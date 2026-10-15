@@ -1,0 +1,26 @@
+module test/ris/fibers/cleanup_panic
+import std/int
+
+def observe(label : String, active : Bool) : Nil
+  raise "wrong tape lifetime at #{label}" unless (IyiRegion.tape != 0_u64) == active
+  puts label
+end
+
+def broken : Int32
+  defer observe("outer panic", false)
+  Tape.scope do
+    defer observe("inner panic", true)
+    Tape.scope do
+      defer observe("nested panic", true)
+      raise "tape test panic"
+    end
+  end
+  0
+end
+
+group do |g|
+  task = g.spawn { broken }
+  puts task.value.is_a?(Panicked)
+end
+puts IyiRegion.tape == 0_u64
+Tape.scope { puts "scope after panic" }

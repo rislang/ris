@@ -1,0 +1,13 @@
+module test/ris/cleanup_exit
+import std/int
+
+def observe(label : String, active : Bool) : Nil
+  raise "wrong tape lifetime at #{label}" unless (IyiRegion.tape != 0_u64) == active
+  puts label
+end
+
+defer observe("outer exit", false)
+Tape.scope do
+  defer observe("inner exit", true)
+  exit 3
+end

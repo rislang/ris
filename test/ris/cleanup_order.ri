@@ -1,0 +1,34 @@
+module test/ris/cleanup_order
+import std/int
+
+def observe(label : String, active : Bool) : Nil
+  raise "wrong tape lifetime at #{label}" unless (IyiRegion.tape != 0_u64) == active
+  puts label
+end
+
+def early : Int32
+  defer observe("outer return", false)
+  Tape.scope do
+    defer observe("inner return", true)
+    return 7
+  end
+  0
+end
+
+def leave : Nil
+  defer observe("outer break", false)
+  Tape.scope do
+    defer observe("inner break", true)
+    Tape.scope do
+      defer observe("nested", true)
+    end
+    break
+  end
+end
+
+puts early
+leave
+# Reuse the same cached node underneath a different outer defer chain.
+puts early
+puts IyiRegion.tape == 0_u64
+puts IyiScheduler.current.defers.nil?

@@ -403,6 +403,8 @@ class IyiFiber
   # Panics — III.1.4. The registry `defer` pushes onto and the panic
   # path drains; the flag and message a boundary reads after the join.
   property defers : IyiDeferNode?
+  # ris: one non-capturing cleanup, reused by sequential outer tape scopes.
+  property tape_cleanup : IyiDeferNode?
   property panicked : Bool
   property panic_message : String
   # Set when a handle read delivered the panic as a `Panicked` value:
@@ -540,6 +542,7 @@ class IyiFiber
     @state = IyiFiberState::Runnable
     @cancelled = false
     @defers = nil
+    @tape_cleanup = nil
     @panicked = false
     @panic_message = ""
     @panic_delivered = false
@@ -2744,6 +2747,35 @@ def __iyi_defer_pop_run : Nil
   return unless node.is_a?(IyiDeferNode)
   fiber.defers = node.next_node
   node.run
+end
+
+# The tape guard occupies the same LIFO registry as ordinary defers, but
+# allocates only on this fiber's first use. Its proc captures no state.
+def __iyi_tape_defer_push : Nil
+  fiber = IyiScheduler.current
+  node = fiber.tape_cleanup
+  unless node.is_a?(IyiDeferNode)
+    node = IyiDeferNode.new(-> { __iyi_tape_defer_run })
+    fiber.tape_cleanup = node
+  end
+  node.next_node = fiber.defers
+  fiber.defers = node
+end
+
+def __iyi_tape_defer_pop : Nil
+  fiber = IyiScheduler.current
+  node = fiber.tape_cleanup
+  return unless node.is_a?(IyiDeferNode)
+  fiber.defers = node.next_node
+  node.next_node = nil
+end
+
+def __iyi_tape_defer_run : Nil
+  # The panic/exit drain has already detached the node. Drop its old link
+  # before releasing, so a retained task handle does not retain defers.
+  node = IyiScheduler.current.tape_cleanup
+  node.next_node = nil if node.is_a?(IyiDeferNode)
+  ::__iyi_tape_release
 end
 
 # What a standard stream set to `sync = false` still holds, written out as

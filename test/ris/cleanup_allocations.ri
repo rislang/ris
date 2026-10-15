@@ -1,0 +1,22 @@
+module test/ris/cleanup_allocations
+import std/int
+import std/gc::{GC}
+
+def work : Nil
+  Tape.scope do
+    items = TapeArray(Int64).new(0)
+    items.push(7_i64)
+    Tape.scope { items.push(8_i64) }
+  end
+end
+
+# Warm the fiber, mapping and reusable cleanup before measuring steady state.
+work
+GC.disable
+before = GC.stats.bytes_since_collection
+100000.times { work }
+after = GC.stats.bytes_since_collection
+GC.enable
+raise "tape scopes allocated on the GC heap" unless after == before
+puts "no GC allocation per scope"
+puts IyiRegion.tape == 0_u64

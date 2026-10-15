@@ -35,6 +35,16 @@ expect return_escape "cannot return a tape value out of its Tape.scope"
 expect break_escape "cannot break a tape value out of its Tape.scope"
 expect yield_break_escape "cannot break a tape value out of its Tape.scope"
 
+# Cleanup keeps LIFO order on early exits, panic and explicit exit.
+out=$("$RIS" run test/ris/cleanup_order.ri 2>&1)
+if [ "$out" = $'inner return\nouter return\n7\nnested\ninner break\nouter break\ninner return\nouter return\n7\ntrue\ntrue' ]; then echo "runs     cleanup_order"; else echo "FAILED   cleanup_order: $out"; status=1; fi
+out=$("$RIS" run test/ris/cleanup_allocations.ri 2>&1)
+if [ "$out" = $'no GC allocation per scope\ntrue' ]; then echo "runs     cleanup_allocations"; else echo "FAILED   cleanup_allocations: $out"; status=1; fi
+out=$("$RIS" run test/ris/fibers/cleanup_panic.ri 2>/dev/null)
+if [ "$?" = 0 ] && [ "$out" = $'nested panic\ninner panic\nouter panic\ntrue\ntrue\nscope after panic' ]; then echo "runs     cleanup_panic"; else echo "FAILED   cleanup_panic: $out"; status=1; fi
+out=$("$RIS" run test/ris/cleanup_exit.ri 2>&1)
+if [ "$?" = 3 ] && [ "$out" = $'inner exit\nouter exit' ]; then echo "runs     cleanup_exit"; else echo "FAILED   cleanup_exit: $out"; status=1; fi
+
 out=$("$RIS" run test/ris/zero_capacity.ri 2>&1)
 if [ "$out" = $'123\n789\n456\nABC' ]; then echo "runs     zero_capacity"; else echo "FAILED   zero_capacity: $out"; status=1; fi
 

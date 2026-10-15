@@ -162,6 +162,18 @@ module Iyi
       deferred = exps[index].as(Defer)
       head = exps[0...index]
 
+      # ris: the trusted tape guard needs no captured `live` flag or fresh
+      # registry node. One cached node per fiber preserves the ordinary
+      # defer order on panic; normal exits detach it and release inline.
+      if tape_cleanup?(deferred)
+        rest = apply_defers(exps[(index + 1)..], live)
+        head << Call.new(nil, "__iyi_tape_defer_push", global: true).at(deferred)
+        pop = Call.new(nil, "__iyi_tape_defer_pop", global: true).at(deferred)
+        cleanup = Expressions.new([pop, deferred.exp] of ASTNode).at(deferred)
+        head << ExceptionHandler.new(rest, ensure: cleanup).at(deferred).tap(&.iyi_defer=(true))
+        return head
+      end
+
       if program.iyi_prelude?
         # An earlier `defer` of this list made the flag, and its proc is
         # still registered when this one is popped.
@@ -191,6 +203,15 @@ module Iyi
         head << ExceptionHandler.new(rest, ensure: deferred.exp).at(deferred).tap(&.iyi_defer=(true))
       end
       head
+    end
+
+    private def tape_cleanup?(deferred : Defer) : Bool
+      return false unless program.iyi_prelude? && @current_def.try(&.name) == "tape_scope"
+      call = deferred.exp
+      return false unless call.is_a?(Call) && call.global? && call.name == "__iyi_tape_release"
+      return false unless call.args.empty? && call.named_args.nil? && call.block.nil? && call.obj.nil?
+      directory = program.iyi_prelude_dir
+      !!(directory && deferred.location.try(&.original_filename) == File.join(directory, "prelude.iyi"))
     end
 
     # A `defer` that is not one of several expressions — the whole of a body,

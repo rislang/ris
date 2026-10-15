@@ -19,6 +19,12 @@
 # so a copy of one - a block parameter, an argument - writes through to the
 # same value.
 
+# Internal ABI: the normalizer lowers only the runtime's own tape guard to
+# a cached registry entry plus an inline release on normal exits.
+def __iyi_tape_release : Nil
+  IyiRegion.release_tape
+end
+
 module Tape
   CAPACITY = 67108864_u64
 

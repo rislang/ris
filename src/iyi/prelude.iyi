@@ -3572,7 +3572,7 @@ require "./file"
       def self.tape_scope(capacity : UInt64, &)
         return yield if @@tape != 0
         @@tape = acquire(capacity)
-        defer release_tape
+        defer ::__iyi_tape_release
         yield
       end
 
@@ -9287,6 +9287,29 @@ end
   # No fibers on this target, so one global stack is exact.
   class IyiDefers
     @@head : IyiDeferNode?
+    @@tape_cleanup : IyiDeferNode?
+
+    def self.push_tape : Nil
+      node = @@tape_cleanup
+      unless node.is_a?(IyiDeferNode)
+        node = IyiDeferNode.new(-> { IyiDefers.run_tape })
+        @@tape_cleanup = node
+      end
+      push(node)
+    end
+
+    def self.pop_tape : Nil
+      node = @@tape_cleanup
+      return unless node.is_a?(IyiDeferNode)
+      @@head = node.next_node
+      node.next_node = nil
+    end
+
+    def self.run_tape : Nil
+      node = @@tape_cleanup
+      node.next_node = nil if node.is_a?(IyiDeferNode)
+      ::__iyi_tape_release
+    end
 
     def self.push(node : IyiDeferNode) : Nil
       node.next_node = @@head
@@ -9316,6 +9339,14 @@ end
 
   def __iyi_defer_pop_run : Nil
     IyiDefers.pop_run
+  end
+
+  def __iyi_tape_defer_push : Nil
+    IyiDefers.push_tape
+  end
+
+  def __iyi_tape_defer_pop : Nil
+    IyiDefers.pop_tape
   end
 
   # `exit` where there are no tasks: the one registry's cleanups, then the
