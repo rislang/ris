@@ -74,7 +74,10 @@ class Iyi::Program
     end
 
     @progress_tracker.stage("Semantic (tape check)") do
-      Prof.span("tape check") { TapeChecker.new(self).run }
+      Prof.span("tape check") do
+        TapeChecker.new(self).run
+        result.accept TapeLifetimeChecker.new(self)
+      end
     end
 
     result

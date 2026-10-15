@@ -1,0 +1,12 @@
+module test/ris/refused/yield_break_escape
+import std/int
+
+def with_text(&)
+  Tape.scope do
+    text = TapeString.build { |w| w.push(65_u8) }
+    yield text
+  end
+end
+
+kept = with_text { |text| break text }
+puts kept.to_s

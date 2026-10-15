@@ -3572,7 +3572,11 @@ require "./file"
       def self.tape_scope(capacity : UInt64, &)
         return yield if @@tape != 0
         @@tape = acquire(capacity)
-        result = yield
+        defer release_tape
+        yield
+      end
+
+      def self.release_tape : Nil
         # The tape may have grown past its first mapping (`grow_onto`): the
         # running one is the newest, and each names the one before it.
         region = @@tape
@@ -3583,7 +3587,6 @@ require "./file"
           release(region)
           region = parent
         end
-        result
       end
 
       @[NoInline]

@@ -1,0 +1,33 @@
+module test/ris/lifetime_flow
+import std/int
+
+def make_text : TapeString
+  return TapeString.build { |w| w.push(65_u8) }
+end
+
+def with_text(&)
+  Tape.scope { yield make_text }
+end
+
+def forward(&)
+  yield
+end
+
+with_text { |text| puts text.to_s }
+Tape.scope do
+  kept = nil
+  items = TapeArray(TapeString).new(0)
+  items.push(make_text)
+  items.each { |text| kept = text }
+  if text = kept
+    puts text.to_s
+  end
+  nested = Tape.scope { break make_text }
+  if text = nested
+    puts text.to_s
+  end
+  forward do
+    local = make_text
+    puts local.to_s
+  end
+end

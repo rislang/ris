@@ -29,6 +29,20 @@ expect generic_array "Array("
 expect proc_capture  "this block becomes a proc"
 expect outer_var     "is a variable of the code around this Tape.scope"
 expect scope_value   "undefined method 'id' for Nil"
+expect yield_escape "is a variable of the code around this Tape.scope"
+expect yield_scope_escape "is a variable of the code around this Tape.scope"
+expect return_escape "cannot return a tape value out of its Tape.scope"
+expect break_escape "cannot break a tape value out of its Tape.scope"
+expect yield_break_escape "cannot break a tape value out of its Tape.scope"
+
+out=$("$RIS" run test/ris/zero_capacity.ri 2>&1)
+if [ "$out" = $'123\n789\n456\nABC' ]; then echo "runs     zero_capacity"; else echo "FAILED   zero_capacity: $out"; status=1; fi
+
+out=$("$RIS" run test/ris/scope_cleanup.ri 2>&1)
+if [ "$out" = $'1\ntrue\ntrue\ntrue\nC\ntrue' ]; then echo "runs     scope_cleanup"; else echo "FAILED   scope_cleanup: $out"; status=1; fi
+
+out=$("$RIS" run test/ris/lifetime_flow.ri 2>&1)
+if [ "$out" = $'A\nA\nA\nA' ]; then echo "runs     lifetime_flow"; else echo "FAILED   lifetime_flow: $out"; status=1; fi
 
 out=$("$RIS" run test/ris/allowed.ri 2>&1)
 if [ "$out" = $'2\na' ]; then echo "runs     allowed"; else echo "FAILED   allowed: $out"; status=1; fi

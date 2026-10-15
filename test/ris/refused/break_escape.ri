@@ -1,0 +1,7 @@
+module test/ris/refused/break_escape
+import std/int
+
+kept = Tape.scope do
+  break TapeString.build { |w| w.push(65_u8) }
+end
+puts kept.to_s

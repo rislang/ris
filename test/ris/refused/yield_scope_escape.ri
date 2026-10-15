@@ -1,0 +1,12 @@
+module test/ris/refused/yield_scope_escape
+import std/int
+
+def with_tape(&)
+  Tape.scope { yield }
+end
+
+kept = nil
+with_tape do
+  kept = TapeString.build { |w| w.push(65_u8) }
+end
+puts kept.nil?

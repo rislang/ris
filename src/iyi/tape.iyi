@@ -10,7 +10,7 @@
 #
 # What keeps a tape value from outliving its scope is the compiler: every
 # struct marked `@[OnTape]` is a tape type, and `Iyi::TapeChecker` and
-# `CleanupTransformer#check_tape_*` refuse a tape value in a class's field, a
+# `TapeLifetimeChecker` refuse a tape value in a class's field, a
 # non-tape struct's field, a class variable, a generic's type argument, a
 # proc's captures, a `Tape.scope` block's value, or a variable of the code
 # around the scope.
@@ -100,6 +100,7 @@ struct TapeWriter
   def grow(extra : UInt64) : Nil
     need = (@state + 1_i64).value &+ extra
     capacity = (@state + 2_i64).value
+    capacity = 1_u64 if capacity == 0_u64
     while capacity < need
       capacity = capacity &* 2_u64
     end
@@ -133,6 +134,7 @@ struct TapeArray(T)
     size = (@state + 1_i64).value
     if size >= (@state + 2_i64).value
       capacity = (@state + 2_i64).value &* 2_u64
+      capacity = 1_u64 if capacity == 0_u64
       @state.value = IyiRegion.tape_grow(@state.value, capacity &* sizeof(T).to_u64)
       (@state + 2_i64).value = capacity
     end

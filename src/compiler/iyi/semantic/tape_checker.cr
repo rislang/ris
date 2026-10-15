@@ -16,7 +16,7 @@
 # Each is a fact about types, so this runs once over every type after the
 # main pass, the way `RecursiveStructChecker` does. The flow half - a block
 # capturing a tape value, a `Tape.scope` handing one out - is in
-# `CleanupTransformer#check_tape_*`, where the blocks are.
+# `TapeLifetimeChecker`; proc captures are checked during cleanup.
 class Iyi::TapeChecker
   @program : Program
 

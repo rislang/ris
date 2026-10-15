@@ -1,0 +1,11 @@
+module test/ris/refused/return_escape
+import std/int
+
+def escaped : TapeString
+  Tape.scope do
+    return TapeString.build { |w| w.push(65_u8) }
+  end
+  TapeString.new(Pointer(UInt8).new(0_u64), 0)
+end
+
+puts escaped.to_s
