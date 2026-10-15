@@ -11,7 +11,7 @@ of [iyi](https://github.com/iyilang/iyi), which is built on
 * **on the Go**: one binary for `fmt`, `test`, `vet`, `check`, `lsp` and
   `mcp`; fibers; one executable, `--static` if asked.
 * **with tape memory**, ris's own, after Goose's data stacks: a hot path's
-  objects go onto the fiber's tape and are freed with one store. The rest
+  objects use the fiber's tape and are reclaimed together. The rest
   stays on iyi's collected heap, so no library needs rewriting, and the
   compiler refuses a tape value wherever it could outlive its scope.
 
@@ -24,9 +24,9 @@ pub struct Order
 end
 
 Tape.scope do
-  order = make_order(1_i64)   # every byte of it on this fiber's tape
+  order = make_order(1_i64)   # its TapeString/TapeArray storage uses tape
   body = render(order).to_s   # `to_s` copies out what must outlive it
-end                           # the whole tape freed with one store
+end                           # all tape storage reclaimed together
 ```
 
 ## Getting it
@@ -46,7 +46,8 @@ runs ris's checks. Source files end in `.ri`. Building needs what iyi needs
 The compiler refuses a tape value (examples in `test/ris/refused/`) in a
 class field, in a struct that is not `@[OnTape]`, in a class variable, as
 another generic's type argument, captured by a proc or `spawn`, or assigned
-to a variable outside its `Tape.scope`.
+to a variable outside its `Tape.scope`. See [the tape design](TAPE_DESIGN.md)
+for lifetime rules, implementation details and open decisions.
 
 ## How fast
 
@@ -69,8 +70,8 @@ a faster `String::Builder`), at two stores per fiber switch.
 
 ## Status and thanks
 
-ris 0.1.0 is a prototype: tape types have what the benchmark needs, a tape is
-64 MiB, and the internals keep iyi's names (`Iyi::`, `.iyi`) so iyi merges.
+ris 0.1.0 is a prototype: tape types have what the benchmark needs; a tape
+starts at 64 MiB and grows. Internals keep iyi's names so iyi merges.
 Built on **Crystal** (Ary Borenszweig, Juan Wajnerman, Brian Cardiff, Manas
 and the community), **iyi** (Serdar Dogruyol), **Goose** (Wouter van
 Oortmerssen: data stacks, the benchmark, its C++ and Rust), **Ruby** (Yukihiro
