@@ -140,7 +140,13 @@ struct TapeArray(T)
     (@state + 1_i64).value = size &+ 1_u64
   end
 
+  # As `Array#[]`: a negative index counts from the end, and one still out
+  # of range raises rather than reading past the elements.
   def [](index : Int32) : T
+    asked = index
+    count = size
+    index = index + count if index < 0
+    raise "index #{asked} out of range for #{count} elements" if index < 0 || index >= count
     Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value
   end
 

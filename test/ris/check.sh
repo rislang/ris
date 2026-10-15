@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # ris's own checks: every program under test/ris/refused must be refused by
 # the compiler with the expected message, test/ris/allowed.ri must compile
-# and run, the fibers test must read back what each fiber wrote, and the
+# and run, the fibers test must read back what each fiber wrote, a tape must
+# grow past its first mapping and refuse an index out of range, and the
 # respond sample must print its known checksum.
 #
 #   bash test/ris/check.sh
@@ -34,6 +35,12 @@ if [ "$out" = $'2\na' ]; then echo "runs     allowed"; else echo "FAILED   allow
 
 out=$("$RIS" run test/ris/fibers/interleave.ri 2>&1)
 if [ "$out" = $'fiber A wrong: 0\nfiber B wrong: 0' ]; then echo "runs     fibers/interleave"; else echo "FAILED   fibers/interleave: $out"; status=1; fi
+
+out=$("$RIS" run test/ris/grow.ri 2>&1)
+if [ "$out" = $'round 1: 100 MiB intact, before 499500, after 7\nround 2: 100 MiB intact, before 999000, after 14' ]; then echo "runs     grow"; else echo "FAILED   grow: $out"; status=1; fi
+
+out=$("$RIS" run test/ris/bounds.ri 2>&1)
+if grep -qF $'10 30 30' <<<"$out" && grep -qF "index 3 out of range for 3 elements" <<<"$out"; then echo "runs     bounds"; else echo "FAILED   bounds: $out"; status=1; fi
 
 out=$("$RIS" run samples/ris/hello.ri 2>&1)
 if [ "$out" = $'Hello from ris, order 1\ntotal 1649' ]; then echo "runs     samples/ris/hello"; else echo "FAILED   samples/ris/hello: $out"; status=1; fi

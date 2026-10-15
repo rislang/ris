@@ -3571,11 +3571,18 @@ require "./file"
       # of the outer one.
       def self.tape_scope(capacity : UInt64, &)
         return yield if @@tape != 0
-        region = acquire(capacity)
-        @@tape = region
+        @@tape = acquire(capacity)
         result = yield
+        # The tape may have grown past its first mapping (`grow_onto`): the
+        # running one is the newest, and each names the one before it.
+        region = @@tape
         @@tape = 0_u64
-        release(region)
+        while region != 0
+          parent = IyiHeap.read64(region &+ OFF_PARENT)
+          IyiHeap.write64(region &+ OFF_PARENT, 0_u64)
+          release(region)
+          region = parent
+        end
         result
       end
 
@@ -3606,6 +3613,7 @@ require "./file"
         if spare != 0 && IyiHeap.read64(spare &+ OFF_MAP) >= capacity &+ DATA
           @@spare = 0_u64
           IyiHeap.write64(spare &+ OFF_CURSOR, spare &+ DATA)
+          IyiHeap.write64(spare &+ OFF_PARENT, 0_u64)
           return spare
         end
         length = capacity &+ DATA
@@ -3678,7 +3686,12 @@ require "./file"
         bytes = (size &+ 7_u64) & 0xFFFFFFFFFFFFFFF8_u64
         object = cursor &+ UNDER
         stop = object &+ bytes
-        overflow if stop > IyiHeap.read64(region &+ OFF_LIMIT)
+        if stop > IyiHeap.read64(region &+ OFF_LIMIT)
+          region = grow_onto(region, bytes &+ UNDER)
+          cursor = IyiHeap.read64(region &+ OFF_CURSOR)
+          object = cursor &+ UNDER
+          stop = object &+ bytes
+        end
         IyiHeap.write64(region &+ OFF_CURSOR, stop)
         IyiHeap.write64(cursor, size)
         IyiHeap.write64(cursor &+ 8_u64, type_id.unsafe_shl(IyiHeap::TYPE_SHIFT))
@@ -3686,10 +3699,25 @@ require "./file"
         object
       end
 
+      # A full tape grows: a new mapping twice the size (or the block's,
+      # if larger), naming the full one as its parent, becomes the running
+      # tape. Nothing on the old one moves, so every tape value stays where
+      # it is, and the scope's end releases the whole chain. A full tape
+      # used to end the program with "region full".
       @[NoInline]
-      def self.overflow : NoReturn
-        __iyi_write(2, "iyi: region full\n".to_unsafe.as(Void*), 17_u64)
-        __iyi_exit(1)
+      def self.grow_onto(region : UInt64, need : UInt64) : UInt64
+        capacity = (IyiHeap.read64(region &+ OFF_MAP) &- DATA) &* 2_u64
+        capacity = need if capacity < need
+        capacity = (capacity &+ 4095_u64) & 0xFFFFFFFFFFFFF000_u64
+        length = capacity &+ DATA
+        fresh = __iyi_mmap(length).address
+        IyiHeap.write64(fresh &+ OFF_CURSOR, fresh &+ DATA)
+        IyiHeap.write64(fresh &+ OFF_LIMIT, fresh &+ length)
+        IyiHeap.write64(fresh &+ OFF_MAP, length)
+        IyiHeap.write64(fresh &+ OFF_PARENT, region)
+        register(fresh)
+        @@tape = fresh
+        fresh
       end
 
       # The last block on its tape grows where it is, which is the common

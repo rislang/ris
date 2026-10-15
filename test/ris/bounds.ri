@@ -1,0 +1,10 @@
+# TapeArray#[] reads as Array#[] does: a negative index counts from the
+# end, and one out of range raises instead of reading past the elements.
+Tape.scope do
+  a = TapeArray(Int64).new(2)
+  a.push(10_i64)
+  a.push(20_i64)
+  a.push(30_i64)
+  puts "#{a[0]} #{a[-1]} #{a[2]}"
+  puts a[3]
+end

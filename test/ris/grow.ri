@@ -1,0 +1,30 @@
+# A tape that outgrows its first 64 MiB mapping: a 100 MiB string written a
+# byte at a time grows onto new mappings, the arrays made before and after
+# it keep their elements where they were, and a second scope starts clean.
+def run_scope(round : Int64) : Nil
+  Tape.scope do
+    before = TapeArray(Int64).new(4)
+    i = 0_i64
+    while i < 1000_i64
+      before.push(i * round)
+      i += 1_i64
+    end
+    big = TapeString.build(1024) do |w|
+      n = 0
+      while n < 100 * 1024 * 1024
+        w.push((97 + n % 26).to_u8)
+        n += 1
+      end
+    end
+    after = TapeArray(Int64).new(4)
+    after.push(7_i64 * round)
+    sum = 0_i64
+    before.each { |v| sum += v }
+    p = big.to_unsafe
+    ok = big.bytesize == 100 * 1024 * 1024 && p[0] == 97_u8 && p[big.bytesize - 1] == (97 + (big.bytesize - 1) % 26).to_u8
+    puts "round #{round}: #{big.bytesize // (1024 * 1024)} MiB #{ok ? "intact" : "WRONG"}, before #{sum}, after #{after[0]}"
+  end
+end
+
+run_scope(1_i64)
+run_scope(2_i64)
