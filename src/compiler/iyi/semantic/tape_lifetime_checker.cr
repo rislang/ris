@@ -55,7 +55,7 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
 
     if tape_scope?(node)
       if !@scope && (type = node.type?) && TapeChecker.tape_in(@program, type)
-        node.raise "cannot break a tape value out of its Tape.scope: its storage ends with the scope"
+        node.raise "cannot break a tape value out of its Tape.scope: its storage ends with the scope" + ownership_hint(type)
       end
       if block = node.block
         previous_scope = @scope
@@ -84,6 +84,15 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
       @active.delete(active_key)
     end
     false
+  end
+
+  # Keep the proposed repair valid for both text and tape-bearing DTOs.
+  private def ownership_hint(type : Type) : String
+    if type.remove_typedef.to_s == "TapeString"
+      "\n\nCopy the text with `.to_s` inside the owning Tape.scope to obtain a String that can outlive it."
+    else
+      "\n\nBuild an owned value before leaving the scope; copy contained TapeString values with `.to_s`. Copying a tape-bearing struct alone does not copy its storage."
+    end
   end
 
   private def tape_scope?(node : Call) : Bool
@@ -124,7 +133,7 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
       meta = @block.try(&.vars.try(&.[name]?)) || @owner.try(&.vars.try(&.[name]?))
       context = meta.try &.context
       unless context.is_a?(ASTNode) && @contexts.includes?(context)
-        node.raise "`#{name}` is a variable of the code around this Tape.scope, and is assigned `#{type}` here: its storage ends with the scope, so the variable would outlive it"
+        node.raise "`#{name}` is a variable of the code around this Tape.scope, and is assigned `#{type}` here: its storage ends with the scope, so the variable would outlive it" + ownership_hint(type)
       end
     end
     true
@@ -133,7 +142,7 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
   def visit(node : Return)
     if @scope && (type = node.exp.try(&.type?)) && TapeChecker.tape_in(@program, type)
       unless @owner.try { |owner| @contexts.includes?(owner) }
-        node.raise "cannot return a tape value out of its Tape.scope: its storage ends with the scope"
+        node.raise "cannot return a tape value out of its Tape.scope: its storage ends with the scope" + ownership_hint(type)
       end
     end
     true
@@ -141,7 +150,7 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
 
   def visit(node : Break)
     if @scope && !@block_exit_safe && @loop_depth == 0 && (type = node.exp.try(&.type?)) && TapeChecker.tape_in(@program, type)
-      node.raise "cannot break a tape value out of its Tape.scope: its storage ends with the scope"
+      node.raise "cannot break a tape value out of its Tape.scope: its storage ends with the scope" + ownership_hint(type)
     end
     true
   end

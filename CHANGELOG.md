@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Preserve `@[OnTape]` on exported and nested types in `.iyimod` artifacts,
+  so consumers retain tape field checks and reject lifetime escapes.
+
 ## 0.17.0 — 2026-10-14
 
 **About two hundred and thirty fixes, and the `windows-0.17.0-3` and

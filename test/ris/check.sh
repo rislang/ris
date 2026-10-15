@@ -35,6 +35,10 @@ expect return_escape "cannot return a tape value out of its Tape.scope"
 expect break_escape "cannot break a tape value out of its Tape.scope"
 expect yield_break_escape "cannot break a tape value out of its Tape.scope"
 
+expect return_escape 'Copy the text with `.to_s`'
+expect outer_var 'copy contained TapeString values with `.to_s`'
+expect owned_cache "to be String, not TapeString"
+
 # Cleanup keeps LIFO order on early exits, panic and explicit exit.
 out=$("$RIS" run test/ris/cleanup_order.ri 2>&1)
 if [ "$out" = $'inner return\nouter return\n7\nnested\ninner break\nouter break\ninner return\nouter return\n7\ntrue\ntrue' ]; then echo "runs     cleanup_order"; else echo "FAILED   cleanup_order: $out"; status=1; fi
@@ -65,6 +69,9 @@ if [ "$out" = $'round 1: 100 MiB intact, before 499500, after 7\nround 2: 100 Mi
 
 out=$("$RIS" run test/ris/bounds.ri 2>&1)
 if grep -qF $'10 30 30' <<<"$out" && grep -qF "index 3 out of range for 3 elements" <<<"$out"; then echo "runs     bounds"; else echo "FAILED   bounds: $out"; status=1; fi
+
+out=$("$RIS" run test/ris/owned.ri 2>&1)
+if [ "$out" = 'PASS: explicit owned copy, typed cache boundary, UTF-8, empty text and scope reuse' ]; then echo "runs     owned"; else echo "FAILED   owned: $out"; status=1; fi
 
 out=$("$RIS" run samples/ris/hello.ri 2>&1)
 if [ "$out" = $'Hello from ris, order 1\ntotal 1649' ]; then echo "runs     samples/ris/hello"; else echo "FAILED   samples/ris/hello: $out"; status=1; fi

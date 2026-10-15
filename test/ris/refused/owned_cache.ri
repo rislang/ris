@@ -1,0 +1,12 @@
+module test/ris/refused/owned_cache
+
+class Cache
+  def store(body : String) : Nil
+  end
+end
+
+cache = Cache.new
+Tape.scope do
+  borrowed = TapeString.build { |writer| writer.append("temporary") }
+  cache.store(borrowed)
+end

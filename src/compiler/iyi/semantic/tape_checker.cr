@@ -105,7 +105,8 @@ class Iyi::TapeChecker
 
         #{type} is #{where}, and a tape value lives only until the Tape.scope
         that made it ends. Keep it in a local, a parameter or another @[OnTape]
-        struct, or copy what must outlive the scope out of it (`to_s`).
+        struct, or copy what must outlive the scope into an owned value
+        (use `to_s` for TapeString fields).
         MSG
     end
   end

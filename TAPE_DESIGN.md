@@ -5,7 +5,6 @@ experimental; this contract is not a proof of complete memory safety.
 The inherited [SPEC.md](SPEC.md) describes iyi and is kept unchanged.
 
 ## Allocation and ownership
-
 Ordinary objects use iyi's collected heap. Tape is opt-in: `TapeString`,
 `TapeWriter` and `TapeArray(T)` allocate backing storage on the running
 fiber's tape. `@[OnTape]` marks a struct as tape-bearing; the annotation
@@ -26,7 +25,6 @@ in LIFO order with ordinary defers; later scopes need no GC allocation.
 A scope normally returns `Nil`; a non-tape `break` value can leave it.
 
 ## Lifetime and storage rules
-
 The intended invariant: no safe tape-bearing value survives reclamation
 of the outermost tape scope that owns its storage.
 
@@ -41,8 +39,8 @@ of the outermost tape scope that owns its storage.
   copy data out, but must obey the same lifetime restrictions.
 * Nested scopes may pass tape values back into the still-active outer
   scope: both scopes use the same storage lifetime.
-* `TapeString#to_s` creates an independent GC-managed string. Numeric
-  results can also leave the scope without retaining tape storage.
+* `TapeString#to_s : String` copies bytes into independent GC-managed
+  storage. Numeric results can leave without retaining tape storage.
 * Raw pointers and direct internal allocator calls are outside this safe
   contract. A pointer into tape storage becomes invalid at reclamation.
 
@@ -65,13 +63,13 @@ Tape reduces heap allocation; it does not remove GC or its scanning work.
 * `bash test/ris/check.sh`: accepted/refused programs, early exits, nested
   scopes, zero-capacity growth, fiber isolation and mapping growth.
 
-## Fixed architecture and remaining work
+## Readable interfaces and remaining work
 
-ris keeps ordinary allocations on the GC-managed heap. Only explicitly
-selected tape-backed storage uses the tape memory model. Replacing GC with
-whole-language data stacks is not an open design decision.
-Goose is an inspiration, not a requirement to adopt its layouts, static
-function values or concurrency model: see [Goose](https://github.com/aardappel/goose).
+Prefer tape for bounded work. Keep borrowed return types explicit in method
+signatures; retained destinations accept String. Use `to_s` at a lifetime
+boundary instead of adding tape/heap prefixes to every domain method. This
+does not infer allocation or remove the need for an active scope. Ordinary
+objects still use GC storage; only tape-backed types allocate on the tape.
 
 Before treating this model as stable, audit lifetime checks across all
 language features and specify pointer/FFI boundaries and resource limits.

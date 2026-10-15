@@ -39,7 +39,7 @@ module Tape
 end
 
 # Bytes on the tape. Not a `String`: a `String` may be kept anywhere, and
-# this may not. `to_s` copies it into one when it has to outlive the scope.
+# this may not. `to_s` copies it into a retained String explicitly.
 @[OnTape]
 struct TapeString
   @ptr : Pointer(UInt8)
@@ -56,6 +56,9 @@ struct TapeString
     @ptr
   end
 
+  # Copy these borrowed bytes into an independent GC-managed String.
+  # Call inside the owning Tape.scope when retaining text in a cache/task.
+  # The source is unchanged and remains valid until its scope ends.
   def to_s : String
     String.new(@bytesize) { |buffer| buffer.copy_from(@ptr, @bytesize) }
   end

@@ -1,0 +1,47 @@
+module test/ris/owned
+
+# A retained destination says what it accepts in its interface.
+class Cache
+  getter body : String
+
+  def initialize
+    @body = ""
+  end
+
+  def store(body : String) : Nil
+    @body = body
+  end
+end
+
+# A method name describes the work; the return type describes the lifetime.
+def page : TapeString
+  TapeString.build(1) { |writer| writer.append("café <&>") }
+end
+
+def retained_page : String
+  Tape.scope do
+    return page.to_s
+  end
+  ""
+end
+
+cache = Cache.new
+Tape.scope do
+  borrowed = page
+  owned = borrowed.to_s
+  raise "owned bytes still alias tape" if owned.to_unsafe.address == borrowed.to_unsafe.address
+  cache.store(owned)
+  # Deliberately modify borrowed bytes while alive to prove copy independence.
+  borrowed.to_unsafe[0] = 88_u8
+  raise "copy changed with source" unless cache.body == "café <&>"
+  raise "formatting changed" unless borrowed.to_s == "Xafé <&>"
+  empty = TapeString.build(0) { |writer| }
+  raise "empty copy changed" unless empty.to_s == ""
+end
+Tape.scope do
+  overwrite = page
+end
+raise "retained text changed after scope reuse" unless cache.body == "café <&>"
+raise "owned return changed" unless retained_page == "café <&>"
+raise "return left tape active" unless IyiRegion.tape == 0_u64
+puts "PASS: explicit owned copy, typed cache boundary, UTF-8, empty text and scope reuse"

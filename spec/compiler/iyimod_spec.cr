@@ -3554,6 +3554,77 @@ describe Iyi::IyiMod do
     end
   end
 
+  it "preserves the OnTape lifetime marker on exported and nested types" do
+    with_tempdir("iyimod_tape_annotation") do
+      File.write "packet.iyi", <<-IYI
+        module packet
+
+        @[OnTape]
+        pub struct Packet
+          @data : TapeWriter
+          def initialize
+            @data = TapeWriter.new(1)
+          end
+          def finish : TapeString
+            @data.append("tape")
+            @data.finish
+          end
+
+          @[OnTape]
+          pub struct View
+            @bytes : Pointer(UInt8)
+            def initialize(@bytes : Pointer(UInt8))
+            end
+          end
+        end
+        IYI
+      File.write "main.iyi", <<-IYI
+        module main
+        import packet::{Packet}
+        Tape.scope do
+          text = Packet.new.finish
+          puts text.to_s
+        end
+        IYI
+      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      producer = create_spec_compiler
+      producer.prelude = "iyi/prelude"
+      producer.emit_iyimod = "mods"
+      producer.compile source, File.expand_path("from-source")
+      `./from-source`.chomp.should eq "tape"
+
+      artifact = Iyi::IyiMod.read("mods/packet.iyimod")
+      packet = artifact.exports.types.find! { |type| type.name == "Packet" }
+      packet.annotations.should contain "@[::OnTape]"
+      packet.types.find! { |type| type.name == "View" }.annotations.should contain "@[::OnTape]"
+
+      consumer = create_spec_compiler
+      consumer.prelude = "iyi/prelude"
+      consumer.use_iyimod = "mods"
+      consumer.compile source, File.expand_path("from-artifact")
+      `./from-artifact`.chomp.should eq "tape"
+
+      # Pointer-only tape types otherwise look like ordinary structs, and
+      # losing the marker would silently allow this lifetime escape.
+      File.write "bad.iyi", <<-IYI
+        module bad
+        import packet::{Packet}
+        kept = nil
+        Tape.scope do
+          kept = Packet::View.new(Pointer(UInt8).new(0_u64))
+        end
+        puts kept
+        IYI
+      bad_source = Iyi::Compiler::Source.new(File.expand_path("bad.iyi"), File.read("bad.iyi"))
+      checker = create_spec_compiler
+      checker.prelude = "iyi/prelude"
+      checker.use_iyimod = "mods"
+      expect_raises(Iyi::TypeException, /is a variable of the code around this Tape.scope/) do
+        checker.compile bad_source, File.expand_path("must-not-build")
+      end
+    end
+  end
+
   # A `lib` the module declares, and the `struct` inside it.
   #
   # A `fun` is not a symbol this artifact answers for — the system linker
