@@ -286,7 +286,7 @@ describe "Semantic: iyi import" do
       with_iyi_modules({
         "main.iyi" => "module app/main\n\nimport app/ghost\n",
       }) do
-        expect_raises(Iyi::TypeException, /this one is `app\/ghost.iyi`/) do
+        expect_raises(Iyi::TypeException, /this one is `app\/ghost\.ri` \(or `\.iyi`\)/) do
           semantic_iyi("main.iyi")
         end
       end
@@ -431,6 +431,205 @@ describe "Semantic: iyi import" do
       }) do
         expect_raises(Iyi::TypeException, /is not imported here/) do
           semantic_iyi("main.iyi")
+        end
+      end
+    end
+  end
+
+  describe "the import wall and a type's own methods" do
+    # A concrete generic instance has no locations of its own. The import
+    # wall must ask its template before treating its methods as extensions.
+    files = {
+      "lib/reader.iyi" => <<-IYI,
+        module lib/reader
+
+        pub trait Reader
+          type Elem
+          abstract def value : Elem
+
+          def read : Elem
+            value
+          end
+        end
+        IYI
+      "lib/box.iyi" => <<-IYI,
+        module lib/box
+        import lib/reader::{Reader}
+
+        pub class Box(T)
+          def initialize(@value : T)
+          end
+
+          def self.answer : Int32
+            7
+          end
+        end
+
+        impl Reader for Box(T) forall T
+          type Elem = T
+          def value : T
+            @value
+          end
+        end
+        IYI
+      "lib/caller.iyi" => <<-IYI,
+        module lib/caller
+
+        pub def answer(type : T.class) : Int32 forall T
+          type.answer
+        end
+        IYI
+    }
+
+    it "allows a trait default to call a generic type's own implementation" do
+      with_iyi_modules(files.merge({"main.iyi" => <<-IYI})) do
+        module main
+        import lib/box::{Box}
+        Box(Int32).new(1).read
+        IYI
+        semantic_iyi("main.iyi")
+      end
+    end
+
+    it "finds own methods through an instantiated generic ancestor" do
+      with_iyi_modules(files.merge({
+        "lib/child.iyi" => <<-IYI,
+          module lib/child
+          import lib/box::{Box}
+
+          pub class Child < Box(Int32)
+          end
+          IYI
+        "main.iyi" => <<-IYI,
+          module main
+          import lib/child::{Child}
+          Child.new(1).read
+          IYI
+      })) do
+        semantic_iyi("main.iyi")
+      end
+    end
+
+    it "finds the declaration behind a generic metaclass" do
+      with_iyi_modules(files.merge({"main.iyi" => <<-IYI})) do
+        module main
+        import lib/box::{Box}
+        import lib/caller::{answer}
+        answer(Box(Int32))
+        IYI
+        semantic_iyi("main.iyi")
+      end
+    end
+
+    it "finds the declaration behind an ordinary metaclass" do
+      with_iyi_modules(files.merge({
+        "lib/plain.iyi" => <<-IYI,
+          module lib/plain
+          pub class Plain
+            def self.answer : Int32
+              7
+            end
+          end
+          IYI
+        "main.iyi" => <<-IYI,
+          module main
+          import lib/plain::{Plain}
+          import lib/caller::{answer}
+          answer(Plain)
+          IYI
+      })) do
+        semantic_iyi("main.iyi")
+      end
+    end
+
+    it "still requires importing a module that extends a generic type" do
+      with_iyi_modules({
+        "prelude/box.iyi" => <<-IYI,
+          struct ::Box(T)
+            def initialize
+            end
+          end
+          IYI
+        "app/extension.iyi" => <<-IYI,
+          module app/extension
+          require "../prelude/box.iyi"
+
+          struct ::Box(T)
+            def added : Int32
+              7
+            end
+          end
+          IYI
+        "app/caller.iyi" => <<-IYI,
+          module app/caller
+          require "../prelude/box.iyi"
+
+          pub def read : Int32
+            Box(Int32).new.added
+          end
+          IYI
+        "main.iyi" => <<-IYI,
+          module main
+          import app/extension
+          import app/caller::{read}
+          read
+          IYI
+      }) do |dir|
+        expect_raises(Iyi::TypeException, /comes from `app\/extension`.*not imported here/m) do
+          semantic_iyi("main.iyi", prelude_dir: File.join(dir, "prelude"))
+        end
+        # Importing that extension in the actual caller makes it valid.
+        File.write("app/caller.iyi", File.read("app/caller.iyi").sub("module app/caller", "module app/caller\nimport app/extension"))
+        semantic_iyi("main.iyi", prelude_dir: File.join(dir, "prelude"))
+      end
+    end
+    # `std/int` reopens `struct ::Int` as well as `UInt8`, and a wall that
+    # excused any ancestor declared in the extension's file let `UInt8#>>`
+    # through as `UInt8`'s own. The type asked is the one holding the def.
+    it "still requires importing a module that reopens the type's parent too" do
+      with_iyi_modules({
+        "prelude/num.iyi" => <<-IYI,
+          abstract struct ::Num
+          end
+
+          struct ::Small < ::Num
+            def initialize
+            end
+          end
+          IYI
+        "app/extension.iyi" => <<-IYI,
+          module app/extension
+          require "../prelude/num.iyi"
+
+          abstract struct ::Num
+            def base : Int32
+              1
+            end
+          end
+
+          struct ::Small
+            def shifted : Int32
+              8
+            end
+          end
+          IYI
+        "app/caller.iyi" => <<-IYI,
+          module app/caller
+          require "../prelude/num.iyi"
+
+          pub def read : Int32
+            Small.new.shifted
+          end
+          IYI
+        "main.iyi" => <<-IYI,
+          module main
+          import app/extension
+          import app/caller::{read}
+          read
+          IYI
+      }) do |dir|
+        expect_raises(Iyi::TypeException, /`shifted`.*comes from `app\/extension`.*not imported here/m) do
+          semantic_iyi("main.iyi", prelude_dir: File.join(dir, "prelude"))
         end
       end
     end
@@ -692,6 +891,45 @@ describe "Semantic: iyi import" do
           import app/dep::*
 
           declare(made)
+          IYI
+      }) do
+        semantic_iyi("main.iyi")
+      end
+    end
+
+    # iyi-web's `render` in `dsl` expands to `Templates.render` in
+    # `templates`, which expands to its own module's `Templates.partial`.
+    # The caller imported `dsl` alone; the line was written by the library,
+    # so the wall asks what the macro's file reaches, not only the caller.
+    it "lets a macro name a type its own module reaches" do
+      with_iyi_modules({
+        "app/inner.iyi" => <<-IYI,
+          module app/inner
+
+          pub class Helper
+            def self.answer : Int32
+              1
+            end
+          end
+
+          pub macro inner_answer
+            ::App::Inner::Helper.answer
+          end
+          IYI
+        "app/outer.iyi" => <<-IYI,
+          module app/outer
+          import app/inner
+
+          pub macro answer
+            ::App::Inner.inner_answer
+          end
+          IYI
+        "main.iyi" => <<-IYI,
+          module app/main
+
+          import app/outer::{answer}
+
+          answer
           IYI
       }) do
         semantic_iyi("main.iyi")

@@ -192,8 +192,86 @@ module Iyi
       # code nobody on this machine wrote.
       return unless writer == filename || iyi_imported_files.includes?(writer)
       return if iyi_reachable_files(writer).includes?(unit_file)
+      return if iyi_macro_reaches?(location, writer, unit_file)
 
       unit
+    end
+
+    # Code a macro wrote may name what the macro's own file reaches: the
+    # library wrote that line, and the caller imported only the macro.
+    # Without this iyi-web's `render`, imported as `{render}`, expanded to
+    # `IyiWeb::Templates::Templates.partial` and was refused in every view.
+    # The caller's reach still counts as well, because a macro like
+    # `Eiy.embed` brings in code its caller wrote.
+    private def iyi_macro_reaches?(location : Location?, writer : String, unit_file : String) : Bool
+      author = location.try(&.macro_location).try(&.filename.as?(String))
+      return false unless author && author != writer
+      author == unit_file || iyi_reachable_files(author).includes?(unit_file)
+    end
+
+    # The import wall for a method a module adds to a type it did not
+    # declare - `std/int`'s `UInt8#>>` on the prelude's `UInt8` (SPEC.md
+    # R-1). Such a method comes with its module's import, so the file that
+    # calls it must reach that module, as it must to name a type. Without
+    # this a module that forgot `import std/int` compiled whenever the
+    # program's other files happened to import it, and failed the day one
+    # of them stopped. A type's own methods are left alone: a value of a
+    # type from a module this file never imported can still arrive, through
+    # a subclass or a union, and calling it is not naming it.
+    def iyi_check_def_reach(call : ASTNode, a_def : Def) : Nil
+      return unless iyi_prelude?
+      def_file = a_def.location.try(&.original_filename)
+      return unless def_file && iyi_imported_files.includes?(def_file)
+      # A method declared with its type, or with an ancestor the type
+      # inherits it from, is the type's own. Where a type was declared is
+      # its first location: every reopening adds one, `std/int`'s among
+      # them, so "any of them" would excuse exactly the methods this wall
+      # is for. A virtual call's match is owned by the subclass, which is
+      # why the ancestors are asked too.
+      owner = a_def.owner.devirtualize
+      # Only types whose defs hold this one count: asking every ancestor let
+      # all of `std/int` through, since it declares `struct ::Int` above
+      # `UInt8`, and `UInt8#>>` from it was its own method. Several types
+      # can hold it - a subclass's metaclass gets a copy of an inherited
+      # `new` - so it is the type's own if any holder was declared here. A
+      # generic instance's defs live on its generic type, asked too.
+      candidates = [owner] + owner.ancestors
+      candidates.dup.each do |type|
+        generic = type.is_a?(GenericInstanceType) ? type.generic_type.as(Type) : nil
+        generic ||= type.instance_type.generic_type.metaclass if type.metaclass? && type.instance_type.is_a?(GenericInstanceType)
+        candidates << generic if generic
+      end
+      holders = candidates.select do |type|
+        type.defs.try(&.[a_def.name]?).try(&.any? { |item| item.def.location == a_def.location })
+      end
+      if holders.empty?
+        # Not found by its defs: any declaring type will do, as before.
+        return if iyi_type_declared_in?(owner, def_file)
+        return if owner.ancestors.any? { |ancestor| iyi_type_declared_in?(ancestor, def_file) }
+      else
+        return if holders.any? { |type| iyi_type_declared_in?(type, def_file) }
+      end
+      writer = call.location.try(&.original_filename)
+      return unless writer
+      return if writer == def_file
+      return unless writer == filename || iyi_imported_files.includes?(writer)
+      return if iyi_reachable_files(writer).includes?(def_file)
+      return if iyi_macro_reaches?(call.location, writer, def_file)
+      path = iyi_module_paths[def_file]? || def_file
+      call.raise "`#{a_def.name}` on #{a_def.owner} comes from `#{path}`, which is " \
+                 "not imported here — it is in the program only because some " \
+                 "other file imported it. Add `import #{path}` in this file (SPEC.md R-1)"
+    end
+
+    private def iyi_type_declared_in?(type : Type, file : String) : Bool
+      type = type.devirtualize
+      type = type.instance_type.devirtualize if type.metaclass?
+      # Instantiations (and their metaclasses) carry no source locations.
+      # Their declaration belongs to the generic template, not to a caller
+      # that happened to instantiate it. Still use only the first location:
+      # a later reopening must not turn an extension into an own method.
+      type = type.generic_type.as(Type) if type.is_a?(GenericInstanceType)
+      type.locations.try(&.first?).try(&.original_filename) == file
     end
 
     # The files reachable from `from`: every direct import, then onward

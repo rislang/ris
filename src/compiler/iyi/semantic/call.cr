@@ -127,6 +127,7 @@ class Iyi::Call
     end
 
     matches = lookup_matches
+    matches.try &.each { |match| program.iyi_check_def_reach(self, match) }
 
     # If @target_defs is set here it means there was a recalculation
     # fired as a result of a recalculation. We keep the last one.
