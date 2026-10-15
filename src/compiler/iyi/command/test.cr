@@ -97,6 +97,8 @@ class Iyi::Command
         # rather than walked past: "no *_test.iyi found" in a directory of
         # one test (`Lexer.iyi_miscased?`).
         Dir.glob(Iyi.glob_root(path).join("**", "*_test.[iI][yY][iI]")) { |file| files << file }
+        # ris: and its own `.ri` tests.
+        Dir.glob(Iyi.glob_root(path).join("**", "*_test.[rR][iI]")) { |file| files << file }
       elsif File.file?(path)
         # As stored: `X_TEST.IYI` typed on Windows for `x_test.iyi` is it.
         files << Lexer.stored_name(path)
@@ -113,7 +115,7 @@ class Iyi::Command
     end
 
     if files.empty?
-      abort! "no *_test.iyi found. A test is a plain iyi program that exits non-zero to fail", :USAGE_ERROR
+      abort! "no *_test.ri or *_test.iyi found. A test is a plain iyi program that exits non-zero to fail", :USAGE_ERROR
     end
 
     skipped = 0
@@ -432,9 +434,9 @@ class Iyi::Command
     <<-USAGE
     Usage: #{Command.program_name} test [--json] [--timeout SECONDS] [--affected FILE]... [paths]
 
-    Runs every `*_test.iyi` under the given paths (default: `.`). A test is
-    a plain iyi program: exit 0 is a pass, anything else is a failure that
-    prints its own evidence. `--json` reports the run as data.
+    Runs every `*_test.ri` and `*_test.iyi` under the given paths (default:
+    `.`). A test is a plain program: exit 0 is a pass, anything else is a
+    failure that prints its own evidence. `--json` reports the run as data.
 
     `--affected FILE` (repeatable) runs only the tests whose transitive
     import closure contains a named file — name every file you changed.
