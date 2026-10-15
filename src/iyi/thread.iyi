@@ -2,7 +2,8 @@
 # GC_DESIGN.md Stage 4, built on the thread floor's measured mechanism.
 #
 # `bench/thread_floor.iyi` priced every piece of this before it was
-# written: a thread by raw `clone` on Linux costs the floor no name, a
+# written: a mark helper by raw `clone` on Linux costs the floor no name
+# (a program's own thread is glibc's, see `pthread_create` below), a
 # thread by `pthread_create` on darwin costs libSystem's exact list, a
 # `@[ThreadLocal]` is one load, and a stop is one signal per thread with a
 # handler that reads the held thread's registers out of the kernel's
@@ -146,6 +147,21 @@
     # probe's flags: the tid is in the line before `clone` returns to the
     # parent, so a stop that begins the instant after can name the child.
     IYI_CLONE_FLAGS = 0x013d0f00_i64
+
+    # A program's own thread is glibc's on Linux, as it is libSystem's on
+    # darwin: every iyi binary links libc dynamically, and a thread made by
+    # raw `clone` has no glibc thread block, so the first `malloc` a C
+    # library made on it - SQLite's, opening a connection - read a TLS slot
+    # that was not there and faulted. The collector's mark helpers stay on
+    # `clone`: they call no C. The thread runs on the stack mapped here
+    # (`pthread_attr_setstack`), so its bounds are still the line's.
+    lib LibC
+      fun pthread_create(thread : UInt64*, attributes : Void*, start : Void*, argument : Void*) : Int32
+      fun pthread_join(thread : UInt64, value : Void*) : Int32
+      fun pthread_attr_init(attributes : Void*) : Int32
+      fun pthread_attr_setstack(attributes : Void*, stack : Void*, size : UInt64) : Int32
+      fun pthread_attr_destroy(attributes : Void*) : Int32
+    end
     IYI_SIGSTOP_THE_WORLD = 10_i64
     IYI_FUTEX_WAIT = 0_i64
     IYI_FUTEX_WAKE = 1_i64
@@ -559,13 +575,25 @@
         # Linked before the clone, under the lock the clone is made under:
         # a stop cannot begin between the two, and the tid is in the line
         # before the lock is released.
+        attributes = uninitialized StaticArray(UInt64, 16)
+        LibC.pthread_attr_init(pointerof(attributes).as(Void*))
+        LibC.pthread_attr_setstack(pointerof(attributes).as(Void*), Pointer(Void).new(stack), IYI_THREAD_STACK)
+        # The tid is the child's to write, as its first act (`run`); the
+        # lock is held until it has, so no stop walks a line without one.
         IyiRuntimeLock.lock
         IyiHeap.write64(line + IYI_TL_NEXT, @@lines)
         @@lines = line
         @@count = @@count + 1_i64
-        result = __iyi_thread_clone(stack + IYI_THREAD_STACK, thread_entry, line, line + IYI_TL_HANDLE, IyiTlsImage.make)
+        result = LibC.pthread_create(Pointer(UInt64).new(line + IYI_TL_PARK), pointerof(attributes).as(Void*),
+          Pointer(Void).new(thread_entry), Pointer(Void).new(line))
+        if result == 0
+          while IyiThread.word(line + IYI_TL_HANDLE).value.get == 0_u64
+            yield_cpu
+          end
+        end
         IyiRuntimeLock.unlock
-        raise "clone failed: #{result}" if result < 0
+        LibC.pthread_attr_destroy(pointerof(attributes).as(Void*))
+        raise "pthread_create failed: #{result}" if result != 0
       {% elsif flag?(:darwin) %}
         make_park(line)
         IyiRuntimeLock.lock
@@ -634,6 +662,9 @@
     # list, run it, leave the stop's list, and return into the exit the
     # clone asm (or pthread) performs.
     def self.run(line : UInt64) : Nil
+      {% if flag?(:linux) %}
+        IyiThread.word(line + IYI_TL_HANDLE).value.set(__iyi_conc_syscall3(IYI_SYS_GETTID, 0_i64, 0_i64, 0_i64).to_u64)
+      {% end %}
       @@line = line
       # An alternate signal stack is a thread's own, so a stack overflow on
       # this thread has somewhere to say so (`IyiStackGuard`).
@@ -708,9 +739,8 @@
       line = @line
       return if line == 0
       {% if flag?(:linux) %}
-        while (tid = IyiThread.word(line + IYI_TL_HANDLE).value.get) != 0_u64
-          __iyi_conc_syscall6(IYI_SYS_FUTEX, (line + IYI_TL_HANDLE).to_i64, IYI_FUTEX_WAIT, tid.to_i64, 0_i64, 0_i64, 0_i64)
-        end
+        result = LibC.pthread_join(IyiHeap.read64(line + IYI_TL_PARK), Pointer(Void).new(0_u64))
+        raise "pthread_join failed: #{result}" if result != 0
       {% elsif flag?(:darwin) %}
         handle = Pointer(Void).new(IyiHeap.read64(line + IYI_TL_HANDLE))
         result = LibC.pthread_join(handle, Pointer(Void).new(0_u64))

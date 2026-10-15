@@ -18,8 +18,11 @@
 #      the allocator. A joined thread keeps nothing its block captured, its
 #      line is unmapped, and a second join of it returns at once.
 #   2. The binary keeps the floor. On Linux the runtime's five C-template
-#      names and nothing else: a thread by raw `clone`, a stop by `tgkill`
-#      and `rt_sigaction`, a park by `futex`, all syscalls. On darwin the
+#      names and glibc's thread, by name - pthread_create, pthread_join and
+#      the three pthread_attr calls that put it on the runtime's own stack -
+#      because a thread raw `clone` made has no glibc thread block, and a C
+#      library's `malloc` on it faults (ris). A stop by `tgkill` and
+#      `rt_sigaction`, a park by `futex`, all syscalls. On darwin the
 #      exact list: the runtime's names plus what a thread costs there,
 #      the thread floor's list, spelled out.
 #   3. The numbers, printed from the release run: allocations per thread,
@@ -137,11 +140,12 @@ echo "  ten of ten"
 # ── 2. The floor ──────────────────────────────────────────────────────────
 case "$(uname -s)" in
   Linux)
-    step "dependency floor: threads and their stop add no symbol"
+    step "dependency floor: threads add glibc's thread and nothing else"
     for bin in threads threads-release; do
       added="$(nm -u "$bin" |
         sed -e 's/^ *[wU] *//' -e 's/@.*$//' |
         grep -v -E '^(_ITM_deregisterTMCloneTable|_ITM_registerTMCloneTable|__cxa_finalize|__gmon_start__|__libc_start_main)$' |
+        grep -v -E '^(pthread_create|pthread_join|pthread_attr_init|pthread_attr_setstack|pthread_attr_destroy)$' |
         grep -cv '^\s*$')"
       if [ "$added" -ne 0 ]; then
         echo "$bin put $added undefined symbols on the link line:"
@@ -149,7 +153,7 @@ case "$(uname -s)" in
         exit 1
       fi
     done
-    echo "  five template names and nothing else, plain and release"
+    echo "  five template names and glibc's thread, nothing else, plain and release"
     ;;
   Darwin)
     # The runtime's list (bench/dependency_floor.sh), the concurrency
