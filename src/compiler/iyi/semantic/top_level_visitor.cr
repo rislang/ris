@@ -3097,7 +3097,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
   # a thing Crystal has and iyi does not.
   private def iyi_check_not_reopening(node : ASTNode, path : Path, prefix : Path) : Nil
     filename = path.location.try(&.filename)
-    return unless filename.is_a?(String) && filename.ends_with?(".iyi")
+    return unless filename.is_a?(String) && filename.ris_source?
 
     # `module app/formal` is a qualified declaration the parser wrote, not one
     # the author did, and two modules under `app/` share the namespace by

@@ -84,7 +84,7 @@ class Iyi::Command
       Usage: #{Command.program_name} tool [tool] [switches] [program file] [--] [arguments]
 
       Tool:
-          bind                     say what a Crystal shard would cost as an iyi module
+          bind                     what a Crystal shard would cost as an iyi module
           context                  show context for given location
           dependencies             show file dependency tree
           expand                   show macro expansion for given location
@@ -396,7 +396,7 @@ class Iyi::Command
   private def init
     # iyi: the `iyi` binary's `init` writes an iyi project (command/init.cr);
     # `crystal init` underneath is still Crystal's shard scaffold.
-    if Command.program_name == "iyi"
+    if Command.program_name.in?("iyi", "ris")
       iyi_init
     else
       Init.run(options)
@@ -763,11 +763,11 @@ class Iyi::Command
         valid_emit_values = Compiler::EmitTarget.names
         valid_emit_values.map!(&.gsub('_', '-').downcase)
 
-        opts.on("--emit [#{valid_emit_values.join('|')}]", "Comma separated list of types of output for the compiler to emit") do |emit_values|
+        opts.on("--emit [#{valid_emit_values.join('|')}]", "Comma separated list of types of output\nfor the compiler to emit") do |emit_values|
           compiler.emit_targets |= validate_emit_values(emit_values.split(',').map(&.strip))
         end
 
-        opts.on("--x86-asm-syntax att|intel", "X86 dialect for --emit=asm: AT&T (default), Intel") do |value|
+        opts.on("--x86-asm-syntax att|intel", "X86 dialect for --emit=asm:\nAT&T (default), Intel") do |value|
           # `dialect`, not `value`: the parse wrote over the word it read,
           # and the refusal said "Invalid value `` for x86-asm-syntax".
           case dialect = LLVM::InlineAsmDialect.parse?(value)
@@ -864,7 +864,7 @@ class Iyi::Command
         opts.on("--no-codegen", "Don't do code generation") do
           compiler.no_codegen = true
         end
-        opts.on("-o FILE", "--output FILE", "Output path. If a directory, the filename is derived from the first source file (default: ./)") do |an_output_filename|
+        opts.on("-o FILE", "--output FILE", "Output path. If a directory, the filename\nis derived from the first source file\n(default: ./)") do |an_output_filename|
           # `-o ""` is what a shell produces from `-o "$OUT"` with `OUT`
           # unset, and it used to mean the current directory - the
           # program was written beside its source under a name nobody
@@ -897,13 +897,13 @@ class Iyi::Command
       # with it gets Crystal's library, so `require` reaches the ecosystem and
       # means what it means in Crystal. The rules that make a module a module
       # are untouched — they are the language's, and a prelude is a library.
-      opts.on("--crystal", "iyi: build against Crystal's standard library, so `require` works") do
+      opts.on("--crystal", "iyi: build against Crystal's standard\nlibrary, so `require` works") do
         compiler.prelude = "prelude"
         compiler.crystal_library = true
         specified_prelude = true
       end
 
-      opts.on("--iyi-keep NAMESPACE", "iyi: define rather than inline the methods under NAMESPACE") do |root|
+      opts.on("--iyi-keep NAMESPACE", "iyi: define rather than inline the methods\nunder NAMESPACE") do |root|
         compiler.iyi_keep = root
       end
 
@@ -912,11 +912,11 @@ class Iyi::Command
       # Its own switch rather than `--emit-iyimod`, because it is not that: it
       # writes one artifact it built itself, for a shard, under Crystal's
       # library — which is exactly the combination `--emit-iyimod` refuses.
-      opts.on("--emit-bind DIR", "iyi: where `tool bind` writes the boundary it generates") do |dir|
+      opts.on("--emit-bind DIR", "iyi: where `tool bind` writes the boundary\nit generates") do |dir|
         compiler.emit_bind = dir
       end
 
-      opts.on("--emit-iyimod DIR", "iyi: write a .iyimod per imported module this build reads from source into DIR (a package's is III.7 step 5's, and is not one of these)") do |dir|
+      opts.on("--emit-iyimod DIR", "iyi: write a .iyimod per imported module\nthis build reads from source into DIR (a\npackage's is III.7 step 5's, and is not\none of these)") do |dir|
         # iyi: answered here rather than by `Dir.mkdir_p` half an hour into a
         # build. A path that names a file, or a directory nobody may write to,
         # used to arrive as `Unable to create directory` and a stack trace.
@@ -948,7 +948,7 @@ class Iyi::Command
       # file is not there (`Compiler.workspace_artifacts`, SPEC.md IV.1f).
       # A reader who has seen a build use an artifact it was never told
       # about is owed the difference between the two.
-      opts.on("--use-iyimod DIR", "iyi: compile imported modules from DIR's .iyimod files first; `mods` beside the project root is read for a module with no source either way") do |dir|
+      opts.on("--use-iyimod DIR", "iyi: compile imported modules from DIR's\n.iyimod files first; `mods` beside the\nproject root is read for a module with\nno source either way") do |dir|
         # iyi: a module with no artifact is ordinary — the first build of the
         # loop has none at all, and compiles from source. A *directory* that is
         # not there is a typo, and it used to be ignored: the build compiled
@@ -967,10 +967,10 @@ class Iyi::Command
       end
 
       unless no_codegen
-        opts.on("--release", "Compile in release mode (-O3 --single-module)") do
+        opts.on("--release", "Release mode (-O3 --single-module)") do
           compiler.release!
         end
-        opts.on("-O LEVEL", "Optimization mode: 0 (default), 1, 2, 3, s, z") do |level|
+        opts.on("-O LEVEL", "Optimization: 0 (default), 1, 2, 3, s, z") do |level|
           if mode = Compiler::OptimizationMode.from_level?(level)
             compiler.optimization_mode = mode
           else
@@ -1064,7 +1064,7 @@ class Iyi::Command
     if (entry = sources.first?) && Lexer.iyi_miscased?(entry.filename)
       abort! Lexer.iyi_miscased_sentence(entry.filename), :USAGE_ERROR
     end
-    if !specified_prelude && sources.first?.try(&.filename.ends_with?(".iyi"))
+    if !specified_prelude && sources.first?.try(&.filename.ris_source?)
       compiler.prelude = "iyi/prelude"
     end
 
@@ -1244,10 +1244,10 @@ class Iyi::Command
       @error_trace = true
       compiler.show_error_trace = true
     end
-    opts.on("--release", "Compile in release mode (-O3 --single-module)") do
+    opts.on("--release", "Release mode (-O3 --single-module)") do
       compiler.release!
     end
-    opts.on("-O LEVEL", "Optimization mode: 0 (default), 1, 2, 3, s, z") do |level|
+    opts.on("-O LEVEL", "Optimization: 0 (default), 1, 2, 3, s, z") do |level|
       if mode = Compiler::OptimizationMode.from_level?(level)
         compiler.optimization_mode = mode
       else

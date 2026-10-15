@@ -3043,7 +3043,7 @@ module Iyi::Lsp
       params["files"].as_a.each do |file|
         old_path = path_of(file["oldUri"].as_s)
         new_path = path_of(file["newUri"].as_s)
-        next unless old_path.ends_with?(".iyi") && new_path.ends_with?(".iyi")
+        next unless old_path.ris_source? && new_path.ris_source?
 
         text = document_text(old_path) || (File.file?(old_path) ? File.read(old_path) : nil)
         next unless text
@@ -3962,7 +3962,7 @@ module Iyi::Lsp
         if workspace_directory?(path)
           next if name == "lib" && !with_lib
           walk_workspace(path, in_lib || name == "lib", with_lib, manifests, limit, found)
-        elsif (manifests ? name.in?(Mod::Installer::MANIFEST, Mod::Sum::FILE) : name.ends_with?(".iyi")) && listed_file?(path)
+        elsif (manifests ? name.in?(Mod::Installer::MANIFEST, Mod::Sum::FILE) : name.ris_source?) && listed_file?(path)
           found << {path, in_lib}
         end
       end

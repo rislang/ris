@@ -227,7 +227,7 @@ class Iyi::Command
       # only ever finds the `.cr`, which stays where it is: what they
       # build and what a module builds are then two programs from one
       # source, and that is worth saying rather than discovering.
-      by_module = requirers.select(&.ends_with?(".iyi"))
+      by_module = requirers.select(&.ris_source?)
       unless by_module.empty?
         named = by_module.first(4).map { |file| Iyi.path_under?(file, project_root) || file }.join(", ")
         more = by_module.size > 4 ? " and #{by_module.size - 4} more" : ""
@@ -235,7 +235,7 @@ class Iyi::Command
                "a `require` that finds a `.iyi` gets a compilation unit and none of its names, so that consumer needs an `import` - which is the whole tree's job: " \
                "#{Command.program_name} migrate #{File.dirname(single)} --out DIR", :USAGE_ERROR
       end
-      by_crystal = requirers.reject(&.ends_with?(".iyi"))
+      by_crystal = requirers.reject(&.ris_source?)
       unless by_crystal.empty?
         named = by_crystal.first(3).map { |file| Iyi.path_under?(file, project_root) || file }.join(", ")
         more = by_crystal.size > 3 ? " and #{by_crystal.size - 3} more" : ""

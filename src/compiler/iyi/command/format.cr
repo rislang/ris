@@ -29,7 +29,7 @@ class Iyi::Command
         Options:
         USAGE
 
-      opts.on("--check", "Checks that formatting code produces no changes") do |f|
+      opts.on("--check", "Checks that formatting produces no changes") do |f|
         check = true
       end
 
@@ -41,7 +41,7 @@ class Iyi::Command
         excludes << f
       end
 
-      opts.on("--stdin-filename <path>", "Path the piped source came from (its extension picks the language)") do |f|
+      opts.on("--stdin-filename <path>", "Path the piped source came from\n(its extension picks the language)") do |f|
         stdin_filename = f
       end
 
@@ -54,7 +54,7 @@ class Iyi::Command
         @color = false
       end
 
-      opts.on("--show-backtrace", "Show backtrace on a bug (used only for debugging)") do
+      opts.on("--show-backtrace", "Show backtrace on a bug (debugging)") do
         show_backtrace = true
       end
     end
@@ -251,7 +251,7 @@ class Iyi::Command
     rescue ex : InvalidByteSequenceError
       # The same question the compiler asks: whichever language the file is
       # written in, not whichever one this command was forked from.
-      language = filename.ends_with?(".iyi") ? "iyi" : "Crystal"
+      language = filename.ris_source? ? "iyi" : "Crystal"
       print_error "file '#{filename}' is not a valid #{language} source file: #{ex.message}"
       @status_code = 1
     rescue ex : Iyi::SyntaxException

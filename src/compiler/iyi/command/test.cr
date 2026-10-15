@@ -245,7 +245,7 @@ class Iyi::Command
   # every program compiles and no import names. `--affected
   # src/iyi/prelude.iyi` answered "0 to run, 1 skipped".
   private def outside_every_closure?(path : String) : Bool
-    return true unless File.extname(path).compare(".iyi", case_insensitive: true) == 0
+    return true unless File.extname(path).compare(".iyi", case_insensitive: true) == 0 || File.extname(path).compare(".ri", case_insensitive: true) == 0
     key = Iyi.file_key(File.expand_path(path))
     IyiPath.default_paths.each do |entry|
       prelude = File.expand_path(File.join(entry, "iyi"))

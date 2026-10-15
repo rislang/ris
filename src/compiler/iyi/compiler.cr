@@ -316,7 +316,8 @@ module Iyi
     def self.header_root_of(path : String, text : String) : String?
       module_path = module_header_of(text)
       return nil unless module_path
-      suffix = "/#{module_path}.iyi"
+      # ris: the entry's own extension, `.ri` or the `.iyi` carried over.
+      suffix = "/#{module_path}#{path.ends_with?(".ri") ? ".ri" : ".iyi"}"
       # Asked of the posix reading: a module path is posix by grammar (R-1) and
       # a path is the platform's, so on Windows no entry ever ended with its own
       # header — every build fell back to the entry-dir rule and `import
@@ -3226,7 +3227,7 @@ module Iyi
       # bytes that are not text was reported as "not a valid Crystal source
       # file", which names the other language for a file this one was asked
       # to read - the identity `bench/identity_floor.py` exists to keep.
-      language = source.filename.ends_with?(".iyi") ? "iyi" : "Crystal"
+      language = source.filename.ris_source? ? "iyi" : "Crystal"
       # iyi: raised, never printed and exited on here. `Lsp::Analysis`
       # compiles in the language server's own worker, and one `.iyi` file
       # saved as Windows-1254 ended that worker with exit 1 and its sentence

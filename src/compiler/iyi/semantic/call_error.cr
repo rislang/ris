@@ -179,7 +179,7 @@ class Iyi::Path
       dir = File.join(entry, "std")
       next unless Dir.exists?(dir)
       Dir.each_child(dir) do |file|
-        next unless file.ends_with?(".iyi")
+        next unless file.ris_source?
         path = File.join(dir, file)
         next unless File.file?(path) && iyi_declares_at_top_level?(File.read(path), name)
         written = "std/#{file.rchop(".iyi")}"
@@ -1133,7 +1133,7 @@ class Iyi::Call
       dir = File.join(entry, "std")
       next unless Dir.exists?(dir)
       # Sorted, so the modules are named in the same order on every machine.
-      files = Dir.children(dir).select(&.ends_with?(".iyi")).sort!
+      files = Dir.children(dir).select(&.ris_source?).sort!
       files.each do |file|
         path = File.join(dir, file)
         next unless File.file?(path)

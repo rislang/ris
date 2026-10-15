@@ -53,7 +53,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     # that is not part of this language. A relative require is left alone: it
     # is file inclusion inside one unit, which is how the prelude is written.
     if !node.iyi_prelude? && @program.iyi_prelude? &&
-       relative_to.try(&.ends_with?(".iyi")) && !filename.starts_with?('.')
+       relative_to.try(&.ris_source?) && !filename.starts_with?('.')
       # `require "json"` was told to write `import json`, which reaches
       # Crystal's `src/json.cr` and fails inside it; iyi's own is std's.
       if iyi_std_module?("std/#{filename}")
@@ -79,7 +79,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     # artifact (SPEC.md IV.1g, `Requires`). A relative require is file
     # inclusion inside this unit and travels with its source, so it is not one
     # of these; a library name is.
-    if relative_to && relative_to.ends_with?(".iyi") && !filename.starts_with?('.')
+    if relative_to && relative_to.ris_source? && !filename.starts_with?('.')
       list = (@program.iyi_module_requires[relative_to] ||= [] of String)
       list << filename unless list.includes?(filename)
     end
@@ -287,7 +287,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
         hint = "\nDid you mean `#{similar}`?"
       end
       node.raise "can't find module '#{path}'. A module's path is its file's " \
-                 "path, so this one is `#{path}.iyi`, resolved from the " \
+                 "path, so this one is `#{path}.ri` (or `.iyi`), resolved from the " \
                  "directory of the file being built and then from `IYI_PATH`#{hint}"
     end
 
@@ -515,6 +515,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     # - named `C:\proj\app/deep/util.iyi`, which a tool matching paths
     # does not match to `C:\proj\app\deep\util.iyi`.
     if !inside_package && (root = project_root)
+      candidates << Iyi.native_path(File.join(root, "#{path}.ri"))
       candidates << Iyi.native_path(File.join(root, "#{path}.iyi"))
       candidates << Iyi.native_path(File.join(root, "#{path}.cr"))
     end
@@ -525,11 +526,13 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     # the way a build from the project root would. After the entry's
     # directory, never instead of it.
     if !inside_package && (header_root = @program.iyi_header_root)
+      candidates << Iyi.native_path(File.join(header_root, "#{path}.ri"))
       candidates << Iyi.native_path(File.join(header_root, "#{path}.iyi"))
       candidates << Iyi.native_path(File.join(header_root, "#{path}.cr"))
     end
 
     @program.iyi_path.entries.each do |entry|
+      candidates << Iyi.native_path(File.join(entry, "#{path}.ri"))
       candidates << Iyi.native_path(File.join(entry, "#{path}.iyi"))
       candidates << Iyi.native_path(File.join(entry, "#{path}.cr"))
     end

@@ -595,6 +595,10 @@ module Iyi
             check_args_are_not_closure node, "can't set closure as C #{obj_type.type_desc} member"
           end
           check_thread_captures_share(node, target_defs[0])
+          check_tape_scope(node, target_defs[0])
+        end
+        if (block = node.block) && (fun_literal = block.fun_literal).is_a?(ProcLiteral)
+          check_tape_captures(fun_literal.def)
         end
 
         current_def = @current_def
@@ -644,6 +648,73 @@ module Iyi
       end
 
       node
+    end
+
+    # PROTOTYPE (ris, step B): a block that becomes a proc - `-> { }`, the
+    # block `spawn` or a callback keeps - may run after the Tape.scope it
+    # was made in has ended, so it may not capture a tape value.
+    def check_tape_captures(a_def : Def)
+      return unless a_def.closure?
+      vars = a_def.vars
+      ClosuredVarsCollector.collect(a_def).each do |captured|
+        next unless captured.is_a?(Var)
+        meta = vars.try &.[captured.name]?
+        next unless meta
+        next if meta.belongs_to?(a_def)
+        type = meta.type?
+        next unless type
+        if found = Iyi::TapeChecker.tape_in(@program, type)
+          captured.raise "this block becomes a proc, which may run after the Tape.scope that made `#{captured.name} : #{type}` has ended, and #{found} is a tape type: pass what the block needs as a copy (`to_s`), or call it inside the scope without keeping it"
+        end
+      end
+    end
+
+    # PROTOTYPE (ris, step B): what a `Tape.scope` block makes is reclaimed
+    # when the block returns, so nothing tape-typed may leave it through a
+    # variable of the code around it. (Its value cannot leave: `Tape.scope`
+    # returns nil.)
+    def check_tape_scope(node : Call, target_def : Def)
+      return unless target_def.name == "scope"
+      owner = target_def.owner
+      return unless owner.metaclass? && owner.instance_type.to_s == "Tape"
+      block = node.block
+      return unless block
+      TapeScopeEscapes.new(@program, block).check
+    end
+
+    class TapeScopeEscapes < Visitor
+      @blocks : Array(Block)
+
+      def initialize(@program : Program, @scope : Block)
+        @blocks = [@scope]
+      end
+
+      def check
+        @scope.body.accept self
+      end
+
+      def visit(node : Block)
+        @blocks.push node
+        node.body.accept self
+        @blocks.pop
+        false
+      end
+
+      def visit(node : Assign)
+        target = node.target
+        if target.is_a?(Var) && (type = node.value.type?) && (found = Iyi::TapeChecker.tape_in(@program, type))
+          meta = @blocks.last.vars.try &.[target.name]?
+          context = meta.try &.context
+          unless context.is_a?(Block) && @blocks.includes?(context)
+            node.raise "`#{target.name}` is a variable of the code around this Tape.scope, and is assigned `#{type}` here, which holds the tape type #{found}: its storage ends with the scope, so the variable would outlive it"
+          end
+        end
+        true
+      end
+
+      def visit(node : ASTNode)
+        true
+      end
     end
 
     # iyi: `IyiThread.start { }`'s block runs on another thread, so every
@@ -1140,6 +1211,7 @@ module Iyi
     end
 
     def transform(node : ProcLiteral)
+      check_tape_captures(node.def)
       body = node.def.body
       if node.def.no_returns? && !body.type?
         node.def.body = untyped_expression(body)

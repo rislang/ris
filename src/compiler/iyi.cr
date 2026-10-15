@@ -28,33 +28,33 @@ Log.setup_from_env(default_level: :warn, default_sources: "crystal.*")
 
 module Iyi
   USAGE = <<-USAGE
-    iyi — a language built for Developer & Agentic Experience, Portability,
-    Performance, and Efficiency.
+    ris #{RIS_VERSION} — Rubyist In Stack memory with agents.
+    (built on iyi #{VERSION}, built on #{Iyi::Config.description.lines.first})
 
-    Usage: iyi [command] [switches] [program file] [--] [arguments]
+    Usage: ris [command] [switches] [program file] [--] [arguments]
 
     Command:
-        init                     write a new project: iyi.mod and the root module it names
-        get                      add a requirement to iyi.mod, or move one; -u brings all up to date
-        build                    build an executable
-        run                      build and run a program (default)
-        mod                      inspect a .iyimod module artifact; `mod tidy` fixes iyi.mod
-        doc                      print a module's exported surface, or a prelude type's
-        test                     run every *_test.iyi: exit 0 passes, anything else fails
-        vet                      report unreachable code; findings are the exit code
-        check                    type-check only; errors are the exit code, `-f json` makes them data
-        fmt                      format files in place (`tool format`); --check makes a change the exit code
-        fix                      apply the compiler's did-you-mean edits until the file is clean
-        bind                     put every shard under lib/ behind a boundary, as .iyimod files
-        migrate                  write a Crystal tree as iyi modules, the namespace as the path
-        lsp                      serve the language over stdio (editors, agents)
-        mcp                      serve the compiler's verbs as MCP tools over stdio (agents)
-        daemon                   hold the prelude analysed between builds
-        env                      print environment information
-        clear_cache              clear the compiler cache
-        tool                     formatter and editor tools, Crystal's
-        version                  print the version
-        help                     print this text
+        init         write a new project: iyi.mod and its root module
+        get          add or move a requirement in iyi.mod; -u updates all
+        build        build an executable
+        run          build and run a program (default)
+        mod          inspect a .iyimod artifact; `mod tidy` fixes iyi.mod
+        doc          print a module's exported surface, or a prelude type's
+        test         run every *_test.iyi: exit 0 passes, else fails
+        vet          report unreachable code; findings are the exit code
+        check        type-check only; errors are the exit code, -f json data
+        fmt          format files in place; --check makes a change fail
+        fix          apply the compiler's did-you-mean edits until clean
+        bind         put every shard under lib/ behind a .iyimod boundary
+        migrate      write a Crystal tree as iyi modules, namespace as path
+        lsp          serve the language over stdio (editors, agents)
+        mcp          serve the compiler's verbs as MCP tools over stdio
+        daemon       hold the prelude analysed between builds
+        env          print environment information
+        clear_cache  clear the compiler cache
+        tool         formatter and editor tools, Crystal's
+        version      print the version
+        help         print this text
 
     Switches worth knowing:
         --crystal                build against Crystal's standard library
@@ -62,12 +62,6 @@ module Iyi
         --use-iyimod DIR         compile imports from DIR's .iyimod files
         --no-codegen             analyse only, produce nothing
         --release                optimise, and take longer about it
-
-    A `.iyi` entry file gets iyi's prelude; `--crystal` gives it Crystal's
-    instead, and there `require "kemal"` means what it means in Crystal. The
-    rules do not change with the library. `iyi daemon` is for that second mode:
-    it holds Crystal's library analysed between builds and halves them. See
-    SPEC.md for the design and README.md for what is and is not here.
     USAGE
 
   # What the binary calls itself, read from `src/IYI_VERSION` — the same file
@@ -112,11 +106,16 @@ module Iyi
     "iyi has no `#{verb}`: it belongs to Crystal, which this compiler is also built on. Here #{instead}."
   end
 
+  # ris: its own version line, beside the iyi version it forked from.
+  RIS_VERSION = "0.1.0"
+
   def self.description : String
     String.build do |io|
       # The name first, then what it is built on. Both, because the licence
       # requires the second and the language is not the second's dialect.
-      io << "iyi " << VERSION << " (built on " << Iyi::Config.description.lines.first << ")"
+      # ris: the name, then the iyi it is built on and what that is built
+      # on - the licence asks for the last, and the credit for all three.
+      io << "ris " << RIS_VERSION << " (built on iyi " << VERSION << ", built on " << Iyi::Config.description.lines.first << ")"
       io << "\n\nThe compiler was not built in release mode." unless Iyi::Config.release_mode?
     end
   end
@@ -124,7 +123,7 @@ module Iyi
   def self.run(options = ARGV) : Nil
     # The delegated commands print their own usage, and it used to name the
     # binary underneath instead of the one that was typed.
-    Iyi::Command.program_name = "iyi"
+    Iyi::Command.program_name = "ris"
 
     command = options.first?
 

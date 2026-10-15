@@ -46,9 +46,10 @@ class Iyi::Command
           after each one, until the file is clean or carries an error the
           compiler has no edit for. Every `using` is first written as the
           `import` that replaced it: `using X` is `import X::*`, `using
-          X::{a}` is `import X::{a}`, folded into a bare `import X`. Exit 0 when the file ends clean. When
-          the remaining error lives in another file of the program, the
-          verb names it (`cause` in `--json`): that is the file to fix next.
+          X::{a}` is `import X::{a}`, folded into a bare `import X`.
+          Exit 0 when the file ends clean. When the remaining error lives
+          in another file of the program, the verb names it (`cause` in
+          `--json`): that is the file to fix next.
 
           Several files, or a directory - every .iyi under it, hidden
           directories and lib/ aside - are one run: every `using` in all
@@ -126,7 +127,7 @@ class Iyi::Command
       if File.info?(full, follow_symlinks: false).try(&.directory?)
         next if entry.starts_with?('.') || entry == "lib"
         found.concat(fix_sources(full))
-      elsif entry.ends_with?(".iyi")
+      elsif entry.ris_source?
         found << full
       end
     end

@@ -1290,6 +1290,11 @@ module Iyi
       # every type it found shareable, and a consumer reads that and never
       # recomputes: the bodies that would tell it are not in the artifact.
       types["Share"] = @share_annotation = AnnotationType.new self, self, "Share"
+      # PROTOTYPE (ris, step B): `@[OnTape]` on a struct makes it a tape type -
+      # a value whose storage is the current fiber's tape and ends with the
+      # `Tape.scope` that made it. `Iyi::TapeChecker` and `CleanupTransformer`
+      # refuse every place such a value could outlive its scope.
+      types["OnTape"] = @tape_annotation = AnnotationType.new self, self, "OnTape"
 
       # iyi: the marker that makes a union member an error member (SPEC.md
       # III.1.1). Created here rather than declared in the prelude because the
@@ -1623,7 +1628,7 @@ module Iyi
                      always_inline_annotation naked_annotation returns_twice_annotation
                      raises_annotation primitive_annotation call_convention_annotation
                      flags_annotation link_annotation extern_annotation deprecated_annotation experimental_annotation
-                     share_annotation error_trait) %}
+                     share_annotation tape_annotation error_trait) %}
       def {{name.id}}
         @{{name.id}}.not_nil!
       end

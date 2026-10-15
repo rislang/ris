@@ -180,7 +180,10 @@ module Iyi
       # `--prelude` resolves through here, and 0.1.0's prelude is written in
       # iyi (SPEC.md, "0.1.0", item 3).
       unless relative_filename.ends_with?(".cr")
-        yield relative_filename.ensure_suffix(".iyi")
+        # ris: a module of the language is `name.ri`; `name.iyi` is one
+        # carried over from iyi, the prelude's among them.
+        yield relative_filename.ensure_suffix(".ri") unless relative_filename.ends_with?(".iyi")
+        yield relative_filename.ensure_suffix(".iyi") unless relative_filename.ends_with?(".ri")
       end
 
       # Check if .cr file exists.

@@ -53,7 +53,7 @@ module Iyi::Front
   # The prelude a `.iyi` file gets, which is the same rule `crystal build`
   # applies: iyi's own, unless the file is Crystal's.
   private def self.prelude_for(filename : String) : String
-    filename.ends_with?(".iyi") ? "iyi/prelude" : "prelude"
+    filename.ris_source? ? "iyi/prelude" : "prelude"
   end
 
   def self.run(argv : Array(String)) : Int32

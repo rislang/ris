@@ -177,7 +177,7 @@ class Iyi::Command
         next if entry.starts_with?('.') || entry == "lib"
         next if File.file?(File.join(full, Mod::Installer::MANIFEST))
         found.concat(mod_tidy_sources(full))
-      elsif entry.ends_with?(".iyi")
+      elsif entry.ris_source?
         found << full
       end
     end

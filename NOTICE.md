@@ -1,3 +1,26 @@
+# ris
+
+Copyright 2026 Priit Tark.
+
+ris is a fork of iyi (https://github.com/iyilang/iyi, Copyright Serdar
+Dogruyol and the iyi contributors), which is built on the Crystal programming
+language (Copyright 2012-2026 Manas Technology Solutions). Both are licensed
+under the Apache License 2.0, as ris is. The notices of both follow,
+unchanged.
+
+ris modifies iyi's sources. Every file ris changed carries a comment naming
+the change ("ris:" or "PROTOTYPE (ris"). The tape memory is ris's own work:
+`src/iyi/tape.iyi`, `src/compiler/iyi/semantic/tape_checker.cr`, and the
+tape parts of `src/iyi/prelude.iyi`, `src/iyi/concurrency.iyi`,
+`src/iyi/string.iyi` and `src/compiler/iyi/semantic/cleanup_transformer.cr`.
+
+`samples/ris/respond.ri` is a port of the `respond` benchmark of Goose
+(https://github.com/aardappel/goose, Copyright Wouter van Oortmerssen,
+Apache License 2.0). Goose's data stacks are the idea ris's tape memory is
+built on.
+
+---
+
 # Crystal Programming Language
 
 Copyright 2012-2026 Manas Technology Solutions.

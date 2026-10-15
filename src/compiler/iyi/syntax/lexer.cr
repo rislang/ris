@@ -150,7 +150,7 @@ module Iyi
     def self.iyi_source?(filename) : Bool
       case filename
       when String
-        filename.ends_with?(".iyi")
+        filename.ris_source?
       when VirtualFile
         iyi_source?(filename.expanded_location.try(&.filename))
       else
@@ -170,7 +170,7 @@ module Iyi
     # refuse it, by name (a name typed in another case is read as the one
     # stored, `stored_name`).
     def self.iyi_miscased?(filename : String) : Bool
-      return false if filename.ends_with?(".iyi")
+      return false if filename.ris_source?
       tail = filename[-4..]?
       !tail.nil? && tail.compare(".iyi", case_insensitive: true) == 0
     end

@@ -1,0 +1,42 @@
+module test/ris/allowed
+
+import std/int
+
+@[OnTape]
+struct Resp
+  getter id : Int64
+  getter user : TapeString
+
+  def initialize(@id : Int64, @user : TapeString)
+  end
+end
+
+def make : Resp
+  Resp.new(1_i64, TapeString.build { |s| s.push(97_u8) })
+end
+
+# Everything here stays inside the scope, and compiles.
+@[OnTape]
+struct Page
+  getter items : TapeArray(Resp)
+
+  def initialize(@items : TapeArray(Resp))
+  end
+end
+
+def total(p : Page) : Int64
+  sum = 0_i64
+  p.items.each { |r| sum += r.id }
+  sum
+end
+
+copied = ""
+Tape.scope do
+  items = TapeArray(Resp).new
+  items.push(make)
+  items.push(make)
+  page = Page.new(items)
+  puts total(page)
+  copied = page.items[0].user.to_s
+end
+puts copied

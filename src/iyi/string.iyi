@@ -689,15 +689,19 @@ class String::Builder
     self << value.to_s
   end
 
+  # ris: the full-buffer test is one compare in the caller and the growth
+  # out of line. `reserve`'s Int64 arithmetic on every byte was a fifth of
+  # a JSON renderer's time.
+  @[AlwaysInline]
   def write_byte(byte : UInt8) : Nil
-    reserve(1)
+    reserve(1) if @bytesize >= @capacity
     @buffer[@bytesize] = byte
     @bytesize = @bytesize + 1
   end
 
   def write(bytes : Pointer(UInt8), count : Int32) : Nil
     return if count <= 0
-    reserve(count)
+    reserve(count) if count > @capacity - @bytesize
     (@buffer + @bytesize.to_i64).copy_from(bytes, count)
     @bytesize = @bytesize + count
   end
@@ -709,6 +713,7 @@ class String::Builder
   # In Int64, so a build doubles past 1 GiB up to the 2147483647 bytes a
   # string holds and is refused past them as `*` is: in Int32, doubling
   # 1 GiB panicked a 1.2 GB build with "arithmetic overflow".
+  @[NoInline]
   private def reserve(extra : Int32) : Nil
     needed = @bytesize.to_i64 + extra.to_i64
     return if needed <= @capacity.to_i64

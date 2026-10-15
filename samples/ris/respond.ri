@@ -1,0 +1,184 @@
+# respond: a web service's hot loop, the benchmark ris was measured on.
+#
+#   ./bin/ris build --release -o respond samples/ris/respond.ri && ./respond
+#
+# For each of 1.6 million requests, build the typed response - an id, a user
+# name, 1..8 line items each with a sku - render it as JSON, hash it and throw
+# both away. The response is two `@[OnTape]` structs whose strings and list
+# are `TapeString` and `TapeArray`, so each request's objects are bumped onto
+# the fiber's tape and freed together when its `Tape.scope` ends. Prints the
+# request count, the bytes rendered and a checksum: 1600000, 367459487,
+# 7480137599999527189, the same as the Goose, C++, Rust and Go versions.
+
+module samples/respond
+
+import std/int
+
+N = 1600000_i64 # BENCH_N
+
+def xs_next(x : UInt64) : UInt64
+  v = x
+  v = v ^ (v << 13)
+  v = v ^ (v >> 7)
+  v = v ^ (v << 17)
+  v
+end
+
+def xs_mod(x : UInt64, k : Int64) : Int64
+  (x % k.to_u64).to_i64
+end
+
+@[OnTape]
+struct Item
+  getter sku : TapeString
+  getter qty : Int64
+  getter price : Int64
+
+  def initialize(@sku : TapeString, @qty : Int64, @price : Int64)
+  end
+end
+
+@[OnTape]
+struct Resp
+  getter id : Int64
+  getter user : TapeString
+  getter items : TapeArray(Item)
+
+  def initialize(@id : Int64, @user : TapeString, @items : TapeArray(Item))
+  end
+end
+
+# A user name of 3..10 letters; one in eight carries a quote or a backslash
+# so the escaping path in the renderer is real.
+def name_of(seed : UInt64) : TapeString
+  r = xs_next(seed)
+  n = 3_i64 + xs_mod(r, 8_i64)
+  odd = xs_mod(r >> 8, 8_i64) == 0_i64
+  TapeString.build(16) do |s|
+    i = 0_i64
+    while i < n
+      r = xs_next(r)
+      if odd && i == 1_i64
+        s.push(xs_mod(r, 2_i64) == 0_i64 ? 34_u8 : 92_u8)
+      else
+        s.push((97_i64 + xs_mod(r, 26_i64)).to_u8)
+      end
+      i += 1_i64
+    end
+  end
+end
+
+# A stock keeping unit: two letters and four digits.
+def sku_of(seed : UInt64) : TapeString
+  r = xs_next(seed)
+  TapeString.build(8) do |s|
+    s.push((65_i64 + xs_mod(r, 26_i64)).to_u8)
+    s.push((65_i64 + xs_mod(r >> 8, 26_i64)).to_u8)
+    i = 0
+    while i < 4
+      r = xs_next(r)
+      s.push((48_i64 + xs_mod(r, 10_i64)).to_u8)
+      i += 1
+    end
+  end
+end
+
+def make_items(seed : UInt64, n : Int64) : TapeArray(Item)
+  t = TapeArray(Item).new(8)
+  r = seed
+  i = 0_i64
+  while i < n
+    r = xs_next(r)
+    t.push(Item.new(sku_of(r), 1_i64 + xs_mod(r >> 8, 5_i64), 100_i64 + xs_mod(r >> 16, 99900_i64)))
+    i += 1_i64
+  end
+  t
+end
+
+def emit_int(buf : TapeWriter, v : Int64) : Nil
+  if v == 0_i64
+    buf.push(48_u8)
+    return
+  end
+  div = 1_i64
+  while div <= v // 10_i64
+    div = div * 10_i64
+  end
+  while div > 0_i64
+    buf.push((48_i64 + (v // div) % 10_i64).to_u8)
+    div = div // 10_i64
+  end
+end
+
+def emit_str(buf : TapeWriter, s : TapeString) : Nil
+  buf.push(34_u8)
+  p = s.to_unsafe
+  n = s.bytesize
+  i = 0
+  while i < n
+    c = p[i]
+    buf.push(92_u8) if c == 34_u8 || c == 92_u8
+    buf.push(c)
+    i += 1
+  end
+  buf.push(34_u8)
+end
+
+def render(r : Resp) : TapeString
+  TapeString.build(256) do |buf|
+    buf.append("{\"id\":")
+    emit_int(buf, r.id)
+    buf.append(",\"user\":")
+    emit_str(buf, r.user)
+    buf.append(",\"items\":[")
+    total = 0_i64
+    first = true
+    r.items.each do |it|
+      buf.push(44_u8) unless first
+      first = false
+      buf.append("{\"sku\":")
+      emit_str(buf, it.sku)
+      buf.append(",\"qty\":")
+      emit_int(buf, it.qty)
+      buf.append(",\"price\":")
+      emit_int(buf, it.price)
+      buf.push(125_u8)
+      total += it.qty * it.price
+    end
+    buf.append("],\"total\":")
+    emit_int(buf, total)
+    buf.push(125_u8)
+  end
+end
+
+def fnv(s : TapeString) : UInt64
+  h = 14695981039346656037_u64
+  p = s.to_unsafe
+  n = s.bytesize
+  i = 0
+  while i < n
+    h = (h ^ p[i].to_u64) &* 1099511628211_u64
+    i += 1
+  end
+  h
+end
+
+seed = 12345_u64
+h = 0_u64
+bytes = 0_i64
+i = 0_i64
+while i < N
+  seed = xs_next(seed)
+  Tape.scope do
+    r = xs_next(seed)
+    n = 1_i64 + xs_mod(r, 8_i64)
+    resp = Resp.new(xs_mod(r >> 4, 1000000_i64), name_of(r >> 8), make_items(r >> 16, n))
+    out_text = render(resp)
+    h = h ^ (fnv(out_text) &* 31_u64 &+ i.to_u64)
+    bytes += out_text.bytesize.to_i64
+  end
+  i += 1_i64
+end
+puts N
+puts bytes
+puts h

@@ -351,3 +351,12 @@ module Iyi
     path.to_s
   end
 end
+
+# ris: a file with the language's rules is a `.ri` file, or an `.iyi` one -
+# the prelude and every module carried over from iyi keep that name. Every
+# check that read `ends_with?(".iyi")` asks this instead.
+class String
+  def ris_source? : Bool
+    ends_with?(".ri") || ends_with?(".iyi")
+  end
+end

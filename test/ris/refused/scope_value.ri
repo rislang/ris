@@ -1,0 +1,20 @@
+module test/ris/refused/scope_value
+
+import std/int
+
+@[OnTape]
+struct Resp
+  getter id : Int64
+  getter user : TapeString
+
+  def initialize(@id : Int64, @user : TapeString)
+  end
+end
+
+def make : Resp
+  Resp.new(1_i64, TapeString.build { |s| s.push(97_u8) })
+end
+
+# The block value leaves the scope; its storage does not.
+kept = Tape.scope { make }
+puts kept.id

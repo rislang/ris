@@ -73,6 +73,10 @@ class Iyi::Program
       Prof.span("recursive struct check") { RecursiveStructChecker.new(self).run }
     end
 
+    @progress_tracker.stage("Semantic (tape check)") do
+      Prof.span("tape check") { TapeChecker.new(self).run }
+    end
+
     result
   end
 

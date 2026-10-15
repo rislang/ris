@@ -2549,7 +2549,7 @@ module Iyi
       next_token_skip_space
       check_import_path_shape(location)
       path = parse_import_path
-      if path.last.ends_with?(".iyi")
+      if path.last.ris_source?
         refuse_import_path "a module path has no extension", location, @iyi_import_end, path.join('/').rchop(".iyi")
       end
       names = nil

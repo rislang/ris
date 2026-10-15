@@ -1,0 +1,155 @@
+# PROTOTYPE (ris, step B): tape values.
+#
+# `Tape.scope { }` gives the running fiber a tape: one mapping that values
+# made inside the block are bumped into, all of it freed with one store when
+# the block returns, and the mapping kept warm for the fiber's next scope.
+# Only the types below are made there. Every other allocation - a String, an
+# Array, anything a library builds and keeps - goes to the collected heap as
+# it always did, which is what makes this safe where a region that took
+# every allocation was not: no object can land on the tape by accident.
+#
+# What keeps a tape value from outliving its scope is the compiler: every
+# struct marked `@[OnTape]` is a tape type, and `Iyi::TapeChecker` and
+# `CleanupTransformer#check_tape_*` refuse a tape value in a class's field, a
+# non-tape struct's field, a class variable, a generic's type argument, a
+# proc's captures, a `Tape.scope` block's value, or a variable of the code
+# around the scope.
+#
+# The values are structs holding one pointer, to a state block on the tape,
+# so a copy of one - a block parameter, an argument - writes through to the
+# same value.
+
+module Tape
+  CAPACITY = 67108864_u64
+
+  # Returns nothing: a block's value is the one thing that leaves it
+  # without an assignment the compiler can see, so it is not passed on.
+  # What must outlive the scope is copied into a variable of the code
+  # around it (`total = page.sum`, `body = text.to_s`).
+  def self.scope(&) : Nil
+    IyiRegion.tape_scope(CAPACITY) { yield }
+    nil
+  end
+end
+
+# Bytes on the tape. Not a `String`: a `String` may be kept anywhere, and
+# this may not. `to_s` copies it into one when it has to outlive the scope.
+@[OnTape]
+struct TapeString
+  @ptr : Pointer(UInt8)
+  @bytesize : Int32
+
+  def initialize(@ptr : Pointer(UInt8), @bytesize : Int32)
+  end
+
+  def bytesize : Int32
+    @bytesize
+  end
+
+  def to_unsafe : Pointer(UInt8)
+    @ptr
+  end
+
+  def to_s : String
+    String.new(@bytesize) { |buffer| buffer.copy_from(@ptr, @bytesize) }
+  end
+
+  # Writes the bytes the block pushes straight onto the tape, where the
+  # string will stay: no buffer to copy out of.
+  def self.build(capacity : Int32 = 32, & : TapeWriter -> _) : TapeString
+    writer = TapeWriter.new(capacity)
+    yield writer
+    writer.finish
+  end
+end
+
+# The open end of a `TapeString` being built: its data pointer, length and
+# capacity in a block on the tape, which the struct points at.
+@[OnTape]
+struct TapeWriter
+  @state : Pointer(UInt64)
+
+  def initialize(capacity : Int32)
+    @state = Pointer(UInt64).new(IyiRegion.tape_bytes(24_u64))
+    @state.value = IyiRegion.tape_bytes(capacity.to_u64)
+    (@state + 1_i64).value = 0_u64
+    (@state + 2_i64).value = capacity.to_u64
+  end
+
+  @[AlwaysInline]
+  def push(byte : UInt8) : Nil
+    length = (@state + 1_i64).value
+    grow(1_u64) if length >= (@state + 2_i64).value
+    Pointer(UInt8).new(@state.value &+ length).value = byte
+    (@state + 1_i64).value = length &+ 1_u64
+  end
+
+  def append(text : String) : Nil
+    count = text.bytesize.to_u64
+    length = (@state + 1_i64).value
+    grow(count) if length &+ count > (@state + 2_i64).value
+    Pointer(UInt8).new(@state.value &+ length).copy_from(text.to_unsafe, text.bytesize)
+    (@state + 1_i64).value = length &+ count
+  end
+
+  def length : Int32
+    (@state + 1_i64).value.to_i32
+  end
+
+  @[NoInline]
+  def grow(extra : UInt64) : Nil
+    need = (@state + 1_i64).value &+ extra
+    capacity = (@state + 2_i64).value
+    while capacity < need
+      capacity = capacity &* 2_u64
+    end
+    @state.value = IyiRegion.tape_grow(@state.value, capacity)
+    (@state + 2_i64).value = capacity
+  end
+
+  def finish : TapeString
+    TapeString.new(Pointer(UInt8).new(@state.value), (@state + 1_i64).value.to_i32)
+  end
+end
+
+# Elements on the tape. `T` is held by value, so an element may itself be a
+# tape type, which no other generic may hold.
+@[OnTape]
+struct TapeArray(T)
+  @state : Pointer(UInt64)
+
+  def initialize(capacity : Int32 = 4)
+    @state = Pointer(UInt64).new(IyiRegion.tape_bytes(24_u64))
+    @state.value = IyiRegion.tape_bytes(capacity.to_u64 &* sizeof(T).to_u64)
+    (@state + 1_i64).value = 0_u64
+    (@state + 2_i64).value = capacity.to_u64
+  end
+
+  def size : Int32
+    (@state + 1_i64).value.to_i32
+  end
+
+  def push(value : T) : Nil
+    size = (@state + 1_i64).value
+    if size >= (@state + 2_i64).value
+      capacity = (@state + 2_i64).value &* 2_u64
+      @state.value = IyiRegion.tape_grow(@state.value, capacity &* sizeof(T).to_u64)
+      (@state + 2_i64).value = capacity
+    end
+    Pointer(T).new(@state.value &+ size &* sizeof(T).to_u64).value = value
+    (@state + 1_i64).value = size &+ 1_u64
+  end
+
+  def [](index : Int32) : T
+    Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value
+  end
+
+  def each(& : T -> Nil) : Nil
+    index = 0
+    count = size
+    while index < count
+      yield self[index]
+      index = index + 1
+    end
+  end
+end

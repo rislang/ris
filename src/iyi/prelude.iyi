@@ -3527,6 +3527,202 @@ require "./file"
       end
     end
 
+    # ris: the tape. Each fiber's tape is one mapping that `TapeString` and
+    # `TapeArray` (src/iyi/tape.iyi) bump their bytes into, freed with one
+    # store when the outermost `Tape.scope` ends and kept as the thread's
+    # spare, so the next scope writes the same warm pages. Only those types
+    # allocate here: the allocator's entry points never do, so no object of
+    # a library can land on a tape. The collector never sees a tape address
+    # as an object - `arena_of` and the large list both refuse it - so it
+    # neither marks nor frees one, and every tape's used words are scanned
+    # as roots, because a tape value may hold a collected object's address.
+    class IyiRegion
+      OFF_CURSOR = 0_u64
+      OFF_LIMIT  = 8_u64
+      OFF_PARENT = 16_u64
+      OFF_MAP    = 24_u64
+      DATA       = 64_u64
+      UNDER      = 16_u64
+      SLOTS      = 256_u64
+      CAPACITY   = 67108864_u64
+
+      @[ThreadLocal]
+      @@spare : UInt64 = 0_u64
+      @@registry : UInt64 = 0_u64
+      @@registered : UInt64 = 0_u64
+
+      # The running fiber's tape, or 0: `IyiScheduler.switch_to` swaps it
+      # with the fiber's own slot.
+      @[ThreadLocal]
+      @@tape : UInt64 = 0_u64
+
+      @[AlwaysInline]
+      def self.tape : UInt64
+        @@tape
+      end
+
+      def self.tape=(region : UInt64) : UInt64
+        @@tape = region
+      end
+
+      # The outermost scope owns the tape; a scope inside it (a handler
+      # calling a helper that opens its own) runs on the same tape and
+      # frees nothing, because what it made may already be held by values
+      # of the outer one.
+      def self.tape_scope(capacity : UInt64, &)
+        return yield if @@tape != 0
+        region = acquire(capacity)
+        @@tape = region
+        result = yield
+        @@tape = 0_u64
+        release(region)
+        result
+      end
+
+      @[NoInline]
+      def self.no_tape : NoReturn
+        __iyi_write(2, "iyi: a tape value made outside Tape.scope\n".to_unsafe.as(Void*), 43_u64)
+        __iyi_exit(1)
+      end
+
+      # Bytes on the tape, uncleared, with no header: a tape value's storage
+      # is never an object the collector or dispatch reads.
+      @[AlwaysInline]
+      def self.tape_bytes(size : UInt64) : UInt64
+        region = @@tape
+        no_tape if region == 0
+        take(region, size, false, 0_u64)
+      end
+
+      # Grows the tape's last block in place, or copies it to the tape's end.
+      def self.tape_grow(pointer : UInt64, size : UInt64) : UInt64
+        region = @@tape
+        no_tape if region == 0
+        realloc(region, pointer, size)
+      end
+
+      def self.acquire(capacity : UInt64) : UInt64
+        spare = @@spare
+        if spare != 0 && IyiHeap.read64(spare &+ OFF_MAP) >= capacity &+ DATA
+          @@spare = 0_u64
+          IyiHeap.write64(spare &+ OFF_CURSOR, spare &+ DATA)
+          return spare
+        end
+        length = capacity &+ DATA
+        region = __iyi_mmap(length).address
+        IyiHeap.write64(region &+ OFF_CURSOR, region &+ DATA)
+        IyiHeap.write64(region &+ OFF_LIMIT, region &+ length)
+        IyiHeap.write64(region &+ OFF_MAP, length)
+        register(region)
+        region
+      end
+
+      def self.release(region : UInt64) : Nil
+        IyiHeap.write64(region &+ OFF_CURSOR, region &+ DATA)
+        if @@spare == 0
+          @@spare = region
+        else
+          unregister(region)
+          __iyi_munmap(region, IyiHeap.read64(region &+ OFF_MAP))
+        end
+      end
+
+      def self.register(region : UInt64) : Nil
+        IyiHeap.lock
+        @@registry = __iyi_mmap(SLOTS &* 8_u64).address if @@registry == 0
+        slot = 0_u64
+        while slot < SLOTS && IyiHeap.read64(@@registry &+ slot &* 8_u64) != 0
+          slot = slot &+ 1_u64
+        end
+        if slot == SLOTS
+          IyiHeap.unlock
+          __iyi_write(2, "iyi: too many regions\n".to_unsafe.as(Void*), 22_u64)
+          __iyi_exit(1)
+        end
+        IyiHeap.write64(@@registry &+ slot &* 8_u64, region)
+        @@registered = @@registered &+ 1_u64
+        IyiHeap.unlock
+      end
+
+      def self.unregister(region : UInt64) : Nil
+        IyiHeap.lock
+        slot = 0_u64
+        while slot < SLOTS
+          if IyiHeap.read64(@@registry &+ slot &* 8_u64) == region
+            IyiHeap.write64(@@registry &+ slot &* 8_u64, 0_u64)
+            @@registered = @@registered &- 1_u64
+          end
+          slot = slot &+ 1_u64
+        end
+        IyiHeap.unlock
+      end
+
+      # The region holding *address*, or 0: what `free` and `realloc` ask
+      # before treating a pointer as the arena's.
+      def self.owner(address : UInt64) : UInt64
+        return 0_u64 if @@registered == 0
+        slot = 0_u64
+        while slot < SLOTS
+          region = IyiHeap.read64(@@registry &+ slot &* 8_u64)
+          if region != 0 && address >= region &+ DATA && address < IyiHeap.read64(region &+ OFF_LIMIT)
+            return region
+          end
+          slot = slot &+ 1_u64
+        end
+        0_u64
+      end
+
+      @[AlwaysInline]
+      def self.take(region : UInt64, size : UInt64, clear : Bool, type_id : UInt64) : UInt64
+        cursor = IyiHeap.read64(region &+ OFF_CURSOR)
+        bytes = (size &+ 7_u64) & 0xFFFFFFFFFFFFFFF8_u64
+        object = cursor &+ UNDER
+        stop = object &+ bytes
+        overflow if stop > IyiHeap.read64(region &+ OFF_LIMIT)
+        IyiHeap.write64(region &+ OFF_CURSOR, stop)
+        IyiHeap.write64(cursor, size)
+        IyiHeap.write64(cursor &+ 8_u64, type_id.unsafe_shl(IyiHeap::TYPE_SHIFT))
+        IyiHeap.clear_block(object, bytes) if clear
+        object
+      end
+
+      @[NoInline]
+      def self.overflow : NoReturn
+        __iyi_write(2, "iyi: region full\n".to_unsafe.as(Void*), 17_u64)
+        __iyi_exit(1)
+      end
+
+      # The last block on its tape grows where it is, which is the common
+      # case of a string being written; anything else is a fresh copy at the
+      # tape's end.
+      def self.realloc(region : UInt64, pointer : UInt64, size : UInt64) : UInt64
+        old = IyiHeap.read64(pointer &- UNDER)
+        old_bytes = (old &+ 7_u64) & 0xFFFFFFFFFFFFFFF8_u64
+        bytes = (size &+ 7_u64) & 0xFFFFFFFFFFFFFFF8_u64
+        if pointer &+ old_bytes == IyiHeap.read64(region &+ OFF_CURSOR) && pointer &+ bytes <= IyiHeap.read64(region &+ OFF_LIMIT)
+          IyiHeap.write64(region &+ OFF_CURSOR, pointer &+ bytes)
+          IyiHeap.write64(pointer &- UNDER, size)
+          return pointer
+        end
+        return pointer if size <= old
+        fresh = take(region, size, false, 0_u64)
+        Pointer(UInt8).new(fresh).copy_from(Pointer(UInt8).new(pointer), old.to_i32)
+        fresh
+      end
+
+      # Every region's used words, as roots: a region object may hold the
+      # only reference to a collected one.
+      def self.each_root(visit : Proc(UInt64, Nil)) : Nil
+        return if @@registered == 0
+        slot = 0_u64
+        while slot < SLOTS
+          region = IyiHeap.read64(@@registry &+ slot &* 8_u64)
+          IyiRoots.scan_range(region &+ DATA, IyiHeap.read64(region &+ OFF_CURSOR), visit) if region != 0
+          slot = slot &+ 1_u64
+        end
+      end
+    end
+
     # Codegen emits calls to these by name for every allocation under the
     # __iyi_* ABI.
     fun __iyi_malloc64(size : UInt64) : Void*
@@ -4369,6 +4565,7 @@ require "./file"
         each_thread_root(visit)
         each_fiber_root(visit)
         each_global_root(visit)
+        IyiRegion.each_root(visit)
       end
 
       # The root set as a helper sees it at the mark's second stop: every
@@ -4379,6 +4576,7 @@ require "./file"
         each_thread_root(visit)
         each_fiber_root(visit)
         each_global_root(visit)
+        IyiRegion.each_root(visit)
       end
     end
 
@@ -9841,4 +10039,9 @@ end
     __iyi_flush_std
     0
   end
+{% end %}
+
+# PROTOTYPE (ris, step B): tape values, where the arena's region code is.
+{% if !flag?(:gc_none) && !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || flag?(:darwin) || flag?(:win32)) %}
+  require "./tape"
 {% end %}

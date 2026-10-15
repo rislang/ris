@@ -93,7 +93,7 @@ module Iyi::DefinitionTyping
           overloads.each do |with_metadata|
             a_def = with_metadata.def
             filename = a_def.location.try(&.filename).as?(String)
-            next unless filename && filename.ends_with?(".iyi") && files.includes?(filename)
+            next unless filename && filename.ris_source? && files.includes?(filename)
             synthesize(owner, a_def)
           end
         end

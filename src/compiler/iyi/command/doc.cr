@@ -36,7 +36,7 @@ class Iyi::Command
     when filename.ends_with?(".iyimod")
       doc_file! filename, ".iyimod"
       doc_artifact(filename)
-    when Iyi.path_key(filename).ends_with?(".iyi")
+    when Iyi.path_key(filename).ris_source?
       doc_file! filename, ".iyi module"
       doc_from_source(File.expand_path(filename))
     when filename == "prelude"

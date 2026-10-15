@@ -1,0 +1,23 @@
+module test/ris/refused/generic_array
+
+import std/int
+
+@[OnTape]
+struct Resp
+  getter id : Int64
+  getter user : TapeString
+
+  def initialize(@id : Int64, @user : TapeString)
+  end
+end
+
+def make : Resp
+  Resp.new(1_i64, TapeString.build { |s| s.push(97_u8) })
+end
+
+# Array is a heap class with a Pointer(T) field.
+Tape.scope do
+  all = [] of Resp
+  all << make
+  puts all.size
+end

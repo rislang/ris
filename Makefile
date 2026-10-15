@@ -323,6 +323,14 @@ crystal: $(O)/$(CRYSTAL_BIN) ## Build the compiler under Crystal's name (specs a
 .PHONY: iyi
 iyi: $(O)/iyi$(EXE) ## iyi: build `iyi` itself, runnable as ./bin/iyi [default, with crystal]
 
+# ris: the same compiler under the language's name. A link, not a second
+# build: the binary finds its prelude from where it really is, and names
+# itself `ris` whichever name ran it.
+.PHONY: ris
+ris: $(O)/iyi$(EXE) ## ris: build the compiler, runnable as ./bin/ris
+	ln -sf iyi$(EXE) $(O)/ris$(EXE)
+	@echo "built $(O)/ris — run it as ./bin/ris"
+
 .PHONY: crystal-front
 crystal-front: $(O)/crystal-front$(EXE) ## iyi: build the front end, which links no LLVM
 

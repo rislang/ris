@@ -113,7 +113,7 @@ module Iyi::Mod
           next if entry.starts_with?('.') || entry == "lib"
           next if File.file?(File.join(full, "iyi.mod"))
           found.concat(sources(full))
-        elsif entry.ends_with?(".iyi") && !entry.ends_with?("_test.iyi")
+        elsif entry.ris_source? && !entry.ends_with?("_test.iyi")
           found << full
         end
       end

@@ -1,0 +1,26 @@
+module test/ris/refused/struct_field
+
+import std/int
+
+@[OnTape]
+struct Resp
+  getter id : Int64
+  getter user : TapeString
+
+  def initialize(@id : Int64, @user : TapeString)
+  end
+end
+
+def make : Resp
+  Resp.new(1_i64, TapeString.build { |s| s.push(97_u8) })
+end
+
+# A struct that is not @[OnTape] may itself be stored anywhere.
+struct Holder
+  getter r : Resp
+
+  def initialize(@r : Resp)
+  end
+end
+
+Tape.scope { puts Holder.new(make).r.id }

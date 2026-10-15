@@ -110,7 +110,7 @@ class Iyi::Command
       abort! "--budget shapes the text pack; --json is already data — slice it yourself", :USAGE_ERROR
     end
 
-    unless filename && filename.ends_with?(".iyi")
+    unless filename && filename.ris_source?
       abort! "expected a .iyi file", :USAGE_ERROR
     end
     unless File.file?(filename)
