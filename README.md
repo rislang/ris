@@ -11,21 +11,28 @@ Source: [github.com/rislang/ris](https://github.com/rislang/ris).
 * **Go**: imports by URL (`github.com/…`), one `fmt`, fibers and channels.
 * **Goose**: tape memory, bump-allocated and freed at once, with no GC.
 
+## Install: paste this to your agent
+
+```text
+Learn and install the ris language (needs Crystal and LLVM). Clone
+https://github.com/rislang/ris, read its LEARN.md and what it lists, then
+in the clone run `make install_iyi release=1 PREFIX=$HOME/.local` and
+`ln -sf iyi ~/.local/bin/ris`. Register `ris mcp` as an MCP server (Claude
+Code: `claude mcp add ris -- ris mcp`). After each edit of a .ri file:
+`ris check -f json`, `ris fix`, `ris test`.
+```
+
 ## Why ris: tape memory, without the GC
 
-iyi and Crystal collect all garbage with a GC. ris adds **tape memory**,
-after Goose's data stacks: in a `Tape.scope`, tape types (`@[OnTape]`) are
-bump-allocated on a tape, and the whole tape is freed at the scope's `end`.
-No GC allocates or frees it. All other objects keep iyi's GC, so iyi and
-Crystal libraries work unchanged (the GC only scans the tape for pointers).
+In a `Tape.scope`, tape types (`@[OnTape]`) are bump-allocated on a tape,
+freed all at once at the scope's `end`. All other objects keep iyi's GC, so
+iyi and Crystal libraries work unchanged.
 
 ```crystal
 import github.com/domify/slim::{Slim}
-
 def page(name : String) : TapeString
   Slim.render("views/page.slim")      # the template, compiled to ris code
 end
-
 body = ""                             # an ordinary String: iyi's GC heap
 Tape.scope do                         # this request's memory starts here
   html = page("world")                # rendered onto the tape, no GC
@@ -34,15 +41,8 @@ end                                   # every tape byte freed at once, here
 puts body                             # => <h1>Hello world</h1>
 ```
 
-Freeing by hand stays safe: the compiler refuses a tape value that could
-outlive its tape (a heap field, `[] of TapeString`, a kept proc, an outer
-variable). Rules: [TAPE_DESIGN.md](TAPE_DESIGN.md).
-
-## Getting it
-
-`make ris`, then `./bin/ris run samples/ris/hello.ri`. Sources end in `.ri`;
-`ris init` writes `ris.mod`, read before an iyi package's `iyi.mod`. Needs
-Crystal and LLVM ([README.iyi.md](README.iyi.md)); `test/ris/check.sh` checks.
+The compiler refuses a tape value that could outlive its tape (a heap field,
+a kept proc, an outer variable). Rules: [TAPE_DESIGN.md](TAPE_DESIGN.md).
 
 ## How fast
 
