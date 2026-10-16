@@ -3541,9 +3541,12 @@ require "./file"
       OFF_LIMIT  = 8_u64
       OFF_PARENT = 16_u64
       OFF_MAP    = 24_u64
+      # Every live mapping is on one list, for the collector to scan: the
+      # links live in the mapping's own header, so the list has no bound.
+      OFF_NEXT   = 32_u64
+      OFF_PREV   = 40_u64
       DATA       = 64_u64
       UNDER      = 16_u64
-      SLOTS      = 256_u64
       CAPACITY   = 67108864_u64
       # A mapping's length is a whole number of these: 64 KiB covers the
       # 4 KiB pages of x86_64, the 16 KiB of Apple's and Asahi's arm64, the
@@ -3553,7 +3556,7 @@ require "./file"
 
       @[ThreadLocal]
       @@spare : UInt64 = 0_u64
-      @@registry : UInt64 = 0_u64
+      @@first_region : UInt64 = 0_u64
       @@registered : UInt64 = 0_u64
 
       # The running fiber's tape, or 0: `IyiScheduler.switch_to` swaps it
@@ -3662,33 +3665,31 @@ require "./file"
         end
       end
 
+      # A fixed table of 256 regions ended the program at the 257th tape
+      # alive at once - a server with that many requests in flight. The list
+      # runs through the mappings' headers instead.
       def self.register(region : UInt64) : Nil
         IyiHeap.lock
-        @@registry = __iyi_mmap(SLOTS &* 8_u64).address if @@registry == 0
-        slot = 0_u64
-        while slot < SLOTS && IyiHeap.read64(@@registry &+ slot &* 8_u64) != 0
-          slot = slot &+ 1_u64
-        end
-        if slot == SLOTS
-          IyiHeap.unlock
-          __iyi_write(2, "iyi: too many regions\n".to_unsafe.as(Void*), 22_u64)
-          __iyi_exit(1)
-        end
-        IyiHeap.write64(@@registry &+ slot &* 8_u64, region)
+        first = @@first_region
+        IyiHeap.write64(region &+ OFF_NEXT, first)
+        IyiHeap.write64(region &+ OFF_PREV, 0_u64)
+        IyiHeap.write64(first &+ OFF_PREV, region) if first != 0
+        @@first_region = region
         @@registered = @@registered &+ 1_u64
         IyiHeap.unlock
       end
 
       def self.unregister(region : UInt64) : Nil
         IyiHeap.lock
-        slot = 0_u64
-        while slot < SLOTS
-          if IyiHeap.read64(@@registry &+ slot &* 8_u64) == region
-            IyiHeap.write64(@@registry &+ slot &* 8_u64, 0_u64)
-            @@registered = @@registered &- 1_u64
-          end
-          slot = slot &+ 1_u64
+        following = IyiHeap.read64(region &+ OFF_NEXT)
+        previous = IyiHeap.read64(region &+ OFF_PREV)
+        if previous != 0
+          IyiHeap.write64(previous &+ OFF_NEXT, following)
+        else
+          @@first_region = following
         end
+        IyiHeap.write64(following &+ OFF_PREV, previous) if following != 0
+        @@registered = @@registered &- 1_u64
         IyiHeap.unlock
       end
 
@@ -3752,12 +3753,10 @@ require "./file"
       # Every region's used words, as roots: a region object may hold the
       # only reference to a collected one.
       def self.each_root(visit : Proc(UInt64, Nil)) : Nil
-        return if @@registered == 0
-        slot = 0_u64
-        while slot < SLOTS
-          region = IyiHeap.read64(@@registry &+ slot &* 8_u64)
-          IyiRoots.scan_range(region &+ DATA, IyiHeap.read64(region &+ OFF_CURSOR), visit) if region != 0
-          slot = slot &+ 1_u64
+        region = @@first_region
+        while region != 0
+          IyiRoots.scan_range(region &+ DATA, IyiHeap.read64(region &+ OFF_CURSOR), visit)
+          region = IyiHeap.read64(region &+ OFF_NEXT)
         end
       end
     end

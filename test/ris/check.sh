@@ -75,6 +75,8 @@ if [ "$out" = $'2\na' ]; then echo "runs     allowed"; else echo "FAILED   allow
 
 out=$("$RIS" run test/ris/fibers/interleave.ri 2>&1)
 if [ "$out" = $'fiber A wrong: 0\nfiber B wrong: 0' ]; then echo "runs     fibers/interleave"; else echo "FAILED   fibers/interleave: $out"; status=1; fi
+out=$("$RIS" run test/ris/fibers/many.ri 2>&1)
+if [ "$out" = "1000 tapes at once, sum 499500" ]; then echo "runs     fibers/many"; else echo "FAILED   fibers/many: $out"; status=1; fi
 
 out=$("$RIS" run test/ris/grow.ri 2>&1)
 if [ "$out" = $'round 1: 100 MiB intact, before 499500, after 7\nround 2: 100 MiB intact, before 999000, after 14' ]; then echo "runs     grow"; else echo "FAILED   grow: $out"; status=1; fi

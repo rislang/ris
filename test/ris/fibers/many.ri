@@ -1,0 +1,39 @@
+# More tapes alive at once than the 256 a fixed table held: each fiber
+# keeps its scope open while it sleeps, and a collection scans them all.
+module test/ris/fibers/many
+import std/int
+import std/gc::{GC}
+
+def hold(i : Int32, done : Channel(Int64)) : Nil
+  total = 0_i64
+  Tape.scope do
+    values = TapeArray(Int64).new(4)
+    values.push(i.to_i64)
+    sleep(200)
+    values.each { |v| total = total + v }
+  end
+  done.send(total)
+end
+
+def start(g : IyiGroup, i : Int32, done : Channel(Int64)) : Nil
+  g.spawn do
+    hold(i, done)
+    0
+  end
+end
+
+N = 1000
+done = Channel(Int64).new(N)
+group do |g|
+  i = 0
+  while i < N
+    start(g, i, done)
+    i = i + 1
+  end
+  sleep(50)
+  GC.collect
+  sum = 0_i64
+  N.times { sum = sum + done.receive.or_panic }
+  puts "#{N} tapes at once, sum #{sum}"
+  0
+end
