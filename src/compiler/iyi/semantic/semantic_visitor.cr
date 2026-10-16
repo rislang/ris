@@ -422,11 +422,13 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
   private def resolve_package(path : String) : {String, String, String, String}?
     if (current = @iyi_package_stack.last?) && !path.includes?('.')
       prefix, checkout = current
-      candidate = File.join(checkout, "#{path}.iyi")
-      return {candidate, prefix, path, checkout} if File.file?(candidate)
+      if candidate = package_module_file(checkout, path)
+        return {candidate, prefix, path, checkout}
+      end
       return nil if iyi_std_module?(path)
       raise_at_import "package '#{prefix}' has no module '#{path}': " \
-                      "`#{path}.iyi` is not in its checkout at #{checkout}"
+                      "neither `#{path}.ri` nor `#{path}.iyi` is in its " \
+                      "checkout at #{checkout}"
     end
 
     @program.iyi_mod_table.each do |(prefix, checkout)|
@@ -440,10 +442,22 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
         else
           next
         end
-      candidate = File.join(checkout, "#{inner}.iyi")
-      return {candidate, prefix, inner, checkout} if File.file?(candidate)
+      if candidate = package_module_file(checkout, inner)
+        return {candidate, prefix, inner, checkout}
+      end
       raise_at_import "requirement '#{prefix}' has no module '#{inner}': " \
-                      "`#{inner}.iyi` is not in its checkout at #{checkout}"
+                      "neither `#{inner}.ri` nor `#{inner}.iyi` is in its " \
+                      "checkout at #{checkout}"
+    end
+    nil
+  end
+
+  # ris: a package's module *inner* in *checkout*, its `.ri` file before
+  # its `.iyi` one, as `resolve_import` asks a program's roots.
+  private def package_module_file(checkout : String, inner : String) : String?
+    {".ri", ".iyi"}.each do |ext|
+      candidate = File.join(checkout, "#{inner}#{ext}")
+      return candidate if File.file?(candidate)
     end
     nil
   end
