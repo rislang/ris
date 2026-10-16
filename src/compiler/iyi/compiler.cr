@@ -3869,9 +3869,14 @@ module Iyi
       end
     end
 
+    # A unit is optimized in a context of its own, read back from its
+    # bitcode, as the threaded path does. The module codegen built in place
+    # passes LLVM's verifier and prints the same, yet LLVM 23 optimized it
+    # wrong where the same bitcode in a fresh context is right: `"9".to_i?`
+    # answered nil, and a loop exited early (std/http, std/time exercises).
     private def sequential_codegen(units)
       units.each do |unit|
-        unit.compile
+        unit.compile(isolate_context: true)
         @progress_tracker.stage_progress += 1
       end
     end
@@ -4048,6 +4053,22 @@ module Iyi
         optimization_mode = @optimization_mode
         optimization_mode = OptimizationMode::O2 if optimization_mode.os? || optimization_mode.oz?
 
+        # LLVM's own options for this run, as `opt` takes them: what bisects
+        # a miscompile to the pass that makes it (`-opt-bisect-limit=N`).
+        if llvm_args = ENV["IYI_LLVM_ARGS"]?
+          LLVM.parse_command_line_options(["iyi"] + llvm_args.split)
+        end
+        # LLVM's verifier on the module as the pipeline receives it.
+        if check_path = ENV["IYI_VERIFY"]?
+          message = Pointer(UInt8).null
+          broken = LibLLVM.verify_module(llvm_mod, LLVM::VerifierFailureAction::ReturnStatusAction, pointerof(message))
+          File.write(check_path, "broken=#{broken}\n#{message ? String.new(message) : ""}")
+        end
+        # The module as the pipeline receives it, for `opt` to run on.
+        if dump = ENV["IYI_DUMP_PREOPT"]?
+          llvm_mod.write_bitcode_to_file(dump)
+          llvm_mod.print_to_file("#{dump}.ll")
+        end
         LLVM::PassBuilderOptions.new do |options|
           LLVM.run_passes(llvm_mod, "default<#{optimization_mode}>", target_machine, options)
         end
