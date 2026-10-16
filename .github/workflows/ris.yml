@@ -1,0 +1,157 @@
+# ris: the release tarballs, built with a static LLVM so they need no
+# Crystal and no LLVM where they land. iyi.yml stays iyi's, so iyi merges.
+#
+# Every run builds and proves the tarballs; a `ris-v*` tag also publishes
+# them, with SHA256SUMS, as the release `install_ris.sh` installs from.
+name: ris
+
+on:
+  push:
+    tags: ["ris-v*"]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    container:
+      image: crystallang/crystal:1.21.0-build
+    name: "The ris tarball, linux x86-64"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Restore the static LLVM
+        id: llvm-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/llvm-static
+          key: llvm-static-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-static-llvm.sh') }}
+      - name: Build the static LLVM (cache miss)
+        if: steps.llvm-cache.outputs.cache-hit != 'true'
+        run: |
+          apt-get update -qq && apt-get install -y -qq cmake curl xz-utils > /dev/null
+          bash scripts/build-static-llvm.sh /tmp/llvm-static
+
+      - name: Build ris and package it
+        run: make ris-tarball LLVM_CONFIG=/tmp/llvm-static/bin/llvm-config
+
+      - name: Stage the tarball
+        run: mkdir -p dist && cp .build/ris-*-linux-*.tar.gz dist/
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ris-linux-x86_64
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  clean-room:
+    needs: linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    name: "install_ris.sh, on a machine with only gcc"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v5
+        with:
+          name: ris-linux-x86_64
+          path: dist/
+
+      - name: The tarball names nothing it does not carry
+        run: |
+          mkdir -p room && tar -xzf dist/*.tar.gz -C room
+          bash scripts/bundle-runtime-libs.sh room --verify-only
+
+      - name: Install it in a bare image, then hello world
+        run: |
+          (cd dist && sha256sum *.tar.gz > SHA256SUMS)
+          docker run --rm -v "$PWD:/src" ubuntu:26.04 sh -c '
+            set -e
+            apt-get update -qq
+            apt-get install -y -qq gcc curl ca-certificates > /dev/null
+            RIS_RELEASE_URL=file:///src/dist sh /src/install_ris.sh
+            export PATH="$HOME/.local/bin:$PATH"
+            ris version
+            ris init hello "$HOME/hello"
+            cd "$HOME/hello"
+            ris run hello.ri
+            ris run "$HOME/.local/lib/ris/share/ris/samples/hello.ri"
+          '
+
+  darwin:
+    runs-on: macos-14
+    timeout-minutes: 180
+    name: "The ris tarball, darwin arm64"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install the bootstrap toolchain
+        run: |
+          brew install crystal coreutils pkgconf
+          echo "$(brew --prefix)/opt/coreutils/libexec/gnubin" >> "$GITHUB_PATH"
+
+      - name: Restore the static LLVM
+        id: llvm-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/llvm-static
+          key: llvm-static-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-static-llvm.sh') }}
+      - name: Build the static LLVM (cache miss)
+        if: steps.llvm-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build-static-llvm.sh "$HOME/llvm-static"
+
+      - name: Build ris and package it
+        run: make ris-tarball LLVM_CONFIG="$HOME/llvm-static/bin/llvm-config"
+
+      - name: install_ris.sh, then hello world
+        run: |
+          mkdir -p dist && cp .build/ris-*-darwin-*.tar.gz dist/
+          (cd dist && shasum -a 256 *.tar.gz > SHA256SUMS)
+          RIS_RELEASE_URL="file://$PWD/dist" RIS_PREFIX="$RUNNER_TEMP/r" \
+            sh install_ris.sh
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/r/bin/ris" init hello "$RUNNER_TEMP/hello"
+          cd "$RUNNER_TEMP/hello" && "$RUNNER_TEMP/r/bin/ris" run hello.ri
+          rm dist/SHA256SUMS
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ris-darwin-arm64
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/ris-v')
+    needs: [clean-room, darwin]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v5
+        with:
+          name: ris-linux-x86_64
+          path: dist/
+      - uses: actions/download-artifact@v5
+        with:
+          name: ris-darwin-arm64
+          path: dist/
+      - name: Create the release from the proven tarballs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          (cd dist && sha256sum *.tar.gz > SHA256SUMS && cat SHA256SUMS)
+          gh release create "$tag" --title "ris ${tag#ris-v}" --latest \
+            --notes "ris ${tag#ris-v}: install with install_ris.sh (README.md)." \
+            dist/*.tar.gz dist/SHA256SUMS

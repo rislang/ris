@@ -539,6 +539,24 @@ iyi-tarball: $(O)/iyi$(EXE) $(O)/$(IYI_DAEMON_BIN) check_iyi_is_release
 	tar -czf "$(O)/$(IYI_PACKAGE).tar.gz" -C "$(O)/iyi-package" .
 	@echo "wrote $(O)/$(IYI_PACKAGE).tar.gz"
 
+# ris: iyi's package, with `bin/ris` and ris's documents beside it. Unpacked
+# into a directory of its own (`install_ris.sh`), so it carries no manifest.
+RIS_VERSION := $(shell sed -n 's/^ *RIS_VERSION = "\(.*\)"/\1/p' src/compiler/iyi.cr)
+RIS_PACKAGE := ris-$(RIS_VERSION)-$(shell uname -s | tr A-Z a-z)-$(shell uname -m)
+
+.PHONY: ris-tarball
+ris-tarball: ## ris: build a relocatable tarball at $(O)
+ris-tarball: iyi-tarball
+	rm -rf "$(O)/ris-package"
+	cp -R -p "$(O)/iyi-package" "$(O)/ris-package"
+	ln -sf iyi$(EXE) "$(O)/ris-package/bin/ris$(EXE)"
+	$(INSTALL) -d -m 0755 "$(O)/ris-package/share/ris"
+	$(INSTALL) -m 644 README.md LEARN.md TAPE_DESIGN.md LICENSE NOTICE.md \
+	  "$(O)/ris-package/share/ris/"
+	cp -R -p samples/ris "$(O)/ris-package/share/ris/samples"
+	tar -czf "$(O)/$(RIS_PACKAGE).tar.gz" -C "$(O)/ris-package" .
+	@echo "wrote $(O)/$(RIS_PACKAGE).tar.gz"
+
 .PHONY: install_compiler
 install_compiler: $(O)/$(CRYSTAL_BIN)
 	$(INSTALL) -d -m 0755 "$(DESTDIR)$(BINDIR)/"

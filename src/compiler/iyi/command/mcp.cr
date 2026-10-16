@@ -102,8 +102,8 @@ class Iyi::Command
           end
           json.field "serverInfo" do
             json.object do
-              json.field "name", "iyi"
-              json.field "version", Iyi::Config.iyi_version
+              json.field "name", "ris"
+              json.field "version", Iyi::RIS_VERSION
             end
           end
         end
@@ -150,10 +150,10 @@ class Iyi::Command
     [
       {
         "name": "check",
-        "description": "Type-check an iyi file without producing anything. Returns [] when clean, else the compiler's errors as data: file, line, column, size, message, the SPEC sections cited, and suggested_edit (exact replacement span) when the compiler knows the fix.",
+        "description": "Type-check a ris file without producing anything. Returns [] when clean, else the compiler's errors as data: file, line, column, size, message, the SPEC sections cited, and suggested_edit (exact replacement span) when the compiler knows the fix.",
         "inputSchema": {
           "type": "object",
-          "properties": {"file": {"type": "string", "description": "path to the .iyi file"}},
+          "properties": {"file": {"type": "string", "description": "path to the .ri file"}},
           "required": ["file"]
         }
       },
@@ -162,22 +162,22 @@ class Iyi::Command
         "description": "Apply the compiler's own did-you-mean edits to a file, recompiling after each, until clean or an error carries no edit. Returns the edits applied and whether the file ended clean; when the remaining error lives in another file of the program, `cause` names that file and position, and that is the file to call this on next.",
         "inputSchema": {
           "type": "object",
-          "properties": {"file": {"type": "string", "description": "path to the .iyi file"}},
+          "properties": {"file": {"type": "string", "description": "path to the .ri file"}},
           "required": ["file"]
         }
       },
       {
         "name": "context",
-        "description": "The grounding pack for an iyi file: every import's exported surface as data (signatures, docs, interface_hash), read from source without compiling the file itself. What an agent should read before editing.",
+        "description": "The grounding pack for a ris file: every import's exported surface as data (signatures, docs, interface_hash), read from source without compiling the file itself. What an agent should read before editing.",
         "inputSchema": {
           "type": "object",
-          "properties": {"file": {"type": "string", "description": "path to the .iyi file"}},
+          "properties": {"file": {"type": "string", "description": "path to the .ri file"}},
           "required": ["file"]
         }
       },
       {
         "name": "test",
-        "description": "Run *_test.iyi programs: exit 0 is a pass. Optionally pass affected=[changed files] to run only the tests whose transitive import closure reaches a change - the selection is exact, computed by parsing.",
+        "description": "Run *_test.ri programs: exit 0 is a pass. Optionally pass affected=[changed files] to run only the tests whose transitive import closure reaches a change - the selection is exact, computed by parsing.",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -188,10 +188,10 @@ class Iyi::Command
       },
       {
         "name": "doc",
-        "description": "What can be called: a module's exported surface (functions, types, methods, impls, with their doc comments, no bodies) from a .iyi file or a .iyimod artifact, or a type of the prelude by name - `String`, `Array`, `Hash`, `Float64`, `Program` - the same way. Text.",
+        "description": "What can be called: a module's exported surface (functions, types, methods, impls, with their doc comments, no bodies) from a .ri file or a .iyimod artifact, or a type of the prelude by name - `String`, `Array`, `Hash`, `Float64`, `Program` - the same way. Text.",
         "inputSchema": {
           "type": "object",
-          "properties": {"target": {"type": "string", "description": "path to a .iyi module or .iyimod artifact, a prelude type's name, or `prelude` for the list of them"}},
+          "properties": {"target": {"type": "string", "description": "path to a .ri module or .iyimod artifact, a prelude type's name, or `prelude` for the list of them"}},
           "required": ["target"]
         }
       }
@@ -231,7 +231,7 @@ class Iyi::Command
         built
       when "doc"
         target = arguments.try(&.dig?("target")).try(&.as_s?)
-        return mcp_tool_error(id, "doc needs a target: a .iyi module, a .iyimod artifact, or a prelude type's name") unless target
+        return mcp_tool_error(id, "doc needs a target: a .ri module, a .iyimod artifact, or a prelude type's name") unless target
         ["doc", target]
       else
         # With the catalogue, because a caller that guessed a name wrong

@@ -11,16 +11,16 @@ Source: [github.com/rislang/ris](https://github.com/rislang/ris).
 * **Go**: imports by URL (`github.com/…`), one `fmt`, fibers and channels.
 * **Goose**: tape memory, bump-allocated and freed at once, with no GC.
 
-## Install: paste this to a coding agent on your machine
-Claude Code, Codex, Cursor or any agent that runs commands on your machine.
+## Install: paste to an agent on your machine (Claude Code, Codex, ...)
 ```text
-Learn and install ris (needs Crystal and LLVM). Clone
-https://github.com/rislang/ris to ~/src/ris; read its LEARN.md and what it
-lists. There run `make install_ris release=1 PREFIX=$HOME/.local`, put
-~/.local/bin on PATH, and register `ris mcp` as an MCP server (Claude Code:
-`claude mcp add ris -- ris mcp`). Then `ris init hello ~/src/hello`, make
-it print "Hello, world!", run it and show me. End with exactly: "Congrats!
-Next, ask me to build your personal blog in ris ;-)" Don't start the blog.
+Learn and install ris. Clone https://github.com/rislang/ris to ~/src/ris and
+read its LEARN.md first. Run `sh ~/src/ris/install_ris.sh` (prebuilt; needs a C
+compiler); if it has none for this machine, in the clone run `make install_ris
+release=1 PREFIX=$HOME/.local` (needs Crystal and LLVM; 20-40 min, so a long
+timeout). Put ~/.local/bin on PATH; register `ris mcp` as an MCP server (Claude
+Code: `claude mcp add ris -- ris mcp`). Then `ris init hello ~/src/hello`, make
+it print "Hello, world!", run it, show me. End with exactly: "Congrats! Next,
+ask me to build your personal blog in ris ;-)" Don't start the blog.
 ```
 
 ## Why ris: tape memory, without the GC

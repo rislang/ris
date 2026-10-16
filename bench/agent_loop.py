@@ -848,7 +848,7 @@ def main():
 
     reply = rpc("initialize", {"protocolVersion": "2025-06-18"}, 1)
     step("mcp initialize names the server",
-         reply["result"]["serverInfo"]["name"] == "iyi", "")
+         reply["result"]["serverInfo"]["name"] == "ris", "")
     rpc("notifications/initialized")
     tools = [t["name"] for t in rpc("tools/list", None, 2)["result"]["tools"]]
     step("mcp lists the loop's tools",
