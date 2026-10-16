@@ -452,6 +452,22 @@ install_iyi: $(O)/iyi$(EXE) $(O)/$(IYI_DAEMON_BIN)
 	$(INSTALL) -m 644 LICENSE "$(DESTDIR)$(DATADIR)/licenses/iyi/LICENSE"
 	$(INSTALL) -m 644 NOTICE.md "$(DESTDIR)$(DATADIR)/licenses/iyi/NOTICE.md"
 
+# ris: iyi's install in a tree of its own, and `ris` on the PATH linked into
+# it. The prelude's place is built into the binary as `$ORIGIN/../share/iyi`,
+# so sharing PREFIX with an installed iyi would replace that iyi's files.
+RIS_HOME ?= $(PREFIX)/lib/ris
+
+.PHONY: install_ris
+install_ris: ## ris: install ris in RIS_HOME, linked as BINDIR/ris
+	$(MAKE) install_iyi PREFIX="$(RIS_HOME)" BINDIR="$(RIS_HOME)/bin" DATADIR="$(RIS_HOME)/share"
+	$(INSTALL) -d -m 0755 "$(DESTDIR)$(BINDIR)/"
+	ln -sf "$(RIS_HOME)/bin/iyi$(EXE)" "$(DESTDIR)$(BINDIR)/ris$(EXE)"
+
+.PHONY: uninstall_ris
+uninstall_ris: ## ris: remove what install_ris installed
+	rm -f "$(DESTDIR)$(BINDIR)/ris$(EXE)"
+	rm -rf "$(DESTDIR)$(RIS_HOME)"
+
 .PHONY: uninstall_iyi
 uninstall_iyi: ## iyi: remove what install_iyi installed
 	rm -f "$(DESTDIR)$(BINDIR)/iyi$(EXE)"

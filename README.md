@@ -14,12 +14,12 @@ Source: [github.com/rislang/ris](https://github.com/rislang/ris).
 ## Install: paste this to your agent
 
 ```text
-Learn and install the ris language (needs Crystal and LLVM). Clone
-https://github.com/rislang/ris, read its LEARN.md and what it lists, then
-in the clone run `make install_iyi release=1 PREFIX=$HOME/.local` and
-`ln -sf iyi ~/.local/bin/ris`. Register `ris mcp` as an MCP server (Claude
-Code: `claude mcp add ris -- ris mcp`). After each edit of a .ri file:
-`ris check -f json`, `ris fix`, `ris test`.
+Learn and install ris (needs Crystal and LLVM). Clone
+https://github.com/rislang/ris to ~/src/ris and read its LEARN.md and what
+it lists. There run `make install_ris release=1 PREFIX=$HOME/.local`; put
+~/.local/bin on PATH. Register `ris mcp` as an MCP server (Claude Code:
+`claude mcp add ris -- ris mcp`). Last, build me a first app: `ris init
+hello ~/src/hello`, make it print "Hello, world!", run it there, show me.
 ```
 
 ## Why ris: tape memory, without the GC
