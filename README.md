@@ -12,15 +12,15 @@ Source: [github.com/rislang/ris](https://github.com/rislang/ris).
 * **Goose**: tape memory, bump-allocated and freed at once, with no GC.
 
 ## Install: paste this to a coding agent on your machine
-
 Claude Code, Codex, Cursor or any agent that runs commands on your machine.
 ```text
 Learn and install ris (needs Crystal and LLVM). Clone
-https://github.com/rislang/ris to ~/src/ris and read its LEARN.md and what
-it lists. There run `make install_ris release=1 PREFIX=$HOME/.local`; put
-~/.local/bin on PATH. Register `ris mcp` as an MCP server (Claude Code:
-`claude mcp add ris -- ris mcp`). Last, build me a first app: `ris init
-hello ~/src/hello`, make it print "Hello, world!", run it there, show me.
+https://github.com/rislang/ris to ~/src/ris; read its LEARN.md and what it
+lists. There run `make install_ris release=1 PREFIX=$HOME/.local`, put
+~/.local/bin on PATH, and register `ris mcp` as an MCP server (Claude Code:
+`claude mcp add ris -- ris mcp`). Then `ris init hello ~/src/hello`, make
+it print "Hello, world!", run it and show me. End with exactly: "Congrats!
+Next, ask me to build your personal blog in ris ;-)" Don't start the blog.
 ```
 
 ## Why ris: tape memory, without the GC
