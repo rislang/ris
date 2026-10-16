@@ -491,7 +491,11 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     return written if expanded == written
     if @iyi_package_stack.empty? && (local = resolve_import(written))
       name = written.partition('/')[0]
-      node.raise "`#{written}` names two modules: `#{name}` is iyi.mod's short name for " \
+      # ris: the manifest the short name is in, `ris.mod` or an `iyi.mod`.
+      root = File.dirname(local)
+      written.count('/').times { root = File.dirname(root) }
+      manifest = File.basename(Mod::Installer.manifest_in(root))
+      node.raise "`#{written}` names two modules: `#{name}` is #{manifest}'s short name for " \
                  "#{expanded.rchop("/#{written.partition('/')[2]}")}, and #{Iyi.relative_filename(local)} " \
                  "is this project's own. Rename the short name, or the directory"
     end

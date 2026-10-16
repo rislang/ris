@@ -105,11 +105,11 @@ publish() { # publish <repo> <tag>
 
 # ── The fixture ─────────────────────────────────────────────────────────
 mkrepo work/liba
-printf 'module example.test/user/liba\n' > work/liba/iyi.mod
+printf 'module example.test/user/liba\n' > work/liba/ris.mod
 printf 'module liba\n\npub def greeting : String\n  "liba 1.0.0"\nend\n' > work/liba/liba.iyi
 git -C work/liba add -A && git -C work/liba commit -qm one
 mkrepo work/libb
-printf 'module example.test/user/libb\nrequire example.test/user/liba v1.1.0\n' > work/libb/iyi.mod
+printf 'module example.test/user/libb\nrequire example.test/user/liba v1.1.0\n' > work/libb/ris.mod
 printf 'module libb\n\npub def number : Int32\n  7\nend\n' > work/libb/libb.iyi
 git -C work/libb add -A && git -C work/libb commit -qm one
 mkdir -p mirror/example.test/user
@@ -124,17 +124,17 @@ publish libb v1.0.0
 
 "$IYI" init example.test/user/app app > init.log 2>&1 || { echo "init failed:"; cat init.log; exit 1; }
 cd app || exit 1
-cp iyi.mod iyi.mod.init
+cp ris.mod ris.mod.init
 printf 'import example.test/user/liba::{greeting}\nputs greeting\n' > use.iyi
 
 # requires <path>: the version iyi.mod requires it at, or nothing.
-requires() { awk -v p="$1" '$1 == "require" && $2 == p { print $3 }' iyi.mod; }
+requires() { awk -v p="$1" '$1 == "require" && $2 == p { print $3 }' ris.mod; }
 # refused <label> <phrase> <args...>: a refusal that names <phrase> and
 # leaves iyi.mod exactly as it was.
 refused() {
   local label="$1" phrase="$2"
   shift 2
-  cp iyi.mod iyi.mod.before
+  cp ris.mod ris.mod.before
   "$IYI" get "$@" > refused.log 2>&1
   local code=$?
   if [ "$code" -eq 0 ]; then
@@ -142,34 +142,34 @@ refused() {
   elif ! grep -qF -- "$phrase" refused.log; then
     fail "$label: refused without '$phrase':"
     sed 's/^/    /' refused.log
-  elif ! cmp -s iyi.mod iyi.mod.before; then
-    fail "$label: refused, and iyi.mod changed anyway"
+  elif ! cmp -s ris.mod ris.mod.before; then
+    fail "$label: refused, and ris.mod changed anyway"
   else
-    echo "  $label: refused, iyi.mod untouched"
+    echo "  $label: refused, ris.mod untouched"
   fi
 }
 
 step "a path alone is its latest release, not a later pre-release"
 "$IYI" get example.test/user/liba > get1.log 2>&1 || { fail "get failed"; cat get1.log; }
-[ "$(requires example.test/user/liba)" = "v1.1.0" ] || fail "iyi.mod requires liba at '$(requires example.test/user/liba)', not v1.1.0"
+[ "$(requires example.test/user/liba)" = "v1.1.0" ] || fail "ris.mod requires liba at '$(requires example.test/user/liba)', not v1.1.0"
 grep -q "added example.test/user/liba v1.1.0" get1.log || fail "the addition was not said: $(cat get1.log)"
-grep -q "example.test/user/liba v1.1.0 s1:" iyi.sum 2>/dev/null || fail "iyi.sum has no entry for liba v1.1.0"
+grep -q "example.test/user/liba v1.1.0 s1:" ris.sum 2>/dev/null || fail "ris.sum has no entry for liba v1.1.0"
 # Everything init wrote is still there, byte for byte, with the one line
 # after it. Bytes rather than lines: init ends its manifest without a
 # newline, which `wc -l` counts one short.
-head -c "$(wc -c < iyi.mod.init | tr -d ' ')" iyi.mod | cmp -s - iyi.mod.init || fail "the manifest's own lines moved"
-[ "$status" -eq 0 ] && echo "  liba v1.1.0 required, the manifest's comments kept, iyi.sum written"
+head -c "$(wc -c < ris.mod.init | tr -d ' ')" ris.mod | cmp -s - ris.mod.init || fail "the manifest's own lines moved"
+[ "$status" -eq 0 ] && echo "  liba v1.1.0 required, the manifest's comments kept, ris.sum written"
 
 step "a version moves the one line, down as well as up"
 "$IYI" get example.test/user/liba@v1.0.0 > get2.log 2>&1 || { fail "get @v1.0.0 failed"; cat get2.log; }
-[ "$(grep -c 'example.test/user/liba' iyi.mod | tr -d ' ')" = "1" ] || fail "liba has more than one line now"
+[ "$(grep -c 'example.test/user/liba' ris.mod | tr -d ' ')" = "1" ] || fail "liba has more than one line now"
 [ "$(requires example.test/user/liba)" = "v1.0.0" ] || fail "liba is at '$(requires example.test/user/liba)'"
 grep -q "downgraded example.test/user/liba v1.1.0 -> v1.0.0" get2.log || fail "the downgrade was not said: $(cat get2.log)"
 
 step "a module another one outbids is named"
 "$IYI" get example.test/user/libb > get3.log 2>&1 || { fail "get libb failed"; cat get3.log; }
 [ "$(requires example.test/user/libb)" = "v1.0.0" ] || fail "libb is at '$(requires example.test/user/libb)'"
-grep -q "example.test/user/liba builds at v1.1.0: iyi.mod names v1.0.0" get3.log || fail "the raise was not said: $(cat get3.log)"
+grep -q "example.test/user/liba builds at v1.1.0: ris.mod names v1.0.0" get3.log || fail "the raise was not said: $(cat get3.log)"
 "$IYI" run use.iyi > run1.log 2>&1 || { fail "the program did not build"; cat run1.log; }
 grep -q "liba 1.1.0" run1.log || fail "the program ran liba '$(cat run1.log)', not what MVS selected"
 
@@ -189,11 +189,11 @@ case "$(uname -s)" in
     cache_spelled() { # cache_spelled <how> <IYI_CACHE_DIR>
       (cd "$checkout" && IYI_CACHE_DIR="$2" "$IYI" check libb.iyi) > cachecase.log 2>&1 ||
         fail "check in the cached libb, IYI_CACHE_DIR in $1, failed: $(cat cachecase.log)"
-      if [ -e "$checkout/iyi.sum" ]; then
-        fail "a check with the cache spelled in $1 wrote iyi.sum into the cached libb"
-        rm -f "$checkout/iyi.sum"
+      if [ -e "$checkout/ris.sum" ]; then
+        fail "a check with the cache spelled in $1 wrote ris.sum into the cached libb"
+        rm -f "$checkout/ris.sum"
       else
-        echo "  a check in the cached libb, IYI_CACHE_DIR in $1: no iyi.sum written there"
+        echo "  a check in the cached libb, IYI_CACHE_DIR in $1: no ris.sum written there"
       fi
     }
     cache_spelled "upper case" "$(echo "$IYI_CACHE_DIR" | tr '[:lower:]' '[:upper:]')"
@@ -211,13 +211,13 @@ step "-u finds a tag published since, and the program builds against it"
 # and nothing is written until the same `get` runs without it.
 sed -i.bak 's/1.2.0-rc.1/1.3.0/' "$WORK/work/liba/liba.iyi" && rm -f "$WORK/work/liba/liba.iyi.bak"
 git -C "$WORK/work/liba" commit -qam four && (cd "$WORK" && publish liba v1.3.0)
-cp iyi.mod iyi.mod.before
+cp ris.mod ris.mod.before
 "$IYI" get -u --check > check.log 2>&1
 check_code=$?
 [ "$check_code" -eq 1 ] || fail "get -u --check answered $check_code with liba behind"
 grep -q "would upgrade example.test/user/liba v1.0.0 -> v1.3.0" check.log || fail "--check did not list liba: $(cat check.log)"
 grep -q "example.test/user/libb is at v1.0.0, its latest" check.log || fail "--check did not say libb is current: $(cat check.log)"
-cmp -s iyi.mod iyi.mod.before || fail "get --check wrote iyi.mod"
+cmp -s ris.mod ris.mod.before || fail "get --check wrote ris.mod"
 "$IYI" get -u > get4.log 2>&1 || { fail "get -u failed"; cat get4.log; }
 "$IYI" get -u --check > check2.log 2>&1 || fail "get -u --check found something behind after -u: $(cat check2.log)"
 [ "$(requires example.test/user/liba)" = "v1.3.0" ] || fail "-u left liba at '$(requires example.test/user/liba)'"
@@ -243,10 +243,10 @@ step "a manifest saved with a byte order mark is read, and keeps it"
 # As PowerShell 5.1's `Out-File -Encoding utf8` writes one. It was refused
 # as "`\uFEFFmodule` is not a directive", and every verb with it.
 mkdir -p "$WORK/bom" && cd "$WORK/bom" || exit 1
-printf '\xef\xbb\xbfmodule example.test/user/bom\n' > iyi.mod
+printf '\xef\xbb\xbfmodule example.test/user/bom\n' > ris.mod
 "$IYI" get example.test/user/liba@v1.1.0 > bom.log 2>&1 || { fail "get on a manifest with a BOM failed"; cat bom.log; }
-[ "$(head -c 3 iyi.mod | od -An -tx1 | tr -d ' \n')" = "efbbbf" ] || fail "the BOM was not kept: $(od -c iyi.mod | head -2)"
-grep -q '^require example.test/user/liba v1.1.0$' iyi.mod || fail "the BOM manifest did not get liba: $(cat iyi.mod)"
+[ "$(head -c 3 ris.mod | od -An -tx1 | tr -d ' \n')" = "efbbbf" ] || fail "the BOM was not kept: $(od -c ris.mod | head -2)"
+grep -q '^require example.test/user/liba v1.1.0$' ris.mod || fail "the BOM manifest did not get liba: $(cat ris.mod)"
 cd "$WORK/app" || exit 1
 [ "$status" -eq 0 ] && echo "  read past, kept, and liba v1.1.0 required"
 
@@ -255,12 +255,12 @@ step "a major version past 1 is the same repository under a /vN path"
 # `example.test/user/liba/v2`. The plain path must not cross into it, the
 # suffixed one is fetched from the same repository, and a line that pairs
 # a path with another major's version is refused naming the right path.
-printf 'module example.test/user/liba/v2\n' > "$WORK/work/liba/iyi.mod"
+printf 'module example.test/user/liba/v2\n' > "$WORK/work/liba/ris.mod"
 sed -i.bak 's/1.3.0/2.0.0/' "$WORK/work/liba/liba.iyi" && rm -f "$WORK/work/liba/liba.iyi.bak"
 git -C "$WORK/work/liba" commit -qam five && (cd "$WORK" && publish liba v2.0.0)
 "$IYI" get -u --check > major-check.log 2>&1 || fail "the plain path saw v2.0.0 as its own: $(cat major-check.log)"
 mkdir -p "$WORK/vapp"
-printf 'module example.test/user/vapp\n' > "$WORK/vapp/iyi.mod"
+printf 'module example.test/user/vapp\n' > "$WORK/vapp/ris.mod"
 printf 'import example.test/user/liba/v2::{greeting}\nputs greeting\n' > "$WORK/vapp/main.iyi"
 (cd "$WORK/vapp" && "$IYI" get example.test/user/liba/v2) > major.log 2>&1 || { fail "get of the /v2 path failed"; cat major.log; }
 grep -q "added example.test/user/liba/v2 v2.0.0" major.log || fail "the /v2 path got: $(cat major.log)"
@@ -268,7 +268,7 @@ grep -q "added example.test/user/liba/v2 v2.0.0" major.log || fail "the /v2 path
 grep -q "liba 2.0.0" major-run.log || fail "the /v2 program ran '$(cat major-run.log)'"
 refused "a plain path at a v2 version" "is example.test/user/liba/v2: a major version past 1 is its own module path" \
   example.test/user/liba@v2.0.0
-printf 'module example.test/user/wapp\nrequire example.test/user/liba/v2 v1.1.0\n' > "$WORK/vapp/iyi.mod"
+printf 'module example.test/user/wapp\nrequire example.test/user/liba/v2 v1.1.0\n' > "$WORK/vapp/ris.mod"
 (cd "$WORK/vapp" && "$IYI" run main.iyi) > major-bad.log 2>&1
 if [ $? -eq 0 ] || ! grep -q "is major version 2, and v1.1.0 is not; v1.1.0 is example.test/user/liba's" major-bad.log; then
   fail "a /v2 line at a v1 version was not refused by name: $(cat major-bad.log)"
@@ -281,7 +281,7 @@ step "the prelude's own verbs do not fetch the project's packages"
 # a requirement not in the cache, with no network, answered "the prelude
 # does not compile: cannot fetch ...".
 mkdir -p "$WORK/offline" && cd "$WORK/offline" || exit 1
-printf 'module example.test/user/offline\nrequire example.test/user/nope v1.0.0\n' > iyi.mod
+printf 'module example.test/user/offline\nrequire example.test/user/nope v1.0.0\n' > ris.mod
 for verb in "doc String" "doc prelude" "init tool tools/tool"; do
   # shellcheck disable=SC2086 # the verb's words are its arguments
   "$IYI" $verb > offline.log 2>&1 || fail "\`$verb\` in a project whose requirement cannot be fetched: $(head -2 offline.log)"
@@ -289,7 +289,7 @@ done
 cd "$WORK/app" || exit 1
 [ "$status" -eq 0 ] && echo "  doc String, doc prelude and init answer with a requirement that cannot be fetched"
 
-step "what get refuses leaves iyi.mod as it was"
+step "what get refuses leaves ris.mod as it was"
 refused "a version that is not a tag" "has no v1.9.9; its versions are v1.0.0, v1.1.0, v1.2.0-rc.1, v1.3.0" \
   example.test/user/liba@v1.9.9
 refused "a path that is no repository" "cannot list the versions of example.test/user/nope" \
@@ -301,22 +301,22 @@ refused "-u beside a path" "takes no path" -u example.test/user/liba
 # Two lines for one path: get moved the first, said the second was what it
 # moved from - "downgraded v1.3.0 -> v1.1.0" - and built at v1.3.0.
 mkdir -p "$WORK/dup" && cd "$WORK/dup" || exit 1
-printf 'module example.test/user/dup\nrequire example.test/user/liba v1.0.0\nrequire example.test/user/liba v1.3.0\n' > iyi.mod
+printf 'module example.test/user/dup\nrequire example.test/user/liba v1.0.0\nrequire example.test/user/liba v1.3.0\n' > ris.mod
 refused "a path required twice" "example.test/user/liba is already required, at v1.0.0" example.test/user/liba@v1.1.0
 cd "$WORK/app" || exit 1
 (cd "$WORK" && "$IYI" get example.test/user/liba) > nomanifest.log 2>&1
-if [ $? -eq 0 ] || ! grep -q "there is no iyi.mod" nomanifest.log; then
-  fail "a directory without iyi.mod was not named"
+if [ $? -eq 0 ] || ! grep -q "there is no ris.mod" nomanifest.log; then
+  fail "a directory without ris.mod was not named"
 else
-  echo "  no iyi.mod here: refused, and init named"
+  echo "  no ris.mod here: refused, and init named"
 fi
 
 step "a manifest written with CRLF keeps CRLF"
 mkdir -p "$WORK/crlf"
-printf 'module example.test/user/crlf\r\n\r\nrequire example.test/user/libb v1.0.0\r\n' > "$WORK/crlf/iyi.mod"
+printf 'module example.test/user/crlf\r\n\r\nrequire example.test/user/libb v1.0.0\r\n' > "$WORK/crlf/ris.mod"
 (cd "$WORK/crlf" && "$IYI" get example.test/user/liba@v1.1.0) > crlf.log 2>&1 || { fail "get on a CRLF manifest failed"; cat crlf.log; }
-if [ "$(grep -c $'\r$' "$WORK/crlf/iyi.mod")" != "$(wc -l < "$WORK/crlf/iyi.mod" | tr -d ' ')" ]; then
-  fail "a line lost its CR:"; od -c "$WORK/crlf/iyi.mod" | tail -4
+if [ "$(grep -c $'\r$' "$WORK/crlf/ris.mod")" != "$(wc -l < "$WORK/crlf/ris.mod" | tr -d ' ')" ]; then
+  fail "a line lost its CR:"; od -c "$WORK/crlf/ris.mod" | tail -4
 else
   echo "  every line ends CRLF, the new one too"
 fi
@@ -328,12 +328,12 @@ step "a manifest with mixed line endings: each line is found, and keeps its own"
 # said "removed" and removed nothing. (`grep -U`: a Windows grep reads a
 # line's CR away otherwise.)
 mkdir -p "$WORK/mixed" && cd "$WORK/mixed" || exit 1
-printf '# made by init\nmodule example.test/user/mixed\nrequire example.test/user/liba v1.1.0\r\n' > iyi.mod
+printf '# made by init\nmodule example.test/user/mixed\nrequire example.test/user/liba v1.1.0\r\n' > ris.mod
 "$IYI" get example.test/user/liba@v1.0.0 > mixed.log 2>&1 || { fail "get on a mixed manifest failed"; cat mixed.log; }
-[ "$(grep -c 'example.test/user/liba' iyi.mod | tr -d ' ')" = "1" ] || fail "a mixed manifest gained a second liba line: $(cat iyi.mod)"
-grep -qU $'^require example.test/user/liba v1.0.0\r$' iyi.mod && ! grep -qU $'module example.test/user/mixed\r' iyi.mod ||
-  fail "the liba line did not move, or a line lost or gained its CR: $(od -c iyi.mod | tail -4)"
-printf 'module example.test/user/mixt\nrequire example.test/user/libb v1.0.0\r\n' > iyi.mod
+[ "$(grep -c 'example.test/user/liba' ris.mod | tr -d ' ')" = "1" ] || fail "a mixed manifest gained a second liba line: $(cat ris.mod)"
+grep -qU $'^require example.test/user/liba v1.0.0\r$' ris.mod && ! grep -qU $'module example.test/user/mixed\r' ris.mod ||
+  fail "the liba line did not move, or a line lost or gained its CR: $(od -c ris.mod | tail -4)"
+printf 'module example.test/user/mixt\nrequire example.test/user/libb v1.0.0\r\n' > ris.mod
 printf 'puts 1\n' > main.iyi
 "$IYI" mod tidy > mixed-tidy.log 2>&1 || { fail "tidy on a mixed manifest failed"; cat mixed-tidy.log; }
 [ -z "$(requires example.test/user/libb)" ] || fail "tidy said '$(cat mixed-tidy.log)' and left libb's line"
@@ -343,22 +343,22 @@ cd "$WORK/app" || exit 1
 
 step "replace builds a required module from a directory"
 mkdir -p "$WORK/liba-local" "$WORK/rapp"
-printf 'module example.test/user/liba\n' > "$WORK/liba-local/iyi.mod"
+printf 'module example.test/user/liba\n' > "$WORK/liba-local/ris.mod"
 printf 'module liba\n\npub def greeting : String\n  "liba from beside the app"\nend\n' > "$WORK/liba-local/liba.iyi"
 # liba is required through libb as well as directly: the replacement is
 # the module, wherever the graph reaches it.
-printf 'module example.test/user/rapp\n\nrequire example.test/user/libb v1.0.0\nrequire example.test/user/liba v1.0.0\n\nreplace example.test/user/liba => ../liba-local\n' > "$WORK/rapp/iyi.mod"
+printf 'module example.test/user/rapp\n\nrequire example.test/user/libb v1.0.0\nrequire example.test/user/liba v1.0.0\n\nreplace example.test/user/liba => ../liba-local\n' > "$WORK/rapp/ris.mod"
 cp use.iyi "$WORK/rapp/use.iyi"
 (cd "$WORK/rapp" && "$IYI" run use.iyi) > replace1.log 2>&1 || { fail "the replaced build failed"; cat replace1.log; }
 grep -q "liba from beside the app" replace1.log || fail "the replacement did not build: $(cat replace1.log)"
-grep -q "example.test/user/liba" "$WORK/rapp/iyi.sum" 2>/dev/null && fail "iyi.sum recorded the replaced module"
-grep -q "example.test/user/libb v1.0.0 s1:" "$WORK/rapp/iyi.sum" 2>/dev/null || fail "iyi.sum lost the fetched module"
+grep -q "example.test/user/liba" "$WORK/rapp/ris.sum" 2>/dev/null && fail "ris.sum recorded the replaced module"
+grep -q "example.test/user/libb v1.0.0 s1:" "$WORK/rapp/ris.sum" 2>/dev/null || fail "ris.sum lost the fetched module"
 sed -i.bak 's/beside the app/beside the app, edited/' "$WORK/liba-local/liba.iyi" && rm -f "$WORK/liba-local/liba.iyi.bak"
 (cd "$WORK/rapp" && "$IYI" run use.iyi) > replace2.log 2>&1 || { fail "an edit in the replacement was refused"; cat replace2.log; }
 grep -q "beside the app, edited" replace2.log || fail "the edit did not build: $(cat replace2.log)"
 (cd "$WORK/rapp" && "$IYI" get example.test/user/liba@v1.1.0) > replace3.log 2>&1 || { fail "get on a replaced module failed"; cat replace3.log; }
 grep -q "example.test/user/liba builds from ../liba-local, which replaces it" replace3.log || fail "get did not say the line moves nothing: $(cat replace3.log)"
-[ "$status" -eq 0 ] && echo "  built from ../liba-local, directly and through libb; edits build; iyi.sum never records it"
+[ "$status" -eq 0 ] && echo "  built from ../liba-local, directly and through libb; edits build; ris.sum never records it"
 
 step "vet reports the program, not the packages it builds from"
 # A package's unused export is its author's to act on, as std's is: `iyi
@@ -376,13 +376,13 @@ fi
 
 step "a dependency's own replace is ignored"
 mkrepo "$WORK/work/libc"
-printf 'module example.test/user/libc\nrequire example.test/user/liba v1.1.0\nreplace example.test/user/liba => ../elsewhere\n' > "$WORK/work/libc/iyi.mod"
+printf 'module example.test/user/libc\nrequire example.test/user/liba v1.1.0\nreplace example.test/user/liba => ../elsewhere\n' > "$WORK/work/libc/ris.mod"
 printf 'module libc\n\npub def c : Int32\n  3\nend\n' > "$WORK/work/libc/libc.iyi"
 git -C "$WORK/work/libc" add -A && git -C "$WORK/work/libc" commit -qm one
 git init -q --bare "$WORK/mirror/example.test/user/libc"
 (cd "$WORK" && publish libc v1.0.0)
 mkdir -p "$WORK/capp"
-printf 'module example.test/user/capp\nrequire example.test/user/libc v1.0.0\n' > "$WORK/capp/iyi.mod"
+printf 'module example.test/user/capp\nrequire example.test/user/libc v1.0.0\n' > "$WORK/capp/ris.mod"
 cp use.iyi "$WORK/capp/use.iyi"
 (cd "$WORK/capp" && "$IYI" run use.iyi) > replace4.log 2>&1 || { fail "a dependency's replace redirected the build"; cat replace4.log; }
 grep -q "liba 1.1.0" replace4.log || fail "the program ran '$(cat replace4.log)', not liba's tag"
@@ -392,7 +392,7 @@ step "a relative IYI_MOD_MIRROR is the working directory's"
 # Handed to git as written, the path was read from the top of the git
 # repository the project sits in - `outer` here - and was no repository.
 mkdir -p "$WORK/outer/proj" && git init -q "$WORK/outer"
-printf 'module example.test/user/proj\n' > "$WORK/outer/proj/iyi.mod"
+printf 'module example.test/user/proj\n' > "$WORK/outer/proj/ris.mod"
 (cd "$WORK/outer/proj" && IYI_MOD_MIRROR=../../mirror "$IYI" get example.test/user/liba@v1.1.0) > relmirror.log 2>&1 ||
   fail "a relative mirror inside a repository was not found: $(cat relmirror.log)"
 grep -q "added example.test/user/liba v1.1.0" relmirror.log && echo "  ../../mirror from outer/proj: liba v1.1.0 added" ||
@@ -400,7 +400,7 @@ grep -q "added example.test/user/liba v1.1.0" relmirror.log && echo "  ../../mir
 
 step "a replacement that is not the module is refused by name"
 bad_replace() { # bad_replace <label> <target> <phrase>
-  printf 'module example.test/user/rapp\n\nrequire example.test/user/liba v1.0.0\n\nreplace example.test/user/liba => %s\n' "$2" > "$WORK/rapp/iyi.mod"
+  printf 'module example.test/user/rapp\n\nrequire example.test/user/liba v1.0.0\n\nreplace example.test/user/liba => %s\n' "$2" > "$WORK/rapp/ris.mod"
   (cd "$WORK/rapp" && "$IYI" run use.iyi) > bad.log 2>&1
   if [ $? -eq 0 ] || ! grep -qF -- "$3" bad.log; then
     fail "$1: not refused with '$3':"; sed 's/^/    /' bad.log
@@ -410,8 +410,8 @@ bad_replace() { # bad_replace <label> <target> <phrase>
 }
 bad_replace "a directory that is not there" ../nowhere "does not exist"
 mkdir -p "$WORK/nomod"
-bad_replace "a directory with no iyi.mod" ../nomod "has no iyi.mod"
-mkdir -p "$WORK/othermod" && printf 'module example.test/user/other\n' > "$WORK/othermod/iyi.mod"
+bad_replace "a directory with no ris.mod" ../nomod "has no ris.mod"
+mkdir -p "$WORK/othermod" && printf 'module example.test/user/other\n' > "$WORK/othermod/ris.mod"
 bad_replace "a directory holding another module" ../othermod "says it is 'example.test/user/other'"
 bad_replace "a target spelled like a module path" liba-local "is not spelled as a directory"
 bad_replace "a directory with a space, unquoted" "../liba local" "holds a space; a directory with one is written in double quotes"
@@ -422,7 +422,7 @@ step "a replacement in quotes may hold a space, and Windows' own spelling is one
 # path and a directory". `..\lib`, the native relative spelling every other
 # verb takes, was refused as "'..\lib' is not a directory".
 good_replace() { # good_replace <label> <target>
-  printf 'module example.test/user/rapp\n\nrequire example.test/user/liba v1.0.0\n\nreplace example.test/user/liba => %s\n' "$2" > "$WORK/rapp/iyi.mod"
+  printf 'module example.test/user/rapp\n\nrequire example.test/user/liba v1.0.0\n\nreplace example.test/user/liba => %s\n' "$2" > "$WORK/rapp/ris.mod"
   (cd "$WORK/rapp" && "$IYI" run use.iyi) > good.log 2>&1
   if [ $? -ne 0 ] || ! grep -q "liba from beside the app" good.log; then
     fail "$1: not built from the replacement:"; sed 's/^/    /' good.log
@@ -442,28 +442,28 @@ esac
 step "mod tidy says what the source imports"
 mkdir -p "$WORK/tapp"
 cd "$WORK/tapp" || exit 1
-printf 'module example.test/user/tapp\n\nrequire example.test/user/liba v1.3.0\nrequire example.test/user/libb v1.0.0\n' > iyi.mod
+printf 'module example.test/user/tapp\n\nrequire example.test/user/liba v1.3.0\nrequire example.test/user/libb v1.0.0\n' > ris.mod
 cp "$WORK/app/use.iyi" main.iyi
 # Another module beside it, with a manifest of its own, is not this one's
 # source: what it imports is not a requirement here.
-mkdir -p nested && printf 'module example.test/user/nested\n' > nested/iyi.mod
+mkdir -p nested && printf 'module example.test/user/nested\n' > nested/ris.mod
 printf 'import example.test/user/libc\nputs 1\n' > nested/main.iyi
 "$IYI" build main.iyi -o main > tidy-build.log 2>&1 || { fail "the tidy fixture did not build"; cat tidy-build.log; }
-printf 'example.test/user/liba v1.0.0 s1:0000000000000000000000000000000000000000\n' >> iyi.sum
-cp iyi.mod iyi.mod.before && cp iyi.sum iyi.sum.before
+printf 'example.test/user/liba v1.0.0 s1:0000000000000000000000000000000000000000\n' >> ris.sum
+cp ris.mod ris.mod.before && cp ris.sum ris.sum.before
 "$IYI" mod tidy --check > tidy-check.log 2>&1
 check_status=$?
 [ "$check_status" -eq 1 ] || fail "--check answered $check_status with a change due"
 grep -q "would remove example.test/user/libb v1.0.0: nothing imports it" tidy-check.log || fail "--check did not name the unused line: $(cat tidy-check.log)"
 # Two: the version nothing builds, and libb's, which goes with its line.
-grep -q "would drop 2 iyi.sum entries" tidy-check.log || fail "--check did not name the stale sums: $(cat tidy-check.log)"
-cmp -s iyi.mod iyi.mod.before && cmp -s iyi.sum iyi.sum.before || fail "--check wrote something"
+grep -q "would drop 2 ris.sum entries" tidy-check.log || fail "--check did not name the stale sums: $(cat tidy-check.log)"
+cmp -s ris.mod ris.mod.before && cmp -s ris.sum ris.sum.before || fail "--check wrote something"
 "$IYI" mod tidy > tidy1.log 2>&1 || { fail "tidy failed"; cat tidy1.log; }
 [ -z "$(requires example.test/user/libb)" ] || fail "libb is still required"
 [ "$(requires example.test/user/liba)" = "v1.3.0" ] || fail "liba moved to '$(requires example.test/user/liba)'"
 [ -z "$(requires example.test/user/libc)" ] || fail "the nested module's import was taken for this one's"
-grep -q "v1.0.0" iyi.sum && fail "the stale sum entry is still there"
-grep -q "example.test/user/liba v1.3.0 s1:" iyi.sum || fail "the sum lost what builds"
+grep -q "v1.0.0" ris.sum && fail "the stale sum entry is still there"
+grep -q "example.test/user/liba v1.3.0 s1:" ris.sum || fail "the sum lost what builds"
 "$IYI" mod tidy --check > tidy-clean.log 2>&1 || fail "a tidy manifest was not clean: $(cat tidy-clean.log)"
 grep -q "say what the source imports" tidy-clean.log || fail "a clean tidy did not say so"
 [ "$status" -eq 0 ] && echo "  libb removed, liba kept, the stale sum dropped; --check wrote nothing, then found nothing"
@@ -479,7 +479,7 @@ rm main.iyi
 grep -q "kept example.test/user/liba v1.3.0: nothing imports it, but without the line another module's requirement would build v1.1.0" tidy2.log \
   || fail "the kept line was not explained: $(cat tidy2.log)"
 mkdir -p "$WORK/t2" && cd "$WORK/t2" || exit 1
-printf 'module example.test/user/t2\nrequire example.test/user/libb v1.0.0\n' > iyi.mod
+printf 'module example.test/user/t2\nrequire example.test/user/libb v1.0.0\n' > ris.mod
 printf 'import example.test/user/liba\nputs 1\n' > main.iyi
 "$IYI" mod tidy > tidy3.log 2>&1 || { fail "tidy failed"; cat tidy3.log; }
 [ "$(requires example.test/user/liba)" = "v1.1.0" ] || fail "liba was added at '$(requires example.test/user/liba)', not the v1.1.0 the graph builds"
@@ -488,28 +488,28 @@ printf 'import example.test/user/liba\nputs 1\n' > main.iyi
 
 step "mod tidy refuses an import no repository provides"
 printf 'import example.test/user/nosuch/thing\nputs 1\n' > missing.iyi
-cp iyi.mod iyi.mod.before
+cp ris.mod ris.mod.before
 "$IYI" mod tidy > tidy4.log 2>&1
 if [ $? -eq 0 ] || ! grep -q "no module provides example.test/user/nosuch/thing" tidy4.log; then
   fail "the unprovided import was not refused: $(cat tidy4.log)"
-elif ! cmp -s iyi.mod iyi.mod.before; then
-  fail "the refusal changed iyi.mod"
+elif ! cmp -s ris.mod ris.mod.before; then
+  fail "the refusal changed ris.mod"
 else
-  echo "  refused, naming every prefix tried, iyi.mod untouched"
+  echo "  refused, naming every prefix tried, ris.mod untouched"
 fi
 
-step "a short name: iyi.mod writes the path once, files write the name"
+step "a short name: ris.mod writes the path once, files write the name"
 mkdir -p "$WORK/sapp" && cd "$WORK/sapp" || exit 1
-printf 'module example.test/user/sapp\n' > iyi.mod
+printf 'module example.test/user/sapp\n' > ris.mod
 "$IYI" get example.test/user/liba@v1.1.0 --as web > short1.log 2>&1 || { fail "get --as failed"; cat short1.log; }
-grep -qx "require example.test/user/liba v1.1.0 as web" iyi.mod || fail "get --as wrote: $(grep require iyi.mod)"
+grep -qx "require example.test/user/liba v1.1.0 as web" ris.mod || fail "get --as wrote: $(grep require ris.mod)"
 # One line: the import loads the package under its short name and brings
 # its names into scope.
 printf 'import web::*\n\nputs greeting\n' > main.iyi
 "$IYI" run main.iyi > short2.log 2>&1 || { fail "the short name did not build"; cat short2.log; }
 grep -q "liba 1.1.0" short2.log || fail "the short-named program ran '$(cat short2.log)'"
 "$IYI" get -u > short3.log 2>&1 || { fail "get -u failed"; cat short3.log; }
-grep -qx "require example.test/user/liba v1.3.0 as web" iyi.mod || fail "get -u lost the short name: $(grep require iyi.mod)"
+grep -qx "require example.test/user/liba v1.3.0 as web" ris.mod || fail "get -u lost the short name: $(grep require ris.mod)"
 # Whatever else tidy would do - -u left a sum entry behind - it must not
 # take the line a short name imports for unused.
 "$IYI" mod tidy --check > short4.log 2>&1
@@ -520,13 +520,13 @@ step "a package's short names are its own"
 mkrepo "$WORK/work/libs"
 # libs calls liba `a`; the app below calls libb `a`. Each file means its
 # own manifest's `a`.
-printf 'module example.test/user/libs\nrequire example.test/user/liba v1.1.0 as a\n' > "$WORK/work/libs/iyi.mod"
+printf 'module example.test/user/libs\nrequire example.test/user/liba v1.1.0 as a\n' > "$WORK/work/libs/ris.mod"
 printf 'module libs\n\nimport a::*\n\npub def relay : String\n  greeting\nend\n' > "$WORK/work/libs/libs.iyi"
 git -C "$WORK/work/libs" add -A && git -C "$WORK/work/libs" commit -qm one
 git init -q --bare "$WORK/mirror/example.test/user/libs"
 (cd "$WORK" && publish libs v1.0.0)
 mkdir -p "$WORK/papp" && cd "$WORK/papp" || exit 1
-printf 'module example.test/user/papp\nrequire example.test/user/libs v1.0.0\nrequire example.test/user/libb v1.0.0 as a\n' > iyi.mod
+printf 'module example.test/user/papp\nrequire example.test/user/libs v1.0.0\nrequire example.test/user/libb v1.0.0 as a\n' > ris.mod
 printf 'import example.test/user/libs::*\nimport a::*\n\nputs relay\nputs number\n' > main.iyi
 "$IYI" run main.iyi > pkgshort.log 2>&1 || { fail "a package's own short name did not build"; cat pkgshort.log; }
 grep -q "liba 1.1.0" pkgshort.log && grep -q "^7$" pkgshort.log || fail "the two a's crossed: $(cat pkgshort.log)"
@@ -536,7 +536,7 @@ step "a short name that is not one is refused by name"
 cd "$WORK/sapp" || exit 1
 mkdir -p web && printf 'module web\n' > web.iyi
 "$IYI" run main.iyi > clash.log 2>&1
-if [ $? -eq 0 ] || ! grep -q "names two modules: \`web\` is iyi.mod's short name for example.test/user/liba" clash.log; then
+if [ $? -eq 0 ] || ! grep -q "names two modules: \`web\` is ris.mod's short name for example.test/user/liba" clash.log; then
   fail "a short name that is also a local module was not refused: $(cat clash.log)"
 else
   echo "  a short name that is also this project's module: refused"
@@ -548,7 +548,7 @@ refused "a short name already taken" "\`web\` already names example.test/user/li
 
 step "get says what a package reaches, and what an upgrade adds to it"
 mkrepo "$WORK/work/libr"
-printf 'module example.test/user/libr\n' > "$WORK/work/libr/iyi.mod"
+printf 'module example.test/user/libr\n' > "$WORK/work/libr/ris.mod"
 printf 'module libr\n\nimport std/json::*\n\npub def version : String\n  "1.0.0"\nend\n' > "$WORK/work/libr/libr.iyi"
 # A test's imports are the package author's, not the consumer's.
 printf 'import std/file\n\nputs File.exists?("x")\n' > "$WORK/work/libr/libr_test.iyi"
@@ -577,7 +577,7 @@ git -C "$WORK/work/libr" commit -qam two && (cd "$WORK" && publish libr v1.1.0)
 printf 'module libr\n\nimport std/json::*\n\npub def version : String\n  "1.2.0"\nend\n' > "$WORK/work/libr/libr.iyi"
 git -C "$WORK/work/libr" commit -qam three && (cd "$WORK" && publish libr v1.2.0)
 mkdir -p "$WORK/rapp" && cd "$WORK/rapp" || exit 1
-printf 'module example.test/user/rapp\n' > iyi.mod
+printf 'module example.test/user/rapp\n' > ris.mod
 "$IYI" get example.test/user/libr@v1.0.0 > reach1.log 2>&1 || { fail "get libr failed"; cat reach1.log; }
 grep -q "example.test/user/libr v1.0.0, new: nothing outside the language" reach1.log ||
   fail "a pure package's reach was not said, or its test's std/file was counted: $(cat reach1.log)"
@@ -605,20 +605,20 @@ pseudo() { # pseudo <base> <rev>: the version iyi should write for <rev>
 }
 push_main() { git -C "$WORK/work/libt" push -q "$WORK/mirror/example.test/user/libt" HEAD:refs/heads/main; }
 mkrepo "$WORK/work/libt"
-printf 'module example.test/user/libt\n' > "$WORK/work/libt/iyi.mod"
+printf 'module example.test/user/libt\n' > "$WORK/work/libt/ris.mod"
 printf 'module libt\n\npub def word : String\n  "one"\nend\n' > "$WORK/work/libt/libt.iyi"
 git -C "$WORK/work/libt" add -A && at "2026-03-01 10:00:00 +0300" commit -qm one
 git init -q --bare "$WORK/mirror/example.test/user/libt"
 git -C "$WORK/mirror/example.test/user/libt" symbolic-ref HEAD refs/heads/main
 push_main
 mkdir -p "$WORK/tapp" && cd "$WORK/tapp" || exit 1
-printf 'module example.test/user/tapp\n' > iyi.mod
+printf 'module example.test/user/tapp\n' > ris.mod
 printf 'import example.test/user/libt::*\n\nputs word\n' > main.iyi
 one="$(pseudo v0.0.0- HEAD)"
 "$IYI" get example.test/user/libt > pseudo1.log 2>&1 || { fail "get of an untagged repository failed"; cat pseudo1.log; }
 [ "$(requires example.test/user/libt)" = "$one" ] || fail "an untagged repository was written as '$(requires example.test/user/libt)', not $one"
 [ "$("$IYI" run main.iyi 2>&1)" = "one" ] || fail "the pseudo-version did not build its commit"
-grep -q "example.test/user/libt $one s1:" iyi.sum || fail "iyi.sum has no entry for $one"
+grep -q "example.test/user/libt $one s1:" ris.sum || fail "ris.sum has no entry for $one"
 sed -i.bak 's/"one"/"two"/' "$WORK/work/libt/libt.iyi" && rm -f "$WORK/work/libt/libt.iyi.bak"
 at "2026-03-02 10:00:00 +0300" commit -qam two && push_main
 two="$(pseudo v0.0.0- HEAD)"
@@ -640,17 +640,17 @@ three="$(pseudo v0.1.1-0. HEAD)"
 [ "$(requires example.test/user/libt)" = "v0.1.0" ] || fail "the commit v0.1.0 tags was written as '$(requires example.test/user/libt)'"
 [ "$status" -eq 0 ] && echo "  @main after v0.1.0: $three, kept by -u; the tagged commit is v0.1.0"
 
-cp iyi.mod iyi.mod.good
+cp ris.mod ris.mod.good
 # The time one second off: the hash is the commit's, and the line still lies.
 forged="$(echo "$three" | sed -E 's/-0\.([0-9]{13})[0-9]-/-0.\10-/')"
 [ "$forged" != "$three" ] || forged="$(echo "$three" | sed -E 's/-0\.([0-9]{13})[0-9]-/-0.\11-/')"
-sed -i.bak "s/v0.1.0\$/$forged/" iyi.mod && rm -f iyi.mod.bak iyi.sum
+sed -i.bak "s/v0.1.0\$/$forged/" ris.mod && rm -f ris.mod.bak ris.sum
 if "$IYI" run main.iyi > forged.log 2>&1 || ! grep -q "is not that commit's version" forged.log; then
   fail "a pseudo-version with the wrong time was not refused: $(cat forged.log)"
 else
   echo "  a pseudo-version whose time is not its commit's: refused"
 fi
-cp iyi.mod.good iyi.mod
+cp ris.mod.good ris.mod
 refused "a ref that is not there" "has no \`nosuchbranch\`" example.test/user/libt@nosuchbranch
 
 step "mod release: what the next tag has to be"
@@ -661,7 +661,7 @@ mkrepo "$REL"
 ln -s "$REL" "$WORK/rel-link" 2>/dev/null
 cd "$WORK/rel-link" 2>/dev/null || cd "$REL" || exit 1
 mkdir -p rel examples
-printf 'module example.test/user/rel\n' > iyi.mod
+printf 'module example.test/user/rel\n' > ris.mod
 printf 'module rel/util\n\npub def twice(n : Int32) : Int32\n  n * 2\nend\n' > rel/util.iyi
 # The release before is written the way 0.14 wrote a module's names.
 printf 'module rel\n\nimport rel/util\nusing rel/util::{twice}\n\npub def a : Int32\n  twice(1)\nend\n' > rel.iyi
@@ -693,18 +693,18 @@ grep -q "gone  rel: def a : Int32" rel4.log || fail "the gone def was not named:
 if "$IYI" mod release v2.0.0 > rel5.log 2>&1 || ! grep -q "is example.test/user/rel/v2: a major version past 1 is its own module path" rel5.log; then
   fail "v2.0.0 was accepted on a path without /v2: $(cat rel5.log)"
 fi
-printf 'module example.test/user/rel/v2\n' > iyi.mod && git commit -qam v2
+printf 'module example.test/user/rel/v2\n' > ris.mod && git commit -qam v2
 "$IYI" mod release v2.0.0 > rel6.log 2>&1 || fail "v2.0.0 at the /v2 path was refused: $(cat rel6.log)"
 grep -q "examples/demo" rel6.log && fail "an example program was counted as surface: $(cat rel6.log)"
 if "$IYI" mod release v1.0.0 > rel7.log 2>&1; then fail "a version already tagged was accepted: $(cat rel7.log)"; fi
-[ "$status" -eq 0 ] && echo "  respelled: patch; new def: minor, patch refused; gone def: v2 at /v2, refused until iyi.mod says it"
+[ "$status" -eq 0 ] && echo "  respelled: patch; new def: minor, patch refused; gone def: v2 at /v2, refused until ris.mod says it"
 # A module saved with a byte order mark, its header carrying a comment,
 # its `pub` followed by a tab: the same surface, so a patch. Each was a
 # module not found, its whole surface "gone", and a new major.
 RELHDR="$WORK/relhdr"
 mkrepo "$RELHDR"
 cd "$RELHDR" || exit 1
-printf 'module example.test/user/relhdr\n' > iyi.mod
+printf 'module example.test/user/relhdr\n' > ris.mod
 printf 'module relhdr\n\npub def greeting : String\n  "one"\nend\n' > relhdr.iyi
 git add -A && git commit -qm one && git tag v1.0.0
 printf '\xef\xbb\xbfmodule relhdr # the library\n\npub\tdef greeting : String\n  "one"\nend\n' > relhdr.iyi
@@ -718,7 +718,7 @@ step "mod release before v1: a break is a minor"
 REL0="$WORK/rel0"
 mkrepo "$REL0"
 cd "$REL0" || exit 1
-printf 'module example.test/user/zero\n' > iyi.mod
+printf 'module example.test/user/zero\n' > ris.mod
 printf 'module zero\n\npub def a : Int32\n  1\nend\n' > zero.iyi
 git add -A && git commit -qm one && git tag v0.3.0
 printf 'module zero\n\npub def c : Int32\n  1\nend\n' > zero.iyi && git commit -qam break
@@ -735,7 +735,7 @@ step "mod release measures from the last release, not a pre-release"
 RELRC="$WORK/relrc"
 mkrepo "$RELRC"
 cd "$RELRC" || exit 1
-printf 'module example.test/user/relrc\n' > iyi.mod
+printf 'module example.test/user/relrc\n' > ris.mod
 printf 'module relrc\n\npub def greeting : String\n  "one"\nend\n' > relrc.iyi
 git add -A && git commit -qm one && git tag v1.1.0
 printf 'module relrc\n\npub def other : String\n  "x"\nend\n' > relrc.iyi && git commit -qam rc && git tag v1.2.0-rc.1
@@ -759,7 +759,7 @@ mkrepo "$RELN"
 cd "$RELN" || exit 1
 printf 'outside\n' > README && git add -A && git commit -qm outer && git tag v0.16.2
 mkdir -p pkg && cd pkg || exit 1
-printf 'module example.test/user/pkg\n' > iyi.mod
+printf 'module example.test/user/pkg\n' > ris.mod
 printf 'module pkg\n\npub def f : Int32\n  1\nend\n' > pkg.iyi
 if "$IYI" mod release > reln.log 2>&1 || ! grep -q "commit the package first" reln.log; then
   fail "an uncommitted package inside a repository was not told so: $(cat reln.log)"
@@ -781,7 +781,7 @@ step "mod release: every name a consumer writes is surface"
 RELK="$WORK/relk"
 mkrepo "$RELK"
 cd "$RELK" || exit 1
-printf 'module example.test/user/kit\n' > iyi.mod
+printf 'module example.test/user/kit\n' > ris.mod
 cat > kit.iyi <<'EOF'
 module kit
 
@@ -853,7 +853,7 @@ relk "a constant's value moved" "v1.0.1" 's/^pub LIMIT = 10$/pub LIMIT = 11/'
 
 step "get says what a move changes in what the project uses"
 mkrepo "$WORK/work/libi"
-printf 'module example.test/user/libi\n' > "$WORK/work/libi/iyi.mod"
+printf 'module example.test/user/libi\n' > "$WORK/work/libi/ris.mod"
 printf 'module libi\n\npub def greeting : String\n  "hi"\nend\n\npub def old : Int32\n  1\nend\n\npub def keep : Int32\n  2\nend\n' > "$WORK/work/libi/libi.iyi"
 git -C "$WORK/work/libi" add -A && git -C "$WORK/work/libi" commit -qm one
 git init -q --bare "$WORK/mirror/example.test/user/libi"
@@ -861,7 +861,7 @@ git init -q --bare "$WORK/mirror/example.test/user/libi"
 printf 'module libi\n\npub def greeting(name : String) : String\n  "hi #{name}"\nend\n\npub def keep : Int32\n  2\nend\n\npub def fresh : Int32\n  3\nend\n' > "$WORK/work/libi/libi.iyi"
 git -C "$WORK/work/libi" commit -qam two && (cd "$WORK" && publish libi v0.2.0)
 mkdir -p "$WORK/iapp" && cd "$WORK/iapp" || exit 1
-printf 'module example.test/user/iapp\n' > iyi.mod
+printf 'module example.test/user/iapp\n' > ris.mod
 printf 'import example.test/user/libi::{greeting, keep}\n\nputs greeting\nputs keep\n# greeting, in a comment\n' > main.iyi
 "$IYI" get example.test/user/libi@v0.1.0 > imp0.log 2>&1 || { fail "get libi@v0.1.0 failed"; cat imp0.log; }
 "$IYI" get -u > imp1.log 2>&1 || { fail "get -u of libi failed"; cat imp1.log; }
@@ -876,7 +876,7 @@ grep -q "gone     libi: def old : Int32 - used nowhere here" imp1.section || fai
 grep -q "and 1 new" imp1.section || fail "the new export was not counted: $(cat imp1.log)"
 # The same move for a project that requires libi and imports none of it.
 mkdir -p "$WORK/japp" && cd "$WORK/japp" || exit 1
-printf 'module example.test/user/japp\n' > iyi.mod
+printf 'module example.test/user/japp\n' > ris.mod
 printf 'puts 1\n' > main.iyi
 "$IYI" get example.test/user/libi@v0.1.0 > jmp0.log 2>&1 && "$IYI" get -u > jmp1.log 2>&1 || { fail "get in japp failed"; cat jmp0.log jmp1.log; }
 grep -q "what the move changes" jmp1.log && fail "a requirement nothing here imports was reported: $(cat jmp1.log)"
@@ -885,7 +885,7 @@ grep -q "what the move changes" jmp1.log && fail "a requirement nothing here imp
 step "two packages' util modules are two modules"
 for p in pa pb; do
   mkrepo "$WORK/work/$p"
-  printf 'module example.test/user/%s\n' "$p" > "$WORK/work/$p/iyi.mod"
+  printf 'module example.test/user/%s\n' "$p" > "$WORK/work/$p/ris.mod"
   printf 'module util\n\npub def who : String\n  "%s"\nend\n' "$p" > "$WORK/work/$p/util.iyi"
   printf 'module %s\n\nimport util\n\npub def name : String\n  Util.who\nend\n' "$p" > "$WORK/work/$p/$p.iyi"
   git -C "$WORK/work/$p" add -A && git -C "$WORK/work/$p" commit -qm one
@@ -893,7 +893,7 @@ for p in pa pb; do
   (cd "$WORK" && publish "$p" v1.0.0)
 done
 mkdir -p "$WORK/capp2" && cd "$WORK/capp2" || exit 1
-printf 'module example.test/user/capp2\nrequire example.test/user/pa v1.0.0\nrequire example.test/user/pb v1.0.0\n' > iyi.mod
+printf 'module example.test/user/capp2\nrequire example.test/user/pa v1.0.0\nrequire example.test/user/pb v1.0.0\n' > ris.mod
 printf 'import example.test/user/pa\nimport example.test/user/pb\nimport example.test/user/pa/util\nimport example.test/user/pb/util\n\nputs Pa.name\nputs Pb.name\nputs Pa::Util.who\nputs Pb::Util.who\n' > main.iyi
 "$IYI" run main.iyi > coll.log 2>&1
 [ "$(tr '\n' ' ' < coll.log)" = "pa pb pa pb " ] || fail "two packages' util modules did not stay two: $(cat coll.log)"
@@ -906,7 +906,7 @@ grep -q "'who' is ambiguous here: it is exported by both Pa::Util and Pb::Util" 
 # `util` is `Pa::Util`, the error says so as a suggested edit, and `iyi
 # fix` applies it.
 mkdir -p "$WORK/capp3" && cd "$WORK/capp3" || exit 1
-printf 'module example.test/user/capp3\nrequire example.test/user/pa v1.0.0\n' > iyi.mod
+printf 'module example.test/user/capp3\nrequire example.test/user/pa v1.0.0\n' > ris.mod
 printf 'import example.test/user/pa/util\n\nputs Util.who\n' > main.iyi
 "$IYI" check -f json main.iyi > old.json 2>&1
 grep -q '"replacement":"Pa::Util"' old.json || fail "the old name got no edit to its new one: $(cat old.json)"
@@ -920,19 +920,19 @@ grep -q "^# qualified, the module is Pa::Util" ctx.log || fail "mod context did 
 
 step "reaches: what a package may touch, as a limit"
 mkdir -p "$WORK/lapp" && cd "$WORK/lapp" || exit 1
-printf 'module example.test/user/lapp\nrequire example.test/user/libr v1.0.0 reaches nothing\n' > iyi.mod
+printf 'module example.test/user/lapp\nrequire example.test/user/libr v1.0.0 reaches nothing\n' > ris.mod
 printf 'import example.test/user/libr::{version}\n\nputs version\n' > main.iyi
 "$IYI" run main.iyi > lim1.log 2>&1 && grep -q "^1.0.0$" lim1.log || fail "a pure version under reaches nothing did not build: $(cat lim1.log)"
-cp iyi.mod iyi.mod.before; cp iyi.sum iyi.sum.before
+cp ris.mod ris.mod.before; cp ris.sum ris.sum.before
 if "$IYI" get example.test/user/libr@v1.1.0 > lim2.log 2>&1 ||
-   ! grep -q "example.test/user/libr v1.1.0 reaches std/socket, C, which its line in iyi.mod does not allow" lim2.log; then
+   ! grep -q "example.test/user/libr v1.1.0 reaches std/socket, C, which its line in ris.mod does not allow" lim2.log; then
   fail "a get past reaches nothing was not refused by what it reaches: $(cat lim2.log)"
 fi
-cmp -s iyi.mod iyi.mod.before && cmp -s iyi.sum iyi.sum.before || fail "a refused get changed iyi.mod or iyi.sum"
-printf 'module example.test/user/lapp\nrequire example.test/user/libr v1.0.0 reaches std/socket, C\n' > iyi.mod
+cmp -s ris.mod ris.mod.before && cmp -s ris.sum ris.sum.before || fail "a refused get changed ris.mod or ris.sum"
+printf 'module example.test/user/lapp\nrequire example.test/user/libr v1.0.0 reaches std/socket, C\n' > ris.mod
 "$IYI" get example.test/user/libr@v1.1.0 > lim3.log 2>&1 || fail "a get inside the widened limit was refused: $(cat lim3.log)"
-grep -qx "require example.test/user/libr v1.1.0 reaches std/socket, C" iyi.mod || fail "get did not keep the reaches clause: $(grep require iyi.mod)"
-printf 'module example.test/user/lapp\nrequire example.test/user/libr v1.1.0 reaches std/sockt, Files\n' > iyi.mod
+grep -qx "require example.test/user/libr v1.1.0 reaches std/socket, C" ris.mod || fail "get did not keep the reaches clause: $(grep require ris.mod)"
+printf 'module example.test/user/lapp\nrequire example.test/user/libr v1.1.0 reaches std/sockt, Files\n' > ris.mod
 "$IYI" run main.iyi > lim4.log 2>&1
 grep -q "\`Files\` is not something a package reaches" lim4.log || fail "a word that is not a reach was not refused: $(cat lim4.log)"
 [ "$status" -eq 0 ] && echo "  reaches nothing: v1.0.0 builds, v1.1.0 refused as std/socket, C with nothing written; widened: allowed and kept"
@@ -952,7 +952,7 @@ mkrepo "$WORK/work/libn"
 # git may ask for CRLF, and warns of it under `text=auto`.
 git -C "$WORK/work/libn" config core.autocrlf false
 mkdir -p "$WORK/work/libn/sub"
-printf 'module example.test/user/libn\n' > "$WORK/work/libn/iyi.mod"
+printf 'module example.test/user/libn\n' > "$WORK/work/libn/ris.mod"
 printf 'module libn\n\npub def two : Int32\n  2\nend\n' > "$WORK/work/libn/libn.iyi"
 printf 'module libn/sub/extra\n\npub def three : Int32\n  3\nend\n' > "$WORK/work/libn/sub/extra.iyi"
 printf '* text=auto\n' > "$WORK/work/libn/.gitattributes"
@@ -968,9 +968,9 @@ expected="$(
 # Both: autocrlf for every file, eol for a `text` one (KEEP_BYTES).
 printf '[core]\n\tautocrlf = true\n\teol = crlf\n' > "$WORK/crlf.gitconfig"
 mkdir -p "$WORK/napp" && cd "$WORK/napp" || exit 1
-printf 'module example.test/user/napp\n' > iyi.mod
+printf 'module example.test/user/napp\n' > ris.mod
 GIT_CONFIG_GLOBAL="$WORK/crlf.gitconfig" "$IYI" get example.test/user/libn > sum.log 2>&1 || fail "get libn failed: $(cat sum.log)"
-got="$(awk '$1 == "example.test/user/libn" { print $3 }' iyi.sum)"
+got="$(awk '$1 == "example.test/user/libn" { print $3 }' ris.sum)"
 [ "$got" = "s1:$expected" ] || fail "libn's sum is $got, where the tag's bytes and paths make s1:$expected"
 [ "$status" -eq 0 ] && echo "  s1:$expected, from the tag's paths and bytes, with a CRLF-asking git"
 
@@ -982,7 +982,7 @@ step "a module in a subdirectory reads the manifest at the root its header names
 # beside it "does not build", `check --affected` "3 consumer(s) checked, 2
 # broke", and `mod context` "does not resolve".
 mkdir -p "$WORK/sapp/greet" && cd "$WORK/sapp" || exit 1
-printf 'module example.test/user/sapp\nrequire example.test/user/liba v1.1.0\n' > iyi.mod
+printf 'module example.test/user/sapp\nrequire example.test/user/liba v1.1.0\n' > ris.mod
 printf 'module greet/greeter\n\nimport example.test/user/liba\n\npub def hello : String\n  "greeter says " + Liba.greeting\nend\n' > greet/greeter.iyi
 printf 'module greet/greeter_test\n\nimport greet/greeter\n\nassert Greet::Greeter.hello == "greeter says liba 1.1.0", "hello"\n' > greet/greeter_test.iyi
 printf 'import greet/greeter\n\nputs Greet::Greeter.hello\n' > main.iyi
@@ -994,7 +994,7 @@ printf 'import greet/greeter\n\nputs Greet::Greeter.hello\n' > main.iyi
   fail "check --affected of the module: $(cat sub-aff.log)"
 "$IYI" mod context greet/greeter.iyi > sub-ctx.log 2>&1 && grep -q "def greeting : String" sub-ctx.log ||
   fail "mod context of the module: $(head -5 sub-ctx.log)"
-[ "$status" -eq 0 ] && echo "  greet/greeter.iyi: check, its test, check --affected and mod context resolve liba through the root's iyi.mod"
+[ "$status" -eq 0 ] && echo "  greet/greeter.iyi: check, its test, check --affected and mod context resolve liba through the root's ris.mod"
 
 echo
 if [ "$status" -eq 0 ]; then
