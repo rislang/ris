@@ -49,9 +49,6 @@
 
 module std/format
 
-# ris: `UInt16#to_u64` and the other widths are `std/int`'s.
-import std/int
-
 # The prelude's own module, reopened: `bits_of` and the rest of the bit
 # arithmetic are `src/iyi/float.iyi`'s, which is where `Float64#to_s`
 # needs them. What this file adds is the *formatted* text - fixed and
