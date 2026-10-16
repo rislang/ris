@@ -4,9 +4,12 @@ ris is a Ruby-like language whose hot paths run on tape memory, with no GC.
 Built on [iyi](https://github.com/iyilang/iyi), a fork of Crystal.
 Source: [github.com/rislang/ris](https://github.com/rislang/ris).
 
-* **from Ruby**: how code reads, with Crystal's types and nil-safety.
-* **from Rust**: `pub`, `impl`, closed classes, errors as return values.
-* **from Go**: one CLI (`fmt`, `test`, `check`, `lsp`, `mcp`), fibers.
+* **Ruby**: code that reads like prose; blocks, `each`, `map`, `do … end`.
+* **Crystal**: static types, nil-safety, native code through LLVM.
+* **iyi**: fast modular rebuilds; `check`, `fix`, `lsp`, `mcp` for agents.
+* **Rust**: `pub`, `impl`, closed classes, errors as return values.
+* **Go**: imports by URL (`github.com/…`), one `fmt`, fibers and channels.
+* **Goose**: tape memory, bump-allocated and freed at once, with no GC.
 
 ## Why ris: tape memory, without the GC
 
@@ -72,9 +75,6 @@ ris 0.1.0 is a prototype; internals keep iyi's names so iyi merges. Special
 thanks to Serdar Dogruyol, [iyi](https://github.com/iyilang/iyi)'s author,
 and Wouter van Oortmerssen, [Goose](https://github.com/aardappel/goose)'s
 author: ris keeps building on the iyi language and Goose's tape memory.
-Thanks to **Crystal** (Ary Borenszweig, Juan Wajnerman, Brian Cardiff,
-Manas and community), **iyi** (Serdar Dogruyol), **Goose** (Wouter van
-Oortmerssen), **Ruby** (Yukihiro Matsumoto). Apache 2.0: [LICENSE](LICENSE),
-[NOTICE.md](NOTICE.md).
-
+Thanks to **Crystal** (Ary Borenszweig, Juan Wajnerman, Brian Cardiff, Manas
+and community), **Ruby** (Yukihiro Matsumoto). [LICENSE](LICENSE): Apache 2.0.
 Developed with Claude Opus 5.5, ChatGPT Codex Sol 6.1 and other models.
