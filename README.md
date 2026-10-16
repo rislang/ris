@@ -70,11 +70,11 @@ own minimal HTTP loop (iyi-web: 9,182/s). ¹ Other machine, gzip: approximate.
 | Memory | 34 MB | 76 MB | **29 MB** |
 
 ## Status and thanks
-
 ris 0.1.0 is a prototype; internals keep iyi's names so iyi merges. Special
 thanks to Serdar Dogruyol, [iyi](https://github.com/iyilang/iyi)'s author,
 and Wouter van Oortmerssen, [Goose](https://github.com/aardappel/goose)'s
 author: ris keeps building on the iyi language and Goose's tape memory.
 Thanks to **Crystal** (Ary Borenszweig, Juan Wajnerman, Brian Cardiff, Manas
 and community), **Ruby** (Yukihiro Matsumoto). [LICENSE](LICENSE): Apache 2.0.
+Windows is out of scope for now (WSL2 works); add it if you need it.
 Developed with Claude Opus 5.5, ChatGPT Codex Sol 6.1 and other models.
