@@ -4,9 +4,9 @@ ris is a Ruby-like language whose hot paths run on tape memory, with no GC.
 Built on [iyi](https://github.com/iyilang/iyi), a fork of Crystal.
 Source: [github.com/rislang/ris](https://github.com/rislang/ris).
 
-* **Ruby**: how code reads, with Crystal's blocks, unions and nil-safety.
-* **in Rust**: `pub`, `impl`, closed classes, errors as return values.
-* **on the Go**: one CLI (`fmt`, `test`, `check`, `lsp`, `mcp`), fibers.
+* **from Ruby**: how code reads, with Crystal's blocks, unions and nil-safety.
+* **from Rust**: `pub`, `impl`, closed classes, errors as return values.
+* **from Go**: one CLI (`fmt`, `test`, `check`, `lsp`, `mcp`), fibers.
 
 ## Why ris: tape memory, without the GC
 
