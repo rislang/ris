@@ -166,6 +166,18 @@ pub struct ParsedHead
     HTTP.same_bytes?(@version.to_unsafe, @version.bytesize, "HTTP/1.0")
   end
 
+  # Each field as the heap strings a caller keeps: its name as first
+  # spelled, and the values of all its lines joined with ", " (RFC 9110
+  # §5.3), in one string. A head has a few fields, so a repeat is looked
+  # for among them rather than through a table.
+  def each_heap_field(& : String, String -> Nil) : Nil
+    i = 0
+    while i < @fields.size
+      yield @fields[i].name.to_s, joined_value(i) unless repeated?(i)
+      i = i + 1
+    end
+  end
+
   # The value of the first field called *name*, in any case.
   def field(name : String) : TapeString?
     i = 0
@@ -175,6 +187,67 @@ pub struct ParsedHead
       i = i + 1
     end
     nil
+  end
+
+  # The value of the field at *index*, and of each later one of its name,
+  # joined with ", " in one string: joined one by one, a head of many lines
+  # of one field cost the square of its size.
+  private def joined_value(index : Int32) : String
+    name = @fields[index].name
+    total = @fields[index].value.bytesize
+    lines = 1
+    k = index + 1
+    while k < @fields.size
+      if same_field?(@fields[k].name, name)
+        total = total + 2 + @fields[k].value.bytesize
+        lines = lines + 1
+      end
+      k = k + 1
+    end
+    return @fields[index].value.to_s if lines == 1
+    String.new(total) do |buffer|
+      first = @fields[index].value
+      buffer.copy_from(first.to_unsafe, first.bytesize)
+      at = first.bytesize
+      k = index + 1
+      while k < @fields.size
+        if same_field?(@fields[k].name, name)
+          value = @fields[k].value
+          buffer[at] = 44_u8
+          buffer[at + 1] = 32_u8
+          (buffer + at + 2).copy_from(value.to_unsafe, value.bytesize)
+          at = at + 2 + value.bytesize
+        end
+        k = k + 1
+      end
+    end
+  end
+
+  # Whether a field before *index* has the name of the one at *index*.
+  private def repeated?(index : Int32) : Bool
+    name = @fields[index].name
+    j = 0
+    while j < index
+      return true if same_field?(@fields[j].name, name)
+      j = j + 1
+    end
+    false
+  end
+
+  private def same_field?(a : TapeString, b : TapeString) : Bool
+    return false unless a.bytesize == b.bytesize
+    pa = a.to_unsafe
+    pb = b.to_unsafe
+    i = 0
+    while i < a.bytesize
+      ca = pa[i]
+      cb = pb[i]
+      ca = ca + 32_u8 if ca >= 65_u8 && ca <= 90_u8
+      cb = cb + 32_u8 if cb >= 65_u8 && cb <= 90_u8
+      return false unless ca == cb
+      i = i + 1
+    end
+    true
   end
 end
 
@@ -541,81 +614,11 @@ pub struct Server
     request_body(text, method, path, query, headers, http10, split_at)
   end
 
-  # The fields of *head* as the heap `Hash` a `Request` keeps: each name as
-  # it was first spelled, and the values of a field on several lines joined
-  # with ", " (RFC 9110 §5.3). A head has a few fields, so a repeat is
-  # looked for among them rather than through a second table.
+  # The fields of *head* as the heap `Hash` a `Request` keeps.
   private def self.heap_fields(head : ParsedHead) : Hash(String, String)
-    fields = head.fields
     headers = {} of String => String
-    i = 0
-    while i < fields.size
-      name = fields[i].name
-      headers[name.to_s] = joined_value(fields, i) unless repeated?(fields, i)
-      i = i + 1
-    end
+    head.each_heap_field { |name, value| headers[name] = value }
     headers
-  end
-
-  # The value of the field at *index*, and of each later one of its name,
-  # joined with ", " in one string: joined one by one, a head of many lines
-  # of one field cost the square of its size.
-  private def self.joined_value(fields : TapeArray(Field), index : Int32) : String
-    name = fields[index].name
-    total = fields[index].value.bytesize
-    lines = 1
-    k = index + 1
-    while k < fields.size
-      if same_field?(fields[k].name, name)
-        total = total + 2 + fields[k].value.bytesize
-        lines = lines + 1
-      end
-      k = k + 1
-    end
-    return fields[index].value.to_s if lines == 1
-    String.new(total) do |buffer|
-      first = fields[index].value
-      buffer.copy_from(first.to_unsafe, first.bytesize)
-      at = first.bytesize
-      k = index + 1
-      while k < fields.size
-        if same_field?(fields[k].name, name)
-          value = fields[k].value
-          buffer[at] = 44_u8
-          buffer[at + 1] = 32_u8
-          (buffer + at + 2).copy_from(value.to_unsafe, value.bytesize)
-          at = at + 2 + value.bytesize
-        end
-        k = k + 1
-      end
-    end
-  end
-
-  # Whether a field before *index* has the name of the one at *index*.
-  private def self.repeated?(fields : TapeArray(Field), index : Int32) : Bool
-    name = fields[index].name
-    j = 0
-    while j < index
-      return true if same_field?(fields[j].name, name)
-      j = j + 1
-    end
-    false
-  end
-
-  private def self.same_field?(a : TapeString, b : TapeString) : Bool
-    return false unless a.bytesize == b.bytesize
-    pa = a.to_unsafe
-    pb = b.to_unsafe
-    i = 0
-    while i < a.bytesize
-      ca = pa[i]
-      cb = pb[i]
-      ca = ca + 32_u8 if ca >= 65_u8 && ca <= 90_u8
-      cb = cb + 32_u8 if cb >= 65_u8 && cb <= 90_u8
-      return false unless ca == cb
-      i = i + 1
-    end
-    true
   end
 
   # The rest of a request whose head is read: what its fields say of the
