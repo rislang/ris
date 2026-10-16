@@ -1,4 +1,4 @@
-# ris: Rubyist In Stack memory with agents
+# ris: rubyist in stack memory with agents
 
 ris is a Ruby-like language whose hot paths run on tape memory, with no GC.
 Built on [iyi](https://github.com/iyilang/iyi), a fork of Crystal.
