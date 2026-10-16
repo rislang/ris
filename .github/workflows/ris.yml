@@ -3,7 +3,7 @@
 #
 # Every run builds and proves the tarballs; a `ris-v*` tag also publishes
 # them, with SHA256SUMS, as the release `install_ris.sh` installs from.
-name: ris
+name: ris release
 
 on:
   push:
