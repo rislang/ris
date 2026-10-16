@@ -301,7 +301,7 @@ esac
 # its own. `version extra` dropped the word.
 refuses "help for a verb that is not one" "there is no" -- "$IYI" help nonesuch
 refuses "version with an argument" "takes no arguments" -- "$IYI" version extra
-if "$IYI" help build 2>/dev/null | head -1 | grep -q '^Usage: iyi build'; then
+if "$IYI" help build 2>/dev/null | head -1 | grep -qE '^Usage: (iyi|ris) build'; then
   echo "  help for a verb is the verb's own"
 else
   echo "  help for a verb printed the general usage"; status=1
@@ -602,13 +602,13 @@ fi
 # the next run takes away once it is an hour old, and not before: a
 # younger one may be another runner's, linked and about to start.
 mkdir -p "$WORK/runcache"
-: > "$WORK/runcache/iyi-run-main-99999.tmp.exe"
-: > "$WORK/runcache/iyi-run-main-99998.tmp.exe"
-touch -d '2 hours ago' "$WORK/runcache/iyi-run-main-99999.tmp.exe"
+: > "$WORK/runcache/ris-run-main-99999.tmp.exe"
+: > "$WORK/runcache/ris-run-main-99998.tmp.exe"
+touch -d '2 hours ago' "$WORK/runcache/ris-run-main-99999.tmp.exe"
 IYI_CACHE_DIR="$WORK/runcache" "$IYI" run twin_b/main.iyi > sweep.out 2>&1
-if [ -e "$WORK/runcache/iyi-run-main-99999.tmp.exe" ]; then
+if [ -e "$WORK/runcache/ris-run-main-99999.tmp.exe" ]; then
   echo "  a runner's leftover from two hours ago is still in the cache"; status=1
-elif [ ! -e "$WORK/runcache/iyi-run-main-99998.tmp.exe" ]; then
+elif [ ! -e "$WORK/runcache/ris-run-main-99998.tmp.exe" ]; then
   echo "  a runner's leftover from just now was taken"; status=1
 else
   echo "  an old runner's leftover is taken, a fresh one kept"
@@ -1185,7 +1185,7 @@ refuses "an unknown flag to fix" "unknown flag" -- "$IYI" fix --nonesuch good.iy
 refuses "a second file that is not there" "no such file: extra.iyi" -- "$IYI" fix good.iyi extra.iyi
 # `.exe` off the end: the usage line names the command, and the command is
 # the compiler's name without the suffix Windows puts on the file.
-refuses "vet with no file" "Usage: $(basename "$IYI" .exe) vet" -- "$IYI" vet
+refuses "vet with no file" "vet [options] [programfile]" -- "$IYI" vet
 refuses "a variable env does not have" "no such variable" -- "$IYI" env NOPE
 refuses "an argument to clear_cache" "takes no arguments" -- "$IYI" clear_cache extra
 refuses "an argument to the mcp server" "takes no arguments" -- "$IYI" mcp --nonesuch

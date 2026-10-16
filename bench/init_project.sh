@@ -44,31 +44,31 @@ cd "$WORK" || exit 1
 # ── the project, and what it does on arrival ─────────────────────────────
 "$IYI" init example.com/me/hello app > init.txt 2>&1
 say "init writes a project and says what it wrote" \
-  "$([ $? -eq 0 ] && grep -qE 'wrote app[/\\]hello.iyi' init.txt && grep -q 'run hello.iyi' init.txt; echo $?)"
-say "two files and no more: iyi.mod and hello.iyi" \
-  "$([ "$(ls app | sort | tr '\n' ' ')" = "hello.iyi iyi.mod " ]; echo $?)"
-grep -q '^module example.com/me/hello$' app/iyi.mod
+  "$([ $? -eq 0 ] && grep -qE 'wrote app[/\\]hello.ri' init.txt && grep -q 'run hello.ri' init.txt; echo $?)"
+say "two files and no more: ris.mod and hello.ri" \
+  "$([ "$(ls app | sort | tr '\n' ' ')" = "hello.ri ris.mod " ]; echo $?)"
+grep -q '^module example.com/me/hello$' app/ris.mod
 say "the manifest names the module" $?
-grep -q '^module hello$' app/hello.iyi
+grep -q '^module hello$' app/hello.ri
 say "the file is the root module the name promises" $?
 
-(cd app && "$IYI" run hello.iyi) > run.txt 2>&1
+(cd app && "$IYI" run hello.ri) > run.txt 2>&1
 say "it runs: $(tail -1 run.txt)" "$([ "$(tail -1 run.txt)" = "hello from hello" ]; echo $?)"
 
 # A consumer's `import` of the package reads that file: the root module is
 # what `import example.com/me/hello` means.
-mkdir -p user && printf 'module example.com/me/user\nrequire example.com/me/hello v0.0.1\nreplace example.com/me/hello => ../app\n' > user/iyi.mod
-printf 'import example.com/me/hello\n' > user/main.iyi
-(cd user && "$IYI" run main.iyi) > use.txt 2>&1
+mkdir -p user && printf 'module example.com/me/user\nrequire example.com/me/hello v0.0.1\nreplace example.com/me/hello => ../app\n' > user/ris.mod
+printf 'import example.com/me/hello\n' > user/main.ri
+(cd user && "$IYI" run main.ri) > use.txt 2>&1
 say "a consumer's import of the package reads it" "$([ "$(tail -1 use.txt)" = "hello from hello" ]; echo $?)"
 
 # ── nothing written twice ────────────────────────────────────────────────
-before="$(cat app/iyi.mod app/hello.iyi | cksum)"
+before="$(cat app/ris.mod app/hello.ri | cksum)"
 "$IYI" init example.com/me/hello app > again.txt 2>&1
 rc=$?
-after="$(cat app/iyi.mod app/hello.iyi | cksum)"
+after="$(cat app/ris.mod app/hello.ri | cksum)"
 say "a second init is refused by name" \
-  "$([ $rc -ne 0 ] && grep -q 'already has `iyi.mod`' again.txt; echo $?)"
+  "$([ $rc -ne 0 ] && grep -q 'already has `ris.mod`' again.txt; echo $?)"
 say "and changes not one byte" "$([ "$before" = "$after" ]; echo $?)"
 
 # The next step, as lines any shell takes: a `cd` of its own, quoted
@@ -77,9 +77,9 @@ say "and changes not one byte" "$([ "$before" = "$after" ]; echo $?)"
 # and the directory went unquoted.
 "$IYI" init example.com/me/spaced "my app" > spaced.txt 2>&1
 say "the next step is a cd of its own, quoted, and a run" \
-  "$(grep -qx 'cd "my app"' spaced.txt && grep -q '^iyi run spaced.iyi' spaced.txt && ! grep -q '&&' spaced.txt; echo $?)"
+  "$(grep -qx 'cd "my app"' spaced.txt && grep -q '^ris run spaced.ri' spaced.txt && ! grep -q '&&' spaced.txt; echo $?)"
 mkdir -p inplace && (cd inplace && "$IYI" init example.com/me/inplace .) > inplace.txt 2>&1
-say "and no cd into the directory it is in" "$([ -f inplace/inplace.iyi ] && ! grep -q "^cd " inplace.txt; echo $?)"
+say "and no cd into the directory it is in" "$([ -f inplace/inplace.ri ] && ! grep -q "^cd " inplace.txt; echo $?)"
 # Quoted for whatever a shell would read as more than a name: `cd x;y` was
 # printed bare and ran `cd x`, then `y`; `cd d$x` went to `d`. Double quotes
 # where all three shells read them alike, single where `$` is inside.
@@ -90,13 +90,13 @@ say "a directory with ; or \$ in its name is one word to cd" \
 
 # ── the name, the current directory, and the refusals ────────────────────
 mkdir -p here && (cd here && "$IYI" init kemal) > here.txt 2>&1
-say "init kemal writes iyi.mod and kemal.iyi into the current directory" \
-  "$([ "$(ls here | sort | tr '\n' ' ')" = "iyi.mod kemal.iyi " ] && grep -q '^module kemal$' here/iyi.mod; echo $?)"
+say "init kemal writes ris.mod and kemal.ri into the current directory" \
+  "$([ "$(ls here | sort | tr '\n' ' ')" = "kemal.ri ris.mod " ] && grep -q '^module kemal$' here/ris.mod; echo $?)"
 "$IYI" init github.com/me/iyi-web dash > dash.txt 2>&1
 say "a repository name with - is a module name with _" \
-  "$([ -f dash/iyi_web.iyi ] && grep -q '^module iyi_web$' dash/iyi_web.iyi; echo $?)"
+  "$([ -f dash/iyi_web.ri ] && grep -q '^module iyi_web$' dash/iyi_web.ri; echo $?)"
 "$IYI" init example.com/me/lib/v2 major > major.txt 2>&1
-say "a /v2 suffix is a version, and the file is the name before it" "$([ -f major/lib.iyi ]; echo $?)"
+say "a /v2 suffix is a version, and the file is the name before it" "$([ -f major/lib.ri ]; echo $?)"
 "$IYI" init "Example.com/Me/App" bad > bad.txt 2>&1
 say "a path the manifest would refuse is refused before anything is written" \
   "$([ $? -ne 0 ] && grep -q 'is not a module path' bad.txt && [ ! -e bad ]; echo $?)"
@@ -126,7 +126,7 @@ say "--help is init's own usage" "$(head -1 help.txt | grep -q '^Usage: .* init 
 "$IYI" help > top.txt 2>&1
 init_line="$(grep -m1 '^ *init ' top.txt)"
 say "iyi help's init line names what init writes, and nothing it does not" \
-  "$(echo "$init_line" | grep -q 'iyi.mod' && ! echo "$init_line" | grep -qE 'main\.iyi|test'; echo $?)"
+  "$(echo "$init_line" | grep -q 'ris.mod' && ! echo "$init_line" | grep -qE 'main\.iyi|test'; echo $?)"
 
 echo
 if [ "$status" -eq 0 ]; then
