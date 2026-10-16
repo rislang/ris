@@ -115,7 +115,8 @@ class Iyi::Command
     # and different command surfaces, and a server is the compiler it was built
     # from — an `iyi daemon start` served by `crystal-daemon` would hold the
     # wrong prelude and answer `iyi help` questions in the wrong language.
-    server_name = "#{Command.program_name}-daemon"
+    # ris: the server is iyi's, `iyi-daemon`, beside `iyi` that `ris` links to.
+    server_name = "#{Command.program_name == "ris" ? "iyi" : Command.program_name}-daemon"
 
     candidates = [] of String
     if executable = Process.executable_path

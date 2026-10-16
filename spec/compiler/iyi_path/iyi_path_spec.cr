@@ -123,6 +123,7 @@ describe Iyi::IyiPath do
 
     it "foo.cr/bar" do
       assert_iterates_yielding [
+        "x/foo.cr/bar.ri",
         "x/foo.cr/bar.iyi",
         "x/foo.cr/bar.cr",
         "x/foo.cr/src/bar.cr",
@@ -146,6 +147,7 @@ describe Iyi::IyiPath do
 
     it "foo" do
       assert_iterates_yielding [
+        "x/foo.ri",
         "x/foo.iyi",
         "x/foo.cr",
         "x/foo/foo.cr",
@@ -155,6 +157,7 @@ describe Iyi::IyiPath do
 
     it "./foo" do
       assert_iterates_yielding [
+        "x/./foo.ri",
         "x/./foo.iyi",
         "x/./foo.cr",
         "x/./foo/foo.cr",
@@ -170,6 +173,7 @@ describe Iyi::IyiPath do
 
     it "foo/bar" do
       assert_iterates_yielding [
+        "x/foo/bar.ri",
         "x/foo/bar.iyi",
         "x/foo/bar.cr",
         "x/foo/src/bar.cr",
@@ -182,6 +186,7 @@ describe Iyi::IyiPath do
 
     it "./foo/bar" do
       assert_iterates_yielding [
+        "x/./foo/bar.ri",
         "x/./foo/bar.iyi",
         "x/./foo/bar.cr",
         "x/./foo/bar/bar.cr",
@@ -190,6 +195,7 @@ describe Iyi::IyiPath do
 
     it "foo/bar/baz" do
       assert_iterates_yielding [
+        "x/foo/bar/baz.ri",
         "x/foo/bar/baz.iyi",
         "x/foo/bar/baz.cr",
         "x/foo/src/bar/baz.cr",
@@ -202,6 +208,7 @@ describe Iyi::IyiPath do
 
     it "./foo/bar/baz" do
       assert_iterates_yielding [
+        "x/./foo/bar/baz.ri",
         "x/./foo/bar/baz.iyi",
         "x/./foo/bar/baz.cr",
         "x/./foo/bar/baz/baz.cr",

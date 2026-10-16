@@ -6,7 +6,8 @@ require "./spec_helper"
 # asked PATH.
 describe "`iyi-*` external commands" do
   exec_path = File.tempname
-  echo_env_path = File.join(exec_path, "iyi-echo_env#{EXE_SUFFIX}")
+  # ris: the binary calls itself ris, so `ris echo_env` runs `ris-echo_env`.
+  echo_env_path = File.join(exec_path, "ris-echo_env#{EXE_SUFFIX}")
 
   before_all do
     Dir.mkdir_p(exec_path)
