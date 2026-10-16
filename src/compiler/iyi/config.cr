@@ -1,6 +1,10 @@
 require "./codegen/target"
 
 module Iyi
+  # ris: its own version line, beside the iyi version it forked from. Here,
+  # not in iyi.cr, because the `crystal` binary compiles `ris mcp` too.
+  RIS_VERSION = "0.1.0"
+
   module Config
     class_property path : String = {{env("IYI_CONFIG_PATH") || ""}}
 

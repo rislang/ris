@@ -541,7 +541,7 @@ iyi-tarball: $(O)/iyi$(EXE) $(O)/$(IYI_DAEMON_BIN) check_iyi_is_release
 
 # ris: iyi's package, with `bin/ris` and ris's documents beside it. Unpacked
 # into a directory of its own (`install_ris.sh`), so it carries no manifest.
-RIS_VERSION := $(shell sed -n 's/^ *RIS_VERSION = "\(.*\)"/\1/p' src/compiler/iyi.cr)
+RIS_VERSION := $(shell sed -n 's/^ *RIS_VERSION = "\(.*\)"/\1/p' src/compiler/iyi/config.cr)
 RIS_PACKAGE := ris-$(RIS_VERSION)-$(shell uname -s | tr A-Z a-z)-$(shell uname -m)
 
 .PHONY: ris-tarball

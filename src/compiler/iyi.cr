@@ -106,9 +106,6 @@ module Iyi
     "iyi has no `#{verb}`: it belongs to Crystal, which this compiler is also built on. Here #{instead}."
   end
 
-  # ris: its own version line, beside the iyi version it forked from.
-  RIS_VERSION = "0.1.0"
-
   def self.description : String
     String.build do |io|
       # The name first, then what it is built on. Both, because the licence
