@@ -26,6 +26,7 @@
 module std/time
 
 import std/traits::{Comparable}
+import std/int
 
 pub struct DayOfWeek
   getter value : Int32
@@ -435,15 +436,199 @@ pub struct Time
 
     def self.wall_clock_nanoseconds : UInt64
       # CLOCK_REALTIME = 0 on Linux
-      sec, nsec = kernel_clock_gettime(0_i64)
+      sec, nsec = clock_gettime(0_i64)
       sec.to_u64 * 1000000000_u64 + nsec.to_u64
     end
 
     def self.monotonic_nanoseconds : UInt64
       # CLOCK_MONOTONIC = 1 on Linux
-      sec, nsec = kernel_clock_gettime(1_i64)
+      sec, nsec = clock_gettime(1_i64)
       sec.to_u64 * 1000000000_u64 + nsec.to_u64
     end
+
+    {% if flag?(:x86_64) %}
+      # The kernel maps its own `clock_gettime` into every process, the vDSO,
+      # which reads the clock from a page the kernel keeps current: a call,
+      # about 20 ns, where the system call is a switch into the kernel and
+      # back, measured at 400 ns. libc finds it for C; a program here links
+      # no libc `clock_gettime` (SPEC.md III.9), so it is found here, as Go
+      # finds it: the vDSO's address from the auxiliary vector, read from
+      # /proc/self/auxv, and the symbol from its ELF dynamic table. 0 until
+      # looked for, 1 when it is not there and the system call answers.
+      @@vdso_clock = 0_u64
+
+      def self.clock_gettime(clock_id : Int64) : {Int64, Int64}
+        fn = @@vdso_clock
+        if fn == 0_u64
+          fn = find_vdso_clock
+          @@vdso_clock = fn
+        end
+        return kernel_clock_gettime(clock_id) if fn == 1_u64
+        ts = uninitialized KernelTimeSpec
+        result = uninitialized Int64
+        # A C call from inside the function: the stack moves below the red
+        # zone the compiler may keep locals in, aligned to 16 as the ABI
+        # asks, and every register a C function may change is clobbered.
+        asm("movq %rsp, %r12
+             subq $$128, %rsp
+             andq $$-16, %rsp
+             callq *%rax
+             movq %r12, %rsp" : "={rax}"(result)
+                              : "{rax}"(fn), "{rdi}"(clock_id), "{rsi}"(pointerof(ts).as(Void*))
+                              : "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12",
+                                "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7",
+                                "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", "xmm14", "xmm15",
+                                "memory", "cc"
+                              : "volatile")
+        return kernel_clock_gettime(clock_id) unless result == 0_i64
+        {ts.tv_sec, ts.tv_nsec}
+      end
+
+      def self.raw_syscall(number : Int64, a : Int64, b : Int64, c : Int64) : Int64
+        result = uninitialized Int64
+        asm("syscall" : "={rax}"(result)
+                      : "{rax}"(number), "{rdi}"(a), "{rsi}"(b), "{rdx}"(c)
+                      : "rcx", "r11", "memory"
+                      : "volatile")
+        result
+      end
+
+      # `__vdso_clock_gettime`'s address, or 1 when there is none to find.
+      def self.find_vdso_clock : UInt64
+        base = vdso_base
+        return 1_u64 if base == 0_u64
+        found = vdso_symbol(base, "__vdso_clock_gettime")
+        found == 0_u64 ? 1_u64 : found
+      end
+
+      # AT_SYSINFO_EHDR (33) from /proc/self/auxv: where the vDSO's ELF
+      # header is mapped. 0 when the file cannot be read.
+      def self.vdso_base : UInt64
+        path = "/proc/self/auxv"
+        fd = raw_syscall(2_i64, path.to_unsafe.address.to_i64, 0_i64, 0_i64) # open, O_RDONLY
+        return 0_u64 if fd < 0_i64
+        buffer = uninitialized UInt64[128]
+        got = raw_syscall(0_i64, fd, pointerof(buffer).address.to_i64, 1024_i64) # read
+        raw_syscall(3_i64, fd, 0_i64, 0_i64) # close
+        return 0_u64 if got <= 0_i64
+        words = pointerof(buffer).as(UInt64*)
+        i = 0
+        while i + 1 < got.to_i32 // 8
+          return words[i + 1] if words[i] == 33_u64
+          return 0_u64 if words[i] == 0_u64
+          i = i + 2
+        end
+        0_u64
+      end
+
+      # The address of the function *name* in the ELF image at *base*, read
+      # from its dynamic symbol table; 0 when it has none of that name.
+      def self.vdso_symbol(base : UInt64, name : String) : UInt64
+        phoff = read_u64(base + 32_u64)
+        phentsize = read_u16(base + 54_u64)
+        phnum = read_u16(base + 56_u64)
+        load = 0_u64
+        loaded = false
+        dynamic = 0_u64
+        i = 0_u64
+        while i < phnum
+          ph = base + phoff + i * phentsize
+          kind = read_u32(ph)
+          if kind == 1_u32 && !loaded # PT_LOAD: where vaddr 0 is mapped
+            load = base + read_u64(ph + 8_u64) - read_u64(ph + 16_u64)
+            loaded = true
+          elsif kind == 2_u32 # PT_DYNAMIC
+            dynamic = read_u64(ph + 16_u64)
+          end
+          i = i + 1_u64
+        end
+        return 0_u64 unless loaded && dynamic != 0_u64
+        strtab = 0_u64
+        symtab = 0_u64
+        hash = 0_u64
+        gnu_hash = 0_u64
+        entry = load + dynamic
+        while (tag = read_u64(entry)) != 0_u64
+          value = read_u64(entry + 8_u64)
+          case tag
+          when 4_u64          then hash = load + value
+          when 5_u64          then strtab = load + value
+          when 6_u64          then symtab = load + value
+          when 0x6ffffef5_u64 then gnu_hash = load + value
+          end
+          entry = entry + 16_u64
+        end
+        return 0_u64 if strtab == 0_u64 || symtab == 0_u64
+        count = 0_u64
+        if hash != 0_u64
+          count = read_u32(hash + 4_u64).to_u64 # nchain
+        elsif gnu_hash != 0_u64
+          count = gnu_symbol_count(gnu_hash)
+        end
+        k = 0_u64
+        while k < count
+          sym = symtab + k * 24_u64
+          if read_u16(sym + 6_u64) != 0_u64 && read_u8(sym + 4_u64) % 16_u8 == 2_u8 &&
+             c_name?(strtab + read_u32(sym).to_u64, name)
+            return load + read_u64(sym + 8_u64)
+          end
+          k = k + 1_u64
+        end
+        0_u64
+      end
+
+      # How many symbols a GNU hash table covers: one past the last index
+      # of the longest bucket's chain.
+      def self.gnu_symbol_count(table : UInt64) : UInt64
+        nbuckets = read_u32(table).to_u64
+        symoffset = read_u32(table + 4_u64).to_u64
+        bloom = read_u32(table + 8_u64).to_u64
+        buckets = table + 16_u64 + bloom * 8_u64
+        chains = buckets + nbuckets * 4_u64
+        last = 0_u64
+        b = 0_u64
+        while b < nbuckets
+          index = read_u32(buckets + b * 4_u64).to_u64
+          last = index if index > last
+          b = b + 1_u64
+        end
+        return symoffset if last < symoffset
+        while read_u32(chains + (last - symoffset) * 4_u64) % 2_u32 == 0_u32
+          last = last + 1_u64
+        end
+        last + 1_u64
+      end
+
+      def self.c_name?(at : UInt64, name : String) : Bool
+        n = name.to_unsafe
+        i = 0
+        while i < name.bytesize
+          return false unless read_u8(at + i.to_u64) == n[i]
+          i = i + 1
+        end
+        read_u8(at + name.bytesize.to_u64) == 0_u8
+      end
+
+      def self.read_u64(at : UInt64) : UInt64
+        Pointer(UInt64).new(at).value
+      end
+
+      def self.read_u32(at : UInt64) : UInt32
+        Pointer(UInt32).new(at).value
+      end
+
+      def self.read_u16(at : UInt64) : UInt64
+        Pointer(UInt8).new(at).value.to_u64 + Pointer(UInt8).new(at + 1_u64).value.to_u64 * 256_u64
+      end
+
+      def self.read_u8(at : UInt64) : UInt8
+        Pointer(UInt8).new(at).value
+      end
+    {% else %}
+      def self.clock_gettime(clock_id : Int64) : {Int64, Int64}
+        kernel_clock_gettime(clock_id)
+      end
+    {% end %}
 
   {% elsif flag?(:windows) %}
     lib LibKernel32
