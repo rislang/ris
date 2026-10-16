@@ -11,8 +11,9 @@ Source: [github.com/rislang/ris](https://github.com/rislang/ris).
 * **Go**: imports by URL (`github.com/…`), one `fmt`, fibers and channels.
 * **Goose**: tape memory, bump-allocated and freed at once, with no GC.
 
-## Install: paste this to your agent
+## Install: paste this to a coding agent on your machine
 
+Claude Code, Codex, Cursor or any agent that runs commands on your machine.
 ```text
 Learn and install ris (needs Crystal and LLVM). Clone
 https://github.com/rislang/ris to ~/src/ris and read its LEARN.md and what
@@ -54,8 +55,7 @@ a kept proc, an outer variable). Rules: [TAPE_DESIGN.md](TAPE_DESIGN.md).
 **Campfire, preliminary: the port is not finished; numbers will change.**
 The ris port answers its busiest page, 40 messages and 364,500 bytes, byte
 for byte as the Rust port does. 16-core Linux, 2026-10-15; `raw` is ris's
-own minimal HTTP loop (iyi-web: 9,182/s).
-¹ Another machine, gzip on: approximate only.
+own minimal HTTP loop (iyi-web: 9,182/s). ¹ Other machine, gzip: approximate.
 
 | one core (`ab`) | ris raw | Rust | Go | Rails¹ |
 |---|---|---|---|---|
