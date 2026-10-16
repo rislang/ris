@@ -48,8 +48,9 @@ Tape.scope do
   Tape.local do
     first_mapping = IyiRegion.tape
     # Force the local tape to grow onto a second mapping without touching
-    # 64 MiB of pages. Cleanup must release the whole chain, then restore.
-    IyiRegion.tape_bytes(Tape::CAPACITY)
+    # 64 MiB of pages (the mapping is rounded up to a whole 64 KiB grain).
+    # Cleanup must release the whole chain, then restore.
+    IyiRegion.tape_bytes(Tape::CAPACITY &+ IyiRegion::GRAIN)
     check(IyiRegion.tape != first_mapping)
   end
   check(IyiRegion.tape == saved)

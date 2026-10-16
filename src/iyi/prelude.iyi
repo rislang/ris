@@ -3545,6 +3545,11 @@ require "./file"
       UNDER      = 16_u64
       SLOTS      = 256_u64
       CAPACITY   = 67108864_u64
+      # A mapping's length is a whole number of these: 64 KiB covers the
+      # 4 KiB pages of x86_64, the 16 KiB of Apple's and Asahi's arm64, the
+      # 64 KiB of some arm64 servers and Windows' allocation granularity,
+      # so the limit is the mapping's real end on every one of them.
+      GRAIN      = 65536_u64
 
       @[ThreadLocal]
       @@spare : UInt64 = 0_u64
@@ -3634,13 +3639,17 @@ require "./file"
           IyiHeap.write64(spare &+ OFF_PARENT, 0_u64)
           return spare
         end
-        length = capacity &+ DATA
+        length = mapping_length(capacity)
         region = __iyi_mmap(length).address
         IyiHeap.write64(region &+ OFF_CURSOR, region &+ DATA)
         IyiHeap.write64(region &+ OFF_LIMIT, region &+ length)
         IyiHeap.write64(region &+ OFF_MAP, length)
         register(region)
         region
+      end
+
+      def self.mapping_length(capacity : UInt64) : UInt64
+        (capacity &+ DATA &+ (GRAIN &- 1_u64)) & 0xFFFFFFFFFFFF0000_u64
       end
 
       def self.release(region : UInt64) : Nil
@@ -3683,21 +3692,6 @@ require "./file"
         IyiHeap.unlock
       end
 
-      # The region holding *address*, or 0: what `free` and `realloc` ask
-      # before treating a pointer as the arena's.
-      def self.owner(address : UInt64) : UInt64
-        return 0_u64 if @@registered == 0
-        slot = 0_u64
-        while slot < SLOTS
-          region = IyiHeap.read64(@@registry &+ slot &* 8_u64)
-          if region != 0 && address >= region &+ DATA && address < IyiHeap.read64(region &+ OFF_LIMIT)
-            return region
-          end
-          slot = slot &+ 1_u64
-        end
-        0_u64
-      end
-
       @[AlwaysInline]
       def self.take(region : UInt64, size : UInt64, clear : Bool, type_id : UInt64) : UInt64
         cursor = IyiHeap.read64(region &+ OFF_CURSOR)
@@ -3726,8 +3720,7 @@ require "./file"
       def self.grow_onto(region : UInt64, need : UInt64) : UInt64
         capacity = (IyiHeap.read64(region &+ OFF_MAP) &- DATA) &* 2_u64
         capacity = need if capacity < need
-        capacity = (capacity &+ 4095_u64) & 0xFFFFFFFFFFFFF000_u64
-        length = capacity &+ DATA
+        length = mapping_length(capacity)
         fresh = __iyi_mmap(length).address
         IyiHeap.write64(fresh &+ OFF_CURSOR, fresh &+ DATA)
         IyiHeap.write64(fresh &+ OFF_LIMIT, fresh &+ length)

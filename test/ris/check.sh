@@ -2,8 +2,8 @@
 # ris's own checks: every program under test/ris/refused must be refused by
 # the compiler with the expected message, test/ris/allowed.ri must compile
 # and run, the fibers test must read back what each fiber wrote, a tape must
-# grow past its first mapping and refuse an index out of range, and the
-# respond sample must print its known checksum.
+# grow past its first mapping in whole 64 KiB grains and refuse an index out
+# of range, and the respond sample must print its known checksum.
 #
 #   bash test/ris/check.sh
 set -uo pipefail
@@ -78,6 +78,9 @@ if [ "$out" = $'fiber A wrong: 0\nfiber B wrong: 0' ]; then echo "runs     fiber
 
 out=$("$RIS" run test/ris/grow.ri 2>&1)
 if [ "$out" = $'round 1: 100 MiB intact, before 499500, after 7\nround 2: 100 MiB intact, before 999000, after 14' ]; then echo "runs     grow"; else echo "FAILED   grow: $out"; status=1; fi
+
+out=$("$RIS" run test/ris/grain.ri 2>&1)
+if [ "$out" = 'PASS: tape mappings are whole 64 KiB grains' ]; then echo "runs     grain"; else echo "FAILED   grain: $out"; status=1; fi
 
 out=$("$RIS" run test/ris/bounds.ri 2>&1)
 if grep -qF $'10 30 30' <<<"$out" && grep -qF "index 3 out of range for 3 elements" <<<"$out"; then echo "runs     bounds"; else echo "FAILED   bounds: $out"; status=1; fi
