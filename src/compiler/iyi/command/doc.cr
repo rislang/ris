@@ -54,7 +54,7 @@ class Iyi::Command
       roots << File.expand_path(Compiler::ARTIFACT_DIR) if Compiler.workspace_artifacts(Dir.current)
       packages = Mod::Installer.manifest?(Dir.current) ? ", and through this project's #{File.basename(Mod::Installer.manifest_in(Dir.current))}" : ""
       abort! "can't find module '#{filename}'. A module's path is its file's path, so this one is " \
-             "`#{filename}.iyi` (or `#{filename}.iyimod` in #{Compiler::ARTIFACT_DIR}), looked for under #{roots.join(", ")}#{packages}", :USAGE_ERROR
+             "`#{filename}.ri` (or `#{filename}.iyimod` in #{Compiler::ARTIFACT_DIR}), looked for under #{roots.join(", ")}#{packages}", :USAGE_ERROR
     else
       abort! "expected a module path (`#{Command.program_name} doc app/greeter`), " \
              "a .iyi file, a .iyimod artifact, or a type of the prelude " \
@@ -128,14 +128,17 @@ class Iyi::Command
           else
             next
           end
-        file = File.join(checkout, "#{inner}.iyi")
-        return File.expand_path(file) if File.file?(file)
+        # ris: `name.ri` first, as the compiler reads it.
+        {".ri", ".iyi"}.each do |extension|
+          file = File.join(checkout, "#{inner}#{extension}")
+          return File.expand_path(file) if File.file?(file)
+        end
       end
     end
 
     roots = [Dir.current] + IyiPath.new(iyi_path_entries).entries
     roots.each do |root|
-      {".iyi", ".cr"}.each do |extension|
+      {".ri", ".iyi", ".cr"}.each do |extension|
         relative = "#{path}#{extension}"
         candidate = File.join(root, relative)
         next unless File.file?(candidate) && doc_spelled_as?(root, relative)
@@ -371,10 +374,12 @@ class Iyi::Command
       abort! "#{filename} declares no module, and a module is what `doc` reads", :USAGE_ERROR
     end
     module_root = doc_module_root(filename, module_name)
-    unless Iyi.same_file?(File.join(module_root, "#{module_name}.iyi"), filename)
+    # ris: the file's own extension, `.ri` or the `.iyi` carried over.
+    extension = filename.ends_with?(".ri") ? ".ri" : ".iyi"
+    unless Iyi.same_file?(File.join(module_root, "#{module_name}#{extension}"), filename)
       abort! "#{filename} declares `module #{module_name}`, and a module's path " \
              "is its file's path (SPEC.md R-1, IV.6): a module by that name is " \
-             "read from #{module_name}.iyi", :USAGE_ERROR
+             "read from #{module_name}#{extension}", :USAGE_ERROR
     end
 
     emit_dir = File.tempname("iyi-doc", nil)

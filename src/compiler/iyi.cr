@@ -34,13 +34,13 @@ module Iyi
     Usage: ris [command] [switches] [program file] [--] [arguments]
 
     Command:
-        init         write a new project: iyi.mod and its root module
-        get          add or move a requirement in iyi.mod; -u updates all
+        init         write a new project: ris.mod and its root module
+        get          add or move a requirement in ris.mod; -u updates all
         build        build an executable
         run          build and run a program (default)
-        mod          inspect a .iyimod artifact; `mod tidy` fixes iyi.mod
+        mod          inspect a .iyimod artifact; `mod tidy` fixes ris.mod
         doc          print a module's exported surface, or a prelude type's
-        test         run every *_test.iyi: exit 0 passes, else fails
+        test         run every *_test.ri: exit 0 passes, else fails
         vet          report unreachable code; findings are the exit code
         check        type-check only; errors are the exit code, -f json data
         fmt          format files in place; --check makes a change fail

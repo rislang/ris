@@ -149,7 +149,7 @@ class Iyi::Command
     Usage: #{Command.program_name} init MODULE [DIR]
 
     Write a new project: `ris.mod` naming MODULE, and NAME.ri, its root
-    module, where NAME is MODULE's last segment (`-` written `_`) - `iyi
+    module, where NAME is MODULE's last segment (`-` written `_`) - `ris
     init kemal` writes ris.mod and kemal.ri. DIR is where, and the current
     directory when it is left out. Nothing that is already there is
     overwritten.
