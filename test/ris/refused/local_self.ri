@@ -1,0 +1,17 @@
+module test/ris/refused/local_self
+@[OnTape]
+struct Holder
+  @values : TapeArray(TapeString)
+  def initialize
+    @values = TapeArray(TapeString).new
+  end
+  def escape : Nil
+    Tape.local do
+      @values.push(TapeString.build { |w| w.append("inner") })
+    end
+  end
+end
+Tape.scope do
+  h = Holder.new
+  h.escape
+end

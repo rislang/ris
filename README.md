@@ -41,6 +41,13 @@ runs ris's checks. Source files end in `.ri`. Building needs what iyi needs
   `TapeWriter` and `TapeArray(T)` (`src/iyi/tape.iyi`).
 * `Tape.scope { }` frees the fiber's tape when the block returns. It returns
   nil; a nested scope runs on the outer tape. A fiber switch swaps tapes.
+* `Tape.local { }` always owns an independent temporary tape, restores
+  the previous tape on exit (including early return and panic), and returns
+  nil. Copy retained output with `.to_s` before leaving. Its mappings are
+  eligible for reuse immediately. Outer `TapeString` values may be read;
+  convert other outer tape values to owned data before entering. This
+  conservative restriction prevents storing temporary values in outer tape
+  objects until the compiler supports distinct tape lifetimes.
 * Only tape types go on the tape. `Pointer` is outside the rules.
 
 The compiler refuses a tape value (examples in `test/ris/refused/`) in a

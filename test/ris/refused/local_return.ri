@@ -1,0 +1,10 @@
+module test/ris/refused/local_return
+def escape : TapeString
+  Tape.scope do
+    Tape.local do
+      return TapeString.build { |w| w.append("inner") }
+    end
+  end
+  TapeString.build { |w| w.append("bad") }
+end
+escape

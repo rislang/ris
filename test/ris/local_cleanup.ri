@@ -1,0 +1,52 @@
+module test/ris/local_cleanup
+import std/int
+
+def check(ok : Bool) : Nil
+  raise "local cleanup check failed" unless ok
+end
+
+def fail_local(events : Array(String)) : Int32
+  defer events << (IyiRegion.tape == 0_u64 ? "empty" : "bad empty")
+  Tape.scope do
+    outer = IyiRegion.tape
+    defer events << (IyiRegion.tape == outer ? "outer" : "bad outer")
+    Tape.local do
+      local_tape = IyiRegion.tape
+      defer events << (IyiRegion.tape == local_tape ? "local" : "bad local")
+      Tape.local do
+        defer events << (IyiRegion.tape != local_tape ? "nested" : "bad nested")
+        raise "expected local panic"
+      end
+    end
+  end
+  0
+end
+
+def interleave(tag : UInt8) : Nil
+  Tape.scope do
+    outer = TapeString.build { |w| w.push(tag) }
+    saved = IyiRegion.tape
+    Tape.local do
+      text = TapeString.build { |w| w.append(outer.to_s) }
+      current = IyiRegion.tape
+      sleep(1)
+      check(IyiRegion.tape == current)
+      check(text.to_unsafe[0] == tag)
+    end
+    check(IyiRegion.tape == saved)
+    check(outer.to_unsafe[0] == tag)
+  end
+end
+
+events = Array(String).new
+group do |g|
+  a = g.spawn { interleave(65_u8) }
+  b = g.spawn { interleave(66_u8) }
+  task = g.spawn { fail_local(events) }
+  check(!a.value.is_a?(Panicked))
+  check(!b.value.is_a?(Panicked))
+  check(task.value.is_a?(Panicked))
+end
+check(events.join("|") == "nested|local|outer|empty")
+check(IyiRegion.tape == 0_u64)
+puts "PASS: local panic cleanup and fiber switching"

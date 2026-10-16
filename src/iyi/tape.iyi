@@ -28,6 +28,14 @@ end
 module Tape
   CAPACITY = 67108864_u64
 
+  # Independent temporary tape, even inside a scope. Copy retained results
+  # before leaving. Outer TapeString values may be read; other outer tape
+  # values must be converted to owned data before entering.
+  def self.local(&) : Nil
+    IyiRegion.tape_local(CAPACITY) { yield }
+    nil
+  end
+
   # Returns nothing: a block's value is the one thing that leaves it
   # without an assignment the compiler can see, so it is not passed on.
   # What must outlive the scope is copied into a variable of the code
@@ -99,6 +107,65 @@ struct TapeWriter
     grow(count) if length &+ count > (@state + 2_i64).value
     Pointer(UInt8).new(@state.value &+ length).copy_from(text.to_unsafe, text.bytesize)
     (@state + 1_i64).value = length &+ count
+  end
+
+  def append(text : TapeString) : Nil
+    append(text.to_unsafe, text.bytesize)
+  end
+
+  def append(bytes : Pointer(UInt8), count : Int32) : Nil
+    length = (@state + 1_i64).value
+    grow(count.to_u64) if length &+ count.to_u64 > (@state + 2_i64).value
+    Pointer(UInt8).new(@state.value &+ length).copy_from(bytes, count)
+    (@state + 1_i64).value = length &+ count.to_u64
+  end
+
+  # *value* in decimal, written in place: `value.to_s` would make a heap
+  # string for every number a page prints.
+  def append_int(value : Int64) : Nil
+    # The magnitude as unsigned, so the most negative value has one too.
+    magnitude = value < 0 ? 0_u64 &- value.unsafe_to_u64 : value.unsafe_to_u64
+    digits = uninitialized StaticArray(UInt8, 20)
+    base = pointerof(digits).as(Pointer(UInt8))
+    count = 0
+    while true
+      (base + (19 - count)).value = (48_u64 &+ magnitude % 10_u64).unsafe_to_u8
+      count = count + 1
+      magnitude = magnitude // 10_u64
+      break if magnitude == 0_u64
+    end
+    push(45_u8) if value < 0
+    append(base + (20 - count), count)
+  end
+
+  def append_int(value : Int32) : Nil
+    append_int(value.to_i64)
+  end
+
+  # *text* with `&`, `<`, `>`, `"` and `'` escaped as `ERB::Util.html_escape`
+  # writes them; the runs between them are copied whole.
+  def append_html_escaped(text : String) : Nil
+    bytes = text.to_unsafe
+    size = text.bytesize
+    start = 0
+    index = 0
+    while index < size
+      escaped = case bytes[index]
+                when 38_u8 then "&amp;"
+                when 60_u8 then "&lt;"
+                when 62_u8 then "&gt;"
+                when 34_u8 then "&quot;"
+                when 39_u8 then "&#39;"
+                else            nil
+                end
+      if escaped
+        append(bytes + start, index - start) if index > start
+        append(escaped)
+        start = index + 1
+      end
+      index = index + 1
+    end
+    append(bytes + start, size - start) if size > start
   end
 
   def length : Int32

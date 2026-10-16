@@ -18,6 +18,7 @@
 
 module std/compress
 
+import std/int
 import std/digest::{CRC32, Adler32}
 
 # A growing byte buffer: the output side of both directions, and the

@@ -39,6 +39,18 @@ expect return_escape 'Copy the text with `.to_s`'
 expect outer_var 'copy contained TapeString values with `.to_s`'
 expect owned_cache "to be String, not TapeString"
 
+expect local_outer "is a variable of the code around this Tape.local"
+expect local_mutate "cannot use outer tape value"
+expect local_self 'cannot use outer tape value `self`'
+expect local_return "cannot return a tape value"
+expect local_break "cannot break a tape value"
+expect local_yield_break "cannot break a tape value"
+out=$("$RIS" run test/ris/local.ri 2>&1)
+if [ "$out" = 'PASS: local isolation, reuse, nested scopes, borrowed text, retained copy and early exits' ]; then echo "runs     local"; else echo "FAILED   local: $out"; status=1; fi
+
+out=$("$RIS" run test/ris/local_cleanup.ri 2>/dev/null)
+if [ "$out" = 'PASS: local panic cleanup and fiber switching' ]; then echo "runs     local_cleanup"; else echo "FAILED   local_cleanup: $out"; status=1; fi
+
 # Cleanup keeps LIFO order on early exits, panic and explicit exit.
 out=$("$RIS" run test/ris/cleanup_order.ri 2>&1)
 if [ "$out" = $'inner return\nouter return\n7\nnested\ninner break\nouter break\ninner return\nouter return\n7\ntrue\ntrue' ]; then echo "runs     cleanup_order"; else echo "FAILED   cleanup_order: $out"; status=1; fi
@@ -72,6 +84,9 @@ if grep -qF $'10 30 30' <<<"$out" && grep -qF "index 3 out of range for 3 elemen
 
 out=$("$RIS" run test/ris/owned.ri 2>&1)
 if [ "$out" = 'PASS: explicit owned copy, typed cache boundary, UTF-8, empty text and scope reuse' ]; then echo "runs     owned"; else echo "FAILED   owned: $out"; status=1; fi
+
+out=$("$RIS" run test/ris/writer.ri 2>&1)
+if [ "$out" = '0 -42 9223372036854775807 -9223372036854775808 a&amp;b&lt;c&gt;&quot;d&#39;e <b>' ]; then echo "runs     writer"; else echo "FAILED   writer: $out"; status=1; fi
 
 out=$("$RIS" run samples/ris/hello.ri 2>&1)
 if [ "$out" = $'Hello from ris, order 1\ntotal 1649' ]; then echo "runs     samples/ris/hello"; else echo "FAILED   samples/ris/hello: $out"; status=1; fi

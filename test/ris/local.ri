@@ -1,0 +1,62 @@
+module test/ris/local
+import std/int
+
+def check(ok : Bool) : Nil
+  raise "local check failed" unless ok
+end
+
+def early : Int32
+  Tape.local do
+    text = TapeString.build { |w| w.append("early") }
+    return text.bytesize
+  end
+  0
+end
+
+check(early == 5)
+check(IyiRegion.tape == 0_u64)
+copy = ""
+Tape.scope do
+  outer = TapeString.build { |w| w.append("outer") }
+  saved = IyiRegion.tape
+  cursor = IyiHeap.read64(saved)
+  first = 0_u64
+  20.times do
+    Tape.local do
+      current = IyiRegion.tape
+      check(current != saved)
+      first = current if first == 0_u64
+      check(current == first)
+      text = TapeString.build(1) { |w| w.append(outer.to_s) }
+      copy = text.to_s
+      Tape.scope { check(IyiRegion.tape == current) }
+      break 9
+    end
+    check(IyiRegion.tape == saved)
+    check(IyiHeap.read64(saved) == cursor)
+    check(outer.to_s == "outer")
+  end
+  Tape.local do
+    current = IyiRegion.tape
+    Tape.local do
+      check(IyiRegion.tape != current)
+      inner = TapeString.build { |w| w.append("inner") }
+      check(inner.to_s == "inner")
+    end
+    check(IyiRegion.tape == current)
+  end
+  Tape.local do
+    first_mapping = IyiRegion.tape
+    # Force the local tape to grow onto a second mapping without touching
+    # 64 MiB of pages. Cleanup must release the whole chain, then restore.
+    IyiRegion.tape_bytes(Tape::CAPACITY)
+    check(IyiRegion.tape != first_mapping)
+  end
+  check(IyiRegion.tape == saved)
+  check(IyiHeap.read64(saved) == cursor)
+  check(early == 5)
+  check(IyiRegion.tape == saved)
+end
+check(copy == "outer")
+check(IyiRegion.tape == 0_u64)
+puts "PASS: local isolation, reuse, nested scopes, borrowed text, retained copy and early exits"

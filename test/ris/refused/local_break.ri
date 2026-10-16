@@ -1,0 +1,7 @@
+module test/ris/refused/local_break
+Tape.scope do
+  escaped = Tape.local do
+    break TapeString.build { |w| w.append("inner") }
+  end
+  puts escaped.to_s
+end

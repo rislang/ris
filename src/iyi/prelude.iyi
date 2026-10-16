@@ -3576,6 +3576,21 @@ require "./file"
         yield
       end
 
+      # Unlike tape_scope, this always owns a separate chain of mappings.
+      # Ordinary defer captures the saved tape and also runs on nonlocal exits
+      # and panic; the single cached tape guard belongs to the outer scope.
+      def self.tape_local(capacity : UInt64, &)
+        saved = @@tape
+        @@tape = acquire(capacity)
+        defer restore_tape(saved)
+        yield
+      end
+
+      def self.restore_tape(saved : UInt64) : Nil
+        release_tape
+        @@tape = saved
+      end
+
       def self.release_tape : Nil
         # The tape may have grown past its first mapping (`grow_onto`): the
         # running one is the newest, and each names the one before it.

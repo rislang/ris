@@ -1,0 +1,12 @@
+module test/ris/refused/local_yield_break
+
+def with_local(&)
+  Tape.local { yield }
+end
+
+Tape.scope do
+  escaped = with_local do
+    break TapeString.build { |w| w.append("inner") }
+  end
+  puts escaped.to_s
+end

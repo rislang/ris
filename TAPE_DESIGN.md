@@ -10,8 +10,8 @@ Ordinary objects use iyi's collected heap. Tape is opt-in: `TapeString`,
 fiber's tape. `@[OnTape]` marks a struct as tape-bearing; the annotation
 alone does not move the struct or all of its fields onto the tape.
 
-A tape allocation needs an active `Tape.scope`. Tape allocation outside
-one terminates the program. Each fiber has its own active tape; switching
+A tape allocation needs an active `Tape.scope` or `Tape.local`. Tape
+allocation outside one terminates the program. Each fiber has its own active tape; switching
 fibers saves and restores it. Allocations are bump-pointer allocations.
 The initial mapping is 64 MiB; a full tape adds a larger mapping without
 moving existing allocations. The scope releases the mapping chain and
@@ -24,9 +24,18 @@ cleanup node, allocated once per fiber. Normal exits (including nonlocal
 in LIFO order with ordinary defers; later scopes need no GC allocation.
 A scope normally returns `Nil`; a non-tape `break` value can leave it.
 
+`Tape.local` always acquires an independent tape, even inside another
+scope or local tape. Its cleanup releases the entire local mapping chain
+and restores the previously active tape on normal exits, nonlocal exits,
+panic and exit. It uses an ordinary defer guard (including its heap
+allocation), rather than the single cached outer-scope guard. Released
+mappings use the same spare cache; repeated calls can reuse warm storage.
+Local tapes can nest, and ordinary `Tape.scope` inside one shares it.
+Copy retained results with `.to_s` before leaving the local tape.
+
 ## Lifetime and storage rules
 The intended invariant: no safe tape-bearing value survives reclamation
-of the outermost tape scope that owns its storage.
+of the tape scope or local tape that owns its storage.
 
 * Tape values may be locals, method arguments/results within that lifetime,
   fields of other `@[OnTape]` structs, and elements of `TapeArray(T)`.
@@ -39,6 +48,12 @@ of the outermost tape scope that owns its storage.
   copy data out, but must obey the same lifetime restrictions.
 * Nested scopes may pass tape values back into the still-active outer
   scope: both scopes use the same storage lifetime.
+* `Tape.local` starts a new lifetime: its values cannot be assigned to
+  outer locals or returned through an enclosing method or yield binding.
+  Outer `TapeString` values may be read. Other outer tape values, including
+  an outer tape receiver's `self`, must be converted to owned data before
+  entering. This conservative restriction prevents indirect mutation of
+  outer tape containers; distinct region lifetimes are not tracked in types.
 * `TapeString#to_s : String` copies bytes into independent GC-managed
   storage. Numeric results can leave without retaining tape storage.
 * Raw pointers and direct internal allocator calls are outside this safe
@@ -75,4 +90,5 @@ Before treating this model as stable, audit lifetime checks across all
 language features and specify pointer/FFI boundaries and resource limits.
 Measure real workloads, copy-out costs, GC scanning, long-lived scopes and
 many fibers. A long outer scope retains temporary and superseded buffers;
-a favorable request-loop benchmark alone does not establish general gains.
+use `Tape.local` to bound temporary copy-out work within that scope. A
+favorable request-loop benchmark alone does not establish general gains.
