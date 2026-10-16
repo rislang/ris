@@ -1192,7 +1192,7 @@ module Iyi::Lsp
           # outside the workspace - the library being written beside the
           # app - and its files are part of every verdict that imports it.
           # Unstamped, an edit there left each file's result "unchanged".
-          next unless ::Path[file].basename == Mod::Installer::MANIFEST
+          next unless Mod::Installer::MANIFESTS.includes?(::Path[file].basename)
           replacements = begin
             Mod::ModFile.parse(File.read(file), file).replacements
           rescue Mod::ModError
@@ -1202,7 +1202,7 @@ module Iyi::Lsp
             local = File.expand_path(target, File.dirname(file))
             next unless Dir.exists?(local)
             replaced_files = workspace_files(local, with_lib: true).map(&.[0])
-            manifest = File.join(local, Mod::Installer::MANIFEST)
+            manifest = Mod::Installer.manifest_in(local)
             replaced_files << manifest if File.file?(manifest)
             replaced_files.each do |replaced|
               if replaced_info = File.info?(replaced)
@@ -3962,7 +3962,7 @@ module Iyi::Lsp
         if workspace_directory?(path)
           next if name == "lib" && !with_lib
           walk_workspace(path, in_lib || name == "lib", with_lib, manifests, limit, found)
-        elsif (manifests ? name.in?(Mod::Installer::MANIFEST, Mod::Sum::FILE) : name.ris_source?) && listed_file?(path)
+        elsif (manifests ? (Mod::Installer::MANIFESTS.includes?(name) || Mod::Sum::FILES.includes?(name)) : name.ris_source?) && listed_file?(path)
           found << {path, in_lib}
         end
       end

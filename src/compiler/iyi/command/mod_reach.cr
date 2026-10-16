@@ -18,14 +18,14 @@ class Iyi::Command
         puts mod_reach_usage
         exit
       else
-        abort! "mod reach: unexpected '#{option}'; it reads the iyi.mod in this directory", :USAGE_ERROR
+        abort! "mod reach: unexpected '#{option}'; it reads the ris.mod in this directory", :USAGE_ERROR
       end
     end
 
     dir = Dir.current
-    manifest_path = File.join(dir, Mod::Installer::MANIFEST)
+    manifest_path = Mod::Installer.manifest_in(dir)
     unless File.file?(manifest_path)
-      abort! "mod reach: there is no iyi.mod in #{Iyi.relative_filename(dir)}; " \
+      abort! "mod reach: there is no ris.mod in #{Iyi.relative_filename(dir)}; " \
              "`#{Command.program_name} init MODULE` writes one", :USAGE_ERROR
     end
 

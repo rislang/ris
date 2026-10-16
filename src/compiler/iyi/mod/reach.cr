@@ -111,7 +111,7 @@ module Iyi::Mod
         full = File.join(dir, entry)
         if File.directory?(full)
           next if entry.starts_with?('.') || entry == "lib"
-          next if File.file?(File.join(full, "iyi.mod"))
+          next if Installer.manifest?(full)
           found.concat(sources(full))
         elsif entry.ris_source? && !entry.ends_with?("_test.iyi")
           found << full

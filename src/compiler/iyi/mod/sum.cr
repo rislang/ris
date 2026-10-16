@@ -22,12 +22,24 @@ require "../codegen/cache_dir"
 
 module Iyi::Mod
   module Sum
-    FILE = "iyi.sum"
+    # ris: `ris.sum` beside `ris.mod`; an iyi project's `iyi.sum` is kept
+    # while its manifest is still `iyi.mod`.
+    FILE     = "ris.sum"
+    IYI_FILE = "iyi.sum"
+    FILES    = {FILE, IYI_FILE}
+
+    def self.path_in(dir : String) : String
+      if File.basename(Installer.manifest_in(dir)) == Installer::IYI_MANIFEST
+        File.join(dir, IYI_FILE)
+      else
+        File.join(dir, FILE)
+      end
+    end
 
     # Verifies *selections* against the manifest directory's `iyi.sum`,
     # appending what is new. *checkout* answers a selection's directory.
     def self.check(dir : String, selections : Array(Selection), &checkout : Selection -> String) : Nil
-      sum_path = File.join(dir, FILE)
+      sum_path = path_in(dir)
       known = File.file?(sum_path) ? parse(File.read(sum_path), sum_path) : {} of String => String
       added = false
 
@@ -64,7 +76,7 @@ module Iyi::Mod
     # of the manifest in *dir* now uses, and answers how many went: a sum
     # line for a version nothing builds is a fact about another program.
     def self.prune(dir : String, keep : Array(Selection)) : Int32
-      sum_path = File.join(dir, FILE)
+      sum_path = path_in(dir)
       return 0 unless File.file?(sum_path)
       known = parse(File.read(sum_path), sum_path)
       wanted = keep.map { |selection| "#{selection.path} v#{selection.version}" }.to_set
@@ -82,7 +94,7 @@ module Iyi::Mod
     # Which entries of the sum in *dir* are not one of *keep*, without
     # writing anything.
     def self.stale(dir : String, keep : Array(Selection)) : Array(String)
-      sum_path = File.join(dir, FILE)
+      sum_path = path_in(dir)
       return [] of String unless File.file?(sum_path)
       wanted = keep.map { |selection| "#{selection.path} v#{selection.version}" }.to_set
       parse(File.read(sum_path), sum_path).keys.reject { |key| wanted.includes?(key) }.sort!

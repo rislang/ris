@@ -39,7 +39,7 @@ class Iyi::Command
     Usage: #{Command.program_name} mod [subcommand]
 
     Subcommand:
-        tidy [--check]           make iyi.mod and iyi.sum say what the source
+        tidy [--check]           make ris.mod and ris.sum say what the source
                                  imports: add what is missing, remove what
                                  nothing uses, drop sums nothing builds
         reach                    say what every module the build selects

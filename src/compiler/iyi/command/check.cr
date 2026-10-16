@@ -121,7 +121,7 @@ class Iyi::Command
     # `--affected iyi.mod` answered "0 consumer(s) checked, all compile",
     # which is a clean verdict about nothing.
     manifest_changed = typed.select do |path|
-      File.basename(path).in?(Iyi::Mod::Installer::MANIFEST, Iyi::Mod::Sum::FILE)
+      Iyi::Mod::Installer::MANIFESTS.includes?(File.basename(path)) || Iyi::Mod::Sum::FILES.includes?(File.basename(path))
     end
 
     # A changed file no import can name: the prelude, which every module

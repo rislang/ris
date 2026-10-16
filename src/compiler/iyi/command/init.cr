@@ -107,7 +107,7 @@ class Iyi::Command
     unless Iyi.same_file?(directory, Dir.current)
       puts "cd #{iyi_init_shell_word(Iyi.relative_filename(directory))}"
     end
-    puts "#{Command.program_name} run #{name}.iyi    # builds and runs it"
+    puts "#{Command.program_name} run #{name}.ri     # builds and runs it"
   end
 
   # *path* as one word to `cd`: as it is when every character means itself
@@ -132,11 +132,11 @@ class Iyi::Command
   # The two files, in the order they are written.
   private def iyi_init_files(module_path : String, name : String) : Hash(String, String)
     {
-      "iyi.mod" => <<-MOD,
-        # `iyi get example.com/someone/lib` adds a dependency here.
+      "ris.mod" => <<-MOD,
+        # `#{Command.program_name} get example.com/someone/lib` adds a dependency here.
         module #{module_path}
         MOD
-      "#{name}.iyi" => <<-IYI,
+      "#{name}.ri" => <<-IYI,
         module #{name}
 
         puts "hello from #{name}"
@@ -148,9 +148,9 @@ class Iyi::Command
     <<-USAGE
     Usage: #{Command.program_name} init MODULE [DIR]
 
-    Write a new project: `iyi.mod` naming MODULE, and NAME.iyi, its root
+    Write a new project: `ris.mod` naming MODULE, and NAME.ri, its root
     module, where NAME is MODULE's last segment (`-` written `_`) - `iyi
-    init kemal` writes iyi.mod and kemal.iyi. DIR is where, and the current
+    init kemal` writes ris.mod and kemal.ri. DIR is where, and the current
     directory when it is left out. Nothing that is already there is
     overwritten.
 

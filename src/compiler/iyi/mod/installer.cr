@@ -14,14 +14,32 @@ require "./reach"
 
 module Iyi::Mod
   module Installer
-    MANIFEST = "iyi.mod"
+    # ris: a ris module is named by `ris.mod`; an iyi package's `iyi.mod`
+    # is read where there is no `ris.mod`, so iyi packages stay requirable.
+    MANIFEST     = "ris.mod"
+    IYI_MANIFEST = "iyi.mod"
+    MANIFESTS    = {MANIFEST, IYI_MANIFEST}
+
+    # The manifest in *dir*: `ris.mod`, else an existing `iyi.mod`, else
+    # where a new `ris.mod` would go.
+    def self.manifest_in(dir : String) : String
+      ris = File.join(dir, MANIFEST)
+      return ris if File.file?(ris)
+      iyi = File.join(dir, IYI_MANIFEST)
+      File.file?(iyi) ? iyi : ris
+    end
+
+    # Whether *dir* holds a module manifest of either name.
+    def self.manifest?(dir : String) : Bool
+      MANIFESTS.any? { |name| File.file?(File.join(dir, name)) }
+    end
 
     # The prefix table for the program answered from *entry_dir* - the root
     # its entry's header names, or the entry's directory
     # (`Compiler.entry_root_of`) - or an empty one when there is no manifest
     # to serve.
     def self.table_for(entry_dir : String) : Array({String, String})
-      manifest_path = File.join(entry_dir, MANIFEST)
+      manifest_path = manifest_in(entry_dir)
       return [] of {String, String} unless File.file?(manifest_path)
 
       root = ModFile.parse(File.read(manifest_path), manifest_path)
@@ -62,7 +80,7 @@ module Iyi::Mod
     # files wrote them, and they mean what its manifest says wherever the
     # package is used. Empty for a directory with no manifest.
     def self.short_names_in(dir : String) : Array({String, String})
-      file = File.join(dir, MANIFEST)
+      file = manifest_in(dir)
       return [] of {String, String} unless File.file?(file)
       short_name_rows(ModFile.parse(File.read(file), file))
     end
@@ -92,7 +110,7 @@ module Iyi::Mod
         over = Reach.of(checkout).beyond(allowed)
         next if over.empty?
         raise ModError.new(
-          "#{selection} reaches #{over.join(", ")}, which its line in iyi.mod does not allow " \
+          "#{selection} reaches #{over.join(", ")}, which its line in #{File.basename(manifest_in(dir))} does not allow " \
           "(`reaches #{allowed.empty? ? "nothing" : allowed.join(", ")}`). Add what it now needs to the line if that " \
           "is wanted, or stay on a version that reaches less; `#{Iyi::Command.program_name} mod reach` lists each module's")
       end
@@ -136,9 +154,9 @@ module Iyi::Mod
     # says whose it is, and a replacement pointed at the wrong checkout is
     # the mistake this catches before any import resolves into it.
     private def self.local_manifest(path : String, local : String, written : String) : ModFile
-      file = File.join(local, MANIFEST)
+      file = manifest_in(local)
       unless File.file?(file)
-        detail = Dir.exists?(local) ? "has no iyi.mod" : "does not exist"
+        detail = Dir.exists?(local) ? "has no #{MANIFEST}" : "does not exist"
         raise ModError.new("replace #{path} => #{written}: #{local} #{detail}; " \
                            "a replacement is a directory holding the module it replaces")
       end

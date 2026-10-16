@@ -27,7 +27,7 @@ module Iyi::Mod
     # The checkout directory for *path* at *version*, fetched if absent.
     def self.checkout(path : String, version : SemanticVersion) : String
       target = cache_target(path, version)
-      return target if File.exists?(File.join(target, "iyi.mod"))
+      return target if Installer.manifest?(target)
       ModFile.check_major(path, version)
 
       remote = remote_for(path)
@@ -70,10 +70,10 @@ module Iyi::Mod
         end
       end
 
-      unless File.exists?(File.join(staging, "iyi.mod"))
+      unless Installer.manifest?(staging)
         FileUtils.rm_rf(staging)
         raise ModError.new(
-          "#{path} v#{version} has no iyi.mod at its root; " \
+          "#{path} v#{version} has no ris.mod or iyi.mod at its root; " \
           "a module says whose it is before anything can require it")
       end
 
@@ -89,7 +89,7 @@ module Iyi::Mod
     # bound to git.
     def self.manifest(path : String, version : SemanticVersion) : ModFile
       dir = checkout(path, version)
-      file = File.join(dir, "iyi.mod")
+      file = Installer.manifest_in(dir)
       ModFile.parse(File.read(file), file)
     end
 

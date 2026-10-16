@@ -128,7 +128,7 @@ class Iyi::Command
     # reach the change", which is an agent bumping a dependency and being
     # told there is nothing to run.
     manifest_changed = affected.select do |changed|
-      File.basename(changed).in?(Iyi::Mod::Installer::MANIFEST, Iyi::Mod::Sum::FILE)
+      Iyi::Mod::Installer::MANIFESTS.includes?(File.basename(changed)) || Iyi::Mod::Sum::FILES.includes?(File.basename(changed))
     end
     # A changed file no import can name is the same largest change: the
     # prelude is compiled by every test and imported by none, and a file

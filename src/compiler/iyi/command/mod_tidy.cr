@@ -36,14 +36,14 @@ class Iyi::Command
       when "--check"
         check_only = true
       else
-        abort! "mod tidy: unexpected '#{option}'; it tidies the iyi.mod in this directory", :USAGE_ERROR
+        abort! "mod tidy: unexpected '#{option}'; it tidies the ris.mod in this directory", :USAGE_ERROR
       end
     end
 
     dir = Dir.current
-    manifest_path = File.join(dir, Mod::Installer::MANIFEST)
+    manifest_path = Mod::Installer.manifest_in(dir)
     unless File.file?(manifest_path)
-      abort! "mod tidy: there is no iyi.mod in #{Iyi.relative_filename(dir)}; " \
+      abort! "mod tidy: there is no ris.mod in #{Iyi.relative_filename(dir)}; " \
              "`#{Command.program_name} init MODULE` writes one", :USAGE_ERROR
     end
 
@@ -124,12 +124,12 @@ class Iyi::Command
         puts "kept #{path} v#{version}: nothing imports it, but without the line another module's requirement would build v#{lower}"
       end
       unless stale.empty?
-        puts "#{check_only ? "would drop" : "dropped"} #{stale.size} iyi.sum #{stale.size == 1 ? "entry" : "entries"} for a version nothing builds"
+        puts "#{check_only ? "would drop" : "dropped"} #{stale.size} ris.sum #{stale.size == 1 ? "entry" : "entries"} for a version nothing builds"
       end
 
       changed = !added.empty? || !removed.empty? || !stale.empty?
       unless changed
-        puts "iyi.mod and iyi.sum say what the source imports"
+        puts "ris.mod and ris.sum say what the source imports"
         return
       end
       exit 1 if check_only
@@ -175,7 +175,7 @@ class Iyi::Command
       # until "src\loop\loop\...\x.iyi does not parse", exit 1.
       if File.info?(full, follow_symlinks: false).try(&.directory?)
         next if entry.starts_with?('.') || entry == "lib"
-        next if File.file?(File.join(full, Mod::Installer::MANIFEST))
+        next if Mod::Installer.manifest?(full)
         found.concat(mod_tidy_sources(full))
       elsif entry.ris_source?
         found << full
@@ -188,14 +188,14 @@ class Iyi::Command
     <<-USAGE
     Usage: #{Command.program_name} mod tidy [--check]
 
-    Make iyi.mod and iyi.sum say what this module's source imports: a
+    Make ris.mod and ris.sum say what this module's source imports: a
     `require` for each package imported without one - at the version the
     build already selects, or the latest release - none for a package
     nothing imports, unless the line raises a version another module pulls
-    in, and no iyi.sum entry for a version nothing builds.
+    in, and no ris.sum entry for a version nothing builds.
 
     The source is every .iyi file under this directory, tests included,
-    except hidden directories, lib/, and directories with an iyi.mod of
+    except hidden directories, lib/, and directories with an ris.mod of
     their own. `--check` writes nothing and exits 1 when a change is due.
     USAGE
   end

@@ -52,7 +52,7 @@ class Iyi::Command
       # module was missing or where it had been looked for.
       roots = [Dir.current] + IyiPath.new(iyi_path_entries).entries
       roots << File.expand_path(Compiler::ARTIFACT_DIR) if Compiler.workspace_artifacts(Dir.current)
-      packages = File.file?(File.join(Dir.current, Mod::Installer::MANIFEST)) ? ", and through this project's #{Mod::Installer::MANIFEST}" : ""
+      packages = Mod::Installer.manifest?(Dir.current) ? ", and through this project's #{File.basename(Mod::Installer.manifest_in(Dir.current))}" : ""
       abort! "can't find module '#{filename}'. A module's path is its file's path, so this one is " \
              "`#{filename}.iyi` (or `#{filename}.iyimod` in #{Compiler::ARTIFACT_DIR}), looked for under #{roots.join(", ")}#{packages}", :USAGE_ERROR
     else
@@ -110,7 +110,7 @@ class Iyi::Command
     # A package's module, through this project's iyi.mod - a short name
     # included - the way a build resolves the import: `iyi doc
     # github.com/sdogruyol/iyi-web/iyi_web/dsl`, or `iyi doc web/iyi_web/dsl`.
-    if File.file?(File.join(Dir.current, Mod::Installer::MANIFEST))
+    if Mod::Installer.manifest?(Dir.current)
       table =
         begin
           Mod::Installer.table_for(Dir.current)

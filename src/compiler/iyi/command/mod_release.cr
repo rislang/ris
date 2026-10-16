@@ -53,9 +53,9 @@ class Iyi::Command
     end
 
     dir = File.expand_path(Dir.current)
-    manifest_path = File.join(dir, Mod::Installer::MANIFEST)
+    manifest_path = Mod::Installer.manifest_in(dir)
     unless File.file?(manifest_path)
-      abort! "mod release: there is no iyi.mod in #{Iyi.relative_filename(dir)}; a release is of a package, " \
+      abort! "mod release: there is no ris.mod in #{Iyi.relative_filename(dir)}; a release is of a package, " \
              "and a package is a directory with one", :USAGE_ERROR
     end
     root =
@@ -79,9 +79,9 @@ class Iyi::Command
     # The package has to be in HEAD, which is what a tag names: a package
     # not yet committed - or not yet its own repository, sitting untracked
     # in someone else's - has nothing a release could compare.
-    manifest_at = ->(rev : String) { "#{rev}:#{inside.empty? ? "" : "#{inside}/"}#{Mod::Installer::MANIFEST}" }
+    manifest_at = ->(rev : String) { "#{rev}:#{inside.empty? ? "" : "#{inside}/"}#{File.basename(manifest_path)}" }
     unless mod_release_git(dir, "cat-file", "-e", manifest_at.call("HEAD"))
-      abort! "mod release: HEAD of the repository at #{Iyi.relative_filename(top)} has no #{Mod::Installer::MANIFEST} at " \
+      abort! "mod release: HEAD of the repository at #{Iyi.relative_filename(top)} has no #{File.basename(manifest_path)} at " \
              "#{inside.empty? ? "its root" : inside}; a release is of what a commit holds, so commit the package first", :USAGE_ERROR
     end
 
@@ -199,7 +199,7 @@ class Iyi::Command
 
     unless wanted = proposed
       puts "the next release is v#{next_version}: #{why}"
-      puts "and its path is #{next_path}, which iyi.mod has to say first" if next_path != root.path
+      puts "and its path is #{next_path}, which ris.mod has to say first" if next_path != root.path
       return
     end
 
@@ -276,8 +276,8 @@ class Iyi::Command
     end
     begin
       package = inside.empty? ? into : File.join(into, inside)
-      unless File.file?(File.join(package, Mod::Installer::MANIFEST))
-        raise Mod::ModError.new("#{rev} has no iyi.mod at #{inside.empty? ? "the repository's root" : inside}")
+      unless Mod::Installer.manifest?(package)
+        raise Mod::ModError.new("#{rev} has no ris.mod at #{inside.empty? ? "the repository's root" : inside}")
       end
       # HEAD is compiled as it is - a `using` there is what a consumer meets.
       package_surface(package, into, rev, respell: rev != "HEAD")
@@ -367,7 +367,7 @@ class Iyi::Command
     parameters among them - is a new minor (a new patch before v1), nothing
     moved is a patch; after a pre-release, its own release. With VERSION,
     exit 1 when it is smaller than that, or when its major is not the one
-    iyi.mod's path names. Tags nothing.
+    ris.mod's path names. Tags nothing.
     USAGE
   end
 end

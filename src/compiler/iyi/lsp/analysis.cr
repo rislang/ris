@@ -228,8 +228,8 @@ module Iyi::Lsp
       program.try &.requires.each { |file| files << file }
       probes.try &.each { |file| files << file }
       if root
-        files << File.join(root, Mod::Installer::MANIFEST)
-        files << File.join(root, Mod::Sum::FILE)
+        files << Mod::Installer.manifest_in(root)
+        files << Mod::Sum.path_in(root)
       end
       files.delete(path)
       files.map { |file| {file, Analysis.disk_stamp(file)} }

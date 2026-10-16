@@ -61,9 +61,9 @@ class Iyi::Command
     end
 
     dir = Dir.current
-    manifest_path = File.join(dir, Mod::Installer::MANIFEST)
+    manifest_path = Mod::Installer.manifest_in(dir)
     unless File.file?(manifest_path)
-      abort! "get: there is no iyi.mod in #{Iyi.relative_filename(dir)}; a requirement is a line of one. " \
+      abort! "get: there is no ris.mod in #{Iyi.relative_filename(dir)}; a requirement is a line of one. " \
              "`#{Command.program_name} init MODULE` writes it", :USAGE_ERROR
     end
 
@@ -169,7 +169,7 @@ class Iyi::Command
     required = updated.requirements.to_h { |requirement| {requirement.path, requirement.version} }
     selections.each do |selection|
       if (named = required[selection.path]?) && named != selection.version
-        puts "#{selection.path} builds at v#{selection.version}: iyi.mod names v#{named}, " \
+        puts "#{selection.path} builds at v#{selection.version}: ris.mod names v#{named}, " \
              "and another module asks for more"
       end
     end
@@ -182,7 +182,7 @@ class Iyi::Command
     fetched = selections.count { |selection| !updated.replacements.has_key?(selection.path) }
     puts "#{selections.size} module#{selections.size == 1 ? "" : "s"} selected " \
          "(#{indirect} through another module's requirements); " \
-         "iyi.sum records the #{fetched} fetched"
+         "ris.sum records the #{fetched} fetched"
     unless reach_lines.empty?
       puts "what the change reaches:"
       reach_lines.each { |line| puts "  #{line}" }
@@ -260,9 +260,9 @@ class Iyi::Command
     Usage: #{Command.program_name} get [--check] PATH[@VERSION]... [--as NAME]
            #{Command.program_name} get [--check] -u
 
-    Add a requirement to iyi.mod, or move one: PATH at its latest release,
+    Add a requirement to ris.mod, or move one: PATH at its latest release,
     or at VERSION (`v1.2.3`, up or down; `latest` is the default). `-u`
-    brings every requirement already in iyi.mod to its latest release, and
+    brings every requirement already in ris.mod to its latest release, and
     never moves one down.
 
     VERSION may be a branch, a tag or a commit - `@main`, `@a1b2c3d` - and
@@ -274,9 +274,9 @@ class Iyi::Command
     A version is a git tag, `v1.2.3`, on the repository PATH names; the
     latest is the highest release, or the highest pre-release when there
     is no release. The graph is resolved by minimal version selection, the
-    checkouts are fetched into the cache and recorded in iyi.sum, and only
-    then is iyi.mod written - one line rewritten or added, nothing else
-    touched. Run it where iyi.mod is.
+    checkouts are fetched into the cache and recorded in ris.sum, and only
+    then is ris.mod written - one line rewritten or added, nothing else
+    touched. Run it where ris.mod is.
 
     `--as NAME` gives the one PATH a short name this project's files write
     in its place: `iyi get github.com/someone/web --as web` makes
