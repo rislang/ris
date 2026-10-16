@@ -68,11 +68,13 @@ own minimal HTTP loop (iyi-web: 9,182/s).
 
 ## Status and thanks
 
-ris 0.1.0 is a prototype; internals keep iyi's names so iyi merges. Thanks
-to **Crystal** (Ary Borenszweig, Juan Wajnerman, Brian Cardiff, Manas and
-community), **iyi** (Serdar Dogruyol), **Goose** (Wouter van Oortmerssen),
-**Ruby** (Yukihiro Matsumoto), C#'s `ref struct`. Developed with Claude.
-Apache 2.0: [LICENSE](LICENSE), [NOTICE.md](NOTICE.md).
+ris 0.1.0 is a prototype; internals keep iyi's names so iyi merges. Special
+thanks to Serdar Dogruyol, [iyi](https://github.com/iyilang/iyi)'s author,
+and Wouter van Oortmerssen, [Goose](https://github.com/aardappel/goose)'s
+author: ris keeps building on the iyi language and Goose's tape memory.
+Thanks to **Crystal** (Ary Borenszweig, Juan Wajnerman, Brian Cardiff,
+Manas and community), **iyi** (Serdar Dogruyol), **Goose** (Wouter van
+Oortmerssen), **Ruby** (Yukihiro Matsumoto). Apache 2.0: [LICENSE](LICENSE),
+[NOTICE.md](NOTICE.md).
 
-Special thanks to Serdar Dogruyol, [iyi](https://github.com/iyilang/iyi)'s
-author, for a friendly collaboration. ris keeps building on the iyi language.
+Developed with Claude Opus 5.5, ChatGPT Codex Sol 6.1 and other models.
