@@ -135,6 +135,59 @@ struct ParsedRequest
   end
 end
 
+# One field of a request head as it was written: its name, and its value
+# without the blanks around it. Both are views into the bytes the head was
+# read from, on the caller's tape.
+@[OnTape]
+pub struct Field
+  getter name : TapeString
+  getter value : TapeString
+
+  def initialize(@name : TapeString, @value : TapeString)
+  end
+end
+
+# A request head read where it lies (`Server.parse_head`): the request
+# line's parts and the fields, views into the caller's bytes, nothing
+# copied. The caller copies to the heap what it keeps, when it keeps it.
+@[OnTape]
+pub struct ParsedHead
+  getter method : TapeString
+  getter target : TapeString
+  getter version : TapeString
+  getter fields : TapeArray(Field)
+  # Where the body starts in the bytes: just past the blank line.
+  getter body_start : Int32
+
+  def initialize(@method : TapeString, @target : TapeString, @version : TapeString, @fields : TapeArray(Field), @body_start : Int32)
+  end
+
+  def http10? : Bool
+    HTTP.same_bytes?(@version.to_unsafe, @version.bytesize, "HTTP/1.0")
+  end
+
+  # The value of the first field called *name*, in any case.
+  def field(name : String) : TapeString?
+    i = 0
+    while i < @fields.size
+      f = @fields[i]
+      return f.value if HTTP.same_name?(f.name.to_unsafe, f.name.bytesize, name)
+      i = i + 1
+    end
+    nil
+  end
+end
+
+# Why a head is refused, and the status that answers it: 431 for a head
+# past `Server::MAX_HEAD`, 400 otherwise.
+pub struct HeadError
+  getter message : String
+  getter status : Int32
+
+  def initialize(@message : String, @status : Int32 = 400)
+  end
+end
+
 pub struct Server
   # A request too large to be a request: 1 MiB of headers, 64 MiB of body.
   MAX_HEAD =  1048576
@@ -342,55 +395,122 @@ pub struct Server
     wrote.is_a?(Int32) && !closing
   end
 
-  # A request at *from* in `text`, if a whole one is there. No request and
-  # no error means "not yet". `consumed` and `wanted` count from the start
-  # of `text`: a server parses each request where it lies in
-  # what has arrived, and copies none of what follows it.
-  def self.parse_request(text : String, from : Int32 = 0) : ParsedRequest
-    from = HTTP.past_empty_lines(text, from)
-    split_at = HTTP.find_headers_end(text, from)
-    unless split_at
-      return ParsedRequest.new(nil, "request headers past #{MAX_HEAD} bytes", true, 0, status: 431) if text.bytesize - from > MAX_HEAD
-      return ParsedRequest.new(nil, nil, false, 0)
+  # A request head at *from* in *bytes*, read on the caller's tape: nil
+  # until the blank line that ends it has arrived. The parts and fields are
+  # views into *bytes*; temporaries go on the caller's `Tape.scope`.
+  def self.parse_head(bytes : TapeString, from : Int32 = 0) : ParsedHead | HeadError | Nil
+    p = bytes.to_unsafe
+    n = bytes.bytesize
+    while from + 1 < n && p[from] == 13_u8 && p[from + 1] == 10_u8
+      from = from + 2
     end
-    lines = HTTP.split_crlf(text[from, split_at - from])
-    return ParsedRequest.new(nil, "empty request", true, 0) if lines.size == 0
-    first = lines[0]
-    sp1 = first.index(' ')
-    return ParsedRequest.new(nil, "not a request line: #{first.inspect}", true, 0) unless sp1
-    rest = first[sp1 + 1, first.bytesize - sp1 - 1]
-    sp2 = rest.index(' ')
-    return ParsedRequest.new(nil, "not a request line: #{first.inspect}", true, 0) unless sp2
-    method = first[0, sp1]
-    target = rest[0, sp2]
-    version = rest[sp2 + 1, rest.bytesize - sp2 - 1]
-    return ParsedRequest.new(nil, "not a method: #{method.inspect}", true, 0) unless HTTP.token?(method)
-    return ParsedRequest.new(nil, "not an HTTP/1 request: #{version.inspect}", true, 0) unless version == "HTTP/1.1" || version == "HTTP/1.0"
+    split_at = -1
+    i = from
+    while i + 3 < n
+      if p[i] == 13_u8 && p[i + 1] == 10_u8 && p[i + 2] == 13_u8 && p[i + 3] == 10_u8
+        split_at = i
+        break
+      end
+      i = i + 1
+    end
+    if split_at < 0
+      return HeadError.new("request headers past #{MAX_HEAD} bytes", 431) if n - from > MAX_HEAD
+      return nil
+    end
+    return HeadError.new("empty request") if split_at == from
+    line_end = HTTP.crlf_in(p, from, split_at)
+    sp1 = HTTP.byte_in(p, from, line_end, 32_u8)
+    sp2 = sp1 < line_end ? HTTP.byte_in(p, sp1 + 1, line_end, 32_u8) : line_end
+    return HeadError.new("not a request line: #{TapeString.new(p + from, line_end - from).to_s.inspect}") if sp2 >= line_end
+    method = TapeString.new(p + from, sp1 - from)
+    target = TapeString.new(p + sp1 + 1, sp2 - sp1 - 1)
+    version = TapeString.new(p + sp2 + 1, line_end - sp2 - 1)
+    return HeadError.new("not a method: #{method.to_s.inspect}") unless HTTP.token?(method.to_unsafe, method.bytesize)
+    unless HTTP.same_bytes?(version.to_unsafe, version.bytesize, "HTTP/1.1") || HTTP.same_bytes?(version.to_unsafe, version.bytesize, "HTTP/1.0")
+      return HeadError.new("not an HTTP/1 request: #{version.to_s.inspect}")
+    end
     # A control byte in the target - a bare CR, a NUL - is not part of any
     # URI (RFC 9112 §2.2, §3.2); passed on, a query with a line break in it
     # broke the answer of a block that echoed it into a header.
-    return ParsedRequest.new(nil, "not a request target: #{target.inspect}", true, 0) if target.bytesize == 0 || HTTP.control?(target)
-    headers = case fields = HTTP.parse_fields(lines)
-              in String
-                return ParsedRequest.new(nil, fields, true, 0)
-              in Hash(String, String)
-                fields
-              end
-    # Host (RFC 9112 §3.2): an HTTP/1.1 request names one, no request names
-    # two, and what it names is a host; a server answers 400 otherwise. This
-    # one served a request with no Host, and handed the block two as one,
-    # `Host: a` and `Host: b` read as "a, b".
-    hosts = 0
-    lines.each do |line|
-      hosts = hosts + 1 if line.bytesize > 4 && line.to_unsafe[4] == 58_u8 && HTTP.same_name?(line[0, 4], "Host")
+    if target.bytesize == 0 || HTTP.control?(target.to_unsafe, target.bytesize)
+      return HeadError.new("not a request target: #{target.to_s.inspect}")
     end
-    return ParsedRequest.new(nil, "Host on #{hosts} lines", true, 0) if hosts > 1
-    return ParsedRequest.new(nil, "an HTTP/1.1 request without Host", true, 0) if hosts == 0 && version == "HTTP/1.1"
+    fields = TapeArray(Field).new(16)
+    hosts = 0
+    at = line_end + 2
+    while at < split_at
+      stop = HTTP.crlf_in(p, at, split_at)
+      colon = HTTP.byte_in(p, at, stop, 58_u8)
+      return HeadError.new("header without a colon: #{TapeString.new(p + at, stop - at).to_s.inspect}") if colon >= stop
+      return HeadError.new("not a header name: #{TapeString.new(p + at, colon - at).to_s.inspect}") unless HTTP.token?(p + at, colon - at)
+      first = colon + 1
+      last = stop
+      while first < last && (p[first] == 32_u8 || p[first] == 9_u8)
+        first = first + 1
+      end
+      while last > first && (p[last - 1] == 32_u8 || p[last - 1] == 9_u8)
+        last = last - 1
+      end
+      name = TapeString.new(p + at, colon - at)
+      value = TapeString.new(p + first, last - first)
+      return HeadError.new("header #{name.to_s} contains a control character") if HTTP.control?(value.to_unsafe, value.bytesize)
+      # Host (RFC 9112 §3.2): an HTTP/1.1 request names one, no request
+      # names two, and what it names is a host; a server answers 400
+      # otherwise.
+      if HTTP.same_name?(name.to_unsafe, name.bytesize, "Host")
+        hosts = hosts + 1
+        return HeadError.new("not a host: #{value.to_s.inspect}") unless HTTP.host?(value.to_unsafe, value.bytesize)
+      end
+      fields.push(Field.new(name, value))
+      at = stop + 2
+    end
+    return HeadError.new("Host on #{hosts} lines") if hosts > 1
+    if hosts == 0 && HTTP.same_bytes?(version.to_unsafe, version.bytesize, "HTTP/1.1")
+      return HeadError.new("an HTTP/1.1 request without Host")
+    end
+    ParsedHead.new(method, target, version, fields, split_at + 4)
+  end
+
+  # A request at *from* in `text`, if a whole one is there. No request and
+  # no error means "not yet". `consumed` and `wanted` count from the start
+  # of `text`: a server parses each request where it lies in
+  # what has arrived, and copies none of what follows it. The head is read
+  # by `parse_head` on a `Tape.scope` - the caller's, when it has one - and
+  # only what the request keeps is copied to the heap.
+  def self.parse_request(text : String, from : Int32 = 0) : ParsedRequest
+    parsed = nil.as(ParsedRequest?)
+    Tape.scope do
+      parsed = request_at(text, TapeString.new(text.to_unsafe, text.bytesize), from)
+    end
+    parsed || ParsedRequest.new(nil, "incomplete request", true, 0)
+  end
+
+  private def self.request_at(text : String, bytes : TapeString, from : Int32) : ParsedRequest
+    head = case got = parse_head(bytes, from)
+           in Nil
+             return ParsedRequest.new(nil, nil, false, 0)
+           in HeadError
+             return ParsedRequest.new(nil, got.message, true, 0, status: got.status)
+           in ParsedHead
+             got
+           end
+    method = head.method.to_s
+    http10 = head.http10?
+    split_at = head.body_start - 4
+    headers = heap_fields(head)
+    target = head.target
+    if HTTP.absolute_form(target.to_unsafe, target.bytesize).nil?
+      # The origin form, by far the most common: path and query copied
+      # straight from the target's bytes.
+      q = HTTP.byte_in(target.to_unsafe, 0, target.bytesize, 63_u8)
+      path = TapeString.new(target.to_unsafe, q).to_s
+      query = q < target.bytesize ? TapeString.new(target.to_unsafe + q + 1, target.bytesize - q - 1).to_s : nil.as(String?)
+      return request_body(text, method, path, query, headers, http10, split_at)
+    end
+    target = head.target.to_s
     host_name = "Host"
     headers.each do |name, value|
-      next unless HTTP.same_name?(name, "Host")
-      return ParsedRequest.new(nil, "not a host: #{value.inspect}", true, 0) unless HTTP.host?(value)
-      host_name = name
+      host_name = name if HTTP.same_name?(name, "Host")
     end
     # The absolute form (RFC 9112 §3.2.2), which a server must accept,
     # names the path after the authority: `http://h/x?q` is path `/x` and
@@ -418,26 +538,109 @@ pub struct Server
       path = origin[0, q]
       query = origin[q + 1, origin.bytesize - q - 1]
     end
+    request_body(text, method, path, query, headers, http10, split_at)
+  end
+
+  # The fields of *head* as the heap `Hash` a `Request` keeps: each name as
+  # it was first spelled, and the values of a field on several lines joined
+  # with ", " (RFC 9110 §5.3). A head has a few fields, so a repeat is
+  # looked for among them rather than through a second table.
+  private def self.heap_fields(head : ParsedHead) : Hash(String, String)
+    fields = head.fields
+    headers = {} of String => String
+    i = 0
+    while i < fields.size
+      name = fields[i].name
+      headers[name.to_s] = joined_value(fields, i) unless repeated?(fields, i)
+      i = i + 1
+    end
+    headers
+  end
+
+  # The value of the field at *index*, and of each later one of its name,
+  # joined with ", " in one string: joined one by one, a head of many lines
+  # of one field cost the square of its size.
+  private def self.joined_value(fields : TapeArray(Field), index : Int32) : String
+    name = fields[index].name
+    total = fields[index].value.bytesize
+    lines = 1
+    k = index + 1
+    while k < fields.size
+      if same_field?(fields[k].name, name)
+        total = total + 2 + fields[k].value.bytesize
+        lines = lines + 1
+      end
+      k = k + 1
+    end
+    return fields[index].value.to_s if lines == 1
+    String.new(total) do |buffer|
+      first = fields[index].value
+      buffer.copy_from(first.to_unsafe, first.bytesize)
+      at = first.bytesize
+      k = index + 1
+      while k < fields.size
+        if same_field?(fields[k].name, name)
+          value = fields[k].value
+          buffer[at] = 44_u8
+          buffer[at + 1] = 32_u8
+          (buffer + at + 2).copy_from(value.to_unsafe, value.bytesize)
+          at = at + 2 + value.bytesize
+        end
+        k = k + 1
+      end
+    end
+  end
+
+  # Whether a field before *index* has the name of the one at *index*.
+  private def self.repeated?(fields : TapeArray(Field), index : Int32) : Bool
+    name = fields[index].name
+    j = 0
+    while j < index
+      return true if same_field?(fields[j].name, name)
+      j = j + 1
+    end
+    false
+  end
+
+  private def self.same_field?(a : TapeString, b : TapeString) : Bool
+    return false unless a.bytesize == b.bytesize
+    pa = a.to_unsafe
+    pb = b.to_unsafe
+    i = 0
+    while i < a.bytesize
+      ca = pa[i]
+      cb = pb[i]
+      ca = ca + 32_u8 if ca >= 65_u8 && ca <= 90_u8
+      cb = cb + 32_u8 if cb >= 65_u8 && cb <= 90_u8
+      return false unless ca == cb
+      i = i + 1
+    end
+    true
+  end
+
+  # The rest of a request whose head is read: what its fields say of the
+  # connection, and its body, where it lies in *text*.
+  private def self.request_body(text : String, method : String, path : String, query : String?, headers : Hash(String, String), http10 : Bool, split_at : Int32) : ParsedRequest
     stub = Request.new(method, path, query, headers, "")
     # `Connection` is a list of options (RFC 9110 §7.6.1), and `close`
     # among them closes (RFC 9112 §9.6): read as one value, `close, TE` and
     # two `Connection: close` lines, joined to `close, close`, kept the
     # connection open and were answered `keep-alive`.
-    close = version == "HTTP/1.0"
+    close = http10
     if conn = stub.header("Connection")
-      close = HTTP.has_token?(conn, "close") || (version == "HTTP/1.0" && !HTTP.has_token?(conn, "keep-alive"))
+      close = HTTP.has_token?(conn, "close") || (http10 && !HTTP.has_token?(conn, "keep-alive"))
     end
     body_start = split_at + 4
     # The body is read where it lies in what has arrived: cut off with all
     # that came after it, the rest of the read was copied per request.
-    expects = version == "HTTP/1.1" && HTTP.same_name?(HTTP.trim(stub.header("Expect") || ""), "100-continue")
+    expects = !http10 && HTTP.same_name?(HTTP.trim(stub.header("Expect") || ""), "100-continue")
     if te = stub.header("Transfer-Encoding")
       return ParsedRequest.new(nil, "transfer encoding #{te.inspect} is not chunked", true, 0) unless HTTP.same_name?(HTTP.trim(te), "chunked")
       # A length beside the chunks, or chunks in HTTP/1.0, is framing that
       # a reader ahead of this one may have taken otherwise (RFC 9112 §6.1,
       # §6.3): the connection closes after the answer, where what followed
       # was read as the next request.
-      close = true if stub.header("Content-Length") || version == "HTTP/1.0"
+      close = true if stub.header("Content-Length") || http10
       # A body that is not chunked is a 400, as any request that is not
       # HTTP: `chunked_end` raised, and the connection's task panicked with
       # no answer, and `serve` with it once the listener closed. Its end is
@@ -927,11 +1130,15 @@ pub struct HTTP
   # Two field names for the same field: ASCII case is the only difference
   # a name may carry.
   def self.same_name?(a : String, b : String) : Bool
-    return false unless a.bytesize == b.bytesize
-    pa = a.to_unsafe
+    same_name?(a.to_unsafe, a.bytesize, b)
+  end
+
+  # The same, for *count* bytes at *pa*: a name read where it lies.
+  def self.same_name?(pa : Pointer(UInt8), count : Int32, b : String) : Bool
+    return false unless count == b.bytesize
     pb = b.to_unsafe
     i = 0
-    while i < a.bytesize
+    while i < count
       ca = pa[i]
       cb = pb[i]
       ca = ca + 32_u8 if ca >= 65_u8 && ca <= 90_u8
@@ -953,10 +1160,13 @@ pub struct HTTP
 
   # A token (RFC 9110 §5.6.2): what a method or a field name is made of.
   def self.token?(text : String) : Bool
-    return false if text.bytesize == 0
-    p = text.to_unsafe
+    token?(text.to_unsafe, text.bytesize)
+  end
+
+  def self.token?(p : Pointer(UInt8), count : Int32) : Bool
+    return false if count == 0
     i = 0
-    while i < text.bytesize
+    while i < count
       c = p[i]
       letter = (c >= 65_u8 && c <= 90_u8) || (c >= 97_u8 && c <= 122_u8)
       digit = c >= 48_u8 && c <= 57_u8
@@ -1026,9 +1236,12 @@ pub struct HTTP
   # A control character other than a tab, or DEL: what a field value may
   # not hold (RFC 9110 §5.5), nor a request target or a reason phrase.
   def self.control?(text : String) : Bool
-    p = text.to_unsafe
+    control?(text.to_unsafe, text.bytesize)
+  end
+
+  def self.control?(p : Pointer(UInt8), count : Int32) : Bool
     i = 0
-    while i < text.bytesize
+    while i < count
       return true if (p[i] < 32_u8 && p[i] != 9_u8) || p[i] == 127_u8
       i = i + 1
     end
@@ -1038,9 +1251,45 @@ pub struct HTTP
   # For a request target in absolute form (RFC 9112 §3.2.2), where its
   # authority starts: after `http://` or `https://`, in any case.
   def self.absolute_form(target : String) : Int32?
-    return 7 if target.bytesize >= 7 && same_name?(target[0, 7], "http://")
-    return 8 if target.bytesize >= 8 && same_name?(target[0, 8], "https://")
+    absolute_form(target.to_unsafe, target.bytesize)
+  end
+
+  def self.absolute_form(p : Pointer(UInt8), count : Int32) : Int32?
+    return 7 if count >= 7 && same_name?(p, 7, "http://")
+    return 8 if count >= 8 && same_name?(p, 8, "https://")
     nil
+  end
+
+  # Whether the *count* bytes at *p* are exactly *text*.
+  def self.same_bytes?(p : Pointer(UInt8), count : Int32, text : String) : Bool
+    return false unless count == text.bytesize
+    t = text.to_unsafe
+    i = 0
+    while i < count
+      return false unless p[i] == t[i]
+      i = i + 1
+    end
+    true
+  end
+
+  # The first CRLF at or after *from* and before *stop*; *stop* when none.
+  def self.crlf_in(p : Pointer(UInt8), from : Int32, stop : Int32) : Int32
+    i = from
+    while i + 1 < stop
+      return i if p[i] == 13_u8 && p[i + 1] == 10_u8
+      i = i + 1
+    end
+    stop
+  end
+
+  # The first *byte* at or after *from* and before *stop*; *stop* when none.
+  def self.byte_in(p : Pointer(UInt8), from : Int32, stop : Int32, byte : UInt8) : Int32
+    i = from
+    while i < stop
+      return i if p[i] == byte
+      i = i + 1
+    end
+    stop
   end
 
   # A Host value - the `a` of `Host: a` - or an absolute-form target's
@@ -1050,9 +1299,12 @@ pub struct HTTP
   # authority (RFC 9112 §3.2). A blank, a `/`, an `@` - the bytes another
   # host or a path begins with - are not.
   def self.host?(text : String) : Bool
-    p = text.to_unsafe
+    host?(text.to_unsafe, text.bytesize)
+  end
+
+  def self.host?(p : Pointer(UInt8), count : Int32) : Bool
     i = 0
-    while i < text.bytesize
+    while i < count
       c = p[i]
       letter = (c >= 65_u8 && c <= 90_u8) || (c >= 97_u8 && c <= 122_u8)
       digit = c >= 48_u8 && c <= 57_u8
