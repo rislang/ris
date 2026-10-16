@@ -4,6 +4,9 @@
 
 module std/static_array
 
+# ris: `Int32#<=>` is `std/traits`'s.
+import std/traits
+
 import std/slice::{Slice}
 
 struct ::StaticArray(T, N)

@@ -257,10 +257,31 @@ module Iyi
       return unless writer == filename || iyi_imported_files.includes?(writer)
       return if iyi_reachable_files(writer).includes?(def_file)
       return if iyi_macro_reaches?(call.location, writer, def_file)
+      return if iyi_answered_elsewhere?(candidates, a_def, def_file, writer)
+      # The extension's module reaches the writer: a generic body the writer
+      # wrote - `std/number`'s `divmod` - meets `std/float`'s `//` only on a
+      # Float64 that `std/float`, importing `std/number`, brought to it.
+      return if iyi_reachable_files(def_file).includes?(writer)
       path = iyi_module_paths[def_file]? || def_file
       call.raise "`#{a_def.name}` on #{a_def.owner} comes from `#{path}`, which is " \
                  "not imported here — it is in the program only because some " \
                  "other file imported it. Add `import #{path}` in this file (SPEC.md R-1)"
+    end
+
+    # A module that redefines a method the type already has - `std/float`'s
+    # unary `-` on Float64, `std/io`'s `<<` on an IO - adds nothing a file
+    # could forget to import: the method is there without it. Only a name
+    # the type has nowhere else is the module's extension. Elsewhere is the
+    # prelude (a file no module owns) or a file *writer* reaches.
+    private def iyi_answered_elsewhere?(types : Array(Type), a_def : Def, def_file : String, writer : String) : Bool
+      reach = iyi_reachable_files(writer)
+      types.any? do |type|
+        type.defs.try(&.[a_def.name]?).try(&.any? do |item|
+          file = item.def.location.try(&.original_filename)
+          next false unless file && file != def_file
+          !iyi_imported_files.includes?(file) || file == writer || reach.includes?(file)
+        end)
+      end
     end
 
     private def iyi_type_declared_in?(type : Type, file : String) : Bool

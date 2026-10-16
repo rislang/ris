@@ -23,6 +23,7 @@
 
 import std/big::{BigInt, BigDecimal, BigRational}
 import std/gc::{GC}
+import std/int
 
 # The bytes one call allocates, with the collector held back so that the
 # word the trigger reads counts every one of them.

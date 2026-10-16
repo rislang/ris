@@ -15,6 +15,7 @@ end
 
 import std/static_array
 import std/io::{Memory}
+import std/traits
 
 puts "== new"
 a = StaticArray(Int32, 3).new(9)

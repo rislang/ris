@@ -1,5 +1,8 @@
 module std/symbol
 
+# ris: `IO::Memory#<<` is `std/io`'s.
+import std/io
+
 struct ::Symbol
   # Compares symbol with other based on string ordering.
   def <=>(other : Symbol) : Int32

@@ -34,6 +34,9 @@
 
 module std/path
 
+# ris: the Windows arm's `UInt16#+` is `std/int`'s.
+import std/int
+
 import std/traits::{Comparable}
 
 {% if flag?(:win32) %}

@@ -5,6 +5,9 @@
 
 module std/file
 
+# ris: the Windows arm's `UInt64#<<` is `std/int`'s.
+import std/int
+
 import std/path::{Path}
 
 {% if flag?(:darwin) %}

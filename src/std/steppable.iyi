@@ -1,5 +1,8 @@
 module std/steppable
 
+# ris: `Int32#<=>` is `std/traits`'s.
+import std/traits
+
 import std/iterator::{Iterator, Stop}
 
 # Implements a step method for iterating from a value.
