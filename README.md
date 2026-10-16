@@ -1,79 +1,77 @@
 # ris: Rubyist In Stack memory with agents
 
-ris is an experimental fork of [iyi](https://github.com/iyilang/iyi), built
-on [Crystal](https://crystal-lang.org): Ruby syntax, strict interfaces and tape.
+ris is a Ruby-like language whose hot paths run on tape memory, with no GC.
+Built on [iyi](https://github.com/iyilang/iyi), a fork of Crystal.
 
-* **Ruby**: how code reads. Blocks, unions, nil-safety, type inference.
-* **in Rust**: `pub`, `impl`, closed classes and errors as unions.
+* **Ruby**: how code reads, with Crystal's blocks, unions and nil-safety.
+* **in Rust**: `pub`, `impl`, closed classes, errors as return values.
 * **on the Go**: one CLI (`fmt`, `test`, `check`, `lsp`, `mcp`), fibers.
-* **with tape memory**, after Goose's data stacks: a hot path's objects use
-  the fiber's tape and are reclaimed together. The rest stays on iyi's
-  collected heap, and the compiler refuses a tape value that could outlive
-  its scope.
+
+## Why ris: tape memory, without the GC
+
+iyi and Crystal collect all garbage with a GC. ris adds **tape memory**,
+after Goose's data stacks: in a `Tape.scope`, tape types (`@[OnTape]`) are
+bump-allocated on a tape, and the whole tape is freed at the scope's `end`.
+No GC allocates or frees it. All other objects keep iyi's GC, so iyi and
+Crystal libraries work unchanged (the GC only scans the tape for pointers).
 
 ```crystal
-@[OnTape]
-pub struct Order
-  getter customer : TapeString
+import github.com/domify/slim::{Slim}
+
+def page(name : String) : TapeString
+  Slim.render("views/page.slim")      # the template, compiled to ris code
 end
-Tape.scope do
-  body = render(make_order(1_i64)).to_s   # `to_s` copies out what is kept
-end                                       # all tape storage reclaimed
+
+body = ""                             # an ordinary String: iyi's GC heap
+Tape.scope do                         # this request's memory starts here
+  html = page("world")                # rendered onto the tape, no GC
+  body = html.to_s                    # `to_s` copies out what must survive
+end                                   # every tape byte freed at once, here
+puts body                             # => <h1>Hello world</h1>
 ```
 
-## Getting it and tape memory
+Freeing by hand stays safe: the compiler refuses a tape value that could
+outlive its tape (a heap field, `[] of TapeString`, a kept proc, an outer
+variable). Rules: [TAPE_DESIGN.md](TAPE_DESIGN.md).
 
-`make ris`, then `./bin/ris run samples/ris/hello.ri`; `test/ris/check.sh`
-runs the checks. Sources end in `.ri`; `ris init` writes `ris.mod` (and
-`ris.sum`), read before an iyi package's `iyi.mod`. Building needs a
-Crystal compiler and LLVM ([README.iyi.md](README.iyi.md)).
+## Getting it
 
-* Tape types: `@[OnTape] struct`, `TapeString`, `TapeWriter`, `TapeArray`.
-* `Tape.scope { }` frees the fiber's tape when the block returns; a nested
-  scope runs on the outer tape. `Tape.local { }` runs on its own temporary
-  tape and may read only the outer tape's `TapeString`s.
-* The compiler refuses tape values in heap fields, containers, kept procs
-  and assignments beyond their scope ([TAPE_DESIGN.md](TAPE_DESIGN.md)).
+`make ris`, then `./bin/ris run samples/ris/hello.ri`. Sources end in `.ri`;
+`ris init` writes `ris.mod`, read before an iyi package's `iyi.mod`. Needs
+Crystal and LLVM ([README.iyi.md](README.iyi.md)); `test/ris/check.sh` checks.
 
 ## How fast
 
-`samples/ris/respond.ri`, 1.6M DTOs as JSON; median of 9, x86_64, `-O3`:
+`samples/ris/respond.ri`, 1.6M DTOs as JSON, median of 9, `-O3`: **ris
+0.71 s, 1.7 MB**; Goose 0.70 s, 2.0 MB; C++ 1.01 s, 4.0 MB; Rust 1.23 s,
+2.3 MB; iyi 1.59 s, 7.7 MB; Go 1.72 s, 8.6 MB.
+[Slim](https://github.com/domify/slim), Slang ported to ris: 4x faster.
 
-| | time | peak memory |
-|---|---:|---:|
-| **ris, `@[OnTape]` types** | **0.71 s** | **1.7 MB** |
-| Goose, inline DTO | 0.70 s | 2.0 MB |
-| C++ / Rust | 1.01 / 1.23 s | 4.0 / 2.3 MB |
-| iyi / Go | 1.59 / 1.72 s | 7.7 / 8.6 MB |
-
-Slang 2.0.3 vs its ris port, 200k pages: text 0.29 to 0.07 s, attr 0.72 to 0.43.
-
-## Campfire, preliminary
-
-**The Campfire port is not finished; its numbers will change.** The ris
-port (`../once-campfire-ris/bench`) answers its busiest page, 40 messages
-and 364,500 bytes, byte for byte as the Rust port does, same SQLite
-database. 2026-10-15, 16-core Linux; p99 at 64 connections. `raw` is
-ris's own minimal HTTP loop (iyi-web: 9,182/s). ¹ Approximate.
+**Campfire, preliminary: the port is not finished; numbers will change.**
+The ris port answers its busiest page, 40 messages and 364,500 bytes, byte
+for byte as the Rust port does. 16-core Linux, 2026-10-15; `raw` is ris's
+own minimal HTTP loop (iyi-web: 9,182/s).
+¹ Another machine, gzip on: approximate only.
 
 | one core (`ab`) | ris raw | Rust | Go | Rails¹ |
 |---|---|---|---|---|
 | Requests/s | **10,692** | 7,311 | 5,489 | 444 |
-| Median | **0.135 ms** | 0.214 ms | 0.214 ms | 5.5 ms |
-| Slowest (p99) | **7 ms** | 76 ms | 167 ms | 226 ms |
+| p99, 64 conn. | **7 ms** | 76 ms | 167 ms | 226 ms |
 | Memory | 17 MB | 76 MB | 16 MB | 309 MB |
 
 | eight cores (`loadgen`) | ris | Rust | Go |
 |---|---|---|---|
 | Requests/s | **34,762** | 23,180 | 11,944 |
-| Median | **0.157 ms** | 0.234 ms | 0.472 ms |
-| Slowest (p99) | **5.8 ms** | 7.5 ms | 24.7 ms |
+| p99, 64 conn. | **5.8 ms** | 7.5 ms | 24.7 ms |
 | Memory | 34 MB | 76 MB | **29 MB** |
 
 ## Status and thanks
 
-ris 0.1.0 is a prototype; internals keep iyi's names so iyi merges. Built
-on **Crystal** (Ary Borenszweig, Juan Wajnerman, Brian Cardiff, Manas and
-the community), **iyi** (Serdar Dogruyol), **Goose** (Wouter van
-Oortmerssen), **Ruby** (Yukihiro Matsumoto) and C#'s `ref struct`.
-Developed with Claude. Apache 2.0: [LICENSE](LICENSE), [NOTICE.md](NOTICE.md).
+ris 0.1.0 is a prototype; internals keep iyi's names so iyi merges. Thanks
+to **Crystal** (Ary Borenszweig, Juan Wajnerman, Brian Cardiff, Manas and
+community), **iyi** (Serdar Dogruyol), **Goose** (Wouter van Oortmerssen),
+**Ruby** (Yukihiro Matsumoto), C#'s `ref struct`. Developed with Claude.
+Apache 2.0: [LICENSE](LICENSE), [NOTICE.md](NOTICE.md).
+
+Special thanks to Serdar Dogruyol, [iyi](https://github.com/iyilang/iyi)'s
+author, for a friendly collaboration. ris keeps building on the iyi language.
