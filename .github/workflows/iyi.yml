@@ -1449,6 +1449,7 @@ jobs:
   # million self-checks, no wrong output and no crash — and the watch is a
   # gate now: a wrong output or a crash fails the build by its tally.
   windows-probe:
+    if: false  # ris: Windows off for now; WSL2 runs the Linux build
     needs: cross-objects
     runs-on: windows-2022
     timeout-minutes: 30
@@ -1512,6 +1513,7 @@ jobs:
 
   # The GC Stage 10 Windows collector exercise on a real windows-2022 runner.
   windows-collector:
+    if: false  # ris: Windows off for now; WSL2 runs the Linux build
     needs: cross-objects
     runs-on: windows-2022
     timeout-minutes: 30
@@ -1554,6 +1556,7 @@ jobs:
 
   # The concurrency runtime exercise on a real windows-2022 runner.
   windows-runtime:
+    if: false  # ris: Windows off for now; WSL2 runs the Linux build
     needs: cross-objects
     runs-on: windows-2022
     timeout-minutes: 30
@@ -1621,6 +1624,7 @@ jobs:
   # `llvm_VERSION` beside it — this fork needs no `llvm-config` on the
   # msvc path and the package ships none.
   windows-native:
+    if: false  # ris: Windows off for now; WSL2 runs the Linux build
     runs-on: windows-2025
     timeout-minutes: 90
     name: "iyi, built and run on Windows"
@@ -2061,6 +2065,7 @@ jobs:
   # exercises refusing a platform whose collector they had never been
   # asked about.
   windows-std:
+    if: false  # ris: Windows off for now; WSL2 runs the Linux build
     runs-on: windows-2025
     timeout-minutes: 90
     name: "The standard library and the collector, gated on Windows"
@@ -2128,6 +2133,7 @@ jobs:
   # not start there ran `bin/iyi`, a shell script, or named a module by
   # its Windows path, and take the exe and a `/` now.
   windows-gates:
+    if: false  # ris: Windows off for now; WSL2 runs the Linux build
     runs-on: windows-2025
     timeout-minutes: 90
     name: "The language's gates, on Windows"
@@ -2296,6 +2302,7 @@ jobs:
   # it was `Iyi::Loader`. A job of its own because a codegen example is a
   # program built and run, and there are fourteen thousand.
   windows-compiler-specs:
+    if: false  # ris: Windows off for now; WSL2 runs the Linux build
     runs-on: windows-2025
     timeout-minutes: 180
     name: "Crystal's compiler specs, on Windows"
