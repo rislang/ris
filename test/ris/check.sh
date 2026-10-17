@@ -93,6 +93,10 @@ if [ "$out" = 'PASS: explicit owned copy, typed cache boundary, UTF-8, empty tex
 out=$("$RIS" run test/ris/writer.ri 2>&1)
 if [ "$out" = '0 -42 9223372036854775807 -9223372036854775808 a&amp;b&lt;c&gt;&quot;d&#39;e <b>' ]; then echo "runs     writer"; else echo "FAILED   writer: $out"; status=1; fi
 
+# Two pieces, String or on the tape, go out in one socket write.
+out=$("$RIS" run test/ris/socket_pair.ri 2>&1)
+if [ "$out" = 'PASS: two pieces in one write, String and on the tape, 1 MiB' ]; then echo "runs     socket_pair"; else echo "FAILED   socket_pair: $out"; status=1; fi
+
 out=$("$RIS" run samples/ris/hello.ri 2>&1)
 if [ "$out" = $'Hello from ris, order 1\ntotal 1649' ]; then echo "runs     samples/ris/hello"; else echo "FAILED   samples/ris/hello: $out"; status=1; fi
 

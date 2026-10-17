@@ -515,6 +515,43 @@ pub class IyiSocket
     written
   end
 
+  # *first* then *second*, as one write: a head and its body, which written
+  # apart leave the body waiting on the peer's delayed ACK (Nagle).
+  def write(first : String, second : String) : Int32 | Cancelled | SocketError
+    raise "socket is closed" if @fd < 0
+    write_pair(first.to_unsafe, first.bytesize, second.to_unsafe, second.bytesize)
+  end
+
+  # The same for two pieces on the tape, which are not copied.
+  def write(first : TapeString, second : TapeString) : Int32 | Cancelled | SocketError
+    raise "socket is closed" if @fd < 0
+    write_pair(first.to_unsafe, first.bytesize, second.to_unsafe, second.bytesize)
+  end
+
+  private def write_pair(first : Pointer(UInt8), first_count : Int32, second : Pointer(UInt8), second_count : Int32) : Int32 | Cancelled | SocketError
+    total = first_count + second_count
+    written = 0
+    while written < total
+      n = if written < first_count
+            IyiSocket.__sys_send2(@fd, first + written, (first_count - written).to_u64,
+              second, second_count.to_u64, IyiSocket.bound(@write_timeout_ms))
+          else
+            done = written - first_count
+            IyiSocket.__sys_send(@fd, second + done, (second_count - done).to_u64, IyiSocket.bound(@write_timeout_ms))
+          end
+      if n < 0_i64 && IyiSocket.__sys_would_block?(n)
+        waited = IyiSocket.await_writable(@fd, IyiSocket.bound(@write_timeout_ms))
+        return waited if waited.is_a?(Cancelled)
+        return Cancelled.new if @fd < 0
+        return SocketError.timed_out("write to socket") unless waited
+        next
+      end
+      return SocketError.new("write to socket", n < 0_i64 ? IyiSocket.__sys_code(n) : 0) if n <= 0_i64
+      written = written + n.to_i32
+    end
+    written
+  end
+
   def send(contents : String) : Int32 | Cancelled | SocketError
     write(contents)
   end
@@ -983,6 +1020,7 @@ pub class IyiSocket
       fun accept(fd : Int32, addr : Void*, addrlen : UInt32*) : Int32
       fun connect(fd : Int32, addr : Void*, addrlen : UInt32) : Int32
       fun send(fd : Int32, buf : Void*, len : UInt64, flags : Int32) : Int64
+      fun writev(fd : Int32, iov : Void*, iovcnt : Int32) : Int64
       fun recv(fd : Int32, buf : Void*, len : UInt64, flags : Int32) : Int64
       fun getsockname(fd : Int32, addr : Void*, addrlen : UInt32*) : Int32
       fun setsockopt(fd : Int32, level : Int32, optname : Int32, optval : Void*, optlen : UInt32) : Int32
@@ -1034,6 +1072,17 @@ pub class IyiSocket
 
     def self.__sys_send(fd : Int32, buf : Pointer(UInt8), len : UInt64, ms : Int32) : Int64
       LibC.send(fd, buf.as(Void*), len, 0)
+    end
+
+    # Two buffers in one `writev`; SO_NOSIGPIPE covers it as it does send.
+    def self.__sys_send2(fd : Int32, a : Pointer(UInt8), alen : UInt64, b : Pointer(UInt8), blen : UInt64, ms : Int32) : Int64
+      iov = uninitialized UInt64[4]
+      words = pointerof(iov).as(UInt64*)
+      words[0] = a.address
+      words[1] = alen
+      words[2] = b.address
+      words[3] = blen
+      LibC.writev(fd, pointerof(iov).as(Void*), 2)
     end
 
     # Every connect here parks; see the Windows arm for the one that does not.
@@ -1116,6 +1165,7 @@ pub class IyiSocket
       SYS_ACCEPT      =  43_i64
       SYS_SENDTO      =  44_i64
       SYS_RECVFROM    =  45_i64
+      SYS_SENDMSG     =  46_i64
       SYS_BIND        =  49_i64
       SYS_LISTEN      =  50_i64
       SYS_GETSOCKNAME =  51_i64
@@ -1132,6 +1182,7 @@ pub class IyiSocket
       SYS_GETSOCKNAME = 204_i64
       SYS_SENDTO      = 206_i64
       SYS_RECVFROM    = 207_i64
+      SYS_SENDMSG     = 211_i64
       SYS_SETSOCKOPT  = 208_i64
       SYS_GETSOCKOPT  = 209_i64
       SYS_FCNTL       =  25_i64
@@ -1226,6 +1277,24 @@ pub class IyiSocket
     # EPIPE instead of killing the process with SIGPIPE.
     def self.__sys_send(fd : Int32, buf : Pointer(UInt8), len : UInt64, ms : Int32) : Int64
       __sys6(SYS_SENDTO, fd.to_i64, buf.address.to_i64, len.to_i64, 0x4000_i64, 0_i64, 0_i64)
+    end
+
+    # Two buffers in one `sendmsg`, MSG_NOSIGNAL as `__sys_send`. The
+    # `msghdr` is seven words: name, its length, iov, iovlen, control, its
+    # length and flags, all zero but the iov.
+    def self.__sys_send2(fd : Int32, a : Pointer(UInt8), alen : UInt64, b : Pointer(UInt8), blen : UInt64, ms : Int32) : Int64
+      iov = uninitialized UInt64[4]
+      words = pointerof(iov).as(UInt64*)
+      words[0] = a.address
+      words[1] = alen
+      words[2] = b.address
+      words[3] = blen
+      msg = uninitialized UInt64[7]
+      header = pointerof(msg).as(UInt64*)
+      7.times { |i| header[i] = 0_u64 }
+      header[2] = pointerof(iov).address
+      header[3] = 2_u64
+      __sys3(SYS_SENDMSG, fd.to_i64, pointerof(msg).address.to_i64, 0x4000_i64)
     end
 
     def self.__sys_no_sigpipe(fd : Int32) : Nil
@@ -1623,6 +1692,11 @@ pub class IyiSocket
       0
     end
 
+    # The first buffer only: the caller's loop sends the second after it.
+    def self.__sys_send2(fd : Int32, a : Pointer(UInt8), alen : UInt64, b : Pointer(UInt8), blen : UInt64, ms : Int32) : Int64
+      __sys_send(fd, a, alen, ms)
+    end
+
     def self.__sys_send(fd : Int32, buf : Pointer(UInt8), len : UInt64, ms : Int32) : Int64
       s = __sys_handle(fd)
       # A bounded piece at a time. Winsock takes a whole buffer of any size
@@ -1855,6 +1929,10 @@ pub class IyiSocket
     end
 
     def self.__sys_send(fd : Int32, buf : Pointer(UInt8), len : UInt64, ms : Int32) : Int64
+      -1_i64
+    end
+
+    def self.__sys_send2(fd : Int32, a : Pointer(UInt8), alen : UInt64, b : Pointer(UInt8), blen : UInt64, ms : Int32) : Int64
       -1_i64
     end
 

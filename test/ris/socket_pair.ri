@@ -1,0 +1,40 @@
+# `IyiSocket#write(first, second)`: two pieces, String or on the tape, in
+# one write, read back whole on loopback; a second piece of 1 MiB passes the
+# send buffer, so the write parks and goes on where the kernel stopped.
+module socket_pair
+
+import std/socket::{IyiSocket}
+
+def read_all(socket : IyiSocket, count : Int32) : String
+  text = ""
+  while text.bytesize < count
+    chunk = socket.read(65536).or_panic
+    break if chunk.empty?
+    text = text + chunk
+  end
+  text
+end
+
+big = "b" * 1048576
+server = IyiSocket.listen(0)
+client = IyiSocket.connect("127.0.0.1", server.local_port).or_panic
+conn = server.accept.or_panic
+got = ""
+group do |g|
+  reader = g.spawn { read_all(client, 5 + 3 + 5 + big.bytesize) }
+  conn.write("head:", "abc").or_panic
+  Tape.scope do
+    head = TapeString.build(8) { |w| w.append("tape:") }
+    body = TapeString.build(big.bytesize) { |w| w.append(big) }
+    conn.write(head, body).or_panic
+  end
+  got = reader.value.or_panic
+end
+client.close
+conn.close
+server.close
+if got == "head:abc" + "tape:" + big
+  puts "PASS: two pieces in one write, String and on the tape, 1 MiB"
+else
+  puts "FAILED: #{got.bytesize} bytes"
+end

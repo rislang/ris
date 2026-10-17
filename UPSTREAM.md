@@ -13,6 +13,10 @@ has it.
   miscompile), recommend 23; `LLVM.md` (rename its ris wording).
 * `7d3a1517f` std/time: the clock through the vDSO on x86_64 Linux.
 * `1d4f7ed68` Say which manifest a build read when an import is not found.
+* std/socket: `IyiSocket#write(first, second)`, two buffers in one
+  `sendmsg`/`writev`. Written apart, a response's head and body wait on
+  the client's delayed ACK (Nagle), 40 ms each (web, 2026-10-17). Take the
+  `String` overload; the `TapeString` one stays in ris.
 
 ## To make in iyi first
 
