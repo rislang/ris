@@ -46,7 +46,7 @@ request's bytes, temporaries and response on one tape per request.
 
 ## LLVM
 
-* Build with LLVM 23, never 21 or 22: they miscompile ris code. Why, and
+* Recommend and build with LLVM 23 or newer: 21 and 22 miscompile. Why, and
   the codegen workaround that must stay: [LLVM.md](LLVM.md).
 
 ## Length

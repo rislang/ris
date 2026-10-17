@@ -1,7 +1,7 @@
 # LLVM
 
-ris builds with **LLVM 23** (preferred) or LLVM 20 and older. The Makefile
-refuses LLVM 21 and 22.
+Use **LLVM 23** or newer. ris still builds with older LLVM, but on 21 and
+22 the Makefile warns: they miscompile some code.
 
 ## Why not 21 and 22
 
@@ -13,8 +13,7 @@ it, so the bug is in LLVM, not in ris. LLVM 23.1 has it fixed.
 
 ## Building
 
-The finder skips 21 and 22. When the system llvm-config is one of them,
-point the build at LLVM 23 explicitly:
+When the system llvm-config is older, point the build at LLVM 23:
 
     make ris LLVM_CONFIG=/path/to/llvm-23/bin/llvm-config
 
