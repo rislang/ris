@@ -1,0 +1,51 @@
+# Each thread links its own fibers into its own list, with no lock, while
+# another thread collects again and again. A task holds a string and an
+# array only its own stack names, parks, and checks them after: a fiber
+# the root walk missed - stopped between two stores of the link - would
+# have them freed and reused under it.
+module test/ris/fibers/threads_spawn
+import std/gc::{GC}
+import std/text
+
+def check(id : Int64) : Int64
+  text = "fiber-" + id.to_s
+  values = [id, id * 2, id * 3]
+  sleep(0)
+  ok = text == "fiber-" + id.to_s && values[0] == id && values[2] == id * 3
+  ok ? 0_i64 : 1_i64
+end
+
+def run(base : Int64) : Int64
+  wrong = 0_i64
+  n = 0_i64
+  while n < 4000_i64
+    wrong = wrong + group do |g|
+      a = g.spawn { check(base + n) }
+      b = g.spawn { check(base + n + 1_000_000_i64) }
+      av = a.value
+      bv = b.value
+      (av.is_a?(Int64) ? av : 1_i64) + (bv.is_a?(Int64) ? bv : 1_i64)
+    end
+    n += 1_i64
+  end
+  wrong
+end
+
+done = Atomic(Int64).new(0_i64)
+wrong = Atomic(Int64).new(0_i64)
+collector = IyiThread.start do
+  while done.get < 4_i64
+    GC.collect
+  end
+  nil
+end
+threads = (0...4).map do |t|
+  IyiThread.start do
+    wrong.add(run(t.to_i64 * 10_000_000_i64))
+    done.add(1_i64)
+    nil
+  end
+end
+threads.each(&.join)
+collector.join
+puts wrong.get == 0_i64 ? "PASS: 4 threads, 32,000 tasks, collected throughout" : "FAIL: #{wrong.get} tasks found their values changed"

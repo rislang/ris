@@ -3529,8 +3529,8 @@ require "./file"
 
     # ris: the tape. Each fiber's tape is one mapping that `TapeString` and
     # `TapeArray` (src/iyi/tape.iyi) bump their bytes into, freed with one
-    # store when the outermost `Tape.scope` ends and kept as the thread's
-    # spare, so the next scope writes the same warm pages. Only those types
+    # store when the outermost `Tape.scope` ends and kept among the thread's
+    # spares, so the next scope writes the same warm pages. Only those types
     # allocate here: the allocator's entry points never do, so no object of
     # a library can land on a tape. The collector never sees a tape address
     # as an object - `arena_of` and the large list both refuse it - so it
@@ -3554,8 +3554,20 @@ require "./file"
       # so the limit is the mapping's real end on every one of them.
       GRAIN      = 65536_u64
 
+      # Released mappings the thread keeps warm, newest first, linked
+      # through their OFF_PARENT words: one per scope open at once, up to
+      # SPARES. A handler that parks inside its request's scope lets the
+      # next connection open one too; with a single spare every such scope
+      # took a fresh mapping and faulted in each page it wrote (a 364 KB
+      # page: 85 faults a request, 2,500 requests/s where 4,400 were warm).
       @[ThreadLocal]
       @@spare : UInt64 = 0_u64
+      @[ThreadLocal]
+      @@spares : UInt64 = 0_u64
+      SPARES     = 64_u64
+      # A spare keeps this much of what it was written warm; the pages past
+      # it go back to the kernel, so one large scope does not stay resident.
+      KEEP_WARM  = 1048576_u64
       @@first_region : UInt64 = 0_u64
       @@registered : UInt64 = 0_u64
 
@@ -3637,7 +3649,8 @@ require "./file"
       def self.acquire(capacity : UInt64) : UInt64
         spare = @@spare
         if spare != 0 && IyiHeap.read64(spare &+ OFF_MAP) >= capacity &+ DATA
-          @@spare = 0_u64
+          @@spare = IyiHeap.read64(spare &+ OFF_PARENT)
+          @@spares = @@spares &- 1_u64
           IyiHeap.write64(spare &+ OFF_CURSOR, spare &+ DATA)
           IyiHeap.write64(spare &+ OFF_PARENT, 0_u64)
           return spare
@@ -3655,13 +3668,34 @@ require "./file"
         (capacity &+ DATA &+ (GRAIN &- 1_u64)) & 0xFFFFFFFFFFFF0000_u64
       end
 
+      # A first-size mapping joins the spares while there is room, the
+      # pages past KEEP_WARM handed back; a grown one, or one past SPARES,
+      # is unmapped.
       def self.release(region : UInt64) : Nil
+        used = IyiHeap.read64(region &+ OFF_CURSOR) &- region
         IyiHeap.write64(region &+ OFF_CURSOR, region &+ DATA)
-        if @@spare == 0
+        length = IyiHeap.read64(region &+ OFF_MAP)
+        if length == mapping_length(CAPACITY) && @@spares < SPARES
+          __iyi_release_pages(region &+ KEEP_WARM, used &- KEEP_WARM) if used > KEEP_WARM
+          IyiHeap.write64(region &+ OFF_PARENT, @@spare)
           @@spare = region
+          @@spares = @@spares &+ 1_u64
         else
           unregister(region)
+          __iyi_munmap(region, length)
+        end
+      end
+
+      # The thread's spares back to the kernel, when the thread ends.
+      def self.drop_spares : Nil
+        region = @@spare
+        @@spare = 0_u64
+        @@spares = 0_u64
+        while region != 0
+          following = IyiHeap.read64(region &+ OFF_PARENT)
+          unregister(region)
           __iyi_munmap(region, IyiHeap.read64(region &+ OFF_MAP))
+          region = following
         end
       end
 
@@ -4564,14 +4598,12 @@ require "./file"
       # walk and this is the empty walk it looks like.
       def self.each_fiber_root(visit : Proc(UInt64, Nil)) : Nil
         {% if (flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64)) %}
-          fiber = IyiScheduler.first_fiber
-          while fiber.is_a?(IyiFiber)
+          IyiScheduler.each_fiber do |fiber|
             if fiber.state != IyiFiberState::Running && fiber.state != IyiFiberState::Done && fiber.saved_sp != 0
               top = fiber.stack_top
               top = stack_base if top == 0
               scan_range(fiber.saved_sp, top, visit)
             end
-            fiber = fiber.next_fiber
           end
         {% end %}
       end
@@ -5632,7 +5664,7 @@ require "./file"
         # the same drain, this thread included.
         if helpers > 0_u64
           pool_word(POOL_GENERATION).value.add(1_u64)
-          wake_helpers
+          wake_some_helpers(helpers)
         end
         black = drain(w, true)
         # Every helper asked has answered - left the drain and folded its
@@ -5733,6 +5765,19 @@ require "./file"
 
       def self.workers : UInt64
         @@helpers_wanted
+      end
+
+      # *helpers* held to the cores the program's own threads leave, and
+      # at least one, which takes a concurrent mark's finish.
+      def self.beside_program(helpers : UInt64) : UInt64
+        {% if (flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64)) %}
+          threads = IyiThread.program_threads
+          cores = IyiThread.core_count
+          free = cores > threads + 1_u64 ? cores - threads : 1_u64
+          helpers > free ? free : helpers
+        {% else %}
+          helpers
+        {% end %}
       end
 
       # A spin's breath: the CPU's pause hint, no syscall.
@@ -5910,8 +5955,14 @@ require "./file"
           __iyi_conc_syscall6(IYI_SYS_FUTEX, (pool + POOL_GENERATION).to_i64, IYI_FUTEX_WAKE, 1000000_i64, 0_i64, 0_i64, 0_i64)
         end
 
+        # *count* helpers off the futex, for that many permits: waking every
+        # one woke the ones no permit was left for, and each spun its fifty
+        # microseconds for nothing before it parked again. A helper still
+        # spinning sees the generation itself, and one left parked reads
+        # it whenever it wakes.
         def self.wake_some_helpers(count : UInt64) : Nil
-          wake_helpers
+          return if count == 0_u64
+          __iyi_conc_syscall6(IYI_SYS_FUTEX, (pool + POOL_GENERATION).to_i64, IYI_FUTEX_WAKE, count.to_i64, 0_i64, 0_i64, 0_i64)
         end
       {% elsif flag?(:win32) %}
         # No futex here either, and not darwin's spin: a helper spins
@@ -6362,18 +6413,23 @@ require "./file"
           return if @@helpers == 0_u64 || @@sweep_left == 0_u64
           open_mark_permits(0_u64)
           pool_word(POOL_HELPERS_DONE).value.set(0_u64)
-          pool_word(POOL_SWEEP_PERMITS).value.set(@@helpers < SWEEP_HELPERS ? @@helpers : SWEEP_HELPERS)
+          # The round runs beside the program: no more sweepers than the
+          # cores its threads leave.
+          permits = beside_program(@@helpers < SWEEP_HELPERS ? @@helpers : SWEEP_HELPERS)
+          @@sweep_permits = permits
+          pool_word(POOL_SWEEP_PERMITS).value.set(permits)
           pool_word(POOL_SWEEP).value.set(1_u64)
           pool_word(POOL_GENERATION).value.add(1_u64)
           @@round_to_wake = true
         end
 
         @@round_to_wake : Bool = false
+        @@sweep_permits : UInt64 = 0_u64
 
         def self.wake_sweep_round : Nil
           return unless @@round_to_wake
           @@round_to_wake = false
-          wake_some_helpers(SWEEP_HELPERS)
+          wake_some_helpers(@@sweep_permits)
         end
 
         # Before a collection stops anything, under the lock: the round
@@ -7296,25 +7352,20 @@ require "./file"
           # reset - and the cores are otherwise idle. Sized by the last
           # mark's live bytes here, binary trees ran a tenth slower than
           # with all of them.
-          helpers = @@helpers
-          {% if flag?(:win32) %}
-            # Every helper there is, while the cores are otherwise idle -
-            # and not past them: a program running threads of its own has
-            # them on those cores, and each helper beyond the cores it
-            # leaves took one from a thread of the program's. Measured on
-            # twelve cores with eleven helpers, four threads allocating
-            # beside the mark: their longest stall median 41 ms and the
-            # longest pause's 20.5, against 21.6 and 2.9 with the helpers
-            # held to the cores the threads leave (12 runs each); with one
-            # thread nothing is held back and nothing changed (9.4 ms,
-            # 8.7), and binary trees ran as it did.
-            # The floor is one helper, which takes the finish. Asserted
-            # where it was measured.
-            threads = IyiThread.program_threads
-            cores = IyiThread.core_count
-            free = cores > threads + 1_u64 ? cores - threads : 1_u64
-            helpers = free if helpers > free
-          {% end %}
+          # Every helper there is, while the cores are otherwise idle -
+          # and not past them: a program running threads of its own has
+          # them on those cores, and each helper beyond the cores it
+          # leaves took one from a thread of the program's. Measured on
+          # twelve cores with eleven helpers, four threads allocating
+          # beside the mark: their longest stall median 41 ms and the
+          # longest pause's 20.5, against 21.6 and 2.9 with the helpers
+          # held to the cores the threads leave (12 runs each); with one
+          # thread nothing is held back and nothing changed (9.4 ms,
+          # 8.7), and binary trees ran as it did. It was Windows' alone,
+          # and Linux paid the same: eight threads serving a page on eight
+          # cores, seven helpers beside them, the helpers 12% of the
+          # samples, 16,000 requests a second against 17,700 with none.
+          helpers = beside_program(@@helpers)
           @@beside_helpers = helpers
           @@workers = helpers + 1_u64
           open_mark_permits(helpers)
@@ -7336,7 +7387,7 @@ require "./file"
           # microseconds are the futex's either way. It is the program's
           # own thread that wakes them, so its length is the program's.
           woke = now_ns
-          wake_helpers
+          wake_some_helpers(helpers)
           woke = now_ns - woke
           @@wake_longest_ns = woke if woke > @@wake_longest_ns
           @@wakes = @@wakes + 1_u64
@@ -7520,7 +7571,7 @@ require "./file"
           pool_word(POOL_ACTIVE).value.set(0_u64)
           pool_word(POOL_HELPERS_DONE).value.set(0_u64)
           generation = pool_word(POOL_GENERATION).value.add(1_u64) + 1_u64
-          wake_helpers
+          wake_some_helpers(helpers - 1_u64)
           drain(w)
           takers = close_mark_permits
           while pool_word(POOL_HELPERS_DONE).value.get < takers

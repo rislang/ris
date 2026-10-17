@@ -78,6 +78,12 @@ if [ "$out" = $'fiber A wrong: 0\nfiber B wrong: 0' ]; then echo "runs     fiber
 out=$("$RIS" run test/ris/fibers/many.ri 2>&1)
 if [ "$out" = "1000 tapes at once, sum 499500" ]; then echo "runs     fibers/many"; else echo "FAILED   fibers/many: $out"; status=1; fi
 
+out=$("$RIS" run --release test/ris/fibers/threads_spawn.ri 2>&1)
+if [ "$out" = 'PASS: 4 threads, 32,000 tasks, collected throughout' ]; then echo "runs     fibers/threads_spawn"; else echo "FAILED   fibers/threads_spawn: $out"; status=1; fi
+
+out=$("$RIS" run test/ris/fibers/spares.ri 2>&1)
+if [ "$out" = $'warm: 4096 KiB written again\n8388608\ntrimmed' ]; then echo "runs     fibers/spares"; else echo "FAILED   fibers/spares: $out"; status=1; fi
+
 out=$("$RIS" run test/ris/grow.ri 2>&1)
 if [ "$out" = $'round 1: 100 MiB intact, before 499500, after 7\nround 2: 100 MiB intact, before 999000, after 14' ]; then echo "runs     grow"; else echo "FAILED   grow: $out"; status=1; fi
 

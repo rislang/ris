@@ -1,0 +1,78 @@
+# Scopes open at once keep their mappings warm: eight fibers each write
+# 512 KiB on their tape and park inside the scope, twice. The second round
+# reuses the first round's mappings, so it faults in next to none of the
+# 1,024 pages it writes; with one spare a thread kept, seven of the eight
+# took a fresh mapping and faulted in every page. A scope that wrote 8 MiB
+# keeps only its first MiB resident.
+module test/ris/fibers/spares
+import std/file::{File}
+import std/text
+
+# Minor faults so far, the tenth field of `/proc/self/stat` after the name.
+def minor_faults : Int64
+  stat = File.read("/proc/self/stat")
+  close = stat.rindex(')') || 0
+  fields = stat[close + 2, stat.bytesize - close - 2].split(' ')
+  fields[7].to_i64
+end
+
+def hold(done : Channel(Int64)) : Nil
+  sum = 0_i64
+  Tape.scope do
+    text = TapeString.build(512 * 1024) do |w|
+      n = 0
+      while n < 512 * 1024
+        w.push((97 + n % 26).to_u8)
+        n += 1
+      end
+    end
+    sleep(20)
+    sum = text.bytesize.to_i64
+  end
+  done.send(sum)
+end
+
+def start(g : IyiGroup, done : Channel(Int64)) : Nil
+  g.spawn do
+    hold(done)
+    0
+  end
+end
+
+def round : Int64
+  done = Channel(Int64).new(8)
+  total = 0_i64
+  group do |g|
+    8.times { start(g, done) }
+    8.times { total = total + done.receive.or_panic }
+    0
+  end
+  total
+end
+
+def resident_kb : Int64
+  File.read("/proc/self/status").split('\n').each do |line|
+    return line.split(' ').reject(&.empty?)[1].to_i64 if line.starts_with?("RssAnon:")
+  end
+  0_i64
+end
+
+round
+before = minor_faults
+total = round
+faults = minor_faults - before
+puts faults < 128 ? "warm: #{total // 1024} KiB written again" : "COLD: #{faults} faults for #{total // 1024} KiB"
+
+before_kb = resident_kb
+Tape.scope do
+  big = TapeString.build(8 * 1024 * 1024) do |w|
+    n = 0
+    while n < 8 * 1024 * 1024
+      w.push(1_u8)
+      n += 1
+    end
+  end
+  puts big.bytesize
+end
+grown = resident_kb - before_kb
+puts grown < 4096 ? "trimmed" : "KEPT #{grown} KiB"

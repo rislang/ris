@@ -246,11 +246,7 @@
   # a stopped thread's stack by and scans parked stacks from.
   def registered_fibers : Int32
     registered = 0
-    fiber = IyiScheduler.first_fiber
-    while fiber.is_a?(IyiFiber)
-      registered = registered + 1
-      fiber = fiber.next_fiber
-    end
+    IyiScheduler.each_fiber { |_| registered = registered + 1 }
     registered
   end
 

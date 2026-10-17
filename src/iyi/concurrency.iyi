@@ -910,6 +910,12 @@ class IyiSchedulerState
   property events : Pointer(UInt8)
   property next_state : IyiSchedulerState?
 
+  # This thread's live fibers, for the collector's root walk
+  # (`IyiScheduler.register`), and the one being linked in, if a stop
+  # lands while it is.
+  property fibers_head : IyiFiber?
+  property registering : IyiFiber?
+
   # The fiber that finished on this thread and is waiting for its
   # successor to hand the stack back, and the stacks already handed
   # back. Both are this thread's alone — a fiber never leaves the
@@ -1067,32 +1073,67 @@ class IyiScheduler
   # per connection, and a list nothing leaves makes every later
   # collection walk every request the process ever served. A fiber
   # leaves when its stack does, which is one step with the back link.
-  # Under the runtime lock, for the reason the states are.
-  @@all_head : IyiFiber?
-
+  #
+  # Each thread keeps its own list (`IyiSchedulerState#fibers_head`): a
+  # fiber never leaves the scheduler it was spawned on, so only its
+  # thread links it in or out, and the runtime lock - which every spawn
+  # and every fiber's end took, a server's every request on every thread
+  # meeting there - is not needed. Only the collector reads the lists, and
+  # only while every other thread is stopped. A stop is a signal, so it
+  # can land between any two stores of the link: every store is ordered
+  # (`fence`), the list is whole forwards after each one, and the fiber
+  # being linked in sits in `registering` until the head names it, so the
+  # walk finds it one way or the other.
   def self.register(fiber : IyiFiber) : Nil
-    IyiRuntimeLock.lock
-    head = @@all_head
+    st = state
+    st.registering = fiber
+    fence
+    head = st.fibers_head
     fiber.next_fiber = head
     fiber.prev_fiber = nil
     head.prev_fiber = fiber if head.is_a?(IyiFiber)
-    @@all_head = fiber
-    IyiRuntimeLock.unlock
+    fence
+    st.fibers_head = fiber
+    fence
+    st.registering = nil
   end
 
   def self.unregister(fiber : IyiFiber) : Nil
-    IyiRuntimeLock.lock
+    st = state
     following = fiber.next_fiber
     previous = fiber.prev_fiber
     if previous.is_a?(IyiFiber)
       previous.next_fiber = following
     else
-      @@all_head = following
+      st.fibers_head = following
     end
+    fence
     following.prev_fiber = previous if following.is_a?(IyiFiber)
     fiber.next_fiber = nil
     fiber.prev_fiber = nil
-    IyiRuntimeLock.unlock
+  end
+
+  # Keeps the compiler from moving a store across it: the thread's own
+  # stop handler is the other reader, on this thread, so program order is
+  # all it needs.
+  @[AlwaysInline]
+  def self.fence : Nil
+    asm("" ::: "memory" : "volatile")
+  end
+
+  # Each live fiber of every thread, the one being linked in included.
+  def self.each_fiber(& : IyiFiber -> Nil) : Nil
+    st = @@states_head
+    while st.is_a?(IyiSchedulerState)
+      linking = st.registering
+      yield linking if linking.is_a?(IyiFiber)
+      fiber = st.fibers_head
+      while fiber.is_a?(IyiFiber)
+        yield fiber
+        fiber = fiber.next_fiber
+      end
+      st = st.next_state
+    end
   end
 
   # A stack for a new fiber out of this thread's pool (0 when it is
@@ -1134,9 +1175,6 @@ class IyiScheduler
     unregister(fiber)
   end
 
-  def self.first_fiber : IyiFiber?
-    @@all_head
-  end
 
   # A thread's last act with the scheduler: its main fiber leaves the
   # registry, because its stack is about to. A spawned fiber leaves when
@@ -1153,8 +1191,8 @@ class IyiScheduler
   # does not would rewrite the head.
   #
   # And what the scheduler made for the thread goes with it: the poller,
-  # Windows' deadline timer, the stacks in the pool, and the state on the
-  # roots' list. None of it was ever given back, and a thread that slept
+  # Windows' deadline timer, the stacks in the pool, the tape's spare
+  # mappings, and the state on the roots' list. None of it was ever given back, and a thread that slept
   # once left two handles: a thousand of them, run and joined one after
   # another, took the process from 60 handles to 2,061, and a thousand
   # that each ran four tasks kept 259 MiB of stacks committed after they
@@ -1164,7 +1202,7 @@ class IyiScheduler
     return if state.is_a?(Nil)
     main = state.current
     if main.is_a?(IyiFiber)
-      head = @@all_head
+      head = state.fibers_head
       linked = main.prev_fiber.is_a?(IyiFiber) || (head.is_a?(IyiFiber) && head.object_id == main.object_id)
       unregister(main) if linked
     end
@@ -1180,6 +1218,7 @@ class IyiScheduler
       base = following
     end
     state.stack_pool = 0_u64
+    IyiRegion.drop_spares
     IyiRuntimeLock.lock
     previous : IyiSchedulerState? = nil
     cursor = @@states_head
@@ -1203,11 +1242,9 @@ class IyiScheduler
   # does: how a stopped thread's stack is bounded when the stop landed
   # on one of its fibers.
   def self.fiber_top_holding(address : UInt64) : UInt64
-    fiber = @@all_head
-    while fiber.is_a?(IyiFiber)
+    each_fiber do |fiber|
       top = fiber.stack_top
       return top if top != 0 && address < top && address >= top - IyiFiber::STACK_BYTES
-      fiber = fiber.next_fiber
     end
     0_u64
   end
@@ -1231,8 +1268,7 @@ class IyiScheduler
     # handler that overran it still says what happened rather than
     # calling it a memory fault.
     def self.fiber_guard_hit?(address : UInt64) : Bool
-      fiber = @@all_head
-      while fiber.is_a?(IyiFiber)
+      each_fiber do |fiber|
         top = fiber.stack_top
         if top != 0
           # Anywhere in the reservation: the pages the kernel had not grown
@@ -1240,7 +1276,6 @@ class IyiScheduler
           low = top - IyiFiber::STACK_BYTES
           return true if address >= low && address < top
         end
-        fiber = fiber.next_fiber
       end
       false
     end

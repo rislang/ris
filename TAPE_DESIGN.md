@@ -26,7 +26,14 @@ or its fields onto the tape. A tape allocation outside an active
 `Tape.scope` or `Tape.local` terminates the program. Each fiber has its
 own tape, saved and restored on a switch. Allocation is bump-pointer; the
 first mapping is 64 MiB, and a full tape adds a larger one without moving
-anything. Reclamation releases the chain and keeps one spare mapping.
+anything. 64 MiB is address space, not memory: only written pages are
+resident, a mapping costs the same at any size, a request rarely grows past
+it (growth copies the growing value), and it holds the largest request
+body std/http accepts (`MAX_BODY`). Reclamation releases the chain; each
+thread keeps up to 64 first-size mappings as spares, newest first, so
+scopes open at once (handlers that park) reuse warm pages. A spare keeps
+its first MiB resident and hands the rest back; grown mappings are
+unmapped, and a thread's spares go when it ends.
 
 Only the outermost `Tape.scope` reclaims; nested scopes share its tape.
 Its guard reuses one cleanup node per fiber: normal and nonlocal exits
