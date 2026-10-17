@@ -241,7 +241,8 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
       node.raise "no requirement covers '#{path}'. A dotted path is a " \
                  "package (SPEC.md III.7); the file that declares one is " \
                  "`iyi.mod`, at the root the entry's `module` header names or beside " \
-                 "the entry, as `require #{repositories.first} v1.2.3`#{inside}"
+                 "the entry, as `require #{repositories.first} v1.2.3`#{inside}" \
+                 "#{iyi_header_root_hint}"
     end
 
     # iyi: the artifact, if there is one (SPEC.md IV.1). This is R-1's contract
@@ -288,7 +289,8 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
       end
       node.raise "can't find module '#{path}'. A module's path is its file's " \
                  "path, so this one is `#{path}.ri` (or `.iyi`), resolved from the " \
-                 "directory of the file being built and then from `IYI_PATH`#{hint}"
+                 "directory of the file being built and then from `IYI_PATH`#{hint}" \
+                 "#{iyi_header_root_hint}"
     end
 
     # iyi: `import json` under iyi's own prelude found Crystal's
@@ -558,6 +560,23 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     candidates.find do |candidate|
       !@program.iyi_file_override(candidate).nil? || File.file?(candidate)
     end
+  end
+
+  # ris: why a project's own `ris.mod` went unread. The entry's header
+  # names the project root (`module demo/app` in `/p/demo/app.ri` is
+  # `/p`) and the manifest is read there, so a project beside another
+  # one's - an app in a library's `demo/` - built against the outer
+  # manifest and said only that a module was not there.
+  private def iyi_header_root_hint : String
+    return "" unless header_root = @program.iyi_header_root
+    return "" unless entry = @program.filename
+    entry_dir = File.dirname(entry)
+    return "" if File.expand_path(entry_dir) == File.expand_path(header_root)
+    return "" unless Mod::Installer.manifest?(entry_dir)
+    name = File.basename(entry).rchop(".ri").rchop(".iyi")
+    "\nThe entry's `module` header names #{header_root} as the project root, " \
+    "and the build reads the manifest there, not the one beside the entry in " \
+    "#{entry_dir}. To build from that one, write `module #{name}`"
   end
 
   # iyi: whether *filename* is a module of iyi's own standard library — a
