@@ -42,7 +42,12 @@ request's bytes, temporaries and response on one tape per request.
 
 * iyi's and Crystal's documents (SPEC.md, CHANGELOG.md, README.iyi.md,
   GC_DESIGN.md, …) stay as they are; ris's own are README.md, LEARN.md and
-  TAPE_DESIGN.md.
+  TAPE_DESIGN.md and LLVM.md.
+
+## LLVM
+
+* Build with LLVM 23, never 21 or 22: they miscompile ris code. Why, and
+  the codegen workaround that must stay: [LLVM.md](LLVM.md).
 
 ## Length
 

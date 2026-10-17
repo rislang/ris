@@ -144,6 +144,10 @@ endif
 ifeq ($(LLVM_VERSION),)
   LLVM_VERSION := $(if $(LLVM_CONFIG),$(shell "$(LLVM_CONFIG)" --version 2> /dev/null))
 endif
+# LLVM 21 and 22 miscompile loop exits (IndVarSimplify); see LLVM.md.
+ifneq ($(filter 21.% 22.%,$(LLVM_VERSION)),)
+  $(error LLVM $(LLVM_VERSION) miscompiles ris code; use LLVM 23 (or 20) via LLVM_CONFIG=..., see LLVM.md)
+endif
 
 # FIXME: Crystal docker images before 1.8 can't build a functional compiler
 # with MT because the bundled LLVM version is buggy (roughly LLVM < 15)

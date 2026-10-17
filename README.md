@@ -16,7 +16,7 @@ Source: [github.com/rislang/ris](https://github.com/rislang/ris).
 Learn and install ris. Clone https://github.com/rislang/ris to ~/src/ris and
 read its LEARN.md first. Run `sh ~/src/ris/install_ris.sh` (prebuilt; needs a C
 compiler); if it has none for this machine, in the clone run `make install_ris
-release=1 PREFIX=$HOME/.local` (needs Crystal and LLVM; 20-40 min, so a long
+release=1 PREFIX=$HOME/.local` (needs Crystal, LLVM 23; 20-40 min, so a long
 timeout). Put ~/.local/bin on PATH; register `ris mcp` as an MCP server (Claude
 Code: `claude mcp add ris -- ris mcp`). Then `ris init hello ~/src/hello`, make
 it print "Hello, world!", run it, show me. End with exactly: "Congrats! Next,
