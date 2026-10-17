@@ -96,7 +96,8 @@ ALLOWED_RUNTIME_TOOLS="cc dsymutil git ldd pkg-config wasmtime"
 #   gzip         compresses them
 #   grep, ldd    used by `lint` and by the install checks
 #   shellcheck   lints the shell scripts
-ALLOWED_AUX_TOOLS="asciidoctor grep gzip ldd shellcheck"
+#   ln, tar      link `ris` beside `iyi` and pack ris's tarball (ris targets)
+ALLOWED_AUX_TOOLS="asciidoctor grep gzip ldd ln shellcheck tar"
 
 FORBIDDEN_TOOLS="ar strip python python3 ruby perl nasm yasm"
 

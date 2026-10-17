@@ -203,7 +203,7 @@ def main():
          f"cause {cause}")
     proc = run("fix", "bumps.iyi", cwd=work)
     step("and says so in prose",
-         f"the cause is in {os.path.join('calc', 'typo.iyi')}:8:3" in proc.stderr and f"iyi fix {os.path.join('calc', 'typo.iyi')}" in proc.stderr,
+         f"the cause is in {os.path.join('calc', 'typo.iyi')}:8:3" in proc.stderr and f"ris fix {os.path.join('calc', 'typo.iyi')}" in proc.stderr,
          proc.stderr.strip().splitlines()[-1])
     proc = run("fix", "--json", "calc/typo.iyi", cwd=work)
     fixed = json.loads(proc.stdout)

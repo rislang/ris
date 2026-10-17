@@ -138,6 +138,10 @@ def scan_build(repo):
                     elif inner in ["CRYSTAL"]:
                         found_build.setdefault("crystal", []).append(f"Makefile:{idx}")
                         break
+                    # A sub-make and `install` are the command; the word
+                    # after them is a target or a file, not a tool.
+                    elif inner in ["MAKE", "INSTALL"]:
+                        break
                     continue
                 if "=" in tok:
                     continue
