@@ -1175,7 +1175,6 @@ class IyiScheduler
     unregister(fiber)
   end
 
-
   # A thread's last act with the scheduler: its main fiber leaves the
   # registry, because its stack is about to. A spawned fiber leaves when
   # it is reaped; the main fiber was made by the first `current` on the
