@@ -30,6 +30,11 @@ of its own; the caller's `Tape.scope` owns all of it, freed at once:
 * Temporaries go on the caller's tape: a nested `Tape.scope` shares it at
   no cost. No `Tape.local` per call; it costs more than small work saves.
 * The caller decides what to copy to the heap, and when.
+* No raw pointers in an API: pass `TapeString`, `TapeWriter`, `TapeArray`
+  or an `@[OnTape]` struct. The checker refuses a `TapeString` that leaves
+  its scope, but not its `to_unsafe`: that pointer compiles and then reads
+  the next scope's bytes. Only the library's own FFI or socket call takes
+  one, never a caller.
 * Keep the `String` API beside it, built on the tape one: it opens a
   `Tape.scope` (shared when the caller has one) and copies the result out.
 
