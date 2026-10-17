@@ -948,7 +948,7 @@ echo "== the fill command the bind log names"
 # `tool bind` told a person to run `crystal build --iyi-keep`, which
 # Crystal answers with `Invalid option: --iyi-keep`; it names this binary
 # and the flags `iyi bind` runs it with.
-if grep -q "^  iyi build --crystal --iyi-keep Radix " "$NEAR/mods/radix.bind.log" &&
+if grep -q "^  ris build --crystal --iyi-keep Radix " "$NEAR/mods/radix.bind.log" &&
    ! grep -q "crystal build --iyi-keep" "$NEAR/mods/radix.bind.log"; then
   echo "  it is a command this binary takes"
 else
