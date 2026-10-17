@@ -199,91 +199,145 @@ pub struct SHA1
 end
 
 pub struct SHA256
+  # The round constants, made once: they were an array built on every call.
+  K = [
+  0x428a2f98_u32, 0x71374491_u32, 0xb5c0fbcf_u32, 0xe9b5dba5_u32,
+  0x3956c25b_u32, 0x59f111f1_u32, 0x923f82a4_u32, 0xab1c5ed5_u32,
+  0xd807aa98_u32, 0x12835b01_u32, 0x243185be_u32, 0x550c7dc3_u32,
+  0x72be5d74_u32, 0x80deb1fe_u32, 0x9bdc06a7_u32, 0xc19bf174_u32,
+  0xe49b69c1_u32, 0xefbe4786_u32, 0x0fc19dc6_u32, 0x240ca1cc_u32,
+  0x2de92c6f_u32, 0x4a7484aa_u32, 0x5cb0a9dc_u32, 0x76f988da_u32,
+  0x983e5152_u32, 0xa831c66d_u32, 0xb00327c8_u32, 0xbf597fc7_u32,
+  0xc6e00bf3_u32, 0xd5a79147_u32, 0x06ca6351_u32, 0x14292967_u32,
+  0x27b70a85_u32, 0x2e1b2138_u32, 0x4d2c6dfc_u32, 0x53380d13_u32,
+  0x650a7354_u32, 0x766a0abb_u32, 0x81c2c92e_u32, 0x92722c85_u32,
+  0xa2bfe8a1_u32, 0xa81a664b_u32, 0xc24b8b70_u32, 0xc76c51a3_u32,
+  0xd192e819_u32, 0xd6990624_u32, 0xf40e3585_u32, 0x106aa070_u32,
+  0x19a4c116_u32, 0x1e376c08_u32, 0x2748774c_u32, 0x34b0bcb5_u32,
+  0x391c0cb3_u32, 0x4ed8aa4a_u32, 0x5b9cca4f_u32, 0x682e6ff3_u32,
+  0x748f82ee_u32, 0x78a5636f_u32, 0x84c87814_u32, 0x8cc70208_u32,
+  0x90befffa_u32, 0xa4506ceb_u32, 0xbef9a3f7_u32, 0xc67178f2_u32,
+  ] of UInt32
+
   def self.hexdigest(data : String) : String
     DigestUtil.hex(hash_bytes(data), 32)
   end
 
+  # The blocks are read where the string's bytes are, the schedule and the
+  # state sit on the stack, and only the last block or two are padded, in a
+  # buffer of their own. It had padded a copy of the whole input into an
+  # array a byte at a time and made a 64-word array for every block: the
+  # ETag of a 3.7 KB string was 280 K instructions.
   def self.hash_bytes(data : String) : Array(UInt8)
-    h = [
-      0x6a09e667_u32, 0xbb67ae85_u32, 0x3c6ef372_u32, 0xa54ff53a_u32,
-      0x510e527f_u32, 0x9b05688c_u32, 0x1f83d9ab_u32, 0x5be0cd19_u32,
-    ]
-    k = sha256_k
-    msg = DigestUtil.padded_be(data)
+    state = uninitialized StaticArray(UInt32, 8)
+    h = pointerof(state).as(Pointer(UInt32))
+    h[0] = 0x6a09e667_u32
+    h[1] = 0xbb67ae85_u32
+    h[2] = 0x3c6ef372_u32
+    h[3] = 0xa54ff53a_u32
+    h[4] = 0x510e527f_u32
+    h[5] = 0x9b05688c_u32
+    h[6] = 0x1f83d9ab_u32
+    h[7] = 0x5be0cd19_u32
+    schedule = uninitialized StaticArray(UInt32, 64)
+    w = pointerof(schedule).as(Pointer(UInt32))
+    bytes = data.to_unsafe
+    n = data.bytesize
+    whole = n - n % 64
     off = 0
-    while off < msg.size
-      w = Array(UInt32).new(64) { 0_u32 }
-      i = 0
-      while i < 16
-        j = off + i * 4
-        w[i] = (msg[j].to_u32 << 24) | (msg[j + 1].to_u32 << 16) | (msg[j + 2].to_u32 << 8) | msg[j + 3].to_u32
-        i = i + 1
-      end
-      i = 16
-      while i < 64
-        s0 = DigestUtil.rotr(w[i - 15], 7) ^ DigestUtil.rotr(w[i - 15], 18) ^ (w[i - 15] >> 3)
-        s1 = DigestUtil.rotr(w[i - 2], 17) ^ DigestUtil.rotr(w[i - 2], 19) ^ (w[i - 2] >> 10)
-        w[i] = w[i - 16] &+ s0 &+ w[i - 7] &+ s1
-        i = i + 1
-      end
-      a = h[0]
-      b = h[1]
-      c = h[2]
-      d = h[3]
-      e = h[4]
-      f = h[5]
-      g = h[6]
-      hh = h[7]
-      t = 0
-      while t < 64
-        s1 = DigestUtil.rotr(e, 6) ^ DigestUtil.rotr(e, 11) ^ DigestUtil.rotr(e, 25)
-        ch = (e & f) ^ ((~e) & g)
-        temp1 = hh &+ s1 &+ ch &+ k[t] &+ w[t]
-        s0 = DigestUtil.rotr(a, 2) ^ DigestUtil.rotr(a, 13) ^ DigestUtil.rotr(a, 22)
-        maj = (a & b) ^ (a & c) ^ (b & c)
-        temp2 = s0 &+ maj
-        hh = g
-        g = f
-        f = e
-        e = d &+ temp1
-        d = c
-        c = b
-        b = a
-        a = temp1 &+ temp2
-        t = t + 1
-      end
-      h[0] = h[0] &+ a
-      h[1] = h[1] &+ b
-      h[2] = h[2] &+ c
-      h[3] = h[3] &+ d
-      h[4] = h[4] &+ e
-      h[5] = h[5] &+ f
-      h[6] = h[6] &+ g
-      h[7] = h[7] &+ hh
+    while off < whole
+      compress(h, w, bytes + off)
       off = off + 64
     end
-    DigestUtil.u32s_be(h)
+    # The rest, the 0x80 byte and the length in bits, in one block or two.
+    tail = uninitialized StaticArray(UInt8, 128)
+    t = pointerof(tail).as(Pointer(UInt8))
+    rest = n - whole
+    i = 0
+    while i < rest
+      t[i] = bytes[off + i]
+      i = i + 1
+    end
+    t[rest] = 0x80_u8
+    last = rest + 9 > 64 ? 128 : 64
+    i = rest + 1
+    while i < last - 8
+      t[i] = 0_u8
+      i = i + 1
+    end
+    bits = n.to_u64 * 8_u64
+    i = 0
+    while i < 8
+      t[last - 1 - i] = ((bits >> (i * 8)) & 255_u64).to_u8
+      i = i + 1
+    end
+    compress(h, w, t)
+    compress(h, w, t + 64) if last == 128
+    out = Array(UInt8).new(32)
+    i = 0
+    while i < 8
+      v = h[i]
+      out << (v >> 24).to_u8
+      out << ((v >> 16) & 255_u32).to_u8
+      out << ((v >> 8) & 255_u32).to_u8
+      out << (v & 255_u32).to_u8
+      i = i + 1
+    end
+    out
   end
 
-  private def self.sha256_k : Array(UInt32)
-    [
-      0x428a2f98_u32, 0x71374491_u32, 0xb5c0fbcf_u32, 0xe9b5dba5_u32,
-      0x3956c25b_u32, 0x59f111f1_u32, 0x923f82a4_u32, 0xab1c5ed5_u32,
-      0xd807aa98_u32, 0x12835b01_u32, 0x243185be_u32, 0x550c7dc3_u32,
-      0x72be5d74_u32, 0x80deb1fe_u32, 0x9bdc06a7_u32, 0xc19bf174_u32,
-      0xe49b69c1_u32, 0xefbe4786_u32, 0x0fc19dc6_u32, 0x240ca1cc_u32,
-      0x2de92c6f_u32, 0x4a7484aa_u32, 0x5cb0a9dc_u32, 0x76f988da_u32,
-      0x983e5152_u32, 0xa831c66d_u32, 0xb00327c8_u32, 0xbf597fc7_u32,
-      0xc6e00bf3_u32, 0xd5a79147_u32, 0x06ca6351_u32, 0x14292967_u32,
-      0x27b70a85_u32, 0x2e1b2138_u32, 0x4d2c6dfc_u32, 0x53380d13_u32,
-      0x650a7354_u32, 0x766a0abb_u32, 0x81c2c92e_u32, 0x92722c85_u32,
-      0xa2bfe8a1_u32, 0xa81a664b_u32, 0xc24b8b70_u32, 0xc76c51a3_u32,
-      0xd192e819_u32, 0xd6990624_u32, 0xf40e3585_u32, 0x106aa070_u32,
-      0x19a4c116_u32, 0x1e376c08_u32, 0x2748774c_u32, 0x34b0bcb5_u32,
-      0x391c0cb3_u32, 0x4ed8aa4a_u32, 0x5b9cca4f_u32, 0x682e6ff3_u32,
-      0x748f82ee_u32, 0x78a5636f_u32, 0x84c87814_u32, 0x8cc70208_u32,
-      0x90befffa_u32, 0xa4506ceb_u32, 0xbef9a3f7_u32, 0xc67178f2_u32,
-    ]
+  # One 64-byte block at *block* into the state *h*, *w* the schedule's 64
+  # words.
+  private def self.compress(h : Pointer(UInt32), w : Pointer(UInt32), block : Pointer(UInt8)) : Nil
+    k = K.to_unsafe
+    i = 0
+    while i < 16
+      j = i * 4
+      w[i] = (block[j].to_u32 << 24) | (block[j + 1].to_u32 << 16) | (block[j + 2].to_u32 << 8) | block[j + 3].to_u32
+      i = i + 1
+    end
+    while i < 64
+      x = w[i - 15]
+      y = w[i - 2]
+      s0 = ((x >> 7) | (x << 25)) ^ ((x >> 18) | (x << 14)) ^ (x >> 3)
+      s1 = ((y >> 17) | (y << 15)) ^ ((y >> 19) | (y << 13)) ^ (y >> 10)
+      w[i] = w[i - 16] &+ s0 &+ w[i - 7] &+ s1
+      i = i + 1
+    end
+    a = h[0]
+    b = h[1]
+    c = h[2]
+    d = h[3]
+    e = h[4]
+    f = h[5]
+    g = h[6]
+    hh = h[7]
+    t = 0
+    while t < 64
+      s1 = ((e >> 6) | (e << 26)) ^ ((e >> 11) | (e << 21)) ^ ((e >> 25) | (e << 7))
+      ch = (e & f) ^ ((~e) & g)
+      temp1 = hh &+ s1 &+ ch &+ k[t] &+ w[t]
+      s0 = ((a >> 2) | (a << 30)) ^ ((a >> 13) | (a << 19)) ^ ((a >> 22) | (a << 10))
+      maj = (a & b) ^ (a & c) ^ (b & c)
+      temp2 = s0 &+ maj
+      hh = g
+      g = f
+      f = e
+      e = d &+ temp1
+      d = c
+      c = b
+      b = a
+      a = temp1 &+ temp2
+      t = t + 1
+    end
+    h[0] = h[0] &+ a
+    h[1] = h[1] &+ b
+    h[2] = h[2] &+ c
+    h[3] = h[3] &+ d
+    h[4] = h[4] &+ e
+    h[5] = h[5] &+ f
+    h[6] = h[6] &+ g
+    h[7] = h[7] &+ hh
   end
 end
 
