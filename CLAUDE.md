@@ -38,11 +38,16 @@ with `ParsedHead`'s method, target and fields as views into *bytes*;
 `parse_request(text : String)` stays, on top of it. A web server keeps a
 request's bytes, temporaries and response on one tape per request.
 
+## Upstream
+
+* A change that does not need tape belongs in iyi: make it there first,
+  or list it in [UPSTREAM.md](UPSTREAM.md) to take there later.
+
 ## Documents
 
 * iyi's and Crystal's documents (SPEC.md, CHANGELOG.md, README.iyi.md,
   GC_DESIGN.md, …) stay as they are; ris's own are README.md, LEARN.md and
-  TAPE_DESIGN.md and LLVM.md.
+  TAPE_DESIGN.md, LLVM.md and UPSTREAM.md.
 
 ## LLVM
 
