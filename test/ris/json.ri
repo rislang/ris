@@ -116,6 +116,15 @@ Tape.scope do
   check(failures, JSON.parse(w.finish).size(0) == 300, "300 keys written and read back")
 end
 
+# `w.json` is `JSON.write(w)` with the writer first, options and all.
+Tape.scope do
+  w = Tape::String::Writer.new(16)
+  w.append("x:")
+  w.json { |b| b.object { b.field "a", 1 } }
+  w.json(2, true) { |b| b.array { b.string "é" } }
+  check(failures, w.finish.to_s == %(x:{"a":1}[\n  "\\u00e9"\n]), "w.json writes as JSON.write")
+end
+
 # A document copied through the builder is the heap builder's text of it,
 # its escapes decoded and written again, in every mode.
 Tape.scope do

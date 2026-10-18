@@ -1,7 +1,7 @@
 # orders: a JSON API's request path, all of it on one tape per request.
 #
 #   ./bin/ris build --release -o orders samples/ris/orders.ri
-#   ./orders        # tape: parse_head, JSON.parse, JSON.write on the tape
+#   ./orders        # tape: parse_head, JSON.parse, w.json on the tape
 #   ./orders heap   # the same with parse_request, JSON.parse, JSON.build
 #
 # Each of 200,000 requests is a `POST /orders` whose body names a user and
@@ -68,7 +68,7 @@ def answer(bytes : Tape::String) : UInt64
   return 0_u64 unless size
   doc = JSON.parse(bytes[head.body_start, size.to_i32])
   w = Tape::String::Writer.new(256)
-  JSON.write(w) do |json|
+  w.json do |json|
     total = 0_i64
     json.object do
       json.field(doc, doc.at(doc.root, "user"))

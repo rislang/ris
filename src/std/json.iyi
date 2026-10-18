@@ -3678,3 +3678,16 @@ pub struct JSON
     {% end %}
   end
 end
+
+# A writer on the tape writes a JSON document after what it holds:
+# `w.json { |json| ... }` is `JSON.write(w) { |json| ... }`, with the
+# writer, and so the tape, first on the line.
+pub trait WritesJSON
+  abstract def json(indent : String | Int32 | Nil = nil, ascii_only : Bool = false, & : TapeWriter -> Nil) : Nil
+end
+
+impl WritesJSON for Tape::String::Writer
+  def json(indent : String | Int32 | Nil = nil, ascii_only : Bool = false, & : Std::Json::TapeWriter -> Nil) : Nil
+    Std::Json::JSON.write(self, indent, ascii_only) { |j| yield j }
+  end
+end
