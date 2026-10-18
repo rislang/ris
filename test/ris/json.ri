@@ -7,7 +7,7 @@ module test/ris/json
 
 import std/int
 import std/gc::{GC}
-import std/json::{JSON, Builder, TapeWriter, Document, DocumentParser, Parser}
+import std/json::{JSON, Builder, Document, DocumentParser, Parser}
 
 failures = [] of String
 
@@ -33,7 +33,7 @@ def heap_doc(b : Builder) : Nil
   end
 end
 
-def tape_doc(b : TapeWriter) : Nil
+def tape_doc(b : JSON::Writer) : Nil
   b.object do
     b.field "id", 7_i64
     b.field "name", "a \"b\"\né \u{1F600} \u0001"
