@@ -1,6 +1,6 @@
 # std/json on the tape: `JSON.parse(Tape::String)` reads what `JSON.parse`
 # reads and refuses what it refuses, with the same sentence; a string with
-# no escape is a view of the input; `JSON.build(Tape::String::Writer)`
+# no escape is a view of the input; `JSON.write(Tape::String::Writer)`
 # writes what `JSON.build` writes, plain, indented and ASCII-only; and
 # neither puts anything on the GC heap.
 module test/ris/json
@@ -101,7 +101,7 @@ end
     Tape.scope do
       w = Tape::String::Writer.new(16)
       w.append("head:")
-      JSON.build(w, indent, ascii) { |b| tape_doc(b) }
+      JSON.write(w, indent, ascii) { |b| tape_doc(b) }
       tape = w.finish.to_s
     end
     check(failures, tape == "head:" + heap, "written alike, indent #{indent.inspect}, ascii #{ascii}: #{tape}")
@@ -112,7 +112,7 @@ end
 # move to the heap, and a repeat among them is still seen by the end.
 Tape.scope do
   w = Tape::String::Writer.new(16)
-  JSON.build(w) { |b| b.object { 300.times { |i| b.field "k#{i}", i } } }
+  JSON.write(w) { |b| b.object { 300.times { |i| b.field "k#{i}", i } } }
   check(failures, JSON.parse(w.finish).size(0) == 300, "300 keys written and read back")
 end
 
@@ -123,7 +123,7 @@ Tape.scope do
   [nil, 2].each do |indent|
     [false, true].each do |ascii|
       w = Tape::String::Writer.new(16)
-      JSON.build(w, indent, ascii) { |b| b.value(doc, doc.root) }
+      JSON.write(w, indent, ascii) { |b| b.value(doc, doc.root) }
       heap = JSON.build(indent) do |b|
         b.ascii_only = ascii
         JSON.parse(text).to_json(b)
@@ -132,7 +132,7 @@ Tape.scope do
     end
   end
   w = Tape::String::Writer.new(16)
-  JSON.build(w) do |b|
+  JSON.write(w) do |b|
     b.object { doc.each(doc.root) { |child| b.field(doc, child); b.number doc.kind(child).value } }
   end
   check(failures, w.finish.to_s == %({"a":5,"bA":6,"e":5}), "keys copied, an escaped one decoded")
@@ -146,7 +146,7 @@ total = 0_i64
   Tape.scope do
     doc = JSON.parse(Tape::String.new(small))
     w = Tape::String::Writer.new(64)
-    JSON.build(w) do |b|
+    JSON.write(w) do |b|
       b.object do
         doc.each(doc.root) { |child| b.field(doc, child); b.value(doc, child) }
       end

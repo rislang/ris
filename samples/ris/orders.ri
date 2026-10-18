@@ -1,7 +1,7 @@
 # orders: a JSON API's request path, all of it on one tape per request.
 #
 #   ./bin/ris build --release -o orders samples/ris/orders.ri
-#   ./orders        # tape: parse_head, JSON.parse, JSON.build on the tape
+#   ./orders        # tape: parse_head, JSON.parse, JSON.write on the tape
 #   ./orders heap   # the same with parse_request, JSON.parse, JSON.build
 #
 # Each of 200,000 requests is a `POST /orders` whose body names a user and
@@ -46,12 +46,6 @@ def requests : Array(String)
   end
 end
 
-def digits(text : Tape::String) : Int32
-  n = 0
-  text.each_byte { |c| n = n * 10 + (c - 48_u8).to_i32 }
-  n
-end
-
 def fnv(h : UInt64, text : Tape::String) : UInt64
   text.each_byte { |c| h = (h ^ c.to_u64) &* 1099511628211_u64 }
   h
@@ -70,10 +64,11 @@ end
 def answer(bytes : Tape::String) : UInt64
   head = Server.parse_head(bytes)
   return 0_u64 unless head.is_a?(ParsedHead)
-  size = (length = head.field("Content-Length")) ? digits(length) : 0
-  doc = JSON.parse(bytes[head.body_start, size])
+  size = head.content_length
+  return 0_u64 unless size
+  doc = JSON.parse(bytes[head.body_start, size.to_i32])
   w = Tape::String::Writer.new(256)
-  JSON.build(w) do |json|
+  JSON.write(w) do |json|
     total = 0_i64
     json.object do
       json.field(doc, doc.at(doc.root, "user"))

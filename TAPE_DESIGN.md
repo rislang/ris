@@ -68,7 +68,7 @@ classic object tree on tape is slower than the heap. 4.6 MB JSON, 20 parses:
 | tape: `Tape::Array` per node, as parsed | refused | 0 | 0 | 1749 ms | 116 MB |
 
 std/json too: `JSON.parse(Tape::String)` 675 ms and no heap, `Any` 840 ms
-(escapes, floats); `JSON.build` into a writer 2.9x as fast. No YAML yet.
+(escapes, floats); `JSON.write` into a writer 2.9x as fast. No YAML yet.
 
 ## Implementation, checks and remaining work
 * `src/iyi/`: `tape.iyi` containers, `prelude.iyi` mappings, GC roots.

@@ -178,6 +178,48 @@ pub struct ParsedHead
     end
   end
 
+  # The body's length as `Content-Length` says it, read where it lies: 0
+  # without the field, nil when it is not one length (RFC 9110 §8.6:
+  # digits and nothing else; each line, and each value of a list, the
+  # same). Past 2147483647 it is one past that, too large for any body.
+  def content_length : Int64?
+    found = -1_i64
+    i = 0
+    while i < @fields.size
+      f = @fields[i]
+      if HTTP.same_name?(f.name.to_unsafe, f.name.bytesize, "Content-Length")
+        p = f.value.to_unsafe
+        size = f.value.bytesize
+        at = 0
+        while at <= size
+          stop = HTTP.byte_in(p, at, size, 44_u8)
+          first = at
+          last = stop
+          while first < last && (p[first] == 32_u8 || p[first] == 9_u8)
+            first = first + 1
+          end
+          while last > first && (p[last - 1] == 32_u8 || p[last - 1] == 9_u8)
+            last = last - 1
+          end
+          return nil if first == last
+          n = 0_i64
+          k = first
+          while k < last
+            return nil unless p[k] >= 48_u8 && p[k] <= 57_u8
+            n = n * 10_i64 + (p[k] - 48_u8).to_i64 if n <= 2147483647_i64
+            k = k + 1
+          end
+          n = 2147483648_i64 if n > 2147483647_i64
+          return nil if found >= 0 && n != found
+          found = n
+          at = stop + 1
+        end
+      end
+      i = i + 1
+    end
+    found < 0 ? 0_i64 : found
+  end
+
   # The value of the first field called *name*, in any case.
   def field(name : String) : Tape::String?
     i = 0

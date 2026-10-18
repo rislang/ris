@@ -8,7 +8,7 @@ import std/json::{JSON}
 
 Tape.scope do
   w = Tape::String::Writer.new(64)
-  JSON.build(w) do |b|
+  JSON.write(w) do |b|
     b.object do
       b.field "inner" do
         b.object { 100.times { |i| b.field "k#{i}", i } }

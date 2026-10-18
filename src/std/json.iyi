@@ -2402,7 +2402,7 @@ TAPE_LINEAR = 32
 
 # Writes a document into the caller's `Tape::String::Writer`, as `Builder`
 # writes one into a String: the same values, checks and escapes, and nothing
-# on the heap. `JSON.build(writer) { |json| ... }` hands one.
+# on the heap. `JSON.write(writer) { |json| ... }` hands one.
 @[OnTape]
 pub struct TapeWriter
   @out : Tape::String::Writer
@@ -3236,10 +3236,11 @@ pub struct JSON
     parser.document
   end
 
-  # A document written into the caller's *writer* through a `TapeWriter` the
-  # block is handed, as `build` writes a String. Its state is on this
-  # method's stack: the JSON writer is not used after the block.
-  def self.build(writer : Tape::String::Writer, indent : String | Int32 | Nil = nil, ascii_only : Bool = false, & : TapeWriter -> Nil) : Nil
+  # A document written into the caller's *writer*, after what it holds,
+  # through a `TapeWriter` the block is handed: `build` makes a String,
+  # `write` adds to one. Its state is on this method's stack: the JSON
+  # writer is not used after the block.
+  def self.write(writer : Tape::String::Writer, indent : String | Int32 | Nil = nil, ascii_only : Bool = false, & : TapeWriter -> Nil) : Nil
     slots = uninitialized Int32[784]
     spans = uninitialized Int32[256]
     keys = pointerof(spans).as(Pointer(Int32))
