@@ -65,7 +65,7 @@ classic object tree on tape is slower than the heap. 4.6 MB JSON, 20 parses:
 | tape: Goose pool, children first | NO | 0 | 0 | 871 ms | 59 MB |
 | heap: std/json `Any` tree | YES, std/json | 16 | 31 MB | 1081 ms | 99 MB |
 | tape: `TapeArray` per node, stacked | NO | 0 | 0 | 1328 ms | 83 MB |
-| tape: `TapeArray` per node, as parsed | NO | 0 | 0 | 1749 ms | 116 MB |
+| tape: `TapeArray` per node, as parsed | refused | 0 | 0 | 1749 ms | 116 MB |
 
 std/json too: `JSON.parse(TapeString)` 675 ms and no heap, `Any` 840 ms
 (escapes, floats); `JSON.build(TapeWriter)` 2.9x as fast. No YAML yet.
