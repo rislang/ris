@@ -30,6 +30,16 @@ codegen already did. The deeper cause is not found yet; a suspect is the
 `LibLLVM` bindings, inherited from Crystal, which does not support LLVM 23
 yet. Don't remove the workaround without finding the cause.
 
+## Tried: alias scopes for TapeWriter
+
+`!alias.scope`/`!noalias` on a writer's state and data (primitives refused
+outside `tape.iyi`) left `push` unchanged (2026-10-18). The cursor already
+stays in a register, as the byte is stored before the cursor; the cursor
+store and the limit load stay in the loop because the `grow` call on the
+slow path may write the state, which alias metadata cannot change. Not
+kept: the gap to Goose is that capacity check, not aliasing. On LLVM 23
+`samples/ris/respond.ri` runs 8.64G instructions, on LLVM 21 9.07G.
+
 ## Debugging codegen
 
 * `IYI_LLVM_ARGS="-opt-bisect-limit=N"` passes options to LLVM.

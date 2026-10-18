@@ -1,26 +1,21 @@
 # ris tape memory: current design
 
-Architecture: GC + optional tape is decided. The tape implementation is
-experimental; this contract is not a proof of complete memory safety.
-The inherited [SPEC.md](SPEC.md) describes iyi and is kept unchanged.
-An example is in [README.md](README.md).
+Architecture: GC + optional tape is decided; the tape is experimental, and
+this is no proof of memory safety. [SPEC.md](SPEC.md) describes iyi,
+unchanged; an example is in [README.md](README.md).
 
 ## Allocation and ownership
-Ordinary objects use iyi's collected heap. Tape is opt-in: `TapeString`,
-`TapeWriter` and `TapeArray(T)` allocate on the running fiber's tape.
-`@[OnTape]` marks a struct as tape-bearing; it does not move the struct
-or its fields onto the tape. A tape allocation outside an active
-`Tape.scope` or `Tape.local` terminates the program. Each fiber has its
-own tape, saved and restored on a switch. Allocation is bump-pointer; the
-first mapping is 64 MiB of address space (only written pages are resident,
-std/http's `MAX_BODY` fits), and a full tape adds a larger one. Each thread
-keeps up to 64 first-size mappings as warm spares, first MiB resident.
+Objects use iyi's GC heap. Tape is opt-in: `TapeString`, `TapeWriter`,
+`TapeArray(T)` allocate on the running fiber's tape (saved on a switch);
+`@[OnTape]` marks a struct tape-bearing without moving it. Tape allocation
+outside `Tape.scope` or `Tape.local` ends the program. Bump-pointer; the
+first mapping is 64 MiB of address space (written pages resident, fits
+`MAX_BODY`), a full tape adds a larger one; each thread keeps 64 spares.
 
-Only the outermost `Tape.scope` reclaims, on every exit (panic and exit
-too, LIFO with defers); nested scopes share its tape. A scope returns
-`Nil`; a non-tape `break` value can leave it. `Tape.local` always takes an
-independent tape, even inside a scope, released and the previous restored
-on every exit; a `Tape.scope` inside one shares it.
+Only the outermost `Tape.scope` reclaims, on every exit (panic too, LIFO
+with defers); nested scopes share it. It returns `Nil`; a non-tape `break`
+value can leave. `Tape.local` always takes its own tape, released on every
+exit; a `Tape.scope` inside one shares it.
 
 ## Lifetime and storage rules
 The invariant: no safe tape-bearing value survives reclamation of the
@@ -34,10 +29,9 @@ scope or local tape that owns its storage.
 * Assignment, `return` and `break` must not carry one past its owning
   scope, wrapped in unions or tuples included. Synchronous `yield` is
   allowed under the same rules. Nested scopes share one lifetime.
-* `Tape.local` starts a new lifetime: its values cannot reach outer locals,
+* `Tape.local` starts a new lifetime: its values reach no outer locals,
   returns or yield bindings. It may read outer `TapeString`s; other outer
-  tape values, `self` included, are converted to owned data first, since
-  distinct region lifetimes are not tracked in types.
+  tape values, `self` too, become owned data first (lifetimes are untyped).
 * `TapeString#to_s : String` copies into GC storage. Raw pointers and
   internal allocator calls are outside the contract.
 
@@ -47,34 +41,40 @@ stable. Tape words are GC roots: tape cuts heap allocation, not scanning.
 
 ## Layout: write the tape in order
 Tape pays when written in order: one growing value at the top, all else
-written once, whole. Mixed building (a `TapeArray` per node, filled while
-its children are made, as a classic object-tree YAML or JSON parser does)
-copies the parent on each growth. 4.6 MB JSON, 20 parses, best of 7:
+written once. Streaming pays most: `samples/ris/respond.ri`, 1.6M DTOs as
+JSON, one `TapeWriter` per response; each tool's release build, median of 9:
 
-| layout, `--release`, 2026-10-17 | time | RSS | tape allocations |
+| respond, DTO (2026-10-18) | memory | time | RSS |
 |---|---|---|---|
-| `TapeArray` per node, pushed while parsing | 1862 ms | 126 MB | 1,320,548 |
-| same, children gathered on a stack first | 1452 ms | 93 MB | 1,320,548 |
-| Goose: one pool, children first, index links | 842 ms | 59 MB | 2 |
+| Goose: default, `cc -O2` | own data stacks | 0.68 s | 2.0 MB |
+| ris: `--release` | tape | 0.70 s | 1.7 MB |
+| C++: `g++ -O3 -DNDEBUG` | malloc per string/list | 0.99 s | 4.1 MB |
+| C: `gcc -O3 -DNDEBUG` | malloc per string/list | 1.13 s | 1.8 MB |
+| Rust: `opt-level=3` | malloc per string/list | 1.20 s | 2.3 MB |
+| iyi: `--release` | GC heap, 3.2 s CPU | 1.59 s | 7.6 MB |
+| Crystal: `--release` | Boehm GC heap, 4.0 s CPU | 1.79 s | 4.1 MB |
 
-For a tree, use the Goose layout (its `samples/18_json.goose`): nodes in
-one pool, children before their parent, siblings linked by index, strings
-as views of the input (`TapeArray` has no `[]=` yet to set links). Do not
-port mixed building to tape: too little gain to rewrite for. Streaming (one
-`TapeWriter`, input views: std/http, Slim) already grows in place.
+Trees pay only in Goose's layout; a classic object tree on tape (a TapeArray
+per node) is slower than the heap. 4.6 MB JSON, 20 parses, 1 core, best of 7:
+
+| tree layout (`--release`, 2026-10-18) | in ris now? | time | RSS | garbage |
+|---|---|---|---|---|
+| tape: Goose pool, children first | NO, test | 910 ms | 59 MB | 0 |
+| heap: std/json `Any` tree | YES, std/json | 1113 ms | 99 MB | 31 MB |
+| tape: `TapeArray` per node, stacked | NO, test | 1577 ms | 93 MB | 0 |
+| tape: `TapeArray` per node, as parsed | NO, test | 2006 ms | 126 MB | 0 |
+
+Garbage: heap bytes per parse left to the GC (16 GCs in 20 runs, timed).
+NO, test: only here; ris has no pool type, `TapeArray#[]=` or tape JSON yet.
 
 ## Implementation and checks
-* `src/iyi/`: `tape.iyi` scopes and containers, `prelude.iyi` mappings
-  and GC roots, `concurrency.iyi` fiber switching.
+* `src/iyi/`: `tape.iyi` containers, `prelude.iyi` mappings, GC roots.
 * [TapeChecker](src/compiler/iyi/semantic/tape_checker.cr): storage types;
   [TapeLifetimeChecker](src/compiler/iyi/semantic/tape_lifetime_checker.cr):
-  calls, yield bindings, assignments, scope exits.
-* `CleanupTransformer#check_tape_captures`: proc captures;
-  `test/ris/check.sh`: refused programs, exits, nesting, growth, fibers.
+  calls, yields, assignments, exits. `check_tape_captures`: procs.
+* `test/ris/check.sh`: refused programs, exits, nesting, growth, fibers.
 
 ## Interfaces and remaining work
 Use `to_s` at a lifetime boundary, not tape/heap variants of each method.
-Before calling this stable: audit lifetime checks across all features,
-specify pointer/FFI boundaries, measure copy-out, GC scanning, long scopes
-and many fibers. A long scope keeps superseded buffers; `Tape.local` bounds
-temporary work.
+To call it stable: audit lifetime checks, specify pointer/FFI boundaries,
+measure copy-out, GC scanning, long scopes (`Tape.local` bounds them).
