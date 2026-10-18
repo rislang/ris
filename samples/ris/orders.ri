@@ -1,0 +1,151 @@
+# orders: a JSON API's request path, all of it on one tape per request.
+#
+#   ./bin/ris build --release -o orders samples/ris/orders.ri
+#   ./orders        # tape: parse_head, JSON.parse, JSON.build on the tape
+#   ./orders heap   # the same with parse_request, JSON.parse, JSON.build
+#
+# Each of 200,000 requests is a `POST /orders` whose body names a user and
+# 1..8 line items. The handler reads the head, reads the body as JSON,
+# prices the order and answers it as JSON: the user, each line's sku and
+# total, and the order's total, with a head that says its length. Prints
+# the request count, the bytes answered and a checksum, the same in both.
+
+module samples/orders
+
+import std/int
+import std/http::{Server, ParsedHead}
+import std/json::{JSON, Any, TapeDocument}
+
+N = 200000
+
+def xs_next(x : UInt64) : UInt64
+  v = x
+  v = v ^ (v << 13)
+  v = v ^ (v >> 7)
+  v = v ^ (v << 17)
+  v
+end
+
+# A thousand requests, cycled: the bytes a server would have read.
+def requests : Array(String)
+  x = 88172645463325252_u64
+  Array(String).new(1000) do |r|
+    x = xs_next(x)
+    body = String.build do |io|
+      io << %({"user":"u) << r << (r % 9 == 0 ? %(\\"q\\") : "") << %(","items":[)
+      ((x % 8_u64).to_i32 + 1).times do |i|
+        x = xs_next(x)
+        io << "," if i > 0
+        io << %({"sku":"SKU-) << (x % 100000_u64) << %(","qty":) << (x % 5_u64 + 1)
+        io << %(,"price":) << (x % 99900_u64 + 100) << "}"
+      end
+      io << "]}"
+    end
+    "POST /orders HTTP/1.1\r\nHost: shop\r\nContent-Type: application/json\r\n" +
+      "Content-Length: #{body.bytesize}\r\n\r\n#{body}"
+  end
+end
+
+def digits(text : TapeString) : Int32
+  n = 0
+  p = text.to_unsafe
+  text.bytesize.times { |i| n = n * 10 + (p[i] - 48_u8).to_i32 }
+  n
+end
+
+def fnv(h : UInt64, p : Pointer(UInt8), n : Int32) : UInt64
+  i = 0
+  while i < n
+    h = (h ^ p[i].to_u64) &* 1099511628211_u64
+    i += 1
+  end
+  h
+end
+
+# The request in *bytes*, answered on the caller's tape; the answer's hash.
+def answer(bytes : TapeString) : UInt64
+  head = Server.parse_head(bytes)
+  return 0_u64 unless head.is_a?(ParsedHead)
+  size = (length = head.field("Content-Length")) ? digits(length) : 0
+  doc = JSON.parse(TapeString.new(bytes.to_unsafe + head.body_start, size))
+  w = TapeWriter.new(256)
+  JSON.build(w) do |json|
+    total = 0_i64
+    json.object do
+      json.field(doc, doc.at(doc.root, "user"))
+      json.value(doc, doc.at(doc.root, "user"))
+      json.field "lines" do
+        json.array do
+          doc.each(doc.at(doc.root, "items")) do |item|
+            line = doc.int(doc.at(item, "qty")) * doc.int(doc.at(item, "price"))
+            total += line
+            json.object do
+              json.field(doc, doc.at(item, "sku"))
+              json.value(doc, doc.at(item, "sku"))
+              json.field "total", line
+            end
+          end
+        end
+      end
+      json.field "total", total
+    end
+  end
+  body = w.finish
+  top = TapeString.build(96) do |line|
+    line.append("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ")
+    line.append_int(body.bytesize)
+    line.append("\r\n\r\n")
+  end
+  h = fnv(14695981039346656037_u64, top.to_unsafe, top.bytesize)
+  (fnv(h, body.to_unsafe, body.bytesize) & 0xFFFFFFFFFF_u64) | ((top.bytesize + body.bytesize).to_u64 << 40)
+end
+
+# The same on the heap: the request, the document and the answer all
+# GC-heap objects.
+def answer_heap(text : String) : UInt64
+  parsed = Server.parse_request(text)
+  req = parsed.request
+  return 0_u64 unless req
+  doc = JSON.parse(req.body)
+  total = 0_i64
+  body = JSON.build do |json|
+    json.object do
+      json.field "user", doc["user"].as_s
+      json.field "lines" do
+        json.array do
+          doc["items"].as_a.each do |item|
+            line = item["qty"].as_i64 * item["price"].as_i64
+            total += line
+            json.object do
+              json.field "sku", item["sku"].as_s
+              json.field "total", line
+            end
+          end
+        end
+      end
+      json.field "total", total
+    end
+  end
+  top = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: #{body.bytesize}\r\n\r\n"
+  h = fnv(14695981039346656037_u64, top.to_unsafe, top.bytesize)
+  (fnv(h, body.to_unsafe, body.bytesize) & 0xFFFFFFFFFF_u64) | ((top.bytesize + body.bytesize).to_u64 << 40)
+end
+
+heap = Program.args.size > 0 && Program.args[0] == "heap"
+texts = requests
+sum = 0_u64
+bytes = 0_i64
+N.times do |i|
+  text = texts[i % texts.size]
+  got = 0_u64
+  if heap
+    got = answer_heap(text)
+  else
+    Tape.scope { got = answer(TapeString.new(text.to_unsafe, text.bytesize)) }
+  end
+  bytes += (got >> 40).to_i64
+  sum = (sum ^ (got & 0xFFFFFFFFFF_u64)) &* 1099511628211_u64
+end
+puts N
+puts bytes
+puts sum

@@ -116,6 +116,15 @@ if [ "$out" = 'PASS: parsed, refused alike, written alike, on the tape' ]; then 
 out=$("$RIS" run samples/ris/hello.ri 2>&1)
 if [ "$out" = $'Hello from ris, order 1\ntotal 1649' ]; then echo "runs     samples/ris/hello"; else echo "FAILED   samples/ris/hello: $out"; status=1; fi
 
+# A JSON API's request path: the tape and the heap answer alike.
+exe=$(mktemp)
+if "$RIS" build --release -o "$exe" samples/ris/orders.ri >/dev/null 2>&1 && [ "$("$exe")" = "$("$exe" heap)" ] && [ "$("$exe" | tail -1)" = "16015853319686983776" ]; then
+  echo "runs     samples/ris/orders (tape and heap alike)"
+else
+  echo "FAILED   samples/ris/orders"; status=1
+fi
+rm -f "$exe"
+
 exe=$(mktemp)
 if "$RIS" build --release -o "$exe" samples/ris/respond.ri >/dev/null 2>&1 && [ "$("$exe" | tail -1)" = "7480137599999527189" ]; then
   echo "runs     samples/ris/respond (checksum matches)"
