@@ -2,14 +2,15 @@
 
 Decided 2026-10-19: ris takes Goose's memory model whole
 ([goose_spec.md](https://github.com/aardappel/goose)), not piece by piece,
-and keeps iyi's GC heap for classes. [SPEC.md](SPEC.md) is iyi's, unchanged.
+for its tape types, beside iyi unchanged: `String`, `Array`, `Hash` and
+classes stay on the GC heap. [SPEC.md](SPEC.md) is iyi's, unchanged.
 
 ## The model
 * Every fiber has a block of data stacks, reserved lazily on first use:
   each a bump pointer over reserved address space; growth never moves.
-* Value types (structs, strings, arrays, hashes) live on them: fixed ones
-  in registers or the native stack, variable-size ones on a data stack
-  (buried once built), resizable ones each on top of a stack of its own.
+* Tape types live on them (`Tape::String`, `Writer`, `Tape::Array`,
+  `@[OnTape]` structs): variable-size ones on a data stack (buried once
+  built), resizable ones each on top of a stack of its own.
 * Every scope that put something there restores its watermark on every
   exit (panic too): a function, a block, a branch, a loop's body. No
   `tape { }` block: the fiber's stacks are there when first used.
@@ -33,7 +34,7 @@ Goose's rules, which hold only together:
 * While a value is built on a stack, nothing else allocates on that one.
 * ris's own: a heap object (a class, a class variable, a captured proc)
   holds no reference into a data stack. What it keeps is a heap value,
-  copied at the boundary; heap types for that are named in stage 3.
+  copied at the boundary (`to_s`), as today.
 
 ## Stages, each measured before the next
 1. The engine on today's tape types (`Tape::String`, `Tape::Array`,
@@ -42,9 +43,9 @@ Goose's rules, which hold only together:
    Gate: `respond`, `bintrees`, `words`, `graph_csr` at Goose's numbers.
 2. The checks: Goose's roots and outlives (§9) and shrink rules replace
    TapeLifetimeChecker; the heap rule above.
-3. The default flips: `Tape::String` becomes `String`, the heap one gets a
-   name; std ported module by module.
-4. Fibers: a `group`'s children on stacks of its parent's region.
+3. Fibers: a `group`'s children on stacks of its parent's region.
+Not a stage: iyi's own types stay as they are; a library moves onto the
+tape where it pays, by the rules in CLAUDE.md.
 
 ## Today (before stage 1)
 One tape per fiber; `tape { }` opens it and only the outermost frees; one
