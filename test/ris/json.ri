@@ -118,6 +118,28 @@ Tape.scope do
   check(failures, JSON.parse(w.finish).size(0) == 300, "300 keys written and read back")
 end
 
+# A document copied through the builder is the heap builder's text of it,
+# its escapes decoded and written again, in every mode.
+Tape.scope do
+  doc = JSON.parse(TapeString.new(text.to_unsafe, text.bytesize))
+  [nil, 2].each do |indent|
+    [false, true].each do |ascii|
+      w = TapeWriter.new(16)
+      JSON.build(w, indent, ascii) { |b| b.value(doc, doc.root) }
+      heap = JSON.build(indent) do |b|
+        b.ascii_only = ascii
+        JSON.parse(text).to_json(b)
+      end
+      check(failures, w.finish.to_s == heap, "copied alike, indent #{indent.inspect}, ascii #{ascii}")
+    end
+  end
+  w = TapeWriter.new(16)
+  JSON.build(w) do |b|
+    b.object { doc.each(doc.root) { |child| b.field(doc, child); b.number doc.kind(child).value } }
+  end
+  check(failures, w.finish.to_s == %({"a":5,"bA":6,"e":5}), "keys copied, an escaped one decoded")
+end
+
 GC.disable
 small = %({"id":1,"name":"user","tags":["a","b"],"ok":true,"n":null})
 before = IyiMark.allocated_since
@@ -127,8 +149,8 @@ total = 0_i64
     doc = JSON.parse(TapeString.new(small.to_unsafe, small.bytesize))
     w = TapeWriter.new(64)
     JSON.build(w) do |b|
-      b.array do
-        doc.each(doc.root) { |child| b.number doc.kind(child).value }
+      b.object do
+        doc.each(doc.root) { |child| b.field(doc, child); b.value(doc, child) }
       end
     end
     total = total &+ w.length
@@ -137,7 +159,7 @@ end
 per = (IyiMark.allocated_since - before) // 2000
 GC.enable
 check(failures, per < 400, "a parse and a build on the tape: #{per} heap bytes, the lexer's")
-check(failures, total == 2000 * 11, "written #{total}")
+check(failures, total == 2000 * small.bytesize, "written #{total}")
 
 if failures.empty?
   puts "PASS: parsed, refused alike, written alike, on the tape"
