@@ -3,20 +3,7 @@
 Architecture: GC + optional tape is decided. The tape implementation is
 experimental; this contract is not a proof of complete memory safety.
 The inherited [SPEC.md](SPEC.md) describes iyi and is kept unchanged.
-
-## Example
-```crystal
-@[OnTape]
-pub struct Order
-  getter id : Int64
-  getter customer : TapeString
-  getter lines : TapeArray(Int64)
-end
-Tape.scope do
-  order = make_order(1_i64)   # its TapeString/TapeArray storage uses tape
-  body = render(order).to_s   # `to_s` copies out what must outlive it
-end                           # all tape storage reclaimed together
-```
+An example is in [README.md](README.md).
 
 ## Allocation and ownership
 Ordinary objects use iyi's collected heap. Tape is opt-in: `TapeString`,
@@ -25,25 +12,15 @@ Ordinary objects use iyi's collected heap. Tape is opt-in: `TapeString`,
 or its fields onto the tape. A tape allocation outside an active
 `Tape.scope` or `Tape.local` terminates the program. Each fiber has its
 own tape, saved and restored on a switch. Allocation is bump-pointer; the
-first mapping is 64 MiB, and a full tape adds a larger one without moving
-anything. 64 MiB is address space, not memory: only written pages are
-resident, a mapping costs the same at any size, a request rarely grows past
-it (growth copies the growing value), and it holds the largest request
-body std/http accepts (`MAX_BODY`). Reclamation releases the chain; each
-thread keeps up to 64 first-size mappings as spares, newest first, so
-scopes open at once (handlers that park) reuse warm pages. A spare keeps
-its first MiB resident and hands the rest back; grown mappings are
-unmapped, and a thread's spares go when it ends.
+first mapping is 64 MiB of address space (only written pages are resident,
+std/http's `MAX_BODY` fits), and a full tape adds a larger one. Each thread
+keeps up to 64 first-size mappings as warm spares, first MiB resident.
 
-Only the outermost `Tape.scope` reclaims; nested scopes share its tape.
-Its guard reuses one cleanup node per fiber: normal and nonlocal exits
-release directly, panic and exit drain it in LIFO order with defers. A
-scope returns `Nil`; a non-tape `break` value can leave it.
-
-`Tape.local` always takes an independent tape, even inside another scope,
-and releases it and restores the previous tape on every exit, through an
-ordinary (heap-allocated) defer guard. Released mappings share the spare
-cache. Locals nest; a `Tape.scope` inside one shares it.
+Only the outermost `Tape.scope` reclaims, on every exit (panic and exit
+too, LIFO with defers); nested scopes share its tape. A scope returns
+`Nil`; a non-tape `break` value can leave it. `Tape.local` always takes an
+independent tape, even inside a scope, released and the previous restored
+on every exit; a `Tape.scope` inside one shares it.
 
 ## Lifetime and storage rules
 The invariant: no safe tape-bearing value survives reclamation of the
@@ -64,10 +41,27 @@ scope or local tape that owns its storage.
 * `TapeString#to_s : String` copies into GC storage. Raw pointers and
   internal allocator calls are outside the contract.
 
-Copying a `TapeArray` or `TapeWriter` aliases its state. Growth may copy to
-a new allocation, leaving the old until scope exit; unlike Goose, element
-references are not stable on growth. Tape words are scanned as GC roots:
-tape reduces heap allocation, not GC or its scanning.
+Copying a `TapeArray` or `TapeWriter` aliases its state. Growth off the top
+copies, leaving the old until scope exit: element references are not
+stable. Tape words are GC roots: tape cuts heap allocation, not scanning.
+
+## Layout: write the tape in order
+Tape pays when written in order: one growing value at the top, all else
+written once, whole. Mixed building (a `TapeArray` per node, filled while
+its children are made, as a classic object-tree YAML or JSON parser does)
+copies the parent on each growth. 4.6 MB JSON, 20 parses, best of 7:
+
+| layout, `--release`, 2026-10-17 | time | RSS | tape allocations |
+|---|---|---|---|
+| `TapeArray` per node, pushed while parsing | 1862 ms | 126 MB | 1,320,548 |
+| same, children gathered on a stack first | 1452 ms | 93 MB | 1,320,548 |
+| Goose: one pool, children first, index links | 842 ms | 59 MB | 2 |
+
+For a tree, use the Goose layout (its `samples/18_json.goose`): nodes in
+one pool, children before their parent, siblings linked by index, strings
+as views of the input (`TapeArray` has no `[]=` yet to set links). Do not
+port mixed building to tape: too little gain to rewrite for. Streaming (one
+`TapeWriter`, input views: std/http, Slim) already grows in place.
 
 ## Implementation and checks
 * `src/iyi/`: `tape.iyi` scopes and containers, `prelude.iyi` mappings
@@ -79,9 +73,8 @@ tape reduces heap allocation, not GC or its scanning.
   `test/ris/check.sh`: refused programs, exits, nesting, growth, fibers.
 
 ## Interfaces and remaining work
-Prefer tape for bounded work; keep borrowed return types explicit and use
-`to_s` at a lifetime boundary rather than tape/heap prefixes on every
-method. Before calling this stable: audit lifetime checks across all
-features, specify pointer/FFI boundaries and limits, and measure real
-workloads, copy-out, GC scanning, long scopes and many fibers. A long
-scope keeps superseded buffers; `Tape.local` bounds temporary work.
+Use `to_s` at a lifetime boundary, not tape/heap variants of each method.
+Before calling this stable: audit lifetime checks across all features,
+specify pointer/FFI boundaries, measure copy-out, GC scanning, long scopes
+and many fibers. A long scope keeps superseded buffers; `Tape.local` bounds
+temporary work.

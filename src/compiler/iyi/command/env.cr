@@ -24,8 +24,9 @@ class Iyi::Command
     # `crystal env` prints `CRYSTAL_*`, because Crystal's own specs and anyone
     # invoking the compatibility binary ask for Crystal's names. `CRYSTAL_VERSION`
     # is Crystal's version under both, which is what `--version` reports as the
-    # upstream number.
-    prefix = Command.program_name.upcase
+    # upstream number. `ris env` prints `IYI_*`, the names `Config.env` reads:
+    # `RIS_PATH` was printed and read by nobody.
+    prefix = Command.program_name == "crystal" ? "CRYSTAL" : "IYI"
     vars = {
       "#{prefix}_CACHE_DIR"    => CacheDir.instance.dir,
       "#{prefix}_EXEC_PATH"    => Iyi::Config.exec_path || "",
