@@ -20,6 +20,11 @@ has it.
 * `IyiScheduler.current`: the running fiber inline, the first touch out of
   line. Two calls a `Tape.scope` made it 0.7% of respond (2026-10-18).
 
+* std/json: a string with an escape no longer makes a substring per
+  non-ASCII run (`StringBuffer#append(Pointer, Int32)`), and the writer's
+  escapes are `JSON.each_escaped_byte`. The lexer's span mode, `TapeBuilder`
+  and `TapeDocument` stay in ris.
+
 ## To make in iyi first
 
 * std: `String#rchop`, `String#lchop(String)`, `Time#to_s(format)`;

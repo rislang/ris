@@ -71,6 +71,13 @@ class StringBuffer
     @size = @size + len
   end
 
+  def append(bytes : Pointer(UInt8), len : Int32) : Nil
+    return if len == 0
+    ensure_capacity(@size + len)
+    (@buffer + @size).copy_from(bytes, len)
+    @size = @size + len
+  end
+
   def append_codepoint(codepoint : Int32) : Nil
     if codepoint <= 0x7F
       append(codepoint.to_u8)
@@ -693,6 +700,9 @@ class Token
   property string_value : String
   property int_value : Int64
   property float_value : Float64
+  # A string's text read as a span (`raw_start`, `raw_size`) of the input
+  # by a lexer on the tape, and whether it holds an escape to decode.
+  property escaped : Bool
   property line_number : Int32
   property column_number : Int32
 
@@ -704,6 +714,7 @@ class Token
     @string_value = ""
     @int_value = 0_i64
     @float_value = 0.0
+    @escaped = false
     @line_number = 1
     @column_number = 1
   end
@@ -731,6 +742,8 @@ class Lexer
   # and each was a new substring. A slot holds the last string that hashed
   # there, so a miss costs the substring it always did.
   @short : Array(String)
+  # Strings are spans of the input, not Strings: the tape reader's mode.
+  @spans : Bool
 
   def initialize(@input : String)
     @bytes = @input.to_unsafe
@@ -742,6 +755,29 @@ class Lexer
     @string_buffer = StringBuffer.new(64)
     @error = nil
     @short = Array(String).new(SHORT_SLOTS) { "" }
+    @spans = false
+  end
+
+  # A lexer over bytes on the tape (`JSON.parse(TapeString)`): a string
+  # token is its span, with `escaped` set when it must be decoded, and
+  # nothing of it is copied.
+  def initialize(@bytes : Pointer(UInt8), @bytesize : Int32)
+    @input = ""
+    @pos = 0
+    @line_number = 1
+    @column_number = 1
+    @token = Token.new
+    @string_buffer = StringBuffer.new(16)
+    @error = nil
+    @short = [] of String
+    @spans = true
+  end
+
+  # The input's bytes from *start* as a String, in either mode.
+  private def slice(start : Int32, size : Int32) : String
+    return @input[start, size] unless @spans
+    from = @bytes + start
+    String.new(size) { |target| target.copy_from(from, size) }
   end
 
   SHORT_SLOTS = 256
@@ -893,7 +929,7 @@ class Lexer
     while @pos < @bytesize && identifier_byte?(current_byte)
       advance
     end
-    fail("bare identifier '#{@input[start, @pos - start]}'", line, col)
+    fail("bare identifier '#{slice(start, @pos - start)}'", line, col)
   end
 
   # `true`, `false`, `null`: the whole word, and nothing joined to it.
@@ -937,6 +973,10 @@ class Lexer
       end
     end
 
+    if @spans && @pos < @bytesize
+      return consume_span(start_pos, has_escape, line, col)
+    end
+
     if !has_escape && @pos < @bytesize && current_byte == 34_u8
       # No escape: the text is a substring of the input.
       str_val = text_at(start_pos, @pos - start_pos)
@@ -952,7 +992,7 @@ class Lexer
 
     @string_buffer.clear
     if @pos > start_pos
-      @string_buffer.append(@input[start_pos, @pos - start_pos])
+      @string_buffer.append(@bytes + start_pos, @pos - start_pos)
     end
 
     while @pos < @bytesize
@@ -1035,13 +1075,74 @@ class Lexer
       elsif b >= 128_u8
         from = @pos
         return unless take_utf8_sequence
-        @string_buffer.append(@input[from, @pos - from])
+        @string_buffer.append(@bytes + from, @pos - from)
       else
         @string_buffer.append(b)
         advance
       end
     end
 
+    fail("unterminated string", line, col)
+  end
+
+  # The rest of a string from the current byte, checked as `consume_string`
+  # checks it, and taken as the span from *start* to the closing quote.
+  private def consume_span(start : Int32, has_escape : Bool, line : Int32, col : Int32) : Nil
+    while @pos < @bytesize
+      b = current_byte
+      if b == 34_u8 # '"'
+        @token.raw_start = start
+        @token.raw_size = @pos - start
+        @token.escaped = has_escape
+        advance
+        set_token(TokenKind::String, line, col)
+        return
+      elsif b == 92_u8 # '\\'
+        has_escape = true
+        esc_col = @column_number
+        advance
+        return fail("unterminated string after backslash", line, esc_col) if @pos >= @bytesize
+        esc = current_byte
+        if esc == 117_u8 # 'u'
+          u_line = @line_number
+          u_col = @column_number - 1
+          advance
+          hex1 = read_hex4(u_line, u_col)
+          return if hex1 < 0
+          if hex1 >= 0xD800 && hex1 <= 0xDBFF
+            if current_byte != 92_u8
+              return fail("lone high surrogate \\u#{hex1.to_s(16)} without low surrogate", u_line, u_col)
+            end
+            advance
+            if current_byte != 117_u8
+              return fail("lone high surrogate \\u#{hex1.to_s(16)} without following \\u escape", u_line, u_col)
+            end
+            u2_line = @line_number
+            u2_col = @column_number - 1
+            advance
+            hex2 = read_hex4(u2_line, u2_col)
+            return if hex2 < 0
+            if hex2 < 0xDC00 || hex2 > 0xDFFF
+              return fail("invalid surrogate pair: expected low surrogate (0xDC00..0xDFFF), got \\u#{hex2.to_s(16)}", u2_line, u2_col)
+            end
+          elsif hex1 >= 0xDC00 && hex1 <= 0xDFFF
+            return fail("lone low surrogate \\u#{hex1.to_s(16)} without preceding high surrogate", u_line, u_col)
+          end
+        elsif esc == 34_u8 || esc == 92_u8 || esc == 47_u8 || esc == 98_u8 || esc == 102_u8 || esc == 110_u8 || esc == 114_u8 || esc == 116_u8
+          advance
+        elsif esc >= 32_u8 && esc < 127_u8
+          return fail("invalid escape sequence '\\#{esc.unsafe_chr}'", line, esc_col)
+        else
+          return fail("invalid escape sequence '\\' before byte #{esc}", line, esc_col)
+        end
+      elsif b < 32_u8
+        return fail("unescaped control character (ASCII #{b}) in string", @line_number, @column_number)
+      elsif b >= 128_u8
+        return unless take_utf8_sequence
+      else
+        step_ascii
+      end
+    end
     fail("unterminated string", line, col)
   end
 
@@ -1236,9 +1337,9 @@ class Lexer
       # and `-0.0` is what the text says.
       f = f * -1.0 if negative
     else
-      f = @input[start_pos, @pos - start_pos].to_f
+      f = slice(start_pos, @pos - start_pos).to_f
       if f.abs > 1.7976931348623157e308
-        return fail("number #{@input[start_pos, @pos - start_pos]} out of range", line, col)
+        return fail("number #{slice(start_pos, @pos - start_pos)} out of range", line, col)
       end
     end
     @token.kind = TokenKind::Float
@@ -2128,98 +2229,7 @@ pub class Builder
   end
 
   private def write_escaped_string(val : String) : Nil
-    @buffer.append(34_u8) # '"'
-    i = 0
-    len = val.bytesize
-    bytes = val.to_unsafe
-    while i < len
-      b = bytes[i]
-      if b == 34_u8 # '"'
-        @buffer.append(92_u8)
-        @buffer.append(34_u8)
-        i = i + 1
-      elsif b == 92_u8 # '\\'
-        @buffer.append(92_u8)
-        @buffer.append(92_u8)
-        i = i + 1
-      elsif b == 8_u8 # '\b'
-        @buffer.append(92_u8)
-        @buffer.append(98_u8)
-        i = i + 1
-      elsif b == 12_u8 # '\f'
-        @buffer.append(92_u8)
-        @buffer.append(102_u8)
-        i = i + 1
-      elsif b == 10_u8 # '\n'
-        @buffer.append(92_u8)
-        @buffer.append(110_u8)
-        i = i + 1
-      elsif b == 13_u8 # '\r'
-        @buffer.append(92_u8)
-        @buffer.append(114_u8)
-        i = i + 1
-      elsif b == 9_u8 # '\t'
-        @buffer.append(92_u8)
-        @buffer.append(116_u8)
-        i = i + 1
-      elsif b < 32_u8 || b == 127_u8
-        write_hex_u4(b.to_i)
-        i = i + 1
-      elsif b >= 128_u8
-        # Bytes that are not a code point are written as U+FFFD, one per
-        # ill-formed subpart, in either mode: written through as they
-        # were, `"a\xffb"` made a document that is not UTF-8 (RFC 8259
-        # §8.1), and this reader refused what this writer wrote ("invalid
-        # UTF-8 byte 255 in string at line 1, column 3"). Replaced rather
-        # than refused, as `to_ascii_json` already did: a String holds any
-        # bytes, a file name or a log line. A well-formed sequence is
-        # copied, or under `ascii_only` decoded and written as \uXXXX, a
-        # surrogate pair past the basic plane.
-        length = utf8_sequence_at(bytes, len, i)
-        if length < 0
-          if @ascii_only
-            write_hex_u4(0xFFFD)
-          else
-            @buffer.append(0xEF_u8)
-            @buffer.append(0xBF_u8)
-            @buffer.append(0xBD_u8)
-          end
-          i = i - length
-        elsif !@ascii_only
-          while length > 0
-            @buffer.append(bytes[i])
-            i = i + 1
-            length = length - 1
-          end
-        elsif length == 2
-          write_hex_u4(((b.to_i & 0x1F) << 6) | (bytes[i + 1].to_i & 0x3F))
-          i = i + 2
-        elsif length == 3
-          write_hex_u4(((b.to_i & 0x0F) << 12) | ((bytes[i + 1].to_i & 0x3F) << 6) | (bytes[i + 2].to_i & 0x3F))
-          i = i + 3
-        else
-          cp = ((b.to_i & 0x07) << 18) | ((bytes[i + 1].to_i & 0x3F) << 12) | ((bytes[i + 2].to_i & 0x3F) << 6) | (bytes[i + 3].to_i & 0x3F)
-          sub = cp - 0x10000
-          write_hex_u4(0xD800 + (sub >> 10))
-          write_hex_u4(0xDC00 + (sub & 0x3FF))
-          i = i + 4
-        end
-      else
-        @buffer.append(b)
-        i = i + 1
-      end
-    end
-    @buffer.append(34_u8) # '"'
-  end
-
-  private def write_hex_u4(val : Int32) : Nil
-    @buffer.append(92_u8)  # '\'
-    @buffer.append(117_u8) # 'u'
-    hex = "0123456789abcdef".to_unsafe
-    @buffer.append(hex[(val >> 12) & 0x0F])
-    @buffer.append(hex[(val >> 8) & 0x0F])
-    @buffer.append(hex[(val >> 4) & 0x0F])
-    @buffer.append(hex[val & 0x0F])
+    JSON.each_escaped_byte(val.to_unsafe, val.bytesize, @ascii_only) { |b| @buffer.append(b) }
   end
 
   def start_array : Nil
@@ -2352,6 +2362,660 @@ pub class Builder
   end
 end
 
+# A document's state in a `TapeBuilder`, on the stack of `JSON.build`:
+# the level, the count of keys of the open objects, then a state per level,
+# the first key of each open object, and the keys as (start, size) spans of
+# the output. Past `KEYS` keys open at once they go to the heap.
+TAPE_STATES = MAX_NESTING + 2
+TAPE_KEYS   = 128
+
+# Writes a document into the caller's `TapeWriter`, as `Builder` writes one
+# into a String: the same values, checks and escapes, and nothing on the
+# heap but a `Float64`'s text. `JSON.build(writer) { |json| ... }` hands one.
+@[OnTape]
+pub struct TapeBuilder
+  @out : TapeWriter
+  @slots : Pointer(Int32)
+  @keys : Pointer(Pointer(Int32))
+  @indent : String?
+  @ascii_only : Bool
+
+  def initialize(@out : TapeWriter, @slots : Pointer(Int32), @keys : Pointer(Pointer(Int32)), @indent : String?, @ascii_only : Bool)
+    @slots[0] = 0
+    @slots[1] = 0
+    @slots[2] = Builder::ROOT
+  end
+
+  private def level : Int32
+    @slots[0]
+  end
+
+  private def state : Int32
+    @slots[2 + level]
+  end
+
+  private def set_state(s : Int32) : Nil
+    @slots[2 + level] = s
+  end
+
+  private def write_indent : Nil
+    if indent = @indent
+      @out.push(10_u8)
+      i = 0
+      while i < level
+        @out.append(indent)
+        i = i + 1
+      end
+    end
+  end
+
+  private def before_value : Nil
+    st = state
+    if st == Builder::ROOT
+      set_state(Builder::ROOT_DONE)
+    elsif st == Builder::ARRAY_FIRST
+      set_state(Builder::ARRAY_NEXT)
+      write_indent
+    elsif st == Builder::ARRAY_NEXT
+      @out.push(44_u8)
+      write_indent
+    elsif st == Builder::OBJECT_VALUE
+      set_state(Builder::OBJECT_NEXT)
+    elsif st == Builder::ROOT_DONE
+      raise "a second value at the document root"
+    else
+      raise "a value where an object key is expected"
+    end
+  end
+
+  def null : Nil
+    before_value
+    @out.append("null")
+  end
+
+  def bool(val : Bool) : Nil
+    before_value
+    @out.append(val ? "true" : "false")
+  end
+
+  def number(val : Int32) : Nil
+    before_value
+    @out.append_int(val)
+  end
+
+  def number(val : Int64) : Nil
+    before_value
+    @out.append_int(val)
+  end
+
+  def number(val : UInt8) : Nil
+    before_value
+    @out.append_int(val.to_i64)
+  end
+
+  def number(val : UInt64) : Nil
+    before_value
+    if val > 9223372036854775807_u64
+      @out.append(val.to_s)
+    else
+      @out.append_int(val.to_i64)
+    end
+  end
+
+  def number(val : Float64) : Nil
+    raise "NaN is not a JSON number" if val != val
+    raise "#{val} is not a JSON number" if val.abs > 1.7976931348623157e308
+    before_value
+    @out.append(val.to_s)
+  end
+
+  # Text written as it is: the caller's own JSON.
+  def raw(str : String) : Nil
+    before_value
+    @out.append(str)
+  end
+
+  def raw(str : TapeString) : Nil
+    before_value
+    @out.append(str)
+  end
+
+  def string(val : String) : Nil
+    before_value
+    escaped(val.to_unsafe, val.bytesize)
+  end
+
+  def string(val : TapeString) : Nil
+    before_value
+    escaped(val.to_unsafe, val.bytesize)
+  end
+
+  private def escaped(bytes : Pointer(UInt8), size : Int32) : Nil
+    JSON.each_escaped_byte(bytes, size, @ascii_only) { |b| @out.push(b) }
+  end
+
+  private def open(byte : UInt8, first : Int32) : Nil
+    before_value
+    @out.push(byte)
+    depth = level + 1
+    raise "nesting depth of #{depth} exceeds maximum depth #{MAX_NESTING}" if depth > MAX_NESTING
+    @slots[0] = depth
+    set_state(first)
+    @slots[2 + TAPE_STATES + depth] = @slots[1]
+  end
+
+  def start_array : Nil
+    open(91_u8, Builder::ARRAY_FIRST)
+  end
+
+  def end_array : Nil
+    st = state
+    raise "end_array without start_array" unless st == Builder::ARRAY_FIRST || st == Builder::ARRAY_NEXT
+    @slots[0] = level - 1
+    write_indent if st == Builder::ARRAY_NEXT
+    @out.push(93_u8)
+  end
+
+  def array(& : -> Nil) : Nil
+    start_array
+    yield
+    end_array
+  end
+
+  def start_object : Nil
+    open(123_u8, Builder::OBJECT_FIRST)
+  end
+
+  def end_object : Nil
+    st = state
+    raise "end_object with a field's value still due" if st == Builder::OBJECT_VALUE
+    raise "end_object without start_object" unless st == Builder::OBJECT_FIRST || st == Builder::OBJECT_NEXT
+    @slots[1] = @slots[2 + TAPE_STATES + level]
+    @slots[0] = level - 1
+    write_indent if st == Builder::OBJECT_NEXT
+    @out.push(125_u8)
+  end
+
+  def object(& : -> Nil) : Nil
+    start_object
+    yield
+    end_object
+  end
+
+  # A key, refused when this object already holds its text, as `Builder`
+  # refuses it. The object's keys are compared one by one: an object of
+  # thousands of keys is better written with `Builder`.
+  def field(name : String) : Nil
+    key(name.to_unsafe, name.bytesize)
+  end
+
+  def field(name : TapeString) : Nil
+    key(name.to_unsafe, name.bytesize)
+  end
+
+  private def key(bytes : Pointer(UInt8), size : Int32) : Nil
+    st = state
+    raise "a field outside an object" unless st == Builder::OBJECT_FIRST || st == Builder::OBJECT_NEXT
+    @out.push(44_u8) if st == Builder::OBJECT_NEXT
+    set_state(Builder::OBJECT_VALUE)
+    write_indent
+    from = @out.length
+    escaped(bytes, size)
+    length = @out.length - from
+    text = @out.finish.to_unsafe
+    keys = @keys.value
+    i = @slots[2 + TAPE_STATES + level]
+    count = @slots[1]
+    while i < count
+      if keys[2 * i + 1] == length && JSON.same?(text + keys[2 * i], text + from, length)
+        written = String.new(length) { |target| target.copy_from(text + from, length) }
+        name = String.new(size) { |target| target.copy_from(bytes, size) }
+        raise "the key #{name.inspect} is written twice in one object" if JSON.utf8?(bytes, size)
+        raise "the key #{name.inspect} is written as #{written}, as an earlier key was"
+      end
+      i = i + 1
+    end
+    if count >= TAPE_KEYS && (count & (count - 1)) == 0
+      # Past the stack's room: the spans move to the heap, doubling.
+      grown = Pointer(Int32).malloc((4 * count).to_u64)
+      grown.copy_from(keys, 2 * count)
+      @keys.value = grown
+      keys = grown
+    end
+    keys[2 * count] = from
+    keys[2 * count + 1] = length
+    @slots[1] = count + 1
+    @out.push(58_u8)
+    @out.push(32_u8) unless @indent.nil?
+  end
+
+  def field(name : String | TapeString, & : -> Nil) : Nil
+    field(name)
+    yield
+  end
+
+  def field(name : String | TapeString, val : String) : Nil
+    field(name)
+    string(val)
+  end
+
+  def field(name : String | TapeString, val : TapeString) : Nil
+    field(name)
+    string(val)
+  end
+
+  def field(name : String | TapeString, val : Int32) : Nil
+    field(name)
+    number(val)
+  end
+
+  def field(name : String | TapeString, val : Int64) : Nil
+    field(name)
+    number(val)
+  end
+
+  def field(name : String | TapeString, val : Float64) : Nil
+    field(name)
+    number(val)
+  end
+
+  def field(name : String | TapeString, val : Bool) : Nil
+    field(name)
+    bool(val)
+  end
+
+  def field(name : String | TapeString, val : Nil) : Nil
+    field(name)
+    null
+  end
+
+  # Whether no value has been written yet.
+  def empty? : Bool
+    level == 0 && state == Builder::ROOT
+  end
+
+  # Refuses a document left unfinished, as `Builder#to_s` does.
+  def finish : Nil
+    st = state
+    raise "build with an array still open" if st == Builder::ARRAY_FIRST || st == Builder::ARRAY_NEXT
+    raise "build with an object still open" if st == Builder::OBJECT_FIRST || st == Builder::OBJECT_NEXT || st == Builder::OBJECT_VALUE
+    raise "build wrote no value" if st == Builder::ROOT
+  end
+end
+
+# One value of a `TapeDocument`, in 24 bytes: its kind and which of its
+# texts hold an escape, the span of its key in the input, and its payload:
+# an integer's or a bool's value, a float's bits, or a string's span (start
+# in the high half, size in the low). Spans, not `TapeString`s, halve the
+# stream: a parse writes it whole, past the tape's warm megabyte.
+@[OnTape]
+pub struct TapeNode
+  ESCAPED_TEXT = 256
+  ESCAPED_KEY  = 512
+
+  @flags : Int32
+  @key_at : Int32
+  @key_size : Int32
+  @payload : Int64
+
+  def initialize(@flags : Int32, @key_at : Int32, @key_size : Int32, @payload : Int64)
+  end
+
+  def kind : TapeDocument::Kind
+    TapeDocument::Kind.new(@flags & 255)
+  end
+
+  def flags : Int32
+    @flags
+  end
+
+  def key_at : Int32
+    @key_at
+  end
+
+  def key_size : Int32
+    @key_size
+  end
+
+  def payload : Int64
+    @payload
+  end
+end
+
+# A document read by `JSON.parse(bytes : TapeString)`: every value in one
+# `TapeStream` in document order, its strings spans of the input, all of it
+# the caller's `Tape.scope`'s. A value is named by its index; the root's is
+# 0. A string with an escape is decoded when it is asked for.
+@[OnTape]
+pub struct TapeDocument
+  enum Kind
+    Null
+    Bool
+    Int
+    Float
+    String
+    Array
+    Object
+  end
+
+  getter tree : TapeStream(TapeNode)
+  getter input : TapeString
+
+  def initialize(@tree : TapeStream(TapeNode), @input : TapeString)
+  end
+
+  def root : Int32
+    0
+  end
+
+  def kind(index : Int32) : Kind
+    @tree[index].kind
+  end
+
+  def bool(index : Int32) : Bool
+    expect(index, Kind::Bool).payload != 0
+  end
+
+  def int(index : Int32) : Int64
+    expect(index, Kind::Int).payload
+  end
+
+  # A float, or an integer as one.
+  def float(index : Int32) : Float64
+    node = @tree[index]
+    return node.payload.to_f64 if node.kind == Kind::Int
+    bits = expect(index, Kind::Float).payload
+    pointerof(bits).as(Pointer(Float64)).value
+  end
+
+  def null?(index : Int32) : Bool
+    @tree[index].kind == Kind::Null
+  end
+
+  # The string at *index*, decoded: the input's own bytes unless it holds
+  # an escape, a new string on the tape if it does.
+  def string(index : Int32) : TapeString
+    node = expect(index, Kind::String)
+    text = TapeString.new(@input.to_unsafe + (node.payload >> 32), (node.payload & 0xFFFFFFFF).to_i32)
+    JSON.decoded(text, (node.flags & TapeNode::ESCAPED_TEXT) != 0)
+  end
+
+  # The key *index* has in its object, decoded as `string` is.
+  def key(index : Int32) : TapeString
+    node = @tree[index]
+    JSON.decoded(TapeString.new(@input.to_unsafe + node.key_at, node.key_size), (node.flags & TapeNode::ESCAPED_KEY) != 0)
+  end
+
+  # The count of an array's values or an object's fields.
+  def size(index : Int32) : Int32
+    count = 0
+    each(index) { count = count + 1 }
+    count
+  end
+
+  # Each value of the array or object at *index*, by index.
+  def each(index : Int32, & : Int32 -> _) : Nil
+    kind = @tree[index].kind
+    raise "#{kind} is not an array or an object" unless kind == Kind::Array || kind == Kind::Object
+    @tree.each_child(index) { |child| yield child }
+  end
+
+  # The *nth* value of the array at *index*, or -1.
+  def at(index : Int32, nth : Int32) : Int32
+    expect(index, Kind::Array)
+    found = -1
+    seen = 0
+    @tree.each_child(index) do |child|
+      found = child if seen == nth
+      seen = seen + 1
+    end
+    found
+  end
+
+  # The value of the field *name* of the object at *index*, or -1.
+  def at(index : Int32, name : String) : Int32
+    expect(index, Kind::Object)
+    found = -1
+    @tree.each_child(index) do |child|
+      if found < 0
+        node = @tree[child]
+        key = @input.to_unsafe + node.key_at
+        if (node.flags & TapeNode::ESCAPED_KEY) == 0
+          found = child if node.key_size == name.bytesize && JSON.same?(key, name.to_unsafe, name.bytesize)
+        elsif JSON.decoded_s(TapeString.new(key, node.key_size)) == name
+          found = child
+        end
+      end
+    end
+    found
+  end
+
+  private def expect(index : Int32, kind : Kind) : TapeNode
+    node = @tree[index]
+    raise "expected #{kind}, not #{node.kind}" unless node.kind == kind
+    node
+  end
+end
+
+# Reads a document onto the tape for `JSON.parse(bytes : TapeString)`: the
+# same grammar, limits and sentences as `Parser`, through the same lexer in
+# its span mode, so that only the stream of values goes on the tape.
+@[OnTape]
+pub struct TapeParser
+  @lexer : Lexer
+  @input : TapeString
+  @tree : TapeStream(TapeNode)
+  @nesting : Int32
+  @error : String?
+
+  def initialize(@input : TapeString)
+    @lexer = Lexer.new(@input.to_unsafe, @input.bytesize)
+    @tree = TapeStream(TapeNode).new(@input.bytesize // 16 + 8)
+    @nesting = 0
+    @error = nil
+    @lexer.next_token
+  end
+
+  def error : String?
+    @error
+  end
+
+  def document : TapeDocument
+    TapeDocument.new(@tree, @input)
+  end
+
+  private def token : Token
+    @lexer.token
+  end
+
+  private def fail(reason : String, line : Int32, col : Int32) : Nil
+    if @error.nil?
+      lexer_error = @lexer.error
+      @error = lexer_error.nil? ? "#{reason} at line #{line}, column #{col}" : lexer_error
+    end
+    nil
+  end
+
+  private def fail(reason : String) : Nil
+    fail(reason, token.line_number, token.column_number)
+  end
+
+  private def text(at : Int32, size : Int32) : TapeString
+    TapeString.new(@input.to_unsafe + at, size)
+  end
+
+  def parse : Nil
+    return fail("empty JSON input", 1, 1) if token.kind == TokenKind::EOF
+    parse_value(0, 0, 0)
+    return unless @error.nil?
+    fail("unexpected #{token_text} after JSON root value") unless token.kind == TokenKind::EOF
+  end
+
+  private def token_text : String
+    case token.kind
+    when TokenKind::BeginArray  then "'['"
+    when TokenKind::BeginObject then "'{'"
+    when TokenKind::EndArray    then "']'"
+    when TokenKind::EndObject   then "'}'"
+    when TokenKind::Colon       then "':'"
+    when TokenKind::Comma       then "','"
+    when TokenKind::True        then "'true'"
+    when TokenKind::False       then "'false'"
+    when TokenKind::Null        then "'null'"
+    when TokenKind::EOF         then "end of input"
+    when TokenKind::String      then "string"
+    when TokenKind::Int, TokenKind::Float
+      "number #{text(token.raw_start, token.raw_size).to_s}"
+    else "value"
+    end
+  end
+
+  private def leaf(kind : TapeDocument::Kind, flags : Int32, key_at : Int32, key_size : Int32, payload : Int64) : Nil
+    @tree.leaf(TapeNode.new(kind.value | flags, key_at, key_size, payload))
+    @lexer.next_token
+  end
+
+  # The value at the current token, in its object under the key at
+  # *key_at* (*flags* saying whether it holds an escape).
+  private def parse_value(flags : Int32, key_at : Int32, key_size : Int32) : Nil
+    case token.kind
+    when TokenKind::Null
+      leaf(TapeDocument::Kind::Null, flags, key_at, key_size, 0_i64)
+    when TokenKind::True
+      leaf(TapeDocument::Kind::Bool, flags, key_at, key_size, 1_i64)
+    when TokenKind::False
+      leaf(TapeDocument::Kind::Bool, flags, key_at, key_size, 0_i64)
+    when TokenKind::Int
+      leaf(TapeDocument::Kind::Int, flags, key_at, key_size, token.int_value)
+    when TokenKind::Float
+      real = token.float_value
+      leaf(TapeDocument::Kind::Float, flags, key_at, key_size, pointerof(real).as(Pointer(Int64)).value)
+    when TokenKind::String
+      flags = flags | TapeNode::ESCAPED_TEXT if token.escaped
+      leaf(TapeDocument::Kind::String, flags, key_at, key_size, (token.raw_start.to_i64 << 32) | token.raw_size.to_i64)
+    when TokenKind::BeginArray
+      parse_array(flags, key_at, key_size)
+    when TokenKind::BeginObject
+      parse_object(flags, key_at, key_size)
+    else
+      fail("unexpected #{token_text}")
+    end
+  end
+
+  private def nest : Bool
+    @nesting = @nesting + 1
+    return true if @nesting <= MAX_NESTING
+    fail("nesting depth of #{@nesting} exceeds maximum depth #{MAX_NESTING}")
+    false
+  end
+
+  private def parse_array(flags : Int32, key_at : Int32, key_size : Int32) : Nil
+    return unless nest
+    at = @tree.open(TapeNode.new(TapeDocument::Kind::Array.value | flags, key_at, key_size, 0_i64))
+    @lexer.next_token # '['
+    if token.kind == TokenKind::EndArray
+      @lexer.next_token
+    else
+      while true
+        parse_value(0, 0, 0)
+        return unless @error.nil?
+        if token.kind == TokenKind::Comma
+          comma_line = token.line_number
+          comma_col = token.column_number
+          @lexer.next_token
+          return fail("trailing comma in array", comma_line, comma_col) if token.kind == TokenKind::EndArray
+        elsif token.kind == TokenKind::EndArray
+          @lexer.next_token
+          break
+        else
+          return fail("expected ',' or ']' in array")
+        end
+      end
+    end
+    @tree.close(at)
+    @nesting = @nesting - 1
+  end
+
+  private def parse_object(flags : Int32, key_at : Int32, key_size : Int32) : Nil
+    return unless nest
+    at = @tree.open(TapeNode.new(TapeDocument::Kind::Object.value | flags, key_at, key_size, 0_i64))
+    @lexer.next_token # '{'
+    # Past this many keys, the object's are looked up in a hash rather
+    # than compared one by one.
+    seen = nil.as(Hash(String, Bool)?)
+    count = 0
+    if token.kind == TokenKind::EndObject
+      @lexer.next_token
+    else
+      while true
+        return fail("expected string key in object") unless token.kind == TokenKind::String
+        name_at = token.raw_start
+        name_size = token.raw_size
+        name_flags = token.escaped ? TapeNode::ESCAPED_KEY : 0
+        if (set = seen)
+          name = key_s(name_at, name_size, name_flags)
+          return fail("duplicate key '#{name}'") if set.has_key?(name)
+          set[name] = true
+        else
+          return fail("duplicate key '#{key_s(name_at, name_size, name_flags)}'") if duplicate?(at, name_at, name_size, name_flags)
+          if count == 32
+            set = {} of String => Bool
+            child = at + 1
+            while child < @tree.size
+              node = @tree[child]
+              set[key_s(node.key_at, node.key_size, node.flags)] = true
+              child = @tree.stop(child)
+            end
+            set[key_s(name_at, name_size, name_flags)] = true
+            seen = set
+          end
+        end
+        count = count + 1
+        @lexer.next_token # the key
+        return fail("expected ':' after object key") unless token.kind == TokenKind::Colon
+        @lexer.next_token # ':'
+        parse_value(name_flags, name_at, name_size)
+        return unless @error.nil?
+        if token.kind == TokenKind::Comma
+          comma_line = token.line_number
+          comma_col = token.column_number
+          @lexer.next_token
+          return fail("trailing comma in object", comma_line, comma_col) if token.kind == TokenKind::EndObject
+        elsif token.kind == TokenKind::EndObject
+          @lexer.next_token
+          break
+        else
+          return fail("expected ',' or '}' in object")
+        end
+      end
+    end
+    @tree.close(at)
+    @nesting = @nesting - 1
+  end
+
+  # The key at *at* decoded into a String.
+  private def key_s(at : Int32, size : Int32, flags : Int32) : String
+    JSON.decoded_s(text(at, size), (flags & TapeNode::ESCAPED_KEY) != 0)
+  end
+
+  # Whether the object opened at *at* already has a field with this key.
+  private def duplicate?(at : Int32, key_at : Int32, key_size : Int32, flags : Int32) : Bool
+    child = at + 1
+    count = @tree.size
+    bytes = @input.to_unsafe
+    while child < count
+      node = @tree[child]
+      if ((flags | node.flags) & TapeNode::ESCAPED_KEY) == 0
+        return true if node.key_size == key_size && JSON.same?(bytes + node.key_at, bytes + key_at, key_size)
+      elsif key_s(node.key_at, node.key_size, node.flags) == key_s(key_at, key_size, flags)
+        return true
+      end
+      child = @tree.stop(child)
+    end
+    false
+  end
+end
+
 pub struct JSON
   # The document as an `Any`; panics with the line and column of the first
   # thing it refuses.
@@ -2361,6 +3025,210 @@ pub struct JSON
     failure = parser.error
     raise failure unless failure.nil?
     result
+  end
+
+  # The document in *bytes* read onto the caller's tape, its strings views
+  # into *bytes*; panics with the line and column of the first thing it
+  # refuses, as `parse(String)` does.
+  def self.parse(bytes : TapeString) : TapeDocument
+    parser = TapeParser.new(bytes)
+    parser.parse
+    failure = parser.error
+    raise failure unless failure.nil?
+    parser.document
+  end
+
+  # The document in *bytes* on the tape, or `nil` when it is not one.
+  def self.parse?(bytes : TapeString) : TapeDocument?
+    parser = TapeParser.new(bytes)
+    parser.parse
+    return nil unless parser.error.nil?
+    parser.document
+  end
+
+  # A document written into the caller's *writer* through a `TapeBuilder` the
+  # block is handed, as `build` writes a String. Its state is on this
+  # method's stack: the builder is not used after the block.
+  def self.build(writer : TapeWriter, indent : String | Int32 | Nil = nil, ascii_only : Bool = false, & : TapeBuilder -> Nil) : Nil
+    slots = uninitialized Int32[520]
+    spans = uninitialized Int32[256]
+    keys = pointerof(spans).as(Pointer(Int32))
+    text = indent.is_a?(Int32) ? (indent.as(Int32) > 0 ? " " * indent.as(Int32) : nil) : indent.as(String?)
+    text = nil if text && text.empty?
+    builder = TapeBuilder.new(writer, pointerof(slots).as(Pointer(Int32)), pointerof(keys), text, ascii_only)
+    yield builder
+    builder.finish
+  end
+
+  # The bytes of a string as the lexer found them, decoded: themselves
+  # when they hold no escape, else a new string on the tape.
+  def self.decoded(text : TapeString, escaped : Bool) : TapeString
+    return text unless escaped
+    TapeString.build(text.bytesize) do |w|
+      each_decoded_byte(text.to_unsafe, text.bytesize) { |b| w.push(b) }
+    end
+  end
+
+  # The same decoded into a String.
+  def self.decoded_s(text : TapeString, escaped : Bool = true) : String
+    return text.to_s unless escaped
+    buffer = StringBuffer.new(text.bytesize)
+    each_decoded_byte(text.to_unsafe, text.bytesize) { |b| buffer.append(b) }
+    buffer.to_s
+  end
+
+  # Each byte of a string's text whose escapes the lexer has checked,
+  # decoded: `\uXXXX` (a surrogate pair into one code point) as UTF-8.
+  def self.each_decoded_byte(bytes : Pointer(UInt8), size : Int32, & : UInt8 -> Nil) : Nil
+    i = 0
+    while i < size
+      b = bytes[i]
+      if b != 92_u8
+        yield b
+        i = i + 1
+        next
+      end
+      esc = bytes[i + 1]
+      i = i + 2
+      if esc == 117_u8
+        cp = hex4(bytes + i)
+        i = i + 4
+        if cp >= 0xD800 && cp <= 0xDBFF
+          cp = 0x10000 + ((cp - 0xD800) << 10) + (hex4(bytes + i + 2) - 0xDC00)
+          i = i + 6
+        end
+        if cp <= 0x7F
+          yield cp.to_u8
+        elsif cp <= 0x7FF
+          yield (0xC0 | (cp >> 6)).to_u8
+          yield (0x80 | (cp & 0x3F)).to_u8
+        elsif cp <= 0xFFFF
+          yield (0xE0 | (cp >> 12)).to_u8
+          yield (0x80 | ((cp >> 6) & 0x3F)).to_u8
+          yield (0x80 | (cp & 0x3F)).to_u8
+        else
+          yield (0xF0 | (cp >> 18)).to_u8
+          yield (0x80 | ((cp >> 12) & 0x3F)).to_u8
+          yield (0x80 | ((cp >> 6) & 0x3F)).to_u8
+          yield (0x80 | (cp & 0x3F)).to_u8
+        end
+      elsif esc == 98_u8
+        yield 8_u8
+      elsif esc == 102_u8
+        yield 12_u8
+      elsif esc == 110_u8
+        yield 10_u8
+      elsif esc == 114_u8
+        yield 13_u8
+      elsif esc == 116_u8
+        yield 9_u8
+      else
+        yield esc
+      end
+    end
+  end
+
+  # Whether *a* and *b* hold the same *size* bytes.
+  def self.same?(a : Pointer(UInt8), b : Pointer(UInt8), size : Int32) : Bool
+    i = 0
+    while i < size
+      return false if a[i] != b[i]
+      i = i + 1
+    end
+    true
+  end
+
+  # Whether *bytes* are well-formed UTF-8.
+  def self.utf8?(bytes : Pointer(UInt8), size : Int32) : Bool
+    i = 0
+    while i < size
+      length = utf8_sequence_at(bytes, size, i)
+      return false if length < 0
+      i = i + length
+    end
+    true
+  end
+
+  private def self.hex4(p : Pointer(UInt8)) : Int32
+    val = 0
+    i = 0
+    while i < 4
+      c = p[i]
+      d = c <= 57_u8 ? c.to_i - 48 : (c | 0x20_u8).to_i - 87
+      val = (val << 4) | d
+      i = i + 1
+    end
+    val
+  end
+
+  # Each byte of *bytes* written as a JSON string, quotes and all: the
+  # escapes, control bytes as `\u00XX`, and bytes that are not a code
+  # point as U+FFFD, one per ill-formed subpart, so what is written is
+  # UTF-8 the reader takes back (RFC 8259 §8.1: a String holds any bytes,
+  # a file name or a log line). Under *ascii_only* every code point past
+  # ASCII is a `\uXXXX`, a surrogate pair past the basic plane.
+  def self.each_escaped_byte(bytes : Pointer(UInt8), len : Int32, ascii_only : Bool, & : UInt8 -> Nil) : Nil
+    yield 34_u8
+    i = 0
+    while i < len
+      b = bytes[i]
+      if b == 34_u8 || b == 92_u8
+        yield 92_u8
+        yield b
+        i = i + 1
+      elsif b >= 32_u8 && b < 127_u8
+        yield b
+        i = i + 1
+      elsif b == 8_u8 || b == 12_u8 || b == 10_u8 || b == 13_u8 || b == 9_u8
+        yield 92_u8
+        yield (b == 8_u8 ? 98_u8 : b == 12_u8 ? 102_u8 : b == 10_u8 ? 110_u8 : b == 13_u8 ? 114_u8 : 116_u8)
+        i = i + 1
+      elsif b < 128_u8
+        hex_u4(b.to_i) { |h| yield h }
+        i = i + 1
+      else
+        length = utf8_sequence_at(bytes, len, i)
+        if length < 0
+          if ascii_only
+            hex_u4(0xFFFD) { |h| yield h }
+          else
+            yield 0xEF_u8
+            yield 0xBF_u8
+            yield 0xBD_u8
+          end
+          i = i - length
+        elsif !ascii_only
+          while length > 0
+            yield bytes[i]
+            i = i + 1
+            length = length - 1
+          end
+        elsif length == 2
+          hex_u4(((b.to_i & 0x1F) << 6) | (bytes[i + 1].to_i & 0x3F)) { |h| yield h }
+          i = i + 2
+        elsif length == 3
+          hex_u4(((b.to_i & 0x0F) << 12) | ((bytes[i + 1].to_i & 0x3F) << 6) | (bytes[i + 2].to_i & 0x3F)) { |h| yield h }
+          i = i + 3
+        else
+          cp = ((b.to_i & 0x07) << 18) | ((bytes[i + 1].to_i & 0x3F) << 12) | ((bytes[i + 2].to_i & 0x3F) << 6) | (bytes[i + 3].to_i & 0x3F)
+          sub = cp - 0x10000
+          hex_u4(0xD800 + (sub >> 10)) { |h| yield h }
+          hex_u4(0xDC00 + (sub & 0x3FF)) { |h| yield h }
+          i = i + 4
+        end
+      end
+    end
+    yield 34_u8
+  end
+
+  private def self.hex_u4(val : Int32, & : UInt8 -> Nil) : Nil
+    hex = "0123456789abcdef".to_unsafe
+    yield 92_u8
+    yield 117_u8
+    yield hex[(val >> 12) & 0x0F]
+    yield hex[(val >> 8) & 0x0F]
+    yield hex[(val >> 4) & 0x0F]
+    yield hex[val & 0x0F]
   end
 
   # The document as an `Any`, or `nil` when it is not one.

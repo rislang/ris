@@ -67,8 +67,8 @@ classic object tree on tape is slower than the heap. 4.6 MB JSON, 20 parses:
 | tape: `TapeArray` per node, stacked | NO | 0 | 0 | 1328 ms | 83 MB |
 | tape: `TapeArray` per node, as parsed | NO | 0 | 0 | 1749 ms | 116 MB |
 
-Its tape parsers are only in ris-bench's `json/jnest.ri` (no escapes or
-floats); std has no tape JSON or YAML yet. A tree on tape: `TapeStream`.
+std/json too: `JSON.parse(TapeString)` 675 ms and no heap, `Any` 840 ms
+(escapes, floats); `JSON.build(TapeWriter)` 2.9x as fast. No YAML yet.
 
 ## Implementation, checks and remaining work
 * `src/iyi/`: `tape.iyi` containers, `prelude.iyi` mappings, GC roots.
