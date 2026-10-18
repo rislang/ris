@@ -1,6 +1,6 @@
 # A Tape::Array grows in a loop that also builds a Tape::String on the tape: the
 # array is never the tape's end, so every growth copies it.
-Tape.scope do
+Tape.run do
   names = Tape::Array(Tape::String).new
   3.times { names.push(Tape::String.build { |w| w.push(97_u8) }) }
   puts names.size

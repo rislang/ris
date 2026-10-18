@@ -3,10 +3,10 @@ import std/int
 import std/gc::{GC}
 
 def work : Nil
-  Tape.scope do
+  Tape.run do
     items = Tape::Array(Int64).new(0)
     items.push(7_i64)
-    Tape.scope { items.push(8_i64) }
+    Tape.run { items.push(8_i64) }
   end
 end
 

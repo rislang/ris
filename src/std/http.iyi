@@ -507,7 +507,7 @@ pub struct Server
 
   # A request head at *from* in *bytes*, read on the caller's tape: nil
   # until the blank line that ends it has arrived. The parts and fields are
-  # views into *bytes*; temporaries go on the caller's `Tape.scope`.
+  # views into *bytes*; temporaries go on the caller's `Tape.run`.
   def self.parse_head(bytes : Tape::String, from : Int32 = 0) : ParsedHead | HeadError | Nil
     p = bytes.to_unsafe
     n = bytes.bytesize
@@ -589,11 +589,11 @@ pub struct Server
   # no error means "not yet". `consumed` and `wanted` count from the start
   # of `text`: a server parses each request where it lies in
   # what has arrived, and copies none of what follows it. The head is read
-  # by `parse_head` on a `Tape.scope` - the caller's, when it has one - and
+  # by `parse_head` on a `Tape.run` - the caller's, when it has one - and
   # only what the request keeps is copied to the heap.
   def self.parse_request(text : String, from : Int32 = 0) : ParsedRequest
     parsed = nil.as(ParsedRequest?)
-    Tape.scope do
+    Tape.run do
       parsed = request_at(text, Tape::String.new(text.to_unsafe, text.bytesize), from)
     end
     parsed || ParsedRequest.new(nil, "incomplete request", true, 0)

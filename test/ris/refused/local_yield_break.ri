@@ -4,7 +4,7 @@ def with_local(&)
   Tape.local { yield }
 end
 
-Tape.scope do
+Tape.run do
   escaped = with_local do
     break Tape::String.build { |w| w.append("inner") }
   end

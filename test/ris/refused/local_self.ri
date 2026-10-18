@@ -11,7 +11,7 @@ struct Holder
     end
   end
 end
-Tape.scope do
+Tape.run do
   h = Holder.new
   h.escape
 end

@@ -16,5 +16,5 @@ def make : Resp
 end
 
 # The block value leaves the scope; its storage does not.
-kept = Tape.scope { make }
+kept = Tape.run { make }
 puts kept.id

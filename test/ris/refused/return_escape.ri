@@ -2,7 +2,7 @@ module test/ris/refused/return_escape
 import std/int
 
 def escaped : Tape::String
-  Tape.scope do
+  Tape.run do
     return Tape::String.build { |w| w.push(65_u8) }
   end
   Tape::String.new(Pointer(UInt8).new(0_u64), 0)

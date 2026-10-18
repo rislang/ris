@@ -140,7 +140,7 @@ N.times do |i|
   if heap
     got = answer_heap(text)
   else
-    Tape.scope { got = answer(Tape::String.view(text)) }
+    Tape.run { got = answer(Tape::String.view(text)) }
   end
   bytes += (got >> 40).to_i64
   sum = (sum ^ (got & 0xFFFFFFFFFF_u64)) &* 1099511628211_u64

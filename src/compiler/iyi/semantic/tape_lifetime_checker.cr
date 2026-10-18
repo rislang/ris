@@ -1,5 +1,5 @@
 # Follow calls and their lexical block bindings, not just the syntax inside
-# Tape.scope. A helper can yield to a caller whose locals outlive its tape.
+# Tape.run. A helper can yield to a caller whose locals outlive its tape.
 class Iyi::TapeLifetimeChecker < Iyi::Visitor
   class BlockContext
     getter block : Block
@@ -101,7 +101,7 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
 
   # Keep the proposed repair valid for both text and tape-bearing DTOs.
   private def tape_scope_name : String
-    @local_tape ? "Tape.local" : "Tape.scope"
+    @local_tape ? "Tape.local" : "Tape.run"
   end
 
   private def ownership_hint(type : Type) : String
@@ -113,7 +113,7 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
   end
 
   private def tape_scope?(node : Call) : Bool
-    return false unless node.name == "scope" || node.name == "local"
+    return false unless node.name == "run" || node.name == "local"
     node.target_defs.try &.any? do |target|
       owner = target.owner
       owner.metaclass? && owner.instance_type.to_s == "Tape"

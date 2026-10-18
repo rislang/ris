@@ -23,4 +23,4 @@ struct Holder
   end
 end
 
-Tape.scope { puts Holder.new(make).r.id }
+Tape.run { puts Holder.new(make).r.id }

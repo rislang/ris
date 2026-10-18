@@ -17,7 +17,7 @@ end
 
 # A variable of the code around the scope outlives it.
 kept = nil
-Tape.scope do
+Tape.run do
   kept = make
 end
 puts kept.nil?

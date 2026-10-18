@@ -1391,7 +1391,7 @@ module Iyi
       types["Share"] = @share_annotation = AnnotationType.new self, self, "Share"
       # PROTOTYPE (ris, step B): `@[OnTape]` on a struct makes it a tape type -
       # a value whose storage is the current fiber's tape and ends with the
-      # `Tape.scope` that made it. `Iyi::TapeChecker` and `CleanupTransformer`
+      # `Tape.run` that made it. `Iyi::TapeChecker` and `CleanupTransformer`
       # refuse every place such a value could outlive its scope.
       types["OnTape"] = @tape_annotation = AnnotationType.new self, self, "OnTape"
 

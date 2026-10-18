@@ -23,7 +23,7 @@ got = ""
 group do |g|
   reader = g.spawn { read_all(client, 5 + 3 + 5 + big.bytesize) }
   conn.write("head:", "abc").or_panic
-  Tape.scope do
+  Tape.run do
     head = Tape::String.build(8) { |w| w.append("tape:") }
     body = Tape::String.build(big.bytesize) { |w| w.append(big) }
     conn.write(head, body).or_panic

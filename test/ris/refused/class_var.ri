@@ -24,4 +24,4 @@ class Last
   end
 end
 
-Tape.scope { Last.keep(make) }
+Tape.run { Last.keep(make) }

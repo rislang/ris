@@ -1,7 +1,7 @@
 module test/ris/zero_capacity
 import std/int
 
-Tape.scope do
+Tape.run do
   items = Tape::Array(Int64).new(0)
   items.push(123_i64)
   other = Tape::Array(Int64).new(0)

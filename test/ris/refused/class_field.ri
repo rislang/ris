@@ -29,4 +29,4 @@ class Cache
 end
 
 cache = Cache.new
-Tape.scope { cache.keep(make) }
+Tape.run { cache.keep(make) }

@@ -16,7 +16,7 @@ end
 check(early == 5)
 check(IyiRegion.tape == 0_u64)
 copy = ""
-Tape.scope do
+Tape.run do
   outer = Tape::String.build { |w| w.append("outer") }
   saved = IyiRegion.tape
   cursor = IyiHeap.read64(saved)
@@ -29,7 +29,7 @@ Tape.scope do
       check(current == first)
       text = Tape::String.build(1) { |w| w.append(outer.to_s) }
       copy = text.to_s
-      Tape.scope { check(IyiRegion.tape == current) }
+      Tape.run { check(IyiRegion.tape == current) }
       break 9
     end
     check(IyiRegion.tape == saved)

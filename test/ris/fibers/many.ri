@@ -6,7 +6,7 @@ import std/gc::{GC}
 
 def hold(i : Int32, done : Channel(Int64)) : Nil
   total = 0_i64
-  Tape.scope do
+  Tape.run do
     values = Tape::Array(Int64).new(4)
     values.push(i.to_i64)
     sleep(200)

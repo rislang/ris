@@ -53,7 +53,7 @@ end
 
 text = %({"a": [1, -0, 2.5e3, "x\\ny\\u00e9\\ud83d\\ude00", true, false, null],) +
        %( "b\\u0041": {"c": -7, "d": "plain"}, "e": []})
-Tape.scope do
+Tape.run do
   doc = JSON.parse(Tape::String.new(text))
   a = doc.at(doc.root, "a")
   check(failures, doc.size(a) == 7, "array size")
@@ -81,7 +81,7 @@ many = String.build do |io|
 end
 bad << many
 bad.each do |input|
-  Tape.scope do
+  Tape.run do
     tape = DocumentParser.new(Tape::String.new(input))
     tape.parse
     heap = Parser.new(input)
@@ -98,7 +98,7 @@ end
       heap_doc(b)
     end
     tape = ""
-    Tape.scope do
+    Tape.run do
       w = Tape::String::Writer.new(16)
       w.append("head:")
       JSON.write(w, indent, ascii) { |b| tape_doc(b) }
@@ -110,14 +110,14 @@ end
 
 # A document of more keys than the builder's stack holds: their spans
 # move to the heap, and a repeat among them is still seen by the end.
-Tape.scope do
+Tape.run do
   w = Tape::String::Writer.new(16)
   JSON.write(w) { |b| b.object { 300.times { |i| b.field "k#{i}", i } } }
   check(failures, JSON.parse(w.finish).size(0) == 300, "300 keys written and read back")
 end
 
 # `w.json` is `JSON.write(w)` with the writer first, options and all.
-Tape.scope do
+Tape.run do
   w = Tape::String::Writer.new(16)
   w.append("x:")
   w.json { |b| b.object { b.field "a", 1 } }
@@ -127,7 +127,7 @@ end
 
 # A document copied through the builder is the heap builder's text of it,
 # its escapes decoded and written again, in every mode.
-Tape.scope do
+Tape.run do
   doc = JSON.parse(Tape::String.new(text))
   [nil, 2].each do |indent|
     [false, true].each do |ascii|
@@ -152,7 +152,7 @@ small = %({"id":1,"name":"us\\"er","tags":["a","b"],"ok":true,"n":null})
 before = IyiMark.allocated_since
 total = 0_i64
 2000.times do
-  Tape.scope do
+  Tape.run do
     doc = JSON.parse(Tape::String.new(small))
     w = Tape::String::Writer.new(64)
     JSON.write(w) do |b|

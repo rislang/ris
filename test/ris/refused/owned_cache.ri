@@ -6,7 +6,7 @@ class Cache
 end
 
 cache = Cache.new
-Tape.scope do
+Tape.run do
   borrowed = Tape::String.build { |writer| writer.append("temporary") }
   cache.store(borrowed)
 end

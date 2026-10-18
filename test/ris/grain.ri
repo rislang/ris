@@ -6,7 +6,7 @@ def whole(region : UInt64) : Bool
   length % 65536_u64 == 0_u64 && IyiHeap.read64(region &+ 8_u64) == region &+ length
 end
 
-Tape.scope do
+Tape.run do
   first = IyiRegion.tape
   ok = whole(first)
   big = Tape::String.build(1024) do |w|

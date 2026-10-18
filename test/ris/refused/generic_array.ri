@@ -16,7 +16,7 @@ def make : Resp
 end
 
 # Array is a heap class with a Pointer(T) field.
-Tape.scope do
+Tape.run do
   all = [] of Resp
   all << make
   puts all.size

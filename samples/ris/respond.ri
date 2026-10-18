@@ -6,7 +6,7 @@
 # name, 1..8 line items each with a sku - render it as JSON, hash it and throw
 # both away. The response is two `@[OnTape]` structs whose strings and list
 # are `Tape::String` and `Tape::Array`, so each request's objects are bumped
-# onto the fiber's tape and freed together when its `Tape.scope` ends. Prints
+# onto the fiber's tape and freed together when its `Tape.run` ends. Prints
 # the request count, the bytes rendered and a checksum: 1600000, 367459487,
 # 7480137599999527189, the same as the other languages' versions in
 # github.com/rislang/ris-bench, which keeps a copy of this file as
@@ -141,7 +141,7 @@ bytes = 0_i64
 i = 0_i64
 while i < N
   seed = xs_next(seed)
-  Tape.scope do
+  Tape.run do
     r = xs_next(seed)
     n = 1_i64 + xs_mod(r, 8_i64)
     resp = Resp.new(xs_mod(r >> 4, 1000000_i64), name_of(r >> 8), make_items(r >> 16, n))

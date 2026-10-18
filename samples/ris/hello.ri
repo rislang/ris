@@ -3,7 +3,7 @@
 #   ./bin/ris run samples/ris/hello.ri
 #
 # ris is iyi with tape memory: values marked `@[OnTape]` live on the running
-# fiber's tape inside `Tape.scope`, and all of it is freed with one store when
+# fiber's tape inside `Tape.run`, and all of it is freed with one store when
 # the block ends. Everything else is iyi as it is - and so, underneath,
 # Crystal.
 module samples/hello
@@ -23,7 +23,7 @@ end
 
 total = 0_i64
 greeting = ""
-Tape.scope do
+Tape.run do
   order = make_order(1_i64)
   total = order_total(order)
   greeting = "Hello from #{order.customer.to_s}, order #{order.id}"
