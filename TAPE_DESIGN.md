@@ -5,7 +5,7 @@ safety. [SPEC.md](SPEC.md) is iyi's, unchanged; example: [README.md](README.md).
 
 ## Allocation and ownership
 Objects use iyi's GC heap. Tape is opt-in: `Tape::String` (and its
-`Builder`), `Tape::Array(T)`, `Tape::Tree(T)` go on the running fiber's tape
+`Writer`), `Tape::Array(T)`, `Tape::Tree(T)` go on the running fiber's tape
 (saved on a switch); `@[OnTape]` marks a struct tape-bearing, not moved. Tape
 allocation outside `Tape.scope` or `Tape.local` ends the program. Bump-pointer;
 64 MiB of address space first (written pages resident), then larger; 64 spares.
@@ -30,13 +30,13 @@ scope or local tape that owns its storage.
 * `Tape::String#to_s : String` copies into GC storage. Raw pointers and
   internal allocator calls are outside the contract.
 
-Copying a `Tape::Array` or a builder aliases its state. Growth off the top
+Copying a `Tape::Array` or a writer aliases its state. Growth off the top
 copies (element references are not stable). Tape words are GC roots.
 
 ## Layout: write the tape in order
 Tape pays when written in order: one growing value at the top, all else
 written once. Streaming pays most: `samples/ris/respond.ri`, 1.6M DTOs as
-JSON, one `Tape::String::Builder` a response; median of 9, 2026-10-18,
+JSON, one `Tape::String::Writer` a response; median of 9, 2026-10-18,
 release, as [ris-bench](https://github.com/rislang/ris-bench)'s `run.sh` builds:
 
 | respond, DTO | memory | GCs | heap allocated | time | RSS |
@@ -68,7 +68,7 @@ classic object tree on tape is slower than the heap. 4.6 MB JSON, 20 parses:
 | tape: `Tape::Array` per node, as parsed | refused | 0 | 0 | 1749 ms | 116 MB |
 
 std/json too: `JSON.parse(Tape::String)` 675 ms and no heap, `Any` 840 ms
-(escapes, floats); `JSON.build` into a builder 2.9x as fast. No YAML yet.
+(escapes, floats); `JSON.build` into a writer 2.9x as fast. No YAML yet.
 
 ## Implementation, checks and remaining work
 * `src/iyi/`: `tape.iyi` containers, `prelude.iyi` mappings, GC roots.

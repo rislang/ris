@@ -2389,7 +2389,7 @@ pub class Builder
   end
 end
 
-# A document's state in a `TapeBuilder`, on the stack of `JSON.build`:
+# A document's state in a `TapeWriter`, on the stack of `JSON.build`:
 # the level, the count of keys of the open objects, then per level a state,
 # the first key of each open object and its id in the hash table, and the
 # last id; the keys are (start, size) spans of the output. Past
@@ -2400,19 +2400,19 @@ TAPE_KEYS   = 128
 # heap, not compared one by one: 50,000 keys took 1.7 s, the heap 11 ms.
 TAPE_LINEAR = 32
 
-# Writes a document into the caller's `Tape::String::Builder`, as `Builder`
+# Writes a document into the caller's `Tape::String::Writer`, as `Builder`
 # writes one into a String: the same values, checks and escapes, and nothing
-# on the heap. `JSON.build(builder) { |json| ... }` hands one.
+# on the heap. `JSON.build(writer) { |json| ... }` hands one.
 @[OnTape]
-pub struct TapeBuilder
-  @out : Tape::String::Builder
+pub struct TapeWriter
+  @out : Tape::String::Writer
   @slots : Pointer(Int32)
   @keys : Pointer(Pointer(Int32))
   @table : Pointer(Pointer(UInt64))
   @indent : String?
   @ascii_only : Bool
 
-  def initialize(@out : Tape::String::Builder, @slots : Pointer(Int32), @keys : Pointer(Pointer(Int32)), @table : Pointer(Pointer(UInt64)), @indent : String?, @ascii_only : Bool)
+  def initialize(@out : Tape::String::Writer, @slots : Pointer(Int32), @keys : Pointer(Pointer(Int32)), @table : Pointer(Pointer(UInt64)), @indent : String?, @ascii_only : Bool)
     @slots[0] = 0
     @slots[1] = 0
     @slots[2] = Builder::ROOT
@@ -3236,19 +3236,19 @@ pub struct JSON
     parser.document
   end
 
-  # A document written into the caller's *writer* through a `TapeBuilder` the
+  # A document written into the caller's *writer* through a `TapeWriter` the
   # block is handed, as `build` writes a String. Its state is on this
-  # method's stack: the builder is not used after the block.
-  def self.build(writer : Tape::String::Builder, indent : String | Int32 | Nil = nil, ascii_only : Bool = false, & : TapeBuilder -> Nil) : Nil
+  # method's stack: the JSON writer is not used after the block.
+  def self.build(writer : Tape::String::Writer, indent : String | Int32 | Nil = nil, ascii_only : Bool = false, & : TapeWriter -> Nil) : Nil
     slots = uninitialized Int32[784]
     spans = uninitialized Int32[256]
     keys = pointerof(spans).as(Pointer(Int32))
     table = Pointer(UInt64).new(0_u64)
     text = indent.is_a?(Int32) ? (indent.as(Int32) > 0 ? " " * indent.as(Int32) : nil) : indent.as(String?)
     text = nil if text && text.empty?
-    builder = TapeBuilder.new(writer, pointerof(slots).as(Pointer(Int32)), pointerof(keys), pointerof(table), text, ascii_only)
-    yield builder
-    builder.finish
+    json = TapeWriter.new(writer, pointerof(slots).as(Pointer(Int32)), pointerof(keys), pointerof(table), text, ascii_only)
+    yield json
+    json.finish
   end
 
   # The bytes of a string as the lexer found them, decoded: themselves

@@ -73,8 +73,8 @@ module Tape
 
     # Writes the bytes the block pushes straight onto the tape, where the
     # string will stay: no buffer to copy out of.
-    def self.build(capacity : Int32 = 32, & : String::Builder -> _) : String
-      writer = String::Builder.new(capacity)
+    def self.build(capacity : Int32 = 32, & : String::Writer -> _) : String
+      writer = String::Writer.new(capacity)
       yield writer
       writer.finish
     end
@@ -85,7 +85,7 @@ module Tape
   # the struct points at. Addresses rather than a length and capacity, so a
   # push is one load, one compare and one store.
   @[OnTape]
-  struct String::Builder
+  struct String::Writer
     @state : Pointer(UInt64)
 
     def initialize(capacity : Int32)

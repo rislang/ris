@@ -93,7 +93,7 @@ def make_items(seed : UInt64, n : Int64) : Tape::Array(Item)
   end
 end
 
-def emit_str(buf : Tape::String::Builder, s : Tape::String) : Nil
+def emit_str(buf : Tape::String::Writer, s : Tape::String) : Nil
   buf.push(34_u8)
   p = s.to_unsafe
   n = s.bytesize

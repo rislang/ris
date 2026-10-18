@@ -26,13 +26,13 @@ As Slim does (`Slim.render`, `Slim.embed`), a library does not open a tape
 of its own; the caller's `Tape.scope` owns all of it, freed at once:
 
 * Take input already on the tape (`Tape::String`), not a `String` copy of it.
-* Write output into the caller's `Tape::String::Builder`, or return a
+* Write output into the caller's `Tape::String::Writer`, or return a
   `Tape::String` or an `@[OnTape]` struct the caller's scope owns, viewing
   the input bytes rather than copying them.
 * Temporaries go on the caller's tape: a nested `Tape.scope` shares it at
   no cost. No `Tape.local` per call; it costs more than small work saves.
 * The caller decides what to copy to the heap, and when.
-* No raw pointers in an API: pass `Tape::String`, `Tape::String::Builder`,
+* No raw pointers in an API: pass `Tape::String`, `Tape::String::Writer`,
   `Tape::Array` or an `@[OnTape]` struct. The checker refuses a
   `Tape::String` that leaves its scope, but not its `to_unsafe`: that
   pointer compiles and then reads

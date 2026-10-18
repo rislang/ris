@@ -16,7 +16,7 @@
 # and code that reaches the tape through raw pointers, are outside the rule.
 class Iyi::TapeLayoutChecker
   GROWS = {
-    "Tape::String::Builder" => {"push", "append", "append_int", "append_float", "append_html_escaped", "reserve"},
+    "Tape::String::Writer" => {"push", "append", "append_int", "append_float", "append_html_escaped", "reserve"},
     "Tape::Array"           => {"push"},
     "Tape::Tree"            => {"leaf", "open"},
   }
@@ -93,7 +93,7 @@ class Iyi::TapeLayoutChecker
     owner = a_def.owner
     owner = owner.instance_type if owner.metaclass?
     owner = owner.generic_type if owner.is_a?(GenericClassInstanceType)
-    TapeLayoutChecker.base_name(owner).in?("Tape::String", "Tape::String::Builder", "Tape::Array",
+    TapeLayoutChecker.base_name(owner).in?("Tape::String", "Tape::String::Writer", "Tape::Array",
       "Tape::Tree", "Tape::Tree::Entry", "Tape", "IyiRegion")
   end
 

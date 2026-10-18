@@ -30,7 +30,7 @@ codegen already did. The deeper cause is not found yet; a suspect is the
 `LibLLVM` bindings, inherited from Crystal, which does not support LLVM 23
 yet. Don't remove the workaround without finding the cause.
 
-## Tried: alias scopes for Tape::String::Builder
+## Tried: alias scopes for Tape::String::Writer
 
 `!alias.scope`/`!noalias` on a writer's state and data (primitives refused
 outside `tape.iyi`) left `push` unchanged (2026-10-18). The cursor already

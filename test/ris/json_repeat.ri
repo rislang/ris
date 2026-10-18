@@ -7,7 +7,7 @@ import std/int
 import std/json::{JSON}
 
 Tape.scope do
-  w = Tape::String::Builder.new(64)
+  w = Tape::String::Writer.new(64)
   JSON.build(w) do |b|
     b.object do
       b.field "inner" do

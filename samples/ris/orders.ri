@@ -68,7 +68,7 @@ def answer(bytes : Tape::String) : UInt64
   return 0_u64 unless head.is_a?(ParsedHead)
   size = (length = head.field("Content-Length")) ? digits(length) : 0
   doc = JSON.parse(Tape::String.new(bytes.to_unsafe + head.body_start, size))
-  w = Tape::String::Builder.new(256)
+  w = Tape::String::Writer.new(256)
   JSON.build(w) do |json|
     total = 0_i64
     json.object do

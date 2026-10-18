@@ -1,4 +1,4 @@
-# Tape::String::Builder's numbers and escaping, written in place on the tape.
+# Tape::String::Writer's numbers and escaping, written in place on the tape.
 Tape.scope do
   inner = Tape::String.build(8) { |w| w.append("<b>") }
   text = Tape::String.build(16) do |w|
