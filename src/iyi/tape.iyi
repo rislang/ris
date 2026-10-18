@@ -177,6 +177,14 @@ struct TapeWriter
     (@state.value &- (@state + 2_i64).value).to_i32
   end
 
+  # Room for *total* bytes in all, so that writing up to them does not grow
+  # the writer again: once a request's length is known, its bytes grow in
+  # place even after other values have gone on the tape.
+  def reserve(total : Int32) : Nil
+    extra = total - length
+    grow(extra.to_u64) if extra > 0 && @state.value &+ extra.to_u64 > (@state + 1_i64).value
+  end
+
   @[NoInline]
   def grow(extra : UInt64) : Nil
     start = (@state + 2_i64).value
@@ -210,6 +218,19 @@ struct TapeArray(T)
     @state.value = @state.address &+ 24_u64
     (@state + 1_i64).value = 0_u64
     (@state + 2_i64).value = capacity.to_u64
+  end
+
+  # *count* elements, the block giving each by index, in room of exactly
+  # that size: it never grows, so the block may put other values on the
+  # tape (TapeLayoutChecker allows it, where a loop of `push` is refused).
+  def self.new(count : Int32, & : Int32 -> T) : self
+    array = new(count)
+    index = 0
+    while index < count
+      array.push(yield index)
+      index = index + 1
+    end
+    array
   end
 
   def size : Int32

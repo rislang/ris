@@ -1,5 +1,5 @@
 # Tape-fiber: fibers each in their own Tape.scope, each building a TapeArray
-# and sleeping between pushes so the others run on the same thread. Fiber A
+# and sleeping between elements so the others run on the same thread. Fiber A
 # ends a short scope while B is in the middle of a long one, then opens
 # another and writes different bytes. With one tape per thread, A's scope end
 # frees the tape B is still using and A's next scope writes over B's values;
@@ -11,12 +11,10 @@ module test/ris/fibers/interleave
 def fill(tag : UInt8, rounds : Int32) : Int32
   wrong = 0
   Tape.scope do
-    items = TapeArray(TapeString).new
-    round = 0
-    while round < rounds
-      items.push(TapeString.build { |s| s.push(tag); s.push(tag) })
+    items = TapeArray(TapeString).new(rounds) do
+      text = TapeString.build { |s| s.push(tag); s.push(tag) }
       sleep(1)
-      round += 1
+      text
     end
     items.each do |text|
       wrong += 1 unless text.bytesize == 2 && text.to_unsafe[0] == tag && text.to_unsafe[1] == tag

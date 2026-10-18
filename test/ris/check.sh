@@ -46,6 +46,9 @@ expect local_self 'cannot use outer tape value `self`'
 expect local_return "cannot return a tape value"
 expect local_break "cannot break a tape value"
 expect local_yield_break "cannot break a tape value"
+expect mixed_growth      "grows on the tape in this loop, and TapeString.build"
+expect mixed_growth_call "grows on the tape in this loop, and \`tag\`"
+expect two_writers       "all grow on the tape in this loop"
 out=$("$RIS" run test/ris/local.ri 2>&1)
 if [ "$out" = 'PASS: local isolation, reuse, nested scopes, borrowed text, retained copy and early exits' ]; then echo "runs     local"; else echo "FAILED   local: $out"; status=1; fi
 

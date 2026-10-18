@@ -86,15 +86,11 @@ def sku_of(seed : UInt64) : TapeString
 end
 
 def make_items(seed : UInt64, n : Int64) : TapeArray(Item)
-  t = TapeArray(Item).new(8)
   r = seed
-  i = 0_i64
-  while i < n
+  TapeArray(Item).new(n.to_i32) do
     r = xs_next(r)
-    t.push(Item.new(sku_of(r), 1_i64 + xs_mod(r >> 8, 5_i64), 100_i64 + xs_mod(r >> 16, 99900_i64)))
-    i += 1_i64
+    Item.new(sku_of(r), 1_i64 + xs_mod(r >> 8, 5_i64), 100_i64 + xs_mod(r >> 16, 99900_i64))
   end
-  t
 end
 
 def emit_str(buf : TapeWriter, s : TapeString) : Nil

@@ -77,6 +77,7 @@ class Iyi::Program
       Prof.span("tape check") do
         TapeChecker.new(self).run
         result.accept TapeLifetimeChecker.new(self)
+        TapeLayoutChecker.new(self).run(result)
       end
     end
 
