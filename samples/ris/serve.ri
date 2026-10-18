@@ -1,0 +1,54 @@
+# serve: `Server.handle`'s cost per request, measured on loopback. A client
+# sends N keep-alive requests at once and reads the N answers; the server
+# side is `Server.handle` with a block that answers a small JSON body and a
+# header of its own. Prints the requests and the bytes the GC heap took
+# per request, collection off; time it from outside, with `gc` for the
+# collector on as a server runs it.
+#
+#   ./bin/ris build --release -o serve samples/ris/serve.ri
+#   ./serve; /usr/bin/time -f '%e s %M KB' ./serve gc
+
+module samples/serve
+
+import std/socket::{IyiSocket}
+import std/http::{Server, Request, Response}
+import std/gc::{GC}
+
+N = 200000
+REQUEST = "GET /users/42?full=1 HTTP/1.1\r\nHost: localhost\r\nUser-Agent: bench\r\nAccept: */*\r\n\r\n"
+BODY = %({"id":42,"name":"Mari","email":"mari@example.com"})
+
+def answer(req : Request) : Response
+  Response.new(200, BODY, {"Content-Type" => "application/json"})
+end
+
+def drain(socket : IyiSocket, want : Int64) : Int64
+  got = 0_i64
+  while got < want
+    chunk = socket.read(65536).or_panic
+    break if chunk.empty?
+    got += chunk.bytesize
+  end
+  got
+end
+
+reply = Server.format_response(answer(Request.new("GET", "/", nil, {} of String => String, "")), false, false)
+want = reply.bytesize.to_i64 * N
+listener = IyiSocket.listen(0)
+client = IyiSocket.connect("127.0.0.1", listener.local_port).or_panic
+conn = listener.accept.or_panic
+batch = REQUEST * 1000
+GC.disable unless Program.args.includes?("gc")
+before = GC.stats.bytes_since_collection
+got = 0_i64
+group do |g|
+  g.spawn { Server.handle(conn, ->answer(Request)); 0 }
+  reader = g.spawn { drain(client, want) }
+  (N // 1000).times { client.write(batch).or_panic }
+  got = reader.value
+  client.close
+end
+bytes = GC.stats.bytes_since_collection - before
+listener.close
+raise "read #{got} of #{want} bytes" unless got == want
+puts "#{N} requests, #{bytes // N.to_u64} heap bytes a request"

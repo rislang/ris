@@ -495,14 +495,24 @@ pub struct Server
   # `close` closes the connection after it, as Go's server and Python's
   # do: the line was dropped, `keep-alive` written in its place, and the
   # next request served on a connection the block had ended.
+  #
+  # The block runs on the request's tape, so what it puts there is freed
+  # with the answer; the head is written onto it and goes out with the
+  # body in one write, neither copied into the other.
   private def self.answered?(client : IyiSocket, handler : Proc(Request, Response), req : Request, close : Bool) : Bool
-    response = handler.call(req)
-    closing = close
-    if said = response.header("Connection")
-      closing = true if HTTP.has_token?(said, "close")
+    going = false
+    tape do
+      response = handler.call(req)
+      closing = close
+      if said = response.header("Connection")
+        closing = true if HTTP.has_token?(said, "close")
+      end
+      w = Tape::String::Writer.new(256)
+      body = write_head(w, response, HTTP.same_name?(req.method, "HEAD"), closing) ? response.body : ""
+      wrote = client.write(w.finish, Tape::String.view(body))
+      going = wrote.is_a?(Int32) && !closing
     end
-    wrote = client.write(format_response(response, HTTP.same_name?(req.method, "HEAD"), closing))
-    wrote.is_a?(Int32) && !closing
+    going
   end
 
   # A request head at *from* in *bytes*, read on the caller's tape: nil
@@ -723,6 +733,17 @@ pub struct Server
   # next answer, and `Content-Length: 0` on a 304 told a cache that the
   # resource had become empty.
   def self.format_response(response : Response, head : Bool, close : Bool) : String
+    text = ""
+    tape do
+      w = Tape::String::Writer.new(256)
+      text = write_head(w, response, head, close) ? w.finish.to_s + response.body : w.finish.to_s
+    end
+    text
+  end
+
+  # The head of *response* written into *w*, checked as `format_response`
+  # says: whether its body goes after it.
+  def self.write_head(w : Tape::String::Writer, response : Response, head : Bool, close : Bool) : Bool
     # A status line the client half reads as written, refused otherwise as
     # a request's lines are: `Response.new(200, "OK\r\nSet-Cookie: a=1",
     # ...)` went out with a header of its own in the reason, and 2000 as
@@ -730,7 +751,11 @@ pub struct Server
     raise "HTTP: not a status: #{response.status}" unless response.status >= 100 && response.status <= 999
     raise "HTTP: the reason contains a line break" if HTTP.has_break?(response.reason)
     raise "HTTP: the reason contains a control character" if HTTP.control?(response.reason)
-    text = "HTTP/1.1 #{response.status} #{response.reason}\r\n"
+    w.append("HTTP/1.1 ")
+    w.append_int(response.status)
+    w.append(" ")
+    w.append(response.reason)
+    w.append("\r\n")
     has_length = false
     response.headers.each do |name, value|
       raise "HTTP: not a header name: #{name.inspect}" unless HTTP.token?(name)
@@ -751,13 +776,19 @@ pub struct Server
         end
         has_length = true
       end
-      text = text + name + ": " + value + "\r\n"
+      w.append(name)
+      w.append(": ")
+      w.append(value)
+      w.append("\r\n")
     end
     bodiless = (response.status >= 100 && response.status < 200) || response.status == 204 || response.status == 304
-    text = text + "Content-Length: #{response.body.bytesize}\r\n" unless has_length || bodiless
-    text = text + (close ? "Connection: close\r\n" : "Connection: keep-alive\r\n")
-    text = text + "\r\n"
-    head || bodiless ? text : text + response.body
+    unless has_length || bodiless
+      w.append("Content-Length: ")
+      w.append_int(response.body.bytesize)
+      w.append("\r\n")
+    end
+    w.append(close ? "Connection: close\r\n\r\n" : "Connection: keep-alive\r\n\r\n")
+    !(head || bodiless)
   end
 end
 
