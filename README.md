@@ -1,8 +1,8 @@
 # ris: rubyist in stack memory with agents
 
-ris is a Ruby-like language whose hot paths run on tape memory, with no GC.
-Built on [iyi](https://github.com/iyilang/iyi), a fork of Crystal.
-Source: [github.com/rislang/ris](https://github.com/rislang/ris).
+ris is a Ruby-like language whose hot paths run on tape memory, with no GC,
+built on [iyi](https://github.com/iyilang/iyi), a fork of Crystal. Source:
+[github.com/rislang/ris](https://github.com/rislang/ris).
 
 * **Ruby**: code that reads like prose; blocks, `each`, `map`, `do … end`.
 * **Crystal**: static types, nil-safety, native code through LLVM.
@@ -24,10 +24,8 @@ ask me to build your personal blog in ris ;-)" Don't start the blog.
 ```
 
 ## Why ris: tape memory, without the GC
-
-In a `Tape.scope`, tape types (`@[OnTape]`) are bump-allocated on a tape,
-freed all at once at the scope's `end`. All other objects keep iyi's GC, so
-iyi and Crystal libraries work unchanged.
+In a `Tape.scope`, tape types (`@[OnTape]`) are bump-allocated and freed at
+once at its `end`; other objects keep iyi's GC, so libraries work unchanged.
 
 ```crystal
 import github.com/domify/slim::{Slim}
@@ -46,16 +44,19 @@ The compiler refuses a tape value that could outlive its tape (a heap field,
 a kept proc, an outer variable). Rules: [TAPE_DESIGN.md](TAPE_DESIGN.md).
 
 ## How fast
+| `respond.ri`, 1.6M DTOs | ris | Goose | C++ | Rust | Go | Ruby² |
+|---|---|---|---|---|---|---|
+| Time | **0.67 s** | 0.67 s | 0.97 s | 1.18 s | 1.67 s | 118 s |
+| Memory | **1.7 MB** | 2.0 MB | 4.1 MB | 2.3 MB | 8.7 MB | 15 MB |
+| Heap allocated | **0** | 0 | 1.7 GB | 1.6 GB | 1.7 GB | 2.2G objects |
 
-`samples/ris/respond.ri`, 1.6M DTOs as JSON, median of 9, `-O3`: **ris
-0.71 s, 1.7 MB**; Goose 0.70 s, 2.0 MB; C++ 1.01 s, 4.0 MB; Rust 1.23 s,
-2.3 MB; iyi 1.59 s, 7.7 MB; Go 1.72 s, 8.6 MB.
+As JSON; release builds, median of 9. ² YJIT, 95 s of it Bignum math; via
+Spinel 127 s. Rust with bumpalo 1.03 s. All: [TAPE_DESIGN.md](TAPE_DESIGN.md).
 [Slim](https://github.com/domify/slim), Slang ported to ris: 4x faster.
 
 **Campfire, preliminary: the port is not finished; numbers will change.**
-The ris port answers its busiest page, 40 messages and 364,500 bytes, byte
-for byte as the Rust port does. 16-core Linux, 2026-10-15; `raw` is ris's
-own minimal HTTP loop (iyi-web: 9,182/s). ¹ Other machine, gzip: approximate.
+Its busiest page, 40 messages, 364,500 bytes as the Rust port's; 16 cores,
+2026-10-15; `raw`: ris's own HTTP loop. ¹ Other machine, gzip: approximate.
 
 | one core (`ab`) | ris raw | Rust | Go | Rails¹ |
 |---|---|---|---|---|
@@ -76,5 +77,4 @@ and Wouter van Oortmerssen, [Goose](https://github.com/aardappel/goose)'s
 author: ris keeps building on the iyi language and Goose's tape memory.
 Thanks to **Crystal** (Ary Borenszweig, Juan Wajnerman, Brian Cardiff, Manas
 and community), **Ruby** (Yukihiro Matsumoto). [LICENSE](LICENSE): Apache 2.0.
-Windows is out of scope for now (WSL2 works); add it if you need it.
-Developed with Claude Opus 5.5, ChatGPT Codex Sol 6.1 and other models.
+Windows: WSL2 for now. Developed with Claude Opus 5.5, ChatGPT Codex Sol 6.1.
