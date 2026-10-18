@@ -1,12 +1,12 @@
 # Every tape mapping is a whole number of 64 KiB, the largest page or
 # allocation grain ris runs on, and its limit is the mapping's end: the
-# first one, one grown past it and an independent Tape.local's.
+# first one and one grown past it.
 def whole(region : UInt64) : Bool
   length = IyiHeap.read64(region &+ 24_u64)
   length % 65536_u64 == 0_u64 && IyiHeap.read64(region &+ 8_u64) == region &+ length
 end
 
-Tape.use do
+tape do
   first = IyiRegion.tape
   ok = whole(first)
   big = Tape::String.build(1024) do |w|
@@ -18,6 +18,5 @@ Tape.use do
   end
   grown = IyiRegion.tape
   ok &&= grown != first && whole(grown) && big.bytesize == 70 * 1024 * 1024 + 3
-  Tape.local { ok &&= IyiRegion.tape != grown && whole(IyiRegion.tape) }
   puts ok ? "PASS: tape mappings are whole 64 KiB grains" : "FAILED"
 end

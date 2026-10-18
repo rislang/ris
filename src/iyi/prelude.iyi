@@ -3529,7 +3529,7 @@ require "./file"
 
     # ris: the tape. Each fiber's tape is one mapping that `Tape::String` and
     # `Tape::Array` (src/iyi/tape.iyi) bump their bytes into, freed with one
-    # store when the outermost `Tape.use` ends and kept among the thread's
+    # store when the outermost `tape` block ends and kept among the thread's
     # spares, so the next scope writes the same warm pages. Only those types
     # allocate here: the allocator's entry points never do, so no object of
     # a library can land on a tape. The collector never sees a tape address
@@ -3596,21 +3596,6 @@ require "./file"
         yield
       end
 
-      # Unlike tape_scope, this always owns a separate chain of mappings.
-      # Ordinary defer captures the saved tape and also runs on nonlocal exits
-      # and panic; the single cached tape guard belongs to the outer scope.
-      def self.tape_local(capacity : UInt64, &)
-        saved = @@tape
-        @@tape = acquire(capacity)
-        defer restore_tape(saved)
-        yield
-      end
-
-      def self.restore_tape(saved : UInt64) : Nil
-        release_tape
-        @@tape = saved
-      end
-
       def self.release_tape : Nil
         # The tape may have grown past its first mapping (`grow_onto`): the
         # running one is the newest, and each names the one before it.
@@ -3626,7 +3611,7 @@ require "./file"
 
       @[NoInline]
       def self.no_tape : NoReturn
-        __iyi_write(2, "iyi: a tape value made outside Tape.use\n".to_unsafe.as(Void*), 43_u64)
+        __iyi_write(2, "iyi: a tape value made outside a tape block\n".to_unsafe.as(Void*), 44_u64)
         __iyi_exit(1)
       end
 

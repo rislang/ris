@@ -28,24 +28,18 @@ expect struct_field  "is a struct that is not @[OnTape]"
 expect class_var     "the class variable"
 expect generic_array "Array("
 expect proc_capture  "this block becomes a proc"
-expect outer_var     "is a variable of the code around this Tape.use"
+expect outer_var     "is a variable of the code around this tape block"
 expect scope_value   "undefined method 'id' for Nil"
-expect yield_escape "is a variable of the code around this Tape.use"
-expect yield_scope_escape "is a variable of the code around this Tape.use"
-expect return_escape "cannot return a tape value out of its Tape.use"
-expect break_escape "cannot break a tape value out of its Tape.use"
-expect yield_break_escape "cannot break a tape value out of its Tape.use"
+expect yield_escape "is a variable of the code around this tape block"
+expect yield_scope_escape "is a variable of the code around this tape block"
+expect return_escape "cannot return a tape value out of its tape block"
+expect break_escape "cannot break a tape value out of its tape block"
+expect yield_break_escape "cannot break a tape value out of its tape block"
 
 expect return_escape 'Copy the text with `.to_s`'
 expect outer_var 'copy contained Tape::String values with `.to_s`'
 expect owned_cache "to be String, not Tape::String"
 
-expect local_outer "is a variable of the code around this Tape.local"
-expect local_mutate "cannot use outer tape value"
-expect local_self 'cannot use outer tape value `self`'
-expect local_return "cannot return a tape value"
-expect local_break "cannot break a tape value"
-expect local_yield_break "cannot break a tape value"
 expect mixed_growth      "grows on the tape in this loop, and Tape::String.build"
 expect mixed_growth_call "grows on the tape in this loop, and \`tag\`"
 expect two_writers       "all grow on the tape in this loop"
@@ -55,11 +49,7 @@ expect raw_append       "private method 'append' called for Tape::String::Writer
 expect writer_grow      "private method 'grow' called for Tape::String::Writer"
 expect tree_entry       "private constant Tape::Tree::Entry(T) referenced"
 expect array_grow       "private method 'grow' called for Tape::Array(T)"
-out=$("$RIS" run test/ris/local.ri 2>&1)
-if [ "$out" = 'PASS: local isolation, reuse, nested scopes, borrowed text, retained copy and early exits' ]; then echo "runs     local"; else echo "FAILED   local: $out"; status=1; fi
 
-out=$("$RIS" run test/ris/local_cleanup.ri 2>/dev/null)
-if [ "$out" = 'PASS: local panic cleanup and fiber switching' ]; then echo "runs     local_cleanup"; else echo "FAILED   local_cleanup: $out"; status=1; fi
 
 # Cleanup keeps LIFO order on early exits, panic and explicit exit.
 out=$("$RIS" run test/ris/cleanup_order.ri 2>&1)

@@ -1,5 +1,5 @@
 # Follow calls and their lexical block bindings, not just the syntax inside
-# Tape.use. A helper can yield to a caller whose locals outlive its tape.
+# tape block. A helper can yield to a caller whose locals outlive its tape.
 class Iyi::TapeLifetimeChecker < Iyi::Visitor
   class BlockContext
     getter block : Block
@@ -23,7 +23,6 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
     end
   end
 
-  @local_tape = false
   @scope : Block? = nil
   @owner : Def? = nil
   @block : Block? = nil
@@ -55,30 +54,18 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
     end
 
     if tape_scope?(node)
-      local_tape = node.name == "local"
-      if (local_tape || !@scope) && (type = node.type?) && TapeChecker.tape_in(@program, type)
-        node.raise "cannot break a tape value out of its Tape.#{node.name}: its storage ends with the scope" + ownership_hint(type)
+      if !@scope && (type = node.type?) && TapeChecker.tape_in(@program, type)
+        node.raise "cannot break a tape value out of its tape block: its storage ends with the block" + ownership_hint(type)
       end
       if block = node.block
-        previous_scope, previous_local_tape = @scope, @local_tape
-        previous_contexts = @contexts
-        if local_tape
-          @contexts = Set(ASTNode).new.compare_by_identity
-          @scope = block
-          @local_tape = true
-        else
-          @scope ||= block
-        end
-        visit_block(block, @owner, @yield_context, !local_tape && !previous_scope.nil?)
-        @scope, @local_tape = previous_scope, previous_local_tape
-        @contexts = previous_contexts
+        previous_scope = @scope
+        @scope ||= block
+        visit_block(block, @owner, @yield_context, !previous_scope.nil?)
+        @scope = previous_scope
       end
       return false
     end
 
-    if node.obj.nil? && node.target_defs.try(&.any? { |target| TapeChecker.tape?(@program, target.owner) })
-      check_outer_self(node)
-    end
     binding = node.block.try { |block| BlockContext.new(block, @yield_context, @owner, @scope) }
     node.target_defs.try &.each do |target|
       key = VisitKey.new(target, @scope, binding)
@@ -99,25 +86,18 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
     false
   end
 
-  # Keep the proposed repair valid for both text and tape-bearing DTOs.
-  private def tape_scope_name : String
-    @local_tape ? "Tape.local" : "Tape.use"
-  end
-
   private def ownership_hint(type : Type) : String
     if type.remove_typedef.to_s == "Tape::String"
-      "\n\nCopy the text with `.to_s` inside the owning #{tape_scope_name} to obtain a String that can outlive it."
+      "\n\nCopy the text with `.to_s` inside the owning tape block to obtain a String that can outlive it."
     else
       "\n\nBuild an owned value before leaving the scope; copy contained Tape::String values with `.to_s`. Copying a tape-bearing struct alone does not copy its storage."
     end
   end
 
+  # The prelude's top-level `tape { }`, not a method of that name.
   private def tape_scope?(node : Call) : Bool
-    return false unless node.name == "use" || node.name == "local"
-    node.target_defs.try &.any? do |target|
-      owner = target.owner
-      owner.metaclass? && owner.instance_type.to_s == "Tape"
-    end || false
+    return false unless node.name == "tape" && node.obj.nil? && node.block
+    node.target_defs.try &.any?(&.owner.is_a?(Program)) || false
   end
 
   def visit(node : Yield)
@@ -144,44 +124,13 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
     @block_exit_safe, @loop_depth = previous_exit_safe, previous_loop_depth
   end
 
-  # There is no region parameter in tape types yet. Conservatively forbid
-  # access to an outer mutable tape value: a write through it could retain
-  # local storage. Tape::String is immutable and safe to borrow for reads.
-  # Raw pointer access remains explicitly outside tape lifetime guarantees.
-  def visit(node : Var)
-    if @local_tape && (type = node.type?) && TapeChecker.tape_in(@program, type) && type.remove_typedef.to_s != "Tape::String"
-      meta = @block.try(&.vars.try(&.[node.name]?)) || @owner.try(&.vars.try(&.[node.name]?))
-      context = meta.try &.context
-      unless context.is_a?(ASTNode) && @contexts.includes?(context)
-        node.raise "cannot use outer tape value `#{node.name}` inside Tape.local: it could retain temporary storage; copy it into owned data before entering (outer Tape::String values may be read)"
-      end
-    end
-    false
-  end
-
-  private def check_outer_self(node : ASTNode)
-    if @local_tape && (owner = @owner) && !@contexts.includes?(owner) && TapeChecker.tape?(@program, owner.owner) && owner.owner.to_s != "Tape::String"
-      node.raise "cannot use outer tape value `self` inside Tape.local: copy it into owned data before entering"
-    end
-  end
-
-  def visit(node : Self)
-    check_outer_self(node)
-    false
-  end
-
-  def visit(node : InstanceVar)
-    check_outer_self(node)
-    false
-  end
-
   def visit(node : Assign)
     if @scope && node.target.is_a?(Var) && (type = node.value.type?) && TapeChecker.tape_in(@program, type)
       name = node.target.as(Var).name
       meta = @block.try(&.vars.try(&.[name]?)) || @owner.try(&.vars.try(&.[name]?))
       context = meta.try &.context
       unless context.is_a?(ASTNode) && @contexts.includes?(context)
-        node.raise "`#{name}` is a variable of the code around this #{tape_scope_name}, and is assigned `#{type}` here: its storage ends with the scope, so the variable would outlive it" + ownership_hint(type)
+        node.raise "`#{name}` is a variable of the code around this tape block, and is assigned `#{type}` here: its storage ends with the scope, so the variable would outlive it" + ownership_hint(type)
       end
     end
     true
@@ -190,7 +139,7 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
   def visit(node : Return)
     if @scope && (type = node.exp.try(&.type?)) && TapeChecker.tape_in(@program, type)
       unless @owner.try { |owner| @contexts.includes?(owner) }
-        node.raise "cannot return a tape value out of its #{tape_scope_name}: its storage ends with the scope" + ownership_hint(type)
+        node.raise "cannot return a tape value out of its tape block: its storage ends with the scope" + ownership_hint(type)
       end
     end
     true
@@ -198,7 +147,7 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
 
   def visit(node : Break)
     if @scope && !@block_exit_safe && @loop_depth == 0 && (type = node.exp.try(&.type?)) && TapeChecker.tape_in(@program, type)
-      node.raise "cannot break a tape value out of its #{tape_scope_name}: its storage ends with the scope" + ownership_hint(type)
+      node.raise "cannot break a tape value out of its tape block: its storage ends with the scope" + ownership_hint(type)
     end
     true
   end
@@ -217,13 +166,12 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
     key = VisitKey.new(node.def, nil, nil)
     if @visited.add?(key)
       previous_scope, previous_owner, previous_block, previous_yield = @scope, @owner, @block, @yield_context
-      previous_contexts, previous_local_tape = @contexts, @local_tape
+      previous_contexts = @contexts
       @contexts = Set(ASTNode).new.compare_by_identity
-      @local_tape = false
       @scope, @owner, @block, @yield_context = nil, node.def, nil, nil
       node.def.body.accept self
       @scope, @owner, @block, @yield_context = previous_scope, previous_owner, previous_block, previous_yield
-      @contexts, @local_tape = previous_contexts, previous_local_tape
+      @contexts = previous_contexts
     end
     false
   end

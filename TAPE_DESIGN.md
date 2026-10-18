@@ -7,16 +7,16 @@ safety. [SPEC.md](SPEC.md) is iyi's, unchanged; example: [README.md](README.md).
 Objects use iyi's GC heap. Tape is opt-in: `Tape::String` (and its
 `Writer`), `Tape::Array(T)`, `Tape::Tree(T)` go on the running fiber's tape
 (saved on a switch); `@[OnTape]` marks a struct tape-bearing, not moved. Tape
-allocation outside `Tape.use` or `Tape.local` ends the program. Bump-pointer;
+allocation outside a `tape { }` block ends the program. Bump-pointer;
 64 MiB of address space first (written pages resident), then larger; 64 spares.
 
-Only the outermost `Tape.use` reclaims, on every exit (panic too); nested
-scopes share it. `Tape.local` always takes its own tape, released on every
-exit; a `Tape.use` inside one shares it. A non-tape `break` may leave.
+Only the outermost `tape` block reclaims, on every exit (panic too); nested
+blocks share it, as iyi's `group { }` brings tasks (SPEC III.4.1): a block
+brings the tape, never a call. A non-tape `break` may leave.
 
 ## Lifetime and storage rules
 The invariant: no safe tape-bearing value survives reclamation of the
-scope or local tape that owns its storage.
+tape block that owns its storage.
 
 * Tape values may be locals, arguments/results within that lifetime,
   `@[OnTape]` struct fields and `Tape::Array(T)` elements; not class or plain
@@ -24,9 +24,9 @@ scope or local tape that owns its storage.
 * No proc, spawned block included, may capture a tape-bearing value.
 * Assignment, `return`, `break` (in unions or tuples too) carry none past its
   scope; synchronous `yield` alike. Nested scopes share one lifetime.
-* `Tape.local` starts a new lifetime: its values reach no outer locals,
-  returns or yield bindings. It may read outer `Tape::String`s; other outer
-  tape values, `self` too, become owned data first (lifetimes are untyped).
+* A long loop opens its block inside, not around it, where no outer one
+  is open: an inner block frees nothing (`Tape.local`, a tape of its own
+  for that, went unused and was removed).
 * `Tape::String#to_s : String` copies into GC storage. Raw pointers and
   internal allocator calls are outside the contract.
 
@@ -77,4 +77,4 @@ std/json too: `JSON.parse(Tape::String)` 675 ms and no heap, `Any` 840 ms
   calls, yields, exits; procs; TapeLayoutChecker, TapePointerChecker.
 * `test/ris/check.sh`: refused programs, exits, nesting, growth, fibers.
 * `to_s` at a lifetime boundary. To call it stable: audit lifetime checks,
-  pointer/FFI boundaries, copy-out, GC scanning, long scopes (`Tape.local`).
+  pointer/FFI boundaries, copy-out, GC scanning, long scopes.
