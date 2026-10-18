@@ -183,8 +183,13 @@ COMPILER="$REPO/.build/iyi"
 # the optimiser cannot see. libSystem re-exports compiler-rt, which
 # defines them; Linux links libgcc's copies into the program; Windows has
 # neither and the prelude's win32 arm defines them itself.
+# `pthread_create`, `pthread_join` and the three `pthread_attr_*` calls
+# joined Linux's list when a program's thread became glibc's (thread.iyi):
+# a raw clone had no glibc thread block, and the first malloc a C library
+# made on it faulted. The stack is still the runtime's, and libc.so.6 still
+# the only library; the collector's helpers stay on clone.
 ALLOWED_SYMBOLS_DARWIN="$FLOOR_BASE_DARWIN __divti3 __modti3 __udivti3 __umodti3 __floattidf __floattisf __floatuntidf __floatuntisf accept access bind chmod close connect environ getsockname isatty listen open pthread_join recv send setsockopt socket unlink utimes stat64 lstat64 rename link symlink readlink realpath truncate opendir readdir closedir rewinddir getcwd chdir mkdir rmdir sendto recvfrom fcntl getsockopt lseek arc4random_buf posix_spawn posix_spawn_file_actions_init posix_spawn_file_actions_destroy posix_spawn_file_actions_adddup2 posix_spawn_file_actions_addchdir_np posix_spawnattr_init posix_spawnattr_destroy posix_spawnattr_setflags posix_spawnattr_setsigmask waitpid kill _NSGetExecutablePath"
-ALLOWED_SYMBOLS_LINUX="$FLOOR_BASE_LINUX environ"
+ALLOWED_SYMBOLS_LINUX="$FLOOR_BASE_LINUX environ pthread_attr_destroy pthread_attr_init pthread_attr_setstack pthread_create pthread_join"
 
 # What a program may link. The platform libc only.
 ALLOWED_LIBS_PROGRAM="$FLOOR_LIBS_PROGRAM"
