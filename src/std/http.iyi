@@ -293,6 +293,86 @@ pub struct ParsedHead
   end
 end
 
+# A request as `Server.answer`'s block is handed it: views into the bytes
+# that arrived, on the request's tape, nothing copied. `to_s` copies what
+# the block keeps past its answer.
+@[OnTape]
+pub struct Incoming
+  getter method : Tape::String
+  getter path : Tape::String
+  getter query : Tape::String?
+  getter fields : Tape::Array(Field)
+  getter body : Tape::String
+
+  def initialize(@method : Tape::String, @path : Tape::String, @query : Tape::String?, @fields : Tape::Array(Field), @body : Tape::String)
+  end
+
+  # The value of the first field called *name*, in any case.
+  def header(name : String) : Tape::String?
+    i = 0
+    while i < @fields.size
+      f = @fields[i]
+      return f.value if HTTP.same_name?(f.name.to_unsafe, f.name.bytesize, name)
+      i = i + 1
+    end
+    nil
+  end
+end
+
+# The answer `Server.answer`'s block writes: a status, 200 until set, up
+# to `LINES` header lines, and its body, written into `body`. The lines
+# go in slots made at their final size, so the body's writer is the one
+# value that grows. The server adds `Content-Length` and `Connection`,
+# and refuses the block's own.
+@[OnTape]
+pub struct Outgoing
+  LINES = 32
+
+  # The status and the number of lines.
+  @state : Tape::Array(Int32)
+  @lines : Tape::Array(Field)
+  getter body : Tape::String::Writer
+
+  def initialize
+    @state = Tape::Array(Int32).new(2) { |i| i == 0 ? 200 : 0 }
+    none = Tape::String.view("")
+    @lines = Tape::Array(Field).new(LINES) { Field.new(none, none) }
+    @body = Tape::String::Writer.new(512)
+  end
+
+  def status : Int32
+    @state[0]
+  end
+
+  def status=(code : Int32) : Int32
+    raise "HTTP: not a status: #{code}" unless code >= 100 && code <= 999
+    @state[0] = code
+  end
+
+  # A header line, checked as `format_response` checks one: a name that is
+  # a token, a value with no line break or control character, and none of
+  # the lines the server writes itself.
+  def header(name : String, value : String) : Nil
+    Server.check_line(name, value)
+    if HTTP.same_name?(name, "Content-Length") || HTTP.same_name?(name, "Connection") || HTTP.same_name?(name, "Transfer-Encoding")
+      raise "HTTP: #{name} is the server's own line"
+    end
+    count = @state[1]
+    raise "HTTP: more than #{LINES} header lines" if count == LINES
+    @lines[count] = Field.new(Tape::String.view(name), Tape::String.view(value))
+    @state[1] = count + 1
+  end
+
+  # Each header line the block wrote, in order.
+  def each_line(& : Field -> Nil) : Nil
+    i = 0
+    while i < @state[1]
+      yield @lines[i]
+      i = i + 1
+    end
+  end
+end
+
 # Why a head is refused, and the status that answers it: 431 for a head
 # past `Server::MAX_HEAD`, 400 otherwise.
 pub struct HeadError
@@ -316,6 +396,25 @@ pub struct Server
   # returning for as long as it stayed, and so did one that had sent
   # what has arrived of a request so far - one byte of it was enough.
   def self.serve(listener : IyiSocket, &handler : Request -> Response) : Nil
+    accept_loop(listener, handler, nil)
+  end
+
+  # `serve` on the tape: the block reads the request where it arrived and
+  # writes its answer into *res*, on the request's tape, freed when the
+  # answer is written. No `Request`, `Response` or header `Hash` is made
+  # for a plain request; one the fast path does not take (chunked, `Expect`,
+  # an absolute-form target, HTTP/1.0) is read as `serve` reads it, then
+  # handed on the same way.
+  #
+  #   Server.answer(listener) do |req, res|
+  #     res.header("Content-Type", "application/json")
+  #     res.body.json { |json| json.object { json.field "path", req.path } }
+  #   end
+  def self.answer(listener : IyiSocket, &answerer : Incoming, Outgoing -> Nil) : Nil
+    accept_loop(listener, nil, answerer)
+  end
+
+  private def self.accept_loop(listener : IyiSocket, handler : Proc(Request, Response)?, answerer : Proc(Incoming, Outgoing, Nil)?) : Nil
     idle = {} of UInt64 => IyiSocket
     group do |g|
       pause = 5
@@ -331,7 +430,7 @@ pub struct Server
           pause = pause * 2 if pause < 1000
         in IyiSocket
           pause = 5
-          spawn_handler(g, client, handler, listener, idle)
+          spawn_handler(g, client, handler, answerer, listener, idle)
         end
       end
       idle.each { |_, waiting| waiting.close }
@@ -352,11 +451,11 @@ pub struct Server
   # Go's server does. Unread, the panic reached `serve`'s group, which
   # cancelled every other connection and the accept loop and panicked "a
   # task panicked": one request whose block failed took the server down.
-  private def self.spawn_handler(g : IyiGroup, client : IyiSocket, handler : Proc(Request, Response), listener : IyiSocket, idle : Hash(UInt64, IyiSocket)) : Nil
+  private def self.spawn_handler(g : IyiGroup, client : IyiSocket, handler : Proc(Request, Response)?, answerer : Proc(Incoming, Outgoing, Nil)?, listener : IyiSocket, idle : Hash(UInt64, IyiSocket)) : Nil
     g.spawn do
       group do |own|
         served = own.spawn do
-          handle(client, handler, listener, idle)
+          connection(client, handler, answerer, listener, idle)
           0
         end
         served.value
@@ -374,6 +473,12 @@ pub struct Server
   # connection in *idle*, for `serve` to close once the listener is, and
   # none starts once the listener is closed (`wait_read`).
   def self.handle(client : IyiSocket, handler : Proc(Request, Response), listener : IyiSocket? = nil, idle : Hash(UInt64, IyiSocket)? = nil) : Nil
+    connection(client, handler, nil, listener, idle)
+  end
+
+  # `handle` for either block: *handler*'s heap `Request`, or *answerer*'s
+  # request on the tape, which a plain request reaches without one.
+  private def self.connection(client : IyiSocket, handler : Proc(Request, Response)?, answerer : Proc(Incoming, Outgoing, Nil)?, listener : IyiSocket?, idle : Hash(UInt64, IyiSocket)?) : Nil
     defer client.close
     buffer = ""
     # Where the next request starts in *buffer*: requests that came in one
@@ -385,11 +490,22 @@ pub struct Server
     start = 0
     continued = false
     while true
+      if answerer
+        case got = answered_in_place(client, answerer, buffer, start)
+        in Int32
+          continued = false
+          start = got
+          next
+        in Bool
+          return
+        in Nil
+        end
+      end
       parsed = parse_request(buffer, start)
       if req = parsed.request
         continued = false
         start = parsed.consumed
-        return unless answered?(client, handler, req, parsed.close)
+        return unless delivered?(client, handler, answerer, req, parsed.close)
         next
       end
       if reason = parsed.error
@@ -418,7 +534,7 @@ pub struct Server
         end
         body, buffer = read
         start = 0
-        return unless answered?(client, handler, Request.new(head.method, head.path, head.query, head.headers, body), parsed.close)
+        return unless delivered?(client, handler, answerer, Request.new(head.method, head.path, head.query, head.headers, body), parsed.close)
         next
       end
       # A client that sent `Expect: 100-continue` holds its body back until
@@ -487,6 +603,85 @@ pub struct Server
       end
       nil
     end
+  end
+
+  # *req* to whichever block the connection has: whether it goes on.
+  private def self.delivered?(client : IyiSocket, handler : Proc(Request, Response)?, answerer : Proc(Incoming, Outgoing, Nil)?, req : Request, close : Bool) : Bool
+    if answerer
+      going = false
+      tape do
+        fields = Tape::Array(Field).new(req.headers.size)
+        req.headers.each { |name, value| fields.push(Field.new(Tape::String.view(name), Tape::String.view(value))) }
+        query = req.query
+        incoming = Incoming.new(Tape::String.view(req.method), Tape::String.view(req.path), query ? Tape::String.view(query) : nil, fields, Tape::String.view(req.body))
+        going = answered_on_tape?(client, answerer, incoming, close)
+      end
+      going
+    elsif handler
+      answered?(client, handler, req, close)
+    else
+      false
+    end
+  end
+
+  # A plain request at *start* in *buffer*, answered where it lies: the
+  # next request's start, false when the connection ends, nil for one the
+  # fast path does not take - not all here, chunked, `Expect`, HTTP/1.0,
+  # an absolute-form target, not HTTP - which `parse_request` reads.
+  private def self.answered_in_place(client : IyiSocket, answerer : Proc(Incoming, Outgoing, Nil), buffer : String, start : Int32) : Int32 | Bool | Nil
+    result = nil.as(Int32 | Bool | Nil)
+    tape do
+      bytes = Tape::String.view(buffer)
+      head = parse_head(bytes, start)
+      if head.is_a?(ParsedHead) && !head.http10? && head.field("Transfer-Encoding").nil? && head.field("Expect").nil? &&
+         HTTP.absolute_form(head.target.to_unsafe, head.target.bytesize).nil? && (length = head.content_length) &&
+         length <= MAX_BODY.to_i64 && bytes.bytesize - head.body_start >= length
+        size = length.to_i32
+        close = false
+        if conn = head.field("Connection")
+          close = HTTP.has_token?(conn.to_s, "close")
+        end
+        target = head.target
+        q = HTTP.byte_in(target.to_unsafe, 0, target.bytesize, 63_u8)
+        query = q < target.bytesize ? target[q + 1, target.bytesize - q - 1] : nil
+        incoming = Incoming.new(head.method, target[0, q], query, head.fields, bytes[head.body_start, size])
+        result = answered_on_tape?(client, answerer, incoming, close) ? head.body_start + size : false
+      end
+    end
+    result
+  end
+
+  # *answerer*'s answer to *req*, written from the tape: its head, then
+  # its body, in one write. Whether the connection goes on.
+  private def self.answered_on_tape?(client : IyiSocket, answerer : Proc(Incoming, Outgoing, Nil), req : Incoming, close : Bool) : Bool
+    res = Outgoing.new
+    answerer.call(req, res)
+    status = res.status
+    raise "HTTP: not a status: #{status}" unless status >= 100 && status <= 999
+    body = res.body.finish
+    w = Tape::String::Writer.new(256)
+    w.append("HTTP/1.1 ")
+    w.append_int(status)
+    w.append(" ")
+    w.append(HTTP.reason_for(status))
+    w.append("\r\n")
+    res.each_line do |line|
+      w.append(line.name)
+      w.append(": ")
+      w.append(line.value)
+      w.append("\r\n")
+    end
+    bodiless = (status >= 100 && status < 200) || status == 204 || status == 304
+    unless bodiless
+      w.append("Content-Length: ")
+      w.append_int(body.bytesize)
+      w.append("\r\n")
+    end
+    w.append(close ? "Connection: close\r\n\r\n" : "Connection: keep-alive\r\n\r\n")
+    method = req.method
+    sends = !bodiless && !HTTP.same_name?(method.to_unsafe, method.bytesize, "HEAD")
+    wrote = client.write(w.finish, sends ? body : Tape::String.view(""))
+    wrote.is_a?(Int32) && !close
   end
 
   # The handler's answer to *req*, written: whether the connection goes on.
@@ -741,6 +936,15 @@ pub struct Server
     text
   end
 
+  # A header line an answer writes, checked: a name that is a token, a
+  # value with no line break or control character. `write_head` and
+  # `Outgoing#header` both ask it.
+  def self.check_line(name : String, value : String) : Nil
+    raise "HTTP: not a header name: #{name.inspect}" unless HTTP.token?(name)
+    raise "HTTP: header #{name} contains a line break" if HTTP.has_break?(value)
+    raise "HTTP: header #{name} contains a control character" if HTTP.control?(value)
+  end
+
   # The head of *response* written into *w*, checked as `format_response`
   # says: whether its body goes after it.
   def self.write_head(w : Tape::String::Writer, response : Response, head : Bool, close : Bool) : Bool
@@ -758,9 +962,7 @@ pub struct Server
     w.append("\r\n")
     has_length = false
     response.headers.each do |name, value|
-      raise "HTTP: not a header name: #{name.inspect}" unless HTTP.token?(name)
-      raise "HTTP: header #{name} contains a line break" if HTTP.has_break?(value)
-      raise "HTTP: header #{name} contains a control character" if HTTP.control?(value)
+      check_line(name, value)
       next if HTTP.same_name?(name, "Connection")
       # The body is written whole, after its length: a caller's chunked
       # framing went out beside `Content-Length` (RFC 9112 §6.1), and a

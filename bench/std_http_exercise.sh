@@ -366,9 +366,9 @@ mutate "a server that cuts each request off the front of the read" 'start = pars
 mutate "a client that copies its answer so far per read" 'answer << chunk' 'answer << answer.to_s[0, 0] + chunk'
 mutate "a client that reads a head for as long as it comes" 'got, ends = read_head(got, at, Server::MAX_HEAD)' 'got, ends = read_head(got, at, 2147483647)'
 mutate "a server that never says 100 Continue" 'if parsed.expects && !continued' 'if false'
-mutate "a server whose tasks share the accept loop's variable" '          spawn_handler(g, client, handler, listener, idle)' '          accepted = client
+mutate "a server whose tasks share the accept loop's variable" '          spawn_handler(g, client, handler, answerer, listener, idle)' '          accepted = client
           g.spawn do
-            handle(accepted, handler)
+            connection(accepted, handler, answerer, nil, nil)
             0
           end'
 mutate "a coding this client cannot undo read as chunked" 'return "transfer coding #{coding.inspect} is not one this client decodes" unless same_name?(coding, "chunked")' 'next unless same_name?(coding, "chunked")'

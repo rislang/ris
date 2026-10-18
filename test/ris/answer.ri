@@ -1,0 +1,76 @@
+# `Server.answer` over loopback: the block reads the method, path, query,
+# a header and the body where they arrived, and writes a status, a header
+# and a body. A plain request takes the fast path; a chunked one, an
+# `Expect` and HTTP/1.0 are read as `serve` reads them and handed on alike.
+# A HEAD gets the length and no body, a 204 neither, and `Connection:
+# close` ends the connection after its answer.
+module test/ris/answer
+
+import std/socket::{IyiSocket}
+import std/http::{Server, Incoming, Outgoing}
+
+def read_to_close(socket : IyiSocket) : String
+  text = ""
+  while true
+    chunk = socket.read(65536).or_panic
+    break if chunk.empty?
+    text = text + chunk
+  end
+  text
+end
+
+REQUESTS = "GET /echo?x=1 HTTP/1.1\r\nHost: h\r\nX-Name: mari\r\n\r\n" +
+           "POST /echo HTTP/1.1\r\nHost: h\r\nContent-Length: 5\r\n\r\nhello" +
+           "POST /echo HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n0\r\n\r\n" +
+           "HEAD /echo HTTP/1.1\r\nHost: h\r\n\r\n" +
+           "GET /none HTTP/1.1\r\nHost: h\r\n\r\n" +
+           "GET /last HTTP/1.1\r\nHost: h\r\nConnection: close\r\n\r\n"
+
+def answer(req : Incoming, res : Outgoing) : Nil
+  if req.path == "/none"
+    res.status = 204
+    return
+  end
+  res.header("X-Seen", "yes")
+  w = res.body
+  w.append(req.method)
+  w.append(" ")
+  w.append(req.path)
+  if q = req.query
+    w.append("?")
+    w.append(q)
+  end
+  if name = req.header("x-name")
+    w.append(" name=")
+    w.append(name)
+  end
+  w.append(" body=")
+  w.append(req.body)
+end
+
+listener = IyiSocket.listen(0)
+got = ""
+group do |g|
+  g.spawn { Server.answer(listener) { |req, res| answer(req, res) }; 0 }
+  client = IyiSocket.connect("127.0.0.1", listener.local_port).or_panic
+  client.write(REQUESTS).or_panic
+  got = read_to_close(client)
+  client.close
+  listener.close
+end
+
+def reply(body : String, close : Bool = false) : String
+  "HTTP/1.1 200 OK\r\nX-Seen: yes\r\nContent-Length: #{body.bytesize}\r\nConnection: #{close ? "close" : "keep-alive"}\r\n\r\n" + body
+end
+
+want = reply("GET /echo?x=1 name=mari body=") +
+       reply("POST /echo body=hello") +
+       reply("POST /echo body=abc") +
+       "HTTP/1.1 200 OK\r\nX-Seen: yes\r\nContent-Length: 16\r\nConnection: keep-alive\r\n\r\n" +
+       "HTTP/1.1 204 No Content\r\nConnection: keep-alive\r\n\r\n" +
+       reply("GET /last body=", true)
+if got == want
+  puts "PASS: read and answered on the tape, fast path and not"
+else
+  puts "FAILED:\n#{got.inspect}\nwanted\n#{want.inspect}"
+end

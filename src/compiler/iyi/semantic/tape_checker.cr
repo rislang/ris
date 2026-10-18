@@ -46,6 +46,10 @@ class Iyi::TapeChecker
       type.entries.each { |entry| tape_in(program, entry.type, visiting).try { |found| return found } }
     when PointerInstanceType
       return tape_in(program, type.element_type, visiting)
+    when ProcInstanceType
+      # A proc holds what it captured, checked where it is made, not the
+      # values it is called with: `Proc(Tape::String, Nil)` holds no tape.
+      return nil
     when GenericClassInstanceType
       type.type_vars.each_value do |type_var|
         if type_var.is_a?(Var) && (var_type = type_var.type?)
