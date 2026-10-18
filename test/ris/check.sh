@@ -54,6 +54,7 @@ expect raw_view         "Tape::String.new(pointer, size)\` outside the library"
 expect raw_append       "private method 'append' called for Tape::String::Writer"
 expect writer_grow      "private method 'grow' called for Tape::String::Writer"
 expect tree_entry       "private constant Tape::Tree::Entry(T) referenced"
+expect array_grow       "private method 'grow' called for Tape::Array(T)"
 out=$("$RIS" run test/ris/local.ri 2>&1)
 if [ "$out" = 'PASS: local isolation, reuse, nested scopes, borrowed text, retained copy and early exits' ]; then echo "runs     local"; else echo "FAILED   local: $out"; status=1; fi
 
