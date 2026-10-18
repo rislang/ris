@@ -1,0 +1,22 @@
+# A Tape::String read without its pointer: a byte by index (from the end
+# when negative), a view of a range or of a heap String, each byte,
+# comparison; and a read past the end raises rather than returning what
+# follows.
+module test/ris/tape_string
+
+import std/int
+
+Tape.scope do
+  text = Tape::String.new("hello, tape")
+  sum = 0
+  text.each_byte { |b| sum += b.to_i32 }
+  part = text[7, 4]
+  heap = "hello, " + "tape"
+  seen = Tape::String.view(heap)
+  ok = text[0] == 104_u8 && text[-1] == 101_u8 && part == "tape" &&
+       part == Tape::String.new("tape") && text.starts_with?("hello") &&
+       !text.starts_with?("tape") && sum == 1034 && text[0, 0].empty? &&
+       seen == text && seen[7, 4] == "tape"
+  puts ok ? "read through the bounds" : "WRONG"
+  puts text[11]
+end

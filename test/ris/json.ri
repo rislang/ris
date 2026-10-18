@@ -54,7 +54,7 @@ end
 text = %({"a": [1, -0, 2.5e3, "x\\ny\\u00e9\\ud83d\\ude00", true, false, null],) +
        %( "b\\u0041": {"c": -7, "d": "plain"}, "e": []})
 Tape.scope do
-  doc = JSON.parse(Tape::String.new(text.to_unsafe, text.bytesize))
+  doc = JSON.parse(Tape::String.new(text))
   a = doc.at(doc.root, "a")
   check(failures, doc.size(a) == 7, "array size")
   check(failures, doc.int(doc.at(a, 0)) == 1 && doc.int(doc.at(a, 1)) == 0, "integers")
@@ -64,9 +64,7 @@ Tape.scope do
   check(failures, doc.null?(doc.at(a, 6)) && doc.at(a, 7) == -1, "null, past the end")
   b = doc.at(doc.root, "bA")
   check(failures, b > 0 && doc.int(doc.at(b, "c")) == -7, "escaped key found")
-  plain = doc.string(doc.at(b, "d"))
-  at = plain.to_unsafe.address &- text.to_unsafe.address
-  check(failures, at < text.bytesize.to_u64, "a plain string views the input")
+  check(failures, doc.string(doc.at(b, "d")) == "plain", "a plain string")
   check(failures, doc.size(doc.at(doc.root, "e")) == 0 && doc.at(doc.root, "zz") == -1, "empty array, missing key")
   keys = [] of String
   doc.each(doc.root) { |child| keys << doc.key(child).to_s }
@@ -84,12 +82,12 @@ end
 bad << many
 bad.each do |input|
   Tape.scope do
-    tape = DocumentParser.new(Tape::String.new(input.to_unsafe, input.bytesize))
+    tape = DocumentParser.new(Tape::String.new(input))
     tape.parse
     heap = Parser.new(input)
     heap.parse
     check(failures, !tape.error.nil? && tape.error == heap.error, "refused alike: #{input[0, 20].inspect} #{tape.error} | #{heap.error}")
-    check(failures, JSON.parse?(Tape::String.new(input.to_unsafe, input.bytesize)).nil?, "parse? nil: #{input[0, 20].inspect}")
+    check(failures, JSON.parse?(Tape::String.new(input)).nil?, "parse? nil: #{input[0, 20].inspect}")
   end
 end
 
@@ -121,7 +119,7 @@ end
 # A document copied through the builder is the heap builder's text of it,
 # its escapes decoded and written again, in every mode.
 Tape.scope do
-  doc = JSON.parse(Tape::String.new(text.to_unsafe, text.bytesize))
+  doc = JSON.parse(Tape::String.new(text))
   [nil, 2].each do |indent|
     [false, true].each do |ascii|
       w = Tape::String::Writer.new(16)
@@ -146,7 +144,7 @@ before = IyiMark.allocated_since
 total = 0_i64
 2000.times do
   Tape.scope do
-    doc = JSON.parse(Tape::String.new(small.to_unsafe, small.bytesize))
+    doc = JSON.parse(Tape::String.new(small))
     w = Tape::String::Writer.new(64)
     JSON.build(w) do |b|
       b.object do

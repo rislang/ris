@@ -48,9 +48,13 @@ end
 
 def digits(text : Tape::String) : Int32
   n = 0
-  p = text.to_unsafe
-  text.bytesize.times { |i| n = n * 10 + (p[i] - 48_u8).to_i32 }
+  text.each_byte { |c| n = n * 10 + (c - 48_u8).to_i32 }
   n
+end
+
+def fnv(h : UInt64, text : Tape::String) : UInt64
+  text.each_byte { |c| h = (h ^ c.to_u64) &* 1099511628211_u64 }
+  h
 end
 
 def fnv(h : UInt64, p : Pointer(UInt8), n : Int32) : UInt64
@@ -67,7 +71,7 @@ def answer(bytes : Tape::String) : UInt64
   head = Server.parse_head(bytes)
   return 0_u64 unless head.is_a?(ParsedHead)
   size = (length = head.field("Content-Length")) ? digits(length) : 0
-  doc = JSON.parse(Tape::String.new(bytes.to_unsafe + head.body_start, size))
+  doc = JSON.parse(bytes[head.body_start, size])
   w = Tape::String::Writer.new(256)
   JSON.build(w) do |json|
     total = 0_i64
@@ -96,8 +100,8 @@ def answer(bytes : Tape::String) : UInt64
     line.append_int(body.bytesize)
     line.append("\r\n\r\n")
   end
-  h = fnv(14695981039346656037_u64, top.to_unsafe, top.bytesize)
-  (fnv(h, body.to_unsafe, body.bytesize) & 0xFFFFFFFFFF_u64) | ((top.bytesize + body.bytesize).to_u64 << 40)
+  h = fnv(14695981039346656037_u64, top)
+  (fnv(h, body) & 0xFFFFFFFFFF_u64) | ((top.bytesize + body.bytesize).to_u64 << 40)
 end
 
 # The same on the heap: the request, the document and the answer all
@@ -141,7 +145,7 @@ N.times do |i|
   if heap
     got = answer_heap(text)
   else
-    Tape.scope { got = answer(Tape::String.new(text.to_unsafe, text.bytesize)) }
+    Tape.scope { got = answer(Tape::String.view(text)) }
   end
   bytes += (got >> 40).to_i64
   sum = (sum ^ (got & 0xFFFFFFFFFF_u64)) &* 1099511628211_u64

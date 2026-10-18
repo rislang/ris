@@ -49,6 +49,8 @@ expect local_yield_break "cannot break a tape value"
 expect mixed_growth      "grows on the tape in this loop, and Tape::String.build"
 expect mixed_growth_call "grows on the tape in this loop, and \`tag\`"
 expect two_writers       "all grow on the tape in this loop"
+expect raw_pointer      "to_unsafe\` of a Tape::String outside the library"
+expect raw_view         "Tape::String.new(pointer, size)\` outside the library"
 out=$("$RIS" run test/ris/local.ri 2>&1)
 if [ "$out" = 'PASS: local isolation, reuse, nested scopes, borrowed text, retained copy and early exits' ]; then echo "runs     local"; else echo "FAILED   local: $out"; status=1; fi
 
@@ -87,6 +89,9 @@ if [ "$out" = 'PASS: 4 threads, 32,000 tasks, collected throughout' ]; then echo
 
 out=$("$RIS" run test/ris/fibers/spares.ri 2>&1)
 if [ "$out" = $'warm: 4096 KiB written again\n8388608\ntrimmed' ]; then echo "runs     fibers/spares"; else echo "FAILED   fibers/spares: $out"; status=1; fi
+
+out=$("$RIS" run test/ris/tape_string.ri 2>&1)
+if grep -qF 'read through the bounds' <<<"$out" && grep -qF 'index 11 out of range for 11 bytes' <<<"$out"; then echo "runs     tape_string"; else echo "FAILED   tape_string: $out"; status=1; fi
 
 out=$("$RIS" run test/ris/grow.ri 2>&1)
 if [ "$out" = $'round 1: 100 MiB intact, before 499500, after 7\nround 2: 100 MiB intact, before 999000, after 14' ]; then echo "runs     grow"; else echo "FAILED   grow: $out"; status=1; fi

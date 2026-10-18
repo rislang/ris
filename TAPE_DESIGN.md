@@ -74,7 +74,7 @@ std/json too: `JSON.parse(Tape::String)` 675 ms and no heap, `Any` 840 ms
 * `src/iyi/`: `tape.iyi` containers, `prelude.iyi` mappings, GC roots.
 * [TapeChecker](src/compiler/iyi/semantic/tape_checker.cr): storage types;
   [TapeLifetimeChecker](src/compiler/iyi/semantic/tape_lifetime_checker.cr):
-  calls, yields, assignments, exits. `check_tape_captures`: procs.
+  calls, yields, exits; procs; TapeLayoutChecker, TapePointerChecker.
 * `test/ris/check.sh`: refused programs, exits, nesting, growth, fibers.
 * `to_s` at a lifetime boundary. To call it stable: audit lifetime checks,
   pointer/FFI boundaries, copy-out, GC scanning, long scopes (`Tape.local`).

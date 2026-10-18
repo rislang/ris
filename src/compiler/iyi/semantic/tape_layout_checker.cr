@@ -172,6 +172,8 @@ class Iyi::TapeLayoutChecker
         @effects.allocate(node, "a new #{TapeLayoutChecker.container(node.type?)}")
       elsif node.name == "build" && owned_by?(node, "Tape::String")
         @effects.allocate(node, "Tape::String.build")
+      elsif node.name == "new" && node.args.size == 1 && owned_by?(node, "Tape::String")
+        @effects.allocate(node, "Tape::String.new")
       elsif receiver && (kind = TapeLayoutChecker.container(receiver.type?))
         grow(receiver, node) if GROWS[kind].includes?(node.name)
       else

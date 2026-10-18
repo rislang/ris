@@ -78,6 +78,7 @@ class Iyi::Program
         TapeChecker.new(self).run
         result.accept TapeLifetimeChecker.new(self)
         TapeLayoutChecker.new(self).run(result)
+        TapePointerChecker.new(self).run(result)
       end
     end
 

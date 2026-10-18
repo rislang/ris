@@ -56,8 +56,72 @@ module Tape
     def initialize(@ptr : Pointer(UInt8), @bytesize : Int32)
     end
 
+    # *text*'s bytes copied onto the tape: a String a program has, made a
+    # tape string without a raw pointer.
+    def self.new(text : ::String) : self
+      bytes = Pointer(UInt8).new(IyiRegion.tape_bytes(text.bytesize.to_u64))
+      bytes.copy_from(text.to_unsafe, text.bytesize)
+      new(bytes, text.bytesize)
+    end
+
+    # A view of *text*'s bytes, nothing copied: a String is never changed,
+    # and the view's pointer, a root on the tape and the stack, keeps it
+    # alive while the view is (the collector takes an interior pointer to
+    # its object).
+    def self.view(text : ::String) : self
+      new(text.to_unsafe, text.bytesize)
+    end
+
     def bytesize : Int32
       @bytesize
+    end
+
+    def empty? : Bool
+      @bytesize == 0
+    end
+
+    # The byte at *index*, from the end when negative; one out of range
+    # raises rather than reading what follows. `to_unsafe` is the library's.
+    def [](index : Int32) : UInt8
+      asked = index
+      index = index + @bytesize if index < 0
+      raise "index #{asked} out of range for #{@bytesize} bytes" if index < 0 || index >= @bytesize
+      @ptr[index]
+    end
+
+    # *count* bytes from *start*, a view of these: nothing is copied.
+    def [](start : Int32, count : Int32) : String
+      raise "bytes #{start}, #{count} out of range for #{@bytesize}" if start < 0 || count < 0 || start > @bytesize - count
+      String.new(@ptr + start, count)
+    end
+
+    def each_byte(& : UInt8 -> _) : Nil
+      i = 0
+      while i < @bytesize
+        yield @ptr[i]
+        i = i + 1
+      end
+    end
+
+    def ==(other : String) : Bool
+      @bytesize == other.bytesize && same?(other.to_unsafe)
+    end
+
+    def ==(other : ::String) : Bool
+      @bytesize == other.bytesize && same?(other.to_unsafe)
+    end
+
+    def starts_with?(prefix : ::String) : Bool
+      prefix.bytesize <= @bytesize && String.new(@ptr, prefix.bytesize) == prefix
+    end
+
+    private def same?(other : Pointer(UInt8)) : Bool
+      i = 0
+      while i < @bytesize
+        return false if @ptr[i] != other[i]
+        i = i + 1
+      end
+      true
     end
 
     def to_unsafe : Pointer(UInt8)

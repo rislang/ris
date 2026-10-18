@@ -95,14 +95,9 @@ end
 
 def emit_str(buf : Tape::String::Writer, s : Tape::String) : Nil
   buf.push(34_u8)
-  p = s.to_unsafe
-  n = s.bytesize
-  i = 0
-  while i < n
-    c = p[i]
+  s.each_byte do |c|
     buf.push(92_u8) if c == 34_u8 || c == 92_u8
     buf.push(c)
-    i += 1
   end
   buf.push(34_u8)
 end
@@ -136,13 +131,7 @@ end
 
 def fnv(s : Tape::String) : UInt64
   h = 14695981039346656037_u64
-  p = s.to_unsafe
-  n = s.bytesize
-  i = 0
-  while i < n
-    h = (h ^ p[i].to_u64) &* 1099511628211_u64
-    i += 1
-  end
+  s.each_byte { |c| h = (h ^ c.to_u64) &* 1099511628211_u64 }
   h
 end
 

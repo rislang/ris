@@ -17,7 +17,7 @@ def fill(tag : UInt8, rounds : Int32) : Int32
       text
     end
     items.each do |text|
-      wrong += 1 unless text.bytesize == 2 && text.to_unsafe[0] == tag && text.to_unsafe[1] == tag
+      wrong += 1 unless text.bytesize == 2 && text[0] == tag && text[1] == tag
     end
   end
   wrong

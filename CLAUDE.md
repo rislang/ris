@@ -33,11 +33,11 @@ of its own; the caller's `Tape.scope` owns all of it, freed at once:
   no cost. No `Tape.local` per call; it costs more than small work saves.
 * The caller decides what to copy to the heap, and when.
 * No raw pointers in an API: pass `Tape::String`, `Tape::String::Writer`,
-  `Tape::Array` or an `@[OnTape]` struct. The checker refuses a
-  `Tape::String` that leaves its scope, but not its `to_unsafe`: that
-  pointer compiles and then reads
-  the next scope's bytes. Only the library's own FFI or socket call takes
-  one, never a caller.
+  `Tape::Array` or an `@[OnTape]` struct. Outside a `std/` module the
+  compiler refuses a `Tape::String`'s `to_unsafe` and
+  `Tape::String.new(pointer, size)` (TapePointerChecker); a caller reads
+  with `[]`, `[start, count]`, `each_byte`. Only the library's own FFI or
+  socket call takes the pointer.
 * Keep the `String` API beside it, built on the tape one: it opens a
   `Tape.scope` (shared when the caller has one) and copies the result out.
 
