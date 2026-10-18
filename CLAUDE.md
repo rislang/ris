@@ -17,6 +17,8 @@ ris is iyi plus Goose's tape memory.
 * Bytes allocated (`IyiMark.allocated_since`, collection off) are steadier
   than time on a busy machine; for time, take the fastest of several runs.
 * Rules for tape values: [TAPE_DESIGN.md](TAPE_DESIGN.md).
+* The other languages are in [ris-bench](https://github.com/rislang/ris-bench),
+  which keeps a copy of `samples/ris/respond.ri`: change both in one go.
 
 ## A library works on the caller's tape
 
