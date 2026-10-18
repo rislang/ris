@@ -43,7 +43,7 @@ puts body                             # => <h1>Hello world</h1>
 The compiler refuses a tape value that could outlive its tape (a heap field,
 a kept proc, an outer variable). Rules: [TAPE_DESIGN.md](TAPE_DESIGN.md).
 
-## How fast
+## How fast: [ris-bench](https://github.com/rislang/ris-bench)
 | `respond.ri`, 1.6M DTOs | ris | Goose | C++ | Rust | Go | Ruby² |
 |---|---|---|---|---|---|---|
 | Time | **0.67 s** | 0.67 s | 0.97 s | 1.18 s | 1.67 s | 118 s |

@@ -8,7 +8,8 @@
 # are `TapeString` and `TapeArray`, so each request's objects are bumped onto
 # the fiber's tape and freed together when its `Tape.scope` ends. Prints the
 # request count, the bytes rendered and a checksum: 1600000, 367459487,
-# 7480137599999527189, the same as the Goose, C++, Rust and Go versions.
+# 7480137599999527189, the same as the other languages' versions in
+# github.com/rislang/ris-bench, which keeps a copy of this file.
 
 module samples/respond
 

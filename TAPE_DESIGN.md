@@ -37,7 +37,7 @@ copies (element references are not stable). Tape words are GC roots.
 Tape pays when written in order: one growing value at the top, all else
 written once. Streaming pays most: `samples/ris/respond.ri`, 1.6M DTOs as
 JSON, one `TapeWriter` per response; median of 9, 2026-10-18, release builds
-(Goose default and `cc -O2`, C and C++ `-O3 -DNDEBUG`, Rust `opt-level=3`):
+as [ris-bench](https://github.com/rislang/ris-bench)'s `run.sh` makes them:
 
 | respond, DTO | memory | GCs | heap allocated | time | RSS |
 |---|---|---|---|---|---|
@@ -67,8 +67,8 @@ classic object tree on tape is slower than the heap. 4.6 MB JSON, 20 parses:
 | tape: `TapeArray` per node, stacked | NO | 0 | 0 | 1328 ms | 83 MB |
 | tape: `TapeArray` per node, as parsed | NO | 0 | 0 | 1749 ms | 116 MB |
 
-The tape parsers are only in this test (no escapes or floats); std has no
-tape JSON or YAML yet. Build a tree on tape with `TapeStream`, else heap.
+Its tape parsers are only in ris-bench's `json/jnest.ri` (no escapes or
+floats); std has no tape JSON or YAML yet. A tree on tape: `TapeStream`.
 
 ## Implementation, checks and remaining work
 * `src/iyi/`: `tape.iyi` containers, `prelude.iyi` mappings, GC roots.
