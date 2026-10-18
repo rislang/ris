@@ -2389,7 +2389,7 @@ pub class Builder
   end
 end
 
-# A document's state in a `JSON::Writer`, on the stack of `JSON.write`:
+# A document's state in a `Writer`, on the stack of `JSON.write`:
 # the level, the count of keys of the open objects, then per level a state,
 # the first key of each open object and its id in the hash table, and the
 # last id; the keys are (start, size) spans of the output. Past
@@ -2400,16 +2400,11 @@ TAPE_KEYS   = 128
 # heap, not compared one by one: 50,000 keys took 1.7 s, the heap 11 ms.
 TAPE_LINEAR = 32
 
-# Declared here, before its `Writer`, so that `JSON::Writer` nests in it
-# rather than in a module of that name. Its methods are further down.
-pub struct JSON
-end
-
 # Writes a document into the caller's `Tape::String::Writer`, as `Builder`
 # writes one into a String: the same values, checks and escapes, and nothing
 # on the heap. `JSON.write(writer) { |json| ... }` hands one.
 @[OnTape]
-pub struct JSON::Writer
+pub struct Writer
   @out : Tape::String::Writer
   @slots : Pointer(Int32)
   @keys : Pointer(Pointer(Int32))
@@ -3242,17 +3237,17 @@ pub struct JSON
   end
 
   # A document written into the caller's *writer*, after what it holds,
-  # through a `JSON::Writer` the block is handed: `build` makes a String,
+  # through a `Writer` the block is handed: `build` makes a String,
   # `write` adds to one. Its state is on this method's stack: the JSON
   # writer is not used after the block.
-  def self.write(writer : Tape::String::Writer, indent : String | Int32 | Nil = nil, ascii_only : Bool = false, & : JSON::Writer -> Nil) : Nil
+  def self.write(writer : Tape::String::Writer, indent : String | Int32 | Nil = nil, ascii_only : Bool = false, & : Writer -> Nil) : Nil
     slots = uninitialized Int32[784]
     spans = uninitialized Int32[256]
     keys = pointerof(spans).as(Pointer(Int32))
     table = Pointer(UInt64).new(0_u64)
     text = indent.is_a?(Int32) ? (indent.as(Int32) > 0 ? " " * indent.as(Int32) : nil) : indent.as(String?)
     text = nil if text && text.empty?
-    json = JSON::Writer.new(writer, pointerof(slots).as(Pointer(Int32)), pointerof(keys), pointerof(table), text, ascii_only)
+    json = Writer.new(writer, pointerof(slots).as(Pointer(Int32)), pointerof(keys), pointerof(table), text, ascii_only)
     yield json
     json.finish
   end
@@ -3688,11 +3683,11 @@ end
 # `w.json { |json| ... }` is `JSON.write(w) { |json| ... }`, with the
 # writer, and so the tape, first on the line.
 pub trait WritesJSON
-  abstract def json(indent : String | Int32 | Nil = nil, ascii_only : Bool = false, & : JSON::Writer -> Nil) : Nil
+  abstract def json(indent : String | Int32 | Nil = nil, ascii_only : Bool = false, & : Writer -> Nil) : Nil
 end
 
 impl WritesJSON for Tape::String::Writer
-  def json(indent : String | Int32 | Nil = nil, ascii_only : Bool = false, & : Std::Json::JSON::Writer -> Nil) : Nil
+  def json(indent : String | Int32 | Nil = nil, ascii_only : Bool = false, & : Std::Json::Writer -> Nil) : Nil
     Std::Json::JSON.write(self, indent, ascii_only) { |j| yield j }
   end
 end
