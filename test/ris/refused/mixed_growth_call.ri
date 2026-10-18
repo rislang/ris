@@ -1,11 +1,11 @@
-# The same through a call: `tag` puts a TapeString on the tape, and the
+# The same through a call: `tag` puts a Tape::String on the tape, and the
 # checker follows calls, so a helper does not hide it.
-def tag : TapeString
-  TapeString.build { |w| w.push(97_u8) }
+def tag : Tape::String
+  Tape::String.build { |w| w.push(97_u8) }
 end
 
 Tape.scope do
-  names = TapeArray(TapeString).new
+  names = Tape::Array(Tape::String).new
   i = 0
   while i < 3
     names.push(tag)

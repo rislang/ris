@@ -523,7 +523,7 @@ pub class IyiSocket
   end
 
   # The same for two pieces on the tape, which are not copied.
-  def write(first : TapeString, second : TapeString) : Int32 | Cancelled | SocketError
+  def write(first : Tape::String, second : Tape::String) : Int32 | Cancelled | SocketError
     raise "socket is closed" if @fd < 0
     write_pair(first.to_unsafe, first.bytesize, second.to_unsafe, second.bytesize)
   end

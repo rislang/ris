@@ -4,9 +4,9 @@ GC plus optional tape is decided; the tape is experimental, no proof of memory
 safety. [SPEC.md](SPEC.md) is iyi's, unchanged; example: [README.md](README.md).
 
 ## Allocation and ownership
-Objects use iyi's GC heap. Tape is opt-in: `TapeString`, `TapeWriter`,
-`TapeArray(T)`, `TapeStream(T)` allocate on the running fiber's tape (saved
-on a switch); `@[OnTape]` marks a struct tape-bearing without moving it. Tape
+Objects use iyi's GC heap. Tape is opt-in: `Tape::String` (and its
+`Builder`), `Tape::Array(T)`, `Tape::Tree(T)` go on the running fiber's tape
+(saved on a switch); `@[OnTape]` marks a struct tape-bearing, not moved. Tape
 allocation outside `Tape.scope` or `Tape.local` ends the program. Bump-pointer;
 64 MiB of address space first (written pages resident), then larger; 64 spares.
 
@@ -19,25 +19,25 @@ The invariant: no safe tape-bearing value survives reclamation of the
 scope or local tape that owns its storage.
 
 * Tape values may be locals, arguments/results within that lifetime,
-  `@[OnTape]` struct fields and `TapeArray(T)` elements; not class or plain
-  struct fields, class variables or ordinary containers (`Array(TapeString)`).
+  `@[OnTape]` struct fields and `Tape::Array(T)` elements; not class or plain
+  struct fields, class variables or ordinary containers (`Array(Tape::String)`).
 * No proc, spawned block included, may capture a tape-bearing value.
 * Assignment, `return`, `break` (in unions or tuples too) carry none past its
   scope; synchronous `yield` alike. Nested scopes share one lifetime.
 * `Tape.local` starts a new lifetime: its values reach no outer locals,
-  returns or yield bindings. It may read outer `TapeString`s; other outer
+  returns or yield bindings. It may read outer `Tape::String`s; other outer
   tape values, `self` too, become owned data first (lifetimes are untyped).
-* `TapeString#to_s : String` copies into GC storage. Raw pointers and
+* `Tape::String#to_s : String` copies into GC storage. Raw pointers and
   internal allocator calls are outside the contract.
 
-Copying a `TapeArray` or `TapeWriter` aliases its state. Growth off the top
+Copying a `Tape::Array` or a builder aliases its state. Growth off the top
 copies (element references are not stable). Tape words are GC roots.
 
 ## Layout: write the tape in order
 Tape pays when written in order: one growing value at the top, all else
 written once. Streaming pays most: `samples/ris/respond.ri`, 1.6M DTOs as
-JSON, one `TapeWriter` per response; median of 9, 2026-10-18, release builds
-as [ris-bench](https://github.com/rislang/ris-bench)'s `run.sh` makes them:
+JSON, one `Tape::String::Builder` a response; median of 9, 2026-10-18,
+release, as [ris-bench](https://github.com/rislang/ris-bench)'s `run.sh` builds:
 
 | respond, DTO | memory | GCs | heap allocated | time | RSS |
 |---|---|---|---|---|---|
@@ -56,19 +56,19 @@ as [ris-bench](https://github.com/rislang/ris-bench)'s `run.sh` makes them:
 request: 1.03 s, no heap; an add-on crate with `'b` lifetimes everywhere, not
 built in, and little gain (`write!` costs more).
 
-A tree pays in one `TapeStream` in document order (simdjson's layout), and a
+A tree pays in one `Tape::Tree` in document order (simdjson's layout), and a
 classic object tree on tape is slower than the heap. 4.6 MB JSON, 20 parses:
 
 | tree, 1 core, best of 7 | in ris now? | GCs | heap/parse | time | RSS |
 |---|---|---|---|---|---|
-| tape: `TapeStream`, document order | type YES | 0 | 0 | 725 ms | 54 MB |
+| tape: `Tape::Tree`, document order | type YES | 0 | 0 | 725 ms | 54 MB |
 | tape: Goose pool, children first | NO | 0 | 0 | 871 ms | 59 MB |
 | heap: std/json `Any` tree | YES, std/json | 16 | 31 MB | 1081 ms | 99 MB |
-| tape: `TapeArray` per node, stacked | NO | 0 | 0 | 1328 ms | 83 MB |
-| tape: `TapeArray` per node, as parsed | refused | 0 | 0 | 1749 ms | 116 MB |
+| tape: `Tape::Array` per node, stacked | NO | 0 | 0 | 1328 ms | 83 MB |
+| tape: `Tape::Array` per node, as parsed | refused | 0 | 0 | 1749 ms | 116 MB |
 
-std/json too: `JSON.parse(TapeString)` 675 ms and no heap, `Any` 840 ms
-(escapes, floats); `JSON.build(TapeWriter)` 2.9x as fast. No YAML yet.
+std/json too: `JSON.parse(Tape::String)` 675 ms and no heap, `Any` 840 ms
+(escapes, floats); `JSON.build` into a builder 2.9x as fast. No YAML yet.
 
 ## Implementation, checks and remaining work
 * `src/iyi/`: `tape.iyi` containers, `prelude.iyi` mappings, GC roots.

@@ -3527,8 +3527,8 @@ require "./file"
       end
     end
 
-    # ris: the tape. Each fiber's tape is one mapping that `TapeString` and
-    # `TapeArray` (src/iyi/tape.iyi) bump their bytes into, freed with one
+    # ris: the tape. Each fiber's tape is one mapping that `Tape::String` and
+    # `Tape::Array` (src/iyi/tape.iyi) bump their bytes into, freed with one
     # store when the outermost `Tape.scope` ends and kept among the thread's
     # spares, so the next scope writes the same warm pages. Only those types
     # allocate here: the allocator's entry points never do, so no object of

@@ -1,13 +1,13 @@
 module test/ris/refused/local_self
 @[OnTape]
 struct Holder
-  @values : TapeArray(TapeString)
+  @values : Tape::Array(Tape::String)
   def initialize
-    @values = TapeArray(TapeString).new
+    @values = Tape::Array(Tape::String).new
   end
   def escape : Nil
     Tape.local do
-      @values.push(TapeString.build { |w| w.append("inner") })
+      @values.push(Tape::String.build { |w| w.append("inner") })
     end
   end
 end

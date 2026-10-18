@@ -758,7 +758,7 @@ class Lexer
     @spans = false
   end
 
-  # A lexer over bytes on the tape (`JSON.parse(TapeString)`): a string
+  # A lexer over bytes on the tape (`JSON.parse(Tape::String)`): a string
   # token is its span, with `escaped` set when it must be decoded, and
   # nothing of it is copied.
   def initialize(@bytes : Pointer(UInt8), @bytesize : Int32)
@@ -2400,19 +2400,19 @@ TAPE_KEYS   = 128
 # heap, not compared one by one: 50,000 keys took 1.7 s, the heap 11 ms.
 TAPE_LINEAR = 32
 
-# Writes a document into the caller's `TapeWriter`, as `Builder` writes one
-# into a String: the same values, checks and escapes, and nothing on the
-# heap. `JSON.build(writer) { |json| ... }` hands one.
+# Writes a document into the caller's `Tape::String::Builder`, as `Builder`
+# writes one into a String: the same values, checks and escapes, and nothing
+# on the heap. `JSON.build(builder) { |json| ... }` hands one.
 @[OnTape]
 pub struct TapeBuilder
-  @out : TapeWriter
+  @out : Tape::String::Builder
   @slots : Pointer(Int32)
   @keys : Pointer(Pointer(Int32))
   @table : Pointer(Pointer(UInt64))
   @indent : String?
   @ascii_only : Bool
 
-  def initialize(@out : TapeWriter, @slots : Pointer(Int32), @keys : Pointer(Pointer(Int32)), @table : Pointer(Pointer(UInt64)), @indent : String?, @ascii_only : Bool)
+  def initialize(@out : Tape::String::Builder, @slots : Pointer(Int32), @keys : Pointer(Pointer(Int32)), @table : Pointer(Pointer(UInt64)), @indent : String?, @ascii_only : Bool)
     @slots[0] = 0
     @slots[1] = 0
     @slots[2] = Builder::ROOT
@@ -2514,7 +2514,7 @@ pub struct TapeBuilder
     @out.append(str)
   end
 
-  def raw(str : TapeString) : Nil
+  def raw(str : Tape::String) : Nil
     before_value
     @out.append(str)
   end
@@ -2524,7 +2524,7 @@ pub struct TapeBuilder
     escaped(val.to_unsafe, val.bytesize)
   end
 
-  def string(val : TapeString) : Nil
+  def string(val : Tape::String) : Nil
     before_value
     escaped(val.to_unsafe, val.bytesize)
   end
@@ -2588,7 +2588,7 @@ pub struct TapeBuilder
     key(name.to_unsafe, name.bytesize)
   end
 
-  def field(name : TapeString) : Nil
+  def field(name : Tape::String) : Nil
     key(name.to_unsafe, name.bytesize)
   end
 
@@ -2702,42 +2702,42 @@ pub struct TapeBuilder
     table[1] = table[1] + 1
   end
 
-  def field(name : String | TapeString, & : -> Nil) : Nil
+  def field(name : String | Tape::String, & : -> Nil) : Nil
     field(name)
     yield
   end
 
-  def field(name : String | TapeString, val : String) : Nil
+  def field(name : String | Tape::String, val : String) : Nil
     field(name)
     string(val)
   end
 
-  def field(name : String | TapeString, val : TapeString) : Nil
+  def field(name : String | Tape::String, val : Tape::String) : Nil
     field(name)
     string(val)
   end
 
-  def field(name : String | TapeString, val : Int32) : Nil
+  def field(name : String | Tape::String, val : Int32) : Nil
     field(name)
     number(val)
   end
 
-  def field(name : String | TapeString, val : Int64) : Nil
+  def field(name : String | Tape::String, val : Int64) : Nil
     field(name)
     number(val)
   end
 
-  def field(name : String | TapeString, val : Float64) : Nil
+  def field(name : String | Tape::String, val : Float64) : Nil
     field(name)
     number(val)
   end
 
-  def field(name : String | TapeString, val : Bool) : Nil
+  def field(name : String | Tape::String, val : Bool) : Nil
     field(name)
     bool(val)
   end
 
-  def field(name : String | TapeString, val : Nil) : Nil
+  def field(name : String | Tape::String, val : Nil) : Nil
     field(name)
     null
   end
@@ -2746,10 +2746,10 @@ pub struct TapeBuilder
   # copy from one document into another puts nothing on the tape but what
   # it writes. A key with an escape is decoded first, so the check for a
   # repeat sees the key and not its spelling.
-  def field(doc : TapeDocument, index : Int32) : Nil
+  def field(doc : Document, index : Int32) : Nil
     node = doc.tree[index]
     bytes = doc.input.to_unsafe + node.key_at
-    if (node.flags & TapeNode::ESCAPED_KEY) == 0
+    if (node.flags & Node::ESCAPED_KEY) == 0
       key(bytes, node.key_size)
     else
       decoding(bytes, node.key_size) { |text, size| key(text, size) }
@@ -2758,27 +2758,27 @@ pub struct TapeBuilder
 
   # The value at *index* of *doc*, and all it holds, as the calls that
   # would write it: an object's fields through `field(doc, index)`.
-  def value(doc : TapeDocument, index : Int32) : Nil
+  def value(doc : Document, index : Int32) : Nil
     node = doc.tree[index]
     case node.kind
-    when TapeDocument::Kind::Null
+    when Document::Kind::Null
       null
-    when TapeDocument::Kind::Bool
+    when Document::Kind::Bool
       bool(node.payload != 0)
-    when TapeDocument::Kind::Int
+    when Document::Kind::Int
       number(node.payload)
-    when TapeDocument::Kind::Float
+    when Document::Kind::Float
       number(doc.float(index))
-    when TapeDocument::Kind::String
+    when Document::Kind::String
       bytes = doc.input.to_unsafe + (node.payload >> 32)
       size = (node.payload & 0xFFFFFFFF).to_i32
       before_value
-      if (node.flags & TapeNode::ESCAPED_TEXT) == 0
+      if (node.flags & Node::ESCAPED_TEXT) == 0
         escaped(bytes, size)
       else
         decoding(bytes, size) { |text, length| escaped(text, length) }
       end
-    when TapeDocument::Kind::Array
+    when Document::Kind::Array
       start_array
       doc.each(index) { |child| value(doc, child) }
       end_array
@@ -2807,7 +2807,7 @@ pub struct TapeBuilder
       end
       yield buffer, length
     else
-      text = JSON.decoded_s(TapeString.new(bytes, size))
+      text = JSON.decoded_s(Tape::String.new(bytes, size))
       yield text.to_unsafe, text.bytesize
     end
   end
@@ -2826,13 +2826,13 @@ pub struct TapeBuilder
   end
 end
 
-# One value of a `TapeDocument`, in 24 bytes: its kind and which of its
+# One value of a `Document`, in 24 bytes: its kind and which of its
 # texts hold an escape, the span of its key in the input, and its payload:
 # an integer's or a bool's value, a float's bits, or a string's span (start
-# in the high half, size in the low). Spans, not `TapeString`s, halve the
+# in the high half, size in the low). Spans, not `Tape::String`s, halve the
 # stream: a parse writes it whole, past the tape's warm megabyte.
 @[OnTape]
-pub struct TapeNode
+pub struct Node
   ESCAPED_TEXT = 256
   ESCAPED_KEY  = 512
 
@@ -2844,8 +2844,8 @@ pub struct TapeNode
   def initialize(@flags : Int32, @key_at : Int32, @key_size : Int32, @payload : Int64)
   end
 
-  def kind : TapeDocument::Kind
-    TapeDocument::Kind.new(@flags & 255)
+  def kind : Document::Kind
+    Document::Kind.new(@flags & 255)
   end
 
   def flags : Int32
@@ -2865,12 +2865,12 @@ pub struct TapeNode
   end
 end
 
-# A document read by `JSON.parse(bytes : TapeString)`: every value in one
-# `TapeStream` in document order, its strings spans of the input, all of it
+# A document read by `JSON.parse(bytes : Tape::String)`: every value in one
+# `Tape::Tree` in document order, its strings spans of the input, all of it
 # the caller's `Tape.scope`'s. A value is named by its index; the root's is
 # 0. A string with an escape is decoded when it is asked for.
 @[OnTape]
-pub struct TapeDocument
+pub struct Document
   enum Kind
     Null
     Bool
@@ -2881,10 +2881,10 @@ pub struct TapeDocument
     Object
   end
 
-  getter tree : TapeStream(TapeNode)
-  getter input : TapeString
+  getter tree : Tape::Tree(Node)
+  getter input : Tape::String
 
-  def initialize(@tree : TapeStream(TapeNode), @input : TapeString)
+  def initialize(@tree : Tape::Tree(Node), @input : Tape::String)
   end
 
   def root : Int32
@@ -2917,16 +2917,16 @@ pub struct TapeDocument
 
   # The string at *index*, decoded: the input's own bytes unless it holds
   # an escape, a new string on the tape if it does.
-  def string(index : Int32) : TapeString
+  def string(index : Int32) : Tape::String
     node = expect(index, Kind::String)
-    text = TapeString.new(@input.to_unsafe + (node.payload >> 32), (node.payload & 0xFFFFFFFF).to_i32)
-    JSON.decoded(text, (node.flags & TapeNode::ESCAPED_TEXT) != 0)
+    text = Tape::String.new(@input.to_unsafe + (node.payload >> 32), (node.payload & 0xFFFFFFFF).to_i32)
+    JSON.decoded(text, (node.flags & Node::ESCAPED_TEXT) != 0)
   end
 
   # The key *index* has in its object, decoded as `string` is.
-  def key(index : Int32) : TapeString
+  def key(index : Int32) : Tape::String
     node = @tree[index]
-    JSON.decoded(TapeString.new(@input.to_unsafe + node.key_at, node.key_size), (node.flags & TapeNode::ESCAPED_KEY) != 0)
+    JSON.decoded(Tape::String.new(@input.to_unsafe + node.key_at, node.key_size), (node.flags & Node::ESCAPED_KEY) != 0)
   end
 
   # The count of an array's values or an object's fields.
@@ -2963,9 +2963,9 @@ pub struct TapeDocument
       if found < 0
         node = @tree[child]
         key = @input.to_unsafe + node.key_at
-        if (node.flags & TapeNode::ESCAPED_KEY) == 0
+        if (node.flags & Node::ESCAPED_KEY) == 0
           found = child if node.key_size == name.bytesize && JSON.same?(key, name.to_unsafe, name.bytesize)
-        elsif JSON.decoded_s(TapeString.new(key, node.key_size)) == name
+        elsif JSON.decoded_s(Tape::String.new(key, node.key_size)) == name
           found = child
         end
       end
@@ -2973,27 +2973,27 @@ pub struct TapeDocument
     found
   end
 
-  private def expect(index : Int32, kind : Kind) : TapeNode
+  private def expect(index : Int32, kind : Kind) : Node
     node = @tree[index]
     raise "expected #{kind}, not #{node.kind}" unless node.kind == kind
     node
   end
 end
 
-# Reads a document onto the tape for `JSON.parse(bytes : TapeString)`: the
+# Reads a document onto the tape for `JSON.parse(bytes : Tape::String)`: the
 # same grammar, limits and sentences as `Parser`, through the same lexer in
 # its span mode, so that only the stream of values goes on the tape.
 @[OnTape]
-pub struct TapeParser
+pub struct DocumentParser
   @lexer : Lexer
-  @input : TapeString
-  @tree : TapeStream(TapeNode)
+  @input : Tape::String
+  @tree : Tape::Tree(Node)
   @nesting : Int32
   @error : String?
 
-  def initialize(@input : TapeString)
+  def initialize(@input : Tape::String)
     @lexer = Lexer.spans(@input.to_unsafe, @input.bytesize)
-    @tree = TapeStream(TapeNode).new(@input.bytesize // 16 + 8)
+    @tree = Tape::Tree(Node).new(@input.bytesize // 16 + 8)
     @nesting = 0
     @error = nil
     @lexer.next_token
@@ -3003,8 +3003,8 @@ pub struct TapeParser
     @error
   end
 
-  def document : TapeDocument
-    TapeDocument.new(@tree, @input)
+  def document : Document
+    Document.new(@tree, @input)
   end
 
   # The lexer back to the thread, for the next parse; this parser is done.
@@ -3028,8 +3028,8 @@ pub struct TapeParser
     fail(reason, token.line_number, token.column_number)
   end
 
-  private def text(at : Int32, size : Int32) : TapeString
-    TapeString.new(@input.to_unsafe + at, size)
+  private def text(at : Int32, size : Int32) : Tape::String
+    Tape::String.new(@input.to_unsafe + at, size)
   end
 
   def parse : Nil
@@ -3058,8 +3058,8 @@ pub struct TapeParser
     end
   end
 
-  private def leaf(kind : TapeDocument::Kind, flags : Int32, key_at : Int32, key_size : Int32, payload : Int64) : Nil
-    @tree.leaf(TapeNode.new(kind.value | flags, key_at, key_size, payload))
+  private def leaf(kind : Document::Kind, flags : Int32, key_at : Int32, key_size : Int32, payload : Int64) : Nil
+    @tree.leaf(Node.new(kind.value | flags, key_at, key_size, payload))
     @lexer.next_token
   end
 
@@ -3068,19 +3068,19 @@ pub struct TapeParser
   private def parse_value(flags : Int32, key_at : Int32, key_size : Int32) : Nil
     case token.kind
     when TokenKind::Null
-      leaf(TapeDocument::Kind::Null, flags, key_at, key_size, 0_i64)
+      leaf(Document::Kind::Null, flags, key_at, key_size, 0_i64)
     when TokenKind::True
-      leaf(TapeDocument::Kind::Bool, flags, key_at, key_size, 1_i64)
+      leaf(Document::Kind::Bool, flags, key_at, key_size, 1_i64)
     when TokenKind::False
-      leaf(TapeDocument::Kind::Bool, flags, key_at, key_size, 0_i64)
+      leaf(Document::Kind::Bool, flags, key_at, key_size, 0_i64)
     when TokenKind::Int
-      leaf(TapeDocument::Kind::Int, flags, key_at, key_size, token.int_value)
+      leaf(Document::Kind::Int, flags, key_at, key_size, token.int_value)
     when TokenKind::Float
       real = token.float_value
-      leaf(TapeDocument::Kind::Float, flags, key_at, key_size, pointerof(real).as(Pointer(Int64)).value)
+      leaf(Document::Kind::Float, flags, key_at, key_size, pointerof(real).as(Pointer(Int64)).value)
     when TokenKind::String
-      flags = flags | TapeNode::ESCAPED_TEXT if token.escaped
-      leaf(TapeDocument::Kind::String, flags, key_at, key_size, (token.raw_start.to_i64 << 32) | token.raw_size.to_i64)
+      flags = flags | Node::ESCAPED_TEXT if token.escaped
+      leaf(Document::Kind::String, flags, key_at, key_size, (token.raw_start.to_i64 << 32) | token.raw_size.to_i64)
     when TokenKind::BeginArray
       parse_array(flags, key_at, key_size)
     when TokenKind::BeginObject
@@ -3099,7 +3099,7 @@ pub struct TapeParser
 
   private def parse_array(flags : Int32, key_at : Int32, key_size : Int32) : Nil
     return unless nest
-    at = @tree.open(TapeNode.new(TapeDocument::Kind::Array.value | flags, key_at, key_size, 0_i64))
+    at = @tree.open(Node.new(Document::Kind::Array.value | flags, key_at, key_size, 0_i64))
     @lexer.next_token # '['
     if token.kind == TokenKind::EndArray
       @lexer.next_token
@@ -3126,7 +3126,7 @@ pub struct TapeParser
 
   private def parse_object(flags : Int32, key_at : Int32, key_size : Int32) : Nil
     return unless nest
-    at = @tree.open(TapeNode.new(TapeDocument::Kind::Object.value | flags, key_at, key_size, 0_i64))
+    at = @tree.open(Node.new(Document::Kind::Object.value | flags, key_at, key_size, 0_i64))
     @lexer.next_token # '{'
     # Past this many keys, the object's are looked up in a hash rather
     # than compared one by one.
@@ -3139,7 +3139,7 @@ pub struct TapeParser
         return fail("expected string key in object") unless token.kind == TokenKind::String
         name_at = token.raw_start
         name_size = token.raw_size
-        name_flags = token.escaped ? TapeNode::ESCAPED_KEY : 0
+        name_flags = token.escaped ? Node::ESCAPED_KEY : 0
         if (set = seen)
           name = key_s(name_at, name_size, name_flags)
           return fail("duplicate key '#{name}'") if set.has_key?(name)
@@ -3183,7 +3183,7 @@ pub struct TapeParser
 
   # The key at *at* decoded into a String.
   private def key_s(at : Int32, size : Int32, flags : Int32) : String
-    JSON.decoded_s(text(at, size), (flags & TapeNode::ESCAPED_KEY) != 0)
+    JSON.decoded_s(text(at, size), (flags & Node::ESCAPED_KEY) != 0)
   end
 
   # Whether the object opened at *at* already has a field with this key.
@@ -3193,7 +3193,7 @@ pub struct TapeParser
     bytes = @input.to_unsafe
     while child < count
       node = @tree[child]
-      if ((flags | node.flags) & TapeNode::ESCAPED_KEY) == 0
+      if ((flags | node.flags) & Node::ESCAPED_KEY) == 0
         return true if node.key_size == key_size && JSON.same?(bytes + node.key_at, bytes + key_at, key_size)
       elsif key_s(node.key_at, node.key_size, node.flags) == key_s(key_at, key_size, flags)
         return true
@@ -3218,8 +3218,8 @@ pub struct JSON
   # The document in *bytes* read onto the caller's tape, its strings views
   # into *bytes*; panics with the line and column of the first thing it
   # refuses, as `parse(String)` does.
-  def self.parse(bytes : TapeString) : TapeDocument
-    parser = TapeParser.new(bytes)
+  def self.parse(bytes : Tape::String) : Document
+    parser = DocumentParser.new(bytes)
     parser.parse
     failure = parser.error
     raise failure unless failure.nil?
@@ -3228,8 +3228,8 @@ pub struct JSON
   end
 
   # The document in *bytes* on the tape, or `nil` when it is not one.
-  def self.parse?(bytes : TapeString) : TapeDocument?
-    parser = TapeParser.new(bytes)
+  def self.parse?(bytes : Tape::String) : Document?
+    parser = DocumentParser.new(bytes)
     parser.parse
     parser.finish
     return nil unless parser.error.nil?
@@ -3239,7 +3239,7 @@ pub struct JSON
   # A document written into the caller's *writer* through a `TapeBuilder` the
   # block is handed, as `build` writes a String. Its state is on this
   # method's stack: the builder is not used after the block.
-  def self.build(writer : TapeWriter, indent : String | Int32 | Nil = nil, ascii_only : Bool = false, & : TapeBuilder -> Nil) : Nil
+  def self.build(writer : Tape::String::Builder, indent : String | Int32 | Nil = nil, ascii_only : Bool = false, & : TapeBuilder -> Nil) : Nil
     slots = uninitialized Int32[784]
     spans = uninitialized Int32[256]
     keys = pointerof(spans).as(Pointer(Int32))
@@ -3253,15 +3253,15 @@ pub struct JSON
 
   # The bytes of a string as the lexer found them, decoded: themselves
   # when they hold no escape, else a new string on the tape.
-  def self.decoded(text : TapeString, escaped : Bool) : TapeString
+  def self.decoded(text : Tape::String, escaped : Bool) : Tape::String
     return text unless escaped
-    TapeString.build(text.bytesize) do |w|
+    Tape::String.build(text.bytesize) do |w|
       each_decoded_byte(text.to_unsafe, text.bytesize) { |b| w.push(b) }
     end
   end
 
   # The same decoded into a String.
-  def self.decoded_s(text : TapeString, escaped : Bool = true) : String
+  def self.decoded_s(text : Tape::String, escaped : Bool = true) : String
     return text.to_s unless escaped
     buffer = StringBuffer.new(text.bytesize)
     each_decoded_byte(text.to_unsafe, text.bytesize) { |b| buffer.append(b) }

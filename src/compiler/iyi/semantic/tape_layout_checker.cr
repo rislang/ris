@@ -1,14 +1,14 @@
 # ris: the layout half of tape memory. A tape is one line with one end, and
 # a container grows in place only while it is that end. In a loop where a
 # container made before the loop grows and anything else is put on the tape
-# - a new container, a `TapeString.build`, another container growing, or a
+# - a new container, a `Tape::String.build`, another container growing, or a
 # call that does any of these - the container is never the end when it
 # grows, so every growth copies it and leaves the old copy until the scope
 # ends: measured slower than the GC heap (TAPE_DESIGN.md, "Layout"). Such a
 # loop is refused. What stays allowed: one container growing in a loop with
 # nothing else put on the tape (a writer streaming a response, a
-# `TapeStream` building a tree in document order), and a container made at
-# its final size, `TapeArray(T).new(count) { |i| ... }`, which never grows.
+# `Tape::Tree` building a tree in document order), and a container made at
+# its final size, `Tape::Array(T).new(count) { |i| ... }`, which never grows.
 #
 # Every block counts as a loop, as one may run many times. What a method
 # puts on the tape is summarized over the call graph to a fixpoint, so a
@@ -16,9 +16,9 @@
 # and code that reaches the tape through raw pointers, are outside the rule.
 class Iyi::TapeLayoutChecker
   GROWS = {
-    "TapeWriter" => {"push", "append", "append_int", "append_float", "append_html_escaped", "reserve"},
-    "TapeArray"  => {"push"},
-    "TapeStream" => {"leaf", "open"},
+    "Tape::String::Builder" => {"push", "append", "append_int", "append_float", "append_html_escaped", "reserve"},
+    "Tape::Array"           => {"push"},
+    "Tape::Tree"            => {"leaf", "open"},
   }
 
   # What a method does to the tape: the parameters (by index) and instance
@@ -77,8 +77,15 @@ class Iyi::TapeLayoutChecker
   def self.container(type : Type?) : String?
     return nil unless type
     type = type.remove_typedef
-    name = type.is_a?(GenericClassInstanceType) ? type.generic_type.name : type.to_s
+    name = base_name(type.is_a?(GenericClassInstanceType) ? type.generic_type : type)
     GROWS.has_key?(name) ? name : nil
+  end
+
+  # A type's name without its type arguments: `Tape::Array(T)` is
+  # `Tape::Array`, which the short `name` would make `Array`.
+  def self.base_name(type) : String
+    name = type.to_s
+    (at = name.index('(')) ? name[0, at] : name
   end
 
   # The tape's own types, whose methods are the rule's primitives.
@@ -86,8 +93,8 @@ class Iyi::TapeLayoutChecker
     owner = a_def.owner
     owner = owner.instance_type if owner.metaclass?
     owner = owner.generic_type if owner.is_a?(GenericClassInstanceType)
-    owner.to_s.in?("TapeString", "TapeWriter", "TapeArray", "TapeStream",
-      "TapeStreamEntry", "Tape", "IyiRegion")
+    TapeLayoutChecker.base_name(owner).in?("Tape::String", "Tape::String::Builder", "Tape::Array",
+      "Tape::Tree", "Tape::Tree::Entry", "Tape", "IyiRegion")
   end
 
   # Every reachable instantiated method outside the tape's own types.
@@ -163,8 +170,8 @@ class Iyi::TapeLayoutChecker
       receiver = node.obj
       if node.name == "new" && TapeLayoutChecker.container(node.type?)
         @effects.allocate(node, "a new #{TapeLayoutChecker.container(node.type?)}")
-      elsif node.name == "build" && owned_by?(node, "TapeString")
-        @effects.allocate(node, "TapeString.build")
+      elsif node.name == "build" && owned_by?(node, "Tape::String")
+        @effects.allocate(node, "Tape::String.build")
       elsif receiver && (kind = TapeLayoutChecker.container(receiver.type?))
         grow(receiver, node) if GROWS[kind].includes?(node.name)
       else
@@ -254,7 +261,7 @@ class Iyi::TapeLayoutChecker
     end
   end
 
-  HINT = "Build a tree with TapeStream in document order, make the container at its final size (`TapeArray(T).new(count) { |i| ... }`), or keep this data on the GC heap. Why: TAPE_DESIGN.md, \"Layout\"."
+  HINT = "Build a tree with Tape::Tree in document order, make the container at its final size (`Tape::Array(T).new(count) { |i| ... }`), or keep this data on the GC heap. Why: TAPE_DESIGN.md, \"Layout\"."
 
   class LocalCollector < Visitor
     def initialize(@locals : Set(String))
@@ -268,7 +275,7 @@ class Iyi::TapeLayoutChecker
     end
 
     # A nested block's parameters are its own: a writer a nested
-    # `TapeString.build` yields is made inside the loop.
+    # `Tape::String.build` yields is made inside the loop.
     def visit(node : Block)
       node.args.each { |arg| @locals << arg.name }
       true

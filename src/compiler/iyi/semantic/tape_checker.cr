@@ -1,7 +1,7 @@
 # PROTOTYPE (ris, step B): the type-level half of tape safety.
 #
 # A tape type is a struct marked `@[OnTape]`. Its storage - the bytes of a
-# `TapeString`, the elements of a `TapeArray` - is the current fiber's tape,
+# `Tape::String`, the elements of a `Tape::Array` - is the current fiber's tape,
 # and is reclaimed when the `Tape.scope` that made it ends. So a tape value
 # may live in locals, in parameters, in other tape values and in the tape
 # itself, and nowhere that can outlive the scope:
@@ -106,7 +106,7 @@ class Iyi::TapeChecker
         #{type} is #{where}, and a tape value lives only until the Tape.scope
         that made it ends. Keep it in a local, a parameter or another @[OnTape]
         struct, or copy what must outlive the scope into an owned value
-        (use `to_s` for TapeString fields).
+        (use `to_s` for Tape::String fields).
         MSG
     end
   end

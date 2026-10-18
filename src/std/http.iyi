@@ -140,10 +140,10 @@ end
 # read from, on the caller's tape.
 @[OnTape]
 pub struct Field
-  getter name : TapeString
-  getter value : TapeString
+  getter name : Tape::String
+  getter value : Tape::String
 
-  def initialize(@name : TapeString, @value : TapeString)
+  def initialize(@name : Tape::String, @value : Tape::String)
   end
 end
 
@@ -152,14 +152,14 @@ end
 # copied. The caller copies to the heap what it keeps, when it keeps it.
 @[OnTape]
 pub struct ParsedHead
-  getter method : TapeString
-  getter target : TapeString
-  getter version : TapeString
-  getter fields : TapeArray(Field)
+  getter method : Tape::String
+  getter target : Tape::String
+  getter version : Tape::String
+  getter fields : Tape::Array(Field)
   # Where the body starts in the bytes: just past the blank line.
   getter body_start : Int32
 
-  def initialize(@method : TapeString, @target : TapeString, @version : TapeString, @fields : TapeArray(Field), @body_start : Int32)
+  def initialize(@method : Tape::String, @target : Tape::String, @version : Tape::String, @fields : Tape::Array(Field), @body_start : Int32)
   end
 
   def http10? : Bool
@@ -179,7 +179,7 @@ pub struct ParsedHead
   end
 
   # The value of the first field called *name*, in any case.
-  def field(name : String) : TapeString?
+  def field(name : String) : Tape::String?
     i = 0
     while i < @fields.size
       f = @fields[i]
@@ -234,7 +234,7 @@ pub struct ParsedHead
     false
   end
 
-  private def same_field?(a : TapeString, b : TapeString) : Bool
+  private def same_field?(a : Tape::String, b : Tape::String) : Bool
     return false unless a.bytesize == b.bytesize
     pa = a.to_unsafe
     pb = b.to_unsafe
@@ -466,7 +466,7 @@ pub struct Server
   # A request head at *from* in *bytes*, read on the caller's tape: nil
   # until the blank line that ends it has arrived. The parts and fields are
   # views into *bytes*; temporaries go on the caller's `Tape.scope`.
-  def self.parse_head(bytes : TapeString, from : Int32 = 0) : ParsedHead | HeadError | Nil
+  def self.parse_head(bytes : Tape::String, from : Int32 = 0) : ParsedHead | HeadError | Nil
     p = bytes.to_unsafe
     n = bytes.bytesize
     # Past the empty lines a client may send before a request: RFC 9112
@@ -493,10 +493,10 @@ pub struct Server
     line_end = HTTP.crlf_in(p, from, split_at)
     sp1 = HTTP.byte_in(p, from, line_end, 32_u8)
     sp2 = sp1 < line_end ? HTTP.byte_in(p, sp1 + 1, line_end, 32_u8) : line_end
-    return HeadError.new("not a request line: #{TapeString.new(p + from, line_end - from).to_s.inspect}") if sp2 >= line_end
-    method = TapeString.new(p + from, sp1 - from)
-    target = TapeString.new(p + sp1 + 1, sp2 - sp1 - 1)
-    version = TapeString.new(p + sp2 + 1, line_end - sp2 - 1)
+    return HeadError.new("not a request line: #{Tape::String.new(p + from, line_end - from).to_s.inspect}") if sp2 >= line_end
+    method = Tape::String.new(p + from, sp1 - from)
+    target = Tape::String.new(p + sp1 + 1, sp2 - sp1 - 1)
+    version = Tape::String.new(p + sp2 + 1, line_end - sp2 - 1)
     return HeadError.new("not a method: #{method.to_s.inspect}") unless HTTP.token?(method.to_unsafe, method.bytesize)
     unless HTTP.same_bytes?(version.to_unsafe, version.bytesize, "HTTP/1.1") || HTTP.same_bytes?(version.to_unsafe, version.bytesize, "HTTP/1.0")
       return HeadError.new("not an HTTP/1 request: #{version.to_s.inspect}")
@@ -507,14 +507,14 @@ pub struct Server
     if target.bytesize == 0 || HTTP.control?(target.to_unsafe, target.bytesize)
       return HeadError.new("not a request target: #{target.to_s.inspect}")
     end
-    fields = TapeArray(Field).new(16)
+    fields = Tape::Array(Field).new(16)
     hosts = 0
     at = line_end + 2
     while at < split_at
       stop = HTTP.crlf_in(p, at, split_at)
       colon = HTTP.byte_in(p, at, stop, 58_u8)
-      return HeadError.new("header without a colon: #{TapeString.new(p + at, stop - at).to_s.inspect}") if colon >= stop
-      return HeadError.new("not a header name: #{TapeString.new(p + at, colon - at).to_s.inspect}") unless HTTP.token?(p + at, colon - at)
+      return HeadError.new("header without a colon: #{Tape::String.new(p + at, stop - at).to_s.inspect}") if colon >= stop
+      return HeadError.new("not a header name: #{Tape::String.new(p + at, colon - at).to_s.inspect}") unless HTTP.token?(p + at, colon - at)
       first = colon + 1
       last = stop
       while first < last && (p[first] == 32_u8 || p[first] == 9_u8)
@@ -523,8 +523,8 @@ pub struct Server
       while last > first && (p[last - 1] == 32_u8 || p[last - 1] == 9_u8)
         last = last - 1
       end
-      name = TapeString.new(p + at, colon - at)
-      value = TapeString.new(p + first, last - first)
+      name = Tape::String.new(p + at, colon - at)
+      value = Tape::String.new(p + first, last - first)
       return HeadError.new("header #{name.to_s} contains a control character") if HTTP.control?(value.to_unsafe, value.bytesize)
       # Host (RFC 9112 §3.2): an HTTP/1.1 request names one, no request
       # names two, and what it names is a host; a server answers 400
@@ -552,12 +552,12 @@ pub struct Server
   def self.parse_request(text : String, from : Int32 = 0) : ParsedRequest
     parsed = nil.as(ParsedRequest?)
     Tape.scope do
-      parsed = request_at(text, TapeString.new(text.to_unsafe, text.bytesize), from)
+      parsed = request_at(text, Tape::String.new(text.to_unsafe, text.bytesize), from)
     end
     parsed || ParsedRequest.new(nil, "incomplete request", true, 0)
   end
 
-  private def self.request_at(text : String, bytes : TapeString, from : Int32) : ParsedRequest
+  private def self.request_at(text : String, bytes : Tape::String, from : Int32) : ParsedRequest
     head = case got = parse_head(bytes, from)
            in Nil
              return ParsedRequest.new(nil, nil, false, 0)
@@ -575,8 +575,8 @@ pub struct Server
       # The origin form, by far the most common: path and query copied
       # straight from the target's bytes.
       q = HTTP.byte_in(target.to_unsafe, 0, target.bytesize, 63_u8)
-      path = TapeString.new(target.to_unsafe, q).to_s
-      query = q < target.bytesize ? TapeString.new(target.to_unsafe + q + 1, target.bytesize - q - 1).to_s : nil.as(String?)
+      path = Tape::String.new(target.to_unsafe, q).to_s
+      query = q < target.bytesize ? Tape::String.new(target.to_unsafe + q + 1, target.bytesize - q - 1).to_s : nil.as(String?)
       return request_body(text, method, path, query, headers, http10, split_at)
     end
     target = head.target.to_s

@@ -7,7 +7,7 @@ end
 
 def with_text(&)
   Tape.scope do
-    text = TapeString.build { |w| w.push(65_u8) }
+    text = Tape::String.build { |w| w.push(65_u8) }
     forward { yield text }
   end
 end

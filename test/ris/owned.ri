@@ -14,8 +14,8 @@ class Cache
 end
 
 # A method name describes the work; the return type describes the lifetime.
-def page : TapeString
-  TapeString.build(1) { |writer| writer.append("café <&>") }
+def page : Tape::String
+  Tape::String.build(1) { |writer| writer.append("café <&>") }
 end
 
 def retained_page : String
@@ -35,7 +35,7 @@ Tape.scope do
   borrowed.to_unsafe[0] = 88_u8
   raise "copy changed with source" unless cache.body == "café <&>"
   raise "formatting changed" unless borrowed.to_s == "Xafé <&>"
-  empty = TapeString.build(0) { |writer| }
+  empty = Tape::String.build(0) { |writer| }
   raise "empty copy changed" unless empty.to_s == ""
 end
 Tape.scope do

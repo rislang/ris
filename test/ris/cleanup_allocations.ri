@@ -4,7 +4,7 @@ import std/gc::{GC}
 
 def work : Nil
   Tape.scope do
-    items = TapeArray(Int64).new(0)
+    items = Tape::Array(Int64).new(0)
     items.push(7_i64)
     Tape.scope { items.push(8_i64) }
   end

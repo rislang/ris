@@ -5,9 +5,9 @@
 # For each of 1.6 million requests, build the typed response - an id, a user
 # name, 1..8 line items each with a sku - render it as JSON, hash it and throw
 # both away. The response is two `@[OnTape]` structs whose strings and list
-# are `TapeString` and `TapeArray`, so each request's objects are bumped onto
-# the fiber's tape and freed together when its `Tape.scope` ends. Prints the
-# request count, the bytes rendered and a checksum: 1600000, 367459487,
+# are `Tape::String` and `Tape::Array`, so each request's objects are bumped
+# onto the fiber's tape and freed together when its `Tape.scope` ends. Prints
+# the request count, the bytes rendered and a checksum: 1600000, 367459487,
 # 7480137599999527189, the same as the other languages' versions in
 # github.com/rislang/ris-bench, which keeps a copy of this file as
 # ris/respond.ri: a change here is copied there in the same go.
@@ -32,31 +32,31 @@ end
 
 @[OnTape]
 struct Item
-  getter sku : TapeString
+  getter sku : Tape::String
   getter qty : Int64
   getter price : Int64
 
-  def initialize(@sku : TapeString, @qty : Int64, @price : Int64)
+  def initialize(@sku : Tape::String, @qty : Int64, @price : Int64)
   end
 end
 
 @[OnTape]
 struct Resp
   getter id : Int64
-  getter user : TapeString
-  getter items : TapeArray(Item)
+  getter user : Tape::String
+  getter items : Tape::Array(Item)
 
-  def initialize(@id : Int64, @user : TapeString, @items : TapeArray(Item))
+  def initialize(@id : Int64, @user : Tape::String, @items : Tape::Array(Item))
   end
 end
 
 # A user name of 3..10 letters; one in eight carries a quote or a backslash
 # so the escaping path in the renderer is real.
-def name_of(seed : UInt64) : TapeString
+def name_of(seed : UInt64) : Tape::String
   r = xs_next(seed)
   n = 3_i64 + xs_mod(r, 8_i64)
   odd = xs_mod(r >> 8, 8_i64) == 0_i64
-  TapeString.build(16) do |s|
+  Tape::String.build(16) do |s|
     i = 0_i64
     while i < n
       r = xs_next(r)
@@ -71,9 +71,9 @@ def name_of(seed : UInt64) : TapeString
 end
 
 # A stock keeping unit: two letters and four digits.
-def sku_of(seed : UInt64) : TapeString
+def sku_of(seed : UInt64) : Tape::String
   r = xs_next(seed)
-  TapeString.build(8) do |s|
+  Tape::String.build(8) do |s|
     s.push((65_i64 + xs_mod(r, 26_i64)).to_u8)
     s.push((65_i64 + xs_mod(r >> 8, 26_i64)).to_u8)
     i = 0
@@ -85,15 +85,15 @@ def sku_of(seed : UInt64) : TapeString
   end
 end
 
-def make_items(seed : UInt64, n : Int64) : TapeArray(Item)
+def make_items(seed : UInt64, n : Int64) : Tape::Array(Item)
   r = seed
-  TapeArray(Item).new(n.to_i32) do
+  Tape::Array(Item).new(n.to_i32) do
     r = xs_next(r)
     Item.new(sku_of(r), 1_i64 + xs_mod(r >> 8, 5_i64), 100_i64 + xs_mod(r >> 16, 99900_i64))
   end
 end
 
-def emit_str(buf : TapeWriter, s : TapeString) : Nil
+def emit_str(buf : Tape::String::Builder, s : Tape::String) : Nil
   buf.push(34_u8)
   p = s.to_unsafe
   n = s.bytesize
@@ -107,8 +107,8 @@ def emit_str(buf : TapeWriter, s : TapeString) : Nil
   buf.push(34_u8)
 end
 
-def render(r : Resp) : TapeString
-  TapeString.build(256) do |buf|
+def render(r : Resp) : Tape::String
+  Tape::String.build(256) do |buf|
     buf.append("{\"id\":")
     buf.append_int(r.id)
     buf.append(",\"user\":")
@@ -134,7 +134,7 @@ def render(r : Resp) : TapeString
   end
 end
 
-def fnv(s : TapeString) : UInt64
+def fnv(s : Tape::String) : UInt64
   h = 14695981039346656037_u64
   p = s.to_unsafe
   n = s.bytesize

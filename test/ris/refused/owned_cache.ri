@@ -7,6 +7,6 @@ end
 
 cache = Cache.new
 Tape.scope do
-  borrowed = TapeString.build { |writer| writer.append("temporary") }
+  borrowed = Tape::String.build { |writer| writer.append("temporary") }
   cache.store(borrowed)
 end

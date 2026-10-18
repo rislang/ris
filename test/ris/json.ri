@@ -1,13 +1,13 @@
-# std/json on the tape: `JSON.parse(TapeString)` reads what `JSON.parse`
+# std/json on the tape: `JSON.parse(Tape::String)` reads what `JSON.parse`
 # reads and refuses what it refuses, with the same sentence; a string with
-# no escape is a view of the input; `JSON.build(TapeWriter)` writes what
-# `JSON.build` writes, plain, indented and ASCII-only; and neither puts
-# anything on the GC heap.
+# no escape is a view of the input; `JSON.build(Tape::String::Builder)`
+# writes what `JSON.build` writes, plain, indented and ASCII-only; and
+# neither puts anything on the GC heap.
 module test/ris/json
 
 import std/int
 import std/gc::{GC}
-import std/json::{JSON, Builder, TapeBuilder, TapeDocument, TapeParser, Parser}
+import std/json::{JSON, Builder, TapeBuilder, Document, DocumentParser, Parser}
 
 failures = [] of String
 
@@ -54,7 +54,7 @@ end
 text = %({"a": [1, -0, 2.5e3, "x\\ny\\u00e9\\ud83d\\ude00", true, false, null],) +
        %( "b\\u0041": {"c": -7, "d": "plain"}, "e": []})
 Tape.scope do
-  doc = JSON.parse(TapeString.new(text.to_unsafe, text.bytesize))
+  doc = JSON.parse(Tape::String.new(text.to_unsafe, text.bytesize))
   a = doc.at(doc.root, "a")
   check(failures, doc.size(a) == 7, "array size")
   check(failures, doc.int(doc.at(a, 0)) == 1 && doc.int(doc.at(a, 1)) == 0, "integers")
@@ -84,12 +84,12 @@ end
 bad << many
 bad.each do |input|
   Tape.scope do
-    tape = TapeParser.new(TapeString.new(input.to_unsafe, input.bytesize))
+    tape = DocumentParser.new(Tape::String.new(input.to_unsafe, input.bytesize))
     tape.parse
     heap = Parser.new(input)
     heap.parse
     check(failures, !tape.error.nil? && tape.error == heap.error, "refused alike: #{input[0, 20].inspect} #{tape.error} | #{heap.error}")
-    check(failures, JSON.parse?(TapeString.new(input.to_unsafe, input.bytesize)).nil?, "parse? nil: #{input[0, 20].inspect}")
+    check(failures, JSON.parse?(Tape::String.new(input.to_unsafe, input.bytesize)).nil?, "parse? nil: #{input[0, 20].inspect}")
   end
 end
 
@@ -101,7 +101,7 @@ end
     end
     tape = ""
     Tape.scope do
-      w = TapeWriter.new(16)
+      w = Tape::String::Builder.new(16)
       w.append("head:")
       JSON.build(w, indent, ascii) { |b| tape_doc(b) }
       tape = w.finish.to_s
@@ -113,7 +113,7 @@ end
 # A document of more keys than the builder's stack holds: their spans
 # move to the heap, and a repeat among them is still seen by the end.
 Tape.scope do
-  w = TapeWriter.new(16)
+  w = Tape::String::Builder.new(16)
   JSON.build(w) { |b| b.object { 300.times { |i| b.field "k#{i}", i } } }
   check(failures, JSON.parse(w.finish).size(0) == 300, "300 keys written and read back")
 end
@@ -121,10 +121,10 @@ end
 # A document copied through the builder is the heap builder's text of it,
 # its escapes decoded and written again, in every mode.
 Tape.scope do
-  doc = JSON.parse(TapeString.new(text.to_unsafe, text.bytesize))
+  doc = JSON.parse(Tape::String.new(text.to_unsafe, text.bytesize))
   [nil, 2].each do |indent|
     [false, true].each do |ascii|
-      w = TapeWriter.new(16)
+      w = Tape::String::Builder.new(16)
       JSON.build(w, indent, ascii) { |b| b.value(doc, doc.root) }
       heap = JSON.build(indent) do |b|
         b.ascii_only = ascii
@@ -133,7 +133,7 @@ Tape.scope do
       check(failures, w.finish.to_s == heap, "copied alike, indent #{indent.inspect}, ascii #{ascii}")
     end
   end
-  w = TapeWriter.new(16)
+  w = Tape::String::Builder.new(16)
   JSON.build(w) do |b|
     b.object { doc.each(doc.root) { |child| b.field(doc, child); b.number doc.kind(child).value } }
   end
@@ -146,8 +146,8 @@ before = IyiMark.allocated_since
 total = 0_i64
 2000.times do
   Tape.scope do
-    doc = JSON.parse(TapeString.new(small.to_unsafe, small.bytesize))
-    w = TapeWriter.new(64)
+    doc = JSON.parse(Tape::String.new(small.to_unsafe, small.bytesize))
+    w = Tape::String::Builder.new(64)
     JSON.build(w) do |b|
       b.object do
         doc.each(doc.root) { |child| b.field(doc, child); b.value(doc, child) }

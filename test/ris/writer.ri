@@ -1,7 +1,7 @@
-# TapeWriter's numbers and escaping, written in place on the tape.
+# Tape::String::Builder's numbers and escaping, written in place on the tape.
 Tape.scope do
-  inner = TapeString.build(8) { |w| w.append("<b>") }
-  text = TapeString.build(16) do |w|
+  inner = Tape::String.build(8) { |w| w.append("<b>") }
+  text = Tape::String.build(16) do |w|
     w.append_int(0_i64)
     w.push(32_u8)
     w.append_int(-42)

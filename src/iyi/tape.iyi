@@ -29,7 +29,7 @@ module Tape
   CAPACITY = 67108864_u64
 
   # Independent temporary tape, even inside a scope. Copy retained results
-  # before leaving. Outer TapeString values may be read; other outer tape
+  # before leaving. Outer Tape::String values may be read; other outer tape
   # values must be converted to owned data before entering.
   def self.local(&) : Nil
     IyiRegion.tape_local(CAPACITY) { yield }
@@ -44,345 +44,347 @@ module Tape
     IyiRegion.tape_scope(CAPACITY) { yield }
     nil
   end
-end
 
-# Bytes on the tape. Not a `String`: a `String` may be kept anywhere, and
-# this may not. `to_s` copies it into a retained String explicitly.
-@[OnTape]
-struct TapeString
-  @ptr : Pointer(UInt8)
-  @bytesize : Int32
 
-  def initialize(@ptr : Pointer(UInt8), @bytesize : Int32)
+  # Bytes on the tape. Not a `String`: a `String` may be kept anywhere, and
+  # this may not. `to_s` copies it into a retained String explicitly.
+  @[OnTape]
+  struct String
+    @ptr : Pointer(UInt8)
+    @bytesize : Int32
+
+    def initialize(@ptr : Pointer(UInt8), @bytesize : Int32)
+    end
+
+    def bytesize : Int32
+      @bytesize
+    end
+
+    def to_unsafe : Pointer(UInt8)
+      @ptr
+    end
+
+    # Copy these borrowed bytes into an independent GC-managed String.
+    # Call inside the owning Tape.scope when retaining text in a cache/task.
+    # The source is unchanged and remains valid until its scope ends.
+    def to_s : ::String
+      ::String.new(@bytesize) { |buffer| buffer.copy_from(@ptr, @bytesize) }
+    end
+
+    # Writes the bytes the block pushes straight onto the tape, where the
+    # string will stay: no buffer to copy out of.
+    def self.build(capacity : Int32 = 32, & : String::Builder -> _) : String
+      writer = String::Builder.new(capacity)
+      yield writer
+      writer.finish
+    end
   end
 
-  def bytesize : Int32
-    @bytesize
-  end
+  # The open end of a `String` being built: the address the next byte
+  # goes to, the end of the room and the start, in a block on the tape that
+  # the struct points at. Addresses rather than a length and capacity, so a
+  # push is one load, one compare and one store.
+  @[OnTape]
+  struct String::Builder
+    @state : Pointer(UInt64)
 
-  def to_unsafe : Pointer(UInt8)
-    @ptr
-  end
+    def initialize(capacity : Int32)
+      @state = Pointer(UInt64).new(IyiRegion.tape_bytes(24_u64 &+ capacity.to_u64))
+      start = @state.address &+ 24_u64
+      @state.value = start
+      (@state + 1_i64).value = start &+ capacity.to_u64
+      (@state + 2_i64).value = start
+    end
 
-  # Copy these borrowed bytes into an independent GC-managed String.
-  # Call inside the owning Tape.scope when retaining text in a cache/task.
-  # The source is unchanged and remains valid until its scope ends.
-  def to_s : String
-    String.new(@bytesize) { |buffer| buffer.copy_from(@ptr, @bytesize) }
-  end
-
-  # Writes the bytes the block pushes straight onto the tape, where the
-  # string will stay: no buffer to copy out of.
-  def self.build(capacity : Int32 = 32, & : TapeWriter -> _) : TapeString
-    writer = TapeWriter.new(capacity)
-    yield writer
-    writer.finish
-  end
-end
-
-# The open end of a `TapeString` being built: the address the next byte
-# goes to, the end of the room and the start, in a block on the tape that
-# the struct points at. Addresses rather than a length and capacity, so a
-# push is one load, one compare and one store.
-@[OnTape]
-struct TapeWriter
-  @state : Pointer(UInt64)
-
-  def initialize(capacity : Int32)
-    @state = Pointer(UInt64).new(IyiRegion.tape_bytes(24_u64 &+ capacity.to_u64))
-    start = @state.address &+ 24_u64
-    @state.value = start
-    (@state + 1_i64).value = start &+ capacity.to_u64
-    (@state + 2_i64).value = start
-  end
-
-  @[AlwaysInline]
-  def push(byte : UInt8) : Nil
-    cursor = @state.value
-    if cursor >= (@state + 1_i64).value
-      grow(1_u64)
+    @[AlwaysInline]
+    def push(byte : UInt8) : Nil
       cursor = @state.value
-    end
-    Pointer(UInt8).new(cursor).value = byte
-    @state.value = cursor &+ 1_u64
-  end
-
-  def append(text : String) : Nil
-    append(text.to_unsafe, text.bytesize)
-  end
-
-  def append(text : TapeString) : Nil
-    append(text.to_unsafe, text.bytesize)
-  end
-
-  def append(bytes : Pointer(UInt8), count : Int32) : Nil
-    cursor = @state.value
-    if cursor &+ count.to_u64 > (@state + 1_i64).value
-      grow(count.to_u64)
-      cursor = @state.value
-    end
-    Pointer(UInt8).new(cursor).copy_from(bytes, count)
-    @state.value = cursor &+ count.to_u64
-  end
-
-  # *value* in decimal, written in place: `value.to_s` would make a heap
-  # string for every number a page prints.
-  def append_int(value : Int64) : Nil
-    # The magnitude as unsigned, so the most negative value has one too.
-    magnitude = value < 0 ? 0_u64 &- value.unsafe_to_u64 : value.unsafe_to_u64
-    digits = uninitialized StaticArray(UInt8, 20)
-    base = pointerof(digits).as(Pointer(UInt8))
-    count = 0
-    while true
-      (base + (19 - count)).value = (48_u64 &+ magnitude % 10_u64).unsafe_to_u8
-      count = count + 1
-      magnitude = magnitude // 10_u64
-      break if magnitude == 0_u64
-    end
-    push(45_u8) if value < 0
-    append(base + (20 - count), count)
-  end
-
-  def append_int(value : Int32) : Nil
-    append_int(value.to_i64)
-  end
-
-  # *text* with `&`, `<`, `>`, `"` and `'` escaped as `ERB::Util.html_escape`
-  # writes them; the runs between them are copied whole.
-  # *value* as `Float64#to_s` writes it, in place: no heap string per
-  # number.
-  def append_float(value : Float64) : Nil
-    cursor = @state.value
-    if cursor &+ 32_u64 > (@state + 1_i64).value
-      grow(32_u64)
-      cursor = @state.value
-    end
-    count = IyiFloatText.write(IyiFloatText.bits_of(value), Pointer(UInt8).new(cursor))
-    @state.value = cursor &+ count.to_u64
-  end
-
-  def append_html_escaped(text : String) : Nil
-    bytes = text.to_unsafe
-    size = text.bytesize
-    start = 0
-    index = 0
-    while index < size
-      escaped = case bytes[index]
-                when 38_u8 then "&amp;"
-                when 60_u8 then "&lt;"
-                when 62_u8 then "&gt;"
-                when 34_u8 then "&quot;"
-                when 39_u8 then "&#39;"
-                else            nil
-                end
-      if escaped
-        append(bytes + start, index - start) if index > start
-        append(escaped)
-        start = index + 1
+      if cursor >= (@state + 1_i64).value
+        grow(1_u64)
+        cursor = @state.value
       end
-      index = index + 1
+      Pointer(UInt8).new(cursor).value = byte
+      @state.value = cursor &+ 1_u64
     end
-    append(bytes + start, size - start) if size > start
-  end
 
-  def length : Int32
-    (@state.value &- (@state + 2_i64).value).to_i32
-  end
-
-  # Room for *total* bytes in all, so that writing up to them does not grow
-  # the writer again: once a request's length is known, its bytes grow in
-  # place even after other values have gone on the tape.
-  def reserve(total : Int32) : Nil
-    extra = total - length
-    grow(extra.to_u64) if extra > 0 && @state.value &+ extra.to_u64 > (@state + 1_i64).value
-  end
-
-  @[NoInline]
-  def grow(extra : UInt64) : Nil
-    start = (@state + 2_i64).value
-    length = @state.value &- start
-    need = length &+ extra
-    capacity = (@state + 1_i64).value &- start
-    capacity = 1_u64 if capacity == 0_u64
-    while capacity < need
-      capacity = capacity &* 2_u64
+    def append(text : ::String) : Nil
+      append(text.to_unsafe, text.bytesize)
     end
-    start = IyiRegion.tape_resize(start, (@state + 1_i64).value, length, capacity)
-    @state.value = start &+ length
-    (@state + 1_i64).value = start &+ capacity
-    (@state + 2_i64).value = start
-  end
 
-  def finish : TapeString
-    start = (@state + 2_i64).value
-    TapeString.new(Pointer(UInt8).new(start), (@state.value &- start).to_i32)
-  end
-end
-
-# Elements on the tape. `T` is held by value, so an element may itself be a
-# tape type, which no other generic may hold.
-@[OnTape]
-struct TapeArray(T)
-  @state : Pointer(UInt64)
-
-  def initialize(capacity : Int32 = 4)
-    @state = Pointer(UInt64).new(IyiRegion.tape_bytes(24_u64 &+ capacity.to_u64 &* sizeof(T).to_u64))
-    @state.value = @state.address &+ 24_u64
-    (@state + 1_i64).value = 0_u64
-    (@state + 2_i64).value = capacity.to_u64
-  end
-
-  # *count* elements, the block giving each by index, in room of exactly
-  # that size: it never grows, so the block may put other values on the
-  # tape (TapeLayoutChecker allows it, where a loop of `push` is refused).
-  def self.new(count : Int32, & : Int32 -> T) : self
-    array = new(count)
-    index = 0
-    while index < count
-      array.push(yield index)
-      index = index + 1
+    def append(text : String) : Nil
+      append(text.to_unsafe, text.bytesize)
     end
-    array
-  end
 
-  def size : Int32
-    (@state + 1_i64).value.to_i32
-  end
-
-  def push(value : T) : Nil
-    size = (@state + 1_i64).value
-    if size >= (@state + 2_i64).value
-      grow
+    def append(bytes : Pointer(UInt8), count : Int32) : Nil
+      cursor = @state.value
+      if cursor &+ count.to_u64 > (@state + 1_i64).value
+        grow(count.to_u64)
+        cursor = @state.value
+      end
+      Pointer(UInt8).new(cursor).copy_from(bytes, count)
+      @state.value = cursor &+ count.to_u64
     end
-    Pointer(T).new(@state.value &+ size &* sizeof(T).to_u64).value = value
-    (@state + 1_i64).value = size &+ 1_u64
-  end
 
-  @[NoInline]
-  def grow : Nil
-    start = @state.value
-    room = (@state + 2_i64).value
-    capacity = room == 0_u64 ? 1_u64 : room &* 2_u64
-    width = sizeof(T).to_u64
-    @state.value = IyiRegion.tape_resize(start, start &+ room &* width, (@state + 1_i64).value &* width, capacity &* width)
-    (@state + 2_i64).value = capacity
-  end
-
-  # As `Array#[]`: a negative index counts from the end, and one still out
-  # of range raises rather than reading past the elements.
-  def [](index : Int32) : T
-    asked = index
-    count = size
-    index = index + count if index < 0
-    raise "index #{asked} out of range for #{count} elements" if index < 0 || index >= count
-    Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value
-  end
-
-  def each(& : T -> Nil) : Nil
-    index = 0
-    count = size
-    while index < count
-      yield self[index]
-      index = index + 1
+    # *value* in decimal, written in place: `value.to_s` would make a heap
+    # string for every number a page prints.
+    def append_int(value : Int64) : Nil
+      # The magnitude as unsigned, so the most negative value has one too.
+      magnitude = value < 0 ? 0_u64 &- value.unsafe_to_u64 : value.unsafe_to_u64
+      digits = uninitialized StaticArray(UInt8, 20)
+      base = pointerof(digits).as(Pointer(UInt8))
+      count = 0
+      while true
+        (base + (19 - count)).value = (48_u64 &+ magnitude % 10_u64).unsafe_to_u8
+        count = count + 1
+        magnitude = magnitude // 10_u64
+        break if magnitude == 0_u64
+      end
+      push(45_u8) if value < 0
+      append(base + (20 - count), count)
     end
-  end
-end
 
-# One entry of a `TapeStream`: the value and the index past its subtree.
-@[OnTape]
-struct TapeStreamEntry(T)
-  getter value : T
-  getter stop : Int32
+    def append_int(value : Int32) : Nil
+      append_int(value.to_i64)
+    end
 
-  def initialize(@value : T, @stop : Int32)
-  end
-end
+    # *text* with `&`, `<`, `>`, `"` and `'` escaped as `ERB::Util.html_escape`
+    # writes them; the runs between them are copied whole.
+    # *value* as `Float64#to_s` writes it, in place: no heap string per
+    # number.
+    def append_float(value : Float64) : Nil
+      cursor = @state.value
+      if cursor &+ 32_u64 > (@state + 1_i64).value
+        grow(32_u64)
+        cursor = @state.value
+      end
+      count = IyiFloatText.write(IyiFloatText.bits_of(value), Pointer(UInt8).new(cursor))
+      @state.value = cursor &+ count.to_u64
+    end
 
-# A tree on the tape as one stream in document order, the layout simdjson
-# calls a tape: a container is written when it opens and told where its
-# subtree ends when it closes, so its children follow it and a reader
-# steps over a child in one jump. Only this one value grows while a tree
-# is built, always at the tape's end, so the tree is written once, whole:
-# measured faster than a heap tree, where a `TapeArray` per node is slower
-# (TAPE_DESIGN.md, "Layout").
-@[OnTape]
-struct TapeStream(T)
-  @state : Pointer(UInt64)
+    def append_html_escaped(text : ::String) : Nil
+      bytes = text.to_unsafe
+      size = text.bytesize
+      start = 0
+      index = 0
+      while index < size
+        escaped = case bytes[index]
+                  when 38_u8 then "&amp;"
+                  when 60_u8 then "&lt;"
+                  when 62_u8 then "&gt;"
+                  when 34_u8 then "&quot;"
+                  when 39_u8 then "&#39;"
+                  else            nil
+                  end
+        if escaped
+          append(bytes + start, index - start) if index > start
+          append(escaped)
+          start = index + 1
+        end
+        index = index + 1
+      end
+      append(bytes + start, size - start) if size > start
+    end
 
-  def initialize(capacity : Int32 = 64)
-    width = sizeof(TapeStreamEntry(T)).to_u64
-    @state = Pointer(UInt64).new(IyiRegion.tape_bytes(24_u64 &+ capacity.to_u64 &* width))
-    @state.value = @state.address &+ 24_u64
-    (@state + 1_i64).value = 0_u64
-    (@state + 2_i64).value = capacity.to_u64
-  end
+    def length : Int32
+      (@state.value &- (@state + 2_i64).value).to_i32
+    end
 
-  def size : Int32
-    (@state + 1_i64).value.to_i32
-  end
+    # Room for *total* bytes in all, so that writing up to them does not grow
+    # the writer again: once a request's length is known, its bytes grow in
+    # place even after other values have gone on the tape.
+    def reserve(total : Int32) : Nil
+      extra = total - length
+      grow(extra.to_u64) if extra > 0 && @state.value &+ extra.to_u64 > (@state + 1_i64).value
+    end
 
-  # A value with no children; its index.
-  def leaf(value : T) : Int32
-    put(value, size + 1)
-  end
+    @[NoInline]
+    def grow(extra : UInt64) : Nil
+      start = (@state + 2_i64).value
+      length = @state.value &- start
+      need = length &+ extra
+      capacity = (@state + 1_i64).value &- start
+      capacity = 1_u64 if capacity == 0_u64
+      while capacity < need
+        capacity = capacity &* 2_u64
+      end
+      start = IyiRegion.tape_resize(start, (@state + 1_i64).value, length, capacity)
+      @state.value = start &+ length
+      (@state + 1_i64).value = start &+ capacity
+      (@state + 2_i64).value = start
+    end
 
-  # A container whose children are the values added until `close`; its
-  # index, which `close` takes.
-  def open(value : T) : Int32
-    put(value, -1)
-  end
-
-  # Ends the container opened at *at*: its subtree is everything added
-  # since.
-  def close(at : Int32) : Nil
-    entry = slot(at)
-    raise "TapeStream#close: #{at} is not open" unless entry.value.stop == -1
-    entry.value = TapeStreamEntry(T).new(entry.value.value, size)
-  end
-
-  def [](index : Int32) : T
-    slot(index).value.value
-  end
-
-  # The index past *index*'s subtree: the next sibling, if any.
-  def stop(index : Int32) : Int32
-    stop = slot(index).value.stop
-    raise "TapeStream: #{index} is not closed" if stop == -1
-    stop
-  end
-
-  # Each child of the container at *index*, by index.
-  def each_child(index : Int32, & : Int32 -> _) : Nil
-    child = index + 1
-    last = stop(index)
-    while child < last
-      yield child
-      child = stop(child)
+    def finish : String
+      start = (@state + 2_i64).value
+      String.new(Pointer(UInt8).new(start), (@state.value &- start).to_i32)
     end
   end
 
-  private def put(value : T, stop : Int32) : Int32
-    count = (@state + 1_i64).value
-    grow if count >= (@state + 2_i64).value
-    width = sizeof(TapeStreamEntry(T)).to_u64
-    Pointer(TapeStreamEntry(T)).new(@state.value &+ count &* width).value = TapeStreamEntry(T).new(value, stop)
-    (@state + 1_i64).value = count &+ 1_u64
-    count.to_i32
+  # Elements on the tape. `T` is held by value, so an element may itself be a
+  # tape type, which no other generic may hold.
+  @[OnTape]
+  struct Array(T)
+    @state : Pointer(UInt64)
+
+    def initialize(capacity : Int32 = 4)
+      @state = Pointer(UInt64).new(IyiRegion.tape_bytes(24_u64 &+ capacity.to_u64 &* sizeof(T).to_u64))
+      @state.value = @state.address &+ 24_u64
+      (@state + 1_i64).value = 0_u64
+      (@state + 2_i64).value = capacity.to_u64
+    end
+
+    # *count* elements, the block giving each by index, in room of exactly
+    # that size: it never grows, so the block may put other values on the
+    # tape (TapeLayoutChecker allows it, where a loop of `push` is refused).
+    def self.new(count : Int32, & : Int32 -> T) : self
+      array = new(count)
+      index = 0
+      while index < count
+        array.push(yield index)
+        index = index + 1
+      end
+      array
+    end
+
+    def size : Int32
+      (@state + 1_i64).value.to_i32
+    end
+
+    def push(value : T) : Nil
+      size = (@state + 1_i64).value
+      if size >= (@state + 2_i64).value
+        grow
+      end
+      Pointer(T).new(@state.value &+ size &* sizeof(T).to_u64).value = value
+      (@state + 1_i64).value = size &+ 1_u64
+    end
+
+    @[NoInline]
+    def grow : Nil
+      start = @state.value
+      room = (@state + 2_i64).value
+      capacity = room == 0_u64 ? 1_u64 : room &* 2_u64
+      width = sizeof(T).to_u64
+      @state.value = IyiRegion.tape_resize(start, start &+ room &* width, (@state + 1_i64).value &* width, capacity &* width)
+      (@state + 2_i64).value = capacity
+    end
+
+    # As `Array#[]`: a negative index counts from the end, and one still out
+    # of range raises rather than reading past the elements.
+    def [](index : Int32) : T
+      asked = index
+      count = size
+      index = index + count if index < 0
+      raise "index #{asked} out of range for #{count} elements" if index < 0 || index >= count
+      Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value
+    end
+
+    def each(& : T -> Nil) : Nil
+      index = 0
+      count = size
+      while index < count
+        yield self[index]
+        index = index + 1
+      end
+    end
   end
 
-  private def slot(index : Int32) : Pointer(TapeStreamEntry(T))
-    count = size
-    raise "index #{index} out of range for #{count} entries" if index < 0 || index >= count
-    Pointer(TapeStreamEntry(T)).new(@state.value &+ index.to_u64 &* sizeof(TapeStreamEntry(T)).to_u64)
+
+  # A tree on the tape as one stream in document order, the layout simdjson
+  # calls a tape: a container is written when it opens and told where its
+  # subtree ends when it closes, so its children follow it and a reader
+  # steps over a child in one jump. Only this one value grows while a tree
+  # is built, always at the tape's end, so the tree is written once, whole:
+  # measured faster than a heap tree, where a `Array` per node is slower
+  # (TAPE_DESIGN.md, "Layout").
+  @[OnTape]
+  struct Tree(T)
+    @state : Pointer(UInt64)
+
+    def initialize(capacity : Int32 = 64)
+      width = sizeof(Tree::Entry(T)).to_u64
+      @state = Pointer(UInt64).new(IyiRegion.tape_bytes(24_u64 &+ capacity.to_u64 &* width))
+      @state.value = @state.address &+ 24_u64
+      (@state + 1_i64).value = 0_u64
+      (@state + 2_i64).value = capacity.to_u64
+    end
+
+    def size : Int32
+      (@state + 1_i64).value.to_i32
+    end
+
+    # A value with no children; its index.
+    def leaf(value : T) : Int32
+      put(value, size + 1)
+    end
+
+    # A container whose children are the values added until `close`; its
+    # index, which `close` takes.
+    def open(value : T) : Int32
+      put(value, -1)
+    end
+
+    # Ends the container opened at *at*: its subtree is everything added
+    # since.
+    def close(at : Int32) : Nil
+      entry = slot(at)
+      raise "Tape::Tree#close: #{at} is not open" unless entry.value.stop == -1
+      entry.value = Tree::Entry(T).new(entry.value.value, size)
+    end
+
+    def [](index : Int32) : T
+      slot(index).value.value
+    end
+
+    # The index past *index*'s subtree: the next sibling, if any.
+    def stop(index : Int32) : Int32
+      stop = slot(index).value.stop
+      raise "Tape::Tree: #{index} is not closed" if stop == -1
+      stop
+    end
+
+    # Each child of the container at *index*, by index.
+    def each_child(index : Int32, & : Int32 -> _) : Nil
+      child = index + 1
+      last = stop(index)
+      while child < last
+        yield child
+        child = stop(child)
+      end
+    end
+
+    private def put(value : T, stop : Int32) : Int32
+      count = (@state + 1_i64).value
+      grow if count >= (@state + 2_i64).value
+      width = sizeof(Tree::Entry(T)).to_u64
+      Pointer(Tree::Entry(T)).new(@state.value &+ count &* width).value = Tree::Entry(T).new(value, stop)
+      (@state + 1_i64).value = count &+ 1_u64
+      count.to_i32
+    end
+
+    private def slot(index : Int32) : Pointer(Tree::Entry(T))
+      count = size
+      raise "index #{index} out of range for #{count} entries" if index < 0 || index >= count
+      Pointer(Tree::Entry(T)).new(@state.value &+ index.to_u64 &* sizeof(Tree::Entry(T)).to_u64)
+    end
+
+    @[NoInline]
+    private def grow : Nil
+      start = @state.value
+      room = (@state + 2_i64).value
+      capacity = room == 0_u64 ? 1_u64 : room &* 2_u64
+      width = sizeof(Tree::Entry(T)).to_u64
+      @state.value = IyiRegion.tape_resize(start, start &+ room &* width, (@state + 1_i64).value &* width, capacity &* width)
+      (@state + 2_i64).value = capacity
+    end
   end
 
-  @[NoInline]
-  private def grow : Nil
-    start = @state.value
-    room = (@state + 2_i64).value
-    capacity = room == 0_u64 ? 1_u64 : room &* 2_u64
-    width = sizeof(TapeStreamEntry(T)).to_u64
-    @state.value = IyiRegion.tape_resize(start, start &+ room &* width, (@state + 1_i64).value &* width, capacity &* width)
-    (@state + 2_i64).value = capacity
+  # One entry of a `Tree`: the value and the index past its subtree.
+  @[OnTape]
+  struct Tree::Entry(T)
+    getter value : T
+    getter stop : Int32
+
+    def initialize(@value : T, @stop : Int32)
+    end
   end
 end

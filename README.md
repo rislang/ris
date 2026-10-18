@@ -29,7 +29,7 @@ once at its `end`; other objects keep iyi's GC, so libraries work unchanged.
 
 ```crystal
 import github.com/domify/slim::{Slim}
-def page(name : String) : TapeString
+def page(name : String) : Tape::String
   Slim.render("views/page.slim")      # the template, compiled to ris code
 end
 body = ""                             # an ordinary String: iyi's GC heap

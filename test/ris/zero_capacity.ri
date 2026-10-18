@@ -2,13 +2,13 @@ module test/ris/zero_capacity
 import std/int
 
 Tape.scope do
-  items = TapeArray(Int64).new(0)
+  items = Tape::Array(Int64).new(0)
   items.push(123_i64)
-  other = TapeArray(Int64).new(0)
+  other = Tape::Array(Int64).new(0)
   other.push(456_i64)
   items.push(789_i64)
   puts items[0]
   puts items[1]
   puts other[0]
-  puts TapeString.build(0) { |w| w.push(65_u8); w.append("BC") }.to_s
+  puts Tape::String.build(0) { |w| w.push(65_u8); w.append("BC") }.to_s
 end

@@ -24,10 +24,10 @@ end
 
 def interleave(tag : UInt8) : Nil
   Tape.scope do
-    outer = TapeString.build { |w| w.push(tag) }
+    outer = Tape::String.build { |w| w.push(tag) }
     saved = IyiRegion.tape
     Tape.local do
-      text = TapeString.build { |w| w.append(outer.to_s) }
+      text = Tape::String.build { |w| w.append(outer.to_s) }
       current = IyiRegion.tape
       sleep(1)
       check(IyiRegion.tape == current)

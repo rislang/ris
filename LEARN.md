@@ -55,8 +55,9 @@ end
 ```
 
 * Memory: ordinary objects use the GC. For bounded work (a request) use
-  `Tape.scope do … end` with `TapeString`, `TapeWriter`, `TapeArray(T)`
-  and `@[OnTape]` structs; `to_s` copies out what must survive the block.
+  `Tape.scope do … end` with `Tape::String` (and its `Builder`),
+  `Tape::Array(T)` and `@[OnTape]` structs; `to_s` copies out what must
+  survive the block.
 * Tape only where it pays: a hot path that allocates much short-lived
   data. Elsewhere plain ris is simpler, and copy-out can cost more than
   it saves. Measure it yourself: run the real work with and without tape

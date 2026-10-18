@@ -19,7 +19,7 @@ end
 def hold(done : Channel(Int64)) : Nil
   sum = 0_i64
   Tape.scope do
-    text = TapeString.build(512 * 1024) do |w|
+    text = Tape::String.build(512 * 1024) do |w|
       n = 0
       while n < 512 * 1024
         w.push((97 + n % 26).to_u8)
@@ -65,7 +65,7 @@ puts faults < 128 ? "warm: #{total // 1024} KiB written again" : "COLD: #{faults
 
 before_kb = resident_kb
 Tape.scope do
-  big = TapeString.build(8 * 1024 * 1024) do |w|
+  big = Tape::String.build(8 * 1024 * 1024) do |w|
     n = 0
     while n < 8 * 1024 * 1024
       w.push(1_u8)

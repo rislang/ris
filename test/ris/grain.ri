@@ -9,7 +9,7 @@ end
 Tape.scope do
   first = IyiRegion.tape
   ok = whole(first)
-  big = TapeString.build(1024) do |w|
+  big = Tape::String.build(1024) do |w|
     n = 0
     while n < 70 * 1024 * 1024 + 3
       w.push(97_u8)

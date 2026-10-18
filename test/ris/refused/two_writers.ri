@@ -1,7 +1,7 @@
 # Two writers grow in one loop: only one can be the tape's end.
 Tape.scope do
-  a = TapeWriter.new(4)
-  b = TapeWriter.new(4)
+  a = Tape::String::Builder.new(4)
+  b = Tape::String::Builder.new(4)
   3.times do
     a.push(65_u8)
     b.push(66_u8)

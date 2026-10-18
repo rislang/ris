@@ -3633,11 +3633,11 @@ describe Iyi::IyiMod do
 
         @[OnTape]
         pub struct Packet
-          @data : TapeWriter
+          @data : Tape::String::Builder
           def initialize
-            @data = TapeWriter.new(1)
+            @data = Tape::String::Builder.new(1)
           end
-          def finish : TapeString
+          def finish : Tape::String
             @data.append("tape")
             @data.finish
           end

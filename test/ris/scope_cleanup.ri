@@ -3,7 +3,7 @@ import std/int
 
 def early : Int32
   Tape.scope do
-    text = TapeString.build { |w| w.push(65_u8) }
+    text = Tape::String.build { |w| w.push(65_u8) }
     return text.bytesize
   end
   0
@@ -13,7 +13,7 @@ puts early
 puts IyiRegion.tape == 0_u64
 Tape.scope do
   Tape.scope do
-    text = TapeString.build { |w| w.push(66_u8) }
+    text = Tape::String.build { |w| w.push(66_u8) }
     break text.bytesize
   end
   puts IyiRegion.tape != 0_u64
@@ -21,7 +21,7 @@ Tape.scope do
 end
 puts IyiRegion.tape == 0_u64
 Tape.scope do
-  text = TapeString.build { |w| w.push(67_u8) }
+  text = Tape::String.build { |w| w.push(67_u8) }
   puts text.to_s
 end
 puts IyiRegion.tape == 0_u64

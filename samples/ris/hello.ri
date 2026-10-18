@@ -11,10 +11,10 @@ module samples/hello
 import shop/order::*
 
 def make_order(id : Int64) : Order
-  name = TapeString.build do |s|
+  name = Tape::String.build do |s|
     "ris".each_char { |c| s.push(c.ord.to_u8) }
   end
-  lines = TapeArray(Int64).new
+  lines = Tape::Array(Int64).new
   lines.push(1200_i64)
   lines.push(350_i64)
   lines.push(99_i64)

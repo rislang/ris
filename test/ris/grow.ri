@@ -3,20 +3,20 @@
 # it keep their elements where they were, and a second scope starts clean.
 def run_scope(round : Int64) : Nil
   Tape.scope do
-    before = TapeArray(Int64).new(4)
+    before = Tape::Array(Int64).new(4)
     i = 0_i64
     while i < 1000_i64
       before.push(i * round)
       i += 1_i64
     end
-    big = TapeString.build(1024) do |w|
+    big = Tape::String.build(1024) do |w|
       n = 0
       while n < 100 * 1024 * 1024
         w.push((97 + n % 26).to_u8)
         n += 1
       end
     end
-    after = TapeArray(Int64).new(4)
+    after = Tape::Array(Int64).new(4)
     after.push(7_i64 * round)
     sum = 0_i64
     before.each { |v| sum += v }

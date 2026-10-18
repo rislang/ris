@@ -1,8 +1,8 @@
 module test/ris/lifetime_flow
 import std/int
 
-def make_text : TapeString
-  return TapeString.build { |w| w.push(65_u8) }
+def make_text : Tape::String
+  return Tape::String.build { |w| w.push(65_u8) }
 end
 
 def with_text(&)
@@ -16,7 +16,7 @@ end
 with_text { |text| puts text.to_s }
 Tape.scope do
   kept = nil
-  items = TapeArray(TapeString).new(0)
+  items = Tape::Array(Tape::String).new(0)
   items.push(make_text)
   items.each { |text| kept = text }
   if text = kept

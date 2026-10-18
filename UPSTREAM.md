@@ -16,16 +16,16 @@ has it.
 * std/socket: `IyiSocket#write(first, second)`, two buffers in one
   `sendmsg`/`writev`. Written apart, a response's head and body wait on
   the client's delayed ACK (Nagle), 40 ms each (web, 2026-10-17). Take the
-  `String` overload; the `TapeString` one stays in ris.
+  `String` overload; the `Tape::String` one stays in ris.
 * `IyiScheduler.current`: the running fiber inline, the first touch out of
   line. Two calls a `Tape.scope` made it 0.7% of respond (2026-10-18).
 
 * std/json: a string with an escape no longer makes a substring per
   non-ASCII run (`StringBuffer#append(Pointer, Int32)`), and the writer's
   escapes are `JSON.each_escaped_byte`. The lexer's span mode, `TapeBuilder`
-  and `TapeDocument` stay in ris.
+  and `Document` stay in ris.
 * `IyiFloatText.write(bits, buffer)` / `format_into`: a float's text into
-  a buffer, `to_s` on top. `TapeWriter#append_float` stays in ris.
+  a buffer, `to_s` on top. `Tape::String::Builder#append_float` stays in ris.
 * Both are iyi's branch `json-float-from-ris` (`c02af8fac`), not merged.
 
 ## To make in iyi first
