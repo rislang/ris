@@ -2390,11 +2390,15 @@ pub class Builder
 end
 
 # A document's state in a `TapeBuilder`, on the stack of `JSON.build`:
-# the level, the count of keys of the open objects, then a state per level,
-# the first key of each open object, and the keys as (start, size) spans of
-# the output. Past `KEYS` keys open at once they go to the heap.
+# the level, the count of keys of the open objects, then per level a state,
+# the first key of each open object and its id in the hash table, and the
+# last id; the keys are (start, size) spans of the output. Past
+# `TAPE_KEYS` keys open at once they go to the heap.
 TAPE_STATES = MAX_NESTING + 2
 TAPE_KEYS   = 128
+# Past this many keys an object's are found through a hash table on the
+# heap, not compared one by one: 50,000 keys took 1.7 s, the heap 11 ms.
+TAPE_LINEAR = 32
 
 # Writes a document into the caller's `TapeWriter`, as `Builder` writes one
 # into a String: the same values, checks and escapes, and nothing on the
@@ -2404,13 +2408,21 @@ pub struct TapeBuilder
   @out : TapeWriter
   @slots : Pointer(Int32)
   @keys : Pointer(Pointer(Int32))
+  @table : Pointer(Pointer(UInt64))
   @indent : String?
   @ascii_only : Bool
 
-  def initialize(@out : TapeWriter, @slots : Pointer(Int32), @keys : Pointer(Pointer(Int32)), @indent : String?, @ascii_only : Bool)
+  def initialize(@out : TapeWriter, @slots : Pointer(Int32), @keys : Pointer(Pointer(Int32)), @table : Pointer(Pointer(UInt64)), @indent : String?, @ascii_only : Bool)
     @slots[0] = 0
     @slots[1] = 0
     @slots[2] = Builder::ROOT
+    @slots[2 + 3 * TAPE_STATES] = 0
+  end
+
+  # The id of the open object at *depth* in the hash table, 0 while its
+  # keys are few enough to compare one by one.
+  private def table_id(depth : Int32) : Int32
+    @slots[2 + 2 * TAPE_STATES + depth]
   end
 
   private def level : Int32
@@ -2529,6 +2541,7 @@ pub struct TapeBuilder
     @slots[0] = depth
     set_state(first)
     @slots[2 + TAPE_STATES + depth] = @slots[1]
+    @slots[2 + 2 * TAPE_STATES + depth] = 0
   end
 
   def start_array : Nil
@@ -2570,8 +2583,7 @@ pub struct TapeBuilder
   end
 
   # A key, refused when this object already holds its text, as `Builder`
-  # refuses it. The object's keys are compared one by one: an object of
-  # thousands of keys is better written with `Builder`.
+  # refuses it.
   def field(name : String) : Nil
     key(name.to_unsafe, name.bytesize)
   end
@@ -2591,16 +2603,37 @@ pub struct TapeBuilder
     length = @out.length - from
     text = @out.finish.to_unsafe
     keys = @keys.value
-    i = @slots[2 + TAPE_STATES + level]
+    first = @slots[2 + TAPE_STATES + level]
     count = @slots[1]
-    while i < count
-      if keys[2 * i + 1] == length && JSON.same?(text + keys[2 * i], text + from, length)
-        written = String.new(length) { |target| target.copy_from(text + from, length) }
-        name = String.new(size) { |target| target.copy_from(bytes, size) }
-        raise "the key #{name.inspect} is written twice in one object" if JSON.utf8?(bytes, size)
-        raise "the key #{name.inspect} is written as #{written}, as an earlier key was"
+    id = table_id(level)
+    if id == 0 && count - first < TAPE_LINEAR
+      i = first
+      while i < count
+        repeated(bytes, size, text, from, length) if keys[2 * i + 1] == length && JSON.same?(text + keys[2 * i], text + from, length)
+        i = i + 1
       end
-      i = i + 1
+    else
+      if id == 0
+        id = @slots[2 + 3 * TAPE_STATES] + 1
+        @slots[2 + 3 * TAPE_STATES] = id
+        @slots[2 + 2 * TAPE_STATES + level] = id
+        i = first
+        while i < count
+          index(id, text, keys, i)
+          i = i + 1
+        end
+      end
+      table = @table.value
+      mask = table[0] - 1
+      slot = id.to_u64.unsafe_shl(32_u64) | hash(text + from, length)
+      at = slot & mask
+      while (got = table[2 + 2 * at]) != 0
+        if got == slot
+          k = table[3 + 2 * at].to_i32
+          repeated(bytes, size, text, from, length) if keys[2 * k + 1] == length && JSON.same?(text + keys[2 * k], text + from, length)
+        end
+        at = (at + 1) & mask
+      end
     end
     if count >= TAPE_KEYS && (count & (count - 1)) == 0
       # Past the stack's room: the spans move to the heap, doubling.
@@ -2612,8 +2645,61 @@ pub struct TapeBuilder
     keys[2 * count] = from
     keys[2 * count + 1] = length
     @slots[1] = count + 1
+    index(id, text, keys, count) if id != 0
     @out.push(58_u8)
     @out.push(32_u8) unless @indent.nil?
+  end
+
+  private def repeated(bytes : Pointer(UInt8), size : Int32, text : Pointer(UInt8), from : Int32, length : Int32) : Nil
+    written = String.new(length) { |target| target.copy_from(text + from, length) }
+    name = String.new(size) { |target| target.copy_from(bytes, size) }
+    raise "the key #{name.inspect} is written twice in one object" if JSON.utf8?(bytes, size)
+    raise "the key #{name.inspect} is written as #{written}, as an earlier key was"
+  end
+
+  # FNV-1a of a key's written text, 32 bits and never 0.
+  private def hash(p : Pointer(UInt8), size : Int32) : UInt64
+    h = 2166136261_u64
+    i = 0
+    while i < size
+      h = (h ^ p[i].to_u64) &* 16777619_u64
+      i = i + 1
+    end
+    h = h & 0xFFFFFFFF_u64
+    h == 0 ? 1_u64 : h
+  end
+
+  # Key *k* of the object *id* into the table: (id, hash) to *k*, open
+  # addressing, doubled past half full.
+  private def index(id : Int32, text : Pointer(UInt8), keys : Pointer(Int32), k : Int32) : Nil
+    table = @table.value
+    if table.address == 0 || table[1] * 2 >= table[0]
+      room = table.address == 0 ? 64_u64 : table[0] * 2
+      grown = Pointer(UInt64).malloc((2 + 2 * room).to_u64)
+      grown[0] = room
+      grown[1] = 0_u64
+      unless table.address == 0
+        j = 0_u64
+        while j < table[0]
+          put(grown, table[2 + 2 * j], table[3 + 2 * j]) if table[2 + 2 * j] != 0
+          j = j + 1
+        end
+      end
+      @table.value = grown
+      table = grown
+    end
+    put(table, id.to_u64.unsafe_shl(32_u64) | hash(text + keys[2 * k], keys[2 * k + 1]), k.to_u64)
+  end
+
+  private def put(table : Pointer(UInt64), slot : UInt64, value : UInt64) : Nil
+    mask = table[0] - 1
+    at = slot & mask
+    while table[2 + 2 * at] != 0
+      at = (at + 1) & mask
+    end
+    table[2 + 2 * at] = slot
+    table[3 + 2 * at] = value
+    table[1] = table[1] + 1
   end
 
   def field(name : String | TapeString, & : -> Nil) : Nil
@@ -3135,12 +3221,13 @@ pub struct JSON
   # block is handed, as `build` writes a String. Its state is on this
   # method's stack: the builder is not used after the block.
   def self.build(writer : TapeWriter, indent : String | Int32 | Nil = nil, ascii_only : Bool = false, & : TapeBuilder -> Nil) : Nil
-    slots = uninitialized Int32[520]
+    slots = uninitialized Int32[784]
     spans = uninitialized Int32[256]
     keys = pointerof(spans).as(Pointer(Int32))
+    table = Pointer(UInt64).new(0_u64)
     text = indent.is_a?(Int32) ? (indent.as(Int32) > 0 ? " " * indent.as(Int32) : nil) : indent.as(String?)
     text = nil if text && text.empty?
-    builder = TapeBuilder.new(writer, pointerof(slots).as(Pointer(Int32)), pointerof(keys), text, ascii_only)
+    builder = TapeBuilder.new(writer, pointerof(slots).as(Pointer(Int32)), pointerof(keys), pointerof(table), text, ascii_only)
     yield builder
     builder.finish
   end

@@ -1,0 +1,21 @@
+# A key repeated past the first 32 of an object, where the builder looks
+# keys up in its hash table: refused as the first 32 are. An inner object
+# with the same keys, opened and closed before, is no repeat.
+module test/ris/json_repeat
+
+import std/int
+import std/json::{JSON}
+
+Tape.scope do
+  w = TapeWriter.new(64)
+  JSON.build(w) do |b|
+    b.object do
+      b.field "inner" do
+        b.object { 100.times { |i| b.field "k#{i}", i } }
+      end
+      100.times { |i| b.field "k#{i}", i }
+      puts "nested keys are no repeat"
+      b.field "k77", 0
+    end
+  end
+end
