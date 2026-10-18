@@ -1045,7 +1045,18 @@ class IyiScheduler
   # enters. A zero left here was read back from inside a spawned fiber
   # as that fiber's top, and the scan of main's stack then ran off the
   # end of the mapping.
+  @[AlwaysInline]
   def self.current : IyiFiber
+    state = @@state
+    if state.is_a?(IyiSchedulerState)
+      fiber = state.current
+      return fiber if fiber.is_a?(IyiFiber)
+    end
+    first_current
+  end
+
+  @[NoInline]
+  private def self.first_current : IyiFiber
     state = self.state
     fiber = state.current
     return fiber if fiber.is_a?(IyiFiber)

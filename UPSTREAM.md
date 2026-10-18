@@ -17,6 +17,8 @@ has it.
   `sendmsg`/`writev`. Written apart, a response's head and body wait on
   the client's delayed ACK (Nagle), 40 ms each (web, 2026-10-17). Take the
   `String` overload; the `TapeString` one stays in ris.
+* `IyiScheduler.current`: the running fiber inline, the first touch out of
+  line. Two calls a `Tape.scope` made it 0.7% of respond (2026-10-18).
 
 ## To make in iyi first
 
