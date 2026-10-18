@@ -24,6 +24,8 @@ has it.
   non-ASCII run (`StringBuffer#append(Pointer, Int32)`), and the writer's
   escapes are `JSON.each_escaped_byte`. The lexer's span mode, `TapeBuilder`
   and `TapeDocument` stay in ris.
+* `IyiFloatText.write(bits, buffer)` / `format_into`: a float's text into
+  a buffer, `to_s` on top. `TapeWriter#append_float` stays in ris.
 
 ## To make in iyi first
 

@@ -1542,14 +1542,23 @@ module IyiFloatText
   # The digits of `value`'s shortest round-tripping decimal, and where the
   # point falls: value = 0.d1 d2 ... dn * 10^k.
   def self.text(bits : UInt64) : String
+    room = uninitialized UInt8[32]
+    buffer = pointerof(room).as(Pointer(UInt8))
+    size = write(bits, buffer)
+    String.new(size) { |target| target.copy_from(buffer, size) }
+  end
+
+  # `text` into *buffer*, 32 bytes at least, with no String made: what a
+  # writer on the tape prints a float with. The count of bytes written.
+  def self.write(bits : UInt64, buffer : Pointer(UInt8)) : Int32
     negative = bits.unsafe_shr(63_u64) != 0_u64
     exponent_bits = bits.unsafe_shr(52_u64) & 2047_u64
     fraction = bits & 4503599627370495_u64
     if exponent_bits == 2047_u64
-      return "NaN" if fraction != 0_u64
-      return negative ? "-Infinity" : "Infinity"
+      return word(buffer, "NaN") if fraction != 0_u64
+      return word(buffer, negative ? "-Infinity" : "Infinity")
     end
-    return negative ? "-0.0" : "0.0" if exponent_bits == 0_u64 && fraction == 0_u64
+    return word(buffer, negative ? "-0.0" : "0.0") if exponent_bits == 0_u64 && fraction == 0_u64
 
     # value = f * 2^e, f the 53-bit significand (52 for a subnormal).
     hidden = 4503599627370496_u64
@@ -1563,7 +1572,7 @@ module IyiFloatText
     # Grisu answers all but about one double in two hundred; those it
     # cannot prove, the bignum below does.
     quick = shortest(f, e, unequal)
-    return format(negative, quick[0], quick[1], quick[2]) if quick[1] > 0
+    return format_into(buffer, negative, quick[0], quick[1], quick[2]) if quick[1] > 0
 
     # r/s is the value, m+/s and m-/s the distances to the neighbours'
     # midpoints.
@@ -1669,7 +1678,12 @@ module IyiFloatText
       break
     end
 
-    format(negative, digits, count, k)
+    format_into(buffer, negative, digits, count, k)
+  end
+
+  private def self.word(buffer : Pointer(UInt8), text : String) : Int32
+    buffer.copy_from(text.to_unsafe, text.bytesize)
+    text.bytesize
   end
 
   # Grisu3 (Loitsch, "Printing floating-point numbers quickly and
@@ -1906,41 +1920,47 @@ module IyiFloatText
   # part always, exponent form outside with a signed exponent. The digits
   # are one integer, written from the last.
   def self.format(negative : Bool, digits : UInt64, count : Int32, k : Int32) : String
+    room = uninitialized UInt8[32]
+    buffer = pointerof(room).as(Pointer(UInt8))
+    size = format_into(buffer, negative, digits, count, k)
+    String.new(size) { |target| target.copy_from(buffer, size) }
+  end
+
+  # `format` into *buffer*, 32 bytes at least; the count written.
+  def self.format_into(buffer : Pointer(UInt8), negative : Bool, digits : UInt64, count : Int32, k : Int32) : Int32
+    size = 0
     sign = negative ? 1 : 0
     if k > -4 && k <= 15
       if k <= 0
         # 0.000ddd
-        String.new(sign + 2 - k + count) do |buffer|
-          buffer[0] = 45_u8 if negative
-          buffer[sign] = 48_u8
-          buffer[sign + 1] = 46_u8
-          at = sign + 2
-          while at < sign + 2 - k
-            buffer[at] = 48_u8
-            at = at + 1
-          end
-          put_digits(buffer + at.to_i64, digits, count, count)
+        size = sign + 2 - k + count
+        buffer[0] = 45_u8 if negative
+        buffer[sign] = 48_u8
+        buffer[sign + 1] = 46_u8
+        at = sign + 2
+        while at < sign + 2 - k
+          buffer[at] = 48_u8
+          at = at + 1
         end
+        put_digits(buffer + at.to_i64, digits, count, count)
       elsif count > k
         # ddd.ddd
-        String.new(sign + count + 1) do |buffer|
-          buffer[0] = 45_u8 if negative
-          put_digits(buffer + sign.to_i64, digits, count, k)
-          buffer[sign + k] = 46_u8
-        end
+        size = sign + count + 1
+        buffer[0] = 45_u8 if negative
+        put_digits(buffer + sign.to_i64, digits, count, k)
+        buffer[sign + k] = 46_u8
       else
         # ddd000.0
-        String.new(sign + k + 2) do |buffer|
-          buffer[0] = 45_u8 if negative
-          put_digits(buffer + sign.to_i64, digits, count, count)
-          at = sign + count
-          while at < sign + k
-            buffer[at] = 48_u8
-            at = at + 1
-          end
-          buffer[sign + k] = 46_u8
-          buffer[sign + k + 1] = 48_u8
+        size = sign + k + 2
+        buffer[0] = 45_u8 if negative
+        put_digits(buffer + sign.to_i64, digits, count, count)
+        at = sign + count
+        while at < sign + k
+          buffer[at] = 48_u8
+          at = at + 1
         end
+        buffer[sign + k] = 46_u8
+        buffer[sign + k + 1] = 48_u8
       end
     else
       # d.ddde+xx
@@ -1948,17 +1968,17 @@ module IyiFloatText
       magnitude = exponent < 0 ? 0 - exponent : exponent
       width = magnitude >= 100 ? 3 : (magnitude >= 10 ? 2 : 1)
       fraction = count > 1 ? count - 1 : 1
-      String.new(sign + 2 + fraction + 2 + width) do |buffer|
-        buffer[0] = 45_u8 if negative
-        put_digits(buffer + sign.to_i64, digits, count, 1)
-        buffer[sign + 1] = 46_u8
-        buffer[sign + 2] = 48_u8 if count == 1
-        at = sign + 2 + fraction
-        buffer[at] = 101_u8
-        buffer[at + 1] = exponent < 0 ? 45_u8 : 43_u8
-        put_digits(buffer + (at + 2).to_i64, magnitude.to_u64, width, width)
-      end
+      size = sign + 2 + fraction + 2 + width
+      buffer[0] = 45_u8 if negative
+      put_digits(buffer + sign.to_i64, digits, count, 1)
+      buffer[sign + 1] = 46_u8
+      buffer[sign + 2] = 48_u8 if count == 1
+      at = sign + 2 + fraction
+      buffer[at] = 101_u8
+      buffer[at + 1] = exponent < 0 ? 45_u8 : 43_u8
+      put_digits(buffer + (at + 2).to_i64, magnitude.to_u64, width, width)
     end
+    size
   end
 
   # The *count* digits of *digits* into *buffer*, the ones from index

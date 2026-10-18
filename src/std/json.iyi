@@ -2371,7 +2371,7 @@ TAPE_KEYS   = 128
 
 # Writes a document into the caller's `TapeWriter`, as `Builder` writes one
 # into a String: the same values, checks and escapes, and nothing on the
-# heap but a `Float64`'s text. `JSON.build(writer) { |json| ... }` hands one.
+# heap. `JSON.build(writer) { |json| ... }` hands one.
 @[OnTape]
 pub struct TapeBuilder
   @out : TapeWriter
@@ -2466,7 +2466,7 @@ pub struct TapeBuilder
     raise "NaN is not a JSON number" if val != val
     raise "#{val} is not a JSON number" if val.abs > 1.7976931348623157e308
     before_value
-    @out.append(val.to_s)
+    @out.append_float(val)
   end
 
   # Text written as it is: the caller's own JSON.

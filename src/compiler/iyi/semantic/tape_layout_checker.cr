@@ -16,7 +16,7 @@
 # and code that reaches the tape through raw pointers, are outside the rule.
 class Iyi::TapeLayoutChecker
   GROWS = {
-    "TapeWriter" => {"push", "append", "append_int", "append_html_escaped", "reserve"},
+    "TapeWriter" => {"push", "append", "append_int", "append_float", "append_html_escaped", "reserve"},
     "TapeArray"  => {"push"},
     "TapeStream" => {"leaf", "open"},
   }

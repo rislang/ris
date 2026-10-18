@@ -149,6 +149,18 @@ struct TapeWriter
 
   # *text* with `&`, `<`, `>`, `"` and `'` escaped as `ERB::Util.html_escape`
   # writes them; the runs between them are copied whole.
+  # *value* as `Float64#to_s` writes it, in place: no heap string per
+  # number.
+  def append_float(value : Float64) : Nil
+    cursor = @state.value
+    if cursor &+ 32_u64 > (@state + 1_i64).value
+      grow(32_u64)
+      cursor = @state.value
+    end
+    count = IyiFloatText.write(IyiFloatText.bits_of(value), Pointer(UInt8).new(cursor))
+    @state.value = cursor &+ count.to_u64
+  end
+
   def append_html_escaped(text : String) : Nil
     bytes = text.to_unsafe
     size = text.bytesize
