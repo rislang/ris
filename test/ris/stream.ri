@@ -1,0 +1,23 @@
+# TapeStream: nested and empty containers, growth past the first room,
+# stepping over subtrees, and the misuse it refuses.
+Tape.scope do
+  s = TapeStream(Int32).new(1)
+  root = s.open(0)
+  s.leaf(1)
+  inner = s.open(2)
+  s.leaf(3)
+  s.leaf(4)
+  s.close(inner)
+  empty = s.open(5)
+  s.close(empty)
+  s.leaf(6)
+  s.close(root)
+  kids = [] of Int32
+  s.each_child(root) { |i| kids << s[i] }
+  grand = [] of Int32
+  s.each_child(inner) { |i| grand << s[i] }
+  none = 0
+  s.each_child(empty) { none += 1 }
+  puts "#{s.size} #{kids.join(",")} #{grand.join(",")} #{none} #{s.stop(root)}"
+  s.close(inner)
+end

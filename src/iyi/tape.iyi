@@ -254,3 +254,102 @@ struct TapeArray(T)
     end
   end
 end
+
+# One entry of a `TapeStream`: the value and the index past its subtree.
+@[OnTape]
+struct TapeStreamEntry(T)
+  getter value : T
+  getter stop : Int32
+
+  def initialize(@value : T, @stop : Int32)
+  end
+end
+
+# A tree on the tape as one stream in document order, the layout simdjson
+# calls a tape: a container is written when it opens and told where its
+# subtree ends when it closes, so its children follow it and a reader
+# steps over a child in one jump. Only this one value grows while a tree
+# is built, always at the tape's end, so the tree is written once, whole:
+# measured faster than a heap tree, where a `TapeArray` per node is slower
+# (TAPE_DESIGN.md, "Layout").
+@[OnTape]
+struct TapeStream(T)
+  @state : Pointer(UInt64)
+
+  def initialize(capacity : Int32 = 64)
+    width = sizeof(TapeStreamEntry(T)).to_u64
+    @state = Pointer(UInt64).new(IyiRegion.tape_bytes(24_u64 &+ capacity.to_u64 &* width))
+    @state.value = @state.address &+ 24_u64
+    (@state + 1_i64).value = 0_u64
+    (@state + 2_i64).value = capacity.to_u64
+  end
+
+  def size : Int32
+    (@state + 1_i64).value.to_i32
+  end
+
+  # A value with no children; its index.
+  def leaf(value : T) : Int32
+    put(value, size + 1)
+  end
+
+  # A container whose children are the values added until `close`; its
+  # index, which `close` takes.
+  def open(value : T) : Int32
+    put(value, -1)
+  end
+
+  # Ends the container opened at *at*: its subtree is everything added
+  # since.
+  def close(at : Int32) : Nil
+    entry = slot(at)
+    raise "TapeStream#close: #{at} is not open" unless entry.value.stop == -1
+    entry.value = TapeStreamEntry(T).new(entry.value.value, size)
+  end
+
+  def [](index : Int32) : T
+    slot(index).value.value
+  end
+
+  # The index past *index*'s subtree: the next sibling, if any.
+  def stop(index : Int32) : Int32
+    stop = slot(index).value.stop
+    raise "TapeStream: #{index} is not closed" if stop == -1
+    stop
+  end
+
+  # Each child of the container at *index*, by index.
+  def each_child(index : Int32, & : Int32 -> _) : Nil
+    child = index + 1
+    last = stop(index)
+    while child < last
+      yield child
+      child = stop(child)
+    end
+  end
+
+  private def put(value : T, stop : Int32) : Int32
+    count = (@state + 1_i64).value
+    grow if count >= (@state + 2_i64).value
+    width = sizeof(TapeStreamEntry(T)).to_u64
+    Pointer(TapeStreamEntry(T)).new(@state.value &+ count &* width).value = TapeStreamEntry(T).new(value, stop)
+    (@state + 1_i64).value = count &+ 1_u64
+    count.to_i32
+  end
+
+  private def slot(index : Int32) : Pointer(TapeStreamEntry(T))
+    count = size
+    raise "index #{index} out of range for #{count} entries" if index < 0 || index >= count
+    Pointer(TapeStreamEntry(T)).new(@state.value &+ index.to_u64 &* sizeof(TapeStreamEntry(T)).to_u64)
+  end
+
+  @[NoInline]
+  private def grow : Nil
+    start = @state.value
+    room = (@state + 2_i64).value
+    capacity = room == 0_u64 ? 1_u64 : room &* 2_u64
+    width = sizeof(TapeStreamEntry(T)).to_u64
+    @state.value = IyiRegion.tape_resize(start, start &+ room &* width, (@state + 1_i64).value &* width, capacity &* width)
+    (@state + 2_i64).value = capacity
+  end
+end

@@ -3,7 +3,8 @@
 # the compiler with the expected message, test/ris/allowed.ri must compile
 # and run, the fibers test must read back what each fiber wrote, a tape must
 # grow past its first mapping in whole 64 KiB grains and refuse an index out
-# of range, and the respond sample must print its known checksum.
+# of range, a TapeStream must step over subtrees, and the respond sample must
+# print its known checksum.
 #
 #   bash test/ris/check.sh
 set -uo pipefail
@@ -92,6 +93,9 @@ if [ "$out" = 'PASS: tape mappings are whole 64 KiB grains' ]; then echo "runs  
 
 out=$("$RIS" run test/ris/bounds.ri 2>&1)
 if grep -qF $'10 30 30' <<<"$out" && grep -qF "index 3 out of range for 3 elements" <<<"$out"; then echo "runs     bounds"; else echo "FAILED   bounds: $out"; status=1; fi
+
+out=$("$RIS" run test/ris/stream.ri 2>&1)
+if grep -qF '7 1,2,5,6 3,4 0 7' <<<"$out" && grep -qF "TapeStream#close: 2 is not open" <<<"$out"; then echo "runs     stream"; else echo "FAILED   stream: $out"; status=1; fi
 
 out=$("$RIS" run test/ris/owned.ri 2>&1)
 if [ "$out" = 'PASS: explicit owned copy, typed cache boundary, UTF-8, empty text and scope reuse' ]; then echo "runs     owned"; else echo "FAILED   owned: $out"; status=1; fi
