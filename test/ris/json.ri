@@ -2,7 +2,7 @@
 # reads and refuses what it refuses, with the same sentence; a string with
 # no escape is a view of the input; `JSON.build(TapeWriter)` writes what
 # `JSON.build` writes, plain, indented and ASCII-only; and neither puts
-# anything on the GC heap but a float's text.
+# anything on the GC heap.
 module test/ris/json
 
 import std/int
@@ -158,7 +158,7 @@ total = 0_i64
 end
 per = (IyiMark.allocated_since - before) // 2000
 GC.enable
-check(failures, per < 400, "a parse and a build on the tape: #{per} heap bytes, the lexer's")
+check(failures, per == 0, "a parse and a build on the tape: #{per} heap bytes")
 check(failures, total == 2000 * small.bytesize, "written #{total}")
 
 if failures.empty?

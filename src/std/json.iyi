@@ -773,6 +773,33 @@ class Lexer
     @spans = true
   end
 
+  # The thread's spare span lexer, kept between parses: made anew, its
+  # objects were the only heap a parse on the tape made. A parse does not
+  # switch fibers, so one a thread is enough.
+  @[ThreadLocal]
+  @@spare : Lexer? = nil
+
+  def self.spans(bytes : Pointer(UInt8), size : Int32) : Lexer
+    lexer = @@spare
+    return new(bytes, size) unless lexer
+    @@spare = nil
+    lexer.restart(bytes, size)
+    lexer
+  end
+
+  def self.give_back(lexer : Lexer) : Nil
+    @@spare = lexer
+  end
+
+  protected def restart(@bytes : Pointer(UInt8), @bytesize : Int32) : Nil
+    @pos = 0
+    @line_number = 1
+    @column_number = 1
+    @token.kind = TokenKind::EOF
+    @token.escaped = false
+    @error = nil
+  end
+
   # The input's bytes from *start* as a String, in either mode.
   private def slice(start : Int32, size : Int32) : String
     return @input[start, size] unless @spans
@@ -2860,7 +2887,7 @@ pub struct TapeParser
   @error : String?
 
   def initialize(@input : TapeString)
-    @lexer = Lexer.new(@input.to_unsafe, @input.bytesize)
+    @lexer = Lexer.spans(@input.to_unsafe, @input.bytesize)
     @tree = TapeStream(TapeNode).new(@input.bytesize // 16 + 8)
     @nesting = 0
     @error = nil
@@ -2873,6 +2900,11 @@ pub struct TapeParser
 
   def document : TapeDocument
     TapeDocument.new(@tree, @input)
+  end
+
+  # The lexer back to the thread, for the next parse; this parser is done.
+  def finish : Nil
+    Lexer.give_back(@lexer)
   end
 
   private def token : Token
@@ -3086,6 +3118,7 @@ pub struct JSON
     parser.parse
     failure = parser.error
     raise failure unless failure.nil?
+    parser.finish
     parser.document
   end
 
@@ -3093,6 +3126,7 @@ pub struct JSON
   def self.parse?(bytes : TapeString) : TapeDocument?
     parser = TapeParser.new(bytes)
     parser.parse
+    parser.finish
     return nil unless parser.error.nil?
     parser.document
   end
