@@ -2744,15 +2744,15 @@ pub struct TapeBuilder
 
   # The key the value at *index* of *doc* has, as `field` writes a key: a
   # copy from one document into another puts nothing on the tape but what
-  # it writes. A key with an escape is decoded on the heap, so the check
-  # for a repeat sees the key and not its spelling.
+  # it writes. A key with an escape is decoded first, so the check for a
+  # repeat sees the key and not its spelling.
   def field(doc : TapeDocument, index : Int32) : Nil
     node = doc.tree[index]
     bytes = doc.input.to_unsafe + node.key_at
     if (node.flags & TapeNode::ESCAPED_KEY) == 0
       key(bytes, node.key_size)
     else
-      field(JSON.decoded_s(TapeString.new(bytes, node.key_size)))
+      decoding(bytes, node.key_size) { |text, size| key(text, size) }
     end
   end
 
@@ -2776,8 +2776,7 @@ pub struct TapeBuilder
       if (node.flags & TapeNode::ESCAPED_TEXT) == 0
         escaped(bytes, size)
       else
-        text = JSON.decoded_s(TapeString.new(bytes, size))
-        escaped(text.to_unsafe, text.bytesize)
+        decoding(bytes, size) { |text, length| escaped(text, length) }
       end
     when TapeDocument::Kind::Array
       start_array
@@ -2790,6 +2789,26 @@ pub struct TapeBuilder
         value(doc, child)
       end
       end_object
+    end
+  end
+
+  # The text of an escaped string decoded, handed to the block: on the
+  # stack up to 256 bytes (decoded text is never longer than its escapes),
+  # on the heap past that. Decoded into a String, one name in nine of a
+  # JSON API's requests made a heap string to copy.
+  private def decoding(bytes : Pointer(UInt8), size : Int32, & : Pointer(UInt8), Int32 -> Nil) : Nil
+    if size <= 256
+      room = uninitialized UInt8[256]
+      buffer = pointerof(room).as(Pointer(UInt8))
+      length = 0
+      JSON.each_decoded_byte(bytes, size) do |b|
+        buffer[length] = b
+        length = length + 1
+      end
+      yield buffer, length
+    else
+      text = JSON.decoded_s(TapeString.new(bytes, size))
+      yield text.to_unsafe, text.bytesize
     end
   end
 

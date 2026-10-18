@@ -141,7 +141,7 @@ Tape.scope do
 end
 
 GC.disable
-small = %({"id":1,"name":"user","tags":["a","b"],"ok":true,"n":null})
+small = %({"id":1,"name":"us\\"er","tags":["a","b"],"ok":true,"n":null})
 before = IyiMark.allocated_since
 total = 0_i64
 2000.times do
