@@ -26,6 +26,7 @@ has it.
   and `TapeDocument` stay in ris.
 * `IyiFloatText.write(bits, buffer)` / `format_into`: a float's text into
   a buffer, `to_s` on top. `TapeWriter#append_float` stays in ris.
+* Both are iyi's branch `json-float-from-ris` (`c02af8fac`), not merged.
 
 ## To make in iyi first
 
