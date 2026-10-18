@@ -51,6 +51,7 @@ expect mixed_growth_call "grows on the tape in this loop, and \`tag\`"
 expect two_writers       "all grow on the tape in this loop"
 expect raw_pointer      "to_unsafe\` of a Tape::String outside the library"
 expect raw_view         "Tape::String.new(pointer, size)\` outside the library"
+expect raw_append       "private method 'append' called for Tape::String::Writer"
 out=$("$RIS" run test/ris/local.ri 2>&1)
 if [ "$out" = 'PASS: local isolation, reuse, nested scopes, borrowed text, retained copy and early exits' ]; then echo "runs     local"; else echo "FAILED   local: $out"; status=1; fi
 
