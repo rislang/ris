@@ -1,10 +1,13 @@
-# Tape::Array#[] reads as Array#[] does: a negative index counts from the
-# end, and one out of range raises instead of reading past the elements.
+# Tape::Array#[] and #[]= work as Array's do: a negative index counts from
+# the end, and one out of range raises instead of reading or writing past
+# the elements.
 tape do
   a = Tape::Array(Int64).new(2)
   a.push(10_i64)
   a.push(20_i64)
   a.push(30_i64)
-  puts "#{a[0]} #{a[-1]} #{a[2]}"
-  puts a[3]
+  a[1] = 25_i64
+  a[-1] = 35_i64
+  puts "#{a[0]} #{a[1]} #{a[-1]} #{a[2]}"
+  a[3] = 40_i64
 end

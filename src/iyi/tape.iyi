@@ -339,6 +339,16 @@ module Tape
       Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value
     end
 
+    # As `Array#[]=`, with the same range check: an element written in
+    # place, which does not grow the array.
+    def []=(index : Int32, value : T) : T
+      asked = index
+      count = size
+      index = index + count if index < 0
+      raise "index #{asked} out of range for #{count} elements" if index < 0 || index >= count
+      Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value = value
+    end
+
     def each(& : T -> Nil) : Nil
       index = 0
       count = size

@@ -94,7 +94,7 @@ out=$("$RIS" run test/ris/grain.ri 2>&1)
 if [ "$out" = 'PASS: tape mappings are whole 64 KiB grains' ]; then echo "runs     grain"; else echo "FAILED   grain: $out"; status=1; fi
 
 out=$("$RIS" run test/ris/bounds.ri 2>&1)
-if grep -qF $'10 30 30' <<<"$out" && grep -qF "index 3 out of range for 3 elements" <<<"$out"; then echo "runs     bounds"; else echo "FAILED   bounds: $out"; status=1; fi
+if grep -qF $'10 25 35 35' <<<"$out" && grep -qF "index 3 out of range for 3 elements" <<<"$out"; then echo "runs     bounds"; else echo "FAILED   bounds: $out"; status=1; fi
 
 out=$("$RIS" run test/ris/stream.ri 2>&1)
 if grep -qF '7 1,2,5,6 3,4 0 7' <<<"$out" && grep -qF "Tape::Tree#close: 2 is not open" <<<"$out"; then echo "runs     stream"; else echo "FAILED   stream: $out"; status=1; fi
