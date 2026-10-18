@@ -95,21 +95,6 @@ def make_items(seed : UInt64, n : Int64) : TapeArray(Item)
   t
 end
 
-def emit_int(buf : TapeWriter, v : Int64) : Nil
-  if v == 0_i64
-    buf.push(48_u8)
-    return
-  end
-  div = 1_i64
-  while div <= v // 10_i64
-    div = div * 10_i64
-  end
-  while div > 0_i64
-    buf.push((48_i64 + (v // div) % 10_i64).to_u8)
-    div = div // 10_i64
-  end
-end
-
 def emit_str(buf : TapeWriter, s : TapeString) : Nil
   buf.push(34_u8)
   p = s.to_unsafe
@@ -127,7 +112,7 @@ end
 def render(r : Resp) : TapeString
   TapeString.build(256) do |buf|
     buf.append("{\"id\":")
-    emit_int(buf, r.id)
+    buf.append_int(r.id)
     buf.append(",\"user\":")
     emit_str(buf, r.user)
     buf.append(",\"items\":[")
@@ -139,14 +124,14 @@ def render(r : Resp) : TapeString
       buf.append("{\"sku\":")
       emit_str(buf, it.sku)
       buf.append(",\"qty\":")
-      emit_int(buf, it.qty)
+      buf.append_int(it.qty)
       buf.append(",\"price\":")
-      emit_int(buf, it.price)
+      buf.append_int(it.price)
       buf.push(125_u8)
       total += it.qty * it.price
     end
     buf.append("],\"total\":")
-    emit_int(buf, total)
+    buf.append_int(total)
     buf.push(125_u8)
   end
 end

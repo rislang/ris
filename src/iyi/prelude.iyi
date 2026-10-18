@@ -3639,11 +3639,23 @@ require "./file"
         take(region, size, false, 0_u64)
       end
 
-      # Grows the tape's last block in place, or copies it to the tape's end.
-      def self.tape_grow(pointer : UInt64, size : UInt64) : UInt64
+      # Room for *bytes* at *start*, where *used* bytes are and the room
+      # ended at *stop*: the cursor moves on when *stop* is the tape's end,
+      # else the used bytes move to a new block there. *start* may be inside
+      # a block (a writer's or array's first room follows its state), so no
+      # block header is read.
+      def self.tape_resize(start : UInt64, stop : UInt64, used : UInt64, bytes : UInt64) : UInt64
         region = @@tape
         no_tape if region == 0
-        realloc(region, pointer, size)
+        cursor = IyiHeap.read64(region &+ OFF_CURSOR)
+        fresh = (start &+ bytes &+ 7_u64) & 0xFFFFFFFFFFFFFFF8_u64
+        if ((stop &+ 7_u64) & 0xFFFFFFFFFFFFFFF8_u64) == cursor && fresh <= IyiHeap.read64(region &+ OFF_LIMIT)
+          IyiHeap.write64(region &+ OFF_CURSOR, fresh)
+          return start
+        end
+        moved = take(region, bytes, false, 0_u64)
+        Pointer(UInt8).new(moved).copy_from(Pointer(UInt8).new(start), used.to_i32)
+        moved
       end
 
       def self.acquire(capacity : UInt64) : UInt64
@@ -3763,24 +3775,6 @@ require "./file"
         IyiHeap.write64(fresh &+ OFF_PARENT, region)
         register(fresh)
         @@tape = fresh
-        fresh
-      end
-
-      # The last block on its tape grows where it is, which is the common
-      # case of a string being written; anything else is a fresh copy at the
-      # tape's end.
-      def self.realloc(region : UInt64, pointer : UInt64, size : UInt64) : UInt64
-        old = IyiHeap.read64(pointer &- UNDER)
-        old_bytes = (old &+ 7_u64) & 0xFFFFFFFFFFFFFFF8_u64
-        bytes = (size &+ 7_u64) & 0xFFFFFFFFFFFFFFF8_u64
-        if pointer &+ old_bytes == IyiHeap.read64(region &+ OFF_CURSOR) && pointer &+ bytes <= IyiHeap.read64(region &+ OFF_LIMIT)
-          IyiHeap.write64(region &+ OFF_CURSOR, pointer &+ bytes)
-          IyiHeap.write64(pointer &- UNDER, size)
-          return pointer
-        end
-        return pointer if size <= old
-        fresh = take(region, size, false, 0_u64)
-        Pointer(UInt8).new(fresh).copy_from(Pointer(UInt8).new(pointer), old.to_i32)
         fresh
       end
 

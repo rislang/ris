@@ -80,33 +80,35 @@ struct TapeString
   end
 end
 
-# The open end of a `TapeString` being built: its data pointer, length and
-# capacity in a block on the tape, which the struct points at.
+# The open end of a `TapeString` being built: the address the next byte
+# goes to, the end of the room and the start, in a block on the tape that
+# the struct points at. Addresses rather than a length and capacity, so a
+# push is one load, one compare and one store.
 @[OnTape]
 struct TapeWriter
   @state : Pointer(UInt64)
 
   def initialize(capacity : Int32)
-    @state = Pointer(UInt64).new(IyiRegion.tape_bytes(24_u64))
-    @state.value = IyiRegion.tape_bytes(capacity.to_u64)
-    (@state + 1_i64).value = 0_u64
-    (@state + 2_i64).value = capacity.to_u64
+    @state = Pointer(UInt64).new(IyiRegion.tape_bytes(24_u64 &+ capacity.to_u64))
+    start = @state.address &+ 24_u64
+    @state.value = start
+    (@state + 1_i64).value = start &+ capacity.to_u64
+    (@state + 2_i64).value = start
   end
 
   @[AlwaysInline]
   def push(byte : UInt8) : Nil
-    length = (@state + 1_i64).value
-    grow(1_u64) if length >= (@state + 2_i64).value
-    Pointer(UInt8).new(@state.value &+ length).value = byte
-    (@state + 1_i64).value = length &+ 1_u64
+    cursor = @state.value
+    if cursor >= (@state + 1_i64).value
+      grow(1_u64)
+      cursor = @state.value
+    end
+    Pointer(UInt8).new(cursor).value = byte
+    @state.value = cursor &+ 1_u64
   end
 
   def append(text : String) : Nil
-    count = text.bytesize.to_u64
-    length = (@state + 1_i64).value
-    grow(count) if length &+ count > (@state + 2_i64).value
-    Pointer(UInt8).new(@state.value &+ length).copy_from(text.to_unsafe, text.bytesize)
-    (@state + 1_i64).value = length &+ count
+    append(text.to_unsafe, text.bytesize)
   end
 
   def append(text : TapeString) : Nil
@@ -114,10 +116,13 @@ struct TapeWriter
   end
 
   def append(bytes : Pointer(UInt8), count : Int32) : Nil
-    length = (@state + 1_i64).value
-    grow(count.to_u64) if length &+ count.to_u64 > (@state + 2_i64).value
-    Pointer(UInt8).new(@state.value &+ length).copy_from(bytes, count)
-    (@state + 1_i64).value = length &+ count.to_u64
+    cursor = @state.value
+    if cursor &+ count.to_u64 > (@state + 1_i64).value
+      grow(count.to_u64)
+      cursor = @state.value
+    end
+    Pointer(UInt8).new(cursor).copy_from(bytes, count)
+    @state.value = cursor &+ count.to_u64
   end
 
   # *value* in decimal, written in place: `value.to_s` would make a heap
@@ -169,23 +174,28 @@ struct TapeWriter
   end
 
   def length : Int32
-    (@state + 1_i64).value.to_i32
+    (@state.value &- (@state + 2_i64).value).to_i32
   end
 
   @[NoInline]
   def grow(extra : UInt64) : Nil
-    need = (@state + 1_i64).value &+ extra
-    capacity = (@state + 2_i64).value
+    start = (@state + 2_i64).value
+    length = @state.value &- start
+    need = length &+ extra
+    capacity = (@state + 1_i64).value &- start
     capacity = 1_u64 if capacity == 0_u64
     while capacity < need
       capacity = capacity &* 2_u64
     end
-    @state.value = IyiRegion.tape_grow(@state.value, capacity)
-    (@state + 2_i64).value = capacity
+    start = IyiRegion.tape_resize(start, (@state + 1_i64).value, length, capacity)
+    @state.value = start &+ length
+    (@state + 1_i64).value = start &+ capacity
+    (@state + 2_i64).value = start
   end
 
   def finish : TapeString
-    TapeString.new(Pointer(UInt8).new(@state.value), (@state + 1_i64).value.to_i32)
+    start = (@state + 2_i64).value
+    TapeString.new(Pointer(UInt8).new(start), (@state.value &- start).to_i32)
   end
 end
 
@@ -196,8 +206,8 @@ struct TapeArray(T)
   @state : Pointer(UInt64)
 
   def initialize(capacity : Int32 = 4)
-    @state = Pointer(UInt64).new(IyiRegion.tape_bytes(24_u64))
-    @state.value = IyiRegion.tape_bytes(capacity.to_u64 &* sizeof(T).to_u64)
+    @state = Pointer(UInt64).new(IyiRegion.tape_bytes(24_u64 &+ capacity.to_u64 &* sizeof(T).to_u64))
+    @state.value = @state.address &+ 24_u64
     (@state + 1_i64).value = 0_u64
     (@state + 2_i64).value = capacity.to_u64
   end
@@ -209,13 +219,20 @@ struct TapeArray(T)
   def push(value : T) : Nil
     size = (@state + 1_i64).value
     if size >= (@state + 2_i64).value
-      capacity = (@state + 2_i64).value &* 2_u64
-      capacity = 1_u64 if capacity == 0_u64
-      @state.value = IyiRegion.tape_grow(@state.value, capacity &* sizeof(T).to_u64)
-      (@state + 2_i64).value = capacity
+      grow
     end
     Pointer(T).new(@state.value &+ size &* sizeof(T).to_u64).value = value
     (@state + 1_i64).value = size &+ 1_u64
+  end
+
+  @[NoInline]
+  def grow : Nil
+    start = @state.value
+    room = (@state + 2_i64).value
+    capacity = room == 0_u64 ? 1_u64 : room &* 2_u64
+    width = sizeof(T).to_u64
+    @state.value = IyiRegion.tape_resize(start, start &+ room &* width, (@state + 1_i64).value &* width, capacity &* width)
+    (@state + 2_i64).value = capacity
   end
 
   # As `Array#[]`: a negative index counts from the end, and one still out
