@@ -1,0 +1,7 @@
+module test/ris/refused/writer_grow
+
+# A writer grows itself; a caller asks for room with `reserve`.
+Tape.use do
+  w = Tape::String::Writer.new(8)
+  w.grow(64_u64)
+end

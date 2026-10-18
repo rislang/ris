@@ -267,7 +267,7 @@ module Tape
     end
 
     @[NoInline]
-    def grow(extra : UInt64) : Nil
+    private def grow(extra : UInt64) : Nil
       start = (@state + 2_i64).value
       length = @state.value &- start
       need = length &+ extra
@@ -370,7 +370,7 @@ module Tape
     @state : Pointer(UInt64)
 
     def initialize(capacity : Int32 = 64)
-      width = sizeof(Tree::Entry(T)).to_u64
+      width = sizeof(Entry(T)).to_u64
       @state = Pointer(UInt64).new(IyiRegion.tape_bytes(24_u64 &+ capacity.to_u64 &* width))
       @state.value = @state.address &+ 24_u64
       (@state + 1_i64).value = 0_u64
@@ -397,7 +397,7 @@ module Tape
     def close(at : Int32) : Nil
       entry = slot(at)
       raise "Tape::Tree#close: #{at} is not open" unless entry.value.stop == -1
-      entry.value = Tree::Entry(T).new(entry.value.value, size)
+      entry.value = Entry(T).new(entry.value.value, size)
     end
 
     def [](index : Int32) : T
@@ -424,16 +424,16 @@ module Tape
     private def put(value : T, stop : Int32) : Int32
       count = (@state + 1_i64).value
       grow if count >= (@state + 2_i64).value
-      width = sizeof(Tree::Entry(T)).to_u64
-      Pointer(Tree::Entry(T)).new(@state.value &+ count &* width).value = Tree::Entry(T).new(value, stop)
+      width = sizeof(Entry(T)).to_u64
+      Pointer(Entry(T)).new(@state.value &+ count &* width).value = Entry(T).new(value, stop)
       (@state + 1_i64).value = count &+ 1_u64
       count.to_i32
     end
 
-    private def slot(index : Int32) : Pointer(Tree::Entry(T))
+    private def slot(index : Int32) : Pointer(Entry(T))
       count = size
       raise "index #{index} out of range for #{count} entries" if index < 0 || index >= count
-      Pointer(Tree::Entry(T)).new(@state.value &+ index.to_u64 &* sizeof(Tree::Entry(T)).to_u64)
+      Pointer(Entry(T)).new(@state.value &+ index.to_u64 &* sizeof(Entry(T)).to_u64)
     end
 
     @[NoInline]
@@ -441,7 +441,7 @@ module Tape
       start = @state.value
       room = (@state + 2_i64).value
       capacity = room == 0_u64 ? 1_u64 : room &* 2_u64
-      width = sizeof(Tree::Entry(T)).to_u64
+      width = sizeof(Entry(T)).to_u64
       @state.value = IyiRegion.tape_resize(start, start &+ room &* width, (@state + 1_i64).value &* width, capacity &* width)
       (@state + 2_i64).value = capacity
     end
@@ -449,7 +449,7 @@ module Tape
 
   # One entry of a `Tree`: the value and the index past its subtree.
   @[OnTape]
-  struct Tree::Entry(T)
+  private struct Tree::Entry(T)
     getter value : T
     getter stop : Int32
 
