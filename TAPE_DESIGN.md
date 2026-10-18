@@ -6,14 +6,18 @@ for its tape types, beside iyi unchanged: `String`, `Array`, `Hash` and
 classes stay on the GC heap. [SPEC.md](SPEC.md) is iyi's, unchanged.
 
 ## The model
-* Every fiber has a block of data stacks, reserved lazily on first use:
-  each a bump pointer over reserved address space; growth never moves.
+* `tape { }` gives the fiber a block of data stacks, so a reader sees
+  where the tape is; outside one a tape value is refused. The outermost
+  block hands the stacks back to a shared pool when it ends, so a fiber
+  that waits outside one holds none. Nested blocks share them.
+* Each stack is a bump pointer over reserved address space, taken lazily,
+  small at first and chained to grow; growth never moves.
 * Tape types live on them (`Tape::String`, `Writer`, `Tape::Array`,
   `@[OnTape]` structs): variable-size ones on a data stack (buried once
   built), resizable ones each on top of a stack of its own.
-* Every scope that put something there restores its watermark on every
-  exit (panic too): a function, a block, a branch, a loop's body. No
-  `tape { }` block: the fiber's stacks are there when first used.
+* Inside it, every scope that put something there restores its watermark
+  on every exit (panic too): a function, a block, a branch, a loop's
+  body, an inner `tape`.
 * A function takes its stack base as a hidden argument and addresses its
   values at constant offsets above it; a callee starts above its caller's
   watermark (goose_spec App. E). This changes the ABI and `.iyimod`.
