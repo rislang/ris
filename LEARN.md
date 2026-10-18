@@ -55,7 +55,7 @@ end
 ```
 
 * Memory: ordinary objects use the GC. For bounded work (a request) use
-  `Tape.run do … end` with `Tape::String` (and its `Writer`),
+  `Tape.use do … end` with `Tape::String` (and its `Writer`),
   `Tape::Array(T)` and `@[OnTape]` structs; `to_s` copies out what must
   survive the block.
 * Tape only where it pays: a hot path that allocates much short-lived

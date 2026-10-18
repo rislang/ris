@@ -31,7 +31,7 @@ def total(p : Page) : Int64
 end
 
 copied = ""
-Tape.run do
+Tape.use do
   items = Tape::Array(Resp).new
   items.push(make)
   items.push(make)

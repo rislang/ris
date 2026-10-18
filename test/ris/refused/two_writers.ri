@@ -1,5 +1,5 @@
 # Two writers grow in one loop: only one can be the tape's end.
-Tape.run do
+Tape.use do
   a = Tape::String::Writer.new(4)
   b = Tape::String::Writer.new(4)
   3.times do

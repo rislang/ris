@@ -1,4 +1,4 @@
-# Tape-fiber: fibers each in their own Tape.run, each building a Tape::Array
+# Tape-fiber: fibers each in their own Tape.use, each building a Tape::Array
 # and sleeping between elements so the others run on the same thread. Fiber A
 # ends a short scope while B is in the middle of a long one, then opens
 # another and writes different bytes. With one tape per thread, A's scope end
@@ -10,7 +10,7 @@ module test/ris/fibers/interleave
 
 def fill(tag : UInt8, rounds : Int32) : Int32
   wrong = 0
-  Tape.run do
+  Tape.use do
     items = Tape::Array(Tape::String).new(rounds) do
       text = Tape::String.build { |s| s.push(tag); s.push(tag) }
       sleep(1)

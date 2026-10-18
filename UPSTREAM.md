@@ -18,7 +18,7 @@ has it.
   the client's delayed ACK (Nagle), 40 ms each (web, 2026-10-17). Take the
   `String` overload; the `Tape::String` one stays in ris.
 * `IyiScheduler.current`: the running fiber inline, the first touch out of
-  line. Two calls a `Tape.run` made it 0.7% of respond (2026-10-18).
+  line. Two calls a `Tape.use` made it 0.7% of respond (2026-10-18).
 
 * std/json: a string with an escape no longer makes a substring per
   non-ASCII run (`StringBuffer#append(Pointer, Int32)`), and the writer's

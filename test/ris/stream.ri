@@ -1,6 +1,6 @@
 # Tape::Tree: nested and empty containers, growth past the first room,
 # stepping over subtrees, and the misuse it refuses.
-Tape.run do
+Tape.use do
   s = Tape::Tree(Int32).new(1)
   root = s.open(0)
   s.leaf(1)

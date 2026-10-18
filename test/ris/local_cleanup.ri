@@ -7,7 +7,7 @@ end
 
 def fail_local(events : Array(String)) : Int32
   defer events << (IyiRegion.tape == 0_u64 ? "empty" : "bad empty")
-  Tape.run do
+  Tape.use do
     outer = IyiRegion.tape
     defer events << (IyiRegion.tape == outer ? "outer" : "bad outer")
     Tape.local do
@@ -23,7 +23,7 @@ def fail_local(events : Array(String)) : Int32
 end
 
 def interleave(tag : UInt8) : Nil
-  Tape.run do
+  Tape.use do
     outer = Tape::String.build { |w| w.push(tag) }
     saved = IyiRegion.tape
     Tape.local do

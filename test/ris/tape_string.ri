@@ -6,7 +6,7 @@ module test/ris/tape_string
 
 import std/int
 
-Tape.run do
+Tape.use do
   text = Tape::String.new("hello, tape")
   sum = 0
   text.each_byte { |b| sum += b.to_i32 }

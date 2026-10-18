@@ -3653,7 +3653,7 @@ describe Iyi::IyiMod do
       File.write "main.iyi", <<-IYI
         module main
         import packet::{Packet}
-        Tape.run do
+        Tape.use do
           text = Packet.new.finish
           puts text.to_s
         end
@@ -3682,7 +3682,7 @@ describe Iyi::IyiMod do
         module bad
         import packet::{Packet}
         kept = nil
-        Tape.run do
+        Tape.use do
           kept = Packet::View.new(Pointer(UInt8).new(0_u64))
         end
         puts kept
@@ -3691,7 +3691,7 @@ describe Iyi::IyiMod do
       checker = create_spec_compiler
       checker.prelude = "iyi/prelude"
       checker.use_iyimod = "mods"
-      expect_raises(Iyi::TypeException, /is a variable of the code around this Tape.run/) do
+      expect_raises(Iyi::TypeException, /is a variable of the code around this Tape.use/) do
         checker.compile bad_source, File.expand_path("must-not-build")
       end
     end

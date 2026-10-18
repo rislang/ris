@@ -2,7 +2,7 @@
 #
 # A tape type is a struct marked `@[OnTape]`. Its storage - the bytes of a
 # `Tape::String`, the elements of a `Tape::Array` - is the current fiber's tape,
-# and is reclaimed when the `Tape.run` that made it ends. So a tape value
+# and is reclaimed when the `Tape.use` that made it ends. So a tape value
 # may live in locals, in parameters, in other tape values and in the tape
 # itself, and nowhere that can outlive the scope:
 #
@@ -15,7 +15,7 @@
 #
 # Each is a fact about types, so this runs once over every type after the
 # main pass, the way `RecursiveStructChecker` does. The flow half - a block
-# capturing a tape value, a `Tape.run` handing one out - is in
+# capturing a tape value, a `Tape.use` handing one out - is in
 # `TapeLifetimeChecker`; proc captures are checked during cleanup.
 class Iyi::TapeChecker
   @program : Program
@@ -87,7 +87,7 @@ class Iyi::TapeChecker
         #{type} is marked @[OnTape] but is a class
 
         A tape type is a value that lives on the fiber's tape and ends with
-        its Tape.run. A class instance is a heap object anything may keep a
+        its Tape.use. A class instance is a heap object anything may keep a
         reference to; declare #{type} as a struct.
         MSG
     end
@@ -103,7 +103,7 @@ class Iyi::TapeChecker
       fail type, ivar, <<-MSG
         #{type}'s field `#{ivar.name} : #{ivar_type}` holds the tape type #{found}
 
-        #{type} is #{where}, and a tape value lives only until the Tape.run
+        #{type} is #{where}, and a tape value lives only until the Tape.use
         that made it ends. Keep it in a local, a parameter or another @[OnTape]
         struct, or copy what must outlive the scope into an owned value
         (use `to_s` for Tape::String fields).
@@ -122,7 +122,7 @@ class Iyi::TapeChecker
         the class variable `#{cvar.name} : #{cvar_type}` holds the tape type #{found}
 
         A class variable lives as long as the program, and a tape value only
-        until the Tape.run that made it ends.
+        until the Tape.use that made it ends.
         MSG
     end
   end

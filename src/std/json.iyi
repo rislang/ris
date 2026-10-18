@@ -2867,7 +2867,7 @@ end
 
 # A document read by `JSON.parse(bytes : Tape::String)`: every value in one
 # `Tape::Tree` in document order, its strings spans of the input, all of it
-# the caller's `Tape.run`'s. A value is named by its index; the root's is
+# the caller's `Tape.use`'s. A value is named by its index; the root's is
 # 0. A string with an escape is decoded when it is asked for.
 @[OnTape]
 pub struct Document

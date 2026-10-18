@@ -24,4 +24,4 @@ class Last
   end
 end
 
-Tape.run { Last.keep(make) }
+Tape.use { Last.keep(make) }

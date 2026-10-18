@@ -16,7 +16,7 @@ def make : Resp
 end
 
 # A proc may be called after the scope has ended.
-Tape.run do
+Tape.use do
   r = make
   callback = -> { r.id }
   puts callback.call

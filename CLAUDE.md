@@ -23,13 +23,13 @@ ris is iyi plus Goose's tape memory.
 ## A library works on the caller's tape
 
 As Slim does (`Slim.render`, `Slim.embed`), a library does not open a tape
-of its own; the caller's `Tape.run` owns all of it, freed at once:
+of its own; the caller's `Tape.use` owns all of it, freed at once:
 
 * Take input already on the tape (`Tape::String`), not a `String` copy of it.
 * Write output into the caller's `Tape::String::Writer`, or return a
   `Tape::String` or an `@[OnTape]` struct the caller's scope owns, viewing
   the input bytes rather than copying them.
-* Temporaries go on the caller's tape: a nested `Tape.run` shares it at
+* Temporaries go on the caller's tape: a nested `Tape.use` shares it at
   no cost. No `Tape.local` per call; it costs more than small work saves.
 * The caller decides what to copy to the heap, and when.
 * No raw pointers in an API: pass `Tape::String`, `Tape::String::Writer`,
@@ -39,7 +39,7 @@ of its own; the caller's `Tape.run` owns all of it, freed at once:
   with `[]`, `[start, count]`, `each_byte`. Only the library's own FFI or
   socket call takes the pointer.
 * Keep the `String` API beside it, built on the tape one: it opens a
-  `Tape.run` (shared when the caller has one) and copies the result out.
+  `Tape.use` (shared when the caller has one) and copies the result out.
 
 Example: `HTTP.parse_head(bytes : Tape::String) : ParsedHead | ParseError`,
 with `ParsedHead`'s method, target and fields as views into *bytes*;

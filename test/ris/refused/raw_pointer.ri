@@ -1,6 +1,6 @@
 # A Tape::String's pointer outside the library: it reads past the string's
 # bytes as readily as within them.
-Tape.run do
+Tape.use do
   text = Tape::String.new("abc")
   puts text.to_unsafe[3]
 end

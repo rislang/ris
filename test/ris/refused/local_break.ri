@@ -1,5 +1,5 @@
 module test/ris/refused/local_break
-Tape.run do
+Tape.use do
   escaped = Tape.local do
     break Tape::String.build { |w| w.append("inner") }
   end

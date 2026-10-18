@@ -1,6 +1,6 @@
 module test/ris/refused/local_return
 def escape : Tape::String
-  Tape.run do
+  Tape.use do
     Tape.local do
       return Tape::String.build { |w| w.append("inner") }
     end

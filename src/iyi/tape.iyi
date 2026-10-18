@@ -1,6 +1,6 @@
 # PROTOTYPE (ris, step B): tape values.
 #
-# `Tape.run { }` gives the running fiber a tape: one mapping that values
+# `Tape.use { }` gives the running fiber a tape: one mapping that values
 # made inside the block are bumped into, all of it freed with one store when
 # the block returns, and the mapping kept warm for the fiber's next scope.
 # Only the types below are made there. Every other allocation - a String, an
@@ -12,7 +12,7 @@
 # struct marked `@[OnTape]` is a tape type, and `Iyi::TapeChecker` and
 # `TapeLifetimeChecker` refuse a tape value in a class's field, a
 # non-tape struct's field, a class variable, a generic's type argument, a
-# proc's captures, a `Tape.run` block's value, or a variable of the code
+# proc's captures, a `Tape.use` block's value, or a variable of the code
 # around the scope.
 #
 # The values are structs holding one pointer, to a state block on the tape,
@@ -37,7 +37,7 @@ module Tape
   end
 
   # Runs the block on the fiber's tape, freed when the block ends. Inside
-  # another `run` it shares that tape and frees nothing: what it made is
+  # another `use` it shares that tape and frees nothing: what it made is
   # freed with the outer one, so a library opens one at no cost, and a
   # long loop inside one takes `Tape.local` for its temporaries.
   #
@@ -45,7 +45,7 @@ module Tape
   # without an assignment the compiler can see, so it is not passed on.
   # What must outlive the scope is copied into a variable of the code
   # around it (`total = page.sum`, `body = text.to_s`).
-  def self.run(&) : Nil
+  def self.use(&) : Nil
     IyiRegion.tape_scope(CAPACITY) { yield }
     nil
   end
@@ -134,7 +134,7 @@ module Tape
     end
 
     # Copy these borrowed bytes into an independent GC-managed String.
-    # Call inside the owning Tape.run when retaining text in a cache/task.
+    # Call inside the owning Tape.use when retaining text in a cache/task.
     # The source is unchanged and remains valid until its scope ends.
     def to_s : ::String
       ::String.new(@bytesize) { |buffer| buffer.copy_from(@ptr, @bytesize) }

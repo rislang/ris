@@ -2,7 +2,7 @@ module test/ris/scope_cleanup
 import std/int
 
 def early : Int32
-  Tape.run do
+  Tape.use do
     text = Tape::String.build { |w| w.push(65_u8) }
     return text.bytesize
   end
@@ -11,8 +11,8 @@ end
 
 puts early
 puts IyiRegion.tape == 0_u64
-Tape.run do
-  Tape.run do
+Tape.use do
+  Tape.use do
     text = Tape::String.build { |w| w.push(66_u8) }
     break text.bytesize
   end
@@ -20,7 +20,7 @@ Tape.run do
   break 7
 end
 puts IyiRegion.tape == 0_u64
-Tape.run do
+Tape.use do
   text = Tape::String.build { |w| w.push(67_u8) }
   puts text.to_s
 end

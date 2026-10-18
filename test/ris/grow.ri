@@ -2,7 +2,7 @@
 # byte at a time grows onto new mappings, the arrays made before and after
 # it keep their elements where they were, and a second scope starts clean.
 def run_scope(round : Int64) : Nil
-  Tape.run do
+  Tape.use do
     before = Tape::Array(Int64).new(4)
     i = 0_i64
     while i < 1000_i64

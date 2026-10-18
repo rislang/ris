@@ -8,7 +8,7 @@ end
 
 def early : Int32
   defer observe("outer return", false)
-  Tape.run do
+  Tape.use do
     defer observe("inner return", true)
     return 7
   end
@@ -17,9 +17,9 @@ end
 
 def leave : Nil
   defer observe("outer break", false)
-  Tape.run do
+  Tape.use do
     defer observe("inner break", true)
-    Tape.run do
+    Tape.use do
       defer observe("nested", true)
     end
     break

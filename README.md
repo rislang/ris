@@ -24,7 +24,7 @@ ask me to build your personal blog in ris ;-)" Don't start the blog.
 ```
 
 ## Why ris: tape memory, without the GC
-In a `Tape.run`, tape types (`@[OnTape]`) are bump-allocated and freed at
+In a `Tape.use`, tape types (`@[OnTape]`) are bump-allocated and freed at
 once at its `end`; other objects keep iyi's GC, so libraries work unchanged.
 
 ```crystal
@@ -33,7 +33,7 @@ def page(name : String) : Tape::String
   Slim.render("views/page.slim")      # the template, compiled to ris code
 end
 body = ""                             # an ordinary String: iyi's GC heap
-Tape.run do                         # this request's memory starts here
+Tape.use do                         # this request's memory starts here
   html = page("world")                # rendered onto the tape, no GC
   body = html.to_s                    # `to_s` copies out what must survive
 end                                   # every tape byte freed at once, here

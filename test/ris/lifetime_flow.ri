@@ -6,7 +6,7 @@ def make_text : Tape::String
 end
 
 def with_text(&)
-  Tape.run { yield make_text }
+  Tape.use { yield make_text }
 end
 
 def forward(&)
@@ -14,7 +14,7 @@ def forward(&)
 end
 
 with_text { |text| puts text.to_s }
-Tape.run do
+Tape.use do
   kept = nil
   items = Tape::Array(Tape::String).new(0)
   items.push(make_text)
@@ -22,7 +22,7 @@ Tape.run do
   if text = kept
     puts text.to_s
   end
-  nested = Tape.run { break make_text }
+  nested = Tape.use { break make_text }
   if text = nested
     puts text.to_s
   end

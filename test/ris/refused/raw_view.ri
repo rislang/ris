@@ -1,5 +1,5 @@
 # A view of any address, made outside the library.
-Tape.run do
+Tape.use do
   heap = "abc"
   text = Tape::String.new(heap.to_unsafe, 64)
   puts text.bytesize

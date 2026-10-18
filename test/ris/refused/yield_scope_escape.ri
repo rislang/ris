@@ -2,7 +2,7 @@ module test/ris/refused/yield_scope_escape
 import std/int
 
 def with_tape(&)
-  Tape.run { yield }
+  Tape.use { yield }
 end
 
 kept = nil

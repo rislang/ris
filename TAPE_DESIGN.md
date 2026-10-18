@@ -7,12 +7,12 @@ safety. [SPEC.md](SPEC.md) is iyi's, unchanged; example: [README.md](README.md).
 Objects use iyi's GC heap. Tape is opt-in: `Tape::String` (and its
 `Writer`), `Tape::Array(T)`, `Tape::Tree(T)` go on the running fiber's tape
 (saved on a switch); `@[OnTape]` marks a struct tape-bearing, not moved. Tape
-allocation outside `Tape.run` or `Tape.local` ends the program. Bump-pointer;
+allocation outside `Tape.use` or `Tape.local` ends the program. Bump-pointer;
 64 MiB of address space first (written pages resident), then larger; 64 spares.
 
-Only the outermost `Tape.run` reclaims, on every exit (panic too); nested
+Only the outermost `Tape.use` reclaims, on every exit (panic too); nested
 scopes share it. `Tape.local` always takes its own tape, released on every
-exit; a `Tape.run` inside one shares it. A non-tape `break` may leave.
+exit; a `Tape.use` inside one shares it. A non-tape `break` may leave.
 
 ## Lifetime and storage rules
 The invariant: no safe tape-bearing value survives reclamation of the

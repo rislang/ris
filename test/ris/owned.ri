@@ -19,14 +19,14 @@ def page : Tape::String
 end
 
 def retained_page : String
-  Tape.run do
+  Tape.use do
     return page.to_s
   end
   ""
 end
 
 cache = Cache.new
-Tape.run do
+Tape.use do
   borrowed = page
   owned = borrowed.to_s
   cache.store(owned)
@@ -34,7 +34,7 @@ Tape.run do
   empty = Tape::String.build(0) { |writer| }
   raise "empty copy changed" unless empty.to_s == ""
 end
-Tape.run do
+Tape.use do
   overwrite = page
 end
 raise "retained text changed after scope reuse" unless cache.body == "café <&>"

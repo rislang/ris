@@ -7,7 +7,7 @@ def observe(label : String, active : Bool) : Nil
 end
 
 defer observe("outer exit", false)
-Tape.run do
+Tape.use do
   defer observe("inner exit", true)
   exit 3
 end

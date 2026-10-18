@@ -8,9 +8,9 @@ end
 
 def broken : Int32
   defer observe("outer panic", false)
-  Tape.run do
+  Tape.use do
     defer observe("inner panic", true)
-    Tape.run do
+    Tape.use do
       defer observe("nested panic", true)
       raise "tape test panic"
     end
@@ -23,4 +23,4 @@ group do |g|
   puts task.value.is_a?(Panicked)
 end
 puts IyiRegion.tape == 0_u64
-Tape.run { puts "scope after panic" }
+Tape.use { puts "scope after panic" }

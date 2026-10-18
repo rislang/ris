@@ -3,7 +3,7 @@ module shop/order
 
 # A response that lives on the request's tape. `@[OnTape]` makes it a tape
 # type: the compiler refuses to keep one anywhere that outlives the
-# `Tape.run` that made it.
+# `Tape.use` that made it.
 @[OnTape]
 pub struct Order
   getter id : Int64

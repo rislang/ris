@@ -6,7 +6,7 @@ def forward(&)
 end
 
 def with_text(&)
-  Tape.run do
+  Tape.use do
     text = Tape::String.build { |w| w.push(65_u8) }
     forward { yield text }
   end
