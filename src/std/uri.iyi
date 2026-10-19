@@ -161,36 +161,8 @@ pub struct Params
   # asked of text a program made.
   def self.parse(query : String) : Params
     params = Params.new
-    return params if query.empty?
-
-    # Strip optional leading '?'
-    s = query.starts_with?('?') ? query[1, query.bytesize - 1] : query
-    return params if s.empty?
-
-    pairs = s.split('&')
-    p_idx = 0
-    while p_idx < pairs.size
-      pair = pairs[p_idx]
-      unless pair.empty?
-        # Support semicolon separator as well
-        sub_pairs = pair.split(';')
-        sp_idx = 0
-        while sp_idx < sub_pairs.size
-          item = sub_pairs[sp_idx]
-          unless item.empty?
-            eq_idx = item.index('=')
-            if eq_idx
-              raw_k = item[0, eq_idx]
-              raw_v = item[eq_idx + 1, item.bytesize - eq_idx - 1]
-              params.add(URI.decode_form_lenient(raw_k), URI.decode_form_lenient(raw_v))
-            else
-              params.add(URI.decode_form_lenient(item), "")
-            end
-          end
-          sp_idx = sp_idx + 1
-        end
-      end
-      p_idx = p_idx + 1
+    tape do
+      Query.parse(Tape::String.view(query)).each { |key, value| params.add(key.to_s, value.to_s) }
     end
     params
   end
@@ -206,6 +178,125 @@ pub struct Params
       i = i + 1
     end
     parts.join("&")
+  end
+end
+
+# A query's parameters read on the caller's tape, as `Params.parse` reads
+# them: `&` and `;` part the pairs, `+` is a space, `%XX` the byte, and a
+# `%` before no two hex digits itself. A name or value with neither `+`
+# nor `%` is a view of the query; one with them is decoded onto the tape.
+# The pairs are made at their final size, counted first.
+@[OnTape]
+pub struct Query
+  getter pairs : Tape::Array(QueryPair)
+
+  def initialize(@pairs : Tape::Array(QueryPair))
+  end
+
+  def self.parse(query : Tape::String) : Query
+    from = query.bytesize > 0 && query[0] == 63_u8 ? 1 : 0
+    count = 0
+    each_part(query, from) { |_, _| count += 1 }
+    none = query[0, 0]
+    pairs = Tape::Array(QueryPair).new(count) { QueryPair.new(none, none) }
+    at = 0
+    each_part(query, from) do |start, stop|
+      eq = start
+      while eq < stop && query[eq] != 61_u8
+        eq += 1
+      end
+      key = decoded(query, start, eq)
+      value = eq < stop ? decoded(query, eq + 1, stop) : none
+      pairs[at] = QueryPair.new(key, value)
+      at += 1
+    end
+    Query.new(pairs)
+  end
+
+  # The start and end of each part between `&` and `;` that is not empty.
+  private def self.each_part(query : Tape::String, from : Int32, & : Int32, Int32 -> Nil) : Nil
+    start = from
+    i = from
+    size = query.bytesize
+    while i <= size
+      if i == size || query[i] == 38_u8 || query[i] == 59_u8
+        yield start, i if i > start
+        start = i + 1
+      end
+      i += 1
+    end
+  end
+
+  # The bytes from *start* to *stop*, decoded: themselves when there is
+  # nothing to decode, else a new string on the tape.
+  private def self.decoded(query : Tape::String, start : Int32, stop : Int32) : Tape::String
+    plain = true
+    i = start
+    while i < stop
+      b = query[i]
+      plain = false if b == 43_u8 || b == 37_u8
+      i += 1
+    end
+    return query[start, stop - start] if plain
+    Tape::String.build(stop - start) do |w|
+      i = start
+      while i < stop
+        b = query[i]
+        if b == 43_u8
+          w.push(32_u8)
+          i += 1
+        elsif b == 37_u8 && i + 2 < stop && hex(query[i + 1]) >= 0 && hex(query[i + 2]) >= 0
+          w.push(((hex(query[i + 1]) << 4) | hex(query[i + 2])).to_u8)
+          i += 3
+        else
+          w.push(b)
+          i += 1
+        end
+      end
+    end
+  end
+
+  # A hex digit's value, -1 for another byte.
+  private def self.hex(b : UInt8) : Int32
+    return (b - 48_u8).to_i32 if b >= 48_u8 && b <= 57_u8
+    return (b - 87_u8).to_i32 if b >= 97_u8 && b <= 102_u8
+    return (b - 55_u8).to_i32 if b >= 65_u8 && b <= 70_u8
+    -1
+  end
+
+  def size : Int32
+    @pairs.size
+  end
+
+  # The first value of *key*, nil when there is none.
+  def []?(key : String) : Tape::String?
+    i = 0
+    while i < @pairs.size
+      pair = @pairs[i]
+      return pair.value if pair.key == key
+      i += 1
+    end
+    nil
+  end
+
+  # Each name and value, in order.
+  def each(& : Tape::String, Tape::String -> Nil) : Nil
+    i = 0
+    while i < @pairs.size
+      pair = @pairs[i]
+      yield pair.key, pair.value
+      i += 1
+    end
+  end
+end
+
+# One name and value of a `Query`.
+@[OnTape]
+pub struct QueryPair
+  getter key : Tape::String
+  getter value : Tape::String
+
+  def initialize(@key : Tape::String, @value : Tape::String)
   end
 end
 
@@ -619,29 +710,6 @@ pub class URI
 
     String.new(bytes.size) do |buf|
       buf.copy_from(bytes.to_unsafe, bytes.size)
-    end
-  end
-
-  # `+` a space and `%XX` a byte, any other `%` kept as it is: the form
-  # reading `Params.parse` makes.
-  protected def self.decode_form_lenient(str : String) : String
-    raw = str.to_unsafe
-    len = str.bytesize
-    String.build(len) do |io|
-      i = 0
-      while i < len
-        b = raw[i]
-        if b == 43_u8 # '+'
-          io.write_byte(32_u8)
-          i = i + 1
-        elsif b == 37_u8 && i + 2 < len && hex_value(raw[i + 1]) >= 0 && hex_value(raw[i + 2]) >= 0
-          io.write_byte(((hex_value(raw[i + 1]) << 4) | hex_value(raw[i + 2])).to_u8)
-          i = i + 3
-        else
-          io.write_byte(b)
-          i = i + 1
-        end
-      end
     end
   end
 

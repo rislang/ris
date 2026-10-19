@@ -120,10 +120,10 @@ PY
   "$PY" - <<PY
 from pathlib import Path
 src = Path("$REPO/src/std/uri.iyi").read_text()
-old = '              params.add(URI.decode_form_lenient(raw_k), URI.decode_form_lenient(raw_v))'
+old = '        elsif b == 37_u8 && i + 2 < stop && hex(query[i + 1]) >= 0 && hex(query[i + 2]) >= 0'
 if old not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/strict/std/uri.iyi").write_text(src.replace(old, '              params.add(URI.decode_www_form(raw_k), URI.decode_www_form(raw_v))', 1))
+Path("$WORK/strict/std/uri.iyi").write_text(src.replace(old, '        elsif b == 37_u8 && (i + 2 < stop && hex(query[i + 1]) >= 0 && hex(query[i + 2]) >= 0 || raise "malformed percent escape")', 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the strict-form patch did not apply"

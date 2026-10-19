@@ -1,0 +1,40 @@
+# query: a query string's parameters read a million times, as a handler
+# reads `?q=...&page=...`: by `Params.parse` on the heap, or `Query.parse`
+# on the tape. Prints a checksum and the GC heap bytes per parse,
+# collection off; time it from outside.
+#
+#   ./bin/ris build --release -o query samples/ris/query.ri
+#   ./query; ./query tape
+
+module samples/query_bench
+
+import std/uri::{Params, Query}
+import std/gc::{GC}
+
+N = 1000000
+QUERIES = ["q=hello+world&page=2&sort=name", "filter=a%2Cb&x=1&y=&z", "page=10;limit=50&q=caf%C3%A9"]
+
+on_tape = Program.args.includes?("tape")
+GC.disable
+before = GC.stats.bytes_since_collection
+sum = 0_i64
+i = 0
+while i < N
+  text = QUERIES[i % 3]
+  if on_tape
+    tape do
+      q = Query.parse(Tape::String.view(text))
+      page = q["page"]?
+      words = q["q"]?
+      sum += (page ? page.bytesize : 0) + (words ? words.bytesize : 0) + q.size
+    end
+  else
+    p = Params.parse(text)
+    page = p["page"]?
+    words = p["q"]?
+    sum += (page ? page.bytesize : 0) + (words ? words.bytesize : 0) + p.size
+  end
+  i += 1
+end
+puts sum
+puts "#{(GC.stats.bytes_since_collection - before) // N.to_u64} heap bytes a parse"

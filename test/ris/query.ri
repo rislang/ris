@@ -1,0 +1,31 @@
+# `Query.parse` on the tape reads what `Params.parse` reads - `&` and `;`
+# part pairs, `+` a space, `%XX` a byte, a lone `%` itself, a leading `?`
+# dropped, empty parts skipped - and puts nothing on the GC heap.
+module test/ris/query_test
+
+import std/uri::{Query}
+import std/gc::{GC}
+
+def pairs(text : String) : String
+  out = ""
+  tape do
+    q = Query.parse(Tape::String.view(text))
+    q.each { |key, value| out = out + "[#{key.to_s}=#{value.to_s}]" }
+  end
+  out
+end
+
+ok = pairs("?a=1&b=2;c=3&&d&e=") == "[a=1][b=2][c=3][d=][e=]" &&
+     pairs("q=hello+world&x=%41%2c%zz&p=100%") == "[q=hello world][x=A,%zz][p=100%]" &&
+     pairs("") == "" && pairs("?") == "" && pairs("=v&k=") == "[=v][k=]"
+GC.disable
+before = GC.stats.bytes_since_collection
+found = 0
+tape do
+  q = Query.parse(Tape::String.view("page=2&q=caf%C3%A9+au+lait"))
+  page = q["page"]?
+  words = q["q"]?
+  found = (page ? page.bytesize : 0) + (words ? words.bytesize : 0)
+end
+ok &&= found == 1 + 13 && GC.stats.bytes_since_collection == before
+puts ok ? "PASS: read as Params reads, nothing on the heap" : "FAILED"
