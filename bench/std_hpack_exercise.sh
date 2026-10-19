@@ -222,8 +222,9 @@ fix_proof "a negative integer offset read from the end" fix_int_offset \
       return HpackError.new("Integer decode'
 fix_proof "a Huffman bound that adds offset and length" fix_huff_bound \
   "arithmetic overflow" "a Huffman length past Int32 is refused" \
-  'offset > bytes.size || length > bytes.size - offset' \
-  'offset + length > bytes.size'
+  'offset > bytes.bytesize ||
+       length > bytes.bytesize - offset' \
+  'offset + length > bytes.bytesize'
 fix_proof "a header list counted in Int32" fix_list_i32 \
   "arithmetic overflow" "a header list past Int32 octets is counted" \
   'total_uncompressed_size = 0_i64' 'total_uncompressed_size = 0_i32' \

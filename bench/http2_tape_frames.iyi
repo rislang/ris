@@ -1,0 +1,27 @@
+# Internal harness: http2_tape.sh exposes test hooks in temporary copies.
+# Dispatch identical buffered extension frames; no socket IO is involved.
+module bench/http2_tape_frames
+
+import std/http::{Conn, H2Connection}
+import std/socket::{IyiSocket}
+import std/time::{Time}
+
+conn = Conn.new(IyiSocket.new(-1))
+h2 = H2Connection.new(conn, true)
+h2.bench_settled
+payload = "x" * 1000
+frame = "\x00\x03\xe8\x2a\x00\x00\x00\x00\x00" + payload
+IyiMark.auto = false
+conn.bench_seed(frame, 0)
+h2.read_frame
+sum = 0_i64
+before = IyiMark.allocated_since
+started = Time.monotonic_nanoseconds
+20000.times do
+  conn.bench_seed(frame, 0)
+  raise "dispatch failed" unless h2.read_frame
+  sum = sum + payload.bytesize
+end
+elapsed = Time.monotonic_nanoseconds - started
+allocated = IyiMark.allocated_since - before
+puts "frames ns=#{elapsed} bytes=#{allocated} sum=#{sum}"

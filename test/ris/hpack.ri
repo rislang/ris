@@ -1,0 +1,73 @@
+# Heap and tape HPACK preserve fields, errors and connection tables.
+module test/ris/hpack
+
+import std/indexable
+import std/slice::{Bytes}
+import std/hpack::{Encoder, Decoder, HeaderField, HpackError,
+                  TapeHeaders, TapeHeaderField, IndexingMode}
+
+fields = [HeaderField.new(":method", "GET"),
+          HeaderField.new(":path", "/hello?q=1"),
+          HeaderField.new("x-indexed", "retained by the table"),
+          HeaderField.new("authorization", "secret", true),
+          HeaderField.new("x-raw", "utf8: ü and NUL: \x00",
+                          IndexingMode::WithoutIndexing)]
+encoder = Encoder.new
+native_encoder = Encoder.new
+decoder = Decoder.new
+heap_decoder = Decoder.new
+retained = [] of HeaderField
+20.times do |i|
+  encoder.use_huffman = i % 2 == 0
+  native_encoder.use_huffman = i % 2 == 0
+  if i == 5
+    encoder.set_max_table_size(128)
+    native_encoder.set_max_table_size(128)
+  end
+  wire = encoder.encode(fields)
+  text = String.new(wire.size) { |p| p.copy_from(wire.to_unsafe, wire.size) }
+  expected = heap_decoder.decode(wire)
+  raise "heap decode failed" if expected.is_a?(HpackError)
+  tape do
+    native_fields = TapeHeaders.new(fields.size)
+    fields.each do |field|
+      native_fields.push(TapeHeaderField.new(
+        Tape::String.new(field.name), Tape::String.new(field.value),
+        field.indexing))
+    end
+    encoded = native_encoder.encode_on_tape(native_fields)
+    raise "tape encoding" unless encoded == text
+    decoded = decoder.decode(Tape::String.view(text))
+    raise decoded.message if decoded.is_a?(HpackError)
+    raise "field count" unless decoded.size == expected.size
+    decoded.each do |field|
+      raise "name" unless field.name == expected[retained.size].name
+      raise "value" unless field.value == expected[retained.size].value
+      retained << field.retained
+    end
+  end
+  raise "retained fields" unless retained == expected
+  retained.clear
+end
+# Bad integers, index zero, truncated literals and Huffman padding.
+["\x80", "\xff", "\x00\x03a", "\x00\x81\x00"].each do |text|
+  bytes = Bytes.new(text.bytesize) { |i| text.to_unsafe[i] }
+  expected = Decoder.new.decode(bytes)
+  raise "expected failure" unless expected.is_a?(HpackError)
+  tape do
+    decoded = Decoder.new.decode(Tape::String.view(text))
+    raise "accepted malformed block" unless decoded.is_a?(HpackError)
+    raise "changed error" unless decoded.message == expected.message
+  end
+end
+# List limits must reject a valid indexed field before writing a slot.
+tape do
+  text = Tape::String.view("\x82")
+  count = Decoder.new(max_header_count: 0).decode(text)
+  raise "count limit" unless count.is_a?(HpackError)
+  raise "count error" unless count.message.starts_with?("Decompression bomb")
+  size = Decoder.new(max_header_list_size: 41).decode(text)
+  raise "size limit" unless size.is_a?(HpackError)
+  raise "size error" unless size.message.starts_with?("Decompression bomb")
+end
+puts "PASS: tape HPACK fields, retained tables and malformed input"

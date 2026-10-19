@@ -1,0 +1,63 @@
+# Internal harness: a complete buffered request, through response queueing.
+# http2_tape.sh adds seed/queue inspection hooks to temporary module copies.
+module bench/http2_tape_request
+
+import std/http::{Conn, H2Connection, Response}
+import std/hpack::{Encoder, HeaderField}
+import std/socket::{IyiSocket}
+import std/time::{Time}
+
+conn = Conn.new(IyiSocket.new(-1))
+h2 = H2Connection.new(conn, true)
+h2.bench_settled
+encoder = Encoder.new(max_table_size: 0)
+fields = [HeaderField.new(":method", "GET"),
+          HeaderField.new(":scheme", "https"),
+          HeaderField.new(":path", "/resource?q=one", true),
+          HeaderField.new(":authority", "www.example.com", true),
+          HeaderField.new("authorization", "Bearer abcdef0123456789", true)]
+wire = encoder.encode(fields)
+block = String.new(wire.size) { |p| p.copy_from(wire.to_unsafe, wire.size) }
+frame = String.new(9) do |p|
+  p[0] = 0_u8
+  p[1] = 0_u8
+  p[2] = block.bytesize.to_u8
+  p[3] = 1_u8
+  p[4] = 5_u8
+  p[5] = 0_u8
+  p[6] = 0_u8
+  p[7] = 0_u8
+  p[8] = 1_u8
+end
+frame = frame + block
+response = Response.new(200, "hello world")
+response.headers["Content-Type"] = "text/plain"
+response.headers["X-Request"] = "  a fairly long response field  "
+IyiMark.auto = false
+sum = 0_i64
+# Include the same request scope as the server and warm it once.
+before = 0_u64
+started = 0_u64
+20001.times do |i|
+  if i == 1
+    before = IyiMark.allocated_since
+    started = Time.monotonic_nanoseconds
+  end
+  tape do
+    conn.bench_seed(frame, i * 2 + 1)
+    id = h2.next_request
+    raise "no request" unless id
+    req = h2.request(id, nil)
+    raise "bad request" unless req
+    raise "bad path" unless req.path == "/resource"
+    raise "bad header" unless req.header("authorization") ==
+      "Bearer abcdef0123456789"
+    raise "no response" unless h2.answer(id, response, req, false)
+    h2.done(id)
+    size = h2.bench_drain
+    sum = sum + size if i > 0
+  end
+end
+elapsed = Time.monotonic_nanoseconds - started
+allocated = IyiMark.allocated_since - before
+puts "request ns=#{elapsed} bytes=#{allocated} sum=#{sum}"

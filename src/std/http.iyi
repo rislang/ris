@@ -2146,11 +2146,22 @@ pub struct Server
   private def self.serve_h2(conn : Conn, handler : Proc(Request, Response), stream_bodies : Bool, compress : Bool, remote : String?, peer : Array(Certificate)) : Nil
     h2 = H2Connection.new(conn, true, MAX_BODY.to_i64)
     return unless h2.start
-    while id = h2.next_request
+    while serve_h2_request(h2, handler, stream_bodies, compress, remote, peer)
+    end
+    h2.goaway
+    linger(conn.socket) if h2.failure.is_a?(HTTPError)
+  end
+
+  private def self.serve_h2_request(h2 : H2Connection,
+      handler : Proc(Request, Response), stream_bodies : Bool,
+      compress : Bool, remote : String?, peer : Array(Certificate)) : Bool
+    tape do
+      id = h2.next_request
+      return false unless id
       req = h2.request(id, remote)
       if req.nil?
         h2.done(id)
-        next
+        return true
       end
       unless stream_bodies
         body = req.body_io.read_all(MAX_BODY.to_i64)
@@ -2160,20 +2171,19 @@ pub struct Server
         in HTTPError
           h2.refuse_request(id, 413, body.reason) if body.status == 413
           h2.done(id)
-          next
+          return true
         in Cancelled
-          break
+          return false
         in SocketError
-          break
+          return false
         end
       end
       req.peer_certificates = peer
       answered = h2.answer(id, handler.call(req), req, compress)
       h2.done(id)
-      break unless answered
+      return answered
     end
-    h2.goaway
-    linger(conn.socket) if h2.failure.is_a?(HTTPError)
+    false
   end
 
   LINGER_BYTES = 65536
@@ -4989,6 +4999,14 @@ class H2Connection
   # peer closed it, it failed (`failure`), or it broke the protocol, which
   # has been answered with a GOAWAY that says how.
   def read_frame : Bool
+    result = false
+    tape do
+      result = read_frame_on_tape
+    end
+    result
+  end
+
+  private def read_frame_on_tape : Bool
     return false unless @failure.nil?
     return false unless flush
     return ended unless @conn.need(9)
@@ -4998,8 +5016,10 @@ class H2Connection
     id = ((@conn.peek(5).to_i32 & 0x7F) << 24) | (@conn.peek(6).to_i32 << 16) | (@conn.peek(7).to_i32 << 8) | @conn.peek(8).to_i32
     return fail(FRAME_SIZE_ERROR, "a frame of #{length} bytes, past the #{FRAME} this end takes") if length > FRAME
     return ended unless @conn.need(9 + length)
-    @conn.consume(9)
-    payload = @conn.take(length)
+    # Dispatch before the connection buffer can be filled again. Only
+    # DATA queued for a stream copies out at its retention boundary.
+    payload = @conn.tape_view[9, length]
+    @conn.consume(9 + length)
     if @block_stream != 0 && (type != CONTINUATION || id != @block_stream)
       return fail(PROTOCOL_ERROR, "a header block broken off by another frame")
     end
@@ -5072,7 +5092,7 @@ class H2Connection
 
   # The payload without its padding (§6.1), or nil when the padding claims
   # more than the frame holds.
-  private def unpadded(flags : Int32, payload : String) : String?
+  private def unpadded(flags : Int32, payload : Tape::String) : Tape::String?
     return payload if flags & PADDED == 0
     return nil if payload.bytesize < 1
     pad = payload.to_unsafe[0].to_i32
@@ -5080,7 +5100,7 @@ class H2Connection
     payload[1, payload.bytesize - 1 - pad]
   end
 
-  private def on_data(id : Int32, flags : Int32, payload : String) : Bool
+  private def on_data(id : Int32, flags : Int32, payload : Tape::String) : Bool
     return fail(PROTOCOL_ERROR, "DATA on stream 0") if id == 0
     body = unpadded(flags, payload)
     return fail(PROTOCOL_ERROR, "DATA whose padding is longer than the frame") if body.nil?
@@ -5116,7 +5136,7 @@ class H2Connection
       s.too_large = true
       s.pieces.clear
     elsif body.bytesize > 0
-      s.pieces << body
+      s.pieces << body.to_s
     end
     if flags & END_STREAM != 0
       s.ended = true
@@ -5125,7 +5145,8 @@ class H2Connection
     true
   end
 
-  private def on_headers(id : Int32, flags : Int32, payload : String) : Bool
+  private def on_headers(id : Int32, flags : Int32,
+                          payload : Tape::String) : Bool
     return fail(PROTOCOL_ERROR, "HEADERS on stream 0") if id == 0
     block = unpadded(flags, payload)
     return fail(PROTOCOL_ERROR, "HEADERS whose padding is longer than the frame") if block.nil?
@@ -5170,7 +5191,8 @@ class H2Connection
     flags & END_HEADERS != 0 ? close_block : true
   end
 
-  private def on_continuation(id : Int32, flags : Int32, payload : String) : Bool
+  private def on_continuation(id : Int32, flags : Int32,
+                          payload : Tape::String) : Bool
     return fail(PROTOCOL_ERROR, "CONTINUATION with no header block open") if @block_stream == 0
     return false unless gather(payload)
     flags & END_HEADERS != 0 ? close_block : true
@@ -5178,7 +5200,7 @@ class H2Connection
 
   # A piece of the open header block, refused past what a head may hold:
   # CONTINUATION after CONTINUATION is no way to make this end keep more.
-  private def gather(piece : String) : Bool
+  private def gather(piece : Tape::String) : Bool
     return fail(ENHANCE_YOUR_CALM, "a header block past #{HEADER_LIST} bytes") if @block.size + piece.bytesize > HEADER_LIST
     p = piece.to_unsafe
     i = 0
@@ -5190,9 +5212,19 @@ class H2Connection
   end
 
   private def close_block : Bool
+    result = false
+    tape do
+      result = close_block_on_tape
+    end
+    result
+  end
+
+  private def close_block_on_tape : Bool
     id = @block_stream
     @block_stream = 0
-    bytes = Std::Hpack::Bytes.new(@block.size) { |i| @block[i] }
+    bytes = Tape::String.build(@block.size) do |w|
+      @block.each { |b| w.push(b) }
+    end
     @block = [] of UInt8
     decoded = @decoder.decode(bytes)
     return fail(COMPRESSION_ERROR, "a header block that does not decode: #{decoded.message}") if decoded.is_a?(Std::Hpack::HpackError)
@@ -5227,9 +5259,13 @@ class H2Connection
         return true
       end
     end
-    s.fields = decoded
+    # Ready streams live on the connection until selected by the server.
+    # This is the ownership boundary; rejected heads never copy out.
+    s.fields = Array(Std::Hpack::HeaderField).new(decoded.size) do |i|
+      decoded[i].retained
+    end
     if declared = H2Connection.field(decoded, "content-length")
-      n = HTTP.content_length(declared)
+      n = HTTP.content_length(declared.to_s)
       return refuse(id, PROTOCOL_ERROR) unless n
       s.declared = n
     end
@@ -5248,7 +5284,7 @@ class H2Connection
     n
   end
 
-  private def on_priority(id : Int32, payload : String) : Bool
+  private def on_priority(id : Int32, payload : Tape::String) : Bool
     return fail(PROTOCOL_ERROR, "PRIORITY on stream 0") if id == 0
     return refuse(id, FRAME_SIZE_ERROR) if payload.bytesize != 5
     p = payload.to_unsafe
@@ -5257,7 +5293,7 @@ class H2Connection
     true
   end
 
-  private def on_reset(id : Int32, payload : String) : Bool
+  private def on_reset(id : Int32, payload : Tape::String) : Bool
     return fail(PROTOCOL_ERROR, "RST_STREAM on stream 0") if id == 0
     return fail(FRAME_SIZE_ERROR, "RST_STREAM of #{payload.bytesize} bytes") if payload.bytesize != 4
     return fail(PROTOCOL_ERROR, "RST_STREAM on a stream never opened") if idle?(id) && @streams[id]?.nil?
@@ -5269,7 +5305,8 @@ class H2Connection
     true
   end
 
-  private def on_settings(id : Int32, flags : Int32, payload : String) : Bool
+  private def on_settings(id : Int32, flags : Int32,
+                          payload : Tape::String) : Bool
     return fail(PROTOCOL_ERROR, "SETTINGS on stream #{id}") if id != 0
     if flags & ACK != 0
       return fail(FRAME_SIZE_ERROR, "a SETTINGS acknowledgement that carries #{payload.bytesize} bytes") if payload.bytesize != 0
@@ -5307,14 +5344,14 @@ class H2Connection
     write_frame(SETTINGS, ACK, 0, "")
   end
 
-  private def on_ping(id : Int32, flags : Int32, payload : String) : Bool
+  private def on_ping(id : Int32, flags : Int32, payload : Tape::String) : Bool
     return fail(PROTOCOL_ERROR, "PING on stream #{id}") if id != 0
     return fail(FRAME_SIZE_ERROR, "PING of #{payload.bytesize} bytes") if payload.bytesize != 8
     return true if flags & ACK != 0
     write_frame(PING, ACK, 0, payload)
   end
 
-  private def on_goaway(id : Int32, payload : String) : Bool
+  private def on_goaway(id : Int32, payload : Tape::String) : Bool
     return fail(PROTOCOL_ERROR, "GOAWAY on stream #{id}") if id != 0
     return fail(FRAME_SIZE_ERROR, "GOAWAY of #{payload.bytesize} bytes") if payload.bytesize < 8
     @goaway = H2Connection.read_u32(payload, 0) & 0x7FFFFFFF
@@ -5329,7 +5366,7 @@ class H2Connection
     true
   end
 
-  private def on_window(id : Int32, payload : String) : Bool
+  private def on_window(id : Int32, payload : Tape::String) : Bool
     return fail(FRAME_SIZE_ERROR, "WINDOW_UPDATE of #{payload.bytesize} bytes") if payload.bytesize != 4
     increment = (H2Connection.read_u32(payload, 0) & 0x7FFFFFFF).to_i64
     if id == 0
@@ -5352,7 +5389,8 @@ class H2Connection
   # -- writing
 
   # One frame, in one write.
-  def write_frame(type : Int32, flags : Int32, id : Int32, payload : String) : Bool
+  def write_frame(type : Int32, flags : Int32, id : Int32,
+                  payload : String | Tape::String) : Bool
     return false unless @failure.nil? || (type == GOAWAY && @failure.is_a?(HTTPError))
     n = payload.bytesize
     head = String.new(9) do |b|
@@ -5368,7 +5406,7 @@ class H2Connection
       nil
     end
     @pending << head
-    @pending << payload if n > 0
+    @pending << payload.to_s if n > 0
     @pending_size = @pending_size + 9 + n
     @pending_size >= PENDING ? flush : true
   end
@@ -5387,12 +5425,20 @@ class H2Connection
 
   # A head: HEADERS, and CONTINUATION after it for what one frame of the
   # peer's size does not hold.
-  def send_headers(id : Int32, fields : Array(Std::Hpack::HeaderField), end_stream : Bool) : Bool
-    encoded = @encoder.encode(fields)
-    block = String.new(encoded.size) do |b|
-      b.copy_from(encoded.to_unsafe, encoded.size)
-      nil
+  def send_headers(id : Int32,
+                   fields : Array(Std::Hpack::HeaderField) |
+                            Std::Hpack::TapeHeaders,
+                   end_stream : Bool) : Bool
+    result = false
+    tape do
+      block = @encoder.encode_on_tape(fields)
+      result = send_header_block(id, block, end_stream)
     end
+    result
+  end
+
+  private def send_header_block(id : Int32, block : Tape::String,
+                                end_stream : Bool) : Bool
     at = 0
     first = true
     while first || at < block.bytesize
@@ -5537,6 +5583,15 @@ class H2Connection
   # The block's answer to stream *id*: its head, then its body as the
   # windows allow. False when the connection is over.
   def answer(id : Int32, response : Response, req : Request, compress : Bool) : Bool
+    result = false
+    tape do
+      result = answer_on_tape(id, response, req, compress)
+    end
+    result
+  end
+
+  private def answer_on_tape(id : Int32, response : Response,
+                            req : Request, compress : Bool) : Bool
     s = @streams[id]?
     return @failure.nil? if s.nil? || s.reset >= 0
     # 101 has no meaning here (§8.6): the client is told to use HTTP/1.1.
@@ -5559,7 +5614,8 @@ class H2Connection
       end
       gzip = false if length
       shown = gzip ? Server.coded(response, "gzip") : response
-      return false unless send_headers(id, H2Connection.answer_fields(shown, length, head), head || bodiless)
+      fields = H2Connection.answer_fields_on_tape(shown, length, head)
+      return false unless send_headers(id, fields, head || bodiless)
       return @failure.nil? if head || bodiless
       sink = H2Out.new(self, id)
       writer = gzip ? HTTP.gzip_writer(sink, false) : BodyWriter.new(sink, false)
@@ -5573,7 +5629,8 @@ class H2Connection
     end
     if block = response.writer
       shown = gzip ? Server.coded(response, "gzip") : response
-      return false unless send_headers(id, H2Connection.answer_fields(shown, nil, head), head || bodiless)
+      fields = H2Connection.answer_fields_on_tape(shown, nil, head)
+      return false unless send_headers(id, fields, head || bodiless)
       return @failure.nil? if head || bodiless
       sink = H2Out.new(self, id)
       writer = gzip ? HTTP.gzip_writer(sink, false) : BodyWriter.new(sink, false)
@@ -5584,7 +5641,9 @@ class H2Connection
     response = Server.compressed(response, coding) if coding && response.body.bytesize >= Server::COMPRESS_FROM
     body = response.body
     empty = head || bodiless || body.bytesize == 0
-    return false unless send_headers(id, H2Connection.answer_fields(response, bodiless ? nil : body.bytesize.to_i64, head), empty)
+    length = bodiless ? nil : body.bytesize.to_i64
+    fields = H2Connection.answer_fields_on_tape(response, length, head)
+    return false unless send_headers(id, fields, empty)
     return @failure.nil? if empty
     send_data(id, body, true)
     @failure.nil?
@@ -5718,29 +5777,34 @@ class H2Connection
   # ones its method needs - and its fields - lower case, no connection
   # field, `te` only `trailers`, no value beginning or ending in white
   # space or holding NUL, CR or LF.
-  def self.request_flaw(fields : Array(Std::Hpack::HeaderField)) : String?
-    method = nil.as(String?)
-    path = nil.as(String?)
-    scheme = nil.as(String?)
-    authority = nil.as(String?)
+  def self.request_flaw(fields : Array(Std::Hpack::HeaderField) |
+                              Std::Hpack::TapeHeaders) : String?
+    method = false
+    path = false
+    scheme = false
+    authority = false
+    connect = false
+    empty_path = false
     regular = false
     fields.each do |f|
       name = f.name
       if name.starts_with?(":")
         return "a pseudo-header after a field" if regular
-        case name
-        when ":method"
-          return ":method twice" unless method.nil?
-          method = f.value
-        when ":path"
-          return ":path twice" unless path.nil?
-          path = f.value
-        when ":scheme"
-          return ":scheme twice" unless scheme.nil?
-          scheme = f.value
-        when ":authority"
-          return ":authority twice" unless authority.nil?
-          authority = f.value
+        case
+        when name == ":method"
+          return ":method twice" if method
+          method = true
+          connect = f.value == "CONNECT"
+        when name == ":path"
+          return ":path twice" if path
+          path = true
+          empty_path = f.value.empty?
+        when name == ":scheme"
+          return ":scheme twice" if scheme
+          scheme = true
+        when name == ":authority"
+          return ":authority twice" if authority
+          authority = true
         else
           return "the pseudo-header #{name}"
         end
@@ -5750,19 +5814,20 @@ class H2Connection
         return flaw if flaw
       end
     end
-    return "no :method" if method.nil?
-    if method == "CONNECT"
-      return "CONNECT with :scheme or :path" unless scheme.nil? && path.nil?
-      return "CONNECT without :authority" if authority.nil?
+    return "no :method" unless method
+    if connect
+      return "CONNECT with :scheme or :path" if scheme || path
+      return "CONNECT without :authority" unless authority
     else
-      return "no :scheme" if scheme.nil?
-      return "no :path, or an empty one" if path.nil? || path.empty?
+      return "no :scheme" unless scheme
+      return "no :path, or an empty one" if !path || empty_path
     end
     nil
   end
 
   # An answer's final status, or nil when its head is malformed.
-  def self.answer_status(fields : Array(Std::Hpack::HeaderField)) : Int32?
+  def self.answer_status(fields : Array(Std::Hpack::HeaderField) |
+                               Std::Hpack::TapeHeaders) : Int32?
     status = nil.as(Int32?)
     regular = false
     fields.each do |f|
@@ -5771,7 +5836,9 @@ class H2Connection
         v = f.value
         return nil unless v.bytesize == 3
         v.each_byte { |b| return nil unless b >= 48_u8 && b <= 57_u8 }
-        status = v.to_i
+        status = (v.to_unsafe[0] - 48_u8).to_i32 * 100 +
+          (v.to_unsafe[1] - 48_u8).to_i32 * 10 +
+          (v.to_unsafe[2] - 48_u8).to_i32
       else
         regular = true
         return nil if field_flaw(f)
@@ -5780,11 +5847,13 @@ class H2Connection
     status
   end
 
-  def self.field_flaw(f : Std::Hpack::HeaderField) : String?
+  def self.field_flaw(f : Std::Hpack::HeaderField |
+                         Std::Hpack::TapeHeaderField) : String?
     name = f.name
     return "an empty field name" if name.empty?
     name.each_byte { |b| return "the field name #{name.inspect} is not lower case" if b >= 65_u8 && b <= 90_u8 }
-    return "the field name #{name.inspect}" unless HTTP.token?(name)
+    return "the field name #{name.inspect}" unless HTTP.token?(
+      name.to_unsafe, name.bytesize)
     return "the connection-specific field #{name}" if connection_specific?(name)
     return "te other than trailers" if name == "te" && f.value != "trailers"
     v = f.value
@@ -5797,7 +5866,7 @@ class H2Connection
     nil
   end
 
-  def self.connection_specific?(name : String) : Bool
+  def self.connection_specific?(name : String | Tape::String) : Bool
     name == "connection" || name == "keep-alive" || name == "proxy-connection" || name == "transfer-encoding" || name == "upgrade"
   end
 
@@ -5841,6 +5910,84 @@ class H2Connection
     fields
   end
 
+  def self.answer_fields_on_tape(response : Response, length : Int64?,
+                                 head : Bool) : Std::Hpack::TapeHeaders
+    unless response.status >= 100 && response.status <= 999
+      raise "HTTP: not a status: #{response.status}"
+    end
+    capacity = 2
+    response.headers.each do |name, _value|
+      lines = response.apart
+      split = lines ? lines[name]? : nil
+      capacity = capacity + (split ? split.size : 1)
+    end
+    fields = Std::Hpack::TapeHeaders.new(capacity)
+    status = Tape::String.build(3) { |w| w.append_int(response.status) }
+    fields.push(Std::Hpack::TapeHeaderField.new(
+      Tape::String.view(":status"), status))
+    has_length = false
+    apart = response.apart
+    response.headers.each do |name, value|
+      raise "HTTP: not a header name: #{name.inspect}" unless HTTP.token?(name)
+      if HTTP.has_break?(value)
+        raise "HTTP: header #{name} contains a line break"
+      end
+      if HTTP.control?(value)
+        raise "HTTP: header #{name} contains a control character"
+      end
+      lower = Tape::String.build(name.bytesize) do |w|
+        name.each_byte do |b|
+          w.push(b >= 65_u8 && b <= 90_u8 ? b + 32_u8 : b)
+        end
+      end
+      if lower == "transfer-encoding"
+        raise "HTTP: #{name} is not written; the body goes with its length"
+      end
+      next if connection_specific?(lower)
+      if lower == "content-length"
+        unless head || response.status == 304 || length.nil?
+          n = HTTP.content_length(value)
+          unless n && n == length
+            raise "HTTP: #{name} #{value.inspect} is not the body's " +
+                  "#{length} bytes"
+          end
+        end
+        has_length = true
+      end
+      lines = nil.as(Array(String)?)
+      if split = apart
+        lines = split[name]?
+      end
+      if each_line = lines
+        each_line.each { |line| fields.push(Std::Hpack::TapeHeaderField.new(
+            lower, H2Connection.trimmed(Tape::String.view(line)))) }
+      else
+        fields.push(Std::Hpack::TapeHeaderField.new(
+          lower, H2Connection.trimmed(Tape::String.view(value))))
+      end
+    end
+    if !has_length && !HTTP.bodiless?(response.status)
+      if written = length
+        size = Tape::String.build(20) { |w| w.append_int(written) }
+        fields.push(Std::Hpack::TapeHeaderField.new(
+          Tape::String.view("content-length"), size))
+      end
+    end
+    fields
+  end
+
+  def self.trimmed(value : Tape::String) : Tape::String
+    first = 0
+    last = value.bytesize
+    while first < last && (value[first] == 32_u8 || value[first] == 9_u8)
+      first = first + 1
+    end
+    while last > first && (value[last - 1] == 32_u8 || value[last - 1] == 9_u8)
+      last = last - 1
+    end
+    value[first, last - first]
+  end
+
   # A value with the white space at its ends gone, which HTTP/1.1 reads
   # past and HTTP/2 refuses.
   def self.trimmed(value : String) : String
@@ -5861,7 +6008,14 @@ class H2Connection
     end
   end
 
-  def self.field(fields : Array(Std::Hpack::HeaderField), name : String) : String?
+  def self.field(fields : Std::Hpack::TapeHeaders,
+                 name : String) : Tape::String?
+    fields.each { |f| return f.value if f.name == name }
+    nil
+  end
+
+  def self.field(fields : Array(Std::Hpack::HeaderField),
+                 name : String) : String?
     fields.each { |f| return f.value if f.name == name }
     nil
   end
@@ -5888,7 +6042,7 @@ class H2Connection
     end
   end
 
-  def self.read_u32(text : String, at : Int32) : Int32
+  def self.read_u32(text : String | Tape::String, at : Int32) : Int32
     p = text.to_unsafe
     (p[at].to_i32 << 24) | (p[at + 1].to_i32 << 16) | (p[at + 2].to_i32 << 8) | p[at + 3].to_i32
   end

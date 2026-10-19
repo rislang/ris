@@ -1,0 +1,38 @@
+# Same response fields and HPACK bytes, using heap or request tape.
+module bench/http2_tape_response
+
+import std/http::{Response}
+import std/hpack::{Encoder}
+import std/time::{Time}
+
+response = Response.new(200, "hello world")
+response.headers["Content-Type"] = "text/plain"
+response.headers["X-Request"] = "  a fairly long response field  "
+response.headers["Cache-Control"] = "no-cache"
+encoder = Encoder.new
+IyiMark.auto = false
+sum = 0_i64
+# Warm static tables and tape mapping outside the measured interval.
+tape do
+  fields = Std::Http::H2Connection.answer_fields(response, 11_i64, false)
+  encoder.encode(fields)
+end
+before = IyiMark.allocated_since
+started = Time.monotonic_nanoseconds
+20000.times do
+  tape do
+    {% if flag?(:h2_tape) %}
+      fields = Std::Http::H2Connection.answer_fields_on_tape(
+        response, 11_i64, false)
+      wire = encoder.encode_on_tape(fields)
+      sum = sum + wire.bytesize
+    {% else %}
+      fields = Std::Http::H2Connection.answer_fields(response, 11_i64, false)
+      wire = encoder.encode(fields)
+      sum = sum + wire.size
+    {% end %}
+  end
+end
+elapsed = Time.monotonic_nanoseconds - started
+allocated = IyiMark.allocated_since - before
+puts "response ns=#{elapsed} bytes=#{allocated} sum=#{sum}"

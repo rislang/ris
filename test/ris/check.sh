@@ -149,4 +149,15 @@ else
   echo "FAILED   samples/ris/respond"; status=1
 fi
 rm -f "$exe"
+
+# HPACK's tape overload agrees with the retained API across tape scopes.
+out=$("$RIS" run --release test/ris/hpack.ri 2>&1)
+if [ "$out" = \
+  'PASS: tape HPACK fields, retained tables and malformed input' ]; then
+  echo "runs     hpack"
+else
+  echo "FAILED   hpack: $out"
+  status=1
+fi
+
 exit $status
