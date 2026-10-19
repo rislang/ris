@@ -1424,6 +1424,11 @@ pub struct HTTP
   end
 
   # The same, for *count* bytes at *pa*: a name read where it lies.
+  # The same for a name on the tape, read where it lies.
+  def self.same_name?(a : Tape::String, b : String) : Bool
+    same_name?(a.to_unsafe, a.bytesize, b)
+  end
+
   def self.same_name?(pa : Pointer(UInt8), count : Int32, b : String) : Bool
     return false unless count == b.bytesize
     pb = b.to_unsafe
@@ -1563,6 +1568,11 @@ pub struct HTTP
   # For a request target in absolute form (RFC 9112 §3.2.2), where its
   # authority starts: after `http://` or `https://`, in any case.
   def self.absolute_form(target : String) : Int32?
+    absolute_form(target.to_unsafe, target.bytesize)
+  end
+
+  # The same for a target on the tape, read where it lies.
+  def self.absolute_form(target : Tape::String) : Int32?
     absolute_form(target.to_unsafe, target.bytesize)
   end
 
