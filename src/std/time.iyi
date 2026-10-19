@@ -1970,13 +1970,44 @@ pub struct Time
   # offset RFC 3339 cannot write, one with seconds in it as local mean time
   # before standard time had, is written as the same instant in UTC.
   def to_rfc3339(fraction_digits : Int32 = 0) : String
-    text = ""
-    tape do
-      w = Tape::String::Writer.new(32)
-      to_rfc3339(fraction_digits, w)
-      text = w.finish.to_s
-    end
-    text
+    # Match the prelude: portable targets and collectors have no tape.
+    {% if !flag?(:gc_none) && !flag?(:gc_boehm) &&
+            ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) ||
+              flag?(:darwin) || flag?(:win32)) %}
+      text = ""
+      tape do
+        w = Tape::String::Writer.new(32)
+        to_rfc3339(fraction_digits, w)
+        text = w.finish.to_s
+      end
+      text
+    {% else %}
+      if @offset != 0 && @offset % 60 == 0
+        return Format::RFC_3339.format(self, fraction_digits, @offset)
+      end
+      y, m, d = Time.civil_from_days(Time.floor_div(@seconds, 86400_i64))
+      clock = Time.floor_mod(@seconds, 86400_i64).to_i32
+      h = clock // 3600
+      mi = (clock % 3600) // 60
+      s = clock % 60
+
+      date = "#{Time.pad4(y)}-#{Time.pad2(m)}-#{Time.pad2(d)}"
+      clock = "#{Time.pad2(h)}:#{Time.pad2(mi)}:#{Time.pad2(s)}"
+      base = "#{date}T#{clock}"
+      if fraction_digits == 3
+        "#{base}.#{Time.pad3(millisecond)}Z"
+      elsif fraction_digits == 6
+        "#{base}.#{Time.pad6(@nanoseconds // 1000)}Z"
+      elsif fraction_digits == 9
+        "#{base}.#{Time.pad9(@nanoseconds)}Z"
+      elsif fraction_digits == 0
+        "#{base}Z"
+      else
+        # Reject unsupported precision, as the tape writer does.
+        message = "fraction_digits must be 0, 3, 6 or 9"
+        raise "#{message}, not #{fraction_digits}"
+      end
+    {% end %}
   end
 
   # The same written into the caller's *writer* on the tape: no string

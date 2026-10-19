@@ -17,8 +17,8 @@
 class Iyi::TapeLayoutChecker
   GROWS = {
     "Tape::String::Writer" => {"push", "append", "append_int", "append_float", "append_html_escaped", "reserve"},
-    "Tape::Array"           => {"push"},
-    "Tape::Tree"            => {"leaf", "open"},
+    "Tape::Array"          => {"push"},
+    "Tape::Tree"           => {"leaf", "open"},
   }
 
   # What a method does to the tape: the parameters (by index) and instance

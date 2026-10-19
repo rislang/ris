@@ -1417,6 +1417,10 @@ module Iyi
       # `tape` block that made it. `Iyi::TapeChecker` and `CleanupTransformer`
       # refuse every place such a value could outlive its scope.
       types["OnTape"] = @tape_annotation = AnnotationType.new self, self, "OnTape"
+      # ris: `@[Escape]` on a def lets it copy a `Tape::String` off the tape
+      # with `to_s`; elsewhere `Iyi::TapeEscapeChecker` refuses that copy.
+      types["Escape"] = @escape_annotation =
+        AnnotationType.new self, self, "Escape"
 
       # iyi: the marker that makes a union member an error member (SPEC.md
       # III.1.1). Created here rather than declared in the prelude because the
@@ -1750,7 +1754,8 @@ module Iyi
                      always_inline_annotation naked_annotation returns_twice_annotation
                      raises_annotation primitive_annotation call_convention_annotation
                      flags_annotation link_annotation extern_annotation deprecated_annotation experimental_annotation
-                     share_annotation tape_annotation error_trait) %}
+                     share_annotation tape_annotation escape_annotation
+                     error_trait) %}
       def {{name.id}}
         @{{name.id}}.not_nil!
       end

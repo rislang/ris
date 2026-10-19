@@ -54,7 +54,27 @@ expect raw_view         "Tape::String.new(pointer, size)\` outside the library"
 expect writer_grow      "private method 'grow' called for Tape::String::Writer"
 expect tree_entry       "private constant Tape::Tree::Entry(T) referenced"
 expect array_grow       "private method 'grow' called for Tape::Array(T)"
+expect heap_copy \
+  "\`to_s\` of a Tape::String outside an @[Escape] def copies"
+expect heap_copy_top \
+  "\`to_s\` of a Tape::String outside an @[Escape] def"
+expect heap_interpolation \
+  "Interpolating a Tape::String outside an @[Escape]"
+expect heap_builder     "Writing a Tape::String into a String::Builder"
+expect heap_copy        "tape -> heap -> tape pays this at every turn"
+expect heap_memory      "Writing a Tape::String into a String::Builder or"
+expect heap_memory_print "Writing a Tape::String into a Std::Io::Memory"
+expect heap_escape_helper \
+  "\`to_s\` of a Tape::String outside an @[Escape] def copies"
 
+
+out=$("$RIS" run test/ris/escape.ri 2>&1)
+if [ "$out" = 'abc' ]; then
+  echo "runs     escape"
+else
+  echo "FAILED   escape: $out"
+  status=1
+fi
 
 # Cleanup keeps LIFO order on early exits, panic and explicit exit.
 out=$("$RIS" run test/ris/local.ri 2>&1)

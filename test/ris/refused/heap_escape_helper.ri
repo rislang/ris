@@ -1,0 +1,13 @@
+# Permission belongs to the def that copies, not its caller.
+def copy(text : Tape::String) : String
+  text.to_s
+end
+
+@[Escape]
+def retain(text : Tape::String) : String
+  copy(text)
+end
+
+tape do
+  puts retain(Tape::String.new("abc"))
+end

@@ -16,6 +16,8 @@
 *.pdb
 *.exe
 /.build/
+/.build20/
+/.build23/
 /docs/
 /man/
 

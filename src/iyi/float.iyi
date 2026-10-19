@@ -1545,7 +1545,7 @@ module IyiFloatText
     room = uninitialized UInt8[32]
     buffer = pointerof(room).as(Pointer(UInt8))
     size = write(bits, buffer)
-    String.new(size) { |target| target.copy_from(buffer, size) }
+    String.new(size) { |target| copy_text(target, buffer, size) }
   end
 
   # `text` into *buffer*, 32 bytes at least, with no String made: what a
@@ -1681,8 +1681,17 @@ module IyiFloatText
     format_into(buffer, negative, digits, count, k)
   end
 
+  # Float text fits in 32 bytes. Fixed stores keep LLVM from replacing
+  # the copy loop with a libc memcpy (the dependency floor forbids it).
+  private def self.copy_text(target : Pointer(UInt8),
+                             source : Pointer(UInt8), size : Int32) : Nil
+    {% for i in 0...32 %}
+      target[{{i}}] = source[{{i}}] if {{i}} < size
+    {% end %}
+  end
+
   private def self.word(buffer : Pointer(UInt8), text : String) : Int32
-    buffer.copy_from(text.to_unsafe, text.bytesize)
+    copy_text(buffer, text.to_unsafe, text.bytesize)
     text.bytesize
   end
 
@@ -1923,7 +1932,7 @@ module IyiFloatText
     room = uninitialized UInt8[32]
     buffer = pointerof(room).as(Pointer(UInt8))
     size = format_into(buffer, negative, digits, count, k)
-    String.new(size) { |target| target.copy_from(buffer, size) }
+    String.new(size) { |target| copy_text(target, buffer, size) }
   end
 
   # `format` into *buffer*, 32 bytes at least; the count written.

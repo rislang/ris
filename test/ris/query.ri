@@ -6,6 +6,8 @@ module test/ris/query_test
 import std/uri::{Query}
 import std/gc::{GC}
 
+# The String API beside the tape one: its result is copied off.
+@[Escape]
 def pairs(text : String) : String
   out = ""
   tape do

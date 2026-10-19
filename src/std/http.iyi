@@ -1665,7 +1665,7 @@ pub struct Server
   end
 
   private def self.tape_accept_loop(
-    listener : IyiSocket, answerer : Proc(Incoming, Outgoing, Nil)
+    listener : IyiSocket, answerer : Proc(Incoming, Outgoing, Nil),
   ) : Nil
     idle = {} of UInt64 => IyiSocket
     group do |g|
@@ -1706,7 +1706,7 @@ pub struct Server
   private def self.spawn_tape_handler(
     g : IyiGroup, client : IyiSocket,
     answerer : Proc(Incoming, Outgoing, Nil), listener : IyiSocket,
-    idle : Hash(UInt64, IyiSocket)
+    idle : Hash(UInt64, IyiSocket),
   ) : Nil
     g.spawn do
       group do |own|
@@ -1722,9 +1722,9 @@ pub struct Server
   end
 
   private def self.tape_connection(client : IyiSocket,
-                                  answerer : Proc(Incoming, Outgoing, Nil),
-                                  listener : IyiSocket?,
-                                  idle : Hash(UInt64, IyiSocket)?) : Nil
+                                   answerer : Proc(Incoming, Outgoing, Nil),
+                                   listener : IyiSocket?,
+                                   idle : Hash(UInt64, IyiSocket)?) : Nil
     defer client.close
     conn = Conn.new(client, listener, idle)
     conn.gap = 60000
@@ -1768,13 +1768,13 @@ pub struct Server
         fields = Tape::Array(Field).new(head.headers.size)
         head.headers.each do |name, value|
           fields.push(Field.new(Tape::String.view(name),
-                                Tape::String.view(value)))
+            Tape::String.view(value)))
         end
         query = head.query
         req = Incoming.new(Tape::String.view(head.method),
-                           Tape::String.view(head.path),
-                           query ? Tape::String.view(query) : nil,
-                           fields, Tape::String.view(body))
+          Tape::String.view(head.path),
+          query ? Tape::String.view(query) : nil,
+          fields, Tape::String.view(body))
         going = answered_on_tape?(client, answerer, req, head.close)
       end
       return unless going
@@ -1844,7 +1844,7 @@ pub struct Server
   # until the blank line that ends it has arrived. The parts and fields are
   # views into *bytes*; temporaries go on the caller's `tape`.
   def self.parse_head(
-    bytes : Tape::String, from : Int32 = 0, complete : Bool = false
+    bytes : Tape::String, from : Int32 = 0, complete : Bool = false,
   ) : ParsedHead | HeadError | Nil
     p = bytes.to_unsafe
     n = bytes.bytesize
@@ -2153,8 +2153,10 @@ pub struct Server
   end
 
   private def self.serve_h2_request(h2 : H2Connection,
-      handler : Proc(Request, Response), stream_bodies : Bool,
-      compress : Bool, remote : String?, peer : Array(Certificate)) : Bool
+                                    handler : Proc(Request, Response),
+                                    stream_bodies : Bool,
+                                    compress : Bool, remote : String?,
+                                    peer : Array(Certificate)) : Bool
     tape do
       id = h2.next_request
       return false unless id
@@ -2575,15 +2577,17 @@ pub struct Server
         end
       end
       unless upgrade
-        text.append(close ? "Connection: close\r\n" :
-                            "Connection: keep-alive\r\n")
+        if close
+          text.append("Connection: close\r\n")
+        else
+          text.append("Connection: keep-alive\r\n")
+        end
       end
       text.append("\r\n")
       result = text.finish.to_s
     end
     result
   end
-
 end
 
 # A request on its way: the connection, and the answer whose head has been
@@ -4331,6 +4335,7 @@ pub struct HTTP
     end
     s[first, last - first]
   end
+
   def self.same_name?(a : Tape::String, b : String) : Bool
     same_name?(a.to_unsafe, a.bytesize, b)
   end
@@ -4448,7 +4453,6 @@ pub struct HTTP
     end
     true
   end
-
 end
 
 # A `multipart/form-data` body (RFC 7578) read a part at a time, as it
@@ -5146,7 +5150,7 @@ class H2Connection
   end
 
   private def on_headers(id : Int32, flags : Int32,
-                          payload : Tape::String) : Bool
+                         payload : Tape::String) : Bool
     return fail(PROTOCOL_ERROR, "HEADERS on stream 0") if id == 0
     block = unpadded(flags, payload)
     return fail(PROTOCOL_ERROR, "HEADERS whose padding is longer than the frame") if block.nil?
@@ -5192,7 +5196,7 @@ class H2Connection
   end
 
   private def on_continuation(id : Int32, flags : Int32,
-                          payload : Tape::String) : Bool
+                              payload : Tape::String) : Bool
     return fail(PROTOCOL_ERROR, "CONTINUATION with no header block open") if @block_stream == 0
     return false unless gather(payload)
     flags & END_HEADERS != 0 ? close_block : true
@@ -5591,7 +5595,7 @@ class H2Connection
   end
 
   private def answer_on_tape(id : Int32, response : Response,
-                            req : Request, compress : Bool) : Bool
+                             req : Request, compress : Bool) : Bool
     s = @streams[id]?
     return @failure.nil? if s.nil? || s.reset >= 0
     # 101 has no meaning here (§8.6): the client is told to use HTTP/1.1.
@@ -5778,7 +5782,7 @@ class H2Connection
   # field, `te` only `trailers`, no value beginning or ending in white
   # space or holding NUL, CR or LF.
   def self.request_flaw(fields : Array(Std::Hpack::HeaderField) |
-                              Std::Hpack::TapeHeaders) : String?
+                                 Std::Hpack::TapeHeaders) : String?
     method = false
     path = false
     scheme = false
@@ -5827,7 +5831,7 @@ class H2Connection
 
   # An answer's final status, or nil when its head is malformed.
   def self.answer_status(fields : Array(Std::Hpack::HeaderField) |
-                               Std::Hpack::TapeHeaders) : Int32?
+                                  Std::Hpack::TapeHeaders) : Int32?
     status = nil.as(Int32?)
     regular = false
     fields.each do |f|
@@ -5837,8 +5841,8 @@ class H2Connection
         return nil unless v.bytesize == 3
         v.each_byte { |b| return nil unless b >= 48_u8 && b <= 57_u8 }
         status = (v.to_unsafe[0] - 48_u8).to_i32 * 100 +
-          (v.to_unsafe[1] - 48_u8).to_i32 * 10 +
-          (v.to_unsafe[2] - 48_u8).to_i32
+                 (v.to_unsafe[1] - 48_u8).to_i32 * 10 +
+                 (v.to_unsafe[2] - 48_u8).to_i32
       else
         regular = true
         return nil if field_flaw(f)
@@ -5848,12 +5852,12 @@ class H2Connection
   end
 
   def self.field_flaw(f : Std::Hpack::HeaderField |
-                         Std::Hpack::TapeHeaderField) : String?
+                          Std::Hpack::TapeHeaderField) : String?
     name = f.name
     return "an empty field name" if name.empty?
     name.each_byte { |b| return "the field name #{name.inspect} is not lower case" if b >= 65_u8 && b <= 90_u8 }
-    return "the field name #{name.inspect}" unless HTTP.token?(
-      name.to_unsafe, name.bytesize)
+    valid_name = HTTP.token?(name.to_unsafe, name.bytesize)
+    return "the field name #{name.inspect}" unless valid_name
     return "the connection-specific field #{name}" if connection_specific?(name)
     return "te other than trailers" if name == "te" && f.value != "trailers"
     v = f.value
@@ -5960,7 +5964,7 @@ class H2Connection
       end
       if each_line = lines
         each_line.each { |line| fields.push(Std::Hpack::TapeHeaderField.new(
-            lower, H2Connection.trimmed(Tape::String.view(line)))) }
+          lower, H2Connection.trimmed(Tape::String.view(line)))) }
       else
         fields.push(Std::Hpack::TapeHeaderField.new(
           lower, H2Connection.trimmed(Tape::String.view(value))))

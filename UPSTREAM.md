@@ -15,10 +15,16 @@ has it.
 
 * v0.18.0 integration: explicit std imports in new modules and exercises,
   required by ris's per-file extension checks (`std/int`, `std/text`,
-  `std/indexable` and others reported by the compiler). HTTP's import
-  audit includes those pure modules and sorts independently of locale.
+  `std/indexable` and others reported by the compiler), including the
+  AEAD and CSV gates' generated oracles. HTTP's import audit includes
+  those pure modules and sorts independently of locale.
 * Dependency audits: LLVM 23's local `_PROCEDURE_LINKAGE_TABLE_` marker
   is not a dynamic import; allow it in the Linux toolchain floor.
+* Exercise proofs: bypass a hosts result without injecting an unimported
+  extension; lower Linux x86-64's Adler cost bound to separate LLVM 23
+  batched and per-byte reductions (1.3-1.8 vs 3.7-6.1 byte sums here).
+* std/debug: the broken unwind-row proof may lose beta or alpha on
+  LLVM 23; require either caller frame to be missing.
 
 * `50745b97c` Optimize a single unit from its bitcode in an isolated
   context: LLVM 23 miscompiles the module optimized in place.
@@ -38,7 +44,9 @@ has it.
   escapes are `JSON.each_escaped_byte`. The lexer's span mode, the tape `Writer`
   and `Document` stay in ris.
 * `IyiFloatText.write(bits, buffer)` / `format_into`: a float's text into
-  a buffer, `to_s` on top. `Tape::String::Writer#append_float` stays in ris.
+  a buffer, `to_s` on top. Keep bounded copies as fixed stores so LLVM 23
+  does not introduce libc `memcpy` on Darwin after the extraction.
+  `Tape::String::Writer#append_float` stays in ris.
 * Both are iyi's branch `json-float-from-ris` (`c02af8fac`), not merged.
 
 ## To make in iyi first

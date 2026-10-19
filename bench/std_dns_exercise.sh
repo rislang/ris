@@ -202,7 +202,7 @@ else
     'while attempt < 1'
   breaks "the hosts file skipped" nohosts "the hosts file answers" socket.iyi \
     'return listed unless listed.empty?' \
-    'listed.clear'
+    'nil # Ignore the hosts result.'
   breaks "the search list tried after the name" searchorder "a short name tries the search list first" dns.iyi \
     'answer << name if dots >= ndots' \
     'answer << name if dots < ndots'

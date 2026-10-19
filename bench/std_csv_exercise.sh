@@ -97,6 +97,7 @@ fi
 cat >"$WORK/oracle.iyi" <<'IYI'
 module oracle
 
+import std/int
 import std/csv::{CSVReader, CSVWriter, CSVError}
 import std/file::{File}
 

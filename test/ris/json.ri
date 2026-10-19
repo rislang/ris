@@ -11,6 +11,12 @@ import std/json::{JSON, Builder, Writer, Document, DocumentParser, Parser}
 
 failures = [] of String
 
+# The copy a caller keeps, made at the boundary it leaves the tape by.
+@[Escape]
+def retain(text : Tape::String) : String
+  text.to_s
+end
+
 def check(failures : Array(String), ok : Bool, what : String) : Nil
   failures << what unless ok
 end
@@ -59,7 +65,7 @@ tape do
   check(failures, doc.size(a) == 7, "array size")
   check(failures, doc.int(doc.at(a, 0)) == 1 && doc.int(doc.at(a, 1)) == 0, "integers")
   check(failures, doc.float(doc.at(a, 2)) == 2500.0, "float")
-  check(failures, doc.string(doc.at(a, 3)).to_s == "x\nyé😀", "escapes decoded")
+  check(failures, doc.string(doc.at(a, 3)) == "x\nyé😀", "escapes decoded")
   check(failures, doc.bool(doc.at(a, 4)) && !doc.bool(doc.at(a, 5)), "bools")
   check(failures, doc.null?(doc.at(a, 6)) && doc.at(a, 7) == -1, "null, past the end")
   b = doc.at(doc.root, "bA")
@@ -67,7 +73,7 @@ tape do
   check(failures, doc.string(doc.at(b, "d")) == "plain", "a plain string")
   check(failures, doc.size(doc.at(doc.root, "e")) == 0 && doc.at(doc.root, "zz") == -1, "empty array, missing key")
   keys = [] of String
-  doc.each(doc.root) { |child| keys << doc.key(child).to_s }
+  doc.each(doc.root) { |child| keys << retain(doc.key(child)) }
   check(failures, keys == ["a", "bA", "e"], "keys in order")
 end
 
@@ -102,7 +108,7 @@ end
       w = Tape::String::Writer.new(16)
       w.append("head:")
       JSON.write(w, indent, ascii) { |b| tape_doc(b) }
-      tape = w.finish.to_s
+      tape = retain(w.finish)
     end
     check(failures, tape == "head:" + heap, "written alike, indent #{indent.inspect}, ascii #{ascii}: #{tape}")
   end
@@ -122,7 +128,8 @@ tape do
   w.append("x:")
   w.json { |b| b.object { b.field "a", 1 } }
   w.json(2, true) { |b| b.array { b.string "é" } }
-  check(failures, w.finish.to_s == %(x:{"a":1}[\n  "\\u00e9"\n]), "w.json writes as JSON.write")
+  check(failures, w.finish == %(x:{"a":1}[\n  "\\u00e9"\n]),
+    "w.json writes as JSON.write")
 end
 
 # A document copied through the builder is the heap builder's text of it,
@@ -137,14 +144,16 @@ tape do
         b.ascii_only = ascii
         JSON.parse(text).to_json(b)
       end
-      check(failures, w.finish.to_s == heap, "copied alike, indent #{indent.inspect}, ascii #{ascii}")
+      message = "copied alike, indent #{indent.inspect}, ascii #{ascii}"
+      check(failures, w.finish == heap, message)
     end
   end
   w = Tape::String::Writer.new(16)
   JSON.write(w) do |b|
     b.object { doc.each(doc.root) { |child| b.field(doc, child); b.number doc.kind(child).value } }
   end
-  check(failures, w.finish.to_s == %({"a":5,"bA":6,"e":5}), "keys copied, an escaped one decoded")
+  message = "keys copied, an escaped one decoded"
+  check(failures, w.finish == %({"a":5,"bA":6,"e":5}), message)
 end
 
 GC.disable

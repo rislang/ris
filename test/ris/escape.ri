@@ -1,0 +1,63 @@
+module test/ris/escape_boundary
+
+import std/io::{Memory}
+import std/gc::{GC}
+
+# A copy off the tape in a def marked @[Escape] compiles: it is the
+# boundary where the text leaves for what outlives the tape.
+CACHE = [] of String
+
+@[Escape]
+def keep(text : Tape::String) : Nil
+  CACHE << text.to_s
+end
+
+@[Escape]
+def memory_copy(text : Tape::String) : String
+  memory = Memory.new
+  text.to_s(memory)
+  GC.disable
+  before = GC.stats.bytes_since_collection
+  10.times do
+    memory.clear
+    memory.print(text)
+    memory.clear
+    text.to_s(memory)
+  end
+  after = GC.stats.bytes_since_collection
+  GC.enable
+  raise "stream output allocated" unless after == before
+  memory.to_s
+end
+
+@[Escape]
+def interpolated_copy(text : Tape::String) : String
+  "#{text}"
+end
+
+@[Escape]
+def builder_copy(text : Tape::String) : String
+  String.build { |io| io << text }
+end
+
+tape do
+  text = Tape::String.new("abc")
+  keep(text)
+  empty = Tape::String.new("")
+  print(empty)
+  stdout.print(empty)
+  GC.disable
+  before = GC.stats.bytes_since_collection
+  10.times do
+    print(empty)
+    stdout.print(empty)
+    empty.to_s(stdout)
+  end
+  after = GC.stats.bytes_since_collection
+  GC.enable
+  raise "stream output allocated" unless after == before
+  raise "memory copy differs" unless memory_copy(text) == "abc"
+  raise "interpolation differs" unless interpolated_copy(text) == "abc"
+  raise "builder copy differs" unless builder_copy(text) == "abc"
+end
+puts CACHE.first

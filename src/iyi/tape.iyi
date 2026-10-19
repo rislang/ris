@@ -143,6 +143,14 @@ module Tape
       ::String.new(@bytesize) { |buffer| buffer.copy_from(@ptr, @bytesize) }
     end
 
+    # Writes the bytes to *io*, a file or socket, with no copy on the heap
+    # (`puts text`, `io << text`). A `String::Builder` or `std/io::Memory` is
+    # the heap: `TapeEscapeChecker` refuses writing into one outside an
+    # `@[Escape]` def.
+    def to_s(io : IyiIO) : Nil
+      io.write(@ptr, @bytesize)
+    end
+
     # Writes the bytes the block pushes straight onto the tape, where the
     # string will stay: no buffer to copy out of.
     def self.build(capacity : Int32 = 32, & : String::Writer -> _) : String
@@ -212,7 +220,18 @@ module Tape
         break if magnitude == 0_u64
       end
       push(45_u8) if value < 0
-      append(base + (20 - count), count)
+      cursor = @state.value
+      if cursor &+ count.to_u64 > (@state + 1_i64).value
+        grow(count.to_u64)
+        cursor = @state.value
+      end
+      target = Pointer(UInt8).new(cursor)
+      # A decimal has at most 20 bytes. Fixed stores avoid LLVM turning
+      # this short stack copy into a libc memcpy in release builds.
+      {% for i in 0...20 %}
+        target[{{i}}] = base[20 - count + {{i}}] if {{i}} < count
+      {% end %}
+      @state.value = cursor &+ count.to_u64
     end
 
     def append_int(value : Int32) : Nil
@@ -384,7 +403,6 @@ module Tape
     end
   end
 
-
   # A tree on the tape as one stream in document order, the layout simdjson
   # calls a tape: a container is written when it opens and told where its
   # subtree ends when it closes, so its children follow it and a reader
@@ -483,4 +501,20 @@ module Tape
     def initialize(@value : T, @stop : Int32)
     end
   end
+end
+
+# Descriptor streams consume tape bytes before their scope can end.
+class IyiIO
+  def print(text : Tape::String) : Nil
+    text.to_s(self)
+  end
+
+  def puts(text : Tape::String) : Nil
+    text.to_s(self)
+    write("\n")
+  end
+end
+
+def print(text : Tape::String) : Nil
+  stdout.print(text)
 end

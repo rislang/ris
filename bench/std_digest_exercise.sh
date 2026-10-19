@@ -676,7 +676,7 @@ cost_proof "a CRC-32 a bit at a time" "crc cost" \
 # A divide is a few cycles on arm64 and on the Windows runners' processors:
 # there Adler-32 reduced every byte stays inside the bound, and the time
 # cannot tell the two shapes apart. The check runs everywhere; its proof on
-# Linux x86_64, where reducing every byte costs seven byte sums.
+# Linux x86_64, where the byte-sum bound separates the two shapes.
 case "$(uname -s) $(uname -m)" in
   "Linux x86_64") ;;
   *) no_adler_proof=1 ;;

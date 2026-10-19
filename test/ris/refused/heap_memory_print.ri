@@ -1,0 +1,8 @@
+module test/ris/refused/heap_memory_print
+
+import std/io::{Memory}
+
+tape do
+  memory = Memory.new
+  memory.print(Tape::String.new("abc"))
+end

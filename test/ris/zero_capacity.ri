@@ -10,5 +10,5 @@ tape do
   puts items[0]
   puts items[1]
   puts other[0]
-  puts Tape::String.build(0) { |w| w.push(65_u8); w.append("BC") }.to_s
+  puts Tape::String.build(0) { |w| w.push(65_u8); w.append("BC") }
 end

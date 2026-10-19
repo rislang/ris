@@ -51,7 +51,7 @@ started = 0_u64
     raise "bad request" unless req
     raise "bad path" unless req.path == "/resource"
     raise "bad header" unless req.header("authorization") ==
-      "Bearer abcdef0123456789"
+                                "Bearer abcdef0123456789"
     raise "no response" unless h2.answer(id, response, req, false)
     h2.done(id)
     size = h2.bench_drain

@@ -14,5 +14,5 @@ tape do
     w.push(32_u8)
     w.append(inner)
   end
-  puts text.to_s
+  puts text
 end

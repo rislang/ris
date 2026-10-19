@@ -13,21 +13,21 @@ def forward(&)
   yield
 end
 
-with_text { |text| puts text.to_s }
+with_text { |text| puts text }
 tape do
   kept = nil
   items = Tape::Array(Tape::String).new(0)
   items.push(make_text)
   items.each { |text| kept = text }
   if text = kept
-    puts text.to_s
+    puts text
   end
   nested = tape { break make_text }
   if text = nested
-    puts text.to_s
+    puts text
   end
   forward do
     local = make_text
-    puts local.to_s
+    puts local
   end
 end

@@ -549,7 +549,7 @@ PY
     fi
     "$WORK/broken-deep" > "$WORK/broken.out" 2>&1
     got="$(deep_holds "$WORK/broken.out")"
-    if [ "$got" = "$expected" ]; then
+    if [[ "$got" == $expected ]]; then
       echo "  $label: caught - $expected"
     elif [ -z "$got" ]; then
       fail "$label: the exercise PASSED on a broken module"
@@ -566,8 +566,9 @@ PY
     '          when 0x0e
             read_uleb128(pointerof(cursor))'
   # The rules of the whole function, not of the address: a row past it
-  # applied.
-  prove_broken "a row past the address applied" "a frame at deep.iyi:11" \
+  # applied. LLVM 23 can preserve beta and lose alpha instead: either
+  # caller lost is this unwind defect, at lines 11 and 15 respectively.
+  prove_broken "a row past the address applied" "a frame at deep.iyi:1[15]" \
     '          loc = loc &+ (op & 0x3f).to_u64 &* code_align
           return true if loc > target' \
     '          loc = loc &+ (op & 0x3f).to_u64 &* code_align'

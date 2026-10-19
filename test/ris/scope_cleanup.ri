@@ -22,6 +22,6 @@ end
 puts IyiRegion.tape == 0_u64
 tape do
   text = Tape::String.build { |w| w.push(67_u8) }
-  puts text.to_s
+  puts text
 end
 puts IyiRegion.tape == 0_u64

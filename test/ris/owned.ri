@@ -13,11 +13,18 @@ class Cache
   end
 end
 
+# The copy a caller keeps, made at the boundary it leaves the tape by.
+@[Escape]
+def retain(text : Tape::String) : String
+  text.to_s
+end
+
 # A method name describes the work; the return type describes the lifetime.
 def page : Tape::String
   Tape::String.build(1) { |writer| writer.append("café <&>") }
 end
 
+@[Escape]
 def retained_page : String
   tape do
     return page.to_s
@@ -28,11 +35,12 @@ end
 cache = Cache.new
 tape do
   borrowed = page
-  owned = borrowed.to_s
+  owned = retain(borrowed)
   cache.store(owned)
-  raise "copy differs from source" unless borrowed == owned && borrowed.to_s == "café <&>"
+  same = borrowed == owned && borrowed == "café <&>"
+  raise "copy differs from source" unless same
   empty = Tape::String.build(0) { |writer| }
-  raise "empty copy changed" unless empty.to_s == ""
+  raise "empty copy changed" unless empty == ""
 end
 tape do
   overwrite = page

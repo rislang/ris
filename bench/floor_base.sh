@@ -29,8 +29,10 @@ FLOOR_BASE_DARWIN="__error _tlv_bootstrap backtrace backtrace_symbols_fd clock_g
 # Linux: the prelude issues raw syscalls and adds no symbol of its own; what
 # a program carries is what the C runtime's start files leave undefined.
 # LLVM 23 can leave this local undefined marker after inline assembly.
-# It is absent from the dynamic imports and asks no library for a symbol.
-FLOOR_BASE_LINUX="PROCEDURE_LINKAGE_TABLE_ ITM_deregisterTMCloneTable ITM_registerTMCloneTable _cxa_finalize _gmon_start__ _libc_start_main"
+# It is absent from dynamic imports and asks no library for a symbol.
+FLOOR_BASE_LINUX="PROCEDURE_LINKAGE_TABLE_"
+FLOOR_BASE_LINUX+=" ITM_deregisterTMCloneTable ITM_registerTMCloneTable"
+FLOOR_BASE_LINUX+=" _cxa_finalize _gmon_start__ _libc_start_main"
 
 # What a program may link: the platform libc, and on darwin the two
 # frameworks the trusted roots are kept behind - Security for the anchors

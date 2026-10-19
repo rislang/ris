@@ -1,0 +1,5 @@
+# The copy off the tape outside any def is refused too.
+tape do
+  text = Tape::String.new("abc")
+  puts text.to_s
+end

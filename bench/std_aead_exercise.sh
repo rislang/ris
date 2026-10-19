@@ -146,6 +146,7 @@ else
   cat >"$WORK/oracle.iyi" <<'IYI'
 module oracle
 
+import std/int
 import std/aead::{AES, AesGcm, ChaCha20, Poly1305, ChaCha20Poly1305, AeadError}
 import std/text
 

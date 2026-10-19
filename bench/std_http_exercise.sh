@@ -2012,7 +2012,7 @@ h2_breaks "the preface not recognised" h2_preface \
   'GET over HTTP/2'
 h2_breaks "Set-Cookie lines joined into one field" h2_cookies \
   '        each_line.each { |line| fields.push(Std::Hpack::TapeHeaderField.new(
-            lower, H2Connection.trimmed(Tape::String.view(line)))) }' \
+          lower, H2Connection.trimmed(Tape::String.view(line)))) }' \
   '        fields.push(Std::Hpack::TapeHeaderField.new(
           lower, H2Connection.trimmed(Tape::String.view(value))))' \
   'Set-Cookie on fields of their own'

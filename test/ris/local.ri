@@ -1,6 +1,12 @@
 module test/ris/local
 import std/int
 
+# The copy a caller keeps, made at the boundary it leaves the tape by.
+@[Escape]
+def retain(text : Tape::String) : String
+  text.to_s
+end
+
 def check(ok : Bool) : Nil
   raise "local check failed" unless ok
 end
@@ -27,21 +33,21 @@ tape do
       check(current != saved)
       first = current if first == 0_u64
       check(current == first)
-      text = Tape::String.build(1) { |w| w.append(outer.to_s) }
-      copy = text.to_s
+      text = Tape::String.build(1) { |w| w.append(outer) }
+      copy = retain(text)
       tape { check(IyiRegion.tape == current) }
       break 9
     end
     check(IyiRegion.tape == saved)
     check(IyiHeap.read64(saved) == cursor)
-    check(outer.to_s == "outer")
+    check(outer == "outer")
   end
   local_tape do
     current = IyiRegion.tape
     local_tape do
       check(IyiRegion.tape != current)
       inner = Tape::String.build { |w| w.append("inner") }
-      check(inner.to_s == "inner")
+      check(inner == "inner")
     end
     check(IyiRegion.tape == current)
   end
