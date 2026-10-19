@@ -231,9 +231,16 @@ module Tape
       @state.value = cursor &+ count.to_u64
     end
 
+    # The same for text on the tape: a template's value, a request's field.
+    def append_html_escaped(text : String) : Nil
+      html_escaped(text.to_unsafe, text.bytesize)
+    end
+
     def append_html_escaped(text : ::String) : Nil
-      bytes = text.to_unsafe
-      size = text.bytesize
+      html_escaped(text.to_unsafe, text.bytesize)
+    end
+
+    private def html_escaped(bytes : Pointer(UInt8), size : Int32) : Nil
       start = 0
       index = 0
       while index < size
