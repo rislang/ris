@@ -40,17 +40,17 @@ def tape(&) : Nil
   nil
 end
 
+# A tape of its own, even inside a `tape` block, freed when the block
+# ends: for work whose temporaries should not stay on the outer tape
+# until it ends. Copy what is kept before leaving. Outer `Tape::String`s
+# may be read; other outer tape values become owned data first.
+def local_tape(&) : Nil
+  IyiRegion.tape_local(Tape::CAPACITY) { yield }
+  nil
+end
+
 module Tape
   CAPACITY = 67108864_u64
-
-  # A tape of its own, even inside a `tape` block, freed when the block
-  # ends: for work whose temporaries should not stay on the outer tape
-  # until it ends. Copy what is kept before leaving. Outer `Tape::String`s
-  # may be read; other outer tape values become owned data first.
-  def self.local(&) : Nil
-    IyiRegion.tape_local(CAPACITY) { yield }
-    nil
-  end
 
   # Bytes on the tape. Not a `String`: a `String` may be kept anywhere, and
   # this may not. `to_s` copies it into a retained String explicitly.

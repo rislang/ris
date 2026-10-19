@@ -163,7 +163,7 @@ class Iyi::TapeLayoutChecker
       node.obj.try &.accept self
       node.args.each &.accept self
       node.named_args.try &.each &.value.accept(self)
-      # A Tape.local block is on a tape of its own: what it puts there is
+      # A local_tape block is on a tape of its own: what it puts there is
       # not on this one.
       node.block.try &.body.accept(self) unless tape_local?(node)
 
@@ -207,11 +207,8 @@ class Iyi::TapeLayoutChecker
     end
 
     private def tape_local?(node : Call) : Bool
-      return false unless node.name == "local"
-      node.target_defs.try &.any? do |target|
-        owner = target.owner
-        owner.metaclass? && owner.instance_type.to_s == "Tape"
-      end || false
+      return false unless node.name == "local_tape" && node.obj.nil?
+      node.target_defs.try &.any?(&.owner.is_a?(Program)) || false
     end
 
     # A container named by a variable grows; any other is put on the tape.

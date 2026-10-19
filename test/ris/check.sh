@@ -42,7 +42,7 @@ expect owned_cache "to be String, not Tape::String"
 
 expect mixed_growth      "grows on the tape in this loop, and Tape::String.build"
 expect mixed_growth_call "grows on the tape in this loop, and \`tag\`"
-expect local_outer "is a variable of the code around this Tape.local"
+expect local_outer "is a variable of the code around this local_tape block"
 expect local_mutate "cannot use outer tape value"
 expect local_self 'cannot use outer tape value `self`'
 expect local_return "cannot return a tape value"

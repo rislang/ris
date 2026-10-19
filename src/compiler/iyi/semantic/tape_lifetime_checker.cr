@@ -55,9 +55,9 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
     end
 
     if tape_scope?(node)
-      local_tape = node.name == "local"
+      local_tape = node.name == "local_tape"
       if (local_tape || !@scope) && (type = node.type?) && TapeChecker.tape_in(@program, type)
-        node.raise "cannot break a tape value out of its #{local_tape ? "Tape.local" : "tape block"}: its storage ends with the block" + ownership_hint(type)
+        node.raise "cannot break a tape value out of its #{local_tape ? "local_tape block" : "tape block"}: its storage ends with the block" + ownership_hint(type)
       end
       if block = node.block
         previous_scope, previous_local_tape = @scope, @local_tape
@@ -101,7 +101,7 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
 
   # Keep the proposed repair valid for both text and tape-bearing DTOs.
   private def tape_scope_name : String
-    @local_tape ? "Tape.local" : "tape block"
+    @local_tape ? "local_tape block" : "tape block"
   end
 
   private def ownership_hint(type : Type) : String
@@ -112,17 +112,14 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
     end
   end
 
-  # The prelude's top-level `tape { }`, or `Tape.local { }`; not another
+  # The prelude's top-level `tape { }`, or `local_tape { }`; not another
   # method of either name.
   private def tape_scope?(node : Call) : Bool
     return false unless node.block
     if node.name == "tape" && node.obj.nil?
       node.target_defs.try &.any?(&.owner.is_a?(Program)) || false
-    elsif node.name == "local"
-      node.target_defs.try &.any? do |target|
-        owner = target.owner
-        owner.metaclass? && owner.instance_type.to_s == "Tape"
-      end || false
+    elsif node.name == "local_tape" && node.obj.nil?
+      node.target_defs.try &.any?(&.owner.is_a?(Program)) || false
     else
       false
     end
@@ -161,7 +158,7 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
       meta = @block.try(&.vars.try(&.[node.name]?)) || @owner.try(&.vars.try(&.[node.name]?))
       context = meta.try &.context
       unless context.is_a?(ASTNode) && @contexts.includes?(context)
-        node.raise "cannot use outer tape value `#{node.name}` inside Tape.local: it could retain temporary storage; copy it into owned data before entering (outer Tape::String values may be read)"
+        node.raise "cannot use outer tape value `#{node.name}` inside local_tape: it could retain temporary storage; copy it into owned data before entering (outer Tape::String values may be read)"
       end
     end
     false
@@ -169,7 +166,7 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
 
   private def check_outer_self(node : ASTNode)
     if @local_tape && (owner = @owner) && !@contexts.includes?(owner) && TapeChecker.tape?(@program, owner.owner) && owner.owner.to_s != "Tape::String"
-      node.raise "cannot use outer tape value `self` inside Tape.local: copy it into owned data before entering"
+      node.raise "cannot use outer tape value `self` inside local_tape: copy it into owned data before entering"
     end
   end
 

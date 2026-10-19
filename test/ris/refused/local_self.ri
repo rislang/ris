@@ -6,7 +6,7 @@ struct Holder
     @values = Tape::Array(Tape::String).new
   end
   def escape : Nil
-    Tape.local do
+    local_tape do
       @values.push(Tape::String.build { |w| w.append("inner") })
     end
   end

@@ -10,10 +10,10 @@ def fail_local(events : Array(String)) : Int32
   tape do
     outer = IyiRegion.tape
     defer events << (IyiRegion.tape == outer ? "outer" : "bad outer")
-    Tape.local do
+    local_tape do
       local_tape = IyiRegion.tape
       defer events << (IyiRegion.tape == local_tape ? "local" : "bad local")
-      Tape.local do
+      local_tape do
         defer events << (IyiRegion.tape != local_tape ? "nested" : "bad nested")
         raise "expected local panic"
       end
@@ -26,7 +26,7 @@ def interleave(tag : UInt8) : Nil
   tape do
     outer = Tape::String.build { |w| w.push(tag) }
     saved = IyiRegion.tape
-    Tape.local do
+    local_tape do
       text = Tape::String.build { |w| w.append(outer.to_s) }
       current = IyiRegion.tape
       sleep(1)
