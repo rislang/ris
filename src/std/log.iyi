@@ -104,20 +104,45 @@ end
 pub abstract class Formatter
   abstract def format(entry : Entry) : String
 
+  # The line written onto a tape, then into *io* in one write.
   def format(entry : Entry, io : IO) : Nil
-    io.write(format(entry))
-    io.write("\n")
+    tape do
+      w = Tape::String::Writer.new(128)
+      format(entry, w)
+      w.push(10_u8)
+      line = w.finish
+      io.write(line.to_unsafe, line.bytesize)
+    end
+  end
+
+  # The line written into the caller's *writer*: `format(entry)` unless a
+  # formatter writes it there itself.
+  def format(entry : Entry, writer : Tape::String::Writer) : Nil
+    writer.append(format(entry))
   end
 end
 
 pub class DefaultFormatter < Formatter
   def format(entry : Entry) : String
-    head = "#{entry.timestamp.to_rfc3339(6)} #{entry.severity.label}"
-    if entry.source.empty?
-      "#{head} - #{entry.message}"
-    else
-      "#{head} - #{entry.source}: #{entry.message}"
+    line = ""
+    tape do
+      w = Tape::String::Writer.new(128)
+      format(entry, w)
+      line = w.finish.to_s
     end
+    line
+  end
+
+  def format(entry : Entry, writer : Tape::String::Writer) : Nil
+    entry.timestamp.to_rfc3339(6, writer)
+    writer.push(32_u8)
+    writer.append(entry.severity.label)
+    writer.append(" - ")
+    unless entry.source.empty?
+      writer.append(entry.source)
+      writer.append(": ")
+    end
+    writer.append(entry.message)
   end
 end
 

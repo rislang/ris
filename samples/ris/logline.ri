@@ -1,0 +1,22 @@
+# logline: a million log lines through `IOBackend` and the default
+# formatter, to /dev/null. Prints the GC heap bytes per line, collection
+# off; time it from outside.
+#
+#   ./bin/ris build --release -o logline samples/ris/logline.ri && ./logline
+
+module samples/logline
+
+import std/log::{Logger, IOBackend, Severity}
+import std/gc::{GC}
+
+N = 1000000
+sink = File.open("/dev/null", "w")
+log = Logger.new("web", Severity::Info, IOBackend.new(sink))
+GC.disable
+before = GC.stats.bytes_since_collection
+i = 0
+while i < N
+  log.info("GET /users/42 200")
+  i += 1
+end
+puts "#{(GC.stats.bytes_since_collection - before) // N.to_u64} heap bytes a line"
