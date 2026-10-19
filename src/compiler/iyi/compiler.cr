@@ -3,6 +3,7 @@ require "file_utils"
 require "colorize"
 require "crystal/digest/md5"
 require "./optimization_mode"
+require "./wasm_roots"
 require "./mod/installer"
 {% if flag?(:msvc) %}
   require "./loader"
@@ -1754,7 +1755,10 @@ module Iyi
       # not carry the marker.
       annotations = [] of String
       if type.is_a?(ClassType) && Iyi::Share.shareable?(type)
-        annotations << "@[Share]"
+        # An owning type says so, or its consumer would read it as trusted
+        # only when its arguments are, and `Mutex(Array(Int32))` would stop
+        # being Share at the artifact's edge.
+        annotations << (type.iyi_share_owns? ? "@[Share(owns: true)]" : "@[Share]")
       end
       # And `@[Primitive(:ReferenceStorageType)]`, which is not decoration
       # either: the annotation is what makes the compiler create this
@@ -3350,6 +3354,7 @@ module Iyi
 
       @progress_tracker.stage("Codegen (bc+obj)") do
         optimize llvm_mod, target_machine unless @optimization_mode.o0?
+        WasmRoots.run(llvm_mod) if @codegen_target.architecture == "wasm32"
 
         unit.emit(@emit_targets, emit_base_filename || output_filename)
 
@@ -4316,6 +4321,7 @@ module Iyi
         temporary_object_name = self.temporary_object_name
         target_machine = compiler.create_target_machine
         compiler.optimize llvm_mod, target_machine unless compiler.optimization_mode.o0?
+        WasmRoots.run(llvm_mod) if compiler.codegen_target.architecture == "wasm32"
         target_machine.emit_obj_to_file llvm_mod, temporary_object_name
         File.rename(temporary_object_name, object_name)
       rescue ex

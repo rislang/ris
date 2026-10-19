@@ -26,14 +26,13 @@ nothing references, collect, 300 more allocations, and 299 of them come back
 from addresses the sweep reclaimed. A rooted object keeps every byte, comes out
 white, and its chunk is not handed out again.
 
-Finalizers and weak references are not built, and not for lack of time.
-Nothing in this language defines a finalizer, there is no `def finalize`
-anywhere in `src/iyi` or `samples/iyi`, so a finalizer queue would be a
-mechanism no program could put an entry in. Weak references are registration
-based and the standard library's `WeakRef` is on the `--crystal` side, so there
-is no table here to walk and null out. Both wait on the language having the
-feature. Statistics are the honest subset, counted as the walk goes: chunks
-swept, chunks kept, bytes freed, collections run.
+Finalizers are not built, and not for lack of time. Nothing in this language
+defines a finalizer, there is no `def finalize` anywhere in `src/iyi` or
+`samples/iyi`, so a finalizer queue would be a mechanism no program could put
+an entry in. Weak references waited on the same answer until `std/weak_ref`
+gave them a user, and are built now (Stage 6's third item, below). Statistics
+are the honest subset, counted as the walk goes: chunks swept, chunks kept,
+bytes freed, collections run.
 
 Stage 5: the mark phase. Roots go gray through Stage 3's walker, a queue in its
 own mapping drains, each object's payload is scanned to the bound its size
@@ -1726,10 +1725,21 @@ Each stage is independently verifiable; the tree is never left broken between th
    - Then free the object.
    - Finalizers must not allocate or spawn tasks (enforce in design docs; runtime check deferred).
 
-3. **Weak References:**
-   - A weak reference is a pointer that does not prevent marking.
-   - At the end of the mark phase, before sweep, walk weak-reference tables and null out pointers to white objects.
-   - A weak reference returning `nil` after a collection is expected behavior; no finalizer or error.
+3. **Weak References:** built, as `IyiWeak` under `std/weak_ref`.
+   - A weak reference is a *cell*: eight bytes of atomic memory, which the mark
+     blackens and never scans, holding the target's address. Reading it is one
+     load into a register, where the next stop's root walk finds it, so a read
+     never races the clearing.
+   - The cells are registered in a table under the runtime lock. At the end of
+     every mark, before the epoch turns and the sweep can reuse anything
+     (`scavenge`), a cell left white is forgotten (its `WeakRef` is garbage) and
+     a live cell whose target is white is zeroed. A concurrent mark clears in its
+     second stop, after the last drain. wasm32's collector clears between its
+     mark and its sweep, and libgc does the same through
+     `GC_general_register_disappearing_link`.
+   - A weak reference returning `nil` after a collection is expected behavior;
+     no finalizer or error. `bench/std_weak_ref_exercise.sh` holds it, with
+     four threads reading beside marks that run beside the program.
 
 4. **Heap Statistics:**
    - Track: bytes allocated, bytes freed, pause time, number of collections, objects finalized.
@@ -1833,9 +1843,35 @@ Each stage is independently verifiable; the tree is never left broken between th
 
 2. **wasm32 Integration:** (Completed for wasm32-wasi)
    - Allocator: linear memory watermark with 64 KiB size-classed arenas, chunk headers, and free list reuse.
-   - Root discovery: linear memory scan from stacksave to __heap_base, and globals from 0 to __data_end.
+   - Root discovery: linear memory scan from stacksave to __heap_base, and globals from 0 to __data_end; the compiler keeps in a stack slot every value a call may outlive (`src/compiler/iyi/wasm_roots.cr`), so a value held only in a wasm local is in linear memory too.
    - Mark and sweep: mark-queue with layout table traversal; sweep into free lists and large object tracking.
    - Verified: bench/wasm32_exercise.sh passes under wasmtime in default and release modes.
+   - **Locals are roots (closed).** The walk reads linear memory, and a wasm
+     local is not in it: an object held only by a value the backend kept in
+     a local was freed by a collection that came while it was held. Under
+     `--release` a top-level array of 200 objects read back empty after a
+     collection and the same in a function ended the program; a plain build
+     lost a temporary - `pair(Box.new(40), Box.new(2))` added to 1848, the
+     first box freed while the second was made. The fix is a pass the
+     compiler runs on wasm32 after optimisation, plain or not
+     (`src/compiler/iyi/wasm_roots.cr`): every parameter and instruction
+     whose type can carry an address (a pointer, an integer of 32 bits or
+     more, an aggregate) that is used past a call - in another block, by a
+     phi, or in its block with a call between - is stored to an alloca of
+     its own where it is defined, with a volatile store. SSA values do not
+     change, so one store keeps the value reachable while its frame lives.
+     LLVM's `llvm.gcroot` covers allocas only, and Binaryen's
+     `--spill-pointers` i32 locals only and is another tool to ship; this
+     covers temporaries and integers and is part of the compiler.
+     `bench/wasm32_exercise.sh` section 7 holds objects in locals alone -
+     an array at the top level and in a function, a call's arguments, a
+     chain, a union made in place - across a collection with the stack
+     scrubbed beneath it, and the weak section holds its arrays in locals
+     with the trigger on; the compiler without the pass fails both, plain
+     and `--release`, and each of four rules removed (parameters, a call in
+     the block, a use elsewhere, integers) fails one. The cost under
+     `--release`: an allocation-heavy tree build 0.14 s to 0.19 s, an
+     arithmetic loop unchanged, the binary 5% larger.
 
 3. **Platform-Specific Pointer Maps:** (Measured and verified)
    - Codegen emits target-specific TypeLayout entries for each build target based on LLVM target data.

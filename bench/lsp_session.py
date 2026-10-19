@@ -69,6 +69,17 @@ def watchdog(seconds):
                         except Exception as error:  # noqa: BLE001 - a report, not a check
                             kids = f"unlisted ({error})"
                         print(f"  server {proc.pid} running, its children {kids}", flush=True)
+                        # Where each one is waiting: darwin's `sample` reads
+                        # every thread's stack for a second, symbols and all.
+                        if sys.platform == "darwin" and isinstance(kids, list):
+                            for pid in [proc.pid, *kids]:
+                                sampled = subprocess.run(["sample", str(pid), "1", "-mayDie"],
+                                                         capture_output=True, text=True, timeout=30)
+                                stack = [line for line in sampled.stdout.splitlines()
+                                         if "+" in line and ("iyi" in line or "Lsp" in line or "Fiber" in line)]
+                                print(f"  {pid}'s busiest frames:", flush=True)
+                                for line in stack[:40]:
+                                    print(f"    {line.strip()[:160]}", flush=True)
                 for proc in LIVE:
                     proc.kill()
                 os._exit(1)
@@ -154,6 +165,12 @@ def children(pid):
     names every process's parent, which is the same question."""
     if os.name == "nt":
         return nt_children(pid)
+    if sys.platform == "darwin":
+        # BSD ps has no --ppid, and asked for it answered nothing at all:
+        # every darwin dump said "its children []", and a kill found none.
+        listed = subprocess.run(["ps", "-A", "-o", "pid=,ppid="], capture_output=True, text=True)
+        pairs = [line.split() for line in listed.stdout.splitlines()]
+        return [int(p[0]) for p in pairs if len(p) == 2 and p[1] == str(pid)]
     listed = subprocess.run(["ps", "-o", "pid=", "--ppid", str(pid)],
                             capture_output=True, text=True)
     return [int(line) for line in listed.stdout.split() if line.isdigit()]
@@ -890,16 +907,20 @@ def kill_workers(c):
                 found.append(pid)
         except OSError:
             continue
+    # Killed a generation at a time, and the killed listed again: a worker
+    # that started a process after the list was taken and before its kill
+    # left that one running with its pipes (Windows CI: the proxy waited
+    # 180 s with no worker, a `ping` orphaned to the end of the job).
     doomed, pending = [], list(found)
     while pending:
-        pid = pending.pop()
-        doomed.append(pid)
-        pending.extend(children(pid))
-    for pid in reversed(doomed):
-        try:
-            os.kill(pid, signal.SIGTERM if os.name == "nt" else signal.SIGKILL)
-        except OSError:
-            pass
+        for pid in pending:
+            try:
+                os.kill(pid, signal.SIGTERM if os.name == "nt" else signal.SIGKILL)
+            except OSError:
+                pass
+        doomed.extend(pending)
+        time.sleep(0.2)
+        pending = [k for pid in doomed for k in children(pid) if k not in doomed]
     deadline = time.monotonic() + 10
     while any(pid in children(c.proc.pid) for pid in found) and time.monotonic() < deadline:
         time.sleep(0.1)

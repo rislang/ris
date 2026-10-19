@@ -116,7 +116,7 @@ that prints each one is named beside it.
 
 **Where it loses**, said here rather than left to be found: a full build of a
 6,912-line program from scratch is 0.24 s against `go build`'s 0.09 s. The
-current compiler reports `0.17.0`. iyi's own prelude carries the small-tool
+current compiler reports `0.18.0`. iyi's own prelude carries the small-tool
 floor — `puts`, stdin, whole-file `File` read/write, `Program.args`/`.env` —
 and no more: no TLS, no serialisation, and no sockets or format strings -
 `import std/socket` and `import std/format` are where the last two live,
@@ -345,8 +345,8 @@ programs under `bench/`, 84 run and pass unattended on a Windows 11
 machine. The three that do not are the three that cannot: one whose pass
 *is* a crash, one that waits for a client its gate supplies, and one that
 reads the two environment variables its gate pins. What is missing is named
-in the entry: no `Time::Location`, and a symbolic link needs a privilege
-Windows does not hand out.
+in the entry: no zone database of Windows' own, and a symbolic link needs a
+privilege Windows does not hand out.
 
 **Performance — Crystal's backend, and now one measurement of its own.**
 Native code through LLVM, the same GC. `python3 bench/runtime.py` runs the same
@@ -400,8 +400,8 @@ line so it cannot move unread.
 **Efficiency — built, and it is mostly subtraction.** `puts "hello"` is a 36 KB
 binary that starts in 1.6 ms; the same program compiled with Crystal's standard
 library is 1,553 KB and 3.2 ms. Nothing clever is happening: a program links what
-it uses, and iyi's own library is 20,323 lines rather than 8,161. The whole
-library is 852 KB on disk beside the binary.
+it uses, and iyi's own library is 21,567 lines rather than 8,161. The whole
+library is 899 KB on disk beside the binary.
 
 <sup>Sizes and start times are a plain `iyi build`, no flags, on macOS arm64
 with LLVM 22. They move with the platform and the LLVM, which is why they are
@@ -416,7 +416,7 @@ fails when one of those drifts from the tree.</sup>
 
 ## Getting it
 
-The released tarball is 0.17.0, and a build from current source reports the
+The released tarball is 0.18.0, and a build from current source reports the
 same. The one-liner at the top runs [`install.sh`](install.sh): POSIX sh
 over `curl` and `tar`, it picks the tarball for `uname` (linux-x86_64 or
 darwin-arm64), follows GitHub's `releases/latest` redirect rather than the
@@ -425,16 +425,16 @@ against the `SHA256SUMS` the release publishes beside it and refuses a
 mismatch with nothing unpacked; releases before 0.12.0 published no sums,
 and it says so rather than passing over it. CI runs the script against
 the tarball each build proves, then against a sum with one digit wrong.
-`IYI_PREFIX` moves the destination and `IYI_VERSION=0.17.0` pins a
+`IYI_PREFIX` moves the destination and `IYI_VERSION=0.18.0` pins a
 release. By hand it is the same two lines:
 
 ```sh
-tar -xzf iyi-0.17.0-linux-x86_64.tar.gz -C ~/.local
+tar -xzf iyi-0.18.0-linux-x86_64.tar.gz -C ~/.local
 ~/.local/bin/iyi run ~/.local/share/iyi/samples/hello.iyi
 ```
 
 The tarball is relocatable and carries every library a program can ask for:
-iyi's own 852 KB prelude, the 2,353 KB of `src/std` that `import std/...`
+iyi's own 899 KB prelude, the 4,312 KB of `src/std` that `import std/...`
 resolves to, and Crystal's standard library for `--crystal`. 0.11.0 shipped
 the first and the third — `import std/enumerable` answered "can't find module"
 out of the thing people downloaded, and every gate passed it because they all
@@ -452,7 +452,7 @@ outside the package but `/usr/lib` and `/System`.
 
 **On Windows the same release is a zip, and the one prerequisite is the
 build tools.** 0.14.0 was the first release to publish it, and
-`iyi-0.17.0-windows-x86_64.zip` sits beside the two tarballs,
+`iyi-0.18.0-windows-x86_64.zip` sits beside the two tarballs,
 written by `make -f Makefile.win iyi-zip` in the run that proved it, with
 its line in the same `SHA256SUMS`. The one-liner at the top runs
 [`install.ps1`](install.ps1), `install.sh`'s twin: Windows PowerShell 5.1
@@ -468,7 +468,7 @@ same two lines, because the zip is relocatable — `bin\` and `share\` at
 its top, exactly like the tarball:
 
 ```powershell
-Expand-Archive iyi-0.17.0-windows-x86_64.zip -DestinationPath "$env:LOCALAPPDATA\Programs\iyi"
+Expand-Archive iyi-0.18.0-windows-x86_64.zip -DestinationPath "$env:LOCALAPPDATA\Programs\iyi"
 & "$env:LOCALAPPDATA\Programs\iyi\bin\iyi.exe" run "$env:LOCALAPPDATA\Programs\iyi\share\iyi\samples\hello.iyi"
 ```
 
@@ -719,7 +719,7 @@ $ curl localhost:3000/json
 `pub`, traits with defaults, `impl … forall`, error unions and `!`, `.or`,
 `or_panic`, `defer` — all of them, on a program that requires a shard. R-2
 still refuses an export that does not write its types. What changes is what the
-program *has*: 8,161 lines of Crystal's standard library instead of 20,323
+program *has*: 8,161 lines of Crystal's standard library instead of 21,567
 lines of iyi's own prelude.
 
 **One name is unreachable, and it is a class of names.** `!` in iyi propagates
@@ -991,7 +991,7 @@ An artifact is readable:
 ```console
 $ iyi mod dump mods/kemal/router.iyimod | head -20
 module        kemal/router
-compiler      0.17.0
+compiler      0.18.0
 ...
 exports
   pub struct Context
@@ -1089,7 +1089,7 @@ swept through it, Kemal among them. There is still no package manager: point
 R-1 for the required shard, which is compiled from source rather than read as
 declarations.
 
-**Is the syntax stable?** No. 0.17.0 is a release of a language that is still
+**Is the syntax stable?** No. 0.18.0 is a release of a language that is still
 moving, and the parts of SPEC.md marked PROPOSED are exactly the parts that
 will move.
 
@@ -1102,12 +1102,12 @@ that the test suite runs on every target.
 **Who is this for right now?** Somebody who wants to check the claim, read the
 design, or argue with a number. `--crystal` moved the other line: a program
 that requires shards is buildable today, and what should keep you away is the
-language rather than the library — master is 0.17.0, and the parts of SPEC.md
+language rather than the library — master is 0.18.0, and the parts of SPEC.md
 marked PROPOSED are the parts that will move under you.
 
 ## What is not here
 
-- **iyi's own library is 20,323 lines, and its IO is `puts`, `print`, the
+- **iyi's own library is 21,567 lines, and its IO is `puts`, `print`, the
   three standard streams and `File`**: integers, booleans, a string, one
   sequence, one dictionary, one range, and what an `enum` needs — its
   name, its order, its members and, for a `@[Flags]` one, its bits.
@@ -1116,8 +1116,9 @@ marked PROPOSED are the parts that will move under you.
   `read_all` the rest, `write` and `flush` go the other way, and
   `read_input` is `stdin.read_all` under its old name.
   `File.read`, `File.write`, `File.exists?` and `File.delete` are the
-  whole-file surface, and `File.open(path, "r"|"w")` is the same stream
-  over a file. `samples/iyi/files.iyi` writes, reads and deletes its file;
+  whole-file surface, and `File.open(path, mode)` with the other library's
+  `r`, `w`, `a`, `r+`, `w+` and `a+` is the same stream over a file.
+  `samples/iyi/files.iyi` writes, reads and deletes its file;
   `samples/iyi/io.iyi` reads a line at a time. Sockets and format strings
   are `src/std/` modules, so a program that imports neither carries
   neither. `--crystal` is the other library and has all of it; everything
@@ -1206,7 +1207,10 @@ marked PROPOSED are the parts that will move under you.
   others, its output read through overlapped named pipes on the completion
   port and its end posted there by `RegisterWaitForSingleObject`, so a
   program waiting for a child keeps serving its other tasks.
-  What is *not* here: there is no `Time::Location`; a
+  What is *not* here: Windows keeps no IANA zone database, so
+  `Time::Location.local` there is the system's rule from
+  `GetTimeZoneInformation`, its zones named by their offsets, and
+  `Location.load` reads only what `$ZONEINFO` points at; a
   symbolic link needs a privilege Windows grants to an administrator or
   to Developer Mode, so the file exercise asks first and says what it
   skipped; the daemon is POSIX-only (`poll(2)` and `fork`), so the
@@ -1238,8 +1242,8 @@ marked PROPOSED are the parts that will move under you.
   of the same released version read each other's `.iyimod` files only on the
   same target under the same flags; anything else is rejected and rebuilt,
   never migrated. A `-dev` build is not a released version: it keeps the build
-  commit in its identity and interoperates only with itself. 0.17.0 is
-  released, so its artifacts carry the version alone and any 0.17.0 build on
+  commit in its identity and interoperates only with itself. 0.18.0 is
+  released, so its artifacts carry the version alone and any 0.18.0 build on
   the same target and flags reads them.
 - **A derive reads upwards, and an artifact carries more than the rule says.**
   `derive <macro>` in a class or struct body runs once, in the module that
@@ -1266,7 +1270,7 @@ marked PROPOSED are the parts that will move under you.
 | [SPEC.md](SPEC.md) | the design, and the record of what measurement settled |
 | [`samples/iyi`](samples/iyi) | twenty-seven programs: nineteen documenting a part of it, seven being a first hour, and `calc`, a language |
 | [`samples/crystal/kemal`](samples/crystal/kemal) | a kemal application, from `shard.yml`: built from source and across four `.iyimod` boundaries |
-| [`src/iyi`](src/iyi) | iyi's own library, 20,323 lines. `--crystal` swaps it for Crystal's |
+| [`src/iyi`](src/iyi) | iyi's own library, 21,567 lines. `--crystal` swaps it for Crystal's |
 | [`src/std`](src/std) | the standard library, in iyi. Opt-in with `import std/...`, outside the prelude's ceiling |
 | [`src/compiler/iyi/iyimod.cr`](src/compiler/iyi/iyimod.cr) | the artifact format |
 | [`bench/incremental.py`](bench/incremental.py) | the edit loop, against Go, generated in both languages |
@@ -1280,7 +1284,7 @@ iyi's compiler is built on the Crystal compiler and carries Crystal's licence
 and copyright: Apache 2.0, Copyright 2012-2026 Manas Technology Solutions. See
 [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md). Everything here that is not
 Crystal's is a change to Crystal's source. `iyi --version` reports
-`iyi 0.17.0 (built on Crystal 1.22.0-dev)`: the language first, then what it
+`iyi 0.18.0 (built on Crystal 1.22.0-dev)`: the language first, then what it
 is built on. The compatibility binary in the same checkout still reports itself
 as `Crystal 1.22.0-dev`, because that is what it is. This paragraph is a licence
 obligation and an accurate one; the language above it is iyi's own.

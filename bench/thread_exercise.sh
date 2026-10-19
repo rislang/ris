@@ -1095,10 +1095,12 @@ if ! grep -q "\`limit\` is assigned here, after the thread has started" build-re
   echo "the refusal did not name the variable:"; cat build-reassigned.log; exit 1
 fi
 printf '  refused: %s\n' "$(grep -m1 'is assigned here' build-reassigned.log | sed 's/^Error: //')"
-# The advice names what iyi has: it said "or behind a `Mutex`", and `Mutex`
-# is an undefined constant here. `Atomic` is the one it names now.
-if grep -q 'Mutex' build-raced.log build-reassigned.log || ! grep -q 'Keep the value in an `Atomic`' build-raced.log; then
-  echo "the advice does not name Atomic alone:"; cat build-raced.log build-reassigned.log; exit 1
+# The advice names what iyi has to keep a value two threads write: an
+# `Atomic`, or a `Mutex` from std/mutex. It once said "or behind a
+# `Mutex`" before there was one; the module is named now, so the advice
+# leads somewhere.
+if ! grep -q 'Keep the value in an `Atomic`, or behind a `Mutex` (std/mutex)' build-raced.log || ! grep -q 'or behind a `Mutex` (std/mutex)' build-reassigned.log; then
+  echo "the advice does not name Atomic and std/mutex's Mutex:"; cat build-raced.log build-reassigned.log; exit 1
 fi
 # The same line inside `{% if true %}` or `{% for %}`: the walk read the
 # macro's text rather than its expansion, so it compiled, and a thread
@@ -1436,7 +1438,9 @@ PS1
     step "failure proof: a program that ends back in the C runtime hangs under a collection"
     mkdir -p crt-end/iyi
     cp "$REPO"/src/iyi/*.iyi crt-end/iyi/
-    awk '/^    LibC\.fflush\(Pointer\(Void\)\.new\(0_u64\)\)$/ || /^    __iyi_exit\(0\)$/ { found++; next } { print } END { if (found != 2) exit 3 }' \
+    # The pair is the win32 end of `fun main`; `def exit` writes the same
+    # `__iyi_exit(status)` line, so only the one after the flush is taken.
+    awk 'after && /^    __iyi_exit\(status\)$/ { found++; after = 0; next } { after = 0 } /^    LibC\.fflush\(Pointer\(Void\)\.new\(0_u64\)\)$/ { found++; after = 1; next } { print } END { if (found != 2) exit 3 }' \
       "$REPO/src/iyi/prelude.iyi" > crt-end/iyi/prelude.iyi || { echo "the end this proof removes is not in the prelude any more"; exit 1; }
     if ! IYI_PATH="$WORK/crt-end${PSEP}$REPO/src" "$IYI" build --release ends.iyi -o ends-in-crt > build-crt-end.log 2>&1; then
       cat build-crt-end.log; exit 1

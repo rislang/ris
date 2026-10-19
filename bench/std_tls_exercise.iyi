@@ -1,0 +1,434 @@
+# Exercises std/tls: a TLS 1.3 client and server, and the client's TLS 1.2.
+#
+# With no argument: RFC 8448's "Simple 1-RTT Handshake" trace, held byte for
+# byte through the key schedule and the record protection - every secret
+# from the early one to the exporter's, the server's handshake flight
+# decrypted from the trace's record to the trace's plaintext, both
+# Finished values, the client's Finished sealed into exactly the trace's
+# record, and the application data both ways after a NewSessionTicket -
+# and TLS 1.2's PRF over SHA-256 and SHA-384 against the vectors that
+# circulate for it. The modes the gate script drives:
+#   scenarios DIR       every scenario of bench/std_tls_server.py, whose
+#                       port and roots are in DIR, each holding or refused
+#                       for its reason;
+#   get PORT ROOTS HOST [ALPN|-] [CHAIN KEY]
+#                       GET / over a connection to 127.0.0.1:PORT for HOST,
+#                       its status line, suite, protocol and version
+#                       printed, or why it was refused; with CHAIN and KEY,
+#                       presented if the server asks; TLS 1.2 offered too
+#                       when TLS_MIN_VERSION is 1.2;
+#   renegotiate PORT ROOTS HOST
+#                       "first", a read that times out, "second", a read:
+#                       what a TLS 1.2 server that sends a HelloRequest
+#                       between is answered;
+#   serve DIR COUNT     a TlsServer on 127.0.0.1, its port written to
+#                       DIR/port, with DIR/chain.pem and DIR/key.pem and
+#                       ALPN h2 and http/1.1 - asking for a client's
+#                       certificate under DIR/client-roots.pem when there
+#                       is one, not requiring it when DIR/client-optional
+#                       is there: COUNT connections, one at a time, each
+#                       line "held ..." or "refused: why".
+#                       Bytes are echoed as "echo:..."; a request ending
+#                       in a blank line is answered `HTTP/1.0 200 ok` and
+#                       what was agreed, then close_notify;
+#   config CHAIN KEY    TlsServerConfig.from_pem's answer.
+
+import std/tls::{TlsClient, TlsConfig, TlsError, TlsIdentity, TlsKeySchedule, TlsRecordCipher, TlsServer, TlsServerConfig, TlsVersion}
+import std/x509::{Certificate}
+import std/socket::{IyiSocket, SocketError}
+import std/file::{File}
+import std/env::{ENV}
+
+def check(cond : Bool, label : String) : Nil
+  raise "ASSERTION FAILED: #{label}" unless cond
+end
+
+def b(hex : String) : Array(UInt8)
+  p = hex.to_unsafe
+  Array(UInt8).new(hex.bytesize // 2) do |i|
+    hi = p[i * 2].to_i32
+    lo = p[i * 2 + 1].to_i32
+    hi = hi >= 97 ? hi - 87 : hi - 48
+    lo = lo >= 97 ? lo - 87 : lo - 48
+    (hi * 16 + lo).to_u8
+  end
+end
+
+def text(bytes : Array(UInt8)) : String
+  String.new(bytes.size) { |buf| buf.copy_from(bytes.to_unsafe, bytes.size) }
+end
+
+# Everything the server sends after *conn* has written "hello", or the
+# error that ended it.
+def drain(conn : TlsClient) : String
+  got = ""
+  while true
+    chunk = conn.read
+    return got + " [#{chunk.message}]" if chunk.is_a?(TlsError)
+    return got if chunk.empty?
+    got = got + chunk
+  end
+  got
+end
+
+# scenario, whether it holds, and the phrase its refusal says
+SCENARIOS = [
+  {"ok", true, ""}, {"rsa", true, ""}, {"p384", true, ""}, {"ed25519", true, ""}, {"aes256", true, "TLS_AES_256_GCM_SHA384"},
+  {"chacha", true, "TLS_CHACHA20_POLY1305_SHA256"}, {"ccs", true, ""}, {"fragmented", true, ""},
+  {"certreq", true, ""}, {"certreq-ed25519", true, ""}, {"alpn", true, "http/1.1"}, {"hrr-cookie", true, ""}, {"hrr-p256", true, ""}, {"keyupdate", true, ""}, {"slow-echo", true, ""}, {"client-rekey", true, ""},
+  {"big", true, ""}, {"ticket", true, ""},
+  {"bad-finished", false, "Finished does not match the handshake (decrypt_error)"},
+  {"bad-cv", false, "CertificateVerify is not its key's signature (decrypt_error)"},
+  {"bad-cv-ed25519", false, "CertificateVerify is not its key's signature (decrypt_error)"},
+  {"cv-ed25519-p256", false, "scheme 0x807 for a key that is not Ed25519"},
+  {"cv-pkcs1", false, "CertificateVerify under scheme 0x401"},
+  {"cv-wrong-curve", false, "scheme 0x403 for a key that is not on its curve"},
+  {"suite-unoffered", false, "cipher suite 0x1304, which was not offered"},
+  {"tls12", false, "the server does not speak TLS 1.3 (protocol_version)"},
+  {"tls12-resume", false, "resuming this ClientHello's session id, which was never a session (illegal_parameter)"},
+  {"tls12-hello", false, "the server sent alert access_denied (49)"},
+  {"tls12-downgrade", false, "carrying RFC 8446's downgrade sentinel, where TLS 1.3 was offered: a downgrade (illegal_parameter)"},
+  {"tls12-downgrade11", false, "carrying RFC 8446's downgrade sentinel, where TLS 1.3 was offered: a downgrade (illegal_parameter)"},
+  {"tls12-no-ems", false, "does not do the extended master secret (RFC 7627), which a TLS 1.2 handshake here requires (handshake_failure)"},
+  {"tls12-reneg", false, "a renegotiation_info that is not empty, on a first handshake (handshake_failure)"},
+  {"tls12-suite13", false, "cipher suite TLS_AES_128_GCM_SHA256 for TLS 1.2, which was not offered for it (illegal_parameter)"},
+  {"tls12-version11", false, "the server chose version 0x302, before TLS 1.2, which this does not speak (protocol_version)"},
+  {"tls12-versions", false, "the server does not speak TLS 1.3 (protocol_version)"},
+  {"tls12-key-share", false, "extension 51 in a TLS 1.2 ServerHello, which was not offered for it (unsupported_extension)"},
+  {"no-echo", false, "does not echo the session id"},
+  {"hrr-group", false, "a HelloRetryRequest for group 24, which was not offered (illegal_parameter)"},
+  {"unsolicited-ext", false, "extension 65281 in EncryptedExtensions, which was not offered"},
+  {"alpn-unoffered", false, "chose \"spdy/3\" by ALPN, which was not offered"},
+  {"wrong-host", false, "is not valid for wrong-host.tls.test"},
+  {"untrusted", false, "no certificate here issued CN=Other Root"},
+  {"expired", false, "CN=leaf is not valid at"},
+  {"bad-record-mac", false, "a record that does not decrypt (bad_record_mac)"},
+  {"oversize", false, "past the 2^14 + 256 allowed (record_overflow)"},
+  {"alert", false, "the server sent alert handshake_failure (40)"},
+  {"cert-empty", false, "the server sent no certificate (decode_error)"},
+  {"app-data-in-handshake", false, "a record of type 23 during the handshake"},
+  {"trailing-after-finished", false, "handshake bytes left after the server's Finished"},
+  {"zero-share", false, "X25519 share gives no secret"},
+  {"compression", false, "a ServerHello with compression"},
+  {"sh-extension", false, "extension 65280 in a ServerHello, which was not offered"},
+  {"certreq-no-sigalgs", false, "a CertificateRequest with no signature_algorithms (missing_extension)"},
+  {"cert-many", false, "a Certificate of more than 10 certificates (bad_certificate)"},
+  {"slow-server", false, "took past the time given to the handshake"},
+  {"sh-wrong-group", false, "a ServerHello's share in secp256r1, where the share sent was X25519's (illegal_parameter)"},
+  {"sh-and-more", false, "handshake bytes after the ServerHello in its record (unexpected_message)"},
+  {"ku-no-sign", false, "does not allow digitalSignature, which a CertificateVerify is (bad_certificate)"},
+  {"keyupdate-bad", true, "read: a KeyUpdate asking 2 (illegal_parameter)"},
+  {"certreq-context", false, "a CertificateRequest with a request context in the handshake (illegal_parameter)"},
+  {"cert-entry-ext", false, "a certificate entry with extensions nobody asked for (unsupported_extension)"},
+  {"sni-ack-data", false, "a server_name acknowledgement that is not empty (decode_error)"},
+  {"user-canceled", true, ""},
+]
+
+CLIENT_HELLO           = "010000c00303cb34ecb1e78163ba1c38c6dacb196a6dffa21a8d9912ec18a2ef6283024dece7000006130113031302010000910000000b0009000006736572766572ff01000100000a00140012001d0017001800190100010101020103010400230000003300260024001d002099381de560e4bd43d23d8e435a7dbafeb3c06e51c13cae4d5413691e529aaf2c002b0003020304000d0020001e040305030603020308040805080604010501060102010402050206020202002d00020101001c00024001"
+SERVER_HELLO           = "020000560303a6af06a4121860dc5e6e60249cd34c95930c8ac5cb1434dac155772ed3e2692800130100002e00330024001d0020c9828876112095fe66762bdbf7c672e156d6cc253b833df1dd69b1b04e751f0f002b00020304"
+EARLY_SECRET           = "33ad0a1c607ec03b09e6cd9893680ce210adf300aa1f2660e1b22e10f170f92a"
+SHARED                 = "8bd4054fb55b9d63fdfbacf9f04b9f0d35e6d63f537563efd46272900f89492d"
+HANDSHAKE_SECRET       = "1dc826e93606aa6fdc0aadc12f741b01046aa6b99f691ed221a9f0ca043fbeac"
+C_HS                   = "b3eddb126e067f35a780b3abf45e2d8f3b1a950738f52e9600746a0e27a55a21"
+S_HS                   = "b67b7d690cc16c4e75e54213cb2d37b4e9c912bcded9105d42befd59d391ad38"
+MASTER                 = "18df06843d13a08bf2a449844c5f8a478001bc4d4c627984d5a41da8d0402919"
+S_HS_IV                = "5d313eb2671276ee13000b30"
+SERVER_FLIGHT          = "080000240022000a00140012001d00170018001901000101010201030104001c00024001000000000b0001b9000001b50001b0308201ac30820115a003020102020102300d06092a864886f70d01010b0500300e310c300a06035504031303727361301e170d3136303733303031323335395a170d3236303733303031323335395a300e310c300a0603550403130372736130819f300d06092a864886f70d010101050003818d0030818902818100b4bb498f8279303d980836399b36c6988c0c68de55e1bdb826d3901a2461eafd2de49a91d015abbc9a95137ace6c1af19eaa6af98c7ced43120998e187a80ee0ccb0524b1b018c3e0b63264d449a6d38e22a5fda430846748030530ef0461c8ca9d9efbfae8ea6d1d03e2bd193eff0ab9a8002c47428a6d35a8d88d79f7f1e3f0203010001a31a301830090603551d1304023000300b0603551d0f0404030205a0300d06092a864886f70d01010b05000381810085aad2a0e5b9276b908c65f73a7267170618a54c5f8a7b337d2df7a594365417f2eae8f8a58c8f8172f9319cf36b7fd6c55b80f21a03015156726096fd335e5e67f2dbf102702e608ccae6bec1fc63a42a99be5c3eb7107c3c54e9b9eb2bd5203b1c3b84e0a8b2f759409ba3eac9d91d402dcc0cc8f8961229ac9187b42b4de100000f000084080400805a747c5d88fa9bd2e55ab085a61015b7211f824cd484145ab3ff52f1fda8477b0b7abc90db78e2d33a5c141a078653fa6bef780c5ea248eeaaa785c4f394cab6d30bbe8d4859ee511f602957b15411ac027671459e46445c9ea58c181e818e95b8c3fb0bf3278409d3be152a3da5043e063dda65cdf5aea20d53dfacd42f74f3140000209b9b141d906337fbd2cbdce71df4deda4ab42c309572cb7fffee5454b78f0718"
+SERVER_FLIGHT_RECORD   = "17030302a2d1ff334a56f5bff6594a07cc87b580233f500f45e489e7f33af35edf7869fcf40aa40aa2b8ea73f848a7ca07612ef9f945cb960b4068905123ea78b111b429ba9191cd05d2a389280f526134aadc7fc78c4b729df828b5ecf7b13bd9aefb0e57f271585b8ea9bb355c7c79020716cfb9b1183ef3ab20e37d57a6b9d7477609aee6e122a4cf51427325250c7d0e509289444c9b3a648f1d71035d2ed65b0e3cdd0cbae8bf2d0b227812cbb360987255cc744110c453baa4fcd610928d809810e4b7ed1a8fd991f06aa6248204797e36a6a73b70a2559c09ead686945ba246ab66e5edd8044b4c6de3fcf2a89441ac66272fd8fb330ef8190579b3684596c960bd596eea520a56a8d650f563aad27409960dca63d3e688611ea5e22f4415cf9538d51a200c27034272968a264ed6540c84838d89f72c24461aad6d26f59ecaba9acbbb317b66d902f4f292a36ac1b639c637ce343117b659622245317b49eeda0c6258f100d7d961ffb138647e92ea330faeea6dfa31c7a84dc3bd7e1b7a6c7178af36879018e3f252107f243d243dc7339d5684c8b0378bf30244da8c87c843f5e56eb4c5e8280a2b48052cf93b16499a66db7cca71e4599426f7d461e66f99882bd89fc50800becca62d6c74116dbd2972fda1fa80f85df881edbe5a37668936b335583b599186dc5c6918a396fa48a181d6b6fa4f9d62d513afbb992f2b992f67f8afe67f76913fa388cb5630c8ca01e0c65d11c66a1e2ac4c85977b7c7a6999bbf10dc35ae69f5515614636c0b9b68c19ed2e31c0b3b66763038ebba42f3b38edc0399f3a9f23faa63978c317fc9fa66a73f60f0504de93b5b845e275592c12335ee340bbc4fddd502784016e4b3be7ef04dda49f4b440a30cb5d2af939828fd4ae3794e44f94df5a631ede42c1719bfdabf0253fe5175be898e750edc53370d2b"
+SERVER_FINISHED        = "9b9b141d906337fbd2cbdce71df4deda4ab42c309572cb7fffee5454b78f0718"
+CLIENT_FINISHED        = "a8ec436d677634ae525ac1fcebe11a039ec17694fac6e98527b642f2edd5ce61"
+CLIENT_FINISHED_RECORD = "170303003575ec4dc238cce60b298044a71e219c56cc77b0517fe9b93c7a4bfc44d87f38f80338ac98fc46deb384bd1caeacab6867d726c40546"
+C_AP                   = "9e40646ce79a7f9dc05af8889bce6552875afa0b06df0087f792ebb7c17504a5"
+S_AP                   = "a11af9f05531f856ad47116b45a950328204b4f44bfb6b3a4b4f1f3fcb631643"
+EXP_MASTER             = "fe22f881176eda18eb8f44529e6792c50c9a3f89452f68d8ae311b4309d3cf50"
+TICKET_RECORD          = "17030300de3a6b8f90414a97d6959c3487680de5134a2b240e6cffac116e95d41d6af8f6b580dcf3d11d63c758db289a015940252f55713e061dc13e078891a38efbcf5753ad8ef170ad3c7353d16d9da773b9ca7f2b9fa1b6c0d4a3d03f75e09c30ba1e62972ac46f75f7b981be63439b2999ce13064615139891d5e4c5b406f16e3fc181a77ca475840025db2f0a77f81b5ab05b94c01346755f69232c86519d86cbeeac87aac347d143f9605d64f650db4d023e70e952ca49fe5137121c74bc2697687e248746d6df353005f3bce18696129c8153556b3b6c6779b37bf15985684f"
+TICKET                 = "040000c90000001efad6aac502000000b22c035d829359ee5ff7af4ec900000000262a6494dc486d2c8a34cb33fa90bf1b0070ad3c498883c9367c09a2be785abc55cd226097a3a982117283f82a03a143efd3ff5dd36d64e861be7fd61d2827db279cce145077d454a3664d4e6da4d29ee03725a6a4dafcd0fc67d2aea70529513e3da2677fa5906c5b3f7d8f92f228bda40dda721470f9fbf297b5aea617646fac5c03272e970727c621a79141ef5f7de6505e5bfbc388e93343694093934ae4d3570008002a000400000400"
+CLIENT_DATA            = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f3031"
+CLIENT_DATA_RECORD     = "1703030043a23f7054b62c94d0affafe8228ba55cbefacea42f914aa66bcab3f2b9819a8a5b46b395bd54a9a20441e2b62974e1f5a6292a2977014bd1e3deae63aeebb21694915e4"
+SERVER_DATA            = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f3031"
+SERVER_DATA_RECORD     = "17030300432e937e11ef4ac740e538ad36005fc4a46932fc3225d05f82aa1b36e30efaf97d90e6dffc602dcb501a59a8fcc49c4bf2e5f0a21c0047c2abf332540dd032e167c2955d"
+PRF_SHA256             = "e3f229ba727be17b8d122620557cd453c2aab21d07c3d495329b52d4e61edb5a6b301791e90d35c9c9a46b4e14baf9af0fa022f7077def17abfd3797c0564bab4fbc91666e9def9b97fce34f796789baa48082d122ee42c5a72e5a5110fff70187347b66"
+PRF_SHA384             = "7b0c18e9ced410ed1804f2cfa34a336a1c14dffb4900bb5fd7942107e81c83cde9ca0faa60be9fe34f82b1233c9146a0e534cb400fed2700884f9dc236f80edd8bfa961144c9e8d792eca722a7b32fc3d416d473ebc2c5fd4abfdad05d9184259b5bf8cd4d90fa0d31e2dec479e4f1a26066f2eea9a69236a3e52655c9e9aee691c8f3a26854308d5eaa3be85e0990703d73e56f"
+
+args = Program.args
+
+if args.size > 0 && args[0] == "scenarios"
+  port = File.read(args[1] + "/port").to_i
+  config = TlsConfig.new
+  config.roots = Certificate.from_pem(File.read(args[1] + "/roots.pem")).or_panic
+  config.alpn = ["h2", "http/1.1"]
+  # Presented where a request names ed25519, and only there.
+  config.identity = TlsIdentity.from_pem(File.read(args[1] + "/client.pem"), File.read(args[1] + "/client.key")).or_panic
+  # The same, told to speak TLS 1.2: for the tls12-* scenarios alone, so
+  # every other one meets the default.
+  config12 = TlsConfig.new
+  config12.roots = config.roots
+  config12.alpn = config.alpn
+  config12.identity = config.identity
+  config12.min_version = TlsVersion::TLS12
+  held = 0
+  refused = 0
+  SCENARIOS.each do |s|
+    socket = IyiSocket.connect("127.0.0.1", port)
+    check socket.is_a?(IyiSocket), "#{s[0]}: no connection to the scripted server"
+    next unless socket.is_a?(IyiSocket)
+    # Three seconds for a handshake: the slow server is cut off within it.
+    conn = TlsClient.over(socket, s[0] + ".tls.test", s[0].starts_with?("tls12-") ? config12 : config, 3000)
+    if s[1]
+      check !conn.is_a?(TlsError), "#{s[0]}: refused: #{conn.is_a?(TlsError) ? conn.message : ""}"
+      next unless conn.is_a?(TlsClient)
+      if s[0] == "keyupdate"
+        # The server's keys move before its echo; this side's KeyUpdate goes
+        # with its next write, never from a read.
+        conn.write("hello")
+        first = conn.read
+        check first == "echo:hello", "keyupdate: the first echo came back as #{first.is_a?(TlsError) ? first.message : first.inspect}"
+        conn.write("again")
+        got = drain(conn)
+        check got == "echo:again", "keyupdate: the second echo came back as #{got.inspect}"
+        held = held + 1
+        next
+      end
+      if s[0] == "slow-echo"
+        # A read past its timeout says so and leaves the connection open.
+        conn.write("hello")
+        conn.read_timeout_ms = 300
+        first = conn.read
+        check first.is_a?(TlsError) && first.timed_out?, "slow-echo: a read past its timeout answered #{first.is_a?(TlsError) ? first.message : first.inspect}"
+        conn.read_timeout_ms = 5000
+        got = drain(conn)
+        check got == "echo:hello", "slow-echo: after the timeout the echo came back as #{got.inspect}"
+        held = held + 1
+        next
+      end
+      if s[0] == "client-rekey"
+        # Two records a key: the third and fifth writes move to new keys
+        # first; then a KeyUpdate asking for the server's.
+        conn.key_limit = 2_u64
+        conn.write("hello")
+        ["b", "c", "d", "e"].each { |x| conn.write(x) }
+        asked = conn.key_update(true)
+        check asked.nil?, "client-rekey: key_update answered #{asked.is_a?(TlsError) ? asked.message : ""}"
+        got = drain(conn)
+        check got == "echo:hellobcde keyupdates=2 asked=1", "client-rekey: the echo came back as #{got.inspect}"
+        held = held + 1
+        next
+      end
+      conn.write("hello")
+      got = drain(conn)
+      if s[2].starts_with?("read: ")
+        # Refused after the handshake: what the read says.
+        check got.includes?(s[2][6, s[2].size - 6]), "#{s[0]}: read #{got[0, 120].inspect}"
+      else
+        check conn.cipher_suite.includes?(s[2]) || conn.alpn_protocol == s[2] || s[2].empty?, "#{s[0]}: #{conn.cipher_suite}, alpn #{conn.alpn_protocol.inspect}"
+        expected = s[0] == "big" ? 40000 : 10
+        check got.starts_with?("echo:hello") && got.size == expected, "#{s[0]}: the echo came back as #{got[0, 60].inspect} (#{got.size} bytes)"
+      end
+      held = held + 1
+    else
+      check conn.is_a?(TlsError), "#{s[0]}: expected a refusal, got a connection"
+      if conn.is_a?(TlsError)
+        check conn.message.includes?(s[2]), "#{s[0]}: refused with #{conn.message.inspect}, not #{s[2].inspect}"
+      end
+      refused = refused + 1
+    end
+  end
+  puts "  #{held} handshakes held and echoed, #{refused} refused, each for its reason"
+  exit 0
+end
+
+if args.size > 0 && args[0] == "get"
+  config = TlsConfig.new
+  config.roots = Certificate.from_pem(File.read(args[2])).or_panic
+  config.alpn = [args[4]] if args.size > 4 && args[4] != "-"
+  config.identity = TlsIdentity.from_pem(File.read(args[5]), File.read(args[6])).or_panic if args.size > 6
+  config.min_version = TlsVersion::TLS12 if ENV["TLS_MIN_VERSION"]? == "1.2"
+  socket = IyiSocket.connect("127.0.0.1", args[1].to_i)
+  unless socket.is_a?(IyiSocket)
+    puts "no connection"
+    exit 0
+  end
+  conn = TlsClient.over(socket, args[3], config)
+  if conn.is_a?(TlsError)
+    puts "refused: #{conn.message}"
+    exit 0
+  end
+  conn.write("GET / HTTP/1.0\r\n\r\n")
+  # With TLS_EXPORT, what this end exports for that label, 16 bytes.
+  label = ENV["TLS_EXPORT"]?
+  exported = label ? " exported=#{hex_of(conn.export_keying_material(label, [] of UInt8, 16))}" : ""
+  got = drain(conn)
+  puts "#{got.lines.first? || got} #{conn.cipher_suite} alpn=#{conn.alpn_protocol || "-"}#{exported} #{conn.version}"
+  conn.close
+  exit 0
+end
+
+# renegotiate PORT ROOTS HOST: TLS 1.2 to a server that sends a
+# HelloRequest after "first" reaches it; the read that takes it times out,
+# and the next write carries the no_renegotiation warning before "second".
+if args.size > 0 && args[0] == "renegotiate"
+  config = TlsConfig.new
+  config.roots = Certificate.from_pem(File.read(args[2])).or_panic
+  config.min_version = TlsVersion::TLS12
+  socket = IyiSocket.connect("127.0.0.1", args[1].to_i)
+  unless socket.is_a?(IyiSocket)
+    puts "no connection"
+    exit 0
+  end
+  conn = TlsClient.over(socket, args[3], config).or_panic
+  conn.write("first\n")
+  conn.read_timeout_ms = 3000
+  first = conn.read
+  puts "#{conn.version}: the read after first: #{first.is_a?(TlsError) ? first.message : first.inspect}"
+  conn.read_timeout_ms = 3000
+  sent = conn.write("second\n")
+  puts "the write after it: #{sent.is_a?(TlsError) ? sent.message : sent}"
+  after = conn.read
+  puts "then: #{after.is_a?(TlsError) ? after.message : after.inspect}"
+  exit 0
+end
+
+if args.size > 0 && args[0] == "config"
+  answer = TlsServerConfig.from_pem(File.read(args[1]), File.read(args[2]))
+  if answer.is_a?(TlsError)
+    puts "refused: #{answer.message}"
+  else
+    puts "config: #{answer.chain.size} certificates, leaf #{answer.leaf.subject_name}"
+  end
+  exit 0
+end
+
+# What one connection to the server mode says it agreed, for a reply.
+def hex_of(bytes : Array(UInt8)) : String
+  bytes.map { |x| (x < 16_u8 ? "0" : "") + x.to_s(16) }.join("")
+end
+
+# What the server says of a connection: the name asked for, the protocol,
+# the suite, the client's certificate, the certificate it was shown under,
+# and 16 bytes exported for "EXPERIMENTAL iyi" (RFC 8446 section 7.5).
+def agreed(conn : TlsServer) : String
+  peer = conn.peer_certificates.empty? ? "-" : conn.peer_certificates[0].subject_name
+  exported = hex_of(conn.export_keying_material("EXPERIMENTAL iyi", [] of UInt8, 16))
+  "name=#{conn.server_name || "-"} alpn=#{conn.alpn_protocol || "-"} #{conn.cipher_suite} peer=#{peer} shown=#{conn.identity.leaf.subject_name} exported=#{exported}"
+end
+
+def serve_one(conn : TlsServer) : String
+  received = ""
+  while true
+    chunk = conn.read
+    return "held #{agreed(conn)}, then #{chunk.message}" if chunk.is_a?(TlsError)
+    return "held #{agreed(conn)}, closed by the client after #{received.bytesize} bytes" if chunk.empty?
+    received = received + chunk
+    if received.includes?("\r\n\r\n") || received.includes?("\n\n")
+      conn.write("HTTP/1.0 200 ok\r\n\r\n#{agreed(conn)}\n")
+      conn.close
+      return "held #{agreed(conn)}, answered"
+    end
+    conn.write("echo:" + chunk)
+  end
+  ""
+end
+
+if args.size > 0 && args[0] == "serve"
+  config = TlsServerConfig.from_pem(File.read(args[1] + "/chain.pem"), File.read(args[1] + "/key.pem")).or_panic
+  config.alpn = ["h2", "http/1.1"]
+  # A second identity, for other.test, shown to a client that asks for it.
+  if File.file?(args[1] + "/other-chain.pem")
+    config.add_identity(TlsIdentity.from_pem(File.read(args[1] + "/other-chain.pem"), File.read(args[1] + "/other-key.pem")).or_panic)
+  end
+  if File.file?(args[1] + "/client-roots.pem")
+    config.client_roots = Certificate.from_pem(File.read(args[1] + "/client-roots.pem")).or_panic
+    config.client_required = !File.file?(args[1] + "/client-optional")
+  end
+  listener = IyiSocket.listen("127.0.0.1", 0)
+  File.write(args[1] + "/port", listener.local_port.to_s)
+  args[2].to_i.times do
+    socket = listener.accept
+    unless socket.is_a?(IyiSocket)
+      puts "no connection"
+      next
+    end
+    socket.read_timeout_ms = 15000
+    # Five seconds to finish a handshake, so a peer that drips one in is
+    # cut off while the gate waits. Three were too few for the first
+    # handshake of Python 3.14's ssl on a fresh Windows runner, once: the
+    # same client's next three, against the other keys, were in time.
+    conn = TlsServer.over(socket, config, 5000)
+    if conn.is_a?(TlsError)
+      puts "refused: #{conn.message}"
+    else
+      puts serve_one(conn)
+    end
+    STDOUT.flush
+  end
+  exit 0
+end
+
+puts "== RFC 8448's simple 1-RTT handshake, through the key schedule"
+schedule = TlsKeySchedule.new(false)
+hello = b(CLIENT_HELLO) + b(SERVER_HELLO)
+check schedule.early_secret == b(EARLY_SECRET), "the early secret"
+handshake = schedule.handshake_secret(b(SHARED))
+check handshake == b(HANDSHAKE_SECRET), "the handshake secret"
+c_hs = schedule.derive_secret(handshake, "c hs traffic", hello)
+s_hs = schedule.derive_secret(handshake, "s hs traffic", hello)
+check c_hs == b(C_HS), "client_handshake_traffic_secret"
+check s_hs == b(S_HS), "server_handshake_traffic_secret"
+master = schedule.master_secret(handshake)
+check master == b(MASTER), "the master secret"
+flight = b(SERVER_FLIGHT)
+before_finished = hello + flight[0, flight.size - 36]
+check schedule.finished(s_hs, before_finished) == b(SERVER_FINISHED), "the server's Finished"
+check flight[flight.size - 32, 32] == b(SERVER_FINISHED), "the trace's Finished is the one computed"
+whole = hello + flight
+check schedule.finished(c_hs, whole) == b(CLIENT_FINISHED), "the client's Finished"
+check schedule.derive_secret(master, "c ap traffic", whole) == b(C_AP), "client_application_traffic_secret_0"
+check schedule.derive_secret(master, "s ap traffic", whole) == b(S_AP), "server_application_traffic_secret_0"
+check schedule.derive_secret(master, "exp master", whole) == b(EXP_MASTER), "exporter_master_secret"
+check schedule.next_secret(b(S_AP)) != b(S_AP), "a KeyUpdate's next secret is another"
+puts "  early, handshake and master secrets, both handshake and application traffic secrets, the exporter's, both Finished"
+
+puts "== the trace's records, sealed and opened"
+reader = TlsRecordCipher.new(0x1301, schedule, s_hs)
+check reader.key_iv == b(S_HS_IV), "the server's handshake iv"
+record = b(SERVER_FLIGHT_RECORD)
+opened = reader.open(record[0, 5], record[5, record.size - 5])
+check !opened.is_a?(TlsError), "the server's flight opens: #{opened.is_a?(TlsError) ? opened.message : ""}"
+if opened.is_a?(Tuple(UInt8, Array(UInt8)))
+  check opened[0] == 22_u8 && opened[1] == flight, "the server's flight is EncryptedExtensions to Finished, as the trace has it"
+end
+tampered = record.dup
+tampered[record.size - 1] = tampered[record.size - 1] ^ 1_u8
+check TlsRecordCipher.new(0x1301, schedule, s_hs).open(tampered[0, 5], tampered[5, tampered.size - 5]).is_a?(TlsError), "a record one bit off refused"
+writer = TlsRecordCipher.new(0x1301, schedule, c_hs)
+sealed = writer.seal(22_u8, [20_u8, 0_u8, 0_u8, 32_u8] + b(CLIENT_FINISHED))
+check sealed == b(CLIENT_FINISHED_RECORD), "the client's Finished sealed as the trace's record"
+server_app = TlsRecordCipher.new(0x1301, schedule, b(S_AP))
+ticket = b(TICKET_RECORD)
+opened = server_app.open(ticket[0, 5], ticket[5, ticket.size - 5])
+if opened.is_a?(Tuple(UInt8, Array(UInt8)))
+  check opened[0] == 22_u8 && opened[1] == b(TICKET), "the NewSessionTicket opened"
+else
+  check false, "the NewSessionTicket opened: #{opened.message}"
+end
+data = b(SERVER_DATA_RECORD)
+opened = server_app.open(data[0, 5], data[5, data.size - 5])
+if opened.is_a?(Tuple(UInt8, Array(UInt8)))
+  check opened[0] == 23_u8 && opened[1] == b(SERVER_DATA), "the server's data opened, second in sequence"
+else
+  check false, "the server's data opened: #{opened.message}"
+end
+client_app = TlsRecordCipher.new(0x1301, schedule, b(C_AP))
+check client_app.seal(23_u8, b(CLIENT_DATA)) == b(CLIENT_DATA_RECORD), "the client's data sealed as the trace's record"
+puts "  the server's flight and data opened, the client's Finished and data sealed byte for byte"
+
+puts "== TLS 1.2's PRF, through the key schedule"
+# The P_SHA256 and P_SHA384 vectors that circulate for TLS 1.2 (Python's
+# hmac computes the same): secret, seed and "test label", 100 and 148 bytes.
+prf256 = TlsKeySchedule.new(false).prf(b("9bbe436ba940f017b17652849a71db35"), "test label", b("a0ba9f936cda311827a6f796ffd5198c"), 100)
+check prf256 == b(PRF_SHA256), "P_SHA256's 100 bytes"
+prf384 = TlsKeySchedule.new(true).prf(b("b80b733d6ceefcdc71566ea48e5567df"), "test label", b("cd665cf6a8447dd6ff8b27555edb7465"), 148)
+check prf384 == b(PRF_SHA384), "P_SHA384's 148 bytes"
+puts "  P_SHA256 and P_SHA384, 100 and 148 bytes"
+
+puts "\nALL CHECKS PASSED"

@@ -2,7 +2,2598 @@
 
 ## Unreleased
 
+## 0.18.0 — 2026-10-18
+
+**iyi's own library reaches the network by itself: TLS 1.3 at both ends,
+HTTPS, HTTP/2, WebSocket over TLS and the certificates beneath them,
+written in iyi from the RFCs, with no C library under any of it.** std/tls
+is a client and a server - X25519 and secp256r1, AES-GCM and
+ChaCha20-Poly1305, ECDSA, RSA-PSS and Ed25519 checked, Ed25519 and P-256
+signed in constant time and RSA on a blinded message, client certificates
+in both directions, certificates chosen by server_name and keying material
+exported - over std/x509, std/ecdsa, std/rsa, std/curve25519, std/p256 and
+std/aead, each held to OpenSSL's verdicts, and bounded against hostile
+peers: a chain search stops at 100 signature checks, input is read in time
+that grows with it, a handshake has a deadline, keys move before their
+record limit, and a read that times out leaves the connection open.
+Records move at two to three and a half times their earlier rate, now that
+the prelude's arrays join and slice in one copy. std/http fetches and
+serves HTTP/1.1 and HTTP/2 over it, through a proxy when asked,
+std/websocket speaks `wss://` with permessage-deflate, std/smtp sends what
+std/mail builds, and a program resolves names through iyi's own resolver.
+Around them came a hundred and nine additions - XPath 1.0, `BigFloat`,
+grapheme clusters, `WeakRef`, processes a program talks to, file locks,
+signals, regular expressions with groups and Unicode, time zones, zip and
+tar, a DEFLATE compressor at zlib's sizes, xz, Zstandard, bzip2, PNG,
+TOML, IP addresses and prefixes, shell words, password hashing among
+them - each exercised beside the other library's or the platform's own
+answers, with broken copies of the module proving every check can fail.
+A wasm32 program keeps what its locals hold through a collection, plain
+and optimised, where an optimised build freed it, and an optimised build
+reads a `UInt128` out of a large array, where it died of SIGSEGV.
+
+**Some answers change:** `Hash#==` compares contents, regular expressions
+consume whole UTF-8 characters, `String#gsub` reads `\0`-`\9` in its
+replacement, `IyiSocket.connect` resolves a host name, `File.open` in
+`"a"` appends, a `Secure` cookie is sent over `https://` alone, the
+stricter of two overloads is chosen whatever order they were declared in,
+a WebSocket offers and accepts permessage-deflate and an HTTP client asks
+for `zstd` too, and a wasm32 `--release` binary is about 5% larger,
+allocation-heavy code about a third slower, for keeping its locals where
+the collector reads. **Some programs that compiled are refused:** a script
+without a `module` line that defines `assert_eq` or another of the
+prelude's new test names.
+
+**Not here, and said so:** std/tls has not been audited and is not to be
+called secure until it is; TLS 1.2 is a client's alone, and only when
+asked; resumption and 0-RTT are not there. The language server twice left
+a `shutdown` unanswered on darwin and Windows CI, not on Linux's, cause
+not found. The scheduler that spreads tasks across cores comes after this
+release; a REPL is not planned.
+
+### Added
+
+- **std/shlex: shell words split, quoted and joined as Python's `shlex`
+  does in POSIX mode.** `Shlex.split(text, comments = false)` answers
+  `Array(String) | ShlexError`: words separated by space, tab, CR and
+  LF, single quotes literal, a backslash keeping the byte after it
+  outside quotes and taking only `"` and `\` inside double quotes
+  (Python's rule; POSIX also lets it take `$`, `` ` `` and a line feed),
+  `''` an empty word, and with `comments` a `#` ending the word and the
+  line. An unclosed quote or a final backslash is a `ShlexError` naming
+  the byte it stands at. `Shlex.quote(arg)` leaves an argument of
+  letters, digits and `%+,-./:=@_` as it is and single-quotes any other
+  (`'` written `'"'"'`), `''` for empty; `Shlex.join(args)` joins the
+  quoted arguments with spaces. Pure iyi, no imports.
+  `bench/std_shlex_exercise.sh` holds it to Python 3.14's
+  `shlex.split`/`quote`/`join` on a generated corpus (10,026 splits,
+  1,537 of them refused, 3,133 quotes, 808 joins), checks
+  `split(join(args)) == args` on 3,000 generated lists and the corpus,
+  has `/bin/sh` (dash) and bash read every join as `printf` arguments
+  and print the arguments back, checks the `or_panic` sentences, and
+  catches 14 broken copies of the module.
+- **std/websocket: permessage-deflate (RFC 7692) at both ends, on by
+  default.** `WebSocket.connect` offers `permessage-deflate;
+  client_max_window_bits`, as browsers do, and `WebSocket.upgrade`
+  accepts the first offer it can keep, naming back
+  `server_no_context_takeover`, `client_no_context_takeover` and
+  `server_max_window_bits` as the offer did; an offer with a parameter
+  §7.1 does not define, one named twice, or a value it may not have is
+  declined (§7), and a `Sec-WebSocket-Extensions` that is not a list of
+  extensions is a 400 that says so. The client refuses an answer with
+  another extension, permessage-deflate twice, or a parameter wrong in
+  any of those ways, as a `WebSocketError` that names it. `deflate:
+  false` on either turns it off, and `deflate_level:` (0 to 9, 1 by
+  default as gorilla/websocket's is; anything else a panic) sets this
+  end's level; `WebSocket#deflate` is the `PerMessageDeflate` agreed,
+  its `level` included, and `WebSocket.new` takes one. Text and binary
+  messages go with RSV1 set, through std/compress's `Deflater`, 256 KiB
+  at a time, ending in a sync flush whose 00 00 ff ff is left off; an
+  empty message is the byte 00; pings, pongs and closes
+  never. The window carries over unless that end's
+  `no_context_takeover` was agreed, and matches reach no farther back
+  than its `max_window_bits`, which the compressor keeps to exactly, so
+  no window is declined. A compressed message is inflated with the four
+  bytes put back, in a 32 KiB window that reads any `max_window_bits`,
+  and `max_message` holds as it inflates: a deflate bomb is refused 1009
+  at most 64 KiB past the limit, never inflated whole. RSV1 on a control
+  frame or a continuation is 1002, bytes that do not inflate 1007.
+  std/compress gains `Inflater.flushed` and `Inflater#inflate(piece,
+  limit)` - a raw stream decoded a sync-flushed piece at a time, the
+  window kept, a final block followed by more as RFC 7692 §7.2.1 allows -
+  and `Deflater.new(window_bits:)`, 8 to 15. Measured here (`--release`):
+  eight 16 MiB messages of CHANGELOG.md text from a client to a server in
+  1.5 s at level 1 and 5.2 s at level 6, against 74 ms uncompressed -
+  nearly all of it the compressor, which takes one such message to 7.2
+  MB in 121 ms at level 1 and to 6.1 MB in 589 ms at level 6, where
+  inflating takes 60 to 67 ms; 64 MiB of zeros in 292,849 bytes refused
+  at a 1 MiB limit in 0.13 ms. Held by Node 24's `WebSocket` against the
+  server (permessage-deflate agreed, 54 messages and a megabyte echoed
+  compressed), a Python client and server written in the gate over
+  zlib's raw DEFLATE (the window carried over and not, windows of 2^15
+  and 2^9, a message ending in a final block, fragments, 256 MiB of
+  zeros in 260,917 bytes refused 1009), in the clear and under TLS;
+  RFC 7692 §7.2.3's examples read and the Hello written byte for byte;
+  and seventeen new mutations, the module's 22 still caught. The gate now
+  also builds the exercise from artifacts, typechecks it for five
+  targets, and checks `iyi doc` and `iyi fmt`.
+- **std/http: the `zstd` content coding both ways.** The client's
+  default `Accept-Encoding` is `gzip, deflate, zstd`, and a body coded
+  `zstd` (RFC 8878) is decoded as it arrives through std/zstd's
+  `ZstdReader`, frames one after another, with the 8 MB window RFC 9659
+  §3 holds HTTP to: a frame that asks for more is an `HTTPError`
+  (`the body's coding: zstd: the frame needs a window of 16777216 bytes,
+  past the limit of 8388608`). `BodyReader#decode_zstd` is the reader's
+  half. Under `Server.serve(compress: true)` a whole body goes `zstd`
+  (`Zstd.compress`) when the client's `q` for zstd is at least its `q`
+  for gzip, and gzip otherwise; the tie goes to zstd because, measured
+  here, `Zstd.compress` took a quarter of `Gzip.compress`'s time for at
+  most an eighth more bytes (src/std/http.iyi: 61,753 bytes in 1 ms
+  against 54,484 in 5 ms). A streamed answer - an `IyiIO` or
+  `Response.stream` - stays gzip, or goes as it is to a client that
+  takes zstd alone: std/zstd's compressor takes its input whole, and no
+  streaming zstd writer was added. `Vary: Accept-Encoding` goes with
+  either coding, over HTTP/1.1 and HTTP/2. `q` values are now read to
+  their thousandths (`Server.coding_for`, `HTTP.coding_weight`), where
+  they were read as refused or not. Held by Python 3.14's
+  `compression.zstd` both ways (one frame, two, an 8 MiB window taken
+  and a 16 MiB one refused), curl `--compressed` against the server, and
+  nine new mutations.
+- **std/http and std/websocket: `HTTP.upgrade` and `WebSocket.connect`
+  through a proxy.** Both take `proxy:` as `HTTP.open` does, and the
+  handshake goes through the proxy's `CONNECT` tunnel for `ws://`
+  (`http://`) as for `wss://`, the credential on the CONNECT alone: an
+  upgrade in absolute form through a forward proxy is unreliable, since
+  `Upgrade` belongs to its connection (RFC 9110 §7.8) and a proxy drops
+  `Connection` and the fields it names (§7.6.1) - the gate's own proxy
+  leaves std/websocket's server a request it answers 400. Bytes a proxy
+  sends after its 200 to an upgrade's CONNECT are refused as for
+  `https://` ("before the request began"). The http gate's Python proxy
+  round carries a WebSocket echo through it, `ws://` and `wss://`, with
+  a 407 named, and the websocket gate one through a CONNECT proxy
+  written in iyi; a mutation each that sends the handshake past the
+  proxy or in absolute form is caught.
+- **std/tls: a client that speaks TLS 1.2, when asked, to a server that
+  speaks nothing newer (RFC 5246, RFC 7627's extended master secret, RFC
+  5746's renegotiation_info).** Opt-in: `TlsConfig#min_version` is
+  `TlsVersion::TLS13` by default, and then the ClientHello is 1.3's alone
+  and a 1.2 ServerHello is refused as before ("the server does not speak
+  TLS 1.3", protocol_version) - SPEC.md's decision #18, 1.3 only, stands
+  as the default and is restated there as done. With `TLS12`, one
+  ClientHello offers both: supported_versions names 1.3 then 1.2, and six
+  1.2 suites follow the three of 1.3 - ECDHE signed by ECDSA (or
+  Ed25519, RFC 8422) or RSA, with AES-128-GCM, AES-256-GCM or
+  ChaCha20-Poly1305; ECDHE and AEADs alone. A 1.2
+  ServerHello carrying RFC 8446's downgrade sentinel is refused, as is
+  one that echoes the ClientHello's session id (resumption is not
+  offered), chooses a suite not offered for 1.2, or does not do the
+  extended master secret, which is required and named in the refusal.
+  The ServerKeyExchange's signature is checked over both randoms and the
+  parameters (PKCS #1 v1.5, RSA-PSS, ECDSA with the scheme's hash on any
+  curve, Ed25519), the chain as for 1.3, the server's Finished under its
+  keys; the PRF is P_SHA256 or P_SHA384; AES-GCM's explicit nonce is the
+  sequence number going out and the record's coming in. A HelloRequest
+  is answered with a no_renegotiation warning before the next write; a
+  CertificateRequest with the identity when its type and a scheme fit;
+  the exporter is RFC 5705's. `TlsConnection#version` says "TLSv1.3" or
+  "TLSv1.2"; a 1.2 connection has no KeyUpdate, so `key_update` answers
+  a `TlsError` there and writes end at `key_limit`. A 1.2 server whose
+  ECDSA certificate is on P-384 refuses this ClientHello, whose groups
+  name X25519 and secp256r1 alone. `bench/std_tls_exercise.sh` holds the
+  default to 1.3 alone (the scripted server checks the ClientHello and
+  refuses nothing else; OpenSSL's and Python's 1.2-only servers answer
+  protocol_version) and runs the 1.2 interop with the option set; copies
+  that offer 1.2 by default, take a 1.2 ServerHello unasked, or list 1.2's
+  suites unasked are each caught.
+- **std/rsa signs: `RsaPrivateKey`, and a std/tls server or client
+  identity on an RSA key.** `RsaPrivateKey.from_pem` reads PKCS #1 (`RSA
+  PRIVATE KEY`) and PKCS #8 (`PRIVATE KEY`), `from_pkcs1`/`from_pkcs8` the
+  DER, `RsaPrivateKey.new` eight numbers; the key is read only if p·q =
+  n, e·d = 1 mod lcm(p - 1, q - 1), dp and dq are d's residues and qi is
+  q's inverse mod p, and a modulus under 2048 bits, more than two
+  primes, an RSASSA-PSS key and an encrypted one are refused by name.
+  `sign_pss` (salt as long as the hash) and `sign_pkcs1v15` over SHA-256,
+  -384 and -512 run the CRT through std/big's `pow_mod_secret` on a
+  blinded message and check the signature against the public key before
+  it goes out (a fault is a panic, not a signature); signing over SHA-1
+  is a panic. 1.16 to 1.33 ms a 2048-bit signature, 6.5 to 6.9 a 4096-bit
+  one, --release, here. `TlsServerConfig.from_pem` takes an RSA leaf key
+  and signs CertificateVerify under rsa_pss_rsae_sha256, -384 or -512,
+  the first of them the client lists, never PKCS #1 v1.5;
+  `TlsIdentity#schemes` and `#scheme_for` replace `#scheme`, and a client
+  certificate may be RSA. A full handshake measured with Python's ssl:
+  0.64 ms on Ed25519, 0.65 on P-256, 1.58 on RSA-2048, 6.66 on RSA-4096.
+- **std/compress: a DEFLATE compressor with zlib's levels, its lazy
+  matching and dynamic Huffman blocks, writing within 0.3% of zlib's
+  size.** `Deflate.compress(data, level = 6)`, `Zlib.compress`,
+  `Gzip.compress` and `Deflater.new(envelope, level = 6)` take zlib's
+  levels and its configuration table: 0 stores, 1 to 3 take the longest
+  match greedily (deflate_fast), 4 to 9 hold a match while the next
+  position is searched (deflate_slow), over zlib's three-byte hash into
+  2^15 chains and its blocks of 16,383 symbols, a match reaching the
+  whole 32 KiB back. Each block is written stored, fixed or dynamic by
+  its exact bit cost; the dynamic codes are optimal, held to 15 bits (7
+  for the code-length code, which ordinary text reaches) and run-length
+  coded with 16/17/18 across the literal/distance boundary. zlib's FLEVEL
+  and gzip's XFL say the level as zlib writes them. `Deflater` keeps its
+  window from piece to piece, each `compress` still ending in a sync
+  flush. Before, every stream was one fixed-Huffman block over greedy
+  matching: on the gate's corpora - SPEC.md, two std modules, 600 KB of
+  JSON, 10 MB of the repository - it wrote 25%, 20%, 27% and 22% more
+  than zlib's level 6 (313,110 bytes for SPEC.md against 250,229), and
+  200,000 bytes of noise came to 210,859; level 6 now writes 0.05%,
+  0.11%, 0.01% and 0.05% less (250,113), noise is stored (200,065), and
+  every level of every corpus is within 0.26% of zlib's at the same
+  level, smaller at most. With --release over the 10 MB: level 1 in 62
+  ms (Python's zlib 1.3.1, 54), 6 in 242 (205), 9 in 709 (528). A
+  Deflater fed 2 MB 100 bytes at a time writes 788,483 bytes in 88 ms,
+  zlib with a sync flush per piece 788,766 in 82; before, 1,659,598 in
+  321. std/png's 2048x2048 RGBA picture is 3.5% past Pillow's file,
+  from 30%. A level outside 0 to 9 panics.
+- **std/http: requests through a proxy, and std/http_proxy to find one in
+  the environment.** `proxy:` on `HTTP.request`, `HTTP.open` and
+  `HTTPClient.new` takes an `http://` proxy's URL (`host:port` alone is
+  read as `http://`, the port 80 when none is written): `http://` goes to
+  the proxy as an absolute-form request (RFC 9112 §3.2.2), `https://`
+  through `CONNECT host:port` (RFC 9110 §9.3.6) with TLS to the server
+  inside the tunnel, its certificate checked as without a proxy, and ALPN
+  `h2` spoken inside as outside. The URL's user and password go as
+  `Proxy-Authorization: Basic` to the proxy alone - on the CONNECT, never
+  inside the tunnel; a caller's own `Proxy-Authorization` is moved to the
+  CONNECT too, and replaced on a forwarded request by the URL's. A
+  CONNECT answered with anything but a 2xx is an `HTTPError` naming the
+  proxy and its status (`the proxy at 127.0.0.1:3128 answered 407 Proxy
+  Authentication Required to CONNECT localhost:8443`), and so are bytes
+  sent after the 2xx before TLS began; a proxy over `https://` or SOCKS
+  is refused by name, never spoken in the clear. An `HTTPClient` keeps a
+  proxy's connections under the proxy URL, credentials included, and a
+  tunnel under the proxy and the server; `http://` through a proxy is
+  HTTP/1.1 whatever `prior_knowledge` says. `HTTP.proxy_for(url,
+  http_proxy, https_proxy, no_proxy)` answers which proxy a URL takes
+  under those values, as Go's `httpproxy` does: `localhost` and loopback
+  addresses never, and NO_PROXY's domains (and their subdomains), `.` and
+  `*.` suffixes, `*`, IPv4 and IPv6 addresses, CIDR ranges and ports,
+  hosts compared in IDNA's ASCII form. It is pure, and std/http still
+  imports no std/env: the new `std/http_proxy`'s `HTTPProxy.from_env(url)`
+  reads `http_proxy`, `https_proxy`, `no_proxy` and their names in
+  capitals, the lower-case name winning when set even to nothing, and
+  `HTTP_PROXY` not read under CGI (httpoxy), as Python's `urllib` reads
+  them; on Windows, where `http_proxy` is `HTTP_PROXY`, neither is read
+  under CGI.
+- **std/smtp: an SMTP client (RFC 5321) over std/socket and std/tls.**
+  `SmtpClient.connect(host, port, security, config, helo, timeout_ms) :
+  SmtpClient | SmtpError` greets and says EHLO (HELO after a 500, 502 or
+  504), under `SmtpSecurity::StartTls` (the default, which the server
+  must offer), `Tls` from the first byte (port 465) or `Cleartext`;
+  after STARTTLS it says EHLO again and forgets what it was told, and a
+  server that sends anything after its 220 to STARTTLS is refused. The
+  EHLO name is the caller's or the connection's address literal. `auth`
+  sends AUTH PLAIN, LOGIN or CRAM-MD5, the first offered unless named,
+  and refuses to send a password without TLS unless `cleartext_auth` is
+  set. `send(message)` takes a `Mail::Message`'s From, To, Cc and Bcc,
+  or `send(sender, recipients, data)`; MAIL FROM carries SIZE, and a
+  message past the server's is refused before it goes, BODY=8BITMIME for
+  8-bit data (refused where neither 8BITMIME nor SMTPUTF8 is offered) and
+  SMTPUTF8 for RFC 6532 addresses (refused where it is not offered); a
+  refused recipient ends the transaction with RSET, so a message goes to
+  all its recipients or none; DATA's lines are made CRLF and its leading
+  dots doubled. Replies are read whole, their lines' codes held to agree,
+  a line past 4096 bytes or a reply past 100 lines refused. Errors are
+  `SmtpError` values whose `code` is the reply's (0 below SMTP, and then
+  the connection is closed) and `reply` its text; every read and write
+  waits at most `timeout_ms`, five minutes unless asked, and one that
+  runs out says `timed_out?`.
+- **std/mail: Internet mail messages (RFC 5322, MIME) built and read in
+  iyi.** `Mail::Message` takes From, To, Cc, Bcc, Reply-To, the Subject,
+  a Date (`Mail.date(unix, offset)` writes one) and a Message-ID from the
+  caller - the module reads no clock and draws no randomness - a text
+  and an HTML body, attachments and headers of the caller's own, and
+  `to_s` writes it: one `text/plain` part, `multipart/alternative` for
+  text and HTML, `multipart/mixed` with attachments; text as 7bit, or as
+  whichever of quoted-printable and base64 is shorter, attachments as
+  base64; CRLF throughout; Bcc left out of the text and kept in
+  `recipients`; boundaries `iyi-` and the SHA-1 of the parts they
+  separate, made again while a part holds one, as std/http's
+  `MultipartBuilder` makes them. Headers are folded to 78 columns, a
+  value that is not single-spaced printable ASCII goes as RFC 2047
+  encoded-words of 75 or fewer, whole characters each, and a file name
+  that is not short ASCII as RFC 2231 `filename*`, in continuations when
+  long. `Mail.parse(text) : Mail::Part | MailError` reads CRLF or LF
+  messages: fields unfolded, `header` with encoded-words decoded, the
+  MIME tree with `message/rfc822` and digests, `body` with its transfer
+  encoding undone, `text` in UTF-8 from UTF-8, US-ASCII, ISO-8859-1,
+  ISO-8859-15 or windows-1252 and an error naming any other charset,
+  `addresses` reading RFC 5322's mailboxes and groups, quoted local
+  parts, domain literals, obsolete forms and RFC 6532's UTF-8, comments
+  passed over and never taken for a name. `Mail.parse_date` reads dates
+  with section 4.3's obsolete years and zones. Refused as a `MailError`:
+  a header line that is not a field, a header section that begins
+  folded, a multipart with no boundary, no boundary line or no closing
+  one, parts nested deeper than 32, an address list that is not one; a
+  body in an unknown transfer encoding and text not in its charset when
+  asked for. Panics: a message without From or Date, a Date or
+  Message-ID that is not one, a line break in a header, a name or a file
+  name, a header the message writes itself, an address that is not one,
+  a Date outside 1900 to 9999 or a day from UTC. A display name that
+  fits one encoded-word is written as one, since Python's `email` reads a
+  space into the gap between two encoded-words of a phrase where RFC 2047
+  drops it - its own long names come back so. std/mail imports
+  std/digest, std/base64, std/mime and std/text, and reaches no platform.
+- **std/xz: .xz and .lzma decompressed in iyi, read a piece at a time,
+  `.tar.xz` read by std/tar, and CRC-64 in std/digest.** `XzReader.new {
+  next_bytes }` reads the .xz container (file format 1.0.4) the way
+  std/compress's `Inflater` reads gzip - `read(max) : String | XzError`,
+  `finished?` - and `XzReader.new(XzFormat::Lzma) { ... }` the legacy
+  .lzma file; `Xz.decompress(data)` is the same reader over one string,
+  answering `String | XzError`. LZMA and LZMA2 as XZ Embedded decodes them
+  (every chunk kind, state, property and dictionary resets), the delta and
+  x86 BCJ filters before LZMA2, every check xz writes (none, CRC32, CRC64,
+  SHA-256) compared, block header CRCs, flags, padding and sizes, the
+  index (record count, unpadded and uncompressed sizes, padding, CRC32)
+  and the stream footer against the header and the index; streams joined
+  with stream padding; a .lzma ended by its size, its end marker or both.
+  Memory is the dictionary - a ring that starts at 64 KiB and doubles up
+  to the stream's dictionary size - plus a 128 KiB input buffer; a
+  dictionary past `dict_limit` (64 MiB unless the caller says) is an
+  `XzError` before it is allocated. Refused as values, each by its own
+  sentence: a check, CRC, index or size that does not match, a stream that
+  ends early, LZMA data that reaches before its output or past its chunk,
+  the reserved check types, the other BCJ filters (ARM64, PowerPC, ...),
+  and bytes after the last stream that are neither padding nor a stream.
+  `TarReader` now sniffs xz's magic beside gzip's and bzip2's and reads
+  the rest of the stream at the archive's end, so xz's checks vouch for
+  what was handed out (`xz?` says it was xz). `CRC64` (CRC-64/XZ) joins
+  `CRC32` and `Adler32` in std/digest with the same `checksum`/`update`
+  convention.
+- **std/zstd: Zstandard (RFC 8878) read and written in iyi, read a piece
+  at a time, and XXH64 in std/digest.** `ZstdReader.new { next_bytes }`
+  reads a stream the way std/compress's `Inflater` does - `read(max) :
+  String | ZstdError`, `finished?`, `leftover` - decoding a block at a
+  time into one buffer of at most two windows and a block, slid once that
+  frees a window; `Zstd.decompress(data) : String | ZstdError` is the same
+  decoder over one piece. Both read every frame of a stream and skip
+  skippable ones; every header form; raw, RLE and compressed blocks;
+  literals raw, RLE or Huffman-coded in one stream or four, the table
+  described (weights direct or FSE-compressed) or reused; sequence codes
+  through the predefined tables, one symbol, a described table or the
+  last block's; the repeat offsets as RFC 8878 §3.1.1.5 moves them. They
+  hold a frame to its content size, its checksum (the low 32 bits of
+  XXH64), its block maximum and its window. Refused as a `ZstdError`, by
+  name: a frame that needs a dictionary (by its ID), a window past the
+  caller's limit - `max_window`, 8 MiB unless asked, RFC 9659's limit for
+  HTTP - a reserved header bit or block type, a block past the maximum,
+  an FSE description whose accuracy or probabilities do not hold, a
+  symbol past its alphabet, Huffman weights that leave the code
+  incomplete, a stream that does not end where its symbols do, a treeless
+  block or repeated table with nothing before it, an offset past the
+  window or before the frame, a sequence past the block's literals or
+  maximum, either size or the checksum not matching, a stream that ends
+  early, and - whole - bytes after the last frame that begin none, which
+  the reader leaves as `leftover`. Misuse panics: a read of no bytes, a
+  window limit outside 1 KiB to 512 MiB. `Zstd.compress(data)` writes
+  one frame with its size and checksum that any decoder reads with a
+  1 MiB window: RLE blocks, a greedy hash matcher, literals Huffman-coded,
+  sequence codes through tables made for each block, raw blocks where
+  that is no larger; 4.2 MB of `src/std` comes to 1,275,717 bytes,
+  where Python's zstd at level 1 writes 1,285,541 and zlib at levels 1
+  and 6 1,408,756 and 1,175,988. With --release the gate's 64 MiB stream
+  read through `ZstdReader` in 41 ms (`zstd.decompress` 35). std/zstd
+  imports std/int and std/digest and reaches no platform. `XXH64`
+  joins std/digest: `checksum(data, seed)`, and `update` in pieces with a
+  `digest` that can be asked midway.
+- **`std/toml`: TOML 1.0.0 read and written in iyi, with `derive
+  toml_serializable`.** `TOML.parse(text)` answers an `Any` (a table) or a
+  `TOMLError` naming the line and column; `TOML.parse?` answers nil
+  instead, and `.or_panic` panics with the sentence. Every construct of
+  the spec is read: bare, quoted and dotted keys; basic, literal and both
+  multi-line strings with all nine escapes, the line-ending backslash and
+  CRLF read as LF; integers decimal, hex, octal and binary with
+  underscores, to the `Int64` limits; floats correctly rounded, `inf` and
+  `nan`; booleans; offset date-times, local date-times, local dates and
+  local times as a `TOMLDateTime` that keeps its kind and its offset (a
+  type of the module's own: three of the four kinds are not instants, and
+  std/time would reach the clock - `unix_seconds` gives an offset
+  date-time's instant); arrays of mixed kinds; inline tables; `[tables]`
+  and `[[arrays of tables]]`. Refused, each with where: text that is not
+  UTF-8 and a byte order mark; controls in comments and strings, a lone
+  CR, TOML 1.1's `\e`, `\x` and seconds-less times, escapes naming
+  surrogates; leading zeros, stray underscores, signed hex, integers past
+  `Int64` (which Python's tomllib reads); `.7`, `7.`, `3.e+20`; impossible
+  dates and leap seconds; trailing commas and line breaks in inline
+  tables; a key or table given twice, a header naming a table dotted keys
+  made, dotted keys adding to a declared table, anything added to an
+  inline table or a static array, `[x]`/`[[x]]` crossed; nesting past 64
+  levels, which keeps reading, `==`, `hash` and `dump` within a task's
+  stack (a plain build ran out at 120 nested inline tables). `TOML.dump`
+  writes a table back - plain keys, then `[sub-tables]` and
+  `[[arrays of tables]]`, strings escaped onto one line, floats in their
+  shortest round-tripping text - and `derive toml_serializable` gives
+  `to_toml`, `from_toml` and `initialize(toml)` beside std/json's and
+  std/yaml's derives on one type, a nil field left out since TOML has no
+  null. Held by `bench/std_toml_exercise.sh` against Python 3.14's
+  `tomllib`: the spec's 48 examples, 99 corpus documents, 256 random
+  documents in random syntax and 404 dumps read to the same typed values;
+  209 refused documents refused by both; 20,000 fuzzed documents of
+  headers, arrays of tables, dotted keys and inline values accepted and
+  refused alike (11,394 read); derived records read to what their JSON
+  says; plain and `--release` printing the same, five targets
+  typechecked, the artifact build printing what the source build prints;
+  thirty broken copies of the module, and one of the comparison, each
+  caught at the check that names it.
+- **std/bzip2: bzip2 read and written in iyi, read a piece at a time,
+  and `.tar.bz2` read by std/tar.** `Bzip2Reader.new { next_bytes }`
+  reads a stream the way std/compress's `Inflater` does - `read(max) :
+  String | Bzip2Error`, `finished?`, `leftover` - holding one block's
+  inverse-BWT links (3.6 MB at -9) and a 64 KiB buffer, the BWT and the
+  run-length code undone as `read` asks; `Bzip2.decompress(data)` answers
+  `String | Bzip2Error`. Both read every block - Huffman tables picked by
+  selectors, move-to-front and RUNA/RUNB runs, the inverse BWT, the first
+  run-length code - check each block's CRC and the stream's combined CRC,
+  and read concatenated streams (`cat a.bz2 b.bz2`, pbzip2) as one;
+  bytes after the last stream that start no other are `leftover`,
+  ignored as bzip2(1) ignores them. `Bzip2.compress(data, level = 9)`
+  writes streams libbzip2 reads: the run-length code, a BWT sorted by
+  prefix doubling, O(n log n) on any input where a quicksort of
+  rotations goes quadratic on repetition (1 MiB of "ab" in 43 ms with
+  --release, libbzip2 76), and bzip2's own choice of two to six tables
+  refined four times: on the gate's corpora within 0.2% of libbzip2's
+  size, smaller on most (the gate allows 2%). Refused as a `Bzip2Error`,
+  by name: a magic or block-size digit that is not bzip2's, a block that
+  starts with neither magic, a randomised block, a block that uses no
+  bytes, a table count outside 2 to 6, no selectors or one past the
+  tables, a code length outside 1 to 20, an over-subscribed table, a bit
+  pattern no code has, more groups than selectors, a block past its
+  declared size, an origin pointer outside the block, either CRC, and a
+  stream that ends early. Misuse panics: a level outside 1 to 9, a read
+  of no bytes. The module imports only std/int and reaches no platform.
+  `TarReader` sniffs "BZh" and a digit as it sniffs gzip's 1f 8b, reads
+  through `Bzip2Reader` (`bzip2?`), and reads the stream to its end
+  after the zero block so the CRCs vouch for every entry handed out.
+- **std/png: PNG images decoded and encoded in iyi, over std/compress's
+  zlib and std/digest's CRC-32.** `Png.decode(bytes)` answers a `PngFile`:
+  an `Image` (width, height, a `Layout` of Gray, GrayAlpha, RGB or RGBA,
+  8- or 16-bit samples, `sample(x, y, c)` and `to_rgba8`) and what the
+  file said - gAMA, sRGB, the iCCP profile inflated, tEXt, zTXt and iTXt
+  (Latin-1 answered as UTF-8), tRNS and PLTE as written, and the
+  ancillary chunks skipped, by name. Every color type at every legal bit
+  depth, Adam7, all five filters and IDAT across any number of chunks are
+  read; a 1-, 2- or 4-bit gray sample is scaled by replication, a palette
+  expanded to RGB or RGBA, a gray or RGB tRNS kept as the image's
+  transparent color and compared at the file's depth. `Png.encode` writes
+  an `Image` (tRNS for its transparent color), `Png.encode_indexed` a
+  palette image at the smallest depth its palette fits; rows are filtered
+  by section 12.8's minimum-sum-of-absolute-differences heuristic (a
+  palette image's not at all), `interlace: true` writes Adam7, and texts
+  go as tEXt, or iTXt past Latin-1. Refused as a `PngError`: a bad
+  signature, a chunk cut short or failing its CRC-32, a name that is not
+  four letters, an unknown critical chunk, IHDR not first, an impossible
+  depth and color type, IDAT before PLTE in a palette image, IDAT chunks
+  apart, no IEND, a corrupt or short zlib stream, a filter type past 4, a
+  palette index past the palette, a malformed tRNS, PLTE or text chunk.
+  A header claiming more than 89,478,485 pixels (Pillow's bomb threshold,
+  or the caller's `max_pixels`) is refused before anything is allocated,
+  image data is inflated into exactly the bytes IHDR promises, and a
+  compressed text or profile stops at 8 MiB. Misuse panics: samples that
+  do not fill the image, a depth other than 8 or 16, an index past the
+  palette, a keyword that is not one.
+- **std/netip: IP addresses and prefixes as values, read and classified
+  as Python's `ipaddress` reads them.** `IP` holds either family, an
+  IPv6 zone kept; it reads text by Python 3.14's strict rules (no leading
+  zero in an IPv4 octet, CVE-2021-29921; RFC 4291's forms with a dotted
+  tail; 45 characters at most) and writes RFC 5952's canonical form,
+  `exploded` and `reverse_pointer`; it orders IPv4 first, steps with
+  `next`/`prev`, and answers `global?`, `loopback?`, `link_local?`,
+  `multicast?`, `unspecified?`, `reserved?` and `site_local?` from the
+  IANA special-purpose registries as Python encodes them, an IPv4-mapped
+  address as its IPv4 one, with `private?` being Go's RFC 1918/4193.
+  `Prefix` parses CIDR (lengths, IPv4 netmasks and hostmasks), refuses
+  host bits unless `mask: true`, and answers `contains?`, `overlaps?`,
+  `first`/`last`, masks, subnets and supernets; `PrefixSet` is a binary
+  trie answering the longest match and Python's `collapse_addresses`.
+  Pure, reaching no platform module. Malformed text is a `NetipError`;
+  a zone in a prefix is refused (Python keeps it), and so are a length
+  out of range, a zone on IPv4 and more than 65,536 subnets at once.
+
+- **`UdpSocket.bind?` answers a refused bind instead of raising it.** A
+  port held, or one Windows reserves (its excluded ranges answer "access
+  denied"), ended the program: iyi has no `rescue`, so nothing could go
+  on to another port. `bind?` answers the `SocketError`, whose message is
+  the sentence `bind` raises; std/dns's exercise now tries another port
+  when its UDP bind is refused, where a Windows runner failed it.
+
+  Held by `bench/std_udp_exercise.sh`: a held port's `bind?` answers the
+  refusal by name and a free port the socket, and two broken copies (one
+  raising, one ignoring the refusal) are caught.
+
+- **std/tls moves 2-3.5x the data it did, and arrays join and slice in one
+  step.** A TLS record cost several times its cipher's work: the prelude's
+  `Array#+`, `#concat`, `#dup`, slicing and growth stored an element at a
+  time through `<<`, and the record layer took the socket's bytes one
+  `<<` each.
+  - The prelude makes the room once and copies with `Pointer#copy_from`,
+    the same stores, so the collector's barrier sees each as before.
+  - std/tls reads the socket into a fixed two-record inbox in place, and
+    copies a record's content out once.
+
+  Over loopback against OpenSSL, ChaCha20-Poly1305 reads 105 -> 347 MB/s
+  and writes 142 -> 522; AES-128-GCM 79 -> 164 and 98 -> 188, near what
+  this AES does alone. Held by `bench/tls_speed.sh`, which fails a rate
+  under 25% of its cipher's own on the same machine: the old record layer
+  measured 11% and 15% for ChaCha20-Poly1305.
+
+- **A std/tls server can hold several certificates, chosen by
+  server_name; both ends export keying material.** A server had one
+  identity for every name a client asked for, and nothing could bind a
+  protocol above TLS to the connection.
+  - `TlsServerConfig#add_identity` adds one shown to a client asking for a
+    host its certificate names, and whose scheme it takes; `identity` is
+    shown to any other. `TlsServer#identity` says which was shown.
+  - `export_keying_material(label, context, length)` on either end is RFC
+    8446 section 7.5's exporter.
+
+  Held by the scripted client's `sni-other` and `sni-unknown`, by what both
+  ends export matched against OpenSSL's `s_client` and `s_server`, and by
+  three broken copies.
+
+- **A TLS read that times out leaves the connection open, and says it
+  timed out.** Every failed read ended the connection: a read timeout set
+  to poll a TLS socket closed it, and std/http's `timed_out?` was false
+  over `https://` - a WebSocket's own idle wait ended without close_notify.
+  - `TlsError#timed_out?` and `#cancelled?` mark a read that waited past
+    its timeout or was cancelled; nothing it read is lost, and the next
+    read goes on. std/http's `TlsStream` answers `SocketError.timed_out`
+    and `Cancelled` for them, as a socket does.
+
+  Held by the scripted server's `slow-echo` (a read at 300 ms times out,
+  the next reads the echo) and a broken copy.
+
+- **std/tls's errors carry their alert as a field: `TlsError#alert`,
+  `TlsAlert`.** What went on the wire was read back out of the sentence's
+  last parentheses, so rewording a message could change the protocol.
+  The sentences read as before.
+
+  Held by every alert the gate's scenarios expect, and a broken copy that
+  sends none.
+
+- **A TLS read writes nothing; KeyUpdate and close_notify go out from
+  writes.** A read answered a peer's KeyUpdate and its close_notify at
+  once, writing from the reading task while another could be writing.
+  - A KeyUpdate asking for one back is answered before this side's next
+    application data (RFC 8446 section 4.6.3); a close_notify received
+    leaves this side able to write, and its own goes out with `close`.
+  - `write` moves to new keys past `key_limit` records (2^23 by default,
+    under section 5.5's bound for AES-GCM), and `key_update(request)` does
+    so on demand.
+
+  Held by the scripted server's `keyupdate` (the client's answer comes
+  with its next write) and `client-rekey` (two KeyUpdates at a limit of
+  two records, then one asking back), with three broken copies.
+
+- **std/tls holds to eight more of RFC 8446's rules.** A CertificateRequest
+  in the handshake has an empty context (4.3.2); certificate entries carry
+  no extensions nobody asked for, either end (4.4.2); a server_name
+  acknowledgement is empty and answers a name sent; a ClientHello's
+  server_name is one ASCII host name; early data ends at the second
+  ClientHello, and only a record that does not decrypt is passed over as
+  early data; user_canceled after the handshake is a warning; a second
+  ClientHello without the chosen suite, or offering early data again, is
+  refused - both had no scenario; and `read(0)` is refused as the
+  program's mistake, since "" is the peer's close.
+
+  Held by eleven scenarios across the scripted server and client, and a
+  broken copy each.
+
+- **A search for a certificate chain is bounded: 100 signature checks,
+  and ten certificates a Certificate message.** Intermediates under one
+  name, each a CA signing the others, made `X509.verify` try every order
+  of them before any trust: seven took 13,700 checks, and a 64 KiB
+  Certificate holds far more - a client's certificate could stall a
+  server that asks for one, and a server any client that connects.
+  - `X509::MAX_SIGNATURE_CHECKS` (100, as Go's path builder has it) ends
+    the search with "no chain ... within 100 signature checks".
+  - std/tls refuses a Certificate of more than `X509::MAX_CHAIN` (10)
+    certificates, either end, before reading them (bad_certificate).
+
+  Held by `bench/std_x509_exercise.sh` (seven same-name intermediates,
+  refused within the bound; a copy without it is caught) and
+  `bench/std_tls_exercise.sh` (twelve certificates from the scripted
+  server and from the scripted client refused; two broken copies).
+
+- **std/tls reads what a peer sends in time that grows with it, not with
+  its square.** Each record copied the message read so far, and each read
+  the rest of the buffer: a 60 KB ClientHello a byte to a record took the
+  server 3.2 s and gigabytes of copying, before any key.
+  - Records and handshake bytes are read forward from an offset and
+    compacted only when more comes; the same ClientHello takes 0.05 s.
+  - ChangeCipherSpec records are passed over 16 times at most, and never
+    before a server has a ClientHello (unexpected_message).
+  - A ClientHello's extensions and key shares are checked against sets.
+
+  Held by the scripted client's `byte-records` (answered within 1.5 s),
+  `ccs-flood` and `ccs-first`, each with a broken copy.
+
+- **A TLS handshake has a deadline: 30 s, or the caller's.** The socket's
+  timeout bounds each wait, and a peer sending a byte now and then made
+  each wait short and the handshake endless - a fiber and a descriptor
+  held for days.
+  - `TlsServer.over` and `TlsClient.over` take `timeout_ms`
+    (`HANDSHAKE_TIMEOUT_MS`, 30,000; 0 for none); `TlsClient.connect`'s
+    bounds the handshake too, and std/http passes its own `timeout_ms`.
+  - Past the handshake, one `read` is bounded as a whole by the socket's
+    read timeout, so std/http's deadlines hold over TLS as in the clear.
+
+  Held by the scripted client's `slow-hello` and the scripted server's
+  `slow-server`, each cut off at a 3 s bound, with a broken copy each.
+
+- **std/tls's client sends the alert its refusal names, under its
+  handshake keys.** It only closed: a server saw an end where
+  bad_certificate or decrypt_error belonged (RFC 8446 section 6.2).
+
+  Held by `bench/std_tls_exercise.sh`: OpenSSL's `s_server` reads alert 42
+  from a client refusing a certificate for another host, and a copy that
+  hangs up without it is caught.
+
+- **std/tls's client offers secp256r1 beside X25519 and follows a
+  HelloRetryRequest for it.** A server that takes P-256 alone could not be
+  reached.
+  - A HelloRetryRequest for a group not offered, or for X25519 whose share
+    was sent, is refused (illegal_parameter, section 4.1.4); a ServerHello
+    whose share is not in the group the client sent is refused.
+
+  Held by OpenSSL's `s_server -groups P-256` answering, the scripted
+  server's `hrr-p256` (finished in P-256), `hrr-group` and
+  `sh-wrong-group`, with two broken copies.
+
+- **std/cookie sends `Secure` cookies over `https://`.** It never sent
+  one, since std/http had been plain http: a session cookie set over
+  HTTPS did not come back.
+  - A `Secure` cookie is taken from an `https://` answer only and sent
+    over `https://` only (RFC 6265 section 5.4; 6265bis on setting).
+
+  Held by `bench/std_cookie_exercise.sh`, with three broken copies.
+
+- **std/tls holds to four more of RFC 8446's rules.**
+  - Handshake messages do not cross a key change (section 5.1): bytes
+    after a ServerHello, a last ClientHello or a KeyUpdate in their
+    record are refused (unexpected_message).
+  - A leaf whose keyUsage leaves out digitalSignature signs no
+    CertificateVerify (section 4.4.2.2, bad_certificate).
+  - A KeyUpdate asking neither 0 nor 1 is illegal_parameter, and an empty
+    Certificate from a server decode_error, as sections 4.6.3 and 4.4.2.4
+    name them.
+  - A client's Certificate past 2^14 bytes goes in as many records as it
+    takes.
+
+  Held by the scripted server's `sh-and-more`, `ku-no-sign`,
+  `keyupdate-bad` and a client certificate of 20 KB, and the scripted
+  client's `hello-and-more`, each with a broken copy.
+
+- **wasm32: an object held only by a local is a root, plain and
+  `--release`.** The collector reads linear memory and a WebAssembly local
+  is not in it, so an object held by a value the backend kept in a local
+  was freed while held: under `--release` a top-level array read back
+  empty after a collection and the same in a function ended the program; a
+  plain build freed a call's first argument while the second was made.
+  - A compiler pass for wasm32 (`src/compiler/iyi/wasm_roots.cr`), after
+    optimisation: every parameter and instruction that can carry an address
+    and is used past a call is stored, where it is defined, to a stack slot
+    of its own, which the collector's stack walk reads.
+  - The wasm32 exercise's weak check holds its arrays in locals again, with
+    the collector free to run, as it did before the hole was found.
+  - The cost under `--release`: an allocation-heavy tree build 0.14 s to
+    0.19 s, an arithmetic loop unchanged, the binary 5% larger.
+
+  Held by `bench/wasm32_exercise.sh`'s new section 7 - an array at the top
+  level and in a function, a call's arguments, a chain, a union made in
+  place, held across a collection with the stack scrubbed beneath it -
+  which the compiler without the pass fails plain and `--release`, and
+  which fails with any of four of the pass's rules removed.
+
+- **std/tls's server takes a secp256r1 (P-256) key share beside X25519.**
+  A client without X25519 - Windows' Schannel, as CI showed - was refused
+  (handshake_failure).
+  - std/p256 does ECDH (SEC 1 section 3.3.1): `P256PrivateKey#shared_secret`
+    answers x of [d]Q in constant time, after checking the peer's point -
+    65 bytes uncompressed, coordinates below p, on the curve - before d is
+    used; `public_point` is the key's own.
+  - The server takes an X25519 share first, then a secp256r1 one; a
+    HelloRetryRequest asks for X25519, or for secp256r1 where X25519 is not
+    among the client's groups. The client still offers X25519 alone.
+
+  Held by `bench/std_p256_exercise.sh`: RFC 5903's vector, 500 shared
+  secrets equal to Python's, the points Python refuses refused - x = p
+  with the y of (0, y) among them - and four broken copies; and by
+  `bench/std_tls_exercise.sh`: five scripted-client scenarios, OpenSSL's
+  `s_client` with P-256 alone and asked again for secp256r1, three broken
+  copies, and curl on Schannel asked again.
+
+- **std/http's server reads what a refused client goes on sending before
+  it closes.** A refusal - a malformed head's 400, a 431, a broken body's
+  400, an HTTP/2 GOAWAY for a connection error - closed with the client's
+  bytes unread, and the reset that close sends could take the refusal
+  from the client's buffer before it was read: macOS's CI read no GOAWAY
+  at all for a frame past 16384 bytes.
+  - After the refusal the server reads and drops what the client sends
+    until it closes, for at most 64 KiB and a second in all.
+
+  Held by `bench/std_http_exercise.sh`: four raw cases send the rest of a
+  refused request in two pieces after pauses and must still read the
+  answer, on Linux too, where a reset keeps what was received; four broken
+  copies, each closing on one of the refusals at once, caught by its case.
+
+- **Client certificates over HTTPS: a handler sees the one a client
+  presented, and the client presents `HTTP.tls_config`'s identity.**
+  `Server.serve(tls:)` could ask for a client's certificate once std/tls
+  could, but no request carried it, and an upgrade over `https://` made
+  its own `TlsConfig` and left the identity out.
+  - `Request#peer_certificates` is the chain std/tls checked, over
+    HTTP/1.1 and HTTP/2 alike; `TlsStream#peer_certificates` beside it.
+  - `HTTP.upgrade` (and so `wss://`) presents the identity too.
+
+  Held by `bench/std_http_exercise.sh`: a server asking under the gate's
+  root, the iyi client presenting the localhost leaf over h2, http/1.1 and
+  an upgrade with the handler seeing it each time, none refused each way,
+  Python presenting it; three broken copies - each protocol's request
+  without the chain, an upgrade presenting nothing.
+
+- **std/tls's server waits for the rest of a refused client's flight
+  before it closes.** A refusal mid-flight - a client certificate the
+  server turns down, with CertificateVerify and Finished still on the way
+  - closed with them unread, and the reset that close sends could reach
+  the client before it read the alert: "connection reset" or a broken
+  pipe where the reason belonged, as Windows' CI saw for application data
+  sent before the client's Finished.
+  - After the alert the server reads and drops what the client sends
+    until it closes, for at most 64 KiB and a second in all.
+
+  Held by `bench/std_tls_exercise.sh`: the scripted client's `mtls-late`
+  sends the rest of its flight 300 ms after a refused Certificate and
+  must still read the alert; a copy that closes at once breaks its send.
+
+- **Client certificates in std/tls, both ends (mutual TLS).** A server
+  could not ask for one, and a client asked for one could only send an
+  empty Certificate.
+  - `TlsIdentity` is a chain and its key (Ed25519 or P-256, as a server's
+    was): `TlsServerConfig` holds one, and `TlsConfig#identity` is what a
+    client presents. A client sends it with its CertificateVerify when the
+    CertificateRequest names the key's scheme, an empty Certificate
+    otherwise; a request without signature_algorithms is refused
+    (missing_extension).
+  - `TlsServerConfig#client_roots` makes the server send a
+    CertificateRequest and check the client's chain for clientAuth
+    (`X509Purpose::Client`) and its CertificateVerify; a client that sends
+    none is refused (certificate_required) unless `client_required` is
+    false. `peer_certificates` moves to `TlsConnection`: the client's
+    chain at a server.
+
+  Held by `bench/std_tls_exercise.sh`: the scripted client's ten mTLS
+  scenarios (P-256 and Ed25519 certificates held; none, a bad signature,
+  no CertificateVerify, a request context, the wrong scheme, another
+  root, serverAuth alone refused) and four against a server that does not
+  require one; Python's `ssl`, OpenSSL's `s_client`, curl and Node
+  presenting certificates; the scripted server's `certreq-ed25519`,
+  checking the client's chain and signature, and `certreq-no-sigalgs`;
+  OpenSSL's `s_server -Verify` taking the std/tls client's P-256 and
+  Ed25519 certificates; and thirteen more broken copies.
+
+- **`X509.verify` checks a chain for a purpose: a server's certificate or
+  a client's (`X509Purpose::Client`).** Every chain was held to serverAuth,
+  so a client's certificate - for clientAuth alone, as a CA issues one -
+  could not be checked at all.
+  - `purpose:` (serverAuth by default) is asked of the leaf and of every
+    issuer that carries extKeyUsage, anyExtendedKeyUsage taking either; a
+    CA's certificate is no client's either.
+
+  Held by `bench/std_x509_exercise.sh`: the exercise's own chains checked
+  for clientAuth - a clientAuth leaf, a clientAuth intermediate and a chain
+  with no extKeyUsage held, a serverAuth-only leaf and a CA leaf refused -
+  and one more broken copy.
+
+- **WebSocket over TLS, both ends: `wss://`.** `WebSocket.connect`
+  refused `wss://` before sending anything, and a server under TLS had no
+  way to hand an upgraded connection over.
+  - `HTTP.upgrade` takes `https://` URLs, offering ALPN `http/1.1` alone
+    (RFC 8441's WebSocket over HTTP/2 is not here), and `WebSocket.connect`
+    takes `wss://`, the certificate checked against `HTTP.tls_config`.
+  - `Response.upgrade`'s block, `Upgraded#socket` and std/websocket's
+    connection take `IyiSocket | TlsStream`; `TlsStream` is public, with
+    `closed?` and the timeouts beside `read`, `write` and `close`. A block
+    written against `IyiSocket` alone must take the union.
+
+  Held by `bench/std_websocket_exercise.sh`: the Python client and server
+  and Node's WebSocket, each under TLS as in the clear - every echo,
+  fragment, length and fault, the stop with 1001 - with a P-256
+  certificate, and a copy of std/http that hands the bare socket over
+  under TLS refused by the Python client.
+
+- **std/tls's server signs with a P-256 key too, the kind every browser
+  takes.** `TlsServerConfig` took an Ed25519 key alone, which no browser
+  accepts in a certificate.
+  - `from_pem` reads a PRIVATE KEY block (PKCS #8, Ed25519 or P-256) or an
+    EC PRIVATE KEY block (SEC 1); `from_der(chain, P256PrivateKey)`
+    beside the Ed25519 form. `scheme` says which: CertificateVerify goes
+    under ed25519 or ecdsa_secp256r1_sha256, signed by std/p256 in
+    constant time, and a client that does not offer it is refused
+    (handshake_failure).
+  - `Server.serve(tls:)` in std/http takes either.
+
+  Held by `bench/std_tls_exercise.sh`: four more configurations judged;
+  the scripted client (now 39 scenarios, `--p256` for what turns on the
+  key) and the other clients against a P-256 server as against an Ed25519
+  one; three more broken copies. `bench/std_http_exercise.sh` runs its
+  HTTPS checks under both certificates.
+
+- **std/p256 makes ECDSA signatures on P-256 in constant time:
+  `P256PrivateKey`.** std/ecdsa only checks signatures, on std/big's
+  variable-time arithmetic, so nothing in std could sign with the key
+  browsers want a server's certificate on without leaking it through
+  timing.
+  - Four-limb Montgomery arithmetic modulo p and n with masked final
+    subtractions; the complete projective formulas of Renes, Costello and
+    Batina; [k]G in 64 four-bit windows, each table entry read whole and
+    kept by masks; inversion by Fermat over the public exponent.
+  - Nonces by RFC 6979 under SHA-256, -384 or -512, so one key and
+    message sign alike; the signature is DER's Ecdsa-Sig-Value.
+  - Keys from 32 bytes, PKCS #8 or SEC 1, with a carried curve or public
+    key checked; d outside [1, n - 1] refused. About 100 µs a signature
+    against OpenSSL's 19 (`--release`, one x86_64 machine).
+
+  Held by `bench/std_p256_exercise.sh`: RFC 6979's own key and
+  signatures; 1,500 keys and signatures equal to Python's cryptography
+  (OpenSSL's deterministic ECDSA) byte for byte, edge keys among them;
+  60 keys as OpenSSL writes them and six refused; 14 broken copies, the
+  arithmetic ones caught by std/ecdsa's own check of the curve.
+
+- **std/http serves HTTPS: `Server.serve(listener, tls: config)`, HTTP/2
+  where the client's ALPN chose `h2` and HTTP/1.1 otherwise.** The server
+  spoke only in the clear, so an iyi web server needed a proxy in front of
+  it for TLS.
+  - Each connection's handshake is std/tls's `TlsServer`, held to
+    `timeout_ms` like a request's head; one that fails is closed with its
+    alert and the server goes on. The connection ends with close_notify.
+  - Every answer, 100 Continue and refusal goes through TLS, and an
+    upgrade's block is handed the TLS stream (`wss://`, above).
+
+  Held by `bench/std_http_exercise.sh` with `bench/http2_exercise.iyi`'s
+  new `serve-tls` and `tls-get` modes, under an Ed25519 certificate: the
+  iyi client over h2 and over http/1.1; curl both ways, gzip, three
+  requests on one connection, an upgrade answered 101, TLS 1.2 refused
+  and the next request served; Python reading an HTTP/1.0 answer to the
+  end with ragged EOFs refused, so close_notify must come; Node's 100 GETs
+  and 20 uploads at once under a 1000-byte window. Three broken copies:
+  the answer written past TLS, the handshake skipped, close_notify left
+  out.
+
+- **std/tls has a server: `TlsServer` and `TlsServerConfig`, TLS 1.3 with
+  an Ed25519 certificate.** std/tls was a client only, so an iyi program
+  could not take a TLS connection at all.
+  - `TlsServerConfig.from_pem(chain, key)` takes the chain, leaf first,
+    and a PKCS #8 Ed25519 key (RFC 8410 §7, version 1 or 2), refusing a
+    key that is not the leaf's; `alpn` lists the protocols spoken.
+  - `TlsServer.over(socket, config)` runs the handshake: the client's
+    suite order, X25519 with a HelloRetryRequest when no share came, the
+    server's ALPN order (none in common is `no_application_protocol`),
+    CertificateVerify signed with std/curve25519's constant-time Ed25519,
+    the client's Finished checked in constant time. Early data is refused
+    and its records passed over (§4.2.10); every malformed ClientHello is
+    refused with the alert §4 and §9.2 name, sent to the client - in the
+    clear before the keys, under them after.
+  - Ed25519 signs here; P-256, which browsers take, came with std/p256
+    (above). RSA does not: std/rsa verifies only, on variable-time std/big.
+  - The client and the server share one record layer
+    (`TlsConnection`): records, alerts, KeyUpdate, close_notify. The
+    client's sentences are unchanged; it now takes a plaintext alert
+    anywhere in the handshake, and names every alert of RFC 8446 §6.
+  - `X509.pem(text, label)` reads any PEM block, `PRIVATE KEY` among them.
+
+  Held by `bench/std_tls_exercise.sh`: eleven configurations judged; a new
+  scripted client, `bench/std_tls_client.py`, checks a handshake step by
+  step - the chain, CertificateVerify with Python's Ed25519, Finished
+  against its own transcript, a KeyUpdate - and breaks one rule in each of
+  38 scenarios; the std/tls client, Python's ssl, OpenSSL's s_client (each
+  suite, a HelloRetryRequest, four refusals), curl and Node; 20 more broken
+  copies.
+
+- **The std/tls client offers `ed25519` and takes a server whose
+  certificate is Ed25519.** Its signature_algorithms named ECDSA and
+  RSA-PSS only, so a server with an Ed25519 certificate - OpenSSL with an
+  Ed25519 key, for one - could not be reached. The client now offers
+  scheme 0x0807 and checks a CertificateVerify under it with the leaf's
+  `Ed25519PublicKey`; the scheme named for a key of another kind is
+  refused (illegal_parameter).
+
+  Held by `bench/std_tls_exercise.sh`: the scripted server's Ed25519 leaf,
+  its CertificateVerify one bit off, and a P-256 signature named
+  `ed25519`; OpenSSL's `s_server` with an Ed25519 key; one more broken
+  copy.
+
+- **std/x509 reads Ed25519 keys and checks Ed25519 signatures (RFC
+  8410), and std/curve25519 has `Ed25519PublicKey`.** A certificate with
+  an Ed25519 key was refused as "a key for 1.3.101.112, which this does
+  not read", so a private CA or a server on Ed25519 could not be trusted.
+  - `Certificate#public_key` is `RsaPublicKey | EcdsaPublicKey |
+    Ed25519PublicKey`; the key is checked once, where it is read, to be a
+    canonical point on the curve. A key or signature algorithm with
+    parameters is refused, as RFC 8410 says they are absent.
+  - A chain may be signed with Ed25519 at any link, as OpenSSL and Go take
+    it; Python's Web PKI verifier refuses an Ed25519 issuer outright.
+  - A signature of one kind under an issuer's key of another now names
+    both kinds.
+
+  Held by `bench/std_x509_exercise.sh`: named certificates (three chains
+  held, three refused, three keys refused, `y = p` refused); the 200
+  random chains now draw Ed25519 keys too, a chain with an Ed25519 signer
+  judged by Python as its twin with EC keys in their place and every link
+  of the real one held to Python's own Ed25519 check; 4 more broken
+  copies, one of std/curve25519.
+
+- **std/http speaks HTTP/2 (RFC 9113): the server beside HTTP/1.1 on one
+  listener, the client over TLS where ALPN chooses `h2` and in the clear
+  with prior knowledge.** HPACK was there and nothing used it: every
+  request was HTTP/1.1, and a program that offered `h2` in
+  `HTTP.tls_config.alpn` got HTTP/1.1 written onto an HTTP/2 connection.
+  - `serve` answers a connection that opens with the preface as HTTP/2,
+    and runs the same block for every stream. Request and answer bodies
+    stay streams: strings, `IyiIO`s and `Response.stream` writers, gzip,
+    a 413 past the limit. An upgrade is reset with HTTP_1_1_REQUIRED.
+  - The client uses `h2` when ALPN chose it, and
+    `HTTPClient.new(prior_knowledge: true)` speaks h2c. A kept connection
+    carries request after request until GOAWAY.
+  - A stream's reset leaves the connection; a refused stream is sent
+    again once.
+  - The frames: every connection and stream error of §5–6; padding,
+    priority (read and ignored), trailers, 1xx; SETTINGS applied. A header
+    block is bounded while it is still arriving, so a flood of
+    CONTINUATION frames is refused, not held.
+  - Flow control: the connection's window opens again on receipt, a
+    stream's as its body is read. Frames go out in one write per burst:
+    they went one write each at first, and Nagle with delayed ACK cost
+    40 ms a request (200 requests took 16 s, now 0.23 s for the whole
+    exercise).
+
+  Held by `bench/std_http_exercise.sh` and `bench/http2_exercise.iyi`:
+  - iyi to iyi, plain and `--release`;
+  - 31 raw-frame cases, each answered with RFC 9113's GOAWAY or
+    RST_STREAM code;
+  - curl (nghttp2);
+  - Node's client: 100 GETs and 20 uploads at once under a 1000-byte
+    window, and a stream cancelled mid-answer;
+  - this client against Node's server, in the clear and under TLS with
+    ALPN: padding, CONTINUATION, trailers, a 103, a 256-byte HPACK table;
+  - 13 broken copies, each caught by name.
+
+- **`WeakRef(T)`: std/weak_ref names an object without keeping it alive,
+  and the collector forgets it before reusing the memory.** There was no
+  weak reference: GC_DESIGN.md had deferred them until something could
+  register one, so a cache or an observer list held everything it pointed
+  at forever.
+  - `WeakRef.new(target)` and `#value`, which is the target while
+    anything else holds it and nil from the first collection that finds
+    nothing does. `WeakRef(Int32)` is refused when it is compiled.
+  - The address lives in an eight-byte atomic cell, which no collector
+    here scans. Reading it is a single load into a register, where the
+    next stop's root walk finds it, so a read never races the clearing.
+  - The owned collector registers each cell and, at the end of every mark
+    (`scavenge`, before the epoch turns), zeroes the cells whose target is
+    white and forgets the cells that are white themselves; a concurrent
+    mark does it in its second stop.
+  - wasm32's collector clears between its mark and its sweep; libgc clears
+    through a disappearing link; `-Dgc_none` never clears. An object no
+    collector allocated - a literal - is never cleared.
+
+  Held by `bench/std_weak_ref_exercise.sh`:
+  - 500 held and 500 dropped targets;
+  - 200,000 objects made where the dead ones were, 500 at their very
+    addresses, with every cleared reference still nil;
+  - 10,000 dead references forgotten;
+  - four threads reading through marks that run beside the program, 120
+    to 320 million reads a run, every one nil or the object intact;
+  - libgc, `-Dgc_none` and wasm32 builds;
+  - five broken prelude copies, each caught by name - a cell never zeroed
+    answers freed memory.
+
+  `bench/wasm32_exercise.sh` runs the clearing under wasmtime.
+
+- **std/xml evaluates XPath 1.0, all of it, and answers what the
+  recommendation says where libxml2 does not.** A document could be walked
+  and searched by name, but there was no query language; the other
+  library's `xpath` methods are libxml2's.
+  - `Node#xpath`, `#xpath_nodes`, `#xpath_node`, `#xpath_string`,
+    `#xpath_float` and `#xpath_bool`, with namespaces and variables, and
+    `XPath.parse` to compile once. The thirteen axes, every node test,
+    predicates, filter expressions, unions, section 3.4's comparisons and
+    the 27 core functions, `id()` by `xml:id` and the DTD's ID attributes
+    (which `Document#id_attributes` now keeps) and `lang()` included.
+  - Attribute and namespace nodes are `XPathNode`s, as the tree keeps
+    them as values. A run of text and CDATA is one text node, as section
+    5.7 says.
+  - A malformed expression is refused with what was expected and the
+    column. A function given the wrong type, a variable not given or a
+    prefix bound nowhere is refused when the expression runs, the prefix
+    even when no node reaches its step.
+  - Where libxml2 departs from the recommendation, this follows the
+    recommendation:
+    - numbers are the shortest round trip, written out in full
+      (`0.3333333333333333`, not libxml2's 15 digits or `-1e-07`);
+    - `1e0` is refused;
+    - an attribute's following axis holds its element's children;
+    - `xmlns=""` leaves no namespace node;
+    - an empty CDATA section is no text node;
+    - `id(' a')` finds `a`;
+    - `.//.` as the whole expression keeps the context node, which
+      libxml2 2.9 (darwin's) leaves out.
+
+  Held by `bench/std_xml_exercise.sh`:
+  - section 2.5's paths and section 4's examples worked out by hand;
+  - 29 refusals;
+  - 9,999 seeded expressions over 100 documents, compared node by node
+    with libxml2 through ctypes on Linux and darwin, which must reject a
+    node-set out of order, a number one ulp off and a wrong string;
+  - 4,000 number conversions checked against the recommendation's text;
+  - 17 broken copies, each caught at its named check.
+
+- **`BigFloat`: binary floating point at any precision, every result
+  rounded once to the nearest, ties to even.** std/big had integers,
+  decimals and fractions, but no float wider than a double; the other
+  library's BigFloat is GMP's `mpf`, which truncates and keeps bits it was
+  not asked for.
+  - `BigFloat.new(value, precision = 128)` from an integer, a BigInt, a
+    double (exactly), a fraction, a decimal or a string; `+ - * /`, `**`
+    and `sqrt`, each rounded once from the exact result; `round` (ties to
+    even), `floor`, `ceil`, `trunc`, `to_big_i`, `to_big_r` (exact),
+    `to_f64` (the nearest double), and `to_s`, the fewest decimal digits
+    that read back, laid out as `Float64#to_s` lays out a double.
+  - Equal values hash alike at any precision. There is no NaN or
+    infinity: division by zero, a negative square root, a NaN double, a
+    precision under one bit and a malformed string are refused by name.
+
+  Held by `bench/std_big_exercise.sh`: named answers (√2 to 256 bits,
+  ties, an addend under the last place), five refusals, 5,162 random cases
+  at precisions from 1 to 256 bits checked against Python's exact
+  fractions - arithmetic, roots, powers, parsing, the shortest decimal,
+  the nearest double, the integer roundings - and five broken copies,
+  three caught at named checks and two by the oracle.
+
+- **std/unicode splits a string into grapheme clusters, every rule of UAX
+  #29 through Unicode 17's Indic conjuncts.** A program could count bytes
+  and code points but not what a reader counts: `"🇹🇷🇩🇪"` was eight code
+  points, `"e\u0301"` two.
+  - `String#graphemes`, `#each_grapheme` and `#grapheme_size`, and the
+    same on `Unicode.`: a combining mark stays with its letter, regional
+    indicators pair into flags, a ZWJ emoji sequence is one cluster
+    (GB11), a Devanagari conjunct is one (GB9c, which the other library
+    leaves pending), and a piece of ill-formed UTF-8 is a cluster of its
+    own.
+  - The properties - Grapheme_Cluster_Break, Extended_Pictographic and
+    Indic_Conjunct_Break - are one table of 1,631 rows that
+    `scripts/generate_unicode_std.py` now writes from UCD 17.0.0 beside
+    the module's others, which it rewrote byte for byte.
+
+  Held by `bench/std_unicode_exercise.sh`: all 766 cases of Unicode's
+  `GraphemeBreakTest.txt`, as the repository carries them, split exactly
+  as the file splits them by the plain and the `--release` builds; named
+  examples; and four broken copies (GB9c, GB11, regional indicator
+  parity, CR LF), each caught at its own check.
+
+- **A socket is a stream, and `IyiIO.pipe` joins two tasks: one `IyiIO`
+  reads and writes files, sockets, pipes and memory alike.** A socket was
+  not an `IyiIO`: nothing written against streams - `read_line`, `puts`,
+  `IyiIO.copy` - could take one, and `IyiSocket#to_io` answered a stream
+  over the descriptor that read a socket with nothing yet to read as
+  failed. There was no pipe between tasks.
+  - `IyiSocket#to_io` answers a `SocketIO`, the same one every time, whose
+    reads and writes are the socket's own: they park the task and keep its
+    timeouts. A read the socket refuses ends the stream with
+    `read_failed?` true; a write it refuses panics, naming the reason, as
+    any stream's failed write does.
+  - `IyiIO.pipe(capacity = 16)` answers a `PipeReader` and a
+    `PipeWriter` over a channel: each write is delivered at once, a write
+    waits while *capacity* writes are unread, closing the writer ends the
+    reader, and a write after the reader closed is refused.
+
+  Held by `bench/socket_exercise.sh` (lines both ways, two lines from one
+  write, a 100,000-byte line, a timed-out read; two broken copies) and
+  `bench/std_io_exercise.sh` (a writer waiting for room, order, a clean
+  end, a copy of 170,000 bytes through 4 KB reads, the refusals; three
+  broken copies). std/io's floor is unchanged.
+
+- **`AsyncBackend` writes log entries from a thread of its own, so a call
+  that logs does not wait for the write.** Every backend wrote in the
+  calling task, which a slow disk or a full pipe held up.
+  - The entry is formatted where it is logged and queued behind a
+    `Mutex`; a writer thread waits with `Mutex#wait_for`, writes what has
+    queued up in one write, and ends on `close`, which drains the queue
+    first. An entry written after `close` is refused.
+  - `AsyncBackend.open { |backend| ... }` closes it when the block ends.
+  - It needs the collector's threads (Linux, darwin arm64, Windows
+    x86_64); elsewhere `new` refuses by name.
+
+  Held by `bench/std_log_exercise.sh`: a thousand entries read back in
+  order from a file, a drain by `close`, the refusal, and two broken
+  copies (an entry without its newline, a write after close let through).
+
+- **std/log entries carry data, and a task's context reaches every entry
+  it and the tasks it starts write.** A log line was a message and
+  nothing else, so a request's id had to be pasted into every message,
+  and nothing set the level from the environment.
+  - `log.info("query", rows: 3)` adds data to one entry,
+    `Log.for("db").bind(pool: "main")` to every entry of a logger and
+    its children, and `Log.with_context(request_id: id) { ... }` to every
+    entry of the task for the block's length, each over the one before.
+    `Entry#data` holds them; `DefaultFormatter` writes ` -- key=value`,
+    quoting a value a reader could not tell the end of.
+  - A task without a context of its own finds the one its starter has
+    open, up the groups that started it - where the other library's new
+    fiber starts with none - and a context stays out of the tasks beside
+    it. The prelude's `IyiGroup` gains `owner`, the task that opened it,
+    for that walk. A program that opens no context never looks.
+  - `Log.setup_from_env` reads `LOG_LEVEL`, a severity's name in any case,
+    and refuses one that is not, naming the severities.
+
+  Held by `bench/std_log_exercise.sh`: two new sections and six broken
+  copies - a bound logger that forgets, an entry without its context, a
+  context left open, a task that does not look to its starter, a value
+  unquoted, and a level that never reads the variable.
+
+- **An open file takes a whole-file lock: `flock_exclusive`,
+  `flock_shared`, `try_flock_*` and `flock_unlock`.** Two programs that
+  shared a file - a pid file, a cache, a log rotated by one of them - had
+  no way to keep out of each other.
+  - The waiting forms wait a task at a time, retrying after 1, 2, 4 ...
+    64 ms while the thread runs its other tasks, and answer `Cancelled`
+    when their task is cancelled. The block forms unlock after the block,
+    even when it panics. `try_flock_*` answers at once.
+  - Linux and darwin lock with `flock(2)`, which only other locks heed.
+    Windows locks every byte with `LockFileEx`, which is mandatory and
+    counts each lock a handle takes; the module documents both.
+
+  Held by `bench/std_file_exercise.sh`: two opens of one file kept out of
+  each other's exclusive lock and sharing a shared one, a task waiting
+  for another's lock, a cancelled wait, a lock given back on close and by
+  a panicking block, and four broken copies - contention read as taken
+  (each platform's own error), an unlock that unlocks nothing, a wait
+  that does not wait, and a block that keeps its lock.
+
+- **OptionParser takes `-v, --verbose` pairs, a banner, help sections and
+  subcommands.** Each flag had one spelling, the help always opened with
+  "options:", and a command line with a verb - `tool deploy -f` - could
+  not be read.
+  - `on("-n NAME", "--name=NAME", "who") { |v| ... }` is one flag spelled
+    two ways; a value either spelling states, both take, and spellings
+    that disagree about it are refused by name.
+  - `banner=`, `separator(text)`, and `to_s`, so `puts parser` prints the
+    help.
+  - `on("deploy", "ship it") { ... }` is a command, matched as the first
+    operand. Its block registers the next level's flags and commands,
+    which replace the commands beside it, in the parser and in the help.
+    Flags registered before it still apply after it, where the other
+    library forgets them.
+
+  Held by `bench/std_option_parser_exercise.sh`: the help before and
+  after a command, both spellings of three pairs, a nested command, a
+  command after an operand, three refusals, and six broken copies, each
+  caught at its own check.
+
+- **`std/number_format` writes numbers as people read them, exactly:
+  `1234567.format` is "1,234,567", `1_234_567.humanize` "1.23M",
+  `1536.humanize_bytes` "1.5KiB".** There was no way to group digits or
+  scale a quantity to a prefix.
+  - `Number#format(separator, delimiter, decimal_places, group:,
+    only_significant:)` rounds the double's own value half to even
+    (`1.005` to two places is "1.00"), writes a float's shortest digits in
+    full without places, and gives a zero no sign.
+  - `Number#humanize(precision, separator, delimiter, significant:,
+    unit_separator:)` scales to SI prefixes from q to Q, by significant
+    digits or by places, and rounds into the next prefix: 999,999 is "1M".
+  - `Int#humanize_bytes(precision, separator, significant:,
+    unit_separator:, format:)` divides by 1024 into IEC's KiB ... EiB or
+    JEDEC's KB ... EB. It writes `KiB`, where the other library writes
+    `kiB`, and a trimmed fraction drops its point: "1k", where that
+    library writes "1.0k".
+
+  Held by `bench/std_number_format_exercise.sh`: named examples, five
+  refusals, 25,902 cases checked against Python's exact `decimal` - random
+  doubles, singles, integers and byte counts, plus the ties, carries and
+  powers of ten where rounding decides - and identical from the
+  `--release` build, and eight broken copies, six caught at named checks
+  and two by the oracle. The oracle found one bug before it shipped:
+  1023.5 KiB at four digits printed "1MiB" for 0.9995 MiB.
+
+- **std/signal handles, ignores and resets signals, and knows USR1, USR2,
+  WINCH, PIPE, ALRM and CHLD.** It could only wait for HUP, INT, QUIT and
+  TERM: no handler that keeps running, no way to ignore a signal or give
+  one its default back, and no user signals at all.
+  - `Signal.each(*signals) { |s| ... }` runs its block for each arrival in
+    its task until the task is cancelled: a handler a group owns.
+  - `Signal.ignore(*signals)` sets the action to nothing and drops an
+    arrival already kept; `Signal.reset(*signals)` restores the default.
+    A later `wait` or `each` takes the signal again.
+  - The members carry each platform's numbers (darwin's USR1 is 30).
+    Windows refuses every signal but INT and TERM by name, and ignores and
+    resets INT (Ctrl-C and Ctrl-Break) alone.
+
+  Held by `bench/std_signal_exercise.sh`: a handler for USR1 and USR2, an
+  arrival dropped by an ignore, an ignored signal the process outlives, a
+  reset TERM that ends it as 143, and four broken copies (a handler that
+  never runs its block, an undropped arrival, an ignore that keeps the
+  default, a reset that keeps it ignored).
+
+- **`Mutex#wait_for` is the condition variable, with the condition and its
+  action one step.** A task that had to wait until a Mutex's value was
+  ready - a queue with an item in it - could only take the lock again and
+  again. `wait_for` runs its block with the lock held each time another
+  task has had the lock, until the block answers something other than
+  nil, and answers that:
+  `queue.wait_for { |q| q.empty? ? nil : q.shift }`.
+  - Between runs the task holds no lock and waits as `lock` does: on
+    Linux a thread with nothing else to run sleeps on a futex over the
+    count of releases, which each release moves and wakes.
+  - Cancellable. A wait nothing could end - one thread, nothing else on
+    it - panics, saying so.
+
+  Held by `bench/std_mutex_exercise.sh`: a queue between tasks, one
+  between threads, a wait the kernel slept through, a cancelled wait, the
+  refusal, and four broken copies (an uncounted release, the refusal
+  taken out, and each futex wake left out).
+
+- **`derive serializable` takes the other library's `@[JSON::Field(...)]`,
+  and enums read and write themselves as JSON.** Every field was written
+  under its own name, so the first API with camelCase keys could not be
+  read, nor a field kept out, nor a nil left out, nor a value converted.
+  An enum field did not compile at all.
+  - `key:`, `ignore:`, `ignore_serialize:`, `ignore_deserialize:`,
+    `emit_null:` and `converter:` (a type with `self.to_json(value, json)`
+    and `self.from_json(pull)`) are read off each field when the type's
+    methods are compiled.
+  - An option it does not know, a key that is not a string, two fields
+    under one key, and a field never read with neither a default nor nil
+    are refused there, naming the type and the field.
+  - A nil field is still written as `null` unless `emit_null: false`; the
+    other library leaves it out unless asked.
+  - An enum is written by its underscored name (`DarkRed` as `"dark_red"`),
+    a `@[Flags]` enum as the array of its members. It is read by name, in
+    any case and with or without underscores, or by value. A name no
+    member has is refused, naming the members.
+
+  Held by `bench/std_json_exercise.sh`: every option read and written and
+  round-tripped, the four compile-time refusals, and six broken copies
+  each caught at its check. `Time` is not among the values: std/json does
+  not depend on std/time.
+
+- **std/process starts a program this one talks to while it runs, and
+  replaces this program with another.** `Process.run` was the one call:
+  it waited for the end and handed back two texts, so a program could not
+  feed a child line by line, read it as it wrote, ask whether it had
+  ended, or stop it.
+  - `Process.spawn` answers a `ChildProcess` at once. Each stream is a
+    `Redirect`: `Pipe`, `Inherit` (the default, flushed first) or `Null`.
+    `stdin.write` and `close`, `stdout`/`stderr` with `read`, `read_line`
+    and `read_all`, all parked on the poller. `pid`; `wait`, which closes
+    the input first, for a `ProcessStatus`; `ended?` and `status` without
+    waiting; `terminate`, `kill` and `signal`. Windows has no signals:
+    there `terminate` and `kill` end the child's job.
+  - A cancelled task's call ends the child before it answers `Cancelled`,
+    as `run` does. A write to a child that closed its input is
+    `ChildInputClosed`.
+  - `Process.exec` replaces this program, keeping its pid and its three
+    streams and no other descriptor: `execve` on Linux, `posix_spawn`
+    with POSIX_SPAWN_SETEXEC on darwin. It answers only with a
+    `ProcessError`, in the directory it was in. Windows cannot replace a
+    program, so there it runs one and ends with its exit code.
+  - `Process.pid` is this program's id.
+
+  `run` is built on the same start, which now takes three stream modes.
+  darwin's floor gains `getpid` and `posix_spawn_file_actions_addinherit_np`.
+  Held by `bench/std_process_exercise.sh`:
+  - three lines answered one at a time while the child ran;
+  - 1 MiB of each stream read on two tasks;
+  - the null device both ways, and an inherited stream landing in order;
+  - kill, terminate and a TERM a child answers itself;
+  - a cancelled read that ends its child;
+  - exec's output, exit code, `env:`, pid and descriptors, and a failed
+    exec that leaves the directory alone;
+  - the refusal sentences through `.or_panic`;
+  - nine new broken copies, each caught at its check.
+
+- **A panic on Linux names its callers, file, line and column, in a
+  program that imports std/debug.** darwin and Windows did; Linux printed
+  the message and the raise's own line, because the prelude had no stack
+  walk there and an iyi function keeps no frame pointer to follow. The
+  module walks the stack itself now, by the program's own `.eh_frame`,
+  read in memory through `.eh_frame_hdr`, from registers it reads with
+  `asm`. Then it maps `/proc/self/exe` and names each frame by the
+  subprogram `.debug_info` gives it - `gamma`, as Windows' PDB says
+  `inner` - and its line by `.debug_line`. `.symtab` names a frame only
+  in a program stripped of its debug information: an older GNU ld, the
+  one in CI's image, cuts a symbol at its `@`, and every method of a
+  type came out as `*Deep`. Nothing of libc or libgcc is asked for, so
+  it is the same on glibc and musl and on a task's own stack. The
+  prelude gained an `IyiPanic.capturer` hook beside the resolver, and a
+  program that does not import the module captures nothing. Held by
+  `bench/std_debug_exercise.sh`:
+  - each frame's function and line are what `addr2line -f` answers for
+    the address a stripped copy prints, and without debug information
+    each name is the symbol `nm` says holds it;
+  - the walk holds under `--release`, under `--frame-pointers always`,
+    in a task, and stripped;
+  - six broken copies of the walk and the reader are caught.
+
+  `bench/panics.sh` §9a measures Linux now. CI's cross-run runs
+  `bench/std_debug_cross.iyi` on aarch64 under emulation and on musl.
+  Inlined frames are named for the function they were inlined into.
+
+- **`std/http` speaks `https://`, over std/tls.** `HTTP.get`, `request`,
+  `open`, `HTTPClient` and redirects take `https://` URLs. The connection
+  is TLS 1.3, its certificate checked for the URL's host against the
+  system's roots, or against `HTTP.tls_config`'s, which a program sets for
+  roots of its own. A kept connection is kept per scheme, host and port.
+  A credential is not carried from `https://` to `http://` at the same
+  name. A handshake refused is an `HTTPError` with TLS's sentence; a
+  failure after it is a `SocketError` whose new `layer_reason` holds
+  TLS's words (`SocketError.layered`). `https://` had been refused as
+  "TLS is not in 0.x", and a redirect to it the same. An upgrade over
+  `https://` (a WebSocket's `wss://`) is still refused, now saying so
+  rather than that TLS is missing. Held by `bench/std_http_exercise.sh`'s
+  new section against Python's own `ssl` server held to TLS 1.3:
+  - gzip undone over TLS, a 303 followed on `https://`, a kept
+    connection used twice;
+  - a host the certificate does not name refused, `wss://` refused;
+  - a copy of the module that sends `https://` in the clear caught.
+- **`std/tls`: a TLS 1.3 client (RFC 8446), the last piece, on iyi's own
+  cryptography and certificates.** `TlsClient.connect(host, port)` makes a
+  connection whose server's chain std/x509 checked to the system's roots
+  (or `TlsConfig#roots`) for that host, then `read`, `write` and `close`;
+  `TlsClient.over(socket, host)` does the same over a connected socket.
+  TLS 1.3 alone, with AES-128-GCM, AES-256-GCM and ChaCha20-Poly1305 and
+  an X25519 key exchange, a HelloRetryRequest answered for a cookie and
+  refused for another group. The server's CertificateVerify is checked
+  under ECDSA on the curve its scheme names or RSASSA-PSS, never PKCS #1
+  v1.5, and its Finished in constant time before anything is sent under
+  the application keys. SNI, ALPN, the middlebox ChangeCipherSpec, an empty
+  Certificate for a server that asks, KeyUpdate, NewSessionTicket set
+  aside, close_notify. Every extension or record the protocol does not
+  allow is refused with a sentence naming it and its alert. There is no
+  switch that turns a check off. `TlsKeySchedule` and `TlsRecordCipher`
+  are the key schedule and record protection on their own. Held by
+  `bench/std_tls_exercise.sh`, plain and `--release`:
+  - RFC 8448's simple 1-RTT trace byte for byte, every secret, both
+    Finished values, and the records sealed and opened;
+  - 35 scenarios of `bench/std_tls_server.py`, a TLS 1.3 server over
+    Python's cryptography that breaks one rule each, 13 holding and 22
+    refused for their reasons;
+  - OpenSSL's `s_server` in 11 configurations;
+  - 19 broken copies of the module, each caught.
+  
+  Measured beyond the gate: `HEAD /` to Google, GitHub, Cloudflare,
+  example.com, Let's Encrypt and Wikipedia over the system's roots. Not
+  audited, and not to be called secure until it is.
+- **`std/system_roots`: the roots the operating system trusts, read as
+  std/x509 certificates, the fifth piece of a TLS client.**
+  `X509.verify` needs roots, and they are each platform's own.
+  `SystemRoots.load` answers them, each once, with a count of those
+  std/x509 cannot read and where they came from. On Linux they are
+  `$SSL_CERT_FILE` and `$SSL_CERT_DIR` when set, otherwise the first of
+  the distributions' bundle files, otherwise `/etc/ssl/certs` and
+  `/etc/pki/tls/certs`. On darwin they are Security.framework's anchors,
+  with the administrator's and then the user's trust settings applied (a
+  root trusted without constraint added, one denied taken away). On
+  Windows they are crypt32's ROOT store less its Disallowed store. **The
+  floor moved, by the owner's decision**: crypt32.dll on Windows and the
+  Security and CoreFoundation frameworks on darwin, reached by this
+  module alone. SPEC.md III.10's inventory gives the reason, and
+  `bench/floor_base.sh`, `bench/dependency_floor.sh`,
+  `bench/std_dependency_floor.sh` and `bench/std_exercise.sh` allow them
+  for it and nothing else. std/x509 stays pure. Held by
+  `bench/std_system_roots_exercise.sh`, plain and `--release`: the
+  platform's store read (at least one root, none twice), the variables
+  over written files (a root twice beside a broken block, a directory, an
+  empty bundle refused), the Linux store the same certificates Python
+  reads from the same bundle (121 here, by SHA-256), and 5 broken copies
+  of the module each caught. The darwin and Windows arms are type-checked
+  by cross-compiling here and run by the exercise on those platforms'
+  CI.
+- **`std/x509`: certificates read and chains checked (RFC 5280), the
+  fourth piece of a TLS client.** With DER, RSA and ECDSA in place there
+  was still nothing that could say whether a server's certificates lead
+  to a trusted root. `Certificate.parse` reads a certificate through
+  std/asn1 and its key through std/rsa or std/ecdsa, with
+  basicConstraints, keyUsage, extKeyUsage, subjectAltName and
+  nameConstraints, refusing an extension written twice and a signature
+  algorithm that differs inside and out; `Certificate.from_pem` reads a
+  bundle without letting a bad byte reach std/base64's panic.
+  `X509.verify(leaf, intermediates, roots, host, now)` builds the chain
+  issuer by issuer, trying every candidate under a name before giving
+  up, and holds each issuer to its time, cA, keyCertSign,
+  pathLenConstraint, extKeyUsage and name constraints (DNS and IP; any
+  other kind refuses the chain) and to its signature; the leaf to its
+  time, serverAuth, not being a CA, and the host, matched against
+  subjectAltName alone with a wildcard for exactly one leftmost label. An
+  unknown critical extension refuses its certificate, and so does SHA-1.
+  Each refusal says why. Held by `bench/std_x509_exercise.sh`, plain and
+  `--release`: 44 chains made with Python's cryptography, each verdict
+  the one Python's own verifier gives and each refusal for its reason;
+  200 fresh chains over random keys, depths and 20 kinds of defect
+  against that verifier; every certificate in the CA bundle (121 here)
+  read as Python reads it; and 20 broken copies of the module each
+  caught.
+- **`std/ecdsa`: ECDSA signatures checked on P-256, P-384 and P-521, the
+  third piece of a TLS client.** Of the roots a system trusts, the ones
+  that are not RSA are ECDSA, and most of those are P-384, so a client
+  that checked P-256 alone would refuse most EC chains.
+  `EcdsaPublicKey.from_spki` reads id-ecPublicKey with a named curve (RFC
+  5480) and `from_point` an uncompressed point, refusing a compressed
+  one, a coordinate not below p, a point off its curve, another curve and
+  explicit parameters. `verify` reads the signature as strict DER through
+  std/asn1, holds r and s to [1, n - 1], cuts a digest longer than n, and
+  takes u1·G + u2·Q in one pass with the doubling and the identity handled
+  where an addition meets them. Checking only, so the arithmetic is
+  std/big's; nothing secret is computed. Held by
+  `bench/std_ecdsa_exercise.sh`, plain and `--release`: signatures Python's
+  cryptography made and ones made by hand that break one rule each (n - s
+  taken, as it is valid); keys whose private value is 1 and n - 1; 600
+  random signatures over the three curves and three hashes, most of them
+  broken, against Python's verdicts; every ECDSA root on the machine (39
+  here) verified with its own key; and 12 broken copies of the module
+  each caught.
+- **`BigInt.from_bytes` and `BigInt#to_bytes(size)`: a big integer read
+  from and written to big-endian bytes.** Keys, signatures and curve
+  points are big-endian byte strings, and std/big could only parse text,
+  so std/rsa carried its own conversion over BigInt's limbs, and the next
+  cryptography module would have carried another. `to_bytes` writes
+  exactly *size* bytes, zeros in front, and answers nil for a negative
+  value or one that does not fit rather than cutting it short. std/rsa
+  uses them now. Held by `bench/std_big_exercise.sh`: round trips at 9
+  and 256 bytes, leading zeros, zero, and the two refusals, with a byte
+  order reversed and a too-wide value cut short each caught.
+- **`std/rsa`: RSA signatures checked, PKCS #1 v1.5 and PSS (RFC 8017),
+  the second piece of a TLS client.** `RsaPublicKey.from_spki` reads the
+  key a certificate carries (rsaEncryption with its NULL parameters) and
+  `from_pkcs1` a bare RSAPublicKey, refusing a modulus that is even or
+  outside 1024 to 16384 bits and an exponent that is even, under 3 or
+  past 2^31 - 1. `verify_pkcs1v15` builds the one encoding a signature
+  over the message can have and compares the whole of it, rather than
+  parsing what the signature opens to, which is how the Bleichenbacher
+  and BERserk forgeries got through; `verify_pss` is EMSA-PSS-VERIFY with
+  MGF1, the salt as long as the digest unless named. SHA-1, SHA-256,
+  SHA-384 and SHA-512. A signature that is not one is `false`, whatever
+  the reason. A signature that is not k bytes long is refused as RFC 8017
+  says, where OpenSSL's PSS path takes one with its leading zero byte
+  dropped. Held by `bench/std_rsa_exercise.sh`, plain and `--release`:
+  signatures Python's cryptography made and encodings made by hand that
+  each break one rule with the digest still matching; 600 signatures over
+  six key sizes, both schemes, four hashes and every salt length PSS
+  allows, half of them broken, against Python's verdicts; every RSA root
+  certificate on the machine verified with its own key (82 here); and 13
+  broken copies of the module each caught.
+- **`std/asn1`: ASN.1 values read from DER (X.690), the first piece of
+  a TLS client.** A certificate, a key and a signature are DER, and
+  nothing here could read one. `Der.parse(bytes)` answers the one value
+  the bytes hold, or an `Asn1Error` naming the offset; a value is a view
+  into those bytes, read one level at a time through `children`,
+  `sequence`, `set` and `explicit(n)`, with `raw` its own bytes for a
+  signature to be checked over. The typed readers - `boolean`, `null`,
+  `integer`, `integer_bytes`, `unsigned_integer`, `oid`, `bit_string`,
+  `bit_string_bits`, `octet_string`, `string` (UTF8String, PrintableString,
+  IA5String, NumericString, VisibleString, TeletexString as ISO-8859-1,
+  BMPString, UniversalString) and `time` (UTCTime as RFC 5280 reads it,
+  GeneralizedTime) - hold DER to its one encoding: an indefinite or
+  non-minimal length, a high-form tag that fits the low one, a redundant
+  INTEGER byte, a subidentifier's leading 0x80, set unused bits, a BOOLEAN
+  other than 0x00 or 0xFF, a primitive type written constructed and a
+  time not in its one form are each refused as a value. `Der.walk` reads a
+  whole tree on a stack of its own and refuses one nested past 64. Held
+  by `bench/std_asn1_exercise.sh`, plain and `--release`: every rule both
+  ways on hand-written values; every value of the machine's root
+  certificates (7,725 in 121 on this one) at the offset, depth, header,
+  length, form and tag `openssl asn1parse` reads; each certificate's
+  serial, signature algorithm, validity and name attributes as Python's
+  `cryptography` reads them; 4,000 certificates broken at random read
+  without a panic; and 18 broken copies of the module each caught.
+- **`std/otp`: HOTP (RFC 4226), TOTP (RFC 6238) and `otpauth://` key
+  URIs.** A server that wanted a second factor had HMAC and no code.
+  `HOTP.code(secret, counter, digits = 6, algorithm = SHA1)` and
+  `TOTP.code(secret, unix_time, step = 30, digits = 6, algorithm)` over
+  `OTPAlgorithm::SHA1`, `SHA256` and `SHA512` on std/crypto's HMAC, 6 to
+  10 digits; `TOTP.now(secret)` by the wall clock; `TOTP.verify(secret,
+  code, unix_time, window = 1)` takes the steps either side, comparing
+  every candidate with `Subtle.constant_time_compare`, and leaves
+  remembering a used step to the caller, which the module says. A secret
+  is an `Array(UInt8)`, never a `String`, so base32 text cannot be passed
+  where its bytes were meant. `OTPAuth.totp`/`.hotp(...).to_s` writes
+  Google's Key Uri Format - label and values percent-encoded, the secret
+  base32 without padding, `algorithm`, `digits` and `period` only when
+  not the defaults - and `OTPAuth.parse` reads it back, or answers an
+  `OTPError` for another scheme or type, no account, no or bad secret,
+  issuers that disagree, an unknown algorithm, digits outside 6 to 10, a
+  bad period or counter, a parameter given twice, a broken escape. The
+  module imports std/time for `now` alone and says so: everything else
+  is a pure function of an explicit counter or time. Held by
+  `bench/std_otp_exercise.sh`, plain and `--release`: RFC 4226 appendix
+  D's ten codes and truncated numbers, RFC 6238 appendix B's six times
+  under all three hashes, the window's edges; 400 codes and 300
+  verifications against an HOTP written on Python's `hmac` over random
+  secrets, counters to 2^63, times, steps and digits; 150 URIs written
+  here read back by `urllib.parse` and 150 Python wrote read here; 14
+  refusals by their sentence; ten broken copies of the module caught
+  (the truncation offset, the counter's byte order, the window one step
+  short and one long, among them).
+- **`std/base32`: Base32 and Base32hex (RFC 4648 sections 6 and 7).**
+  `Base32.encode(data, padding: true)` and `Base32Hex.encode`, and
+  `decode(text) : Array(UInt8) | Base32Error` reading either case with
+  padding optional, refusing as a value a byte outside the alphabet
+  (whitespace included), data after the padding, padding too short or
+  too long, a last group of 1, 3 or 6 characters, and a last character
+  that sets bits past the data, naming the canonical one. Pure: it
+  imports nothing. Held by `bench/std_base32_exercise.sh`, plain and
+  `--release`: section 10's vectors both alphabets padded and not, 2,400
+  answers on 300 random byte strings against Python's `b32encode`,
+  `b32hexencode` and their decoders, 1,500 texts broken at random
+  answered as Python's `b32decode` does but for the 70 whose bits past
+  the data Python ignores, the 256 canonical two-character texts out of
+  1,024, six error sentences through `.or_panic`, eight broken copies
+  caught (an alphabet swap among them).
+- **`std/user`: who the program runs as, and the accounts and groups the
+  machine knows.** `User.current`, `User.find_by_name`/`find_by_id`,
+  `Group.find_by_name`/`find_by_id` and `User#group_ids`, with the other
+  library's field names (`name`, `id`, `group_id`, `full_name`, `home`,
+  `shell`; a group's `members`). An id is a `String`, as Windows' SID is,
+  and an account nobody has is nil, never a panic. On Linux the answer is
+  `/etc/passwd` and `/etc/group`, read here by glibc's rules for a line
+  (ids compared as numbers, the first match winning, NIS `+`/`-` lines
+  skipped); the NSS modules after `files` - LDAP, sssd, systemd's dynamic
+  users - are not consulted, as Go's pure-Go reader does not consult them.
+  `User.current` is `getuid(2)`, and a uid the files lack falls back to
+  `$USER` and `$HOME` as Go's does. darwin asks libSystem's `getpw*_r`,
+  `getgr*_r` and `getgrouplist`. Windows answers the current user alone,
+  through advapi32 (`GetUserNameW`, the token's SIDs, `%USERPROFILE%`);
+  every other lookup there needs netapi32, which an iyi program does not
+  link, and panics saying so. Held by `bench/std_user_exercise.sh`, plain
+  and `--release`: Go's `os/user` reader and Python's `pwd`, `grp`,
+  `os.getuid` and `os.getgrouplist` answer a fixture as the module does,
+  `getent` and `id -G` agree on this machine, and 16 broken copies are
+  each caught.
+- **`std/aead`: authenticated encryption in iyi - AES-GCM and
+  ChaCha20-Poly1305, and AES, ChaCha20 and Poly1305 on their own.** A
+  program that had to seal a cookie or a file had a MAC and no cipher.
+  `AesGcm.new(key)` (16, 24 or 32 bytes; NIST SP 800-38D, 96-bit nonce,
+  128-bit tag) and `ChaCha20Poly1305.new(key)` (RFC 8439 §2.8) both
+  `seal(nonce, plaintext, aad = "")`, answering the ciphertext and the
+  tag after it, the layout Python's `cryptography` and Go use, and
+  `open(nonce, sealed, aad = "")`, answering the plaintext or an
+  `AeadError`: the tag is checked before a byte is decrypted, compared
+  with every byte's difference OR-ed together, and a forged, damaged or
+  short message is a value, not a panic. `AES` encrypts and decrypts a
+  block (FIPS 197), `ChaCha20` XORs its key stream over data in pieces
+  from any 32-bit counter, `Poly1305` MACs a message in pieces. No table
+  is indexed by a secret: AES is BearSSL's bitsliced `aes_ct64`, four
+  blocks at a time through Boyar and Peralta's 115-gate S-box, the key
+  schedule through the same gates; GHASH is BearSSL's `ghash_ctmul64`,
+  carry-less products from integer multiplies; Poly1305 is
+  poly1305-donna's 26-bit limbs with a masked final reduction. Keys and
+  nonces come from the caller, so std/aead imports only std/int and
+  reaches nothing. Refused with a sentence: a key or nonce of the wrong
+  size (GCM's 8 and 60-byte nonces among them), an AES block that is not
+  16 bytes, a ChaCha20 stream run past block 2^32 - 1, a Poly1305 used
+  after `final`. Measured on one x86_64 Linux machine (a QEMU CPU with
+  AES-NI, no carry-less multiply), --release, sealing 16 MiB: AES-128-GCM
+  221 MB/s, AES-256-GCM 179, ChaCha20-Poly1305 790, against Python's
+  `cryptography` (OpenSSL) 875, 880 and 1581. Held by
+  `bench/std_aead_exercise.sh`: FIPS 197's appendix B and C vectors both
+  ways, the GCM specification's twelve 96-bit-nonce test cases sealed and
+  opened, RFC 8439's §2.3.2 to §2.8.2 and appendix A.1 to A.5 vectors, a
+  flipped tag, ciphertext, additional data or nonce, another key and a
+  changed length refused under each AEAD, then 3,000 AES-GCM and
+  3,000 ChaCha20-Poly1305 random messages where iyi's sealing is
+  Python's, Python opens iyi's and iyi opens Python's and refuses a
+  tampered copy of each, 500 ChaCha20 streams and 500 Poly1305 messages
+  in random pieces and 1,000 AES blocks both ways against Python; the
+  throughput recorded, eighteen refusals by their sentences, and
+  seventeen broken copies caught at the check that names them.
+- **`std/tar`: tar archives read and written in iyi, `.tar.gz` both
+  ways.** `TarReader.new(io)` reads an archive from any `IyiIO` as a
+  stream, gzip or not by its first bytes: `next_entry` answers each
+  `TarEntry` - name, size, mode, mtime (to the nanosecond from a pax
+  record), uid, gid, uname, gname, link target, type (regular, directory,
+  symbolic and hard link, others named: "FIFO", "GNU sparse file") and
+  every pax record - and `read`/`read_all` its data, which the next
+  `next_entry` reads past when it was not read. POSIX ustar and pax
+  (extended and global headers), GNU's `././@LongLink` names and
+  base-256 numbers and old v7 headers are read. `TarWriter.new(io,
+  gzip: false)` writes ustar headers, a pax header only for a field that
+  does not fit (a name no `/` splits into 155 and 100 bytes, a size past
+  8 GiB, an id, time, user name or non-ASCII name past what ustar holds),
+  and the two zero blocks. `TarReader#extract(dir)` makes directories,
+  files, symbolic and hard links with their permission bits and times,
+  and refuses tar slip: an absolute name or a `..` part, a link whose
+  target is absolute, climbs above *dir* or goes down and back up, a hard
+  link to anything but a file it extracted, and any entry written
+  through a link on disk. What is wrong with an archive is a `TarError`:
+  a checksum that does not add up, a number field that is not one, a
+  header or data cut short, a malformed pax record, an extended header
+  past 1 MiB, a gzip stream whose CRC-32 disagrees - checked at the end,
+  past the zero blocks. Held by `bench/std_tar_exercise.sh`: Python's
+  `tarfile` reads what iyi wrote (ustar, pax long and unicode names, gz)
+  and iyi reads what Python wrote (USTAR, GNU, PAX with a global header,
+  gz), GNU tar 1.35 lists and extracts iyi's archives and iyi reads and
+  extracts GNU tar's gnu, posix, ustar, v7 and gzip archives; an 8 GiB +
+  1 entry written and read back; a corrupted checksum refused by both
+  sides; thirteen tar slips refused; 26 broken copies caught.
+- **`std/idna`: Punycode (RFC 3492) and host names to and from ASCII
+  (IDNA2008), and `URI.ascii_host`.** `Punycode.encode` writes any
+  string's Punycode and `Punycode.decode` reads it back, or answers a
+  `PunycodeError` for a byte that is not ASCII, one that is not a base-36
+  digit, input that ends inside a number, overflow, and a code point past
+  U+10FFFF or a surrogate; the arithmetic is 64-bit, so a delta past 32
+  bits (U+10FFFF after 3,000 basic code points) reads back.
+  `IDNA.to_ascii("bücher.example")` is `"xn--bcher-kva.example"` and
+  `IDNA.to_unicode` is the way back, label by label at `.` and the three
+  full stops UTS #46 treats as one, a trailing dot kept, ASCII
+  lower-cased. Refused as an `IdnaError` naming the label and the code
+  point: an empty label, a leading or trailing hyphen, `--` at the third
+  and fourth characters outside `xn--`, an `xn--` label that does not
+  decode or decodes to ASCII, a U-label not in NFC or beginning with a
+  combining mark, a code point RFC 5892 does not allow - the property is
+  derived from `std/unicode` by the RFC's own rules, and `IDNA.property`
+  answers it - or a CONTEXTO one out of its context, a label past 63
+  octets and a name past 253 in ASCII. Not done, and the module says so:
+  no UTS #46 mapping (`BÜCHER`, full-width letters and ligatures are
+  refused with what folding and NFKC make of them, not mapped), no
+  transitional `ß`, the joiners refused because their CONTEXTJ rule needs
+  Joining_Type, no Bidi rule. `URI.ascii_host(host)` decodes a host's
+  escapes and carries it through `to_ascii`, IP literals and an empty
+  host as they are; `URI#hostname` is unchanged. Held by
+  `bench/std_idna_exercise.sh`, plain and `--release`: the 19 samples of
+  RFC 3492 section 7.1; 312 strings encoded and decoded as Python's
+  `punycode` codec does; 50 real names (IANA's IDN test domains, IDN
+  country TLDs) agreeing both ways with the `idna` package 3.11 and, but
+  for `ß`, with Python's IDNA2003 codec; 28 bad names refused by both, and
+  the three known differences (an underscore label, the Bidi rule, ZWNJ in
+  Persian) checked to differ as documented; `IDNA.property` against the
+  package's table on all 294,579 code points Unicode 16 assigns, the ten
+  that differ being the package's own slip (OUTLINED DIGIT ZERO to NINE,
+  whose NFKC is an ASCII digit); seven refusals by their sentence; twelve
+  broken copies of the module caught. `bench/std_uri_exercise.sh` holds
+  `ascii_host` and catches one more broken copy.
+- **`std/curve25519`: X25519 key agreement (RFC 7748) and Ed25519
+  signatures (RFC 8032), in iyi.** `X25519.public_key(private)`,
+  `X25519.shared(private, peer_public) : String | CurveError`,
+  `Ed25519.public_key(seed)`, `Ed25519.sign(seed, message)` and
+  `Ed25519.verify(public, message, signature) : Bool`, on a field of
+  five 51-bit limbs multiplied in `UInt128`, with no branch or index on a
+  secret: a Montgomery ladder with masked swaps, and signing's base-point
+  multiplication a 4-bit window read from its table by masks. Keys and
+  seeds come from the caller and the module imports only std/int and
+  std/digest's SHA-512, so it reaches nothing. `shared` answers a
+  `CurveError` for a peer key of the wrong size and for the all-zero
+  secret a small-order point gives (RFC 7748 §6.1). `verify` is §5.1.7
+  read strictly with the cofactorless equation: an S of L or more (the
+  S + L malleation) and a key that is not a canonical encoding (y of p
+  or more, x = 0 with the sign bit) answer false - OpenSSL takes the
+  latter two, the gate records. A private key or seed that is not 32
+  bytes is refused with a sentence. `bench/std_curve25519_exercise.sh`
+  holds RFC 7748's §5.2 vectors and its 1, 1,000 and (in the release
+  build, about 25 seconds) 1,000,000 iterations, the §6.1 exchange,
+  seven small-order points, RFC 8032's five §7.1 vectors, 2,000 X25519
+  cases and 4,000 Ed25519 ones against Python's `cryptography` both
+  ways, six refusals and 12 broken copies each caught at the check that
+  names it. Measured --release: a shared secret 21 microseconds
+  (OpenSSL 19), a verification 43 (47), a signature 68 (17).
+- **`std/csv` reads a row at a time (`CSVReader`) and writes to a
+  stream (`CSVWriter`).** `CSV.parse` held the whole document and its
+  every row, and panicked at a malformed one. `CSVReader` reads a
+  `String` or an `IyiIO` through a 64 KiB window: `next_row` gives the
+  fields, `next` and `each` a `CSVRow` that also answers by the header's
+  names (`row["name"]`, `row["missing"]?`) under `headers: true`, blank
+  lines passed over and a repeated name answering its last column, as
+  Python's `DictReader` has them. The separator and the quote are the
+  caller's; `strip: true` drops spaces and tabs around unquoted fields;
+  `same_size: true` refuses a row whose length is not the first's.
+  RFC 4180's rules as `CSV.parse` reads them: doubled quotes, LF, CRLF
+  and a lone CR, line breaks inside quotes, a byte order mark read past.
+  A quote inside an unquoted field, text after a closing quote, a quote
+  open at the end, a UTF-16 mark and a short row under `same_size` are a
+  `CSVError` value with its line and column (in characters, a CRLF one
+  line end), answered again after. `CSVWriter` quotes a field only when it
+  holds the separator, the quote or a line break, or begins or ends with
+  a space or a tab, writes a row of one empty field `""`, and quotes all
+  of them under `quote_all: true`; LF, CRLF or CR ends a row. A separator
+  or quote that is not one ASCII character, the two the same, another
+  line end and a header name the header lacks are refused with a
+  sentence. `bench/std_csv_exercise.sh` holds Python's `csv` both ways
+  on three generated 3,000-row corpora (separators, both quotes, every
+  line end, characters of up to four bytes), `DictReader` against header
+  access on 2,000 ragged rows, CRLFs, doubled quotes and characters split
+  across the window, a 51 MB file read keeping 90 KB alive at the most
+  and 464 bytes allocated a row (bound: 1 MiB, 1 KiB), seven refusals,
+  and 18 broken copies each caught at the check that names it.
+- **`IyiSocket#remote_address` and `#remote_port`, and
+  `Request#remote_address`.** A server had no way to name the client it
+  was answering: a socket said its own address and port and not the
+  other end's. Now `remote_address` and `remote_port` are the peer's as
+  `local_address` and `local_port` are this end's (`getpeername` by
+  syscall on Linux, from libSystem on darwin, Winsock on Windows; nil
+  when the peer has already gone), and std/http's server hands each
+  request its client's address. Held by `bench/socket_exercise.sh`, each
+  end naming the other as the other names itself, and
+  `bench/std_http_exercise.sh`, a request naming 127.0.0.1; a broken copy
+  of each is caught.
+- **`std/digest` has SHA-3 (`SHA3_224`, `SHA3_256`, `SHA3_384`,
+  `SHA3_512`) and the extendable-output `SHAKE128` and `SHAKE256`.**
+  FIPS 202's Keccak-f[1600] on 64-bit lanes, in iyi. The four SHA-3s are
+  `Digest`s like the SHA-2s: `update` in pieces, `final`, `hexfinal`,
+  `dup`, `copy_from`, `reset`, the rate as `block_size`. A SHAKE takes
+  `update`, then `read(n)` as often as wanted, each read going on where
+  the last stopped; `update` after a read is refused ("update after
+  read; reset first"), as are negative counts. The gate holds NIST's
+  example values (the empty message and 200 bytes of 0xa3, 512 bytes of
+  SHAKE output), every length to 300 bytes, 3,000 random messages fed
+  in random pieces against python's hashlib with SHAKE reads split at
+  random against one read, and proofs that a wrong round constant, a
+  rho rotation off by one, the padding byte 0x01 for 0x06 and SHA3-256
+  at the wrong rate are each caught. Measured with `--release` on 4 MB:
+  SHA3-256 21 ms and a SHAKE128 read 22 ms, against SHA-256's 11 and
+  hashlib's (OpenSSL) 6 and 5.
+- **`std/http`: the client's `timeout_ms`.** `HTTP.request`, `HTTP.open`,
+  `HTTP.upgrade` and `HTTPClient.new` take one: it bounds the connect and
+  each read and write after it - a pause, not the whole exchange, as
+  Python's `timeout` is - and one that runs out is a `SocketError` whose
+  `timed_out?` is true. A server that took the request and never
+  answered held the client for as long as it stayed; 0, the default,
+  still waits as long as the server does, as Go's and Python's clients
+  do. An upgraded connection's protocol waits as it likes. Held by
+  `bench/std_http_exercise.sh`: a server that accepts and never answers
+  is a timeout in 300 ms, through `HTTP` and through an `HTTPClient`.
+- **`std/router`: requests sent to handlers by pattern, Go 1.22's
+  `ServeMux`.** `router.handle("GET /users/{id}") { |req, params| ... }`
+  registers a handler and `Server.serve(l) { |req| router.call(req) }`
+  routes by it. Patterns are `[METHOD ][HOST]/path`: `{name}` takes a
+  segment, a last `{name...}` the rest, a trailing `/` a subtree, `{$}`
+  the end; `GET` takes `HEAD` too; wildcard values are percent-decoded a
+  segment at a time, so `%2F` stays inside one. The most specific
+  pattern wins whatever the order they were registered in, a host's
+  pattern before one without, and two patterns neither of which is more
+  specific but which share a request are refused when the second is
+  registered, with a sentence naming both and the request
+  (`"/index.html" conflicts with "GET /": it matches more methods but a
+  more specific path, and both match GET "/index.html"`). A path
+  matched only under other methods is 405 with `Allow`, `/x` is
+  redirected to a registered `/x/` (301), a path with `.`, `..` or `//`
+  to its cleaned form, a malformed escape is 400, anything else 404.
+  Malformed patterns are refused by their sentence, and so is a
+  pattern registered after the router answered its first request, so
+  the table is never written while it is read. `Pattern.parse`,
+  `relation` and `conflict` are the comparisons as values. Held by
+  `bench/std_router_exercise.sh`, plain and `--release`: every pattern
+  and example in Go's `ServeMux` documentation in a table of 70
+  requests, 23 pairs of patterns and 32 patterns read; the same tables
+  handed to Go 1.25's own `ServeMux` give the same answer for every
+  row (the four patterns Go takes and this refuses - unclean paths, a
+  malformed escape - left out); Python's `http.client` against a served
+  router for 405 and `Allow`, 301s, HEAD and 400; seven refusals by
+  their sentence; fourteen broken copies of the module caught. 200,000
+  requests routed against 21 patterns in 165 ms.
+- **`std/sse`: server-sent events (WHATWG HTML §9.2) on both ends of
+  std/http.** `SSE.stream { |events| events.send(data, event:, id:,
+  retry:); events.comment(text) }` answers a request with a 200
+  `text/event-stream`, `Cache-Control: no-cache`, each event one chunk
+  sent at once, data cut into `data:` lines at CRLF, CR and LF; a line
+  break in an event type, a line break or NUL in an id, a negative retry
+  and text that is not UTF-8 are refused before they are written, and a
+  client gone is the write's `SocketError` and `gone?`, so the block's
+  loop ends on a value. `SSE.open(url, last_event_id:, reconnects:,
+  retry:) { |event| true }` reads one through `HTTP.open` with `Accept:
+  text/event-stream` and `Last-Event-ID`, fails the connection on an
+  answer that is not a 200 `text/event-stream` (an `SSEError`), and
+  reconnects after a drop or an end with the last event ID and the
+  stream's `retry:` delay, giving up once *reconnects* + 1 connections
+  in a row brought no event. `EventParser` is §9.2.6's interpretation fed in
+  pieces of any size - one BOM, CRLF/CR/LF, a CR and its LF split
+  between pieces, comments, one space after the colon, `id` with NUL
+  ignored, `retry` digits alone, ill-formed bytes as U+FFFD, an unended
+  event discarded. A reconnection's parser takes over the last event ID
+  rather than starting empty as the text says, which is what Chromium
+  does and what keeps a resumed stream's place. Held by
+  `bench/std_sse_exercise.sh`: the standard's six example streams; 807
+  generated streams (352 events) parsed the same as a Python
+  transcription of the algorithm; the client against a Python server
+  that cuts it mid-chunk three times (Last-Event-ID none, 2, 2, none;
+  delays of 50 ms from `retry: 50` against the caller's 5000); the
+  server read byte for byte by Python and `curl -N`; ten refusals; and
+  twenty broken copies of the module caught.
+- **`std/socket`: `IyiSocket.connect(host, port, timeout_ms)`.** A
+  connect waited as long as the kernel did - on Linux about two minutes
+  of SYN retries for a host that drops them, a full listen backlog among
+  them - and a program had no way to ask for less. Now each address's
+  handshake waits at most *timeout_ms*, and one that runs out is a
+  `SocketError` whose `timed_out?` is true before the next address is
+  tried. The resolver's own TCP query already had a bound; this is the
+  same one for the program's connect. Held by
+  `bench/socket_exercise.sh`: a listener with a backlog of one, full and
+  never accepted, times out the connects past it in 300 ms.
+- **`std/http`: the server closes a connection that takes too long.**
+  `Server.serve(listener, timeout_ms: 60000)`: a request's head must have
+  arrived within the limit, counted from when the server starts waiting
+  for it - a kept connection's idle time included - however its bytes
+  are spread over reads, and no read of a body or write of an answer may
+  wait longer; a connection that does is closed. Before it, a client
+  that sent a byte of its head every few seconds (Slowloris) held a
+  connection and its fiber for as long as it liked, and so did one that
+  connected and sent nothing, or read none of its answer. A minute by
+  default, nginx's `client_header_timeout`; 0 for none. A connection
+  handed over by `Response.upgrade` is the protocol's and waits as it
+  likes. Held by `bench/std_http_exercise.sh`'s `== timeouts`, a head sent
+  a byte every 100 ms against a 400 ms limit among them, and two broken
+  copies of the module caught.
+- **`std/zip`: ZIP archives read and written in iyi, `ZipReader` and
+  `ZipWriter`, over std/compress's DEFLATE and std/digest's CRC-32.**
+  `ZipReader.open` takes the archive as a `String` or as a file it reads
+  only where it must (by `seek`), finds the end record by scanning back
+  over the comment, and lists the central directory: name, sizes,
+  CRC-32, method, MS-DOS time as a `Time`, flags. Names are UTF-8 under
+  bit 11, code page 437 otherwise, and Info-ZIP's Unicode Path field is
+  taken when its CRC-32 matches. ZIP64 extended fields and end records
+  carry what 16 and 32 bits do not. `open(entry)` streams the content
+  and checks the CRC-32, the size and a data descriptor's CRC-32 before
+  the last piece is handed out; `read(entry)` is the whole of it, and
+  `extract(dir)` writes the archive under a directory. `ZipWriter` writes
+  to any `IyiIO` without seeking: an entry from a `String`, stored or
+  deflated; one streamed from an `IyiIO` with a data descriptor;
+  directories; UTF-8 names flagged; ZIP64 where a value needs it, or
+  everywhere with `zip64: true`; the central directory at `finish`.
+  Refused as a `ZipError`: no end record, a central directory past the
+  file, a split archive, an encrypted entry, a method other than stored
+  and deflate (named: "compressed with bzip2 (method 12)"), a local
+  header missing or naming another file, entries that overlap (the
+  overlapping-file zip bomb, refused at `open` before anything is read),
+  a total uncompressed size past the caller's `limit`, content that does
+  not match its CRC-32 or size or inflates past its declared size, and
+  for `extract` a name that is absolute, climbs out with `..`, or holds
+  `\` or `:` (zip slip), checked for every entry before anything is
+  written. Misuse panics: an `add` after `finish`, `finish` twice, a
+  name that is empty, absolute, holds a `\` or is already there.
+  `bench/std_zip_exercise.sh` holds it, plain and `--release`: Python's
+  `zipfile` reads what `ZipWriter` wrote (stored, deflated, streamed
+  with descriptors, empty entries and an empty archive, UTF-8 names,
+  ZIP64 forced, and 70,000 entries through the ZIP64 end record), its
+  listing line for line what the exercise wrote, and Info-ZIP's `unzip
+  -t` finds no errors; `ZipReader` reads what Python wrote (stored,
+  deflated at levels 1, 6 and 9, a comment, `force_zip64`, ZIP64 with
+  the limit lowered so the central directory carries it, 66,000 entries,
+  data descriptors from an unseekable stream, UTF-8, code page 437 and
+  Unicode Path names, a comment holding a false end record) and what
+  `zip -r` wrote to a file and to a pipe, each listed as Python lists it,
+  from the string and from the file. Thirty refusals (twenty-five
+  malformed archives, five zip-slip names) are checked by their sentence,
+  ten panics by theirs, and seventeen broken copies of the module fail at
+  the check that names the break. Measured: 50 MB of text written
+  deflated in 145 ms and read back in 65 to 70 ms, where Python over C
+  zlib reads it in 35 ms.
+- **`std/http`: `HTTPClient` keeps its connections.** Each `HTTP`
+  request opened a connection of its own and closed it, so a program
+  talking to one server paid a TCP handshake per request. An
+  `HTTPClient` has `HTTP`'s methods - redirects, cookies and decoding
+  included - and keeps the connection an answer leaves open, by host and
+  port, at most four waiting per server: ten requests go over one
+  connection, `connections_made` and `connections_reused` say so. A
+  connection goes back once its answer has been read to the end, what
+  an `open` block left unread read past up to 64 KiB and the connection
+  closed past that, as Go's client does; an HTTP/1.0 answer, one that
+  says `close` and one the connection's end frames are not kept. A
+  server may close an idle connection whenever it likes (RFC 9112
+  §9.3.1), so a request whose kept connection turns out closed is sent
+  again once on a new one when its method is idempotent and its body a
+  string (RFC 9110 §9.2.2), and a POST answers the failure. A gzip body
+  now reads the end of its framing after the end of its stream, where the
+  last chunk was left on the connection for the next answer to start
+  with. Held by `bench/std_http_exercise.sh`'s `== kept connections`, a
+  server that closes each connection a moment after its answer among
+  them, and five broken copies of the module caught.
+- **`std/password`: `Bcrypt` and `Scrypt` hash passwords.** A program that
+  stores passwords had PBKDF2 and no format to keep it in. They are a
+  module apart from std/crypto because bcrypt's salt comes from
+  `Random::Secure`: std/crypto reaches nothing, and a package that only
+  uses HMAC should not reach std/random, the clocks and the environment.
+  `Bcrypt.hash(password, cost = 11)` answers the 60-character `$2b$`
+  string OpenBSD, Crystal and Python's `bcrypt` write, its 16 bytes of
+  salt from `Random::Secure`, on a Blowfish (EksBlowfish) written in
+  iyi; `Bcrypt.verify(password, hash)` reads `$2a$`, `$2b$` and `$2y$`
+  and compares through `Subtle.constant_time_compare`. The key is
+  OpenBSD's: the password up to a NUL, cut to 72 bytes. A cost outside 4
+  to 31 panics with a sentence; a stored hash that is malformed, or whose
+  cost is out of range, verifies false. `Scrypt.derive(password, salt,
+  n, r, p, length, max_memory = 32 MiB)` is RFC 7914 on std/crypto's
+  PBKDF2-HMAC-SHA256 and a Salsa20/8 core, and refuses an *n* that is
+  not a power of two above 1 or not below 2^(16r), an *r*, *p* or length
+  below one, and parameters whose memory, counted as OpenSSL counts it,
+  is past the limit, so it accepts what Python's `hashlib.scrypt` does.
+  Measured on one x86_64 Linux machine, --release: bcrypt at cost 10
+  37 ms against Python's `bcrypt` 39 ms, scrypt at n = 16384, r = 8
+  18 ms against `hashlib.scrypt`'s 23 ms. Held by
+  `bench/std_password_exercise.sh`: RFC 7914's vectors 1 to 3 and its
+  fourth refused at the default limit, 30 random cases against
+  `hashlib.scrypt`, the 20 jBCrypt vectors at costs 6 to 12, 16 hashes
+  from Python's `bcrypt` verified and 10 of iyi's verified by it, the
+  cost-10 time recorded, eleven refusals by their sentences, and five
+  broken copies caught: a wrong S-box word, the salt unused, the cost
+  ignored, Salsa20 at six rounds, BlockMix's blocks in order.
+- **`std/string_scanner`: `StringScanner`, the other library's lexical
+  scanner, matching at its offset with std/regex's own machine; and
+  `Regex#match_at`, the match that begins at a given byte.**
+  `scan`, `skip`, `check` and `matches?` match at the offset (a `Regex`,
+  a `String`, a `Char`, or for the first three a count of characters);
+  `scan_until`, `skip_until` and `check_until` search forward and take
+  everything up to the match's end. `[]` and `[]?` read the last match's
+  groups by number, from the end, or by name; `offset`/`offset=`,
+  `eos?`, `rest`, `peek`, `matched?`, `reset`, `terminate` and
+  `inspect`, which writes `#<StringScanner 5/16 …s ‣is …>` as the other
+  library does. Offsets are bytes, as every position in iyi is, and
+  `skip` answers bytes so the offset moves by what it says; counts stay
+  characters, so `scan(2)` on `文字列` is `文字`. A regex is matched at
+  the offset by the new `Regex#match_at` (Python's `pattern.match(text,
+  pos)`), a Pike VM run that starts no thread after the offset, so a
+  failed `scan` costs what the pattern read, not the rest of the text;
+  `^` and `\b` still see the whole text, as there. Refused, with a
+  sentence: an offset that is negative, past the end, or inside a
+  character; a negative count; a group the last match does not have,
+  one that took no part, and any group after a miss. Input is never
+  refused: a miss is nil, and the exercise's tokenizer answers its own
+  `LexError` value for source it cannot read.
+  `bench/std_string_scanner_exercise.sh` holds it, plain and `--release`:
+  the other library's StringScanner spec ported (multi-byte cases in
+  bytes), a tokenizer for a small language, seven refusal programs
+  checked for their exact sentence, `match_at` against Python's
+  `re.match(text, pos)` on 47,840 pattern, text and offset triples with
+  no difference, the tokenizer against one written with Python's `re`
+  over 300 generated programs (1,094 tokens, 155 errors) with the same
+  answer, and nine broken copies of the module each caught at the check
+  that names them. `bench/std_regex_exercise.sh` gains a section on
+  `match_at` and the proof that a run which still searches ahead fails it.
+- **`std/term`: `Term.tty?`, `Term.size`, `Term.raw { }`, `Term.no_echo { }`
+  and `Term.read_password`, terminal control without a C library.**
+  `tty?(io or fd)` is the prelude's `__iyi_isatty`, the same answer
+  `std/colorize` already uses, not a second copy of it. `size` answers
+  `{rows, columns}` from TIOCGWINSZ (Linux, darwin) or the console
+  window (Windows), asking standard output, then standard error, then
+  standard input; nil when there is no terminal, and also for 0 by 0,
+  which is what a pseudo-terminal nobody sized answers. `raw` and
+  `no_echo` save the mode, change it, run the block, answer its value,
+  and put the saved mode back with a `defer`, so it comes back when the
+  block returns, when a `!` returns early and when the block panics. Raw
+  is termios(3)'s `cfmakeraw` set, as Go's x/term `makeRaw` and Crystal's
+  `cfmakeraw` write it out; echo off is Crystal's `noecho` set (ECHO,
+  ECHOE, ECHOK, ECHONL); a password adds what Go's `readPassword` forces
+  on (ICANON, ISIG, ICRNL), so it is read as an edited line even from
+  inside raw mode. The prompt goes to standard error, and standard input
+  that is not a terminal is read as it is, so `echo pw | prog` works.
+  Linux makes TCGETS/TCSETS `ioctl` system calls by hand, darwin calls
+  libSystem's `tcgetattr`/`tcsetattr`/`ioctl`, and Windows calls
+  `GetConsoleMode`/`SetConsoleMode`/`GetConsoleScreenBufferInfo`. Refused:
+  a stream that is not a terminal is a `TermError`, and the block does not
+  run ("cannot enter raw mode on standard input: not a terminal"); a
+  closed stream panics ("Term: cannot enter raw mode on a closed stream").
+  `bench/std_term_exercise.sh` holds it, plain and `--release`, by
+  driving both builds through a pseudo-terminal from Python's `pty`
+  module. In raw mode a byte arrives without a newline, Ctrl-C arrives as
+  byte 3 and does not raise SIGINT (a control run without raw mode is
+  killed by SIGINT), and CR stays CR. Echo off and the password show
+  nothing typed. The terminal's termios is compared before and after each
+  block, and after a panic in one, with Python's `tcgetattr` and with
+  `stty -g`. The mode bits are checked against Python's own termios
+  constants. `size` follows the TIOCSWINSZ the driver sets, and agrees
+  with `stty size` and `os.get_terminal_size`. A pipe, a file and
+  /dev/null are not terminals. Four refusals are matched by their exact
+  sentence, the binary is checked for any libc terminal symbol, and
+  twelve broken copies of the module are each caught.
+- **`std/yaml`: `derive yaml_serializable`, std/json's derive over YAML.**
+  A struct or class that derives it gets `to_yaml : String`,
+  `self.from_yaml(text) : self` and `initialize(yaml : Any)`, and
+  implements the new `ToYAML` trait: a mapping, a key per field in the
+  order the fields are written, each value read and written as
+  `YAML.read_value` and `YAML.to_any` take its type (Bool, Int32, Int64,
+  UInt8, UInt64, Float64, String, `Any`, an `Array` or a `Hash` of them,
+  keys typed as YAML's are, another derived type, each of them or nil).
+  Unknown keys are passed over, a field with a default keeps it for a
+  missing key or a null its type does not admit, a nilable field holds
+  nil, and merges and aliases fill fields as the parser builds them. It is
+  named for its format because a derive takes a bare name and a second
+  `serializable` was refused as ambiguous: a type that is both writes
+  `derive serializable, yaml_serializable`. `YAML.to_yaml(value)` and
+  `YAML.from_yaml(text, Type)` are the module-level pair. Refused, each
+  with its sentence: a missing key with neither default nor nil (`YAML for
+  Spot has no key "name"`), a document that is not a mapping, a value of
+  another kind, an integer past Int32/UInt8, and a UInt64 past Int64 on
+  the way out, which this reader would bring back as a float. `YAML.dump`
+  now also quotes what a YAML 1.1 reader takes for another kind: PyYAML
+  6.0.3 read the plain `yes` as True, `22:30` as 1350, `0777` as 511 and
+  refused `=`, so the 1.1 booleans, `=` and any string starting with a
+  digit are quoted. Held by `bench/std_yaml_exercise.sh`: records of every
+  field kind, nested, read back equal through YAML and through JSON;
+  Python's `yaml` (SafeLoader and libyaml's CSafeLoader) reads each
+  `to_yaml` to what its `json` reads the same value's `to_json` to; four
+  refusal programs by their exact panic; and eight broken copies of the
+  module caught at the check that names each, the 1.1 one also failing the
+  Python comparison.
+- **`std/file_utils`: `FileUtils.cp`, `cp_r`, `rm_r`, `rm_rf`, `mv` and
+  `compare_file`, the tree operations, in a module of their own.** `cp`
+  copies a file's bytes and its permission bits, into a directory under
+  its own name when the destination is one; `cp_r` copies a tree as
+  `cp -R` does, links made again as links and never followed, each
+  directory given its source's bits after it is filled; `rm_r` removes a
+  tree and never follows a link - a link to a directory outside the tree
+  is removed and that directory left whole, and `link/` is the link, not
+  the directory POSIX resolves it to; `rm_rf` accepts a path that is not
+  there; `mv` is one rename on a device and, across two (`File.info`'s
+  `dev`), a copy then a removal; `compare_file` reads both files a piece
+  at a time up to the first difference. Bytes cross in 64 KiB pieces
+  through one buffer: a 64 MiB copy allocates 64 KiB, and 256 MiB copies
+  in 0.05-0.08 s where coreutils `cp` takes 0.06-0.10 s. Refused by
+  sentence, as `std/file` refuses: a file onto itself, a directory to
+  `cp`, a tree into itself, a FIFO, socket or device in a tree, a move
+  across devices onto what `rename(2)` would refuse, and a move whose
+  source holds a read-only directory - which the copy could not have
+  removed afterwards, leaving the tree in both places. Nothing new is
+  bound: the calls are `std/file`'s, `std/dir`'s and the prelude's.
+  `bench/std_file_utils_exercise.sh` holds it, plain and `--release`:
+  `cp_r` against `shutil.copytree(symlinks=True)` and `filecmp.dircmp`,
+  `compare_file` against `filecmp.cmp` on 26 pairs, a move to /dev/shm
+  against `shutil.move`, twelve refusals by their exact sentence, and
+  eleven broken copies of the module each caught.
+- **`std/system`: the machine's name, the CPUs a process may use, the
+  page size.** `System.hostname`, `System.cpu_count` and
+  `System.page_size`, the other library's `System` plus the page size its
+  runtime keeps to itself. `hostname` is the kernel's node name: `uname`'s
+  on Linux, libSystem's `gethostname` on darwin,
+  `GetComputerNameExW(ComputerNameDnsHostname)` on Windows, read every
+  time. `cpu_count` is the CPUs *this process* may run on, not the
+  machine's: the bits of `sched_getaffinity` on Linux, its buffer grown
+  past 1,024 CPUs when the kernel's mask is larger, and the online list in
+  `/sys/devices/system/cpu/online` only when the call is refused;
+  `hw.activecpu` then `hw.logicalcpu` on darwin; the process affinity mask
+  on Windows, and every group's active processors for a process spread
+  across groups. `page_size` is `AT_PAGESZ` from `/proc/self/auxv` on
+  Linux (16 and 64 KiB aarch64 kernels included), `getpagesize` on darwin,
+  `GetSystemInfo`'s `dwPageSize` on Windows, read once. Linux is raw
+  syscalls, as the rest of std is there. A kernel that answers neither
+  affinity nor the online list, or a Linux without the auxiliary vector,
+  panics naming what was refused rather than answering a made-up count.
+  Held by `bench/std_system_exercise.sh`: Python's `socket.gethostname()`,
+  `len(os.sched_getaffinity(0))` and `os.sysconf('SC_PAGE_SIZE')`, then
+  `uname -n`, `nproc` and `getconf PAGESIZE`, all agreeing plain and
+  `--release`; `taskset -c 0` and `taskset -c 0,2` answered 1 and 2;
+  patched copies proving the online fallback is `os.cpu_count()` and a
+  2-byte first mask is grown to fit; both refusals by their sentence; and
+  seven broken copies of the module caught at the check that names each.
+- **`std/websocket`: RFC 6455, both ends, over std/http.** A server's
+  block answers `WebSocket.upgrade(req) { |ws| ... }`: a version 13
+  handshake is answered 101 with its `Sec-WebSocket-Accept` and the block
+  gets the connection, anything else 400 saying why, another version 426
+  naming 13, and the first of the server's `protocols` the client offered
+  is chosen. `WebSocket.connect("ws://...", headers, protocols)` sends a
+  key of 16 bytes from `Random::Secure` through `HTTP.upgrade` and refuses
+  a 101 whose accept, `Upgrade`, `Connection`, extensions or protocol do
+  not answer what was sent; `wss://` is refused, as TLS is not in 0.x.
+  `send`, `send_binary`, `ping`, `receive` (a `Message`, nil after the
+  close handshake) and `close(code, reason)`, with `close_code`,
+  `close_reason` and `protocol`. Client frames are masked with four fresh
+  bytes each; fragments are reassembled around pings, which are answered,
+  and pongs; the bytes that came with the handshake are read first. What
+  the peer does wrong fails the connection with the code §7.1.7 names - a
+  reserved bit or opcode, a mask where there must be none or none where
+  there must be one, a fragmented or long control frame, a 64-bit length
+  with its high bit, a close code no peer sends: 1002; text or a close
+  reason that is not UTF-8, checked across fragments as they arrive:
+  1007; a message past `max_message` (16 MiB): 1009, refused on the
+  declared length before anything is read or allocated, so a frame
+  claiming 2^62 bytes costs its head. Errors are `WebSocketError` values
+  with that code; what a program does wrong (text that is not UTF-8, a
+  close code 1005, a long ping) panics before anything is written. Two
+  tasks sending on one connection take turns a frame at a time, where the
+  runtime refused the second write ("two fibers writing one fd"). 128 MiB
+  as 16 MiB messages crosses loopback, masked, in 70 ms (`--release`).
+  Held by `bench/std_websocket_exercise.sh`: RFC 6455's own examples byte
+  for byte, every fault above from hand-made frames, the close handshake
+  from both ends, a Python client and a Python server written from the
+  RFC over raw sockets, Node's `WebSocket` client where Node is installed,
+  and twenty-one broken copies of the module caught at the check that
+  names each.
+- **`std/fileserver`: a directory served over std/http.**
+  `FileServer.serve(root, request)` answers GET and HEAD from the files
+  under *root* (405 otherwise): types from std/mime, `Last-Modified` and
+  an `ETag`, 304 for `If-None-Match` or, without it, `If-Modified-Since`,
+  one byte range as 206 (`If-Range` honoured, a suffix range included,
+  past the end 416), a directory's index and a 301 to its slash, and a
+  404 for `..`, an encoded `..`, a NUL or a backslash. The file goes out
+  as it is read, from where the range starts. Held by
+  `bench/std_fileserver_exercise.sh`: Python's `http.client` reads a 300
+  KB file whole and in three ranges across the server's pieces, both
+  304s, a HEAD and a redirect, and eight broken copies are caught.
+- **`std/cookie`: `Cookie` and `CookieJar` (RFC 6265).** `Cookie.parse`
+  reads a `Set-Cookie` line as §5.2 has a user agent read one - any case,
+  unknown attributes passed over, `Expires` in RFC 9110's three date
+  forms, `Max-Age` before it - and `to_set_cookie` writes one, refusing a
+  name that is not a token or a value with a byte a cookie cannot hold.
+  `CookieJar`, handed to `HTTP.request(..., jar:)`, keeps what answers
+  set by domain and path, replaces and removes (`Max-Age=0`) as §5.3
+  says, and sends back what matches a URL, longer paths first, never a
+  `Secure` cookie over plain http; a `Domain` of one label or of another
+  site is refused. Held by `bench/std_cookie_exercise.sh`: Python's
+  `http.cookies` reads every attribute the module writes, Python's
+  `http.cookiejar` keeps and sends back what a std/http server sets
+  with it, and eight broken copies are caught.
+- **`std/http`: bodies are streams both ways, and the client and server
+  do what the web expects of them.** A body was a string, read whole
+  before the block ran and handed out whole, so a download cost its size
+  and an upload could not start before its last byte. Now
+  `HTTP.open(method, url) { |response| ... }` hands the block the answer
+  with its body still on the wire, read a piece at a time from
+  `response.body_io` (a `BodyReader`), and a request's body may be an
+  `IyiIO`, sent chunked as it is read. `Server.serve(listener,
+  stream_bodies: true)` hands the block a request whose body it reads as
+  it arrives - what it leaves unread is read past up to a megabyte, past
+  which the connection is closed - and an answer may be an `IyiIO`
+  copied out and closed, or `Response.stream { |w| ... }`, whose writes go
+  out as chunks as they are made (to the close for an HTTP/1.0 client).
+  `Response.upgrade(headers) { |socket, leftover| ... }` answers 101 and
+  hands the connection over, and `HTTP.upgrade(url, protocol)` is the
+  client's side; std/websocket is built on the two. What the other end
+  does wrong is an `HTTPError` value beside `Cancelled` and
+  `SocketError` - a malformed head, a body cut short, a broken chunk, a
+  corrupt gzip - with the same sentences `.or_panic` printed before.
+  The client asks for `gzip, deflate` and undoes either as it arrives
+  (deflate in zlib's envelope, or bare, told apart by zlib's header
+  check); `Server.serve(compress: true)` sends gzip to a client that
+  takes it (`q=0` refuses, `*` accepts), for types std/mime calls
+  compressible, past a kilobyte, a stream a write at a time, with `Vary:
+  Accept-Encoding`. Redirects are followed as RFC 9110 §15.4 has them,
+  ten by default: 301 and 302 make a POST a GET, 303 anything but a HEAD,
+  307 and 308 keep the method and body (a stream that cannot be sent
+  again hands the 3xx back), and `Authorization`, `Proxy-Authorization`
+  and `Cookie` do not cross to another host; `jar:` takes a
+  `CookieStore` (std/cookie's `CookieJar`). `Request#form` reads a
+  urlencoded body after the query; `Request#multipart` reads
+  `multipart/form-data` a part at a time as it arrives, a boundary split
+  across reads included, and `MultipartBuilder` writes one under a
+  boundary made from the parts' SHA-1, so none of them holds it and the
+  same fields make the same body. The module still reaches what
+  std/socket reaches and nothing of its own - no file, and no clock,
+  environment or randomness past a name lookup's - and the gate checks
+  its imports say so: cookies are std/cookie's and files
+  std/fileserver's, since each needs what std/http does not. A server's
+  connection now reads into one buffer of its own, so the socket is
+  never asked for a string per read; a chunk size whose CRLF came in the
+  next read is found where the buffer moved it, where the body was read
+  as cut short. A connection handed over by an upgrade is closed with
+  the listener, where `serve` waited for its client to leave. Held by
+  `bench/std_http_exercise.sh`: five new sections, Python's
+  `http.client`, `gzip`, `zlib` and `email` package against the server,
+  the client against a Python server sending gzip, deflate both ways, a
+  303 and a chunked upload, and thirteen more broken copies of the module
+  caught; the socket's own small-read allocation, which the server no
+  longer exercises, is held by `bench/socket_exercise.sh` now.
+- **`std/mime`: media types by extension, and what goes with them.**
+  `MIME.from_extension("a.svg")` answers `image/svg+xml`, `extensions`
+  the other way, `compressible?` whether gzip is worth it, `with_charset`
+  adds `charset=utf-8` to text, JSON, JavaScript and XML, and `parse?`
+  reads a `Content-Type` as RFC 9110 §8.3.1 has it. The table is written
+  out, not read from the machine, so a server answers the same type
+  everywhere; `bench/std_mime_exercise.sh` checks it against Python's
+  `mimetypes`, five differences named and kept.
+- **`std/compress`: `Inflater` and `Deflater`, a stream a piece at a
+  time.** `Inflater.new(Envelope::Gzip) { next_bytes }` reads compressed
+  bytes from its block only when it has none left, and `read(max)`
+  answers what has been decoded so far - a 32 KiB window and what waits
+  to be read, whatever the stream's size; a corrupt stream, a bad
+  checksum or one that ends early is a `CompressError` value, after which
+  every read answers the same. `Deflater#compress(piece)` answers whole
+  blocks ending in zlib's sync flush, so what has been written decodes
+  without waiting for more, and `finish` writes the trailer. The
+  one-shot `Deflate`, `Zlib` and `Gzip` decoders are the same decoder
+  over a whole string, keeping their panics' sentences, and got faster:
+  20 MB of Python's gzip from 224 to 187 ms (75 to 62 ms with
+  `--release`). A gzip header's own checksum (FHCRC) is checked now; it
+  was skipped. std/digest's `CRC32.update` and `Adler32.update` carry a
+  checksum across pieces, as zlib's do.
+- **`std/mutex`: `Mutex(T)`, and the compiler checks every block that
+  reaches the value behind it.** SPEC.md III.4.4 named `Mutex(T)` as the
+  escape `Share` leaves for state that has to be shared and changed, and
+  it was an undefined constant. Now `Mutex.new { [] of Int32 }` makes
+  one, and `lock { |a| ... }`, `get { |a| a.size }` and `update { |n| n
+  + 1 }` run their block with the lock held, answering `Cancelled` when
+  the waiting task is cancelled. `Mutex(Array(Int32))` is Share although
+  `Array(Int32)` is not - a new `@[Share(owns: true)]` that travels in an
+  artifact as itself - so `IyiThread.start`'s block may capture it. That
+  is sound because only the blocks reach the value: its value comes from
+  the constructor's block (the one that takes a value is private), every
+  such block may capture only Share values (`self`, constants and class
+  variables included), and what `get` answers must be Share. A captured
+  array, a value handed in from outside, a nested lock reaching the outer
+  value and `m.get { |a| a }` are compile errors naming the variable or
+  the answer. A waiter spins briefly when the holder is on another
+  thread, yields to its own thread's other tasks, then sleeps a
+  millisecond at a time; a thread with nothing else to run sleeps in the
+  kernel until the release (a futex on Linux, a semaphore on Windows). A
+  task locking what it holds, and a holder parked where nothing can wake
+  it, panic saying so; a panicking block releases the lock. The compiler's
+  advice for a captured cell two threads write now names `Mutex` beside
+  `Atomic`. Held by `bench/std_mutex_exercise.sh`: five threads and
+  500,000 locked increments of two cells each, none lost or torn; twenty
+  tasks parking inside the lock; a thread asleep in the kernel until a
+  release 150 ms later; a cancelled waiter; seven programs the compiler
+  refuses; and four broken copies of the module caught, one by hanging.
+  `spec/compiler/semantic/iyi_spec.cr` and `iyimod_spec.cr` hold the
+  check and the marker across an artifact.
+- **`Time` has time zones: `Time::Location`, read from the machine's own
+  zone database.** A `Time` was a UTC instant and a zone was an offset
+  passed by hand. Now a `Time` carries the `Location` it is read in:
+  `Location.load("Europe/Istanbul")` reads the IANA database's TZif file
+  (RFC 8536, versions 1 to 4, `$ZONEINFO` then `/usr/share/zoneinfo`,
+  `/usr/share/lib/zoneinfo` and `/etc/zoneinfo`); `Location.local` is
+  `TZ` (a name, a path, or a POSIX rule such as
+  `CET-1CEST,M3.5.0,M10.5.0/3`) or `/etc/localtime`, and on Windows the
+  system's rule from `GetTimeZoneInformation`; `Location.fixed(19800)`,
+  `Location::UTC` and `Location.read_zoneinfo(name, bytes)` complete it.
+  `Time.local`, `Time.local(y, m, d, ..., location:)`, `time.in(loc)`,
+  `to_utc`, `to_local`, `offset`, `zone`, `utc?` and `local?` are new, and
+  the date, clock, `to_s`, `inspect`, `to_rfc3339`, `to_rfc2822` and `%Z`
+  read the time in its location (`2024-07-01 14:00:00 +02:00`, `CEST`),
+  while `==`, `<=>` and `hash` stay the instant's. A slim file's future
+  is its footer's rule, so 2099 reads as 2024 does. A wall time a change
+  skips is read past the gap and one it repeats as the earlier instant,
+  as Python's `fold=0` and Go read them; `shift(days:)` moves the date on
+  the wall clock and a `Span` stays exact. `Time.parse(text, pattern,
+  location)`, `Time.parse_local` and `Time::Format.new(pattern, location)`
+  read a text with no zone on that location's clock. A missing zone or a
+  malformed file is a `LocationError` value naming what was wrong, never
+  a panic, and a header that counts more than any zone holds is refused
+  before anything is allocated. Every existing UTC result is unchanged.
+  Held by `bench/std_time_exercise.sh`: TZif files built by the exercise,
+  so it runs the same on every machine; 572,040 offsets, abbreviations,
+  summer flags and wall-clock readings over fifteen zones (Lord Howe's
+  half-hour summer, Dublin's negative one, Apia's skipped day among
+  them) identical to Python's zoneinfo; twelve `TZ` settings hour by
+  hour through 2024 and 2025 identical to glibc; and seven broken copies
+  of the module caught. A `Time` stays shareable across tasks and
+  threads. Reading `TZ` and `ZONEINFO` reaches the C runtime's `environ`,
+  as std/env does; no library is added.
+- **`std/digest` has SHA-224, SHA-384 and SHA-512, and every hash takes
+  its data in pieces.** It had MD5, SHA-1 and SHA-256, each a single
+  `hexdigest(String)`. Now the six are one `Digest`:
+  `SHA512.hexdigest(data)` and `hash_bytes(data)` as before, taking a
+  `String` or an `Array(UInt8)`, or `SHA512.new`, then `update`, then
+  `final`/`hexfinal`, with `reset`, `dup`, `final(dst)` writing into an
+  array the caller holds, and `copy_from` taking another digest's state
+  with nothing allocated. A second `final`, an `update` after one, a
+  buffer too short and another algorithm's state are each refused by
+  name. Each digest compresses whole blocks straight from the caller's
+  bytes into a state allocated once, where every block had allocated its
+  own schedule and the whole message was copied padded first. 8 MB hashes
+  2.5 to 4 times faster (`--release`: SHA-256 53 ms to 21, SHA-1 50 to 14,
+  MD5 28 to 10). Held by `bench/std_digest_exercise.sh`: FIPS 180-4's
+  messages, a million a's, every length from 0 to 300 bytes for all six
+  against Python's hashlib, 1,280 bytes fed in uneven pieces, five
+  refusals, and four broken copies of the module, each caught at the
+  check that names it.
+- **`std/crypto`: HMAC, HKDF, PBKDF2 and a constant-time compare.**
+  `HMAC.hexdigest(SHA256, key, message)`, or `HMAC.new(SHA256, key)` with
+  `update`, `final` and `reset`; `HKDF.extract`, `expand` and `derive`;
+  `PBKDF2.derive(SHA256, password, salt, iterations, length)`; and
+  `Subtle.constant_time_compare(a, b)`, which reads every byte and so
+  takes the same time wherever two MACs differ. Any of the six hashes can
+  be named. The keyed state is computed once and copied back on `reset`,
+  so PBKDF2 allocates nothing per round: 600,000 rounds of HMAC-SHA256
+  take 231 ms `--release`, against 142 ms for Python's hashlib over
+  OpenSSL. Held by `bench/std_crypto_exercise.sh`: RFC 4231's and 2202's
+  HMAC cases over all six hashes, RFC 5869's four HKDF cases, RFC 6070's
+  PBKDF2 cases and SHA-2 ones from Python, seven refusals, and six broken
+  copies of the module. No cipher, signature or TLS yet: these are what
+  a TLS 1.3 written in iyi would start from.
+- **A program connects by host name, through iyi's own resolver.**
+  `IyiSocket.connect("example.com", 80)` and
+  `HTTP.get("http://example.com/")` panicked with "cannot resolve address"
+  for every name but `localhost`, because getaddrinfo would have brought
+  in libc.so and NSS. `std/dns` now reads `/etc/hosts` and
+  `/etc/resolv.conf` (`nameserver`, `search`, `domain`, `ndots`,
+  `timeout`, `attempts`), and on Windows the registry through advapi32,
+  so no new DLL. `std/socket`'s `Resolver` asks over UDP with a random ID
+  from `Random::Secure`, on a socket connected to the server; it ignores
+  answers whose ID or question do not match, asks again over TCP when TC
+  is set, follows at most 8 CNAMEs, and refuses compression loops and
+  out-of-range pointers. NXDOMAIN, SERVFAIL, timeout and a malformed
+  answer are separate `DnsError` questions, and a name that does not
+  resolve comes back from `connect` as a `SocketError` naming the host.
+  Held by `bench/std_dns_exercise.sh`: a name server inside the program
+  answers 24 sections, plain and `--release`, and eleven broken copies of
+  the resolver are each caught. There is no EDNS(0), answer cache, DNSSEC
+  or reverse lookup, and addresses are tried one after another rather
+  than raced.
+- **`std/regex` has groups, flags and Unicode, and stays linear.** It
+  matched bytes with no capture groups and refused inline flags, `\p{..}`
+  and flagged literals. Now the Pike VM reads UTF-8 code points and gives
+  each thread its own capture positions, so `Regex#match` returns a
+  `Regex::MatchData` (`[]`, names, `begin`/`end` in characters,
+  `byte_begin`/`byte_end` in bytes, `pre_match`, `captures`,
+  `named_captures`). `String#sub`/`gsub` read `\1` and `\k<name>`, and
+  `String#scan`, `=~`, `index` and `case … when /x/` work.
+  `Regex::Options` (`IGNORE_CASE` with Unicode simple folding, `MULTILINE`
+  as the other library means it, `DOTALL`, `EXTENDED`) and RE2's
+  `(?imsxU)` are supported, as are `\p{L}`…`\p{Greek}` over every general
+  category and script, `Regex.escape` and `Regex.union`. `/a/i`, `/a/m`
+  and `/a/x` compile to `Regex.compile` with those options, in their own
+  constant. `(a|a)*b` against 30,000 a's answers in about 0.1 s.
+  Backreferences, lookaround and the other non-regular constructs are
+  still refused by name, and there is no `$~`. Held by
+  `bench/std_regex_exercise.sh`, checked against Python's `re` for every
+  group span on 1,490 more cases plus a 20-second clock with its failure
+  proof, and by `spec/compiler/normalize/regex_spec.cr`. The price is on
+  the general path only: three VM-bound patterns over 8 MB take 0.68 s
+  where they took 0.45 s (`--release`); the literal and run fast paths
+  are unchanged.
+- **An array answers for its spans, and a table for everything a program
+  asks of it, without an import.** `Array` had `[]` for one index and
+  nothing for part of itself: `a[1, 2]`, `a[1..]`, `a[..-2]`, their `[]?`
+  and `[]=` forms, `truncate`, `push`, `unshift`, `pop?`, `first?`,
+  `last(n)`, `flatten`, `transpose`, `-`, `&`, `|`, `*` and `uniq` by a
+  key are the prelude's now, with the other library's edges - a start of
+  `size` is the empty tail, one past it is refused naming the index, an
+  end past the last stops at it. `Hash` had thirteen methods; it has
+  `fetch`, `dig`, `merge` and `merge_in_place`, `update`,
+  `transform_values`/`transform_keys`, `select`/`reject` and their
+  `_in_place` forms, `each_key`/`each_value`, `has_value?`, `key_for`,
+  `invert`, `compact`, `clear`, `dup`, `first_key?`, `shift`,
+  `values_at`, `put_if_absent`, `delete` with a block,
+  `count`/`any?`/`all?`/`sum`/`map` over its pairs and `sorted_by`.
+  `Hash` stays out of `Enumerable`, whose `each` hands on one element
+  where every table block takes a key and a value. Held by
+  `bench/collections_exercise.sh`, which drives every refusal and proves
+  every new section can fail.
+- **`std/time` formats and parses with the other library's strftime
+  directives, and reads every HTTP date RFC 9110 names.** The module could
+  only write and read RFC 3339. `Time::Format`, `Time#to_s(format,
+  offset)`, `Time.parse`/`parse_utc` and the named formats `HTTP_DATE`,
+  `RFC_2822`, `RFC_3339` and `ISO_8601_DATE`/`_DATE_TIME`/`_TIME` now
+  write an instant at a fixed offset and read it back. They take every
+  directive the other library does, plus `-`, `_`, `0` and `^` on every
+  number or name. `HTTP_DATE` reads the IMF-fixdate, RFC 850 (two-digit
+  years by the 50-year rule) and asctime. Bad text comes back as a
+  `TimeParseError` that names the byte and what was wrong, never a
+  panic: a month name that is not one, a day the month lacks, a field out
+  of range, an unknown zone and trailing text. `calendar_week`,
+  `week_date` and `shift(months:)` (clamped to the month's last day) come
+  with it. `parse_rfc3339` reads through the same parser and keeps its
+  sentences. Held by `bench/std_time_exercise.sh`: every directive
+  against fixed instants, 75,200 round trips, the three HTTP forms, 54
+  refusals, plain and `--release`, and eight broken copies of the module
+  each caught. There is still no `Time::Location`: an offset is seconds
+  east of UTC.
+- **`Random::Secure` answers every byte from the operating system's
+  entropy.** `std/random` only had a PCG generator. `Random::Secure` reads
+  `getrandom` by syscall on Linux (short reads and EINTR asked again,
+  `/dev/urandom` on a kernel without it), `arc4random_buf` on darwin,
+  `RtlGenRandom` on Windows and WASI's `random_get` on wasm32, and
+  buffers nothing a `fork` could copy. It is a `Random`, so `rand`, `hex`,
+  `base64`, `urlsafe_base64` and `random_bytes` work on it and at class
+  level (`Random::Secure.hex`). `Random` itself draws `Int64`, `UInt64`
+  and `UInt32` bounds, `Int32`/`Int64`/`Float64` ranges and `Float64`
+  bounds without modulo bias, and a seeded generator answers the other
+  library's numbers. `bench/std_random_exercise.sh` holds 10,000 distinct
+  draws, exact lengths and even byte counts, measures bias at 3·2^30 and
+  3·2^62, and proves a silent source, a dropped rejection and a dropped
+  inclusive end are each caught.
+- **`UUID.v7`: the time in milliseconds, then random bits, each UUID
+  sorting after the last.** RFC 9562's database key was missing. The 12
+  bits after the version are a counter that starts at a random 11 bits
+  each millisecond, so UUIDs made in the same millisecond still sort in
+  the order they were made; past 4,095 the stamp moves on early. The
+  exercise checks version, variant, the stamp against the clock and order
+  over 10,000 UUIDs, and proves a frozen counter is caught.
+- **`File.open` takes every mode the other library does - `r`, `w`, `a`,
+  `r+`, `w+`, `a+`, each with an optional `b` - and a `perm` for the file
+  it creates.** It accepted only `"r"` and `"w"`, so a program could not
+  append to a log. Append is the kernel's own: O_APPEND on Linux and
+  darwin, and on Windows a handle with FILE_APPEND_DATA but no
+  FILE_WRITE_DATA, so every write lands at the end, even after a seek,
+  and concurrent writers do not overwrite each other. `r+` writes in
+  place without truncating, `w+` truncates and reads back, and `a+` reads
+  from the start and appends at the end. `perm` (default 0o644, less the
+  umask) applies only to a file the open creates; on Windows a `perm`
+  without the owner's write bit makes the file read-only. Any other mode
+  is refused with a sentence that names the valid ones. In the `+` modes,
+  `seek` between a read and a write, as C's stdio asks. Held by
+  `bench/std_file_exercise.sh`'s "open modes" section, plain and
+  `--release`, with six broken copies each caught.
+- **A failing test says what it expected, what came, and where.**
+  `assert(a == b)` said only "assertion failed", so the first thing a
+  failing test asked of its reader was a `puts` and another run. The
+  prelude now has, with no import, `assert_eq`/`assert_ne` (both values
+  via `inspect`, plus the first differing line of a multi-line text),
+  `assert_nil`, `assert_in_delta`, `assert_includes`, `assert_error(T) { }`
+  and `assert_ok { }` for error unions (each giving the narrowed value
+  back), and `assert_panics(containing) { }`, which catches the panic as
+  the `Panicked` value of a task it runs. `test "name" { }` runs each case
+  as its own task, prints `ok -`/`FAIL -`, carries on past a failure and
+  exits 1 at the end if any case failed, which is still the only thing
+  `iyi test` reads. A caught panic still prints its `iyi: panic:` line.
+  `bench/assertions_exercise.sh` drives each assertion both ways, plain
+  and `--release`, checks the site and exit status from outside the
+  program, and proves every check can fail against 16 patched copies of
+  the prelude; `bench/test_verb.sh` holds the verb's side.
+
 ### Fixed
+
+- **A travelling body whose argument expanded to statements crosses an
+  `.iyimod` as source that parses.** A body travels printed after the
+  normalizer has expanded it, and `.or_panic` and `!` expand to an
+  assignment and an `if`. As an argument -
+  `twice(parse(text).or_panic, type)` in a generic method - the two were
+  printed bare inside the parentheses and the consumer stopped at
+  "expecting token ')', not 'if'". Wherever the printer writes an
+  expression (an argument, a named argument, a literal's element, a
+  condition, an assigned or returned value), a sequence of statements,
+  `return`/`break`/`next` and `a, b = 1, 2` are now written in a form the
+  parser reads there: in parentheses, or in `begin ... end` when a
+  multiple assignment is among them. Held by `spec/compiler/iyimod_spec.cr`
+  and `spec/compiler/parser/to_s_spec.cr`.
+- **An alias may name any type of its module through an artifact.** An
+  artifact declares a module's types in the order of their names, and an
+  overload restricted to an alias resolves the alias when the next
+  overload is added. `std/toml`'s `Any` (`alias Type = ... | TOMLDateTime
+  | ...` beside two `initialize`s) came before `TOMLDateTime`, and the
+  consumer said "undefined constant TOMLDateTime", qualified or not. The
+  types an alias names - its own or one declared inside a type - are now
+  declared before the type that holds it. Held by
+  `spec/compiler/iyimod_spec.cr`.
+- **The stricter overload wins whatever the declaration order and
+  whatever unrelated overloads stand beside it.** With `pick(Int32)`,
+  `pick(Array(UInt8))` and `pick(Array(T)) forall T` declared in that
+  order, `pick([1_u8])` chose `Array(T)`; without the `Int32` overload, or
+  in the reverse order, it chose `Array(UInt8)`. A restriction holding a
+  free variable (`Array(T)`) counted as stricter than any type it could
+  not relate to, `Int32` included, so `Array(T)` was put in front of
+  `Int32` - and so in front of the `Array(UInt8)` that came after it. A
+  generic restriction is now stricter than a type exactly when its generic
+  type is (`Object`, `Indexable`: yes; `Int32`, `Bytes`: no), with or
+  without `-Dpreview_overload_order`. Crystal 1.21 makes the same choice.
+  Held by `spec/compiler/semantic/restrictions_spec.cr`: three overloads in
+  all six orders, flat and nested deeper (`Array(Array(T))`,
+  `Foo(Array(T))`).
+- **A large allocation begins on 16 bytes, so `--release` can read a
+  `UInt128` in it.** A small chunk of a size that is a multiple of 16 was
+  16-aligned, and the collector's large objects - past the top size class,
+  a mapping each - began 8 bytes past a boundary: the node's two words and
+  the header word put the object at 24. A struct holding a `UInt128` is
+  16-aligned to LLVM, and an optimised build read one out of an `Array` of
+  65,536 such structs with an aligned load (`movaps`) and died of SIGSEGV;
+  the plain build, which loads unaligned, ran. A word of padding puts
+  every large object at 32. Held by `bench/arena_exercise.sh`: allocations
+  of 32 bytes to 8 MiB, each a multiple of 16, and each grown, are
+  16-aligned, and the padding taken out is caught at that check.
+
+- **A program on darwin reads standard input redirected from a file to its
+  end, and stops.** The runtime waits for a stream before it reads it, and
+  darwin's wait is kqueue's. kqueue takes a regular file where Linux's
+  epoll refuses one, and its EVFILT_READ fires only while the file's
+  offset is short of the end. So `./prog < input.txt` read every line,
+  then waited for the end of input forever. CI's crypto gates feed their
+  oracle programs this way, and two of them held a darwin runner for an
+  hour each until the job's limit. darwin now asks `fstat64` whether
+  standard input is a regular file and reads one without the wait, which
+  is what epoll's refusal comes to on Linux. `fstat64` joins darwin's
+  floor with that reason (`bench/dependency_floor.sh`), and std/file's
+  unused declaration of it is gone, since a symbol takes one signature.
+  Held by `bench/std_io_exercise.sh`: 2000 lines read to their end from
+  a file and from a pipe, under a timeout.
+
+- **An ECDSA signature whose r or s is tagged ENUMERATED is refused.**
+  `DerValue#integer` and `integer_bytes` took an ENUMERATED (0x0a) as an
+  INTEGER (0x02), since the two are written alike. So std/ecdsa verified
+  a signature with one bit of a tag flipped, where DER, OpenSSL and
+  Python's `cryptography` refuse it. r and s were the signer's own, so
+  nothing was forged, but one signature had two encodings that verified.
+  rsa's and x509's integers were read the same way. An ENUMERATED is read
+  by `enumerated` and `enumerated_bytes` now, held to the same
+  fewest-bytes rule. Found by the ecdsa gate's 600 random signatures
+  against Python, which met it about once a run once CI had
+  `cryptography`: 6 in 120,000 cases before, none after. Held by
+  `bench/std_asn1_exercise.sh` (an ENUMERATED asked as an INTEGER is
+  refused; a copy that takes one is caught) and by two fixed signatures
+  in `bench/std_ecdsa_exercise.iyi`, r and then s tagged 0x0a.
+- **std/user on darwin answers the groups of an account whose gid is past
+  2^31, and on Windows its lookups build from std/user's artifact.**
+  darwin's `getgrouplist` takes a gid as an `int`, and the module checked
+  `nobody`'s 4294967294 into one, which panics, then read each group
+  back through a checked conversion. The bits are reinterpreted both ways
+  now. On Windows the lookups that panic were a panic and nothing else.
+  A method's machine code is named by the type its body has, so their
+  symbols were NoReturn's, and a program built from the artifact looked
+  for the declared type's (`User#group_ids`: "its object code has no
+  symbol for it"). They panic under a condition that always holds now
+  and are typed as declared. Held by `bench/std_user_exercise.sh` against
+  Python on darwin and by `bench/std_exercise.sh`'s from-artifacts run on
+  Windows. Neither had run in CI before the shards.
+- **`File.open` on Windows truncates when asked to without creating.** The
+  open mapped "truncate, don't create" to `OPEN_EXISTING` and kept the
+  file's bytes. No mode asks for that today, but the mapping was the
+  floor's and is POSIX's now: `TRUNCATE_EXISTING`. The proof in
+  `bench/std_file_exercise.sh` that an `r+` which truncates is caught now
+  catches it on Windows too.
+- **`$SSL_CERT_DIR` is a list as `PATH` is on Windows, `;`-separated.**
+  std/system_roots split it on `:`, and `C:/...` came apart at the drive.
+- **The std gates hold on darwin and Windows, where they had not run.**
+  The std job ran out of time before reaching most module exercises on
+  those two platforms, so the first sharded run found what had always
+  been there:
+  - csv's `case` inside `$(...)` was a syntax error to macOS's bash 3.2;
+  - mime's oracle read the machine's own types (`mimetypes.init([])`
+    still loads them) and newer Pythons' table; it is held to Python's
+    built-in table now, with 3.13's and 3.14's moves allowed by name;
+  - Python wrote the string scanner's programs and zip's expectations
+    with `\r\n` in Windows' text mode;
+  - sse timed a 50 ms wait with Windows' 15.6 ms clock;
+  - system read the page size from a `sysconf` Windows' Python lacks;
+  - tar set a link's time with `follow_symlinks=False`, which Windows
+    has not;
+  - tar printed a path that differs each run, and sse the reconnect
+    delays it measured, so their source and artifact runs disagreed;
+  - darwin's `link(2)` follows a symbolic link, which tar's proof now
+    expects there;
+  - zip expected the flags a writing ZipFile listed rather than those it
+    wrote;
+  - user's Python oracle overflowed on `nobody`'s gid, and user asked
+    Windows for sections it is not asked; under root in one group, its
+    check of the first group indexed an empty list, and its proof that
+    group_ids reads `/etc/group` had nothing to see;
+  - term's and file_utils' proofs patched an arm Windows does not
+    compile, or asked root for a refusal root never meets;
+  - file_utils compared a link's target as spelled, and Windows' Python
+    spells `b/c` as `b\c`;
+  - tar ran Git's GNU tar on Windows, which the Python oracle then
+    reached as System32's bsdtar; GNU tar's fixtures are not written
+    there;
+  - tar's Python wrote its `.expect` files with `\r\n`, and its proof of
+    the drive-path rule is caught there by the slip through the
+    exercise's own `C:` directory, which comes first;
+  - file_utils asked Windows to refuse a FIFO, which Git's shell
+    emulates as a plain file;
+  - websocket's proof that two writers wait for each other expected the
+    runtime's refusal of a second parked writer, where darwin's socket
+    buffers take the second write and split the first frame instead,
+    which the 16 MiB check names;
+  - tls made its certificates with macOS's `openssl`, which is LibreSSL
+    and adds its configuration's `v3_ca` to `-addext`: a CA with
+    basicConstraints twice, which x509 rightly refused. Homebrew's OpenSSL
+    3 is asked where it is installed, and every certificate comes from a
+    configuration the gate writes;
+  - file_utils' proof of a tree copied into itself expected the stack to
+    run out, where darwin's 1024-byte paths run out first and the
+    exercise's own check names the break;
+  - term's driver stopped on an ENOTTY from a terminal a broken copy had
+    left behind on darwin, before the check that names it;
+  - the concurrency and runtime gates hold the runtime's darwin symbols
+    as an exact list, which now carries `fstat64`.
+
+- **A program builds from artifacts whose code reads a class variable
+  through a subclassed owner, or asks a value its class.** Both go through
+  functions the main module defines - `~Owner+::name:read`, which
+  dispatches on the receiver's type, and `~metaclass` - and the main
+  module never travels, so the consumer defined them only when its own
+  code made the same read. `import std/password::{Scrypt}` and one
+  `Scrypt.derive` linked from artifacts ended on "undefined reference to
+  `~Std::Digest::SHA256+::k:read`", because `SHA224 < SHA256` makes
+  `SHA256`'s round constants a virtual read, and on `~metaclass` from
+  std/digest's `#{self.class}`. An artifact now records a virtual read as
+  `Owner+::@@name` (`+.class` for a class method's), the consumer defines
+  that read over its own subclasses, and a build that links artifacts
+  defines `~metaclass` whatever its own code asked. Held by the
+  `virtual_class_var` case of `bench/samples_roundtrip.sh`, which failed
+  to link on both names before.
+- **`UUID.v4` draws its bits from the operating system, so a UUID can no
+  longer be predicted from another.** It was sixteen outputs of a fresh
+  PCG generator: every UUID was a function of 127 bits of generator state
+  that PCG makes no promise to hide, where version 4 promises 122
+  unpredictable bits, and a UUID handed out as a token said enough to
+  guess the next. It takes its bytes from `Random::Secure` now.
+  `bench/std_uuid_exercise.sh` proves v4 stays unique with every
+  `Random.new` seeded alike, and that a PCG-drawn v4 is caught.
 
 - **A trait value cast to a union of some of its implementers reads the
   right value.** With `Val` implemented by `Nil`, `String` and `Int64`,
@@ -48,8 +2639,95 @@
   The walks stop at a module with a `module` header of its own. Held by
   `spec/compiler/iyimod_spec.cr`. (#124)
 
-- Preserve `@[OnTape]` on exported and nested types in `.iyimod` artifacts,
-  so consumers retain tape field checks and reject lifetime escapes.
+### Changed
+
+- **std/big: `pow_mod` by Montgomery multiplication for an odd modulus,
+  `pow_mod_secret` for a private exponent, and a division of one pass
+  for a one-limb quotient.** An odd modulus - RSA's, Diffie-Hellman's,
+  a prime field's - goes to Montgomery multiplication on 64-bit words
+  (products in `UInt128`, CIOS for a product, a squaring that takes each
+  product off the diagonal once) with a sliding window of up to six bits; an
+  even one keeps square-and-multiply, reading the exponent's bits in
+  place instead of copying it a bit at a time. A 2048-bit modulus and
+  exponent took 19.0 ms in a --release build and take 2.5, where
+  Python 3.14's `pow` takes 13.7 (3072 bits: 63.2, 8.5 and 45.4; 4096:
+  168.7, 20.6 and 102.1). The base enters Montgomery form by one
+  division, which took a 2048-bit RSA check (e = 65537) from 36 us with
+  R^2 squared out to 22. `BigInt#pow_mod_secret(exp, mod)` is a fixed
+  window over as many bits as the longer of exponent and modulus, every
+  table entry read for every window and the one wanted kept by a mask,
+  the final subtraction masked too; LLVM turned the first masks into
+  branches, so each is xored with a zero read by an atomic load, and the
+  release assembly shows the and and the or in both loops. It refuses an
+  even modulus by sentence. `divmod` takes a quotient under 2^32 - each
+  step of Euclid's algorithm - from the operands' top bits in one pass
+  where Algorithm D copied both and the remainder twice: 2048 bits over
+  2046 took 0.60 us and take 0.15. Together a 2048-bit RSA signature by
+  CRT, blinded and its blinding inverse Euclid's, took 9.4 ms and takes
+  1.3 (3072 bits: 24.1 and 3.4; 4096: 69.1 and 7.4), its check 150 us
+  and 45. std/rsa's `RsaPrivateKey` signs its two CRT halves through
+  `pow_mod_secret`, so no branch or table read of their exponentiation
+  follows dp's or dq's bits, for about a tenth more than `pow_mod`
+  (2048 bits: 1.25 to 1.32 ms against 1.12 to 1.16).
+- **std/zip reads bzip2, LZMA, Zstandard and xz entries, and writes
+  bzip2 and Zstandard.** `ZipEntryReader` reads methods 12, 14, 93 and
+  95 through `Bzip2Reader`, std/xz's .lzma decoder, `ZstdReader` and
+  `XzReader`, streamed as deflate is, with the CRC-32 and size checked
+  as before. An LZMA entry's own header (APPNOTE 5.8.8) is turned into
+  the 13 bytes of a .lzma header, so std/xz is unchanged: the size is
+  the directory's, or "unknown" when bit 1 says an end marker ends the
+  data, and that marker must then be there. A Zstandard frame may name a
+  window up to 512 MiB and an LZMA or xz stream a dictionary up to
+  1.5 GiB, past the readers' defaults: both grow their buffers with the
+  output, which is held to the entry's declared size, and Python's
+  level-22 entries name 128 MiB. `ZipMethod::Bzip2` and
+  `ZipMethod::Zstandard` on `ZipWriter#add(name, String)` write
+  `Bzip2.compress` and `Zstd.compress` of the whole entry, with version
+  4.6 and 6.3 needed to extract; asked of a streamed entry they are a
+  panic, as those compressors take a whole input. Deflate64, PPMd and the
+  other methods are still refused by name, the sentence now listing six.
+  In a --release build, 50 MB of text Python 3.14 wrote reads in 300 ms
+  from bzip2 (Python 297), 85 ms from LZMA (57), 64 ms from Zstandard
+  (32).
+
+- **A package that speaks HTTP reaches what std/tls does.** std/http
+  imports std/tls for `https://`, so `iyi mod reach` counts what reading
+  the system's trusted roots needs (files, on Linux) and the entropy of a
+  handshake. A `require ... reaches` line written for a package over
+  std/http names those too now, or `iyi get` refuses it. Go's `net/http`
+  carries `crypto/tls` the same way.
+
+- **The std modules' exercises run in shards beside the foundation, on
+  Linux, Windows and darwin.** One after another inside the std job they
+  outgrew its hour: 39 of 91 had run at sixty minutes, std/http's proofs
+  alone taking thirteen, and the Windows and darwin jobs were cut at their
+  ninety and hundred and twenty the same way. `bench/std_siblings.sh K N`
+  runs every N-th exercise from the K-th, interleaved so the slow ones
+  spread out; `bench/std_exercise.sh` runs it whole after its own
+  sections unless `STD_SIBLINGS=0`, which is how the three jobs run the
+  foundation while `std-siblings` (three shards), `windows-std-siblings`
+  and `darwin-std-siblings` (four each) run the rest side by side. The
+  release job waits on all of them.
+
+- **Some answers change.** `Hash#==` compares pairs in any order and
+  `Hash#hash` follows the contents, where both were the object's
+  identity, so `{"a" => 1} == {"a" => 1}` is true and an equal table finds
+  a key. In `std/regex`, `.`, negated classes, `\D`/`\W`/`\S` and `\P`
+  consume a whole UTF-8 character rather than a byte, `\xHH` is the code
+  point U+00HH, a class may hold non-ASCII, and a pattern that is not
+  valid UTF-8 is refused; `String#gsub(regex, String)` reads `\0`-`\9`,
+  `\k<name>` and `\\` in its replacement, as the other library's does,
+  where it inserted them as written (`Regex#replace` still does), and
+  `String#gsub(regex, &)` yields the text and its `MatchData`.
+  `IyiSocket.connect` given a host name resolves it, and a name that does
+  not resolve is a returned `SocketError` rather than a panic.
+  `File.open(path, "a")` appends where it was refused.
+- **New prelude names.** `assert_eq`, `assert_ne`, `assert_nil`,
+  `assert_in_delta`, `assert_includes`, `assert_error`, `assert_ok`,
+  `assert_panics` and `test(name, &)` are the prelude's, so a script
+  without a `module` line that defines one of the same shape is refused
+  by the rule against redefining a prelude method; a file with a `module`
+  line is unaffected.
 
 ## 0.17.0 — 2026-10-14
 
@@ -19891,7 +22569,7 @@ the same flags.
 
 - **`samples/iyi/calc`: a language, in the language.** Three modules — a
   scanner, a parser and an evaluator — reading a program from standard input,
-  written against iyi's own 20,325-line library and nothing else. Every other
+  written against iyi's own 21,567-line library and nothing else. Every other
   sample is a page long, and a language that has only been used for pages has
   not been used.
 

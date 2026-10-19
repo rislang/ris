@@ -4900,6 +4900,82 @@ describe Iyi::IyiMod do
     end
   end
 
+  # An owning type travels as one: read back as `@[Share]` alone it would be
+  # Share only when its argument is, and `Guard(Counter)` - the escape the
+  # marker exists for - would stop being Share at the artifact's edge.
+  it "carries an owning type's Share marker, and a consumer's thread reads it" do
+    with_tempdir("iyimod_share_owns") do
+      Dir.mkdir_p "std"
+      File.write "std/guard.iyi", <<-IYI
+        module std/guard
+
+        pub class Counter
+          @count : Int32
+
+          def initialize
+            @count = 0
+          end
+
+          def bump : Nil
+            @count = @count + 1
+          end
+        end
+
+        @[Share(owns: true)]
+        pub class Guard(T)
+          @value : T
+
+          def self.new(&block : -> U) : Guard(U) forall U
+            Guard(U).build(block.call)
+          end
+
+          protected def self.build(value : T) : Guard(T)
+            new(value)
+          end
+
+          private def initialize(@value : T)
+          end
+
+          def lock(&block : T -> _) : Nil
+            block.call(@value)
+            nil
+          end
+        end
+        IYI
+      File.write "main.iyi", <<-IYI
+        module main
+
+        import std/guard::{Guard, Counter}
+
+        guard = Guard.new { Counter.new }
+        t = IyiThread.start do
+          guard.lock { |counter| counter.bump }
+          nil
+        end
+        t.join
+        IYI
+
+      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+
+      producer = create_spec_compiler
+      producer.prelude = "iyi/prelude"
+      producer.emit_iyimod = "mods"
+      producer.no_codegen = true
+      producer.compile source, File.expand_path("unused")
+
+      types = Iyi::IyiMod.read(File.join("mods", "std", "guard.iyimod")).exports.types
+      types.find! { |candidate| candidate.name == "Guard" }.annotations.should eq ["@[Share(owns: true)]"]
+
+      File.delete "std/guard.iyi"
+
+      consumer = create_spec_compiler
+      consumer.prelude = "iyi/prelude"
+      consumer.use_iyimod = "mods"
+      consumer.no_codegen = true
+      consumer.compile source, File.expand_path("unused")
+    end
+  end
+
   it "renders a type's fields into the declarations a consumer reads" do
     declaration = type_declaration("List", "generic struct",
       type_parameters: ["T"],
@@ -6123,6 +6199,132 @@ describe "a module compiled against Crystal's library" do
       expect_raises Iyi::CodeError, /built against iyi's prelude/ do
         consumer.compile source, File.expand_path("consumer")
       end
+    end
+  end
+
+  # A generic method's body travels as source printed after the normalizer
+  # has expanded it, and `.or_panic` expands to an assignment and an `if` in
+  # one `Expressions`. Printed bare inside `twice(...)` the consumer read
+  # `twice(__temp = parse(text)` and stopped at "expecting token ')', not
+  # 'if'". The `!` beside it expands the same way, inside an array literal.
+  it "carries a body whose argument expanded to statements" do
+    with_tempdir("iyimod_expanded_argument") do
+      modules = {
+        "orp.iyi" => <<-IYI,
+          module orp
+
+          pub struct OrpError
+            getter text : String
+
+            def initialize(@text : String)
+            end
+          end
+
+          impl Error for OrpError
+            def message : String
+              @text
+            end
+          end
+
+          pub struct Orp
+            def self.parse(text : String) : Int32 | OrpError
+              text.empty? ? OrpError.new("empty") : text.size
+            end
+
+            def self.twice(value : Int32, type : T.class) : Int32 forall T
+              value * 2
+            end
+
+            def self.read(text : String, type : T.class) : Int32 forall T
+              twice(parse(text).or_panic, type)
+            end
+
+            def self.both(text : String, type : T.class) : Array(Int32) | OrpError forall T
+              [parse(text)!, twice(value: parse(text).or_panic, type: type)]
+            end
+          end
+          IYI
+      }
+      main = <<-IYI
+        module main
+
+        import orp::{Orp}
+
+        puts Orp.read("abc", Int32)
+        puts Orp.both("ab", Int32)
+        IYI
+
+      from_source, from_artifact = iyimod_round_trip(modules, main)
+      from_source.should eq "6\n[2, 4]\n"
+      from_artifact.should eq from_source
+    end
+  end
+
+  # Adding an overload orders it against the ones already there, and that
+  # resolves an alias one of them is restricted to on the spot. `std/toml`'s
+  # `Any` held `alias Type = ... | TOMLDateTime | ...` beside two
+  # `initialize`s, below `TOMLDateTime` in the source; the artifact declares
+  # types by name, so `Any` came first and the consumer said "undefined
+  # constant TOMLDateTime". The types an alias names are now declared before
+  # the type holding it, whether the alias names them bare or qualified.
+  it "declares the types an alias names before the alias" do
+    with_tempdir("iyimod_alias_order") do
+      modules = {
+        "al.iyi" => <<-IYI,
+          module al
+
+          pub struct Zed
+            getter n : Int32
+
+            def initialize(@n : Int32)
+            end
+          end
+
+          pub struct Any
+            alias Type = Int32 | Zed | Array(Any)
+
+            getter raw : Type
+
+            def initialize(@raw : Type)
+            end
+
+            def initialize(value : String)
+              @raw = value.size
+            end
+
+            def zed? : Bool
+              @raw.is_a?(Zed)
+            end
+          end
+
+          pub struct Box
+            alias Held = String | ::Al::Zed
+
+            getter held : Held
+
+            def initialize(@held : Held)
+            end
+
+            def initialize(value : Int32)
+              @held = value.to_s
+            end
+          end
+          IYI
+      }
+      main = <<-IYI
+        module main
+
+        import al::{Any, Box, Zed}
+
+        puts Any.new(Zed.new(3)).zed?
+        puts Any.new("abc").raw
+        puts Box.new(4).held
+        puts Box.new(Zed.new(5)).held.is_a?(Zed)
+        IYI
+
+      from_source, from_artifact = iyimod_round_trip(modules, main)
+      from_source.should eq "true\n3\n4\ntrue\n"
+      from_artifact.should eq from_source
     end
   end
 end

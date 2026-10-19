@@ -28,10 +28,16 @@ FLOOR_BASE_DARWIN="__error _tlv_bootstrap backtrace backtrace_symbols_fd clock_g
 
 # Linux: the prelude issues raw syscalls and adds no symbol of its own; what
 # a program carries is what the C runtime's start files leave undefined.
-FLOOR_BASE_LINUX="ITM_deregisterTMCloneTable ITM_registerTMCloneTable _cxa_finalize _gmon_start__ _libc_start_main"
+# LLVM 23 can leave this local undefined marker after inline assembly.
+# It is absent from the dynamic imports and asks no library for a symbol.
+FLOOR_BASE_LINUX="PROCEDURE_LINKAGE_TABLE_ ITM_deregisterTMCloneTable ITM_registerTMCloneTable _cxa_finalize _gmon_start__ _libc_start_main"
 
-# What a program may link: the platform libc, and nothing else.
-FLOOR_LIBS_PROGRAM="libSystem libc.so ld-linux libgcc_s"
+# What a program may link: the platform libc, and on darwin the two
+# frameworks the trusted roots are kept behind - Security for the anchors
+# and trust settings, CoreFoundation for the arrays and data they come in -
+# which `std/system_roots` alone reaches (SPEC.md III.10). Both ship with
+# every macOS, as libSystem does.
+FLOOR_LIBS_PROGRAM="libSystem libc.so ld-linux libgcc_s Security CoreFoundation"
 
 # Windows: a PE leaves nothing undefined, so the floor there is the DLLs its
 # import table names, read with the MSVC toolchain's own `dumpbin`, and the
@@ -48,14 +54,20 @@ FLOOR_LIBS_PROGRAM="libSystem libc.so ld-linux libgcc_s"
 #                     environment, all of them the C runtime and none of
 #                     them a library iyi took on
 # That is the runtime's floor - the collector, the scheduler and threads
-# are kernel32's - and a program may add two, each through one module:
-#   advapi32.dll      `RtlGenRandom`, the OS entropy `std/random` reads, and
-#                     `std/random` is its only caller (SPEC.md III.10)
+# are kernel32's - and a program may add three, each through the modules
+# named:
+#   advapi32.dll      `RtlGenRandom`, the OS entropy `std/random` reads;
+#                     the registry `std/socket` reads the name servers
+#                     from; the account name and token SIDs `std/user`
+#                     answers `User.current` with (SPEC.md III.10)
 #   ws2_32.dll        Winsock, the platform's network interface, reached by
 #                     `std/socket` and `std/udp` and nothing else
 #                     (SPEC.md III.10)
+#   crypt32.dll       the certificate stores, the trusted roots
+#                     `std/system_roots` reads and nothing else
+#                     (SPEC.md III.10)
 FLOOR_DLLS_RUNTIME="kernel32.dll vcruntime140.dll ucrtbase.dll api-ms-win-crt-"
-FLOOR_DLLS_PROGRAM="$FLOOR_DLLS_RUNTIME advapi32.dll ws2_32.dll"
+FLOOR_DLLS_PROGRAM="$FLOOR_DLLS_RUNTIME advapi32.dll ws2_32.dll crypt32.dll"
 
 # The reader, found the way src/compiler/iyi/codegen/link.cr finds the
 # linker: on PATH (a developer prompt), else through the installer's own

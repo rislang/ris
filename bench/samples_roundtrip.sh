@@ -49,8 +49,15 @@ cd "$WORK" || exit 1
 
 status=0
 
+# Each sample writes and reads its own directory of artifacts. An emitting
+# build writes every module it imports, from what that build compiled, so
+# one shared directory let a later sample rewrite an earlier one's: once
+# `std/time` imported `std/list`, `std_time` wrote `std/iterator`'s artifact
+# from a build that never made a `Stop`, and `std_iterator` read that one.
+# The claim here is per program - its own modules' artifacts, their source
+# gone - so the directory is too.
 for sample in $SAMPLES; do
-  if ! "$IYI" build --emit-iyimod mods -o "from-source-$sample" "$sample.iyi" >"emit-$sample.log" 2>&1; then
+  if ! "$IYI" build --emit-iyimod "mods-$sample" -o "from-source-$sample" "$sample.iyi" >"emit-$sample.log" 2>&1; then
     echo "$sample: writing artifacts failed"
     tail -5 "emit-$sample.log"
     status=1
@@ -65,7 +72,7 @@ rm -rf app std boot kemal
 
 for sample in $SAMPLES; do
   [ -f "from-source-$sample" ] || continue
-  if ! "$IYI" build --use-iyimod mods -o "from-artifact-$sample" "$sample.iyi" >"use-$sample.log" 2>&1; then
+  if ! "$IYI" build --use-iyimod "mods-$sample" -o "from-artifact-$sample" "$sample.iyi" >"use-$sample.log" 2>&1; then
     echo "$sample: building from artifacts failed"
     tail -12 "use-$sample.log"
     status=1
@@ -323,7 +330,7 @@ travel() { # travel <case> <expected output>, with $TRAVEL/<case>/{kit/lib.iyi,m
     echo "travel: $name answers from its artifact as from source"
   fi
 }
-mkdir -p "$TRAVEL"/{impl_block,abstract_generic,empty_body,field_default,hooks,macro_def,annotated,unreached}/kit
+mkdir -p "$TRAVEL"/{impl_block,abstract_generic,empty_body,field_default,virtual_class_var,hooks,macro_def,annotated,unreached}/kit
 cat > "$TRAVEL/impl_block/kit/lib.iyi" <<'IYI'
 module kit/lib
 
@@ -446,6 +453,42 @@ import kit/lib::*
 puts A.new.describe
 IYI
 travel field_default "7 0"
+# A class variable read through a virtual owner: `look` and `count` are
+# called on `Base+` and `Base+.class` because `Sub < Base`, so the module's
+# object code calls `~Kit::Lib::Base+::table:read` and its metaclass twin,
+# which are main-module functions. `main` reads no class variable itself,
+# so nothing but the artifact's record can tell it to define them.
+cat > "$TRAVEL/virtual_class_var/kit/lib.iyi" <<'IYI'
+module kit/lib
+
+pub class Base
+  @@table = [3, 4]
+
+  def look : Int32
+    @@table[0]
+  end
+
+  def self.count : Int32
+    @@table.size
+  end
+end
+
+pub class Sub < Base
+end
+
+pub def answer : String
+  items = [Base.new, Sub.new] of Base
+  "#{items.map(&.look)} #{items.map { |item| item.class.count }}"
+end
+IYI
+cat > "$TRAVEL/virtual_class_var/main.iyi" <<'IYI'
+module main
+
+import kit/lib::{answer}
+
+puts answer
+IYI
+travel virtual_class_var "[3, 3] [2, 2]"
 cat > "$TRAVEL/hooks/kit/lib.iyi" <<'IYI'
 module kit/lib
 

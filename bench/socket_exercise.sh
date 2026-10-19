@@ -80,7 +80,7 @@ fi
 
 echo
 echo "== every socket check reported"
-phrases="connect_accept message_exchange short_read closed_peer ipv6 localhost unix timeout closed_under_read"
+phrases="connect_accept message_exchange short_read closed_peer ipv6 localhost unix timeout closed_under_read stream"
 case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT) phrases="$phrases backlog" ;;
   Linux) phrases="$phrases reset_after_chunk" ;;
@@ -91,7 +91,7 @@ for phrase in $phrases; do
     status=1
   }
 done
-[ "$status" -eq 0 ] && echo "  connect_accept, message_exchange, short_read, closed_peer, ipv6, localhost, unix and timeout all reported ok"
+[ "$status" -eq 0 ] && echo "  connect_accept, message_exchange, short_read, closed_peer, ipv6, localhost, unix, timeout and stream all reported ok"
 
 echo
 echo "== the same program with optimisation on (--release)"
@@ -203,6 +203,13 @@ prove_fails "short read size mismatch" badshort "short_read:" \
 # 3. Broken closed peer detection (does not answer empty string on EOF)
 prove_fails "closed peer EOF missed" badoff "closed_peer:" \
   '{ sub(/return "" if count == 0$/, "return \"eof_missed\" if count == 0"); print }'
+# 4. A small read that takes the whole room it was given from the heap
+prove_fails "a socket read that takes all it may read from the heap" heapread "small_read:" \
+  '{ sub(/if count < first \|\| max_bytes == first$/, "if false"); print }'
+
+# The peer's name asked of this end: `getsockname` for `getpeername`.
+prove_fails "the peer's address read from this end" peername "remote_port:" \
+  '{ sub(/return nil if IyiSocket.__sys_getpeername\(@fd, addr, pointerof\(len\)\) < 0$/, "return nil if IyiSocket.__sys_getsockname(@fd, addr, pointerof(len)) < 0"); print }'
 
 # 5. A write to a gone peer panicking, as it did
 prove_fails "a gone peer is a panic" panicwrite "cannot write to socket" \
@@ -325,6 +332,15 @@ prove_fails "local port returns 0" badport "local_port failed:" \
 # then parks every reader on its last 4 KB.
 prove_fails "a read whose buffer waits with it" inlined_read "retain: a reader parked" \
   '{ sub(/^  @\[NoInline\]$/, "  @[AlwaysInline]"); print }' --release
+
+# A socket's stream made anew at each `to_io`: the second line, already in
+# the first stream's read-ahead, is never read, and the read times out.
+prove_fails "a socket's stream made anew each time" fresh_io "stream: two lines in one write" \
+  '{ sub(/^      @io = made$/, ""); print }'
+
+# A read the socket refuses taken for a clean end: `read_failed?` says no.
+prove_fails "a refused socket read taken for the end" quiet_end "stream: a timed-out read" \
+  '{ sub(/return -1_i64 if got.is_a\?\(SocketError\)/, "return 0_i64 if got.is_a?(SocketError)"); print }'
 
 # 12. A read whose second receive met the peer's reset and dropped it: the
 #     next read answered an end of file, and the aborted transfer read as

@@ -7,6 +7,19 @@ has it.
 
 ## To take to iyi
 
+* Concurrent builds of the same entry share mutable object-cache paths.
+  One can replace or remove another's objects before artifact assembly:
+  std/http's artifact lost the TLS client unit during parallel gates.
+  Separate `IYI_CACHE_DIR`s make the producer and consumer pass; make
+  cache publication safe across builds in iyi.
+
+* v0.18.0 integration: explicit std imports in new modules and exercises,
+  required by ris's per-file extension checks (`std/int`, `std/text`,
+  `std/indexable` and others reported by the compiler). HTTP's import
+  audit includes those pure modules and sorts independently of locale.
+* Dependency audits: LLVM 23's local `_PROCEDURE_LINKAGE_TABLE_` marker
+  is not a dynamic import; allow it in the Linux toolchain floor.
+
 * `50745b97c` Optimize a single unit from its bitcode in an isolated
   context: LLVM 23 miscompiles the module optimized in place.
 * `0d5fc458b` + `f7f7d3d9f` Warn on LLVM 21 and 22 (IndVarSimplify
@@ -30,15 +43,11 @@ has it.
 
 ## To make in iyi first
 
-* std: `String#rchop`, `String#lchop(String)`, `Time#to_s(format)`;
-  missing when a blog was written on web (2026-10-17).
+* std: `String#rchop`, `String#lchop(String)`; missing when a blog was
+  written on web (2026-10-17).
+
 * `String#[]` indexes bytes while `size` counts characters: at least say
   so in the docs and in a hint; a decision for iyi.
-
-* std/http: a connection's reads into one buffer it keeps, read with
-  `read(Pointer, Int32)`. `read(65536)` makes a 64 KB scratch and a copy
-  per read, and the loop copies what is left before the next: 332 heap
-  bytes a request on `Server.answer` (samples/ris/serve.ri, 2026-10-19).
 
 ## Stays in ris
 

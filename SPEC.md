@@ -63,8 +63,8 @@ own reference accepts.
 | warm full build, `hello` / 6,900-line pair | 0.07 s / 0.24 s, against `go build`'s 0.08 s / 0.09 s |
 | front end, `hello.iyi` | **0.036 s** against the 0.050 s target: MET |
 | starting the compiler and doing nothing | 0.018 s of that |
-| iyi's own prelude | 20,325 lines, of which 3,734 are the library held to the 3,734 ceiling (5,605 with every platform's floor, which the ceiling stopped counting after Windows); the rest is the collector, the scheduler and the float printer, which 0.1.0's prelude got from libgc, pthreads and libc |
-| compiler | 126,834 lines, none of it written in iyi |
+| iyi's own prelude | 21,567 lines, of which 4,634 are the library held to the 4,650 ceiling (6,647 with every platform's floor, which the ceiling stopped counting after Windows); the rest is the collector, the scheduler and the float printer, which 0.1.0's prelude got from libgc, pthreads and libc |
+| compiler | 127,312 lines, none of it written in iyi |
 | artifact format | `.iyimod` v56, checksum per section |
 | samples | 27 programs, of which 12 rebuild from artifacts with their modules' source deleted |
 | what runs in CI | iyi's specs, Crystal's 13,798 compiler examples, the standard library's, the CLI's, the samples, nine targets iyi's own prelude type-checks for, seven whose own-prelude emitted objects are audited for undefined symbols, the tarball |
@@ -88,7 +88,7 @@ shape.
 > is a library and the rules are the language, so a program can keep one and
 > change the other: `--crystal` builds against Crystal's standard library, and
 > there `require` reaches the ecosystem while every rule stays where it was.
-> "No standard library worth the name" is still true of iyi's own 20,325 lines
+> "No standard library worth the name" is still true of iyi's own 21,567 lines
 > and no longer true of what a program can have. Part V item 12a is the
 > measurement, nine shards wide.
 
@@ -270,8 +270,8 @@ of binary. It is not made the default on that trade, and the middle needs the
 initialisers to run *later* rather than not at all, which is the `dlsym` table
 above, and a larger piece of work than the number it wins.
 
-**3. A deliberately tiny prelude, written in iyi. Done: 20,325 lines,
-primitives included, of which the library is 3,734.** Not a standard library:
+**3. A deliberately tiny prelude, written in iyi. Done: 21,567 lines,
+primitives included, of which the library is 4,634.** Not a standard library:
 integers, booleans, a string, one sequence, one dictionary, one range, `puts`,
 and an `enum`'s surface — the member's name, an order, the members, and the
 bits of a `@[Flags]` one. **Its scope is set by what the
@@ -299,11 +299,11 @@ collector (GC_DESIGN.md, the block between two marks in `prelude.iyi`),
 the scheduler and the kernel thread (III.4, `concurrency.iyi` and
 `thread.iyi`), the shortest-round-trip float text (`float.iyi`) - and they
 are most of its lines. So the figure held to the ceiling is the library:
-**3,734 lines** of the 20,325, measured by `bench/doc_numbers.py` as
+**4,634 lines** of the 21,556, measured by `bench/doc_numbers.py` as
 everything under `src/iyi/` except those three and except every platform's
-floor of 1,871 lines — the arms behind `flag?(:win32)`, `flag?(:linux)`,
+floor of 2,013 lines — the arms behind `flag?(:win32)`, `flag?(:linux)`,
 `flag?(:darwin)` and `flag?(:wasm32)`, which the paragraph on the breach
-below settles and explains. Opening `src/iyi/` counts 5,605 with the floor
+below settles and explains. Opening `src/iyi/` counts 6,647 with the floor
 still in it, and the whole-prelude figure is stated beside both because a
 reader sees the whole file, and a "tiny prelude" claim that hid 9,000 lines
 of runtime would be a claim about the wrong number.
@@ -424,10 +424,10 @@ where most of the 1,040 lines are.
 by hand.** Counting the lines inside a macro conditional whose condition
 names an OS, architecture or ABI flag — every arm of it, `else` included,
 since an `else` under `flag?(:linux)` is what the other platforms take and
-exists for the same reason — the platform floor measures **1,871 lines**
-of the 4,803, and Windows is the largest arm of it by a wide margin, which
-is what a platform whose every path, console byte and integer division
-needs its own answer costs.
+exists for the same reason — the platform floor measures **2,013 lines**
+today (1,871 of the 4,803 that day), and Windows is the largest arm of it
+by a wide margin, which is what a platform whose every path, console byte
+and integer division needs its own answer costs.
 
 The first writing of this paragraph counted by hand and gave two figures
 that did not agree: 624 lines for Windows' arms and a library of 3,618,
@@ -457,6 +457,21 @@ the fourth piece of the same kind: not a method a program calls by a new
 name, but the price of reaching a kernel without a C library in between.
 Counting it was comparing a library that carries its floor against one
 that did not.
+
+**And it was raised, by the owner's decision, to 4,650.** The 0.18
+collections and assertions took the library from 3,732 to 4,617, 883 over:
+an array answering for its spans and set operations, a table answering
+`fetch`, `dig`, `merge` and the rest a program asks of it, a failing test
+saying what it expected and what came, `File.open` taking every mode. The
+two answers were the precedent's - move them to `src/std/` behind an
+import, as `format` and `socket` were moved - or a new number, and the
+owner chose the number: these are the methods a first program reaches for
+on the two collections every program has, and an import in front of
+`Array#[](range)` is a tax on every program for a ceiling's sake. The rule
+itself is unchanged and is checked as it was: the next method that enters
+the library moves something out first, `bench/doc_numbers.py` fails past
+4,650, and the ceiling no longer claims to be 0.1.0's core, only to be the
+number that stops the prelude from drifting.
 
 What the rule does *not* forgive: a `pub def` a program calls is API and
 counts wherever it is written, macro arm or not — the exclusion is for the
@@ -1013,9 +1028,9 @@ Checking it moved two things and left the shape alone.
 
 | | Crystal 0.1.0 (2014-06-18) | iyi today |
 |---|---|---|
-| Compiler | 24,984 lines, **written in Crystal** | 126,834 lines, Crystal, forked |
-| Library | 8,161 lines (3,551 of it core) | 20,325-line own prelude + 59,403 in std |
-| Specs | 21,146 lines | 14,488 for iyi |
+| Compiler | 24,984 lines, **written in Crystal** | 127,312 lines, Crystal, forked |
+| Library | 8,161 lines (3,551 of it core) | 21,567-line own prelude + 111,428 in std |
+| Specs | 21,146 lines | 14,792 for iyi |
 | Samples | 24 **programs** | 8 **explanations**, a first half hour, and `calc`, a language |
 | History | 3,165 commits over 21 months | 266 |
 | Own status line | *"pre-alpha: we are still designing the language"* | design largely settled, 0.2.0 released, a language written in it |
@@ -2677,12 +2692,28 @@ spawned 10 ms after it slept its full 2,000 ms, and the group's join with it.
 
 A marker trait, `Share`, decided structurally: a type is shareable if every
 field is shareable and none is mutable, or if it is a synchronised type that
-owns its contents: `Mutex(T)` is shareable when `T` is. A value that is not
-shareable cannot be captured by a spawned block or sent over a channel.
+owns its contents: `Mutex(T)` is shareable whatever `T` is, because nothing
+but the blocks it runs reaches what it holds, and each of those blocks is
+checked where it is written. A value that is not shareable cannot be
+captured by a spawned block or sent over a channel.
 
-**Built, as written, with the obligations below met — but for `Mutex(T)`,
-which does not exist yet (`undefined constant Mutex`): the synchronised
-types `Share` trusts today are `Atomic(T)` (III.4.10) and `List(T)`.** `Iyi::Share`
+**Built, as written, with the obligations below met. The synchronised
+types `Share` trusts are `Atomic(T)` (III.4.10), `List(T)` and
+`Mutex(T)` (`src/std/mutex.iyi`).** The two readings this paragraph once
+had of `Mutex(T)` — "shareable when `T` is", and III.4.7's
+`Mutex(Array(T))` as the escape — were settled for the second, and the
+soundness it needs is the compiler's, not a convention's: the value is
+made by the block `Mutex.new` runs, the constructor that takes a value is
+private, and every block `Mutex.new`, `lock`, `get` and `update` run may
+capture only `Share` values — `self` and the constants and class
+variables it names included — while what `get` answers must be `Share`
+too, since it leaves the lock. A block that breaks either is refused
+where it is written (`CleanupTransformer#check_share_boundary`), so a
+captured array, a value handed in from outside, a nested lock reaching
+the outer value and `m.get { |a| a }` are compile errors. The trust is
+`@[Share(owns: true)]`, which travels in an artifact as itself. What the
+check does not see is the edge the thread check has too: a method the
+block calls that stores its argument somewhere global. `Iyi::Share`
 (`src/compiler/iyi/semantic/share.cr`) decides a type structurally: a
 field is mutable if any method other than `initialize` assigns it, by any
 spelling (the structural scan reads the type's own methods, those its
@@ -3270,7 +3301,7 @@ III.4.8's: one thread interleaves only at parks. III.4.11 removed the
 reason, and III.4.4 has it built. What this section changed is the list
 of types `Share` trusts rather than checks: `Atomic(T)` is the first
 synchronised type in the prelude, shareable by construction, `@[Share]`
-on its declaration, and it joins `List(T)` there before `Mutex(T)` exists.
+on its declaration, beside `List(T)`, and `Mutex(T)` (`@[Share(owns: true)]`) joined them.
 
 #### III.4.11 A kernel thread: **BUILT — `IyiThread`, not a task, and the collector stops it**
 
@@ -3293,8 +3324,8 @@ the scheduler's queues are one thread's, and a value handed from one
 thread to another is a data race — which the type system now refuses at
 the door it has: the block `IyiThread.start` runs may capture only
 `Share` values (III.4.4, built below), so what crosses threads is
-`Atomic(T)`, immutable values, and memory a program reaches through
-`Pointer` and keeps straight itself, `Pointer` being what the marker
+`Atomic(T)`, immutable values, state kept behind a `Mutex(T)`, and memory
+a program reaches through `Pointer` and keeps straight itself, `Pointer` being what the marker
 refuses by name. A thread is not offered as a spelling for
 concurrency; `group` is. It is offered because the collector's parallel
 stages (GC_DESIGN.md 7 and 8) and a scheduler with M threads need one,
@@ -4256,11 +4287,12 @@ linear-time engine III.10 promises, so the sugar moves no line there
 either. It was refused while that library had no runtime `Regex`, and kept
 refused after `std/regex` arrived, so a port wrote every pattern as a
 string (crystal-metric's review asked for it back). The literal is cached
-as the other library's is, one constant per pattern, named apart from that
-library's (`$Regex:iyi:<digest>`) so an artifact's consumer rebuilds it
-with the engine it was built with. Without `import std/regex` it is refused
-by name, and so is a flag (`/a/i`), which that engine does not take -
-compiled without it, `/a/i` would have answered `false` for `"A"`.
+as the other library's is, one constant per pattern and flags, named apart
+from that library's (`$Regex:iyi:<digest>`, the flags in the digest when
+there are any) so an artifact's consumer rebuilds it with the engine and
+flags it was built with. Without `import std/regex` it is refused by name;
+its flags `i`, `m` and `x` are `Regex::Options` of the same numbers, `m`
+meaning what it means in the other library, and any other flag is refused.
 `bench/std_regex_exercise.sh` holds all of it, a module's literal through
 its artifact included. And `pub` did not admit an
 **alias** or an **annotation**, which are both surface: a name for a type
@@ -5623,8 +5655,9 @@ From Crystal's own *Required libraries* page, plus every `@[Link]` in this tree.
 | Library | What it is for | Reachable | iyi's answer |
 |---|---|---|---|
 | libc | everything | yes: `write`, `exit`, `memset` and the collector's `mmap`/`munmap` on darwin | keep. On Linux the prelude issues the raw syscalls instead, so the object asks libc for nothing and the executable carries only the link template's five |
-| kernel32, advapi32, the MSVC C runtime (Windows) | the platform itself | yes: `WriteFile`, `ExitProcess`, `VirtualAlloc`, `CreateThread`, the completion port, `CreateProcessW` for `std/process` — and `RtlGenRandom` for `std/random` | keep, and of the platform's own only these two. Windows has no libc of its own: the C runtime's POSIX shims are a person-installed choice of CRT and the Win32 API is the platform's contract, which is the same answer Go gives. `kernel32` is the floor; `advapi32` is one function, the OS entropy `Random.new` seeds from, and there is no kernel32 name for it. Both ship with every Windows. The link line also carries the *dynamic* C runtime — the static one, `libcmt`, links and access-violates before `main` — so every program imports `vcruntime140.dll` and five UCRT façades (runtime, math, stdio, locale, heap) beside `kernel32`, as III.9's PE measurement counts. The façades ship with Windows 10 and later; `vcruntime140.dll` is the Visual C++ redistributable, which a clean machine is not promised, so an `.exe` iyi builds needs that one installed |
+| kernel32, advapi32, the MSVC C runtime (Windows) | the platform itself | yes: `WriteFile`, `ExitProcess`, `VirtualAlloc`, `CreateThread`, the completion port, `CreateProcessW` for `std/process` — `RtlGenRandom` for `std/random`, and the registry reads (`RegOpenKeyExW`, `RegEnumKeyExW`, `RegQueryValueExW`, `RegCloseKey`) through which `std/socket`'s resolver finds the configured name servers | keep, and of the platform's own only these two. Windows has no libc of its own: the C runtime's POSIX shims are a person-installed choice of CRT and the Win32 API is the platform's contract, which is the same answer Go gives. `kernel32` is the floor; `advapi32` is the OS entropy `Random::Secure` answers and `Random.new` seeds from, for which there is no kernel32 name, and the registry, where Windows keeps the name servers that iphlpapi and dnsapi — two more DLLs — would otherwise have answered. Both ship with every Windows. The link line also carries the *dynamic* C runtime — the static one, `libcmt`, links and access-violates before `main` — so every program imports `vcruntime140.dll` and five UCRT façades (runtime, math, stdio, locale, heap) beside `kernel32`, as III.9's PE measurement counts. The façades ship with Windows 10 and later; `vcruntime140.dll` is the Visual C++ redistributable, which a clean machine is not promised, so an `.exe` iyi builds needs that one installed |
 | ws2_32 (Windows) | sockets | yes: `socket`, `bind`, `listen`, `recv`, `send`, `recvfrom`, `sendto`, and the posted `AcceptEx`, `ConnectEx`, `WSASend` and `WSARecvFrom` the completion port answers — `std/socket` and `std/udp`, and nothing else | keep, and only for those two. Winsock *is* Windows' network interface: there is no socket call anywhere else, not in kernel32 and not in a CRT, which is the same position `kernel32` holds for processes and files. `ws2_32.dll` ships with every Windows, so it adds nothing to what an `.exe` iyi builds needs installed. `AcceptEx` and `ConnectEx` are mswsock's exports and are reached by asking a socket for the pointer (`WSAIoctl` with `SIO_GET_EXTENSION_FUNCTION_POINTER`) rather than by linking `mswsock`, so Windows' sockets are one row here and not two |
+| crypt32 (Windows); Security and CoreFoundation (darwin) | the trusted roots | yes: `CertOpenSystemStoreW`, `CertEnumCertificatesInStore`, `CertCloseStore` on Windows; `SecTrustCopyAnchorCertificates`, `SecTrustSettingsCopyCertificates`, `SecTrustSettingsCopyTrustSettings`, `SecCertificateCopyData` and the CoreFoundation array, data, dictionary, number and string calls they answer in on darwin — `std/system_roots`, and nothing else | keep, and only for that one. **Decided by the owner** for the TLS client: a system's trusted roots - and the roots an administrator or a user added or took away - are kept behind these interfaces and no file holds them, so reading them is the platform's act the way a socket is Winsock's. Each ships with every Windows and every macOS, so an `.exe` or a darwin binary needs nothing installed. Linux keeps its roots in a bundle file, read with no binding. The alternatives were weighed and refused: files only (no roots at all on Windows, and none a darwin user added), and a bundled copy of Mozilla's roots (stale between releases, and blind to every root an operating system trusts or distrusts on its own). std/x509 itself stays pure computation; a program that brings its own roots links none of these |
 | Boehm GC | allocation | no: the default is the owned collector, arena over the platform's own `mmap`; `-Dgc_boehm` opts libgc back in, `-Dgc_none` opts out of collecting | **owned, shipped, default.** II.5 already required a precise collector for R-4; GC_DESIGN.md is the record and `bench/gc_default.py` the measurement that flipped the default. Present on the compiler only as a temporary bootstrap runtime dependency with an exit condition: leaves when the compiler stops being a Crystal program |
 | compiler-rt builtins | 128-bit divide, float conversion, overflow-checked multiply | no | **already owned**: `src/crystal/compiler_rt/` ports them to Crystal. Keep porting |
 | libunwind / libgcc | exception backtraces | no | own the walk. III.1 is what makes this cheap: errors are union members, so only a panic unwinds |
@@ -5634,8 +5667,8 @@ From Crystal's own *Required libraries* page, plus every `@[Link]` in this tree.
 | libm | `sqrt`, `pow` | no | LLVM intrinsics where they exist, iyi where they do not |
 | libiconv | encoding conversion | no | never. UTF-8 only, which is Go's answer and already iyi's. The compiler dropped it too (`-Dwithout_iconv`) |
 | PCRE2 | `Regex` | no | **decided (#17, #22) and done: RE2 semantics everywhere, on iyi's own engine** `src/compiler/iyi/rx.cr`, macro-level regex included, differentially verified against pcre2, and `libpcre2` measured off the compiler binary rather than only out of compiler source. The price: macros lose the constructs that are not regular, backreferences, recursion, subroutine calls and conditionals, plus atomic groups and possessive quantifiers, which are controls for a backtracker there is none of here; a macro using one fails with a named error. Lookaround was on this list and should never have been, corrected in III.10 and in #17. `Spec::CLI#pattern` changed type from `Regex?` to `String?` |
-| OpenSSL (libssl, libcrypto) | TLS, digests | no | digests **already owned** (`src/crystal/digest/`). TLS: not in 0.x, own it eventually, a binding never in the prelude |
-| zlib | `Compress` | no | **owned**: `src/std/compress.iyi` is DEFLATE, zlib and gzip in iyi — every block type read, one fixed-Huffman block over a 32 KiB LZ77 window written — and `bench/std_compress_exercise.sh` reads 72 of zlib's streams and has zlib read 18 of iyi's. DEFLATE was a known quantity and it arrived with HTTP, as this row said it would |
+| OpenSSL (libssl, libcrypto) | TLS, digests, ciphers | no | digests **already owned**: `src/crystal/digest/` for the compiler, and for programs `src/std/digest.iyi` (MD5, SHA-1, SHA-224/256/384/512, SHA-3 and SHAKE) and `src/std/crypto.iyi` (HMAC, HKDF, PBKDF2, a constant-time compare) in iyi, checked against RFC 4231, 5869 and 6070 and FIPS 180-4's and FIPS 202's messages by `bench/std_digest_exercise.sh` and `bench/std_crypto_exercise.sh`. Ciphers and curves **owned** too: `src/std/aead.iyi` (AES-GCM, bitsliced, and ChaCha20-Poly1305), `src/std/curve25519.iyi` (X25519, Ed25519, constant time) and `src/std/p256.iyi` (ECDSA signing on P-256, constant time), each checked against its RFC's or NIST's vectors and against OpenSSL through Python's `cryptography` both ways; `src/std/password.iyi` (bcrypt, scrypt). And certificates, checked only: `src/std/asn1.iyi` (DER), `src/std/rsa.iyi` (PKCS #1 v1.5 and PSS), `src/std/ecdsa.iyi` (P-256, P-384, P-521), `src/std/x509.iyi` (chains, validity, constraints, host names) and `src/std/system_roots.iyi` (the platform's trusted roots), each held to OpenSSL's verdicts through Python's `cryptography` - chains to its own verifier - and to every root certificate on the machine. **And TLS 1.3, both ends: `src/std/tls.iyi`**, on all of the above - the client held to RFC 8448's trace byte for byte, a scripted server breaking the protocol one rule at a time, and OpenSSL's own `s_server` across its suites, keys, a HelloRetryRequest and ALPN; the server, with an Ed25519 or P-256 certificate signed in constant time and X25519 or secp256r1 key shares, held to a scripted client breaking it one rule at a time and to OpenSSL's `s_client`, Python's `ssl`, curl and Node (`bench/std_tls_exercise.sh`), and serving std/http's HTTPS (`bench/std_http_exercise.sh`). **Not audited, and not to be called secure until it is**: that is the condition this row set before writing it. Client certificates at both ends (mutual TLS), the server checking a client's for clientAuth and std/http handing it to the handler; a server with several certificates, each shown to a client asking by server_name for a host it names; RFC 8446's exporter at both ends, checked against OpenSSL's; KeyUpdate on a record limit and on request. TLS 1.2 and earlier, a server signing with RSA and resumption are not there. A binding never in the prelude |
+| zlib | `Compress` | no | **owned**: `src/std/compress.iyi` is DEFLATE, zlib and gzip in iyi — every block type read, and written at zlib's levels 0 to 9 with zlib's greedy and lazy match finders, each block stored, fixed or dynamic by what it costs, within 0.3% of zlib's size at every level and smaller at most; `Inflater` and `Deflater` the same a piece at a time, which std/http's gzip in both directions is — and `bench/std_compress_exercise.sh` reads 72 of zlib's streams and has zlib read 256 of iyi's. DEFLATE was a known quantity and it arrived with HTTP, as this row said it would |
 | libxml2 | `XML` | no | no XML in the prelude. A package, written in iyi |
 | libyaml | `YAML` | no | same, and Go ships no YAML at all |
 | GMP / MPIR | `BigInt`, `BigFloat` | no | own it or do without. Go's `math/big` is Go |
@@ -5987,7 +6020,9 @@ outside the allowlist: 103 programs import `kernel32.dll`,
 `vcruntime140.dll` and five UCRT façades (runtime, math, stdio, locale,
 heap); five add `api-ms-win-crt-environment` (the `Program.env` readers);
 four add `ws2_32.dll` (`std/socket`, `std/udp`); two add `advapi32.dll`
-(`std/random`). The teeth were proven the way the POSIX ones were: with
+(`std/random`) - counted before `std/socket` resolved names, and a program
+that connects by name now adds `advapi32.dll` too, for the registry's name
+servers. The teeth were proven the way the POSIX ones were: with
 `kernel32.dll` taken off the allowlist in a throwaway copy, the gate exits
 1 naming the program and the DLL.
 
@@ -6070,7 +6105,7 @@ object layer, on Linux, there is no dependency at all. At the executable layer,
 on Linux and macOS, the platform libc is the only library: five symbols on
 macOS that the prelude asked for, five on Linux that the link template added.
 
-### III.11 The interpreter, again: **DECIDED (Appendix B #25): yes, on the macro interpreter, no C interop**
+### III.11 The interpreter, again: **DECIDED (Appendix B #25): not planned; it was built and removed**
 
 This reopens a decision the document had settled, so it says what changed, and
 what changed is not the evidence. V.11 removed Crystal's interpreter and
@@ -6127,6 +6162,12 @@ to fire by adding to a sample the exact `@[Link("ffi")]` shape a naive revert
 would produce. It failed at three independent layers, reporting the gained
 symbol `ffi_prep_cif`, the gained library `libffi.8.dylib`, and the denylist
 hit, so an interpreter cannot quietly bring libffi with it.
+
+**Then decided again: no REPL is planned.** One was written on that base and
+removed, and the owner does not want it back: the yes above is history, kept
+for its reasoning. What stays is the enforcement - `libffi` on
+`bench/dependency_floor.sh`'s denylist - so nothing brings an interpreter's
+dependency in by another door.
 
 ### III.12 The sandbox: **BUILT, by subtraction; measured by `bench/sandbox_story.sh`**
 
@@ -8411,7 +8452,7 @@ Named honestly, so nobody mistakes this draft for complete.
     be rewritten for iyi whatever happened. It is in the history, one
     `git revert` away, and it will be a better starting point when there is an
     iyi to interpret. There is one now, and #25 chose the smaller evaluator
-    instead (III.11).
+    instead (III.11) - and then no REPL at all.
 
     What came out: the compiler is 99,253 → **87,421 lines** (11.9%), specs
     211,749 → 203,640, one CI workflow and four interpreter steps in others, the
@@ -9881,7 +9922,7 @@ Named honestly, so nobody mistakes this draft for complete.
     shards exist and none of them is written to iyi's rules, so "run them
     directly" is not a compatibility problem, it is the four rules: `require`
     against R-1, inference against R-2, monkey patching against R-3, and
-    Crystal's 8,161-line standard library against iyi's own 20,325-line prelude.
+    Crystal's 8,161-line standard library against iyi's own 21,567-line prelude.
 
     What is measurable is narrower and better than that framing suggests, and
     it was measured on **Kemal 1.12.0**, which compiles under this compiler
@@ -10891,14 +10932,14 @@ For traceability, since several rules here rest on numbers rather than taste.
 | 15 | ~~**Does the daemon become the language server's process? (III.8)**~~ | **Decided: no, on the number.** The server is a front-end compile per question, 44 ms p50 on the release compiler with today's prelude, and the daemon's `Preanalysed` is the 30 ms of that which is the prelude's top-level pass — held in a `Program` that adoption mutates, which is why the daemon forks per build. A clone per request or an invalidation story, for 44 ms to about 15 under an editor's debounce: III.8 declines it with the measurement beside it. The daemon is reachable (`iyi daemon`, listed, gated out of the tarball) and serves the workload it was kept for, `--crystal` builds |
 | 16 | **Does III.4 use libevent or the native backends? (III.10)** | native, and it is not close. Crystal already wrote `epoll`, `kqueue`, `io_uring` and `iocp` backends and libevent is its default only on four platforms iyi does not target. Adopting it would put a C library under every concurrent iyi program to save work already done |
 | 17 | **Regex: PCRE semantics or RE2's? (III.10)** | RE2's, and that answer stands. Linear time, no construct whose cost can grow with the subject. A language selling "the compiler will not surprise you" should not ship a library that takes exponential time on ordinary input, and Go already took this trade. **What this row said the answer costs was wrong, and it is restated rather than quietly widened.** It read "no backreferences, no lookbehind", and was taken to mean the guarantee forbids lookaround, on the premise that lookaround needs a backtracker. It does not: a lookaround over a regular inner pattern is itself a regular property of a position, answered by a pre-pass costing one state set per character and nothing per position. All four forms are supported, nested to any depth, and lookbehind here is not length-limited the way pcre2's is, so the engine accepts patterns pcre2 rejects. RE2 omits lookaround because of its one-pass DFA design, not because linear time forbids it, and this row inherited the omission as if it were the price. What the guarantee actually costs is the constructs that are not regular: backreferences, recursion, subroutine calls and conditionals, refused because no simulation answers them and matching backreferences is NP-hard. Atomic groups and possessive quantifiers are refused for a separate reason worth keeping separate: they are controls for a backtracker, and there is none here to control. A capturing group inside an assertion is refused too, because the pre-pass never performs the sub-match that would set it (III.10) |
-| 18 | **TLS (III.10)** | none in 0.x; an OpenSSL binding as a package if something needs it sooner; own it eventually, TLS 1.3 only, and not before there is something to protect and somebody to audit it. What must not happen is OpenSSL becoming reachable from iyi's own prelude |
+| 18 | ~~**TLS (III.10)**~~ | **Decided and done: iyi owns its TLS, 1.3 at both ends since 0.18, 1.2 at the client alone and only when asked, and never OpenSSL.** The row recommended none in 0.x; an OpenSSL binding as a package if something needed it sooner; owning it eventually, TLS 1.3 only, and not before there was something to protect and somebody to audit it. Owning it came first: std/tls is written in iyi from the RFCs over std/aead, std/curve25519, std/p256, std/ecdsa, std/rsa and std/x509, client and server, so no OpenSSL binding was written and none is planned, and OpenSSL is reachable from no prelude. "1.3 only" stands as the default: a server speaks nothing else, and a client offers nothing else unless its `TlsConfig#min_version` is `TlsVersion::TLS12`, for servers that never moved past 1.2 - then with the extended master secret required, ECDHE and AEAD suites alone, RFC 8446's downgrade sentinel checked, no renegotiation and no resumption. The row's other condition is not met and is said so: std/tls has not been audited, and its header says not to call it secure until it is |
 | 19 | **Is "no C library in the prelude" a rule or a habit? (III.10)** | a rule for iyi's own prelude, and it is checked: `bench/dependency_floor.sh` fails in CI when an own-prelude program grows a symbol or a linked library, on the default build and on `-Dgc_boehm`. `--crystal` is outside this gate and may link Crystal's standard library dependencies and anything a required shard pulls. Both host platforms measure the same property: direct dependencies, `otool -L` on macOS and `readelf -d` NEEDED on Linux, since `ldd`'s transitive closure put libLLVM's libraries on iyi's list and an allowlist holding libxml2 for that reason could never notice iyi reaching for libxml2 itself. Symbols are per platform: macOS's five libSystem calls, and on Linux the five the link template's crt objects leave, allowed by exact name rather than a wildcard, so `malloc` or `mmap` still fails. It holds the compiler binary to a list too, `libLLVM libc++ libgc libSystem`, and to a denylist that carries `libpcre`, so the rule is not weaker for the toolchain than for own-prelude programs. Proven to fail three times: adding a `lib LibM` call to a sample, injecting a reachable regex literal into `src/option_parser.cr`, and rebuilding the compiler with an explicit `-lxml2` |
 | 20 | ~~**Write a collector, or adopt `gcry`? (III.9)**~~ | **Decided: iyi writes its own collector; gcry is not adopted, overruling this row's earlier recommendation.** What changed is the goal, and the change is the owner's, not a finding: they want concurrency, parallelism and a performant language, and owning the collector is the only path to the control that takes; gcry was pointed at as hints about what has already been tried to pull Crystal off Boehm, never as a runtime to adopt. The price is stated rather than softened: everything gcry already built, the heap, the STW, the roots, the finalizers, two platforms, is rebuilt in this tree, and only its measurements are inherited (#21). R-4 still requires the precise heap-layout table either way (II.5) |
 | 21 | **Precise stack roots, now a design question inside the collector iyi writes (III.9)** | still open, and reframed by #20 rather than settled by it: it is a design decision in a collector iyi owns, no longer a finding inherited from gcry. R-4 needs heap-layout precision, which is a table. gcry's measurement is still the best available evidence on the expensive half: stack-map precision is correctness-stable and not an RSS win. Inherited as prior art rather than repeated, and answerable only when iyi's own collector exists to measure on |
 | 22 | ~~**Keep macro-level regex, and pcre2 on the compiler with it? (III.9, III.10)**~~ | **Decided and done: macro-level regex is kept, on iyi's own engine, and pcre2 is off the compiler, measured.** RE2 semantics everywhere. This row recommended keeping both until the owned engine from #17 landed; it landed as `src/compiler/iyi/rx.cr`, differentially verified against pcre2, and it took pcre2 out of compiler-owned source. It did not take the library off the binary. Ten reachable regex literals in four stdlib files the compiler compiles into itself did that, found by reading `--emit llvm-ir` (`$Regex:0` through `$Regex:9`) rather than by inference: `option_parser.cr`, `process/shell.cr`, `semantic_version.cr` and `spec/cli.cr` now parse by hand, each differentially verified, and `otool -L .build/iyi` is down to libLLVM, libc++, libgc and libSystem. `bench/dependency_floor.sh` forbids `libpcre` for the compiler and own-prelude programs, proven to fail by injecting a reachable literal. The price: macro authors lose the constructs that are not regular, backreferences, recursion, subroutine calls and conditionals, plus atomic groups and possessive quantifiers, and a macro using one fails with a named error rather than quietly meaning something else; and `Spec::CLI#pattern` changed from `Regex?` to `String?`, a breaking change to a stdlib public API even though the behaviour is identical. **This row also listed lookaround as part of that price, inheriting the false premise corrected in #17; lookaround is supported, in all four forms, and lookbehind here is unbounded where pcre2's is not.** The gain: the compiler sheds a library on Crystal's required list, and no pattern can take exponential time |
 | 23 | ~~**Is a default that does not collect acceptable until the collector lands? (III.9)**~~ | **Decided then, and now retired the way its last sentence promised.** A plain build using iyi's own prelude allocated and never collected, kept on purpose and documented loudly; the price stayed in the row: a long-running own-prelude program grew without bound, a default that shipped a known leak. "Until the collector lands" meant until iyi's own landed (#20) — and it landed: the owned collector is the default now (GC_DESIGN.md, `bench/gc_default.py` the measurement, III.9 the floor it kept). The never-collecting mode is `-Dgc_none`, chosen rather than shipped |
 | 24 | ~~**Keep bdw-gc on the compiler? (III.9, III.10)**~~ | **Decided: yes; the exception holds in the present tense, and this row is superseded by #20 in its premise and restated.** The compiler keeps bdw-gc: `-Dgc_none` is proven not viable for it (III.10), and a collector that cannot carry parallel codegen cannot host a compiler that runs parallel codegen over fibers. What changed is the revisit condition: it is no longer gcry's parallel path leaving experimental, since gcry is not being adopted; it is iyi's own collector reaching the stage that serves parallel codegen. Until then the dependency stays a recorded exception carrying this reason rather than an unexamined habit |
-| 25 | ~~**Build the interpreter on the macro interpreter, without C interop? (III.11)**~~ | **Decided: yes.** This reopens #11 on the owner's ask, with `iex` as the reference; the evidence that removed the old one still stands. The base is `src/compiler/iyi/macros/interpreter.cr`, 781 lines, a complete AST evaluator that already resolves types, extended for iyi's nine new AST nodes and two `Def` clauses, not the 11,377-line revert that cannot run iyi past the module header. No C interop, so no libffi, and that is enforced rather than assumed: `libffi` is on `bench/dependency_floor.sh`'s denylist, and the gate was proven to fire by adding to a sample the exact `@[Link("ffi")]` shape a naive revert would produce. It failed at three independent layers, reporting the gained symbol `ffi_prep_cif`, the gained library `libffi.8.dylib`, and the denylist hit, so an interpreter cannot quietly bring libffi with it. R-1 bounds what a session recompiles to the module graph; R-3 takes open-class patching away from the prompt |
+| 25 | ~~**Build the interpreter on the macro interpreter, without C interop? (III.11)**~~ | **Decided: yes, then no: built, removed, and not planned (the owner does not want a REPL).** The first decision, kept for its reasoning: This reopens #11 on the owner's ask, with `iex` as the reference; the evidence that removed the old one still stands. The base is `src/compiler/iyi/macros/interpreter.cr`, 781 lines, a complete AST evaluator that already resolves types, extended for iyi's nine new AST nodes and two `Def` clauses, not the 11,377-line revert that cannot run iyi past the module header. No C interop, so no libffi, and that is enforced rather than assumed: `libffi` is on `bench/dependency_floor.sh`'s denylist, and the gate was proven to fire by adding to a sample the exact `@[Link("ffi")]` shape a naive revert would produce. It failed at three independent layers, reporting the gained symbol `ffi_prep_cif`, the gained library `libffi.8.dylib`, and the denylist hit, so an interpreter cannot quietly bring libffi with it. R-1 bounds what a session recompiles to the module graph; R-3 takes open-class patching away from the prompt |
 | 26 | ~~**wasm32's allocator: wasi-libc as the platform runtime, a qualified platform, or `memory.grow` in the compiler? (III.9, III.10)**~~ | **Decided: bind `memory.grow` so an own-prelude iyi program on wasm32 needs nothing but its WASI imports.** A two-argument `fun` declaration of `llvm.wasm.memory.grow.i32` (memory index, then page delta) lowers to `memory.grow 0`. An earlier probe used the one-argument form, failed the module verifier, and was misread as "Crystal cannot bind this intrinsic". It was an arity error, not an impossibility, so this landed as an own-prelude binding rather than a compiler primitive. Measured after: `hello.wasm` and `webapp.wasm` leave `wasi_fd_write` and `wasi_proc_exit` undefined, and no longer leave `malloc` or `realloc`. Two alternatives were rejected: accepting wasi-libc as the platform's own runtime the way libSystem and kernel32 are accepted, and documenting wasm32 as a qualified target, both because either leaves an asterisk on a platform the owner named as a priority |
 
 ### B.2: The one decision the fork already made: **SETTLED: not a self-hosting project**

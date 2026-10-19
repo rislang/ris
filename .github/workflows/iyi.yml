@@ -29,7 +29,9 @@ name: ris
 #                    by cross-compiling: an edit to `src/lib_c` or
 #                    `src/crystal/system` is invisible here until somebody
 #   binary           the thing a person downloads, unpacked somewhere else
-#   std              the native standard library (src/std/) and its module exercises
+#   std              the native standard library (src/std/): its foundation here,
+#                    its modules' exercises in the std-siblings shards (and the
+#                    windows- and darwin- shards beside their own jobs)
 #
 # Every job carries a `timeout-minutes`. The default is six hours, and these
 # jobs start daemons, listen on sockets, serve HTTP, soak an LSP and run
@@ -210,6 +212,35 @@ jobs:
         env:
           CRYSTAL_WORKERS: 1
 
+  # And the question from a position nobody chose. The samples job's
+  # soak asks one hover after each abuse; this asks every cursor question
+  # at thousands of positions across `src/std`, including the two shapes
+  # the answers were wrong on — a macro directive line and a local
+  # assignment, where a variable an arm this target does not take has no
+  # type and a visitor read it anyway. Eighteen internal errors were found
+  # that way and nothing had asked. A job of its own: it grows with the
+  # library, and took 22 to 41 of the samples job's 90 minutes.
+  lsp-positions:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    container:
+      image: crystallang/crystal:1.21.0-build
+    name: "Every cursor question, everywhere in the library"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v5
+        with:
+          name: crystal
+          path: .build
+      - run: chmod +x .build/crystal
+      - name: Build `iyi` and its daemon
+        run: make -o .build/crystal iyi iyi-daemon
+      - name: Every cursor question, everywhere in the library
+        run: python3 bench/lsp_positions.py
+
   samples:
     needs: build
     runs-on: ubuntu-24.04
@@ -221,6 +252,9 @@ jobs:
     # and 51. `lsp_positions.py`, which asks a cursor question every 200
     # lines of every module in `src/std` and grows with it, took 15, 16 and
     # 23 minutes in those that finished and 28 to 31 in those cancelled.
+    # At 90 the job took 87 on most runs and was cancelled at 90 on
+    # 2026-10-16, `lsp_positions.py` 22 to 41 minutes of it: that step is
+    # now the `lsp-positions` job's, run beside this one.
     timeout-minutes: 90
     container:
       image: crystallang/crystal:1.21.0-build
@@ -400,6 +434,13 @@ jobs:
       # names and eight broken methods of a copied prelude.
       - name: Arrays, hashes and sets at their edges
         run: bash bench/collections_exercise.sh
+
+      # The assertions a test is written in, with no import: each one held
+      # and failed, its message naming the values and the caller's line,
+      # named cases running past a failure to an exit of 1, and every check
+      # proved able to fail against a patched copy of the prelude.
+      - name: The prelude's assertions
+        run: bash bench/assertions_exercise.sh
 
       # And what the commands say when they refuse. Every case is a mistake
       # a person makes at the command line, and the claim is one sentence
@@ -598,15 +639,8 @@ jobs:
       - name: The language server does not flinch
         run: python3 bench/lsp_soak.py
 
-      # And the question from a position nobody chose. The soak above asks
-      # one hover after each abuse; this asks every cursor question at
-      # thousands of positions across `src/std`, including the two shapes
-      # the answers were wrong on — a macro directive line and a local
-      # assignment, where a variable an arm this target does not take has
-      # no type and a visitor read it anyway. Eighteen internal errors
-      # were found that way and nothing here had asked.
-      - name: Every cursor question, everywhere in the library
-        run: python3 bench/lsp_positions.py
+      # Every cursor question at every 200th line of the library is the
+      # `lsp-positions` job's, beside this one.
 
       # The server is two processes because `iyi` carries no collector: a
       # proxy that keeps the protocol and the buffers, and a worker that
@@ -843,13 +877,70 @@ jobs:
       - run: chmod +x .build/crystal
       - name: Build iyi binary
         run: make -o .build/crystal iyi
-      - name: The standard library foundation and discovered exercises
+      # The foundation's own sections; the modules' exercises are the
+      # std-siblings shards below, side by side.
+      - name: The standard library foundation
+        env:
+          STD_SIBLINGS: "0"
         run: bash bench/std_exercise.sh
       # crystal-metric's port: twenty-six benchmarks that check their own
       # answers against the Crystal program's, over one program that uses
       # the library together; four broken modules prove it can fail.
       - name: crystal-metric's port answers as Crystal does
         run: bash bench/metric_port.sh
+
+  # Every module's own exercise, in four shards (bench/std_siblings.sh).
+  # One after another they ran past the std job's hour: 39 of 91 had run at
+  # sixty minutes, std/http's proofs alone thirteen of them, on top of the
+  # foundation's twenty-five. Interleaved, each shard carries a quarter:
+  # in three, the shard with std/http - 21 minutes of HTTPS under two
+  # certificates and its proofs - ran past 45.
+  std-siblings:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    container:
+      image: crystallang/crystal:1.21.0-build
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    name: "The standard library's module exercises, shard ${{ matrix.shard }} of 4"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v5
+        with:
+          name: crystal
+          path: .build
+      - run: chmod +x .build/crystal
+      - name: Build iyi binary
+        run: make -o .build/crystal iyi
+      # The crypto modules' gates hold them to OpenSSL through Python's
+      # cryptography - signatures, chains, a TLS server - and skip that
+      # half, saying so, where it is missing. It was missing here. And the
+      # gates hold their modules to Python 3.14: `compression.zstd` and
+      # zipfile's Zstandard are 3.14's, `ipaddress`'s registries and
+      # `shlex`, `email` and liblzma answer otherwise in 3.12, which is the
+      # container's, and std/png's oracle is Pillow. uv brings 3.14 into a
+      # container that has no setup-python.
+      - name: Python 3.14 with cryptography and Pillow, for the oracles
+        run: |
+          apt-get update -qq && apt-get install -y -qq python3 python3-pip > /dev/null
+          python3 -m pip install -q --break-system-packages uv
+          uv python install 3.14
+          uv venv --python 3.14 /opt/oracle
+          uv pip install --python /opt/oracle/bin/python -q cryptography pillow
+          echo /opt/oracle/bin >> "$GITHUB_PATH"
+      - name: The module exercises of this shard
+        run: bash bench/std_siblings.sh ${{ matrix.shard }} 4
+      # std/tls's reads and writes against OpenSSL, each set against its
+      # cipher's own rate on the same machine (bench/tls_speed.sh): a share
+      # needs no shard but one.
+      - name: std/tls's throughput, against its cipher's
+        if: matrix.shard == 4
+        run: bash bench/tls_speed.sh
 
   targets:
     needs: build
@@ -1013,6 +1104,13 @@ jobs:
             -o cross/process-aarch64 bench/std_process_exercise.iyi
           ./bin/iyi build --cross-compile --target x86_64-linux-musl \
             -o cross/process-musl bench/std_process_exercise.iyi
+          # std/debug's own stack walk on the other instruction set - its
+          # register numbers and its capture are aarch64's - and linked
+          # against the other libc's start files.
+          ./bin/iyi build --cross-compile --target aarch64-linux-gnu \
+            -o cross/debug-aarch64 bench/std_debug_cross.iyi
+          ./bin/iyi build --cross-compile --target x86_64-linux-musl \
+            -o cross/debug-musl bench/std_debug_cross.iyi
 
           # The Windows probe: the two shapes whose output has been seen wrong,
           # a case conversion and a number rendered into a string — then the
@@ -1089,13 +1187,24 @@ jobs:
             cc conc-musl.o -o conc-musl &&
             ./conc-musl > conc.txt &&
             cc process-musl.o -o process-musl &&
-            timeout 300 ./process-musl > process.txt 2>&1
+            timeout 300 ./process-musl > process.txt 2>&1 &&
+            cc debug-musl.o -o debug-musl &&
+            { ./debug-musl > debug-musl.txt 2>&1; true; }
           ' || status=$?
-          echo "== process.txt"; cat cross/process.txt 2>/dev/null || echo "(not written)"
+          for out in process debug-musl; do
+            echo "== $out.txt"; cat "cross/$out.txt" 2>/dev/null || echo "(not written)"
+          done
           [ "${status:-0}" -eq 0 ]
           diff cross/expected.txt cross/got.txt && echo "musl: same output"
           grep -q "every property held" cross/conc.txt && echo "musl: III.4 held"
-          grep -q "ALL CHECKS PASSED" cross/process.txt && echo "musl: std/process held"
+          # A failed `&&` list stops a `bash -e` step only when it is the
+          # last command, so these two say so themselves.
+          grep -q "ALL CHECKS PASSED" cross/process.txt && echo "musl: std/process held" || exit 1
+          # The panic is the program's exit; the trace is what is checked.
+          { grep -qE "^0 +[^ ]*gamma[^ ]* at .*std_debug_cross\.iyi:15:" cross/debug-musl.txt &&
+            grep -qE "^1 +[^ ]*beta[^ ]* at .*std_debug_cross\.iyi:20:" cross/debug-musl.txt &&
+            grep -qE "^2 +[^ ]*alpha[^ ]* at .*std_debug_cross\.iyi:24:" cross/debug-musl.txt &&
+            echo "musl: std/debug named every frame"; } || exit 1
 
       # Every program's output goes to a file and the chain stops at the
       # first failure, which is why a red run here used to say nothing but
@@ -1117,9 +1226,11 @@ jobs:
               gcc threads-aarch64.o -o threads-aarch64 &&
               timeout 300 ./threads-aarch64 4 > threads.txt 2>&1 &&
               gcc process-aarch64.o -o process-aarch64 &&
-              timeout 300 ./process-aarch64 > process.txt 2>&1
+              timeout 300 ./process-aarch64 > process.txt 2>&1 &&
+              gcc debug-aarch64.o -o debug-aarch64 &&
+              { timeout 120 ./debug-aarch64 > debug-aarch64.txt 2>&1; true; }
             ' || status=$?
-          for out in got conc floor threads process; do
+          for out in got conc floor threads process debug-aarch64; do
             echo "== $out.txt"; cat "cross/$out.txt" 2>/dev/null || echo "(not written)"
           done
           [ "${status:-0}" -eq 0 ]
@@ -1129,7 +1240,11 @@ jobs:
           # kernel's ABI and the asm, which is what this arm is for.
           grep -q "every property held" cross/floor.txt && echo "aarch64: the thread floor held"
           grep -q "every property held" cross/threads.txt && echo "aarch64: threads under the collector held"
-          grep -q "ALL CHECKS PASSED" cross/process.txt && echo "aarch64: std/process held"
+          grep -q "ALL CHECKS PASSED" cross/process.txt && echo "aarch64: std/process held" || exit 1
+          { grep -qE "^0 +[^ ]*gamma[^ ]* at .*std_debug_cross\.iyi:15:" cross/debug-aarch64.txt &&
+            grep -qE "^1 +[^ ]*beta[^ ]* at .*std_debug_cross\.iyi:20:" cross/debug-aarch64.txt &&
+            grep -qE "^2 +[^ ]*alpha[^ ]* at .*std_debug_cross\.iyi:24:" cross/debug-aarch64.txt &&
+            echo "aarch64: std/debug named every frame"; } || exit 1
 
   # darwin arm64 is a run target now (SPEC.md III.4.8): the concurrency
   # runtime's kqueue arm, the panic registry and every sample run natively on
@@ -1316,7 +1431,12 @@ jobs:
       # patched a branch this platform never compiles). Every one had been
       # green on Linux for a release. `std_exercise.sh` drives the whole
       # set and fails on any of them, and the gate-per-module rule with it.
-      - name: The native standard library and its module exercises
+      # The foundation's own sections; the modules' exercises are the
+      # darwin-std-siblings shards below, which ran this job past its two
+      # hours when they were a step here.
+      - name: The native standard library's foundation
+        env:
+          STD_SIBLINGS: "0"
         run: bash bench/std_exercise.sh
 
       # `std/socket`'s gate is named from before the `std_` prefix, so the
@@ -1435,6 +1555,46 @@ jobs:
           path: dist/
           if-no-files-found: error
           retention-days: 7
+
+  # Every module's own exercise on darwin, in four shards
+  # (bench/std_siblings.sh), each building its own compiler from the same
+  # cached static LLVM: as one step of the job above they ran it past its
+  # hundred and twenty minutes, seventy of them in that step alone.
+  darwin-std-siblings:
+    runs-on: macos-14
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    name: "The standard library's module exercises on darwin, shard ${{ matrix.shard }} of 4"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install the bootstrap toolchain
+        run: |
+          brew install crystal coreutils pkgconf
+          echo "$(brew --prefix)/opt/coreutils/libexec/gnubin" >> "$GITHUB_PATH"
+      - name: Restore the static LLVM
+        id: llvm-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/llvm-static
+          key: llvm-static-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-static-llvm.sh') }}
+      - name: Build the static LLVM (cache miss)
+        if: steps.llvm-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build-static-llvm.sh "$HOME/llvm-static"
+      - name: Build `iyi`
+        run: make iyi LLVM_CONFIG="$HOME/llvm-static/bin/llvm-config"
+      # Python 3.14, as on Linux: the oracles' modules answer as 3.14's do.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Python's cryptography and Pillow, for the oracles
+        run: python3 -m pip install -q cryptography pillow
+      - name: The module exercises of this shard, on darwin
+        run: bash bench/std_siblings.sh ${{ matrix.shard }} 4
 
   # A Windows binary, run twenty times, and every run held to the right
   # answer. Three things used to happen: it printed the right answer, it
@@ -1745,6 +1905,9 @@ jobs:
       #                      bench/arena_exercise.sh asserts and a tally
       #                      cannot
       #   wasm32_exercise    a wasm32 program
+      #   std_debug_cross    its pass is a panic, whose trace cross-run
+      #                      reads on aarch64 and musl; Windows' own trace
+      #                      is bench/panics.sh's
       #
       # The sockets came off this list when `std/socket` and `std/udp` got
       # their Winsock arms, and `std_file_exercise` came off it when the
@@ -1759,7 +1922,7 @@ jobs:
           # it - a line two seconds in - and an empty stdin is its failure.
           $skip = @(
             "std_http_server.iyi", "arena_large_probe.iyi", "wasm32_exercise.iyi",
-            "stdin_park.iyi"
+            "stdin_park.iyi", "std_debug_cross.iyi"
           )
           $env:TEST_SANDBOX = Join-Path $env:RUNNER_TEMP "sandbox"
           $env:IYI_FILE_SANDBOX = Join-Path $env:RUNNER_TEMP "filesandbox"
@@ -2112,10 +2275,13 @@ jobs:
           bash bench/parallel_mark.sh
           bash bench/concurrent_mark.sh
 
-      - name: The standard library's gates, on Windows
+      # The foundation's own sections; the modules' exercises are the
+      # windows-std-siblings shards below.
+      - name: The standard library's foundation, on Windows
         shell: bash
         env:
           PYTHONUNBUFFERED: "1"
+          STD_SIBLINGS: "0"
         run: bash bench/std_exercise.sh
 
       # The socket gate, which the sweep above does not reach (its name is
@@ -2124,6 +2290,61 @@ jobs:
       - name: Sockets, on Windows
         shell: bash
         run: bash bench/socket_exercise.sh
+
+  # Every module's own exercise on Windows, in four shards
+  # (bench/std_siblings.sh): one after another, with the collector's gates
+  # and the foundation before them, they ran past this job's ninety minutes.
+  windows-std-siblings:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    name: "The standard library's module exercises on Windows, shard ${{ matrix.shard }} of 4"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: 1.21.0
+
+      - name: What this machine has
+        shell: pwsh
+        run: |
+          if (-not (Get-Command make -ErrorAction SilentlyContinue)) {
+            choco install make --no-progress -y
+          }
+          $lib = (crystal env CRYSTAL_LIBRARY_PATH).Trim()
+          $llvm = (Get-Content "$lib\llvm_VERSION")[0].Trim()
+          "CRYSTAL_LIBRARY_PATH=$lib" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "LLVM_VERSION=$llvm" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+
+      - name: Build the fork's compiler, then `iyi`
+        shell: cmd
+        run: |
+          make -f Makefile.win crystal || exit /b 1
+          make -f Makefile.win iyi
+
+      # Python 3.14, as on Linux: a gate asks for `python3` first, which
+      # setup-python's Windows build has beside `python`.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Python's cryptography and Pillow, for the oracles
+        shell: bash
+        run: |
+          python -m pip install -q cryptography pillow
+          python3 --version
+      - name: The module exercises of this shard, on Windows
+        shell: bash
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: bash bench/std_siblings.sh ${{ matrix.shard }} 4
 
   # The gates the Linux job runs that no Windows job did: the runtime's
   # own exercises, the boundaries bound from Crystal's library, the floors,
@@ -2203,6 +2424,7 @@ jobs:
           bash bench/enum_exercise.sh
           bash bench/float_text.sh
           bash bench/collections_exercise.sh
+          bash bench/assertions_exercise.sh
           bash bench/runtime_exercise.sh
           bash bench/server_load.sh
           bash bench/defer_cost.sh
@@ -2731,10 +2953,10 @@ jobs:
   # red would ship a claim nobody on that platform can reproduce.
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [binary, darwin, clean-room, iyi, compiler-specs, stdlib-specs,
-            samples, std, targets, cross-objects, cross-run, wasi-run,
+    needs: [binary, darwin, darwin-std-siblings, clean-room, iyi, compiler-specs, stdlib-specs,
+            samples, lsp-positions, std, std-siblings, targets, cross-objects, cross-run, wasi-run,
             windows-probe, windows-collector, windows-runtime, windows-native, windows-std,
-            windows-gates, windows-compiler-specs,
+            windows-std-siblings, windows-gates, windows-compiler-specs,
             wasm32-collector]
     runs-on: ubuntu-24.04
     timeout-minutes: 15

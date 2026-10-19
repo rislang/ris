@@ -12,6 +12,7 @@
 
 import std/socket::{IyiSocket, SocketError, IPv6Address}
 import std/env::{ENV}
+import std/gc::{GC}
 
 args = Program.args
 if args.size > 0 && args[0] == "refused"
@@ -62,6 +63,57 @@ c3 = conn.read(4).or_panic
 raise "short_read: chunk 3 size mismatch" if c3.bytesize != 4
 raise "short_read: chunk 3 content mismatch" if c3 != "CDEF"
 puts "short_read: ok"
+
+# A small read asked for with room for much more costs what arrived: a
+# heap buffer of the whole 64 KB per read was garbage the size of the
+# room for every answer - a server reading 64 KB at a time made 64 KB of
+# it per 30-byte request. std/http's buffer of its own measured it there
+# until the server stopped asking the socket for strings.
+GC.disable
+lean_before = GC.stats.bytes_since_collection
+100.times do
+  client.write("thirty bytes of one request..\n")
+  got = conn.read(65536).or_panic
+  raise "small_read: #{got.bytesize} bytes, not 30" unless got.bytesize == 30
+end
+lean_bytes = (GC.stats.bytes_since_collection - lean_before) // 100_u64
+GC.enable
+raise "small_read: a 30-byte read with room for 64 KB allocated #{lean_bytes} bytes" unless lean_bytes < 1024_u64
+puts "small_read: ok"
+
+# Each end names the other as the other names itself.
+raise "remote_address: #{conn.remote_address.inspect}, not #{client.local_address}" unless conn.remote_address == client.local_address
+raise "remote_port: #{conn.remote_port.inspect}, not #{client.local_port}" unless conn.remote_port == client.local_port
+raise "remote_address: the client's #{client.remote_address.inspect}" unless client.remote_address == "127.0.0.1" && client.remote_port == port
+puts "remote_address: ok"
+
+# A connect waits at most `timeout_ms` for its handshake. A listener whose
+# backlog of one is full and never accepted: Linux drops the SYNs past it,
+# and a connect without a limit waited the kernel's two minutes of
+# retries.
+{% if flag?(:linux) %}
+  full = IyiSocket.listen("127.0.0.1", 0, 1)
+  queued = [] of IyiSocket
+  timed_out = 0
+  4.times do
+    started = __iyi_monotonic_ns
+    tried = IyiSocket.connect("127.0.0.1", full.local_port, timeout_ms: 300)
+    took = (__iyi_monotonic_ns - started) // 1000000_i64
+    if tried.is_a?(IyiSocket)
+      queued << tried
+    elsif tried.is_a?(SocketError)
+      raise "connect_timeout: #{tried.message}, not a timeout" unless tried.timed_out?
+      raise "connect_timeout: a 300 ms limit took #{took} ms" unless took >= 250 && took < 1500
+      timed_out = timed_out + 1
+    end
+  end
+  raise "connect_timeout: no connect past the backlog timed out" if timed_out == 0
+  queued.each { |s| s.close }
+  full.close
+  puts "connect_timeout: ok"
+{% else %}
+  puts "connect_timeout: ok"
+{% end %}
 
 # 4. Closed peer detection (EOF)
 client.close
@@ -631,5 +683,51 @@ puts "closed_under_read: ok"
   raise "reset_after_chunk: after the chunk the read answered #{r_second.inspect}, not the reset" unless r_second.is_a?(SocketError) && r_second.disconnected?
   puts "reset_after_chunk: ok"
 {% end %}
+
+# A socket as a stream: lines through `to_io`, which is the same stream
+# every time - two lines sent in one write reach the second `read_line`
+# from the first one's read-ahead - a long line through the buffers, and a
+# read the socket refuses as the end, which `read_failed?` tells apart.
+stream_server = IyiSocket.listen("127.0.0.1", 0)
+stream_port = stream_server.local_port
+stream_heard = [] of String
+long_line = "x" * 100_000
+group do |g|
+  g.spawn do
+    peer = stream_server.accept.or_panic
+    peer.read_timeout_ms = 2000
+    while line = peer.to_io.read_line(chomp: true)
+      stream_heard << line
+      peer.to_io.puts "echo #{line.bytesize > 20 ? line.bytesize.to_s : line}"
+      peer.to_io.flush
+    end
+    peer.to_io.close
+    0
+  end
+  g.spawn do
+    talker = IyiSocket.connect("127.0.0.1", stream_port).or_panic
+    io = talker.to_io
+    io.write("one\ntwo\n")
+    io.flush
+    replies = [io.read_line(chomp: true), io.read_line(chomp: true)]
+    raise "stream: two lines in one write answered #{replies}" unless replies == ["echo one", "echo two"]
+    io.puts long_line
+    io.flush
+    long_reply = io.read_line(chomp: true)
+    raise "stream: a 100,000-byte line answered #{long_reply}" unless long_reply == "echo 100000"
+    io.close
+    0
+  end
+end
+raise "stream: the server heard #{stream_heard.size} lines" unless stream_heard.size == 3 && stream_heard[2] == long_line
+quiet_talker = IyiSocket.connect("127.0.0.1", stream_port).or_panic
+quiet_peer = stream_server.accept.or_panic
+quiet_peer.read_timeout_ms = 50
+quiet = quiet_peer.to_io
+raise "stream: a timed-out read is the end, and read_failed? says it failed" unless quiet.read_line.nil? && quiet.read_failed?
+quiet.close
+quiet_talker.close
+stream_server.close
+puts "stream: ok"
 
 puts "socket_exercise: all checks passed"
