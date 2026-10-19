@@ -1,0 +1,39 @@
+# escape: HTML escaping ten million short texts, a third of them with a
+# character to escape: `HTML.escape(String)` on the heap, or into a
+# writer on the tape. Prints a checksum and the GC heap bytes per text,
+# collection off; time it from outside.
+#
+#   ./bin/ris build --release -o escape samples/ris/escape.ri
+#   ./escape; ./escape tape
+
+module samples/escape_bench
+
+import std/html::{HTML}
+import std/gc::{GC}
+
+N = 10000000
+TEXTS = ["Mari Maasikas, Tallinn", "Tom & Jerry <cartoon>", "a plain sentence of words"]
+
+on_tape = Program.args.includes?("tape")
+GC.disable
+before = GC.stats.bytes_since_collection
+sum = 0_i64
+if on_tape
+  i = 0
+  while i < N
+    tape do
+      w = Tape::String::Writer.new(64)
+      HTML.escape(TEXTS[i % 3], w)
+      sum += w.length
+    end
+    i += 1
+  end
+else
+  i = 0
+  while i < N
+    sum += HTML.escape(TEXTS[i % 3]).bytesize
+    i += 1
+  end
+end
+puts sum
+puts "#{(GC.stats.bytes_since_collection - before) // N.to_u64} heap bytes a text"

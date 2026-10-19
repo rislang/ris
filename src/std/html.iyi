@@ -72,31 +72,20 @@ pub struct HTML
     end
     return string unless needs
 
-    # Allocate and copy
-    bytes = [] of UInt8
-    i = 0
-    while i < len
-      b = raw[i]
-      case b
-      when 38_u8 # &
-        bytes << 38_u8; bytes << 97_u8; bytes << 109_u8; bytes << 112_u8; bytes << 59_u8
-      when 60_u8 # <
-        bytes << 38_u8; bytes << 108_u8; bytes << 116_u8; bytes << 59_u8
-      when 62_u8 # >
-        bytes << 38_u8; bytes << 103_u8; bytes << 116_u8; bytes << 59_u8
-      when 34_u8 # "
-        bytes << 38_u8; bytes << 113_u8; bytes << 117_u8; bytes << 111_u8; bytes << 116_u8; bytes << 59_u8
-      when 39_u8 # '
-        bytes << 38_u8; bytes << 35_u8; bytes << 51_u8; bytes << 57_u8; bytes << 59_u8
-      else
-        bytes << b
-      end
-      i = i + 1
+    # Escaped on a tape, then copied out once.
+    escaped = ""
+    tape do
+      w = Tape::String::Writer.new(len + 16)
+      w.append_html_escaped(string)
+      escaped = w.finish.to_s
     end
+    escaped
+  end
 
-    String.new(bytes.size) do |buf|
-      buf.copy_from(bytes.to_unsafe, bytes.size)
-    end
+  # *string* escaped as `escape` escapes it, written into the caller's
+  # *writer* on the tape: nothing on the heap.
+  def self.escape(string : String, writer : Tape::String::Writer) : Nil
+    writer.append_html_escaped(string)
   end
 
   # Returns Unicode codepoint for standard HTML named entity, or -1 if unknown.

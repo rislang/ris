@@ -98,10 +98,10 @@ else
   mkdir -p "$WORK/patched_amp/std"
   "$PY" - <<PY
 src = open("$REPO/src/std/html.iyi").read()
-old = 'bytes << 38_u8; bytes << 97_u8; bytes << 109_u8; bytes << 112_u8; bytes << 59_u8'
+old = 'w.append_html_escaped(string)'
 if old not in src:
     raise SystemExit("patch site missing")
-open("$WORK/patched_amp/std/html.iyi", "w").write(src.replace(old, 'bytes << 38_u8', 1))
+open("$WORK/patched_amp/std/html.iyi", "w").write(src.replace(old, 'w.append(string)', 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the patch did not apply"
