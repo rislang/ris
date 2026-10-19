@@ -13,8 +13,9 @@ before. [SPEC.md](SPEC.md) is iyi's, unchanged.
 * Tape types: `Tape::String` (and its `Writer`), `Tape::Array(T)`,
   `Tape::Tree(T)`, structs marked `@[OnTape]`. All else is on the heap.
 * Only the outermost block frees, at once, on every exit (panic too);
-  nested blocks share it, so a library opens one at no cost. A loop that
-  would grow it opens its block inside, where no outer one is open.
+  nested blocks share it, so a library opens one at no cost. Work whose
+  temporaries should not wait for the outer end takes `Tape.local`, a
+  tape of its own freed when its block ends (web's intake, Slim).
 * A fiber's tape is its own, saved on a switch; a spawned fiber has one of
   its own. 64 warm spares keep the next block's pages written.
 

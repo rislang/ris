@@ -27,9 +27,9 @@ end
 
 # Runs the block on the fiber's tape, freed when the block ends. Inside
 # another `tape` it shares that tape and frees nothing: what it made is
-# freed with the outer one, so a library opens one at no cost, and a long
-# loop opens one inside, not around it. As `group` brings tasks
-# (SPEC III.4.1), a block brings the tape, never a call.
+# freed with the outer one, so a library opens one at no cost; a long
+# loop inside one takes `Tape.local` for its temporaries. As `group`
+# brings tasks (SPEC III.4.1), a block brings the tape, never a call.
 #
 # Returns nothing: a block's value is the one thing that leaves it
 # without an assignment the compiler can see, so it is not passed on.
@@ -42,6 +42,15 @@ end
 
 module Tape
   CAPACITY = 67108864_u64
+
+  # A tape of its own, even inside a `tape` block, freed when the block
+  # ends: for work whose temporaries should not stay on the outer tape
+  # until it ends. Copy what is kept before leaving. Outer `Tape::String`s
+  # may be read; other outer tape values become owned data first.
+  def self.local(&) : Nil
+    IyiRegion.tape_local(CAPACITY) { yield }
+    nil
+  end
 
   # Bytes on the tape. Not a `String`: a `String` may be kept anywhere, and
   # this may not. `to_s` copies it into a retained String explicitly.

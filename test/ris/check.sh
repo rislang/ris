@@ -42,6 +42,12 @@ expect owned_cache "to be String, not Tape::String"
 
 expect mixed_growth      "grows on the tape in this loop, and Tape::String.build"
 expect mixed_growth_call "grows on the tape in this loop, and \`tag\`"
+expect local_outer "is a variable of the code around this Tape.local"
+expect local_mutate "cannot use outer tape value"
+expect local_self 'cannot use outer tape value `self`'
+expect local_return "cannot return a tape value"
+expect local_break "cannot break a tape value"
+expect local_yield_break "cannot break a tape value"
 expect two_writers       "all grow on the tape in this loop"
 expect raw_pointer      "to_unsafe\` of a Tape::String outside the library"
 expect raw_view         "Tape::String.new(pointer, size)\` outside the library"
@@ -52,6 +58,10 @@ expect array_grow       "private method 'grow' called for Tape::Array(T)"
 
 
 # Cleanup keeps LIFO order on early exits, panic and explicit exit.
+out=$("$RIS" run test/ris/local.ri 2>&1)
+if [ "$out" = 'PASS: local isolation, reuse, nested scopes, borrowed text, retained copy and early exits' ]; then echo "runs     local"; else echo "FAILED   local: $out"; status=1; fi
+out=$("$RIS" run test/ris/local_cleanup.ri 2>/dev/null)
+if [ "$out" = 'PASS: local panic cleanup and fiber switching' ]; then echo "runs     local_cleanup"; else echo "FAILED   local_cleanup: $out"; status=1; fi
 out=$("$RIS" run test/ris/cleanup_order.ri 2>&1)
 if [ "$out" = $'inner return\nouter return\n7\nnested\ninner break\nouter break\ninner return\nouter return\n7\ntrue\ntrue' ]; then echo "runs     cleanup_order"; else echo "FAILED   cleanup_order: $out"; status=1; fi
 out=$("$RIS" run test/ris/cleanup_allocations.ri 2>&1)

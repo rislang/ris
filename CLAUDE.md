@@ -30,7 +30,7 @@ of its own; the caller's `tape` owns all of it, freed at once:
   `Tape::String` or an `@[OnTape]` struct the caller's scope owns, viewing
   the input bytes rather than copying them.
 * Temporaries go on the caller's tape: a nested `tape` block shares it at
-  no cost.
+  no cost. No `Tape.local` per call; it costs more than small work saves.
 * The caller decides what to copy to the heap, and when.
 * No raw pointers in an API: pass `Tape::String`, `Tape::String::Writer`,
   `Tape::Array` or an `@[OnTape]` struct. Outside a `std/` module the

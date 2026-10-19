@@ -1,0 +1,7 @@
+module test/ris/refused/local_outer
+tape do
+  outer = Tape::String.build { |w| w.append("outer") }
+  Tape.local do
+    outer = Tape::String.build { |w| w.append("inner") }
+  end
+end
