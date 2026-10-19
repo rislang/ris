@@ -33,7 +33,7 @@
 module std/http
 
 import std/socket::{IyiSocket, SocketError}
-import std/uri::{URI}
+import std/uri::{URI, Query}
 
 pub struct Response
   getter status : Int32
@@ -316,6 +316,12 @@ pub struct Incoming
       i = i + 1
     end
     nil
+  end
+
+  # The query's parameters, read on the request's tape (`Query.parse`).
+  def params : Query
+    q = @query
+    Query.parse(q ? q : @path[0, 0])
   end
 end
 

@@ -40,6 +40,10 @@ def answer(req : Incoming, res : Outgoing) : Nil
     w.append("?")
     w.append(q)
   end
+  if x = req.params["x"]?
+    w.append(" x=")
+    w.append(x)
+  end
   if name = req.header("x-name")
     w.append(" name=")
     w.append(name)
@@ -63,7 +67,7 @@ def reply(body : String, close : Bool = false) : String
   "HTTP/1.1 200 OK\r\nX-Seen: yes\r\nContent-Length: #{body.bytesize}\r\nConnection: #{close ? "close" : "keep-alive"}\r\n\r\n" + body
 end
 
-want = reply("GET /echo?x=1 name=mari body=") +
+want = reply("GET /echo?x=1 x=1 name=mari body=") +
        reply("POST /echo body=hello") +
        reply("POST /echo body=abc") +
        "HTTP/1.1 200 OK\r\nX-Seen: yes\r\nContent-Length: 16\r\nConnection: keep-alive\r\n\r\n" +
