@@ -8,7 +8,7 @@
     Median of nine runs, 1.6 million DTOs.</desc>
   <style>
     :root { --fg:#e4edf5; --dim:#9aafc1; --bg:#080e17;
-      --track:#182637; --tape:#39e6cf; --heap:#ffb454; }
+      --track:#182637; --tape:#39e6cf; --heap:#929eab; }
     text { font:13px ui-monospace, SFMono-Regular, Menlo,
       Consolas, monospace; fill:var(--fg); }
     .dim { fill:var(--dim); }
