@@ -359,13 +359,19 @@ pub struct Outgoing
   # a token, a value with no line break or control character, and none of
   # the lines the server writes itself.
   def header(name : String, value : String) : Nil
+    header(name, Tape::String.view(value))
+  end
+
+  # The same with a value on the tape: one written there, a stamp
+  # (`Time#to_rfc3339`) or a request's own field, as it is.
+  def header(name : String, value : Tape::String) : Nil
     Server.check_line(name, value)
     if HTTP.same_name?(name, "Content-Length") || HTTP.same_name?(name, "Connection") || HTTP.same_name?(name, "Transfer-Encoding")
       raise "HTTP: #{name} is the server's own line"
     end
     count = @state[1]
     raise "HTTP: more than #{LINES} header lines" if count == LINES
-    @lines[count] = Field.new(Tape::String.view(name), Tape::String.view(value))
+    @lines[count] = Field.new(Tape::String.view(name), value)
     @state[1] = count + 1
   end
 
@@ -949,6 +955,18 @@ pub struct Server
     raise "HTTP: not a header name: #{name.inspect}" unless HTTP.token?(name)
     raise "HTTP: header #{name} contains a line break" if HTTP.has_break?(value)
     raise "HTTP: header #{name} contains a control character" if HTTP.control?(value)
+  end
+
+  # The same for a value on the tape, read where it lies.
+  def self.check_line(name : String, value : Tape::String) : Nil
+    raise "HTTP: not a header name: #{name.inspect}" unless HTTP.token?(name)
+    p = value.to_unsafe
+    i = 0
+    while i < value.bytesize
+      raise "HTTP: header #{name} contains a line break" if p[i] == 13_u8 || p[i] == 10_u8
+      i = i + 1
+    end
+    raise "HTTP: header #{name} contains a control character" if HTTP.control?(p, value.bytesize)
   end
 
   # The head of *response* written into *w*, checked as `format_response`

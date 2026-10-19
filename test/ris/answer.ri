@@ -1,7 +1,8 @@
 # `Server.answer` over loopback: the block reads the method, path, query,
-# a header and the body where they arrived, and writes a status, a header
-# and a body. A plain request takes the fast path; a chunked one, an
-# `Expect` and HTTP/1.0 are read as `serve` reads them and handed on alike.
+# a header and the body where they arrived, and writes a status, headers
+# (one a request's own field, from the tape) and a body. A plain request
+# takes the fast path; a chunked one, an `Expect` and HTTP/1.0 are read as
+# `serve` reads them and handed on alike.
 # A HEAD gets the length and no body, a 204 neither, and `Connection:
 # close` ends the connection after its answer.
 module test/ris/answer
@@ -32,6 +33,9 @@ def answer(req : Incoming, res : Outgoing) : Nil
     return
   end
   res.header("X-Seen", "yes")
+  if agent = req.header("x-name")
+    res.header("X-Echo", agent)
+  end
   w = res.body
   w.append(req.method)
   w.append(" ")
@@ -67,7 +71,7 @@ def reply(body : String, close : Bool = false) : String
   "HTTP/1.1 200 OK\r\nX-Seen: yes\r\nContent-Length: #{body.bytesize}\r\nConnection: #{close ? "close" : "keep-alive"}\r\n\r\n" + body
 end
 
-want = reply("GET /echo?x=1 x=1 name=mari body=") +
+want = "HTTP/1.1 200 OK\r\nX-Seen: yes\r\nX-Echo: mari\r\nContent-Length: 33\r\nConnection: keep-alive\r\n\r\nGET /echo?x=1 x=1 name=mari body=" +
        reply("POST /echo body=hello") +
        reply("POST /echo body=abc") +
        "HTTP/1.1 200 OK\r\nX-Seen: yes\r\nContent-Length: 16\r\nConnection: keep-alive\r\n\r\n" +
