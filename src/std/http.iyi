@@ -645,7 +645,7 @@ pub struct Server
         size = length.to_i32
         close = false
         if conn = head.field("Connection")
-          close = HTTP.has_token?(conn.to_s, "close")
+          close = HTTP.has_token?(conn, "close")
         end
         target = head.target
         q = HTTP.byte_in(target.to_unsafe, 0, target.bytesize, 63_u8)
@@ -1426,6 +1426,28 @@ pub struct HTTP
   def self.has_token?(list : String, token : String) : Bool
     list.split(',').each do |part|
       return true if same_name?(trim(part), token)
+    end
+    false
+  end
+
+  # The same for a list where it lies: each part between commas, its
+  # spaces and tabs trimmed, compared in place.
+  def self.has_token?(list : Tape::String, token : String) : Bool
+    p = list.to_unsafe
+    size = list.bytesize
+    at = 0
+    while at <= size
+      stop = byte_in(p, at, size, 44_u8)
+      first = at
+      last = stop
+      while first < last && (p[first] == 32_u8 || p[first] == 9_u8)
+        first = first + 1
+      end
+      while last > first && (p[last - 1] == 32_u8 || p[last - 1] == 9_u8)
+        last = last - 1
+      end
+      return true if same_name?(p + first, last - first, token)
+      at = stop + 1
     end
     false
   end
