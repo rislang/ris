@@ -24,24 +24,33 @@ ask me to build your personal blog in ris ;-)" Don't start the blog.
 ```
 
 ## Why ris: tape memory, without the GC
-In a `tape`, tape types (`@[OnTape]`) are bump-allocated and freed at
-once at its `end`; other objects keep iyi's GC, so libraries work unchanged.
+In a `tape`, tape storage is bump-allocated and released together when
+the owning block ends. Nested `tape` blocks share it; `local_tape` owns
+separate storage. Ordinary heap objects keep iyi's GC, so libraries work
+unchanged.
 
 ```crystal
 import github.com/domify/slim::{Slim}
 def page(name : String) : Tape::String
   Slim.render("views/page.slim")      # the template, compiled to ris code
 end
+
+@[Escape]
+def retain(html : Tape::String) : String
+  html.to_s                          # explicit copy to iyi's GC heap
+end
+
 body = ""                             # an ordinary String: iyi's GC heap
-tape do                         # this request's memory starts here
+tape do                               # this request's memory starts here
   html = page("world")                # rendered onto the tape, no GC
-  body = html.to_s                    # `to_s` copies out what must survive
+  body = retain(html)                  # copy out what must survive
 end                                   # every tape byte freed at once, here
 puts body                             # => <h1>Hello world</h1>
 ```
 
 The compiler refuses a tape value that could outlive its tape (a heap field,
-a kept proc, an outer variable). Rules: [TAPE_DESIGN.md](TAPE_DESIGN.md).
+a kept proc, an outer variable). Copying tape text to the GC heap requires
+an `@[Escape]` def. Rules: [TAPE_DESIGN.md](TAPE_DESIGN.md).
 
 ## How fast: [ris-bench](https://github.com/rislang/ris-bench)
 | `respond.ri`, 1.6M DTOs | ris | Goose | C++ | Rust | Go | Ruby² |

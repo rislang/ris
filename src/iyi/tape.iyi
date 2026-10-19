@@ -1,8 +1,8 @@
 # PROTOTYPE (ris, step B): tape values.
 #
-# `tape { }` gives the running fiber a tape: one mapping that values
-# made inside the block are bumped into, all of it freed with one store when
-# the block returns, and the mapping kept warm for the fiber's next scope.
+# `tape do … end` gives the running fiber a tape: values are bumped into
+# mappings, chained when full. The owning scope releases them together;
+# spare mappings keep bounded warm pages for the thread's next scope.
 # Only the types below are made there. Every other allocation - a String, an
 # Array, anything a library builds and keeps - goes to the collected heap as
 # it always did, which is what makes this safe where a region that took
@@ -15,9 +15,9 @@
 # proc's captures, a `tape` block's value, or a variable of the code
 # around the scope.
 #
-# The values are structs holding one pointer, to a state block on the tape,
-# so a copy of one - a block parameter, an argument - writes through to the
-# same value.
+# Writers, arrays and trees hold pointers to state blocks on the tape;
+# copies share that state. A Tape::String is an immutable byte view.
+# Copying a tape value does not copy its backing storage.
 
 # Internal ABI: the normalizer lowers only the runtime's own tape guard to
 # a cached registry entry plus an inline release on normal exits.
@@ -28,13 +28,14 @@ end
 # Runs the block on the fiber's tape, freed when the block ends. Inside
 # another `tape` it shares that tape and frees nothing: what it made is
 # freed with the outer one, so a library opens one at no cost; a long
-# loop inside one takes `Tape.local` for its temporaries. As `group`
+# loop inside one takes `local_tape` for its temporaries. As `group`
 # brings tasks (SPEC III.4.1), a block brings the tape, never a call.
 #
 # Returns nothing: a block's value is the one thing that leaves it
 # without an assignment the compiler can see, so it is not passed on.
 # What must outlive the block is copied into a variable of the code
-# around it (`total = page.sum`, `body = text.to_s`).
+# around it (`total = page.sum`, `body = retain(text)`, where `retain`
+# copies with `to_s` in an `@[Escape]` def).
 def tape(&) : Nil
   IyiRegion.tape_scope(Tape::CAPACITY) { yield }
   nil
@@ -135,7 +136,8 @@ module Tape
     end
 
     # Copy these borrowed bytes into an independent GC-managed String.
-    # Call inside the owning tape block when retaining text in a cache/task.
+    # Application copies require an `@[Escape]` def, called while the
+    # source is alive, for example when retaining text in a cache/task.
     # The source is unchanged and remains valid until its scope ends.
     def to_s : ::String
       ::String.new(@bytesize) { |buffer| buffer.copy_from(@ptr, @bytesize) }

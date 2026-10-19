@@ -3,8 +3,8 @@
 #   ./bin/ris run samples/ris/hello.ri
 #
 # ris is iyi with tape memory: values marked `@[OnTape]` live on the running
-# fiber's tape inside `tape`, and all of it is freed with one store when
-# the block ends. Everything else is iyi as it is - and so, underneath,
+# fiber's tape inside `tape`, and its owning scope releases the storage
+# together when it ends. Everything else is iyi as it is - and so, underneath,
 # Crystal.
 module samples/hello
 

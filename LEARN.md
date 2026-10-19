@@ -1,7 +1,6 @@
 # Learning ris: read this before writing code
 
 For an agent that is to write ris. Read the source first, then build.
-
 ## 1. Get the source and read, in this order
 
 `git clone https://github.com/rislang/ris`, then:
@@ -56,8 +55,9 @@ end
 
 * Memory: ordinary objects use the GC. For bounded work (a request) use
   `tape do … end` with `Tape::String` (and its `Writer`),
-  `Tape::Array(T)` and `@[OnTape]` structs; `to_s` copies out what must
-  survive the block.
+  `Tape::Array(T)`, `Tape::Tree(T)` and `@[OnTape]` structs. To keep text,
+  call `to_s` in an `@[Escape]` def before its tape ends. Nested `tape`
+  shares storage; `local_tape` owns its own. See `TAPE_DESIGN.md`.
 * Tape only where it pays: a hot path that allocates much short-lived
   data. Elsewhere plain ris is simpler, and copy-out can cost more than
   it saves. Measure it yourself: run the real work with and without tape

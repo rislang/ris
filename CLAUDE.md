@@ -10,7 +10,7 @@ ris is iyi plus Goose's tape memory.
   iyi is merged.
 * It pays where much short-lived data is made and dropped together: a
   request, a parse, a render, a response. Keep what a caller retains on the
-  heap, and copy it out with `to_s` at the boundary.
+  heap, and copy it out with `to_s` in an `@[Escape]` def at the boundary.
 * Measure before keeping a change: the same work with and without tape,
   `--release`, interleaved runs, time and peak memory or bytes allocated.
   Keep it only for a clear gain, and say the numbers in the commit.
@@ -22,8 +22,8 @@ ris is iyi plus Goose's tape memory.
 
 ## A library works on the caller's tape
 
-As Slim does (`Slim.render`, `Slim.embed`), a library does not open a tape
-of its own; the caller's `tape` owns all of it, freed at once:
+A library returns tape data on the caller's active tape; the owning
+scope releases it all together:
 
 * Take input already on the tape (`Tape::String`), not a `String` copy of it.
 * Write output into the caller's `Tape::String::Writer`, or return a
@@ -31,7 +31,9 @@ of its own; the caller's `tape` owns all of it, freed at once:
   the input bytes rather than copying them.
 * Temporaries go on the caller's tape: a nested `tape` block shares it at
   no cost. No `local_tape` per call; it costs more than small work saves.
-* The caller decides what to copy to the heap, and when.
+* The caller decides what to copy to the heap, and when. Application
+  helpers making that copy need `@[Escape]` individually; the annotation
+  does not propagate to called helpers or permit tape values to escape.
 * No raw pointers in an API: pass `Tape::String`, `Tape::String::Writer`,
   `Tape::Array` or an `@[OnTape]` struct. Outside a `std/` module the
   compiler refuses a `Tape::String`'s `to_unsafe` and
@@ -40,6 +42,8 @@ of its own; the caller's `tape` owns all of it, freed at once:
   socket call takes the pointer.
 * Keep the `String` API beside it, built on the tape one: it opens a
   `tape` (shared when the caller has one) and copies the result out.
+  In application code, mark that wrapper `@[Escape]`. Library code in
+  `std/` and `src/iyi/` is exempt from heap-copy and raw-pointer checks.
 
 Example: `HTTP.parse_head(bytes : Tape::String) : ParsedHead | ParseError`,
 with `ParsedHead`'s method, target and fields as views into *bytes*;
