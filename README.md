@@ -24,29 +24,48 @@ ask me to build your personal blog in ris ;-)" Don't start the blog.
 ```
 
 ## Why ris: tape memory, without the GC
-In a `tape`, tape storage is bump-allocated and released together when
-the owning block ends. Nested `tape` blocks share it; `local_tape` owns
-separate storage. Ordinary heap objects keep iyi's GC, so libraries work
-unchanged.
+A request's input, parsed fields and response body can live on one tape.
+When the owning `tape` block ends, it frees their storage all at once.
+Ordinary heap objects are still managed by iyi's GC.
 
 ```crystal
-import github.com/domify/slim::{Slim}
-def page(name : String) : Tape::String
-  Slim.render("views/page.slim")      # the template, compiled to ris code
-end
+import std/http::{Server, ParsedHead}  # supports tape memory
+import std/json::{JSON}               # supports tape memory
+import github.com/domify/slim::{Slim}  # supports tape memory
 
-@[Escape]
-def retain(html : Tape::String) : String
-  html.to_s                          # explicit copy to iyi's GC heap
-end
+# Process one HTTP request and render JSON and HTML on its tape.
+tape do # one tape for this request
+  bytes = Tape::String.new("GET /hello HTTP/1.1\r\nHost: localhost\r\n\r\n")
+  req = Server.parse_head(bytes) # fields borrow bytes on the tape
+  if req.is_a?(ParsedHead)
+    # The whole JSON body is built in tape memory, without a heap buffer.
+    body = Tape::String.build do |writer|
+      writer.json do |json|
+        json.object do
+          json.field "method", req.method
+          json.field "path", req.target
+        end
+      end
+    end
+    puts body  # => {"method":"GET","path":"/hello"}
 
-body = ""                             # an ordinary String: iyi's GC heap
-tape do                               # this request's memory starts here
-  html = page("world")                # rendered onto the tape, no GC
-  body = retain(html)                  # copy out what must survive
-end                                   # every tape byte freed at once, here
-puts body                             # => <h1>Hello world</h1>
+    # The whole HTML output is rendered onto this request's tape.
+    # The template tree is compiled to code; no runtime DOM is allocated.
+    html = Slim.render("views/page.slim")
+    puts html  # => <h1>/hello</h1>
+  end
+end # request data, JSON and HTML freed together
 ```
+
+The template, `views/page.slim`:
+
+```slim
+h1= req.target
+```
+
+`bytes`, `body` and `html` are `Tape::String` values. Writing them to a
+file or socket requires no copy to the GC heap. `Server.answer` manages
+a tape scope for each request and sends the response before the scope ends.
 
 The compiler refuses a tape value that could outlive its tape (a heap field,
 a kept proc, an outer variable). Copying tape text to the GC heap requires
