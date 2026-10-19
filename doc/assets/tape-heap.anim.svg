@@ -1,0 +1,1763 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 742 540" width="742"
+  height="540" role="img" aria-labelledby="title desc">
+  <title id="title">Tape and heap: the same respond workload</title>
+  <desc id="desc">Recorded: tape 0.67 seconds and 1.7 MB;
+    heap 1.55 seconds and 7.6 MB. Playback is 5 times slower.
+    Each block represents 0.05 MB: 34 tape blocks, 152 heap blocks.
+    Median of nine runs, 1.6 million DTOs.</desc>
+  <style>
+    :root { --fg:#e4edf5; --dim:#9aafc1; --bg:#080e17;
+      --track:#182637; --tape:#39e6cf; --heap:#ffb454; }
+    text { font:13px ui-monospace, SFMono-Regular, Menlo,
+      Consolas, monospace; fill:var(--fg); }
+    .dim { fill:var(--dim); }
+    .time { font-weight:600; }
+    .brand { font-size:24px; font-weight:800;
+      letter-spacing:3px; }
+    .tag { font-size:11px; letter-spacing:1.5px; }
+    .memory { font-size:20px; font-weight:700; }
+    .cells rect { stroke:#080e17; stroke-width:1; }
+    @keyframes tape0 {
+      0% { opacity:0; }
+      13.814879%, 100% { opacity:1; }
+    }
+    .tape0 { animation:tape0
+      17.0s steps(1, end) infinite; }
+    @keyframes tape1 {
+      0% { opacity:0; }
+      14.394464%, 100% { opacity:1; }
+    }
+    .tape1 { animation:tape1
+      17.0s steps(1, end) infinite; }
+    @keyframes tape2 {
+      0% { opacity:0; }
+      14.974048%, 100% { opacity:1; }
+    }
+    .tape2 { animation:tape2
+      17.0s steps(1, end) infinite; }
+    @keyframes tape3 {
+      0% { opacity:0; }
+      15.553633%, 100% { opacity:1; }
+    }
+    .tape3 { animation:tape3
+      17.0s steps(1, end) infinite; }
+    @keyframes tape4 {
+      0% { opacity:0; }
+      16.133218%, 100% { opacity:1; }
+    }
+    .tape4 { animation:tape4
+      17.0s steps(1, end) infinite; }
+    @keyframes tape5 {
+      0% { opacity:0; }
+      16.712803%, 100% { opacity:1; }
+    }
+    .tape5 { animation:tape5
+      17.0s steps(1, end) infinite; }
+    @keyframes tape6 {
+      0% { opacity:0; }
+      17.292388%, 100% { opacity:1; }
+    }
+    .tape6 { animation:tape6
+      17.0s steps(1, end) infinite; }
+    @keyframes tape7 {
+      0% { opacity:0; }
+      17.871972%, 100% { opacity:1; }
+    }
+    .tape7 { animation:tape7
+      17.0s steps(1, end) infinite; }
+    @keyframes tape8 {
+      0% { opacity:0; }
+      18.451557%, 100% { opacity:1; }
+    }
+    .tape8 { animation:tape8
+      17.0s steps(1, end) infinite; }
+    @keyframes tape9 {
+      0% { opacity:0; }
+      19.031142%, 100% { opacity:1; }
+    }
+    .tape9 { animation:tape9
+      17.0s steps(1, end) infinite; }
+    @keyframes tape10 {
+      0% { opacity:0; }
+      19.610727%, 100% { opacity:1; }
+    }
+    .tape10 { animation:tape10
+      17.0s steps(1, end) infinite; }
+    @keyframes tape11 {
+      0% { opacity:0; }
+      20.190311%, 100% { opacity:1; }
+    }
+    .tape11 { animation:tape11
+      17.0s steps(1, end) infinite; }
+    @keyframes tape12 {
+      0% { opacity:0; }
+      20.769896%, 100% { opacity:1; }
+    }
+    .tape12 { animation:tape12
+      17.0s steps(1, end) infinite; }
+    @keyframes tape13 {
+      0% { opacity:0; }
+      21.349481%, 100% { opacity:1; }
+    }
+    .tape13 { animation:tape13
+      17.0s steps(1, end) infinite; }
+    @keyframes tape14 {
+      0% { opacity:0; }
+      21.929066%, 100% { opacity:1; }
+    }
+    .tape14 { animation:tape14
+      17.0s steps(1, end) infinite; }
+    @keyframes tape15 {
+      0% { opacity:0; }
+      22.508651%, 100% { opacity:1; }
+    }
+    .tape15 { animation:tape15
+      17.0s steps(1, end) infinite; }
+    @keyframes tape16 {
+      0% { opacity:0; }
+      23.088235%, 100% { opacity:1; }
+    }
+    .tape16 { animation:tape16
+      17.0s steps(1, end) infinite; }
+    @keyframes tape17 {
+      0% { opacity:0; }
+      23.667820%, 100% { opacity:1; }
+    }
+    .tape17 { animation:tape17
+      17.0s steps(1, end) infinite; }
+    @keyframes tape18 {
+      0% { opacity:0; }
+      24.247405%, 100% { opacity:1; }
+    }
+    .tape18 { animation:tape18
+      17.0s steps(1, end) infinite; }
+    @keyframes tape19 {
+      0% { opacity:0; }
+      24.826990%, 100% { opacity:1; }
+    }
+    .tape19 { animation:tape19
+      17.0s steps(1, end) infinite; }
+    @keyframes tape20 {
+      0% { opacity:0; }
+      25.406574%, 100% { opacity:1; }
+    }
+    .tape20 { animation:tape20
+      17.0s steps(1, end) infinite; }
+    @keyframes tape21 {
+      0% { opacity:0; }
+      25.986159%, 100% { opacity:1; }
+    }
+    .tape21 { animation:tape21
+      17.0s steps(1, end) infinite; }
+    @keyframes tape22 {
+      0% { opacity:0; }
+      26.565744%, 100% { opacity:1; }
+    }
+    .tape22 { animation:tape22
+      17.0s steps(1, end) infinite; }
+    @keyframes tape23 {
+      0% { opacity:0; }
+      27.145329%, 100% { opacity:1; }
+    }
+    .tape23 { animation:tape23
+      17.0s steps(1, end) infinite; }
+    @keyframes tape24 {
+      0% { opacity:0; }
+      27.724913%, 100% { opacity:1; }
+    }
+    .tape24 { animation:tape24
+      17.0s steps(1, end) infinite; }
+    @keyframes tape25 {
+      0% { opacity:0; }
+      28.304498%, 100% { opacity:1; }
+    }
+    .tape25 { animation:tape25
+      17.0s steps(1, end) infinite; }
+    @keyframes tape26 {
+      0% { opacity:0; }
+      28.884083%, 100% { opacity:1; }
+    }
+    .tape26 { animation:tape26
+      17.0s steps(1, end) infinite; }
+    @keyframes tape27 {
+      0% { opacity:0; }
+      29.463668%, 100% { opacity:1; }
+    }
+    .tape27 { animation:tape27
+      17.0s steps(1, end) infinite; }
+    @keyframes tape28 {
+      0% { opacity:0; }
+      30.043253%, 100% { opacity:1; }
+    }
+    .tape28 { animation:tape28
+      17.0s steps(1, end) infinite; }
+    @keyframes tape29 {
+      0% { opacity:0; }
+      30.622837%, 100% { opacity:1; }
+    }
+    .tape29 { animation:tape29
+      17.0s steps(1, end) infinite; }
+    @keyframes tape30 {
+      0% { opacity:0; }
+      31.202422%, 100% { opacity:1; }
+    }
+    .tape30 { animation:tape30
+      17.0s steps(1, end) infinite; }
+    @keyframes tape31 {
+      0% { opacity:0; }
+      31.782007%, 100% { opacity:1; }
+    }
+    .tape31 { animation:tape31
+      17.0s steps(1, end) infinite; }
+    @keyframes tape32 {
+      0% { opacity:0; }
+      32.361592%, 100% { opacity:1; }
+    }
+    .tape32 { animation:tape32
+      17.0s steps(1, end) infinite; }
+    @keyframes tape33 {
+      0% { opacity:0; }
+      32.941176%, 100% { opacity:1; }
+    }
+    .tape33 { animation:tape33
+      17.0s steps(1, end) infinite; }
+    @keyframes done-tape {
+      0% { opacity:0; }
+      32.941176%, 100% { opacity:1; }
+    }
+    .done-tape { animation:done-tape
+      17.0s steps(1, end) infinite; }
+    @keyframes heap0 {
+      0% { opacity:0; }
+      13.535217%, 100% { opacity:1; }
+    }
+    .heap0 { animation:heap0
+      17.0s steps(1, end) infinite; }
+    @keyframes heap1 {
+      0% { opacity:0; }
+      13.835139%, 100% { opacity:1; }
+    }
+    .heap1 { animation:heap1
+      17.0s steps(1, end) infinite; }
+    @keyframes heap2 {
+      0% { opacity:0; }
+      14.135062%, 100% { opacity:1; }
+    }
+    .heap2 { animation:heap2
+      17.0s steps(1, end) infinite; }
+    @keyframes heap3 {
+      0% { opacity:0; }
+      14.434985%, 100% { opacity:1; }
+    }
+    .heap3 { animation:heap3
+      17.0s steps(1, end) infinite; }
+    @keyframes heap4 {
+      0% { opacity:0; }
+      14.734907%, 100% { opacity:1; }
+    }
+    .heap4 { animation:heap4
+      17.0s steps(1, end) infinite; }
+    @keyframes heap5 {
+      0% { opacity:0; }
+      15.034830%, 100% { opacity:1; }
+    }
+    .heap5 { animation:heap5
+      17.0s steps(1, end) infinite; }
+    @keyframes heap6 {
+      0% { opacity:0; }
+      15.334752%, 100% { opacity:1; }
+    }
+    .heap6 { animation:heap6
+      17.0s steps(1, end) infinite; }
+    @keyframes heap7 {
+      0% { opacity:0; }
+      15.634675%, 100% { opacity:1; }
+    }
+    .heap7 { animation:heap7
+      17.0s steps(1, end) infinite; }
+    @keyframes heap8 {
+      0% { opacity:0; }
+      15.934598%, 100% { opacity:1; }
+    }
+    .heap8 { animation:heap8
+      17.0s steps(1, end) infinite; }
+    @keyframes heap9 {
+      0% { opacity:0; }
+      16.234520%, 100% { opacity:1; }
+    }
+    .heap9 { animation:heap9
+      17.0s steps(1, end) infinite; }
+    @keyframes heap10 {
+      0% { opacity:0; }
+      16.534443%, 100% { opacity:1; }
+    }
+    .heap10 { animation:heap10
+      17.0s steps(1, end) infinite; }
+    @keyframes heap11 {
+      0% { opacity:0; }
+      16.834365%, 100% { opacity:1; }
+    }
+    .heap11 { animation:heap11
+      17.0s steps(1, end) infinite; }
+    @keyframes heap12 {
+      0% { opacity:0; }
+      17.134288%, 100% { opacity:1; }
+    }
+    .heap12 { animation:heap12
+      17.0s steps(1, end) infinite; }
+    @keyframes heap13 {
+      0% { opacity:0; }
+      17.434211%, 100% { opacity:1; }
+    }
+    .heap13 { animation:heap13
+      17.0s steps(1, end) infinite; }
+    @keyframes heap14 {
+      0% { opacity:0; }
+      17.734133%, 100% { opacity:1; }
+    }
+    .heap14 { animation:heap14
+      17.0s steps(1, end) infinite; }
+    @keyframes heap15 {
+      0% { opacity:0; }
+      18.034056%, 100% { opacity:1; }
+    }
+    .heap15 { animation:heap15
+      17.0s steps(1, end) infinite; }
+    @keyframes heap16 {
+      0% { opacity:0; }
+      18.333978%, 100% { opacity:1; }
+    }
+    .heap16 { animation:heap16
+      17.0s steps(1, end) infinite; }
+    @keyframes heap17 {
+      0% { opacity:0; }
+      18.633901%, 100% { opacity:1; }
+    }
+    .heap17 { animation:heap17
+      17.0s steps(1, end) infinite; }
+    @keyframes heap18 {
+      0% { opacity:0; }
+      18.933824%, 100% { opacity:1; }
+    }
+    .heap18 { animation:heap18
+      17.0s steps(1, end) infinite; }
+    @keyframes heap19 {
+      0% { opacity:0; }
+      19.233746%, 100% { opacity:1; }
+    }
+    .heap19 { animation:heap19
+      17.0s steps(1, end) infinite; }
+    @keyframes heap20 {
+      0% { opacity:0; }
+      19.533669%, 100% { opacity:1; }
+    }
+    .heap20 { animation:heap20
+      17.0s steps(1, end) infinite; }
+    @keyframes heap21 {
+      0% { opacity:0; }
+      19.833591%, 100% { opacity:1; }
+    }
+    .heap21 { animation:heap21
+      17.0s steps(1, end) infinite; }
+    @keyframes heap22 {
+      0% { opacity:0; }
+      20.133514%, 100% { opacity:1; }
+    }
+    .heap22 { animation:heap22
+      17.0s steps(1, end) infinite; }
+    @keyframes heap23 {
+      0% { opacity:0; }
+      20.433437%, 100% { opacity:1; }
+    }
+    .heap23 { animation:heap23
+      17.0s steps(1, end) infinite; }
+    @keyframes heap24 {
+      0% { opacity:0; }
+      20.733359%, 100% { opacity:1; }
+    }
+    .heap24 { animation:heap24
+      17.0s steps(1, end) infinite; }
+    @keyframes heap25 {
+      0% { opacity:0; }
+      21.033282%, 100% { opacity:1; }
+    }
+    .heap25 { animation:heap25
+      17.0s steps(1, end) infinite; }
+    @keyframes heap26 {
+      0% { opacity:0; }
+      21.333204%, 100% { opacity:1; }
+    }
+    .heap26 { animation:heap26
+      17.0s steps(1, end) infinite; }
+    @keyframes heap27 {
+      0% { opacity:0; }
+      21.633127%, 100% { opacity:1; }
+    }
+    .heap27 { animation:heap27
+      17.0s steps(1, end) infinite; }
+    @keyframes heap28 {
+      0% { opacity:0; }
+      21.933050%, 100% { opacity:1; }
+    }
+    .heap28 { animation:heap28
+      17.0s steps(1, end) infinite; }
+    @keyframes heap29 {
+      0% { opacity:0; }
+      22.232972%, 100% { opacity:1; }
+    }
+    .heap29 { animation:heap29
+      17.0s steps(1, end) infinite; }
+    @keyframes heap30 {
+      0% { opacity:0; }
+      22.532895%, 100% { opacity:1; }
+    }
+    .heap30 { animation:heap30
+      17.0s steps(1, end) infinite; }
+    @keyframes heap31 {
+      0% { opacity:0; }
+      22.832817%, 100% { opacity:1; }
+    }
+    .heap31 { animation:heap31
+      17.0s steps(1, end) infinite; }
+    @keyframes heap32 {
+      0% { opacity:0; }
+      23.132740%, 100% { opacity:1; }
+    }
+    .heap32 { animation:heap32
+      17.0s steps(1, end) infinite; }
+    @keyframes heap33 {
+      0% { opacity:0; }
+      23.432663%, 100% { opacity:1; }
+    }
+    .heap33 { animation:heap33
+      17.0s steps(1, end) infinite; }
+    @keyframes heap34 {
+      0% { opacity:0; }
+      23.732585%, 100% { opacity:1; }
+    }
+    .heap34 { animation:heap34
+      17.0s steps(1, end) infinite; }
+    @keyframes heap35 {
+      0% { opacity:0; }
+      24.032508%, 100% { opacity:1; }
+    }
+    .heap35 { animation:heap35
+      17.0s steps(1, end) infinite; }
+    @keyframes heap36 {
+      0% { opacity:0; }
+      24.332430%, 100% { opacity:1; }
+    }
+    .heap36 { animation:heap36
+      17.0s steps(1, end) infinite; }
+    @keyframes heap37 {
+      0% { opacity:0; }
+      24.632353%, 100% { opacity:1; }
+    }
+    .heap37 { animation:heap37
+      17.0s steps(1, end) infinite; }
+    @keyframes heap38 {
+      0% { opacity:0; }
+      24.932276%, 100% { opacity:1; }
+    }
+    .heap38 { animation:heap38
+      17.0s steps(1, end) infinite; }
+    @keyframes heap39 {
+      0% { opacity:0; }
+      25.232198%, 100% { opacity:1; }
+    }
+    .heap39 { animation:heap39
+      17.0s steps(1, end) infinite; }
+    @keyframes heap40 {
+      0% { opacity:0; }
+      25.532121%, 100% { opacity:1; }
+    }
+    .heap40 { animation:heap40
+      17.0s steps(1, end) infinite; }
+    @keyframes heap41 {
+      0% { opacity:0; }
+      25.832043%, 100% { opacity:1; }
+    }
+    .heap41 { animation:heap41
+      17.0s steps(1, end) infinite; }
+    @keyframes heap42 {
+      0% { opacity:0; }
+      26.131966%, 100% { opacity:1; }
+    }
+    .heap42 { animation:heap42
+      17.0s steps(1, end) infinite; }
+    @keyframes heap43 {
+      0% { opacity:0; }
+      26.431889%, 100% { opacity:1; }
+    }
+    .heap43 { animation:heap43
+      17.0s steps(1, end) infinite; }
+    @keyframes heap44 {
+      0% { opacity:0; }
+      26.731811%, 100% { opacity:1; }
+    }
+    .heap44 { animation:heap44
+      17.0s steps(1, end) infinite; }
+    @keyframes heap45 {
+      0% { opacity:0; }
+      27.031734%, 100% { opacity:1; }
+    }
+    .heap45 { animation:heap45
+      17.0s steps(1, end) infinite; }
+    @keyframes heap46 {
+      0% { opacity:0; }
+      27.331656%, 100% { opacity:1; }
+    }
+    .heap46 { animation:heap46
+      17.0s steps(1, end) infinite; }
+    @keyframes heap47 {
+      0% { opacity:0; }
+      27.631579%, 100% { opacity:1; }
+    }
+    .heap47 { animation:heap47
+      17.0s steps(1, end) infinite; }
+    @keyframes heap48 {
+      0% { opacity:0; }
+      27.931502%, 100% { opacity:1; }
+    }
+    .heap48 { animation:heap48
+      17.0s steps(1, end) infinite; }
+    @keyframes heap49 {
+      0% { opacity:0; }
+      28.231424%, 100% { opacity:1; }
+    }
+    .heap49 { animation:heap49
+      17.0s steps(1, end) infinite; }
+    @keyframes heap50 {
+      0% { opacity:0; }
+      28.531347%, 100% { opacity:1; }
+    }
+    .heap50 { animation:heap50
+      17.0s steps(1, end) infinite; }
+    @keyframes heap51 {
+      0% { opacity:0; }
+      28.831269%, 100% { opacity:1; }
+    }
+    .heap51 { animation:heap51
+      17.0s steps(1, end) infinite; }
+    @keyframes heap52 {
+      0% { opacity:0; }
+      29.131192%, 100% { opacity:1; }
+    }
+    .heap52 { animation:heap52
+      17.0s steps(1, end) infinite; }
+    @keyframes heap53 {
+      0% { opacity:0; }
+      29.431115%, 100% { opacity:1; }
+    }
+    .heap53 { animation:heap53
+      17.0s steps(1, end) infinite; }
+    @keyframes heap54 {
+      0% { opacity:0; }
+      29.731037%, 100% { opacity:1; }
+    }
+    .heap54 { animation:heap54
+      17.0s steps(1, end) infinite; }
+    @keyframes heap55 {
+      0% { opacity:0; }
+      30.030960%, 100% { opacity:1; }
+    }
+    .heap55 { animation:heap55
+      17.0s steps(1, end) infinite; }
+    @keyframes heap56 {
+      0% { opacity:0; }
+      30.330882%, 100% { opacity:1; }
+    }
+    .heap56 { animation:heap56
+      17.0s steps(1, end) infinite; }
+    @keyframes heap57 {
+      0% { opacity:0; }
+      30.630805%, 100% { opacity:1; }
+    }
+    .heap57 { animation:heap57
+      17.0s steps(1, end) infinite; }
+    @keyframes heap58 {
+      0% { opacity:0; }
+      30.930728%, 100% { opacity:1; }
+    }
+    .heap58 { animation:heap58
+      17.0s steps(1, end) infinite; }
+    @keyframes heap59 {
+      0% { opacity:0; }
+      31.230650%, 100% { opacity:1; }
+    }
+    .heap59 { animation:heap59
+      17.0s steps(1, end) infinite; }
+    @keyframes heap60 {
+      0% { opacity:0; }
+      31.530573%, 100% { opacity:1; }
+    }
+    .heap60 { animation:heap60
+      17.0s steps(1, end) infinite; }
+    @keyframes heap61 {
+      0% { opacity:0; }
+      31.830495%, 100% { opacity:1; }
+    }
+    .heap61 { animation:heap61
+      17.0s steps(1, end) infinite; }
+    @keyframes heap62 {
+      0% { opacity:0; }
+      32.130418%, 100% { opacity:1; }
+    }
+    .heap62 { animation:heap62
+      17.0s steps(1, end) infinite; }
+    @keyframes heap63 {
+      0% { opacity:0; }
+      32.430341%, 100% { opacity:1; }
+    }
+    .heap63 { animation:heap63
+      17.0s steps(1, end) infinite; }
+    @keyframes heap64 {
+      0% { opacity:0; }
+      32.730263%, 100% { opacity:1; }
+    }
+    .heap64 { animation:heap64
+      17.0s steps(1, end) infinite; }
+    @keyframes heap65 {
+      0% { opacity:0; }
+      33.030186%, 100% { opacity:1; }
+    }
+    .heap65 { animation:heap65
+      17.0s steps(1, end) infinite; }
+    @keyframes heap66 {
+      0% { opacity:0; }
+      33.330108%, 100% { opacity:1; }
+    }
+    .heap66 { animation:heap66
+      17.0s steps(1, end) infinite; }
+    @keyframes heap67 {
+      0% { opacity:0; }
+      33.630031%, 100% { opacity:1; }
+    }
+    .heap67 { animation:heap67
+      17.0s steps(1, end) infinite; }
+    @keyframes heap68 {
+      0% { opacity:0; }
+      33.929954%, 100% { opacity:1; }
+    }
+    .heap68 { animation:heap68
+      17.0s steps(1, end) infinite; }
+    @keyframes heap69 {
+      0% { opacity:0; }
+      34.229876%, 100% { opacity:1; }
+    }
+    .heap69 { animation:heap69
+      17.0s steps(1, end) infinite; }
+    @keyframes heap70 {
+      0% { opacity:0; }
+      34.529799%, 100% { opacity:1; }
+    }
+    .heap70 { animation:heap70
+      17.0s steps(1, end) infinite; }
+    @keyframes heap71 {
+      0% { opacity:0; }
+      34.829721%, 100% { opacity:1; }
+    }
+    .heap71 { animation:heap71
+      17.0s steps(1, end) infinite; }
+    @keyframes heap72 {
+      0% { opacity:0; }
+      35.129644%, 100% { opacity:1; }
+    }
+    .heap72 { animation:heap72
+      17.0s steps(1, end) infinite; }
+    @keyframes heap73 {
+      0% { opacity:0; }
+      35.429567%, 100% { opacity:1; }
+    }
+    .heap73 { animation:heap73
+      17.0s steps(1, end) infinite; }
+    @keyframes heap74 {
+      0% { opacity:0; }
+      35.729489%, 100% { opacity:1; }
+    }
+    .heap74 { animation:heap74
+      17.0s steps(1, end) infinite; }
+    @keyframes heap75 {
+      0% { opacity:0; }
+      36.029412%, 100% { opacity:1; }
+    }
+    .heap75 { animation:heap75
+      17.0s steps(1, end) infinite; }
+    @keyframes heap76 {
+      0% { opacity:0; }
+      36.329334%, 100% { opacity:1; }
+    }
+    .heap76 { animation:heap76
+      17.0s steps(1, end) infinite; }
+    @keyframes heap77 {
+      0% { opacity:0; }
+      36.629257%, 100% { opacity:1; }
+    }
+    .heap77 { animation:heap77
+      17.0s steps(1, end) infinite; }
+    @keyframes heap78 {
+      0% { opacity:0; }
+      36.929180%, 100% { opacity:1; }
+    }
+    .heap78 { animation:heap78
+      17.0s steps(1, end) infinite; }
+    @keyframes heap79 {
+      0% { opacity:0; }
+      37.229102%, 100% { opacity:1; }
+    }
+    .heap79 { animation:heap79
+      17.0s steps(1, end) infinite; }
+    @keyframes heap80 {
+      0% { opacity:0; }
+      37.529025%, 100% { opacity:1; }
+    }
+    .heap80 { animation:heap80
+      17.0s steps(1, end) infinite; }
+    @keyframes heap81 {
+      0% { opacity:0; }
+      37.828947%, 100% { opacity:1; }
+    }
+    .heap81 { animation:heap81
+      17.0s steps(1, end) infinite; }
+    @keyframes heap82 {
+      0% { opacity:0; }
+      38.128870%, 100% { opacity:1; }
+    }
+    .heap82 { animation:heap82
+      17.0s steps(1, end) infinite; }
+    @keyframes heap83 {
+      0% { opacity:0; }
+      38.428793%, 100% { opacity:1; }
+    }
+    .heap83 { animation:heap83
+      17.0s steps(1, end) infinite; }
+    @keyframes heap84 {
+      0% { opacity:0; }
+      38.728715%, 100% { opacity:1; }
+    }
+    .heap84 { animation:heap84
+      17.0s steps(1, end) infinite; }
+    @keyframes heap85 {
+      0% { opacity:0; }
+      39.028638%, 100% { opacity:1; }
+    }
+    .heap85 { animation:heap85
+      17.0s steps(1, end) infinite; }
+    @keyframes heap86 {
+      0% { opacity:0; }
+      39.328560%, 100% { opacity:1; }
+    }
+    .heap86 { animation:heap86
+      17.0s steps(1, end) infinite; }
+    @keyframes heap87 {
+      0% { opacity:0; }
+      39.628483%, 100% { opacity:1; }
+    }
+    .heap87 { animation:heap87
+      17.0s steps(1, end) infinite; }
+    @keyframes heap88 {
+      0% { opacity:0; }
+      39.928406%, 100% { opacity:1; }
+    }
+    .heap88 { animation:heap88
+      17.0s steps(1, end) infinite; }
+    @keyframes heap89 {
+      0% { opacity:0; }
+      40.228328%, 100% { opacity:1; }
+    }
+    .heap89 { animation:heap89
+      17.0s steps(1, end) infinite; }
+    @keyframes heap90 {
+      0% { opacity:0; }
+      40.528251%, 100% { opacity:1; }
+    }
+    .heap90 { animation:heap90
+      17.0s steps(1, end) infinite; }
+    @keyframes heap91 {
+      0% { opacity:0; }
+      40.828173%, 100% { opacity:1; }
+    }
+    .heap91 { animation:heap91
+      17.0s steps(1, end) infinite; }
+    @keyframes heap92 {
+      0% { opacity:0; }
+      41.128096%, 100% { opacity:1; }
+    }
+    .heap92 { animation:heap92
+      17.0s steps(1, end) infinite; }
+    @keyframes heap93 {
+      0% { opacity:0; }
+      41.428019%, 100% { opacity:1; }
+    }
+    .heap93 { animation:heap93
+      17.0s steps(1, end) infinite; }
+    @keyframes heap94 {
+      0% { opacity:0; }
+      41.727941%, 100% { opacity:1; }
+    }
+    .heap94 { animation:heap94
+      17.0s steps(1, end) infinite; }
+    @keyframes heap95 {
+      0% { opacity:0; }
+      42.027864%, 100% { opacity:1; }
+    }
+    .heap95 { animation:heap95
+      17.0s steps(1, end) infinite; }
+    @keyframes heap96 {
+      0% { opacity:0; }
+      42.327786%, 100% { opacity:1; }
+    }
+    .heap96 { animation:heap96
+      17.0s steps(1, end) infinite; }
+    @keyframes heap97 {
+      0% { opacity:0; }
+      42.627709%, 100% { opacity:1; }
+    }
+    .heap97 { animation:heap97
+      17.0s steps(1, end) infinite; }
+    @keyframes heap98 {
+      0% { opacity:0; }
+      42.927632%, 100% { opacity:1; }
+    }
+    .heap98 { animation:heap98
+      17.0s steps(1, end) infinite; }
+    @keyframes heap99 {
+      0% { opacity:0; }
+      43.227554%, 100% { opacity:1; }
+    }
+    .heap99 { animation:heap99
+      17.0s steps(1, end) infinite; }
+    @keyframes heap100 {
+      0% { opacity:0; }
+      43.527477%, 100% { opacity:1; }
+    }
+    .heap100 { animation:heap100
+      17.0s steps(1, end) infinite; }
+    @keyframes heap101 {
+      0% { opacity:0; }
+      43.827399%, 100% { opacity:1; }
+    }
+    .heap101 { animation:heap101
+      17.0s steps(1, end) infinite; }
+    @keyframes heap102 {
+      0% { opacity:0; }
+      44.127322%, 100% { opacity:1; }
+    }
+    .heap102 { animation:heap102
+      17.0s steps(1, end) infinite; }
+    @keyframes heap103 {
+      0% { opacity:0; }
+      44.427245%, 100% { opacity:1; }
+    }
+    .heap103 { animation:heap103
+      17.0s steps(1, end) infinite; }
+    @keyframes heap104 {
+      0% { opacity:0; }
+      44.727167%, 100% { opacity:1; }
+    }
+    .heap104 { animation:heap104
+      17.0s steps(1, end) infinite; }
+    @keyframes heap105 {
+      0% { opacity:0; }
+      45.027090%, 100% { opacity:1; }
+    }
+    .heap105 { animation:heap105
+      17.0s steps(1, end) infinite; }
+    @keyframes heap106 {
+      0% { opacity:0; }
+      45.327012%, 100% { opacity:1; }
+    }
+    .heap106 { animation:heap106
+      17.0s steps(1, end) infinite; }
+    @keyframes heap107 {
+      0% { opacity:0; }
+      45.626935%, 100% { opacity:1; }
+    }
+    .heap107 { animation:heap107
+      17.0s steps(1, end) infinite; }
+    @keyframes heap108 {
+      0% { opacity:0; }
+      45.926858%, 100% { opacity:1; }
+    }
+    .heap108 { animation:heap108
+      17.0s steps(1, end) infinite; }
+    @keyframes heap109 {
+      0% { opacity:0; }
+      46.226780%, 100% { opacity:1; }
+    }
+    .heap109 { animation:heap109
+      17.0s steps(1, end) infinite; }
+    @keyframes heap110 {
+      0% { opacity:0; }
+      46.526703%, 100% { opacity:1; }
+    }
+    .heap110 { animation:heap110
+      17.0s steps(1, end) infinite; }
+    @keyframes heap111 {
+      0% { opacity:0; }
+      46.826625%, 100% { opacity:1; }
+    }
+    .heap111 { animation:heap111
+      17.0s steps(1, end) infinite; }
+    @keyframes heap112 {
+      0% { opacity:0; }
+      47.126548%, 100% { opacity:1; }
+    }
+    .heap112 { animation:heap112
+      17.0s steps(1, end) infinite; }
+    @keyframes heap113 {
+      0% { opacity:0; }
+      47.426471%, 100% { opacity:1; }
+    }
+    .heap113 { animation:heap113
+      17.0s steps(1, end) infinite; }
+    @keyframes heap114 {
+      0% { opacity:0; }
+      47.726393%, 100% { opacity:1; }
+    }
+    .heap114 { animation:heap114
+      17.0s steps(1, end) infinite; }
+    @keyframes heap115 {
+      0% { opacity:0; }
+      48.026316%, 100% { opacity:1; }
+    }
+    .heap115 { animation:heap115
+      17.0s steps(1, end) infinite; }
+    @keyframes heap116 {
+      0% { opacity:0; }
+      48.326238%, 100% { opacity:1; }
+    }
+    .heap116 { animation:heap116
+      17.0s steps(1, end) infinite; }
+    @keyframes heap117 {
+      0% { opacity:0; }
+      48.626161%, 100% { opacity:1; }
+    }
+    .heap117 { animation:heap117
+      17.0s steps(1, end) infinite; }
+    @keyframes heap118 {
+      0% { opacity:0; }
+      48.926084%, 100% { opacity:1; }
+    }
+    .heap118 { animation:heap118
+      17.0s steps(1, end) infinite; }
+    @keyframes heap119 {
+      0% { opacity:0; }
+      49.226006%, 100% { opacity:1; }
+    }
+    .heap119 { animation:heap119
+      17.0s steps(1, end) infinite; }
+    @keyframes heap120 {
+      0% { opacity:0; }
+      49.525929%, 100% { opacity:1; }
+    }
+    .heap120 { animation:heap120
+      17.0s steps(1, end) infinite; }
+    @keyframes heap121 {
+      0% { opacity:0; }
+      49.825851%, 100% { opacity:1; }
+    }
+    .heap121 { animation:heap121
+      17.0s steps(1, end) infinite; }
+    @keyframes heap122 {
+      0% { opacity:0; }
+      50.125774%, 100% { opacity:1; }
+    }
+    .heap122 { animation:heap122
+      17.0s steps(1, end) infinite; }
+    @keyframes heap123 {
+      0% { opacity:0; }
+      50.425697%, 100% { opacity:1; }
+    }
+    .heap123 { animation:heap123
+      17.0s steps(1, end) infinite; }
+    @keyframes heap124 {
+      0% { opacity:0; }
+      50.725619%, 100% { opacity:1; }
+    }
+    .heap124 { animation:heap124
+      17.0s steps(1, end) infinite; }
+    @keyframes heap125 {
+      0% { opacity:0; }
+      51.025542%, 100% { opacity:1; }
+    }
+    .heap125 { animation:heap125
+      17.0s steps(1, end) infinite; }
+    @keyframes heap126 {
+      0% { opacity:0; }
+      51.325464%, 100% { opacity:1; }
+    }
+    .heap126 { animation:heap126
+      17.0s steps(1, end) infinite; }
+    @keyframes heap127 {
+      0% { opacity:0; }
+      51.625387%, 100% { opacity:1; }
+    }
+    .heap127 { animation:heap127
+      17.0s steps(1, end) infinite; }
+    @keyframes heap128 {
+      0% { opacity:0; }
+      51.925310%, 100% { opacity:1; }
+    }
+    .heap128 { animation:heap128
+      17.0s steps(1, end) infinite; }
+    @keyframes heap129 {
+      0% { opacity:0; }
+      52.225232%, 100% { opacity:1; }
+    }
+    .heap129 { animation:heap129
+      17.0s steps(1, end) infinite; }
+    @keyframes heap130 {
+      0% { opacity:0; }
+      52.525155%, 100% { opacity:1; }
+    }
+    .heap130 { animation:heap130
+      17.0s steps(1, end) infinite; }
+    @keyframes heap131 {
+      0% { opacity:0; }
+      52.825077%, 100% { opacity:1; }
+    }
+    .heap131 { animation:heap131
+      17.0s steps(1, end) infinite; }
+    @keyframes heap132 {
+      0% { opacity:0; }
+      53.125000%, 100% { opacity:1; }
+    }
+    .heap132 { animation:heap132
+      17.0s steps(1, end) infinite; }
+    @keyframes heap133 {
+      0% { opacity:0; }
+      53.424923%, 100% { opacity:1; }
+    }
+    .heap133 { animation:heap133
+      17.0s steps(1, end) infinite; }
+    @keyframes heap134 {
+      0% { opacity:0; }
+      53.724845%, 100% { opacity:1; }
+    }
+    .heap134 { animation:heap134
+      17.0s steps(1, end) infinite; }
+    @keyframes heap135 {
+      0% { opacity:0; }
+      54.024768%, 100% { opacity:1; }
+    }
+    .heap135 { animation:heap135
+      17.0s steps(1, end) infinite; }
+    @keyframes heap136 {
+      0% { opacity:0; }
+      54.324690%, 100% { opacity:1; }
+    }
+    .heap136 { animation:heap136
+      17.0s steps(1, end) infinite; }
+    @keyframes heap137 {
+      0% { opacity:0; }
+      54.624613%, 100% { opacity:1; }
+    }
+    .heap137 { animation:heap137
+      17.0s steps(1, end) infinite; }
+    @keyframes heap138 {
+      0% { opacity:0; }
+      54.924536%, 100% { opacity:1; }
+    }
+    .heap138 { animation:heap138
+      17.0s steps(1, end) infinite; }
+    @keyframes heap139 {
+      0% { opacity:0; }
+      55.224458%, 100% { opacity:1; }
+    }
+    .heap139 { animation:heap139
+      17.0s steps(1, end) infinite; }
+    @keyframes heap140 {
+      0% { opacity:0; }
+      55.524381%, 100% { opacity:1; }
+    }
+    .heap140 { animation:heap140
+      17.0s steps(1, end) infinite; }
+    @keyframes heap141 {
+      0% { opacity:0; }
+      55.824303%, 100% { opacity:1; }
+    }
+    .heap141 { animation:heap141
+      17.0s steps(1, end) infinite; }
+    @keyframes heap142 {
+      0% { opacity:0; }
+      56.124226%, 100% { opacity:1; }
+    }
+    .heap142 { animation:heap142
+      17.0s steps(1, end) infinite; }
+    @keyframes heap143 {
+      0% { opacity:0; }
+      56.424149%, 100% { opacity:1; }
+    }
+    .heap143 { animation:heap143
+      17.0s steps(1, end) infinite; }
+    @keyframes heap144 {
+      0% { opacity:0; }
+      56.724071%, 100% { opacity:1; }
+    }
+    .heap144 { animation:heap144
+      17.0s steps(1, end) infinite; }
+    @keyframes heap145 {
+      0% { opacity:0; }
+      57.023994%, 100% { opacity:1; }
+    }
+    .heap145 { animation:heap145
+      17.0s steps(1, end) infinite; }
+    @keyframes heap146 {
+      0% { opacity:0; }
+      57.323916%, 100% { opacity:1; }
+    }
+    .heap146 { animation:heap146
+      17.0s steps(1, end) infinite; }
+    @keyframes heap147 {
+      0% { opacity:0; }
+      57.623839%, 100% { opacity:1; }
+    }
+    .heap147 { animation:heap147
+      17.0s steps(1, end) infinite; }
+    @keyframes heap148 {
+      0% { opacity:0; }
+      57.923762%, 100% { opacity:1; }
+    }
+    .heap148 { animation:heap148
+      17.0s steps(1, end) infinite; }
+    @keyframes heap149 {
+      0% { opacity:0; }
+      58.223684%, 100% { opacity:1; }
+    }
+    .heap149 { animation:heap149
+      17.0s steps(1, end) infinite; }
+    @keyframes heap150 {
+      0% { opacity:0; }
+      58.523607%, 100% { opacity:1; }
+    }
+    .heap150 { animation:heap150
+      17.0s steps(1, end) infinite; }
+    @keyframes heap151 {
+      0% { opacity:0; }
+      58.823529%, 100% { opacity:1; }
+    }
+    .heap151 { animation:heap151
+      17.0s steps(1, end) infinite; }
+    @keyframes done-heap {
+      0% { opacity:0; }
+      58.823529%, 100% { opacity:1; }
+    }
+    .done-heap { animation:done-heap
+      17.0s steps(1, end) infinite; }
+    @media (prefers-reduced-motion:reduce) {
+      .cells rect, .time { animation:none; opacity:1; }
+    }
+  </style>
+  <defs>
+    <pattern id="grid" width="20" height="20"
+      patternUnits="userSpaceOnUse">
+      <path d="M20 0H0V20" fill="none"
+        stroke="#142132" stroke-width="0.5"/>
+    </pattern>
+  </defs>
+  <rect width="742" height="540" fill="var(--bg)"/>
+  <rect width="742" height="540" fill="url(#grid)"/>
+  <path d="M0 0H742" stroke="var(--tape)" stroke-width="4"/>
+  <text x="26" y="38" class="brand">ris</text>
+  <text x="112" y="36" class="tag" fill="#39e6cf">
+    // MEMORY LAB</text>
+  <text x="26" y="64" class="dim">
+    $ bench respond --dtos 1.6M --runs 9</text>
+  <text x="716" y="36" text-anchor="end" class="tag">
+    TAPE / GC</text>
+  <path d="M26 78H716" stroke="#26384b"/>
+  <text x="26" y="100" class="tag"    style="fill:var(--tape)">TAPE</text>
+  <text x="102" y="100" class="dim">// sequential writes</text>
+  <text x="590" y="100" class="time done-tape"
+    style="fill:var(--tape)">0.67 s / done</text>
+  <text x="26" y="165"    class="memory" style="fill:var(--tape)">1.7 MB</text>
+  <rect x="26" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="46" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="66" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="86" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="106" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="126" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="146" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="166" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="186" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="206" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="226" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="246" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="266" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="286" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="306" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="326" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="346" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="366" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="386" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="406" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="426" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="446" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="466" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="486" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="506" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="526" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="546" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="566" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="586" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="606" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="626" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="646" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="666" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="686" y="114" width="16" height="18" rx="0" fill="var(--track)"/>
+  <g class="cells" fill="var(--tape)">
+    <rect x="26" y="114" width="16" height="18"
+      rx="0" class="tape0"/>
+    <rect x="46" y="114" width="16" height="18"
+      rx="0" class="tape1"/>
+    <rect x="66" y="114" width="16" height="18"
+      rx="0" class="tape2"/>
+    <rect x="86" y="114" width="16" height="18"
+      rx="0" class="tape3"/>
+    <rect x="106" y="114" width="16" height="18"
+      rx="0" class="tape4"/>
+    <rect x="126" y="114" width="16" height="18"
+      rx="0" class="tape5"/>
+    <rect x="146" y="114" width="16" height="18"
+      rx="0" class="tape6"/>
+    <rect x="166" y="114" width="16" height="18"
+      rx="0" class="tape7"/>
+    <rect x="186" y="114" width="16" height="18"
+      rx="0" class="tape8"/>
+    <rect x="206" y="114" width="16" height="18"
+      rx="0" class="tape9"/>
+    <rect x="226" y="114" width="16" height="18"
+      rx="0" class="tape10"/>
+    <rect x="246" y="114" width="16" height="18"
+      rx="0" class="tape11"/>
+    <rect x="266" y="114" width="16" height="18"
+      rx="0" class="tape12"/>
+    <rect x="286" y="114" width="16" height="18"
+      rx="0" class="tape13"/>
+    <rect x="306" y="114" width="16" height="18"
+      rx="0" class="tape14"/>
+    <rect x="326" y="114" width="16" height="18"
+      rx="0" class="tape15"/>
+    <rect x="346" y="114" width="16" height="18"
+      rx="0" class="tape16"/>
+    <rect x="366" y="114" width="16" height="18"
+      rx="0" class="tape17"/>
+    <rect x="386" y="114" width="16" height="18"
+      rx="0" class="tape18"/>
+    <rect x="406" y="114" width="16" height="18"
+      rx="0" class="tape19"/>
+    <rect x="426" y="114" width="16" height="18"
+      rx="0" class="tape20"/>
+    <rect x="446" y="114" width="16" height="18"
+      rx="0" class="tape21"/>
+    <rect x="466" y="114" width="16" height="18"
+      rx="0" class="tape22"/>
+    <rect x="486" y="114" width="16" height="18"
+      rx="0" class="tape23"/>
+    <rect x="506" y="114" width="16" height="18"
+      rx="0" class="tape24"/>
+    <rect x="526" y="114" width="16" height="18"
+      rx="0" class="tape25"/>
+    <rect x="546" y="114" width="16" height="18"
+      rx="0" class="tape26"/>
+    <rect x="566" y="114" width="16" height="18"
+      rx="0" class="tape27"/>
+    <rect x="586" y="114" width="16" height="18"
+      rx="0" class="tape28"/>
+    <rect x="606" y="114" width="16" height="18"
+      rx="0" class="tape29"/>
+    <rect x="626" y="114" width="16" height="18"
+      rx="0" class="tape30"/>
+    <rect x="646" y="114" width="16" height="18"
+      rx="0" class="tape31"/>
+    <rect x="666" y="114" width="16" height="18"
+      rx="0" class="tape32"/>
+    <rect x="686" y="114" width="16" height="18"
+      rx="0" class="tape33"/>
+  </g>
+  <text x="26" y="205" class="tag"    style="fill:var(--heap)">HEAP</text>
+  <text x="102" y="205" class="dim">// GC-managed objects</text>
+  <text x="590" y="205" class="time done-heap"
+    style="fill:var(--heap)">1.55 s / done</text>
+  <text x="26" y="350"    class="memory" style="fill:var(--heap)">7.6 MB</text>
+  <rect x="26" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="46" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="66" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="86" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="106" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="126" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="146" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="166" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="186" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="206" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="226" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="246" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="266" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="286" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="306" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="326" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="346" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="366" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="386" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="406" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="426" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="446" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="466" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="486" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="506" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="526" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="546" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="566" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="586" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="606" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="626" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="646" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="666" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="686" y="219" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="26" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="46" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="66" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="86" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="106" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="126" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="146" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="166" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="186" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="206" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="226" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="246" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="266" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="286" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="306" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="326" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="346" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="366" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="386" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="406" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="426" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="446" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="466" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="486" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="506" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="526" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="546" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="566" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="586" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="606" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="626" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="646" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="666" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="686" y="242" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="26" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="46" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="66" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="86" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="106" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="126" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="146" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="166" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="186" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="206" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="226" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="246" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="266" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="286" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="306" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="326" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="346" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="366" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="386" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="406" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="426" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="446" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="466" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="486" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="506" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="526" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="546" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="566" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="586" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="606" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="626" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="646" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="666" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="686" y="265" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="26" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="46" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="66" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="86" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="106" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="126" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="146" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="166" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="186" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="206" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="226" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="246" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="266" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="286" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="306" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="326" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="346" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="366" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="386" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="406" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="426" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="446" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="466" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="486" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="506" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="526" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="546" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="566" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="586" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="606" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="626" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="646" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="666" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="686" y="288" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="26" y="311" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="46" y="311" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="66" y="311" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="86" y="311" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="106" y="311" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="126" y="311" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="146" y="311" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="166" y="311" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="186" y="311" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="206" y="311" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="226" y="311" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="246" y="311" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="266" y="311" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="286" y="311" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="306" y="311" width="16" height="18" rx="0" fill="var(--track)"/>
+  <rect x="326" y="311" width="16" height="18" rx="0" fill="var(--track)"/>
+  <g class="cells" fill="var(--heap)">
+    <rect x="666" y="242" width="16" height="18"
+      rx="0" class="heap0"/>
+    <rect x="686" y="288" width="16" height="18"
+      rx="0" class="heap1"/>
+    <rect x="666" y="265" width="16" height="18"
+      rx="0" class="heap2"/>
+    <rect x="346" y="288" width="16" height="18"
+      rx="0" class="heap3"/>
+    <rect x="146" y="265" width="16" height="18"
+      rx="0" class="heap4"/>
+    <rect x="106" y="242" width="16" height="18"
+      rx="0" class="heap5"/>
+    <rect x="386" y="219" width="16" height="18"
+      rx="0" class="heap6"/>
+    <rect x="626" y="219" width="16" height="18"
+      rx="0" class="heap7"/>
+    <rect x="226" y="265" width="16" height="18"
+      rx="0" class="heap8"/>
+    <rect x="566" y="242" width="16" height="18"
+      rx="0" class="heap9"/>
+    <rect x="26" y="288" width="16" height="18"
+      rx="0" class="heap10"/>
+    <rect x="446" y="265" width="16" height="18"
+      rx="0" class="heap11"/>
+    <rect x="26" y="219" width="16" height="18"
+      rx="0" class="heap12"/>
+    <rect x="166" y="311" width="16" height="18"
+      rx="0" class="heap13"/>
+    <rect x="246" y="288" width="16" height="18"
+      rx="0" class="heap14"/>
+    <rect x="186" y="242" width="16" height="18"
+      rx="0" class="heap15"/>
+    <rect x="326" y="242" width="16" height="18"
+      rx="0" class="heap16"/>
+    <rect x="386" y="288" width="16" height="18"
+      rx="0" class="heap17"/>
+    <rect x="246" y="311" width="16" height="18"
+      rx="0" class="heap18"/>
+    <rect x="406" y="265" width="16" height="18"
+      rx="0" class="heap19"/>
+    <rect x="66" y="219" width="16" height="18"
+      rx="0" class="heap20"/>
+    <rect x="466" y="288" width="16" height="18"
+      rx="0" class="heap21"/>
+    <rect x="406" y="242" width="16" height="18"
+      rx="0" class="heap22"/>
+    <rect x="166" y="265" width="16" height="18"
+      rx="0" class="heap23"/>
+    <rect x="206" y="288" width="16" height="18"
+      rx="0" class="heap24"/>
+    <rect x="426" y="242" width="16" height="18"
+      rx="0" class="heap25"/>
+    <rect x="546" y="242" width="16" height="18"
+      rx="0" class="heap26"/>
+    <rect x="86" y="219" width="16" height="18"
+      rx="0" class="heap27"/>
+    <rect x="126" y="242" width="16" height="18"
+      rx="0" class="heap28"/>
+    <rect x="26" y="311" width="16" height="18"
+      rx="0" class="heap29"/>
+    <rect x="586" y="265" width="16" height="18"
+      rx="0" class="heap30"/>
+    <rect x="606" y="288" width="16" height="18"
+      rx="0" class="heap31"/>
+    <rect x="366" y="242" width="16" height="18"
+      rx="0" class="heap32"/>
+    <rect x="666" y="219" width="16" height="18"
+      rx="0" class="heap33"/>
+    <rect x="66" y="311" width="16" height="18"
+      rx="0" class="heap34"/>
+    <rect x="306" y="219" width="16" height="18"
+      rx="0" class="heap35"/>
+    <rect x="186" y="311" width="16" height="18"
+      rx="0" class="heap36"/>
+    <rect x="666" y="288" width="16" height="18"
+      rx="0" class="heap37"/>
+    <rect x="606" y="242" width="16" height="18"
+      rx="0" class="heap38"/>
+    <rect x="446" y="288" width="16" height="18"
+      rx="0" class="heap39"/>
+    <rect x="566" y="265" width="16" height="18"
+      rx="0" class="heap40"/>
+    <rect x="306" y="265" width="16" height="18"
+      rx="0" class="heap41"/>
+    <rect x="46" y="265" width="16" height="18"
+      rx="0" class="heap42"/>
+    <rect x="366" y="265" width="16" height="18"
+      rx="0" class="heap43"/>
+    <rect x="86" y="288" width="16" height="18"
+      rx="0" class="heap44"/>
+    <rect x="546" y="265" width="16" height="18"
+      rx="0" class="heap45"/>
+    <rect x="346" y="219" width="16" height="18"
+      rx="0" class="heap46"/>
+    <rect x="186" y="265" width="16" height="18"
+      rx="0" class="heap47"/>
+    <rect x="646" y="242" width="16" height="18"
+      rx="0" class="heap48"/>
+    <rect x="386" y="242" width="16" height="18"
+      rx="0" class="heap49"/>
+    <rect x="266" y="311" width="16" height="18"
+      rx="0" class="heap50"/>
+    <rect x="406" y="288" width="16" height="18"
+      rx="0" class="heap51"/>
+    <rect x="686" y="242" width="16" height="18"
+      rx="0" class="heap52"/>
+    <rect x="586" y="288" width="16" height="18"
+      rx="0" class="heap53"/>
+    <rect x="106" y="265" width="16" height="18"
+      rx="0" class="heap54"/>
+    <rect x="646" y="265" width="16" height="18"
+      rx="0" class="heap55"/>
+    <rect x="626" y="288" width="16" height="18"
+      rx="0" class="heap56"/>
+    <rect x="66" y="242" width="16" height="18"
+      rx="0" class="heap57"/>
+    <rect x="506" y="265" width="16" height="18"
+      rx="0" class="heap58"/>
+    <rect x="366" y="288" width="16" height="18"
+      rx="0" class="heap59"/>
+    <rect x="626" y="242" width="16" height="18"
+      rx="0" class="heap60"/>
+    <rect x="366" y="219" width="16" height="18"
+      rx="0" class="heap61"/>
+    <rect x="526" y="219" width="16" height="18"
+      rx="0" class="heap62"/>
+    <rect x="546" y="288" width="16" height="18"
+      rx="0" class="heap63"/>
+    <rect x="106" y="219" width="16" height="18"
+      rx="0" class="heap64"/>
+    <rect x="426" y="265" width="16" height="18"
+      rx="0" class="heap65"/>
+    <rect x="106" y="311" width="16" height="18"
+      rx="0" class="heap66"/>
+    <rect x="166" y="242" width="16" height="18"
+      rx="0" class="heap67"/>
+    <rect x="326" y="311" width="16" height="18"
+      rx="0" class="heap68"/>
+    <rect x="226" y="288" width="16" height="18"
+      rx="0" class="heap69"/>
+    <rect x="386" y="265" width="16" height="18"
+      rx="0" class="heap70"/>
+    <rect x="46" y="311" width="16" height="18"
+      rx="0" class="heap71"/>
+    <rect x="326" y="265" width="16" height="18"
+      rx="0" class="heap72"/>
+    <rect x="646" y="219" width="16" height="18"
+      rx="0" class="heap73"/>
+    <rect x="106" y="288" width="16" height="18"
+      rx="0" class="heap74"/>
+    <rect x="446" y="219" width="16" height="18"
+      rx="0" class="heap75"/>
+    <rect x="206" y="219" width="16" height="18"
+      rx="0" class="heap76"/>
+    <rect x="26" y="242" width="16" height="18"
+      rx="0" class="heap77"/>
+    <rect x="206" y="311" width="16" height="18"
+      rx="0" class="heap78"/>
+    <rect x="286" y="288" width="16" height="18"
+      rx="0" class="heap79"/>
+    <rect x="286" y="242" width="16" height="18"
+      rx="0" class="heap80"/>
+    <rect x="426" y="219" width="16" height="18"
+      rx="0" class="heap81"/>
+    <rect x="626" y="265" width="16" height="18"
+      rx="0" class="heap82"/>
+    <rect x="286" y="265" width="16" height="18"
+      rx="0" class="heap83"/>
+    <rect x="646" y="288" width="16" height="18"
+      rx="0" class="heap84"/>
+    <rect x="486" y="288" width="16" height="18"
+      rx="0" class="heap85"/>
+    <rect x="66" y="288" width="16" height="18"
+      rx="0" class="heap86"/>
+    <rect x="306" y="288" width="16" height="18"
+      rx="0" class="heap87"/>
+    <rect x="486" y="265" width="16" height="18"
+      rx="0" class="heap88"/>
+    <rect x="186" y="288" width="16" height="18"
+      rx="0" class="heap89"/>
+    <rect x="686" y="265" width="16" height="18"
+      rx="0" class="heap90"/>
+    <rect x="606" y="219" width="16" height="18"
+      rx="0" class="heap91"/>
+    <rect x="346" y="265" width="16" height="18"
+      rx="0" class="heap92"/>
+    <rect x="166" y="288" width="16" height="18"
+      rx="0" class="heap93"/>
+    <rect x="126" y="311" width="16" height="18"
+      rx="0" class="heap94"/>
+    <rect x="466" y="265" width="16" height="18"
+      rx="0" class="heap95"/>
+    <rect x="506" y="219" width="16" height="18"
+      rx="0" class="heap96"/>
+    <rect x="126" y="265" width="16" height="18"
+      rx="0" class="heap97"/>
+    <rect x="266" y="242" width="16" height="18"
+      rx="0" class="heap98"/>
+    <rect x="246" y="265" width="16" height="18"
+      rx="0" class="heap99"/>
+    <rect x="266" y="265" width="16" height="18"
+      rx="0" class="heap100"/>
+    <rect x="86" y="242" width="16" height="18"
+      rx="0" class="heap101"/>
+    <rect x="286" y="311" width="16" height="18"
+      rx="0" class="heap102"/>
+    <rect x="226" y="219" width="16" height="18"
+      rx="0" class="heap103"/>
+    <rect x="326" y="288" width="16" height="18"
+      rx="0" class="heap104"/>
+    <rect x="326" y="219" width="16" height="18"
+      rx="0" class="heap105"/>
+    <rect x="26" y="265" width="16" height="18"
+      rx="0" class="heap106"/>
+    <rect x="506" y="242" width="16" height="18"
+      rx="0" class="heap107"/>
+    <rect x="526" y="265" width="16" height="18"
+      rx="0" class="heap108"/>
+    <rect x="126" y="219" width="16" height="18"
+      rx="0" class="heap109"/>
+    <rect x="46" y="288" width="16" height="18"
+      rx="0" class="heap110"/>
+    <rect x="686" y="219" width="16" height="18"
+      rx="0" class="heap111"/>
+    <rect x="206" y="265" width="16" height="18"
+      rx="0" class="heap112"/>
+    <rect x="226" y="242" width="16" height="18"
+      rx="0" class="heap113"/>
+    <rect x="526" y="288" width="16" height="18"
+      rx="0" class="heap114"/>
+    <rect x="246" y="242" width="16" height="18"
+      rx="0" class="heap115"/>
+    <rect x="266" y="219" width="16" height="18"
+      rx="0" class="heap116"/>
+    <rect x="306" y="242" width="16" height="18"
+      rx="0" class="heap117"/>
+    <rect x="246" y="219" width="16" height="18"
+      rx="0" class="heap118"/>
+    <rect x="286" y="219" width="16" height="18"
+      rx="0" class="heap119"/>
+    <rect x="506" y="288" width="16" height="18"
+      rx="0" class="heap120"/>
+    <rect x="606" y="265" width="16" height="18"
+      rx="0" class="heap121"/>
+    <rect x="426" y="288" width="16" height="18"
+      rx="0" class="heap122"/>
+    <rect x="566" y="219" width="16" height="18"
+      rx="0" class="heap123"/>
+    <rect x="406" y="219" width="16" height="18"
+      rx="0" class="heap124"/>
+    <rect x="226" y="311" width="16" height="18"
+      rx="0" class="heap125"/>
+    <rect x="206" y="242" width="16" height="18"
+      rx="0" class="heap126"/>
+    <rect x="146" y="311" width="16" height="18"
+      rx="0" class="heap127"/>
+    <rect x="146" y="242" width="16" height="18"
+      rx="0" class="heap128"/>
+    <rect x="46" y="219" width="16" height="18"
+      rx="0" class="heap129"/>
+    <rect x="86" y="265" width="16" height="18"
+      rx="0" class="heap130"/>
+    <rect x="266" y="288" width="16" height="18"
+      rx="0" class="heap131"/>
+    <rect x="466" y="242" width="16" height="18"
+      rx="0" class="heap132"/>
+    <rect x="126" y="288" width="16" height="18"
+      rx="0" class="heap133"/>
+    <rect x="346" y="242" width="16" height="18"
+      rx="0" class="heap134"/>
+    <rect x="306" y="311" width="16" height="18"
+      rx="0" class="heap135"/>
+    <rect x="566" y="288" width="16" height="18"
+      rx="0" class="heap136"/>
+    <rect x="526" y="242" width="16" height="18"
+      rx="0" class="heap137"/>
+    <rect x="446" y="242" width="16" height="18"
+      rx="0" class="heap138"/>
+    <rect x="486" y="219" width="16" height="18"
+      rx="0" class="heap139"/>
+    <rect x="166" y="219" width="16" height="18"
+      rx="0" class="heap140"/>
+    <rect x="186" y="219" width="16" height="18"
+      rx="0" class="heap141"/>
+    <rect x="146" y="288" width="16" height="18"
+      rx="0" class="heap142"/>
+    <rect x="466" y="219" width="16" height="18"
+      rx="0" class="heap143"/>
+    <rect x="86" y="311" width="16" height="18"
+      rx="0" class="heap144"/>
+    <rect x="546" y="219" width="16" height="18"
+      rx="0" class="heap145"/>
+    <rect x="46" y="242" width="16" height="18"
+      rx="0" class="heap146"/>
+    <rect x="486" y="242" width="16" height="18"
+      rx="0" class="heap147"/>
+    <rect x="586" y="242" width="16" height="18"
+      rx="0" class="heap148"/>
+    <rect x="66" y="265" width="16" height="18"
+      rx="0" class="heap149"/>
+    <rect x="146" y="219" width="16" height="18"
+      rx="0" class="heap150"/>
+    <rect x="586" y="219" width="16" height="18"
+      rx="0" class="heap151"/>
+  </g>
+  <text x="26" y="375" class="dim">* Illustration only:
+    the heap does not actually fill in this random order.
+  </text>
+  <text x="26" y="410" class="dim">// MEMORY FOOTPRINT [MB]</text>
+  <text x="26" y="437">tape</text>
+  <rect x="90" y="422" width="460" height="20"
+    rx="0" fill="var(--track)"/>
+  <rect x="90" y="422" width="102.89" height="20"
+    rx="0" fill="var(--tape)"/>
+  <text x="566" y="437">1.7 MB</text>
+  <text x="26" y="467">heap</text>
+  <rect x="90" y="452" width="460" height="20"
+    rx="0" fill="var(--track)"/>
+  <rect x="90" y="452" width="460.00" height="20"
+    rx="0" fill="var(--heap)"/>
+  <text x="566" y="467">7.6 MB</text>
+  <text x="26" y="499" class="dim">Playback 5x slower;
+    labels show measured time. Median of 9 runs.</text>
+  <text x="26" y="521" class="dim">Allocation layout is schematic;
+    1 block = 0.05 MB; 34 tape / 152 heap blocks.</text>
+</svg>

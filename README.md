@@ -102,6 +102,16 @@ Its busiest page, 40 messages, 364,500 bytes as the Rust port's; 16 cores,
 | p99, 64 conn. | **5.8 ms** | 7.5 ms | 24.7 ms |
 | Memory | 34 MB | 76 MB | **29 MB** |
 
+<img src="doc/assets/tape-heap.anim.svg" width="742"
+  alt="respond: tape 0.67 s / 1.7 MB; heap 1.55 s / 7.6 MB">
+
+Recorded time and memory: `respond`, 1.6M DTOs, median of 9 runs.
+Playback is 5x slower; time labels show measured results.
+Each block represents 0.05 MB: 34 tape blocks and 152 heap blocks.
+Allocation order is schematic; memory bars share one scale. Results:
+[TAPE_DESIGN.md](TAPE_DESIGN.md). Redraw with
+`python3 bench/tape_memory_svg.py`.
+
 ## Status and thanks
 ris 0.1.0 is a prototype; internals keep iyi's names so iyi merges. Special
 thanks to Serdar Dogruyol, [iyi](https://github.com/iyilang/iyi)'s author,
