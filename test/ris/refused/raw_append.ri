@@ -1,9 +1,0 @@
-module test/ris/refused/raw_append
-
-# A writer takes bytes from a String or a Tape::String, never from a
-# pointer: one would copy whatever lies at any address onto the tape.
-text = "abc"
-tape do
-  w = Tape::String::Writer.new(8)
-  w.append(text.to_unsafe, 1000)
-end

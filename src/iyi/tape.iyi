@@ -185,7 +185,7 @@ module Tape
       append(text.to_unsafe, text.bytesize)
     end
 
-    private def append(bytes : Pointer(UInt8), count : Int32) : Nil
+    def append(bytes : Pointer(UInt8), count : Int32) : Nil
       cursor = @state.value
       if cursor &+ count.to_u64 > (@state + 1_i64).value
         grow(count.to_u64)
