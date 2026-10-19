@@ -997,25 +997,63 @@ pub struct Time
   # ---------------------------------------------------------------------------
 
   def to_rfc3339(fraction_digits : Int32 = 0) : String
-    y, m, d = civil_parts
-    h = hour
-    mi = minute
-    s = second
+    text = ""
+    tape do
+      w = Tape::String::Writer.new(32)
+      to_rfc3339(fraction_digits, w)
+      text = w.finish.to_s
+    end
+    text
+  end
 
-    base = "#{Time.pad4(y)}-#{Time.pad2(m)}-#{Time.pad2(d)}T#{Time.pad2(h)}:#{Time.pad2(mi)}:#{Time.pad2(s)}"
-    if fraction_digits == 3
-      "#{base}.#{Time.pad3(millisecond)}Z"
-    elsif fraction_digits == 6
-      "#{base}.#{Time.pad6(@nanoseconds // 1000)}Z"
-    elsif fraction_digits == 9
-      "#{base}.#{Time.pad9(@nanoseconds)}Z"
-    elsif fraction_digits == 0
-      "#{base}Z"
-    else
-      # Any other count printed no fraction at all, in silence: `to_rfc3339(12)`
-      # and `to_rfc3339(-1)` both answered as if 0 had been asked.
+  # The same written into the caller's *writer* on the tape: no string
+  # per field, nothing on the heap.
+  def to_rfc3339(fraction_digits : Int32, writer : Tape::String::Writer) : Nil
+    # Any other count printed no fraction at all, in silence: `to_rfc3339(12)`
+    # and `to_rfc3339(-1)` both answered as if 0 had been asked.
+    unless fraction_digits == 0 || fraction_digits == 3 || fraction_digits == 6 || fraction_digits == 9
       raise "fraction_digits must be 0, 3, 6 or 9, not #{fraction_digits}"
     end
+    y, m, d = civil_parts
+    Time.put_digits(writer, y.to_i64, 4)
+    writer.push(45_u8)
+    Time.put_digits(writer, m.to_i64, 2)
+    writer.push(45_u8)
+    Time.put_digits(writer, d.to_i64, 2)
+    writer.push(84_u8)
+    Time.put_digits(writer, hour.to_i64, 2)
+    writer.push(58_u8)
+    Time.put_digits(writer, minute.to_i64, 2)
+    writer.push(58_u8)
+    Time.put_digits(writer, second.to_i64, 2)
+    if fraction_digits > 0
+      writer.push(46_u8)
+      fraction = @nanoseconds.to_i64
+      fraction = fraction // 1000 if fraction_digits == 6
+      fraction = fraction // 1000000 if fraction_digits == 3
+      Time.put_digits(writer, fraction, fraction_digits)
+    end
+    writer.push(90_u8)
+  end
+
+  # *value* in decimal, zero-padded to *width* digits, as `pad4` and its
+  # kin pad it: a value of more digits is written whole.
+  def self.put_digits(writer : Tape::String::Writer, value : Int64, width : Int32) : Nil
+    if value < 0
+      writer.push(45_u8)
+      value = -value
+    end
+    digits = 1
+    rest = value
+    while rest >= 10
+      rest = rest // 10
+      digits += 1
+    end
+    while digits < width
+      writer.push(48_u8)
+      digits += 1
+    end
+    writer.append_int(value)
   end
 
   def to_s : String
