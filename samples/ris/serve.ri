@@ -19,12 +19,15 @@ N = 200000
 REQUEST = "GET /users/42?full=1 HTTP/1.1\r\nHost: localhost\r\nUser-Agent: bench\r\nAccept: */*\r\n\r\n"
 BODY = %({"id":42,"name":"Mari","email":"mari@example.com"})
 
+# The answers read into one buffer, so the client puts nothing on the heap
+# and what is counted is the server's.
 def drain(socket : IyiSocket, want : Int64) : Int64
+  buffer = Pointer(UInt8).malloc(65536)
   got = 0_i64
   while got < want
-    chunk = socket.read(65536).or_panic
-    break if chunk.empty?
-    got += chunk.bytesize
+    n = socket.read(buffer, 65536).or_panic
+    break if n == 0
+    got += n
   end
   got
 end

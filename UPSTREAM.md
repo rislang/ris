@@ -35,6 +35,11 @@ has it.
 * `String#[]` indexes bytes while `size` counts characters: at least say
   so in the docs and in a hint; a decision for iyi.
 
+* std/http: a connection's reads into one buffer it keeps, read with
+  `read(Pointer, Int32)`. `read(65536)` makes a 64 KB scratch and a copy
+  per read, and the loop copies what is left before the next: 332 heap
+  bytes a request on `Server.answer` (samples/ris/serve.ri, 2026-10-19).
+
 ## Stays in ris
 
 * Tape: std/http `parse_head` and `ParsedHead`, the tape list in
