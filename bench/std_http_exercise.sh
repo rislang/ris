@@ -347,7 +347,7 @@ mutate "header names compared by case" 'ca = ca + 32_u8 if ca >= 65_u8 && ca <= 
 mutate "a chunked body left as it came" 'body = decode_chunked(body)' 'body = body + ""'
 mutate "a server that forgets keep-alive" 'wrote.is_a?(Int32) && !closing' 'wrote.is_a?(Int32) && false'
 mutate "a block's Connection: close dropped" 'closing = true if HTTP.has_token?(said, "close")' ''
-mutate "Connection read as one value" 'HTTP.has_token?(conn, "close")' 'HTTP.same_name?(HTTP.trim(conn), "close")'
+mutate "Connection read as one value" 'close = HTTP.has_token?(conn, "close") || (http10' 'close = HTTP.same_name?(HTTP.trim(conn), "close") || (http10'
 mutate "a server that answers every request 200" 'Response.new(parsed.status, reason' 'Response.new(200, reason'
 mutate "a server that parses the body so far after every read" 'while have < wanted' 'while have < rest.bytesize + 1'
 mutate "a server that parses a chunked body again after every read" '        read = HTTP.read_chunked(buffer, parsed.consumed, MAX_BODY) { wait_read(client, listener, idle) }' '        more = wait_read(client, listener, idle)
