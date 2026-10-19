@@ -1,0 +1,14 @@
+# `Writer#truncate` cuts a writer back to its first bytes, and what comes
+# next is written over the rest; it refuses a length past what is written.
+ok = true
+tape do
+  w = Tape::String::Writer.new(4)
+  w.append("hello world")
+  w.truncate(5)
+  w.append("!")
+  ok &&= w.finish == "hello!" && w.length == 6
+  w.truncate(0)
+  ok &&= w.finish == ""
+  puts ok ? "PASS: cut back and written over" : "FAILED"
+  w.truncate(1)
+end

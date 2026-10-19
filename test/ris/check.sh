@@ -121,6 +121,8 @@ out=$("$RIS" run test/ris/answer.ri 2>&1)
 if [ "$out" = 'PASS: read and answered on the tape, fast path and not' ]; then echo "runs     answer"; else echo "FAILED   answer: $out"; status=1; fi
 out=$("$RIS" run test/ris/query.ri 2>&1)
 if [ "$out" = 'PASS: read as Params reads, nothing on the heap' ]; then echo "runs     query"; else echo "FAILED   query: $out"; status=1; fi
+out=$("$RIS" run test/ris/truncate.ri 2>&1)
+if grep -qF "PASS: cut back and written over" <<<"$out" && grep -qF "truncate to 1 of 0 bytes" <<<"$out"; then echo "runs     truncate"; else echo "FAILED   truncate: $out"; status=1; fi
 
 out=$("$RIS" run test/ris/json.ri 2>&1)
 if [ "$out" = 'PASS: parsed, refused alike, written alike, on the tape' ]; then echo "runs     json"; else echo "FAILED   json: $out"; status=1; fi

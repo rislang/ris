@@ -266,6 +266,13 @@ module Tape
       (@state.value &- (@state + 2_i64).value).to_i32
     end
 
+    # The writer cut back to its first *length* bytes: what a caller wrote
+    # past them, and has copied out, is written over by what comes next.
+    def truncate(length : Int32) : Nil
+      raise "truncate to #{length} of #{self.length} bytes" if length < 0 || length > self.length
+      @state.value = (@state + 2_i64).value &+ length.to_u64
+    end
+
     # Room for *total* bytes in all, so that writing up to them does not grow
     # the writer again: once a request's length is known, its bytes grow in
     # place even after other values have gone on the tape.
