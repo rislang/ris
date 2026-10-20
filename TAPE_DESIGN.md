@@ -1,9 +1,8 @@
 # ris tape memory: one tape per fiber, beside iyi's GC
 
-Decided 2026-10-19: iyi stays as it is (`String`, `Array`, `Hash`, classes
-on the GC heap) and the tape is added beside it. Goose's data stacks
-([Goose](https://github.com/aardappel/goose)) are the direction and the
-yardstick; features follow measured needs. [SPEC.md](SPEC.md) is iyi's.
+iyi stays as it is (`String`, `Array`, `Hash`, classes on the GC heap);
+the tape is beside it, where short-lived data is made and dropped together.
+[Goose](https://github.com/aardappel/goose)'s data stacks are the model.
 
 ## The model
 * `tape do … end` opens the running fiber's tape: bump allocation over
@@ -16,9 +15,8 @@ yardstick; features follow measured needs. [SPEC.md](SPEC.md) is iyi's.
   it, on normal and early exits, including panic; a def, loop round or
   block (std's too, unless it holds raw pointers) that keeps nothing
   frees its part each time.
-* `local_tape do … end` always owns a separate tape, releases it at its
-  end and restores the previous tape. Use it when temporaries must be
-  freed before the outer block ends, rather than for every small call.
+* `local_tape do … end` owns a separate tape, released at its end, for
+  temporaries to free before the outer block ends.
 * Tapes follow fibers across switches; spawned fibers have their own.
   Each thread caches up to 64 spare mappings, with bounded warm pages.
 * Tape storage is not GC-managed, but used tape words are scanned as
@@ -43,14 +41,12 @@ No tape value survives the block that owns its storage:
   not escaping tape values. Each helper making a copy needs its own mark.
 * Pass tape text on, append to a tape writer, or write directly to a file
   or socket (`puts text`, `io << text`). Avoid tape -> heap -> tape copies.
-* Pointer access (`to_unsafe`, `Tape::String.new(pointer, size)`) and heap
-  copy checks exempt library code in `std/` and `src/iyi/`. These checks
-  do not make arbitrary raw pointers safe.
+* `std/` and `src/iyi/` may use raw pointers (`to_unsafe`,
+  `Tape::String.new(pointer, size)`) and copy to the heap freely.
 
 ## Layout: a tape per growing value
 A container grows in place at the tape's end, else moves once to a region
-of its own and grows there: values grow side by side.
-A `Tape::Tree` stores a tree in document order (simdjson's layout):
+of its own and grows there. `Tape::Tree` is simdjson's document order:
 4.6 MB JSON, 20 parses, 725 ms; std/json's `Any` 1081.
 
 | median of 9, ris-bench | Goose | ris tape | ris heap |
@@ -59,20 +55,26 @@ A `Tape::Tree` stores a tree in document order (simdjson's layout):
 | bintrees | 0.06 s, 7.9 MB | 0.10 s, 7.1 MB | 0.32 s, 24 MB |
 | words | 0.22 s, 68 MB | 0.34 s, 90 MB | 0.54 s, 175 MB |
 | graph_csr | 0.64 s, 109 MB | 1.06 s, 108 MB | 1.06 s, 174 MB |
-
-Recorded, not new: C++ 0.97 s, Rust 1.18 s, Go 1.67 s on respond
-([ris-bench](https://github.com/rislang/ris-bench)).
-
-## Taken from Goose
-* `puts "a#{b}"` in a `tape` block or a def taking a tape value writes on
-  the tape, also through a variable used only so. `each`, `map`, `sum`
-  and `a[i]` in `while i < a.size` (`i` only `+= 1`) skip bounds checks.
-* Flat data: `Tape::Link(T, UInt16)`, a typed index checked when followed,
-  `Tape::Span`, `@[Tape::Flat]` structs: `Array#bytes`, `Array.load`.
-* `w.append(f(x))`, `f`'s value a `Tape::String.build`, writes in `w`.
+Recorded: C++ 0.97 s, Rust 1.18 s, Go 1.67 s on respond (ris-bench).
 
 ## Implementation and checks
-`src/iyi/tape.iyi`: types and scopes; `src/iyi/prelude.iyi`: `IyiRegion`.
-`src/compiler/iyi/semantic/tape_*.cr`: storage, lifetimes, scope freeing,
-raw pointers, heap copies and lowering. `bash test/ris/check.sh` checks
-refusals, cleanup, scopes, growth, fibers, copies, lowering, flat data.
+`src/iyi/tape.iyi`, `IyiRegion` in `src/iyi/prelude.iyi`, the checks and
+lowerings in `src/compiler/iyi/semantic/tape_*.cr`; `test/ris/check.sh`.
+
+## Goose and ris
+| Goose | ris tape | Why |
+|---|---|---|
+| No heap, no GC | Tape beside iyi's GC | Long-lived data stays on the GC |
+| Scope end frees | Def, loop, block keeping nothing | Proven; not past `next` |
+| One growing value, unmoved | Own region, moved once | No refs into elements |
+| No annotations | Block lifetimes, `@[Escape]` | The GC holds the rest |
+| Flat data, links | `Link`, `Span`, `@[Tape::Flat]` | Pointer-free bytes |
+| Load checks every link | Checked when followed | Same safety, a later error |
+| Built in place | `w.append(f(x))` writes in `w`; `puts "#{x}"` | No copy |
+| Bounds checks elided | `each`, `while i < a.size` | The loop bounds `i` |
+| Variable-size enums | No | Unions and the GC suffice |
+| `reusable` pools | No | The GC holds unnested lifetimes |
+| No escaping closures | For tape values only | Procs are heap values |
+| Shared-nothing threads | No tape value on a channel | Send bytes on the heap |
+| No growth across recursion | No such limit | Regions, not one stack |
+| `return err from` | No | Not memory: it belongs in iyi |
