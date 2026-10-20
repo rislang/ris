@@ -1,0 +1,52 @@
+module test/toml_tape
+
+import std/toml::{TOML, TOMLError}
+
+kept = ""
+tape do
+  parsed = TOML.parse("title = 'café'\n[db]\nports = [80, 443]\n".as_tape)
+  exit 1 if parsed.is_a?(TOMLError)
+  exit 2 unless parsed["title"].as_s == "café"
+  exit 3 unless parsed["db"]["ports"][1].as_i == 443_i64
+  writer = Tape::String::Writer.new(1)
+  writer << "prefix:"
+  TOML.dump(parsed, writer)
+  encoded = TOML.dump(parsed)
+  expected = Tape::String.build { |w| w << "prefix:" << encoded }
+  exit 6 unless writer.finish == expected
+  again = TOML.parse(encoded)
+  exit 7 if again.is_a?(TOMLError)
+  exit 8 unless again.to_heap == parsed.to_heap
+  values = TOML.parse("x = 1.25\ny = 1979-05-27T07:32:00Z".as_tape)
+  exit 9 if values.is_a?(TOMLError)
+  exit 10 unless values["x"].as_f == 1.25
+  dates = TOML.parse(TOML.dump(values))
+  exit 11 if dates.is_a?(TOMLError)
+  exit 12 unless dates.to_heap == values.to_heap
+  exit 13 unless TOML.parse("x=1\nx=2".as_tape).is_a?(TOMLError)
+  corpus = [
+    "x = \"line\\nquote\\\"\"",
+    "x = \"\"\"\nmultiline\ntext\"\"\"",
+    "x = {a = 1, b = ['a', true]}\ny.z = 2",
+    "[[a]]\nx = 1\n[[a]]\nx = 2\n[a.b]\ny = 3",
+    "x = -9223372036854775808\ny = 0x7FFFFFFFFFFFFFFF",
+    "a = nan\nb = -inf\nc = +inf\nd = -0.0",
+    "a = 1979-05-27\nb = 07:32:00.123\nc = 1979-05-27T07:32:00",
+    "x = 0.10000000000000000000000000000000000001",
+  ]
+  corpus.each do |text|
+    value = TOML.parse(text.as_tape)
+    exit 15 if value.is_a?(TOMLError)
+    roundtrip = TOML.parse(TOML.dump(value))
+    exit 16 if roundtrip.is_a?(TOMLError)
+    exit 17 unless roundtrip.to_heap == value.to_heap
+  end
+  exit 18 unless parsed["title"].size == 4
+  exit 19 unless parsed.dig("db".as_tape, "ports", 1).as_i == 443_i64
+  kept = parsed["title"].as_s.to_heap
+end
+parsed = TOML.parse("title = 'café'")
+exit 4 if parsed.is_a?(TOMLError)
+exit 14 unless TOML.parse(TOML.dump(parsed)) == parsed
+exit 5 unless parsed["title"].as_s == kept
+puts "PASS: toml tape and heap APIs"
