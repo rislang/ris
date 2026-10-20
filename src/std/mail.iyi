@@ -128,6 +128,413 @@ end
 
 # Bytes, characters and charsets: what the rest is written over.
 struct MailText
+  def self.cut(text : Tape::String, start : Int32,
+               stop : Int32) : Tape::String
+    text[start, stop > start ? stop - start : 0]
+  end
+
+  def self.lower(text : Tape::String) : Tape::String
+    Tape::String.build do |w|
+      text.each_byte do |byte|
+        byte += 32_u8 if byte >= 65_u8 && byte <= 90_u8
+        w.push(byte)
+      end
+    end
+  end
+
+  def self.trim(text : Tape::String) : Tape::String
+    a = 0
+    b = text.bytesize
+    while a < b && text[a] <= 32_u8
+      a += 1
+    end
+    while b > a && text[b - 1] <= 32_u8
+      b -= 1
+    end
+    text[a, b - a]
+  end
+
+  def self.ends?(text : Tape::String, suffix : String) : Bool
+    n = suffix.bytesize
+    text.bytesize >= n && text[text.bytesize - n, n] == suffix
+  end
+
+  def self.contains?(text : Tape::String, part : String) : Bool
+    i = 0
+    while i + part.bytesize <= text.bytesize
+      return true if text[i, part.bytesize] == part
+      i += 1
+    end
+    false
+  end
+
+  def self.base64_decode(text : Tape::String) : Tape::String
+    Tape::String.build { |w| base64_decode(text, w) }
+  end
+
+  def self.qp_decode(text : Tape::String) : Tape::String
+    Tape::String.build { |w| qp_decode(text, w) }
+  end
+
+  def self.charset(name : Tape::String) : String?
+    case MailText.lower(MailText.trim(name))
+    when "utf-8", "utf8"
+      "utf-8"
+    when "us-ascii", "ascii", "us", "ansi_x3.4-1968", "iso646-us"
+      "us-ascii"
+    when "iso-8859-1", "iso8859-1", "iso_8859-1", "latin1", "latin-1", "l1", "cp819", "iso-ir-100"
+      "iso-8859-1"
+    when "iso-8859-15", "iso8859-15", "iso_8859-15", "latin-9", "latin9"
+      "iso-8859-15"
+    when "windows-1252", "cp1252"
+      "windows-1252"
+    else
+      nil
+    end
+  end
+
+  # *data*, in *name*'s charset, as UTF-8.
+  def self.decode(data : Tape::String, name : Tape::String) : Tape::String | MailError
+    kind = MailText.charset(name)
+    return MailError.new("the charset #{name.to_heap.inspect} is not one std/mail reads (UTF-8, US-ASCII, ISO-8859-1, ISO-8859-15, windows-1252)") unless kind
+    p = data.to_unsafe
+    n = data.bytesize
+    if kind == "utf-8"
+      return data if MailText.utf8?(data)
+      return MailError.new("text said to be UTF-8 is not UTF-8")
+    end
+    i = 0
+    if kind == "us-ascii"
+      while i < n
+        return MailError.new("text said to be US-ASCII holds the byte 0x#{p[i].to_i32.to_s(16)}") if p[i] >= 128_u8
+        i = i + 1
+      end
+      return data
+    end
+    io = Tape::String::Writer.new(n + n // 4 + 1)
+    while i < n
+      b = p[i].to_i32
+      if b < 128
+        io.push(p[i])
+      else
+        cp = b
+        if kind == "windows-1252" && b < 0xA0
+          cp = CP1252[b - 128]
+          return MailError.new("text said to be windows-1252 holds the byte 0x#{b.to_s(16)}, which it leaves undefined") if cp < 0
+        elsif kind == "iso-8859-15"
+          cp = MailText.latin9(b)
+        end
+        MailText.append_utf8(io, cp)
+      end
+      i = i + 1
+    end
+    io.finish
+  end
+
+
+  def self.lf(text : Tape::String) : Tape::String
+    return text unless MailText.contains?(text, "\r\n")
+    p = text.to_unsafe
+    n = text.bytesize
+    io = Tape::String::Writer.new(n)
+    i = 0
+    while i < n
+      io.push(p[i]) unless p[i] == 13_u8 && i + 1 < n && p[i + 1] == 10_u8
+      i = i + 1
+    end
+    io.finish
+  end
+
+
+  def self.decode_words(text : Tape::String) : Tape::String
+    return text unless MailText.contains?(text, "=?")
+    p = text.to_unsafe
+    n = text.bytesize
+    io = Tape::String::Writer.new(n)
+    i = 0
+    after_word = false
+    while i < n
+      j = i
+      while j < n && (MailText.wsp?(p[j]) || p[j] == 13_u8 || p[j] == 10_u8)
+        j = j + 1
+      end
+      k = j
+      while k < n && !(MailText.wsp?(p[k]) || p[k] == 13_u8 || p[k] == 10_u8)
+        k = k + 1
+      end
+      if k == j
+        io << text[i, j - i]
+        i = k
+      else
+        decoded = MailText.words_in(text, j, k)
+        if decoded
+          io << text[i, j - i] unless after_word
+          io << decoded
+          after_word = true
+        else
+          io << text[i, k - i]
+          after_word = false
+        end
+        i = k
+      end
+    end
+    io.finish
+  end
+
+  # The encoded-words that are the whole of `text[start, stop)`, decoded,
+  # or nil when it is anything else.
+  def self.words_in(text : Tape::String, start : Int32, stop : Int32) : Tape::String?
+    io = Tape::String::Writer.new(stop - start)
+    at = start
+    while at < stop
+      one = MailText.word_at(text, at, stop)
+      return nil unless one
+      io << one[0]
+      at = one[1]
+    end
+    at == start ? nil : io.finish
+  end
+
+  def self.word_at(text : Tape::String, at : Int32, stop : Int32) : {Tape::String, Int32}?
+    p = text.to_unsafe
+    return nil unless at + 1 < stop && p[at] == 61_u8 && p[at + 1] == 63_u8
+    c0 = at + 2
+    c1 = c0
+    while c1 < stop && p[c1] != 63_u8
+      c1 = c1 + 1
+    end
+    return nil if c1 == c0 || c1 + 2 >= stop || p[c1 + 2] != 63_u8
+    enc = p[c1 + 1]
+    t0 = c1 + 3
+    t1 = t0
+    while t1 < stop && p[t1] != 63_u8
+      t1 = t1 + 1
+    end
+    return nil unless t1 + 1 < stop && p[t1 + 1] == 61_u8
+    charset = MailText.cut(text, c0, c1)
+    star = charset.index('*')
+    charset = charset[0, star] if star
+    raw = nil.as(Tape::String?)
+    if enc == 81_u8 || enc == 113_u8
+      raw = MailText.q_decode(text, t0, t1)
+    elsif enc == 66_u8 || enc == 98_u8
+      raw = MailText.b_decode(text, t0, t1)
+    end
+    return nil unless raw
+    decoded = MailText.decode(raw, charset)
+    return nil if decoded.is_a?(MailError)
+    {decoded, t1 + 2}
+  end
+
+  def self.q_decode(text : Tape::String, start : Int32, stop : Int32) : Tape::String?
+    p = text.to_unsafe
+    io = Tape::String::Writer.new(stop - start)
+    i = start
+    while i < stop
+      b = p[i]
+      if b == 95_u8
+        io.push(32_u8)
+        i = i + 1
+      elsif b == 61_u8
+        return nil unless i + 2 < stop
+        hi = MailText.hex_value(p[i + 1])
+        lo = MailText.hex_value(p[i + 2])
+        return nil if hi < 0 || lo < 0
+        io.push((hi * 16 + lo).to_u8)
+        i = i + 3
+      else
+        io.push(b)
+        i = i + 1
+      end
+    end
+    io.finish
+  end
+
+  # The alphabet, then at most two `=` at the end: missing padding is
+  # taken, as readers take it.
+  def self.b_decode(text : Tape::String, start : Int32, stop : Int32) : Tape::String?
+    p = text.to_unsafe
+    e = stop
+    pads = 0
+    while e > start && p[e - 1] == 61_u8 && pads < 2
+      e = e - 1
+      pads = pads + 1
+    end
+    i = start
+    while i < e
+      return nil if MailText.b64_value(p[i]) < 0
+      i = i + 1
+    end
+    return nil if (e - start) % 4 == 1
+    MailText.base64_decode(MailText.cut(text, start, e))
+  end
+
+
+  def self.content_type(value : Tape::String) : {Tape::String, TapeMap(Tape::String, Tape::String)}?
+    scan = TapeMailScan.new(value)
+    return nil if scan.skip_cfws
+    major = scan.token
+    return nil if major.empty? || scan.skip_cfws || scan.peek != 47_u8
+    scan.advance
+    return nil if scan.skip_cfws
+    minor = scan.token
+    return nil if minor.empty?
+    {Tape::String.build { |w| w << MailText.lower(major) << "/" << MailText.lower(minor) }, MailText.params(scan)}
+  end
+
+  # A Content-Disposition's kind in lower case, and its parameters.
+  def self.disposition(value : Tape::String) : {Tape::String, TapeMap(Tape::String, Tape::String)}?
+    scan = TapeMailScan.new(value)
+    return nil if scan.skip_cfws
+    kind = scan.token
+    return nil if kind.empty?
+    {MailText.lower(kind), MailText.params(scan)}
+  end
+
+  # `; name=value` after `scan`, names in lower case, RFC 2231's extended
+  # values and continuations put together. A parameter that cannot be read
+  # ends the list; what came before it is kept.
+  def self.params(scan : TapeMailScan) : TapeMap(Tape::String, Tape::String)
+    raw = Tape::Array({Tape::String, Tape::String}).new
+    while true
+      break if scan.skip_cfws
+      break if scan.done? || scan.peek != 59_u8
+      scan.advance
+      break if scan.skip_cfws
+      name = MailText.lower(scan.token)
+      break if name.empty? || scan.skip_cfws || scan.peek != 61_u8
+      scan.advance
+      break if scan.skip_cfws
+      if scan.peek == 34_u8
+        value = scan.quoted
+        break if value.is_a?(MailError)
+        raw << {name, value}
+      else
+        # Unquoted values with tspecials in them - `boundary=----=_Part`
+        # - are what mailers send; up to `;` or whitespace is the value.
+        raw << {name, scan.bare_value}
+      end
+    end
+    MailText.assemble(raw)
+  end
+
+  def self.assemble(raw : Tape::Array({Tape::String, Tape::String})) : TapeMap(Tape::String, Tape::String)
+    result = TapeMap(Tape::String, Tape::String).new
+    plain = TapeMap(Tape::String, Tape::String).new
+    pieces = TapeMap(Tape::String, Tape::Array({Int32, Tape::String, Bool})).new
+    raw.each do |pair|
+      name = pair[0]
+      value = pair[1]
+      star = name.index('*')
+      if star.nil?
+        plain[name] = value if plain[name]?.nil?
+      else
+        base = name[0, star]
+        rest = MailText.cut(name, star + 1, name.bytesize)
+        list = pieces[base]? || Tape::Array({Int32, Tape::String, Bool}).new
+        if rest.empty?
+          list << {-1, value, true}
+        else
+          extended = MailText.ends?(rest, "*")
+          digits = extended ? rest[0, rest.bytesize - 1] : rest
+          index = digits.to_i?
+          if index && index >= 0 && (digits == "0" || !digits.starts_with?("0"))
+            list << {index, value, extended}
+          end
+        end
+        pieces[base] = list
+      end
+    end
+    pieces.each do |base, list|
+      joined = MailText.continued(list)
+      result[base] = joined if joined
+    end
+    plain.each do |name, value|
+      result[name] = MailText.whole_words(value) if result[name]?.nil?
+    end
+    result
+  end
+
+  # A value that is encoded-words and nothing else - how some mailers
+  # write a file name - decoded; any other as it is.
+  def self.whole_words(value : Tape::String) : Tape::String
+    return value unless value.starts_with?("=?") && MailText.ends?(value, "?=")
+    decoded = MailText.decode_words(value)
+    decoded
+  end
+
+  def self.continued(list : Tape::Array({Int32, Tape::String, Bool})) : Tape::String?
+    list.each do |piece|
+      return MailText.extended(piece[1], true) if piece[0] == -1
+    end
+    sorted = list.sorted_by { |piece| piece[0] }
+    bytes = Tape::String::Writer.new(64)
+    charset = "".as_tape
+    expect = 0
+    sorted.each do |piece|
+      if piece[0] == expect
+        if piece[2]
+          value = piece[1]
+          if expect == 0
+            first = value.index('\'')
+            second = first ? value.index('\'', first + 1) : nil
+            if first && second
+              charset = value[0, first]
+              value = MailText.cut(value, second + 1, value.bytesize)
+            end
+          end
+          bytes << MailText.percent_decode(value)
+        else
+          bytes << piece[1]
+        end
+        expect = expect + 1
+      end
+    end
+    return nil if expect == 0
+    MailText.in_charset(bytes.finish, charset)
+  end
+
+  # `charset'language'%XX...`, or with *prefixed* false just the
+  # percent-encoded bytes.
+  def self.extended(value : Tape::String, prefixed : Bool) : Tape::String
+    charset = "".as_tape
+    text = value
+    first = value.index('\'')
+    second = first ? value.index('\'', first + 1) : nil
+    if prefixed && first && second
+      charset = value[0, first]
+      text = MailText.cut(value, second + 1, value.bytesize)
+    end
+    MailText.in_charset(MailText.percent_decode(text), charset)
+  end
+
+  # Bytes from RFC 2231's charset in UTF-8; as they are when the charset
+  # is none or not one this reads.
+  def self.in_charset(bytes : Tape::String, charset : Tape::String) : Tape::String
+    return bytes if charset.empty?
+    decoded = MailText.decode(bytes, charset)
+    decoded.is_a?(MailError) ? bytes : decoded
+  end
+
+  def self.percent_decode(text : Tape::String) : Tape::String
+    return text unless MailText.contains?(text, "%")
+    p = text.to_unsafe
+    n = text.bytesize
+    io = Tape::String::Writer.new(n)
+    i = 0
+    while i < n
+      if p[i] == 37_u8 && i + 2 < n && MailText.hex_value(p[i + 1]) >= 0 && MailText.hex_value(p[i + 2]) >= 0
+        io.push((MailText.hex_value(p[i + 1]) * 16 + MailText.hex_value(p[i + 2])).to_u8)
+        i = i + 3
+      else
+        io.push(p[i])
+        i = i + 1
+      end
+    end
+    io.finish
+  end
+
+
   HEX = "0123456789ABCDEF"
 
   # windows-1252's 0x80 to 0x9F, -1 where it defines nothing.
@@ -158,7 +565,7 @@ struct MailText
     io.write_byte(HEX.to_unsafe[b.to_i32 & 15])
   end
 
-  def self.ascii?(text : String) : Bool
+  def self.ascii?(text : String | Tape::String) : Bool
     p = text.to_unsafe
     i = 0
     while i < text.bytesize
@@ -180,7 +587,7 @@ struct MailText
 
   # Whether *text* is well-formed UTF-8: no overlong form, no surrogate,
   # nothing past U+10FFFF.
-  def self.utf8?(text : String) : Bool
+  def self.utf8?(text : String | Tape::String) : Bool
     p = text.to_unsafe
     n = text.bytesize
     i = 0
@@ -253,6 +660,23 @@ struct MailText
       io.write_byte((0x80 | ((cp >> 12) & 0x3F)).to_u8)
       io.write_byte((0x80 | ((cp >> 6) & 0x3F)).to_u8)
       io.write_byte((0x80 | (cp & 0x3F)).to_u8)
+    end
+  end
+  def self.append_utf8(io : Tape::String::Writer, cp : Int32) : Nil
+    if cp < 0x80
+      io.push(cp.to_u8)
+    elsif cp < 0x800
+      io.push((0xC0 | (cp >> 6)).to_u8)
+      io.push((0x80 | (cp & 0x3F)).to_u8)
+    elsif cp < 0x10000
+      io.push((0xE0 | (cp >> 12)).to_u8)
+      io.push((0x80 | ((cp >> 6) & 0x3F)).to_u8)
+      io.push((0x80 | (cp & 0x3F)).to_u8)
+    else
+      io.push((0xF0 | (cp >> 18)).to_u8)
+      io.push((0x80 | ((cp >> 12) & 0x3F)).to_u8)
+      io.push((0x80 | ((cp >> 6) & 0x3F)).to_u8)
+      io.push((0x80 | (cp & 0x3F)).to_u8)
     end
   end
 
@@ -376,28 +800,35 @@ struct MailText
     -1
   end
 
-  def self.base64_encode(data : String) : String
+  def self.escape(io : Tape::String::Writer, b : UInt8,
+                  mark : UInt8 = 61_u8) : Nil
+    io.push(mark)
+    io.push(HEX.to_unsafe[b.to_i32 >> 4])
+    io.push(HEX.to_unsafe[b.to_i32 & 15])
+  end
+
+  def self.base64_encode(data : Tape::String,
+                         io : Tape::String::Writer) : Nil
     flat = Base64.encode(data)
     n = flat.bytesize
-    io = String::Builder.new(n + (n // 76 + 1) * 2)
     p = flat.to_unsafe
     i = 0
     while i < n
       take = n - i < 76 ? n - i : 76
-      io.write(p + i, take)
+      io << flat[i, take]
       io << "\r\n"
       i = i + take
     end
-    io.to_s
+    nil
   end
 
   # Characters outside the alphabet are passed over, as section 6.8 has
   # it, and the first `=` ends the data; bits short of a byte at the end
   # are dropped.
-  def self.base64_decode(text : String) : String
+  def self.base64_decode(text : Tape::String,
+                         io : Tape::String::Writer) : Nil
     p = text.to_unsafe
     n = text.bytesize
-    io = String::Builder.new(n * 3 // 4 + 4)
     acc = 0
     bits = 0
     i = 0
@@ -410,12 +841,153 @@ struct MailText
         bits = bits + 6
         if bits >= 8
           bits = bits - 8
-          io.write_byte(((acc >> bits) & 0xFF).to_u8)
+          io.push(((acc >> bits) & 0xFF).to_u8)
         end
       end
       i = i + 1
     end
-    io.to_s
+    nil
+  end
+
+  # --- Quoted-printable (RFC 2045 section 6.7) ---
+
+  # Line breaks of *data* (CRLF, CR or LF) are hard breaks written as
+  # CRLF, unless *binary*, when CR and LF are bytes like any other and
+  # escaped. The wrapping is `email.quoprimime.body_encode`'s: a line of
+  # more than 76 is cut at 75 and a soft break, never inside an escape;
+  # a space or tab at a line's end is escaped, or kept before a soft
+  # break where there is no room for its escape.
+  def self.qp_encode(data : Tape::String, binary : Bool,
+                     io : Tape::String::Writer) : Nil
+    p = data.to_unsafe
+    n = data.bytesize
+    line = Tape::String::Writer.new(128)
+    i = 0
+    while i < n
+      line = Tape::String::Writer.new(128)
+      while i < n
+        b = p[i]
+        break if !binary && (b == 13_u8 || b == 10_u8)
+        if (b >= 32_u8 && b <= 126_u8 && b != 61_u8) || b == 9_u8
+          line.push(b)
+        else
+          MailText.escape(line, b)
+        end
+        i = i + 1
+      end
+      MailText.qp_wrap(io, line.finish)
+      if i < n
+        i = i + 1 if p[i] == 13_u8 && i + 1 < n && p[i + 1] == 10_u8
+        i = i + 1
+        io << "\r\n"
+      end
+    end
+    nil
+  end
+
+  # One encoded line, cut into lines of 76 or fewer.
+  def self.qp_wrap(io : Tape::String::Writer, e : Tape::String) : Nil
+    p = e.to_unsafe
+    size = e.bytesize
+    start = 0
+    last_start = size - 1 - 76
+    while start <= last_start
+      stop = start + 75
+      if p[stop - 2] == 61_u8
+        io << e[start, stop - 1 - start]
+        start = stop - 2
+      elsif p[stop - 1] == 61_u8
+        io << e[start, stop - start]
+        start = stop - 1
+      else
+        io << e[start, stop - start]
+        io.push(61_u8)
+        start = stop
+      end
+      io << "\r\n"
+    end
+    if size > 0 && MailText.wsp?(p[size - 1])
+      room = start - last_start
+      io << e[start, size - 1 - start]
+      if room >= 3
+        MailText.escape(io, p[size - 1])
+      elsif room == 2
+        io.push(p[size - 1])
+        io << "=\r\n"
+      else
+        io << "=\r\n"
+        MailText.escape(io, p[size - 1])
+      end
+    else
+      io << e[start, size - start]
+    end
+  end
+
+  # Hard breaks come out as CRLF. Space and tab at a line's end are
+  # dropped first (rule 3: a gateway may have added them), a line's last
+  # `=` is a soft break, `=` and two hex digits - either case - a byte,
+  # and any other `=` is itself.
+  def self.qp_decode(text : Tape::String,
+                     io : Tape::String::Writer) : Nil
+    p = text.to_unsafe
+    n = text.bytesize
+    i = 0
+    while i < n
+      j = i
+      while j < n && p[j] != 10_u8
+        j = j + 1
+      end
+      e = j
+      e = e - 1 if j < n && e > i && p[e - 1] == 13_u8
+      while e > i && MailText.wsp?(p[e - 1])
+        e = e - 1
+      end
+      soft = false
+      k = i
+      while k < e
+        b = p[k]
+        if b != 61_u8
+          io.push(b)
+          k = k + 1
+        elsif k + 1 == e
+          soft = true
+          k = k + 1
+        elsif k + 2 < e && MailText.hex_value(p[k + 1]) >= 0 && MailText.hex_value(p[k + 2]) >= 0
+          io.push((MailText.hex_value(p[k + 1]) * 16 + MailText.hex_value(p[k + 2])).to_u8)
+          k = k + 3
+        else
+          io.push(b)
+          k = k + 1
+        end
+      end
+      io << "\r\n" if j < n && !soft
+      i = j + 1
+    end
+    nil
+  end
+
+
+  def self.base64_encode(data : String) : String
+    result = ""
+    tape do
+      w = Tape::String::Writer.new(128)
+      base64_encode(data.as_tape, w)
+      result = w.finish.to_heap
+    end
+    result
+  end
+
+  # Characters outside the alphabet are passed over, as section 6.8 has
+  # it, and the first `=` ends the data; bits short of a byte at the end
+  # are dropped.
+  def self.base64_decode(text : String) : String
+    result = ""
+    tape do
+      w = Tape::String::Writer.new(128)
+      base64_decode(text.as_tape, w)
+      result = w.finish.to_heap
+    end
+    result
   end
 
   # --- Quoted-printable (RFC 2045 section 6.7) ---
@@ -427,31 +999,13 @@ struct MailText
   # a space or tab at a line's end is escaped, or kept before a soft
   # break where there is no room for its escape.
   def self.qp_encode(data : String, binary : Bool) : String
-    p = data.to_unsafe
-    n = data.bytesize
-    io = String::Builder.new(n + n // 8 + 8)
-    line = String::Builder.new(128)
-    i = 0
-    while i < n
-      line = String::Builder.new(128)
-      while i < n
-        b = p[i]
-        break if !binary && (b == 13_u8 || b == 10_u8)
-        if (b >= 32_u8 && b <= 126_u8 && b != 61_u8) || b == 9_u8
-          line.write_byte(b)
-        else
-          MailText.escape(line, b)
-        end
-        i = i + 1
-      end
-      MailText.qp_wrap(io, line.to_s)
-      if i < n
-        i = i + 1 if p[i] == 13_u8 && i + 1 < n && p[i + 1] == 10_u8
-        i = i + 1
-        io << "\r\n"
-      end
+    result = ""
+    tape do
+      w = Tape::String::Writer.new(128)
+      qp_encode(data.as_tape, binary, w)
+      result = w.finish.to_heap
     end
-    io.to_s
+    result
   end
 
   # One encoded line, cut into lines of 76 or fewer.
@@ -497,42 +1051,13 @@ struct MailText
   # `=` is a soft break, `=` and two hex digits - either case - a byte,
   # and any other `=` is itself.
   def self.qp_decode(text : String) : String
-    p = text.to_unsafe
-    n = text.bytesize
-    io = String::Builder.new(n)
-    i = 0
-    while i < n
-      j = i
-      while j < n && p[j] != 10_u8
-        j = j + 1
-      end
-      e = j
-      e = e - 1 if j < n && e > i && p[e - 1] == 13_u8
-      while e > i && MailText.wsp?(p[e - 1])
-        e = e - 1
-      end
-      soft = false
-      k = i
-      while k < e
-        b = p[k]
-        if b != 61_u8
-          io.write_byte(b)
-          k = k + 1
-        elsif k + 1 == e
-          soft = true
-          k = k + 1
-        elsif k + 2 < e && MailText.hex_value(p[k + 1]) >= 0 && MailText.hex_value(p[k + 2]) >= 0
-          io.write_byte((MailText.hex_value(p[k + 1]) * 16 + MailText.hex_value(p[k + 2])).to_u8)
-          k = k + 3
-        else
-          io.write_byte(b)
-          k = k + 1
-        end
-      end
-      io << "\r\n" if j < n && !soft
-      i = j + 1
+    result = ""
+    tape do
+      w = Tape::String::Writer.new(128)
+      qp_decode(text.as_tape, w)
+      result = w.finish.to_heap
     end
-    io.to_s
+    result
   end
 
   # --- Encoded-words (RFC 2047) ---
@@ -1003,7 +1528,7 @@ struct MailText
     raise "mail: the #{name} header is not UTF-8" unless MailText.utf8?(value)
   end
 
-  def self.field_name?(name : String) : Bool
+  def self.field_name?(name : String | Tape::String) : Bool
     return false if name.empty?
     p = name.to_unsafe
     i = 0
@@ -1017,6 +1542,190 @@ end
 
 # A cursor over a structured header value: whitespace and comments
 # passed over, tokens and quoted strings read.
+@[OnTape]
+struct TapeMap(K, V)
+  @keys : Tape::Array(K)
+  @values : Tape::Array(V)
+
+  def initialize
+    @keys = Tape::Array(K).new
+    @values = Tape::Array(V).new
+  end
+
+  def empty? : Bool
+    @keys.empty?
+  end
+
+  def size : Int32
+    @keys.size
+  end
+
+  def []?(key : K) : V?
+    @keys.each_with_index do |item, i|
+      return @values[i] if item == key
+    end
+    nil
+  end
+
+  def [](key : K) : V
+    self[key]? || raise "missing YAML key"
+  end
+
+  def has_key?(key : K) : Bool
+    @keys.each { |item| return true if item == key }
+    false
+  end
+
+  def []=(key : K, value : V) : Nil
+    @keys.each_with_index do |item, i|
+      if item == key
+        @values[i] = value
+        return
+      end
+    end
+    @keys << key
+    @values << value
+  end
+
+  def each(& : K, V -> _) : Nil
+    @keys.each_with_index { |key, i| yield key, @values[i] }
+  end
+end
+
+@[OnTape]
+struct TapeMailScan
+  getter at : Int32
+  @text : Tape::String
+  @p : Pointer(UInt8)
+  @n : Int32
+
+  def initialize(@text : Tape::String, @at : Int32 = 0)
+    @p = @text.to_unsafe
+    @n = @text.bytesize
+  end
+
+  def done? : Bool
+    @at >= @n
+  end
+
+  def peek : UInt8
+    @at < @n ? @p[@at] : 0_u8
+  end
+
+  def advance : Nil
+    @at = @at + 1
+  end
+
+  # Whether anything - whitespace or a comment - was passed over: an error
+  # for a comment never closed.
+  def skip_cfws : MailError?
+    while @at < @n
+      b = @p[@at]
+      if b == 32_u8 || b == 9_u8 || b == 13_u8 || b == 10_u8
+        @at = @at + 1
+      elsif b == 40_u8
+        depth = 0
+        while true
+          return MailError.new("a comment is not closed in #{@text.to_heap.inspect}") if @at >= @n
+          c = @p[@at]
+          if c == 92_u8
+            @at = @at + 1
+          elsif c == 40_u8
+            depth = depth + 1
+          elsif c == 41_u8
+            depth = depth - 1
+          end
+          @at = @at + 1
+          break if depth == 0
+        end
+      else
+        break
+      end
+    end
+    nil
+  end
+
+  def token : Tape::String
+    start = @at
+    while @at < @n && MailText.token?(@p[@at])
+      @at = @at + 1
+    end
+    MailText.cut(@text, start, @at)
+  end
+
+  def atom : Tape::String
+    start = @at
+    while @at < @n && MailText.atext?(@p[@at])
+      @at = @at + 1
+    end
+    MailText.cut(@text, start, @at)
+  end
+
+  def digits : Tape::String
+    start = @at
+    while @at < @n && @p[@at] >= 48_u8 && @p[@at] <= 57_u8
+      @at = @at + 1
+    end
+    MailText.cut(@text, start, @at)
+  end
+
+  def letters : Tape::String
+    start = @at
+    while @at < @n && ((@p[@at] >= 65_u8 && @p[@at] <= 90_u8) || (@p[@at] >= 97_u8 && @p[@at] <= 122_u8))
+      @at = @at + 1
+    end
+    MailText.cut(@text, start, @at)
+  end
+
+  def bare_value : Tape::String
+    start = @at
+    while @at < @n && @p[@at] != 59_u8 && @p[@at] > 32_u8 && @p[@at] != 40_u8
+      @at = @at + 1
+    end
+    MailText.cut(@text, start, @at)
+  end
+
+  # The quoted string at `"`, its quoted-pairs resolved.
+  def quoted : Tape::String | MailError
+    @at = @at + 1
+    io = Tape::String::Writer.new(32)
+    while @at < @n
+      b = @p[@at]
+      if b == 34_u8
+        @at = @at + 1
+        return io.finish
+      elsif b == 92_u8
+        @at = @at + 1
+        break if @at >= @n
+        io.push(@p[@at])
+      elsif b != 13_u8 && b != 10_u8
+        io.push(b)
+      end
+      @at = @at + 1
+    end
+    MailError.new("a quoted string is not closed in #{@text.to_heap.inspect}")
+  end
+
+  # A domain literal at `[`, brackets kept.
+  def literal : Tape::String | MailError
+    start = @at
+    @at = @at + 1
+    while @at < @n
+      b = @p[@at]
+      if b == 93_u8
+        @at = @at + 1
+        return MailText.cut(@text, start, @at)
+      elsif b == 92_u8
+        @at = @at + 1
+      elsif b == 91_u8
+        break
+      end
+      @at = @at + 1
+    end
+    MailError.new("a domain literal is not closed in #{@text.to_heap.inspect}")
+  end
+end
+
 class MailScan
   getter at : Int32
   @text : String
@@ -1555,6 +2264,10 @@ pub struct Mail
   MAX_DEPTH = 32
 
   # A message read from *text*: its header section, then its body.
+  def self.parse(text : Tape::String) : TapePart | MailError
+    TapePart.parse(text)
+  end
+
   def self.parse(text : String) : Part | MailError
     Part.parse(text)
   end
@@ -1679,6 +2392,46 @@ pub struct Mail
   # What quoted-printable *text* stands for, hard breaks as CRLF.
   def self.decode_quoted_printable(text : String) : String
     MailText.qp_decode(text)
+  end
+
+  def self.encode_base64(data : Tape::String
+                        ) : Tape::String
+    Tape::String.build { |w| encode_base64(data, w) }
+  end
+
+  def self.encode_base64(data : Tape::String,
+                        writer : Tape::String::Writer) : Nil
+    MailText.base64_encode(data, writer)
+  end
+
+  def self.decode_base64(text : Tape::String
+                        ) : Tape::String
+    Tape::String.build { |w| decode_base64(text, w) }
+  end
+
+  def self.decode_base64(text : Tape::String,
+                        writer : Tape::String::Writer) : Nil
+    MailText.base64_decode(text, writer)
+  end
+
+  def self.encode_quoted_printable(data : Tape::String, binary : Bool = false
+                        ) : Tape::String
+    Tape::String.build { |w| encode_quoted_printable(data, w, binary) }
+  end
+
+  def self.encode_quoted_printable(data : Tape::String,
+                        writer : Tape::String::Writer, binary : Bool = false) : Nil
+    MailText.qp_encode(data, binary, writer)
+  end
+
+  def self.decode_quoted_printable(text : Tape::String
+                        ) : Tape::String
+    Tape::String.build { |w| decode_quoted_printable(text, w) }
+  end
+
+  def self.decode_quoted_printable(text : Tape::String,
+                        writer : Tape::String::Writer) : Nil
+    MailText.qp_decode(text, writer)
   end
 
   # *text* from *charset* in UTF-8.
@@ -2050,6 +2803,299 @@ pub struct Mail
   # A message or one of its parts, as read: its header fields unfolded and
   # in order, and its body - a multipart's parts, a `message/rfc822`'s
   # message, or bytes in a transfer encoding.
+  @[OnTape]
+  struct TapePart
+    # Each field's name as written and its value unfolded, whitespace at
+    # either end dropped, nothing decoded.
+    getter headers : Tape::Array({Tape::String, Tape::String})
+    # The parts of a multipart, or the message a `message/rfc822` holds.
+    getter parts : Tape::Array(TapePart)
+    # `type/subtype` in lower case: `text/plain` when the part names none,
+    # or names one that cannot be read (RFC 2045 section 5.2).
+    getter media_type : Tape::String
+    @params : TapeMap(Tape::String, Tape::String)
+    @source : Tape::String
+    @body_at : Int32
+    @body_end : Int32
+
+    def initialize(@source : Tape::String, @headers : Tape::Array({Tape::String, Tape::String}), @media_type : Tape::String, @params : TapeMap(Tape::String, Tape::String), @body_at : Int32, @body_end : Int32, @parts : Tape::Array(TapePart))
+    end
+
+    def self.parse(text : Tape::String) : TapePart | MailError
+      TapePart.read(text, 0, text.bytesize, 0, "text/plain".as_tape)
+    end
+
+    protected def self.read(source : Tape::String, start : Int32, stop : Int32, depth : Int32, default_type : Tape::String) : TapePart | MailError
+      return MailError.new("parts are nested deeper than #{MAX_DEPTH}") if depth > MAX_DEPTH
+      p = source.to_unsafe
+      headers = Tape::Array({Tape::String, Tape::String}).new
+      name = nil.as(Tape::String?)
+      value = Tape::String::Writer.new(64)
+      body_at = stop
+      line = 0
+      i = start
+      while i < stop
+        j = i
+        while j < stop && p[j] != 10_u8
+          j = j + 1
+        end
+        e = j
+        e = e - 1 if e > i && p[e - 1] == 13_u8
+        after = j < stop ? j + 1 : stop
+        line = line + 1
+        if e == i
+          body_at = after
+          break
+        end
+        if MailText.wsp?(p[i])
+          return MailError.new("the header section begins with a folded line") unless name
+          value << source[i, e - i]
+        else
+          if field = name
+            headers << {field, TapePart.trim(value.finish)}
+          end
+          colon = i
+          while colon < e && p[colon] != 58_u8
+            colon = colon + 1
+          end
+          stem = colon
+          while stem > i && MailText.wsp?(p[stem - 1])
+            stem = stem - 1
+          end
+          field = MailText.cut(source, i, stem)
+          unless colon < e && MailText.field_name?(field)
+            shown = MailText.cut(source, i, e)
+            shown = Tape::String.build { |w| w << shown[0, 60] << "..." } if shown.bytesize > 64
+            return MailError.new("line #{line} of a header section is not a field: #{shown.to_heap.inspect}")
+          end
+          name = field
+          value = Tape::String::Writer.new(64)
+          value << source[colon + 1, e - colon - 1]
+        end
+        body_at = after
+        i = after
+      end
+      if field = name
+        headers << {field, TapePart.trim(value.finish)}
+      end
+      media = default_type
+      params = TapeMap(Tape::String, Tape::String).new
+      if type = TapePart.first(headers, "content-type")
+        parsed = MailText.content_type(type)
+        if parsed
+          media = parsed[0]
+          params = parsed[1]
+        else
+          media = "text/plain".as_tape
+        end
+      end
+      parts = Tape::Array(TapePart).new
+      if media.starts_with?("multipart/")
+        boundary = params["boundary".as_tape]?
+        return MailError.new("a #{media} part names no boundary") unless boundary && !boundary.empty?
+        ranges = TapePart.split(source, body_at, stop, boundary, media)
+        return ranges if ranges.is_a?(MailError)
+        child_type = (media == "multipart/digest" ? "message/rfc822" : "text/plain").as_tape
+        ranges.each do |range|
+          child = TapePart.read(source, range[0], range[1], depth + 1, child_type)
+          return child if child.is_a?(MailError)
+          parts << child
+        end
+      elsif media == "message/rfc822"
+        cte = MailText.lower(MailText.trim(TapePart.first(headers, "content-transfer-encoding") || "7bit".as_tape))
+        if cte == "7bit" || cte == "8bit" || cte == "binary"
+          inner = TapePart.read(source, body_at, stop, depth + 1, "text/plain".as_tape)
+          return inner if inner.is_a?(MailError)
+          parts << inner
+        end
+      end
+      TapePart.new(source, headers, media, params, body_at, stop, parts)
+    end
+
+    protected def self.trim(value : Tape::String) : Tape::String
+      p = value.to_unsafe
+      a = 0
+      b = value.bytesize
+      while a < b && MailText.wsp?(p[a])
+        a = a + 1
+      end
+      while b > a && MailText.wsp?(p[b - 1])
+        b = b - 1
+      end
+      a == 0 && b == value.bytesize ? value : MailText.cut(value, a, b)
+    end
+
+    protected def self.first(headers : Tape::Array({Tape::String, Tape::String}), lower : String) : Tape::String?
+      headers.each do |pair|
+        return pair[1] if MailText.lower(pair[0]) == lower
+      end
+      nil
+    end
+
+    # The parts of a multipart body: between `--boundary` lines, the line
+    # break before each line its own; to the `--boundary--` line. The
+    # preamble and the epilogue are passed over.
+    protected def self.split(source : Tape::String, start : Int32, stop : Int32, boundary : Tape::String, media : Tape::String) : Tape::Array({Int32, Int32}) | MailError
+      p = source.to_unsafe
+      mark = Tape::String.build { |w| w << "--" << boundary }
+      m = mark.to_unsafe
+      size = mark.bytesize
+      ranges = Tape::Array({Int32, Int32}).new
+      open_at = -1
+      i = start
+      while i < stop
+        j = i
+        while j < stop && p[j] != 10_u8
+          j = j + 1
+        end
+        e = j
+        e = e - 1 if e > i && p[e - 1] == 13_u8
+        if e - i >= size && p[i] == 45_u8 && p[i + 1] == 45_u8 && (i + size <= stop) && TapePart.prefix?(p + i, m, size)
+          k = i + size
+          closing = k + 2 <= e && p[k] == 45_u8 && p[k + 1] == 45_u8
+          rest = closing ? k + 2 : k
+          blank = true
+          while rest < e
+            blank = false unless MailText.wsp?(p[rest])
+            rest = rest + 1
+          end
+          if blank
+            if open_at >= 0
+              stop_at = i
+              if stop_at > open_at
+                stop_at = stop_at - 1
+                stop_at = stop_at - 1 if stop_at > open_at && p[stop_at - 1] == 13_u8
+              end
+              ranges << {open_at, stop_at}
+            end
+            return ranges if closing && open_at >= 0
+            return MailError.new("a #{media} body closes before its first part") if closing
+            open_at = j < stop ? j + 1 : stop
+          end
+        end
+        i = j + 1
+      end
+      return MailError.new("a #{media} body holds no line --#{boundary}") if open_at < 0
+      MailError.new("a #{media} body ends before its closing line --#{boundary}--")
+    end
+
+    protected def self.prefix?(a : Pointer(UInt8), b : Pointer(UInt8), size : Int32) : Bool
+      k = 0
+      while k < size
+        return false unless a[k] == b[k]
+        k = k + 1
+      end
+      true
+    end
+
+    # The first field named *name*, any case, its encoded-words decoded.
+    def header(name : String) : Tape::String?
+      raw = raw_header(name)
+      raw ? MailText.decode_words(raw) : nil
+    end
+
+    # Every field named *name*, in order, decoded.
+    def header_values(name : String) : Tape::Array(Tape::String)
+      lower = name.downcase
+      found = Tape::Array(Tape::String).new
+      @headers.each do |pair|
+        found << MailText.decode_words(pair[1]) if MailText.lower(pair[0]) == lower
+      end
+      found
+    end
+
+    # The first field named *name*, as written.
+    def raw_header(name : String) : Tape::String?
+      TapePart.first(@headers, name.downcase)
+    end
+
+    def subject : Tape::String?
+      header("Subject")
+    end
+
+    # The mailboxes of every field named *name* - `From`, `To`, `Cc` -
+    # none when there is no such field.
+    # A Content-Type parameter, RFC 2231's decoded.
+    def param(name : String) : Tape::String?
+      @params[name.downcase.as_tape]?
+    end
+
+    # The charset text is in: `us-ascii` when none is named (RFC 2045
+    # section 5.2), in lower case.
+    def charset : Tape::String
+      MailText.lower(@params["charset".as_tape]? || "us-ascii".as_tape)
+    end
+
+    # The disposition in lower case - `attachment`, `inline` - or nil.
+    def disposition : Tape::String?
+      raw = raw_header("Content-Disposition")
+      return nil unless raw
+      parsed = MailText.disposition(raw)
+      parsed ? parsed[0] : nil
+    end
+
+    # The file name of Content-Disposition, or else Content-Type's `name`.
+    def filename : Tape::String?
+      if raw = raw_header("Content-Disposition")
+        parsed = MailText.disposition(raw)
+        if parsed
+          name = parsed[1]["filename".as_tape]?
+          return name if name
+        end
+      end
+      @params["name".as_tape]?
+    end
+
+    def attachment? : Bool
+      disposition == "attachment"
+    end
+
+    def multipart? : Bool
+      @media_type.starts_with?("multipart/")
+    end
+
+    # The transfer encoding in lower case: `7bit` when none is named.
+    def transfer_encoding : Tape::String
+      MailText.lower(MailText.trim(
+        raw_header("Content-Transfer-Encoding") || "7bit".as_tape))
+    end
+
+    # The bytes the body stands for, its transfer encoding undone.
+    def body : Tape::String | MailError
+      raw = MailText.cut(@source, @body_at, @body_end)
+      case encoding = transfer_encoding
+      when "7bit", "8bit", "binary"
+        raw
+      when "base64"
+        MailText.base64_decode(raw)
+      when "quoted-printable"
+        MailText.qp_decode(raw)
+      else
+        MailError.new("the Content-Transfer-Encoding #{encoding.inspect} is not one std/mail reads")
+      end
+    end
+
+    # The body as text in UTF-8, from the part's charset, each CRLF an LF.
+    def text : Tape::String | MailError
+      bytes = body
+      return bytes if bytes.is_a?(MailError)
+      decoded = MailText.decode(bytes, charset)
+      return decoded if decoded.is_a?(MailError)
+      MailText.lf(decoded)
+    end
+
+    def to_heap : Part
+      headers = [] of {String, String}
+      @headers.each { |pair| headers << {pair[0].to_heap, pair[1].to_heap} }
+      params = {} of String => String
+      @params.each { |key, value| params[key.to_heap] = value.to_heap }
+      parts = [] of Part
+      @parts.each { |child| parts << child.to_heap }
+      Part.new(@source.to_heap, headers, @media_type.to_heap, params,
+        @body_at, @body_end, parts)
+    end
+  end
+
   class Part
     # Each field's name as written and its value unfolded, whitespace at
     # either end dropped, nothing decoded.
