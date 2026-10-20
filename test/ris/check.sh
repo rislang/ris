@@ -64,6 +64,7 @@ expect heap_builder     "Writing a Tape::String into a String::Builder"
 expect heap_copy        "tape -> heap -> tape pays this at every turn"
 expect heap_memory      "Writing a Tape::String into a String::Builder or"
 expect heap_memory_print "Writing a Tape::String into a Std::Io::Memory"
+expect not_flat "Holder is not flat"
 expect heap_escape_helper \
   "\`to_s\` of a Tape::String outside an @[Escape] def copies"
 
@@ -149,6 +150,17 @@ if [ "$out" = 'PASS: parsed, refused alike, written alike, on the tape' ]; then 
 
 out=$("$RIS" run test/ris/json_repeat.ri 2>&1)
 if grep -qF 'nested keys are no repeat' <<<"$out" && grep -qF 'the key "k77" is written twice in one object' <<<"$out"; then echo "runs     json_repeat"; else echo "FAILED   json_repeat: $out"; status=1; fi
+
+# Interpolation into puts or print is written on the tape, or on the heap
+# when no tape runs; flat data is linked, saved as bytes and loaded back.
+out=$("$RIS" run test/ris/interpolate.ri 2>&1)
+if [ "$out" = $'on the tape: 42 -7 1.5 x true\nno newline tape\nitem 1\nitem 2\nends its line\nheap 3\nno tape when called 4' ]; then echo "runs     interpolate"; else echo "FAILED   interpolate: $out"; status=1; fi
+out=$("$RIS" run test/ris/flat.ri 2>&1)
+if [ "$out" = $'16 bytes a node\n1 one\n2 two\n5 five\n8 eight\n9 nine\n25' ]; then echo "runs     flat"; else echo "FAILED   flat: $out"; status=1; fi
+out=$("$RIS" run test/ris/link_check.ri 2>&1)
+if grep -qF $'7' <<<"$out" && grep -qF "index 200 out of range for 1 elements" <<<"$out"; then echo "runs     link_check"; else echo "FAILED   link_check: $out"; status=1; fi
+out=$("$RIS" run test/ris/link_wide.ri 2>&1)
+if grep -qF "link 255 does not fit 1 bytes" <<<"$out"; then echo "runs     link_wide"; else echo "FAILED   link_wide: $out"; status=1; fi
 
 out=$("$RIS" run samples/ris/hello.ri 2>&1)
 if [ "$out" = $'Hello from ris, order 1\ntotal 1649' ]; then echo "runs     samples/ris/hello"; else echo "FAILED   samples/ris/hello: $out"; status=1; fi

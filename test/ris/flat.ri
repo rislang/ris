@@ -1,0 +1,70 @@
+# Flat data, Goose's way: a binary search tree in one grow-only array,
+# linked by 2-byte typed links, its names as spans of one string; written
+# out as bytes and loaded back, every link checked when followed.
+@[Tape::Flat]
+struct Node
+  getter key : Int32
+  getter name : Tape::Span
+  property left : Tape::Link(Node, UInt16)
+  property right : Tape::Link(Node, UInt16)
+
+  def initialize(@key, @name)
+    @left = Tape::Link(Node, UInt16).none
+    @right = Tape::Link(Node, UInt16).none
+  end
+end
+
+def insert(nodes : Tape::Array(Node), key : Int32, name : Tape::Span) : Nil
+  link = nodes.next_link(UInt16)
+  nodes.push(Node.new(key, name))
+  return if link.index == 0
+  at = nodes.link(0, UInt16)
+  while true
+    node = nodes[at]
+    if key < node.key
+      if node.left.none?
+        node.left = link
+        nodes[at] = node
+        return
+      end
+      at = node.left
+    else
+      if node.right.none?
+        node.right = link
+        nodes[at] = node
+        return
+      end
+      at = node.right
+    end
+  end
+end
+
+alias NodeLink = Tape::Link(Node, UInt16)
+
+def walk(nodes : Tape::Array(Node), names : Tape::String, at : NodeLink) : Nil
+  return if at.none?
+  node = nodes[at]
+  walk(nodes, names, node.left)
+  puts "#{node.key} #{names[node.name]}"
+  walk(nodes, names, node.right)
+end
+
+tape do
+  words = {5 => "five", 2 => "two", 8 => "eight", 1 => "one", 9 => "nine"}
+  text = Tape::String::Writer.new(32)
+  spans = Tape::Array(Tape::Span).new(words.size) do |i|
+    text.append_span(words.values[i])
+  end
+  names = text.finish
+  nodes = Tape::Array(Node).new(8)
+  i = 0
+  words.each_key do |key|
+    insert(nodes, key, spans[i])
+    i += 1
+  end
+  puts "#{sizeof(Node)} bytes a node"
+  saved = nodes.bytes
+  loaded = Tape::Array(Node).load(saved)
+  walk(loaded, names, loaded.link(0, UInt16))
+  puts nodes.map { |node| node.key }.sum
+end

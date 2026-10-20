@@ -11,11 +11,9 @@ ris is iyi plus Goose's tape memory.
 * It pays where much short-lived data is made and dropped together: a
   request, a parse, a render, a response. Keep what a caller retains on the
   heap, and copy it out with `to_s` in an `@[Escape]` def at the boundary.
-* Measure before keeping a change: the same work with and without tape,
-  `--release`, interleaved runs, time and peak memory or bytes allocated.
-  Keep it only for a clear gain, and say the numbers in the commit.
-* Bytes allocated (`IyiMark.allocated_since`, collection off) are steadier
-  than time on a busy machine; for time, take the fastest of several runs.
+* Speed measurement is off for now: the goal is to make tape work
+  everywhere; Goose has proven it fast. Speed tests for the whole
+  project come later, not per change.
 * Rules for tape values: [TAPE_DESIGN.md](TAPE_DESIGN.md).
 * The other languages are in [ris-bench](https://github.com/rislang/ris-bench),
   which keeps a copy of `samples/ris/respond.ri`: change both in one go.

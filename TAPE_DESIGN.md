@@ -62,18 +62,19 @@ A `Tape::Tree` stores a tree in document order (simdjson's layout):
 | words | 0.22 s, 68 MB | 0.34 s, 90 MB | 0.54 s, 175 MB |
 | graph_csr | 0.64 s, 109 MB | 1.06 s, 108 MB | 1.06 s, 174 MB |
 
-These are recorded benchmark results, not new measurements.
-C++ 0.97 s, Rust 1.18 s, Go 1.67 s on respond; see
-[ris-bench](https://github.com/rislang/ris-bench).
+Recorded, not new: C++ 0.97 s, Rust 1.18 s, Go 1.67 s on respond
+([ris-bench](https://github.com/rislang/ris-bench)).
 
-## From Goose, when a benchmark needs it
-* A tape per growing value; words and graph_csr size their arrays first.
-* Bounds checks elided in loops; graph_csr's gap is this, not memory.
-* Every scope freeing, results built in their destination, outlives and
-  shrink checks; a `group`'s fibers on tapes of their parent's region.
+## Taken from Goose
+* `puts "a#{b}"` in a `tape` block or a def taking a tape value writes on
+  the tape. `Tape::Array#each`, `map`, `sum` skip bounds checks.
+* Flat data: `Tape::Link(T, UInt16)`, a typed index checked when followed;
+  `Tape::Span` (`Writer#append_span`); `@[Tape::Flat]` structs of these and
+  numbers, saved by `Array#bytes`, read back by `Array.load`. Not yet:
+  every scope freeing, results built in place, a tape per value.
 
 ## Implementation and checks
 `src/iyi/tape.iyi`: types and scopes; `src/iyi/prelude.iyi`: `IyiRegion`.
 `src/compiler/iyi/semantic/tape*checker.cr`: storage, lifetimes, layout,
 raw pointers and heap copies. `bash test/ris/check.sh` checks refusals,
-cleanup, nested/local scopes, growth, fibers and retained copies.
+cleanup, scopes, growth, fibers, copies, interpolation and flat data.

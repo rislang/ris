@@ -1,0 +1,4 @@
+# A link too wide for its bytes is refused when made.
+tape do
+  Tape::Link(Int32, UInt8).new(255)
+end

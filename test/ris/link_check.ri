@@ -1,0 +1,8 @@
+# A link read from bytes is checked when followed: one past the elements
+# panics rather than reading past them.
+tape do
+  nodes = Tape::Array(Int32).new(2)
+  nodes.push(7)
+  puts nodes[nodes.link(0, UInt8)]
+  nodes[Tape::Link(Int32, UInt8).new(200)]
+end

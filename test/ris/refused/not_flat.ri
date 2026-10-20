@@ -1,0 +1,11 @@
+struct Holder
+  getter text : String
+
+  def initialize(@text)
+  end
+end
+
+tape do
+  holders = Tape::Array(Holder).new(1)
+  puts holders.bytes
+end

@@ -430,6 +430,10 @@ module Iyi
     end
 
     def transform(node : Call)
+      if TapeTextLowering.tape_block?(node)
+        node.block.try(&.body.accept(TapeTextLowering.new))
+      end
+
       # iyi: the typed group (III.4.9). The parser marked the call; whether
       # the *typed* form applies is this file's question, and a `nil` answer
       # is the method call standing as written.
@@ -505,6 +509,7 @@ module Iyi
     end
 
     def transform(node : Def)
+      node.body.accept(TapeTextLowering.new) if TapeTextLowering.tape_def?(node)
       @current_def = node
       node = super
       @current_def = nil

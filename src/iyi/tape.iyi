@@ -110,6 +110,12 @@ module Tape
       end
     end
 
+    # The text *span* names, a view: checked, as a span read from bytes is
+    # never trusted.
+    def [](span : Span) : String
+      self[span.start, span.size]
+    end
+
     def ==(other : String) : Bool
       @bytesize == other.bytesize && same?(other.to_unsafe)
     end
@@ -157,6 +163,27 @@ module Tape
       writer = String::Writer.new(capacity)
       yield writer
       writer.finish
+    end
+
+    # `"a#{b}"` inside a `tape` block, where the text only goes to `puts` or
+    # `print`: the normalizer makes it this call, so the text is written on
+    # the tape rather than built on the heap. With no tape running (a
+    # `spawn`ed fiber, a proc called later) it is built on the heap as
+    # before and viewed.
+    def self.interpolate(*parts : *T) : String forall T
+      if IyiRegion.tape == 0
+        return view(::String.build do |io|
+          {% for i in 0...T.size %}
+            part = parts[{{i}}]
+            io << (part.is_a?(String) ? part.to_s : part)
+          {% end %}
+        end)
+      end
+      build do |writer|
+        {% for i in 0...T.size %}
+          writer.append_value(parts[{{i}}])
+        {% end %}
+      end
     end
   end
 
@@ -236,6 +263,31 @@ module Tape
 
     def append_int(value : Int32) : Nil
       append_int(value.to_i64)
+    end
+
+    # A piece of an interpolation: text and numbers written in place, any
+    # other value as its `to_s`.
+    def append_value(value : ::String | String) : Nil
+      append(value)
+    end
+
+    def append_value(value : Int8 | Int16 | Int32 | Int64 | UInt8 | UInt16 | UInt32) : Nil
+      append_int(value.to_i64)
+    end
+
+    def append_value(value : Float64) : Nil
+      append_float(value)
+    end
+
+    def append_value(value : Char) : Nil
+      value.each_byte { |byte| push(byte) }
+    end
+
+    def append_value(value : Nil) : Nil
+    end
+
+    def append_value(value) : Nil
+      append(value.to_s)
     end
 
     # *text* with `&`, `<`, `>`, `"` and `'` escaped as `ERB::Util.html_escape`
@@ -318,6 +370,13 @@ module Tape
       (@state + 2_i64).value = start
     end
 
+    # Appends *text* and says where it is: a `Span` of the finished string.
+    def append_span(text : ::String | String) : Span
+      start = length
+      append(text)
+      Span.new(start, text.bytesize)
+    end
+
     def finish : String
       start = (@state + 2_i64).value
       String.new(Pointer(UInt8).new(start), (@state.value &- start).to_i32)
@@ -393,14 +452,164 @@ module Tape
       Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value = value
     end
 
+    # The element at *link*, checked as `[]` checks an index: a link read
+    # from bytes is never trusted.
+    def [](link : Tape::Link(T, I)) : T forall I
+      self[link.index]
+    end
+
+    def []=(link : Tape::Link(T, I), value : T) : T forall I
+      self[link.index] = value
+    end
+
+    # A link to the element at *index*, stored in an `I`: `UInt8`, `UInt16`
+    # or `UInt32` (the default) bytes rather than a pointer's eight.
+    def link(index : Int32, width : I.class = UInt32) : Tape::Link(T, I) forall I
+      raise "index #{index} out of range for #{size} elements" if index < 0 || index >= size
+      Tape::Link(T, I).new(index)
+    end
+
+    # The index the next `push` takes, as a link: a node can name a child
+    # before the child is pushed.
+    def next_link(width : I.class = UInt32) : Tape::Link(T, I) forall I
+      Tape::Link(T, I).new(size)
+    end
+
+    # Each element in order. The loop's own bound keeps the index in range,
+    # so no element is checked again (Goose elides these too).
     def each(& : T -> Nil) : Nil
       index = 0
       count = size
       while index < count
-        yield self[index]
+        yield unsafe_at(index)
         index = index + 1
       end
     end
+
+    def each_with_index(& : T, Int32 -> Nil) : Nil
+      index = 0
+      count = size
+      while index < count
+        yield unsafe_at(index), index
+        index = index + 1
+      end
+    end
+
+    # A new array of what the block gives for each element, sized first so
+    # the block may put other values on the tape.
+    def map(& : T -> U) : Array(U) forall U
+      Array(U).new(size) { |index| yield unsafe_at(index) }
+    end
+
+    def sum : T
+      total = T.zero
+      each { |value| total = total + value }
+      total
+    end
+
+    @[AlwaysInline]
+    private def unsafe_at(index : Int32) : T
+      Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value
+    end
+
+    # The elements' bytes, nothing copied: write them to a file or socket
+    # and `load` them back. `T` must be flat (see `Tape::Flat`), with no
+    # pointer in it, which `Link` and `Span` are not.
+    def bytes : String
+      {% begin %}
+        {% for t in [T] + T.instance_vars.map(&.type) %}
+          {% unless t < ::Number || t.name.starts_with?("Tape::Link(") || t == ::Tape::Span || t.annotation(::Tape::Flat) %}
+            {% raise "#{T} is not flat: #{t} in it is not a number, a Tape::Link, a Tape::Span or an @[Tape::Flat] struct" %}
+          {% end %}
+        {% end %}
+      {% end %}
+      String.new(Pointer(UInt8).new(@state.value), (size.to_u64 &* sizeof(T).to_u64).to_i32)
+    end
+
+    # The elements *bytes* holds, copied onto the tape: the length must be
+    # whole elements, and each link is checked when it is followed.
+    def self.load(bytes : String) : self
+      {% begin %}
+        {% for t in [T] + T.instance_vars.map(&.type) %}
+          {% unless t < ::Number || t.name.starts_with?("Tape::Link(") || t == ::Tape::Span || t.annotation(::Tape::Flat) %}
+            {% raise "#{T} is not flat: #{t} in it is not a number, a Tape::Link, a Tape::Span or an @[Tape::Flat] struct" %}
+          {% end %}
+        {% end %}
+      {% end %}
+      width = sizeof(T)
+      raise "#{bytes.bytesize} bytes are not whole #{width}-byte elements" if bytes.bytesize % width != 0
+      count = bytes.bytesize // width
+      array = new(count)
+      Pointer(UInt8).new(array.@state.value).copy_from(bytes.to_unsafe, bytes.bytesize)
+      (array.@state + 1_i64).value = count.to_u64
+      array
+    end
+  end
+
+  # A typed link to an element of a `Tape::Array(T)`: its index in `I`
+  # bytes. It holds no pointer, so it stays valid while the array grows and
+  # moves, may be kept in any value, and is the same in bytes written out
+  # and loaded back. The array checks it when followed.
+  struct Link(T, I)
+    @index : I
+
+    def initialize(index : Int32)
+      raise "link #{index} does not fit #{sizeof(I)} bytes" if index < 0 || index.to_u64 >= Link.top(I)
+      @index = Link.narrow(index.to_u64, I)
+    end
+
+    # The link to nothing: `none?` is true.
+    def self.none : self
+      new(Link.narrow(Link.top(I), I), none: true)
+    end
+
+    protected def initialize(@index : I, *, none : Bool)
+    end
+
+    def none? : Bool
+      wide == Link.top(I)
+    end
+
+    def index : Int32
+      raise "Tape::Link: none" if none?
+      wide.to_i32
+    end
+
+    # The low `I` bytes of *value*, and back: the prelude converts to and
+    # from few widths, and a link is unsigned and little-endian either way.
+    protected def self.narrow(value : UInt64, width : W.class) : W forall W
+      pointerof(value).as(Pointer(W)).value
+    end
+
+    protected def self.top(width : W.class) : UInt64 forall W
+      case sizeof(W)
+      when 1 then 0xff_u64
+      when 2 then 0xffff_u64
+      when 4 then 0xffffffff_u64
+      else        raise "a link is 1, 2 or 4 bytes, not #{sizeof(W)}"
+      end
+    end
+
+    private def wide : UInt64
+      value = 0_u64
+      pointerof(value).as(Pointer(I)).value = @index
+      value
+    end
+  end
+
+  # Text inside a `Tape::String`, as its start and length: a record holds
+  # its text this way, flat, beside the one string all its text is in.
+  struct Span
+    getter start : Int32
+    getter size : Int32
+
+    def initialize(@start : Int32, @size : Int32)
+    end
+  end
+
+  # A struct is flat when each field is a number, a `Link`, a `Span` or
+  # another flat struct: it has no pointer, so its bytes are its value.
+  annotation Flat
   end
 
   # A tree on the tape as one stream in document order, the layout simdjson
@@ -509,9 +718,10 @@ class IyiIO
     text.to_s(self)
   end
 
+  # As `puts(String)`: text that already ends its line gets no second one.
   def puts(text : Tape::String) : Nil
     text.to_s(self)
-    write("\n")
+    write("\n") unless text.bytesize > 0 && text[-1] == 10_u8
   end
 end
 
