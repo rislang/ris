@@ -10,7 +10,7 @@ ris is iyi plus Goose's tape memory.
   iyi is merged.
 * It pays where much short-lived data is made and dropped together: a
   request, a parse, a render, a response. Keep what a caller retains on the
-  heap, and copy it out with `to_s` in a `@[TapeToHeap]` def at the boundary.
+  heap, and copy it out with `to_heap` at the boundary.
 * Speed measurement is off for now: the goal is to make tape work
   everywhere; Goose has proven it fast. Speed tests for the whole
   project come later, not per change.
@@ -29,9 +29,9 @@ scope releases it all together:
   the input bytes rather than copying them.
 * Temporaries go on the caller's tape: a nested `tape` block shares it at
   no cost. No `local_tape` per call; it costs more than small work saves.
-* The caller decides what to copy to the heap, and when. Application
-  helpers making that copy need `@[TapeToHeap]` individually; the annotation
-  does not propagate to called helpers or permit tape values to escape.
+* The caller decides what to copy to the heap, and when: `to_heap`, on a
+  `Tape::String`, `Tape::Array` or an `@[OnTape]` struct defining one.
+  `to_s` and interpolation need `@[TapeToHeap]`, per def, not propagated.
 * No raw pointers in an API: pass `Tape::String`, `Tape::String::Writer`,
   `Tape::Array` or an `@[OnTape]` struct. Outside a `std/` module the
   compiler refuses a `Tape::String`'s `to_unsafe` and
@@ -39,8 +39,8 @@ scope releases it all together:
   with `[]`, `[start, count]`, `each_byte`. Only the library's own FFI or
   socket call takes the pointer.
 * Keep the `String` API beside it, built on the tape one: it opens a
-  `tape` (shared when the caller has one) and copies the result out.
-  In application code, mark that wrapper `@[TapeToHeap]`. Library code in
+  `tape` (shared when the caller has one) and copies the result out
+  with `to_heap`. Library code in
   `std/` and `src/iyi/` is exempt from heap-copy and raw-pointer checks.
 
 Example: `HTTP.parse_head(bytes : Tape::String) : ParsedHead | ParseError`,

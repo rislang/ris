@@ -35,10 +35,10 @@ No tape value survives the block that owns its storage:
   outer variables or containers. Copying a struct does not copy its data.
 * `Tape::String.new(text)` copies heap text onto the tape; `.view(text)`
   borrows its bytes. `[start, count]` borrows a slice; `[]` reads a byte.
-* To retain text, call `to_s` inside a `@[TapeToHeap]` def while its source
-  is alive. Interpolation and writing tape text into `String::Builder`
-  or `IO::Memory` also require this annotation. It permits heap copies,
-  not escaping tape values. Each helper making a copy needs its own mark.
+* To retain a value, copy it by name while its source is alive: `to_heap`
+  on a `Tape::String`, a `Tape::Array` or `View` (each element by its own
+  `to_heap`), or an `@[OnTape]` struct that defines one. `to_s`,
+  interpolation and writing into `String::Builder` need `@[TapeToHeap]`.
 * Pass tape text on, append to a tape writer, or write directly to a file
   or socket (`puts text`, `io << text`). Avoid tape -> heap -> tape copies.
 * `std/` and `src/iyi/` may use raw pointers (`to_unsafe`,

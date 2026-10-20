@@ -5,7 +5,7 @@
 # Each day's log is read on its own tape: its lines, the parsed hits, the
 # filtered and sorted arrays and the report text all go on it, and all
 # are freed at once when `tape do ... end` ends. Only what must outlive
-# the day - its slowest path - is copied to the heap, in one marked def.
+# the day - its slowest path - is copied to the heap, with `to_heap`.
 #
 # Moving a tape value out of its block is refused by the compiler:
 # `kept = hits` inside the block, with `kept` from outside, does not build.
@@ -47,11 +47,6 @@ def parse(line : Tape::String) : Hit
   Hit.new(method, path, number(status), number(ms))
 end
 
-# The one copy off the tape: the slowest path is kept after its day.
-@[TapeToHeap]
-def keep(path : Tape::String) : String
-  path.to_s
-end
 
 DAYS = [
   "GET /users/1 200 12\nGET /users/2 200 640\nPOST /login 500 30\n" \
@@ -87,7 +82,8 @@ DAYS.each_with_index do |log, day|
     end
     puts report.finish
 
-    slowest << keep(top.first.path) unless top.empty?
+    # The one copy off the tape: the slowest path outlives its day.
+    slowest << top.first.path.to_heap unless top.empty?
   end
 end
 

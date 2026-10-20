@@ -177,6 +177,12 @@ module Tape
       ::String.new(@bytesize) { |buffer| buffer.copy_from(@ptr, @bytesize) }
     end
 
+    # The copy to keep after the tape ends, by its own name so it is seen
+    # where it is made: anywhere, where `to_s` needs a @[TapeToHeap] def.
+    def to_heap : ::String
+      to_s
+    end
+
     # Writes the bytes to *io*, a file or socket, with no copy on the heap
     # (`puts text`, `io << text`). A `String::Builder` or `std/io::Memory` is
     # the heap: `TapeEscapeChecker` refuses writing into one outside an
@@ -818,6 +824,15 @@ module Tape
       View(T).new(self, indexes)
     end
 
+    # The elements copied into an `Array` on the heap, to keep after the
+    # tape ends. An element with a `to_heap` of its own - a Tape::String,
+    # a Tape::Array, an @[OnTape] struct that defines one - is copied by it;
+    # any other is taken as it is. A tape element with none is refused, as
+    # no `Array` may hold a tape value.
+    def to_heap
+      ::Array(typeof(Tape.heap_value(unsafe_at(0)))).new(size) { |index| Tape.heap_value(unsafe_at(index)) }
+    end
+
     # For `View`, whose indexes are known in range.
     protected def unchecked(index : Int32) : T
       unsafe_at(index)
@@ -918,6 +933,17 @@ module Tape
     def each(& : T -> Nil) : Nil
       @at.each { |index| yield @target.unchecked(index) }
     end
+
+    # The viewed elements, in the view's order, copied to the heap as
+    # `Tape::Array#to_heap` copies them.
+    def to_heap
+      ::Array(typeof(Tape.heap_value(@target.unchecked(0)))).new(size) { |k| Tape.heap_value(self[k]) }
+    end
+  end
+
+  # An element as `to_heap` keeps it: its own copy, or itself.
+  def self.heap_value(value)
+    value.responds_to?(:to_heap) ? value.to_heap : value
   end
 
   # A typed link to an element of a `Tape::Array(T)`: its index in `I`

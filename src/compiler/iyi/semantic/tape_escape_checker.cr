@@ -1,8 +1,8 @@
 # ris: a value on the tape stays there until its scope ends. Text goes
-# onto the tape freely (`Tape::String.new`, `Writer#append`), but the one
-# way back to the heap, a `Tape::String`'s `to_s`, is taken only in a def
-# marked `@[TapeToHeap]`: the place where a value is handed to what outlives
-# the tape - a cache, a broadcast, a record. So a request's text, once on
+# onto the tape freely (`Tape::String.new`, `Writer#append`), but back to
+# the heap only by name: `to_heap`, or a `Tape::String`'s `to_s` in a def
+# marked `@[TapeToHeap]`, where a value is handed to what outlives the
+# tape - a cache, a broadcast, a record. So a request's text, once on
 # its tape, is not copied off and carried on as a `String` by code between
 # the intake and the response; each copy that leaves is at a boundary
 # named as one. Interpolation and writing into a `String::Builder` or
@@ -59,8 +59,8 @@ class Iyi::TapeEscapeChecker
     (`==`, `starts_with?`, `[start, count]`); print it (`puts text`, \
     `io << text` to a file or socket); or append it to a \
     Tape::String::Writer. Only where the text must outlive the tape - a \
-    cache, a broadcast, a record - copy it once, in a def marked \
-    `@[TapeToHeap]`: the boundary it leaves by.
+    cache, a broadcast, a record - copy it once, by name: `text.to_heap`, \
+    or `to_heap` on a Tape::Array of it.
     TEXT
 
   def refuse?(node : Call) : String?

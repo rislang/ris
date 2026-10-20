@@ -198,6 +198,8 @@ else
   echo "FAILED   samples/ris/web: does not build"; status=1
 fi
 rm -rf "$web"
+out=$("$RIS" run test/ris/to_heap.ri 2>&1)
+if [ "$out" = $'GET /users\nGET,/users\n[3, 1, 2] [2, 3]\n/users 12' ]; then echo "runs     to_heap"; else echo "FAILED   to_heap: $out"; status=1; fi
 out=$("$RIS" run test/ris/each_line.ri 2>&1)
 if [ "$out" = $'[GET /][POST /users][][GET /a] 4\n[one] 1\n 0\n[b\r] 1' ]; then echo "runs     each_line"; else echo "FAILED   each_line: $out"; status=1; fi
 out=$("$RIS" run samples/ris/report.ri 2>&1)

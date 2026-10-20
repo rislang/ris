@@ -42,10 +42,9 @@ module Chat
   end
 
   # The one copy to the heap: a posted message outlives its request.
-  @[TapeToHeap]
   def self.keep(room : Room, post : Post) : Nil
     room.authors << post.user_id
-    room.bodies << post.body.to_s
+    room.bodies << post.body.to_heap
     room.boosts << 0
   end
 

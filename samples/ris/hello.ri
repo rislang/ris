@@ -21,10 +21,9 @@ def make_order(id : Int64) : Order
   Order.new(id, name, lines)
 end
 
-# The greeting outlives the tape, so it is copied off here, once.
-@[TapeToHeap]
+# The greeting outlives the tape, so its name is copied off, by name.
 def greet(order : Order) : String
-  "Hello from #{order.customer.to_s}, order #{order.id}"
+  "Hello from #{order.customer.to_heap}, order #{order.id}"
 end
 
 total = 0_i64

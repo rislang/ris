@@ -55,8 +55,8 @@ end
 
 * Memory: ordinary objects use the GC. For bounded work (a request) use
   `tape do … end` with `Tape::String` (and its `Writer`),
-  `Tape::Array(T)`, `Tape::Tree(T)` and `@[OnTape]` structs. To keep text,
-  call `to_s` in a `@[TapeToHeap]` def before its tape ends. Nested `tape`
+  `Tape::Array(T)`, `Tape::Tree(T)` and `@[OnTape]` structs. To keep a
+  value, copy it with `to_heap` before its tape ends. Nested `tape`
   shares storage; `local_tape` owns its own. See `TAPE_DESIGN.md`.
 * Tape only where it pays: a hot path that allocates much short-lived
   data. Elsewhere plain ris is simpler, and copy-out can cost more than
