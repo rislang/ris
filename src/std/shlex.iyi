@@ -76,10 +76,23 @@ end
 pub struct Shlex
   # The words of *text*, quotes and backslashes taken off as `sh` takes
   # them; with *comments*, `#` to the end of the line is skipped.
-  def self.split(text : String, comments : ::Bool = false) : Array(String) | ShlexError
-    raw = text.to_unsafe
+  def self.split(text : String,
+                 comments : ::Bool = false) : Array(String) | ShlexError
+    result = [] of String
+    tape do
+      parsed = split(text.as_tape, comments)
+      return parsed if parsed.is_a?(ShlexError)
+      result = parsed.to_heap
+    end
+    result
+  end
+
+  def self.split(text : Tape::String,
+                 comments : ::Bool = false
+                 ) : Tape::Array(Tape::String) | ShlexError
+    raw = text
     n = text.bytesize
-    words = [] of String
+    words = Tape::Array(Tape::String).new
     i = 0
     while i < n
       c = raw[i]
@@ -88,7 +101,7 @@ pub struct Shlex
       elsif comments && c == 35_u8
         i = past_line(raw, n, i)
       else
-        word = String::Builder.new
+        word = Tape::String::Writer.new(32)
         quoted = false
         while i < n
           c = raw[i]
@@ -103,7 +116,7 @@ pub struct Shlex
               close += 1
             end
             return unclosed(text, i) if close >= n
-            word.write(raw + i + 1, close - i - 1)
+            word << raw[i + 1, close - i - 1]
             i = close + 1
           elsif c == 34_u8
             quoted = true
@@ -118,24 +131,24 @@ pub struct Shlex
               elsif c == 92_u8
                 return dangling(text, i) if i + 1 >= n
                 after = raw[i + 1]
-                word.write_byte(92_u8) unless after == 34_u8 || after == 92_u8
-                word.write_byte(after)
+                word.push(92_u8) unless after == 34_u8 || after == 92_u8
+                word.push(after)
                 i += 2
               else
-                word.write_byte(c)
+                word.push(c)
                 i += 1
               end
             end
           elsif c == 92_u8
             return dangling(text, i) if i + 1 >= n
-            word.write_byte(raw[i + 1])
+            word.push(raw[i + 1])
             i += 2
           else
-            word.write_byte(c)
+            word.push(c)
             i += 1
           end
         end
-        words << word.to_s if quoted || !word.empty?
+        words << word.finish if quoted || word.length > 0
       end
     end
     words
@@ -144,33 +157,66 @@ pub struct Shlex
   # *arg* as one shell word: as it is when every byte is a letter, a
   # digit or one of `%+,-./:=@_`, `''` when empty, else single-quoted.
   def self.quote(arg : String) : String
-    return "''" if arg.empty?
-    raw = arg.to_unsafe
-    n = arg.bytesize
-    i = 0
-    while i < n && safe?(raw[i])
-      i += 1
+    result = ""
+    tape do
+      result = quote(arg.as_tape).to_heap
     end
-    return arg if i == n
-    String.build(n + 8) do |io|
-      io.write_byte(39_u8)
-      j = 0
-      while j < n
-        if raw[j] == 39_u8
-          io << "'\"'\"'"
-        else
-          io.write_byte(raw[j])
-        end
-        j += 1
-      end
-      io.write_byte(39_u8)
-    end
+    result
   end
 
-  # The arguments quoted and joined with spaces: a command line that
-  # `split` and `sh` read back as *args*.
+  def self.quote(arg : Tape::String) : Tape::String
+    Tape::String.build(arg.bytesize + 8) { |w| quote(arg, w) }
+  end
+
+  def self.quote(arg : Tape::String,
+                 writer : Tape::String::Writer) : Nil
+    if arg.empty?
+      writer << "''"
+      return
+    end
+    n = arg.bytesize
+    i = 0
+    while i < n && safe?(arg[i])
+      i += 1
+    end
+    if i == n
+      writer << arg
+      return
+    end
+    writer << "'"
+    j = 0
+    while j < n
+      if arg[j] == 39_u8
+        writer << "'\"'\"'"
+      else
+        writer << arg[j, 1]
+      end
+      j += 1
+    end
+    writer << "'"
+  end
+
+  # Quoted arguments separated by one space.
   def self.join(args : Array(String)) : String
-    args.map { |a| quote(a) }.join(" ")
+    result = ""
+    tape do
+      words = Tape::Array(Tape::String).new(args.size)
+      args.each { |arg| words << arg.as_tape }
+      result = join(words).to_heap
+    end
+    result
+  end
+
+  def self.join(args : Tape::Array(Tape::String)) : Tape::String
+    Tape::String.build { |w| join(args, w) }
+  end
+
+  def self.join(args : Tape::Array(Tape::String),
+                writer : Tape::String::Writer) : Nil
+    args.each_with_index do |arg, i|
+      writer << " " if i > 0
+      quote(arg, writer)
+    end
   end
 
   private def self.blank?(c : UInt8) : ::Bool
@@ -178,25 +224,33 @@ pub struct Shlex
   end
 
   private def self.safe?(c : UInt8) : ::Bool
-    (c >= 97_u8 && c <= 122_u8) || (c >= 65_u8 && c <= 90_u8) || (c >= 48_u8 && c <= 58_u8) ||
-      c == 37_u8 || c == 43_u8 || c == 44_u8 || c == 45_u8 || c == 46_u8 || c == 47_u8 ||
+    (c >= 97_u8 && c <= 122_u8) ||
+      (c >= 65_u8 && c <= 90_u8) ||
+      (c >= 48_u8 && c <= 58_u8) ||
+      c == 37_u8 || c == 43_u8 || c == 44_u8 || c == 45_u8 ||
+      c == 46_u8 || c == 47_u8 ||
       c == 61_u8 || c == 64_u8 || c == 95_u8
   end
 
   # The index after the line feed that ends the line holding *i*, or *n*.
-  private def self.past_line(raw : Pointer(UInt8), n : Int32, i : Int32) : Int32
+  private def self.past_line(raw : Tape::String, n : Int32,
+                             i : Int32) : Int32
     while i < n && raw[i] != 10_u8
       i += 1
     end
     i < n ? i + 1 : n
   end
 
-  private def self.unclosed(text : String, at : Int32) : ShlexError
-    quote = text.to_unsafe[at] == 39_u8 ? "'" : "\""
-    ShlexError.new("shlex: no closing quotation: the #{quote} at byte #{at} is never closed", at)
+  private def self.unclosed(text : Tape::String, at : Int32) : ShlexError
+    quote = text[at] == 39_u8 ? "'" : "\""
+    ShlexError.new(
+      "shlex: no closing quotation: the #{quote} at byte #{at} is never " \
+      "closed", at)
   end
 
-  private def self.dangling(text : String, at : Int32) : ShlexError
-    ShlexError.new("shlex: no escaped character: the backslash at byte #{at} ends the text", at)
+  private def self.dangling(text : Tape::String, at : Int32) : ShlexError
+    ShlexError.new(
+      "shlex: no escaped character: the backslash at byte #{at} ends " \
+      "the text", at)
   end
 end
