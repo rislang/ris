@@ -532,12 +532,12 @@ module Tape
     end
 
     # The indexes in *indexes*, each checked against this array once, for
-    # reads with no check after (`Tape::Indexes`).
-    def indexes(indexes : Array(Int32)) : Indexes(T)
-      Indexes(T).new(self, indexes)
+    # reads with no check after (`Tape::View`).
+    def view(indexes : Array(Int32)) : View(T)
+      View(T).new(self, indexes)
     end
 
-    # For `Indexes`, whose indexes are known in range.
+    # For `View`, whose indexes are known in range.
     protected def unchecked(index : Int32) : T
       unsafe_at(index)
     end
@@ -589,9 +589,9 @@ module Tape
   # checked once here: Goose's index types, `u32 in nodes`. Reading through
   # one checks nothing more, as `target` never shrinks and the indexes are
   # a copy no one else can change. CSR's `dist[adj[k]]` is
-  # `dist.indexes(adj)[k]`, checked when the edges come in.
+  # `dist.view(adj)[k]`, checked when the edges come in.
   @[OnTape]
-  struct Indexes(T)
+  struct View(T)
     @target : Array(T)
     @at : Array(Int32)
 
