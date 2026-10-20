@@ -178,6 +178,26 @@ out=$("$RIS" run samples/ris/chat.ri 2>&1)
 if [ "$(tail -3 <<<"$out")" = $'403 user 99 is not in the room\n400 bad request\nkept 3 messages' ] && grep -qF "200 12: Deploy is green | 7: Morning! | 7: Ship it (members 7, 12, 31)" <<<"$out"; then echo "runs     samples/ris/chat"; else echo "FAILED   samples/ris/chat: $out"; status=1; fi
 out=$("$RIS" run samples/ris/request.ri 2>&1)
 if [ "$out" = $'200 OK Hello\n200 OK {"id":42,"name":"alice"}\n404 Not Found \n405 Method Not Allowed \n400 Bad Request' ]; then echo "runs     samples/ris/request"; else echo "FAILED   samples/ris/request: $out"; status=1; fi
+# The web sample serves until killed: port 0, read back from its banner.
+web=$(mktemp -d)
+if ! command -v curl >/dev/null; then
+  echo "skipped  samples/ris/web (no curl)"
+elif "$RIS" build -o "$web/web" samples/ris/web.ri >/dev/null 2>&1; then
+  "$web/web" 0 >"$web/log" 2>&1 &
+  pid=$!
+  url=""
+  for _ in $(seq 50); do
+    url=$(grep -o 'http://[^ ]*' "$web/log" 2>/dev/null) && break
+    sleep 0.1
+  done
+  page=$(curl -s "$url")
+  missing=$(curl -s -o /dev/null -w '%{http_code}' "${url%/1/status}/9/status")
+  kill "$pid" 2>/dev/null
+  if [ "$page" = $'<h1>alice</h1>\n<p class="status">Learning sequential memory management :-)</p>' ] && [ "$missing" = 404 ]; then echo "runs     samples/ris/web"; else echo "FAILED   samples/ris/web: $page $missing"; status=1; fi
+else
+  echo "FAILED   samples/ris/web: does not build"; status=1
+fi
+rm -rf "$web"
 out=$("$RIS" run samples/ris/hello.ri 2>&1)
 if [ "$out" = $'Hello from ris, order 1\ntotal 1649' ]; then echo "runs     samples/ris/hello"; else echo "FAILED   samples/ris/hello: $out"; status=1; fi
 
