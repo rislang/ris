@@ -1,0 +1,42 @@
+module test/number_format_tape
+
+import std/number_format
+
+kept = ""
+tape do
+  writer = Tape::String::Writer.new(1)
+  writer << "prefix:"
+  1234567.format(writer)
+  exit 1 unless writer.finish == "prefix:1,234,567"
+  writer = Tape::String::Writer.new(1)
+  1234.5678.format(writer, decimal_places: 2)
+  exit 2 unless writer.finish == "1,234.57"
+  kept = writer.finish.to_heap
+  writer = Tape::String::Writer.new(1)
+  (-9223372036854775807_i64 - 1_i64).format(writer)
+  exit 8 unless writer.finish == "-9,223,372,036,854,775,808"
+  writer = Tape::String::Writer.new(1)
+  18446744073709551615_u64.format(writer)
+  exit 9 unless writer.finish == "18,446,744,073,709,551,615"
+  writer = Tape::String::Writer.new(1)
+  1234567.humanize(writer)
+  exit 3 unless writer.finish == "1.23M"
+  writer = Tape::String::Writer.new(1)
+  1536.humanize_bytes(writer)
+  exit 4 unless writer.finish == "1.5KiB"
+end
+exit 5 unless 1234.5678.format(decimal_places: 2) == kept
+exit 6 unless 1234567.humanize == "1.23M"
+exit 7 unless 1536.humanize_bytes == "1.5KiB"
+exit 10 unless 1.005.format(decimal_places: 2) == "1.00"
+exit 11 unless 2.5.format(decimal_places: 0) == "2"
+exit 12 unless (-0.0).format(decimal_places: 2) == "0.00"
+exit 13 unless 1e20.format == "100,000,000,000,000,000,000.0"
+exit 14 unless 0.000_012.humanize == "12µ"
+exit 15 unless 999999.humanize == "1M"
+exit 16 unless 1536.humanize_bytes(precision: 2,
+  significant: false) == "1.50KiB"
+exit 17 unless 0.1_f32.format == "0.1"
+exit 18 unless 1234.5_f32.format == "1,234.5"
+exit 19 unless 0.1_f32.format(decimal_places: 9) == "0.100000001"
+puts "PASS: number_format tape and heap APIs"
