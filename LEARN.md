@@ -8,9 +8,9 @@ For an agent that is to write ris. Read the source first, then build.
 1. `README.md`: what ris is, and the tape example.
 2. This file: the rules that differ from Ruby and Crystal.
 3. `TAPE_DESIGN.md`: where a tape value may and may not go.
-4. `samples/ris/hello.ri` and `samples/ris/shop/order.ri`: a program and
-   a module it imports. `test/ris/*.ri` are small cases; `test/ris/refused/`
-   is what the compiler rejects, one file per tape rule.
+4. `samples/ris/report.ri`: tape written by hand; `samples/ris/hello.ri`
+   and `shop/order.ri`: a program and a module it imports. `test/ris/*.ri`
+   are small cases; `test/ris/refused/` is what the compiler rejects.
 5. `SPEC.md` (iyi's, long): look things up, don't read it through. Part I
    is the rules (R-1..R-5); III.1 is errors; III.4 is fibers and channels.
 
@@ -54,15 +54,15 @@ end
 ```
 
 * Memory: ordinary objects use the GC. For bounded work (a request) use
-  `tape do … end` with `Tape::String` (and its `Writer`),
-  `Tape::Array(T)`, `Tape::Tree(T)` and `@[OnTape]` structs. To keep a
-  value, copy it with `to_heap` before its tape ends. Nested `tape`
-  shares storage; `local_tape` owns its own. See `TAPE_DESIGN.md`.
+  `tape do … end`: `text.as_tape` views a String there, nothing copied;
+  a `Tape::String` reads as a String does (`[a..]`, `split`, `index`,
+  `to_i`), a `Tape::String::Writer` takes `<<`, `Tape::Array(T)` and
+  `@[OnTape]` structs hold the rest, and `to_heap` copies what must
+  outlive the tape. Nested `tape` shares it; `local_tape` owns its own.
 * Tape only where it pays: a hot path that allocates much short-lived
   data. Elsewhere plain ris is simpler, and copy-out can cost more than
-  it saves. Measure it yourself: run the real work with and without tape
-  (`--release`, median of several runs), compare time and peak memory.
-  Keep tape only for a clear gain.
+  it saves. Measure with and without tape (`--release`, median of several
+  runs, time and peak memory); keep tape only for a clear gain.
 
 ## 3. Then install, and work in the loop
 
