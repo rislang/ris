@@ -36,8 +36,7 @@ class Iyi::TapeScopeChecker
   end
 
   def self.mark(program : Program, node : While | Block | Def) : Nil
-    # Crystal's library (`--crystal`) has no tape, so no mark to call.
-    return if program.crystal_library? || TapeScopeRuntime.runtime?(node.location)
+    return if !program.tape_scopes? || TapeScopeRuntime.runtime?(node.location)
     body = node.body
     return if body.is_a?(Nop) || body.is_a?(Primitive)
     return if node.is_a?(Def) && (node.abstract? || node.name == "initialize")

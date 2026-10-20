@@ -3143,6 +3143,7 @@ module Iyi
     private def new_program(sources)
       @program = program = Program.new
       program.iyi_prelude = prelude.ends_with?("iyi/prelude")
+      program.tape_scopes = program.iyi_prelude?
       program.compiler = self
       program.filename = sources.first.filename
       program.codegen_target = codegen_target

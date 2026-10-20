@@ -491,6 +491,11 @@ module Iyi
     # iyi: true when building with `--crystal`, targeting Crystal's standard library and ABI.
     property? crystal_library = false
 
+    # ris: true when the prelude is iyi's, whose tape defines the scope
+    # marks (`__iyi_scope_mark`) the normalizer wraps bodies in. Crystal's
+    # library and a spec's bare program have none.
+    property? tape_scopes = false
+
     # iyi: true when this program's runtime symbols are `__iyi_*`.
     #
     # The prelude decides, because the prelude is what defines them: iyi's

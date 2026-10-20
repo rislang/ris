@@ -97,6 +97,11 @@ pub abstract class Digest
     update(data.to_unsafe, data.bytesize)
   end
 
+  # Text on the caller's tape, read where it lies: nothing is copied.
+  def update(data : Tape::String) : self
+    update(data.to_unsafe, data.bytesize)
+  end
+
   def update(data : Array(UInt8)) : self
     update(data.to_unsafe, data.size)
   end
