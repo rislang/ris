@@ -393,27 +393,39 @@ pub class SmtpClient
   # doubled at a line's start, a CRLF at the end if it had none, and the
   # lone dot after.
   def self.stuffed(data : String) : String
+    result = ""
+    tape do
+      result = stuffed(data.as_tape).to_heap
+    end
+    result
+  end
+
+  def self.stuffed(data : Tape::String) : Tape::String
+    Tape::String.build { |w| stuffed(data, w) }
+  end
+
+  def self.stuffed(data : Tape::String,
+                   io : Tape::String::Writer) : Nil
     p = data.to_unsafe
     n = data.bytesize
-    io = String::Builder.new(n + n // 32 + 8)
     start = true
     i = 0
     while i < n
       b = p[i]
-      io.write_byte(46_u8) if start && b == 46_u8
+      io.push(46_u8) if start && b == 46_u8
       start = false
       if b == 13_u8 || b == 10_u8
         io << "\r\n"
         i = i + 1 if b == 13_u8 && i + 1 < n && p[i + 1] == 10_u8
         start = true
       else
-        io.write_byte(b)
+        io.push(b)
       end
       i = i + 1
     end
     io << "\r\n" unless start
     io << ".\r\n"
-    io.to_s
+    nil
   end
 
   # QUIT, its 221 read, and the connection closed.
