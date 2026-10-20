@@ -1,0 +1,70 @@
+# request: one HTTP request in, one response out, all on one tape.
+#
+#   ./bin/ris run samples/ris/request.ri
+#
+# The request's bytes, the parsed head and the response are made inside
+# `tape do ... end` and freed together when it ends: nothing to collect.
+# Only the user table lives on, on the heap.
+
+module samples/request
+
+import std/http::{Server, ParsedHead}
+
+USERS = {42 => "alice", 7 => "bob"}
+
+# GET /users/42 -> 200 {"id":42,"name":"alice"}
+# The body is written into the caller's writer, on its tape.
+def route(head : ParsedHead, body : Tape::String::Writer) : Int32
+  path = head.target
+  return 405 unless head.method == "GET"
+  if path == "/"
+    body.append("Hello")
+    return 200
+  end
+  return 404 unless path.starts_with?("/users/")
+  id = 0
+  index = 7
+  while index < path.bytesize
+    digit = path[index] &- '0'.ord.to_u8
+    return 404 if digit > 9
+    id = id * 10 + digit.to_i32
+    index += 1
+  end
+  name = USERS[id]?
+  return 404 unless name
+  body.append(%({"id":))
+  body.append_value(id)
+  body.append(%(,"name":"))
+  body.append(name)
+  body.append(%("}))
+  200
+end
+
+def reason(status : Int32) : String
+  case status
+  when 200 then "OK"
+  when 404 then "Not Found"
+  when 405 then "Method Not Allowed"
+  else          "Bad Request"
+  end
+end
+
+def handle(raw : String) : Nil
+  tape do
+    head = Server.parse_head(Tape::String.view(raw))
+    unless head.is_a?(ParsedHead)
+      puts "400 Bad Request"
+      return
+    end
+    body = Tape::String::Writer.new(128)
+    status = route(head, body)
+    text = body.finish
+    puts "#{status} #{reason(status)} #{text}"
+  end
+end
+
+handle("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+handle("GET /users/42 HTTP/1.1\r\nHost: localhost\r\n\r\n")
+handle("GET /users/9 HTTP/1.1\r\nHost: localhost\r\n\r\n")
+handle("POST /users/42 HTTP/1.1\r\nHost: localhost\r\n\r\n")
+handle("not http")
