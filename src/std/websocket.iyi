@@ -772,6 +772,58 @@ pub class WebSocket
     end
   end
 
+  # One complete FIN frame. A key masks client frames; nil is a server
+  # frame. Compression, when negotiated, precedes this encoding step.
+  def self.frame(data : String, opcode : Int32 = OP_TEXT,
+                  key : UInt32? = nil, compressed : Bool = false) : String
+    result = ""
+    tape do
+      result = frame(data.as_tape, opcode, key, compressed).to_heap
+    end
+    result
+  end
+
+  def self.frame(data : Tape::String, opcode : Int32 = OP_TEXT,
+                  key : UInt32? = nil,
+                  compressed : Bool = false) : Tape::String
+    Tape::String.build do |w|
+      frame(data, w, opcode, key, compressed)
+    end
+  end
+
+  def self.frame(data : Tape::String, w : Tape::String::Writer,
+                  opcode : Int32 = OP_TEXT, key : UInt32? = nil,
+                  compressed : Bool = false) : Nil
+    n = data.bytesize
+    masked = key.nil? ? 0 : 128
+    w.push((128 | (compressed ? 64 : 0) | opcode).to_u8)
+    if n < 126
+      w.push((masked | n).to_u8)
+    elsif n < 65536
+      w.push((masked | 126).to_u8)
+      w.push((n >> 8).to_u8)
+      w.push((n & 255).to_u8)
+    else
+      w.push((masked | 127).to_u8)
+      4.times { w.push(0_u8) }
+      w.push((n >> 24).to_u8)
+      w.push(((n >> 16) & 255).to_u8)
+      w.push(((n >> 8) & 255).to_u8)
+      w.push((n & 255).to_u8)
+    end
+    if mask = key
+      4.times { |i| w.push(((mask >> (i * 8)) & 255_u32).to_u8) }
+      i = 0
+      while i < n
+        byte = ((mask >> ((i % 4) * 8)) & 255_u32).to_u8
+        w.push(data[i] ^ byte)
+        i += 1
+      end
+    else
+      w << data
+    end
+  end
+
   # One frame of *data*, written whole: masked from a client, bare from a
   # server (§5.1, §5.3), a text or binary compressed when permessage-
   # deflate was agreed. Another task's frame being written is waited for.
@@ -793,36 +845,22 @@ pub class WebSocket
       @writing = false
       raise "WebSocket: a message of #{n} bytes and its frame's head are past the 2147483647 bytes a string holds"
     end
-    masked = @client ? 128 : 0
-    frame = String.new(head + n) do |dst|
-      # RSV1 on a compressed message's frame (RFC 7692 §6).
-      dst[0] = (128 | (compressed ? 64 : 0) | opcode).to_u8
-      if extra == 0
-        dst[1] = (masked | n).to_u8
-      elsif extra == 2
-        dst[1] = (masked | 126).to_u8
-        dst[2] = (n >> 8).to_u8
-        dst[3] = (n & 255).to_u8
-      else
-        dst[1] = (masked | 127).to_u8
-        dst[2] = 0_u8
-        dst[3] = 0_u8
-        dst[4] = 0_u8
-        dst[5] = 0_u8
-        dst[6] = (n >> 24).to_u8
-        dst[7] = ((n >> 16) & 255).to_u8
-        dst[8] = ((n >> 8) & 255).to_u8
-        dst[9] = (n & 255).to_u8
-      end
-      (dst + head).copy_from(payload.to_unsafe, n)
+    wrote = nil.as(Int32 | Cancelled | SocketError)
+    tape do
+      key = nil.as(UInt32?)
       if @client
-        key = 0_u32
-        Random::Secure.fill(pointerof(key).as(UInt8*), 4)
-        (dst + (head - 4)).as(UInt32*).value = key
-        WebSocket.mask(dst + head, n, key)
+        random = 0_u32
+        Random::Secure.fill(pointerof(random).as(UInt8*), 4)
+        key = random
+      end
+      frame = WebSocket.frame(payload.as_tape, opcode, key, compressed)
+      socket = @socket
+      wrote = if socket.is_a?(TlsStream)
+        socket.write(frame.to_heap)
+      else
+        socket.write(frame.to_unsafe, frame.bytesize)
       end
     end
-    wrote = @socket.write(frame)
     @writing = false
     return wrote unless wrote.is_a?(Int32)
     nil
