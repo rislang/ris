@@ -295,18 +295,276 @@ pub struct Eiy
     end
   end
 
-  # The iyi source that prints the template *string* to *io_name*, or nil
-  # for a tag that is never closed.
-  def self.process_string?(string : String, filename : String = "", io_name : String = DefaultIoName) : String?
-    generate(Lexer.new(string), filename, io_name)
+  @[OnTape]
+  pub struct TapeLexer
+    @[OnTape]
+    pub struct Token
+      enum Type
+        String
+        Output
+        Control
+        EOF
+      end
+
+      def string? : Bool
+        @type.value == 0
+      end
+
+      def output? : Bool
+        @type.value == 1
+      end
+
+      def control? : Bool
+        @type.value == 2
+      end
+
+      def eof? : Bool
+        @type.value == 3
+      end
+
+      property type : Type
+      property value : Tape::String
+      property line_number : Int32
+      property column_number : Int32
+      property suppress_leading : Bool
+      property suppress_trailing : Bool
+
+      def suppress_leading? : Bool
+        @suppress_leading
+      end
+
+      def suppress_trailing? : Bool
+        @suppress_trailing
+      end
+
+      def initialize
+        @type = Type::EOF
+        @value = "".as_tape
+        @line_number = 0
+        @column_number = 0
+        @suppress_leading = false
+        @suppress_trailing = false
+      end
+    end
+
+    @string : Tape::String
+    @bytes : Pointer(UInt8)
+    @len : Int32
+    @pos : Int32
+    @line_number : Int32
+    @column_number : Int32
+    @token : Token
+    @error : String
+
+    def initialize(@string : Tape::String)
+      @bytes = @string.to_unsafe
+      @len = @string.bytesize
+      @pos = 0
+      @line_number = 1
+      @column_number = 1
+      @token = Token.new
+      @error = ""
+    end
+
+    # Why the last `next_token?` answered nil, or nil while it has not.
+    def error : String?
+      @error.empty? ? nil : @error
+    end
+
+    # The next token; the same `Token` object is reused, so copy what is
+    # needed before asking again. Panics on a tag that is never closed.
+    def next_token : Token
+      next_token? || raise @error
+    end
+
+    # The next token, or nil on a tag that is never closed; `error` then says
+    # where.
+    def next_token? : Token?
+      copy_location_info_to_token
+
+      if @pos >= @len
+        @token.type = Token::Type::EOF
+        @token.value = "".as_tape
+        return @token
+      end
+
+      b = current_byte
+      if b == 60_u8 && peek_byte == 37_u8 # '<' and '%'
+        open_line = @line_number
+        open_column = @column_number
+        next_byte # skip '<'
+        next_byte # skip '%'
+
+        suppress_leading = current_byte == 45_u8 # '-'
+        next_byte if suppress_leading
+
+        is_output = false
+        is_escape = false
+
+        case current_byte
+        when 61_u8 # '='
+          next_byte
+          copy_location_info_to_token
+          is_output = true
+        when 37_u8 # '%'
+          next_byte
+          copy_location_info_to_token
+          is_escape = true
+        else
+          copy_location_info_to_token
+        end
+
+        return consume_control(is_output, is_escape, suppress_leading, open_line, open_column)
+      end
+
+      consume_string
+    end
+
+    private def consume_string : Token
+      start_pos = @pos
+      while @pos < @len
+        b = current_byte
+        if b == 10_u8 # '\n'
+          @line_number += 1
+          @column_number = 0
+        elsif b == 60_u8 && peek_byte == 37_u8 # '<' and '%'
+          break
+        end
+        next_byte
+      end
+
+      @token.type = Token::Type::String
+      @token.value = @string[start_pos, @pos - start_pos]
+      @token.suppress_leading = false
+      @token.suppress_trailing = false
+      @token
+    end
+
+    private def consume_control(is_output : Bool, is_escape : Bool, suppress_leading : Bool, open_line : Int32, open_column : Int32) : Token?
+      start_pos = @pos
+
+      while true
+        if @pos >= @len
+          tag = is_output ? "<%=" : (is_escape ? "<%%" : "<%")
+          @error = "unterminated #{tag} tag at line #{open_line}, column #{open_column}"
+          return nil
+        end
+
+        b = current_byte
+        if b == 10_u8 # '\n'
+          @line_number += 1
+          @column_number = 0
+        elsif b == 45_u8 && peek_byte == 37_u8 # '-' and '%'
+          # Only `-%>` closes; a `-%` followed by anything else is code.
+          if @pos + 2 < @len && @bytes[@pos + 2] == 62_u8 # '>'
+            end_pos = @pos
+            next_byte # skip '-'
+            next_byte # skip '%'
+            next_byte # skip '>'
+            return setup_control_token(start_pos, end_pos, is_escape, suppress_leading, true, is_output)
+          end
+        elsif b == 37_u8 && peek_byte == 62_u8 # '%' and '>'
+          end_pos = @pos
+          next_byte # skip '%'
+          next_byte # skip '>'
+          return setup_control_token(start_pos, end_pos, is_escape, suppress_leading, false, is_output)
+        end
+
+        next_byte
+      end
+    end
+
+    private def setup_control_token(start_pos : Int32, end_pos : Int32, is_escape : Bool, suppress_leading : Bool, suppress_trailing : Bool, is_output : Bool) : Token
+      @token.suppress_leading = !is_escape && suppress_leading
+      @token.suppress_trailing = !is_escape && suppress_trailing
+
+      if is_escape
+        head = suppress_leading ? "<%-" : "<%"
+        tail = @string[start_pos, end_pos - start_pos]
+        close_tag = suppress_trailing ? "-%>" : "%>"
+        @token.type = Token::Type::String
+        @token.value = Tape::String.build do |w|
+          w << head << tail << close_tag
+        end
+      elsif is_output
+        @token.type = Token::Type::Output
+        @token.value = @string[start_pos, end_pos - start_pos]
+      else
+        @token.type = Token::Type::Control
+        @token.value = @string[start_pos, end_pos - start_pos]
+      end
+
+      @token
+    end
+
+    private def copy_location_info_to_token : Nil
+      @token.line_number = @line_number
+      @token.column_number = @column_number
+    end
+
+    private def current_byte : UInt8
+      @pos < @len ? @bytes[@pos] : 0_u8
+    end
+
+    private def peek_byte : UInt8
+      @pos + 1 < @len ? @bytes[@pos + 1] : 0_u8
+    end
+
+    # Advances one byte; the column advances one character, so a UTF-8
+    # continuation byte does not count.
+    private def next_byte : UInt8
+      b = current_byte
+      @pos += 1
+      @column_number += 1 unless (b & 0xC0_u8) == 0x80_u8
+      b
+    end
   end
 
-  # The iyi source that prints the template *string* to *io_name*. Panics on
-  # a tag that is never closed, naming *filename* when there is one.
-  def self.process_string(string : String, filename : String = "", io_name : String = DefaultIoName) : String
-    lexer = Lexer.new(string)
-    code = generate(lexer, filename, io_name)
-    return code if code
+  # The iyi source that prints the template *string* to *io_name*, or nil
+  # for a tag that is never closed.
+  def self.process_string?(string : String, filename : String = "",
+                           io_name : String = DefaultIoName) : String?
+    result = nil.as(String?)
+    tape do
+      code = process_string?(string.as_tape, filename, io_name)
+      result = code.to_heap if code
+    end
+    result
+  end
+
+  def self.process_string(string : String, filename : String = "",
+                          io_name : String = DefaultIoName) : String
+    result = ""
+    tape do
+      result = process_string(string.as_tape, filename, io_name).to_heap
+    end
+    result
+  end
+
+  def self.process_string?(string : Tape::String, filename : String = "",
+                           io_name : String = DefaultIoName) : Tape::String?
+    w = Tape::String::Writer.new(string.bytesize)
+    process_string?(string, w, filename, io_name) ? w.finish : nil
+  end
+
+  def self.process_string?(string : Tape::String,
+                           w : Tape::String::Writer, filename : String = "",
+                           io_name : String = DefaultIoName) : Bool
+    generate(TapeLexer.new(string), filename, io_name, w)
+  end
+
+  def self.process_string(string : Tape::String, filename : String = "",
+                          io_name : String = DefaultIoName) : Tape::String
+    Tape::String.build do |w|
+      process_string(string, w, filename, io_name)
+    end
+  end
+
+  def self.process_string(string : Tape::String,
+                          w : Tape::String::Writer, filename : String = "",
+                          io_name : String = DefaultIoName) : Nil
+    lexer = TapeLexer.new(string)
+    return if generate(lexer, filename, io_name, w)
     sentence = lexer.error || "template refused"
     raise filename.empty? ? sentence : "#{filename}: #{sentence}"
   end
@@ -412,7 +670,7 @@ pub struct Eiy
 
         # A comment tag prints and runs nothing, however many lines it has:
         # spliced in as code, every line after its first would run.
-        unless str_val.starts_with?('#')
+        unless str_val.starts_with?("#")
           parts << "#<loc:push>"
           append_loc(parts, filename, line_number, column_number)
           # The code straight after its location, as an output tag's is: a
@@ -428,6 +686,74 @@ pub struct Eiy
     end
 
     parts.join("")
+  end
+
+  private def self.generate(lexer : TapeLexer, filename : String, io_name : String,
+                            parts : Tape::String::Writer) : Bool
+    token = lexer.next_token?
+    return false unless token
+
+    while true
+      if token.string?
+        str_val = token.value
+        opens_line = token.column_number == 1
+        token = lexer.next_token?
+        return false unless token
+
+        str_val = suppress_leading_indentation(token, str_val, opens_line)
+
+        unless str_val.empty?
+          parts << io_name
+          parts << ".print("
+          quote(str_val, parts)
+          parts << ")\n"
+        end
+      elsif token.output?
+        str_val = token.value
+        line_number = token.line_number
+        column_number = token.column_number
+        suppress_trailing = token.suppress_trailing?
+        token = lexer.next_token?
+        return false unless token
+
+        token = suppress_trailing_whitespace(token, suppress_trailing)
+
+        # The newline before `))` keeps a comment at the end of the
+        # expression from swallowing the rest of the line.
+        parts << "#<loc:push>"
+        parts << io_name
+        parts << ".print(("
+        append_loc(parts, filename, line_number, column_number)
+        parts << str_val
+        parts << "\n))#<loc:pop>\n"
+      elsif token.control?
+        str_val = token.value
+        line_number = token.line_number
+        column_number = token.column_number
+        suppress_trailing = token.suppress_trailing?
+        token = lexer.next_token?
+        return false unless token
+
+        token = suppress_trailing_whitespace(token, suppress_trailing)
+
+        # A comment tag prints and runs nothing, however many lines it has:
+        # spliced in as code, every line after its first would run.
+        unless str_val.starts_with?("#")
+          parts << "#<loc:push>"
+          append_loc(parts, filename, line_number, column_number)
+          # The code straight after its location, as an output tag's is: a
+          # space put before code that did not open with one moved its first
+          # line a column right, and `<%nonexistent%>` was refused at
+          # column 4, where the name starts at 3.
+          parts << str_val
+          parts << "\n#<loc:pop>\n"
+        end
+      elsif token.eof?
+        break
+      end
+    end
+
+    true
   end
 
   # *text* as an iyi string literal: quotes, backslashes and `#` escaped,
@@ -476,6 +802,52 @@ pub struct Eiy
     parts << text[run_start, len - run_start] if len > run_start
     parts << "\""
     parts.join("")
+  end
+
+  private def self.quote(text : Tape::String,
+                         parts : Tape::String::Writer) : Nil
+    parts << "\""
+    raw = text.to_unsafe
+    len = text.bytesize
+    run_start = 0
+    i = 0
+    while i < len
+      b = raw[i].to_i32
+      if b >= 128
+        size = utf8_size(raw, i, len)
+        if size > 0
+          i += size
+          next
+        end
+      end
+      escape =
+        if b == 34 # '"'
+          "\\\""
+        elsif b == 92 # '\\'
+          "\\\\"
+        elsif b == 35 # '#'
+          "\\#"
+        elsif b == 10
+          "\\n"
+        elsif b == 13
+          "\\r"
+        elsif b == 9
+          "\\t"
+        elsif b < 32 || b >= 127
+          "\\x#{HEX[b // 16]}#{HEX[b % 16]}"
+        else
+          nil
+        end
+      if escape
+        parts << text[run_start, i - run_start] if i > run_start
+        parts << escape
+        run_start = i + 1
+      end
+      i += 1
+    end
+    parts << text[run_start, len - run_start] if len > run_start
+    parts << "\""
+    nil
   end
 
   HEX = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F"]
@@ -565,6 +937,66 @@ pub struct Eiy
   private def self.append_loc(parts : Array(String), filename : String, line_number : Int32, column_number : Int32) : Nil
     parts << "#<loc:"
     parts << quote(filename)
+    parts << ","
+    parts << line_number.to_s
+    parts << ","
+    parts << column_number.to_s
+    parts << ">"
+  end
+
+  private def self.suppress_leading_indentation(token : TapeLexer::Token, string : Tape::String, opens_line : Bool) : Tape::String
+    if (token.output? || token.control?) && token.suppress_leading?
+      raw = string.to_unsafe
+      len = string.bytesize
+      start_idx = 0
+      i = len - 1
+      while i >= 0
+        if raw[i] == 10_u8 # '\n'
+          start_idx = i + 1
+          break
+        end
+        i -= 1
+      end
+      # Blanks with no line break before them are a line's indentation only
+      # when the text opens the line. After a tag on the same line the `<%-`
+      # is not the first thing there, and `<%= a %>  <%- b %>` lost the two
+      # spaces between its tags.
+      return string if start_idx == 0 && !opens_line
+      all_ws = true
+      i = start_idx
+      while i < len
+        b = raw[i]
+        unless b == 32_u8 || b == 9_u8
+          all_ws = false
+          break
+        end
+        i += 1
+      end
+      if all_ws
+        return string[0, start_idx]
+      end
+    end
+    string
+  end
+
+  private def self.suppress_trailing_whitespace(token : TapeLexer::Token, suppress_trailing : Bool) : TapeLexer::Token
+    if suppress_trailing && token.string?
+      idx = token.value.index('\n')
+      if idx
+        token.value = token.value[idx + 1, token.value.bytesize - idx - 1]
+        token.line_number = token.line_number + 1
+      end
+      # What `-%>` leaves stands where the rest of its line was taken, so it
+      # opens a line (`generate`'s opens_line) and a `<%-` after it takes
+      # its blanks.
+      token.column_number = 1
+    end
+    token
+  end
+
+  private def self.append_loc(parts : Tape::String::Writer, filename : String, line_number : Int32, column_number : Int32) : Nil
+    parts << "#<loc:"
+    quote(filename.as_tape, parts)
     parts << ","
     parts << line_number.to_s
     parts << ","
