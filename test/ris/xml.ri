@@ -1,0 +1,24 @@
+module test/xml_tape
+
+import std/xml::{parse, parse?, escape}
+
+tape do
+  text = "<root xmlns:p=\"urn:x\" a=\"&amp;\"><p:child>café &lt;" \
+    "<![CDATA[raw]]></p:child><!--ok--></root>".as_tape
+  doc = parse(text)
+  exit 1 unless doc.root.name == "root"
+  exit 2 unless doc.root["a"] == "&"
+  exit 3 unless doc.root.text == "café <raw"
+  w = Tape::String::Writer.new(1)
+  w << "prefix:"
+  doc.to_xml(w)
+  rendered = doc.to_xml
+  exit 4 unless parse(rendered).root.text == doc.root.text
+  exit 5 unless w.finish.starts_with?("prefix:<?xml")
+  exit 6 unless parse?("<bad>".as_tape).nil?
+  exit 7 unless escape("<&\r".as_tape) == "&lt;&amp;&#13;"
+  heap = doc.to_heap
+  exit 8 unless heap.root.name == "root"
+end
+exit 9 unless parse("<a>heap</a>").root.text == "heap"
+puts "PASS: xml tape and heap APIs"

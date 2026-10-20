@@ -523,19 +523,31 @@ pub class Node
   end
 
   def to_xml : String
-    buf = [] of String
-    serialize_node(buf)
-    buf.join("")
+    result = ""
+    tape do
+      w = Tape::String::Writer.new(256)
+      to_xml(w)
+      result = w.finish.to_heap
+    end
+    result
+  end
+
+  def to_xml(writer : Tape::String::Writer) : Nil
+    serialize_node(writer)
   end
 
   def inner_xml : String
-    buf = [] of String
-    i = 0
-    while i < @children.size
-      @children[i].serialize_node(buf)
-      i = i + 1
+    result = ""
+    tape do
+      w = Tape::String::Writer.new(256)
+      inner_xml(w)
+      result = w.finish.to_heap
     end
-    buf.join("")
+    result
+  end
+
+  def inner_xml(writer : Tape::String::Writer) : Nil
+    @children.each { |child| child.serialize_node(writer) }
   end
 
   # With *ascii* (a document declared US-ASCII), a character past U+007F in
@@ -552,7 +564,7 @@ pub class Node
   # were, so `set_attribute("k=\"1\" j", "2")` wrote two attributes and a
   # "\u0001" in text a document no parser reads. A parsed tree holds
   # neither.
-  protected def serialize_node(buf : Array(String), ascii : Bool = false) : Nil
+  protected def serialize_node(buf : Tape::String::Writer, ascii : Bool = false) : Nil
     if @node_type.element?
       Node.check_writable_name(@name, "element")
       check_namespaced_name(@name, "element")
@@ -565,7 +577,12 @@ pub class Node
         Node.check_writable_name(@namespaces[ns_i].prefix, "namespace prefix") unless @namespaces[ns_i].default?
         refuse_non_ascii_name("xmlns:#{@namespaces[ns_i].prefix}") if ascii
         buf << " "
-        buf << @namespaces[ns_i].to_s(ascii)
+        ns = @namespaces[ns_i]
+        buf << "xmlns"
+        buf << ":" << ns.prefix unless ns.default?
+        buf << "=\""
+        Std::Xml.escape_attribute(ns.uri.as_tape, buf, ascii)
+        buf << "\""
         ns_i = ns_i + 1
       end
       expanded = Hash(String, String).new
@@ -584,7 +601,9 @@ pub class Node
         end
         refuse_non_ascii_name(attr.name) if ascii
         buf << " "
-        buf << attr.to_s(ascii)
+        buf << attr.name << "=\""
+        Std::Xml.escape_attribute(attr.value.as_tape, buf, ascii)
+        buf << "\""
         attr_i = attr_i + 1
       end
       if @children.empty?
@@ -602,7 +621,7 @@ pub class Node
       end
     elsif @node_type.text?
       Node.check_writable_text(@content)
-      buf << Std::Xml.escape(@content, ascii)
+      Std::Xml.escape(@content.as_tape, buf, ascii)
     elsif @node_type.cdata?
       Node.check_writable_text(@content)
       buf << "<![CDATA["
@@ -715,7 +734,7 @@ pub class Node
   # the section, it read back as a newline. With *ascii*, so is a character
   # past U+007F, as `&#N;`: it was written raw, as UTF-8 bytes, in a
   # document declared US-ASCII.
-  private def serialize_cdata_body(buf : Array(String), ascii : Bool) : Nil
+  private def serialize_cdata_body(buf : Tape::String::Writer, ascii : Bool) : Nil
     if !@content.includes?("]]>") && !@content.includes?("\r") && (!ascii || Node.first_non_ascii(@content) < 0)
       buf << @content
       return
@@ -742,7 +761,7 @@ pub class Node
           i = i + 1
         end
         buf << "]]>"
-        buf << Std::Xml.escape(@content[run_start, i - run_start], true)
+        Std::Xml.escape(@content.as_tape[run_start, i - run_start], buf, true)
         buf << "<![CDATA["
         run_start = i
       else
@@ -817,7 +836,7 @@ pub class Document < Node
   # does not read (`ISO-8859-1`) made a document its parser refuses. So did
   # a second root element, none, text that is not white space, or a CDATA
   # section beside the root.
-  def to_xml : String
+  def to_xml(buf : Tape::String::Writer) : Nil
     if !Parser.version_number?(@version)
       raise "version '#{@version}' is not a version number, so the document cannot be written"
     end
@@ -825,7 +844,6 @@ pub class Document < Node
     if !@encoding.empty? && lowered != "utf-8" && lowered != "utf8" && lowered != "us-ascii" && lowered != "ascii"
       raise "encoding '#{@encoding}' is not one this module reads (UTF-8 or US-ASCII), so the document cannot be written"
     end
-    buf = [] of String
     buf << "<?xml version=\""
     buf << @version
     buf << "\""
@@ -850,7 +868,7 @@ pub class Document < Node
       end
     end
     raise "a document with #{roots == 0 ? "no root element" : "#{roots} root elements"} cannot be written" if roots != 1
-    buf.join("")
+    nil
   end
 end
 
@@ -859,20 +877,526 @@ end
 # `parse?` then answers nil and `parse` panics with that sentence.
 pub class Parser
   @input : String
+  @max_depth : Int32
+  @max_expansions : Int32
+  @error : String
+
+  def initialize(@input : String, @max_depth : Int32 = 256,
+                 @max_expansions : Int32 = 1000)
+    @error = ""
+  end
+
+  def error : String
+    @error
+  end
+
+  def parse? : Document?
+    result = nil.as(Document?)
+    tape do
+      parser = TapeParser.new(@input.as_tape, @max_depth, @max_expansions)
+      doc = parser.parse?
+      @error = parser.error
+      result = doc.to_heap.as(Document) if doc
+    end
+    result
+  end
+
+  def parse : Document
+    parse? || raise @error
+  end
+
+  protected def self.version_number?(value : String) : Bool
+    ptr = value.to_unsafe
+    len = value.bytesize
+    i = 0
+    while i < len && ptr[i] >= 48_u8 && ptr[i] <= 57_u8
+      i = i + 1
+    end
+    return false if i == 0 || i >= len || ptr[i] != 46_u8
+    i = i + 1
+    while i < len && ptr[i] >= 48_u8 && ptr[i] <= 57_u8
+      i = i + 1
+    end
+    i == len
+  end
+
+  protected def self.hex4(value : Int32) : String
+    digits = value.to_s(16).upcase
+    while digits.bytesize < 4
+      digits = "0" + digits
+    end
+    digits
+  end
+
+  protected def self.first_bad_character(input : String, from : Int32, ascii : Bool) : Tuple(Int32, String)
+    ptr = input.to_unsafe
+    len = input.bytesize
+    i = from
+    while i < len
+      b = ptr[i]
+      if b < 128_u8
+        i = i + 1
+        next
+      end
+      byte = "0x" + Parser.hex4(b.to_i32)[2, 2]
+      return {i, "byte #{byte} is not US-ASCII, the declared encoding"} if ascii
+      n = b >= 0xF5_u8 ? 0 : (b >= 0xF0_u8 ? 4 : (b >= 0xE0_u8 ? 3 : (b >= 0xC2_u8 ? 2 : 0)))
+      return {i, "byte #{byte} is not UTF-8"} if n == 0 || i + n > len
+      cp = (b & (n == 2 ? 0x1F_u8 : (n == 3 ? 0x0F_u8 : 0x07_u8))).to_i32
+      k = 1
+      while k < n
+        c = ptr[i + k]
+        return {i, "byte #{byte} is not UTF-8"} if (c & 0xC0_u8) != 0x80_u8
+        cp = (cp << 6) | (c & 0x3F_u8).to_i32
+        k = k + 1
+      end
+      overlong = (n == 3 && cp < 0x800) || (n == 4 && cp < 0x10000)
+      return {i, "byte #{byte} is not UTF-8"} if overlong || cp > 0x10FFFF
+      return {i, "character U+#{Parser.hex4(cp)} is not an XML character"} unless xml_char?(cp)
+      i = i + n
+    end
+    {-1, ""}
+  end
+
+  protected def self.name_start?(cp : Int32) : Bool
+    return (cp >= 97 && cp <= 122) || (cp >= 65 && cp <= 90) || cp == 95 || cp == 58 if cp < 0xC0
+    return cp != 0xD7 && cp != 0xF7 if cp <= 0x2FF
+    return cp != 0x37E if cp >= 0x370 && cp <= 0x1FFF
+    (cp >= 0x200C && cp <= 0x200D) || (cp >= 0x2070 && cp <= 0x218F) || (cp >= 0x2C00 && cp <= 0x2FEF) ||
+      (cp >= 0x3001 && cp <= 0xD7FF) || (cp >= 0xF900 && cp <= 0xFDCF) || (cp >= 0xFDF0 && cp <= 0xFFFD) ||
+      (cp >= 0x10000 && cp <= 0xEFFFF)
+  end
+
+  protected def self.name_char?(cp : Int32) : Bool
+    return true if name_start?(cp)
+    (cp >= 48 && cp <= 57) || cp == 45 || cp == 46 || cp == 0xB7 || (cp >= 0x300 && cp <= 0x36F) || cp == 0x203F || cp == 0x2040
+  end
+
+  protected def self.name_shaped?(text : String) : Bool
+    ptr = text.to_unsafe
+    len = text.bytesize
+    return false if len == 0
+    i = 0
+    while i < len
+      cp = code_point_at(ptr, len, i)
+      return false unless i == 0 ? name_start?(cp) : name_char?(cp)
+      i = i + utf8_width(ptr[i])
+    end
+    true
+  end
+
+end
+
+@[OnTape]
+struct TapeMap(K, V)
+  @keys : Tape::Array(K)
+  @values : Tape::Array(V)
+
+  def initialize
+    @keys = Tape::Array(K).new
+    @values = Tape::Array(V).new
+  end
+
+  def empty? : Bool
+    @keys.empty?
+  end
+
+  def size : Int32
+    @keys.size
+  end
+
+  def []?(key : K) : V?
+    @keys.each_with_index do |item, i|
+      return @values[i] if item == key
+    end
+    nil
+  end
+
+  def [](key : K) : V
+    self[key]? || raise "missing YAML key"
+  end
+
+  def has_key?(key : K) : Bool
+    @keys.each { |item| return true if item == key }
+    false
+  end
+
+  def []=(key : K, value : V) : Nil
+    @keys.each_with_index do |item, i|
+      if item == key
+        @values[i] = value
+        return
+      end
+    end
+    @keys << key
+    @values << value
+  end
+
+  def each(& : K, V -> _) : Nil
+    @keys.each_with_index { |key, i| yield key, @values[i] }
+  end
+end
+
+# A parsed document on the caller's tape. Node handles share one record
+# each, so parent links and declaration updates preserve node identity.
+@[OnTape]
+pub struct TapeNamespace
+  getter prefix : Tape::String
+  getter uri : Tape::String
+
+  def initialize(prefix : String | Tape::String, uri : Tape::String)
+    @prefix = tape_view(prefix)
+    @uri = uri
+  end
+end
+
+@[OnTape]
+pub struct TapeAttribute
+  getter name : Tape::String
+  getter value : Tape::String
+  getter namespace_uri : Tape::String
+
+  def initialize(@name : Tape::String, @value : Tape::String,
+                 namespace_uri : String | Tape::String = "")
+    @namespace_uri = tape_view(namespace_uri)
+  end
+
+  def prefix : Tape::String
+    colon = @name.index(':')
+    colon ? @name[0, colon] : "".as_tape
+  end
+
+  def local_name : Tape::String
+    colon = @name.index(':')
+    colon ? @name[colon + 1, @name.bytesize - colon - 1] : @name
+  end
+end
+
+@[OnTape]
+struct TapeNodeData
+  property node_type : NodeType
+  property name : Tape::String
+  property content : Tape::String
+  property version : Tape::String
+  property encoding : Tape::String
+  property standalone : Bool?
+  getter children : Tape::Array(TapeNode)
+  getter parents : Tape::Array(TapeNode)
+  getter attributes : Tape::Array(TapeAttribute)
+  getter namespaces : Tape::Array(TapeNamespace)
+  property id_attributes : TapeMap(Tape::String, Tape::Array(Tape::String))
+
+  def initialize(@node_type : NodeType, @name : Tape::String,
+                 @content : Tape::String)
+    @version = "1.0".as_tape
+    @encoding = "UTF-8".as_tape
+    @standalone = nil
+    @children = Tape::Array(TapeNode).new
+    @parents = Tape::Array(TapeNode).new
+    @attributes = Tape::Array(TapeAttribute).new
+    @namespaces = Tape::Array(TapeNamespace).new
+    @id_attributes = TapeMap(Tape::String, Tape::Array(Tape::String)).new
+  end
+end
+
+@[OnTape]
+pub struct TapeNode
+  @state : Tape::Array(TapeNodeData)
+
+  def initialize(kind : NodeType, name : String | Tape::String = "",
+                 content : String | Tape::String = "")
+    @state = Tape::Array(TapeNodeData).new
+    @state << TapeNodeData.new(kind, tape_view(name),
+      tape_view(content))
+  end
+
+  def self.document : TapeNode
+    TapeNode.new(NodeType::Document, "#document")
+  end
+
+  def self.new_element(name : String | Tape::String) : TapeNode
+    TapeNode.new(NodeType::Element, name)
+  end
+
+  def self.new_text(text : String | Tape::String) : TapeNode
+    TapeNode.new(NodeType::Text, content: text)
+  end
+
+  def self.new_comment(text : String | Tape::String) : TapeNode
+    TapeNode.new(NodeType::Comment, content: text)
+  end
+
+  def self.new_cdata(text : String | Tape::String) : TapeNode
+    TapeNode.new(NodeType::CData, content: text)
+  end
+
+  def self.new_pi(name : String | Tape::String,
+                  text : String | Tape::String) : TapeNode
+    TapeNode.new(NodeType::ProcessingInstruction, name, text)
+  end
+
+  def node_type : NodeType
+    @state[0].node_type
+  end
+
+  def name : Tape::String
+    @state[0].name
+  end
+
+  def content : Tape::String
+    @state[0].content
+  end
+
+  def version : Tape::String
+    @state[0].version
+  end
+
+  def version=(value : String | Tape::String) : Nil
+    data = @state[0]
+    data.version = tape_view(value)
+    @state[0] = data
+  end
+
+  def encoding : Tape::String
+    @state[0].encoding
+  end
+
+  def encoding=(value : String | Tape::String) : Nil
+    data = @state[0]
+    data.encoding = tape_view(value)
+    @state[0] = data
+  end
+
+  def standalone : Bool?
+    @state[0].standalone
+  end
+
+  def standalone=(value : Bool?) : Nil
+    data = @state[0]
+    data.standalone = value
+    @state[0] = data
+  end
+
+  def children : Tape::Array(TapeNode)
+    @state[0].children
+  end
+
+  def attributes : Tape::Array(TapeAttribute)
+    @state[0].attributes
+  end
+
+  def namespaces : Tape::Array(TapeNamespace)
+    @state[0].namespaces
+  end
+
+  def id_attributes : TapeMap(Tape::String, Tape::Array(Tape::String))
+    @state[0].id_attributes
+  end
+
+  def id_attributes=(value : TapeMap(Tape::String, Tape::Array(Tape::String))) : Nil
+    data = @state[0]
+    data.id_attributes = value
+    @state[0] = data
+  end
+
+  def parent : TapeNode?
+    parents = @state[0].parents
+    parents.empty? ? nil : parents[0]
+  end
+
+  def parent=(node : TapeNode) : Nil
+    parents = @state[0].parents
+    if parents.empty?
+      parents << node
+    else
+      parents[0] = node
+    end
+  end
+
+  def append_parsed(node : TapeNode) : Nil
+    node.parent = self
+    children << node
+  end
+
+  def root : TapeNode
+    children.each do |child|
+      return child if child.node_type.element?
+    end
+    raise "document has no root element"
+  end
+
+  def prefix : Tape::String
+    colon = name.index(':')
+    colon ? name[0, colon] : "".as_tape
+  end
+
+  def resolve_namespace_prefix(prefix : String | Tape::String
+                                ) : TapeNamespace?
+    namespaces.each { |ns| return ns if ns.prefix == prefix }
+    up = parent
+    return up.resolve_namespace_prefix(prefix) if up
+    if prefix == "xml"
+      return TapeNamespace.new("xml", XML_NAMESPACE.as_tape)
+    end
+    nil
+  end
+
+  def [](key : String) : Tape::String
+    attributes.each { |attr| return attr.value if attr.name == key }
+    raise "no XML attribute #{key}"
+  end
+
+  def text(writer : Tape::String::Writer) : Nil
+    if node_type.text? || node_type.cdata?
+      writer << content
+    else
+      children.each do |child|
+        child.text(writer) unless child.node_type.comment? || child.node_type.pi?
+      end
+    end
+  end
+
+  def text : Tape::String
+    Tape::String.build { |w| text(w) }
+  end
+
+  def to_xml(writer : Tape::String::Writer) : Nil
+    ascii = node_type.document? &&
+      (tape_lower(encoding) == "us-ascii" || tape_lower(encoding) == "ascii")
+    serialize(writer, ascii)
+  end
+
+  protected def serialize(writer : Tape::String::Writer,
+                           ascii : Bool) : Nil
+    if node_type.document?
+      writer << "<?xml version=\"" << version << "\""
+      unless encoding.empty?
+        writer << " encoding=\"" << encoding << "\""
+      end
+      unless standalone.nil?
+        writer << " standalone=\"" << (standalone ? "yes" : "no") << "\""
+      end
+      writer << "?>\n"
+      children.each do |child|
+        child.serialize(writer, ascii)
+        writer << "\n" if node_type.document?
+      end
+    elsif node_type.element?
+      writer << "<" << name
+      namespaces.each do |ns|
+        writer << " xmlns"
+        writer << ":" << ns.prefix unless ns.prefix.empty?
+        writer << "=\""
+        Std::Xml.escape_attribute(ns.uri, writer, ascii)
+        writer << "\""
+      end
+      attributes.each do |attr|
+        writer << " " << attr.name << "=\""
+        Std::Xml.escape_attribute(attr.value, writer, ascii)
+        writer << "\""
+      end
+      if children.empty?
+        writer << "/>"
+      else
+        writer << ">"
+        children.each do |child|
+        child.serialize(writer, ascii)
+        writer << "\n" if node_type.document?
+      end
+        writer << "</" << name << ">"
+      end
+    elsif node_type.cdata?
+      writer << "<![CDATA["
+      i = 0
+      start = 0
+      while i < content.bytesize
+        if i + 2 < content.bytesize && content[i, 3] == "]]>"
+          writer << content[start, i + 2 - start] << "]]><![CDATA["
+          i += 2
+          start = i
+        elsif content[i] == 13_u8 || (ascii && content[i] >= 128_u8)
+          writer << content[start, i - start] << "]]>"
+          width = content[i] < 128_u8 ? 1 : utf8_width(content[i])
+          Std::Xml.escape(content[i, width], writer, ascii)
+          writer << "<![CDATA["
+          i += width
+          start = i
+        else
+          i += 1
+        end
+      end
+      writer << content[start, content.bytesize - start] << "]]>"
+    elsif node_type.comment?
+      writer << "<!--" << content << "-->"
+    elsif node_type.pi?
+      writer << "<?" << name
+      writer << " " << content unless content.empty?
+      writer << "?>"
+    else
+      # Escaping also preserves CDATA content containing a carriage return.
+      Std::Xml.escape(content, writer, ascii)
+    end
+  end
+
+  def to_xml : Tape::String
+    Tape::String.build { |w| to_xml(w) }
+  end
+
+  def to_heap : Node
+    result = if node_type.document?
+      doc = Document.new(version.to_heap, encoding.to_heap, standalone)
+      ids = Hash(String, Array(String)).new
+      id_attributes.each { |key, values| ids[key.to_heap] = values.to_heap }
+      doc.id_attributes = ids
+      doc.as(Node)
+    else
+      Node.new(node_type, name.to_heap, content.to_heap)
+    end
+    namespaces.each do |ns|
+      result.namespaces << Namespace.new(ns.prefix.to_heap, ns.uri.to_heap)
+    end
+    attributes.each do |attr|
+      result.attributes << Attribute.new(attr.name.to_heap,
+        attr.value.to_heap, attr.namespace_uri.to_heap)
+    end
+    children.each { |child| result.append_parsed(child.to_heap) }
+    result
+  end
+end
+
+private def tape_view(text : Tape::String) : Tape::String
+  text
+end
+
+private def tape_view(text : String) : Tape::String
+  text.as_tape
+end
+
+private def tape_lower(text : Tape::String) : Tape::String
+  Tape::String.build do |w|
+    text.each_byte do |byte|
+      byte += 32_u8 if byte >= 65_u8 && byte <= 90_u8
+      w.push(byte)
+    end
+  end
+end
+@[OnTape]
+struct TapeParser
+  @input : Tape::String
   @len : Int32
   @pos : Int32
   @line : Int32
   @col : Int32
   @max_depth : Int32
   @depth : Int32
-  @entities : Hash(String, String)
+  @entities : TapeMap(Tape::String, Tape::String)
   # What the internal subset's attribute-list declarations say, by element
   # name: whether each declared attribute's type is other than CDATA, and
   # the defaults, in the order they were declared.
-  @attribute_tokenized : Hash(String, Hash(String, Bool))
-  @attribute_defaults : Hash(String, Array(Tuple(String, String)))
+  @attribute_tokenized : TapeMap(Tape::String, TapeMap(Tape::String, Bool))
+  @attribute_defaults : TapeMap(Tape::String, Tape::Array(Tuple(Tape::String, Tape::String)))
   # The attributes declared of type ID, by element name, for the document.
-  @attribute_ids : Hash(String, Array(String))
+  @attribute_ids : TapeMap(Tape::String, Tape::Array(Tape::String))
   @expansions : Int32
   @max_expansions : Int32
   # Bytes of replacement text copied so far, and how many a document may
@@ -883,23 +1407,23 @@ pub class Parser
   @bad_at : Int32
   @bad_message : String
 
-  def initialize(input : String, @max_depth : Int32 = 256, @max_expansions : Int32 = 1000)
-    @input = Parser.normalize_line_ends(input)
+  def initialize(input : Tape::String, @max_depth : Int32 = 256, @max_expansions : Int32 = 1000)
+    @input = TapeParser.normalize_line_ends(input)
     @len = @input.bytesize
     @pos = 0
     @line = 1
     @col = 1
     @depth = 0
-    @entities = Hash(String, String).new
-    @attribute_tokenized = Hash(String, Hash(String, Bool)).new
-    @attribute_defaults = Hash(String, Array(Tuple(String, String))).new
-    @attribute_ids = Hash(String, Array(String)).new
+    @entities = TapeMap(Tape::String, Tape::String).new
+    @attribute_tokenized = TapeMap(Tape::String, TapeMap(Tape::String, Bool)).new
+    @attribute_defaults = TapeMap(Tape::String, Tape::Array(Tuple(Tape::String, Tape::String))).new
+    @attribute_ids = TapeMap(Tape::String, Tape::Array(Tape::String)).new
     @expansions = 0
     @expanded_bytes = 0_i64
     @max_expanded_bytes = @len.to_i64 * 100
     @max_expanded_bytes = 8_i64 * 1024 * 1024 if @max_expanded_bytes < 8_i64 * 1024 * 1024
     @error = ""
-    bad = Parser.first_bad_character(@input, 0, false)
+    bad = TapeParser.first_bad_character(@input, 0, false)
     @bad_at = bad[0]
     @bad_message = bad[1]
   end
@@ -909,35 +1433,33 @@ pub class Parser
     @error
   end
 
-  def parse? : Document?
+  def parse? : TapeNode?
     doc = parse_document
     @error.empty? ? doc : nil
   end
 
-  def parse : Document
+  def parse : TapeNode
     doc = parse_document
     raise @error unless @error.empty?
     doc
   end
 
   # `\r\n` and a lone `\r` both mean `\n` (XML 1.0, 2.11).
-  protected def self.normalize_line_ends(input : String) : String
-    return input unless input.includes?("\r")
-    ptr = input.to_unsafe
-    len = input.bytesize
-    bytes = [] of UInt8
-    i = 0
-    while i < len
-      b = ptr[i]
-      if b == 13_u8
-        bytes << 10_u8
-        i = i + 1 if i + 1 < len && ptr[i + 1] == 10_u8
-      else
-        bytes << b
+  protected def self.normalize_line_ends(input : Tape::String) : Tape::String
+    return input unless input.includes?('\r')
+    Tape::String.build do |w|
+      i = 0
+      while i < input.bytesize
+        byte = input[i]
+        if byte == 13_u8
+          w << "\n"
+          i += 1 if i + 1 < input.bytesize && input[i + 1] == 10_u8
+        else
+          w.push(byte)
+        end
+        i += 1
       end
-      i = i + 1
     end
-    String.new(bytes.size) { |buffer| buffer.copy_from(bytes.to_unsafe, bytes.size) }
   end
 
   # -- the cursor ----------------------------------------------------------
@@ -984,7 +1506,7 @@ pub class Parser
   # this a byte that is not UTF-8, an encoded surrogate, U+FFFE and U+FFFF
   # were read and written back, while their character references were
   # refused. With *ascii*, any byte past 0x7F is one.
-  protected def self.first_bad_character(input : String, from : Int32, ascii : Bool) : Tuple(Int32, String)
+  protected def self.first_bad_character(input : Tape::String, from : Int32, ascii : Bool) : Tuple(Int32, String)
     ptr = input.to_unsafe
     len = input.bytesize
     i = from
@@ -994,7 +1516,7 @@ pub class Parser
         i = i + 1
         next
       end
-      byte = "0x" + Parser.hex4(b.to_i32)[2, 2]
+      byte = "0x" + TapeParser.hex4(b.to_i32)[2, 2]
       return {i, "byte #{byte} is not US-ASCII, the declared encoding"} if ascii
       n = b >= 0xF5_u8 ? 0 : (b >= 0xF0_u8 ? 4 : (b >= 0xE0_u8 ? 3 : (b >= 0xC2_u8 ? 2 : 0)))
       return {i, "byte #{byte} is not UTF-8"} if n == 0 || i + n > len
@@ -1008,7 +1530,7 @@ pub class Parser
       end
       overlong = (n == 3 && cp < 0x800) || (n == 4 && cp < 0x10000)
       return {i, "byte #{byte} is not UTF-8"} if overlong || cp > 0x10FFFF
-      return {i, "character U+#{Parser.hex4(cp)} is not an XML character"} unless xml_char?(cp)
+      return {i, "character U+#{TapeParser.hex4(cp)} is not an XML character"} unless xml_char?(cp)
       i = i + n
     end
     {-1, ""}
@@ -1048,7 +1570,7 @@ pub class Parser
     true
   end
 
-  private def slice_from(from : Int32) : String
+  private def slice_from(from : Int32) : Tape::String
     @input[from, @pos - from]
   end
 
@@ -1057,12 +1579,12 @@ pub class Parser
   end
 
   private def fail_control(b : UInt8) : Nil
-    fail("control character U+#{Parser.hex4(b.to_i32)} is not allowed")
+    fail("control character U+#{TapeParser.hex4(b.to_i32)} is not allowed")
   end
 
   # One or more digits, a dot, then digits: the version numbers the other
   # library reads (`1.0`, `1.1`, `1.`).
-  protected def self.version_number?(value : String) : Bool
+  protected def self.version_number?(value : Tape::String) : Bool
     ptr = value.to_unsafe
     len = value.bytesize
     i = 0
@@ -1087,8 +1609,8 @@ pub class Parser
 
   # -- the document --------------------------------------------------------
 
-  private def parse_document : Document
-    doc = Document.new
+  private def parse_document : TapeNode
+    doc = TapeNode.document
     # A UTF-16 file opens with its byte order mark, FF FE or FE FF - what
     # Windows PowerShell 5.1's `Out-File`, `>` and `Export-Clixml` write -
     # and was read as UTF-8 until the first `<`: "text outside the root
@@ -1149,7 +1671,7 @@ pub class Parser
   # first required and each at most once (XML 1.0, production [23]): taking
   # any of them in any order, or none, read `<?xml ?>` and
   # `<?xml standalone="yes" version="1.0"?>` as declarations.
-  private def parse_xml_declaration(doc : Document) : Nil
+  private def parse_xml_declaration(doc : TapeNode) : Nil
     start_line = @line
     start_col = @col
     consume("<?xml")
@@ -1186,14 +1708,14 @@ pub class Parser
       if attr_name == "version"
         # Digits, a dot, digits: `1.0`, `1.1`; any text was taken, a control
         # character or a `<` included.
-        if !Parser.version_number?(attr_val)
+        if !TapeParser.version_number?(attr_val)
           fail_at(attr_line, attr_col, "version '#{attr_val}' is not a version number")
           return
         end
         doc.version = attr_val
         stage = 1
       elsif attr_name == "encoding"
-        lowered = attr_val.downcase
+        lowered = tape_lower(attr_val)
         if lowered != "utf-8" && lowered != "utf8" && lowered != "us-ascii" && lowered != "ascii"
           fail_at(start_line, start_col, "encoding '#{attr_val}' is not supported: the input is read as UTF-8")
           return
@@ -1203,7 +1725,7 @@ pub class Parser
         # A US-ASCII document has no byte past 0x7F: one is refused where it
         # stands rather than read as UTF-8.
         if lowered == "us-ascii" || lowered == "ascii"
-          bad = Parser.first_bad_character(@input, @pos, true)
+          bad = TapeParser.first_bad_character(@input, @pos, true)
           if bad[0] >= 0 && (@bad_at < 0 || bad[0] < @bad_at)
             @bad_at = bad[0]
             @bad_message = bad[1]
@@ -1311,11 +1833,11 @@ pub class Parser
 
   # An element or attribute name in a declaration, held to the same shape
   # as one in the document.
-  private def declared_name : String
+  private def declared_name : Tape::String
     line = @line
     col = @col
     name = parse_name
-    return "" if failed? || !qualified_name?(name, line, col)
+    return "".as_tape if failed? || !qualified_name?(name, line, col)
     name
   end
 
@@ -1355,7 +1877,7 @@ pub class Parser
   # by `,` or by `|` - never both in one group - each with an optional `?`,
   # `*` or `+`. Each open group's separator is kept on a list rather than
   # the call stack, so no depth of nesting runs the stack out.
-  private def parse_content_model(element : String) : Nil
+  private def parse_content_model(element : Tape::String) : Nil
     what = "content model of element '#{element}'"
     consume("(")
     declaration_space
@@ -1459,7 +1981,7 @@ pub class Parser
     end
   end
 
-  private def parse_attribute_definition(element : String, what : String) : Nil
+  private def parse_attribute_definition(element : Tape::String, what : String) : Nil
     name = declared_name
     return if failed?
     if !declaration_space
@@ -1524,27 +2046,27 @@ pub class Parser
     end
     # The default is read as a value written on the element would be: its
     # references expanded with the entities declared so far, a `<` refused.
-    value = has_value ? parse_attribute_value : ""
+    value = has_value ? parse_attribute_value : "".as_tape
     return if failed?
 
-    types = @attribute_tokenized[element]? || Hash(String, Bool).new
+    types = @attribute_tokenized[element]? || TapeMap(Tape::String, Bool).new
     return if types.has_key?(name)
     types[name] = tokenized
     @attribute_tokenized[element] = types
     if id_type
-      ids = @attribute_ids[element]? || [] of String
+      ids = @attribute_ids[element]? || Tape::Array(Tape::String).new
       ids << name
       @attribute_ids[element] = ids
     end
     return unless has_value
-    defaults = @attribute_defaults[element]? || [] of Tuple(String, String)
-    defaults << {name, tokenized ? Parser.collapse_spaces(value) : value}
+    defaults = @attribute_defaults[element]? || Tape::Array(Tuple(Tape::String, Tape::String)).new
+    defaults << {name, tokenized ? TapeParser.collapse_spaces(value) : value}
     @attribute_defaults[element] = defaults
   end
 
   # The `(a|b)` of an enumerated type, name tokens, or of a NOTATION type,
   # names.
-  private def parse_value_list(attribute : String, notation : Bool, what : String) : Nil
+  private def parse_value_list(attribute : Tape::String, notation : Bool, what : String) : Nil
     consume("(")
     while !failed?
       declaration_space
@@ -1576,7 +2098,7 @@ pub class Parser
     notation = parse_name
     return if failed?
     # Namespaces in XML, section 7: no notation name holds a colon.
-    if notation.includes?(":")
+    if notation.includes?(':')
       fail_at(name_line, name_col, "notation name '#{notation}' cannot hold a colon")
       return
     end
@@ -1626,7 +2148,7 @@ pub class Parser
       if b == quote
         step
         return
-      elsif public_id && @pos != @bad_at && !Parser.public_id_byte?(b)
+      elsif public_id && @pos != @bad_at && !TapeParser.public_id_byte?(b)
         fail("#{found_here} is not allowed in a public identifier")
         return
       elsif control?(b)
@@ -1665,7 +2187,7 @@ pub class Parser
     name = parse_name
     return if failed?
     # Namespaces in XML, section 7: no entity name holds a colon.
-    if name.includes?(":")
+    if name.includes?(':')
       fail_at(name_line, name_col, "entity name '#{name}' cannot hold a colon")
       return
     end
@@ -1686,50 +2208,50 @@ pub class Parser
 
   # The literal in quotes: character references are decoded now, a general
   # entity reference is checked and kept for the moment it is used.
-  private def parse_entity_value(entity : String) : String
+  private def parse_entity_value(entity : Tape::String) : Tape::String
     start_line = @line
     start_col = @col
     quote = @pos < @len ? byte_at(@pos) : 0_u8
     if quote != 34_u8 && quote != 39_u8
       fail("entity value must be quoted")
-      return ""
+      return "".as_tape
     end
     step
-    parts = [] of String
+    parts = Tape::Array(Tape::String).new
     run_start = @pos
     while @pos < @len
       b = byte_at(@pos)
       if b == quote
         parts << slice_from(run_start)
         step
-        return parts.join("")
+        return Tape::String.build { |w| parts.join(w) }
       elsif b == 60_u8
         fail("markup inside the value of entity '#{entity}' is not supported")
-        return ""
+        return "".as_tape
       elsif b == 37_u8
         # A `%` here starts a parameter entity reference, which the internal
         # subset does not allow inside a declaration; it was kept as text.
         fail("parameter entity references are not supported")
-        return ""
+        return "".as_tape
       elsif b == 38_u8
         parts << slice_from(run_start)
         parts << parse_reference(0, true)
-        return "" if failed?
+        return "".as_tape if failed?
         run_start = @pos
       elsif control?(b)
         fail_control(b)
-        return ""
+        return "".as_tape
       else
         step
       end
     end
     fail_at(start_line, start_col, "unclosed entity value")
-    ""
+    "".as_tape
   end
 
   # -- comments, PIs, CDATA ------------------------------------------------
 
-  private def parse_comment : Node
+  private def parse_comment : TapeNode
     start_line = @line
     start_col = @col
     consume("<!--")
@@ -1738,62 +2260,62 @@ pub class Parser
       if match?("-->")
         body = slice_from(run_start)
         consume("-->")
-        return Node.new_comment(body)
+        return TapeNode.new_comment(body)
       elsif match?("--")
         fail("'--' is not allowed inside a comment")
-        return Node.new_comment("")
+        return TapeNode.new_comment("")
       end
       b = byte_at(@pos)
       if control?(b)
         fail_control(b)
-        return Node.new_comment("")
+        return TapeNode.new_comment("")
       end
       step
     end
     fail_at(start_line, start_col, "unclosed comment")
-    Node.new_comment("")
+    TapeNode.new_comment("")
   end
 
-  private def parse_pi : Node
+  private def parse_pi : TapeNode
     start_line = @line
     start_col = @col
     consume("<?")
     target = parse_name
-    return Node.new_pi("", "") if failed?
-    if target.downcase == "xml"
+    return TapeNode.new_pi("", "") if failed?
+    if tape_lower(target) == "xml"
       fail_at(start_line, start_col, "processing instruction target '#{target}' is reserved")
-      return Node.new_pi("", "")
+      return TapeNode.new_pi("", "")
     end
     # Namespaces in XML, section 7: no processing instruction target holds
     # a colon.
-    if target.includes?(":")
+    if target.includes?(':')
       fail_at(start_line, start_col, "processing instruction target '#{target}' cannot hold a colon")
-      return Node.new_pi("", "")
+      return TapeNode.new_pi("", "")
     end
-    return Node.new_pi(target, "") if consume("?>")
+    return TapeNode.new_pi(target, "") if consume("?>")
     if !skip_whitespace
       fail("expected whitespace after the processing instruction target '#{target}'")
-      return Node.new_pi("", "")
+      return TapeNode.new_pi("", "")
     end
     run_start = @pos
     while @pos < @len
       if match?("?>")
         body = slice_from(run_start)
         consume("?>")
-        return Node.new_pi(target, body)
+        return TapeNode.new_pi(target, body)
       end
       b = byte_at(@pos)
       if control?(b)
         fail_control(b)
-        return Node.new_pi("", "")
+        return TapeNode.new_pi("", "")
       end
       step
     end
     fail_at(start_line, start_col, "unclosed processing instruction")
-    Node.new_pi("", "")
+    TapeNode.new_pi("", "")
   end
 
-  private def parse_cdata : Node
+  private def parse_cdata : TapeNode
     start_line = @line
     start_col = @col
     consume("<![CDATA[")
@@ -1802,26 +2324,26 @@ pub class Parser
       if match?("]]>")
         body = slice_from(run_start)
         consume("]]>")
-        return Node.new_cdata(body)
+        return TapeNode.new_cdata(body)
       end
       b = byte_at(@pos)
       if control?(b)
         fail_control(b)
-        return Node.new_cdata("")
+        return TapeNode.new_cdata("")
       end
       step
     end
     fail_at(start_line, start_col, "unclosed CDATA section")
-    Node.new_cdata("")
+    TapeNode.new_cdata("")
   end
 
   # -- elements ------------------------------------------------------------
 
-  private def parse_element(parent : Node) : Node
+  private def parse_element(parent : TapeNode) : TapeNode
     start_line = @line
     start_col = @col
     step
-    elem = Node.new_element("")
+    elem = TapeNode.new_element("")
     @depth = @depth + 1
     if @depth > @max_depth
       fail_at(start_line, start_col, "elements nested deeper than #{@max_depth}")
@@ -1831,14 +2353,14 @@ pub class Parser
     name = parse_name
     return elem if failed?
     return elem unless qualified_name?(name, start_line, start_col)
-    elem = Node.new_element(name)
+    elem = TapeNode.new_element(name)
     elem.parent = parent
 
-    seen = Hash(String, Bool).new
-    raw_names = [] of String
-    raw_values = [] of String
-    raw_lines = [] of Int32
-    raw_cols = [] of Int32
+    seen = TapeMap(Tape::String, Bool).new
+    raw_names = Tape::Array(Tape::String).new
+    raw_values = Tape::Array(Tape::String).new
+    raw_lines = Tape::Array(Int32).new
+    raw_cols = Tape::Array(Int32).new
     self_closing = false
     closed = false
     while @pos < @len
@@ -1873,7 +2395,7 @@ pub class Parser
       skip_whitespace
       attr_val = parse_attribute_value
       return elem if failed?
-      attr_val = Parser.collapse_spaces(attr_val) if tokenized?(name, attr_name)
+      attr_val = TapeParser.collapse_spaces(attr_val) if tokenized?(name, attr_name)
       raw_names << attr_name
       raw_values << attr_val
       raw_lines << attr_line
@@ -1917,7 +2439,7 @@ pub class Parser
           fail_at(attr_line, attr_col, "the default namespace cannot be bound to the uri of the '#{attr_val == XML_NAMESPACE ? "xml" : "xmlns"}' prefix")
           return elem
         end
-        elem.namespaces << Namespace.new("", attr_val)
+        elem.namespaces << TapeNamespace.new("", attr_val)
       elsif attr_name.starts_with?("xmlns:")
         ns_prefix = attr_name[6, attr_name.bytesize - 6]
         if attr_val.empty?
@@ -1936,7 +2458,7 @@ pub class Parser
           fail_at(attr_line, attr_col, "namespace prefix '#{ns_prefix}' cannot be bound to the uri of the 'xmlns' prefix")
           return elem
         end
-        elem.namespaces << Namespace.new(ns_prefix, attr_val)
+        elem.namespaces << TapeNamespace.new(ns_prefix, attr_val)
       end
       i = i + 1
     end
@@ -1948,22 +2470,22 @@ pub class Parser
     # Two spellings of one attribute - the same local name through two
     # prefixes bound to the same uri - are a duplicate as much as one
     # spelling twice.
-    expanded = Hash(String, String).new
+    expanded = TapeMap(Tape::String, Tape::String).new
     i = 0
     while i < raw_names.size
       if raw_names[i] == "xmlns" || raw_names[i].starts_with?("xmlns:")
         i = i + 1
         next
       end
-      attr = Attribute.new(raw_names[i], raw_values[i])
+      attr = TapeAttribute.new(raw_names[i], raw_values[i])
       if !attr.prefix.empty?
         ns = elem.resolve_namespace_prefix(attr.prefix)
         if ns.nil?
           fail_at(start_line, start_col, "namespace prefix '#{attr.prefix}' of attribute '#{attr.name}' on <#{name}> is not declared")
           return elem
         end
-        attr = Attribute.new(raw_names[i], raw_values[i], ns.uri)
-        key = "#{ns.uri}\n#{attr.local_name}"
+        attr = TapeAttribute.new(raw_names[i], raw_values[i], ns.uri)
+        key = Tape::String.build { |w| w << ns.uri << "\n" << attr.local_name }
         first = expanded[key]?
         if !first.nil?
           fail_at(raw_lines[i], raw_cols[i], "attribute '#{attr.local_name}' in namespace '#{ns.uri}' given twice on <#{name}>, as '#{first}' and '#{attr.name}'")
@@ -1980,14 +2502,14 @@ pub class Parser
       return elem
     end
 
-    parts = [] of String
+    parts = Tape::Array(Tape::String).new
     run_start = @pos
     while @pos < @len
       b = byte_at(@pos)
       if b == 60_u8
         parts << slice_from(run_start)
         flush_text(elem, parts)
-        parts = [] of String
+        parts = Tape::Array(Tape::String).new
         if match?("</")
           end_line = @line
           end_col = @col
@@ -2037,7 +2559,7 @@ pub class Parser
 
   # Whether the internal subset declares *attribute* of *element* with a
   # type other than CDATA.
-  private def tokenized?(element : String, attribute : String) : Bool
+  private def tokenized?(element : Tape::String, attribute : Tape::String) : Bool
     return false if @attribute_tokenized.empty?
     types = @attribute_tokenized[element]?
     !types.nil? && types[attribute]? == true
@@ -2047,7 +2569,7 @@ pub class Parser
   # 3.3.3): the spaces at either end dropped and each run of them made one.
   # Only U+0020 counts; a tab a character reference wrote stays. Values
   # were kept as written: `x="  p   q  "` of an NMTOKENS `x` read as is.
-  protected def self.collapse_spaces(value : String) : String
+  protected def self.collapse_spaces(value : Tape::String) : Tape::String
     ptr = value.to_unsafe
     start = 0
     stop = value.bytesize
@@ -2064,76 +2586,73 @@ pub class Parser
       i = i + 1
     end
     return value if kept == value.bytesize
-    String.new(kept) do |buffer|
-      n = 0
+    Tape::String.build do |w|
       i = start
       while i < stop
-        if ptr[i] != 32_u8 || ptr[i - 1] != 32_u8
-          buffer[n] = ptr[i]
-          n = n + 1
-        end
-        i = i + 1
+        w.push(ptr[i]) if i == start || ptr[i] != 32_u8 || ptr[i - 1] != 32_u8
+        i += 1
       end
     end
   end
 
-  private def flush_text(elem : Node, parts : Array(String)) : Nil
+
+  private def flush_text(elem : TapeNode, parts : Tape::Array(Tape::String)) : Nil
     return if parts.empty?
-    text = parts.join("")
-    elem.append_parsed(Node.new_text(text)) unless text.empty?
+    text = Tape::String.build { |w| parts.join(w) }
+    elem.append_parsed(TapeNode.new_text(text)) unless text.empty?
   end
 
   # A quoted value with references decoded and a literal tab or newline
   # read as a space (attribute-value normalisation, XML 1.0 3.3.3).
-  private def parse_attribute_value : String
+  private def parse_attribute_value : Tape::String
     start_line = @line
     start_col = @col
     quote = @pos < @len ? byte_at(@pos) : 0_u8
     if quote != 34_u8 && quote != 39_u8
       fail("attribute value must be quoted")
-      return ""
+      return "".as_tape
     end
     step
-    parts = [] of String
+    parts = Tape::Array(Tape::String).new
     run_start = @pos
     while @pos < @len
       b = byte_at(@pos)
       if b == quote
         parts << slice_from(run_start)
         step
-        return parts.join("")
+        return Tape::String.build { |w| parts.join(w) }
       elsif b == 60_u8
         fail("raw '<' is not allowed in an attribute value")
-        return ""
+        return "".as_tape
       elsif b == 38_u8
         parts << slice_from(run_start)
         parts << parse_reference(0, false, true)
-        return "" if failed?
+        return "".as_tape if failed?
         run_start = @pos
       elsif b == 9_u8 || b == 10_u8
         parts << slice_from(run_start)
-        parts << " "
+        parts << " ".as_tape
         step
         run_start = @pos
       elsif control?(b)
         fail_control(b)
-        return ""
+        return "".as_tape
       else
         step
       end
     end
     fail_at(start_line, start_col, "unclosed attribute value")
-    ""
+    "".as_tape
   end
 
   # A quoted value taken as written: the XML declaration's.
-  private def parse_quoted_literal : String
+  private def parse_quoted_literal : Tape::String
     start_line = @line
     start_col = @col
     quote = @pos < @len ? byte_at(@pos) : 0_u8
     if quote != 34_u8 && quote != 39_u8
       fail("expected a quoted value")
-      return ""
+      return "".as_tape
     end
     step
     run_start = @pos
@@ -2146,7 +2665,7 @@ pub class Parser
       step
     end
     fail_at(start_line, start_col, "unclosed quote")
-    ""
+    "".as_tape
   end
 
   # -- references ----------------------------------------------------------
@@ -2155,7 +2674,7 @@ pub class Parser
   # entity reference is checked for shape and answered as written (`&name;`),
   # which is what an entity's own value keeps until it is used. With
   # *in_attribute*, the reference stands in an attribute value.
-  private def parse_reference(depth : Int32, keep_names : Bool = false, in_attribute : Bool = false) : String
+  private def parse_reference(depth : Int32, keep_names : Bool = false, in_attribute : Bool = false) : Tape::String
     ref_line = @line
     ref_col = @col
     ref_start = @pos
@@ -2166,117 +2685,117 @@ pub class Parser
     if @pos >= @len || byte_at(@pos) != 59_u8
       kind = @pos > ref_start + 1 && byte_at(ref_start + 1) == 35_u8 ? "character" : "entity"
       fail_at(ref_line, ref_col, "unterminated #{kind} reference #{slice_from(ref_start)}: expected ';'")
-      return ""
+      return "".as_tape
     end
     ref = @input[ref_start + 1, @pos - ref_start - 1]
     step
     if ref.empty?
       fail_at(ref_line, ref_col, "empty entity reference")
-      return ""
+      return "".as_tape
     end
     if ref.starts_with?("#")
       cp = char_ref_value(ref)
       if cp < 0
         fail_at(ref_line, ref_col, "invalid character reference '&#{ref};'")
-        return ""
+        return "".as_tape
       elsif !xml_char?(cp)
         fail_at(ref_line, ref_col, "character reference &#{ref}; is not an XML character")
-        return ""
+        return "".as_tape
       end
-      return cp.unsafe_chr.to_s
+      return Tape::String.build { |w| w << cp.unsafe_chr }
     end
     # `&a]b;` and `&0;` are no references: kept as written in an entity's
     # value, they were accepted wherever that entity went unused.
-    if !Parser.name_shaped?(ref)
+    if !TapeParser.name_shaped?(ref)
       fail_at(ref_line, ref_col, "'&#{ref};' is not a reference: '#{ref}' is not a name")
-      return ""
+      return "".as_tape
     end
     return slice_from(ref_start) if keep_names
     expand_entity(ref, ref_line, ref_col, depth, in_attribute)
   end
 
-  private def expand_entity(name : String, line : Int32, col : Int32, depth : Int32, in_attribute : Bool) : String
-    return "<" if name == "lt"
-    return ">" if name == "gt"
-    return "&" if name == "amp"
-    return "'" if name == "apos"
-    return "\"" if name == "quot"
+  private def expand_entity(name : Tape::String, line : Int32, col : Int32, depth : Int32, in_attribute : Bool) : Tape::String
+    return "<".as_tape if name == "lt"
+    return ">".as_tape if name == "gt"
+    return "&".as_tape if name == "amp"
+    return "'".as_tape if name == "apos"
+    return "\"".as_tape if name == "quot"
     value = @entities[name]?
     if value.nil?
       fail_at(line, col, "undefined entity reference &#{name};")
-      return ""
+      return "".as_tape
     end
     if depth >= 10
       fail_at(line, col, "entity &#{name}; expands more than 10 levels deep")
-      return ""
+      return "".as_tape
     end
     @expansions = @expansions + 1
     if @expansions > @max_expansions
       fail_at(line, col, "entity expansion limit of #{@max_expansions} exceeded at &#{name};")
-      return ""
+      return "".as_tape
     end
     # Counting expansions alone let one large entity used a thousand times
     # make a thousand times the document: 1 MB of input read as 1 GB of text.
     @expanded_bytes = @expanded_bytes + value.bytesize
     if @expanded_bytes > @max_expanded_bytes
       fail_at(line, col, "entity expansion past #{@max_expanded_bytes} bytes at &#{name};")
-      return ""
+      return "".as_tape
     end
     # The replacement text is read where the reference stands, and it was
     # read as plain text everywhere. In an attribute value a `<` in it is an
     # error (XML 1.0, "No < in Attribute Values") and its tabs and line ends
     # are spaces (3.3.3); in content a `<` is markup, which is not supported,
     # and `]]>` is refused as it is in text.
-    if value.includes?("<")
+    if value.includes?('<')
       if in_attribute
         fail_at(line, col, "entity &#{name}; holds a '<', which an attribute value cannot")
       else
         fail_at(line, col, "markup inside the value of entity '#{name}' is not supported")
       end
-      return ""
+      return "".as_tape
     end
-    if !in_attribute && value.includes?("]]>")
+    if !in_attribute && TapeParser.contains_end?(value)
       fail_at(line, col, "']]>' is not allowed in text, nor in the value of entity '#{name}'")
-      return ""
+      return "".as_tape
     end
-    return (in_attribute ? Parser.attribute_spaces(value) : value) unless value.includes?("&")
+    return (in_attribute ? TapeParser.attribute_spaces(value) : value) unless value.includes?('&')
 
     # The replacement text is read as content: a character reference is
     # decoded, an entity reference expanded a level deeper.
     ptr = value.to_unsafe
     len = value.bytesize
-    parts = [] of String
+    parts = Tape::Array(Tape::String).new
     run_start = 0
     i = 0
     while i < len
       if ptr[i] == 38_u8
         literal = value[run_start, i - run_start]
-        parts << (in_attribute ? Parser.attribute_spaces(literal) : literal)
+        parts << (in_attribute ? TapeParser.attribute_spaces(literal) : literal)
         semi = i + 1
         while semi < len && ptr[semi] != 59_u8 && !reference_stop?(ptr[semi])
           semi = semi + 1
         end
         if semi >= len || ptr[semi] != 59_u8
           fail_at(line, col, "unterminated reference #{value[i, semi - i]} in the value of entity '#{name}': expected ';'")
-          return ""
+          return "".as_tape
         end
         ref = value[i + 1, semi - i - 1]
         if ref.empty?
           fail_at(line, col, "empty entity reference in the value of entity '#{name}'")
-          return ""
+          return "".as_tape
         elsif ref.starts_with?("#")
           cp = char_ref_value(ref)
           if cp < 0
             fail_at(line, col, "invalid character reference '&#{ref};' in the value of entity '#{name}'")
-            return ""
+            return "".as_tape
           elsif !xml_char?(cp)
             fail_at(line, col, "character reference &#{ref}; in the value of entity '#{name}' is not an XML character")
-            return ""
+            return "".as_tape
           end
-          parts << cp.unsafe_chr.to_s
+          parts << Tape::String.build { |w| w << cp.unsafe_chr }
         else
           parts << expand_entity(ref, line, col, depth + 1, in_attribute)
-          return "" if failed?
+          return "".as_tape if failed?
         end
         i = semi + 1
         run_start = i
@@ -2285,14 +2804,14 @@ pub class Parser
       end
     end
     literal = value[run_start, len - run_start]
-    parts << (in_attribute ? Parser.attribute_spaces(literal) : literal)
-    parts.join("")
+    parts << (in_attribute ? TapeParser.attribute_spaces(literal) : literal)
+    Tape::String.build { |w| parts.join(w) }
   end
 
   # An entity's replacement text in an attribute value: a tab, newline or
   # carriage return in it is a space, as one written in the value is. One
   # that a character reference in the replacement text names is not.
-  protected def self.attribute_spaces(text : String) : String
+  protected def self.attribute_spaces(text : Tape::String) : Tape::String
     ptr = text.to_unsafe
     len = text.bytesize
     i = 0
@@ -2300,19 +2819,28 @@ pub class Parser
       i = i + 1
     end
     return text if i == len
-    String.new(len) do |buffer|
-      buffer.copy_from(ptr, len)
-      while i < len
-        b = ptr[i]
-        buffer[i] = 32_u8 if b == 9_u8 || b == 10_u8 || b == 13_u8
-        i = i + 1
+    Tape::String.build do |w|
+      j = 0
+      while j < len
+        b = ptr[j]
+        w.push(b == 9_u8 || b == 10_u8 || b == 13_u8 ? 32_u8 : b)
+        j += 1
       end
     end
   end
 
+  protected def self.contains_end?(text : Tape::String) : Bool
+    i = 0
+    while i + 2 < text.bytesize
+      return true if text[i, 3] == "]]>"
+      i += 1
+    end
+    false
+  end
+
   # -- names ---------------------------------------------------------------
 
-  private def parse_name : String
+  private def parse_name : Tape::String
     name = parse_name?
     return name unless name.nil?
     if @pos >= @len
@@ -2320,7 +2848,7 @@ pub class Parser
     else
       fail("expected a name, found #{found_here}")
     end
-    ""
+    "".as_tape
   end
 
   # The character at the cursor, for a sentence: `'x'`, or its code point
@@ -2328,7 +2856,7 @@ pub class Parser
   private def found_here : String
     cp = code_point_at(@input.to_unsafe, @len, @pos)
     cp = byte_at(@pos).to_i32 if cp < 0
-    cp >= 32 && cp < 127 ? "'#{cp.unsafe_chr}'" : "U+#{Parser.hex4(cp)}"
+    cp >= 32 && cp < 127 ? "'#{cp.unsafe_chr}'" : "U+#{TapeParser.hex4(cp)}"
   end
 
   # An element or attribute name is `local` or `prefix:local`, with neither
@@ -2336,7 +2864,7 @@ pub class Parser
   # last, or twice is refused with the name's line and column, and so is a
   # local part that does not start as a name does (`p:-a`, `p:1`), which was
   # taken.
-  private def qualified_name?(name : String, line : Int32, col : Int32) : Bool
+  private def qualified_name?(name : Tape::String, line : Int32, col : Int32) : Bool
     ptr = name.to_unsafe
     len = name.bytesize
     colons = 0
@@ -2350,7 +2878,7 @@ pub class Parser
       i = i + 1
     end
     return true if colons == 0
-    if colons == 1 && ptr[0] != 58_u8 && ptr[len - 1] != 58_u8 && Parser.name_start?(code_point_at(ptr, len, colon_at + 1))
+    if colons == 1 && ptr[0] != 58_u8 && ptr[len - 1] != 58_u8 && TapeParser.name_start?(code_point_at(ptr, len, colon_at + 1))
       return true
     end
     fail_at(line, col, "'#{name}' is not a qualified name: a name is 'local' or 'prefix:local'")
@@ -2378,7 +2906,7 @@ pub class Parser
   end
 
   # Whether all of *text* is one name.
-  protected def self.name_shaped?(text : String) : Bool
+  protected def self.name_shaped?(text : Tape::String) : Bool
     ptr = text.to_unsafe
     len = text.bytesize
     return false if len == 0
@@ -2393,12 +2921,12 @@ pub class Parser
 
   # A name, or with *token* a name token (production [7]), which any
   # character that continues a name may start.
-  private def parse_name?(token : Bool = false) : String?
+  private def parse_name?(token : Bool = false) : Tape::String?
     ptr = @input.to_unsafe
     start = @pos
     while @pos < @len
       cp = code_point_at(ptr, @len, @pos)
-      break unless @pos == start && !token ? Parser.name_start?(cp) : Parser.name_char?(cp)
+      break unless @pos == start && !token ? TapeParser.name_start?(cp) : TapeParser.name_char?(cp)
       width = utf8_width(ptr[@pos])
       while width > 0 && !failed?
         step
@@ -2415,6 +2943,87 @@ pub class Parser
     return nil if failed? || @pos == start
     slice_from(start)
   end
+end
+
+pub def parse(xml : Tape::String, max_depth : Int32 = 256,
+              max_entity_expansions : Int32 = 1000) : TapeNode
+  TapeParser.new(xml, max_depth, max_entity_expansions).parse
+end
+
+pub def parse?(xml : Tape::String, max_depth : Int32 = 256,
+               max_entity_expansions : Int32 = 1000) : TapeNode?
+  TapeParser.new(xml, max_depth, max_entity_expansions).parse?
+end
+
+pub def escape(text : Tape::String, ascii : Bool = false) : Tape::String
+  Tape::String.build { |w| escape(text, w, ascii) }
+end
+
+pub def escape(text : Tape::String, writer : Tape::String::Writer,
+               ascii : Bool = false) : Nil
+  escape_bytes(text, false, ascii, writer)
+end
+
+pub def escape_attribute(text : Tape::String, ascii : Bool = false) : Tape::String
+  Tape::String.build { |w| escape_attribute(text, w, ascii) }
+end
+
+pub def escape_attribute(text : Tape::String, writer : Tape::String::Writer,
+               ascii : Bool = false) : Nil
+  escape_bytes(text, true, ascii, writer)
+end
+
+def escape_bytes(text : Tape::String, attribute : Bool, ascii : Bool,
+                 parts : Tape::String::Writer) : Nil
+  ptr = text.to_unsafe
+  len = text.bytesize
+  run_start = 0
+  i = 0
+  while i < len
+    b = ptr[i]
+    if ascii && b >= 128_u8
+      width = b >= 0xF0_u8 ? 4 : (b >= 0xE0_u8 ? 3 : (b >= 0xC0_u8 ? 2 : 1))
+      width = len - i if i + width > len
+      cp = width == 1 ? b.to_i32 : (b & (width == 2 ? 0x1F_u8 : (width == 3 ? 0x0F_u8 : 0x07_u8))).to_i32
+      k = 1
+      while k < width
+        cp = (cp << 6) | (ptr[i + k] & 0x3F_u8).to_i32
+        k = k + 1
+      end
+      parts << text[run_start, i - run_start] if i > run_start
+      parts << "&#"
+      parts.append_int(cp)
+      parts << ";"
+      i = i + width
+      run_start = i
+      next
+    end
+    replacement = if b == 38_u8
+                    "&amp;"
+                  elsif b == 60_u8
+                    "&lt;"
+                  elsif b == 62_u8
+                    "&gt;"
+                  elsif b == 13_u8
+                    "&#13;"
+                  elsif attribute && b == 34_u8
+                    "&quot;"
+                  elsif attribute && b == 9_u8
+                    "&#9;"
+                  elsif attribute && b == 10_u8
+                    "&#10;"
+                  else
+                    ""
+                  end
+    if !replacement.empty?
+      parts << text[run_start, i - run_start] if i > run_start
+      parts << replacement
+      run_start = i + 1
+    end
+    i = i + 1
+  end
+  parts << text[run_start, len - run_start] if len > run_start
+  nil
 end
 
 # -- the module's functions --------------------------------------------------
@@ -2476,55 +3085,13 @@ pub def escape_attribute(text : String, ascii : Bool = false) : String
 end
 
 def escape_bytes(text : String, attribute : Bool, ascii : Bool) : String
-  ptr = text.to_unsafe
-  len = text.bytesize
-  parts = [] of String
-  run_start = 0
-  i = 0
-  while i < len
-    b = ptr[i]
-    if ascii && b >= 128_u8
-      width = b >= 0xF0_u8 ? 4 : (b >= 0xE0_u8 ? 3 : (b >= 0xC0_u8 ? 2 : 1))
-      width = len - i if i + width > len
-      cp = width == 1 ? b.to_i32 : (b & (width == 2 ? 0x1F_u8 : (width == 3 ? 0x0F_u8 : 0x07_u8))).to_i32
-      k = 1
-      while k < width
-        cp = (cp << 6) | (ptr[i + k] & 0x3F_u8).to_i32
-        k = k + 1
-      end
-      parts << text[run_start, i - run_start] if i > run_start
-      parts << "&##{cp};"
-      i = i + width
-      run_start = i
-      next
-    end
-    replacement = if b == 38_u8
-                    "&amp;"
-                  elsif b == 60_u8
-                    "&lt;"
-                  elsif b == 62_u8
-                    "&gt;"
-                  elsif b == 13_u8
-                    "&#13;"
-                  elsif attribute && b == 34_u8
-                    "&quot;"
-                  elsif attribute && b == 9_u8
-                    "&#9;"
-                  elsif attribute && b == 10_u8
-                    "&#10;"
-                  else
-                    ""
-                  end
-    if !replacement.empty?
-      parts << text[run_start, i - run_start] if i > run_start
-      parts << replacement
-      run_start = i + 1
-    end
-    i = i + 1
+  result = ""
+  tape do
+    w = Tape::String::Writer.new(text.bytesize)
+    escape_bytes(text.as_tape, attribute, ascii, w)
+    result = w.finish.to_heap
   end
-  return text if run_start == 0
-  parts << text[run_start, len - run_start] if len > run_start
-  parts.join("")
+  result
 end
 
 # The five predefined entities and character references decoded, the same
@@ -2610,7 +3177,7 @@ end
 # The code point a character reference names, given the text between its
 # `&` and `;` (`#65`, `#x41`); -1 where that is not digits. Accumulation
 # stops past U+10FFFF, so a long reference is merely too large.
-def char_ref_value(ref : String) : Int32
+def char_ref_value(ref : String | Tape::String) : Int32
   ptr = ref.to_unsafe
   len = ref.bytesize
   i = 1
