@@ -33,7 +33,7 @@ No tape value survives the block that owns its storage:
   tape values, including mutable containers and `self`, cannot be used;
   prepare owned data before entering. Inner values cannot escape into
   outer variables or containers. Copying a struct does not copy its data.
-* `Tape::String.new(text)` copies heap text onto the tape; `.view(text)`
+* `Tape::String.new(text)` copies heap text onto the tape; `text.as_tape`
   borrows its bytes. `[start, count]` borrows a slice; `[]` reads a byte.
 * To retain a value, copy it by name while its source is alive: `to_heap`
   on a `Tape::String`, a `Tape::Array` or `View` (each element by its own

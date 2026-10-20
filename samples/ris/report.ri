@@ -59,7 +59,7 @@ slowest = [] of String # on the heap: it lives past every day
 DAYS.each_with_index do |log, day|
   tape do
     hits = Tape::Array(Hit).new
-    Tape::String.view(log).each_line { |line| hits << parse(line) }
+    log.as_tape.each_line { |line| hits << parse(line) }
 
     errors = hits.count { |h| h.status >= 500 }
     slow = hits.select { |h| h.ms > 500 }

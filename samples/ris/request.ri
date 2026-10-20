@@ -51,7 +51,7 @@ end
 
 def handle(raw : String) : Nil
   tape do
-    head = Server.parse_head(Tape::String.view(raw))
+    head = Server.parse_head(raw.as_tape)
     unless head.is_a?(ParsedHead)
       puts "400 Bad Request"
       return

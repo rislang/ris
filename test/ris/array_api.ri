@@ -6,7 +6,7 @@ struct Message
   getter body : Tape::String
 
   def initialize(@user_id, body : String)
-    @body = Tape::String.view(body)
+    @body = body.as_tape
   end
 end
 

@@ -1141,6 +1141,14 @@ class Object
   end
 end
 
+class String
+  # These bytes as a Tape::String, nothing copied: `Tape::String.view`.
+  # `as_` for a view at no cost, as `to_heap` is `to_` for a copy.
+  def as_tape : Tape::String
+    Tape::String.view(self)
+  end
+end
+
 # Goose's every scope freeing: outside the prelude, the normalizer begins
 # each def body, `while` body and block body with `__iyi_scope_mark(false)` and ends it with `__iyi_scope_reset`.
 # `TapeScopeChecker` turns the mark on where nothing the body puts on the

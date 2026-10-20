@@ -22,7 +22,7 @@ nums = [] of Int32
 picked = [] of Int32
 hits = [] of HeapHit
 tape do
-  line = Tape::String.view("GET /users")
+  line = "GET /users".as_tape
   text = line.to_heap
   names = Tape::Array(Tape::String){line[0, 3], line[4, 6]}.to_heap
   ints = Tape::Array(Int32){3, 1, 2}

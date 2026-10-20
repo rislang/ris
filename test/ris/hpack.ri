@@ -37,7 +37,7 @@ retained = [] of HeaderField
     end
     encoded = native_encoder.encode_on_tape(native_fields)
     raise "tape encoding" unless encoded == text
-    decoded = decoder.decode(Tape::String.view(text))
+    decoded = decoder.decode(text.as_tape)
     raise decoded.message if decoded.is_a?(HpackError)
     raise "field count" unless decoded.size == expected.size
     decoded.each do |field|
@@ -55,14 +55,14 @@ end
   expected = Decoder.new.decode(bytes)
   raise "expected failure" unless expected.is_a?(HpackError)
   tape do
-    decoded = Decoder.new.decode(Tape::String.view(text))
+    decoded = Decoder.new.decode(text.as_tape)
     raise "accepted malformed block" unless decoded.is_a?(HpackError)
     raise "changed error" unless decoded.message == expected.message
   end
 end
 # List limits must reject a valid indexed field before writing a slot.
 tape do
-  text = Tape::String.view("\x82")
+  text = "\x82".as_tape
   count = Decoder.new(max_header_count: 0).decode(text)
   raise "count limit" unless count.is_a?(HpackError)
   raise "count error" unless count.message.starts_with?("Decompression bomb")

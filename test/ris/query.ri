@@ -11,7 +11,7 @@ import std/gc::{GC}
 def pairs(text : String) : String
   out = ""
   tape do
-    q = Query.parse(Tape::String.view(text))
+    q = Query.parse(text.as_tape)
     q.each { |key, value| out = out + "[#{key.to_s}=#{value.to_s}]" }
   end
   out
@@ -24,7 +24,7 @@ GC.disable
 before = GC.stats.bytes_since_collection
 found = 0
 tape do
-  q = Query.parse(Tape::String.view("page=2&q=caf%C3%A9+au+lait"))
+  q = Query.parse("page=2&q=caf%C3%A9+au+lait".as_tape)
   page = q["page"]?
   words = q["q"]?
   found = (page ? page.bytesize : 0) + (words ? words.bytesize : 0)

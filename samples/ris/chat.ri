@@ -50,7 +50,7 @@ module Chat
   # params and the rendered room are freed together when it ends.
   def self.create_message(room : Room, request : String) : Nil
     tape do
-      params = message_params(Tape::String.view(request))
+      params = message_params(request.as_tape)
       if params.nil?
         puts "400 bad request"
       elsif user = room.user(params.user_id)
