@@ -46,19 +46,19 @@ module Chat
     end
   end
 
-  # The action: one request, start to end on one tape. Its bytes, the
-  # params and the rendered room are freed together when it ends.
+  # The action: one request, start to end on one tape (`@[Tape]`). Its
+  # bytes, the params and the rendered room are freed together when it
+  # ends.
+  @[Tape]
   def self.create_message(room : Room, request : String) : Nil
-    tape do
-      params = message_params(request.as_tape)
-      if params.nil?
-        puts "400 bad request"
-      elsif user = room.user(params.user_id)
-        create(room, user, params)
-        render_room(room)
-      else
-        puts "403 user #{params.user_id} is not in the room"
-      end
+    params = message_params(request.as_tape)
+    if params.nil?
+      puts "400 bad request"
+    elsif user = room.user(params.user_id)
+      create(room, user, params)
+      render_room(room)
+    else
+      puts "403 user #{params.user_id} is not in the room"
     end
   end
 

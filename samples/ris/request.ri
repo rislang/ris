@@ -2,8 +2,8 @@
 #
 #   ./bin/ris run samples/ris/request.ri
 #
-# The request's bytes, the parsed head and the response are made inside
-# `tape do ... end` and freed together when it ends: nothing to collect.
+# The request's bytes, the parsed head and the response are made on the
+# tape `@[Tape]` gives `handle`, freed together when it ends.
 # Only the user table lives on, on the heap.
 
 module samples/request
@@ -37,17 +37,17 @@ def reason(status : Int32) : String
   end
 end
 
+# One request on its own tape: `@[Tape]` runs the def's body on one.
+@[Tape]
 def handle(raw : String) : Nil
-  tape do
-    head = Server.parse_head(raw.as_tape)
-    unless head.is_a?(ParsedHead)
-      puts "400 Bad Request"
-      return
-    end
-    body = Tape::String::Writer.new(128)
-    status = route(head, body)
-    puts "#{status} #{reason(status)} #{body.finish}"
+  head = Server.parse_head(raw.as_tape)
+  unless head.is_a?(ParsedHead)
+    puts "400 Bad Request"
+    return
   end
+  body = Tape::String::Writer.new(128)
+  status = route(head, body)
+  puts "#{status} #{reason(status)} #{body.finish}"
 end
 
 handle("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")

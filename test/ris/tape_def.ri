@@ -1,0 +1,22 @@
+# `@[Tape]` on a def runs its body on a tape, as `tape do ... end` around
+# it would: the def's Writer and split pieces need a running tape, an
+# early `return` leaves it, and a def in a module takes it alike.
+module Shop
+  @[Tape]
+  def self.greet(name : String) : Nil
+    text = name.as_tape
+    return puts("nobody") if text.empty?
+    greeting = Tape::String::Writer.new(32)
+    greeting << "hi " << text
+    puts greeting
+  end
+end
+
+@[Tape]
+def count_words(line : String) : Nil
+  puts line.as_tape.split(' ').size
+end
+
+Shop.greet("bob")
+Shop.greet("")
+count_words("a b c")

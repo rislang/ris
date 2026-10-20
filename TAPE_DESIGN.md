@@ -7,7 +7,8 @@ the tape is beside it, where short-lived data is made and dropped together.
 ## The model
 * `tape do … end` opens the running fiber's tape: bump allocation over
   mappings, chained when full, never moved. Allocation without an active
-  tape ends the program. The block normally returns `nil`.
+  tape ends the program. The block returns `nil`; `@[Tape]` on a def
+  makes its body one, so the def returns `Nil` too.
 * Tape types: `Tape::String`, `Tape::String::Writer`, `Tape::Array(T)`,
   `Tape::Tree(T)` and `@[OnTape]` structs. The annotation constrains where
   a value may live; ordinary allocations still follow iyi's rules.
@@ -15,8 +16,7 @@ the tape is beside it, where short-lived data is made and dropped together.
   it, on normal and early exits, including panic; a def, loop round or
   block (std's too, unless it holds raw pointers) that keeps nothing
   frees its part each time.
-* `local_tape do … end` owns a separate tape, released at its end, for
-  temporaries to free before the outer block ends.
+* `local_tape do … end` owns a tape of its own, freed at its end.
 * Tapes follow fibers across switches; spawned fibers have their own.
   Each thread caches up to 64 spare mappings, with bounded warm pages.
 * Tape storage is not GC-managed, but used tape words are scanned as
