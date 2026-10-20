@@ -9552,14 +9552,27 @@ struct Pointer(T)
     (self + offset.to_i64).value = value
   end
 
-  # Bytes, not elements: every caller here is copying string contents.
+  # *count* elements from *source*, as one `llvm.memcpy`: the platform's
+  # `memcpy`, which a tape's large copies (a page into a response) need
+  # at its speed, not a loop the back end vectorises only to SSE2.
   def copy_from(source : Pointer(T), count : Int32) : Nil
-    index = 0
-    while index < count
-      self[index] = source[index]
-      index = index + 1
-    end
+    return if count <= 0
+    {% if flag?(:wasm32) %}
+      LibIyiCopy.memcpy(self.as(Void*), source.as(Void*), count &* sizeof(T), false)
+    {% else %}
+      LibIyiCopy.memcpy(self.as(Void*), source.as(Void*), count.to_u64 &* sizeof(T).to_u64, false)
+    {% end %}
   end
+end
+
+# The intrinsic `copy_from` lowers to, bound by its LLVM name as
+# `LibWasmMem` binds `memory.grow`.
+lib LibIyiCopy
+  {% if flag?(:wasm32) %}
+    fun memcpy = "llvm.memcpy.p0.p0.i32"(destination : Void*, source : Void*, count : Int32, volatile : Bool) : Nil
+  {% else %}
+    fun memcpy = "llvm.memcpy.p0.p0.i64"(destination : Void*, source : Void*, count : UInt64, volatile : Bool) : Nil
+  {% end %}
 end
 
 # ── Panics — SPEC.md III.1.4, built ───────────────────────────────────

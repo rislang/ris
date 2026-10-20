@@ -698,6 +698,65 @@ pub class IyiSocket
     write_pair(first.to_unsafe, first.bytesize, second.to_unsafe, second.bytesize)
   end
 
+  # *pieces* in order, as one write where the platform takes several
+  # buffers in a call: a head and a page's runs go out without being
+  # joined into one buffer first, up to `SENDV_PIECES` a call.
+  def write(pieces : Tape::Array(Tape::String)) : Int32 | Cancelled | SocketError
+    raise "socket is closed" if @fd < 0
+    iov = uninitialized UInt64[128]
+    words = pointerof(iov).as(UInt64*)
+    total = 0
+    pieces.each { |piece| total = total + piece.bytesize }
+    written = 0
+    index = 0
+    offset = 0
+    while written < total
+      while index < pieces.size && offset >= pieces[index].bytesize
+        index = index + 1
+        offset = 0
+      end
+      count = 0
+      at = index
+      from = offset
+      while at < pieces.size && count < SENDV_PIECES
+        piece = pieces[at]
+        if piece.bytesize > from
+          words[count * 2] = (piece.to_unsafe + from).address
+          words[count * 2 + 1] = (piece.bytesize - from).to_u64
+          count = count + 1
+        end
+        at = at + 1
+        from = 0
+      end
+      n = IyiSocket.__sys_sendv(@fd, words, count, IyiSocket.bound(@write_timeout_ms))
+      if n < 0_i64 && IyiSocket.__sys_would_block?(n)
+        waited = IyiSocket.await_writable(@fd, IyiSocket.bound(@write_timeout_ms))
+        return waited if waited.is_a?(Cancelled)
+        return Cancelled.new if @fd < 0
+        return SocketError.timed_out("write to socket") unless waited
+        next
+      end
+      return SocketError.new("write to socket", n < 0_i64 ? IyiSocket.__sys_code(n) : 0) if n <= 0_i64
+      written = written + n.to_i32
+      left = n.to_i32
+      while left > 0
+        rest = pieces[index].bytesize - offset
+        if left >= rest
+          left = left - rest
+          index = index + 1
+          offset = 0
+        else
+          offset = offset + left
+          left = 0
+        end
+      end
+    end
+    written
+  end
+
+  # Buffers in one `sendv`: well under every platform's IOV_MAX.
+  SENDV_PIECES = 64
+
   private def write_pair(first : Pointer(UInt8), first_count : Int32, second : Pointer(UInt8), second_count : Int32) : Int32 | Cancelled | SocketError
     total = first_count + second_count
     written = 0
@@ -1308,6 +1367,11 @@ pub class IyiSocket
       LibC.writev(fd, pointerof(iov).as(Void*), 2)
     end
 
+    # *count* buffers, as `(address, length)` words at *iov*, in one `writev`.
+    def self.__sys_sendv(fd : Int32, iov : Pointer(UInt64), count : Int32, ms : Int32) : Int64
+      LibC.writev(fd, iov.as(Void*), count)
+    end
+
     # Every connect here parks; see the Windows arm for the one that does not.
     def self.__sys_connects_blocking?(family : Int32) : ::Bool
       false
@@ -1546,6 +1610,17 @@ pub class IyiSocket
       7.times { |i| header[i] = 0_u64 }
       header[2] = pointerof(iov).address
       header[3] = 2_u64
+      __sys3(SYS_SENDMSG, fd.to_i64, pointerof(msg).address.to_i64, 0x4000_i64)
+    end
+
+    # *count* buffers, as `(address, length)` words at *iov*, in one
+    # `sendmsg` with MSG_NOSIGNAL, as `__sys_send2`.
+    def self.__sys_sendv(fd : Int32, iov : Pointer(UInt64), count : Int32, ms : Int32) : Int64
+      msg = uninitialized UInt64[7]
+      header = pointerof(msg).as(UInt64*)
+      7.times { |i| header[i] = 0_u64 }
+      header[2] = iov.address
+      header[3] = count.to_u64
       __sys3(SYS_SENDMSG, fd.to_i64, pointerof(msg).address.to_i64, 0x4000_i64)
     end
 
@@ -2005,6 +2080,11 @@ pub class IyiSocket
       __sys_send(fd, a, alen, ms)
     end
 
+    # The first buffer only, as `__sys_send2`: the caller's loop goes on.
+    def self.__sys_sendv(fd : Int32, iov : Pointer(UInt64), count : Int32, ms : Int32) : Int64
+      __sys_send(fd, Pointer(UInt8).new(iov[0]), iov[1], ms)
+    end
+
     def self.__sys_send(fd : Int32, buf : Pointer(UInt8), len : UInt64, ms : Int32) : Int64
       s = __sys_handle(fd)
       # A bounded piece at a time. Winsock takes a whole buffer of any size
@@ -2418,6 +2498,10 @@ pub class IyiSocket
     end
 
     def self.__sys_send2(fd : Int32, a : Pointer(UInt8), alen : UInt64, b : Pointer(UInt8), blen : UInt64, ms : Int32) : Int64
+      -1_i64
+    end
+
+    def self.__sys_sendv(fd : Int32, iov : Pointer(UInt64), count : Int32, ms : Int32) : Int64
       -1_i64
     end
 

@@ -1,0 +1,52 @@
+# `IyiSocket#write(pieces)`: pieces on the tape in order, as one write where
+# the platform takes several buffers, read back whole on loopback. More
+# pieces than one call takes, empty ones among them, and a 1 MiB piece past
+# the send buffer, so the write parks and goes on mid-piece.
+module socket_pieces
+
+import std/socket::{IyiSocket}
+
+def read_all(socket : IyiSocket, count : Int32) : String
+  text = ""
+  while text.bytesize < count
+    chunk = socket.read(65536).or_panic
+    break if chunk.empty?
+    text = text + chunk
+  end
+  text
+end
+
+big = "b" * 1048576
+expected = String.build do |io|
+  io << "head:"
+  100.times { |i| io << i << (i.even? ? "" : ",") }
+  io << big << "end"
+end
+server = IyiSocket.listen(0)
+client = IyiSocket.connect("127.0.0.1", server.local_port).or_panic
+conn = server.accept.or_panic
+got = ""
+group do |g|
+  reader = g.spawn { read_all(client, expected.bytesize) }
+  tape do
+    pieces = Tape::Array(Tape::String).new(4)
+    pieces << "head:".as_tape
+    100.times do |i|
+      pieces << Tape::String.build(4) { |w| w.append_int(i) }
+      pieces << (i.even? ? "".as_tape : ",".as_tape)
+    end
+    pieces << Tape::String.build(big.bytesize) { |w| w.append(big) }
+    pieces << "end".as_tape
+    written = conn.write(pieces).or_panic
+    raise "wrote #{written}" unless written == expected.bytesize
+  end
+  got = reader.value.or_panic
+end
+client.close
+conn.close
+server.close
+if got == expected
+  puts "PASS: 203 pieces in order, empty ones and 1 MiB among them"
+else
+  puts "FAILED: #{got.bytesize} bytes of #{expected.bytesize}"
+end

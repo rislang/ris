@@ -136,6 +136,8 @@ if [ "$out" = '0 -42 9223372036854775807 -9223372036854775808 a&amp;b&lt;c&gt;&q
 # Two pieces, String or on the tape, go out in one socket write.
 out=$("$RIS" run test/ris/socket_pair.ri 2>&1)
 if [ "$out" = 'PASS: two pieces in one write, String and on the tape, 1 MiB' ]; then echo "runs     socket_pair"; else echo "FAILED   socket_pair: $out"; status=1; fi
+out=$("$RIS" run test/ris/socket_pieces.ri 2>&1)
+if [ "$out" = 'PASS: 203 pieces in order, empty ones and 1 MiB among them' ]; then echo "runs     socket_pieces"; else echo "FAILED   socket_pieces: $out"; status=1; fi
 out=$("$RIS" run test/ris/answer.ri 2>&1)
 if [ "$out" = 'PASS: read and answered on the tape, fast path and not' ]; then echo "runs     answer"; else echo "FAILED   answer: $out"; status=1; fi
 out=$("$RIS" run test/ris/query.ri 2>&1)

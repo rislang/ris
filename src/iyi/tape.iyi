@@ -1364,7 +1364,15 @@ end
 
 @[AlwaysInline]
 def __iyi_scope_reset(mark : IyiScopeMark) : Nil
-  __iyi_scope_release(mark) if mark.region != 0
+  region = mark.region
+  return if region == 0
+  # Nothing put on the tape since the mark - most rounds of a loop, and a
+  # def that made nothing there - leaves nothing to release: answered
+  # here, inline, rather than by a call that finds as much.
+  return if IyiRegion.tape == region &&
+            IyiHeap.read64(region &+ IyiRegion::OFF_CURSOR) == mark.cursor &&
+            IyiHeap.read64(region &+ IyiRegion::OFF_SIDE) == mark.side
+  __iyi_scope_release(mark)
 end
 
 def __iyi_scope_release(mark : IyiScopeMark) : Nil
