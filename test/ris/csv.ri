@@ -1,0 +1,22 @@
+module test/csv_tape
+
+import std/csv::{CSV}
+
+kept = [] of Array(String)
+tape do
+  rows = CSV.parse("id,name\r\n1,\"café,\"\"yes\"\"\"\n\"\"\n\n".as_tape)
+  exit 1 unless rows.size == 4
+  exit 2 unless rows[1][1] == "café,\"yes\""
+  exit 3 unless rows[2].size == 1 && rows[2][0].empty?
+  exit 4 unless rows[3].empty?
+  w = Tape::String::Writer.new(1)
+  w << "prefix:"
+  CSV.build(rows, w)
+  exit 5 unless w.finish.starts_with?("prefix:id,name\n")
+  exit 6 unless CSV.parse(CSV.build(rows)).to_heap == rows.to_heap
+  exit 7 unless CSV.parse("\uFEFFa,b".as_tape)[0][0] == "a"
+  kept = rows.to_heap
+end
+exit 8 unless CSV.parse(CSV.build(kept)) == kept
+exit 9 unless CSV.parse("").empty?
+puts "PASS: csv tape and heap APIs"

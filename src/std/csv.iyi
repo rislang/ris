@@ -48,12 +48,39 @@ module std/csv
 
 pub struct CSV
   def self.parse(text : String) : Array(Array(String))
-    rows = [] of Array(String)
-    row = [] of String
+    result = [] of Array(String)
+    tape do
+      result = parse(text.as_tape).to_heap
+    end
+    result
+  end
+
+  def self.build(rows : Array(Array(String))) : String
+    result = ""
+    tape do
+      views = Tape::Array(Tape::Array(Tape::String)).new
+      rows.each do |row|
+        fields = Tape::Array(Tape::String).new
+        row.each { |field| fields << field.as_tape }
+        views << fields
+      end
+      result = build(views).to_heap
+    end
+    result
+  end
+
+  def self.build(rows : Tape::Array(Tape::Array(Tape::String)),
+                 writer : Tape::String::Writer) : Nil
+    writer << build(rows)
+  end
+
+  def self.parse(text : Tape::String) : Tape::Array(Tape::Array(Tape::String))
+    rows = Tape::Array(Tape::Array(Tape::String)).new
+    row = Tape::Array(Tape::String).new
     n = text.bytesize
     src = text.to_unsafe
     i = 0
-    field = Pointer(UInt8).malloc((n + 1).to_u64)
+    field = Pointer(UInt8).new(IyiRegion.tape_bytes((n + 1).to_u64))
     flen = 0
     quoted = false
     # The field opened with a quote: `""` is a field even with no bytes in
@@ -68,6 +95,7 @@ pub struct CSV
     if n >= 2 && ((src[0] == 0xFF_u8 && src[1] == 0xFE_u8) || (src[0] == 0xFE_u8 && src[1] == 0xFF_u8))
       raise "CSV: the document is UTF-16, by its byte order mark, and is read as UTF-8"
     end
+    start = i
     while i < n
       b = src[i]
       if quoted
@@ -100,21 +128,25 @@ pub struct CSV
           # field `a"b`, a guess at what an unpaired quote meant.
           refuse(text, i, "unexpected quote")
         elsif b == 44_u8 # comma
-          row << take(field, flen)
+          row << field_value(text, start, field, flen, opened)
           flen = 0
           opened = false
           i = i + 1
+          start = i
         elsif b == 10_u8 || b == 13_u8
           # A lone CR ends the line as the other library's does: it was
           # dropped, joining the text either side of it into one field.
           # A blank line is a row of no fields there, not of one empty one.
-          row << take(field, flen) if row.size > 0 || flen > 0 || opened
+          if row.size > 0 || flen > 0 || opened
+            row << field_value(text, start, field, flen, opened)
+          end
           flen = 0
           opened = false
           rows << row
-          row = [] of String
+          row = Tape::Array(Tape::String).new
           i = i + 1
           i = i + 1 if b == 13_u8 && i < n && src[i] == 10_u8
+          start = i
         else
           field[flen] = b
           flen = flen + 1
@@ -124,7 +156,7 @@ pub struct CSV
     end
     raise "unterminated quoted field" if quoted
     if flen > 0 || row.size > 0 || opened
-      row << take(field, flen)
+      row << field_value(text, start, field, flen, opened)
       rows << row
     end
     rows
@@ -132,8 +164,8 @@ pub struct CSV
 
   # Into one builder: adding each field to the text so far copied that
   # text once per field, and 20,000 rows of five took 12.8 seconds.
-  def self.build(rows : Array(Array(String))) : String
-    String.build do |io|
+  def self.build(rows : Tape::Array(Tape::Array(Tape::String))) : Tape::String
+    Tape::String.build do |io|
       r = 0
       while r < rows.size
         io << '\n' if r > 0
@@ -146,7 +178,7 @@ pub struct CSV
         # mark, so a first field opening with one came back without it:
         # `[["\uFEFFid"]]` read back as `[["id"]]`. Quoted, the text opens
         # with `"` and the mark is the field's.
-        if r == 0 && fields.size > 0 && fields[0].starts_with?('\uFEFF')
+        if r == 0 && fields.size > 0 && fields[0].starts_with?("\uFEFF")
           io << quote(fields[0])
           c = 1
         end
@@ -165,14 +197,23 @@ pub struct CSV
     end
   end
 
-  private def self.take(field : Pointer(UInt8), flen : Int32) : String
-    String.new(flen) { |dst| dst.copy_from(field, flen) }
+  private def self.field_value(text : Tape::String, start : Int32,
+                               field : Pointer(UInt8), size : Int32,
+                               quoted : Bool) : Tape::String
+    quoted ? take(field, size) : text[start, size]
+  end
+
+  private def self.take(field : Pointer(UInt8), flen : Int32) : Tape::String
+    Tape::String.build(flen) do |w|
+      w << Tape::String.new(field, flen)
+    end
   end
 
   # The line and column of the byte at *at*, both counted from 1 and the
   # column in characters, as the other library counts them: worked out
   # here, on the way out, so a document that parses pays nothing for them.
-  private def self.refuse(text : String, at : Int32, what : String) : NoReturn
+  private def self.refuse(text : Tape::String, at : Int32,
+                          what : String) : NoReturn
     src = text.to_unsafe
     line = 1
     column = 1
@@ -191,14 +232,14 @@ pub struct CSV
   end
 
   # The character that starts at byte *at*, for a refusal to name.
-  private def self.char_at(text : String, at : Int32) : String
+  private def self.char_at(text : Tape::String, at : Int32) : String
     b = text.to_unsafe[at]
     len = b < 0x80_u8 ? 1 : (b < 0xE0_u8 ? 2 : (b < 0xF0_u8 ? 3 : 4))
     len = text.bytesize - at if len > text.bytesize - at
-    take(text.to_unsafe + at, len)
+    take(text.to_unsafe + at, len).to_heap
   end
 
-  private def self.escape(field : String) : String
+  private def self.escape(field : Tape::String) : Tape::String
     need = false
     p = field.to_unsafe
     n = field.bytesize
@@ -217,7 +258,7 @@ pub struct CSV
 
   # Always quoted: a field that holds a separator, or a first field that
   # opens with U+FEFF.
-  private def self.quote(field : String) : String
+  private def self.quote(field : Tape::String) : Tape::String
     p = field.to_unsafe
     n = field.bytesize
     extra = 2
@@ -226,7 +267,8 @@ pub struct CSV
       extra = extra + 1 if p[i] == 34_u8
       i = i + 1
     end
-    String.new(n + extra) do |dst|
+    dst = Pointer(UInt8).new(IyiRegion.tape_bytes((n + extra).to_u64))
+    begin
       dst[0] = 34_u8
       o = 1
       i = 0
@@ -241,6 +283,7 @@ pub struct CSV
       end
       dst[o] = 34_u8
     end
+    Tape::String.new(dst, n + extra)
   end
 end
 
