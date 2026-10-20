@@ -106,9 +106,9 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
 
   private def ownership_hint(type : Type) : String
     if type.remove_typedef.to_s == "Tape::String"
-      "\n\nCopy the text with `.to_s` inside the owning #{tape_scope_name} to obtain a String that can outlive it."
+      "\n\nCopy the text with `.to_heap` inside the owning #{tape_scope_name} to obtain a String that can outlive it."
     else
-      "\n\nBuild an owned value before leaving the scope; copy contained Tape::String values with `.to_s`. Copying a tape-bearing struct alone does not copy its storage."
+      "\n\nBuild an owned value before leaving the scope: `to_heap` copies a Tape::String or Tape::Array, or an @[OnTape] struct that defines one. Copying a tape-bearing struct alone does not copy its storage."
     end
   end
 

@@ -36,8 +36,8 @@ expect return_escape "cannot return a tape value out of its tape block"
 expect break_escape "cannot break a tape value out of its tape block"
 expect yield_break_escape "cannot break a tape value out of its tape block"
 
-expect return_escape 'Copy the text with `.to_s`'
-expect outer_var 'copy contained Tape::String values with `.to_s`'
+expect return_escape 'Copy the text with `.to_heap`'
+expect outer_var '`to_heap` copies a Tape::String or Tape::Array'
 expect owned_cache "to be String, not Tape::String"
 
 expect local_outer "is a variable of the code around this local_tape block"
