@@ -14,7 +14,7 @@ module Chat
     getter id : Int32
     getter name : String
 
-    def initialize(@id, @name)
+    def initialize(*, @id : Int32, @name : String)
     end
   end
 
@@ -22,7 +22,7 @@ module Chat
     getter user : User
     getter body : String
 
-    def initialize(@user, @body)
+    def initialize(*, @user : User, @body : String)
     end
   end
 
@@ -42,7 +42,7 @@ module Chat
     getter user_id : Int32
     getter body : Tape::String
 
-    def initialize(@user_id, @body)
+    def initialize(*, @user_id : Int32, @body : Tape::String)
     end
   end
 
@@ -73,13 +73,14 @@ module Chat
       index += 1
     end
     return nil if index == 0 || index >= request.bytesize
-    MessageParams.new(user_id, request[index + 1, request.bytesize - index - 1])
+    body = request[index + 1, request.bytesize - index - 1]
+    MessageParams.new(user_id: user_id, body: body)
   end
 
   # As `@room.messages.create!`: the one copy to the heap, as a posted
   # message outlives its request.
   def self.create(room : Room, user : User, params : MessageParams) : Nil
-    room.messages << Message.new(user, params.body.to_heap)
+    room.messages << Message.new(user: user, body: params.body.to_heap)
   end
 
   # The view: the newest message first, then the users by name, all
@@ -106,9 +107,9 @@ module Chat
 end
 
 room = Chat::Room.new
-room.users << Chat::User.new(31, "carol")
-room.users << Chat::User.new(7, "alice")
-room.users << Chat::User.new(12, "bob")
+room.users << Chat::User.new(id: 31, name: "carol")
+room.users << Chat::User.new(id: 7, name: "alice")
+room.users << Chat::User.new(id: 12, name: "bob")
 Chat.create_message(room, "7 Morning!")
 Chat.create_message(room, "12 Deploy is green")
 Chat.create_message(room, "7 Ship it")
