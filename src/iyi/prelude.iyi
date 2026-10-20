@@ -3613,6 +3613,9 @@ require "./file"
       # links live in the mapping's own header, so the list has no bound.
       OFF_NEXT   = 32_u64
       OFF_PREV   = 40_u64
+      # The regions of this one's growing values (`tape_resize`), linked
+      # through their OFF_PARENT words and released with it.
+      OFF_SIDE   = 48_u64
       DATA       = 64_u64
       UNDER      = 16_u64
       CAPACITY   = 67108864_u64
@@ -3712,19 +3715,34 @@ require "./file"
       # else the used bytes move to a new block there. *start* may be inside
       # a block (a writer's or array's first room follows its state), so no
       # block header is read.
-      def self.tape_resize(start : UInt64, stop : UInt64, used : UInt64, bytes : UInt64) : UInt64
+      # Goose's tape per growing value: a value that is not at its tape's
+      # end moves, once, to a region of its own (*side*, the word of its
+      # state naming it), and grows there in place however much else goes
+      # on the tape meanwhile; a full one is followed by one four times its
+      # size. The regions are released with the tape that was running.
+      def self.tape_resize(start : UInt64, stop : UInt64, used : UInt64, bytes : UInt64, side : Pointer(UInt64)) : UInt64
         region = @@tape
         no_tape if region == 0
-        cursor = IyiHeap.read64(region &+ OFF_CURSOR)
+        own = side.value
+        home = own != 0 ? own : region
         fresh = (start &+ bytes &+ 7_u64) & 0xFFFFFFFFFFFFFFF8_u64
-        if ((stop &+ 7_u64) & 0xFFFFFFFFFFFFFFF8_u64) == cursor && fresh <= IyiHeap.read64(region &+ OFF_LIMIT)
-          IyiHeap.write64(region &+ OFF_CURSOR, fresh)
+        if ((stop &+ 7_u64) & 0xFFFFFFFFFFFFFFF8_u64) == IyiHeap.read64(home &+ OFF_CURSOR) && fresh <= IyiHeap.read64(home &+ OFF_LIMIT)
+          IyiHeap.write64(home &+ OFF_CURSOR, fresh)
           return start
         end
-        moved = take(region, bytes, false, 0_u64)
+        capacity = bytes &* 4_u64
+        capacity = SIDE_FIRST if capacity < SIDE_FIRST
+        own = acquire(capacity)
+        IyiHeap.write64(own &+ OFF_PARENT, IyiHeap.read64(region &+ OFF_SIDE))
+        IyiHeap.write64(region &+ OFF_SIDE, own)
+        side.value = own
+        moved = own &+ DATA
+        IyiHeap.write64(own &+ OFF_CURSOR, (moved &+ bytes &+ 7_u64) & 0xFFFFFFFFFFFFFFF8_u64)
         Pointer(UInt8).new(moved).copy_from(Pointer(UInt8).new(start), used.to_i32)
         moved
       end
+
+      SIDE_FIRST = 1048576_u64
 
       def self.acquire(capacity : UInt64) : UInt64
         spare = @@spare
@@ -3733,6 +3751,7 @@ require "./file"
           @@spares = @@spares &- 1_u64
           IyiHeap.write64(spare &+ OFF_CURSOR, spare &+ DATA)
           IyiHeap.write64(spare &+ OFF_PARENT, 0_u64)
+          IyiHeap.write64(spare &+ OFF_SIDE, 0_u64)
           return spare
         end
         length = mapping_length(capacity)
@@ -3752,6 +3771,14 @@ require "./file"
       # pages past KEEP_WARM handed back; a grown one, or one past SPARES,
       # is unmapped.
       def self.release(region : UInt64) : Nil
+        side = IyiHeap.read64(region &+ OFF_SIDE)
+        IyiHeap.write64(region &+ OFF_SIDE, 0_u64)
+        while side != 0
+          following = IyiHeap.read64(side &+ OFF_PARENT)
+          IyiHeap.write64(side &+ OFF_PARENT, 0_u64)
+          release(side)
+          side = following
+        end
         used = IyiHeap.read64(region &+ OFF_CURSOR) &- region
         IyiHeap.write64(region &+ OFF_CURSOR, region &+ DATA)
         length = IyiHeap.read64(region &+ OFF_MAP)

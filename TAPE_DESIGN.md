@@ -12,9 +12,9 @@ yardstick; features follow measured needs. [SPEC.md](SPEC.md) is iyi's.
 * Tape types: `Tape::String`, `Tape::String::Writer`, `Tape::Array(T)`,
   `Tape::Tree(T)` and `@[OnTape]` structs. The annotation constrains where
   a value may live; ordinary allocations still follow iyi's rules.
-* Nested `tape` blocks share the active tape. Only its owning block
-  releases it, on normal and early exits, including panic. Mappings are
-  reused or unmapped; there is no per-object freeing.
+* Nested `tape` blocks share the active tape. Its owning block releases
+  it, on normal and early exits, including panic; a loop round or block
+  in ris's own code that keeps nothing frees its part each time.
 * `local_tape do … end` always owns a separate tape, releases it at its
   end and restores the previous tape. Use it when temporaries must be
   freed before the outer block ends, rather than for every small call.
@@ -46,12 +46,10 @@ No tape value survives the block that owns its storage:
   copy checks exempt library code in `std/` and `src/iyi/`. These checks
   do not make arbitrary raw pointers safe.
 
-## Layout: write the tape in order
-A container grows in place only at the tape's end. A loop that grows an
-existing container and also allocates other tape data is refused, even
-through helper calls. Two growing writers are one example. Blocks are
-conservatively treated as loops. Use one streaming writer/tree, or a
-fixed-size array: `Tape::Array(T).new(count) { |i| ... }`.
+## Layout: a tape per growing value
+A container grows in place at the tape's end; one that is not moves once
+to a region of its own and grows there, so writers, arrays and other
+values may grow side by side. The region goes with the tape.
 A `Tape::Tree` stores a tree in document order (simdjson's layout):
 4.6 MB JSON, 20 parses, 725 ms; std/json's `Any` 1081.
 
@@ -70,11 +68,11 @@ Recorded, not new: C++ 0.97 s, Rust 1.18 s, Go 1.67 s on respond
   the tape, also through a variable used only so. `each`, `map`, `sum`
   and `a[i]` in `while i < a.size` (`i` only `+= 1`) skip bounds checks.
 * Flat data: `Tape::Link(T, UInt16)`, a typed index checked when followed,
-  `Tape::Span`, `@[Tape::Flat]` structs: `Array#bytes`, `Array.load`. Not
-  yet: every scope freeing, results built in place, a tape per value.
+  `Tape::Span`, `@[Tape::Flat]` structs: `Array#bytes`, `Array.load`.
+* `w.append(f(x))`, `f`'s value a `Tape::String.build`, writes in `w`.
 
 ## Implementation and checks
 `src/iyi/tape.iyi`: types and scopes; `src/iyi/prelude.iyi`: `IyiRegion`.
-`src/compiler/iyi/semantic/tape*checker.cr`: storage, lifetimes, layout,
-raw pointers and heap copies. `bash test/ris/check.sh` checks refusals,
-cleanup, scopes, growth, fibers, copies, interpolation and flat data.
+`src/compiler/iyi/semantic/tape_*.cr`: storage, lifetimes, scope freeing,
+raw pointers, heap copies and lowering. `bash test/ris/check.sh` checks
+refusals, cleanup, scopes, growth, fibers, copies, lowering, flat data.

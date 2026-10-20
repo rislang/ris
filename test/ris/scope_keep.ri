@@ -1,0 +1,17 @@
+# Rounds that grow a value from outside the loop, even through a new name
+# or a block's parameter, keep their tape: nothing they wrote is lost.
+tape do
+  writers = Tape::Array(Tape::String::Writer).new(1) { |_| Tape::String::Writer.new(2) }
+  i = 0
+  while i < 50_000
+    w = writers[0]
+    w.push(120_u8)
+    i += 1
+  end
+  outer = Tape::String::Writer.new(2)
+  50_000.times { |n| outer.append_int(n % 10) }
+  text = Tape::String.new("abc")
+  each_text = 0
+  3.times { each_text += text.bytesize }
+  puts "#{writers[0].length} #{outer.length} #{each_text}"
+end

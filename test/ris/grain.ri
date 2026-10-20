@@ -9,15 +9,12 @@ end
 tape do
   first = IyiRegion.tape
   ok = whole(first)
-  big = Tape::String.build(1024) do |w|
-    n = 0
-    while n < 70 * 1024 * 1024 + 3
-      w.push(97_u8)
-      n += 1
-    end
-  end
+  # Many values, not one growing one: a growing value takes a region of
+  # its own (TAPE_DESIGN.md), and these fill the tape past its mapping.
+  chunk = "a" * (1024 * 1024)
+  pieces = Tape::Array(Tape::String).new(71) { |_| Tape::String.new(chunk) }
   grown = IyiRegion.tape
-  ok &&= grown != first && whole(grown) && big.bytesize == 70 * 1024 * 1024 + 3
+  ok &&= grown != first && whole(grown) && pieces.size == 71
   local_tape { ok &&= IyiRegion.tape != grown && whole(IyiRegion.tape) }
   puts ok ? "PASS: tape mappings are whole 64 KiB grains" : "FAILED"
 end

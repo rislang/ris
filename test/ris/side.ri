@@ -1,0 +1,24 @@
+# Goose's tape per growing value: two writers and an array grow in one
+# loop with other values made between, each in place on a region of its
+# own, past the first one's size, and freed with the tape.
+3.times do |round|
+  tape do
+    a = Tape::String::Writer.new(4)
+    b = Tape::String::Writer.new(4)
+    names = Tape::Array(Tape::String).new
+    count = 300_000
+    i = 0
+    while i < count
+      a.push((65 + i % 26).to_u8)
+      b.push((97 + i % 26).to_u8)
+      a.push(10_u8) if i % 100_000 == 99_999
+      names.push(Tape::String.build { |w| w.append_int(i) }) if i % 1000 == 0
+      i += 1
+    end
+    x = a.finish
+    y = b.finish
+    ok = x.bytesize == count + 3 && y.bytesize == count && y[25] == 122_u8 &&
+         x[100_000] == 10_u8 && names.size == 300 && names[299] == "299000"
+    puts "round #{round}: #{ok ? "intact" : "WRONG"}"
+  end
+end

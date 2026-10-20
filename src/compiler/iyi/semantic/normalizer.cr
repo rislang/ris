@@ -435,6 +435,9 @@ module Iyi
     end
 
     def transform(node : Call)
+      if lowered = TapeInPlace.lower(program, node)
+        return lowered.transform(self)
+      end
       if TapeTextLowering.tape_block?(node)
         node.block.try(&.body.accept(TapeTextLowering.new))
       end
@@ -514,6 +517,7 @@ module Iyi
     end
 
     def transform(node : Def)
+      twin = TapeInPlace.twin(program, node)
       tape_def = TapeTextLowering.tape_def?(node)
       params = node.args.map(&.name)
       node.block_arg.try { |arg| params << arg.name }
@@ -536,6 +540,7 @@ module Iyi
         end
       end
 
+      return Expressions.new([node, twin.transform(self)] of ASTNode) if twin
       node
     end
 
@@ -692,7 +697,9 @@ module Iyi
     #    end
     def transform(node : While)
       TapeLoopBounds.lower(node)
-      super
+      node = super
+      TapeScopeChecker.mark(program, node) if node.is_a?(While)
+      node
     end
 
     def transform(node : Until)
@@ -941,6 +948,7 @@ module Iyi
     #    end
     def transform(node : Block)
       node = super
+      TapeScopeChecker.mark(program, node) if node.is_a?(Block)
 
       unpacks = node.unpacks
       return node unless unpacks

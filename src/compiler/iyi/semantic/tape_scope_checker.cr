@@ -1,0 +1,272 @@
+# ris: Goose frees every scope's data when the scope ends. Here a `while`
+# body or a block body, in ris's own code (not `std/` or the prelude),
+# frees what it put on the tape at its end, each round, when nothing it
+# made can outlive it. The normalizer writes the body as
+#
+#   __mark = __iyi_scope_mark(false)
+#   __value = (body)
+#   __iyi_scope_reset(__mark)
+#   __value
+#
+# and this checker, once types are known, turns the `false` to `true`
+# where it proves the body keeps nothing: the block's value is no tape
+# value, nothing in the body yields, a variable of the code around it is
+# not assigned a tape value, and a tape value from outside the body - a
+# variable around it, a block parameter - is only a `Tape::String` or
+# read (`[]`, `size`, `each`, ...), never grown, written or passed on.
+# A tape variable of the body's own is assigned first at the body's top
+# level and used nowhere else. Any doubt leaves the mark off: the tape
+# then frees the body's values with the scope, as before.
+class Iyi::TapeScopeChecker
+  MARK  = "__iyi_scope_mark"
+  RESET = "__iyi_scope_reset"
+  READS = {"[]", "[]?", "size", "bytesize", "length", "empty?", "each",
+           "each_byte", "each_with_index", "each_child", "stop", "==",
+           "!=", "starts_with?", "finish", "none?", "index", "start",
+           "map", "sum", "__loop_fetch", "bytes"}
+
+  def self.mark(program : Program, node : While | Block) : Nil
+    return if TapePointerCheckerLibrary.library?(node.location)
+    body = node.body
+    return if body.is_a?(Nop)
+    on = BoolLiteral.new(false).at(body)
+    mark = program.new_temp_var.at(body)
+    value = program.new_temp_var.at(body)
+    node.body = Expressions.new([
+      Assign.new(mark, Call.new(nil, MARK, on, global: true).at(body)).at(body),
+      Assign.new(value, body).at(body),
+      Call.new(nil, RESET, mark.clone, global: true).at(body),
+      value.clone,
+    ] of ASTNode).at(body)
+  end
+
+  # The pieces of a marked body: the flag and the body as written.
+  def self.parts(node : ASTNode) : {BoolLiteral, ASTNode}?
+    return nil unless node.is_a?(Expressions) && node.expressions.size == 4
+    first, second = node.expressions[0], node.expressions[1]
+    return nil unless first.is_a?(Assign) && second.is_a?(Assign)
+    call = first.value
+    return nil unless call.is_a?(Call) && call.name == MARK
+    flag = call.args.first?
+    return nil unless flag.is_a?(BoolLiteral)
+    {flag, second.value}
+  end
+
+  def initialize(@program : Program)
+  end
+
+  @seen = Set(UInt64).new
+
+  def run(node : ASTNode) : Nil
+    check_scope(node, false)
+  end
+
+  def reach(a_def : Def) : Nil
+    return unless @seen.add?(a_def.object_id)
+    owner_tape = a_def.owner.try { |owner| TapeChecker.tape?(@program, owner) } || false
+    params = a_def.args.map(&.name)
+    a_def.block_arg.try { |arg| params << arg.name }
+    check_scope(a_def.body, owner_tape, params)
+  end
+
+  private def check_scope(scope : ASTNode, owner_tape : Bool, params = [] of String) : Nil
+    scope.accept(Finder.new(self, scope, owner_tape, params))
+  end
+
+  def tape?(type : Type?) : Bool
+    !type.nil? && !TapeChecker.tape_in(@program, type).nil?
+  end
+
+  def tape_string?(type : Type?) : Bool
+    !type.nil? && type.remove_typedef.to_s == "Tape::String"
+  end
+
+  # Whether *body*, inside *scope*, keeps nothing it puts on the tape.
+  def safe?(body : ASTNode, value_type : Type?, scope : ASTNode, owner_tape : Bool,
+            params : Array(String), block_args : Array(String)) : Bool
+    return false if owner_tape
+    return false if tape?(value_type)
+    outside = Hash(String, Int32).new(0)
+    scope.accept(Counter.new(outside))
+    inside = Hash(String, Int32).new(0)
+    body.accept(Counter.new(inside))
+    inner = Set(String).new
+    if body.is_a?(Expressions)
+      statements = body.expressions
+    else
+      statements = [body]
+    end
+    seen = Set(String).new
+    statements.each do |statement|
+      if statement.is_a?(Assign) && (target = statement.target).is_a?(Var)
+        name = target.name
+        if !seen.includes?(name) && outside[name] == inside[name] &&
+           !params.includes?(name) && !block_args.includes?(name) &&
+           !Counter.mentions?(statement.value, name)
+          inner << name
+        end
+      end
+      statement.accept(Counter.new(Hash(String, Int32).new(0)).tap { |c| c.names = seen })
+    end
+    scan = Scan.new(self, inner)
+    body.accept(scan)
+    scan.safe
+  end
+
+  # Counts the uses of each variable name.
+  class Counter < Visitor
+    property names : Set(String)? = nil
+
+    def initialize(@counts : Hash(String, Int32))
+    end
+
+    def self.mentions?(node : ASTNode, name : String) : Bool
+      counts = Hash(String, Int32).new(0)
+      node.accept(new(counts))
+      counts[name] > 0
+    end
+
+    def visit(node : Var)
+      @counts[node.name] += 1
+      @names.try(&.<<(node.name))
+      false
+    end
+
+    def visit(node : Def)
+      false
+    end
+
+    def visit(node : ASTNode)
+      true
+    end
+  end
+
+  class Scan < Visitor
+    getter safe = true
+
+    def initialize(@checker : TapeScopeChecker, @inner : Set(String))
+    end
+
+    def outer_tape?(node : ASTNode) : Bool
+      node.is_a?(Var) && !@inner.includes?(node.name) && @checker.tape?(node.type?) &&
+        !@checker.tape_string?(node.type?)
+    end
+
+    def visit(node : Yield)
+      @safe = false
+      false
+    end
+
+    def visit(node : Assign)
+      target = node.target
+      if target.is_a?(Var)
+        @safe = false if !@inner.includes?(target.name) && @checker.tape?(node.value.type?)
+      elsif @checker.tape?(node.value.type?)
+        @safe = false
+      end
+      node.value.accept(self)
+      false
+    end
+
+    def visit(node : OpAssign | MultiAssign | InstanceVar | ClassVar | Global)
+      @safe = false
+      false
+    end
+
+    # A read of a tape value from outside is kept only when what it gives
+    # is no tape value, or text: `outer[0]` may be a writer of the outer
+    # scope's, which the body would then grow.
+    def visit(node : Call)
+      obj = node.obj
+      outer = !obj.nil? && outer_tape?(obj)
+      if obj && outer
+        ok = READS.includes?(node.name) &&
+             (!@checker.tape?(node.type?) || @checker.tape_string?(node.type?))
+        @safe = false unless ok
+      else
+        obj.try &.accept(self)
+      end
+      node.args.each &.accept(self)
+      node.named_args.try &.each &.value.accept(self)
+      if block = node.block
+        # A call given only the body's own values yields only those, or
+        # what it makes (`Tape::String.build { |w| ... }`): its block's
+        # parameters are the body's own too.
+        # A block's parameters shadow the names around it, so they are its
+        # own only while it is read.
+        saved = @inner
+        unless outer
+          @inner = @inner.dup
+          block.args.each { |arg| @inner << arg.name }
+        end
+        block.accept(self)
+        @inner = saved
+      end
+      false
+    end
+
+    # A tape value from outside, anywhere but a read's receiver.
+    def visit(node : Var)
+      @safe = false if outer_tape?(node)
+      false
+    end
+
+    def visit(node : Def)
+      false
+    end
+
+    def visit(node : ASTNode)
+      true
+    end
+  end
+
+  class Finder < Visitor
+    def initialize(@checker : TapeScopeChecker, @scope : ASTNode, @owner_tape : Bool,
+                   @params : Array(String))
+    end
+
+    def visit(node : Call)
+      node.target_defs.try &.each { |a_def| @checker.reach(a_def) }
+      if expanded = node.expanded
+        expanded.accept self
+      end
+      true
+    end
+
+    def visit(node : While)
+      check(node.body, nil, [] of String)
+      true
+    end
+
+    def visit(node : Block)
+      check(node.body, node.body.type?, node.args.map(&.name))
+      true
+    end
+
+    private def check(body : ASTNode, value_type : Type?, block_args : Array(String)) : Nil
+      parts = TapeScopeChecker.parts(body)
+      return unless parts
+      flag, inner = parts
+      flag.value = @checker.safe?(inner, value_type, @scope, @owner_tape, @params, block_args)
+    end
+
+    def visit(node : Def)
+      false
+    end
+
+    def visit(node : ASTNode)
+      true
+    end
+  end
+end
+
+# Where ris's own code ends: the library keeps raw pointers this checker
+# cannot follow, so its loops are left as they are.
+module Iyi::TapePointerCheckerLibrary
+  def self.library?(location : Location?) : Bool
+    file = location.try(&.original_filename)
+    return true unless file
+    file.includes?("/std/") || file.includes?("/src/iyi/") ||
+      file.includes?("/src/compiler/")
+  end
+end

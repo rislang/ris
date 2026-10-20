@@ -1,0 +1,38 @@
+# Goose's every scope freeing: a loop round or block that keeps nothing
+# frees what it put on the tape; one that keeps something does not.
+def used : UInt64
+  IyiHeap.read64(IyiRegion.tape &+ IyiRegion::OFF_CURSOR)
+end
+
+tape do
+  before = used
+  i = 0
+  while i < 100_000
+    line = "round #{i}"
+    text = Tape::String.build { |w| w.append_int(i) }
+    puts line if text == "99999"
+    i += 1
+  end
+  puts "while frees: #{used == before}"
+
+  before = used
+  3.times do |n|
+    big = Tape::String::Writer.new(8)
+    200_000.times { big.push(65_u8) }
+    puts "block wrote #{big.length}" if n == 2
+  end
+  puts "block frees: #{used == before}"
+
+  kept = Tape::Array(Tape::String).new(4)
+  before = used
+  j = 0
+  while j < 3
+    kept.push(Tape::String.build { |w| w.append_int(j) })
+    j += 1
+  end
+  puts "kept stays: #{used != before} #{kept[2] == "2"}"
+
+  sink = Tape::String::Writer.new(4)
+  [1, 2, 3].each { |k| sink.append_int(k) }
+  puts sink.finish
+end

@@ -40,15 +40,12 @@ expect return_escape 'Copy the text with `.to_s`'
 expect outer_var 'copy contained Tape::String values with `.to_s`'
 expect owned_cache "to be String, not Tape::String"
 
-expect mixed_growth      "grows on the tape in this loop, and Tape::String.build"
-expect mixed_growth_call "grows on the tape in this loop, and \`tag\`"
 expect local_outer "is a variable of the code around this local_tape block"
 expect local_mutate "cannot use outer tape value"
 expect local_self 'cannot use outer tape value `self`'
 expect local_return "cannot return a tape value"
 expect local_break "cannot break a tape value"
 expect local_yield_break "cannot break a tape value"
-expect two_writers       "all grow on the tape in this loop"
 expect raw_pointer      "to_unsafe\` of a Tape::String outside the library"
 expect raw_view         "Tape::String.new(pointer, size)\` outside the library"
 expect writer_grow      "private method 'grow' called for Tape::String::Writer"
@@ -161,6 +158,14 @@ out=$("$RIS" run test/ris/link_check.ri 2>&1)
 if grep -qF $'7' <<<"$out" && grep -qF "index 200 out of range for 1 elements" <<<"$out"; then echo "runs     link_check"; else echo "FAILED   link_check: $out"; status=1; fi
 out=$("$RIS" run test/ris/loop_bounds.ri 2>&1)
 if grep -qF '1 11 21 300' <<<"$out" && grep -qF "index -1 out of range for 3 elements" <<<"$out"; then echo "runs     loop_bounds"; else echo "FAILED   loop_bounds: $out"; status=1; fi
+out=$("$RIS" run test/ris/side.ri 2>&1)
+if [ "$out" = $'round 0: intact\nround 1: intact\nround 2: intact' ]; then echo "runs     side"; else echo "FAILED   side: $out"; status=1; fi
+out=$("$RIS" run test/ris/scope_free.ri 2>&1)
+if [ "$out" = $'round 99999\nwhile frees: true\nblock wrote 200000\nblock frees: true\nkept stays: true true\n123' ]; then echo "runs     scope_free"; else echo "FAILED   scope_free: $out"; status=1; fi
+out=$("$RIS" run test/ris/scope_keep.ri 2>&1)
+if [ "$out" = "50000 50000 9" ]; then echo "runs     scope_keep"; else echo "FAILED   scope_keep: $out"; status=1; fi
+out=$("$RIS" run test/ris/in_place.ri 2>&1)
+if [ "$out" = $'<li>item n0</li><li>item n1</li><li>item n2</li>\n<li>item n9</li>\nin place: true 1' ]; then echo "runs     in_place"; else echo "FAILED   in_place: $out"; status=1; fi
 out=$("$RIS" run test/ris/link_wide.ri 2>&1)
 if grep -qF "link 255 does not fit 1 bytes" <<<"$out"; then echo "runs     link_wide"; else echo "FAILED   link_wide: $out"; status=1; fi
 

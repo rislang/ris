@@ -1,0 +1,31 @@
+# Goose's results built in place: `page.append(row(...))` writes the row
+# straight into `page`, where `row` would build it and `append` copy it.
+def row(name : Tape::String, count : Int32) : Tape::String
+  label = "n"
+  Tape::String.build do |w|
+    w.append("<li>")
+    w.append(name)
+    w.append(" ")
+    w.append(label)
+    w.append_int(count)
+    w.append("</li>")
+  end
+end
+
+def used : UInt64
+  IyiHeap.read64(IyiRegion.tape &+ IyiRegion::OFF_CURSOR)
+end
+
+tape do
+  page = Tape::String::Writer.new(4096)
+  name = Tape::String.new("item")
+  before = used
+  3.times { |i| page.append(row(name, i)) }
+  same = used == before
+  alone = row(name, 9)
+  plain = [] of String
+  plain << "heap"
+  puts page.finish
+  puts alone
+  puts "in place: #{same} #{plain.size}"
+end

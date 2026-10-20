@@ -16,7 +16,8 @@
 # around the scope.
 #
 # Writers, arrays and trees hold pointers to state blocks on the tape;
-# copies share that state. A Tape::String is an immutable byte view.
+# copies share that state. Its fourth word names the region a value moved
+# to when it grew away from the tape's end (`IyiRegion.tape_resize`). A Tape::String is an immutable byte view.
 # Copying a tape value does not copy its backing storage.
 
 # Internal ABI: the normalizer lowers only the runtime's own tape guard to
@@ -203,11 +204,12 @@ module Tape
     @state : Pointer(UInt64)
 
     def initialize(capacity : Int32)
-      @state = Pointer(UInt64).new(IyiRegion.tape_bytes(24_u64 &+ capacity.to_u64))
-      start = @state.address &+ 24_u64
+      @state = Pointer(UInt64).new(IyiRegion.tape_bytes(32_u64 &+ capacity.to_u64))
+      start = @state.address &+ 32_u64
       @state.value = start
       (@state + 1_i64).value = start &+ capacity.to_u64
       (@state + 2_i64).value = start
+      (@state + 3_i64).value = 0_u64
     end
 
     @[AlwaysInline]
@@ -371,7 +373,7 @@ module Tape
       while capacity < need
         capacity = capacity &* 2_u64
       end
-      start = IyiRegion.tape_resize(start, (@state + 1_i64).value, length, capacity)
+      start = IyiRegion.tape_resize(start, (@state + 1_i64).value, length, capacity, @state + 3_i64)
       @state.value = start &+ length
       (@state + 1_i64).value = start &+ capacity
       (@state + 2_i64).value = start
@@ -397,15 +399,16 @@ module Tape
     @state : Pointer(UInt64)
 
     def initialize(capacity : Int32 = 4)
-      @state = Pointer(UInt64).new(IyiRegion.tape_bytes(24_u64 &+ capacity.to_u64 &* sizeof(T).to_u64))
-      @state.value = @state.address &+ 24_u64
+      @state = Pointer(UInt64).new(IyiRegion.tape_bytes(32_u64 &+ capacity.to_u64 &* sizeof(T).to_u64))
+      @state.value = @state.address &+ 32_u64
       (@state + 1_i64).value = 0_u64
       (@state + 2_i64).value = capacity.to_u64
+      (@state + 3_i64).value = 0_u64
     end
 
     # *count* elements, the block giving each by index, in room of exactly
-    # that size: it never grows, so the block may put other values on the
-    # tape (TapeLayoutChecker allows it, where a loop of `push` is refused).
+    # that size: it never grows, so it never moves to a region of its own
+    # however much the block puts on the tape.
     def self.new(count : Int32, & : Int32 -> T) : self
       array = new(count)
       index = 0
@@ -435,7 +438,7 @@ module Tape
       room = (@state + 2_i64).value
       capacity = room == 0_u64 ? 1_u64 : room &* 2_u64
       width = sizeof(T).to_u64
-      @state.value = IyiRegion.tape_resize(start, start &+ room &* width, (@state + 1_i64).value &* width, capacity &* width)
+      @state.value = IyiRegion.tape_resize(start, start &+ room &* width, (@state + 1_i64).value &* width, capacity &* width, @state + 3_i64)
       (@state + 2_i64).value = capacity
     end
 
@@ -636,20 +639,20 @@ module Tape
   # A tree on the tape as one stream in document order, the layout simdjson
   # calls a tape: a container is written when it opens and told where its
   # subtree ends when it closes, so its children follow it and a reader
-  # steps over a child in one jump. Only this one value grows while a tree
-  # is built, always at the tape's end, so the tree is written once, whole:
-  # measured faster than a heap tree, where a `Array` per node is slower
-  # (TAPE_DESIGN.md, "Layout").
+  # steps over a child in one jump. The tree is one growing value, written
+  # once, whole: measured faster than a heap tree, where a `Array` per node
+  # is slower (TAPE_DESIGN.md, "Layout").
   @[OnTape]
   struct Tree(T)
     @state : Pointer(UInt64)
 
     def initialize(capacity : Int32 = 64)
       width = sizeof(Entry(T)).to_u64
-      @state = Pointer(UInt64).new(IyiRegion.tape_bytes(24_u64 &+ capacity.to_u64 &* width))
-      @state.value = @state.address &+ 24_u64
+      @state = Pointer(UInt64).new(IyiRegion.tape_bytes(32_u64 &+ capacity.to_u64 &* width))
+      @state.value = @state.address &+ 32_u64
       (@state + 1_i64).value = 0_u64
       (@state + 2_i64).value = capacity.to_u64
+      (@state + 3_i64).value = 0_u64
     end
 
     def size : Int32
@@ -717,7 +720,7 @@ module Tape
       room = (@state + 2_i64).value
       capacity = room == 0_u64 ? 1_u64 : room &* 2_u64
       width = sizeof(Entry(T)).to_u64
-      @state.value = IyiRegion.tape_resize(start, start &+ room &* width, (@state + 1_i64).value &* width, capacity &* width)
+      @state.value = IyiRegion.tape_resize(start, start &+ room &* width, (@state + 1_i64).value &* width, capacity &* width, @state + 3_i64)
       (@state + 2_i64).value = capacity
     end
   end
@@ -760,4 +763,69 @@ class Object
   def __loop_store(index, value)
     self[index] = value
   end
+end
+
+# Goose's every scope freeing: where the code is ris's own (not `std/` or
+# the prelude), the normalizer begins each `while` body and block body
+# with `__iyi_scope_mark(false)` and ends it with `__iyi_scope_reset`.
+# `TapeScopeChecker` turns the mark on where nothing the body puts on the
+# tape can outlive the body, and then each round of the loop frees what it
+# made, sides and grown mappings included. Left off, both do nothing.
+struct IyiScopeMark
+  getter region : UInt64
+  getter cursor : UInt64
+  getter side : UInt64
+
+  def initialize(@region : UInt64, @cursor : UInt64, @side : UInt64)
+  end
+end
+
+@[AlwaysInline]
+def __iyi_scope_mark(on : Bool) : IyiScopeMark
+  region = on ? IyiRegion.tape : 0_u64
+  return IyiScopeMark.new(0_u64, 0_u64, 0_u64) if region == 0
+  IyiScopeMark.new(region, IyiHeap.read64(region &+ IyiRegion::OFF_CURSOR),
+    IyiHeap.read64(region &+ IyiRegion::OFF_SIDE))
+end
+
+@[AlwaysInline]
+def __iyi_scope_reset(mark : IyiScopeMark) : Nil
+  __iyi_scope_release(mark) if mark.region != 0
+end
+
+def __iyi_scope_release(mark : IyiScopeMark) : Nil
+  region = mark.region
+  # The running tape must be the marked one or grown from it; another
+  # (a scope that ended oddly) is left alone.
+  running = IyiRegion.tape
+  while running != region
+    return if running == 0
+    running = IyiHeap.read64(running &+ IyiRegion::OFF_PARENT)
+  end
+  running = IyiRegion.tape
+  while running != region
+    parent = IyiHeap.read64(running &+ IyiRegion::OFF_PARENT)
+    IyiHeap.write64(running &+ IyiRegion::OFF_PARENT, 0_u64)
+    IyiRegion.release(running)
+    running = parent
+  end
+  IyiRegion.tape = region
+  side = IyiHeap.read64(region &+ IyiRegion::OFF_SIDE)
+  while side != mark.side && side != 0
+    following = IyiHeap.read64(side &+ IyiRegion::OFF_PARENT)
+    IyiHeap.write64(side &+ IyiRegion::OFF_PARENT, 0_u64)
+    IyiRegion.release(side)
+    side = following
+  end
+  IyiHeap.write64(region &+ IyiRegion::OFF_SIDE, side)
+  # Pages written past the warm first MiB go back to the kernel, as the
+  # tape's own release hands them back: the cursor that release reads is
+  # the mark's now.
+  written = IyiHeap.read64(region &+ IyiRegion::OFF_CURSOR)
+  low = mark.cursor &+ (IyiRegion::GRAIN &- 1_u64)
+  low = low & 0xFFFFFFFFFFFF0000_u64
+  keep = region &+ IyiRegion::KEEP_WARM
+  low = keep if low < keep
+  __iyi_release_pages(low, written &- low) if written > low &+ IyiRegion::KEEP_WARM
+  IyiHeap.write64(region &+ IyiRegion::OFF_CURSOR, mark.cursor)
 end
