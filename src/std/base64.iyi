@@ -22,32 +22,57 @@ PAIRS_URL = Base64.pairs_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxy
 
 pub struct Base64
   def self.encode(data : String) : String
+    result = ""
+    tape do
+      result = encode(data.as_tape).to_heap
+    end
+    result
+  end
+
+  def self.encode(data : Tape::String) : Tape::String
     encode_with(data, plus_slash, PAIRS_STD, true)
   end
 
+  def self.encode(data : Tape::String,
+                  writer : Tape::String::Writer) : Nil
+    writer << encode(data)
+  end
+
   def self.urlsafe_encode(data : String) : String
+    result = ""
+    tape do
+      result = urlsafe_encode(data.as_tape).to_heap
+    end
+    result
+  end
+
+  def self.urlsafe_encode(data : Tape::String) : Tape::String
     encode_with(data, minus_underscore, PAIRS_URL, true)
   end
 
+  def self.urlsafe_encode(data : Tape::String,
+                  writer : Tape::String::Writer) : Nil
+    writer << urlsafe_encode(data)
+  end
+
   def self.decode(text : String) : String
-    src = text.to_unsafe
-    n = text.bytesize
-    # Every data character is six bits and a byte is written per eight, so
-    # a text of data characters and closing padding decodes to six-eighths
-    # of what is left without the padding: that many bytes are written
-    # straight into the answer. Whitespace, or padding anywhere but the
-    # end, leaves fewer - never more - and the text is decoded again into a
-    # buffer the size of the bytes it did write.
-    pads = 0
-    pads = pads + 1 if n > 0 && src[n - 1] == 61_u8
-    pads = pads + 1 if n > 1 && src[n - 2] == 61_u8
-    size = ((n - pads).to_i64 * 6 // 8).to_i32
-    written = 0
-    answer = String.new(size) { |buf| written = decode_into(buf, src, n) }
-    return answer if written == size
-    buf = Pointer(UInt8).malloc(size.to_u64)
-    written = decode_into(buf, src, n)
-    String.new(written) { |dst| dst.copy_from(buf, written) }
+    result = ""
+    tape do
+      result = decode(text.as_tape).to_heap
+    end
+    result
+  end
+
+  def self.decode(text : Tape::String) : Tape::String
+    size = (text.bytesize.to_i64 * 6 // 8).to_i32
+    buf = Pointer(UInt8).new(IyiRegion.tape_bytes(size.to_u64))
+    written = decode_into(buf, text.to_unsafe, text.bytesize)
+    Tape::String.new(buf, written)
+  end
+
+  def self.decode(text : Tape::String,
+                  writer : Tape::String::Writer) : Nil
+    writer << decode(text)
   end
 
   # Decodes into *buf*, which has room for what the text can hold, and
@@ -135,14 +160,17 @@ pub struct Base64
     o
   end
 
-  private def self.encode_with(data : String, alphabet : String, pairs : Array(Int32), pad : Bool) : String
+  private def self.encode_with(data : Tape::String, alphabet : String,
+                               pairs : Array(Int32),
+                               pad : Bool) : Tape::String
     n = data.bytesize
     src = data.to_unsafe
     table = alphabet.to_unsafe
     twelve = pairs.to_unsafe
     out_n = ((n + 2) // 3) * 4
     whole = n - n % 3
-    String.new(out_n) do |dst|
+    dst = Pointer(UInt8).new(IyiRegion.tape_bytes(out_n.to_u64))
+    begin
       i = 0
       o = 0
       # Six bytes read as one word and eight characters written as one,
@@ -191,6 +219,7 @@ pub struct Base64
         end
       end
     end
+    Tape::String.new(dst, out_n)
   end
 
   private def self.plus_slash : String

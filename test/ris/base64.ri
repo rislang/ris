@@ -1,0 +1,23 @@
+module test/base64_tape
+
+import std/base64::{Base64}
+
+kept = ""
+tape do
+  raw = "\u0000hello café\u00ff".as_tape
+  encoded = Base64.encode(raw)
+  exit 1 unless Base64.decode(encoded) == raw
+  exit 2 unless Base64.decode(" Q Q = = \n".as_tape) == "A"
+  w = Tape::String::Writer.new(1)
+  w << "prefix:"
+  Base64.encode("foo".as_tape, w)
+  Base64.decode("YmFy".as_tape, w)
+  Base64.urlsafe_encode("?".as_tape, w)
+  exit 3 unless w.finish == "prefix:Zm9vbarPw=="
+  exit 4 unless Base64.encode("".as_tape).empty?
+  kept = encoded.to_heap
+end
+exit 5 unless Base64.decode(kept) == "\u0000hello café\u00ff"
+exit 6 unless Base64.encode("foobar") == "Zm9vYmFy"
+exit 7 unless Base64.urlsafe_encode("foobar") == "Zm9vYmFy"
+puts "PASS: base64 tape and heap APIs"
