@@ -419,8 +419,24 @@ module Tape
       array
     end
 
+    # *count* copies of *value*, as `Array.new(size, value)`.
+    def self.new(count : Int32, value : T) : self
+      new(count) { |index| value }
+    end
+
     def size : Int32
       (@state + 1_i64).value.to_i32
+    end
+
+    def empty? : Bool
+      size == 0
+    end
+
+    # `push` that answers the array, so `Tape::Array(Int32){1, 2, 3}` builds
+    # one as `Set{1, 2}` does.
+    def <<(value : T) : self
+      push(value)
+      self
     end
 
     def push(value : T) : Nil
@@ -529,6 +545,110 @@ module Tape
       total = T.zero
       each { |value| total = total + value }
       total
+    end
+
+    # Removes and returns the last element. Empty is a mistake, as with
+    # `Array#pop`; `pop?` answers nil.
+    def pop : T
+      raise "pop of an empty array" if empty?
+      count = (@state + 1_i64).value &- 1_u64
+      (@state + 1_i64).value = count
+      unsafe_at(count.to_i32)
+    end
+
+    def pop? : T?
+      empty? ? nil : pop
+    end
+
+    # `first` on an empty array is a mistake, as with `Array#first`; the
+    # nilable questions answer nil.
+    def first : T
+      raise "first of an empty array" if empty?
+      unsafe_at(0)
+    end
+
+    def first? : T?
+      empty? ? nil : unsafe_at(0)
+    end
+
+    def last? : T?
+      empty? ? nil : unsafe_at(size - 1)
+    end
+
+    def includes?(value : T) : Bool
+      each { |element| return true if element == value }
+      false
+    end
+
+    # Where a value first is, or nil.
+    def index(value : T) : Int32?
+      each_with_index { |element, index| return index if element == value }
+      nil
+    end
+
+    def count(& : T -> Bool) : Int32
+      total = 0
+      each { |value| total = total + 1 if yield value }
+      total
+    end
+
+    def any?(& : T -> Bool) : Bool
+      each { |value| return true if yield value }
+      false
+    end
+
+    def all?(& : T -> Bool) : Bool
+      each { |value| return false unless yield value }
+      true
+    end
+
+    def find(& : T -> Bool) : T?
+      each { |value| return value if yield value }
+      nil
+    end
+
+    def reduce(initial : U, & : U, T -> U) : U forall U
+      accumulator = initial
+      each { |value| accumulator = yield accumulator, value }
+      accumulator
+    end
+
+    # The element whose key is largest, or smallest, the first of equals; a
+    # NaN key is above every other, as `Array#max_by` places it.
+    def max_by(& : T -> U) : T forall U
+      raise "max_by of an empty array" if empty?
+      best = unsafe_at(0)
+      best_key = yield best
+      index = 1
+      count = size
+      while index < count
+        value = unsafe_at(index)
+        key = yield value
+        if best_key < key || (key.is_a?(Float) && key != key && best_key == best_key)
+          best = value
+          best_key = key
+        end
+        index = index + 1
+      end
+      best
+    end
+
+    def min_by(& : T -> U) : T forall U
+      raise "min_by of an empty array" if empty?
+      best = unsafe_at(0)
+      best_key = yield best
+      index = 1
+      count = size
+      while index < count
+        value = unsafe_at(index)
+        key = yield value
+        if key < best_key || (key.is_a?(Float) && best_key != best_key && key == key)
+          best = value
+          best_key = key
+        end
+        index = index + 1
+      end
+      best
     end
 
     # The indexes in *indexes*, each checked against this array once, for

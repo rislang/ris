@@ -1,0 +1,25 @@
+# Tape::Array asked what iyi's Array is asked: built from a literal, read
+# with the same questions, emptied from the top.
+tape do
+  prices = Tape::Array(Int32){129, 199, 649, 389}
+  puts "#{prices.size} #{prices.first} #{prices.last?} #{prices.empty?}"
+  puts "#{prices.includes?(649)} #{prices.index(649)} #{prices.index(1)}"
+  big = prices.count { |p| p > 200 }
+  puts "#{big} #{prices.any? { |p| p > 600 }} #{prices.all? { |p| p > 100 }}"
+  puts "#{prices.find { |p| p > 300 }} #{prices.find { |p| p > 900 }.nil?}"
+  total = prices.reduce(0) { |sum, p| sum + p }
+  puts "#{total} #{prices.max_by { |p| p }} #{prices.min_by { |p| -p }}"
+  puts "#{prices.pop} #{prices.size} #{prices.pop?}"
+  zeros = Tape::Array(Int32).new(3, 0)
+  puts "#{zeros.size} #{zeros.sum} #{zeros.first?}"
+  empty = Tape::Array(Int32).new
+  puts "#{empty.empty?} #{empty.first?.nil?} #{empty.pop?.nil?}"
+  piim = Tape::String.view("piim")
+  names = Tape::Array(Tape::String){piim, Tape::String.view("kohv")}
+  puts names.size
+  puts names.max_by { |n| n.bytesize }
+  if last = names.last?
+    puts last
+  end
+  empty.first
+end
