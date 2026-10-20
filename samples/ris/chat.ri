@@ -64,16 +64,9 @@ module Chat
 
   # "7 Ship it": a user id, one space, the text. Nil when it is not.
   def self.message_params(request : Tape::String) : MessageParams?
-    user_id = 0
-    index = 0
-    while index < request.bytesize && request[index] != ' '.ord.to_u8
-      digit = request[index] &- '0'.ord.to_u8
-      return nil if digit > 9
-      user_id = user_id * 10 + digit.to_i32
-      index += 1
-    end
-    return nil if index == 0 || index >= request.bytesize
-    body = request[index + 1, request.bytesize - index - 1]
+    space = request.index(' ') || return nil
+    user_id = request[0, space].to_i? || return nil
+    body = request[space + 1, request.bytesize - space - 1]
     MessageParams.new(user_id: user_id, body: body)
   end
 
@@ -89,20 +82,18 @@ module Chat
     count = room.messages.size
     newest = Tape::Array(Int32).new(count) { |i| count - 1 - i }
     response = Tape::String::Writer.new(256)
-    response.append("200 ")
+    response << "200 "
     newest.each_with_index do |i, k|
       message = room.messages[i]
-      response.append(" | ") if k > 0
-      response.append(message.user.name)
-      response.append(": ")
-      response.append(message.body)
+      response << " | " if k > 0
+      response << message.user.name << ": " << message.body
     end
-    response.append(" (users ")
+    response << " (users "
     names = Tape::Array(String).new(room.users.size) { |i| room.users[i].name }
     names.sort_in_place
     names.join(response, ", ")
-    response.append(")")
-    puts response.finish
+    response << ")"
+    puts response
   end
 end
 

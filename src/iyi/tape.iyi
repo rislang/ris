@@ -131,6 +131,63 @@ module Tape
       end
     end
 
+    # Where the ASCII *char* first is from *offset*, or nil, byte-indexed
+    # as `String#index` is.
+    def index(char : Char, offset : Int32 = 0) : Int32?
+      raise "Tape::String#index takes an ASCII char, not #{char.inspect}" if char.ord > 127
+      byte = char.ord.to_u8
+      at = offset
+      while at < @bytesize
+        return at if @ptr[at] == byte
+        at = at + 1
+      end
+      nil
+    end
+
+    def includes?(char : Char) : Bool
+      !index(char).nil?
+    end
+
+    # The pieces between each ASCII *separator*, as `String#split(Char)`
+    # cuts them, empty ones kept; each a view, in a new array on the tape.
+    def split(separator : Char) : Array(String)
+      pieces = Array(String).new
+      start = 0
+      while at = index(separator, start)
+        pieces << self[start, at - start]
+        start = at + 1
+      end
+      pieces << self[start, @bytesize - start]
+      pieces
+    end
+
+    # As `String#to_i`: the digits as an Int32, a mistake when they are not
+    # one. `to_i?` answers nil instead. Read on the tape, nothing copied.
+    def to_i : Int32
+      to_i? || raise "not a number: #{@bytesize} bytes"
+    end
+
+    def to_i? : Int32?
+      return nil if @bytesize == 0
+      index = 0
+      negative = @ptr[0] == 45_u8
+      if negative || @ptr[0] == 43_u8
+        return nil if @bytesize == 1
+        index = 1
+      end
+      value = 0
+      while index < @bytesize
+        digit = @ptr[index].to_i - 48
+        return nil if digit < 0 || digit > 9
+        return nil if value < -214748364 || (value == -214748364 && digit > 8)
+        value = value * 10 - digit
+        index = index + 1
+      end
+      return value if negative
+      return nil if value == -2147483648
+      0 - value
+    end
+
     # The text *span* names, a view: checked, as a span read from bytes is
     # never trusted.
     def [](span : Span) : String
@@ -415,6 +472,13 @@ module Tape
     def finish : String
       start = (@state + 2_i64).value
       String.new(Pointer(UInt8).new(start), (@state.value &- start).to_i32)
+    end
+
+    # *value* written as `append_value` writes it, answering the writer so
+    # pieces chain as into an IO: `w << name << ": " << count`.
+    def <<(value) : self
+      append_value(value)
+      self
     end
   end
 
@@ -1123,10 +1187,23 @@ class IyiIO
     text.to_s(self)
     write("\n") unless text.bytesize > 0 && text[-1] == 10_u8
   end
+
+  # What a writer holds so far, written straight from the tape.
+  def print(writer : Tape::String::Writer) : Nil
+    print(writer.finish)
+  end
+
+  def puts(writer : Tape::String::Writer) : Nil
+    puts(writer.finish)
+  end
 end
 
 def print(text : Tape::String) : Nil
   stdout.print(text)
+end
+
+def print(writer : Tape::String::Writer) : Nil
+  stdout.print(writer)
 end
 
 # Any other value read in `while i < a.size`: `[]` and `[]=` as written,

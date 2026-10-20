@@ -21,18 +21,10 @@ USERS = {
 
 # The user id in "/users/1/status", or nil when the path is another one.
 def status_id(path : Tape::String) : Int32?
-  return nil unless path.starts_with?("/users/")
-  id = 0
-  index = 7
-  while index < path.bytesize && path[index] != '/'.ord.to_u8
-    digit = path[index] &- '0'.ord.to_u8
-    return nil if digit > 9
-    id = id * 10 + digit.to_i32
-    index += 1
-  end
-  return nil if index == 7
-  rest = path[index, path.bytesize - index]
-  rest == "/status" ? id : nil
+  parts = path.split('/')
+  return nil unless parts.size == 4 && parts[1] == "users"
+  return nil unless parts[3] == "status"
+  parts[2].to_i?
 end
 
 # The view, as a Slim template would write it:
@@ -45,17 +37,17 @@ end
 def status_view(res : Outgoing, name : String, status : String) : Nil
   res.header("Content-Type", "text/html; charset=utf-8")
   html = res.body
-  html.append("<h1>")
+  html << "<h1>"
   html.append_html_escaped(name)
-  html.append("</h1>\n<p class=\"status\">")
+  html << "</h1>\n<p class=\"status\">"
   html.append_html_escaped(status)
-  html.append("</p>\n")
+  html << "</p>\n"
 end
 
 def not_found(res : Outgoing) : Nil
   res.status = 404
   res.header("Content-Type", "text/plain")
-  res.body.append("Not Found\n")
+  res.body << "Not Found\n"
 end
 
 port = Program.args.empty? ? 3000 : Program.args[0].to_i
