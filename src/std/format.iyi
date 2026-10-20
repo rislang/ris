@@ -122,7 +122,7 @@ module ::IyiFloatText
       k = k - 1
     end
 
-    digits = Pointer(UInt8).malloc(24_u64)
+    digits = Pointer(UInt8).new(IyiRegion.tape_bytes(24_u64))
     count = 0
     while true
       r.mul_small(10_u64)
@@ -163,9 +163,9 @@ module ::IyiFloatText
   # smallest denormal answered 5.000000e-324 for 4.940656e-324 - the
   # shortest digits, which round-trip, are not the value, and past them
   # there was nothing but zeros. `places` may be negative, a scale down.
-  def self.scaled_digits(f : UInt64, e : Int32, places : Int32) : String
+  def self.tape_scaled_digits(f : UInt64, e : Int32, places : Int32) : Tape::String
     if quick = scaled_quick(f, e, places)
-      return quick.to_s
+      return IyiFormat.integer_text(quick, 10)
     end
     num = IyiBig.new(f)
     den = IyiBig.new(1_u64)
@@ -187,7 +187,7 @@ module ::IyiFloatText
     if c > 0 || (c == 0 && quotient.low_bit == 1_u64)
       quotient.add_small(1_u64)
     end
-    quotient.to_decimal
+    Tape::String.build { |w| quotient.write_decimal(w) }
   end
 
   # `scaled_digits` in two words, when they hold it: f * 10^places is
@@ -255,106 +255,7 @@ module ::IyiFloatText
   MAX_PLACES = 400
 
   # Fixed-point decimal format with exact places, half to even.
-  def self.format_fixed(value : Float64, precision : Int32) : String
-    bits = bits_of(value)
-    exponent_bits = bits.unsafe_shr(52_u64) & 2047_u64
-    fraction = bits & 4503599627370495_u64
 
-    if exponent_bits == 2047_u64
-      return fraction != 0_u64 ? "NaN" : (bits.unsafe_shr(63_u64) != 0_u64 ? "-Infinity" : "Infinity")
-    end
-    if precision > MAX_PLACES
-      raise "precision must be at most #{MAX_PLACES}, not #{precision}"
-    end
-    if exponent_bits == 0_u64 && fraction == 0_u64
-      if precision <= 0
-        return "0"
-      else
-        return "0." + ("0" * precision)
-      end
-    end
-
-    hidden = 4503599627370496_u64
-    f = exponent_bits == 0_u64 ? fraction : fraction | hidden
-    e = exponent_bits == 0_u64 ? -1074 : exponent_bits.to_i64.to_i32 - 1075
-
-    digits = scaled_digits(f, e, precision)
-    return digits if precision <= 0
-    while digits.size < precision + 1
-      digits = "0" + digits
-    end
-    digits[0, digits.size - precision] + "." + digits[digits.size - precision, precision]
-  end
-
-  # Scientific notation with exact places, half to even.
-  def self.format_exp(value : Float64, uppercase : Bool, precision : Int32, hash_flag : Bool) : String
-    bits = bits_of(value)
-    exponent_bits = bits.unsafe_shr(52_u64) & 2047_u64
-    fraction = bits & 4503599627370495_u64
-
-    if exponent_bits == 2047_u64
-      return fraction != 0_u64 ? "NaN" : (bits.unsafe_shr(63_u64) != 0_u64 ? "-Infinity" : "Infinity")
-    end
-    if precision > MAX_PLACES
-      raise "precision must be at most #{MAX_PLACES}, not #{precision}"
-    end
-    if exponent_bits == 0_u64 && fraction == 0_u64
-      e_tag = uppercase ? "E+00" : "e+00"
-      if precision <= 0
-        return hash_flag ? "0." + e_tag : "0" + e_tag
-      else
-        return "0." + ("0" * precision) + e_tag
-      end
-    end
-
-    hidden = 4503599627370496_u64
-    f = exponent_bits == 0_u64 ? fraction : fraction | hidden
-    e = exponent_bits == 0_u64 ? -1074 : exponent_bits.to_i64.to_i32 - 1075
-
-    # The decimal exponent, guessed from the shortest digits and then held
-    # to the exact digits: the shortest spelling of 99999999999999991611392
-    # is 1e+23, one place up, and rounding can carry the other way -
-    # `%.2e` of 9.995 is 1.00e+01. Either moves the exponent by one, and
-    # the digit count says which way.
-    res = dragon4(value.abs)
-    exp = res[2] - 1
-    digits = scaled_digits(f, e, precision - exp)
-    attempts = 0
-    while digits.size != precision + 1 && attempts < 4
-      exp = digits.size > precision + 1 ? exp + 1 : exp - 1
-      digits = scaled_digits(f, e, precision - exp)
-      attempts = attempts + 1
-    end
-    # A guess one too high passes that count as well: at the shortest
-    # digits' exponent `%.15e` of 1e23 rounds to 1.000000000000000e+23,
-    # where the value's own digits are 9.999999999999999e+22. Only a
-    # 10...0 can be that, and the exponent below is the value's when its
-    # digits still fit there.
-    tail = 1
-    while tail < digits.bytesize && digits.to_unsafe[tail] == 48_u8
-      tail = tail + 1
-    end
-    if tail == digits.bytesize && digits.size == precision + 1 && digits.to_unsafe[0] == 49_u8
-      lower = scaled_digits(f, e, precision - exp + 1)
-      if lower.size == precision + 1
-        exp = exp - 1
-        digits = lower
-      end
-    end
-
-    num = digits[0, 1]
-    if precision > 0
-      num = num + "." + digits[1, precision]
-    elsif hash_flag
-      num = num + "."
-    end
-
-    e_char = uppercase ? "E" : "e"
-    sign_char = exp >= 0 ? "+" : "-"
-    exp_mag = exp < 0 ? 0 - exp : exp
-    exp_str = exp_mag < 10 ? "0" + exp_mag.to_s : exp_mag.to_s
-    num + e_char + sign_char + exp_str
-  end
 end
 
 # The two operations the exact formats need that the printer's bignum did
@@ -379,394 +280,455 @@ class ::IyiBig
   end
 
   # Base ten, most significant digit first, nine digits per division.
-  def to_decimal : String
-    return "0" if @size == 0
+  def write_decimal(w : Tape::String::Writer) : Nil
+    if @size == 0
+      w << "0"
+      return
+    end
     work = copy
-    chunks = [] of UInt64
+    chunks = Tape::Array(UInt64).new
     while work.size > 0
       chunks << work.div_small(1000000000_u64)
     end
-    text = chunks[chunks.size - 1].to_s
-    index = chunks.size - 2
-    while index >= 0
-      chunk = chunks[index].to_s
-      text = text + ("0" * (9 - chunk.size)) + chunk
-      index = index - 1
+    i = chunks.size - 1
+    while i >= 0
+      text = IyiFormat.integer_text(chunks[i], 10)
+      IyiFormat.repeat(w, 48_u8, 9 - text.bytesize) if i < chunks.size - 1
+      w << text
+      i -= 1
     end
-    text
   end
+
 end
 
 module ::IyiFormat
-  def self.format_int64(val : Int64, base : Int32, uppercase : Bool, signed : Bool, minus : Bool, plus : Bool, space : Bool, zero : Bool, hash : Bool, width : Int32, precision : Int32) : String
-    is_negative = val < 0_i64
-
-    sign = ""
-    if is_negative
-      sign = "-"
-    elsif signed
-      if plus
-        sign = "+"
-      elsif space
-        sign = " "
-      end
-    end
-
-    prefix = ""
-    if hash && val != 0_i64
-      if base == 16
-        prefix = uppercase ? "0X" : "0x"
-      elsif base == 8
-        prefix = "0o"
-      elsif base == 2
-        prefix = "0b"
-      end
-    end
-
-    digits = ""
-    if val == 0_i64
-      digits = precision == 0 ? "" : "0"
-    else
-      radix = base.to_i64
-      digit_list = [] of Int32
-      temp = val
-      while temp != 0_i64
-        rem = temp % radix
-        d = rem < 0_i64 ? (0_i64 - rem).to_i32 : rem.to_i32
-        digit_list << d
-        temp = temp // radix
-      end
-      bytesize = digit_list.size
-      hex_base = uppercase ? 55 : 87
-      digits = String.new(bytesize) do |buffer|
-        at = 0
-        rev = bytesize - 1
-        while rev >= 0
-          d = digit_list[rev]
-          buffer[at] = d < 10 ? (48 + d).to_u8 : (hex_base + d).to_u8
-          at = at + 1
-          rev = rev - 1
-        end
-      end
-    end
-
-    # Minimum digits padding
-    if precision >= 0
-      zero = false
-      if digits.bytesize < precision
-        digits = ("0" * (precision - digits.bytesize)) + digits
-      end
-    end
-
-    total_len = sign.bytesize + prefix.bytesize + digits.bytesize
-    if total_len < width
-      pad_count = width - total_len
-      if minus
-        sign + prefix + digits + (" " * pad_count)
-      elsif zero
-        sign + prefix + ("0" * pad_count) + digits
-      else
-        (" " * pad_count) + sign + prefix + digits
-      end
-    else
-      sign + prefix + digits
-    end
-  end
-
-  def self.format_uint64(val : UInt64, base : Int32, uppercase : Bool, signed : Bool, minus : Bool, plus : Bool, space : Bool, zero : Bool, hash : Bool, width : Int32, precision : Int32) : String
-    sign = ""
-    if signed
-      sign = "+" if plus
-      sign = " " if space && !plus
-    end
-
-    prefix = ""
-    if hash && val != 0_u64
-      if base == 16
-        prefix = uppercase ? "0X" : "0x"
-      elsif base == 8
-        prefix = "0o"
-      elsif base == 2
-        prefix = "0b"
-      end
-    end
-
-    digits = ""
-    if val == 0_u64
-      digits = precision == 0 ? "" : "0"
-    else
-      radix = base.to_u64
-      digit_list = [] of Int32
-      temp = val
-      while temp > 0_u64
-        rem = (temp % radix).to_i64.to_i32
-        digit_list << rem
-        temp = temp // radix
-      end
-      bytesize = digit_list.size
-      hex_base = uppercase ? 55 : 87
-      digits = String.new(bytesize) do |buffer|
-        at = 0
-        rev = bytesize - 1
-        while rev >= 0
-          d = digit_list[rev]
-          buffer[at] = d < 10 ? (48 + d).to_u8 : (hex_base + d).to_u8
-          at = at + 1
-          rev = rev - 1
-        end
-      end
-    end
-
-    if precision >= 0
-      zero = false
-      if digits.bytesize < precision
-        digits = ("0" * (precision - digits.bytesize)) + digits
-      end
-    end
-
-    total_len = sign.bytesize + prefix.bytesize + digits.bytesize
-    if total_len < width
-      pad_count = width - total_len
-      if minus
-        sign + prefix + digits + (" " * pad_count)
-      elsif zero
-        sign + prefix + ("0" * pad_count) + digits
-      else
-        (" " * pad_count) + sign + prefix + digits
-      end
-    else
-      sign + prefix + digits
-    end
-  end
-
-  def self.format_float64(val : Float64, minus : Bool, plus : Bool, space : Bool, zero : Bool, hash : Bool, width : Int32, precision : Int32) : String
-    prec = precision < 0 ? 6 : precision
-    bits = IyiFloatText.bits_of(val)
-    is_nan = (bits.unsafe_shr(52_u64) & 2047_u64 == 2047_u64) && (bits & 4503599627370495_u64 != 0_u64)
-    if is_nan
-      return format_string_arg(plus ? "+NaN" : (space ? " NaN" : "NaN"), minus, width, -1)
-    end
-
-    is_inf = (bits.unsafe_shr(52_u64) & 2047_u64 == 2047_u64) && (bits & 4503599627370495_u64 == 0_u64)
-    if is_inf
-      str = bits.unsafe_shr(63_u64) != 0_u64 ? "-Infinity" : (plus ? "+Infinity" : (space ? " Infinity" : "Infinity"))
-      return format_string_arg(str, minus, width, -1)
-    end
-
-    is_negative = bits.unsafe_shr(63_u64) != 0_u64
-    sign = ""
-    if is_negative
-      sign = "-"
-    elsif plus
-      sign = "+"
-    elsif space
-      sign = " "
-    end
-
-    num_str = IyiFloatText.format_fixed(val.abs, prec)
-    if hash && prec == 0
-      num_str = num_str + "."
-    end
-
-    total_len = sign.bytesize + num_str.bytesize
-    if total_len < width
-      pad_count = width - total_len
-      if minus
-        sign + num_str + (" " * pad_count)
-      elsif zero
-        sign + ("0" * pad_count) + num_str
-      else
-        (" " * pad_count) + sign + num_str
-      end
-    else
-      sign + num_str
-    end
-  end
-
-  def self.format_float_exp(val : Float64, uppercase : Bool, minus : Bool, plus : Bool, space : Bool, zero : Bool, hash : Bool, width : Int32, precision : Int32) : String
-    prec = precision < 0 ? 6 : precision
-    bits = IyiFloatText.bits_of(val)
-    is_nan = (bits.unsafe_shr(52_u64) & 2047_u64 == 2047_u64) && (bits & 4503599627370495_u64 != 0_u64)
-    if is_nan
-      return format_string_arg(plus ? "+NaN" : (space ? " NaN" : "NaN"), minus, width, -1)
-    end
-
-    is_inf = (bits.unsafe_shr(52_u64) & 2047_u64 == 2047_u64) && (bits & 4503599627370495_u64 == 0_u64)
-    if is_inf
-      str = bits.unsafe_shr(63_u64) != 0_u64 ? "-Infinity" : (plus ? "+Infinity" : (space ? " Infinity" : "Infinity"))
-      return format_string_arg(str, minus, width, -1)
-    end
-
-    is_negative = bits.unsafe_shr(63_u64) != 0_u64
-    sign = ""
-    if is_negative
-      sign = "-"
-    elsif plus
-      sign = "+"
-    elsif space
-      sign = " "
-    end
-
-    num_str = IyiFloatText.format_exp(val.abs, uppercase, prec, hash)
-
-    total_len = sign.bytesize + num_str.bytesize
-    if total_len < width
-      pad_count = width - total_len
-      if minus
-        sign + num_str + (" " * pad_count)
-      elsif zero
-        sign + ("0" * pad_count) + num_str
-      else
-        (" " * pad_count) + sign + num_str
-      end
-    else
-      sign + num_str
-    end
-  end
-
-  # `%g`: the shorter of the two notations, C's rule. With P the precision
-  # (6 when none is given, 1 when it is 0) and X the exponent `%e` would
-  # write at P - 1 places, it is `%e` at P - 1 places when X < -4 or X >= P
-  # and `%f` at P - 1 - X places otherwise; either way the trailing zeros
-  # of the fraction go, and its point with them, unless `#` keeps them.
-  # NaN and the infinities are written as `%e` writes them.
-  def self.format_float_general(val : Float64, uppercase : Bool, minus : Bool, plus : Bool, space : Bool, zero : Bool, hash : Bool, width : Int32, precision : Int32) : String
-    prec = precision < 0 ? 6 : (precision == 0 ? 1 : precision)
-    bits = IyiFloatText.bits_of(val)
-    if bits.unsafe_shr(52_u64) & 2047_u64 == 2047_u64
-      return format_float_exp(val, uppercase, minus, plus, space, zero, hash, width, precision)
-    end
-
-    # Significant digits, one more than the places `%e` is asked for: left
-    # to `%e`, `%.402g` was refused as "at most 400, not 401", a precision
-    # nobody wrote under a limit `%.401g` had just passed.
-    limit = IyiFloatText::MAX_PLACES + 1
-    raise "precision must be at most #{limit}, not #{prec}" if prec > limit
-    scientific = IyiFloatText.format_exp(val.abs, uppercase, prec - 1, hash)
-    marker = scientific.index(uppercase ? 'E' : 'e') || scientific.bytesize
-    exp = scientific[marker + 1, scientific.bytesize - marker - 1].to_i
-    if exp < -4 || exp >= prec
-      mantissa = scientific[0, marker]
-      num_str = (hash ? mantissa : IyiFormat.trim_fraction(mantissa)) + scientific[marker, scientific.bytesize - marker]
-    else
-      # The digits `%e` just wrote, the point moved: `%f` at P - 1 - X
-      # places rounds at the same place, and asked again of `format_fixed`
-      # those places pass MAX_PLACES for an X under zero at a precision
-      # within it - `%.400g` of 0.0001 panicked.
-      sig = scientific[0, 1] + (marker > 2 ? scientific[2, marker - 2] : "")
-      if exp >= 0
-        fixed = exp + 1 < prec ? sig[0, exp + 1] + "." + sig[exp + 1, prec - 1 - exp] : sig
-      else
-        fixed = "0." + ("0" * (0 - exp - 1)) + sig
-      end
-      num_str = hash ? (fixed.index('.') ? fixed : fixed + ".") : IyiFormat.trim_fraction(fixed)
-    end
-
-    sign = ""
-    if bits.unsafe_shr(63_u64) != 0_u64
-      sign = "-"
-    elsif plus
-      sign = "+"
-    elsif space
-      sign = " "
-    end
-    total_len = sign.bytesize + num_str.bytesize
-    return sign + num_str if total_len >= width
-    pad_count = width - total_len
-    if minus
-      sign + num_str + (" " * pad_count)
-    elsif zero
-      sign + ("0" * pad_count) + num_str
-    else
-      (" " * pad_count) + sign + num_str
-    end
-  end
-
-  # A decimal's fraction without its trailing zeros, and without its point
-  # when nothing is left after it: `%g`'s trim.
-  def self.trim_fraction(text : String) : String
-    return text unless text.index('.')
-    stop = text.bytesize
-    while stop > 0 && text.to_unsafe[stop - 1] == 48_u8
-      stop = stop - 1
-    end
-    stop = stop - 1 if stop > 0 && text.to_unsafe[stop - 1] == 46_u8
-    text[0, stop]
-  end
-
-  # Width and precision in characters, because `size` is and because
-  # `%-10s` is a column: counted in bytes, a multi-byte string came out
-  # short by one space per extra byte, and a precision cut a character in
-  # half. The prelude's `ljust`/`rjust` decided the same thing.
-  #
-  # The characters a precision keeps are written into one buffer, as
-  # `each_char` decodes them and `size` counts them: added one at a time
-  # onto a string of their own, the text was copied once per character,
-  # and `%.800000s` of a megabyte took 12.8 s, four times as long for
-  # every doubling.
-  def self.format_string_arg(str : String, minus : Bool, width : Int32, precision : Int32) : String
-    res = str
-    if precision >= 0 && res.size > precision
-      kept = String::Builder.new
-      taken = 0
-      res.each_char do |c|
-        if taken < precision
-          kept << c
-          taken = taken + 1
-        end
-      end
-      res = kept.to_s
-    end
-    if res.size < width
-      pad = " " * (width - res.size)
-      minus ? res + pad : pad + res
-    else
-      res
-    end
-  end
-
-  # A number is a code point, as Crystal's `%c` has it: `%c` of 233 is
-  # `é`, where it panicked "233 is out of char range" (`chr` is ASCII).
-  # Anything else is its first character, not its first byte, which cut
-  # `é` in half.
-  def self.format_char_arg(val, minus : Bool, width : Int32) : String
-    ch = case val
-         when Char
-           val
-         when Int32
-           code_point(val.to_i64)
-         when Int64
-           code_point(val)
-         when UInt64
-           # `UInt8`, `UInt16` and `UInt32` arrive widened, and the last two
-           # and this were the first character of their digits: `%c` of
-           # 65_u32 was "6".
-           code_point(val)
-         else
-           first = ' '
-           taken = false
-           val.to_s.each_char do |c|
-             first = c unless taken
-             taken = true
-           end
-           first
-         end
-    s = ch.to_s
-    if width > 1
-      pad = " " * (width - 1)
-      minus ? s + pad : pad + s
-    else
-      s
-    end
-  end
-
-  # Any integer: an `Int64` or a `UInt64`, whose top half `to_i64` refuses.
   def self.code_point(code) : Char
     raise "%c of #{code}: not a Unicode code point" if code < 0 || code > 0x10FFFF || (code >= 0xD800 && code <= 0xDFFF)
     code.to_i32.unsafe_chr
   end
 
-  def self.format_arg(val, verb : Char, minus : Bool, plus : Bool, space : Bool, zero : Bool, hash : Bool, width : Int32, precision : Int32) : String
+  def self.text_view(value : Tape::String) : Tape::String
+    value
+  end
+
+  def self.text_view(value : String) : Tape::String
+    value.as_tape
+  end
+
+  def self.text_view(value) : Tape::String
+    Tape::String.build { |w| w.append_value(value) }
+  end
+
+  def self.repeat(w : Tape::String::Writer, byte : UInt8,
+                  count : Int32) : Nil
+    count.times { w.push(byte) } if count > 0
+  end
+
+  def self.tape_string_arg(text : Tape::String, minus : Bool,
+                           width : Int32, precision : Int32) : Tape::String
+    Tape::String.build do |w|
+      count = 0
+      stop = 0
+      i = 0
+      while i < text.bytesize
+        break if precision >= 0 && count >= precision
+        i += 1
+        while i < text.bytesize && (text[i] & 192_u8) == 128_u8
+          i += 1
+        end
+        stop = i
+        count += 1
+      end
+      repeat(w, 32_u8, width - count) unless minus
+      w << text[0, stop]
+      repeat(w, 32_u8, width - count) if minus
+    end
+  end
+
+  def self.tape_char_arg(value, minus : Bool, width : Int32) : Tape::String
+    text = text_view(value)
+    case value
+    when Char
+      text = Tape::String.build { |w| w << value }
+    when Int32, Int64, UInt64
+      text = Tape::String.build { |w| w << code_point(value) }
+    end
+    text = " ".as_tape if text.empty?
+    tape_string_arg(text, minus, width, 1)
+  end
+
+  def self.tape_digits(text : Tape::String, verb : Char, base : Int32,
+                       minus : Bool, plus : Bool, space : Bool,
+                       zero : Bool, hash : Bool, width : Int32,
+                       precision : Int32) : Tape::String
+    Tape::String.build do |w|
+      negative = text.starts_with?("-")
+      digits = negative ? text[1, text.bytesize - 1] : text
+      nonzero = digits != "0"
+      digits = "".as_tape if !nonzero && precision == 0
+      sign = negative ? "-" :
+        (verb != 'u' ? (plus ? "+" : (space ? " " : "")) : "")
+      prefix = ""
+      if hash && nonzero
+        prefix = base == 16 ? (verb == 'X' ? "0X" : "0x") :
+          (base == 8 ? "0o" : (base == 2 ? "0b" : ""))
+      end
+      zeros = precision > digits.bytesize ? precision - digits.bytesize : 0
+      zero = false if precision >= 0
+      pad = width - sign.bytesize - prefix.bytesize - digits.bytesize - zeros
+      repeat(w, 32_u8, pad) unless minus || zero
+      w << sign << prefix
+      repeat(w, 48_u8, pad) if zero && !minus
+      repeat(w, 48_u8, zeros)
+      digits.each_byte do |byte|
+        byte -= 32_u8 if verb == 'X' && byte >= 97_u8 && byte <= 102_u8
+        w.push(byte)
+      end
+      repeat(w, 32_u8, pad) if minus
+    end
+  end
+
+  def self.integer_text(value : Int64, base : Int32) : Tape::String
+    Tape::String.build do |w|
+      negative = value < 0
+      # Negative remainders allow the signed minimum without negating it.
+      digits = Tape::Array(UInt8).new(128)
+      radix = base.to_i64
+      temp = value
+      while temp != 0
+        rem = temp % radix
+        d = (rem < 0 ? -rem : rem).to_i32
+        digits << (d < 10 ? 48 + d : 87 + d).to_u8
+        temp = temp // radix
+      end
+      w << "-" if negative
+      w << "0" if digits.empty?
+      i = digits.size - 1
+      while i >= 0
+        w.push(digits[i])
+        i -= 1
+      end
+    end
+  end
+
+  def self.integer_text(value : UInt64, base : Int32) : Tape::String
+    Tape::String.build do |w|
+      negative = value < 0
+      # Negative remainders allow the signed minimum without negating it.
+      digits = Tape::Array(UInt8).new(128)
+      radix = base.to_u64
+      temp = value
+      while temp != 0
+        rem = temp % radix
+        d = rem.to_i32
+        digits << (d < 10 ? 48 + d : 87 + d).to_u8
+        temp = temp // radix
+      end
+      w << "-" if negative
+      w << "0" if digits.empty?
+      i = digits.size - 1
+      while i >= 0
+        w.push(digits[i])
+        i -= 1
+      end
+    end
+  end
+
+  def self.integer_text(value : Int128, base : Int32) : Tape::String
+    Tape::String.build do |w|
+      negative = value < 0
+      # Negative remainders allow the signed minimum without negating it.
+      digits = Tape::Array(UInt8).new(128)
+      radix = base.to_i128
+      temp = value
+      while temp != 0
+        rem = temp % radix
+        d = (rem < 0 ? -rem : rem).to_i32
+        digits << (d < 10 ? 48 + d : 87 + d).to_u8
+        temp = temp // radix
+      end
+      w << "-" if negative
+      w << "0" if digits.empty?
+      i = digits.size - 1
+      while i >= 0
+        w.push(digits[i])
+        i -= 1
+      end
+    end
+  end
+
+  def self.integer_text(value : UInt128, base : Int32) : Tape::String
+    Tape::String.build do |w|
+      negative = value < 0
+      # Negative remainders allow the signed minimum without negating it.
+      digits = Tape::Array(UInt8).new(128)
+      radix = base.to_u128
+      temp = value
+      while temp != 0
+        rem = temp % radix
+        d = rem.to_i32
+        digits << (d < 10 ? 48 + d : 87 + d).to_u8
+        temp = temp // radix
+      end
+      w << "-" if negative
+      w << "0" if digits.empty?
+      i = digits.size - 1
+      while i >= 0
+        w.push(digits[i])
+        i -= 1
+      end
+    end
+  end
+
+  def self.tape_int64(val : Int64, base : Int32, uppercase : Bool,
+                      signed : Bool, minus : Bool, plus : Bool,
+                      space : Bool, zero : Bool, hash : Bool,
+                      width : Int32, precision : Int32) : Tape::String
+    verb = uppercase ? 'X' : (signed ? 'd' : 'u')
+    tape_digits(integer_text(val, base), verb, base, minus, plus, space,
+      zero, hash, width, precision)
+  end
+
+  def self.tape_uint64(val : UInt64, base : Int32, uppercase : Bool,
+                       signed : Bool, minus : Bool, plus : Bool,
+                       space : Bool, zero : Bool, hash : Bool,
+                       width : Int32, precision : Int32) : Tape::String
+    verb = uppercase ? 'X' : (signed ? 'd' : 'u')
+    tape_digits(integer_text(val, base), verb, base, minus, plus, space,
+      zero, hash, width, precision)
+  end
+
+  def self.tape_wide(val, verb : Char, minus : Bool, plus : Bool, space : Bool, zero : Bool, hash : Bool, width : Int32, precision : Int32) : Tape::String
+    base = case verb
+           when 'd', 'i', 'u' then 10
+           when 'x', 'X'      then 16
+           when 'o'           then 8
+           when 'b'           then 2
+           else                    0
+           end
+    if base == 0
+      return tape_arg(val.to_f64, verb, minus, plus, space, zero, hash, width, precision) if verb == 'f' || verb == 'e' || verb == 'E' || verb == 'g' || verb == 'G'
+      # The value's own text, as every other integer's: written as its
+      # digits and then asked again as a string, `%p` of 65_i128 was "65" in
+      # quotes, the string's inspection; and `%c` is a code point here too,
+      # where it was refused as "wants a character".
+      return tape_string_arg(verb == 'p' ? val.inspect.as_tape : integer_text(val, 10), minus, width, precision) if verb == 's' || verb == 'p'
+      return tape_char_arg(code_point(val), minus, width) if verb == 'c'
+      raise "unknown format specifier '%#{verb}'"
+    end
+    # `%u` is the word's bits, as an `Int64`'s are: `%u` of -5_i128
+    # printed -5.
+    text = verb == 'u' && val < 0 ? integer_text(val.unsafe_to_u128, base) : integer_text(val, base)
+    tape_digits(text, verb, base, minus, plus, space, zero, hash, width, precision)
+  end
+
+  def self.float_field(value : Float64, text : Tape::String,
+                        minus : Bool, plus : Bool, space : Bool,
+                        zero : Bool, width : Int32) : Tape::String
+    Tape::String.build do |w|
+      bits = IyiFloatText.bits_of(value)
+      sign = bits.unsafe_shr(63_u64) != 0_u64 ? "-" :
+        (plus ? "+" : (space ? " " : ""))
+      pad = width - sign.bytesize - text.bytesize
+      repeat(w, 32_u8, pad) unless minus || zero
+      w << sign
+      repeat(w, 48_u8, pad) if zero && !minus
+      w << text
+      repeat(w, 32_u8, pad) if minus
+    end
+  end
+
+  def self.float_special(value : Float64, minus : Bool, plus : Bool,
+                          space : Bool, width : Int32) : Tape::String?
+    bits = IyiFloatText.bits_of(value)
+    return nil unless bits.unsafe_shr(52_u64) & 2047_u64 == 2047_u64
+    nan = bits & 4503599627370495_u64 != 0_u64
+    text = if nan
+      plus ? "+NaN" : (space ? " NaN" : "NaN")
+    elsif bits.unsafe_shr(63_u64) != 0_u64
+      "-Infinity"
+    else
+      plus ? "+Infinity" : (space ? " Infinity" : "Infinity")
+    end
+    tape_string_arg(text.as_tape, minus, width, -1)
+  end
+
+  def self.exact_digits(value : Float64, places : Int32) : Tape::String
+    bits = IyiFloatText.bits_of(value)
+    eb = bits.unsafe_shr(52_u64) & 2047_u64
+    fraction = bits & 4503599627370495_u64
+    f = eb == 0_u64 ? fraction : fraction | 4503599627370496_u64
+    e = eb == 0_u64 ? -1074 : eb.to_i64.to_i32 - 1075
+    IyiFloatText.tape_scaled_digits(f, e, places)
+  end
+
+  def self.fixed_text(value : Float64, places : Int32,
+                       hash : Bool) : Tape::String
+    limit = IyiFloatText::MAX_PLACES
+    raise "precision must be at most #{limit}, not #{places}" if places > limit
+    digits = exact_digits(value, places)
+    Tape::String.build do |w|
+      if places == 0
+        w << digits
+        w << "." if hash
+      elsif digits.bytesize <= places
+        w << "0."
+        repeat(w, 48_u8, places - digits.bytesize)
+        w << digits
+      else
+        at = digits.bytesize - places
+        w << digits[0, at] << "." << digits[at, places]
+      end
+    end
+  end
+
+  def self.exp_text(value : Float64, places : Int32,
+                     uppercase : Bool, hash : Bool) : Tape::String
+    limit = IyiFloatText::MAX_PLACES
+    raise "precision must be at most #{limit}, not #{places}" if places > limit
+    exp = 0
+    digits = "0".as_tape
+    if value != 0.0
+      exp = IyiFloatText.dragon4(value.abs)[2] - 1
+      digits = exact_digits(value, places - exp)
+      attempts = 0
+      while digits.bytesize != places + 1 && attempts < 4
+        exp += digits.bytesize > places + 1 ? 1 : -1
+        digits = exact_digits(value, places - exp)
+        attempts += 1
+      end
+      tail = 1
+      while tail < digits.bytesize && digits[tail] == 48_u8
+        tail += 1
+      end
+      if tail == digits.bytesize && digits.bytesize == places + 1 &&
+          digits[0] == 49_u8
+        lower = exact_digits(value, places - exp + 1)
+        if lower.bytesize == places + 1
+          exp -= 1
+          digits = lower
+        end
+      end
+    else
+      digits = Tape::String.build { |w| repeat(w, 48_u8, places + 1) }
+    end
+    Tape::String.build do |w|
+      w << digits[0, 1]
+      w << "." if places > 0 || hash
+      w << digits[1, places] if places > 0
+      w << (uppercase ? "E" : "e") << (exp < 0 ? "-" : "+")
+      magnitude = exp < 0 ? -exp : exp
+      w << "0" if magnitude < 10
+      w.append_int(magnitude)
+    end
+  end
+
+  def self.tape_float64(val : Float64, minus : Bool, plus : Bool,
+                        space : Bool, zero : Bool, hash : Bool,
+                        width : Int32, precision : Int32) : Tape::String
+    special = float_special(val, minus, plus, space, width)
+    return special if special
+    text = fixed_text(val.abs, precision < 0 ? 6 : precision, hash)
+    float_field(val, text, minus, plus, space, zero, width)
+  end
+
+  def self.tape_float_exp(val : Float64, uppercase : Bool, minus : Bool,
+                          plus : Bool, space : Bool, zero : Bool,
+                          hash : Bool, width : Int32,
+                          precision : Int32) : Tape::String
+    special = float_special(val, minus, plus, space, width)
+    return special if special
+    text = exp_text(val.abs, precision < 0 ? 6 : precision, uppercase, hash)
+    float_field(val, text, minus, plus, space, zero, width)
+  end
+
+  def self.trim_tape(text : Tape::String) : Tape::String
+    return text unless text.index('.')
+    stop = text.bytesize
+    while stop > 0 && text[stop - 1] == 48_u8
+      stop -= 1
+    end
+    stop -= 1 if stop > 0 && text[stop - 1] == 46_u8
+    text[0, stop]
+  end
+
+  def self.tape_float_general(val : Float64, uppercase : Bool,
+                              minus : Bool, plus : Bool, space : Bool,
+                              zero : Bool, hash : Bool, width : Int32,
+                              precision : Int32) : Tape::String
+    special = float_special(val, minus, plus, space, width)
+    return special if special
+    prec = precision < 0 ? 6 : (precision == 0 ? 1 : precision)
+    limit = IyiFloatText::MAX_PLACES + 1
+    raise "precision must be at most #{limit}, not #{prec}" if prec > limit
+    scientific = exp_text(val.abs, prec - 1, uppercase, hash)
+    marker = scientific.index(uppercase ? 'E' : 'e') || scientific.bytesize
+    exp = scientific[marker + 1, scientific.bytesize - marker - 1].to_i
+    text = Tape::String.build do |w|
+      if exp < -4 || exp >= prec
+        mantissa = scientific[0, marker]
+        w << (hash ? mantissa : trim_tape(mantissa))
+        w << scientific[marker, scientific.bytesize - marker]
+      else
+        sig = Tape::String.build do |o|
+          o << scientific[0, 1]
+          o << scientific[2, marker - 2] if marker > 2
+        end
+        fixed = Tape::String.build do |o|
+          if exp >= 0
+            if exp + 1 < prec
+              o << sig[0, exp + 1] << "."
+              o << sig[exp + 1, prec - 1 - exp]
+            else
+              o << sig
+            end
+          else
+            o << "0."
+            repeat(o, 48_u8, -exp - 1)
+            o << sig
+          end
+        end
+        w << (hash ? fixed : trim_tape(fixed))
+        w << "." if hash && !fixed.index('.')
+      end
+    end
+    float_field(val, text, minus, plus, space, zero, width)
+  end
+
+  def self.tape_truncated(val : Float64, verb : Char, minus : Bool,
+                          plus : Bool, space : Bool, zero : Bool,
+                          hash : Bool, width : Int32,
+                          precision : Int32) : Tape::String
+    bits = IyiFloatText.bits_of(val)
+    eb = bits.unsafe_shr(52_u64) & 2047_u64
+    if eb == 2047_u64
+      raise "%#{verb} wants a finite number, and #{val} is not one"
+    end
+    if val >= -9223372036854775808.0 && val < 9223372036854775808.0
+      return tape_arg(val.to_i64, verb, minus, plus, space, zero, hash,
+        width, precision)
+    end
+    f = (bits & 4503599627370495_u64) | 4503599627370496_u64
+    e = eb.to_i64.to_i32 - 1075
+    base = verb == 'x' || verb == 'X' ? 16 :
+      (verb == 'o' ? 8 : (verb == 'b' ? 2 : 10))
+    text = Tape::String.build do |w|
+      w << "-" if bits.unsafe_shr(63_u64) != 0_u64
+      if base == 10
+        whole = IyiBig.new(f)
+        whole.shl(e)
+        whole.write_decimal(w)
+      else
+        step = base == 16 ? 4 : (base == 8 ? 3 : 1)
+        w << integer_text(f.unsafe_shl((e % step).to_u64), base)
+        repeat(w, 48_u8, e // step)
+      end
+    end
+    tape_digits(text, verb, base, minus, plus, space, zero, hash,
+      width, precision)
+  end
+
+  def self.tape_arg(val, verb : Char, minus : Bool, plus : Bool, space : Bool, zero : Bool, hash : Bool, width : Int32, precision : Int32) : Tape::String
     # The rest of the tower `std/int` and `std/float` make usable is
     # formatted as the prelude's own four are: `%d` of an `Int8`, `UInt32`
     # or `Float32` panicked "wants a number". A value is widened without
@@ -776,55 +738,55 @@ module ::IyiFormat
       # `%u` is the word's bits at the word's own width, as an `Int32`'s
       # are below: widened first, `%u` of -5_i8 and of -5_i16 printed
       # 18446744073709551611, the bits of an `Int64`.
-      return format_arg(verb == 'u' ? val.to_i64 & 255_i64 : val.to_i64, verb, minus, plus, space, zero, hash, width, precision)
+      return tape_arg(verb == 'u' ? val.to_i64 & 255_i64 : val.to_i64, verb, minus, plus, space, zero, hash, width, precision)
     when Int16
-      return format_arg(verb == 'u' ? val.to_i64 & 65535_i64 : val.to_i64, verb, minus, plus, space, zero, hash, width, precision)
+      return tape_arg(verb == 'u' ? val.to_i64 & 65535_i64 : val.to_i64, verb, minus, plus, space, zero, hash, width, precision)
     when UInt8
       # Widened as `Int8` is: it had every integer verb's branch of its own
       # and none of the float verbs', so `%f` of 200_u8 panicked "wants a
       # number" where `%d` printed 200.
-      return format_arg(val.to_i64, verb, minus, plus, space, zero, hash, width, precision)
+      return tape_arg(val.to_i64, verb, minus, plus, space, zero, hash, width, precision)
     when UInt16, UInt32
-      return format_arg(val.to_u64, verb, minus, plus, space, zero, hash, width, precision)
+      return tape_arg(val.to_u64, verb, minus, plus, space, zero, hash, width, precision)
     when Float32
       # Widened for a number's verbs only: `%s` and `%p` are the value's
       # own text, and the double's was 0.10000000149011612 for 0.1_f32.
-      return format_arg(val.to_f64, verb, minus, plus, space, zero, hash, width, precision) unless verb == 's' || verb == 'p'
+      return tape_arg(val.to_f64, verb, minus, plus, space, zero, hash, width, precision) unless verb == 's' || verb == 'p'
     when Int128, UInt128
-      return format_wide(val, verb, minus, plus, space, zero, hash, width, precision)
+      return tape_wide(val, verb, minus, plus, space, zero, hash, width, precision)
     end
     case verb
     when 's'
-      format_string_arg(val.to_s, minus, width, precision)
+      tape_string_arg(text_view(val), minus, width, precision)
     when 'p'
-      format_string_arg(val.inspect, minus, width, precision)
+      tape_string_arg(val.inspect.as_tape, minus, width, precision)
     when 'c'
-      format_char_arg(val, minus, width)
+      tape_char_arg(val, minus, width)
     when 'd', 'i'
       case val
       when Int32
-        format_int64(val.to_i64, 10, false, true, minus, plus, space, zero, hash, width, precision)
+        tape_int64(val.to_i64, 10, false, true, minus, plus, space, zero, hash, width, precision)
       when Int64
-        format_int64(val, 10, false, true, minus, plus, space, zero, hash, width, precision)
+        tape_int64(val, 10, false, true, minus, plus, space, zero, hash, width, precision)
       when UInt64
-        format_uint64(val, 10, false, true, minus, plus, space, zero, hash, width, precision)
+        tape_uint64(val, 10, false, true, minus, plus, space, zero, hash, width, precision)
       when Float64
-        format_truncated(val, verb, minus, plus, space, zero, hash, width, precision)
+        tape_truncated(val, verb, minus, plus, space, zero, hash, width, precision)
       else
         not_a_number(val, verb)
       end
     when 'u'
       case val
       when Int32
-        format_int64(val < 0 ? (val.to_i64 & 4294967295_i64) : val.to_i64, 10, false, false, minus, plus, space, zero, hash, width, precision)
+        tape_int64(val < 0 ? (val.to_i64 & 4294967295_i64) : val.to_i64, 10, false, false, minus, plus, space, zero, hash, width, precision)
       when Int64
         # Unsigned is the word's bits, as an Int32's are above: `%u` of
         # -5_i64 printed -5.
-        format_uint64(val.unsafe_to_u64, 10, false, false, minus, plus, space, zero, hash, width, precision)
+        tape_uint64(val.unsafe_to_u64, 10, false, false, minus, plus, space, zero, hash, width, precision)
       when UInt64
-        format_uint64(val, 10, false, false, minus, plus, space, zero, hash, width, precision)
+        tape_uint64(val, 10, false, false, minus, plus, space, zero, hash, width, precision)
       when Float64
-        format_truncated(val, verb, minus, plus, space, zero, hash, width, precision)
+        tape_truncated(val, verb, minus, plus, space, zero, hash, width, precision)
       else
         not_a_number(val, verb)
       end
@@ -836,104 +798,104 @@ module ::IyiFormat
       # on one side. Only `%u` is the word's bits, and never signed.
       case val
       when Int32
-        format_int64(val.to_i64, 16, false, true, minus, plus, space, zero, hash, width, precision)
+        tape_int64(val.to_i64, 16, false, true, minus, plus, space, zero, hash, width, precision)
       when Int64
-        format_int64(val, 16, false, true, minus, plus, space, zero, hash, width, precision)
+        tape_int64(val, 16, false, true, minus, plus, space, zero, hash, width, precision)
       when UInt64
-        format_uint64(val, 16, false, true, minus, plus, space, zero, hash, width, precision)
+        tape_uint64(val, 16, false, true, minus, plus, space, zero, hash, width, precision)
       when Float64
-        format_truncated(val, verb, minus, plus, space, zero, hash, width, precision)
+        tape_truncated(val, verb, minus, plus, space, zero, hash, width, precision)
       else
         not_a_number(val, verb)
       end
     when 'X'
       case val
       when Int32
-        format_int64(val.to_i64, 16, true, true, minus, plus, space, zero, hash, width, precision)
+        tape_int64(val.to_i64, 16, true, true, minus, plus, space, zero, hash, width, precision)
       when Int64
-        format_int64(val, 16, true, true, minus, plus, space, zero, hash, width, precision)
+        tape_int64(val, 16, true, true, minus, plus, space, zero, hash, width, precision)
       when UInt64
-        format_uint64(val, 16, true, true, minus, plus, space, zero, hash, width, precision)
+        tape_uint64(val, 16, true, true, minus, plus, space, zero, hash, width, precision)
       when Float64
-        format_truncated(val, verb, minus, plus, space, zero, hash, width, precision)
+        tape_truncated(val, verb, minus, plus, space, zero, hash, width, precision)
       else
         not_a_number(val, verb)
       end
     when 'o'
       case val
       when Int32
-        format_int64(val.to_i64, 8, false, true, minus, plus, space, zero, hash, width, precision)
+        tape_int64(val.to_i64, 8, false, true, minus, plus, space, zero, hash, width, precision)
       when Int64
-        format_int64(val, 8, false, true, minus, plus, space, zero, hash, width, precision)
+        tape_int64(val, 8, false, true, minus, plus, space, zero, hash, width, precision)
       when UInt64
-        format_uint64(val, 8, false, true, minus, plus, space, zero, hash, width, precision)
+        tape_uint64(val, 8, false, true, minus, plus, space, zero, hash, width, precision)
       when Float64
-        format_truncated(val, verb, minus, plus, space, zero, hash, width, precision)
+        tape_truncated(val, verb, minus, plus, space, zero, hash, width, precision)
       else
         not_a_number(val, verb)
       end
     when 'b'
       case val
       when Int32
-        format_int64(val.to_i64, 2, false, true, minus, plus, space, zero, hash, width, precision)
+        tape_int64(val.to_i64, 2, false, true, minus, plus, space, zero, hash, width, precision)
       when Int64
-        format_int64(val, 2, false, true, minus, plus, space, zero, hash, width, precision)
+        tape_int64(val, 2, false, true, minus, plus, space, zero, hash, width, precision)
       when UInt64
-        format_uint64(val, 2, false, true, minus, plus, space, zero, hash, width, precision)
+        tape_uint64(val, 2, false, true, minus, plus, space, zero, hash, width, precision)
       when Float64
-        format_truncated(val, verb, minus, plus, space, zero, hash, width, precision)
+        tape_truncated(val, verb, minus, plus, space, zero, hash, width, precision)
       else
         not_a_number(val, verb)
       end
     when 'f'
       case val
       when Float64
-        format_float64(val, minus, plus, space, zero, hash, width, precision)
+        tape_float64(val, minus, plus, space, zero, hash, width, precision)
       when Int32
-        format_float64(val.to_f64, minus, plus, space, zero, hash, width, precision)
+        tape_float64(val.to_f64, minus, plus, space, zero, hash, width, precision)
       when Int64
-        format_float64(val.to_f64, minus, plus, space, zero, hash, width, precision)
+        tape_float64(val.to_f64, minus, plus, space, zero, hash, width, precision)
       when UInt64
-        format_float64(val.to_f64, minus, plus, space, zero, hash, width, precision)
+        tape_float64(val.to_f64, minus, plus, space, zero, hash, width, precision)
       else
         not_a_number(val, verb)
       end
     when 'e'
       case val
       when Float64
-        format_float_exp(val, false, minus, plus, space, zero, hash, width, precision)
+        tape_float_exp(val, false, minus, plus, space, zero, hash, width, precision)
       when Int32
-        format_float_exp(val.to_f64, false, minus, plus, space, zero, hash, width, precision)
+        tape_float_exp(val.to_f64, false, minus, plus, space, zero, hash, width, precision)
       when Int64
-        format_float_exp(val.to_f64, false, minus, plus, space, zero, hash, width, precision)
+        tape_float_exp(val.to_f64, false, minus, plus, space, zero, hash, width, precision)
       when UInt64
-        format_float_exp(val.to_f64, false, minus, plus, space, zero, hash, width, precision)
+        tape_float_exp(val.to_f64, false, minus, plus, space, zero, hash, width, precision)
       else
         not_a_number(val, verb)
       end
     when 'E'
       case val
       when Float64
-        format_float_exp(val, true, minus, plus, space, zero, hash, width, precision)
+        tape_float_exp(val, true, minus, plus, space, zero, hash, width, precision)
       when Int32
-        format_float_exp(val.to_f64, true, minus, plus, space, zero, hash, width, precision)
+        tape_float_exp(val.to_f64, true, minus, plus, space, zero, hash, width, precision)
       when Int64
-        format_float_exp(val.to_f64, true, minus, plus, space, zero, hash, width, precision)
+        tape_float_exp(val.to_f64, true, minus, plus, space, zero, hash, width, precision)
       when UInt64
-        format_float_exp(val.to_f64, true, minus, plus, space, zero, hash, width, precision)
+        tape_float_exp(val.to_f64, true, minus, plus, space, zero, hash, width, precision)
       else
         not_a_number(val, verb)
       end
     when 'g', 'G'
       case val
       when Float64
-        format_float_general(val, verb == 'G', minus, plus, space, zero, hash, width, precision)
+        tape_float_general(val, verb == 'G', minus, plus, space, zero, hash, width, precision)
       when Int32
-        format_float_general(val.to_f64, verb == 'G', minus, plus, space, zero, hash, width, precision)
+        tape_float_general(val.to_f64, verb == 'G', minus, plus, space, zero, hash, width, precision)
       when Int64
-        format_float_general(val.to_f64, verb == 'G', minus, plus, space, zero, hash, width, precision)
+        tape_float_general(val.to_f64, verb == 'G', minus, plus, space, zero, hash, width, precision)
       when UInt64
-        format_float_general(val.to_f64, verb == 'G', minus, plus, space, zero, hash, width, precision)
+        tape_float_general(val.to_f64, verb == 'G', minus, plus, space, zero, hash, width, precision)
       else
         not_a_number(val, verb)
       end
@@ -942,94 +904,17 @@ module ::IyiFormat
     end
   end
 
-  # An `Int128` or `UInt128`: an integer verb writes its digits, which may
-  # not fit 64 bits; a float verb its nearest double, as `%f` of an
-  # `Int64` is.
-  def self.format_wide(val, verb : Char, minus : Bool, plus : Bool, space : Bool, zero : Bool, hash : Bool, width : Int32, precision : Int32) : String
-    base = case verb
-           when 'd', 'i', 'u' then 10
-           when 'x', 'X'      then 16
-           when 'o'           then 8
-           when 'b'           then 2
-           else                    0
-           end
-    if base == 0
-      return format_arg(val.to_f64, verb, minus, plus, space, zero, hash, width, precision) if verb == 'f' || verb == 'e' || verb == 'E' || verb == 'g' || verb == 'G'
-      # The value's own text, as every other integer's: written as its
-      # digits and then asked again as a string, `%p` of 65_i128 was "65" in
-      # quotes, the string's inspection; and `%c` is a code point here too,
-      # where it was refused as "wants a character".
-      return format_string_arg(verb == 'p' ? val.inspect : val.to_s, minus, width, precision) if verb == 's' || verb == 'p'
-      return format_char_arg(code_point(val), minus, width) if verb == 'c'
-      raise "unknown format specifier '%#{verb}'"
-    end
-    # `%u` is the word's bits, as an `Int64`'s are: `%u` of -5_i128
-    # printed -5.
-    text = verb == 'u' && val < 0 ? val.unsafe_to_u128.to_s(base) : val.to_s(base)
-    format_digits(text, verb, base, minus, plus, space, zero, hash, width, precision)
-  end
-
-  # Digits as `to_s(base)` writes them, a `-` first when negative, given
-  # the verb's sign, prefix, precision and width.
-  def self.format_digits(text : String, verb : Char, base : Int32, minus : Bool, plus : Bool, space : Bool, zero : Bool, hash : Bool, width : Int32, precision : Int32) : String
-    negative = text.starts_with?('-')
-    digits = negative ? text[1, text.bytesize - 1] : text
-    digits = digits.upcase if verb == 'X'
-    digits = "" if digits == "0" && precision == 0
-    sign = negative ? "-" : (verb != 'u' ? (plus ? "+" : (space ? " " : "")) : "")
-    prefix = ""
-    if hash && text != "0"
-      prefix = base == 16 ? (verb == 'X' ? "0X" : "0x") : (base == 8 ? "0o" : (base == 2 ? "0b" : ""))
-    end
-    if precision >= 0
-      zero = false
-      digits = ("0" * (precision - digits.bytesize)) + digits if digits.bytesize < precision
-    end
-    total_len = sign.bytesize + prefix.bytesize + digits.bytesize
-    return sign + prefix + digits if total_len >= width
-    pad_count = width - total_len
-    if minus
-      sign + prefix + digits + (" " * pad_count)
-    elsif zero
-      sign + prefix + ("0" * pad_count) + digits
-    else
-      (" " * pad_count) + sign + prefix + digits
-    end
-  end
-
-  # A float under an integer verb is truncated, which is what Ruby, Python
-  # and the other language answer to it. Past an `Int64` the truncation is
-  # the double's own integer, f * 2^e, written whole as Python writes it:
-  # `%d` of 1e30 is 1000000000000000019884624838656, where `to_i64`
-  # panicked "arithmetic overflow". NaN and the infinities have no
-  # integer, and the refusal says that rather than "arithmetic overflow".
-  def self.format_truncated(val : Float64, verb : Char, minus : Bool, plus : Bool, space : Bool, zero : Bool, hash : Bool, width : Int32, precision : Int32) : String
-    bits = IyiFloatText.bits_of(val)
-    exponent_bits = bits.unsafe_shr(52_u64) & 2047_u64
-    raise "%#{verb} wants a finite number, and #{val} is not one" if exponent_bits == 2047_u64
-    if val >= -9223372036854775808.0 && val < 9223372036854775808.0
-      return format_arg(val.to_i64, verb, minus, plus, space, zero, hash, width, precision)
-    end
-    # Past 2^63 the exponent is at least ten and the integer is f shifted
-    # up: in base ten the bignum's digits, and in a base of 2^step those
-    # of f shifted by the exponent's remainder, then one zero per step.
-    f = (bits & 4503599627370495_u64) | 4503599627370496_u64
-    e = exponent_bits.to_i64.to_i32 - 1075
-    base = verb == 'x' || verb == 'X' ? 16 : (verb == 'o' ? 8 : (verb == 'b' ? 2 : 10))
-    if base == 10
-      whole = IyiBig.new(f)
-      whole.shl(e)
-      digits = whole.to_decimal
-    else
-      step = base == 16 ? 4 : (base == 8 ? 3 : 1)
-      digits = f.unsafe_shl((e % step).to_u64).to_s(base) + ("0" * (e // step))
-    end
-    format_digits(bits.unsafe_shr(63_u64) != 0_u64 ? "-" + digits : digits, verb, base, minus, plus, space, zero, hash, width, precision)
-  end
-
-  # A width or a precision, which an `Int32` holds: read into one, the
-  # digits of `%99999999999d` panicked "arithmetic overflow".
   def self.field_number(format_string : String, start : Int32, stop : Int32, what : String) : Int32
+    value = 0_i64
+    index = start
+    while index < stop
+      value = value * 10_i64 + (format_string.to_unsafe[index] - 48_u8).to_i64
+      raise "#{what} must be at most 2147483647, not #{format_string[start, stop - start]}" if value > 2147483647_i64
+      index = index + 1
+    end
+    value.to_i32
+  end
+  def self.field_number(format_string : Tape::String, start : Int32, stop : Int32, what : String) : Int32
     value = 0_i64
     index = start
     while index < stop
@@ -1069,13 +954,44 @@ pub def sprintf(format_string : String, args : Tuple) : String
 end
 
 private def format_list(format_string : String, args) : String
+  result = ""
+  tape do
+    result = sprintf(format_string.as_tape, args).to_heap
+  end
+  result
+end
+
+pub def sprintf(format_string : Tape::String, *args : *T
+                ) : Tape::String forall T
+  sprintf(format_string, args)
+end
+
+pub def sprintf(format_string : Tape::String, args : Tuple) : Tape::String
+  Tape::String.build { |w| format_list(format_string, args, w) }
+end
+
+pub def sprintf(format_string : Tape::String, args : Array) : Tape::String
+  Tape::String.build { |w| format_list(format_string, args, w) }
+end
+
+pub def sprintf(format_string : Tape::String,
+                writer : Tape::String::Writer, args : Tuple) : Nil
+  format_list(format_string, args, writer)
+end
+
+pub def sprintf(format_string : Tape::String,
+                writer : Tape::String::Writer, args : Array) : Nil
+  format_list(format_string, args, writer)
+end
+
+private def format_list(format_string : Tape::String, args,
+                        result : Tape::String::Writer) : Nil
   index = 0
   format_bytesize = format_string.bytesize
   format_ptr = format_string.to_unsafe
   arg_index = 0
   # Written into one buffer: `result = result + piece` copied the whole
   # result once per piece, and a `%%` is a piece.
-  result = String::Builder.new(format_bytesize)
 
   while index < format_bytesize
     byte = format_ptr[index]
@@ -1084,7 +1000,7 @@ private def format_list(format_string : String, args) : String
       while index < format_bytesize && format_ptr[index] != 37_u8
         index = index + 1
       end
-      result.write(format_ptr + start, index - start)
+      result << format_string[start, index - start]
       next
     end
 
@@ -1153,7 +1069,7 @@ private def format_list(format_string : String, args) : String
     # A verb is ASCII; past it is a character of several bytes, named whole
     # - its lead byte read as a character of its own was `%Ã` for `%é`.
     if format_ptr[index] >= 0x80_u8
-      format_string[index, format_bytesize - index].each_char do |char|
+      format_string[index, format_bytesize - index].to_heap.each_char do |char|
         raise "unknown format specifier '%#{char}'"
       end
     end
@@ -1168,7 +1084,7 @@ private def format_list(format_string : String, args) : String
     val = args[arg_index]
     arg_index = arg_index + 1
 
-    result << IyiFormat.format_arg(val, verb, minus, plus, space, zero, hash, width, precision)
+    result << IyiFormat.tape_arg(val, verb, minus, plus, space, zero, hash, width, precision)
   end
 
   # And the mirror of "too few": an argument no specifier took is a `%s`
@@ -1177,7 +1093,7 @@ private def format_list(format_string : String, args) : String
     raise "too many arguments for format string: #{args.size} given, #{arg_index} used"
   end
 
-  result.to_s
+  nil
 end
 
 pub def printf(format_string : String, *args : *T) : Nil forall T
