@@ -49,6 +49,7 @@ class Iyi::TapeTextLowering < Iyi::Visitor
   # level; *params* are the names it is given, never lowered, and *whole*
   # says the scope itself runs on a tape.
   def self.lower_scope(body : ASTNode, params : Array(String), whole : Bool) : Nil
+    return if TapeScopeRuntime.crystal?(body.location)
     scan = Scan.new(whole)
     params.each { |name| scan.use(name, :other) }
     body.accept(scan)

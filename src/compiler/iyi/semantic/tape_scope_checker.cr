@@ -25,11 +25,25 @@ class Iyi::TapeScopeChecker
            "!=", "starts_with?", "finish", "none?", "index", "start",
            "map", "sum", "__loop_fetch", "bytes"}
 
+  def self.declares?(body : ASTNode) : Bool
+    nodes = body.is_a?(Expressions) ? body.expressions : [body]
+    nodes.any? do |node|
+      node.is_a?(Def) || node.is_a?(ClassDef) || node.is_a?(ModuleDef) ||
+        node.is_a?(Macro) || node.is_a?(EnumDef) || node.is_a?(Alias) ||
+        node.is_a?(Include) || node.is_a?(Extend) || node.is_a?(VisibilityModifier) ||
+        node.is_a?(Annotation)
+    end
+  end
+
   def self.mark(program : Program, node : While | Block | Def) : Nil
     return if TapeScopeRuntime.runtime?(node.location)
     body = node.body
     return if body.is_a?(Nop) || body.is_a?(Primitive)
     return if node.is_a?(Def) && (node.abstract? || node.name == "initialize")
+    # A block that declares methods or types is a macro's body (`record
+    # ... do def ... end end`), not code that runs: wrapping it would put
+    # the declarations inside an expression.
+    return if node.is_a?(Block) && declares?(body)
     on = BoolLiteral.new(false).at(body)
     mark = program.new_temp_var.at(body)
     value = program.new_temp_var.at(body)
@@ -281,13 +295,24 @@ class Iyi::TapeScopeChecker
 end
 
 # Where the tape's own runtime is: the prelude and the compiler's code,
-# which is never marked. `std/` is: its raw pointers keep a body's tape
-# (`Scan#pointer?`), and it keeps no pointer into a tape in a heap object.
+# which is never marked, nor is Crystal's code (a `.cr` file), which has
+# no tape: marking it wrapped the block of `record Value128 ... do def
+# ... end end` in an expression, and its `def` could not be declared, so
+# a compiler built from source could not build itself. `std/` is marked:
+# its raw pointers keep a body's tape (`Scan#pointer?`), and it keeps no
+# pointer into a tape in a heap object.
 module Iyi::TapeScopeRuntime
   def self.runtime?(location : Location?) : Bool
     file = location.try(&.original_filename)
     return true unless file
-    file.includes?("/src/iyi/") || file.includes?("/src/compiler/")
+    crystal?(location) || file.includes?("/src/iyi/") || file.includes?("/src/compiler/")
+  end
+
+  # Crystal's code, a `.cr` file: none of the tape's lowerings apply to it,
+  # as it has no tape and no `__loop_fetch`.
+  def self.crystal?(location : Location?) : Bool
+    file = location.try(&.original_filename)
+    !file.nil? && file.ends_with?(".cr")
   end
 end
 
@@ -297,6 +322,6 @@ module Iyi::TapePointerCheckerLibrary
     file = location.try(&.original_filename)
     return true unless file
     file.includes?("/std/") || file.includes?("/src/iyi/") ||
-      file.includes?("/src/compiler/")
+      file.includes?("/src/compiler/") || file.ends_with?(".cr")
   end
 end

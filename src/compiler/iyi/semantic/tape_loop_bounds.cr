@@ -7,6 +7,7 @@
 # `[]` and `[]=` as written (Goose elides these checks too).
 class Iyi::TapeLoopBounds < Iyi::Visitor
   def self.lower(node : While) : Nil
+    return if TapeScopeRuntime.crystal?(node.location)
     cond = node.cond
     return unless cond.is_a?(Call) && cond.name == "<" && cond.args.size == 1
     index = cond.obj
