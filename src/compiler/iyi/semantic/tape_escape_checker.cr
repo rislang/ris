@@ -41,6 +41,7 @@ class Iyi::TapeEscapeChecker
   def library?(location : Location?) : Bool
     file = location.try(&.original_filename)
     return false unless file
+    file = file.gsub('\\', '/')
     file.includes?("/std/") || file.includes?("/src/iyi/")
   end
 

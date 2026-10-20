@@ -305,6 +305,7 @@ module Iyi::TapeScopeRuntime
   def self.runtime?(location : Location?) : Bool
     file = location.try(&.original_filename)
     return true unless file
+    file = file.gsub('\\', '/')
     crystal?(location) || file.includes?("/src/iyi/") || file.includes?("/src/compiler/")
   end
 
@@ -321,6 +322,7 @@ module Iyi::TapePointerCheckerLibrary
   def self.library?(location : Location?) : Bool
     file = location.try(&.original_filename)
     return true unless file
+    file = file.gsub('\\', '/')
     file.includes?("/std/") || file.includes?("/src/iyi/") ||
       file.includes?("/src/compiler/") || file.ends_with?(".cr")
   end

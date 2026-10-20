@@ -28,10 +28,12 @@ class Iyi::TapePointerChecker
   end
 
   # Code of the library: a `std/` module, wherever IYI_PATH finds it (a
-  # test's patched copy too), and the prelude with the tape itself.
+  # test's patched copy too), and the prelude with the tape itself. On
+  # Windows the path is written with backslashes.
   def library?(location : Location?) : Bool
     file = location.try(&.original_filename)
     return false unless file
+    file = file.gsub('\\', '/')
     file.includes?("/std/") || file.includes?("/src/iyi/")
   end
 
