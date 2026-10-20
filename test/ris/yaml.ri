@@ -1,0 +1,23 @@
+module test/yaml_tape
+
+import std/yaml::{YAML}
+
+kept = YAML.parse("null")
+tape do
+  text = "name: café\nlist: [1, true, null, 0.125]\nquoted: \"a\\nb\"\n".as_tape
+  doc = YAML.parse(text)
+  exit 1 unless doc["name"].as_s == "café"
+  exit 2 unless doc["list"][0].as_i == 1
+  exit 3 unless doc["quoted"].as_s == "a\nb"
+  w = Tape::String::Writer.new(1)
+  w << "prefix:"
+  YAML.dump(doc, w)
+  rendered = YAML.dump(doc)
+  exit 4 unless YAML.parse(rendered) == doc
+  exit 5 unless w.finish.starts_with?("prefix:name:")
+  exit 6 unless YAML.parse?("[bad".as_tape).nil?
+  kept = doc.to_heap
+end
+exit 7 unless kept["name"].as_s == "café"
+exit 8 unless YAML.parse(YAML.dump(kept)) == kept
+puts "PASS: yaml tape and heap APIs"

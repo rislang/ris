@@ -401,145 +401,458 @@ pub struct Any
   end
 end
 
-# A growable byte buffer for the strings the parser and the emitter build.
-class ByteBuffer
-  @bytes : Pointer(UInt8)
-  @capacity : Int32
-  @size : Int32
+@[OnTape]
+struct TapeMap(K, V)
+  @keys : Tape::Array(K)
+  @values : Tape::Array(V)
 
   def initialize
-    @capacity = 64
-    @bytes = Pointer(UInt8).malloc(64_u64)
-    @size = 0
+    @keys = Tape::Array(K).new
+    @values = Tape::Array(V).new
   end
 
   def size : Int32
-    @size
+    @keys.size
   end
 
-  def clear : Nil
-    @size = 0
-  end
-
-  def <<(byte : UInt8) : Nil
-    room(@size + 1)
-    @bytes[@size] = byte
-    @size = @size + 1
-  end
-
-  def <<(text : String) : Nil
-    count = text.bytesize
-    return if count == 0
-    room(@size + count)
-    (@bytes + @size).copy_from(text.to_unsafe, count)
-    @size = @size + count
-  end
-
-  # `count` bytes from `source`, as they are.
-  def append(source : Pointer(UInt8), count : Int32) : Nil
-    return if count <= 0
-    room(@size + count)
-    (@bytes + @size).copy_from(source, count)
-    @size = @size + count
-  end
-
-  # The byte at `index`, which is below `size`.
-  def [](index : Int32) : UInt8
-    @bytes[index]
-  end
-
-  # Keeps the first `count` bytes, in place.
-  def truncate(count : Int32) : Nil
-    @size = count if count < @size
-  end
-
-  def spaces(count : Int32) : Nil
-    while count > 0
-      self << 32_u8
-      count = count - 1
+  def []?(key : K) : V?
+    @keys.each_with_index do |item, i|
+      return @values[i] if item == key
     end
+    nil
   end
 
-  def codepoint(point : Int32) : Nil
-    if point < 0x80
-      self << point.to_u8
-    elsif point < 0x800
-      self << (0xC0 | (point >> 6)).to_u8
-      self << (0x80 | (point & 0x3F)).to_u8
-    elsif point < 0x10000
-      self << (0xE0 | (point >> 12)).to_u8
-      self << (0x80 | ((point >> 6) & 0x3F)).to_u8
-      self << (0x80 | (point & 0x3F)).to_u8
-    else
-      self << (0xF0 | (point >> 18)).to_u8
-      self << (0x80 | ((point >> 12) & 0x3F)).to_u8
-      self << (0x80 | ((point >> 6) & 0x3F)).to_u8
-      self << (0x80 | (point & 0x3F)).to_u8
+  def [](key : K) : V
+    self[key]? || raise "missing YAML key"
+  end
+
+  def has_key?(key : K) : Bool
+    @keys.each { |item| return true if item == key }
+    false
+  end
+
+  def []=(key : K, value : V) : Nil
+    @keys.each_with_index do |item, i|
+      if item == key
+        @values[i] = value
+        return
+      end
     end
+    @keys << key
+    @values << value
   end
 
-  def to_s : String
-    count = @size
-    source = @bytes
-    String.new(count) { |target| target.copy_from(source, count) }
-  end
-
-  private def room(needed : Int32) : Nil
-    return if needed <= @capacity
-    while @capacity < needed
-      @capacity = @capacity * 2
-    end
-    @bytes = @bytes.realloc(@capacity.to_u64)
+  def each(& : K, V -> _) : Nil
+    @keys.each_with_index { |key, i| yield key, @values[i] }
   end
 end
 
-# The core schema's reading of a plain scalar, shared by the parser (to
-# resolve) and the emitter (to know what must be quoted).
-module Scalar
-  def self.resolve(text : String) : Any
+@[OnTape]
+pub struct TapeValue
+  alias Type = Nil | Bool | Int64 | Float64 | Tape::String | Tape::Array(TapeValue) | TapeMap(TapeValue, TapeValue)
+
+  KIND_NIL    = 0
+  KIND_BOOL   = 1
+  KIND_INT    = 2
+  KIND_FLOAT  = 3
+  KIND_STRING = 4
+  KIND_ARRAY  = 5
+  KIND_HASH   = 6
+
+  getter raw : Type
+
+  def initialize(@raw : Type)
+  end
+
+  def initialize(value : Int32)
+    @raw = value.to_i64
+  end
+
+  # Which member of the union `raw` is, as one of the KIND_ constants.
+  # Reference types are tested first on purpose (see the header).
+  def kind : Int32
+    r = @raw
+    if r.is_a?(Tape::Array(TapeValue))
+      KIND_ARRAY
+    elsif r.is_a?(TapeMap(TapeValue, TapeValue))
+      KIND_HASH
+    elsif r.is_a?(Tape::String)
+      KIND_STRING
+    elsif r.is_a?(Int64)
+      KIND_INT
+    elsif r.is_a?(Float64)
+      KIND_FLOAT
+    elsif r.is_a?(Bool)
+      KIND_BOOL
+    else
+      KIND_NIL
+    end
+  end
+
+  # The name of the kind, for the sentences below.
+  def kind_name : String
+    k = kind
+    if k == KIND_ARRAY
+      "a sequence"
+    elsif k == KIND_HASH
+      "a mapping"
+    elsif k == KIND_STRING
+      "a string"
+    elsif k == KIND_INT
+      "an integer"
+    elsif k == KIND_FLOAT
+      "a float"
+    elsif k == KIND_BOOL
+      "a boolean"
+    else
+      "null"
+    end
+  end
+
+  def null? : Bool
+    kind == KIND_NIL
+  end
+
+  def as_nil : Nil
+    raise "expected null, not #{kind_name}" unless null?
+    nil
+  end
+
+  def as_nil? : Nil
+    nil
+  end
+
+  def as_bool : Bool
+    raise "expected a boolean, not #{kind_name}" unless kind == KIND_BOOL
+    @raw.as(Bool)
+  end
+
+  def as_bool? : Bool?
+    kind == KIND_BOOL ? @raw.as(Bool) : nil
+  end
+
+  def as_i : Int64
+    raise "expected an integer, not #{kind_name}" unless kind == KIND_INT
+    @raw.as(Int64)
+  end
+
+  def as_i? : Int64?
+    kind == KIND_INT ? @raw.as(Int64) : nil
+  end
+
+  # A float, or an integer widened to one.
+  def as_f : Float64
+    k = kind
+    return @raw.as(Float64) if k == KIND_FLOAT
+    return @raw.as(Int64).to_f64 if k == KIND_INT
+    raise "expected a float, not #{kind_name}"
+  end
+
+  def as_f? : Float64?
+    k = kind
+    return @raw.as(Float64) if k == KIND_FLOAT
+    return @raw.as(Int64).to_f64 if k == KIND_INT
+    nil
+  end
+
+  def as_s : Tape::String
+    raise "expected a string, not #{kind_name}" unless kind == KIND_STRING
+    @raw.as(Tape::String)
+  end
+
+  def as_s? : Tape::String?
+    kind == KIND_STRING ? @raw.as(Tape::String) : nil
+  end
+
+  def as_a : Tape::Array(TapeValue)
+    raise "expected a sequence, not #{kind_name}" unless kind == KIND_ARRAY
+    @raw.as(Tape::Array(TapeValue))
+  end
+
+  def as_a? : Tape::Array(TapeValue)?
+    kind == KIND_ARRAY ? @raw.as(Tape::Array(TapeValue)) : nil
+  end
+
+  def as_h : TapeMap(TapeValue, TapeValue)
+    raise "expected a mapping, not #{kind_name}" unless kind == KIND_HASH
+    @raw.as(TapeMap(TapeValue, TapeValue))
+  end
+
+  def as_h? : TapeMap(TapeValue, TapeValue)?
+    kind == KIND_HASH ? @raw.as(TapeMap(TapeValue, TapeValue)) : nil
+  end
+
+  # Elements of a sequence, pairs of a mapping, characters of a string.
+  def size : Int32
+    k = kind
+    return @raw.as(Tape::Array(TapeValue)).size if k == KIND_ARRAY
+    return @raw.as(TapeMap(TapeValue, TapeValue)).size if k == KIND_HASH
+    return @raw.as(Tape::String).bytesize if k == KIND_STRING
+    raise "size of #{kind_name}"
+  end
+
+  def [](key : TapeValue) : TapeValue
+    h = as_h
+    raise "no such key #{key.to_heap.inspect}" unless h.has_key?(key)
+    h[key]
+  end
+
+  def []?(key : TapeValue) : TapeValue?
+    h = as_h?
+    return nil if h.nil?
+    h[key]?
+  end
+
+  def [](key : Tape::String) : TapeValue
+    self[TapeValue.new(key)]
+  end
+
+  def []?(key : Tape::String) : TapeValue?
+    self[TapeValue.new(key)]?
+  end
+
+  # An Int32 indexes a sequence and reaches an integer key of a mapping:
+  # `1: one` has the `Int64` key 1, and `doc[1]` panicked "expected a
+  # sequence, not a mapping" while `[]?` and `dig?` answered nil.
+  def [](index : Int32) : TapeValue
+    return self[TapeValue.new(index)] if kind == KIND_HASH
+    as_a[index]
+  end
+
+  def []?(index : Int32) : TapeValue?
+    return self[TapeValue.new(index)]? if kind == KIND_HASH
+    a = as_a?
+    return nil if a.nil?
+    at = index < 0 ? a.size + index : index
+    at >= 0 && at < a.size ? a[at] : nil
+  end
+
+  def dig?(key : Tape::String | Int32) : TapeValue?
+    step?(key)
+  end
+
+  def dig?(key : Tape::String | Int32, *rest : Tape::String | Int32) : TapeValue?
+    v = step?(key)
+    return nil if v.nil?
+    v.dig?(*rest)
+  end
+
+  def dig(key : Tape::String | Int32) : TapeValue
+    step(key)
+  end
+
+  def dig(key : Tape::String | Int32, *rest : Tape::String | Int32) : TapeValue
+    step(key).dig(*rest)
+  end
+
+  private def step?(key : Tape::String | Int32) : TapeValue?
+    if key.is_a?(Tape::String)
+      self[key]?
+    else
+      self[key]?
+    end
+  end
+
+  private def step(key : Tape::String | Int32) : TapeValue
+    if key.is_a?(Tape::String)
+      self[key]
+    else
+      self[key]
+    end
+  end
+
+  # Structural: same kind, same value; a mapping equals a mapping with the
+  # same pairs in any order. `1` and `1.0` are different values.
+  def ==(other : TapeValue) : Bool
+    k = kind
+    return false unless k == other.kind
+    if k == KIND_ARRAY
+      a = as_a
+      b = other.as_a
+      return false unless a.size == b.size
+      a.each_with_index do |item, i|
+        return false unless item == b[i]
+      end
+      true
+    elsif k == KIND_HASH
+      a = @raw.as(TapeMap(TapeValue, TapeValue))
+      b = other.raw.as(TapeMap(TapeValue, TapeValue))
+      return false unless a.size == b.size
+      a.each do |key, value|
+        found = b[key]?
+        return false if found.nil?
+        return false unless found == value
+      end
+      true
+    elsif k == KIND_STRING
+      @raw.as(Tape::String) == other.raw.as(Tape::String)
+    elsif k == KIND_INT
+      @raw.as(Int64) == other.raw.as(Int64)
+    elsif k == KIND_FLOAT
+      @raw.as(Float64) == other.raw.as(Float64)
+    elsif k == KIND_BOOL
+      @raw.as(Bool) == other.raw.as(Bool)
+    else
+      true
+    end
+  end
+
+  def !=(other : TapeValue) : Bool
+    !(self == other)
+  end
+
+  def initialize(value : String)
+    @raw = value.as_tape
+  end
+
+  def [](key : String) : TapeValue
+    self[TapeValue.new(key)]
+  end
+
+  def []?(key : String) : TapeValue?
+    self[TapeValue.new(key)]?
+  end
+
+  def self.view(value : Any) : TapeValue
+    k = value.kind
+    if k == Any::KIND_ARRAY
+      items = Tape::Array(TapeValue).new
+      value.as_a.each { |item| items << view(item) }
+      TapeValue.new(items)
+    elsif k == Any::KIND_HASH
+      pairs = TapeMap(TapeValue, TapeValue).new
+      value.as_h.each { |key, item| pairs[view(key)] = view(item) }
+      TapeValue.new(pairs)
+    elsif k == Any::KIND_STRING
+      TapeValue.new(value.as_s.as_tape)
+    elsif k == Any::KIND_INT
+      TapeValue.new(value.as_i)
+    elsif k == Any::KIND_FLOAT
+      TapeValue.new(value.as_f)
+    elsif k == Any::KIND_BOOL
+      TapeValue.new(value.as_bool)
+    else
+      TapeValue.new(nil)
+    end
+  end
+
+  def to_heap : Any
+    k = kind
+    if k == KIND_ARRAY
+      items = [] of Any
+      as_a.each { |item| items << item.to_heap }
+      Any.new(items)
+    elsif k == KIND_HASH
+      pairs = Hash(Any, Any).new
+      as_h.each { |key, item| pairs[key.to_heap] = item.to_heap }
+      Any.new(pairs)
+    elsif k == KIND_STRING
+      Any.new(as_s.to_heap)
+    elsif k == KIND_INT
+      Any.new(as_i)
+    elsif k == KIND_FLOAT
+      Any.new(as_f)
+    elsif k == KIND_BOOL
+      Any.new(as_bool)
+    else
+      Any.new(nil)
+    end
+  end
+end
+@[OnTape]
+struct TapeBuffer
+  @writer : Tape::String::Writer
+
+  def initialize
+    @writer = Tape::String::Writer.new(64)
+  end
+
+  def size : Int32
+    @writer.length
+  end
+
+  def clear : Nil
+    @writer.truncate(0)
+  end
+
+  def <<(byte : UInt8) : Nil
+    @writer.push(byte)
+  end
+
+  def <<(text : String | Tape::String) : Nil
+    @writer << text
+  end
+
+  def append(source : Pointer(UInt8), count : Int32) : Nil
+    @writer << Tape::String.new(source, count) if count > 0
+  end
+
+  def [](index : Int32) : UInt8
+    @writer.finish[index]
+  end
+
+  def truncate(count : Int32) : Nil
+    @writer.truncate(count)
+  end
+
+  def spaces(count : Int32) : Nil
+    count.times { @writer << " " }
+  end
+
+  def codepoint(point : Int32) : Nil
+    @writer << point.unsafe_chr
+  end
+
+  def finish : Tape::String
+    Tape::String.build { |w| w << @writer.finish }
+  end
+end
+
+module TapeScalar
+  def self.resolve(text : Tape::String) : TapeValue
     size = text.bytesize
-    return Any.new(nil) if size == 0
+    return TapeValue.new(nil) if size == 0
     bytes = text.to_unsafe
     first = bytes[0]
     if first == 126_u8 # ~
-      return Any.new(nil) if size == 1
+      return TapeValue.new(nil) if size == 1
     elsif first == 110_u8 || first == 78_u8 # n N
-      return Any.new(nil) if text == "null" || text == "Null" || text == "NULL"
+      return TapeValue.new(nil) if text == "null" || text == "Null" || text == "NULL"
     elsif first == 116_u8 || first == 84_u8 # t T
-      return Any.new(true) if text == "true" || text == "True" || text == "TRUE"
+      return TapeValue.new(true) if text == "true" || text == "True" || text == "TRUE"
     elsif first == 102_u8 || first == 70_u8 # f F
-      return Any.new(false) if text == "false" || text == "False" || text == "FALSE"
+      return TapeValue.new(false) if text == "false" || text == "False" || text == "FALSE"
     end
 
     if first == 48_u8 && size > 2 # 0x.. 0o..
       if bytes[1] == 120_u8
         v = text[2, size - 2].to_i64?(16)
-        return Any.new(v) if !v.nil? && hex_digits?(bytes + 2, size - 2)
+        return TapeValue.new(v) if !v.nil? && hex_digits?(bytes + 2, size - 2)
       elsif bytes[1] == 111_u8
         v = text[2, size - 2].to_i64?(8)
-        return Any.new(v) if !v.nil? && octal_digits?(bytes + 2, size - 2)
+        return TapeValue.new(v) if !v.nil? && octal_digits?(bytes + 2, size - 2)
       end
     end
 
     at = 0
     at = 1 if first == 45_u8 || first == 43_u8 # - +
-    return Any.new(text) if at >= size
+    return TapeValue.new(text) if at >= size
 
     if bytes[at] == 46_u8 # .
       rest = text[at, size - at]
       if rest == ".inf" || rest == ".Inf" || rest == ".INF"
-        return Any.new(first == 45_u8 ? "-Infinity".to_f : "Infinity".to_f)
+        return TapeValue.new(first == 45_u8 ? "-Infinity".to_f : "Infinity".to_f)
       end
-      return Any.new("NaN".to_f) if at == 0 && (rest == ".nan" || rest == ".NaN" || rest == ".NAN")
+      return TapeValue.new("NaN".to_f) if at == 0 && (rest == ".nan" || rest == ".NaN" || rest == ".NAN")
     end
 
     if decimal_digits?(bytes + at, size - at)
       v = text.to_i64?(10)
-      return Any.new(v) unless v.nil?
-      return Any.new(text.to_f)
+      return TapeValue.new(v) unless v.nil?
+      return TapeValue.new(text.to_f)
     end
-    return Any.new(text.to_f) if float_text?(bytes + at, size - at)
-    Any.new(text)
+    return TapeValue.new(text.to_f) if float_text?(bytes + at, size - at)
+    TapeValue.new(text)
   end
 
   def self.decimal_digits?(bytes : Pointer(UInt8), count : Int32) : Bool
@@ -604,9 +917,8 @@ module Scalar
   end
 end
 
-# Reads one stream. Every failure is recorded once in `@error` and every
-# loop returns as soon as one is recorded; nothing is raised inside.
-pub class Parser
+@[OnTape]
+struct TapeParser
   # Deep enough for any document a person wrote, and shallow enough for a
   # task's 256 KB stack: at 256 a task parsing a 256-deep flow sequence,
   # or comparing two 128 deep, died of a stack overflow that took the
@@ -624,21 +936,21 @@ pub class Parser
   # break), where its content starts (after the indentation; moved past a
   # `- ` when a sequence entry is entered), whether a tab was in the
   # indentation.
-  @starts : Array(Int32)
-  @ends : Array(Int32)
-  @heads : Array(Int32)
-  @tabbed : Array(Bool)
+  @starts : Tape::Array(Int32)
+  @ends : Tape::Array(Int32)
+  @heads : Tape::Array(Int32)
+  @tabbed : Tape::Array(Bool)
   @line : Int32
   @error : String?
-  @anchors : Hash(String, Any)
-  @open_anchors : Array(String)
+  @anchors : TapeMap(Tape::String, TapeValue)
+  @open_anchors : Tape::Array(Tape::String)
   # Nodes read so far, and per anchor how many nodes its value holds
   # (measured between opening and closing it); an alias adds that many
   # to `@nodes` and to `@expanded`, which is what ALIAS_NODE_LIMIT bounds.
   @nodes : Int64
   @expanded : Int64
-  @anchor_sizes : Hash(String, Int64)
-  @open_sizes : Array(Int64)
+  @anchor_sizes : TapeMap(Tape::String, Int64)
+  @open_sizes : Tape::Array(Int64)
   # Collections open now, and per anchor how deep its value nests: the
   # deepest `@peak` reached while it was open, past the depth it opened
   # at. An alias counts as its anchor's value written out in its place,
@@ -649,30 +961,30 @@ pub class Parser
   # overflow.
   @depth : Int32
   @peak : Int32
-  @anchor_depths : Hash(String, Int32)
-  @open_peaks : Array(Int32)
-  @buffer : ByteBuffer
+  @anchor_depths : TapeMap(Tape::String, Int32)
+  @open_peaks : Tape::Array(Int32)
+  @buffer : TapeBuffer
 
-  def initialize(text : String)
+  def initialize(text : Tape::String)
     @bytes = text.to_unsafe
     @size = text.bytesize
-    @starts = [] of Int32
-    @ends = [] of Int32
-    @heads = [] of Int32
-    @tabbed = [] of Bool
+    @starts = Tape::Array(Int32).new
+    @ends = Tape::Array(Int32).new
+    @heads = Tape::Array(Int32).new
+    @tabbed = Tape::Array(Bool).new
     @line = 0
     @error = nil
-    @anchors = Hash(String, Any).new
-    @open_anchors = [] of String
+    @anchors = TapeMap(Tape::String, TapeValue).new
+    @open_anchors = Tape::Array(Tape::String).new
     @nodes = 0_i64
     @expanded = 0_i64
-    @anchor_sizes = Hash(String, Int64).new
-    @open_sizes = [] of Int64
+    @anchor_sizes = TapeMap(Tape::String, Int64).new
+    @open_sizes = Tape::Array(Int64).new
     @depth = 0
     @peak = 0
-    @anchor_depths = Hash(String, Int32).new
-    @open_peaks = [] of Int32
-    @buffer = ByteBuffer.new
+    @anchor_depths = TapeMap(Tape::String, Int32).new
+    @open_peaks = Tape::Array(Int32).new
+    @buffer = TapeBuffer.new
     split_lines
   end
 
@@ -681,15 +993,15 @@ pub class Parser
   end
 
   # Every document in the stream, or nil with `error` set.
-  def parse_all : Array(Any)?
-    docs = [] of Any
+  def parse_all : Tape::Array(TapeValue)?
+    docs = Tape::Array(TapeValue).new
     implicit_allowed = true
     while true
       skip_directives_and_blank
       return nil if @error
       break if @line >= @starts.size
       explicit = false
-      node = Any.new(nil)
+      node = TapeValue.new(nil)
       if marker?(@line, 45_u8) # ---
         explicit = true
         pos = skip_blank(@starts[@line] + 3)
@@ -713,9 +1025,9 @@ pub class Parser
       return nil if @error
       # Every node leaves `@line` on the first line after it, so the next
       # document starts here or on a later blank-free line.
-      @anchors = Hash(String, Any).new
-      @anchor_sizes = Hash(String, Int64).new
-      @anchor_depths = Hash(String, Int32).new
+      @anchors = TapeMap(Tape::String, TapeValue).new
+      @anchor_sizes = TapeMap(Tape::String, Int64).new
+      @anchor_depths = TapeMap(Tape::String, Int32).new
       docs << node
       implicit_allowed = false
       skip_blank_lines
@@ -1019,18 +1331,18 @@ pub class Parser
   # node is null. Every node, scalar or collection, leaves `@line` on the
   # first line after it, so a caller never guesses whether the line it is
   # on was consumed.
-  private def parse_block_node(parent : Int32, sequence_at_parent : Bool) : Any
+  private def parse_block_node(parent : Int32, sequence_at_parent : Bool) : TapeValue
     skip_blank_lines
-    return Any.new(nil) if @error
-    return Any.new(nil) if @line >= @starts.size || document_marker?(@line)
+    return TapeValue.new(nil) if @error
+    return TapeValue.new(nil) if @line >= @starts.size || document_marker?(@line)
     refuse_tab(@line)
-    return Any.new(nil) if @error
+    return TapeValue.new(nil) if @error
     indent = indent_of(@line)
     if indent <= parent
       if sequence_at_parent && indent == parent && sequence_entry?(@line)
         return parse_block_sequence(indent)
       end
-      return Any.new(nil)
+      return TapeValue.new(nil)
     end
     if sequence_entry?(@line)
       parse_block_sequence(indent)
@@ -1047,37 +1359,37 @@ pub class Parser
   # scalar, or (after properties alone) the block node on the lines below.
   # Requires the rest of the value's last line to be empty and steps past
   # it. `outer_tag` is a tag that stood alone on the line above.
-  private def parse_inline_node(pos : Int32, parent : Int32, sequence_at_parent : Bool, outer_tag : String? = nil) : Any
-    anchor = nil.as(String?)
+  private def parse_inline_node(pos : Int32, parent : Int32, sequence_at_parent : Bool, outer_tag : Tape::String? = nil) : TapeValue
+    anchor = nil.as(Tape::String?)
     tag = outer_tag
     anchor_pos = pos
     while true
       b = pos < @ends[@line] ? @bytes[pos] : 0_u8
       if b == 38_u8 # &
         fail("a second anchor", pos) unless anchor.nil?
-        return Any.new(nil) if @error
+        return TapeValue.new(nil) if @error
         anchor_pos = pos
         finish = name_end(pos + 1, @ends[@line])
-        anchor = String.new(finish - pos - 1) { |t| t.copy_from(@bytes + pos + 1, finish - pos - 1) }
+        anchor = Tape::String.new(@bytes + pos + 1, finish - pos - 1)
         fail("an anchor with no name", pos) if !anchor.nil? && anchor.empty?
-        return Any.new(nil) if @error
+        return TapeValue.new(nil) if @error
         pos = skip_blank(finish)
       elsif b == 33_u8 # !
         # A node has one tag, as it has one anchor: `!!str !!int 1` read
         # as the integer, the first tag dropped.
         fail("a second tag", pos) unless tag.nil?
-        return Any.new(nil) if @error
+        return TapeValue.new(nil) if @error
         finish = tag_end(pos, @ends[@line])
         tag = tag_text(pos, finish)
         fail("unknown tag #{tag}", pos) unless tag.nil? || known_tag?(tag)
-        return Any.new(nil) if @error
+        return TapeValue.new(nil) if @error
         pos = skip_blank(finish)
       else
         break
       end
     end
     open_anchor(anchor)
-    value = Any.new(nil)
+    value = TapeValue.new(nil)
     if line_end?(pos)
       # Properties alone on the line: the node is below.
       @line = @line + 1
@@ -1096,7 +1408,7 @@ pub class Parser
           empty = !(sequence_at_parent && indent_of(@line) == parent && sequence_entry?(@line))
         end
         if empty
-          value = apply_tag(tag, Any.new(""), anchor_pos)
+          value = apply_tag(tag, TapeValue.new(""), anchor_pos)
         elsif sequence_entry?(@line) || key_colon(@line) >= 0
           value = apply_tag(tag, parse_block_node(parent, sequence_at_parent), anchor_pos)
         else
@@ -1116,7 +1428,7 @@ pub class Parser
         @heads[@line] = saved
         if is_key
           fail("an anchor on a mapping key is not supported", anchor_pos)
-          return Any.new(nil)
+          return TapeValue.new(nil)
         end
       end
       value = parse_inline_value(pos, parent, tag)
@@ -1133,25 +1445,25 @@ pub class Parser
     b == 64_u8 || b == 96_u8 || b == 37_u8 || b == 93_u8 || b == 125_u8 || b == 44_u8
   end
 
-  private def parse_inline_value(pos : Int32, parent : Int32, tag : String?) : Any
+  private def parse_inline_value(pos : Int32, parent : Int32, tag : Tape::String?) : TapeValue
     @nodes = @nodes + 1
     b = @bytes[pos]
     if b == 42_u8 # *
       finish = name_end(pos + 1, @ends[@line])
-      name = String.new(finish - pos - 1) { |t| t.copy_from(@bytes + pos + 1, finish - pos - 1) }
+      name = Tape::String.new(@bytes + pos + 1, finish - pos - 1)
       value = resolve_alias(name, pos)
       expect_line_end(finish)
       return value
     end
     if b == 91_u8 || b == 123_u8
       finish = 0
-      value = Any.new(nil)
+      value = TapeValue.new(nil)
       if b == 91_u8
         value = parse_flow_sequence(pos)
       else
         value = parse_flow_mapping(pos)
       end
-      return Any.new(nil) if @error
+      return TapeValue.new(nil) if @error
       expect_line_end(@flow_end)
       return apply_tag(tag, value, pos)
     end
@@ -1161,9 +1473,9 @@ pub class Parser
     end
     if b == 34_u8 || b == 39_u8
       text = parse_quoted(pos, parent, false)
-      return Any.new(nil) if @error
+      return TapeValue.new(nil) if @error
       expect_line_end(@flow_end)
-      return apply_tag(tag, Any.new(text), pos)
+      return apply_tag(tag, TapeValue.new(text), pos)
     end
     # `?` and `-` start a plain scalar unless a blank follows them: `?a`
     # is text (it was refused, and the emitter writes it plain), while
@@ -1172,32 +1484,32 @@ pub class Parser
     lone = pos + 1 >= @ends[@line] || blank_byte?(@bytes[pos + 1])
     if plain_first_refused?(b)
       fail("a scalar cannot start with '#{b.unsafe_chr}'", pos)
-      return Any.new(nil)
+      return TapeValue.new(nil)
     end
     # `? a` is an explicit key, as on a mapping's later lines; on the
     # first it was refused as "a scalar cannot start with '?'".
     if b == 63_u8 && lone
       fail("an explicit '?' key is not supported", pos)
-      return Any.new(nil)
+      return TapeValue.new(nil)
     end
     if b == 45_u8 && lone
       fail("a sequence entry is not allowed here", pos)
-      return Any.new(nil)
+      return TapeValue.new(nil)
     end
     text = parse_plain_block(pos, parent)
-    return Any.new(nil) if @error
+    return TapeValue.new(nil) if @error
     expect_line_end(@flow_end)
     if tag.nil?
-      Scalar.resolve(text)
+      TapeScalar.resolve(text)
     else
-      apply_tag(tag, Any.new(text), pos)
+      apply_tag(tag, TapeValue.new(text), pos)
     end
   end
 
-  private def parse_block_sequence(indent : Int32) : Any
+  private def parse_block_sequence(indent : Int32) : TapeValue
     @nodes = @nodes + 1
-    items = [] of Any
-    result = Any.new(items)
+    items = Tape::Array(TapeValue).new
+    result = TapeValue.new(items)
     enter(@heads[@line])
     return result if @error
     while true
@@ -1229,12 +1541,12 @@ pub class Parser
     result
   end
 
-  private def parse_block_mapping(indent : Int32) : Any
+  private def parse_block_mapping(indent : Int32) : TapeValue
     @nodes = @nodes + 1
-    pairs = Hash(Any, Any).new
-    spelled = Hash(Any, Bool).new
+    pairs = TapeMap(TapeValue, TapeValue).new
+    spelled = TapeMap(TapeValue, Bool).new
     merged = false
-    result = Any.new(pairs)
+    result = TapeValue.new(pairs)
     enter(@heads[@line])
     return result if @error
     while true
@@ -1263,11 +1575,11 @@ pub class Parser
         break
       end
       merge = false
-      key = Any.new(nil)
+      key = TapeValue.new(nil)
       # A core tag on a key is read as on a value: `!!str a: b` was
       # refused as "an alias, anchor or tag as a mapping key", where the
       # header refused only an anchor; PyYAML and ruamel read {a: b}.
-      tag = nil.as(String?)
+      tag = nil.as(Tape::String?)
       text_pos = key_pos
       while @error.nil? && @bytes[text_pos] == 33_u8
         # One tag, as on any node: `!!str !!int a: b` kept the later.
@@ -1281,7 +1593,7 @@ pub class Parser
       break if @error
       b = @bytes[text_pos]
       if b == 34_u8 || b == 39_u8
-        key = Any.new(parse_quoted(text_pos, indent, false))
+        key = TapeValue.new(parse_quoted(text_pos, indent, false))
       elsif b == 42_u8
         fail("an alias as a mapping key is not supported", text_pos)
       elsif b == 38_u8
@@ -1294,9 +1606,9 @@ pub class Parser
         while finish > text_pos && blank_byte?(@bytes[finish - 1])
           finish = finish - 1
         end
-        text = String.new(finish - text_pos) { |t| t.copy_from(@bytes + text_pos, finish - text_pos) }
+        text = Tape::String.new(@bytes + text_pos, finish - text_pos)
         merge = tag.nil? && text == "<<"
-        key = tag.nil? ? Scalar.resolve(text) : Any.new(text)
+        key = tag.nil? ? TapeScalar.resolve(text) : TapeValue.new(text)
       end
       key = apply_tag(tag, key, key_pos)
       break if @error
@@ -1313,7 +1625,7 @@ pub class Parser
       end
       spelled[key] = true unless merge
       pos = skip_blank(colon + 1)
-      value = Any.new(nil)
+      value = TapeValue.new(nil)
       if pos >= @ends[@line] || @bytes[pos] == 35_u8
         @line = @line + 1
         value = parse_block_node(indent, true)
@@ -1335,15 +1647,15 @@ pub class Parser
   # The merged mappings' pairs go in where the `<<` is; a key already in
   # the mapping keeps its value, and a key spelled later in the mapping
   # replaces the merged one (a later `pairs[key] = value` does that).
-  private def merge_into(pairs : Hash(Any, Any), value : Any, pos : Int32) : Nil
+  private def merge_into(pairs : TapeMap(TapeValue, TapeValue), value : TapeValue, pos : Int32) : Nil
     k = value.kind
-    if k == Any::KIND_HASH
+    if k == TapeValue::KIND_HASH
       value.as_h.each do |key, item|
         pairs[key] = item unless pairs.has_key?(key)
       end
-    elsif k == Any::KIND_ARRAY
+    elsif k == TapeValue::KIND_ARRAY
       value.as_a.each do |element|
-        unless element.kind == Any::KIND_HASH
+        unless element.kind == TapeValue::KIND_HASH
           fail("a merge value must be a mapping or a sequence of mappings", pos)
           return
         end
@@ -1359,8 +1671,8 @@ pub class Parser
   # A flow key at `pos` that read to `key` is a merge when it is the plain
   # scalar `<<`: not quoted, no properties in front (`!!str <<` starts
   # with `!`).
-  private def merge_key?(pos : Int32, key : Any) : Bool
-    @bytes[pos] == 60_u8 && key.kind == Any::KIND_STRING && key.as_s == "<<"
+  private def merge_key?(pos : Int32, key : TapeValue) : Bool
+    @bytes[pos] == 60_u8 && key.kind == TapeValue::KIND_STRING && key.as_s == "<<"
   end
 
   # ------------------------------------------------------------------
@@ -1390,56 +1702,59 @@ pub class Parser
   end
 
   # The tag's text; the verbatim spelling of a core tag,
-  # `!<tag:yaml.org,2002:str>`, is read as its `!!str` shorthand. Any
+  # `!<tag:yaml.org,2002:str>`, is read as its `!!str` shorthand. TapeValue
   # other tag keeps its spelling, so the refusal echoes it whole.
-  private def tag_text(pos : Int32, finish : Int32) : String
-    text = String.new(finish - pos) { |t| t.copy_from(@bytes + pos, finish - pos) }
+  private def tag_text(pos : Int32, finish : Int32) : Tape::String
+    text = Tape::String.new(@bytes + pos, finish - pos)
     prefix = "!<tag:yaml.org,2002:"
-    if text.starts_with?(prefix) && text.ends_with?(">") && text.bytesize > prefix.bytesize + 1
-      short = "!!" + text[prefix.bytesize, text.bytesize - prefix.bytesize - 1]
+    if text.starts_with?(prefix) && (text.bytesize > 0 && text[text.bytesize - 1] == 62_u8) && text.bytesize > prefix.bytesize + 1
+      short = Tape::String.build do |w|
+        w << "!!" << text[prefix.bytesize,
+          text.bytesize - prefix.bytesize - 1]
+      end
       return short if known_tag?(short)
     end
     text
   end
 
-  private def known_tag?(tag : String) : Bool
+  private def known_tag?(tag : Tape::String) : Bool
     tag == "!!str" || tag == "!!int" || tag == "!!float" || tag == "!!bool" || tag == "!!null" ||
       tag == "!!seq" || tag == "!!map"
   end
 
   # A tagged scalar must read as what the tag says; `!!seq`/`!!map` only
   # confirm the shape.
-  private def apply_tag(tag : String?, value : Any, pos : Int32) : Any
+  private def apply_tag(tag : Tape::String?, value : TapeValue, pos : Int32) : TapeValue
     return value if tag.nil? || @error
     k = value.kind
     if tag == "!!seq"
-      fail("!!seq on #{value.kind_name}", pos) unless k == Any::KIND_ARRAY
+      fail("!!seq on #{value.kind_name}", pos) unless k == TapeValue::KIND_ARRAY
       return value
     elsif tag == "!!map"
-      fail("!!map on #{value.kind_name}", pos) unless k == Any::KIND_HASH
+      fail("!!map on #{value.kind_name}", pos) unless k == TapeValue::KIND_HASH
       return value
     end
-    unless k == Any::KIND_STRING
+    unless k == TapeValue::KIND_STRING
       fail("#{tag} on #{value.kind_name}", pos)
       return value
     end
     text = value.as_s
     return value if tag == "!!str"
-    resolved = Scalar.resolve(text)
+    resolved = TapeScalar.resolve(text)
     rk = resolved.kind
     if tag == "!!int"
-      return resolved if rk == Any::KIND_INT
-      fail("not an integer: #{text.inspect}", pos)
+      return resolved if rk == TapeValue::KIND_INT
+      fail("not an integer: #{text.to_heap.inspect}", pos)
     elsif tag == "!!float"
-      return resolved if rk == Any::KIND_FLOAT
-      return Any.new(resolved.as_i.to_f64) if rk == Any::KIND_INT
-      fail("not a float: #{text.inspect}", pos)
+      return resolved if rk == TapeValue::KIND_FLOAT
+      return TapeValue.new(resolved.as_i.to_f64) if rk == TapeValue::KIND_INT
+      fail("not a float: #{text.to_heap.inspect}", pos)
     elsif tag == "!!bool"
-      return resolved if rk == Any::KIND_BOOL
-      fail("not a boolean: #{text.inspect}", pos)
+      return resolved if rk == TapeValue::KIND_BOOL
+      fail("not a boolean: #{text.to_heap.inspect}", pos)
     else
-      return resolved if rk == Any::KIND_NIL
-      fail("not null: #{text.inspect}", pos)
+      return resolved if rk == TapeValue::KIND_NIL
+      fail("not null: #{text.to_heap.inspect}", pos)
     end
     value
   end
@@ -1450,12 +1765,12 @@ pub class Parser
 
   # A plain scalar in block context, folded across the lines below that
   # are indented past `parent`.
-  private def parse_plain_block(pos : Int32, parent : Int32) : String
+  private def parse_plain_block(pos : Int32, parent : Int32) : Tape::String
     @buffer.clear
     stop = plain_piece_end(pos, false)
     @buffer.append(@bytes + pos, stop - pos)
     @flow_end = stop
-    return @buffer.to_s if stop < @ends[@line] && @bytes[stop] == 58_u8
+    return @buffer.finish if stop < @ends[@line] && @bytes[stop] == 58_u8
     blanks = 0
     look = @line + 1
     while look < @starts.size
@@ -1499,7 +1814,7 @@ pub class Parser
       @flow_end = stop
       look = look + 1
     end
-    @buffer.to_s
+    @buffer.finish
   end
 
   # Where the plain text on this line ends: before ` #`, at a value
@@ -1524,7 +1839,7 @@ pub class Parser
   # A quoted scalar starting at `pos`; folded across lines, which in block
   # context must be indented past `parent`. Leaves `@flow_end` after the
   # closing quote.
-  private def parse_quoted(pos : Int32, parent : Int32, flow : Bool) : String
+  private def parse_quoted(pos : Int32, parent : Int32, flow : Bool) : Tape::String
     quote = @bytes[pos]
     opener = pos
     @buffer.clear
@@ -1538,7 +1853,7 @@ pub class Parser
         # The line ended inside the string: fold onto the next line.
         trim_trailing_blanks(hard)
         at = next_quoted_line(opener, parent, flow, false)
-        return "" if @error
+        return "".as_tape if @error
         hard = @buffer.size
         next
       end
@@ -1551,7 +1866,7 @@ pub class Parser
           next
         end
         @flow_end = at + 1
-        return @buffer.to_s
+        return @buffer.finish
       end
       if quote == 34_u8 && b == 92_u8
         if at + 1 >= @ends[@line]
@@ -1559,12 +1874,12 @@ pub class Parser
           # the backslash stay (they were trimmed), and an empty line
           # below is still a line feed (it was a refusal or a space).
           at = next_quoted_line(opener, parent, flow, true)
-          return "" if @error
+          return "".as_tape if @error
           hard = @buffer.size
           next
         end
         at = escape(at)
-        return "" if @error
+        return "".as_tape if @error
         hard = @buffer.size
         next
       end
@@ -1572,7 +1887,7 @@ pub class Parser
       hard = @buffer.size unless blank_byte?(b)
       at = at + 1
     end
-    ""
+    "".as_tape
   end
 
   # Past the line break a quoted scalar did not close before: writes what
@@ -1694,7 +2009,7 @@ pub class Parser
       return at + 2
     end
     if point >= 0xD800 && point <= 0xDFFF
-      written = String.new(2 + digits) { |t| t.copy_from(@bytes + at, 2 + digits) }
+      written = Tape::String.new(@bytes + at, 2 + digits)
       fail("surrogate code point #{written} in escape", at)
       return at + 2
     end
@@ -1703,7 +2018,7 @@ pub class Parser
   end
 
   # `|` or `>` at `pos`: the header, then the lines below.
-  private def parse_block_scalar(pos : Int32, parent : Int32) : Any
+  private def parse_block_scalar(pos : Int32, parent : Int32) : TapeValue
     literal = @bytes[pos] == 124_u8
     chomp = 0 # clip
     explicit = 0
@@ -1723,7 +2038,7 @@ pub class Parser
       at = at + 1
     end
     expect_line_end(at)
-    return Any.new(nil) if @error
+    return TapeValue.new(nil) if @error
     indent = 0
     if explicit > 0
       indent = parent < 0 ? explicit : parent + explicit
@@ -1757,7 +2072,7 @@ pub class Parser
       floor = parent + 1
       indent = floor if indent < floor
     end
-    lines = [] of String
+    lines = Tape::Array(Tape::String).new
     look = @line + 1
     last_content = @line
     while look < @starts.size
@@ -1773,13 +2088,13 @@ pub class Parser
       # no line at all; read as one, it added a line feed under `+`.
       if start + spaces >= finish && spaces <= indent
         break if finish >= @size
-        lines << ""
+        lines << "".as_tape
         look = look + 1
         next
       end
       break if spaces < indent
       from = start + indent
-      lines << String.new(finish - from) { |t| t.copy_from(@bytes + from, finish - from) }
+      lines << Tape::String.new(@bytes + from, finish - from)
       last_content = look
       look = look + 1
     end
@@ -1787,7 +2102,7 @@ pub class Parser
     @line = look - 1
     @flow_end = @ends[@line]
     trailing = 0
-    while lines.size > 0 && lines.last.empty?
+    while lines.size > 0 && lines[lines.size - 1].empty?
       lines.pop
       trailing = trailing + 1
     end
@@ -1852,7 +2167,7 @@ pub class Parser
     elsif chomp == 0
       @buffer << 10_u8 if final
     end
-    Any.new(@buffer.to_s)
+    TapeValue.new(@buffer.finish)
   end
 
   # ------------------------------------------------------------------
@@ -1877,9 +2192,9 @@ pub class Parser
     -1
   end
 
-  private def parse_flow_sequence(opener : Int32) : Any
-    items = [] of Any
-    result = Any.new(items)
+  private def parse_flow_sequence(opener : Int32) : TapeValue
+    items = Tape::Array(TapeValue).new
+    result = TapeValue.new(items)
     enter(opener)
     return result if @error
     pos = opener + 1
@@ -1909,17 +2224,17 @@ pub class Parser
         # `[key: value]`: a one-pair mapping.
         # As in a flow mapping: `[[a]: b]` read to a mapping with a
         # sequence key, which `dump` then panicked on.
-        if item.kind == Any::KIND_ARRAY || item.kind == Any::KIND_HASH
+        if item.kind == TapeValue::KIND_ARRAY || item.kind == TapeValue::KIND_HASH
           fail("a collection cannot be a mapping key", item_pos)
           break
         end
-        pair = Hash(Any, Any).new
+        pair = TapeMap(TapeValue, TapeValue).new
         pos = skip_flow_space(pos + 1)
         if pos < 0
           fail("unterminated flow sequence", opener)
           break
         end
-        value = Any.new(nil)
+        value = TapeValue.new(nil)
         unless @bytes[pos] == 44_u8 || @bytes[pos] == 93_u8
           value = parse_flow_node(pos)
           break if @error
@@ -1933,7 +2248,7 @@ pub class Parser
         else
           pair[item] = value
         end
-        item = Any.new(pair)
+        item = TapeValue.new(pair)
       end
       items << item
       if pos < 0
@@ -1955,11 +2270,11 @@ pub class Parser
     result
   end
 
-  private def parse_flow_mapping(opener : Int32) : Any
-    pairs = Hash(Any, Any).new
-    spelled = Hash(Any, Bool).new
+  private def parse_flow_mapping(opener : Int32) : TapeValue
+    pairs = TapeMap(TapeValue, TapeValue).new
+    spelled = TapeMap(TapeValue, Bool).new
     merged = false
-    result = Any.new(pairs)
+    result = TapeValue.new(pairs)
     enter(opener)
     return result if @error
     pos = opener + 1
@@ -1986,7 +2301,7 @@ pub class Parser
       key = parse_flow_node(pos)
       break if @error
       kk = key.kind
-      if kk == Any::KIND_ARRAY || kk == Any::KIND_HASH
+      if kk == TapeValue::KIND_ARRAY || kk == TapeValue::KIND_HASH
         fail("a collection cannot be a mapping key", key_pos)
         break
       end
@@ -2009,7 +2324,7 @@ pub class Parser
         fail("unterminated flow mapping", opener)
         break
       end
-      value = Any.new(nil)
+      value = TapeValue.new(nil)
       if @bytes[pos] == 58_u8 && (value_indicator?(pos, true, @ends[@line]) || @bytes[key_pos] == 34_u8 || @bytes[key_pos] == 39_u8)
         pos = skip_flow_space(pos + 1)
         if pos < 0
@@ -2048,9 +2363,9 @@ pub class Parser
   end
 
   # One node inside a flow collection, starting at `pos` (not blank).
-  private def parse_flow_node(pos : Int32) : Any
-    anchor = nil.as(String?)
-    tag = nil.as(String?)
+  private def parse_flow_node(pos : Int32) : TapeValue
+    anchor = nil.as(Tape::String?)
+    tag = nil.as(Tape::String?)
     anchor_pos = pos
     while true
       b = @bytes[pos]
@@ -2058,48 +2373,48 @@ pub class Parser
         # One anchor and one tag, as in block context: `[&a &b 1]`
         # dropped `&a` and `[!!int !!str 1]` the `!!int`.
         fail("a second anchor", pos) unless anchor.nil?
-        return Any.new(nil) if @error
+        return TapeValue.new(nil) if @error
         anchor_pos = pos
         finish = name_end(pos + 1, @ends[@line])
-        anchor = String.new(finish - pos - 1) { |t| t.copy_from(@bytes + pos + 1, finish - pos - 1) }
+        anchor = Tape::String.new(@bytes + pos + 1, finish - pos - 1)
         fail("an anchor with no name", pos) if !anchor.nil? && anchor.empty?
-        return Any.new(nil) if @error
+        return TapeValue.new(nil) if @error
         pos = skip_flow_space(finish)
       elsif b == 33_u8
         fail("a second tag", pos) unless tag.nil?
-        return Any.new(nil) if @error
+        return TapeValue.new(nil) if @error
         finish = tag_end(pos, @ends[@line])
         tag = tag_text(pos, finish)
         fail("unknown tag #{tag}", pos) unless tag.nil? || known_tag?(tag)
-        return Any.new(nil) if @error
+        return TapeValue.new(nil) if @error
         pos = skip_flow_space(finish)
       else
         break
       end
       if pos < 0
         fail("a value was expected after the properties", anchor_pos)
-        return Any.new(nil)
+        return TapeValue.new(nil)
       end
     end
     open_anchor(anchor)
     @nodes = @nodes + 1
     b = @bytes[pos]
-    value = Any.new(nil)
+    value = TapeValue.new(nil)
     if b == 91_u8
       value = parse_flow_sequence(pos)
     elsif b == 123_u8
       value = parse_flow_mapping(pos)
     elsif b == 34_u8 || b == 39_u8
-      value = Any.new(parse_quoted(pos, -1, true))
+      value = TapeValue.new(parse_quoted(pos, -1, true))
     elsif b == 42_u8
       finish = name_end(pos + 1, @ends[@line])
-      name = String.new(finish - pos - 1) { |t| t.copy_from(@bytes + pos + 1, finish - pos - 1) }
+      name = Tape::String.new(@bytes + pos + 1, finish - pos - 1)
       value = resolve_alias(name, pos)
       @flow_end = finish
     elsif (b == 44_u8 || b == 93_u8 || b == 125_u8) && !(anchor.nil? && tag.nil?)
       # Properties over nothing are the empty scalar: `[!!str ]` is [""]
       # and `[&a ]` is [nil]. They were refused as a missing value.
-      value = tag.nil? ? Any.new(nil) : Any.new("")
+      value = tag.nil? ? TapeValue.new(nil) : TapeValue.new("")
       @flow_end = pos
     elsif (b == 63_u8 || b == 45_u8) && (pos + 1 >= @ends[@line] || blank_byte?(@bytes[pos + 1]) ||
           (b == 63_u8 && (@bytes[pos + 1] == 44_u8 || @bytes[pos + 1] == 93_u8 || @bytes[pos + 1] == 125_u8)))
@@ -2119,10 +2434,10 @@ pub class Parser
         fail("a value was expected", pos)
       else
         text = parse_plain_flow(pos)
-        value = tag.nil? ? Scalar.resolve(text) : Any.new(text)
+        value = tag.nil? ? TapeScalar.resolve(text) : TapeValue.new(text)
       end
     end
-    return Any.new(nil) if @error
+    return TapeValue.new(nil) if @error
     value = apply_tag(tag, value, anchor_pos)
     close_anchor(anchor, value)
     value
@@ -2133,7 +2448,7 @@ pub class Parser
   # empty line, as in block context. A comment, a flow indicator or a
   # value indicator ends it. It stopped at the line end, so `[a\n b]`
   # was refused for want of a `,`. Leaves `@flow_end` after it.
-  private def parse_plain_flow(pos : Int32) : String
+  private def parse_plain_flow(pos : Int32) : Tape::String
     @buffer.clear
     stop = plain_piece_end(pos, true)
     @buffer.append(@bytes + pos, stop - pos)
@@ -2163,13 +2478,13 @@ pub class Parser
       @buffer.append(@bytes + start, stop - start)
       @flow_end = stop
     end
-    @buffer.to_s
+    @buffer.finish
   end
 
   # ------------------------------------------------------------------
   # Anchors and depth
 
-  private def open_anchor(name : String?) : Nil
+  private def open_anchor(name : Tape::String?) : Nil
     return if name.nil?
     @open_anchors << name
     @open_sizes << @nodes
@@ -2177,7 +2492,7 @@ pub class Parser
     @peak = @depth
   end
 
-  private def close_anchor(name : String?, value : Any) : Nil
+  private def close_anchor(name : Tape::String?, value : TapeValue) : Nil
     return if name.nil?
     started = @nodes
     peak = @peak
@@ -2196,24 +2511,24 @@ pub class Parser
   # The anchored value, shared; the nodes it holds count as read again,
   # and once aliases have added ALIAS_NODE_LIMIT nodes the stream is
   # refused rather than built. Its levels count from where it is read.
-  private def resolve_alias(name : String, pos : Int32) : Any
+  private def resolve_alias(name : Tape::String, pos : Int32) : TapeValue
     if name.empty?
       fail("an alias with no name", pos)
-      return Any.new(nil)
+      return TapeValue.new(nil)
     end
     if @open_anchors.includes?(name)
       fail("cyclic alias *#{name}", pos)
-      return Any.new(nil)
+      return TapeValue.new(nil)
     end
     found = @anchors[name]?
     if found.nil?
       fail("unknown anchor *#{name}", pos)
-      return Any.new(nil)
+      return TapeValue.new(nil)
     end
     deepest = @depth + @anchor_depths[name]
     if deepest > DEPTH_LIMIT
       fail("nesting deeper than #{DEPTH_LIMIT} levels", pos)
-      return Any.new(nil)
+      return TapeValue.new(nil)
     end
     @peak = deepest if deepest > @peak
     size = @anchor_sizes[name]
@@ -2221,7 +2536,7 @@ pub class Parser
     @expanded = @expanded + size
     if @expanded > ALIAS_NODE_LIMIT
       fail("alias expansion past 1,000,000 nodes", pos)
-      return Any.new(nil)
+      return TapeValue.new(nil)
     end
     found
   end
@@ -2237,32 +2552,31 @@ pub class Parser
   end
 end
 
-# Writes a value as block YAML the parser reads back.
-class Emitter
-  @out : ByteBuffer
+@[OnTape]
+struct TapeEmitter
+  @out : Tape::String::Writer
 
-  def initialize
-    @out = ByteBuffer.new
+  def initialize(@out : Tape::String::Writer)
   end
 
-  def dump(value : Any) : String
+  def dump(value : TapeValue) : Nil
     k = value.kind
-    if (k == Any::KIND_ARRAY || k == Any::KIND_HASH) && value.size > 0
+    if (k == TapeValue::KIND_ARRAY || k == TapeValue::KIND_HASH) && value.size > 0
       block(value, 0, false)
     else
       @out << scalar_text(value)
-      @out << 10_u8
+      @out << "\n"
     end
-    @out.to_s
+    nil
   end
 
   # A non-empty collection, one entry per line at `indent`; when `inline`
   # the first entry continues the current line.
-  private def block(value : Any, indent : Int32, inline : Bool) : Nil
-    if value.kind == Any::KIND_ARRAY
+  private def block(value : TapeValue, indent : Int32, inline : Bool) : Nil
+    if value.kind == TapeValue::KIND_ARRAY
       first = true
       value.as_a.each do |item|
-        @out.spaces(indent) unless first && inline
+        indent.times { @out << " " } unless first && inline
         first = false
         @out << "- "
         entry(item, indent + 2)
@@ -2270,14 +2584,14 @@ class Emitter
     else
       first = true
       value.as_h.each do |key, item|
-        @out.spaces(indent) unless first && inline
+        indent.times { @out << " " } unless first && inline
         first = false
         kk = key.kind
-        raise "cannot dump #{key.kind_name} as a mapping key" if kk == Any::KIND_ARRAY || kk == Any::KIND_HASH
+        raise "cannot dump #{key.kind_name} as a mapping key" if kk == TapeValue::KIND_ARRAY || kk == TapeValue::KIND_HASH
         @out << scalar_text(key)
         @out << ":"
         if collection?(item)
-          @out << 10_u8
+          @out << "\n"
           block(item, indent + 2, false)
         else
           @out << " "
@@ -2289,51 +2603,52 @@ class Emitter
 
   # After `- ` or `key: `: a scalar or empty collection on the line, a
   # collection continuing it.
-  private def entry(item : Any, indent : Int32) : Nil
+  private def entry(item : TapeValue, indent : Int32) : Nil
     if collection?(item)
       block(item, indent, true)
     else
       @out << scalar_text(item)
-      @out << 10_u8
+      @out << "\n"
     end
   end
 
-  private def collection?(value : Any) : Bool
+  private def collection?(value : TapeValue) : Bool
     k = value.kind
-    (k == Any::KIND_ARRAY || k == Any::KIND_HASH) && value.size > 0
+    (k == TapeValue::KIND_ARRAY || k == TapeValue::KIND_HASH) && value.size > 0
   end
 
-  private def scalar_text(value : Any) : String
+  private def scalar_text(value : TapeValue) : Tape::String
     k = value.kind
-    if k == Any::KIND_NIL
-      "null"
-    elsif k == Any::KIND_BOOL
-      value.as_bool ? "true" : "false"
-    elsif k == Any::KIND_INT
-      value.as_i.to_s
-    elsif k == Any::KIND_FLOAT
-      f = value.as_f
-      if f != f
-        ".nan"
-      elsif f == "Infinity".to_f
-        ".inf"
-      elsif f == "-Infinity".to_f
-        "-.inf"
+    if k == TapeValue::KIND_STRING
+      return string_text(value.as_s)
+    end
+    Tape::String.build do |w|
+      if k == TapeValue::KIND_NIL
+        w << "null"
+      elsif k == TapeValue::KIND_BOOL
+        w << (value.as_bool ? "true" : "false")
+      elsif k == TapeValue::KIND_INT
+        w.append_int(value.as_i)
+      elsif k == TapeValue::KIND_FLOAT
+        f = value.as_f
+        if f != f
+          w << ".nan"
+        elsif f == "Infinity".to_f
+          w << ".inf"
+        elsif f == "-Infinity".to_f
+          w << "-.inf"
+        else
+          w.append_float(f)
+        end
       else
-        f.to_s
+        w << (k == TapeValue::KIND_ARRAY ? "[]" : "{}")
       end
-    elsif k == Any::KIND_STRING
-      string_text(value.as_s)
-    elsif k == Any::KIND_ARRAY
-      "[]"
-    else
-      "{}"
     end
   end
 
   # Plain when the parser would read it back as the same string, quoted
   # otherwise.
-  private def string_text(text : String) : String
+  private def string_text(text : Tape::String) : Tape::String
     return quoted(text) unless plain_safe?(text)
     text
   end
@@ -2342,7 +2657,7 @@ class Emitter
   # indicator, not `- `/`? ` (an entry), not `<<` (a merge as a key), not
   # a document marker, no `: ` or ` #` inside, and not a value of another
   # kind.
-  private def plain_safe?(text : String) : Bool
+  private def plain_safe?(text : Tape::String) : Bool
     size = text.bytesize
     return false if size == 0
     bytes = text.to_unsafe
@@ -2372,7 +2687,7 @@ class Emitter
       i = i + 1
     end
     return false if other_in_1_1?(text, bytes, size)
-    Scalar.resolve(text).kind == Any::KIND_STRING
+    TapeScalar.resolve(text).kind == TapeValue::KIND_STRING
   end
 
   # Whether a YAML 1.1 reader takes the text for something other than a
@@ -2387,7 +2702,7 @@ class Emitter
   # where telling it from `1_000` would be a second number reader. `y` and
   # `n` are booleans in the 1.1 type repository though PyYAML reads them
   # as strings, so they are quoted too.
-  private def other_in_1_1?(text : String, bytes : Pointer(UInt8), size : Int32) : Bool
+  private def other_in_1_1?(text : Tape::String, bytes : Pointer(UInt8), size : Int32) : Bool
     case text
     when "y", "Y", "n", "N", "yes", "Yes", "YES", "no", "No", "NO", "on", "On", "ON", "off", "Off", "OFF", "="
       return true
@@ -2406,8 +2721,8 @@ class Emitter
     b == 32_u8 || b == 9_u8
   end
 
-  private def quoted(text : String) : String
-    buffer = ByteBuffer.new
+  private def quoted(text : Tape::String) : Tape::String
+    buffer = TapeBuffer.new
     buffer << 34_u8
     bytes = text.to_unsafe
     i = 0
@@ -2446,7 +2761,7 @@ class Emitter
       i = i + 1
     end
     buffer << 34_u8
-    buffer.to_s
+    buffer.finish
   end
 
   # The character at `i`, when it is one written as an escape though it
@@ -2471,6 +2786,34 @@ class Emitter
 
   private def hex_digit(value : Int32) : UInt8
     value < 10 ? (48 + value).to_u8 : (87 + value).to_u8
+  end
+end
+
+# A type that can write itself as an `TapeValue`. `YAML.to_yaml` and
+# `YAML.to_any` accept any value whose type implements it, as a `derive
+# yaml_serializable` type does.
+# Compatibility parser for callers retaining the result on the heap.
+pub class Parser
+  @text : String
+  @error : String?
+
+  def initialize(@text : String)
+    @error = nil
+  end
+
+  def error : String?
+    @error
+  end
+
+  def parse_all : Array(Any)?
+    result = nil.as(Array(Any)?)
+    tape do
+      parser = TapeParser.new(@text.as_tape)
+      docs = parser.parse_all
+      @error = parser.error
+      result = docs.to_heap if docs
+    end
+    result
   end
 end
 
@@ -2563,40 +2906,82 @@ pub macro yaml_serializable(declaration)
 end
 
 pub struct YAML
+  def self.parse(text : Tape::String) : TapeValue
+    parser = TapeParser.new(text)
+    docs = parser.parse_all
+    raise parser.error || "invalid YAML" if docs.nil?
+    docs.empty? ? TapeValue.new(nil) : docs[0]
+  end
+
+  def self.parse?(text : Tape::String) : TapeValue?
+    docs = TapeParser.new(text).parse_all
+    return nil if docs.nil?
+    docs.empty? ? TapeValue.new(nil) : docs[0]
+  end
+
+  def self.parse_all(text : Tape::String) : Tape::Array(TapeValue)
+    parser = TapeParser.new(text)
+    docs = parser.parse_all
+    raise parser.error || "invalid YAML" if docs.nil?
+    docs
+  end
+
+  def self.parse_all?(text : Tape::String) : Tape::Array(TapeValue)?
+    TapeParser.new(text).parse_all
+  end
+
+  def self.dump(value : TapeValue, writer : Tape::String::Writer) : Nil
+    TapeEmitter.new(writer).dump(value)
+  end
+
+  def self.dump(value : TapeValue) : Tape::String
+    Tape::String.build { |w| dump(value, w) }
+  end
+
   # The first document of `text`, or nil when the stream is not YAML this
   # module reads (the whole stream is checked, not just the first
   # document). An empty stream is a null document.
   def self.parse?(text : String) : Any?
-    docs = parse_all?(text)
-    return nil if docs.nil?
-    docs.size == 0 ? Any.new(nil) : docs[0]
+    result = nil.as(Any?)
+    tape do
+      value = parse?(text.as_tape)
+      result = value.to_heap if value
+    end
+    result
   end
 
   def self.parse(text : String) : Any
-    parser = Parser.new(text)
-    docs = parser.parse_all
-    if docs.nil?
-      raise parser.error || "invalid YAML"
+    result = Any.new(nil)
+    tape do
+      result = parse(text.as_tape).to_heap
     end
-    docs.size == 0 ? Any.new(nil) : docs[0]
+    result
   end
 
   def self.parse_all?(text : String) : Array(Any)?
-    Parser.new(text).parse_all
+    result = nil.as(Array(Any)?)
+    tape do
+      value = parse_all?(text.as_tape)
+      result = value.to_heap if value
+    end
+    result
   end
 
   def self.parse_all(text : String) : Array(Any)
-    parser = Parser.new(text)
-    docs = parser.parse_all
-    if docs.nil?
-      raise parser.error || "invalid YAML"
+    result = [] of Any
+    tape do
+      result = parse_all(text.as_tape).to_heap
     end
-    docs
+    result
   end
 
   # Block YAML for `value`, ending in a line break.
   def self.dump(value : Any) : String
-    Emitter.new.dump(value)
+    result = ""
+    tape do
+      result = dump(TapeValue.view(value)).to_heap
+    end
+    result
   end
 
   # Block YAML for any value `to_any` knows, written as `dump` writes it.
