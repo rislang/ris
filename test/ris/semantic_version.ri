@@ -1,0 +1,32 @@
+module test/semantic_version_tape
+
+import std/semantic_version::{SemanticVersion}
+
+kept = ""
+owned = nil.as(SemanticVersion?)
+tape do
+  version = SemanticVersion.parse("1.2.3-beta.11+build.7\r\n".as_tape)
+  exit 1 unless version.major == 1 && version.prerelease == "beta.11"
+  exit 2 unless version.build == "build.7"
+  exit 3 unless SemanticVersion.parse?("01.2.3".as_tape).nil?
+  exit 4 unless SemanticVersion.parse?("1.2.3-01".as_tape).nil?
+  exit 5 unless SemanticVersion.parse?("1.2.3-a..b".as_tape).nil?
+  earlier = SemanticVersion.parse("1.2.3-beta.2".as_tape)
+  exit 6 unless (earlier <=> version) < 0
+  w = Tape::String::Writer.new(1)
+  w << "prefix:"
+  version.write(w)
+  exit 7 unless w.finish == "prefix:1.2.3-beta.11+build.7"
+  exit 8 unless version.to_heap.to_tape == version.to_tape
+  owned = version.to_heap
+  huge = "999999999999999999.0.0".as_tape
+  exit 12 unless SemanticVersion.valid?(huge)
+  exit 13 unless SemanticVersion.parse?(huge).nil?
+  kept = version.to_tape.to_heap
+end
+exit 9 unless SemanticVersion.parse(kept).to_s == kept
+exit 10 unless SemanticVersion.valid?("1.2.3")
+exit 11 unless SemanticVersion.parse?("1.2").nil?
+exit 20 unless owned
+exit 21 unless owned.to_s == kept
+puts "PASS: semantic_version tape and heap APIs"
