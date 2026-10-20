@@ -1,0 +1,99 @@
+# A chat room: what lasts lives on the heap, each request on a tape.
+#
+#   ./bin/ris run samples/ris/chat.ri
+#
+# Inside `module Chat`, `include Tape` makes `Array` and `String` the
+# tape's own, so the request code reads as plain iyi; the heap's are
+# `::Array` and `::String`. Literals stay on the heap: `"hi"` is a
+# `::String`, viewed onto the tape with `String.view`.
+module Chat
+  include Tape
+
+  # What outlives a request: the room's members and posted messages.
+  class Room
+    getter members = ::Array(Int32).new
+    getter authors = ::Array(Int32).new
+    getter bodies = ::Array(::String).new
+    getter boosts = ::Array(Int32).new
+  end
+
+  # A request's message, its body a view into the request's bytes.
+  @[OnTape]
+  struct Post
+    getter user_id : Int32
+    getter body : String
+
+    def initialize(@user_id, @body)
+    end
+  end
+
+  # "7 Ship it": a user id, one space, the text. Nil when it is not.
+  def self.parse(request : String) : Post?
+    user_id = 0
+    index = 0
+    while index < request.bytesize && request[index] != ' '.ord.to_u8
+      digit = request[index] &- '0'.ord.to_u8
+      return nil if digit > 9
+      user_id = user_id * 10 + digit.to_i32
+      index += 1
+    end
+    return nil if index == 0 || index >= request.bytesize
+    Post.new(user_id, request[index + 1, request.bytesize - index - 1])
+  end
+
+  # The one copy to the heap: a posted message outlives its request.
+  @[Escape]
+  def self.keep(room : Room, post : Post) : Nil
+    room.authors << post.user_id
+    room.bodies << post.body.to_s
+    room.boosts << 0
+  end
+
+  # One request, start to end on one tape: its bytes, the parse, the
+  # room's view and the response are freed together when it ends.
+  def self.handle(room : Room, request : ::String) : Nil
+    tape do
+      post = parse(String.view(request))
+      if post.nil?
+        puts "400 bad request"
+      elsif !room.members.includes?(post.user_id)
+        puts "403 user #{post.user_id} is not in the room"
+      else
+        keep(room, post)
+        respond(room)
+      end
+    end
+  end
+
+  # The room as the client shows it: the most boosted first, then
+  # the members, all written into one response on the tape.
+  def self.respond(room : Room) : Nil
+    count = room.bodies.size
+    order = Array(Int32).new(count) { |i| i }
+    top = order.sorted_by { |i| -room.boosts[i] }
+    response = String::Writer.new(256)
+    response.append("200 ")
+    top.each_with_index do |i, k|
+      response.append(" | ") if k > 0
+      response.append_value(room.authors[i])
+      response.append(": ")
+      response.append(room.bodies[i])
+    end
+    response.append(" (members ")
+    members = Array(Int32).new(room.members.size) { |i| room.members[i] }
+    members.sort_in_place
+    members.join(response, ", ")
+    response.append(")")
+    puts response.finish
+  end
+end
+
+room = Chat::Room.new
+room.members.concat([31, 7, 12])
+Chat.handle(room, "7 Morning!")
+Chat.handle(room, "12 Deploy is green")
+room.boosts[1] = 3
+Chat.handle(room, "7 Ship it")
+Chat.handle(room, "99 Hi")
+Chat.handle(room, "hello")
+puts "kept #{room.bodies.size} messages"

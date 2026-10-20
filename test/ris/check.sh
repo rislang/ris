@@ -174,6 +174,8 @@ if grep -qF $'4 edges, last names 3, reads -1\nlevels 10 dist 1 2 4' <<<"$out" &
 out=$("$RIS" run test/ris/link_wide.ri 2>&1)
 if grep -qF "link 255 does not fit 1 bytes" <<<"$out"; then echo "runs     link_wide"; else echo "FAILED   link_wide: $out"; status=1; fi
 
+out=$("$RIS" run samples/ris/chat.ri 2>&1)
+if [ "$(tail -3 <<<"$out")" = $'403 user 99 is not in the room\n400 bad request\nkept 3 messages' ] && grep -qF "200 12: Deploy is green | 7: Morning! | 7: Ship it (members 7, 12, 31)" <<<"$out"; then echo "runs     samples/ris/chat"; else echo "FAILED   samples/ris/chat: $out"; status=1; fi
 out=$("$RIS" run samples/ris/hello.ri 2>&1)
 if [ "$out" = $'Hello from ris, order 1\ntotal 1649' ]; then echo "runs     samples/ris/hello"; else echo "FAILED   samples/ris/hello: $out"; status=1; fi
 
