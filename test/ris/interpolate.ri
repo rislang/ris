@@ -14,3 +14,17 @@ tape do
   later = ->(i : Int32) { puts "no tape when called #{i}"; i }
 end
 later.call(4)
+# A variable the text only passes through is on the tape as well; one the
+# code around the block reads stays on the heap.
+kept = ""
+tape do
+  name = Tape::String.new("var")
+  line = "through a #{name}"
+  puts line
+  line = "again #{1}"
+  print line
+  puts
+  kept = "kept #{2}"
+  puts kept
+end
+puts kept

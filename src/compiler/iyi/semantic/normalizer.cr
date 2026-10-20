@@ -7,6 +7,11 @@ module Iyi
       normalizer = Normalizer.new(self)
       normalizer.current_def = current_def
       normalizer.macro_expansion = node if Normalizer.macro_expansion?(node)
+      # ris: the program's top level is a scope of its own (a def's body
+      # is lowered with the def).
+      unless current_def || normalizer.macro_expansion || node.is_a?(Def)
+        TapeTextLowering.lower_scope(node, [] of String, false)
+      end
       node.transform(normalizer)
     end
   end
@@ -509,7 +514,11 @@ module Iyi
     end
 
     def transform(node : Def)
-      node.body.accept(TapeTextLowering.new) if TapeTextLowering.tape_def?(node)
+      tape_def = TapeTextLowering.tape_def?(node)
+      params = node.args.map(&.name)
+      node.block_arg.try { |arg| params << arg.name }
+      TapeTextLowering.lower_scope(node.body, params, tape_def)
+      node.body.accept(TapeTextLowering.new) if tape_def
       @current_def = node
       node = super
       @current_def = nil
@@ -681,6 +690,11 @@ module Iyi
     #    while !foo
     #      bar
     #    end
+    def transform(node : While)
+      TapeLoopBounds.lower(node)
+      super
+    end
+
     def transform(node : Until)
       node = super
       not_exp = Not.new(node.cond).at(node.cond)

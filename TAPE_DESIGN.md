@@ -67,11 +67,11 @@ Recorded, not new: C++ 0.97 s, Rust 1.18 s, Go 1.67 s on respond
 
 ## Taken from Goose
 * `puts "a#{b}"` in a `tape` block or a def taking a tape value writes on
-  the tape. `Tape::Array#each`, `map`, `sum` skip bounds checks.
-* Flat data: `Tape::Link(T, UInt16)`, a typed index checked when followed;
-  `Tape::Span` (`Writer#append_span`); `@[Tape::Flat]` structs of these and
-  numbers, saved by `Array#bytes`, read back by `Array.load`. Not yet:
-  every scope freeing, results built in place, a tape per value.
+  the tape, also through a variable used only so. `each`, `map`, `sum`
+  and `a[i]` in `while i < a.size` (`i` only `+= 1`) skip bounds checks.
+* Flat data: `Tape::Link(T, UInt16)`, a typed index checked when followed,
+  `Tape::Span`, `@[Tape::Flat]` structs: `Array#bytes`, `Array.load`. Not
+  yet: every scope freeing, results built in place, a tape per value.
 
 ## Implementation and checks
 `src/iyi/tape.iyi`: types and scopes; `src/iyi/prelude.iyi`: `IyiRegion`.

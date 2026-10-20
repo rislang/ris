@@ -116,6 +116,13 @@ module Tape
       self[span.start, span.size]
     end
 
+    # `[]` in `while i < text.bytesize` (TapeLoopBounds): the size is fixed.
+    @[AlwaysInline]
+    def __loop_fetch(index : Int32) : UInt8
+      raise "index #{index} out of range for #{@bytesize} bytes" if index < 0
+      @ptr[index]
+    end
+
     def ==(other : String) : Bool
       @bytesize == other.bytesize && same?(other.to_unsafe)
     end
@@ -452,6 +459,20 @@ module Tape
       Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value = value
     end
 
+    # `[]` in `while i < a.size`, where the loop keeps *index* below the
+    # size (TapeLoopBounds): only a negative one is refused.
+    @[AlwaysInline]
+    def __loop_fetch(index : Int32) : T
+      raise "index #{index} out of range for #{size} elements" if index < 0
+      unsafe_at(index)
+    end
+
+    @[AlwaysInline]
+    def __loop_store(index : Int32, value : T) : T
+      raise "index #{index} out of range for #{size} elements" if index < 0
+      Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value = value
+    end
+
     # The element at *link*, checked as `[]` checks an index: a link read
     # from bytes is never trusted.
     def [](link : Tape::Link(T, I)) : T forall I
@@ -727,4 +748,16 @@ end
 
 def print(text : Tape::String) : Nil
   stdout.print(text)
+end
+
+# Any other value read in `while i < a.size`: `[]` and `[]=` as written,
+# since it may shrink in the loop (TapeLoopBounds).
+class Object
+  def __loop_fetch(index)
+    self[index]
+  end
+
+  def __loop_store(index, value)
+    self[index] = value
+  end
 end
