@@ -2,66 +2,59 @@
 #
 #   ./bin/ris run samples/ris/chat.ri
 #
-# Read it as Rails: models for users, messages and the room, and a
-# `MessagesController.create` that takes the request, reads
-# `message_params`, answers 403 when the user is not in the room, has the
-# room create the message and renders the room. The params and the view
-# are on the request's tape; the model's `create_message` is the one place
-# anything is copied to the heap.
+# Read it as a Rails controller's `create`: `message_params`, the 403 when
+# the user is not in the room, `create` saving the message, a view
+# rendered. The params and the view are on the request's tape; `create`
+# is the one place anything is copied to the heap.
 
-# The models: what outlives a request lives on the heap.
-class User
-  getter id : Int32
-  getter name : String
+module Chat
+  # What outlives a request lives on the heap: users, the room, and the
+  # messages posted in it.
+  class User
+    getter id : Int32
+    getter name : String
 
-  def initialize(*, @id : Int32, @name : String)
-  end
-end
-
-class Message
-  getter user : User
-  getter body : String
-
-  def initialize(*, @user : User, @body : String)
-  end
-end
-
-class Room
-  getter users = Array(User).new
-  getter messages = Array(Message).new
-
-  def user(id : Int32) : User?
-    users.find { |user| user.id == id }
+    def initialize(*, @id : Int32, @name : String)
+    end
   end
 
-  # As `messages.create!`: the one copy to the heap, as a posted message
-  # outlives its request.
-  def create_message(user : User, params : MessageParams) : Nil
-    messages << Message.new(user: user, body: params.body.to_heap)
+  class Message
+    getter user : User
+    getter body : String
+
+    def initialize(*, @user : User, @body : String)
+    end
   end
-end
 
-# The request's message, as Rails' `message_params`: its body a view
-# into the request's bytes.
-@[OnTape]
-struct MessageParams
-  getter user_id : Int32
-  getter body : Tape::String
+  class Room
+    getter users = Array(User).new
+    getter messages = Array(Message).new
 
-  def initialize(*, @user_id : Int32, @body : Tape::String)
+    def user(id : Int32) : User?
+      users.find { |user| user.id == id }
+    end
   end
-end
 
-module MessagesController
+  # The request's message, as Rails' `message_params`: its body a view
+  # into the request's bytes.
+  @[OnTape]
+  struct MessageParams
+    getter user_id : Int32
+    getter body : Tape::String
+
+    def initialize(*, @user_id : Int32, @body : Tape::String)
+    end
+  end
+
   # The action: one request, start to end on one tape. Its bytes, the
   # params and the rendered room are freed together when it ends.
-  def self.create(room : Room, request : String) : Nil
+  def self.create_message(room : Room, request : String) : Nil
     tape do
       params = message_params(Tape::String.view(request))
       if params.nil?
         puts "400 bad request"
       elsif user = room.user(params.user_id)
-        room.create_message(user, params)
+        create(room, user, params)
         render_room(room)
       else
         puts "403 user #{params.user_id} is not in the room"
@@ -82,6 +75,12 @@ module MessagesController
     return nil if index == 0 || index >= request.bytesize
     body = request[index + 1, request.bytesize - index - 1]
     MessageParams.new(user_id: user_id, body: body)
+  end
+
+  # As `@room.messages.create!`: the one copy to the heap, as a posted
+  # message outlives its request.
+  def self.create(room : Room, user : User, params : MessageParams) : Nil
+    room.messages << Message.new(user: user, body: params.body.to_heap)
   end
 
   # The view: the newest message first, then the users by name, all
@@ -107,13 +106,13 @@ module MessagesController
   end
 end
 
-room = Room.new
-room.users << User.new(id: 31, name: "carol")
-room.users << User.new(id: 7, name: "alice")
-room.users << User.new(id: 12, name: "bob")
-MessagesController.create(room, "7 Morning!")
-MessagesController.create(room, "12 Deploy is green")
-MessagesController.create(room, "7 Ship it")
-MessagesController.create(room, "99 Hi")
-MessagesController.create(room, "hello")
+room = Chat::Room.new
+room.users << Chat::User.new(id: 31, name: "carol")
+room.users << Chat::User.new(id: 7, name: "alice")
+room.users << Chat::User.new(id: 12, name: "bob")
+Chat.create_message(room, "7 Morning!")
+Chat.create_message(room, "12 Deploy is green")
+Chat.create_message(room, "7 Ship it")
+Chat.create_message(room, "99 Hi")
+Chat.create_message(room, "hello")
 puts "kept #{room.messages.size} messages"
