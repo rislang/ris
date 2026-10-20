@@ -71,7 +71,7 @@ pub struct CSV
 
   def self.build(rows : Tape::Array(Tape::Array(Tape::String)),
                  writer : Tape::String::Writer) : Nil
-    writer << build(rows)
+    write_rows(rows, writer)
   end
 
   def self.parse(text : Tape::String) : Tape::Array(Tape::Array(Tape::String))
@@ -165,36 +165,41 @@ pub struct CSV
   # Into one builder: adding each field to the text so far copied that
   # text once per field, and 20,000 rows of five took 12.8 seconds.
   def self.build(rows : Tape::Array(Tape::Array(Tape::String))) : Tape::String
-    Tape::String.build do |io|
-      r = 0
-      while r < rows.size
-        io << '\n' if r > 0
-        fields = rows[r]
-        # One empty field bare is a blank line, which reads back as a row of
-        # no fields, or as nothing at the end: quoted, it is the field.
-        io << "\"\"" if fields.size == 1 && fields[0].empty?
-        c = 0
-        # A U+FEFF at the front of the text is read past as a byte order
-        # mark, so a first field opening with one came back without it:
-        # `[["\uFEFFid"]]` read back as `[["id"]]`. Quoted, the text opens
-        # with `"` and the mark is the field's.
-        if r == 0 && fields.size > 0 && fields[0].starts_with?("\uFEFF")
-          io << quote(fields[0])
-          c = 1
-        end
-        while c < fields.size
-          io << ',' if c > 0
-          io << escape(fields[c])
-          c = c + 1
-        end
-        r = r + 1
+    Tape::String.build { |w| build(rows, w) }
+  end
+
+  private def self.write_rows(
+    rows : Tape::Array(Tape::Array(Tape::String)),
+    io : Tape::String::Writer
+  ) : Nil
+    r = 0
+    while r < rows.size
+      io << '\n' if r > 0
+      fields = rows[r]
+      # One empty field bare is a blank line, which reads back as a row of
+      # no fields, or as nothing at the end: quoted, it is the field.
+      io << "\"\"" if fields.size == 1 && fields[0].empty?
+      c = 0
+      # A U+FEFF at the front of the text is read past as a byte order
+      # mark, so a first field opening with one came back without it:
+      # `[["\uFEFFid"]]` read back as `[["id"]]`. Quoted, the text opens
+      # with `"` and the mark is the field's.
+      if r == 0 && fields.size > 0 && fields[0].starts_with?("\uFEFF")
+        quote(fields[0], io)
+        c = 1
       end
-      # A document's last line break ends a row rather than starting one,
-      # so a last row of no fields - the empty text after the last `\n` -
-      # was read back as nothing: `[["a"], []]` came back `[["a"]]`, and
-      # `[[]]` came back `[]`. Its line is ended.
-      io << '\n' if rows.size > 0 && rows[rows.size - 1].empty?
+      while c < fields.size
+        io << ',' if c > 0
+        escape(fields[c], io)
+        c = c + 1
+      end
+      r = r + 1
     end
+    # A document's last line break ends a row rather than starting one,
+    # so a last row of no fields - the empty text after the last `\n` -
+    # was read back as nothing: `[["a"], []]` came back `[["a"]]`, and
+    # `[[]]` came back `[]`. Its line is ended.
+    io << '\n' if rows.size > 0 && rows[rows.size - 1].empty?
   end
 
   private def self.field_value(text : Tape::String, start : Int32,
@@ -239,7 +244,8 @@ pub struct CSV
     take(text.to_unsafe + at, len).to_heap
   end
 
-  private def self.escape(field : Tape::String) : Tape::String
+  private def self.escape(field : Tape::String,
+                           writer : Tape::String::Writer) : Nil
     need = false
     p = field.to_unsafe
     n = field.bytesize
@@ -252,39 +258,25 @@ pub struct CSV
       end
       i = i + 1
     end
-    return field unless need
-    quote(field)
+    if need
+      quote(field, writer)
+    else
+      writer << field
+    end
   end
 
   # Always quoted: a field that holds a separator, or a first field that
   # opens with U+FEFF.
-  private def self.quote(field : Tape::String) : Tape::String
-    p = field.to_unsafe
-    n = field.bytesize
-    extra = 2
-    i = 0
-    while i < n
-      extra = extra + 1 if p[i] == 34_u8
-      i = i + 1
+  private def self.quote(field : Tape::String,
+                          writer : Tape::String::Writer) : Nil
+    writer << '"'
+    field.each_byte do |byte|
+      writer.push(byte)
+      writer << '"' if byte == 34_u8
     end
-    dst = Pointer(UInt8).new(IyiRegion.tape_bytes((n + extra).to_u64))
-    begin
-      dst[0] = 34_u8
-      o = 1
-      i = 0
-      while i < n
-        dst[o] = p[i]
-        o = o + 1
-        if p[i] == 34_u8
-          dst[o] = 34_u8
-          o = o + 1
-        end
-        i = i + 1
-      end
-      dst[o] = 34_u8
-    end
-    Tape::String.new(dst, n + extra)
+    writer << '"'
   end
+
 end
 
 # What is wrong with a document, and where: *line* and *column* count from

@@ -13,6 +13,12 @@ tape do
   w << "prefix:"
   CSV.build(rows, w)
   exit 5 unless w.finish.starts_with?("prefix:id,name\n")
+  output = w.finish
+  encoded = CSV.build(rows)
+  expected = Tape::String.build { |io| io << "prefix:" << encoded }
+  exit 10 unless output == expected
+  bom = CSV.parse("\"\uFEFFid\"".as_tape)
+  exit 11 unless CSV.build(bom) == "\"\uFEFFid\""
   exit 6 unless CSV.parse(CSV.build(rows)).to_heap == rows.to_heap
   exit 7 unless CSV.parse("\uFEFFa,b".as_tape)[0][0] == "a"
   kept = rows.to_heap
