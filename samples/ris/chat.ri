@@ -1,6 +1,11 @@
 # A chat room: what lasts lives on the heap, each request on a tape.
 #
 #   ./bin/ris run samples/ris/chat.ri
+#
+# Read it as a Rails controller's `create`: `message_params`, the 403 when
+# the user is not in the room, `create` saving the message, a view
+# rendered. The params and the view are on the request's tape; `create`
+# is the one place anything is copied to the heap.
 
 module Chat
   # What outlives a request lives on the heap: users, the room, and the
@@ -30,9 +35,10 @@ module Chat
     end
   end
 
-  # A request's message, its body a view into the request's bytes.
+  # The request's message, as Rails' `message_params`: its body a view
+  # into the request's bytes.
   @[OnTape]
-  struct Post
+  struct MessageParams
     getter user_id : Int32
     getter body : Tape::String
 
@@ -40,8 +46,24 @@ module Chat
     end
   end
 
+  # The action: one request, start to end on one tape. Its bytes, the
+  # params and the rendered room are freed together when it ends.
+  def self.create_message(room : Room, request : String) : Nil
+    tape do
+      params = message_params(Tape::String.view(request))
+      if params.nil?
+        puts "400 bad request"
+      elsif user = room.user(params.user_id)
+        create(room, user, params)
+        render_room(room)
+      else
+        puts "403 user #{params.user_id} is not in the room"
+      end
+    end
+  end
+
   # "7 Ship it": a user id, one space, the text. Nil when it is not.
-  def self.parse(request : Tape::String) : Post?
+  def self.message_params(request : Tape::String) : MessageParams?
     user_id = 0
     index = 0
     while index < request.bytesize && request[index] != ' '.ord.to_u8
@@ -51,33 +73,18 @@ module Chat
       index += 1
     end
     return nil if index == 0 || index >= request.bytesize
-    Post.new(user_id, request[index + 1, request.bytesize - index - 1])
+    MessageParams.new(user_id, request[index + 1, request.bytesize - index - 1])
   end
 
-  # The one copy to the heap: a posted message outlives its request.
-  def self.keep(room : Room, user : User, post : Post) : Nil
-    room.messages << Message.new(user, post.body.to_heap)
+  # As `@room.messages.create!`: the one copy to the heap, as a posted
+  # message outlives its request.
+  def self.create(room : Room, user : User, params : MessageParams) : Nil
+    room.messages << Message.new(user, params.body.to_heap)
   end
 
-  # One request, start to end on one tape: its bytes, the parse, the
-  # room's view and the response are freed together when it ends.
-  def self.handle(room : Room, request : String) : Nil
-    tape do
-      post = parse(Tape::String.view(request))
-      if post.nil?
-        puts "400 bad request"
-      elsif user = room.user(post.user_id)
-        keep(room, user, post)
-        respond(room)
-      else
-        puts "403 user #{post.user_id} is not in the room"
-      end
-    end
-  end
-
-  # The room as the client shows it: the newest message first, then
-  # the users by name, all written into one response on the tape.
-  def self.respond(room : Room) : Nil
+  # The view: the newest message first, then the users by name, all
+  # written into one response on the tape.
+  def self.render_room(room : Room) : Nil
     count = room.messages.size
     newest = Tape::Array(Int32).new(count) { |i| count - 1 - i }
     response = Tape::String::Writer.new(256)
@@ -102,9 +109,9 @@ room = Chat::Room.new
 room.users << Chat::User.new(31, "carol")
 room.users << Chat::User.new(7, "alice")
 room.users << Chat::User.new(12, "bob")
-Chat.handle(room, "7 Morning!")
-Chat.handle(room, "12 Deploy is green")
-Chat.handle(room, "7 Ship it")
-Chat.handle(room, "99 Hi")
-Chat.handle(room, "hello")
+Chat.create_message(room, "7 Morning!")
+Chat.create_message(room, "12 Deploy is green")
+Chat.create_message(room, "7 Ship it")
+Chat.create_message(room, "99 Hi")
+Chat.create_message(room, "hello")
 puts "kept #{room.messages.size} messages"
