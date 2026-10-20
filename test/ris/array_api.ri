@@ -11,10 +11,10 @@ struct Message
 end
 
 tape do
-  # The room's members, by user id.
-  members = Tape::Array(Int32){7, 12, 31}
-  puts "#{members.size} #{members.first} #{members.last?} #{members.empty?}"
-  puts "#{members.includes?(31)} #{members.index(31)} #{members.index(99)}"
+  # The room's users, by id.
+  users = Tape::Array(Int32){7, 12, 31}
+  puts "#{users.size} #{users.first} #{users.last?} #{users.empty?}"
+  puts "#{users.includes?(31)} #{users.index(31)} #{users.index(99)}"
 
   messages = Tape::Array(Message){
     Message.new(7, "Morning!"),
@@ -24,7 +24,7 @@ tape do
   }
   long = messages.count { |m| m.body.bytesize > 7 }
   longer = messages.any? { |m| m.body.bytesize >= 15 }
-  puts "#{long} #{longer} #{messages.all? { |m| members.includes?(m.user_id) }}"
+  puts "#{long} #{longer} #{messages.all? { |m| users.includes?(m.user_id) }}"
   if first = messages.find { |m| m.user_id == 12 }
     puts first.body
   end
@@ -45,17 +45,17 @@ tape do
   by_author.each { |m| puts "#{m.user_id} #{m.body}" }
   puts messages.first.body
 
-  # Guests join; the room's member list, sorted and written out.
+  # Guests join; the room's user list, sorted and written out.
   guests = Tape::Array(Int32){44, 3}
-  everyone = members + guests
+  everyone = users + guests
   everyone.sort_in_place
   list = Tape::String::Writer.new(64)
   everyone.join(list, ", ")
   puts list.finish
-  copy = members.dup
+  copy = users.dup
   copy.concat(copy)
   down = copy.sorted { |a, b| a < b ? 1 : 0 }
-  puts "#{members.size} #{copy.size} #{down.first}"
+  puts "#{users.size} #{copy.size} #{down.first}"
 
   # Past 16 elements the sort merges runs: 40 ids, posted newest first.
   ids = Tape::Array(Int32).new(40) { |i| 40 - i }
@@ -65,8 +65,8 @@ tape do
   # The newest message is taken back, as a deleted one is.
   puts "#{messages.pop.user_id} #{messages.size}"
 
-  # Each member's unread count, none yet.
-  unread = Tape::Array(Int32).new(members.size, 0)
+  # Each user's unread count, none yet.
+  unread = Tape::Array(Int32).new(users.size, 0)
   puts "#{unread.size} #{unread.sum} #{unread.first?}"
 
   empty = Tape::Array(Message).new
