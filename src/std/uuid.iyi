@@ -33,9 +33,9 @@ pub struct UUID
     @bytes = bytes.dup
   end
 
-  # An array `v4` or `parse` has just filled, which nothing else holds.
-  private def initialize(*, owned : Array(UInt8))
-    @bytes = owned
+  def initialize(bytes : Tape::String)
+    raise "UUID: need 16 bytes" unless bytes.bytesize == 16
+    @bytes = Array(UInt8).new(16) { |i| bytes[i] }
   end
 
   # Sixteen bytes from the operating system, six bits of them then set to
@@ -45,10 +45,19 @@ pub struct UUID
   # outputs do not give that state away, where a version 4 UUID promises
   # 122 bits nobody can predict.
   def self.v4 : UUID
-    bytes = Random::Secure.random_bytes(16)
+    result = nil.as(UUID?)
+    tape do
+      result = v4_on_tape.to_heap
+    end
+    result || raise "UUID: no result"
+  end
+
+  def self.v4_on_tape : TapeUUID
+    bytes = Pointer(UInt8).new(IyiRegion.tape_bytes(16_u64))
+    Random::Secure.fill(bytes, 16)
     bytes[6] = (bytes[6] & 0x0f_u8) | 0x40_u8
     bytes[8] = (bytes[8] & 0x3f_u8) | 0x80_u8
-    new(owned: bytes)
+    TapeUUID.new(Tape::String.new(bytes, 16))
   end
 
   # The millisecond `v7` last stamped and the 12-bit counter beside it.
@@ -69,7 +78,16 @@ pub struct UUID
   # 62 bits after the counter are random every time, so two processes in
   # one millisecond still do not collide.
   def self.v7 : UUID
-    bytes = Random::Secure.random_bytes(16)
+    result = nil.as(UUID?)
+    tape do
+      result = v7_on_tape.to_heap
+    end
+    result || raise "UUID: no result"
+  end
+
+  def self.v7_on_tape : TapeUUID
+    bytes = Pointer(UInt8).new(IyiRegion.tape_bytes(16_u64))
+    Random::Secure.fill(bytes, 16)
     now = Time.utc.to_unix_ms
     if now > @@v7_ms
       @@v7_ms = now
@@ -89,33 +107,53 @@ pub struct UUID
     bytes[6] = (0x70 | (@@v7_counter >> 8)).to_u8
     bytes[7] = (@@v7_counter & 255).to_u8
     bytes[8] = (bytes[8] & 0x3f_u8) | 0x80_u8
-    new(owned: bytes)
+    TapeUUID.new(Tape::String.new(bytes, 16))
   end
 
   def self.parse(text : String) : UUID
-    hex = compact(text)
-    raise "UUID: not 32 hex digits: #{text}" if hex.size != 32
-    bytes = Array(UInt8).new(16) { 0_u8 }
-    i = 0
-    while i < 16
-      bytes[i] = ((nibble(hex[i * 2]) << 4) | nibble(hex[i * 2 + 1])).to_u8
-      i = i + 1
+    result = nil.as(UUID?)
+    tape do
+      result = parse(text.as_tape).to_heap
     end
-    new(owned: bytes)
+    result || raise "UUID: no result"
+  end
+
+  def self.parse(text : Tape::String) : TapeUUID
+    n = text.bytesize
+    unless n == 32 || (n == 36 && text[8] == 45_u8 &&
+           text[13] == 45_u8 && text[18] == 45_u8 && text[23] == 45_u8)
+      raise "UUID: not 32 hex digits: #{text.to_heap}"
+    end
+    bytes = Tape::String.build(16) do |w|
+      i = 0
+      while i < n
+        if n == 36 && (i == 8 || i == 13 || i == 18 || i == 23)
+          i += 1
+          next
+        end
+        hi = nibble(text[i].unsafe_chr)
+        lo = nibble(text[i + 1].unsafe_chr)
+        w.push(((hi << 4) | lo).to_u8)
+        i += 2
+      end
+    end
+    TapeUUID.new(bytes)
   end
 
   def to_s : String
-    String.new(36) do |dst|
-      write_hex(dst, 0, 0, 4)
-      dst[8] = 45_u8
-      write_hex(dst, 9, 4, 2)
-      dst[13] = 45_u8
-      write_hex(dst, 14, 6, 2)
-      dst[18] = 45_u8
-      write_hex(dst, 19, 8, 2)
-      dst[23] = 45_u8
-      write_hex(dst, 24, 10, 6)
+    result = ""
+    tape do
+      result = to_tape.to_heap
     end
+    result
+  end
+
+  def to_tape : Tape::String
+    Tape::String.build(36) { |w| write(w) }
+  end
+
+  def write(writer : Tape::String::Writer) : Nil
+    TapeUUID.new(Tape::String.new(@bytes.to_unsafe, 16)).write(writer)
   end
 
   def bytes : Array(UInt8)
@@ -148,31 +186,6 @@ pub struct UUID
     (@bytes[6].to_i32 >> 4) & 15
   end
 
-  private def write_hex(dst : Pointer(UInt8), at : Int32, from : Int32, count : Int32) : Nil
-    i = 0
-    while i < count
-      b = @bytes[from + i].to_i32
-      dst[at + i * 2] = hex_nibble(b >> 4)
-      dst[at + i * 2 + 1] = hex_nibble(b & 15)
-      i = i + 1
-    end
-  end
-
-  # The hyphens of the hyphenated form, at 8, 13, 18 and 23 of its 36, out;
-  # any other hyphen stays in and is not a hex digit. Every `-` was taken
-  # out wherever it stood, so `5-50e8400e29b41d4a716446655440000-` was read
-  # as a UUID, which the other library refuses.
-  private def self.compact(text : String) : Array(Char)
-    hyphenated = text.bytesize == 36 && text[8] == '-' && text[13] == '-' && text[18] == '-' && text[23] == '-'
-    out = [] of Char
-    k = 0
-    text.each_char do |ch|
-      out << ch unless hyphenated && (k == 8 || k == 13 || k == 18 || k == 23)
-      k = k + 1
-    end
-    out
-  end
-
   private def self.nibble(ch : Char) : Int32
     o = ch.ord
     return o - 48 if o >= 48 && o <= 57
@@ -180,8 +193,37 @@ pub struct UUID
     return o - 65 + 10 if o >= 65 && o <= 70
     raise "UUID: not a hex digit: #{ch}"
   end
+end
 
-  private def hex_nibble(n : Int32) : UInt8
-    n < 10 ? (48 + n).to_u8 : (87 + n).to_u8
+# Sixteen decoded bytes on the caller's tape.
+@[OnTape]
+pub struct TapeUUID
+  getter bytes : Tape::String
+
+  def initialize(@bytes : Tape::String)
+    raise "UUID: need 16 bytes" unless @bytes.bytesize == 16
+  end
+
+  def version : Int32
+    (@bytes[6].to_i32 >> 4) & 15
+  end
+
+  def to_heap : UUID
+    UUID.new(@bytes)
+  end
+
+  def to_tape : Tape::String
+    Tape::String.build(36) { |w| write(w) }
+  end
+
+  def write(writer : Tape::String::Writer) : Nil
+    digits = "0123456789abcdef"
+    i = 0
+    while i < 16
+      writer << "-" if i == 4 || i == 6 || i == 8 || i == 10
+      b = @bytes[i].to_i32
+      writer << digits[b >> 4] << digits[b & 15]
+      i += 1
+    end
   end
 end
