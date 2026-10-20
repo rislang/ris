@@ -1,0 +1,27 @@
+module test/base32_tape
+
+import std/base32::{Base32, Base32Hex, Base32Error}
+
+kept = ""
+tape do
+  text = "foobar".as_tape
+  encoded = Base32.encode(text)
+  exit 1 unless encoded == "MZXW6YTBOI======"
+  decoded = Base32.decode(encoded)
+  exit 2 if decoded.is_a?(Base32Error)
+  exit 3 unless decoded == text
+  exit 4 unless Base32.decode("MB".as_tape).is_a?(Base32Error)
+  exit 5 unless Base32.decode("A".as_tape).is_a?(Base32Error)
+  exit 6 unless Base32Hex.encode(text) == "CPNMUOJ1E8======"
+  w = Tape::String::Writer.new(1)
+  w << "prefix:"
+  Base32.encode("f".as_tape, w, false)
+  Base32Hex.decode("CO======".as_tape, w)
+  exit 7 unless w.finish == "prefix:MYf"
+  kept = encoded.to_heap
+end
+exit 8 unless Base32.decode(kept) == [102_u8, 111_u8, 111_u8,
+                                       98_u8, 97_u8, 114_u8]
+exit 9 unless Base32.encode("foo", false) == "MZXW6"
+exit 10 unless Base32Hex.decode("CO======") == [102_u8]
+puts "PASS: base32 tape and heap APIs"
