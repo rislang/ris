@@ -72,9 +72,9 @@ lowerings in `src/compiler/iyi/semantic/tape_*.cr`; `test/ris/check.sh`.
 | Load checks every link | Checked when followed | Same safety, a later error |
 | Built in place | `w.append(f(x))` writes in `w`; `puts "#{x}"` | No copy |
 | Bounds checks elided | `each`, `while i < a.size` | The loop bounds `i` |
+| Index types, `checkfree` | `a.indexes(b)`, `@[CheckFree]` | Checked on entry |
 | Variable-size enums | No | Unions and the GC suffice |
 | `reusable` pools | No | The GC holds unnested lifetimes |
 | No escaping closures | For tape values only | Procs are heap values |
 | Shared-nothing threads | No tape value on a channel | Send bytes on the heap |
 | No growth across recursion | No such limit | Regions, not one stack |
-| `return err from` | No | Not memory: it belongs in iyi |

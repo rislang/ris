@@ -1421,6 +1421,10 @@ module Iyi
       # with `to_s`; elsewhere `Iyi::TapeEscapeChecker` refuses that copy.
       types["Escape"] = @escape_annotation =
         AnnotationType.new self, self, "Escape"
+      # ris: `@[CheckFree]` on a def: `Iyi::TapeCheckFreeChecker` refuses
+      # an index checked in its body (Goose's `checkfree fn`).
+      types["CheckFree"] = @check_free_annotation =
+        AnnotationType.new self, self, "CheckFree"
 
       # iyi: the marker that makes a union member an error member (SPEC.md
       # III.1.1). Created here rather than declared in the prelude because the
@@ -1754,7 +1758,7 @@ module Iyi
                      always_inline_annotation naked_annotation returns_twice_annotation
                      raises_annotation primitive_annotation call_convention_annotation
                      flags_annotation link_annotation extern_annotation deprecated_annotation experimental_annotation
-                     share_annotation tape_annotation escape_annotation
+                     share_annotation tape_annotation escape_annotation check_free_annotation
                      error_trait) %}
       def {{name.id}}
         @{{name.id}}.not_nil!

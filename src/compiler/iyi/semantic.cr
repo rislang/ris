@@ -80,6 +80,7 @@ class Iyi::Program
         TapePointerChecker.new(self).run(result)
         TapeEscapeChecker.new(self).run(result)
         TapeScopeChecker.new(self).run(result)
+        TapeCheckFreeChecker.new(self).run(result)
       end
     end
 

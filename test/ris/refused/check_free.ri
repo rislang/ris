@@ -1,0 +1,10 @@
+@[CheckFree]
+def first(values : Tape::Array(Int32)) : Int32
+  values[0]
+end
+
+tape do
+  values = Tape::Array(Int32).new(1)
+  values.push(1)
+  puts first(values)
+end

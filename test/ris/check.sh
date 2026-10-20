@@ -62,6 +62,7 @@ expect heap_copy        "tape -> heap -> tape pays this at every turn"
 expect heap_memory      "Writing a Tape::String into a String::Builder or"
 expect heap_memory_print "Writing a Tape::String into a Std::Io::Memory"
 expect not_flat "Holder is not flat"
+expect check_free "\`first\` is @[CheckFree], and this \`[]\` checks"
 expect heap_escape_helper \
   "\`to_s\` of a Tape::String outside an @[Escape] def copies"
 
@@ -166,6 +167,8 @@ out=$("$RIS" run test/ris/scope_keep.ri 2>&1)
 if [ "$out" = "50000 50000 9" ]; then echo "runs     scope_keep"; else echo "FAILED   scope_keep: $out"; status=1; fi
 out=$("$RIS" run test/ris/in_place.ri 2>&1)
 if [ "$out" = $'<li>item n0</li><li>item n1</li><li>item n2</li>\n<li>item n9</li>\nin place: true 1' ]; then echo "runs     in_place"; else echo "FAILED   in_place: $out"; status=1; fi
+out=$("$RIS" run test/ris/indexes.ri 2>&1)
+if grep -qF $'4 edges, last names 3, reads -1\nlevels 10 dist 1 2 4' <<<"$out" && grep -qF "index 9 out of range for 4 elements" <<<"$out"; then echo "runs     indexes"; else echo "FAILED   indexes: $out"; status=1; fi
 out=$("$RIS" run test/ris/link_wide.ri 2>&1)
 if grep -qF "link 255 does not fit 1 bytes" <<<"$out"; then echo "runs     link_wide"; else echo "FAILED   link_wide: $out"; status=1; fi
 

@@ -531,6 +531,21 @@ module Tape
       total
     end
 
+    # The indexes in *indexes*, each checked against this array once, for
+    # reads with no check after (`Tape::Indexes`).
+    def indexes(indexes : Array(Int32)) : Indexes(T)
+      Indexes(T).new(self, indexes)
+    end
+
+    # For `Indexes`, whose indexes are known in range.
+    protected def unchecked(index : Int32) : T
+      unsafe_at(index)
+    end
+
+    protected def unchecked_store(index : Int32, value : T) : T
+      Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value = value
+    end
+
     @[AlwaysInline]
     private def unsafe_at(index : Int32) : T
       Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value
@@ -567,6 +582,60 @@ module Tape
       Pointer(UInt8).new(array.@state.value).copy_from(bytes.to_unsafe, bytes.bytesize)
       (array.@state + 1_i64).value = count.to_u64
       array
+    end
+  end
+
+  # `target`'s elements in the order *indexes* names them, every index
+  # checked once here: Goose's index types, `u32 in nodes`. Reading through
+  # one checks nothing more, as `target` never shrinks and the indexes are
+  # a copy no one else can change. CSR's `dist[adj[k]]` is
+  # `dist.indexes(adj)[k]`, checked when the edges come in.
+  @[OnTape]
+  struct Indexes(T)
+    @target : Array(T)
+    @at : Array(Int32)
+
+    def initialize(@target : Array(T), indexes : Array(Int32))
+      count = target.size
+      @at = Array(Int32).new(indexes.size) do |k|
+        index = indexes.__loop_fetch(k)
+        raise "index #{index} out of range for #{count} elements" if index < 0 || index >= count
+        index
+      end
+    end
+
+    def size : Int32
+      @at.size
+    end
+
+    # The *k*th index, which is in range of the target.
+    def index(k : Int32) : Int32
+      @at[k]
+    end
+
+    # The element the *k*th index names: *k* checked against the indexes,
+    # the index not at all.
+    def [](k : Int32) : T
+      @target.unchecked(@at[k])
+    end
+
+    def []=(k : Int32, value : T) : T
+      @target.unchecked_store(@at[k], value)
+    end
+
+    # As `[]` in `while k < x.size` (TapeLoopBounds): only *k*'s sign.
+    @[AlwaysInline]
+    def __loop_fetch(k : Int32) : T
+      @target.unchecked(@at.__loop_fetch(k))
+    end
+
+    @[AlwaysInline]
+    def __loop_store(k : Int32, value : T) : T
+      @target.unchecked_store(@at.__loop_fetch(k), value)
+    end
+
+    def each(& : T -> Nil) : Nil
+      @at.each { |index| yield @target.unchecked(index) }
     end
   end
 
