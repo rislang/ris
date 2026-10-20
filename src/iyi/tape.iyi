@@ -651,6 +651,147 @@ module Tape
       best
     end
 
+    # The arrays below are new ones on the same tape, freed with it, as
+    # `Array`'s are new ones on the heap; an element may be a tape value.
+    def select(& : T -> Bool) : self
+      result = Array(T).new(size)
+      each { |value| result.push(value) if yield value }
+      result
+    end
+
+    def reject(& : T -> Bool) : self
+      result = Array(T).new(size)
+      each { |value| result.push(value) unless yield value }
+      result
+    end
+
+    def reversed : self
+      count = size
+      Array(T).new(count) { |index| unsafe_at(count - 1 - index) }
+    end
+
+    def dup : self
+      Array(T).new(size) { |index| unsafe_at(index) }
+    end
+
+    # The two in order, as a new array; neither operand changes.
+    def +(other : Array(T)) : self
+      joined = Array(T).new(size + other.size)
+      each { |value| joined.push(value) }
+      other.each { |value| joined.push(value) }
+      joined
+    end
+
+    # *other*'s elements after the last. Its length is read once, so
+    # `a.concat(a)` doubles `a` rather than growing without end.
+    def concat(other : Array(T)) : self
+      taking = other.size
+      index = 0
+      while index < taking
+        push(other.unchecked(index))
+        index = index + 1
+      end
+      self
+    end
+
+    # Sorted as `Array#sort_in_place` sorts, stable: the block answers above
+    # zero when its first element goes after the second.
+    def sort_in_place(& : T, T -> Int32) : self
+      reorder(order { |a, b| yield unsafe_at(a), unsafe_at(b) })
+    end
+
+    def sort_in_place : self
+      sort_in_place { |a, b| b < a ? 1 : 0 }
+    end
+
+    # Ascending by the key each element answers, computed once each.
+    def sort_in_place_by(& : T -> U) : self forall U
+      keys = map { |value| yield value }
+      reorder(order { |a, b| keys.unchecked(b) < keys.unchecked(a) ? 1 : 0 })
+    end
+
+    def sorted(& : T, T -> Int32) : self
+      dup.sort_in_place { |a, b| yield a, b }
+    end
+
+    def sorted : self
+      dup.sort_in_place
+    end
+
+    def sorted_by(& : T -> U) : self forall U
+      dup.sort_in_place_by { |value| yield value }
+    end
+
+    # The elements written into *writer*, *separator* between them: where
+    # `Array#join` builds a heap String, this one adds to the caller's text.
+    def join(writer : String::Writer, separator : ::String | String = "") : Nil
+      each_with_index do |value, index|
+        writer.append(separator) if index > 0
+        writer.append_value(value)
+      end
+    end
+
+    # The indexes in sorted order, by *compare* on two of them: runs of 16
+    # by insertion, then merged in pairs, as `Array#sort_in_place` does.
+    # Indexes rather than elements are moved, so the scratch room is two
+    # arrays of Int32 on the tape whatever `T` is.
+    private def order(& : Int32, Int32 -> Int32) : Array(Int32)
+      count = size
+      from = Array(Int32).new(count) { |index| index }
+      start = 0
+      while start < count
+        finish = start + 16 < count ? start + 16 : count
+        index = start + 1
+        while index < finish
+          value = from[index]
+          slot = index - 1
+          while slot >= start && (yield from[slot], value) > 0
+            from[slot + 1] = from[slot]
+            slot = slot - 1
+          end
+          from[slot + 1] = value
+          index = index + 1
+        end
+        start = finish
+      end
+      into = Array(Int32).new(count, 0)
+      width = 16
+      while width < count
+        low = 0
+        while low < count
+          middle = low + width < count ? low + width : count
+          high = middle + width < count ? middle + width : count
+          left = low
+          right = middle
+          cursor = low
+          while cursor < high
+            # The left run's element on a tie: that is what keeps it stable.
+            if right >= high || (left < middle && (yield from[left], from[right]) <= 0)
+              into[cursor] = from[left]
+              left = left + 1
+            else
+              into[cursor] = from[right]
+              right = right + 1
+            end
+            cursor = cursor + 1
+          end
+          low = high
+        end
+        spare = from
+        from = into
+        into = spare
+        width = width * 2
+      end
+      from
+    end
+
+    # The elements put in the order *order* names, from a copy of them.
+    private def reorder(order : Array(Int32)) : self
+      copy = dup
+      order.each_with_index { |from, to| unchecked_store(to, copy.unchecked(from)) }
+      self
+    end
+
     # The indexes in *indexes*, each checked against this array once, for
     # reads with no check after (`Tape::View`).
     def values_at(indexes : Array(Int32)) : View(T)

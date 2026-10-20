@@ -34,6 +34,35 @@ tape do
   puts "#{total} #{messages.max_by { |m| m.boosts }.user_id}"
   puts messages.min_by { |m| m.body.bytesize }.body
 
+  # New arrays on the same tape: boosted ones, the rest, newest first.
+  boosted_ones = messages.select { |m| m.boosts > 0 }
+  plain = messages.reject { |m| m.boosts > 0 }
+  newest = messages.reversed
+  puts "#{boosted_ones.size} #{plain.size} #{newest.first.body}"
+
+  # Most boosted first, as a "top messages" panel lists them; ties keep
+  # the order they were posted in.
+  top = messages.sorted_by { |m| -m.boosts }
+  top.each { |m| puts "#{m.boosts} #{m.body}" }
+  puts messages.first.body
+
+  # Guests join; the room's member list, sorted and written out.
+  guests = Tape::Array(Int32){44, 3}
+  everyone = members + guests
+  everyone.sort_in_place
+  list = Tape::String::Writer.new(64)
+  everyone.join(list, ", ")
+  puts list.finish
+  copy = members.dup
+  copy.concat(copy)
+  down = copy.sorted { |a, b| a < b ? 1 : 0 }
+  puts "#{members.size} #{copy.size} #{down.first}"
+
+  # Past 16 elements the sort merges runs: 40 ids, posted newest first.
+  ids = Tape::Array(Int32).new(40) { |i| 40 - i }
+  ids.sort_in_place
+  puts "#{ids.first} #{ids[15]} #{ids[16]} #{ids.last?} #{ids.sum}"
+
   # The newest message is taken back, as a deleted one is.
   puts "#{messages.pop.user_id} #{messages.size}"
 
