@@ -1,0 +1,21 @@
+module test/ini_tape
+
+import std/ini::{INI}
+
+kept = Hash(String, Hash(String, String)).new
+tape do
+  doc = INI.parse("\uFEFFtop=yes\r\n[s]\na = café\n[s]\na=last\n".as_tape)
+  exit 1 unless doc[""]["top"] == "yes"
+  exit 2 unless doc["s"]["a"] == "last"
+  w = Tape::String::Writer.new(1)
+  w << "prefix:"
+  INI.build(doc, w, true)
+  exit 3 unless w.finish == "prefix:top = yes\n[s]\na = last\n\n"
+  exit 4 unless INI.parse(INI.build(doc)).to_heap == doc.to_heap
+  spaced = INI.parse("x=\u00A0café\u3000\n".as_tape)
+  exit 7 unless spaced[""]["x"] == "café"
+  kept = doc.to_heap
+end
+exit 5 unless INI.parse(INI.build(kept)) == kept
+exit 6 unless INI.parse("").empty?
+puts "PASS: ini tape and heap APIs"

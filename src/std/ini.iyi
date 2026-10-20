@@ -32,17 +32,26 @@ pub struct INI
   # declaration at line 1, column 8" at a `[section]` behind one, and the
   # first key of a file without a section kept it and never matched.
   def self.parse(string : String) : Hash(String, Hash(String, String))
-    parse_lines(string.lchop('\uFEFF').lines)
+    result = Hash(String, Hash(String, String)).new
+    tape do
+      result = parse(string.as_tape).to_heap
+    end
+    result
+  end
+
+  def self.parse(string : Tape::String) : TapeINI
+    text = string.starts_with?("\uFEFF") ? string[3..] : string
+    parse_lines(text.split('\n'))
   end
 
   def self.parse(io : IO) : Hash(String, Hash(String, String))
     parse(io.read_all)
   end
 
-  private def self.parse_lines(lines : Array(String)) : Hash(String, Hash(String, String))
-    ini = Hash(String, Hash(String, String)).new
-    current_section = Hash(String, String).new
-    ini[""] = current_section
+  private def self.parse_lines(lines : Tape::Array(Tape::String)) : TapeINI
+    ini = TapeINI.new
+    current_section = TapeProperties.new
+    ini["".as_tape] = current_section
     lineno = 0
 
     lines.each do |line|
@@ -81,7 +90,7 @@ pub struct INI
         if existing = ini[name]?
           current_section = existing
         else
-          current_section = Hash(String, String).new
+          current_section = TapeProperties.new
           ini[name] = current_section
         end
       else
@@ -97,8 +106,8 @@ pub struct INI
 
         raise "expected declaration at line #{lineno}, column #{column(line, len)}" if eq_idx < 0
 
-        key = line[offset, eq_idx - offset].strip
-        value = line[eq_idx + 1, len - eq_idx - 1].strip
+        key = trim(line[offset, eq_idx - offset])
+        value = trim(line[eq_idx + 1, len - eq_idx - 1])
         current_section[key] = value
       end
     end
@@ -111,7 +120,7 @@ pub struct INI
 
   # The 1-based character column of byte *index* in *line*: every byte
   # that is not a UTF-8 continuation byte begins a character.
-  private def self.column(line : String, index : Int32) : Int32
+  private def self.column(line : Tape::String, index : Int32) : Int32
     raw = line.to_unsafe
     count = 0
     i = 0
@@ -122,58 +131,80 @@ pub struct INI
     count + 1
   end
 
-  def self.build(ini : Hash(String, Hash(String, String)), space : Bool = false) : String
-    parts = [] of String
+  def self.build(ini : Hash(String, Hash(String, String)),
+                 space : Bool = false) : String
+    result = ""
+    tape do
+      view = TapeINI.new
+      ini.each do |section, properties|
+        fields = TapeProperties.new
+        properties.each { |key, value| fields[key.as_tape] = value.as_tape }
+        view[section.as_tape] = fields
+      end
+      result = build(view, space).to_heap
+    end
+    result
+  end
+
+  def self.build(ini : TapeINI, space : Bool = false) : Tape::String
+    Tape::String.build { |w| build(ini, w, space) }
+  end
+
+  def self.build(ini : TapeINI, writer : Tape::String::Writer,
+                 space : Bool = false) : Nil
     delim = space ? " = " : "="
     # Written verbatim, a value holding a line break wrote lines of its
     # own: `"hello\r\n[admin]\r\nrole=root"` read back as a section
     # `admin` with a key `role`, and a padded value came back unpadded.
     ini.each do |section, properties|
       if why = unwritable_section(section)
-        raise "INI.build: section #{section.inspect} cannot be written: #{why}"
+        raise "INI.build: section #{section.to_heap.inspect} " \
+          "cannot be written: #{why}"
       end
       properties.each do |key, value|
         if why = unwritable_key(key)
-          raise "INI.build: key #{key.inspect} in section #{section.inspect} cannot be written: #{why}"
+          raise "INI.build: key #{key.to_heap.inspect} in section " \
+            "#{section.to_heap.inspect} cannot be written: #{why}"
         end
         if why = unwritable_value(value)
-          raise "INI.build: the value of #{key.inspect} in section #{section.inspect} cannot be written: #{why}"
+          raise "INI.build: the value of #{key.to_heap.inspect} in " \
+            "section #{section.to_heap.inspect} cannot be written: #{why}"
         end
       end
     end
 
     if top = ini[""]?
       top.each do |key, value|
-        parts << key
-        parts << delim
-        parts << value
-        parts << "\n"
+        writer << key
+        writer << delim
+        writer << value
+        writer << "\n"
       end
     end
 
     ini.each do |section, properties|
       next if section.empty?
-      parts << "["
-      parts << section
-      parts << "]\n"
+      writer << "["
+      writer << section
+      writer << "]\n"
       properties.each do |key, value|
-        parts << key
-        parts << delim
-        parts << value
-        parts << "\n"
+        writer << key
+        writer << delim
+        writer << value
+        writer << "\n"
       end
-      parts << "\n"
+      writer << "\n"
     end
-    parts.join("")
+    nil
   end
 
   def self.build(io : IO, ini : Hash(String, Hash(String, String)), space : Bool = false) : Nil
     io.write(build(ini, space))
   end
 
-  private def self.unwritable_section(name : String) : String?
+  private def self.unwritable_section(name : Tape::String) : String?
     return "it holds a line break" if line_break?(name)
-    return "it holds `]`" if name.includes?("]")
+    return "it holds `]`" if name.includes?(']')
     nil
   end
 
@@ -181,23 +212,196 @@ pub struct INI
   # mark, so a top-level key opening with one, written first, came back
   # without it: `{"" => {"\uFEFFkey" => "v"}}` read back as `key`. Which
   # key is first is the hash's order, so it is refused wherever it is.
-  private def self.unwritable_key(key : String) : String?
+  private def self.unwritable_key(key : Tape::String) : String?
     return "it is empty" if key.empty?
     return "it holds a line break" if line_break?(key)
-    return "it holds `=`" if key.includes?("=")
-    return "it opens with #{key[0].inspect}, which starts a comment or a section" if key.starts_with?("#") || key.starts_with?(";") || key.starts_with?("[")
-    return "it opens with U+FEFF, which is read as a byte order mark" if key.starts_with?('\uFEFF')
-    return "blanks at either end are not read back" if key != key.strip
+    return "it holds `=`" if key.includes?('=')
+    if key.starts_with?("#") || key.starts_with?(";") || key.starts_with?("[")
+      return "it opens with #{key[0].unsafe_chr.inspect}, which starts " \
+        "a comment or a section"
+    end
+    if key.starts_with?("\uFEFF")
+      return "it opens with U+FEFF, which is read as a byte order mark"
+    end
+    return "blanks at either end are not read back" if key != trim(key)
     nil
   end
 
-  private def self.unwritable_value(value : String) : String?
+  private def self.unwritable_value(value : Tape::String) : String?
     return "it holds a line break" if line_break?(value)
-    return "blanks at either end are not read back" if value != value.strip
+    return "blanks at either end are not read back" if value != trim(value)
     nil
   end
 
-  private def self.line_break?(text : String) : Bool
-    text.includes?("\n") || text.includes?("\r")
+  private def self.trim(text : Tape::String) : Tape::String
+    first = 0
+    last = text.bytesize
+    while first < last
+      width = blank_width(text, first)
+      break if width == 0
+      first += width
+    end
+    while last > first
+      at = last - 1
+      while at > first && (text[at] & 0xC0_u8) == 0x80_u8
+        at -= 1
+      end
+      break unless blank_width(text, at) == last - at
+      last = at
+    end
+    text[first, last - first]
+  end
+
+  # Char#whitespace?'s UTF-8 bytes, as String#strip reads them.
+  private def self.blank_width(text : Tape::String, at : Int32) : Int32
+    b = text[at]
+    return 1 if b == 32_u8 || (b >= 9_u8 && b <= 13_u8)
+    left = text.bytesize - at
+    return 2 if left >= 2 && b == 0xC2_u8 && text[at + 1] == 0xA0_u8
+    return 0 if left < 3
+    c = text[at + 1]
+    d = text[at + 2]
+    return 3 if b == 0xE1_u8 && c == 0x9A_u8 && d == 0x80_u8
+    if b == 0xE2_u8
+      if c == 0x80_u8
+        return 3 if (d >= 0x80_u8 && d <= 0x8A_u8) ||
+                    d == 0xA8_u8 || d == 0xA9_u8 || d == 0xAF_u8
+      end
+      return 3 if c == 0x81_u8 && d == 0x9F_u8
+    end
+    return 3 if b == 0xE3_u8 && c == 0x80_u8 && d == 0x80_u8
+    0
+  end
+
+  private def self.line_break?(text : Tape::String) : Bool
+    text.includes?('\n') || text.includes?('\r')
+  end
+end
+
+# Ordered fields on the caller's tape; names and values view the input.
+@[OnTape]
+pub struct TapeProperty
+  getter key : Tape::String
+  getter value : Tape::String
+
+  def initialize(@key : Tape::String, @value : Tape::String)
+  end
+end
+
+@[OnTape]
+pub struct TapeProperties
+  @entries : Tape::Array(TapeProperty)
+
+  def initialize
+    @entries = Tape::Array(TapeProperty).new
+  end
+
+  def []?(key : String | Tape::String) : Tape::String?
+    @entries.each do |field|
+      return field.value if field.key == key
+    end
+    nil
+  end
+
+  def [](key : String | Tape::String) : Tape::String
+    self[key]? || raise "INI: missing key"
+  end
+
+  def []=(key : Tape::String, value : Tape::String) : Nil
+    @entries.each_with_index do |field, i|
+      if field.key == key
+        @entries[i] = TapeProperty.new(key, value)
+        return
+      end
+    end
+    @entries << TapeProperty.new(key, value)
+  end
+
+  def size : Int32
+    @entries.size
+  end
+
+  def empty? : Bool
+    @entries.empty?
+  end
+
+  def has_key?(key : String | Tape::String) : Bool
+    !self[key]?.nil?
+  end
+
+  def each(& : Tape::String, Tape::String -> Nil) : Nil
+    @entries.each { |field| yield field.key, field.value }
+  end
+
+  def to_heap : Hash(String, String)
+    result = Hash(String, String).new
+    each { |key, value| result[key.to_heap] = value.to_heap }
+    result
+  end
+end
+
+# Ordered fields on the caller's tape; names and values view the input.
+@[OnTape]
+pub struct TapeSection
+  getter key : Tape::String
+  getter value : TapeProperties
+
+  def initialize(@key : Tape::String, @value : TapeProperties)
+  end
+end
+
+@[OnTape]
+pub struct TapeINI
+  @entries : Tape::Array(TapeSection)
+
+  def initialize
+    @entries = Tape::Array(TapeSection).new
+  end
+
+  def []?(key : String | Tape::String) : TapeProperties?
+    @entries.each do |field|
+      return field.value if field.key == key
+    end
+    nil
+  end
+
+  def [](key : String | Tape::String) : TapeProperties
+    self[key]? || raise "INI: missing key"
+  end
+
+  def []=(key : Tape::String, value : TapeProperties) : Nil
+    @entries.each_with_index do |field, i|
+      if field.key == key
+        @entries[i] = TapeSection.new(key, value)
+        return
+      end
+    end
+    @entries << TapeSection.new(key, value)
+  end
+
+  def size : Int32
+    @entries.size
+  end
+
+  def empty? : Bool
+    @entries.empty?
+  end
+
+  def has_key?(key : String | Tape::String) : Bool
+    !self[key]?.nil?
+  end
+
+  def each(& : Tape::String, TapeProperties -> Nil) : Nil
+    @entries.each { |field| yield field.key, field.value }
+  end
+
+  def delete(key : String) : Nil
+    @entries = @entries.reject { |field| field.key == key }
+  end
+
+  def to_heap : Hash(String, Hash(String, String))
+    result = Hash(String, Hash(String, String)).new
+    each { |key, value| result[key.to_heap] = value.to_heap }
+    result
   end
 end
