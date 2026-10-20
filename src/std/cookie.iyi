@@ -48,74 +48,17 @@ pub class Cookie
   end
 
   def self.parse(line : String) : Cookie?
-    parts = line.split(';')
-    return nil if parts.empty?
-    pair = parts[0]
-    eq = pair.index('=')
-    return nil unless eq
-    name = HTTP.trim(pair[0, eq])
-    value = HTTP.trim(pair[eq + 1, pair.bytesize - eq - 1])
-    return nil if name.bytesize == 0
-    value = value[1, value.bytesize - 2] if value.bytesize >= 2 && value.starts_with?("\"") && value.ends_with?("\"")
-    path = nil.as(String?)
-    domain = nil.as(String?)
-    expires = nil.as(Time?)
-    max_age = nil.as(Int64?)
-    secure = false
-    http_only = false
-    same_site = nil.as(String?)
-    i = 1
-    while i < parts.size
-      attribute = parts[i]
-      i = i + 1
-      key = attribute
-      text = ""
-      if at = attribute.index('=')
-        key = attribute[0, at]
-        text = HTTP.trim(attribute[at + 1, attribute.bytesize - at - 1])
-      end
-      key = HTTP.trim(key).downcase
-      case key
-      when "expires"
-        read = Time::Format::HTTP_DATE.parse(text)
-        expires = read if read.is_a?(Time)
-      when "max-age"
-        if seconds = Cookie.seconds(text)
-          max_age = seconds
-        end
-      when "domain"
-        name_of = text.starts_with?(".") ? text[1, text.bytesize - 1] : text
-        domain = name_of.downcase if name_of.bytesize > 0
-      when "path"
-        path = text if text.starts_with?("/")
-      when "secure"
-        secure = true
-      when "httponly"
-        http_only = true
-      when "samesite"
-        same_site = text if text.bytesize > 0
+    result = nil.as(Cookie?)
+    tape do
+      if parsed = parse(line.as_tape)
+        result = parsed.to_heap
       end
     end
-    if age = max_age
-      expires = age <= 0_i64 ? Time.unix(0_i64) : Time.utc + Span.seconds(age)
-    end
-    Cookie.new(name, value, path, domain, expires, max_age, secure, http_only, same_site)
+    result
   end
 
-  # `Max-Age`'s digits, with a sign (§5.2.2); nil for anything else.
-  protected def self.seconds(text : String) : Int64?
-    return nil if text.bytesize == 0
-    p = text.to_unsafe
-    negative = p[0] == 45_u8
-    i = negative ? 1 : 0
-    return nil if i == text.bytesize
-    value = 0_i64
-    while i < text.bytesize
-      return nil unless p[i] >= 48_u8 && p[i] <= 57_u8
-      value = value * 10_i64 + (p[i] - 48_u8).to_i64 if value < 100000000000_i64
-      i = i + 1
-    end
-    negative ? 0_i64 - value : value
+  def self.parse(line : Tape::String) : TapeCookie?
+    TapeCookie.parse(line)
   end
 
   # The cookies an answer's `Set-Cookie` lines set, a line each.
@@ -131,42 +74,46 @@ pub class Cookie
 
   # The pairs of a request's `Cookie` header: `a=1; b=2`.
   def self.parse_header(value : String) : Hash(String, String)
-    HTTP.cookie_pairs(value)
+    result = Hash(String, String).new
+    tape do
+      result = parse_header(value.as_tape).to_heap
+    end
+    result
+  end
+
+  def self.parse_header(value : Tape::String) : TapeCookiePairs
+    found = TapeCookiePairs.new
+    value.split(';').each do |part|
+      eq = part.index('=')
+      next unless eq
+      name = TapeCookie.trim(part[0, eq])
+      next if name.empty?
+      text = TapeCookie.trim(part[eq + 1, part.bytesize - eq - 1])
+      if text.bytesize >= 2 && text[0] == 34_u8 && text[-1] == 34_u8
+        text = text[1, text.bytesize - 2]
+      end
+      found[name] = text unless found[name]?
+    end
+    found
   end
 
   # The `Set-Cookie` value a server writes (§4.1). A name is a token, and a
   # value the cookie-octets: a space, a comma, a semicolon, a backslash or
   # a quote inside one would end it or another field early.
   def to_set_cookie : String
-    raise "Cookie: not a cookie name: #{@name.inspect}" unless HTTP.token?(@name)
-    p = @value.to_unsafe
-    i = 0
-    while i < @value.bytesize
-      c = p[i]
-      unless c == 0x21_u8 || (c >= 0x23_u8 && c <= 0x2B_u8) || (c >= 0x2D_u8 && c <= 0x3A_u8) || (c >= 0x3C_u8 && c <= 0x5B_u8) || (c >= 0x5D_u8 && c <= 0x7E_u8)
-        raise "Cookie: #{@name} has a byte a cookie value cannot hold: #{@value.inspect}"
-      end
-      i = i + 1
+    result = ""
+    tape do
+      result = to_tape.to_heap
     end
-    text = String::Builder.new
-    text << @name << "=" << @value
-    if path = @path
-      text << "; Path=" << path
-    end
-    if domain = @domain
-      text << "; Domain=" << domain
-    end
-    if age = @max_age
-      text << "; Max-Age=" << age
-    elsif expires = @expires
-      text << "; Expires=" << expires.to_rfc1123
-    end
-    text << "; Secure" if @secure
-    text << "; HttpOnly" if @http_only
-    if same = @same_site
-      text << "; SameSite=" << same
-    end
-    text.to_s
+    result
+  end
+
+  def to_tape : Tape::String
+    Tape::String.build { |w| to_set_cookie(w) }
+  end
+
+  def to_set_cookie(writer : Tape::String::Writer) : Nil
+    TapeCookie.view(self).to_set_cookie(writer)
   end
 
   # Whether the cookie has lapsed at *now*.
@@ -317,4 +264,444 @@ pub class CookieJar
 end
 
 impl CookieStore for CookieJar
+end
+
+# A Set-Cookie line's fields, retained with the caller's input bytes.
+@[OnTape]
+pub struct TapeCookie
+  getter name : Tape::String
+  getter value : Tape::String
+  getter path : Tape::String?
+  getter domain : Tape::String?
+  getter expires : Time?
+  getter max_age : Int64?
+  getter secure : Bool
+  getter http_only : Bool
+  getter same_site : Tape::String?
+
+  def initialize(@name : Tape::String, @value : Tape::String,
+                 @path : Tape::String? = nil,
+                 @domain : Tape::String? = nil, @expires : Time? = nil,
+                 @max_age : Int64? = nil, @secure : Bool = false,
+                 @http_only : Bool = false,
+                 @same_site : Tape::String? = nil)
+  end
+
+  def self.parse(line : Tape::String) : TapeCookie?
+    parts = line.split(';')
+    return nil if parts.empty?
+    pair = parts[0]
+    eq = pair.index('=')
+    return nil unless eq
+    name = TapeCookie.trim(pair[0, eq])
+    value = TapeCookie.trim(pair[eq + 1, pair.bytesize - eq - 1])
+    return nil if name.bytesize == 0
+    if value.bytesize >= 2 && value[0] == 34_u8 && value[-1] == 34_u8
+      value = value[1, value.bytesize - 2]
+    end
+    path = nil.as(Tape::String?)
+    domain = nil.as(Tape::String?)
+    expires = nil.as(Time?)
+    max_age = nil.as(Int64?)
+    secure = false
+    http_only = false
+    same_site = nil.as(Tape::String?)
+    i = 1
+    while i < parts.size
+      attribute = parts[i]
+      i = i + 1
+      key = attribute
+      text = "".as_tape
+      if at = attribute.index('=')
+        key = attribute[0, at]
+        text = TapeCookie.trim(attribute[at + 1, attribute.bytesize - at - 1])
+      end
+      key = lower(TapeCookie.trim(key))
+      if key == "expires"
+        expires = CookieDate.new(text).parse || expires
+      elsif key == "max-age"
+        if seconds = seconds(text)
+          max_age = seconds
+        end
+      elsif key == "domain"
+        name_of = text.starts_with?(".") ? text[1, text.bytesize - 1] : text
+        domain = lower(name_of) if name_of.bytesize > 0
+      elsif key == "path"
+        path = text if text.starts_with?("/")
+      elsif key == "secure"
+        secure = true
+      elsif key == "httponly"
+        http_only = true
+      elsif key == "samesite"
+        same_site = text if text.bytesize > 0
+      end
+    end
+    if age = max_age
+      expires = age <= 0_i64 ? Time.unix(0_i64) : Time.utc + Span.seconds(age)
+    end
+    TapeCookie.new(name, value, path, domain, expires, max_age, secure,
+                   http_only, same_site)
+  end
+
+  # `Max-Age`'s digits, with a sign (§5.2.2); nil for anything else.
+  private def self.seconds(text : Tape::String) : Int64?
+    return nil if text.bytesize == 0
+    p = text.to_unsafe
+    negative = p[0] == 45_u8
+    i = negative ? 1 : 0
+    return nil if i == text.bytesize
+    value = 0_i64
+    while i < text.bytesize
+      return nil unless p[i] >= 48_u8 && p[i] <= 57_u8
+      value = value * 10_i64 + (p[i] - 48_u8).to_i64 if value < 100000000000_i64
+      i = i + 1
+    end
+    negative ? 0_i64 - value : value
+  end
+
+  def to_set_cookie(text : Tape::String::Writer) : Nil
+    unless HTTP.token?(@name.to_unsafe, @name.bytesize)
+      raise "Cookie: not a cookie name: #{@name.to_heap.inspect}"
+    end
+    p = @value.to_unsafe
+    i = 0
+    while i < @value.bytesize
+      c = p[i]
+      unless c == 0x21_u8 || (c >= 0x23_u8 && c <= 0x2B_u8) ||
+             (c >= 0x2D_u8 && c <= 0x3A_u8) ||
+             (c >= 0x3C_u8 && c <= 0x5B_u8) ||
+             (c >= 0x5D_u8 && c <= 0x7E_u8)
+        raise "Cookie: #{@name.to_heap} has a byte a cookie value " \
+          "cannot hold: #{@value.to_heap.inspect}"
+      end
+      i = i + 1
+    end
+    text << @name << "=" << @value
+    if path = @path
+      text << "; Path=" << path
+    end
+    if domain = @domain
+      text << "; Domain=" << domain
+    end
+    if age = @max_age
+      text << "; Max-Age=" << age
+    elsif expires = @expires
+      text << "; Expires="
+      CookieDate.write(expires, text)
+    end
+    text << "; Secure" if @secure
+    text << "; HttpOnly" if @http_only
+    if same = @same_site
+      text << "; SameSite=" << same
+    end
+    nil
+  end
+
+
+  def to_tape : Tape::String
+    Tape::String.build { |w| to_set_cookie(w) }
+  end
+
+  def self.view(cookie : Cookie) : TapeCookie
+    path = cookie.path
+    domain = cookie.domain
+    same = cookie.same_site
+    new(cookie.name.as_tape, cookie.value.as_tape,
+        path ? path.as_tape : nil, domain ? domain.as_tape : nil,
+        cookie.expires, cookie.max_age, cookie.secure, cookie.http_only,
+        same ? same.as_tape : nil)
+  end
+
+  def to_heap : Cookie
+    path = @path
+    domain = @domain
+    same = @same_site
+    Cookie.new(@name.to_heap, @value.to_heap,
+               path ? path.to_heap : nil, domain ? domain.to_heap : nil,
+               @expires, @max_age, @secure, @http_only,
+               same ? same.to_heap : nil)
+  end
+
+  def self.trim(text : Tape::String) : Tape::String
+    first = 0
+    last = text.bytesize
+    while first < last && (text[first] == 32_u8 || text[first] == 9_u8)
+      first += 1
+    end
+    while last > first && (text[last - 1] == 32_u8 || text[last - 1] == 9_u8)
+      last -= 1
+    end
+    text[first, last - first]
+  end
+
+  private def self.lower(text : Tape::String) : Tape::String
+    Tape::String.build(text.bytesize) do |w|
+      text.each_byte do |b|
+        w.push(b >= 65_u8 && b <= 90_u8 ? b + 32_u8 : b)
+      end
+    end
+  end
+end
+
+@[OnTape]
+pub struct TapeCookiePair
+  getter key : Tape::String
+  getter value : Tape::String
+
+  def initialize(@key : Tape::String, @value : Tape::String)
+  end
+end
+
+@[OnTape]
+pub struct TapeCookiePairs
+  @entries : Tape::Array(TapeCookiePair)
+
+  def initialize
+    @entries = Tape::Array(TapeCookiePair).new
+  end
+
+  def []?(key : String | Tape::String) : Tape::String?
+    @entries.each do |field|
+      return field.value if field.key == key
+    end
+    nil
+  end
+
+  def [](key : String | Tape::String) : Tape::String
+    self[key]? || raise "COOKIE: missing key"
+  end
+
+  def []=(key : Tape::String, value : Tape::String) : Nil
+    @entries.each_with_index do |field, i|
+      if field.key == key
+        @entries[i] = TapeCookiePair.new(key, value)
+        return
+      end
+    end
+    @entries << TapeCookiePair.new(key, value)
+  end
+
+  def size : Int32
+    @entries.size
+  end
+
+  def empty? : Bool
+    @entries.empty?
+  end
+
+  def has_key?(key : String | Tape::String) : Bool
+    !self[key]?.nil?
+  end
+
+  def each(& : Tape::String, Tape::String -> Nil) : Nil
+    @entries.each { |field| yield field.key, field.value }
+  end
+
+  def to_heap : Hash(String, String)
+    result = Hash(String, String).new
+    each { |key, value| result[key.to_heap] = value.to_heap }
+    result
+  end
+end
+
+# The HTTP-date grammar from std/time, over a tape view. Invalid dates
+# are ignored by Cookie.parse, so this reader needs no error strings.
+@[OnTape]
+struct CookieDate
+  DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday",
+          "Friday", "Saturday"]
+  MONTHS = ["January", "February", "March", "April", "May", "June",
+            "July", "August", "September", "October", "November",
+            "December"]
+
+  @pos : Int32 = 0
+
+  def initialize(@text : Tape::String)
+  end
+
+  def parse : Time?
+    return nil unless name(DAYS, false)
+    offset = 0
+    if accept(',')
+      return nil unless space
+      day = number(2)
+      return nil unless day
+      if accept('-')
+        month = name(MONTHS, true)
+        return nil unless month && accept('-')
+        start = @pos
+        year = number(4)
+        return nil unless year
+        count = @pos - start
+        if count == 2
+          now = Time.utc.year
+          year = now - now % 100 + year
+          year += 100 if year + 100 <= now + 50
+          year -= 100 if year > now + 50
+        elsif count != 4
+          return nil
+        end
+      else
+        return nil unless space
+        month = name(MONTHS, true)
+        return nil unless month && space
+        year = exact(4)
+        return nil unless year
+      end
+      return nil unless space
+      clock = time_of_day
+      return nil unless clock && space
+      zone_offset = zone
+      return nil unless zone_offset
+      offset = zone_offset
+    else
+      return nil unless space
+      month = name(MONTHS, true)
+      return nil unless month && space
+      padded = accept(' ')
+      day = number(padded ? 1 : 2)
+      return nil unless day && space
+      clock = time_of_day
+      return nil unless clock && space
+      year = exact(4)
+      return nil unless year
+    end
+    return nil unless @pos == @text.bytesize
+    month += 1
+    return nil if day < 1 || day > Time.days_in_month(year, month)
+    hour, minute, second = clock
+    return nil if hour > 23 || minute > 59 || second > 60
+    Time.utc(year, month, day, hour, minute, 0) +
+      Span.seconds((second - offset).to_i64)
+  end
+
+  private def peek(ahead : Int32 = 0) : UInt8
+    at = @pos + ahead
+    at < @text.bytesize ? @text[at] : 0_u8
+  end
+
+  private def accept(char : Char) : Bool
+    return false unless @pos < @text.bytesize && peek == char.ord
+    @pos += 1
+    true
+  end
+
+  private def space : Bool
+    b = peek
+    return false unless b == 32_u8 || (b >= 9_u8 && b <= 13_u8)
+    @pos += 1
+    true
+  end
+
+  private def number(max : Int32) : Int32?
+    start = @pos
+    value = 0
+    while @pos - start < max && peek >= 48_u8 && peek <= 57_u8
+      value = value * 10 + (peek - 48_u8).to_i32
+      @pos += 1
+    end
+    @pos == start ? nil : value
+  end
+
+  private def exact(count : Int32) : Int32?
+    start = @pos
+    value = number(count)
+    @pos - start == count ? value : nil
+  end
+
+  private def same?(text : Tape::String, name : String) : Bool
+    return false if text.bytesize > name.bytesize
+    i = 0
+    while i < text.bytesize
+      return false if (text[i] | 0x20_u8) != (name.to_unsafe[i] | 0x20_u8)
+      i += 1
+    end
+    true
+  end
+
+  private def name(names : Array(String), short : Bool) : Int32?
+    start = @pos
+    while (b = peek | 0x20_u8) >= 97_u8 && b <= 122_u8
+      @pos += 1
+    end
+    size = @pos - start
+    return nil unless short ? size == 3 : size >= 3
+    text = @text[start, size]
+    names.each_with_index { |n, i| return i if same?(text, n) }
+    nil
+  end
+
+  private def time_of_day : {Int32, Int32, Int32}?
+    hour = number(2)
+    return nil unless hour && accept(':')
+    minute = number(2)
+    return nil unless minute && accept(':')
+    second = number(2)
+    return nil unless second
+    {hour, minute, second}
+  end
+
+  private def zone : Int32?
+    if peek == 43_u8 || peek == 45_u8
+      negative = accept('-')
+      accept('+') unless negative
+      hours = exact(2)
+      minutes = exact(2)
+      return nil unless hours && minutes && hours <= 23 && minutes <= 59
+      offset = hours * 3600 + minutes * 60
+      return negative ? -offset : offset
+    end
+    start = @pos
+    while (b = peek | 0x20_u8) >= 97_u8 && b <= 122_u8
+      @pos += 1
+    end
+    text = @text[start, @pos - start]
+    names = ZONES
+    offsets = OFFSETS
+    names.each_with_index do |name, i|
+      return offsets[i] if text.bytesize == name.bytesize && same?(text, name)
+    end
+    return 0 if text.bytesize == 1 && (text[0] | 0x20_u8) != 106_u8
+    nil
+  end
+
+  ZONES = ["UT", "UTC", "GMT", "EST", "EDT", "CST", "CDT", "MST",
+           "MDT", "PST", "PDT"]
+  OFFSETS = [0, 0, 0, -18000, -14400, -21600, -18000, -25200,
+             -21600, -28800, -25200]
+
+  def self.write(time : Time, writer : Tape::String::Writer) : Nil
+    utc = time.to_utc
+    writer << DAYS[utc.day_of_week.value % 7].as_tape[0, 3] << ", "
+    padded(utc.day, 2, writer)
+    writer << " " << MONTHS[utc.month - 1].as_tape[0, 3] << " "
+    padded(utc.year, 4, writer)
+    writer << " "
+    padded(utc.hour, 2, writer)
+    writer << ":"
+    padded(utc.minute, 2, writer)
+    writer << ":"
+    padded(utc.second, 2, writer)
+    writer << " GMT"
+  end
+
+  private def self.padded(n : Int32, width : Int32,
+                          writer : Tape::String::Writer) : Nil
+    value = n.to_i64
+    if value < 0
+      writer << "-"
+      value = -value
+    end
+    digits = 1
+    rest = value
+    while rest >= 10_i64
+      digits += 1
+      rest //= 10_i64
+    end
+    while digits < width
+      writer << "0"
+      digits += 1
+    end
+    writer << value
+  end
 end

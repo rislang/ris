@@ -1,0 +1,62 @@
+module test/cookie_tape
+
+import std/cookie::{Cookie}
+import std/time::{Time}
+
+dates = [
+  "Sun, 06 Nov 1994 08:49:37 GMT",
+  "Sunday, 06-Nov-94 08:49:37 GMT",
+  "Sun Nov  6 08:49:37 1994",
+  "Sun Nov 16 8:9:7 1994",
+  "Sunday, 06-Nov-2094 08:49:37 GMT",
+  "Sun, 06 Nov 1994 08:49:37 EST",
+  "Sun, 06 Nov 1994 08:49:37 +0530",
+  "Sun, 06 Nov 1994 08:49:60 Z",
+  "Sun, 06 Nov 1994 08:49:37 J",
+  "Sun, 31 Feb 1994 08:49:37 GMT",
+  "Sun, 06 Nov 1994 08:49:37 GMT trailing",
+]
+
+kept = ""
+owned = nil.as(Cookie?)
+tape do
+  line = "sid=\"abc\"; Path=/x; Domain=.EXAMPLE.COM; Secure; HttpOnly"
+  cookie = Cookie.parse(line.as_tape)
+  exit 1 unless cookie
+  exit 2 unless cookie.name == "sid" && cookie.value == "abc"
+  exit 3 unless cookie.domain == "example.com" && cookie.path == "/x"
+  exit 4 unless cookie.secure && cookie.http_only
+  w = Tape::String::Writer.new(1)
+  w << "prefix:"
+  cookie.to_set_cookie(w)
+  exit 5 unless w.finish.starts_with?("prefix:sid=abc; Path=/x")
+  exit 6 unless Cookie.parse("bad".as_tape).nil?
+  pairs = Cookie.parse_header("a=1; b=\"two\"; a=3".as_tape)
+  exit 7 unless pairs["a"] == "1" && pairs["b"] == "two"
+  age = Cookie.parse("x=y; Max-Age=0".as_tape)
+  exit 8 unless age && age.max_age == 0_i64
+  dated = Cookie.parse("x=y; Expires=Wed, 21 Oct 2015 07:28:00 GMT".as_tape)
+  exit 9 unless dated && dated.expires
+  exit 10 unless cookie.to_heap.to_tape == cookie.to_tape
+  dates.each do |date|
+    expected = Time::Format::HTTP_DATE.parse(date)
+    line = Tape::String.build { |w| w << "a=b; Expires=" << date }
+    parsed = Cookie.parse(line)
+    exit 22 unless parsed
+    if expected.is_a?(Time)
+      exit 23 unless parsed.expires == expected
+      text = "a=b; Expires=" + expected.to_rfc1123
+      exit 24 unless parsed.to_tape == text
+    else
+      exit 25 unless parsed.expires.nil?
+    end
+  end
+  owned = cookie.to_heap
+  kept = cookie.to_tape.to_heap
+end
+heap = Cookie.parse(kept)
+exit 11 unless heap && heap.to_set_cookie == kept
+exit 12 unless Cookie.parse_header("a=1; a=2") == {"a" => "1"}
+exit 20 unless owned
+exit 21 unless owned.to_set_cookie == kept
+puts "PASS: cookie tape and heap APIs"
