@@ -111,6 +111,26 @@ module Tape
       end
     end
 
+    # Each line, as `String#each_line` (std/text) splits them: a final
+    # newline closing the last rather than opening an empty one, and a `\r`
+    # before a newline left off. Each line is a view: nothing is copied.
+    def each_line(& : String -> Nil) : Nil
+      start = 0
+      at = 0
+      while at < @bytesize
+        if @ptr[at] == 10_u8
+          stop = at > start && @ptr[at - 1] == 13_u8 ? at - 1 : at
+          yield String.new(@ptr + start, stop - start)
+          start = at + 1
+        end
+        at = at + 1
+      end
+      if start < @bytesize
+        # No newline after it, so a `\r` here is text: `"b\r"` is `"b\r"`.
+        yield String.new(@ptr + start, @bytesize - start)
+      end
+    end
+
     # The text *span* names, a view: checked, as a span read from bytes is
     # never trusted.
     def [](span : Span) : String
