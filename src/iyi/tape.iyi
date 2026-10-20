@@ -227,6 +227,75 @@ module Tape
       0 - value
     end
 
+    def to_i64? : Int64?
+      to_i64?(10)
+    end
+
+    def to_f : Float64
+      first = 0
+      stop = @bytesize
+      while first < stop && numeric_blank?(self[first])
+        first += 1
+      end
+      while stop > first && numeric_blank?(self[stop - 1])
+        stop -= 1
+      end
+      IyiFloatText.parse(self[first, stop - first])
+    end
+
+    private def numeric_blank?(byte : UInt8) : Bool
+      byte == 32_u8 || (byte >= 9_u8 && byte <= 13_u8)
+    end
+
+    def to_i64?(base : Int32) : Int64?
+      raise "base #{base} out of range (2..36)" if base < 2 || base > 36
+      index = 0
+      stop = @bytesize
+      while index < stop && numeric_blank?(self[index])
+        index += 1
+      end
+      while stop > index && numeric_blank?(self[stop - 1])
+        stop -= 1
+      end
+      return nil if index == stop
+
+      negative = to_unsafe[index] == 45_u8
+      if negative || to_unsafe[index] == 43_u8
+        return nil if index + 1 == stop
+        index = index + 1
+      end
+
+      # The same negative accumulation, for the type whose own `MIN` a program
+      # is most likely to read back: a nanosecond timestamp is an `Int64`.
+      radix = base.to_i64
+      limit = -9223372036854775808_i64
+      bound = limit // radix
+      cutoff = 0_i64 - (limit - bound * radix)
+
+      value = 0_i64
+      while index < stop
+        b = to_unsafe[index]
+        digit = -1_i64
+        if b >= 48_u8 && b <= 57_u8
+          digit = (b - 48_u8).to_i64
+        elsif b >= 97_u8 && b <= 122_u8
+          digit = (b - 97_u8).to_i64 + 10_i64
+        elsif b >= 65_u8 && b <= 90_u8
+          digit = (b - 65_u8).to_i64 + 10_i64
+        else
+          return nil
+        end
+        return nil if digit >= radix
+        return nil if value < bound || (value == bound && digit > cutoff)
+        value = value * radix - digit
+        index = index + 1
+      end
+
+      return value if negative
+      return nil if value == limit
+      0_i64 - value
+    end
+
     # The text *span* names, a view: checked, as a span read from bytes is
     # never trusted.
     def [](span : Span) : String
@@ -1333,4 +1402,209 @@ def __iyi_scope_release(mark : IyiScopeMark) : Nil
   low = keep if low < keep
   __iyi_release_pages(low, written &- low) if written > low &+ IyiRegion::KEEP_WARM
   IyiHeap.write64(region &+ IyiRegion::OFF_CURSOR, mark.cursor)
+end
+
+# Numeric text is read directly from tape bytes, as heap text is.
+module IyiFloatText
+  def self.parse(text : Tape::String) : Float64
+    bytes = text.to_unsafe
+    size = text.bytesize
+    raise "not a number: #{text.to_heap.inspect}" if size == 0
+    at = 0
+    negative = false
+    if bytes[0] == 45_u8 || bytes[0] == 43_u8
+      negative = bytes[0] == 45_u8
+      at = 1
+    end
+    rest = size - at
+    if rest == 8 && tail_is?(bytes + at, "Infinity")
+      return from_bits(negative ? 18442240474082181120_u64 : 9218868437227405312_u64)
+    end
+    return from_bits(9221120237041090560_u64) if rest == 3 && tail_is?(bytes + at, "NaN")
+
+    w = 0_u64
+    exponent = 0
+    digits = 0
+    truncated = false
+    seen_point = false
+    any = false
+    while at < size
+      byte = bytes[at]
+      if byte >= 48_u8 && byte <= 57_u8
+        any = true
+        if digits < 19
+          if digits > 0 || byte != 48_u8
+            w = w &* 10_u64 &+ (byte - 48_u8).to_u64
+            digits = digits + 1
+          end
+          exponent = exponent - 1 if seen_point
+        else
+          truncated = true if byte != 48_u8
+          exponent = exponent + 1 unless seen_point
+        end
+      elsif byte == 46_u8 && !seen_point
+        seen_point = true
+      elsif (byte == 101_u8 || byte == 69_u8) && any
+        at = at + 1
+        raise "not a number: #{text.to_heap.inspect}" if at >= size
+        exponent_negative = false
+        if bytes[at] == 45_u8 || bytes[at] == 43_u8
+          exponent_negative = bytes[at] == 45_u8
+          at = at + 1
+        end
+        raise "not a number: #{text.to_heap.inspect}" if at >= size
+        read = 0
+        while at < size
+          byte = bytes[at]
+          raise "not a number: #{text.to_heap.inspect}" if byte < 48_u8 || byte > 57_u8
+          # Read past what any double needs: the digits move the exponent
+          # by up to the text's length, and a cap of 100000 read
+          # "0.<999999 zeros>1e1000000" as 0.0.
+          read = read * 10 + (byte - 48_u8).to_i32 if read < 100000000
+          at = at + 1
+        end
+        exponent = exponent + (exponent_negative ? 0 - read : read)
+        break
+      else
+        raise "not a number: #{text.to_heap.inspect}"
+      end
+      at = at + 1
+    end
+    raise "not a number: #{text.to_heap.inspect}" unless any
+    return from_bits(negative ? 9223372036854775808_u64 : 0_u64) if w == 0_u64
+    bits = nearest(exponent, w)
+    return parse_exact(text) if truncated && nearest(exponent, w &+ 1_u64) != bits
+    from_bits(negative ? bits | 9223372036854775808_u64 : bits)
+  end
+
+  # The digits read into a bignum - all of them to 800, which is past the
+  # 767 that can decide a double, any beyond only telling whether the rest
+  # is zero - and the quotient taken to 54 bits with a sticky remainder.
+  def self.parse_exact(text : Tape::String) : Float64
+    bytes = text.to_unsafe
+    size = text.bytesize
+    at = 0
+    negative = false
+    if bytes[0] == 45_u8 || bytes[0] == 43_u8
+      negative = bytes[0] == 45_u8
+      at = 1
+    end
+    rest = size - at
+    if rest == 8 && tail_is?(bytes + at, "Infinity")
+      return from_bits(negative ? 18442240474082181120_u64 : 9218868437227405312_u64)
+    end
+    return from_bits(9221120237041090560_u64) if rest == 3 && tail_is?(bytes + at, "NaN")
+
+    mantissa = IyiBig.new(0_u64)
+    exponent = 0
+    digits = 0
+    sticky = false
+    seen_point = false
+    any = false
+    while at < size
+      byte = bytes[at]
+      if byte >= 48_u8 && byte <= 57_u8
+        any = true
+        if digits < 800
+          mantissa.mul_small(10_u64)
+          mantissa.add_small((byte - 48_u8).to_u64)
+          digits = digits + 1 if digits > 0 || byte != 48_u8
+          exponent = exponent - 1 if seen_point
+        else
+          sticky = true if byte != 48_u8
+          exponent = exponent + 1 unless seen_point
+        end
+      elsif byte == 46_u8 && !seen_point
+        seen_point = true
+      elsif (byte == 101_u8 || byte == 69_u8) && any
+        at = at + 1
+        raise "not a number: #{text.to_heap.inspect}" if at >= size
+        exponent_negative = false
+        if bytes[at] == 45_u8 || bytes[at] == 43_u8
+          exponent_negative = bytes[at] == 45_u8
+          at = at + 1
+        end
+        raise "not a number: #{text.to_heap.inspect}" if at >= size
+        read = 0
+        while at < size
+          byte = bytes[at]
+          raise "not a number: #{text.to_heap.inspect}" if byte < 48_u8 || byte > 57_u8
+          read = read * 10 + (byte - 48_u8).to_i32 if read < 100000000
+          at = at + 1
+        end
+        exponent = exponent + (exponent_negative ? 0 - read : read)
+        break
+      else
+        raise "not a number: #{text.to_heap.inspect}"
+      end
+      at = at + 1
+    end
+    raise "not a number: #{text.to_heap.inspect}" unless any
+    return from_bits(negative ? 9223372036854775808_u64 : 0_u64) if mantissa.size == 0
+    # Far outside the format either way: the value is under
+    # 10^(digits + exponent) and at least a tenth of that.
+    return from_bits(negative ? 18442240474082181120_u64 : 9218868437227405312_u64) if digits + exponent > 310
+    return from_bits(negative ? 9223372036854775808_u64 : 0_u64) if digits + exponent < -345
+
+    # value = mantissa * 10^exponent as numerator / denominator.
+    numerator = mantissa
+    denominator = IyiBig.new(1_u64)
+    if exponent >= 0
+      numerator.mul_pow10(exponent)
+    else
+      denominator.mul_pow10(0 - exponent)
+    end
+    # The quotient to 54 bits (one past the significand for the rounding
+    # bit), the remainder's emptiness the sticky bit: shift the numerator
+    # up until the quotient has that many bits. `scale` is how far.
+    top = numerator.bit_length - denominator.bit_length
+    scale = 54 - top
+    if scale > 0
+      numerator.shl(scale)
+    elsif scale < 0
+      denominator.shl(0 - scale)
+    end
+    quotient = IyiBig.new(0_u64)
+    remainder = numerator.divide(denominator, quotient) || sticky
+    if quotient.bit_length > 54
+      # The estimate was a bit short of the shift: one more bit of
+      # quotient than asked, which the rounding below absorbs by dropping
+      # it into the sticky remainder.
+      extra = quotient.low_bit
+      quotient.shr1
+      scale = scale - 1
+      remainder = remainder || extra != 0_u64
+    end
+    # Binary exponent of the quotient's leading bit: value = q * 2^-scale.
+    binary_exponent = 53 - scale
+    q = quotient.to_u64
+    # Subnormal: fewer than 53 bits of significand fit; shift q right until
+    # its exponent is the format's floor, folding the dropped bits into
+    # the rounding.
+    if binary_exponent < -1022
+      drop = -1022 - binary_exponent
+      return from_bits(negative ? 9223372036854775808_u64 : 0_u64) if drop > 54
+      while drop > 0
+        remainder = remainder || (q & 1_u64) != 0_u64
+        q = q.unsafe_shr(1_u64)
+        drop = drop - 1
+      end
+      binary_exponent = -1022
+    end
+    # Round half to even on the 54th bit.
+    half = q & 1_u64
+    q = q.unsafe_shr(1_u64)
+    if half != 0_u64 && (remainder || (q & 1_u64) != 0_u64)
+      q = q + 1_u64
+    end
+    if q == 9007199254740992_u64
+      q = q.unsafe_shr(1_u64)
+      binary_exponent = binary_exponent + 1
+    end
+    return from_bits(negative ? 18442240474082181120_u64 : 9218868437227405312_u64) if binary_exponent > 1023
+    biased = q < 4503599627370496_u64 ? 0_u64 : (binary_exponent + 1023).to_u64
+    bits = biased.unsafe_shl(52_u64) | (q & 4503599627370495_u64)
+    bits = bits | 9223372036854775808_u64 if negative
+    from_bits(bits)
+  end
 end

@@ -1,0 +1,13 @@
+module test/tape_numbers
+
+tape do
+  exit 1 unless " -9223372036854775808 ".as_tape.to_i64? ==
+    -9223372036854775808_i64
+  exit 2 unless "9223372036854775808".as_tape.to_i64?.nil?
+  exit 3 unless "7fff".as_tape.to_i64?(16) == 32767_i64
+  exit 4 unless " 0.1 ".as_tape.to_f == 0.1
+  exit 5 unless "4.9406564584124654e-324".as_tape.to_f == 5e-324
+  exit 6 unless "1.00000000000000011102230246251565404236316680908203125"
+    .as_tape.to_f == 1.0
+end
+puts "PASS: tape numeric text"
