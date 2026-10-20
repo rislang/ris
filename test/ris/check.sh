@@ -161,7 +161,7 @@ if grep -qF '1 11 21 300' <<<"$out" && grep -qF "index -1 out of range for 3 ele
 out=$("$RIS" run test/ris/side.ri 2>&1)
 if [ "$out" = $'round 0: intact\nround 1: intact\nround 2: intact' ]; then echo "runs     side"; else echo "FAILED   side: $out"; status=1; fi
 out=$("$RIS" run test/ris/scope_free.ri 2>&1)
-if [ "$out" = $'round 99999\nwhile frees: true\nblock wrote 200000\nblock frees: true\nkept stays: true true\n123' ]; then echo "runs     scope_free"; else echo "FAILED   scope_free: $out"; status=1; fi
+if [ "$out" = $'round 99999\nwhile frees: true\nblock wrote 200000\nblock frees: true\nkept stays: true true\n123\ndef frees: true 5\nresult stays: true 42' ]; then echo "runs     scope_free"; else echo "FAILED   scope_free: $out"; status=1; fi
 out=$("$RIS" run test/ris/scope_keep.ri 2>&1)
 if [ "$out" = "50000 50000 9" ]; then echo "runs     scope_keep"; else echo "FAILED   scope_keep: $out"; status=1; fi
 out=$("$RIS" run test/ris/in_place.ri 2>&1)

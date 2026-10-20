@@ -13,8 +13,9 @@ yardstick; features follow measured needs. [SPEC.md](SPEC.md) is iyi's.
   `Tape::Tree(T)` and `@[OnTape]` structs. The annotation constrains where
   a value may live; ordinary allocations still follow iyi's rules.
 * Nested `tape` blocks share the active tape. Its owning block releases
-  it, on normal and early exits, including panic; a loop round or block
-  in ris's own code that keeps nothing frees its part each time.
+  it, on normal and early exits, including panic; a def, loop round or
+  block (std's too, unless it holds raw pointers) that keeps nothing
+  frees its part each time.
 * `local_tape do … end` always owns a separate tape, releases it at its
   end and restores the previous tape. Use it when temporaries must be
   freed before the outer block ends, rather than for every small call.
@@ -47,9 +48,8 @@ No tape value survives the block that owns its storage:
   do not make arbitrary raw pointers safe.
 
 ## Layout: a tape per growing value
-A container grows in place at the tape's end; one that is not moves once
-to a region of its own and grows there, so writers, arrays and other
-values may grow side by side. The region goes with the tape.
+A container grows in place at the tape's end, else moves once to a region
+of its own and grows there: values grow side by side.
 A `Tape::Tree` stores a tree in document order (simdjson's layout):
 4.6 MB JSON, 20 parses, 725 ms; std/json's `Any` 1081.
 

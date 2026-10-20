@@ -1,7 +1,7 @@
-# ris: Goose frees every scope's data when the scope ends. Here a `while`
-# body or a block body, in ris's own code (not `std/` or the prelude),
-# frees what it put on the tape at its end, each round, when nothing it
-# made can outlive it. The normalizer writes the body as
+# ris: Goose frees every scope's data when the scope ends. Here a def's
+# body, a `while` body or a block body (not the prelude's) frees what it
+# put on the tape at its end, each round, when nothing it made can
+# outlive it; a `return` or `break` past the end frees nothing. The normalizer writes the body as
 #
 #   __mark = __iyi_scope_mark(false)
 #   __value = (body)
@@ -9,8 +9,8 @@
 #   __value
 #
 # and this checker, once types are known, turns the `false` to `true`
-# where it proves the body keeps nothing: the block's value is no tape
-# value, nothing in the body yields, a variable of the code around it is
+# where it proves the body keeps nothing: its value (a def's result) is
+# no tape value, no raw pointer or IyiRegion is in it, nothing in the body yields, a variable of the code around it is
 # not assigned a tape value, and a tape value from outside the body - a
 # variable around it, a block parameter - is only a `Tape::String` or
 # read (`[]`, `size`, `each`, ...), never grown, written or passed on.
@@ -25,10 +25,11 @@ class Iyi::TapeScopeChecker
            "!=", "starts_with?", "finish", "none?", "index", "start",
            "map", "sum", "__loop_fetch", "bytes"}
 
-  def self.mark(program : Program, node : While | Block) : Nil
-    return if TapePointerCheckerLibrary.library?(node.location)
+  def self.mark(program : Program, node : While | Block | Def) : Nil
+    return if TapeScopeRuntime.runtime?(node.location)
     body = node.body
-    return if body.is_a?(Nop)
+    return if body.is_a?(Nop) || body.is_a?(Primitive)
+    return if node.is_a?(Def) && (node.abstract? || node.name == "initialize")
     on = BoolLiteral.new(false).at(body)
     mark = program.new_temp_var.at(body)
     value = program.new_temp_var.at(body)
@@ -67,6 +68,11 @@ class Iyi::TapeScopeChecker
     params = a_def.args.map(&.name)
     a_def.block_arg.try { |arg| params << arg.name }
     check_scope(a_def.body, owner_tape, params)
+    # The def's own scope: what it made, unless it is the result.
+    if parts = TapeScopeChecker.parts(a_def.body)
+      flag, inner = parts
+      flag.value = safe?(inner, a_def.type?, a_def.body, owner_tape, params, [] of String)
+    end
   end
 
   private def check_scope(scope : ASTNode, owner_tape : Bool, params = [] of String) : Nil
@@ -177,6 +183,7 @@ class Iyi::TapeScopeChecker
     # is no tape value, or text: `outer[0]` may be a writer of the outer
     # scope's, which the body would then grow.
     def visit(node : Call)
+      @safe = false if pointer?(node) || node.name == "to_unsafe"
       obj = node.obj
       outer = !obj.nil? && outer_tape?(obj)
       if obj && outer
@@ -205,8 +212,21 @@ class Iyi::TapeScopeChecker
       false
     end
 
+    # The library reaches into the tape with raw pointers, which this scan
+    # cannot follow: a body holding one keeps its tape.
+    def pointer?(node : ASTNode) : Bool
+      type = node.type?
+      !type.nil? && type.remove_typedef.is_a?(PointerInstanceType)
+    end
+
+    def visit(node : Path)
+      @safe = false if node.names.last? == "IyiRegion" || node.names.last? == "IyiHeap"
+      false
+    end
+
     # A tape value from outside, anywhere but a read's receiver.
     def visit(node : Var)
+      @safe = false if pointer?(node)
       @safe = false if outer_tape?(node)
       false
     end
@@ -260,8 +280,18 @@ class Iyi::TapeScopeChecker
   end
 end
 
-# Where ris's own code ends: the library keeps raw pointers this checker
-# cannot follow, so its loops are left as they are.
+# Where the tape's own runtime is: the prelude and the compiler's code,
+# which is never marked. `std/` is: its raw pointers keep a body's tape
+# (`Scan#pointer?`), and it keeps no pointer into a tape in a heap object.
+module Iyi::TapeScopeRuntime
+  def self.runtime?(location : Location?) : Bool
+    file = location.try(&.original_filename)
+    return true unless file
+    file.includes?("/src/iyi/") || file.includes?("/src/compiler/")
+  end
+end
+
+# Where ris's own code ends, for the lowerings that stay out of `std/`.
 module Iyi::TapePointerCheckerLibrary
   def self.library?(location : Location?) : Bool
     file = location.try(&.original_filename)

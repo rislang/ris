@@ -765,9 +765,8 @@ class Object
   end
 end
 
-# Goose's every scope freeing: where the code is ris's own (not `std/` or
-# the prelude), the normalizer begins each `while` body and block body
-# with `__iyi_scope_mark(false)` and ends it with `__iyi_scope_reset`.
+# Goose's every scope freeing: outside the prelude, the normalizer begins
+# each def body, `while` body and block body with `__iyi_scope_mark(false)` and ends it with `__iyi_scope_reset`.
 # `TapeScopeChecker` turns the mark on where nothing the body puts on the
 # tape can outlive the body, and then each round of the loop frees what it
 # made, sides and grown mappings included. Left off, both do nothing.

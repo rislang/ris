@@ -36,3 +36,22 @@ tape do
   [1, 2, 3].each { |k| sink.append_int(k) }
   puts sink.finish
 end
+
+# A def frees its temporaries when its result is no tape value.
+def count_digits(n : Int32) : Int32
+  text = Tape::String.build { |w| w.append_int(n) }
+  first = text[0, 1]
+  text.bytesize
+end
+
+def number(n : Int32) : Tape::String
+  Tape::String.build { |w| w.append_int(n) }
+end
+
+tape do
+  before = used
+  total = count_digits(12345)
+  puts "def frees: #{used == before} #{total}"
+  kept = number(42)
+  puts "result stays: #{used != before} #{kept}"
+end

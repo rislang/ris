@@ -3,13 +3,14 @@ require "../syntax/transformer"
 
 module Iyi
   class Program
-    def normalize(node, inside_exp = false, current_def = nil)
+    def normalize(node, inside_exp = false, current_def = nil, macro_code = false)
       normalizer = Normalizer.new(self)
+      normalizer.macro_code = 1 if macro_code
       normalizer.current_def = current_def
       normalizer.macro_expansion = node if Normalizer.macro_expansion?(node)
       # ris: the program's top level is a scope of its own (a def's body
       # is lowered with the def).
-      unless current_def || normalizer.macro_expansion || node.is_a?(Def)
+      unless current_def || macro_code || normalizer.macro_expansion || node.is_a?(Def)
         TapeTextLowering.lower_scope(node, [] of String, false)
       end
       node.transform(normalizer)
@@ -540,6 +541,7 @@ module Iyi
         end
       end
 
+      TapeScopeChecker.mark(program, node) if node.is_a?(Def) && @macro_code == 0
       return Expressions.new([node, twin.transform(self)] of ASTNode) if twin
       node
     end
@@ -695,10 +697,35 @@ module Iyi
     #    while !foo
     #      bar
     #    end
+    # ris: how deep in `{% %}` code the transform is; its blocks run in the
+    # compiler and get no tape marks.
+    property macro_code = 0
+
+    def transform(node : MacroExpression)
+      @macro_code += 1
+      result = super
+      @macro_code -= 1
+      result
+    end
+
+    def transform(node : MacroIf)
+      @macro_code += 1
+      result = super
+      @macro_code -= 1
+      result
+    end
+
+    def transform(node : MacroFor)
+      @macro_code += 1
+      result = super
+      @macro_code -= 1
+      result
+    end
+
     def transform(node : While)
       TapeLoopBounds.lower(node)
       node = super
-      TapeScopeChecker.mark(program, node) if node.is_a?(While)
+      TapeScopeChecker.mark(program, node) if node.is_a?(While) && @macro_code == 0
       node
     end
 
@@ -948,7 +975,7 @@ module Iyi
     #    end
     def transform(node : Block)
       node = super
-      TapeScopeChecker.mark(program, node) if node.is_a?(Block)
+      TapeScopeChecker.mark(program, node) if node.is_a?(Block) && @macro_code == 0
 
       unpacks = node.unpacks
       return node unless unpacks

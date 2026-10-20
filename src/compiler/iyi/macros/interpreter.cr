@@ -384,7 +384,7 @@ module Iyi
     end
 
     def visit(node : OpAssign)
-      @program.normalize(node).accept(self)
+      @program.normalize(node, macro_code: true).accept(self)
       false
     end
 
@@ -475,7 +475,7 @@ module Iyi
         named_args = node.named_args.try &.to_h { |arg| {arg.name, accept arg.value} }
 
         # normalize needed for param unpacking
-        block = node.block.try { |b| @program.normalize(b) }
+        block = node.block.try { |b| @program.normalize(b, macro_code: true) }
 
         begin
           @last = receiver.interpret(node.name, args, named_args, block, self, node.name_location)
