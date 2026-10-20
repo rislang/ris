@@ -1,0 +1,18 @@
+module test/router_tape
+
+import std/router::{Router}
+
+kept = ""
+tape do
+  path = "/a//b/../c/./".as_tape
+  w = Tape::String::Writer.new(1)
+  w << "prefix:"
+  Router.clean(path, w)
+  exit 1 unless w.finish == "prefix:/a/c/"
+  kept = Router.clean(path).to_heap
+  exit 2 unless Router.clean("/../../".as_tape) == "/"
+  exit 3 unless Router.clean("café/../ok".as_tape) == "/ok"
+end
+exit 4 unless kept == "/a/c/"
+exit 5 unless Router.clean("/a//b/../c/./") == kept
+puts "PASS: router tape and heap APIs"
