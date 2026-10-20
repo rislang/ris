@@ -1426,7 +1426,7 @@ pub struct ParsedHead
   def each_heap_field(& : String, String -> Nil) : Nil
     i = 0
     while i < @fields.size
-      yield @fields[i].name.to_s, joined_value(i) unless repeated?(i)
+      yield @fields[i].name.to_heap, joined_value(i) unless repeated?(i)
       i = i + 1
     end
   end
@@ -1499,7 +1499,7 @@ pub struct ParsedHead
       end
       k = k + 1
     end
-    return @fields[index].value.to_s if lines == 1
+    return @fields[index].value.to_heap if lines == 1
     String.new(total) do |buffer|
       first = @fields[index].value
       buffer.copy_from(first.to_unsafe, first.bytesize)
@@ -1594,7 +1594,7 @@ pub struct Outgoing
 
   def initialize
     @state = Tape::Array(Int32).new(2) { |i| i == 0 ? 200 : 0 }
-    none = Tape::String.view("")
+    none = "".as_tape
     @lines = Tape::Array(Field).new(LINES) { Field.new(none, none) }
     @body = Tape::String::Writer.new(512)
   end
@@ -1612,7 +1612,7 @@ pub struct Outgoing
   # a token, a value with no line break or control character, and none of
   # the lines the server writes itself.
   def header(name : String, value : String) : Nil
-    header(name, Tape::String.view(value))
+    header(name, value.as_tape)
   end
 
   # The same with a value on the tape: one written there, a stamp
@@ -1624,7 +1624,7 @@ pub struct Outgoing
     end
     count = @state[1]
     raise "HTTP: more than #{LINES} header lines" if count == LINES
-    @lines[count] = Field.new(Tape::String.view(name), value)
+    @lines[count] = Field.new(name.as_tape, value)
     @state[1] = count + 1
   end
 
@@ -1767,14 +1767,14 @@ pub struct Server
       tape do
         fields = Tape::Array(Field).new(head.headers.size)
         head.headers.each do |name, value|
-          fields.push(Field.new(Tape::String.view(name),
-            Tape::String.view(value)))
+          fields.push(Field.new(name.as_tape,
+            value.as_tape))
         end
         query = head.query
-        req = Incoming.new(Tape::String.view(head.method),
-          Tape::String.view(head.path),
-          query ? Tape::String.view(query) : nil,
-          fields, Tape::String.view(body))
+        req = Incoming.new(head.method.as_tape,
+          head.path.as_tape,
+          query ? query.as_tape : nil,
+          fields, body.as_tape)
         going = answered_on_tape?(client, answerer, req, head.close)
       end
       return unless going
@@ -1816,27 +1816,27 @@ pub struct Server
     raise "HTTP: not a status: #{status}" unless status >= 100 && status <= 999
     body = res.body.finish
     w = Tape::String::Writer.new(256)
-    w.append("HTTP/1.1 ")
+    w << "HTTP/1.1 "
     w.append_int(status)
-    w.append(" ")
-    w.append(HTTP.reason_for(status))
-    w.append("\r\n")
+    w << " "
+    w << HTTP.reason_for(status)
+    w << "\r\n"
     res.each_line do |line|
-      w.append(line.name)
-      w.append(": ")
-      w.append(line.value)
-      w.append("\r\n")
+      w << line.name
+      w << ": "
+      w << line.value
+      w << "\r\n"
     end
     bodiless = (status >= 100 && status < 200) || status == 204 || status == 304
     unless bodiless
-      w.append("Content-Length: ")
+      w << "Content-Length: "
       w.append_int(body.bytesize)
-      w.append("\r\n")
+      w << "\r\n"
     end
-    w.append(close ? "Connection: close\r\n\r\n" : "Connection: keep-alive\r\n\r\n")
+    w << (close ? "Connection: close\r\n\r\n" : "Connection: keep-alive\r\n\r\n")
     method = req.method
     sends = !bodiless && !HTTP.same_name?(method.to_unsafe, method.bytesize, "HEAD")
-    wrote = client.write(w.finish, sends ? body : Tape::String.view(""))
+    wrote = client.write(w.finish, sends ? body : "".as_tape)
     wrote.is_a?(Int32) && !close
   end
 
@@ -1873,19 +1873,19 @@ pub struct Server
     line_end = HTTP.crlf_in(p, from, split_at)
     sp1 = HTTP.byte_in(p, from, line_end, 32_u8)
     sp2 = sp1 < line_end ? HTTP.byte_in(p, sp1 + 1, line_end, 32_u8) : line_end
-    return HeadError.new("not a request line: #{Tape::String.new(p + from, line_end - from).to_s.inspect}") if sp2 >= line_end
+    return HeadError.new("not a request line: #{Tape::String.new(p + from, line_end - from).to_heap.inspect}") if sp2 >= line_end
     method = Tape::String.new(p + from, sp1 - from)
     target = Tape::String.new(p + sp1 + 1, sp2 - sp1 - 1)
     version = Tape::String.new(p + sp2 + 1, line_end - sp2 - 1)
-    return HeadError.new("not a method: #{method.to_s.inspect}") unless HTTP.token?(method.to_unsafe, method.bytesize)
+    return HeadError.new("not a method: #{method.to_heap.inspect}") unless HTTP.token?(method.to_unsafe, method.bytesize)
     unless HTTP.same_bytes?(version.to_unsafe, version.bytesize, "HTTP/1.1") || HTTP.same_bytes?(version.to_unsafe, version.bytesize, "HTTP/1.0")
-      return HeadError.new("not an HTTP/1 request: #{version.to_s.inspect}")
+      return HeadError.new("not an HTTP/1 request: #{version.to_heap.inspect}")
     end
     # A control byte in the target - a bare CR, a NUL - is not part of any
     # URI (RFC 9112 §2.2, §3.2); passed on, a query with a line break in it
     # broke the answer of a block that echoed it into a header.
     if target.bytesize == 0 || HTTP.control?(target.to_unsafe, target.bytesize)
-      return HeadError.new("not a request target: #{target.to_s.inspect}")
+      return HeadError.new("not a request target: #{target.to_heap.inspect}")
     end
     fields = Tape::Array(Field).new(16)
     hosts = 0
@@ -1893,8 +1893,8 @@ pub struct Server
     while at < split_at
       stop = HTTP.crlf_in(p, at, split_at)
       colon = HTTP.byte_in(p, at, stop, 58_u8)
-      return HeadError.new("header without a colon: #{Tape::String.new(p + at, stop - at).to_s.inspect}") if colon >= stop
-      return HeadError.new("not a header name: #{Tape::String.new(p + at, colon - at).to_s.inspect}") unless HTTP.token?(p + at, colon - at)
+      return HeadError.new("header without a colon: #{Tape::String.new(p + at, stop - at).to_heap.inspect}") if colon >= stop
+      return HeadError.new("not a header name: #{Tape::String.new(p + at, colon - at).to_heap.inspect}") unless HTTP.token?(p + at, colon - at)
       first = colon + 1
       last = stop
       while first < last && (p[first] == 32_u8 || p[first] == 9_u8)
@@ -1905,13 +1905,13 @@ pub struct Server
       end
       name = Tape::String.new(p + at, colon - at)
       value = Tape::String.new(p + first, last - first)
-      return HeadError.new("header #{name.to_s} contains a control character") if HTTP.control?(value.to_unsafe, value.bytesize)
+      return HeadError.new("header #{name.to_heap} contains a control character") if HTTP.control?(value.to_unsafe, value.bytesize)
       # Host (RFC 9112 §3.2): an HTTP/1.1 request names one, no request
       # names two, and what it names is a host; a server answers 400
       # otherwise.
       if HTTP.same_name?(name.to_unsafe, name.bytesize, "Host")
         hosts = hosts + 1
-        return HeadError.new("not a host: #{value.to_s.inspect}") unless HTTP.host?(value.to_unsafe, value.bytesize)
+        return HeadError.new("not a host: #{value.to_heap.inspect}") unless HTTP.host?(value.to_unsafe, value.bytesize)
       end
       fields.push(Field.new(name, value))
       at = stop + 2
@@ -2416,7 +2416,7 @@ pub struct Server
   def self.parse_head(text : String) : RequestHead | HTTPError
     result = nil.as(RequestHead | HTTPError | Nil)
     tape do
-      case head = parse_head(Tape::String.view(text), 0, true)
+      case head = parse_head(text.as_tape, 0, true)
       in ParsedHead
         result = heap_head(head)
       in HeadError
@@ -2429,9 +2429,9 @@ pub struct Server
   end
 
   private def self.heap_head(head : ParsedHead) : RequestHead | HTTPError
-    method = head.method.to_s
-    target = head.target.to_s
-    version = head.version.to_s
+    method = head.method.to_heap
+    target = head.target.to_heap
+    version = head.version.to_heap
     headers = {} of String => String
     head.each_heap_field { |name, value| headers[name] = value }
     host_name = "Host"
@@ -2524,11 +2524,11 @@ pub struct Server
       raise "HTTP: the reason contains a line break" if HTTP.has_break?(response.reason)
       raise "HTTP: the reason contains a control character" if HTTP.control?(response.reason)
       text = Tape::String::Writer.new(256)
-      text.append("HTTP/1.1 ")
+      text << "HTTP/1.1 "
       text.append_int(response.status)
-      text.append(" ")
-      text.append(response.reason)
-      text.append("\r\n")
+      text << " "
+      text << response.reason
+      text << "\r\n"
       has_length = false
       apart = response.apart
       response.headers.each do |name, value|
@@ -2555,36 +2555,36 @@ pub struct Server
         end
         if each_line = lines
           each_line.each do |line|
-            text.append(name)
-            text.append(": ")
-            text.append(line)
-            text.append("\r\n")
+            text << name
+            text << ": "
+            text << line
+            text << "\r\n"
           end
         else
-          text.append(name)
-          text.append(": ")
-          text.append(value)
-          text.append("\r\n")
+          text << name
+          text << ": "
+          text << value
+          text << "\r\n"
         end
       end
       unless has_length || HTTP.bodiless?(response.status)
         if chunked
-          text.append("Transfer-Encoding: chunked\r\n")
+          text << "Transfer-Encoding: chunked\r\n"
         elsif written = length
-          text.append("Content-Length: ")
+          text << "Content-Length: "
           text.append_int(written)
-          text.append("\r\n")
+          text << "\r\n"
         end
       end
       unless upgrade
         if close
-          text.append("Connection: close\r\n")
+          text << "Connection: close\r\n"
         else
-          text.append("Connection: keep-alive\r\n")
+          text << "Connection: keep-alive\r\n"
         end
       end
-      text.append("\r\n")
-      result = text.finish.to_s
+      text << "\r\n"
+      result = text.finish.to_heap
     end
     result
   end
@@ -5140,7 +5140,7 @@ class H2Connection
       s.too_large = true
       s.pieces.clear
     elsif body.bytesize > 0
-      s.pieces << body.to_s
+      s.pieces << body.to_heap
     end
     if flags & END_STREAM != 0
       s.ended = true
@@ -5269,7 +5269,7 @@ class H2Connection
       decoded[i].retained
     end
     if declared = H2Connection.field(decoded, "content-length")
-      n = HTTP.content_length(declared.to_s)
+      n = HTTP.content_length(declared.to_heap)
       return refuse(id, PROTOCOL_ERROR) unless n
       s.declared = n
     end
@@ -5410,7 +5410,7 @@ class H2Connection
       nil
     end
     @pending << head
-    @pending << payload.to_s if n > 0
+    @pending << payload.to_heap if n > 0
     @pending_size = @pending_size + 9 + n
     @pending_size >= PENDING ? flush : true
   end
@@ -5928,7 +5928,7 @@ class H2Connection
     fields = Std::Hpack::TapeHeaders.new(capacity)
     status = Tape::String.build(3) { |w| w.append_int(response.status) }
     fields.push(Std::Hpack::TapeHeaderField.new(
-      Tape::String.view(":status"), status))
+      ":status".as_tape, status))
     has_length = false
     apart = response.apart
     response.headers.each do |name, value|
@@ -5964,17 +5964,17 @@ class H2Connection
       end
       if each_line = lines
         each_line.each { |line| fields.push(Std::Hpack::TapeHeaderField.new(
-          lower, H2Connection.trimmed(Tape::String.view(line)))) }
+          lower, H2Connection.trimmed(line.as_tape))) }
       else
         fields.push(Std::Hpack::TapeHeaderField.new(
-          lower, H2Connection.trimmed(Tape::String.view(value))))
+          lower, H2Connection.trimmed(value.as_tape)))
       end
     end
     if !has_length && !HTTP.bodiless?(response.status)
       if written = length
         size = Tape::String.build(20) { |w| w.append_int(written) }
         fields.push(Std::Hpack::TapeHeaderField.new(
-          Tape::String.view("content-length"), size))
+          "content-length".as_tape, size))
       end
     end
     fields

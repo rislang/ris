@@ -2015,7 +2015,7 @@ pub struct Time
   def to_rfc3339(fraction_digits : Int32, writer : Tape::String::Writer) : Nil
     if @offset != 0
       if @offset % 60 == 0
-        writer.append(Format::RFC_3339.format(self, fraction_digits, @offset))
+        writer << Format::RFC_3339.format(self, fraction_digits, @offset)
       else
         Time.unix(@seconds, @nanoseconds).to_rfc3339(fraction_digits, writer)
       end

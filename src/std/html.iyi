@@ -77,7 +77,7 @@ pub struct HTML
     tape do
       w = Tape::String::Writer.new(len + 16)
       w.append_html_escaped(string)
-      escaped = w.finish.to_s
+      escaped = w.finish.to_heap
     end
     escaped
   end

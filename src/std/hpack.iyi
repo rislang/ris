@@ -97,7 +97,7 @@ pub struct TapeHeaderField
   end
 
   def self.view(field : HeaderField) : self
-    new(Tape::String.view(field.name), Tape::String.view(field.value),
+    new(field.name.as_tape, field.value.as_tape,
       field.indexing, field)
   end
 
@@ -105,7 +105,7 @@ pub struct TapeHeaderField
     if owned = @owned
       return owned
     end
-    HeaderField.new(@name.to_s, @value.to_s, @indexing)
+    HeaderField.new(@name.to_heap, @value.to_heap, @indexing)
   end
 end
 
@@ -603,7 +603,7 @@ pub class Huffman
     tape do
       view = Tape::String.new(bytes.to_unsafe, bytes.size)
       decoded = decode(view, offset, length)
-      result = decoded.is_a?(HpackError) ? decoded : decoded.to_s
+      result = decoded.is_a?(HpackError) ? decoded : decoded.to_heap
     end
     result
   end
@@ -796,7 +796,7 @@ pub class Decoder
           return HpackError.new("Decompression bomb: decoded header list exceeds #{@max_header_list_size} octets")
         end
 
-        owned = HeaderField.new(name.to_s, val.to_s)
+        owned = HeaderField.new(name.to_heap, val.to_heap)
         @dynamic_table.add(owned.name, owned.value, false)
         if headers.is_a?(TapeHeaders)
           headers.push(TapeHeaderField.view(owned))
@@ -873,7 +873,7 @@ pub class Decoder
           headers.push(TapeHeaderField.new(tape_view(name), tape_view(val),
             IndexingMode::NeverIndexed))
         else
-          headers.push(HeaderField.new(name.to_s, val.to_s,
+          headers.push(HeaderField.new(name.to_heap, val.to_heap,
             IndexingMode::NeverIndexed))
         end
         seen_field = true
@@ -926,7 +926,7 @@ pub class Decoder
           headers.push(TapeHeaderField.new(tape_view(name), tape_view(val),
             IndexingMode::WithoutIndexing))
         else
-          headers.push(HeaderField.new(name.to_s, val.to_s,
+          headers.push(HeaderField.new(name.to_heap, val.to_heap,
             IndexingMode::WithoutIndexing))
         end
         seen_field = true
@@ -937,7 +937,7 @@ pub class Decoder
   end
 
   private def tape_view(value : String | Tape::String) : Tape::String
-    value.is_a?(Tape::String) ? value : Tape::String.view(value)
+    value.is_a?(Tape::String) ? value : value.as_tape
   end
 
   private def decode_string(payload : Bytes, offset : Int32) : Tuple(String, Int32) | HpackError
@@ -1126,13 +1126,13 @@ pub class Encoder
         # 6.2.1 Literal Header Field with Incremental Indexing, Indexed Name (01xxxxxx)
         Integer.encode(idx.to_u64, 6, 0x40_u8, buffer)
         encode_string(field.value, buffer, huff)
-        @dynamic_table.add(field.name.to_s, field.value.to_s, false)
+        @dynamic_table.add(field.name.to_heap, field.value.to_heap, false)
       else
         # 6.2.1 Literal Header Field with Incremental Indexing, New Name (01000000)
         buffer.push(0x40_u8)
         encode_string(field.name, buffer, huff)
         encode_string(field.value, buffer, huff)
-        @dynamic_table.add(field.name.to_s, field.value.to_s, false)
+        @dynamic_table.add(field.name.to_heap, field.value.to_heap, false)
       end
     end
   end

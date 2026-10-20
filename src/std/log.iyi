@@ -165,7 +165,7 @@ pub abstract class Formatter
   # The line written into the caller's *writer*: `format(entry)` unless a
   # formatter writes it there itself.
   def format(entry : Entry, writer : Tape::String::Writer) : Nil
-    writer.append(format(entry))
+    writer << format(entry)
   end
 end
 
@@ -175,7 +175,7 @@ pub class DefaultFormatter < Formatter
     tape do
       w = Tape::String::Writer.new(128)
       format(entry, w)
-      line = w.finish.to_s
+      line = w.finish.to_heap
     end
     line
   end
@@ -183,22 +183,22 @@ pub class DefaultFormatter < Formatter
   def format(entry : Entry, writer : Tape::String::Writer) : Nil
     entry.timestamp.to_rfc3339(6, writer)
     writer.push(32_u8)
-    writer.append(entry.severity.label)
-    writer.append(" - ")
+    writer << entry.severity.label
+    writer << " - "
     unless entry.source.empty?
-      writer.append(entry.source)
-      writer.append(": ")
+      writer << entry.source
+      writer << ": "
     end
-    writer.append(entry.message)
+    writer << entry.message
     unless entry.data.empty?
-      writer.append(" -- ")
+      writer << " -- "
       first = true
       entry.data.each do |key, value|
         writer.push(32_u8) unless first
         first = false
-        writer.append(key)
+        writer << key
         writer.push(61_u8)
-        writer.append(quoted(value))
+        writer << quoted(value)
       end
     end
   end

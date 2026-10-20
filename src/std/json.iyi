@@ -2550,7 +2550,7 @@ pub struct Writer
       @out.push(10_u8)
       i = 0
       while i < level
-        @out.append(indent)
+        @out << indent
         i = i + 1
       end
     end
@@ -2577,12 +2577,12 @@ pub struct Writer
 
   def null : Nil
     before_value
-    @out.append("null")
+    @out << "null"
   end
 
   def bool(val : Bool) : Nil
     before_value
-    @out.append(val ? "true" : "false")
+    @out << (val ? "true" : "false")
   end
 
   def number(val : Int32) : Nil
@@ -2603,7 +2603,7 @@ pub struct Writer
   def number(val : UInt64) : Nil
     before_value
     if val > 9223372036854775807_u64
-      @out.append(val.to_s)
+      @out << val.to_s
     else
       @out.append_int(val.to_i64)
     end
@@ -2619,12 +2619,12 @@ pub struct Writer
   # Text written as it is: the caller's own JSON.
   def raw(str : String) : Nil
     before_value
-    @out.append(str)
+    @out << str
   end
 
   def raw(str : Tape::String) : Nil
     before_value
-    @out.append(str)
+    @out << str
   end
 
   def string(val : String) : Nil
@@ -3161,7 +3161,7 @@ pub struct DocumentParser
     when TokenKind::EOF         then "end of input"
     when TokenKind::String      then "string"
     when TokenKind::Int, TokenKind::Float
-      "number #{text(token.raw_start, token.raw_size).to_s}"
+      "number #{text(token.raw_start, token.raw_size).to_heap}"
     else "value"
     end
   end
@@ -3392,7 +3392,7 @@ pub struct JSON
 
   # The same decoded into a String.
   def self.decoded_s(text : Tape::String, escaped : Bool = true) : String
-    return text.to_s unless escaped
+    return text.to_heap unless escaped
     buffer = StringBuffer.new(text.bytesize)
     each_decoded_byte(text.to_unsafe, text.bytesize) { |b| buffer.append(b) }
     buffer.to_s

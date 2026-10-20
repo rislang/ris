@@ -167,7 +167,7 @@ pub struct Params
   def self.parse(query : String) : Params
     params = Params.new
     tape do
-      Query.parse(Tape::String.view(query)).each { |key, value| params.add(key.to_s, value.to_s) }
+      Query.parse(query.as_tape).each { |key, value| params.add(key.to_heap, value.to_heap) }
     end
     params
   end

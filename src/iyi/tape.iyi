@@ -1263,6 +1263,12 @@ class String
   def as_tape : Tape::String
     Tape::String.view(self)
   end
+
+  # Already on the heap: itself, nothing copied. Code holding a String or
+  # a Tape::String calls `to_heap` on either.
+  def to_heap : String
+    self
+  end
 end
 
 # Goose's every scope freeing: outside the prelude, the normalizer begins
