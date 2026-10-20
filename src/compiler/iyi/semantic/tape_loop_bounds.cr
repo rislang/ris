@@ -13,7 +13,7 @@ class Iyi::TapeLoopBounds < Iyi::Visitor
     index = cond.obj
     size = cond.args.first
     return unless index.is_a?(Var) && size.is_a?(Call) &&
-                                    (size.name == "size" || size.name == "bytesize")
+                  (size.name == "size" || size.name == "bytesize")
     array = size.obj
     return unless array.is_a?(Var) && size.args.empty? && size.block.nil?
     scan = Scan.new(index.name, array.name)

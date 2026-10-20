@@ -340,7 +340,7 @@ pub struct TapeCookie
       expires = age <= 0_i64 ? Time.unix(0_i64) : Time.utc + Span.seconds(age)
     end
     TapeCookie.new(name, value, path, domain, expires, max_age, secure,
-                   http_only, same_site)
+      http_only, same_site)
   end
 
   # `Max-Age`'s digits, with a sign (§5.2.2); nil for anything else.
@@ -372,7 +372,7 @@ pub struct TapeCookie
              (c >= 0x3C_u8 && c <= 0x5B_u8) ||
              (c >= 0x5D_u8 && c <= 0x7E_u8)
         raise "Cookie: #{@name.to_heap} has a byte a cookie value " \
-          "cannot hold: #{@value.to_heap.inspect}"
+              "cannot hold: #{@value.to_heap.inspect}"
       end
       i = i + 1
     end
@@ -397,7 +397,6 @@ pub struct TapeCookie
     nil
   end
 
-
   def to_tape : Tape::String
     Tape::String.build { |w| to_set_cookie(w) }
   end
@@ -407,9 +406,9 @@ pub struct TapeCookie
     domain = cookie.domain
     same = cookie.same_site
     new(cookie.name.as_tape, cookie.value.as_tape,
-        path ? path.as_tape : nil, domain ? domain.as_tape : nil,
-        cookie.expires, cookie.max_age, cookie.secure, cookie.http_only,
-        same ? same.as_tape : nil)
+      path ? path.as_tape : nil, domain ? domain.as_tape : nil,
+      cookie.expires, cookie.max_age, cookie.secure, cookie.http_only,
+      same ? same.as_tape : nil)
   end
 
   def to_heap : Cookie
@@ -417,9 +416,9 @@ pub struct TapeCookie
     domain = @domain
     same = @same_site
     Cookie.new(@name.to_heap, @value.to_heap,
-               path ? path.to_heap : nil, domain ? domain.to_heap : nil,
-               @expires, @max_age, @secure, @http_only,
-               same ? same.to_heap : nil)
+      path ? path.to_heap : nil, domain ? domain.to_heap : nil,
+      @expires, @max_age, @secure, @http_only,
+      same ? same.to_heap : nil)
   end
 
   def self.trim(text : Tape::String) : Tape::String

@@ -245,7 +245,7 @@ pub struct Path
   private def long_unc? : Bool
     ptr = @name.to_unsafe
     return false unless @name.bytesize > 8 && ptr[2] == 63_u8 &&
-      sep?(ptr[3]) && sep?(ptr[7])
+                        sep?(ptr[3]) && sep?(ptr[7])
     (ptr[4] | 32_u8) == 117_u8 && (ptr[5] | 32_u8) == 110_u8 &&
       (ptr[6] | 32_u8) == 99_u8
   end
@@ -463,8 +463,7 @@ pub struct Path
   def relative_to?(base : Path | String) : Path?
     result = nil.as(Path?)
     tape do
-      origin = base.is_a?(Path) ? base.to_tape :
-        TapePath.new(base.as_tape, @kind)
+      origin = base.is_a?(Path) ? base.to_tape : TapePath.new(base.as_tape, @kind)
       if relative = to_tape.relative_to?(origin)
         result = relative.to_heap
       end
@@ -623,13 +622,12 @@ pub struct Path
       invariant[0] = 0_u16
       nothing = Pointer(Void).new(0_u64)
       if LibKernel32.LCMapStringEx(invariant, 0x200, wide, length, upper,
-        length, nothing, nothing, 0_i64) != length
+           length, nothing, nothing, 0_i64) != length
         return nil
       end
       at = 0
       while at < length
-        unit = wide[at] >= 0xD800_u16 && wide[at] <= 0xDFFF_u16 ?
-          wide[at] : upper[at]
+        unit = wide[at] >= 0xD800_u16 && wide[at] <= 0xDFFF_u16 ? wide[at] : upper[at]
         unit = unit + 32_u16 if unit >= 65_u16 && unit <= 90_u16
         upper[at] = unit == 47_u16 ? 92_u16 : unit
         at = at + 1
@@ -652,13 +650,12 @@ pub struct Path
       invariant[0] = 0_u16
       nothing = Pointer(Void).new(0_u64)
       if LibKernel32.LCMapStringEx(invariant, 0x200, wide, length, upper,
-        length, nothing, nothing, 0_i64) != length
+           length, nothing, nothing, 0_i64) != length
         return nil
       end
       at = 0
       while at < length
-        unit = wide[at] >= 0xD800_u16 && wide[at] <= 0xDFFF_u16 ?
-          wide[at] : upper[at]
+        unit = wide[at] >= 0xD800_u16 && wide[at] <= 0xDFFF_u16 ? wide[at] : upper[at]
         unit = unit + 32_u16 if unit >= 65_u16 && unit <= 90_u16
         upper[at] = unit == 47_u16 ? 92_u16 : unit
         at = at + 1
@@ -726,7 +723,7 @@ pub struct TapePath
   end
 
   private def concat(first : Tape::String,
-                      second : Tape::String | String) : Tape::String
+                     second : Tape::String | String) : Tape::String
     Tape::String.build { |w| w << first << second }
   end
 
@@ -776,7 +773,7 @@ pub struct TapePath
   private def long_unc? : Bool
     ptr = @name.to_unsafe
     return false unless @name.bytesize > 8 && ptr[2] == 63_u8 &&
-      sep?(ptr[3]) && sep?(ptr[7])
+                        sep?(ptr[3]) && sep?(ptr[7])
     (ptr[4] | 32_u8) == 117_u8 && (ptr[5] | 32_u8) == 110_u8 &&
       (ptr[6] | 32_u8) == 99_u8
   end
@@ -1080,10 +1077,8 @@ pub struct TapePath
     return nil unless same?(ta, ba)
     targets = target.parts
     bases = origin.parts
-    targets = Tape::Array(Tape::String).new if
-      targets.size == 1 && targets[0] == "."
-    bases = Tape::Array(Tape::String).new if
-      bases.size == 1 && bases[0] == "."
+    targets = Tape::Array(Tape::String).new if targets.size == 1 && targets[0] == "."
+    bases = Tape::Array(Tape::String).new if bases.size == 1 && bases[0] == "."
     ti = ta.empty? ? 0 : 1
     bi = ba.empty? ? 0 : 1
     while ti < targets.size && bi < bases.size
@@ -1127,7 +1122,7 @@ pub struct TapePath
              home : Bool = false) : TapePath
     name = @name
     if home && (name == "~" || name.starts_with?("~/") ||
-        (windows? && name.starts_with?("~\\")))
+       (windows? && name.starts_with?("~\\")))
       directory = nil.as(String?)
       {% if flag?(:win32) %}
         directory = Program.env("USERPROFILE")

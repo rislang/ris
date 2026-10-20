@@ -51,7 +51,7 @@ pub struct Base64
   end
 
   def self.urlsafe_encode(data : Tape::String,
-                  writer : Tape::String::Writer) : Nil
+                          writer : Tape::String::Writer) : Nil
     writer << urlsafe_encode(data)
   end
 

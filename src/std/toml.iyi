@@ -163,23 +163,22 @@ pub struct TOMLDateTime
   # Fields that do not make a value of the kind are the caller's mistake,
   # refused with what is wrong; `problem` says it without panicking.
   def initialize(@kind : Int32, @year : Int32, @month : Int32, @day : Int32,
-    @hour : Int32, @minute : Int32, @second : Int32, @nanosecond : Int32,
-    @offset_minutes : Int32)
+                 @hour : Int32, @minute : Int32, @second : Int32, @nanosecond : Int32,
+                 @offset_minutes : Int32)
     wrong = TOMLDateTime.problem(@kind, @year, @month, @day, @hour, @minute,
       @second, @nanosecond, @offset_minutes)
     raise "TOMLDateTime: #{wrong}" unless wrong.nil?
   end
 
   def self.offset_date_time(year : Int32, month : Int32, day : Int32,
-    hour : Int32, minute : Int32, second : Int32, nanosecond : Int32 = 0,
-    offset_minutes : Int32 = 0) : TOMLDateTime
+                            hour : Int32, minute : Int32, second : Int32, nanosecond : Int32 = 0,
+                            offset_minutes : Int32 = 0) : TOMLDateTime
     new(OFFSET_DATE_TIME, year, month, day, hour, minute, second,
       nanosecond, offset_minutes)
   end
 
   def self.local_date_time(year : Int32, month : Int32, day : Int32,
-    hour : Int32, minute : Int32, second : Int32, nanosecond : Int32 =
-    0) : TOMLDateTime
+                           hour : Int32, minute : Int32, second : Int32, nanosecond : Int32 = 0) : TOMLDateTime
     new(LOCAL_DATE_TIME, year, month, day, hour, minute, second, nanosecond, 0)
   end
 
@@ -188,15 +187,15 @@ pub struct TOMLDateTime
   end
 
   def self.local_time(hour : Int32, minute : Int32, second : Int32,
-    nanosecond : Int32 = 0) : TOMLDateTime
+                      nanosecond : Int32 = 0) : TOMLDateTime
     new(LOCAL_TIME, 0, 0, 0, hour, minute, second, nanosecond, 0)
   end
 
   # Nil when the fields make a value of `kind`, else what is wrong with
   # them, as the reader and `new` both say it.
   def self.problem(kind : Int32, year : Int32, month : Int32, day : Int32,
-    hour : Int32, minute : Int32, second : Int32, nanosecond : Int32,
-    offset_minutes : Int32) : String?
+                   hour : Int32, minute : Int32, second : Int32, nanosecond : Int32,
+                   offset_minutes : Int32) : String?
     if kind < OFFSET_DATE_TIME || kind > LOCAL_TIME
       return "the kind #{kind} is none of the four"
     end
@@ -210,7 +209,7 @@ pub struct TOMLDateTime
       last = days_in_month(year, month)
       if day < 1 || day > last
         return "the day #{day} is not in #{pad(year, 4)}-#{pad(month, 2)}, " \
-          "which has #{last} days"
+               "which has #{last} days"
       end
     end
     if kind == LOCAL_DATE
@@ -296,7 +295,7 @@ pub struct TOMLDateTime
   def unix_seconds : Int64
     unless offset?
       raise "TOMLDateTime: #{kind_name} names no instant; only an offset " \
-        "date-time has unix seconds"
+            "date-time has unix seconds"
     end
     # Days from the civil date, Howard Hinnant's `days_from_civil`.
     y = @year.to_i64 - (@month <= 2 ? 1_i64 : 0_i64)
@@ -361,7 +360,7 @@ pub struct TOMLDateTime
     @kind == other.kind && @year == other.year && @month == other.month &&
       @day == other.day &&
       @hour == other.hour && @minute == other.minute &&
-        @second == other.second &&
+      @second == other.second &&
       @nanosecond == other.nanosecond && @offset_minutes == other.offset_minutes
   end
 
@@ -371,7 +370,7 @@ pub struct TOMLDateTime
 
   def hash : Int32
     {@kind, @year, @month, @day, @hour, @minute, @second, @nanosecond,
-      @offset_minutes}.hash
+     @offset_minutes}.hash
   end
 end
 
@@ -387,7 +386,7 @@ pub struct Any
   KIND_TABLE    = 6
 
   alias Type = Bool | Int64 | Float64 | String | TOMLDateTime | Array(Any) |
-    Hash(String, Any)
+               Hash(String, Any)
 
   getter raw : Type
 
@@ -747,7 +746,7 @@ pub struct TapeAny
   KIND_TABLE    = 6
 
   alias Type = Bool | Int64 | Float64 | Tape::String | TOMLDateTime |
-    Tape::Array(TapeAny) | TapeMap(TapeAny)
+               Tape::Array(TapeAny) | TapeMap(TapeAny)
 
   getter raw : Type
 
@@ -915,7 +914,7 @@ pub struct TapeAny
   end
 
   def dig?(key : String | Tape::String | Int32, *rest : String |
-    Int32) : TapeAny?
+                                                        Int32) : TapeAny?
     v = step?(key)
     return nil if v.nil?
     v.dig?(*rest)
@@ -975,7 +974,7 @@ struct TapeSlot
   getter tables : Tape::Array(TapeTable)?
 
   def initialize(@kind : Int32, @value : TapeAny, @table : TapeTable?,
-    @tables : Tape::Array(TapeTable)?)
+                 @tables : Tape::Array(TapeTable)?)
   end
 
   def self.value(value : TapeAny) : TapeSlot
@@ -1046,7 +1045,6 @@ struct TapeTable
   def dotted=(value : Bool) : Bool
     @dotted.value = value
   end
-
 
   def initialize(depth : Int32, explicit : Bool, dotted : Bool)
     @explicit = Pointer(Bool).new(
@@ -1194,7 +1192,7 @@ struct TapeReader
 
   # `count` bytes at `source`, as a string of their own.
   protected def self.text_of(source : Pointer(UInt8),
-                           count : Int32) : Tape::String
+                             count : Int32) : Tape::String
     Tape::String.new(source, count)
   end
 
@@ -1208,9 +1206,9 @@ struct TapeReader
   # nothing past U+10FFFF), and does not start with a byte order mark.
   private def utf8 : Nil | TOMLError
     if @size >= 3 && @bytes[0] == 0xEF_u8 && @bytes[1] == 0xBB_u8 &&
-      @bytes[2] == 0xBF_u8
+       @bytes[2] == 0xBF_u8
       return fail("a byte order mark, which a TOML document does not start " \
-        "with", 0)
+                  "with", 0)
     end
     i = 0
     while i < @size
@@ -1239,14 +1237,14 @@ struct TapeReader
       while j <= need
         if i + j >= @size
           return fail("a UTF-8 sequence cut short by the end of the " \
-            "document", i)
+                      "document", i)
         end
         c = @bytes[i + j]
         lo = j == 1 ? low : 0x80_u8
         hi = j == 1 ? high : 0xBF_u8
         if c < lo || c > hi
           return fail("the byte 0x#{b.to_s(16).upcase} followed by " \
-            "0x#{c.to_s(16).upcase}, which is not UTF-8", i)
+                      "0x#{c.to_s(16).upcase}, which is not UTF-8", i)
         end
         j = j + 1
       end
@@ -1296,7 +1294,7 @@ struct TapeReader
       return fail("a carriage return not followed by a line feed", pos)
     end
     fail("#{found(pos)} after the end of a statement, where the line should " \
-      "end", pos)
+         "end", pos)
   end
 
   # Blanks, comments and line breaks, as an array may hold between items.
@@ -1326,7 +1324,7 @@ struct TapeReader
 
   # A key: its parts, and where each starts, into the two arrays.
   private def key(parts : Tape::Array(Tape::String),
-    starts : Tape::Array(Int32)) : Nil | TOMLError
+                  starts : Tape::Array(Int32)) : Nil | TOMLError
     while true
       skip_blanks
       starts << pos
@@ -1363,7 +1361,7 @@ struct TapeReader
 
   # The dotted name of the first `count` parts of `path` + `parts`.
   private def name(path : Tape::Array(Tape::String),
-    parts : Tape::Array(Tape::String), count : Int32) : Tape::String
+                   parts : Tape::Array(Tape::String), count : Int32) : Tape::String
     text = Tape::String::Writer.new(64)
     first = true
     path.each do |part|
@@ -1386,18 +1384,18 @@ struct TapeReader
     value = slot.value
     if value.kind == TapeAny::KIND_TABLE
       return "the inline table #{what} is closed: no header or dotted key " \
-        "adds to it"
+             "adds to it"
     end
     if value.kind == TapeAny::KIND_ARRAY
       return "the array #{what} was written as a value, which no header or " \
-        "dotted key adds to"
+             "dotted key adds to"
     end
     "#{what} is #{value.kind_name}, not a table"
   end
 
   # `key = value`, into `table`, whose header's key is `path`.
   private def pair(table : TapeTable,
-    path : Tape::Array(Tape::String)) : Nil | TOMLError
+                   path : Tape::Array(Tape::String)) : Nil | TOMLError
     parts = Tape::Array(Tape::String).new
     starts = Tape::Array(Int32).new
     key(parts, starts)!
@@ -1413,8 +1411,8 @@ struct TapeReader
   # Puts `item` at the dotted key `parts` (which start at `starts`) of
   # `table`, opening the tables on the way as the rules allow.
   private def place(table : TapeTable, path : Tape::Array(Tape::String),
-    parts : Tape::Array(Tape::String), starts : Tape::Array(Int32),
-    item : TapeAny) : Nil | TOMLError
+                    parts : Tape::Array(Tape::String), starts : Tape::Array(Int32),
+                    item : TapeAny) : Nil | TOMLError
     t = table
     i = 0
     while i < parts.size - 1
@@ -1429,14 +1427,14 @@ struct TapeReader
           what = name(path, parts, i + 1)
           if slot.kind == TapeSlot::TABLES
             return fail("#{what} is an array of tables, which dotted keys " \
-              "do not add to", starts[i])
+                        "do not add to", starts[i])
           end
           return fail(closed(slot, what), starts[i])
         end
         if child.explicit
           return fail("dotted keys add to the table " \
-            "#{name(path, parts, i + 1)}, which a " \
-            "[#{name(path, parts, i + 1)}] header declared", starts[i])
+                      "#{name(path, parts, i + 1)}, which a " \
+                      "[#{name(path, parts, i + 1)}] header declared", starts[i])
         end
         child.dotted = true
         t = child
@@ -1446,7 +1444,7 @@ struct TapeReader
     last = parts[parts.size - 1]
     unless t.slots[last]?.nil?
       return fail("the key #{name(path, parts, parts.size)} is defined " \
-        "twice", starts[parts.size - 1])
+                  "twice", starts[parts.size - 1])
     end
     t.slots[last] = TapeSlot.value(item)
     nil
@@ -1462,14 +1460,14 @@ struct TapeReader
     key(parts, starts)!
     closer = array ? "]]" : "]"
     unless pos < @size && @bytes[pos] == 93_u8 && (!array ||
-      (pos + 1 < @size && @bytes[pos + 1] == 93_u8))
+           (pos + 1 < @size && @bytes[pos + 1] == 93_u8))
       return fail("#{found(pos)} where the header's #{closer} should be", pos)
     end
     self.pos = pos + closer.bytesize
     empty = Tape::Array(Tape::String).new
     if parts.size > DEPTH_LIMIT
       return fail("a header #{parts.size} keys deep, past the " \
-        "#{DEPTH_LIMIT} levels this reader nests", start)
+                  "#{DEPTH_LIMIT} levels this reader nests", start)
     end
     t = @root
     i = 0
@@ -1507,7 +1505,7 @@ struct TapeReader
           list << target
         elsif slot.kind == TapeSlot::TABLE
           return fail("[[#{whole}]] names the table #{whole}, not an array " \
-            "of tables", starts[parts.size - 1])
+                      "of tables", starts[parts.size - 1])
         else
           return fail(closed(slot, whole), starts[parts.size - 1])
         end
@@ -1521,7 +1519,7 @@ struct TapeReader
         if child.nil?
           if slot.kind == TapeSlot::TABLES
             return fail("[#{whole}] names an array of tables, which " \
-              "[[#{whole}]] adds to", starts[parts.size - 1])
+                        "[[#{whole}]] adds to", starts[parts.size - 1])
           end
           return fail(closed(slot, whole), starts[parts.size - 1])
         end
@@ -1562,13 +1560,13 @@ struct TapeReader
   # here so that their frames do not hold what building them takes.
   private def too_deep(depth : Int32) : TOMLError
     fail("a value #{depth} levels deep, past the #{DEPTH_LIMIT} this reader " \
-      "nests", pos)
+         "nests", pos)
   end
 
   private def no_equals(path : Tape::Array(Tape::String),
-    parts : Tape::Array(Tape::String)) : TOMLError
+                        parts : Tape::Array(Tape::String)) : TOMLError
     fail("#{found(pos)} after the key #{name(path, parts, parts.size)}, " \
-      "where '=' should be", pos)
+         "where '=' should be", pos)
   end
 
   private def unexpected(rest : String) : TOMLError
@@ -1592,12 +1590,12 @@ struct TapeReader
     return TapeAny.new(true) if word?("true")
     return TapeAny.new(false) if word?("false")
     if digit?(pos) && digit?(pos + 1) && digit?(pos + 2) &&
-      digit?(pos + 3) && byte?(pos + 4, 45_u8)
+       digit?(pos + 3) && byte?(pos + 4, 45_u8)
       return date_time
     end
     return date_time if digit?(pos) && digit?(pos + 1) && byte?(pos + 2, 58_u8)
     if b == 43_u8 || b == 45_u8 || b == 105_u8 || b == 110_u8 ||
-      (b >= 48_u8 && b <= 57_u8)
+       (b >= 48_u8 && b <= 57_u8)
       return number
     end
     fail("#{found(pos)} cannot start a value", pos)
@@ -1652,7 +1650,7 @@ struct TapeReader
     dated = false
     if byte?(pos + 4, 45_u8)
       unless all_digits?(pos, 4) && all_digits?(pos + 5, 2) &&
-        byte?(pos + 7, 45_u8) && all_digits?(pos + 8, 2)
+             byte?(pos + 7, 45_u8) && all_digits?(pos + 8, 2)
         return fail("a date is written YYYY-MM-DD", start)
       end
       year = digits(pos, 4)
@@ -1663,7 +1661,7 @@ struct TapeReader
       # A time follows after `T`, `t`, or a space and a digit: a space and
       # anything else ends the value, and is the line's business.
       if byte?(pos, 84_u8) || byte?(pos, 116_u8) || (byte?(pos, 32_u8) &&
-        digit?(pos + 1))
+         digit?(pos + 1))
         self.pos = pos + 1
       else
         wrong = TOMLDateTime.problem(TOMLDateTime::LOCAL_DATE, year, month,
@@ -1673,14 +1671,14 @@ struct TapeReader
       end
     end
     unless all_digits?(pos, 2) && byte?(pos + 2, 58_u8) &&
-      all_digits?(pos + 3, 2)
+           all_digits?(pos + 3, 2)
       return fail("a time is written HH:MM:SS", pos)
     end
     hour = digits(pos, 2)
     minute = digits(pos + 3, 2)
     unless byte?(pos + 5, 58_u8) && all_digits?(pos + 6, 2)
       return fail("a time without its seconds, which TOML 1.0 does not " \
-        "allow", pos)
+                  "allow", pos)
     end
     second = digits(pos + 6, 2)
     self.pos = pos + 8
@@ -1706,7 +1704,7 @@ struct TapeReader
       elsif byte?(pos, 43_u8) || byte?(pos, 45_u8)
         sign = @bytes[pos] == 45_u8 ? -1 : 1
         unless all_digits?(pos + 1, 2) && byte?(pos + 3, 58_u8) &&
-          all_digits?(pos + 4, 2)
+               all_digits?(pos + 4, 2)
           return fail("an offset is written +HH:MM or -HH:MM", pos)
         end
         oh = digits(pos + 1, 2)
@@ -1789,11 +1787,11 @@ struct TapeReader
       end
     end
     if rest >= 2 && @bytes[i] == 48_u8 && (@bytes[i + 1] == 120_u8 ||
-      @bytes[i + 1] == 111_u8 || @bytes[i + 1] == 98_u8)
+       @bytes[i + 1] == 111_u8 || @bytes[i + 1] == 98_u8)
       radix = @bytes[i + 1] == 120_u8 ? 16 : (@bytes[i + 1] == 111_u8 ? 8 : 2)
       if signed
         return fail("a sign before #{token}, which only a decimal number " \
-          "may have", start)
+                    "may have", start)
       end
       finish = digit_run(i + 2, stop, radix)
       return fail("#{token} is not a number", start) unless finish == stop
@@ -1804,7 +1802,7 @@ struct TapeReader
         if d >= 0
           if value > (9223372036854775807_u64 - d.to_u64) // radix.to_u64
             return fail("#{token} is past 9223372036854775807, the largest " \
-              "TOML integer", start)
+                        "TOML integer", start)
           end
           value = value * radix.to_u64 + d.to_u64
         end
@@ -1853,7 +1851,7 @@ struct TapeReader
         d = (b - 48_u8).to_u64
         if value > (limit - d) // 10_u64
           return fail("#{token} is outside -9223372036854775808 to " \
-            "9223372036854775807, the TOML integers", start)
+                      "9223372036854775807, the TOML integers", start)
         end
         value = value * 10_u64 + d
       end
@@ -1890,7 +1888,7 @@ struct TapeReader
         break
       else
         return unexpected(" between the items of an array, where ',' or ']' " \
-          "should be")
+                          "should be")
       end
     end
     TapeAny.new(items)
@@ -1915,7 +1913,7 @@ struct TapeReader
       return fail("an inline table that does not close", start) if pos >= @size
       if @bytes[pos] == 10_u8 || @bytes[pos] == 13_u8
         return fail("a line break in an inline table, which stays on one " \
-          "line", pos)
+                    "line", pos)
       end
       if @bytes[pos] == 125_u8
         return fail("a comma after the last pair of an inline table", pos)
@@ -1931,10 +1929,10 @@ struct TapeReader
         break
       elsif b == 10_u8 || b == 13_u8
         return fail("a line break in an inline table, which stays on one " \
-          "line", pos)
+                    "line", pos)
       else
         return unexpected(" between the pairs of an inline table, where ',' " \
-          "or '}' should be")
+                          "or '}' should be")
       end
     end
     table.to_any
@@ -2011,14 +2009,14 @@ struct TapeReader
       if (point >= 0xD800 && point <= 0xDFFF) || point > 0x10FFFF
         shown = TapeReader.text_of(@bytes + pos + 2, count)
         return fail("\\#{e.unsafe_chr}#{shown} is not a Unicode " \
-          "scalar value", pos)
+                    "scalar value", pos)
       end
       write_codepoint(text, point.to_i32)
       self.pos = pos + 2 + count
       return nil
     end
     shown = e >= 33_u8 && e < 127_u8 ? "\\#{e.unsafe_chr}" : "'\\' followed " \
-      "by #{found(pos + 1)}"
+                                                             "by #{found(pos + 1)}"
     fail("#{shown} is not an escape TOML has", pos)
   end
 
@@ -2068,7 +2066,7 @@ struct TapeReader
         return fail("a line break in a single-line string", pos)
       elsif control?(b)
         return fail("#{found(pos)} in a literal string, which cannot hold " \
-          "it", pos)
+                    "it", pos)
       end
       self.pos = pos + 1
     end
@@ -2109,7 +2107,7 @@ struct TapeReader
         if n >= 3
           if n > 5
             return fail("#{n} quotes closing a multi-line string, where " \
-              "five is the most", pos)
+                        "five is the most", pos)
           end
           i = 3
           while i < n
@@ -2131,8 +2129,8 @@ struct TapeReader
           after = after + 1
         end
         if after < @size && (@bytes[after] == 10_u8 ||
-          (@bytes[after] == 13_u8 && after + 1 < @size &&
-          @bytes[after + 1] == 10_u8))
+           (@bytes[after] == 13_u8 && after + 1 < @size &&
+           @bytes[after + 1] == 10_u8))
           # A line-ending backslash: it, the blanks and every line break
           # and blank after it up to the next text go.
           self.pos = after
@@ -2165,7 +2163,7 @@ struct TapeReader
         while pos < @size
           c = @bytes[pos]
           break if c == 34_u8 || c == 92_u8 || c == 10_u8 || c == 13_u8 ||
-            control?(c)
+                   control?(c)
           self.pos = pos + 1
         end
         text.append(@bytes + run, pos - run)
@@ -2189,7 +2187,7 @@ struct TapeReader
         if n >= 3
           if n > 5
             return fail("#{n} apostrophes closing a multi-line literal " \
-              "string, where five is the most", pos)
+                        "string, where five is the most", pos)
           end
           i = 3
           while i < n
@@ -2216,7 +2214,7 @@ struct TapeReader
         self.pos = pos + 2
       elsif control?(b)
         return fail("#{found(pos)} in a literal string, which cannot hold " \
-          "it", pos)
+                    "it", pos)
       else
         run = pos
         while pos < @size
@@ -2305,7 +2303,7 @@ struct TapeWriter
     while i < key.bytesize
       b = bytes[i]
       unless (b >= 97_u8 && b <= 122_u8) || (b >= 65_u8 && b <= 90_u8) ||
-        (b >= 48_u8 && b <= 57_u8) || b == 95_u8 || b == 45_u8
+             (b >= 48_u8 && b <= 57_u8) || b == 95_u8 || b == 45_u8
         return TapeWriter.quoted(view(key), @out)
       end
       i = i + 1
@@ -2401,7 +2399,7 @@ struct TapeWriter
   # A table's own pairs, then its sub-tables and arrays of tables, each
   # under its header.
   private def section(pairs : Hash(String, Any) | TapeMap(TapeAny),
-                       path : Tape::Array(Tape::String)) : Nil
+                      path : Tape::Array(Tape::String)) : Nil
     pairs.each do |key, value|
       next if value.kind == Any::KIND_TABLE || table_array?(value)
       self.key(key)
@@ -2648,7 +2646,7 @@ pub struct TOML
   def self.write_value(val : UInt64) : Any
     if val > 9223372036854775807_u64
       raise "the UInt64 #{val} is past 9223372036854775807, the largest " \
-        "TOML integer"
+            "TOML integer"
     end
     Any.new(val.to_i64)
   end
@@ -2734,7 +2732,7 @@ pub struct TOML
   end
 
   def self.read_value(value : Any, type : Hash(String,
-    V).class) : Hash(String, V) forall V
+                                               V).class) : Hash(String, V) forall V
     h = Hash(String, V).new
     value.as_h.each { |key, item| h[key] = read_value(item, V) }
     h
@@ -2765,8 +2763,7 @@ module TapeNumbers
     end
     rest = size - at
     if rest == 8 && IyiFloatText.tail_is?(bytes + at, "Infinity")
-      return IyiFloatText.from_bits(negative ?
-        18442240474082181120_u64 : 9218868437227405312_u64)
+      return IyiFloatText.from_bits(negative ? 18442240474082181120_u64 : 9218868437227405312_u64)
     end
     if rest == 3 && IyiFloatText.tail_is?(bytes + at, "NaN")
       return IyiFloatText.from_bits(9221120237041090560_u64)
@@ -2845,8 +2842,7 @@ module TapeNumbers
     end
     rest = size - at
     if rest == 8 && IyiFloatText.tail_is?(bytes + at, "Infinity")
-      return IyiFloatText.from_bits(negative ?
-        18442240474082181120_u64 : 9218868437227405312_u64)
+      return IyiFloatText.from_bits(negative ? 18442240474082181120_u64 : 9218868437227405312_u64)
     end
     if rest == 3 && IyiFloatText.tail_is?(bytes + at, "NaN")
       return IyiFloatText.from_bits(9221120237041090560_u64)
@@ -2903,8 +2899,7 @@ module TapeNumbers
     # Far outside the format either way: the value is under
     # 10^(digits + exponent) and at least a tenth of that.
     if digits + exponent > 310
-      return IyiFloatText.from_bits(negative ?
-        18442240474082181120_u64 : 9218868437227405312_u64)
+      return IyiFloatText.from_bits(negative ? 18442240474082181120_u64 : 9218868437227405312_u64)
     end
     if digits + exponent < -345
       return IyiFloatText.from_bits(negative ? 9223372036854775808_u64 : 0_u64)
@@ -2948,8 +2943,7 @@ module TapeNumbers
     if binary_exponent < -1022
       drop = -1022 - binary_exponent
       if drop > 54
-        return IyiFloatText.from_bits(negative ?
-          9223372036854775808_u64 : 0_u64)
+        return IyiFloatText.from_bits(negative ? 9223372036854775808_u64 : 0_u64)
       end
       while drop > 0
         remainder = remainder || (q & 1_u64) != 0_u64
@@ -2969,13 +2963,11 @@ module TapeNumbers
       binary_exponent = binary_exponent + 1
     end
     if binary_exponent > 1023
-      return IyiFloatText.from_bits(negative ?
-        18442240474082181120_u64 : 9218868437227405312_u64)
+      return IyiFloatText.from_bits(negative ? 18442240474082181120_u64 : 9218868437227405312_u64)
     end
     biased = q < 4503599627370496_u64 ? 0_u64 : (binary_exponent + 1023).to_u64
     bits = biased.unsafe_shl(52_u64) | (q & 4503599627370495_u64)
     bits = bits | 9223372036854775808_u64 if negative
     IyiFloatText.from_bits(bits)
   end
-
 end

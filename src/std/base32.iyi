@@ -109,7 +109,7 @@ pub struct Base32
 
   def self.decode(text : Tape::String) : Tape::String | Base32Error
     Base32Codec.decode(text, BASE32_VALUES, BASE32_ALPHABET,
-                       "base32")
+      "base32")
   end
 
   def self.decode(text : Tape::String,
@@ -160,7 +160,7 @@ pub struct Base32Hex
 
   def self.decode(text : Tape::String) : Tape::String | Base32Error
     Base32Codec.decode(text, BASE32HEX_VALUES, BASE32HEX_ALPHABET,
-                       "base32hex")
+      "base32hex")
   end
 
   def self.decode(text : Tape::String,

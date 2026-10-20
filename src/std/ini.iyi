@@ -159,16 +159,16 @@ pub struct INI
     ini.each do |section, properties|
       if why = unwritable_section(section)
         raise "INI.build: section #{section.to_heap.inspect} " \
-          "cannot be written: #{why}"
+              "cannot be written: #{why}"
       end
       properties.each do |key, value|
         if why = unwritable_key(key)
           raise "INI.build: key #{key.to_heap.inspect} in section " \
-            "#{section.to_heap.inspect} cannot be written: #{why}"
+                "#{section.to_heap.inspect} cannot be written: #{why}"
         end
         if why = unwritable_value(value)
           raise "INI.build: the value of #{key.to_heap.inspect} in " \
-            "section #{section.to_heap.inspect} cannot be written: #{why}"
+                "section #{section.to_heap.inspect} cannot be written: #{why}"
         end
       end
     end
@@ -218,7 +218,7 @@ pub struct INI
     return "it holds `=`" if key.includes?('=')
     if key.starts_with?("#") || key.starts_with?(";") || key.starts_with?("[")
       return "it opens with #{key[0].unsafe_chr.inspect}, which starts " \
-        "a comment or a section"
+             "a comment or a section"
     end
     if key.starts_with?("\uFEFF")
       return "it opens with U+FEFF, which is read as a byte order mark"

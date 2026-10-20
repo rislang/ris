@@ -170,7 +170,7 @@ pub struct CSV
 
   private def self.write_rows(
     rows : Tape::Array(Tape::Array(Tape::String)),
-    io : Tape::String::Writer
+    io : Tape::String::Writer,
   ) : Nil
     r = 0
     while r < rows.size
@@ -245,7 +245,7 @@ pub struct CSV
   end
 
   private def self.escape(field : Tape::String,
-                           writer : Tape::String::Writer) : Nil
+                          writer : Tape::String::Writer) : Nil
     need = false
     p = field.to_unsafe
     n = field.bytesize
@@ -268,7 +268,7 @@ pub struct CSV
   # Always quoted: a field that holds a separator, or a first field that
   # opens with U+FEFF.
   private def self.quote(field : Tape::String,
-                          writer : Tape::String::Writer) : Nil
+                         writer : Tape::String::Writer) : Nil
     writer << '"'
     field.each_byte do |byte|
       writer.push(byte)
@@ -276,7 +276,6 @@ pub struct CSV
     end
     writer << '"'
   end
-
 end
 
 # What is wrong with a document, and where: *line* and *column* count from

@@ -259,7 +259,6 @@ pub struct TapeEventParser
   # takes.
   MAX_RETRY = 2147483647
 
-
   # A parser for a stream whose last event ID is *last_event_id* so far:
   # a reconnection's, which carries the one before it (see the module's
   # header for why).
@@ -292,7 +291,6 @@ pub struct TapeEventParser
     @retry.value = nil
     @dispatched.value = 0_i64
   end
-
 
   def data_buffer : Tape::String
     @data.value.finish
@@ -372,7 +370,7 @@ pub struct TapeEventParser
       # The decoder's one BOM (the Encoding Standard's UTF-8 decode); a
       # second is the first character of the line.
       if line.bytesize >= 3 && line[0] == 0xEF_u8 &&
-          line[1] == 0xBB_u8 && line[2] == 0xBF_u8
+         line[1] == 0xBB_u8 && line[2] == 0xBF_u8
         line = line[3, line.bytesize - 3]
       end
     end
@@ -474,8 +472,6 @@ pub class EventWriter
     @fault = got
     got
   end
-
-
 end
 
 pub struct SSE
@@ -504,14 +500,14 @@ pub struct SSE
       utf8(kind, "an event type")
       if breaks?(kind)
         raise "SSE: an event type cannot hold a line break: " \
-          "#{kind.to_heap.inspect}"
+              "#{kind.to_heap.inspect}"
       end
     end
     if mark = id
       utf8(mark, "an id")
       if breaks?(mark) || mark.includes?('\0')
         raise "SSE: an id cannot hold a line break or a NUL: " \
-          "#{mark.to_heap.inspect}"
+              "#{mark.to_heap.inspect}"
       end
     end
     if ms = retry

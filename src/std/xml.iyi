@@ -984,7 +984,6 @@ pub class Parser
     end
     true
   end
-
 end
 
 @[OnTape]
@@ -1230,8 +1229,7 @@ pub struct TapeNode
     colon ? name[0, colon] : "".as_tape
   end
 
-  def resolve_namespace_prefix(prefix : String | Tape::String
-                                ) : TapeNamespace?
+  def resolve_namespace_prefix(prefix : String | Tape::String) : TapeNamespace?
     namespaces.each { |ns| return ns if ns.prefix == prefix }
     up = parent
     return up.resolve_namespace_prefix(prefix) if up
@@ -1262,12 +1260,12 @@ pub struct TapeNode
 
   def to_xml(writer : Tape::String::Writer) : Nil
     ascii = node_type.document? &&
-      (tape_lower(encoding) == "us-ascii" || tape_lower(encoding) == "ascii")
+            (tape_lower(encoding) == "us-ascii" || tape_lower(encoding) == "ascii")
     serialize(writer, ascii)
   end
 
   protected def serialize(writer : Tape::String::Writer,
-                           ascii : Bool) : Nil
+                          ascii : Bool) : Nil
     if node_type.document?
       writer << "<?xml version=\"" << version << "\""
       unless encoding.empty?
@@ -1300,9 +1298,9 @@ pub struct TapeNode
       else
         writer << ">"
         children.each do |child|
-        child.serialize(writer, ascii)
-        writer << "\n" if node_type.document?
-      end
+          child.serialize(writer, ascii)
+          writer << "\n" if node_type.document?
+        end
         writer << "</" << name << ">"
       end
     elsif node_type.cdata?
@@ -1344,14 +1342,14 @@ pub struct TapeNode
 
   def to_heap : Node
     result = if node_type.document?
-      doc = Document.new(version.to_heap, encoding.to_heap, standalone)
-      ids = Hash(String, Array(String)).new
-      id_attributes.each { |key, values| ids[key.to_heap] = values.to_heap }
-      doc.id_attributes = ids
-      doc.as(Node)
-    else
-      Node.new(node_type, name.to_heap, content.to_heap)
-    end
+               doc = Document.new(version.to_heap, encoding.to_heap, standalone)
+               ids = Hash(String, Array(String)).new
+               id_attributes.each { |key, values| ids[key.to_heap] = values.to_heap }
+               doc.id_attributes = ids
+               doc.as(Node)
+             else
+               Node.new(node_type, name.to_heap, content.to_heap)
+             end
     namespaces.each do |ns|
       result.namespaces << Namespace.new(ns.prefix.to_heap, ns.uri.to_heap)
     end
@@ -1380,6 +1378,7 @@ private def tape_lower(text : Tape::String) : Tape::String
     end
   end
 end
+
 @[OnTape]
 struct TapeParser
   @input : Tape::String
@@ -2595,7 +2594,6 @@ struct TapeParser
     end
   end
 
-
   private def flush_text(elem : TapeNode, parts : Tape::Array(Tape::String)) : Nil
     return if parts.empty?
     text = Tape::String.build { |w| parts.join(w) }
@@ -2969,7 +2967,7 @@ pub def escape_attribute(text : Tape::String, ascii : Bool = false) : Tape::Stri
 end
 
 pub def escape_attribute(text : Tape::String, writer : Tape::String::Writer,
-               ascii : Bool = false) : Nil
+                         ascii : Bool = false) : Nil
   escape_bytes(text, true, ascii, writer)
 end
 

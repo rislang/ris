@@ -398,7 +398,7 @@ pub struct TapeSemanticVersion
   def to_heap : SemanticVersion
     build = @build
     SemanticVersion.new(@major, @minor, @patch, @prerelease.to_heap,
-                        build ? build.to_heap : nil)
+      build ? build.to_heap : nil)
   end
 
   def to_tape : Tape::String

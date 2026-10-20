@@ -34,8 +34,7 @@ pub struct MIME
   end
 
   def self.from_extension(name : String,
-                          default : String = "application/octet-stream"
-                          ) : String
+                          default : String = "application/octet-stream") : String
     from_extension?(name) || default
   end
 
@@ -229,8 +228,7 @@ pub struct MIME
 
   # The same, falling back to *default*.
   def self.from_extension(name : Tape::String,
-                          default : Tape::String =
-                            "application/octet-stream".as_tape) : Tape::String
+                          default : Tape::String = "application/octet-stream".as_tape) : Tape::String
     from_extension?(name) || default
   end
 

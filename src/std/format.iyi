@@ -255,7 +255,6 @@ module ::IyiFloatText
   MAX_PLACES = 400
 
   # Fixed-point decimal format with exact places, half to even.
-
 end
 
 # The two operations the exact formats need that the printer's bignum did
@@ -298,7 +297,6 @@ class ::IyiBig
       i -= 1
     end
   end
-
 end
 
 module ::IyiFormat
@@ -366,12 +364,10 @@ module ::IyiFormat
       digits = negative ? text[1, text.bytesize - 1] : text
       nonzero = digits != "0"
       digits = "".as_tape if !nonzero && precision == 0
-      sign = negative ? "-" :
-        (verb != 'u' ? (plus ? "+" : (space ? " " : "")) : "")
+      sign = negative ? "-" : (verb != 'u' ? (plus ? "+" : (space ? " " : "")) : "")
       prefix = ""
       if hash && nonzero
-        prefix = base == 16 ? (verb == 'X' ? "0X" : "0x") :
-          (base == 8 ? "0o" : (base == 2 ? "0b" : ""))
+        prefix = base == 16 ? (verb == 'X' ? "0X" : "0x") : (base == 8 ? "0o" : (base == 2 ? "0b" : ""))
       end
       zeros = precision > digits.bytesize ? precision - digits.bytesize : 0
       zero = false if precision >= 0
@@ -523,12 +519,11 @@ module ::IyiFormat
   end
 
   def self.float_field(value : Float64, text : Tape::String,
-                        minus : Bool, plus : Bool, space : Bool,
-                        zero : Bool, width : Int32) : Tape::String
+                       minus : Bool, plus : Bool, space : Bool,
+                       zero : Bool, width : Int32) : Tape::String
     Tape::String.build do |w|
       bits = IyiFloatText.bits_of(value)
-      sign = bits.unsafe_shr(63_u64) != 0_u64 ? "-" :
-        (plus ? "+" : (space ? " " : ""))
+      sign = bits.unsafe_shr(63_u64) != 0_u64 ? "-" : (plus ? "+" : (space ? " " : ""))
       pad = width - sign.bytesize - text.bytesize
       repeat(w, 32_u8, pad) unless minus || zero
       w << sign
@@ -539,17 +534,17 @@ module ::IyiFormat
   end
 
   def self.float_special(value : Float64, minus : Bool, plus : Bool,
-                          space : Bool, width : Int32) : Tape::String?
+                         space : Bool, width : Int32) : Tape::String?
     bits = IyiFloatText.bits_of(value)
     return nil unless bits.unsafe_shr(52_u64) & 2047_u64 == 2047_u64
     nan = bits & 4503599627370495_u64 != 0_u64
     text = if nan
-      plus ? "+NaN" : (space ? " NaN" : "NaN")
-    elsif bits.unsafe_shr(63_u64) != 0_u64
-      "-Infinity"
-    else
-      plus ? "+Infinity" : (space ? " Infinity" : "Infinity")
-    end
+             plus ? "+NaN" : (space ? " NaN" : "NaN")
+           elsif bits.unsafe_shr(63_u64) != 0_u64
+             "-Infinity"
+           else
+             plus ? "+Infinity" : (space ? " Infinity" : "Infinity")
+           end
     tape_string_arg(text.as_tape, minus, width, -1)
   end
 
@@ -563,7 +558,7 @@ module ::IyiFormat
   end
 
   def self.fixed_text(value : Float64, places : Int32,
-                       hash : Bool) : Tape::String
+                      hash : Bool) : Tape::String
     limit = IyiFloatText::MAX_PLACES
     raise "precision must be at most #{limit}, not #{places}" if places > limit
     digits = exact_digits(value, places)
@@ -583,7 +578,7 @@ module ::IyiFormat
   end
 
   def self.exp_text(value : Float64, places : Int32,
-                     uppercase : Bool, hash : Bool) : Tape::String
+                    uppercase : Bool, hash : Bool) : Tape::String
     limit = IyiFloatText::MAX_PLACES
     raise "precision must be at most #{limit}, not #{places}" if places > limit
     exp = 0
@@ -602,7 +597,7 @@ module ::IyiFormat
         tail += 1
       end
       if tail == digits.bytesize && digits.bytesize == places + 1 &&
-          digits[0] == 49_u8
+         digits[0] == 49_u8
         lower = exact_digits(value, places - exp + 1)
         if lower.bytesize == places + 1
           exp -= 1
@@ -710,8 +705,7 @@ module ::IyiFormat
     end
     f = (bits & 4503599627370495_u64) | 4503599627370496_u64
     e = eb.to_i64.to_i32 - 1075
-    base = verb == 'x' || verb == 'X' ? 16 :
-      (verb == 'o' ? 8 : (verb == 'b' ? 2 : 10))
+    base = verb == 'x' || verb == 'X' ? 16 : (verb == 'o' ? 8 : (verb == 'b' ? 2 : 10))
     text = Tape::String.build do |w|
       w << "-" if bits.unsafe_shr(63_u64) != 0_u64
       if base == 10
@@ -914,6 +908,7 @@ module ::IyiFormat
     end
     value.to_i32
   end
+
   def self.field_number(format_string : Tape::String, start : Int32, stop : Int32, what : String) : Int32
     value = 0_i64
     index = start
@@ -961,8 +956,7 @@ private def format_list(format_string : String, args) : String
   result
 end
 
-pub def sprintf(format_string : Tape::String, *args : *T
-                ) : Tape::String forall T
+pub def sprintf(format_string : Tape::String, *args : *T) : Tape::String forall T
   sprintf(format_string, args)
 end
 

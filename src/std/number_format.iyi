@@ -59,8 +59,8 @@ struct ::Number
   # and a float's shortest digits. *only_significant* drops the fraction's
   # trailing zeros, and the separator if nothing is left.
   def format(separator : ::Char = '.', delimiter : ::Char = ',',
-    decimal_places : Int32? = nil, *, group : Int32 = 3,
-    only_significant : ::Bool = false) : ::String
+             decimal_places : Int32? = nil, *, group : Int32 = 3,
+             only_significant : ::Bool = false) : ::String
     result = ""
     tape do
       result = Tape::String.build do |writer|
@@ -72,9 +72,9 @@ struct ::Number
   end
 
   def format(writer : Tape::String::Writer,
-    separator : ::Char = '.', delimiter : ::Char = ',',
-      decimal_places : Int32? = nil, *, group : Int32 = 3,
-      only_significant : ::Bool = false) : Nil
+             separator : ::Char = '.', delimiter : ::Char = ',',
+             decimal_places : Int32? = nil, *, group : Int32 = 3,
+             only_significant : ::Bool = false) : Nil
     Std::NumberFormat::NumberText.format(writer, self, separator, delimiter,
       decimal_places, group, only_significant)
   end
@@ -83,8 +83,8 @@ struct ::Number
   # digits (or, with `significant: false`, places), *unit_separator*
   # between it and the prefix.
   def humanize(precision : Int32 = 3, separator : ::Char = '.',
-    delimiter : ::Char = ',', *, significant : ::Bool = true,
-    unit_separator : ::String = "") : ::String
+               delimiter : ::Char = ',', *, significant : ::Bool = true,
+               unit_separator : ::String = "") : ::String
     result = ""
     tape do
       result = Tape::String.build do |writer|
@@ -96,9 +96,9 @@ struct ::Number
   end
 
   def humanize(writer : Tape::String::Writer,
-    precision : Int32 = 3, separator : ::Char = '.', delimiter : ::Char = ',',
-      *, significant : ::Bool = true,
-      unit_separator : ::String | Tape::String = "") : Nil
+               precision : Int32 = 3, separator : ::Char = '.', delimiter : ::Char = ',',
+               *, significant : ::Bool = true,
+               unit_separator : ::String | Tape::String = "") : Nil
     Std::NumberFormat::NumberText.humanize(writer, self, precision, separator,
       delimiter, significant, unit_separator)
   end
@@ -108,9 +108,8 @@ struct ::Int
   # A count of bytes scaled by powers of 1024, as `humanize` scales by
   # 1000.
   def humanize_bytes(precision : Int32 = 3, separator : ::Char = '.', *,
-    significant : ::Bool = true, unit_separator : ::String = "",
-    format : Std::NumberFormat::BinaryPrefixFormat =
-        Std::NumberFormat::BinaryPrefixFormat::IEC) : ::String
+                     significant : ::Bool = true, unit_separator : ::String = "",
+                     format : Std::NumberFormat::BinaryPrefixFormat = Std::NumberFormat::BinaryPrefixFormat::IEC) : ::String
     result = ""
     tape do
       result = Tape::String.build do |writer|
@@ -122,11 +121,10 @@ struct ::Int
   end
 
   def humanize_bytes(writer : Tape::String::Writer,
-    precision : Int32 = 3, separator : ::Char = '.', *,
-      significant : ::Bool = true,
-      unit_separator : ::String | Tape::String = "",
-      format : Std::NumberFormat::BinaryPrefixFormat =
-        Std::NumberFormat::BinaryPrefixFormat::IEC) : Nil
+                     precision : Int32 = 3, separator : ::Char = '.', *,
+                     significant : ::Bool = true,
+                     unit_separator : ::String | Tape::String = "",
+                     format : Std::NumberFormat::BinaryPrefixFormat = Std::NumberFormat::BinaryPrefixFormat::IEC) : Nil
     Std::NumberFormat::NumberText.humanize_bytes(writer, self, precision,
       separator, significant, unit_separator, format)
   end
@@ -135,13 +133,13 @@ end
 module NumberText
   # From q (10^-30) to Q (10^30), one per power of a thousand.
   SI_PREFIXES = ["q", "r", "y", "z", "a", "f", "p", "n", "µ", "m", "", "k",
-    "M", "G", "T", "P", "E", "Z", "Y", "R", "Q"]
+                 "M", "G", "T", "P", "E", "Z", "Y", "R", "Q"]
   IEC_UNITS   = ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"]
   JEDEC_UNITS = ["B", "KB", "MB", "GB", "TB", "PB", "EB"]
 
   def self.format(writer : Tape::String::Writer, value : ::Int,
-    separator : ::Char, delimiter : ::Char, places : Int32?, group : Int32,
-    only_significant : ::Bool) : Nil
+                  separator : ::Char, delimiter : ::Char, places : Int32?, group : Int32,
+                  only_significant : ::Bool) : Nil
     check_format(places, group)
     text = number(value)
     negative = text.starts_with?("-")
@@ -154,8 +152,8 @@ module NumberText
   end
 
   def self.format(writer : Tape::String::Writer, value : Float32,
-    separator : ::Char, delimiter : ::Char, places : Int32?, group : Int32,
-    only_significant : ::Bool) : Nil
+                  separator : ::Char, delimiter : ::Char, places : Int32?, group : Int32,
+                  only_significant : ::Bool) : Nil
     check_format(places, group)
     # The single's own shortest digits; widened, its places are exact.
     return float_text(writer, number(value), separator, delimiter, group,
@@ -165,8 +163,8 @@ module NumberText
   end
 
   def self.format(writer : Tape::String::Writer, value : Float64,
-    separator : ::Char, delimiter : ::Char, places : Int32?, group : Int32,
-    only_significant : ::Bool) : Nil
+                  separator : ::Char, delimiter : ::Char, places : Int32?, group : Int32,
+                  only_significant : ::Bool) : Nil
     check_format(places, group)
     return emit(writer, number(value)) unless finite?(value)
     if count = places
@@ -194,8 +192,8 @@ module NumberText
 
   # `to_s`'s shortest digits, "1.25e-7" or "1234.5", written out in full.
   private def self.float_text(writer : Tape::String::Writer,
-    text : Tape::String, separator : ::Char, delimiter : ::Char,
-    group : Int32, only_significant : ::Bool) : Nil
+                              text : Tape::String, separator : ::Char, delimiter : ::Char,
+                              group : Int32, only_significant : ::Bool) : Nil
     if text == "NaN" || text == "Infinity" || text == "-Infinity"
       return emit(writer, text)
     end
@@ -227,8 +225,8 @@ module NumberText
   end
 
   def self.humanize(writer : Tape::String::Writer, value : ::Int,
-    precision : Int32, separator : ::Char, delimiter : ::Char,
-    significant : ::Bool, unit_separator : ::String | Tape::String) : Nil
+                    precision : Int32, separator : ::Char, delimiter : ::Char,
+                    significant : ::Bool, unit_separator : ::String | Tape::String) : Nil
     negative, magnitude = magnitude_of(value)
     return emit(writer, "0") if magnitude == 0_u64
     scaled(writer, negative, magnitude, 0, number(magnitude).bytesize - 1,
@@ -236,15 +234,15 @@ module NumberText
   end
 
   def self.humanize(writer : Tape::String::Writer, value : Float32,
-    precision : Int32, separator : ::Char, delimiter : ::Char,
-    significant : ::Bool, unit_separator : ::String | Tape::String) : Nil
+                    precision : Int32, separator : ::Char, delimiter : ::Char,
+                    significant : ::Bool, unit_separator : ::String | Tape::String) : Nil
     humanize(writer, value.to_f64, precision, separator, delimiter,
       significant, unit_separator)
   end
 
   def self.humanize(writer : Tape::String::Writer, value : Float64,
-    precision : Int32, separator : ::Char, delimiter : ::Char,
-    significant : ::Bool, unit_separator : ::String | Tape::String) : Nil
+                    precision : Int32, separator : ::Char, delimiter : ::Char,
+                    significant : ::Bool, unit_separator : ::String | Tape::String) : Nil
     check_precision("Number#humanize", precision, significant)
     return emit(writer, number(value)) unless finite?(value)
     return emit(writer, "0") if value == 0.0
@@ -262,12 +260,11 @@ module NumberText
   end
 
   def self.humanize_bytes(writer : Tape::String::Writer, value : ::Int,
-    precision : Int32, separator : ::Char, significant : ::Bool,
-    unit_separator : ::String | Tape::String,
-    format : Std::NumberFormat::BinaryPrefixFormat) : Nil
+                          precision : Int32, separator : ::Char, significant : ::Bool,
+                          unit_separator : ::String | Tape::String,
+                          format : Std::NumberFormat::BinaryPrefixFormat) : Nil
     check_precision("Int#humanize_bytes", precision, significant)
-    units = format == Std::NumberFormat::BinaryPrefixFormat::IEC ?
-      IEC_UNITS : JEDEC_UNITS
+    units = format == Std::NumberFormat::BinaryPrefixFormat::IEC ? IEC_UNITS : JEDEC_UNITS
     negative, magnitude = magnitude_of(value)
     sign = negative ? "-" : ""
     if magnitude < 1024_u64
@@ -304,9 +301,9 @@ module NumberText
   # *magnitude* x 2^*e*, its leading digit at 10^*lead* or near it, as
   # humanize writes it.
   private def self.scaled(writer : Tape::String::Writer, negative : ::Bool,
-    magnitude : UInt64, e : Int32, lead : Int32, precision : Int32,
-    separator : ::Char, delimiter : ::Char, significant : ::Bool,
-    unit_separator : ::String | Tape::String) : Nil
+                          magnitude : UInt64, e : Int32, lead : Int32, precision : Int32,
+                          separator : ::Char, delimiter : ::Char, significant : ::Bool,
+                          unit_separator : ::String | Tape::String) : Nil
     check_precision("Number#humanize", precision, significant)
     if significant
       digits, low = significant_digits(magnitude, e, lead, precision)
@@ -345,7 +342,7 @@ module NumberText
   # even, and the power of ten of the last one. *lead* is where the first
   # digit is thought to be; a guess off is put right here.
   private def self.significant_digits(magnitude : UInt64, e : Int32,
-    lead : Int32, precision : Int32) : {Tape::String, Int32}
+                                      lead : Int32, precision : Int32) : {Tape::String, Int32}
     while true
       low = lead - precision + 1
       digits = scaled_digits(magnitude, e, 0 - low)
@@ -377,8 +374,7 @@ module NumberText
   end
 
   # *digits* x 10^*low* as its whole part and its fraction.
-  private def self.place(digits : Tape::String, low : Int32) : {Tape::String,
-    Tape::String}
+  private def self.place(digits : Tape::String, low : Int32) : {Tape::String, Tape::String}
     return {cat(digits, zeros(low)), "".as_tape} if low >= 0
     point = digits.bytesize + low
     return {"0".as_tape, cat(zeros(0 - point), digits)} if point <= 0
@@ -386,10 +382,10 @@ module NumberText
   end
 
   private def self.check_precision(what : ::String, precision : Int32,
-    significant : ::Bool) : Nil
+                                   significant : ::Bool) : Nil
     if significant && precision < 1
       raise "#{what}: precision must be at least 1 significant digit, " \
-        "not #{precision}"
+            "not #{precision}"
     elsif precision < 0
       raise "#{what}: precision must be at least 0 places, not #{precision}"
     end
@@ -406,8 +402,8 @@ module NumberText
   end
 
   private def self.assemble(writer : Tape::String::Writer, negative : ::Bool,
-    whole : Tape::String, fraction : Tape::String, separator : ::Char,
-    delimiter : ::Char, group : Int32) : Nil
+                            whole : Tape::String, fraction : Tape::String, separator : ::Char,
+                            delimiter : ::Char, group : Int32) : Nil
     zero = all_zero?(whole) && all_zero?(fraction)
     writer << '-' if negative && !zero
     group_digits(writer, whole, delimiter, group)
@@ -457,6 +453,7 @@ module NumberText
     end
     true
   end
+
   private def self.cat(*parts) : Tape::String
     Tape::String.build do |writer|
       parts.each { |part| writer << part }
@@ -665,5 +662,4 @@ module NumberText
       end
     end
   end
-
 end

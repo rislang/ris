@@ -231,7 +231,6 @@ struct MailText
     io.finish
   end
 
-
   def self.lf(text : Tape::String) : Tape::String
     return text unless MailText.contains?(text, "\r\n")
     p = text.to_unsafe
@@ -244,7 +243,6 @@ struct MailText
     end
     io.finish
   end
-
 
   def self.decode_words(text : Tape::String) : Tape::String
     return text unless MailText.contains?(text, "=?")
@@ -368,7 +366,6 @@ struct MailText
     return nil if (e - start) % 4 == 1
     MailText.base64_decode(MailText.cut(text, start, e))
   end
-
 
   def self.content_type(value : Tape::String) : {Tape::String, TapeMap(Tape::String, Tape::String)}?
     scan = TapeMailScan.new(value)
@@ -534,7 +531,6 @@ struct MailText
     io.finish
   end
 
-
   HEX = "0123456789ABCDEF"
 
   # windows-1252's 0x80 to 0x9F, -1 where it defines nothing.
@@ -662,6 +658,7 @@ struct MailText
       io.write_byte((0x80 | (cp & 0x3F)).to_u8)
     end
   end
+
   def self.append_utf8(io : Tape::String::Writer, cp : Int32) : Nil
     if cp < 0x80
       io.push(cp.to_u8)
@@ -965,7 +962,6 @@ struct MailText
     end
     nil
   end
-
 
   def self.base64_encode(data : String) : String
     result = ""
@@ -2394,43 +2390,39 @@ pub struct Mail
     MailText.qp_decode(text)
   end
 
-  def self.encode_base64(data : Tape::String
-                        ) : Tape::String
+  def self.encode_base64(data : Tape::String) : Tape::String
     Tape::String.build { |w| encode_base64(data, w) }
   end
 
   def self.encode_base64(data : Tape::String,
-                        writer : Tape::String::Writer) : Nil
+                         writer : Tape::String::Writer) : Nil
     MailText.base64_encode(data, writer)
   end
 
-  def self.decode_base64(text : Tape::String
-                        ) : Tape::String
+  def self.decode_base64(text : Tape::String) : Tape::String
     Tape::String.build { |w| decode_base64(text, w) }
   end
 
   def self.decode_base64(text : Tape::String,
-                        writer : Tape::String::Writer) : Nil
+                         writer : Tape::String::Writer) : Nil
     MailText.base64_decode(text, writer)
   end
 
-  def self.encode_quoted_printable(data : Tape::String, binary : Bool = false
-                        ) : Tape::String
+  def self.encode_quoted_printable(data : Tape::String, binary : Bool = false) : Tape::String
     Tape::String.build { |w| encode_quoted_printable(data, w, binary) }
   end
 
   def self.encode_quoted_printable(data : Tape::String,
-                        writer : Tape::String::Writer, binary : Bool = false) : Nil
+                                   writer : Tape::String::Writer, binary : Bool = false) : Nil
     MailText.qp_encode(data, binary, writer)
   end
 
-  def self.decode_quoted_printable(text : Tape::String
-                        ) : Tape::String
+  def self.decode_quoted_printable(text : Tape::String) : Tape::String
     Tape::String.build { |w| decode_quoted_printable(text, w) }
   end
 
   def self.decode_quoted_printable(text : Tape::String,
-                        writer : Tape::String::Writer) : Nil
+                                   writer : Tape::String::Writer) : Nil
     MailText.qp_decode(text, writer)
   end
 

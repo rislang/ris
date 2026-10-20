@@ -706,7 +706,7 @@ pub class Router
       writer << "/"
       kept.join(writer, "/")
       writer << "/" if path.bytesize > 0 && path[path.bytesize - 1] == 47_u8 &&
-        !kept.empty?
+                       !kept.empty?
     end
   end
 
