@@ -24,7 +24,6 @@ expect() {
 }
 
 expect class_field   "holds the tape type"
-expect tape_def_value "a @[Tape] def returns nothing"
 expect struct_field  "is a struct that is not @[OnTape]"
 expect class_var     "the class variable"
 expect generic_array "Array("
@@ -203,8 +202,6 @@ out=$("$RIS" run test/ris/to_heap.ri 2>&1)
 if [ "$out" = $'GET /users\nGET,/users\n[3, 1, 2] [2, 3]\n/users 12' ]; then echo "runs     to_heap"; else echo "FAILED   to_heap: $out"; status=1; fi
 out=$("$RIS" run test/ris/text_api.ri 2>&1)
 if grep -qF $'3 12 true\ntrue false\n4 212\n/users/1\n4 true true\n-42 7 true\ntrue -2147483648\n200 /users/1 took 12 ms\n200 /users/1 took 12 ms' <<<"$out" && grep -qF "not a number" <<<"$out"; then echo "runs     text_api"; else echo "FAILED   text_api: $out"; status=1; fi
-out=$("$RIS" run test/ris/tape_def.ri 2>&1)
-if [ "$out" = $'hi bob\nnobody\n3' ]; then echo "runs     tape_def"; else echo "FAILED   tape_def: $out"; status=1; fi
 out=$("$RIS" run test/ris/each_line.ri 2>&1)
 if [ "$out" = $'[GET /][POST /users][][GET /a] 4\n[one] 1\n 0\n[b\r] 1' ]; then echo "runs     each_line"; else echo "FAILED   each_line: $out"; status=1; fi
 out=$("$RIS" run samples/ris/report.ri 2>&1)

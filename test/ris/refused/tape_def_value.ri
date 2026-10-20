@@ -1,8 +1,0 @@
-# A @[Tape] def returns nothing, as a `tape` block does: its value would
-# outlive the tape.
-@[Tape]
-def greeting(name : String) : Tape::String
-  name.as_tape
-end
-
-greeting("bob")

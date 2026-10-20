@@ -63,7 +63,6 @@ module Iyi
     end
 
     def transform(node : Expressions)
-      tape_defs(node)
       exps = [] of ASTNode
       node.expressions.each do |exp|
         # iyi: a `defer` is left standing here on purpose. What it defers past
@@ -92,37 +91,6 @@ module Iyi
       else
         node.expressions = exps
         node
-      end
-    end
-
-    # ris: `@[Tape]` on a def runs its body on a tape, as `tape do ... end`
-    # around it would: the body becomes that block, so every rule of a
-    # tape block holds for it, and the annotation, which names no
-    # annotation type, is taken out. Like the block, the def gives back
-    # nothing; one written to return a value is refused.
-    private def tape_defs(node : Expressions) : Nil
-      exps = node.expressions
-      index = 0
-      while index < exps.size
-        exp = exps[index]
-        if exp.is_a?(Annotation) && !exp.path.global? && exp.path.names == ["Tape"]
-          target = exps[index + 1..].find { |other| !other.is_a?(Annotation) }
-          unless target.is_a?(Def)
-            exp.raise "@[Tape] goes on a def: it runs the def's body on a tape"
-          end
-          return_type = target.return_type
-          if return_type && return_type.to_s != "Nil"
-            return_type.raise "a @[Tape] def returns nothing, as a `tape` block does: " \
-                              "its value would outlive the tape. Return Nil, and assign what " \
-                              "must outlive it to a variable of the code around the call"
-          end
-          block = Block.new(body: target.body).at(target.body)
-          target.body = Call.new(nil, "tape", block: block).at(target)
-          target.return_type ||= Path.global("Nil").at(target)
-          exps.delete_at(index)
-          next
-        end
-        index += 1
       end
     end
 
