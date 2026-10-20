@@ -35,7 +35,7 @@ No tape value survives the block that owns its storage:
   outer variables or containers. Copying a struct does not copy its data.
 * `Tape::String.new(text)` copies heap text onto the tape; `.view(text)`
   borrows its bytes. `[start, count]` borrows a slice; `[]` reads a byte.
-* To retain text, call `to_s` inside an `@[Escape]` def while its source
+* To retain text, call `to_s` inside a `@[TapeToHeap]` def while its source
   is alive. Interpolation and writing tape text into `String::Builder`
   or `IO::Memory` also require this annotation. It permits heap copies,
   not escaping tape values. Each helper making a copy needs its own mark.
@@ -67,7 +67,7 @@ lowerings in `src/compiler/iyi/semantic/tape_*.cr`; `test/ris/check.sh`.
 | No heap, no GC | Tape beside iyi's GC | Long-lived data stays on the GC |
 | Scope end frees | Def, loop, block keeping nothing | Proven; not past `next` |
 | One growing value, unmoved | Own region, moved once | No refs into elements |
-| No annotations | Block lifetimes, `@[Escape]` | The GC holds the rest |
+| No annotations | Block lifetimes, `@[TapeToHeap]` | The GC holds the rest |
 | Flat data, links | `Link`, `Span`, `@[Tape::Flat]` | Pointer-free bytes |
 | Load checks every link | Checked when followed | Same safety, a later error |
 | Built in place | `w.append(f(x))` writes in `w`; `puts "#{x}"` | No copy |

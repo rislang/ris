@@ -10,7 +10,7 @@ ris is iyi plus Goose's tape memory.
   iyi is merged.
 * It pays where much short-lived data is made and dropped together: a
   request, a parse, a render, a response. Keep what a caller retains on the
-  heap, and copy it out with `to_s` in an `@[Escape]` def at the boundary.
+  heap, and copy it out with `to_s` in a `@[TapeToHeap]` def at the boundary.
 * Speed measurement is off for now: the goal is to make tape work
   everywhere; Goose has proven it fast. Speed tests for the whole
   project come later, not per change.
@@ -30,7 +30,7 @@ scope releases it all together:
 * Temporaries go on the caller's tape: a nested `tape` block shares it at
   no cost. No `local_tape` per call; it costs more than small work saves.
 * The caller decides what to copy to the heap, and when. Application
-  helpers making that copy need `@[Escape]` individually; the annotation
+  helpers making that copy need `@[TapeToHeap]` individually; the annotation
   does not propagate to called helpers or permit tape values to escape.
 * No raw pointers in an API: pass `Tape::String`, `Tape::String::Writer`,
   `Tape::Array` or an `@[OnTape]` struct. Outside a `std/` module the
@@ -40,7 +40,7 @@ scope releases it all together:
   socket call takes the pointer.
 * Keep the `String` API beside it, built on the tape one: it opens a
   `tape` (shared when the caller has one) and copies the result out.
-  In application code, mark that wrapper `@[Escape]`. Library code in
+  In application code, mark that wrapper `@[TapeToHeap]`. Library code in
   `std/` and `src/iyi/` is exempt from heap-copy and raw-pointer checks.
 
 Example: `HTTP.parse_head(bytes : Tape::String) : ParsedHead | ParseError`,

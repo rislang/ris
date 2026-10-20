@@ -14,7 +14,7 @@ class Cache
 end
 
 # The copy a caller keeps, made at the boundary it leaves the tape by.
-@[Escape]
+@[TapeToHeap]
 def retain(text : Tape::String) : String
   text.to_s
 end
@@ -24,7 +24,7 @@ def page : Tape::String
   Tape::String.build(1) { |writer| writer.append("café <&>") }
 end
 
-@[Escape]
+@[TapeToHeap]
 def retained_page : String
   tape do
     return page.to_s

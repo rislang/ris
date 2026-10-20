@@ -3,16 +3,16 @@ module test/ris/escape_boundary
 import std/io::{Memory}
 import std/gc::{GC}
 
-# A copy off the tape in a def marked @[Escape] compiles: it is the
+# A copy off the tape in a def marked @[TapeToHeap] compiles: it is the
 # boundary where the text leaves for what outlives the tape.
 CACHE = [] of String
 
-@[Escape]
+@[TapeToHeap]
 def keep(text : Tape::String) : Nil
   CACHE << text.to_s
 end
 
-@[Escape]
+@[TapeToHeap]
 def memory_copy(text : Tape::String) : String
   memory = Memory.new
   text.to_s(memory)
@@ -30,12 +30,12 @@ def memory_copy(text : Tape::String) : String
   memory.to_s
 end
 
-@[Escape]
+@[TapeToHeap]
 def interpolated_copy(text : Tape::String) : String
   "#{text}"
 end
 
-@[Escape]
+@[TapeToHeap]
 def builder_copy(text : Tape::String) : String
   String.build { |io| io << text }
 end

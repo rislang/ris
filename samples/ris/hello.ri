@@ -22,7 +22,7 @@ def make_order(id : Int64) : Order
 end
 
 # The greeting outlives the tape, so it is copied off here, once.
-@[Escape]
+@[TapeToHeap]
 def greet(order : Order) : String
   "Hello from #{order.customer.to_s}, order #{order.id}"
 end

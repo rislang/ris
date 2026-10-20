@@ -2,7 +2,7 @@ module test/ris/local
 import std/int
 
 # The copy a caller keeps, made at the boundary it leaves the tape by.
-@[Escape]
+@[TapeToHeap]
 def retain(text : Tape::String) : String
   text.to_s
 end

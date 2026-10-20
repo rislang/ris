@@ -1417,10 +1417,10 @@ module Iyi
       # `tape` block that made it. `Iyi::TapeChecker` and `CleanupTransformer`
       # refuse every place such a value could outlive its scope.
       types["OnTape"] = @tape_annotation = AnnotationType.new self, self, "OnTape"
-      # ris: `@[Escape]` on a def lets it copy a `Tape::String` off the tape
+      # ris: `@[TapeToHeap]` on a def lets it copy a `Tape::String` off the tape
       # with `to_s`; elsewhere `Iyi::TapeEscapeChecker` refuses that copy.
-      types["Escape"] = @escape_annotation =
-        AnnotationType.new self, self, "Escape"
+      types["TapeToHeap"] = @tape_to_heap_annotation =
+        AnnotationType.new self, self, "TapeToHeap"
       # ris: `@[CheckFree]` on a def: `Iyi::TapeCheckFreeChecker` refuses
       # an index checked in its body (Goose's `checkfree fn`).
       types["CheckFree"] = @check_free_annotation =
@@ -1758,7 +1758,7 @@ module Iyi
                      always_inline_annotation naked_annotation returns_twice_annotation
                      raises_annotation primitive_annotation call_convention_annotation
                      flags_annotation link_annotation extern_annotation deprecated_annotation experimental_annotation
-                     share_annotation tape_annotation escape_annotation check_free_annotation
+                     share_annotation tape_annotation tape_to_heap_annotation check_free_annotation
                      error_trait) %}
       def {{name.id}}
         @{{name.id}}.not_nil!

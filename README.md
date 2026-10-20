@@ -73,7 +73,7 @@ freeing it.
 The compiler rejects code that lets a tape value outlive its tape, such as
 storing it in a heap field, a retained proc or an outer variable. To keep
 text beyond the block, explicitly copy it to the GC heap inside a def
-marked `@[Escape]`. See [TAPE_DESIGN.md](TAPE_DESIGN.md) for the rules.
+marked `@[TapeToHeap]`. See [TAPE_DESIGN.md](TAPE_DESIGN.md) for the rules.
 
 ## How fast: [ris-bench](https://github.com/rislang/ris-bench)
 | `respond.ri`, 1.6M DTOs | ris | Goose | C++ | Rust | Go | Ruby² |

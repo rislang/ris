@@ -36,7 +36,7 @@ end
 # without an assignment the compiler can see, so it is not passed on.
 # What must outlive the block is copied into a variable of the code
 # around it (`total = page.sum`, `body = retain(text)`, where `retain`
-# copies with `to_s` in an `@[Escape]` def).
+# copies with `to_s` in a `@[TapeToHeap]` def).
 def tape(&) : Nil
   IyiRegion.tape_scope(Tape::CAPACITY) { yield }
   nil
@@ -150,7 +150,7 @@ module Tape
     end
 
     # Copy these borrowed bytes into an independent GC-managed String.
-    # Application copies require an `@[Escape]` def, called while the
+    # Application copies require a `@[TapeToHeap]` def, called while the
     # source is alive, for example when retaining text in a cache/task.
     # The source is unchanged and remains valid until its scope ends.
     def to_s : ::String
@@ -160,7 +160,7 @@ module Tape
     # Writes the bytes to *io*, a file or socket, with no copy on the heap
     # (`puts text`, `io << text`). A `String::Builder` or `std/io::Memory` is
     # the heap: `TapeEscapeChecker` refuses writing into one outside an
-    # `@[Escape]` def.
+    # `@[TapeToHeap]` def.
     def to_s(io : IyiIO) : Nil
       io.write(@ptr, @bytesize)
     end

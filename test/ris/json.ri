@@ -12,7 +12,7 @@ import std/json::{JSON, Builder, Writer, Document, DocumentParser, Parser}
 failures = [] of String
 
 # The copy a caller keeps, made at the boundary it leaves the tape by.
-@[Escape]
+@[TapeToHeap]
 def retain(text : Tape::String) : String
   text.to_s
 end

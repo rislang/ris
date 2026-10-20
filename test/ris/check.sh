@@ -52,11 +52,11 @@ expect writer_grow      "private method 'grow' called for Tape::String::Writer"
 expect tree_entry       "private constant Tape::Tree::Entry(T) referenced"
 expect array_grow       "private method 'grow' called for Tape::Array(T)"
 expect heap_copy \
-  "\`to_s\` of a Tape::String outside an @[Escape] def copies"
+  "\`to_s\` of a Tape::String outside a @[TapeToHeap] def copies"
 expect heap_copy_top \
-  "\`to_s\` of a Tape::String outside an @[Escape] def"
+  "\`to_s\` of a Tape::String outside a @[TapeToHeap] def"
 expect heap_interpolation \
-  "Interpolating a Tape::String outside an @[Escape]"
+  "Interpolating a Tape::String outside a @[TapeToHeap]"
 expect heap_builder     "Writing a Tape::String into a String::Builder"
 expect heap_copy        "tape -> heap -> tape pays this at every turn"
 expect heap_memory      "Writing a Tape::String into a String::Builder or"
@@ -64,7 +64,7 @@ expect heap_memory_print "Writing a Tape::String into a Std::Io::Memory"
 expect not_flat "Holder is not flat"
 expect check_free "\`first\` is @[CheckFree], and this \`[]\` checks"
 expect heap_escape_helper \
-  "\`to_s\` of a Tape::String outside an @[Escape] def copies"
+  "\`to_s\` of a Tape::String outside a @[TapeToHeap] def copies"
 
 
 out=$("$RIS" run test/ris/escape.ri 2>&1)
