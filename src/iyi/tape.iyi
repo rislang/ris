@@ -533,7 +533,7 @@ module Tape
 
     # The indexes in *indexes*, each checked against this array once, for
     # reads with no check after (`Tape::View`).
-    def view(indexes : Array(Int32)) : View(T)
+    def values_at(indexes : Array(Int32)) : View(T)
       View(T).new(self, indexes)
     end
 
@@ -589,7 +589,7 @@ module Tape
   # checked once here: Goose's index types, `u32 in nodes`. Reading through
   # one checks nothing more, as `target` never shrinks and the indexes are
   # a copy no one else can change. CSR's `dist[adj[k]]` is
-  # `dist.view(adj)[k]`, checked when the edges come in.
+  # `dist.values_at(adj)[k]`, checked when the edges come in.
   @[OnTape]
   struct View(T)
     @target : Array(T)

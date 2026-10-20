@@ -19,10 +19,10 @@ tape do
   adj = Tape::Array(Int32).new(4)
   [1, 2, 3, 3].each { |e| adj.push(e) }
   dist = Tape::Array(Int32).new(4) { |i| i == 0 ? 0 : -1 }
-  edges = dist.view(adj)
+  edges = dist.values_at(adj)
   puts "#{edges.size} edges, last names #{edges.index(3)}, reads #{edges[3]}"
   puts "levels #{levels(edges, 1)} dist #{dist[1]} #{dist[2]} #{dist[3]}"
   bad = Tape::Array(Int32).new(1)
   bad.push(9)
-  dist.view(bad)
+  dist.values_at(bad)
 end

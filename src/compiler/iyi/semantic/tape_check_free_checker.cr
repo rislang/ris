@@ -50,7 +50,7 @@ class Iyi::TapeCheckFreeChecker
         node.raise "`#{@name}` is @[CheckFree], and this `#{node.name}` checks " \
                    "its index at every call.\n\nIndex in `while i < a.size` " \
                    "(i only `+= 1`), use `each`, `map` or `sum`, or check the " \
-                   "indexes once where they come in: `target.view(array)` " \
+                   "indexes once where they come in: `target.values_at(array)` " \
                    "gives a Tape::View that reads without a check."
       end
       true
