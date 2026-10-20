@@ -1,25 +1,47 @@
-# Tape::Array asked what iyi's Array is asked: built from a literal, read
-# with the same questions, emptied from the top.
-tape do
-  prices = Tape::Array(Int32){129, 199, 649, 389}
-  puts "#{prices.size} #{prices.first} #{prices.last?} #{prices.empty?}"
-  puts "#{prices.includes?(649)} #{prices.index(649)} #{prices.index(1)}"
-  big = prices.count { |p| p > 200 }
-  puts "#{big} #{prices.any? { |p| p > 600 }} #{prices.all? { |p| p > 100 }}"
-  puts "#{prices.find { |p| p > 300 }} #{prices.find { |p| p > 900 }.nil?}"
-  total = prices.reduce(0) { |sum, p| sum + p }
-  puts "#{total} #{prices.max_by { |p| p }} #{prices.min_by { |p| -p }}"
-  puts "#{prices.pop} #{prices.size} #{prices.pop?}"
-  zeros = Tape::Array(Int32).new(3, 0)
-  puts "#{zeros.size} #{zeros.sum} #{zeros.first?}"
-  empty = Tape::Array(Int32).new
-  puts "#{empty.empty?} #{empty.first?.nil?} #{empty.pop?.nil?}"
-  piim = Tape::String.view("piim")
-  names = Tape::Array(Tape::String){piim, Tape::String.view("kohv")}
-  puts names.size
-  puts names.max_by { |n| n.bytesize }
-  if last = names.last?
-    puts last
+# Tape::Array asked what iyi's Array is asked, on a chat app's models:
+# users post messages in a room, and others boost them.
+@[OnTape]
+struct Message
+  getter user_id : Int32
+  getter boosts : Int32
+  getter body : Tape::String
+
+  def initialize(@user_id, @boosts, body : String)
+    @body = Tape::String.view(body)
   end
+end
+
+tape do
+  # The room's members, by user id.
+  members = Tape::Array(Int32){7, 12, 31}
+  puts "#{members.size} #{members.first} #{members.last?} #{members.empty?}"
+  puts "#{members.includes?(31)} #{members.index(31)} #{members.index(99)}"
+
+  messages = Tape::Array(Message){
+    Message.new(7, 0, "Morning!"),
+    Message.new(12, 3, "Deploy is green"),
+    Message.new(7, 1, "Ship it"),
+    Message.new(31, 0, "Hi all"),
+  }
+  boosted = messages.count { |m| m.boosts > 0 }
+  hot = messages.any? { |m| m.boosts >= 3 }
+  puts "#{boosted} #{hot} #{messages.all? { |m| members.includes?(m.user_id) }}"
+  if first = messages.find { |m| m.user_id == 12 }
+    puts first.body
+  end
+  puts messages.find { |m| m.user_id == 99 }.nil?
+  total = messages.reduce(0) { |sum, m| sum + m.boosts }
+  puts "#{total} #{messages.max_by { |m| m.boosts }.user_id}"
+  puts messages.min_by { |m| m.body.bytesize }.body
+
+  # The newest message is taken back, as a deleted one is.
+  puts "#{messages.pop.user_id} #{messages.size}"
+
+  # Each member's unread count, none yet.
+  unread = Tape::Array(Int32).new(members.size, 0)
+  puts "#{unread.size} #{unread.sum} #{unread.first?}"
+
+  empty = Tape::Array(Message).new
+  puts "#{empty.empty?} #{empty.first?.nil?} #{empty.pop?.nil?}"
   empty.first
 end
