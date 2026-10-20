@@ -819,9 +819,9 @@ module Tape
     end
 
     # The indexes in *indexes*, each checked against this array once, for
-    # reads with no check after (`Tape::View`).
-    def values_at(indexes : Array(Int32)) : View(T)
-      View(T).new(self, indexes)
+    # reads with no check after (`Tape::IndexView`).
+    def values_at(indexes : Array(Int32)) : IndexView(T)
+      IndexView(T).new(self, indexes)
     end
 
     # The elements copied into an `Array` on the heap, to keep after the
@@ -833,7 +833,7 @@ module Tape
       ::Array(typeof(Tape.heap_value(unsafe_at(0)))).new(size) { |index| Tape.heap_value(unsafe_at(index)) }
     end
 
-    # For `View`, whose indexes are known in range.
+    # For `IndexView`, whose indexes are known in range.
     protected def unchecked(index : Int32) : T
       unsafe_at(index)
     end
@@ -887,7 +887,7 @@ module Tape
   # a copy no one else can change. CSR's `dist[adj[k]]` is
   # `dist.values_at(adj)[k]`, checked when the edges come in.
   @[OnTape]
-  struct View(T)
+  struct IndexView(T)
     @target : Array(T)
     @at : Array(Int32)
 

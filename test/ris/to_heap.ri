@@ -1,6 +1,6 @@
 # `to_heap` copies tape values off the tape by name, with no
 # @[TapeToHeap] def: a Tape::String, a Tape::Array of numbers, of strings
-# or of an @[OnTape] struct with its own `to_heap`, and a Tape::View.
+# or of an @[OnTape] struct with its own `to_heap`, and a Tape::IndexView.
 record HeapHit, path : String, ms : Int32
 
 @[OnTape]

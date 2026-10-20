@@ -36,8 +36,8 @@ No tape value survives the block that owns its storage:
 * `Tape::String.new(text)` copies heap text onto the tape; `text.as_tape`
   borrows its bytes. `[start, count]` borrows a slice; `[]` reads a byte.
 * To retain a value, copy it by name while its source is alive: `to_heap`
-  on a `Tape::String`, a `Tape::Array` or `View` (each element by its own
-  `to_heap`), or an `@[OnTape]` struct that defines one. `to_s`,
+  on a `Tape::String`, a `Tape::Array` or `IndexView` (each element by its
+  own `to_heap`), or an `@[OnTape]` struct that defines one. `to_s`,
   interpolation and writing into `String::Builder` need `@[TapeToHeap]`.
 * Pass tape text on, append to a tape writer, or write directly to a file
   or socket (`puts text`, `io << text`). Avoid tape -> heap -> tape copies.

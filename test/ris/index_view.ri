@@ -1,7 +1,7 @@
 # Goose's index types and checkfree functions: a CSR graph's edges are
 # checked once when they come in, and the breadth-first search reads and
 # writes `dist[adj[k]]` with no check left, which @[CheckFree]
-def levels(edges : Tape::View(Int32), first : Int32) : Int32
+def levels(edges : Tape::IndexView(Int32), first : Int32) : Int32
   total = 0
   k = 0
   while k < edges.size
