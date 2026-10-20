@@ -1,34 +1,28 @@
 # A chat room: what lasts lives on the heap, each request on a tape.
 #
 #   ./bin/ris run samples/ris/chat.ri
-#
-# Inside `module Chat`, `include Tape` makes `Array` and `String` the
-# tape's own, so the request code reads as plain iyi; the heap's are
-# `::Array` and `::String`. Literals stay on the heap: `"hi"` is a
-# `::String`, viewed onto the tape with `String.view`.
-module Chat
-  include Tape
 
+module Chat
   # What outlives a request: the room's members and posted messages.
   class Room
-    getter members = ::Array(Int32).new
-    getter authors = ::Array(Int32).new
-    getter bodies = ::Array(::String).new
-    getter boosts = ::Array(Int32).new
+    getter members = Array(Int32).new
+    getter authors = Array(Int32).new
+    getter bodies = Array(String).new
+    getter boosts = Array(Int32).new
   end
 
   # A request's message, its body a view into the request's bytes.
   @[OnTape]
   struct Post
     getter user_id : Int32
-    getter body : String
+    getter body : Tape::String
 
     def initialize(@user_id, @body)
     end
   end
 
   # "7 Ship it": a user id, one space, the text. Nil when it is not.
-  def self.parse(request : String) : Post?
+  def self.parse(request : Tape::String) : Post?
     user_id = 0
     index = 0
     while index < request.bytesize && request[index] != ' '.ord.to_u8
@@ -50,9 +44,9 @@ module Chat
 
   # One request, start to end on one tape: its bytes, the parse, the
   # room's view and the response are freed together when it ends.
-  def self.handle(room : Room, request : ::String) : Nil
+  def self.handle(room : Room, request : String) : Nil
     tape do
-      post = parse(String.view(request))
+      post = parse(Tape::String.view(request))
       if post.nil?
         puts "400 bad request"
       elsif !room.members.includes?(post.user_id)
@@ -68,9 +62,9 @@ module Chat
   # the members, all written into one response on the tape.
   def self.respond(room : Room) : Nil
     count = room.bodies.size
-    order = Array(Int32).new(count) { |i| i }
+    order = Tape::Array(Int32).new(count) { |i| i }
     top = order.sorted_by { |i| -room.boosts[i] }
-    response = String::Writer.new(256)
+    response = Tape::String::Writer.new(256)
     response.append("200 ")
     top.each_with_index do |i, k|
       response.append(" | ") if k > 0
@@ -79,7 +73,7 @@ module Chat
       response.append(room.bodies[i])
     end
     response.append(" (members ")
-    members = Array(Int32).new(room.members.size) { |i| room.members[i] }
+    members = Tape::Array(Int32).new(room.members.size) { |i| room.members[i] }
     members.sort_in_place
     members.join(response, ", ")
     response.append(")")
