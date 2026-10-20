@@ -22,7 +22,7 @@ def route(head : ParsedHead, body : Tape::String::Writer) : Int32
     return 200
   end
   return 404 unless path.starts_with?("/users/")
-  id = path[7, path.bytesize - 7].to_i? || return 404
+  id = path[7..].to_i? || return 404
   name = USERS[id]? || return 404
   body << %({"id":) << id << %(,"name":") << name << %("})
   200

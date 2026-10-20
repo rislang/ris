@@ -66,7 +66,7 @@ module Chat
   def self.message_params(request : Tape::String) : MessageParams?
     space = request.index(' ') || return nil
     user_id = request[0, space].to_i? || return nil
-    body = request[space + 1, request.bytesize - space - 1]
+    body = request[space + 1..]
     MessageParams.new(user_id: user_id, body: body)
   end
 

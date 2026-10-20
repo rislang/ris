@@ -103,6 +103,25 @@ module Tape
       String.new(@ptr + start, count)
     end
 
+    # The bytes *range* names, a view, as `Array#[](range)` reads one: a
+    # negative end counts from the last, an endless one runs to it, and a
+    # range that begins past the end is refused. `line[space + 1..]` is
+    # the rest of the line.
+    def [](range : Range(B, E)) : String forall B, E
+      from = range.begin
+      start = from.nil? ? 0 : from
+      start = @bytesize + start if start < 0
+      raise "range #{range} out of range for #{@bytesize} bytes" if start < 0 || start > @bytesize
+      to = range.end
+      stop = to.nil? ? @bytesize : (to < 0 ? @bytesize + to : to)
+      if stop >= @bytesize
+        stop = @bytesize
+      elsif !range.exclusive?
+        stop = stop + 1
+      end
+      String.new(@ptr + start, stop > start ? stop - start : 0)
+    end
+
     def each_byte(& : UInt8 -> _) : Nil
       i = 0
       while i < @bytesize
@@ -131,14 +150,33 @@ module Tape
       end
     end
 
-    # Where the ASCII *char* first is from *offset*, or nil, byte-indexed
-    # as `String#index` is.
+    # Where *char* first is from *offset*, or nil, byte-indexed as
+    # `String#index` is; a char past ASCII by its UTF-8 bytes.
     def index(char : Char, offset : Int32 = 0) : Int32?
-      raise "Tape::String#index takes an ASCII char, not #{char.inspect}" if char.ord > 127
-      byte = char.ord.to_u8
+      if char.ord < 128
+        byte = char.ord.to_u8
+        at = offset
+        while at < @bytesize
+          return at if @ptr[at] == byte
+          at = at + 1
+        end
+        return nil
+      end
+      # Its UTF-8 bytes, matched whole where they start.
+      room = uninitialized StaticArray(UInt8, 4)
+      wanted = pointerof(room).as(Pointer(UInt8))
+      width = 0
+      char.each_byte do |byte|
+        wanted[width] = byte
+        width = width + 1
+      end
       at = offset
-      while at < @bytesize
-        return at if @ptr[at] == byte
+      while at + width <= @bytesize
+        k = 0
+        while k < width && @ptr[at + k] == wanted[k]
+          k = k + 1
+        end
+        return at if k == width
         at = at + 1
       end
       nil
@@ -148,14 +186,15 @@ module Tape
       !index(char).nil?
     end
 
-    # The pieces between each ASCII *separator*, as `String#split(Char)`
-    # cuts them, empty ones kept; each a view, in a new array on the tape.
+    # The pieces between each *separator*, as `String#split(Char)` cuts
+    # them, empty ones kept; each a view, in a new array on the tape.
     def split(separator : Char) : Array(String)
+      width = separator.bytesize
       pieces = Array(String).new
       start = 0
       while at = index(separator, start)
         pieces << self[start, at - start]
-        start = at + 1
+        start = at + width
       end
       pieces << self[start, @bytesize - start]
       pieces

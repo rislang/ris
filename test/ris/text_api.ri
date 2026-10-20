@@ -1,6 +1,6 @@
 # Tape::String read as iyi's String is, every piece a view: `index`,
-# `includes?`, `split` and `to_i`; a Writer written with `<<` and printed
-# with `puts` straight from the tape.
+# `includes?`, `split` (by ASCII and UTF-8 chars), `to_i` and a range; a
+# Writer written with `<<` and printed with `puts` straight from the tape.
 tape do
   line = "GET /users/1 200 12".as_tape
   puts "#{line.index(' ')} #{line.index(' ', 4)} #{line.index('x').nil?}"
@@ -12,6 +12,14 @@ tape do
   puts "#{pieces.size} #{pieces[1].empty?} #{pieces[3].empty?}"
   puts "#{"-42".as_tape.to_i} #{"+7".as_tape.to_i} #{"4x".as_tape.to_i?.nil?}"
   puts "#{"2147483648".as_tape.to_i?.nil?} #{"-2147483648".as_tape.to_i}"
+
+  rest = "7 Ship it".as_tape
+  puts "#{rest[2..]}|#{rest[0...1]}|#{rest[-2..]}|#{rest[..-4]}"
+  puts rest[9..].empty?
+  arrows = "a→b→café".as_tape
+  puts "#{arrows.index('→')} #{arrows.index('→', 2)} #{arrows.index('é')}"
+  pieces = arrows.split('→')
+  puts "#{pieces.size} #{pieces[2]} #{arrows.includes?('ü')}"
 
   response = Tape::String::Writer.new(64)
   response << "200 " << parts[1] << " took " << parts[3].to_i << " ms"
