@@ -56,6 +56,8 @@ has it.
 
 * `String#[]` indexes bytes while `size` counts characters: at least say
   so in the docs and in a hint; a decision for iyi.
+* `editors/vim`: named arguments and keys (`user_id: x`, `{id: 1}`) as
+  Ruby's symbols, `iyiNamedArgument`, with its tests.
 
 ## Stays in ris
 

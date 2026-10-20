@@ -28,6 +28,10 @@ syn match iyiNumber "\<\%(0x[0-9A-Fa-f][0-9A-Fa-f_]*\|0o[0-7][0-7_]*\|0b[01][01_
 " Do not mistake the second colon of Foo::Bar for a symbol prefix.
 syn match iyiSymbol "\%(:\)\@<!:[a-zA-Z_][A-Za-z0-9_]*[?!]\?"
 syn region iyiQuotedSymbol start=+\%(:\)\@<!:"+ skip=+\\.+ end=+"+ contains=iyiEscape
+" A named argument or key, `user_id: user_id` or `{id: 1}`, as Ruby's
+" symbol: its colon touches the name and a space or the end follows, so
+" `x : Int32`, `a ? b : c` and `Foo::Bar` are not taken.
+syn match iyiNamedArgument "\<[a-zA-Z_][A-Za-z0-9_]*[?!]\?:\ze\%(\s\|$\)"
 syn match iyiInstanceVariable "@\{1,2}[a-z_][A-Za-z0-9_]*"
 syn match iyiMagic "\<__\%(DIR\|FILE\|LINE\|END_LINE\)__\>"
 syn match iyiMacroDelimiter "{{\|}}\|{%\|%}"
@@ -38,7 +42,7 @@ syn region iyiCharacter start=+'+ skip=+\\.+ end=+'+ oneline contains=iyiEscape
 syn region iyiString start=+"+ skip=+\\.+ end=+"+ contains=iyiEscape,iyiInterpolation,@Spell
 syn region iyiCommand start=+`+ skip=+\\.+ end=+`+ contains=iyiEscape,iyiInterpolation
 syn match iyiEscape "\\." contained
-syn cluster iyiExpression contains=iyiKeyword,iyiBoolean,iyiSelf,iyiType,iyiNumber,iyiSymbol,iyiQuotedSymbol,iyiInstanceVariable,iyiMagic,iyiMacroDelimiter,iyiComment,iyiCharacter,iyiString,iyiCommand
+syn cluster iyiExpression contains=iyiKeyword,iyiBoolean,iyiSelf,iyiType,iyiNumber,iyiSymbol,iyiNamedArgument,iyiQuotedSymbol,iyiInstanceVariable,iyiMagic,iyiMacroDelimiter,iyiComment,iyiCharacter,iyiString,iyiCommand
 syn region iyiInterpolation matchgroup=iyiInterpolationDelimiter start="#{" end="}" contained contains=@iyiExpression,iyiInterpolationBrace
 syn region iyiInterpolationBrace start="{" end="}" contained transparent contains=@iyiExpression,iyiInterpolationBrace
 " Percent literals balance their own delimiter. q/w/i are non-interpolating.
@@ -73,6 +77,7 @@ hi def link iyiFunction Function
 hi def link iyiNumber Number
 hi def link iyiSymbol Constant
 hi def link iyiQuotedSymbol Constant
+hi def link iyiNamedArgument Constant
 hi def link iyiInstanceVariable Identifier
 hi def link iyiMagic PreProc
 hi def link iyiMacroDelimiter PreProc
