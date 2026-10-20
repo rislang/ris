@@ -183,6 +183,12 @@ module Iyi
       end
 
       node.expressions = exps
+      # A scope wrapper assigns this list's value. Specialization can
+      # make an early return unconditional, leaving its old last value
+      # untyped. The shortened list now has the return's NoReturn type.
+      if last = exps.last?
+        node.bind_to(last) if last.no_returns?
+      end
       node
     end
 

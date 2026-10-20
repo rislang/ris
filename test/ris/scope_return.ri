@@ -1,0 +1,24 @@
+module test/scope_return
+
+def choose(value : Int32?) : Int32
+  return 7 unless value
+  value + 1
+end
+
+def conditional(value : Int32?) : Int32
+  result = if value
+             value + 2
+           else
+             return 9
+           end
+  result
+end
+
+exit 1 unless choose(nil) == 7
+exit 2 unless choose(3) == 4
+exit 3 unless conditional(nil) == 9
+exit 4 unless conditional(3) == 5
+tape do
+  exit 5 unless choose(nil) == 7 && conditional(nil) == 9
+end
+puts "PASS: scope values with early returns"
