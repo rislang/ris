@@ -1,12 +1,11 @@
 # Tape::Array asked what iyi's Array is asked, on a chat app's models:
-# users post messages in a room, and others boost them.
+# users post messages in a room.
 @[OnTape]
 struct Message
   getter user_id : Int32
-  getter boosts : Int32
   getter body : Tape::String
 
-  def initialize(@user_id, @boosts, body : String)
+  def initialize(@user_id, body : String)
     @body = Tape::String.view(body)
   end
 end
@@ -18,32 +17,32 @@ tape do
   puts "#{members.includes?(31)} #{members.index(31)} #{members.index(99)}"
 
   messages = Tape::Array(Message){
-    Message.new(7, 0, "Morning!"),
-    Message.new(12, 3, "Deploy is green"),
-    Message.new(7, 1, "Ship it"),
-    Message.new(31, 0, "Hi all"),
+    Message.new(7, "Morning!"),
+    Message.new(12, "Deploy is green"),
+    Message.new(7, "Ship it"),
+    Message.new(31, "Hi all"),
   }
-  boosted = messages.count { |m| m.boosts > 0 }
-  hot = messages.any? { |m| m.boosts >= 3 }
-  puts "#{boosted} #{hot} #{messages.all? { |m| members.includes?(m.user_id) }}"
+  long = messages.count { |m| m.body.bytesize > 7 }
+  longer = messages.any? { |m| m.body.bytesize >= 15 }
+  puts "#{long} #{longer} #{messages.all? { |m| members.includes?(m.user_id) }}"
   if first = messages.find { |m| m.user_id == 12 }
     puts first.body
   end
   puts messages.find { |m| m.user_id == 99 }.nil?
-  total = messages.reduce(0) { |sum, m| sum + m.boosts }
-  puts "#{total} #{messages.max_by { |m| m.boosts }.user_id}"
+  total = messages.reduce(0) { |sum, m| sum + m.body.bytesize }
+  puts "#{total} #{messages.max_by { |m| m.body.bytesize }.user_id}"
   puts messages.min_by { |m| m.body.bytesize }.body
 
-  # New arrays on the same tape: boosted ones, the rest, newest first.
-  boosted_ones = messages.select { |m| m.boosts > 0 }
-  plain = messages.reject { |m| m.boosts > 0 }
+  # New arrays on the same tape: long ones, the rest, newest first.
+  long_ones = messages.select { |m| m.body.bytesize > 7 }
+  short = messages.reject { |m| m.body.bytesize > 7 }
   newest = messages.reversed
-  puts "#{boosted_ones.size} #{plain.size} #{newest.first.body}"
+  puts "#{long_ones.size} #{short.size} #{newest.first.body}"
 
-  # Most boosted first, as a "top messages" panel lists them; ties keep
-  # the order they were posted in.
-  top = messages.sorted_by { |m| -m.boosts }
-  top.each { |m| puts "#{m.boosts} #{m.body}" }
+  # Grouped by author; one author's messages keep the order they were
+  # posted in.
+  by_author = messages.sorted_by { |m| m.user_id }
+  by_author.each { |m| puts "#{m.user_id} #{m.body}" }
   puts messages.first.body
 
   # Guests join; the room's member list, sorted and written out.

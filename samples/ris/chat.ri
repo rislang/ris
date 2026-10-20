@@ -8,7 +8,6 @@ module Chat
     getter members = Array(Int32).new
     getter authors = Array(Int32).new
     getter bodies = Array(String).new
-    getter boosts = Array(Int32).new
   end
 
   # A request's message, its body a view into the request's bytes.
@@ -39,7 +38,6 @@ module Chat
   def self.keep(room : Room, post : Post) : Nil
     room.authors << post.user_id
     room.bodies << post.body.to_heap
-    room.boosts << 0
   end
 
   # One request, start to end on one tape: its bytes, the parse, the
@@ -58,12 +56,12 @@ module Chat
     end
   end
 
-  # The room as the client shows it: the most boosted first, then
+  # The room as the client shows it: the newest message first, then
   # the members, all written into one response on the tape.
   def self.respond(room : Room) : Nil
     count = room.bodies.size
     order = Tape::Array(Int32).new(count) { |i| i }
-    top = order.sorted_by { |i| -room.boosts[i] }
+    top = order.reversed
     response = Tape::String::Writer.new(256)
     response.append("200 ")
     top.each_with_index do |i, k|
@@ -85,7 +83,6 @@ room = Chat::Room.new
 room.members.concat([31, 7, 12])
 Chat.handle(room, "7 Morning!")
 Chat.handle(room, "12 Deploy is green")
-room.boosts[1] = 3
 Chat.handle(room, "7 Ship it")
 Chat.handle(room, "99 Hi")
 Chat.handle(room, "hello")

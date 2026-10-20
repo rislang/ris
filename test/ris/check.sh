@@ -168,14 +168,14 @@ if [ "$out" = "50000 50000 9" ]; then echo "runs     scope_keep"; else echo "FAI
 out=$("$RIS" run test/ris/in_place.ri 2>&1)
 if [ "$out" = $'<li>item n0</li><li>item n1</li><li>item n2</li>\n<li>item n9</li>\nin place: true 1' ]; then echo "runs     in_place"; else echo "FAILED   in_place: $out"; status=1; fi
 out=$("$RIS" run test/ris/array_api.ri 2>&1)
-if grep -qF $'3 7 31 false\ntrue 2 \n2 true true\nDeploy is green\ntrue\n4 12\nHi all\n2 2 Hi all\n3 Deploy is green\n1 Ship it\n0 Morning!\n0 Hi all\nMorning!\n3, 7, 12, 31, 44\n3 6 31\n1 16 17 40 820\n31 3\n3 0 0\ntrue true true' <<<"$out" && grep -qF "first of an empty array" <<<"$out"; then echo "runs     array_api"; else echo "FAILED   array_api: $out"; status=1; fi
+if grep -qF $'3 7 31 false\ntrue 2 \n2 true true\nDeploy is green\ntrue\n36 12\nHi all\n2 2 Hi all\n7 Morning!\n7 Ship it\n12 Deploy is green\n31 Hi all\nMorning!\n3, 7, 12, 31, 44\n3 6 31\n1 16 17 40 820\n31 3\n3 0 0\ntrue true true' <<<"$out" && grep -qF "first of an empty array" <<<"$out"; then echo "runs     array_api"; else echo "FAILED   array_api: $out"; status=1; fi
 out=$("$RIS" run test/ris/view.ri 2>&1)
 if grep -qF $'4 edges, last names 3, reads -1\nlevels 10 dist 1 2 4' <<<"$out" && grep -qF "index 9 out of range for 4 elements" <<<"$out"; then echo "runs     view"; else echo "FAILED   view: $out"; status=1; fi
 out=$("$RIS" run test/ris/link_wide.ri 2>&1)
 if grep -qF "link 255 does not fit 1 bytes" <<<"$out"; then echo "runs     link_wide"; else echo "FAILED   link_wide: $out"; status=1; fi
 
 out=$("$RIS" run samples/ris/chat.ri 2>&1)
-if [ "$(tail -3 <<<"$out")" = $'403 user 99 is not in the room\n400 bad request\nkept 3 messages' ] && grep -qF "200 12: Deploy is green | 7: Morning! | 7: Ship it (members 7, 12, 31)" <<<"$out"; then echo "runs     samples/ris/chat"; else echo "FAILED   samples/ris/chat: $out"; status=1; fi
+if [ "$(tail -3 <<<"$out")" = $'403 user 99 is not in the room\n400 bad request\nkept 3 messages' ] && grep -qF "200 7: Ship it | 12: Deploy is green | 7: Morning! (members 7, 12, 31)" <<<"$out"; then echo "runs     samples/ris/chat"; else echo "FAILED   samples/ris/chat: $out"; status=1; fi
 out=$("$RIS" run samples/ris/request.ri 2>&1)
 if [ "$out" = $'200 OK Hello\n200 OK {"id":42,"name":"alice"}\n404 Not Found \n405 Method Not Allowed \n400 Bad Request' ]; then echo "runs     samples/ris/request"; else echo "FAILED   samples/ris/request: $out"; status=1; fi
 # The web sample serves until killed: port 0, read back from its banner.
