@@ -85,7 +85,6 @@ module std/sse
 import std/http::{HTTP, Response, BodyWriter, HTTPError}
 import std/socket::{SocketError}
 import std/mime::{MIME}
-import std/unicode::{Unicode}
 
 # What the other end did that fails an event stream (§9.2.3), as a value:
 # an answer that is not a 200, one that is not `text/event-stream`, or a
@@ -129,28 +128,22 @@ end
 # set at each blank line; `retry` the reconnection time the stream set,
 # nil until it sets one; `dispatched` the events yielded so far.
 pub class EventParser
-  # The largest reconnection time kept, in milliseconds: what `sleep`
-  # takes.
   MAX_RETRY = 2147483647
-
   getter last_event_id : String
   getter retry : Int32?
   getter dispatched : Int64
   @id_buffer : String
   @type : String
-  @data : String::Builder
-  @line : String::Builder
+  @data : String
+  @line : String
   @after_cr : Bool
   @first : Bool
 
-  # A parser for a stream whose last event ID is *last_event_id* so far:
-  # a reconnection's, which carries the one before it (see the module's
-  # header for why).
   def initialize(@last_event_id : String = "")
     @id_buffer = @last_event_id
     @type = ""
-    @data = String::Builder.new
-    @line = String::Builder.new
+    @data = ""
+    @line = ""
     @after_cr = false
     @first = true
     @retry = nil
@@ -158,13 +151,179 @@ pub class EventParser
   end
 
   def feed(text : String, & : Event -> Nil) : Nil
+    tape do
+      parser = TapeEventParser.new(@last_event_id.as_tape)
+      parser.restore(@id_buffer.as_tape, @type.as_tape,
+        @data.as_tape, @line.as_tape, @after_cr, @first,
+        @retry, @dispatched)
+      parser.feed(text.as_tape) do |event|
+        copy_state(parser)
+        yield event.to_heap
+      end
+      copy_state(parser)
+    end
+  end
+
+  private def copy_state(parser : TapeEventParser) : Nil
+    @last_event_id = parser.last_event_id.to_heap
+    @id_buffer = parser.id_buffer.to_heap
+    @type = parser.type.to_heap
+    @data = parser.data_buffer.to_heap
+    @line = parser.line_buffer.to_heap
+    @after_cr = parser.after_cr
+    @first = parser.first
+    @retry = parser.retry
+    @dispatched = parser.dispatched
+  end
+
+  def finish : Nil
+    @line = ""
+    @data = ""
+    @type = ""
+    @after_cr = false
+  end
+end
+
+@[OnTape]
+pub struct TapeEvent
+  getter event : Tape::String
+  getter data : Tape::String
+  getter id : Tape::String
+
+  def initialize(@event : Tape::String, @data : Tape::String,
+                 @id : Tape::String)
+  end
+
+  def to_heap : Event
+    Event.new(@event.to_heap, @data.to_heap, @id.to_heap)
+  end
+end
+
+@[OnTape]
+pub struct TapeEventParser
+  @last_event_id : Pointer(Tape::String)
+
+  def last_event_id : Tape::String
+    @last_event_id.value
+  end
+
+  @retry : Pointer(Int32?)
+
+  def retry : Int32?
+    @retry.value
+  end
+
+  @dispatched : Pointer(Int64)
+
+  def dispatched : Int64
+    @dispatched.value
+  end
+
+  @id_buffer : Pointer(Tape::String)
+
+  def id_buffer : Tape::String
+    @id_buffer.value
+  end
+
+  @type : Pointer(Tape::String)
+
+  def type : Tape::String
+    @type.value
+  end
+
+  @data : Pointer(Tape::String::Writer)
+
+  def data : Tape::String::Writer
+    @data.value
+  end
+
+  @line : Pointer(Tape::String::Writer)
+
+  def line : Tape::String::Writer
+    @line.value
+  end
+
+  @after_cr : Pointer(Bool)
+
+  def after_cr : Bool
+    @after_cr.value
+  end
+
+  @first : Pointer(Bool)
+
+  def first : Bool
+    @first.value
+  end
+
+  # The largest reconnection time kept, in milliseconds: what `sleep`
+  # takes.
+  MAX_RETRY = 2147483647
+
+
+  # A parser for a stream whose last event ID is *last_event_id* so far:
+  # a reconnection's, which carries the one before it (see the module's
+  # header for why).
+  def initialize(last_event_id : Tape::String = "".as_tape)
+    @last_event_id = Pointer(Tape::String).new(
+      IyiRegion.tape_bytes(sizeof(Tape::String).to_u64))
+    @retry = Pointer(Int32?).new(
+      IyiRegion.tape_bytes(sizeof(Int32?).to_u64))
+    @dispatched = Pointer(Int64).new(
+      IyiRegion.tape_bytes(sizeof(Int64).to_u64))
+    @id_buffer = Pointer(Tape::String).new(
+      IyiRegion.tape_bytes(sizeof(Tape::String).to_u64))
+    @type = Pointer(Tape::String).new(
+      IyiRegion.tape_bytes(sizeof(Tape::String).to_u64))
+    @data = Pointer(Tape::String::Writer).new(
+      IyiRegion.tape_bytes(sizeof(Tape::String::Writer).to_u64))
+    @line = Pointer(Tape::String::Writer).new(
+      IyiRegion.tape_bytes(sizeof(Tape::String::Writer).to_u64))
+    @after_cr = Pointer(Bool).new(
+      IyiRegion.tape_bytes(sizeof(Bool).to_u64))
+    @first = Pointer(Bool).new(
+      IyiRegion.tape_bytes(sizeof(Bool).to_u64))
+    @last_event_id.value = last_event_id
+    @id_buffer.value = @last_event_id.value
+    @type.value = "".as_tape
+    @data.value = Tape::String::Writer.new(64)
+    @line.value = Tape::String::Writer.new(64)
+    @after_cr.value = false
+    @first.value = true
+    @retry.value = nil
+    @dispatched.value = 0_i64
+  end
+
+
+  def data_buffer : Tape::String
+    @data.value.finish
+  end
+
+  def line_buffer : Tape::String
+    @line.value.finish
+  end
+
+  def restore(id : Tape::String, type : Tape::String,
+              data : Tape::String, line : Tape::String,
+              after_cr : Bool, first : Bool, retry : Int32?,
+              dispatched : Int64) : Nil
+    @id_buffer.value = id
+    @type.value = type
+    @data.value << data
+    @line.value << line
+    @after_cr.value = after_cr
+    @first.value = first
+    @retry.value = retry
+    @dispatched.value = dispatched
+  end
+
+  def feed(text : Tape::String, & : TapeEvent -> Nil) : Nil
     p = text.to_unsafe
     n = text.bytesize
     i = 0
     # A CR that ended the last piece was a line's end already; an LF that
     # starts this one is the rest of that CRLF, not a blank line.
-    if @after_cr && n > 0
-      @after_cr = false
+    if @after_cr.value && n > 0
+      @after_cr.value = false
       i = 1 if p[0] == 10_u8
     end
     start = i
@@ -172,17 +331,17 @@ pub class EventParser
       c = p[i]
       if c == 10_u8 || c == 13_u8
         line = text[start, i - start]
-        if @line.bytesize > 0
-          @line << line
-          line = @line.to_s
-          @line = String::Builder.new
+        if @line.value.length > 0
+          @line.value << line
+          line = @line.value.finish
+          @line.value = Tape::String::Writer.new(64)
         end
         i = i + 1
         if c == 13_u8
           if i < n
             i = i + 1 if p[i] == 10_u8
           else
-            @after_cr = true
+            @after_cr.value = true
           end
         end
         start = i
@@ -193,48 +352,50 @@ pub class EventParser
         i = i + 1
       end
     end
-    @line.write(p + start, n - start) if start < n
+    @line.value << text[start, n - start] if start < n
   end
 
   # The end of the stream: a line or an event not yet ended is discarded,
   # not dispatched. The last event ID and the reconnection time stay.
   def finish : Nil
-    @line = String::Builder.new
-    @data = String::Builder.new
-    @type = ""
-    @after_cr = false
+    @line.value = Tape::String::Writer.new(64)
+    @data.value = Tape::String::Writer.new(64)
+    @type.value = "".as_tape
+    @after_cr.value = false
   end
 
   # One line, its end taken off: the event it dispatches, if it does.
-  private def take(bytes : String) : Event?
-    line = Unicode.clean(bytes)
-    if @first
-      @first = false
+  private def take(bytes : Tape::String) : TapeEvent?
+    line = SSE.clean(bytes)
+    if @first.value
+      @first.value = false
       # The decoder's one BOM (the Encoding Standard's UTF-8 decode); a
       # second is the first character of the line.
-      if line.bytesize >= 3 && line.to_unsafe[0] == 0xEF_u8 && line.to_unsafe[1] == 0xBB_u8 && line.to_unsafe[2] == 0xBF_u8
+      if line.bytesize >= 3 && line[0] == 0xEF_u8 &&
+          line[1] == 0xBB_u8 && line[2] == 0xBF_u8
         line = line[3, line.bytesize - 3]
       end
     end
     return dispatch if line.bytesize == 0
     return nil if line.to_unsafe[0] == 58_u8
     field = line
-    value = ""
+    value = "".as_tape
     if colon = line.index(':')
       field = line[0, colon]
       value = line[colon + 1, line.bytesize - colon - 1]
-      value = value[1, value.bytesize - 1] if value.bytesize > 0 && value.to_unsafe[0] == 32_u8
+      if !value.empty? && value[0] == 32_u8
+        value = value[1, value.bytesize - 1]
+      end
     end
-    case field
-    when "event"
-      @type = value
-    when "data"
-      @data << value << '\n'
-    when "id"
-      @id_buffer = value unless value.includes?("\0")
-    when "retry"
-      if ms = EventParser.digits(value)
-        @retry = ms
+    if field == "event"
+      @type.value = value
+    elsif field == "data"
+      @data.value << value << '\n'
+    elsif field == "id"
+      @id_buffer.value = value unless value.includes?('\0')
+    elsif field == "retry"
+      if ms = TapeEventParser.digits(value)
+        @retry.value = ms
       end
     end
     nil
@@ -242,24 +403,25 @@ pub class EventParser
 
   # A blank line: the last event ID is the buffer's whether or not an
   # event goes, and an event goes when it has data.
-  private def dispatch : Event?
-    @last_event_id = @id_buffer
-    if @data.bytesize == 0
-      @type = ""
+  private def dispatch : TapeEvent?
+    @last_event_id.value = @id_buffer.value
+    if @data.value.length == 0
+      @type.value = "".as_tape
       return nil
     end
-    data = @data.to_s
-    data = data[0, data.bytesize - 1] if data.ends_with?("\n")
-    @data = String::Builder.new
-    event = Event.new(@type.bytesize == 0 ? "message" : @type, data, @last_event_id)
-    @type = ""
-    @dispatched = @dispatched + 1_i64
+    data = @data.value.finish
+    data = data[0, data.bytesize - 1] if !data.empty? && data[-1] == 10_u8
+    @data.value = Tape::String::Writer.new(64)
+    kind = @type.value.empty? ? "message".as_tape : @type.value
+    event = TapeEvent.new(kind, data, @last_event_id.value)
+    @type.value = "".as_tape
+    @dispatched.value = @dispatched.value + 1_i64
     event
   end
 
   # A `retry` value: ASCII digits and nothing else, base ten, saturating
   # at `MAX_RETRY`; nil for anything else, the empty value included.
-  protected def self.digits(text : String) : Int32?
+  def self.digits(text : Tape::String) : Int32?
     return nil if text.bytesize == 0
     p = text.to_unsafe
     value = 0_i64
@@ -297,42 +459,11 @@ pub class EventWriter
   # then the blank line that dispatches it. An empty *data* is an event
   # whose data is empty; an empty *id* resets the client's last event ID.
   def send(data : String, event : String? = nil, id : String? = nil, retry : Int32? = nil) : Nil | Cancelled | SocketError
-    text = String::Builder.new
-    if kind = event
-      raise "SSE: an event type cannot hold a line break: #{kind.inspect}" if HTTP.has_break?(kind)
-      EventWriter.utf8(kind, "an event type")
-      text << "event: " << kind << '\n'
-    end
-    if mark = id
-      raise "SSE: an id cannot hold a line break or a NUL: #{mark.inspect}" if HTTP.has_break?(mark) || mark.includes?("\0")
-      EventWriter.utf8(mark, "an id")
-      text << "id: " << mark << '\n'
-    end
-    if ms = retry
-      raise "SSE: a retry is 0 or more milliseconds, not #{ms}" if ms < 0
-      text << "retry: " << ms << '\n'
-    end
-    EventWriter.utf8(data, "the data")
-    EventWriter.lines(data).each do |line|
-      text << "data:"
-      text << ' ' << line if line.bytesize > 0
-      text << '\n'
-    end
-    text << '\n'
-    put(text.to_s)
+    put(SSE.encode(data, event, id, retry))
   end
 
-  # A comment, a `:` line per line of *text*: read past by every client,
-  # and a write that finds a client gone.
   def comment(text : String = "") : Nil | Cancelled | SocketError
-    EventWriter.utf8(text, "a comment")
-    out_text = String::Builder.new
-    EventWriter.lines(text).each do |line|
-      out_text << ':'
-      out_text << ' ' << line if line.bytesize > 0
-      out_text << '\n'
-    end
-    put(out_text.to_s)
+    put(SSE.comment(text))
   end
 
   private def put(text : String) : Nil | Cancelled | SocketError
@@ -344,35 +475,181 @@ pub class EventWriter
     got
   end
 
-  protected def self.utf8(text : String, what : String) : Nil
-    raise "SSE: #{what} is not UTF-8: #{text.inspect}" unless Unicode.valid?(text)
-  end
 
-  # *text* cut at each CRLF, CR and LF: one line for a text without one,
-  # an empty last line for a text that ends with one.
-  protected def self.lines(text : String) : Array(String)
-    lines = [] of String
-    p = text.to_unsafe
-    n = text.bytesize
-    start = 0
-    i = 0
-    while i < n
-      c = p[i]
-      if c == 10_u8 || c == 13_u8
-        lines << text[start, i - start]
-        i = i + 1
-        i = i + 1 if c == 13_u8 && i < n && p[i] == 10_u8
-        start = i
-      else
-        i = i + 1
-      end
-    end
-    lines << text[start, n - start]
-    lines
-  end
 end
 
 pub struct SSE
+  def self.encode(data : String, event : String? = nil,
+                  id : String? = nil, retry : Int32? = nil) : String
+    result = ""
+    tape do
+      kind = event ? event.as_tape : nil
+      mark = id ? id.as_tape : nil
+      result = encode(data.as_tape, kind, mark, retry).to_heap
+    end
+    result
+  end
+
+  def self.encode(data : Tape::String, event : Tape::String? = nil,
+                  id : Tape::String? = nil,
+                  retry : Int32? = nil) : Tape::String
+    Tape::String.build { |w| encode(data, w, event, id, retry) }
+  end
+
+  def self.encode(data : Tape::String, writer : Tape::String::Writer,
+                  event : Tape::String? = nil, id : Tape::String? = nil,
+                  retry : Int32? = nil) : Nil
+    # Validate every field before changing the caller's writer.
+    if kind = event
+      utf8(kind, "an event type")
+      if breaks?(kind)
+        raise "SSE: an event type cannot hold a line break: " \
+          "#{kind.to_heap.inspect}"
+      end
+    end
+    if mark = id
+      utf8(mark, "an id")
+      if breaks?(mark) || mark.includes?('\0')
+        raise "SSE: an id cannot hold a line break or a NUL: " \
+          "#{mark.to_heap.inspect}"
+      end
+    end
+    if ms = retry
+      raise "SSE: a retry is 0 or more milliseconds, not #{ms}" if ms < 0
+    end
+    utf8(data, "the data")
+    writer << "event: " << kind << '\n' if kind = event
+    writer << "id: " << mark << '\n' if mark = id
+    writer << "retry: " << ms << '\n' if ms = retry
+    lines(data) do |line|
+      writer << "data:"
+      writer << ' ' << line unless line.empty?
+      writer << '\n'
+    end
+    writer << '\n'
+  end
+
+  def self.comment(text : String = "") : String
+    result = ""
+    tape do
+      result = comment(text.as_tape).to_heap
+    end
+    result
+  end
+
+  def self.comment(text : Tape::String) : Tape::String
+    Tape::String.build { |w| comment(text, w) }
+  end
+
+  def self.comment(text : Tape::String,
+                   writer : Tape::String::Writer) : Nil
+    utf8(text, "a comment")
+    lines(text) do |line|
+      writer << ':'
+      writer << ' ' << line unless line.empty?
+      writer << '\n'
+    end
+  end
+
+  private def self.breaks?(text : Tape::String) : Bool
+    text.includes?('\n') || text.includes?('\r')
+  end
+
+  private def self.utf8(text : Tape::String, what : String) : Nil
+    at = 0
+    while at < text.bytesize
+      width = sequence_at(text, text.bytesize, at)
+      if width < 0
+        raise "SSE: #{what} is not UTF-8: #{text.to_heap.inspect}"
+      end
+      at += width
+    end
+  end
+
+  private def self.lines(text : Tape::String,
+                         & : Tape::String -> Nil) : Nil
+    start = 0
+    at = 0
+    while at < text.bytesize
+      byte = text[at]
+      if byte == 10_u8 || byte == 13_u8
+        yield text[start, at - start]
+        at += 1
+        if byte == 13_u8 && at < text.bytesize && text[at] == 10_u8
+          at += 1
+        end
+        start = at
+      else
+        at += 1
+      end
+    end
+    yield text[start, text.bytesize - start]
+  end
+
+  # UTF-8 replacement uses the Encoding Standard's maximal subpart.
+  def self.clean(bytes : Tape::String) : Tape::String
+    at = 0
+    while at < bytes.bytesize
+      length = sequence_at(bytes, bytes.bytesize, at)
+      break if length < 0
+      at += length
+    end
+    return bytes if at == bytes.bytesize
+    writer = Tape::String::Writer.new(bytes.bytesize)
+    writer << bytes[0, at]
+    while at < bytes.bytesize
+      length = sequence_at(bytes, bytes.bytesize, at)
+      if length < 0
+        writer << "\uFFFD"
+        at -= length
+      else
+        writer << bytes[at, length]
+        at += length
+      end
+    end
+    writer.finish
+  end
+
+  private def self.sequence_at(bytes : Tape::String,
+                               size : Int32, at : Int32) : Int32
+    lead = bytes[at]
+    return 1 if lead < 0x80_u8
+    need = 0
+    low = 0x80_u8
+    high = 0xBF_u8
+    if lead >= 0xC2_u8 && lead <= 0xDF_u8
+      need = 1
+    elsif lead == 0xE0_u8
+      need = 2
+      low = 0xA0_u8
+    elsif lead == 0xED_u8
+      need = 2
+      high = 0x9F_u8
+    elsif lead >= 0xE1_u8 && lead <= 0xEF_u8
+      need = 2
+    elsif lead == 0xF0_u8
+      need = 3
+      low = 0x90_u8
+    elsif lead == 0xF4_u8
+      need = 3
+      high = 0x8F_u8
+    elsif lead >= 0xF1_u8 && lead <= 0xF3_u8
+      need = 3
+    else
+      return -1
+    end
+    taken = 1
+    while taken <= need
+      return 0 - taken if at + taken >= size
+      byte = bytes[at + taken]
+      return 0 - taken if byte < low || byte > high
+      low = 0x80_u8
+      high = 0xBF_u8
+      taken = taken + 1
+    end
+    taken
+  end
+
   # The reconnection time a client starts with, in milliseconds.
   RETRY = 3000
   # How many reconnections a client makes after a connection that brought

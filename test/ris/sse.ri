@@ -1,0 +1,43 @@
+module test/sse_tape
+
+import std/sse::{SSE, EventParser, TapeEventParser}
+
+kept = ""
+tape do
+  writer = Tape::String::Writer.new(1)
+  writer << "prefix:"
+  SSE.encode("a\r\nb\r".as_tape, writer,
+    "update".as_tape, "7".as_tape, 0)
+  encoded = SSE.encode("a\r\nb\r".as_tape,
+    "update".as_tape, "7".as_tape, 0)
+  expected = "event: update\nid: 7\nretry: 0\ndata: a\ndata: b\ndata:\n\n"
+  exit 11 unless encoded == expected
+  prefixed = Tape::String.build { |w| w << "prefix:" << encoded }
+  exit 12 unless writer.finish == prefixed
+  exit 13 unless SSE.comment("a\r\nb\r".as_tape) == ": a\n: b\n:\n"
+  parser = TapeEventParser.new
+  count = 0
+  parser.feed("\uFEFFid: 7\r".as_tape) { |_| exit 1 }
+  parser.feed("\ndata: café\r\ndata: next\r\n\r".as_tape) do |event|
+    count += 1
+    exit 2 unless event.event == "message" && event.id == "7"
+    exit 3 unless event.data == "café\nnext"
+    kept = event.to_heap.data
+  end
+  exit 4 unless count == 1 && parser.dispatched == 1_i64
+  parser.feed("\nretry: 999999999999\n\n".as_tape) { |_| exit 5 }
+  exit 6 unless parser.retry == 2147483647
+  parser.finish
+end
+exit 7 unless kept == "café\nnext"
+parser = EventParser.new
+count = 0
+parser.feed("id: 7\r") { |_| exit 8 }
+parser.feed("\ndata: café\ndata: next\n\n") do |event|
+  count += 1
+  exit 9 unless event.data == kept && event.id == "7"
+end
+exit 10 unless count == 1
+exit 14 unless SSE.encode("hi") == "data: hi\n\n"
+exit 15 unless SSE.comment("hi") == ": hi\n"
+puts "PASS: sse tape and heap APIs"
