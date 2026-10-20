@@ -1,0 +1,94 @@
+# report: an access log's daily report, written with tape by hand.
+#
+#   ./bin/ris run samples/ris/report.ri
+#
+# Each day's log is read on its own tape: its lines, the parsed hits, the
+# filtered and sorted arrays and the report text all go on it, and all
+# are freed at once when `tape do ... end` ends. Only what must outlive
+# the day - its slowest path - is copied to the heap, in one marked def.
+#
+# Moving a tape value out of its block is refused by the compiler:
+# `kept = hits` inside the block, with `kept` from outside, does not build.
+
+module samples/report
+
+# One log line, "GET /users/1 200 12": method, path, status, milliseconds.
+# The method and path are views into the line, not copies.
+@[OnTape]
+struct Hit
+  getter method : Tape::String
+  getter path : Tape::String
+  getter status : Int32
+  getter ms : Int32
+
+  def initialize(@method, @path, @status, @ms)
+  end
+end
+
+# A number from its digits.
+def number(text : Tape::String) : Int32
+  value = 0
+  text.each_byte { |byte| value = value * 10 + (byte - '0'.ord.to_u8).to_i32 }
+  value
+end
+
+# The line cut at its spaces into a Hit; every part is a view.
+def parse(line : Tape::String) : Hit
+  cuts = Tape::Array(Int32).new
+  index = 0
+  while index < line.bytesize
+    cuts << index if line[index] == ' '.ord.to_u8
+    index += 1
+  end
+  method = line[0, cuts[0]]
+  path = line[cuts[0] + 1, cuts[1] - cuts[0] - 1]
+  status = line[cuts[1] + 1, cuts[2] - cuts[1] - 1]
+  ms = line[cuts[2] + 1, line.bytesize - cuts[2] - 1]
+  Hit.new(method, path, number(status), number(ms))
+end
+
+# The one copy off the tape: the slowest path is kept after its day.
+@[TapeToHeap]
+def keep(path : Tape::String) : String
+  path.to_s
+end
+
+DAYS = [
+  "GET /users/1 200 12\nGET /users/2 200 640\nPOST /login 500 30\n" \
+  "GET /users/1/status 200 980\n",
+  "GET / 200 4\nGET /search 200 1210\nGET /users/9 404 3\n",
+]
+
+slowest = [] of String # on the heap: it lives past every day
+
+DAYS.each_with_index do |log, day|
+  tape do
+    hits = Tape::Array(Hit).new
+    Tape::String.view(log).each_line { |line| hits << parse(line) }
+
+    errors = hits.count { |h| h.status >= 500 }
+    slow = hits.select { |h| h.ms > 500 }
+    top = slow.sorted_by { |h| -h.ms }
+
+    report = Tape::String::Writer.new(256)
+    report.append("day ")
+    report.append_value(day + 1)
+    report.append(": ")
+    report.append_value(hits.size)
+    report.append(" hits, ")
+    report.append_value(errors)
+    report.append(" errors, slow:")
+    top.each do |h|
+      report.append(" ")
+      report.append(h.path)
+      report.append(" (")
+      report.append_value(h.ms)
+      report.append(" ms)")
+    end
+    puts report.finish
+
+    slowest << keep(top.first.path) unless top.empty?
+  end
+end
+
+puts "slowest each day: #{slowest.join(", ")}"
