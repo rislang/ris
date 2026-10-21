@@ -428,7 +428,7 @@ module Tape
         grow(count.to_u64)
         cursor = @state.value
       end
-      Pointer(UInt8).new(cursor).copy_from(bytes, count)
+      LibTapeCopy.memcpy(Pointer(UInt8).new(cursor), bytes, count.to_u64, false) if count > 0
       @state.value = cursor &+ count.to_u64
     end
 
@@ -1338,6 +1338,13 @@ class String
   def to_heap : String
     self
   end
+end
+
+# The intrinsic a writer appends with: the platform's `memcpy`, at its
+# speed, where a loop is vectorised only to SSE2. What is appended never
+# overlaps where it goes, past the writer's cursor.
+lib LibTapeCopy
+  fun memcpy = "llvm.memcpy.p0.p0.i64"(destination : Pointer(UInt8), source : Pointer(UInt8), count : UInt64, volatile : Bool) : Nil
 end
 
 # Goose's every scope freeing: outside the prelude, the normalizer begins
