@@ -40,6 +40,13 @@ class Iyi::TapeScopeChecker
               TapeScopeRuntime.runtime?(node.location)
     body = node.body
     return if body.is_a?(Nop) || body.is_a?(Primitive)
+    # A getter's field, `self` or a literal puts nothing on the tape, and a
+    # struct's getter and `self` answer the value in place only unwrapped.
+    return if body.is_a?(InstanceVar) || body.is_a?(Var) ||
+              body.is_a?(ClassVar) || body.is_a?(Path) ||
+              body.is_a?(NumberLiteral) || body.is_a?(BoolLiteral) ||
+              body.is_a?(NilLiteral) || body.is_a?(SymbolLiteral) ||
+              body.is_a?(CharLiteral) || body.is_a?(StringLiteral)
     # A body read from an artifact is marked already, with its build's
     # temporaries: a second mark's fresh ones could share their names.
     return if parts(body)
@@ -49,8 +56,10 @@ class Iyi::TapeScopeChecker
     # the declarations inside an expression.
     return if node.is_a?(Block) && declares?(body)
     on = BoolLiteral.new(false).at(body)
-    mark = program.new_temp_var.at(body)
-    value = program.new_temp_var.at(body)
+    # Named by the body's file: an artifact's def keeps its build's names,
+    # and a consumer's block inlined into it must not take them again.
+    mark = program.new_temp_var(node).at(body)
+    value = program.new_temp_var(node).at(body)
     node.body = Expressions.new([
       Assign.new(mark, Call.new(nil, MARK, on, global: true).at(body)).at(body),
       Assign.new(value, body).at(body),
