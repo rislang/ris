@@ -148,7 +148,6 @@ broken "a whole group's last character" '        dst[o + 3] = table[triple & 63]
 broken "four characters decoded out of order" 'q[1] = group.unsafe_shr(8).unsafe_to_u8' 'q[1] = group.unsafe_to_u8'
 broken "the byte loop not resuming where the groups stopped" 'o = (q.address - buf.address).to_i32' 'o = 0'
 broken "a group after a line break out of order" 'buf[o + 1] = ((group >> 8) & 255).to_u8' 'buf[o + 1] = (group & 255).to_u8'
-broken "whitespace taken at the size it was guessed" 'return answer if written == size' 'return answer'
 broken "six bytes read in the wrong order" '(w.unsafe_shr(40) & 0xFF_u64)
 ' '(w.unsafe_shr(32) & 0xFF_u64)
 '

@@ -339,7 +339,9 @@ module Tape
     # source is alive, for example when retaining text in a cache/task.
     # The source is unchanged and remains valid until its scope ends.
     def to_s : ::String
-      ::String.new(@bytesize) { |buffer| buffer.copy_from(@ptr, @bytesize) }
+      ::String.new(@bytesize) do |buffer|
+        LibTapeCopy.memcpy(buffer, @ptr, @bytesize.to_u64, false) if @bytesize > 0
+      end
     end
 
     # The copy to keep after the tape ends, by its own name so it is seen

@@ -85,9 +85,22 @@ class Iyi::TapeScopeChecker
   end
 
   @seen = Set(UInt64).new
+  @decided = [] of Expressions
 
   def run(node : ASTNode) : Nil
     check_scope(node, false)
+    # A mark left off frees nothing, but its two calls still run each
+    # round in an unoptimised build: the body is left as it was written.
+    @decided.each do |wrapper|
+      next unless parts = TapeScopeChecker.parts(wrapper)
+      flag, inner = parts
+      wrapper.expressions = [inner] of ASTNode unless flag.value
+    end
+  end
+
+  def decide(body : ASTNode, flag : BoolLiteral, value : Bool) : Nil
+    flag.value = value
+    @decided << body if body.is_a?(Expressions)
   end
 
   def reach(a_def : Def) : Nil
@@ -99,7 +112,7 @@ class Iyi::TapeScopeChecker
     # The def's own scope: what it made, unless it is the result.
     if parts = TapeScopeChecker.parts(a_def.body)
       flag, inner = parts
-      flag.value = safe?(inner, a_def.type?, a_def.body, owner_tape, params, [] of String)
+      decide(a_def.body, flag, safe?(inner, a_def.type?, a_def.body, owner_tape, params, [] of String))
     end
   end
 
@@ -295,7 +308,7 @@ class Iyi::TapeScopeChecker
       parts = TapeScopeChecker.parts(body)
       return unless parts
       flag, inner = parts
-      flag.value = @checker.safe?(inner, value_type, @scope, @owner_tape, @params, block_args)
+      @checker.decide(body, flag, @checker.safe?(inner, value_type, @scope, @owner_tape, @params, block_args))
     end
 
     def visit(node : Def)

@@ -346,10 +346,10 @@ if [ -z "$PY" ]; then
   echo "  no python on this machine, so the broken-module proofs are unmeasured"
 else
   breaks "groups counted from the left" groups \
-    '      first = group if first == 0
+    '    first = group if first == 0
 ' '' '1e20 written out is'
   breaks "a zero that keeps its sign" signed_zero \
-    'text = (negative && !zero ? "-" : "")' 'text = (negative ? "-" : "")' \
+    "writer << '-' if negative && !zero" "writer << '-' if negative" \
     'a value that prints as zero has no sign'
   breaks "a prefix below one truncated toward zero" truncated \
     'prefix = lead >= 0 ? (lead // 3) * 3 : 0 - ((2 - lead) // 3) * 3' 'prefix = (lead // 3) * 3' \
@@ -362,7 +362,7 @@ else
     else' '    else' \
     'a thousand is 1k'
   breaks "a float written without its point" pointless \
-    '    fraction = "0" if fraction.empty? && !only_significant
+    '    fraction = "0".as_tape if fraction.empty? && !only_significant
 ' '' '1e20 written out is 100,000,000,000,000,000,000'
   # 1023.5 KiB rounds at four digits to 1024, which is 0.9995 MiB; read at
   # the ones place it is "1000", and was 1 MiB.

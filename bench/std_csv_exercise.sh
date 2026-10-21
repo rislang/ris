@@ -341,10 +341,10 @@ if [ -z "$PY" ]; then
 elif ! "$PY" - <<PY
 from pathlib import Path
 src = Path("$REPO/src/std/csv.iyi").read_text()
-old = 'row << take(field, flen)'
+old = 'quoted ? take(field, size) : text[start, size]'
 if old not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/csv.iyi").write_text(src.replace(old, 'row << ""', 1))
+Path("$WORK/patched/std/csv.iyi").write_text(src.replace(old, 'text[start, 0]', 1))
 PY
 then
   echo "  the patch did not apply"
@@ -399,7 +399,7 @@ PY
   fi
 }
 broken "a lone CR dropped again" 'elsif b == 10_u8 || b == 13_u8' 'elsif b == 10_u8' "ASSERTION FAILED: a lone CR ends the line"
-broken "a blank line read as one empty field" 'row << take(field, flen) if row.size > 0 || flen > 0 || opened' 'row << take(field, flen)' "ASSERTION FAILED: a blank line is a row of no fields"
+broken "a blank line read as one empty field" 'if row.size > 0 || flen > 0 || opened' 'if true' "ASSERTION FAILED: a blank line is a row of no fields"
 broken "a last quoted empty field dropped" 'if flen > 0 || row.size > 0 || opened' 'if flen > 0 || row.size > 0' "ASSERTION FAILED: a last line of one quoted empty field"
 broken "a lone empty field written bare" 'io << "\"\"" if fields.size == 1 && fields[0].empty?' '' "ASSERTION FAILED: a row of one empty field is written quoted"
 broken "a last row of no fields left unended" "io << '\\n' if rows.size > 0 && rows[rows.size - 1].empty?" '' "ASSERTION FAILED: a last row of no fields round trips"
