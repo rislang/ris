@@ -3655,7 +3655,7 @@ describe Iyi::IyiMod do
         import packet::{Packet}
         tape do
           text = Packet.new.finish
-          puts text.to_s
+          puts text
         end
         IYI
       source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
