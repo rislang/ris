@@ -2876,6 +2876,7 @@ def exit(status : Int32 = 0) : NoReturn
     fiber.defers = node.next_node
     node.run
   end
+  IyiRegion.report_stats
   __iyi_flush_std
   __iyi_exit(status)
 end

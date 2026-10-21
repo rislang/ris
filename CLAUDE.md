@@ -48,6 +48,13 @@ with `ParsedHead`'s method, target and fields as views into *bytes*;
 `parse_request(text : String)` stays, on top of it. A web server keeps a
 request's bytes, temporaries and response on one tape per request.
 
+## Fast on the tape
+
+* Nothing frees before its block ends: refill a `Tape::Array` field with
+  `clear`, never a new one per call (the compiler warns).
+* Size growing values from the input up front; one that outgrows its
+  room behind another is copied off. `RIS_TAPE_STATS=1` counts both.
+
 ## Upstream
 
 * A change that does not need tape belongs in iyi: make it there first,

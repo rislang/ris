@@ -1,0 +1,16 @@
+# A value that outgrows its room while another follows it moves to a
+# region of its own (`a`, with `b` after it; `b` grows in place). That
+# region joins the spares when the tape ends, so a thousand scopes make
+# two mappings, not a thousand and one (RIS_TAPE_STATS counts them).
+1000.times do
+  tape do
+    a = Tape::Array(Int32).new(4)
+    b = Tape::Array(Int32).new(4)
+    i = 0
+    while i < 100
+      a << i
+      b << i
+      i += 1
+    end
+  end
+end

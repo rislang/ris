@@ -546,6 +546,12 @@ module Tape
       @state.value = (@state + 2_i64).value &+ length.to_u64
     end
 
+    # Empty, keeping its room, to write again: `truncate(0)`, so what was
+    # finished from it before is written over.
+    def clear : Nil
+      @state.value = (@state + 2_i64).value
+    end
+
     # Room for *total* bytes in all, so that writing up to them does not grow
     # the writer again: once a request's length is known, its bytes grow in
     # place even after other values have gone on the tape.
@@ -756,6 +762,14 @@ module Tape
 
     def pop? : T?
       empty? ? nil : pop
+    end
+
+    # Empty, keeping its room: the array to fill again in a loop. A new
+    # array each round instead stays on the tape until the block ends,
+    # every one of them (a tokenizer's queue, one per token: 110 MB for a
+    # 4.5 MB page).
+    def clear : Nil
+      (@state + 1_i64).value = 0_u64
     end
 
     # `first` on an empty array is a mistake, as with `Array#first`; the

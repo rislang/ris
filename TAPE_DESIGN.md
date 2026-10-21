@@ -18,7 +18,7 @@ the tape is beside it, where short-lived data is made and dropped together.
 * `local_tape do … end` owns a separate tape, released at its end, for
   temporaries to free before the outer block ends.
 * Tapes follow fibers across switches; spawned fibers have their own.
-  Each thread caches up to 64 spare mappings, with bounded warm pages.
+  Each thread caches up to 64 spare mappings, side regions too, warm.
 * Tape storage is not GC-managed, but used tape words are scanned as
   roots: a tape value can hold a reference to an ordinary heap object.
 
@@ -46,8 +46,8 @@ No tape value survives the block that owns its storage:
 
 ## Layout: a tape per growing value
 A container grows in place at the tape's end, else moves once to a region
-of its own and grows there. `Tape::Tree` is simdjson's document order:
-4.6 MB JSON, 20 parses, 725 ms; std/json's `Any` 1081.
+of its own; `RIS_TAPE_STATS=1` counts moves and mappings at exit. `clear`
+refills one. `Tape::Tree`, simdjson's order: 4.6 MB JSON ×20 in 725 ms.
 
 | median of 9, ris-bench | Goose | ris tape | ris heap |
 |---|---|---|---|

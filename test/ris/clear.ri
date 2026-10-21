@@ -1,0 +1,14 @@
+# `clear` empties an array or a writer and keeps its room: refilled in a
+# loop, nothing moves off the tape's end and no mapping is made per round.
+tape do
+  items = Tape::Array(Int32).new(8)
+  w = Tape::String::Writer.new(8)
+  3.times do |round|
+    items.clear
+    w.clear
+    (round + 2).times { |i| items << i; w << "x" }
+    puts "#{items.size} #{items[items.size - 1]} #{w.length}"
+  end
+  w << "end"
+  puts w
+end

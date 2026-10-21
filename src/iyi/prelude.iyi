@@ -3642,6 +3642,28 @@ require "./file"
       @@first_region : UInt64 = 0_u64
       @@registered : UInt64 = 0_u64
 
+      # What the tapes did, for `RIS_TAPE_STATS` (`report_stats`): counted
+      # on the slow paths only, per thread, and added to the totals under
+      # the runtime lock when a thread ends.
+      @[ThreadLocal]
+      @@scopes : UInt64 = 0_u64
+      @[ThreadLocal]
+      @@mapped : UInt64 = 0_u64
+      @[ThreadLocal]
+      @@unmapped : UInt64 = 0_u64
+      @[ThreadLocal]
+      @@moved : UInt64 = 0_u64
+      @[ThreadLocal]
+      @@moved_bytes : UInt64 = 0_u64
+      @[ThreadLocal]
+      @@grown : UInt64 = 0_u64
+      @@total_scopes : UInt64 = 0_u64
+      @@total_mapped : UInt64 = 0_u64
+      @@total_unmapped : UInt64 = 0_u64
+      @@total_moved : UInt64 = 0_u64
+      @@total_moved_bytes : UInt64 = 0_u64
+      @@total_grown : UInt64 = 0_u64
+
       # The running fiber's tape, or 0: `IyiScheduler.switch_to` swaps it
       # with the fiber's own slot.
       @[ThreadLocal]
@@ -3683,6 +3705,7 @@ require "./file"
       end
 
       def self.release_tape : Nil
+        @@scopes = @@scopes &+ 1_u64
         # The tape may have grown past its first mapping (`grow_onto`): the
         # running one is the newest, and each names the one before it.
         region = @@tape
@@ -3732,6 +3755,8 @@ require "./file"
         end
         capacity = bytes &* 4_u64
         capacity = SIDE_FIRST if capacity < SIDE_FIRST
+        @@moved = @@moved &+ 1_u64
+        @@moved_bytes = @@moved_bytes &+ used
         own = acquire(capacity)
         IyiHeap.write64(own &+ OFF_PARENT, IyiHeap.read64(region &+ OFF_SIDE))
         IyiHeap.write64(region &+ OFF_SIDE, own)
@@ -3742,7 +3767,13 @@ require "./file"
         moved
       end
 
-      SIDE_FIRST = 1048576_u64
+      # A side region is a first-size mapping, like a tape's own, so that
+      # it joins the spares when its tape ends and the next one that moves
+      # takes it warm. At 1 MiB it was unmapped every time: a parse whose
+      # node and attribute arrays outgrew their room made and unmapped two
+      # mappings each time, 30% of a 1 KiB fragment's parse. The pages
+      # past what a value writes are address space, never touched.
+      SIDE_FIRST = CAPACITY
 
       def self.acquire(capacity : UInt64) : UInt64
         spare = @@spare
@@ -3756,6 +3787,7 @@ require "./file"
         end
         length = mapping_length(capacity)
         region = __iyi_mmap(length).address
+        @@mapped = @@mapped &+ 1_u64
         IyiHeap.write64(region &+ OFF_CURSOR, region &+ DATA)
         IyiHeap.write64(region &+ OFF_LIMIT, region &+ length)
         IyiHeap.write64(region &+ OFF_MAP, length)
@@ -3788,13 +3820,47 @@ require "./file"
           @@spare = region
           @@spares = @@spares &+ 1_u64
         else
+          @@unmapped = @@unmapped &+ 1_u64
           unregister(region)
           __iyi_munmap(region, length)
         end
       end
 
+      # The thread's counts added to the totals, when the thread ends.
+      def self.add_stats : Nil
+        IyiRuntimeLock.lock
+        @@total_scopes = @@total_scopes &+ @@scopes
+        @@total_mapped = @@total_mapped &+ @@mapped
+        @@total_unmapped = @@total_unmapped &+ @@unmapped
+        @@total_moved = @@total_moved &+ @@moved
+        @@total_moved_bytes = @@total_moved_bytes &+ @@moved_bytes
+        @@total_grown = @@total_grown &+ @@grown
+        IyiRuntimeLock.unlock
+        @@scopes = 0_u64
+        @@mapped = 0_u64
+        @@unmapped = 0_u64
+        @@moved = 0_u64
+        @@moved_bytes = 0_u64
+        @@grown = 0_u64
+      end
+
+      # What the tapes did, on standard error, when `RIS_TAPE_STATS` is
+      # set: run as the program ends. A value moved off the tape's end is
+      # one that outgrew its room while something else followed it; a
+      # mapping made per scope is that, or a scope larger than a spare.
+      def self.report_stats : Nil
+        return unless Program.env("RIS_TAPE_STATS")
+        add_stats
+        STDERR.puts "ris tape: #{@@total_scopes} scopes, #{@@total_mapped} mappings made, " \
+                    "#{@@total_unmapped} unmapped, #{@@total_grown} tapes grown onto a new " \
+                    "mapping, #{@@total_moved} values moved off the tape's end " \
+                    "(#{@@total_moved_bytes} bytes copied)"
+        STDERR.flush
+      end
+
       # The thread's spares back to the kernel, when the thread ends.
       def self.drop_spares : Nil
+        add_stats
         region = @@spare
         @@spare = 0_u64
         @@spares = 0_u64
@@ -3864,6 +3930,8 @@ require "./file"
         capacity = need if capacity < need
         length = mapping_length(capacity)
         fresh = __iyi_mmap(length).address
+        @@mapped = @@mapped &+ 1_u64
+        @@grown = @@grown &+ 1_u64
         IyiHeap.write64(fresh &+ OFF_CURSOR, fresh &+ DATA)
         IyiHeap.write64(fresh &+ OFF_LIMIT, fresh &+ length)
         IyiHeap.write64(fresh &+ OFF_MAP, length)
@@ -10412,6 +10480,7 @@ fun main(argc : Int32, argv : UInt8**) : Int32
   # Named `test` cases keep going past a failure, so the program's own code
   # ends normally and the exit status is theirs to give (testing.iyi).
   status = IyiTestCases.verdict
+  IyiRegion.report_stats
   __iyi_flush_std
   {% if flag?(:win32) %}
     # Not back into the C runtime, whose `exit` is `ExitProcess`, for the
