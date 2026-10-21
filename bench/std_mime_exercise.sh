@@ -254,7 +254,8 @@ PY
 # The lookup lowercases before it probes; without that `index.HTML`
 # finds nothing.
 prove_broken "a case-sensitive lookup" "upper dotted" \
-  '    by_extension[lower(ext)]?' '    by_extension[ext]?'
+  '    ext = lower(ext)
+' ''
 # A backslash kept rather than undone in a quoted parameter.
 prove_broken "a quoted value keeping its backslashes" "quoted with escapes" \
   "        at = at + 1 if bytes[at] == '\\\\'.ord.to_u8
@@ -268,7 +269,7 @@ prove_broken "the first extension of a multi-dot name" "multi-dot by last" \
 prove_broken "a parameter without its equals sign accepted" 'refuses "text/html; charset"' \
   "      return nil if pos == name_start || pos >= size || bytes[pos] != '='.ord.to_u8" \
   "      return nil if pos == name_start
-      return {essence, params} if pos >= size"
+      return TapeMediaType.new(essence, params) if pos >= size"
 prove_broken "WOFF2 counted compressible" "font/woff2 not compressible" \
   '"font/ttf", "font/otf",' '"font/ttf", "font/otf", "font/woff2",'
 

@@ -397,7 +397,7 @@ prove_broken "an unclean path routed as it is" "routed GET any.example /a/../ind
 prove_broken "Allow without HEAD" "routed PATCH any.example /items/7" \
   'methods << "HEAD" if methods.includes?("GET") && !methods.includes?("HEAD")' ''
 prove_broken "wildcard values left encoded" "a pattern's wildcards" \
-  '      decoded = URI.decode?(segment)
+  '      decoded = Pattern.decode_piece(segment)
       return nil unless decoded
       pieces << decoded' '      pieces << segment'
 prove_broken "a wildcard name used twice" "the pattern \"/{id}/{id}\"" \

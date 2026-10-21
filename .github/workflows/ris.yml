@@ -120,7 +120,7 @@ jobs:
           cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/r/bin/ris" init hello "$RUNNER_TEMP/hello"
           cd "$RUNNER_TEMP/hello" && "$RUNNER_TEMP/r/bin/ris" run hello.ri
-          rm dist/SHA256SUMS
+          rm "$GITHUB_WORKSPACE/dist/SHA256SUMS"
 
       - uses: actions/upload-artifact@v5
         with:

@@ -150,7 +150,7 @@ if [ -n "$PY" ]; then
     'def <=>(other : SemanticVersion) : Int32' 'def <=>(other : self) : Int32' \
     'stack overflow'
   caught_at "a signed identifier read as a number" \
-    'if n && part.to_unsafe[0] >= 48_u8 && part.to_unsafe[0] <= 57_u8' 'if n' \
+    'if n && part[0] >= 48_u8 && part[0] <= 57_u8' 'if n' \
     'a signed identifier is alphanumeric'
   caught_at "numbers past Int32 compared as bytes" \
     'elsif digits?(x) || digits?(y)' 'elsif false' \

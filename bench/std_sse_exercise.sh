@@ -512,30 +512,34 @@ prove_broken "the LF of a CRLF split between pieces read as a blank line" "a CRL
   '      i = 1 if p[0] == 10_u8
 ' ''
 prove_broken "every leading space stripped" "one space stripped" \
-  'value = value[1, value.bytesize - 1] if value.bytesize > 0 && value.to_unsafe[0] == 32_u8' 'value = value.strip'
+  '      if !value.empty? && value[0] == 32_u8
+        value = value[1, value.bytesize - 1]' '      while !value.empty? && value[0] == 32_u8
+        value = value[1, value.bytesize - 1]'
 prove_broken "the data's last LF kept" "the introduction's three messages" \
-  '    data = data[0, data.bytesize - 1] if data.ends_with?("\n")
+  '    data = data[0, data.bytesize - 1] if !data.empty? && data[-1] == 10_u8
 ' ''
 prove_broken "an id with a NUL taken" "an id with a NUL is ignored" \
-  '@id_buffer = value unless value.includes?("\0")' '@id_buffer = value'
+  "@id_buffer.value = value unless value.includes?('\\0')" '@id_buffer.value = value'
 prove_broken "the last event ID set at the id field" "the last event ID is set at the blank line" \
-  '@id_buffer = value unless value.includes?("\0")' '@last_event_id = @id_buffer = value unless value.includes?("\0")'
+  "@id_buffer.value = value unless value.includes?('\\0')" "@last_event_id.value = @id_buffer.value = value unless value.includes?('\\0')"
 prove_broken "an empty retry read as 0" "retry: digits alone" \
   '    return nil if text.bytesize == 0
     p = text.to_unsafe' '    p = text.to_unsafe'
 prove_broken "the event type carried to the next event" "the type does not carry over" \
-  '    event = Event.new(@type.bytesize == 0 ? "message" : @type, data, @last_event_id)
-    @type = ""' '    event = Event.new(@type.bytesize == 0 ? "message" : @type, data, @last_event_id)'
+  '    event = TapeEvent.new(kind, data, @last_event_id.value)
+    @type.value = "".as_tape' '    event = TapeEvent.new(kind, data, @last_event_id.value)'
 prove_broken "a blank line without data dispatching" "the four blocks" \
-  '    if @data.bytesize == 0
-      @type = ""
+  '    if @data.value.length == 0
+      @type.value = "".as_tape
       return nil
     end
 ' ''
 prove_broken "ill-formed bytes passed through" "ill-formed bytes are U+FFFD" \
-  'line = Unicode.clean(bytes)' 'line = bytes'
+  'line = SSE.clean(bytes)' 'line = bytes'
 prove_broken "multi-line data written on one data: line" "the lines SSE.stream writes" \
-  'EventWriter.lines(data).each do |line|' '[data].each do |line|'
+  '      if byte == 10_u8 || byte == 13_u8
+        yield text[start, at - start]' '      if false
+        yield text[start, at - start]'
 prove_broken "a client gone not kept" "a client gone ends the stream's loop" \
   '    @fault = got
 ' ''

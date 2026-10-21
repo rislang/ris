@@ -293,13 +293,13 @@ prove_broken "a carriage return read as a letter" "space, tab, CR and LF are bla
 prove_broken "a form feed read as a blank" "form feed and vertical tab are not blanks" \
   ' || c == 13_u8' ' || c == 13_u8 || c == 12_u8'
 prove_broken "empty quoted words dropped" "two empty quotes are two empty words" \
-  'words << word.to_s if quoted || !word.empty?' 'words << word.to_s unless word.empty?'
+  'words << word.finish if quoted || word.length > 0' 'words << word.finish if word.length > 0'
 prove_broken "a backslash in double quotes taking any byte" 'inside double quotes a backslash takes only' \
-  'word.write_byte(92_u8) unless after == 34_u8 || after == 92_u8' 'word.write_byte(92_u8) if false'
+  'word.push(92_u8) unless after == 34_u8 || after == 92_u8' 'word.push(92_u8) if false'
 prove_broken "a backslash in double quotes taking \$ as POSIX does" 'inside double quotes a backslash takes only' \
   'unless after == 34_u8 || after == 92_u8' 'unless after == 34_u8 || after == 92_u8 || after == 36_u8'
 prove_broken "a backslash outside quotes kept" "quotes and escapes join into one word" \
-  '            word.write_byte(raw[i + 1])' '            word.write(raw + i, 2)'
+  '            word.push(raw[i + 1])' '            word.push(raw[i]); word.push(raw[i + 1])'
 prove_broken "a # inside a word left to it" "a # inside a word ends it with comments" \
   '          if comments && c == 35_u8' '          if false'
 prove_broken "a comment run to the end of the text" "comments run to the line feed" \
@@ -309,15 +309,16 @@ prove_broken "a final backslash in double quotes called unclosed" 'refused: the 
                 after' 'return unclosed(text, open) if i + 1 >= n
                 after'
 prove_broken "an offset past the quote" "refused: the offset for" \
-  'is never closed", at)' 'is never closed", at + 1)'
+  '"closed", at)' '"closed", at + 1)'
 prove_broken "an empty argument written as nothing" 'quote: ""' \
-  "return \"''\" if arg.empty?" 'return arg if arg.empty?'
+  "      writer << \"''\"
+" ''
 prove_broken "a colon quoted" 'quote: "a:b,c=d@e%f+g/h.i-j_k"' \
   'c <= 58_u8' 'c <= 57_u8'
 prove_broken "a backquote left bare" 'quote: "`"' \
   'c == 95_u8' 'c == 95_u8 || c == 96_u8'
 prove_broken "a single quote escaped with a backslash inside single quotes" "quote: \"it's\"" \
-  "io << \"'\\\"'\\\"'\"" "io << \"\\\\'\""
+  "writer << \"'\\\"'\\\"'\"" "writer << \"\\\\'\""
 echo "  $mutations broken copies tried"
 
 echo

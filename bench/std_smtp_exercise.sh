@@ -429,10 +429,10 @@ PY
   fi
 }
 prove_broken "a dot at a line's start sent once" "a lone dot" \
-  'io.write_byte(46_u8) if start && b == 46_u8' 'io.write_byte(46_u8) if false && b == 46_u8'
+  'io.push(46_u8) if start && b == 46_u8' 'io.push(46_u8) if false && b == 46_u8'
 prove_broken "a bare LF sent bare" "LF and CR become CRLF" \
   '        io << "\r\n"
-        i = i + 1 if b == 13_u8' '        io.write_byte(b)
+        i = i + 1 if b == 13_u8' '        io.push(b)
         i = i + 1 if b == 13_u8'
 prove_broken "a reply's continuation taken for its end" "EHLO was refused: 220 second line" \
   'return SmtpReply.new(code, lines) unless line.bytesize > 3 && p[3] == 45_u8' 'return SmtpReply.new(code, lines)'
