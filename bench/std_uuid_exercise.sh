@@ -215,10 +215,14 @@ else
   "$PY" - <<PY
 from pathlib import Path
 src = Path("$REPO/src/std/uuid.iyi").read_text()
-old = 'out << ch unless hyphenated && (k == 8 || k == 13 || k == 18 || k == 23)'
-if src.count(old) != 1:
-    raise SystemExit("patch site missing or not unique")
-Path("$WORK/patched/std/uuid.iyi").write_text(src.replace(old, "out << ch unless ch == '-'", 1))
+for old, new in (("unless n == 32 || (n == 36 && text[8] == 45_u8 &&",
+                  "unless true || (n == 36 && text[8] == 45_u8 &&"),
+                 ("if n == 36 && (i == 8 || i == 13 || i == 18 || i == 23)",
+                  "if text[i] == 45_u8")):
+    if src.count(old) != 1:
+        raise SystemExit("patch site missing or not unique")
+    src = src.replace(old, new, 1)
+Path("$WORK/patched/std/uuid.iyi").write_text(src)
 PY
   if [ $? -ne 0 ]; then
     echo "  the patch did not apply"
@@ -259,8 +263,8 @@ from pathlib import Path
 random_src = Path("$REPO/src/std/random.iyi").read_text()
 uuid_src = Path("$REPO/src/std/uuid.iyi").read_text()
 constant_seed = ("new(entropy, entropy)", "new(1_u64, 1_u64)")
-pcg_v4 = ("    bytes = Random::Secure.random_bytes(16)\n    bytes[6] = (bytes[6] & 0x0f_u8) | 0x40_u8",
-          "    rng = Random.new\n    bytes = Array(UInt8).new(16) { (rng.next_u & 255_u32).to_u8 }\n"
+pcg_v4 = ("    Random::Secure.fill(bytes, 16)\n    bytes[6] = (bytes[6] & 0x0f_u8) | 0x40_u8",
+          "    rng = Random.new\n    16.times { |i| bytes[i] = (rng.next_u & 255_u32).to_u8 }\n"
           "    bytes[6] = (bytes[6] & 0x0f_u8) | 0x40_u8")
 silent = ("    return if count == 0\n", "    return\n")
 cases = {

@@ -144,11 +144,11 @@ else
   mkdir -p "$WORK/patched_dot/std"
   "$PY" - <<PY
 src = open("$REPO/src/std/path.iyi").read()
-old = 'elsif seg == ".."'
+old = 'elsif part == ".."'
 # break only the first when ".." in normalize if present
 if old not in src:
     raise SystemExit("patch site missing")
-open("$WORK/patched_dot/std/path.iyi", "w").write(src.replace(old, 'elsif seg == "..x"', 1))
+open("$WORK/patched_dot/std/path.iyi", "w").write(src.replace(old, 'elsif part == "..x"', 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the patch did not apply"
@@ -192,21 +192,23 @@ PY
 
 if [ -n "$PY" ]; then
   caught_at "a windows anchor kept as written by normalize" \
-    'norm << (posix? ? "/" : backslashed(drive || "") + (rooted ? "\\" : ""))' 'norm << all[0]' \
+    "writer << '\\\\' if rooted" "writer.push(@name[(own = drive) ? own.bytesize : 0]) if rooted" \
     'a windows anchor normalizes to its own separator'
   caught_at "an extension read off a UNC share" \
-    'return "" if trimmed_end <= anchor_end' '# no anchor test' \
+    'return "".as_tape if trimmed_end <= anchor_end' '# no anchor test' \
     'a UNC share has no extension'
   caught_at "a drive-relative rest cut by characters" \
-    'rest = p.name[drive.bytesize, p.name.bytesize - drive.bytesize]' 'rest = p.name[drive.size, p.name.size - drive.size]' \
+    'name[own.bytesize, name.bytesize - own.bytesize]' 'name[own.bytesize, name.to_heap.size - own.bytesize]' \
     'a non-ASCII name on another drive expands whole'
   caught_at "any name ending in : joined like a drive" \
-    '(drive_end == 2 && anchor_end == 2 && @name.bytesize == 2)' '(!posix? && @name.ends_with?(":"))' \
+    'bare = drive_end == 2 && anchor_end == 2 && @name.bytesize == 2' 'bare = !posix? && @name.bytesize > 0 && @name[-1] == 58_u8' \
     'only a bare drive joins without a separator'
   # `expand` reads a rooted name through `join` now, so its check is the
   # first one a join that drops the drive reaches.
   caught_at "a root joined onto a drive path answered by itself" \
-    'return Path.new(own + part, @kind) if own && their.nil?' '# a half anchor taken whole' \
+    'if own && their.nil?
+        return TapePath.new(concat(own, part), @kind)
+      end' '# a half anchor taken whole' \
     'expands onto the base'
 fi
 
