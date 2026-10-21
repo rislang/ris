@@ -58,6 +58,7 @@ expect heap_copy_top \
 expect heap_interpolation \
   "Interpolating a Tape::String outside a @[TapeToHeap]"
 expect heap_builder     "Writing a Tape::String into a String::Builder"
+expect refill           "\`@items\` is given a new Tape::Array in \`take\`"
 expect heap_copy        "tape -> heap -> tape pays this at every turn"
 expect heap_memory      "Writing a Tape::String into a String::Builder or"
 expect heap_memory_print "Writing a Tape::String into a Std::Io::Memory"
@@ -161,8 +162,8 @@ out=$("$RIS" run test/ris/link_check.ri 2>&1)
 if grep -qF $'7' <<<"$out" && grep -qF "index 200 out of range for 1 elements" <<<"$out"; then echo "runs     link_check"; else echo "FAILED   link_check: $out"; status=1; fi
 out=$("$RIS" run test/ris/loop_bounds.ri 2>&1)
 if grep -qF '1 11 21 300' <<<"$out" && grep -qF "index -1 out of range for 3 elements" <<<"$out"; then echo "runs     loop_bounds"; else echo "FAILED   loop_bounds: $out"; status=1; fi
-out=$("$RIS" build --no-codegen test/ris/warned/refill.ri 2>&1)
-if grep -qF '`@items` is given a new Tape::Array in `take`' <<<"$out" && grep -qF '`@items.clear`' <<<"$out"; then echo "warns    refill"; else echo "FAILED   refill: $out"; status=1; fi
+out=$("$RIS" run test/ris/refill_handoff.ri 2>&1)
+if [ "$out" = '2 2 3 4' ]; then echo "runs     refill_handoff"; else echo "FAILED   refill_handoff: $out"; status=1; fi
 out=$("$RIS" run test/ris/clear.ri 2>&1)
 if [ "$out" = $'2 1 2\n3 2 3\n4 3 4\nxxxxend' ]; then echo "runs     clear"; else echo "FAILED   clear: $out"; status=1; fi
 out=$(RIS_TAPE_STATS=1 "$RIS" run test/ris/side_warm.ri 2>&1)

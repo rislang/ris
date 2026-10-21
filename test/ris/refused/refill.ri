@@ -1,5 +1,5 @@
 # A queue made anew per refill keeps every old one on the tape until the
-# block ends: warned, with `clear` named as the way out.
+# block ends: refused, with `clear` named as the way out.
 @[OnTape]
 struct Queue
   @items : Tape::Array(Int32)

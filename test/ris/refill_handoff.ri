@@ -1,0 +1,39 @@
+# Rows handed on before a new one is made are still in use: a new array
+# is right there, and `clear` would empty the row already kept. Allowed.
+@[OnTape]
+struct Table
+  getter rows : Tape::Array(Tape::Array(Int32))
+  @row : Tape::Array(Int32)
+
+  def initialize
+    @rows = Tape::Array(Tape::Array(Int32)).new
+    @row = Tape::Array(Int32).new
+  end
+
+  def add(value : Int32) : Nil
+    @row << value
+  end
+
+  def end_row : Nil
+    @rows << @row
+    @row = Tape::Array(Int32).new
+  end
+
+  def take : Tape::Array(Int32)
+    batch = @row
+    @row = Tape::Array(Int32).new
+    batch
+  end
+end
+
+tape do
+  table = Table.new
+  table.add(1)
+  table.add(2)
+  table.end_row
+  table.add(3)
+  table.end_row
+  table.add(4)
+  last = table.take
+  puts "#{table.rows.size} #{table.rows[0].size} #{table.rows[1][0]} #{last[0]}"
+end
