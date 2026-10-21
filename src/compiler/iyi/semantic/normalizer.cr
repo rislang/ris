@@ -723,7 +723,8 @@ module Iyi
     end
 
     def transform(node : While)
-      TapeLoopBounds.lower(node)
+      # Only where the prelude has the tape, whose `__loop_fetch` it calls.
+      TapeLoopBounds.lower(node) if program.tape_platform?
       node = super
       TapeScopeChecker.mark(program, node) if node.is_a?(While) && @macro_code == 0
       node

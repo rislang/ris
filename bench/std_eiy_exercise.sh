@@ -241,7 +241,7 @@ prove_fails "text that is not UTF-8 spliced in as itself" patched_utf8 "text tha
   "content.replace('elsif b < 32 || b >= 127', 'elsif b < 32 || b == 127')"
 # Spliced in as code, the comment's second line runs and drops an item.
 prove_fails "a comment tag spliced in as code" patched_comment "render of the template" \
-  "content.replace(\"unless str_val.starts_with?('#')\", \"unless false && str_val.starts_with?('#')\")"
+  "content.replace('unless str_val.starts_with?(\"#\")', 'unless false && str_val.starts_with?(\"#\")')"
 # Under a fixed name the template's inner `render` replaces the outer buffer,
 # and what the outer printed before it is lost.
 prove_fails "render's buffer under a fixed name" patched_nested "render of the template" \
