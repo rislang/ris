@@ -40,6 +40,9 @@ class Iyi::TapeScopeChecker
               TapeScopeRuntime.runtime?(node.location)
     body = node.body
     return if body.is_a?(Nop) || body.is_a?(Primitive)
+    # A body read from an artifact is marked already, with its build's
+    # temporaries: a second mark's fresh ones could share their names.
+    return if parts(body)
     return if node.is_a?(Def) && (node.abstract? || node.name == "initialize")
     # A block that declares methods or types is a macro's body (`record
     # ... do def ... end end`), not code that runs: wrapping it would put

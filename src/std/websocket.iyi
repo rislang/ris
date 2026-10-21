@@ -845,7 +845,7 @@ pub class WebSocket
       @writing = false
       raise "WebSocket: a message of #{n} bytes and its frame's head are past the 2147483647 bytes a string holds"
     end
-    wrote = nil.as(Int32 | Cancelled | SocketError)
+    wrote = 0.as(Int32 | Cancelled | SocketError)
     tape do
       key = nil.as(UInt32?)
       if @client
