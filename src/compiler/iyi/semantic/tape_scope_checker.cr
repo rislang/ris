@@ -89,8 +89,10 @@ class Iyi::TapeScopeChecker
 
   def run(node : ASTNode) : Nil
     check_scope(node, false)
-    # A mark left off frees nothing, but its two calls still run each
-    # round in an unoptimised build: the body is left as it was written.
+    # A loop's or block's mark left off frees nothing, but its two calls
+    # still run each round in an unoptimised build: the body is left as
+    # it was written. A def's runs once a call and stays: unwrapped, a
+    # yielding def inlined into its caller clobbered the caller's index.
     @decided.each do |wrapper|
       next unless parts = TapeScopeChecker.parts(wrapper)
       flag, inner = parts
@@ -112,7 +114,7 @@ class Iyi::TapeScopeChecker
     # The def's own scope: what it made, unless it is the result.
     if parts = TapeScopeChecker.parts(a_def.body)
       flag, inner = parts
-      decide(a_def.body, flag, safe?(inner, a_def.type?, a_def.body, owner_tape, params, [] of String))
+      flag.value = safe?(inner, a_def.type?, a_def.body, owner_tape, params, [] of String)
     end
   end
 
