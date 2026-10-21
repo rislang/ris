@@ -124,15 +124,15 @@ prove_fails() {
 
 # 1. Width padding removed
 prove_fails "width padding broken" no_width "format: width" \
-  's/pad = " " \* (width - res\.size)/pad = ""/'
+  's/^\( *\)repeat(w, 32_u8, \([a-z -]*\)) unless minus.*$/\1nil/'
 
 # 2. Alignment reversed
 prove_fails "alignment ignored" no_align "format: alignment" \
-  's/minus ? res + pad : pad + res/pad + res/'
+  's/ unless minus || zero$/ unless zero/; s/ unless minus$//; s/^\( *\)repeat(w, 32_u8, [a-z -]*) if minus$/\1nil/'
 
 # 3. Zero padding replaced with spaces
 prove_fails "zero pad broken" no_zero "format: zero pad" \
-  's/sign + prefix + ("0" \* pad_count) + digits/sign + prefix + (" " * pad_count) + digits/'
+  's/repeat(w, 48_u8, pad) if zero/repeat(w, 32_u8, pad) if zero/'
 
 # 3b. An array one argument again rather than the argument list.
 prove_fails "an array is one argument again" no_list "too few arguments for format string" \
@@ -163,45 +163,45 @@ prove_fails "the two-word path taken out" no_quick "format: a %.2f costs" \
 #     its zero-led chunks prints 1e22 as 10000.000, which is what a printer
 #     that pads the shortest digits with zeros was never able to see.
 prove_fails "the digits are the value's, all of them" no_exact "format: exact large zeros" \
-  's/^      text = text + ("0" \* (9 - chunk\.size)) + chunk$/      text = text + chunk/'
+  's/^\( *\)IyiFormat\.repeat(w, 48_u8, 9 - text\.bytesize) if .*$/\1nil/'
 
 # 5. Base conversion broken (binary emits decimal)
 prove_fails "base conversion broken" no_base "format: base" \
-  's/format_int64(val\.to_i64, 2, false, true/format_int64(val.to_i64, 10, false, true/'
+  's/tape_int64(val\.to_i64, 2, false, true/tape_int64(val.to_i64, 10, false, true/'
 
 # 6. Negative number sign flag broken (space flag dropped)
 prove_fails "sign flag broken" no_neg "format: sign space positive" \
-  's/sign = " "/sign = ""/'
+  's/(space ? " " : "")/""/'
 
 # 6b. Hex unsigned again for a sign flag, while its `-` stays.
 prove_fails "hex sign flags dropped" no_hex_sign "format: sign flags in other bases" \
-  's/format_int64(val\.to_i64, 16, false, true/format_int64(val.to_i64, 16, false, false/'
+  's/tape_int64(val\.to_i64, 16, false, true/tape_int64(val.to_i64, 16, false, false/'
 
 # 7. Boundary case broken (precision 0 on value 0 produces "0" instead of "")
 prove_fails "boundary zero precision broken" no_bound "format: boundary" \
-  's/digits = precision == 0 ? "" : "0"/digits = "0"/'
+  's/digits = "".as_tape if !nonzero && precision == 0/nil/'
 
 # 8. %g that never trims, and %g that never switches to the exponent
 prove_fails "general notation keeps its zeros" no_trim "general: trailing zeros trimmed" \
   's/^    return text unless text.index(.\..)$/    return text/'
 prove_fails "general notation never switches" no_switch "general: large switches to exponent" \
-  's/^    if exp < -4 || exp >= prec$/    if false/'
+  's/^      if exp < -4 || exp >= prec$/      if false/'
 
 # 9. %u of a negative Int64 signed again, the exponent of the shortest
 #    digits trusted, NaN deaf to + and space, and %g's fixed notation
 #    asked of %f's limited places once more.
 prove_fails "unsigned Int64 signed again" no_u64 "format: boundary negative int64 unsigned" \
-  's/format_uint64(val\.unsafe_to_u64, 10, false, false/format_int64(val, 10, false, false/'
+  's/tape_uint64(val\.unsafe_to_u64, 10, false, false/tape_int64(val, 10, false, false/'
 prove_fails "the shortest digits' exponent trusted" no_lower "the exponent is the value's" \
-  's/^      if lower\.size == precision + 1$/      if false/'
+  's/^        if lower\.bytesize == places + 1$/        if false/'
 prove_fails "NaN drops the sign flags" no_nan_sign "general: NaN takes the sign flags" \
   's/plus ? "+NaN" : (space ? " NaN" : "NaN")/"NaN"/'
 prove_fails "%g fixed from %f's places" no_g_digits "precision must be at most 400, not 403" \
-  's/^        fixed = "0\." + ("0" \* (0 - exp - 1)) + sig$/        fixed = IyiFloatText.format_fixed(val.abs, prec - 1 - exp)/'
+  's/^        w << (hash ? fixed : trim_tape(fixed))$/        w << (hash ? fixed : trim_tape(exp < 0 ? fixed_text(val.abs, prec - 1 - exp, false) : fixed))/'
 
 # 10. An Int128's `%p` asked of its digits as a string again: 65_i128 in quotes.
 prove_fails "an Int128's %p asked of its digits again" no_wide_text "format: Int128 text and code point" \
-  "s/verb == 'p' ? val\.inspect : val\.to_s/verb == 'p' ? val.to_s.inspect : val.to_s/"
+  "s/verb == 'p' ? val\.inspect\.as_tape : integer_text(val, 10)/verb == 'p' ? integer_text(val, 10).to_heap.inspect.as_tape : integer_text(val, 10)/"
 
 echo
 if [ "$status" -eq 0 ]; then

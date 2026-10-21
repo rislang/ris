@@ -34,6 +34,11 @@ FLOOR_BASE_LINUX="PROCEDURE_LINKAGE_TABLE_"
 FLOOR_BASE_LINUX+=" ITM_deregisterTMCloneTable ITM_registerTMCloneTable"
 FLOOR_BASE_LINUX+=" _cxa_finalize _gmon_start__ _libc_start_main"
 
+# Both: `to_heap` copies a tape value off with a variable-length
+# `llvm.memcpy`, which the back end spells as the libc's `memcpy`.
+FLOOR_BASE_DARWIN+=" memcpy"
+FLOOR_BASE_LINUX+=" memcpy"
+
 # What a program may link: the platform libc, and on darwin the two
 # frameworks the trusted roots are kept behind - Security for the anchors
 # and trust settings, CoreFoundation for the arrays and data they come in -
