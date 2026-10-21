@@ -1423,13 +1423,15 @@ def __iyi_scope_release(mark : IyiScopeMark) : Nil
   IyiHeap.write64(region &+ IyiRegion::OFF_SIDE, side)
   # Pages written past the warm first MiB go back to the kernel, as the
   # tape's own release hands them back: the cursor that release reads is
-  # the mark's now.
-  written = IyiHeap.read64(region &+ IyiRegion::OFF_CURSOR)
-  low = mark.cursor &+ (IyiRegion::GRAIN &- 1_u64)
-  low = low & 0xFFFFFFFFFFFF0000_u64
-  keep = region &+ IyiRegion::KEEP_WARM
-  low = keep if low < keep
-  __iyi_release_pages(low, written &- low) if written > low &+ IyiRegion::KEEP_WARM
+  # the mark's now. wasm32's tape is heap blocks, with no pages to return.
+  {% unless flag?(:wasm32) %}
+    written = IyiHeap.read64(region &+ IyiRegion::OFF_CURSOR)
+    low = mark.cursor &+ (IyiRegion::GRAIN &- 1_u64)
+    low = low & 0xFFFFFFFFFFFF0000_u64
+    keep = region &+ IyiRegion::KEEP_WARM
+    low = keep if low < keep
+    __iyi_release_pages(low, written &- low) if written > low &+ IyiRegion::KEEP_WARM
+  {% end %}
   IyiHeap.write64(region &+ IyiRegion::OFF_CURSOR, mark.cursor)
 end
 

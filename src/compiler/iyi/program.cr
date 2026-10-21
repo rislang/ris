@@ -497,12 +497,12 @@ module Iyi
     property? tape_scopes = false
 
     # ris: whether iyi's prelude requires the tape here, by the same
-    # flags as its `require "./tape"`: not on wasm32, nor without the
-    # owned collector.
+    # flags as its `require "./tape"`: not without the owned collector.
+    # wasm32's tape is heap blocks, as it has no mmap.
     def tape_platform? : Bool
       return false if has_flag?("gc_none") || has_flag?("gc_boehm")
       (has_flag?("linux") && (has_flag?("x86_64") || has_flag?("aarch64"))) ||
-        has_flag?("darwin") || has_flag?("win32")
+        has_flag?("darwin") || has_flag?("win32") || has_flag?("wasm32")
     end
 
     # iyi: true when this program's runtime symbols are `__iyi_*`.

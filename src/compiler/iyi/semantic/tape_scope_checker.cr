@@ -37,7 +37,8 @@ class Iyi::TapeScopeChecker
 
   def self.mark(program : Program, node : While | Block | Def) : Nil
     return if !program.tape_scopes? || !program.tape_platform? ||
-              TapeScopeRuntime.runtime?(node.location)
+              TapeScopeRuntime.runtime?(node.location) ||
+              TapeScopeRuntime.prelude?(program, node.location)
     body = node.body
     return if body.is_a?(Nop) || body.is_a?(Primitive)
     # A getter's field, `self` or a literal puts nothing on the tape, and a
@@ -320,6 +321,14 @@ module Iyi::TapeScopeRuntime
     return true unless file
     file = file.gsub('\\', '/')
     crystal?(location) || file.includes?("/src/iyi/") || file.includes?("/src/compiler/")
+  end
+
+  # The prelude where it was loaded from, which a test may copy out of
+  # `src/iyi/` to change it.
+  def self.prelude?(program : Program, location : Location?) : Bool
+    return false unless directory = program.iyi_prelude_dir
+    file = location.try(&.original_filename)
+    !file.nil? && file.starts_with?(directory + "/")
   end
 
   # Crystal's code, a `.cr` file: none of the tape's lowerings apply to it,

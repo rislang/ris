@@ -3849,13 +3849,36 @@ require "./file"
       # one that outgrew its room while something else followed it; a
       # mapping made per scope is that, or a scope larger than a spare.
       def self.report_stats : Nil
-        return unless Program.env("RIS_TAPE_STATS")
+        return unless stats_asked?
         add_stats
         STDERR.puts "ris tape: #{@@total_scopes} scopes, #{@@total_mapped} mappings made, " \
                     "#{@@total_unmapped} unmapped, #{@@total_grown} tapes grown onto a new " \
                     "mapping, #{@@total_moved} values moved off the tape's end " \
                     "(#{@@total_moved_bytes} bytes copied)"
         STDERR.flush
+      end
+
+      # Whether `RIS_TAPE_STATS` is set. On POSIX the environment follows
+      # `argv` on the stack the program began with: read there, not by
+      # `Program.env`, whose `environ` would be one more undefined symbol
+      # in every program, for a flag almost none of them is run with.
+      def self.stats_asked? : Bool
+        {% if flag?(:win32) %}
+          !Program.env("RIS_TAPE_STATS").nil?
+        {% else %}
+          wanted = "RIS_TAPE_STATS=".to_unsafe
+          entry = ARGV_UNSAFE + (ARGC_UNSAFE + 1)
+          while entry.value.address != 0_u64
+            name = entry.value
+            index = 0
+            while index < 15 && name[index] == wanted[index]
+              index = index + 1
+            end
+            return true if index == 15
+            entry = entry + 1
+          end
+          false
+        {% end %}
       end
 
       # The thread's spares back to the kernel, when the thread ends.
@@ -8526,6 +8549,152 @@ require "./file"
         end
       end
 
+      # ris: the tape on wasm32, where there is no mmap. A region is one
+      # untyped heap block, which the collector scans word by word, so a
+      # tape value holding a collected object's address keeps it alive;
+      # the running tape is a global, and each region names its parent and
+      # side regions in its header, so the chain stays reachable. Released,
+      # a region is only unlinked: the collector frees it. The layout and
+      # the entry points are the mmap tape's (`IyiRegion` above).
+      class IyiRegion
+        OFF_CURSOR = 0_u64
+        OFF_LIMIT  = 8_u64
+        OFF_PARENT = 16_u64
+        OFF_MAP    = 24_u64
+        OFF_SIDE   = 48_u64
+        DATA       = 64_u64
+        UNDER      = 16_u64
+        # Linear memory is small and never handed back: a tape starts at
+        # 64 KiB, whatever was asked, and grows by doubling.
+        FIRST      = 65536_u64
+        SIDE_FIRST = FIRST
+
+        @@tape : UInt64 = 0_u64
+
+        def self.tape : UInt64
+          @@tape
+        end
+
+        def self.tape=(region : UInt64) : UInt64
+          @@tape = region
+        end
+
+        def self.tape_scope(capacity : UInt64, &)
+          return yield if @@tape != 0
+          @@tape = acquire(capacity < FIRST ? capacity : FIRST)
+          defer ::__iyi_tape_release
+          yield
+        end
+
+        def self.tape_local(capacity : UInt64, &)
+          saved = @@tape
+          @@tape = acquire(capacity < FIRST ? capacity : FIRST)
+          defer restore_tape(saved)
+          yield
+        end
+
+        def self.restore_tape(saved : UInt64) : Nil
+          release_tape
+          @@tape = saved
+        end
+
+        def self.release_tape : Nil
+          region = @@tape
+          @@tape = 0_u64
+          while region != 0
+            parent = IyiHeap.read64(region &+ OFF_PARENT)
+            release(region)
+            region = parent
+          end
+        end
+
+        @[NoInline]
+        def self.no_tape : NoReturn
+          __iyi_write(2, "iyi: a tape value made outside a tape block\n".to_unsafe.as(Void*), 44_u64)
+          __iyi_exit(1)
+        end
+
+        def self.tape_bytes(size : UInt64) : UInt64
+          region = @@tape
+          no_tape if region == 0
+          take(region, size, false, 0_u64)
+        end
+
+        def self.tape_resize(start : UInt64, stop : UInt64, used : UInt64, bytes : UInt64, side : Pointer(UInt64)) : UInt64
+          region = @@tape
+          no_tape if region == 0
+          own = side.value
+          home = own != 0 ? own : region
+          fresh = (start &+ bytes &+ 7_u64) & 0xFFFFFFFFFFFFFFF8_u64
+          if ((stop &+ 7_u64) & 0xFFFFFFFFFFFFFFF8_u64) == IyiHeap.read64(home &+ OFF_CURSOR) && fresh <= IyiHeap.read64(home &+ OFF_LIMIT)
+            IyiHeap.write64(home &+ OFF_CURSOR, fresh)
+            return start
+          end
+          capacity = bytes &* 4_u64
+          capacity = SIDE_FIRST if capacity < SIDE_FIRST
+          own = acquire(capacity)
+          IyiHeap.write64(own &+ OFF_PARENT, IyiHeap.read64(region &+ OFF_SIDE))
+          IyiHeap.write64(region &+ OFF_SIDE, own)
+          side.value = own
+          moved = own &+ DATA
+          IyiHeap.write64(own &+ OFF_CURSOR, (moved &+ bytes &+ 7_u64) & 0xFFFFFFFFFFFFFFF8_u64)
+          Pointer(UInt8).new(moved).copy_from(Pointer(UInt8).new(start), used.to_i32)
+          moved
+        end
+
+        def self.acquire(capacity : UInt64) : UInt64
+          length = (capacity &+ DATA &+ 7_u64) & 0xFFFFFFFFFFFFFFF8_u64
+          region = IyiHeap.alloc(length).address
+          IyiHeap.write64(region &+ OFF_CURSOR, region &+ DATA)
+          IyiHeap.write64(region &+ OFF_LIMIT, region &+ length)
+          IyiHeap.write64(region &+ OFF_MAP, length)
+          IyiHeap.write64(region &+ OFF_PARENT, 0_u64)
+          IyiHeap.write64(region &+ OFF_SIDE, 0_u64)
+          region
+        end
+
+        def self.release(region : UInt64) : Nil
+          IyiHeap.write64(region &+ OFF_PARENT, 0_u64)
+          IyiHeap.write64(region &+ OFF_SIDE, 0_u64)
+        end
+
+        def self.take(region : UInt64, size : UInt64, clear : Bool, type_id : UInt64) : UInt64
+          cursor = IyiHeap.read64(region &+ OFF_CURSOR)
+          bytes = (size &+ 7_u64) & 0xFFFFFFFFFFFFFFF8_u64
+          object = cursor &+ UNDER
+          stop = object &+ bytes
+          if stop > IyiHeap.read64(region &+ OFF_LIMIT)
+            region = grow_onto(region, bytes &+ UNDER)
+            cursor = IyiHeap.read64(region &+ OFF_CURSOR)
+            object = cursor &+ UNDER
+            stop = object &+ bytes
+          end
+          IyiHeap.write64(region &+ OFF_CURSOR, stop)
+          IyiHeap.write64(cursor, size)
+          IyiHeap.write64(cursor &+ 8_u64, type_id.unsafe_shl(IyiHeap::TYPE_SHIFT))
+          IyiHeap.clear_bytes(object, bytes) if clear
+          object
+        end
+
+        def self.grow_onto(region : UInt64, need : UInt64) : UInt64
+          capacity = (IyiHeap.read64(region &+ OFF_MAP) &- DATA) &* 2_u64
+          capacity = need if capacity < need
+          length = (capacity &+ DATA &+ 7_u64) & 0xFFFFFFFFFFFFFFF8_u64
+          fresh = IyiHeap.alloc(length).address
+          IyiHeap.write64(fresh &+ OFF_CURSOR, fresh &+ DATA)
+          IyiHeap.write64(fresh &+ OFF_LIMIT, fresh &+ length)
+          IyiHeap.write64(fresh &+ OFF_MAP, length)
+          IyiHeap.write64(fresh &+ OFF_PARENT, region)
+          IyiHeap.write64(fresh &+ OFF_SIDE, 0_u64)
+          @@tape = fresh
+          fresh
+        end
+
+        # No counts on wasm32: RIS_TAPE_STATS is for the mmap tape.
+        def self.report_stats : Nil
+        end
+      end
+
       class IyiMark
         WHITE  = 0_u64
         GRAY   = 1_u64
@@ -10519,6 +10688,24 @@ end
 
 # PROTOTYPE (ris, step B): tape values, where the arena's region code is.
 # Program#tape_platform? repeats this condition: change both together.
-{% if !flag?(:gc_none) && !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || flag?(:darwin) || flag?(:win32)) %}
+{% if !flag?(:gc_none) && !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || flag?(:darwin) || flag?(:win32) || flag?(:wasm32)) %}
   require "./tape"
+{% else %}
+  # No tape here: what the program's end and the scheduler ask of it
+  # answers that there is none.
+  class IyiRegion
+    def self.tape : UInt64
+      0_u64
+    end
+
+    def self.tape=(region : UInt64) : UInt64
+      region
+    end
+
+    def self.report_stats : Nil
+    end
+
+    def self.drop_spares : Nil
+    end
+  end
 {% end %}
