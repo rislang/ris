@@ -119,6 +119,7 @@ cat >"$WORK/oracle.iyi" <<'IYI'
 module oracle
 
 import std/curve25519::{X25519, Ed25519, CurveError}
+import std/int
 
 def b(hex : String) : String
   return "" if hex == "-"
