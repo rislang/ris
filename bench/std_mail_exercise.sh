@@ -663,16 +663,16 @@ refuse address-or-panic "mail: an angle address is not closed with > in \"Ann <a
 refuse text-or-panic "mail: the charset \"koi8-r\" is not one std/mail reads (UTF-8, US-ASCII, ISO-8859-1, ISO-8859-15, windows-1252)"
 
 # patched <old> <new> <dir>: a copy of the module in <dir>/std with <old>
-# replaced, once.
+# replaced wherever it is: ris keeps a heap and a tape copy of some code.
 patched() {
   rm -rf "$3"
   mkdir -p "$3/std"
   OLD="$1" NEW="$2" "$PY" - "$REPO/src/std/mail.iyi" "$3/std/mail.iyi" <<'PY'
 import os, sys
 src = open(sys.argv[1], encoding="utf-8").read()
-if src.count(os.environ["OLD"]) != 1:
-    raise SystemExit("patch site missing or not one")
-open(sys.argv[2], "w", encoding="utf-8").write(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
+if src.count(os.environ["OLD"]) == 0:
+    raise SystemExit("patch site missing")
+open(sys.argv[2], "w", encoding="utf-8").write(src.replace(os.environ["OLD"], os.environ["NEW"]))
 PY
 }
 
