@@ -54,6 +54,13 @@ TOOLS = {
     # "What a migration would need, measured"; the application is not in
     # this repository, so there is no tree here to point it at.
     "migrate_count.py",
+    # `bash bench/http2_tape.sh [BASE]` compares std/http and std/hpack
+    # before and after their move onto the tape; it measures, it does not
+    # hold a line, and speed is measured for the whole project later.
+    "http2_tape.sh",
+    # `python3 bench/tape_memory_svg.py` draws README's tape and heap
+    # picture from TAPE_DESIGN.md's recorded numbers.
+    "tape_memory_svg.py",
 }
 
 
