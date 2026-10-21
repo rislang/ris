@@ -10449,6 +10449,7 @@ end
 {% end %}
 
 # PROTOTYPE (ris, step B): tape values, where the arena's region code is.
+# Program#tape_platform? repeats this condition: change both together.
 {% if !flag?(:gc_none) && !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || flag?(:darwin) || flag?(:win32)) %}
   require "./tape"
 {% end %}
