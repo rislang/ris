@@ -347,7 +347,7 @@ prove_caught "a leading zero is read" 'accepted "a = 01\n"' \
 prove_caught "underscores need not stand between digits" 'accepted "a = 1__0\n"' \
   $'        return -1 unless i + 1 < stop && radix_digit(@bytes[i + 1], radix) >= 0\n        i = i + 2' '        i = i + 1'
 prove_caught "a hexadecimal integer may have a sign" 'accepted "a = +0x1\n"' \
-  'which only a decimal number may have", start) if signed' 'which only a decimal number may have", start) if false'
+  $'      if signed\n        return fail("a sign before #{token}' $'      if false\n        return fail("a sign before #{token}'
 prove_caught "the smallest integer is counted as a positive one" 'corpus document 39: refused with -9223372036854775808 is outside' \
   'limit = negative ? 9223372036854775808_u64 : 9223372036854775807_u64' 'limit = 9223372036854775807_u64'
 prove_caught "the radix limit is one short" 'corpus document 39: refused with 0x7FFFFFFFFFFFFFFF is past' \
@@ -359,20 +359,17 @@ prove_caught "an escape may name a surrogate" 'accepted "a = \"\\uD800\"\n"' \
 prove_caught "a line-ending backslash keeps the next line's indentation" 'a line-ending backslash' \
   '            if c == 32_u8 || c == 9_u8 || c == 10_u8' '            if c == 10_u8'
 prove_caught "the line break after the opening quotes is kept" 'the break after the opening quotes is dropped' \
-  $'    if byte?(@pos, 10_u8)\n      @pos = @pos + 1\n    elsif' $'    if false\n      @pos = @pos + 1\n    elsif'
+  $'    if byte?(pos, 10_u8)\n      self.pos = pos + 1\n    elsif' $'    if false\n      self.pos = pos + 1\n    elsif'
 prove_caught "CRLF inside a multi-line string is kept as it is" 'CRLF inside a multi-line string reads as LF' \
-  $'        return fail("a carriage return not followed by a line feed", @pos) unless byte?(@pos + 1, 10_u8)\n        text.write_byte(10_u8)\n        @pos = @pos + 2\n      elsif control?(b)\n        return fail("#{found(@pos)} in a string' \
-  $'        return fail("a carriage return not followed by a line feed", @pos) unless byte?(@pos + 1, 10_u8)\n        text.write_byte(13_u8)\n        text.write_byte(10_u8)\n        @pos = @pos + 2\n      elsif control?(b)\n        return fail("#{found(@pos)} in a string'
+  $'        end\n        text.push(10_u8)\n        self.pos = pos + 2\n      elsif control?(b)\n        return fail("#{found(pos)} in a string' $'        end\n        text.push(13_u8)\n        text.push(10_u8)\n        self.pos = pos + 2\n      elsif control?(b)\n        return fail("#{found(pos)} in a string'
 prove_caught "six quotes may close a multi-line string" 'accepted "a = \"\"\"x\"\"\"\"\"\"\n"' \
-  'quotes closing a multi-line string, where five is the most", @pos) if n > 5' 'quotes closing a multi-line string, where five is the most", @pos) if n > 6'
+  $'          if n > 5\n            return fail("#{n} quotes closing' $'          if n > 6\n            return fail("#{n} quotes closing'
 
 # Comments, line ends, encoding.
 prove_caught "a control character is let into a comment" 'accepted "a = 1 # bell' \
-  $'      if (b < 32_u8 && b != 9_u8) || b == 127_u8\n        return fail("#{found(@pos)} in a comment", @pos)' \
-  $'      if false\n        return fail("#{found(@pos)} in a comment", @pos)'
+  $'      if (b < 32_u8 && b != 9_u8) || b == 127_u8\n        return fail("#{found(pos)} in a comment"' $'      if false\n        return fail("#{found(pos)} in a comment"'
 prove_caught "a lone carriage return ends a line" 'accepted "a = 1\r"' \
-  $'    return fail("a carriage return not followed by a line feed", @pos) if b == 13_u8\n    fail(' \
-  $'    if b == 13_u8\n      @pos = @pos + 1\n      return nil\n    end\n    fail('
+  $'    if b == 13_u8\n      return fail("a carriage return not followed by a line feed", pos)\n    end\n    fail(' $'    if b == 13_u8\n      self.pos = pos + 1\n      return nil\n    end\n    fail('
 prove_caught "an overlong UTF-8 form is read" 'accepted "a = \"\xC0' \
   'if b >= 0xC2_u8 && b <= 0xDF_u8' 'if b >= 0xC0_u8 && b <= 0xDF_u8'
 prove_caught "a UTF-8 surrogate is read" 'accepted "a = \"\xED' \
@@ -388,17 +385,17 @@ prove_caught "a leap second is read" 'accepted "a = 1979-05-27T23:59:60Z\n"' \
 prove_caught "a key may be given twice" 'accepted "name = \"Tom\"\nname = \"Pradyun\"\n"' \
   $'    unless t.slots[last]?.nil?\n      return fail(' $'    if false\n      return fail('
 prove_caught "a table may be declared twice" 'accepted "[fruit]\napple = \"red\"\n\n[fruit]\n' \
-  'is declared twice", starts[parts.size - 1]) if child.explicit' 'is declared twice", starts[parts.size - 1]) if false'
+  $'        if child.explicit\n          return fail("the table [#{whole}] is declared twice"' $'        if false\n          return fail("the table [#{whole}] is declared twice"'
 prove_caught "a super-table declared after its sub-table is not marked declared" 'accepted "[x.y]\n[x]\n[x]\n"' \
   $'        child.explicit = true\n' ''
 prove_caught "a header may declare a table dotted keys made" 'accepted "[fruit]\napple.color = \"red\"\napple.taste.sweet = true\n\n[fruit.apple]\n"' \
-  'declares a table dotted keys made", starts[parts.size - 1]) if child.dotted' 'declares a table dotted keys made", starts[parts.size - 1]) if false'
+  $'        if child.dotted\n          return fail("[#{whole}] declares' $'        if false\n          return fail("[#{whole}] declares'
 prove_caught "dotted keys going through a table do not mark it" 'accepted "[a.b.c]\n[a]\nb.d = 1\n[a.b]\n"' \
   $'        child.dotted = true\n' ''
 prove_caught "dotted keys may add to a table a header declared" 'accepted "[a.b.c]\nz = 9\n[a]\nb.c.t = 9\n"' \
   $'        if child.explicit\n          return fail("dotted keys add' $'        if false\n          return fail("dotted keys add'
 prove_caught "an inline table takes a trailing comma" 'refusal of "a = {b = 1,}\n"' \
-  $'      return fail("a comma after the last pair of an inline table", @pos) if @bytes[@pos] == 125_u8\n' ''
+  $'      if @bytes[pos] == 125_u8\n        return fail("a comma after the last pair' $'      if false\n        return fail("a comma after the last pair'
 
 # Bounds, values, the writer.
 prove_caught "nesting is unbounded" 'accepted 135 bytes nested past DEPTH_LIMIT' \
@@ -408,11 +405,11 @@ prove_caught "two NaNs are different values" 'reads to the value it was written 
 prove_caught "the dump writes control characters raw" 'the dump reads back: refused with' \
   'if b == 34_u8 || b == 92_u8 || b < 32_u8 || b == 127_u8' 'if b == 34_u8 || b == 92_u8'
 prove_caught "the dump writes NaN as the prelude spells it" "the dump reads back: refused with 'N' cannot start a value" \
-  $'    return "nan" if f != f\n' ''
+  $'      writer << "nan"\n' $'      writer << "NaN"\n'
 prove_caught "the dump writes the empty key bare" 'cannot start a key' \
-  $'    return quoted(key) if key.empty?\n' ''
+  $'    return TapeWriter.quoted(view(key), @out) if key.empty?\n' $''
 prove_caught "an integer past Int32 is narrowed" 'an integer past Int32 is refused' \
-  'raise "integer #{v} out of Int32 range" if v < -2147483648_i64 || v > 2147483647_i64' 'raise "integer #{v} out of Int32 range" if v < -2147483648_i64 || v > 4294967296_i64'
+  $'    if v < -2147483648_i64 || v > 2147483647_i64\n      raise "integer #{v} out of Int32 range"' $'    if v < -2147483648_i64 || v > 4294967296_i64\n      raise "integer #{v} out of Int32 range"'
 prove_caught "a field's default is not asked for" 'missing keys keep their defaults' \
   'ivar.has_default_value? } %}' 'ivar.has_default_value? && false } %}'
 
