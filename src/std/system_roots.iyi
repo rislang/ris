@@ -41,6 +41,7 @@
 
 module std/system_roots
 
+import std/int
 import std/x509::{Certificate, X509Error}
 import std/env::{ENV}
 import std/dir::{Dir}

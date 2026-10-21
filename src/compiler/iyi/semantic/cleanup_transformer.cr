@@ -331,7 +331,10 @@ module Iyi
     def transform(node : Assign)
       reset_last_status
 
-      if void_lib_call?(node.value)
+      # A compiler temporary is exempt: a tape scope keeps its body's
+      # value in one, and the body may be a Void lib call.
+      target_name = node.target.as?(Var).try(&.name)
+      if void_lib_call?(node.value) && !target_name.try(&.starts_with?("__temp_"))
         node.value.raise "assigning Void return value of lib fun call has no effect"
       end
 
