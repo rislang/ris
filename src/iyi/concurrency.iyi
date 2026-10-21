@@ -1758,7 +1758,10 @@ class IyiScheduler
     {% else %}
       # EPOLL_CTL_ADD (1) for the fd's first waiter, EPOLL_CTL_MOD (3) to
       # add a direction to one already there; the data is the fd itself.
-      event = Pointer(UInt8).malloc(16_u64)
+      # The event on the stack: the kernel copies it, and a wait is no
+      # reason to allocate.
+      storage = uninitialized UInt64[2]
+      event = pointerof(storage).as(Pointer(UInt8))
       event.as(Pointer(UInt64)).value = (others | direction).to_u64
       Pointer(UInt64).new(event.address + IYI_POLL_DATA_OFFSET).value = fd.to_u64
       added = __iyi_conc_syscall6(IYI_SYS_EPOLL_CTL, pollfd, others == 0 ? 1_i64 : 3_i64, fd.to_i64, event.address.to_i64, 0_i64, 0_i64)
@@ -2419,7 +2422,8 @@ class IyiScheduler
       if remaining == 0
         __iyi_conc_syscall6(IYI_SYS_EPOLL_CTL, pollfd, 2_i64, fiber.wait_fd.to_i64, 0_i64, 0_i64, 0_i64)
       else
-        event = Pointer(UInt8).malloc(16_u64)
+        storage = uninitialized UInt64[2]
+        event = pointerof(storage).as(Pointer(UInt8))
         event.as(Pointer(UInt64)).value = remaining.to_u64
         Pointer(UInt64).new(event.address + IYI_POLL_DATA_OFFSET).value = fiber.wait_fd.to_u64
         __iyi_conc_syscall6(IYI_SYS_EPOLL_CTL, pollfd, 3_i64, fiber.wait_fd.to_i64, event.address.to_i64, 0_i64, 0_i64)
