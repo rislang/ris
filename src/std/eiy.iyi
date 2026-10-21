@@ -563,10 +563,19 @@ pub struct Eiy
   def self.process_string(string : Tape::String,
                           w : Tape::String::Writer, filename : String = "",
                           io_name : String = DefaultIoName) : Nil
-    lexer = TapeLexer.new(string)
-    return if generate(lexer, filename, io_name, w)
-    sentence = lexer.error || "template refused"
+    return if generate(TapeLexer.new(string), filename, io_name, w)
+    sentence = lex_error(string) || "template refused"
     raise filename.empty? ? sentence : "#{filename}: #{sentence}"
+  end
+
+  # The lexer's sentence for *string*. `generate` takes the lexer, a
+  # struct, by copy, so its error is read again from a lexer of its own.
+  private def self.lex_error(string : Tape::String) : String?
+    lexer = TapeLexer.new(string)
+    while token = lexer.next_token?
+      return nil if token.eof?
+    end
+    lexer.error
   end
 
   # `process_string?` of the file at *filename*.
