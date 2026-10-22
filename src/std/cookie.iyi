@@ -346,7 +346,7 @@ pub struct TapeCookie
   # `Max-Age`'s digits, with a sign (§5.2.2); nil for anything else.
   private def self.seconds(text : Tape::String) : Int64?
     return nil if text.bytesize == 0
-    p = text.to_unsafe
+    p = text
     negative = p[0] == 45_u8
     i = negative ? 1 : 0
     return nil if i == text.bytesize
@@ -360,10 +360,10 @@ pub struct TapeCookie
   end
 
   def to_set_cookie(text : Tape::String::Writer) : Nil
-    unless HTTP.token?(@name.to_unsafe, @name.bytesize)
+    unless HTTP.token?(@name)
       raise "Cookie: not a cookie name: #{@name.to_heap.inspect}"
     end
-    p = @value.to_unsafe
+    p = @value
     i = 0
     while i < @value.bytesize
       c = p[i]

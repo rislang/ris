@@ -56,7 +56,7 @@ pub struct INI
 
     lines.each do |line|
       lineno += 1
-      raw = line.to_unsafe
+      raw = line
       len = line.bytesize
       len -= 1 if len > 0 && raw[len - 1] == 13_u8 # a CRLF file's '\r'
 
@@ -121,7 +121,7 @@ pub struct INI
   # The 1-based character column of byte *index* in *line*: every byte
   # that is not a UTF-8 continuation byte begins a character.
   private def self.column(line : Tape::String, index : Int32) : Int32
-    raw = line.to_unsafe
+    raw = line
     count = 0
     i = 0
     while i < index

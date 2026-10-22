@@ -1,0 +1,5 @@
+module le_string_read
+
+tape do
+  "abc".as_tape.read_bytes_at(UInt32, -1)
+end

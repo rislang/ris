@@ -406,7 +406,7 @@ pub class SmtpClient
 
   def self.stuffed(data : Tape::String,
                    io : Tape::String::Writer) : Nil
-    p = data.to_unsafe
+    p = data
     n = data.bytesize
     start = true
     i = 0

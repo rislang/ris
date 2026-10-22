@@ -348,7 +348,6 @@ pub struct Eiy
     end
 
     @string : Tape::String
-    @bytes : Pointer(UInt8)
     @len : Int32
     @pos : Int32
     @line_number : Int32
@@ -357,7 +356,6 @@ pub struct Eiy
     @error : String
 
     def initialize(@string : Tape::String)
-      @bytes = @string.to_unsafe
       @len = @string.bytesize
       @pos = 0
       @line_number = 1
@@ -456,7 +454,7 @@ pub struct Eiy
           @column_number = 0
         elsif b == 45_u8 && peek_byte == 37_u8 # '-' and '%'
           # Only `-%>` closes; a `-%` followed by anything else is code.
-          if @pos + 2 < @len && @bytes[@pos + 2] == 62_u8 # '>'
+          if @pos + 2 < @len && @string[@pos + 2] == 62_u8 # '>'
             end_pos = @pos
             next_byte # skip '-'
             next_byte # skip '%'
@@ -503,11 +501,11 @@ pub struct Eiy
     end
 
     private def current_byte : UInt8
-      @pos < @len ? @bytes[@pos] : 0_u8
+      @pos < @len ? @string[@pos] : 0_u8
     end
 
     private def peek_byte : UInt8
-      @pos + 1 < @len ? @bytes[@pos + 1] : 0_u8
+      @pos + 1 < @len ? @string[@pos + 1] : 0_u8
     end
 
     # Advances one byte; the column advances one character, so a UTF-8
@@ -816,7 +814,7 @@ pub struct Eiy
   private def self.quote(text : Tape::String,
                          parts : Tape::String::Writer) : Nil
     parts << "\""
-    raw = text.to_unsafe
+    raw = text
     len = text.bytesize
     run_start = 0
     i = 0
@@ -864,7 +862,8 @@ pub struct Eiy
   # How many bytes the UTF-8 character starting at *i* takes, or 0 when the
   # bytes there are not one. The compiler reads a literal as UTF-8 and stops
   # at a byte that is not, so such a byte has to be written as `\x`.
-  private def self.utf8_size(raw : Pointer(UInt8), i : Int32, len : Int32) : Int32
+  private def self.utf8_size(raw : Pointer(UInt8) | Tape::String,
+                             i : Int32, len : Int32) : Int32
     b = raw[i].to_i32
     lo = 0x80
     hi = 0xBF
@@ -955,7 +954,7 @@ pub struct Eiy
 
   private def self.suppress_leading_indentation(token : TapeLexer::Token, string : Tape::String, opens_line : Bool) : Tape::String
     if (token.output? || token.control?) && token.suppress_leading?
-      raw = string.to_unsafe
+      raw = string
       len = string.bytesize
       start_idx = 0
       i = len - 1

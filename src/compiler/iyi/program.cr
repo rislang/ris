@@ -1439,6 +1439,11 @@ module Iyi
       # an index checked in its body (Goose's `checkfree fn`).
       types["CheckFree"] = @check_free_annotation =
         AnnotationType.new self, self, "CheckFree"
+      # ris: `@[TapeUnsafe]` on a `std/` def lifts the tape's rules from its
+      # body: raw pointers into tape text and copies off the tape
+      # (`Iyi::TapeRules`). Refused outside `std/`.
+      types["TapeUnsafe"] = @tape_unsafe_annotation =
+        AnnotationType.new self, self, "TapeUnsafe"
 
       # iyi: the marker that makes a union member an error member (SPEC.md
       # III.1.1). Created here rather than declared in the prelude because the
@@ -1773,6 +1778,7 @@ module Iyi
                      raises_annotation primitive_annotation call_convention_annotation
                      flags_annotation link_annotation extern_annotation deprecated_annotation experimental_annotation
                      share_annotation tape_annotation tape_to_heap_annotation check_free_annotation
+                     tape_unsafe_annotation
                      error_trait) %}
       def {{name.id}}
         @{{name.id}}.not_nil!

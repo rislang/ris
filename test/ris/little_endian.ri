@@ -1,0 +1,60 @@
+module little_endian
+
+import std/int
+tape do
+  pool = Tape::Array(UInt8).new(0)
+  pool << 99_u8
+  at = pool.size
+  pool.write_bytes(0xfedc_u16)
+  exit 1 unless pool.read_bytes_at(UInt16, at) == 0xfedc_u16
+  exit 1 unless pool.write_bytes_at(at, 0_u16) == 0_u16
+  exit 1 unless pool.read_bytes_at(UInt16, at) == 0_u16
+  pool.write_bytes_at(at, 0xfedc_u16)
+  exit 1 unless pool.read_bytes_at(UInt16, at) == 0xfedc_u16
+  at = pool.size
+  pool.write_bytes(0xfedcba98_u32)
+  exit 1 unless pool.read_bytes_at(UInt32, at) == 0xfedcba98_u32
+  exit 1 unless pool.write_bytes_at(at, 0_u32) == 0_u32
+  exit 1 unless pool.read_bytes_at(UInt32, at) == 0_u32
+  pool.write_bytes_at(at, 0xfedcba98_u32)
+  exit 1 unless pool.read_bytes_at(UInt32, at) == 0xfedcba98_u32
+  at = pool.size
+  pool.write_bytes(0xfedcba9876543210_u64)
+  exit 1 unless pool.read_bytes_at(UInt64, at) == 0xfedcba9876543210_u64
+  exit 1 unless pool.write_bytes_at(at, 0_u64) == 0_u64
+  exit 1 unless pool.read_bytes_at(UInt64, at) == 0_u64
+  pool.write_bytes_at(at, 0xfedcba9876543210_u64)
+  exit 1 unless pool.read_bytes_at(UInt64, at) == 0xfedcba9876543210_u64
+  at = pool.size
+  pool.write_bytes(-123_i16)
+  exit 1 unless pool.read_bytes_at(Int16, at) == -123_i16
+  exit 1 unless pool.write_bytes_at(at, 0_i16) == 0_i16
+  exit 1 unless pool.read_bytes_at(Int16, at) == 0_i16
+  pool.write_bytes_at(at, -123_i16)
+  exit 1 unless pool.read_bytes_at(Int16, at) == -123_i16
+  at = pool.size
+  pool.write_bytes(-123456_i32)
+  exit 1 unless pool.read_bytes_at(Int32, at) == -123456_i32
+  exit 1 unless pool.write_bytes_at(at, 0_i32) == 0_i32
+  exit 1 unless pool.read_bytes_at(Int32, at) == 0_i32
+  pool.write_bytes_at(at, -123456_i32)
+  exit 1 unless pool.read_bytes_at(Int32, at) == -123456_i32
+  at = pool.size
+  pool.write_bytes(-123456789_i64)
+  exit 1 unless pool.read_bytes_at(Int64, at) == -123456789_i64
+  exit 1 unless pool.write_bytes_at(at, 0_i64) == 0_i64
+  exit 1 unless pool.read_bytes_at(Int64, at) == 0_i64
+  pool.write_bytes_at(at, -123456789_i64)
+  exit 1 unless pool.read_bytes_at(Int64, at) == -123456789_i64
+  exit 1 unless pool[1] == 0xdc_u8 && pool[2] == 0xfe_u8
+  text = "x\x78\x56\x34\x12".as_tape
+  exit 1 unless text.read_bytes_at(UInt32, 1) == 0x12345678_u32
+  text = "x\xff\xff\xff\xff\xff\xff\xff\xff".as_tape
+  exit 1 unless text.read_bytes_at(UInt16, 1) == 0xffff_u16
+  exit 1 unless text.read_bytes_at(UInt32, 1) == 0xffffffff_u32
+  exit 1 unless text.read_bytes_at(UInt64, 1) == 0xffffffffffffffff_u64
+  exit 1 unless text.read_bytes_at(Int16, 1) == -1_i16
+  exit 1 unless text.read_bytes_at(Int32, 1) == -1_i32
+  exit 1 unless text.read_bytes_at(Int64, 1) == -1_i64
+end
+puts "PASS"

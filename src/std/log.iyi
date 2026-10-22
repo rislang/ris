@@ -158,8 +158,14 @@ pub abstract class Formatter
       format(entry, w)
       w.push(10_u8)
       line = w.finish
-      io.write(line.to_unsafe, line.bytesize)
+      write_line(io, line)
     end
+  end
+
+  # IO's byte write interface requires a pointer and a byte count.
+  @[TapeUnsafe]
+  private def write_line(io : IO, line : Tape::String) : Nil
+    io.write(line.to_unsafe, line.bytesize)
   end
 
   # The line written into the caller's *writer*: `format(entry)` unless a

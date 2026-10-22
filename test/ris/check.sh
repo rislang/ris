@@ -28,6 +28,7 @@ expect struct_field  "is a struct that is not @[OnTape]"
 expect class_var     "the class variable"
 expect generic_array "Array("
 expect proc_capture  "this block becomes a proc"
+expect integer_text  "integer / in text gives a Float"
 expect outer_var     "is a variable of the code around this tape block"
 expect scope_value   "undefined method 'id' for Nil"
 expect yield_escape "is a variable of the code around this tape block"
@@ -46,8 +47,12 @@ expect local_self 'cannot use outer tape value `self`'
 expect local_return "cannot return a tape value"
 expect local_break "cannot break a tape value"
 expect local_yield_break "cannot break a tape value"
-expect raw_pointer      "to_unsafe\` of a Tape::String outside the library"
-expect raw_view         "Tape::String.new(pointer, size)\` outside the library"
+expect raw_pointer      "to_unsafe\` of a Tape::String outside a @[TapeUnsafe] def"
+expect raw_view         "Tape::String.new(pointer, size)\` outside a @[TapeUnsafe] def"
+expect std/tape_unsafe_codec "reaches no \`lib\` fun or system call"
+expect std/tape_unsafe_no_pointer "hands no tape pointer to the OS"
+expect tape_pointer "\`unsafe_append\` outside a @[TapeUnsafe] def"
+expect std/tape_pointer_codec "the pointer \`unsafe_append\` yields reaches no"
 expect writer_grow      "private method 'grow' called for Tape::String::Writer"
 expect tree_entry       "private constant Tape::Tree::Entry(T) referenced"
 expect array_grow       "private method 'grow' called for Tape::Array(T)"
@@ -135,6 +140,8 @@ out=$("$RIS" run test/ris/writer.ri 2>&1)
 if [ "$out" = '0 -42 9223372036854775807 -9223372036854775808 a&amp;b&lt;c&gt;&quot;d&#39;e <b>' ]; then echo "runs     writer"; else echo "FAILED   writer: $out"; status=1; fi
 
 # Two pieces, String or on the tape, go out in one socket write.
+out=$("$RIS" run test/ris/tape_primitives.ri 2>&1)
+if [ "$out" = 'PASS: write_bytes, shift and Tape::Scanner' ]; then echo "runs     tape_primitives"; else echo "FAILED   tape_primitives: $out"; status=1; fi
 out=$("$RIS" run test/ris/socket_pair.ri 2>&1)
 if [ "$out" = 'PASS: two pieces in one write, String and on the tape, 1 MiB' ]; then echo "runs     socket_pair"; else echo "FAILED   socket_pair: $out"; status=1; fi
 out=$("$RIS" run test/ris/socket_pieces.ri 2>&1)
@@ -244,5 +251,57 @@ else
   echo "FAILED   hpack: $out"
   status=1
 fi
+
+
+# Fixed-width fields, buffered tape lines, and integer text diagnostics.
+out=$("$RIS" run test/ris/little_endian.ri 2>&1)
+if [ "$out" = PASS ]; then
+  echo "runs     little_endian"
+else
+  echo "FAILED   little_endian: $out"
+  status=1
+fi
+out=$(python3 -c 'import sys
+sys.stdout.write("the first line\n" + ("y" * 100 + "\n") * 20000)' |
+  "$RIS" run test/ris/line_tape_keep.ri 2>&1)
+if [ "$out" = PASS ]; then
+  echo "runs     line_tape_keep"
+else
+  echo "FAILED   line_tape_keep: $out"
+  status=1
+fi
+out=$(python3 -c 'import sys
+sys.stdout.write("\n" + "x" * 20000 + "\r\n")
+sys.stdout.write("hello\r\n" * 10000 + "tail\r")' |
+  "$RIS" run test/ris/line_tape.ri 2>&1)
+if [ "$out" = PASS ]; then
+  echo "runs     line_tape"
+else
+  echo "FAILED   line_tape: $out"
+  status=1
+fi
+out=$("$RIS" run test/ris/refill_default_init.ri 2>&1)
+if [ "$out" = PASS ]; then
+  echo "runs     refill_default_init"
+else
+  echo "FAILED   refill_default_init: $out"
+  status=1
+fi
+out=$("$RIS" check test/ris/integer_text_floor.ri 2>&1)
+if [ $? -ne 0 ]; then
+  echo "FAILED   integer_text_floor: $out"
+  status=1
+fi
+for name in le_array_read le_array_write le_string_read le_offset_overflow; do
+  out=$("$RIS" run "test/ris/$name.ri" 2>&1)
+  code=$?
+  if [ "$code" -ne 0 ] &&
+      grep -qF 'little-endian field out of range' <<<"$out"; then
+    echo "refused  $name"
+  else
+    echo "FAILED   $name: $out"
+    status=1
+  fi
+done
 
 exit $status

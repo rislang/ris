@@ -334,7 +334,7 @@ pub struct TOMLDateTime
       if @nanosecond != 0
         digits = TOMLDateTime.padded(@nanosecond, 9)
         count = 9
-        while digits.to_unsafe[count - 1] == 48_u8
+        while digits[count - 1] == 48_u8
           count = count - 1
         end
         text << "." << digits[0, count]
@@ -1068,9 +1068,9 @@ end
 # that stops the read, passed up with `!`; nothing is raised inside.
 @[OnTape]
 struct TapeReader
-  @bytes : Pointer(UInt8)
+  @bytes : Tape::String
 
-  def bytes : Pointer(UInt8)
+  def bytes : Tape::String
     @bytes
   end
 
@@ -1128,7 +1128,7 @@ struct TapeReader
       IyiRegion.tape_bytes(sizeof(TapeTable).to_u64))
     @path = Pointer(Tape::Array(Tape::String)).new(
       IyiRegion.tape_bytes(sizeof(Tape::Array(Tape::String)).to_u64))
-    @bytes = text.to_unsafe
+    @bytes = text
     @size = text.bytesize
     @pos.value = 0
     @root = TapeTable.new(0, true, false)
@@ -1187,13 +1187,7 @@ struct TapeReader
       return "the control character U+#{b.to_s(16).upcase.rjust(4, '0')}"
     end
     return "'#{b.unsafe_chr}'" if b < 128_u8
-    "'#{TapeReader.text_of(@bytes + at, sequence_size(b))}'"
-  end
-
-  # `count` bytes at `source`, as a string of their own.
-  protected def self.text_of(source : Pointer(UInt8),
-                             count : Int32) : Tape::String
-    Tape::String.new(source, count)
+    "'#{@bytes[at, sequence_size(b)].to_heap}'"
   end
 
   private def sequence_size(b : UInt8) : Int32
@@ -1356,7 +1350,7 @@ struct TapeReader
     while pos < @size && bare?(@bytes[pos])
       self.pos = pos + 1
     end
-    TapeReader.text_of(@bytes + start, pos - start)
+    @bytes[start, pos - start]
   end
 
   # The dotted name of the first `count` parts of `path` + `parts`.
@@ -1383,14 +1377,16 @@ struct TapeReader
   private def closed(slot : TapeSlot, what : Tape::String) : String
     value = slot.value
     if value.kind == TapeAny::KIND_TABLE
-      return "the inline table #{what} is closed: no header or dotted key " \
+      return "the inline table #{what.to_heap} is closed: no header or " \
+             "dotted key " \
              "adds to it"
     end
     if value.kind == TapeAny::KIND_ARRAY
-      return "the array #{what} was written as a value, which no header or " \
+      return "the array #{what.to_heap} was written as a value, which no " \
+             "header or " \
              "dotted key adds to"
     end
-    "#{what} is #{value.kind_name}, not a table"
+    "#{what.to_heap} is #{value.kind_name}, not a table"
   end
 
   # `key = value`, into `table`, whose header's key is `path`.
@@ -1426,15 +1422,17 @@ struct TapeReader
         if child.nil?
           what = name(path, parts, i + 1)
           if slot.kind == TapeSlot::TABLES
-            return fail("#{what} is an array of tables, which dotted keys " \
+            return fail("#{what.to_heap} is an array of tables, which " \
+                        "dotted keys " \
                         "do not add to", starts[i])
           end
           return fail(closed(slot, what), starts[i])
         end
         if child.explicit
           return fail("dotted keys add to the table " \
-                      "#{name(path, parts, i + 1)}, which a " \
-                      "[#{name(path, parts, i + 1)}] header declared", starts[i])
+                      "#{name(path, parts, i + 1).to_heap}, which a " \
+                      "[#{name(path, parts, i + 1).to_heap}] header declared",
+            starts[i])
         end
         child.dotted = true
         t = child
@@ -1443,7 +1441,8 @@ struct TapeReader
     end
     last = parts[parts.size - 1]
     unless t.slots[last]?.nil?
-      return fail("the key #{name(path, parts, parts.size)} is defined " \
+      return fail("the key #{name(path, parts, parts.size).to_heap} is " \
+                  "defined " \
                   "twice", starts[parts.size - 1])
     end
     t.slots[last] = TapeSlot.value(item)
@@ -1504,7 +1503,8 @@ struct TapeReader
           target = TapeTable.new(t.depth + 1, true, false)
           list << target
         elsif slot.kind == TapeSlot::TABLE
-          return fail("[[#{whole}]] names the table #{whole}, not an array " \
+          return fail("[[#{whole.to_heap}]] names the table " \
+                      "#{whole.to_heap}, not an array " \
                       "of tables", starts[parts.size - 1])
         else
           return fail(closed(slot, whole), starts[parts.size - 1])
@@ -1518,17 +1518,17 @@ struct TapeReader
         child = slot.table
         if child.nil?
           if slot.kind == TapeSlot::TABLES
-            return fail("[#{whole}] names an array of tables, which " \
-                        "[[#{whole}]] adds to", starts[parts.size - 1])
+            return fail("[#{whole.to_heap}] names an array of tables, which " \
+                        "[[#{whole.to_heap}]] adds to", starts[parts.size - 1])
           end
           return fail(closed(slot, whole), starts[parts.size - 1])
         end
         if child.explicit
-          return fail("the table [#{whole}] is declared twice",
+          return fail("the table [#{whole.to_heap}] is declared twice",
             starts[parts.size - 1])
         end
         if child.dotted
-          return fail("[#{whole}] declares a table dotted keys made",
+          return fail("[#{whole.to_heap}] declares a table dotted keys made",
             starts[parts.size - 1])
         end
         child.explicit = true
@@ -1565,7 +1565,8 @@ struct TapeReader
 
   private def no_equals(path : Tape::Array(Tape::String),
                         parts : Tape::Array(Tape::String)) : TOMLError
-    fail("#{found(pos)} after the key #{name(path, parts, parts.size)}, " \
+    fail("#{found(pos)} after the key " \
+         "#{name(path, parts, parts.size).to_heap}, " \
          "where '=' should be", pos)
   end
 
@@ -1765,7 +1766,7 @@ struct TapeReader
       break unless bare?(b) || b == 43_u8 || b == 46_u8
       stop = stop + 1
     end
-    token = TapeReader.text_of(@bytes + start, stop - start)
+    token = @bytes[start, stop - start]
     i = start
     negative = false
     signed = false
@@ -1776,7 +1777,7 @@ struct TapeReader
     end
     rest = stop - i
     if rest == 3 && (@bytes[i] == 105_u8 || @bytes[i] == 110_u8)
-      word = TapeReader.text_of(@bytes + i, 3)
+      word = @bytes[i, 3]
       if word == "inf"
         self.pos = stop
         return TapeAny.new(negative ? -1.0 / 0.0 : 1.0 / 0.0)
@@ -1790,18 +1791,22 @@ struct TapeReader
        @bytes[i + 1] == 111_u8 || @bytes[i + 1] == 98_u8)
       radix = @bytes[i + 1] == 120_u8 ? 16 : (@bytes[i + 1] == 111_u8 ? 8 : 2)
       if signed
-        return fail("a sign before #{token}, which only a decimal number " \
+        return fail("a sign before #{token.to_heap}, which only a decimal " \
+                    "number " \
                     "may have", start)
       end
       finish = digit_run(i + 2, stop, radix)
-      return fail("#{token} is not a number", start) unless finish == stop
+      unless finish == stop
+        return fail("#{token.to_heap} is not a number", start)
+      end
       value = 0_u64
       j = i + 2
       while j < stop
         d = radix_digit(@bytes[j], radix)
         if d >= 0
           if value > (9223372036854775807_u64 - d.to_u64) // radix.to_u64
-            return fail("#{token} is past 9223372036854775807, the largest " \
+            return fail("#{token.to_heap} is past 9223372036854775807, the " \
+                        "largest " \
                         "TOML integer", start)
           end
           value = value * radix.to_u64 + d.to_u64
@@ -1812,25 +1817,30 @@ struct TapeReader
       return TapeAny.new(value.to_i64)
     end
     whole = digit_run(i, stop, 10)
-    return fail("#{token} is not a number", start) if whole < 0
+    return fail("#{token.to_heap} is not a number", start) if whole < 0
     if @bytes[i] == 48_u8 && whole > i + 1
-      return fail("#{token} has a leading zero, which only 0 may", start)
+      return fail("#{token.to_heap} has a leading zero, which only 0 may",
+        start)
     end
     j = whole
     float = false
     if j < stop && @bytes[j] == 46_u8
       j = digit_run(j + 1, stop, 10)
-      return fail("#{token} needs a digit after its '.'", start) if j < 0
+      if j < 0
+        return fail("#{token.to_heap} needs a digit after its '.'", start)
+      end
       float = true
     end
     if j < stop && (@bytes[j] == 101_u8 || @bytes[j] == 69_u8)
       j = j + 1
       j = j + 1 if j < stop && (@bytes[j] == 43_u8 || @bytes[j] == 45_u8)
       j = digit_run(j, stop, 10)
-      return fail("#{token} needs digits in its exponent", start) if j < 0
+      if j < 0
+        return fail("#{token.to_heap} needs digits in its exponent", start)
+      end
       float = true
     end
-    return fail("#{token} is not a number", start) unless j == stop
+    return fail("#{token.to_heap} is not a number", start) unless j == stop
     self.pos = stop
     if float
       text = Tape::String::Writer.new(64)
@@ -1850,7 +1860,7 @@ struct TapeReader
       unless b == 95_u8
         d = (b - 48_u8).to_u64
         if value > (limit - d) // 10_u64
-          return fail("#{token} is outside -9223372036854775808 to " \
+          return fail("#{token.to_heap} is outside -9223372036854775808 to " \
                       "9223372036854775807, the TOML integers", start)
         end
         value = value * 10_u64 + d
@@ -2007,8 +2017,8 @@ struct TapeReader
         return fail("\\#{e.unsafe_chr} takes #{count} hexadecimal digits", pos)
       end
       if (point >= 0xD800 && point <= 0xDFFF) || point > 0x10FFFF
-        shown = TapeReader.text_of(@bytes + pos + 2, count)
-        return fail("\\#{e.unsafe_chr}#{shown} is not a Unicode " \
+        shown = @bytes[pos + 2, count]
+        return fail("\\#{e.unsafe_chr}#{shown.to_heap} is not a Unicode " \
                     "scalar value", pos)
       end
       write_codepoint(text, point.to_i32)
@@ -2032,13 +2042,13 @@ struct TapeReader
       if b == 34_u8
         self.pos = pos + 1
         if writer = text
-          writer.append(@bytes + run, pos - run - 1)
+          writer << @bytes[run, pos - run - 1]
           return writer.finish
         end
-        return TapeReader.text_of(@bytes + start + 1, pos - start - 2)
+        return @bytes[start + 1, pos - start - 2]
       elsif b == 92_u8
         writer = text || Tape::String::Writer.new(64)
-        writer.append(@bytes + run, pos - run)
+        writer << @bytes[run, pos - run]
         escape(writer)!
         text = writer
         run = pos
@@ -2061,7 +2071,7 @@ struct TapeReader
       b = @bytes[pos]
       if b == 39_u8
         self.pos = pos + 1
-        return TapeReader.text_of(@bytes + start + 1, pos - start - 2)
+        return @bytes[start + 1, pos - start - 2]
       elsif b == 10_u8 || b == 13_u8
         return fail("a line break in a single-line string", pos)
       elsif control?(b)
@@ -2166,7 +2176,7 @@ struct TapeReader
                    control?(c)
           self.pos = pos + 1
         end
-        text.append(@bytes + run, pos - run)
+        text << @bytes[run, pos - run]
       end
     end
   end
@@ -2222,7 +2232,7 @@ struct TapeReader
           break if c == 39_u8 || c == 10_u8 || c == 13_u8 || control?(c)
           self.pos = pos + 1
         end
-        text.append(@bytes + run, pos - run)
+        text << @bytes[run, pos - run]
       end
     end
   end
@@ -2298,7 +2308,7 @@ struct TapeWriter
   # A key bare where the bare set allows, else a basic string.
   def key(key : String | Tape::String) : Nil
     return TapeWriter.quoted(view(key), @out) if key.empty?
-    bytes = key.to_unsafe
+    bytes = key.is_a?(String) ? key.to_unsafe : key
     i = 0
     while i < key.bytesize
       b = bytes[i]
@@ -2317,14 +2327,14 @@ struct TapeWriter
   def self.quoted(text : Tape::String,
                   output : Tape::String::Writer) : Nil
     output.push(34_u8)
-    bytes = text.to_unsafe
+    bytes = text
     run = 0
     i = 0
     n = text.bytesize
     while i < n
       b = bytes[i]
       if b == 34_u8 || b == 92_u8 || b < 32_u8 || b == 127_u8
-        output.append(bytes + run, i - run)
+        output << bytes[run, i - run]
         if b == 34_u8
           output << "\\\""
         elsif b == 92_u8
@@ -2349,7 +2359,7 @@ struct TapeWriter
       end
       i = i + 1
     end
-    output.append(bytes + run, n - run)
+    output << bytes[run, n - run]
     output.push(34_u8)
   end
 
@@ -2752,7 +2762,7 @@ end
 
 module TapeNumbers
   def self.parse(text : Tape::String) : Float64
-    bytes = text.to_unsafe
+    bytes = text
     size = text.bytesize
     raise "not a number: #{text.inspect}" if size == 0
     at = 0
@@ -2762,10 +2772,10 @@ module TapeNumbers
       at = 1
     end
     rest = size - at
-    if rest == 8 && IyiFloatText.tail_is?(bytes + at, "Infinity")
+    if rest == 8 && text[at, rest] == "Infinity"
       return IyiFloatText.from_bits(negative ? 18442240474082181120_u64 : 9218868437227405312_u64)
     end
-    if rest == 3 && IyiFloatText.tail_is?(bytes + at, "NaN")
+    if rest == 3 && text[at, rest] == "NaN"
       return IyiFloatText.from_bits(9221120237041090560_u64)
     end
 
@@ -2832,7 +2842,7 @@ module TapeNumbers
   # 767 that can decide a double, any beyond only telling whether the rest
   # is zero - and the quotient taken to 54 bits with a sticky remainder.
   def self.parse_exact(text : Tape::String) : Float64
-    bytes = text.to_unsafe
+    bytes = text
     size = text.bytesize
     at = 0
     negative = false
@@ -2841,10 +2851,10 @@ module TapeNumbers
       at = 1
     end
     rest = size - at
-    if rest == 8 && IyiFloatText.tail_is?(bytes + at, "Infinity")
+    if rest == 8 && text[at, rest] == "Infinity"
       return IyiFloatText.from_bits(negative ? 18442240474082181120_u64 : 9218868437227405312_u64)
     end
-    if rest == 3 && IyiFloatText.tail_is?(bytes + at, "NaN")
+    if rest == 3 && text[at, rest] == "NaN"
       return IyiFloatText.from_bits(9221120237041090560_u64)
     end
 

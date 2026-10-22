@@ -97,6 +97,38 @@ module Tape
       @ptr[index]
     end
 
+    # One byte-range check, then one load where words are little-endian
+    # and a load need not be aligned; elsewhere a copy into an aligned
+    # local, its bytes turned around.
+    def read_bytes_at(type : I.class, at : Int32) : I forall I
+      {% unless I == UInt16 || I == UInt32 || I == UInt64 ||
+                I == Int16 || I == Int32 || I == Int64 %}
+        {% raise "little-endian fields need a 16/32/64-bit integer" %}
+      {% end %}
+      width = sizeof(I)
+      if at < 0 || at > @bytesize - width
+        raise "little-endian field out of range"
+      end
+      {% if flag?(:x86_64) || flag?(:aarch64) || flag?(:i386) %}
+        return (@ptr + at).as(Pointer(I)).value
+      {% end %}
+      value = uninitialized I
+      target = pointerof(value).as(Pointer(UInt8))
+      target.copy_from(@ptr + at, width)
+      {% unless flag?(:x86_64) || flag?(:aarch64) || flag?(:arm) ||
+                flag?(:i386) || flag?(:wasm32) %}
+        i = 0
+        while i < sizeof(I) // 2
+          j = sizeof(I) - i - 1
+          byte = target[i]
+          target[i] = target[j]
+          target[j] = byte
+          i = i + 1
+        end
+      {% end %}
+      value
+    end
+
     # *count* bytes from *start*, a view of these: nothing is copied.
     def [](start : Int32, count : Int32) : String
       raise "bytes #{start}, #{count} out of range for #{@bytesize}" if start < 0 || count < 0 || start > @bytesize - count
@@ -321,8 +353,17 @@ module Tape
       prefix.bytesize <= @bytesize && String.new(@ptr, prefix.bytesize) == prefix
     end
 
+    # Eight bytes a step, as `String#==` does: keys and paths, a hash
+    # table's every probe, are mostly shorter than its 32-byte stride.
     private def same?(other : Pointer(UInt8)) : Bool
+      return true if @ptr.address == other.address
       i = 0
+      while i + 8 <= @bytesize
+        x = (@ptr + i).as(Pointer(UInt64))
+        y = (other + i).as(Pointer(UInt64))
+        return false unless x.value == y.value
+        i = i + 8
+      end
       while i < @bytesize
         return false if @ptr[i] != other[i]
         i = i + 1
@@ -432,6 +473,55 @@ module Tape
       end
       LibTapeCopy.memcpy(Pointer(UInt8).new(cursor), bytes, count.to_u64, false) if count > 0
       @state.value = cursor &+ count.to_u64
+    end
+
+    # Room for *max* bytes, its address yielded for the OS to write into;
+    # the block answers how many it wrote. Only a `@[TapeUnsafe]` def calls
+    # it, and only to hand the address to a system call: `socket.read`
+    # (TapePointerChecker).
+    def unsafe_append(max : Int32, & : Pointer(UInt8) -> Int32) : Int32
+      raise "negative room: #{max}" if max < 0
+      reserve(length + max)
+      cursor = @state.value
+      written = yield Pointer(UInt8).new(cursor)
+      raise "wrote #{written} bytes into room for #{max}" if written > max
+      @state.value = cursor &+ written.to_u64 if written > 0
+      written
+    end
+
+    # *value*'s bytes, little-endian, as `Tape::Array#write_bytes` writes
+    # them: a codec writes a word at a time.
+    def write_bytes(value : I) : Nil forall I
+      {% unless I == UInt16 || I == UInt32 || I == UInt64 ||
+                I == Int16 || I == Int32 || I == Int64 %}
+        {% raise "little-endian fields need a 16/32/64-bit integer" %}
+      {% end %}
+      stored = value
+      bytes = pointerof(stored).as(Pointer(UInt8))
+      {% unless flag?(:x86_64) || flag?(:aarch64) || flag?(:arm) ||
+                flag?(:i386) || flag?(:wasm32) %}
+        i = 0
+        while i < sizeof(I) // 2
+          j = sizeof(I) - i - 1
+          byte = bytes[i]
+          bytes[i] = bytes[j]
+          bytes[j] = byte
+          i = i + 1
+        end
+      {% end %}
+      append(bytes, sizeof(I))
+    end
+
+    # The first *count* bytes dropped, the rest moved down to the start, as
+    # `Array#shift(n)`: a connection's buffer after a request is answered.
+    # What was finished from it before is written over.
+    def shift(count : Int32) : Nil
+      raise "shift #{count} of #{length} bytes" if count < 0 || count > length
+      start = Pointer(UInt8).new((@state + 2_i64).value)
+      left = length - count
+      # Down, front to back: no byte is written before it is read.
+      start.copy_from(start + count, left)
+      @state.value = start.address &+ left.to_u64
     end
 
     # *value* in decimal, written in place: `value.to_s` would make a heap
@@ -600,6 +690,178 @@ module Tape
 
   # Elements on the tape. `T` is held by value, so an element may itself be a
   # tape type, which no other generic may hold.
+  # A scanner over tape text, as std/string_scanner's `StringScanner` is
+  # over a String: an offset that moves forward as patterns match at it.
+  # What it answers are views of the text, nothing copied; offsets and
+  # counts are bytes. No regex and no groups: a lexer on the tape reads
+  # bytes, strings and characters.
+  @[OnTape]
+  struct Scanner
+    @string : String
+    @offset : Int32
+
+    def initialize(@string : String)
+      @offset = 0
+    end
+
+    # The text being scanned.
+    def string : String
+      @string
+    end
+
+    # The offset, in bytes.
+    def offset : Int32
+      @offset
+    end
+
+    # Moves the offset to byte *position*: the end of the text is the
+    # furthest it goes.
+    def offset=(position : Int32) : Int32
+      raise "scanner: offset #{position} out of range for #{@string.bytesize} bytes" if position < 0 || position > @string.bytesize
+      @offset = position
+    end
+
+    # Whether the offset is at the end of the text.
+    def eos? : Bool
+      @offset >= @string.bytesize
+    end
+
+    # The text from the offset on.
+    def rest : String
+      @string[@offset, @string.bytesize - @offset]
+    end
+
+    # The byte at the offset, without moving, or nil at the end.
+    def current_byte : UInt8?
+      eos? ? nil : @string[@offset]
+    end
+
+    # Up to *count* bytes from the offset, without moving: fewer at the end.
+    def peek(count : Int32) : String
+      raise "scanner: negative lookahead count: #{count}" if count < 0
+      left = @string.bytesize - @offset
+      @string[@offset, count < left ? count : left]
+    end
+
+    # Matches *pattern* at the offset and moves past it, answering what
+    # matched, or nil without moving.
+    def scan(pattern : String | ::String | Char | Int32) : String?
+      size = here(pattern)
+      return nil unless size
+      found = @string[@offset, size]
+      @offset = @offset + size
+      found
+    end
+
+    # `scan`, answering how many bytes the offset moved.
+    def skip(pattern : String | ::String | Char | Int32) : Int32?
+      size = here(pattern)
+      @offset = @offset + size if size
+      size
+    end
+
+    # What `scan` would answer, without moving.
+    def check(pattern : String | ::String | Char | Int32) : String?
+      size = here(pattern)
+      size ? @string[@offset, size] : nil
+    end
+
+    # Searches for *pattern* from the offset and moves past the match,
+    # answering everything from the offset to the match's end.
+    def scan_until(pattern : String | ::String | Char) : String?
+      stop = until_end(pattern)
+      return nil unless stop
+      found = @string[@offset, stop - @offset]
+      @offset = stop
+      found
+    end
+
+    # `scan_until`, answering how many bytes the offset moved.
+    def skip_until(pattern : String | ::String | Char) : Int32?
+      stop = until_end(pattern)
+      return nil unless stop
+      moved = stop - @offset
+      @offset = stop
+      moved
+    end
+
+    # What `scan_until` would answer, without moving.
+    def check_until(pattern : String | ::String | Char) : String?
+      stop = until_end(pattern)
+      stop ? @string[@offset, stop - @offset] : nil
+    end
+
+    # How many bytes *pattern* matches at the offset, without moving, or nil.
+    def matches?(pattern : String | ::String | Char) : Int32?
+      here(pattern)
+    end
+
+    # Back to the start.
+    def reset : Nil
+      @offset = 0
+    end
+
+    # On to the end.
+    def terminate : Nil
+      @offset = @string.bytesize
+    end
+
+    private def here(count : Int32) : Int32?
+      raise "scanner: negative count: #{count}" if count < 0
+      count <= @string.bytesize - @offset ? count : nil
+    end
+
+    private def here(text : ::String) : Int32?
+      here(String.view(text))
+    end
+
+    private def here(text : String) : Int32?
+      at?(text, @offset) ? text.bytesize : nil
+    end
+
+    private def here(char : Char) : Int32?
+      at = @offset
+      matched = true
+      char.each_byte do |byte|
+        if matched && at < @string.bytesize && @string[at] == byte
+          at = at + 1
+        else
+          matched = false
+        end
+      end
+      matched ? at - @offset : nil
+    end
+
+    # Where the first match from the offset ends, or nil.
+    private def until_end(char : Char) : Int32?
+      found = @string.index(char, @offset)
+      found ? found + char.bytesize : nil
+    end
+
+    private def until_end(text : ::String) : Int32?
+      until_end(String.view(text))
+    end
+
+    private def until_end(text : String) : Int32?
+      at = @offset
+      while at + text.bytesize <= @string.bytesize
+        return at + text.bytesize if at?(text, at)
+        at = at + 1
+      end
+      nil
+    end
+
+    private def at?(text : String, at : Int32) : Bool
+      return false if text.bytesize > @string.bytesize - at
+      i = 0
+      while i < text.bytesize
+        return false unless @string[at + i] == text[i]
+        i = i + 1
+      end
+      true
+    end
+  end
+
   @[OnTape]
   struct Array(T)
     @state : Pointer(UInt64)
@@ -662,6 +924,97 @@ module Tape
       width = sizeof(T).to_u64
       @state.value = IyiRegion.tape_resize(start, start &+ room &* width, (@state + 1_i64).value &* width, capacity &* width, @state + 3_i64)
       (@state + 2_i64).value = capacity
+    end
+
+    # One byte-range check, then memcpy into an aligned local.
+    def read_bytes_at(type : I.class, at : Int32) : I forall I
+      {% unless I == UInt16 || I == UInt32 || I == UInt64 ||
+                I == Int16 || I == Int32 || I == Int64 %}
+        {% raise "little-endian fields need a 16/32/64-bit integer" %}
+      {% end %}
+      {% unless T == UInt8 %}
+        {% raise "little-endian fields require Tape::Array(UInt8)" %}
+      {% end %}
+      width = sizeof(I)
+      if at < 0 || at > size - width
+        raise "little-endian field out of range"
+      end
+      value = uninitialized I
+      target = pointerof(value).as(Pointer(UInt8))
+      target.copy_from(Pointer(UInt8).new(@state.value) + at, width)
+      {% unless flag?(:x86_64) || flag?(:aarch64) || flag?(:arm) ||
+                flag?(:i386) || flag?(:wasm32) %}
+        i = 0
+        while i < sizeof(I) // 2
+          j = sizeof(I) - i - 1
+          byte = target[i]
+          target[i] = target[j]
+          target[j] = byte
+          i = i + 1
+        end
+      {% end %}
+      value
+    end
+
+    # Overwrites a field without growing the byte pool.
+    def write_bytes_at(at : Int32, value : I) : I forall I
+      {% unless I == UInt16 || I == UInt32 || I == UInt64 ||
+                I == Int16 || I == Int32 || I == Int64 %}
+        {% raise "little-endian fields need a 16/32/64-bit integer" %}
+      {% end %}
+      {% unless T == UInt8 %}
+        {% raise "little-endian fields require Tape::Array(UInt8)" %}
+      {% end %}
+      width = sizeof(I)
+      if at < 0 || at > size - width
+        raise "little-endian field out of range"
+      end
+      stored = value
+      bytes = pointerof(stored).as(Pointer(UInt8))
+      {% unless flag?(:x86_64) || flag?(:aarch64) || flag?(:arm) ||
+                flag?(:i386) || flag?(:wasm32) %}
+        i = 0
+        while i < sizeof(I) // 2
+          j = sizeof(I) - i - 1
+          byte = bytes[i]
+          bytes[i] = bytes[j]
+          bytes[j] = byte
+          i = i + 1
+        end
+      {% end %}
+      (Pointer(UInt8).new(@state.value) + at).copy_from(bytes, width)
+      value
+    end
+
+    # Appends a field, growing with the array's usual tape policy.
+    def write_bytes(value : I) : Nil forall I
+      {% unless I == UInt16 || I == UInt32 || I == UInt64 ||
+                I == Int16 || I == Int32 || I == Int64 %}
+        {% raise "little-endian fields need a 16/32/64-bit integer" %}
+      {% end %}
+      {% unless T == UInt8 %}
+        {% raise "little-endian fields require Tape::Array(UInt8)" %}
+      {% end %}
+      count = (@state + 1_i64).value
+      width = sizeof(I).to_u64
+      while count + width > (@state + 2_i64).value
+        grow
+      end
+      stored = value
+      bytes = pointerof(stored).as(Pointer(UInt8))
+      {% unless flag?(:x86_64) || flag?(:aarch64) || flag?(:arm) ||
+                flag?(:i386) || flag?(:wasm32) %}
+        i = 0
+        while i < sizeof(I) // 2
+          j = sizeof(I) - i - 1
+          byte = bytes[i]
+          bytes[i] = bytes[j]
+          bytes[j] = byte
+          i = i + 1
+        end
+      {% end %}
+      Pointer(UInt8).new(@state.value + count).copy_from(bytes, width.to_i32)
+      (@state + 1_i64).value = count + width
     end
 
     # As `Array#[]`: a negative index counts from the end, and one still out

@@ -71,6 +71,14 @@ class StringBuffer
     @size = @size + len
   end
 
+  def append(text : Tape::String) : Nil
+    ensure_capacity(@size + text.bytesize)
+    text.each_byte do |b|
+      @buffer[@size] = b
+      @size = @size + 1
+    end
+  end
+
   def append(bytes : Pointer(UInt8), len : Int32) : Nil
     return if len == 0
     ensure_capacity(@size + len)
@@ -126,7 +134,8 @@ end
 # negated, the length of the maximal ill-formed subpart there: the bytes that
 # could still have begun a well-formed sequence, at least the one byte. An
 # overlong form, a surrogate and anything past U+10FFFF are ill-formed.
-def utf8_sequence_at(bytes : Pointer(UInt8), size : Int32, at : Int32) : Int32
+def utf8_sequence_at(bytes : Tape::String, at : Int32) : Int32
+  size = bytes.bytesize
   lead = bytes[at]
   return 1 if lead < 0x80_u8
   need = 0
@@ -837,8 +846,6 @@ end
 # the sentence, so `JSON.parse?` can answer `nil` and `JSON.parse` can panic.
 class Lexer
   @input : String
-  @bytes : Pointer(UInt8)
-  @bytesize : Int32
   @pos : Int32
   @line_number : Int32
   @column_number : Int32
@@ -854,8 +861,6 @@ class Lexer
   @spans : Bool
 
   def initialize(@input : String)
-    @bytes = @input.to_unsafe
-    @bytesize = @input.bytesize
     @pos = 0
     @line_number = 1
     @column_number = 1
@@ -868,8 +873,8 @@ class Lexer
 
   # A lexer over bytes on the tape (`JSON.parse(Tape::String)`): a string
   # token is its span, with `escaped` set when it must be decoded, and
-  # nothing of it is copied.
-  def initialize(@bytes : Pointer(UInt8), @bytesize : Int32)
+  # nothing of it is copied. The input is handed to `next_token`.
+  def initialize(spans : Bool)
     @input = ""
     @pos = 0
     @line_number = 1
@@ -887,11 +892,11 @@ class Lexer
   @[ThreadLocal]
   @@spare : Lexer? = nil
 
-  def self.spans(bytes : Pointer(UInt8), size : Int32) : Lexer
+  def self.spans : Lexer
     lexer = @@spare
-    return new(bytes, size) unless lexer
+    return new(true) unless lexer
     @@spare = nil
-    lexer.restart(bytes, size)
+    lexer.restart
     lexer
   end
 
@@ -899,7 +904,7 @@ class Lexer
     @@spare = lexer
   end
 
-  protected def restart(@bytes : Pointer(UInt8), @bytesize : Int32) : Nil
+  protected def restart : Nil
     @pos = 0
     @line_number = 1
     @column_number = 1
@@ -909,40 +914,23 @@ class Lexer
   end
 
   # The input's bytes from *start* as a String, in either mode.
-  private def slice(start : Int32, size : Int32) : String
+  private def slice(input : Tape::String, start : Int32, size : Int32) : String
     return @input[start, size] unless @spans
-    from = @bytes + start
-    String.new(size) { |target| target.copy_from(from, size) }
+    input[start, size].to_heap
   end
 
   SHORT_SLOTS = 256
   SHORT_MAX   =  24
 
   # The string the input spells from *start* for *size* bytes.
-  private def text_at(start : Int32, size : Int32) : String
+  private def text_at(input : Tape::String, start : Int32, size : Int32) : String
     return @input[start, size] if size > SHORT_MAX || size == 0
-    p = @bytes + start
+    text = input[start, size]
     h = 2166136261_u64
-    i = 0
-    while i < size
-      h = (h ^ p[i].to_u64) &* 16777619_u64
-      i = i + 1
-    end
+    text.each_byte { |b| h = (h ^ b.to_u64) &* 16777619_u64 }
     slot = (h ^ h.unsafe_shr(8_u64)).unsafe_to_i32 & (SHORT_SLOTS - 1)
     cached = @short[slot]
-    if cached.bytesize == size
-      q = cached.to_unsafe
-      same = true
-      i = 0
-      while i < size
-        if q[i] != p[i]
-          same = false
-          break
-        end
-        i = i + 1
-      end
-      return cached if same
-    end
+    return cached if text == cached
     made = @input[start, size]
     @short[slot] = made
     made
@@ -962,13 +950,13 @@ class Lexer
     nil
   end
 
-  private def current_byte : UInt8
-    @pos < @bytesize ? @bytes[@pos] : 0_u8
+  private def current_byte(input : Tape::String) : UInt8
+    @pos < input.bytesize ? input[@pos] : 0_u8
   end
 
-  private def advance : UInt8
-    b = current_byte
-    if @pos < @bytesize
+  private def advance(input : Tape::String) : UInt8
+    b = current_byte(input)
+    if @pos < input.bytesize
       if b == 10_u8 # '\n'
         @line_number = @line_number + 1
         @column_number = 1
@@ -978,68 +966,74 @@ class Lexer
       end
       @pos = @pos + 1
     end
-    current_byte
+    current_byte(input)
   end
 
-  private def skip_whitespace : Nil
-    while @pos < @bytesize
-      b = current_byte
+  private def skip_whitespace(input : Tape::String) : Nil
+    while @pos < input.bytesize
+      b = current_byte(input)
       if b == 32_u8 || b == 9_u8 || b == 10_u8 || b == 13_u8
-        advance
+        advance(input)
       else
         break
       end
     end
   end
 
+  # The next token of the String the lexer was made with.
   def next_token : Token
+    next_token(Tape::String.view(@input))
+  end
+
+  # The next token of *input*, the tape text a span lexer reads.
+  def next_token(input : Tape::String) : Token
     return @token unless @error.nil?
-    skip_whitespace
+    skip_whitespace(input)
 
     tok_line = @line_number
     tok_col = @column_number
 
-    if @pos >= @bytesize
+    if @pos >= input.bytesize
       set_token(TokenKind::EOF, tok_line, tok_col)
       return @token
     end
 
-    b = current_byte
+    b = current_byte(input)
     case b
     when 123_u8 # '{'
-      advance
+      advance(input)
       set_token(TokenKind::BeginObject, tok_line, tok_col)
     when 125_u8 # '}'
-      advance
+      advance(input)
       set_token(TokenKind::EndObject, tok_line, tok_col)
     when 91_u8 # '['
-      advance
+      advance(input)
       set_token(TokenKind::BeginArray, tok_line, tok_col)
     when 93_u8 # ']'
-      advance
+      advance(input)
       set_token(TokenKind::EndArray, tok_line, tok_col)
     when 58_u8 # ':'
-      advance
+      advance(input)
       set_token(TokenKind::Colon, tok_line, tok_col)
     when 44_u8 # ','
-      advance
+      advance(input)
       set_token(TokenKind::Comma, tok_line, tok_col)
     when 34_u8 # '"'
-      consume_string(tok_line, tok_col)
+      consume_string(input, tok_line, tok_col)
     when 116_u8 # 't'
-      consume_word("true", TokenKind::True, tok_line, tok_col)
+      consume_word(input, "true", TokenKind::True, tok_line, tok_col)
     when 102_u8 # 'f'
-      consume_word("false", TokenKind::False, tok_line, tok_col)
+      consume_word(input, "false", TokenKind::False, tok_line, tok_col)
     when 110_u8 # 'n'
-      consume_word("null", TokenKind::Null, tok_line, tok_col)
+      consume_word(input, "null", TokenKind::Null, tok_line, tok_col)
     when 45_u8, 48_u8, 49_u8, 50_u8, 51_u8, 52_u8, 53_u8, 54_u8, 55_u8, 56_u8, 57_u8 # '-', '0'..'9'
-      consume_number(tok_line, tok_col)
+      consume_number(input, tok_line, tok_col)
     else
       if identifier_byte?(b)
-        consume_bare_identifier(tok_line, tok_col)
+        consume_bare_identifier(input, tok_line, tok_col)
       elsif b >= 32_u8 && b < 127_u8
         fail("unexpected character '#{b.unsafe_chr}'", tok_line, tok_col)
-      elsif b == 0xEF_u8 && @pos + 2 < @bytesize && @bytes[@pos + 1] == 0xBB_u8 && @bytes[@pos + 2] == 0xBF_u8
+      elsif b == 0xEF_u8 && @pos + 2 < input.bytesize && input[@pos + 1] == 0xBB_u8 && input[@pos + 2] == 0xBF_u8
         fail("unexpected UTF-8 byte order mark", tok_line, tok_col)
       else
         fail("unexpected byte #{b}", tok_line, tok_col)
@@ -1059,41 +1053,41 @@ class Lexer
     (b >= 97_u8 && b <= 122_u8) || (b >= 65_u8 && b <= 90_u8) || (b >= 48_u8 && b <= 57_u8) || b == 95_u8
   end
 
-  private def consume_bare_identifier(line : Int32, col : Int32) : Nil
+  private def consume_bare_identifier(input : Tape::String, line : Int32, col : Int32) : Nil
     start = @pos
-    while @pos < @bytesize && identifier_byte?(current_byte)
-      advance
+    while @pos < input.bytesize && identifier_byte?(current_byte(input))
+      advance(input)
     end
-    fail("bare identifier '#{slice(start, @pos - start)}'", line, col)
+    fail("bare identifier '#{slice(input, start, @pos - start)}'", line, col)
   end
 
   # `true`, `false`, `null`: the whole word, and nothing joined to it.
-  private def consume_word(word : String, kind : TokenKind, line : Int32, col : Int32) : Nil
+  private def consume_word(input : Tape::String, word : String, kind : TokenKind, line : Int32, col : Int32) : Nil
     start = @pos
     expected = word.to_unsafe
     i = 0
     while i < word.bytesize
-      if current_byte != expected[i]
+      if current_byte(input) != expected[i]
         @pos = start
-        return consume_bare_identifier(line, col)
+        return consume_bare_identifier(input, line, col)
       end
-      advance
+      advance(input)
       i = i + 1
     end
-    if identifier_byte?(current_byte)
+    if identifier_byte?(current_byte(input))
       @pos = start
-      return consume_bare_identifier(line, col)
+      return consume_bare_identifier(input, line, col)
     end
     set_token(kind, line, col)
   end
 
-  private def consume_string(line : Int32, col : Int32) : Nil
-    advance # the opening quote
+  private def consume_string(input : Tape::String, line : Int32, col : Int32) : Nil
+    advance(input) # the opening quote
     start_pos = @pos
     has_escape = false
 
-    while @pos < @bytesize
-      b = current_byte
+    while @pos < input.bytesize
+      b = current_byte(input)
       if b == 34_u8 # '"'
         break
       elsif b == 92_u8 # '\\'
@@ -1102,93 +1096,93 @@ class Lexer
       elsif b < 32_u8
         return fail("unescaped control character (ASCII #{b}) in string", @line_number, @column_number)
       elsif b >= 128_u8
-        return unless take_utf8_sequence
+        return unless take_utf8_sequence(input)
       else
         step_ascii
       end
     end
 
-    if @spans && @pos < @bytesize
-      return consume_span(start_pos, has_escape, line, col)
+    if @spans && @pos < input.bytesize
+      return consume_span(input, start_pos, has_escape, line, col)
     end
 
-    if !has_escape && @pos < @bytesize && current_byte == 34_u8
+    if !has_escape && @pos < input.bytesize && current_byte(input) == 34_u8
       # No escape: the text is a substring of the input.
-      str_val = text_at(start_pos, @pos - start_pos)
-      advance
+      str_val = text_at(input, start_pos, @pos - start_pos)
+      advance(input)
       set_token(TokenKind::String, line, col)
       @token.string_value = str_val
       return
     end
 
-    if @pos >= @bytesize
+    if @pos >= input.bytesize
       return fail("unterminated string", line, col)
     end
 
     @string_buffer.clear
     if @pos > start_pos
-      @string_buffer.append(@bytes + start_pos, @pos - start_pos)
+      @string_buffer.append(input[start_pos, @pos - start_pos])
     end
 
-    while @pos < @bytesize
-      b = current_byte
+    while @pos < input.bytesize
+      b = current_byte(input)
       if b == 34_u8 # '"'
-        advance
+        advance(input)
         set_token(TokenKind::String, line, col)
         @token.string_value = @string_buffer.to_s
         return
       elsif b == 92_u8 # '\\'
         esc_col = @column_number
-        advance
-        if @pos >= @bytesize
+        advance(input)
+        if @pos >= input.bytesize
           return fail("unterminated string after backslash", line, esc_col)
         end
-        esc = current_byte
+        esc = current_byte(input)
         case esc
         when 34_u8 # '"'
           @string_buffer.append(34_u8)
-          advance
+          advance(input)
         when 92_u8 # '\\'
           @string_buffer.append(92_u8)
-          advance
+          advance(input)
         when 47_u8 # '/'
           @string_buffer.append(47_u8)
-          advance
+          advance(input)
         when 98_u8 # 'b'
           @string_buffer.append(8_u8)
-          advance
+          advance(input)
         when 102_u8 # 'f'
           @string_buffer.append(12_u8)
-          advance
+          advance(input)
         when 110_u8 # 'n'
           @string_buffer.append(10_u8)
-          advance
+          advance(input)
         when 114_u8 # 'r'
           @string_buffer.append(13_u8)
-          advance
+          advance(input)
         when 116_u8 # 't'
           @string_buffer.append(9_u8)
-          advance
+          advance(input)
         when 117_u8 # 'u'
           u_line = @line_number
           u_col = @column_number - 1
-          advance
-          hex1 = read_hex4(u_line, u_col)
+          advance(input)
+          hex1 = read_hex4(input, u_line, u_col)
           return if hex1 < 0
 
           if hex1 >= 0xD800 && hex1 <= 0xDBFF
             # A high surrogate must be followed at once by `\u` and a low one.
-            if current_byte != 92_u8
+            if current_byte(input) != 92_u8
               return fail("lone high surrogate \\u#{hex1.to_s(16)} without low surrogate", u_line, u_col)
             end
-            advance
-            if current_byte != 117_u8
+            advance(input)
+            if current_byte(input) != 117_u8
               return fail("lone high surrogate \\u#{hex1.to_s(16)} without following \\u escape", u_line, u_col)
             end
             u2_line = @line_number
             u2_col = @column_number - 1
-            advance
-            hex2 = read_hex4(u2_line, u2_col)
+            advance(input)
+            hex2 = read_hex4(input, u2_line, u2_col)
             return if hex2 < 0
             if hex2 < 0xDC00 || hex2 > 0xDFFF
               return fail("invalid surrogate pair: expected low surrogate (0xDC00..0xDFFF), got \\u#{hex2.to_s(16)}", u2_line, u2_col)
@@ -1209,11 +1203,11 @@ class Lexer
         return fail("unescaped control character (ASCII #{b}) in string", @line_number, @column_number)
       elsif b >= 128_u8
         from = @pos
-        return unless take_utf8_sequence
-        @string_buffer.append(@bytes + from, @pos - from)
+        return unless take_utf8_sequence(input)
+        @string_buffer.append(input[from, @pos - from])
       else
         @string_buffer.append(b)
-        advance
+        advance(input)
       end
     end
 
@@ -1222,40 +1216,40 @@ class Lexer
 
   # The rest of a string from the current byte, checked as `consume_string`
   # checks it, and taken as the span from *start* to the closing quote.
-  private def consume_span(start : Int32, has_escape : Bool, line : Int32, col : Int32) : Nil
-    while @pos < @bytesize
-      b = current_byte
+  private def consume_span(input : Tape::String, start : Int32, has_escape : Bool, line : Int32, col : Int32) : Nil
+    while @pos < input.bytesize
+      b = current_byte(input)
       if b == 34_u8 # '"'
         @token.raw_start = start
         @token.raw_size = @pos - start
         @token.escaped = has_escape
-        advance
+        advance(input)
         set_token(TokenKind::String, line, col)
         return
       elsif b == 92_u8 # '\\'
         has_escape = true
         esc_col = @column_number
-        advance
-        return fail("unterminated string after backslash", line, esc_col) if @pos >= @bytesize
-        esc = current_byte
+        advance(input)
+        return fail("unterminated string after backslash", line, esc_col) if @pos >= input.bytesize
+        esc = current_byte(input)
         if esc == 117_u8 # 'u'
           u_line = @line_number
           u_col = @column_number - 1
-          advance
-          hex1 = read_hex4(u_line, u_col)
+          advance(input)
+          hex1 = read_hex4(input, u_line, u_col)
           return if hex1 < 0
           if hex1 >= 0xD800 && hex1 <= 0xDBFF
-            if current_byte != 92_u8
+            if current_byte(input) != 92_u8
               return fail("lone high surrogate \\u#{hex1.to_s(16)} without low surrogate", u_line, u_col)
             end
-            advance
-            if current_byte != 117_u8
+            advance(input)
+            if current_byte(input) != 117_u8
               return fail("lone high surrogate \\u#{hex1.to_s(16)} without following \\u escape", u_line, u_col)
             end
             u2_line = @line_number
             u2_col = @column_number - 1
-            advance
-            hex2 = read_hex4(u2_line, u2_col)
+            advance(input)
+            hex2 = read_hex4(input, u2_line, u2_col)
             return if hex2 < 0
             if hex2 < 0xDC00 || hex2 > 0xDFFF
               return fail("invalid surrogate pair: expected low surrogate (0xDC00..0xDFFF), got \\u#{hex2.to_s(16)}", u2_line, u2_col)
@@ -1264,7 +1258,7 @@ class Lexer
             return fail("lone low surrogate \\u#{hex1.to_s(16)} without preceding high surrogate", u_line, u_col)
           end
         elsif esc == 34_u8 || esc == 92_u8 || esc == 47_u8 || esc == 98_u8 || esc == 102_u8 || esc == 110_u8 || esc == 114_u8 || esc == 116_u8
-          advance
+          advance(input)
         elsif esc >= 32_u8 && esc < 127_u8
           return fail("invalid escape sequence '\\#{esc.unsafe_chr}'", line, esc_col)
         else
@@ -1273,7 +1267,7 @@ class Lexer
       elsif b < 32_u8
         return fail("unescaped control character (ASCII #{b}) in string", @line_number, @column_number)
       elsif b >= 128_u8
-        return unless take_utf8_sequence
+        return unless take_utf8_sequence(input)
       else
         step_ascii
       end
@@ -1284,9 +1278,9 @@ class Lexer
   # Passes over the UTF-8 sequence at the current byte and answers true, or
   # records why the bytes there are not one (RFC 8259 §8.1: a document is
   # UTF-8) and answers false.
-  private def take_utf8_sequence : Bool
-    b = current_byte
-    length = utf8_sequence_at(@bytes, @bytesize, @pos)
+  private def take_utf8_sequence(input : Tape::String) : Bool
+    b = current_byte(input)
+    length = utf8_sequence_at(input, @pos)
     if length < 0
       if b >= 0xC2_u8 && b <= 0xF4_u8
         fail("malformed UTF-8 sequence starting with byte #{b} in string", @line_number, @column_number)
@@ -1296,22 +1290,22 @@ class Lexer
       return false
     end
     while length > 0
-      advance
+      advance(input)
       length = length - 1
     end
     true
   end
 
   # Four hex digits, or -1 after recording why not.
-  private def read_hex4(line : Int32, col : Int32) : Int32
+  private def read_hex4(input : Tape::String, line : Int32, col : Int32) : Int32
     val = 0
     i = 0
     while i < 4
-      if @pos >= @bytesize
+      if @pos >= input.bytesize
         fail("unterminated \\u escape sequence: expected 4 hexadecimal digits", line, col)
         return -1
       end
-      b = current_byte
+      b = current_byte(input)
       d = hex_digit_value(b)
       if d < 0
         if b >= 32_u8 && b < 127_u8
@@ -1322,7 +1316,7 @@ class Lexer
         return -1
       end
       val = (val << 4) | d
-      advance
+      advance(input)
       i = i + 1
     end
     val
@@ -1344,7 +1338,7 @@ class Lexer
     b >= 48_u8 && b <= 57_u8
   end
 
-  private def consume_number(line : Int32, col : Int32) : Nil
+  private def consume_number(input : Tape::String, line : Int32, col : Int32) : Nil
     start_pos = @pos
     has_fraction = false
     has_exponent = false
@@ -1356,26 +1350,26 @@ class Lexer
     digits = 0
     scale = 0
 
-    if current_byte == 45_u8 # '-'
+    if current_byte(input) == 45_u8 # '-'
       negative = true
-      advance
-      if @pos >= @bytesize
+      advance(input)
+      if @pos >= input.bytesize
         return fail("expected digit after minus sign in number", line, col)
       end
-      unless digit?(current_byte)
+      unless digit?(current_byte(input))
         return fail("expected digit after minus sign in number", @line_number, @column_number)
       end
     end
 
-    if current_byte == 48_u8 # '0'
+    if current_byte(input) == 48_u8 # '0'
       step_ascii
-      if @pos < @bytesize && digit?(current_byte)
+      if @pos < input.bytesize && digit?(current_byte(input))
         return fail("leading zero not allowed in number", @line_number, @column_number)
       end
     else
-      while @pos < @bytesize && digit?(current_byte)
+      while @pos < input.bytesize && digit?(current_byte(input))
         if digits < 19
-          mantissa = mantissa &* 10_u64 &+ (current_byte &- 48_u8).to_u64
+          mantissa = mantissa &* 10_u64 &+ (current_byte(input) &- 48_u8).to_u64
           digits = digits + 1
         else
           scale = scale + 1
@@ -1384,19 +1378,19 @@ class Lexer
       end
     end
 
-    if @pos < @bytesize && current_byte == 46_u8 # '.'
+    if @pos < input.bytesize && current_byte(input) == 46_u8 # '.'
       has_fraction = true
       step_ascii
-      if @pos >= @bytesize
+      if @pos >= input.bytesize
         return fail("expected at least one digit after decimal point", line, col)
       end
-      unless digit?(current_byte)
+      unless digit?(current_byte(input))
         return fail("expected at least one digit after decimal point", @line_number, @column_number)
       end
-      while @pos < @bytesize && digit?(current_byte)
+      while @pos < input.bytesize && digit?(current_byte(input))
         if digits < 19
-          if digits > 0 || current_byte != 48_u8
-            mantissa = mantissa &* 10_u64 &+ (current_byte &- 48_u8).to_u64
+          if digits > 0 || current_byte(input) != 48_u8
+            mantissa = mantissa &* 10_u64 &+ (current_byte(input) &- 48_u8).to_u64
             digits = digits + 1
           end
           scale = scale - 1
@@ -1407,22 +1401,22 @@ class Lexer
 
     exponent = 0
     exponent_digits = 0
-    if @pos < @bytesize && (current_byte == 101_u8 || current_byte == 69_u8) # 'e' or 'E'
+    if @pos < input.bytesize && (current_byte(input) == 101_u8 || current_byte(input) == 69_u8) # 'e' or 'E'
       has_exponent = true
       step_ascii
       exponent_negative = false
-      if @pos < @bytesize && (current_byte == 43_u8 || current_byte == 45_u8) # '+' or '-'
-        exponent_negative = current_byte == 45_u8
+      if @pos < input.bytesize && (current_byte(input) == 43_u8 || current_byte(input) == 45_u8) # '+' or '-'
+        exponent_negative = current_byte(input) == 45_u8
         step_ascii
       end
-      if @pos >= @bytesize
+      if @pos >= input.bytesize
         return fail("expected at least one digit in exponent", line, col)
       end
-      unless digit?(current_byte)
+      unless digit?(current_byte(input))
         return fail("expected at least one digit in exponent", @line_number, @column_number)
       end
-      while @pos < @bytesize && digit?(current_byte)
-        exponent = exponent * 10 + (current_byte - 48_u8).to_i32 if exponent < 100000
+      while @pos < input.bytesize && digit?(current_byte(input))
+        exponent = exponent * 10 + (current_byte(input) - 48_u8).to_i32 if exponent < 100000
         exponent_digits = exponent_digits + 1
         step_ascii
       end
@@ -1430,8 +1424,8 @@ class Lexer
     end
 
     # `0x12`, `1a`, `1.2.3`: a number does not run into letters or a second point.
-    if @pos < @bytesize
-      tail_b = current_byte
+    if @pos < input.bytesize
+      tail_b = current_byte(input)
       if (tail_b >= 97_u8 && tail_b <= 122_u8) || (tail_b >= 65_u8 && tail_b <= 90_u8) || tail_b == 46_u8
         return fail("unexpected character '#{tail_b.unsafe_chr}' in number", @line_number, @column_number)
       end
@@ -1443,7 +1437,7 @@ class Lexer
     @token.raw_size = @pos - start_pos
 
     unless has_fraction || has_exponent
-      val = parse_int64?(@bytes + start_pos, @pos - start_pos)
+      val = parse_int64?(input[start_pos, @pos - start_pos])
       unless val.nil?
         @token.int_value = val
         return
@@ -1472,9 +1466,9 @@ class Lexer
       # and `-0.0` is what the text says.
       f = f * -1.0 if negative
     else
-      f = slice(start_pos, @pos - start_pos).to_f
+      f = slice(input, start_pos, @pos - start_pos).to_f
       if f.abs > 1.7976931348623157e308
-        return fail("number #{slice(start_pos, @pos - start_pos)} out of range", line, col)
+        return fail("number #{slice(input, start_pos, @pos - start_pos)} out of range", line, col)
       end
     end
     @token.kind = TokenKind::Float
@@ -1489,7 +1483,8 @@ class Lexer
 
   # The Int64 these digits spell, or nil when they do not fit. The negative
   # magnitude is accumulated so the smallest Int64 needs no negation.
-  private def parse_int64?(bytes : Pointer(UInt8), len : Int32) : Int64?
+  private def parse_int64?(bytes : Tape::String) : Int64?
+    len = bytes.bytesize
     i = 0
     negative = false
     if bytes[0] == 45_u8
@@ -2364,7 +2359,7 @@ pub class Builder
   end
 
   private def write_escaped_string(val : String) : Nil
-    JSON.each_escaped_byte(val.to_unsafe, val.bytesize, @ascii_only) { |b| @buffer.append(b) }
+    JSON.each_escaped_byte(Tape::String.view(val), @ascii_only) { |b| @buffer.append(b) }
   end
 
   def start_array : Nil
@@ -2628,17 +2623,16 @@ pub struct Writer
   end
 
   def string(val : String) : Nil
-    before_value
-    escaped(val.to_unsafe, val.bytesize)
+    string(Tape::String.view(val))
   end
 
   def string(val : Tape::String) : Nil
     before_value
-    escaped(val.to_unsafe, val.bytesize)
+    escaped(val)
   end
 
-  private def escaped(bytes : Pointer(UInt8), size : Int32) : Nil
-    JSON.each_escaped_byte(bytes, size, @ascii_only) { |b| @out.push(b) }
+  private def escaped(text : Tape::String) : Nil
+    JSON.each_escaped_byte(text, @ascii_only) { |b| @out.push(b) }
   end
 
   private def open(byte : UInt8, first : Int32) : Nil
@@ -2693,23 +2687,22 @@ pub struct Writer
   # A key, refused when this object already holds its text, as `Builder`
   # refuses it.
   def field(name : String) : Nil
-    key(name.to_unsafe, name.bytesize)
+    field(Tape::String.view(name))
   end
 
+  # Checks the key just written for a repeat against the writer's text so
+  # far, a view of it read before anything more is written.
   def field(name : Tape::String) : Nil
-    key(name.to_unsafe, name.bytesize)
-  end
-
-  private def key(bytes : Pointer(UInt8), size : Int32) : Nil
     st = state
     raise "a field outside an object" unless st == Builder::OBJECT_FIRST || st == Builder::OBJECT_NEXT
     @out.push(44_u8) if st == Builder::OBJECT_NEXT
     set_state(Builder::OBJECT_VALUE)
     write_indent
     from = @out.length
-    escaped(bytes, size)
+    escaped(name)
     length = @out.length - from
-    text = @out.finish.to_unsafe
+    text = @out.finish
+    written = text[from, length]
     keys = @keys.value
     first = @slots[2 + TAPE_STATES + level]
     count = @slots[1]
@@ -2717,7 +2710,7 @@ pub struct Writer
     if id == 0 && count - first < TAPE_LINEAR
       i = first
       while i < count
-        repeated(bytes, size, text, from, length) if keys[2 * i + 1] == length && JSON.same?(text + keys[2 * i], text + from, length)
+        repeated(name, written) if keys[2 * i + 1] == length && text[keys[2 * i], length] == written
         i = i + 1
       end
     else
@@ -2733,12 +2726,12 @@ pub struct Writer
       end
       table = @table.value
       mask = table[0] - 1
-      slot = id.to_u64.unsafe_shl(32_u64) | hash(text + from, length)
+      slot = id.to_u64.unsafe_shl(32_u64) | hash(written)
       at = slot & mask
       while (got = table[2 + 2 * at]) != 0
         if got == slot
           k = table[3 + 2 * at].to_i32
-          repeated(bytes, size, text, from, length) if keys[2 * k + 1] == length && JSON.same?(text + keys[2 * k], text + from, length)
+          repeated(name, written) if keys[2 * k + 1] == length && text[keys[2 * k], length] == written
         end
         at = (at + 1) & mask
       end
@@ -2758,28 +2751,22 @@ pub struct Writer
     @out.push(32_u8) unless @indent.nil?
   end
 
-  private def repeated(bytes : Pointer(UInt8), size : Int32, text : Pointer(UInt8), from : Int32, length : Int32) : Nil
-    written = String.new(length) { |target| target.copy_from(text + from, length) }
-    name = String.new(size) { |target| target.copy_from(bytes, size) }
-    raise "the key #{name.inspect} is written twice in one object" if JSON.utf8?(bytes, size)
-    raise "the key #{name.inspect} is written as #{written}, as an earlier key was"
+  private def repeated(name : Tape::String, written : Tape::String) : Nil
+    raise "the key #{name.to_heap.inspect} is written twice in one object" if JSON.utf8?(name)
+    raise "the key #{name.to_heap.inspect} is written as #{written.to_heap}, as an earlier key was"
   end
 
   # FNV-1a of a key's written text, 32 bits and never 0.
-  private def hash(p : Pointer(UInt8), size : Int32) : UInt64
+  private def hash(text : Tape::String) : UInt64
     h = 2166136261_u64
-    i = 0
-    while i < size
-      h = (h ^ p[i].to_u64) &* 16777619_u64
-      i = i + 1
-    end
+    text.each_byte { |b| h = (h ^ b.to_u64) &* 16777619_u64 }
     h = h & 0xFFFFFFFF_u64
     h == 0 ? 1_u64 : h
   end
 
   # Key *k* of the object *id* into the table: (id, hash) to *k*, open
   # addressing, doubled past half full.
-  private def index(id : Int32, text : Pointer(UInt8), keys : Pointer(Int32), k : Int32) : Nil
+  private def index(id : Int32, text : Tape::String, keys : Pointer(Int32), k : Int32) : Nil
     table = @table.value
     if table.address == 0 || table[1] * 2 >= table[0]
       room = table.address == 0 ? 64_u64 : table[0] * 2
@@ -2796,7 +2783,7 @@ pub struct Writer
       @table.value = grown
       table = grown
     end
-    put(table, id.to_u64.unsafe_shl(32_u64) | hash(text + keys[2 * k], keys[2 * k + 1]), k.to_u64)
+    put(table, id.to_u64.unsafe_shl(32_u64) | hash(text[keys[2 * k], keys[2 * k + 1]]), k.to_u64)
   end
 
   private def put(table : Pointer(UInt64), slot : UInt64, value : UInt64) : Nil
@@ -2856,11 +2843,22 @@ pub struct Writer
   # repeat sees the key and not its spelling.
   def field(doc : Document, index : Int32) : Nil
     node = doc.tree[index]
-    bytes = doc.input.to_unsafe + node.key_at
+    text = doc.input[node.key_at, node.key_size]
     if (node.flags & Node::ESCAPED_KEY) == 0
-      key(bytes, node.key_size)
+      field(text)
     else
-      decoding(bytes, node.key_size) { |text, size| key(text, size) }
+      decoding(text) { |decoded| field(decoded) }
+    end
+  end
+
+  # A string in the document's input, a view handed to the escaper.
+  private def string_of(doc : Document, node : Node) : Nil
+    text = doc.input[(node.payload >> 32).to_i32, (node.payload & 0xFFFFFFFF).to_i32]
+    before_value
+    if (node.flags & Node::ESCAPED_TEXT) == 0
+      escaped(text)
+    else
+      decoding(text) { |decoded| escaped(decoded) }
     end
   end
 
@@ -2878,14 +2876,7 @@ pub struct Writer
     when Document::Kind::Float
       number(doc.float(index))
     when Document::Kind::String
-      bytes = doc.input.to_unsafe + (node.payload >> 32)
-      size = (node.payload & 0xFFFFFFFF).to_i32
-      before_value
-      if (node.flags & Node::ESCAPED_TEXT) == 0
-        escaped(bytes, size)
-      else
-        decoding(bytes, size) { |text, length| escaped(text, length) }
-      end
+      string_of(doc, node)
     when Document::Kind::Array
       start_array
       doc.each(index) { |child| value(doc, child) }
@@ -2900,23 +2891,11 @@ pub struct Writer
     end
   end
 
-  # The text of an escaped string decoded, handed to the block: on the
-  # stack up to 256 bytes (decoded text is never longer than its escapes),
-  # on the heap past that. Decoded into a String, one name in nine of a
-  # JSON API's requests made a heap string to copy.
-  private def decoding(bytes : Pointer(UInt8), size : Int32, & : Pointer(UInt8), Int32 -> Nil) : Nil
-    if size <= 256
-      room = uninitialized UInt8[256]
-      buffer = pointerof(room).as(Pointer(UInt8))
-      length = 0
-      JSON.each_decoded_byte(bytes, size) do |b|
-        buffer[length] = b
-        length = length + 1
-      end
-      yield buffer, length
-    else
-      text = JSON.decoded_s(Tape::String.new(bytes, size))
-      yield text.to_unsafe, text.bytesize
+  # The text of an escaped string decoded on the caller's tape, in a
+  # nested scope that drops it once the block has written it.
+  private def decoding(text : Tape::String, & : Tape::String -> Nil) : Nil
+    tape do
+      yield JSON.decoded(text, true)
     end
   end
 
@@ -3027,14 +3006,14 @@ pub struct Document
   # an escape, a new string on the tape if it does.
   def string(index : Int32) : Tape::String
     node = expect(index, Kind::String)
-    text = Tape::String.new(@input.to_unsafe + (node.payload >> 32), (node.payload & 0xFFFFFFFF).to_i32)
+    text = @input[(node.payload >> 32).to_i32, (node.payload & 0xFFFFFFFF).to_i32]
     JSON.decoded(text, (node.flags & Node::ESCAPED_TEXT) != 0)
   end
 
   # The key *index* has in its object, decoded as `string` is.
   def key(index : Int32) : Tape::String
     node = @tree[index]
-    JSON.decoded(Tape::String.new(@input.to_unsafe + node.key_at, node.key_size), (node.flags & Node::ESCAPED_KEY) != 0)
+    JSON.decoded(@input[node.key_at, node.key_size], (node.flags & Node::ESCAPED_KEY) != 0)
   end
 
   # The count of an array's values or an object's fields.
@@ -3070,10 +3049,10 @@ pub struct Document
     @tree.each_child(index) do |child|
       if found < 0
         node = @tree[child]
-        key = @input.to_unsafe + node.key_at
+        key = @input[node.key_at, node.key_size]
         if (node.flags & Node::ESCAPED_KEY) == 0
-          found = child if node.key_size == name.bytesize && JSON.same?(key, name.to_unsafe, name.bytesize)
-        elsif JSON.decoded_s(Tape::String.new(key, node.key_size)) == name
+          found = child if key == name
+        elsif JSON.decoded_s(key) == name
           found = child
         end
       end
@@ -3100,11 +3079,11 @@ pub struct DocumentParser
   @error : String?
 
   def initialize(@input : Tape::String)
-    @lexer = Lexer.spans(@input.to_unsafe, @input.bytesize)
+    @lexer = Lexer.spans
     @tree = Tape::Tree(Node).new(@input.bytesize // 16 + 8)
     @nesting = 0
     @error = nil
-    @lexer.next_token
+    @lexer.next_token(@input)
   end
 
   def error : String?
@@ -3137,7 +3116,7 @@ pub struct DocumentParser
   end
 
   private def text(at : Int32, size : Int32) : Tape::String
-    Tape::String.new(@input.to_unsafe + at, size)
+    @input[at, size]
   end
 
   def parse : Nil
@@ -3168,7 +3147,7 @@ pub struct DocumentParser
 
   private def leaf(kind : Document::Kind, flags : Int32, key_at : Int32, key_size : Int32, payload : Int64) : Nil
     @tree.leaf(Node.new(kind.value | flags, key_at, key_size, payload))
-    @lexer.next_token
+    @lexer.next_token(@input)
   end
 
   # The value at the current token, in its object under the key at
@@ -3208,9 +3187,9 @@ pub struct DocumentParser
   private def parse_array(flags : Int32, key_at : Int32, key_size : Int32) : Nil
     return unless nest
     at = @tree.open(Node.new(Document::Kind::Array.value | flags, key_at, key_size, 0_i64))
-    @lexer.next_token # '['
+    @lexer.next_token(@input) # '['
     if token.kind == TokenKind::EndArray
-      @lexer.next_token
+      @lexer.next_token(@input)
     else
       while true
         parse_value(0, 0, 0)
@@ -3218,10 +3197,10 @@ pub struct DocumentParser
         if token.kind == TokenKind::Comma
           comma_line = token.line_number
           comma_col = token.column_number
-          @lexer.next_token
+          @lexer.next_token(@input)
           return fail("trailing comma in array", comma_line, comma_col) if token.kind == TokenKind::EndArray
         elsif token.kind == TokenKind::EndArray
-          @lexer.next_token
+          @lexer.next_token(@input)
           break
         else
           return fail("expected ',' or ']' in array")
@@ -3235,13 +3214,13 @@ pub struct DocumentParser
   private def parse_object(flags : Int32, key_at : Int32, key_size : Int32) : Nil
     return unless nest
     at = @tree.open(Node.new(Document::Kind::Object.value | flags, key_at, key_size, 0_i64))
-    @lexer.next_token # '{'
+    @lexer.next_token(@input) # '{'
     # Past this many keys, the object's are looked up in a hash rather
     # than compared one by one.
     seen = nil.as(Hash(String, Bool)?)
     count = 0
     if token.kind == TokenKind::EndObject
-      @lexer.next_token
+      @lexer.next_token(@input)
     else
       while true
         return fail("expected string key in object") unless token.kind == TokenKind::String
@@ -3267,18 +3246,18 @@ pub struct DocumentParser
           end
         end
         count = count + 1
-        @lexer.next_token # the key
+        @lexer.next_token(@input) # the key
         return fail("expected ':' after object key") unless token.kind == TokenKind::Colon
-        @lexer.next_token # ':'
+        @lexer.next_token(@input) # ':'
         parse_value(name_flags, name_at, name_size)
         return unless @error.nil?
         if token.kind == TokenKind::Comma
           comma_line = token.line_number
           comma_col = token.column_number
-          @lexer.next_token
+          @lexer.next_token(@input)
           return fail("trailing comma in object", comma_line, comma_col) if token.kind == TokenKind::EndObject
         elsif token.kind == TokenKind::EndObject
-          @lexer.next_token
+          @lexer.next_token(@input)
           break
         else
           return fail("expected ',' or '}' in object")
@@ -3298,11 +3277,10 @@ pub struct DocumentParser
   private def duplicate?(at : Int32, key_at : Int32, key_size : Int32, flags : Int32) : Bool
     child = at + 1
     count = @tree.size
-    bytes = @input.to_unsafe
     while child < count
       node = @tree[child]
       if ((flags | node.flags) & Node::ESCAPED_KEY) == 0
-        return true if node.key_size == key_size && JSON.same?(bytes + node.key_at, bytes + key_at, key_size)
+        return true if node.key_size == key_size && @input[node.key_at, key_size] == @input[key_at, key_size]
       elsif key_s(node.key_at, node.key_size, node.flags) == key_s(key_at, key_size, flags)
         return true
       end
@@ -3386,7 +3364,7 @@ pub struct JSON
   def self.decoded(text : Tape::String, escaped : Bool) : Tape::String
     return text unless escaped
     Tape::String.build(text.bytesize) do |w|
-      each_decoded_byte(text.to_unsafe, text.bytesize) { |b| w.push(b) }
+      each_decoded_byte(text) { |b| w.push(b) }
     end
   end
 
@@ -3394,13 +3372,14 @@ pub struct JSON
   def self.decoded_s(text : Tape::String, escaped : Bool = true) : String
     return text.to_heap unless escaped
     buffer = StringBuffer.new(text.bytesize)
-    each_decoded_byte(text.to_unsafe, text.bytesize) { |b| buffer.append(b) }
+    each_decoded_byte(text) { |b| buffer.append(b) }
     buffer.to_s
   end
 
   # Each byte of a string's text whose escapes the lexer has checked,
   # decoded: `\uXXXX` (a surrogate pair into one code point) as UTF-8.
-  def self.each_decoded_byte(bytes : Pointer(UInt8), size : Int32, & : UInt8 -> Nil) : Nil
+  def self.each_decoded_byte(bytes : Tape::String, & : UInt8 -> Nil) : Nil
+    size = bytes.bytesize
     i = 0
     while i < size
       b = bytes[i]
@@ -3412,10 +3391,10 @@ pub struct JSON
       esc = bytes[i + 1]
       i = i + 2
       if esc == 117_u8
-        cp = hex4(bytes + i)
+        cp = hex4(bytes, i)
         i = i + 4
         if cp >= 0xD800 && cp <= 0xDBFF
-          cp = 0x10000 + ((cp - 0xD800) << 10) + (hex4(bytes + i + 2) - 0xDC00)
+          cp = 0x10000 + ((cp - 0xD800) << 10) + (hex4(bytes, i + 2) - 0xDC00)
           i = i + 6
         end
         if cp <= 0x7F
@@ -3449,32 +3428,23 @@ pub struct JSON
     end
   end
 
-  # Whether *a* and *b* hold the same *size* bytes.
-  def self.same?(a : Pointer(UInt8), b : Pointer(UInt8), size : Int32) : Bool
-    i = 0
-    while i < size
-      return false if a[i] != b[i]
-      i = i + 1
-    end
-    true
-  end
-
   # Whether *bytes* are well-formed UTF-8.
-  def self.utf8?(bytes : Pointer(UInt8), size : Int32) : Bool
+  def self.utf8?(bytes : Tape::String) : Bool
+    size = bytes.bytesize
     i = 0
     while i < size
-      length = utf8_sequence_at(bytes, size, i)
+      length = utf8_sequence_at(bytes, i)
       return false if length < 0
       i = i + length
     end
     true
   end
 
-  private def self.hex4(p : Pointer(UInt8)) : Int32
+  private def self.hex4(text : Tape::String, at : Int32) : Int32
     val = 0
     i = 0
     while i < 4
-      c = p[i]
+      c = text[at + i]
       d = c <= 57_u8 ? c.to_i - 48 : (c | 0x20_u8).to_i - 87
       val = (val << 4) | d
       i = i + 1
@@ -3488,7 +3458,8 @@ pub struct JSON
   # UTF-8 the reader takes back (RFC 8259 §8.1: a String holds any bytes,
   # a file name or a log line). Under *ascii_only* every code point past
   # ASCII is a `\uXXXX`, a surrogate pair past the basic plane.
-  def self.each_escaped_byte(bytes : Pointer(UInt8), len : Int32, ascii_only : Bool, & : UInt8 -> Nil) : Nil
+  def self.each_escaped_byte(bytes : Tape::String, ascii_only : Bool, & : UInt8 -> Nil) : Nil
+    len = bytes.bytesize
     yield 34_u8
     i = 0
     while i < len
@@ -3508,7 +3479,7 @@ pub struct JSON
         hex_u4(b.to_i) { |h| yield h }
         i = i + 1
       else
-        length = utf8_sequence_at(bytes, len, i)
+        length = utf8_sequence_at(bytes, i)
         if length < 0
           if ascii_only
             hex_u4(0xFFFD) { |h| yield h }

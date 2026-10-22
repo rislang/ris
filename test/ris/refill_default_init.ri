@@ -1,0 +1,20 @@
+module test/ris/refill_default_init
+# An `initialize` with a default argument is written as `initialize:content`
+# too: it makes its arrays as any `initialize` does, not refills them.
+@[OnTape]
+struct Holder
+  @items : Tape::Array(Int32)
+
+  def initialize(first : Int32, name : Int32 = 0, content : Int32 = 0)
+    @items = Tape::Array(Int32).new
+    @items << first << name << content
+  end
+
+  def sum : Int32
+    @items.sum
+  end
+end
+
+tape do
+  puts Holder.new(1, content: 2).sum == 3 && Holder.new(1, name: 2).sum == 3 && Holder.new(4).sum == 4 ? "PASS" : "FAIL"
+end

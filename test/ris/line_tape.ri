@@ -1,0 +1,40 @@
+module line_tape
+import std/gc::{GC}
+
+tape do
+  writer = Tape::String::Writer.new(16)
+  writer.append("warm")
+end
+GC.disable
+before = GC.stats.bytes_since_collection
+
+count = 0
+while true
+  done = false
+  tape do
+    line = STDIN.read_line_tape(count != 2)
+    if line
+      if count == 0
+        exit 1 unless line == ""
+      elsif count == 1
+        exit 1 unless line.bytesize == 20000
+      elsif count == 2
+        exit 1 unless line == "hello\r\n"
+      elsif count == 10002
+        exit 1 unless line == "tail\r"
+      else
+        exit 1 unless line == "hello"
+      end
+      count += 1
+    else
+      done = true
+    end
+  end
+  break if done
+end
+exit 1 unless count == 10003
+
+after = GC.stats.bytes_since_collection
+GC.enable
+exit 1 unless before == after
+puts "PASS"

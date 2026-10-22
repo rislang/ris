@@ -1,0 +1,14 @@
+module line_tape_keep
+
+# A line kept while later ones refill the read buffer keeps its own bytes.
+tape do
+  first = STDIN.read_line_tape(true)
+  exit 1 unless first
+  count = 0
+  while STDIN.read_line_tape(true)
+    count += 1
+  end
+  exit 1 unless count == 20000
+  exit 1 unless first == "the first line"
+end
+puts "PASS"

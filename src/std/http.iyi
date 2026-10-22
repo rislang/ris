@@ -235,11 +235,15 @@ class Conn
     @stop - @start
   end
 
-  # The byte *at* bytes past what has been taken, which must have arrived.
-  def tape_view : Tape::String
-    Tape::String.new(@data + @start.to_i64, available)
+  # *count* of the bytes that have arrived, from *at* past what has been
+  # taken, copied onto the caller's tape: the buffer is written over by
+  # the next fill, and a view of it would be too.
+  def tape_copy(at : Int32 = 0, count : Int32 = available - at) : Tape::String
+    raise "bytes #{at}, #{count} past the #{available} that arrived" if at < 0 || count < 0 || at > available - count
+    Tape::String.build(count) { |w| w.append(@data + (@start + at).to_i64, count) }
   end
 
+  # The byte *at* bytes past what has been taken, which must have arrived.
   def peek(at : Int32) : UInt8
     @data[@start + at]
   end
@@ -1416,7 +1420,7 @@ pub struct ParsedHead
   end
 
   def http10? : Bool
-    HTTP.same_bytes?(@version.to_unsafe, @version.bytesize, "HTTP/1.0")
+    @version == "HTTP/1.0"
   end
 
   # Each field as the heap strings a caller keeps: its name as first
@@ -1440,8 +1444,8 @@ pub struct ParsedHead
     i = 0
     while i < @fields.size
       f = @fields[i]
-      if HTTP.same_name?(f.name.to_unsafe, f.name.bytesize, "Content-Length")
-        p = f.value.to_unsafe
+      if HTTP.same_name?(f.name, "Content-Length")
+        p = f.value
         size = f.value.bytesize
         at = 0
         while at <= size
@@ -1478,7 +1482,7 @@ pub struct ParsedHead
     i = 0
     while i < @fields.size
       f = @fields[i]
-      return f.value if HTTP.same_name?(f.name.to_unsafe, f.name.bytesize, name)
+      return f.value if HTTP.same_name?(f.name, name)
       i = i + 1
     end
     nil
@@ -1487,6 +1491,7 @@ pub struct ParsedHead
   # The value of the field at *index*, and of each later one of its name,
   # joined with ", " in one string: joined one by one, a head of many lines
   # of one field cost the square of its size.
+  @[TapeToHeap]
   private def joined_value(index : Int32) : String
     name = @fields[index].name
     total = @fields[index].value.bytesize
@@ -1502,7 +1507,11 @@ pub struct ParsedHead
     return @fields[index].value.to_heap if lines == 1
     String.new(total) do |buffer|
       first = @fields[index].value
-      buffer.copy_from(first.to_unsafe, first.bytesize)
+      j = 0
+      while j < first.bytesize
+        buffer[j] = first[j]
+        j = j + 1
+      end
       at = first.bytesize
       k = index + 1
       while k < @fields.size
@@ -1510,7 +1519,11 @@ pub struct ParsedHead
           value = @fields[k].value
           buffer[at] = 44_u8
           buffer[at + 1] = 32_u8
-          (buffer + at + 2).copy_from(value.to_unsafe, value.bytesize)
+          j = 0
+          while j < value.bytesize
+            buffer[at + 2 + j] = value[j]
+            j = j + 1
+          end
           at = at + 2 + value.bytesize
         end
         k = k + 1
@@ -1531,8 +1544,8 @@ pub struct ParsedHead
 
   private def same_field?(a : Tape::String, b : Tape::String) : Bool
     return false unless a.bytesize == b.bytesize
-    pa = a.to_unsafe
-    pb = b.to_unsafe
+    pa = a
+    pb = b
     i = 0
     while i < a.bytesize
       ca = pa[i]
@@ -1565,7 +1578,7 @@ pub struct Incoming
     i = 0
     while i < @fields.size
       f = @fields[i]
-      return f.value if HTTP.same_name?(f.name.to_unsafe, f.name.bytesize, name)
+      return f.value if HTTP.same_name?(f.name, name)
       i = i + 1
     end
     nil
@@ -1733,7 +1746,7 @@ pub struct Server
       return unless conn.available > 0 || conn.fill
       result = nil.as(Int32 | Bool | Nil)
       tape do
-        result = answered_in_place(client, answerer, conn.tape_view)
+        result = answered_in_place(client, answerer, conn.tape_copy)
       end
       conn.no_deadline
       case result
@@ -1790,7 +1803,8 @@ pub struct Server
     tape do
       head = parse_head(bytes)
       if head.is_a?(ParsedHead) && !head.http10? && head.field("Transfer-Encoding").nil? && head.field("Expect").nil? &&
-         HTTP.absolute_form(head.target.to_unsafe, head.target.bytesize).nil? && (length = head.content_length) &&
+         HTTP.absolute_form(head.target).nil? &&
+         (length = head.content_length) &&
          length <= MAX_BODY.to_i64 && bytes.bytesize - head.body_start >= length
         size = length.to_i32
         close = false
@@ -1798,7 +1812,7 @@ pub struct Server
           close = HTTP.has_token?(conn, "close")
         end
         target = head.target
-        q = HTTP.byte_in(target.to_unsafe, 0, target.bytesize, 63_u8)
+        q = HTTP.byte_in(target, 0, target.bytesize, 63_u8)
         query = q < target.bytesize ? target[q + 1, target.bytesize - q - 1] : nil
         incoming = Incoming.new(head.method, target[0, q], query, head.fields, bytes[head.body_start, size])
         result = answered_on_tape?(client, answerer, incoming, close) ? head.body_start + size : false
@@ -1835,7 +1849,7 @@ pub struct Server
     end
     w << (close ? "Connection: close\r\n\r\n" : "Connection: keep-alive\r\n\r\n")
     method = req.method
-    sends = !bodiless && !HTTP.same_name?(method.to_unsafe, method.bytesize, "HEAD")
+    sends = !bodiless && !HTTP.same_name?(method, "HEAD")
     wrote = client.write(w.finish, sends ? body : "".as_tape)
     wrote.is_a?(Int32) && !close
   end
@@ -1846,7 +1860,7 @@ pub struct Server
   def self.parse_head(
     bytes : Tape::String, from : Int32 = 0, complete : Bool = false,
   ) : ParsedHead | HeadError | Nil
-    p = bytes.to_unsafe
+    p = bytes
     n = bytes.bytesize
     # Past the empty lines a client may send before a request: RFC 9112
     # §2.2 has a server ignore them. Some clients end a body with an extra
@@ -1873,18 +1887,23 @@ pub struct Server
     line_end = HTTP.crlf_in(p, from, split_at)
     sp1 = HTTP.byte_in(p, from, line_end, 32_u8)
     sp2 = sp1 < line_end ? HTTP.byte_in(p, sp1 + 1, line_end, 32_u8) : line_end
-    return HeadError.new("not a request line: #{Tape::String.new(p + from, line_end - from).to_heap.inspect}") if sp2 >= line_end
-    method = Tape::String.new(p + from, sp1 - from)
-    target = Tape::String.new(p + sp1 + 1, sp2 - sp1 - 1)
-    version = Tape::String.new(p + sp2 + 1, line_end - sp2 - 1)
-    return HeadError.new("not a method: #{method.to_heap.inspect}") unless HTTP.token?(method.to_unsafe, method.bytesize)
-    unless HTTP.same_bytes?(version.to_unsafe, version.bytesize, "HTTP/1.1") || HTTP.same_bytes?(version.to_unsafe, version.bytesize, "HTTP/1.0")
+    if sp2 >= line_end
+      shown = bytes[from, line_end - from].to_heap.inspect
+      return HeadError.new("not a request line: #{shown}")
+    end
+    method = bytes[from, sp1 - from]
+    target = bytes[sp1 + 1, sp2 - sp1 - 1]
+    version = bytes[sp2 + 1, line_end - sp2 - 1]
+    unless HTTP.token?(method)
+      return HeadError.new("not a method: #{method.to_heap.inspect}")
+    end
+    unless version == "HTTP/1.1" || version == "HTTP/1.0"
       return HeadError.new("not an HTTP/1 request: #{version.to_heap.inspect}")
     end
     # A control byte in the target - a bare CR, a NUL - is not part of any
     # URI (RFC 9112 §2.2, §3.2); passed on, a query with a line break in it
     # broke the answer of a block that echoed it into a header.
-    if target.bytesize == 0 || HTTP.control?(target.to_unsafe, target.bytesize)
+    if target.bytesize == 0 || HTTP.control?(target)
       return HeadError.new("not a request target: #{target.to_heap.inspect}")
     end
     fields = Tape::Array(Field).new(16)
@@ -1893,8 +1912,14 @@ pub struct Server
     while at < split_at
       stop = HTTP.crlf_in(p, at, split_at)
       colon = HTTP.byte_in(p, at, stop, 58_u8)
-      return HeadError.new("header without a colon: #{Tape::String.new(p + at, stop - at).to_heap.inspect}") if colon >= stop
-      return HeadError.new("not a header name: #{Tape::String.new(p + at, colon - at).to_heap.inspect}") unless HTTP.token?(p + at, colon - at)
+      if colon >= stop
+        shown = bytes[at, stop - at].to_heap.inspect
+        return HeadError.new("header without a colon: #{shown}")
+      end
+      unless HTTP.token?(bytes[at, colon - at])
+        shown = bytes[at, colon - at].to_heap.inspect
+        return HeadError.new("not a header name: #{shown}")
+      end
       first = colon + 1
       last = stop
       while first < last && (p[first] == 32_u8 || p[first] == 9_u8)
@@ -1903,21 +1928,26 @@ pub struct Server
       while last > first && (p[last - 1] == 32_u8 || p[last - 1] == 9_u8)
         last = last - 1
       end
-      name = Tape::String.new(p + at, colon - at)
-      value = Tape::String.new(p + first, last - first)
-      return HeadError.new("header #{name.to_heap} contains a control character") if HTTP.control?(value.to_unsafe, value.bytesize)
+      name = bytes[at, colon - at]
+      value = bytes[first, last - first]
+      if HTTP.control?(value)
+        return HeadError.new(
+          "header #{name.to_heap} contains a control character")
+      end
       # Host (RFC 9112 §3.2): an HTTP/1.1 request names one, no request
       # names two, and what it names is a host; a server answers 400
       # otherwise.
-      if HTTP.same_name?(name.to_unsafe, name.bytesize, "Host")
+      if HTTP.same_name?(name, "Host")
         hosts = hosts + 1
-        return HeadError.new("not a host: #{value.to_heap.inspect}") unless HTTP.host?(value.to_unsafe, value.bytesize)
+        unless HTTP.host?(value)
+          return HeadError.new("not a host: #{value.to_heap.inspect}")
+        end
       end
       fields.push(Field.new(name, value))
       at = stop + 2
     end
     return HeadError.new("Host on #{hosts} lines") if hosts > 1
-    if hosts == 0 && HTTP.same_bytes?(version.to_unsafe, version.bytesize, "HTTP/1.1")
+    if hosts == 0 && version == "HTTP/1.1"
       return HeadError.new("an HTTP/1.1 request without Host")
     end
     ParsedHead.new(method, target, version, fields, split_at + 4)
@@ -1935,7 +1965,7 @@ pub struct Server
   # The same for a value on the tape, read where it lies.
   def self.check_line(name : String, value : Tape::String) : Nil
     raise "HTTP: not a header name: #{name.inspect}" unless HTTP.token?(name)
-    p = value.to_unsafe
+    p = value
     i = 0
     while i < value.bytesize
       raise "HTTP: header #{name} contains a line break" if p[i] == 13_u8 || p[i] == 10_u8
@@ -4062,8 +4092,9 @@ pub struct HTTP
       c = p[i]
       letter = (c >= 65_u8 && c <= 90_u8) || (c >= 97_u8 && c <= 122_u8)
       digit = c >= 48_u8 && c <= 57_u8
-      mark = c == 33_u8 || (c >= 35_u8 && c <= 39_u8) || c == 42_u8 || c == 43_u8 ||
-             c == 45_u8 || c == 46_u8 || c == 94_u8 || c == 95_u8 || c == 96_u8 ||
+      mark = c == 33_u8 || (c >= 35_u8 && c <= 39_u8) ||
+             c == 42_u8 || c == 43_u8 || c == 45_u8 || c == 46_u8 ||
+             c == 94_u8 || c == 95_u8 || c == 96_u8 ||
              c == 124_u8 || c == 126_u8
       return false unless letter || digit || mark
       i = i + 1
@@ -4159,7 +4190,8 @@ pub struct HTTP
       letter = (c >= 65_u8 && c <= 90_u8) || (c >= 97_u8 && c <= 122_u8)
       digit = c >= 48_u8 && c <= 57_u8
       # ! $ % & ' ( ) * + , - . : ; = [ ] _ ~
-      mark = c == 33_u8 || (c >= 36_u8 && c <= 46_u8) || c == 58_u8 || c == 59_u8 ||
+      mark = c == 33_u8 || (c >= 36_u8 && c <= 46_u8) ||
+             c == 58_u8 || c == 59_u8 ||
              c == 61_u8 || c == 91_u8 || c == 93_u8 || c == 95_u8 || c == 126_u8
       return false unless letter || digit || mark
       i = i + 1
@@ -4337,10 +4369,10 @@ pub struct HTTP
   end
 
   def self.same_name?(a : Tape::String, b : String) : Bool
-    same_name?(a.to_unsafe, a.bytesize, b)
+    same_name?(a, a.bytesize, b)
   end
 
-  def self.same_name?(pa : Pointer(UInt8), count : Int32, b : String) : Bool
+  def self.same_name?(pa : Pointer(UInt8) | Tape::String, count : Int32, b : String) : Bool
     return false unless count == b.bytesize
     pb = b.to_unsafe
     i = 0
@@ -4356,7 +4388,7 @@ pub struct HTTP
   end
 
   def self.has_token?(list : Tape::String, token : String) : Bool
-    p = list.to_unsafe
+    p = list
     size = list.bytesize
     at = 0
     while at <= size
@@ -4369,21 +4401,22 @@ pub struct HTTP
       while last > first && (p[last - 1] == 32_u8 || p[last - 1] == 9_u8)
         last = last - 1
       end
-      return true if same_name?(p + first, last - first, token)
+      return true if same_name?(list[first, last - first], token)
       at = stop + 1
     end
     false
   end
 
-  def self.token?(p : Pointer(UInt8), count : Int32) : Bool
+  def self.token?(p : Pointer(UInt8) | Tape::String, count : Int32 = p.bytesize) : Bool
     return false if count == 0
     i = 0
     while i < count
       c = p[i]
       letter = (c >= 65_u8 && c <= 90_u8) || (c >= 97_u8 && c <= 122_u8)
       digit = c >= 48_u8 && c <= 57_u8
-      mark = c == 33_u8 || (c >= 35_u8 && c <= 39_u8) || c == 42_u8 || c == 43_u8 ||
-             c == 45_u8 || c == 46_u8 || c == 94_u8 || c == 95_u8 || c == 96_u8 ||
+      mark = c == 33_u8 || (c >= 35_u8 && c <= 39_u8) ||
+             c == 42_u8 || c == 43_u8 || c == 45_u8 || c == 46_u8 ||
+             c == 94_u8 || c == 95_u8 || c == 96_u8 ||
              c == 124_u8 || c == 126_u8
       return false unless letter || digit || mark
       i = i + 1
@@ -4391,7 +4424,7 @@ pub struct HTTP
     true
   end
 
-  def self.control?(p : Pointer(UInt8), count : Int32) : Bool
+  def self.control?(p : Pointer(UInt8) | Tape::String, count : Int32 = p.bytesize) : Bool
     i = 0
     while i < count
       return true if (p[i] < 32_u8 && p[i] != 9_u8) || p[i] == 127_u8
@@ -4401,10 +4434,10 @@ pub struct HTTP
   end
 
   def self.absolute_form(target : Tape::String) : Int32?
-    absolute_form(target.to_unsafe, target.bytesize)
+    absolute_form(target, target.bytesize)
   end
 
-  def self.absolute_form(p : Pointer(UInt8), count : Int32) : Int32?
+  def self.absolute_form(p : Pointer(UInt8) | Tape::String, count : Int32) : Int32?
     return 7 if count >= 7 && same_name?(p, 7, "http://")
     return 8 if count >= 8 && same_name?(p, 8, "https://")
     nil
@@ -4421,7 +4454,7 @@ pub struct HTTP
     true
   end
 
-  def self.crlf_in(p : Pointer(UInt8), from : Int32, stop : Int32) : Int32
+  def self.crlf_in(p : Pointer(UInt8) | Tape::String, from : Int32, stop : Int32) : Int32
     i = from
     while i + 1 < stop
       return i if p[i] == 13_u8 && p[i + 1] == 10_u8
@@ -4430,7 +4463,7 @@ pub struct HTTP
     stop
   end
 
-  def self.byte_in(p : Pointer(UInt8), from : Int32, stop : Int32, byte : UInt8) : Int32
+  def self.byte_in(p : Pointer(UInt8) | Tape::String, from : Int32, stop : Int32, byte : UInt8) : Int32
     i = from
     while i < stop
       return i if p[i] == byte
@@ -4439,20 +4472,22 @@ pub struct HTTP
     stop
   end
 
-  def self.host?(p : Pointer(UInt8), count : Int32) : Bool
+  def self.host?(p : Pointer(UInt8) | Tape::String, count : Int32 = p.bytesize) : Bool
     i = 0
     while i < count
       c = p[i]
       letter = (c >= 65_u8 && c <= 90_u8) || (c >= 97_u8 && c <= 122_u8)
       digit = c >= 48_u8 && c <= 57_u8
       # ! $ % & ' ( ) * + , - . : ; = [ ] _ ~
-      mark = c == 33_u8 || (c >= 36_u8 && c <= 46_u8) || c == 58_u8 || c == 59_u8 ||
+      mark = c == 33_u8 || (c >= 36_u8 && c <= 46_u8) ||
+             c == 58_u8 || c == 59_u8 ||
              c == 61_u8 || c == 91_u8 || c == 93_u8 || c == 95_u8 || c == 126_u8
       return false unless letter || digit || mark
       i = i + 1
     end
     true
   end
+
 end
 
 # A `multipart/form-data` body (RFC 7578) read a part at a time, as it
@@ -5020,9 +5055,9 @@ class H2Connection
     id = ((@conn.peek(5).to_i32 & 0x7F) << 24) | (@conn.peek(6).to_i32 << 16) | (@conn.peek(7).to_i32 << 8) | @conn.peek(8).to_i32
     return fail(FRAME_SIZE_ERROR, "a frame of #{length} bytes, past the #{FRAME} this end takes") if length > FRAME
     return ended unless @conn.need(9 + length)
-    # Dispatch before the connection buffer can be filled again. Only
-    # DATA queued for a stream copies out at its retention boundary.
-    payload = @conn.tape_view[9, length]
+    # The frame's payload copied onto the tape before the buffer is filled
+    # again; DATA queued for a stream copies out at its retention boundary.
+    payload = @conn.tape_copy(9, length)
     @conn.consume(9 + length)
     if @block_stream != 0 && (type != CONTINUATION || id != @block_stream)
       return fail(PROTOCOL_ERROR, "a header block broken off by another frame")
@@ -5099,7 +5134,7 @@ class H2Connection
   private def unpadded(flags : Int32, payload : Tape::String) : Tape::String?
     return payload if flags & PADDED == 0
     return nil if payload.bytesize < 1
-    pad = payload.to_unsafe[0].to_i32
+    pad = payload[0].to_i32
     return nil if pad >= payload.bytesize
     payload[1, payload.bytesize - 1 - pad]
   end
@@ -5156,7 +5191,7 @@ class H2Connection
     return fail(PROTOCOL_ERROR, "HEADERS whose padding is longer than the frame") if block.nil?
     if flags & PRIORITY_FLAG != 0
       return fail(FRAME_SIZE_ERROR, "HEADERS too short for the priority it says it has") if block.bytesize < 5
-      p = block.to_unsafe
+      p = block
       depends = ((p[0].to_i32 & 0x7F) << 24) | (p[1].to_i32 << 16) | (p[2].to_i32 << 8) | p[3].to_i32
       block = block[5, block.bytesize - 5]
       return refuse(id, PROTOCOL_ERROR) if depends == id
@@ -5206,7 +5241,7 @@ class H2Connection
   # CONTINUATION after CONTINUATION is no way to make this end keep more.
   private def gather(piece : Tape::String) : Bool
     return fail(ENHANCE_YOUR_CALM, "a header block past #{HEADER_LIST} bytes") if @block.size + piece.bytesize > HEADER_LIST
-    p = piece.to_unsafe
+    p = piece
     i = 0
     while i < piece.bytesize
       @block << p[i]
@@ -5291,7 +5326,7 @@ class H2Connection
   private def on_priority(id : Int32, payload : Tape::String) : Bool
     return fail(PROTOCOL_ERROR, "PRIORITY on stream 0") if id == 0
     return refuse(id, FRAME_SIZE_ERROR) if payload.bytesize != 5
-    p = payload.to_unsafe
+    p = payload
     depends = ((p[0].to_i32 & 0x7F) << 24) | (p[1].to_i32 << 16) | (p[2].to_i32 << 8) | p[3].to_i32
     return refuse(id, PROTOCOL_ERROR) if depends == id
     true
@@ -5319,7 +5354,7 @@ class H2Connection
     return fail(FRAME_SIZE_ERROR, "SETTINGS of #{payload.bytesize} bytes, not a multiple of 6") if payload.bytesize % 6 != 0
     at = 0
     while at < payload.bytesize
-      p = payload.to_unsafe
+      p = payload
       name = (p[at].to_i32 << 8) | p[at + 1].to_i32
       value = H2Connection.read_u32(payload, at + 2).to_i64 & 0xFFFFFFFF_i64
       case name
@@ -5810,7 +5845,7 @@ class H2Connection
           return ":authority twice" if authority
           authority = true
         else
-          return "the pseudo-header #{name}"
+          return "the pseudo-header #{name.is_a?(String) ? name : name.to_heap}"
         end
       else
         regular = true
@@ -5840,9 +5875,9 @@ class H2Connection
         v = f.value
         return nil unless v.bytesize == 3
         v.each_byte { |b| return nil unless b >= 48_u8 && b <= 57_u8 }
-        status = (v.to_unsafe[0] - 48_u8).to_i32 * 100 +
-                 (v.to_unsafe[1] - 48_u8).to_i32 * 10 +
-                 (v.to_unsafe[2] - 48_u8).to_i32
+        status = ((v.is_a?(String) ? v.to_unsafe : v)[0] - 48_u8).to_i32 * 100 +
+                 ((v.is_a?(String) ? v.to_unsafe : v)[1] - 48_u8).to_i32 * 10 +
+                 ((v.is_a?(String) ? v.to_unsafe : v)[2] - 48_u8).to_i32
       else
         regular = true
         return nil if field_flaw(f)
@@ -5856,15 +5891,18 @@ class H2Connection
     name = f.name
     return "an empty field name" if name.empty?
     name.each_byte { |b| return "the field name #{name.inspect} is not lower case" if b >= 65_u8 && b <= 90_u8 }
-    valid_name = HTTP.token?(name.to_unsafe, name.bytesize)
+    valid_name = HTTP.token?(name)
     return "the field name #{name.inspect}" unless valid_name
-    return "the connection-specific field #{name}" if connection_specific?(name)
+    if connection_specific?(name)
+      shown = name.is_a?(String) ? name : name.to_heap
+      return "the connection-specific field #{shown}"
+    end
     return "te other than trailers" if name == "te" && f.value != "trailers"
     v = f.value
     v.each_byte { |b| return "a value holding NUL, CR or LF" if b == 0_u8 || b == 13_u8 || b == 10_u8 }
     if v.bytesize > 0
-      first = v.to_unsafe[0]
-      last = v.to_unsafe[v.bytesize - 1]
+      first = (v.is_a?(String) ? v.to_unsafe : v)[0]
+      last = (v.is_a?(String) ? v.to_unsafe : v)[v.bytesize - 1]
       return "a value beginning or ending in white space" if first == 32_u8 || first == 9_u8 || last == 32_u8 || last == 9_u8
     end
     nil
@@ -6047,7 +6085,7 @@ class H2Connection
   end
 
   def self.read_u32(text : String | Tape::String, at : Int32) : Int32
-    p = text.to_unsafe
+    p = text.is_a?(String) ? text.to_unsafe : text
     (p[at].to_i32 << 24) | (p[at + 1].to_i32 << 16) | (p[at + 2].to_i32 << 8) | p[at + 3].to_i32
   end
 

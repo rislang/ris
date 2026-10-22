@@ -341,7 +341,7 @@ if [ -z "$PY" ]; then
 elif ! "$PY" - <<PY
 from pathlib import Path
 src = Path("$REPO/src/std/csv.iyi").read_text()
-old = 'quoted ? take(field, size) : text[start, size]'
+old = 'quoted ? take(field.finish, size) : text[start, size]'
 if old not in src:
     raise SystemExit("patch site missing")
 Path("$WORK/patched/std/csv.iyi").write_text(src.replace(old, 'text[start, 0]', 1))
@@ -404,7 +404,10 @@ broken "a last quoted empty field dropped" 'if flen > 0 || row.size > 0 || opene
 broken "a lone empty field written bare" 'io << "\"\"" if fields.size == 1 && fields[0].empty?' '' "ASSERTION FAILED: a row of one empty field is written quoted"
 broken "a last row of no fields left unended" "io << '\\n' if rows.size > 0 && rows[rows.size - 1].empty?" '' "ASSERTION FAILED: a last row of no fields round trips"
 broken "text after a closing quote kept" 'if i < n && src[i] != 44_u8 && src[i] != 10_u8 && src[i] != 13_u8' 'if false' "ASSERTION FAILED: text after a closing quote"
-broken "a quote in an unquoted field kept" 'refuse(text, i, "unexpected quote")' 'field[flen] = b; flen = flen + 1; i = i + 1' "ASSERTION FAILED: a quote inside an unquoted field"
+broken "a quote in an unquoted field kept" \
+  'refuse(text, i, "unexpected quote")' \
+  'field.push(b); flen = flen + 1; i = i + 1' \
+  "ASSERTION FAILED: a quote inside an unquoted field"
 # The reader and the writer, each fix undone the same way.
 broken "the LF of a CRLF read as a blank row" 'if b == 10_u8 && @prev_cr && fields.empty? && !touched' 'if false' "ASSERTION FAILED: a CRLF is one line end"
 broken "a bare field's run carried past the separator" '(state == BARE && c == @sep)' 'false' "ASSERTION FAILED: a separator ends a bare field"

@@ -75,6 +75,7 @@ class Iyi::Program
 
     @progress_tracker.stage("Semantic (tape check)") do
       Prof.span("tape check") do
+        IntegerTextDivisionChecker.new(self).run(result)
         TapeChecker.new(self).run
         result.accept TapeLifetimeChecker.new(self)
         TapePointerChecker.new(self).run(result)

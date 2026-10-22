@@ -1,0 +1,14 @@
+# @[TapeUnsafe] in a std/ module on a def that walks tape text by
+# pointer and hands it to no lib fun or system call: a codec, not the OS
+# boundary. The directory is std/ so that the mark itself is let through.
+@[TapeUnsafe]
+def sum(text : Tape::String) : Int32
+  bytes = text.to_unsafe
+  total = 0
+  text.bytesize.times { |i| total = total + bytes[i] }
+  total
+end
+
+tape do
+  puts sum(Tape::String.new("abc"))
+end

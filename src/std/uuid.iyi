@@ -53,11 +53,18 @@ pub struct UUID
   end
 
   def self.v4_on_tape : TapeUUID
-    bytes = Pointer(UInt8).new(IyiRegion.tape_bytes(16_u64))
+    storage = uninitialized StaticArray(UInt8, 16)
+    bytes = pointerof(storage).as(Pointer(UInt8))
     Random::Secure.fill(bytes, 16)
     bytes[6] = (bytes[6] & 0x0f_u8) | 0x40_u8
     bytes[8] = (bytes[8] & 0x3f_u8) | 0x80_u8
-    TapeUUID.new(Tape::String.new(bytes, 16))
+    TapeUUID.new(Tape::String.build(16) do |writer|
+      i = 0
+      while i < 16
+        writer.push(bytes[i])
+        i += 1
+      end
+    end)
   end
 
   # The millisecond `v7` last stamped and the 12-bit counter beside it.
@@ -86,7 +93,8 @@ pub struct UUID
   end
 
   def self.v7_on_tape : TapeUUID
-    bytes = Pointer(UInt8).new(IyiRegion.tape_bytes(16_u64))
+    storage = uninitialized StaticArray(UInt8, 16)
+    bytes = pointerof(storage).as(Pointer(UInt8))
     Random::Secure.fill(bytes, 16)
     now = Time.utc.to_unix_ms
     if now > @@v7_ms
@@ -107,7 +115,13 @@ pub struct UUID
     bytes[6] = (0x70 | (@@v7_counter >> 8)).to_u8
     bytes[7] = (@@v7_counter & 255).to_u8
     bytes[8] = (bytes[8] & 0x3f_u8) | 0x80_u8
-    TapeUUID.new(Tape::String.new(bytes, 16))
+    TapeUUID.new(Tape::String.build(16) do |writer|
+      i = 0
+      while i < 16
+        writer.push(bytes[i])
+        i += 1
+      end
+    end)
   end
 
   def self.parse(text : String) : UUID
@@ -153,7 +167,14 @@ pub struct UUID
   end
 
   def write(writer : Tape::String::Writer) : Nil
-    TapeUUID.new(Tape::String.new(@bytes.to_unsafe, 16)).write(writer)
+    digits = "0123456789abcdef"
+    i = 0
+    while i < 16
+      writer << "-" if i == 4 || i == 6 || i == 8 || i == 10
+      b = @bytes[i].to_i32
+      writer << digits[b >> 4] << digits[b & 15]
+      i += 1
+    end
   end
 
   def bytes : Array(UInt8)

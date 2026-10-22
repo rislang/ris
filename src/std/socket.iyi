@@ -652,6 +652,20 @@ pub class IyiSocket
     end
   end
 
+  # Up to *max* bytes onto the end of *writer*, the caller's tape: recv
+  # writes straight into the writer's room, nothing copied. Answers how
+  # many came, 0 at the end of the stream.
+  @[TapeUnsafe]
+  def read(writer : Tape::String::Writer, max : Int32) : Int32 | Cancelled | SocketError
+    result = 0.as(Int32 | Cancelled | SocketError)
+    writer.unsafe_append(max) do |room|
+      got = read(room, max)
+      result = got
+      got.is_a?(Int32) ? got : 0
+    end
+    result
+  end
+
   def recv(max_bytes : Int32 = 4096) : String | Cancelled | SocketError
     read(max_bytes)
   end
@@ -693,9 +707,33 @@ pub class IyiSocket
   end
 
   # The same for two pieces on the tape, which are not copied.
+  # Pass both tape buffers directly to the OS write call.
+  @[TapeUnsafe]
   def write(first : Tape::String, second : Tape::String) : Int32 | Cancelled | SocketError
     raise "socket is closed" if @fd < 0
     write_pair(first.to_unsafe, first.bytesize, second.to_unsafe, second.bytesize)
+  end
+
+  # Up to `SENDV_PIECES` of *pieces* from *index*, the first from byte
+  # *offset*, in one sendv: their tape addresses go into the iovec.
+  @[TapeUnsafe]
+  private def sendv(pieces : Tape::Array(Tape::String), index : Int32, offset : Int32) : Int64
+    iov = uninitialized UInt64[128]
+    words = pointerof(iov).as(UInt64*)
+    count = 0
+    at = index
+    from = offset
+    while at < pieces.size && count < SENDV_PIECES
+      piece = pieces[at]
+      if piece.bytesize > from
+        words[count * 2] = (piece.to_unsafe + from).address
+        words[count * 2 + 1] = (piece.bytesize - from).to_u64
+        count = count + 1
+      end
+      at = at + 1
+      from = 0
+    end
+    IyiSocket.__sys_sendv(@fd, words, count, IyiSocket.bound(@write_timeout_ms))
   end
 
   # *pieces* in order, as one write where the platform takes several
@@ -703,8 +741,6 @@ pub class IyiSocket
   # joined into one buffer first, up to `SENDV_PIECES` a call.
   def write(pieces : Tape::Array(Tape::String)) : Int32 | Cancelled | SocketError
     raise "socket is closed" if @fd < 0
-    iov = uninitialized UInt64[128]
-    words = pointerof(iov).as(UInt64*)
     total = 0
     pieces.each { |piece| total = total + piece.bytesize }
     written = 0
@@ -715,20 +751,7 @@ pub class IyiSocket
         index = index + 1
         offset = 0
       end
-      count = 0
-      at = index
-      from = offset
-      while at < pieces.size && count < SENDV_PIECES
-        piece = pieces[at]
-        if piece.bytesize > from
-          words[count * 2] = (piece.to_unsafe + from).address
-          words[count * 2 + 1] = (piece.bytesize - from).to_u64
-          count = count + 1
-        end
-        at = at + 1
-        from = 0
-      end
-      n = IyiSocket.__sys_sendv(@fd, words, count, IyiSocket.bound(@write_timeout_ms))
+      n = sendv(pieces, index, offset)
       if n < 0_i64 && IyiSocket.__sys_would_block?(n)
         waited = IyiSocket.await_writable(@fd, IyiSocket.bound(@write_timeout_ms))
         return waited if waited.is_a?(Cancelled)

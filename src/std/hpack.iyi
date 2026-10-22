@@ -543,7 +543,7 @@ pub class Huffman
     bits_in_buf = 0_i32
     i = 0
     while i < input.bytesize
-      byte_val = input.to_unsafe[i].to_i32
+      byte_val = (input.is_a?(String) ? input.to_unsafe[i] : input[i]).to_i32
       code = HUFFMAN_CODES[byte_val]
       code_len = HUFFMAN_LENS[byte_val]
 
@@ -590,7 +590,7 @@ pub class Huffman
     total_bits = 0_i64
     i = 0
     while i < input.bytesize
-      byte_val = input.to_unsafe[i].to_i32
+      byte_val = (input.is_a?(String) ? input.to_unsafe[i] : input[i]).to_i32
       total_bits = total_bits + HUFFMAN_LENS[byte_val].to_i64
       i = i + 1
     end
@@ -601,8 +601,7 @@ pub class Huffman
                   length : Int32) : String | HpackError
     result = HpackError.new("not decoded").as(String | HpackError)
     tape do
-      view = Tape::String.new(bytes.to_unsafe, bytes.size)
-      decoded = decode(view, offset, length)
+      decoded = decode_bytes(bytes, offset, length)
       result = decoded.is_a?(HpackError) ? decoded : decoded.to_heap
     end
     result
@@ -610,6 +609,12 @@ pub class Huffman
 
   def self.decode(bytes : Tape::String, offset : Int32,
                   length : Int32) : Tape::String | HpackError
+    decode_bytes(bytes, offset, length)
+  end
+
+  private def self.decode_bytes(bytes : Bytes | Tape::String,
+                                offset : Int32,
+                                length : Int32) : Tape::String | HpackError
     # `offset + length` overflowed and panicked on a length near Int32's
     # largest; the room left after *offset* cannot.
     if offset < 0 || length < 0 || offset > bytes.bytesize ||
@@ -1149,7 +1154,7 @@ pub class Encoder
       Integer.encode(raw_len.to_u64, 7, 0_u8, buffer)
       j = 0
       while j < raw_len
-        buffer.push(str.to_unsafe[j])
+        buffer.push((str.is_a?(String) ? str.to_unsafe[j] : str[j]))
         j = j + 1
       end
     end

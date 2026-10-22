@@ -1978,7 +1978,7 @@ pub struct Time
       tape do
         w = Tape::String::Writer.new(32)
         to_rfc3339(fraction_digits, w)
-        text = w.finish.to_s
+        text = w.finish.to_heap
       end
       text
     {% else %}

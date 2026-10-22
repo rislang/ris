@@ -78,9 +78,9 @@ pub struct CSV
     rows = Tape::Array(Tape::Array(Tape::String)).new
     row = Tape::Array(Tape::String).new
     n = text.bytesize
-    src = text.to_unsafe
+    src = text
     i = 0
-    field = Pointer(UInt8).new(IyiRegion.tape_bytes((n + 1).to_u64))
+    field = Tape::String::Writer.new(n + 1)
     flen = 0
     quoted = false
     # The field opened with a quote: `""` is a field even with no bytes in
@@ -101,7 +101,7 @@ pub struct CSV
       if quoted
         if b == 34_u8 # "
           if i + 1 < n && src[i + 1] == 34_u8
-            field[flen] = 34_u8
+            field.push(34_u8)
             flen = flen + 1
             i = i + 2
           else
@@ -114,7 +114,7 @@ pub struct CSV
             end
           end
         else
-          field[flen] = b
+          field.push(b)
           flen = flen + 1
           i = i + 1
         end
@@ -129,6 +129,7 @@ pub struct CSV
           refuse(text, i, "unexpected quote")
         elsif b == 44_u8 # comma
           row << field_value(text, start, field, flen, opened)
+          field.truncate(0)
           flen = 0
           opened = false
           i = i + 1
@@ -140,6 +141,7 @@ pub struct CSV
           if row.size > 0 || flen > 0 || opened
             row << field_value(text, start, field, flen, opened)
           end
+          field.truncate(0)
           flen = 0
           opened = false
           rows << row
@@ -148,7 +150,7 @@ pub struct CSV
           i = i + 1 if b == 13_u8 && i < n && src[i] == 10_u8
           start = i
         else
-          field[flen] = b
+          field.push(b)
           flen = flen + 1
           i = i + 1
         end
@@ -203,14 +205,14 @@ pub struct CSV
   end
 
   private def self.field_value(text : Tape::String, start : Int32,
-                               field : Pointer(UInt8), size : Int32,
+                               field : Tape::String::Writer, size : Int32,
                                quoted : Bool) : Tape::String
-    quoted ? take(field, size) : text[start, size]
+    quoted ? take(field.finish, size) : text[start, size]
   end
 
-  private def self.take(field : Pointer(UInt8), flen : Int32) : Tape::String
+  private def self.take(field : Tape::String, flen : Int32) : Tape::String
     Tape::String.build(flen) do |w|
-      w << Tape::String.new(field, flen)
+      w << field[0, flen]
     end
   end
 
@@ -219,7 +221,7 @@ pub struct CSV
   # here, on the way out, so a document that parses pays nothing for them.
   private def self.refuse(text : Tape::String, at : Int32,
                           what : String) : NoReturn
-    src = text.to_unsafe
+    src = text
     line = 1
     column = 1
     i = 0
@@ -238,16 +240,16 @@ pub struct CSV
 
   # The character that starts at byte *at*, for a refusal to name.
   private def self.char_at(text : Tape::String, at : Int32) : String
-    b = text.to_unsafe[at]
+    b = text[at]
     len = b < 0x80_u8 ? 1 : (b < 0xE0_u8 ? 2 : (b < 0xF0_u8 ? 3 : 4))
     len = text.bytesize - at if len > text.bytesize - at
-    take(text.to_unsafe + at, len).to_heap
+    text[at, len].to_heap
   end
 
   private def self.escape(field : Tape::String,
                           writer : Tape::String::Writer) : Nil
     need = false
-    p = field.to_unsafe
+    p = field
     n = field.bytesize
     i = 0
     while i < n

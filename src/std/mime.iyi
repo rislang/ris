@@ -189,7 +189,7 @@ pub struct MIME
   # The text lowercased, and the text itself when it has no uppercase
   # ASCII, which is nearly always, so nothing is allocated for it.
   private def self.lower(text : Tape::String) : Tape::String
-    bytes = text.to_unsafe
+    bytes = text
     i = 0
     while i < text.bytesize
       b = bytes[i]
@@ -204,7 +204,7 @@ pub struct MIME
   # any case. A path whose base name has no dot has no extension; a bare
   # word is taken as the extension itself. Nil when unknown.
   def self.from_extension?(name : Tape::String) : Tape::String?
-    bytes = name.to_unsafe
+    bytes = name
     size = name.bytesize
     dot = -1
     i = size - 1
@@ -300,7 +300,7 @@ pub struct MIME
   # any part is not a token, a parameter has no `=`, or a quote is left
   # open.
   def self.parse?(value : Tape::String) : TapeMediaType?
-    bytes = value.to_unsafe
+    bytes = value
     size = value.bytesize
     pos = skip_ows(bytes, 0, size)
     type_start = pos
@@ -345,14 +345,16 @@ pub struct MIME
     parsed ? parsed.essence : nil
   end
 
-  private def self.skip_ows(bytes : Pointer(UInt8), pos : Int32, size : Int32) : Int32
+  private def self.skip_ows(bytes : Tape::String, pos : Int32,
+                              size : Int32) : Int32
     while pos < size && (bytes[pos] == ' '.ord.to_u8 || bytes[pos] == '\t'.ord.to_u8)
       pos = pos + 1
     end
     pos
   end
 
-  private def self.skip_token(bytes : Pointer(UInt8), pos : Int32, size : Int32) : Int32
+  private def self.skip_token(bytes : Tape::String, pos : Int32,
+                              size : Int32) : Int32
     while pos < size && token_byte?(bytes[pos])
       pos = pos + 1
     end
@@ -384,7 +386,7 @@ pub struct MIME
   # the second copies, so the value is allocated once.
   private def self.unquote(value : Tape::String,
                            start : Int32) : {Tape::String, Int32}?
-    bytes = value.to_unsafe
+    bytes = value
     size = value.bytesize
     pos = start + 1
     count = 0
