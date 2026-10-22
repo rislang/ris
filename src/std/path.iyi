@@ -665,9 +665,11 @@ pub struct Path
       upper[length] = 0_u16
       size = __iyi_utf8_size_from_wide(upper)
       return nil if size <= 1
-      bytes = Pointer(UInt8).new(IyiRegion.tape_bytes(size.to_u64))
-      __iyi_utf8_bytes_from_wide(upper, bytes, size)
-      Tape::String.new(bytes, size - 1)
+      # Windows writes the UTF-8 straight into the writer's room; the
+      # terminator it counts is left out.
+      w = Tape::String::Writer.new(size)
+      w.unsafe_append(size) { |room| __iyi_utf8_bytes_from_wide(upper, room, size) - 1 }
+      w.finish
     end
   {% end %}
 end
