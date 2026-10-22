@@ -1140,7 +1140,7 @@ prove_broken "a client that drops what came with the 101" "a frame that came wit
 prove_broken "a server that drops what came after the handshake" "a frame in the leftover" \
   '    @in_stop = leftover.bytesize' '    @in_stop = 0'
 prove_broken "a client that does not mask" "a client's 1 bytes, unmasked by the reader" \
-  '        WebSocket.mask(dst + head, n, key)' ''
+  '        w.push(data[i] ^ byte)' '        w.push(data[i])'
 prove_broken "a server that takes unmasked frames" "an unmasked client frame" \
   '      return fail(1002, "a client'"'"'s frame is not masked") unless masked' ''
 prove_broken "a client that takes masked frames" "a masked server frame" \

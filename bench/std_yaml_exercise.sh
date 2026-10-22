@@ -310,7 +310,7 @@ prove_caught esctab "folding trims escaped blanks" \
   'trim_trailing_blanks(hard)' 'trim_trailing_blanks(0)'
 prove_caught foldcopy "folding copies a quoted scalar to trim it, not in place" \
   "quoted scalars of 20,000 lines read in under a second" \
-  $'    count = @buffer.size\n    while count > floor' $'    text = @buffer.to_s\n    count = text.bytesize\n    @buffer.clear\n    @buffer.append(text.to_unsafe, count)\n    while count > floor'
+  $'    count = @buffer.size\n    while count > floor' $'    count = @buffer.size\n    held = Tape::String.build(count) { |w| w << @buffer.finish }\n    @buffer.clear\n    @buffer << held\n    while count > floor'
 prove_caught escbreak "an escaped line break folds like a plain one" \
   "blanks before an escaped line break stay" \
   'next_quoted_line(opener, parent, flow, true)' 'next_quoted_line(opener, parent, flow, false)'
@@ -371,7 +371,7 @@ prove_caught maphash "a mapping's hash sums its pairs unmixed" \
   'value = value &+ {key, item}.hash' 'value = value &+ ((key.hash &* 31) &+ item.hash)'
 prove_caught mergespaced "a flow '<<' merges only with its ':' adjacent" \
   "a merge key spaced from its ':' merges" \
-  'key.kind == Any::KIND_STRING && key.as_s == "<<"' 'key.kind == Any::KIND_STRING && key.as_s == "<<" && @bytes[pos + 2] == 58_u8'
+  'key.kind == TapeValue::KIND_STRING && key.as_s == "<<"' 'key.kind == TapeValue::KIND_STRING && key.as_s == "<<" && @bytes[pos + 2] == 58_u8'
 prove_caught mergepair "a one-pair flow mapping keeps '<<' as a key" \
   "a merge in a one-pair flow mapping merges" \
   'if merge_key?(item_pos, item)' 'if false && merge_key?(item_pos, item)'
@@ -381,7 +381,7 @@ prove_caught tabline "a tab after a continuation line's spaces is refused" \
   $'      # and as a tab in the indentation.\n      if @tabbed[look]\n        fail("tab used for indentation", @heads[look])\n        break\n      end\n'
 prove_caught pairkey "a one-pair flow mapping takes a collection key" \
   'accepted "[[a]: b]' \
-  'if item.kind == Any::KIND_ARRAY || item.kind == Any::KIND_HASH' 'if false'
+  'if item.kind == TapeValue::KIND_ARRAY || item.kind == TapeValue::KIND_HASH' 'if false'
 prove_caught secondtag "a second tag replaces the first" \
   'accepted "a: !!str !!int 1' \
   'fail("a second tag", pos) unless tag.nil?' 'nil'

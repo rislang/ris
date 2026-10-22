@@ -114,7 +114,7 @@ proves_slow() { # proves_slow <label> <dir> <std|iyi> <file under src/std or src
 proves_slow "Enumerable#join copying per element" copying_join std "enumerable.iyi" \
   's/^        io << e.to_s$/        io << io.to_s[0, 0] + e.to_s/'
 proves_slow "CSV.build copying per field" copying_csv std "csv.iyi" \
-  's/^          io << escape(fields\[c\])$/          io << io.to_s[0, 0] + escape(fields[c])/'
+  's/^        escape(fields\[c\], io)$/        io.length.times { io.push(32_u8); io.truncate(io.length - 1) }; escape(fields[c], io)/'
 # And a search that never leaves the naive loop, however much it compares.
 proves_slow "a search that stays naive" naive_search iyi "string.iyi" \
   's/^      break if spent > 4 \* (i - offset) + 64$/      spent = 0/'

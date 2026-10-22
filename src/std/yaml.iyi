@@ -758,6 +758,13 @@ pub struct TapeValue
       Any.new(nil)
     end
   end
+
+  # As `Any#inspect` writes it: a refusal names a duplicate key by this,
+  # and the struct's own inspect named the type, not the key.
+  @[TapeToHeap]
+  def inspect : String
+    to_heap.inspect
+  end
 end
 
 @[OnTape]
@@ -2703,10 +2710,15 @@ struct TapeEmitter
   # where telling it from `1_000` would be a second number reader. `y` and
   # `n` are booleans in the 1.1 type repository though PyYAML reads them
   # as strings, so they are quoted too.
+  WORDS_1_1 = ["y", "Y", "n", "N", "yes", "Yes", "YES", "no", "No", "NO",
+               "on", "On", "ON", "off", "Off", "OFF", "="]
+
   private def other_in_1_1?(text : Tape::String, bytes : Pointer(UInt8), size : Int32) : Bool
-    case text
-    when "y", "Y", "n", "N", "yes", "Yes", "YES", "no", "No", "NO", "on", "On", "ON", "off", "Off", "OFF", "="
-      return true
+    # `==` each, as a `case` asks `String#===` of a Tape::String: false.
+    w = 0
+    while w < WORDS_1_1.size
+      return true if text == WORDS_1_1[w]
+      w += 1
     end
     i = bytes[0] == 43_u8 || bytes[0] == 45_u8 ? 1 : 0
     i < size && bytes[i] >= 48_u8 && bytes[i] <= 57_u8
