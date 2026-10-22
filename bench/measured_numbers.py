@@ -100,10 +100,10 @@ def check_bind_speed(wrong: list[str], held: list[str]) -> None:
 
 
 def check_build_pair(wrong: list[str], held: list[str]) -> None:
-    """README.md quotes the generated head-to-head pair's two line counts."""
-    text = doc("README.md")
-    iyi_lines = quoted(text, r"and ([\d,]+) for what\n`[^`]*generate_pair\.py 300", "README.md", wrong)
-    go_lines = quoted(text, r"each row is \d+ lines and ([\d,]+)", "README.md", wrong)
+    """README.iyi.md quotes the generated head-to-head pair's two line counts."""
+    text = doc("README.iyi.md")
+    iyi_lines = quoted(text, r"and ([\d,]+) for what\n`[^`]*generate_pair\.py 300", "README.iyi.md", wrong)
+    go_lines = quoted(text, r"each row is \d+ lines and ([\d,]+)", "README.iyi.md", wrong)
     if not iyi_lines or not go_lines:
         return
     with tempfile.TemporaryDirectory() as raw:
@@ -117,11 +117,11 @@ def check_build_pair(wrong: list[str], held: list[str]) -> None:
     want_go = int(go_lines[0].replace(",", ""))
     if (want_iyi, want_go) != (measured_iyi, measured_go):
         wrong.append(
-            f"README.md: the head-to-head pair is quoted as {want_iyi} iyi and {want_go} Go "
+            f"README.iyi.md: the head-to-head pair is quoted as {want_iyi} iyi and {want_go} Go "
             f"lines, the generator writes {measured_iyi} and {measured_go}"
         )
         return
-    held.append(f"the generated pair is {measured_iyi} iyi and {measured_go} Go lines, as README.md says")
+    held.append(f"the generated pair is {measured_iyi} iyi and {measured_go} Go lines, as README.iyi.md says")
 
 
 def check_gc_arms(wrong: list[str], held: list[str]) -> None:
