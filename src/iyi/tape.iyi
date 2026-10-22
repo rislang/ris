@@ -1663,6 +1663,55 @@ end
 
 # Descriptor streams consume tape bytes before their scope can end.
 class IyiIO
+  # As `read_line`, onto the caller's active tape and with no heap String:
+  # a line in the buffer is one copy; one across refills grows a writer.
+  def read_line_tape(chomp : Bool = false) : Tape::String?
+    raise "cannot read from closed IO" if @closed
+    if @read_pos >= @read_limit
+      return nil if @eof
+      return nil if fill_buffer <= 0
+    end
+    found = @read_pos
+    while found < @read_limit && @read_buffer[found] != 10_u8
+      found = found + 1
+    end
+    if found < @read_limit
+      start_ptr = @read_buffer + @read_pos
+      len = found - @read_pos + 1
+      @read_pos = found + 1
+      len = len - (len > 1 && start_ptr[len - 2] == 13_u8 ? 2 : 1) if chomp
+      # Copied: the buffer is refilled under a view of it.
+      bytes = Pointer(UInt8).new(IyiRegion.tape_bytes(len.to_u64))
+      bytes.copy_from(start_ptr, len)
+      return Tape::String.new(bytes, len)
+    end
+    writer = Tape::String::Writer.new(256)
+    while true
+      start = @read_pos
+      j = start
+      while j < @read_limit && @read_buffer[j] != 10_u8
+        j = j + 1
+      end
+      newline = j < @read_limit
+      take = j - start + (newline ? 1 : 0)
+      if writer.length.to_i64 + take > 2147483647_i64
+        raise "a line is past the 2147483647 bytes a string holds"
+      end
+      writer.append(@read_buffer + start, take)
+      @read_pos = start + take
+      break if newline || @eof
+      break if fill_buffer <= 0
+    end
+    text = writer.finish
+    len = text.bytesize
+    return nil if len == 0 && @eof
+    # A `\r` ends a line only before a `\n`; a final lone one is kept.
+    if chomp && len > 0 && text[len - 1] == 10_u8
+      len = len - (len > 1 && text[len - 2] == 13_u8 ? 2 : 1)
+    end
+    text[0, len]
+  end
+
   def print(text : Tape::String) : Nil
     text.to_s(self)
   end

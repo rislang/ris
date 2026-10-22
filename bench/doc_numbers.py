@@ -178,20 +178,30 @@ def prelude_library_lines() -> int:
 def library_with_floor_lines() -> int:
     """The library with every platform's floor still in it: the number a
     reader counts by opening the files. See `prelude_library_lines`."""
-    files = sorted((REPO / "src/iyi").glob("*.iyi"))
-    outside = {"concurrency.iyi", "thread.iyi", "float.iyi"}
-    total = 0
-    for path in files:
-        lines = path.read_text().splitlines()
+    return sum(len(lines) for lines in library_files())
+
+
+def library_files() -> list[list[str]]:
+    """The lines of each file the ceiling counts: `src/iyi/` without what
+    `prelude_library_lines` names as outside it, and without ris's tape -
+    `tape.iyi` and the block of prelude.iyi that requires it. The tape is
+    ris's addition beside iyi's collector, where Goose's model is the
+    measure, and SPEC.md I.4's ceiling is iyi's, set before there was one."""
+    outside = {"concurrency.iyi", "thread.iyi", "float.iyi", "tape.iyi"}
+    files = []
+    for path in sorted((REPO / "src/iyi").glob("*.iyi")):
         if path.name in outside:
             continue
+        lines = path.read_text().splitlines()
         if path.name == "prelude.iyi":
             start = next(i for i, l in enumerate(lines) if l.startswith("# ── The memory layer"))
             end = next(i for i, l in enumerate(lines) if l.startswith("# ── end of the memory layer"))
-            total += len(lines) - (end - start + 1)
-        else:
-            total += len(lines)
-    return total
+            lines = lines[:start] + lines[end + 1:]
+            tape = next(i for i, l in enumerate(lines) if l.startswith("# PROTOTYPE (ris"))
+            close = next(i for i in range(tape, len(lines)) if lines[i] == "{% end %}")
+            lines = lines[:tape] + lines[close + 1:]
+        files.append(lines)
+    return files
 
 
 # The OS, architecture and ABI flags. A build-configuration flag
@@ -224,17 +234,8 @@ def platform_floor_lines(only: str | None = None) -> int:
 
     *only* narrows it to the arms naming one flag, for the breakdown.
     """
-    files = sorted((REPO / "src/iyi").glob("*.iyi"))
-    outside = {"concurrency.iyi", "thread.iyi", "float.iyi"}
     total = 0
-    for path in files:
-        if path.name in outside:
-            continue
-        lines = path.read_text().splitlines()
-        if path.name == "prelude.iyi":
-            start = next(i for i, l in enumerate(lines) if l.startswith("# ── The memory layer"))
-            end = next(i for i, l in enumerate(lines) if l.startswith("# ── end of the memory layer"))
-            lines = lines[:start] + lines[end + 1:]
+    for lines in library_files():
         stack: list[bool] = []
         for line in lines:
             inside_before = any(stack)
@@ -315,15 +316,20 @@ def iyimod_format() -> int:
     return int(m.group(1))
 
 
+# iyi's own documents, which ris keeps as they are (CLAUDE.md): their
+# numbers are iyi's at the fork and its merges, not ris's tree, so a claim
+# in one of them is listed and not held. ris's own documents state no size.
+IYI_DOCUMENTS = {"SPEC.md", "CHANGELOG.md", "README.iyi.md"}
+
 # Each entry: the measured key, the pattern that quotes it as current, the file,
 # and how many times that pattern is expected to appear there. The count is
 # load-bearing: two sites in one file shared a pattern, and dropping one of them
 # left the other matching, so the check went on passing while a sentence it was
 # meant to cover had gone. A pattern must capture the number in group 1.
 CLAIMS: list[tuple[str, str, str, int]] = [
-    ("prelude", r"iyi's own library is ([\d,]+) lines", "README.md", 2),
-    ("prelude", r"iyi's own library, ([\d,]+) lines", "README.md", 1),
-    ("prelude", r"standard library instead of ([\d,]+)", "README.md", 1),
+    ("prelude", r"iyi's own library is ([\d,]+) lines", "README.iyi.md", 2),
+    ("prelude", r"iyi's own library, ([\d,]+) lines", "README.iyi.md", 1),
+    ("prelude", r"standard library instead of ([\d,]+)", "README.iyi.md", 1),
     ("prelude", r"iyi's own prelude \| ([\d,]+) lines", "SPEC.md", 1),
     ("prelude_library", r"of which ([\d,]+) are the library held to the", "SPEC.md", 1),
     ("platform_floor", r"the platform floor measures \*\*([\d,]+) lines\*\*", "SPEC.md", 1),
@@ -349,16 +355,16 @@ CLAIMS: list[tuple[str, str, str, int]] = [
     # The artifact format, which drifted furthest of anything here: the
     # sentence said v19 while the compiler wrote v51.
     ("iyimod_format", r"`\.iyimod` v([\d,]+), checksum per section", "SPEC.md", 1),
-    ("prelude_kb", r"library is ([\d,]+) KB on disk", "README.md", 1),
-    ("prelude_kb", r"iyi's own ([\d,]+) KB prelude", "README.md", 1),
-    ("std_kb", r"the ([\d,]+) KB of `src/std`", "README.md", 1),
+    ("prelude_kb", r"library is ([\d,]+) KB on disk", "README.iyi.md", 1),
+    ("prelude_kb", r"iyi's own ([\d,]+) KB prelude", "README.iyi.md", 1),
+    ("std_kb", r"the ([\d,]+) KB of `src/std`", "README.iyi.md", 1),
     ("std_kb", r"the directory's ([\d,]+) KB is a second", "Makefile", 1),
     ("prelude_kb", r"beside `bin/iyi` is ([\d,]+) KB", "Makefile", 1),
     ("prelude_kb", r"ships only iyi's own ([\d,]+) KB", "Makefile", 1),
     ("prelude_kb", r"its own, and it is ([\d,]+) KB", "Makefile", 1),
-    ("bang_names", r"standard library has \*\*([\d,]+) such names\*\*", "README.md", 1),
-    ("generated", r"edit one module in a ([\d,]+)-line project", "README.md", 1),
-    ("generated", r"on the same ([\d,]+) lines", "README.md", 1),
+    ("bang_names", r"standard library has \*\*([\d,]+) such names\*\*", "README.iyi.md", 1),
+    ("generated", r"edit one module in a ([\d,]+)-line project", "README.iyi.md", 1),
+    ("generated", r"on the same ([\d,]+) lines", "README.iyi.md", 1),
     # The same generated project, quoted seven more times in SPEC.md — the
     # numbers table at the top of it included — and every one of the seven said
     # 7,208 while the generator emitted 7,207. The two rows above name
@@ -375,7 +381,7 @@ CLAIMS: list[tuple[str, str, str, int]] = [
     # The same project again as one row of the size sweep, which is where the
     # figure was right while the seven sentences above it were wrong.
     ("generated", r"30 modules of 10 types, ([\d,]+) lines", "SPEC.md", 1),
-    ("targets", r"compiles for \*\*(\w+) targets\*\*", "README.md", 1),
+    ("targets", r"compiles for \*\*(\w+) targets\*\*", "README.iyi.md", 1),
     ("targets", r"for (\w+) targets and was tested on one", "SPEC.md", 1),
     ("targets", r"Four of the (\w+) now", "SPEC.md", 1),
     # The count of sample programs was quoted as a word and drifted by three
@@ -384,7 +390,7 @@ CLAIMS: list[tuple[str, str, str, int]] = [
     # `[\w-]+` rather than `\w+`: past twenty the spelled-out number is
     # hyphenated, and `\w+` silently stopped matching the sentence at
     # "twenty-three" rather than reporting the count had moved.
-    ("samples", r"\| ([\w-]+) programs:", "README.md", 1),
+    ("samples", r"\| ([\w-]+) programs:", "README.iyi.md", 1),
     # The same count in SPEC.md's numbers table, where it said 9 — the number
     # of samples there were when the row was written.
     ("samples", r"\| samples \| ([\d,]+) programs,", "SPEC.md", 1),
@@ -429,6 +435,8 @@ def main() -> int:
     found: list[str] = []
 
     for key, pattern, rel, expected in CLAIMS:
+        if rel in IYI_DOCUMENTS:
+            continue
         fp = REPO / rel
         text = fp.read_text()
         hits = list(re.finditer(pattern, text))
