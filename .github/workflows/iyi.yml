@@ -889,12 +889,14 @@ jobs:
       - name: crystal-metric's port answers as Crystal does
         run: bash bench/metric_port.sh
 
-  # Every module's own exercise, in four shards (bench/std_siblings.sh).
+  # Every module's own exercise, in six shards (bench/std_siblings.sh).
   # One after another they ran past the std job's hour: 39 of 91 had run at
   # sixty minutes, std/http's proofs alone thirteen of them, on top of the
   # foundation's twenty-five. Interleaved, each shard carries a quarter:
   # in three, the shard with std/http - 21 minutes of HTTPS under two
-  # certificates and its proofs - ran past 45.
+  # certificates and its proofs - ran past 45. Four shards ran past it
+  # again by 2026-10-22, two of them every run, and so did Windows' 60:
+  # six since, on all three platforms.
   std-siblings:
     needs: build
     runs-on: ubuntu-24.04
@@ -904,8 +906,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
-    name: "The standard library's module exercises, shard ${{ matrix.shard }} of 4"
+        shard: [1, 2, 3, 4, 5, 6]
+    name: "The standard library's module exercises, shard ${{ matrix.shard }} of 6"
     steps:
       - uses: actions/checkout@v7
         with:
@@ -934,7 +936,7 @@ jobs:
           uv pip install --python /opt/oracle/bin/python -q cryptography pillow
           echo /opt/oracle/bin >> "$GITHUB_PATH"
       - name: The module exercises of this shard
-        run: bash bench/std_siblings.sh ${{ matrix.shard }} 4
+        run: bash bench/std_siblings.sh ${{ matrix.shard }} 6
       # std/tls's reads and writes against OpenSSL, each set against its
       # cipher's own rate on the same machine (bench/tls_speed.sh): a share
       # needs no shard but one.
@@ -1556,7 +1558,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # Every module's own exercise on darwin, in four shards
+  # Every module's own exercise on darwin, in six shards
   # (bench/std_siblings.sh), each building its own compiler from the same
   # cached static LLVM: as one step of the job above they ran it past its
   # hundred and twenty minutes, seventy of them in that step alone.
@@ -1566,8 +1568,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
-    name: "The standard library's module exercises on darwin, shard ${{ matrix.shard }} of 4"
+        shard: [1, 2, 3, 4, 5, 6]
+    name: "The standard library's module exercises on darwin, shard ${{ matrix.shard }} of 6"
     steps:
       - uses: actions/checkout@v7
         with:
@@ -1594,7 +1596,7 @@ jobs:
       - name: Python's cryptography and Pillow, for the oracles
         run: python3 -m pip install -q cryptography pillow
       - name: The module exercises of this shard, on darwin
-        run: bash bench/std_siblings.sh ${{ matrix.shard }} 4
+        run: bash bench/std_siblings.sh ${{ matrix.shard }} 6
 
   # A Windows binary, run twenty times, and every run held to the right
   # answer. Three things used to happen: it printed the right answer, it
@@ -2291,7 +2293,7 @@ jobs:
         shell: bash
         run: bash bench/socket_exercise.sh
 
-  # Every module's own exercise on Windows, in four shards
+  # Every module's own exercise on Windows, in six shards
   # (bench/std_siblings.sh): one after another, with the collector's gates
   # and the foundation before them, they ran past this job's ninety minutes.
   windows-std-siblings:
@@ -2300,8 +2302,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
-    name: "The standard library's module exercises on Windows, shard ${{ matrix.shard }} of 4"
+        shard: [1, 2, 3, 4, 5, 6]
+    name: "The standard library's module exercises on Windows, shard ${{ matrix.shard }} of 6"
     steps:
       - uses: actions/checkout@v7
         with:
@@ -2344,7 +2346,7 @@ jobs:
         shell: bash
         env:
           PYTHONUNBUFFERED: "1"
-        run: bash bench/std_siblings.sh ${{ matrix.shard }} 4
+        run: bash bench/std_siblings.sh ${{ matrix.shard }} 6
 
   # The gates the Linux job runs that no Windows job did: the runtime's
   # own exercises, the boundaries bound from Crystal's library, the floors,
