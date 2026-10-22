@@ -721,7 +721,7 @@ done
 # nothing: that is what a Linux box without `nm` used to get, and what
 # Windows got from the darwin arm.
 if [ -n "$allowed_symbols" ] && [ -n "$prog_syms" ]; then
-  missing="$(unexpected "$(echo $prog_syms)" "$allowed_symbols")"
+  missing="$(unexpected "$(echo $prog_syms) ${FLOOR_OPTIONAL_LINUX:-}" "$allowed_symbols")"
   if [ -n "$missing" ]; then
     echo "The floor got lower and this script is out of date. No longer needed:"
     printf '  %s\n' $missing
