@@ -126,8 +126,8 @@ class Iyi::TapeScopeChecker
   # mark would only cost each round. A def being looked at counts as not
   # allocating while it is: its other calls decide. Past DEPTH calls down
   # the answer is yes, as any doubt is.
-  DEPTH      = 16
-  TAKES      = {"tape_bytes", "tape_resize", "take", "grow_onto", "tape_scope", "tape_local", "tape="}
+  DEPTH = 16
+  TAKES = {"tape_bytes", "tape_resize", "take", "grow_onto", "tape_scope", "tape_local", "tape="}
   @allocates = {} of UInt64 => Bool
   @depth = 0
 
@@ -420,7 +420,9 @@ module Iyi::TapeScopeRuntime
   def self.prelude?(program : Program, location : Location?) : Bool
     return false unless directory = program.iyi_prelude_dir
     file = location.try(&.original_filename)
-    !file.nil? && file.starts_with?(directory + "/")
+    return false unless file
+    # Windows names the copy with backslashes; compare as `TapeRules.runtime?` does.
+    file.gsub('\\', '/').starts_with?(directory.gsub('\\', '/').rstrip('/') + "/")
   end
 
   # Crystal's code, a `.cr` file: none of the tape's lowerings apply to it,
