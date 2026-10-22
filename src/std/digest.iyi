@@ -97,9 +97,23 @@ pub abstract class Digest
     update(data.to_unsafe, data.bytesize)
   end
 
-  # Text on the caller's tape, read where it lies: nothing is copied.
+  # Text on the caller's tape, read where it lies with `[]`, a byte at a
+  # time into the block: the tape gives no pointer to compress from.
   def update(data : Tape::String) : self
-    update(data.to_unsafe, data.bytesize)
+    raise "#{self.class}: update after final; reset first" if @finished
+    count = data.bytesize
+    @length = @length &+ count.to_u64
+    i = 0
+    while i < count
+      @block[@fill] = data[i]
+      @fill = @fill + 1
+      i = i + 1
+      if @fill == @block_size
+        compress(@block)
+        @fill = 0
+      end
+    end
+    self
   end
 
   def update(data : Array(UInt8)) : self
