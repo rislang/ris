@@ -899,10 +899,12 @@ jobs:
   # certificates and its proofs - ran past 45. Four shards ran past it
   # again by 2026-10-22, two of them every run, and so did Windows' 60:
   # six since, on all three platforms.
+  # With std/http, std/big and std/tls in shards of their own, each of
+  # the other three carries about 43 minutes of exercises.
   std-siblings:
     needs: build
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     container:
       image: crystallang/crystal:1.21.0-build
     strategy:
