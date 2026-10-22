@@ -859,10 +859,12 @@ jobs:
       - name: The numbers the docs quote from a measurement
         run: python3 bench/measured_numbers.py
 
+  # The foundation took 35 to 48 minutes, and 56 on a slow runner, which
+  # left the job's last step past its hour.
   std:
     needs: build
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 75
     container:
       image: crystallang/crystal:1.21.0-build
     name: "The native standard library and its module exercises"
@@ -2298,7 +2300,7 @@ jobs:
   # and the foundation before them, they ran past this job's ninety minutes.
   windows-std-siblings:
     runs-on: windows-2025
-    timeout-minutes: 60
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
