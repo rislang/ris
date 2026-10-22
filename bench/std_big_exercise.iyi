@@ -893,14 +893,27 @@ puts "    long division: every sign either side of both switches, and a long div
 # Trailing zeros are counted once and divided out once: one divmod by ten
 # per zero made the hash of `1.` and 40,000 zeros, and `3.div(3, 40000)`,
 # take 725 ms each. Counting prints the digits, so this runs after printing
-# is checked.
-strip_started = __iyi_monotonic_ns
-strip_hash = BigDecimal.new("1." + "0" * 40000).hash
-strip_quotient = BigDecimal.new("3").div(BigDecimal.new("3"), 40000)
-strip_ms = (__iyi_monotonic_ns - strip_started) // 1000000
+# is checked, and is held to printing's own time on the same machine: a
+# line of 500 ms failed on a darwin runner at 512 that printed slowly too.
+# Both strips together take three printings of 10**40000; a divmod per
+# zero takes eleven or more.
+strip_ns = 9223372036854775807_i64
+print_ns = 9223372036854775807_i64
+strip_hash = 0
+strip_quotient = BigDecimal.new("0")
+3.times do
+  strip_started = __iyi_monotonic_ns
+  strip_hash = BigDecimal.new("1." + "0" * 40000).hash
+  strip_quotient = BigDecimal.new("3").div(BigDecimal.new("3"), 40000)
+  stripped = __iyi_monotonic_ns
+  (BigInt.new(10) ** 40000).to_s
+  printed = __iyi_monotonic_ns
+  strip_ns = stripped - strip_started if stripped - strip_started < strip_ns
+  print_ns = printed - stripped if printed - stripped < print_ns
+end
 raise "decimal: zeros stripped #{strip_quotient.scale}" unless strip_hash == BigDecimal.new("1").hash && strip_quotient.to_s == "1" && strip_quotient.scale == 0
-raise "decimal: 40,000 trailing zeros took #{strip_ms} ms to strip" unless strip_ms < 500
-puts "    decimal zeros: 40,000 trailing zeros stripped under 500 ms"
+raise "decimal: 40,000 trailing zeros took #{strip_ns // 1000000} ms to strip, printing 10**40000 #{print_ns // 1000000} ms" unless strip_ns < print_ns * 6
+puts "    decimal zeros: 40,000 trailing zeros stripped in under six printings of them"
 
 # Binary floats: named answers, the refusals, and random cases printed for
 # the gate to round exactly in python: arithmetic, square roots, parsing,
