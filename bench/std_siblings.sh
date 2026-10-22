@@ -39,10 +39,11 @@ bounded=""
 command -v timeout >/dev/null 2>&1 && bounded="timeout -k 30 $limit"
 
 # The slowest each have a shard of their own, and the rest are interleaved
-# over the others: sorted by name, std/http (30 minutes on Linux) and
-# std/big (15 to 23) fell into shards that were full without them, and
-# those ran past their limit. With too few shards for that, all share.
-SLOWEST="std_http_exercise.sh std_big_exercise.sh"
+# over the others: sorted by name, std/http (30 minutes on Linux), std/big
+# (15 to 23) and std/tls (22) fell into shards that were full without
+# them, and those ran past their limit. With too few shards for that, all
+# share. CI's std/tls throughput step runs in std/tls's shard, the third.
+SLOWEST="std_http_exercise.sh std_big_exercise.sh std_tls_exercise.sh"
 alone=0
 for name in $SLOWEST; do
   [ -f "$REPO/bench/$name" ] && alone=$((alone + 1))

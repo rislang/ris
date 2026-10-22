@@ -943,7 +943,7 @@ jobs:
       # cipher's own rate on the same machine (bench/tls_speed.sh): a share
       # needs no shard but one.
       - name: std/tls's throughput, against its cipher's
-        if: matrix.shard == 4
+        if: matrix.shard == 3
         run: bash bench/tls_speed.sh
 
   targets:
