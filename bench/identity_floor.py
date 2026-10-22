@@ -124,6 +124,20 @@ ALLOWED_LINES: list[tuple[str, str]] = [
     # the other library's directory spelled with the platform's separator.
     (r"share\\iyi\\crystal\\crystal\\dwarf", "the other library's own directory, as the installed path"),
     (r"crystal_front", "the front-end bench binary"),
+    # What a source build needs and a release does not: the other
+    # language's compiler builds iyi.
+    (r"with no Crystal or LLVM needed", "the toolchain a release spares"),
+    # hello.ri's tour ends on what iyi is built on.
+    (r"^# Crystal\.$", "what iyi is, underneath, in the first sample"),
+    # The binary run under the other language's name answers with its
+    # variables (CRYSTAL_PATH and the rest).
+    (r'program_name == "crystal" \? "CRYSTAL"', "the compatibility name's own variables"),
+    # A `.cr` file is the other language's source, and the formatter and
+    # the compiler say which language a file they refuse is written in.
+    (r'\? "iyi" : "Crystal"', "the language of a .cr file"),
+    # `crystal?` is true of a `.cr` file: the other language's code, where
+    # no tape rule applies.
+    (r"\bcrystal\?\(location\)", "a .cr file's code, outside the tape rules"),
     (r"CRYSTAL_ONLY", "the list of commands that belong to Crystal"),
     (r"Crystal 1\.", "the upstream version this forked from"),
     (r"\bfork of Crystal", "provenance"),

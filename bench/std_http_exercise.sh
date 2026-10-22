@@ -1814,7 +1814,7 @@ mutate "a malformed chunked body that raises in the server" 'return "not a chunk
 mutate "a chunk's end added past Int32's" 'return nil if size > n - i - 2' 'return nil if i + size + 2 > n'
 mutate "a decoded chunk's end added past Int32's" 'raise "HTTP: chunked body ends inside a chunk" if size > n - i' 'raise "HTTP: chunked body ends inside a chunk" if i + size > n'
 mutate "control characters let into a field value" 'return "header #{name} contains a control character" if control?(value)' ''
-mutate "control characters let into a request target" 'target.bytesize == 0 || HTTP.control?(target.to_unsafe, target.bytesize)' 'target.bytesize == 0'
+mutate "control characters let into a request target" 'target.bytesize == 0 || HTTP.control?(target)' 'target.bytesize == 0'
 mutate "a folded answer read as fields of its own" 'lines = unfolded(lines) if unfold' ''
 mutate "a folded request unfolded too" '    while at < split_at
       stop = HTTP.crlf_in(p, at, split_at)' '    while at < split_at
@@ -1831,8 +1831,8 @@ mutate "a reason written with a line break in it" '      raise "HTTP: the reason
 ' ''
 mutate "control characters let into a reason" 'return HTTPError.new("not a status line: #{line}") if control?(reason)' ''
 mutate "Host: a and Host: b on one request served as one" 'return HeadError.new("Host on #{hosts} lines") if hosts > 1' ''
-mutate "an HTTP/1.1 request with no Host served" 'hosts == 0 && HTTP.same_bytes?(version.to_unsafe, version.bytesize, "HTTP/1.1")' 'false'
-mutate "a Host that is not a host served" 'unless HTTP.host?(value.to_unsafe, value.bytesize)' 'if false'
+mutate "an HTTP/1.1 request with no Host served" 'hosts == 0 && version == "HTTP/1.1"' 'false'
+mutate "a Host that is not a host served" 'unless HTTP.host?(value)' 'if false'
 mutate "an absolute-form target's authority left for the Host line's" 'headers[host_name] = named' ''
 mutate "repeated fields told apart by case" 'key = name.downcase' 'key = name'
 mutate "two lengths that differ read as the first" 'return nil unless trim(part) == first' 'return nil if false'
