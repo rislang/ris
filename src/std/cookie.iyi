@@ -503,8 +503,8 @@ pub struct TapeCookiePairs
   end
 end
 
-# The HTTP-date grammar from std/time, over a tape view. Invalid dates
-# are ignored by Cookie.parse, so this reader needs no error strings.
+# The HTTP-date grammar from std/time, scanned over a tape view. Invalid
+# dates are ignored by Cookie.parse, so this reader needs no error strings.
 @[OnTape]
 struct CookieDate
   DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday",
@@ -513,9 +513,10 @@ struct CookieDate
             "July", "August", "September", "October", "November",
             "December"]
 
-  @pos : Int32 = 0
+  @scan : Tape::Scanner
 
-  def initialize(@text : Tape::String)
+  def initialize(text : Tape::String)
+    @scan = Tape::Scanner.new(text)
   end
 
   def parse : Time?
@@ -528,10 +529,10 @@ struct CookieDate
       if accept('-')
         month = name(MONTHS, true)
         return nil unless month && accept('-')
-        start = @pos
+        start = @scan.offset
         year = number(4)
         return nil unless year
-        count = @pos - start
+        count = @scan.offset - start
         if count == 2
           now = Time.utc.year
           year = now - now % 100 + year
@@ -565,7 +566,7 @@ struct CookieDate
       year = exact(4)
       return nil unless year
     end
-    return nil unless @pos == @text.bytesize
+    return nil unless @scan.eos?
     month += 1
     return nil if day < 1 || day > Time.days_in_month(year, month)
     hour, minute, second = clock
@@ -574,38 +575,44 @@ struct CookieDate
       Span.seconds((second - offset).to_i64)
   end
 
-  private def peek(ahead : Int32 = 0) : UInt8
-    at = @pos + ahead
-    at < @text.bytesize ? @text[at] : 0_u8
+  private def peek : UInt8
+    @scan.current_byte || 0_u8
   end
 
   private def accept(char : Char) : Bool
-    return false unless @pos < @text.bytesize && peek == char.ord
-    @pos += 1
-    true
+    !@scan.skip(char).nil?
   end
 
   private def space : Bool
     b = peek
     return false unless b == 32_u8 || (b >= 9_u8 && b <= 13_u8)
-    @pos += 1
+    @scan.skip(1)
     true
   end
 
   private def number(max : Int32) : Int32?
-    start = @pos
+    start = @scan.offset
     value = 0
-    while @pos - start < max && peek >= 48_u8 && peek <= 57_u8
+    while @scan.offset - start < max && peek >= 48_u8 && peek <= 57_u8
       value = value * 10 + (peek - 48_u8).to_i32
-      @pos += 1
+      @scan.skip(1)
     end
-    @pos == start ? nil : value
+    @scan.offset == start ? nil : value
   end
 
   private def exact(count : Int32) : Int32?
-    start = @pos
+    start = @scan.offset
     value = number(count)
-    @pos - start == count ? value : nil
+    @scan.offset - start == count ? value : nil
+  end
+
+  # The letters at the offset, taken.
+  private def letters : Tape::String
+    start = @scan.offset
+    while (b = peek | 0x20_u8) >= 97_u8 && b <= 122_u8
+      @scan.skip(1)
+    end
+    @scan.string[start, @scan.offset - start]
   end
 
   private def same?(text : Tape::String, name : String) : Bool
@@ -619,13 +626,9 @@ struct CookieDate
   end
 
   private def name(names : Array(String), short : Bool) : Int32?
-    start = @pos
-    while (b = peek | 0x20_u8) >= 97_u8 && b <= 122_u8
-      @pos += 1
-    end
-    size = @pos - start
+    text = letters
+    size = text.bytesize
     return nil unless short ? size == 3 : size >= 3
-    text = @text[start, size]
     names.each_with_index { |n, i| return i if same?(text, n) }
     nil
   end
@@ -650,11 +653,7 @@ struct CookieDate
       offset = hours * 3600 + minutes * 60
       return negative ? -offset : offset
     end
-    start = @pos
-    while (b = peek | 0x20_u8) >= 97_u8 && b <= 122_u8
-      @pos += 1
-    end
-    text = @text[start, @pos - start]
+    text = letters
     names = ZONES
     offsets = OFFSETS
     names.each_with_index do |name, i|
