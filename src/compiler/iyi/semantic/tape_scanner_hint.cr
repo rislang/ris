@@ -2,9 +2,10 @@
 # an instance variable stepped with `@pos += n` (or `@pos = @pos + n`) and
 # read as an index into a Tape::String (`@text[@pos]`, `@text[@pos + 1]`).
 # `Tape::Scanner` keeps the text and its offset as one value and answers
-# views with `scan`, `skip` and `check`. Indexing stays right and safe, so
-# this is advice: one warning for each such variable of a type, at its
-# first step. `std/` and the tape's runtime are not told.
+# views with `scan`, `skip` and `check`; its `advance` costs what the add
+# does. Indexing stays right and safe, so this is advice: one warning for
+# each such variable of a type, at its first step. `std/` and the tape's
+# runtime are not told.
 class Iyi::TapeScannerHint
   @program : Program
   @seen = Set(UInt64).new
@@ -26,7 +27,7 @@ class Iyi::TapeScannerHint
     @steps.each do |key, node|
       next unless @indexed.includes?(key)
       name = key[1]
-      @program.warnings.add_warning(node, "`#{name}` walks tape text by hand: it is stepped here and read as an index into a Tape::String.\n\nTape::Scanner keeps the text and its offset as one value: `scan`, `skip` and `check` match at the offset and answer views, `current_byte` and `peek` look ahead, `offset=` moves back.")
+      @program.warnings.add_warning(node, "`#{name}` walks tape text by hand: it is stepped here and read as an index into a Tape::String.\n\nTape::Scanner keeps the text and its offset as one value: `scan`, `skip` and `check` match at the offset and answer views, `current_byte` and `peek` look ahead, `advance` steps as `@pos += 1` does, at the same cost.")
     end
   end
 

@@ -35,5 +35,14 @@ tape do
   check "char past ASCII", s.scan_until('ä') == "GET /pä"
   s.terminate
   check "terminate", s.eos? && s.rest.empty?
+  s.reset
+  s.advance
+  check "advance one", s.offset == 1 && s.current_byte == 'E'.ord
+  s.advance(3)
+  check "advance", s.scan('/') == "/"
+  s.advance(-5)
+  check "advance back", s.current_byte == 'G'.ord
+  s.advance(100)
+  check "advance past the end", s.eos? && s.current_byte.nil?
 end
 puts "PASS: write_bytes, shift and Tape::Scanner"

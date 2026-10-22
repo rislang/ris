@@ -721,6 +721,14 @@ module Tape
       @offset = position
     end
 
+    # Moves the offset *count* bytes, back when negative, unchecked: a
+    # lexer's step is one add, as `@pos += 1` is. Safe all the same, as
+    # every read checks: past the end, `eos?` holds and `current_byte` is
+    # nil; `offset=` is the checked move.
+    def advance(count : Int32 = 1) : Int32
+      @offset = @offset &+ count
+    end
+
     # Whether the offset is at the end of the text.
     def eos? : Bool
       @offset >= @string.bytesize

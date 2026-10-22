@@ -62,7 +62,7 @@ end
 Byte pools: `read_bytes_at(UInt32, at)`, `write_bytes_at(at, v)`, append
 `write_bytes(v)`; no byte loops. Lines: `read_line_tape` in a `tape`. Integer
 `/` in text is refused (a Float): `a // b`, or `a.to_f / b` for a Float.
-Lexers: `Tape::Scanner` (`scan`, `skip`, `current_byte`, `peek`) holds text
+Lexers: `Tape::Scanner` (`current_byte`, `advance`, `scan`, `skip`) holds text
 and offset; `ris check` warns of an `@pos += 1` that indexes tape text.
 ## 3. Then install, and work in the loop
 

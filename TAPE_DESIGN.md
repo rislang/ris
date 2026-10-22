@@ -35,7 +35,7 @@ No tape value survives the block that owns its storage:
   outer variables or containers. Copying a struct does not copy its data.
 * `Tape::String.new(text)` copies heap text onto the tape; `text.as_tape`
   borrows its bytes. `[start, count]` borrows a slice; `[]` reads a byte.
-  A lexer walks it with `Tape::Scanner`; `ris check` warns of a bare `@pos`.
+  A lexer walks it with `Tape::Scanner` (`advance` costs what `@pos += 1` does).
 * To retain a value, copy it by name while its source is alive: `to_heap`
   on a `Tape::String`, a `Tape::Array` or `IndexView` (each element by its
   own `to_heap`), or an `@[OnTape]` struct that defines one. `to_s`,
