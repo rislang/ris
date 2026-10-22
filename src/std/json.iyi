@@ -612,31 +612,12 @@ pub struct Any
 
   # Equal when the values are: an integer equals the float with the same
   # value, arrays element by element, objects key by key in any order.
+  # The containers recurse; a scalar is compared out of line, so a level
+  # of a deep document costs only the container's frame. Inline, every
+  # scalar's locals sat in each level's frame, and a 256-level document
+  # compared in a task ran Windows' 256 KB stack out.
   def ==(other : Any) : Bool
-    if @raw.nil?
-      other.raw.nil?
-    elsif @raw.is_a?(Bool)
-      other.raw.is_a?(Bool) && @raw.as(Bool) == other.raw.as(Bool)
-    elsif s = as_s?
-      o = other.as_s?
-      o.nil? ? false : s == o
-    elsif i = as_i64?
-      if oi = other.as_i64?
-        i == oi
-      elsif of = other.float_value?
-        integer_equals_float?(i, of)
-      else
-        false
-      end
-    elsif f = float_value?
-      if oi = other.as_i64?
-        integer_equals_float?(oi, f)
-      elsif of = other.float_value?
-        f == of
-      else
-        false
-      end
-    elsif a = as_a?
+    if a = as_a?
       b = other.as_a?
       return false if b.nil?
       return false if a.size != b.size
@@ -661,6 +642,36 @@ pub struct Any
       end
       true
     else
+      scalar_equals?(other)
+    end
+  end
+
+  @[NoInline]
+  private def scalar_equals?(other : Any) : Bool
+    if @raw.nil?
+      other.raw.nil?
+    elsif @raw.is_a?(Bool)
+      other.raw.is_a?(Bool) && @raw.as(Bool) == other.raw.as(Bool)
+    elsif s = as_s?
+      o = other.as_s?
+      o.nil? ? false : s == o
+    elsif i = as_i64?
+      if oi = other.as_i64?
+        i == oi
+      elsif of = other.float_value?
+        integer_equals_float?(i, of)
+      else
+        false
+      end
+    elsif f = float_value?
+      if oi = other.as_i64?
+        integer_equals_float?(oi, f)
+      elsif of = other.float_value?
+        f == of
+      else
+        false
+      end
+    else
       false
     end
   end
@@ -675,23 +686,10 @@ pub struct Any
 
   # Consistent with `==`: a whole float hashes as the integer it equals, an
   # object's hash does not depend on the order its keys were written in.
+  # The containers recurse; a scalar is hashed out of line, so a level of
+  # a deep document costs only the container's frame (as `==`).
   def hash : Int32
-    if @raw.nil?
-      0
-    elsif @raw.is_a?(Bool)
-      @raw.as(Bool) ? 1 : 2
-    elsif s = as_s?
-      s.hash
-    elsif i = as_i64?
-      i.hash
-    elsif f = float_value?
-      if f >= -9223372036854775808.0 && f < 9223372036854775808.0
-        t = f.to_i64
-        return t.hash if t.to_f64 == f
-      end
-      bits = IyiFloatText.bits_of(f)
-      ((bits ^ bits.unsafe_shr(32_u64)) & 0x7FFFFFFF_u64).to_i32
-    elsif a = as_a?
+    if a = as_a?
       # As an `Array` hashes. It was `31 * h + e`, an integer hashing as
       # itself: `[1,0]` and `[0,31]` hashed alike, and a 150 by 150 grid of
       # `[i, j]` had 4,769 hashes for its 22,500 values.
@@ -710,6 +708,28 @@ pub struct Any
         value = value &+ (pair ^ pair.unsafe_shr(31_u64))
       end
       value.hash
+    else
+      scalar_hash
+    end
+  end
+
+  @[NoInline]
+  private def scalar_hash : Int32
+    if @raw.nil?
+      0
+    elsif @raw.is_a?(Bool)
+      @raw.as(Bool) ? 1 : 2
+    elsif s = as_s?
+      s.hash
+    elsif i = as_i64?
+      i.hash
+    elsif f = float_value?
+      if f >= -9223372036854775808.0 && f < 9223372036854775808.0
+        t = f.to_i64
+        return t.hash if t.to_f64 == f
+      end
+      bits = IyiFloatText.bits_of(f)
+      ((bits ^ bits.unsafe_shr(32_u64)) & 0x7FFFFFFF_u64).to_i32
     else
       0
     end
@@ -1597,7 +1617,21 @@ pub class Parser
     end
   end
 
+  # The containers recurse; a scalar is read out of line, so a level of a
+  # deep document costs only the container's frame (as `Any#==`).
   private def parse_value : Any
+    case token.kind
+    when TokenKind::BeginArray
+      parse_array
+    when TokenKind::BeginObject
+      parse_object
+    else
+      parse_scalar
+    end
+  end
+
+  @[NoInline]
+  private def parse_scalar : Any
     case token.kind
     when TokenKind::Null
       next_token
@@ -1620,10 +1654,6 @@ pub class Parser
       str = token.string_value
       next_token
       Any.new(str)
-    when TokenKind::BeginArray
-      parse_array
-    when TokenKind::BeginObject
-      parse_object
     else
       fail("unexpected #{token_text}")
     end
