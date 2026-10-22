@@ -83,6 +83,7 @@ class Iyi::Program
         TapeScopeChecker.new(self).run(result)
         TapeCheckFreeChecker.new(self).run(result)
         TapeRefillChecker.new(self).run(result)
+        TapeScannerHint.new(self).run(result)
       end
     end
 

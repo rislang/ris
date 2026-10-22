@@ -304,4 +304,21 @@ for name in le_array_read le_array_write le_string_read le_offset_overflow; do
   fi
 done
 
+# A lexer that steps its own offset through tape text is warned, not
+# refused; the same lexer on Tape::Scanner is not.
+out=$("$RIS" check test/ris/warned/scanner_hint.ri 2>&1)
+if [ $? -eq 0 ] && grep -qF '`@pos` walks tape text by hand' <<<"$out"; then
+  echo "warned   scanner_hint"
+else
+  echo "FAILED   scanner_hint: $out"
+  status=1
+fi
+out=$("$RIS" run test/ris/scanner_words.ri 2>&1)
+if [ "$out" = 2 ]; then
+  echo "runs     scanner_words"
+else
+  echo "FAILED   scanner_words: $out"
+  status=1
+fi
+
 exit $status

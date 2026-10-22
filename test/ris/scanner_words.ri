@@ -1,0 +1,22 @@
+# The same lexer on Tape::Scanner: no warning.
+@[OnTape]
+struct Words
+  @scanner : Tape::Scanner
+
+  def initialize(text : Tape::String)
+    @scanner = Tape::Scanner.new(text)
+  end
+
+  def count : Int32
+    n = 0
+    while byte = @scanner.current_byte
+      n += 1 if byte == 32
+      @scanner.skip(1)
+    end
+    n
+  end
+end
+
+tape do
+  puts Words.new("a b c".as_tape).count
+end

@@ -1,0 +1,24 @@
+# A lexer that steps its own offset through tape text: warned, with
+# Tape::Scanner named as the way to keep text and offset together.
+@[OnTape]
+struct Words
+  @text : Tape::String
+  @pos : Int32
+
+  def initialize(@text : Tape::String)
+    @pos = 0
+  end
+
+  def count : Int32
+    n = 0
+    while @pos < @text.bytesize
+      n += 1 if @text[@pos] == 32
+      @pos += 1
+    end
+    n
+  end
+end
+
+tape do
+  puts Words.new("a b c".as_tape).count
+end

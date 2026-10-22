@@ -10,9 +10,7 @@ For an agent that is to write ris. Read the source first, then build.
    are small cases; `test/ris/refused/` is what the compiler rejects.
 5. `SPEC.md` (iyi's, long): look things up, don't read it through. Part I
    is the rules (R-1..R-5); III.1 is errors; III.4 is fibers and channels.
-
 ## 2. The language, in short
-
 Ruby's syntax with Crystal's types, blocks, unions and nil-safety, plus:
 
 * A file is a module: `.ri`, first line `module shop/order`. Its path is
@@ -64,6 +62,8 @@ end
 Byte pools: `read_bytes_at(UInt32, at)`, `write_bytes_at(at, v)`, append
 `write_bytes(v)`; no byte loops. Lines: `read_line_tape` in a `tape`. Integer
 `/` in text is refused (a Float): `a // b`, or `a.to_f / b` for a Float.
+Lexers: `Tape::Scanner` (`scan`, `skip`, `current_byte`, `peek`) holds text
+and offset; `ris check` warns of an `@pos += 1` that indexes tape text.
 ## 3. Then install, and work in the loop
 
 Needs Crystal and LLVM. In the clone: `make ris`, then
