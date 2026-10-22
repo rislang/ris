@@ -16,7 +16,8 @@ Two readings, both from the artifacts the sample corpus emits:
   1. what travels — per module, bytes by section: exports (the
      declarations a consumer compiles against), mono bodies (what it
      compiles again), macro bodies, object code (what it links and
-     never compiles). Read straight off the section table, no decoder.
+     never compiles). Read straight off the section table; the mono
+     bodies are decoded too, for why each one travels.
   2. what it buys — a consumer of a fully generic module, built from
      source and from artifacts, front end only, minimum of ROUNDS: the
      artifact arm still compiles the bodies, so the difference is what
@@ -25,14 +26,17 @@ Two readings, both from the artifacts the sample corpus emits:
 Two structural facts are asserted, because they are R-4 as built:
 a module with no generic and no macro ships object code and no body;
 a module that is all generics ships every body and no object code.
-And the share of the corpus that is bodies is held under a line set
-from the first measurement with headroom, the way context_pack.py
-holds the pack: not a target, a tripwire, so the number in the SPEC
-cannot drift without this file saying so.
+And every body that travels, in every module, has a reason the
+emitter gives for it (`travel_reason`): a body none of them explains
+is one that should have been object code. The share of the corpus that
+is bodies is printed, not held: it moves with what the corpus imports,
+and a line on it (50% once) failed when the corpus took in
+all-generic std modules, with nothing travelling that should not.
 
     python3 bench/generic_boundary.py
 """
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -51,6 +55,7 @@ SECTIONS = {1: "header", 2: "hashes", 3: "imports", 4: "exports", 5: "macro bodi
             14: "match types", 15: "symbols", 16: "top level", 17: "reopened",
             18: "libs", 19: "top level funs", 20: "inputs", 64: "layouts"}
 MAGIC = b"IYIMOD\0\0"
+MONO_BODIES = 6
 
 # The entries whose imports pull the corpus's modules through the emitter.
 ENTRIES = ["immutable.iyi", "collections.iyi", "derive.iyi", "calc.iyi",
@@ -60,17 +65,7 @@ ENTRIES = ["immutable.iyi", "collections.iyi", "derive.iyi", "calc.iyi",
 ALL_GENERIC = "std/list"    # every def is on List(T): bodies travel, no object code
 NO_GENERIC = "calc/lexer"   # no type parameter, no macro: object code, no body
 GETTER_BODIES = 512         # bytes of getter bodies that travel beside its object code
-
-# Of what a consumer's front end reads from an artifact - exports, mono
-# bodies, macro bodies; object code is the linker's - the share that is
-# bodies it compiles again. First measurement on this corpus: 37%. The
-# line is that with headroom, and a corpus that grows past it is a
-# corpus this file asks about rather than one that quietly moved.
-# 2026-10-22: 57%, the corpus grown by all-generic std modules
-# (enumerable, iterator, traits), whose bodies travel as R-4 says; the
-# line moved to 60% for now. A share of the whole corpus moves with what
-# the corpus holds: a check by module is what would replace it.
-BODIES_CEILING = 0.60
+GETTER_BODY = 24            # one getter's body: an instance variable, or `self`
 
 
 def sections_of(path):
@@ -79,6 +74,57 @@ def sections_of(path):
         version, count = struct.unpack("<II", f.read(8))
         table = [struct.unpack("<HHIQ", f.read(16)) for _ in range(count)]
     return {SECTIONS.get(kind, str(kind)): size for kind, _, size, _ in table}
+
+
+def mono_bodies(path):
+    """The MonoBodies section as {key: body}: `Container#def(params)`,
+    with `&...` after a block-taking def's parameters."""
+    with open(path, "rb") as f:
+        data = f.read()
+    _, count = struct.unpack_from("<II", data, 8)
+    at = 16 + 16 * count
+    for i in range(count):
+        kind, _, size, _ = struct.unpack_from("<HHIQ", data, 16 + 16 * i)
+        if kind == MONO_BODIES:
+            payload, bodies = data[at:at + size], {}
+            n, = struct.unpack_from("<I", payload, 0)
+            o = 4
+            for _ in range(n):
+                fields = []
+                for _ in range(2):
+                    length, = struct.unpack_from("<I", payload, o)
+                    fields.append(payload[o + 4:o + 4 + length].decode())
+                    o += 4 + length
+                bodies[fields[0]] = fields[1]
+            return bodies
+        at += size
+    return {}
+
+
+def declared(source):
+    """The generic types and the traits *source* declares, by name."""
+    generic = set(re.findall(r"^\s*(?:pub\s+)?(?:abstract\s+)?(?:class|struct|module)\s+(?:\w+::)*(\w+)\(", source, re.M))
+    traits = set(re.findall(r"^\s*(?:pub\s+)?trait\s+(\w+)", source, re.M))
+    return generic, traits
+
+
+def travel_reason(key, body, generic, traits):
+    """Why the emitter (compiler.cr, `iyi_record_mono_body`'s callers) let
+    *key*'s body travel, or None. Each is a body the consumer has to
+    compile: its machine code is not this module's to write."""
+    container, signature = key.split("#", 1)
+    if container.startswith("::"):
+        return "reopens a type it does not own"
+    if re.search(r"\)&", signature) or "forall" in signature:
+        return "takes a block or has free variables"
+    names = [part.split("::")[-1] for part in container.split(" for ")]
+    if "(" in container or any(n in generic or n in traits for n in names):
+        return "on a generic type or a trait"
+    if " | " in signature:
+        return "a parameter wider than its callers"
+    if signature.endswith("()") and len(body) <= GETTER_BODY:
+        return "a getter"
+    return None
 
 
 def run(args, cwd):
@@ -153,7 +199,7 @@ def main():
         print(f"\nof the {read:,} bytes a consumer's front end reads, {bodies_share:.0%} is bodies it compiles again;")
         print(f"{len(without_code)} of {len(rows)} modules ship no object code: {', '.join(sorted(without_code))}")
         if reopening:
-            print(f"{len(reopening)} of them only reopen a prelude type, every body travelling, apart from the line: {', '.join(sorted(reopening))}")
+            print(f"{len(reopening)} of them only reopen a prelude type, every body travelling, counted apart: {', '.join(sorted(reopening))}")
 
         generic = by_module.get(ALL_GENERIC)
         if not generic:
@@ -169,8 +215,29 @@ def main():
         # a body that should have been object code.
         elif plain.get("object code", 0) == 0 or plain.get("mono bodies", 0) > GETTER_BODIES:
             failures.append(f"{NO_GENERIC} has no generic and should ship object code and no body past its getters': {plain}")
-        if bodies_share > BODIES_CEILING:
-            failures.append(f"bodies are {bodies_share:.0%} of what a consumer reads, over the {BODIES_CEILING:.0%} line")
+
+        # Every body that travels, by module, with the reason it does.
+        unexplained = 0
+        std = os.path.join(os.path.dirname(SAMPLES), "..", "src")
+        for module, _, _ in rows:
+            path = os.path.join(mods, *module.split("/")) + ".iyimod"
+            source = ""
+            for base in (corpus, std):
+                candidate = os.path.join(base, *module.split("/")) + ".iyi"
+                if os.path.exists(candidate):
+                    with open(candidate) as f:
+                        source = f.read()
+                    break
+            generic, traits = declared(source)
+            for key, body in sorted(mono_bodies(path).items()):
+                if travel_reason(key, body, generic, traits) is None:
+                    unexplained += 1
+                    failures.append(f"{module}: `{key}` travels ({len(body)} bytes) with no reason the emitter gives: it should be object code")
+        print(f"every body that travels has its reason: {'yes' if unexplained == 0 else f'no, {unexplained} without'}")
+        # The check can fail: a plain def on a plain type, as calc/lexer's
+        # `next_token` would be if its body travelled, has no reason.
+        if travel_reason("Lexer#next_token(text : String, at : Int32)", "x" * 200, set(), set()) is not None:
+            failures.append("travel_reason explains a plain def on a plain type: the check cannot fail")
 
         # What the declarations buy a consumer of an all-generic module,
         # front end only, arms alternated, minimum of ROUNDS. The artifact
