@@ -28,6 +28,7 @@ expect struct_field  "is a struct that is not @[OnTape]"
 expect class_var     "the class variable"
 expect generic_array "Array("
 expect proc_capture  "this block becomes a proc"
+expect integer_text  "integer / in text gives a Float"
 expect outer_var     "is a variable of the code around this tape block"
 expect scope_value   "undefined method 'id' for Nil"
 expect yield_escape "is a variable of the code around this tape block"
@@ -244,5 +245,50 @@ else
   echo "FAILED   hpack: $out"
   status=1
 fi
+
+
+# Fixed-width fields, buffered tape lines, and integer text diagnostics.
+out=$("$RIS" run test/ris/little_endian.ri 2>&1)
+if [ "$out" = PASS ]; then
+  echo "runs     little_endian"
+else
+  echo "FAILED   little_endian: $out"
+  status=1
+fi
+out=$(python3 -c 'import sys
+sys.stdout.write("the first line\n" + ("y" * 100 + "\n") * 20000)' |
+  "$RIS" run test/ris/line_tape_keep.ri 2>&1)
+if [ "$out" = PASS ]; then
+  echo "runs     line_tape_keep"
+else
+  echo "FAILED   line_tape_keep: $out"
+  status=1
+fi
+out=$(python3 -c 'import sys
+sys.stdout.write("\n" + "x" * 20000 + "\r\n")
+sys.stdout.write("hello\r\n" * 10000 + "tail\r")' |
+  "$RIS" run test/ris/line_tape.ri 2>&1)
+if [ "$out" = PASS ]; then
+  echo "runs     line_tape"
+else
+  echo "FAILED   line_tape: $out"
+  status=1
+fi
+out=$("$RIS" check test/ris/integer_text_floor.ri 2>&1)
+if [ $? -ne 0 ]; then
+  echo "FAILED   integer_text_floor: $out"
+  status=1
+fi
+for name in le_array_read le_array_write le_string_read le_offset_overflow; do
+  out=$("$RIS" run "test/ris/$name.ri" 2>&1)
+  code=$?
+  if [ "$code" -ne 0 ] &&
+      grep -qF 'little-endian field out of range' <<<"$out"; then
+    echo "refused  $name"
+  else
+    echo "FAILED   $name: $out"
+    status=1
+  fi
+done
 
 exit $status

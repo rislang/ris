@@ -7,6 +7,9 @@ has it.
 
 ## To take to iyi
 
+* Refuse integer `/` directly in interpolation or before `to_s`, naming
+  `//` and `a.to_f / b`. Tape interpolation stays in ris.
+
 * Concurrent builds of the same entry share mutable object-cache paths.
   One can replace or remove another's objects before artifact assembly:
   std/http's artifact lost the TLS client unit during parallel gates.

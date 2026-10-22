@@ -1,0 +1,10 @@
+module integer_text_floor
+# Integer division, and a Float asked for by name: both let through.
+puts "#{16 // 10000}"
+puts (16 // 10000).to_s
+puts "#{16.0 / 10000}"
+puts "#{(16 / 10000) + 1}"
+tape do
+  puts "#{16 // 10000}"
+end
+puts "#{16.to_f / 10000}"

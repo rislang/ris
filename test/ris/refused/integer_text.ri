@@ -1,0 +1,5 @@
+module integer_text
+# An integer `/` straight into text gives a Float: refused, with `//` and
+# `a.to_f / b` named as the ways out.
+ticks = 16
+puts "#{ticks / 10000}"

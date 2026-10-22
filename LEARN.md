@@ -1,10 +1,7 @@
 # Learning ris: read this before writing code
-
 For an agent that is to write ris. Read the source first, then build.
 ## 1. Get the source and read, in this order
-
 `git clone https://github.com/rislang/ris`, then:
-
 1. `README.md`: what ris is, and the tape example.
 2. This file: the rules that differ from Ruby and Crystal.
 3. `TAPE_DESIGN.md`: where a tape value may and may not go.
@@ -64,6 +61,9 @@ end
   it saves. Measure with and without tape (`--release`, median of several
   runs, time and peak memory); keep tape only for a clear gain.
 
+Byte pools: `read_bytes_at(UInt32, at)`, `write_bytes_at(at, v)`, append
+`write_bytes(v)`; no byte loops. Lines: `read_line_tape` in a `tape`. Integer
+`/` in text is refused (a Float): `a // b`, or `a.to_f / b` for a Float.
 ## 3. Then install, and work in the loop
 
 Needs Crystal and LLVM. In the clone: `make ris`, then

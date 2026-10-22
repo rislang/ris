@@ -97,6 +97,33 @@ module Tape
       @ptr[index]
     end
 
+    # One byte-range check, then memcpy into an aligned local.
+    def read_bytes_at(type : I.class, at : Int32) : I forall I
+      {% unless I == UInt16 || I == UInt32 || I == UInt64 ||
+                I == Int16 || I == Int32 || I == Int64 %}
+        {% raise "little-endian fields need a 16/32/64-bit integer" %}
+      {% end %}
+      width = sizeof(I)
+      if at < 0 || at > @bytesize - width
+        raise "little-endian field out of range"
+      end
+      value = uninitialized I
+      target = pointerof(value).as(Pointer(UInt8))
+      target.copy_from(@ptr + at, width)
+      {% unless flag?(:x86_64) || flag?(:aarch64) || flag?(:arm) ||
+                flag?(:i386) || flag?(:wasm32) %}
+        i = 0
+        while i < sizeof(I) // 2
+          j = sizeof(I) - i - 1
+          byte = target[i]
+          target[i] = target[j]
+          target[j] = byte
+          i = i + 1
+        end
+      {% end %}
+      value
+    end
+
     # *count* bytes from *start*, a view of these: nothing is copied.
     def [](start : Int32, count : Int32) : String
       raise "bytes #{start}, #{count} out of range for #{@bytesize}" if start < 0 || count < 0 || start > @bytesize - count
@@ -321,8 +348,17 @@ module Tape
       prefix.bytesize <= @bytesize && String.new(@ptr, prefix.bytesize) == prefix
     end
 
+    # Eight bytes a step, as `String#==` does: keys and paths, a hash
+    # table's every probe, are mostly shorter than its 32-byte stride.
     private def same?(other : Pointer(UInt8)) : Bool
+      return true if @ptr.address == other.address
       i = 0
+      while i + 8 <= @bytesize
+        x = (@ptr + i).as(Pointer(UInt64))
+        y = (other + i).as(Pointer(UInt64))
+        return false unless x.value == y.value
+        i = i + 8
+      end
       while i < @bytesize
         return false if @ptr[i] != other[i]
         i = i + 1
@@ -662,6 +698,97 @@ module Tape
       width = sizeof(T).to_u64
       @state.value = IyiRegion.tape_resize(start, start &+ room &* width, (@state + 1_i64).value &* width, capacity &* width, @state + 3_i64)
       (@state + 2_i64).value = capacity
+    end
+
+    # One byte-range check, then memcpy into an aligned local.
+    def read_bytes_at(type : I.class, at : Int32) : I forall I
+      {% unless I == UInt16 || I == UInt32 || I == UInt64 ||
+                I == Int16 || I == Int32 || I == Int64 %}
+        {% raise "little-endian fields need a 16/32/64-bit integer" %}
+      {% end %}
+      {% unless T == UInt8 %}
+        {% raise "little-endian fields require Tape::Array(UInt8)" %}
+      {% end %}
+      width = sizeof(I)
+      if at < 0 || at > size - width
+        raise "little-endian field out of range"
+      end
+      value = uninitialized I
+      target = pointerof(value).as(Pointer(UInt8))
+      target.copy_from(Pointer(UInt8).new(@state.value) + at, width)
+      {% unless flag?(:x86_64) || flag?(:aarch64) || flag?(:arm) ||
+                flag?(:i386) || flag?(:wasm32) %}
+        i = 0
+        while i < sizeof(I) // 2
+          j = sizeof(I) - i - 1
+          byte = target[i]
+          target[i] = target[j]
+          target[j] = byte
+          i = i + 1
+        end
+      {% end %}
+      value
+    end
+
+    # Overwrites a field without growing the byte pool.
+    def write_bytes_at(at : Int32, value : I) : I forall I
+      {% unless I == UInt16 || I == UInt32 || I == UInt64 ||
+                I == Int16 || I == Int32 || I == Int64 %}
+        {% raise "little-endian fields need a 16/32/64-bit integer" %}
+      {% end %}
+      {% unless T == UInt8 %}
+        {% raise "little-endian fields require Tape::Array(UInt8)" %}
+      {% end %}
+      width = sizeof(I)
+      if at < 0 || at > size - width
+        raise "little-endian field out of range"
+      end
+      stored = value
+      bytes = pointerof(stored).as(Pointer(UInt8))
+      {% unless flag?(:x86_64) || flag?(:aarch64) || flag?(:arm) ||
+                flag?(:i386) || flag?(:wasm32) %}
+        i = 0
+        while i < sizeof(I) // 2
+          j = sizeof(I) - i - 1
+          byte = bytes[i]
+          bytes[i] = bytes[j]
+          bytes[j] = byte
+          i = i + 1
+        end
+      {% end %}
+      (Pointer(UInt8).new(@state.value) + at).copy_from(bytes, width)
+      value
+    end
+
+    # Appends a field, growing with the array's usual tape policy.
+    def write_bytes(value : I) : Nil forall I
+      {% unless I == UInt16 || I == UInt32 || I == UInt64 ||
+                I == Int16 || I == Int32 || I == Int64 %}
+        {% raise "little-endian fields need a 16/32/64-bit integer" %}
+      {% end %}
+      {% unless T == UInt8 %}
+        {% raise "little-endian fields require Tape::Array(UInt8)" %}
+      {% end %}
+      count = (@state + 1_i64).value
+      width = sizeof(I).to_u64
+      while count + width > (@state + 2_i64).value
+        grow
+      end
+      stored = value
+      bytes = pointerof(stored).as(Pointer(UInt8))
+      {% unless flag?(:x86_64) || flag?(:aarch64) || flag?(:arm) ||
+                flag?(:i386) || flag?(:wasm32) %}
+        i = 0
+        while i < sizeof(I) // 2
+          j = sizeof(I) - i - 1
+          byte = bytes[i]
+          bytes[i] = bytes[j]
+          bytes[j] = byte
+          i = i + 1
+        end
+      {% end %}
+      Pointer(UInt8).new(@state.value + count).copy_from(bytes, width.to_i32)
+      (@state + 1_i64).value = count + width
     end
 
     # As `Array#[]`: a negative index counts from the end, and one still out
