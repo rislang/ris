@@ -346,7 +346,7 @@ pub struct MIME
   end
 
   private def self.skip_ows(bytes : Tape::String, pos : Int32,
-                              size : Int32) : Int32
+                            size : Int32) : Int32
     while pos < size && (bytes[pos] == ' '.ord.to_u8 || bytes[pos] == '\t'.ord.to_u8)
       pos = pos + 1
     end

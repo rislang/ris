@@ -102,7 +102,7 @@ module Tape
     # local, its bytes turned around.
     def read_bytes_at(type : I.class, at : Int32) : I forall I
       {% unless I == UInt16 || I == UInt32 || I == UInt64 ||
-                I == Int16 || I == Int32 || I == Int64 %}
+                  I == Int16 || I == Int32 || I == Int64 %}
         {% raise "little-endian fields need a 16/32/64-bit integer" %}
       {% end %}
       width = sizeof(I)
@@ -116,7 +116,7 @@ module Tape
       target = pointerof(value).as(Pointer(UInt8))
       target.copy_from(@ptr + at, width)
       {% unless flag?(:x86_64) || flag?(:aarch64) || flag?(:arm) ||
-                flag?(:i386) || flag?(:wasm32) %}
+                  flag?(:i386) || flag?(:wasm32) %}
         i = 0
         while i < sizeof(I) // 2
           j = sizeof(I) - i - 1
@@ -493,13 +493,13 @@ module Tape
     # them: a codec writes a word at a time.
     def write_bytes(value : I) : Nil forall I
       {% unless I == UInt16 || I == UInt32 || I == UInt64 ||
-                I == Int16 || I == Int32 || I == Int64 %}
+                  I == Int16 || I == Int32 || I == Int64 %}
         {% raise "little-endian fields need a 16/32/64-bit integer" %}
       {% end %}
       stored = value
       bytes = pointerof(stored).as(Pointer(UInt8))
       {% unless flag?(:x86_64) || flag?(:aarch64) || flag?(:arm) ||
-                flag?(:i386) || flag?(:wasm32) %}
+                  flag?(:i386) || flag?(:wasm32) %}
         i = 0
         while i < sizeof(I) // 2
           j = sizeof(I) - i - 1
@@ -937,7 +937,7 @@ module Tape
     # One byte-range check, then memcpy into an aligned local.
     def read_bytes_at(type : I.class, at : Int32) : I forall I
       {% unless I == UInt16 || I == UInt32 || I == UInt64 ||
-                I == Int16 || I == Int32 || I == Int64 %}
+                  I == Int16 || I == Int32 || I == Int64 %}
         {% raise "little-endian fields need a 16/32/64-bit integer" %}
       {% end %}
       {% unless T == UInt8 %}
@@ -951,7 +951,7 @@ module Tape
       target = pointerof(value).as(Pointer(UInt8))
       target.copy_from(Pointer(UInt8).new(@state.value) + at, width)
       {% unless flag?(:x86_64) || flag?(:aarch64) || flag?(:arm) ||
-                flag?(:i386) || flag?(:wasm32) %}
+                  flag?(:i386) || flag?(:wasm32) %}
         i = 0
         while i < sizeof(I) // 2
           j = sizeof(I) - i - 1
@@ -967,7 +967,7 @@ module Tape
     # Overwrites a field without growing the byte pool.
     def write_bytes_at(at : Int32, value : I) : I forall I
       {% unless I == UInt16 || I == UInt32 || I == UInt64 ||
-                I == Int16 || I == Int32 || I == Int64 %}
+                  I == Int16 || I == Int32 || I == Int64 %}
         {% raise "little-endian fields need a 16/32/64-bit integer" %}
       {% end %}
       {% unless T == UInt8 %}
@@ -980,7 +980,7 @@ module Tape
       stored = value
       bytes = pointerof(stored).as(Pointer(UInt8))
       {% unless flag?(:x86_64) || flag?(:aarch64) || flag?(:arm) ||
-                flag?(:i386) || flag?(:wasm32) %}
+                  flag?(:i386) || flag?(:wasm32) %}
         i = 0
         while i < sizeof(I) // 2
           j = sizeof(I) - i - 1
@@ -997,7 +997,7 @@ module Tape
     # Appends a field, growing with the array's usual tape policy.
     def write_bytes(value : I) : Nil forall I
       {% unless I == UInt16 || I == UInt32 || I == UInt64 ||
-                I == Int16 || I == Int32 || I == Int64 %}
+                  I == Int16 || I == Int32 || I == Int64 %}
         {% raise "little-endian fields need a 16/32/64-bit integer" %}
       {% end %}
       {% unless T == UInt8 %}
@@ -1011,7 +1011,7 @@ module Tape
       stored = value
       bytes = pointerof(stored).as(Pointer(UInt8))
       {% unless flag?(:x86_64) || flag?(:aarch64) || flag?(:arm) ||
-                flag?(:i386) || flag?(:wasm32) %}
+                  flag?(:i386) || flag?(:wasm32) %}
         i = 0
         while i < sizeof(I) // 2
           j = sizeof(I) - i - 1

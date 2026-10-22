@@ -4487,7 +4487,6 @@ pub struct HTTP
     end
     true
   end
-
 end
 
 # A `multipart/form-data` body (RFC 7578) read a part at a time, as it

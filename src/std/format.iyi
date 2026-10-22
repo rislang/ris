@@ -916,7 +916,7 @@ module ::IyiFormat
       value = value * 10_i64 + (format_string[index] - 48_u8).to_i64
       if value > 2147483647_i64
         raise "#{what} must be at most 2147483647, not " \
-          "#{format_string[start, stop - start].to_heap}"
+              "#{format_string[start, stop - start].to_heap}"
       end
       index = index + 1
     end

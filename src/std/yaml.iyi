@@ -2724,7 +2724,7 @@ struct TapeEmitter
                "on", "On", "ON", "off", "Off", "OFF", "="]
 
   private def other_in_1_1?(text : Tape::String, bytes : Tape::String,
-    size : Int32) : Bool
+                            size : Int32) : Bool
     # `==` each, as a `case` asks `String#===` of a Tape::String: false.
     w = 0
     while w < WORDS_1_1.size
@@ -2795,7 +2795,7 @@ struct TapeEmitter
   # string "\uFEFF" read back as null), and U+0085, U+2028 and U+2029
   # (line breaks to a YAML 1.1 reader). Its code point, or -1.
   private def escaped_point(bytes : Tape::String, i : Int32,
-    size : Int32) : Int32
+                            size : Int32) : Int32
     b = bytes[i]
     if b == 0xC2_u8 && i + 1 < size && bytes[i + 1] >= 0x80_u8 && bytes[i + 1] <= 0x9F_u8
       return bytes[i + 1].to_i32

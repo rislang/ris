@@ -1702,8 +1702,8 @@ struct TapeParser
                  (attr_name == "standalone" && (stage == 1 || stage == 2))
       if !in_place && (attr_name == "version" || attr_name == "encoding" || attr_name == "standalone")
         fail_at(attr_line, attr_col, "'#{attr_name.to_heap}' is out of " \
-          "place in the XML declaration: it is version, encoding, " \
-            "standalone, each once")
+                                     "place in the XML declaration: it is version, encoding, " \
+                                     "standalone, each once")
         return
       end
       if attr_name == "version"
@@ -1711,7 +1711,7 @@ struct TapeParser
         # character or a `<` included.
         if !TapeParser.version_number?(attr_val)
           fail_at(attr_line, attr_col, "version '#{attr_val.to_heap}' is " \
-            "not a version number")
+                                       "not a version number")
           return
         end
         doc.version = attr_val
@@ -1720,7 +1720,7 @@ struct TapeParser
         lowered = tape_lower(attr_val)
         if lowered != "utf-8" && lowered != "utf8" && lowered != "us-ascii" && lowered != "ascii"
           fail_at(start_line, start_col, "encoding '#{attr_val.to_heap}' is " \
-            "not supported: the input is read as UTF-8")
+                                         "not supported: the input is read as UTF-8")
           return
         end
         doc.encoding = attr_val
@@ -1989,7 +1989,7 @@ struct TapeParser
     return if failed?
     if !declaration_space
       fail("expected whitespace after the attribute name '#{name.to_heap}' " \
-        "in the #{what}")
+           "in the #{what}")
       return
     end
     tokenized = true
@@ -2016,9 +2016,9 @@ struct TapeParser
         parse_value_list(name, true, what)
       elsif type != "ID" && type != "IDREF" && type != "IDREFS" && type != "ENTITY" && type != "ENTITIES" && type != "NMTOKEN" && type != "NMTOKENS"
         fail_at(type_line, type_col, "expected the type of attribute " \
-          "'#{name.to_heap}' in the #{what}: CDATA, ID, IDREF, IDREFS, " \
-            "ENTITY, ENTITIES, NMTOKEN, NMTOKENS, NOTATION or a list in " \
-              "parentheses")
+                                     "'#{name.to_heap}' in the #{what}: CDATA, ID, IDREF, IDREFS, " \
+                                     "ENTITY, ENTITIES, NMTOKEN, NMTOKENS, NOTATION or a list in " \
+                                     "parentheses")
         return
       end
     end
@@ -2030,12 +2030,12 @@ struct TapeParser
     b = @pos < @len ? byte_at(@pos) : 0_u8
     if b != 35_u8 && b != 34_u8 && b != 39_u8
       fail("expected #REQUIRED, #IMPLIED, #FIXED or a quoted default for " \
-        "attribute '#{name.to_heap}' in the #{what}")
+           "attribute '#{name.to_heap}' in the #{what}")
       return
     end
     if !had_space
       fail("expected whitespace before the default of attribute " \
-        "'#{name.to_heap}' in the #{what}")
+           "'#{name.to_heap}' in the #{what}")
       return
     end
     has_value = true
@@ -2047,8 +2047,8 @@ struct TapeParser
         has_value = false
       elsif keyword != "FIXED"
         fail_at(default_line, default_col, "expected #REQUIRED, #IMPLIED, " \
-          "#FIXED or a quoted default for attribute '#{name.to_heap}' in " \
-            "the #{what}")
+                                           "#FIXED or a quoted default for attribute '#{name.to_heap}' in " \
+                                           "the #{what}")
         return
       elsif !declaration_space
         fail("expected whitespace after #FIXED in the #{what}")
@@ -2083,14 +2083,14 @@ struct TapeParser
       declaration_space
       if parse_name?(!notation).nil?
         fail("expected a #{notation ? "name" : "name token"} in the values " \
-          "of attribute '#{attribute.to_heap}' in the #{what}")
+             "of attribute '#{attribute.to_heap}' in the #{what}")
         return
       end
       declaration_space
       return if consume(")")
       if !consume("|")
         fail("expected '|' or ')' in the values of attribute " \
-          "'#{attribute.to_heap}' in the #{what}")
+             "'#{attribute.to_heap}' in the #{what}")
         return
       end
     end
@@ -2113,7 +2113,7 @@ struct TapeParser
     # Namespaces in XML, section 7: no notation name holds a colon.
     if notation.includes?(':')
       fail_at(name_line, name_col, "notation name '#{notation.to_heap}' " \
-        "cannot hold a colon")
+                                   "cannot hold a colon")
       return
     end
     what = "<!NOTATION #{notation.to_heap}> declaration"
@@ -2203,7 +2203,7 @@ struct TapeParser
     # Namespaces in XML, section 7: no entity name holds a colon.
     if name.includes?(':')
       fail_at(name_line, name_col, "entity name '#{name.to_heap}' cannot " \
-        "hold a colon")
+                                   "hold a colon")
       return
     end
     if !skip_whitespace
@@ -2212,7 +2212,7 @@ struct TapeParser
     end
     if match?("SYSTEM") || match?("PUBLIC")
       fail("external entity '#{name.to_heap}' refused: no SYSTEM or PUBLIC " \
-        "identifier is read")
+           "identifier is read")
       return
     end
     value = parse_entity_value(name)
@@ -2221,7 +2221,7 @@ struct TapeParser
     skip_whitespace
     unless consume(">")
       fail_at(start_line, start_col, "unclosed entity declaration for " \
-        "'#{name.to_heap}'")
+                                     "'#{name.to_heap}'")
     end
   end
 
@@ -2246,7 +2246,7 @@ struct TapeParser
         return Tape::String.build { |w| parts.join(w) }
       elsif b == 60_u8
         fail("markup inside the value of entity '#{entity.to_heap}' is not " \
-          "supported")
+             "supported")
         return "".as_tape
       elsif b == 37_u8
         # A `%` here starts a parameter entity reference, which the internal
@@ -2304,20 +2304,20 @@ struct TapeParser
     return TapeNode.new_pi("", "") if failed?
     if tape_lower(target) == "xml"
       fail_at(start_line, start_col, "processing instruction target " \
-        "'#{target.to_heap}' is reserved")
+                                     "'#{target.to_heap}' is reserved")
       return TapeNode.new_pi("", "")
     end
     # Namespaces in XML, section 7: no processing instruction target holds
     # a colon.
     if target.includes?(':')
       fail_at(start_line, start_col, "processing instruction target " \
-        "'#{target.to_heap}' cannot hold a colon")
+                                     "'#{target.to_heap}' cannot hold a colon")
       return TapeNode.new_pi("", "")
     end
     return TapeNode.new_pi(target, "") if consume("?>")
     if !skip_whitespace
       fail("expected whitespace after the processing instruction target " \
-        "'#{target.to_heap}'")
+           "'#{target.to_heap}'")
       return TapeNode.new_pi("", "")
     end
     run_start = @pos
@@ -2398,7 +2398,7 @@ struct TapeParser
       end
       if !had_space
         fail("expected whitespace before the next attribute of " \
-          "<#{name.to_heap}>")
+             "<#{name.to_heap}>")
         return elem
       end
       attr_line = @line
@@ -2408,7 +2408,7 @@ struct TapeParser
       return elem unless qualified_name?(attr_name, attr_line, attr_col)
       if seen.has_key?(attr_name)
         fail_at(attr_line, attr_col, "attribute '#{attr_name.to_heap}' " \
-          "given twice on <#{name.to_heap}>")
+                                     "given twice on <#{name.to_heap}>")
         return elem
       end
       seen[attr_name] = true
@@ -2469,7 +2469,7 @@ struct TapeParser
         ns_prefix = attr_name[6, attr_name.bytesize - 6]
         if attr_val.empty?
           fail_at(attr_line, attr_col, "namespace prefix " \
-            "'#{ns_prefix.to_heap}' cannot be bound to an empty uri")
+                                       "'#{ns_prefix.to_heap}' cannot be bound to an empty uri")
           return elem
         elsif ns_prefix == "xmlns"
           fail_at(attr_line, attr_col, "namespace prefix 'xmlns' is reserved and cannot be declared")
@@ -2479,13 +2479,13 @@ struct TapeParser
           return elem
         elsif ns_prefix != "xml" && attr_val == XML_NAMESPACE
           fail_at(attr_line, attr_col, "namespace prefix " \
-            "'#{ns_prefix.to_heap}' cannot be bound to the uri of the 'xml' " \
-              "prefix")
+                                       "'#{ns_prefix.to_heap}' cannot be bound to the uri of the 'xml' " \
+                                       "prefix")
           return elem
         elsif attr_val == XMLNS_NAMESPACE
           fail_at(attr_line, attr_col, "namespace prefix " \
-            "'#{ns_prefix.to_heap}' cannot be bound to the uri of the " \
-              "'xmlns' prefix")
+                                       "'#{ns_prefix.to_heap}' cannot be bound to the uri of the " \
+                                       "'xmlns' prefix")
           return elem
         end
         elem.namespaces << TapeNamespace.new(ns_prefix, attr_val)
@@ -2495,7 +2495,7 @@ struct TapeParser
 
     if !elem.prefix.empty? && elem.resolve_namespace_prefix(elem.prefix).nil?
       fail_at(start_line, start_col, "namespace prefix " \
-        "'#{elem.prefix.to_heap}' of <#{name.to_heap}> is not declared")
+                                     "'#{elem.prefix.to_heap}' of <#{name.to_heap}> is not declared")
       return elem
     end
     # Two spellings of one attribute - the same local name through two
@@ -2513,8 +2513,8 @@ struct TapeParser
         ns = elem.resolve_namespace_prefix(attr.prefix)
         if ns.nil?
           fail_at(start_line, start_col, "namespace prefix " \
-            "'#{attr.prefix.to_heap}' of attribute '#{attr.name.to_heap}' " \
-              "on <#{name.to_heap}> is not declared")
+                                         "'#{attr.prefix.to_heap}' of attribute '#{attr.name.to_heap}' " \
+                                         "on <#{name.to_heap}> is not declared")
           return elem
         end
         attr = TapeAttribute.new(raw_names[i], raw_values[i], ns.uri)
@@ -2522,9 +2522,9 @@ struct TapeParser
         first = expanded[key]?
         if !first.nil?
           fail_at(raw_lines[i], raw_cols[i], "attribute " \
-            "'#{attr.local_name.to_heap}' in namespace '#{ns.uri.to_heap}' " \
-              "given twice on <#{name.to_heap}>, as '#{first.to_heap}' and " \
-                "'#{attr.name.to_heap}'")
+                                             "'#{attr.local_name.to_heap}' in namespace '#{ns.uri.to_heap}' " \
+                                             "given twice on <#{name.to_heap}>, as '#{first.to_heap}' and " \
+                                             "'#{attr.name.to_heap}'")
           return elem
         end
         expanded[key] = attr.name
@@ -2559,7 +2559,7 @@ struct TapeParser
           end
           if closing != name
             fail_at(end_line, end_col, "mismatched closing tag: expected " \
-              "</#{name.to_heap}>, got </#{closing.to_heap}>")
+                                       "</#{name.to_heap}>, got </#{closing.to_heap}>")
             return elem
           end
           @depth = @depth - 1
@@ -2721,7 +2721,7 @@ struct TapeParser
     if @pos >= @len || byte_at(@pos) != 59_u8
       kind = @pos > ref_start + 1 && byte_at(ref_start + 1) == 35_u8 ? "character" : "entity"
       fail_at(ref_line, ref_col, "unterminated #{kind} reference " \
-        "#{slice_from(ref_start).to_heap}: expected ';'")
+                                 "#{slice_from(ref_start).to_heap}: expected ';'")
       return "".as_tape
     end
     ref = @input[ref_start + 1, @pos - ref_start - 1]
@@ -2734,11 +2734,11 @@ struct TapeParser
       cp = char_ref_value(ref)
       if cp < 0
         fail_at(ref_line, ref_col, "invalid character reference " \
-          "'&#{ref.to_heap};'")
+                                   "'&#{ref.to_heap};'")
         return "".as_tape
       elsif !xml_char?(cp)
         fail_at(ref_line, ref_col, "character reference &#{ref.to_heap}; is " \
-          "not an XML character")
+                                   "not an XML character")
         return "".as_tape
       end
       return Tape::String.build { |w| w << cp.unsafe_chr }
@@ -2747,7 +2747,7 @@ struct TapeParser
     # value, they were accepted wherever that entity went unused.
     if !TapeParser.name_shaped?(ref)
       fail_at(ref_line, ref_col, "'&#{ref.to_heap};' is not a reference: " \
-        "'#{ref.to_heap}' is not a name")
+                                 "'#{ref.to_heap}' is not a name")
       return "".as_tape
     end
     return slice_from(ref_start) if keep_names
@@ -2767,13 +2767,13 @@ struct TapeParser
     end
     if depth >= 10
       fail_at(line, col, "entity &#{name.to_heap}; expands more than 10 " \
-        "levels deep")
+                         "levels deep")
       return "".as_tape
     end
     @expansions = @expansions + 1
     if @expansions > @max_expansions
       fail_at(line, col, "entity expansion limit of #{@max_expansions} " \
-        "exceeded at &#{name.to_heap};")
+                         "exceeded at &#{name.to_heap};")
       return "".as_tape
     end
     # Counting expansions alone let one large entity used a thousand times
@@ -2781,7 +2781,7 @@ struct TapeParser
     @expanded_bytes = @expanded_bytes + value.bytesize
     if @expanded_bytes > @max_expanded_bytes
       fail_at(line, col, "entity expansion past #{@max_expanded_bytes} " \
-        "bytes at &#{name.to_heap};")
+                         "bytes at &#{name.to_heap};")
       return "".as_tape
     end
     # The replacement text is read where the reference stands, and it was
@@ -2792,16 +2792,16 @@ struct TapeParser
     if value.includes?('<')
       if in_attribute
         fail_at(line, col, "entity &#{name.to_heap}; holds a '<', which an " \
-          "attribute value cannot")
+                           "attribute value cannot")
       else
         fail_at(line, col, "markup inside the value of entity " \
-          "'#{name.to_heap}' is not supported")
+                           "'#{name.to_heap}' is not supported")
       end
       return "".as_tape
     end
     if !in_attribute && TapeParser.contains_end?(value)
       fail_at(line, col, "']]>' is not allowed in text, nor in the value of " \
-        "entity '#{name.to_heap}'")
+                         "entity '#{name.to_heap}'")
       return "".as_tape
     end
     return (in_attribute ? TapeParser.attribute_spaces(value) : value) unless value.includes?('&')
@@ -2823,24 +2823,24 @@ struct TapeParser
         end
         if semi >= len || ptr[semi] != 59_u8
           fail_at(line, col, "unterminated reference " \
-            "#{value[i, semi - i].to_heap} in the value of entity " \
-              "'#{name.to_heap}': expected ';'")
+                             "#{value[i, semi - i].to_heap} in the value of entity " \
+                             "'#{name.to_heap}': expected ';'")
           return "".as_tape
         end
         ref = value[i + 1, semi - i - 1]
         if ref.empty?
           fail_at(line, col, "empty entity reference in the value of entity " \
-            "'#{name.to_heap}'")
+                             "'#{name.to_heap}'")
           return "".as_tape
         elsif ref.starts_with?("#")
           cp = char_ref_value(ref)
           if cp < 0
             fail_at(line, col, "invalid character reference " \
-              "'&#{ref.to_heap};' in the value of entity '#{name.to_heap}'")
+                               "'&#{ref.to_heap};' in the value of entity '#{name.to_heap}'")
             return "".as_tape
           elsif !xml_char?(cp)
             fail_at(line, col, "character reference &#{ref.to_heap}; in the " \
-              "value of entity '#{name.to_heap}' is not an XML character")
+                               "value of entity '#{name.to_heap}' is not an XML character")
             return "".as_tape
           end
           parts << Tape::String.build { |w| w << cp.unsafe_chr }
@@ -2933,7 +2933,7 @@ struct TapeParser
       return true
     end
     fail_at(line, col, "'#{name.to_heap}' is not a qualified name: a name " \
-      "is 'local' or 'prefix:local'")
+                       "is 'local' or 'prefix:local'")
     false
   end
 
@@ -3101,7 +3101,7 @@ end
 # one past U+10FFFF included); the parser refuses those where its cursor
 # reaches them, and `name_shaped?` does not take them for a name.
 def code_point_at(ptr : Pointer(UInt8) | Tape::String, len : Int32,
-  i : Int32) : Int32
+                  i : Int32) : Int32
   b = ptr[i]
   return b.to_i32 if b < 0x80_u8
   n = utf8_width(b)

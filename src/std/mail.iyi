@@ -1667,7 +1667,7 @@ struct TapeMailScan
     start = @at
     while @at < @n &&
           ((@text[@at] >= 65_u8 && @text[@at] <= 90_u8) ||
-           (@text[@at] >= 97_u8 && @text[@at] <= 122_u8))
+          (@text[@at] >= 97_u8 && @text[@at] <= 122_u8))
       @at = @at + 1
     end
     MailText.cut(@text, start, @at)
@@ -2978,7 +2978,7 @@ pub struct Mail
           "a #{media.to_heap} body holds no line --#{boundary.to_heap}")
       end
       MailError.new("a #{media.to_heap} body ends before its closing " \
-                   "line --#{boundary.to_heap}--")
+                    "line --#{boundary.to_heap}--")
     end
 
     protected def self.prefix?(a : Pointer(UInt8), b : Pointer(UInt8), size : Int32) : Bool
