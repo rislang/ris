@@ -323,9 +323,9 @@ broken "a derive that reads a null into the other type" "ASSERTION FAILED\|expec
 broken "a repeat past the scanned keys let through" "a repeat past the scanned keys" \
   "parse_error(\"duplicate key '#{candidate}'\") if seen.has_key?(candidate)" 'nil'
 broken "bytes that are not UTF-8 written through by to_json" "to_json writes bytes that are not a code point as U+FFFD" \
-  'length = utf8_sequence_at(bytes, len, i)
+  'length = utf8_sequence_at(bytes, i)
         if length < 0
-          if ascii_only' 'length = ascii_only ? utf8_sequence_at(bytes, len, i) : 1
+          if ascii_only' 'length = ascii_only ? utf8_sequence_at(bytes, i) : 1
         if length < 0
           if ascii_only'
 broken "a null refused for a field with a default" "a null for a field with a default its type does not admit keeps the default" \

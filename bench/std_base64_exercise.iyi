@@ -38,9 +38,9 @@ end
 puts "  every byte value, both alphabets, every length to 40"
 
 # What encoding costs against a pass that only adds the bytes up: a byte
-# and a character at a time it was five of them in a plain build, read
-# and written a word at a time it is under one. A release build turns the
-# pass into vector code, so the ratio is not asked there.
+# and a character at a time it is one and a half of them in a plain
+# build, read and written a word at a time half of one. A release build
+# turns the pass into vector code, so the ratio is not asked there.
 {% unless flag?(:release) %}
   def byte_sum(s : String) : UInt64
     p = s.to_unsafe
@@ -66,7 +66,7 @@ puts "  every byte value, both alphabets, every length to 40"
     best_sum = (t1 - t0).to_i64 if k == 0 || (t1 - t0).to_i64 < best_sum
     best_encode = (t2 - t1).to_i64 if k == 0 || (t2 - t1).to_i64 < best_encode
   end
-  assert_true best_encode * 2 < best_sum * 5, "encode cost: #{best_encode * 10 // best_sum}/10 of a byte sum (#{seen})"
+  assert_true best_encode < best_sum, "encode cost: #{best_encode * 10 // best_sum}/10 of a byte sum (#{seen})"
   # Named without its measurements: `bench/std_exercise.sh` runs this from
   # source and from artifacts and compares what it prints.
   puts "  encode within a few passes that add the bytes up"

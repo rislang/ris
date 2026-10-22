@@ -141,20 +141,20 @@ PY
     echo "  $label: caught"
   fi
 }
-broken "a last group's first character" 'dst[o] = table[(triple >> 18) & 63]' 'dst[o] = 65_u8'
-broken "a whole group's last character" '        dst[o + 3] = table[triple & 63]
-' '        dst[o + 3] = 65_u8
-'
-broken "four characters decoded out of order" 'q[1] = group.unsafe_shr(8).unsafe_to_u8' 'q[1] = group.unsafe_to_u8'
-broken "the byte loop not resuming where the groups stopped" 'o = (q.address - buf.address).to_i32' 'o = 0'
-broken "a group after a line break out of order" 'buf[o + 1] = ((group >> 8) & 255).to_u8' 'buf[o + 1] = (group & 255).to_u8'
-broken "six bytes read in the wrong order" '(w.unsafe_shr(40) & 0xFF_u64)
-' '(w.unsafe_shr(32) & 0xFF_u64)
+broken "a last group's first character" '        triple = (data[i].to_i32 << 16) | (b1 << 8)
+        w.push(table[triple >> 18])' '        triple = (data[i].to_i32 << 16) | (b1 << 8)
+        w.push(65_u8)'
+broken "a whole group's last character" '        w.push(table[triple & 63])
+        i = i + 3' '        w.push(65_u8)
+        i = i + 3'
+broken "four characters decoded out of order" 'w.push(((group >> 8) & 255).to_u8)' 'w.push((group & 255).to_u8)'
+broken "six bytes read in the wrong order" '(word.unsafe_shr(40) & 0xFF_u64)
+' '(word.unsafe_shr(32) & 0xFF_u64)
 '
 broken "a character pair written backwards" 'chars[k.unsafe_shr(6)].to_i32 | chars[k & 63].to_i32.unsafe_shl(8)' 'chars[k & 63].to_i32 | chars[k.unsafe_shr(6)].to_i32.unsafe_shl(8)'
 broken "vertical tab and form feed refused again" 'next if b == 32_u8 || (b >= 9_u8 && b <= 13_u8)' 'next if b == 32_u8 || b == 10_u8 || b == 13_u8 || b == 9_u8' "base64: invalid byte 11"
-# The byte loop is cheap enough on arm64 that it stays inside two and a half
-# byte sums there: darwin arm64 let it through. The check runs everywhere;
+# The byte loop is cheap enough on arm64 that it may stay inside one byte
+# sum there: darwin arm64 let it through. The check runs everywhere;
 # its proof on Linux x86_64, where the byte loop is twice the word loop.
 case "$(uname -s) $(uname -m)" in
   "Linux x86_64")

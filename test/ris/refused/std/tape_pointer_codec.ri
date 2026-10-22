@@ -1,0 +1,15 @@
+# @[TapeUnsafe] in a std/ module writing through the pointer
+# Writer#unsafe_append yields: a codec, not the OS boundary.
+@[TapeUnsafe]
+def upcase(text : Tape::String, w : Tape::String::Writer) : Nil
+  w.unsafe_append(text.bytesize) do |room|
+    text.bytesize.times { |i| room[i] = text[i] - 32_u8 }
+    text.bytesize
+  end
+end
+
+tape do
+  w = Tape::String::Writer.new(8)
+  upcase(Tape::String.new("abc"), w)
+  puts w.finish
+end

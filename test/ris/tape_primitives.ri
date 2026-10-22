@@ -1,0 +1,39 @@
+# Writer#write_bytes and Writer#shift, and Tape::Scanner: views of the
+# text, offsets in bytes, strings, characters and counts as patterns.
+module tape_primitives
+
+def check(what : String, ok : Bool) : Nil
+  raise "FAIL: #{what}" unless ok
+end
+
+tape do
+  w = Tape::String::Writer.new(4)
+  w.write_bytes(0x44434241_u32)
+  w.write_bytes(0x4645_u16)
+  check "write_bytes", w.finish == "ABCDEF"
+  w.shift(2)
+  check "shift", w.finish == "CDEF"
+  w << "GH"
+  check "append after shift", w.finish == "CDEFGH"
+  w.shift(6)
+  check "shift all", w.finish.empty?
+
+  s = Tape::Scanner.new(Tape::String.new("GET /päth HTTP/1.1"))
+  check "scan string", s.scan("GET") == "GET"
+  check "scan miss", s.scan("POST").nil? && s.offset == 3
+  check "skip char", s.skip(' ') == 1
+  check "current_byte", s.current_byte == '/'.ord.to_u8
+  check "scan_until char", s.scan_until(' ') == "/päth "
+  check "check", s.check(4) == "HTTP" && s.offset == 11
+  check "matches?", s.matches?("HTTP/") == 5
+  check "skip_until", s.skip_until(Tape::String.new(".")) == 7
+  check "peek", s.peek(9) == "1"
+  check "rest", s.rest == "1"
+  check "scan count", s.scan(1) == "1" && s.eos?
+  check "past end", s.scan(1).nil? && s.current_byte.nil?
+  s.reset
+  check "char past ASCII", s.scan_until('ä') == "GET /pä"
+  s.terminate
+  check "terminate", s.eos? && s.rest.empty?
+end
+puts "PASS: write_bytes, shift and Tape::Scanner"

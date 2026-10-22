@@ -235,13 +235,15 @@ class Conn
     @stop - @start
   end
 
-  # The byte *at* bytes past what has been taken, which must have arrived.
-  # Borrow the socket receive buffer until the caller consumes it.
-  @[TapeUnsafe]
-  def tape_view : Tape::String
-    Tape::String.new(@data + @start.to_i64, available)
+  # *count* of the bytes that have arrived, from *at* past what has been
+  # taken, copied onto the caller's tape: the buffer is written over by
+  # the next fill, and a view of it would be too.
+  def tape_copy(at : Int32 = 0, count : Int32 = available - at) : Tape::String
+    raise "bytes #{at}, #{count} past the #{available} that arrived" if at < 0 || count < 0 || at > available - count
+    Tape::String.build(count) { |w| w.append(@data + (@start + at).to_i64, count) }
   end
 
+  # The byte *at* bytes past what has been taken, which must have arrived.
   def peek(at : Int32) : UInt8
     @data[@start + at]
   end
@@ -1744,7 +1746,7 @@ pub struct Server
       return unless conn.available > 0 || conn.fill
       result = nil.as(Int32 | Bool | Nil)
       tape do
-        result = answered_in_place(client, answerer, conn.tape_view)
+        result = answered_in_place(client, answerer, conn.tape_copy)
       end
       conn.no_deadline
       case result
@@ -5053,9 +5055,9 @@ class H2Connection
     id = ((@conn.peek(5).to_i32 & 0x7F) << 24) | (@conn.peek(6).to_i32 << 16) | (@conn.peek(7).to_i32 << 8) | @conn.peek(8).to_i32
     return fail(FRAME_SIZE_ERROR, "a frame of #{length} bytes, past the #{FRAME} this end takes") if length > FRAME
     return ended unless @conn.need(9 + length)
-    # Dispatch before the connection buffer can be filled again. Only
-    # DATA queued for a stream copies out at its retention boundary.
-    payload = @conn.tape_view[9, length]
+    # The frame's payload copied onto the tape before the buffer is filled
+    # again; DATA queued for a stream copies out at its retention boundary.
+    payload = @conn.tape_copy(9, length)
     @conn.consume(9 + length)
     if @block_stream != 0 && (type != CONTINUATION || id != @block_stream)
       return fail(PROTOCOL_ERROR, "a header block broken off by another frame")

@@ -49,6 +49,10 @@ expect local_break "cannot break a tape value"
 expect local_yield_break "cannot break a tape value"
 expect raw_pointer      "to_unsafe\` of a Tape::String outside a @[TapeUnsafe] def"
 expect raw_view         "Tape::String.new(pointer, size)\` outside a @[TapeUnsafe] def"
+expect std/tape_unsafe_codec "reaches no \`lib\` fun or system call"
+expect std/tape_unsafe_no_pointer "hands no tape pointer to the OS"
+expect tape_pointer "\`unsafe_append\` outside a @[TapeUnsafe] def"
+expect std/tape_pointer_codec "the pointer \`unsafe_append\` yields reaches no"
 expect writer_grow      "private method 'grow' called for Tape::String::Writer"
 expect tree_entry       "private constant Tape::Tree::Entry(T) referenced"
 expect array_grow       "private method 'grow' called for Tape::Array(T)"
@@ -136,6 +140,8 @@ out=$("$RIS" run test/ris/writer.ri 2>&1)
 if [ "$out" = '0 -42 9223372036854775807 -9223372036854775808 a&amp;b&lt;c&gt;&quot;d&#39;e <b>' ]; then echo "runs     writer"; else echo "FAILED   writer: $out"; status=1; fi
 
 # Two pieces, String or on the tape, go out in one socket write.
+out=$("$RIS" run test/ris/tape_primitives.ri 2>&1)
+if [ "$out" = 'PASS: write_bytes, shift and Tape::Scanner' ]; then echo "runs     tape_primitives"; else echo "FAILED   tape_primitives: $out"; status=1; fi
 out=$("$RIS" run test/ris/socket_pair.ri 2>&1)
 if [ "$out" = 'PASS: two pieces in one write, String and on the tape, 1 MiB' ]; then echo "runs     socket_pair"; else echo "FAILED   socket_pair: $out"; status=1; fi
 out=$("$RIS" run test/ris/socket_pieces.ri 2>&1)
