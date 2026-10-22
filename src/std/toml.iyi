@@ -1068,26 +1068,35 @@ end
 # that stops the read, passed up with `!`; nothing is raised inside.
 @[OnTape]
 struct TapeReader
-  @bytes : Tape::String
+  # The document and the offset in it, on the tape so that a copy of the
+  # reader moves the same offset.
+  @scan : Pointer(Tape::Scanner)
 
   def bytes : Tape::String
-    @bytes
+    @scan.value.string
   end
-
-  @size : Int32
 
   def size : Int32
-    @size
+    @scan.value.string.bytesize
   end
 
-  @pos : Pointer(Int32)
-
   def pos : Int32
-    @pos.value
+    @scan.value.offset
   end
 
   def pos=(value : Int32) : Int32
-    @pos.value = value
+    scan = @scan.value
+    scan.offset = value
+    @scan.value = scan
+    value
+  end
+
+  # *pattern* at the offset, taken: whether it was there.
+  private def skip?(pattern : String | Char) : Bool
+    scan = @scan.value
+    moved = scan.skip(pattern)
+    @scan.value = scan
+    !moved.nil?
   end
 
   @root : TapeTable
@@ -1122,26 +1131,26 @@ struct TapeReader
   # The current header's key, for the sentences.
 
   def initialize(text : Tape::String)
-    @pos = Pointer(Int32).new(
-      IyiRegion.tape_bytes(sizeof(Int32).to_u64))
+    @scan = Pointer(Tape::Scanner).new(
+      IyiRegion.tape_bytes(sizeof(Tape::Scanner).to_u64))
     @current = Pointer(TapeTable).new(
       IyiRegion.tape_bytes(sizeof(TapeTable).to_u64))
     @path = Pointer(Tape::Array(Tape::String)).new(
       IyiRegion.tape_bytes(sizeof(Tape::Array(Tape::String)).to_u64))
-    @bytes = text
-    @size = text.bytesize
-    @pos.value = 0
+    @scan.value = Tape::Scanner.new(text)
     @root = TapeTable.new(0, true, false)
     @current.value = @root
     @path.value = Tape::Array(Tape::String).new
   end
 
   def document : TapeAny | TOMLError
+    input = bytes
+    input_size = size
     utf8!
     while true
       skip_blanks
-      break if pos >= @size
-      b = @bytes[pos]
+      break if pos >= input_size
+      b = input[pos]
       if b == 10_u8 || b == 13_u8
         line_end!
       elsif b == 35_u8
@@ -1160,12 +1169,14 @@ struct TapeReader
   # The error for `reason` at byte `at`: its line, and its column counted
   # in characters (a UTF-8 continuation byte is not one).
   private def fail(reason : String, at : Int32) : TOMLError
-    at = @size if at > @size
+    input = bytes
+    input_size = size
+    at = input_size if at > input_size
     line = 1
     column = 1
     i = 0
     while i < at
-      b = @bytes[i]
+      b = input[i]
       if b == 10_u8
         line = line + 1
         column = 1
@@ -1179,15 +1190,17 @@ struct TapeReader
 
   # What is at byte `at`, for a sentence.
   private def found(at : Int32) : String
-    return "the end of the document" if at >= @size
-    b = @bytes[at]
+    input = bytes
+    input_size = size
+    return "the end of the document" if at >= input_size
+    b = input[at]
     return "a line break" if b == 10_u8 || b == 13_u8
     return "a tab" if b == 9_u8
     if b < 32_u8 || b == 127_u8
       return "the control character U+#{b.to_s(16).upcase.rjust(4, '0')}"
     end
     return "'#{b.unsafe_chr}'" if b < 128_u8
-    "'#{@bytes[at, sequence_size(b)].to_heap}'"
+    "'#{input[at, sequence_size(b)].to_heap}'"
   end
 
   private def sequence_size(b : UInt8) : Int32
@@ -1199,14 +1212,16 @@ struct TapeReader
   # The whole text is UTF-8 (RFC 3629: no overlong form, no surrogate,
   # nothing past U+10FFFF), and does not start with a byte order mark.
   private def utf8 : Nil | TOMLError
-    if @size >= 3 && @bytes[0] == 0xEF_u8 && @bytes[1] == 0xBB_u8 &&
-       @bytes[2] == 0xBF_u8
+    input = bytes
+    input_size = size
+    if input_size >= 3 && input[0] == 0xEF_u8 && input[1] == 0xBB_u8 &&
+       input[2] == 0xBF_u8
       return fail("a byte order mark, which a TOML document does not start " \
                   "with", 0)
     end
     i = 0
-    while i < @size
-      b = @bytes[i]
+    while i < input_size
+      b = input[i]
       if b < 0x80_u8
         i = i + 1
         next
@@ -1229,11 +1244,11 @@ struct TapeReader
       end
       j = 1
       while j <= need
-        if i + j >= @size
+        if i + j >= input_size
           return fail("a UTF-8 sequence cut short by the end of the " \
                       "document", i)
         end
-        c = @bytes[i + j]
+        c = input[i + j]
         lo = j == 1 ? low : 0x80_u8
         hi = j == 1 ? high : 0xBF_u8
         if c < lo || c > hi
@@ -1248,7 +1263,9 @@ struct TapeReader
   end
 
   private def skip_blanks : Nil
-    while pos < @size && (@bytes[pos] == 32_u8 || @bytes[pos] == 9_u8)
+    input = bytes
+    input_size = size
+    while pos < input_size && (input[pos] == 32_u8 || input[pos] == 9_u8)
       self.pos = pos + 1
     end
   end
@@ -1256,11 +1273,13 @@ struct TapeReader
   # A comment from its `#` to the line break, which is left for the
   # caller. A control character but tab is refused in one.
   private def comment : Nil | TOMLError
+    input = bytes
+    input_size = size
     self.pos = pos + 1
-    while pos < @size
-      b = @bytes[pos]
+    while pos < input_size
+      b = input[pos]
       return nil if b == 10_u8
-      return nil if b == 13_u8 && pos + 1 < @size && @bytes[pos + 1] == 10_u8
+      return nil if b == 13_u8 && pos + 1 < input_size && input[pos + 1] == 10_u8
       if (b < 32_u8 && b != 9_u8) || b == 127_u8
         return fail("#{found(pos)} in a comment", pos)
       end
@@ -1272,15 +1291,17 @@ struct TapeReader
   # Blanks, a comment, and the line break (LF or CRLF) or the end of the
   # document: what must follow a key/value pair or a header.
   private def line_end : Nil | TOMLError
+    input = bytes
+    input_size = size
     skip_blanks
-    comment! if pos < @size && @bytes[pos] == 35_u8
-    return nil if pos >= @size
-    b = @bytes[pos]
+    comment! if pos < input_size && input[pos] == 35_u8
+    return nil if pos >= input_size
+    b = input[pos]
     if b == 10_u8
       self.pos = pos + 1
       return nil
     end
-    if b == 13_u8 && pos + 1 < @size && @bytes[pos + 1] == 10_u8
+    if b == 13_u8 && pos + 1 < input_size && input[pos + 1] == 10_u8
       self.pos = pos + 2
       return nil
     end
@@ -1293,12 +1314,14 @@ struct TapeReader
 
   # Blanks, comments and line breaks, as an array may hold between items.
   private def skip_space : Nil | TOMLError
-    while pos < @size
-      b = @bytes[pos]
+    input = bytes
+    input_size = size
+    while pos < input_size
+      b = input[pos]
       if b == 32_u8 || b == 9_u8 || b == 10_u8
         self.pos = pos + 1
       elsif b == 13_u8
-        unless pos + 1 < @size && @bytes[pos + 1] == 10_u8
+        unless pos + 1 < input_size && input[pos + 1] == 10_u8
           return fail("a carriage return not followed by a line feed", pos)
         end
         self.pos = pos + 2
@@ -1319,38 +1342,42 @@ struct TapeReader
   # A key: its parts, and where each starts, into the two arrays.
   private def key(parts : Tape::Array(Tape::String),
                   starts : Tape::Array(Int32)) : Nil | TOMLError
+    input = bytes
+    input_size = size
     while true
       skip_blanks
       starts << pos
       parts << simple_key!
       skip_blanks
-      break unless pos < @size && @bytes[pos] == 46_u8
+      break unless pos < input_size && input[pos] == 46_u8
       self.pos = pos + 1
     end
     nil
   end
 
   private def simple_key : Tape::String | TOMLError
-    return fail("a key expected, and the document ended", pos) if pos >= @size
-    b = @bytes[pos]
+    input = bytes
+    input_size = size
+    return fail("a key expected, and the document ended", pos) if pos >= input_size
+    b = input[pos]
     if b == 34_u8
-      if pos + 2 < @size && @bytes[pos + 1] == 34_u8 && @bytes[pos + 2] == 34_u8
+      if pos + 2 < input_size && input[pos + 1] == 34_u8 && input[pos + 2] == 34_u8
         return fail("a multi-line string cannot be a key", pos)
       end
       return basic_string
     end
     if b == 39_u8
-      if pos + 2 < @size && @bytes[pos + 1] == 39_u8 && @bytes[pos + 2] == 39_u8
+      if pos + 2 < input_size && input[pos + 1] == 39_u8 && input[pos + 2] == 39_u8
         return fail("a multi-line string cannot be a key", pos)
       end
       return literal_string
     end
     return fail("#{found(pos)} cannot start a key", pos) unless bare?(b)
     start = pos
-    while pos < @size && bare?(@bytes[pos])
+    while pos < input_size && bare?(input[pos])
       self.pos = pos + 1
     end
-    @bytes[start, pos - start]
+    input[start, pos - start]
   end
 
   # The dotted name of the first `count` parts of `path` + `parts`.
@@ -1392,10 +1419,12 @@ struct TapeReader
   # `key = value`, into `table`, whose header's key is `path`.
   private def pair(table : TapeTable,
                    path : Tape::Array(Tape::String)) : Nil | TOMLError
+    input = bytes
+    input_size = size
     parts = Tape::Array(Tape::String).new
     starts = Tape::Array(Int32).new
     key(parts, starts)!
-    unless pos < @size && @bytes[pos] == 61_u8
+    unless pos < input_size && input[pos] == 61_u8
       return no_equals(path, parts)
     end
     self.pos = pos + 1
@@ -1451,15 +1480,17 @@ struct TapeReader
 
   # `[key]` or `[[key]]`, which the following pairs go into.
   private def header : Nil | TOMLError
+    input = bytes
+    input_size = size
     start = pos
-    array = pos + 1 < @size && @bytes[pos + 1] == 91_u8
+    array = pos + 1 < input_size && input[pos + 1] == 91_u8
     self.pos = pos + (array ? 2 : 1)
     parts = Tape::Array(Tape::String).new
     starts = Tape::Array(Int32).new
     key(parts, starts)!
     closer = array ? "]]" : "]"
-    unless pos < @size && @bytes[pos] == 93_u8 && (!array ||
-           (pos + 1 < @size && @bytes[pos + 1] == 93_u8))
+    unless pos < input_size && input[pos] == 93_u8 && (!array ||
+           (pos + 1 < input_size && input[pos + 1] == 93_u8))
       return fail("#{found(pos)} where the header's #{closer} should be", pos)
     end
     self.pos = pos + closer.bytesize
@@ -1546,11 +1577,13 @@ struct TapeReader
   # this method, a plain build's task overflowed its 256 KB stack at
   # about 80 nested arrays.
   private def value(depth : Int32) : TapeAny | TOMLError
-    return fail("a value expected, and the document ended", pos) if pos >= @size
+    input = bytes
+    input_size = size
+    return fail("a value expected, and the document ended", pos) if pos >= input_size
     if depth > DEPTH_LIMIT
       return too_deep(depth)
     end
-    b = @bytes[pos]
+    b = input[pos]
     return array(depth) if b == 91_u8
     return inline_table(depth) if b == 123_u8
     scalar
@@ -1575,15 +1608,17 @@ struct TapeReader
   end
 
   private def scalar : TapeAny | TOMLError
-    b = @bytes[pos]
+    input = bytes
+    input_size = size
+    b = input[pos]
     if b == 34_u8
-      if pos + 2 < @size && @bytes[pos + 1] == 34_u8 && @bytes[pos + 2] == 34_u8
+      if pos + 2 < input_size && input[pos + 1] == 34_u8 && input[pos + 2] == 34_u8
         return TapeAny.new(multiline_basic!)
       end
       return TapeAny.new(basic_string!)
     end
     if b == 39_u8
-      if pos + 2 < @size && @bytes[pos + 1] == 39_u8 && @bytes[pos + 2] == 39_u8
+      if pos + 2 < input_size && input[pos + 1] == 39_u8 && input[pos + 2] == 39_u8
         return TapeAny.new(multiline_literal!)
       end
       return TapeAny.new(literal_string!)
@@ -1603,31 +1638,28 @@ struct TapeReader
   end
 
   private def word?(text : String) : Bool
-    n = text.bytesize
-    return false if pos + n > @size
-    i = 0
-    while i < n
-      return false unless @bytes[pos + i] == text.to_unsafe[i]
-      i = i + 1
-    end
-    self.pos = pos + n
-    true
+    skip?(text)
   end
 
   private def digit?(at : Int32) : Bool
-    at < @size && @bytes[at] >= 48_u8 && @bytes[at] <= 57_u8
+    input = bytes
+    input_size = size
+    at < input_size && input[at] >= 48_u8 && input[at] <= 57_u8
   end
 
   private def byte?(at : Int32, b : UInt8) : Bool
-    at < @size && @bytes[at] == b
+    input = bytes
+    input_size = size
+    at < input_size && input[at] == b
   end
 
   # Two (or four) digits at `at`, as a number.
   private def digits(at : Int32, count : Int32) : Int32
+    input = bytes
     value = 0
     i = 0
     while i < count
-      value = value * 10 + (@bytes[at + i] - 48_u8).to_i32
+      value = value * 10 + (input[at + i] - 48_u8).to_i32
       i = i + 1
     end
     value
@@ -1644,6 +1676,7 @@ struct TapeReader
 
   # A local date, a local or offset date-time, or a local time.
   private def date_time : TapeAny | TOMLError
+    input = bytes
     start = pos
     year = 0
     month = 0
@@ -1691,7 +1724,7 @@ struct TapeReader
       end
       scale = 100_000_000
       while digit?(pos)
-        nanosecond = nanosecond + (@bytes[pos] - 48_u8).to_i32 * scale
+        nanosecond = nanosecond + (input[pos] - 48_u8).to_i32 * scale
         scale = scale // 10
         self.pos = pos + 1
       end
@@ -1703,7 +1736,7 @@ struct TapeReader
         kind = TOMLDateTime::OFFSET_DATE_TIME
         self.pos = pos + 1
       elsif byte?(pos, 43_u8) || byte?(pos, 45_u8)
-        sign = @bytes[pos] == 45_u8 ? -1 : 1
+        sign = input[pos] == 45_u8 ? -1 : 1
         unless all_digits?(pos + 1, 2) && byte?(pos + 3, 58_u8) &&
                all_digits?(pos + 4, 2)
           return fail("an offset is written +HH:MM or -HH:MM", pos)
@@ -1740,12 +1773,13 @@ struct TapeReader
   # them, ends after `at`; -1 when there is no digit at `at` or an
   # underscore is out of place.
   private def digit_run(at : Int32, stop : Int32, radix : Int32) : Int32
-    return -1 unless at < stop && radix_digit(@bytes[at], radix) >= 0
+    input = bytes
+    return -1 unless at < stop && radix_digit(input[at], radix) >= 0
     i = at + 1
     while i < stop
-      b = @bytes[i]
+      b = input[i]
       if b == 95_u8
-        return -1 unless i + 1 < stop && radix_digit(@bytes[i + 1], radix) >= 0
+        return -1 unless i + 1 < stop && radix_digit(input[i + 1], radix) >= 0
         i = i + 2
       elsif radix_digit(b, radix) >= 0
         i = i + 1
@@ -1759,25 +1793,27 @@ struct TapeReader
   # An integer or a float. The token is every byte a number can hold;
   # what it holds is then checked against the grammar as a whole.
   private def number : TapeAny | TOMLError
+    input = bytes
+    input_size = size
     start = pos
     stop = pos
-    while stop < @size
-      b = @bytes[stop]
+    while stop < input_size
+      b = input[stop]
       break unless bare?(b) || b == 43_u8 || b == 46_u8
       stop = stop + 1
     end
-    token = @bytes[start, stop - start]
+    token = input[start, stop - start]
     i = start
     negative = false
     signed = false
-    if @bytes[i] == 43_u8 || @bytes[i] == 45_u8
-      negative = @bytes[i] == 45_u8
+    if input[i] == 43_u8 || input[i] == 45_u8
+      negative = input[i] == 45_u8
       signed = true
       i = i + 1
     end
     rest = stop - i
-    if rest == 3 && (@bytes[i] == 105_u8 || @bytes[i] == 110_u8)
-      word = @bytes[i, 3]
+    if rest == 3 && (input[i] == 105_u8 || input[i] == 110_u8)
+      word = input[i, 3]
       if word == "inf"
         self.pos = stop
         return TapeAny.new(negative ? -1.0 / 0.0 : 1.0 / 0.0)
@@ -1787,9 +1823,9 @@ struct TapeReader
         return TapeAny.new(0.0 / 0.0)
       end
     end
-    if rest >= 2 && @bytes[i] == 48_u8 && (@bytes[i + 1] == 120_u8 ||
-       @bytes[i + 1] == 111_u8 || @bytes[i + 1] == 98_u8)
-      radix = @bytes[i + 1] == 120_u8 ? 16 : (@bytes[i + 1] == 111_u8 ? 8 : 2)
+    if rest >= 2 && input[i] == 48_u8 && (input[i + 1] == 120_u8 ||
+       input[i + 1] == 111_u8 || input[i + 1] == 98_u8)
+      radix = input[i + 1] == 120_u8 ? 16 : (input[i + 1] == 111_u8 ? 8 : 2)
       if signed
         return fail("a sign before #{token.to_heap}, which only a decimal " \
                     "number " \
@@ -1802,7 +1838,7 @@ struct TapeReader
       value = 0_u64
       j = i + 2
       while j < stop
-        d = radix_digit(@bytes[j], radix)
+        d = radix_digit(input[j], radix)
         if d >= 0
           if value > (9223372036854775807_u64 - d.to_u64) // radix.to_u64
             return fail("#{token.to_heap} is past 9223372036854775807, the " \
@@ -1818,22 +1854,22 @@ struct TapeReader
     end
     whole = digit_run(i, stop, 10)
     return fail("#{token.to_heap} is not a number", start) if whole < 0
-    if @bytes[i] == 48_u8 && whole > i + 1
+    if input[i] == 48_u8 && whole > i + 1
       return fail("#{token.to_heap} has a leading zero, which only 0 may",
         start)
     end
     j = whole
     float = false
-    if j < stop && @bytes[j] == 46_u8
+    if j < stop && input[j] == 46_u8
       j = digit_run(j + 1, stop, 10)
       if j < 0
         return fail("#{token.to_heap} needs a digit after its '.'", start)
       end
       float = true
     end
-    if j < stop && (@bytes[j] == 101_u8 || @bytes[j] == 69_u8)
+    if j < stop && (input[j] == 101_u8 || input[j] == 69_u8)
       j = j + 1
-      j = j + 1 if j < stop && (@bytes[j] == 43_u8 || @bytes[j] == 45_u8)
+      j = j + 1 if j < stop && (input[j] == 43_u8 || input[j] == 45_u8)
       j = digit_run(j, stop, 10)
       if j < 0
         return fail("#{token.to_heap} needs digits in its exponent", start)
@@ -1845,9 +1881,9 @@ struct TapeReader
     if float
       text = Tape::String::Writer.new(64)
       k = start
-      k = k + 1 if @bytes[k] == 43_u8
+      k = k + 1 if input[k] == 43_u8
       while k < stop
-        text.push(@bytes[k]) unless @bytes[k] == 95_u8
+        text.push(input[k]) unless input[k] == 95_u8
         k = k + 1
       end
       return TapeAny.new(TapeNumbers.parse(text.finish))
@@ -1856,7 +1892,7 @@ struct TapeReader
     value = 0_u64
     k = i
     while k < stop
-      b = @bytes[k]
+      b = input[k]
       unless b == 95_u8
         d = (b - 48_u8).to_u64
         if value > (limit - d) // 10_u64
@@ -1877,20 +1913,22 @@ struct TapeReader
   # `[`...`]`: values separated by commas, with blanks, line breaks and
   # comments anywhere between them, and a comma after the last allowed.
   private def array(depth : Int32) : TapeAny | TOMLError
+    input = bytes
+    input_size = size
     start = pos
     self.pos = pos + 1
     items = Tape::Array(TapeAny).new
     while true
       skip_space!
-      return fail("an array that does not close", start) if pos >= @size
-      if @bytes[pos] == 93_u8
+      return fail("an array that does not close", start) if pos >= input_size
+      if input[pos] == 93_u8
         self.pos = pos + 1
         break
       end
       items << value(depth + 1)!
       skip_space!
-      return fail("an array that does not close", start) if pos >= @size
-      b = @bytes[pos]
+      return fail("an array that does not close", start) if pos >= input_size
+      b = input[pos]
       if b == 44_u8
         self.pos = pos + 1
       elsif b == 93_u8
@@ -1909,29 +1947,31 @@ struct TapeReader
   # keys do (dotted keys may build tables in it), and once closed it is a
   # value: nothing adds to it.
   private def inline_table(depth : Int32) : TapeAny | TOMLError
+    input = bytes
+    input_size = size
     start = pos
     self.pos = pos + 1
     table = TapeTable.new(depth, false, false)
     empty = Tape::Array(Tape::String).new
     skip_blanks
-    if pos < @size && @bytes[pos] == 125_u8
+    if pos < input_size && input[pos] == 125_u8
       self.pos = pos + 1
       return table.to_any
     end
     while true
       skip_blanks
-      return fail("an inline table that does not close", start) if pos >= @size
-      if @bytes[pos] == 10_u8 || @bytes[pos] == 13_u8
+      return fail("an inline table that does not close", start) if pos >= input_size
+      if input[pos] == 10_u8 || input[pos] == 13_u8
         return fail("a line break in an inline table, which stays on one " \
                     "line", pos)
       end
-      if @bytes[pos] == 125_u8
+      if input[pos] == 125_u8
         return fail("a comma after the last pair of an inline table", pos)
       end
       pair(table, empty)!
       skip_blanks
-      return fail("an inline table that does not close", start) if pos >= @size
-      b = @bytes[pos]
+      return fail("an inline table that does not close", start) if pos >= input_size
+      b = input[pos]
       if b == 44_u8
         self.pos = pos + 1
       elsif b == 125_u8
@@ -1955,11 +1995,13 @@ struct TapeReader
   # The `count` hexadecimal digits at `at`, -1 when they are not; eight
   # of them can pass Int32, so the sum is an Int64.
   private def hex_value(at : Int32, count : Int32) : Int64
+    input = bytes
+    input_size = size
     value = 0_i64
     i = 0
     while i < count
-      return -1_i64 unless at + i < @size
-      d = radix_digit(@bytes[at + i], 16)
+      return -1_i64 unless at + i < input_size
+      d = radix_digit(input[at + i], 16)
       return -1_i64 if d < 0
       value = value * 16 + d
       i = i + 1
@@ -1987,8 +2029,10 @@ struct TapeReader
 
   # The escape at `pos` (its backslash), written to `text`.
   private def escape(text : Tape::String::Writer) : Nil | TOMLError
-    return fail("a string that does not close", pos) if pos + 1 >= @size
-    e = @bytes[pos + 1]
+    input = bytes
+    input_size = size
+    return fail("a string that does not close", pos) if pos + 1 >= input_size
+    e = input[pos + 1]
     simple = 0_u8
     if e == 98_u8
       simple = 8_u8
@@ -2017,7 +2061,7 @@ struct TapeReader
         return fail("\\#{e.unsafe_chr} takes #{count} hexadecimal digits", pos)
       end
       if (point >= 0xD800 && point <= 0xDFFF) || point > 0x10FFFF
-        shown = @bytes[pos + 2, count]
+        shown = input[pos + 2, count]
         return fail("\\#{e.unsafe_chr}#{shown.to_heap} is not a Unicode " \
                     "scalar value", pos)
       end
@@ -2032,23 +2076,25 @@ struct TapeReader
 
   # `"`...`"`, escapes read.
   private def basic_string : Tape::String | TOMLError
+    input = bytes
+    input_size = size
     start = pos
     self.pos = pos + 1
     text = nil.as(Tape::String::Writer?)
     run = pos
     while true
-      return fail("a string that does not close", start) if pos >= @size
-      b = @bytes[pos]
+      return fail("a string that does not close", start) if pos >= input_size
+      b = input[pos]
       if b == 34_u8
         self.pos = pos + 1
         if writer = text
-          writer << @bytes[run, pos - run - 1]
+          writer << input[run, pos - run - 1]
           return writer.finish
         end
-        return @bytes[start + 1, pos - start - 2]
+        return input[start + 1, pos - start - 2]
       elsif b == 92_u8
         writer = text || Tape::String::Writer.new(64)
-        writer << @bytes[run, pos - run]
+        writer << input[run, pos - run]
         escape(writer)!
         text = writer
         run = pos
@@ -2064,14 +2110,16 @@ struct TapeReader
 
   # `'`...`'`, as written.
   private def literal_string : Tape::String | TOMLError
+    input = bytes
+    input_size = size
     start = pos
     self.pos = pos + 1
     while true
-      return fail("a string that does not close", start) if pos >= @size
-      b = @bytes[pos]
+      return fail("a string that does not close", start) if pos >= input_size
+      b = input[pos]
       if b == 39_u8
         self.pos = pos + 1
-        return @bytes[start + 1, pos - start - 2]
+        return input[start + 1, pos - start - 2]
       elsif b == 10_u8 || b == 13_u8
         return fail("a line break in a single-line string", pos)
       elsif control?(b)
@@ -2084,18 +2132,16 @@ struct TapeReader
 
   # After an opening `"""` or `'''`: a line break right there is dropped.
   private def skip_first_break : Nil
-    if byte?(pos, 10_u8)
-      self.pos = pos + 1
-    elsif byte?(pos, 13_u8) && byte?(pos + 1, 10_u8)
-      self.pos = pos + 2
-    end
+    skip?('\n') || skip?("\r\n")
   end
 
   # At a run of `quote`: how many, and whether they close the string
   # (three or more; one or two of them may be the string's own).
   private def quote_run(quote : UInt8) : Int32
+    input = bytes
+    input_size = size
     n = 0
-    while pos + n < @size && @bytes[pos + n] == quote
+    while pos + n < input_size && input[pos + n] == quote
       n = n + 1
     end
     n
@@ -2103,15 +2149,17 @@ struct TapeReader
 
   # `"""`...`"""`.
   private def multiline_basic : Tape::String | TOMLError
+    input = bytes
+    input_size = size
     start = pos
     self.pos = pos + 3
     skip_first_break
     text = Tape::String::Writer.new(64)
     while true
-      if pos >= @size
+      if pos >= input_size
         return fail("a multi-line string that does not close", start)
       end
-      b = @bytes[pos]
+      b = input[pos]
       if b == 34_u8
         n = quote_run(34_u8)
         if n >= 3
@@ -2135,17 +2183,17 @@ struct TapeReader
         self.pos = pos + n
       elsif b == 92_u8
         after = pos + 1
-        while after < @size && (@bytes[after] == 32_u8 || @bytes[after] == 9_u8)
+        while after < input_size && (input[after] == 32_u8 || input[after] == 9_u8)
           after = after + 1
         end
-        if after < @size && (@bytes[after] == 10_u8 ||
-           (@bytes[after] == 13_u8 && after + 1 < @size &&
-           @bytes[after + 1] == 10_u8))
+        if after < input_size && (input[after] == 10_u8 ||
+           (input[after] == 13_u8 && after + 1 < input_size &&
+           input[after + 1] == 10_u8))
           # A line-ending backslash: it, the blanks and every line break
           # and blank after it up to the next text go.
           self.pos = after
-          while pos < @size
-            c = @bytes[pos]
+          while pos < input_size
+            c = input[pos]
             if c == 32_u8 || c == 9_u8 || c == 10_u8
               self.pos = pos + 1
             elsif c == 13_u8 && byte?(pos + 1, 10_u8)
@@ -2170,28 +2218,30 @@ struct TapeReader
         return fail("#{found(pos)} in a string, where it must be escaped", pos)
       else
         run = pos
-        while pos < @size
-          c = @bytes[pos]
+        while pos < input_size
+          c = input[pos]
           break if c == 34_u8 || c == 92_u8 || c == 10_u8 || c == 13_u8 ||
                    control?(c)
           self.pos = pos + 1
         end
-        text << @bytes[run, pos - run]
+        text << input[run, pos - run]
       end
     end
   end
 
   # `'''`...`'''`.
   private def multiline_literal : Tape::String | TOMLError
+    input = bytes
+    input_size = size
     start = pos
     self.pos = pos + 3
     skip_first_break
     text = Tape::String::Writer.new(64)
     while true
-      if pos >= @size
+      if pos >= input_size
         return fail("a multi-line string that does not close", start)
       end
-      b = @bytes[pos]
+      b = input[pos]
       if b == 39_u8
         n = quote_run(39_u8)
         if n >= 3
@@ -2227,12 +2277,12 @@ struct TapeReader
                     "it", pos)
       else
         run = pos
-        while pos < @size
-          c = @bytes[pos]
+        while pos < input_size
+          c = input[pos]
           break if c == 39_u8 || c == 10_u8 || c == 13_u8 || control?(c)
           self.pos = pos + 1
         end
-        text << @bytes[run, pos - run]
+        text << input[run, pos - run]
       end
     end
   end

@@ -343,9 +343,9 @@ prove_caught() {
 
 # Numbers.
 prove_caught "a leading zero is read" 'accepted "a = 01\n"' \
-  'if @bytes[i] == 48_u8 && whole > i + 1' 'if false && @bytes[i] == 48_u8 && whole > i + 1'
+  'if input[i] == 48_u8 && whole > i + 1' 'if false && input[i] == 48_u8 && whole > i + 1'
 prove_caught "underscores need not stand between digits" 'accepted "a = 1__0\n"' \
-  $'        return -1 unless i + 1 < stop && radix_digit(@bytes[i + 1], radix) >= 0\n        i = i + 2' '        i = i + 1'
+  $'        return -1 unless i + 1 < stop && radix_digit(input[i + 1], radix) >= 0\n        i = i + 2' '        i = i + 1'
 prove_caught "a hexadecimal integer may have a sign" 'accepted "a = +0x1\n"' \
   $'      if signed\n        return fail("a sign before ' \
   $'      if false\n        return fail("a sign before '
@@ -360,7 +360,7 @@ prove_caught "an escape may name a surrogate" 'accepted "a = \"\\uD800\"\n"' \
 prove_caught "a line-ending backslash keeps the next line's indentation" 'a line-ending backslash' \
   '            if c == 32_u8 || c == 9_u8 || c == 10_u8' '            if c == 10_u8'
 prove_caught "the line break after the opening quotes is kept" 'the break after the opening quotes is dropped' \
-  $'    if byte?(pos, 10_u8)\n      self.pos = pos + 1\n    elsif' $'    if false\n      self.pos = pos + 1\n    elsif'
+  $'    skip?(\'\\n\') || skip?("\\r\\n")' $'    skip?("\\r\\n")'
 prove_caught "CRLF inside a multi-line string is kept as it is" 'CRLF inside a multi-line string reads as LF' \
   $'        end\n        text.push(10_u8)\n        self.pos = pos + 2\n      elsif control?(b)\n        return fail("#{found(pos)} in a string' $'        end\n        text.push(13_u8)\n        text.push(10_u8)\n        self.pos = pos + 2\n      elsif control?(b)\n        return fail("#{found(pos)} in a string'
 prove_caught "six quotes may close a multi-line string" 'accepted "a = \"\"\"x\"\"\"\"\"\"\n"' \
@@ -398,7 +398,7 @@ prove_caught "dotted keys going through a table do not mark it" 'accepted "[a.b.
 prove_caught "dotted keys may add to a table a header declared" 'accepted "[a.b.c]\nz = 9\n[a]\nb.c.t = 9\n"' \
   $'        if child.explicit\n          return fail("dotted keys add' $'        if false\n          return fail("dotted keys add'
 prove_caught "an inline table takes a trailing comma" 'refusal of "a = {b = 1,}\n"' \
-  $'      if @bytes[pos] == 125_u8\n        return fail("a comma after the last pair' $'      if false\n        return fail("a comma after the last pair'
+  $'      if input[pos] == 125_u8\n        return fail("a comma after the last pair' $'      if false\n        return fail("a comma after the last pair'
 
 # Bounds, values, the writer.
 prove_caught "nesting is unbounded" 'accepted 135 bytes nested past DEPTH_LIMIT' \
