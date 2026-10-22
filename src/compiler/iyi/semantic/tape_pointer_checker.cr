@@ -8,7 +8,7 @@
 # through the bounds-checked `[]`, `each_byte` and `[start, count]` instead. A raw pointer the program makes itself
 # (`Pointer.new`) is outside this rule: iyi has no unsafe blocks for it.
 class Iyi::TapePointerChecker
-  @program : Program
+  getter program : Program
   @seen = Set(UInt64).new
   @defs = [] of Def
 
@@ -127,10 +127,13 @@ end
 # parameters of the defs it is passed to. A codec that
 # walks the bytes by pointer is not the boundary; it reads with `[]` and
 # `each_byte`. Copying memory (`LibTapeCopy`, `LibIntrinsics`, C's `mem*`)
-# is not the OS.
+# is not the OS. An IO's pointer write is: which IO it is, a file, socket
+# or pipe, is known at run time, and a program holding only the abstract
+# IO (an editor opening one module) has no concrete write to follow.
 class Iyi::TapeFfiFlow
   POINTER_OPS = {"+", "-", "address", "to_i64", "to_u64", "pointer"}
   MEMORY_LIBS = {"LibTapeCopy", "LibIntrinsics"}
+  IO_WRITES   = {"write", "write_string", "unbuffered_write"}
 
   # Whether parameter *index* of a def reaches the OS, by def and index:
   # false while it is looked at, which ends a recursion.
@@ -232,7 +235,7 @@ class Iyi::TapeFfiFlow
     return false unless targets
     targets.any? do |target|
       next os?(target) if target.is_a?(External)
-      next true if target.name.starts_with?("__sys")
+      next true if target.name.starts_with?("__sys") || io_write?(target)
       next false unless index < target.args.size
       key = {target.object_id, index}
       found = @reaches[key]?
@@ -240,6 +243,14 @@ class Iyi::TapeFfiFlow
       @reaches[key] = false
       @reaches[key] = reaches?(target.body, nil, target.args[index].name)
     end
+  end
+
+  private def io_write?(target : Def) : Bool
+    return false unless IO_WRITES.includes?(target.name)
+    # `IO` is an alias, of `IyiIO` in ris's prelude.
+    return false unless io = @checker.program.types["IO"]?.try(&.remove_alias)
+    owner = target.owner
+    owner == io || owner.ancestors.includes?(io)
   end
 
   private def os?(external : External) : Bool
