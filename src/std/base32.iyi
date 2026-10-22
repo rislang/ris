@@ -80,7 +80,9 @@ pub struct Base32
       view = if data.is_a?(String)
                data.as_tape
              else
-               Tape::String.new(data.to_unsafe, data.size)
+               Tape::String.build(data.size) do |writer|
+                 data.each { |byte| writer.push(byte) }
+               end
              end
       result = encode(view, padding).to_heap
     end
@@ -131,7 +133,9 @@ pub struct Base32Hex
       view = if data.is_a?(String)
                data.as_tape
              else
-               Tape::String.new(data.to_unsafe, data.size)
+               Tape::String.build(data.size) do |writer|
+                 data.each { |byte| writer.push(byte) }
+               end
              end
       result = encode(view, padding).to_heap
     end
@@ -175,14 +179,14 @@ end
 struct Base32Codec
   def self.encode(data : Tape::String, alphabet : String,
                   padding : Bool) : Tape::String
-    src = data.to_unsafe
+    src = data
     n = data.bytesize
     table = alphabet.to_unsafe
     # Eight characters for every five bytes; the last group's characters
     # are its bits rounded up to fives, and padding brings it to eight.
     chars = (n.to_i64 * 8 + 4) // 5
     size = padding ? (n.to_i64 + 4) // 5 * 8 : chars
-    dst = Pointer(UInt8).new(IyiRegion.tape_bytes(size.to_u64))
+    dst = Tape::Array(UInt8).new(size.to_i32, 0_u8)
     begin
       acc = 0
       bits = 0
@@ -207,13 +211,15 @@ struct Base32Codec
         o = o + 1
       end
     end
-    Tape::String.new(dst, size.to_i32)
+    Tape::String.build(size.to_i32) do |writer|
+      dst.each { |byte| writer.push(byte) }
+    end
   end
 
   def self.decode(text : Tape::String, values : Array(Int32),
                   alphabet : String,
                   name : String) : Tape::String | Base32Error
-    src = text.to_unsafe
+    src = text
     n = text.bytesize
     table = values.to_unsafe
     # The data characters run to the first `=`, and everything after it
@@ -255,7 +261,7 @@ struct Base32Codec
       end
     end
     size = data * 5 // 8
-    answer = Pointer(UInt8).new(IyiRegion.tape_bytes(size.to_u64))
+    answer = Tape::String::Writer.new(size)
     acc = 0
     bits = 0
     o = 0
@@ -265,12 +271,12 @@ struct Base32Codec
       bits = bits + 5
       if bits >= 8
         bits = bits - 8
-        answer[o] = ((acc >> bits) & 255).to_u8
+        answer.push(((acc >> bits) & 255).to_u8)
         o = o + 1
       end
       i = i + 1
     end
-    Tape::String.new(answer, size)
+    answer.finish
   end
 
   private def self.count(n : Int32, noun : String) : String

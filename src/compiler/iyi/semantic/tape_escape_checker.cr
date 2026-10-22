@@ -7,9 +7,9 @@
 # the intake and the response; each copy that leaves is at a boundary
 # named as one. Interpolation and writing into a `String::Builder` or
 # `IO::Memory` copy to the heap as `to_s` does, and are refused alike;
-# writing to a file or a socket is not a copy. The library (`std/`,
-# `src/iyi/`) is outside the rule: it keeps a `String` API beside the tape
-# one, built by copying out.
+# writing to a file or a socket is not a copy. `std/` is under the rule:
+# its `String` API beside the tape one copies out in `@[TapeToHeap]` defs,
+# and a def that must do more is `@[TapeUnsafe]` (`Iyi::TapeRules`).
 class Iyi::TapeEscapeChecker
   @program : Program
   @seen = Set(UInt64).new
@@ -27,22 +27,13 @@ class Iyi::TapeEscapeChecker
   end
 
   def reach(a_def : Def) : Nil
-    return if library?(a_def.location) || !@seen.add?(a_def.object_id)
-    @defs << a_def
+    return if TapeRules.runtime?(@program, a_def.location) || !@seen.add?(a_def.object_id)
+    @defs << a_def unless TapeRules.unsafe?(@program, a_def)
     a_def.body.accept Collector.new(self)
   end
 
   def escape?(a_def : Def) : Bool
     !a_def.annotation(@program.tape_to_heap_annotation).nil?
-  end
-
-  # As TapePointerChecker: a `std/` module wherever IYI_PATH finds it, and
-  # the prelude with the tape itself.
-  def library?(location : Location?) : Bool
-    file = location.try(&.original_filename)
-    return false unless file
-    file = file.gsub('\\', '/')
-    file.includes?("/std/") || file.includes?("/src/iyi/")
   end
 
   # Why the copy is refused, and what to write instead: the same for each
@@ -65,7 +56,7 @@ class Iyi::TapeEscapeChecker
     TEXT
 
   def refuse?(node : Call) : String?
-    return nil if library?(node.location)
+    return nil if TapeRules.runtime?(@program, node.location)
     receiver = node.obj
     if node.name == "to_s" && node.args.empty? && !node.block &&
        tape_string?(receiver.try(&.type?))

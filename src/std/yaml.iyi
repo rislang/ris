@@ -784,8 +784,8 @@ struct TapeBuffer
     @writer << text
   end
 
-  def append(source : Pointer(UInt8), count : Int32) : Nil
-    @writer << Tape::String.new(source, count) if count > 0
+  def append(source : Tape::String, count : Int32) : Nil
+    @writer << source[0, count] if count > 0
   end
 
   def [](index : Int32) : UInt8
@@ -813,7 +813,7 @@ module TapeScalar
   def self.resolve(text : Tape::String) : TapeValue
     size = text.bytesize
     return TapeValue.new(nil) if size == 0
-    bytes = text.to_unsafe
+    bytes = text
     first = bytes[0]
     if first == 126_u8 # ~
       return TapeValue.new(nil) if size == 1
@@ -828,10 +828,14 @@ module TapeScalar
     if first == 48_u8 && size > 2 # 0x.. 0o..
       if bytes[1] == 120_u8
         v = text[2, size - 2].to_i64?(16)
-        return TapeValue.new(v) if !v.nil? && hex_digits?(bytes + 2, size - 2)
+        if !v.nil? && hex_digits?(bytes[2, size - 2], size - 2)
+          return TapeValue.new(v)
+        end
       elsif bytes[1] == 111_u8
         v = text[2, size - 2].to_i64?(8)
-        return TapeValue.new(v) if !v.nil? && octal_digits?(bytes + 2, size - 2)
+        if !v.nil? && octal_digits?(bytes[2, size - 2], size - 2)
+          return TapeValue.new(v)
+        end
       end
     end
 
@@ -847,16 +851,18 @@ module TapeScalar
       return TapeValue.new("NaN".to_f) if at == 0 && (rest == ".nan" || rest == ".NaN" || rest == ".NAN")
     end
 
-    if decimal_digits?(bytes + at, size - at)
+    if decimal_digits?(bytes[at, size - at], size - at)
       v = text.to_i64?(10)
       return TapeValue.new(v) unless v.nil?
       return TapeValue.new(text.to_f)
     end
-    return TapeValue.new(text.to_f) if float_text?(bytes + at, size - at)
+    if float_text?(bytes[at, size - at], size - at)
+      return TapeValue.new(text.to_f)
+    end
     TapeValue.new(text)
   end
 
-  def self.decimal_digits?(bytes : Pointer(UInt8), count : Int32) : Bool
+  def self.decimal_digits?(bytes : Tape::String, count : Int32) : Bool
     return false if count == 0
     i = 0
     while i < count
@@ -866,7 +872,7 @@ module TapeScalar
     true
   end
 
-  def self.octal_digits?(bytes : Pointer(UInt8), count : Int32) : Bool
+  def self.octal_digits?(bytes : Tape::String, count : Int32) : Bool
     return false if count == 0
     i = 0
     while i < count
@@ -876,7 +882,7 @@ module TapeScalar
     true
   end
 
-  def self.hex_digits?(bytes : Pointer(UInt8), count : Int32) : Bool
+  def self.hex_digits?(bytes : Tape::String, count : Int32) : Bool
     return false if count == 0
     i = 0
     while i < count
@@ -890,7 +896,7 @@ module TapeScalar
 
   # `.5`, `7.`, `1.5`, `1e3`, `1.5E-3`: digits with at most one point,
   # at least one digit, an optional exponent with at least one digit.
-  def self.float_text?(bytes : Pointer(UInt8), count : Int32) : Bool
+  def self.float_text?(bytes : Tape::String, count : Int32) : Bool
     i = 0
     digits = 0
     while i < count && bytes[i] >= 48_u8 && bytes[i] <= 57_u8
@@ -931,7 +937,7 @@ struct TapeParser
   # expanded; the sentence below spells the same number.
   ALIAS_NODE_LIMIT = 1_000_000_i64
 
-  @bytes : Pointer(UInt8)
+  @bytes : Tape::String
   @size : Int32
   # Per line: where it starts, where its text ends (before the line
   # break), where its content starts (after the indentation; moved past a
@@ -967,7 +973,7 @@ struct TapeParser
   @buffer : TapeBuffer
 
   def initialize(text : Tape::String)
-    @bytes = text.to_unsafe
+    @bytes = text
     @size = text.bytesize
     @starts = Tape::Array(Int32).new
     @ends = Tape::Array(Int32).new
@@ -1371,7 +1377,7 @@ struct TapeParser
         return TapeValue.new(nil) if @error
         anchor_pos = pos
         finish = name_end(pos + 1, @ends[@line])
-        anchor = Tape::String.new(@bytes + pos + 1, finish - pos - 1)
+        anchor = @bytes[pos + 1, finish - pos - 1]
         fail("an anchor with no name", pos) if !anchor.nil? && anchor.empty?
         return TapeValue.new(nil) if @error
         pos = skip_blank(finish)
@@ -1382,7 +1388,9 @@ struct TapeParser
         return TapeValue.new(nil) if @error
         finish = tag_end(pos, @ends[@line])
         tag = tag_text(pos, finish)
-        fail("unknown tag #{tag}", pos) unless tag.nil? || known_tag?(tag)
+        unless tag.nil? || known_tag?(tag)
+          fail("unknown tag #{tag.to_heap}", pos)
+        end
         return TapeValue.new(nil) if @error
         pos = skip_blank(finish)
       else
@@ -1451,7 +1459,7 @@ struct TapeParser
     b = @bytes[pos]
     if b == 42_u8 # *
       finish = name_end(pos + 1, @ends[@line])
-      name = Tape::String.new(@bytes + pos + 1, finish - pos - 1)
+      name = @bytes[pos + 1, finish - pos - 1]
       value = resolve_alias(name, pos)
       expect_line_end(finish)
       return value
@@ -1588,7 +1596,7 @@ struct TapeParser
         break if @error
         finish = tag_end(text_pos, @ends[@line])
         tag = tag_text(text_pos, finish)
-        fail("unknown tag #{tag}", text_pos) unless known_tag?(tag)
+        fail("unknown tag #{tag.to_heap}", text_pos) unless known_tag?(tag)
         text_pos = skip_blank(finish)
       end
       break if @error
@@ -1607,7 +1615,7 @@ struct TapeParser
         while finish > text_pos && blank_byte?(@bytes[finish - 1])
           finish = finish - 1
         end
-        text = Tape::String.new(@bytes + text_pos, finish - text_pos)
+        text = @bytes[text_pos, finish - text_pos]
         merge = tag.nil? && text == "<<"
         key = tag.nil? ? TapeScalar.resolve(text) : TapeValue.new(text)
       end
@@ -1706,7 +1714,7 @@ struct TapeParser
   # `!<tag:yaml.org,2002:str>`, is read as its `!!str` shorthand. TapeValue
   # other tag keeps its spelling, so the refusal echoes it whole.
   private def tag_text(pos : Int32, finish : Int32) : Tape::String
-    text = Tape::String.new(@bytes + pos, finish - pos)
+    text = @bytes[pos, finish - pos]
     prefix = "!<tag:yaml.org,2002:"
     if text.starts_with?(prefix) && (text.bytesize > 0 && text[text.bytesize - 1] == 62_u8) && text.bytesize > prefix.bytesize + 1
       short = Tape::String.build do |w|
@@ -1736,7 +1744,7 @@ struct TapeParser
       return value
     end
     unless k == TapeValue::KIND_STRING
-      fail("#{tag} on #{value.kind_name}", pos)
+      fail("#{tag.to_heap} on #{value.kind_name}", pos)
       return value
     end
     text = value.as_s
@@ -1769,7 +1777,7 @@ struct TapeParser
   private def parse_plain_block(pos : Int32, parent : Int32) : Tape::String
     @buffer.clear
     stop = plain_piece_end(pos, false)
-    @buffer.append(@bytes + pos, stop - pos)
+    @buffer << @bytes[pos, stop - pos]
     @flow_end = stop
     return @buffer.finish if stop < @ends[@line] && @bytes[stop] == 58_u8
     blanks = 0
@@ -1811,7 +1819,7 @@ struct TapeParser
           blanks = blanks - 1
         end
       end
-      @buffer.append(@bytes + start, stop - start)
+      @buffer << @bytes[start, stop - start]
       @flow_end = stop
       look = look + 1
     end
@@ -2010,8 +2018,8 @@ struct TapeParser
       return at + 2
     end
     if point >= 0xD800 && point <= 0xDFFF
-      written = Tape::String.new(@bytes + at, 2 + digits)
-      fail("surrogate code point #{written} in escape", at)
+      written = @bytes[at, 2 + digits]
+      fail("surrogate code point #{written.to_heap} in escape", at)
       return at + 2
     end
     @buffer.codepoint(point)
@@ -2095,7 +2103,7 @@ struct TapeParser
       end
       break if spaces < indent
       from = start + indent
-      lines << Tape::String.new(@bytes + from, finish - from)
+      lines << @bytes[from, finish - from]
       last_content = look
       look = look + 1
     end
@@ -2127,7 +2135,7 @@ struct TapeParser
           blanks = blanks + 1
           next
         end
-        more = blank_byte?(text.to_unsafe[0])
+        more = blank_byte?(text[0])
         if first
           # Empty lines before the first text are line feeds; they were
           # dropped.
@@ -2377,7 +2385,7 @@ struct TapeParser
         return TapeValue.new(nil) if @error
         anchor_pos = pos
         finish = name_end(pos + 1, @ends[@line])
-        anchor = Tape::String.new(@bytes + pos + 1, finish - pos - 1)
+        anchor = @bytes[pos + 1, finish - pos - 1]
         fail("an anchor with no name", pos) if !anchor.nil? && anchor.empty?
         return TapeValue.new(nil) if @error
         pos = skip_flow_space(finish)
@@ -2386,7 +2394,9 @@ struct TapeParser
         return TapeValue.new(nil) if @error
         finish = tag_end(pos, @ends[@line])
         tag = tag_text(pos, finish)
-        fail("unknown tag #{tag}", pos) unless tag.nil? || known_tag?(tag)
+        unless tag.nil? || known_tag?(tag)
+          fail("unknown tag #{tag.to_heap}", pos)
+        end
         return TapeValue.new(nil) if @error
         pos = skip_flow_space(finish)
       else
@@ -2409,7 +2419,7 @@ struct TapeParser
       value = TapeValue.new(parse_quoted(pos, -1, true))
     elsif b == 42_u8
       finish = name_end(pos + 1, @ends[@line])
-      name = Tape::String.new(@bytes + pos + 1, finish - pos - 1)
+      name = @bytes[pos + 1, finish - pos - 1]
       value = resolve_alias(name, pos)
       @flow_end = finish
     elsif (b == 44_u8 || b == 93_u8 || b == 125_u8) && !(anchor.nil? && tag.nil?)
@@ -2452,7 +2462,7 @@ struct TapeParser
   private def parse_plain_flow(pos : Int32) : Tape::String
     @buffer.clear
     stop = plain_piece_end(pos, true)
-    @buffer.append(@bytes + pos, stop - pos)
+    @buffer << @bytes[pos, stop - pos]
     @flow_end = stop
     while skip_blank(stop) >= @ends[@line]
       blanks = 0
@@ -2476,7 +2486,7 @@ struct TapeParser
           blanks = blanks - 1
         end
       end
-      @buffer.append(@bytes + start, stop - start)
+      @buffer << @bytes[start, stop - start]
       @flow_end = stop
     end
     @buffer.finish
@@ -2518,12 +2528,12 @@ struct TapeParser
       return TapeValue.new(nil)
     end
     if @open_anchors.includes?(name)
-      fail("cyclic alias *#{name}", pos)
+      fail("cyclic alias *#{name.to_heap}", pos)
       return TapeValue.new(nil)
     end
     found = @anchors[name]?
     if found.nil?
-      fail("unknown anchor *#{name}", pos)
+      fail("unknown anchor *#{name.to_heap}", pos)
       return TapeValue.new(nil)
     end
     deepest = @depth + @anchor_depths[name]
@@ -2661,7 +2671,7 @@ struct TapeEmitter
   private def plain_safe?(text : Tape::String) : Bool
     size = text.bytesize
     return false if size == 0
-    bytes = text.to_unsafe
+    bytes = text
     first = bytes[0]
     return false if blank_byte?(first) || blank_byte?(bytes[size - 1])
     # `?` is quoted whatever follows it: the reader refuses a plain scalar
@@ -2703,7 +2713,8 @@ struct TapeEmitter
   # where telling it from `1_000` would be a second number reader. `y` and
   # `n` are booleans in the 1.1 type repository though PyYAML reads them
   # as strings, so they are quoted too.
-  private def other_in_1_1?(text : Tape::String, bytes : Pointer(UInt8), size : Int32) : Bool
+  private def other_in_1_1?(text : Tape::String, bytes : Tape::String,
+    size : Int32) : Bool
     case text
     when "y", "Y", "n", "N", "yes", "Yes", "YES", "no", "No", "NO", "on", "On", "ON", "off", "Off", "OFF", "="
       return true
@@ -2725,7 +2736,7 @@ struct TapeEmitter
   private def quoted(text : Tape::String) : Tape::String
     buffer = TapeBuffer.new
     buffer << 34_u8
-    bytes = text.to_unsafe
+    bytes = text
     i = 0
     while i < text.bytesize
       b = bytes[i]
@@ -2771,7 +2782,8 @@ struct TapeEmitter
   # U+FEFF (a byte order mark, dropped at the start of a stream: the
   # string "\uFEFF" read back as null), and U+0085, U+2028 and U+2029
   # (line breaks to a YAML 1.1 reader). Its code point, or -1.
-  private def escaped_point(bytes : Pointer(UInt8), i : Int32, size : Int32) : Int32
+  private def escaped_point(bytes : Tape::String, i : Int32,
+    size : Int32) : Int32
     b = bytes[i]
     if b == 0xC2_u8 && i + 1 < size && bytes[i + 1] >= 0x80_u8 && bytes[i + 1] <= 0x9F_u8
       return bytes[i + 1].to_i32

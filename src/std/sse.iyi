@@ -315,7 +315,7 @@ pub struct TapeEventParser
   end
 
   def feed(text : Tape::String, & : TapeEvent -> Nil) : Nil
-    p = text.to_unsafe
+    p = text
     n = text.bytesize
     i = 0
     # A CR that ended the last piece was a line's end already; an LF that
@@ -375,7 +375,7 @@ pub struct TapeEventParser
       end
     end
     return dispatch if line.bytesize == 0
-    return nil if line.to_unsafe[0] == 58_u8
+    return nil if line[0] == 58_u8
     field = line
     value = "".as_tape
     if colon = line.index(':')
@@ -421,7 +421,7 @@ pub struct TapeEventParser
   # at `MAX_RETRY`; nil for anything else, the empty value included.
   def self.digits(text : Tape::String) : Int32?
     return nil if text.bytesize == 0
-    p = text.to_unsafe
+    p = text
     value = 0_i64
     i = 0
     while i < text.bytesize

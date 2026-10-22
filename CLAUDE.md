@@ -40,8 +40,8 @@ scope releases it all together:
   socket call takes the pointer.
 * Keep the `String` API beside it, built on the tape one: it opens a
   `tape` (shared when the caller has one) and copies the result out
-  with `to_heap`. Library code in
-  `std/` and `src/iyi/` is exempt from heap-copy and raw-pointer checks.
+  with `to_heap`. `std/` is checked too; a def handing a pointer to the
+  OS is a small `@[TapeUnsafe]` with a reason. `src/iyi/` is exempt.
 
 Example: `HTTP.parse_head(bytes : Tape::String) : ParsedHead | ParseError`,
 with `ParsedHead`'s method, target and fields as views into *bytes*;

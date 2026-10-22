@@ -913,8 +913,11 @@ module ::IyiFormat
     value = 0_i64
     index = start
     while index < stop
-      value = value * 10_i64 + (format_string.to_unsafe[index] - 48_u8).to_i64
-      raise "#{what} must be at most 2147483647, not #{format_string[start, stop - start]}" if value > 2147483647_i64
+      value = value * 10_i64 + (format_string[index] - 48_u8).to_i64
+      if value > 2147483647_i64
+        raise "#{what} must be at most 2147483647, not " \
+          "#{format_string[start, stop - start].to_heap}"
+      end
       index = index + 1
     end
     value.to_i32
@@ -982,7 +985,7 @@ private def format_list(format_string : Tape::String, args,
                         result : Tape::String::Writer) : Nil
   index = 0
   format_bytesize = format_string.bytesize
-  format_ptr = format_string.to_unsafe
+  format_ptr = format_string
   arg_index = 0
   # Written into one buffer: `result = result + piece` copied the whole
   # result once per piece, and a `%%` is a piece.

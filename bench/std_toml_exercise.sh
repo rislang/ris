@@ -347,7 +347,8 @@ prove_caught "a leading zero is read" 'accepted "a = 01\n"' \
 prove_caught "underscores need not stand between digits" 'accepted "a = 1__0\n"' \
   $'        return -1 unless i + 1 < stop && radix_digit(@bytes[i + 1], radix) >= 0\n        i = i + 2' '        i = i + 1'
 prove_caught "a hexadecimal integer may have a sign" 'accepted "a = +0x1\n"' \
-  $'      if signed\n        return fail("a sign before #{token}' $'      if false\n        return fail("a sign before #{token}'
+  $'      if signed\n        return fail("a sign before ' \
+  $'      if false\n        return fail("a sign before '
 prove_caught "the smallest integer is counted as a positive one" 'corpus document 39: refused with -9223372036854775808 is outside' \
   'limit = negative ? 9223372036854775808_u64 : 9223372036854775807_u64' 'limit = 9223372036854775807_u64'
 prove_caught "the radix limit is one short" 'corpus document 39: refused with 0x7FFFFFFFFFFFFFFF is past' \
@@ -385,11 +386,13 @@ prove_caught "a leap second is read" 'accepted "a = 1979-05-27T23:59:60Z\n"' \
 prove_caught "a key may be given twice" 'accepted "name = \"Tom\"\nname = \"Pradyun\"\n"' \
   $'    unless t.slots[last]?.nil?\n      return fail(' $'    if false\n      return fail('
 prove_caught "a table may be declared twice" 'accepted "[fruit]\napple = \"red\"\n\n[fruit]\n' \
-  $'        if child.explicit\n          return fail("the table [#{whole}] is declared twice"' $'        if false\n          return fail("the table [#{whole}] is declared twice"'
+  $'        if child.explicit\n          return fail("the table [' \
+  $'        if false\n          return fail("the table ['
 prove_caught "a super-table declared after its sub-table is not marked declared" 'accepted "[x.y]\n[x]\n[x]\n"' \
   $'        child.explicit = true\n' ''
 prove_caught "a header may declare a table dotted keys made" 'accepted "[fruit]\napple.color = \"red\"\napple.taste.sweet = true\n\n[fruit.apple]\n"' \
-  $'        if child.dotted\n          return fail("[#{whole}] declares' $'        if false\n          return fail("[#{whole}] declares'
+  $'        if child.dotted\n          return fail("[' \
+  $'        if false\n          return fail("['
 prove_caught "dotted keys going through a table do not mark it" 'accepted "[a.b.c]\n[a]\nb.d = 1\n[a.b]\n"' \
   $'        child.dotted = true\n' ''
 prove_caught "dotted keys may add to a table a header declared" 'accepted "[a.b.c]\nz = 9\n[a]\nb.c.t = 9\n"' \

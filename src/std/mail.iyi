@@ -197,7 +197,7 @@ struct MailText
   def self.decode(data : Tape::String, name : Tape::String) : Tape::String | MailError
     kind = MailText.charset(name)
     return MailError.new("the charset #{name.to_heap.inspect} is not one std/mail reads (UTF-8, US-ASCII, ISO-8859-1, ISO-8859-15, windows-1252)") unless kind
-    p = data.to_unsafe
+    p = data
     n = data.bytesize
     if kind == "utf-8"
       return data if MailText.utf8?(data)
@@ -233,7 +233,7 @@ struct MailText
 
   def self.lf(text : Tape::String) : Tape::String
     return text unless MailText.contains?(text, "\r\n")
-    p = text.to_unsafe
+    p = text
     n = text.bytesize
     io = Tape::String::Writer.new(n)
     i = 0
@@ -246,7 +246,7 @@ struct MailText
 
   def self.decode_words(text : Tape::String) : Tape::String
     return text unless MailText.contains?(text, "=?")
-    p = text.to_unsafe
+    p = text
     n = text.bytesize
     io = Tape::String::Writer.new(n)
     i = 0
@@ -294,7 +294,7 @@ struct MailText
   end
 
   def self.word_at(text : Tape::String, at : Int32, stop : Int32) : {Tape::String, Int32}?
-    p = text.to_unsafe
+    p = text
     return nil unless at + 1 < stop && p[at] == 61_u8 && p[at + 1] == 63_u8
     c0 = at + 2
     c1 = c0
@@ -325,7 +325,7 @@ struct MailText
   end
 
   def self.q_decode(text : Tape::String, start : Int32, stop : Int32) : Tape::String?
-    p = text.to_unsafe
+    p = text
     io = Tape::String::Writer.new(stop - start)
     i = start
     while i < stop
@@ -351,7 +351,7 @@ struct MailText
   # The alphabet, then at most two `=` at the end: missing padding is
   # taken, as readers take it.
   def self.b_decode(text : Tape::String, start : Int32, stop : Int32) : Tape::String?
-    p = text.to_unsafe
+    p = text
     e = stop
     pads = 0
     while e > start && p[e - 1] == 61_u8 && pads < 2
@@ -515,7 +515,7 @@ struct MailText
 
   def self.percent_decode(text : Tape::String) : Tape::String
     return text unless MailText.contains?(text, "%")
-    p = text.to_unsafe
+    p = text
     n = text.bytesize
     io = Tape::String::Writer.new(n)
     i = 0
@@ -584,7 +584,7 @@ struct MailText
   # Whether *text* is well-formed UTF-8: no overlong form, no surrogate,
   # nothing past U+10FFFF.
   def self.utf8?(text : String | Tape::String) : Bool
-    p = text.to_unsafe
+    p = text.is_a?(String) ? text.to_unsafe : text
     n = text.bytesize
     i = 0
     while i < n
@@ -808,7 +808,7 @@ struct MailText
                          io : Tape::String::Writer) : Nil
     flat = Base64.encode(data)
     n = flat.bytesize
-    p = flat.to_unsafe
+    p = flat
     i = 0
     while i < n
       take = n - i < 76 ? n - i : 76
@@ -824,7 +824,7 @@ struct MailText
   # are dropped.
   def self.base64_decode(text : Tape::String,
                          io : Tape::String::Writer) : Nil
-    p = text.to_unsafe
+    p = text
     n = text.bytesize
     acc = 0
     bits = 0
@@ -856,7 +856,7 @@ struct MailText
   # break where there is no room for its escape.
   def self.qp_encode(data : Tape::String, binary : Bool,
                      io : Tape::String::Writer) : Nil
-    p = data.to_unsafe
+    p = data
     n = data.bytesize
     line = Tape::String::Writer.new(128)
     i = 0
@@ -884,7 +884,7 @@ struct MailText
 
   # One encoded line, cut into lines of 76 or fewer.
   def self.qp_wrap(io : Tape::String::Writer, e : Tape::String) : Nil
-    p = e.to_unsafe
+    p = e
     size = e.bytesize
     start = 0
     last_start = size - 1 - 76
@@ -926,7 +926,7 @@ struct MailText
   # and any other `=` is itself.
   def self.qp_decode(text : Tape::String,
                      io : Tape::String::Writer) : Nil
-    p = text.to_unsafe
+    p = text
     n = text.bytesize
     i = 0
     while i < n
@@ -1526,7 +1526,7 @@ struct MailText
 
   def self.field_name?(name : String | Tape::String) : Bool
     return false if name.empty?
-    p = name.to_unsafe
+    p = name.is_a?(String) ? name.to_unsafe : name
     i = 0
     while i < name.bytesize
       return false if p[i] < 33_u8 || p[i] > 126_u8 || p[i] == 58_u8
@@ -1592,11 +1592,9 @@ end
 struct TapeMailScan
   getter at : Int32
   @text : Tape::String
-  @p : Pointer(UInt8)
   @n : Int32
 
   def initialize(@text : Tape::String, @at : Int32 = 0)
-    @p = @text.to_unsafe
     @n = @text.bytesize
   end
 
@@ -1605,7 +1603,7 @@ struct TapeMailScan
   end
 
   def peek : UInt8
-    @at < @n ? @p[@at] : 0_u8
+    @at < @n ? @text[@at] : 0_u8
   end
 
   def advance : Nil
@@ -1616,14 +1614,14 @@ struct TapeMailScan
   # for a comment never closed.
   def skip_cfws : MailError?
     while @at < @n
-      b = @p[@at]
+      b = @text[@at]
       if b == 32_u8 || b == 9_u8 || b == 13_u8 || b == 10_u8
         @at = @at + 1
       elsif b == 40_u8
         depth = 0
         while true
           return MailError.new("a comment is not closed in #{@text.to_heap.inspect}") if @at >= @n
-          c = @p[@at]
+          c = @text[@at]
           if c == 92_u8
             @at = @at + 1
           elsif c == 40_u8
@@ -1643,7 +1641,7 @@ struct TapeMailScan
 
   def token : Tape::String
     start = @at
-    while @at < @n && MailText.token?(@p[@at])
+    while @at < @n && MailText.token?(@text[@at])
       @at = @at + 1
     end
     MailText.cut(@text, start, @at)
@@ -1651,7 +1649,7 @@ struct TapeMailScan
 
   def atom : Tape::String
     start = @at
-    while @at < @n && MailText.atext?(@p[@at])
+    while @at < @n && MailText.atext?(@text[@at])
       @at = @at + 1
     end
     MailText.cut(@text, start, @at)
@@ -1659,7 +1657,7 @@ struct TapeMailScan
 
   def digits : Tape::String
     start = @at
-    while @at < @n && @p[@at] >= 48_u8 && @p[@at] <= 57_u8
+    while @at < @n && @text[@at] >= 48_u8 && @text[@at] <= 57_u8
       @at = @at + 1
     end
     MailText.cut(@text, start, @at)
@@ -1667,7 +1665,9 @@ struct TapeMailScan
 
   def letters : Tape::String
     start = @at
-    while @at < @n && ((@p[@at] >= 65_u8 && @p[@at] <= 90_u8) || (@p[@at] >= 97_u8 && @p[@at] <= 122_u8))
+    while @at < @n &&
+          ((@text[@at] >= 65_u8 && @text[@at] <= 90_u8) ||
+           (@text[@at] >= 97_u8 && @text[@at] <= 122_u8))
       @at = @at + 1
     end
     MailText.cut(@text, start, @at)
@@ -1675,7 +1675,8 @@ struct TapeMailScan
 
   def bare_value : Tape::String
     start = @at
-    while @at < @n && @p[@at] != 59_u8 && @p[@at] > 32_u8 && @p[@at] != 40_u8
+    while @at < @n && @text[@at] != 59_u8 && @text[@at] > 32_u8 &&
+          @text[@at] != 40_u8
       @at = @at + 1
     end
     MailText.cut(@text, start, @at)
@@ -1686,14 +1687,14 @@ struct TapeMailScan
     @at = @at + 1
     io = Tape::String::Writer.new(32)
     while @at < @n
-      b = @p[@at]
+      b = @text[@at]
       if b == 34_u8
         @at = @at + 1
         return io.finish
       elsif b == 92_u8
         @at = @at + 1
         break if @at >= @n
-        io.push(@p[@at])
+        io.push(@text[@at])
       elsif b != 13_u8 && b != 10_u8
         io.push(b)
       end
@@ -1707,7 +1708,7 @@ struct TapeMailScan
     start = @at
     @at = @at + 1
     while @at < @n
-      b = @p[@at]
+      b = @text[@at]
       if b == 93_u8
         @at = @at + 1
         return MailText.cut(@text, start, @at)
@@ -2819,7 +2820,7 @@ pub struct Mail
 
     protected def self.read(source : Tape::String, start : Int32, stop : Int32, depth : Int32, default_type : Tape::String) : TapePart | MailError
       return MailError.new("parts are nested deeper than #{MAX_DEPTH}") if depth > MAX_DEPTH
-      p = source.to_unsafe
+      p = source
       headers = Tape::Array({Tape::String, Tape::String}).new
       name = nil.as(Tape::String?)
       value = Tape::String::Writer.new(64)
@@ -2884,7 +2885,9 @@ pub struct Mail
       parts = Tape::Array(TapePart).new
       if media.starts_with?("multipart/")
         boundary = params["boundary".as_tape]?
-        return MailError.new("a #{media} part names no boundary") unless boundary && !boundary.empty?
+        unless boundary && !boundary.empty?
+          return MailError.new("a #{media.to_heap} part names no boundary")
+        end
         ranges = TapePart.split(source, body_at, stop, boundary, media)
         return ranges if ranges.is_a?(MailError)
         child_type = (media == "multipart/digest" ? "message/rfc822" : "text/plain").as_tape
@@ -2905,7 +2908,7 @@ pub struct Mail
     end
 
     protected def self.trim(value : Tape::String) : Tape::String
-      p = value.to_unsafe
+      p = value
       a = 0
       b = value.bytesize
       while a < b && MailText.wsp?(p[a])
@@ -2928,9 +2931,8 @@ pub struct Mail
     # break before each line its own; to the `--boundary--` line. The
     # preamble and the epilogue are passed over.
     protected def self.split(source : Tape::String, start : Int32, stop : Int32, boundary : Tape::String, media : Tape::String) : Tape::Array({Int32, Int32}) | MailError
-      p = source.to_unsafe
+      p = source
       mark = Tape::String.build { |w| w << "--" << boundary }
-      m = mark.to_unsafe
       size = mark.bytesize
       ranges = Tape::Array({Int32, Int32}).new
       open_at = -1
@@ -2942,7 +2944,8 @@ pub struct Mail
         end
         e = j
         e = e - 1 if e > i && p[e - 1] == 13_u8
-        if e - i >= size && p[i] == 45_u8 && p[i + 1] == 45_u8 && (i + size <= stop) && TapePart.prefix?(p + i, m, size)
+        if e - i >= size && p[i] == 45_u8 && p[i + 1] == 45_u8 &&
+           i + size <= stop && source[i, size] == mark
           k = i + size
           closing = k + 2 <= e && p[k] == 45_u8 && p[k + 1] == 45_u8
           rest = closing ? k + 2 : k
@@ -2961,14 +2964,21 @@ pub struct Mail
               ranges << {open_at, stop_at}
             end
             return ranges if closing && open_at >= 0
-            return MailError.new("a #{media} body closes before its first part") if closing
+            if closing
+              return MailError.new(
+                "a #{media.to_heap} body closes before its first part")
+            end
             open_at = j < stop ? j + 1 : stop
           end
         end
         i = j + 1
       end
-      return MailError.new("a #{media} body holds no line --#{boundary}") if open_at < 0
-      MailError.new("a #{media} body ends before its closing line --#{boundary}--")
+      if open_at < 0
+        return MailError.new(
+          "a #{media.to_heap} body holds no line --#{boundary.to_heap}")
+      end
+      MailError.new("a #{media.to_heap} body ends before its closing " \
+                   "line --#{boundary.to_heap}--")
     end
 
     protected def self.prefix?(a : Pointer(UInt8), b : Pointer(UInt8), size : Int32) : Bool

@@ -858,7 +858,7 @@ pub class WebSocket
       wrote = if socket.is_a?(TlsStream)
                 socket.write(frame.to_heap)
               else
-                socket.write(frame.to_unsafe, frame.bytesize)
+                socket.write(frame, "".as_tape)
               end
     end
     @writing = false

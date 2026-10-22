@@ -523,8 +523,8 @@ pub struct Path
     len1 = s1.bytesize
     len2 = s2.bytesize
     min_len = len1 < len2 ? len1 : len2
-    p1 = s1.to_unsafe
-    p2 = s2.to_unsafe
+    p1 = (s1.is_a?(String) ? s1.as_tape : s1)
+    p2 = (s2.is_a?(String) ? s2.as_tape : s2)
     i = 0
     while i < min_len
       b1 = p1[i]
@@ -542,8 +542,8 @@ pub struct Path
     len1 = s1.bytesize
     len2 = s2.bytesize
     min_len = len1 < len2 ? len1 : len2
-    p1 = s1.to_unsafe
-    p2 = s2.to_unsafe
+    p1 = (s1.is_a?(String) ? s1.as_tape : s1)
+    p2 = (s2.is_a?(String) ? s2.as_tape : s2)
     i = 0
     while i < min_len
       b1 = p1[i]
@@ -638,6 +638,8 @@ pub struct Path
       String.new(size - 1) { |t| __iyi_utf8_bytes_from_wide(upper, t, size) }
     end
 
+    # Windows folding passes UTF-8 bytes to the native conversion API.
+    @[TapeUnsafe]
     private def self.native_fold(s : Tape::String) : Tape::String?
       wide = __iyi_win_env_wide(s.to_unsafe, s.bytesize)
       return nil if wide.address == 0_u64
@@ -730,7 +732,7 @@ pub struct TapePath
   private def anchor_indices : Tuple(Int32, Int32)
     len = @name.bytesize
     return {0, 0} if len == 0
-    ptr = @name.to_unsafe
+    ptr = @name
     b0 = ptr[0]
 
     unless windows?
@@ -771,7 +773,7 @@ pub struct TapePath
   # `\\?\UNC\` at the start, `UNC` in any case and either separator, as
   # Python's `splitroot` matches it.
   private def long_unc? : Bool
-    ptr = @name.to_unsafe
+    ptr = @name
     return false unless @name.bytesize > 8 && ptr[2] == 63_u8 &&
                         sep?(ptr[3]) && sep?(ptr[7])
     (ptr[4] | 32_u8) == 117_u8 && (ptr[5] | 32_u8) == 110_u8 &&
@@ -809,7 +811,7 @@ pub struct TapePath
   # A `\\server\share` drive, where `C:` is the other kind.
   private def share? : Bool
     drive_end, _ = anchor_indices
-    drive_end > 0 && sep?(@name.to_unsafe[0])
+    drive_end > 0 && sep?(@name[0])
   end
 
   # The anchor with the root a share has whether written or not.
@@ -824,7 +826,7 @@ pub struct TapePath
 
   def ends_with_separator? : Bool
     len = @name.bytesize
-    len > 0 && sep?(@name.to_unsafe[len - 1])
+    len > 0 && sep?(@name[len - 1])
   end
 
   # The last byte that is not a trailing separator, plus one; the anchor
@@ -832,7 +834,7 @@ pub struct TapePath
   private def trimmed_end : Int32
     _, anchor_end = anchor_indices
     last = @name.bytesize
-    while last > anchor_end && sep?(@name.to_unsafe[last - 1])
+    while last > anchor_end && sep?(@name[last - 1])
       last = last - 1
     end
     last
@@ -845,7 +847,7 @@ pub struct TapePath
     last = trimmed_end
     return @name[0, anchor_end] if last <= anchor_end
 
-    ptr = @name.to_unsafe
+    ptr = @name
     first = last
     while first > anchor_end && !sep?(ptr[first - 1])
       first = first - 1
@@ -854,7 +856,7 @@ pub struct TapePath
     base_len = last - first
     if suffix && !suffix.empty? && base_len > suffix.bytesize
       s_len = suffix.bytesize
-      s_ptr = suffix.to_unsafe
+      s_ptr = suffix
       k = 0
       while k < s_len && ptr[first + base_len - s_len + k] == s_ptr[k]
         k = k + 1
@@ -873,7 +875,7 @@ pub struct TapePath
     last = trimmed_end
     return @name[0, anchor_end] if last <= anchor_end
 
-    ptr = @name.to_unsafe
+    ptr = @name
     while last > anchor_end && !sep?(ptr[last - 1])
       last = last - 1
     end
@@ -891,7 +893,7 @@ pub struct TapePath
     return "".as_tape if trimmed_end <= anchor_end
     base = basename
     len = base.bytesize
-    ptr = base.to_unsafe
+    ptr = base
     i = len - 1
     while i > 0 && ptr[i] != 46_u8
       i = i - 1
@@ -909,7 +911,7 @@ pub struct TapePath
     res = Tape::Array(Tape::String).new
     len = @name.bytesize
     return res if len == 0
-    ptr = @name.to_unsafe
+    ptr = @name
     _, anchor_end = anchor_indices
     res << @name[0, anchor_end] if anchor_end > 0
 

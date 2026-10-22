@@ -693,9 +693,19 @@ pub class IyiSocket
   end
 
   # The same for two pieces on the tape, which are not copied.
+  # Pass both tape buffers directly to the OS write call.
+  @[TapeUnsafe]
   def write(first : Tape::String, second : Tape::String) : Int32 | Cancelled | SocketError
     raise "socket is closed" if @fd < 0
     write_pair(first.to_unsafe, first.bytesize, second.to_unsafe, second.bytesize)
+  end
+
+  # Give sendv an OS buffer address and length for this tape slice.
+  @[TapeUnsafe]
+  private def tape_iovec(words : Pointer(UInt64), index : Int32,
+                        piece : Tape::String, from : Int32) : Nil
+    words[index * 2] = (piece.to_unsafe + from).address
+    words[index * 2 + 1] = (piece.bytesize - from).to_u64
   end
 
   # *pieces* in order, as one write where the platform takes several
@@ -721,8 +731,7 @@ pub class IyiSocket
       while at < pieces.size && count < SENDV_PIECES
         piece = pieces[at]
         if piece.bytesize > from
-          words[count * 2] = (piece.to_unsafe + from).address
-          words[count * 2 + 1] = (piece.bytesize - from).to_u64
+          tape_iovec(words, count, piece, from)
           count = count + 1
         end
         at = at + 1

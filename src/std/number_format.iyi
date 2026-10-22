@@ -364,7 +364,7 @@ module NumberText
   end
 
   private def self.power_of_ten?(digits : Tape::String) : ::Bool
-    digits.to_unsafe[0] == 49_u8 && all_zero?(digits[1, digits.bytesize - 1])
+    digits[0] == 49_u8 && all_zero?(digits[1, digits.bytesize - 1])
   end
 
   # The power of a thousand at or below 10^*lead*, within q and Q.
@@ -431,7 +431,7 @@ module NumberText
 
   private def self.trim_zeros(fraction : Tape::String) : Tape::String
     stop = fraction.bytesize
-    while stop > 0 && fraction.to_unsafe[stop - 1] == 48_u8
+    while stop > 0 && fraction[stop - 1] == 48_u8
       stop = stop - 1
     end
     fraction[0, stop]
@@ -439,7 +439,7 @@ module NumberText
 
   private def self.trim_leading_zeros(whole : Tape::String) : Tape::String
     start = 0
-    while start < whole.bytesize - 1 && whole.to_unsafe[start] == 48_u8
+    while start < whole.bytesize - 1 && whole[start] == 48_u8
       start = start + 1
     end
     whole[start, whole.bytesize - start]
@@ -448,7 +448,7 @@ module NumberText
   private def self.all_zero?(digits : Tape::String) : ::Bool
     index = 0
     while index < digits.bytesize
-      return false if digits.to_unsafe[index] != 48_u8
+      return false if digits[index] != 48_u8
       index = index + 1
     end
     true
@@ -598,9 +598,16 @@ module NumberText
       break
     end
 
-    buffer = Pointer(UInt8).new(IyiRegion.tape_bytes(32_u64))
+    storage = uninitialized StaticArray(UInt8, 32)
+    buffer = pointerof(storage).as(Pointer(UInt8))
     size = IyiFloatText.format_into(buffer, negative, digits, count, k)
-    Tape::String.new(buffer, size)
+    Tape::String.build(size) do |writer|
+      i = 0
+      while i < size
+        writer.push(buffer[i])
+        i += 1
+      end
+    end
   end
 
   private def self.fixed(value : Float64, places : Int32) : Tape::String

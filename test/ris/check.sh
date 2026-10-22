@@ -47,8 +47,8 @@ expect local_self 'cannot use outer tape value `self`'
 expect local_return "cannot return a tape value"
 expect local_break "cannot break a tape value"
 expect local_yield_break "cannot break a tape value"
-expect raw_pointer      "to_unsafe\` of a Tape::String outside the library"
-expect raw_view         "Tape::String.new(pointer, size)\` outside the library"
+expect raw_pointer      "to_unsafe\` of a Tape::String outside a @[TapeUnsafe] def"
+expect raw_view         "Tape::String.new(pointer, size)\` outside a @[TapeUnsafe] def"
 expect writer_grow      "private method 'grow' called for Tape::String::Writer"
 expect tree_entry       "private constant Tape::Tree::Entry(T) referenced"
 expect array_grow       "private method 'grow' called for Tape::Array(T)"
@@ -272,6 +272,13 @@ if [ "$out" = PASS ]; then
   echo "runs     line_tape"
 else
   echo "FAILED   line_tape: $out"
+  status=1
+fi
+out=$("$RIS" run test/ris/refill_default_init.ri 2>&1)
+if [ "$out" = PASS ]; then
+  echo "runs     refill_default_init"
+else
+  echo "FAILED   refill_default_init: $out"
   status=1
 fi
 out=$("$RIS" check test/ris/integer_text_floor.ri 2>&1)

@@ -41,8 +41,8 @@ No tape value survives the block that owns its storage:
   interpolation and writing into `String::Builder` need `@[TapeToHeap]`.
 * Pass tape text on, append to a tape writer, or write directly to a file
   or socket (`puts text`, `io << text`). Avoid tape -> heap -> tape copies.
-* `std/` and `src/iyi/` may use raw pointers (`to_unsafe`,
-  `Tape::String.new(pointer, size)`) and copy to the heap freely.
+* `std/` is under these rules; only `src/iyi/` and a `std/` def marked
+  `@[TapeUnsafe]` (refused elsewhere) may use raw pointers or copy freely.
 
 ## Layout: a tape per growing value
 A container grows in place at the tape's end, else moves once to a region

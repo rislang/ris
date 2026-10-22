@@ -63,6 +63,8 @@ pub struct Base64
     result
   end
 
+  # Measured group copies use pointer cursors to avoid index extension.
+  @[TapeUnsafe]
   def self.decode(text : Tape::String) : Tape::String
     size = (text.bytesize.to_i64 * 6 // 8).to_i32
     buf = Pointer(UInt8).new(IyiRegion.tape_bytes(size.to_u64))
@@ -160,6 +162,8 @@ pub struct Base64
     o
   end
 
+  # Measured word copies encode six bytes into eight characters at once.
+  @[TapeUnsafe]
   private def self.encode_with(data : Tape::String, alphabet : String,
                                pairs : Array(Int32),
                                pad : Bool) : Tape::String

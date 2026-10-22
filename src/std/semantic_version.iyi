@@ -199,7 +199,7 @@ pub struct SemanticVersion
 
   # Byte ranges of the five fields, or nil where the grammar is not met.
   private def self.scan(str : Tape::String)
-    bytes = str.to_unsafe
+    bytes = str
     stop = str.bytesize
 
     stop -= 1 if stop > 0 && bytes[stop - 1] == 10_u8 # '\n'
@@ -246,7 +246,8 @@ pub struct SemanticVersion
   end
 
   # A numeric field: `0`, or a digit run that does not start with `0`.
-  private def self.scan_field(bytes : Pointer(UInt8), start : Int32, stop : Int32) : Int32?
+  private def self.scan_field(bytes : Tape::String, start : Int32,
+    stop : Int32) : Int32?
     return nil unless start < stop && bytes[start] >= 48_u8 && bytes[start] <= 57_u8
     return start + 1 if bytes[start] == 48_u8 # '0'
 
@@ -257,7 +258,8 @@ pub struct SemanticVersion
     pos
   end
 
-  private def self.scan_identifiers?(bytes : Pointer(UInt8), start : Int32, stop : Int32, *, reject_leading_zero : Bool) : Bool
+  private def self.scan_identifiers?(bytes : Tape::String, start : Int32,
+    stop : Int32, *, reject_leading_zero : Bool) : Bool
     pos = start
 
     while true

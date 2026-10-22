@@ -22,7 +22,7 @@ class Iyi::TapeRefillChecker
   def run(node : ASTNode) : Nil
     node.accept Collector.new(self)
     @defs.each do |a_def|
-      next if a_def.name == "initialize"
+      next if a_def.name == "initialize" || a_def.name.starts_with?("initialize:")
       handed = HandOffs.new
       a_def.body.accept handed
       a_def.body.accept Finder.new(self, a_def, handed.reads)
@@ -30,8 +30,8 @@ class Iyi::TapeRefillChecker
   end
 
   def reach(a_def : Def) : Nil
-    return if TapePointerCheckerLibrary.library?(a_def.location) || !@seen.add?(a_def.object_id)
-    @defs << a_def
+    return if TapeRules.runtime?(@program, a_def.location) || !@seen.add?(a_def.object_id)
+    @defs << a_def unless TapeRules.unsafe?(@program, a_def)
     a_def.body.accept Collector.new(self)
   end
 

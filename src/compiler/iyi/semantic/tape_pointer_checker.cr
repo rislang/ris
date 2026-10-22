@@ -3,9 +3,9 @@
 # value, or, once the scope has ended, the next scope's - and
 # `Tape::String.new(pointer, size)` makes a view of any address. The
 # checkers that keep a tape value inside its scope do not see either, so
-# outside a `std/` module and `src/iyi/` both are refused, and a program
-# reads a tape string through the bounds-checked `[]`, `each_byte` and
-# `[start, count]` instead. A raw pointer the program makes itself
+# outside the tape's runtime (`src/iyi/`) and a `std/` def marked
+# `@[TapeUnsafe]` both are refused, and a program reads a tape string
+# through the bounds-checked `[]`, `each_byte` and `[start, count]` instead. A raw pointer the program makes itself
 # (`Pointer.new`) is outside this rule: iyi has no unsafe blocks for it.
 class Iyi::TapePointerChecker
   @program : Program
@@ -22,19 +22,9 @@ class Iyi::TapePointerChecker
   end
 
   def reach(a_def : Def) : Nil
-    return if library?(a_def.location) || !@seen.add?(a_def.object_id)
-    @defs << a_def
+    return if TapeRules.runtime?(@program, a_def.location) || !@seen.add?(a_def.object_id)
+    @defs << a_def unless TapeRules.unsafe?(@program, a_def)
     a_def.body.accept Collector.new(self)
-  end
-
-  # Code of the library: a `std/` module, wherever IYI_PATH finds it (a
-  # test's patched copy too), and the prelude with the tape itself. On
-  # Windows the path is written with backslashes.
-  def library?(location : Location?) : Bool
-    file = location.try(&.original_filename)
-    return false unless file
-    file = file.gsub('\\', '/')
-    file.includes?("/std/") || file.includes?("/src/iyi/")
   end
 
   private def check(node : ASTNode) : Nil
@@ -42,12 +32,12 @@ class Iyi::TapePointerChecker
   end
 
   def refuse?(node : Call) : String?
-    return nil if library?(node.location)
+    return nil if TapeRules.runtime?(@program, node.location)
     if node.name == "to_unsafe" && (receiver = node.obj) && tape_string?(receiver.type?)
-      return "`to_unsafe` of a Tape::String outside the library: the pointer reads past its bytes as readily as within them, and after its scope the next scope's.\n\nRead it with `[]`, `[start, count]` or `each_byte`, which check their bounds."
+      return "`to_unsafe` of a Tape::String outside a @[TapeUnsafe] def: the pointer reads past its bytes as readily as within them, and after its scope the next scope's.\n\nRead it with `[]`, `[start, count]` or `each_byte`, which check their bounds."
     end
     if node.name == "new" && node.args.size == 2 && node.target_defs.try &.any? { |target| tape_string_class?(target.owner) }
-      return "`Tape::String.new(pointer, size)` outside the library: a view of any address, which the tape's checks do not see.\n\nCopy a String onto the tape with `Tape::String.new(text)`, view one with `Tape::String.view(text)`, or a part of a tape string with `[start, count]`."
+      return "`Tape::String.new(pointer, size)` outside a @[TapeUnsafe] def: a view of any address, which the tape's checks do not see.\n\nCopy a String onto the tape with `Tape::String.new(text)`, view one with `Tape::String.view(text)`, or a part of a tape string with `[start, count]`."
     end
     nil
   end
@@ -101,5 +91,39 @@ class Iyi::TapePointerChecker
     def visit(node : ASTNode)
       true
     end
+  end
+end
+
+# Where the tape's rules (TapePointerChecker, TapeEscapeChecker,
+# TapeRefillChecker) do not reach. The tape's own runtime (`src/iyi/`, and
+# Crystal's `.cr` code, which has no tape) builds the rules' primitives from
+# raw pointers. A `std/` module is under the rules like any program; a def
+# of one that must hand a pointer to the OS or copy a view out to keep a
+# `String` API says so with `@[TapeUnsafe]`, and only its body is let
+# through. The mark is refused outside `std/`: a program reads tape text
+# through `[]`, `[start, count]` and `each_byte`.
+module Iyi::TapeRules
+  # The prelude also where it was loaded from: a test copies it out of
+  # `src/iyi/` to change it.
+  def self.runtime?(program : Program, location : Location?) : Bool
+    file = location.try(&.original_filename)
+    return false unless file
+    file = file.gsub('\\', '/')
+    file.includes?("/src/iyi/") || file.ends_with?(".cr") ||
+      TapeScopeRuntime.prelude?(program, location)
+  end
+
+  def self.std?(location : Location?) : Bool
+    file = location.try(&.original_filename)
+    return false unless file
+    file.gsub('\\', '/').includes?("/std/")
+  end
+
+  def self.unsafe?(program : Program, a_def : Def) : Bool
+    return false unless ann = a_def.annotation(program.tape_unsafe_annotation)
+    unless std?(a_def.location) || runtime?(program, a_def.location)
+      ann.raise "@[TapeUnsafe] outside a `std/` module: it lifts the tape's rules, which keep a program's tape values in their scope.\n\nRead tape text with `[]`, `[start, count]` or `each_byte`, and copy it off the tape by name with `to_heap`."
+    end
+    true
   end
 end
