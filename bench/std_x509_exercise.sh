@@ -526,7 +526,7 @@ prove_broken "an IP range compared unmasked" "an address inside the permitted ra
 prove_broken "IPv6 :: unexpanded" "an IPv6 address: refused" \
   '    head + Array(UInt8).new(16 - head.size - tail.size, 0_u8) + tail' '    head + tail'
 prove_broken "inner and outer algorithms unchecked" "an outer algorithm that is not the inner one refused" \
-  '    unless inner_algorithm.raw == outer_algorithm.raw' '    if false'
+  '    unless inner_algorithm.same_raw?(outer_algorithm)' '    if false'
 prove_broken "a duplicate extension taken" "an extension written twice refused" \
   '      return X509Error.new("extension #{oid} appears twice") if seen.includes?(oid)' ''
 # Unchecked, the bad byte reaches std/base64, which panics: the refusal

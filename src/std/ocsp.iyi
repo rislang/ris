@@ -292,8 +292,18 @@ pub struct OcspResponse
   end
 
   # The OCSPResponse *der* holds (RFC 6960 section 4.2.1).
+  # The lists of values the parse walks are on a tape of its own, dropped
+  # together when it ends; the response copies out what it keeps.
   def self.parse(der : Array(UInt8)) : OcspResponse | OcspError
-    top = OcspAsn1.values(OcspAsn1.value(Der.parse(der))!.sequence)!
+    parsed = OcspError.new("not read").as(OcspResponse | OcspError)
+    tape do
+      parsed = parse_on_tape(der)
+    end
+    parsed
+  end
+
+  private def self.parse_on_tape(der : Array(UInt8)) : OcspResponse | OcspError
+    top = OcspAsn1.tape_values(OcspAsn1.value(Der.parse(der))!.tape_sequence)!
     return OcspError.new("an OCSPResponse of #{top.size} values, not 1 or 2") unless top.size == 1 || top.size == 2
     status = OcspAsn1.int(top[0].enumerated)!
     unless status == 0
@@ -302,20 +312,20 @@ pub struct OcspResponse
       return OcspError.new("the responder answered #{Ocsp.status_name(status)} (#{status}), with no response", status.to_i32)
     end
     return OcspError.new("a successful OCSPResponse with no responseBytes") unless top.size == 2
-    bytes = OcspAsn1.values(OcspAsn1.value(top[1].explicit(0))!.sequence)!
+    bytes = OcspAsn1.tape_values(OcspAsn1.value(top[1].explicit(0))!.tape_sequence)!
     return OcspError.new("a ResponseBytes of #{bytes.size} values, not 2") unless bytes.size == 2
     type = OcspAsn1.text(bytes[0].oid)!
     return OcspError.new("a response of type #{type}, where id-pkix-ocsp-basic is the one this reads") unless type == Ocsp::BASIC
-    basic = OcspAsn1.values(OcspAsn1.value(Der.parse(OcspAsn1.bytes(bytes[1].octet_string)!))!.sequence)!
+    basic = OcspAsn1.tape_values(OcspAsn1.value(Der.parse(OcspAsn1.bytes(bytes[1].octet_string)!))!.tape_sequence)!
     return OcspError.new("a BasicOCSPResponse of #{basic.size} values, not 3 or 4") unless basic.size == 3 || basic.size == 4
-    algorithm = OcspAsn1.values(basic[1].sequence)!
+    algorithm = OcspAsn1.tape_values(basic[1].tape_sequence)!
     return OcspError.new("a signature AlgorithmIdentifier of #{algorithm.size} values") unless algorithm.size == 1 || algorithm.size == 2
     signature_algorithm = OcspAsn1.text(algorithm[0].oid)!
     parameters = algorithm.size == 2 ? algorithm[1] : nil
     signature = OcspAsn1.bytes(basic[2].bit_string)!
     certificates = [] of Certificate
     if basic.size == 4
-      carried = OcspAsn1.values(OcspAsn1.value(basic[3].explicit(0))!.sequence)!
+      carried = OcspAsn1.tape_values(OcspAsn1.value(basic[3].explicit(0))!.tape_sequence)!
       return OcspError.new("a response carrying #{carried.size} certificates, past #{Ocsp::MAX_CERTIFICATES}") if carried.size > Ocsp::MAX_CERTIFICATES
       carried.each_with_index do |value, i|
         certificate = Certificate.parse(value.raw)
@@ -324,7 +334,7 @@ pub struct OcspResponse
       end
     end
 
-    data = OcspAsn1.values(basic[0].sequence)!
+    data = OcspAsn1.tape_values(basic[0].tape_sequence)!
     if data.size > 0 && data[0].context?(0)
       number = OcspAsn1.int(OcspAsn1.value(data[0].explicit(0))!.integer)!
       return OcspError.new("a ResponseData of version #{number + 1}, where v1 is the one there is") unless number == 0
@@ -337,7 +347,7 @@ pub struct OcspResponse
     key_hash = nil.as(Array(UInt8)?)
     if responder.context?(1) && responder.constructed?
       written = OcspAsn1.value(responder.explicit(1))!
-      OcspAsn1.values(written.sequence)!
+      OcspAsn1.tape_values(written.tape_sequence)!
       name = written.raw
     elsif responder.context?(2) && responder.constructed?
       hash = OcspAsn1.bytes(OcspAsn1.value(responder.explicit(2))!.octet_string)!
@@ -347,7 +357,7 @@ pub struct OcspResponse
       return OcspError.new("a ResponderID that is #{responder.describe}, neither byName [1] nor byKey [2]")
     end
     produced_at = OcspAsn1.generalized(data[1], "producedAt")!
-    singles = OcspAsn1.values(data[2].sequence)!
+    singles = OcspAsn1.tape_values(data[2].tape_sequence)!
     return OcspError.new("a ResponseData with no SingleResponse") if singles.empty?
     responses = [] of OcspSingleResponse
     singles.each { |single| responses << read_single(single)! }
@@ -360,7 +370,7 @@ pub struct OcspResponse
   end
 
   private def self.read_single(single : DerValue) : OcspSingleResponse | OcspError
-    fields = OcspAsn1.values(single.sequence)!
+    fields = OcspAsn1.tape_values(single.tape_sequence)!
     return OcspError.new("a SingleResponse of #{fields.size} values, not 3 to 5") unless fields.size >= 3 && fields.size <= 5
     cert_id = read_cert_id(fields[0])!
     written = fields[1]
@@ -370,7 +380,7 @@ pub struct OcspResponse
       status = OcspCertStatus::Good
     elsif written.context?(1) && written.constructed?
       status = OcspCertStatus::Revoked
-      info = OcspAsn1.values(written.children)!
+      info = OcspAsn1.tape_values(written.tape_children)!
       return OcspError.new("a RevokedInfo of #{info.size} values, not 1 or 2") unless info.size == 1 || info.size == 2
       revoked_at = OcspAsn1.generalized(info[0], "revocationTime")!
       if info.size == 2
@@ -399,9 +409,9 @@ pub struct OcspResponse
   end
 
   private def self.read_cert_id(value : DerValue) : OcspCertId | OcspError
-    fields = OcspAsn1.values(value.sequence)!
+    fields = OcspAsn1.tape_values(value.tape_sequence)!
     return OcspError.new("a CertID of #{fields.size} values, not 4") unless fields.size == 4
-    algorithm = OcspAsn1.values(fields[0].sequence)!
+    algorithm = OcspAsn1.tape_values(fields[0].tape_sequence)!
     return OcspError.new("a CertID's AlgorithmIdentifier of #{algorithm.size} values") unless algorithm.size == 1 || algorithm.size == 2
     oid = OcspAsn1.text(algorithm[0].oid)!
     hash = OcspHash.from_oid(oid)
@@ -503,6 +513,10 @@ end
 # std/asn1's errors as this one's, and the readers this module shares.
 struct OcspAsn1
   def self.value(answer : DerValue | Asn1Error) : DerValue | OcspError
+    answer.is_a?(Asn1Error) ? OcspError.new(answer.message) : answer
+  end
+
+  def self.tape_values(answer : Tape::Array(DerValue) | Asn1Error) : Tape::Array(DerValue) | OcspError
     answer.is_a?(Asn1Error) ? OcspError.new(answer.message) : answer
   end
 

@@ -225,6 +225,47 @@ pub struct DerValue
     found
   end
 
+  # `children` on the caller's tape: a parse's lists of values, which it
+  # reads and drops, go with the tape rather than to the heap. The values
+  # still view the same bytes.
+  def tape_children : Tape::Array(DerValue) | Asn1Error
+    return Asn1Error.new("#{describe} is primitive and holds no values", @offset) unless @constructed
+    found = Tape::Array(DerValue).new(8)
+    at = content_offset
+    stop = end_offset
+    while at < stop
+      child = DerValue.read(@data, at, stop)!
+      found << child
+      at = child.end_offset
+    end
+    found
+  end
+
+  # `sequence` on the caller's tape (`tape_children`).
+  def tape_sequence : Tape::Array(DerValue) | Asn1Error
+    expect_constructed(DerTag::SEQUENCE, "a SEQUENCE")!
+    tape_children
+  end
+
+  # Whether *other* is written with the same bytes, header included: `raw
+  # == other.raw` with neither copied.
+  def same_raw?(other : DerValue) : Bool
+    size = @header_size + @content_size
+    return false unless size == other.header_size + other.content_size
+    mine = @data.to_unsafe + @offset.to_i64
+    theirs = other.raw_at
+    index = 0
+    while index < size
+      return false unless mine[index] == theirs[index]
+      index = index + 1
+    end
+    true
+  end
+
+  protected def raw_at : Pointer(UInt8)
+    @data.to_unsafe + @offset.to_i64
+  end
+
   # A SEQUENCE's elements: `children`, after checking it is one.
   def sequence : Array(DerValue) | Asn1Error
     expect_constructed(DerTag::SEQUENCE, "a SEQUENCE")!

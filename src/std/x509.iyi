@@ -223,10 +223,20 @@ pub class Certificate
   end
 
   # The certificate *der* holds (RFC 5280 section 4.1).
+  # The lists of values the parse walks are on a tape of its own, dropped
+  # together when it ends; the certificate copies out what it keeps.
   def self.parse(der : Array(UInt8)) : Certificate | X509Error
-    outer = X509Asn1.values(X509Asn1.value(Der.parse(der))!.sequence)!
+    parsed = X509Error.new("not read").as(Certificate | X509Error)
+    tape do
+      parsed = parse_on_tape(der)
+    end
+    parsed
+  end
+
+  private def self.parse_on_tape(der : Array(UInt8)) : Certificate | X509Error
+    outer = X509Asn1.tape_values(X509Asn1.value(Der.parse(der))!.tape_sequence)!
     return X509Error.new("a Certificate of #{outer.size} values, not 3") unless outer.size == 3
-    tbs = X509Asn1.values(outer[0].sequence)!
+    tbs = X509Asn1.tape_values(outer[0].tape_sequence)!
     at = 0
     version = 1
     if tbs.size > 0 && tbs[0].context?(0)
@@ -239,10 +249,10 @@ pub class Certificate
     serial = X509Asn1.bytes(tbs[at].integer_bytes)!
     inner_algorithm = tbs[at + 1]
     outer_algorithm = outer[1]
-    unless inner_algorithm.raw == outer_algorithm.raw
+    unless inner_algorithm.same_raw?(outer_algorithm)
       return X509Error.new("the signature algorithm signed differs from the one the signature is under")
     end
-    algorithm = X509Asn1.values(outer_algorithm.sequence)!
+    algorithm = X509Asn1.tape_values(outer_algorithm.tape_sequence)!
     return X509Error.new("an AlgorithmIdentifier with no algorithm") if algorithm.empty?
     signature_algorithm = X509Asn1.text(algorithm[0].oid)!
     parameters = algorithm.size > 1 ? algorithm[1] : nil
@@ -250,12 +260,12 @@ pub class Certificate
     subject = tbs[at + 4]
     issuer_name = X509Names.describe(issuer)!
     subject_name = X509Names.describe(subject)!
-    validity = X509Asn1.values(tbs[at + 3].sequence)!
+    validity = X509Asn1.tape_values(tbs[at + 3].tape_sequence)!
     return X509Error.new("a Validity of #{validity.size} values, not 2") unless validity.size == 2
     not_before = X509Asn1.time(validity[0].time)!
     not_after = X509Asn1.time(validity[1].time)!
     key = X509Keys.read(tbs[at + 5])!
-    key_bits = X509Asn1.bytes(X509Asn1.values(tbs[at + 5].sequence)![1].bit_string)!
+    key_bits = X509Asn1.bytes(X509Asn1.tape_values(tbs[at + 5].tape_sequence)![1].bit_string)!
     extensions = X509Extensions.new
     rest = at + 6
     # RFC 5280 section 4.1: issuerUniqueID [1], subjectUniqueID [2] and
@@ -1182,6 +1192,10 @@ end
 # std/asn1's errors as this one's, one helper a type.
 struct X509Asn1
   def self.value(answer : DerValue | Asn1Error) : DerValue | X509Error
+    answer.is_a?(Asn1Error) ? X509Error.new(answer.message) : answer
+  end
+
+  def self.tape_values(answer : Tape::Array(DerValue) | Asn1Error) : Tape::Array(DerValue) | X509Error
     answer.is_a?(Asn1Error) ? X509Error.new(answer.message) : answer
   end
 

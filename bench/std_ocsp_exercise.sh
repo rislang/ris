@@ -713,7 +713,7 @@ prove_broken "a critical extension passed over" "a response with a critical exte
 prove_broken "an extension twice taken" "an extension twice: expected" \
   '      return OcspError.new("extension #{oid} twice in #{where}") if seen.includes?(oid)' ''
 prove_broken "a version written out taken" "a ResponseData whose version is written out: expected" \
-  '      return OcspError.new("a ResponseData whose version v1 is written out, which DER leaves out as the default")' '      data = data[1, data.size - 1]'
+  '      return OcspError.new("a ResponseData whose version v1 is written out, which DER leaves out as the default")' '      data = data.reject { |value| value.context?(0) }'
 prove_broken "a UTCTime taken" "a thisUpdate in UTCTime: expected" \
   '    return OcspError.new("a #{what} that is #{value.describe}, where RFC 6960 writes a GeneralizedTime") unless value.universal?(DerTag::GENERALIZED_TIME)' ''
 prove_broken "CRLReason 7 taken" "a revocation reason of 7: expected" \
