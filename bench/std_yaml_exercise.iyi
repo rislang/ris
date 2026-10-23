@@ -173,15 +173,30 @@ assert_str("b - c", reads("a: b\n  - c\n", "a continuation line starting with '-
 assert_str("b c", reads("a: b\n  \tc\n", "a tab after a continuation line's indentation separates")["a"].as_s, "a tab after a continuation line's indentation separates")
 # A quoted scalar's folding trims its blanks in place: it copied all it had
 # read at every line end, and 20,000 lines took 4.9 s where the same bytes
-# on one line took 5 ms.
+# on one line took 5 ms. Held to the one line on the same machine, the
+# minimum of three rounds of each: a line of one second let the copying
+# through on a Linux runner whose memcpy took its 2.2 GB in less. In place
+# the two take about as long; copying, 140 times as long here.
 quoted_lines = "xxxxxxxxxx\n" * 20000
-quoted_started = __iyi_monotonic_ns
-double_lines = reads("\"" + quoted_lines + "\"", "a double-quoted scalar of 20,000 lines")
-single_lines = reads("'" + quoted_lines + "'", "a single-quoted scalar of 20,000 lines")
-quoted_ms = (__iyi_monotonic_ns - quoted_started) // 1000000
+quoted_line = "xxxxxxxxxx " * 20000
+double_lines = Any.new(nil)
+single_lines = Any.new(nil)
+lines_ns = 9223372036854775807_i64
+line_ns = 9223372036854775807_i64
+3.times do
+  quoted_started = __iyi_monotonic_ns
+  double_lines = reads("\"" + quoted_lines + "\"", "a double-quoted scalar of 20,000 lines")
+  single_lines = reads("'" + quoted_lines + "'", "a single-quoted scalar of 20,000 lines")
+  quoted_folded = __iyi_monotonic_ns
+  reads("\"" + quoted_line + "\"", "a double-quoted scalar of the same bytes on one line")
+  reads("'" + quoted_line + "'", "a single-quoted scalar of the same bytes on one line")
+  quoted_ended = __iyi_monotonic_ns
+  lines_ns = quoted_folded - quoted_started if quoted_folded - quoted_started < lines_ns
+  line_ns = quoted_ended - quoted_folded if quoted_ended - quoted_folded < line_ns
+end
 assert_true(double_lines.as_s == "xxxxxxxxxx " * 20000 && single_lines == double_lines, "quoted scalars of 20,000 lines fold to one line each")
-assert_true(quoted_ms < 1000, "quoted scalars of 20,000 lines read in under a second, not #{quoted_ms} ms")
-puts "  a double- and a single-quoted scalar of 20,000 lines read in under a second"
+assert_true(lines_ns < line_ns * 4, "quoted scalars of 20,000 lines read in under four times the same bytes on one line, not #{lines_ns // 1000000} ms against #{line_ns // 1000000} ms")
+puts "  a double- and a single-quoted scalar of 20,000 lines read in under four times one line of them"
 puts "  integers, floats, null, 1.2 strings, quotes, folded, literal and verbatim tags"
 puts "  '?' plain starts, block scalar blank lines and chomping, quoted folding, flow folding, tags over nothing"
 
