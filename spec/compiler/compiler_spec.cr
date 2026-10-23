@@ -601,6 +601,9 @@ describe "Compiler" do
           template = ["ITM_deregisterTMCloneTable", "ITM_registerTMCloneTable",
                       "_cxa_finalize", "_gmon_start__", "_libc_start_main",
                       "abort"]
+          # LLVM 23's linker writes `_PROCEDURE_LINKAGE_TABLE_` as a local
+          # marker, not a dynamic import (UPSTREAM.md).
+          template << "PROCEDURE_LINKAGE_TABLE_"
           (symbols - template).should be_empty
         end
       end

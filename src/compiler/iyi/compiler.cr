@@ -3203,7 +3203,7 @@ module Iyi
     private def iyi_root_package_of(sources : Array(Source)) : {String, String}?
       root = @iyi_project_root || sources.first?.try { |entry| Compiler.entry_root_of(entry.filename, entry.code) }
       return nil unless root
-      manifest = File.join(root, Mod::Installer::MANIFEST)
+      manifest = Mod::Installer.manifest_in(root)
       return nil unless File.file?(manifest)
       {Mod::ModFile.parse(File.read(manifest), manifest).path, root}
     rescue Mod::ModError
