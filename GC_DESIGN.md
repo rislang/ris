@@ -342,9 +342,12 @@ page and a TLS block laid out from PT_TLS on Linux, `pthread_create`
 on darwin — and `join` is the futex on the tid word the kernel clears,
 or `pthread_join`. A thread gets a scheduler state and a heap cache on
 first touch, so it spawns fibers and allocates without a lock, and it
-is not a task: no group owns it, nothing cancels it, no channel
-crosses it, and what crosses threads today is `Atomic(T)` — which is
-`Share`'s obligation, now with a second thread to refuse things for.
+is not a task: no group owns it and nothing cancels it, and what
+crosses threads is what `Share` lets a thread's block capture -
+`Atomic(T)`, a `Mutex(T)`, immutable values, and since SPEC.md III.4.13
+a `Channel(T)` of `Share` values. III.4.13's pool is threads of this
+kind: the workers parallel tasks run on are `IyiThread`s the runtime
+starts, so the stop below takes them as it takes any thread.
 
 A collection takes the runtime lock first, so no thread it stops can
 be holding it; then signals every other registered thread and waits
@@ -755,6 +758,32 @@ parity is a live list's and the sweep leaves it where it is, which is
 also what makes a hand-freed chunk safe from the sweep of its own
 epoch; and the sweep's own loop tests the parity first, two tests for
 a dead chunk where it was three.
+
+That covers a chunk freed in its own epoch, and not one the last mark
+kept and the program freed before the lazy sweep of its arena reached
+it: such a chunk wears the last epoch's parity, and a slice walking past
+it reads its entry, then its colour, and writes the entry back. A free
+between the two reads left it looking allocated before the mark and
+white, dead, and the slice linked it into its batch while it sat on the
+freeing thread's list, handed out twice; a free between the read and
+the write lost its free flag to the survivor's restamp. Windows' CI
+printed a kept chunk lost and then a memory fault. `free` reads the
+entry's parity now, without the lock - a slice restamping it beside the
+read has passed the chunk - and a chunk of the last parity is listed
+under the lock with no slice of its arena in flight, a claim standing
+waited out off the lock (`IyiHeap.free_unswept`); a chunk of the
+current parity takes the cache's path as before, an alloc+free pair 3.4
+ns before the look and 3.5 after, release. Under a mark there is none of
+the last parity: the debt is paid before the first stop and the epoch
+turns at the last. `bench/concurrent_mark.sh`'s bursts of frees free 64
+chunks the mark kept as soon as a slice of their arena is in flight: on
+four cores beside two busy loops the plain build faulted in 4 runs of
+1,000 and the release build in 108, and none of either after. The window
+is a few instructions, so the gate also runs the program on a copy of
+the prelude whose slice waits up to 100 us at each kept chunk of a
+kilobyte or more and exits by name if the entry changes under it; with
+the old free put back that copy failed by name in 200 runs of 200, plain
+and release alike.
 
 Two more levers on that garbage were tried in the second cycle and
 are not in the tree. A prefetch of a shaded object's line at its push:
@@ -1919,6 +1948,23 @@ III.4 defines structured concurrency: tasks are spawned inside a `group`, and th
 - A task can be cancelled by its group. Cancellation is a control-flow event (not an exception, not a signal).
 - Write barriers do not need to know about cancellation; barriers run before the write happens.
 - If a task is cancelled, it unwinds (or stops gracefully); any objects it allocated are reclaimed by the next collection.
+
+**Tasks across cores (SPEC.md III.4.13), built: nothing new in the
+collector.** Parallel tasks run on a pool of worker threads, each an
+`IyiThread` with a registered line, so a collection stops a worker with
+the same signal (a suspend on Windows) wherever it stands - running a
+task, or waiting in its poller, whose `EINTR` is a wakeup with no news -
+and scans its spill and its stack from the stopped sp to the top of the
+mapping that holds it, a fiber's or the worker's own. Parked fibers on
+every worker are on the one fiber registry the root walk already reads;
+a parallel task waiting in the pool to start has no stack yet, and is
+rooted through the registry by its proc. What made this free is the
+rule the scheduler keeps: a started task never changes threads, so a
+fiber's stack is only ever live on the thread its registry entry was
+made for, and a worker allocates from its own cache like any thread.
+`bench/parallel_exercise.sh` holds it: eight parallel tasks each keep a
+list of 150,000 nodes on their own stacks through the collections the
+others trigger, and find it whole by checksum.
 
 ---
 

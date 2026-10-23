@@ -57,16 +57,15 @@ outliving it; `text.to_heap` copies what must. [TAPE_DESIGN.md](TAPE_DESIGN.md).
 As JSON; release, median of 9. ² YJIT, 95 s Bignum math; Spinel 127 s. Rust
 with bumpalo 1.03 s. [Slim](https://github.com/domify/slim) (Slang): 4x faster.
 
-**Campfire, preliminary:** busiest page, 40 messages, 364,500 bytes; 16 cores,
-2026-10-15, 64 connections; 1 core `ab` (ris's `raw` loop), 8 `loadgen`.
-| | 1 core req/s | p99 | memory | 8 cores req/s | p99 | memory |
+**Campfire port, the whole app:** busiest page, 40 messages, 364,500 bytes;
+2026-10-17, Ryzen 7 PRO 6850U, 64 connections, three 10 s runs.
+| | 1 core req/s | p99 | memory | 8 CPUs req/s | p99 | memory |
 |---|---|---|---|---|---|---|
-| ris | **10,692** | **7 ms** | 17 MB | **34,762** | **5.8 ms** | 34 MB |
-| Rust | 7,311 | 76 ms | 76 MB | 23,180 | 7.5 ms | 76 MB |
-| Go | 5,489 | 167 ms | 16 MB | 11,944 | 24.7 ms | **29 MB** |
+| ris | 6,847-7,168 | **10-11 ms** | **20 MB** | **21,822-22,040** | 9-11 ms | 172 MB |
+| Rust | **7,066-7,187** | 16 ms | 52 MB | 20,639-21,497 | **6-7 ms** | **70 MB** |
 | Rails¹ | 444 | 226 ms | 309 MB | | | |
 
-¹ Other machine, gzip: approximate.
+¹ Other machine, gzip: approximate. ris on 8 CPUs: 8 processes, one port.
 
 <img src="doc/assets/tape-heap.anim.svg" width="742" alt="respond: tape 0.67 s
   / 1.7 MB; heap 1.55 s / 7.6 MB; 5x slower playback; a block is 0.05 MB">

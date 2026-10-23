@@ -63,9 +63,9 @@ own reference accepts.
 | warm full build, `hello` / 6,900-line pair | 0.07 s / 0.24 s, against `go build`'s 0.08 s / 0.09 s |
 | front end, `hello.iyi` | **0.036 s** against the 0.050 s target: MET |
 | starting the compiler and doing nothing | 0.018 s of that |
-| iyi's own prelude | 21,567 lines, of which 4,634 are the library held to the 4,650 ceiling (6,647 with every platform's floor, which the ceiling stopped counting after Windows); the rest is the collector, the scheduler and the float printer, which 0.1.0's prelude got from libgc, pthreads and libc |
-| compiler | 127,312 lines, none of it written in iyi |
-| artifact format | `.iyimod` v56, checksum per section |
+| iyi's own prelude | 22,608 lines, of which 4,634 are the library held to the 4,650 ceiling (6,647 with every platform's floor, which the ceiling stopped counting after Windows); the rest is the collector, the scheduler and the float printer, which 0.1.0's prelude got from libgc, pthreads and libc |
+| compiler | 128,054 lines, none of it written in iyi |
+| artifact format | `.iyimod` v58, checksum per section |
 | samples | 27 programs, of which 12 rebuild from artifacts with their modules' source deleted |
 | what runs in CI | iyi's specs, Crystal's 13,798 compiler examples, the standard library's, the CLI's, the samples, nine targets iyi's own prelude type-checks for, seven whose own-prelude emitted objects are audited for undefined symbols, the tarball |
 
@@ -88,7 +88,7 @@ shape.
 > is a library and the rules are the language, so a program can keep one and
 > change the other: `--crystal` builds against Crystal's standard library, and
 > there `require` reaches the ecosystem while every rule stays where it was.
-> "No standard library worth the name" is still true of iyi's own 21,567 lines
+> "No standard library worth the name" is still true of iyi's own 22,608 lines
 > and no longer true of what a program can have. Part V item 12a is the
 > measurement, nine shards wide.
 
@@ -270,7 +270,7 @@ of binary. It is not made the default on that trade, and the middle needs the
 initialisers to run *later* rather than not at all, which is the `dlsym` table
 above, and a larger piece of work than the number it wins.
 
-**3. A deliberately tiny prelude, written in iyi. Done: 21,567 lines,
+**3. A deliberately tiny prelude, written in iyi. Done: 22,608 lines,
 primitives included, of which the library is 4,634.** Not a standard library:
 integers, booleans, a string, one sequence, one dictionary, one range, `puts`,
 and an `enum`'s surface — the member's name, an order, the members, and the
@@ -1028,9 +1028,9 @@ Checking it moved two things and left the shape alone.
 
 | | Crystal 0.1.0 (2014-06-18) | iyi today |
 |---|---|---|
-| Compiler | 24,984 lines, **written in Crystal** | 127,312 lines, Crystal, forked |
-| Library | 8,161 lines (3,551 of it core) | 21,567-line own prelude + 111,428 in std |
-| Specs | 21,146 lines | 14,792 for iyi |
+| Compiler | 24,984 lines, **written in Crystal** | 128,054 lines, Crystal, forked |
+| Library | 8,161 lines (3,551 of it core) | 22,608-line own prelude + 124,536 in std |
+| Specs | 21,146 lines | 15,107 for iyi |
 | Samples | 24 **programs** | 8 **explanations**, a first half hour, and `calc`, a language |
 | History | 3,165 commits over 21 months | 266 |
 | Own status line | *"pre-alpha: we are still designing the language"* | design largely settled, 0.2.0 released, a language written in it |
@@ -1340,6 +1340,21 @@ declaration arrives fully qualified, and a qualified name reaches a type
 the way another module would, which R-2 refuses for one that is not
 `pub`. crystal-metric's port wrote the reader and the writer by hand
 field by field for want of it; `bench/std_json_exercise.sh` holds it.
+
+**A union is written as the member it holds and read by the kind of value
+there.** `JSON.write_value` calls `Object#__json_write` on a union, a method
+that runs as the member's own type and hands `self` back to the overload that
+member has alone. The members are never named from `std/json`: a name is
+looked up where it is written, and from there `Std::Time::Time` was refused as
+not imported (R-1) and a program's private type was not found. Reading cannot
+do what Crystal's `Union.new` does, try each member and keep the first that
+does not raise, because there is no rescue to go back with. It reads a boolean
+into `Bool`, an integer into the first of `Int64`, `UInt64`, `Int32`, `UInt8`
+that holds it and then `Float64`, a string into `String`, an array into the
+one `Array` member, an object into the one `Hash` member, and anything else
+into the one other member. A union with two of a kind beyond the scalars,
+such as two derived types or two arrays, is refused when it is compiled
+instead of guessed at. `bench/std_json_exercise.sh` holds both directions.
 
 **The `Order` case is built.** A field's type arrives as a type, not a name, so
 `field[:type] <= ToJSON` is the question above, asked and answered. The type,
@@ -2246,9 +2261,17 @@ language already had:
   committed page carrying PAGE_GUARD with 16 KB of committed slack beneath
   it (`IyiFiber#map_stack`) — the handler runs on the stack that faulted
   and that slack is what it stands on, measured at 2,872 bytes used of the
-  16,384. `bench/panics.sh` holds it on the main stack, a fiber's and a
-  thread's, on every platform with a runtime, and holds the wild pointer
-  apart.
+  16,384. A guard page catches a frame only if the frame touches it, and
+  a frame is carved with one `sub`: one larger than the page, written
+  first at its low end, stepped over the guard into whatever lay under
+  the stack and the program went on (issue #130). So every function the
+  compiler emits touches its frame a page at a time from the top before
+  it uses it — LLVM's inline stack probes on Linux and darwin, and on
+  Windows the `__chkstk` call every frame over a page already makes —
+  and the guard is the first page past the end anything touches.
+  `bench/panics.sh` holds it on the main stack, a fiber's and a
+  thread's, on every platform with a runtime, holds a 64 KiB frame over
+  writable memory to the same sentence, and holds the wild pointer apart.
 
 The residue the first cut recorded — overflow trapping straight to a
 process exit because a `fun` cannot reach scheduler state — closed the
@@ -2606,7 +2629,7 @@ hook, and the prelude's own definition of it is untouched. Compile-time
 `responds_to?` works unchanged, which the error message is entitled to claim
 because it is tested.
 
-### III.4 Concurrency: **BUILT on Linux, darwin arm64 and Windows x86-64 in III.4.8's order — scheduler, cancellable primitives, `group`, `Channel` (rendezvous), `select`, the typed group (III.4.9), `Atomic(T)` (III.4.10), a kernel thread the collector stops (III.4.11), `Share` gating its block (III.4.4)**
+### III.4 Concurrency: **BUILT on Linux, darwin arm64 and Windows x86-64 in III.4.8's order — scheduler, cancellable primitives, `group`, `Channel` (rendezvous), `select`, the typed group (III.4.9), `Atomic(T)` (III.4.10), a kernel thread the collector stops (III.4.11), `Share` gating its block (III.4.4), tasks across cores (III.4.13)**
 
 This is the section where the design either beats Go or does not, so it is worth
 being blunt about where Go actually loses. Not goroutines: they are cheap, the
@@ -2741,16 +2764,21 @@ variable or calls one of its methods without a receiver, must be `Share`,
 and the error names the variable, its type and the field that failed, one
 level at a time — ``captures `items :
 Array(Int32)`, which is not Share: Array(Int32)'s field @size is assigned
-in `unsafe_set_size` ``. The channel's `T : Share` (III.4.6) waits for the
-channel that crosses threads. Held by `spec/compiler/semantic/iyi_spec.cr`
+in `unsafe_set_size` ``. The channel's `T : Share` (III.4.6) is the
+trust `@[Share]` on `Channel(T)` gives since a channel crosses threads
+(III.4.13), and the block `spawn_parallel` runs is gated as a thread's
+is. Held by `spec/compiler/semantic/iyi_spec.cr`
 (thirteen shapes: immutable captures pass, a setter, an assignment outside
 `initialize`, a field one and two levels down, a field `pointerof` gives
 out, `@[Share]` trusted, a trusted generic refused by its argument, `self`,
 `self` reached by a call, a constant the block names, a class variable
-written after its initializer, a local a kept block assigns), by
+written after its initializer, a local a kept block assigns; and five for
+the parallel block: shareable captures pass, a captured value with a
+setter, a local assigned after the spawn, a loop's local, a constant), by
 `spec/compiler/iyimod_spec.cr` (the marker written, read and refused
-across an artifact) and by `bench/thread_exercise.sh`'s last step, a
-program that must not compile. A `Share` type makes a value safe to read
+across an artifact), by `bench/thread_exercise.sh`'s last step, a
+program that must not compile, and by `bench/parallel_exercise.sh`'s
+fifth, four more. A `Share` type makes a value safe to read
 from two threads, not a variable safe to write, and a captured local is
 one cell both threads reach: a local the block assigns, or that its
 starter assigns after the start, or in a loop or block that starts the
@@ -2844,9 +2872,11 @@ behind a synchronised type. The Kemal port did by hand what this makes checked,
 and Part V.5's question about the interaction between concurrency and
 module-level mutable state is answered: there is no interaction, because the
 combination does not compile. A *task* is not a thread, and that half is
-settled the other way: tasks share their group's thread and interleave only
-at parks (III.4.8), so `Share` does not gate them, and a task appending to a
-module-level `Array` compiles and runs.
+settled the other way: tasks `g.spawn` starts share their group's thread
+and interleave only at parks (III.4.8), so `Share` does not gate them, and
+a task appending to a module-level `Array` compiles and runs. A task
+`g.spawn_parallel` starts may run on another core, and its block is
+gated as a thread's is (III.4.13).
 
 #### III.4.6 What carries over from Crystal, and what does not
 
@@ -3030,7 +3060,7 @@ hang.
 
 **darwin arm64 runs the same runtime, through libSystem — III.9's darwin
 rule applied to the poller.** The port changes who is called and nothing
-about what the calls mean: one kernel thread still runs every fiber, the
+about what the calls mean: one kernel thread runs every fiber it starts, the
 context is still one word, the aarch64 switch is the same twenty-slot frame
 Linux swaps, cancellation is still a `Cancelled` value a woken primitive
 answers, and the defer registry and the panic path are the
@@ -3318,17 +3348,19 @@ the collector's allocator were cut over to per-thread state in the two
 entries before this one — so it spawns fibers of its own and allocates
 without a lock.
 
-**It is not a task, and saying so is the design.** No group owns it,
-nothing cancels it, no channel crosses it: `Channel` is one thread's,
-the scheduler's queues are one thread's, and a value handed from one
-thread to another is a data race — which the type system now refuses at
+**It is not a task, and saying so is the design.** No group owns it and
+nothing cancels it. A value handed from one thread to another is a data
+race unless its type says otherwise — which the type system refuses at
 the door it has: the block `IyiThread.start` runs may capture only
 `Share` values (III.4.4, built below), so what crosses threads is
-`Atomic(T)`, immutable values, state kept behind a `Mutex(T)`, and memory
+`Atomic(T)`, immutable values, state kept behind a `Mutex(T)`, a
+`Channel(T)` of `Share` values since III.4.13 made channels cross
+threads, and memory
 a program reaches through `Pointer` and keeps straight itself, `Pointer` being what the marker
 refuses by name. A thread is not offered as a spelling for
 concurrency; `group` is. It is offered because the collector's parallel
-stages (GC_DESIGN.md 7 and 8) and a scheduler with M threads need one,
+stages (GC_DESIGN.md 7 and 8) and a scheduler with M threads need one -
+III.4.13's pool is threads of exactly this kind -
 and because a program that wants a core for itself has never had a way
 to ask.
 
@@ -3392,7 +3424,8 @@ instruction — and leaves the registry and its group's child list on the
 way out (a panicked child stays, because the boundary still owes a
 re-raise for one nobody read). Two hundred sequential connections run
 on one stack. The pool is per scheduler, which is per thread, so it
-needs no lock: a fiber never leaves the scheduler that spawned it.
+needs no lock: a started fiber never leaves the scheduler that started
+it (III.4.13 keeps that true of parallel tasks too, on purpose).
 
 **The other half of that lesson: an address is not a reference.** The
 poller's event buffer was held as `Pointer(...).malloc(...).address` in
@@ -3430,7 +3463,12 @@ what is not HTTP — and `bench/std_http_exercise.sh` runs the module's
 own client against it, Python's `http.client` against it, and `wrk -c50`
 against a release build: **76,226 requests/s, 236,296 requests, every
 one answered**, against the 23,705/s the kemal port under Crystal's
-library did in 0.12.0 on the same shape of program.
+library did in 0.12.0 on the same shape of program. A server facing
+clients it does not control is bounded by default since: a request's
+head within `timeout_ms` (60 s), the whole request within
+`request_timeout_ms` (5 minutes), each counted from when the wait began,
+and at most `max_connections` (1,024) served at once, the next one
+queued in the listen queue rather than refused.
 
 #### III.4.12 Concurrency on wasm32-wasi: **MEASURED and REFUSED: why this target has no runtime**
 
@@ -3516,6 +3554,177 @@ stabilised and enabled by default in Cranelift/Wasmtime without extra flags, or
 WASI 0.2/0.3 component-model async execution supporting stackful fibers directly.
 Neither a sequential imitation nor a post-link bytecode transformation is
 acceptable.
+
+#### III.4.13 Tasks across cores: **BUILT — `spawn_parallel`, a pool of workers, a task placed when it starts and never moved; `Share` gates its block**
+
+0.18.0 ended with "the scheduler that spreads tasks across cores comes after
+this release". Until this section every task ran on the thread that spawned
+it: one scheduler per thread (III.4.8, III.4.11), and a program's tasks all on
+its main thread's, interleaving at parks. The pieces a parallel scheduler
+stands on were already there and measured — a kernel thread of the
+runtime's own that the collector stops and scans (III.4.11, GC_DESIGN.md
+Stage 4), a scheduler whose every field is one thread's (`IyiSchedulerState`),
+an allocator cache per thread, `Share` gating what a thread's block reaches
+(III.4.4) — and what was missing was a way for a *task* to stand on one of
+those threads. This is the decision, written before the code, in eight parts.
+
+**1. The shape: M:N over a pool of workers, a task placed when it starts.**
+A program that asks for parallelism gets a pool of worker threads, each an
+`IyiThread` the runtime starts with a scheduler of its own: its own run
+queue, sleep heap, poller and stack pool, exactly the state III.4.11 gave
+every thread. A parallel task waits in a queue until a worker is free to
+start it — the queue of the worker whose task spawned it, the pool's
+injection queue when a thread outside the pool spawned it, or, for a worker
+with nothing of its own, another worker's queue, stolen from — and **once it
+has run its first instruction it stays on that worker until it ends**. It
+parks and resumes on the thread that started it. That is the decision this
+section is most likely to be asked about, so here is why it is not Go's,
+which moves a parked goroutine to whichever thread is free. Go's compiler
+knows a goroutine can change threads under it; iyi's frames are LLVM's, and
+LLVM takes a thread-local's address as fixed for the life of a function: a
+frame that parked holding the address of its thread's allocator cache would
+resume on another thread still holding it, and two threads would allocate
+from one cache. iyi's codegen already builds on the fact, reading a
+thread-local off the thread pointer with no accessor on Linux because "an
+iyi fiber belongs to its scheduler thread and never moves"
+(`codegen.cr#get_global`); and a scheduler thread with nothing to run waits
+in its poller *on the stack of the fiber that parked last*, which another
+thread could not resume. Placement at the start is where the balance comes
+from instead: a worker that finishes a task takes the next unstarted one,
+so a fan-out of CPU-bound tasks — the program parallelism is for — spreads
+over every worker as fast as the workers free up. What it gives up is the
+rebalancing of tasks that are already running: a task that parks often stays
+where it began.
+
+**2. The door is its own verb, and `Share` gates it as it gates a thread.**
+`g.spawn_parallel { }` is a task of the group like any other — joined at the
+scope's end, cancelled with it, its answer through `value`, typed by `end!`
+(III.4.9) — whose block may run on another core. `g.spawn` does not change:
+a task on the spawner's thread, interleaving at parks only, with no `Share`
+gate, so III.4.5's "a task appending to a module-level `Array` compiles and
+runs" stays true of it. The parallel block is checked by the compiler
+exactly as `IyiThread.start`'s is (III.4.4): every value it captures must be
+`Share`, a captured local must be assigned once — not by the block, not
+after the spawn, not in a loop or block that spawns again — `self` when the
+block reaches it, and every constant and class variable it names. Two
+alternatives lost. Every spawn parallel: the tasks that share their group's
+mutable state legally today would be refused, or raced. And a spawn made
+parallel by the compiler whenever its captures happen to be `Share`: the
+check has a known edge — a method the block calls that touches module
+state is not seen (III.4.4's own words) — and a spawn that moved onto two
+cores because its captures happened to qualify would race that state with
+no line of the program saying so. Rust's tokio arrived at the same pair:
+`spawn` demands `Send` and work-steals, `spawn_local` demands nothing and
+stays.
+
+A task `g.spawn` starts *inside* a parallel task is on that task's worker,
+because a spawn's thread is its spawner's and a started task never moves;
+so the parent and the child may share the parent's non-`Share` locals, as
+any task and its spawner may, and neither can move away from the other.
+
+**3. What crosses, and what does not need to.** Across a parallel boundary:
+`Atomic(T)`, `Mutex(T)`, `List(T)`, immutable values, and now `Channel(T)`:
+a channel is a synchronised type, `@[Share]` and trusted whenever `T` is
+`Share` — III.4.6's "`Channel(T)` carries over, with `T : Share`", which was
+waiting for a channel that crosses threads. A task's *answer* need not be
+`Share`: it is handed over once, after the task has ended, and the join is
+what orders the handover — the task's last write happens before the reader's
+`value` returns, through the scheduler's lock — so a parallel task may build
+an `Array` and answer it. `IyiGroup` and `IyiTask` are not `Share`, so a
+parallel block cannot spawn on its parent's group or read a sibling's
+handle: it opens a group of its own.
+
+**4. How many workers, and how a program says.** By default as many as
+the cores the process may run on — the affinity mask's count on Linux and
+Windows, `hw.ncpu` on darwin, the number the parallel marker already sizes
+its helpers by — which is GC_DESIGN.md's rule from the thread floor: the
+mutator side is M:N with M bounded by the cores, or a resume after a stop is
+milliseconds by construction. The main thread is not one of them: it is
+usually the one waiting in the join. A program sets the count with
+`IYI_WORKERS=n` in its environment, Go's `GOMAXPROCS`, or with
+`IyiWorkers.count = n` before its first parallel task; a count asked for
+after the pool has started, and different from it, is refused by panic,
+since the pool does not shrink. The workers start at the first
+`spawn_parallel`, so a program without one has no pool and no new thread.
+
+**5. A poller per worker, not a shared one.** An IO wait is the waiting
+task's thread's — the fd is registered with that thread's epoll, kqueue or
+completion port, as it always was — because the task resumes there. A
+shared poller would hand every readiness event from the thread that polled
+it to the thread the task is on, a cross-thread wake per event, to save a
+file descriptor per worker. The worker owns its poller, its sleep heap and
+its stacks, and nothing of them is locked.
+
+**6. Waking across threads, and the one lock.** What does cross threads is
+a wake: a sender on one worker hands a value to a receiver parked on
+another, a task's end wakes the owner joining its group, a cancel reaches a
+task on another thread. Each scheduler thread gets an inbox, the fibers
+other threads have woken, and a doorbell its poller waits on beside its
+fds — an eventfd on Linux, an `EVFILT_USER` event on darwin's kqueue, a
+posted completion on Windows' port. A thread with nothing to run marks
+itself idle, *after* finding its inbox empty and under the lock its wakers
+take, and a waker rings only an idle thread: so no wake is lost between
+the look and the wait, and a busy thread is never rung. A cancel of a task
+parked on another thread sets its flag and is delivered to the task's own
+thread, which takes it out of its own sleep heap or poller; nothing touches
+another thread's private lists. Channels, groups, the joiner chains, the
+inboxes and the pool's queues are behind **one runtime-wide scheduler
+lock**, taken only once a second scheduler thread exists — a program with
+one pays a load and a branch. One lock rather than one per channel because
+`select` parks on several channels and a cancel walks groups whose tasks
+are on several threads: one lock has no order to get wrong, and the work it
+serialises is a few pointer moves. Its price is contention in a program
+that sends on channels from many cores at once; that is measured, not
+assumed away.
+
+**7. The collector stops and scans a worker as any thread.** A worker is an
+`IyiThread`: a registered line, stopped by the stop signal (a suspend on
+Windows) wherever it is — running a task, or waiting in its poller, whose
+`EINTR` is already a wakeup with no news — its spill and its stack scanned
+from the stopped sp to the top of whichever mapping holds it, a fiber's or
+its own, and every parked fiber on every worker scanned through the fiber
+registry, as III.4.11 has it. An unstarted parallel task has no stack yet,
+and its block is rooted through the registry by its fiber's proc. Nothing
+in the collector changes; the stop already took every thread a program had.
+
+**8. Deadlock, across threads.** One thread used to know it was
+deadlocked when it had nothing to run and nothing to wait on. With wakes
+across threads that is no longer enough — another thread may wake it — so
+a deadlock is named when every scheduler thread is idle with no sleeper and
+no IO wait, no inbox holds a fiber and no parallel task is waiting to
+start. A worker that finds that rings a thread outside the pool, whose root
+fiber reports it as before (`deadlock: every fiber is blocked`).
+
+**Not built, and said so.** No task moves once started (part 1); no task is
+preempted, so a CPU-bound task holds its worker until it parks or ends, as
+a task always held its thread; a worker sleeping in the kernel on a
+contended `Mutex` holds its own tasks while it sleeps. wasm32 has no
+runtime (III.4.12) and no pool, and a build under `-Dgc_none` or
+`-Dgc_boehm`, which has no `IyiThread`, refuses `spawn_parallel` at compile
+time rather than run it on one thread.
+
+**Built as decided, and measured.** `src/iyi/concurrency.iyi` has the
+pool (`IyiWorkers`), the inbox, the doorbell and the scheduler's lock;
+`CleanupTransformer#check_share_boundary` gates the parallel block with
+the thread's sentences. `bench/parallel_exercise.sh` is the gate: 16
+CPU-bound tasks, release, best of three, on a 12-core Linux machine
+other jobs were sharing, took 715 ms on one worker, 360 on two (1.99x),
+185 on four (3.86x) and 103 on eight (6.94x), and four workers are held
+to 0.6 x 4 wherever the gate runs on at least four cores. The race step
+is the other proof the tasks run at the same instant: eight tasks adding
+2,000,000 times each to one count lose nothing through an atomic, and
+with the add made a load and a store they lost 8,403,659 of 16,000,000,
+which no schedule of one thread can do. The gate also holds placement on
+more than one worker with no task moving across a sleep or a channel,
+channel values across threads once each and in each sender's order, a
+cancel reaching a sleeper, a channel waiter, a task on the spawning
+thread and tasks still in the pool in about 100 ms, steals, lists on
+eight workers' fiber stacks through the collections, a deadlock across
+threads named, and broken copies of the runtime caught by name - a wake
+that does not ring, a steal that leaves the task queued, a cancel never
+delivered, a cancel that skips the pool, and a pool held to one worker.
+The one name the pool adds to the floor is `environ`, the C runtime's
+table `IYI_WORKERS` is read from on Linux and darwin.
 
 ### III.5 Module initialisation: **PROPOSED; rules 1, 2 and 4 BUILT**
 
@@ -4627,7 +4836,34 @@ The decisions:
    packages that each have a `util` have `Pa::Util` and `Pb::Util` rather
    than one type both define. A module whose path already begins with the
    name - `iyi_web/dsl` in `iyi-web` - is where it was, and inside the
-   package `Colors` still means its own, by lexical lookup.
+   package `Colors` still means its own, by lexical lookup. **The name is
+   the same in the package's own build** (#132): a program whose root
+   holds an `iyi.mod` is that package, and its own modules - the files at
+   `<root>/<module path>.iyi` - live under the name too. `codec.iyi` of
+   `github.com/x/iyi-web` was `::Codec` built there and `::IyiWeb::Codec`
+   built in a consumer, and a `pub macro`, which expands in the caller's
+   file and so has to name a module absolutely, had no spelling that
+   built in both. The other answer the issue offered - a macro's absolute
+   paths resolved against the package that defined it - was not taken: it
+   keeps two names for one module and moves the second one into a rule
+   about where text was written, which a reader of `::Codec` cannot see.
+   One function (`Parser.iyi_package_segments`) forms the name in both
+   builds, from the manifest's path and the in-package path, so the
+   layouts agree by construction: `codec` and `iyi_web/codec` are
+   `IyiWeb::Codec`, `web/codec` is `IyiWeb::Web::Codec`, and the package
+   `example.test/x/web` checked out in any directory is `Web::Codec`. An
+   artifact records the name it was written under (`.iyimod` v57), so
+   `--use-iyimod` reads it back the same, and a manifest that renames the
+   package makes it stale. The old name compiled, so it still does where
+   it did - in the package's own build, a `::Codec` or a bare `Codec`
+   nothing else answers resolves to `IyiWeb::Codec` - with a warning that
+   names the new spelling, in the package's build, before a consumer
+   meets the refusal; `iyi fix` makes the edit where a file writes it,
+   and a macro's warning names the macro and the line it is defined on.
+   What changes without a warning is what a type's name prints:
+   `IyiWeb::Codec` in both builds. One consequence is the package rule's
+   own, now in both builds: a package holding `codec.iyi` and
+   `iyi_web/codec.iyi` names both `IyiWeb::Codec`.
 2. **A package's short imports resolve in its own checkout, or fail.** Not
    passed along to the program's roots: a dependency reaching the
    consumer's modules through a name collision is the accident isolation
@@ -5667,7 +5903,7 @@ From Crystal's own *Required libraries* page, plus every `@[Link]` in this tree.
 | libm | `sqrt`, `pow` | no | LLVM intrinsics where they exist, iyi where they do not |
 | libiconv | encoding conversion | no | never. UTF-8 only, which is Go's answer and already iyi's. The compiler dropped it too (`-Dwithout_iconv`) |
 | PCRE2 | `Regex` | no | **decided (#17, #22) and done: RE2 semantics everywhere, on iyi's own engine** `src/compiler/iyi/rx.cr`, macro-level regex included, differentially verified against pcre2, and `libpcre2` measured off the compiler binary rather than only out of compiler source. The price: macros lose the constructs that are not regular, backreferences, recursion, subroutine calls and conditionals, plus atomic groups and possessive quantifiers, which are controls for a backtracker there is none of here; a macro using one fails with a named error. Lookaround was on this list and should never have been, corrected in III.10 and in #17. `Spec::CLI#pattern` changed type from `Regex?` to `String?` |
-| OpenSSL (libssl, libcrypto) | TLS, digests, ciphers | no | digests **already owned**: `src/crystal/digest/` for the compiler, and for programs `src/std/digest.iyi` (MD5, SHA-1, SHA-224/256/384/512, SHA-3 and SHAKE) and `src/std/crypto.iyi` (HMAC, HKDF, PBKDF2, a constant-time compare) in iyi, checked against RFC 4231, 5869 and 6070 and FIPS 180-4's and FIPS 202's messages by `bench/std_digest_exercise.sh` and `bench/std_crypto_exercise.sh`. Ciphers and curves **owned** too: `src/std/aead.iyi` (AES-GCM, bitsliced, and ChaCha20-Poly1305), `src/std/curve25519.iyi` (X25519, Ed25519, constant time) and `src/std/p256.iyi` (ECDSA signing on P-256, constant time), each checked against its RFC's or NIST's vectors and against OpenSSL through Python's `cryptography` both ways; `src/std/password.iyi` (bcrypt, scrypt). And certificates, checked only: `src/std/asn1.iyi` (DER), `src/std/rsa.iyi` (PKCS #1 v1.5 and PSS), `src/std/ecdsa.iyi` (P-256, P-384, P-521), `src/std/x509.iyi` (chains, validity, constraints, host names) and `src/std/system_roots.iyi` (the platform's trusted roots), each held to OpenSSL's verdicts through Python's `cryptography` - chains to its own verifier - and to every root certificate on the machine. **And TLS 1.3, both ends: `src/std/tls.iyi`**, on all of the above - the client held to RFC 8448's trace byte for byte, a scripted server breaking the protocol one rule at a time, and OpenSSL's own `s_server` across its suites, keys, a HelloRetryRequest and ALPN; the server, with an Ed25519 or P-256 certificate signed in constant time and X25519 or secp256r1 key shares, held to a scripted client breaking it one rule at a time and to OpenSSL's `s_client`, Python's `ssl`, curl and Node (`bench/std_tls_exercise.sh`), and serving std/http's HTTPS (`bench/std_http_exercise.sh`). **Not audited, and not to be called secure until it is**: that is the condition this row set before writing it. Client certificates at both ends (mutual TLS), the server checking a client's for clientAuth and std/http handing it to the handler; a server with several certificates, each shown to a client asking by server_name for a host it names; RFC 8446's exporter at both ends, checked against OpenSSL's; KeyUpdate on a record limit and on request. TLS 1.2 and earlier, a server signing with RSA and resumption are not there. A binding never in the prelude |
+| OpenSSL (libssl, libcrypto) | TLS, digests, ciphers | no | digests **already owned**: `src/crystal/digest/` for the compiler, and for programs `src/std/digest.iyi` (MD5, SHA-1, SHA-224/256/384/512, SHA-3 and SHAKE) and `src/std/crypto.iyi` (HMAC, HKDF, PBKDF2, a constant-time compare) in iyi, checked against RFC 4231, 5869 and 6070 and FIPS 180-4's and FIPS 202's messages by `bench/std_digest_exercise.sh` and `bench/std_crypto_exercise.sh`. Ciphers and curves **owned** too: `src/std/aead.iyi` (AES-GCM, bitsliced, and ChaCha20-Poly1305), `src/std/curve25519.iyi` (X25519, Ed25519, constant time), `src/std/p256.iyi` (ECDSA signing and ECDH on P-256, constant time), `src/std/p384.iyi` (the same on P-384) and `src/std/mlkem.iyi` (ML-KEM-768, FIPS 203, constant time), each checked against its RFC's or NIST's vectors and against OpenSSL through Python's `cryptography` both ways; `src/std/password.iyi` (bcrypt, scrypt). And certificates, checked: `src/std/asn1.iyi` (DER), `src/std/rsa.iyi` (PKCS #1 v1.5 and PSS), `src/std/ecdsa.iyi` (P-256, P-384, P-521), `src/std/x509.iyi` (chains, validity, constraints, host names - and, written and signed for std/acme, a PKCS #10 request and a self-signed certificate) and `src/std/system_roots.iyi` (the platform's trusted roots), each held to OpenSSL's verdicts through Python's `cryptography` - chains to its own verifier - and to every root certificate on the machine. **And certificates obtained: `src/std/acme.iyi`**, an ACME client (RFC 8555) over std/http and the above - requests signed as JWS under ES256, ES384, RS256 or EdDSA, http-01, dns-01 and tls-alpn-01 (RFC 8737), each wait bounded and Retry-After honoured, problem documents as error values - held to RFC 7515's, 7638's and 8037's examples, to OpenSSL and Python's `cryptography` for its requests and its tls-alpn-01 certificate, to a scripted server breaking RFC 8555 one rule at a time, and to Let's Encrypt's Pebble for whole orders by all three challenges, every chain verified by std/x509 and `openssl verify` (`bench/std_acme_exercise.sh`). **And kept: `src/std/autocert.iyi`**, Go's autocert over std/acme - a certificate per server_name, got as a handshake first asks for it through std/tls's `identity_source`, tls-alpn-01 answered on the HTTPS listener itself and http-01 on port 80, one order however many handshakes ask at once, a failure remembered with backoff, a directory cache whose files are 0600, renewal before expiry - held to Python's `ssl` and to Pebble's own log (`bench/std_autocert_exercise.sh`). **And TLS, both ends: `src/std/tls.iyi`**, on all of the above - the client held to RFC 8448's trace byte for byte, a scripted server breaking the protocol one rule at a time, and OpenSSL's own `s_server` across its suites, keys, a HelloRetryRequest and ALPN; the server, with an Ed25519, P-256, P-384 or RSA certificate signed in constant time and X25519MLKEM768, X25519, secp256r1 or secp384r1 key shares, held to a scripted client breaking it one rule at a time and to OpenSSL's `s_client`, Python's `ssl`, curl and Node (`bench/std_tls_exercise.sh`), and serving std/http's HTTPS (`bench/std_http_exercise.sh`). **Not audited, and not to be called secure until it is**: that is the condition this row set before writing it. [SECURITY_REVIEW_TLS.md](SECURITY_REVIEW_TLS.md) is an automated review of it and what it stands on - six findings fixed, the rest recorded - which is evidence for that audit and not the audit. Client certificates at both ends (mutual TLS), the server checking a client's for clientAuth and std/http handing it to the handler; a server with several certificates, each shown to a client asking by server_name for a host it names, or one chosen per ClientHello by the config's `identity_source`; RFC 8446's exporter at both ends, checked against OpenSSL's; KeyUpdate on a record limit and on request. TLS 1.2 at either end, and only when asked; TLS 1.3 resumption by tickets and opt-in early data; X25519MLKEM768 by default; OCSP stapling at both ends, over `src/std/ocsp.iyi` (decision #18 has all of it). TLS 1.1 and earlier are not there. A binding never in the prelude |
 | zlib | `Compress` | no | **owned**: `src/std/compress.iyi` is DEFLATE, zlib and gzip in iyi — every block type read, and written at zlib's levels 0 to 9 with zlib's greedy and lazy match finders, each block stored, fixed or dynamic by what it costs, within 0.3% of zlib's size at every level and smaller at most; `Inflater` and `Deflater` the same a piece at a time, which std/http's gzip in both directions is — and `bench/std_compress_exercise.sh` reads 72 of zlib's streams and has zlib read 256 of iyi's. DEFLATE was a known quantity and it arrived with HTTP, as this row said it would |
 | libxml2 | `XML` | no | no XML in the prelude. A package, written in iyi |
 | libyaml | `YAML` | no | same, and Go ships no YAML at all |
@@ -7003,6 +7239,88 @@ a carried type, and the def at the module's own top level.
 Both belong to IV.1g's rule rather than beside it: "a module's own code is the
 object files named after the types it declares" is what makes them missing, and
 what makes the type ids above missing was the same sentence.
+
+**A parameter with no type is a `forall` nobody named, so its instantiations
+are the caller's too** (issue #134). A program whose `lib/thing` derives
+`serializable` and imports a package, built twice with `--emit-iyimod mods
+--use-iyimod mods`, linked the first time and the second time ended on an
+undefined `*Lib::Thing::Item#to_json<Std::Json::Builder>:Nil`, referenced from
+`std/json`'s `JSON` unit. `nm` on that unit, unpacked from the artifact: it
+defined `write_or_null<Lib::Thing::Item, Std::Json::Builder>` and
+`write_value<Lib::Thing::Item, Std::Json::Builder>`, and named `Item#to_json`
+undefined. `write_or_null(val, b : Builder)` writes no type for `val`, so it
+travelled as a header and the first build's instantiations at its own types
+went into `std/json`'s unit as global symbols. The package has no artifact, so
+`lib/thing`'s was stale and the second build compiled it from source, and its
+`Item` unit held `new` and `initialize` and no `to_json`: the one caller was
+machine code that build did not compile.
+
+IV.3's staleness walk is why nothing saw it coming. An artifact is refused
+when anything it imports is, so `lib/render`'s object code, which also calls
+into `Item`, never links against a `lib/thing` compiled from source.
+`std/json` imports nothing of `lib/thing`'s, so nothing the walk reads says
+its object code points there: an instantiation at the caller's type is an
+edge running against the DAG. Three ways to close it, and the rule is the
+one IV.1g already gave `forall` and blocks:
+
+- *Record the outward references and rebuild `std/json` when their module
+  compiles from source.* That makes a library's artifact a fact about the
+  program that wrote it, stale in every program without a `lib/thing` — the
+  shape `forall` already ruled out, when `Lib::Box2::Box(Q4::Meters)` in a
+  library's type ids refused every other program at the import.
+- *Make the source build emit the callee.* It answers this link and not the
+  next program's, which has no `Item` at all; and a program serialising a type
+  the producer never saw was refused at the call already, because the
+  artifact "has no symbol" for `write_or_null` at that type.
+- *The caller instantiates.* **Built.** A def with an untyped parameter
+  carries its body in `MonoBodies`, the producer compiles each instantiation
+  into the unit that called it, private to that unit
+  (`IyiMod.untyped_parameter?`), and the consumer compiles its own. The
+  issue's program builds twice and prints `[{"name":"item"}]` both times, and
+  `std/json`'s `JSON` unit names no `Item` (`bench/samples_roundtrip.sh`,
+  `untyped`).
+
+The caller's unit is a safe home because the caller holds the value. Its type
+is named in the caller's own code or arrives through something it imports, so
+the caller's module reaches the type's module along imports, directly or not,
+and the walk refuses the caller's artifact whenever that module compiles from
+source. A caller that holds the value only as an untyped or `forall`
+parameter is itself the caller's, and the question moves up a frame.
+
+**A parameter written as a trait is the same edge with a bound on it.**
+`kit/lib`'s `area_of(x : Shape)`, called at `lib/thing`'s `Tri`, put
+`area_of<Lib::Thing::Tri>` in `kit/lib`'s unit; a second program in the same
+directory that imports both and no longer calls `area_of` ended its link on
+`*Lib::Thing::Tri#area:Int32`. Such a body already travelled, because a
+consumer keys its call on the declaration (`iyi_widened_parameters?`), and the
+producer's own instantiations stayed global for its own callers. Where the
+written type admits a type it does not name — a trait or module, a class
+with subclasses or its `.class`, a union holding one — they are now the
+caller's as well (`IyiMod.open_parameter?`; `bench/samples_roundtrip.sh`,
+`bounded`). A union of types it names admits nothing else and keeps its
+symbols where they were.
+
+What the caller's-unit argument does not reach is a value held *as* a trait:
+its dispatch enumerates every implementor the producing build had, wherever
+the code holding it is. `kit/lib`'s `total(xs : Array(Shape)) : Int32`,
+summing `x.area`, travelled as a header and its unit called
+`Lib::Thing::Tri#area` from the dispatch. Two programs laid out as above,
+the first calling `total` and the second not, ended the second link on that
+symbol with this rule as without it. That is III.6's open set, a
+whole-program answer whichever unit holds it, and it is left to that rule
+rather than answered here.
+
+Each is asked of the def as it was *written*. A call with named arguments
+instantiates an expansion the compiler wrote, whose parameters carry no
+restriction whatever the written ones said, and asking the expansion made a
+record's `new(kind: …)` the caller's: `webapp` from its artifacts was then
+refused on `FilterDefinition#initialize`. Neither applies in `iyi bind`'s
+fill build, whose boundary declares such a parameter at the type its keep
+file passes, so the producer's symbol is the one a consumer calls. And an
+impl's method keeps a trait-typed parameter's symbols in its module's unit:
+the top-level pass decides whether its body travels from the written text,
+before any type resolves, so one on a type its module declares travels as a
+header, and a consumer calls the symbol.
 
 **And one thing none of the five reaches, which was expected to be a missing
 object file and turned out to be a missing number.** A module's body
@@ -9922,7 +10240,7 @@ Named honestly, so nobody mistakes this draft for complete.
     shards exist and none of them is written to iyi's rules, so "run them
     directly" is not a compatibility problem, it is the four rules: `require`
     against R-1, inference against R-2, monkey patching against R-3, and
-    Crystal's 8,161-line standard library against iyi's own 21,567-line prelude.
+    Crystal's 8,161-line standard library against iyi's own 22,608-line prelude.
 
     What is measurable is narrower and better than that framing suggests, and
     it was measured on **Kemal 1.12.0**, which compiles under this compiler
@@ -10932,7 +11250,7 @@ For traceability, since several rules here rest on numbers rather than taste.
 | 15 | ~~**Does the daemon become the language server's process? (III.8)**~~ | **Decided: no, on the number.** The server is a front-end compile per question, 44 ms p50 on the release compiler with today's prelude, and the daemon's `Preanalysed` is the 30 ms of that which is the prelude's top-level pass — held in a `Program` that adoption mutates, which is why the daemon forks per build. A clone per request or an invalidation story, for 44 ms to about 15 under an editor's debounce: III.8 declines it with the measurement beside it. The daemon is reachable (`iyi daemon`, listed, gated out of the tarball) and serves the workload it was kept for, `--crystal` builds |
 | 16 | **Does III.4 use libevent or the native backends? (III.10)** | native, and it is not close. Crystal already wrote `epoll`, `kqueue`, `io_uring` and `iocp` backends and libevent is its default only on four platforms iyi does not target. Adopting it would put a C library under every concurrent iyi program to save work already done |
 | 17 | **Regex: PCRE semantics or RE2's? (III.10)** | RE2's, and that answer stands. Linear time, no construct whose cost can grow with the subject. A language selling "the compiler will not surprise you" should not ship a library that takes exponential time on ordinary input, and Go already took this trade. **What this row said the answer costs was wrong, and it is restated rather than quietly widened.** It read "no backreferences, no lookbehind", and was taken to mean the guarantee forbids lookaround, on the premise that lookaround needs a backtracker. It does not: a lookaround over a regular inner pattern is itself a regular property of a position, answered by a pre-pass costing one state set per character and nothing per position. All four forms are supported, nested to any depth, and lookbehind here is not length-limited the way pcre2's is, so the engine accepts patterns pcre2 rejects. RE2 omits lookaround because of its one-pass DFA design, not because linear time forbids it, and this row inherited the omission as if it were the price. What the guarantee actually costs is the constructs that are not regular: backreferences, recursion, subroutine calls and conditionals, refused because no simulation answers them and matching backreferences is NP-hard. Atomic groups and possessive quantifiers are refused for a separate reason worth keeping separate: they are controls for a backtracker, and there is none here to control. A capturing group inside an assertion is refused too, because the pre-pass never performs the sub-match that would set it (III.10) |
-| 18 | ~~**TLS (III.10)**~~ | **Decided and done: iyi owns its TLS, 1.3 at both ends since 0.18, 1.2 at the client alone and only when asked, and never OpenSSL.** The row recommended none in 0.x; an OpenSSL binding as a package if something needed it sooner; owning it eventually, TLS 1.3 only, and not before there was something to protect and somebody to audit it. Owning it came first: std/tls is written in iyi from the RFCs over std/aead, std/curve25519, std/p256, std/ecdsa, std/rsa and std/x509, client and server, so no OpenSSL binding was written and none is planned, and OpenSSL is reachable from no prelude. "1.3 only" stands as the default: a server speaks nothing else, and a client offers nothing else unless its `TlsConfig#min_version` is `TlsVersion::TLS12`, for servers that never moved past 1.2 - then with the extended master secret required, ECDHE and AEAD suites alone, RFC 8446's downgrade sentinel checked, no renegotiation and no resumption. The row's other condition is not met and is said so: std/tls has not been audited, and its header says not to call it secure until it is |
+| 18 | ~~**TLS (III.10)**~~ | **Decided and done: iyi owns its TLS - 1.3 at both ends since 0.18, 1.2 at either end only when asked - and never OpenSSL.** The row recommended none in 0.x; an OpenSSL binding as a package if something needed it sooner; owning it eventually, TLS 1.3 only, and not before there was something to protect and somebody to audit it. Owning it came first: std/tls is written in iyi from the RFCs over std/aead, std/curve25519, std/mlkem, std/p256, std/p384, std/ecdsa, std/rsa and std/x509, client and server, so no OpenSSL binding was written and none is planned, and OpenSSL is reachable from no prelude. What std/tls does now, decided as follows. *Versions.* "1.3 only" stands as the default at both ends: a client offers nothing else unless its `TlsConfig#min_version` is `TlsVersion::TLS12`, for servers that never moved past 1.2, and a server answers nothing else unless its `TlsServerConfig#min_version` is, for clients that never did - and then only a client that does not offer 1.3, which is answered in it whenever it does. Either end holds 1.2 to the same: the extended master secret required, ECDHE and the six AEAD suites alone, RFC 8446's downgrade sentinel written by the server and checked by the client, TLS_FALLBACK_SCSV refused by the server, renegotiation_info answered and renegotiation refused, and no resumption. *Key exchange.* Post-quantum by default: X25519MLKEM768 (draft-ietf-tls-ecdhe-mlkem, group 0x11EC) over std/mlkem, ML-KEM-768 from FIPS 203 in iyi and constant-time, held to NIST's ACVP vectors, OpenSSL 3.5 and `cryptography`, in TLS 1.3 alone, as the draft defines no ServerKeyExchange for it. The client sends its share beside an X25519 share with the same key, as OpenSSL 3.5, Chrome and Firefox do: traffic recorded today is decrypted by whoever one day breaks X25519, and the hybrid is the one defence that must be in place before that day, not after. What it costs, measured: the ClientHello grows by 1,222 bytes (197 to 1,419, as OpenSSL 3.5's s_server read it for localhost), and the client spends an ML-KEM-768 key pair and a decapsulation, 41 and 36 microseconds with --release, the server an encapsulation, 48 (OpenSSL 3.5.5's are 25, 24 and 16); a whole handshake with the server, Python's ssl over loopback, went from 0.61 ms in X25519 to 0.76 in the hybrid on an Ed25519 key. `TlsConfig#post_quantum = false` turns it off, for a peer that cannot take a ClientHello past one packet. Beside it are X25519, secp256r1 and secp384r1, each constant-time and each legal in 1.2 as in 1.3. A 1.3 server takes the hybrid whenever the client lists it, through a HelloRetryRequest when its share was not sent, as OpenSSL 3.5's server does - a round trip spent rather than a recorded handshake left to X25519 alone - and otherwise the first of X25519, secp256r1 and secp384r1 it was sent a share in; a 1.2 server takes the first of the three the client lists. The client lists all four and sends shares in the hybrid and X25519 alone: a server that takes only a NIST curve costs its own handshakes a round trip, rather than every handshake paying for keys made and dropped (a P-384 key is 0.348 ms). Either end names the group it agreed by one getter, `named_group`, RFC 8446's name for the field; the P-384 work's `key_exchange` was folded into it before release. *Keys.* A server or client signs with Ed25519, P-256, P-384 or RSA. P-384 is std/p384, std/p256's design at six limbs in a module of its own rather than one made general, because a limb count chosen at run time would put every number on the heap; measured `--release` it makes a key in 0.348 ms, agrees in 0.341 and signs in 0.377, against OpenSSL 3.5.5's 0.091, 0.212 and 0.124 on the same machine, and a server handshake with a P-384 key took 1.24 ms (1.94 in secp384r1 too). It signs CertificateVerify with ecdsa_secp384r1_sha384 alone and refuses a client that does not list it; in 1.2 an ECDSA key answers only a client that lists its curve. P-521 is checked (std/ecdsa) and neither agreed on nor signed with. *Resumption.* TLS 1.3 resumes by tickets at both ends: psk_dhe_ke alone, offered and taken - psk_ke never, so that a resumed session's traffic does not fall to whoever later learns the ticket key, at the price of a key exchange a resumption, in whatever group that handshake agrees; a ticket carries its suite and is taken only under a suite of the same hash. A server's ticket is its own state sealed under keys it makes at random, which turn over every ticket lifetime and live in the process alone, so a ticket survives neither a restart nor a move to another server, and resumption across server instances would need shared keys, which are not offered; a client's tickets are kept in a `TlsSession` the caller holds, never in the process's own state, each offered once and only to the host and port it came from, under the `TlsConfig` it came under (`TlsMadeUnder`, std/http's rule too), while the server's leaf has not expired and within seven days of the full handshake however many resumptions came between; and the tickets a resumption is sent end when the first handshake's lifetime does. std/http's `HTTPClient` is such a caller, with a session per origin - scheme, host and port - kept under the TLS configuration its tickets came under, the client's own `tls:` or else `HTTP.tls_config`: a resumed handshake checks no certificate, so a ticket is never offered under roots or an identity other than those it was taken under, and after either changes the next connection is a full handshake; 4 tickets an origin and 256 in all by default. std/secure_dns's DNS over TLS resumes the same way, RFC 7858 recommending it. *Early data.* 0-RTT is opt-in at both ends: a server takes it only under RFC 8446 section 8.2's ClientHello recording with section 8.3's freshness check - each taken ClientHello's PSK binder held for twice the 10 s window, a binder held refused, and all early data refused while the register is full, so it fails closed - rather than single-use tickets, which would hold every ticket for its whole lifetime, and never after a HelloRetryRequest, whichever group asked for it. The register lives in the process with the ticket keys, which is also why no other server can take a ticket's early data; early data is read apart from 1-RTT data (`read_early`, never `read`); a client resends refused early data only when the protocol chosen is the ticket's (section 4.2.10's MUST NOT); and std/http neither takes nor sends it, since HTTP cannot tell a request safe to replay from one that is not. *Revocation.* By OCSP stapling alone (RFC 6066, RFC 8446 section 4.4.2.1), at both ends, over std/ocsp - RFC 6960's responses read and checked in iyi, and its requests built. A client asks every server for a staple and checks one that comes once the chain is: a SingleResponse for the leaf's CertID, signed by the leaf's issuer or a responder it delegated to (issued and signed by the issuer, carrying id-kp-OCSPSigning itself, valid then), current within five minutes either way, and one without nextUpdate taken for a day after its thisUpdate, since a staple is something a server holds and could replay. Revoked is a refusal, certificate_revoked; so is a staple that is unknown, malformed, out of its time or not the issuer's, bad_certificate_status_response: a staple is the server's own evidence, and evidence that does not hold refuses the handshake whether or not it had to be sent. A server that staples nothing is taken unless `TlsConfig#require_staple` or the leaf's TLS Feature extension (RFC 7633, must staple) asks for one: most servers staple nothing, so refusing them all is not a default. A delegated responder's id-pkix-ocsp-nocheck is accepted and not required, and its own status is never asked, as OpenSSL and Go take a responder: asking would need the revocation this does not do. Not done, by decision: CRLs, and asking a responder over the network from std/tls - each handshake would wait on a third party and tell it the host, and an answer that does not come has to be passed over or every outage of a CA's responder is an outage of every site it signs, so one who can block the request gets the same handshake as no check at all. A server staples the response its config was given for each identity (`TlsServerConfig#staple`), checked to be for the identity's leaf, in either version, to a client that asks, and not once it is past its nextUpdate; fetching a fresh one is the caller's. *Choosing the identity.* A server shows the identity `TlsServerConfig#identity_source` answers when it has one - a proc std/tls asks first, on each ClientHello, with the server_name and the ALPN offer, held to the client's schemes (and in 1.2 its suites and curves) as the config's own identities are - and otherwise the first of `others` that names the host, then `identity`. Whichever is chosen, its own staple is the one sent. *Certificates obtained.* By ACME (RFC 8555) in iyi rather than a tool beside the program: std/acme is the client - JWS under ES256, ES384, RS256 or EdDSA, http-01, dns-01 and tls-alpn-01 (RFC 8737) - over std/x509's writer of certificate requests and self-signed certificates, and std/autocert keeps a server's certificates as Go's autocert does: its manager is an identity source, getting a certificate for a name the first time a handshake asks for it - one order however many handshakes wait, a name outside the program's list refused before the CA is asked, a failure remembered with backoff - showing tls-alpn-01's challenge certificate on the serving listener itself to a client that offers `acme-tls/1` alone, and renewing each certificate `renew_before` (thirty days) before it ends, under a new key. std/autocert fetches no OCSP response: a certificate it gets is stapled only if the program gives the identity one. *Closing.* A connection ends with close_notify, and gracefully (RFC 8446 section 6.1): `close_write` sends it and shuts the socket's sending half, and `close` then reads and drops what the peer still sends - each record within 1 s, 10 s and 64 MiB in all - before the socket closes, because a socket closed with bytes unread in it is a reset, which takes from the peer what it had received and not yet read. std/http's server and client close their connections the same way, RFC 9112 section 9.6's lingering close. A stopping std/http server sends close_notify on each connection waiting between requests and half-closes it, without the drain, which would hold the stop for each client still sending; a socket closed under a connection is that connection's end, answered as a `TlsError` rather than reaching the socket. *Writes.* A flight of records goes out in one write, and std/socket sets TCP_NODELAY on every connected and accepted TCP socket: with Nagle's algorithm on, a client's Finished, written apart from its ChangeCipherSpec, waited 40 ms for the server's delayed acknowledgement. *Names.* A host's address may be asked for privately, over std/tls: std/secure_dns's DNS over TLS (RFC 7858) and DNS over HTTPS (RFC 8484, through an `HTTPClient` of its own) are the upstreams a `Resolver` asks instead of its plaintext servers, each server's certificate checked for the name it was configured by (RFC 8310's strict profile), so nothing is looked up to reach it. A resolver with upstreams never asks its plaintext servers unless the program passes `plaintext_fallback: true`, and then only when no upstream could be asked: falling back by default would hand the question the program meant to keep private to the path. `HTTPClient.new(tls:, resolver:)` gives a client a TLS configuration and a resolver of its own. The row's other condition is not met and is said so: std/tls has not been audited, and its header says not to call it secure until it is. [SECURITY_REVIEW_TLS.md](SECURITY_REVIEW_TLS.md) is an automated review, not that audit |
 | 19 | **Is "no C library in the prelude" a rule or a habit? (III.10)** | a rule for iyi's own prelude, and it is checked: `bench/dependency_floor.sh` fails in CI when an own-prelude program grows a symbol or a linked library, on the default build and on `-Dgc_boehm`. `--crystal` is outside this gate and may link Crystal's standard library dependencies and anything a required shard pulls. Both host platforms measure the same property: direct dependencies, `otool -L` on macOS and `readelf -d` NEEDED on Linux, since `ldd`'s transitive closure put libLLVM's libraries on iyi's list and an allowlist holding libxml2 for that reason could never notice iyi reaching for libxml2 itself. Symbols are per platform: macOS's five libSystem calls, and on Linux the five the link template's crt objects leave, allowed by exact name rather than a wildcard, so `malloc` or `mmap` still fails. It holds the compiler binary to a list too, `libLLVM libc++ libgc libSystem`, and to a denylist that carries `libpcre`, so the rule is not weaker for the toolchain than for own-prelude programs. Proven to fail three times: adding a `lib LibM` call to a sample, injecting a reachable regex literal into `src/option_parser.cr`, and rebuilding the compiler with an explicit `-lxml2` |
 | 20 | ~~**Write a collector, or adopt `gcry`? (III.9)**~~ | **Decided: iyi writes its own collector; gcry is not adopted, overruling this row's earlier recommendation.** What changed is the goal, and the change is the owner's, not a finding: they want concurrency, parallelism and a performant language, and owning the collector is the only path to the control that takes; gcry was pointed at as hints about what has already been tried to pull Crystal off Boehm, never as a runtime to adopt. The price is stated rather than softened: everything gcry already built, the heap, the STW, the roots, the finalizers, two platforms, is rebuilt in this tree, and only its measurements are inherited (#21). R-4 still requires the precise heap-layout table either way (II.5) |
 | 21 | **Precise stack roots, now a design question inside the collector iyi writes (III.9)** | still open, and reframed by #20 rather than settled by it: it is a design decision in a collector iyi owns, no longer a finding inherited from gcry. R-4 needs heap-layout precision, which is a table. gcry's measurement is still the best available evidence on the expensive half: stack-map precision is correctness-stable and not an RSS win. Inherited as prior art rather than repeated, and answerable only when iyi's own collector exists to measure on |

@@ -290,15 +290,40 @@ prove_broken "a third INTEGER read past" "a third INTEGER (P256 SHA256): expecte
 prove_broken "the digest never cut" "P256 SHA384 (P256 SHA384): expected true, got false" \
   '    e = e >> excess if excess > 0' ''
 prove_broken "G + Q precomputed as G + G" "expected true, got false" \
-  '    both = add(g, q)' '    both = add(g, g)'
+  '    add_points(g, q, both)' '    add_points(g, g, both)'
 prove_broken "the scalars' bits read low first" "expected true, got false" \
   '        x = (a[i] >> bit) & 1_u8' '        x = (a[i] >> (7 - bit)) & 1_u8'
-prove_broken "a point added to itself as the identity" "D1 over abc (P256 SHA256): expected true, got false" \
-  'return r.zero? ? double(one) : EcdsaPoint.identity' 'return EcdsaPoint.identity'
-prove_broken "a point added to its negative as a doubling" "DNEG over abc (P256 SHA256): expected true, got false" \
-  'return r.zero? ? double(one) : EcdsaPoint.identity' 'return double(one)'
+prove_broken "a point added to itself as the identity" "D1 over abc (P384 SHA384): expected true, got false" \
+  '      zero?(rr) ? double(p, r) : clear(r + (2 * k).to_i64)' '      clear(r + (2 * k).to_i64)'
+prove_broken "a point added to its negative as a doubling" "DNEG over abc (P384 SHA384): expected true, got false" \
+  '      zero?(rr) ? double(p, r) : clear(r + (2 * k).to_i64)' '      double(p, r)'
 prove_broken "doubling without a = -3's factor" "expected true, got false" \
-  'alpha = reduce((point.x - delta) * (point.x + delta) * BigInt.new(3))' 'alpha = reduce((point.x - delta) * (point.x + delta) * BigInt.new(2))'
+  '    add(u, t, t)' '    copy(u, t, k)'
+# P-256's own path: the coincident points, both digits' signs, the table
+# of G, the recoding's carry, the field's last subtraction and its
+# borrow, and the doubling.
+prove_broken "a P-256 point added to itself as the identity" "D1 where the digits meet (P256 SHA256): expected true, got false" \
+  '    rr.zero? ? double : EcdsaP256Point.identity' '    EcdsaP256Point.identity'
+prove_broken "a P-256 point added to its negative as a doubling" "DNEG where the digits meet (P256 SHA256): expected true, got false" \
+  '    rr.zero? ? double : EcdsaP256Point.identity' '    double'
+prove_broken "Q's negative digits added as positive" "(P256 SHA256): expected true, got false" \
+  '        acc = acc.add(odd[(-d) >> 1].negate)' '        acc = acc.add(odd[(-d) >> 1])'
+prove_broken "G's negative digits added as positive" "(P256 SHA256): expected true, got false" \
+  'EcdsaP256Num.sub(EcdsaP256Num.zero, table[-d])' 'table[-d]'
+prove_broken "G's table one G apart, not two" "(P256 SHA256): expected true, got false" \
+  '      points[i] = points[i - 1].add(twice)' '      points[i] = points[i - 1].add(g)'
+prove_broken "a negative digit's carry left out of the scalar" "(P256 SHA256): expected true, got false" \
+  '          carry = full &- low' '          carry = 0_u64'
+prove_broken "a P-256 product that never takes p off" "(P256 SHA256): expected true, got false" \
+  '    keep = 0_u64 &- ((top | (w.unsafe_shr(127).unsafe_to_u64 ^ 1_u64)) & 1_u64)' '    keep = 0_u64'
+prove_broken "a P-256 difference that never adds p back" "(P256 SHA256): expected true, got false" \
+  '    mask = 0_u64 &- w.unsafe_shr(127).unsafe_to_u64' '    mask = 0_u64'
+prove_broken "a P-256 doubling without a = -3's factor" "(P256 SHA256): expected true, got false" \
+  '    alpha = EcdsaP256Num.add(alpha, EcdsaP256Num.add(alpha, alpha))' '    alpha = EcdsaP256Num.add(alpha, alpha)'
+# The Montgomery product is below 2p before its last subtraction; one
+# that never subtracts leaves values the comparisons do not match.
+prove_broken "a product that never takes p off" "expected true, got false" \
+  '    if t[k] != 0_u64 || !below?(t, m)' '    if false'
 prove_broken "SHA-384 as SHA-512" "SHA384 (P256 SHA384): expected true, got false" \
   'when EcdsaHash::SHA384 then Std::Digest::SHA384.hash_bytes(data)' 'when EcdsaHash::SHA384 then Std::Digest::SHA512.hash_bytes(data)'
 prove_broken "a point off the curve taken" "a point off the curve refused" \

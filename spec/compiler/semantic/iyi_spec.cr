@@ -4833,5 +4833,186 @@ describe "Semantic: iyi" do
         end
         CODE
     end
+
+    # SPEC.md III.4.13: a parallel task's block may run on another core,
+    # and is held to what a thread's block is. The stub stands in for the
+    # prelude's group, known by its owner's name as the thread is.
+    describe "the block spawn_parallel runs" do
+      group_stub = <<-STUB
+        class IyiGroup
+          def spawn_parallel(&block : -> T) : Nil forall T
+            keep = block
+            nil
+          end
+        end
+
+        G = IyiGroup.new
+
+        STUB
+
+      it "lets it capture integers, strings and a value whose fields nothing assigns" do
+        assert_type(group_stub + <<-CODE, filename: "x.iyi") { nil_type }
+          class Totals
+            def initialize(@limit : Int32)
+            end
+
+            def limit : Int32
+              @limit
+            end
+          end
+
+          n = 3
+          name = "seven"
+          totals = Totals.new(4)
+          g = G
+          g.spawn_parallel do
+            totals.limit
+            n
+            name
+          end
+          CODE
+      end
+
+      it "refuses a captured value that is not shareable, by name" do
+        assert_error(group_stub + <<-CODE, "the block spawn_parallel runs on another thread captures `counter : Counter`, which is not Share: Counter's field @count is given a setter `count=` (SPEC.md III.4.4)", filename: "x.iyi")
+          class Counter
+            def initialize
+              @count = 0
+            end
+
+            def count=(value : Int32)
+              @count = value
+            end
+          end
+
+          counter = Counter.new
+          g = G
+          g.spawn_parallel do
+            counter.count = 1
+            nil
+          end
+          CODE
+      end
+
+      it "refuses a captured local assigned after the spawn" do
+        assert_error(group_stub + <<-CODE, "`count` is assigned here, after the task was spawned, and the block spawn_parallel runs on another thread", filename: "x.iyi")
+          count = 1
+          g = G
+          g.spawn_parallel { count }
+          count = 2
+          CODE
+      end
+
+      it "refuses a local of a loop that spawns again" do
+        assert_error(group_stub + <<-CODE, "in a loop or a block that spawns the task again", filename: "x.iyi")
+          g = G
+          going = true
+          while going
+            seed = 10
+            g.spawn_parallel { seed }
+            going = false
+          end
+          CODE
+      end
+
+      it "refuses a constant the block names whose type is not shareable" do
+        assert_error(group_stub + <<-CODE, "the block spawn_parallel runs on another thread names the constant `TALLY : Tally`, which is not Share: Tally's field @total is assigned in `bump` (SPEC.md III.4.5)", filename: "x.iyi")
+          class Tally
+            def initialize
+              @total = 0
+            end
+
+            def bump : Nil
+              @total = 1
+            end
+          end
+
+          TALLY = Tally.new
+          g = G
+          g.spawn_parallel do
+            TALLY.bump
+            nil
+          end
+          CODE
+      end
+    end
+  end
+
+  # #136. A literal records each type it can be cast to while the overloads
+  # are tried, and that record is what calls a call ambiguous; the
+  # mismatch message is computed per argument. Both read the literal where
+  # the call failed on another argument.
+  describe "what a call with a literal says" do
+    float_pair = <<-CODE
+      def pick(a : Float64, b : Float64)
+        a
+      end
+
+      def pick(a : Float32, b : Float32)
+        a
+      end
+
+      CODE
+
+    it "takes the one overload the variable allows, not calling the literal ambiguous" do
+      # It was "ambiguous call, implicit cast of 2 matches all of Float64,
+      # Float32": the Float32 overload, which `x` rules out, had recorded
+      # Float32 for the literal before `x` failed it.
+      assert_type(float_pair + <<-CODE) { float64 }
+        x = 3
+        pick(2, x)
+        CODE
+    end
+
+    it "names the argument no overload takes" do
+      # It was "expected argument #1 to 'pick' to be Float32 or Float64,
+      # not Int32", about the literal both overloads take.
+      assert_error(float_pair + <<-CODE, "expected argument #2 to 'pick' to be Float32 or Float64, not Int64")
+        x = 3_i64
+        pick(2, x)
+        CODE
+    end
+
+    it "still calls a literal ambiguous when two overloads take the call" do
+      assert_error(float_pair + <<-CODE, "ambiguous call, implicit cast of 2 matches all of Float64, Float32")
+        pick(2, 5)
+        CODE
+    end
+
+    it "lets a literal before a variable take the type the variable binds" do
+      # It bound T to Int32 and refused the Int64, where `same(n, 2)` was
+      # an Int64.
+      assert_type(<<-CODE) { int64 }
+        def same(a : T, b : T) : T forall T
+          b
+        end
+
+        n = 3_i64
+        same(2, n)
+        CODE
+    end
+
+    it "keeps the written order's type where it matches" do
+      assert_type(<<-CODE) { int64 }
+        def same(a : T, b : T) : T forall T
+          b
+        end
+
+        x = 3
+        same(1_i64, x)
+        CODE
+    end
+
+    it "refuses a pair neither of which casts to the other" do
+      assert_error(<<-CODE, "expected argument #2 to 'same' to be Int64, not UInt64")
+        def same(a : T, b : T) : T forall T
+          b
+        end
+
+        x = 3_i64
+        y = 4_u64
+        same(x, y)
+        CODE
+    end
   end
 end

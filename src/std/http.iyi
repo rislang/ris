@@ -20,7 +20,10 @@
 # coding itself; a `jar:` (std/cookie's `CookieJar`) keeps what
 # `Set-Cookie` sets and sends it back. Each `HTTP` request is a
 # connection of its own; an `HTTPClient` keeps the connections its
-# answers leave open and sends the next request to that server over one.
+# answers leave open and sends the next request to that server over one,
+# and keeps the TLS tickets `https://` servers send it, so that a new
+# connection to one resumes its session rather than checking its
+# certificate again (`HTTPClient` says how they are kept and bounded).
 # Response headers are read by name without regard to case, a field on
 # several lines is one field with its values joined by ", "
 # (`header_values` keeps the lines apart, as a `Set-Cookie` must be
@@ -48,15 +51,34 @@
 # pattern as Go's ServeMux does, std/fileserver answers them from a
 # directory, std/sse streams events, and std/websocket takes a
 # connection over.
+# A connection the server closes after writing to it - an answer that
+# says `close`, a body left unread past that megabyte, a refusal, a
+# GOAWAY - closes by lingering (RFC 9112 §9.6): the sending half shut
+# (close_notify first over TLS), what the client still sends read and
+# dropped until it closes, while it comes a second apart at most, for
+# ten seconds and 64 MiB at most, then the socket closed - so the reset a
+# close with unread bytes would be cannot take the answer from a client
+# still sending. A client that said
+# `close` and sent nothing past its request is closed at once. The
+# client closes its connections the same way.
 # The socket parks under the runtime, so a slow client costs one fiber;
 # the listener's `close` ends `serve`. With `tls:` a `TlsServerConfig`
-# (std/tls's server: TLS 1.3, an Ed25519 or P-256 certificate) every
-# connection is TLS, its handshake first and close_notify last; inside
-# it, as in the clear, a connection that opens with HTTP/2's preface - as
-# one whose ALPN chose `h2` does - is served HTTP/2, any other HTTP/1.1.
+# (std/tls's server: TLS 1.3, and 1.2 when its `min_version` asks; an
+# Ed25519, P-256, P-384 or RSA certificate) every connection is TLS, its
+# handshake first and close_notify last; inside it, as in the clear, a
+# connection that opens with HTTP/2's preface - as one whose ALPN chose
+# `h2` does - is served HTTP/2, any other HTTP/1.1.
 # A config with `client_roots` asks each client for its certificate, and
 # a request carries the chain it presented in `peer_certificates`; an
 # `https://` request presents `HTTP.tls_config`'s `identity` when asked.
+# No early data (0-RTT), either way: a server here takes none whatever its
+# config allows - its clients send the request again after the handshake -
+# and the client, which resumes sessions by the tickets it keeps, sends
+# none with them, whatever a ticket allows. A request that runs twice
+# when replayed (a POST) must never go early, and HTTP cannot tell a GET
+# with side effects from one without. That is decided here, not left to
+# a setting. `Request#tls_resumed?` and `Response#tls_resumed?` say
+# whether the connection under them was resumed.
 #
 # **Errors are values.** What the other end does wrong - a malformed head,
 # a body cut short, a broken chunk, a corrupt gzip - is an `HTTPError`
@@ -122,8 +144,9 @@ import std/text
 
 import std/int
 
-import std/socket::{IyiSocket, SocketError}
-import std/tls::{TlsClient, TlsConfig, TlsConnection, TlsError, TlsServer, TlsServerConfig}
+import std/dns::{DnsError, DnsName, SvcbAnswer, SvcbRecord}
+import std/socket::{IyiSocket, Resolver, SocketError}
+import std/tls::{TlsAlert, TlsClient, TlsConfig, TlsConnection, TlsEchConfig, TlsError, TlsMadeUnder, TlsServer, TlsServerConfig, TlsSession}
 import std/x509::{Certificate}
 import std/uri::{URI, Params, Query}
 import std/mime::{MIME}
@@ -176,8 +199,8 @@ end
 #
 # Under `serve`, *listener* and *idle*: no read starts once the listener
 # is closed, and every read waits with the connection in *idle*, for
-# `serve` to close when the listener closes - one partway through a
-# request as much as one between requests.
+# `serve` to end (`close_for_stop`) when the listener closes - one partway
+# through a request as much as one between requests.
 class Conn
   @socket : IyiSocket
   @data : Pointer(UInt8)
@@ -190,20 +213,26 @@ class Conn
   @ended : Bool
   @failure : Cancelled | SocketError | Nil
   @listener : IyiSocket?
-  @idle : Hash(UInt64, IyiSocket)?
-  # When the head being read must have arrived by (monotonic ns, 0 for no
-  # such time), and how long one read may wait otherwise.
+  @idle : Hash(UInt64, Conn)?
+  # Handed to an upgrade's protocol (`held`), which writes when it likes.
+  @handed_over : Bool = false
+  # When what is being read must have arrived by (monotonic ns, 0 for no
+  # such time) and what it is, and how long one read may wait otherwise.
   @deadline : Int64 = 0_i64
+  @deadline_what : String = "read a request's head"
   @gap : Int32? = nil
   # A client's `https://` connection: TLS over the socket, which every
   # read and write then goes through. The socket's timeouts are TLS's too.
   @stream : TlsStream? = nil
   # The HTTP/2 connection over it, when the two ends speak that.
   property h2 : H2Connection? = nil
+  # What an `https://` connection's handshake was made under, for a
+  # client to tell whether it may carry a request made under another.
+  property made_under : TlsMadeUnder? = nil
 
   ROOM = 16384
 
-  def initialize(@socket : IyiSocket, @listener : IyiSocket? = nil, @idle : Hash(UInt64, IyiSocket)? = nil, @stream : TlsStream? = nil)
+  def initialize(@socket : IyiSocket, @listener : IyiSocket? = nil, @idle : Hash(UInt64, Conn)? = nil, @stream : TlsStream? = nil)
     @capacity = ROOM
     @data = Pointer(UInt8).malloc(@capacity.to_u64)
     @start = 0
@@ -217,6 +246,31 @@ class Conn
     @socket
   end
 
+  # How long a stopping server's close_notify may wait to be written: a
+  # client that reads nothing, its socket's buffer full, holds the stop
+  # this long and no longer.
+  STOP_WRITE_MS = 100
+
+  # What `serve` does to a connection waiting in a read when its listener
+  # closes: over TLS, close_notify and the sending half shut
+  # (`TlsConnection#close_write`), then the socket closed, so a client
+  # reads the end of the connection rather than a truncation; in the
+  # clear, the socket closed. Either ends the read. Not the lingering
+  # close (`close`): the stop ends each waiting connection in turn, and a
+  # drain of up to `TlsConnection::DRAIN_MS` each, against a client that
+  # keeps sending, would hold the stop that long per connection. A
+  # connection an upgrade handed over is the protocol's to write on, from
+  # its own task, and has its socket closed alone. The socket closed under
+  # it, the connection's own task finds it so: TLS answers that it is
+  # closed, and HTTP/2's GOAWAY, after a read that failed, is not written.
+  def close_for_stop : Nil
+    if (stream = @stream) && !@handed_over && !@socket.closed?
+      @socket.write_timeout_ms = STOP_WRITE_MS
+      stream.close_write
+    end
+    @socket.close
+  end
+
   # What a request is written to: TLS over the socket, or the socket.
   def transport : IyiSocket | TlsStream
     @stream || @socket
@@ -224,6 +278,12 @@ class Conn
 
   def failure : Cancelled | SocketError | Nil
     @failure
+  end
+
+  # Whether the connection's TLS handshake resumed a session by a ticket
+  # rather than checking certificates afresh; false in the clear.
+  def resumed? : Bool
+    (stream = @stream) ? stream.resumed? : false
   end
 
   # Whether the other end closed its side.
@@ -281,13 +341,17 @@ class Conn
     if @deadline > 0_i64
       left = (@deadline - Time.monotonic_nanoseconds.to_i64) // 1000000_i64
       if left <= 0_i64
-        @failure = SocketError.timed_out("read a request's head")
+        @failure = SocketError.timed_out(@deadline_what)
         return false
+      end
+      # The pause a read may take still holds inside the deadline.
+      if gap = @gap
+        left = gap.to_i64 if gap > 0 && gap.to_i64 < left
       end
       @socket.read_timeout_ms = left.to_i32
     end
     if idle = @idle
-      idle[@socket.object_id] = @socket
+      idle[@socket.object_id] = self
     end
     stream = @stream
     got = stream ? stream.read(@data + @stop.to_i64, @capacity - @stop) : @socket.read(@data + @stop.to_i64, @capacity - @stop)
@@ -324,7 +388,14 @@ class Conn
   # client that sends a byte a little inside it holds a connection for as
   # long as it likes.
   def deadline_in(ms : Int32) : Nil
-    @deadline = ms > 0 ? Time.monotonic_nanoseconds.to_i64 + ms.to_i64 * 1000000_i64 : 0_i64
+    deadline_at(ms > 0 ? Time.monotonic_nanoseconds.to_i64 + ms.to_i64 * 1000000_i64 : 0_i64)
+  end
+
+  # The same, by the monotonic clock's nanoseconds (0: no limit); *what*
+  # is what the timed-out read says it was doing.
+  def deadline_at(ns : Int64, what : String = "read a request's head") : Nil
+    @deadline = ns
+    @deadline_what = what
   end
 
   def no_deadline : Nil
@@ -436,34 +507,101 @@ class Conn
   # client that stayed kept `serve` from returning after its listener was
   # closed, for as long as it stayed. Go's server does not wait for a
   # connection it handed over; this one cannot leave a task behind, so it
-  # closes the connection under the protocol, whose next read or write
-  # answers that it closed. A listener closed before the block starts
-  # closes the connection at once.
+  # closes the connection under the protocol, whose next read answers that
+  # it closed, and whose `closed?` says so: `IyiSocket#write` refuses a
+  # closed socket by panicking, so a protocol asks first, as std/websocket
+  # does, while over TLS a write answers it as an error too. A listener
+  # closed before the block starts closes the connection at once.
   def held(& : -> Nil) : Nil
     idle = @idle
     listener = @listener
     if idle && listener
+      @handed_over = true
       if listener.closed?
         @socket.close
       else
-        idle[@socket.object_id] = @socket
+        idle[@socket.object_id] = self
       end
     end
     yield
     idle.delete(@socket.object_id) if idle
   end
 
-  # A connection speaking HTTP/2 says GOAWAY first, so the other end knows
-  # no request was lost in the close.
+  # The connection ended from this side (RFC 9112 section 9.6): GOAWAY
+  # first over HTTP/2, so the other end knows no request was lost in the
+  # close; then, while the other end has not ended its half, a lingering
+  # close - this side's sending half shut (close_notify first over TLS,
+  # `TlsConnection#close`), and what the other end still sends read and
+  # dropped until it closes, for at most `LINGER_BYTES` and `LINGER_MS`,
+  # before the socket closes. A socket closed with bytes unread in it is
+  # reset rather than ended, and the reset takes from the other end what
+  # it had received and not yet read: a server that closed at once on a
+  # request body it had not read lost its whole answer to Python's
+  # http.client in each of 50 runs, and the end of it to curl in each of
+  # 50 (bench/std_http_exercise.sh, "a close while the client still
+  # sends"). nginx's lingering_close is this; Go's server half-closes the
+  # same way (closeWriteAndWait) and then waits without reading. A
+  # connection that ended or failed is closed at once (`close_now`).
   def close : Nil
     if h2 = @h2
       h2.goaway
     end
-    if stream = @stream
+    if @ended || !@failure.nil?
+      close_now
+    elsif stream = @stream
       stream.close
+    else
+      linger
+    end
+  end
+
+  # Closed with nothing waited for: over TLS the close_notify still goes
+  # first.
+  def close_now : Nil
+    if stream = @stream
+      stream.close_write
+      stream.abort
     else
       @socket.close
     end
+  end
+
+  # The lingering close's bounds, nginx's two: each read waits at most
+  # `LINGER_GAP_MS` for more (lingering_timeout, 5 s there), and the whole
+  # linger lasts at most `LINGER_MS` (lingering_time, 30 s there) - so a
+  # close holds its task, and a server's connection its place among
+  # *max_connections*, for at most ten seconds, and that only for a client
+  # that goes on sending at least every second; one that stops sending,
+  # or closes, ends it within a second. A bound on the whole alone was
+  # wrong: at one second in all, a body slower than that to arrive was
+  # cut off, and Python's http.client, which sends its whole body before
+  # it reads, never read its answer - over TLS on a Windows runner it
+  # waited out its timeout in every run (CI job 118872747607), and on
+  # Linux, the server's CPU shared with six busy loops, it was reset with
+  # 4.75 to 7.25 of its 8 MiB sent. Go's server waits 500
+  # ms after its half-close without reading (`rstAvoidanceDelay`). The
+  # bytes are enough for the largest request body the server takes
+  # (`Server::MAX_BODY`) to finish arriving. A client that has read the
+  # answer and closed ends it at once: on loopback, a round trip.
+  LINGER_BYTES  = Server::MAX_BODY
+  LINGER_GAP_MS =  1000
+  LINGER_MS     = 10000
+
+  private def linger : Nil
+    socket = @socket
+    return if socket.closed?
+    socket.close_write
+    until_ns = Time.monotonic_nanoseconds.to_i64 + LINGER_MS.to_i64 * 1000000_i64
+    left = LINGER_BYTES
+    while left > 0
+      wait = (until_ns - Time.monotonic_nanoseconds.to_i64) // 1000000_i64
+      break if wait <= 0
+      socket.read_timeout_ms = wait < LINGER_GAP_MS ? wait.to_i32 : LINGER_GAP_MS
+      got = socket.read(@data, @capacity)
+      break unless got.is_a?(Int32) && got > 0
+      left = left - got
+    end
+    socket.close
   end
 end
 
@@ -486,6 +624,11 @@ pub class TlsStream
   # the server's, at a client; the client's, at a server that asked.
   def peer_certificates : Array(Certificate)
     @tls.peer_certificates
+  end
+
+  # Whether the handshake resumed a session (`TlsConnection#resumed?`).
+  def resumed? : Bool
+    @tls.resumed?
   end
 
   # Up to *count* bytes into *buffer*: 0 once the peer closed with
@@ -537,8 +680,24 @@ pub class TlsStream
     sent
   end
 
+  # close_notify, the sending half shut, and what the peer still sends
+  # read past for a bounded time before the socket closes
+  # (`TlsConnection#close`).
   def close : Nil
     @tls.close
+  end
+
+  # close_notify and the sending half shut; reads go on until the peer's
+  # own (`TlsConnection#close_write`).
+  def close_write : SocketError?
+    shut = @tls.close_write
+    return SocketError.layered("close the writing to #{@host}", shut.message) if shut
+    nil
+  end
+
+  # The socket closed at once, nothing sent or read first.
+  def abort : Nil
+    @tls.abort
   end
 
   def closed? : Bool
@@ -1071,6 +1230,7 @@ pub class Request
   # under `serve(tls:)` with `client_roots` set, the certificate the
   # client presented; empty otherwise.
   property peer_certificates : Array(Certificate) = [] of Certificate
+  @tls_resumed : Bool = false
   @reader : BodyReader
   @text : String?
 
@@ -1083,6 +1243,17 @@ pub class Request
   # A request whose body is still on the connection.
   def initialize(@method : String, @path : String, @query : String?, @headers : Hash(String, String), @version : String, @reader : BodyReader, @remote_address : String? = nil)
     @text = nil
+  end
+
+  # Whether the TLS connection the request came over resumed a session by
+  # a ticket, under `serve(tls:)`: its `peer_certificates` are then the
+  # ticket's. False in the clear.
+  def tls_resumed? : Bool
+    @tls_resumed
+  end
+
+  def tls_resumed=(resumed : Bool) : Bool
+    @tls_resumed = resumed
   end
 
   def header(name : String) : String?
@@ -1128,7 +1299,8 @@ pub class Request
   end
 
   # The body as `multipart/form-data` parts, read as they arrive; nil when
-  # the `Content-Type` is not multipart or names no boundary.
+  # the `Content-Type` is not multipart or names no boundary
+  # (`Multipart.boundary`).
   def multipart : Multipart?
     type = header("Content-Type")
     return nil unless type
@@ -1173,6 +1345,7 @@ pub class Response
   @reader : BodyReader?
   @url : String?
   @decoded : Bool
+  @tls_resumed : Bool = false
 
   def initialize(@status : Int32, @reason : String, @headers : Hash(String, String), @body : String, @apart : Hash(String, Array(String))? = nil)
     @source = nil
@@ -1270,6 +1443,17 @@ pub class Response
   # are gone from the headers then.
   def decoded? : Bool
     @decoded
+  end
+
+  # Whether the `https://` connection the answer came over resumed a TLS
+  # session by a ticket an `HTTPClient` kept, rather than a full
+  # handshake; false in the clear and for one a program made.
+  def tls_resumed? : Bool
+    @tls_resumed
+  end
+
+  def tls_resumed=(resumed : Bool) : Bool
+    @tls_resumed = resumed
   end
 
   # The body: whole. Inside `HTTP.open`'s block it is read here, the first
@@ -1680,7 +1864,7 @@ pub struct Server
   private def self.tape_accept_loop(
     listener : IyiSocket, answerer : Proc(Incoming, Outgoing, Nil),
   ) : Nil
-    idle = {} of UInt64 => IyiSocket
+    idle = {} of UInt64 => Conn
     group do |g|
       pause = 5
       while !listener.closed?
@@ -1698,7 +1882,7 @@ pub struct Server
           spawn_tape_handler(g, client, answerer, listener, idle)
         end
       end
-      idle.each { |_, waiting| waiting.close }
+      idle.values.each { |waiting| waiting.close_for_stop }
       0
     end
   end
@@ -1719,7 +1903,7 @@ pub struct Server
   private def self.spawn_tape_handler(
     g : IyiGroup, client : IyiSocket,
     answerer : Proc(Incoming, Outgoing, Nil), listener : IyiSocket,
-    idle : Hash(UInt64, IyiSocket),
+    idle : Hash(UInt64, Conn),
   ) : Nil
     g.spawn do
       group do |own|
@@ -1737,7 +1921,7 @@ pub struct Server
   private def self.tape_connection(client : IyiSocket,
                                    answerer : Proc(Incoming, Outgoing, Nil),
                                    listener : IyiSocket?,
-                                   idle : Hash(UInt64, IyiSocket)?) : Nil
+                                   idle : Hash(UInt64, Conn)?) : Nil
     defer client.close
     conn = Conn.new(client, listener, idle)
     conn.gap = 60000
@@ -1979,11 +2163,18 @@ pub struct Server
   MAX_BODY = 67108864
   # What a streaming block may leave unread and still have the connection
   # kept: the rest is read past up to this much, and past it the
-  # connection is closed rather than read for as long as the client sends.
+  # connection is closed rather than read for as long as the client sends
+  # - by lingering, which reads on for at most `Conn::LINGER_MS`.
   MAX_DRAIN = 1048576
   # A string body shorter than this goes uncompressed: the gzip envelope
   # and the fixed code cost more than they save under it.
   COMPRESS_FROM = 1024
+  # The defaults of `serve`'s *max_connections* and *request_timeout_ms*.
+  MAX_CONNECTIONS =   1024
+  REQUEST_TIMEOUT = 300000
+  # How often an accept loop held at *max_connections* looks whether its
+  # listener has been closed meanwhile.
+  CAP_CHECK_MS = 250
 
   # Serve `listener` until it is closed. The block runs on the
   # connection's fiber, once per request; what it answers is written back.
@@ -2008,23 +2199,55 @@ pub struct Server
   # `client_header_timeout`; 0 for none. A connection handed over by
   # `Response.upgrade` waits as its protocol likes.
   #
-  # *tls*: each connection is TLS 1.3 (std/tls's `TlsServer`) under this
+  # *request_timeout_ms*: the whole request - head and body - must have
+  # arrived within it, counted from the same moment as *timeout_ms*, as
+  # Go's `ReadTimeout` beside its `ReadHeaderTimeout`; the head is held to
+  # the sooner of the two. Without it a body sent a byte every few seconds
+  # was bounded per read alone, and held its connection for as long as it
+  # dripped. A block that reads the body itself (*stream_bodies*) reads
+  # under it until the block returns, and what it leaves unread is read
+  # past under it too. Over HTTP/2 the wait for each request and its body
+  # is held to it on the connection the same way, the head to the sooner
+  # of the two. Five minutes by default, which a 64 MiB body (`MAX_BODY`)
+  # meets at 224 KB/s; a server taking large uploads over slow links
+  # raises it. 0 for none. A connection past it is closed, unanswered, as
+  # one past *timeout_ms* is.
+  #
+  # *max_connections*: at most this many connections are served at once;
+  # 1024 by default, 0 for no limit. Past it the server stops accepting
+  # until one ends, so the next connection waits in the kernel's listen
+  # queue - queued, not refused, as Go's `netutil.LimitListener` does - and
+  # is served in its turn; a client that gives up waiting goes unserved.
+  # Each served connection holds its place until it closes, a kept-alive
+  # one between requests too, which *timeout_ms* bounds. The process's
+  # own limit on descriptors may come first.
+  #
+  # *tls*: each connection is TLS (std/tls's `TlsServer`, 1.3 or 1.2) under this
   # configuration, its handshake held to *timeout_ms* too; one whose
   # handshake fails is closed, the client told why by an alert. Inside
   # it a connection that opens with HTTP/2's preface - as a client whose
   # ALPN chose `h2` does, when `tls.alpn` offers it - is served HTTP/2,
   # and any other HTTP/1.1. A `Response.upgrade` block over TLS is handed
   # the `TlsStream`, so a WebSocket is `wss://`.
-  def self.serve(listener : IyiSocket, stream_bodies : Bool = false, compress : Bool = false, timeout_ms : Int32 = 60000, tls : TlsServerConfig? = nil, &handler : Request -> Response) : Nil
+  def self.serve(listener : IyiSocket, stream_bodies : Bool = false, compress : Bool = false, timeout_ms : Int32 = 60000, tls : TlsServerConfig? = nil, request_timeout_ms : Int32 = REQUEST_TIMEOUT, max_connections : Int32 = MAX_CONNECTIONS, &handler : Request -> Response) : Nil
     raise "HTTP: a timeout of #{timeout_ms} ms" if timeout_ms < 0
-    idle = {} of UInt64 => IyiSocket
+    raise "HTTP: a request timeout of #{request_timeout_ms} ms" if request_timeout_ms < 0
+    raise "HTTP: at most #{max_connections} connections" if max_connections < 0
+    idle = {} of UInt64 => Conn
+    # A place per connection served: a send waits while every one is held.
+    slots = max_connections > 0 ? Channel(Int32).new(max_connections) : nil
     group do |g|
       pause = 5
       while !listener.closed?
+        if room = slots
+          break unless claim(room, listener)
+        end
         case client = listener.accept
         in Cancelled
+          slots.take_now if slots
           break
         in SocketError
+          slots.take_now if slots
           # The listener's own trouble - descriptors run out, most often -
           # is waited out rather than spun on: 5 ms doubling to a second,
           # as Go's server does, and the next accept that works resets it.
@@ -2032,12 +2255,31 @@ pub struct Server
           pause = pause * 2 if pause < 1000
         in IyiSocket
           pause = 5
-          spawn_handler(g, client, handler, listener, idle, stream_bodies, compress, timeout_ms, tls)
+          spawn_handler(g, client, handler, listener, idle, stream_bodies, compress, timeout_ms, tls, request_timeout_ms, slots)
         end
       end
-      idle.each { |_, waiting| waiting.close }
+      # A copy: a stop's close_notify may wait, and other connections'
+      # tasks leave the set meanwhile.
+      idle.values.each { |waiting| waiting.close_for_stop }
       0
     end
+  end
+
+  # A place among *slots* for the next connection, waited for while all
+  # are held: false when *listener* closes first, which is looked at every
+  # `CAP_CHECK_MS` while waiting, since a close does not wake this wait.
+  private def self.claim(slots : Channel(Int32), listener : IyiSocket) : Bool
+    while !listener.closed?
+      claimed = false
+      select
+      when slots.send(0)
+        claimed = true
+      when timeout(CAP_CHECK_MS)
+        nil
+      end
+      return true if claimed
+    end
+    false
   end
 
   # The connection's task, spawned from a method so its block holds this
@@ -2053,16 +2295,18 @@ pub struct Server
   # Go's server does. Unread, the panic reached `serve`'s group, which
   # cancelled every other connection and the accept loop and panicked "a
   # task panicked": one request whose block failed took the server down.
-  private def self.spawn_handler(g : IyiGroup, client : IyiSocket, handler : Proc(Request, Response), listener : IyiSocket, idle : Hash(UInt64, IyiSocket), stream_bodies : Bool, compress : Bool, timeout_ms : Int32, tls : TlsServerConfig?) : Nil
+  private def self.spawn_handler(g : IyiGroup, client : IyiSocket, handler : Proc(Request, Response), listener : IyiSocket, idle : Hash(UInt64, Conn), stream_bodies : Bool, compress : Bool, timeout_ms : Int32, tls : TlsServerConfig?, request_timeout_ms : Int32, slots : Channel(Int32)?) : Nil
     g.spawn do
       group do |own|
         served = own.spawn do
-          handle(client, handler, listener, idle, stream_bodies, compress, timeout_ms, tls)
+          handle(client, handler, listener, idle, stream_bodies, compress, timeout_ms, tls, request_timeout_ms)
           0
         end
         served.value
         0
       end
+      # The connection's place, given back however it ended.
+      slots.take_now if slots
       0
     end
   end
@@ -2073,84 +2317,131 @@ pub struct Server
   # came in one read are read where they lie, one after another. A
   # connection that opens with HTTP/2's preface is served as HTTP/2. Under
   # *tls* the handshake comes first, and the connection ends with
-  # close_notify.
-  def self.handle(client : IyiSocket, handler : Proc(Request, Response), listener : IyiSocket? = nil, idle : Hash(UInt64, IyiSocket)? = nil, stream_bodies : Bool = false, compress : Bool = false, timeout_ms : Int32 = 0, tls : TlsServerConfig? = nil) : Nil
+  # close_notify. A connection this side wrote last on - an answer, a
+  # refusal, a GOAWAY - closes by lingering (`Conn#close`), so the reset
+  # a close with the client's bytes unread is cannot take what was
+  # written from the client before it reads it. One that timed out or was
+  # cancelled, with nothing of this side's waiting to be read, closes at
+  # once, and so does one whose client said `close` and sent nothing past
+  # its request (`serve_h1`).
+  def self.handle(client : IyiSocket, handler : Proc(Request, Response), listener : IyiSocket? = nil, idle : Hash(UInt64, Conn)? = nil, stream_bodies : Bool = false, compress : Bool = false, timeout_ms : Int32 = 0, tls : TlsServerConfig? = nil, request_timeout_ms : Int32 = 0) : Nil
     defer client.close
     unless config = tls
-      serve_connection(client, nil, handler, listener, idle, stream_bodies, compress, timeout_ms)
+      serve_connection(client, nil, handler, listener, idle, stream_bodies, compress, timeout_ms, request_timeout_ms)
       return
     end
     if timeout_ms > 0
       client.read_timeout_ms = timeout_ms
       client.write_timeout_ms = timeout_ms
     end
-    secured = TlsServer.over(client, config, timeout_ms > 0 ? timeout_ms : TlsServer::HANDSHAKE_TIMEOUT_MS)
+    # Early data is never taken (the header says why).
+    secured = TlsServer.over(client, config, timeout_ms > 0 ? timeout_ms : TlsServer::HANDSHAKE_TIMEOUT_MS, early_data: false)
     return if secured.is_a?(TlsError)
-    serve_connection(client, TlsStream.new(secured, "the client"), handler, listener, idle, stream_bodies, compress, timeout_ms)
-    secured.close
+    serve_connection(client, TlsStream.new(secured, "the client"), handler, listener, idle, stream_bodies, compress, timeout_ms, request_timeout_ms)
   end
 
-  private def self.serve_connection(client : IyiSocket, stream : TlsStream?, handler : Proc(Request, Response), listener : IyiSocket?, idle : Hash(UInt64, IyiSocket)?, stream_bodies : Bool, compress : Bool, timeout_ms : Int32) : Nil
+  # When a request whose wait began at *started* (monotonic ns) must have
+  # arrived whole, 0 for no such time.
+  private def self.until_whole(started : Int64, request_timeout_ms : Int32) : Int64
+    request_timeout_ms > 0 ? started + request_timeout_ms.to_i64 * 1000000_i64 : 0_i64
+  end
+
+  # And its head: *timeout_ms* after *started*, or *whole* if sooner.
+  private def self.until_head(started : Int64, timeout_ms : Int32, whole : Int64) : Int64
+    head = timeout_ms > 0 ? started + timeout_ms.to_i64 * 1000000_i64 : 0_i64
+    head = whole if whole > 0_i64 && (head == 0_i64 || whole < head)
+    head
+  end
+
+  private def self.serve_connection(client : IyiSocket, stream : TlsStream?, handler : Proc(Request, Response), listener : IyiSocket?, idle : Hash(UInt64, Conn)?, stream_bodies : Bool, compress : Bool, timeout_ms : Int32, request_timeout_ms : Int32) : Nil
     conn = Conn.new(client, listener, idle, stream)
     conn.gap = timeout_ms if timeout_ms > 0
     remote = client.remote_address
     peer = stream ? stream.peer_certificates : [] of Certificate
-    conn.deadline_in(timeout_ms)
+    started = Time.monotonic_nanoseconds.to_i64
+    conn.deadline_at(until_head(started, timeout_ms, until_whole(started, request_timeout_ms)))
     preface = h2_preface?(conn)
     conn.no_deadline
-    if preface
-      serve_h2(conn, handler, stream_bodies, compress, remote, peer)
-      return
-    end
+    wrote_last = preface ? serve_h2(conn, handler, stream_bodies, compress, remote, peer, timeout_ms, request_timeout_ms) : serve_h1(conn, handler, stream_bodies, compress, remote, peer, timeout_ms, request_timeout_ms)
+    wrote_last ? conn.close : conn.close_now
+  end
+
+  # HTTP/1.1's requests on *conn*, one after another: whether this side
+  # wrote last - an answer or a refusal - when they end.
+  private def self.serve_h1(conn : Conn, handler : Proc(Request, Response), stream_bodies : Bool, compress : Bool, remote : String?, peer : Array(Certificate), timeout_ms : Int32, request_timeout_ms : Int32) : Bool
     while true
-      conn.deadline_in(timeout_ms)
+      started = Time.monotonic_nanoseconds.to_i64
+      whole = until_whole(started, request_timeout_ms)
+      conn.deadline_at(until_head(started, timeout_ms, whole))
       got = conn.read_head(MAX_HEAD, "request", true)
       conn.no_deadline
       case got
       in Nil
-        return
+        return false
       in HTTPError
         refuse(conn.transport, got)
-        linger(client)
-        return
+        return true
       in String
         parsed = parse_head(got)
         if parsed.is_a?(HTTPError)
           refuse(conn.transport, parsed)
-          linger(client)
-          return
+          return true
         end
         head = parsed
+        # The body, read here or by the block, is the request's too.
+        conn.deadline_at(whole, "read a request") if whole > 0_i64
         reader = body_reader(conn, head)
         req = Request.new(head.method, head.path, head.query, head.headers, head.version, reader, remote)
         unless stream_bodies
           body = reader.read_all(MAX_BODY.to_i64)
+          conn.no_deadline
           case body
           in String
             req = Request.new(head.method, head.path, head.query, head.headers, body, head.version, remote)
           in HTTPError
             # A client that went is not answered; one that sent a body that
             # is not one is told why.
-            unless conn.ended?
-              refuse(conn.transport, body)
-              linger(client)
-            end
-            return
+            return false if conn.ended?
+            refuse(conn.transport, body)
+            return true
           in Cancelled
-            return
+            return false
           in SocketError
-            return
+            return false
           end
         end
+        req.tls_resumed = conn.resumed?
         req.peer_certificates = peer
         going = false
         tape do
-          going = answered?(conn, handler.call(req), req, head.close, compress)
+          response = handler.call(req)
+          # Writing the answer waits as the client reads it, a pause at a time.
+          conn.no_deadline
+          going = answered?(conn, response, req, head.close, compress)
         end
-        return unless going
-        return unless reader.finished? || reader.drain(MAX_DRAIN.to_i64)
+        unless going
+          # A client that said `close` sends no further request (RFC 9112
+          # section 9.6): its request read whole and nothing after it,
+          # nothing of the client's is left to come, and the close waits
+          # for nothing - as nginx's lingering_close waits only where more
+          # may come. Any other close, the server's own choice, may meet a
+          # client still sending.
+          return !(said_close?(head, req) && reader.finished? && conn.available == 0)
+        end
+        next if reader.finished?
+        conn.deadline_at(whole, "read a request") if whole > 0_i64
+        drained = reader.drain(MAX_DRAIN.to_i64)
+        conn.no_deadline
+        return true unless drained
       end
     end
+  end
+
+  # Whether the client said this request is its last: `Connection: close`,
+  # or HTTP/1.0 without keep-alive.
+  private def self.said_close?(head : RequestHead, req : Request) : Bool
+    said = req.header("Connection") || ""
+    HTTP.has_token?(said, "close") || (head.version == "HTTP/1.0" && !HTTP.has_token?(said, "keep-alive"))
   end
 
   # Whether the connection opens with HTTP/2's preface, taken if it does:
@@ -2173,30 +2464,44 @@ pub struct Server
   # An HTTP/2 connection (RFC 9113): its requests, one stream at a time.
   # A body is read whole before the block runs unless *stream_bodies*,
   # as over HTTP/1.1; one past `MAX_BODY` is answered 413 on its stream.
-  private def self.serve_h2(conn : Conn, handler : Proc(Request, Response), stream_bodies : Bool, compress : Bool, remote : String?, peer : Array(Certificate)) : Nil
+  # The wait for the next request's head, and then for its body, are held
+  # to *timeout_ms* and *request_timeout_ms* as over HTTP/1.1, counted
+  # from when the wait began; the connection's every frame is read under
+  # them meanwhile, so a peer that drips any stream's frames, or PINGs to
+  # look alive, is cut off with the rest. It ends with GOAWAY, so this side
+  # wrote last: true.
+  private def self.serve_h2(conn : Conn, handler : Proc(Request, Response), stream_bodies : Bool, compress : Bool, remote : String?, peer : Array(Certificate), timeout_ms : Int32, request_timeout_ms : Int32) : Bool
     h2 = H2Connection.new(conn, true, MAX_BODY.to_i64)
-    return unless h2.start
-    while serve_h2_request(h2, handler, stream_bodies, compress, remote, peer)
+    return true unless h2.start
+    while serve_h2_request(conn, h2, handler, stream_bodies, compress, remote, peer, timeout_ms, request_timeout_ms)
     end
     h2.goaway
-    linger(conn.socket) if h2.failure.is_a?(HTTPError)
+    true
   end
 
-  private def self.serve_h2_request(h2 : H2Connection,
+  private def self.serve_h2_request(conn : Conn, h2 : H2Connection,
                                     handler : Proc(Request, Response),
                                     stream_bodies : Bool,
                                     compress : Bool, remote : String?,
-                                    peer : Array(Certificate)) : Bool
+                                    peer : Array(Certificate),
+                                    timeout_ms : Int32,
+                                    request_timeout_ms : Int32) : Bool
     tape do
+      started = Time.monotonic_nanoseconds.to_i64
+      whole = until_whole(started, request_timeout_ms)
+      conn.deadline_at(until_head(started, timeout_ms, whole))
       id = h2.next_request
+      conn.no_deadline
       return false unless id
       req = h2.request(id, remote)
       if req.nil?
         h2.done(id)
         return true
       end
+      conn.deadline_at(whole, "read a request") if whole > 0_i64
       unless stream_bodies
         body = req.body_io.read_all(MAX_BODY.to_i64)
+        conn.no_deadline
         case body
         in String
           req = Request.new(req.method, req.path, req.query, req.headers, body, "HTTP/2", remote)
@@ -2210,34 +2515,15 @@ pub struct Server
           return false
         end
       end
+      req.tls_resumed = conn.resumed?
       req.peer_certificates = peer
-      answered = h2.answer(id, handler.call(req), req, compress)
+      response = handler.call(req)
+      conn.no_deadline
+      answered = h2.answer(id, response, req, compress)
       h2.done(id)
       return answered
     end
     false
-  end
-
-  LINGER_BYTES = 65536
-  LINGER_MS    =  1000
-
-  # What a refused client goes on sending, read and dropped until it
-  # closes - at most `LINGER_BYTES` and `LINGER_MS` in all - before the
-  # close: a close with its bytes unread is a reset, which can take the
-  # refusal (a 4xx answer, GOAWAY) from the client's buffer before it is
-  # read, as macOS's does.
-  private def self.linger(socket : IyiSocket) : Nil
-    return if socket.closed?
-    until_ns = Time.monotonic_nanoseconds.to_i64 + LINGER_MS.to_i64 * 1000000_i64
-    left = LINGER_BYTES
-    while left > 0
-      wait = (until_ns - Time.monotonic_nanoseconds.to_i64) // 1000000_i64
-      break if wait <= 0
-      socket.read_timeout_ms = wait.to_i32
-      got = socket.read(left < 16384 ? left : 16384)
-      break unless got.is_a?(String) && !got.empty?
-      left = left - got.bytesize
-    end
   end
 
   # The body *head* promises, read from *conn*: under the server's limit,
@@ -2640,13 +2926,17 @@ class Exchange
 
   def initialize(@conn : Conn, @response : Response, @client : HTTPClient? = nil, @key : String = "", @keep : Bool = false)
     @reader = @response.body_io
+    @response.tls_resumed = @conn.resumed?
   end
 
   # The connection closed, or handed back to its client once the body has
   # been read to its end - what the caller left of it read past, up to
   # 64 KiB, and the connection closed past that, as Go's client does. An
   # HTTP/2 answer left unread past that is cancelled on its stream alone,
-  # and the connection goes back while it can take another request.
+  # and the connection goes back while it can take another request. A
+  # connection closed with its answer read whole lingers (`Conn#close`);
+  # one closed on an answer still coming is closed at once, and the reset
+  # that is tells the server to stop sending it.
   def close : Nil
     client = @client
     if h2 = @conn.h2
@@ -2661,8 +2951,10 @@ class Exchange
     end
     if client && @keep && !@conn.ended? && @reader.drain(65536_i64) && @conn.available == 0
       client.give_back(@key, @conn)
-    else
+    elsif @conn.ended? || @reader.finished?
       @conn.close
+    else
+      @conn.close_now
     end
   end
 end
@@ -2689,33 +2981,150 @@ end
 # its method is idempotent (RFC 9110 §9.2.2) and its body a string;
 # anything else answers the failure. One task at a time per request: two
 # tasks sending at once take two connections, and a client is not for
-# sharing across threads.
+# sharing across threads. An `https://` connection is kept under the
+# `HTTP.tls_config` it was made with, and handed only to a request made
+# under the same one (`TlsMadeUnder`): after `HTTP.tls_config=` the next
+# request makes a connection of its own, checked against the new roots.
+# A client made with *tls* uses that configuration instead of
+# `HTTP.tls_config`, and one made with *resolver* finds its hosts by it
+# instead of `Resolver.system` - an encrypted resolver, or a hosts text
+# that pins a name to an address: std/secure_dns's `DnsOverHttps` is a
+# client of its own with both, so its server is checked against the roots
+# it was given and reached at the address it was given.
+#
+# A client resumes TLS sessions (RFC 8446 §2.2): the tickets an
+# `https://` server sends are kept for its origin - scheme, host and
+# port, whichever proxy's tunnel they came through - under the TLS
+# configuration they came under, the client's own *tls* or else
+# `HTTP.tls_config` (`TlsMadeUnder`, as a kept connection is), and a new
+# connection to that origin offers the newest, each once.
+# A resumed handshake checks no certificate - the ticket stands for the
+# check the first one made - so a ticket is never offered to another
+# origin, nor under another configuration: after `HTTP.tls_config=`, or
+# roots, an identity, `now`, `min_version` or `require_staple` assigned
+# in place - in `HTTP.tls_config` or in the client's own *tls* - the next
+# connection is a full handshake under the new ones, and that origin's
+# tickets from under the old one are dropped. (std/tls's `TlsSession`
+# holds each ticket to its configuration too; this client drops them
+# where that one would only pass them over.) At most *origin_tickets* are
+# kept an origin - 4 by default, so that as many connections as *idle*
+# keeps by default can resume at once, where std/tls's server and
+# OpenSSL's send 2 a handshake - and *tickets* in all, 256 by default: as
+# many origins as that leaves room for at *origin_tickets* each, the one
+# longest unused dropped first. 0 for either keeps none, and nothing
+# resumes. `close`
+# leaves them. Nothing goes early (0-RTT), whatever a ticket allows: the
+# module's header says why. `connections_resumed`, `tickets_held` and
+# `Response#tls_resumed?` say what was kept and used. What it saves, by
+# bench/std_http_resume.iyi built --release on a 12-core machine other
+# jobs shared (medians of 200, the middle of three runs): the handshake
+# took 0.96 ms full and 0.51 resumed against std/http's server, 1.03 and
+# 0.57 against OpenSSL 3.5's s_server - and a GET on a new connection,
+# which waits about 40 ms at each iyi end that is not the handshake's,
+# 82.98 ms and 82.00, and 42.04 and 40.96.
 #
 # Over HTTP/2 - `https://` where ALPN chose `h2`, or `http://` with
 # *prior_knowledge* (h2c, RFC 9113 §3.3) - a kept connection carries the
 # next request on a new stream, until the server says GOAWAY.
+#
+# HTTPS records (RFC 9460), when `use_https_records` is set: before a new
+# connection to an `https://` origin - not through a proxy, and not for
+# an upgrade - the client asks its resolver for the origin's HTTPS
+# records (`Resolver#https_records`, AliasMode followed) and connects by
+# the first ServiceMode record it can use: one whose mandatory keys it
+# knows - the seven std/dns reads, port and no-default-alpn mandatory by
+# being there (section 9) - and whose protocols (alpn, and http/1.1
+# unless no-default-alpn) hold one of the configuration's `alpn`, or
+# http/1.1 where that is empty. Its target - the record's owner for "."
+# - and its port, or the origin's, are where the connection goes; its
+# `ech` is the connection's `ech_configs` (RFC 9848); and the protocols
+# it lists go first in the ClientHello's ALPN, which still offers every
+# one the configuration does (section 7.1.2: a record says which
+# protocols the endpoint has, and cannot take one away). The certificate
+# is checked, and the server named inside, for the origin's host,
+# whatever the target (section 2.3). An `ech` whose ECHConfigList holds
+# no config std/tls can use is passed over, as RFC 9849 section 6.1 has
+# it. The address hints are not read: the target's addresses are asked
+# for as any host's are.
+#
+# An endpoint that does not connect gives way to the next, then to the
+# last AliasMode target and to the origin itself (section 3) - unless
+# every endpoint carries `ech`, when the request fails rather than name
+# the server in the clear (RFC 9848 section 5.1). A TLS refusal is the
+# request's failure, but for one: a server that turned the encrypted
+# ClientHello down, its certificate checked for the config's
+# public_name, is asked once more on a new connection to the same
+# address, under the retry_configs it sent, or without ECH where it sent
+# none, which turns ECH off there (RFC 9849 section 6.1.6); a refusal of
+# that is the failure. No records (NXDOMAIN, NODATA), a set section 2.2
+# refuses, an AliasMode "." (the service says it is not there), or no
+# record the client can use: the connection is made as without records.
+# So is one whose lookup failed through a resolver that asks in the
+# clear, as section 3.1 lets a client choose; through encrypted
+# upstreams the failure is the request's, as section 3.1 asks, for
+# there the one who can drop the answer is an attacker taking the
+# records away. `localhost` and addresses are not asked about, and an
+# `http://` URL is not made `https://` by its records (section 9.5's
+# SHOULD): the program wrote the scheme.
+#
+# A record's `ech` and protocols make a configuration of their own - a
+# copy of the client's, made once and kept for the origin while the same
+# ones come under the same configuration - so that a kept connection and
+# a ticket are handed on only under the record they were made by
+# (`TlsMadeUnder` holds `ech_configs`). Off by default: every new
+# connection then waits on one DNS answer or more before its ClientHello
+# (RFC 9848 section 5.3 forbids sending it sooner), with no cache to
+# spare the next, and the records may move a connection to another host
+# and port, which is the program's to ask for.
 pub class HTTPClient
   @idle : Hash(String, Array(Conn))
   @limit : Int32
   @timeout_ms : Int32
   @made : Int32
   @reused : Int32
+  @resumed : Int32
+  # The tickets kept, an origin's together, the one used last at the end.
+  @sessions : Array(HeldSession)
+  @origin_tickets : Int32
+  @tickets : Int32
+  # The configurations HTTPS records made, the one an origin's last
+  # connection by them was made under at the end.
+  @bound : Array(HttpsBound)
   # `http://` spoken as HTTP/2 from the first byte, without asking: for a
   # server known to take it.
   getter prior_knowledge : Bool
   # The proxy every request goes through, `HTTP.open`'s *proxy*; its
   # connections are kept under it.
   getter proxy : String?
+  # What this client's `https://` requests are checked against and offer,
+  # instead of `HTTP.tls_config`: roots of its own, or ALPN's `h2` first.
+  getter tls : TlsConfig?
+  # What turns a host name into addresses for this client's connections,
+  # instead of `Resolver.system`: encrypted upstreams, or a hosts text
+  # alone that pins a name to an address, as std/secure_dns's
+  # `DnsOverHttps` pins its server's.
+  getter resolver : Resolver?
+  # Whether a new `https://` connection is made by the origin's HTTPS
+  # records (the class's header); off by default.
+  property use_https_records : Bool = false
 
   # *timeout_ms* and *proxy* are `HTTP.open`'s, for every request the
-  # client sends.
-  def initialize(idle : Int32 = 4, @timeout_ms : Int32 = 0, @prior_knowledge : Bool = false, @proxy : String? = nil)
+  # client sends; *tls* and *resolver* are this client's own (above);
+  # *origin_tickets* and *tickets* bound the TLS tickets kept, by origin
+  # and in all.
+  def initialize(idle : Int32 = 4, @timeout_ms : Int32 = 0, @prior_knowledge : Bool = false, @proxy : String? = nil,
+                 @tls : TlsConfig? = nil, @resolver : Resolver? = nil, @origin_tickets : Int32 = 4, @tickets : Int32 = 256)
     raise "HTTP: a client keeps 0 or more idle connections, not #{idle}" if idle < 0
     raise "HTTP: a timeout of #{@timeout_ms} ms" if @timeout_ms < 0
+    raise "HTTP: a client keeps 0 to #{TlsSession::MAX_TICKETS} tickets an origin, not #{@origin_tickets}" if @origin_tickets < 0 || @origin_tickets > TlsSession::MAX_TICKETS
+    raise "HTTP: a client keeps 0 or more tickets, not #{@tickets}" if @tickets < 0
     @idle = {} of String => Array(Conn)
     @limit = idle
     @made = 0
     @reused = 0
+    @resumed = 0
+    @sessions = [] of HeldSession
+    @bound = [] of HttpsBound
   end
 
   # Connections this client has opened, and requests sent over one it
@@ -2726,6 +3135,23 @@ pub class HTTPClient
 
   def connections_reused : Int32
     @reused
+  end
+
+  # Connections this client opened whose TLS handshake resumed a session
+  # by a ticket it kept.
+  def connections_resumed : Int32
+    @resumed
+  end
+
+  # The TLS tickets held for *origin* - `https://host:port`, the host in
+  # lower case and the port written even where it is 443 - or for every
+  # origin when nil.
+  def tickets_held(origin : String? = nil) : Int32
+    count = 0
+    @sessions.each do |held|
+      count = count + held.session.size if origin.nil? || held.origin == origin
+    end
+    count
   end
 
   def request(method : String, url : String, headers : Hash(String, String) = {} of String => String, body : String | IyiIO = "", redirects : Int32 = 10, jar : CookieStore? = nil, decompress : Bool = true) : Response | Cancelled | SocketError | HTTPError
@@ -2766,12 +3192,22 @@ pub class HTTPClient
   end
 
   # A kept connection to *key*, nil when none waits. An HTTP/2 connection
-  # that can take no more requests is closed rather than handed out.
-  protected def take(key : String) : Conn?
+  # that can take no more requests is closed rather than handed out, and
+  # so is an `https://` one made under another TLS configuration than
+  # *tls*, the one the request is made under (`TlsMadeUnder`): keyed by
+  # scheme, host and port alone, a connection whose server was checked
+  # against one set of roots carried requests after `HTTP.tls_config=`
+  # named others that would have refused it.
+  protected def take(key : String, tls : TlsConfig? = nil) : Conn?
     if waiting = @idle[key]?
       while conn = waiting.pop?
         h2 = conn.h2
         if h2 && !h2.usable?
+          conn.close
+          next
+        end
+        under = conn.made_under
+        if tls && !(under && under.same?(tls))
           conn.close
           next
         end
@@ -2786,6 +3222,37 @@ pub class HTTPClient
     @made = @made + 1
   end
 
+  protected def resumed : Nil
+    @resumed = @resumed + 1
+  end
+
+  # The session a new connection to *origin* under *tls* offers a ticket
+  # from and keeps the server's new ones in; nil when the client keeps
+  # none. The origin's tickets from under another configuration are
+  # dropped, not left to take room that `TlsSession` would never offer
+  # them from. The session handed out is the newest used; past the room
+  # *tickets* leaves, the oldest goes.
+  protected def session_for(origin : String, tls : TlsConfig) : TlsSession?
+    room = @origin_tickets > 0 ? @tickets // @origin_tickets : 0
+    return nil if room == 0
+    kept = [] of HeldSession
+    found = nil.as(HeldSession?)
+    @sessions.each do |held|
+      if held.origin != origin
+        kept << held
+      elsif held.under.same?(tls)
+        found = held
+      end
+    end
+    held = found || HeldSession.new(origin, TlsMadeUnder.new(tls), TlsSession.new(@origin_tickets))
+    while kept.size >= room
+      kept.shift
+    end
+    kept << held
+    @sessions = kept
+    held.session
+  end
+
   protected def give_back(key : String, conn : Conn) : Nil
     waiting = @idle[key]? || [] of Conn
     if waiting.size >= @limit
@@ -2794,6 +3261,118 @@ pub class HTTPClient
     end
     waiting << conn
     @idle[key] = waiting
+  end
+
+  # The most configurations HTTPS records make an origin hold - a
+  # record's, its retry_configs' and ECH turned off - and the most in
+  # all, past which the one longest unused goes.
+  ORIGIN_BOUND =   4
+  BOUND        = 256
+
+  # The configuration a connection to *origin* is made under by a record
+  # whose `ech` is *ech* (nil: none) and whose protocols put *alpn* in its
+  # order, *base* being the client's own or `HTTP.tls_config`: *base*
+  # itself where those are its own, and otherwise a copy of it with them -
+  # the same object every time while *base* is the same (`TlsMadeUnder`),
+  # so that a connection kept and a ticket held under it serve the next
+  # connection by the same record. It becomes the one the origin's kept
+  # connections are taken under (`https_current`). The origin's
+  # configurations from under another *base* go.
+  protected def https_config(origin : String, base : TlsConfig, ech : Array(UInt8)?, alpn : Array(String)) : TlsConfig
+    kept = [] of HttpsBound
+    found = nil.as(HttpsBound?)
+    @bound.each do |held|
+      if origin != held.origin
+        kept << held
+      elsif held.under.same?(base)
+        if found.nil? && held.ech == ech && held.alpn == alpn
+          found = held
+        else
+          kept << held
+        end
+      end
+    end
+    held = found
+    unless held
+      config = base
+      unless ech == base.ech_configs && alpn == base.alpn
+        config = base.dup
+        config.ech_configs = ech
+        config.alpn = alpn
+      end
+      held = HttpsBound.new(origin, TlsMadeUnder.new(base), ech, alpn, config)
+    end
+    kept << held
+    over = kept.count { |other| other.origin == origin } - ORIGIN_BOUND
+    if over > 0
+      trimmed = [] of HttpsBound
+      kept.each do |other|
+        if over > 0 && other.origin == origin
+          over = over - 1
+        else
+          trimmed << other
+        end
+      end
+      kept = trimmed
+    end
+    while kept.size > BOUND
+      kept.shift
+    end
+    @bound = kept
+    held.config
+  end
+
+  # The configuration *origin*'s last connection by HTTPS records was made
+  # under, while *base* is the one it came from - *base* itself where it
+  # was made as without records: what a kept connection to the origin
+  # must have been made under to be taken. Nil when none was made by them
+  # under *base*, and then none is taken.
+  protected def https_current(origin : String, base : TlsConfig) : TlsConfig?
+    at = @bound.size - 1
+    while at >= 0
+      held = @bound[at]
+      return held.under.same?(base) ? held.config : nil if held.origin == origin
+      at = at - 1
+    end
+    nil
+  end
+end
+
+# A configuration an `HTTPClient` made for an origin from an HTTPS
+# record's `ech` and protocols, and the base it was made from.
+class HttpsBound
+  getter origin : String
+  getter under : TlsMadeUnder
+  getter ech : Array(UInt8)?
+  getter alpn : Array(String)
+  getter config : TlsConfig
+
+  def initialize(@origin : String, @under : TlsMadeUnder, @ech : Array(UInt8)?, @alpn : Array(String), @config : TlsConfig)
+  end
+end
+
+# One endpoint an origin's HTTPS records name, as `HTTP.https_endpoints`
+# reads it: the host and port to connect to, the ECHConfigList to encrypt
+# the ClientHello under (nil: none), and the protocols to offer by ALPN,
+# in order.
+pub struct HttpsEndpoint
+  getter host : String
+  getter port : Int32
+  getter ech : Array(UInt8)?
+  getter alpn : Array(String)
+
+  def initialize(@host : String, @port : Int32, @ech : Array(UInt8)?, @alpn : Array(String))
+  end
+end
+
+# The tickets an `HTTPClient` keeps for one origin, and the configuration
+# they were taken under.
+class HeldSession
+  getter origin : String
+  getter under : TlsMadeUnder
+  getter session : TlsSession
+
+  def initialize(@origin : String, @under : TlsMadeUnder, @session : TlsSession)
   end
 end
 
@@ -3023,9 +3602,13 @@ pub struct HTTP
   # The redirects followed are RFC 9110 §15.4's: 301 and 302 make a POST a
   # GET, 303 makes anything but a HEAD a GET, and 307 and 308 keep the
   # method and the body. `Authorization`, `Proxy-Authorization` and
-  # `Cookie` written by the caller are not sent to another host. One more
-  # than *redirects* is an `HTTPError`; with 0 the first answer is the
-  # block's.
+  # `Cookie` written by the caller are not sent to another scheme, host or
+  # port - `https://` to `http://` at one host included, as curl does (Go
+  # strips them for another host) - and a jar's `Secure` cookies go over
+  # `https://` alone. The downgrade itself is followed, as Go's client and
+  # `curl -L` follow it; any other header the caller wrote, and a 307 or
+  # 308's body, go on in the clear. One more than *redirects* is an
+  # `HTTPError`; with 0 the first answer is the block's.
   #
   # *timeout_ms* bounds the connect, and each read and write after it -
   # a pause, not the whole exchange, as Python's `timeout` is: a body that
@@ -3199,6 +3782,8 @@ pub struct HTTP
     end
     head = same_name?(method, "HEAD")
     key = (secure ? "https://" : "http://") + host.downcase + ":" + port.to_s
+    # What a TLS ticket is kept for: the origin, whichever proxy is between.
+    origin = key
     dial_host = host
     dial_port = port
     target = path
@@ -3233,46 +3818,88 @@ pub struct HTTP
     # have been closed by the server before it answered.
     retry = body.is_a?(String) && (head || same_name?(method, "GET") || same_name?(method, "PUT") || same_name?(method, "DELETE") || same_name?(method, "OPTIONS") || same_name?(method, "TRACE"))
     refused_before = false
+    # The client's own TLS configuration and resolver, when it has them.
+    under = tls_config
+    through = nil.as(Resolver?)
+    if keeping = client
+      under = keeping.tls || under
+      through = keeping.resolver
+    end
+    # A client that asks connects to an `https://` origin by its HTTPS
+    # records, and takes a kept connection only when it was made under the
+    # configuration its last connection by them was
+    # (`HTTPClient#https_current`): one made before it asked is not.
+    recorded = secure && route.nil? && upgrade.nil? && !client.nil? && client.use_https_records
     while true
       conn = nil.as(Conn?)
-      if keeping = client
-        conn = keeping.take(key) unless upgrade
+      if (keeping = client) && !upgrade
+        if recorded
+          current = keeping.https_current(origin, under)
+          conn = keeping.take(key, current) if current
+        else
+          conn = keeping.take(key, secure ? under : nil)
+        end
       end
       reused = !conn.nil?
       unless conn
-        socket = IyiSocket.connect(dial_host, dial_port, timeout_ms > 0 ? timeout_ms : -1)!
-        client.made if client
-        if tunneled && (via = route)
-          unopened = tunnel(socket, via, named + ":" + port.to_s, tunnel_credential, timeout_ms, secure)
-          if unopened
-            socket.close
-            return unopened
-          end
+        wait = timeout_ms > 0 ? timeout_ms : -1
+        made = nil.as(Tuple(IyiSocket, TlsClient, TlsConfig)?)
+        if recorded && (keeping = client)
+          found = by_records(keeping, origin, host, port, under, through, timeout_ms)
+          return found if found.is_a?(Cancelled) || found.is_a?(SocketError) || found.is_a?(HTTPError)
+          made = found
         end
-        if secure
-          # The handshake waits as long as a read does.
-          if timeout_ms > 0
-            socket.read_timeout_ms = timeout_ms
-            socket.write_timeout_ms = timeout_ms
-          end
-          offered = tls_config
-          if upgrade
-            # An upgrade is HTTP/1.1's: ALPN offers that alone, as RFC
-            # 8441's way over HTTP/2 (an extended CONNECT) is not here.
-            offered = TlsConfig.new
-            offered.roots = tls_config.roots
-            offered.now = tls_config.now
-            offered.identity = tls_config.identity
-            offered.alpn = ["http/1.1"]
-          end
-          tls = TlsClient.over(socket, host, offered, timeout_ms > 0 ? timeout_ms : TlsClient::HANDSHAKE_TIMEOUT_MS)
-          return HTTPError.new(tls.message) if tls.is_a?(TlsError)
+        if by = made
+          socket, tls, config = by
+          client.resumed if client && tls.resumed?
           conn = Conn.new(socket, stream: TlsStream.new(tls, host))
-          speaks_h2 = upgrade.nil? && tls.alpn_protocol == "h2"
+          conn.made_under = TlsMadeUnder.new(config)
+          speaks_h2 = tls.alpn_protocol == "h2"
         else
-          conn = Conn.new(socket)
-          # Through a proxy the request is HTTP/1.1's absolute form.
-          speaks_h2 = upgrade.nil? && !client.nil? && client.prior_knowledge && route.nil?
+          socket = (through ? IyiSocket.connect(dial_host, dial_port, through, wait) : IyiSocket.connect(dial_host, dial_port, wait))!
+          client.made if client
+          if tunneled && (via = route)
+            unopened = tunnel(socket, via, named + ":" + port.to_s, tunnel_credential, timeout_ms, secure)
+            if unopened
+              socket.close
+              return unopened
+            end
+          end
+          if secure
+            # The handshake waits as long as a read does.
+            if timeout_ms > 0
+              socket.read_timeout_ms = timeout_ms
+              socket.write_timeout_ms = timeout_ms
+            end
+            offered = under
+            if upgrade
+              # An upgrade is HTTP/1.1's: ALPN offers that alone, as RFC
+              # 8441's way over HTTP/2 (an extended CONNECT) is not here.
+              offered = TlsConfig.new
+              offered.roots = under.roots
+              offered.now = under.now
+              offered.identity = under.identity
+              offered.alpn = ["http/1.1"]
+            end
+            # The tickets a client keeps for this origin under this
+            # configuration (`HTTPClient#session_for`); an upgrade, which no
+            # client carries, keeps none. Nothing goes early (0-RTT), whatever
+            # a ticket allows: the module's header says why.
+            session = nil.as(TlsSession?)
+            if keeping = client
+              session = keeping.session_for(origin, under) unless upgrade
+            end
+            tls = TlsClient.over(socket, host, offered, timeout_ms > 0 ? timeout_ms : TlsClient::HANDSHAKE_TIMEOUT_MS, session)
+            return HTTPError.new(tls.message) if tls.is_a?(TlsError)
+            client.resumed if client && tls.resumed?
+            conn = Conn.new(socket, stream: TlsStream.new(tls, host))
+            conn.made_under = TlsMadeUnder.new(under)
+            speaks_h2 = upgrade.nil? && tls.alpn_protocol == "h2"
+          else
+            conn = Conn.new(socket)
+            # Through a proxy the request is HTTP/1.1's absolute form.
+            speaks_h2 = upgrade.nil? && !client.nil? && client.prior_knowledge && route.nil?
+          end
         end
         conn.gap = timeout_ms if timeout_ms > 0
         if speaks_h2
@@ -3311,7 +3938,8 @@ pub struct HTTP
       end
       failed = send_request(conn.transport, method, target, host_line, sent, body, connection)
       if failed
-        conn.close
+        # Nothing of this side's is left to be read: closed at once.
+        conn.close_now
         next if reused && retry
         return failed
       end
@@ -3324,9 +3952,119 @@ pub struct HTTP
         end
         return HTTPError.new("the connection ended before an answer")
       end
-      conn.close unless answer.is_a?(Exchange)
+      # An answer that is not one: what follows it is not waited for.
+      conn.close_now unless answer.is_a?(Exchange)
       return answer
     end
+  end
+
+  # A connection to the origin *host*:*port* made by its HTTPS records for
+  # *client*, under *base*, its own configuration or `HTTP.tls_config`
+  # (`HTTPClient`'s header says how): the socket, the TLS connection and
+  # the configuration it was made under. Nil when the records give no
+  # endpoint to take, or every one they give failed to connect and the
+  # origin may be connected to as without them; the origin's kept
+  # connections are then taken under *base* again.
+  private def self.by_records(client : HTTPClient, origin : String, host : String, port : Int32, base : TlsConfig, through : Resolver?, timeout_ms : Int32) : Tuple(IyiSocket, TlsClient, TlsConfig) | Cancelled | SocketError | HTTPError | Nil
+    made = connect_by_records(client, origin, host, port, base, through, timeout_ms)
+    client.https_config(origin, base, base.ech_configs, base.alpn) if made.nil?
+    made
+  end
+
+  private def self.connect_by_records(client : HTTPClient, origin : String, host : String, port : Int32, base : TlsConfig, through : Resolver?, timeout_ms : Int32) : Tuple(IyiSocket, TlsClient, TlsConfig) | Cancelled | SocketError | HTTPError | Nil
+    return nil if IyiSocket.localhost?(host) || !DnsName.valid?(host)
+    resolver = through || Resolver.system
+    found = resolver.https_records(host, port)
+    return found if found.is_a?(Cancelled)
+    if found.is_a?(DnsError)
+      return nil if found.not_found? || found.no_address? || found.malformed? || resolver.upstreams.empty?
+      return HTTPError.new("#{found.message}; a failed lookup of HTTPS records over encrypted upstreams is not passed over (RFC 9460 section 3.1)")
+    end
+    endpoints = https_endpoints(found, base.alpn, port)
+    # RFC 9848 section 5.1: where every endpoint is encrypted, none that
+    # is not is fallen back to - not the last AliasMode target's, which
+    # section 3 adds for a client that may fall back, nor the origin.
+    reliant = !endpoints.empty? && endpoints.all? { |endpoint| !endpoint.ech.nil? }
+    if !reliant && found.aliases > 0 && !found.unavailable? && DnsName.valid?(found.name)
+      endpoints << HttpsEndpoint.new(found.name, port, nil, base.alpn)
+    end
+    wait = timeout_ms > 0 ? timeout_ms : -1
+    failed = nil.as(SocketError?)
+    endpoints.each do |endpoint|
+      socket = through ? IyiSocket.connect(endpoint.host, endpoint.port, through, wait) : IyiSocket.connect(endpoint.host, endpoint.port, wait)
+      return socket if socket.is_a?(Cancelled)
+      if socket.is_a?(SocketError)
+        failed = socket
+        next
+      end
+      client.made
+      # Where a retry goes: the address this connection reached, not one
+      # a new lookup might give, which could be another server's under
+      # another configuration (RFC 9849 section 6.1.6).
+      address = socket.remote_address
+      config = client.https_config(origin, base, endpoint.ech, endpoint.alpn)
+      tls = records_handshake(client, origin, socket, host, config, timeout_ms)
+      if tls.is_a?(TlsError) && tls.alert == TlsAlert::ECH_REQUIRED && !config.ech_configs.nil? && address
+        # Turned down, the server's certificate checked for the config's
+        # public_name: asked once more under the retry_configs it sent, or
+        # without ECH where it sent none. A second refusal is the failure.
+        socket = IyiSocket.connect(address, endpoint.port, wait)
+        return socket if socket.is_a?(Cancelled) || socket.is_a?(SocketError)
+        client.made
+        config = client.https_config(origin, base, tls.retry_configs, endpoint.alpn)
+        tls = records_handshake(client, origin, socket, host, config, timeout_ms)
+      end
+      return HTTPError.new(tls.message) if tls.is_a?(TlsError)
+      return {socket, tls, config}
+    end
+    return failed if reliant && failed
+    nil
+  end
+
+  # The handshake for *host* on *socket* under *config*, offering a ticket
+  # *client* keeps for *origin* under it; it waits as long as a read does.
+  private def self.records_handshake(client : HTTPClient, origin : String, socket : IyiSocket, host : String, config : TlsConfig, timeout_ms : Int32) : TlsClient | TlsError
+    if timeout_ms > 0
+      socket.read_timeout_ms = timeout_ms
+      socket.write_timeout_ms = timeout_ms
+    end
+    shake_ms = timeout_ms > 0 ? timeout_ms : TlsClient::HANDSHAKE_TIMEOUT_MS
+    TlsClient.over(socket, host, config, shake_ms, client.session_for(origin, config))
+  end
+
+  # The endpoints *answer*'s ServiceMode records name for a client whose
+  # configuration offers *alpn* by ALPN (none: it speaks http/1.1 alone),
+  # to an origin on *port*, in the order to try them: a record whose
+  # mandatory keys are not all ones std/dns reads, or whose protocols -
+  # alpn, and http/1.1 unless no-default-alpn - hold none of the client's,
+  # names none (RFC 9460 sections 7.1.2 and 8), and neither does one whose
+  # target is not a host name. Each is the record's target, or its owner
+  # for "."; its port, or *port*; its `ech` where the ECHConfigList holds
+  # a config std/tls can use (RFC 9849 section 6.1), nil otherwise; and
+  # *alpn* with the protocols the record's alpn lists first, in *alpn*'s
+  # order otherwise.
+  def self.https_endpoints(answer : SvcbAnswer, alpn : Array(String), port : Int32) : Array(HttpsEndpoint)
+    spoken = alpn.empty? ? ["http/1.1"] : alpn
+    found = [] of HttpsEndpoint
+    answer.records.each do |record|
+      next if record.alias?
+      next unless record.mandatory.all? { |key| key <= SvcbRecord::IPV6HINT }
+      listed = record.alpn
+      offered = listed.dup
+      offered << "http/1.1" unless record.no_default_alpn?
+      next unless spoken.any? { |protocol| offered.includes?(protocol) }
+      host = record.endpoint
+      next unless DnsName.valid?(host)
+      ech = nil.as(Array(UInt8)?)
+      if list = record.ech
+        bytes = Array(UInt8).new(list.size) { |index| list[index] }
+        configs = TlsEchConfig.read_list(bytes)
+        ech = bytes if configs.is_a?(Array(TlsEchConfig)) && configs.any? { |config| !config.hpke_suite.nil? }
+      end
+      ordered = alpn.select { |protocol| listed.includes?(protocol) } + alpn.reject { |protocol| listed.includes?(protocol) }
+      found << HttpsEndpoint.new(host, record.port || port, ech, ordered)
+    end
+    found
   end
 
   # The tunnel to *authority* (`host:port`, an IPv6 host in brackets) on
@@ -4523,13 +5261,18 @@ pub class Multipart
   end
 
   # The boundary a `Content-Type` of `multipart/...` names, nil when it
-  # names none.
+  # names none - or one of a length RFC 2046 §5.1.1 does not allow, 1 to
+  # 70 characters, which `new` refuses with a panic. The type is the
+  # peer's: `Request#multipart` handed a client's 90-character boundary
+  # through to that panic (found by bench/std_fuzz_exercise.sh).
   def self.boundary(content_type : String) : String?
     parsed = MIME.parse?(content_type)
     return nil unless parsed
     media, params = parsed
     return nil unless media.starts_with?("multipart/")
-    params["boundary"]?
+    found = params["boundary"]?
+    return nil unless found && found.bytesize >= 1 && found.bytesize <= 70
+    found
   end
 
   # The next part, nil after the last.

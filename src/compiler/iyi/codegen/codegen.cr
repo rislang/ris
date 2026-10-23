@@ -774,6 +774,7 @@ module Iyi
       @modules.each do |name, info|
         mod = info.mod
         push_debug_info_metadata(mod) unless @debug.none?
+        iyi_probe_stack(mod)
 
         mod.dump if dump_all_llvm || dump_llvm_regex.try &.matches?(name)
 
@@ -787,6 +788,32 @@ module Iyi
         dump_type_info(type_info_path)
       end
       dump_type_id if ENV["IYI_DUMP_TYPE_ID"]? == "1"
+    end
+
+    # iyi: every function this unit defines touches its frame a page at a
+    # time, top down, before it uses any of it, so running off the end of a
+    # stack faults on the guard page under it rather than past it.
+    #
+    # A fiber's stack has one guard page (`IyiFiber#map_stack`), and a frame
+    # is carved with one `sub rsp`; a frame larger than the page, written
+    # first at its low end, stepped over the guard into whatever mapping lay
+    # below, which is often another fiber's stack or the heap, and the
+    # program went on with that memory overwritten. Inline probes are LLVM's
+    # (`"probe-stack"="inline-asm"`): a loop of `sub $4096, %rsp` and a store
+    # to the new top, so the guard is the first page past the end anything
+    # touches whatever the frame's size, and the fault arrives within a page
+    # of the stack pointer, where `IyiStackGuard` names it a stack overflow.
+    #
+    # Not on Windows: there a frame over a page already calls `__chkstk`,
+    # which touches each page below the TEB's StackLimit in order, and
+    # LLVM's x86 backend reads the attribute there as the name of the probe
+    # function to call. Not on wasm32, whose stack is not paged.
+    private def iyi_probe_stack(mod : LLVM::Module) : Nil
+      return if @program.has_flag?("win32") || @program.has_flag?("wasm32")
+      mod.functions.each do |func|
+        next if func.basic_blocks.empty?
+        func.add_attribute "probe-stack", value: "inline-asm"
+      end
     end
 
     def visit(node : Annotation)
@@ -1138,7 +1165,12 @@ module Iyi
         unreachable
       else
         value = upcast(@last, method_type, type)
-        ret to_rhs(value, method_type)
+        if indirect_return = context.indirect_return
+          store_value value, method_type, indirect_return, fresh: true
+          ret
+        else
+          ret to_rhs(value, method_type)
+        end
       end
     end
 
@@ -2498,11 +2530,9 @@ module Iyi
 
         if self_closured
           offset = parent_closure_type ? 1 : 0
-          self_value = to_rhs(llvm_self, current_context.type)
-
           slot = gep(closure_type, closure_ptr, 0, closure_vars.size + offset, "self")
           iyi_with_write_barrier(slot, current_context.type) do
-            store self_value, slot
+            store_value llvm_self, current_context.type, slot, fresh: true
           end
 
           current_context.closure_self = current_context.type
@@ -2937,6 +2967,56 @@ module Iyi
       res
     end
 
+    def memmove(dest, src, len, align, volatile)
+      res = call c_memmove_fun, [dest, src, len, volatile]
+
+      LibLLVM.set_instr_param_alignment(res, 1, align)
+      LibLLVM.set_instr_param_alignment(res, 2, align)
+
+      res
+    end
+
+    def passed_indirectly?(type)
+      llvm_typer.passed_indirectly?(type)
+    end
+
+    # Stores *value*, of *type* and in the form `to_lhs` gives it, at
+    # *pointer*.
+    #
+    # iyi: a value passed indirectly (`LLVMTyper#passed_indirectly?`) is
+    # copied from memory to memory by `copy_value`, rather than loaded as one
+    # first-class aggregate and stored, which LLVM lowers an element at a
+    # time through stack slots when it does not optimise. *fresh* says
+    # *pointer* is a slot made for this value, which nothing can point into.
+    def store_value(value, type, pointer, *, fresh = false)
+      if passed_indirectly?(type)
+        copy_value(pointer, value, type, fresh: fresh)
+      else
+        store to_rhs(value, type), pointer
+      end
+    end
+
+    # Copies the bytes of a *type* at *src* to *dest*. Into a *fresh* slot the
+    # two cannot overlap and the copy is a `memcpy`; anywhere else it is a
+    # `memmove`, which is what loading the whole value before storing it was:
+    # `ptr.value = (ptr + 1).value` reads both halves of an overlap before
+    # either is written. Neither is volatile, as the load and store were not;
+    # a volatile or atomic access is a primitive of its own, on a scalar.
+    # Both ends are assumed aligned to the type's ABI alignment, which is what
+    # the load and store assumed.
+    def copy_value(dest, src, type, *, fresh = false)
+      return if @builder.end
+
+      llvm_value_type = llvm_type(type)
+      size = size_t(llvm_typer.size_of(llvm_value_type))
+      align = llvm_typer.align_of(llvm_value_type)
+      if fresh
+        memcpy(dest, src, size, align, int1(0))
+      else
+        memmove(dest, src, size, align, int1(0))
+      end
+    end
+
     def realloc(buffer, size)
       if realloc_fun = crystal_realloc_fun
         call realloc_fun, [buffer, size]
@@ -2969,6 +3049,19 @@ module Iyi
                "llvm.memcpy.p0i8.p0i8.i#{@program.size_bit_width}"
              {% else %}
                "llvm.memcpy.p0.p0.i#{@program.size_bit_width}"
+             {% end %}
+
+      fetch_typed_fun(@llvm_mod, name) do
+        arg_types = [@llvm_context.void_pointer, @llvm_context.void_pointer, size_t, @llvm_context.int1]
+        LLVM::Type.function(arg_types, @llvm_context.void)
+      end
+    end
+
+    private def c_memmove_fun
+      name = {% if LibLLVM::IS_LT_150 %}
+               "llvm.memmove.p0i8.p0i8.i#{@program.size_bit_width}"
+             {% else %}
+               "llvm.memmove.p0.p0.i#{@program.size_bit_width}"
              {% end %}
 
       fetch_typed_fun(@llvm_mod, name) do

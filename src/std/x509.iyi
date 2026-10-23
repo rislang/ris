@@ -1,5 +1,7 @@
 # X.509 certificates read and chains checked (RFC 5280), written in iyi:
-# what a TLS client asks of a server's certificates.
+# what a TLS client asks of a server's certificates - and, for an ACME
+# client (std/acme), a certificate request and a self-signed certificate
+# written and signed.
 #
 #     import std/x509::{Certificate, X509, X509Error}
 #
@@ -13,7 +15,11 @@
 # issuer and subject (kept as their DER, which is what a chain matches),
 # validity, key, signature, and the extensions a chain is checked by -
 # basicConstraints, keyUsage, extKeyUsage, subjectAltName's DNS names and
-# IP addresses, nameConstraints, and the key identifiers. An extension
+# IP addresses, nameConstraints, and the key identifiers - and two that
+# OCSP stapling reads (std/ocsp, std/tls): the TLS Feature extension (RFC
+# 7633), whose status_request is "must staple", and id-pkix-ocsp-nocheck
+# (RFC 6960). Revocation itself is std/ocsp's: a chain checked here is
+# not asked whether any certificate in it was revoked. An extension
 # that appears twice is refused. One that is critical and not among these
 # is kept by name, and a chain through its certificate is refused: RFC
 # 5280 section 4.2 says a certificate with a critical extension it does
@@ -31,10 +37,13 @@
 # client's, `X509Purpose::Client`), and the leaf's names must fall inside
 # its nameConstraints; it must have signed the certificate below it. Name
 # constraints are checked for DNS names and IP addresses; a constraint of
-# any other kind refuses the chain rather than being passed over. The
-# leaf must be valid at that time, not a CA (a CA's certificate is not a
-# server's, as the Web PKI's verifiers hold, nor a client's), allowed the
-# purpose if it carries extKeyUsage, and, when a host is given, name it.
+# any other kind refuses the chain rather than being passed over. A DNS
+# name is judged by a constraint as a host is matched to it, without its
+# final dot, and a constraint or a name under one with an empty label
+# refuses the chain. The leaf must be valid at that time, not a CA (a
+# CA's certificate is not a server's, as the Web PKI's verifiers hold, nor
+# a client's), allowed the purpose if it carries extKeyUsage, and, when a
+# host is given, name it.
 #
 # A host is matched against subjectAltName only, never the subject's
 # common name, as browsers and RFC 6125 have it: a DNS name exactly,
@@ -45,21 +54,46 @@
 # Signatures: RSA PKCS #1 v1.5 and PSS, and ECDSA, under SHA-256, SHA-384
 # and SHA-512, and Ed25519 (RFC 8410: the key's and the signature's
 # AlgorithmIdentifier carry no parameters at all). A certificate signed
-# under SHA-1 is refused, as every browser refuses one. A root's own
+# under SHA-1 is refused, as every browser refuses one, and so is a chain
+# with an RSA key under 2048 bits anywhere in it, root included (see
+# `X509::MIN_RSA_BITS` for how OpenSSL's level 2 compares). A root's own
 # signature is not checked: a root is trusted for being in the store, not
 # for what it says about itself.
 #
-# Pure computation: std/asn1, std/rsa, std/ecdsa, std/curve25519,
-# std/base64 for PEM and std/idna for a host written in Unicode.
+# Written: `X509.request` is a PKCS #10 request (RFC 2986) - CN=<the first
+# name> and subjectAltName's dNSNames in an extensionRequest attribute -
+# and `X509.self_signed` a version 3 certificate for itself with
+# subjectAltName and whatever extensions the caller adds, critical or
+# not, each signed by a `SigningKey`: P-256 under ecdsa-with-SHA256, P-384
+# under ecdsa-with-SHA384 (std/p256, std/p384), RSA under
+# sha256WithRSAEncryption (std/rsa, PKCS #1 v1.5) or Ed25519
+# (std/curve25519), each in constant time. The DER is written in its one
+# shortest form (`X509Der`), what std/asn1 reads back. No CA is made here:
+# no basicConstraints, keyUsage or key identifiers are written. RFC 5280's
+# bounds hold on what is written: a common name of 64 characters at most
+# (a request leaves a longer first name out of its subject, a self-signed
+# certificate refuses it), and a serial that is positive and 20 octets
+# at most.
+# bench/std_acme_exercise.sh holds both to OpenSSL and Python's
+# cryptography.
+#
+# Pure computation: std/asn1, std/rsa, std/ecdsa, std/p256, std/p384,
+# std/curve25519, std/base64 for PEM and std/idna for a host written in
+# Unicode - but for the operating system's entropy (std/random's
+# `Secure`), which a new key and a serial left to this module draw.
 
 module std/x509
 
 import std/int
 
 import std/asn1::{Der, DerValue, DerTag, Asn1Error}
-import std/rsa::{RsaPublicKey, RsaHash, RsaError}
-import std/ecdsa::{EcdsaPublicKey, EcdsaHash, EcdsaError}
-import std/curve25519::{Ed25519PublicKey, CurveError}
+import std/rsa::{RsaPublicKey, RsaPrivateKey, RsaHash, RsaError}
+import std/ecdsa::{EcdsaPublicKey, EcdsaCurve, EcdsaHash, EcdsaError}
+import std/p256::{P256PrivateKey}
+import std/p384::{P384PrivateKey}
+import std/curve25519::{Ed25519, Ed25519PublicKey, CurveError}
+import std/random::{Random}
+import std/big::{BigInt}
 import std/time::{Time}
 import std/base64::{Base64}
 import std/idna::{IDNA, IdnaError}
@@ -83,7 +117,20 @@ impl Error for X509Error
   end
 end
 
-pub struct Certificate
+# A class, not a struct, for the stack's sake. Thirty-odd fields make 472
+# bytes, and a struct is copied whole into every array slot, block
+# argument and union it passes through. In a debug build each copy is a
+# stack slot of its own, and a TLS handshake inside a task ran out of
+# its 256 KiB (issue #130). Measured on Linux x86_64, a struct made
+# `Certificate.parse`'s frame 31,832 bytes (each `!` and early return
+# makes a `Certificate | X509Error`), `X509.grow`'s 13,640 and
+# `issuer_error`'s 6,184; a class makes them 5,224, 296 and 368. With
+# `EcdsaP256.check` split as well (std/ecdsa), `X509.verify` of a
+# two-certificate P-256 chain in a task went from 35,608 bytes of stack
+# to 11,768. Nothing in a certificate is written after `parse`, so
+# sharing one is not observable, and two are equal when they are the
+# same DER, as two structs were when every field was.
+pub class Certificate
   # The whole certificate as it was read, and its signed part.
   getter raw : Array(UInt8)
   getter tbs : Array(UInt8)
@@ -124,6 +171,16 @@ pub struct Certificate
   getter other_constraints : Bool
   getter subject_key_id : Array(UInt8)?
   getter authority_key_id : Array(UInt8)?
+  # The subjectPublicKey BIT STRING's bytes, as written: what an OCSP
+  # CertID's issuerKeyHash and a responder's byKey are hashes of (RFC
+  # 6960 section 4.1.1).
+  getter public_key_bits : Array(UInt8)
+  # The TLS Feature extension's features (RFC 7633), nil when absent:
+  # 5, status_request, is "must staple".
+  getter tls_features : Array(Int32)?
+  # Whether id-pkix-ocsp-nocheck is here (RFC 6960 section 4.2.2.2.1): an
+  # OCSP responder's certificate saying its own status is not asked.
+  getter ocsp_nocheck : Bool
   # Critical extensions this does not understand, by OID.
   getter unhandled_critical : Array(String)
   @signature_parameters : DerValue?
@@ -136,7 +193,7 @@ pub struct Certificate
                  @issuer : Array(UInt8), @subject : Array(UInt8), @subject_name : String, @issuer_name : String,
                  @not_before : Time, @not_after : Time, @public_key : RsaPublicKey | EcdsaPublicKey | Ed25519PublicKey,
                  @signature_algorithm : String, @signature_parameters : DerValue?, @signature : Array(UInt8),
-                 extensions : X509Extensions)
+                 @public_key_bits : Array(UInt8), extensions : X509Extensions)
     @basic_constraints = extensions.basic_constraints
     @ca = extensions.ca
     @path_length = extensions.path_length
@@ -152,6 +209,17 @@ pub struct Certificate
     @subject_key_id = extensions.subject_key_id
     @authority_key_id = extensions.authority_key_id
     @unhandled_critical = extensions.unhandled_critical
+    @tls_features = extensions.tls_features
+    @ocsp_nocheck = extensions.ocsp_nocheck
+  end
+
+  # The same certificate: the same DER, from which every field is read.
+  def ==(other : Certificate) : Bool
+    @raw == other.raw
+  end
+
+  def hash : Int32
+    @raw.hash
   end
 
   # The certificate *der* holds (RFC 5280 section 4.1).
@@ -187,23 +255,33 @@ pub struct Certificate
     not_before = X509Asn1.time(validity[0].time)!
     not_after = X509Asn1.time(validity[1].time)!
     key = X509Keys.read(tbs[at + 5])!
+    key_bits = X509Asn1.bytes(X509Asn1.values(tbs[at + 5].sequence)![1].bit_string)!
     extensions = X509Extensions.new
     rest = at + 6
+    # RFC 5280 section 4.1: issuerUniqueID [1], subjectUniqueID [2] and
+    # extensions [3], each at most once and in that order. A second
+    # extensions block was read on top of the first, so a certificate
+    # whose second block said cA where its first did not was a CA here and
+    # not to a reader that stopped at the first; Python's cryptography and
+    # OpenSSL refuse to read one at all.
+    last = 0
     while rest < tbs.size
       field = tbs[rest]
-      if field.context?(1) || field.context?(2)
+      tag = field.context?(1) ? 1 : (field.context?(2) ? 2 : (field.context?(3) ? 3 : 0))
+      return X509Error.new("#{field.describe} where the TBSCertificate ends") if tag == 0
+      return X509Error.new("#{field.describe} after [#{last}], where RFC 5280 has each of [1], [2] and [3] once and in order") unless tag > last
+      last = tag
+      if tag < 3
         return X509Error.new("a unique identifier in a version 1 certificate") if version < 2
-      elsif field.context?(3)
+      else
         return X509Error.new("extensions in a version #{version} certificate") unless version == 3
         extensions.read(X509Asn1.value(field.explicit(3))!)!
-      else
-        return X509Error.new("#{field.describe} where the TBSCertificate ends")
       end
       rest = rest + 1
     end
     signature = X509Asn1.bytes(outer[2].bit_string)!
     Certificate.new(der, outer[0].raw, version, serial, issuer.raw, subject.raw, subject_name, issuer_name,
-      not_before, not_after, key, signature_algorithm, parameters, signature, extensions)
+      not_before, not_after, key, signature_algorithm, parameters, signature, key_bits, extensions)
   end
 
   # Every CERTIFICATE block in a PEM text, read; the first one that is not
@@ -233,43 +311,14 @@ pub struct Certificate
 
   # Why *issuer*'s key did not make this certificate's signature, or nil.
   def signature_error(issuer : Certificate) : String?
-    key = issuer.public_key
-    case @signature_algorithm
-    when X509Oids::SHA256_RSA, X509Oids::SHA384_RSA, X509Oids::SHA512_RSA
-      return "#{@signature_algorithm} with parameters that are not NULL" unless X509Keys.null_or_absent?(@signature_parameters)
-      return "an RSA signature under #{issuer.subject_name}'s #{X509Keys.kind(key)} key" unless key.is_a?(RsaPublicKey)
-      hash = case @signature_algorithm
-             when X509Oids::SHA256_RSA then RsaHash::SHA256
-             when X509Oids::SHA384_RSA then RsaHash::SHA384
-             else                           RsaHash::SHA512
-             end
-      return nil if key.verify_pkcs1v15(hash, @tbs, @signature)
-    when X509Oids::RSA_PSS
-      return "an RSA signature under #{issuer.subject_name}'s #{X509Keys.kind(key)} key" unless key.is_a?(RsaPublicKey)
-      parameters = @signature_parameters
-      return "RSASSA-PSS without its parameters" unless parameters
-      pss = X509Keys.pss(parameters)
-      return pss if pss.is_a?(String)
-      return nil if key.verify_pss(pss[0], @tbs, @signature, salt_length: pss[1])
-    when X509Oids::ECDSA_SHA256, X509Oids::ECDSA_SHA384, X509Oids::ECDSA_SHA512
-      return "#{@signature_algorithm} with parameters" unless @signature_parameters.nil?
-      return "an ECDSA signature under #{issuer.subject_name}'s #{X509Keys.kind(key)} key" unless key.is_a?(EcdsaPublicKey)
-      hash = case @signature_algorithm
-             when X509Oids::ECDSA_SHA256 then EcdsaHash::SHA256
-             when X509Oids::ECDSA_SHA384 then EcdsaHash::SHA384
-             else                             EcdsaHash::SHA512
-             end
-      return nil if key.verify(hash, @tbs, @signature)
-    when X509Oids::ED25519
-      return "#{@signature_algorithm} with parameters" unless @signature_parameters.nil?
-      return "an Ed25519 signature under #{issuer.subject_name}'s #{X509Keys.kind(key)} key" unless key.is_a?(Ed25519PublicKey)
-      return nil if key.verify(@tbs, @signature)
-    when X509Oids::SHA1_RSA, X509Oids::ECDSA_SHA1
-      return "#{@subject_name} is signed under SHA-1, which is refused"
-    else
-      return "#{@subject_name} is signed under #{@signature_algorithm}, which this does not check"
-    end
-    "#{@subject_name}'s signature is not #{issuer.subject_name}'s"
+    X509.signature_error(issuer.public_key, @signature_algorithm, @signature_parameters, @tbs, @signature, @subject_name, issuer.subject_name)
+  end
+
+  # Whether the TLS Feature extension (RFC 7633) asks for status_request:
+  # a certificate that must be shown with a stapled OCSP response.
+  def must_staple? : Bool
+    features = @tls_features
+    !features.nil? && features.includes?(5)
   end
 
   # Whether *host* is a name this certificate is for: a DNS name or an IP
@@ -299,6 +348,63 @@ pub struct X509
   # Certificate message holds far more than seven. The other library's
   # path builder in Go stops at the same 100.
   MAX_SIGNATURE_CHECKS = 100
+  # An RSA key under this many bits is refused anywhere in a chain, leaf
+  # to root: the floor std/rsa signs at and the CA/Browser Forum's for a
+  # certificate's key. OpenSSL at its security level 2 (`openssl verify
+  # -auth_level 2`, where Debian's and Ubuntu's builds start) refuses a
+  # 1024- or 1536-bit key at any depth as this does; it judges by NIST SP
+  # 800-56B's strength estimate, which took 1990 bits and up when measured
+  # (OpenSSL 3.5.5), so the two part only between 1990 and 2047 bits.
+  # std/rsa itself reads keys down to 1024 bits.
+  MIN_RSA_BITS = 2048
+
+  # Why *key*, *signer*'s, did not make *signature* over *signed* under
+  # *algorithm* (an OID) and its *parameters*, or nil; *what* names what
+  # was signed, for the sentence. A certificate's signature is checked
+  # here, and an OCSP response's (std/ocsp).
+  def self.signature_error(key : RsaPublicKey | EcdsaPublicKey | Ed25519PublicKey, algorithm : String, parameters : DerValue?,
+                           signed : Array(UInt8), signature : Array(UInt8), what : String, signer : String) : String?
+    case algorithm
+    when X509Oids::SHA256_RSA, X509Oids::SHA384_RSA, X509Oids::SHA512_RSA
+      return "#{algorithm} with parameters that are not NULL" unless X509Keys.null_or_absent?(parameters)
+      return "an RSA signature under #{signer}'s #{X509Keys.kind(key)} key" unless key.is_a?(RsaPublicKey)
+      hash = case algorithm
+             when X509Oids::SHA256_RSA then RsaHash::SHA256
+             when X509Oids::SHA384_RSA then RsaHash::SHA384
+             else                           RsaHash::SHA512
+             end
+      return nil if key.verify_pkcs1v15(hash, signed, signature)
+    when X509Oids::RSA_PSS
+      return "an RSA signature under #{signer}'s #{X509Keys.kind(key)} key" unless key.is_a?(RsaPublicKey)
+      return "RSASSA-PSS without its parameters" unless parameters
+      pss = X509Keys.pss(parameters)
+      return pss if pss.is_a?(String)
+      return nil if key.verify_pss(pss[0], signed, signature, salt_length: pss[1])
+    when X509Oids::ECDSA_SHA256, X509Oids::ECDSA_SHA384, X509Oids::ECDSA_SHA512
+      return "#{algorithm} with parameters" unless parameters.nil?
+      return "an ECDSA signature under #{signer}'s #{X509Keys.kind(key)} key" unless key.is_a?(EcdsaPublicKey)
+      hash = case algorithm
+             when X509Oids::ECDSA_SHA256 then EcdsaHash::SHA256
+             when X509Oids::ECDSA_SHA384 then EcdsaHash::SHA384
+             else                             EcdsaHash::SHA512
+             end
+      return nil if key.verify(hash, signed, signature)
+    when X509Oids::ED25519
+      return "#{algorithm} with parameters" unless parameters.nil?
+      return "an Ed25519 signature under #{signer}'s #{X509Keys.kind(key)} key" unless key.is_a?(Ed25519PublicKey)
+      return nil if key.verify(signed, signature)
+    when X509Oids::SHA1_RSA, X509Oids::ECDSA_SHA1
+      return "#{what} is signed under SHA-1, which is refused"
+    else
+      return "#{what} is signed under #{algorithm}, which this does not check"
+    end
+    "#{what}'s signature is not #{signer}'s"
+  end
+
+  # Why *certificate*'s RSA key is under `MIN_RSA_BITS`, or nil.
+  def self.weak_key_error(certificate : Certificate) : String?
+    weak_key(certificate)
+  end
 
   # The DER of every block labelled *label* in a PEM text - `"CERTIFICATE"`
   # or `"PRIVATE KEY"` - each checked to be base64 before it is decoded.
@@ -327,8 +433,83 @@ pub struct X509
     X509Error.new("no certificate here issued #{leaf.issuer_name}, the issuer of #{leaf.subject_name}")
   end
 
+  # The longest common name RFC 5280 allows (ub-common-name, appendix A.1).
+  MAX_COMMON_NAME = 64
+  # The most octets a serial's INTEGER may hold (RFC 5280 section 4.1.2.2).
+  MAX_SERIAL_OCTETS = 20
+
+  # A certificate *key* signs for itself (RFC 5280 section 4.1), as its
+  # DER: version 3, *serial* (sixteen random bytes when nil), the subject
+  # and issuer both CN=<the first name>, valid from *not_before* to
+  # *not_after*, and the extensions - subjectAltName with *names* as
+  # dNSNames, then *extensions* in order. No basicConstraints and no
+  # keyUsage: what this writes is a certificate shown for a name, as RFC
+  # 8737's tls-alpn-01 shows one, not a CA's.
+  #
+  # A first name longer than `MAX_COMMON_NAME` is refused, not cut or left
+  # out of the subject: a common name holds 64 characters at most, and a
+  # subject without one would be empty, which a self-signed certificate's
+  # issuer - the same name - must not be (section 4.1.2.4). `request`,
+  # whose subject is no issuer, leaves the CN out instead. *serial* is the
+  # big-endian magnitude of a positive number: refused when it is zero or
+  # when its INTEGER, a sign byte put before a top bit that is set, runs
+  # past `MAX_SERIAL_OCTETS` (section 4.1.2.2). The sixteen bytes drawn
+  # when it is nil write 17 octets at most and are drawn again in the
+  # 2^-128 chance they are all zero.
+  def self.self_signed(key : SigningKey, names : Array(String), not_before : Time, not_after : Time,
+                       serial : Array(UInt8)? = nil, extensions : Array(X509Extension) = [] of X509Extension) : Array(UInt8) | X509Error
+    alt = X509Der.alt_names(names)!
+    return X509Error.new("a certificate valid until #{not_after}, before it is valid from #{not_before}") if not_after < not_before
+    if names[0].bytesize > MAX_COMMON_NAME
+      return X509Error.new("#{names[0]} is #{names[0].bytesize} characters, past the #{MAX_COMMON_NAME} RFC 5280 allows a common name, and a self-signed certificate's subject cannot be left empty")
+    end
+    number = serial || X509Der.random_serial
+    return X509Error.new("a serial of 0, where RFC 5280 asks a positive number") unless number.any? { |b| b != 0_u8 }
+    octets = X509Der.integer_content(number)
+    if octets.size > MAX_SERIAL_OCTETS
+      return X509Error.new("a serial whose INTEGER is #{octets.size} octets, past the #{MAX_SERIAL_OCTETS} RFC 5280 allows")
+    end
+    written_serial = X509Der.tlv(0x02_u8, octets)
+    name = X509Der.name(names[0])
+    written = [X509Der.extension(X509Oids::SUBJECT_ALT_NAME, false, alt)]
+    extensions.each { |e| written << X509Der.extension(e.oid, e.critical, e.value) }
+    tbs = X509Der.sequence([
+      X509Der.explicit(0, X509Der.integer([2_u8])),
+      written_serial,
+      key.algorithm_identifier,
+      name,
+      X509Der.sequence([X509Der.time(not_before), X509Der.time(not_after)]),
+      name,
+      key.public_key_info,
+      X509Der.explicit(3, X509Der.sequence(written)),
+    ])
+    X509Der.sequence([tbs, key.algorithm_identifier, X509Der.bit_string(key.sign(tbs))])
+  end
+
+  # A certificate request (PKCS #10, RFC 2986) *key* signs, as its DER: the
+  # subject CN=<the first name> when it fits the 64 characters RFC 5280
+  # gives a common name and empty otherwise, the key, and an
+  # extensionRequest attribute (RFC 2985 section 5.4.2) asking for
+  # subjectAltName with *names* as dNSNames - which is what an ACME server
+  # issues for (RFC 8555 section 7.4).
+  def self.request(key : SigningKey, names : Array(String)) : Array(UInt8) | X509Error
+    alt = X509Der.alt_names(names)!
+    subject = names[0].bytesize <= MAX_COMMON_NAME ? X509Der.name(names[0]) : X509Der.sequence([] of Array(UInt8))
+    requested = X509Der.sequence([X509Der.extension(X509Oids::SUBJECT_ALT_NAME, false, alt)])
+    attribute = X509Der.sequence([X509Der.oid(X509Oids::EXTENSION_REQUEST), X509Der.set([requested])])
+    info = X509Der.sequence([
+      X509Der.integer([0_u8]),
+      subject,
+      key.public_key_info,
+      X509Der.tlv(0xA0_u8, attribute),
+    ])
+    X509Der.sequence([info, key.algorithm_identifier, X509Der.bit_string(key.sign(info))])
+  end
+
   private def self.leaf_error(leaf : Certificate, host : String?, now : Time, purpose : X509Purpose) : String?
     return "#{leaf.subject_name} is not valid at #{now}: from #{leaf.not_before} to #{leaf.not_after}" unless leaf.valid_at?(now)
+    weak = weak_key(leaf)
+    return weak if weak
     return "#{leaf.subject_name} carries critical extension #{leaf.unhandled_critical[0]}, which this does not understand" unless leaf.unhandled_critical.empty?
     return "#{leaf.subject_name} is not allowed #{purpose.usage}" unless allowed?(leaf, purpose)
     return "#{leaf.subject_name} is a CA certificate, not a #{purpose.holder}'s" if leaf.ca
@@ -342,6 +523,13 @@ pub struct X509
     usages = certificate.extended_key_usage
     return true unless usages
     usages.includes?(purpose.oid) || usages.includes?(X509Oids::ANY_EXTENDED_KEY_USAGE)
+  end
+
+  # Why *certificate*'s key is too weak to be in a chain, or nil.
+  private def self.weak_key(certificate : Certificate) : String?
+    key = certificate.public_key
+    return nil unless key.is_a?(RsaPublicKey) && key.bits < MIN_RSA_BITS
+    "#{certificate.subject_name}'s RSA key is #{key.bits} bits, under the #{MIN_RSA_BITS} a chain is held to"
   end
 
   # The chain grown from *chain* to a root, trying every issuer that
@@ -385,6 +573,8 @@ pub struct X509
   private def self.issuer_error(child : Certificate, issuer : Certificate, chain : Array(Certificate), now : Time, purpose : X509Purpose) : String?
     name = issuer.subject_name
     return "#{name} is not valid at #{now}: from #{issuer.not_before} to #{issuer.not_after}" unless issuer.valid_at?(now)
+    weak = weak_key(issuer)
+    return weak if weak
     return "#{name} carries critical extension #{issuer.unhandled_critical[0]}, which this does not understand" unless issuer.unhandled_critical.empty?
     return "#{name} is not a CA" unless issuer.basic_constraints && issuer.ca
     usage = issuer.key_usage
@@ -404,12 +594,32 @@ pub struct X509
   private def self.constraint_error(leaf : Certificate, issuer : Certificate) : String?
     name = issuer.subject_name
     return "#{name} constrains names of a kind this does not check" if issuer.other_constraints
-    leaf.dns_names.each do |dns|
-      unless issuer.permitted_dns.empty? || issuer.permitted_dns.any? { |c| X509Names.within?(dns, c) }
-        return "#{dns} is outside the names #{name} permits"
+    unless issuer.permitted_dns.empty? && issuer.excluded_dns.empty?
+      # A constraint with an empty label ("evil.example.") names no
+      # subtree; read as a suffix it holds nothing, and an excluded one
+      # held nothing out. Refused, as Python's verifier refuses it.
+      (issuer.permitted_dns + issuer.excluded_dns).each do |c|
+        return "#{name} constrains names by #{c.inspect}, which is no name" unless c.empty? || X509Names.labels?(c, leading_dot: true)
       end
-      if issuer.excluded_dns.any? { |c| X509Names.within?(dns, c) }
-        return "#{dns} is among the names #{name} excludes"
+    end
+    leaf.dns_names.each do |written|
+      next if issuer.permitted_dns.empty? && issuer.excluded_dns.empty?
+      # Judged as `matches_host?` reads it, without its final dot: the
+      # name "evil.example." is the host evil.example to the matcher, and
+      # was outside a constraint excluding evil.example while the two
+      # read it differently.
+      dns = X509Names.unrooted(written)
+      return "#{written} is no host name for #{name}'s constraints to judge" unless X509Names.labels?(dns)
+      unless issuer.permitted_dns.empty? || issuer.permitted_dns.any? { |c| X509Names.within?(dns, c) }
+        return "#{written} is outside the names #{name} permits"
+      end
+      # A wildcard names every host one label over its rest, so one of
+      # those excluded holds the whole name out, whatever host it is
+      # matched to - as Python's verifier does, and Go's since it fixed
+      # the same gap (CVE-2025-61727). "*.example.com" under an exclusion
+      # of bad.example.com held for bad.example.com before.
+      if issuer.excluded_dns.any? { |c| X509Names.within?(dns, c) || X509Names.dns_matches?(dns, c) }
+        return "#{written} is among the names #{name} excludes"
       end
     end
     leaf.ip_addresses.each do |ip|
@@ -424,7 +634,7 @@ pub struct X509
   end
 end
 
-# The OIDs read here.
+# The OIDs read and written here.
 struct X509Oids
   SHA1_RSA               = "1.2.840.113549.1.1.5"
   SHA256_RSA             = "1.2.840.113549.1.1.11"
@@ -453,6 +663,11 @@ struct X509Oids
   SERVER_AUTH            = "1.3.6.1.5.5.7.3.1"
   CLIENT_AUTH            = "1.3.6.1.5.5.7.3.2"
   ANY_EXTENDED_KEY_USAGE = "2.5.29.37.0"
+  COMMON_NAME            = "2.5.4.3"
+  EXTENSION_REQUEST      = "1.2.840.113549.1.9.14"
+  OCSP_SIGNING           = "1.3.6.1.5.5.7.3.9"
+  OCSP_NOCHECK           = "1.3.6.1.5.5.7.48.1.5"
+  TLS_FEATURE            = "1.3.6.1.5.5.7.1.24"
 end
 
 # What a chain is checked for: a TLS server's certificate or a client's
@@ -492,6 +707,8 @@ class X509Extensions
   property subject_key_id : Array(UInt8)? = nil
   property authority_key_id : Array(UInt8)? = nil
   property unhandled_critical : Array(String) = [] of String
+  property tls_features : Array(Int32)? = nil
+  property ocsp_nocheck : Bool = false
 
   def initialize
   end
@@ -524,6 +741,21 @@ class X509Extensions
         end
       when X509Oids::CERTIFICATE_POLICIES
         X509Asn1.values(inner.sequence)!
+      when X509Oids::TLS_FEATURE
+        # RFC 7633 section 6: Features ::= SEQUENCE OF INTEGER, each a TLS
+        # extension's number.
+        features = [] of Int32
+        X509Asn1.values(inner.sequence)!.each do |feature|
+          number = X509Asn1.int(feature.integer)!
+          return X509Error.new("a TLS feature of #{number}, which names no extension") if number < 0 || number > 65535
+          features << number.to_i32
+        end
+        @tls_features = features
+      when X509Oids::OCSP_NOCHECK
+        # RFC 6960 section 4.2.2.2.1: its value is NULL.
+        null = inner.null
+        return X509Error.new("an id-pkix-ocsp-nocheck that is not NULL: #{null.message}") if null.is_a?(Asn1Error)
+        @ocsp_nocheck = true
       else
         @unhandled_critical << oid if critical
       end
@@ -592,6 +824,13 @@ class X509Extensions
         elsif base.context?(7) && !base.constructed?
           range = base.content
           return X509Error.new("an iPAddress constraint of #{range.size} bytes") unless range.size == 8 || range.size == 32
+          # RFC 5280 section 4.2.1.10 writes the range as CIDR (RFC 4632):
+          # its mask is ones, then zeros. One with a hole in it was taken
+          # and matched bit by bit, a range no CIDR reader sees; Go
+          # refuses it, as Python's cryptography does.
+          unless X509Names.prefix_mask?(range[range.size // 2, range.size // 2])
+            return X509Error.new("an iPAddress constraint whose mask is not a CIDR prefix")
+          end
           permitted ? @permitted_ips << range : @excluded_ips << range
         else
           @other_constraints = true
@@ -697,7 +936,11 @@ struct X509Names
   def self.describe(name : DerValue) : String | X509Error
     parts = [] of String
     X509Asn1.values(name.sequence)!.each do |rdn|
-      X509Asn1.values(rdn.set)!.each do |attribute|
+      attributes = X509Asn1.values(rdn.set)!
+      # RelativeDistinguishedName ::= SET SIZE (1..MAX) (RFC 5280
+      # appendix A.1): an empty one was read as no attribute at all.
+      return X509Error.new("an empty RelativeDistinguishedName") if attributes.empty?
+      attributes.each do |attribute|
         fields = X509Asn1.values(attribute.sequence)!
         return X509Error.new("an AttributeTypeAndValue of #{fields.size} values") unless fields.size == 2
         oid = X509Asn1.text(fields[0].oid)!
@@ -721,6 +964,19 @@ struct X509Names
     end
   end
 
+  # Whether *mask* is ones, then zeros, as a CIDR prefix is.
+  def self.prefix_mask?(mask : Array(UInt8)) : Bool
+    zeros = false
+    mask.each do |b|
+      8.times do |k|
+        one = (b >> (7 - k)) & 1_u8 == 1_u8
+        return false if one && zeros
+        zeros = true unless one
+      end
+    end
+    true
+  end
+
   # The bytes as text where every one is ASCII, else a text that matches
   # no host: a dNSName is IA5String.
   def self.ascii(bytes : Array(UInt8)) : String
@@ -730,7 +986,7 @@ struct X509Names
 
   # *host*, lowercase and in ASCII, against one dNSName.
   def self.dns_matches?(pattern : String, host : String) : Bool
-    pattern = pattern[0, pattern.size - 1] if pattern.ends_with?(".")
+    pattern = unrooted(pattern)
     if pattern.starts_with?("*.")
       rest = pattern[2, pattern.size - 2]
       return false if rest.includes?("*") || !rest.includes?(".")
@@ -740,6 +996,19 @@ struct X509Names
     end
     return false if pattern.includes?("*")
     pattern == host
+  end
+
+  # A dNSName as `dns_matches?` reads it: its one final dot dropped.
+  def self.unrooted(name : String) : String
+    name.ends_with?(".") ? name[0, name.size - 1] : name
+  end
+
+  # Whether *name* is labels joined by dots, none of them empty - after a
+  # leading dot, where *leading_dot* allows one (a constraint's way of
+  # naming what is under a domain and not the domain).
+  def self.labels?(name : String, leading_dot : Bool = false) : Bool
+    name = name[1, name.size - 1] if leading_dot && name.starts_with?(".")
+    !name.empty? && !name.starts_with?(".") && !name.ends_with?(".") && !name.includes?("..")
   end
 
   # Whether a DNS name falls under a dNSName constraint: the name itself
@@ -942,5 +1211,379 @@ struct X509Asn1
 
   def self.int(answer : Int64 | Asn1Error) : Int64 | X509Error
     answer.is_a?(Asn1Error) ? X509Error.new(answer.message) : answer
+  end
+end
+
+# An extension a certificate this module writes carries beside its
+# subjectAltName: its OID, whether it is critical, and *value*, the DER
+# that extnValue's OCTET STRING holds.
+pub struct X509Extension
+  getter oid : String
+  getter critical : Bool
+  getter value : Array(UInt8)
+
+  def initialize(@oid : String, @critical : Bool, @value : Array(UInt8))
+  end
+end
+
+# A private key that signs what this module writes - a certificate for
+# itself, a certificate request - and, through std/acme, an ACME account's
+# requests: P-256 or P-384 (std/p256, std/p384), RSA (std/rsa, 2048 bits
+# or more) or Ed25519 (std/curve25519), each signing in constant time.
+# The signature is the one X.509 carries: ECDSA's the DER of
+# Ecdsa-Sig-Value under SHA-256 on P-256 and SHA-384 on P-384, RSA's PKCS
+# #1 v1.5 under SHA-256, Ed25519's its 64 bytes.
+pub struct SigningKey
+  getter p256 : P256PrivateKey?
+  getter p384 : P384PrivateKey?
+  getter rsa : RsaPrivateKey?
+  @seed : Array(UInt8)?
+
+  def initialize(@p256 : P256PrivateKey?, @p384 : P384PrivateKey?, @rsa : RsaPrivateKey?, @seed : Array(UInt8)?)
+  end
+
+  def self.new(key : P256PrivateKey) : SigningKey
+    SigningKey.new(key, nil, nil, nil)
+  end
+
+  def self.new(key : P384PrivateKey) : SigningKey
+    SigningKey.new(nil, key, nil, nil)
+  end
+
+  def self.new(key : RsaPrivateKey) : SigningKey
+    SigningKey.new(nil, nil, key, nil)
+  end
+
+  # The Ed25519 key whose 32-byte seed (RFC 8032's private key) is *seed*.
+  def self.ed25519(seed : Array(UInt8)) : SigningKey | X509Error
+    return X509Error.new("an Ed25519 private key is 32 bytes, not #{seed.size}") unless seed.size == 32
+    SigningKey.new(nil, nil, nil, seed)
+  end
+
+  # A new P-256 key, from the system's entropy (std/random's `Secure`).
+  # The 32 bytes it is made from are drawn again in the 2^-32 chance that
+  # they are not below the group's order.
+  def self.p256 : SigningKey
+    while true
+      key = P256PrivateKey.from_bytes(Random::Secure.random_bytes(32))
+      return SigningKey.new(key) unless key.is_a?(EcdsaError)
+    end
+    raise "unreachable"
+  end
+
+  # A new P-384 key, as `p256` makes one.
+  def self.p384 : SigningKey
+    while true
+      key = P384PrivateKey.from_bytes(Random::Secure.random_bytes(48))
+      return SigningKey.new(key) unless key.is_a?(EcdsaError)
+    end
+    raise "unreachable"
+  end
+
+  # The key in *text*'s one PRIVATE KEY block (PKCS #8: P-256, P-384, RSA
+  # or Ed25519), EC PRIVATE KEY block (SEC 1, P-256 or P-384) or RSA
+  # PRIVATE KEY block (PKCS #1).
+  def self.from_pem(text : String) : SigningKey | X509Error
+    pkcs8 = X509Pem.blocks(text, "PRIVATE KEY")!
+    sec1 = X509Pem.blocks(text, "EC PRIVATE KEY")!
+    pkcs1 = X509Pem.blocks(text, "RSA PRIVATE KEY")!
+    count = pkcs8.size + sec1.size + pkcs1.size
+    return X509Error.new("#{count} blocks of PRIVATE KEY, EC PRIVATE KEY or RSA PRIVATE KEY, not one") unless count == 1
+    if sec1.size == 1
+      narrow = P256PrivateKey.from_sec1(sec1[0])
+      return SigningKey.new(narrow) unless narrow.is_a?(EcdsaError)
+      wide = P384PrivateKey.from_sec1(sec1[0])
+      return X509Error.new("an EC private key on neither P-256 nor P-384: #{narrow.message}; #{wide.message}") if wide.is_a?(EcdsaError)
+      return SigningKey.new(wide)
+    end
+    if pkcs1.size == 1
+      rsa = RsaPrivateKey.from_pkcs1(pkcs1[0])
+      return X509Error.new(rsa.message) if rsa.is_a?(RsaError)
+      return SigningKey.new(rsa)
+    end
+    der = pkcs8[0]
+    fields = X509Asn1.values(X509Asn1.value(Der.parse(der))!.sequence)!
+    return X509Error.new("a PrivateKeyInfo of #{fields.size} values, under 3") if fields.size < 3
+    algorithm = X509Asn1.values(fields[1].sequence)!
+    return X509Error.new("a PrivateKeyInfo with no algorithm") if algorithm.empty?
+    oid = X509Asn1.text(algorithm[0].oid)!
+    case oid
+    when X509Oids::EC_PUBLIC_KEY
+      return X509Error.new("an EC private key without its named curve") unless algorithm.size == 2
+      curve = X509Asn1.text(algorithm[1].oid)!
+      if curve == EcdsaCurve::P256.oid
+        key = P256PrivateKey.from_pkcs8(der)
+        return key.is_a?(EcdsaError) ? X509Error.new(key.message) : SigningKey.new(key)
+      elsif curve == EcdsaCurve::P384.oid
+        key = P384PrivateKey.from_pkcs8(der)
+        return key.is_a?(EcdsaError) ? X509Error.new(key.message) : SigningKey.new(key)
+      end
+      X509Error.new("an EC private key on #{curve}, not P-256 or P-384")
+    when X509Oids::RSA_ENCRYPTION
+      rsa = RsaPrivateKey.from_pkcs8(der)
+      rsa.is_a?(RsaError) ? X509Error.new(rsa.message) : SigningKey.new(rsa)
+    when X509Oids::ED25519
+      # RFC 8410 section 7: the privateKey OCTET STRING holds another, the
+      # seed.
+      inner = X509Asn1.bytes(fields[2].octet_string)!
+      seed = X509Asn1.bytes(X509Asn1.value(Der.parse(inner))!.octet_string)!
+      SigningKey.ed25519(seed)
+    else
+      X509Error.new("a private key for #{oid}, not P-256, P-384, RSA or Ed25519")
+    end
+  end
+
+  def public_key : RsaPublicKey | EcdsaPublicKey | Ed25519PublicKey
+    if key = @p256
+      return key.public_key
+    end
+    if key = @p384
+      return key.public_key
+    end
+    if key = @rsa
+      return key.public_key
+    end
+    Ed25519PublicKey.new(X509Der.bytes(Ed25519.public_key(ed25519_seed)))
+  end
+
+  # The Ed25519 seed; the key is Ed25519 when none of the others is.
+  private def ed25519_seed : Array(UInt8)
+    seed = @seed
+    raise "x509: a SigningKey with no key" unless seed
+    seed
+  end
+
+  # What the key is, for a person: `P-256`, `P-384`, `RSA-2048`, `Ed25519`.
+  def kind : String
+    return "P-256" if @p256
+    return "P-384" if @p384
+    if key = @rsa
+      return "RSA-#{key.bits}"
+    end
+    "Ed25519"
+  end
+
+  # The key's SubjectPublicKeyInfo (RFC 5280 section 4.1.2.7): RFC 5480's
+  # for P-256 and P-384, RFC 8017's rsaEncryption with its NULL, RFC 8410's
+  # for Ed25519.
+  def public_key_info : Array(UInt8)
+    key = public_key
+    case key
+    when EcdsaPublicKey
+      narrow = @p256
+      wide = @p384
+      point = narrow ? narrow.public_point : (wide ? wide.public_point : [] of UInt8)
+      algorithm = X509Der.sequence([X509Der.oid(X509Oids::EC_PUBLIC_KEY), X509Der.oid(key.curve.oid)])
+      X509Der.sequence([algorithm, X509Der.bit_string(point)])
+    when RsaPublicKey
+      numbers = X509Der.sequence([X509Der.integer(X509Der.unsigned(key.modulus)), X509Der.integer(X509Der.unsigned(key.exponent))])
+      algorithm = X509Der.sequence([X509Der.oid(X509Oids::RSA_ENCRYPTION), X509Der.null])
+      X509Der.sequence([algorithm, X509Der.bit_string(numbers)])
+    else
+      X509Der.sequence([X509Der.sequence([X509Der.oid(X509Oids::ED25519)]), X509Der.bit_string(key.bytes)])
+    end
+  end
+
+  # The AlgorithmIdentifier of what `sign` makes: ecdsa-with-SHA256 or
+  # -SHA384 without parameters (RFC 5758), sha256WithRSAEncryption with
+  # its NULL (RFC 4055), id-Ed25519 without parameters (RFC 8410).
+  def algorithm_identifier : Array(UInt8)
+    return X509Der.sequence([X509Der.oid(X509Oids::ECDSA_SHA256)]) if @p256
+    return X509Der.sequence([X509Der.oid(X509Oids::ECDSA_SHA384)]) if @p384
+    return X509Der.sequence([X509Der.oid(X509Oids::SHA256_RSA), X509Der.null]) if @rsa
+    X509Der.sequence([X509Der.oid(X509Oids::ED25519)])
+  end
+
+  # *data* signed as `algorithm_identifier` says.
+  def sign(data : Array(UInt8)) : Array(UInt8)
+    if key = @p256
+      return key.sign(EcdsaHash::SHA256, data)
+    end
+    if key = @p384
+      return key.sign(EcdsaHash::SHA384, data)
+    end
+    if key = @rsa
+      return key.sign_pkcs1v15(RsaHash::SHA256, data)
+    end
+    X509Der.bytes(Ed25519.sign(ed25519_seed, data))
+  end
+end
+
+# DER written (X.690): what `X509.self_signed` and `X509.request` are
+# made of. Each value is written whole, its length in the shortest form,
+# so what comes out is the one encoding std/asn1 reads back.
+struct X509Der
+  def self.tlv(tag : UInt8, content : Array(UInt8)) : Array(UInt8)
+    out = [tag]
+    n = content.size
+    if n < 128
+      out << n.to_u8
+    else
+      length = [] of UInt8
+      while n > 0
+        length.unshift((n & 0xFF).to_u8)
+        n = n >> 8
+      end
+      out << (0x80 | length.size).to_u8
+      out.concat(length)
+    end
+    out.concat(content)
+    out
+  end
+
+  def self.join(parts : Array(Array(UInt8))) : Array(UInt8)
+    out = [] of UInt8
+    parts.each { |part| out.concat(part) }
+    out
+  end
+
+  def self.sequence(parts : Array(Array(UInt8))) : Array(UInt8)
+    tlv(0x30_u8, join(parts))
+  end
+
+  def self.set(parts : Array(Array(UInt8))) : Array(UInt8)
+    tlv(0x31_u8, join(parts))
+  end
+
+  def self.explicit(number : Int32, content : Array(UInt8)) : Array(UInt8)
+    tlv((0xA0 | number).to_u8, content)
+  end
+
+  # A non-negative INTEGER from its big-endian bytes: leading zeros taken
+  # off, and one put back where the top bit would read as a sign.
+  def self.integer(magnitude : Array(UInt8)) : Array(UInt8)
+    tlv(0x02_u8, integer_content(magnitude))
+  end
+
+  # What `integer` writes inside its tag and length.
+  def self.integer_content(magnitude : Array(UInt8)) : Array(UInt8)
+    at = 0
+    while at < magnitude.size - 1 && magnitude[at] == 0_u8
+      at = at + 1
+    end
+    body = magnitude.empty? ? [0_u8] : magnitude[at, magnitude.size - at]
+    body[0] >= 0x80_u8 ? [0_u8] + body : body
+  end
+
+  # Sixteen bytes of the system's entropy, not all zero: a serial that
+  # `integer` writes in 17 octets at most, positive.
+  def self.random_serial : Array(UInt8)
+    while true
+      drawn = Random::Secure.random_bytes(16)
+      return drawn if drawn.any? { |b| b != 0_u8 }
+    end
+    raise "unreachable"
+  end
+
+  def self.unsigned(value : BigInt) : Array(UInt8)
+    size = 1
+    while true
+      bytes = value.to_bytes(size)
+      return bytes if bytes
+      size = size + 1
+    end
+    raise "unreachable"
+  end
+
+  def self.oid(text : String) : Array(UInt8)
+    arcs = text.split('.').map { |arc| arc.to_i.to_i64 }
+    body = encode_arc(arcs[0] * 40 + arcs[1])
+    i = 2
+    while i < arcs.size
+      body.concat(encode_arc(arcs[i]))
+      i = i + 1
+    end
+    tlv(0x06_u8, body)
+  end
+
+  private def self.encode_arc(value : Int64) : Array(UInt8)
+    out = [(value & 0x7F).to_u8]
+    value = value >> 7
+    while value > 0
+      out.unshift((0x80 | (value & 0x7F)).to_u8)
+      value = value >> 7
+    end
+    out
+  end
+
+  def self.bit_string(bytes : Array(UInt8)) : Array(UInt8)
+    tlv(0x03_u8, [0_u8] + bytes)
+  end
+
+  def self.octet_string(bytes : Array(UInt8)) : Array(UInt8)
+    tlv(0x04_u8, bytes)
+  end
+
+  def self.null : Array(UInt8)
+    [0x05_u8, 0_u8]
+  end
+
+  def self.boolean(value : Bool) : Array(UInt8)
+    [0x01_u8, 1_u8, value ? 0xFF_u8 : 0_u8]
+  end
+
+  # RFC 5280 section 4.1.2.5: UTCTime through 2049, GeneralizedTime from
+  # 2050, both in whole seconds and Z.
+  def self.time(at : Time) : Array(UInt8)
+    t = at.to_utc
+    clock = "#{two(t.month)}#{two(t.day)}#{two(t.hour)}#{two(t.minute)}#{two(t.second)}Z"
+    if t.year >= 1950 && t.year < 2050
+      tlv(0x17_u8, bytes(two(t.year % 100) + clock))
+    else
+      tlv(0x18_u8, bytes(t.year.to_s.rjust(4, '0') + clock))
+    end
+  end
+
+  private def self.two(n : Int32) : String
+    n < 10 ? "0#{n}" : n.to_s
+  end
+
+  # CN=*common_name*, as a Name of one RDN.
+  def self.name(common_name : String) : Array(UInt8)
+    cn = sequence([oid(X509Oids::COMMON_NAME), tlv(0x0C_u8, bytes(common_name))])
+    sequence([set([cn])])
+  end
+
+  # An Extension: its OID, critical when it is (DER leaves out the
+  # default FALSE), and *value* inside extnValue's OCTET STRING.
+  def self.extension(id : String, critical : Bool, value : Array(UInt8)) : Array(UInt8)
+    parts = [oid(id)]
+    parts << boolean(true) if critical
+    parts << octet_string(value)
+    sequence(parts)
+  end
+
+  # subjectAltName's GeneralNames: each of *names* a dNSName ([2]
+  # IA5String), or why one is not a host name this writes - ASCII letters,
+  # digits and hyphens in labels of 1 to 63, 253 in all, a `*.` before the
+  # rest for a wildcard (std/idna's `to_ascii` writes a Unicode name so).
+  def self.alt_names(names : Array(String)) : Array(UInt8) | X509Error
+    return X509Error.new("a certificate for no names") if names.empty?
+    entries = [] of Array(UInt8)
+    names.each do |name|
+      return X509Error.new("#{name.inspect} is not a host name") unless host?(name)
+      entries << tlv(0x82_u8, bytes(name))
+    end
+    sequence(entries)
+  end
+
+  def self.host?(name : String) : Bool
+    rest = name.starts_with?("*.") ? name[2, name.bytesize - 2] : name
+    return false if rest.empty? || rest.bytesize > 253
+    rest.split('.').all? do |label|
+      ok = !label.empty? && label.bytesize <= 63 && !label.starts_with?("-") && !label.ends_with?("-")
+      p = label.to_unsafe
+      i = 0
+      while ok && i < label.bytesize
+        b = p[i]
+        ok = (b >= 97_u8 && b <= 122_u8) || (b >= 65_u8 && b <= 90_u8) || (b >= 48_u8 && b <= 57_u8) || b == 45_u8
+        i = i + 1
+      end
+      ok
+    end
+  end
+
+  def self.bytes(text : String) : Array(UInt8)
+    Array(UInt8).new(text.bytesize) { |i| text.to_unsafe[i] }
   end
 end
