@@ -325,19 +325,19 @@ if [ -z "$PY" ]; then
   status=1
 else
   breaks "an answer read without its question" noquestion "a wrong ID and a wrong question are ignored" dns.iyi \
-    'DnsName.same?(@question_name, name) && @question_type == type' \
-    '@question_type == type'
+    'same_name && question_type == type && question_class' \
+    'question_type == type && question_class'
   breaks "a truncated answer taken as it came" notcp "a truncated answer is asked again over TCP" socket.iyi \
     'return ask_tcp(server, query, id, name, type) if answer.is_a?(DnsMessage) && answer.truncated?' \
     ''
   # The ID is checked twice - before the bytes are parsed, and again by
   # `answers?` - so the proof takes out both.
   breaks "an answer read without its ID" noid "a wrong ID and a wrong question are ignored" dns.iyi \
-    'return false unless response? && opcode == 0 && @id == id' \
-    'return false unless response? && opcode == 0' \
+    'return false unless flags & 0x8000 != 0 && (flags >> 11) & 15 == 0 && message_id == id' \
+    'return false unless flags & 0x8000 != 0 && (flags >> 11) & 15 == 0' \
     socket.iyi \
-    'next unless DnsMessage.id_of(packet) == id.to_i32' \
-    ''
+    'if packet.bytesize >= 2 && ((packet[0].to_i32 << 8) | packet[1].to_i32) == id.to_i32' \
+    'if packet.bytesize >= 2'
   breaks "NXDOMAIN read as a server's failure" nxservfail "NXDOMAIN is not_found?" socket.iyi \
     'DnsError.new(DnsError::NOT_FOUND, name, label)' \
     'DnsError.new(DnsError::SERVER_FAILURE, name, label)'

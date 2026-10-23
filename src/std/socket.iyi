@@ -83,7 +83,7 @@ module std/socket
 
 import std/int
 
-import std/dns::{DnsError, DnsMessage, DnsName, DnsRecord, HostsFile, ResolvConf, SvcbAnswer, SvcbRecord}
+import std/dns::{DnsError, DnsMessage, DnsName, DnsRecord, DnsTapeMessage, HostsFile, ResolvConf, SvcbAnswer, SvcbRecord}
 import std/random::{Random}
 import std/slice::{Bytes, Slice}
 
@@ -3688,7 +3688,6 @@ pub class Resolver
     return failed(name, server, SocketError.new("connect", IyiSocket.__sys_code(connected.to_i64))) if connected < 0
     sent = IyiSocket.__sys_dgram_send(fd, query.to_unsafe, query.size.to_u64)
     return failed(name, server, SocketError.new("send", IyiSocket.__sys_code(sent))) if sent < 0_i64
-    buffer = Pointer(UInt8).malloc(65536_u64)
     unread = nil.as(DnsError?)
     deadline = Resolver.now_ms + @timeout_ms.to_i64
     while true
@@ -3697,23 +3696,48 @@ pub class Resolver
       ready = IyiSocket.__sys_dgram_wait(fd, left.to_i32)
       return ready if ready.is_a?(Cancelled)
       next unless ready
-      count = IyiSocket.__sys_recv(fd, buffer, 65536_u64)
-      if count < 0_i64
-        next if IyiSocket.__sys_would_block?(count)
-        return failed(name, server, SocketError.new("receive", IyiSocket.__sys_code(count)))
+      # Each datagram is received onto a tape and read there; only the
+      # answer is copied off it, and the rest - another's datagram, a
+      # forger's guess, one that does not read - goes with the tape.
+      got = nil.as(DnsMessage | DnsError | SocketError | Nil)
+      tape do
+        datagram = Tape::String::Writer.new(DATAGRAM_ROOM)
+        count = Resolver.receive(fd, datagram)
+        if count < 0_i64
+          got = SocketError.new("receive", IyiSocket.__sys_code(count)) unless IyiSocket.__sys_would_block?(count)
+        else
+          packet = datagram.finish
+          # Somebody else's datagram, or a forger's guess: not an answer.
+          if packet.bytesize >= 2 && ((packet[0].to_i32 << 8) | packet[1].to_i32) == id.to_i32
+            message = DnsMessage.parse(packet)
+            if message.is_a?(DnsError)
+              got = message.about(name, server.label)
+            elsif message.answers?(id, name, type)
+              got = message.to_heap
+            end
+          end
+        end
       end
-      packet = Bytes.new(buffer, count.to_i32)
-      # Somebody else's datagram, or a forger's guess: not an answer.
-      next unless DnsMessage.id_of(packet) == id.to_i32
-      message = DnsMessage.parse(packet)
-      if message.is_a?(DnsError)
-        unread = message.about(name, server.label)
-        next
-      end
-      next unless message.answers?(id, name, type)
-      return message
+      return failed(name, server, got) if got.is_a?(SocketError)
+      return got if got.is_a?(DnsMessage)
+      unread = got if got.is_a?(DnsError)
     end
     unread || DnsError.new(DnsError::TIMED_OUT, name, server.label)
+  end
+
+  # The largest datagram an answer can be.
+  DATAGRAM_ROOM = 65536
+
+  # One datagram from *fd* onto the end of *writer*: its size, or the
+  # receive's negative error.
+  @[TapeUnsafe]
+  def self.receive(fd : Int32, writer : Tape::String::Writer) : Int64
+    count = 0_i64
+    writer.unsafe_append(DATAGRAM_ROOM) do |room|
+      count = IyiSocket.__sys_recv(fd, room, DATAGRAM_ROOM.to_u64)
+      count > 0_i64 ? count.to_i32 : 0
+    end
+    count
   end
 
   # The same query over TCP, to the same server and port, for an answer
