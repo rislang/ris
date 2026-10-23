@@ -61,6 +61,8 @@ has it.
   so in the docs and in a hint; a decision for iyi.
 * `editors/vim`: named arguments and keys (`user_id: x`, `{id: 1}`) as
   Ruby's symbols, `iyiNamedArgument`, with its tests.
+* std/aead `seal_at`/`open_at` and std/tls records opened and sealed in
+  place (`TlsRecordCipher#seal_at`, `#open_at`): no tape, nothing per record.
 
 ## Stays in ris
 
