@@ -4,6 +4,27 @@ The tape surface of ris, one feature at a time, each with a runnable
 example. Start with LEARN.md; come here for the details. Exact signatures
 are in `src/iyi/tape.iyi`, the rules in TAPE_DESIGN.md.
 
+## In short
+
+A text, an array, a built string, and a copy kept after the tape ends:
+
+```crystal
+tape do
+  puts Tape::String.new("hello")       # hello
+
+  numbers = Tape::Array(Int32).new
+  numbers << 1 << 2 << 3
+  puts numbers.sum                     # 6
+
+  line = Tape::String.build do |writer|
+    writer << "id=" << 7
+  end
+  puts line                            # id=7
+  kept = line.to_heap                  # a String, kept after the tape
+  puts kept.size                       # 4
+end
+```
+
 ## Open a tape
 
 Use tape do … end around bounded work: a request, a parse or a batch. Allocation
