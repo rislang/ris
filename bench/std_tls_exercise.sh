@@ -2533,10 +2533,10 @@ prove_broken "the master secret derived from the early one" "the master secret" 
 prove_broken "Finished keyed without its label" "the server's Finished" \
   '    hmac(expand_label(secret, "finished", [] of UInt8, @hash_size), hash(transcript))' '    hmac(secret, hash(transcript))'
 prove_broken "the sequence number XORed into the nonce's front" "the server's data opened" \
-  '    8.times { |i| nonce[11 - i] = nonce[11 - i] ^ ((@sequence >> (8 * i)) & 0xFF_u64).to_u8 }' \
-  '    8.times { |i| nonce[i] = nonce[i] ^ ((@sequence >> (8 * i)) & 0xFF_u64).to_u8 }'
+  '    8.times { |i| dst[11 - i] = dst[11 - i] ^ ((@sequence >> (8 * i)) & 0xFF_u64).to_u8 }' \
+  '    8.times { |i| dst[i] = dst[i] ^ ((@sequence >> (8 * i)) & 0xFF_u64).to_u8 }'
 prove_broken "a record's length in its additional data left out" "the client's Finished sealed as the trace's record" \
-  '    length = inner.size + 16' '    length = inner.size'
+  '      length = size + 1 + 16' '      length = size + 1'
 # Taken, a Finished one bit off lets the client finish its handshake, and
 # the scripted server, which hangs up after it, races the client's echo:
 # the client holds a connection or reads the refusal first; on darwin it
@@ -2570,7 +2570,7 @@ prove_broken "a leaf whose keyUsage forbids signing taken" "ku-no-sign:" \
 prove_broken "a client Certificate past 2^14 bytes sent in one record" "certreq-ed25519:" \
   '        sent = send_flight(presented)' '        sent = send_protected(TlsRecords::HANDSHAKE, presented)' scenarios
 prove_broken "a read past its timeout taken as the connection's end" "slow-echo:" \
-  '        return record if record.timed_out? || record.cancelled?' '' scenarios
+  '    return error if error.timed_out? || error.cancelled?' '' scenarios
 prove_broken "a KeyUpdate's request never answered" "keyupdate:" \
   '        @update_owed = true if message[4] == 1_u8' '' scenarios
 prove_broken "no new keys at the key limit" "client-rekey:" \
@@ -2592,14 +2592,14 @@ prove_broken "status_request twice in an entry taken" "staple-twice:" \
 prove_broken "a server_name acknowledgement with something in it taken" "sni-ack-data:" \
   '    return TlsError.new("a server_name acknowledgement that is not empty", TlsAlert::DECODE_ERROR) unless data.empty?' '' scenarios
 prove_broken "user_canceled after the handshake taken as an end" "user-canceled:" \
-  '        next if warning' '' scenarios
+  '      return false if warning' '' scenarios
 # Section 5.4's limit on the whole inner plaintext, padding in it, as it
 # was before SECURITY_REVIEW_TLS.md's finding, and one byte short of it -
 # which "big", 2^14 bytes of content a record, meets before "padded-max".
 prove_broken "padding past 2^14 + 1 bytes of inner plaintext taken" "padded-over:" \
-  '    if opened.bytesize > TlsRecords::MAX_PLAINTEXT + 1' '    if opened.bytesize > TlsRecords::MAX_PLAINTEXT + 256' scenarios
+  '      if opened > TlsRecords::MAX_PLAINTEXT + 1' '      if opened > TlsRecords::MAX_PLAINTEXT + 256' scenarios
 prove_broken "the inner plaintext's limit one byte short" "a record of 16385 bytes of inner plaintext" \
-  '    if opened.bytesize > TlsRecords::MAX_PLAINTEXT + 1' '    if opened.bytesize > TlsRecords::MAX_PLAINTEXT' scenarios
+  '      if opened > TlsRecords::MAX_PLAINTEXT + 1' '      if opened > TlsRecords::MAX_PLAINTEXT' scenarios
 # Section 5.1's rule that nothing comes between a handshake message's
 # pieces, as it was before SECURITY_REVIEW_TLS.md's finding.
 prove_broken "application data taken inside a split handshake message" "split-by-data:" \
@@ -2607,9 +2607,9 @@ prove_broken "application data taken inside a split handshake message" "split-by
         return fail(cut) if cut
         next if content.empty?' '        next if content.empty?' scenarios
 prove_broken "close_notify taken inside a split handshake message" "split-by-close:" \
-  '        cut = cut_message(type)
-        return fail(cut) if cut
-        next if warning' '        next if warning' scenarios
+  '      cut = cut_message(type)
+      return fail(cut) if cut
+      return false if warning' '      return false if warning' scenarios
 # The same two rules in TLS 1.2, against the scripted server's whole 1.2
 # handshakes: the split-message rule waived for 1.2 alone, and the limit
 # on a 1.2 record's plaintext (RFC 5246 section 6.2.1) dropped.
@@ -2618,9 +2618,9 @@ prove_broken "TLS 1.2 application data taken inside a split handshake message" "
 ' '    return nil if handshake_left == 0 || @tls12
 ' scenarios
 prove_broken "a TLS 1.2 record past 2^14 bytes of plaintext taken" "tls12-oversize: read" \
-  ' if length > TlsRecords::MAX_PLAINTEXT
-    {type, TlsBytes.of(opened)}' ' if false
-    {type, TlsBytes.of(opened)}' scenarios
+  ' if plain > TlsRecords::MAX_PLAINTEXT
+    {type, 5 + explicit, plain}' ' if false
+    {type, 5 + explicit, plain}' scenarios
 prove_broken "the session id's echo unchecked" "FAILED: no-echo: " \
   '    return TlsError.new("a ServerHello that does not echo the session id", TlsAlert::ILLEGAL_PARAMETER) unless echo == session' '' scenarios
 prove_broken "the certificate checked for no host" "FAILED: wrong-host: " \
@@ -2731,13 +2731,17 @@ prove_broken "the session hash short of the ClientKeyExchange" "FAIL s_server -t
 prove_broken "the client's Finished over the PRF's server label" "FAIL s_server -tls1_2, RSA, ECDHE-RSA-AES128-GCM-SHA256" \
   '"client finished"' '"server finished"' client12
 prove_broken "AES-GCM's explicit nonce sent and not sealed with" "FAIL s_server -tls1_2, P-256, ECDHE-ECDSA-AES256-GCM-SHA384" \
-  'gcm.seal(@iv + explicit, content, aad)' 'gcm.seal(@iv + Array(UInt8).new(8, 0_u8), content, aad)' client12
+  '      8.times { |i| n[4 + i] = aad[i] }
+      8.times { |i| buffer[5 + i]' '      8.times { |i| n[4 + i] = 0_u8 }
+      8.times { |i| buffer[5 + i]' client12
 prove_broken "AES-GCM's explicit nonce read as the sequence number" "FAIL s_server -tls1_2, P-256, ECDHE-ECDSA-AES128-GCM-SHA256" \
-  'gcm.open(@iv + body[0, 8], ' 'gcm.open(@iv + sequence_bytes, ' client12
+  '      8.times { |i| n[4 + i] = record[5 + i] }' '      8.times { |i| n[4 + i] = aad[i] }' client12
 prove_broken "TLS 1.2's ChaCha20-Poly1305 nonce without the sequence number" "FAIL s_server -tls1_2, RSA, ECDHE-RSA-CHACHA20-POLY1305" \
-  '             TlsBytes.of(chacha.seal(nonce, content, aad))' '             TlsBytes.of(chacha.seal(@iv, content, aad))' client12
+  '      nonce_at(n)
+      seal_with(n, buffer + 5_i64, size, aad, 13)' '      12.times { |i| n[i] = @iv[i] }
+      seal_with(n, buffer + 5_i64, size, aad, 13)' client12
 prove_broken "TLS 1.2's additional data without the sequence number" "FAIL s_server -tls1_2, RSA, ECDHE-RSA-AES256-GCM-SHA384" \
-  '    aad = explicit + [type, 3_u8, 3_u8] + TlsBytes.u16(content.size)' '    aad = [type, 3_u8, 3_u8] + TlsBytes.u16(content.size)' client12
+  '    8.times { |i| dst[i] = ((@sequence >> (8 * (7 - i))) & 0xFF_u64).to_u8 }' '    8.times { |i| dst[i] = 0_u8 }' client12
 prove_broken "the ServerKeyExchange's signature unchecked" "FAIL a ServerKeyExchange's signature one bit off" \
   '    return TlsError.new("the server'"'"'s ServerKeyExchange is not its key'"'"'s signature", TlsAlert::DECRYPT_ERROR) unless ok' '' client12
 prove_broken "the ServerKeyExchange signed without the client's random" "FAIL s_server -tls1_2, P-256, ECDHE-ECDSA-AES128-GCM-SHA256" \
@@ -3057,7 +3061,7 @@ prove_broken "a replay guard that forgets nothing" "a binder is dropped two wind
 prove_broken "a replay of early data taken" "FAIL early-replay " \
   '    return false if @held.has_key?(key)' '' server
 prove_broken "early data delivered as 1-RTT data" "FAIL early-ok " \
-  '        return content unless content.empty?' '        @pending = content unless content.empty?' server
+  '        return content unless content.empty?' '        keep_plain(content) unless content.empty?' server
 prove_broken "early data past the ticket's max_early_data_size taken" "FAIL early-too-much " \
   '        if @early_read > @early_limit' '        if false' server
 prove_broken "early data a ticket allows past a lowered limit taken" "early data a ticket allows past a lowered limit is declined, and sent again" \
@@ -3094,7 +3098,7 @@ prove_broken "close_notify taken inside a split EndOfEarlyData" "FAIL early-spli
 # the break is the client's "padding past 2^14 + 1 bytes" one above, made
 # here where the scripted client's early record is what pads past it.
 prove_broken "an early record padded past 2^14 + 1 bytes of inner plaintext taken" "FAIL early-padded-over " \
-  '    if opened.bytesize > TlsRecords::MAX_PLAINTEXT + 1' '    if opened.bytesize > TlsRecords::MAX_PLAINTEXT + 256' server
+  '      if opened > TlsRecords::MAX_PLAINTEXT + 1' '      if opened > TlsRecords::MAX_PLAINTEXT + 256' server
 prove_broken "the client's early data sent again under another protocol" "early-alpn:" \
   '      if @early_alpn != @alpn_protocol' '      if false' scenarios
 prove_broken "the client's early data past the ticket's allowance" "early-small:" \
@@ -3147,11 +3151,11 @@ prove_broken "the server's TLS 1.2 suite order put before the client's" "FAIL 12
   '    @suite = TlsSuites::TLS12.find { |s| offer.suites.includes?(s) && TlsSuites.rsa?(s) == chosen.rsa? } || 0' server12
 prove_broken "a TLS 1.2 record's read sequence number not advanced" "FAIL 12-ok " \
   '    @sequence = @sequence + 1
-    return TlsError.new("a record of #{length} bytes, past the 2^14 allowed"' '    return TlsError.new("a record of #{length} bytes, past the 2^14 allowed"' server12
+    return TlsError.new("a record of #{plain} bytes, past the 2^14 allowed"' '    return TlsError.new("a record of #{plain} bytes, past the 2^14 allowed"' server12
 prove_broken "AES-GCM's explicit nonce the same for every record" "FAIL 12-ok " \
-  '    explicit = sequence_bytes
-    aad = explicit + [type, 3_u8, 3_u8] + TlsBytes.u16(content.size)' '    explicit = Array(UInt8).new(8, 0_u8)
-    aad = sequence_bytes + [type, 3_u8, 3_u8] + TlsBytes.u16(content.size)' server12
+  '      8.times { |i| n[4 + i] = aad[i] }
+      8.times { |i| buffer[5 + i] = aad[i] }' '      8.times { |i| n[4 + i] = 0_u8 }
+      8.times { |i| buffer[5 + i] = 0_u8 }' server12
 prove_broken "the server's TLS 1.2 reads under its own write keys" "FAIL 12-ok " \
   '    @reader = client_keys' '    @reader = server_keys' server12
 prove_broken "the server's TLS 1.2 Finished under the client's label" "FAIL 12-ok " \
@@ -3213,9 +3217,9 @@ prove_broken "the server's TLS 1.2 application data taken inside a split handsha
 ' '    return nil if handshake_left == 0 || @tls12
 ' server12
 prove_broken "a TLS 1.2 record past 2^14 bytes of plaintext taken by the server" "FAIL 12-oversize " \
-  ' if length > TlsRecords::MAX_PLAINTEXT
-    {type, TlsBytes.of(opened)}' ' if false
-    {type, TlsBytes.of(opened)}' server12
+  ' if plain > TlsRecords::MAX_PLAINTEXT
+    {type, 5 + explicit, plain}' ' if false
+    {type, 5 + explicit, plain}' server12
 prove_broken "no CertificateRequest in TLS 1.2" "FAIL 12-mtls-ok " \
   '    request = @config.client_roots ? request12 : [] of UInt8' '    request = [] of UInt8' server12
 prove_broken "a TLS 1.2 client with no certificate let in" "FAIL 12-mtls-none " \

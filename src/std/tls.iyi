@@ -739,110 +739,157 @@ pub class TlsRecordCipher
     @iv
   end
 
-  private def nonce : Array(UInt8)
-    nonce = @iv.dup
-    8.times { |i| nonce[11 - i] = nonce[11 - i] ^ ((@sequence >> (8 * i)) & 0xFF_u64).to_u8 }
-    nonce
+  # The bytes before a record's content where `seal_at` seals it: the
+  # header, and TLS 1.2 AES-GCM's explicit nonce.
+  def prefix : Int32
+    @tls12 && @gcm ? 13 : 5
   end
 
-  # The sequence number as eight big-endian bytes.
-  private def sequence_bytes : Array(UInt8)
-    Array(UInt8).new(8) { |i| ((@sequence >> (8 * (7 - i))) & 0xFF_u64).to_u8 }
+  # The bytes a record sealed by `seal_at` takes past its content: the
+  # content type (TLS 1.3) and the tag.
+  OVERHEAD = 17
+
+  # This record's nonce, from the IV and the sequence number, at *dst*.
+  private def nonce_at(dst : Pointer(UInt8)) : Nil
+    12.times { |i| dst[i] = @iv[i] }
+    8.times { |i| dst[11 - i] = dst[11 - i] ^ ((@sequence >> (8 * i)) & 0xFF_u64).to_u8 }
   end
 
-  # The whole record that carries *content* of *type*, protected.
-  def seal(type : UInt8, content : Array(UInt8)) : Array(UInt8)
-    return seal12(type, content) if @tls12
-    inner = content + [type]
-    length = inner.size + 16
-    header = [23_u8, 3_u8, 3_u8, (length >> 8).to_u8, (length & 0xFF).to_u8]
-    gcm = @gcm
-    chacha = @chacha
-    sealed = if gcm
-               gcm.seal(nonce, inner, header)
-             elsif chacha
-               chacha.seal(nonce, inner, header)
-             else
-               ""
-             end
+  # TLS 1.2's additional data: the sequence number, then *type*, the
+  # version and *length* (RFC 5246 section 6.2.3.3), at *dst*.
+  private def aad12_at(dst : Pointer(UInt8), type : UInt8, length : Int32) : Nil
+    8.times { |i| dst[i] = ((@sequence >> (8 * (7 - i))) & 0xFF_u64).to_u8 }
+    dst[8] = type
+    dst[9] = 3_u8
+    dst[10] = 3_u8
+    dst[11] = (length >> 8).to_u8
+    dst[12] = (length & 0xFF).to_u8
+  end
+
+  private def seal_with(nonce : Pointer(UInt8), at : Pointer(UInt8), size : Int32, aad : Pointer(UInt8), aad_size : Int32) : Nil
+    if gcm = @gcm
+      gcm.seal_at(nonce, at, size, aad, aad_size)
+    elsif chacha = @chacha
+      chacha.seal_at(nonce, at, size, aad, aad_size)
+    end
+  end
+
+  private def open_with(nonce : Pointer(UInt8), at : Pointer(UInt8), total : Int32, aad : Pointer(UInt8), aad_size : Int32) : Int32 | AeadError
+    if gcm = @gcm
+      gcm.open_at(nonce, at, total, aad, aad_size)
+    elsif chacha = @chacha
+      chacha.open_at(nonce, at, total, aad, aad_size)
+    else
+      AeadError.new("no cipher")
+    end
+  end
+
+  # The record that carries the *size* bytes of *type* at `buffer +
+  # prefix`, sealed in place in *buffer*, which has `OVERHEAD` bytes of
+  # room past them: the record's length. Nothing is made: a connection
+  # seals each record in one buffer of its own.
+  def seal_at(type : UInt8, buffer : Pointer(UInt8), size : Int32) : Int32
+    nonces = uninitialized StaticArray(UInt8, 12)
+    n = pointerof(nonces).as(Pointer(UInt8))
+    if !@tls12
+      buffer[5 + size] = type
+      length = size + 1 + 16
+      buffer[0] = 23_u8
+      buffer[1] = 3_u8
+      buffer[2] = 3_u8
+      buffer[3] = (length >> 8).to_u8
+      buffer[4] = (length & 0xFF).to_u8
+      nonce_at(n)
+      seal_with(n, buffer + 5_i64, size + 1, buffer, 5)
+      @sequence = @sequence + 1
+      return 5 + length
+    end
+    extras = uninitialized StaticArray(UInt8, 13)
+    aad = pointerof(extras).as(Pointer(UInt8))
+    aad12_at(aad, type, size)
+    if @gcm
+      4.times { |i| n[i] = @iv[i] }
+      8.times { |i| n[4 + i] = aad[i] }
+      8.times { |i| buffer[5 + i] = aad[i] }
+      seal_with(n, buffer + 13_i64, size, aad, 13)
+      body = 8 + size + 16
+    else
+      nonce_at(n)
+      seal_with(n, buffer + 5_i64, size, aad, 13)
+      body = size + 16
+    end
+    buffer[0] = type
+    buffer[1] = 3_u8
+    buffer[2] = 3_u8
+    buffer[3] = (body >> 8).to_u8
+    buffer[4] = (body & 0xFF).to_u8
     @sequence = @sequence + 1
-    header + TlsBytes.of(sealed)
+    5 + body
+  end
+
+  # The protected record at *record*, its 5-byte header and *length*
+  # bytes of body, opened in place: its content type, and where its
+  # content now lies past *record* and how long it is.
+  def open_at(record : Pointer(UInt8), length : Int32) : {UInt8, Int32, Int32} | TlsError
+    nonces = uninitialized StaticArray(UInt8, 12)
+    n = pointerof(nonces).as(Pointer(UInt8))
+    if !@tls12
+      nonce_at(n)
+      opened = open_with(n, record + 5_i64, length, record, 5)
+      return TlsError.new("a record that does not decrypt", TlsAlert::BAD_RECORD_MAC) if opened.is_a?(AeadError)
+      @sequence = @sequence + 1
+      # Section 5.4, as `open` holds it.
+      if opened > TlsRecords::MAX_PLAINTEXT + 1
+        return TlsError.new("a record of #{opened} bytes of inner plaintext, past the 2^14 + 1 allowed", TlsAlert::RECORD_OVERFLOW)
+      end
+      inner = record + 5_i64
+      at = opened - 1
+      while at >= 0 && inner[at] == 0_u8
+        at = at - 1
+      end
+      return TlsError.new("a record with no content type", TlsAlert::UNEXPECTED_MESSAGE) if at < 0
+      return {inner[at], 5, at}
+    end
+    type = record[0]
+    explicit = @gcm ? 8 : 0
+    return TlsError.new("a protected record of #{length} bytes, short of its nonce and tag", TlsAlert::BAD_RECORD_MAC) if length < explicit + 16
+    plain = length - explicit - 16
+    extras = uninitialized StaticArray(UInt8, 13)
+    aad = pointerof(extras).as(Pointer(UInt8))
+    aad12_at(aad, type, plain)
+    if @gcm
+      4.times { |i| n[i] = @iv[i] }
+      8.times { |i| n[4 + i] = record[5 + i] }
+    else
+      nonce_at(n)
+    end
+    opened = open_with(n, record + (5 + explicit).to_i64, length - explicit, aad, 13)
+    return TlsError.new("a record that does not decrypt", TlsAlert::BAD_RECORD_MAC) if opened.is_a?(AeadError)
+    @sequence = @sequence + 1
+    return TlsError.new("a record of #{plain} bytes, past the 2^14 allowed", TlsAlert::RECORD_OVERFLOW) if plain > TlsRecords::MAX_PLAINTEXT
+    {type, 5 + explicit, plain}
+  end
+
+  # The whole record that carries *content* of *type*, protected: sealed
+  # by `seal_at` in a buffer of its own.
+  def seal(type : UInt8, content : Array(UInt8)) : Array(UInt8)
+    at = prefix
+    buffer = Pointer(UInt8).malloc((at + content.size + OVERHEAD).to_u64)
+    (buffer + at.to_i64).copy_from(content.to_unsafe, content.size)
+    length = seal_at(type, buffer, content.size)
+    TlsBytes.bytes(buffer, length)
   end
 
   # The type and content of a protected record whose 5-byte header is
-  # *header* and body *body*.
+  # *header* and body *body*: opened by `open_at` in a copy.
   def open(header : Array(UInt8), body : Array(UInt8)) : {UInt8, Array(UInt8)} | TlsError
-    return open12(header, body) if @tls12
-    gcm = @gcm
-    chacha = @chacha
-    opened = if gcm
-               gcm.open(nonce, body, header)
-             elsif chacha
-               chacha.open(nonce, body, header)
-             else
-               AeadError.new("no cipher")
-             end
-    return TlsError.new("a record that does not decrypt", TlsAlert::BAD_RECORD_MAC) if opened.is_a?(AeadError)
-    @sequence = @sequence + 1
-    # Section 5.4: padding does not widen a record - the whole inner
-    # plaintext, content type and padding in it, is at most 2^14 + 1
-    # bytes. Checked on the content alone, a peer could pad a full record
-    # past that by up to the 239 bytes the ciphertext's limit leaves.
-    if opened.bytesize > TlsRecords::MAX_PLAINTEXT + 1
-      return TlsError.new("a record of #{opened.bytesize} bytes of inner plaintext, past the 2^14 + 1 allowed", TlsAlert::RECORD_OVERFLOW)
-    end
-    inner = opened.to_unsafe
-    at = opened.bytesize - 1
-    # The content type is the last byte that is not padding.
-    while at >= 0 && inner[at] == 0_u8
-      at = at - 1
-    end
-    return TlsError.new("a record with no content type", TlsAlert::UNEXPECTED_MESSAGE) if at < 0
-    {inner[at], TlsBytes.bytes(inner, at)}
-  end
-
-  # A TLS 1.2 record: the additional data is the sequence number and the
-  # plaintext's header (RFC 5246 section 6.2.3.3). AES-GCM's explicit nonce
-  # is the sequence number, which never repeats under one key - all RFC
-  # 5288 asks of it - and goes before the ciphertext.
-  private def seal12(type : UInt8, content : Array(UInt8)) : Array(UInt8)
-    explicit = sequence_bytes
-    aad = explicit + [type, 3_u8, 3_u8] + TlsBytes.u16(content.size)
-    gcm = @gcm
-    chacha = @chacha
-    body = if gcm
-             explicit + TlsBytes.of(gcm.seal(@iv + explicit, content, aad))
-           elsif chacha
-             TlsBytes.of(chacha.seal(nonce, content, aad))
-           else
-             [] of UInt8
-           end
-    @sequence = @sequence + 1
-    [type, 3_u8, 3_u8] + TlsBytes.u16(body.size) + body
-  end
-
-  # A TLS 1.2 record opened: its type is its header's, and AES-GCM's nonce
-  # is the salt and the explicit nonce the record carries, whatever the
-  # peer chose it to be.
-  private def open12(header : Array(UInt8), body : Array(UInt8)) : {UInt8, Array(UInt8)} | TlsError
-    type = header[0]
-    gcm = @gcm
-    chacha = @chacha
-    explicit = gcm ? 8 : 0
-    return TlsError.new("a protected record of #{body.size} bytes, short of its nonce and tag", TlsAlert::BAD_RECORD_MAC) if body.size < explicit + 16
-    length = body.size - explicit - 16
-    aad = sequence_bytes + [type, 3_u8, 3_u8] + TlsBytes.u16(length)
-    opened = if gcm
-               gcm.open(@iv + body[0, 8], body[8, body.size - 8], aad)
-             elsif chacha
-               chacha.open(nonce, body, aad)
-             else
-               AeadError.new("no cipher")
-             end
-    return TlsError.new("a record that does not decrypt", TlsAlert::BAD_RECORD_MAC) if opened.is_a?(AeadError)
-    @sequence = @sequence + 1
-    return TlsError.new("a record of #{length} bytes, past the 2^14 allowed", TlsAlert::RECORD_OVERFLOW) if length > TlsRecords::MAX_PLAINTEXT
-    {type, TlsBytes.of(opened)}
+    record = Pointer(UInt8).malloc((5 + body.size).to_u64)
+    record.copy_from(header.to_unsafe, 5)
+    (record + 5_i64).copy_from(body.to_unsafe, body.size)
+    opened = open_at(record, body.size)
+    return opened if opened.is_a?(TlsError)
+    type, offset, size = opened
+    {type, TlsBytes.bytes(record + offset.to_i64, size)}
   end
 end
 
@@ -1070,10 +1117,39 @@ pub abstract class TlsConnection
   # Up to *max* bytes the peer sent: "" once it has closed with
   # close_notify. The socket's read timeout bounds the whole call.
   def read(max : Int32 = 16384) : String | TlsError
+    got = take(max)
+    return got if got.is_a?(TlsError)
+    from, n = got
+    return "" if n == 0
+    String.new(n) { |buf| buf.copy_from(from, n) }
+  end
+
+  # Up to *max* bytes the peer sent, onto the end of *writer*, the
+  # caller's tape: how many, 0 once it has closed with close_notify. The
+  # record is opened where it came in, and only its content is copied.
+  def read(writer : Tape::String::Writer, max : Int32 = 16384) : Int32 | TlsError
+    got = take(max)
+    return got if got.is_a?(TlsError)
+    from, n = got
+    writer.append(from, n) if n > 0
+    n
+  end
+
+  # Up to *count* bytes the peer sent into *buffer*, a connection's own
+  # (std/http's `Conn`): as `read`, with no string made between.
+  def read(buffer : Pointer(UInt8), count : Int32) : Int32 | TlsError
+    got = take(count)
+    return got if got.is_a?(TlsError)
+    from, n = got
+    buffer.copy_from(from, n) if n > 0
+    n
+  end
+
+  private def take(max : Int32) : {Pointer(UInt8), Int32} | TlsError
     # "" is the peer's close: a read of nothing would look like one.
     raise "a TLS read of #{max} bytes: at least 1" if max < 1
     timeout = @socket.read_timeout_ms
-    within(timeout && timeout > 0 ? timeout : 0) { read_now(max) }
+    within(timeout && timeout > 0 ? timeout : 0) { take_now(max) }
   end
 
   # *block* under a deadline *ms* from now (none when 0), cleared after.
@@ -1092,50 +1168,120 @@ pub abstract class TlsConnection
     left > 0_i64 ? left.to_i32 : 0
   end
 
-  private def read_now(max : Int32) : String | TlsError
-    return "" if @eof
+  # What a read has not taken of the last record's content: where it
+  # lies - in the inbox, where the record was opened, or in `@plain_kept`
+  # for a record read the slow way - and how much is left. The inbox is
+  # not filled again until it is taken.
+  @plain_at : Pointer(UInt8) = Pointer(UInt8).new(0_u64)
+  @plain_left : Int32 = 0
+  @plain_kept : Array(UInt8)? = nil
+
+  # *content*, application data read the slow way, held for the reads.
+  private def keep_plain(content : Array(UInt8)) : Nil
+    @plain_kept = content
+    @plain_at = content.to_unsafe
+    @plain_left = content.size
+  end
+
+  # At most *max* of what is left, taken.
+  private def plain(max : Int32) : {Pointer(UInt8), Int32}
+    n = @plain_left < max ? @plain_left : max
+    from = @plain_at
+    @plain_at = @plain_at + n.to_i64
+    @plain_left = @plain_left - n
+    @plain_kept = nil if @plain_left == 0
+    {from, n}
+  end
+
+  # Where the next *max* bytes of application data lie, and how many: 0
+  # once the peer's close_notify came. An application data record after
+  # the handshake is opened in the inbox; anything else is read the slow
+  # way, by `next_record`.
+  private def take_now(max : Int32) : {Pointer(UInt8), Int32} | TlsError
+    return plain(max) if @plain_left > 0
+    return {@plain_at, 0} if @eof
     return TlsError.new("the connection is closed") if closed?
     while true
-      record = next_record
-      if record.is_a?(TlsError)
-        return record if record.timed_out? || record.cancelled?
-        return fail(record)
+      reader = @reader
+      if reader && !@handshaking && @early_left == 0 && handshake_left == 0
+        filled = fill(5)
+        return read_failed(filled) if filled
+        if @inbox[@inbox_at] == TlsRecords::APPLICATION_DATA
+          return fail(TlsError.new("a record with version #{@inbox[@inbox_at + 1]}.#{@inbox[@inbox_at + 2]}", TlsAlert::DECODE_ERROR)) unless @inbox[@inbox_at + 1] == 3_u8
+          length = (@inbox[@inbox_at + 3].to_i32 << 8) | @inbox[@inbox_at + 4].to_i32
+          return fail(TlsError.new("a record of #{length} bytes, past the 2^14 + 256 allowed", TlsAlert::RECORD_OVERFLOW)) if length > TlsRecords::MAX_CIPHERTEXT
+          filled = fill(5 + length)
+          return read_failed(filled) if filled
+          record = @inbox + @inbox_at
+          @inbox_at = @inbox_at + 5 + length
+          opened = reader.open_at(record, length)
+          return fail(opened) if opened.is_a?(TlsError)
+          type, offset, size = opened
+          if type == TlsRecords::APPLICATION_DATA
+            next if size == 0
+            @plain_at = record + offset.to_i64
+            @plain_left = size
+            return plain(max)
+          end
+          ended = other_record(type, TlsBytes.bytes(record + offset.to_i64, size))
+          return ended if ended.is_a?(TlsError)
+          return {@plain_at, 0} if ended
+          next
+        end
       end
+      record = next_record
+      return read_failed(record) if record.is_a?(TlsError)
       type, content = record
-      case type
-      when TlsRecords::APPLICATION_DATA
+      if type == TlsRecords::APPLICATION_DATA
         cut = cut_message(type)
         return fail(cut) if cut
         next if content.empty?
-        if content.size > max
-          @pending = content[max, content.size - max]
-          return TlsBytes.text(content[0, max])
-        end
-        return TlsBytes.text(content)
-      when TlsRecords::HANDSHAKE
-        problem = post_handshake(content)
-        return fail(problem) if problem
-      when TlsRecords::ALERT
-        # user_canceled after the handshake is a warning (section 6.1): the
-        # close_notify meant to follow it is what ends the reading.
-        warning = content.size == 2 && content[1] == TlsAlert::USER_CANCELED
-        answer = warning ? nil : alert(content)
-        return fail(answer) if answer
-        cut = cut_message(type)
-        return fail(cut) if cut
-        next if warning
-        # close_notify: no more from the peer. This side's own goes out
-        # with `close` or `close_write`, never from a read - a task writing
-        # beside this one owns the socket's writes. In TLS 1.3 this side
-        # may go on writing (section 6.1); in TLS 1.2 it may not: RFC 5246
-        # section 7.2.1 has the peer's close_notify answered by this
-        # side's and the connection closed, what it had yet to write
-        # discarded, so `write` refuses from here on.
-        @eof = true
-        return ""
-      else
-        return fail(TlsError.new("a record of type #{type} after the handshake", TlsAlert::UNEXPECTED_MESSAGE))
+        keep_plain(content)
+        return plain(max)
       end
+      ended = other_record(type, content)
+      return ended if ended.is_a?(TlsError)
+      return {@plain_at, 0} if ended
+    end
+  end
+
+  # A read that failed: a wait past the timeout, or a cancelled one, takes
+  # nothing from the stream and leaves the connection open; anything else
+  # ends it.
+  private def read_failed(error : TlsError) : TlsError
+    return error if error.timed_out? || error.cancelled?
+    fail(error)
+  end
+
+  # A record after the handshake that is not application data: a
+  # handshake message (a ticket, a KeyUpdate) or an alert. True for the
+  # peer's close_notify, an error once the connection failed, else false.
+  private def other_record(type : UInt8, content : Array(UInt8)) : Bool | TlsError
+    case type
+    when TlsRecords::HANDSHAKE
+      problem = post_handshake(content)
+      return fail(problem) if problem
+      false
+    when TlsRecords::ALERT
+      # user_canceled after the handshake is a warning (section 6.1): the
+      # close_notify meant to follow it is what ends the reading.
+      warning = content.size == 2 && content[1] == TlsAlert::USER_CANCELED
+      answer = warning ? nil : alert(content)
+      return fail(answer) if answer
+      cut = cut_message(type)
+      return fail(cut) if cut
+      return false if warning
+      # close_notify: no more from the peer. This side's own goes out
+      # with `close` or `close_write`, never from a read - a task writing
+      # beside this one owns the socket's writes. In TLS 1.3 this side
+      # may go on writing (section 6.1); in TLS 1.2 it may not: RFC 5246
+      # section 7.2.1 has the peer's close_notify answered by this
+      # side's and the connection closed, what it had yet to write
+      # discarded, so `write` refuses from here on.
+      @eof = true
+      true
+    else
+      fail(TlsError.new("a record of type #{type} after the handshake", TlsAlert::UNEXPECTED_MESSAGE))
     end
   end
 
@@ -1148,27 +1294,93 @@ pub abstract class TlsConnection
     TlsError.new("a record of type #{type} inside a handshake message split across records", TlsAlert::UNEXPECTED_MESSAGE)
   end
 
-  @pending : Array(UInt8)? = nil
-
   # Sends *data*, in records of at most 2^14 bytes; answers its size.
   # Refused once `close_write` has sent this side's close_notify, and in
-  # TLS 1.2 once the peer's has been read (see `read_now`).
+  # TLS 1.2 once the peer's has been read (see `other_record`).
   def write(data : String | Array(UInt8)) : Int32 | TlsError
+    refused = write_refused
+    return refused if refused
+    from, size = data.is_a?(String) ? {data.to_unsafe, data.bytesize} : {data.to_unsafe, data.size}
+    at = 0
+    while at < size
+      n = size - at
+      n = TlsRecords::MAX_PLAINTEXT if n > TlsRecords::MAX_PLAINTEXT
+      outbox = outbox_room
+      (outbox[0] + outbox[1].to_i64).copy_from(from + at.to_i64, n)
+      sent = seal_out(n)
+      return sent if sent
+      at = at + n
+    end
+    size
+  end
+
+  # *data* from the caller's tape, as `write` sends a string: each record's
+  # bytes are copied into this connection's outbox and sealed there.
+  def write(data : Tape::String) : Int32 | TlsError
+    refused = write_refused
+    return refused if refused
+    size = data.bytesize
+    at = 0
+    while at < size
+      n = size - at
+      n = TlsRecords::MAX_PLAINTEXT if n > TlsRecords::MAX_PLAINTEXT
+      outbox = outbox_room
+      to = outbox[0] + outbox[1].to_i64
+      i = 0
+      while i < n
+        to[i] = data[at + i]
+        i = i + 1
+      end
+      sent = seal_out(n)
+      return sent if sent
+      at = at + n
+    end
+    size
+  end
+
+  private def write_refused : TlsError?
     return TlsError.new("the connection is closed") if closed?
     return TlsError.new("the connection is closed for writing: close_notify was sent") if @write_closed
     return TlsError.new("the peer closed the TLS 1.2 connection with close_notify, which ends this side's writing too (RFC 5246 section 7.2.1)") if @tls12 && @eof
-    bytes = data.is_a?(String) ? TlsBytes.of(data) : data
-    at = 0
-    while at < bytes.size
-      size = bytes.size - at
-      size = TlsRecords::MAX_PLAINTEXT if size > TlsRecords::MAX_PLAINTEXT
-      keyed = rekey_if_due
-      return fail(keyed) if keyed
-      sent = send_protected(TlsRecords::APPLICATION_DATA, bytes[at, size])
-      return fail(sent) if sent
-      at = at + size
+    nil
+  end
+
+  # One record's room, made once per connection: its content goes at the
+  # write keys' prefix past the start.
+  @outbox : Pointer(UInt8) = Pointer(UInt8).new(0_u64)
+  OUTBOX_SIZE = 13 + TlsRecords::MAX_PLAINTEXT + TlsRecordCipher::OVERHEAD
+
+  private def outbox_room : {Pointer(UInt8), Int32}
+    @outbox = Pointer(UInt8).malloc(OUTBOX_SIZE.to_u64) if @outbox.address == 0_u64
+    writer = @writer
+    {@outbox, writer ? writer.prefix : 5}
+  end
+
+  # The *size* bytes of application data in the outbox sealed and sent,
+  # under new keys first when they are due. Only TLS 1.3 changes keys, and
+  # its prefix is always the header's 5 bytes, so the bytes stay put.
+  private def seal_out(size : Int32) : TlsError?
+    keyed = rekey_if_due
+    return fail(keyed) if keyed
+    writer = @writer
+    return fail(TlsError.new("no keys to write with")) unless writer
+    length = writer.seal_at(TlsRecords::APPLICATION_DATA, @outbox, size)
+    sent = put_at(@outbox, length)
+    return fail(sent) if sent
+    nil
+  end
+
+  # *count* bytes at *bytes* written, or held with the rest of a flight.
+  private def put_at(bytes : Pointer(UInt8), count : Int32) : TlsError?
+    if held = @held
+      count.times { |i| held << bytes[i] }
+      return nil
     end
-    bytes.size
+    return TlsError.new("the socket under the connection is closed") if @socket.closed?
+    sent = @socket.write(bytes, count)
+    return TlsError.new("the write to #{@place} failed: #{sent.message}") if sent.is_a?(SocketError)
+    return TlsError.new("the write to #{@place} was cancelled") unless sent.is_a?(Int32)
+    nil
   end
 
   # Records one write key carries before the next (RFC 8446 section 5.5:
@@ -1321,9 +1533,11 @@ pub abstract class TlsConnection
     while left > 0 && !@eof && !closed?
       wait = (until_ns - Time.monotonic_nanoseconds.to_i64) // 1000000_i64
       break if wait <= 0
-      got = within(wait < DRAIN_GAP_MS ? wait.to_i32 : DRAIN_GAP_MS) { read_now(16384) }
-      break unless got.is_a?(String) && !got.empty?
-      left = left - got.bytesize
+      got = within(wait < DRAIN_GAP_MS ? wait.to_i32 : DRAIN_GAP_MS) { take_now(16384) }
+      break if got.is_a?(TlsError)
+      _, n = got
+      break if n == 0
+      left = left - n
     end
   end
 
@@ -1676,10 +1890,6 @@ pub abstract class TlsConnection
   # The next record under the read keys: {inner type, content}; in TLS
   # 1.2, {type, content}.
   private def next_record : {UInt8, Array(UInt8)} | TlsError
-    if (pending = @pending)
-      @pending = nil
-      return {TlsRecords::APPLICATION_DATA, pending}
-    end
     while true
       raw = read_record
       return raw if raw.is_a?(TlsError)
@@ -1859,15 +2069,7 @@ pub abstract class TlsConnection
   # close_notify from a `close` after the socket went, an alert, a
   # KeyUpdate, a released flight, all answer it as a `TlsError`.
   private def put(bytes : Array(UInt8)) : TlsError?
-    if held = @held
-      held.concat(bytes)
-      return nil
-    end
-    return TlsError.new("the socket under the connection is closed") if @socket.closed?
-    sent = @socket.write(TlsBytes.text(bytes))
-    return TlsError.new("the write to #{@place} failed: #{sent.message}") if sent.is_a?(SocketError)
-    return TlsError.new("the write to #{@place} was cancelled") unless sent.is_a?(Int32)
-    nil
+    put_at(bytes.to_unsafe, bytes.size)
   end
 end
 

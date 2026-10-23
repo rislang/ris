@@ -613,9 +613,6 @@ end
 pub class TlsStream
   @tls : TlsConnection
   @host : String
-  # What TLS handed over and the buffer has not taken yet.
-  @pending : String = ""
-  @at : Int32 = 0
 
   def initialize(@tls : TlsConnection, @host : String)
   end
@@ -632,35 +629,27 @@ pub class TlsStream
   end
 
   # Up to *count* bytes into *buffer*: 0 once the peer closed with
-  # close_notify.
+  # close_notify. TLS opens each record where it came in and copies only
+  # its content here.
   def read(buffer : Pointer(UInt8), count : Int32) : Int32 | Cancelled | SocketError
-    if @at >= @pending.bytesize
-      got = @tls.read(16384)
-      return failed_read(got) if got.is_a?(TlsError)
-      return 0 if got.empty?
-      @pending = got
-      @at = 0
-    end
-    n = @pending.bytesize - @at
-    n = count if n > count
-    buffer.copy_from(@pending.to_unsafe + @at.to_i64, n)
-    @at = @at + n
-    n
+    got = @tls.read(buffer, count)
+    return failed_read(got) if got.is_a?(TlsError)
+    got
   end
 
-  # Up to *max_bytes* as a string, what is held first: "" once the peer
-  # closed with close_notify. `IyiSocket#read`'s form, for a block an
-  # upgrade hands either.
+  # Up to *max_bytes* as a string: "" once the peer closed with
+  # close_notify. `IyiSocket#read`'s form, for a block an upgrade hands
+  # either.
   def read(max_bytes : Int32 = 4096) : String | Cancelled | SocketError
-    if @at < @pending.bytesize
-      n = @pending.bytesize - @at
-      n = max_bytes if n > max_bytes
-      from = @at
-      piece = String.new(n) { |buf| buf.copy_from(@pending.to_unsafe + from.to_i64, n) }
-      @at = @at + n
-      return piece
-    end
     got = @tls.read(max_bytes)
+    return failed_read(got) if got.is_a?(TlsError)
+    got
+  end
+
+  # Up to *max* bytes onto the end of *writer*, the caller's tape:
+  # `IyiSocket#read`'s tape form, 0 at the end of the stream.
+  def read(writer : Tape::String::Writer, max : Int32) : Int32 | Cancelled | SocketError
+    got = @tls.read(writer, max)
     return failed_read(got) if got.is_a?(TlsError)
     got
   end
@@ -675,6 +664,13 @@ pub class TlsStream
   end
 
   def write(text : String) : Int32 | Cancelled | SocketError
+    sent = @tls.write(text)
+    return SocketError.layered("write to #{@host}", sent.message) if sent.is_a?(TlsError)
+    sent
+  end
+
+  # *text* from the caller's tape, sealed with no string made.
+  def write(text : Tape::String) : Int32 | Cancelled | SocketError
     sent = @tls.write(text)
     return SocketError.layered("write to #{@host}", sent.message) if sent.is_a?(TlsError)
     sent

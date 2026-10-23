@@ -198,6 +198,29 @@ pub class AesGcm
     String.new(size) { |buf| ctr(n, ct, buf, size) }
   end
 
+  # *size* bytes at *buffer* sealed where they lie, the 16-byte tag
+  # written after them: a record layer's own buffer, sealed with nothing
+  # made. *nonce* is 12 bytes.
+  def seal_at(nonce : Pointer(UInt8), buffer : Pointer(UInt8), size : Int32, aad : Pointer(UInt8), aad_size : Int32) : Nil
+    ctr(nonce, buffer, buffer, size)
+    tag(nonce, aad, aad_size, buffer, size, buffer + size.to_i64)
+  end
+
+  # The *total* sealed bytes at *buffer* opened where they lie: the size of
+  # the plaintext now at *buffer*, or an `AeadError` and nothing decrypted.
+  def open_at(nonce : Pointer(UInt8), buffer : Pointer(UInt8), total : Int32, aad : Pointer(UInt8), aad_size : Int32) : Int32 | AeadError
+    return AeadError.new("AesGcm: #{total} bytes cannot be sealed: the tag alone is 16") if total < 16
+    size = total - 16
+    want = uninitialized StaticArray(UInt64, 2)
+    expected = pointerof(want).as(Pointer(UInt8))
+    tag(nonce, aad, aad_size, buffer, size, expected)
+    unless AeadBytes.same_tag?(expected, buffer + size.to_i64)
+      return AeadError.new("AesGcm: the tag does not match: the sealed bytes, the additional data, the nonce or the key is not what was sealed")
+    end
+    ctr(nonce, buffer, buffer, size)
+    size
+  end
+
   # *size* bytes from *src* to *dst*, XORed with the key stream of the
   # counter blocks from 2 on (§7.1: the first, 1, is the tag's), four
   # blocks to an AES call, which is what the bitsliced cipher does at
@@ -469,6 +492,35 @@ pub class ChaCha20Poly1305
       return AeadError.new("ChaCha20Poly1305: the tag does not match: the sealed bytes, the additional data, the nonce or the key is not what was sealed")
     end
     String.new(size) { |buf| ChaChaCore.xor(state, 1_u32, ct, buf, size) }
+  end
+
+  # *size* bytes at *buffer* sealed where they lie, the 16-byte tag
+  # written after them: a record layer's own buffer, sealed with nothing
+  # made. *nonce* is 12 bytes.
+  def seal_at(nonce : Pointer(UInt8), buffer : Pointer(UInt8), size : Int32, aad : Pointer(UInt8), aad_size : Int32) : Nil
+    words = uninitialized StaticArray(UInt32, 16)
+    state = pointerof(words).as(Pointer(UInt32))
+    ChaChaCore.start(state, @key, nonce)
+    ChaChaCore.xor(state, 1_u32, buffer, buffer, size)
+    tag(state, aad, aad_size, buffer, size, buffer + size.to_i64)
+  end
+
+  # The *total* sealed bytes at *buffer* opened where they lie: the size of
+  # the plaintext now at *buffer*, or an `AeadError` and nothing decrypted.
+  def open_at(nonce : Pointer(UInt8), buffer : Pointer(UInt8), total : Int32, aad : Pointer(UInt8), aad_size : Int32) : Int32 | AeadError
+    return AeadError.new("ChaCha20Poly1305: #{total} bytes cannot be sealed: the tag alone is 16") if total < 16
+    words = uninitialized StaticArray(UInt32, 16)
+    state = pointerof(words).as(Pointer(UInt32))
+    ChaChaCore.start(state, @key, nonce)
+    size = total - 16
+    want = uninitialized StaticArray(UInt64, 2)
+    expected = pointerof(want).as(Pointer(UInt8))
+    tag(state, aad, aad_size, buffer, size, expected)
+    unless AeadBytes.same_tag?(expected, buffer + size.to_i64)
+      return AeadError.new("ChaCha20Poly1305: the tag does not match: the sealed bytes, the additional data, the nonce or the key is not what was sealed")
+    end
+    ChaChaCore.xor(state, 1_u32, buffer, buffer, size)
+    size
   end
 
   # §2.8's tag of *size* bytes of ciphertext at *ct*, into *dst*.
