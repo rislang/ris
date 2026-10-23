@@ -220,13 +220,19 @@ jobs:
   # type and a visitor read it anyway. Eighteen internal errors were found
   # that way and nothing had asked. A job of its own: it grows with the
   # library, and took 22 to 41 of the samples job's 90 minutes.
+  # ris: four shards side by side, every fourth module each: one sweep took
+  # 67 minutes, the run's second longest job (run 39882150145).
   lsp-positions:
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     container:
       image: crystallang/crystal:1.21.0-build
-    name: "Every cursor question, everywhere in the library"
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    name: "Every cursor question, everywhere in the library, shard ${{ matrix.shard }} of 4"
     steps:
       - uses: actions/checkout@v7
         with:
@@ -239,7 +245,7 @@ jobs:
       - name: Build `iyi` and its daemon
         run: make -o .build/crystal iyi iyi-daemon
       - name: Every cursor question, everywhere in the library
-        run: python3 bench/lsp_positions.py
+        run: python3 bench/lsp_positions.py --shard ${{ matrix.shard }}/4
 
   samples:
     needs: build
@@ -902,7 +908,7 @@ jobs:
       - name: crystal-metric's port answers as Crystal does
         run: bash bench/metric_port.sh
 
-  # Every module's own exercise, in six shards (bench/std_siblings.sh).
+  # Every module's own exercise, in eight shards (bench/std_siblings.sh).
   # One after another they ran past the std job's hour: 39 of 91 had run at
   # sixty minutes, std/http's proofs alone thirteen of them, on top of the
   # foundation's twenty-five. Interleaved, each shard carries a quarter:
@@ -929,8 +935,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
-    name: "The standard library's module exercises, shard ${{ matrix.shard }} of 6"
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    name: "The standard library's module exercises, shard ${{ matrix.shard }} of 8"
     steps:
       - uses: actions/checkout@v7
         with:
@@ -971,7 +977,7 @@ jobs:
           go-version: stable
           cache: false
       - name: The module exercises of this shard
-        run: bash bench/std_siblings.sh ${{ matrix.shard }} 6
+        run: bash bench/std_siblings.sh ${{ matrix.shard }} 8
       # std/tls's reads and writes against OpenSSL, each set against its
       # cipher's own rate on the same machine (bench/tls_speed.sh): a share
       # needs no shard but one.
@@ -1481,13 +1487,9 @@ jobs:
       # patched a branch this platform never compiles). Every one had been
       # green on Linux for a release. `std_exercise.sh` drives the whole
       # set and fails on any of them, and the gate-per-module rule with it.
-      # The foundation's own sections; the modules' exercises are the
-      # darwin-std-siblings shards below, which ran this job past its two
-      # hours when they were a step here.
-      - name: The native standard library's foundation
-        env:
-          STD_SIBLINGS: "0"
-        run: bash bench/std_exercise.sh
+      # The foundation's own sections are the darwin-std-foundation job's,
+      # and the modules' exercises the darwin-std-siblings shards: each ran
+      # this job past the rest of the run when it was a step here.
 
       # `std/socket`'s gate is named from before the `std_` prefix, so the
       # sweep above never ran it, and its darwin arm - libSystem's calls,
@@ -1612,6 +1614,43 @@ jobs:
   # hundred and twenty minutes, seventy of them in that step alone. A
   # shard has a hundred and five: on integration/0.19 shard 4 was cut off
   # at seventy-five, std/http alone 27 minutes of it and std/big 14.
+  # ris: the native standard library's foundation, out of the darwin job,
+  # where its 46 minutes after a 21-minute build made that job the run's
+  # longest (99 minutes, run 39882150145). Built the darwin job's way, in
+  # release mode, so the gates meet the compiler people download.
+  darwin-std-foundation:
+    runs-on: macos-14
+    timeout-minutes: 90
+    name: "The native standard library's foundation, on darwin"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install the bootstrap toolchain
+        run: |
+          brew install crystal coreutils pkgconf
+          echo "$(brew --prefix)/opt/coreutils/libexec/gnubin" >> "$GITHUB_PATH"
+      - name: Restore the static LLVM
+        id: llvm-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/llvm-static
+          key: llvm-static-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-static-llvm.sh') }}
+      - name: Build the static LLVM (cache miss)
+        if: steps.llvm-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build-static-llvm.sh "$HOME/llvm-static"
+      - name: Build `iyi` and its daemon
+        run: make iyi iyi-daemon release=1 LLVM_CONFIG="$HOME/llvm-static/bin/llvm-config"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Python's cryptography and Pillow, for the oracles
+        run: python3 -m pip install -q cryptography pillow
+      - name: The native standard library's foundation
+        env:
+          STD_SIBLINGS: "0"
+        run: bash bench/std_exercise.sh
+
   darwin-std-siblings:
     runs-on: macos-14
     timeout-minutes: 105
@@ -2386,8 +2425,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
-    name: "The standard library's module exercises on Windows, shard ${{ matrix.shard }} of 6"
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    name: "The standard library's module exercises on Windows, shard ${{ matrix.shard }} of 8"
     steps:
       - uses: actions/checkout@v7
         with:
@@ -2437,7 +2476,7 @@ jobs:
           PYTHONUNBUFFERED: "1"
           MUT_JOBS: "2"
           SIBLING_MINUTES: "50"
-        run: bash bench/std_siblings.sh ${{ matrix.shard }} 6
+        run: bash bench/std_siblings.sh ${{ matrix.shard }} 8
 
   # The gates the Linux job runs that no Windows job did: the runtime's
   # own exercises, the boundaries bound from Crystal's library, the floors,
@@ -3094,7 +3133,7 @@ jobs:
   # red would ship a claim nobody on that platform can reproduce.
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [binary, darwin, darwin-std-siblings, clean-room, iyi, compiler-specs, stdlib-specs,
+    needs: [binary, darwin, darwin-std-foundation, darwin-std-siblings, clean-room, iyi, compiler-specs, stdlib-specs,
             samples, lsp-positions, std, std-siblings, targets, cross-objects, cross-run, wasi-run,
             windows-probe, windows-collector, windows-runtime, windows-native, windows-std,
             windows-std-siblings, windows-gates, windows-compiler-specs,

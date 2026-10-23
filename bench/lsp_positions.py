@@ -269,9 +269,16 @@ def prove_it_can_fail(stride: int) -> None:
 
 
 def main() -> int:
-    stride = int(sys.argv[1]) if len(sys.argv) > 1 else 200
+    args = sys.argv[1:]
+    # `--shard K/N`: every Nth module from the Kth, so CI runs the sweep
+    # side by side; the proof that it can fail is shard 1's.
+    shard, shards = 1, 1
+    if args and args[0] == "--shard":
+        shard, shards = (int(n) for n in args[1].split("/"))
+        args = args[2:]
+    stride = int(args[0]) if args else 200
     # Names narrow it to those modules, for a bisect or a repair.
-    wanted = set(sys.argv[2:])
+    wanted = set(args[1:])
     modules = [p for p in MODULES if not wanted or p.name in wanted]
     if wanted and len(modules) != len(wanted):
         print(f"lsp positions: no module under src/std named {sorted(wanted - {p.name for p in modules})}")
@@ -279,6 +286,7 @@ def main() -> int:
     if not MODULES:
         print("lsp positions: no module under src/std, so this checked nothing")
         return 1
+    modules = [p for i, p in enumerate(modules) if i % shards == shard - 1]
 
     print(f"== every cursor question, every {stride} lines, one server per module")
     total = 0
@@ -290,11 +298,12 @@ def main() -> int:
             worst = (peak, path.name)
         print(f"  {path.name:28s} {asked:5d} questions, {peak:5d} MB")
 
-    print()
-    print("== proving the sweep sees a module that stopped compiling")
-    prove_it_can_fail(stride)
-    if not any("cannot see" in f or "not a sweep" in f for f in FAILURES):
-        print("  a broken module is reported as diagnostics, and the cursor questions still answer")
+    if shard == 1:
+        print()
+        print("== proving the sweep sees a module that stopped compiling")
+        prove_it_can_fail(stride)
+        if not any("cannot see" in f or "not a sweep" in f for f in FAILURES):
+            print("  a broken module is reported as diagnostics, and the cursor questions still answer")
 
     print()
     if worst[0]:
