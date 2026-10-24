@@ -2107,6 +2107,7 @@ describe Iyi::IyiMod do
     with_tempdir("iyimod_lib_and_macro") do
       Dir.mkdir_p "boot"
       File.write "boot/plat.iyi", <<-IYI
+        @[Ffi]
         module boot/plat
 
         lib LibPlat
@@ -3607,6 +3608,7 @@ describe Iyi::IyiMod do
   it "carries what an annotation decides, on a type and on a def" do
     with_tempdir("iyimod_primitive_annotation") do
       File.write "main.iyi", <<-IYI
+        @[Ffi]
         module main
 
         import std/reference_storage::{ReferenceStorage}
@@ -3644,6 +3646,7 @@ describe Iyi::IyiMod do
   it "preserves the OnTape lifetime marker on exported and nested types" do
     with_tempdir("iyimod_tape_annotation") do
       File.write "packet.iyi", <<-IYI
+        @[Ffi]
         module packet
 
         @[OnTape]
@@ -3694,6 +3697,7 @@ describe Iyi::IyiMod do
       # Pointer-only tape types otherwise look like ordinary structs, and
       # losing the marker would silently allow this lifetime escape.
       File.write "bad.iyi", <<-IYI
+        @[Ffi]
         module bad
         import packet::{Packet}
         kept = nil
@@ -3730,6 +3734,7 @@ describe Iyi::IyiMod do
     with_tempdir("iyimod_own_lib") do
       Dir.mkdir_p "boot"
       File.write "boot/clock.iyi", <<-IYI
+        @[Ffi]
         module boot/clock
 
         lib LibC
