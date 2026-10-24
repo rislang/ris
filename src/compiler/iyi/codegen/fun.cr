@@ -824,6 +824,10 @@ class Iyi::CodeGenVisitor
     else
       context.fun.add_attribute LLVM::Attribute::AlwaysInline if target_def.always_inline?
       context.fun.add_attribute LLVM::Attribute::NoInline if target_def.no_inline?
+      if !@program.optimization_mode.o0? && !target_def.is_a?(External) &&
+         AutoInline.small?(target_def)
+        context.fun.add_attribute LLVM::Attribute::AlwaysInline
+      end
     end
 
     {% unless LibLLVM::IS_LT_130 %}
