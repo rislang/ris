@@ -10,8 +10,10 @@ require "../syntax/visitor"
 # of line (`keep_call_out_of_main`): LLVM keeps a call marked noinline
 # whatever the def says.
 module Iyi::AutoInline
-  # Nodes in a def's body, as normalized: `span`'s is 46.
-  LIMIT = (ENV["IYI_AUTO_INLINE"]? || "48").to_i
+  # Nodes in a def's body, as normalized: `span`'s is 46. At 48 a
+  # five-line program took 41s and 0.9GB to build --release, against 10s
+  # and 0.4GB at 24, timing specs out and the compiler specs out of memory.
+  LIMIT = (ENV["IYI_AUTO_INLINE"]? || "24").to_i
 
   def self.small?(a_def : Def) : Bool
     return false if LIMIT <= 0
