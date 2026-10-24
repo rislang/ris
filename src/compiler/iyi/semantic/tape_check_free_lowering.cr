@@ -4,11 +4,18 @@
 # `i` is not negative. That holds when the body assigns `a` nowhere and
 # `i` only by adding one, and the array cannot shrink: `Tape::Array` and
 # `Tape::String` never do, and for any other value the two calls are
-# `[]` and `[]=` as written (Goose elides these checks too).
-class Iyi::TapeLoopBounds < Iyi::Visitor
+# `[]` and `[]=` as written (Goose elides these checks too). In
+# `while i < a.size && c`, `c` runs only after that test, so `a[i]` in
+# `c` is lowered as well.
+class Iyi::TapeCheckFreeLowering < Iyi::Visitor
   def self.lower(node : While) : Nil
     return if TapeScopeRuntime.crystal?(node.location)
     cond = node.cond
+    rest = [] of ASTNode
+    while cond.is_a?(And)
+      rest << cond.right
+      cond = cond.left
+    end
     return unless cond.is_a?(Call) && cond.name == "<" && cond.args.size == 1
     index = cond.obj
     size = cond.args.first
@@ -18,8 +25,11 @@ class Iyi::TapeLoopBounds < Iyi::Visitor
     return unless array.is_a?(Var) && size.args.empty? && size.block.nil?
     scan = Scan.new(index.name, array.name)
     node.body.accept(scan)
+    rest.each &.accept(scan)
     return if scan.unsafe
-    node.body.accept(new(index.name, array.name))
+    lower = new(index.name, array.name)
+    node.body.accept(lower)
+    rest.each &.accept(lower)
   end
 
   def initialize(@index : String, @array : String)
@@ -70,7 +80,9 @@ class Iyi::TapeLoopBounds < Iyi::Visitor
     end
 
     def visit(node : Block)
-      @unsafe = true if node.args.any? { |arg| arg.name == @index || arg.name == @array }
+      @unsafe = true if node.args.any? do |arg|
+                          arg.name == @index || arg.name == @array
+                        end
       true
     end
 
@@ -83,7 +95,8 @@ class Iyi::TapeLoopBounds < Iyi::Visitor
       if target.name == @array
         @unsafe = true
       elsif target.name == @index
-        ok = value.is_a?(Call) && value.name == "+" && one?(value.args.first?) &&
+        ok = value.is_a?(Call) && value.name == "+" &&
+             one?(value.args.first?) &&
              (obj = value.obj).is_a?(Var) && obj.name == @index
         @unsafe = true unless ok
       end

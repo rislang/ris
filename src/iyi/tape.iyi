@@ -344,7 +344,8 @@ module Tape
       self[span.start, span.size]
     end
 
-    # `[]` in `while i < text.bytesize` (TapeLoopBounds): the size is fixed.
+    # `[]` in `while i < text.bytesize` (TapeCheckFreeLowering): the size
+    # is fixed.
     @[AlwaysInline]
     def __loop_fetch(index : Int32) : UInt8
       raise "index #{index} out of range for #{@bytesize} bytes" if index < 0
@@ -1071,7 +1072,7 @@ module Tape
     end
 
     # `[]` in `while i < a.size`, where the loop keeps *index* below the
-    # size (TapeLoopBounds): only a negative one is refused.
+    # size (TapeCheckFreeLowering): only a negative one is refused.
     @[AlwaysInline]
     def __loop_fetch(index : Int32) : T
       raise "index #{index} out of range for #{size} elements" if index < 0
@@ -1493,7 +1494,7 @@ module Tape
       @target.unchecked_store(@at[k], value)
     end
 
-    # As `[]` in `while k < x.size` (TapeLoopBounds): only *k*'s sign.
+    # As `[]` in `while k < x.size` (TapeCheckFreeLowering): only *k*'s sign.
     @[AlwaysInline]
     def __loop_fetch(k : Int32) : T
       @target.unchecked(@at.__loop_fetch(k))
@@ -1766,7 +1767,7 @@ def print(writer : Tape::String::Writer) : Nil
 end
 
 # Any other value read in `while i < a.size`: `[]` and `[]=` as written,
-# since it may shrink in the loop (TapeLoopBounds).
+# since it may shrink in the loop (TapeCheckFreeLowering).
 class Object
   def __loop_fetch(index)
     self[index]

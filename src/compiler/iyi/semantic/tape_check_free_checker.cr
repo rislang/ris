@@ -1,8 +1,8 @@
 # ris: Goose's `checkfree fn`. A def marked `@[CheckFree]` may index only
 # where no bound is checked: `each`, `map`, `sum`, `a[i]` in
-# `while i < a.size` (TapeLoopBounds) and `Tape::IndexView`, whose indexes
-# were checked once when they were made. A `[]` or `[]=` left in its body
-# checks its bound at every call, and is refused with where it is.
+# `while i < a.size` (TapeCheckFreeLowering) and `Tape::IndexView`, whose
+# indexes were checked once when they were made. A `[]` or `[]=` left in
+# its body checks its bound at every call, and is refused with where it is.
 class Iyi::TapeCheckFreeChecker
   INDEXING = {"[]", "[]?", "[]="}
 
@@ -47,11 +47,12 @@ class Iyi::TapeCheckFreeChecker
 
     def visit(node : Call)
       if INDEXING.includes?(node.name) && node.obj
-        node.raise "`#{@name}` is @[CheckFree], and this `#{node.name}` checks " \
-                   "its index at every call.\n\nIndex in `while i < a.size` " \
-                   "(i only `+= 1`), use `each`, `map` or `sum`, or check the " \
-                   "indexes once where they come in: `target.values_at(array)` " \
-                   "gives a Tape::IndexView that reads without a check."
+        node.raise "`#{@name}` is @[CheckFree], and this " \
+                   "`#{node.name}` checks its index at every call.\n\n" \
+                   "Index in `while i < a.size` (i only `+= 1`), use " \
+                   "`each`, `map` or `sum`, or check the indexes once " \
+                   "where they come in: `target.values_at(array)` gives " \
+                   "a Tape::IndexView that reads without a check."
       end
       true
     end

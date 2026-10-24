@@ -20,7 +20,12 @@ tape do
     total = total + heap[k]
     k += 1
   end
-  puts "#{a[0]} #{a[1]} #{a[2]} #{total}"
+  digits = Tape::String.new("123x")
+  d = 0
+  while d < digits.bytesize && digits[d] >= 48 && digits[d] <= 57
+    d += 1
+  end
+  puts "#{a[0]} #{a[1]} #{a[2]} #{total} #{d}"
   n = -1
   while n < a.size
     a[n]
