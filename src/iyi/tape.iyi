@@ -108,10 +108,16 @@ module Tape
 
     # The byte at *index*, from the end when negative; one out of range
     # raises rather than reading what follows. `to_unsafe` is the library's.
+    # One unsigned compare on the way to the byte; a negative index
+    # takes the other branch, counted from the end.
     def [](index : Int32) : UInt8
-      asked = index
-      index = index + @bytesize if index < 0
-      Tape.out_of_range(asked, @bytesize, "bytes") if index < 0 || index >= @bytesize
+      unless index.unsafe_to_u64 < @bytesize.unsafe_to_u64
+        asked = index
+        index = index + @bytesize
+        unless asked < 0 && index.unsafe_to_u64 < @bytesize.unsafe_to_u64
+          Tape.out_of_range(asked, @bytesize, "bytes")
+        end
+      end
       @ptr[index]
     end
 
@@ -1062,20 +1068,28 @@ module Tape
     # As `Array#[]`: a negative index counts from the end, and one still out
     # of range raises rather than reading past the elements.
     def [](index : Int32) : T
-      asked = index
       count = size
-      index = index + count if index < 0
-      Tape.out_of_range(asked, count, "elements") if index < 0 || index >= count
+      unless index.unsafe_to_u64 < count.unsafe_to_u64
+        asked = index
+        index = index + count
+        unless asked < 0 && index.unsafe_to_u64 < count.unsafe_to_u64
+          Tape.out_of_range(asked, count, "elements")
+        end
+      end
       Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value
     end
 
     # As `Array#[]=`, with the same range check: an element written in
     # place, which does not grow the array.
     def []=(index : Int32, value : T) : T
-      asked = index
       count = size
-      index = index + count if index < 0
-      Tape.out_of_range(asked, count, "elements") if index < 0 || index >= count
+      unless index.unsafe_to_u64 < count.unsafe_to_u64
+        asked = index
+        index = index + count
+        unless asked < 0 && index.unsafe_to_u64 < count.unsafe_to_u64
+          Tape.out_of_range(asked, count, "elements")
+        end
+      end
       Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value = value
     end
 
