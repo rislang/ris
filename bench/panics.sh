@@ -784,6 +784,7 @@ done
 # kernel answers STATUS_STACK_OVERFLOW; a frame that skipped the probes
 # would have written only committed memory and come back.
 cat > "$work/overrun.iyi" <<'EOF'
+@[Ffi]
 module overrun
 
 # 64 KiB of frame, written first at its lowest byte, the one farthest
@@ -874,6 +875,7 @@ step "a frame larger than the guard page is a stack overflow, not a write under 
 case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT)
     cat > "$work/guarantee.iyi" <<'EOF'
+@[Ffi]
 module guarantee
 
 t = IyiThread.start do
@@ -901,6 +903,7 @@ EOF
     ;;
 esac
 cat > "$work/wild.iyi" <<'EOF'
+@[Ffi]
 module wild
 
 p = Pointer(Int32).new(16_u64)
@@ -962,6 +965,7 @@ EOF
 
   # ── 12. a panic resolver hook formats frames when installed ────────────────
   cat > "$work/hook.iyi" <<'EOF'
+@[Ffi]
 module hook
 
 def format_trace(frames : Pointer(Void*), count : Int32) : Nil
