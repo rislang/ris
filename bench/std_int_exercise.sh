@@ -140,10 +140,10 @@ else
   "$PY" - <<PY
 from pathlib import Path
 src = Path("$REPO/src/std/int.iyi").read_text()
-old = 'count = count + 1 if (unsafe_shr(i) & 1) != 0'
+old = '::Std::Int::IyiBits.popcount({{ raw.id }})'
 if old not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/int.iyi").write_text(src.replace(old, 'count = count', 1))
+Path("$WORK/patched/std/int.iyi").write_text(src.replace(old, '0', 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the patch did not apply"

@@ -240,7 +240,8 @@ while [ -n "$todo" ]; do
 done
 bound=""
 for module in $reached; do
-  if grep -nE '^\s*(lib [A-Z]|fun [a-z_]|asm\(|@\[Link)|__iyi_' "$REPO/src/$module.iyi" >/dev/null; then
+  if grep -nE '^\s*(lib [A-Z]|fun [a-z_]|asm\(|@\[Link)|__iyi_' "$REPO/src/$module.iyi" \
+      | grep -qvE 'llvm\.(ctpop|ctlz|cttz)\.'; then
     bound="$bound $module"
   fi
 done

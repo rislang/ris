@@ -31,6 +31,34 @@
 # which is exact as well and agrees with their `<=>` here.
 module std/int
 
+# The processor's bit counts, one LLVM signature per width: an unsigned type
+# passes its bits as the signed type of its width, and a zero counts as the
+# width. `IyiBits` carries them to the methods below, which live on the
+# prelude's types and so cannot see this module's own lib.
+lib LibLLVMBits # llvm.ctpop.iN llvm.ctlz.iN llvm.cttz.iN
+  {% for w in [8, 16, 32, 64, 128] %}
+    fun ctpop{{ w }} = "llvm.ctpop.i{{ w }}"(x : Int{{ w }}) : Int{{ w }}
+    fun ctlz{{ w }} = "llvm.ctlz.i{{ w }}"(x : Int{{ w }}, zero_is_undef : Bool) : Int{{ w }}
+    fun cttz{{ w }} = "llvm.cttz.i{{ w }}"(x : Int{{ w }}, zero_is_undef : Bool) : Int{{ w }}
+  {% end %}
+end
+
+pub struct IyiBits
+  {% for w in [8, 16, 32, 64, 128] %}
+    def self.popcount(x : Int{{ w }}) : Int32
+      LibLLVMBits.ctpop{{ w }}(x).to_i32
+    end
+
+    def self.leading_zeros(x : Int{{ w }}) : Int32
+      LibLLVMBits.ctlz{{ w }}(x, false).to_i32
+    end
+
+    def self.trailing_zeros(x : Int{{ w }}) : Int32
+      LibLLVMBits.cttz{{ w }}(x, false).to_i32
+    end
+  {% end %}
+end
+
 {% begin %}
   {% types = [
        {"Int8", 8, true, "i8"},
@@ -470,35 +498,19 @@ module std/int
         {% end %}
       {% end %}
 
-      # --- the bits, counted with a logical shift for every type ----------
-      # A negative value has its sign bits counted: `(-1).popcount` is 32,
-      # one loop of the type's width.
+      # --- the bits, counted by the processor for every type -------------
+      # A negative value has its sign bits counted: `(-1).popcount` is 32.
+      {% raw = signed ? "self" : "unsafe_to_i#{bits}" %}
       def popcount : Int32
-        count = 0
-        i = 0
-        while i < {{ bits }}
-          count = count + 1 if (unsafe_shr(i) & 1) != 0
-          i = i + 1
-        end
-        count
+        ::Std::Int::IyiBits.popcount({{ raw.id }})
       end
 
       def leading_zeros_count : Int32
-        i = {{ bits }} - 1
-        while i >= 0
-          return {{ bits }} - 1 - i if (unsafe_shr(i) & 1) != 0
-          i = i - 1
-        end
-        {{ bits }}
+        ::Std::Int::IyiBits.leading_zeros({{ raw.id }})
       end
 
       def trailing_zeros_count : Int32
-        i = 0
-        while i < {{ bits }}
-          return i if (unsafe_shr(i) & 1) != 0
-          i = i + 1
-        end
-        {{ bits }}
+        ::Std::Int::IyiBits.trailing_zeros({{ raw.id }})
       end
 
       # Bits needed to write the value, the sign excluded: `255.bit_length`

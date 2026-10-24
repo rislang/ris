@@ -389,9 +389,9 @@ for source in "$REPO"/src/std/*.iyi; do
       continue
       ;;
   esac
-  if [ "$name" = math ]; then
+  if [ "$name" = math ] || [ "$name" = int ]; then
     grep -nE '^\s*(lib [A-Z]|fun [a-z_]|asm\(|@\[Link)' "$source" \
-      | grep -vE 'llvm\.(sqrt|copysign|fma)\.' > "$WORK/reach.$name" || true
+      | grep -vE 'llvm\.(sqrt|copysign|fma|ctpop|ctlz|cttz)\.' > "$WORK/reach.$name" || true
   else
     grep -nE '^\s*(lib [A-Z]|fun [a-z_]|asm\(|@\[Link)' "$source" > "$WORK/reach.$name" || true
   fi
