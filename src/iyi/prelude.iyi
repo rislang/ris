@@ -10856,6 +10856,8 @@ end
 
 # PROTOTYPE (ris, step B): tape values, where the arena's region code is.
 # Program#tape_platform? repeats this condition: change both together.
+# ris's other additions every target carries come first, outside it.
+require "./ris"
 {% if !flag?(:gc_none) && !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || flag?(:darwin) || flag?(:win32) || flag?(:wasm32)) %}
   require "./tape"
 {% else %}

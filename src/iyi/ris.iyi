@@ -1,0 +1,14 @@
+# ris's additions to iyi's prelude that every target carries, tape or not.
+# Like tape.iyi, outside the library SPEC.md I.4's ceiling counts: the
+# ceiling is iyi's (bench/doc_numbers.py).
+
+class String
+  # The byte at *index*, bounds-checked as `[]` is, for code that would
+  # otherwise read `to_unsafe[index]` (FfiBoundaryChecker).
+  def byte_at(index : Int32) : UInt8
+    asked = index
+    index = @bytesize + index if index < 0
+    raise "index #{asked} out of range for a string of #{@bytesize} bytes" if index < 0 || index >= @bytesize
+    to_unsafe[index]
+  end
+end

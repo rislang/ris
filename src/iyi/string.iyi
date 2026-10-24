@@ -111,15 +111,6 @@ class String
     to_unsafe[index].unsafe_chr
   end
 
-  # ris: the byte at *index*, bounds-checked as `[]` is, for code that
-  # would otherwise read `to_unsafe[index]` (FfiBoundaryChecker).
-  def byte_at(index : Int32) : UInt8
-    asked = index
-    index = @bytesize + index if index < 0
-    raise "index #{asked} out of range for a string of #{@bytesize} bytes" if index < 0 || index >= @bytesize
-    to_unsafe[index]
-  end
-
   # Every character in order, decoded, as many as `size` counts: it yielded
   # one per byte, so `"héllo".size` was 5 and `each_char` ran six times.
   # Indexing stays byte-indexed (`[]` above), as `samples/iyi/calc` scans.
@@ -698,9 +689,8 @@ class String::Builder
     self << value.to_s
   end
 
-  # ris: the full-buffer test is one compare in the caller and the growth
-  # out of line. `reserve`'s Int64 arithmetic on every byte was a fifth of
-  # a JSON renderer's time.
+  # ris: one compare inline, the growth out of line: `reserve`'s Int64
+  # arithmetic on every byte was a fifth of a JSON renderer's time.
   @[AlwaysInline]
   def write_byte(byte : UInt8) : Nil
     reserve(1) if @bytesize >= @capacity

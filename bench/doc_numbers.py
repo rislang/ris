@@ -184,10 +184,11 @@ def library_with_floor_lines() -> int:
 def library_files() -> list[list[str]]:
     """The lines of each file the ceiling counts: `src/iyi/` without what
     `prelude_library_lines` names as outside it, and without ris's tape -
-    `tape.iyi` and the block of prelude.iyi that requires it. The tape is
+    `tape.iyi`, `ris.iyi` and the block of prelude.iyi that requires the
+    tape. The tape is
     ris's addition beside iyi's collector, where Goose's model is the
     measure, and SPEC.md I.4's ceiling is iyi's, set before there was one."""
-    outside = {"concurrency.iyi", "thread.iyi", "float.iyi", "tape.iyi"}
+    outside = {"concurrency.iyi", "thread.iyi", "float.iyi", "tape.iyi", "ris.iyi"}
     files = []
     for path in sorted((REPO / "src/iyi").glob("*.iyi")):
         if path.name in outside:
