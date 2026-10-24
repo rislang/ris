@@ -1,15 +1,14 @@
-# A `while @sc.offset < …` loop over a Tape::Scanner field runs on a local
+# A `while @sc.offset < …` loop over a Str::Scanner field runs on a local
 # cursor (TapeCursorLowering): what the loop moves is written back where
 # it ends, at a `break` and before a `return`, and a call in the body sees
 # the offset as moved so far and may move it itself.
 @[OnTape]
 struct Lexer
-  @sc : Tape::Scanner
   @lim : Int32
   @seen = 0
 
-  def initialize(text : Tape::String)
-    @sc = Tape::Scanner.new(text)
+  def initialize(text : Str)
+    @sc = Str::Scanner.new(text)
     @lim = text.bytesize
   end
 
@@ -49,7 +48,7 @@ struct Lexer
 end
 
 tape do
-  lexer = Lexer.new(Tape::String.new("ab#c  de#f g;h"))
+  lexer = Lexer.new(Str.new("ab#c  de#f g;h"))
   a = lexer.word
   b = lexer.word
   c = lexer.word

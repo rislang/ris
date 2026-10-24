@@ -1,10 +1,10 @@
-# The same lexer on Tape::Scanner: no warning.
+# The same lexer on Str::Scanner: no warning.
 @[OnTape]
 struct Words
-  @scanner : Tape::Scanner
+  @scanner : Str::Scanner
 
-  def initialize(text : Tape::String)
-    @scanner = Tape::Scanner.new(text)
+  def initialize(text : Str)
+    @scanner = Str::Scanner.new(text)
   end
 
   def count : Int32

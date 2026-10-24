@@ -3,7 +3,7 @@
 # `a.__loop_fetch(i)` and `a.__loop_store(i, v)`, which check only that
 # `i` is not negative. That holds when the body assigns `a` nowhere and
 # `i` only by adding one (`&+` too: a wrapped `i` is negative), and the
-# array cannot shrink: `Tape::Array` and `Tape::String` never do, and
+# array cannot shrink: `Ary` and `Str` never do, and
 # for any other value the two calls are `[]` and `[]=` as written
 # (Goose elides these checks too). In
 # `while i < a.size && c`, `c` runs only after that test, so `a[i]` in

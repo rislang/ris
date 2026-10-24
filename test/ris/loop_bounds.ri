@@ -1,13 +1,13 @@
 # `while i < a.size` reads and writes `a[i]` with no second bound check;
 # a negative start is still refused, and a heap Array is read as written.
 tape do
-  a = Tape::Array(Int64).new(3) { |i| (i * 10).to_i64 }
+  a = Ary(Int64).new(3) { |i| (i * 10).to_i64 }
   i = 0
   while i < a.size
     a[i] = a[i] + 1_i64
     i += 1
   end
-  text = Tape::String.new("abc")
+  text = Str.new("abc")
   j = 0
   total = 0
   while j < text.bytesize
@@ -20,7 +20,7 @@ tape do
     total = total + heap[k]
     k += 1
   end
-  digits = Tape::String.new("123x")
+  digits = Str.new("123x")
   d = 0
   while d < digits.bytesize && digits[d] >= 48 && digits[d] <= 57
     d += 1

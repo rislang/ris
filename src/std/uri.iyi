@@ -193,17 +193,17 @@ end
 # The pairs are made at their final size, counted first.
 @[OnTape]
 pub struct Query
-  getter pairs : Tape::Array(QueryPair)
+  getter pairs : Ary(QueryPair)
 
-  def initialize(@pairs : Tape::Array(QueryPair))
+  def initialize(@pairs : Ary(QueryPair))
   end
 
-  def self.parse(query : Tape::String) : Query
+  def self.parse(query : Str) : Query
     from = query.bytesize > 0 && query[0] == 63_u8 ? 1 : 0
     count = 0
     each_part(query, from) { |_, _| count += 1 }
     none = query[0, 0]
-    pairs = Tape::Array(QueryPair).new(count) { QueryPair.new(none, none) }
+    pairs = Ary(QueryPair).new(count) { QueryPair.new(none, none) }
     at = 0
     each_part(query, from) do |start, stop|
       eq = start
@@ -219,7 +219,7 @@ pub struct Query
   end
 
   # The start and end of each part between `&` and `;` that is not empty.
-  private def self.each_part(query : Tape::String, from : Int32, & : Int32, Int32 -> Nil) : Nil
+  private def self.each_part(query : Str, from : Int32, & : Int32, Int32 -> Nil) : Nil
     start = from
     i = from
     size = query.bytesize
@@ -234,7 +234,7 @@ pub struct Query
 
   # The bytes from *start* to *stop*, decoded: themselves when there is
   # nothing to decode, else a new string on the tape.
-  private def self.decoded(query : Tape::String, start : Int32, stop : Int32) : Tape::String
+  private def self.decoded(query : Str, start : Int32, stop : Int32) : Str
     plain = true
     i = start
     while i < stop
@@ -243,7 +243,7 @@ pub struct Query
       i += 1
     end
     return query[start, stop - start] if plain
-    Tape::String.build(stop - start) do |w|
+    Str.build(stop - start) do |w|
       i = start
       while i < stop
         b = query[i]
@@ -274,7 +274,7 @@ pub struct Query
   end
 
   # The first value of *key*, nil when there is none.
-  def []?(key : String) : Tape::String?
+  def []?(key : String) : Str?
     i = 0
     while i < @pairs.size
       pair = @pairs[i]
@@ -285,7 +285,7 @@ pub struct Query
   end
 
   # Each name and value, in order.
-  def each(& : Tape::String, Tape::String -> Nil) : Nil
+  def each(& : Str, Str -> Nil) : Nil
     i = 0
     while i < @pairs.size
       pair = @pairs[i]
@@ -298,10 +298,10 @@ end
 # One name and value of a `Query`.
 @[OnTape]
 pub struct QueryPair
-  getter key : Tape::String
-  getter value : Tape::String
+  getter key : Str
+  getter value : Str
 
-  def initialize(@key : Tape::String, @value : Tape::String)
+  def initialize(@key : Str, @value : Str)
   end
 end
 

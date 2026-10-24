@@ -516,7 +516,7 @@ struct OcspAsn1
     answer.is_a?(Asn1Error) ? OcspError.new(answer.message) : answer
   end
 
-  def self.tape_values(answer : Tape::Array(DerValue) | Asn1Error) : Tape::Array(DerValue) | OcspError
+  def self.tape_values(answer : Ary(DerValue) | Asn1Error) : Ary(DerValue) | OcspError
     answer.is_a?(Asn1Error) ? OcspError.new(answer.message) : answer
   end
 

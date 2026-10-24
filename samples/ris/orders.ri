@@ -47,7 +47,7 @@ def requests : Array(String)
   end
 end
 
-def fnv(h : UInt64, text : Tape::String) : UInt64
+def fnv(h : UInt64, text : Str) : UInt64
   text.each_byte { |c| h = (h ^ c.to_u64) &* 1099511628211_u64 }
   h
 end
@@ -58,13 +58,13 @@ def fnv(h : UInt64, text : String) : UInt64
 end
 
 # The request in *bytes*, answered on the caller's tape; the answer's hash.
-def answer(bytes : Tape::String) : UInt64
+def answer(bytes : Str) : UInt64
   head = Server.parse_head(bytes)
   return 0_u64 unless head.is_a?(ParsedHead)
   size = head.content_length
   return 0_u64 unless size
   doc = JSON.parse(bytes[head.body_start, size.to_i32])
-  w = Tape::String::Writer.new(256)
+  w = Str::Builder.new(256)
   w.json do |json|
     total = 0_i64
     json.object do
@@ -87,7 +87,7 @@ def answer(bytes : Tape::String) : UInt64
     end
   end
   body = w.finish
-  top = Tape::String.build(96) do |line|
+  top = Str.build(96) do |line|
     line.append("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ")
     line.append_int(body.bytesize)
     line.append("\r\n\r\n")

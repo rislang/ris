@@ -1,4 +1,4 @@
-# ris: `while @x.offset < lim` over a `Tape::Scanner` field reads and
+# ris: `while @x.offset < lim` over a `Str::Scanner` field reads and
 # moves the offset through `@x` at every byte, and LLVM keeps storing it
 # back, as the text's bytes might be the field. The loop is run on two
 # locals instead, the text and a cursor:
@@ -16,7 +16,7 @@
 # a read of the text) is made with the offset written back, and both
 # locals are read again after it. A body with a block, a `yield`, a
 # macro or another use of `@x` is left as written, as is one where `@x`
-# is not declared `Tape::Scanner` in the class the def is in.
+# is not declared `Str::Scanner` in the class the def is in.
 class Iyi::TapeCursorLowering < Iyi::Transformer
   OPERATORS = %w(== != < > <= >= + - * / // % & | ^ << >> &+ &- &* ! ~)
   PLAIN     = %w(to_i to_i32 to_i64 to_u8 to_u16 to_u32 to_u64 chr bytesize size

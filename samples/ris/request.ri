@@ -14,7 +14,7 @@ USERS = {42 => "alice", 7 => "bob"}
 
 # GET /users/42 -> 200 {"id":42,"name":"alice"}
 # The body is written into the caller's writer, on its tape.
-def route(head : ParsedHead, body : Tape::String::Writer) : Int32
+def route(head : ParsedHead, body : Str::Builder) : Int32
   path = head.target
   return 405 unless head.method == "GET"
   if path == "/"
@@ -44,7 +44,7 @@ def handle(raw : String) : Nil
       puts "400 Bad Request"
       return
     end
-    body = Tape::String::Writer.new(128)
+    body = Str::Builder.new(128)
     status = route(head, body)
     puts "#{status} #{reason(status)} #{body.finish}"
   end

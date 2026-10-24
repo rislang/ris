@@ -323,7 +323,7 @@ pub struct Eiy
       end
 
       property type : Type
-      property value : Tape::String
+      property value : Str
       property line_number : Int32
       property column_number : Int32
       property suppress_leading : Bool
@@ -347,7 +347,7 @@ pub struct Eiy
       end
     end
 
-    @string : Tape::String
+    @string : Str
     @len : Int32
     @pos : Int32
     @line_number : Int32
@@ -355,7 +355,7 @@ pub struct Eiy
     @token : Token
     @error : String
 
-    def initialize(@string : Tape::String)
+    def initialize(@string : Str)
       @len = @string.bytesize
       @pos = 0
       @line_number = 1
@@ -481,7 +481,7 @@ pub struct Eiy
         tail = @string[start_pos, end_pos - start_pos]
         close_tag = suppress_trailing ? "-%>" : "%>"
         @token.type = Token::Type::String
-        @token.value = Tape::String.build do |w|
+        @token.value = Str.build do |w|
           w << head << tail << close_tag
         end
       elsif is_output
@@ -539,27 +539,27 @@ pub struct Eiy
     result
   end
 
-  def self.process_string?(string : Tape::String, filename : String = "",
-                           io_name : String = DefaultIoName) : Tape::String?
-    w = Tape::String::Writer.new(string.bytesize)
+  def self.process_string?(string : Str, filename : String = "",
+                           io_name : String = DefaultIoName) : Str?
+    w = Str::Builder.new(string.bytesize)
     process_string?(string, w, filename, io_name) ? w.finish : nil
   end
 
-  def self.process_string?(string : Tape::String,
-                           w : Tape::String::Writer, filename : String = "",
+  def self.process_string?(string : Str,
+                           w : Str::Builder, filename : String = "",
                            io_name : String = DefaultIoName) : Bool
     generate(TapeLexer.new(string), filename, io_name, w)
   end
 
-  def self.process_string(string : Tape::String, filename : String = "",
-                          io_name : String = DefaultIoName) : Tape::String
-    Tape::String.build do |w|
+  def self.process_string(string : Str, filename : String = "",
+                          io_name : String = DefaultIoName) : Str
+    Str.build do |w|
       process_string(string, w, filename, io_name)
     end
   end
 
-  def self.process_string(string : Tape::String,
-                          w : Tape::String::Writer, filename : String = "",
+  def self.process_string(string : Str,
+                          w : Str::Builder, filename : String = "",
                           io_name : String = DefaultIoName) : Nil
     return if generate(TapeLexer.new(string), filename, io_name, w)
     sentence = lex_error(string) || "template refused"
@@ -568,7 +568,7 @@ pub struct Eiy
 
   # The lexer's sentence for *string*. `generate` takes the lexer, a
   # struct, by copy, so its error is read again from a lexer of its own.
-  private def self.lex_error(string : Tape::String) : String?
+  private def self.lex_error(string : Str) : String?
     lexer = TapeLexer.new(string)
     while token = lexer.next_token?
       return nil if token.eof?
@@ -696,7 +696,7 @@ pub struct Eiy
   end
 
   private def self.generate(lexer : TapeLexer, filename : String, io_name : String,
-                            parts : Tape::String::Writer) : Bool
+                            parts : Str::Builder) : Bool
     token = lexer.next_token?
     return false unless token
 
@@ -811,8 +811,8 @@ pub struct Eiy
     parts.join("")
   end
 
-  private def self.quote(text : Tape::String,
-                         parts : Tape::String::Writer) : Nil
+  private def self.quote(text : Str,
+                         parts : Str::Builder) : Nil
     parts << "\""
     raw = text
     len = text.bytesize
@@ -862,7 +862,7 @@ pub struct Eiy
   # How many bytes the UTF-8 character starting at *i* takes, or 0 when the
   # bytes there are not one. The compiler reads a literal as UTF-8 and stops
   # at a byte that is not, so such a byte has to be written as `\x`.
-  private def self.utf8_size(raw : Pointer(UInt8) | Tape::String,
+  private def self.utf8_size(raw : Pointer(UInt8) | Str,
                              i : Int32, len : Int32) : Int32
     b = raw[i].to_i32
     lo = 0x80
@@ -952,7 +952,7 @@ pub struct Eiy
     parts << ">"
   end
 
-  private def self.suppress_leading_indentation(token : TapeLexer::Token, string : Tape::String, opens_line : Bool) : Tape::String
+  private def self.suppress_leading_indentation(token : TapeLexer::Token, string : Str, opens_line : Bool) : Str
     if (token.output? || token.control?) && token.suppress_leading?
       raw = string
       len = string.bytesize
@@ -1002,7 +1002,7 @@ pub struct Eiy
     token
   end
 
-  private def self.append_loc(parts : Tape::String::Writer, filename : String, line_number : Int32, column_number : Int32) : Nil
+  private def self.append_loc(parts : Str::Builder, filename : String, line_number : Int32, column_number : Int32) : Nil
     parts << "#<loc:"
     quote(filename.as_tape, parts)
     parts << ","

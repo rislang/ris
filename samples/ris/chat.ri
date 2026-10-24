@@ -40,9 +40,9 @@ module Chat
   @[OnTape]
   struct MessageParams
     getter user_id : Int32
-    getter body : Tape::String
+    getter body : Str
 
-    def initialize(*, @user_id : Int32, @body : Tape::String)
+    def initialize(*, @user_id : Int32, @body : Str)
     end
   end
 
@@ -63,7 +63,7 @@ module Chat
   end
 
   # "7 Ship it": a user id, one space, the text. Nil when it is not.
-  def self.message_params(request : Tape::String) : MessageParams?
+  def self.message_params(request : Str) : MessageParams?
     space = request.index(' ') || return nil
     user_id = request[0, space].to_i? || return nil
     body = request[space + 1..]
@@ -80,8 +80,8 @@ module Chat
   # written into one response on the tape.
   def self.render_room(room : Room) : Nil
     count = room.messages.size
-    newest = Tape::Array(Int32).new(count) { |i| count - 1 - i }
-    response = Tape::String::Writer.new(256)
+    newest = Ary(Int32).new(count) { |i| count - 1 - i }
+    response = Str::Builder.new(256)
     response << "200 "
     newest.each_with_index do |i, k|
       message = room.messages[i]
@@ -89,7 +89,7 @@ module Chat
       response << message.user.name << ": " << message.body
     end
     response << " (users "
-    names = Tape::Array(String).new(room.users.size) { |i| room.users[i].name }
+    names = Ary(String).new(room.users.size) { |i| room.users[i].name }
     names.sort_in_place
     names.join(response, ", ")
     response << ")"

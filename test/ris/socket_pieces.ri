@@ -29,13 +29,13 @@ got = ""
 group do |g|
   reader = g.spawn { read_all(client, expected.bytesize) }
   tape do
-    pieces = Tape::Array(Tape::String).new(4)
+    pieces = Ary(Str).new(4)
     pieces << "head:".as_tape
     100.times do |i|
-      pieces << Tape::String.build(4) { |w| w.append_int(i) }
+      pieces << Str.build(4) { |w| w.append_int(i) }
       pieces << (i.even? ? "".as_tape : ",".as_tape)
     end
-    pieces << Tape::String.build(big.bytesize) { |w| w.append(big) }
+    pieces << Str.build(big.bytesize) { |w| w.append(big) }
     pieces << "end".as_tape
     written = conn.write(pieces).or_panic
     raise "wrote #{written}" unless written == expected.bytesize

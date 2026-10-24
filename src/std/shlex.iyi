@@ -87,11 +87,11 @@ pub struct Shlex
     result
   end
 
-  def self.split(text : Tape::String,
-                 comments : ::Bool = false) : Tape::Array(Tape::String) | ShlexError
+  def self.split(text : Str,
+                 comments : ::Bool = false) : Ary(Str) | ShlexError
     raw = text
     n = text.bytesize
-    words = Tape::Array(Tape::String).new
+    words = Ary(Str).new
     i = 0
     while i < n
       c = raw[i]
@@ -100,7 +100,7 @@ pub struct Shlex
       elsif comments && c == 35_u8
         i = past_line(raw, n, i)
       else
-        word = Tape::String::Writer.new(32)
+        word = Str::Builder.new(32)
         quoted = false
         while i < n
           c = raw[i]
@@ -163,12 +163,12 @@ pub struct Shlex
     result
   end
 
-  def self.quote(arg : Tape::String) : Tape::String
-    Tape::String.build(arg.bytesize + 8) { |w| quote(arg, w) }
+  def self.quote(arg : Str) : Str
+    Str.build(arg.bytesize + 8) { |w| quote(arg, w) }
   end
 
-  def self.quote(arg : Tape::String,
-                 writer : Tape::String::Writer) : Nil
+  def self.quote(arg : Str,
+                 writer : Str::Builder) : Nil
     if arg.empty?
       writer << "''"
       return
@@ -199,19 +199,19 @@ pub struct Shlex
   def self.join(args : Array(String)) : String
     result = ""
     tape do
-      words = Tape::Array(Tape::String).new(args.size)
+      words = Ary(Str).new(args.size)
       args.each { |arg| words << arg.as_tape }
       result = join(words).to_heap
     end
     result
   end
 
-  def self.join(args : Tape::Array(Tape::String)) : Tape::String
-    Tape::String.build { |w| join(args, w) }
+  def self.join(args : Ary(Str)) : Str
+    Str.build { |w| join(args, w) }
   end
 
-  def self.join(args : Tape::Array(Tape::String),
-                writer : Tape::String::Writer) : Nil
+  def self.join(args : Ary(Str),
+                writer : Str::Builder) : Nil
     args.each_with_index do |arg, i|
       writer << " " if i > 0
       quote(arg, writer)
@@ -232,7 +232,7 @@ pub struct Shlex
   end
 
   # The index after the line feed that ends the line holding *i*, or *n*.
-  private def self.past_line(raw : Tape::String, n : Int32,
+  private def self.past_line(raw : Str, n : Int32,
                              i : Int32) : Int32
     while i < n && raw[i] != 10_u8
       i += 1
@@ -240,14 +240,14 @@ pub struct Shlex
     i < n ? i + 1 : n
   end
 
-  private def self.unclosed(text : Tape::String, at : Int32) : ShlexError
+  private def self.unclosed(text : Str, at : Int32) : ShlexError
     quote = text[at] == 39_u8 ? "'" : "\""
     ShlexError.new(
       "shlex: no closing quotation: the #{quote} at byte #{at} is never " \
       "closed", at)
   end
 
-  private def self.dangling(text : Tape::String, at : Int32) : ShlexError
+  private def self.dangling(text : Str, at : Int32) : ShlexError
     ShlexError.new(
       "shlex: no escaped character: the backslash at byte #{at} ends " \
       "the text", at)

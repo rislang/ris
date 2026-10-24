@@ -75,24 +75,24 @@ pub struct Path
   def initialize(@name : String = "", @kind : Kind = Kind.native)
   end
 
-  def self.new(name : Tape::String,
+  def self.new(name : Str,
                kind : Kind = Kind.native) : TapePath
     TapePath.new(name, kind)
   end
 
-  def self.posix(name : Tape::String) : TapePath
+  def self.posix(name : Str) : TapePath
     TapePath.new(name, Kind::POSIX)
   end
 
-  def self.windows(name : Tape::String) : TapePath
+  def self.windows(name : Str) : TapePath
     TapePath.new(name, Kind::WINDOWS)
   end
 
-  def self.[](name : Tape::String) : TapePath
+  def self.[](name : Str) : TapePath
     TapePath.new(name)
   end
 
-  def self.[](parts : Tape::Array(Tape::String)) : TapePath
+  def self.[](parts : Ary(Str)) : TapePath
     TapePath.new("".as_tape).join(parts)
   end
 
@@ -437,7 +437,7 @@ pub struct Path
   def join(parts : Array(String)) : Path
     result = self
     tape do
-      views = Tape::Array(Tape::String).new(parts.size)
+      views = Ary(Str).new(parts.size)
       parts.each { |part| views << part.as_tape }
       result = to_tape.join(views).to_heap
     end
@@ -518,8 +518,8 @@ pub struct Path
     (windows? ? Path.windows_fold(@name) : @name).hash &* 31 &+ @kind.value.to_i32
   end
 
-  def self.compare_strings(s1 : String | Tape::String,
-                           s2 : String | Tape::String) : Int32
+  def self.compare_strings(s1 : String | Str,
+                           s2 : String | Str) : Int32
     len1 = s1.bytesize
     len2 = s2.bytesize
     min_len = len1 < len2 ? len1 : len2
@@ -537,8 +537,8 @@ pub struct Path
 
   # As the two names' `windows_fold`s compare, read here without folding
   # either while both are ASCII.
-  def self.compare_strings_ci(s1 : String | Tape::String,
-                              s2 : String | Tape::String) : Int32
+  def self.compare_strings_ci(s1 : String | Str,
+                              s2 : String | Str) : Int32
     len1 = s1.bytesize
     len2 = s2.bytesize
     min_len = len1 < len2 ? len1 : len2
@@ -566,7 +566,7 @@ pub struct Path
   # surrogate pair stays as written, as both leave it. ASCII alone folded,
   # `C:\Ä` and `c:\ä` were two paths where NTFS has one file; built for
   # another platform there is no table to ask, and ASCII alone is folded.
-  def self.windows_fold(s : Tape::String) : Tape::String
+  def self.windows_fold(s : Str) : Str
     {% if flag?(:win32) %}
       at = 0
       while at < s.bytesize && s[at] < 128_u8
@@ -578,7 +578,7 @@ pub struct Path
         end
       end
     {% end %}
-    Tape::String.build do |writer|
+    Str.build do |writer|
       s.each_byte do |byte|
         byte += 32_u8 if byte >= 65_u8 && byte <= 90_u8
         writer.push(byte == 47_u8 ? 92_u8 : byte)
@@ -640,7 +640,7 @@ pub struct Path
 
     # Windows folding passes UTF-8 bytes to the native conversion API.
     @[TapeUnsafe]
-    private def self.native_fold(s : Tape::String) : Tape::String?
+    private def self.native_fold(s : Str) : Str?
       wide = __iyi_win_env_wide(s.to_unsafe, s.bytesize)
       return nil if wide.address == 0_u64
       length = 0
@@ -667,7 +667,7 @@ pub struct Path
       return nil if size <= 1
       # Windows writes the UTF-8 straight into the writer's room; the
       # terminator it counts is left out.
-      w = Tape::String::Writer.new(size)
+      w = Str::Builder.new(size)
       w.unsafe_append(size) { |room| __iyi_utf8_bytes_from_wide(upper, room, size) - 1 }
       w.finish
     end
@@ -684,21 +684,21 @@ end
 @[OnTape]
 pub struct TapePath
   alias Kind = Path::Kind
-  getter name : Tape::String
+  getter name : Str
   getter kind : Kind
 
-  def initialize(@name : Tape::String, @kind : Kind = Kind.native)
+  def initialize(@name : Str, @kind : Kind = Kind.native)
   end
 
   def to_heap : Path
     Path.new(@name.to_heap, @kind)
   end
 
-  def to_tape : Tape::String
+  def to_tape : Str
     @name
   end
 
-  def write(writer : Tape::String::Writer) : Nil
+  def write(writer : Str::Builder) : Nil
     writer << @name
   end
 
@@ -726,9 +726,9 @@ pub struct TapePath
     byte == 47_u8 || (windows? && byte == 92_u8)
   end
 
-  private def concat(first : Tape::String,
-                     second : Tape::String | String) : Tape::String
-    Tape::String.build { |w| w << first << second }
+  private def concat(first : Str,
+                     second : Str | String) : Str
+    Str.build { |w| w << first << second }
   end
 
   private def anchor_indices : Tuple(Int32, Int32)
@@ -782,17 +782,17 @@ pub struct TapePath
       (ptr[6] | 32_u8) == 99_u8
   end
 
-  def drive : Tape::String?
+  def drive : Str?
     drive_end, _ = anchor_indices
     drive_end > 0 ? @name[0, drive_end] : nil
   end
 
-  def root : Tape::String?
+  def root : Str?
     drive_end, anchor_end = anchor_indices
     anchor_end > drive_end ? @name[drive_end, anchor_end - drive_end] : nil
   end
 
-  def anchor : Tape::String?
+  def anchor : Str?
     _, anchor_end = anchor_indices
     anchor_end > 0 ? @name[0, anchor_end] : nil
   end
@@ -817,7 +817,7 @@ pub struct TapePath
   end
 
   # The anchor with the root a share has whether written or not.
-  protected def rooted_anchor : Tape::String
+  protected def rooted_anchor : Str
     found = anchor || "".as_tape
     share? && root.nil? ? concat(found, separator) : found
   end
@@ -844,7 +844,7 @@ pub struct TapePath
 
   # The last component; the anchor, or the empty name, is its own. A
   # *suffix* found at the end is left off.
-  def basename(suffix : Tape::String? = nil) : Tape::String
+  def basename(suffix : Str? = nil) : Str
     _, anchor_end = anchor_indices
     last = trimmed_end
     return @name[0, anchor_end] if last <= anchor_end
@@ -871,7 +871,7 @@ pub struct TapePath
 
   # Everything before the last component: `"."` for a bare name, the
   # anchor for a single component under it.
-  def dirname : Tape::String
+  def dirname : Str
     return ".".as_tape if @name.empty?
     _, anchor_end = anchor_indices
     last = trimmed_end
@@ -888,7 +888,7 @@ pub struct TapePath
     @name[0, last]
   end
 
-  def extension : Tape::String
+  def extension : Str
     # An anchor is no file name: the UNC share `\\srv\a.\` answered `.\`,
     # a separator inside the extension, with a stem that did not add up.
     _, anchor_end = anchor_indices
@@ -904,13 +904,13 @@ pub struct TapePath
     base[i, len - i]
   end
 
-  def stem : Tape::String
+  def stem : Str
     basename(extension)
   end
 
   # The anchor, if any, then each non-empty component.
-  def parts : Tape::Array(Tape::String)
-    res = Tape::Array(Tape::String).new
+  def parts : Ary(Str)
+    res = Ary(Str).new
     len = @name.bytesize
     return res if len == 0
     ptr = @name
@@ -935,8 +935,8 @@ pub struct TapePath
     TapePath.new(dirname, @kind)
   end
 
-  def parents : Tape::Array(TapePath)
-    result = Tape::Array(TapePath).new
+  def parents : Ary(TapePath)
+    result = Ary(TapePath).new
     return result if @name.empty?
     child = self
     up = parent
@@ -957,7 +957,7 @@ pub struct TapePath
     result
   end
 
-  def each_part(& : Tape::String -> Nil) : Nil
+  def each_part(& : Str -> Nil) : Nil
     parts.each { |part| yield part }
   end
 
@@ -965,7 +965,7 @@ pub struct TapePath
     parents.each { |path| yield path }
   end
 
-  def join(part : Tape::String) : TapePath
+  def join(part : Str) : TapePath
     return self if part.empty?
     other = TapePath.new(part, @kind)
     return other if @name.empty?
@@ -983,7 +983,7 @@ pub struct TapePath
     end
     drive_end, anchor_end = anchor_indices
     bare = drive_end == 2 && anchor_end == 2 && @name.bytesize == 2
-    joined = Tape::String.build do |writer|
+    joined = Str.build do |writer|
       writer << @name
       writer << separator unless ends_with_separator? || bare
       writer << part
@@ -995,38 +995,38 @@ pub struct TapePath
     join(part.name)
   end
 
-  def join(first : Tape::String | TapePath,
-           second : Tape::String | TapePath) : TapePath
+  def join(first : Str | TapePath,
+           second : Str | TapePath) : TapePath
     join(first).join(second)
   end
 
-  def join(first : Tape::String | TapePath,
-           second : Tape::String | TapePath,
-           third : Tape::String | TapePath) : TapePath
+  def join(first : Str | TapePath,
+           second : Str | TapePath,
+           third : Str | TapePath) : TapePath
     join(first).join(second).join(third)
   end
 
-  def join(parts : Tape::Array(Tape::String)) : TapePath
+  def join(parts : Ary(Str)) : TapePath
     current = self
     parts.each { |part| current = current.join(part) }
     current
   end
 
-  def /(part : Tape::String | TapePath) : TapePath
+  def /(part : Str | TapePath) : TapePath
     join(part)
   end
 
-  def sibling(part : Tape::String | TapePath) : TapePath
+  def sibling(part : Str | TapePath) : TapePath
     parent.join(part)
   end
 
   def normalize : TapePath
-    text = Tape::String.build { |writer| normalize(writer) }
+    text = Str.build { |writer| normalize(writer) }
     TapePath.new(text, @kind)
   end
 
-  def normalize(writer : Tape::String::Writer) : Nil
-    components = Tape::Array(Tape::String).new
+  def normalize(writer : Str::Builder) : Nil
+    components = Ary(Str).new
     rooted = !root.nil?
     _, anchor_end = anchor_indices
     all = parts
@@ -1064,7 +1064,7 @@ pub struct TapePath
     writer << '.' if anchor_end == 0 && components.empty?
   end
 
-  private def same?(a : Tape::String, b : Tape::String) : Bool
+  private def same?(a : Str, b : Str) : Bool
     if windows?
       Path.compare_strings_ci(a, b) == 0
     else
@@ -1072,8 +1072,8 @@ pub struct TapePath
     end
   end
 
-  def relative_to?(base : TapePath | Tape::String) : TapePath?
-    base = TapePath.new(base, @kind) if base.is_a?(Tape::String)
+  def relative_to?(base : TapePath | Str) : TapePath?
+    base = TapePath.new(base, @kind) if base.is_a?(Str)
     target = normalize
     origin = base.to_kind(@kind).normalize
     ta = target.rooted_anchor
@@ -1081,8 +1081,8 @@ pub struct TapePath
     return nil unless same?(ta, ba)
     targets = target.parts
     bases = origin.parts
-    targets = Tape::Array(Tape::String).new if targets.size == 1 && targets[0] == "."
-    bases = Tape::Array(Tape::String).new if bases.size == 1 && bases[0] == "."
+    targets = Ary(Str).new if targets.size == 1 && targets[0] == "."
+    bases = Ary(Str).new if bases.size == 1 && bases[0] == "."
     ti = ta.empty? ? 0 : 1
     bi = ba.empty? ? 0 : 1
     while ti < targets.size && bi < bases.size
@@ -1095,7 +1095,7 @@ pub struct TapePath
       return nil if bases[index] == ".."
       index += 1
     end
-    text = Tape::String.build do |writer|
+    text = Str.build do |writer|
       count = 0
       while bi < bases.size
         writer << separator if count > 0
@@ -1114,7 +1114,7 @@ pub struct TapePath
     TapePath.new(text, @kind)
   end
 
-  def relative_to(base : TapePath | Tape::String) : TapePath
+  def relative_to(base : TapePath | Str) : TapePath
     relative_to?(base) || raise "no relative path between these anchors"
   end
 
@@ -1122,7 +1122,7 @@ pub struct TapePath
   # `USERPROFILE`, and `HOME` shows up only under a POSIX-shaped shell
   # such as MSYS or a CI runner. So win32 asks both, its own name first;
   # every other platform asks `HOME` alone.
-  def expand(base : TapePath | Tape::String | Nil = nil,
+  def expand(base : TapePath | Str | Nil = nil,
              home : Bool = false) : TapePath
     name = @name
     if home && (name == "~" || name.starts_with?("~/") ||
@@ -1138,7 +1138,7 @@ pub struct TapePath
       name = if name == "~"
                directory.as_tape
              else
-               Tape::String.build do |writer|
+               Str.build do |writer|
                  writer << directory << name[1, name.bytesize - 1]
                end
              end
@@ -1147,7 +1147,7 @@ pub struct TapePath
     return path.normalize if path.absolute?
     origin = if base.is_a?(TapePath)
                base.to_kind(@kind)
-             elsif base.is_a?(Tape::String)
+             elsif base.is_a?(Str)
                TapePath.new(base, @kind)
              else
                pwd = nil.as(String?)
@@ -1164,7 +1164,7 @@ pub struct TapePath
       own = path.drive
       other = origin.drive
       if own && path.root.nil? && !(other && same?(other, own))
-        text = Tape::String.build do |writer|
+        text = Str.build do |writer|
           writer << own << separator
           writer << name[own.bytesize, name.bytesize - own.bytesize]
         end
@@ -1176,7 +1176,7 @@ pub struct TapePath
 
   def to_posix : TapePath
     return self if posix?
-    text = Tape::String.build do |writer|
+    text = Str.build do |writer|
       @name.each_byte do |byte|
         writer.push(byte == 92_u8 ? 47_u8 : byte)
       end

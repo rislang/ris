@@ -163,7 +163,7 @@ module ::IyiFloatText
   # smallest denormal answered 5.000000e-324 for 4.940656e-324 - the
   # shortest digits, which round-trip, are not the value, and past them
   # there was nothing but zeros. `places` may be negative, a scale down.
-  def self.tape_scaled_digits(f : UInt64, e : Int32, places : Int32) : Tape::String
+  def self.tape_scaled_digits(f : UInt64, e : Int32, places : Int32) : Str
     if quick = scaled_quick(f, e, places)
       return IyiFormat.integer_text(quick, 10)
     end
@@ -187,7 +187,7 @@ module ::IyiFloatText
     if c > 0 || (c == 0 && quotient.low_bit == 1_u64)
       quotient.add_small(1_u64)
     end
-    Tape::String.build { |w| quotient.write_decimal(w) }
+    Str.build { |w| quotient.write_decimal(w) }
   end
 
   # `scaled_digits` in two words, when they hold it: f * 10^places is
@@ -279,13 +279,13 @@ class ::IyiBig
   end
 
   # Base ten, most significant digit first, nine digits per division.
-  def write_decimal(w : Tape::String::Writer) : Nil
+  def write_decimal(w : Str::Builder) : Nil
     if @size == 0
       w << "0"
       return
     end
     work = copy
-    chunks = Tape::Array(UInt64).new
+    chunks = Ary(UInt64).new
     while work.size > 0
       chunks << work.div_small(1000000000_u64)
     end
@@ -305,26 +305,26 @@ module ::IyiFormat
     code.to_i32.unsafe_chr
   end
 
-  def self.text_view(value : Tape::String) : Tape::String
+  def self.text_view(value : Str) : Str
     value
   end
 
-  def self.text_view(value : String) : Tape::String
+  def self.text_view(value : String) : Str
     value.as_tape
   end
 
-  def self.text_view(value) : Tape::String
-    Tape::String.build { |w| w.append_value(value) }
+  def self.text_view(value) : Str
+    Str.build { |w| w.append_value(value) }
   end
 
-  def self.repeat(w : Tape::String::Writer, byte : UInt8,
+  def self.repeat(w : Str::Builder, byte : UInt8,
                   count : Int32) : Nil
     count.times { w.push(byte) } if count > 0
   end
 
-  def self.tape_string_arg(text : Tape::String, minus : Bool,
-                           width : Int32, precision : Int32) : Tape::String
-    Tape::String.build do |w|
+  def self.tape_string_arg(text : Str, minus : Bool,
+                           width : Int32, precision : Int32) : Str
+    Str.build do |w|
       count = 0
       stop = 0
       i = 0
@@ -343,23 +343,23 @@ module ::IyiFormat
     end
   end
 
-  def self.tape_char_arg(value, minus : Bool, width : Int32) : Tape::String
+  def self.tape_char_arg(value, minus : Bool, width : Int32) : Str
     text = text_view(value)
     case value
     when Char
-      text = Tape::String.build { |w| w << value }
+      text = Str.build { |w| w << value }
     when Int32, Int64, UInt64
-      text = Tape::String.build { |w| w << code_point(value) }
+      text = Str.build { |w| w << code_point(value) }
     end
     text = " ".as_tape if text.empty?
     tape_string_arg(text, minus, width, 1)
   end
 
-  def self.tape_digits(text : Tape::String, verb : Char, base : Int32,
+  def self.tape_digits(text : Str, verb : Char, base : Int32,
                        minus : Bool, plus : Bool, space : Bool,
                        zero : Bool, hash : Bool, width : Int32,
-                       precision : Int32) : Tape::String
-    Tape::String.build do |w|
+                       precision : Int32) : Str
+    Str.build do |w|
       negative = text.starts_with?("-")
       digits = negative ? text[1, text.bytesize - 1] : text
       nonzero = digits != "0"
@@ -384,11 +384,11 @@ module ::IyiFormat
     end
   end
 
-  def self.integer_text(value : Int64, base : Int32) : Tape::String
-    Tape::String.build do |w|
+  def self.integer_text(value : Int64, base : Int32) : Str
+    Str.build do |w|
       negative = value < 0
       # Negative remainders allow the signed minimum without negating it.
-      digits = Tape::Array(UInt8).new(128)
+      digits = Ary(UInt8).new(128)
       radix = base.to_i64
       temp = value
       while temp != 0
@@ -407,11 +407,11 @@ module ::IyiFormat
     end
   end
 
-  def self.integer_text(value : UInt64, base : Int32) : Tape::String
-    Tape::String.build do |w|
+  def self.integer_text(value : UInt64, base : Int32) : Str
+    Str.build do |w|
       negative = value < 0
       # Negative remainders allow the signed minimum without negating it.
-      digits = Tape::Array(UInt8).new(128)
+      digits = Ary(UInt8).new(128)
       radix = base.to_u64
       temp = value
       while temp != 0
@@ -430,11 +430,11 @@ module ::IyiFormat
     end
   end
 
-  def self.integer_text(value : Int128, base : Int32) : Tape::String
-    Tape::String.build do |w|
+  def self.integer_text(value : Int128, base : Int32) : Str
+    Str.build do |w|
       negative = value < 0
       # Negative remainders allow the signed minimum without negating it.
-      digits = Tape::Array(UInt8).new(128)
+      digits = Ary(UInt8).new(128)
       radix = base.to_i128
       temp = value
       while temp != 0
@@ -453,11 +453,11 @@ module ::IyiFormat
     end
   end
 
-  def self.integer_text(value : UInt128, base : Int32) : Tape::String
-    Tape::String.build do |w|
+  def self.integer_text(value : UInt128, base : Int32) : Str
+    Str.build do |w|
       negative = value < 0
       # Negative remainders allow the signed minimum without negating it.
-      digits = Tape::Array(UInt8).new(128)
+      digits = Ary(UInt8).new(128)
       radix = base.to_u128
       temp = value
       while temp != 0
@@ -479,7 +479,7 @@ module ::IyiFormat
   def self.tape_int64(val : Int64, base : Int32, uppercase : Bool,
                       signed : Bool, minus : Bool, plus : Bool,
                       space : Bool, zero : Bool, hash : Bool,
-                      width : Int32, precision : Int32) : Tape::String
+                      width : Int32, precision : Int32) : Str
     verb = uppercase ? 'X' : (signed ? 'd' : 'u')
     tape_digits(integer_text(val, base), verb, base, minus, plus, space,
       zero, hash, width, precision)
@@ -488,13 +488,13 @@ module ::IyiFormat
   def self.tape_uint64(val : UInt64, base : Int32, uppercase : Bool,
                        signed : Bool, minus : Bool, plus : Bool,
                        space : Bool, zero : Bool, hash : Bool,
-                       width : Int32, precision : Int32) : Tape::String
+                       width : Int32, precision : Int32) : Str
     verb = uppercase ? 'X' : (signed ? 'd' : 'u')
     tape_digits(integer_text(val, base), verb, base, minus, plus, space,
       zero, hash, width, precision)
   end
 
-  def self.tape_wide(val, verb : Char, minus : Bool, plus : Bool, space : Bool, zero : Bool, hash : Bool, width : Int32, precision : Int32) : Tape::String
+  def self.tape_wide(val, verb : Char, minus : Bool, plus : Bool, space : Bool, zero : Bool, hash : Bool, width : Int32, precision : Int32) : Str
     base = case verb
            when 'd', 'i', 'u' then 10
            when 'x', 'X'      then 16
@@ -518,10 +518,10 @@ module ::IyiFormat
     tape_digits(text, verb, base, minus, plus, space, zero, hash, width, precision)
   end
 
-  def self.float_field(value : Float64, text : Tape::String,
+  def self.float_field(value : Float64, text : Str,
                        minus : Bool, plus : Bool, space : Bool,
-                       zero : Bool, width : Int32) : Tape::String
-    Tape::String.build do |w|
+                       zero : Bool, width : Int32) : Str
+    Str.build do |w|
       bits = IyiFloatText.bits_of(value)
       sign = bits.unsafe_shr(63_u64) != 0_u64 ? "-" : (plus ? "+" : (space ? " " : ""))
       pad = width - sign.bytesize - text.bytesize
@@ -534,7 +534,7 @@ module ::IyiFormat
   end
 
   def self.float_special(value : Float64, minus : Bool, plus : Bool,
-                         space : Bool, width : Int32) : Tape::String?
+                         space : Bool, width : Int32) : Str?
     bits = IyiFloatText.bits_of(value)
     return nil unless bits.unsafe_shr(52_u64) & 2047_u64 == 2047_u64
     nan = bits & 4503599627370495_u64 != 0_u64
@@ -548,7 +548,7 @@ module ::IyiFormat
     tape_string_arg(text.as_tape, minus, width, -1)
   end
 
-  def self.exact_digits(value : Float64, places : Int32) : Tape::String
+  def self.exact_digits(value : Float64, places : Int32) : Str
     bits = IyiFloatText.bits_of(value)
     eb = bits.unsafe_shr(52_u64) & 2047_u64
     fraction = bits & 4503599627370495_u64
@@ -558,11 +558,11 @@ module ::IyiFormat
   end
 
   def self.fixed_text(value : Float64, places : Int32,
-                      hash : Bool) : Tape::String
+                      hash : Bool) : Str
     limit = IyiFloatText::MAX_PLACES
     raise "precision must be at most #{limit}, not #{places}" if places > limit
     digits = exact_digits(value, places)
-    Tape::String.build do |w|
+    Str.build do |w|
       if places == 0
         w << digits
         w << "." if hash
@@ -578,7 +578,7 @@ module ::IyiFormat
   end
 
   def self.exp_text(value : Float64, places : Int32,
-                    uppercase : Bool, hash : Bool) : Tape::String
+                    uppercase : Bool, hash : Bool) : Str
     limit = IyiFloatText::MAX_PLACES
     raise "precision must be at most #{limit}, not #{places}" if places > limit
     exp = 0
@@ -605,9 +605,9 @@ module ::IyiFormat
         end
       end
     else
-      digits = Tape::String.build { |w| repeat(w, 48_u8, places + 1) }
+      digits = Str.build { |w| repeat(w, 48_u8, places + 1) }
     end
-    Tape::String.build do |w|
+    Str.build do |w|
       w << digits[0, 1]
       w << "." if places > 0 || hash
       w << digits[1, places] if places > 0
@@ -620,7 +620,7 @@ module ::IyiFormat
 
   def self.tape_float64(val : Float64, minus : Bool, plus : Bool,
                         space : Bool, zero : Bool, hash : Bool,
-                        width : Int32, precision : Int32) : Tape::String
+                        width : Int32, precision : Int32) : Str
     special = float_special(val, minus, plus, space, width)
     return special if special
     text = fixed_text(val.abs, precision < 0 ? 6 : precision, hash)
@@ -630,14 +630,14 @@ module ::IyiFormat
   def self.tape_float_exp(val : Float64, uppercase : Bool, minus : Bool,
                           plus : Bool, space : Bool, zero : Bool,
                           hash : Bool, width : Int32,
-                          precision : Int32) : Tape::String
+                          precision : Int32) : Str
     special = float_special(val, minus, plus, space, width)
     return special if special
     text = exp_text(val.abs, precision < 0 ? 6 : precision, uppercase, hash)
     float_field(val, text, minus, plus, space, zero, width)
   end
 
-  def self.trim_tape(text : Tape::String) : Tape::String
+  def self.trim_tape(text : Str) : Str
     return text unless text.index('.')
     stop = text.bytesize
     while stop > 0 && text[stop - 1] == 48_u8
@@ -650,7 +650,7 @@ module ::IyiFormat
   def self.tape_float_general(val : Float64, uppercase : Bool,
                               minus : Bool, plus : Bool, space : Bool,
                               zero : Bool, hash : Bool, width : Int32,
-                              precision : Int32) : Tape::String
+                              precision : Int32) : Str
     special = float_special(val, minus, plus, space, width)
     return special if special
     prec = precision < 0 ? 6 : (precision == 0 ? 1 : precision)
@@ -659,17 +659,17 @@ module ::IyiFormat
     scientific = exp_text(val.abs, prec - 1, uppercase, hash)
     marker = scientific.index(uppercase ? 'E' : 'e') || scientific.bytesize
     exp = scientific[marker + 1, scientific.bytesize - marker - 1].to_i
-    text = Tape::String.build do |w|
+    text = Str.build do |w|
       if exp < -4 || exp >= prec
         mantissa = scientific[0, marker]
         w << (hash ? mantissa : trim_tape(mantissa))
         w << scientific[marker, scientific.bytesize - marker]
       else
-        sig = Tape::String.build do |o|
+        sig = Str.build do |o|
           o << scientific[0, 1]
           o << scientific[2, marker - 2] if marker > 2
         end
-        fixed = Tape::String.build do |o|
+        fixed = Str.build do |o|
           if exp >= 0
             if exp + 1 < prec
               o << sig[0, exp + 1] << "."
@@ -693,7 +693,7 @@ module ::IyiFormat
   def self.tape_truncated(val : Float64, verb : Char, minus : Bool,
                           plus : Bool, space : Bool, zero : Bool,
                           hash : Bool, width : Int32,
-                          precision : Int32) : Tape::String
+                          precision : Int32) : Str
     bits = IyiFloatText.bits_of(val)
     eb = bits.unsafe_shr(52_u64) & 2047_u64
     if eb == 2047_u64
@@ -706,7 +706,7 @@ module ::IyiFormat
     f = (bits & 4503599627370495_u64) | 4503599627370496_u64
     e = eb.to_i64.to_i32 - 1075
     base = verb == 'x' || verb == 'X' ? 16 : (verb == 'o' ? 8 : (verb == 'b' ? 2 : 10))
-    text = Tape::String.build do |w|
+    text = Str.build do |w|
       w << "-" if bits.unsafe_shr(63_u64) != 0_u64
       if base == 10
         whole = IyiBig.new(f)
@@ -722,7 +722,7 @@ module ::IyiFormat
       width, precision)
   end
 
-  def self.tape_arg(val, verb : Char, minus : Bool, plus : Bool, space : Bool, zero : Bool, hash : Bool, width : Int32, precision : Int32) : Tape::String
+  def self.tape_arg(val, verb : Char, minus : Bool, plus : Bool, space : Bool, zero : Bool, hash : Bool, width : Int32, precision : Int32) : Str
     # The rest of the tower `std/int` and `std/float` make usable is
     # formatted as the prelude's own four are: `%d` of an `Int8`, `UInt32`
     # or `Float32` panicked "wants a number". A value is widened without
@@ -909,7 +909,7 @@ module ::IyiFormat
     value.to_i32
   end
 
-  def self.field_number(format_string : Tape::String, start : Int32, stop : Int32, what : String) : Int32
+  def self.field_number(format_string : Str, start : Int32, stop : Int32, what : String) : Int32
     value = 0_i64
     index = start
     while index < stop
@@ -959,30 +959,30 @@ private def format_list(format_string : String, args) : String
   result
 end
 
-pub def sprintf(format_string : Tape::String, *args : *T) : Tape::String forall T
+pub def sprintf(format_string : Str, *args : *T) : Str forall T
   sprintf(format_string, args)
 end
 
-pub def sprintf(format_string : Tape::String, args : Tuple) : Tape::String
-  Tape::String.build { |w| format_list(format_string, args, w) }
+pub def sprintf(format_string : Str, args : Tuple) : Str
+  Str.build { |w| format_list(format_string, args, w) }
 end
 
-pub def sprintf(format_string : Tape::String, args : Array) : Tape::String
-  Tape::String.build { |w| format_list(format_string, args, w) }
+pub def sprintf(format_string : Str, args : Array) : Str
+  Str.build { |w| format_list(format_string, args, w) }
 end
 
-pub def sprintf(format_string : Tape::String,
-                writer : Tape::String::Writer, args : Tuple) : Nil
+pub def sprintf(format_string : Str,
+                writer : Str::Builder, args : Tuple) : Nil
   format_list(format_string, args, writer)
 end
 
-pub def sprintf(format_string : Tape::String,
-                writer : Tape::String::Writer, args : Array) : Nil
+pub def sprintf(format_string : Str,
+                writer : Str::Builder, args : Array) : Nil
   format_list(format_string, args, writer)
 end
 
-private def format_list(format_string : Tape::String, args,
-                        result : Tape::String::Writer) : Nil
+private def format_list(format_string : Str, args,
+                        result : Str::Builder) : Nil
   index = 0
   format_bytesize = format_string.bytesize
   format_ptr = format_string

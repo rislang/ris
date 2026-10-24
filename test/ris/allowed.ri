@@ -5,28 +5,28 @@ import std/int
 @[OnTape]
 struct Resp
   getter id : Int64
-  getter user : Tape::String
+  getter user : Str
 
-  def initialize(@id : Int64, @user : Tape::String)
+  def initialize(@id : Int64, @user : Str)
   end
 end
 
 # The copy a caller keeps, made at the boundary it leaves the tape by.
 @[TapeToHeap]
-def retain(text : Tape::String) : String
+def retain(text : Str) : String
   text.to_s
 end
 
 def make : Resp
-  Resp.new(1_i64, Tape::String.build { |s| s.push(97_u8) })
+  Resp.new(1_i64, Str.build { |s| s.push(97_u8) })
 end
 
 # Everything here stays inside the scope, and compiles.
 @[OnTape]
 struct Page
-  getter items : Tape::Array(Resp)
+  getter items : Ary(Resp)
 
-  def initialize(@items : Tape::Array(Resp))
+  def initialize(@items : Ary(Resp))
   end
 end
 
@@ -38,7 +38,7 @@ end
 
 copied = ""
 tape do
-  items = Tape::Array(Resp).new
+  items = Ary(Resp).new
   items.push(make)
   items.push(make)
   page = Page.new(items)

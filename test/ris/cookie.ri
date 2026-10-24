@@ -26,7 +26,7 @@ tape do
   exit 2 unless cookie.name == "sid" && cookie.value == "abc"
   exit 3 unless cookie.domain == "example.com" && cookie.path == "/x"
   exit 4 unless cookie.secure && cookie.http_only
-  w = Tape::String::Writer.new(1)
+  w = Str::Builder.new(1)
   w << "prefix:"
   cookie.to_set_cookie(w)
   exit 5 unless w.finish.starts_with?("prefix:sid=abc; Path=/x")
@@ -40,7 +40,7 @@ tape do
   exit 10 unless cookie.to_heap.to_tape == cookie.to_tape
   dates.each do |date|
     expected = Time::Format::HTTP_DATE.parse(date)
-    line = Tape::String.build { |w| w << "a=b; Expires=" << date }
+    line = Str.build { |w| w << "a=b; Expires=" << date }
     parsed = Cookie.parse(line)
     exit 22 unless parsed
     if expected.is_a?(Time)

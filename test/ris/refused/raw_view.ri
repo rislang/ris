@@ -4,6 +4,6 @@ module test/ris/refused/raw_view
 
 tape do
   heap = "abc"
-  text = Tape::String.new(heap.to_unsafe, 64)
+  text = Str.new(heap.to_unsafe, 64)
   puts text.bytesize
 end

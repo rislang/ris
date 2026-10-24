@@ -75,7 +75,7 @@ pub struct HTML
     # Escaped on a tape, then copied out once.
     escaped = ""
     tape do
-      w = Tape::String::Writer.new(len + 16)
+      w = Str::Builder.new(len + 16)
       w.append_html_escaped(string)
       escaped = w.finish.to_heap
     end
@@ -84,7 +84,7 @@ pub struct HTML
 
   # *string* escaped as `escape` escapes it, written into the caller's
   # *writer* on the tape: nothing on the heap.
-  def self.escape(string : String, writer : Tape::String::Writer) : Nil
+  def self.escape(string : String, writer : Str::Builder) : Nil
     writer.append_html_escaped(string)
   end
 

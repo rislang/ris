@@ -15,7 +15,7 @@ tape do
   exit 6 unless Path.windows("C:/a/../b".as_tape).normalize.name == "C:\\b"
   exit 7 unless Path.windows("C:".as_tape).join("foo".as_tape).name == "C:foo"
   exit 8 unless path.name == path.to_heap.name
-  writer = Tape::String::Writer.new(1)
+  writer = Str::Builder.new(1)
   writer << "prefix:"
   normal.write(writer)
   exit 9 unless writer.finish == "prefix:/a/c.txt"

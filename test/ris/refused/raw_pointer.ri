@@ -1,9 +1,9 @@
-# A Tape::String's pointer outside the library: it reads past the string's
+# A Str's pointer outside the library: it reads past the string's
 # bytes as readily as within them.
 @[Ffi]
 module test/ris/refused/raw_pointer
 
 tape do
-  text = Tape::String.new("abc")
+  text = Str.new("abc")
   puts text.to_unsafe[3]
 end

@@ -33,7 +33,7 @@ pub struct UUID
     @bytes = bytes.dup
   end
 
-  def initialize(bytes : Tape::String)
+  def initialize(bytes : Str)
     raise "UUID: need 16 bytes" unless bytes.bytesize == 16
     @bytes = Array(UInt8).new(16) { |i| bytes[i] }
   end
@@ -58,7 +58,7 @@ pub struct UUID
     Random::Secure.fill(bytes, 16)
     bytes[6] = (bytes[6] & 0x0f_u8) | 0x40_u8
     bytes[8] = (bytes[8] & 0x3f_u8) | 0x80_u8
-    TapeUUID.new(Tape::String.build(16) do |writer|
+    TapeUUID.new(Str.build(16) do |writer|
       i = 0
       while i < 16
         writer.push(bytes[i])
@@ -115,7 +115,7 @@ pub struct UUID
     bytes[6] = (0x70 | (@@v7_counter >> 8)).to_u8
     bytes[7] = (@@v7_counter & 255).to_u8
     bytes[8] = (bytes[8] & 0x3f_u8) | 0x80_u8
-    TapeUUID.new(Tape::String.build(16) do |writer|
+    TapeUUID.new(Str.build(16) do |writer|
       i = 0
       while i < 16
         writer.push(bytes[i])
@@ -132,13 +132,13 @@ pub struct UUID
     result || raise "UUID: no result"
   end
 
-  def self.parse(text : Tape::String) : TapeUUID
+  def self.parse(text : Str) : TapeUUID
     n = text.bytesize
     unless n == 32 || (n == 36 && text[8] == 45_u8 &&
            text[13] == 45_u8 && text[18] == 45_u8 && text[23] == 45_u8)
       raise "UUID: not 32 hex digits: #{text.to_heap}"
     end
-    bytes = Tape::String.build(16) do |w|
+    bytes = Str.build(16) do |w|
       i = 0
       while i < n
         if n == 36 && (i == 8 || i == 13 || i == 18 || i == 23)
@@ -162,11 +162,11 @@ pub struct UUID
     result
   end
 
-  def to_tape : Tape::String
-    Tape::String.build(36) { |w| write(w) }
+  def to_tape : Str
+    Str.build(36) { |w| write(w) }
   end
 
-  def write(writer : Tape::String::Writer) : Nil
+  def write(writer : Str::Builder) : Nil
     digits = "0123456789abcdef"
     i = 0
     while i < 16
@@ -219,9 +219,9 @@ end
 # Sixteen decoded bytes on the caller's tape.
 @[OnTape]
 pub struct TapeUUID
-  getter bytes : Tape::String
+  getter bytes : Str
 
-  def initialize(@bytes : Tape::String)
+  def initialize(@bytes : Str)
     raise "UUID: need 16 bytes" unless @bytes.bytesize == 16
   end
 
@@ -233,11 +233,11 @@ pub struct TapeUUID
     UUID.new(@bytes)
   end
 
-  def to_tape : Tape::String
-    Tape::String.build(36) { |w| write(w) }
+  def to_tape : Str
+    Str.build(36) { |w| write(w) }
   end
 
-  def write(writer : Tape::String::Writer) : Nil
+  def write(writer : Str::Builder) : Nil
     digits = "0123456789abcdef"
     i = 0
     while i < 16

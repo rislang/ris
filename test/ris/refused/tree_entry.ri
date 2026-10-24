@@ -2,5 +2,5 @@ module test/ris/refused/tree_entry
 
 # A tree's entries are its own: a caller reads values with `[]`.
 tape do
-  e = Tape::Tree::Entry(Int32).new(1, 2)
+  e = Tre::Entry(Int32).new(1, 2)
 end

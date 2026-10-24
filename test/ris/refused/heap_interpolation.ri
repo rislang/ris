@@ -1,6 +1,6 @@
 # Interpolation builds a heap String from the tape text, as `to_s` does.
 tape do
-  text = Tape::String.new("abc")
+  text = Str.new("abc")
   greeting = "hello #{text}"
   puts greeting.size
 end

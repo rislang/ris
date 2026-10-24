@@ -5,7 +5,7 @@ import std/mail::{Mail}
 kept = ""
 tape do
   data = "café\nline \t\r\n\x00=".as_tape
-  w = Tape::String::Writer.new(1)
+  w = Str::Builder.new(1)
   w << "prefix:"
   Mail.encode_base64(data, w)
   exit 1 unless w.finish.starts_with?("prefix:")

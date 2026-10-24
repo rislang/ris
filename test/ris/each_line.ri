@@ -1,4 +1,4 @@
-# Tape::String#each_line splits as String#each_line does, each line a view
+# Str#each_line splits as String#each_line does, each line a view
 # into the text: `\r\n` and `\n` end one, a final newline opens none, a
 # last `\r` with no newline after it is kept.
 def show(text : String) : Nil

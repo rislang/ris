@@ -1,10 +1,10 @@
 # @[TapeUnsafe] in a std/ module on a def with no tape pointer to hand
 # to the OS: the mark only lifted the tape's other checks.
 @[TapeUnsafe]
-def first(text : Tape::String) : UInt8
+def first(text : Str) : UInt8
   text[0]
 end
 
 tape do
-  puts first(Tape::String.new("abc"))
+  puts first(Str.new("abc"))
 end

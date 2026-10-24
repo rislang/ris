@@ -2,17 +2,17 @@
 # block ends: refused, with `clear` named as the way out.
 @[OnTape]
 struct Queue
-  @items : Tape::Array(Int32)
+  @items : Ary(Int32)
   @next : Int32
 
   def initialize
-    @items = Tape::Array(Int32).new
+    @items = Ary(Int32).new
     @next = 0
   end
 
   def take : Int32
     while @next >= @items.size
-      @items = Tape::Array(Int32).new if @next > 0
+      @items = Ary(Int32).new if @next > 0
       @next = 0
       @items << 1
     end

@@ -1,7 +1,7 @@
 # `puts "…#{x}"` in a tape block writes its text on the tape, and the
 # same line with no tape running builds it on the heap as before.
 tape do
-  name = Tape::String.new("tape")
+  name = Str.new("tape")
   puts "on the #{name}: #{42} #{-7_i64} #{1.5} #{'x'} #{nil}#{true}"
   print "no newline #{name}\n"
   [1, 2].each { |i| puts "item #{i}" }
@@ -18,7 +18,7 @@ later.call(4)
 # code around the block reads stays on the heap.
 kept = ""
 tape do
-  name = Tape::String.new("var")
+  name = Str.new("var")
   line = "through a #{name}"
   puts line
   line = "again #{1}"

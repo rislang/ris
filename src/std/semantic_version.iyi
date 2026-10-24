@@ -65,12 +65,12 @@ pub struct SemanticVersion
     def to_s : String
       result = ""
       tape do
-        result = Tape::String.build { |w| write(w) }.to_heap
+        result = Str.build { |w| write(w) }.to_heap
       end
       result
     end
 
-    def write(writer : Tape::String::Writer) : Nil
+    def write(writer : Str::Builder) : Nil
       @identifiers.each_with_index do |identifier, i|
         writer << "." if i > 0
         writer << identifier
@@ -161,7 +161,7 @@ pub struct SemanticVersion
     result
   end
 
-  def self.valid?(str : Tape::String) : Bool
+  def self.valid?(str : Str) : Bool
     !scan(str).nil?
   end
 
@@ -169,7 +169,7 @@ pub struct SemanticVersion
     parse?(str) || raise "not a semantic version: #{str.inspect}"
   end
 
-  def self.parse(str : Tape::String) : TapeSemanticVersion
+  def self.parse(str : Str) : TapeSemanticVersion
     parse?(str) ||
       raise "not a semantic version: #{str.to_heap.inspect}"
   end
@@ -184,7 +184,7 @@ pub struct SemanticVersion
     result
   end
 
-  def self.parse?(str : Tape::String) : TapeSemanticVersion?
+  def self.parse?(str : Str) : TapeSemanticVersion?
     parts = scan(str)
     return nil unless parts
     major_range, minor_range, patch_range, pre_range, build_range = parts
@@ -198,7 +198,7 @@ pub struct SemanticVersion
   end
 
   # Byte ranges of the five fields, or nil where the grammar is not met.
-  private def self.scan(str : Tape::String)
+  private def self.scan(str : Str)
     bytes = str
     stop = str.bytesize
 
@@ -246,7 +246,7 @@ pub struct SemanticVersion
   end
 
   # A numeric field: `0`, or a digit run that does not start with `0`.
-  private def self.scan_field(bytes : Tape::String, start : Int32,
+  private def self.scan_field(bytes : Str, start : Int32,
                               stop : Int32) : Int32?
     return nil unless start < stop && bytes[start] >= 48_u8 && bytes[start] <= 57_u8
     return start + 1 if bytes[start] == 48_u8 # '0'
@@ -258,7 +258,7 @@ pub struct SemanticVersion
     pos
   end
 
-  private def self.scan_identifiers?(bytes : Tape::String, start : Int32,
+  private def self.scan_identifiers?(bytes : Str, start : Int32,
                                      stop : Int32, *, reject_leading_zero : Bool) : Bool
     pos = start
 
@@ -311,11 +311,11 @@ pub struct SemanticVersion
     result
   end
 
-  def to_tape : Tape::String
-    Tape::String.build { |w| write(w) }
+  def to_tape : Str
+    Str.build { |w| write(w) }
   end
 
-  def write(writer : Tape::String::Writer) : Nil
+  def write(writer : Str::Builder) : Nil
     writer << @major << "." << @minor << "." << @patch
     unless @prerelease.empty?
       writer << "-"
@@ -390,11 +390,11 @@ pub struct TapeSemanticVersion
   getter major : Int32
   getter minor : Int32
   getter patch : Int32
-  getter prerelease : Tape::String
-  getter build : Tape::String?
+  getter prerelease : Str
+  getter build : Str?
 
   def initialize(@major : Int32, @minor : Int32, @patch : Int32,
-                 @prerelease : Tape::String, @build : Tape::String?)
+                 @prerelease : Str, @build : Str?)
   end
 
   def to_heap : SemanticVersion
@@ -403,11 +403,11 @@ pub struct TapeSemanticVersion
       build ? build.to_heap : nil)
   end
 
-  def to_tape : Tape::String
-    Tape::String.build { |w| write(w) }
+  def to_tape : Str
+    Str.build { |w| write(w) }
   end
 
-  def write(writer : Tape::String::Writer) : Nil
+  def write(writer : Str::Builder) : Nil
     writer << @major << "." << @minor << "." << @patch
     writer << "-" << @prerelease unless @prerelease.empty?
     if b = @build
@@ -455,7 +455,7 @@ pub struct TapeSemanticVersion
     a == b ? 0 : (a < b ? -1 : 1)
   end
 
-  private def digits?(text : Tape::String) : Bool
+  private def digits?(text : Str) : Bool
     text.each_byte { |b| return false unless b >= 48_u8 && b <= 57_u8 }
     true
   end

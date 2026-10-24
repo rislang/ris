@@ -50,8 +50,8 @@ end
 
 * Memory: ordinary objects use the GC. For bounded work (a request) use
   `tape do … end`: `text.as_tape` views a String there, nothing copied;
-  a `Tape::String` reads as a String does (`[a..]`, `split`, `index`,
-  `to_i`), a `Tape::String::Writer` takes `<<`, `Tape::Array(T)` and
+  a `Str` reads as a String does (`[a..]`, `split`, `index`,
+  `to_i`), a `Str::Builder` takes `<<`, `Ary(T)` and
   `@[OnTape]` structs hold the rest, and `to_heap` copies what must
   outlive the tape. Nested `tape` shares it; `local_tape` owns its own.
 * Tape only where it pays: a hot path that allocates much short-lived
@@ -62,7 +62,7 @@ end
 Byte pools: `read_bytes_at(UInt32, at)`, `write_bytes_at(at, v)`, append
 `write_bytes(v)`; no byte loops. Lines: `read_line_tape` in a `tape`. Integer
 `/` in text is refused (a Float): `a // b`, or `a.to_f / b` for a Float.
-Lexers: `Tape::Scanner` (`current_byte`, `advance`, `scan`, `skip`) holds text
+Lexers: `Str::Scanner` (`current_byte`, `advance`, `scan`, `skip`) holds text
 and offset; `ris check` warns of an `@pos += 1` that indexes tape text.
 ## 3. Then install, and work in the loop
 

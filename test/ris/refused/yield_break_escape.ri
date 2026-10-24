@@ -3,7 +3,7 @@ import std/int
 
 def with_text(&)
   tape do
-    text = Tape::String.build { |w| w.push(65_u8) }
+    text = Str.build { |w| w.push(65_u8) }
     yield text
   end
 end

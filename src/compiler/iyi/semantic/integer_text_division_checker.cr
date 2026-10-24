@@ -38,7 +38,7 @@ class Iyi::IntegerTextDivisionChecker
         defs.any? do |target|
           owner = target.owner
           owner.metaclass? &&
-            {"String", "Tape::String"}.includes?(owner.instance_type.to_s)
+            {"String", "Str"}.includes?(owner.instance_type.to_s)
         end
       end
       node.args.each { |arg| warn_division(arg) } if string_call

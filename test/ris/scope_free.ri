@@ -9,7 +9,7 @@ tape do
   i = 0
   while i < 100_000
     line = "round #{i}"
-    text = Tape::String.build { |w| w.append_int(i) }
+    text = Str.build { |w| w.append_int(i) }
     puts line if text == "99999"
     i += 1
   end
@@ -17,35 +17,35 @@ tape do
 
   before = used
   3.times do |n|
-    big = Tape::String::Writer.new(8)
+    big = Str::Builder.new(8)
     200_000.times { big.push(65_u8) }
     puts "block wrote #{big.length}" if n == 2
   end
   puts "block frees: #{used == before}"
 
-  kept = Tape::Array(Tape::String).new(4)
+  kept = Ary(Str).new(4)
   before = used
   j = 0
   while j < 3
-    kept.push(Tape::String.build { |w| w.append_int(j) })
+    kept.push(Str.build { |w| w.append_int(j) })
     j += 1
   end
   puts "kept stays: #{used != before} #{kept[2] == "2"}"
 
-  sink = Tape::String::Writer.new(4)
+  sink = Str::Builder.new(4)
   [1, 2, 3].each { |k| sink.append_int(k) }
   puts sink.finish
 end
 
 # A def frees its temporaries when its result is no tape value.
 def count_digits(n : Int32) : Int32
-  text = Tape::String.build { |w| w.append_int(n) }
+  text = Str.build { |w| w.append_int(n) }
   first = text[0, 1]
   text.bytesize
 end
 
-def number(n : Int32) : Tape::String
-  Tape::String.build { |w| w.append_int(n) }
+def number(n : Int32) : Str
+  Str.build { |w| w.append_int(n) }
 end
 
 tape do

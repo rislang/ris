@@ -58,9 +58,9 @@ pub struct CSV
   def self.build(rows : Array(Array(String))) : String
     result = ""
     tape do
-      views = Tape::Array(Tape::Array(Tape::String)).new
+      views = Ary(Ary(Str)).new
       rows.each do |row|
-        fields = Tape::Array(Tape::String).new
+        fields = Ary(Str).new
         row.each { |field| fields << field.as_tape }
         views << fields
       end
@@ -69,18 +69,18 @@ pub struct CSV
     result
   end
 
-  def self.build(rows : Tape::Array(Tape::Array(Tape::String)),
-                 writer : Tape::String::Writer) : Nil
+  def self.build(rows : Ary(Ary(Str)),
+                 writer : Str::Builder) : Nil
     write_rows(rows, writer)
   end
 
-  def self.parse(text : Tape::String) : Tape::Array(Tape::Array(Tape::String))
-    rows = Tape::Array(Tape::Array(Tape::String)).new
-    row = Tape::Array(Tape::String).new
+  def self.parse(text : Str) : Ary(Ary(Str))
+    rows = Ary(Ary(Str)).new
+    row = Ary(Str).new
     n = text.bytesize
     src = text
     i = 0
-    field = Tape::String::Writer.new(n + 1)
+    field = Str::Builder.new(n + 1)
     flen = 0
     quoted = false
     # The field opened with a quote: `""` is a field even with no bytes in
@@ -145,7 +145,7 @@ pub struct CSV
           flen = 0
           opened = false
           rows << row
-          row = Tape::Array(Tape::String).new
+          row = Ary(Str).new
           i = i + 1
           i = i + 1 if b == 13_u8 && i < n && src[i] == 10_u8
           start = i
@@ -166,13 +166,13 @@ pub struct CSV
 
   # Into one builder: adding each field to the text so far copied that
   # text once per field, and 20,000 rows of five took 12.8 seconds.
-  def self.build(rows : Tape::Array(Tape::Array(Tape::String))) : Tape::String
-    Tape::String.build { |w| build(rows, w) }
+  def self.build(rows : Ary(Ary(Str))) : Str
+    Str.build { |w| build(rows, w) }
   end
 
   private def self.write_rows(
-    rows : Tape::Array(Tape::Array(Tape::String)),
-    io : Tape::String::Writer,
+    rows : Ary(Ary(Str)),
+    io : Str::Builder,
   ) : Nil
     r = 0
     while r < rows.size
@@ -204,14 +204,14 @@ pub struct CSV
     io << '\n' if rows.size > 0 && rows[rows.size - 1].empty?
   end
 
-  private def self.field_value(text : Tape::String, start : Int32,
-                               field : Tape::String::Writer, size : Int32,
-                               quoted : Bool) : Tape::String
+  private def self.field_value(text : Str, start : Int32,
+                               field : Str::Builder, size : Int32,
+                               quoted : Bool) : Str
     quoted ? take(field.finish, size) : text[start, size]
   end
 
-  private def self.take(field : Tape::String, flen : Int32) : Tape::String
-    Tape::String.build(flen) do |w|
+  private def self.take(field : Str, flen : Int32) : Str
+    Str.build(flen) do |w|
       w << field[0, flen]
     end
   end
@@ -219,7 +219,7 @@ pub struct CSV
   # The line and column of the byte at *at*, both counted from 1 and the
   # column in characters, as the other library counts them: worked out
   # here, on the way out, so a document that parses pays nothing for them.
-  private def self.refuse(text : Tape::String, at : Int32,
+  private def self.refuse(text : Str, at : Int32,
                           what : String) : NoReturn
     src = text
     line = 1
@@ -239,15 +239,15 @@ pub struct CSV
   end
 
   # The character that starts at byte *at*, for a refusal to name.
-  private def self.char_at(text : Tape::String, at : Int32) : String
+  private def self.char_at(text : Str, at : Int32) : String
     b = text[at]
     len = b < 0x80_u8 ? 1 : (b < 0xE0_u8 ? 2 : (b < 0xF0_u8 ? 3 : 4))
     len = text.bytesize - at if len > text.bytesize - at
     text[at, len].to_heap
   end
 
-  private def self.escape(field : Tape::String,
-                          writer : Tape::String::Writer) : Nil
+  private def self.escape(field : Str,
+                          writer : Str::Builder) : Nil
     need = false
     p = field
     n = field.bytesize
@@ -269,8 +269,8 @@ pub struct CSV
 
   # Always quoted: a field that holds a separator, or a first field that
   # opens with U+FEFF.
-  private def self.quote(field : Tape::String,
-                         writer : Tape::String::Writer) : Nil
+  private def self.quote(field : Str,
+                         writer : Str::Builder) : Nil
     writer << '"'
     field.each_byte do |byte|
       writer.push(byte)

@@ -1,8 +1,8 @@
 module test/ris/refused/local_mutate
 tape do
-  outer = Tape::Array(Tape::String).new
+  outer = Ary(Str).new
   local_tape do
-    text = Tape::String.build { |w| w.append("inner") }
+    text = Str.build { |w| w.append("inner") }
     outer.push(text)
   end
 end

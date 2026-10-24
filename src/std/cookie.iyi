@@ -57,7 +57,7 @@ pub class Cookie
     result
   end
 
-  def self.parse(line : Tape::String) : TapeCookie?
+  def self.parse(line : Str) : TapeCookie?
     TapeCookie.parse(line)
   end
 
@@ -81,7 +81,7 @@ pub class Cookie
     result
   end
 
-  def self.parse_header(value : Tape::String) : TapeCookiePairs
+  def self.parse_header(value : Str) : TapeCookiePairs
     found = TapeCookiePairs.new
     value.split(';').each do |part|
       eq = part.index('=')
@@ -108,11 +108,11 @@ pub class Cookie
     result
   end
 
-  def to_tape : Tape::String
-    Tape::String.build { |w| to_set_cookie(w) }
+  def to_tape : Str
+    Str.build { |w| to_set_cookie(w) }
   end
 
-  def to_set_cookie(writer : Tape::String::Writer) : Nil
+  def to_set_cookie(writer : Str::Builder) : Nil
     TapeCookie.view(self).to_set_cookie(writer)
   end
 
@@ -269,25 +269,25 @@ end
 # A Set-Cookie line's fields, retained with the caller's input bytes.
 @[OnTape]
 pub struct TapeCookie
-  getter name : Tape::String
-  getter value : Tape::String
-  getter path : Tape::String?
-  getter domain : Tape::String?
+  getter name : Str
+  getter value : Str
+  getter path : Str?
+  getter domain : Str?
   getter expires : Time?
   getter max_age : Int64?
   getter secure : Bool
   getter http_only : Bool
-  getter same_site : Tape::String?
+  getter same_site : Str?
 
-  def initialize(@name : Tape::String, @value : Tape::String,
-                 @path : Tape::String? = nil,
-                 @domain : Tape::String? = nil, @expires : Time? = nil,
+  def initialize(@name : Str, @value : Str,
+                 @path : Str? = nil,
+                 @domain : Str? = nil, @expires : Time? = nil,
                  @max_age : Int64? = nil, @secure : Bool = false,
                  @http_only : Bool = false,
-                 @same_site : Tape::String? = nil)
+                 @same_site : Str? = nil)
   end
 
-  def self.parse(line : Tape::String) : TapeCookie?
+  def self.parse(line : Str) : TapeCookie?
     parts = line.split(';')
     return nil if parts.empty?
     pair = parts[0]
@@ -299,13 +299,13 @@ pub struct TapeCookie
     if value.bytesize >= 2 && value[0] == 34_u8 && value[-1] == 34_u8
       value = value[1, value.bytesize - 2]
     end
-    path = nil.as(Tape::String?)
-    domain = nil.as(Tape::String?)
+    path = nil.as(Str?)
+    domain = nil.as(Str?)
     expires = nil.as(Time?)
     max_age = nil.as(Int64?)
     secure = false
     http_only = false
-    same_site = nil.as(Tape::String?)
+    same_site = nil.as(Str?)
     i = 1
     while i < parts.size
       attribute = parts[i]
@@ -344,7 +344,7 @@ pub struct TapeCookie
   end
 
   # `Max-Age`'s digits, with a sign (§5.2.2); nil for anything else.
-  private def self.seconds(text : Tape::String) : Int64?
+  private def self.seconds(text : Str) : Int64?
     return nil if text.bytesize == 0
     p = text
     negative = p[0] == 45_u8
@@ -359,7 +359,7 @@ pub struct TapeCookie
     negative ? 0_i64 - value : value
   end
 
-  def to_set_cookie(text : Tape::String::Writer) : Nil
+  def to_set_cookie(text : Str::Builder) : Nil
     unless HTTP.token?(@name)
       raise "Cookie: not a cookie name: #{@name.to_heap.inspect}"
     end
@@ -397,8 +397,8 @@ pub struct TapeCookie
     nil
   end
 
-  def to_tape : Tape::String
-    Tape::String.build { |w| to_set_cookie(w) }
+  def to_tape : Str
+    Str.build { |w| to_set_cookie(w) }
   end
 
   def self.view(cookie : Cookie) : TapeCookie
@@ -421,7 +421,7 @@ pub struct TapeCookie
       same ? same.to_heap : nil)
   end
 
-  def self.trim(text : Tape::String) : Tape::String
+  def self.trim(text : Str) : Str
     first = 0
     last = text.bytesize
     while first < last && (text[first] == 32_u8 || text[first] == 9_u8)
@@ -433,8 +433,8 @@ pub struct TapeCookie
     text[first, last - first]
   end
 
-  private def self.lower(text : Tape::String) : Tape::String
-    Tape::String.build(text.bytesize) do |w|
+  private def self.lower(text : Str) : Str
+    Str.build(text.bytesize) do |w|
       text.each_byte do |b|
         w.push(b >= 65_u8 && b <= 90_u8 ? b + 32_u8 : b)
       end
@@ -444,33 +444,33 @@ end
 
 @[OnTape]
 pub struct TapeCookiePair
-  getter key : Tape::String
-  getter value : Tape::String
+  getter key : Str
+  getter value : Str
 
-  def initialize(@key : Tape::String, @value : Tape::String)
+  def initialize(@key : Str, @value : Str)
   end
 end
 
 @[OnTape]
 pub struct TapeCookiePairs
-  @entries : Tape::Array(TapeCookiePair)
+  @entries : Ary(TapeCookiePair)
 
   def initialize
-    @entries = Tape::Array(TapeCookiePair).new
+    @entries = Ary(TapeCookiePair).new
   end
 
-  def []?(key : String | Tape::String) : Tape::String?
+  def []?(key : String | Str) : Str?
     @entries.each do |field|
       return field.value if field.key == key
     end
     nil
   end
 
-  def [](key : String | Tape::String) : Tape::String
+  def [](key : String | Str) : Str
     self[key]? || raise "COOKIE: missing key"
   end
 
-  def []=(key : Tape::String, value : Tape::String) : Nil
+  def []=(key : Str, value : Str) : Nil
     @entries.each_with_index do |field, i|
       if field.key == key
         @entries[i] = TapeCookiePair.new(key, value)
@@ -488,11 +488,11 @@ pub struct TapeCookiePairs
     @entries.empty?
   end
 
-  def has_key?(key : String | Tape::String) : Bool
+  def has_key?(key : String | Str) : Bool
     !self[key]?.nil?
   end
 
-  def each(& : Tape::String, Tape::String -> Nil) : Nil
+  def each(& : Str, Str -> Nil) : Nil
     @entries.each { |field| yield field.key, field.value }
   end
 
@@ -513,10 +513,10 @@ struct CookieDate
             "July", "August", "September", "October", "November",
             "December"]
 
-  @scan : Tape::Scanner
+  @scan : Str::Scanner
 
-  def initialize(text : Tape::String)
-    @scan = Tape::Scanner.new(text)
+  def initialize(text : Str)
+    @scan = Str::Scanner.new(text)
   end
 
   def parse : Time?
@@ -607,7 +607,7 @@ struct CookieDate
   end
 
   # The letters at the offset, taken.
-  private def letters : Tape::String
+  private def letters : Str
     start = @scan.offset
     while (b = peek | 0x20_u8) >= 97_u8 && b <= 122_u8
       @scan.skip(1)
@@ -615,7 +615,7 @@ struct CookieDate
     @scan.string[start, @scan.offset - start]
   end
 
-  private def same?(text : Tape::String, name : String) : Bool
+  private def same?(text : Str, name : String) : Bool
     return false if text.bytesize > name.bytesize
     i = 0
     while i < text.bytesize
@@ -668,7 +668,7 @@ struct CookieDate
   OFFSETS = [0, 0, 0, -18000, -14400, -21600, -18000, -25200,
              -21600, -28800, -25200]
 
-  def self.write(time : Time, writer : Tape::String::Writer) : Nil
+  def self.write(time : Time, writer : Str::Builder) : Nil
     utc = time.to_utc
     writer << DAYS[utc.day_of_week.value % 7].as_tape[0, 3] << ", "
     padded(utc.day, 2, writer)
@@ -684,7 +684,7 @@ struct CookieDate
   end
 
   private def self.padded(n : Int32, width : Int32,
-                          writer : Tape::String::Writer) : Nil
+                          writer : Str::Builder) : Nil
     value = n.to_i64
     if value < 0
       writer << "-"

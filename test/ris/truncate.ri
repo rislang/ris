@@ -2,7 +2,7 @@
 # next is written over the rest; it refuses a length past what is written.
 ok = true
 tape do
-  w = Tape::String::Writer.new(4)
+  w = Str::Builder.new(4)
   w.append("hello world")
   w.truncate(5)
   w.append("!")

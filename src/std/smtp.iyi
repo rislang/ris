@@ -416,12 +416,12 @@ pub class SmtpClient
     result
   end
 
-  def self.stuffed(data : Tape::String) : Tape::String
-    Tape::String.build { |w| stuffed(data, w) }
+  def self.stuffed(data : Str) : Str
+    Str.build { |w| stuffed(data, w) }
   end
 
-  def self.stuffed(data : Tape::String,
-                   io : Tape::String::Writer) : Nil
+  def self.stuffed(data : Str,
+                   io : Str::Builder) : Nil
     p = data
     n = data.bytesize
     start = true

@@ -11,7 +11,7 @@ tape do
   canonical = uuid.to_tape
   exit 2 unless canonical == "550e8400-e29b-41d4-a716-446655440000"
   exit 3 unless uuid.to_heap.to_tape == canonical
-  w = Tape::String::Writer.new(1)
+  w = Str::Builder.new(1)
   w << "prefix:"
   uuid.write(w)
   exit 4 unless w.finish ==

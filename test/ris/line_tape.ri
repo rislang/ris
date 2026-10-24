@@ -2,7 +2,7 @@ module line_tape
 import std/gc::{GC}
 
 tape do
-  writer = Tape::String::Writer.new(16)
+  writer = Str::Builder.new(16)
   writer.append("warm")
 end
 GC.disable

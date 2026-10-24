@@ -12,7 +12,7 @@
 # where it proves the body keeps nothing: its value (a def's result) is
 # no tape value, no raw pointer or IyiRegion is in it, nothing in the body yields, a variable of the code around it is
 # not assigned a tape value, and a tape value from outside the body - a
-# variable around it, a block parameter - is only a `Tape::String` or
+# variable around it, a block parameter - is only a `Str` or
 # read (`[]`, `size`, `each`, ...), never grown, written or passed on.
 # A tape variable of the body's own is assigned first at the body's top
 # level and used nowhere else. Any doubt leaves the mark off: the tape
@@ -198,7 +198,7 @@ class Iyi::TapeScopeChecker
   end
 
   def tape_string?(type : Type?) : Bool
-    !type.nil? && type.remove_typedef.to_s == "Tape::String"
+    !type.nil? && type.remove_typedef.to_s == "Str"
   end
 
   # Whether *body*, inside *scope*, keeps nothing it puts on the tape.
@@ -311,7 +311,7 @@ class Iyi::TapeScopeChecker
       node.named_args.try &.each &.value.accept(self)
       if block = node.block
         # A call given only the body's own values yields only those, or
-        # what it makes (`Tape::String.build { |w| ... }`): its block's
+        # what it makes (`Str.build { |w| ... }`): its block's
         # parameters are the body's own too.
         # A block's parameters shadow the names around it, so they are its
         # own only while it is read.

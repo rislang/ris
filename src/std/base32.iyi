@@ -80,7 +80,7 @@ pub struct Base32
       view = if data.is_a?(String)
                data.as_tape
              else
-               Tape::String.build(data.size) do |writer|
+               Str.build(data.size) do |writer|
                  data.each { |byte| writer.push(byte) }
                end
              end
@@ -89,12 +89,12 @@ pub struct Base32
     result
   end
 
-  def self.encode(data : Tape::String,
-                  padding : Bool = true) : Tape::String
+  def self.encode(data : Str,
+                  padding : Bool = true) : Str
     Base32Codec.encode(data, BASE32_ALPHABET, padding)
   end
 
-  def self.encode(data : Tape::String, writer : Tape::String::Writer,
+  def self.encode(data : Str, writer : Str::Builder,
                   padding : Bool = true) : Nil
     writer << encode(data, padding)
   end
@@ -109,13 +109,13 @@ pub struct Base32
     result
   end
 
-  def self.decode(text : Tape::String) : Tape::String | Base32Error
+  def self.decode(text : Str) : Str | Base32Error
     Base32Codec.decode(text, BASE32_VALUES, BASE32_ALPHABET,
       "base32")
   end
 
-  def self.decode(text : Tape::String,
-                  writer : Tape::String::Writer) : Nil | Base32Error
+  def self.decode(text : Str,
+                  writer : Str::Builder) : Nil | Base32Error
     decoded = decode(text)
     return decoded if decoded.is_a?(Base32Error)
     writer << decoded
@@ -133,7 +133,7 @@ pub struct Base32Hex
       view = if data.is_a?(String)
                data.as_tape
              else
-               Tape::String.build(data.size) do |writer|
+               Str.build(data.size) do |writer|
                  data.each { |byte| writer.push(byte) }
                end
              end
@@ -142,12 +142,12 @@ pub struct Base32Hex
     result
   end
 
-  def self.encode(data : Tape::String,
-                  padding : Bool = true) : Tape::String
+  def self.encode(data : Str,
+                  padding : Bool = true) : Str
     Base32Codec.encode(data, BASE32HEX_ALPHABET, padding)
   end
 
-  def self.encode(data : Tape::String, writer : Tape::String::Writer,
+  def self.encode(data : Str, writer : Str::Builder,
                   padding : Bool = true) : Nil
     writer << encode(data, padding)
   end
@@ -162,13 +162,13 @@ pub struct Base32Hex
     result
   end
 
-  def self.decode(text : Tape::String) : Tape::String | Base32Error
+  def self.decode(text : Str) : Str | Base32Error
     Base32Codec.decode(text, BASE32HEX_VALUES, BASE32HEX_ALPHABET,
       "base32hex")
   end
 
-  def self.decode(text : Tape::String,
-                  writer : Tape::String::Writer) : Nil | Base32Error
+  def self.decode(text : Str,
+                  writer : Str::Builder) : Nil | Base32Error
     decoded = decode(text)
     return decoded if decoded.is_a?(Base32Error)
     writer << decoded
@@ -177,8 +177,8 @@ pub struct Base32Hex
 end
 
 struct Base32Codec
-  def self.encode(data : Tape::String, alphabet : String,
-                  padding : Bool) : Tape::String
+  def self.encode(data : Str, alphabet : String,
+                  padding : Bool) : Str
     src = data
     n = data.bytesize
     table = alphabet.to_unsafe
@@ -186,7 +186,7 @@ struct Base32Codec
     # are its bits rounded up to fives, and padding brings it to eight.
     chars = (n.to_i64 * 8 + 4) // 5
     size = padding ? (n.to_i64 + 4) // 5 * 8 : chars
-    dst = Tape::Array(UInt8).new(size.to_i32, 0_u8)
+    dst = Ary(UInt8).new(size.to_i32, 0_u8)
     begin
       acc = 0
       bits = 0
@@ -211,14 +211,14 @@ struct Base32Codec
         o = o + 1
       end
     end
-    Tape::String.build(size.to_i32) do |writer|
+    Str.build(size.to_i32) do |writer|
       dst.each { |byte| writer.push(byte) }
     end
   end
 
-  def self.decode(text : Tape::String, values : Array(Int32),
+  def self.decode(text : Str, values : Array(Int32),
                   alphabet : String,
-                  name : String) : Tape::String | Base32Error
+                  name : String) : Str | Base32Error
     src = text
     n = text.bytesize
     table = values.to_unsafe
@@ -261,7 +261,7 @@ struct Base32Codec
       end
     end
     size = data * 5 // 8
-    answer = Tape::String::Writer.new(size)
+    answer = Str::Builder.new(size)
     acc = 0
     bits = 0
     o = 0

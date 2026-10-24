@@ -62,8 +62,8 @@ pub struct MIME
     result
   end
 
-  def self.with_charset(media_type : Tape::String,
-                        writer : Tape::String::Writer) : Nil
+  def self.with_charset(media_type : Str,
+                        writer : Str::Builder) : Nil
     writer << with_charset(media_type)
   end
 
@@ -77,21 +77,21 @@ pub struct MIME
     result
   end
 
-  private def self.downcase(text : Tape::String) : Tape::String
-    Tape::String.build(text.bytesize) do |w|
+  private def self.downcase(text : Str) : Str
+    Str.build(text.bytesize) do |w|
       text.each_byte do |b|
         w.push(b >= 65_u8 && b <= 90_u8 ? b + 32_u8 : b)
       end
     end
   end
 
-  private def self.ends_with?(text : Tape::String,
+  private def self.ends_with?(text : Str,
                               suffix : String) : Bool
     n = suffix.bytesize
     text.bytesize >= n && text[text.bytesize - n, n] == suffix
   end
 
-  private def self.compare(a : Tape::String, b : Tape::String) : Int32
+  private def self.compare(a : Str, b : Str) : Int32
     i = 0
     while i < a.bytesize && i < b.bytesize
       return a[i] < b[i] ? -1 : 1 if a[i] != b[i]
@@ -188,7 +188,7 @@ pub struct MIME
 
   # The text lowercased, and the text itself when it has no uppercase
   # ASCII, which is nearly always, so nothing is allocated for it.
-  private def self.lower(text : Tape::String) : Tape::String
+  private def self.lower(text : Str) : Str
     bytes = text
     i = 0
     while i < text.bytesize
@@ -203,7 +203,7 @@ pub struct MIME
   # "index.HTML" and "a/b.tar.gz" (by its last extension) all work, in
   # any case. A path whose base name has no dot has no extension; a bare
   # word is taken as the extension itself. Nil when unknown.
-  def self.from_extension?(name : Tape::String) : Tape::String?
+  def self.from_extension?(name : Str) : Str?
     bytes = name
     size = name.bytesize
     dot = -1
@@ -227,8 +227,8 @@ pub struct MIME
   end
 
   # The same, falling back to *default*.
-  def self.from_extension(name : Tape::String,
-                          default : Tape::String = "application/octet-stream".as_tape) : Tape::String
+  def self.from_extension(name : Str,
+                          default : Str = "application/octet-stream".as_tape) : Str
     from_extension?(name) || default
   end
 
@@ -236,13 +236,13 @@ pub struct MIME
   # ("text/html" is [".htm", ".html"]). Parameters are ignored and case
   # does not matter; empty when the type is unknown. The array is a fresh
   # copy the caller may change.
-  def self.extensions(media_type : Tape::String) : Tape::Array(Tape::String)
-    result = Tape::Array(Tape::String).new
+  def self.extensions(media_type : Str) : Ary(Str)
+    result = Ary(Str).new
     essence = essence_of(media_type)
     return result unless essence
     TABLE.each do |entry|
       if essence == entry[1]
-        result << Tape::String.build { |w| w << "." << entry[0] }
+        result << Str.build { |w| w << "." << entry[0] }
       end
     end
     result.sort_in_place { |a, b| compare(a, b) }
@@ -256,7 +256,7 @@ pub struct MIME
   # compressed, nor zip, gzip and the other archives, nor WOFF and WOFF2,
   # which are compressed fonts. WebAssembly is included because its code
   # roughly halves under gzip, which is why servers compress it.
-  def self.compressible?(media_type : Tape::String) : Bool
+  def self.compressible?(media_type : Str) : Bool
     essence = essence_of(media_type)
     return false if essence.nil?
     return true if essence.starts_with?("text/")
@@ -277,7 +277,7 @@ pub struct MIME
   # JavaScript or XML (`+json` and `+xml` included) and names no charset
   # yet. Anything else, and anything that does not parse, comes back as
   # given.
-  def self.with_charset(media_type : Tape::String) : Tape::String
+  def self.with_charset(media_type : Str) : Str
     parsed = parse?(media_type)
     return media_type if parsed.nil?
     essence = parsed.essence
@@ -287,7 +287,7 @@ pub struct MIME
               ends_with?(essence, "+json") || ends_with?(essence, "+xml") ||
               essence == "application/json" || essence == "application/javascript" || essence == "application/xml"
     return media_type unless textual
-    Tape::String.build do |w|
+    Str.build do |w|
       w << media_type << "; charset=utf-8"
     end
   end
@@ -299,7 +299,7 @@ pub struct MIME
   # values as written; a name given twice keeps its last value. Nil when
   # any part is not a token, a parameter has no `=`, or a quote is left
   # open.
-  def self.parse?(value : Tape::String) : TapeMediaType?
+  def self.parse?(value : Str) : TapeMediaType?
     bytes = value
     size = value.bytesize
     pos = skip_ows(bytes, 0, size)
@@ -340,12 +340,12 @@ pub struct MIME
   end
 
   # The type and subtype lowercased, or nil when the value does not parse.
-  private def self.essence_of(media_type : Tape::String) : Tape::String?
+  private def self.essence_of(media_type : Str) : Str?
     parsed = parse?(media_type)
     parsed ? parsed.essence : nil
   end
 
-  private def self.skip_ows(bytes : Tape::String, pos : Int32,
+  private def self.skip_ows(bytes : Str, pos : Int32,
                             size : Int32) : Int32
     while pos < size && (bytes[pos] == ' '.ord.to_u8 || bytes[pos] == '\t'.ord.to_u8)
       pos = pos + 1
@@ -353,7 +353,7 @@ pub struct MIME
     pos
   end
 
-  private def self.skip_token(bytes : Tape::String, pos : Int32,
+  private def self.skip_token(bytes : Str, pos : Int32,
                               size : Int32) : Int32
     while pos < size && token_byte?(bytes[pos])
       pos = pos + 1
@@ -375,8 +375,8 @@ pub struct MIME
   end
 
   # The bytes of *text* from *start*, *count* of them, as a string.
-  private def self.slice(text : Tape::String, start : Int32,
-                         count : Int32) : Tape::String
+  private def self.slice(text : Str, start : Int32,
+                         count : Int32) : Str
     text[start, count]
   end
 
@@ -384,8 +384,8 @@ pub struct MIME
   # after its closing quote. A control byte other than a tab inside, or a
   # string that never closes, is nil. The first pass measures and checks,
   # the second copies, so the value is allocated once.
-  private def self.unquote(value : Tape::String,
-                           start : Int32) : {Tape::String, Int32}?
+  private def self.unquote(value : Str,
+                           start : Int32) : {Str, Int32}?
     bytes = value
     size = value.bytesize
     pos = start + 1
@@ -406,7 +406,7 @@ pub struct MIME
       pos = pos + 1
     end
     return nil if close < 0
-    text = Tape::String.build(count) do |dst|
+    text = Str.build(count) do |dst|
       at = start + 1
       i = 0
       while at < close
@@ -422,33 +422,33 @@ end
 
 @[OnTape]
 pub struct TapeParameter
-  getter key : Tape::String
-  getter value : Tape::String
+  getter key : Str
+  getter value : Str
 
-  def initialize(@key : Tape::String, @value : Tape::String)
+  def initialize(@key : Str, @value : Str)
   end
 end
 
 @[OnTape]
 pub struct TapeParameters
-  @entries : Tape::Array(TapeParameter)
+  @entries : Ary(TapeParameter)
 
   def initialize
-    @entries = Tape::Array(TapeParameter).new
+    @entries = Ary(TapeParameter).new
   end
 
-  def []?(key : String | Tape::String) : Tape::String?
+  def []?(key : String | Str) : Str?
     @entries.each do |field|
       return field.value if field.key == key
     end
     nil
   end
 
-  def [](key : String | Tape::String) : Tape::String
+  def [](key : String | Str) : Str
     self[key]? || raise "MIME: missing key"
   end
 
-  def []=(key : Tape::String, value : Tape::String) : Nil
+  def []=(key : Str, value : Str) : Nil
     @entries.each_with_index do |field, i|
       if field.key == key
         @entries[i] = TapeParameter.new(key, value)
@@ -466,11 +466,11 @@ pub struct TapeParameters
     @entries.empty?
   end
 
-  def has_key?(key : String | Tape::String) : Bool
+  def has_key?(key : String | Str) : Bool
     !self[key]?.nil?
   end
 
-  def each(& : Tape::String, Tape::String -> Nil) : Nil
+  def each(& : Str, Str -> Nil) : Nil
     @entries.each { |field| yield field.key, field.value }
   end
 
@@ -483,10 +483,10 @@ end
 
 @[OnTape]
 pub struct TapeMediaType
-  getter essence : Tape::String
+  getter essence : Str
   getter params : TapeParameters
 
-  def initialize(@essence : Tape::String, @params : TapeParameters)
+  def initialize(@essence : Str, @params : TapeParameters)
   end
 
   def to_heap : {String, Hash(String, String)}

@@ -1492,7 +1492,7 @@ module Iyi
       # `tape` block that made it. `Iyi::TapeChecker` and `CleanupTransformer`
       # refuse every place such a value could outlive its scope.
       types["OnTape"] = @tape_annotation = AnnotationType.new self, self, "OnTape"
-      # ris: `@[TapeToHeap]` on a def lets it copy a `Tape::String` off the tape
+      # ris: `@[TapeToHeap]` on a def lets it copy a `Str` off the tape
       # with `to_s`; elsewhere `Iyi::TapeEscapeChecker` refuses that copy.
       types["TapeToHeap"] = @tape_to_heap_annotation =
         AnnotationType.new self, self, "TapeToHeap"

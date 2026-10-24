@@ -2,7 +2,7 @@
 # pointer and hands it to no lib fun or system call: a codec, not the OS
 # boundary. The directory is std/ so that the mark itself is let through.
 @[TapeUnsafe]
-def sum(text : Tape::String) : Int32
+def sum(text : Str) : Int32
   bytes = text.to_unsafe
   total = 0
   text.bytesize.times { |i| total = total + bytes[i] }
@@ -10,5 +10,5 @@ def sum(text : Tape::String) : Int32
 end
 
 tape do
-  puts sum(Tape::String.new("abc"))
+  puts sum(Str.new("abc"))
 end

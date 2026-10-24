@@ -17,7 +17,7 @@
 #
 # Writers, arrays and trees hold pointers to state blocks on the tape;
 # copies share that state. Its fourth word names the region a value moved
-# to when it grew away from the tape's end (`IyiRegion.tape_resize`). A Tape::String is an immutable byte view.
+# to when it grew away from the tape's end (`IyiRegion.tape_resize`). A Str is an immutable byte view.
 # Copying a tape value does not copy its backing storage.
 
 # Internal ABI: the normalizer lowers only the runtime's own tape guard to
@@ -44,13 +44,14 @@ end
 
 # A tape of its own, even inside a `tape` block, freed when the block
 # ends: for work whose temporaries should not stay on the outer tape
-# until it ends. Copy what is kept before leaving. Outer `Tape::String`s
+# until it ends. Copy what is kept before leaving. Outer `Str`s
 # may be read; other outer tape values become owned data first.
 def local_tape(&) : Nil
   IyiRegion.tape_local(Tape::CAPACITY) { yield }
   nil
 end
 
+# Internals of the tape types: `Str`, `Ary`, `Tre` and theirs.
 module Tape
   # An index out of range: raised out of line, so the `[]` inlined at
   # every read keeps only its compare and branch, not the building of
@@ -72,1666 +73,1678 @@ module Tape
 
   CAPACITY = 67108864_u64
 
-  # Bytes on the tape. Not a `String`: a `String` may be kept anywhere, and
-  # this may not. `to_s` copies it into a retained String explicitly.
-  @[OnTape]
-  struct String
-    @ptr : Pointer(UInt8)
-    @bytesize : Int32
-
-    # Built in a local, not by `initialize`: a store through `self` in
-    # `initialize` takes the collector's write barrier (codegen cannot see
-    # that `self` is a stack slot there), one into a local's field does not.
-    def initialize(@ptr : Pointer(UInt8), @bytesize : Int32)
-    end
-
-    def self.new(ptr : Pointer(UInt8), bytesize : Int32) : self
-      made = uninitialized self
-      pointerof(made.@ptr).value = ptr
-      pointerof(made.@bytesize).value = bytesize
-      made
-    end
-
-    # *text*'s bytes copied onto the tape: a String a program has, made a
-    # tape string without a raw pointer.
-    def self.new(text : ::String) : self
-      bytes = Pointer(UInt8).new(IyiRegion.tape_bytes(text.bytesize.to_u64))
-      bytes.copy_from(text.to_unsafe, text.bytesize)
-      new(bytes, text.bytesize)
-    end
-
-    # A view of *text*'s bytes, nothing copied: a String is never changed,
-    # and the view's pointer, a root on the tape and the stack, keeps it
-    # alive while the view is (the collector takes an interior pointer to
-    # its object).
-    def self.view(text : ::String) : self
-      new(text.to_unsafe, text.bytesize)
-    end
-
-    def bytesize : Int32
-      @bytesize
-    end
-
-    def empty? : Bool
-      @bytesize == 0
-    end
-
-    # The byte at *index*, from the end when negative; one out of range
-    # raises rather than reading what follows. `to_unsafe` is the library's.
-    # One unsigned compare on the way to the byte; a negative index
-    # takes the other branch, counted from the end.
-    def [](index : Int32) : UInt8
-      unless index.unsafe_to_u64 < @bytesize.unsafe_to_u64
-        asked = index
-        index = index + @bytesize
-        unless asked < 0 && index.unsafe_to_u64 < @bytesize.unsafe_to_u64
-          Tape.out_of_range(asked, @bytesize, "bytes")
-        end
-      end
-      @ptr[index]
-    end
-
-    # One byte-range check, then one load where words are little-endian
-    # and a load need not be aligned; elsewhere a copy into an aligned
-    # local, its bytes turned around.
-    def read_bytes_at(type : I.class, at : Int32) : I forall I
-      {% unless I == UInt16 || I == UInt32 || I == UInt64 ||
-                  I == Int16 || I == Int32 || I == Int64 %}
-        {% raise "little-endian fields need a 16/32/64-bit integer" %}
-      {% end %}
-      width = sizeof(I)
-      if at < 0 || at > @bytesize - width
-        raise "little-endian field out of range"
-      end
-      {% if flag?(:x86_64) || flag?(:aarch64) || flag?(:i386) %}
-        return (@ptr + at).as(Pointer(I)).unaligned_value
-      {% end %}
-      value = uninitialized I
-      target = pointerof(value).as(Pointer(UInt8))
-      target.copy_from(@ptr + at, width)
-      {% unless flag?(:x86_64) || flag?(:aarch64) || flag?(:arm) ||
-                  flag?(:i386) || flag?(:wasm32) %}
-        i = 0
-        while i < sizeof(I) // 2
-          j = sizeof(I) - i - 1
-          byte = target[i]
-          target[i] = target[j]
-          target[j] = byte
-          i = i + 1
-        end
-      {% end %}
-      value
-    end
-
-    # *count* bytes from *start*, a view of these: nothing is copied.
-    def [](start : Int32, count : Int32) : String
-      raise "bytes #{start}, #{count} out of range for #{@bytesize}" if start < 0 || count < 0 || start > @bytesize - count
-      String.new(@ptr + start, count)
-    end
-
-    # The bytes *range* names, a view, as `Array#[](range)` reads one: a
-    # negative end counts from the last, an endless one runs to it, and a
-    # range that begins past the end is refused. `line[space + 1..]` is
-    # the rest of the line.
-    def [](range : Range(B, E)) : String forall B, E
-      from = range.begin
-      start = from.nil? ? 0 : from
-      start = @bytesize + start if start < 0
-      raise "range #{range} out of range for #{@bytesize} bytes" if start < 0 || start > @bytesize
-      to = range.end
-      stop = to.nil? ? @bytesize : (to < 0 ? @bytesize + to : to)
-      if stop >= @bytesize
-        stop = @bytesize
-      elsif !range.exclusive?
-        stop = stop + 1
-      end
-      String.new(@ptr + start, stop > start ? stop - start : 0)
-    end
-
-    def each_byte(& : UInt8 -> _) : Nil
-      i = 0
-      while i < @bytesize
-        yield @ptr[i]
-        i = i + 1
-      end
-    end
-
-    # Each line, as `String#each_line` (std/text) splits them: a final
-    # newline closing the last rather than opening an empty one, and a `\r`
-    # before a newline left off. Each line is a view: nothing is copied.
-    def each_line(& : String -> Nil) : Nil
-      start = 0
-      at = 0
-      while at < @bytesize
-        if @ptr[at] == 10_u8
-          stop = at > start && @ptr[at - 1] == 13_u8 ? at - 1 : at
-          yield String.new(@ptr + start, stop - start)
-          start = at + 1
-        end
-        at = at + 1
-      end
-      if start < @bytesize
-        # No newline after it, so a `\r` here is text: `"b\r"` is `"b\r"`.
-        yield String.new(@ptr + start, @bytesize - start)
-      end
-    end
-
-    # Where *char* first is from *offset*, or nil, byte-indexed as
-    # `String#index` is; a char past ASCII by its UTF-8 bytes.
-    def index(char : Char, offset : Int32 = 0) : Int32?
-      if char.ord < 128
-        byte = char.ord.to_u8
-        at = offset
-        while at < @bytesize
-          return at if @ptr[at] == byte
-          at = at + 1
-        end
-        return nil
-      end
-      # Its UTF-8 bytes, matched whole where they start.
-      room = uninitialized StaticArray(UInt8, 4)
-      wanted = pointerof(room).as(Pointer(UInt8))
-      width = 0
-      char.each_byte do |byte|
-        wanted[width] = byte
-        width = width + 1
-      end
-      at = offset
-      while at + width <= @bytesize
-        k = 0
-        while k < width && @ptr[at + k] == wanted[k]
-          k = k + 1
-        end
-        return at if k == width
-        at = at + 1
-      end
-      nil
-    end
-
-    def includes?(char : Char) : Bool
-      !index(char).nil?
-    end
-
-    # The pieces between each *separator*, as `String#split(Char)` cuts
-    # them, empty ones kept; each a view, in a new array on the tape.
-    def split(separator : Char) : Array(String)
-      width = separator.bytesize
-      pieces = Array(String).new
-      start = 0
-      while at = index(separator, start)
-        pieces << self[start, at - start]
-        start = at + width
-      end
-      pieces << self[start, @bytesize - start]
-      pieces
-    end
-
-    # As `String#to_i`: the digits as an Int32, a mistake when they are not
-    # one. `to_i?` answers nil instead. Read on the tape, nothing copied.
-    def to_i : Int32
-      to_i? || raise "not a number: #{@bytesize} bytes"
-    end
-
-    def to_i? : Int32?
-      return nil if @bytesize == 0
-      index = 0
-      negative = @ptr[0] == 45_u8
-      if negative || @ptr[0] == 43_u8
-        return nil if @bytesize == 1
-        index = 1
-      end
-      value = 0
-      while index < @bytesize
-        digit = @ptr[index].to_i - 48
-        return nil if digit < 0 || digit > 9
-        return nil if value < -214748364 || (value == -214748364 && digit > 8)
-        value = value * 10 - digit
-        index = index + 1
-      end
-      return value if negative
-      return nil if value == -2147483648
-      0 - value
-    end
-
-    def to_i64? : Int64?
-      to_i64?(10)
-    end
-
-    def to_f : Float64
-      first = 0
-      stop = @bytesize
-      while first < stop && numeric_blank?(self[first])
-        first += 1
-      end
-      while stop > first && numeric_blank?(self[stop - 1])
-        stop -= 1
-      end
-      IyiFloatText.parse(self[first, stop - first])
-    end
-
-    private def numeric_blank?(byte : UInt8) : Bool
-      byte == 32_u8 || (byte >= 9_u8 && byte <= 13_u8)
-    end
-
-    def to_i64?(base : Int32) : Int64?
-      raise "base #{base} out of range (2..36)" if base < 2 || base > 36
-      index = 0
-      stop = @bytesize
-      while index < stop && numeric_blank?(self[index])
-        index += 1
-      end
-      while stop > index && numeric_blank?(self[stop - 1])
-        stop -= 1
-      end
-      return nil if index == stop
-
-      negative = to_unsafe[index] == 45_u8
-      if negative || to_unsafe[index] == 43_u8
-        return nil if index + 1 == stop
-        index = index + 1
-      end
-
-      # The same negative accumulation, for the type whose own `MIN` a program
-      # is most likely to read back: a nanosecond timestamp is an `Int64`.
-      radix = base.to_i64
-      limit = -9223372036854775808_i64
-      bound = limit // radix
-      cutoff = 0_i64 - (limit - bound * radix)
-
-      value = 0_i64
-      while index < stop
-        b = to_unsafe[index]
-        digit = -1_i64
-        if b >= 48_u8 && b <= 57_u8
-          digit = (b - 48_u8).to_i64
-        elsif b >= 97_u8 && b <= 122_u8
-          digit = (b - 97_u8).to_i64 + 10_i64
-        elsif b >= 65_u8 && b <= 90_u8
-          digit = (b - 65_u8).to_i64 + 10_i64
-        else
-          return nil
-        end
-        return nil if digit >= radix
-        return nil if value < bound || (value == bound && digit > cutoff)
-        value = value * radix - digit
-        index = index + 1
-      end
-
-      return value if negative
-      return nil if value == limit
-      0_i64 - value
-    end
-
-    # The text *span* names, a view: checked, as a span read from bytes is
-    # never trusted.
-    def [](span : Span) : String
-      self[span.start, span.size]
-    end
-
-    # `[]` in `while i < text.bytesize` (TapeCheckFreeLowering): the size
-    # is fixed.
-    @[AlwaysInline]
-    def __loop_fetch(index : Int32) : UInt8
-      Tape.out_of_range(index, @bytesize, "bytes") if index < 0
-      @ptr[index]
-    end
-
-    # `read_bytes_at` in `while i + room <= text.bytesize`
-    # (TapeCheckFreeLowering): *room* bytes from *at* are in range.
-    @[AlwaysInline]
-    def __loop_read_bytes_at(type : I.class, at : Int32, room : Int32) : I forall I
-      return read_bytes_at(type, at) if sizeof(I) > room || at < 0
-      {% if flag?(:x86_64) || flag?(:aarch64) || flag?(:i386) %}
-        (@ptr + at).as(Pointer(I)).unaligned_value
-      {% else %}
-        read_bytes_at(type, at)
-      {% end %}
-    end
-
-    def ==(other : String) : Bool
-      @bytesize == other.bytesize && same?(other.to_unsafe)
-    end
-
-    def ==(other : ::String) : Bool
-      @bytesize == other.bytesize && same?(other.to_unsafe)
-    end
-
-    def starts_with?(prefix : ::String) : Bool
-      prefix.bytesize <= @bytesize && String.new(@ptr, prefix.bytesize) == prefix
-    end
-
-    # Eight bytes a step, as `String#==` does: keys and paths, a hash
-    # table's every probe, are mostly shorter than its 32-byte stride.
-    private def same?(other : Pointer(UInt8)) : Bool
-      return true if @ptr.address == other.address
-      i = 0
-      while i + 8 <= @bytesize
-        x = (@ptr + i).as(Pointer(UInt64))
-        y = (other + i).as(Pointer(UInt64))
-        return false unless x.value == y.value
-        i = i + 8
-      end
-      while i < @bytesize
-        return false if @ptr[i] != other[i]
-        i = i + 1
-      end
-      true
-    end
-
-    def to_unsafe : Pointer(UInt8)
-      @ptr
-    end
-
-    # Copy these borrowed bytes into an independent GC-managed String.
-    # Application copies require a `@[TapeToHeap]` def, called while the
-    # source is alive, for example when retaining text in a cache/task.
-    # The source is unchanged and remains valid until its scope ends.
-    def to_s : ::String
-      ::String.new(@bytesize) do |buffer|
-        LibTapeCopy.memcpy(buffer, @ptr, @bytesize.to_u64, false) if @bytesize > 0
-      end
-    end
-
-    # The copy to keep after the tape ends, by its own name so it is seen
-    # where it is made: anywhere, where `to_s` needs a @[TapeToHeap] def.
-    def to_heap : ::String
-      to_s
-    end
-
-    # Writes the bytes to *io*, a file or socket, with no copy on the heap
-    # (`puts text`, `io << text`). A `String::Builder` or `std/io::Memory` is
-    # the heap: `TapeEscapeChecker` refuses writing into one outside an
-    # `@[TapeToHeap]` def.
-    def to_s(io : IyiIO) : Nil
-      io.write(@ptr, @bytesize)
-    end
-
-    # Writes the bytes the block pushes straight onto the tape, where the
-    # string will stay: no buffer to copy out of.
-    def self.build(capacity : Int32 = 32, & : String::Writer -> _) : String
-      writer = String::Writer.new(capacity)
-      yield writer
-      writer.finish
-    end
-
-    # `"a#{b}"` inside a `tape` block, where the text only goes to `puts` or
-    # `print`: the normalizer makes it this call, so the text is written on
-    # the tape rather than built on the heap. With no tape running (a
-    # `spawn`ed fiber, a proc called later) it is built on the heap as
-    # before and viewed.
-    def self.interpolate(*parts : *T) : String forall T
-      if IyiRegion.tape == 0
-        return view(::String.build do |io|
-          {% for i in 0...T.size %}
-            part = parts[{{i}}]
-            io << (part.is_a?(String) ? part.to_s : part)
-          {% end %}
-        end)
-      end
-      build do |writer|
-        {% for i in 0...T.size %}
-          writer.append_value(parts[{{i}}])
-        {% end %}
-      end
-    end
-  end
-
-  # The open end of a `String` being built: the address the next byte
-  # goes to, the end of the room and the start, in a block on the tape that
-  # the struct points at. Addresses rather than a length and capacity, so a
-  # push is one load, one compare and one store.
-  @[OnTape]
-  struct String::Writer
-    @state : Pointer(UInt64)
-
-    def initialize(capacity : Int32)
-      @state = Pointer(UInt64).new(IyiRegion.tape_bytes(32_u64 &+ capacity.to_u64))
-      start = @state.address &+ 32_u64
-      @state.value = start
-      (@state + 1_i64).value = start &+ capacity.to_u64
-      (@state + 2_i64).value = start
-      (@state + 3_i64).value = 0_u64
-    end
-
-    @[AlwaysInline]
-    def push(byte : UInt8) : Nil
-      cursor = @state.value
-      if cursor >= (@state + 1_i64).value
-        grow(1_u64)
-        cursor = @state.value
-      end
-      Pointer(UInt8).new(cursor).value = byte
-      @state.value = cursor &+ 1_u64
-    end
-
-    def append(text : ::String) : Nil
-      append(text.to_unsafe, text.bytesize)
-    end
-
-    def append(text : String) : Nil
-      append(text.to_unsafe, text.bytesize)
-    end
-
-    def append(bytes : Pointer(UInt8), count : Int32) : Nil
-      cursor = @state.value
-      if cursor &+ count.to_u64 > (@state + 1_i64).value
-        grow(count.to_u64)
-        cursor = @state.value
-      end
-      LibTapeCopy.memcpy(Pointer(UInt8).new(cursor), bytes, count.to_u64, false) if count > 0
-      @state.value = cursor &+ count.to_u64
-    end
-
-    # Room for *max* bytes, its address yielded for the OS to write into;
-    # the block answers how many it wrote. Only a `@[TapeUnsafe]` def calls
-    # it, and only to hand the address to a system call: `socket.read`
-    # (TapePointerChecker).
-    def unsafe_append(max : Int32, & : Pointer(UInt8) -> Int32) : Int32
-      raise "negative room: #{max}" if max < 0
-      reserve(length + max)
-      cursor = @state.value
-      written = yield Pointer(UInt8).new(cursor)
-      raise "wrote #{written} bytes into room for #{max}" if written > max
-      @state.value = cursor &+ written.to_u64 if written > 0
-      written
-    end
-
-    # *value*'s bytes, little-endian, as `Tape::Array#write_bytes` writes
-    # them: a codec writes a word at a time.
-    def write_bytes(value : I) : Nil forall I
-      {% unless I == UInt16 || I == UInt32 || I == UInt64 ||
-                  I == Int16 || I == Int32 || I == Int64 %}
-        {% raise "little-endian fields need a 16/32/64-bit integer" %}
-      {% end %}
-      stored = value
-      bytes = pointerof(stored).as(Pointer(UInt8))
-      {% unless flag?(:x86_64) || flag?(:aarch64) || flag?(:arm) ||
-                  flag?(:i386) || flag?(:wasm32) %}
-        i = 0
-        while i < sizeof(I) // 2
-          j = sizeof(I) - i - 1
-          byte = bytes[i]
-          bytes[i] = bytes[j]
-          bytes[j] = byte
-          i = i + 1
-        end
-      {% end %}
-      append(bytes, sizeof(I))
-    end
-
-    # The first *count* bytes dropped, the rest moved down to the start, as
-    # `Array#shift(n)`: a connection's buffer after a request is answered.
-    # What was finished from it before is written over.
-    def shift(count : Int32) : Nil
-      raise "shift #{count} of #{length} bytes" if count < 0 || count > length
-      start = Pointer(UInt8).new((@state + 2_i64).value)
-      left = length - count
-      # Down, front to back: no byte is written before it is read.
-      start.copy_from(start + count, left)
-      @state.value = start.address &+ left.to_u64
-    end
-
-    # *value* in decimal, written in place: `value.to_s` would make a heap
-    # string for every number a page prints.
-    def append_int(value : Int64) : Nil
-      # The magnitude as unsigned, so the most negative value has one too.
-      magnitude = value < 0 ? 0_u64 &- value.unsafe_to_u64 : value.unsafe_to_u64
-      digits = uninitialized StaticArray(UInt8, 20)
-      base = pointerof(digits).as(Pointer(UInt8))
-      count = 0
-      while true
-        (base + (19 - count)).value = (48_u64 &+ magnitude % 10_u64).unsafe_to_u8
-        count = count + 1
-        magnitude = magnitude // 10_u64
-        break if magnitude == 0_u64
-      end
-      push(45_u8) if value < 0
-      cursor = @state.value
-      if cursor &+ count.to_u64 > (@state + 1_i64).value
-        grow(count.to_u64)
-        cursor = @state.value
-      end
-      target = Pointer(UInt8).new(cursor)
-      # A decimal has at most 20 bytes. Fixed stores avoid LLVM turning
-      # this short stack copy into a libc memcpy in release builds.
-      {% for i in 0...20 %}
-        target[{{i}}] = base[20 - count + {{i}}] if {{i}} < count
-      {% end %}
-      @state.value = cursor &+ count.to_u64
-    end
-
-    def append_int(value : Int32) : Nil
-      append_int(value.to_i64)
-    end
-
-    # A piece of an interpolation: text and numbers written in place, any
-    # other value as its `to_s`.
-    def append_value(value : ::String | String) : Nil
-      append(value)
-    end
-
-    def append_value(value : Int8 | Int16 | Int32 | Int64 | UInt8 | UInt16 | UInt32) : Nil
-      append_int(value.to_i64)
-    end
-
-    def append_value(value : Float64) : Nil
-      append_float(value)
-    end
-
-    def append_value(value : Char) : Nil
-      value.each_byte { |byte| push(byte) }
-    end
-
-    def append_value(value : Nil) : Nil
-    end
-
-    def append_value(value) : Nil
-      append(value.to_s)
-    end
-
-    # *text* with `&`, `<`, `>`, `"` and `'` escaped as `ERB::Util.html_escape`
-    # writes them; the runs between them are copied whole.
-    # *value* as `Float64#to_s` writes it, in place: no heap string per
-    # number.
-    def append_float(value : Float64) : Nil
-      cursor = @state.value
-      if cursor &+ 32_u64 > (@state + 1_i64).value
-        grow(32_u64)
-        cursor = @state.value
-      end
-      count = IyiFloatText.write(IyiFloatText.bits_of(value), Pointer(UInt8).new(cursor))
-      @state.value = cursor &+ count.to_u64
-    end
-
-    # The same for text on the tape: a template's value, a request's field.
-    def append_html_escaped(text : String) : Nil
-      html_escaped(text.to_unsafe, text.bytesize)
-    end
-
-    def append_html_escaped(text : ::String) : Nil
-      html_escaped(text.to_unsafe, text.bytesize)
-    end
-
-    private def html_escaped(bytes : Pointer(UInt8), size : Int32) : Nil
-      start = 0
-      index = 0
-      while index < size
-        escaped = case bytes[index]
-                  when 38_u8 then "&amp;"
-                  when 60_u8 then "&lt;"
-                  when 62_u8 then "&gt;"
-                  when 34_u8 then "&quot;"
-                  when 39_u8 then "&#39;"
-                  else            nil
-                  end
-        if escaped
-          append(bytes + start, index - start) if index > start
-          append(escaped)
-          start = index + 1
-        end
-        index = index + 1
-      end
-      append(bytes + start, size - start) if size > start
-    end
-
-    def length : Int32
-      (@state.value &- (@state + 2_i64).value).to_i32
-    end
-
-    # The writer cut back to its first *length* bytes: what a caller wrote
-    # past them, and has copied out, is written over by what comes next.
-    def truncate(length : Int32) : Nil
-      raise "truncate to #{length} of #{self.length} bytes" if length < 0 || length > self.length
-      @state.value = (@state + 2_i64).value &+ length.to_u64
-    end
-
-    # Empty, keeping its room, to write again: `truncate(0)`, so what was
-    # finished from it before is written over.
-    def clear : Nil
-      @state.value = (@state + 2_i64).value
-    end
-
-    # Room for *total* bytes in all, so that writing up to them does not grow
-    # the writer again: once a request's length is known, its bytes grow in
-    # place even after other values have gone on the tape.
-    def reserve(total : Int32) : Nil
-      extra = total - length
-      grow(extra.to_u64) if extra > 0 && @state.value &+ extra.to_u64 > (@state + 1_i64).value
-    end
-
-    @[NoInline]
-    private def grow(extra : UInt64) : Nil
-      start = (@state + 2_i64).value
-      length = @state.value &- start
-      need = length &+ extra
-      capacity = (@state + 1_i64).value &- start
-      capacity = 1_u64 if capacity == 0_u64
-      while capacity < need
-        capacity = capacity &* 2_u64
-      end
-      start = IyiRegion.tape_resize(start, (@state + 1_i64).value, length, capacity, @state + 3_i64)
-      @state.value = start &+ length
-      (@state + 1_i64).value = start &+ capacity
-      (@state + 2_i64).value = start
-    end
-
-    # Appends *text* and says where it is: a `Span` of the finished string.
-    def append_span(text : ::String | String) : Span
-      start = length
-      append(text)
-      Span.new(start, text.bytesize)
-    end
-
-    def finish : String
-      start = (@state + 2_i64).value
-      String.new(Pointer(UInt8).new(start), (@state.value &- start).to_i32)
-    end
-
-    # *value* written as `append_value` writes it, answering the writer so
-    # pieces chain as into an IO: `w << name << ": " << count`.
-    def <<(value) : self
-      append_value(value)
-      self
-    end
-  end
-
-  # Elements on the tape. `T` is held by value, so an element may itself be a
-  # tape type, which no other generic may hold.
-  # A scanner over tape text, as std/string_scanner's `StringScanner` is
-  # over a String: an offset that moves forward as patterns match at it.
-  # What it answers are views of the text, nothing copied; offsets and
-  # counts are bytes. No regex and no groups: a lexer on the tape reads
-  # bytes, strings and characters.
-  @[OnTape]
-  struct Scanner
-    @string : String
-    @offset : Int32
-
-    def initialize(@string : String)
-      @offset = 0
-    end
-
-    # The text being scanned.
-    def string : String
-      @string
-    end
-
-    # The offset, in bytes.
-    def offset : Int32
-      @offset
-    end
-
-    # Moves the offset to byte *position*: the end of the text is the
-    # furthest it goes.
-    def offset=(position : Int32) : Int32
-      raise "scanner: offset #{position} out of range for #{@string.bytesize} bytes" if position < 0 || position > @string.bytesize
-      @offset = position
-    end
-
-    # Moves the offset *count* bytes, back when negative, unchecked: a
-    # lexer's step is one add, as `@pos += 1` is. Safe all the same, as
-    # every read checks: past the end, `eos?` holds and `current_byte` is
-    # nil; `offset=` is the checked move.
-    def advance(count : Int32 = 1) : Int32
-      @offset = @offset &+ count
-    end
-
-    # Whether the offset is at the end of the text.
-    def eos? : Bool
-      @offset >= @string.bytesize
-    end
-
-    # The text from the offset on.
-    def rest : String
-      @string[@offset, @string.bytesize - @offset]
-    end
-
-    # The byte at the offset, without moving, or nil at the end.
-    def current_byte : UInt8?
-      eos? ? nil : @string[@offset]
-    end
-
-    # Up to *count* bytes from the offset, without moving: fewer at the end.
-    def peek(count : Int32) : String
-      raise "scanner: negative lookahead count: #{count}" if count < 0
-      left = @string.bytesize - @offset
-      @string[@offset, count < left ? count : left]
-    end
-
-    # Matches *pattern* at the offset and moves past it, answering what
-    # matched, or nil without moving.
-    def scan(pattern : String | ::String | Char | Int32) : String?
-      size = here(pattern)
-      return nil unless size
-      found = @string[@offset, size]
-      @offset = @offset + size
-      found
-    end
-
-    # `scan`, answering how many bytes the offset moved.
-    def skip(pattern : String | ::String | Char | Int32) : Int32?
-      size = here(pattern)
-      @offset = @offset + size if size
-      size
-    end
-
-    # What `scan` would answer, without moving.
-    def check(pattern : String | ::String | Char | Int32) : String?
-      size = here(pattern)
-      size ? @string[@offset, size] : nil
-    end
-
-    # Searches for *pattern* from the offset and moves past the match,
-    # answering everything from the offset to the match's end.
-    def scan_until(pattern : String | ::String | Char) : String?
-      stop = until_end(pattern)
-      return nil unless stop
-      found = @string[@offset, stop - @offset]
-      @offset = stop
-      found
-    end
-
-    # `scan_until`, answering how many bytes the offset moved.
-    def skip_until(pattern : String | ::String | Char) : Int32?
-      stop = until_end(pattern)
-      return nil unless stop
-      moved = stop - @offset
-      @offset = stop
-      moved
-    end
-
-    # What `scan_until` would answer, without moving.
-    def check_until(pattern : String | ::String | Char) : String?
-      stop = until_end(pattern)
-      stop ? @string[@offset, stop - @offset] : nil
-    end
-
-    # How many bytes *pattern* matches at the offset, without moving, or nil.
-    def matches?(pattern : String | ::String | Char) : Int32?
-      here(pattern)
-    end
-
-    # Back to the start.
-    def reset : Nil
-      @offset = 0
-    end
-
-    # On to the end.
-    def terminate : Nil
-      @offset = @string.bytesize
-    end
-
-    private def here(count : Int32) : Int32?
-      raise "scanner: negative count: #{count}" if count < 0
-      count <= @string.bytesize - @offset ? count : nil
-    end
-
-    private def here(text : ::String) : Int32?
-      here(String.view(text))
-    end
-
-    private def here(text : String) : Int32?
-      at?(text, @offset) ? text.bytesize : nil
-    end
-
-    private def here(char : Char) : Int32?
-      at = @offset
-      matched = true
-      char.each_byte do |byte|
-        if matched && at < @string.bytesize && @string[at] == byte
-          at = at + 1
-        else
-          matched = false
-        end
-      end
-      matched ? at - @offset : nil
-    end
-
-    # Where the first match from the offset ends, or nil.
-    private def until_end(char : Char) : Int32?
-      found = @string.index(char, @offset)
-      found ? found + char.bytesize : nil
-    end
-
-    private def until_end(text : ::String) : Int32?
-      until_end(String.view(text))
-    end
-
-    private def until_end(text : String) : Int32?
-      at = @offset
-      while at + text.bytesize <= @string.bytesize
-        return at + text.bytesize if at?(text, at)
-        at = at + 1
-      end
-      nil
-    end
-
-    private def at?(text : String, at : Int32) : Bool
-      return false if text.bytesize > @string.bytesize - at
-      i = 0
-      while i < text.bytesize
-        return false unless @string[at + i] == text[i]
-        i = i + 1
-      end
-      true
-    end
-  end
-
-  @[OnTape]
-  struct Array(T)
-    @state : Pointer(UInt64)
-
-    def initialize(capacity : Int32 = 4)
-      @state = Pointer(UInt64).new(IyiRegion.tape_bytes(32_u64 &+ capacity.to_u64 &* sizeof(T).to_u64))
-      @state.value = @state.address &+ 32_u64
-      (@state + 1_i64).value = 0_u64
-      (@state + 2_i64).value = capacity.to_u64
-      (@state + 3_i64).value = 0_u64
-    end
-
-    # *count* elements, the block giving each by index, in room of exactly
-    # that size: it never grows, so it never moves to a region of its own
-    # however much the block puts on the tape.
-    def self.new(count : Int32, & : Int32 -> T) : self
-      array = new(count)
-      index = 0
-      while index < count
-        array.push(yield index)
-        index = index + 1
-      end
-      array
-    end
-
-    # *count* copies of *value*, as `Array.new(size, value)`.
-    def self.new(count : Int32, value : T) : self
-      new(count) { |index| value }
-    end
-
-    # Unchecked: `Tape.grown` keeps the room, and so the size, an Int32.
-    # The mask tells LLVM it is not negative, as the check did.
-    def size : Int32
-      ((@state + 1_i64).value & 0x7fffffff_u64).unsafe_to_i32
-    end
-
-    def empty? : Bool
-      size == 0
-    end
-
-    # `push` that answers the array, so `Tape::Array(Int32){1, 2, 3}` builds
-    # one as `Set{1, 2}` does.
-    def <<(value : T) : self
-      push(value)
-      self
-    end
-
-    def push(value : T) : Nil
-      size = (@state + 1_i64).value
-      if size >= (@state + 2_i64).value
-        grow
-      end
-      Pointer(T).new(@state.value &+ size &* sizeof(T).to_u64).value = value
-      (@state + 1_i64).value = size &+ 1_u64
-    end
-
-    @[NoInline]
-    private def grow : Nil
-      start = @state.value
-      room = (@state + 2_i64).value
-      capacity = Tape.grown(room)
-      width = sizeof(T).to_u64
-      @state.value = IyiRegion.tape_resize(start, start &+ room &* width, (@state + 1_i64).value &* width, capacity &* width, @state + 3_i64)
-      (@state + 2_i64).value = capacity
-    end
-
-    # One byte-range check, then memcpy into an aligned local.
-    def read_bytes_at(type : I.class, at : Int32) : I forall I
-      {% unless I == UInt16 || I == UInt32 || I == UInt64 ||
-                  I == Int16 || I == Int32 || I == Int64 %}
-        {% raise "little-endian fields need a 16/32/64-bit integer" %}
-      {% end %}
-      {% unless T == UInt8 %}
-        {% raise "little-endian fields require Tape::Array(UInt8)" %}
-      {% end %}
-      width = sizeof(I)
-      if at < 0 || at > size - width
-        raise "little-endian field out of range"
-      end
-      value = uninitialized I
-      target = pointerof(value).as(Pointer(UInt8))
-      target.copy_from(Pointer(UInt8).new(@state.value) + at, width)
-      {% unless flag?(:x86_64) || flag?(:aarch64) || flag?(:arm) ||
-                  flag?(:i386) || flag?(:wasm32) %}
-        i = 0
-        while i < sizeof(I) // 2
-          j = sizeof(I) - i - 1
-          byte = target[i]
-          target[i] = target[j]
-          target[j] = byte
-          i = i + 1
-        end
-      {% end %}
-      value
-    end
-
-    # Overwrites a field without growing the byte pool.
-    def write_bytes_at(at : Int32, value : I) : I forall I
-      {% unless I == UInt16 || I == UInt32 || I == UInt64 ||
-                  I == Int16 || I == Int32 || I == Int64 %}
-        {% raise "little-endian fields need a 16/32/64-bit integer" %}
-      {% end %}
-      {% unless T == UInt8 %}
-        {% raise "little-endian fields require Tape::Array(UInt8)" %}
-      {% end %}
-      width = sizeof(I)
-      if at < 0 || at > size - width
-        raise "little-endian field out of range"
-      end
-      stored = value
-      bytes = pointerof(stored).as(Pointer(UInt8))
-      {% unless flag?(:x86_64) || flag?(:aarch64) || flag?(:arm) ||
-                  flag?(:i386) || flag?(:wasm32) %}
-        i = 0
-        while i < sizeof(I) // 2
-          j = sizeof(I) - i - 1
-          byte = bytes[i]
-          bytes[i] = bytes[j]
-          bytes[j] = byte
-          i = i + 1
-        end
-      {% end %}
-      (Pointer(UInt8).new(@state.value) + at).copy_from(bytes, width)
-      value
-    end
-
-    # Appends a field, growing with the array's usual tape policy.
-    def write_bytes(value : I) : Nil forall I
-      {% unless I == UInt16 || I == UInt32 || I == UInt64 ||
-                  I == Int16 || I == Int32 || I == Int64 %}
-        {% raise "little-endian fields need a 16/32/64-bit integer" %}
-      {% end %}
-      {% unless T == UInt8 %}
-        {% raise "little-endian fields require Tape::Array(UInt8)" %}
-      {% end %}
-      count = (@state + 1_i64).value
-      width = sizeof(I).to_u64
-      while count + width > (@state + 2_i64).value
-        grow
-      end
-      stored = value
-      bytes = pointerof(stored).as(Pointer(UInt8))
-      {% unless flag?(:x86_64) || flag?(:aarch64) || flag?(:arm) ||
-                  flag?(:i386) || flag?(:wasm32) %}
-        i = 0
-        while i < sizeof(I) // 2
-          j = sizeof(I) - i - 1
-          byte = bytes[i]
-          bytes[i] = bytes[j]
-          bytes[j] = byte
-          i = i + 1
-        end
-      {% end %}
-      Pointer(UInt8).new(@state.value + count).copy_from(bytes, width.to_i32)
-      (@state + 1_i64).value = count + width
-    end
-
-    # The bytes of *text* at the end, with one room check and one copy
-    # rather than a `push` or `write_bytes` per byte or word.
-    def append(text : Tape::String) : Nil
-      {% unless T == UInt8 %}
-        {% raise "append requires Tape::Array(UInt8)" %}
-      {% end %}
-      count = (@state + 1_i64).value
-      width = text.bytesize.to_u64
-      while count + width > (@state + 2_i64).value
-        grow
-      end
-      Pointer(UInt8).new(@state.value + count).copy_from(text.to_unsafe, width.to_i32)
-      (@state + 1_i64).value = count + width
-    end
-
-    # As `Array#[]`: a negative index counts from the end, and one still out
-    # of range raises rather than reading past the elements.
-    def [](index : Int32) : T
-      count = size
-      unless index.unsafe_to_u64 < count.unsafe_to_u64
-        asked = index
-        index = index + count
-        unless asked < 0 && index.unsafe_to_u64 < count.unsafe_to_u64
-          Tape.out_of_range(asked, count, "elements")
-        end
-      end
-      Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value
-    end
-
-    # As `Array#[]=`, with the same range check: an element written in
-    # place, which does not grow the array.
-    def []=(index : Int32, value : T) : T
-      count = size
-      unless index.unsafe_to_u64 < count.unsafe_to_u64
-        asked = index
-        index = index + count
-        unless asked < 0 && index.unsafe_to_u64 < count.unsafe_to_u64
-          Tape.out_of_range(asked, count, "elements")
-        end
-      end
-      Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value = value
-    end
-
-    # `[]` in `while i < a.size`, where the loop keeps *index* below the
-    # size (TapeCheckFreeLowering): only a negative one is refused.
-    @[AlwaysInline]
-    def __loop_fetch(index : Int32) : T
-      Tape.out_of_range(index, size, "elements") if index < 0
-      unsafe_at(index)
-    end
-
-    @[AlwaysInline]
-    def __loop_store(index : Int32, value : T) : T
-      Tape.out_of_range(index, size, "elements") if index < 0
-      Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value = value
-    end
-
-    # The element at *link*, checked as `[]` checks an index: a link read
-    # from bytes is never trusted.
-    def [](link : Tape::Link(T, I)) : T forall I
-      self[link.index]
-    end
-
-    def []=(link : Tape::Link(T, I), value : T) : T forall I
-      self[link.index] = value
-    end
-
-    # A link to the element at *index*, stored in an `I`: `UInt8`, `UInt16`
-    # or `UInt32` (the default) bytes rather than a pointer's eight.
-    def link(index : Int32, width : I.class = UInt32) : Tape::Link(T, I) forall I
-      Tape.out_of_range(index, size, "elements") if index < 0 || index >= size
-      Tape::Link(T, I).new(index)
-    end
-
-    # The index the next `push` takes, as a link: a node can name a child
-    # before the child is pushed.
-    def next_link(width : I.class = UInt32) : Tape::Link(T, I) forall I
-      Tape::Link(T, I).new(size)
-    end
-
-    # Each element in order. The loop's own bound keeps the index in range,
-    # so no element is checked again (Goose elides these too).
-    def each(& : T -> Nil) : Nil
-      index = 0
-      count = size
-      while index < count
-        yield unsafe_at(index)
-        index = index + 1
-      end
-    end
-
-    def each_with_index(& : T, Int32 -> Nil) : Nil
-      index = 0
-      count = size
-      while index < count
-        yield unsafe_at(index), index
-        index = index + 1
-      end
-    end
-
-    # A new array of what the block gives for each element, sized first so
-    # the block may put other values on the tape.
-    def map(& : T -> U) : Array(U) forall U
-      Array(U).new(size) { |index| yield unsafe_at(index) }
-    end
-
-    def sum : T
-      total = T.zero
-      each { |value| total = total + value }
-      total
-    end
-
-    # Removes and returns the last element. Empty is a mistake, as with
-    # `Array#pop`; `pop?` answers nil.
-    def pop : T
-      raise "pop of an empty array" if empty?
-      count = (@state + 1_i64).value &- 1_u64
-      (@state + 1_i64).value = count
-      unsafe_at(count.to_i32)
-    end
-
-    def pop? : T?
-      empty? ? nil : pop
-    end
-
-    # Empty, keeping its room: the array to fill again in a loop. A new
-    # array each round instead stays on the tape until the block ends,
-    # every one of them (a tokenizer's queue, one per token: 110 MB for a
-    # 4.5 MB page).
-    def clear : Nil
-      (@state + 1_i64).value = 0_u64
-    end
-
-    # `first` on an empty array is a mistake, as with `Array#first`; the
-    # nilable questions answer nil.
-    def first : T
-      raise "first of an empty array" if empty?
-      unsafe_at(0)
-    end
-
-    def first? : T?
-      empty? ? nil : unsafe_at(0)
-    end
-
-    def last? : T?
-      empty? ? nil : unsafe_at(size - 1)
-    end
-
-    def includes?(value : T) : Bool
-      each { |element| return true if element == value }
-      false
-    end
-
-    # Where a value first is, or nil.
-    def index(value : T) : Int32?
-      each_with_index { |element, index| return index if element == value }
-      nil
-    end
-
-    def count(& : T -> Bool) : Int32
-      total = 0
-      each { |value| total = total + 1 if yield value }
-      total
-    end
-
-    def any?(& : T -> Bool) : Bool
-      each { |value| return true if yield value }
-      false
-    end
-
-    def all?(& : T -> Bool) : Bool
-      each { |value| return false unless yield value }
-      true
-    end
-
-    def find(& : T -> Bool) : T?
-      each { |value| return value if yield value }
-      nil
-    end
-
-    def reduce(initial : U, & : U, T -> U) : U forall U
-      accumulator = initial
-      each { |value| accumulator = yield accumulator, value }
-      accumulator
-    end
-
-    # The element whose key is largest, or smallest, the first of equals; a
-    # NaN key is above every other, as `Array#max_by` places it.
-    def max_by(& : T -> U) : T forall U
-      raise "max_by of an empty array" if empty?
-      best = unsafe_at(0)
-      best_key = yield best
-      index = 1
-      count = size
-      while index < count
-        value = unsafe_at(index)
-        key = yield value
-        if best_key < key || (key.is_a?(Float) && key != key && best_key == best_key)
-          best = value
-          best_key = key
-        end
-        index = index + 1
-      end
-      best
-    end
-
-    def min_by(& : T -> U) : T forall U
-      raise "min_by of an empty array" if empty?
-      best = unsafe_at(0)
-      best_key = yield best
-      index = 1
-      count = size
-      while index < count
-        value = unsafe_at(index)
-        key = yield value
-        if key < best_key || (key.is_a?(Float) && best_key != best_key && key == key)
-          best = value
-          best_key = key
-        end
-        index = index + 1
-      end
-      best
-    end
-
-    # The arrays below are new ones on the same tape, freed with it, as
-    # `Array`'s are new ones on the heap; an element may be a tape value.
-    def select(& : T -> Bool) : self
-      result = Array(T).new(size)
-      each { |value| result.push(value) if yield value }
-      result
-    end
-
-    def reject(& : T -> Bool) : self
-      result = Array(T).new(size)
-      each { |value| result.push(value) unless yield value }
-      result
-    end
-
-    def reversed : self
-      count = size
-      Array(T).new(count) { |index| unsafe_at(count - 1 - index) }
-    end
-
-    def dup : self
-      Array(T).new(size) { |index| unsafe_at(index) }
-    end
-
-    # The two in order, as a new array; neither operand changes.
-    def +(other : Array(T)) : self
-      joined = Array(T).new(size + other.size)
-      each { |value| joined.push(value) }
-      other.each { |value| joined.push(value) }
-      joined
-    end
-
-    # *other*'s elements after the last. Its length is read once, so
-    # `a.concat(a)` doubles `a` rather than growing without end.
-    def concat(other : Array(T)) : self
-      taking = other.size
-      index = 0
-      while index < taking
-        push(other.unchecked(index))
-        index = index + 1
-      end
-      self
-    end
-
-    # Sorted as `Array#sort_in_place` sorts, stable: the block answers above
-    # zero when its first element goes after the second.
-    def sort_in_place(& : T, T -> Int32) : self
-      reorder(order { |a, b| yield unsafe_at(a), unsafe_at(b) })
-    end
-
-    def sort_in_place : self
-      sort_in_place { |a, b| b < a ? 1 : 0 }
-    end
-
-    # Ascending by the key each element answers, computed once each.
-    def sort_in_place_by(& : T -> U) : self forall U
-      keys = map { |value| yield value }
-      reorder(order { |a, b| keys.unchecked(b) < keys.unchecked(a) ? 1 : 0 })
-    end
-
-    def sorted(& : T, T -> Int32) : self
-      dup.sort_in_place { |a, b| yield a, b }
-    end
-
-    def sorted : self
-      dup.sort_in_place
-    end
-
-    def sorted_by(& : T -> U) : self forall U
-      dup.sort_in_place_by { |value| yield value }
-    end
-
-    # The elements written into *writer*, *separator* between them: where
-    # `Array#join` builds a heap String, this one adds to the caller's text.
-    def join(writer : String::Writer, separator : ::String | String = "") : Nil
-      each_with_index do |value, index|
-        writer.append(separator) if index > 0
-        writer.append_value(value)
-      end
-    end
-
-    # The indexes in sorted order, by *compare* on two of them: runs of 16
-    # by insertion, then merged in pairs, as `Array#sort_in_place` does.
-    # Indexes rather than elements are moved, so the scratch room is two
-    # arrays of Int32 on the tape whatever `T` is.
-    private def order(& : Int32, Int32 -> Int32) : Array(Int32)
-      count = size
-      from = Array(Int32).new(count) { |index| index }
-      start = 0
-      while start < count
-        finish = start + 16 < count ? start + 16 : count
-        index = start + 1
-        while index < finish
-          value = from[index]
-          slot = index - 1
-          while slot >= start && (yield from[slot], value) > 0
-            from[slot + 1] = from[slot]
-            slot = slot - 1
-          end
-          from[slot + 1] = value
-          index = index + 1
-        end
-        start = finish
-      end
-      into = Array(Int32).new(count, 0)
-      width = 16
-      while width < count
-        low = 0
-        while low < count
-          middle = low + width < count ? low + width : count
-          high = middle + width < count ? middle + width : count
-          left = low
-          right = middle
-          cursor = low
-          while cursor < high
-            # The left run's element on a tie: that is what keeps it stable.
-            if right >= high || (left < middle && (yield from[left], from[right]) <= 0)
-              into[cursor] = from[left]
-              left = left + 1
-            else
-              into[cursor] = from[right]
-              right = right + 1
-            end
-            cursor = cursor + 1
-          end
-          low = high
-        end
-        spare = from
-        from = into
-        into = spare
-        width = width * 2
-      end
-      from
-    end
-
-    # The elements put in the order *order* names, from a copy of them.
-    private def reorder(order : Array(Int32)) : self
-      copy = dup
-      order.each_with_index { |from, to| unchecked_store(to, copy.unchecked(from)) }
-      self
-    end
-
-    # The indexes in *indexes*, each checked against this array once, for
-    # reads with no check after (`Tape::IndexView`).
-    def values_at(indexes : Array(Int32)) : IndexView(T)
-      IndexView(T).new(self, indexes)
-    end
-
-    # The elements copied into an `Array` on the heap, to keep after the
-    # tape ends. An element with a `to_heap` of its own - a Tape::String,
-    # a Tape::Array, an @[OnTape] struct that defines one - is copied by it;
-    # any other is taken as it is. A tape element with none is refused, as
-    # no `Array` may hold a tape value.
-    def to_heap
-      ::Array(typeof(Tape.heap_value(unsafe_at(0)))).new(size) { |index| Tape.heap_value(unsafe_at(index)) }
-    end
-
-    # For `IndexView`, whose indexes are known in range.
-    protected def unchecked(index : Int32) : T
-      unsafe_at(index)
-    end
-
-    protected def unchecked_store(index : Int32, value : T) : T
-      Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value = value
-    end
-
-    @[AlwaysInline]
-    private def unsafe_at(index : Int32) : T
-      Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value
-    end
-
-    # The elements' bytes, nothing copied: write them to a file or socket
-    # and `load` them back. `T` must be flat (see `Tape::Flat`), with no
-    # pointer in it, which `Link` and `Span` are not.
-    def bytes : String
-      {% begin %}
-        {% for t in [T] + T.instance_vars.map(&.type) %}
-          {% unless t < ::Number || t.name.starts_with?("Tape::Link(") || t == ::Tape::Span || t.annotation(::Tape::Flat) %}
-            {% raise "#{T} is not flat: #{t} in it is not a number, a Tape::Link, a Tape::Span or an @[Tape::Flat] struct" %}
-          {% end %}
-        {% end %}
-      {% end %}
-      String.new(Pointer(UInt8).new(@state.value), (size.to_u64 &* sizeof(T).to_u64).to_i32)
-    end
-
-    # The elements *bytes* holds, copied onto the tape: the length must be
-    # whole elements, and each link is checked when it is followed.
-    def self.load(bytes : String) : self
-      {% begin %}
-        {% for t in [T] + T.instance_vars.map(&.type) %}
-          {% unless t < ::Number || t.name.starts_with?("Tape::Link(") || t == ::Tape::Span || t.annotation(::Tape::Flat) %}
-            {% raise "#{T} is not flat: #{t} in it is not a number, a Tape::Link, a Tape::Span or an @[Tape::Flat] struct" %}
-          {% end %}
-        {% end %}
-      {% end %}
-      width = sizeof(T)
-      raise "#{bytes.bytesize} bytes are not whole #{width}-byte elements" if bytes.bytesize % width != 0
-      count = bytes.bytesize // width
-      array = new(count)
-      Pointer(UInt8).new(array.@state.value).copy_from(bytes.to_unsafe, bytes.bytesize)
-      (array.@state + 1_i64).value = count.to_u64
-      array
-    end
-  end
-
-  # `target`'s elements in the order *indexes* names them, every index
-  # checked once here: Goose's index types, `u32 in nodes`. Reading through
-  # one checks nothing more, as `target` never shrinks and the indexes are
-  # a copy no one else can change. CSR's `dist[adj[k]]` is
-  # `dist.values_at(adj)[k]`, checked when the edges come in.
-  @[OnTape]
-  struct IndexView(T)
-    @target : Array(T)
-    @at : Array(Int32)
-
-    def initialize(@target : Array(T), indexes : Array(Int32))
-      count = target.size
-      @at = Array(Int32).new(indexes.size) do |k|
-        index = indexes.__loop_fetch(k)
-        Tape.out_of_range(index, count, "elements") if index < 0 || index >= count
-        index
-      end
-    end
-
-    def size : Int32
-      @at.size
-    end
-
-    # The *k*th index, which is in range of the target.
-    def index(k : Int32) : Int32
-      @at[k]
-    end
-
-    # The element the *k*th index names: *k* checked against the indexes,
-    # the index not at all.
-    def [](k : Int32) : T
-      @target.unchecked(@at[k])
-    end
-
-    def []=(k : Int32, value : T) : T
-      @target.unchecked_store(@at[k], value)
-    end
-
-    # As `[]` in `while k < x.size` (TapeCheckFreeLowering): only *k*'s sign.
-    @[AlwaysInline]
-    def __loop_fetch(k : Int32) : T
-      @target.unchecked(@at.__loop_fetch(k))
-    end
-
-    @[AlwaysInline]
-    def __loop_store(k : Int32, value : T) : T
-      @target.unchecked_store(@at.__loop_fetch(k), value)
-    end
-
-    def each(& : T -> Nil) : Nil
-      @at.each { |index| yield @target.unchecked(index) }
-    end
-
-    # The viewed elements, in the view's order, copied to the heap as
-    # `Tape::Array#to_heap` copies them.
-    def to_heap
-      ::Array(typeof(Tape.heap_value(@target.unchecked(0)))).new(size) { |k| Tape.heap_value(self[k]) }
-    end
-  end
-
   # An element as `to_heap` keeps it: its own copy, or itself.
   def self.heap_value(value)
     value.responds_to?(:to_heap) ? value.to_heap : value
-  end
-
-  # A typed link to an element of a `Tape::Array(T)`: its index in `I`
-  # bytes. It holds no pointer, so it stays valid while the array grows and
-  # moves, may be kept in any value, and is the same in bytes written out
-  # and loaded back. The array checks it when followed.
-  struct Link(T, I)
-    @index : I
-
-    def initialize(index : Int32)
-      raise "link #{index} does not fit #{sizeof(I)} bytes" if index < 0 || index.to_u64 >= Link.top(I)
-      @index = Link.narrow(index.to_u64, I)
-    end
-
-    # The link to nothing: `none?` is true.
-    def self.none : self
-      new(Link.narrow(Link.top(I), I), none: true)
-    end
-
-    protected def initialize(@index : I, *, none : Bool)
-    end
-
-    def none? : Bool
-      wide == Link.top(I)
-    end
-
-    def index : Int32
-      raise "Tape::Link: none" if none?
-      wide.to_i32
-    end
-
-    # The low `I` bytes of *value*, and back: the prelude converts to and
-    # from few widths, and a link is unsigned and little-endian either way.
-    protected def self.narrow(value : UInt64, width : W.class) : W forall W
-      pointerof(value).as(Pointer(W)).value
-    end
-
-    protected def self.top(width : W.class) : UInt64 forall W
-      case sizeof(W)
-      when 1 then 0xff_u64
-      when 2 then 0xffff_u64
-      when 4 then 0xffffffff_u64
-      else        raise "a link is 1, 2 or 4 bytes, not #{sizeof(W)}"
-      end
-    end
-
-    private def wide : UInt64
-      value = 0_u64
-      pointerof(value).as(Pointer(I)).value = @index
-      value
-    end
-  end
-
-  # Text inside a `Tape::String`, as its start and length: a record holds
-  # its text this way, flat, beside the one string all its text is in.
-  struct Span
-    getter start : Int32
-    getter size : Int32
-
-    def initialize(@start : Int32, @size : Int32)
-    end
   end
 
   # A struct is flat when each field is a number, a `Link`, a `Span` or
   # another flat struct: it has no pointer, so its bytes are its value.
   annotation Flat
   end
+end
 
-  # A tree on the tape as one stream in document order, the layout simdjson
-  # calls a tape: a container is written when it opens and told where its
-  # subtree ends when it closes, so its children follow it and a reader
-  # steps over a child in one jump. The tree is one growing value, written
-  # once, whole: measured faster than a heap tree, where a `Array` per node
-  # is slower (TAPE_DESIGN.md, "Layout").
-  @[OnTape]
-  struct Tree(T)
-    @state : Pointer(UInt64)
+# Bytes on the tape. Not a `String`: a `String` may be kept anywhere, and
+# this may not. `to_s` copies it into a retained String explicitly.
+@[OnTape]
+struct Str
+  @ptr : Pointer(UInt8)
+  @bytesize : Int32
 
-    def initialize(capacity : Int32 = 64)
-      width = sizeof(Entry(T)).to_u64
-      @state = Pointer(UInt64).new(IyiRegion.tape_bytes(32_u64 &+ capacity.to_u64 &* width))
-      @state.value = @state.address &+ 32_u64
-      (@state + 1_i64).value = 0_u64
-      (@state + 2_i64).value = capacity.to_u64
-      (@state + 3_i64).value = 0_u64
-    end
+  # Built in a local, not by `initialize`: a store through `self` in
+  # `initialize` takes the collector's write barrier (codegen cannot see
+  # that `self` is a stack slot there), one into a local's field does not.
+  def initialize(@ptr : Pointer(UInt8), @bytesize : Int32)
+  end
 
-    # Unchecked: `Tape.grown` keeps the room, and so the size, an Int32.
-    # The mask tells LLVM it is not negative, as the check did.
-    def size : Int32
-      ((@state + 1_i64).value & 0x7fffffff_u64).unsafe_to_i32
-    end
+  def self.new(ptr : Pointer(UInt8), bytesize : Int32) : self
+    made = uninitialized self
+    pointerof(made.@ptr).value = ptr
+    pointerof(made.@bytesize).value = bytesize
+    made
+  end
 
-    # A value with no children; its index.
-    def leaf(value : T) : Int32
-      put(value, size + 1)
-    end
+  # *text*'s bytes copied onto the tape: a String a program has, made a
+  # tape string without a raw pointer.
+  def self.new(text : String) : self
+    bytes = Pointer(UInt8).new(IyiRegion.tape_bytes(text.bytesize.to_u64))
+    bytes.copy_from(text.to_unsafe, text.bytesize)
+    new(bytes, text.bytesize)
+  end
 
-    # A container whose children are the values added until `close`; its
-    # index, which `close` takes.
-    def open(value : T) : Int32
-      put(value, -1)
-    end
+  # A view of *text*'s bytes, nothing copied: a String is never changed,
+  # and the view's pointer, a root on the tape and the stack, keeps it
+  # alive while the view is (the collector takes an interior pointer to
+  # its object).
+  def self.view(text : String) : self
+    new(text.to_unsafe, text.bytesize)
+  end
 
-    # Ends the container opened at *at*: its subtree is everything added
-    # since.
-    def close(at : Int32) : Nil
-      entry = slot(at)
-      raise "Tape::Tree#close: #{at} is not open" unless entry.value.stop == -1
-      entry.value = Entry(T).new(entry.value.value, size)
-    end
+  def bytesize : Int32
+    @bytesize
+  end
 
-    def [](index : Int32) : T
-      slot(index).value.value
-    end
+  def empty? : Bool
+    @bytesize == 0
+  end
 
-    # The index past *index*'s subtree: the next sibling, if any.
-    def stop(index : Int32) : Int32
-      stop = slot(index).value.stop
-      raise "Tape::Tree: #{index} is not closed" if stop == -1
-      stop
-    end
-
-    # Each child of the container at *index*, by index.
-    def each_child(index : Int32, & : Int32 -> _) : Nil
-      child = index + 1
-      last = stop(index)
-      while child < last
-        yield child
-        child = stop(child)
+  # The byte at *index*, from the end when negative; one out of range
+  # raises rather than reading what follows. `to_unsafe` is the library's.
+  # One unsigned compare on the way to the byte; a negative index
+  # takes the other branch, counted from the end.
+  def [](index : Int32) : UInt8
+    unless index.unsafe_to_u64 < @bytesize.unsafe_to_u64
+      asked = index
+      index = index + @bytesize
+      unless asked < 0 && index.unsafe_to_u64 < @bytesize.unsafe_to_u64
+        Tape.out_of_range(asked, @bytesize, "bytes")
       end
     end
+    @ptr[index]
+  end
 
-    private def put(value : T, stop : Int32) : Int32
-      count = (@state + 1_i64).value
-      grow if count >= (@state + 2_i64).value
-      width = sizeof(Entry(T)).to_u64
-      Pointer(Entry(T)).new(@state.value &+ count &* width).value = Entry(T).new(value, stop)
-      (@state + 1_i64).value = count &+ 1_u64
-      count.to_i32
+  # One byte-range check, then one load where words are little-endian
+  # and a load need not be aligned; elsewhere a copy into an aligned
+  # local, its bytes turned around.
+  def read_bytes_at(type : I.class, at : Int32) : I forall I
+    {% unless I == UInt16 || I == UInt32 || I == UInt64 ||
+                I == Int16 || I == Int32 || I == Int64 %}
+      {% raise "little-endian fields need a 16/32/64-bit integer" %}
+    {% end %}
+    width = sizeof(I)
+    if at < 0 || at > @bytesize - width
+      raise "little-endian field out of range"
     end
+    {% if flag?(:x86_64) || flag?(:aarch64) || flag?(:i386) %}
+      return (@ptr + at).as(Pointer(I)).unaligned_value
+    {% end %}
+    value = uninitialized I
+    target = pointerof(value).as(Pointer(UInt8))
+    target.copy_from(@ptr + at, width)
+    {% unless flag?(:x86_64) || flag?(:aarch64) || flag?(:arm) ||
+                flag?(:i386) || flag?(:wasm32) %}
+      i = 0
+      while i < sizeof(I) // 2
+        j = sizeof(I) - i - 1
+        byte = target[i]
+        target[i] = target[j]
+        target[j] = byte
+        i = i + 1
+      end
+    {% end %}
+    value
+  end
 
-    private def slot(index : Int32) : Pointer(Entry(T))
-      count = size
-      Tape.out_of_range(index, count, "entries") if index < 0 || index >= count
-      Pointer(Entry(T)).new(@state.value &+ index.to_u64 &* sizeof(Entry(T)).to_u64)
+  # *count* bytes from *start*, a view of these: nothing is copied.
+  def [](start : Int32, count : Int32) : Str
+    raise "bytes #{start}, #{count} out of range for #{@bytesize}" if start < 0 || count < 0 || start > @bytesize - count
+    Str.new(@ptr + start, count)
+  end
+
+  # The bytes *range* names, a view, as `Array#[](range)` reads one: a
+  # negative end counts from the last, an endless one runs to it, and a
+  # range that begins past the end is refused. `line[space + 1..]` is
+  # the rest of the line.
+  def [](range : Range(B, E)) : Str forall B, E
+    from = range.begin
+    start = from.nil? ? 0 : from
+    start = @bytesize + start if start < 0
+    raise "range #{range} out of range for #{@bytesize} bytes" if start < 0 || start > @bytesize
+    to = range.end
+    stop = to.nil? ? @bytesize : (to < 0 ? @bytesize + to : to)
+    if stop >= @bytesize
+      stop = @bytesize
+    elsif !range.exclusive?
+      stop = stop + 1
     end
+    Str.new(@ptr + start, stop > start ? stop - start : 0)
+  end
 
-    @[NoInline]
-    private def grow : Nil
-      start = @state.value
-      room = (@state + 2_i64).value
-      capacity = Tape.grown(room)
-      width = sizeof(Entry(T)).to_u64
-      @state.value = IyiRegion.tape_resize(start, start &+ room &* width, (@state + 1_i64).value &* width, capacity &* width, @state + 3_i64)
-      (@state + 2_i64).value = capacity
+  def each_byte(& : UInt8 -> _) : Nil
+    i = 0
+    while i < @bytesize
+      yield @ptr[i]
+      i = i + 1
     end
   end
 
-  # One entry of a `Tree`: the value and the index past its subtree.
-  @[OnTape]
-  private struct Tree::Entry(T)
-    getter value : T
-    getter stop : Int32
-
-    def initialize(@value : T, @stop : Int32)
+  # Each line, as `String#each_line` (std/text) splits them: a final
+  # newline closing the last rather than opening an empty one, and a `\r`
+  # before a newline left off. Each line is a view: nothing is copied.
+  def each_line(& : Str -> Nil) : Nil
+    start = 0
+    at = 0
+    while at < @bytesize
+      if @ptr[at] == 10_u8
+        stop = at > start && @ptr[at - 1] == 13_u8 ? at - 1 : at
+        yield Str.new(@ptr + start, stop - start)
+        start = at + 1
+      end
+      at = at + 1
     end
+    if start < @bytesize
+      # No newline after it, so a `\r` here is text: `"b\r"` is `"b\r"`.
+      yield Str.new(@ptr + start, @bytesize - start)
+    end
+  end
+
+  # Where *char* first is from *offset*, or nil, byte-indexed as
+  # `String#index` is; a char past ASCII by its UTF-8 bytes.
+  def index(char : Char, offset : Int32 = 0) : Int32?
+    if char.ord < 128
+      byte = char.ord.to_u8
+      at = offset
+      while at < @bytesize
+        return at if @ptr[at] == byte
+        at = at + 1
+      end
+      return nil
+    end
+    # Its UTF-8 bytes, matched whole where they start.
+    room = uninitialized StaticArray(UInt8, 4)
+    wanted = pointerof(room).as(Pointer(UInt8))
+    width = 0
+    char.each_byte do |byte|
+      wanted[width] = byte
+      width = width + 1
+    end
+    at = offset
+    while at + width <= @bytesize
+      k = 0
+      while k < width && @ptr[at + k] == wanted[k]
+        k = k + 1
+      end
+      return at if k == width
+      at = at + 1
+    end
+    nil
+  end
+
+  def includes?(char : Char) : Bool
+    !index(char).nil?
+  end
+
+  # The pieces between each *separator*, as `String#split(Char)` cuts
+  # them, empty ones kept; each a view, in a new array on the tape.
+  def split(separator : Char) : Ary(Str)
+    width = separator.bytesize
+    pieces = Ary(Str).new
+    start = 0
+    while at = index(separator, start)
+      pieces << self[start, at - start]
+      start = at + width
+    end
+    pieces << self[start, @bytesize - start]
+    pieces
+  end
+
+  # As `String#to_i`: the digits as an Int32, a mistake when they are not
+  # one. `to_i?` answers nil instead. Read on the tape, nothing copied.
+  def to_i : Int32
+    to_i? || raise "not a number: #{@bytesize} bytes"
+  end
+
+  def to_i? : Int32?
+    return nil if @bytesize == 0
+    index = 0
+    negative = @ptr[0] == 45_u8
+    if negative || @ptr[0] == 43_u8
+      return nil if @bytesize == 1
+      index = 1
+    end
+    value = 0
+    while index < @bytesize
+      digit = @ptr[index].to_i - 48
+      return nil if digit < 0 || digit > 9
+      return nil if value < -214748364 || (value == -214748364 && digit > 8)
+      value = value * 10 - digit
+      index = index + 1
+    end
+    return value if negative
+    return nil if value == -2147483648
+    0 - value
+  end
+
+  def to_i64? : Int64?
+    to_i64?(10)
+  end
+
+  def to_f : Float64
+    first = 0
+    stop = @bytesize
+    while first < stop && numeric_blank?(self[first])
+      first += 1
+    end
+    while stop > first && numeric_blank?(self[stop - 1])
+      stop -= 1
+    end
+    IyiFloatText.parse(self[first, stop - first])
+  end
+
+  private def numeric_blank?(byte : UInt8) : Bool
+    byte == 32_u8 || (byte >= 9_u8 && byte <= 13_u8)
+  end
+
+  def to_i64?(base : Int32) : Int64?
+    raise "base #{base} out of range (2..36)" if base < 2 || base > 36
+    index = 0
+    stop = @bytesize
+    while index < stop && numeric_blank?(self[index])
+      index += 1
+    end
+    while stop > index && numeric_blank?(self[stop - 1])
+      stop -= 1
+    end
+    return nil if index == stop
+
+    negative = to_unsafe[index] == 45_u8
+    if negative || to_unsafe[index] == 43_u8
+      return nil if index + 1 == stop
+      index = index + 1
+    end
+
+    # The same negative accumulation, for the type whose own `MIN` a program
+    # is most likely to read back: a nanosecond timestamp is an `Int64`.
+    radix = base.to_i64
+    limit = -9223372036854775808_i64
+    bound = limit // radix
+    cutoff = 0_i64 - (limit - bound * radix)
+
+    value = 0_i64
+    while index < stop
+      b = to_unsafe[index]
+      digit = -1_i64
+      if b >= 48_u8 && b <= 57_u8
+        digit = (b - 48_u8).to_i64
+      elsif b >= 97_u8 && b <= 122_u8
+        digit = (b - 97_u8).to_i64 + 10_i64
+      elsif b >= 65_u8 && b <= 90_u8
+        digit = (b - 65_u8).to_i64 + 10_i64
+      else
+        return nil
+      end
+      return nil if digit >= radix
+      return nil if value < bound || (value == bound && digit > cutoff)
+      value = value * radix - digit
+      index = index + 1
+    end
+
+    return value if negative
+    return nil if value == limit
+    0_i64 - value
+  end
+
+  # The text *span* names, a view: checked, as a span read from bytes is
+  # never trusted.
+  def [](span : Str::Span) : Str
+    self[span.start, span.size]
+  end
+
+  # `[]` in `while i < text.bytesize` (TapeCheckFreeLowering): the size
+  # is fixed.
+  @[AlwaysInline]
+  def __loop_fetch(index : Int32) : UInt8
+    Tape.out_of_range(index, @bytesize, "bytes") if index < 0
+    @ptr[index]
+  end
+
+  # `read_bytes_at` in `while i + room <= text.bytesize`
+  # (TapeCheckFreeLowering): *room* bytes from *at* are in range.
+  @[AlwaysInline]
+  def __loop_read_bytes_at(type : I.class, at : Int32, room : Int32) : I forall I
+    return read_bytes_at(type, at) if sizeof(I) > room || at < 0
+    {% if flag?(:x86_64) || flag?(:aarch64) || flag?(:i386) %}
+      (@ptr + at).as(Pointer(I)).unaligned_value
+    {% else %}
+      read_bytes_at(type, at)
+    {% end %}
+  end
+
+  def ==(other : Str) : Bool
+    @bytesize == other.bytesize && same?(other.to_unsafe)
+  end
+
+  def ==(other : String) : Bool
+    @bytesize == other.bytesize && same?(other.to_unsafe)
+  end
+
+  def starts_with?(prefix : String) : Bool
+    prefix.bytesize <= @bytesize && Str.new(@ptr, prefix.bytesize) == prefix
+  end
+
+  # Eight bytes a step, as `String#==` does: keys and paths, a hash
+  # table's every probe, are mostly shorter than its 32-byte stride.
+  private def same?(other : Pointer(UInt8)) : Bool
+    return true if @ptr.address == other.address
+    i = 0
+    while i + 8 <= @bytesize
+      x = (@ptr + i).as(Pointer(UInt64))
+      y = (other + i).as(Pointer(UInt64))
+      return false unless x.value == y.value
+      i = i + 8
+    end
+    while i < @bytesize
+      return false if @ptr[i] != other[i]
+      i = i + 1
+    end
+    true
+  end
+
+  def to_unsafe : Pointer(UInt8)
+    @ptr
+  end
+
+  # Copy these borrowed bytes into an independent GC-managed String.
+  # Application copies require a `@[TapeToHeap]` def, called while the
+  # source is alive, for example when retaining text in a cache/task.
+  # The source is unchanged and remains valid until its scope ends.
+  def to_s : String
+    String.new(@bytesize) do |buffer|
+      LibTapeCopy.memcpy(buffer, @ptr, @bytesize.to_u64, false) if @bytesize > 0
+    end
+  end
+
+  # The copy to keep after the tape ends, by its own name so it is seen
+  # where it is made: anywhere, where `to_s` needs a @[TapeToHeap] def.
+  def to_heap : String
+    to_s
+  end
+
+  # Writes the bytes to *io*, a file or socket, with no copy on the heap
+  # (`puts text`, `io << text`). A `String::Builder` or `std/io::Memory` is
+  # the heap: `TapeEscapeChecker` refuses writing into one outside an
+  # `@[TapeToHeap]` def.
+  def to_s(io : IyiIO) : Nil
+    io.write(@ptr, @bytesize)
+  end
+
+  # Writes the bytes the block pushes straight onto the tape, where the
+  # string will stay: no buffer to copy out of.
+  def self.build(capacity : Int32 = 64, & : Str::Builder -> _) : Str
+    writer = Str::Builder.new(capacity)
+    yield writer
+    writer.finish
+  end
+
+  # `"a#{b}"` inside a `tape` block, where the text only goes to `puts` or
+  # `print`: the normalizer makes it this call, so the text is written on
+  # the tape rather than built on the heap. With no tape running (a
+  # `spawn`ed fiber, a proc called later) it is built on the heap as
+  # before and viewed.
+  def self.interpolate(*parts : *T) : Str forall T
+    if IyiRegion.tape == 0
+      return view(String.build do |io|
+        {% for i in 0...T.size %}
+          part = parts[{{i}}]
+          io << (part.is_a?(Str) ? part.to_s : part)
+        {% end %}
+      end)
+    end
+    build do |writer|
+      {% for i in 0...T.size %}
+        writer.append_value(parts[{{i}}])
+      {% end %}
+    end
+  end
+end
+
+# The open end of a `String` being built: the address the next byte
+# goes to, the end of the room and the start, in a block on the tape that
+# the struct points at. Addresses rather than a length and capacity, so a
+# push is one load, one compare and one store.
+@[OnTape]
+struct Str::Builder
+  @state : Pointer(UInt64)
+
+  def initialize(capacity : Int32 = 64)
+    @state = Pointer(UInt64).new(IyiRegion.tape_bytes(32_u64 &+ capacity.to_u64))
+    start = @state.address &+ 32_u64
+    @state.value = start
+    (@state + 1_i64).value = start &+ capacity.to_u64
+    (@state + 2_i64).value = start
+    (@state + 3_i64).value = 0_u64
+  end
+
+  @[AlwaysInline]
+  def push(byte : UInt8) : Nil
+    cursor = @state.value
+    if cursor >= (@state + 1_i64).value
+      grow(1_u64)
+      cursor = @state.value
+    end
+    Pointer(UInt8).new(cursor).value = byte
+    @state.value = cursor &+ 1_u64
+  end
+
+  def append(text : String) : Nil
+    append(text.to_unsafe, text.bytesize)
+  end
+
+  def append(text : Str) : Nil
+    append(text.to_unsafe, text.bytesize)
+  end
+
+  def append(bytes : Pointer(UInt8), count : Int32) : Nil
+    cursor = @state.value
+    if cursor &+ count.to_u64 > (@state + 1_i64).value
+      grow(count.to_u64)
+      cursor = @state.value
+    end
+    LibTapeCopy.memcpy(Pointer(UInt8).new(cursor), bytes, count.to_u64, false) if count > 0
+    @state.value = cursor &+ count.to_u64
+  end
+
+  # Room for *max* bytes, its address yielded for the OS to write into;
+  # the block answers how many it wrote. Only a `@[TapeUnsafe]` def calls
+  # it, and only to hand the address to a system call: `socket.read`
+  # (TapePointerChecker).
+  def unsafe_append(max : Int32, & : Pointer(UInt8) -> Int32) : Int32
+    raise "negative room: #{max}" if max < 0
+    reserve(length + max)
+    cursor = @state.value
+    written = yield Pointer(UInt8).new(cursor)
+    raise "wrote #{written} bytes into room for #{max}" if written > max
+    @state.value = cursor &+ written.to_u64 if written > 0
+    written
+  end
+
+  # *value*'s bytes, little-endian, as `Ary#write_bytes` writes
+  # them: a codec writes a word at a time.
+  def write_bytes(value : I) : Nil forall I
+    {% unless I == UInt16 || I == UInt32 || I == UInt64 ||
+                I == Int16 || I == Int32 || I == Int64 %}
+      {% raise "little-endian fields need a 16/32/64-bit integer" %}
+    {% end %}
+    stored = value
+    bytes = pointerof(stored).as(Pointer(UInt8))
+    {% unless flag?(:x86_64) || flag?(:aarch64) || flag?(:arm) ||
+                flag?(:i386) || flag?(:wasm32) %}
+      i = 0
+      while i < sizeof(I) // 2
+        j = sizeof(I) - i - 1
+        byte = bytes[i]
+        bytes[i] = bytes[j]
+        bytes[j] = byte
+        i = i + 1
+      end
+    {% end %}
+    append(bytes, sizeof(I))
+  end
+
+  # The first *count* bytes dropped, the rest moved down to the start, as
+  # `Array#shift(n)`: a connection's buffer after a request is answered.
+  # What was finished from it before is written over.
+  def shift(count : Int32) : Nil
+    raise "shift #{count} of #{length} bytes" if count < 0 || count > length
+    start = Pointer(UInt8).new((@state + 2_i64).value)
+    left = length - count
+    # Down, front to back: no byte is written before it is read.
+    start.copy_from(start + count, left)
+    @state.value = start.address &+ left.to_u64
+  end
+
+  # *value* in decimal, written in place: `value.to_s` would make a heap
+  # string for every number a page prints.
+  def append_int(value : Int64) : Nil
+    # The magnitude as unsigned, so the most negative value has one too.
+    magnitude = value < 0 ? 0_u64 &- value.unsafe_to_u64 : value.unsafe_to_u64
+    digits = uninitialized StaticArray(UInt8, 20)
+    base = pointerof(digits).as(Pointer(UInt8))
+    count = 0
+    while true
+      (base + (19 - count)).value = (48_u64 &+ magnitude % 10_u64).unsafe_to_u8
+      count = count + 1
+      magnitude = magnitude // 10_u64
+      break if magnitude == 0_u64
+    end
+    push(45_u8) if value < 0
+    cursor = @state.value
+    if cursor &+ count.to_u64 > (@state + 1_i64).value
+      grow(count.to_u64)
+      cursor = @state.value
+    end
+    target = Pointer(UInt8).new(cursor)
+    # A decimal has at most 20 bytes. Fixed stores avoid LLVM turning
+    # this short stack copy into a libc memcpy in release builds.
+    {% for i in 0...20 %}
+      target[{{i}}] = base[20 - count + {{i}}] if {{i}} < count
+    {% end %}
+    @state.value = cursor &+ count.to_u64
+  end
+
+  def append_int(value : Int32) : Nil
+    append_int(value.to_i64)
+  end
+
+  # A piece of an interpolation: text and numbers written in place, any
+  # other value as its `to_s`.
+  def append_value(value : String | Str) : Nil
+    append(value)
+  end
+
+  def append_value(value : Int8 | Int16 | Int32 | Int64 | UInt8 | UInt16 | UInt32) : Nil
+    append_int(value.to_i64)
+  end
+
+  def append_value(value : Float64) : Nil
+    append_float(value)
+  end
+
+  def append_value(value : Char) : Nil
+    value.each_byte { |byte| push(byte) }
+  end
+
+  def append_value(value : Nil) : Nil
+  end
+
+  def append_value(value) : Nil
+    append(value.to_s)
+  end
+
+  # *text* with `&`, `<`, `>`, `"` and `'` escaped as `ERB::Util.html_escape`
+  # writes them; the runs between them are copied whole.
+  # *value* as `Float64#to_s` writes it, in place: no heap string per
+  # number.
+  def append_float(value : Float64) : Nil
+    cursor = @state.value
+    if cursor &+ 32_u64 > (@state + 1_i64).value
+      grow(32_u64)
+      cursor = @state.value
+    end
+    count = IyiFloatText.write(IyiFloatText.bits_of(value), Pointer(UInt8).new(cursor))
+    @state.value = cursor &+ count.to_u64
+  end
+
+  # The same for text on the tape: a template's value, a request's field.
+  def append_html_escaped(text : Str) : Nil
+    html_escaped(text.to_unsafe, text.bytesize)
+  end
+
+  def append_html_escaped(text : String) : Nil
+    html_escaped(text.to_unsafe, text.bytesize)
+  end
+
+  private def html_escaped(bytes : Pointer(UInt8), size : Int32) : Nil
+    start = 0
+    index = 0
+    while index < size
+      escaped = case bytes[index]
+                when 38_u8 then "&amp;"
+                when 60_u8 then "&lt;"
+                when 62_u8 then "&gt;"
+                when 34_u8 then "&quot;"
+                when 39_u8 then "&#39;"
+                else            nil
+                end
+      if escaped
+        append(bytes + start, index - start) if index > start
+        append(escaped)
+        start = index + 1
+      end
+      index = index + 1
+    end
+    append(bytes + start, size - start) if size > start
+  end
+
+  def length : Int32
+    (@state.value &- (@state + 2_i64).value).to_i32
+  end
+
+  # The writer cut back to its first *length* bytes: what a caller wrote
+  # past them, and has copied out, is written over by what comes next.
+  def truncate(length : Int32) : Nil
+    raise "truncate to #{length} of #{self.length} bytes" if length < 0 || length > self.length
+    @state.value = (@state + 2_i64).value &+ length.to_u64
+  end
+
+  # Empty, keeping its room, to write again: `truncate(0)`, so what was
+  # finished from it before is written over.
+  def clear : Nil
+    @state.value = (@state + 2_i64).value
+  end
+
+  # Room for *total* bytes in all, so that writing up to them does not grow
+  # the writer again: once a request's length is known, its bytes grow in
+  # place even after other values have gone on the tape.
+  def reserve(total : Int32) : Nil
+    extra = total - length
+    grow(extra.to_u64) if extra > 0 && @state.value &+ extra.to_u64 > (@state + 1_i64).value
+  end
+
+  @[NoInline]
+  private def grow(extra : UInt64) : Nil
+    start = (@state + 2_i64).value
+    length = @state.value &- start
+    need = length &+ extra
+    capacity = (@state + 1_i64).value &- start
+    capacity = 1_u64 if capacity == 0_u64
+    while capacity < need
+      capacity = capacity &* 2_u64
+    end
+    start = IyiRegion.tape_resize(start, (@state + 1_i64).value, length, capacity, @state + 3_i64)
+    @state.value = start &+ length
+    (@state + 1_i64).value = start &+ capacity
+    (@state + 2_i64).value = start
+  end
+
+  # Appends *text* and says where it is: a `Span` of the finished string.
+  def append_span(text : String | Str) : Str::Span
+    start = length
+    append(text)
+    Str::Span.new(start, text.bytesize)
+  end
+
+  # The text written so far, as `String::Builder#to_s` gives it: a `Str`
+  # viewing the builder's bytes, nothing copied.
+  def to_s : Str
+    start = (@state + 2_i64).value
+    Str.new(Pointer(UInt8).new(start), (@state.value &- start).to_i32)
+  end
+
+  def finish : Str
+    to_s
+  end
+
+  # *value* written as `append_value` writes it, answering the writer so
+  # pieces chain as into an IO: `w << name << ": " << count`.
+  def <<(value) : self
+    append_value(value)
+    self
+  end
+end
+
+# A scanner over tape text, as std/string_scanner's `StringScanner` is
+# over a String: an offset that moves forward as patterns match at it.
+# What it answers are views of the text, nothing copied; offsets and
+# counts are bytes. No regex and no groups: a lexer on the tape reads
+# bytes, strings and characters.
+@[OnTape]
+struct Str::Scanner
+  @string : Str
+  @offset : Int32
+
+  def initialize(@string : Str)
+    @offset = 0
+  end
+
+  # A scanner over no text: a field's first value, before the text comes.
+  def initialize
+    @string = "".as_tape
+    @offset = 0
+  end
+
+  # The text being scanned.
+  def string : Str
+    @string
+  end
+
+  # The offset, in bytes.
+  def offset : Int32
+    @offset
+  end
+
+  # Moves the offset to byte *position*: the end of the text is the
+  # furthest it goes.
+  def offset=(position : Int32) : Int32
+    raise "scanner: offset #{position} out of range for #{@string.bytesize} bytes" if position < 0 || position > @string.bytesize
+    @offset = position
+  end
+
+  # Moves the offset *count* bytes, back when negative, unchecked: a
+  # lexer's step is one add, as `@pos += 1` is. Safe all the same, as
+  # every read checks: past the end, `eos?` holds and `current_byte` is
+  # nil; `offset=` is the checked move.
+  def advance(count : Int32 = 1) : Int32
+    @offset = @offset &+ count
+  end
+
+  # Whether the offset is at the end of the text.
+  def eos? : Bool
+    @offset >= @string.bytesize
+  end
+
+  # The text from the offset on.
+  def rest : Str
+    @string[@offset, @string.bytesize - @offset]
+  end
+
+  # The byte at the offset, without moving, or nil at the end.
+  def current_byte : UInt8?
+    eos? ? nil : @string[@offset]
+  end
+
+  # Up to *count* bytes from the offset, without moving: fewer at the end.
+  def peek(count : Int32) : Str
+    raise "scanner: negative lookahead count: #{count}" if count < 0
+    left = @string.bytesize - @offset
+    @string[@offset, count < left ? count : left]
+  end
+
+  # Matches *pattern* at the offset and moves past it, answering what
+  # matched, or nil without moving.
+  def scan(pattern : Str | String | Char | Int32) : Str?
+    size = here(pattern)
+    return nil unless size
+    found = @string[@offset, size]
+    @offset = @offset + size
+    found
+  end
+
+  # `scan`, answering how many bytes the offset moved.
+  def skip(pattern : Str | String | Char | Int32) : Int32?
+    size = here(pattern)
+    @offset = @offset + size if size
+    size
+  end
+
+  # What `scan` would answer, without moving.
+  def check(pattern : Str | String | Char | Int32) : Str?
+    size = here(pattern)
+    size ? @string[@offset, size] : nil
+  end
+
+  # Searches for *pattern* from the offset and moves past the match,
+  # answering everything from the offset to the match's end.
+  def scan_until(pattern : Str | String | Char) : Str?
+    stop = until_end(pattern)
+    return nil unless stop
+    found = @string[@offset, stop - @offset]
+    @offset = stop
+    found
+  end
+
+  # `scan_until`, answering how many bytes the offset moved.
+  def skip_until(pattern : Str | String | Char) : Int32?
+    stop = until_end(pattern)
+    return nil unless stop
+    moved = stop - @offset
+    @offset = stop
+    moved
+  end
+
+  # What `scan_until` would answer, without moving.
+  def check_until(pattern : Str | String | Char) : Str?
+    stop = until_end(pattern)
+    stop ? @string[@offset, stop - @offset] : nil
+  end
+
+  # How many bytes *pattern* matches at the offset, without moving, or nil.
+  def matches?(pattern : Str | String | Char) : Int32?
+    here(pattern)
+  end
+
+  # Back to the start.
+  def reset : Nil
+    @offset = 0
+  end
+
+  # On to the end.
+  def terminate : Nil
+    @offset = @string.bytesize
+  end
+
+  private def here(count : Int32) : Int32?
+    raise "scanner: negative count: #{count}" if count < 0
+    count <= @string.bytesize - @offset ? count : nil
+  end
+
+  private def here(text : String) : Int32?
+    here(Str.view(text))
+  end
+
+  private def here(text : Str) : Int32?
+    at?(text, @offset) ? text.bytesize : nil
+  end
+
+  private def here(char : Char) : Int32?
+    at = @offset
+    matched = true
+    char.each_byte do |byte|
+      if matched && at < @string.bytesize && @string[at] == byte
+        at = at + 1
+      else
+        matched = false
+      end
+    end
+    matched ? at - @offset : nil
+  end
+
+  # Where the first match from the offset ends, or nil.
+  private def until_end(char : Char) : Int32?
+    found = @string.index(char, @offset)
+    found ? found + char.bytesize : nil
+  end
+
+  private def until_end(text : String) : Int32?
+    until_end(Str.view(text))
+  end
+
+  private def until_end(text : Str) : Int32?
+    at = @offset
+    while at + text.bytesize <= @string.bytesize
+      return at + text.bytesize if at?(text, at)
+      at = at + 1
+    end
+    nil
+  end
+
+  private def at?(text : Str, at : Int32) : Bool
+    return false if text.bytesize > @string.bytesize - at
+    i = 0
+    while i < text.bytesize
+      return false unless @string[at + i] == text[i]
+      i = i + 1
+    end
+    true
+  end
+end
+
+# Elements on the tape. `T` is held by value, so an element may itself be a
+# tape type, which no other generic may hold.
+@[OnTape]
+struct Ary(T)
+  @state : Pointer(UInt64)
+
+  def initialize(capacity : Int32 = 4)
+    @state = Pointer(UInt64).new(IyiRegion.tape_bytes(32_u64 &+ capacity.to_u64 &* sizeof(T).to_u64))
+    @state.value = @state.address &+ 32_u64
+    (@state + 1_i64).value = 0_u64
+    (@state + 2_i64).value = capacity.to_u64
+    (@state + 3_i64).value = 0_u64
+  end
+
+  # *count* elements, the block giving each by index, in room of exactly
+  # that size: it never grows, so it never moves to a region of its own
+  # however much the block puts on the tape.
+  def self.new(count : Int32, & : Int32 -> T) : self
+    array = new(count)
+    index = 0
+    while index < count
+      array.push(yield index)
+      index = index + 1
+    end
+    array
+  end
+
+  # *count* copies of *value*, as `Array.new(size, value)`.
+  def self.new(count : Int32, value : T) : self
+    new(count) { |index| value }
+  end
+
+  # Unchecked: `Tape.grown` keeps the room, and so the size, an Int32.
+  # The mask tells LLVM it is not negative, as the check did.
+  def size : Int32
+    ((@state + 1_i64).value & 0x7fffffff_u64).unsafe_to_i32
+  end
+
+  def empty? : Bool
+    size == 0
+  end
+
+  # `push` that answers the array, so `Ary(Int32){1, 2, 3}` builds
+  # one as `Set{1, 2}` does.
+  def <<(value : T) : self
+    push(value)
+    self
+  end
+
+  def push(value : T) : Nil
+    size = (@state + 1_i64).value
+    if size >= (@state + 2_i64).value
+      grow
+    end
+    Pointer(T).new(@state.value &+ size &* sizeof(T).to_u64).value = value
+    (@state + 1_i64).value = size &+ 1_u64
+  end
+
+  @[NoInline]
+  private def grow : Nil
+    start = @state.value
+    room = (@state + 2_i64).value
+    capacity = Tape.grown(room)
+    width = sizeof(T).to_u64
+    @state.value = IyiRegion.tape_resize(start, start &+ room &* width, (@state + 1_i64).value &* width, capacity &* width, @state + 3_i64)
+    (@state + 2_i64).value = capacity
+  end
+
+  # One byte-range check, then memcpy into an aligned local.
+  def read_bytes_at(type : I.class, at : Int32) : I forall I
+    {% unless I == UInt16 || I == UInt32 || I == UInt64 ||
+                I == Int16 || I == Int32 || I == Int64 %}
+      {% raise "little-endian fields need a 16/32/64-bit integer" %}
+    {% end %}
+    {% unless T == UInt8 %}
+      {% raise "little-endian fields require Ary(UInt8)" %}
+    {% end %}
+    width = sizeof(I)
+    if at < 0 || at > size - width
+      raise "little-endian field out of range"
+    end
+    value = uninitialized I
+    target = pointerof(value).as(Pointer(UInt8))
+    target.copy_from(Pointer(UInt8).new(@state.value) + at, width)
+    {% unless flag?(:x86_64) || flag?(:aarch64) || flag?(:arm) ||
+                flag?(:i386) || flag?(:wasm32) %}
+      i = 0
+      while i < sizeof(I) // 2
+        j = sizeof(I) - i - 1
+        byte = target[i]
+        target[i] = target[j]
+        target[j] = byte
+        i = i + 1
+      end
+    {% end %}
+    value
+  end
+
+  # Overwrites a field without growing the byte pool.
+  def write_bytes_at(at : Int32, value : I) : I forall I
+    {% unless I == UInt16 || I == UInt32 || I == UInt64 ||
+                I == Int16 || I == Int32 || I == Int64 %}
+      {% raise "little-endian fields need a 16/32/64-bit integer" %}
+    {% end %}
+    {% unless T == UInt8 %}
+      {% raise "little-endian fields require Ary(UInt8)" %}
+    {% end %}
+    width = sizeof(I)
+    if at < 0 || at > size - width
+      raise "little-endian field out of range"
+    end
+    stored = value
+    bytes = pointerof(stored).as(Pointer(UInt8))
+    {% unless flag?(:x86_64) || flag?(:aarch64) || flag?(:arm) ||
+                flag?(:i386) || flag?(:wasm32) %}
+      i = 0
+      while i < sizeof(I) // 2
+        j = sizeof(I) - i - 1
+        byte = bytes[i]
+        bytes[i] = bytes[j]
+        bytes[j] = byte
+        i = i + 1
+      end
+    {% end %}
+    (Pointer(UInt8).new(@state.value) + at).copy_from(bytes, width)
+    value
+  end
+
+  # Appends a field, growing with the array's usual tape policy.
+  def write_bytes(value : I) : Nil forall I
+    {% unless I == UInt16 || I == UInt32 || I == UInt64 ||
+                I == Int16 || I == Int32 || I == Int64 %}
+      {% raise "little-endian fields need a 16/32/64-bit integer" %}
+    {% end %}
+    {% unless T == UInt8 %}
+      {% raise "little-endian fields require Ary(UInt8)" %}
+    {% end %}
+    count = (@state + 1_i64).value
+    width = sizeof(I).to_u64
+    while count + width > (@state + 2_i64).value
+      grow
+    end
+    stored = value
+    bytes = pointerof(stored).as(Pointer(UInt8))
+    {% unless flag?(:x86_64) || flag?(:aarch64) || flag?(:arm) ||
+                flag?(:i386) || flag?(:wasm32) %}
+      i = 0
+      while i < sizeof(I) // 2
+        j = sizeof(I) - i - 1
+        byte = bytes[i]
+        bytes[i] = bytes[j]
+        bytes[j] = byte
+        i = i + 1
+      end
+    {% end %}
+    Pointer(UInt8).new(@state.value + count).copy_from(bytes, width.to_i32)
+    (@state + 1_i64).value = count + width
+  end
+
+  # The bytes of *text* at the end, with one room check and one copy
+  # rather than a `push` or `write_bytes` per byte or word.
+  def append(text : Str) : Nil
+    {% unless T == UInt8 %}
+      {% raise "append requires Ary(UInt8)" %}
+    {% end %}
+    count = (@state + 1_i64).value
+    width = text.bytesize.to_u64
+    while count + width > (@state + 2_i64).value
+      grow
+    end
+    Pointer(UInt8).new(@state.value + count).copy_from(text.to_unsafe, width.to_i32)
+    (@state + 1_i64).value = count + width
+  end
+
+  # As `Array#[]`: a negative index counts from the end, and one still out
+  # of range raises rather than reading past the elements.
+  def [](index : Int32) : T
+    count = size
+    unless index.unsafe_to_u64 < count.unsafe_to_u64
+      asked = index
+      index = index + count
+      unless asked < 0 && index.unsafe_to_u64 < count.unsafe_to_u64
+        Tape.out_of_range(asked, count, "elements")
+      end
+    end
+    Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value
+  end
+
+  # As `Array#[]=`, with the same range check: an element written in
+  # place, which does not grow the array.
+  def []=(index : Int32, value : T) : T
+    count = size
+    unless index.unsafe_to_u64 < count.unsafe_to_u64
+      asked = index
+      index = index + count
+      unless asked < 0 && index.unsafe_to_u64 < count.unsafe_to_u64
+        Tape.out_of_range(asked, count, "elements")
+      end
+    end
+    Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value = value
+  end
+
+  # `[]` in `while i < a.size`, where the loop keeps *index* below the
+  # size (TapeCheckFreeLowering): only a negative one is refused.
+  @[AlwaysInline]
+  def __loop_fetch(index : Int32) : T
+    Tape.out_of_range(index, size, "elements") if index < 0
+    unsafe_at(index)
+  end
+
+  @[AlwaysInline]
+  def __loop_store(index : Int32, value : T) : T
+    Tape.out_of_range(index, size, "elements") if index < 0
+    Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value = value
+  end
+
+  # The element at *link*, checked as `[]` checks an index: a link read
+  # from bytes is never trusted.
+  def [](link : Ary::Link(T, I)) : T forall I
+    self[link.index]
+  end
+
+  def []=(link : Ary::Link(T, I), value : T) : T forall I
+    self[link.index] = value
+  end
+
+  # A link to the element at *index*, stored in an `I`: `UInt8`, `UInt16`
+  # or `UInt32` (the default) bytes rather than a pointer's eight.
+  def link(index : Int32, width : I.class = UInt32) : Ary::Link(T, I) forall I
+    Tape.out_of_range(index, size, "elements") if index < 0 || index >= size
+    Ary::Link(T, I).new(index)
+  end
+
+  # The index the next `push` takes, as a link: a node can name a child
+  # before the child is pushed.
+  def next_link(width : I.class = UInt32) : Ary::Link(T, I) forall I
+    Ary::Link(T, I).new(size)
+  end
+
+  # Each element in order. The loop's own bound keeps the index in range,
+  # so no element is checked again (Goose elides these too).
+  def each(& : T -> Nil) : Nil
+    index = 0
+    count = size
+    while index < count
+      yield unsafe_at(index)
+      index = index + 1
+    end
+  end
+
+  def each_with_index(& : T, Int32 -> Nil) : Nil
+    index = 0
+    count = size
+    while index < count
+      yield unsafe_at(index), index
+      index = index + 1
+    end
+  end
+
+  # A new array of what the block gives for each element, sized first so
+  # the block may put other values on the tape.
+  def map(& : T -> U) : Ary(U) forall U
+    Ary(U).new(size) { |index| yield unsafe_at(index) }
+  end
+
+  def sum : T
+    total = T.zero
+    each { |value| total = total + value }
+    total
+  end
+
+  # Removes and returns the last element. Empty is a mistake, as with
+  # `Array#pop`; `pop?` answers nil.
+  def pop : T
+    raise "pop of an empty array" if empty?
+    count = (@state + 1_i64).value &- 1_u64
+    (@state + 1_i64).value = count
+    unsafe_at(count.to_i32)
+  end
+
+  def pop? : T?
+    empty? ? nil : pop
+  end
+
+  # Empty, keeping its room: the array to fill again in a loop. A new
+  # array each round instead stays on the tape until the block ends,
+  # every one of them (a tokenizer's queue, one per token: 110 MB for a
+  # 4.5 MB page).
+  def clear : Nil
+    (@state + 1_i64).value = 0_u64
+  end
+
+  # `first` on an empty array is a mistake, as with `Array#first`; the
+  # nilable questions answer nil.
+  def first : T
+    raise "first of an empty array" if empty?
+    unsafe_at(0)
+  end
+
+  def first? : T?
+    empty? ? nil : unsafe_at(0)
+  end
+
+  def last? : T?
+    empty? ? nil : unsafe_at(size - 1)
+  end
+
+  def includes?(value : T) : Bool
+    each { |element| return true if element == value }
+    false
+  end
+
+  # Where a value first is, or nil.
+  def index(value : T) : Int32?
+    each_with_index { |element, index| return index if element == value }
+    nil
+  end
+
+  def count(& : T -> Bool) : Int32
+    total = 0
+    each { |value| total = total + 1 if yield value }
+    total
+  end
+
+  def any?(& : T -> Bool) : Bool
+    each { |value| return true if yield value }
+    false
+  end
+
+  def all?(& : T -> Bool) : Bool
+    each { |value| return false unless yield value }
+    true
+  end
+
+  def find(& : T -> Bool) : T?
+    each { |value| return value if yield value }
+    nil
+  end
+
+  def reduce(initial : U, & : U, T -> U) : U forall U
+    accumulator = initial
+    each { |value| accumulator = yield accumulator, value }
+    accumulator
+  end
+
+  # The element whose key is largest, or smallest, the first of equals; a
+  # NaN key is above every other, as `Array#max_by` places it.
+  def max_by(& : T -> U) : T forall U
+    raise "max_by of an empty array" if empty?
+    best = unsafe_at(0)
+    best_key = yield best
+    index = 1
+    count = size
+    while index < count
+      value = unsafe_at(index)
+      key = yield value
+      if best_key < key || (key.is_a?(Float) && key != key && best_key == best_key)
+        best = value
+        best_key = key
+      end
+      index = index + 1
+    end
+    best
+  end
+
+  def min_by(& : T -> U) : T forall U
+    raise "min_by of an empty array" if empty?
+    best = unsafe_at(0)
+    best_key = yield best
+    index = 1
+    count = size
+    while index < count
+      value = unsafe_at(index)
+      key = yield value
+      if key < best_key || (key.is_a?(Float) && best_key != best_key && key == key)
+        best = value
+        best_key = key
+      end
+      index = index + 1
+    end
+    best
+  end
+
+  # The arrays below are new ones on the same tape, freed with it, as
+  # `Array`'s are new ones on the heap; an element may be a tape value.
+  def select(& : T -> Bool) : self
+    result = Ary(T).new(size)
+    each { |value| result.push(value) if yield value }
+    result
+  end
+
+  def reject(& : T -> Bool) : self
+    result = Ary(T).new(size)
+    each { |value| result.push(value) unless yield value }
+    result
+  end
+
+  def reversed : self
+    count = size
+    Ary(T).new(count) { |index| unsafe_at(count - 1 - index) }
+  end
+
+  def dup : self
+    Ary(T).new(size) { |index| unsafe_at(index) }
+  end
+
+  # The two in order, as a new array; neither operand changes.
+  def +(other : Ary(T)) : self
+    joined = Ary(T).new(size + other.size)
+    each { |value| joined.push(value) }
+    other.each { |value| joined.push(value) }
+    joined
+  end
+
+  # *other*'s elements after the last. Its length is read once, so
+  # `a.concat(a)` doubles `a` rather than growing without end.
+  def concat(other : Ary(T)) : self
+    taking = other.size
+    index = 0
+    while index < taking
+      push(other.unchecked(index))
+      index = index + 1
+    end
+    self
+  end
+
+  # Sorted as `Array#sort_in_place` sorts, stable: the block answers above
+  # zero when its first element goes after the second.
+  def sort_in_place(& : T, T -> Int32) : self
+    reorder(order { |a, b| yield unsafe_at(a), unsafe_at(b) })
+  end
+
+  def sort_in_place : self
+    sort_in_place { |a, b| b < a ? 1 : 0 }
+  end
+
+  # Ascending by the key each element answers, computed once each.
+  def sort_in_place_by(& : T -> U) : self forall U
+    keys = map { |value| yield value }
+    reorder(order { |a, b| keys.unchecked(b) < keys.unchecked(a) ? 1 : 0 })
+  end
+
+  def sorted(& : T, T -> Int32) : self
+    dup.sort_in_place { |a, b| yield a, b }
+  end
+
+  def sorted : self
+    dup.sort_in_place
+  end
+
+  def sorted_by(& : T -> U) : self forall U
+    dup.sort_in_place_by { |value| yield value }
+  end
+
+  # The elements written into *writer*, *separator* between them: where
+  # `Array#join` builds a heap String, this one adds to the caller's text.
+  def join(writer : Str::Builder, separator : String | Str = "") : Nil
+    each_with_index do |value, index|
+      writer.append(separator) if index > 0
+      writer.append_value(value)
+    end
+  end
+
+  # The indexes in sorted order, by *compare* on two of them: runs of 16
+  # by insertion, then merged in pairs, as `Array#sort_in_place` does.
+  # Indexes rather than elements are moved, so the scratch room is two
+  # arrays of Int32 on the tape whatever `T` is.
+  private def order(& : Int32, Int32 -> Int32) : Ary(Int32)
+    count = size
+    from = Ary(Int32).new(count) { |index| index }
+    start = 0
+    while start < count
+      finish = start + 16 < count ? start + 16 : count
+      index = start + 1
+      while index < finish
+        value = from[index]
+        slot = index - 1
+        while slot >= start && (yield from[slot], value) > 0
+          from[slot + 1] = from[slot]
+          slot = slot - 1
+        end
+        from[slot + 1] = value
+        index = index + 1
+      end
+      start = finish
+    end
+    into = Ary(Int32).new(count, 0)
+    width = 16
+    while width < count
+      low = 0
+      while low < count
+        middle = low + width < count ? low + width : count
+        high = middle + width < count ? middle + width : count
+        left = low
+        right = middle
+        cursor = low
+        while cursor < high
+          # The left run's element on a tie: that is what keeps it stable.
+          if right >= high || (left < middle && (yield from[left], from[right]) <= 0)
+            into[cursor] = from[left]
+            left = left + 1
+          else
+            into[cursor] = from[right]
+            right = right + 1
+          end
+          cursor = cursor + 1
+        end
+        low = high
+      end
+      spare = from
+      from = into
+      into = spare
+      width = width * 2
+    end
+    from
+  end
+
+  # The elements put in the order *order* names, from a copy of them.
+  private def reorder(order : Ary(Int32)) : self
+    copy = dup
+    order.each_with_index { |from, to| unchecked_store(to, copy.unchecked(from)) }
+    self
+  end
+
+  # The indexes in *indexes*, each checked against this array once, for
+  # reads with no check after (`Ary::View`).
+  def values_at(indexes : Ary(Int32)) : Ary::View(T)
+    Ary::View(T).new(self, indexes)
+  end
+
+  # The elements copied into an `Array` on the heap, to keep after the
+  # tape ends. An element with a `to_heap` of its own - a Str,
+  # an Ary, an @[OnTape] struct that defines one - is copied by it;
+  # any other is taken as it is. A tape element with none is refused, as
+  # no `Array` may hold a tape value.
+  def to_heap
+    Array(typeof(Tape.heap_value(unsafe_at(0)))).new(size) { |index| Tape.heap_value(unsafe_at(index)) }
+  end
+
+  # For `IndexView`, whose indexes are known in range.
+  protected def unchecked(index : Int32) : T
+    unsafe_at(index)
+  end
+
+  protected def unchecked_store(index : Int32, value : T) : T
+    Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value = value
+  end
+
+  @[AlwaysInline]
+  private def unsafe_at(index : Int32) : T
+    Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value
+  end
+
+  # The elements' bytes, nothing copied: write them to a file or socket
+  # and `load` them back. `T` must be flat (see `Tape::Flat`), with no
+  # pointer in it, which `Link` and `Span` are not.
+  def bytes : Str
+    {% begin %}
+      {% for t in [T] + T.instance_vars.map(&.type) %}
+        {% unless t < ::Number || t.name.starts_with?("Ary::Link(") || t == ::Str::Span || t.annotation(::Tape::Flat) %}
+          {% raise "#{T} is not flat: #{t} in it is not a number, an Ary::Link, a Str::Span or an @[Tape::Flat] struct" %}
+        {% end %}
+      {% end %}
+    {% end %}
+    Str.new(Pointer(UInt8).new(@state.value), (size.to_u64 &* sizeof(T).to_u64).to_i32)
+  end
+
+  # The elements *bytes* holds, copied onto the tape: the length must be
+  # whole elements, and each link is checked when it is followed.
+  def self.load(bytes : Str) : self
+    {% begin %}
+      {% for t in [T] + T.instance_vars.map(&.type) %}
+        {% unless t < ::Number || t.name.starts_with?("Ary::Link(") || t == ::Str::Span || t.annotation(::Tape::Flat) %}
+          {% raise "#{T} is not flat: #{t} in it is not a number, an Ary::Link, a Str::Span or an @[Tape::Flat] struct" %}
+        {% end %}
+      {% end %}
+    {% end %}
+    width = sizeof(T)
+    raise "#{bytes.bytesize} bytes are not whole #{width}-byte elements" if bytes.bytesize % width != 0
+    count = bytes.bytesize // width
+    array = new(count)
+    Pointer(UInt8).new(array.@state.value).copy_from(bytes.to_unsafe, bytes.bytesize)
+    (array.@state + 1_i64).value = count.to_u64
+    array
+  end
+end
+
+# `target`'s elements in the order *indexes* names them, every index
+# checked once here: Goose's index types, `u32 in nodes`. Reading through
+# one checks nothing more, as `target` never shrinks and the indexes are
+# a copy no one else can change. CSR's `dist[adj[k]]` is
+# `dist.values_at(adj)[k]`, checked when the edges come in.
+@[OnTape]
+struct Ary::View(T)
+  @target : Ary(T)
+  @at : Ary(Int32)
+
+  def initialize(@target : Ary(T), indexes : Ary(Int32))
+    count = target.size
+    @at = Ary(Int32).new(indexes.size) do |k|
+      index = indexes.__loop_fetch(k)
+      Tape.out_of_range(index, count, "elements") if index < 0 || index >= count
+      index
+    end
+  end
+
+  def size : Int32
+    @at.size
+  end
+
+  # The *k*th index, which is in range of the target.
+  def index(k : Int32) : Int32
+    @at[k]
+  end
+
+  # The element the *k*th index names: *k* checked against the indexes,
+  # the index not at all.
+  def [](k : Int32) : T
+    @target.unchecked(@at[k])
+  end
+
+  def []=(k : Int32, value : T) : T
+    @target.unchecked_store(@at[k], value)
+  end
+
+  # As `[]` in `while k < x.size` (TapeCheckFreeLowering): only *k*'s sign.
+  @[AlwaysInline]
+  def __loop_fetch(k : Int32) : T
+    @target.unchecked(@at.__loop_fetch(k))
+  end
+
+  @[AlwaysInline]
+  def __loop_store(k : Int32, value : T) : T
+    @target.unchecked_store(@at.__loop_fetch(k), value)
+  end
+
+  def each(& : T -> Nil) : Nil
+    @at.each { |index| yield @target.unchecked(index) }
+  end
+
+  # The viewed elements, in the view's order, copied to the heap as
+  # `Ary#to_heap` copies them.
+  def to_heap
+    Array(typeof(Tape.heap_value(@target.unchecked(0)))).new(size) { |k| Tape.heap_value(self[k]) }
+  end
+end
+
+# A typed link to an element of an `Ary(T)`: its index in `I`
+# bytes. It holds no pointer, so it stays valid while the array grows and
+# moves, may be kept in any value, and is the same in bytes written out
+# and loaded back. The array checks it when followed.
+struct Ary::Link(T, I)
+  @index : I
+
+  def initialize(index : Int32)
+    raise "link #{index} does not fit #{sizeof(I)} bytes" if index < 0 || index.to_u64 >= Ary::Link.top(I)
+    @index = Ary::Link.narrow(index.to_u64, I)
+  end
+
+  # The link to nothing: `none?` is true.
+  def self.none : self
+    new(Ary::Link.narrow(Ary::Link.top(I), I), none: true)
+  end
+
+  protected def initialize(@index : I, *, none : Bool)
+  end
+
+  def none? : Bool
+    wide == Ary::Link.top(I)
+  end
+
+  def index : Int32
+    raise "Ary::Link: none" if none?
+    wide.to_i32
+  end
+
+  # The low `I` bytes of *value*, and back: the prelude converts to and
+  # from few widths, and a link is unsigned and little-endian either way.
+  protected def self.narrow(value : UInt64, width : W.class) : W forall W
+    pointerof(value).as(Pointer(W)).value
+  end
+
+  protected def self.top(width : W.class) : UInt64 forall W
+    case sizeof(W)
+    when 1 then 0xff_u64
+    when 2 then 0xffff_u64
+    when 4 then 0xffffffff_u64
+    else        raise "a link is 1, 2 or 4 bytes, not #{sizeof(W)}"
+    end
+  end
+
+  private def wide : UInt64
+    value = 0_u64
+    pointerof(value).as(Pointer(I)).value = @index
+    value
+  end
+end
+
+# Text inside a `Str`, as its start and length: a record holds
+# its text this way, flat, beside the one string all its text is in.
+struct Str::Span
+  getter start : Int32
+  getter size : Int32
+
+  def initialize(@start : Int32, @size : Int32)
+  end
+end
+
+# A tree on the tape as one stream in document order, the layout simdjson
+# calls a tape: a container is written when it opens and told where its
+# subtree ends when it closes, so its children follow it and a reader
+# steps over a child in one jump. The tree is one growing value, written
+# once, whole: measured faster than a heap tree, where a `Array` per node
+# is slower (TAPE_DESIGN.md, "Layout").
+@[OnTape]
+struct Tre(T)
+  @state : Pointer(UInt64)
+
+  def initialize(capacity : Int32 = 64)
+    width = sizeof(Entry(T)).to_u64
+    @state = Pointer(UInt64).new(IyiRegion.tape_bytes(32_u64 &+ capacity.to_u64 &* width))
+    @state.value = @state.address &+ 32_u64
+    (@state + 1_i64).value = 0_u64
+    (@state + 2_i64).value = capacity.to_u64
+    (@state + 3_i64).value = 0_u64
+  end
+
+  # Unchecked: `Tape.grown` keeps the room, and so the size, an Int32.
+  # The mask tells LLVM it is not negative, as the check did.
+  def size : Int32
+    ((@state + 1_i64).value & 0x7fffffff_u64).unsafe_to_i32
+  end
+
+  # A value with no children; its index.
+  def leaf(value : T) : Int32
+    put(value, size + 1)
+  end
+
+  # A container whose children are the values added until `close`; its
+  # index, which `close` takes.
+  def open(value : T) : Int32
+    put(value, -1)
+  end
+
+  # Ends the container opened at *at*: its subtree is everything added
+  # since.
+  def close(at : Int32) : Nil
+    entry = slot(at)
+    raise "Tre#close: #{at} is not open" unless entry.value.stop == -1
+    entry.value = Entry(T).new(entry.value.value, size)
+  end
+
+  def [](index : Int32) : T
+    slot(index).value.value
+  end
+
+  # The index past *index*'s subtree: the next sibling, if any.
+  def stop(index : Int32) : Int32
+    stop = slot(index).value.stop
+    raise "Tre: #{index} is not closed" if stop == -1
+    stop
+  end
+
+  # Each child of the container at *index*, by index.
+  def each_child(index : Int32, & : Int32 -> _) : Nil
+    child = index + 1
+    last = stop(index)
+    while child < last
+      yield child
+      child = stop(child)
+    end
+  end
+
+  private def put(value : T, stop : Int32) : Int32
+    count = (@state + 1_i64).value
+    grow if count >= (@state + 2_i64).value
+    width = sizeof(Entry(T)).to_u64
+    Pointer(Entry(T)).new(@state.value &+ count &* width).value = Entry(T).new(value, stop)
+    (@state + 1_i64).value = count &+ 1_u64
+    count.to_i32
+  end
+
+  private def slot(index : Int32) : Pointer(Entry(T))
+    count = size
+    Tape.out_of_range(index, count, "entries") if index < 0 || index >= count
+    Pointer(Entry(T)).new(@state.value &+ index.to_u64 &* sizeof(Entry(T)).to_u64)
+  end
+
+  @[NoInline]
+  private def grow : Nil
+    start = @state.value
+    room = (@state + 2_i64).value
+    capacity = Tape.grown(room)
+    width = sizeof(Entry(T)).to_u64
+    @state.value = IyiRegion.tape_resize(start, start &+ room &* width, (@state + 1_i64).value &* width, capacity &* width, @state + 3_i64)
+    (@state + 2_i64).value = capacity
+  end
+end
+
+# One entry of a `Tree`: the value and the index past its subtree.
+@[OnTape]
+private struct Tre::Entry(T)
+  getter value : T
+  getter stop : Int32
+
+  def initialize(@value : T, @stop : Int32)
   end
 end
 
@@ -1739,7 +1752,7 @@ end
 class IyiIO
   # As `read_line`, onto the caller's active tape and with no heap String:
   # a line in the buffer is one copy; one across refills grows a writer.
-  def read_line_tape(chomp : Bool = false) : Tape::String?
+  def read_line_tape(chomp : Bool = false) : Str?
     raise "cannot read from closed IO" if @closed
     if @read_pos >= @read_limit
       return nil if @eof
@@ -1757,9 +1770,9 @@ class IyiIO
       # Copied: the buffer is refilled under a view of it.
       bytes = Pointer(UInt8).new(IyiRegion.tape_bytes(len.to_u64))
       bytes.copy_from(start_ptr, len)
-      return Tape::String.new(bytes, len)
+      return Str.new(bytes, len)
     end
-    writer = Tape::String::Writer.new(256)
+    writer = Str::Builder.new(256)
     while true
       start = @read_pos
       j = start
@@ -1786,31 +1799,31 @@ class IyiIO
     text[0, len]
   end
 
-  def print(text : Tape::String) : Nil
+  def print(text : Str) : Nil
     text.to_s(self)
   end
 
   # As `puts(String)`: text that already ends its line gets no second one.
-  def puts(text : Tape::String) : Nil
+  def puts(text : Str) : Nil
     text.to_s(self)
     write("\n") unless text.bytesize > 0 && text[-1] == 10_u8
   end
 
   # What a writer holds so far, written straight from the tape.
-  def print(writer : Tape::String::Writer) : Nil
+  def print(writer : Str::Builder) : Nil
     print(writer.finish)
   end
 
-  def puts(writer : Tape::String::Writer) : Nil
+  def puts(writer : Str::Builder) : Nil
     puts(writer.finish)
   end
 end
 
-def print(text : Tape::String) : Nil
+def print(text : Str) : Nil
   stdout.print(text)
 end
 
-def print(writer : Tape::String::Writer) : Nil
+def print(writer : Str::Builder) : Nil
   stdout.print(writer)
 end
 
@@ -1831,14 +1844,14 @@ class Object
 end
 
 class String
-  # These bytes as a Tape::String, nothing copied: `Tape::String.view`.
+  # These bytes as a Str, nothing copied: `Str.view`.
   # `as_` for a view at no cost, as `to_heap` is `to_` for a copy.
-  def as_tape : Tape::String
-    Tape::String.view(self)
+  def as_tape : Str
+    Str.view(self)
   end
 
   # Already on the heap: itself, nothing copied. Code holding a String or
-  # a Tape::String calls `to_heap` on either.
+  # a Str calls `to_heap` on either.
   def to_heap : String
     self
   end
@@ -1927,7 +1940,7 @@ end
 
 # Numeric text is read directly from tape bytes, as heap text is.
 module IyiFloatText
-  def self.parse(text : Tape::String) : Float64
+  def self.parse(text : Str) : Float64
     bytes = text.to_unsafe
     size = text.bytesize
     raise "not a number: #{text.to_heap.inspect}" if size == 0
@@ -2001,7 +2014,7 @@ module IyiFloatText
   # The digits read into a bignum - all of them to 800, which is past the
   # 767 that can decide a double, any beyond only telling whether the rest
   # is zero - and the quotient taken to 54 bits with a sticky remainder.
-  def self.parse_exact(text : Tape::String) : Float64
+  def self.parse_exact(text : Str) : Float64
     bytes = text.to_unsafe
     size = text.bytesize
     at = 0

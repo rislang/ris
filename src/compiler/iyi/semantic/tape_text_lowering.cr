@@ -1,8 +1,8 @@
 # ris: inside a `tape` or `local_tape` block, or a def taking a tape
 # value (a tape runs while one exists), `puts "a#{b}"` and
 # `print "a#{b}"` write their text on the tape. The interpolation is
-# made `Tape::String.interpolate(...)`, which appends each piece to a
-# writer on the running tape; `puts` and `print` take a `Tape::String`.
+# made `Str.interpolate(...)`, which appends each piece to a
+# writer on the running tape; `puts` and `print` take a `Str`.
 # Nothing else changes: the text goes straight to the call, so no tape
 # value is held anywhere new, and with no tape running (a proc called
 # later) `interpolate` builds on the heap as before.
@@ -21,7 +21,7 @@ class Iyi::TapeTextLowering < Iyi::Visitor
   end
 
   def self.tape_def?(node : Def) : Bool
-    node.args.any? { |arg| arg.restriction.to_s.includes?("Tape::") }
+    node.args.any? { |arg| arg.restriction.to_s.matches?(/(?<!\w)(?:Str|Ary|Tre)\b/) }
   end
 
   def self.sink?(node : Call) : Bool
@@ -29,7 +29,7 @@ class Iyi::TapeTextLowering < Iyi::Visitor
   end
 
   def self.interpolate(arg : ASTNode) : ASTNode
-    path = Path.global(["Tape", "String"]).at(arg)
+    path = Path.global(["Str"]).at(arg)
     Call.new(path, "interpolate", arg.expressions).at(arg)
   end
 

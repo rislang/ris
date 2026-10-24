@@ -1,9 +1,9 @@
 # A tape value copied off to the heap in the middle of the work: the text
 # goes on as a String where it was on the tape.
-def shout(text : Tape::String) : String
+def shout(text : Str) : String
   text.to_s.upcase
 end
 
 tape do
-  puts shout(Tape::String.new("abc"))
+  puts shout(Str.new("abc"))
 end

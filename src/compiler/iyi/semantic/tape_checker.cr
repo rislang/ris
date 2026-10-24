@@ -1,7 +1,7 @@
 # PROTOTYPE (ris, step B): the type-level half of tape safety.
 #
 # A tape type is a struct marked `@[OnTape]`. Its storage - the bytes of a
-# `Tape::String`, the elements of a `Tape::Array` - is the current fiber's tape,
+# `Str`, the elements of an `Ary` - is the current fiber's tape,
 # and is reclaimed when the `tape` block that made it ends. So a tape value
 # may live in locals, in parameters, in other tape values and in the tape
 # itself, and nowhere that can outlive the scope:
@@ -48,7 +48,7 @@ class Iyi::TapeChecker
       return tape_in(program, type.element_type, visiting)
     when ProcInstanceType
       # A proc holds what it captured, checked where it is made, not the
-      # values it is called with: `Proc(Tape::String, Nil)` holds no tape.
+      # values it is called with: `Proc(Str, Nil)` holds no tape.
       return nil
     when GenericClassInstanceType
       type.type_vars.each_value do |type_var|
@@ -110,7 +110,7 @@ class Iyi::TapeChecker
         #{type} is #{where}, and a tape value lives only until the tape block
         that made it ends. Keep it in a local, a parameter or another @[OnTape]
         struct, or copy what must outlive the scope into an owned value
-        (`to_heap` copies a Tape::String or Tape::Array).
+        (`to_heap` copies a Str or Ary).
         MSG
     end
   end

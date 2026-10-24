@@ -1,6 +1,6 @@
 # ris: a value on the tape stays there until its scope ends. Text goes
-# onto the tape freely (`Tape::String.new`, `Writer#append`), but back to
-# the heap only by name: `to_heap`, or a `Tape::String`'s `to_s` in a def
+# onto the tape freely (`Str.new`, `Writer#append`), but back to
+# the heap only by name: `to_heap`, or a `Str`'s `to_s` in a def
 # marked `@[TapeToHeap]`, where a value is handed to what outlives the
 # tape - a cache, a broadcast, a record. So a request's text, once on
 # its tape, is not copied off and carried on as a `String` by code between
@@ -42,17 +42,17 @@ class Iyi::TapeEscapeChecker
     On the tape the text is freed with the whole tape at once, at no cost. \
     Each copy to the heap is a GC allocation and a copy of every byte, and \
     the GC must later find and free it; carried back onto the tape \
-    (`append`, `Tape::String.new`) it is copied again. Code that goes \
+    (`append`, `Str.new`) it is copied again. Code that goes \
     tape -> heap -> tape pays this at every turn and loses what the tape \
     saves: the respond sample takes 0.67 s on the tape, 1.55 s on the heap \
     (TAPE_DESIGN.md).
 
-    Instead pass the Tape::String on; compare and slice it on the tape \
+    Instead pass the Str on; compare and slice it on the tape \
     (`==`, `starts_with?`, `[start, count]`); print it (`puts text`, \
     `io << text` to a file or socket); or append it to a \
-    Tape::String::Writer. Only where the text must outlive the tape - a \
+    Str::Builder. Only where the text must outlive the tape - a \
     cache, a broadcast, a record - copy it once, by name: `text.to_heap`, \
-    or `to_heap` on a Tape::Array of it.
+    or `to_heap` on an Ary of it.
     TEXT
 
   def refuse?(node : Call) : String?
@@ -60,12 +60,12 @@ class Iyi::TapeEscapeChecker
     receiver = node.obj
     if node.name == "to_s" && node.args.empty? && !node.block &&
        tape_string?(receiver.try(&.type?))
-      return "`to_s` of a Tape::String outside a @[TapeToHeap] def copies " \
+      return "`to_s` of a Str outside a @[TapeToHeap] def copies " \
              "the text to the GC heap.\n\n#{WHY}"
     end
     if heap_buffer?(receiver.try(&.type?)) &&
        node.args.any? { |arg| tape_string?(arg.type?) }
-      return "Writing a Tape::String into a #{receiver.not_nil!.type} " \
+      return "Writing a Str into a #{receiver.not_nil!.type} " \
              "outside a @[TapeToHeap] def copies the text to the GC heap." \
              "\n\n#{WHY}"
     end
@@ -73,12 +73,12 @@ class Iyi::TapeEscapeChecker
     if node.name == "interpolation" &&
        receiver.try(&.type?).try(&.metaclass?) &&
        node.args.any? { |arg| tape_string?(arg.type?) }
-      return "Interpolating a Tape::String outside a @[TapeToHeap] def " \
+      return "Interpolating a Str outside a @[TapeToHeap] def " \
              "copies the text to the GC heap.\n\n#{WHY}"
     end
     if tape_string?(receiver.try(&.type?)) &&
        node.args.any? { |arg| heap_buffer?(arg.type?) }
-      return "Writing a Tape::String into a String::Builder or " \
+      return "Writing a Str into a String::Builder or " \
              "IO::Memory outside a @[TapeToHeap] def copies the text " \
              "to the GC heap.\n\n#{WHY}"
     end
@@ -87,7 +87,7 @@ class Iyi::TapeEscapeChecker
 
   private def tape_string?(type : Type?) : Bool
     return false unless type
-    type.remove_typedef.to_s == "Tape::String"
+    type.remove_typedef.to_s == "Str"
   end
 
   # Where text written lands on the GC heap, unlike a file or a socket.

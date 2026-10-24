@@ -1,4 +1,4 @@
-# Writer#write_bytes and Writer#shift, and Tape::Scanner: views of the
+# Writer#write_bytes and Writer#shift, and Str::Scanner: views of the
 # text, offsets in bytes, strings, characters and counts as patterns.
 module tape_primitives
 
@@ -7,7 +7,7 @@ def check(what : String, ok : Bool) : Nil
 end
 
 tape do
-  w = Tape::String::Writer.new(4)
+  w = Str::Builder.new(4)
   w.write_bytes(0x44434241_u32)
   w.write_bytes(0x4645_u16)
   check "write_bytes", w.finish == "ABCDEF"
@@ -18,7 +18,7 @@ tape do
   w.shift(6)
   check "shift all", w.finish.empty?
 
-  s = Tape::Scanner.new(Tape::String.new("GET /päth HTTP/1.1"))
+  s = Str::Scanner.new(Str.new("GET /päth HTTP/1.1"))
   check "scan string", s.scan("GET") == "GET"
   check "scan miss", s.scan("POST").nil? && s.offset == 3
   check "skip char", s.skip(' ') == 1
@@ -26,7 +26,7 @@ tape do
   check "scan_until char", s.scan_until(' ') == "/päth "
   check "check", s.check(4) == "HTTP" && s.offset == 11
   check "matches?", s.matches?("HTTP/") == 5
-  check "skip_until", s.skip_until(Tape::String.new(".")) == 7
+  check "skip_until", s.skip_until(Str.new(".")) == 7
   check "peek", s.peek(9) == "1"
   check "rest", s.rest == "1"
   check "scan count", s.scan(1) == "1" && s.eos?
@@ -45,4 +45,4 @@ tape do
   s.advance(100)
   check "advance past the end", s.eos? && s.current_byte.nil?
 end
-puts "PASS: write_bytes, shift and Tape::Scanner"
+puts "PASS: write_bytes, shift and Str::Scanner"

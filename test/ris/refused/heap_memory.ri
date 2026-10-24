@@ -3,7 +3,7 @@ module test/ris/refused/heap_memory
 import std/io::{Memory}
 
 tape do
-  text = Tape::String.new("abc")
+  text = Str.new("abc")
   memory = Memory.new
   text.to_s(memory)
 end

@@ -1,0 +1,30 @@
+#!/bin/sh
+
+# Rename the tape types to their short names in place:
+#
+#   bin/ris-shortnames src/ samples/app.ri
+#
+# Directories are walked for .ri, .iy, .iyi, .cr and .md files. Run it once;
+# a second run changes nothing. `Tape::Flat` and the `Tape` module stay.
+
+if [ $# -eq 0 ]; then
+  echo "usage: ris-shortnames FILE|DIR..." >&2
+  exit 1
+fi
+
+find "$@" -type f \( -name '*.ri' -o -name '*.iy' -o -name '*.iyi' \
+  -o -name '*.cr' -o -name '*.md' \) -print | while IFS= read -r f; do
+  grep -qE 'Tape::(String|Array|Scanner|Link|Span|Tree|IndexView)' "$f" ||
+    continue
+  sed -i.bak -E \
+    -e 's/Tape::String::Writer/Str::Builder/g' \
+    -e 's/Tape::String/Str/g' \
+    -e 's/Tape::Array/Ary/g' \
+    -e 's/Tape::Scanner/Str::Scanner/g' \
+    -e 's/Tape::Span/Str::Span/g' \
+    -e 's/Tape::Link/Ary::Link/g' \
+    -e 's/Tape::IndexView/Ary::View/g' \
+    -e 's/Tape::Tree/Tre/g' \
+    "$f" && rm -f "$f.bak"
+  echo "$f"
+done

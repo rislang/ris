@@ -957,7 +957,7 @@ pub class IyiSocket
   # writes straight into the writer's room, nothing copied. Answers how
   # many came, 0 at the end of the stream.
   @[TapeUnsafe]
-  def read(writer : Tape::String::Writer, max : Int32) : Int32 | Cancelled | SocketError
+  def read(writer : Str::Builder, max : Int32) : Int32 | Cancelled | SocketError
     result = 0.as(Int32 | Cancelled | SocketError)
     writer.unsafe_append(max) do |room|
       got = read(room, max)
@@ -1010,7 +1010,7 @@ pub class IyiSocket
   # The same for two pieces on the tape, which are not copied.
   # Pass both tape buffers directly to the OS write call.
   @[TapeUnsafe]
-  def write(first : Tape::String, second : Tape::String) : Int32 | Cancelled | SocketError
+  def write(first : Str, second : Str) : Int32 | Cancelled | SocketError
     raise "socket is closed" if @fd < 0
     write_pair(first.to_unsafe, first.bytesize, second.to_unsafe, second.bytesize)
   end
@@ -1018,7 +1018,7 @@ pub class IyiSocket
   # Up to `SENDV_PIECES` of *pieces* from *index*, the first from byte
   # *offset*, in one sendv: their tape addresses go into the iovec.
   @[TapeUnsafe]
-  private def sendv(pieces : Tape::Array(Tape::String), index : Int32, offset : Int32) : Int64
+  private def sendv(pieces : Ary(Str), index : Int32, offset : Int32) : Int64
     iov = uninitialized UInt64[128]
     words = pointerof(iov).as(UInt64*)
     count = 0
@@ -1040,7 +1040,7 @@ pub class IyiSocket
   # *pieces* in order, as one write where the platform takes several
   # buffers in a call: a head and a page's runs go out without being
   # joined into one buffer first, up to `SENDV_PIECES` a call.
-  def write(pieces : Tape::Array(Tape::String)) : Int32 | Cancelled | SocketError
+  def write(pieces : Ary(Str)) : Int32 | Cancelled | SocketError
     raise "socket is closed" if @fd < 0
     total = 0
     pieces.each { |piece| total = total + piece.bytesize }
@@ -3701,7 +3701,7 @@ pub class Resolver
       # forger's guess, one that does not read - goes with the tape.
       got = nil.as(DnsMessage | DnsError | SocketError | Nil)
       tape do
-        datagram = Tape::String::Writer.new(DATAGRAM_ROOM)
+        datagram = Str::Builder.new(DATAGRAM_ROOM)
         count = Resolver.receive(fd, datagram)
         if count < 0_i64
           got = SocketError.new("receive", IyiSocket.__sys_code(count)) unless IyiSocket.__sys_would_block?(count)
@@ -3731,7 +3731,7 @@ pub class Resolver
   # One datagram from *fd* onto the end of *writer*: its size, or the
   # receive's negative error.
   @[TapeUnsafe]
-  def self.receive(fd : Int32, writer : Tape::String::Writer) : Int64
+  def self.receive(fd : Int32, writer : Str::Builder) : Int64
     count = 0_i64
     writer.unsafe_append(DATAGRAM_ROOM) do |room|
       count = IyiSocket.__sys_recv(fd, room, DATAGRAM_ROOM.to_u64)

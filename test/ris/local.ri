@@ -3,7 +3,7 @@ import std/int
 
 # The copy a caller keeps, made at the boundary it leaves the tape by.
 @[TapeToHeap]
-def retain(text : Tape::String) : String
+def retain(text : Str) : String
   text.to_s
 end
 
@@ -13,7 +13,7 @@ end
 
 def early : Int32
   local_tape do
-    text = Tape::String.build { |w| w.append("early") }
+    text = Str.build { |w| w.append("early") }
     return text.bytesize
   end
   0
@@ -23,7 +23,7 @@ check(early == 5)
 check(IyiRegion.tape == 0_u64)
 copy = ""
 tape do
-  outer = Tape::String.build { |w| w.append("outer") }
+  outer = Str.build { |w| w.append("outer") }
   saved = IyiRegion.tape
   cursor = IyiHeap.read64(saved)
   first = 0_u64
@@ -33,7 +33,7 @@ tape do
       check(current != saved)
       first = current if first == 0_u64
       check(current == first)
-      text = Tape::String.build(1) { |w| w.append(outer) }
+      text = Str.build(1) { |w| w.append(outer) }
       copy = retain(text)
       tape { check(IyiRegion.tape == current) }
       break 9
@@ -46,7 +46,7 @@ tape do
     current = IyiRegion.tape
     local_tape do
       check(IyiRegion.tape != current)
-      inner = Tape::String.build { |w| w.append("inner") }
+      inner = Str.build { |w| w.append("inner") }
       check(inner == "inner")
     end
     check(IyiRegion.tape == current)

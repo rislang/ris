@@ -6,6 +6,6 @@ struct Holder
 end
 
 tape do
-  holders = Tape::Array(Holder).new(1)
+  holders = Ary(Holder).new(1)
   puts holders.bytes
 end

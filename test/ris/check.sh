@@ -3,7 +3,7 @@
 # the compiler with the expected message, test/ris/allowed.ri must compile
 # and run, the fibers test must read back what each fiber wrote, a tape must
 # grow past its first mapping in whole 64 KiB grains and refuse an index out
-# of range, a Tape::Tree must step over subtrees, and the respond sample must
+# of range, a Tre must step over subtrees, and the respond sample must
 # print its known checksum.
 #
 #   bash test/ris/check.sh
@@ -38,8 +38,8 @@ expect break_escape "cannot break a tape value out of its tape block"
 expect yield_break_escape "cannot break a tape value out of its tape block"
 
 expect return_escape 'Copy the text with `.to_heap`'
-expect outer_var '`to_heap` copies a Tape::String or Tape::Array'
-expect owned_cache "to be String, not Tape::String"
+expect outer_var '`to_heap` copies a Str or Ary'
+expect owned_cache "to be String, not Str"
 
 expect local_outer "is a variable of the code around this local_tape block"
 expect local_mutate "cannot use outer tape value"
@@ -52,31 +52,31 @@ expect ffi_pointer      "\`Pointer\` outside an @[Ffi] module"
 expect ffi_to_unsafe    "Read a byte with \`s.byte_at(i)\`"
 expect ffi_lib          "a \`lib\` block outside an @[Ffi] module"
 expect ffi_string_new   "Build it with \`String.build(capacity)"
-expect raw_pointer      "to_unsafe\` of a Tape::String outside a @[TapeUnsafe] def"
-expect raw_view         "Tape::String.new(pointer, size)\` outside a @[TapeUnsafe] def"
+expect raw_pointer      "to_unsafe\` of a Str outside a @[TapeUnsafe] def"
+expect raw_view         "Str.new(pointer, size)\` outside a @[TapeUnsafe] def"
 expect std/tape_unsafe_codec "reaches no \`lib\` fun or system call"
 expect std/tape_unsafe_no_pointer "hands no tape pointer to the OS"
 expect tape_pointer "\`unsafe_append\` outside a @[TapeUnsafe] def"
 expect std/tape_pointer_codec "the pointer \`unsafe_append\` yields reaches no"
-expect writer_grow      "private method 'grow' called for Tape::String::Writer"
-expect tree_entry       "private constant Tape::Tree::Entry(T) referenced"
-expect array_grow       "private method 'grow' called for Tape::Array(T)"
-expect array_append     "append requires Tape::Array(UInt8)"
+expect writer_grow      "private method 'grow' called for Str::Builder"
+expect tree_entry       "private constant Tre::Entry(T) referenced"
+expect array_grow       "private method 'grow' called for Ary(T)"
+expect array_append     "append requires Ary(UInt8)"
 expect heap_copy \
-  "\`to_s\` of a Tape::String outside a @[TapeToHeap] def copies"
+  "\`to_s\` of a Str outside a @[TapeToHeap] def copies"
 expect heap_copy_top \
-  "\`to_s\` of a Tape::String outside a @[TapeToHeap] def"
+  "\`to_s\` of a Str outside a @[TapeToHeap] def"
 expect heap_interpolation \
-  "Interpolating a Tape::String outside a @[TapeToHeap]"
-expect heap_builder     "Writing a Tape::String into a String::Builder"
-expect refill           "\`@items\` is given a new Tape::Array in \`take\`"
+  "Interpolating a Str outside a @[TapeToHeap]"
+expect heap_builder     "Writing a Str into a String::Builder"
+expect refill           "\`@items\` is given a new Ary in \`take\`"
 expect heap_copy        "tape -> heap -> tape pays this at every turn"
-expect heap_memory      "Writing a Tape::String into a String::Builder or"
-expect heap_memory_print "Writing a Tape::String into a Std::Io::Memory"
+expect heap_memory      "Writing a Str into a String::Builder or"
+expect heap_memory_print "Writing a Str into a Std::Io::Memory"
 expect not_flat "Holder is not flat"
 expect check_free "\`first\` is @[CheckFree], and this \`[]\` checks"
 expect heap_escape_helper \
-  "\`to_s\` of a Tape::String outside a @[TapeToHeap] def copies"
+  "\`to_s\` of a Str outside a @[TapeToHeap] def copies"
 
 
 out=$("$RIS" run test/ris/escape.ri 2>&1)
@@ -143,7 +143,7 @@ out=$("$RIS" run test/ris/bounds.ri 2>&1)
 if grep -qF $'10 25 35 35' <<<"$out" && grep -qF "index 3 out of range for 3 elements" <<<"$out"; then echo "runs     bounds"; else echo "FAILED   bounds: $out"; status=1; fi
 
 out=$("$RIS" run test/ris/stream.ri 2>&1)
-if grep -qF '7 1,2,5,6 3,4 0 7' <<<"$out" && grep -qF "Tape::Tree#close: 2 is not open" <<<"$out"; then echo "runs     stream"; else echo "FAILED   stream: $out"; status=1; fi
+if grep -qF '7 1,2,5,6 3,4 0 7' <<<"$out" && grep -qF "Tre#close: 2 is not open" <<<"$out"; then echo "runs     stream"; else echo "FAILED   stream: $out"; status=1; fi
 
 out=$("$RIS" run test/ris/owned.ri 2>&1)
 if [ "$out" = 'PASS: explicit owned copy, typed cache boundary, UTF-8, empty text and scope reuse' ]; then echo "runs     owned"; else echo "FAILED   owned: $out"; status=1; fi
@@ -153,7 +153,7 @@ if [ "$out" = '0 -42 9223372036854775807 -9223372036854775808 a&amp;b&lt;c&gt;&q
 
 # Two pieces, String or on the tape, go out in one socket write.
 out=$("$RIS" run test/ris/tape_primitives.ri 2>&1)
-if [ "$out" = 'PASS: write_bytes, shift and Tape::Scanner' ]; then echo "runs     tape_primitives"; else echo "FAILED   tape_primitives: $out"; status=1; fi
+if [ "$out" = 'PASS: write_bytes, shift and Str::Scanner' ]; then echo "runs     tape_primitives"; else echo "FAILED   tape_primitives: $out"; status=1; fi
 out=$("$RIS" run test/ris/socket_pair.ri 2>&1)
 if [ "$out" = 'PASS: two pieces in one write, String and on the tape, 1 MiB' ]; then echo "runs     socket_pair"; else echo "FAILED   socket_pair: $out"; status=1; fi
 out=$("$RIS" run test/ris/socket_pieces.ri 2>&1)
@@ -323,7 +323,7 @@ for name in le_array_read le_array_write le_string_read le_offset_overflow; do
 done
 
 # A lexer that steps its own offset through tape text is warned, not
-# refused; the same lexer on Tape::Scanner is not.
+# refused; the same lexer on Str::Scanner is not.
 out=$("$RIS" check test/ris/warned/scanner_hint.ri 2>&1)
 if [ $? -eq 0 ] && grep -qF '`@pos` walks tape text by hand' <<<"$out"; then
   echo "warned   scanner_hint"

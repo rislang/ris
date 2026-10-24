@@ -99,7 +99,7 @@ pub abstract class Digest
 
   # Text on the caller's tape, read where it lies with `[]`, a byte at a
   # time into the block: the tape gives no pointer to compress from.
-  def update(data : Tape::String) : self
+  def update(data : Str) : self
     raise "#{self.class}: update after final; reset first" if @finished
     count = data.bytesize
     @length = @length &+ count.to_u64

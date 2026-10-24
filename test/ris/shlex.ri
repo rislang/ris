@@ -10,7 +10,7 @@ tape do
   exit 2 unless words.size == 5
   exit 3 unless words[1] == "two words" && words[2] == "café"
   exit 4 unless words[3] == "a b" && words[4].empty?
-  w = Tape::String::Writer.new(1)
+  w = Str::Builder.new(1)
   w << "prefix:"
   Shlex.join(words, w)
   exit 5 unless w.finish.starts_with?("prefix:plain 'two words'")

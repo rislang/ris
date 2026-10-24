@@ -1,13 +1,13 @@
 # Permission belongs to the def that copies, not its caller.
-def copy(text : Tape::String) : String
+def copy(text : Str) : String
   text.to_s
 end
 
 @[TapeToHeap]
-def retain(text : Tape::String) : String
+def retain(text : Str) : String
   copy(text)
 end
 
 tape do
-  puts retain(Tape::String.new("abc"))
+  puts retain(Str.new("abc"))
 end

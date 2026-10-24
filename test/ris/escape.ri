@@ -8,12 +8,12 @@ import std/gc::{GC}
 CACHE = [] of String
 
 @[TapeToHeap]
-def keep(text : Tape::String) : Nil
+def keep(text : Str) : Nil
   CACHE << text.to_s
 end
 
 @[TapeToHeap]
-def memory_copy(text : Tape::String) : String
+def memory_copy(text : Str) : String
   memory = Memory.new
   text.to_s(memory)
   GC.disable
@@ -31,19 +31,19 @@ def memory_copy(text : Tape::String) : String
 end
 
 @[TapeToHeap]
-def interpolated_copy(text : Tape::String) : String
+def interpolated_copy(text : Str) : String
   "#{text}"
 end
 
 @[TapeToHeap]
-def builder_copy(text : Tape::String) : String
+def builder_copy(text : Str) : String
   String.build { |io| io << text }
 end
 
 tape do
-  text = Tape::String.new("abc")
+  text = Str.new("abc")
   keep(text)
-  empty = Tape::String.new("")
+  empty = Str.new("")
   print(empty)
   stdout.print(empty)
   GC.disable

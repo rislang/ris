@@ -2,12 +2,12 @@
 # is right there, and `clear` would empty the row already kept. Allowed.
 @[OnTape]
 struct Table
-  getter rows : Tape::Array(Tape::Array(Int32))
-  @row : Tape::Array(Int32)
+  getter rows : Ary(Ary(Int32))
+  @row : Ary(Int32)
 
   def initialize
-    @rows = Tape::Array(Tape::Array(Int32)).new
-    @row = Tape::Array(Int32).new
+    @rows = Ary(Ary(Int32)).new
+    @row = Ary(Int32).new
   end
 
   def add(value : Int32) : Nil
@@ -16,12 +16,12 @@ struct Table
 
   def end_row : Nil
     @rows << @row
-    @row = Tape::Array(Int32).new
+    @row = Ary(Int32).new
   end
 
-  def take : Tape::Array(Int32)
+  def take : Ary(Int32)
     batch = @row
-    @row = Tape::Array(Int32).new
+    @row = Ary(Int32).new
     batch
   end
 end

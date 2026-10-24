@@ -1,9 +1,9 @@
-# Tape::Array asked what iyi's Array is asked, on a chat app's models:
+# Ary asked what iyi's Array is asked, on a chat app's models:
 # users post messages in a room.
 @[OnTape]
 struct Message
   getter user_id : Int32
-  getter body : Tape::String
+  getter body : Str
 
   def initialize(@user_id, body : String)
     @body = body.as_tape
@@ -12,11 +12,11 @@ end
 
 tape do
   # The room's users, by id.
-  users = Tape::Array(Int32){7, 12, 31}
+  users = Ary(Int32){7, 12, 31}
   puts "#{users.size} #{users.first} #{users.last?} #{users.empty?}"
   puts "#{users.includes?(31)} #{users.index(31)} #{users.index(99)}"
 
-  messages = Tape::Array(Message){
+  messages = Ary(Message){
     Message.new(7, "Morning!"),
     Message.new(12, "Deploy is green"),
     Message.new(7, "Ship it"),
@@ -46,10 +46,10 @@ tape do
   puts messages.first.body
 
   # Guests join; the room's user list, sorted and written out.
-  guests = Tape::Array(Int32){44, 3}
+  guests = Ary(Int32){44, 3}
   everyone = users + guests
   everyone.sort_in_place
-  list = Tape::String::Writer.new(64)
+  list = Str::Builder.new(64)
   everyone.join(list, ", ")
   puts list.finish
   copy = users.dup
@@ -58,7 +58,7 @@ tape do
   puts "#{users.size} #{copy.size} #{down.first}"
 
   # Past 16 elements the sort merges runs: 40 ids, posted newest first.
-  ids = Tape::Array(Int32).new(40) { |i| 40 - i }
+  ids = Ary(Int32).new(40) { |i| 40 - i }
   ids.sort_in_place
   puts "#{ids.first} #{ids[15]} #{ids[16]} #{ids.last?} #{ids.sum}"
 
@@ -66,10 +66,10 @@ tape do
   puts "#{messages.pop.user_id} #{messages.size}"
 
   # Each user's unread count, none yet.
-  unread = Tape::Array(Int32).new(users.size, 0)
+  unread = Ary(Int32).new(users.size, 0)
   puts "#{unread.size} #{unread.sum} #{unread.first?}"
 
-  empty = Tape::Array(Message).new
+  empty = Ary(Message).new
   puts "#{empty.empty?} #{empty.first?.nil?} #{empty.pop?.nil?}"
   empty.first
 end

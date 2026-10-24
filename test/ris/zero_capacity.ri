@@ -2,13 +2,13 @@ module test/ris/zero_capacity
 import std/int
 
 tape do
-  items = Tape::Array(Int64).new(0)
+  items = Ary(Int64).new(0)
   items.push(123_i64)
-  other = Tape::Array(Int64).new(0)
+  other = Ary(Int64).new(0)
   other.push(456_i64)
   items.push(789_i64)
   puts items[0]
   puts items[1]
   puts other[0]
-  puts Tape::String.build(0) { |w| w.push(65_u8); w.append("BC") }
+  puts Str.build(0) { |w| w.push(65_u8); w.append("BC") }
 end

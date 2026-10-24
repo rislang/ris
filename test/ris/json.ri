@@ -1,6 +1,6 @@
-# std/json on the tape: `JSON.parse(Tape::String)` reads what `JSON.parse`
+# std/json on the tape: `JSON.parse(Str)` reads what `JSON.parse`
 # reads and refuses what it refuses, with the same sentence; a string with
-# no escape is a view of the input; `JSON.write(Tape::String::Writer)`
+# no escape is a view of the input; `JSON.write(Str::Builder)`
 # writes what `JSON.build` writes, plain, indented and ASCII-only; and
 # neither puts anything on the GC heap.
 module test/ris/json
@@ -13,7 +13,7 @@ failures = [] of String
 
 # The copy a caller keeps, made at the boundary it leaves the tape by.
 @[TapeToHeap]
-def retain(text : Tape::String) : String
+def retain(text : Str) : String
   text.to_s
 end
 
@@ -60,7 +60,7 @@ end
 text = %({"a": [1, -0, 2.5e3, "x\\ny\\u00e9\\ud83d\\ude00", true, false, null],) +
        %( "b\\u0041": {"c": -7, "d": "plain"}, "e": []})
 tape do
-  doc = JSON.parse(Tape::String.new(text))
+  doc = JSON.parse(Str.new(text))
   a = doc.at(doc.root, "a")
   check(failures, doc.size(a) == 7, "array size")
   check(failures, doc.int(doc.at(a, 0)) == 1 && doc.int(doc.at(a, 1)) == 0, "integers")
@@ -88,12 +88,12 @@ end
 bad << many
 bad.each do |input|
   tape do
-    tape = DocumentParser.new(Tape::String.new(input))
+    tape = DocumentParser.new(Str.new(input))
     tape.parse
     heap = Parser.new(input)
     heap.parse
     check(failures, !tape.error.nil? && tape.error == heap.error, "refused alike: #{input[0, 20].inspect} #{tape.error} | #{heap.error}")
-    check(failures, JSON.parse?(Tape::String.new(input)).nil?, "parse? nil: #{input[0, 20].inspect}")
+    check(failures, JSON.parse?(Str.new(input)).nil?, "parse? nil: #{input[0, 20].inspect}")
   end
 end
 
@@ -105,7 +105,7 @@ end
     end
     tape = ""
     tape do
-      w = Tape::String::Writer.new(16)
+      w = Str::Builder.new(16)
       w.append("head:")
       JSON.write(w, indent, ascii) { |b| tape_doc(b) }
       tape = retain(w.finish)
@@ -117,14 +117,14 @@ end
 # A document of more keys than the builder's stack holds: their spans
 # move to the heap, and a repeat among them is still seen by the end.
 tape do
-  w = Tape::String::Writer.new(16)
+  w = Str::Builder.new(16)
   JSON.write(w) { |b| b.object { 300.times { |i| b.field "k#{i}", i } } }
   check(failures, JSON.parse(w.finish).size(0) == 300, "300 keys written and read back")
 end
 
 # `w.json` is `JSON.write(w)` with the writer first, options and all.
 tape do
-  w = Tape::String::Writer.new(16)
+  w = Str::Builder.new(16)
   w.append("x:")
   w.json { |b| b.object { b.field "a", 1 } }
   w.json(2, true) { |b| b.array { b.string "é" } }
@@ -135,10 +135,10 @@ end
 # A document copied through the builder is the heap builder's text of it,
 # its escapes decoded and written again, in every mode.
 tape do
-  doc = JSON.parse(Tape::String.new(text))
+  doc = JSON.parse(Str.new(text))
   [nil, 2].each do |indent|
     [false, true].each do |ascii|
-      w = Tape::String::Writer.new(16)
+      w = Str::Builder.new(16)
       JSON.write(w, indent, ascii) { |b| b.value(doc, doc.root) }
       heap = JSON.build(indent) do |b|
         b.ascii_only = ascii
@@ -148,7 +148,7 @@ tape do
       check(failures, w.finish == heap, message)
     end
   end
-  w = Tape::String::Writer.new(16)
+  w = Str::Builder.new(16)
   JSON.write(w) do |b|
     b.object { doc.each(doc.root) { |child| b.field(doc, child); b.number doc.kind(child).value } }
   end
@@ -162,8 +162,8 @@ before = IyiMark.allocated_since
 total = 0_i64
 2000.times do
   tape do
-    doc = JSON.parse(Tape::String.new(small))
-    w = Tape::String::Writer.new(64)
+    doc = JSON.parse(Str.new(small))
+    w = Str::Builder.new(64)
     JSON.write(w) do |b|
       b.object do
         doc.each(doc.root) { |child| b.field(doc, child); b.value(doc, child) }

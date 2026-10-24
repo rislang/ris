@@ -23,19 +23,19 @@ ris is iyi plus Goose's tape memory.
 A library returns tape data on the caller's active tape; the owning
 scope releases it all together:
 
-* Take input already on the tape (`Tape::String`), not a `String` copy of it.
-* Write output into the caller's `Tape::String::Writer`, or return a
-  `Tape::String` or an `@[OnTape]` struct the caller's scope owns, viewing
+* Take input already on the tape (`Str`), not a `String` copy of it.
+* Write output into the caller's `Str::Builder`, or return a
+  `Str` or an `@[OnTape]` struct the caller's scope owns, viewing
   the input bytes rather than copying them.
 * Temporaries go on the caller's tape: a nested `tape` block shares it at
   no cost. No `local_tape` per call; it costs more than small work saves.
 * The caller decides what to copy to the heap, and when: `to_heap`, on a
-  `Tape::String`, `Tape::Array` or an `@[OnTape]` struct defining one.
+  `Str`, `Ary` or an `@[OnTape]` struct defining one.
   `to_s` and interpolation need `@[TapeToHeap]`, per def, not propagated.
-* No raw pointers in an API: pass `Tape::String`, `Tape::String::Writer`,
-  `Tape::Array` or an `@[OnTape]` struct. Outside a `std/` module the
-  compiler refuses a `Tape::String`'s `to_unsafe` and
-  `Tape::String.new(pointer, size)` (TapePointerChecker); a caller reads
+* No raw pointers in an API: pass `Str`, `Str::Builder`,
+  `Ary` or an `@[OnTape]` struct. Outside a `std/` module the
+  compiler refuses a `Str`'s `to_unsafe` and
+  `Str.new(pointer, size)` (TapePointerChecker); a caller reads
   with `[]`, `[start, count]`, `each_byte`. Only the library's own FFI or
   socket call takes the pointer.
 * Keep the `String` API beside it, built on the tape one: it opens a
@@ -43,14 +43,14 @@ scope releases it all together:
   with `to_heap`. `std/` is checked too; a def handing a pointer to the
   OS is a small `@[TapeUnsafe]` with a reason. `src/iyi/` is exempt.
 
-Example: `HTTP.parse_head(bytes : Tape::String) : ParsedHead | ParseError`,
+Example: `HTTP.parse_head(bytes : Str) : ParsedHead | ParseError`,
 with `ParsedHead`'s method, target and fields as views into *bytes*;
 `parse_request(text : String)` stays, on top of it. A web server keeps a
 request's bytes, temporaries and response on one tape per request.
 
 ## Fast on the tape
 
-* Nothing frees before its block ends: refill a `Tape::Array` field with
+* Nothing frees before its block ends: refill an `Ary` field with
   `clear`, never a new one per call (the compiler refuses it).
 * Size growing values from the input up front; one that outgrows its
   room behind another is copied off. `RIS_TAPE_STATS=1` counts both.

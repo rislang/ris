@@ -71,7 +71,7 @@ class StringBuffer
     @size = @size + len
   end
 
-  def append(text : Tape::String) : Nil
+  def append(text : Str) : Nil
     ensure_capacity(@size + text.bytesize)
     text.each_byte do |b|
       @buffer[@size] = b
@@ -134,7 +134,7 @@ end
 # negated, the length of the maximal ill-formed subpart there: the bytes that
 # could still have begun a well-formed sequence, at least the one byte. An
 # overlong form, a surrogate and anything past U+10FFFF are ill-formed.
-def utf8_sequence_at(bytes : Tape::String, at : Int32) : Int32
+def utf8_sequence_at(bytes : Str, at : Int32) : Int32
   size = bytes.bytesize
   lead = bytes[at]
   return 1 if lead < 0x80_u8
@@ -892,7 +892,7 @@ class Lexer
     @spans = false
   end
 
-  # A lexer over bytes on the tape (`JSON.parse(Tape::String)`): a string
+  # A lexer over bytes on the tape (`JSON.parse(Str)`): a string
   # token is its span, with `escaped` set when it must be decoded, and
   # nothing of it is copied. The input is handed to `next_token`.
   def initialize(spans : Bool)
@@ -935,7 +935,7 @@ class Lexer
   end
 
   # The input's bytes from *start* as a String, in either mode.
-  private def slice(input : Tape::String, start : Int32, size : Int32) : String
+  private def slice(input : Str, start : Int32, size : Int32) : String
     return @input[start, size] unless @spans
     input[start, size].to_heap
   end
@@ -944,7 +944,7 @@ class Lexer
   SHORT_MAX   =  24
 
   # The string the input spells from *start* for *size* bytes.
-  private def text_at(input : Tape::String, start : Int32, size : Int32) : String
+  private def text_at(input : Str, start : Int32, size : Int32) : String
     return @input[start, size] if size > SHORT_MAX || size == 0
     text = input[start, size]
     h = 2166136261_u64
@@ -971,11 +971,11 @@ class Lexer
     nil
   end
 
-  private def current_byte(input : Tape::String) : UInt8
+  private def current_byte(input : Str) : UInt8
     @pos < input.bytesize ? input[@pos] : 0_u8
   end
 
-  private def advance(input : Tape::String) : UInt8
+  private def advance(input : Str) : UInt8
     b = current_byte(input)
     if @pos < input.bytesize
       if b == 10_u8 # '\n'
@@ -990,7 +990,7 @@ class Lexer
     current_byte(input)
   end
 
-  private def skip_whitespace(input : Tape::String) : Nil
+  private def skip_whitespace(input : Str) : Nil
     while @pos < input.bytesize
       b = current_byte(input)
       if b == 32_u8 || b == 9_u8 || b == 10_u8 || b == 13_u8
@@ -1003,11 +1003,11 @@ class Lexer
 
   # The next token of the String the lexer was made with.
   def next_token : Token
-    next_token(Tape::String.view(@input))
+    next_token(Str.view(@input))
   end
 
   # The next token of *input*, the tape text a span lexer reads.
-  def next_token(input : Tape::String) : Token
+  def next_token(input : Str) : Token
     return @token unless @error.nil?
     skip_whitespace(input)
 
@@ -1074,7 +1074,7 @@ class Lexer
     (b >= 97_u8 && b <= 122_u8) || (b >= 65_u8 && b <= 90_u8) || (b >= 48_u8 && b <= 57_u8) || b == 95_u8
   end
 
-  private def consume_bare_identifier(input : Tape::String, line : Int32, col : Int32) : Nil
+  private def consume_bare_identifier(input : Str, line : Int32, col : Int32) : Nil
     start = @pos
     while @pos < input.bytesize && identifier_byte?(current_byte(input))
       advance(input)
@@ -1083,7 +1083,7 @@ class Lexer
   end
 
   # `true`, `false`, `null`: the whole word, and nothing joined to it.
-  private def consume_word(input : Tape::String, word : String, kind : TokenKind, line : Int32, col : Int32) : Nil
+  private def consume_word(input : Str, word : String, kind : TokenKind, line : Int32, col : Int32) : Nil
     start = @pos
     expected = word.to_unsafe
     i = 0
@@ -1102,7 +1102,7 @@ class Lexer
     set_token(kind, line, col)
   end
 
-  private def consume_string(input : Tape::String, line : Int32, col : Int32) : Nil
+  private def consume_string(input : Str, line : Int32, col : Int32) : Nil
     advance(input) # the opening quote
     start_pos = @pos
     has_escape = false
@@ -1237,7 +1237,7 @@ class Lexer
 
   # The rest of a string from the current byte, checked as `consume_string`
   # checks it, and taken as the span from *start* to the closing quote.
-  private def consume_span(input : Tape::String, start : Int32, has_escape : Bool, line : Int32, col : Int32) : Nil
+  private def consume_span(input : Str, start : Int32, has_escape : Bool, line : Int32, col : Int32) : Nil
     while @pos < input.bytesize
       b = current_byte(input)
       if b == 34_u8 # '"'
@@ -1299,7 +1299,7 @@ class Lexer
   # Passes over the UTF-8 sequence at the current byte and answers true, or
   # records why the bytes there are not one (RFC 8259 §8.1: a document is
   # UTF-8) and answers false.
-  private def take_utf8_sequence(input : Tape::String) : Bool
+  private def take_utf8_sequence(input : Str) : Bool
     b = current_byte(input)
     length = utf8_sequence_at(input, @pos)
     if length < 0
@@ -1318,7 +1318,7 @@ class Lexer
   end
 
   # Four hex digits, or -1 after recording why not.
-  private def read_hex4(input : Tape::String, line : Int32, col : Int32) : Int32
+  private def read_hex4(input : Str, line : Int32, col : Int32) : Int32
     val = 0
     i = 0
     while i < 4
@@ -1359,7 +1359,7 @@ class Lexer
     b >= 48_u8 && b <= 57_u8
   end
 
-  private def consume_number(input : Tape::String, line : Int32, col : Int32) : Nil
+  private def consume_number(input : Str, line : Int32, col : Int32) : Nil
     start_pos = @pos
     has_fraction = false
     has_exponent = false
@@ -1504,7 +1504,7 @@ class Lexer
 
   # The Int64 these digits spell, or nil when they do not fit. The negative
   # magnitude is accumulated so the smallest Int64 needs no negation.
-  private def parse_int64?(bytes : Tape::String) : Int64?
+  private def parse_int64?(bytes : Str) : Int64?
     len = bytes.bytesize
     i = 0
     negative = false
@@ -2390,7 +2390,7 @@ pub class Builder
   end
 
   private def write_escaped_string(val : String) : Nil
-    JSON.each_escaped_byte(Tape::String.view(val), @ascii_only) { |b| @buffer.append(b) }
+    JSON.each_escaped_byte(Str.view(val), @ascii_only) { |b| @buffer.append(b) }
   end
 
   def start_array : Nil
@@ -2534,19 +2534,19 @@ TAPE_KEYS   = 128
 # heap, not compared one by one: 50,000 keys took 1.7 s, the heap 11 ms.
 TAPE_LINEAR = 32
 
-# Writes a document into the caller's `Tape::String::Writer`, as `Builder`
+# Writes a document into the caller's `Str::Builder`, as `Builder`
 # writes one into a String: the same values, checks and escapes, and nothing
 # on the heap. `JSON.write(writer) { |json| ... }` hands one.
 @[OnTape]
 pub struct Writer
-  @out : Tape::String::Writer
+  @out : Str::Builder
   @slots : Pointer(Int32)
   @keys : Pointer(Pointer(Int32))
   @table : Pointer(Pointer(UInt64))
   @indent : String?
   @ascii_only : Bool
 
-  def initialize(@out : Tape::String::Writer, @slots : Pointer(Int32), @keys : Pointer(Pointer(Int32)), @table : Pointer(Pointer(UInt64)), @indent : String?, @ascii_only : Bool)
+  def initialize(@out : Str::Builder, @slots : Pointer(Int32), @keys : Pointer(Pointer(Int32)), @table : Pointer(Pointer(UInt64)), @indent : String?, @ascii_only : Bool)
     @slots[0] = 0
     @slots[1] = 0
     @slots[2] = Builder::ROOT
@@ -2648,21 +2648,21 @@ pub struct Writer
     @out << str
   end
 
-  def raw(str : Tape::String) : Nil
+  def raw(str : Str) : Nil
     before_value
     @out << str
   end
 
   def string(val : String) : Nil
-    string(Tape::String.view(val))
+    string(Str.view(val))
   end
 
-  def string(val : Tape::String) : Nil
+  def string(val : Str) : Nil
     before_value
     escaped(val)
   end
 
-  private def escaped(text : Tape::String) : Nil
+  private def escaped(text : Str) : Nil
     JSON.each_escaped_byte(text, @ascii_only) { |b| @out.push(b) }
   end
 
@@ -2718,12 +2718,12 @@ pub struct Writer
   # A key, refused when this object already holds its text, as `Builder`
   # refuses it.
   def field(name : String) : Nil
-    field(Tape::String.view(name))
+    field(Str.view(name))
   end
 
   # Checks the key just written for a repeat against the writer's text so
   # far, a view of it read before anything more is written.
-  def field(name : Tape::String) : Nil
+  def field(name : Str) : Nil
     st = state
     raise "a field outside an object" unless st == Builder::OBJECT_FIRST || st == Builder::OBJECT_NEXT
     @out.push(44_u8) if st == Builder::OBJECT_NEXT
@@ -2782,13 +2782,13 @@ pub struct Writer
     @out.push(32_u8) unless @indent.nil?
   end
 
-  private def repeated(name : Tape::String, written : Tape::String) : Nil
+  private def repeated(name : Str, written : Str) : Nil
     raise "the key #{name.to_heap.inspect} is written twice in one object" if JSON.utf8?(name)
     raise "the key #{name.to_heap.inspect} is written as #{written.to_heap}, as an earlier key was"
   end
 
   # FNV-1a of a key's written text, 32 bits and never 0.
-  private def hash(text : Tape::String) : UInt64
+  private def hash(text : Str) : UInt64
     h = 2166136261_u64
     text.each_byte { |b| h = (h ^ b.to_u64) &* 16777619_u64 }
     h = h & 0xFFFFFFFF_u64
@@ -2797,7 +2797,7 @@ pub struct Writer
 
   # Key *k* of the object *id* into the table: (id, hash) to *k*, open
   # addressing, doubled past half full.
-  private def index(id : Int32, text : Tape::String, keys : Pointer(Int32), k : Int32) : Nil
+  private def index(id : Int32, text : Str, keys : Pointer(Int32), k : Int32) : Nil
     table = @table.value
     if table.address == 0 || table[1] * 2 >= table[0]
       room = table.address == 0 ? 64_u64 : table[0] * 2
@@ -2828,42 +2828,42 @@ pub struct Writer
     table[1] = table[1] + 1
   end
 
-  def field(name : String | Tape::String, & : -> Nil) : Nil
+  def field(name : String | Str, & : -> Nil) : Nil
     field(name)
     yield
   end
 
-  def field(name : String | Tape::String, val : String) : Nil
+  def field(name : String | Str, val : String) : Nil
     field(name)
     string(val)
   end
 
-  def field(name : String | Tape::String, val : Tape::String) : Nil
+  def field(name : String | Str, val : Str) : Nil
     field(name)
     string(val)
   end
 
-  def field(name : String | Tape::String, val : Int32) : Nil
+  def field(name : String | Str, val : Int32) : Nil
     field(name)
     number(val)
   end
 
-  def field(name : String | Tape::String, val : Int64) : Nil
+  def field(name : String | Str, val : Int64) : Nil
     field(name)
     number(val)
   end
 
-  def field(name : String | Tape::String, val : Float64) : Nil
+  def field(name : String | Str, val : Float64) : Nil
     field(name)
     number(val)
   end
 
-  def field(name : String | Tape::String, val : Bool) : Nil
+  def field(name : String | Str, val : Bool) : Nil
     field(name)
     bool(val)
   end
 
-  def field(name : String | Tape::String, val : Nil) : Nil
+  def field(name : String | Str, val : Nil) : Nil
     field(name)
     null
   end
@@ -2924,7 +2924,7 @@ pub struct Writer
 
   # The text of an escaped string decoded on the caller's tape, in a
   # nested scope that drops it once the block has written it.
-  private def decoding(text : Tape::String, & : Tape::String -> Nil) : Nil
+  private def decoding(text : Str, & : Str -> Nil) : Nil
     tape do
       yield JSON.decoded(text, true)
     end
@@ -2947,7 +2947,7 @@ end
 # One value of a `Document`, in 24 bytes: its kind and which of its
 # texts hold an escape, the span of its key in the input, and its payload:
 # an integer's or a bool's value, a float's bits, or a string's span (start
-# in the high half, size in the low). Spans, not `Tape::String`s, halve the
+# in the high half, size in the low). Spans, not `Str`s, halve the
 # stream: a parse writes it whole, past the tape's warm megabyte.
 @[OnTape]
 pub struct Node
@@ -2983,8 +2983,8 @@ pub struct Node
   end
 end
 
-# A document read by `JSON.parse(bytes : Tape::String)`: every value in one
-# `Tape::Tree` in document order, its strings spans of the input, all of it
+# A document read by `JSON.parse(bytes : Str)`: every value in one
+# `Tre` in document order, its strings spans of the input, all of it
 # the caller's `tape`'s. A value is named by its index; the root's is
 # 0. A string with an escape is decoded when it is asked for.
 @[OnTape]
@@ -2999,10 +2999,10 @@ pub struct Document
     Object
   end
 
-  getter tree : Tape::Tree(Node)
-  getter input : Tape::String
+  getter tree : Tre(Node)
+  getter input : Str
 
-  def initialize(@tree : Tape::Tree(Node), @input : Tape::String)
+  def initialize(@tree : Tre(Node), @input : Str)
   end
 
   def root : Int32
@@ -3035,14 +3035,14 @@ pub struct Document
 
   # The string at *index*, decoded: the input's own bytes unless it holds
   # an escape, a new string on the tape if it does.
-  def string(index : Int32) : Tape::String
+  def string(index : Int32) : Str
     node = expect(index, Kind::String)
     text = @input[(node.payload >> 32).to_i32, (node.payload & 0xFFFFFFFF).to_i32]
     JSON.decoded(text, (node.flags & Node::ESCAPED_TEXT) != 0)
   end
 
   # The key *index* has in its object, decoded as `string` is.
-  def key(index : Int32) : Tape::String
+  def key(index : Int32) : Str
     node = @tree[index]
     JSON.decoded(@input[node.key_at, node.key_size], (node.flags & Node::ESCAPED_KEY) != 0)
   end
@@ -3098,20 +3098,20 @@ pub struct Document
   end
 end
 
-# Reads a document onto the tape for `JSON.parse(bytes : Tape::String)`: the
+# Reads a document onto the tape for `JSON.parse(bytes : Str)`: the
 # same grammar, limits and sentences as `Parser`, through the same lexer in
 # its span mode, so that only the stream of values goes on the tape.
 @[OnTape]
 pub struct DocumentParser
   @lexer : Lexer
-  @input : Tape::String
-  @tree : Tape::Tree(Node)
+  @input : Str
+  @tree : Tre(Node)
   @nesting : Int32
   @error : String?
 
-  def initialize(@input : Tape::String)
+  def initialize(@input : Str)
     @lexer = Lexer.spans
-    @tree = Tape::Tree(Node).new(@input.bytesize // 16 + 8)
+    @tree = Tre(Node).new(@input.bytesize // 16 + 8)
     @nesting = 0
     @error = nil
     @lexer.next_token(@input)
@@ -3146,7 +3146,7 @@ pub struct DocumentParser
     fail(reason, token.line_number, token.column_number)
   end
 
-  private def text(at : Int32, size : Int32) : Tape::String
+  private def text(at : Int32, size : Int32) : Str
     @input[at, size]
   end
 
@@ -3356,7 +3356,7 @@ pub struct JSON
   # The document in *bytes* read onto the caller's tape, its strings views
   # into *bytes*; panics with the line and column of the first thing it
   # refuses, as `parse(String)` does.
-  def self.parse(bytes : Tape::String) : Document
+  def self.parse(bytes : Str) : Document
     parser = DocumentParser.new(bytes)
     parser.parse
     failure = parser.error
@@ -3366,7 +3366,7 @@ pub struct JSON
   end
 
   # The document in *bytes* on the tape, or `nil` when it is not one.
-  def self.parse?(bytes : Tape::String) : Document?
+  def self.parse?(bytes : Str) : Document?
     parser = DocumentParser.new(bytes)
     parser.parse
     parser.finish
@@ -3378,7 +3378,7 @@ pub struct JSON
   # through a `Writer` the block is handed: `build` makes a String,
   # `write` adds to one. Its state is on this method's stack: the JSON
   # writer is not used after the block.
-  def self.write(writer : Tape::String::Writer, indent : String | Int32 | Nil = nil, ascii_only : Bool = false, & : Writer -> Nil) : Nil
+  def self.write(writer : Str::Builder, indent : String | Int32 | Nil = nil, ascii_only : Bool = false, & : Writer -> Nil) : Nil
     slots = uninitialized Int32[784]
     spans = uninitialized Int32[256]
     keys = pointerof(spans).as(Pointer(Int32))
@@ -3392,15 +3392,15 @@ pub struct JSON
 
   # The bytes of a string as the lexer found them, decoded: themselves
   # when they hold no escape, else a new string on the tape.
-  def self.decoded(text : Tape::String, escaped : Bool) : Tape::String
+  def self.decoded(text : Str, escaped : Bool) : Str
     return text unless escaped
-    Tape::String.build(text.bytesize) do |w|
+    Str.build(text.bytesize) do |w|
       each_decoded_byte(text) { |b| w.push(b) }
     end
   end
 
   # The same decoded into a String.
-  def self.decoded_s(text : Tape::String, escaped : Bool = true) : String
+  def self.decoded_s(text : Str, escaped : Bool = true) : String
     return text.to_heap unless escaped
     buffer = StringBuffer.new(text.bytesize)
     each_decoded_byte(text) { |b| buffer.append(b) }
@@ -3409,7 +3409,7 @@ pub struct JSON
 
   # Each byte of a string's text whose escapes the lexer has checked,
   # decoded: `\uXXXX` (a surrogate pair into one code point) as UTF-8.
-  def self.each_decoded_byte(bytes : Tape::String, & : UInt8 -> Nil) : Nil
+  def self.each_decoded_byte(bytes : Str, & : UInt8 -> Nil) : Nil
     size = bytes.bytesize
     i = 0
     while i < size
@@ -3460,7 +3460,7 @@ pub struct JSON
   end
 
   # Whether *bytes* are well-formed UTF-8.
-  def self.utf8?(bytes : Tape::String) : Bool
+  def self.utf8?(bytes : Str) : Bool
     size = bytes.bytesize
     i = 0
     while i < size
@@ -3471,7 +3471,7 @@ pub struct JSON
     true
   end
 
-  private def self.hex4(text : Tape::String, at : Int32) : Int32
+  private def self.hex4(text : Str, at : Int32) : Int32
     val = 0
     i = 0
     while i < 4
@@ -3489,7 +3489,7 @@ pub struct JSON
   # UTF-8 the reader takes back (RFC 8259 §8.1: a String holds any bytes,
   # a file name or a log line). Under *ascii_only* every code point past
   # ASCII is a `\uXXXX`, a surrogate pair past the basic plane.
-  def self.each_escaped_byte(bytes : Tape::String, ascii_only : Bool, & : UInt8 -> Nil) : Nil
+  def self.each_escaped_byte(bytes : Str, ascii_only : Bool, & : UInt8 -> Nil) : Nil
     len = bytes.bytesize
     yield 34_u8
     i = 0
@@ -4050,7 +4050,7 @@ pub trait WritesJSON
   abstract def json(indent : String | Int32 | Nil = nil, ascii_only : Bool = false, & : Writer -> Nil) : Nil
 end
 
-impl WritesJSON for Tape::String::Writer
+impl WritesJSON for Str::Builder
   def json(indent : String | Int32 | Nil = nil, ascii_only : Bool = false, & : Std::Json::Writer -> Nil) : Nil
     Std::Json::JSON.write(self, indent, ascii_only) { |j| yield j }
   end

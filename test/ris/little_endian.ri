@@ -2,7 +2,7 @@ module little_endian
 
 import std/int
 tape do
-  pool = Tape::Array(UInt8).new(0)
+  pool = Ary(UInt8).new(0)
   pool << 99_u8
   at = pool.size
   pool.write_bytes(0xfedc_u16)

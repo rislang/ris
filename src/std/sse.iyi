@@ -186,12 +186,12 @@ end
 
 @[OnTape]
 pub struct TapeEvent
-  getter event : Tape::String
-  getter data : Tape::String
-  getter id : Tape::String
+  getter event : Str
+  getter data : Str
+  getter id : Str
 
-  def initialize(@event : Tape::String, @data : Tape::String,
-                 @id : Tape::String)
+  def initialize(@event : Str, @data : Str,
+                 @id : Str)
   end
 
   def to_heap : Event
@@ -201,9 +201,9 @@ end
 
 @[OnTape]
 pub struct TapeEventParser
-  @last_event_id : Pointer(Tape::String)
+  @last_event_id : Pointer(Str)
 
-  def last_event_id : Tape::String
+  def last_event_id : Str
     @last_event_id.value
   end
 
@@ -219,27 +219,27 @@ pub struct TapeEventParser
     @dispatched.value
   end
 
-  @id_buffer : Pointer(Tape::String)
+  @id_buffer : Pointer(Str)
 
-  def id_buffer : Tape::String
+  def id_buffer : Str
     @id_buffer.value
   end
 
-  @type : Pointer(Tape::String)
+  @type : Pointer(Str)
 
-  def type : Tape::String
+  def type : Str
     @type.value
   end
 
-  @data : Pointer(Tape::String::Writer)
+  @data : Pointer(Str::Builder)
 
-  def data : Tape::String::Writer
+  def data : Str::Builder
     @data.value
   end
 
-  @line : Pointer(Tape::String::Writer)
+  @line : Pointer(Str::Builder)
 
-  def line : Tape::String::Writer
+  def line : Str::Builder
     @line.value
   end
 
@@ -262,21 +262,21 @@ pub struct TapeEventParser
   # A parser for a stream whose last event ID is *last_event_id* so far:
   # a reconnection's, which carries the one before it (see the module's
   # header for why).
-  def initialize(last_event_id : Tape::String = "".as_tape)
-    @last_event_id = Pointer(Tape::String).new(
-      IyiRegion.tape_bytes(sizeof(Tape::String).to_u64))
+  def initialize(last_event_id : Str = "".as_tape)
+    @last_event_id = Pointer(Str).new(
+      IyiRegion.tape_bytes(sizeof(Str).to_u64))
     @retry = Pointer(Int32?).new(
       IyiRegion.tape_bytes(sizeof(Int32?).to_u64))
     @dispatched = Pointer(Int64).new(
       IyiRegion.tape_bytes(sizeof(Int64).to_u64))
-    @id_buffer = Pointer(Tape::String).new(
-      IyiRegion.tape_bytes(sizeof(Tape::String).to_u64))
-    @type = Pointer(Tape::String).new(
-      IyiRegion.tape_bytes(sizeof(Tape::String).to_u64))
-    @data = Pointer(Tape::String::Writer).new(
-      IyiRegion.tape_bytes(sizeof(Tape::String::Writer).to_u64))
-    @line = Pointer(Tape::String::Writer).new(
-      IyiRegion.tape_bytes(sizeof(Tape::String::Writer).to_u64))
+    @id_buffer = Pointer(Str).new(
+      IyiRegion.tape_bytes(sizeof(Str).to_u64))
+    @type = Pointer(Str).new(
+      IyiRegion.tape_bytes(sizeof(Str).to_u64))
+    @data = Pointer(Str::Builder).new(
+      IyiRegion.tape_bytes(sizeof(Str::Builder).to_u64))
+    @line = Pointer(Str::Builder).new(
+      IyiRegion.tape_bytes(sizeof(Str::Builder).to_u64))
     @after_cr = Pointer(Bool).new(
       IyiRegion.tape_bytes(sizeof(Bool).to_u64))
     @first = Pointer(Bool).new(
@@ -284,24 +284,24 @@ pub struct TapeEventParser
     @last_event_id.value = last_event_id
     @id_buffer.value = @last_event_id.value
     @type.value = "".as_tape
-    @data.value = Tape::String::Writer.new(64)
-    @line.value = Tape::String::Writer.new(64)
+    @data.value = Str::Builder.new(64)
+    @line.value = Str::Builder.new(64)
     @after_cr.value = false
     @first.value = true
     @retry.value = nil
     @dispatched.value = 0_i64
   end
 
-  def data_buffer : Tape::String
+  def data_buffer : Str
     @data.value.finish
   end
 
-  def line_buffer : Tape::String
+  def line_buffer : Str
     @line.value.finish
   end
 
-  def restore(id : Tape::String, type : Tape::String,
-              data : Tape::String, line : Tape::String,
+  def restore(id : Str, type : Str,
+              data : Str, line : Str,
               after_cr : Bool, first : Bool, retry : Int32?,
               dispatched : Int64) : Nil
     @id_buffer.value = id
@@ -314,7 +314,7 @@ pub struct TapeEventParser
     @dispatched.value = dispatched
   end
 
-  def feed(text : Tape::String, & : TapeEvent -> Nil) : Nil
+  def feed(text : Str, & : TapeEvent -> Nil) : Nil
     p = text
     n = text.bytesize
     i = 0
@@ -332,7 +332,7 @@ pub struct TapeEventParser
         if @line.value.length > 0
           @line.value << line
           line = @line.value.finish
-          @line.value = Tape::String::Writer.new(64)
+          @line.value = Str::Builder.new(64)
         end
         i = i + 1
         if c == 13_u8
@@ -356,14 +356,14 @@ pub struct TapeEventParser
   # The end of the stream: a line or an event not yet ended is discarded,
   # not dispatched. The last event ID and the reconnection time stay.
   def finish : Nil
-    @line.value = Tape::String::Writer.new(64)
-    @data.value = Tape::String::Writer.new(64)
+    @line.value = Str::Builder.new(64)
+    @data.value = Str::Builder.new(64)
     @type.value = "".as_tape
     @after_cr.value = false
   end
 
   # One line, its end taken off: the event it dispatches, if it does.
-  private def take(bytes : Tape::String) : TapeEvent?
+  private def take(bytes : Str) : TapeEvent?
     line = SSE.clean(bytes)
     if @first.value
       @first.value = false
@@ -409,7 +409,7 @@ pub struct TapeEventParser
     end
     data = @data.value.finish
     data = data[0, data.bytesize - 1] if !data.empty? && data[-1] == 10_u8
-    @data.value = Tape::String::Writer.new(64)
+    @data.value = Str::Builder.new(64)
     kind = @type.value.empty? ? "message".as_tape : @type.value
     event = TapeEvent.new(kind, data, @last_event_id.value)
     @type.value = "".as_tape
@@ -419,7 +419,7 @@ pub struct TapeEventParser
 
   # A `retry` value: ASCII digits and nothing else, base ten, saturating
   # at `MAX_RETRY`; nil for anything else, the empty value included.
-  def self.digits(text : Tape::String) : Int32?
+  def self.digits(text : Str) : Int32?
     return nil if text.bytesize == 0
     p = text
     value = 0_i64
@@ -486,14 +486,14 @@ pub struct SSE
     result
   end
 
-  def self.encode(data : Tape::String, event : Tape::String? = nil,
-                  id : Tape::String? = nil,
-                  retry : Int32? = nil) : Tape::String
-    Tape::String.build { |w| encode(data, w, event, id, retry) }
+  def self.encode(data : Str, event : Str? = nil,
+                  id : Str? = nil,
+                  retry : Int32? = nil) : Str
+    Str.build { |w| encode(data, w, event, id, retry) }
   end
 
-  def self.encode(data : Tape::String, writer : Tape::String::Writer,
-                  event : Tape::String? = nil, id : Tape::String? = nil,
+  def self.encode(data : Str, writer : Str::Builder,
+                  event : Str? = nil, id : Str? = nil,
                   retry : Int32? = nil) : Nil
     # Validate every field before changing the caller's writer.
     if kind = event
@@ -533,12 +533,12 @@ pub struct SSE
     result
   end
 
-  def self.comment(text : Tape::String) : Tape::String
-    Tape::String.build { |w| comment(text, w) }
+  def self.comment(text : Str) : Str
+    Str.build { |w| comment(text, w) }
   end
 
-  def self.comment(text : Tape::String,
-                   writer : Tape::String::Writer) : Nil
+  def self.comment(text : Str,
+                   writer : Str::Builder) : Nil
     utf8(text, "a comment")
     lines(text) do |line|
       writer << ':'
@@ -547,11 +547,11 @@ pub struct SSE
     end
   end
 
-  private def self.breaks?(text : Tape::String) : Bool
+  private def self.breaks?(text : Str) : Bool
     text.includes?('\n') || text.includes?('\r')
   end
 
-  private def self.utf8(text : Tape::String, what : String) : Nil
+  private def self.utf8(text : Str, what : String) : Nil
     at = 0
     while at < text.bytesize
       width = sequence_at(text, text.bytesize, at)
@@ -562,8 +562,8 @@ pub struct SSE
     end
   end
 
-  private def self.lines(text : Tape::String,
-                         & : Tape::String -> Nil) : Nil
+  private def self.lines(text : Str,
+                         & : Str -> Nil) : Nil
     start = 0
     at = 0
     while at < text.bytesize
@@ -583,7 +583,7 @@ pub struct SSE
   end
 
   # UTF-8 replacement uses the Encoding Standard's maximal subpart.
-  def self.clean(bytes : Tape::String) : Tape::String
+  def self.clean(bytes : Str) : Str
     at = 0
     while at < bytes.bytesize
       length = sequence_at(bytes, bytes.bytesize, at)
@@ -591,7 +591,7 @@ pub struct SSE
       at += length
     end
     return bytes if at == bytes.bytesize
-    writer = Tape::String::Writer.new(bytes.bytesize)
+    writer = Str::Builder.new(bytes.bytesize)
     writer << bytes[0, at]
     while at < bytes.bytesize
       length = sequence_at(bytes, bytes.bytesize, at)
@@ -606,7 +606,7 @@ pub struct SSE
     writer.finish
   end
 
-  private def self.sequence_at(bytes : Tape::String,
+  private def self.sequence_at(bytes : Str,
                                size : Int32, at : Int32) : Int32
     lead = bytes[at]
     return 1 if lead < 0x80_u8

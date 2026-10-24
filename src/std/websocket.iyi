@@ -783,15 +783,15 @@ pub class WebSocket
     result
   end
 
-  def self.frame(data : Tape::String, opcode : Int32 = OP_TEXT,
+  def self.frame(data : Str, opcode : Int32 = OP_TEXT,
                  key : UInt32? = nil,
-                 compressed : Bool = false) : Tape::String
-    Tape::String.build do |w|
+                 compressed : Bool = false) : Str
+    Str.build do |w|
       frame(data, w, opcode, key, compressed)
     end
   end
 
-  def self.frame(data : Tape::String, w : Tape::String::Writer,
+  def self.frame(data : Str, w : Str::Builder,
                  opcode : Int32 = OP_TEXT, key : UInt32? = nil,
                  compressed : Bool = false) : Nil
     n = data.bytesize

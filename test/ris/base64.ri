@@ -8,7 +8,7 @@ tape do
   encoded = Base64.encode(raw)
   exit 1 unless Base64.decode(encoded) == raw
   exit 2 unless Base64.decode(" Q Q = = \n".as_tape) == "A"
-  w = Tape::String::Writer.new(1)
+  w = Str::Builder.new(1)
   w << "prefix:"
   Base64.encode("foo".as_tape, w)
   Base64.decode("YmFy".as_tape, w)

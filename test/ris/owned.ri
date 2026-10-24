@@ -15,13 +15,13 @@ end
 
 # The copy a caller keeps, made at the boundary it leaves the tape by.
 @[TapeToHeap]
-def retain(text : Tape::String) : String
+def retain(text : Str) : String
   text.to_s
 end
 
 # A method name describes the work; the return type describes the lifetime.
-def page : Tape::String
-  Tape::String.build(1) { |writer| writer.append("café <&>") }
+def page : Str
+  Str.build(1) { |writer| writer.append("café <&>") }
 end
 
 @[TapeToHeap]
@@ -39,7 +39,7 @@ tape do
   cache.store(owned)
   same = borrowed == owned && borrowed == "café <&>"
   raise "copy differs from source" unless same
-  empty = Tape::String.build(0) { |writer| }
+  empty = Str.build(0) { |writer| }
   raise "empty copy changed" unless empty == ""
 end
 tape do

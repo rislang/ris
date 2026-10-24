@@ -11,12 +11,12 @@ all at its end, early exits and panics included. A nested `tape` shares it;
 
 ```crystal
 tape do
-  text = "name=ris".as_tape                 # borrows; Tape::String.new copies
+  text = "name=ris".as_tape                 # borrows; Str.new copies
   puts text[5, 3]                           # ris: a view, not a copy
-  numbers = Tape::Array(Int32).new
+  numbers = Ary(Int32).new
   numbers << 3 << 1 << 2
   puts numbers.sorted.sum                   # 6
-  line = Tape::String.build { |w| w << "id=" << 7 }
+  line = Str.build { |w| w << "id=" << 7 }
   kept = line.to_heap                       # a String, kept after the tape
   puts kept                                 # id=7
 end
@@ -32,20 +32,20 @@ Text is bytes: `text[0]` is a UInt8. Strings have `split`, `index`,
 ```crystal
 @[OnTape]
 struct Row
-  getter name : Tape::String
+  getter name : Str
   def initialize(@name); end
   def to_heap; name.to_heap; end
 end
 
 tape do
-  rows = Tape::Array(Row).new
+  rows = Ary(Row).new
   rows << Row.new("ris".as_tape)
   puts rows.to_heap[0]                      # ris
 end
 ```
 
 Tape values may be locals, arguments, results, @[OnTape] fields and
-Tape::Array elements; never class fields, heap containers, procs or channels.
+Ary elements; never class fields, heap containers, procs or channels.
 
 ## Scanner, links, binary fields, trees
 
@@ -53,15 +53,15 @@ Tape::Array elements; never class fields, heap containers, procs or channels.
 import std/int
 
 tape do
-  s = Tape::Scanner.new("GET /a HTTP/1.1".as_tape)
+  s = Str::Scanner.new("GET /a HTTP/1.1".as_tape)
   puts s.scan("GET")                        # GET; nil on no match
   s.skip(' ')
   puts s.scan_until(' ')                    # "/a ": through the space
 
-  head = Tape::String.build { |w| w.write_bytes(8080_u16) }
+  head = Str.build { |w| w.write_bytes(8080_u16) }
   puts head.read_bytes_at(UInt16, 0).to_i32 # 8080: little-endian
 
-  tree = Tape::Tree(Int32).new
+  tree = Tre(Int32).new
   root = tree.open(1)
   tree.leaf(2)
   tree.close(root)
@@ -70,8 +70,8 @@ end
 ```
 
 `values_at(indexes)` gives a checked view that writes through. A
-`@[Tape::Flat]` struct holds only numbers, `Tape::Span`s (`text[span]`) and
-`Tape::Link(T, UInt16)` indexes; `array.bytes` and `.load(bytes)` round-trip.
+`@[Tape::Flat]` struct holds only numbers, `Str::Span`s (`text[span]`) and
+`Ary::Link(T, UInt16)` indexes; `array.bytes` and `.load(bytes)` round-trip.
 
 ## Lifetimes and speed
 

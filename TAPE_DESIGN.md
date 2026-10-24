@@ -8,9 +8,9 @@ the tape is beside it, where short-lived data is made and dropped together.
 * `tape do … end` opens the running fiber's tape: bump allocation over
   mappings, chained when full, never moved. Allocation without an active
   tape ends the program. The block normally returns `nil`.
-* Tape types: `Tape::String`, `Tape::String::Writer`, `Tape::Array(T)`,
-  `Tape::Tree(T)` and `@[OnTape]` structs. The annotation constrains where
-  a value may live; ordinary allocations still follow iyi's rules.
+* Tape types, a closed set, three letters of the heap type: `Str`, `Ary(T)`,
+  `Tre(T)`, their `Str::Builder`, `Str::Scanner`, `Ary::View`; `@[OnTape]`
+  structs. Where a value may live is constrained; the rest is iyi's.
 * Nested `tape` blocks share the active tape. Its owning block releases
   it, on normal and early exits, including panic; a def, loop round or
   block (std's too, unless it holds raw pointers) that keeps nothing
@@ -25,21 +25,21 @@ the tape is beside it, where short-lived data is made and dropped together.
 ## Lifetime and storage rules
 No tape value survives the block that owns its storage:
 * Tape values may be locals, arguments and results within that lifetime,
-  `@[OnTape]` fields and `Tape::Array` elements; not class or plain struct
-  fields, class variables or heap containers such as `Array(Tape::String)`.
+  `@[OnTape]` fields and `Ary` elements; not class or plain struct
+  fields, class variables or heap containers such as `Array(Str)`.
 * No proc, including a spawned block, captures one. Assignment, `return`,
   `break` and `yield` cannot carry one past its owning block.
-* In `local_tape`, outer `Tape::String` values may be read. Other outer
+* In `local_tape`, outer `Str` values may be read. Other outer
   tape values, including mutable containers and `self`, cannot be used;
   prepare owned data before entering. Inner values cannot escape into
   outer variables or containers. Copying a struct does not copy its data.
-* `Tape::String.new(text)` copies heap text onto the tape; `text.as_tape`
-  borrows its bytes. `[start, count]` borrows a slice; `[]` reads a byte.
-  A lexer walks it with `Tape::Scanner` (`advance` costs what `@pos += 1` does).
+* `Str.new(text)` copies heap text onto the tape; `text.as_tape` borrows
+  its bytes, `[start, count]` a slice; `[]` reads a byte. A lexer walks it
+  with `Str::Scanner`: `advance` costs what `@pos += 1` does.
 * To retain a value, copy it by name while its source is alive: `to_heap`
-  on a `Tape::String`, a `Tape::Array` or `IndexView` (each element by its
-  own `to_heap`), or an `@[OnTape]` struct that defines one. `to_s`,
-  interpolation and writing into `String::Builder` need `@[TapeToHeap]`.
+  on a `Str`, an `Ary` or `Ary::View` (each element by its own `to_heap`),
+  or an `@[OnTape]` struct that defines one. `to_s`, interpolation and
+  writing into `String::Builder` need `@[TapeToHeap]`.
 * Pass tape text on, append to a tape writer, or write directly to a file
   or socket (`puts text`, `io << text`). Avoid tape -> heap -> tape copies.
 * `std/` is under these rules; only `src/iyi/` and a `std/` def marked
@@ -48,7 +48,7 @@ No tape value survives the block that owns its storage:
 ## Layout: a tape per growing value
 A container grows in place at the tape's end, else moves once to a region
 of its own; `RIS_TAPE_STATS=1` counts moves and mappings at exit. `clear`
-refills one. `Tape::Tree`, simdjson's order: 4.6 MB JSON ×20 in 725 ms.
+refills one. `Tre`, simdjson's order: 4.6 MB JSON ×20 in 725 ms.
 
 | median of 9, ris-bench | Goose | ris tape | ris heap |
 |---|---|---|---|
@@ -68,7 +68,7 @@ lowerings in `src/compiler/iyi/semantic/tape_*.cr`; `test/ris/check.sh`.
 | Scope end frees | Def, loop, block keeping nothing | Proven; not past `next` |
 | One growing value, unmoved | Own region, moved once | No refs into elements |
 | No annotations | Block lifetimes, `@[TapeToHeap]` | The GC holds the rest |
-| Flat data, links | `Link`, `Span`, `@[Tape::Flat]` | Pointer-free bytes |
+| Flat data, links | `Ary::Link`, `Str::Span`, `@[Tape::Flat]` | No pointers |
 | Load checks every link | Checked when followed | Same safety, a later error |
 | Built in place | `w.append(f(x))` writes in `w`; `puts "#{x}"` | No copy |
 | Bounds checks elided | `each`, `while i < a.size` | The loop bounds `i` |

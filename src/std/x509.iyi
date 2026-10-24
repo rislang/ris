@@ -1195,7 +1195,7 @@ struct X509Asn1
     answer.is_a?(Asn1Error) ? X509Error.new(answer.message) : answer
   end
 
-  def self.tape_values(answer : Tape::Array(DerValue) | Asn1Error) : Tape::Array(DerValue) | X509Error
+  def self.tape_values(answer : Ary(DerValue) | Asn1Error) : Ary(DerValue) | X509Error
     answer.is_a?(Asn1Error) ? X509Error.new(answer.message) : answer
   end
 

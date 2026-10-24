@@ -1127,7 +1127,7 @@ pub abstract class TlsConnection
   # Up to *max* bytes the peer sent, onto the end of *writer*, the
   # caller's tape: how many, 0 once it has closed with close_notify. The
   # record is opened where it came in, and only its content is copied.
-  def read(writer : Tape::String::Writer, max : Int32 = 16384) : Int32 | TlsError
+  def read(writer : Str::Builder, max : Int32 = 16384) : Int32 | TlsError
     got = take(max)
     return got if got.is_a?(TlsError)
     from, n = got
@@ -1316,7 +1316,7 @@ pub abstract class TlsConnection
 
   # *data* from the caller's tape, as `write` sends a string: each record's
   # bytes are copied into this connection's outbox and sealed there.
-  def write(data : Tape::String) : Int32 | TlsError
+  def write(data : Str) : Int32 | TlsError
     refused = write_refused
     return refused if refused
     size = data.bytesize

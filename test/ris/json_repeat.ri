@@ -7,7 +7,7 @@ import std/int
 import std/json::{JSON}
 
 tape do
-  w = Tape::String::Writer.new(64)
+  w = Str::Builder.new(64)
   JSON.write(w) do |b|
     b.object do
       b.field "inner" do

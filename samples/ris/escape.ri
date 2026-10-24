@@ -22,7 +22,7 @@ if on_tape
   i = 0
   while i < N
     tape do
-      w = Tape::String::Writer.new(64)
+      w = Str::Builder.new(64)
       HTML.escape(TEXTS[i % 3], w)
       sum += w.length
     end

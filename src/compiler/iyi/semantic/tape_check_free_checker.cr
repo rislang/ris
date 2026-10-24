@@ -1,6 +1,6 @@
 # ris: Goose's `checkfree fn`. A def marked `@[CheckFree]` may index only
 # where no bound is checked: `each`, `map`, `sum`, `a[i]` in
-# `while i < a.size` (TapeCheckFreeLowering) and `Tape::IndexView`, whose
+# `while i < a.size` (TapeCheckFreeLowering) and `Ary::View`, whose
 # indexes were checked once when they were made. A `[]` or `[]=` left in
 # its body checks its bound at every call, and is refused with where it is.
 class Iyi::TapeCheckFreeChecker
@@ -52,7 +52,7 @@ class Iyi::TapeCheckFreeChecker
                    "Index in `while i < a.size` (i only `+= 1`), use " \
                    "`each`, `map` or `sum`, or check the indexes once " \
                    "where they come in: `target.values_at(array)` gives " \
-                   "a Tape::IndexView that reads without a check."
+                   "an Ary::View that reads without a check."
       end
       true
     end

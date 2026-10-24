@@ -39,7 +39,7 @@ encoder.encode(fields)
       # Use a fresh table: the wire block establishes its entries.
       {% if flag?(:h2_tape) %}
         tape do
-          view = Tape::String.view(wire_text)
+          view = Str.view(wire_text)
           parsed = Decoder.new.decode(view)
           raise parsed.message if parsed.is_a?(HpackError)
           sum = sum + parsed.size

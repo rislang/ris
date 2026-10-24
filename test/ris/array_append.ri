@@ -1,12 +1,12 @@
-# `Tape::Array(UInt8)#append` puts a tape string's bytes at the end: an
+# `Ary(UInt8)#append` puts a tape string's bytes at the end: an
 # empty one adds nothing, and one past the room grows the array, keeping
 # the bytes already there.
 tape do
-  a = Tape::Array(UInt8).new(4)
+  a = Ary(UInt8).new(4)
   a.push(62_u8)
-  a.append(Tape::String.new(""))
-  a.append(Tape::String.new("abc"))
-  long = Tape::String.new("0123456789" * 10)
+  a.append(Str.new(""))
+  a.append(Str.new("abc"))
+  long = Str.new("0123456789" * 10)
   a.append(long)
   ok = a.size == 104 && a[0] == 62_u8 && a[1] == 97_u8 && a[3] == 99_u8
   i = 0

@@ -1,4 +1,4 @@
-# Tape::String read as iyi's String is, every piece a view: `index`,
+# Str read as iyi's String is, every piece a view: `index`,
 # `includes?`, `split` (by ASCII and UTF-8 chars), `to_i` and a range; a
 # Writer written with `<<` and printed with `puts` straight from the tape.
 tape do
@@ -21,7 +21,7 @@ tape do
   pieces = arrows.split('→')
   puts "#{pieces.size} #{pieces[2]} #{arrows.includes?('ü')}"
 
-  response = Tape::String::Writer.new(64)
+  response = Str::Builder.new(64)
   response << "200 " << parts[1] << " took " << parts[3].to_i << " ms"
   puts response
   print response

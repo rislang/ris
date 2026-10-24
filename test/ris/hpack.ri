@@ -32,7 +32,7 @@ retained = [] of HeaderField
     native_fields = TapeHeaders.new(fields.size)
     fields.each do |field|
       native_fields.push(TapeHeaderField.new(
-        Tape::String.new(field.name), Tape::String.new(field.value),
+        Str.new(field.name), Str.new(field.value),
         field.indexing))
     end
     encoded = native_encoder.encode_on_tape(native_fields)

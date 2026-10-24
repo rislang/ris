@@ -525,28 +525,28 @@ pub class Node
   def to_xml : String
     result = ""
     tape do
-      w = Tape::String::Writer.new(256)
+      w = Str::Builder.new(256)
       to_xml(w)
       result = w.finish.to_heap
     end
     result
   end
 
-  def to_xml(writer : Tape::String::Writer) : Nil
+  def to_xml(writer : Str::Builder) : Nil
     serialize_node(writer)
   end
 
   def inner_xml : String
     result = ""
     tape do
-      w = Tape::String::Writer.new(256)
+      w = Str::Builder.new(256)
       inner_xml(w)
       result = w.finish.to_heap
     end
     result
   end
 
-  def inner_xml(writer : Tape::String::Writer) : Nil
+  def inner_xml(writer : Str::Builder) : Nil
     @children.each { |child| child.serialize_node(writer) }
   end
 
@@ -564,7 +564,7 @@ pub class Node
   # were, so `set_attribute("k=\"1\" j", "2")` wrote two attributes and a
   # "\u0001" in text a document no parser reads. A parsed tree holds
   # neither.
-  protected def serialize_node(buf : Tape::String::Writer, ascii : Bool = false) : Nil
+  protected def serialize_node(buf : Str::Builder, ascii : Bool = false) : Nil
     if @node_type.element?
       Node.check_writable_name(@name, "element")
       check_namespaced_name(@name, "element")
@@ -734,7 +734,7 @@ pub class Node
   # the section, it read back as a newline. With *ascii*, so is a character
   # past U+007F, as `&#N;`: it was written raw, as UTF-8 bytes, in a
   # document declared US-ASCII.
-  private def serialize_cdata_body(buf : Tape::String::Writer, ascii : Bool) : Nil
+  private def serialize_cdata_body(buf : Str::Builder, ascii : Bool) : Nil
     if !@content.includes?("]]>") && !@content.includes?("\r") && (!ascii || Node.first_non_ascii(@content) < 0)
       buf << @content
       return
@@ -836,7 +836,7 @@ pub class Document < Node
   # does not read (`ISO-8859-1`) made a document its parser refuses. So did
   # a second root element, none, text that is not white space, or a CDATA
   # section beside the root.
-  def to_xml(buf : Tape::String::Writer) : Nil
+  def to_xml(buf : Str::Builder) : Nil
     if !Parser.version_number?(@version)
       raise "version '#{@version}' is not a version number, so the document cannot be written"
     end
@@ -988,12 +988,12 @@ end
 
 @[OnTape]
 struct TapeMap(K, V)
-  @keys : Tape::Array(K)
-  @values : Tape::Array(V)
+  @keys : Ary(K)
+  @values : Ary(V)
 
   def initialize
-    @keys = Tape::Array(K).new
-    @values = Tape::Array(V).new
+    @keys = Ary(K).new
+    @values = Ary(V).new
   end
 
   def empty? : Bool
@@ -1040,10 +1040,10 @@ end
 # each, so parent links and declaration updates preserve node identity.
 @[OnTape]
 pub struct TapeNamespace
-  getter prefix : Tape::String
-  getter uri : Tape::String
+  getter prefix : Str
+  getter uri : Str
 
-  def initialize(prefix : String | Tape::String, uri : Tape::String)
+  def initialize(prefix : String | Str, uri : Str)
     @prefix = tape_view(prefix)
     @uri = uri
   end
@@ -1051,21 +1051,21 @@ end
 
 @[OnTape]
 pub struct TapeAttribute
-  getter name : Tape::String
-  getter value : Tape::String
-  getter namespace_uri : Tape::String
+  getter name : Str
+  getter value : Str
+  getter namespace_uri : Str
 
-  def initialize(@name : Tape::String, @value : Tape::String,
-                 namespace_uri : String | Tape::String = "")
+  def initialize(@name : Str, @value : Str,
+                 namespace_uri : String | Str = "")
     @namespace_uri = tape_view(namespace_uri)
   end
 
-  def prefix : Tape::String
+  def prefix : Str
     colon = @name.index(':')
     colon ? @name[0, colon] : "".as_tape
   end
 
-  def local_name : Tape::String
+  def local_name : Str
     colon = @name.index(':')
     colon ? @name[colon + 1, @name.bytesize - colon - 1] : @name
   end
@@ -1074,37 +1074,37 @@ end
 @[OnTape]
 struct TapeNodeData
   property node_type : NodeType
-  property name : Tape::String
-  property content : Tape::String
-  property version : Tape::String
-  property encoding : Tape::String
+  property name : Str
+  property content : Str
+  property version : Str
+  property encoding : Str
   property standalone : Bool?
-  getter children : Tape::Array(TapeNode)
-  getter parents : Tape::Array(TapeNode)
-  getter attributes : Tape::Array(TapeAttribute)
-  getter namespaces : Tape::Array(TapeNamespace)
-  property id_attributes : TapeMap(Tape::String, Tape::Array(Tape::String))
+  getter children : Ary(TapeNode)
+  getter parents : Ary(TapeNode)
+  getter attributes : Ary(TapeAttribute)
+  getter namespaces : Ary(TapeNamespace)
+  property id_attributes : TapeMap(Str, Ary(Str))
 
-  def initialize(@node_type : NodeType, @name : Tape::String,
-                 @content : Tape::String)
+  def initialize(@node_type : NodeType, @name : Str,
+                 @content : Str)
     @version = "1.0".as_tape
     @encoding = "UTF-8".as_tape
     @standalone = nil
-    @children = Tape::Array(TapeNode).new
-    @parents = Tape::Array(TapeNode).new
-    @attributes = Tape::Array(TapeAttribute).new
-    @namespaces = Tape::Array(TapeNamespace).new
-    @id_attributes = TapeMap(Tape::String, Tape::Array(Tape::String)).new
+    @children = Ary(TapeNode).new
+    @parents = Ary(TapeNode).new
+    @attributes = Ary(TapeAttribute).new
+    @namespaces = Ary(TapeNamespace).new
+    @id_attributes = TapeMap(Str, Ary(Str)).new
   end
 end
 
 @[OnTape]
 pub struct TapeNode
-  @state : Tape::Array(TapeNodeData)
+  @state : Ary(TapeNodeData)
 
-  def initialize(kind : NodeType, name : String | Tape::String = "",
-                 content : String | Tape::String = "")
-    @state = Tape::Array(TapeNodeData).new
+  def initialize(kind : NodeType, name : String | Str = "",
+                 content : String | Str = "")
+    @state = Ary(TapeNodeData).new
     @state << TapeNodeData.new(kind, tape_view(name),
       tape_view(content))
   end
@@ -1113,24 +1113,24 @@ pub struct TapeNode
     TapeNode.new(NodeType::Document, "#document")
   end
 
-  def self.new_element(name : String | Tape::String) : TapeNode
+  def self.new_element(name : String | Str) : TapeNode
     TapeNode.new(NodeType::Element, name)
   end
 
-  def self.new_text(text : String | Tape::String) : TapeNode
+  def self.new_text(text : String | Str) : TapeNode
     TapeNode.new(NodeType::Text, content: text)
   end
 
-  def self.new_comment(text : String | Tape::String) : TapeNode
+  def self.new_comment(text : String | Str) : TapeNode
     TapeNode.new(NodeType::Comment, content: text)
   end
 
-  def self.new_cdata(text : String | Tape::String) : TapeNode
+  def self.new_cdata(text : String | Str) : TapeNode
     TapeNode.new(NodeType::CData, content: text)
   end
 
-  def self.new_pi(name : String | Tape::String,
-                  text : String | Tape::String) : TapeNode
+  def self.new_pi(name : String | Str,
+                  text : String | Str) : TapeNode
     TapeNode.new(NodeType::ProcessingInstruction, name, text)
   end
 
@@ -1138,29 +1138,29 @@ pub struct TapeNode
     @state[0].node_type
   end
 
-  def name : Tape::String
+  def name : Str
     @state[0].name
   end
 
-  def content : Tape::String
+  def content : Str
     @state[0].content
   end
 
-  def version : Tape::String
+  def version : Str
     @state[0].version
   end
 
-  def version=(value : String | Tape::String) : Nil
+  def version=(value : String | Str) : Nil
     data = @state[0]
     data.version = tape_view(value)
     @state[0] = data
   end
 
-  def encoding : Tape::String
+  def encoding : Str
     @state[0].encoding
   end
 
-  def encoding=(value : String | Tape::String) : Nil
+  def encoding=(value : String | Str) : Nil
     data = @state[0]
     data.encoding = tape_view(value)
     @state[0] = data
@@ -1176,23 +1176,23 @@ pub struct TapeNode
     @state[0] = data
   end
 
-  def children : Tape::Array(TapeNode)
+  def children : Ary(TapeNode)
     @state[0].children
   end
 
-  def attributes : Tape::Array(TapeAttribute)
+  def attributes : Ary(TapeAttribute)
     @state[0].attributes
   end
 
-  def namespaces : Tape::Array(TapeNamespace)
+  def namespaces : Ary(TapeNamespace)
     @state[0].namespaces
   end
 
-  def id_attributes : TapeMap(Tape::String, Tape::Array(Tape::String))
+  def id_attributes : TapeMap(Str, Ary(Str))
     @state[0].id_attributes
   end
 
-  def id_attributes=(value : TapeMap(Tape::String, Tape::Array(Tape::String))) : Nil
+  def id_attributes=(value : TapeMap(Str, Ary(Str))) : Nil
     data = @state[0]
     data.id_attributes = value
     @state[0] = data
@@ -1224,12 +1224,12 @@ pub struct TapeNode
     raise "document has no root element"
   end
 
-  def prefix : Tape::String
+  def prefix : Str
     colon = name.index(':')
     colon ? name[0, colon] : "".as_tape
   end
 
-  def resolve_namespace_prefix(prefix : String | Tape::String) : TapeNamespace?
+  def resolve_namespace_prefix(prefix : String | Str) : TapeNamespace?
     namespaces.each { |ns| return ns if ns.prefix == prefix }
     up = parent
     return up.resolve_namespace_prefix(prefix) if up
@@ -1239,12 +1239,12 @@ pub struct TapeNode
     nil
   end
 
-  def [](key : String) : Tape::String
+  def [](key : String) : Str
     attributes.each { |attr| return attr.value if attr.name == key }
     raise "no XML attribute #{key}"
   end
 
-  def text(writer : Tape::String::Writer) : Nil
+  def text(writer : Str::Builder) : Nil
     if node_type.text? || node_type.cdata?
       writer << content
     else
@@ -1254,17 +1254,17 @@ pub struct TapeNode
     end
   end
 
-  def text : Tape::String
-    Tape::String.build { |w| text(w) }
+  def text : Str
+    Str.build { |w| text(w) }
   end
 
-  def to_xml(writer : Tape::String::Writer) : Nil
+  def to_xml(writer : Str::Builder) : Nil
     ascii = node_type.document? &&
             (tape_lower(encoding) == "us-ascii" || tape_lower(encoding) == "ascii")
     serialize(writer, ascii)
   end
 
-  protected def serialize(writer : Tape::String::Writer,
+  protected def serialize(writer : Str::Builder,
                           ascii : Bool) : Nil
     if node_type.document?
       writer << "<?xml version=\"" << version << "\""
@@ -1336,8 +1336,8 @@ pub struct TapeNode
     end
   end
 
-  def to_xml : Tape::String
-    Tape::String.build { |w| to_xml(w) }
+  def to_xml : Str
+    Str.build { |w| to_xml(w) }
   end
 
   def to_heap : Node
@@ -1362,16 +1362,16 @@ pub struct TapeNode
   end
 end
 
-private def tape_view(text : Tape::String) : Tape::String
+private def tape_view(text : Str) : Str
   text
 end
 
-private def tape_view(text : String) : Tape::String
+private def tape_view(text : String) : Str
   text.as_tape
 end
 
-private def tape_lower(text : Tape::String) : Tape::String
-  Tape::String.build do |w|
+private def tape_lower(text : Str) : Str
+  Str.build do |w|
     text.each_byte do |byte|
       byte += 32_u8 if byte >= 65_u8 && byte <= 90_u8
       w.push(byte)
@@ -1381,21 +1381,21 @@ end
 
 @[OnTape]
 struct TapeParser
-  @input : Tape::String
+  @input : Str
   @len : Int32
   @pos : Int32
   @line : Int32
   @col : Int32
   @max_depth : Int32
   @depth : Int32
-  @entities : TapeMap(Tape::String, Tape::String)
+  @entities : TapeMap(Str, Str)
   # What the internal subset's attribute-list declarations say, by element
   # name: whether each declared attribute's type is other than CDATA, and
   # the defaults, in the order they were declared.
-  @attribute_tokenized : TapeMap(Tape::String, TapeMap(Tape::String, Bool))
-  @attribute_defaults : TapeMap(Tape::String, Tape::Array(Tuple(Tape::String, Tape::String)))
+  @attribute_tokenized : TapeMap(Str, TapeMap(Str, Bool))
+  @attribute_defaults : TapeMap(Str, Ary(Tuple(Str, Str)))
   # The attributes declared of type ID, by element name, for the document.
-  @attribute_ids : TapeMap(Tape::String, Tape::Array(Tape::String))
+  @attribute_ids : TapeMap(Str, Ary(Str))
   @expansions : Int32
   @max_expansions : Int32
   # Bytes of replacement text copied so far, and how many a document may
@@ -1406,17 +1406,17 @@ struct TapeParser
   @bad_at : Int32
   @bad_message : String
 
-  def initialize(input : Tape::String, @max_depth : Int32 = 256, @max_expansions : Int32 = 1000)
+  def initialize(input : Str, @max_depth : Int32 = 256, @max_expansions : Int32 = 1000)
     @input = TapeParser.normalize_line_ends(input)
     @len = @input.bytesize
     @pos = 0
     @line = 1
     @col = 1
     @depth = 0
-    @entities = TapeMap(Tape::String, Tape::String).new
-    @attribute_tokenized = TapeMap(Tape::String, TapeMap(Tape::String, Bool)).new
-    @attribute_defaults = TapeMap(Tape::String, Tape::Array(Tuple(Tape::String, Tape::String))).new
-    @attribute_ids = TapeMap(Tape::String, Tape::Array(Tape::String)).new
+    @entities = TapeMap(Str, Str).new
+    @attribute_tokenized = TapeMap(Str, TapeMap(Str, Bool)).new
+    @attribute_defaults = TapeMap(Str, Ary(Tuple(Str, Str))).new
+    @attribute_ids = TapeMap(Str, Ary(Str)).new
     @expansions = 0
     @expanded_bytes = 0_i64
     @max_expanded_bytes = @len.to_i64 * 100
@@ -1444,9 +1444,9 @@ struct TapeParser
   end
 
   # `\r\n` and a lone `\r` both mean `\n` (XML 1.0, 2.11).
-  protected def self.normalize_line_ends(input : Tape::String) : Tape::String
+  protected def self.normalize_line_ends(input : Str) : Str
     return input unless input.includes?('\r')
-    Tape::String.build do |w|
+    Str.build do |w|
       i = 0
       while i < input.bytesize
         byte = input[i]
@@ -1505,7 +1505,7 @@ struct TapeParser
   # this a byte that is not UTF-8, an encoded surrogate, U+FFFE and U+FFFF
   # were read and written back, while their character references were
   # refused. With *ascii*, any byte past 0x7F is one.
-  protected def self.first_bad_character(input : Tape::String, from : Int32, ascii : Bool) : Tuple(Int32, String)
+  protected def self.first_bad_character(input : Str, from : Int32, ascii : Bool) : Tuple(Int32, String)
     ptr = input
     len = input.bytesize
     i = from
@@ -1569,7 +1569,7 @@ struct TapeParser
     true
   end
 
-  private def slice_from(from : Int32) : Tape::String
+  private def slice_from(from : Int32) : Str
     @input[from, @pos - from]
   end
 
@@ -1583,7 +1583,7 @@ struct TapeParser
 
   # One or more digits, a dot, then digits: the version numbers the other
   # library reads (`1.0`, `1.1`, `1.`).
-  protected def self.version_number?(value : Tape::String) : Bool
+  protected def self.version_number?(value : Str) : Bool
     ptr = value
     len = value.bytesize
     i = 0
@@ -1836,7 +1836,7 @@ struct TapeParser
 
   # An element or attribute name in a declaration, held to the same shape
   # as one in the document.
-  private def declared_name : Tape::String
+  private def declared_name : Str
     line = @line
     col = @col
     name = parse_name
@@ -1880,7 +1880,7 @@ struct TapeParser
   # by `,` or by `|` - never both in one group - each with an optional `?`,
   # `*` or `+`. Each open group's separator is kept on a list rather than
   # the call stack, so no depth of nesting runs the stack out.
-  private def parse_content_model(element : Tape::String) : Nil
+  private def parse_content_model(element : Str) : Nil
     what = "content model of element '#{element.to_heap}'"
     consume("(")
     declaration_space
@@ -1984,7 +1984,7 @@ struct TapeParser
     end
   end
 
-  private def parse_attribute_definition(element : Tape::String, what : String) : Nil
+  private def parse_attribute_definition(element : Str, what : String) : Nil
     name = declared_name
     return if failed?
     if !declaration_space
@@ -2060,24 +2060,24 @@ struct TapeParser
     value = has_value ? parse_attribute_value : "".as_tape
     return if failed?
 
-    types = @attribute_tokenized[element]? || TapeMap(Tape::String, Bool).new
+    types = @attribute_tokenized[element]? || TapeMap(Str, Bool).new
     return if types.has_key?(name)
     types[name] = tokenized
     @attribute_tokenized[element] = types
     if id_type
-      ids = @attribute_ids[element]? || Tape::Array(Tape::String).new
+      ids = @attribute_ids[element]? || Ary(Str).new
       ids << name
       @attribute_ids[element] = ids
     end
     return unless has_value
-    defaults = @attribute_defaults[element]? || Tape::Array(Tuple(Tape::String, Tape::String)).new
+    defaults = @attribute_defaults[element]? || Ary(Tuple(Str, Str)).new
     defaults << {name, tokenized ? TapeParser.collapse_spaces(value) : value}
     @attribute_defaults[element] = defaults
   end
 
   # The `(a|b)` of an enumerated type, name tokens, or of a NOTATION type,
   # names.
-  private def parse_value_list(attribute : Tape::String, notation : Bool, what : String) : Nil
+  private def parse_value_list(attribute : Str, notation : Bool, what : String) : Nil
     consume("(")
     while !failed?
       declaration_space
@@ -2227,7 +2227,7 @@ struct TapeParser
 
   # The literal in quotes: character references are decoded now, a general
   # entity reference is checked and kept for the moment it is used.
-  private def parse_entity_value(entity : Tape::String) : Tape::String
+  private def parse_entity_value(entity : Str) : Str
     start_line = @line
     start_col = @col
     quote = @pos < @len ? byte_at(@pos) : 0_u8
@@ -2236,14 +2236,14 @@ struct TapeParser
       return "".as_tape
     end
     step
-    parts = Tape::Array(Tape::String).new
+    parts = Ary(Str).new
     run_start = @pos
     while @pos < @len
       b = byte_at(@pos)
       if b == quote
         parts << slice_from(run_start)
         step
-        return Tape::String.build { |w| parts.join(w) }
+        return Str.build { |w| parts.join(w) }
       elsif b == 60_u8
         fail("markup inside the value of entity '#{entity.to_heap}' is not " \
              "supported")
@@ -2379,11 +2379,11 @@ struct TapeParser
     elem = TapeNode.new_element(name)
     elem.parent = parent
 
-    seen = TapeMap(Tape::String, Bool).new
-    raw_names = Tape::Array(Tape::String).new
-    raw_values = Tape::Array(Tape::String).new
-    raw_lines = Tape::Array(Int32).new
-    raw_cols = Tape::Array(Int32).new
+    seen = TapeMap(Str, Bool).new
+    raw_names = Ary(Str).new
+    raw_values = Ary(Str).new
+    raw_lines = Ary(Int32).new
+    raw_cols = Ary(Int32).new
     self_closing = false
     closed = false
     while @pos < @len
@@ -2501,7 +2501,7 @@ struct TapeParser
     # Two spellings of one attribute - the same local name through two
     # prefixes bound to the same uri - are a duplicate as much as one
     # spelling twice.
-    expanded = TapeMap(Tape::String, Tape::String).new
+    expanded = TapeMap(Str, Str).new
     i = 0
     while i < raw_names.size
       if raw_names[i] == "xmlns" || raw_names[i].starts_with?("xmlns:")
@@ -2518,7 +2518,7 @@ struct TapeParser
           return elem
         end
         attr = TapeAttribute.new(raw_names[i], raw_values[i], ns.uri)
-        key = Tape::String.build { |w| w << ns.uri << "\n" << attr.local_name }
+        key = Str.build { |w| w << ns.uri << "\n" << attr.local_name }
         first = expanded[key]?
         if !first.nil?
           fail_at(raw_lines[i], raw_cols[i], "attribute " \
@@ -2538,14 +2538,14 @@ struct TapeParser
       return elem
     end
 
-    parts = Tape::Array(Tape::String).new
+    parts = Ary(Str).new
     run_start = @pos
     while @pos < @len
       b = byte_at(@pos)
       if b == 60_u8
         parts << slice_from(run_start)
         flush_text(elem, parts)
-        parts = Tape::Array(Tape::String).new
+        parts = Ary(Str).new
         if match?("</")
           end_line = @line
           end_col = @col
@@ -2596,7 +2596,7 @@ struct TapeParser
 
   # Whether the internal subset declares *attribute* of *element* with a
   # type other than CDATA.
-  private def tokenized?(element : Tape::String, attribute : Tape::String) : Bool
+  private def tokenized?(element : Str, attribute : Str) : Bool
     return false if @attribute_tokenized.empty?
     types = @attribute_tokenized[element]?
     !types.nil? && types[attribute]? == true
@@ -2606,7 +2606,7 @@ struct TapeParser
   # 3.3.3): the spaces at either end dropped and each run of them made one.
   # Only U+0020 counts; a tab a character reference wrote stays. Values
   # were kept as written: `x="  p   q  "` of an NMTOKENS `x` read as is.
-  protected def self.collapse_spaces(value : Tape::String) : Tape::String
+  protected def self.collapse_spaces(value : Str) : Str
     ptr = value
     start = 0
     stop = value.bytesize
@@ -2623,7 +2623,7 @@ struct TapeParser
       i = i + 1
     end
     return value if kept == value.bytesize
-    Tape::String.build do |w|
+    Str.build do |w|
       i = start
       while i < stop
         w.push(ptr[i]) if i == start || ptr[i] != 32_u8 || ptr[i - 1] != 32_u8
@@ -2632,15 +2632,15 @@ struct TapeParser
     end
   end
 
-  private def flush_text(elem : TapeNode, parts : Tape::Array(Tape::String)) : Nil
+  private def flush_text(elem : TapeNode, parts : Ary(Str)) : Nil
     return if parts.empty?
-    text = Tape::String.build { |w| parts.join(w) }
+    text = Str.build { |w| parts.join(w) }
     elem.append_parsed(TapeNode.new_text(text)) unless text.empty?
   end
 
   # A quoted value with references decoded and a literal tab or newline
   # read as a space (attribute-value normalisation, XML 1.0 3.3.3).
-  private def parse_attribute_value : Tape::String
+  private def parse_attribute_value : Str
     start_line = @line
     start_col = @col
     quote = @pos < @len ? byte_at(@pos) : 0_u8
@@ -2649,14 +2649,14 @@ struct TapeParser
       return "".as_tape
     end
     step
-    parts = Tape::Array(Tape::String).new
+    parts = Ary(Str).new
     run_start = @pos
     while @pos < @len
       b = byte_at(@pos)
       if b == quote
         parts << slice_from(run_start)
         step
-        return Tape::String.build { |w| parts.join(w) }
+        return Str.build { |w| parts.join(w) }
       elsif b == 60_u8
         fail("raw '<' is not allowed in an attribute value")
         return "".as_tape
@@ -2682,7 +2682,7 @@ struct TapeParser
   end
 
   # A quoted value taken as written: the XML declaration's.
-  private def parse_quoted_literal : Tape::String
+  private def parse_quoted_literal : Str
     start_line = @line
     start_col = @col
     quote = @pos < @len ? byte_at(@pos) : 0_u8
@@ -2710,7 +2710,7 @@ struct TapeParser
   # entity reference is checked for shape and answered as written (`&name;`),
   # which is what an entity's own value keeps until it is used. With
   # *in_attribute*, the reference stands in an attribute value.
-  private def parse_reference(depth : Int32, keep_names : Bool = false, in_attribute : Bool = false) : Tape::String
+  private def parse_reference(depth : Int32, keep_names : Bool = false, in_attribute : Bool = false) : Str
     ref_line = @line
     ref_col = @col
     ref_start = @pos
@@ -2741,7 +2741,7 @@ struct TapeParser
                                    "not an XML character")
         return "".as_tape
       end
-      return Tape::String.build { |w| w << cp.unsafe_chr }
+      return Str.build { |w| w << cp.unsafe_chr }
     end
     # `&a]b;` and `&0;` are no references: kept as written in an entity's
     # value, they were accepted wherever that entity went unused.
@@ -2754,7 +2754,7 @@ struct TapeParser
     expand_entity(ref, ref_line, ref_col, depth, in_attribute)
   end
 
-  private def expand_entity(name : Tape::String, line : Int32, col : Int32, depth : Int32, in_attribute : Bool) : Tape::String
+  private def expand_entity(name : Str, line : Int32, col : Int32, depth : Int32, in_attribute : Bool) : Str
     return "<".as_tape if name == "lt"
     return ">".as_tape if name == "gt"
     return "&".as_tape if name == "amp"
@@ -2810,7 +2810,7 @@ struct TapeParser
     # decoded, an entity reference expanded a level deeper.
     ptr = value
     len = value.bytesize
-    parts = Tape::Array(Tape::String).new
+    parts = Ary(Str).new
     run_start = 0
     i = 0
     while i < len
@@ -2843,7 +2843,7 @@ struct TapeParser
                                "value of entity '#{name.to_heap}' is not an XML character")
             return "".as_tape
           end
-          parts << Tape::String.build { |w| w << cp.unsafe_chr }
+          parts << Str.build { |w| w << cp.unsafe_chr }
         else
           parts << expand_entity(ref, line, col, depth + 1, in_attribute)
           return "".as_tape if failed?
@@ -2856,13 +2856,13 @@ struct TapeParser
     end
     literal = value[run_start, len - run_start]
     parts << (in_attribute ? TapeParser.attribute_spaces(literal) : literal)
-    Tape::String.build { |w| parts.join(w) }
+    Str.build { |w| parts.join(w) }
   end
 
   # An entity's replacement text in an attribute value: a tab, newline or
   # carriage return in it is a space, as one written in the value is. One
   # that a character reference in the replacement text names is not.
-  protected def self.attribute_spaces(text : Tape::String) : Tape::String
+  protected def self.attribute_spaces(text : Str) : Str
     ptr = text
     len = text.bytesize
     i = 0
@@ -2870,7 +2870,7 @@ struct TapeParser
       i = i + 1
     end
     return text if i == len
-    Tape::String.build do |w|
+    Str.build do |w|
       j = 0
       while j < len
         b = ptr[j]
@@ -2880,7 +2880,7 @@ struct TapeParser
     end
   end
 
-  protected def self.contains_end?(text : Tape::String) : Bool
+  protected def self.contains_end?(text : Str) : Bool
     i = 0
     while i + 2 < text.bytesize
       return true if text[i, 3] == "]]>"
@@ -2891,7 +2891,7 @@ struct TapeParser
 
   # -- names ---------------------------------------------------------------
 
-  private def parse_name : Tape::String
+  private def parse_name : Str
     name = parse_name?
     return name unless name.nil?
     if @pos >= @len
@@ -2915,7 +2915,7 @@ struct TapeParser
   # last, or twice is refused with the name's line and column, and so is a
   # local part that does not start as a name does (`p:-a`, `p:1`), which was
   # taken.
-  private def qualified_name?(name : Tape::String, line : Int32, col : Int32) : Bool
+  private def qualified_name?(name : Str, line : Int32, col : Int32) : Bool
     ptr = name
     len = name.bytesize
     colons = 0
@@ -2958,7 +2958,7 @@ struct TapeParser
   end
 
   # Whether all of *text* is one name.
-  protected def self.name_shaped?(text : Tape::String) : Bool
+  protected def self.name_shaped?(text : Str) : Bool
     ptr = text
     len = text.bytesize
     return false if len == 0
@@ -2973,7 +2973,7 @@ struct TapeParser
 
   # A name, or with *token* a name token (production [7]), which any
   # character that continues a name may start.
-  private def parse_name?(token : Bool = false) : Tape::String?
+  private def parse_name?(token : Bool = false) : Str?
     ptr = @input
     start = @pos
     while @pos < @len
@@ -2997,36 +2997,36 @@ struct TapeParser
   end
 end
 
-pub def parse(xml : Tape::String, max_depth : Int32 = 256,
+pub def parse(xml : Str, max_depth : Int32 = 256,
               max_entity_expansions : Int32 = 1000) : TapeNode
   TapeParser.new(xml, max_depth, max_entity_expansions).parse
 end
 
-pub def parse?(xml : Tape::String, max_depth : Int32 = 256,
+pub def parse?(xml : Str, max_depth : Int32 = 256,
                max_entity_expansions : Int32 = 1000) : TapeNode?
   TapeParser.new(xml, max_depth, max_entity_expansions).parse?
 end
 
-pub def escape(text : Tape::String, ascii : Bool = false) : Tape::String
-  Tape::String.build { |w| escape(text, w, ascii) }
+pub def escape(text : Str, ascii : Bool = false) : Str
+  Str.build { |w| escape(text, w, ascii) }
 end
 
-pub def escape(text : Tape::String, writer : Tape::String::Writer,
+pub def escape(text : Str, writer : Str::Builder,
                ascii : Bool = false) : Nil
   escape_bytes(text, false, ascii, writer)
 end
 
-pub def escape_attribute(text : Tape::String, ascii : Bool = false) : Tape::String
-  Tape::String.build { |w| escape_attribute(text, w, ascii) }
+pub def escape_attribute(text : Str, ascii : Bool = false) : Str
+  Str.build { |w| escape_attribute(text, w, ascii) }
 end
 
-pub def escape_attribute(text : Tape::String, writer : Tape::String::Writer,
+pub def escape_attribute(text : Str, writer : Str::Builder,
                          ascii : Bool = false) : Nil
   escape_bytes(text, true, ascii, writer)
 end
 
-def escape_bytes(text : Tape::String, attribute : Bool, ascii : Bool,
-                 parts : Tape::String::Writer) : Nil
+def escape_bytes(text : Str, attribute : Bool, ascii : Bool,
+                 parts : Str::Builder) : Nil
   ptr = text
   len = text.bytesize
   run_start = 0
@@ -3100,7 +3100,7 @@ end
 # encodes, or -1 where the bytes there are not one (an overlong form and
 # one past U+10FFFF included); the parser refuses those where its cursor
 # reaches them, and `name_shaped?` does not take them for a name.
-def code_point_at(ptr : Pointer(UInt8) | Tape::String, len : Int32,
+def code_point_at(ptr : Pointer(UInt8) | Str, len : Int32,
                   i : Int32) : Int32
   b = ptr[i]
   return b.to_i32 if b < 0x80_u8
@@ -3140,7 +3140,7 @@ end
 def escape_bytes(text : String, attribute : Bool, ascii : Bool) : String
   result = ""
   tape do
-    w = Tape::String::Writer.new(text.bytesize)
+    w = Str::Builder.new(text.bytesize)
     escape_bytes(text.as_tape, attribute, ascii, w)
     result = w.finish.to_heap
   end
@@ -3230,7 +3230,7 @@ end
 # The code point a character reference names, given the text between its
 # `&` and `;` (`#65`, `#x41`); -1 where that is not digits. Accumulation
 # stops past U+10FFFF, so a long reference is merely too large.
-def char_ref_value(ref : String | Tape::String) : Int32
+def char_ref_value(ref : String | Str) : Int32
   ptr = ref.is_a?(String) ? ref.to_unsafe : ref
   len = ref.bytesize
   i = 1

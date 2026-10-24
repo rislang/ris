@@ -4,8 +4,8 @@
 # two mappings, not a thousand and one (RIS_TAPE_STATS counts them).
 1000.times do
   tape do
-    a = Tape::Array(Int32).new(4)
-    b = Tape::Array(Int32).new(4)
+    a = Ary(Int32).new(4)
+    b = Ary(Int32).new(4)
     i = 0
     while i < 100
       a << i

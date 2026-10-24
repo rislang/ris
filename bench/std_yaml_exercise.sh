@@ -310,7 +310,7 @@ prove_caught esctab "folding trims escaped blanks" \
   'trim_trailing_blanks(hard)' 'trim_trailing_blanks(0)'
 prove_caught foldcopy "folding copies a quoted scalar to trim it, not in place" \
   "quoted scalars of 20,000 lines read in under four times the same bytes on one line" \
-  $'    count = @buffer.size\n    while count > floor' $'    count = @buffer.size\n    held = Tape::String.build(count) { |w| w << @buffer.finish }\n    @buffer.clear\n    @buffer << held\n    while count > floor'
+  $'    count = @buffer.size\n    while count > floor' $'    count = @buffer.size\n    held = Str.build(count) { |w| w << @buffer.finish }\n    @buffer.clear\n    @buffer << held\n    while count > floor'
 prove_caught escbreak "an escaped line break folds like a plain one" \
   "blanks before an escaped line break stay" \
   'next_quoted_line(opener, parent, flow, true)' 'next_quoted_line(opener, parent, flow, false)'

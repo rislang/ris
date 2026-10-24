@@ -403,12 +403,12 @@ end
 
 @[OnTape]
 struct TapeMap(K, V)
-  @keys : Tape::Array(K)
-  @values : Tape::Array(V)
+  @keys : Ary(K)
+  @values : Ary(V)
 
   def initialize
-    @keys = Tape::Array(K).new
-    @values = Tape::Array(V).new
+    @keys = Ary(K).new
+    @values = Ary(V).new
   end
 
   def size : Int32
@@ -449,7 +449,7 @@ end
 
 @[OnTape]
 pub struct TapeValue
-  alias Type = Nil | Bool | Int64 | Float64 | Tape::String | Tape::Array(TapeValue) | TapeMap(TapeValue, TapeValue)
+  alias Type = Nil | Bool | Int64 | Float64 | Str | Ary(TapeValue) | TapeMap(TapeValue, TapeValue)
 
   KIND_NIL    = 0
   KIND_BOOL   = 1
@@ -472,11 +472,11 @@ pub struct TapeValue
   # Reference types are tested first on purpose (see the header).
   def kind : Int32
     r = @raw
-    if r.is_a?(Tape::Array(TapeValue))
+    if r.is_a?(Ary(TapeValue))
       KIND_ARRAY
     elsif r.is_a?(TapeMap(TapeValue, TapeValue))
       KIND_HASH
-    elsif r.is_a?(Tape::String)
+    elsif r.is_a?(Str)
       KIND_STRING
     elsif r.is_a?(Int64)
       KIND_INT
@@ -555,22 +555,22 @@ pub struct TapeValue
     nil
   end
 
-  def as_s : Tape::String
+  def as_s : Str
     raise "expected a string, not #{kind_name}" unless kind == KIND_STRING
-    @raw.as(Tape::String)
+    @raw.as(Str)
   end
 
-  def as_s? : Tape::String?
-    kind == KIND_STRING ? @raw.as(Tape::String) : nil
+  def as_s? : Str?
+    kind == KIND_STRING ? @raw.as(Str) : nil
   end
 
-  def as_a : Tape::Array(TapeValue)
+  def as_a : Ary(TapeValue)
     raise "expected a sequence, not #{kind_name}" unless kind == KIND_ARRAY
-    @raw.as(Tape::Array(TapeValue))
+    @raw.as(Ary(TapeValue))
   end
 
-  def as_a? : Tape::Array(TapeValue)?
-    kind == KIND_ARRAY ? @raw.as(Tape::Array(TapeValue)) : nil
+  def as_a? : Ary(TapeValue)?
+    kind == KIND_ARRAY ? @raw.as(Ary(TapeValue)) : nil
   end
 
   def as_h : TapeMap(TapeValue, TapeValue)
@@ -585,9 +585,9 @@ pub struct TapeValue
   # Elements of a sequence, pairs of a mapping, characters of a string.
   def size : Int32
     k = kind
-    return @raw.as(Tape::Array(TapeValue)).size if k == KIND_ARRAY
+    return @raw.as(Ary(TapeValue)).size if k == KIND_ARRAY
     return @raw.as(TapeMap(TapeValue, TapeValue)).size if k == KIND_HASH
-    return @raw.as(Tape::String).bytesize if k == KIND_STRING
+    return @raw.as(Str).bytesize if k == KIND_STRING
     raise "size of #{kind_name}"
   end
 
@@ -603,11 +603,11 @@ pub struct TapeValue
     h[key]?
   end
 
-  def [](key : Tape::String) : TapeValue
+  def [](key : Str) : TapeValue
     self[TapeValue.new(key)]
   end
 
-  def []?(key : Tape::String) : TapeValue?
+  def []?(key : Str) : TapeValue?
     self[TapeValue.new(key)]?
   end
 
@@ -627,34 +627,34 @@ pub struct TapeValue
     at >= 0 && at < a.size ? a[at] : nil
   end
 
-  def dig?(key : Tape::String | Int32) : TapeValue?
+  def dig?(key : Str | Int32) : TapeValue?
     step?(key)
   end
 
-  def dig?(key : Tape::String | Int32, *rest : Tape::String | Int32) : TapeValue?
+  def dig?(key : Str | Int32, *rest : Str | Int32) : TapeValue?
     v = step?(key)
     return nil if v.nil?
     v.dig?(*rest)
   end
 
-  def dig(key : Tape::String | Int32) : TapeValue
+  def dig(key : Str | Int32) : TapeValue
     step(key)
   end
 
-  def dig(key : Tape::String | Int32, *rest : Tape::String | Int32) : TapeValue
+  def dig(key : Str | Int32, *rest : Str | Int32) : TapeValue
     step(key).dig(*rest)
   end
 
-  private def step?(key : Tape::String | Int32) : TapeValue?
-    if key.is_a?(Tape::String)
+  private def step?(key : Str | Int32) : TapeValue?
+    if key.is_a?(Str)
       self[key]?
     else
       self[key]?
     end
   end
 
-  private def step(key : Tape::String | Int32) : TapeValue
-    if key.is_a?(Tape::String)
+  private def step(key : Str | Int32) : TapeValue
+    if key.is_a?(Str)
       self[key]
     else
       self[key]
@@ -685,7 +685,7 @@ pub struct TapeValue
       end
       true
     elsif k == KIND_STRING
-      @raw.as(Tape::String) == other.raw.as(Tape::String)
+      @raw.as(Str) == other.raw.as(Str)
     elsif k == KIND_INT
       @raw.as(Int64) == other.raw.as(Int64)
     elsif k == KIND_FLOAT
@@ -716,7 +716,7 @@ pub struct TapeValue
   def self.view(value : Any) : TapeValue
     k = value.kind
     if k == Any::KIND_ARRAY
-      items = Tape::Array(TapeValue).new
+      items = Ary(TapeValue).new
       value.as_a.each { |item| items << view(item) }
       TapeValue.new(items)
     elsif k == Any::KIND_HASH
@@ -769,10 +769,10 @@ end
 
 @[OnTape]
 struct TapeBuffer
-  @writer : Tape::String::Writer
+  @writer : Str::Builder
 
   def initialize
-    @writer = Tape::String::Writer.new(64)
+    @writer = Str::Builder.new(64)
   end
 
   def size : Int32
@@ -787,11 +787,11 @@ struct TapeBuffer
     @writer.push(byte)
   end
 
-  def <<(text : String | Tape::String) : Nil
+  def <<(text : String | Str) : Nil
     @writer << text
   end
 
-  def append(source : Tape::String, count : Int32) : Nil
+  def append(source : Str, count : Int32) : Nil
     @writer << source[0, count] if count > 0
   end
 
@@ -811,13 +811,13 @@ struct TapeBuffer
     @writer << point.unsafe_chr
   end
 
-  def finish : Tape::String
-    Tape::String.build { |w| w << @writer.finish }
+  def finish : Str
+    Str.build { |w| w << @writer.finish }
   end
 end
 
 module TapeScalar
-  def self.resolve(text : Tape::String) : TapeValue
+  def self.resolve(text : Str) : TapeValue
     size = text.bytesize
     return TapeValue.new(nil) if size == 0
     bytes = text
@@ -869,7 +869,7 @@ module TapeScalar
     TapeValue.new(text)
   end
 
-  def self.decimal_digits?(bytes : Tape::String, count : Int32) : Bool
+  def self.decimal_digits?(bytes : Str, count : Int32) : Bool
     return false if count == 0
     i = 0
     while i < count
@@ -879,7 +879,7 @@ module TapeScalar
     true
   end
 
-  def self.octal_digits?(bytes : Tape::String, count : Int32) : Bool
+  def self.octal_digits?(bytes : Str, count : Int32) : Bool
     return false if count == 0
     i = 0
     while i < count
@@ -889,7 +889,7 @@ module TapeScalar
     true
   end
 
-  def self.hex_digits?(bytes : Tape::String, count : Int32) : Bool
+  def self.hex_digits?(bytes : Str, count : Int32) : Bool
     return false if count == 0
     i = 0
     while i < count
@@ -903,7 +903,7 @@ module TapeScalar
 
   # `.5`, `7.`, `1.5`, `1e3`, `1.5E-3`: digits with at most one point,
   # at least one digit, an optional exponent with at least one digit.
-  def self.float_text?(bytes : Tape::String, count : Int32) : Bool
+  def self.float_text?(bytes : Str, count : Int32) : Bool
     i = 0
     digits = 0
     while i < count && bytes[i] >= 48_u8 && bytes[i] <= 57_u8
@@ -944,27 +944,27 @@ struct TapeParser
   # expanded; the sentence below spells the same number.
   ALIAS_NODE_LIMIT = 1_000_000_i64
 
-  @bytes : Tape::String
+  @bytes : Str
   @size : Int32
   # Per line: where it starts, where its text ends (before the line
   # break), where its content starts (after the indentation; moved past a
   # `- ` when a sequence entry is entered), whether a tab was in the
   # indentation.
-  @starts : Tape::Array(Int32)
-  @ends : Tape::Array(Int32)
-  @heads : Tape::Array(Int32)
-  @tabbed : Tape::Array(Bool)
+  @starts : Ary(Int32)
+  @ends : Ary(Int32)
+  @heads : Ary(Int32)
+  @tabbed : Ary(Bool)
   @line : Int32
   @error : String?
-  @anchors : TapeMap(Tape::String, TapeValue)
-  @open_anchors : Tape::Array(Tape::String)
+  @anchors : TapeMap(Str, TapeValue)
+  @open_anchors : Ary(Str)
   # Nodes read so far, and per anchor how many nodes its value holds
   # (measured between opening and closing it); an alias adds that many
   # to `@nodes` and to `@expanded`, which is what ALIAS_NODE_LIMIT bounds.
   @nodes : Int64
   @expanded : Int64
-  @anchor_sizes : TapeMap(Tape::String, Int64)
-  @open_sizes : Tape::Array(Int64)
+  @anchor_sizes : TapeMap(Str, Int64)
+  @open_sizes : Ary(Int64)
   # Collections open now, and per anchor how deep its value nests: the
   # deepest `@peak` reached while it was open, past the depth it opened
   # at. An alias counts as its anchor's value written out in its place,
@@ -975,29 +975,29 @@ struct TapeParser
   # overflow.
   @depth : Int32
   @peak : Int32
-  @anchor_depths : TapeMap(Tape::String, Int32)
-  @open_peaks : Tape::Array(Int32)
+  @anchor_depths : TapeMap(Str, Int32)
+  @open_peaks : Ary(Int32)
   @buffer : TapeBuffer
 
-  def initialize(text : Tape::String)
+  def initialize(text : Str)
     @bytes = text
     @size = text.bytesize
-    @starts = Tape::Array(Int32).new
-    @ends = Tape::Array(Int32).new
-    @heads = Tape::Array(Int32).new
-    @tabbed = Tape::Array(Bool).new
+    @starts = Ary(Int32).new
+    @ends = Ary(Int32).new
+    @heads = Ary(Int32).new
+    @tabbed = Ary(Bool).new
     @line = 0
     @error = nil
-    @anchors = TapeMap(Tape::String, TapeValue).new
-    @open_anchors = Tape::Array(Tape::String).new
+    @anchors = TapeMap(Str, TapeValue).new
+    @open_anchors = Ary(Str).new
     @nodes = 0_i64
     @expanded = 0_i64
-    @anchor_sizes = TapeMap(Tape::String, Int64).new
-    @open_sizes = Tape::Array(Int64).new
+    @anchor_sizes = TapeMap(Str, Int64).new
+    @open_sizes = Ary(Int64).new
     @depth = 0
     @peak = 0
-    @anchor_depths = TapeMap(Tape::String, Int32).new
-    @open_peaks = Tape::Array(Int32).new
+    @anchor_depths = TapeMap(Str, Int32).new
+    @open_peaks = Ary(Int32).new
     @buffer = TapeBuffer.new
     split_lines
   end
@@ -1007,8 +1007,8 @@ struct TapeParser
   end
 
   # Every document in the stream, or nil with `error` set.
-  def parse_all : Tape::Array(TapeValue)?
-    docs = Tape::Array(TapeValue).new
+  def parse_all : Ary(TapeValue)?
+    docs = Ary(TapeValue).new
     implicit_allowed = true
     while true
       skip_directives_and_blank
@@ -1039,9 +1039,9 @@ struct TapeParser
       return nil if @error
       # Every node leaves `@line` on the first line after it, so the next
       # document starts here or on a later blank-free line.
-      @anchors = TapeMap(Tape::String, TapeValue).new
-      @anchor_sizes = TapeMap(Tape::String, Int64).new
-      @anchor_depths = TapeMap(Tape::String, Int32).new
+      @anchors = TapeMap(Str, TapeValue).new
+      @anchor_sizes = TapeMap(Str, Int64).new
+      @anchor_depths = TapeMap(Str, Int32).new
       docs << node
       implicit_allowed = false
       skip_blank_lines
@@ -1373,8 +1373,8 @@ struct TapeParser
   # scalar, or (after properties alone) the block node on the lines below.
   # Requires the rest of the value's last line to be empty and steps past
   # it. `outer_tag` is a tag that stood alone on the line above.
-  private def parse_inline_node(pos : Int32, parent : Int32, sequence_at_parent : Bool, outer_tag : Tape::String? = nil) : TapeValue
-    anchor = nil.as(Tape::String?)
+  private def parse_inline_node(pos : Int32, parent : Int32, sequence_at_parent : Bool, outer_tag : Str? = nil) : TapeValue
+    anchor = nil.as(Str?)
     tag = outer_tag
     anchor_pos = pos
     while true
@@ -1461,7 +1461,7 @@ struct TapeParser
     b == 64_u8 || b == 96_u8 || b == 37_u8 || b == 93_u8 || b == 125_u8 || b == 44_u8
   end
 
-  private def parse_inline_value(pos : Int32, parent : Int32, tag : Tape::String?) : TapeValue
+  private def parse_inline_value(pos : Int32, parent : Int32, tag : Str?) : TapeValue
     @nodes = @nodes + 1
     b = @bytes[pos]
     if b == 42_u8 # *
@@ -1524,7 +1524,7 @@ struct TapeParser
 
   private def parse_block_sequence(indent : Int32) : TapeValue
     @nodes = @nodes + 1
-    items = Tape::Array(TapeValue).new
+    items = Ary(TapeValue).new
     result = TapeValue.new(items)
     enter(@heads[@line])
     return result if @error
@@ -1595,7 +1595,7 @@ struct TapeParser
       # A core tag on a key is read as on a value: `!!str a: b` was
       # refused as "an alias, anchor or tag as a mapping key", where the
       # header refused only an anchor; PyYAML and ruamel read {a: b}.
-      tag = nil.as(Tape::String?)
+      tag = nil.as(Str?)
       text_pos = key_pos
       while @error.nil? && @bytes[text_pos] == 33_u8
         # One tag, as on any node: `!!str !!int a: b` kept the later.
@@ -1720,11 +1720,11 @@ struct TapeParser
   # The tag's text; the verbatim spelling of a core tag,
   # `!<tag:yaml.org,2002:str>`, is read as its `!!str` shorthand. TapeValue
   # other tag keeps its spelling, so the refusal echoes it whole.
-  private def tag_text(pos : Int32, finish : Int32) : Tape::String
+  private def tag_text(pos : Int32, finish : Int32) : Str
     text = @bytes[pos, finish - pos]
     prefix = "!<tag:yaml.org,2002:"
     if text.starts_with?(prefix) && (text.bytesize > 0 && text[text.bytesize - 1] == 62_u8) && text.bytesize > prefix.bytesize + 1
-      short = Tape::String.build do |w|
+      short = Str.build do |w|
         w << "!!" << text[prefix.bytesize,
           text.bytesize - prefix.bytesize - 1]
       end
@@ -1733,14 +1733,14 @@ struct TapeParser
     text
   end
 
-  private def known_tag?(tag : Tape::String) : Bool
+  private def known_tag?(tag : Str) : Bool
     tag == "!!str" || tag == "!!int" || tag == "!!float" || tag == "!!bool" || tag == "!!null" ||
       tag == "!!seq" || tag == "!!map"
   end
 
   # A tagged scalar must read as what the tag says; `!!seq`/`!!map` only
   # confirm the shape.
-  private def apply_tag(tag : Tape::String?, value : TapeValue, pos : Int32) : TapeValue
+  private def apply_tag(tag : Str?, value : TapeValue, pos : Int32) : TapeValue
     return value if tag.nil? || @error
     k = value.kind
     if tag == "!!seq"
@@ -1781,7 +1781,7 @@ struct TapeParser
 
   # A plain scalar in block context, folded across the lines below that
   # are indented past `parent`.
-  private def parse_plain_block(pos : Int32, parent : Int32) : Tape::String
+  private def parse_plain_block(pos : Int32, parent : Int32) : Str
     @buffer.clear
     stop = plain_piece_end(pos, false)
     @buffer << @bytes[pos, stop - pos]
@@ -1855,7 +1855,7 @@ struct TapeParser
   # A quoted scalar starting at `pos`; folded across lines, which in block
   # context must be indented past `parent`. Leaves `@flow_end` after the
   # closing quote.
-  private def parse_quoted(pos : Int32, parent : Int32, flow : Bool) : Tape::String
+  private def parse_quoted(pos : Int32, parent : Int32, flow : Bool) : Str
     quote = @bytes[pos]
     opener = pos
     @buffer.clear
@@ -2088,7 +2088,7 @@ struct TapeParser
       floor = parent + 1
       indent = floor if indent < floor
     end
-    lines = Tape::Array(Tape::String).new
+    lines = Ary(Str).new
     look = @line + 1
     last_content = @line
     while look < @starts.size
@@ -2209,7 +2209,7 @@ struct TapeParser
   end
 
   private def parse_flow_sequence(opener : Int32) : TapeValue
-    items = Tape::Array(TapeValue).new
+    items = Ary(TapeValue).new
     result = TapeValue.new(items)
     enter(opener)
     return result if @error
@@ -2380,8 +2380,8 @@ struct TapeParser
 
   # One node inside a flow collection, starting at `pos` (not blank).
   private def parse_flow_node(pos : Int32) : TapeValue
-    anchor = nil.as(Tape::String?)
-    tag = nil.as(Tape::String?)
+    anchor = nil.as(Str?)
+    tag = nil.as(Str?)
     anchor_pos = pos
     while true
       b = @bytes[pos]
@@ -2466,7 +2466,7 @@ struct TapeParser
   # empty line, as in block context. A comment, a flow indicator or a
   # value indicator ends it. It stopped at the line end, so `[a\n b]`
   # was refused for want of a `,`. Leaves `@flow_end` after it.
-  private def parse_plain_flow(pos : Int32) : Tape::String
+  private def parse_plain_flow(pos : Int32) : Str
     @buffer.clear
     stop = plain_piece_end(pos, true)
     @buffer << @bytes[pos, stop - pos]
@@ -2502,7 +2502,7 @@ struct TapeParser
   # ------------------------------------------------------------------
   # Anchors and depth
 
-  private def open_anchor(name : Tape::String?) : Nil
+  private def open_anchor(name : Str?) : Nil
     return if name.nil?
     @open_anchors << name
     @open_sizes << @nodes
@@ -2510,7 +2510,7 @@ struct TapeParser
     @peak = @depth
   end
 
-  private def close_anchor(name : Tape::String?, value : TapeValue) : Nil
+  private def close_anchor(name : Str?, value : TapeValue) : Nil
     return if name.nil?
     started = @nodes
     peak = @peak
@@ -2529,7 +2529,7 @@ struct TapeParser
   # The anchored value, shared; the nodes it holds count as read again,
   # and once aliases have added ALIAS_NODE_LIMIT nodes the stream is
   # refused rather than built. Its levels count from where it is read.
-  private def resolve_alias(name : Tape::String, pos : Int32) : TapeValue
+  private def resolve_alias(name : Str, pos : Int32) : TapeValue
     if name.empty?
       fail("an alias with no name", pos)
       return TapeValue.new(nil)
@@ -2572,9 +2572,9 @@ end
 
 @[OnTape]
 struct TapeEmitter
-  @out : Tape::String::Writer
+  @out : Str::Builder
 
-  def initialize(@out : Tape::String::Writer)
+  def initialize(@out : Str::Builder)
   end
 
   def dump(value : TapeValue) : Nil
@@ -2635,12 +2635,12 @@ struct TapeEmitter
     (k == TapeValue::KIND_ARRAY || k == TapeValue::KIND_HASH) && value.size > 0
   end
 
-  private def scalar_text(value : TapeValue) : Tape::String
+  private def scalar_text(value : TapeValue) : Str
     k = value.kind
     if k == TapeValue::KIND_STRING
       return string_text(value.as_s)
     end
-    Tape::String.build do |w|
+    Str.build do |w|
       if k == TapeValue::KIND_NIL
         w << "null"
       elsif k == TapeValue::KIND_BOOL
@@ -2666,7 +2666,7 @@ struct TapeEmitter
 
   # Plain when the parser would read it back as the same string, quoted
   # otherwise.
-  private def string_text(text : Tape::String) : Tape::String
+  private def string_text(text : Str) : Str
     return quoted(text) unless plain_safe?(text)
     text
   end
@@ -2675,7 +2675,7 @@ struct TapeEmitter
   # indicator, not `- `/`? ` (an entry), not `<<` (a merge as a key), not
   # a document marker, no `: ` or ` #` inside, and not a value of another
   # kind.
-  private def plain_safe?(text : Tape::String) : Bool
+  private def plain_safe?(text : Str) : Bool
     size = text.bytesize
     return false if size == 0
     bytes = text
@@ -2723,9 +2723,9 @@ struct TapeEmitter
   WORDS_1_1 = ["y", "Y", "n", "N", "yes", "Yes", "YES", "no", "No", "NO",
                "on", "On", "ON", "off", "Off", "OFF", "="]
 
-  private def other_in_1_1?(text : Tape::String, bytes : Tape::String,
+  private def other_in_1_1?(text : Str, bytes : Str,
                             size : Int32) : Bool
-    # `==` each, as a `case` asks `String#===` of a Tape::String: false.
+    # `==` each, as a `case` asks `String#===` of a Str: false.
     w = 0
     while w < WORDS_1_1.size
       return true if text == WORDS_1_1[w]
@@ -2745,7 +2745,7 @@ struct TapeEmitter
     b == 32_u8 || b == 9_u8
   end
 
-  private def quoted(text : Tape::String) : Tape::String
+  private def quoted(text : Str) : Str
     buffer = TapeBuffer.new
     buffer << 34_u8
     bytes = text
@@ -2794,7 +2794,7 @@ struct TapeEmitter
   # U+FEFF (a byte order mark, dropped at the start of a stream: the
   # string "\uFEFF" read back as null), and U+0085, U+2028 and U+2029
   # (line breaks to a YAML 1.1 reader). Its code point, or -1.
-  private def escaped_point(bytes : Tape::String, i : Int32,
+  private def escaped_point(bytes : Str, i : Int32,
                             size : Int32) : Int32
     b = bytes[i]
     if b == 0xC2_u8 && i + 1 < size && bytes[i + 1] >= 0x80_u8 && bytes[i + 1] <= 0x9F_u8
@@ -2931,36 +2931,36 @@ pub macro yaml_serializable(declaration)
 end
 
 pub struct YAML
-  def self.parse(text : Tape::String) : TapeValue
+  def self.parse(text : Str) : TapeValue
     parser = TapeParser.new(text)
     docs = parser.parse_all
     raise parser.error || "invalid YAML" if docs.nil?
     docs.empty? ? TapeValue.new(nil) : docs[0]
   end
 
-  def self.parse?(text : Tape::String) : TapeValue?
+  def self.parse?(text : Str) : TapeValue?
     docs = TapeParser.new(text).parse_all
     return nil if docs.nil?
     docs.empty? ? TapeValue.new(nil) : docs[0]
   end
 
-  def self.parse_all(text : Tape::String) : Tape::Array(TapeValue)
+  def self.parse_all(text : Str) : Ary(TapeValue)
     parser = TapeParser.new(text)
     docs = parser.parse_all
     raise parser.error || "invalid YAML" if docs.nil?
     docs
   end
 
-  def self.parse_all?(text : Tape::String) : Tape::Array(TapeValue)?
+  def self.parse_all?(text : Str) : Ary(TapeValue)?
     TapeParser.new(text).parse_all
   end
 
-  def self.dump(value : TapeValue, writer : Tape::String::Writer) : Nil
+  def self.dump(value : TapeValue, writer : Str::Builder) : Nil
     TapeEmitter.new(writer).dump(value)
   end
 
-  def self.dump(value : TapeValue) : Tape::String
-    Tape::String.build { |w| dump(value, w) }
+  def self.dump(value : TapeValue) : Str
+    Str.build { |w| dump(value, w) }
   end
 
   # The first document of `text`, or nil when the stream is not YAML this

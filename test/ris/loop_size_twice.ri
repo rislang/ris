@@ -1,6 +1,6 @@
 # A size set twice is not taken for the bound of `while i < n`: `s[i]`
 # keeps its check and refuses the byte past the end.
-def past(s : Tape::String) : Int32
+def past(s : Str) : Int32
   n = s.bytesize
   n = n + 1
   i = 0
@@ -13,5 +13,5 @@ def past(s : Tape::String) : Int32
 end
 
 tape do
-  puts past(Tape::String.new("ab"))
+  puts past(Str.new("ab"))
 end

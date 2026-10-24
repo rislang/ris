@@ -9,7 +9,7 @@ tape do
   exit 1 unless doc.root.name == "root"
   exit 2 unless doc.root["a"] == "&"
   exit 3 unless doc.root.text == "café <raw"
-  w = Tape::String::Writer.new(1)
+  w = Str::Builder.new(1)
   w << "prefix:"
   doc.to_xml(w)
   rendered = doc.to_xml

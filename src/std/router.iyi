@@ -108,26 +108,26 @@ end
 # patterns neither of which is more specific.
 @[OnTape]
 pub struct Capture
-  getter name : Tape::String
-  getter value : Tape::String
+  getter name : Str
+  getter value : Str
 
-  def initialize(@name : Tape::String, @value : Tape::String)
+  def initialize(@name : Str, @value : Str)
   end
 end
 
 @[OnTape]
 pub struct Captures
-  getter entries : Tape::Array(Capture)
+  getter entries : Ary(Capture)
 
   def initialize
-    @entries = Tape::Array(Capture).new
+    @entries = Ary(Capture).new
   end
 
-  def add(name : Tape::String, value : Tape::String) : Nil
+  def add(name : Str, value : Str) : Nil
     @entries << Capture.new(name, value)
   end
 
-  def [](name : String) : Tape::String
+  def [](name : String) : Str
     @entries.each { |entry| return entry.value if entry.name == name }
     raise "no route capture #{name}"
   end
@@ -306,7 +306,7 @@ pub class Pattern
     result
   end
 
-  def match(path : Tape::String) : Captures?
+  def match(path : Str) : Captures?
     pieces = Pattern.pieces(path)
     pieces ? match_pieces(pieces) : nil
   end
@@ -315,9 +315,9 @@ pub class Pattern
   # one empty piece, and a trailing slash is a last empty one. Nil for a
   # path that is not rooted or holds a malformed escape. Decoded a segment
   # at a time, so `%2F` is inside a segment, never between two.
-  def self.pieces(path : Tape::String) : Tape::Array(Tape::String)?
+  def self.pieces(path : Str) : Ary(Str)?
     return nil unless path.starts_with?("/")
-    pieces = Tape::Array(Tape::String).new
+    pieces = Ary(Str).new
     path[1, path.bytesize - 1].split('/').each do |segment|
       decoded = Pattern.decode_piece(segment)
       return nil unless decoded
@@ -327,7 +327,7 @@ pub class Pattern
   end
 
   # `match` on a path already cut into `pieces`.
-  def match_pieces(pieces : Tape::Array(Tape::String)) : Captures?
+  def match_pieces(pieces : Ary(Str)) : Captures?
     found = Captures.new
     i = 0
     j = 0
@@ -338,7 +338,7 @@ pub class Pattern
         # end: `/x/` does not match `/x`.
         return nil if j >= pieces.size
         name = @names[i]
-        value = Tape::String.build do |w|
+        value = Str.build do |w|
           k = j
           while k < pieces.size
             w << "/" if k > j
@@ -403,9 +403,9 @@ pub class Pattern
     -1
   end
 
-  protected def self.decode_piece(text : Tape::String) : Tape::String?
+  protected def self.decode_piece(text : Str) : Str?
     return text unless text.index('%')
-    w = Tape::String::Writer.new(text.bytesize)
+    w = Str::Builder.new(text.bytesize)
     i = 0
     while i < text.bytesize
       if text[i] == 37_u8
@@ -703,14 +703,14 @@ pub class Router
     result
   end
 
-  def self.clean(path : Tape::String) : Tape::String
-    Tape::String.build { |w| clean(path, w) }
+  def self.clean(path : Str) : Str
+    Str.build { |w| clean(path, w) }
   end
 
-  def self.clean(path : Tape::String,
-                 writer : Tape::String::Writer) : Nil
+  def self.clean(path : Str,
+                 writer : Str::Builder) : Nil
     tape do
-      kept = Tape::Array(Tape::String).new
+      kept = Ary(Str).new
       path.split('/').each do |segment|
         if segment == ".."
           kept.pop?

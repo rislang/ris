@@ -154,7 +154,7 @@ pub abstract class Formatter
   # The line written onto a tape, then into *io* in one write.
   def format(entry : Entry, io : IO) : Nil
     tape do
-      w = Tape::String::Writer.new(128)
+      w = Str::Builder.new(128)
       format(entry, w)
       w.push(10_u8)
       line = w.finish
@@ -164,13 +164,13 @@ pub abstract class Formatter
 
   # IO's byte write interface requires a pointer and a byte count.
   @[TapeUnsafe]
-  private def write_line(io : IO, line : Tape::String) : Nil
+  private def write_line(io : IO, line : Str) : Nil
     io.write(line.to_unsafe, line.bytesize)
   end
 
   # The line written into the caller's *writer*: `format(entry)` unless a
   # formatter writes it there itself.
-  def format(entry : Entry, writer : Tape::String::Writer) : Nil
+  def format(entry : Entry, writer : Str::Builder) : Nil
     writer << format(entry)
   end
 end
@@ -179,14 +179,14 @@ pub class DefaultFormatter < Formatter
   def format(entry : Entry) : String
     line = ""
     tape do
-      w = Tape::String::Writer.new(128)
+      w = Str::Builder.new(128)
       format(entry, w)
       line = w.finish.to_heap
     end
     line
   end
 
-  def format(entry : Entry, writer : Tape::String::Writer) : Nil
+  def format(entry : Entry, writer : Str::Builder) : Nil
     entry.timestamp.to_rfc3339(6, writer)
     writer.push(32_u8)
     writer << entry.severity.label

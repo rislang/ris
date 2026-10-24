@@ -234,7 +234,7 @@ pub struct DnsName
 
   # `same?` for a name read onto the tape (`DnsMessage.parse`), read where
   # it lies.
-  def self.same?(a : Tape::String, b : String) : ::Bool
+  def self.same?(a : Str, b : String) : ::Bool
     size = a.bytesize
     size = size - 1 if size > 1 && a[size - 1] == 46_u8
     right = relative(b)
@@ -951,7 +951,7 @@ pub struct DnsMessage
   # out onto it, compression undone, and each record's data is a view of
   # *packet*. A lookup reads its answers so and keeps only what it takes
   # (`DnsTapeMessage#to_heap`).
-  def self.parse(packet : Tape::String) : DnsTapeMessage | DnsError
+  def self.parse(packet : Str) : DnsTapeMessage | DnsError
     size = packet.bytesize
     return malformed("#{size} bytes, shorter than a header") if size < 12
     id = ((packet[0].to_u16 << 8) | packet[1].to_u16)
@@ -960,7 +960,7 @@ pub struct DnsMessage
     count = u16(packet, 6)
     return malformed("#{questions} questions; a query has one") if questions > 1
     at = 12
-    question_name = Tape::String.new("")
+    question_name = Str.new("")
     question_type = 0
     question_class = 0
     if questions == 1
@@ -972,7 +972,7 @@ pub struct DnsMessage
       question_class = u16(packet, at + 2)
       at = at + 4
     end
-    answers = Tape::Array(DnsTapeRecord).new(count > 0 ? count : 1)
+    answers = Ary(DnsTapeRecord).new(count > 0 ? count : 1)
     extended_rcode = 0
     if flags & 0x0200 == 0
       index = 0
@@ -987,7 +987,7 @@ pub struct DnsMessage
         length = u16(packet, at + 8)
         at = at + 10
         return malformed("answer #{index + 1}'s data runs past the message") if at + length > size
-        target = Tape::String.new("")
+        target = Str.new("")
         if klass == DnsRecord::IN
           return malformed("an A record of #{length} bytes") if type == DnsRecord::A && length != 4
           return malformed("an AAAA record of #{length} bytes") if type == DnsRecord::AAAA && length != 16
@@ -1038,7 +1038,7 @@ pub struct DnsMessage
   def self.parse(packet : Bytes) : DnsMessage | DnsError
     result = malformed("not read").as(DnsMessage | DnsError)
     tape do
-      bytes = Tape::String.build(packet.size) { |w| w.append(packet.to_unsafe, packet.size) }
+      bytes = Str.build(packet.size) { |w| w.append(packet.to_unsafe, packet.size) }
       read = parse(bytes)
       result = read.is_a?(DnsError) ? read : read.to_heap
     end
@@ -1092,13 +1092,13 @@ pub struct DnsMessage
   # the wire, and each compression pointer must point before the place the
   # name was last read from - RFC 1035 4.1.4's "prior occurrence" - so the
   # positions strictly fall and a loop cannot be written.
-  def self.read_name(packet : Tape::String, at : Int32) : Tuple(Tape::String, Int32)?
+  def self.read_name(packet : Str, at : Int32) : Tuple(Str, Int32)?
     size = packet.bytesize
     position = at
     floor = at
     ends = -1
     wire = 0
-    text = Tape::String::Writer.new(32)
+    text = Str::Builder.new(32)
     while true
       return nil if position < 0 || position >= size
       length = packet[position].to_i32
@@ -1140,7 +1140,7 @@ pub struct DnsMessage
   def self.read_name(packet : Bytes, at : Int32) : Tuple(String, Int32)?
     result = nil.as(Tuple(String, Int32)?)
     tape do
-      bytes = Tape::String.build(packet.size) { |w| w.append(packet.to_unsafe, packet.size) }
+      bytes = Str.build(packet.size) { |w| w.append(packet.to_unsafe, packet.size) }
       if read = read_name(bytes, at)
         name, ends = read
         result = {name.to_heap, ends}
@@ -1157,7 +1157,7 @@ pub struct DnsMessage
     (raw[at].to_i32 << 8) | raw[at + 1].to_i32
   end
 
-  private def self.u16(bytes : Tape::String, at : Int32) : Int32
+  private def self.u16(bytes : Str, at : Int32) : Int32
     (bytes[at].to_i32 << 8) | bytes[at + 1].to_i32
   end
 end
@@ -1166,14 +1166,14 @@ end
 # out there, its data a view of the message.
 @[OnTape]
 pub struct DnsTapeRecord
-  getter name : Tape::String
+  getter name : Str
   getter type : Int32
   getter record_class : Int32
   getter ttl : UInt32
-  getter data : Tape::String
-  getter target : Tape::String
+  getter data : Str
+  getter target : Str
 
-  def initialize(@name : Tape::String, @type : Int32, @record_class : Int32, @ttl : UInt32, @data : Tape::String, @target : Tape::String)
+  def initialize(@name : Str, @type : Int32, @record_class : Int32, @ttl : UInt32, @data : Str, @target : Str)
   end
 
   def to_heap : DnsRecord
@@ -1188,14 +1188,14 @@ end
 pub struct DnsTapeMessage
   getter id : UInt16
   getter flags : Int32
-  getter question_name : Tape::String
+  getter question_name : Str
   getter question_type : Int32
   getter question_class : Int32
-  getter answers : Tape::Array(DnsTapeRecord)
+  getter answers : Ary(DnsTapeRecord)
   getter extended_rcode : Int32
 
-  def initialize(@id : UInt16, @flags : Int32, @question_name : Tape::String, @question_type : Int32,
-                 @question_class : Int32, @answers : Tape::Array(DnsTapeRecord), @extended_rcode : Int32)
+  def initialize(@id : UInt16, @flags : Int32, @question_name : Str, @question_type : Int32,
+                 @question_class : Int32, @answers : Ary(DnsTapeRecord), @extended_rcode : Int32)
   end
 
   def response? : ::Bool
@@ -1227,7 +1227,7 @@ pub struct DnsTapeMessage
   end
 
   # *data*'s bytes copied to the heap.
-  def self.bytes(data : Tape::String) : Bytes
+  def self.bytes(data : Str) : Bytes
     copy = Bytes.new(data.bytesize)
     index = 0
     while index < data.bytesize

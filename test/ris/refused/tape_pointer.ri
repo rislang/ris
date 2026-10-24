@@ -1,7 +1,7 @@
 # Writer#unsafe_append outside a @[TapeUnsafe] def: it yields a pointer
 # into the tape, which only a system call may write into.
 tape do
-  w = Tape::String::Writer.new(8)
+  w = Str::Builder.new(8)
   w.unsafe_append(1) { |room| room.value = 65_u8; 1 }
   puts w.finish
 end

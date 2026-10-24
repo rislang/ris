@@ -298,9 +298,9 @@ class Conn
   # *count* of the bytes that have arrived, from *at* past what has been
   # taken, copied onto the caller's tape: the buffer is written over by
   # the next fill, and a view of it would be too.
-  def tape_copy(at : Int32 = 0, count : Int32 = available - at) : Tape::String
+  def tape_copy(at : Int32 = 0, count : Int32 = available - at) : Str
     raise "bytes #{at}, #{count} past the #{available} that arrived" if at < 0 || count < 0 || at > available - count
-    Tape::String.build(count) { |w| w.append(@data + (@start + at).to_i64, count) }
+    Str.build(count) { |w| w.append(@data + (@start + at).to_i64, count) }
   end
 
   # The byte *at* bytes past what has been taken, which must have arrived.
@@ -648,7 +648,7 @@ pub class TlsStream
 
   # Up to *max* bytes onto the end of *writer*, the caller's tape:
   # `IyiSocket#read`'s tape form, 0 at the end of the stream.
-  def read(writer : Tape::String::Writer, max : Int32) : Int32 | Cancelled | SocketError
+  def read(writer : Str::Builder, max : Int32) : Int32 | Cancelled | SocketError
     got = @tls.read(writer, max)
     return failed_read(got) if got.is_a?(TlsError)
     got
@@ -670,7 +670,7 @@ pub class TlsStream
   end
 
   # *text* from the caller's tape, sealed with no string made.
-  def write(text : Tape::String) : Int32 | Cancelled | SocketError
+  def write(text : Str) : Int32 | Cancelled | SocketError
     sent = @tls.write(text)
     return SocketError.layered("write to #{@host}", sent.message) if sent.is_a?(TlsError)
     sent
@@ -1577,10 +1577,10 @@ end
 # read from, on the caller's tape.
 @[OnTape]
 pub struct Field
-  getter name : Tape::String
-  getter value : Tape::String
+  getter name : Str
+  getter value : Str
 
-  def initialize(@name : Tape::String, @value : Tape::String)
+  def initialize(@name : Str, @value : Str)
   end
 end
 
@@ -1589,14 +1589,14 @@ end
 # copied. The caller copies to the heap what it keeps, when it keeps it.
 @[OnTape]
 pub struct ParsedHead
-  getter method : Tape::String
-  getter target : Tape::String
-  getter version : Tape::String
-  getter fields : Tape::Array(Field)
+  getter method : Str
+  getter target : Str
+  getter version : Str
+  getter fields : Ary(Field)
   # Where the body starts in the bytes: just past the blank line.
   getter body_start : Int32
 
-  def initialize(@method : Tape::String, @target : Tape::String, @version : Tape::String, @fields : Tape::Array(Field), @body_start : Int32)
+  def initialize(@method : Str, @target : Str, @version : Str, @fields : Ary(Field), @body_start : Int32)
   end
 
   def http10? : Bool
@@ -1658,7 +1658,7 @@ pub struct ParsedHead
   end
 
   # The value of the first field called *name*, in any case.
-  def field(name : String) : Tape::String?
+  def field(name : String) : Str?
     i = 0
     while i < @fields.size
       f = @fields[i]
@@ -1722,7 +1722,7 @@ pub struct ParsedHead
     false
   end
 
-  private def same_field?(a : Tape::String, b : Tape::String) : Bool
+  private def same_field?(a : Str, b : Str) : Bool
     return false unless a.bytesize == b.bytesize
     pa = a
     pb = b
@@ -1744,17 +1744,17 @@ end
 # the block keeps past its answer.
 @[OnTape]
 pub struct Incoming
-  getter method : Tape::String
-  getter path : Tape::String
-  getter query : Tape::String?
-  getter fields : Tape::Array(Field)
-  getter body : Tape::String
+  getter method : Str
+  getter path : Str
+  getter query : Str?
+  getter fields : Ary(Field)
+  getter body : Str
 
-  def initialize(@method : Tape::String, @path : Tape::String, @query : Tape::String?, @fields : Tape::Array(Field), @body : Tape::String)
+  def initialize(@method : Str, @path : Str, @query : Str?, @fields : Ary(Field), @body : Str)
   end
 
   # The value of the first field called *name*, in any case.
-  def header(name : String) : Tape::String?
+  def header(name : String) : Str?
     i = 0
     while i < @fields.size
       f = @fields[i]
@@ -1781,15 +1781,15 @@ pub struct Outgoing
   LINES = 32
 
   # The status and the number of lines.
-  @state : Tape::Array(Int32)
-  @lines : Tape::Array(Field)
-  getter body : Tape::String::Writer
+  @state : Ary(Int32)
+  @lines : Ary(Field)
+  getter body : Str::Builder
 
   def initialize
-    @state = Tape::Array(Int32).new(2) { |i| i == 0 ? 200 : 0 }
+    @state = Ary(Int32).new(2) { |i| i == 0 ? 200 : 0 }
     none = "".as_tape
-    @lines = Tape::Array(Field).new(LINES) { Field.new(none, none) }
-    @body = Tape::String::Writer.new(512)
+    @lines = Ary(Field).new(LINES) { Field.new(none, none) }
+    @body = Str::Builder.new(512)
   end
 
   def status : Int32
@@ -1810,7 +1810,7 @@ pub struct Outgoing
 
   # The same with a value on the tape: one written there, a stamp
   # (`Time#to_rfc3339`) or a request's own field, as it is.
-  def header(name : String, value : Tape::String) : Nil
+  def header(name : String, value : Str) : Nil
     Server.check_line(name, value)
     if HTTP.same_name?(name, "Content-Length") || HTTP.same_name?(name, "Connection") || HTTP.same_name?(name, "Transfer-Encoding")
       raise "HTTP: #{name} is the server's own line"
@@ -1958,7 +1958,7 @@ pub struct Server
       end
       going = false
       tape do
-        fields = Tape::Array(Field).new(head.headers.size)
+        fields = Ary(Field).new(head.headers.size)
         head.headers.each do |name, value|
           fields.push(Field.new(name.as_tape,
             value.as_tape))
@@ -1978,7 +1978,7 @@ pub struct Server
   # next request's start, false when the connection ends, nil for one the
   # fast path does not take - not all here, chunked, `Expect`, HTTP/1.0,
   # an absolute-form target, not HTTP - which `parse_request` reads.
-  private def self.answered_in_place(client : IyiSocket, answerer : Proc(Incoming, Outgoing, Nil), bytes : Tape::String) : Int32 | Bool | Nil
+  private def self.answered_in_place(client : IyiSocket, answerer : Proc(Incoming, Outgoing, Nil), bytes : Str) : Int32 | Bool | Nil
     result = nil.as(Int32 | Bool | Nil)
     tape do
       head = parse_head(bytes)
@@ -2009,7 +2009,7 @@ pub struct Server
     status = res.status
     raise "HTTP: not a status: #{status}" unless status >= 100 && status <= 999
     body = res.body.finish
-    w = Tape::String::Writer.new(256)
+    w = Str::Builder.new(256)
     w << "HTTP/1.1 "
     w.append_int(status)
     w << " "
@@ -2038,7 +2038,7 @@ pub struct Server
   # until the blank line that ends it has arrived. The parts and fields are
   # views into *bytes*; temporaries go on the caller's `tape`.
   def self.parse_head(
-    bytes : Tape::String, from : Int32 = 0, complete : Bool = false,
+    bytes : Str, from : Int32 = 0, complete : Bool = false,
   ) : ParsedHead | HeadError | Nil
     p = bytes
     n = bytes.bytesize
@@ -2086,7 +2086,7 @@ pub struct Server
     if target.bytesize == 0 || HTTP.control?(target)
       return HeadError.new("not a request target: #{target.to_heap.inspect}")
     end
-    fields = Tape::Array(Field).new(16)
+    fields = Ary(Field).new(16)
     hosts = 0
     at = line_end + 2
     while at < split_at
@@ -2143,7 +2143,7 @@ pub struct Server
   end
 
   # The same for a value on the tape, read where it lies.
-  def self.check_line(name : String, value : Tape::String) : Nil
+  def self.check_line(name : String, value : Str) : Nil
     raise "HTTP: not a header name: #{name.inspect}" unless HTTP.token?(name)
     p = value
     i = 0
@@ -2835,7 +2835,7 @@ pub struct Server
       raise "HTTP: not a status: #{response.status}" unless response.status >= 100 && response.status <= 999
       raise "HTTP: the reason contains a line break" if HTTP.has_break?(response.reason)
       raise "HTTP: the reason contains a control character" if HTTP.control?(response.reason)
-      text = Tape::String::Writer.new(256)
+      text = Str::Builder.new(256)
       text << "HTTP/1.1 "
       text.append_int(response.status)
       text << " "
@@ -5102,11 +5102,11 @@ pub struct HTTP
     s[first, last - first]
   end
 
-  def self.same_name?(a : Tape::String, b : String) : Bool
+  def self.same_name?(a : Str, b : String) : Bool
     same_name?(a, a.bytesize, b)
   end
 
-  def self.same_name?(pa : Pointer(UInt8) | Tape::String, count : Int32, b : String) : Bool
+  def self.same_name?(pa : Pointer(UInt8) | Str, count : Int32, b : String) : Bool
     return false unless count == b.bytesize
     pb = b.to_unsafe
     i = 0
@@ -5121,7 +5121,7 @@ pub struct HTTP
     true
   end
 
-  def self.has_token?(list : Tape::String, token : String) : Bool
+  def self.has_token?(list : Str, token : String) : Bool
     p = list
     size = list.bytesize
     at = 0
@@ -5141,7 +5141,7 @@ pub struct HTTP
     false
   end
 
-  def self.token?(p : Pointer(UInt8) | Tape::String, count : Int32 = p.bytesize) : Bool
+  def self.token?(p : Pointer(UInt8) | Str, count : Int32 = p.bytesize) : Bool
     return false if count == 0
     i = 0
     while i < count
@@ -5158,7 +5158,7 @@ pub struct HTTP
     true
   end
 
-  def self.control?(p : Pointer(UInt8) | Tape::String, count : Int32 = p.bytesize) : Bool
+  def self.control?(p : Pointer(UInt8) | Str, count : Int32 = p.bytesize) : Bool
     i = 0
     while i < count
       return true if (p[i] < 32_u8 && p[i] != 9_u8) || p[i] == 127_u8
@@ -5167,11 +5167,11 @@ pub struct HTTP
     false
   end
 
-  def self.absolute_form(target : Tape::String) : Int32?
+  def self.absolute_form(target : Str) : Int32?
     absolute_form(target, target.bytesize)
   end
 
-  def self.absolute_form(p : Pointer(UInt8) | Tape::String, count : Int32) : Int32?
+  def self.absolute_form(p : Pointer(UInt8) | Str, count : Int32) : Int32?
     return 7 if count >= 7 && same_name?(p, 7, "http://")
     return 8 if count >= 8 && same_name?(p, 8, "https://")
     nil
@@ -5188,7 +5188,7 @@ pub struct HTTP
     true
   end
 
-  def self.crlf_in(p : Pointer(UInt8) | Tape::String, from : Int32, stop : Int32) : Int32
+  def self.crlf_in(p : Pointer(UInt8) | Str, from : Int32, stop : Int32) : Int32
     i = from
     while i + 1 < stop
       return i if p[i] == 13_u8 && p[i + 1] == 10_u8
@@ -5197,7 +5197,7 @@ pub struct HTTP
     stop
   end
 
-  def self.byte_in(p : Pointer(UInt8) | Tape::String, from : Int32, stop : Int32, byte : UInt8) : Int32
+  def self.byte_in(p : Pointer(UInt8) | Str, from : Int32, stop : Int32, byte : UInt8) : Int32
     i = from
     while i < stop
       return i if p[i] == byte
@@ -5206,7 +5206,7 @@ pub struct HTTP
     stop
   end
 
-  def self.host?(p : Pointer(UInt8) | Tape::String, count : Int32 = p.bytesize) : Bool
+  def self.host?(p : Pointer(UInt8) | Str, count : Int32 = p.bytesize) : Bool
     i = 0
     while i < count
       c = p[i]
@@ -5869,7 +5869,7 @@ class H2Connection
 
   # The payload without its padding (§6.1), or nil when the padding claims
   # more than the frame holds.
-  private def unpadded(flags : Int32, payload : Tape::String) : Tape::String?
+  private def unpadded(flags : Int32, payload : Str) : Str?
     return payload if flags & PADDED == 0
     return nil if payload.bytesize < 1
     pad = payload[0].to_i32
@@ -5877,7 +5877,7 @@ class H2Connection
     payload[1, payload.bytesize - 1 - pad]
   end
 
-  private def on_data(id : Int32, flags : Int32, payload : Tape::String) : Bool
+  private def on_data(id : Int32, flags : Int32, payload : Str) : Bool
     return fail(PROTOCOL_ERROR, "DATA on stream 0") if id == 0
     body = unpadded(flags, payload)
     return fail(PROTOCOL_ERROR, "DATA whose padding is longer than the frame") if body.nil?
@@ -5923,7 +5923,7 @@ class H2Connection
   end
 
   private def on_headers(id : Int32, flags : Int32,
-                         payload : Tape::String) : Bool
+                         payload : Str) : Bool
     return fail(PROTOCOL_ERROR, "HEADERS on stream 0") if id == 0
     block = unpadded(flags, payload)
     return fail(PROTOCOL_ERROR, "HEADERS whose padding is longer than the frame") if block.nil?
@@ -5969,7 +5969,7 @@ class H2Connection
   end
 
   private def on_continuation(id : Int32, flags : Int32,
-                              payload : Tape::String) : Bool
+                              payload : Str) : Bool
     return fail(PROTOCOL_ERROR, "CONTINUATION with no header block open") if @block_stream == 0
     return false unless gather(payload)
     flags & END_HEADERS != 0 ? close_block : true
@@ -5977,7 +5977,7 @@ class H2Connection
 
   # A piece of the open header block, refused past what a head may hold:
   # CONTINUATION after CONTINUATION is no way to make this end keep more.
-  private def gather(piece : Tape::String) : Bool
+  private def gather(piece : Str) : Bool
     return fail(ENHANCE_YOUR_CALM, "a header block past #{HEADER_LIST} bytes") if @block.size + piece.bytesize > HEADER_LIST
     p = piece
     i = 0
@@ -5999,7 +5999,7 @@ class H2Connection
   private def close_block_on_tape : Bool
     id = @block_stream
     @block_stream = 0
-    bytes = Tape::String.build(@block.size) do |w|
+    bytes = Str.build(@block.size) do |w|
       @block.each { |b| w.push(b) }
     end
     @block = [] of UInt8
@@ -6061,7 +6061,7 @@ class H2Connection
     n
   end
 
-  private def on_priority(id : Int32, payload : Tape::String) : Bool
+  private def on_priority(id : Int32, payload : Str) : Bool
     return fail(PROTOCOL_ERROR, "PRIORITY on stream 0") if id == 0
     return refuse(id, FRAME_SIZE_ERROR) if payload.bytesize != 5
     p = payload
@@ -6070,7 +6070,7 @@ class H2Connection
     true
   end
 
-  private def on_reset(id : Int32, payload : Tape::String) : Bool
+  private def on_reset(id : Int32, payload : Str) : Bool
     return fail(PROTOCOL_ERROR, "RST_STREAM on stream 0") if id == 0
     return fail(FRAME_SIZE_ERROR, "RST_STREAM of #{payload.bytesize} bytes") if payload.bytesize != 4
     return fail(PROTOCOL_ERROR, "RST_STREAM on a stream never opened") if idle?(id) && @streams[id]?.nil?
@@ -6083,7 +6083,7 @@ class H2Connection
   end
 
   private def on_settings(id : Int32, flags : Int32,
-                          payload : Tape::String) : Bool
+                          payload : Str) : Bool
     return fail(PROTOCOL_ERROR, "SETTINGS on stream #{id}") if id != 0
     if flags & ACK != 0
       return fail(FRAME_SIZE_ERROR, "a SETTINGS acknowledgement that carries #{payload.bytesize} bytes") if payload.bytesize != 0
@@ -6121,14 +6121,14 @@ class H2Connection
     write_frame(SETTINGS, ACK, 0, "")
   end
 
-  private def on_ping(id : Int32, flags : Int32, payload : Tape::String) : Bool
+  private def on_ping(id : Int32, flags : Int32, payload : Str) : Bool
     return fail(PROTOCOL_ERROR, "PING on stream #{id}") if id != 0
     return fail(FRAME_SIZE_ERROR, "PING of #{payload.bytesize} bytes") if payload.bytesize != 8
     return true if flags & ACK != 0
     write_frame(PING, ACK, 0, payload)
   end
 
-  private def on_goaway(id : Int32, payload : Tape::String) : Bool
+  private def on_goaway(id : Int32, payload : Str) : Bool
     return fail(PROTOCOL_ERROR, "GOAWAY on stream #{id}") if id != 0
     return fail(FRAME_SIZE_ERROR, "GOAWAY of #{payload.bytesize} bytes") if payload.bytesize < 8
     @goaway = H2Connection.read_u32(payload, 0) & 0x7FFFFFFF
@@ -6143,7 +6143,7 @@ class H2Connection
     true
   end
 
-  private def on_window(id : Int32, payload : Tape::String) : Bool
+  private def on_window(id : Int32, payload : Str) : Bool
     return fail(FRAME_SIZE_ERROR, "WINDOW_UPDATE of #{payload.bytesize} bytes") if payload.bytesize != 4
     increment = (H2Connection.read_u32(payload, 0) & 0x7FFFFFFF).to_i64
     if id == 0
@@ -6167,7 +6167,7 @@ class H2Connection
 
   # One frame, in one write.
   def write_frame(type : Int32, flags : Int32, id : Int32,
-                  payload : String | Tape::String) : Bool
+                  payload : String | Str) : Bool
     return false unless @failure.nil? || (type == GOAWAY && @failure.is_a?(HTTPError))
     n = payload.bytesize
     head = String.new(9) do |b|
@@ -6214,7 +6214,7 @@ class H2Connection
     result
   end
 
-  private def send_header_block(id : Int32, block : Tape::String,
+  private def send_header_block(id : Int32, block : Str,
                                 end_stream : Bool) : Bool
     at = 0
     first = true
@@ -6646,7 +6646,7 @@ class H2Connection
     nil
   end
 
-  def self.connection_specific?(name : String | Tape::String) : Bool
+  def self.connection_specific?(name : String | Str) : Bool
     name == "connection" || name == "keep-alive" || name == "proxy-connection" || name == "transfer-encoding" || name == "upgrade"
   end
 
@@ -6702,7 +6702,7 @@ class H2Connection
       capacity = capacity + (split ? split.size : 1)
     end
     fields = Std::Hpack::TapeHeaders.new(capacity)
-    status = Tape::String.build(3) { |w| w.append_int(response.status) }
+    status = Str.build(3) { |w| w.append_int(response.status) }
     fields.push(Std::Hpack::TapeHeaderField.new(
       ":status".as_tape, status))
     has_length = false
@@ -6715,7 +6715,7 @@ class H2Connection
       if HTTP.control?(value)
         raise "HTTP: header #{name} contains a control character"
       end
-      lower = Tape::String.build(name.bytesize) do |w|
+      lower = Str.build(name.bytesize) do |w|
         name.each_byte do |b|
           w.push(b >= 65_u8 && b <= 90_u8 ? b + 32_u8 : b)
         end
@@ -6748,7 +6748,7 @@ class H2Connection
     end
     if !has_length && !HTTP.bodiless?(response.status)
       if written = length
-        size = Tape::String.build(20) { |w| w.append_int(written) }
+        size = Str.build(20) { |w| w.append_int(written) }
         fields.push(Std::Hpack::TapeHeaderField.new(
           "content-length".as_tape, size))
       end
@@ -6756,7 +6756,7 @@ class H2Connection
     fields
   end
 
-  def self.trimmed(value : Tape::String) : Tape::String
+  def self.trimmed(value : Str) : Str
     first = 0
     last = value.bytesize
     while first < last && (value[first] == 32_u8 || value[first] == 9_u8)
@@ -6789,7 +6789,7 @@ class H2Connection
   end
 
   def self.field(fields : Std::Hpack::TapeHeaders,
-                 name : String) : Tape::String?
+                 name : String) : Str?
     fields.each { |f| return f.value if f.name == name }
     nil
   end
@@ -6822,7 +6822,7 @@ class H2Connection
     end
   end
 
-  def self.read_u32(text : String | Tape::String, at : Int32) : Int32
+  def self.read_u32(text : String | Str, at : Int32) : Int32
     p = text.is_a?(String) ? text.to_unsafe : text
     (p[at].to_i32 << 24) | (p[at + 1].to_i32 << 16) | (p[at + 2].to_i32 << 8) | p[at + 3].to_i32
   end

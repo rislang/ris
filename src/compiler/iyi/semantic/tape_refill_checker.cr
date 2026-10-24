@@ -1,5 +1,5 @@
 # ris: a tape array made anew where an old one was, outside `initialize`,
-# is refused. `@queue = Tape::Array(Token).new` in a method a loop calls
+# is refused. `@queue = Ary(Token).new` in a method a loop calls
 # compiles and runs right, and every array it replaces stays on the tape
 # until the tape block ends: a tokenizer that did it once per token kept
 # 110 MB for a 4.5 MB page and parsed it 40% slower. The tape frees
@@ -42,12 +42,12 @@ class Iyi::TapeRefillChecker
     return unless value.is_a?(Call) && value.name == "new"
     return unless tape_array?(value.type?)
     return if reads.any? { |read| read.name == target.name && before?(read, node) }
-    node.raise "`#{target.name}` is given a new Tape::Array in `#{a_def.name}`, not in `initialize`: the one it held stays on the tape until the tape block ends, one for every call.\n\nEmpty it with `#{target.name}.clear` and fill it again, which keeps its room. When the old one is still wanted, hand it on first in this def (`list << #{target.name}`, `old = #{target.name}`, `return #{target.name}`) and the new one is allowed."
+    node.raise "`#{target.name}` is given a new Ary in `#{a_def.name}`, not in `initialize`: the one it held stays on the tape until the tape block ends, one for every call.\n\nEmpty it with `#{target.name}.clear` and fill it again, which keeps its room. When the old one is still wanted, hand it on first in this def (`list << #{target.name}`, `old = #{target.name}`, `return #{target.name}`) and the new one is allowed."
   end
 
   private def tape_array?(type : Type?) : Bool
     return false unless type
-    type.remove_typedef.to_s.starts_with?("Tape::Array(")
+    type.remove_typedef.to_s.starts_with?("Ary(")
   end
 
   private def before?(read : ASTNode, node : ASTNode) : Bool

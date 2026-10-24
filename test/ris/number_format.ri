@@ -4,24 +4,24 @@ import std/number_format
 
 kept = ""
 tape do
-  writer = Tape::String::Writer.new(1)
+  writer = Str::Builder.new(1)
   writer << "prefix:"
   1234567.format(writer)
   exit 1 unless writer.finish == "prefix:1,234,567"
-  writer = Tape::String::Writer.new(1)
+  writer = Str::Builder.new(1)
   1234.5678.format(writer, decimal_places: 2)
   exit 2 unless writer.finish == "1,234.57"
   kept = writer.finish.to_heap
-  writer = Tape::String::Writer.new(1)
+  writer = Str::Builder.new(1)
   (-9223372036854775807_i64 - 1_i64).format(writer)
   exit 8 unless writer.finish == "-9,223,372,036,854,775,808"
-  writer = Tape::String::Writer.new(1)
+  writer = Str::Builder.new(1)
   18446744073709551615_u64.format(writer)
   exit 9 unless writer.finish == "18,446,744,073,709,551,615"
-  writer = Tape::String::Writer.new(1)
+  writer = Str::Builder.new(1)
   1234567.humanize(writer)
   exit 3 unless writer.finish == "1.23M"
-  writer = Tape::String::Writer.new(1)
+  writer = Str::Builder.new(1)
   1536.humanize_bytes(writer)
   exit 4 unless writer.finish == "1.5KiB"
 end

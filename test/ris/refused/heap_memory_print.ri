@@ -4,5 +4,5 @@ import std/io::{Memory}
 
 tape do
   memory = Memory.new
-  memory.print(Tape::String.new("abc"))
+  memory.print(Str.new("abc"))
 end

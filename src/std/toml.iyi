@@ -254,9 +254,9 @@ pub struct TOMLDateTime
     result
   end
 
-  protected def self.padded(value : Int32, width : Int32) : Tape::String
-    digits = Tape::String.build { |writer| writer << value }
-    Tape::String.build do |writer|
+  protected def self.padded(value : Int32, width : Int32) : Str
+    digits = Str.build { |writer| writer << value }
+    Str.build do |writer|
       (width - digits.bytesize).times { writer << '0' }
       writer << digits
     end
@@ -314,14 +314,14 @@ pub struct TOMLDateTime
   def to_s : String
     result = ""
     tape do
-      writer = Tape::String::Writer.new(32)
+      writer = Str::Builder.new(32)
       write(writer)
       result = writer.finish.to_heap
     end
     result
   end
 
-  def write(text : Tape::String::Writer) : Nil
+  def write(text : Str::Builder) : Nil
     if @kind != LOCAL_TIME
       text << TOMLDateTime.padded(@year, 4) << "-" <<
         TOMLDateTime.padded(@month, 2) << "-" << TOMLDateTime.padded(@day, 2)
@@ -683,33 +683,33 @@ end
 
 @[OnTape]
 struct TapePair(T)
-  getter key : Tape::String
+  getter key : Str
   getter value : T
 
-  def initialize(@key : Tape::String, @value : T)
+  def initialize(@key : Str, @value : T)
   end
 end
 
 @[OnTape]
 pub struct TapeMap(T)
-  @pairs : Tape::Array(TapePair(T))
+  @pairs : Ary(TapePair(T))
 
   def initialize
-    @pairs = Tape::Array(TapePair(T)).new
+    @pairs = Ary(TapePair(T)).new
   end
 
-  def []?(key : Tape::String | String) : T?
+  def []?(key : Str | String) : T?
     @pairs.each { |pair| return pair.value if pair.key == key }
     nil
   end
 
-  def [](key : Tape::String | String) : T
+  def [](key : Str | String) : T
     found = self[key]?
     raise "missing TOML key" if found.nil?
     found
   end
 
-  def []=(key : Tape::String, value : T) : T
+  def []=(key : Str, value : T) : T
     at = 0
     while at < @pairs.size
       if @pairs[at].key == key
@@ -730,7 +730,7 @@ pub struct TapeMap(T)
     @pairs.empty?
   end
 
-  def each(& : Tape::String, T -> Nil) : Nil
+  def each(& : Str, T -> Nil) : Nil
     @pairs.each { |pair| yield pair.key, pair.value }
   end
 end
@@ -745,8 +745,8 @@ pub struct TapeAny
   KIND_ARRAY    = 5
   KIND_TABLE    = 6
 
-  alias Type = Bool | Int64 | Float64 | Tape::String | TOMLDateTime |
-               Tape::Array(TapeAny) | TapeMap(TapeAny)
+  alias Type = Bool | Int64 | Float64 | Str | TOMLDateTime |
+               Ary(TapeAny) | TapeMap(TapeAny)
 
   getter raw : Type
 
@@ -762,11 +762,11 @@ pub struct TapeAny
   # gives.
   def kind : Int32
     r = @raw
-    if r.is_a?(Tape::Array(TapeAny))
+    if r.is_a?(Ary(TapeAny))
       KIND_ARRAY
     elsif r.is_a?(TapeMap(TapeAny))
       KIND_TABLE
-    elsif r.is_a?(Tape::String)
+    elsif r.is_a?(Str)
       KIND_STRING
     elsif r.is_a?(TOMLDateTime)
       KIND_DATETIME
@@ -832,13 +832,13 @@ pub struct TapeAny
     nil
   end
 
-  def as_s : Tape::String
+  def as_s : Str
     raise "expected a string, not #{kind_name}" unless kind == KIND_STRING
-    @raw.as(Tape::String)
+    @raw.as(Str)
   end
 
-  def as_s? : Tape::String?
-    kind == KIND_STRING ? @raw.as(Tape::String) : nil
+  def as_s? : Str?
+    kind == KIND_STRING ? @raw.as(Str) : nil
   end
 
   def as_datetime : TOMLDateTime
@@ -852,13 +852,13 @@ pub struct TapeAny
     kind == KIND_DATETIME ? @raw.as(TOMLDateTime) : nil
   end
 
-  def as_a : Tape::Array(TapeAny)
+  def as_a : Ary(TapeAny)
     raise "expected an array, not #{kind_name}" unless kind == KIND_ARRAY
-    @raw.as(Tape::Array(TapeAny))
+    @raw.as(Ary(TapeAny))
   end
 
-  def as_a? : Tape::Array(TapeAny)?
-    kind == KIND_ARRAY ? @raw.as(Tape::Array(TapeAny)) : nil
+  def as_a? : Ary(TapeAny)?
+    kind == KIND_ARRAY ? @raw.as(Ary(TapeAny)) : nil
   end
 
   def as_h : TapeMap(TapeAny)
@@ -873,11 +873,11 @@ pub struct TapeAny
   # Items of an array, keys of a table, characters of a string.
   def size : Int32
     k = kind
-    return @raw.as(Tape::Array(TapeAny)).size if k == KIND_ARRAY
+    return @raw.as(Ary(TapeAny)).size if k == KIND_ARRAY
     return @raw.as(TapeMap(TapeAny)).size if k == KIND_TABLE
     if k == KIND_STRING
       count = 0
-      @raw.as(Tape::String).each_byte do |byte|
+      @raw.as(Str).each_byte do |byte|
         count += 1 unless (byte & 0xC0_u8) == 0x80_u8
       end
       return count
@@ -885,14 +885,14 @@ pub struct TapeAny
     raise "#{kind_name} has no size"
   end
 
-  def [](key : String | Tape::String) : TapeAny
+  def [](key : String | Str) : TapeAny
     h = as_h
     found = h[key]?
     raise "no such key #{key.inspect}" if found.nil?
     found
   end
 
-  def []?(key : String | Tape::String) : TapeAny?
+  def []?(key : String | Str) : TapeAny?
     h = as_h?
     return nil if h.nil?
     h[key]?
@@ -909,26 +909,26 @@ pub struct TapeAny
     index >= 0 && index < a.size ? a[index] : nil
   end
 
-  def dig?(key : String | Tape::String | Int32) : TapeAny?
+  def dig?(key : String | Str | Int32) : TapeAny?
     step?(key)
   end
 
-  def dig?(key : String | Tape::String | Int32, *rest : String |
+  def dig?(key : String | Str | Int32, *rest : String |
                                                         Int32) : TapeAny?
     v = step?(key)
     return nil if v.nil?
     v.dig?(*rest)
   end
 
-  def dig(key : String | Tape::String | Int32) : TapeAny
+  def dig(key : String | Str | Int32) : TapeAny
     step(key)
   end
 
-  def dig(key : String | Tape::String | Int32, *rest : String | Int32) : TapeAny
+  def dig(key : String | Str | Int32, *rest : String | Int32) : TapeAny
     step(key).dig(*rest)
   end
 
-  private def step?(key : String | Tape::String | Int32) : TapeAny?
+  private def step?(key : String | Str | Int32) : TapeAny?
     if key.is_a?(String)
       self[key]?
     else
@@ -936,7 +936,7 @@ pub struct TapeAny
     end
   end
 
-  private def step(key : String | Tape::String | Int32) : TapeAny
+  private def step(key : String | Str | Int32) : TapeAny
     if key.is_a?(String)
       self[key]
     else
@@ -946,9 +946,9 @@ pub struct TapeAny
 
   def to_heap : Any
     raw = @raw
-    if raw.is_a?(Tape::String)
+    if raw.is_a?(Str)
       Any.new(raw.to_heap)
-    elsif raw.is_a?(Tape::Array(TapeAny))
+    elsif raw.is_a?(Ary(TapeAny))
       items = [] of Any
       raw.each { |item| items << item.to_heap }
       Any.new(items)
@@ -971,10 +971,10 @@ struct TapeSlot
   getter kind : Int32
   getter value : TapeAny
   getter table : TapeTable?
-  getter tables : Tape::Array(TapeTable)?
+  getter tables : Ary(TapeTable)?
 
   def initialize(@kind : Int32, @value : TapeAny, @table : TapeTable?,
-                 @tables : Tape::Array(TapeTable)?)
+                 @tables : Ary(TapeTable)?)
   end
 
   def self.value(value : TapeAny) : TapeSlot
@@ -987,7 +987,7 @@ struct TapeSlot
 
   def self.tables(first : TapeTable) : TapeSlot
     new(TABLES, TapeAny.new(false), nil,
-      Tape::Array(TapeTable).new(1) { first })
+      Ary(TapeTable).new(1) { first })
   end
 
   def to_any : TapeAny
@@ -1070,9 +1070,9 @@ end
 struct TapeReader
   # The document and the offset in it, on the tape so that a copy of the
   # reader moves the same offset.
-  @scan : Pointer(Tape::Scanner)
+  @scan : Pointer(Str::Scanner)
 
-  def bytes : Tape::String
+  def bytes : Str
     @scan.value.string
   end
 
@@ -1111,9 +1111,9 @@ struct TapeReader
     @current.value
   end
 
-  @path : Pointer(Tape::Array(Tape::String))
+  @path : Pointer(Ary(Str))
 
-  def path : Tape::Array(Tape::String)
+  def path : Ary(Str)
     @path.value
   end
 
@@ -1130,17 +1130,17 @@ struct TapeReader
 
   # The current header's key, for the sentences.
 
-  def initialize(text : Tape::String)
-    @scan = Pointer(Tape::Scanner).new(
-      IyiRegion.tape_bytes(sizeof(Tape::Scanner).to_u64))
+  def initialize(text : Str)
+    @scan = Pointer(Str::Scanner).new(
+      IyiRegion.tape_bytes(sizeof(Str::Scanner).to_u64))
     @current = Pointer(TapeTable).new(
       IyiRegion.tape_bytes(sizeof(TapeTable).to_u64))
-    @path = Pointer(Tape::Array(Tape::String)).new(
-      IyiRegion.tape_bytes(sizeof(Tape::Array(Tape::String)).to_u64))
-    @scan.value = Tape::Scanner.new(text)
+    @path = Pointer(Ary(Str)).new(
+      IyiRegion.tape_bytes(sizeof(Ary(Str)).to_u64))
+    @scan.value = Str::Scanner.new(text)
     @root = TapeTable.new(0, true, false)
     @current.value = @root
-    @path.value = Tape::Array(Tape::String).new
+    @path.value = Ary(Str).new
   end
 
   def document : TapeAny | TOMLError
@@ -1340,8 +1340,8 @@ struct TapeReader
   end
 
   # A key: its parts, and where each starts, into the two arrays.
-  private def key(parts : Tape::Array(Tape::String),
-                  starts : Tape::Array(Int32)) : Nil | TOMLError
+  private def key(parts : Ary(Str),
+                  starts : Ary(Int32)) : Nil | TOMLError
     input = bytes
     input_size = size
     while true
@@ -1355,7 +1355,7 @@ struct TapeReader
     nil
   end
 
-  private def simple_key : Tape::String | TOMLError
+  private def simple_key : Str | TOMLError
     input = bytes
     input_size = size
     return fail("a key expected, and the document ended", pos) if pos >= input_size
@@ -1381,9 +1381,9 @@ struct TapeReader
   end
 
   # The dotted name of the first `count` parts of `path` + `parts`.
-  private def name(path : Tape::Array(Tape::String),
-                   parts : Tape::Array(Tape::String), count : Int32) : Tape::String
-    text = Tape::String::Writer.new(64)
+  private def name(path : Ary(Str),
+                   parts : Ary(Str), count : Int32) : Str
+    text = Str::Builder.new(64)
     first = true
     path.each do |part|
       text << "." unless first
@@ -1401,7 +1401,7 @@ struct TapeReader
   end
 
   # Why the value in `slot` cannot be gone into as a table.
-  private def closed(slot : TapeSlot, what : Tape::String) : String
+  private def closed(slot : TapeSlot, what : Str) : String
     value = slot.value
     if value.kind == TapeAny::KIND_TABLE
       return "the inline table #{what.to_heap} is closed: no header or " \
@@ -1418,11 +1418,11 @@ struct TapeReader
 
   # `key = value`, into `table`, whose header's key is `path`.
   private def pair(table : TapeTable,
-                   path : Tape::Array(Tape::String)) : Nil | TOMLError
+                   path : Ary(Str)) : Nil | TOMLError
     input = bytes
     input_size = size
-    parts = Tape::Array(Tape::String).new
-    starts = Tape::Array(Int32).new
+    parts = Ary(Str).new
+    starts = Ary(Int32).new
     key(parts, starts)!
     unless pos < input_size && input[pos] == 61_u8
       return no_equals(path, parts)
@@ -1435,8 +1435,8 @@ struct TapeReader
 
   # Puts `item` at the dotted key `parts` (which start at `starts`) of
   # `table`, opening the tables on the way as the rules allow.
-  private def place(table : TapeTable, path : Tape::Array(Tape::String),
-                    parts : Tape::Array(Tape::String), starts : Tape::Array(Int32),
+  private def place(table : TapeTable, path : Ary(Str),
+                    parts : Ary(Str), starts : Ary(Int32),
                     item : TapeAny) : Nil | TOMLError
     t = table
     i = 0
@@ -1485,8 +1485,8 @@ struct TapeReader
     start = pos
     array = pos + 1 < input_size && input[pos + 1] == 91_u8
     self.pos = pos + (array ? 2 : 1)
-    parts = Tape::Array(Tape::String).new
-    starts = Tape::Array(Int32).new
+    parts = Ary(Str).new
+    starts = Ary(Int32).new
     key(parts, starts)!
     closer = array ? "]]" : "]"
     unless pos < input_size && input[pos] == 93_u8 && (!array ||
@@ -1494,7 +1494,7 @@ struct TapeReader
       return fail("#{found(pos)} where the header's #{closer} should be", pos)
     end
     self.pos = pos + closer.bytesize
-    empty = Tape::Array(Tape::String).new
+    empty = Ary(Str).new
     if parts.size > DEPTH_LIMIT
       return fail("a header #{parts.size} keys deep, past the " \
                   "#{DEPTH_LIMIT} levels this reader nests", start)
@@ -1596,8 +1596,8 @@ struct TapeReader
          "nests", pos)
   end
 
-  private def no_equals(path : Tape::Array(Tape::String),
-                        parts : Tape::Array(Tape::String)) : TOMLError
+  private def no_equals(path : Ary(Str),
+                        parts : Ary(Str)) : TOMLError
     fail("#{found(pos)} after the key " \
          "#{name(path, parts, parts.size).to_heap}, " \
          "where '=' should be", pos)
@@ -1879,7 +1879,7 @@ struct TapeReader
     return fail("#{token.to_heap} is not a number", start) unless j == stop
     self.pos = stop
     if float
-      text = Tape::String::Writer.new(64)
+      text = Str::Builder.new(64)
       k = start
       k = k + 1 if input[k] == 43_u8
       while k < stop
@@ -1917,7 +1917,7 @@ struct TapeReader
     input_size = size
     start = pos
     self.pos = pos + 1
-    items = Tape::Array(TapeAny).new
+    items = Ary(TapeAny).new
     while true
       skip_space!
       return fail("an array that does not close", start) if pos >= input_size
@@ -1952,7 +1952,7 @@ struct TapeReader
     start = pos
     self.pos = pos + 1
     table = TapeTable.new(depth, false, false)
-    empty = Tape::Array(Tape::String).new
+    empty = Ary(Str).new
     skip_blanks
     if pos < input_size && input[pos] == 125_u8
       self.pos = pos + 1
@@ -2009,7 +2009,7 @@ struct TapeReader
     value
   end
 
-  private def write_codepoint(text : Tape::String::Writer, point : Int32) : Nil
+  private def write_codepoint(text : Str::Builder, point : Int32) : Nil
     if point < 0x80
       text.push(point.to_u8)
     elsif point < 0x800
@@ -2028,7 +2028,7 @@ struct TapeReader
   end
 
   # The escape at `pos` (its backslash), written to `text`.
-  private def escape(text : Tape::String::Writer) : Nil | TOMLError
+  private def escape(text : Str::Builder) : Nil | TOMLError
     input = bytes
     input_size = size
     return fail("a string that does not close", pos) if pos + 1 >= input_size
@@ -2075,12 +2075,12 @@ struct TapeReader
   end
 
   # `"`...`"`, escapes read.
-  private def basic_string : Tape::String | TOMLError
+  private def basic_string : Str | TOMLError
     input = bytes
     input_size = size
     start = pos
     self.pos = pos + 1
-    text = nil.as(Tape::String::Writer?)
+    text = nil.as(Str::Builder?)
     run = pos
     while true
       return fail("a string that does not close", start) if pos >= input_size
@@ -2093,7 +2093,7 @@ struct TapeReader
         end
         return input[start + 1, pos - start - 2]
       elsif b == 92_u8
-        writer = text || Tape::String::Writer.new(64)
+        writer = text || Str::Builder.new(64)
         writer << input[run, pos - run]
         escape(writer)!
         text = writer
@@ -2109,7 +2109,7 @@ struct TapeReader
   end
 
   # `'`...`'`, as written.
-  private def literal_string : Tape::String | TOMLError
+  private def literal_string : Str | TOMLError
     input = bytes
     input_size = size
     start = pos
@@ -2148,13 +2148,13 @@ struct TapeReader
   end
 
   # `"""`...`"""`.
-  private def multiline_basic : Tape::String | TOMLError
+  private def multiline_basic : Str | TOMLError
     input = bytes
     input_size = size
     start = pos
     self.pos = pos + 3
     skip_first_break
-    text = Tape::String::Writer.new(64)
+    text = Str::Builder.new(64)
     while true
       if pos >= input_size
         return fail("a multi-line string that does not close", start)
@@ -2230,13 +2230,13 @@ struct TapeReader
   end
 
   # `'''`...`'''`.
-  private def multiline_literal : Tape::String | TOMLError
+  private def multiline_literal : Str | TOMLError
     input = bytes
     input_size = size
     start = pos
     self.pos = pos + 3
     skip_first_break
-    text = Tape::String::Writer.new(64)
+    text = Str::Builder.new(64)
     while true
       if pos >= input_size
         return fail("a multi-line string that does not close", start)
@@ -2301,7 +2301,7 @@ class Writer
   def inline_text(value : Any) : String
     result = ""
     tape do
-      writer = Tape::String::Writer.new(64)
+      writer = Str::Builder.new(64)
       TapeWriter.new(writer).inline(value)
       result = writer.finish.to_heap
     end
@@ -2311,7 +2311,7 @@ class Writer
   def self.key_text(key : String) : String
     result = ""
     tape do
-      writer = Tape::String::Writer.new(32)
+      writer = Str::Builder.new(32)
       TapeWriter.new(writer).key(key)
       result = writer.finish.to_heap
     end
@@ -2321,7 +2321,7 @@ class Writer
   def self.quoted(text : String) : String
     result = ""
     tape do
-      writer = Tape::String::Writer.new(32)
+      writer = Str::Builder.new(32)
       TapeWriter.quoted(text.as_tape, writer)
       result = writer.finish.to_heap
     end
@@ -2331,7 +2331,7 @@ class Writer
   def self.float_text(value : Float64) : String
     result = ""
     tape do
-      writer = Tape::String::Writer.new(32)
+      writer = Str::Builder.new(32)
       TapeWriter.float_text(value, writer)
       result = writer.finish.to_heap
     end
@@ -2341,10 +2341,10 @@ end
 
 @[OnTape]
 struct TapeWriter
-  @out : Tape::String::Writer
+  @out : Str::Builder
   @start : Int32
 
-  def initialize(@out : Tape::String::Writer)
+  def initialize(@out : Str::Builder)
     @start = @out.length
   end
 
@@ -2352,11 +2352,11 @@ struct TapeWriter
     unless value.kind == Any::KIND_TABLE
       raise "TOML.dump: a document is a table, not #{value.kind_name}"
     end
-    section(value.as_h, Tape::Array(Tape::String).new)
+    section(value.as_h, Ary(Str).new)
   end
 
   # A key bare where the bare set allows, else a basic string.
-  def key(key : String | Tape::String) : Nil
+  def key(key : String | Str) : Nil
     return TapeWriter.quoted(view(key), @out) if key.empty?
     bytes = key.is_a?(String) ? key.to_unsafe : key
     i = 0
@@ -2374,8 +2374,8 @@ struct TapeWriter
   # A basic string: `"` and `\` escaped, every control character too
   # (the five with a short escape by it, the rest as `\u00XX`), the rest
   # as it is.
-  def self.quoted(text : Tape::String,
-                  output : Tape::String::Writer) : Nil
+  def self.quoted(text : Str,
+                  output : Str::Builder) : Nil
     output.push(34_u8)
     bytes = text
     run = 0
@@ -2417,7 +2417,7 @@ struct TapeWriter
   # round-tripping text (`1.5`, `1.0e+20`, `5.0e-324`, always a point or an
   # exponent), and TOML's spellings of the three that are not numbers.
   def self.float_text(value : Float64,
-                      writer : Tape::String::Writer) : Nil
+                      writer : Str::Builder) : Nil
     if value != value
       writer << "nan"
     elsif value > 1.7976931348623157e308
@@ -2441,15 +2441,15 @@ struct TapeWriter
     true
   end
 
-  private def view(text : String) : Tape::String
+  private def view(text : String) : Str
     text.as_tape
   end
 
-  private def view(text : Tape::String) : Tape::String
+  private def view(text : Str) : Str
     text
   end
 
-  private def header(path : Tape::Array(Tape::String)) : Nil
+  private def header(path : Ary(Str)) : Nil
     path.each_with_index do |part, i|
       @out << '.' if i > 0
       key(part)
@@ -2459,7 +2459,7 @@ struct TapeWriter
   # A table's own pairs, then its sub-tables and arrays of tables, each
   # under its header.
   private def section(pairs : Hash(String, Any) | TapeMap(TapeAny),
-                      path : Tape::Array(Tape::String)) : Nil
+                      path : Ary(Str)) : Nil
     pairs.each do |key, value|
       next if value.kind == Any::KIND_TABLE || table_array?(value)
       self.key(key)
@@ -2623,7 +2623,7 @@ pub struct TOML
     result || raise "TOML parser returned no document"
   end
 
-  def self.parse(text : Tape::String) : TapeAny | TOMLError
+  def self.parse(text : Str) : TapeAny | TOMLError
     TapeReader.new(text).document
   end
 
@@ -2632,7 +2632,7 @@ pub struct TOML
     parsed.is_a?(TOMLError) ? nil : parsed
   end
 
-  def self.parse?(text : Tape::String) : TapeAny?
+  def self.parse?(text : Str) : TapeAny?
     parsed = parse(text)
     parsed.is_a?(TOMLError) ? nil : parsed
   end
@@ -2646,16 +2646,16 @@ pub struct TOML
     result
   end
 
-  def self.dump(value : TapeAny) : Tape::String
+  def self.dump(value : TapeAny) : Str
     dump_tape(value)
   end
 
-  def self.dump_tape(value : Any | TapeAny) : Tape::String
-    Tape::String.build { |writer| dump(value, writer) }
+  def self.dump_tape(value : Any | TapeAny) : Str
+    Str.build { |writer| dump(value, writer) }
   end
 
   def self.dump(value : Any | TapeAny,
-                writer : Tape::String::Writer) : Nil
+                writer : Str::Builder) : Nil
     TapeWriter.new(writer).document(value)
   end
 
@@ -2811,7 +2811,7 @@ pub struct TOML
 end
 
 module TapeNumbers
-  def self.parse(text : Tape::String) : Float64
+  def self.parse(text : Str) : Float64
     bytes = text
     size = text.bytesize
     raise "not a number: #{text.inspect}" if size == 0
@@ -2891,7 +2891,7 @@ module TapeNumbers
   # The digits read into a bignum - all of them to 800, which is past the
   # 767 that can decide a double, any beyond only telling whether the rest
   # is zero - and the quotient taken to 54 bits with a sticky remainder.
-  def self.parse_exact(text : Tape::String) : Float64
+  def self.parse_exact(text : Str) : Float64
     bytes = text
     size = text.bytesize
     at = 0

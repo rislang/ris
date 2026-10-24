@@ -1,11 +1,11 @@
 # `to_heap` copies tape values off the tape by name, with no
-# @[TapeToHeap] def: a Tape::String, a Tape::Array of numbers, of strings
-# or of an @[OnTape] struct with its own `to_heap`, and a Tape::IndexView.
+# @[TapeToHeap] def: a Str, an Ary of numbers, of strings
+# or of an @[OnTape] struct with its own `to_heap`, and an Ary::View.
 record HeapHit, path : String, ms : Int32
 
 @[OnTape]
 struct Hit
-  getter path : Tape::String
+  getter path : Str
   getter ms : Int32
 
   def initialize(@path, @ms)
@@ -24,11 +24,11 @@ hits = [] of HeapHit
 tape do
   line = "GET /users".as_tape
   text = line.to_heap
-  names = Tape::Array(Tape::String){line[0, 3], line[4, 6]}.to_heap
-  ints = Tape::Array(Int32){3, 1, 2}
+  names = Ary(Str){line[0, 3], line[4, 6]}.to_heap
+  ints = Ary(Int32){3, 1, 2}
   nums = ints.to_heap
-  picked = ints.values_at(Tape::Array(Int32){2, 0}).to_heap
-  hits = Tape::Array(Hit){Hit.new(line[4, 6], 12)}.to_heap
+  picked = ints.values_at(Ary(Int32){2, 0}).to_heap
+  hits = Ary(Hit){Hit.new(line[4, 6], 12)}.to_heap
 end
 puts text
 puts names.join(",")

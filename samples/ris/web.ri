@@ -20,7 +20,7 @@ USERS = {
 }
 
 # The user id in "/users/1/status", or nil when the path is another one.
-def status_id(path : Tape::String) : Int32?
+def status_id(path : Str) : Int32?
   parts = path.split('/')
   return nil unless parts.size == 4 && parts[1] == "users"
   return nil unless parts[3] == "status"

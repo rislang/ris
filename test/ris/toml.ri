@@ -8,11 +8,11 @@ tape do
   exit 1 if parsed.is_a?(TOMLError)
   exit 2 unless parsed["title"].as_s == "café"
   exit 3 unless parsed["db"]["ports"][1].as_i == 443_i64
-  writer = Tape::String::Writer.new(1)
+  writer = Str::Builder.new(1)
   writer << "prefix:"
   TOML.dump(parsed, writer)
   encoded = TOML.dump(parsed)
-  expected = Tape::String.build { |w| w << "prefix:" << encoded }
+  expected = Str.build { |w| w << "prefix:" << encoded }
   exit 6 unless writer.finish == expected
   again = TOML.parse(encoded)
   exit 7 if again.is_a?(TOMLError)

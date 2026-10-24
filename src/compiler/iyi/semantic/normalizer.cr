@@ -45,7 +45,7 @@ module Iyi
     @bound_params = [] of String
 
     # ris: the fields the class being normalized declares
-    # `Tape::Scanner`, whose loops TapeCursorLowering runs on locals.
+    # `Str::Scanner`, whose loops TapeCursorLowering runs on locals.
     @scanners = [] of String
 
     # A macro's expansion is parsed from a `VirtualFile`, and it is the
@@ -748,15 +748,27 @@ module Iyi
       @scanners = [] of String
       body = node.body
       (body.is_a?(Expressions) ? body.expressions : [body]).each do |exp|
-        next unless exp.is_a?(TypeDeclaration) && (var = exp.var).is_a?(InstanceVar)
-        type = exp.declared_type
-        if type.is_a?(Path) && type.names == ["Tape", "Scanner"]
-          @scanners << var.name.lchop('@')
+        if exp.is_a?(TypeDeclaration) && (var = exp.var).is_a?(InstanceVar)
+          @scanners << var.name.lchop('@') if scanner_path?(exp.declared_type)
+        elsif exp.is_a?(Def) && exp.name == "initialize"
+          # A field with no declaration, typed by `@sc = Str::Scanner.new`.
+          init = exp.body
+          (init.is_a?(Expressions) ? init.expressions : [init]).each do |line|
+            next unless line.is_a?(Assign) && (target = line.target).is_a?(InstanceVar)
+            value = line.value
+            next unless value.is_a?(Call) && value.name == "new" && scanner_path?(value.obj)
+            name = target.name.lchop('@')
+            @scanners << name unless @scanners.includes?(name)
+          end
         end
       end
       node = super
       @scanners = outer
       node
+    end
+
+    private def scanner_path?(type) : Bool
+      type.is_a?(Path) && type.names == ["Str", "Scanner"]
     end
 
     def transform(node : ModuleDef)

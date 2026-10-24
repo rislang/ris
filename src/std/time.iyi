@@ -2017,7 +2017,7 @@ pub struct Time
               flag?(:darwin) || flag?(:win32)) %}
       text = ""
       tape do
-        w = Tape::String::Writer.new(32)
+        w = Str::Builder.new(32)
         to_rfc3339(fraction_digits, w)
         text = w.finish.to_heap
       end
@@ -2053,7 +2053,7 @@ pub struct Time
 
   # The same written into the caller's *writer* on the tape: no string
   # per field, nothing on the heap.
-  def to_rfc3339(fraction_digits : Int32, writer : Tape::String::Writer) : Nil
+  def to_rfc3339(fraction_digits : Int32, writer : Str::Builder) : Nil
     if @offset != 0
       if @offset % 60 == 0
         writer << Format::RFC_3339.format(self, fraction_digits, @offset)
@@ -2091,7 +2091,7 @@ pub struct Time
 
   # *value* in decimal, zero-padded to *width* digits, as `pad4` and its
   # kin pad it: a value of more digits is written whole.
-  def self.put_digits(writer : Tape::String::Writer, value : Int64, width : Int32) : Nil
+  def self.put_digits(writer : Str::Builder, value : Int64, width : Int32) : Nil
     if value < 0
       writer.push(45_u8)
       value = -value

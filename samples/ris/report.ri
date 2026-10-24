@@ -16,8 +16,8 @@ module samples/report
 # The method and path are views into the line, not copies.
 @[OnTape]
 struct Hit
-  getter method : Tape::String
-  getter path : Tape::String
+  getter method : Str
+  getter path : Str
   getter status : Int32
   getter ms : Int32
 
@@ -26,7 +26,7 @@ struct Hit
 end
 
 # The line cut at its spaces into a Hit; every part is a view.
-def parse(line : Tape::String) : Hit
+def parse(line : Str) : Hit
   parts = line.split(' ')
   Hit.new(parts[0], parts[1], parts[2].to_i, parts[3].to_i)
 end
@@ -41,14 +41,14 @@ slowest = [] of String # on the heap: it lives past every day
 
 DAYS.each_with_index do |log, day|
   tape do
-    hits = Tape::Array(Hit).new
+    hits = Ary(Hit).new
     log.as_tape.each_line { |line| hits << parse(line) }
 
     errors = hits.count { |h| h.status >= 500 }
     slow = hits.select { |h| h.ms > 500 }
     top = slow.sorted_by { |h| -h.ms }
 
-    report = Tape::String::Writer.new(256)
+    report = Str::Builder.new(256)
     report << "day " << day + 1 << ": " << hits.size << " hits, "
     report << errors << " errors, slow:"
     top.each { |h| report << " " << h.path << " (" << h.ms << " ms)" }

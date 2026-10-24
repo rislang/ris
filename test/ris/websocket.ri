@@ -5,14 +5,14 @@ import std/websocket::{WebSocket}
 kept = ""
 tape do
   text = "hello".as_tape
-  w = Tape::String::Writer.new(1)
+  w = Str::Builder.new(1)
   w << "prefix:"
   WebSocket.frame(text, w)
   exit 1 unless w.finish == "prefix:\x81\x05hello"
   frame = WebSocket.frame(text, key: 0x04030201_u32)
   exit 2 unless frame == "\x81\x85\x01\x02\x03\x04igohn"
   kept = frame.to_heap
-  large = Tape::String.build { |o| 65536.times { o << "a" } }
+  large = Str.build { |o| 65536.times { o << "a" } }
   encoded = WebSocket.frame(large)
   exit 3 unless encoded.bytesize == 65546
   exit 4 unless encoded[1] == 127_u8 && encoded[7] == 1_u8

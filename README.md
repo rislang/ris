@@ -34,7 +34,7 @@ tape do # one tape for this request
   bytes = "GET /hello HTTP/1.1\r\nHost: localhost\r\n\r\n".as_tape
   req = Server.parse_head(bytes) # its fields are views into the bytes
   if req.is_a?(ParsedHead)
-    body = Tape::String.build do |writer| # JSON written on the tape
+    body = Str.build do |writer| # JSON written on the tape
       writer.json { |json| json.object { json.field "path", req.target } }
     end
     puts body                             # => {"path":"/hello"}

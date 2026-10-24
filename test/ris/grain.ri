@@ -12,7 +12,7 @@ tape do
   # Many values, not one growing one: a growing value takes a region of
   # its own (TAPE_DESIGN.md), and these fill the tape past its mapping.
   chunk = "a" * (1024 * 1024)
-  pieces = Tape::Array(Tape::String).new(71) { |_| Tape::String.new(chunk) }
+  pieces = Ary(Str).new(71) { |_| Str.new(chunk) }
   grown = IyiRegion.tape
   ok &&= grown != first && whole(grown) && pieces.size == 71
   local_tape { ok &&= IyiRegion.tape != grown && whole(IyiRegion.tape) }

@@ -228,9 +228,9 @@ pub struct DerValue
   # `children` on the caller's tape: a parse's lists of values, which it
   # reads and drops, go with the tape rather than to the heap. The values
   # still view the same bytes.
-  def tape_children : Tape::Array(DerValue) | Asn1Error
+  def tape_children : Ary(DerValue) | Asn1Error
     return Asn1Error.new("#{describe} is primitive and holds no values", @offset) unless @constructed
-    found = Tape::Array(DerValue).new(8)
+    found = Ary(DerValue).new(8)
     at = content_offset
     stop = end_offset
     while at < stop
@@ -242,7 +242,7 @@ pub struct DerValue
   end
 
   # `sequence` on the caller's tape (`tape_children`).
-  def tape_sequence : Tape::Array(DerValue) | Asn1Error
+  def tape_sequence : Ary(DerValue) | Asn1Error
     expect_constructed(DerTag::SEQUENCE, "a SEQUENCE")!
     tape_children
   end
