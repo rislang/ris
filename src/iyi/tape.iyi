@@ -52,6 +52,14 @@ def local_tape(&) : Nil
 end
 
 module Tape
+  # An index out of range: raised out of line, so the `[]` inlined at
+  # every read keeps only its compare and branch, not the building of
+  # the message, and stays cheap for LLVM's inliner where it lands.
+  @[NoInline]
+  def self.out_of_range(index : Int32, count : Int32, what : ::String) : NoReturn
+    raise "index #{index} out of range for #{count} #{what}"
+  end
+
   CAPACITY = 67108864_u64
 
   # Bytes on the tape. Not a `String`: a `String` may be kept anywhere, and
@@ -103,7 +111,7 @@ module Tape
     def [](index : Int32) : UInt8
       asked = index
       index = index + @bytesize if index < 0
-      raise "index #{asked} out of range for #{@bytesize} bytes" if index < 0 || index >= @bytesize
+      Tape.out_of_range(asked, @bytesize, "bytes") if index < 0 || index >= @bytesize
       @ptr[index]
     end
 
@@ -348,7 +356,7 @@ module Tape
     # is fixed.
     @[AlwaysInline]
     def __loop_fetch(index : Int32) : UInt8
-      raise "index #{index} out of range for #{@bytesize} bytes" if index < 0
+      Tape.out_of_range(index, @bytesize, "bytes") if index < 0
       @ptr[index]
     end
 
@@ -1057,7 +1065,7 @@ module Tape
       asked = index
       count = size
       index = index + count if index < 0
-      raise "index #{asked} out of range for #{count} elements" if index < 0 || index >= count
+      Tape.out_of_range(asked, count, "elements") if index < 0 || index >= count
       Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value
     end
 
@@ -1067,7 +1075,7 @@ module Tape
       asked = index
       count = size
       index = index + count if index < 0
-      raise "index #{asked} out of range for #{count} elements" if index < 0 || index >= count
+      Tape.out_of_range(asked, count, "elements") if index < 0 || index >= count
       Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value = value
     end
 
@@ -1075,13 +1083,13 @@ module Tape
     # size (TapeCheckFreeLowering): only a negative one is refused.
     @[AlwaysInline]
     def __loop_fetch(index : Int32) : T
-      raise "index #{index} out of range for #{size} elements" if index < 0
+      Tape.out_of_range(index, size, "elements") if index < 0
       unsafe_at(index)
     end
 
     @[AlwaysInline]
     def __loop_store(index : Int32, value : T) : T
-      raise "index #{index} out of range for #{size} elements" if index < 0
+      Tape.out_of_range(index, size, "elements") if index < 0
       Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value = value
     end
 
@@ -1098,7 +1106,7 @@ module Tape
     # A link to the element at *index*, stored in an `I`: `UInt8`, `UInt16`
     # or `UInt32` (the default) bytes rather than a pointer's eight.
     def link(index : Int32, width : I.class = UInt32) : Tape::Link(T, I) forall I
-      raise "index #{index} out of range for #{size} elements" if index < 0 || index >= size
+      Tape.out_of_range(index, size, "elements") if index < 0 || index >= size
       Tape::Link(T, I).new(index)
     end
 
@@ -1470,7 +1478,7 @@ module Tape
       count = target.size
       @at = Array(Int32).new(indexes.size) do |k|
         index = indexes.__loop_fetch(k)
-        raise "index #{index} out of range for #{count} elements" if index < 0 || index >= count
+        Tape.out_of_range(index, count, "elements") if index < 0 || index >= count
         index
       end
     end
@@ -1661,7 +1669,7 @@ module Tape
 
     private def slot(index : Int32) : Pointer(Entry(T))
       count = size
-      raise "index #{index} out of range for #{count} entries" if index < 0 || index >= count
+      Tape.out_of_range(index, count, "entries") if index < 0 || index >= count
       Pointer(Entry(T)).new(@state.value &+ index.to_u64 &* sizeof(Entry(T)).to_u64)
     end
 
