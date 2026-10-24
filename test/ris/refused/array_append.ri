@@ -1,0 +1,7 @@
+module test/ris/refused/array_append
+
+# Only an array of bytes takes a tape string's bytes.
+tape do
+  a = Tape::Array(Int32).new(4)
+  a.append(Tape::String.new("abc"))
+end

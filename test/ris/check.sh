@@ -56,6 +56,7 @@ expect std/tape_pointer_codec "the pointer \`unsafe_append\` yields reaches no"
 expect writer_grow      "private method 'grow' called for Tape::String::Writer"
 expect tree_entry       "private constant Tape::Tree::Entry(T) referenced"
 expect array_grow       "private method 'grow' called for Tape::Array(T)"
+expect array_append     "append requires Tape::Array(UInt8)"
 expect heap_copy \
   "\`to_s\` of a Tape::String outside a @[TapeToHeap] def copies"
 expect heap_copy_top \
@@ -123,6 +124,9 @@ if grep -qF 'read through the bounds' <<<"$out" && grep -qF 'index 11 out of ran
 
 out=$("$RIS" run test/ris/grow.ri 2>&1)
 if [ "$out" = $'round 1: 100 MiB intact, before 499500, after 7\nround 2: 100 MiB intact, before 999000, after 14' ]; then echo "runs     grow"; else echo "FAILED   grow: $out"; status=1; fi
+
+out=$("$RIS" run test/ris/array_append.ri 2>&1)
+if [ "$out" = 'append: 104 bytes intact' ]; then echo "runs     array_append"; else echo "FAILED   array_append: $out"; status=1; fi
 
 out=$("$RIS" run test/ris/grain.ri 2>&1)
 if [ "$out" = 'PASS: tape mappings are whole 64 KiB grains' ]; then echo "runs     grain"; else echo "FAILED   grain: $out"; status=1; fi
