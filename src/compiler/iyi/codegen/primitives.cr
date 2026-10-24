@@ -35,6 +35,10 @@ class Iyi::CodeGenVisitor
               codegen_primitive_pointer_set node, target_def, call_args
             when "pointer_get"
               codegen_primitive_pointer_get node, target_def, call_args
+            when "pointer_get_unaligned"
+              codegen_primitive_pointer_get_unaligned node, target_def, call_args
+            when "pointer_set_unaligned"
+              codegen_primitive_pointer_set_unaligned node, target_def, call_args
             when "pointer_address"
               codegen_primitive_pointer_address node, target_def, call_args
             when "pointer_new"
@@ -935,6 +939,22 @@ class Iyi::CodeGenVisitor
   def codegen_primitive_pointer_get(node, target_def, call_args)
     type = context.type.remove_typedef.as(PointerInstanceType)
     to_lhs call_args[0], type.element_type
+  end
+
+  # A load or store marked `align 1`: an integer at any address, which
+  # x86_64 and aarch64 still do in one instruction, and which LLVM may not
+  # widen into an access that assumes the element's natural alignment.
+  def codegen_primitive_pointer_get_unaligned(node, target_def, call_args)
+    type = context.type.remove_typedef.as(PointerInstanceType)
+    value = load(llvm_embedded_type(type.element_type), call_args[0])
+    value.alignment = 1
+    value
+  end
+
+  def codegen_primitive_pointer_set_unaligned(node, target_def, call_args)
+    value = call_args[1]
+    store(value, call_args[0]).alignment = 1
+    llvm_nil
   end
 
   def codegen_primitive_pointer_address(node, target_def, call_args)

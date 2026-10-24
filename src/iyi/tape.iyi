@@ -110,7 +110,7 @@ module Tape
         raise "little-endian field out of range"
       end
       {% if flag?(:x86_64) || flag?(:aarch64) || flag?(:i386) %}
-        return (@ptr + at).as(Pointer(I)).value
+        return (@ptr + at).as(Pointer(I)).unaligned_value
       {% end %}
       value = uninitialized I
       target = pointerof(value).as(Pointer(UInt8))

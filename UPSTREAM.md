@@ -28,7 +28,6 @@ has it.
   batched and per-byte reductions (1.3-1.8 vs 3.7-6.1 byte sums here).
 * std/debug: the broken unwind-row proof may lose beta or alpha on
   LLVM 23; require either caller frame to be missing.
-
 * `50745b97c` Optimize a single unit from its bitcode in an isolated
   context: LLVM 23 miscompiles the module optimized in place.
 * `0d5fc458b` + `f7f7d3d9f` Warn on LLVM 21 and 22 (IndVarSimplify
@@ -55,6 +54,8 @@ has it.
   does not introduce libc `memcpy` on Darwin after the extraction.
   `Tape::String::Writer#append_float` stays in ris.
 * Both are iyi's branch `json-float-from-ris` (`c02af8fac`), not merged.
+* `Pointer#unaligned_value`(`=`): an `align 1` access; `memcpy` copies
+  words at any address on x86_64 and aarch64, its tail as one last word.
 
 ## To make in iyi first
 

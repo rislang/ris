@@ -9158,23 +9158,39 @@ require "./file"
     to = destination.address
     from = source.address
     done = 0_u64
-    if (to | from) & 7_u64 == 0_u64
+    # x86_64 and aarch64 load and store a word at any address, so there the
+    # ends need no alignment: `unaligned_value` tells LLVM as much.
+    {% if flag?(:x86_64) || flag?(:aarch64) %}
+      aligned = true
+    {% else %}
+      aligned = (to | from) & 7_u64 == 0_u64
+    {% end %}
+    if aligned
       # Four words read before any is written, then the rest one at a time.
       while done &+ 32_u64 <= count
-        a = Pointer(UInt64).new(from &+ done).value
-        b = Pointer(UInt64).new(from &+ done &+ 8_u64).value
-        c = Pointer(UInt64).new(from &+ done &+ 16_u64).value
-        d = Pointer(UInt64).new(from &+ done &+ 24_u64).value
-        Pointer(UInt64).new(to &+ done).value = a
-        Pointer(UInt64).new(to &+ done &+ 8_u64).value = b
-        Pointer(UInt64).new(to &+ done &+ 16_u64).value = c
-        Pointer(UInt64).new(to &+ done &+ 24_u64).value = d
+        a = Pointer(UInt64).new(from &+ done).unaligned_value
+        b = Pointer(UInt64).new(from &+ done &+ 8_u64).unaligned_value
+        c = Pointer(UInt64).new(from &+ done &+ 16_u64).unaligned_value
+        d = Pointer(UInt64).new(from &+ done &+ 24_u64).unaligned_value
+        Pointer(UInt64).new(to &+ done).unaligned_value = a
+        Pointer(UInt64).new(to &+ done &+ 8_u64).unaligned_value = b
+        Pointer(UInt64).new(to &+ done &+ 16_u64).unaligned_value = c
+        Pointer(UInt64).new(to &+ done &+ 24_u64).unaligned_value = d
         done = done &+ 32_u64
       end
       while done &+ 8_u64 <= count
-        Pointer(UInt64).new(to &+ done).value = Pointer(UInt64).new(from &+ done).value
+        Pointer(UInt64).new(to &+ done).unaligned_value = Pointer(UInt64).new(from &+ done).unaligned_value
         done = done &+ 8_u64
       end
+      {% if flag?(:x86_64) || flag?(:aarch64) %}
+        # The tail as one last word that ends at `count`, over bytes already
+        # copied: the two regions do not overlap, so they read the same.
+        if done < count && count >= 8_u64
+          last = count &- 8_u64
+          Pointer(UInt64).new(to &+ last).unaligned_value = Pointer(UInt64).new(from &+ last).unaligned_value
+          done = count
+        end
+      {% end %}
     end
     while done < count
       Pointer(UInt8).new(to &+ done).value = Pointer(UInt8).new(from &+ done).value

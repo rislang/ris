@@ -162,6 +162,16 @@ struct Pointer(T)
   def value=(value : T)
   end
 
+  # As `value` and `value=` for an integer at any address: LLVM is told the
+  # access has no alignment, rather than that of `T`.
+  @[Primitive(:pointer_get_unaligned)]
+  def unaligned_value : T
+  end
+
+  @[Primitive(:pointer_set_unaligned)]
+  def unaligned_value=(value : T) : Nil
+  end
+
   @[Primitive(:pointer_address)]
   def address : UInt64
   end
