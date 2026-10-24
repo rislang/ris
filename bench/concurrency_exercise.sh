@@ -555,7 +555,7 @@ fi
 # ── 4. Failure proof: the interleaving assert is reachable ────────────────
 step "failure proof: a wrong order is refused"
 sed 's/== "bababa"/== "aaabbb"/' "$REPO/bench/concurrency_exercise.iyi" > misordered.iyi
-if ! "$IYI" build misordered.iyi -o misordered > build-misordered.log 2>&1; then
+if ! "$IYI" build --allow-unsafe misordered.iyi -o misordered > build-misordered.log 2>&1; then
   echo "misordered probe failed to build:"
   tail -5 build-misordered.log
   exit 1

@@ -2923,8 +2923,10 @@ jobs:
             | tar -xz -C /opt/cmake --strip-components=1
           PATH="/opt/cmake/bin:$PATH" bash scripts/build-static-llvm.sh /tmp/llvm-static
 
+      # ris keeps bdw-gc on the compiler by default; the floor carries no
+      # libgc, so it builds the collector-free one, as iyi does.
       - name: Build the compiler on the floor
-        run: make crystal LLVM_CONFIG=/tmp/llvm-static/bin/llvm-config
+        run: make crystal gc_none=1 LLVM_CONFIG=/tmp/llvm-static/bin/llvm-config
 
       # `iyi-tarball` alone, and the missing word is the whole of it. The target
       # carries `release := 1` and make applies that to what it builds *for this
@@ -2932,7 +2934,9 @@ jobs:
       # found it up to date by file times and refused to package it. Which is
       # the guard working: an unoptimised release is what it was added to stop.
       - name: Build `iyi` and package it
-        run: make iyi-tarball LLVM_CONFIG=/tmp/llvm-static/bin/llvm-config
+        run: >-
+          make iyi-tarball gc_none=1
+          LLVM_CONFIG=/tmp/llvm-static/bin/llvm-config
 
       # What a person who downloads it does: unpack it somewhere else and run a
       # program. Nothing here may need this checkout, a IYI_PATH, or a
