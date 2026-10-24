@@ -93,10 +93,11 @@ done
 # What the pool costs each platform, by name. Its workers are the
 # runtime's own threads, so it pays what a thread pays and nothing else:
 #
-#   Linux    nothing of the pool's own: threads by raw `clone`, the stop by
-#            `tgkill`, the doorbell by `eventfd2`, all syscalls. `environ`
-#            is the one name, the C runtime's table `IYI_WORKERS` is read
-#            from through `Program.env`.
+#   Linux    nothing of the pool's own: a worker is a thread, which in ris
+#            is glibc's (`pthread_create`, bench/thread_exercise.sh), the
+#            stop by `tgkill`, the doorbell by `eventfd2`, both syscalls.
+#            `environ` is the one name, the C runtime's table
+#            `IYI_WORKERS` is read from through `Program.env`.
 #   darwin   the runtime's list (bench/thread_exercise.sh spells it out),
 #            the thread floor's names a started thread costs -
 #            `pthread_create`, `pthread_kill` and `sigaction` for the
@@ -151,12 +152,13 @@ case "$(uname -s)" in
       added="$("$NM" -u "$bin" |
         sed -e 's/^ *[wU] *//' -e 's/@.*$//' |
         grep -v -E '^(_ITM_deregisterTMCloneTable|_ITM_registerTMCloneTable|__cxa_finalize|__gmon_start__|__libc_start_main|environ|__environ)$' |
+        grep -v -E '^(pthread_create|pthread_join|pthread_attr_init|pthread_attr_setstack|pthread_attr_destroy)$' |
         grep -cv '^\s*$')"
       if [ "$added" -ne 0 ]; then
         echo "the pool put $added undefined symbols on $bin's link line:"; "$NM" -u "$bin"; exit 1
       fi
     done
-    echo "  the C runtime template's names and environ, which IYI_WORKERS is read through, plain and release: the pool itself is raw syscalls"
+    echo "  the C runtime template's names, glibc's thread and environ, which IYI_WORKERS is read through, plain and release: the pool itself is raw syscalls"
     ;;
 esac
 
