@@ -44,6 +44,10 @@ module Iyi
     property bound_scope : ASTNode?
     @bound_params = [] of String
 
+    # ris: the fields the class being normalized declares
+    # `Tape::Scanner`, whose loops TapeCursorLowering runs on locals.
+    @scanners = [] of String
+
     # A macro's expansion is parsed from a `VirtualFile`, and it is the
     # only source that is.
     def self.macro_expansion?(node : ASTNode) : Bool
@@ -739,7 +743,35 @@ module Iyi
       result
     end
 
+    def transform(node : ClassDef)
+      outer = @scanners
+      @scanners = [] of String
+      body = node.body
+      (body.is_a?(Expressions) ? body.expressions : [body]).each do |exp|
+        next unless exp.is_a?(TypeDeclaration) && (var = exp.var).is_a?(InstanceVar)
+        type = exp.declared_type
+        if type.is_a?(Path) && type.names == ["Tape", "Scanner"]
+          @scanners << var.name.lchop('@')
+        end
+      end
+      node = super
+      @scanners = outer
+      node
+    end
+
+    def transform(node : ModuleDef)
+      outer = @scanners
+      @scanners = [] of String
+      node = super
+      @scanners = outer
+      node
+    end
+
     def transform(node : While)
+      if program.tape_platform? && @macro_code == 0 && @current_def &&
+         (lowered = TapeCursorLowering.lower(node, @scanners))
+        return lowered.transform(self)
+      end
       # Only where the prelude has the tape, whose `__loop_fetch` it calls.
       if program.tape_platform?
         TapeCheckFreeLowering.lower(node, @bound_scope, @bound_params)

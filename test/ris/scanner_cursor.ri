@@ -1,0 +1,57 @@
+# A `while @sc.offset < …` loop over a Tape::Scanner field runs on a local
+# cursor (TapeCursorLowering): what the loop moves is written back where
+# it ends, at a `break` and before a `return`, and a call in the body sees
+# the offset as moved so far and may move it itself.
+@[OnTape]
+struct Lexer
+  @sc : Tape::Scanner
+  @lim : Int32
+  @seen = 0
+
+  def initialize(text : Tape::String)
+    @sc = Tape::Scanner.new(text)
+    @lim = text.bytesize
+  end
+
+  def offset : Int32
+    @sc.offset
+  end
+
+  # Skips one byte itself, and notes where it was called.
+  def skip_one : Int32
+    @seen = @seen * 100 + @sc.offset
+    @sc.advance
+    1
+  end
+
+  # A word: up to a space, a `#` skipped by a call, a `;` ends it all.
+  def word : Int32
+    start = @sc.offset
+    while @sc.offset < @lim
+      c = @sc.string[@sc.offset]
+      if c == 35
+        skip_one
+        next
+      end
+      return -1 if c == 59
+      break if c == 32
+      @sc.advance
+    end
+    while @sc.offset < @sc.string.bytesize && @sc.string[@sc.offset] == 32
+      @sc.advance(1)
+    end
+    @sc.offset - start
+  end
+
+  def seen : Int32
+    @seen
+  end
+end
+
+tape do
+  lexer = Lexer.new(Tape::String.new("ab#c  de#f g;h"))
+  a = lexer.word
+  b = lexer.word
+  c = lexer.word
+  puts "#{a} #{b} #{c} #{lexer.offset} #{lexer.seen}"
+end

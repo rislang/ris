@@ -2,9 +2,10 @@
 # `a[i] = v` in its body need not check that bound again: they become
 # `a.__loop_fetch(i)` and `a.__loop_store(i, v)`, which check only that
 # `i` is not negative. That holds when the body assigns `a` nowhere and
-# `i` only by adding one, and the array cannot shrink: `Tape::Array` and
-# `Tape::String` never do, and for any other value the two calls are
-# `[]` and `[]=` as written (Goose elides these checks too). In
+# `i` only by adding one (`&+` too: a wrapped `i` is negative), and the
+# array cannot shrink: `Tape::Array` and `Tape::String` never do, and
+# for any other value the two calls are `[]` and `[]=` as written
+# (Goose elides these checks too). In
 # `while i < a.size && c`, `c` runs only after that test, so `a[i]` in
 # `c` is lowered as well; so is `c` in `if i < a.size && c`.
 #
@@ -147,7 +148,7 @@ class Iyi::TapeCheckFreeLowering < Iyi::Visitor
     def visit(node : OpAssign)
       target = node.target
       if target.is_a?(Var) && target.name == @index
-        @unsafe = true unless node.op == "+" && step?(node.value)
+        @unsafe = true unless (node.op == "+" || node.op == "&+") && step?(node.value)
       elsif target.is_a?(Var) && fixed?(target.name)
         @unsafe = true
       end
@@ -185,7 +186,7 @@ class Iyi::TapeCheckFreeLowering < Iyi::Visitor
       if fixed?(target.name)
         @unsafe = true
       elsif target.name == @index
-        ok = value.is_a?(Call) && value.name == "+" &&
+        ok = value.is_a?(Call) && (value.name == "+" || value.name == "&+") &&
              step?(value.args.first?) &&
              (obj = value.obj).is_a?(Var) && obj.name == @index
         @unsafe = true unless ok
