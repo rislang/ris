@@ -60,6 +60,16 @@ module Tape
     raise "index #{index} out of range for #{count} #{what}"
   end
 
+  # The room an array grows to from *room*: twice as much, but no more
+  # than an Int32 counts, so its size is one at every read without a
+  # check there. An array at that room has no more to give.
+  def self.grown(room : UInt64) : UInt64
+    return 1_u64 if room == 0_u64
+    limit = 2147483647_u64
+    raise "tape array full: #{limit} elements" if room >= limit
+    room < limit // 2_u64 + 1_u64 ? room &* 2_u64 : limit
+  end
+
   CAPACITY = 67108864_u64
 
   # Bytes on the tape. Not a `String`: a `String` may be kept anywhere, and
@@ -937,8 +947,10 @@ module Tape
       new(count) { |index| value }
     end
 
+    # Unchecked: `Tape.grown` keeps the room, and so the size, an Int32.
+    # The mask tells LLVM it is not negative, as the check did.
     def size : Int32
-      (@state + 1_i64).value.to_i32
+      ((@state + 1_i64).value & 0x7fffffff_u64).unsafe_to_i32
     end
 
     def empty? : Bool
@@ -965,7 +977,7 @@ module Tape
     private def grow : Nil
       start = @state.value
       room = (@state + 2_i64).value
-      capacity = room == 0_u64 ? 1_u64 : room &* 2_u64
+      capacity = Tape.grown(room)
       width = sizeof(T).to_u64
       @state.value = IyiRegion.tape_resize(start, start &+ room &* width, (@state + 1_i64).value &* width, capacity &* width, @state + 3_i64)
       (@state + 2_i64).value = capacity
@@ -1640,8 +1652,10 @@ module Tape
       (@state + 3_i64).value = 0_u64
     end
 
+    # Unchecked: `Tape.grown` keeps the room, and so the size, an Int32.
+    # The mask tells LLVM it is not negative, as the check did.
     def size : Int32
-      (@state + 1_i64).value.to_i32
+      ((@state + 1_i64).value & 0x7fffffff_u64).unsafe_to_i32
     end
 
     # A value with no children; its index.
@@ -1703,7 +1717,7 @@ module Tape
     private def grow : Nil
       start = @state.value
       room = (@state + 2_i64).value
-      capacity = room == 0_u64 ? 1_u64 : room &* 2_u64
+      capacity = Tape.grown(room)
       width = sizeof(Entry(T)).to_u64
       @state.value = IyiRegion.tape_resize(start, start &+ room &* width, (@state + 1_i64).value &* width, capacity &* width, @state + 3_i64)
       (@state + 2_i64).value = capacity
