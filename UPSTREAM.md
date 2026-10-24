@@ -15,7 +15,6 @@ has it.
   lost its TLS client unit in parallel gates; separate `IYI_CACHE_DIR`s
   pass). Make cache publication safe across builds in iyi.
 * `String#byte_at(i)`: a bounds-checked byte read, beside `[]`.
-
 * v0.18.0 integration: explicit std imports in new modules and exercises,
   required by ris's per-file extension checks (`std/int`, `std/text`,
   `std/indexable` and others reported by the compiler), including the
@@ -44,7 +43,6 @@ has it.
   spawn and end; a parallel task waits on a locked `@@pending` list until
   its worker moves it to its own (`started`). Per thread alone broke on
   0.19.1's steals: parallel_exercise crashed in a join, every second run.
-
 * std/json: a string with an escape no longer makes a substring per
   non-ASCII run (`StringBuffer#append(Pointer, Int32)`), and the writer's
   escapes are `JSON.each_escaped_byte`. The lexer's span mode, the tape `Writer`
@@ -64,6 +62,8 @@ has it.
 
 * `String#[]` indexes bytes while `size` counts characters: at least say
   so in the docs and in a hint; a decision for iyi.
+* `-Dgc_none` by default (`017ec91d3`): building `compiler_spec --release`
+  passed 59GB, `Killed`. ris keeps bdw-gc; `gc_none=1` opts out.
 * `editors/vim`: named arguments and keys (`user_id: x`, `{id: 1}`) as
   Ruby's symbols, `iyiNamedArgument`, with its tests.
 * std/aead `seal_at`/`open_at` and std/tls records opened and sealed in

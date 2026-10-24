@@ -90,7 +90,7 @@ override COMPILER_FLAGS += -Dwithout_openssl -Dwithout_zlib -Dwithout_iconv$(if 
 # The collector choice, and it is deliberately not in COMPILER_FLAGS, because
 # the shipped binary and the spec harness want opposite answers.
 #
-# `-Dgc_none` is the default because the objective is a compiler carrying no
+# `-Dgc_none` is iyi's default because the objective is a compiler carrying no
 # ancestor library, and `libgc` was the last one that was not a deliberate
 # toolchain choice. `src/gc/none.cr` never frees, so peak memory is a function
 # of how much a process allocates: a compiler invocation compiles one program
@@ -104,9 +104,10 @@ override COMPILER_FLAGS += -Dwithout_openssl -Dwithout_zlib -Dwithout_iconv$(if 
 # binaries do not, which is the same split SPEC.md III.9 draws between the
 # compiler and the programs it builds.
 #
-# `collector=1` puts bdw-gc back on the binaries too, and is the configuration
-# every number above was measured against.
-BINARY_GC_FLAGS := $(if $(collector),,-Dgc_none)
+# ris: the binaries keep bdw-gc by default; `gc_none=1` takes it off. Without
+# it peak memory has no bound: building `compiler_spec --release` passed 59GB
+# and was `Killed`, and a user's large program would be next.
+BINARY_GC_FLAGS := $(if $(gc_none),-Dgc_none,)
 SPEC_WARNINGS_OFF := --exclude-warnings spec/std --exclude-warnings spec/compiler --exclude-warnings spec/primitives --exclude-warnings src/float/printer --exclude-warnings src/random.cr
 override SPEC_FLAGS += $(if $(verbose),-v )$(if $(junit_output),--junit_output $(junit_output) )$(if $(order),--order=$(order) )
 IYI_CONFIG_LIBRARY_PATH := '$$ORIGIN/../lib/iyi'
@@ -530,8 +531,8 @@ iyi-tarball: $(O)/iyi$(EXE) $(O)/$(IYI_DAEMON_BIN) check_iyi_is_release
 	find "$(O)/iyi-package/share/iyi/samples" -type f -perm -u+x -delete
 	find "$(O)/iyi-package/share/iyi/samples" -type d -empty -delete
 # What the binaries need at runtime and a fresh machine has no reason to
-# own. The collector is no longer among them by default; `collector=1` puts
-# libgc back and the bundle follows it. What is left depends on how LLVM was
+# own. In ris the collector is among them by default; `gc_none=1` takes
+# libgc off and the bundle follows it. What is left depends on how LLVM was
 # linked, and both cases are measured: against `scripts/build-static-llvm.sh`
 # LLVM is inside the binary and `lib/` is empty, and the script refuses a
 # package that carries libLLVM in that case; against a shared LLVM, `lib/`
