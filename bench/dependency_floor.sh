@@ -217,13 +217,11 @@ ALLOWED_SYMBOLS_DARWIN="$ALLOWED_SYMBOLS_DARWIN SecTrustCopyAnchorCertificates S
 # libSystem's call, which Linux makes as a system call and Windows as
 # kernel32's `LockFileEx`.
 ALLOWED_SYMBOLS_DARWIN="$ALLOWED_SYMBOLS_DARWIN flock"
-# `memcpy` joined with the tape: a copy onto or off it is a variable-length
-# `llvm.memcpy`, which the aarch64 back end spells as libSystem's memcpy.
 # `shutdown` is a socket's half-close, `IyiSocket#close_write` in
 # std/socket: libSystem's POSIX call, nothing new to the machine, which
 # Linux makes as a system call and Windows as ws2_32's `shutdown`, already
 # imported for `close`. The fuzz exercise's scripted peers reach it.
-ALLOWED_SYMBOLS_DARWIN="$ALLOWED_SYMBOLS_DARWIN memcpy shutdown"
+ALLOWED_SYMBOLS_DARWIN="$ALLOWED_SYMBOLS_DARWIN shutdown"
 ALLOWED_SYMBOLS_LINUX="$FLOOR_BASE_LINUX environ pthread_attr_destroy pthread_attr_init pthread_attr_setstack pthread_create pthread_join"
 
 # What a program may link. The platform libc only.
