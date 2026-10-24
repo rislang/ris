@@ -1451,6 +1451,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
           @program.iyi_root_package_name_for(module_path, filename))
       end
       parsed_nodes = parser.parse
+      FfiBoundaryChecker.check(@program, parsed_nodes, filename)
       parsed_nodes = @program.normalize(parsed_nodes, inside_exp: false)
       iyi_at_top_level { parsed_nodes.accept self }
     rescue ex : InvalidByteSequenceError

@@ -1,0 +1,6 @@
+# Calling C outside a module marked @[Ffi].
+lib LibC2
+  fun getpid : Int32
+end
+
+puts LibC2.getpid

@@ -1,0 +1,11 @@
+# A module at a C library's edge may hold pointers.
+@[Ffi]
+module test/ris/ffi_marked
+
+lib LibC3
+  fun strlen(s : UInt8*) : UInt64
+end
+
+text = "four"
+puts LibC3.strlen(text.to_unsafe)
+puts text.byte_at(1)

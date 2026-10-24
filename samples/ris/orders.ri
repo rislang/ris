@@ -13,6 +13,7 @@
 module samples/orders
 
 import std/int
+import std/text
 import std/http::{Server, ParsedHead}
 import std/json::{JSON, Any, Document}
 
@@ -51,12 +52,8 @@ def fnv(h : UInt64, text : Tape::String) : UInt64
   h
 end
 
-def fnv(h : UInt64, p : Pointer(UInt8), n : Int32) : UInt64
-  i = 0
-  while i < n
-    h = (h ^ p[i].to_u64) &* 1099511628211_u64
-    i += 1
-  end
+def fnv(h : UInt64, text : String) : UInt64
+  text.each_byte { |c| h = (h ^ c.to_u64) &* 1099511628211_u64 }
   h
 end
 
@@ -126,8 +123,8 @@ def answer_heap(text : String) : UInt64
     end
   end
   top = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: #{body.bytesize}\r\n\r\n"
-  h = fnv(14695981039346656037_u64, top.to_unsafe, top.bytesize)
-  (fnv(h, body.to_unsafe, body.bytesize) & 0xFFFFFFFFFF_u64) | ((top.bytesize + body.bytesize).to_u64 << 40)
+  h = fnv(14695981039346656037_u64, top)
+  (fnv(h, body) & 0xFFFFFFFFFF_u64) | ((top.bytesize + body.bytesize).to_u64 << 40)
 end
 
 heap = Program.args.size > 0 && Program.args[0] == "heap"

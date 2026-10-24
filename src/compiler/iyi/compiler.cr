@@ -105,6 +105,11 @@ module Iyi
     # (useful to type-check a program)
     property? no_codegen = false
 
+    # ris: `--allow-unsafe` lifts `FfiBoundaryChecker` for one build. It
+    # judges the program's own files, never the prelude's, so it is outside
+    # the prelude's analysis (`OUTSIDE_PRELUDE_ANALYSIS`).
+    property? allow_unsafe = false
+
     # iyi: whether this build's link is the one the compiler builds itself
     # rather than the one `cc` builds for it, and whether that has already been
     # tried and failed. See `iyi_direct_link_command`.
@@ -303,7 +308,7 @@ module Iyi
     def self.module_header_of(text : String) : String?
       text.lchop('\uFEFF').each_line do |line|
         line = line.strip
-        next if line.empty? || line.starts_with?('#')
+        next if line.empty? || line.starts_with?('#') || line == "@[Ffi]"
         return nil unless line.starts_with?("module ")
         module_path = line.lchop("module ").strip
         return nil if module_path.empty? || module_path.includes?(' ')
@@ -529,6 +534,7 @@ module Iyi
       emit_bind emit_targets frame_pointers iyi_direct_link iyi_keep
       iyi_link_driver_only link_flags mattr mcmodel mcpu n_threads no_cleanup
       program progress_tracker single_module stderr target_machine verbose
+      allow_unsafe
     )
 
     # Everything that changes what the prelude analyses *to*. Macros branch on
@@ -3239,7 +3245,7 @@ module Iyi
         parser.iyi_package_name = program.iyi_record_module_package(module_path,
           program.iyi_root_package_name_for(module_path, source.filename))
       end
-      parser.parse
+      parser.parse.tap { |nodes| FfiBoundaryChecker.check(program, nodes, source.filename) }
     rescue ex : InvalidByteSequenceError
       # iyi: whichever language the file is written in. A `.iyi` file full of
       # bytes that are not text was reported as "not a valid Crystal source

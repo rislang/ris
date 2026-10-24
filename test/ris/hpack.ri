@@ -25,7 +25,7 @@ retained = [] of HeaderField
     native_encoder.set_max_table_size(128)
   end
   wire = encoder.encode(fields)
-  text = String.new(wire.size) { |p| p.copy_from(wire.to_unsafe, wire.size) }
+  text = String.build(wire.size) { |io| wire.each { |byte| io.write_byte(byte) } }
   expected = heap_decoder.decode(wire)
   raise "heap decode failed" if expected.is_a?(HpackError)
   tape do
@@ -51,7 +51,7 @@ retained = [] of HeaderField
 end
 # Bad integers, index zero, truncated literals and Huffman padding.
 ["\x80", "\xff", "\x00\x03a", "\x00\x81\x00"].each do |text|
-  bytes = Bytes.new(text.bytesize) { |i| text.to_unsafe[i] }
+  bytes = Bytes.new(text.bytesize) { |i| text.byte_at(i) }
   expected = Decoder.new.decode(bytes)
   raise "expected failure" unless expected.is_a?(HpackError)
   tape do

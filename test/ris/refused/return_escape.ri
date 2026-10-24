@@ -1,3 +1,4 @@
+@[Ffi]
 module test/ris/refused/return_escape
 import std/int
 

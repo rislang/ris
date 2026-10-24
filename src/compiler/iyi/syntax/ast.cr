@@ -2498,11 +2498,19 @@ module Iyi
   class ModuleHeader < ASTNode
     property path : Array(String)
 
+    # ris: the `@[Ffi]` written above the header, which lets the module's
+    # code use raw pointers and `lib` blocks (`Iyi::FfiBoundaryChecker`).
+    property ffi : Annotation?
+
     def initialize(@path)
     end
 
+    def ffi? : Bool
+      !@ffi.nil?
+    end
+
     def clone_without_location
-      ModuleHeader.new(@path.dup)
+      ModuleHeader.new(@path.dup).tap(&.ffi=(@ffi.clone))
     end
 
     def_equals_and_hash @path

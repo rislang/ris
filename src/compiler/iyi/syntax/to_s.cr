@@ -446,6 +446,7 @@ module Iyi
     end
 
     def visit(node : ModuleHeader)
+      @str << "@[Ffi]\n" if node.ffi?
       @str << "module " << node.path.join('/')
       false
     end

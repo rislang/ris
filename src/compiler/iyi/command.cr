@@ -860,6 +860,12 @@ class Iyi::Command
         compiler.color = false
       end
 
+      # ris: for a speed experiment, never in a commit: pointers anywhere,
+      # without passing ordinary code off as an `@[Ffi]` module.
+      opts.on("--allow-unsafe", "Allow raw pointers outside @[Ffi] modules,\nfor a speed experiment, never committed") do
+        compiler.allow_unsafe = true
+      end
+
       unless no_codegen
         opts.on("--no-codegen", "Don't do code generation") do
           compiler.no_codegen = true

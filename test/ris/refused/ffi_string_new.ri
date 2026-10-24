@@ -1,0 +1,6 @@
+# String.new with a block yields a pointer: String.build writes bytes.
+text = String.new(2) do |buffer|
+  buffer[0] = 104_u8
+  buffer[1] = 105_u8
+end
+puts text

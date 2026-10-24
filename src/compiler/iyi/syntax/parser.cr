@@ -276,6 +276,15 @@ module Iyi
         else                  [nodes] of ASTNode
         end
 
+      # ris: `@[Ffi]` above the header marks the module an FFI boundary.
+      # It is the header's, not a node of the file, so nothing else takes it.
+      if (mark = expressions[0]?).is_a?(Annotation) && mark.path.names == ["Ffi"] &&
+         (marked = expressions[1]?).is_a?(ModuleHeader)
+        marked.ffi = mark
+        expressions = expressions[1..]
+        nodes = Expressions.from(expressions)
+      end
+
       # iyi: one file, one module (R-1, IV.6). A second header was accepted and
       # quietly wrong: the file emitted a single artifact under the first
       # module's name carrying *both* modules' exports, so the second module's

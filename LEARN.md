@@ -1,5 +1,4 @@
 # Learning ris: read this before writing code
-For an agent that is to write ris. Read the source first, then build.
 ## 1. Get the source and read, in this order
 `git clone https://github.com/rislang/ris`, then:
 1. `README.md`: what ris is, and the tape example.
@@ -18,8 +17,9 @@ Ruby's syntax with Crystal's types, blocks, unions and nil-safety, plus:
 * `import shop/order` (names stay `order::f`), `import shop/order::{f, T}`,
   `import shop/order::*`; a URL works too: `import github.com/x/y::{Y}`.
 * `pub` exports. Every `pub def` writes all parameter and return types.
-* Classes are closed: no reopening. `impl Trait for Type` lives in the
-  trait's module or the type's.
+* No reopening: classes are closed; `impl` goes in the trait's or type's module.
+* No pointers: `s[i]`, `s.byte_at(i)`, `s[a, n]`, `UInt8[N]`; only a module
+  at a C library's edge has them, marked `@[Ffi]` above its `module` line.
 * Errors are union members, no exceptions to catch:
 
 ```crystal

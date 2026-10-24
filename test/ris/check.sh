@@ -47,6 +47,11 @@ expect local_self 'cannot use outer tape value `self`'
 expect local_return "cannot return a tape value"
 expect local_break "cannot break a tape value"
 expect local_yield_break "cannot break a tape value"
+expect ffi_pointerof    "\`pointerof\` outside an @[Ffi] module"
+expect ffi_pointer      "\`Pointer\` outside an @[Ffi] module"
+expect ffi_to_unsafe    "Read a byte with \`s.byte_at(i)\`"
+expect ffi_lib          "a \`lib\` block outside an @[Ffi] module"
+expect ffi_string_new   "Build it with \`String.build(capacity)"
 expect raw_pointer      "to_unsafe\` of a Tape::String outside a @[TapeUnsafe] def"
 expect raw_view         "Tape::String.new(pointer, size)\` outside a @[TapeUnsafe] def"
 expect std/tape_unsafe_codec "reaches no \`lib\` fun or system call"
@@ -104,6 +109,9 @@ if [ "$out" = $'1\ntrue\ntrue\ntrue\nC\ntrue' ]; then echo "runs     scope_clean
 
 out=$("$RIS" run test/ris/lifetime_flow.ri 2>&1)
 if [ "$out" = $'A\nA\nA\nA' ]; then echo "runs     lifetime_flow"; else echo "FAILED   lifetime_flow: $out"; status=1; fi
+
+out=$("$RIS" run test/ris/ffi_marked.ri 2>&1)
+if [ "$out" = $'4\n111' ]; then echo "runs     ffi_marked"; else echo "FAILED   ffi_marked: $out"; status=1; fi
 
 out=$("$RIS" run test/ris/allowed.ri 2>&1)
 if [ "$out" = $'2\na' ]; then echo "runs     allowed"; else echo "FAILED   allowed: $out"; status=1; fi

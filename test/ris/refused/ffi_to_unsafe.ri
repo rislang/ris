@@ -1,0 +1,3 @@
+# A byte read through to_unsafe: `byte_at` checks its bounds.
+text = "abc"
+puts text.to_unsafe[3]

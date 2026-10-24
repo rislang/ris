@@ -1,0 +1,4 @@
+# A pointer to read a buffer back: index the buffer instead.
+buf = uninitialized UInt8[4]
+p = pointerof(buf)
+puts p[0]

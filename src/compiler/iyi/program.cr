@@ -1505,6 +1505,9 @@ module Iyi
       # (`Iyi::TapeRules`). Refused outside `std/`.
       types["TapeUnsafe"] = @tape_unsafe_annotation =
         AnnotationType.new self, self, "TapeUnsafe"
+      # ris: `@[Ffi]` as a file's first statement, above its header if it
+      # has one, lets the file use raw pointers (`Iyi::FfiBoundaryChecker`).
+      types["Ffi"] = AnnotationType.new self, self, "Ffi"
 
       # iyi: the marker that makes a union member an error member (SPEC.md
       # III.1.1). Created here rather than declared in the prelude because the

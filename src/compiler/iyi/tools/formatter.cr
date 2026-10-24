@@ -3737,6 +3737,11 @@ module Iyi
     # iyi: `module app/greeter`, the compilation-unit header (R-1). It has no
     # body, so unlike Crystal's `module` there is no `end` to find.
     def visit(node : ModuleHeader)
+      if mark = node.ffi
+        mark.accept self
+        skip_space_or_newline
+        write_line
+      end
       write_keyword :module, " "
       format_iyi_module_path node.path
 

@@ -10,11 +10,11 @@ has it.
 * Refuse integer `/` directly in interpolation or before `to_s`, naming
   `//` and `a.to_f / b`. Tape interpolation stays in ris.
 
-* Concurrent builds of the same entry share mutable object-cache paths.
-  One can replace or remove another's objects before artifact assembly:
-  std/http's artifact lost the TLS client unit during parallel gates.
-  Separate `IYI_CACHE_DIR`s make the producer and consumer pass; make
-  cache publication safe across builds in iyi.
+* Concurrent builds of one entry share mutable object-cache paths: one can
+  replace or remove another's objects before artifact assembly (std/http
+  lost its TLS client unit in parallel gates; separate `IYI_CACHE_DIR`s
+  pass). Make cache publication safe across builds in iyi.
+* `String#byte_at(i)`: a bounds-checked byte read, beside `[]`.
 
 * v0.18.0 integration: explicit std imports in new modules and exercises,
   required by ris's per-file extension checks (`std/int`, `std/text`,

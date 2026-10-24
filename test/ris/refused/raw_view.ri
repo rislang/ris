@@ -1,4 +1,7 @@
 # A view of any address, made outside the library.
+@[Ffi]
+module test/ris/refused/raw_view
+
 tape do
   heap = "abc"
   text = Tape::String.new(heap.to_unsafe, 64)
