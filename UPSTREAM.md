@@ -41,6 +41,10 @@ has it.
   `String` overload; the `Tape::String` one stays in ris.
 * `IyiScheduler.current`: the running fiber inline, the first touch out of
   line. Two calls a `tape` made it 0.7% of respond (2026-10-18).
+* `IyiScheduler.register`: a fiber list per thread, no runtime lock per
+  spawn and end; a parallel task waits on a locked `@@pending` list until
+  its worker moves it to its own (`started`). Per thread alone broke on
+  0.19.1's steals: parallel_exercise crashed in a join, every second run.
 
 * std/json: a string with an escape no longer makes a substring per
   non-ASCII run (`StringBuffer#append(Pointer, Int32)`), and the writer's

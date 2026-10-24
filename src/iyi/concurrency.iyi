@@ -443,6 +443,8 @@ class IyiFiber
   property home : IyiSchedulerState?
   # Spawned by `spawn_parallel`: started by whichever worker is free.
   property parallel : Bool
+  # ris: on the process's list of parallel tasks not yet started.
+  property pending : Bool
   # A cancel from another thread, waiting in its home's list until that
   # thread takes the fiber out of its own sleep heap or poller.
   property next_cancel : IyiFiber?
@@ -581,6 +583,7 @@ class IyiFiber
     @group = nil
     @home = nil
     @parallel = false
+    @pending = false
     @next_cancel = nil
     @cancel_posted = false
     @sp = 0_u64
@@ -974,6 +977,12 @@ class IyiSchedulerState
   property events : Pointer(UInt8)
   property next_state : IyiSchedulerState?
 
+  # This thread's live fibers, for the collector's root walk
+  # (`IyiScheduler.register`), and the one being linked in, if a stop
+  # lands while it is.
+  property fibers_head : IyiFiber?
+  property registering : IyiFiber?
+
   # The fiber that finished on this thread and is waiting for its
   # successor to hand the stack back, and the stacks already handed
   # back. Both are this thread's alone — a started fiber never leaves the
@@ -1305,42 +1314,126 @@ class IyiScheduler
   # per connection, and a list nothing leaves makes every later
   # collection walk every request the process ever served. A fiber
   # leaves when its stack does, which is one step with the back link.
-  # Under the runtime lock, for the reason the states are. One list for
-  # the process, not one per thread: a parallel task is registered by its
-  # spawner's thread and may end on the worker that stole it (III.4.13).
-  @@all_head : IyiFiber?
+  #
+  # Each thread keeps its own list (`IyiSchedulerState#fibers_head`): a
+  # started fiber never leaves its thread (III.4.13), so only that thread
+  # links it in or out, and the runtime lock - which every spawn and every
+  # fiber's end took, a server's every request on every thread meeting
+  # there - is not needed. Only the collector reads the lists, and only
+  # while every other thread is stopped. A stop is a signal, so it can land
+  # between any two stores of the link: every store is ordered (`fence`),
+  # the list is whole forwards after each one, and the fiber being linked
+  # in sits in `registering` until the head names it, so the walk finds it
+  # one way or the other.
+  #
+  # A parallel task is the exception until it starts: its spawner's thread
+  # registers it, and any worker may steal it. It waits on `@@pending`,
+  # under the runtime lock the collector holds, and the worker that takes
+  # it moves it to its own list (`started`), where it ends.
+  @@pending : IyiFiber?
 
   def self.register(fiber : IyiFiber) : Nil
-    IyiRuntimeLock.lock
-    head = @@all_head
-    fiber.next_fiber = head
-    fiber.prev_fiber = nil
-    head.prev_fiber = fiber if head.is_a?(IyiFiber)
-    @@all_head = fiber
-    IyiRuntimeLock.unlock
+    if fiber.parallel
+      IyiRuntimeLock.lock
+      head = @@pending
+      fiber.next_fiber = head
+      fiber.prev_fiber = nil
+      head.prev_fiber = fiber if head.is_a?(IyiFiber)
+      @@pending = fiber
+      fiber.pending = true
+      IyiRuntimeLock.unlock
+      return
+    end
+    link_own(fiber)
   end
 
-  def self.unregister(fiber : IyiFiber) : Nil
+  # A parallel task its worker *st* has taken: off the pending list and
+  # onto the worker's own, held in `registering` in between.
+  def self.started(st : IyiSchedulerState, fiber : IyiFiber) : Nil
+    return unless fiber.pending
+    st.registering = fiber
+    fence
     IyiRuntimeLock.lock
+    unlink_pending(fiber)
+    IyiRuntimeLock.unlock
+    link_own(fiber)
+  end
+
+  private def self.unlink_pending(fiber : IyiFiber) : Nil
     following = fiber.next_fiber
     previous = fiber.prev_fiber
     if previous.is_a?(IyiFiber)
       previous.next_fiber = following
     else
-      @@all_head = following
+      @@pending = following
     end
     following.prev_fiber = previous if following.is_a?(IyiFiber)
     fiber.next_fiber = nil
     fiber.prev_fiber = nil
-    IyiRuntimeLock.unlock
+    fiber.pending = false
   end
 
-  # Each live fiber of every thread.
+  private def self.link_own(fiber : IyiFiber) : Nil
+    st = state
+    st.registering = fiber
+    fence
+    head = st.fibers_head
+    fiber.next_fiber = head
+    fiber.prev_fiber = nil
+    head.prev_fiber = fiber if head.is_a?(IyiFiber)
+    fence
+    st.fibers_head = fiber
+    fence
+    st.registering = nil
+  end
+
+  def self.unregister(fiber : IyiFiber) : Nil
+    if fiber.pending
+      IyiRuntimeLock.lock
+      unlink_pending(fiber)
+      IyiRuntimeLock.unlock
+      return
+    end
+    st = state
+    following = fiber.next_fiber
+    previous = fiber.prev_fiber
+    if previous.is_a?(IyiFiber)
+      previous.next_fiber = following
+    else
+      st.fibers_head = following
+    end
+    fence
+    following.prev_fiber = previous if following.is_a?(IyiFiber)
+    fiber.next_fiber = nil
+    fiber.prev_fiber = nil
+  end
+
+  # Keeps the compiler from moving a store across it: the thread's own
+  # stop handler is the other reader, on this thread, so program order is
+  # all it needs.
+  @[AlwaysInline]
+  def self.fence : Nil
+    asm("" ::: "memory" : "volatile")
+  end
+
+  # Each live fiber of every thread, the one being linked in included,
+  # and each parallel task waiting to start.
   def self.each_fiber(& : IyiFiber -> Nil) : Nil
-    fiber = @@all_head
+    fiber = @@pending
     while fiber.is_a?(IyiFiber)
       yield fiber
       fiber = fiber.next_fiber
+    end
+    st = @@states_head
+    while st.is_a?(IyiSchedulerState)
+      linking = st.registering
+      yield linking if linking.is_a?(IyiFiber)
+      fiber = st.fibers_head
+      while fiber.is_a?(IyiFiber)
+        yield fiber
+        fiber = fiber.next_fiber
+      end
+      st = st.next_state
     end
   end
 
@@ -1409,7 +1502,7 @@ class IyiScheduler
     return if state.is_a?(Nil)
     main = state.current
     if main.is_a?(IyiFiber)
-      head = @@all_head
+      head = state.fibers_head
       linked = main.prev_fiber.is_a?(IyiFiber) || (head.is_a?(IyiFiber) && head.object_id == main.object_id)
       unregister(main) if linked
     end
@@ -1694,6 +1787,7 @@ class IyiScheduler
       task = IyiWorkers.take(st)
       if task.is_a?(IyiFiber)
         IyiSchedLock.unlock
+        started(st, task)
         enqueue(task)
         return
       end
