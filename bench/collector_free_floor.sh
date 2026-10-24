@@ -226,7 +226,7 @@ else
   echo "  pkg-config cannot find bdw-gc, so the isolation holds"
   rm -f .build/iyi .build/iyi-daemon .build/crystal
   if env -u LIBRARY_PATH PKG_CONFIG_LIBDIR="$EMPTY" PKG_CONFIG_PATH="$EMPTY" \
-       CRYSTAL_LIBRARY_PATH="$EMPTY" make -j8 > "$WORK/isolated.log" 2>&1; then
+       CRYSTAL_LIBRARY_PATH="$EMPTY" make -j8 gc_none=1 > "$WORK/isolated.log" 2>&1; then
     echo "  the binaries build with no bdw-gc reachable"
   else
     echo "  FAIL: the build needs bdw-gc installed"

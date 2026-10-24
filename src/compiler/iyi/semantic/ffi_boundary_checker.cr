@@ -12,7 +12,9 @@
 # from the tape's rules (`TapeRules`), and so are std's exercises in ris's
 # own `bench/`: speed is std's to give, through the tape, not a pointer's.
 # Checked on the parsed source, so a def nothing calls is held to it too.
-# `--allow-unsafe` lifts the check for one build, for an experiment.
+# `--allow-unsafe` lifts the check for one build, for an experiment, and
+# `IYI_ALLOW_UNSAFE=1` for every build under it: CI's gates, whose bench
+# scripts write std's probes outside `bench/`, in a temporary directory.
 module Iyi::FfiBoundaryChecker
   HINT = "Application code uses no pointers; only a module at a C " \
          "library's edge does, marked `@[Ffi]` above its `module` line " \
@@ -22,6 +24,7 @@ module Iyi::FfiBoundaryChecker
   def self.check(program : Program, node : ASTNode, filename : String) : Nil
     return unless filename.ris_source?
     return if program.compiler.try(&.allow_unsafe?)
+    return if ENV["IYI_ALLOW_UNSAFE"]? == "1"
     return if TapeRules.std?(Location.new(filename, 1, 1))
     return if TapeRules.runtime?(program, Location.new(filename, 1, 1))
     return if std_exercise?(program, filename)

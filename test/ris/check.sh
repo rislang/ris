@@ -8,6 +8,8 @@
 #
 #   bash test/ris/check.sh
 set -uo pipefail
+# The pointer rule is tested here, so CI's switch for bench probes is off.
+unset IYI_ALLOW_UNSAFE
 cd "$(dirname "$0")/../.."
 RIS=${RIS:-./bin/ris}
 status=0
