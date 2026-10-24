@@ -12,6 +12,7 @@ module Iyi
       # is lowered with the def).
       unless current_def || macro_code || normalizer.macro_expansion || node.is_a?(Def)
         TapeTextLowering.lower_scope(node, [] of String, false)
+        normalizer.bound_scope = node
       end
       node.transform(normalizer)
     end
@@ -35,6 +36,13 @@ module Iyi
     property macro_expansion : ASTNode?
 
     @dead_code = false
+
+    # ris: where a local's one assignment is looked for, so that
+    # TapeCheckFreeLowering may take `n = a.bytesize` for the size: the
+    # def being normalized, or the whole top level; nil in a macro's
+    # expansion, which does not see the rest of its def.
+    property bound_scope : ASTNode?
+    @bound_params = [] of String
 
     # A macro's expansion is parsed from a `VirtualFile`, and it is the
     # only source that is.
@@ -527,7 +535,11 @@ module Iyi
       TapeTextLowering.lower_scope(node.body, params, tape_def)
       node.body.accept(TapeTextLowering.new) if tape_def
       @current_def = node
+      outer_scope, outer_params = @bound_scope, @bound_params
+      @bound_scope = @macro_code == 0 && !@macro_expansion ? node.body : nil
+      @bound_params = params
       node = super
+      @bound_scope, @bound_params = outer_scope, outer_params
       @current_def = nil
 
       # If the def has a block argument without a specification
@@ -553,6 +565,9 @@ module Iyi
     end
 
     def transform(node : If)
+      if program.tape_platform?
+        TapeCheckFreeLowering.lower(node, @bound_scope, @bound_params)
+      end
       node.cond = node.cond.transform(self)
 
       node.then = node.then.transform(self)
@@ -726,7 +741,9 @@ module Iyi
 
     def transform(node : While)
       # Only where the prelude has the tape, whose `__loop_fetch` it calls.
-      TapeCheckFreeLowering.lower(node) if program.tape_platform?
+      if program.tape_platform?
+        TapeCheckFreeLowering.lower(node, @bound_scope, @bound_params)
+      end
       node = super
       TapeScopeChecker.mark(program, node) if node.is_a?(While) && @macro_code == 0
       node

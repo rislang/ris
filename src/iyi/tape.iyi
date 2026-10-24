@@ -366,6 +366,18 @@ module Tape
       @ptr[index]
     end
 
+    # `read_bytes_at` in `while i + room <= text.bytesize`
+    # (TapeCheckFreeLowering): *room* bytes from *at* are in range.
+    @[AlwaysInline]
+    def __loop_read_bytes_at(type : I.class, at : Int32, room : Int32) : I forall I
+      return read_bytes_at(type, at) if sizeof(I) > room || at < 0
+      {% if flag?(:x86_64) || flag?(:aarch64) || flag?(:i386) %}
+        (@ptr + at).as(Pointer(I)).unaligned_value
+      {% else %}
+        read_bytes_at(type, at)
+      {% end %}
+    end
+
     def ==(other : String) : Bool
       @bytesize == other.bytesize && same?(other.to_unsafe)
     end
@@ -1797,6 +1809,10 @@ class Object
 
   def __loop_store(index, value)
     self[index] = value
+  end
+
+  def __loop_read_bytes_at(type, at, room)
+    read_bytes_at(type, at)
   end
 end
 

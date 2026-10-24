@@ -181,6 +181,10 @@ out=$("$RIS" run test/ris/link_check.ri 2>&1)
 if grep -qF $'7' <<<"$out" && grep -qF "index 200 out of range for 1 elements" <<<"$out"; then echo "runs     link_check"; else echo "FAILED   link_check: $out"; status=1; fi
 out=$("$RIS" run test/ris/loop_bounds.ri 2>&1)
 if grep -qF '1 11 21 300 3' <<<"$out" && grep -qF "index -1 out of range for 3 elements" <<<"$out"; then echo "runs     loop_bounds"; else echo "FAILED   loop_bounds: $out"; status=1; fi
+out=$("$RIS" run test/ris/loop_words.ri 2>&1)
+if grep -qF '8101531983959975010 true false false' <<<"$out" && grep -qF "little-endian field out of range" <<<"$out"; then echo "runs     loop_words"; else echo "FAILED   loop_words: $out"; status=1; fi
+out=$("$RIS" run test/ris/loop_size_twice.ri 2>&1)
+if grep -qF "index 2 out of range for 2 bytes" <<<"$out"; then echo "runs     loop_size_twice"; else echo "FAILED   loop_size_twice: $out"; status=1; fi
 out=$("$RIS" run test/ris/refill_handoff.ri 2>&1)
 if [ "$out" = '2 2 3 4' ]; then echo "runs     refill_handoff"; else echo "FAILED   refill_handoff: $out"; status=1; fi
 out=$("$RIS" run test/ris/clear.ri 2>&1)

@@ -1,0 +1,30 @@
+# `while i + 8 <= n`, with `n = s.bytesize` set once, reads a word at `i`
+# unchecked; `if i + 8 <= s.bytesize && …` too. A word read from a
+# negative index is refused.
+def words(s : Tape::String) : UInt64
+  n = s.bytesize
+  h = 0_u64
+  i = 0
+  while i + 8 <= n
+    h = h &+ s.read_bytes_at(UInt64, i)
+    i += 8
+  end
+  h
+end
+
+def first_word?(s : Tape::String, i : Int32) : Bool
+  if i + 8 <= s.bytesize && s.read_bytes_at(UInt64, i) == 0x3837363534333231_u64
+    return true
+  end
+  false
+end
+
+tape do
+  w = Tape::String.new("1234567812345678xyz")
+  puts "#{words(w)} #{first_word?(w, 0)} #{first_word?(w, 1)} #{first_word?(w, 12)}"
+  j = -8
+  while j + 8 <= w.bytesize
+    w.read_bytes_at(UInt64, j)
+    j += 8
+  end
+end
