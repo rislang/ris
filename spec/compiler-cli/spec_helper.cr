@@ -10,6 +10,11 @@ EXE_SUFFIX = {{ flag?(:win32) ? ".exe" : "" }}
 
 CRYSTAL_BIN = ENV.fetch("CRYSTAL_SPEC_COMPILER_BIN") { Path[Dir.current, ".build", "crystal#{EXE_SUFFIX}"].to_s }
 
+# The built `crystal` looks for its library in `share/crystal/src` beside
+# `.build`, where an install puts it; a checkout has it in `src`, as
+# `bin/crystal` says. Without it no build finds even the empty prelude.
+ENV["CRYSTAL_PATH"] ||= "lib#{Process::PATH_DELIMITER}#{File.expand_path("../../src", __DIR__)}"
+
 def crystal
   CRYSTAL_BIN
 end
