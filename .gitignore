@@ -63,3 +63,7 @@ __pycache__/
 
 # The compiler's local cache when IYI_CACHE_DIR is unset.
 /.iyi/
+
+# ris: scripts/spec-par.sh
+/spec-out/
+/spec-build.log
