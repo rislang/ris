@@ -61,7 +61,17 @@ module Tape
     @ptr : Pointer(UInt8)
     @bytesize : Int32
 
+    # Built in a local, not by `initialize`: a store through `self` in
+    # `initialize` takes the collector's write barrier (codegen cannot see
+    # that `self` is a stack slot there), one into a local's field does not.
     def initialize(@ptr : Pointer(UInt8), @bytesize : Int32)
+    end
+
+    def self.new(ptr : Pointer(UInt8), bytesize : Int32) : self
+      made = uninitialized self
+      pointerof(made.@ptr).value = ptr
+      pointerof(made.@bytesize).value = bytesize
+      made
     end
 
     # *text*'s bytes copied onto the tape: a String a program has, made a
@@ -1022,6 +1032,21 @@ module Tape
         end
       {% end %}
       Pointer(UInt8).new(@state.value + count).copy_from(bytes, width.to_i32)
+      (@state + 1_i64).value = count + width
+    end
+
+    # The bytes of *text* at the end, with one room check and one copy
+    # rather than a `push` or `write_bytes` per byte or word.
+    def append(text : Tape::String) : Nil
+      {% unless T == UInt8 %}
+        {% raise "append requires Tape::Array(UInt8)" %}
+      {% end %}
+      count = (@state + 1_i64).value
+      width = text.bytesize.to_u64
+      while count + width > (@state + 2_i64).value
+        grow
+      end
+      Pointer(UInt8).new(@state.value + count).copy_from(text.to_unsafe, width.to_i32)
       (@state + 1_i64).value = count + width
     end
 
