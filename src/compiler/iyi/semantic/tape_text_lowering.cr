@@ -20,8 +20,25 @@ class Iyi::TapeTextLowering < Iyi::Visitor
       (node.name == "tape" || node.name == "local_tape")
   end
 
+  TAPE_TYPES = {"Str", "Ary", "Tre"}
+
+  # Whether a restriction names a tape type as a whole word. No regex:
+  # the compiler built on the floor carries no pcre2.
   def self.tape_def?(node : Def) : Bool
-    node.args.any? { |arg| arg.restriction.to_s.matches?(/(?<!\w)(?:Str|Ary|Tre)\b/) }
+    node.args.any? { |arg| names_tape_type?(arg.restriction.to_s) }
+  end
+
+  def self.names_tape_type?(text : String) : Bool
+    word = String::Builder.new
+    text.each_char do |c|
+      if c.alphanumeric? || c == '_'
+        word << c
+      else
+        return true if TAPE_TYPES.includes?(word.to_s)
+        word = String::Builder.new
+      end
+    end
+    TAPE_TYPES.includes?(word.to_s)
   end
 
   def self.sink?(node : Call) : Bool
