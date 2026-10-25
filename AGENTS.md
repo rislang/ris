@@ -66,6 +66,8 @@ on one tape.
 * Keep inherited documents in doc/archive/iyi/ and doc/archive/crystal/;
   SPEC.md stays at the root as an inherited language reference.
   ris's own docs include CONTRIBUTING.md; TAPE_SPEC.md rules tape memory.
+* Change TAPE_SPEC.md only with a dated entry and its reason in
+  [TAPE_SPEC_CHANGELOG.md](TAPE_SPEC_CHANGELOG.md), in the same commit.
 * Cite doc/reference/iyi/ for unchanged iyi rules, doc/reference/goose/
   for Goose designs. Record only ris differences; check snapshot versions.
 * Build with LLVM 23 or newer: 21 and 22 miscompile ([LLVM.md](LLVM.md)).
