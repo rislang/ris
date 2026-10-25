@@ -17,7 +17,8 @@ one.
   still splits shared Ary handles, cannot rebase interior views, and
   Goose clones no graphs (§3.9, §4.1-4.3). One rule, split all sharing,
   is predictable; cycles are refused. Partial copies are discarded on
-  the destination too, and copying runs no user code.
+  the destination too, and copying runs no user code. The copy rules
+  are one bullet with the build-on-destination rule.
 
 ## 2026-10-25: aliasing, sharing, messages, exit, byte images
 

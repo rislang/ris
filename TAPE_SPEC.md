@@ -28,14 +28,13 @@ is the target contract; what the code does not meet yet is in TODO.md.
 * .ri text literals are static Str; interpolation builds Str on the active
   tape. Read-only text parameters borrow Str, without a String copy.
 * Build retained data on its destination (writers, in-place append), else
-  copy_to(owner): Str bytes, Ary/Tre/@[OnTape] fields and class instances
-  deep; no borrows extended; pointers and self-relative links refused.
-* copy_to(owner) deep-copies, splitting all sharing. Preserve concrete
-  types and inherited fields; run no initialize or callbacks. Refuse
-  self-reaching class types, including through collections, unions or
-  subclasses: build on the destination with Ary nodes and indices.
-  Publish only complete results; discard partial destination storage on
-  failure. Deep chains must not overflow the native stack.
+  copy_to(owner) deep-copies Str bytes, Ary/Tre/@[OnTape] fields and class
+  instances, splitting all sharing and extending no borrows. It keeps
+  concrete types and inherited fields and runs no initialize or callbacks.
+  Refuse pointers, self-relative links and self-reaching class types (via
+  collections, unions or subclasses): build those on the destination with
+  Ary nodes and indices. Publish only complete results; discard partial
+  destination storage on failure; deep chains never overflow the stack.
 * Program data initializes in iyi III.5's module order, once, never
   suspending or seeing incomplete values; stores obey owner provenance.
 ## Owners and stable growth (Goose §1.3, design/root_structs.md: planned)
