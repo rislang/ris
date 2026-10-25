@@ -74,7 +74,6 @@ on one tape.
 
 ## Length and commits
 
-* Every ris document is at most 80 lines: condense, don't split. Every line
-  is at most 80 characters: documents, commit messages, help text.
+* Every dokument line is at most 80 characters: documents, commit messages, help text.
 * No `Co-Authored-By` or other AI attribution lines in commits: most work
   is done with agents, so the line is noise. A clear subject, a short body.
