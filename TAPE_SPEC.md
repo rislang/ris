@@ -10,8 +10,13 @@ is the target contract; what the code does not meet yet is in TODO.md.
   retained results stay on their destination owner. Suspension retains live
   storage. Every exit, normal or unwinding, releases owned regions once.
 * Tape types: Str, Ary(T), Tre(T), builders, scanners, views, @[OnTape]
-  structs; all obey the root rules. Structs, inline tagged unions and pools
-  replace heap classes; dispatch and union payloads never box.
+  structs and class instances; all obey the root rules. Dispatch and union
+  payloads never box.
+* Classes stay: new allocates the instance on the active tape, checked
+  before initialize; a reference is a root like a view. Instances are
+  fixed size and never move; finalize is refused (resources have explicit
+  cleanup); class instances are not Share. Long-lived ones are built on
+  their owner's tape (Program.tape) or copied there with copy_to.
 * Ary, Tre and builders are handles to shared state: assignment and
   arguments alias data, length and capacity, so growth through b shows
   through a; Str and views alias their bytes. Only copy_to copies; Goose's
@@ -23,8 +28,14 @@ is the target contract; what the code does not meet yet is in TODO.md.
 * .ri text literals are static Str; interpolation builds Str on the active
   tape. Read-only text parameters borrow Str, without a String copy.
 * Build retained data on its destination (writers, in-place append), else
-  copy_to(owner): Str bytes, Ary/Tre/@[OnTape] fields deep; no aliases kept
-  or borrows extended; pointers, classes, self-relative links refused.
+  copy_to(owner): Str bytes, Ary/Tre/@[OnTape] fields and class instances
+  deep; no borrows extended; pointers and self-relative links refused.
+* copy_to(owner) deep-copies, splitting all sharing. Preserve concrete
+  types and inherited fields; run no initialize or callbacks. Refuse
+  self-reaching class types, including through collections, unions or
+  subclasses: build on the destination with Ary nodes and indices.
+  Publish only complete results; discard partial destination storage on
+  failure. Deep chains must not overflow the native stack.
 * Program data initializes in iyi III.5's module order, once, never
   suspending or seeing incomplete values; stores obey owner provenance.
 ## Owners and stable growth (Goose §1.3, design/root_structs.md: planned)

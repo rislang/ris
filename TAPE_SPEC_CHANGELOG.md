@@ -4,6 +4,21 @@ Every change to TAPE_SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one.
 
+## 2026-10-25: classes stay, on the tape
+
+* Was: structs, unions and pools replace heap classes; copy_to refuses
+  classes. Now: class instances are tape values allocated by new on the
+  active tape, rooted like views, never moved, not Share; finalize is
+  refused; copy_to copies them deep, splitting all sharing, and refuses
+  self-reaching class types.
+* Why: dropping classes would break iyi and Crystal code and the agent's
+  habits for little gain; the heap, not the class, is what tape removes.
+  An identity map was weighed with Codex and rejected: a class-only map
+  still splits shared Ary handles, cannot rebase interior views, and
+  Goose clones no graphs (§3.9, §4.1-4.3). One rule, split all sharing,
+  is predictable; cycles are refused. Partial copies are discarded on
+  the destination too, and copying runs no user code.
+
 ## 2026-10-25: aliasing, sharing, messages, exit, byte images
 
 * Added: Ary, Tre and builders are handles; assignment and arguments

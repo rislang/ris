@@ -15,10 +15,13 @@ check.sh. Delete finished work in the same commit; keep check.sh green.
     opaque calls and iyimod; refuse unproved effects with a safe form.
     Gate: opaque, imported, suspending and unknown callback targets.
 5. [M] Pending results outside callee scratch and rollback. copy_to
-   refuses classes (Object returns self, tape.iyi:1976), pointers and
-   self-relative links; stays alias-free. Replace to_heap advice in
-   tape_escape_checker, tape_lifetime_checker:119, tape_pointer_checker:317
-   and bindings.cr:156 with copy_to(owner) or the caller's builder.
+   copies class instances deep (Object returns self, tape.iyi:1976),
+   refuses pointers, self-relative links and self-reaching class types;
+   stays alias-free. Consider copy_graph_to(owner) only if real code
+   needs it: one identity map for all class and container identities.
+   Replace to_heap advice in tape_escape_checker,
+   tape_lifetime_checker:119, tape_pointer_checker:317 and bindings.cr:156
+   with copy_to(owner) or the caller's builder.
    Gate: results survive rollback; refused copies; bounded scratch.
 5b. [M] std text and parsers onto the tape with existing tape types.
    Gate: each migrated module has zero heap on success and error paths.
@@ -38,9 +41,11 @@ check.sh. Delete finished work in the same commit; keep check.sh green.
    Start from iyi: a panic walks the defer registry, not frames (III.1.4);
    check what it does to foreign frames before adding a barrier.
    Gate: escape refusals, callback attachment, cleanup tests.
-9. [L] Unboxed unions and dispatch; refuse heap classes; the rest of std
-   by module: collections, IO, errors, resources.
-   Gate: each module zero heap; refusals name the safe form.
+9. [L] Classes on the tape: new allocates on the active tape, roots
+   track references, finalize refused. Unboxed unions and dispatch; the
+   rest of std by module: collections, IO, errors, resources.
+   Gate: class instances and each module zero heap; refusals name the
+   safe form.
 10. [M] Every sample, branch and server request workload at zero heap;
    replace GC comparisons; keep checksums and the ris-bench respond copy.
 11. [M] No GC by default; remove the ris allocator fallback, exemptions
