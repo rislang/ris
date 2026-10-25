@@ -3,9 +3,8 @@
 Rules: TAPE_SPEC.md. Work in this dependency order; each gate runs in
 check.sh. Delete finished work in the same commit; keep check.sh green.
 
-1. [M] Harden ris heap: migration marks, opaque calls, runtime exemptions.
-   Budgets must only fall (heap_check.py:35); trace servers past listen.
-   Gate: category fixtures; decreasing site and allocation budgets.
+1. [M] Trace serve past listen (web now traces one real HTTP request).
+   Replace its startup-answer budget with a bounded request workload.
 2. [L] Failure semantics before heap-backed runtime paths go.
    Overflow-safe size math (&+/&* in tape.iyi, region.iyi); publish
    limits (64 MiB is a start size, not a cap); fatal without allocation.

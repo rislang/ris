@@ -13,6 +13,8 @@ class Iyi::Command
         are excluded: they are not program values. Foreign allocations
         and opaque artifact bodies cannot be inspected. Standard stream
         objects/buffers and stack-guard metadata are runtime support.
+        migration/opaque/exemption are overlapping audit categories;
+        total counts allocation kinds only, not audit categories.
         RIS_HEAP_STATS=1 prints program allocations and bytes at exit.
         build/run --no-gc links gc_none on Linux and traps heap allocation.
         HELP
@@ -39,6 +41,11 @@ class Iyi::Command
     %w(class string array hash closure other).each do |kind|
       puts "#{kind}: #{counts[kind]}"
     end
-    puts "total: #{counts.values.sum}"
+    allocation_total = counts.values.sum
+    %w(migration opaque exemption).each do |kind|
+      allocation_total -= counts[kind]
+      puts "#{kind}: #{counts[kind]}"
+    end
+    puts "total: #{allocation_total}"
   end
 end

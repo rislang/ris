@@ -59,7 +59,11 @@ class Iyi::HeapCensus < Iyi::Visitor
     return unless loc
     file = loc.original_filename
     return unless file
-    @sites[{file, loc.line_number, loc.column_number, kind}] = detail
+    key = {file, loc.line_number, loc.column_number, kind}
+    if kind.in?("migration", "opaque", "exemption") && (old = @sites[key]?)
+      detail = (old.split("; ") + [detail]).uniq.sort.join("; ")
+    end
+    @sites[key] = detail
   end
 
   def reach(a_def : Def) : Nil
@@ -91,12 +95,54 @@ class Iyi::HeapCensus < Iyi::Visitor
     "class"
   end
 
+  # Audit categories overlap allocation kinds and never claim exact effects.
+  def classify(node : Call, targets) : Nil
+    if targets.nil? || targets.empty?
+      add node, "opaque", "unknown target: #{node.name}"
+      return
+    end
+    if targets.size > 1
+      add node, "opaque", "virtual targets (all traversed): #{node.name}"
+    end
+    targets.each do |target|
+      detail = "#{target.owner}##{target.name}"
+      if target.is_a?(External)
+        add node, "opaque", "FFI: #{detail}"
+      elsif node.obj.try(&.type?).is_a?(ProcInstanceType) &&
+            node.name == "call"
+        add node, "opaque", "proc call: #{detail}"
+      end
+      if HeapPolicy.internal_def?(target) ||
+         TapeRules.runtime?(@program, target.location) ||
+         target.annotation(@program.tape_unsafe_annotation)
+        add node, "exemption", "runtime/std exemption: #{detail}"
+      end
+      string_api = node.obj.try(&.type?).to_s.in?("String", "String.class") ||
+        node.args.any? { |arg| arg.type?.to_s == "String" }
+      if node.name == "to_heap" ||
+         (node.name == "to_s" && node.type?.to_s == "String") ||
+         target.annotation(@program.tape_to_heap_annotation) || string_api
+        reason = if node.name == "to_heap"
+                   "to_heap"
+                 elsif node.name == "to_s" && node.type?.to_s == "String"
+                   "to_s to String"
+                 elsif target.annotation(@program.tape_to_heap_annotation)
+                   "@[TapeToHeap]"
+                 else
+                   "String API"
+                 end
+        add node, "migration", "#{reason}: #{detail}"
+      end
+    end
+  end
+
   def visit(node : Call)
     if expanded = node.expanded
       expanded.accept self
       return false
     end
     targets = node.target_defs
+    classify(node, targets)
     targets.try &.each do |target|
       if HeapPolicy.allocator?(target)
         add node, "other", "#{target.owner}##{target.name}"

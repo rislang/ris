@@ -1,0 +1,20 @@
+@[Ffi]
+module test/ris/heap_opaque
+
+class First
+  def value : Int32
+    1
+  end
+end
+
+class Second
+  def value : Int32
+    2
+  end
+end
+
+value = Program.args.empty? ? First.new : Second.new
+puts value.value
+callback = -> { 3 }
+puts callback.call
+__iyi_malloc64(1_u64)

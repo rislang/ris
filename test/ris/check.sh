@@ -467,6 +467,35 @@ else
 fi
 
 # Census, runtime budgets and the collector-free trap share one gate.
+# Audit categories are separate from potential allocation-site totals.
+for pair in 'heap_migration migration' 'heap_opaque opaque' \
+            'heap_exemptions exemption'; do
+  read -r name category <<<"$pair"
+  out=$("$RIS" heap --user "test/ris/$name.ri" 2>&1)
+  if [ $? -eq 0 ] && grep -qE "^$category: [1-9][0-9]*$" <<<"$out"; then
+    echo "census   $name ($category)"
+  else
+    echo "FAILED   $name: $out"
+    status=1
+  fi
+done
+out=$("$RIS" heap --user test/ris/heap_migration.ri 2>&1)
+for mark in 'to_heap:' 'to_s to String:' '@[TapeToHeap]:' 'String API:'; do
+  if ! grep -qF "$mark" <<<"$out"; then
+    echo "FAILED   heap_migration: missing $mark"
+    status=1
+  fi
+done
+out=$("$RIS" heap --user test/ris/heap_opaque.ri 2>&1)
+for mark in 'proc call:' 'virtual targets (all traversed):' 'FFI:'; do
+  if ! grep -qF "$mark" <<<"$out"; then
+    echo "FAILED   heap_opaque: missing $mark"
+    status=1
+  fi
+done
+if ! python3 test/ris/heap_check_test.py; then
+  status=1
+fi
 if ! python3 test/ris/heap_check.py; then
   status=1
 fi

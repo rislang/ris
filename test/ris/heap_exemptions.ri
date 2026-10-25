@@ -1,0 +1,8 @@
+module test/ris/heap_exemptions
+
+import std/socket::{IyiSocket}
+
+# The OS boundary in std is TapeUnsafe; core tape helpers are in src/iyi.
+puts "core".bytesize
+listener = IyiSocket.listen(0)
+listener.close

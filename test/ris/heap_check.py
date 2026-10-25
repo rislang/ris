@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Fixed heap workloads; server prefixes stop before opening a listener."""
+"""Fixed heap workloads, including one real web request."""
 import os
 from pathlib import Path
 import re
+import selectors
+import socket
 import subprocess
 import sys
 import tempfile
@@ -35,8 +37,8 @@ def compare(path, label, actual, budget):
     if actual > budget:
         raise RuntimeError(f"{path}: {label} {actual} > budget {budget}")
     if actual < budget:
-        print(f"note: {path}: {label} fell {budget} -> {actual}; "
-              "lower heap_budget.txt in this change")
+        raise RuntimeError(f"{path}: {label} fell {budget} -> {actual}; "
+                           "lower heap_budget.txt in this change")
 
 
 def main():
@@ -59,7 +61,7 @@ def main():
             source = path
             name = Path(path).stem
             mode = {"escape": "tape", "query": "tape",
-                    "serve": "startup-answer", "web": "startup"}.get(
+                    "serve": "startup-answer", "web": "request"}.get(
                         name, "default")
             args = ["tape"] if mode == "tape" else []
             if mode.startswith("startup"):
@@ -71,14 +73,58 @@ def main():
                 source = str(Path(scratch) / f"{name}.ri")
                 Path(source).write_text(text)
                 args = ["answer"] if name == "serve" else ["0"]
+            if mode == "request":
+                text = Path(path).read_text()
+                # Stop accepting; the active handler still writes its response.
+                text = text.replace("Server.answer(listener) do |req, res|",
+                    "Server.answer(listener) do |req, res|\n"
+                    "  listener.close")
+                source = str(Path(scratch) / f"{name}.ri")
+                Path(source).write_text(text)
+                args = ["0"]
             binary = str(Path(scratch) / f"sample-{index}")
             result = command(["build", "--release", "-o", binary, source])
             if result.returncode:
                 raise RuntimeError(result.stdout + result.stderr)
             env = dict(os.environ, RIS_HEAP_STATS="1")
             env.pop("RIS_TAPE_STATS", None)
-            run = subprocess.run([binary, *args], capture_output=True,
-                                 text=True, env=env, timeout=180)
+            if mode == "request":
+                with subprocess.Popen([binary, *args], stdout=subprocess.PIPE,
+                                      stderr=subprocess.PIPE, text=True,
+                                      env=env) as server:
+                    try:
+                        ready = selectors.DefaultSelector()
+                        ready.register(server.stdout, selectors.EVENT_READ)
+                        if not ready.select(30):
+                            server.kill()
+                            raise RuntimeError(
+                                "web did not announce its listener")
+                        line = server.stdout.readline()
+                        ready.close()
+                        port = measured(r"localhost:(\d+)/", line)
+                        address = ("127.0.0.1", port)
+                        with socket.create_connection(address, 10) as sock:
+                            sock.sendall(b"GET /users/1/status HTTP/1.1\r\n"
+                                         b"Host: localhost\r\n"
+                                         b"Connection: close\r\n\r\n")
+                            response = b""
+                            while chunk := sock.recv(65536):
+                                response += chunk
+                        if b"<h1>alice</h1>" not in response:
+                            server.kill()
+                            raise RuntimeError(
+                                f"bad web response: {response!r}")
+                        stdout, stderr = server.communicate(timeout=30)
+                        run = subprocess.CompletedProcess(
+                            server.args, server.returncode,
+                            line + stdout, stderr)
+                    finally:
+                        if server.poll() is None:
+                            server.kill()
+                            server.communicate()
+            else:
+                run = subprocess.run([binary, *args], capture_output=True,
+                                     text=True, env=env, timeout=180)
             if run.returncode:
                 raise RuntimeError(f"{path}: {run.stdout}{run.stderr}")
             allocations = measured(r"^ris heap: (\d+) allocations,",
@@ -112,13 +158,14 @@ def main():
         TABLE.write_text(
             "# sample  static-user-sites  runtime-allocations  workload\n"
             "# release builds; no stdin; default args unless named below.\n"
-            "# tape: argv=tape; startup[-answer]: exit before listen,\n"
-            "# argv=0 (web) / answer (serve); original source census.\n"
+            "# tape: argv=tape; startup-answer: serve exits before listen,\n"
+            "# argv=answer (serve); request: web argv=0, one HTTP GET.\n"
             + "\n".join(rows) + "\n")
 
 
-try:
-    main()
-except (RuntimeError, subprocess.TimeoutExpired) as error:
-    print(f"FAILED   heap: {error}", file=sys.stderr)
-    sys.exit(1)
+if __name__ == "__main__":
+    try:
+        main()
+    except (RuntimeError, OSError, subprocess.TimeoutExpired) as error:
+        print(f"FAILED   heap: {error}", file=sys.stderr)
+        sys.exit(1)

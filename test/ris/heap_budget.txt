@@ -1,7 +1,7 @@
 # sample  static-user-sites  runtime-allocations  workload
 # release builds; no stdin; default args unless named below.
-# tape: argv=tape; startup[-answer]: exit before listen,
-# argv=0 (web) / answer (serve); original source census.
+# tape: argv=tape; startup-answer: serve exits before listen,
+# argv=answer (serve); request: web argv=0, one HTTP GET.
 samples/ris/chat.ri 11 14 default
 samples/ris/escape.ri 0 5 tape
 samples/ris/hello.ri 1 2 default
@@ -13,4 +13,4 @@ samples/ris/request.ri 0 71 default
 samples/ris/respond.ri 0 6 default
 samples/ris/serve.ri 6 82 startup-answer
 samples/ris/shop/order.ri 0 0 default
-samples/ris/web.ri 0 77 startup
+samples/ris/web.ri 0 96 request
