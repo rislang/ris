@@ -1,0 +1,23 @@
+module test/ris/fault_no_heap
+
+@[PointerUnsafe("exercise the fault handler with stack ABI buffers")]
+def check_fault : Nil
+# Exercise the non-stack-fault disposition path under the allocation trap.
+# Signal zero cannot alter a real disposition; fake ABI buffers are local.
+info = uninitialized UInt64[16]
+context = uninitialized UInt64[128]
+128.times { |i| pointerof(context).as(UInt64*)[i] = 0_u64 }
+16.times { |i| pointerof(info).as(UInt64*)[i] = 0_u64 }
+{% if flag?(:darwin) %}
+  machine = uninitialized UInt64[64]
+  64.times { |i| pointerof(machine).as(UInt64*)[i] = 0_u64 }
+  pointerof(context).as(UInt64*)[6] = pointerof(machine).address
+  pointerof(info).as(UInt64*)[3] = 1048576_u64
+{% else %}
+  pointerof(info).as(UInt64*)[2] = 1048576_u64
+{% end %}
+IyiStackGuard.faulted(0, pointerof(info).address, pointerof(context).address)
+puts "fault path: zero heap"
+
+end
+check_fault

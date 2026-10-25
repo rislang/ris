@@ -78,3 +78,21 @@ end
 Each fiber has its own tape; a spawned fiber cannot take its parent's values.
 Size writers and arrays up front, refill with `clear`, write output straight
 to its IO. `RIS_TAPE_STATS=1` counts moves. `@[TapeUnsafe]` is std-only.
+
+## Published runtime limits
+`IyiRegion` starts tapes and side regions at 67,108,864 bytes (64 MiB),
+not a cap. Each mapping adds a 64-byte header and rounds to 65,536 bytes.
+Checked UInt64 arithmetic permits at most 2^64 - 65,536 mapped bytes;
+the OS address space and available memory usually impose a smaller limit.
+`Str` byte lengths and `Ary`/`Tre` counts are at most 2^31 - 1.
+Region and side-region lists have no fixed count cap; allocation failure
+is fatal. A displaced growing value gets a side region; growth can move
+it again. Each worker caches at most 64 released initial-size mappings.
+Each group permits at most 2^31 - 1 live tasks (`IyiGroup::MAX_LIVE`).
+There is no global task cap; metadata and stacks consume memory.
+`IyiFiber::STACK_BYTES` is 262,144 bytes, plus a 4,096-byte guard page.
+Main's stack limit is set by the OS; recursion has no fixed cap.
+POSIX fault handlers use a 65,536-byte alternate stack. Exhaustion is fatal.
+`RIS_TAPE_STATS=1` prints these limits from the runtime constants.
+`exit` skips user cleanup and flushes runtime stdio. This differs from
+`doc/reference/iyi/source/SPEC.md` III.1.4 and its exit rule near line 2382.

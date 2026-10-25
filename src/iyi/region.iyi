@@ -15,6 +15,7 @@ class IyiRegion
   DATA     =       64_u64
   UNDER    =       16_u64
   CAPACITY = 67108864_u64
+  MAX_COUNT = 2147483647_u64
   # A mapping's length is a whole number of these: 64 KiB covers the
   # 4 KiB pages of x86_64, the 16 KiB of Apple's and Asahi's arm64, the
   # 64 KiB of some arm64 servers and Windows' allocation granularity,
@@ -230,7 +231,7 @@ class IyiRegion
   # Str lengths and Ary/Tre element counts are signed 32-bit values.
   def self.count(value : UInt64) : UInt64
     size_error("iyi: tape size exceeds 2147483647: ", value) \
-      if value > 2147483647_u64
+      if value > MAX_COUNT
     value
   end
 
@@ -378,6 +379,28 @@ class IyiRegion
   def self.report_stats : Nil
     return unless stats_asked?
     add_stats
+    RisHeap.text("ris tape limits: start ")
+    RisHeap.number(CAPACITY)
+    RisHeap.text(", grain ")
+    RisHeap.number(GRAIN)
+    RisHeap.text(", max elements ")
+    RisHeap.number(MAX_COUNT)
+    RisHeap.text("\nris tape limits: max mapping ")
+    RisHeap.number(0xFFFFFFFFFFFF0000_u64)
+    RisHeap.text("\nris tape limits: side start ")
+    RisHeap.number(SIDE_FIRST)
+    RisHeap.text(", cached regions ")
+    RisHeap.number(SPARES)
+    RisHeap.text("\nris tape limits: region count has no fixed cap\n")
+    {% if (flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) ||
+            (flag?(:darwin) && flag?(:aarch64)) ||
+            (flag?(:win32) && flag?(:x86_64)) %}
+      RisHeap.text("ris tape limits: live tasks per group ")
+      RisHeap.number(IyiGroup::MAX_LIVE.to_u64)
+      RisHeap.text("\nris tape limits: fiber stack ")
+      RisHeap.number(IyiFiber::STACK_BYTES)
+      RisHeap.text(" bytes; main stack is OS-limited\n")
+    {% end %}
     RisHeap.text("ris tape: ")
     RisHeap.number(@@total_scopes)
     RisHeap.text(" scopes, ")

@@ -1042,6 +1042,43 @@ module Iyi
     end
 
     def visit(node : ProcLiteral)
+      # A defer cannot escape its frame. Borrow a struct receiver at the
+      # registration site instead of reading the ordinary closure's copy.
+      # Keep the parent context: other captured locals still live there.
+      if node.def.iyi_defer? && node.def.closure? &&
+         context.type.passed_by_value? && context.vars.has_key?("self")
+        parent = context
+        parent_type = parent.closure_type.not_nil!
+        wrapper_type = llvm_context.struct([
+          parent_type.pointer, llvm_type(context.type).pointer,
+        ])
+        wrapper = malloc(wrapper_type, node.location)
+        parent_slot = gep(wrapper_type, wrapper, 0, 0)
+        self_slot = gep(wrapper_type, wrapper, 0, 1)
+        pointer_type = @program.pointer_of(@program.void)
+        iyi_with_write_barrier(parent_slot, pointer_type) do
+          store parent.closure_ptr.not_nil!, parent_slot
+        end
+        iyi_with_write_barrier(self_slot, pointer_type) do
+          store llvm_self, self_slot
+        end
+        with_cloned_context do
+          context.closure_vars = [] of MetaVar
+          context.closure_type = wrapper_type
+          context.closure_ptr = wrapper
+          context.closure_skip_parent = false
+          context.closure_parent_context = parent
+          context.closure_self = nil
+          context.closure_borrowed_self = parent.type
+          codegen_proc_literal(node)
+        end
+      else
+        codegen_proc_literal(node)
+      end
+      false
+    end
+
+    def codegen_proc_literal(node : ProcLiteral)
       fun_literal_name = fun_literal_name(node)
       is_closure = node.def.closure?
 
@@ -2532,6 +2569,7 @@ module Iyi
       parent_closure_type = parent_context.try &.closure_type
 
       if closure_vars || self_closured
+        current_context.closure_borrowed_self = nil
         closure_vars ||= [] of MetaVar
 
         closure_type, closure_has_inner_pointers =

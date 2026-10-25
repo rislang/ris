@@ -1,0 +1,21 @@
+@[Ffi]
+module test/ris/signal_flags
+import std/signal::{Signal}
+
+lib SignalTest
+  fun getpid : Int32
+  fun kill(pid : Int32, signal : Int32) : Int32
+end
+
+group do |g|
+  task = g.spawn { Signal.wait(Signal::INT, Signal::TERM) }
+  sleep(10)
+  SignalTest.kill(SignalTest.getpid, Signal::INT.value)
+  raise "signal waiter failed" unless task.value == Signal::INT
+end
+# Saturate the notification pipe before normal code consumes the flags.
+100000.times { SignalTest.kill(SignalTest.getpid, Signal::TERM.value) }
+# A distinct signal must survive even when its notification cannot fit.
+SignalTest.kill(SignalTest.getpid, Signal::INT.value)
+puts Signal.wait(Signal::INT) == Signal::INT
+puts Signal.wait(Signal::TERM) == Signal::TERM

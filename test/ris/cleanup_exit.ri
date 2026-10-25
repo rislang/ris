@@ -6,6 +6,8 @@ def observe(label : Str, active : Bool) : Nil
   puts label
 end
 
+STDOUT.sync = false
+puts "flushed"
 defer observe("outer exit", true)
 tape do
   defer observe("inner exit", true)

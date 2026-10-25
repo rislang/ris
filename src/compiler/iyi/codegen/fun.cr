@@ -894,6 +894,12 @@ class Iyi::CodeGenVisitor
         self_value = load(llvm_type(closure_self), self_value) unless closure_self.passed_by_value?
         self.context.vars["self"] = LLVMVar.new(self_value, closure_self, true, debug_variable_created: debug_variable_created)
       end
+
+      if target_def.iyi_defer? && (borrowed = context.closure_borrowed_self)
+        slot = gep(closure_type, closure_ptr, 0, 1, "defer_self")
+        value = load(llvm_type(borrowed).pointer, slot)
+        self.context.vars["self"] = LLVMVar.new(value, borrowed, true)
+      end
     end
   end
 

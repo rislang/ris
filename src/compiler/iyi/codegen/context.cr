@@ -28,6 +28,7 @@ class Iyi::CodeGenVisitor
     property closure_skip_parent : Bool
     property closure_parent_context : Context?
     property closure_self : Type?
+    property closure_borrowed_self : Type?
 
     def initialize(@fun, @fun_type, @type, @vars = LLVMVars.new)
       @closure_skip_parent = false
@@ -43,6 +44,7 @@ class Iyi::CodeGenVisitor
       @closure_skip_parent = false
       @closure_parent_context = nil
       @closure_self = nil
+      @closure_borrowed_self = nil
     end
 
     def clone
@@ -65,6 +67,7 @@ class Iyi::CodeGenVisitor
       context.closure_skip_parent = @closure_skip_parent
       context.closure_parent_context = @closure_parent_context
       context.closure_self = @closure_self
+      context.closure_borrowed_self = @closure_borrowed_self
       context
     end
 

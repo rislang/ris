@@ -45,7 +45,7 @@ broader suites. Check formatting of changed Crystal files with
   [UPSTREAM.md](UPSTREAM.md) until taken upstream.
 * Per-change speed measurements are paused; move suitable work onto tape.
   Keep the respond sample and its ris-bench copy in sync.
-* ris documents have at most 80 lines, each at most 80 characters. Commit
+* ris document lines are at most 80 characters, any length. Commit
   messages also wrap at 80; use a clear subject and no AI attribution.
 * Preserve the Apache 2.0 licence and inherited copyright notices:
   [LICENSE](LICENSE), [NOTICE.md](NOTICE.md).

@@ -421,6 +421,7 @@ class IyiFiber
   # Panics — III.1.4. The registry `defer` pushes onto and the panic
   # path drains; the flag and message a boundary reads after the join.
   property defers : IyiDeferNode?
+  property unwinding : Bool = false
   # ris: one non-capturing cleanup, reused by sequential outer tape scopes.
   property tape_cleanup : IyiDeferNode?
   property panicked : Bool
@@ -1967,7 +1968,7 @@ class IyiScheduler
     reap_dying
     body = fiber.proc
     {% if (!flag?(:gc_none) || flag?(:linux)) && !flag?(:gc_boehm) %}
-      # Each spawned body owns a tape, including its panic/exit cleanup.
+      # Each spawned body owns a tape, including its panic cleanup.
       IyiRegion.tape_scope(Tape::CAPACITY) do
         body.call unless body.is_a?(Nil)
       end
@@ -3114,6 +3115,7 @@ class IyiScheduler
     IyiSchedLock.lock
     fiber.state = IyiFiberState::Running
     IyiSchedLock.unlock
+    fiber.unwinding = true
     again = fiber.panicked
     # Marked before the drain: a boundary the drain itself reaches — a
     # deferred `g.join`, above all — must see that its owner is already
@@ -3168,6 +3170,7 @@ class IyiScheduler
   # group's join waited forever.
   def self.stop_current : NoReturn
     fiber = current
+    fiber.unwinding = true
     while true
       node = fiber.defers
       break unless node.is_a?(IyiDeferNode)
@@ -3667,7 +3670,7 @@ def __iyi_tape_defer_pop : Nil
 end
 
 def __iyi_tape_defer_run : Nil
-  # The panic/exit drain has already detached the node. Drop its old link
+  # The panic drain has already detached the node. Drop its old link
   # before releasing, so a retained task handle does not retain defers.
   node = IyiScheduler.current.tape_cleanup
   node.next_node = nil if node.is_a?(IyiDeferNode)
@@ -3685,23 +3688,10 @@ def __iyi_flush_std : Nil
   STDERR.flush
 end
 
-# The program ends here, with *status* as its exit code. What this task
-# deferred runs first, innermost first, as a panic's cleanups do; then the
-# process ends and every other task with it, their cleanups not run -
-# Go's `os.Exit` and Crystal's `exit` alike. A failure a person should
-# read about is a panic (`raise`, SPEC.md III.1.4); this is the other
-# kind of ending, a program that has answered and says so in its status,
-# as `diff` and `grep` do with 1. Before this a program reached for the
-# runtime's own `__iyi_exit`, which skipped the cleanups too.
+# ris exit ends the process without user cleanup (TAPE_SPEC.md).
+# Flush runtime streams directly; other fibers end with the process.
 def exit(status : Int32 = 0) : NoReturn
-  fiber = IyiScheduler.current
   IyiScheduler.exiting = true
-  while true
-    node = fiber.defers
-    break unless node.is_a?(IyiDeferNode)
-    fiber.defers = node.next_node
-    node.run
-  end
   IyiRegion.report_stats
   RisHeap.report
   __iyi_flush_std
@@ -3813,6 +3803,15 @@ class IyiTask(T)
 end
 
 class IyiGroup
+  MAX_LIVE = 2147483647
+
+  def self.check_count(live : Int32) : Nil
+    if live >= MAX_LIVE
+      RisHeap.text("ris: fatal: group task limit 2147483647 reached\n")
+      __iyi_exit(1)
+    end
+  end
+
   @live : Int32
   getter first_failure : UInt64
   @first_child : IyiFiber?
@@ -3855,6 +3854,7 @@ class IyiGroup
   # spawner, for its whole life.
   def spawn(&block : -> T) : IyiTask(T) forall T
     raise "a task spawned on a group whose block has ended: no scope is left to join it" if @ended
+    IyiGroup.check_count(@live)
     IyiScheduler.make_stacks_with { |fresh| fresh.prepare_stack } unless IyiScheduler.makes_stacks?
     fiber = IyiFiber.new
     fiber.home = IyiScheduler.state
@@ -3880,6 +3880,7 @@ class IyiGroup
     # `CleanupTransformer#check_share_boundary`).
     def spawn_parallel(&block : -> T) : IyiTask(T) forall T
       raise "a task spawned on a group whose block has ended: no scope is left to join it" if @ended
+      IyiGroup.check_count(@live)
       IyiScheduler.make_stacks_with { |fresh| fresh.prepare_stack } unless IyiScheduler.makes_stacks?
       IyiWorkers.start
       fiber = IyiFiber.new
@@ -3920,6 +3921,7 @@ class IyiGroup
     spawner = IyiScheduler.current
     IyiScheduler.register(fiber)
     IyiSchedLock.lock
+    IyiGroup.check_count(@live)
     fiber.cancelled = spawner.cancelled || @cancelled
     fiber.next_child = @first_child
     fiber.prev_child = nil
@@ -3989,10 +3991,7 @@ class IyiGroup
   # A dying owner is not the sign: a cleanup's own group, opened and ended
   # on a panic's path, had its tasks cancelled at its end.
   def join(early : Bool = false) : Nil
-    # An `exit` runs this task's cleanups and ends the process, the other
-    # tasks with it: a group's join is one of those cleanups, and it waited
-    # for every task - `exit(4)` beside a sibling's minute-long sleep took
-    # the minute.
+    # Runtime stream flushing during exit must not wait for tasks.
     return if IyiScheduler.exiting?
     me = IyiScheduler.current
     # The count and the joiner under the scheduler's lock, which a task
@@ -4869,12 +4868,14 @@ end
       end
       # Not the stack's edge: the signal's default action, on the retry.
       {% if flag?(:darwin) %}
-        action = Pointer(UInt64).malloc(2_u64)
+        storage = uninitialized UInt64[2]
+        action = pointerof(storage).as(UInt64*)
         action[0] = 0_u64
         action[1] = 0_u64
         LibC.sigaction(signal, action.as(Void*), Pointer(Void).new(0_u64))
       {% else %}
-        action = Pointer(UInt64).malloc(4_u64)
+        storage = uninitialized UInt64[4]
+        action = pointerof(storage).as(UInt64*)
         action[0] = 0_u64
         action[1] = 0_u64
         action[2] = 0_u64

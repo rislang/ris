@@ -1,0 +1,5 @@
+module test/ris/unwind_no_heap
+
+# Enter the runtime's unwinding state without allocating user closures.
+IyiScheduler.current.unwinding = true
+raise "second panic"

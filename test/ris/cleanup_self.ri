@@ -1,0 +1,28 @@
+module test/ris/cleanup_self
+import std/int
+
+struct Counter
+  getter n : Int32 = 0
+
+  def fail : Nil
+    saved = -> { @n }
+    defer puts @n
+    defer @n += 1
+    @n = 8
+    puts saved.call
+    raise "expected"
+  end
+
+  def finish : Nil
+    defer @n = 6
+    @n = 3
+  end
+end
+
+group do |g|
+  task = g.spawn { Counter.new.fail }
+  task.value
+end
+counter = Counter.new
+counter.finish
+puts counter.n

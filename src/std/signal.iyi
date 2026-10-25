@@ -20,7 +20,7 @@
 # group join what is in flight.
 #
 # Underneath, on Linux and darwin, the handler does the one thing a signal
-# handler may: it writes the signal's number to a pipe. The waiting fiber
+# handler may: it sets an atomic flag and wakes a pipe. The waiting fiber
 # parks on the pipe's read end like any socket read, so the program's own
 # code never runs inside a handler. On Windows the console's control
 # handler runs on a thread of its own and posts a completion to the
@@ -171,6 +171,7 @@ class SignalWaiter
     # The signals `Signal.ignore` named, which the handler drops.
     @@ignored = ::Atomic(UInt64).new(0_u64)
   {% else %}
+    @@arrivals = ::Atomic(UInt64).new(0_u64)
     @@read_fd = -1
     @@write_fd = -1
   {% end %}
@@ -188,6 +189,8 @@ class SignalWaiter
     while true
       {% if flag?(:win32) %}
         @@pending = @@pending | @@arrived.swap(0_u64)
+      {% else %}
+        drain
       {% end %}
       taken = take(signals)
       return taken if taken
@@ -386,11 +389,16 @@ class SignalWaiter
       {% end %}
     end
 
-    # The handler: one write of one byte, which is all a signal handler may
-    # safely do. A full pipe drops the byte - a thousand signals nobody
-    # waited for are one pending bit anyway.
+    # Only record flags and wake the poller. A full pipe loses no signal:
+    # arrivals live in the atomic word, not in the notification bytes.
     def self.arrived(number : Int32) : Nil
-      byte = number.to_u8
+      bit = 1_u64.unsafe_shl(number.to_u64)
+      while true
+        seen = @@arrivals.get
+        break if seen & bit != 0_u64 ||
+          @@arrivals.compare_and_set(seen, seen | bit)[1]
+      end
+      byte = 0_u8
       __iyi_write(@@write_fd, pointerof(byte).as(Void*), 1_u64)
     end
 
@@ -403,19 +411,14 @@ class SignalWaiter
       nil
     end
 
-    # Every byte the pipe holds, read into the pending bits; the read end
-    # is non-blocking, so an empty pipe ends it.
+    # Drain notifications in normal code, then collect arrival flags.
     private def self.drain : Nil
-      buffer = Pointer(UInt8).malloc(64_u64)
-      while true
-        got = __iyi_read(@@read_fd, buffer.as(Void*), 64_u64)
-        break if got <= 0_i64
-        index = 0
-        while index < got
-          @@pending = @@pending | 1_u64.unsafe_shl(buffer[index].to_u64)
-          index = index + 1
-        end
+      storage = uninitialized UInt8[64]
+      buffer = pointerof(storage).as(UInt8*)
+      while __iyi_read(@@read_fd, buffer.as(Void*), 64_u64) > 0_i64
       end
+      @@pending = @@pending | @@arrivals.swap(0_u64)
     end
+
   {% end %}
 end

@@ -662,6 +662,8 @@ module Iyi
     # block `spawn` or a callback keeps - may run after the tape block it
     # was made in has ended, so it may not capture a tape value.
     def check_tape_captures(a_def : Def)
+      # A lowered defer runs before its owning tape is released.
+      return if a_def.iyi_defer?
       return unless a_def.closure?
       vars = a_def.vars
       ClosuredVarsCollector.collect(a_def).each do |captured|

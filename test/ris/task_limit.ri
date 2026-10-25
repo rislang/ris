@@ -1,0 +1,4 @@
+module test/ris/task_limit
+
+# Exercise the boundary without allocating billions of task records.
+IyiGroup.check_count(IyiGroup::MAX_LIVE)

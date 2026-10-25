@@ -1,0 +1,5 @@
+module test/ris/unwind_failure
+
+defer puts "must not run"
+defer raise "second panic"
+raise "first panic"

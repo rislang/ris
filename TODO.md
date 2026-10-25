@@ -3,11 +3,6 @@
 Rules: TAPE_SPEC.md. Work in this dependency order; each gate runs in
 check.sh. Delete finished work in the same commit; keep check.sh green.
 
-2. [L] Failure semantics before heap-backed runtime paths go.
-   Publish limits (64 MiB is a start size, not a cap).
-   Ensure LIFO on current locals; raise in cleanup is fatal; exit skips
-   user cleanup (concurrency.iyi:3690 walks defers); signals set flags.
-   Gate: panic, cleanup and exit subprocess tests.
 3. [L] Named lexical/program owners; refuse copies, moves, temporaries,
    nesting and raw owner operations. Stable growth: growth now moves a
    value once (region.iyi:191); give each growing value reserved space
@@ -31,7 +26,8 @@ check.sh. Delete finished work in the same commit; keep check.sh green.
    initialization, link and byte-image validation, reset, explicit
    relocation; pool free never closes a resource.
    Gate: stale views stay typed; invalid operations mutate nothing.
-7. [L] Tasks, queues, wait nodes and escaping captures in pools; copy
+7. [L] Tasks, queues, wait nodes, escaping captures and defer closures
+   (codegen.cr ProcLiteral mallocs a wrapper) in pools; copy
    messages, results and panics to the receiver; bounded queues; failed
    receive keeps the message; owner isolation, TLS, ordered
    nonsuspending init and frozen sharing.

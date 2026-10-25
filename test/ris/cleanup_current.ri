@@ -1,0 +1,30 @@
+module test/ris/cleanup_current
+import std/int
+
+def returned : Nil
+  value = 1
+  defer puts value
+  value = 2
+  return
+end
+returned
+2.times do |i|
+  value = 3
+  defer puts value
+  value = 4 + i
+  next if i == 0
+  break
+end
+group do |g|
+  task = g.spawn do
+    local_tape do
+      text = Str.build { |w| w << "alive" }
+      value = 6
+      defer puts text
+      defer puts value
+      value = 7
+      raise "expected"
+    end
+  end
+  task.value
+end

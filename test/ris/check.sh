@@ -166,7 +166,11 @@ if [ "$out" = $'no GC allocation per scope\ntrue' ]; then echo "runs     cleanup
 out=$("$RIS" run test/ris/fibers/cleanup_panic.ri 2>/dev/null)
 if [ "$?" = 0 ] && [ "$out" = $'nested panic\ninner panic\nouter panic\ntrue\ntrue\nscope after panic' ]; then echo "runs     cleanup_panic"; else echo "FAILED   cleanup_panic: $out"; status=1; fi
 out=$("$RIS" run test/ris/cleanup_exit.ri 2>&1)
-if [ "$?" = 3 ] && [ "$out" = $'inner exit\nouter exit' ]; then echo "runs     cleanup_exit"; else echo "FAILED   cleanup_exit: $out"; status=1; fi
+if [ "$?" = 3 ] && [ "$out" = 'flushed' ]; then
+  echo "runs     cleanup_exit"
+else
+  echo "FAILED   cleanup_exit: $out"; status=1
+fi
 
 out=$("$RIS" run test/ris/zero_capacity.ri 2>&1)
 if [ "$out" = $'123\n789\n456\nABC' ]; then echo "runs     zero_capacity"; else echo "FAILED   zero_capacity: $out"; status=1; fi
@@ -464,6 +468,59 @@ if [ "$out" = 2 ]; then
 else
   echo "FAILED   scanner_words: $out"
   status=1
+fi
+
+out=$("$RIS" run test/ris/signal_flags.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = $'true\ntrue' ]; then
+  echo "runs     signal_flags"
+else
+  echo "FAILED   signal_flags: $out"; status=1
+fi
+out=$("$RIS" run test/ris/cleanup_self.ri 2>/dev/null)
+if [ "$?" -eq 0 ] && [ "$out" = $'0\n9\n6' ]; then
+  echo "runs     cleanup_self"
+else
+  echo "FAILED   cleanup_self: $out"; status=1
+fi
+out=$("$RIS" run test/ris/cleanup_cancel.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = $'9\ncancel alive\ncancel done' ]; then
+  echo "runs     cleanup_cancel"
+else
+  echo "FAILED   cleanup_cancel: $out"; status=1
+fi
+out=$("$RIS" run --no-gc test/ris/fault_no_heap.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = 'fault path: zero heap' ]; then
+  echo "runs     fault_no_heap (--no-gc)"
+else
+  echo "FAILED   fault_no_heap: $out"; status=1
+fi
+out=$("$RIS" run test/ris/cleanup_current.ri 2>/dev/null)
+if [ "$?" -eq 0 ] && [ "$out" = $'2\n4\n5\n7\nalive' ]; then
+  echo "runs     cleanup_current"
+else
+  echo "FAILED   cleanup_current: $out"; status=1
+fi
+out=$("$RIS" run --no-gc test/ris/task_limit.ri 2>&1)
+if [ "$?" -eq 1 ] &&
+    [ "$out" = 'ris: fatal: group task limit 2147483647 reached' ]; then
+  echo "fatal    task_limit (--no-gc)"
+else
+  echo "FAILED   task_limit: $out"; status=1
+fi
+out=$("$RIS" run --no-gc test/ris/unwind_no_heap.ri 2>&1)
+if [ "$?" -eq 1 ] &&
+    [ "$out" = 'ris: fatal: raise during cleanup unwinding' ]; then
+  echo "fatal    unwind_no_heap (--no-gc)"
+else
+  echo "FAILED   unwind_no_heap: $out"; status=1
+fi
+out=$("$RIS" run test/ris/unwind_failure.ri 2>&1)
+if [ "$?" -ne 0 ] &&
+    grep -qF 'ris: fatal: raise during cleanup unwinding' <<<"$out" &&
+    ! grep -qF 'must not run' <<<"$out"; then
+  echo "fatal    unwind_failure"
+else
+  echo "FAILED   unwind_failure: $out"; status=1
 fi
 
 # Fatal size errors exit directly, with exact diagnostics and no heap.

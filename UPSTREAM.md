@@ -6,6 +6,8 @@ ris, take it to iyi with `git cherry-pick`; strike entries once merged.
 
 ## To take to iyi
 
+* Cleanup reads current receivers; recursive panic and task caps are fatal.
+  Fault dispositions use stack storage; signal flags survive a full pipe.
 * CLI env specs: clear inherited `IYI_CACHE_DIR` when checking the Crystal
   fallback, and check that iyi's variable wins when both are set.
 * Refuse integer `/` directly in interpolation or before `to_s`, naming
@@ -55,7 +57,6 @@ ris, take it to iyi with `git cherry-pick`; strike entries once merged.
 * `Pointer#unaligned_value`(`=`): an `align 1` access; `memcpy` copies
   words at any address on x86_64 and aarch64, its tail as one last word.
 * Heap census, allocation stats and the `gc_none` trap; tape glue stays here.
-
 ## To make in iyi first
 * Collections: `Array#includes?`/`index` and `Hash#fetch(key, default)`
   accept comparable lookup values without restricting them to stored types.
@@ -69,7 +70,6 @@ ris, take it to iyi with `git cherry-pick`; strike entries once merged.
   Ruby's symbols, `iyiNamedArgument`, with its tests.
 * std/aead `seal_at`/`open_at` and std/tls records opened and sealed in
   place (`TlsRecordCipher#seal_at`, `#open_at`): no tape, nothing per record.
-
 * CI differs from iyi's here, for a faster run (99 minutes was darwin's
   job): darwin's std foundation is a job of its own, the cursor sweep
   (`lsp_positions.py --shard K/N`) four shards, and the Linux and Windows
