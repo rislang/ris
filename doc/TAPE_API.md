@@ -56,7 +56,10 @@ Declare one owner per scope; pass its variable to helpers to borrow it.
 
 Owners cannot be copied, reassigned, nested in fields or containers,
 combined into tuples or unions (including nilable types), or returned
-from a def as a local value. `@[OnTape]` records keep their existing rules.
+from a def, whether a parameter, program constant, receiver (`self`) or
+local. This covers implicit results and explicit `return`. Return a field
+view (`Str`/`Ary`), or take the owner as an argument instead. Constructors
+and `initialize` are allowed. `@[OnTape]` records keep their existing rules.
 Ordinary def arguments borrow the owner's storage, so field growth in a
 helper updates the caller, including through nested calls. Owner methods
 also mutate the receiver in place. Pass owners directly to defs; primitive,
@@ -69,7 +72,14 @@ An owner's `initialize` cannot pass `self` or a field view to other defs,
 including through local aliases or owner helpers. Call the owner's own
 methods until construction finishes; those helpers follow the same rule.
 
-Returned borrows and stable growth on first transfer remain planned.
+If `initialize` panics, already-built fields are reclaimed with the
+enclosing tape scope. They are not individually rolled back at the call.
+Panics end the task; `rescue` is refused, so it cannot observe a half-built
+binding. `test/ris/owner_construction_panic.ri` checks bounded scope cleanup
+with `RIS_TAPE_STATS=1`. See `doc/reference/iyi/source/SPEC.md` III.1.4 for
+the inherited task panic rule.
+
+Stable growth on first transfer remains planned.
 
 ## Scanner, links, binary fields, trees
 

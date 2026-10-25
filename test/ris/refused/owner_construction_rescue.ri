@@ -1,0 +1,16 @@
+@[Owner]
+struct Broken
+  getter left = Ary(Int32).new(20000)
+
+  def initialize(fail : Bool)
+    raise "expected" if fail
+  end
+end
+
+tape do
+  begin
+    w = Broken.new(true)
+  rescue
+    puts w.left.size
+  end
+end

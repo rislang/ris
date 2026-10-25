@@ -1,0 +1,14 @@
+@[Owner]
+struct Workspace
+  getter left = Ary(Int32).new
+
+  def give
+    self
+  end
+end
+
+tape do
+  w = Workspace.new
+  result = w.give
+  nil
+end

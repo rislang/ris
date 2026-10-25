@@ -35,8 +35,12 @@ expect owner_array 'cannot store an owner'
 expect owner_hash 'cannot store an owner'
 expect owner_tuple 'cannot store an owner in a container, tuple or union'
 expect owner_union 'cannot store an owner in a container, tuple or union'
-expect owner_return 'cannot return a local owner from a def'
-expect owner_implicit_return 'cannot return a local owner from a def'
+expect owner_return 'cannot return an owner from a def'
+expect owner_implicit_return 'cannot return an owner from a def'
+for name in param explicit_param program explicit_program self local; do
+  expect "owner_return_$name" \
+    'cannot return an owner from a def; return a field view (Str/Ary) or take the owner as an argument'
+done
 expect owner_class 'requires a struct'
 expect owner_copy 'borrow it: pass the owner variable'
 expect owner_proc_argument 'owner arguments require a direct def call'
@@ -49,6 +53,20 @@ if [ "$?" -eq 0 ] && [ "$out" = 'PASS: owner fields' ]; then
   echo "runs     owners"
 else
   echo "FAILED   owners: $out"
+  status=1
+fi
+
+# Panics end the task; rescue cannot observe a half-built binding.
+expect owner_construction_rescue 'iyi has no exceptions to rescue'
+out=$(RIS_TAPE_STATS=1 "$RIS" run test/ris/owner_construction_panic.ri 2>&1)
+if [ "$?" -eq 0 ] &&
+    grep -qF 'PASS: owner construction panic cleanup' <<<"$out" &&
+    [ "$(grep -cF 'iyi: panic: expected owner construction panic' <<<"$out")" -eq 100 ] &&
+    ! grep -qF 'half-built owner became observable' <<<"$out" &&
+    grep -qF '201 scopes, 103 mappings made, 100 unmapped' <<<"$out"; then
+  echo "runs     owner_construction_panic (bounded scope cleanup)"
+else
+  echo "FAILED   owner_construction_panic: $out"
   status=1
 fi
 

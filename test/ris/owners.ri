@@ -67,6 +67,14 @@ end
 
 ROOT = Workspace.new
 
+def left_view(w : Workspace) : Ary(Int32)
+  w.left
+end
+
+def explicit_view(w : Workspace) : Ary(Int32)
+  return w.left
+end
+
 def count(w : Workspace) : Int32
   w.left.size + w.right.size
 end
@@ -99,6 +107,8 @@ tape do
   raise "large owner argument" unless large.a.size == 100
   raise "large owner argument" unless large.f.size == 100
   borrowed = Workspace.new
+  raise "returned field view" unless left_view(borrowed).empty?
+  raise "explicit field view" unless explicit_view(borrowed).empty?
   # Three calls must all keep the original owner header.
   outer(borrowed)
   raise "borrowed fields" unless count(borrowed) == 200

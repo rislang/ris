@@ -210,8 +210,8 @@ class Iyi::TapeOwnerChecker
         d.args.each { |a| @bindings << a.name }
         body = d.body
         body = TapeScopeChecker.parts(body).try(&.[1]) || body
-        if @checker.owner?(body)
-          @checker.refuse(body, "cannot return a local owner from a def")
+        if @checker.owner?(body) && !owner_initialize?
+          refuse_return(body)
         end
       end
     end
@@ -305,9 +305,22 @@ class Iyi::TapeOwnerChecker
       false
     end
 
+    private def owner_initialize? : Bool
+      @def.try do |d|
+        d.name == "initialize" &&
+          TapeOwnerChecker.owner?(@checker.program, d.owner)
+      end == true
+    end
+
+    private def refuse_return(node : ASTNode) : NoReturn
+      node.raise "cannot return an owner from a def; " \
+                 "return a field view (Str/Ary) or " \
+                 "take the owner as an argument"
+    end
+
     def visit(node : Return)
-      if exp = node.exp
-        @checker.refuse(node, "cannot return a local owner from a def") if @checker.owner?(exp)
+      if (exp = node.exp) && @def && !owner_initialize?
+        refuse_return(node) if @checker.owner?(exp)
       end
       true
     end

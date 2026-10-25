@@ -1,0 +1,29 @@
+# A panic in initialize must release both already-built fields with the
+# enclosing tape. Repeated task scopes must not retain their mappings.
+# Two 40 MB fields exceed the 64 MiB initial mapping in every scope.
+@[Owner]
+struct BrokenOwner
+  getter left : Ary(Int32)
+  getter right : Ary(Int32)
+
+  def initialize(fail : Bool)
+    @left = Ary(Int32).new(10_000_000)
+    @right = Ary(Int32).new(10_000_000)
+    @left << 17
+    @right << 23
+    raise "expected owner construction panic" if fail
+  end
+end
+
+100.times do
+  group do |g|
+    task = g.spawn do
+      local_tape do
+        w = BrokenOwner.new(true)
+        raise "half-built owner became observable"
+      end
+    end
+    raise "construction did not panic" unless task.value.is_a?(Panicked)
+  end
+end
+puts "PASS: owner construction panic cleanup"
