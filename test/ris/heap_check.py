@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fixed heap workloads, including one real web request."""
+"""Fixed heap workloads, including one real request per server."""
 import os
 from pathlib import Path
 import re
@@ -61,18 +61,18 @@ def main():
             source = path
             name = Path(path).stem
             mode = {"escape": "tape", "query": "tape",
-                    "serve": "startup-answer", "web": "request"}.get(
+                    "serve": "answer-request", "web": "request"}.get(
                         name, "default")
             args = ["tape"] if mode == "tape" else []
-            if mode.startswith("startup"):
-                # Same program prefix on every host, sockets allowed or not.
-                # All sites in the original sample still enter the census.
+            if mode == "answer-request":
+                # Keep serve's loopback client and validate one full answer.
                 text = Path(path).read_text()
-                text = text.replace("listener = IyiSocket.listen(",
-                                    "exit\nlistener = IyiSocket.listen(", 1)
+                text = text.replace("N = 200000", "N = 1")
+                text = text.replace("REQUEST * 1000", "REQUEST")
+                text = text.replace("(N // 1000).times", "N.times")
                 source = str(Path(scratch) / f"{name}.ri")
                 Path(source).write_text(text)
-                args = ["answer"] if name == "serve" else ["0"]
+                args = ["answer"]
             if mode == "request":
                 text = Path(path).read_text()
                 # Stop accepting; the active handler still writes its response.
@@ -158,8 +158,9 @@ def main():
         TABLE.write_text(
             "# sample  static-user-sites  runtime-allocations  workload\n"
             "# release builds; no stdin; default args unless named below.\n"
-            "# tape: argv=tape; startup-answer: serve exits before listen,\n"
-            "# argv=answer (serve); request: web argv=0, one HTTP GET.\n"
+            "# tape: argv=tape; answer-request: serve argv=answer, "
+            "one request.\n"
+            "# request: web argv=0, one HTTP GET.\n"
             + "\n".join(rows) + "\n")
 
 
