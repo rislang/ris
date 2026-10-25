@@ -33,10 +33,15 @@ def measured(pattern, text):
     return int(match[1])
 
 
-def compare(path, label, actual, budget):
+# Socket workloads vary by a few allocations with timing: their budget is
+# the observed maximum, and only a fall past this slack must lower it.
+NETWORK_SLACK = 4
+
+
+def compare(path, label, actual, budget, slack=0):
     if actual > budget:
         raise RuntimeError(f"{path}: {label} {actual} > budget {budget}")
-    if actual < budget:
+    if actual < budget - slack:
         raise RuntimeError(f"{path}: {label} fell {budget} -> {actual}; "
                            "lower heap_budget.txt in this change")
 
@@ -134,7 +139,8 @@ def main():
                 if mode != old_mode:
                     raise RuntimeError(f"{path}: workload changed")
                 compare(path, "static sites", sites, old_sites)
-                compare(path, "allocations", allocations, old_allocations)
+                compare(path, "allocations", allocations, old_allocations,
+                        NETWORK_SLACK if "request" in mode else 0)
             # Every workload also runs behind the no-collector gate. A
             # positive count must trap, a zero count must preserve output.
             gated = command(["run", "--release", "--no-gc", source,
