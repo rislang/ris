@@ -46,6 +46,16 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
       expanded.accept self
       return false
     end
+    unless TapeRules.runtime?(@program, node.location)
+      private_heap = node.target_defs.try &.any? do |target|
+        target.name == "__ris_heap_runtime" ||
+          (target.owner?.to_s == "RisHeap.class" && target.name == "runtime")
+      end
+      if private_heap
+        node.raise "runtime heap exemption is private; remove this call. " \
+                   "Keep values in Str, Ary or @[OnTape] structs."
+      end
+    end
     node.obj.try &.accept self
     node.args.each &.accept self
     node.named_args.try &.each { |arg| arg.value.accept self }

@@ -1,0 +1,22 @@
+module test/ris/heap_kinds
+
+import std/set
+
+class Kept
+  getter value : Int32
+  def initialize(@value : Int32)
+  end
+end
+
+def unused
+  Kept.new(99)
+end
+
+kept = Kept.new(42)
+text = "value #{kept.value}".to_heap
+array = [1, 2]
+hash = {1 => 2}
+set = Set(Int32).new
+captured = 3
+proc = -> { captured + 1 }
+puts text, array.size, hash.size, set.size, proc.call

@@ -1,3 +1,4 @@
+require "../heap_census"
 require "llvm"
 require "../syntax/parser"
 require "../syntax/visitor"
@@ -2511,7 +2512,11 @@ module Iyi
 
         closure_type, closure_has_inner_pointers =
           @llvm_typer.closure_context_type(closure_vars, parent_closure_type, (self_closured ? current_context.type : nil))
-        closure_ptr = closure_has_inner_pointers ? malloc(closure_type) : malloc_atomic(closure_type)
+        source = closure_vars.compact_map do |var|
+          var.local_vars.first?.try(&.location)
+        end.first?
+        closure_ptr = closure_has_inner_pointers ?
+          malloc(closure_type, source) : malloc_atomic(closure_type, source)
 
         closure_vars.each_with_index do |var, i|
           current_context.vars[var.name] = LLVMVar.new(gep(closure_type, closure_ptr, 0, i, var.name), var.type)
@@ -2650,6 +2655,7 @@ module Iyi
           # below would zero it twice; the atomic one clears nothing.
           flags = builder.zext iyi_headed_flag(type), llvm_context.int64
           flags = builder.or flags, int64(2) unless pointerful
+          ris_heap_allocation(struct_type.size)
           type_ptr = pointer_cast call(new_fun, [struct_type.size, builder.zext(type_id(type), llvm_context.int64), flags]), struct_type.pointer
           cleared = pointerful
         else
@@ -2731,16 +2737,41 @@ module Iyi
       end
     end
 
-    def malloc(type)
-      generic_malloc(type) { crystal_malloc_fun }
+    # Only synchronous runtime array construction is bracketed. User blocks
+    # are evaluated before this guard and cannot run inside its extent.
+    def ris_heap_runtime(delta)
+      heap_fun = fetch_typed_fun(@main_mod, "__ris_heap_runtime") do
+        LLVM::Type.function([@main_llvm_context.int32], @main_llvm_context.void)
+      end
+      call check_main_fun("__ris_heap_runtime", heap_fun), int32(delta)
     end
 
-    def malloc_atomic(type)
-      generic_malloc(type) { crystal_malloc_atomic_fun }
+    def ris_heap_allocation(size, source = @call_location ||
+                                         @current_debug_location)
+      return unless @program.iyi_object_layout?
+      return if context.heap_internal?
+      return if HeapPolicy.internal?(context.type.to_s)
+      heap_fun = fetch_typed_fun(@main_mod, "__ris_heap_allocation") do
+        LLVM::Type.function([@main_llvm_context.int64,
+          @main_llvm_context.void_pointer], @main_llvm_context.void)
+      end
+      location = source.try(&.expanded_location)
+      label = "#{location || "unknown"}: #{context.type}"
+      site = builder.global_string_pointer(label)
+      call check_main_fun("__ris_heap_allocation", heap_fun), [size, site]
     end
 
-    def generic_malloc(type, &)
+    def malloc(type, source = @call_location || @current_debug_location)
+      generic_malloc(type, source) { crystal_malloc_fun }
+    end
+
+    def malloc_atomic(type, source = @call_location || @current_debug_location)
+      generic_malloc(type, source) { crystal_malloc_atomic_fun }
+    end
+
+    def generic_malloc(type, source, &)
       size = type.size
+      ris_heap_allocation(size, source)
 
       if malloc_fun = yield
         pointer = call malloc_fun, size
@@ -2761,6 +2792,7 @@ module Iyi
 
     def generic_array_malloc(type, count, &)
       size = builder.mul type.size, count
+      ris_heap_allocation(size)
 
       if malloc_fun = yield
         pointer = call malloc_fun, size
@@ -3018,6 +3050,7 @@ module Iyi
     end
 
     def realloc(buffer, size)
+      ris_heap_allocation(size)
       if realloc_fun = crystal_realloc_fun
         call realloc_fun, [buffer, size]
       else

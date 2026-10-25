@@ -1,0 +1,5 @@
+@[Ffi]
+module test/ris/heap_allocator
+
+# Direct ABI calls must pass the same gate as compiler-made allocations.
+__iyi_malloc64(7_u64)

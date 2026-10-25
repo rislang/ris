@@ -1,0 +1,9 @@
+module test/ris/heap_class
+
+class Kept
+  getter value : Int32
+  def initialize(@value : Int32)
+  end
+end
+
+puts Kept.new(42).value

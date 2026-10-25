@@ -1,0 +1,99 @@
+{% if flag?(:ris_no_gc) && !(flag?(:linux) &&
+        (flag?(:x86_64) || flag?(:aarch64))) %}
+  {% raise "--no-gc currently needs Linux x86_64 or aarch64; " \
+           "build without --no-gc on this target." %}
+{% end %}
+
+{% if flag?(:ris_no_gc) && flag?(:gc_boehm) %}
+  {% raise "--no-gc cannot link Boehm; drop -Dgc_boehm." %}
+{% end %}
+
+# Allocation accounting must itself allocate nothing, including in the trap.
+class RisHeap
+  @[ThreadLocal]
+  @@runtime_depth : Int32 = 0
+
+  def self.runtime(delta : Int32) : Nil
+    @@runtime_depth = @@runtime_depth + delta
+  end
+
+  @@count : UInt64 = 0_u64
+  @@bytes : UInt64 = 0_u64
+  @@reported : Bool = false
+
+  def self.number(value : UInt64) : Nil
+    storage = uninitialized UInt8[32]
+    buffer = pointerof(storage).as(Pointer(UInt8))
+    cursor = 32
+    loop do
+      cursor = cursor - 1
+      buffer[cursor] = (48_u64 + value % 10_u64).unsafe_to_u8
+      value = value.unsafe_div(10_u64)
+      break if value == 0
+    end
+    __iyi_write(2, (buffer + cursor).as(Void*), (32 - cursor).to_u64)
+  end
+
+  def self.text(value : String) : Nil
+    __iyi_write(2, value.to_unsafe.as(Void*), value.bytesize.to_u64)
+  end
+
+  def self.allocation(size : UInt64,
+                      site : UInt8* = Pointer(UInt8).new(0_u64)) : Nil
+    return if @@runtime_depth > 0
+    IyiRuntimeLock.lock
+    @@count = @@count &+ 1_u64
+    @@bytes = @@bytes &+ size
+    IyiRuntimeLock.unlock
+    {% if flag?(:ris_no_gc) %}
+      text("ris: heap allocation with --no-gc: ")
+      number(size)
+      text(" bytes\n")
+      if site.address != 0_u64
+        text("  at ")
+        length = 0_u64
+        while site[length.to_i32] != 0_u8
+          length = length + 1_u64
+        end
+        __iyi_write(2, site.as(Void*), length)
+        text("\n")
+      end
+      __iyi_exit(1)
+    {% end %}
+  end
+
+  def self.report : Nil
+    return if @@reported
+    @@reported = true
+    asked = false
+    {% if flag?(:win32) %}
+      asked = !Program.env("RIS_HEAP_STATS").nil?
+    {% else %}
+      wanted = "RIS_HEAP_STATS=".to_unsafe
+      entry = ARGV_UNSAFE + (ARGC_UNSAFE + 1)
+      while entry.value.address != 0_u64
+        name = entry.value
+        index = 0
+        while index < 15 && name[index] == wanted[index]
+          index = index + 1
+        end
+        asked = true if index == 15
+        entry = entry + 1
+      end
+    {% end %}
+    return unless asked
+    text("ris heap: ")
+    number(@@count)
+    text(" allocations, ")
+    number(@@bytes)
+    text(" bytes\n")
+  end
+end
+
+fun __ris_heap_allocation(size : UInt64, site : UInt8*) : Nil
+  RisHeap.allocation(size, site)
+end
+
+fun __ris_heap_runtime(delta : Int32) : Nil
+  RisHeap.runtime(delta)
+end

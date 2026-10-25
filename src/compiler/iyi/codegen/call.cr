@@ -32,7 +32,16 @@ class Iyi::CodeGenVisitor
         codegen_call_with_block(node, block, owner, call_args)
       end
     else
+      runtime_array = @program.iyi_object_layout? && context.heap_internal? &&
+        node.name == "new" && node.type.to_s.starts_with?("Array(")
+      standard_stream = @program.iyi_object_layout? &&
+        node.name == "new" && node.type.to_s == "IyiIO" &&
+        context.type.is_a?(Program) &&
+        node.location.try(&.original_filename).try(&.ends_with?("/iyi/io.iyi"))
+      runtime_array ||= !!standard_stream
+      ris_heap_runtime(1) if runtime_array
       codegen_call(node, node.target_def, owner, call_args)
+      ris_heap_runtime(-1) if runtime_array && !@builder.end
     end
 
     false
@@ -362,6 +371,7 @@ class Iyi::CodeGenVisitor
         context.reset_closure
 
         target_def = node.target_def
+        context.heap_internal = HeapPolicy.internal_def?(target_def)
 
         set_ensure_exception_handler(node)
         set_ensure_exception_handler(target_def)
@@ -509,6 +519,12 @@ class Iyi::CodeGenVisitor
 
   def codegen_call(node, target_def, self_type, call_args)
     body = target_def.body
+
+    if HeapPolicy.allocator?(target_def)
+      offset = target_def.name.in?("realloc", "__iyi_realloc64") ? 1 : 0
+      offset += 1 if self_type.passed_as_self?
+      ris_heap_allocation(call_args[offset], node.location)
+    end
 
     # Try to inline the call
     if try_inline_call(target_def, body, self_type, call_args)

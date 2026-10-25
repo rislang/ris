@@ -2,8 +2,7 @@
 
 ris is iyi plus tape memory. A change that does not depend on tape belongs
 in iyi: make it there first and merge it into ris, or, if it was made in
-ris, take it to iyi with `git cherry-pick`. Strike an entry off once iyi
-has it.
+ris, take it to iyi with `git cherry-pick`; strike entries once merged.
 
 ## To take to iyi
 
@@ -55,6 +54,7 @@ has it.
 * Both are iyi's branch `json-float-from-ris` (`c02af8fac`), not merged.
 * `Pointer#unaligned_value`(`=`): an `align 1` access; `memcpy` copies
   words at any address on x86_64 and aarch64, its tail as one last word.
+* Heap census, allocation stats and the `gc_none` trap; tape glue stays here.
 
 ## To make in iyi first
 * Collections: `Array#includes?`/`index` and `Hash#fetch(key, default)`

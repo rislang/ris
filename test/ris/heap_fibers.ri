@@ -1,0 +1,12 @@
+module test/ris/heap_fibers
+
+group do |g|
+  g.spawn do
+    items = Ary(Int32).new(2)
+    items << 42
+    text = Str.build(16) { |s| s << "fiber" << items[0] }
+    sleep(1)
+    puts text
+  end
+end
+puts "main"

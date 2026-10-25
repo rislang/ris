@@ -1,0 +1,4 @@
+module test/ris/heap_io
+
+# Standard stream initialization is exempt; an explicit IO value is not.
+IyiIO.new(1)

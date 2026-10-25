@@ -281,6 +281,7 @@ class Iyi::CodeGenVisitor
 
     with_cloned_context do |old_context|
       context.type = self_type
+      context.heap_internal = HeapPolicy.internal_def?(target_def)
       context.vars = LLVMVars.new
       context.block_context = nil
       context.indirect_return = nil

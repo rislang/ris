@@ -1,0 +1,9 @@
+module test/ris/heap_fields
+
+class Kept
+  @items = [1, 2]
+  def initialize
+  end
+end
+
+Kept.new

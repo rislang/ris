@@ -1,0 +1,6 @@
+module test/ris/heap_fiber_capture
+
+captured = 42
+group do |g|
+  g.spawn { puts captured }
+end

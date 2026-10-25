@@ -234,7 +234,11 @@ module Iyi
       return false unless call.is_a?(Call) && call.global? && call.name == "__iyi_tape_release"
       return false unless call.args.empty? && call.named_args.nil? && call.block.nil? && call.obj.nil?
       directory = program.iyi_prelude_dir
-      !!(directory && deferred.location.try(&.original_filename) == File.join(directory, "prelude.iyi"))
+      # The shared tape now lives beside the allocator choices.
+      file = deferred.location.try(&.original_filename)
+      !!(directory && {"prelude.iyi", "region.iyi"}.any? do |name|
+        file == File.join(directory, name)
+      end)
     end
 
     # A `defer` that is not one of several expressions — the whole of a body,

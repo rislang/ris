@@ -33,10 +33,8 @@ Goose's array zoo, packed layout and `recursive fn` mark are not needed.
 * Class variables, mutable constants: program tape or a global pool.
 
 ## Order (each step: gate green, docs, samples)
-1. **Census and gate.** `ris heap` lists each reachable heap allocation
-   site, like `ris unsafe`. `--no-gc` links `gc_none` with a trap on
-   allocation. check.sh runs samples/ris both ways; the heap count per
-   sample only falls. Measure first: nothing else can be judged.
+1. **Census and gate: built.** `ris heap [--user] FILE.ri` counts sites;
+   `--no-gc` traps; `RIS_HEAP_STATS=1` counts calls; check.sh budgets both.
 2. **Owners.** Program tape for globals, constants, class vars; fiber
    tape (done); `@[Owner]` struct whose growing fields each take a
    region, freed with it. `copy_to(owner)` replaces `to_heap` for data a

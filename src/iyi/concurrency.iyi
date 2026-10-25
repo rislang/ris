@@ -1941,7 +1941,7 @@ class IyiScheduler
       maker.call(fiber) unless maker.is_a?(Nil)
     end
     state.current = fiber
-    {% if !flag?(:gc_none) && !flag?(:gc_boehm) %}
+    {% if (!flag?(:gc_none) || flag?(:linux)) && !flag?(:gc_boehm) %}
       previous.tape = IyiRegion.tape
       IyiRegion.tape = fiber.tape
     {% end %}
@@ -1966,7 +1966,7 @@ class IyiScheduler
     # returned into the trampoline rather than into `switch_to`.
     reap_dying
     body = fiber.proc
-    {% if !flag?(:gc_none) && !flag?(:gc_boehm) %}
+    {% if (!flag?(:gc_none) || flag?(:linux)) && !flag?(:gc_boehm) %}
       # Each spawned body owns a tape, including its panic/exit cleanup.
       IyiRegion.tape_scope(Tape::CAPACITY) do
         body.call unless body.is_a?(Nil)
@@ -3136,6 +3136,7 @@ class IyiScheduler
 
     body = fiber.proc
     if body.is_a?(Nil)
+      RisHeap.report
       __iyi_flush_std
       __iyi_exit(1)
     end
@@ -3702,6 +3703,7 @@ def exit(status : Int32 = 0) : NoReturn
     node.run
   end
   IyiRegion.report_stats
+  RisHeap.report
   __iyi_flush_std
   __iyi_exit(status)
 end

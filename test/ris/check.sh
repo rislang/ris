@@ -23,6 +23,8 @@ expect() {
   fi
 }
 
+expect heap_exemption \
+  'runtime heap exemption is private'
 expect string_parameter \
   'name : String is only read; take it as Str'
 expect string_optional_parameter \
@@ -425,6 +427,93 @@ if [ "$out" = 2 ]; then
   echo "runs     scanner_words"
 else
   echo "FAILED   scanner_words: $out"
+  status=1
+fi
+
+# Census, runtime budgets and the collector-free trap share one gate.
+if ! python3 test/ris/heap_check.py; then
+  status=1
+fi
+out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc test/ris/heap_zero.ri 2>&1)
+if [ "$?" -eq 0 ] && grep -qF 'zero42' <<<"$out" &&
+    grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+  echo "runs     heap_zero (--no-gc)"
+else
+  echo "FAILED   heap_zero: $out"
+  status=1
+fi
+out=$("$RIS" run --no-gc test/ris/heap_class.ri 2>&1)
+if [ "$?" -ne 0 ] &&
+    grep -qF 'ris: heap allocation with --no-gc:' <<<"$out"; then
+  echo "refused  heap_class (--no-gc trap)"
+else
+  echo "FAILED   heap_class: $out"
+  status=1
+fi
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/heap_allocator.ri 2>&1)
+if [ "$?" -eq 0 ] &&
+    grep -qF 'ris heap: 1 allocations, 7 bytes' <<<"$out"; then
+  echo "counts   heap_allocator (direct ABI)"
+else
+  echo "FAILED   heap_allocator: $out"
+  status=1
+fi
+out=$("$RIS" run --no-gc test/ris/heap_allocator.ri 2>&1)
+if [ "$?" -ne 0 ] &&
+    grep -qF 'ris: heap allocation with --no-gc: 7 bytes' <<<"$out"; then
+  echo "refused  heap_allocator (--no-gc trap)"
+else
+  echo "FAILED   heap_allocator trap: $out"
+  status=1
+fi
+out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc test/ris/heap_fibers.ri 2>&1)
+if [ "$?" -eq 0 ] && grep -qF 'fiber42' <<<"$out" &&
+    grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+  echo "runs     heap_fibers (--no-gc runtime bookkeeping)"
+else
+  echo "FAILED   heap_fibers: $out"
+  status=1
+fi
+out=$("$RIS" heap --user test/ris/heap_fiber_capture.ri 2>&1)
+if [ "$?" -eq 0 ] && grep -qF 'closure: 1' <<<"$out"; then
+  echo "census   heap_fiber_capture (user capture retained)"
+else
+  echo "FAILED   heap_fiber_capture: $out"
+  status=1
+fi
+out=$("$RIS" run --no-gc test/ris/heap_fiber_capture.ri 2>&1)
+if [ "$?" -ne 0 ] &&
+    grep -qF 'ris: heap allocation with --no-gc:' <<<"$out"; then
+  echo "refused  heap_fiber_capture (--no-gc trap)"
+else
+  echo "FAILED   heap_fiber_capture trap: $out"
+  status=1
+fi
+for name in heap_handles heap_io; do
+  out=$("$RIS" run --no-gc "test/ris/$name.ri" 2>&1)
+  if [ "$?" -ne 0 ] &&
+      grep -qF 'ris: heap allocation with --no-gc:' <<<"$out"; then
+    echo "refused  $name (program value, not runtime metadata)"
+  else
+    echo "FAILED   $name: $out"
+    status=1
+  fi
+done
+out=$("$RIS" heap --user test/ris/heap_fields.ri 2>&1)
+if [ "$?" -eq 0 ] && grep -qF 'class: 1' <<<"$out" &&
+    grep -qF 'array: 1' <<<"$out"; then
+  echo "census   heap_fields (instance initializer reached)"
+else
+  echo "FAILED   heap_fields: $out"
+  status=1
+fi
+out=$("$RIS" heap --user test/ris/heap_kinds.ri 2>&1)
+if [ "$?" -eq 0 ] && grep -qF 'class: 1' <<<"$out" &&
+    grep -qF 'string: 1' <<<"$out" && grep -qF 'array: 1' <<<"$out" &&
+    grep -qF 'hash: 2' <<<"$out" && grep -qF 'closure: 1' <<<"$out"; then
+  echo "census   heap_kinds (unused def omitted)"
+else
+  echo "FAILED   heap_kinds: $out"
   status=1
 fi
 
