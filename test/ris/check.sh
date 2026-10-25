@@ -265,6 +265,42 @@ out=$("$RIS" run test/ris/link_check.ri 2>&1)
 if grep -qF $'7' <<<"$out" && grep -qF "index 200 out of range for 1 elements" <<<"$out"; then echo "runs     link_check"; else echo "FAILED   link_check: $out"; status=1; fi
 out=$("$RIS" run test/ris/loop_bounds.ri 2>&1)
 if grep -qF '1 11 21 300 3' <<<"$out" && grep -qF "index -1 out of range for 3 elements" <<<"$out"; then echo "runs     loop_bounds"; else echo "FAILED   loop_bounds: $out"; status=1; fi
+# Shrinking directly, through an argument/holder, or in the condition
+# must retain checks; CheckFree verifies safe indexing still lowers.
+for mode in clear store pop 'pop?' argument holder condition if words \
+    cached truncate shift word_truncate yield operator; do
+  out=$("$RIS" run test/ris/loop_shrink.ri -- "$mode" 2>&1)
+  code=$?
+  if [ "$code" -ne 0 ] &&
+      { grep -qF 'index 0 out of range for 0 elements' <<<"$out" ||
+        grep -qF 'little-endian field out of range' <<<"$out" ||
+        grep -qF 'index 0 out of range for 0 bytes' <<<"$out"; }; then
+    echo "runs     loop_shrink ($mode)"
+  else
+    echo "FAILED   loop_shrink ($mode): $out"
+    status=1
+  fi
+done
+out=$("$RIS" run test/ris/loop_shrink.ri -- safe 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = $'42\n4050765991979987505' ]; then
+  echo "runs     loop_shrink (safe CheckFree reads)"
+else
+  echo "FAILED   loop_shrink (safe): $out"
+  status=1
+fi
+
+# CheckFree checks []/[]=; inspect IR to prove word reads lower too.
+loops=$(mktemp -d)
+if "$RIS" build --emit llvm-ir -o "$loops/loops" \
+    test/ris/loop_shrink.ri >"$loops/log" 2>&1 &&
+    grep -qF '__loop_read_bytes_at' "$loops/loops.ll"; then
+  echo "lowers   loop_shrink (safe word reads)"
+else
+  echo "FAILED   loop_shrink (word lowering): $(cat "$loops/log")"
+  status=1
+fi
+rm -rf "$loops"
+
 out=$("$RIS" run test/ris/loop_words.ri 2>&1)
 if grep -qF '8101531983959975010 true false false' <<<"$out" && grep -qF "little-endian field out of range" <<<"$out"; then echo "runs     loop_words"; else echo "FAILED   loop_words: $out"; status=1; fi
 out=$("$RIS" run test/ris/scanner_cursor.ri 2>&1)

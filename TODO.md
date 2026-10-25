@@ -3,9 +3,6 @@
 Rules: TAPE_SPEC.md. Work in this dependency order; each gate runs in
 check.sh. Delete finished work in the same commit; keep check.sh green.
 
-0. [S] Check-free loops assume Ary never shrinks
-   (tape_check_free_lowering.cr:6), but clear/truncate exist.
-   Gate: a loop body that shrinks keeps its bounds checks.
 1. [M] Harden ris heap: migration marks, opaque calls, runtime exemptions.
    Budgets must only fall (heap_check.py:35); trace servers past listen.
    Gate: category fixtures; decreasing site and allocation budgets.

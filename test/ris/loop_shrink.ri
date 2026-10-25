@@ -1,0 +1,242 @@
+# Each mode runs separately: bounds failures abort the process.
+@[CheckFree]
+def last_checked_free(a : Ary(Int32)) : Int32
+  i = 0
+  value = 0
+  while i < a.size
+    value = a[i]
+    a[i] = value
+    i += 1
+  end
+  value
+end
+
+@[CheckFree]
+def word_checked_free(a : Str) : UInt64
+  i = 0
+  value = 0_u64
+  while i + 8 <= a.size
+    value = a.read_bytes_at(UInt64, i)
+    i += 8
+  end
+  value
+end
+
+def shrink(a : Ary(Int32)) : Bool
+  a.clear
+  true
+end
+
+@[OnTape]
+struct Shrinker
+  def initialize(@a : Ary(Int32))
+  end
+
+  def clear : Bool
+    @a.clear
+    true
+  end
+
+  def +(other : Int32) : self
+    @a.clear
+    self
+  end
+end
+
+def cleared(a : Ary(Int32))
+  i = 0
+  while i < a.size
+    a.clear
+    a[i]
+    i += 1
+  end
+end
+
+def stored(a : Ary(Int32))
+  i = 0
+  while i < a.size
+    a.clear
+    a[i] = 7
+    i += 1
+  end
+end
+
+def popped(a : Ary(Int32))
+  i = 0
+  while i < a.size
+    a.pop
+    a[i]
+    i += 1
+  end
+end
+
+def popped_optional(a : Ary(Int32))
+  i = 0
+  while i < a.size
+    a.pop?
+    a[i]
+    i += 1
+  end
+end
+
+def argument(a : Ary(Int32))
+  i = 0
+  while i < a.size
+    shrink(a)
+    a[i]
+    i += 1
+  end
+end
+
+def yielded(a : Ary(Int32), &)
+  i = 0
+  while i < a.size
+    yield a
+    a[i]
+    i += 1
+  end
+end
+
+def held(a : Ary(Int32), holder : Shrinker)
+  i = 0
+  while i < a.size
+    holder.clear
+    a[i]
+    i += 1
+  end
+end
+
+def held_operator(a : Ary(Int32), holder : Shrinker)
+  i = 0
+  while i < a.size
+    holder += 1
+    a[i]
+    i += 1
+  end
+end
+
+def condition(a : Ary(Int32))
+  i = 0
+  while i < a.size && shrink(a)
+    a[i]
+    i += 1
+  end
+end
+
+def if_condition(a : Ary(Int32))
+  i = 0
+  if i < a.size && shrink(a) && a[i]
+    puts "unreachable"
+  end
+end
+
+def words(a : Ary(UInt8))
+  i = 0
+  while i + 8 <= a.size
+    a.clear
+    a.read_bytes_at(UInt64, i)
+    i += 8
+  end
+end
+
+def cached(a : Ary(Int32))
+  n = a.size
+  a.clear
+  i = 0
+  while i < n
+    a[i]
+    i += 1
+  end
+end
+
+# Give the mutable builder an indexed view for this lowering regression.
+@[OnTape]
+struct IndexedBuilder
+  def initialize(@writer : Str::Builder)
+  end
+
+  def truncate(count : Int32)
+    @writer.truncate(count)
+  end
+
+  def shift(count : Int32)
+    @writer.shift(count)
+  end
+
+  def size : Int32
+    @writer.length
+  end
+
+  def [](index : Int32) : UInt8
+    @writer.finish[index]
+  end
+
+  def __loop_fetch(index : Int32) : UInt8
+    @writer.finish.__loop_fetch(index)
+  end
+
+  def read_bytes_at(type : I.class, index : Int32) : I forall I
+    @writer.finish.read_bytes_at(type, index)
+  end
+
+  def __loop_read_bytes_at(type : I.class, index : Int32,
+                           room : Int32) : I forall I
+    @writer.finish.__loop_read_bytes_at(type, index, room)
+  end
+end
+
+def truncated(a : IndexedBuilder)
+  i = 0
+  while i < a.size
+    a.truncate(0)
+    a[i]
+    i += 1
+  end
+end
+
+def shifted(a : IndexedBuilder)
+  i = 0
+  while i < a.size
+    a.shift(1)
+    a[i]
+    i += 1
+  end
+end
+
+def truncated_words(a : IndexedBuilder)
+  i = 0
+  while i + 8 <= a.size
+    a.truncate(0)
+    a.read_bytes_at(UInt64, i)
+    i += 8
+  end
+end
+
+tape do
+  a = Ary(Int32).new(1) { 42 }
+  bytes = Ary(UInt8).new(8) { 1_u8 }
+  builder = Str::Builder.new(1)
+  builder.append("x")
+  case Program.args[0]?
+  when "safe"
+    puts last_checked_free(a)
+    puts word_checked_free("12345678")
+  when "clear"     then cleared(a)
+  when "store"     then stored(a)
+  when "pop"       then popped(a)
+  when "pop?"      then popped_optional(a)
+  when "argument"  then argument(a)
+  when "holder"    then held(a, Shrinker.new(a))
+  when "yield"     then yielded(a) { |value| value.clear }
+  when "operator"  then held_operator(a, Shrinker.new(a))
+  when "condition" then condition(a)
+  when "if"        then if_condition(a)
+  when "words"     then words(bytes)
+  when "cached"    then cached(a)
+  when "truncate"  then truncated(IndexedBuilder.new(builder))
+  when "shift"     then shifted(IndexedBuilder.new(builder))
+  when "word_truncate"
+    builder.append("1234567")
+    truncated_words(IndexedBuilder.new(builder))
+  end
+end

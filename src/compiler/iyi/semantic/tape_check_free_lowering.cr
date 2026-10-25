@@ -3,9 +3,10 @@
 # `a.__loop_fetch(i)` and `a.__loop_store(i, v)`, which check only that
 # `i` is not negative. That holds when the body assigns `a` nowhere and
 # `i` only by adding one (`&+` too: a wrapped `i` is negative), and the
-# array cannot shrink: `Ary` and `Str` never do, and
-# for any other value the two calls are `[]` and `[]=` as written
-# (Goose elides these checks too). In
+# array cannot shrink. Only whitelisted direct reads/stores and index
+# arithmetic are allowed: other calls may shrink it, receive an alias,
+# or reach it through a holder. Both the condition and body are scanned.
+# For other values the two calls remain `[]` and `[]=` as written. In
 # `while i < a.size && c`, `c` runs only after that test, so `a[i]` in
 # `c` is lowered as well; so is `c` in `if i < a.size && c`.
 #
@@ -13,8 +14,8 @@
 # `i += K`, keeps `K` bytes from `i` in range: `a.read_bytes_at(I, i)`
 # becomes `a.__loop_read_bytes_at(I, i, K)`, unchecked when `I` fits
 # in `K` bytes, and the test is `i <= a.bytesize &- K`, which cannot
-# overflow. The size may be a local `n` set once by `n = a.bytesize`
-# where `a` is set at most once too (`Binding`).
+# overflow. Cached local sizes keep checks: a single assignment does
+# not prove that the array has not shrunk since the size was saved.
 class Iyi::TapeCheckFreeLowering < Iyi::Visitor
   # The largest step `i + K` is taken for: a word or a few.
   MAX_STEP = 64
@@ -27,7 +28,7 @@ class Iyi::TapeCheckFreeLowering < Iyi::Visitor
     scan = Scan.new(index, array, size, step)
     node.body.accept(scan)
     strict = Scan.new(index, array, size, 0)
-    rest.each &.accept(strict)
+    node.cond.accept(strict)
     return if scan.unsafe || strict.unsafe
     lower = new(index, array, step)
     node.body.accept(lower)
@@ -43,7 +44,7 @@ class Iyi::TapeCheckFreeLowering < Iyi::Visitor
     left, rest, index, array, size, step = test
     return if rest.empty?
     strict = Scan.new(index, array, size, 0)
-    rest.each &.accept(strict)
+    node.cond.accept(strict)
     return if strict.unsafe
     lower = new(index, array, step)
     rest.each &.accept(lower)
@@ -80,6 +81,11 @@ class Iyi::TapeCheckFreeLowering < Iyi::Visitor
       array = Binding.find(scope, params, local)
     end
     return unless array
+    if local && scope
+      # A cached size can predate mutation or escape outside this loop.
+      # Keep checks until bindings carry effects as well as assignments.
+      return
+    end
     {cond, rest, left.name, array, local, step}
   end
 
@@ -140,6 +146,80 @@ class Iyi::TapeCheckFreeLowering < Iyi::Visitor
     def initialize(@index : String, @array : String, @size : String?, @step : Int32)
     end
 
+    # Unknown receivers may hold an alias even when `a` is not mentioned.
+    # Blocks can call back with that alias, so no yielding reads are allowed.
+    def visit(node : Call)
+      obj = node.obj
+      direct = obj.is_a?(Var) && obj.name == @array
+      read = direct && {"[]", "[]=", "size", "bytesize",
+                        "read_bytes_at"}.includes?(node.name)
+      index_op = case node.name
+                 when "+", "&+"
+                   index?(obj) && node.args.size == 1 &&
+                     TapeCheckFreeLowering.literal(node.args.first)
+                 when "<", "<="
+                   index_value?(obj) && node.args.size == 1 &&
+                     TapeCheckFreeLowering.sized(node.args.first) == @array
+                 else
+                   false
+                 end
+      @unsafe = true unless (read || index_op) &&
+                            node.block.nil? && node.block_arg.nil? &&
+                            node.named_args.nil?
+      # Even a whitelisted receiver must not receive `a` as an argument.
+      node.args.each do |arg|
+        escape = Escape.new(@array)
+        arg.accept(escape)
+        @unsafe = true if escape.found
+      end
+      true
+    end
+
+    # Callbacks and syntax expanded into calls have no effects here yet.
+    # They may receive or capture an alias, including through a holder.
+    def visit(node : Yield | StringInterpolation | ArrayLiteral | HashLiteral |
+                     RangeLiteral | Case | Asm | MacroExpression | MacroIf | MacroFor |
+                     MacroVerbatim | MacroLiteral)
+      @unsafe = true
+      true
+    end
+
+    private def index?(node : ASTNode?) : Bool
+      node.is_a?(Var) && node.name == @index
+    end
+
+    private def index_value?(node : ASTNode?) : Bool
+      return true if index?(node)
+      node.is_a?(Call) && node.name == "+" && index?(node.obj) &&
+        node.args.size == 1 && !!TapeCheckFreeLowering.literal(node.args.first)
+    end
+
+    class Escape < Iyi::Visitor
+      getter found = false
+
+      def initialize(@array : String)
+      end
+
+      def visit(node : Var)
+        @found = true if node.name == @array
+        true
+      end
+
+      def visit(node : Call)
+        # Direct reads do not pass the receiver itself to their caller.
+        if (obj = node.obj).is_a?(Var) && obj.name == @array &&
+           {"[]", "size", "bytesize", "read_bytes_at"}.includes?(node.name)
+          node.args.each &.accept(self)
+          return false
+        end
+        true
+      end
+
+      def visit(node : ASTNode)
+        true
+      end
+    end
+
     def visit(node : Assign)
       check(node.target, node.value)
       true
@@ -149,7 +229,8 @@ class Iyi::TapeCheckFreeLowering < Iyi::Visitor
       target = node.target
       if target.is_a?(Var) && target.name == @index
         @unsafe = true unless (node.op == "+" || node.op == "&+") && step?(node.value)
-      elsif target.is_a?(Var) && fixed?(target.name)
+      else
+        # `holder += v` also invokes a method on a possible alias holder.
         @unsafe = true
       end
       true
