@@ -1129,6 +1129,21 @@ module Iyi
     end
 
     def self.check_automatic_cast(program, value, var_type, assign = nil)
+      if value.is_a?(Var) && var_type == program.string &&
+         value.type?.try(&.to_s) == "Str"
+        value.raise "#{value.name} holds tape text; write " \
+                    "the literal in place or keep it with .to_heap"
+      end
+      if value.is_a?(Call) && value.tape_literal? && var_type
+        literal_type = StringAutocastType.new(program, value)
+        context = MatchContext.new(value.type, value.type)
+        if literal_type.restrict(var_type, context) == program.string
+          text = value.args.first
+          text.type = program.string
+          assign.value = text if assign
+          return text
+        end
+      end
       if value.is_a?(NumberLiteral) && value.type != var_type
         literal_type = NumberAutocastType.new(program, value)
         restricted = literal_type.restrict(var_type, MatchContext.new(value.type, value.type))

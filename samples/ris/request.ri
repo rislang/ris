@@ -10,7 +10,7 @@ module samples/request
 
 import std/http::{Server, ParsedHead}
 
-USERS = {42 => "alice".to_heap, 7 => "bob".to_heap}
+USERS = {42 => "alice", 7 => "bob"}
 
 # GET /users/42 -> 200 {"id":42,"name":"alice"}
 # The body is written into the caller's writer, on its tape.

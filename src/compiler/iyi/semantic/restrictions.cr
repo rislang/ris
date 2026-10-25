@@ -1845,6 +1845,16 @@ module Iyi
     end
   end
 
+  class StringAutocastType
+    def matches_exactly?(type : Type) : Bool
+      literal.type == type
+    end
+
+    def matches_partially?(type : Type) : Bool
+      type == program.string
+    end
+  end
+
   class SymbolAutocastType
     def matches_exactly?(type : SymbolType) : Bool
       true

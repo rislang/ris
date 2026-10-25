@@ -97,6 +97,11 @@ module Iyi
         break if @dead_code
       end
       exps = apply_defers(exps) unless node.same?(@macro_expansion)
+      # Parentheses do not hide a static literal from heap-place autocast.
+      if exps.size == 1 && (text = exps.first).is_a?(Call) &&
+         text.tape_literal?
+        return text
+      end
       case exps.size
       when 0
         Nop.new
@@ -805,9 +810,23 @@ module Iyi
       While.new(not_exp, node.body).at(node)
     end
 
-    # Checks if the right hand side is dead code
+    # Constants retain static literals after parentheses are normalized.
+    def transform(node : TypeDeclaration)
+      super
+      value = node.value
+      if node.var.is_a?(Path) && value.is_a?(Call) && value.tape_literal?
+        node.value = value.args.first
+      end
+      node
+    end
+
+    # Checks if the right hand side is dead code.
     def transform(node : Assign)
       super
+      value = node.value
+      if node.target.is_a?(Path) && value.is_a?(Call) && value.tape_literal?
+        node.value = value.args.first
+      end
 
       if @dead_code
         node.value
@@ -1029,9 +1048,53 @@ module Iyi
       node
     end
 
+    private def heap_literal(node : ASTNode) : ASTNode
+      value = node.transform(self)
+      if value.is_a?(Call) && value.tape_literal?
+        value.args.first
+      else
+        value
+      end
+    end
+
+    def transform(node : ArrayLiteral)
+      return super if node.name
+      node.elements.map! { |value| heap_literal(value) }
+      node.of = node.of.try &.transform(self)
+      node
+    end
+
+    def transform(node : TupleLiteral)
+      node.elements.map! { |value| heap_literal(value) }
+      node
+    end
+
+    def transform(node : HashLiteral)
+      return super if node.name
+      node.entries.map! do |entry|
+        HashLiteral::Entry.new(
+          heap_literal(entry.key), heap_literal(entry.value))
+      end
+      node.name = node.name.try &.transform(self)
+      node.of = node.of.try do |entry|
+        HashLiteral::Entry.new(
+          entry.key.transform(self), entry.value.transform(self))
+      end
+      node
+    end
+
+    def transform(node : NamedTupleLiteral)
+      node.entries.map! do |entry|
+        NamedTupleLiteral::Entry.new(entry.key, heap_literal(entry.value))
+      end
+      node
+    end
+
     def transform(node : StringLiteral)
       return node unless tape_text?(node)
-      Call.new(Path.global(["Str"]), "view", [node] of ASTNode).at(node)
+      call = Call.new(Path.global(["Str"]), "view", [node] of ASTNode).at(node)
+      call.tape_literal = true
+      call
     end
 
     def transform(node : StringInterpolation)

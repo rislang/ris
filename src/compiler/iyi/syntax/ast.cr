@@ -938,6 +938,9 @@ module Iyi
   # the symbol of that operator instead of a string.
   #
   class Call < ASTNode
+    # Only a literal lowered by Normalizer, never a user's Str.view call.
+    property? tape_literal = false
+
     property obj : ASTNode?
     property name : String
     property args : Array(ASTNode)
@@ -1031,6 +1034,7 @@ module Iyi
 
     def clone_without_location
       clone = Call.new(@obj.clone, @name, @args.clone, @block.clone, @block_arg.clone, @named_args.clone, @global)
+      clone.tape_literal = tape_literal?
       clone.name_location = name_location
       clone.has_parentheses = has_parentheses?
       clone.name_size = name_size

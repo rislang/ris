@@ -572,6 +572,23 @@ class Iyi::Call
   end
 
   def instantiate(signature, matches, owner, self_type, with_autocast)
+    if with_autocast
+      args.each_with_index do |arg, index|
+        if arg.is_a?(Call) && arg.tape_literal? &&
+           matches.any? { |match| match.arg_types[index]? == program.string }
+          args[index] = arg.args.first
+        end
+      end
+      named_args.try &.each do |arg|
+        value = arg.value
+        if value.is_a?(Call) && value.tape_literal? &&
+           matches.any? { |match| match.named_arg_types.try &.any? { |t|
+             t.name == arg.name && t.type == program.string
+           } }
+          arg.value = value.args.first
+        end
+      end
+    end
     matches.each &.remove_literals if with_autocast
 
     block = @block

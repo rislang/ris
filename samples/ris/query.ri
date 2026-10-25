@@ -13,9 +13,9 @@ import std/gc::{GC}
 
 N = 1000000
 QUERIES = [
-  "q=hello+world&page=2&sort=name".to_heap,
-  "filter=a%2Cb&x=1&y=&z".to_heap,
-  "page=10;limit=50&q=caf%C3%A9".to_heap,
+  "q=hello+world&page=2&sort=name",
+  "filter=a%2Cb&x=1&y=&z",
+  "page=10;limit=50&q=caf%C3%A9",
 ]
 
 on_tape = Program.args.includes?("tape")

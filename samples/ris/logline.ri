@@ -11,12 +11,12 @@ import std/gc::{GC}
 
 N = 1000000
 sink = File.open("/dev/null", "w")
-log = Logger.new("web".to_heap, Severity::Info, IOBackend.new(sink))
+log = Logger.new("web", Severity::Info, IOBackend.new(sink))
 GC.disable
 before = GC.stats.bytes_since_collection
 i = 0
 while i < N
-  log.info("GET /users/42 200".to_heap)
+  log.info("GET /users/42 200")
   i += 1
 end
 puts "#{(GC.stats.bytes_since_collection - before) // N.to_u64} heap bytes a line"

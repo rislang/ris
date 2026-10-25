@@ -15,8 +15,8 @@ import std/socket::{IyiSocket}
 import std/http::{Server, Incoming, Outgoing}
 
 USERS = {
-  1 => {"alice".to_heap, "Learning sequential memory management :-)".to_heap},
-  2 => {"bob".to_heap, "Bumping pointers, freeing nothing".to_heap},
+  1 => {"alice", "Learning sequential memory management :-)"},
+  2 => {"bob", "Bumping pointers, freeing nothing"},
 }
 
 # The user id in "/users/1/status", or nil when the path is another one.

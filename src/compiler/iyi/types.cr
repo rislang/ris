@@ -1822,8 +1822,23 @@ module Iyi
     end
   end
 
-  # Type for a symbol literal: it has the specific type of the symbol literal (SymbolType)
-  # but can also match enums if their members match the symbol's name.
+  # A static literal view may satisfy a String restriction on retry.
+  class StringAutocastType < AutocastType
+    getter literal : Call
+
+    def initialize(program, @literal)
+      super(program)
+    end
+
+    def to_s_with_options(io : IO, skip_union_parens : Bool = false,
+                         generic_args : Bool = true,
+                         codegen : Bool = false) : Nil
+      io << @literal.type
+    end
+  end
+
+  # A symbol literal keeps SymbolType, but can also match enum members
+  # whose names match the symbol.
   class SymbolAutocastType < AutocastType
     # The literal associated with this type
     getter literal : SymbolLiteral

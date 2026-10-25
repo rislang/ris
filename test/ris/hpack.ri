@@ -6,11 +6,11 @@ import std/slice::{Bytes}
 import std/hpack::{Encoder, Decoder, HeaderField, HpackError,
                   TapeHeaders, TapeHeaderField, IndexingMode}
 
-fields = [HeaderField.new(":method".to_heap, "GET".to_heap),
-          HeaderField.new(":path".to_heap, "/hello?q=1".to_heap),
-          HeaderField.new("x-indexed".to_heap, "retained by the table".to_heap),
-          HeaderField.new("authorization".to_heap, "secret".to_heap, true),
-          HeaderField.new("x-raw".to_heap, "utf8: ü and NUL: \x00".to_heap,
+fields = [HeaderField.new(":method", "GET"),
+          HeaderField.new(":path", "/hello?q=1"),
+          HeaderField.new("x-indexed", "retained by the table"),
+          HeaderField.new("authorization", "secret", true),
+          HeaderField.new("x-raw", "utf8: ü and NUL: \x00",
                           IndexingMode::WithoutIndexing)]
 encoder = Encoder.new
 native_encoder = Encoder.new
@@ -50,8 +50,8 @@ retained = [] of HeaderField
   retained.clear
 end
 # Bad integers, index zero, truncated literals and Huffman padding.
-["\x80".to_heap, "\xff".to_heap,
- "\x00\x03a".to_heap, "\x00\x81\x00".to_heap].each do |text|
+["\x80", "\xff",
+ "\x00\x03a", "\x00\x81\x00"].each do |text|
   bytes = Bytes.new(text.bytesize) { |i| text.byte_at(i) }
   expected = Decoder.new.decode(bytes)
   raise "expected failure" unless expected.is_a?(HpackError)

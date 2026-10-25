@@ -1,0 +1,72 @@
+TEXT = ("constant")
+TYPED : String = ("typed")
+USERS = {42 => "alice"}
+NESTED = [{name: "nested"}]
+
+class LiteralUser
+  getter name : String
+  @@title : String = "Class"
+  @title : String = "Welcome"
+  @optional : String? = "static"
+
+  def initialize(@name : String)
+    @title = "Hello"
+  end
+
+  def title=(text : String)
+    @title = text
+  end
+
+  def self.title
+    @@title = "Again"
+    @@title
+  end
+end
+
+def retained(text : String) : String
+  text
+end
+
+def choose(text : Str, n : Int64 = 0_i64) : Int32
+  1
+end
+
+def choose(text : String, n : Int64 = 0_i64) : Int32
+  2
+end
+
+user = LiteralUser.new(name: "carol")
+explicit = Array(String).new
+explicit << "x"
+raise "explicit array" unless explicit[0] == "x"
+list = [("a"), "b"]
+hash = {"k" => "v"}
+tuple = {"tuple", 42}
+named = {name: "named"}
+list << "x"
+hash["key"] = "value"
+raise "container types" unless list.is_a?(Array(String)) &&
+  hash.is_a?(Hash(String, String)) && tuple[0].is_a?(String) &&
+  named[:name].is_a?(String)
+raise "constant types" unless TEXT.is_a?(String) && TYPED.is_a?(String) &&
+  USERS[42].is_a?(String) && NESTED[0][:name].is_a?(String)
+raise "default type" unless typeof("a") == Str && choose("a") == 1
+raise "numeric retry" unless choose("a", 1) == 1
+raise "named argument" unless user.name == "carol"
+raise "class initializer" unless LiteralUser.title == "Again"
+# Warm calls and reserve container capacity before measuring static text.
+retained("warm")
+list[0] = "warm"
+before = IyiMark.allocated_since
+1000.times do
+  user.title = "static"
+  retained("static")
+  LiteralUser.title
+  pair = {"static", 42}
+  row = {name: "static"}
+  raise "tuple values" unless pair[0] == row[:name]
+  list[0] = "static"
+  hash["key"] = "static"
+end
+raise "literal allocated" unless before == IyiMark.allocated_since
+puts "PASS: literal heap places, no text allocation"

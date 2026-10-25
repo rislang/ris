@@ -9,7 +9,7 @@ class KeptText
   getter text : String
 
   def initialize
-    @text = "static".to_heap
+    @text = "static"
   end
 
   def update(n : Int32)
@@ -32,7 +32,7 @@ format_size(42)
 raise "def kept interpolation" unless before ==
   IyiHeap.read64(IyiRegion.tape &+ IyiRegion::OFF_CURSOR)
 keys = Hash(String, Int32).new
-keys["key".to_heap] = 42
+keys["key"] = 42
 raise "borrowed key lookup" unless keys["key"]? == 42
 raise "borrowed key membership" unless keys.has_key?("key")
 case "key".to_heap

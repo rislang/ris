@@ -34,10 +34,10 @@ No tape value survives the block that owns its storage:
   `"text #{value}"` builds a `Str` on the active tape. std and iyi keep
   their old text rules. Macro code and annotations are compiler metadata.
 * Read-only text APIs accept `Str`; String callers borrow with `as_tape`.
-* Heap storage and String-only parameters need explicit `.to_heap`, even
-  for literals: no implicit heap container literals. Literal `.to_heap`
-  reuses static String bytes. `Str.new` copies; `as_tape` borrows.
-  String annotations do not copy.
+* Plain literals become static String in heap places, without a copy:
+  String parameters/fields, constants and heap container literal entries.
+  Other tape text needs `.to_heap`; locals stay Str. `Str.new` copies;
+  `as_tape` borrows. String annotations never copy tape text.
 * To retain a value, copy it by name while its source is alive: `to_heap`
   on a `Str`, an `Ary` or `Ary::View` (each element by its own `to_heap`),
   or an `@[OnTape]` struct that defines one. `to_s`, heap interpolation and

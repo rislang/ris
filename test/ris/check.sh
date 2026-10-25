@@ -27,6 +27,10 @@ for name in text_constant text_parameter text_array text_capture \
             text_channel; do
   expect "$name" '.to_heap'
 done
+expect text_local_field \
+  'name holds tape text; write the literal in place or keep it with .to_heap'
+expect text_mixed_array 'to_heap'
+expect text_mixed_hash 'to_heap'
 expect text_literal_field '.to_heap'
 expect text_interpolation_field '.to_heap'
 out=$("$RIS" run test/ris/text_default.ri 2>&1)
@@ -35,6 +39,14 @@ if [ "$?" -eq 0 ] && grep -qF 'Str' <<<"$out" &&
   echo "runs     text_default"
 else
   echo "FAILED   text_default: $out"
+  status=1
+fi
+
+out=$("$RIS" run test/ris/text_literal_heap.ri 2>&1)
+if [ "$?" -eq 0 ] && grep -qF 'PASS: literal heap places' <<<"$out"; then
+  echo "runs     text_literal_heap"
+else
+  echo "FAILED   text_literal_heap: $out"
   status=1
 fi
 

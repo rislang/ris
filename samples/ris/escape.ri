@@ -13,9 +13,9 @@ import std/gc::{GC}
 
 N = 10000000
 TEXTS = [
-  "Mari Maasikas, Tallinn".to_heap,
-  "Tom & Jerry <cartoon>".to_heap,
-  "a plain sentence of words".to_heap,
+  "Mari Maasikas, Tallinn",
+  "Tom & Jerry <cartoon>",
+  "a plain sentence of words",
 ]
 
 on_tape = Program.args.includes?("tape")

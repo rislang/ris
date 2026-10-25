@@ -1,0 +1,8 @@
+class Kept
+  @name : String
+  def initialize
+    name = "alice"
+    @name = name
+  end
+end
+Kept.new

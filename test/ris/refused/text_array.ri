@@ -1,2 +1,2 @@
 kept = [] of String
-kept << "static"
+kept << "value #{42}"

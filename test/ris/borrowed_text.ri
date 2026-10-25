@@ -11,13 +11,13 @@ import std/dns::{DnsName}
 import std/toml::{TOML}
 import std/yaml::{YAML}
 
-keys = {"name".to_heap => 7, "nil".to_heap => 0}
+keys = {"name" => 7, "nil" => 0}
 exit 1 unless keys["name"] == 7 && keys["name"]? == 7
 exit 2 unless keys.has_key?("name") && !keys.has_key?("missing")
 exit 3 unless keys.fetch("missing", 42) == 42
 owned = "name".to_heap
 exit 4 unless owned.hash == "name".hash
-words = ["alpha".to_heap, "beta".to_heap]
+words = ["alpha", "beta"]
 exit 5 unless words.includes?("beta") && words.index("beta") == 1
 exit 6 unless words.join("|") == "alpha|beta"
 exit 7 unless words.join("|".to_heap) == "alpha|beta"

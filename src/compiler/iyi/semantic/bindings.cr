@@ -89,6 +89,9 @@ module Iyi
     def type(*, with_autocast = false)
       type = self.type
 
+      if with_autocast && self.is_a?(Call) && self.tape_literal?
+        return StringAutocastType.new(type.program, self)
+      end
       if with_autocast
         case self
         when NumberLiteral

@@ -1,0 +1,3 @@
+text = "number #{42}"
+items = ["static", text]
+puts items.size

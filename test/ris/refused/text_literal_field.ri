@@ -1,7 +1,7 @@
 class Kept
   @text : String
   def initialize
-    @text = "literal"
+    @text = "value #{42}"
   end
 end
 Kept.new

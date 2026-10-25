@@ -22,10 +22,10 @@ tape do
   exit 10 unless Shlex.split("bad\\").is_a?(ShlexError)
   comments = Shlex.split("a# rest\nb", true)
   exit 11 if comments.is_a?(ShlexError)
-  exit 12 unless comments.to_heap == ["a".to_heap, "b".to_heap]
+  exit 12 unless comments.to_heap == ["a", "b"]
   kept = words.to_heap
 end
-exit 13 unless kept == ["plain".to_heap, "two words".to_heap,
-  "café".to_heap, "a b".to_heap, "".to_heap]
+exit 13 unless kept == ["plain", "two words",
+  "café", "a b", ""]
 exit 14 unless Shlex.split(Shlex.join(kept)) == kept
 puts "PASS: shlex tape and heap APIs"

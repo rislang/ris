@@ -160,7 +160,8 @@ module Iyi
                        Iyi::AnnotationType |
                        Iyi::Const |
                        Iyi::NumberAutocastType |
-                       Iyi::SymbolAutocastType)
+                       Iyi::SymbolAutocastType |
+                       Iyi::StringAutocastType)
       nil
     end
 

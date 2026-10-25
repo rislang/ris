@@ -38,12 +38,12 @@ if req.is_a?(ParsedHead)
     writer.json { |json| json.object { json.field "path", req.target } }
   end
   puts body                             # => {"path":"/hello"}
-  puts Slim.render("views/page.slim".to_heap) # h1= req.target
+  puts Slim.render("views/page.slim") # h1= req.target
 end
 ```
 
-Literals are static `Str` views; interpolation builds tape text. Keep text
-on the heap with `.to_heap`; a String annotation requires that explicit copy.
+Literals default to Str; heap places use static String without copying.
+Interpolation and other tape text need `.to_heap` for heap storage.
 Other objects use iyi's GC. Tape values go to a file or socket uncopied;
 `tape` blocks share it; `local_tape` owns its own. The compiler refuses values
 outliving it; `text.to_heap` copies what must. [TAPE_DESIGN.md](TAPE_DESIGN.md).

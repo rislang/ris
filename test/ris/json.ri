@@ -74,17 +74,17 @@ tape do
   check(failures, doc.size(doc.at(doc.root, "e")) == 0 && doc.at(doc.root, "zz") == -1, "empty array, missing key")
   keys = [] of String
   doc.each(doc.root) { |child| keys << retain(doc.key(child)) }
-  check(failures, keys == ["a".to_heap, "bA".to_heap, "e".to_heap],
+  check(failures, keys == ["a", "bA", "e"],
     "keys in order")
 end
 
 bad = [
-  %([1,]).to_heap, %({"a" 1}).to_heap, %(["\\x"]).to_heap,
-  %().to_heap, %([1] 2).to_heap, %({"k\\u0041":1,"kA":2}).to_heap,
-  %([01]).to_heap, %([1e999]).to_heap, %(["\\ud800"]).to_heap,
-  %({"a":1,}).to_heap, %(tru).to_heap, %([1.5x]).to_heap,
-  %(["a\nb"]).to_heap, %({"a":{"b":1,"b":2}}).to_heap,
-  ("[" * 300).to_heap, %(["\xff"]).to_heap,
+  %([1,]), %({"a" 1}), %(["\\x"]),
+  %(), %([1] 2), %({"k\\u0041":1,"kA":2}),
+  %([01]), %([1e999]), %(["\\ud800"]),
+  %({"a":1,}), %(tru), %([1.5x]),
+  %(["a\nb"]), %({"a":{"b":1,"b":2}}),
+  ("[" * 300).to_heap, %(["\xff"]),
 ]
 many = String.build do |io|
   io << "{".to_heap
@@ -103,7 +103,7 @@ bad.each do |input|
   end
 end
 
-[nil, 2, "\t".to_heap].each do |indent|
+[nil, 2, "\t"].each do |indent|
   [false, true].each do |ascii|
     heap = JSON.build(indent) do |b|
       b.ascii_only = ascii

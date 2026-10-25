@@ -24,7 +24,7 @@ tape do
   same = used == before
   alone = row(name, 9)
   plain = [] of String
-  plain << "heap".to_heap
+  plain << "heap"
   puts page.finish
   puts alone
   puts "in place: #{same} #{plain.size}"

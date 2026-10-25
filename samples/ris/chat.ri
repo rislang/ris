@@ -98,9 +98,9 @@ module Chat
 end
 
 room = Chat::Room.new
-room.users << Chat::User.new(id: 31, name: "carol".to_heap)
-room.users << Chat::User.new(id: 7, name: "alice".to_heap)
-room.users << Chat::User.new(id: 12, name: "bob".to_heap)
+room.users << Chat::User.new(id: 31, name: "carol")
+room.users << Chat::User.new(id: 7, name: "alice")
+room.users << Chat::User.new(id: 12, name: "bob")
 Chat.create_message(room, "7 Morning!")
 Chat.create_message(room, "12 Deploy is green")
 Chat.create_message(room, "7 Ship it")

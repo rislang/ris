@@ -1,2 +1,2 @@
-TEXT = "static"
+TEXT = "value #{42}"
 puts TEXT

@@ -1,4 +1,4 @@
 def retain(text : String) : String
   text
 end
-retain("static")
+retain("value #{42}")

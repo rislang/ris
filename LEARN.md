@@ -41,8 +41,8 @@ def greet(text : String) : String | ParseError
   "age #{parse_age(text)!}".to_heap # `!` returns an error
 end
 
-puts greet("41".to_heap).or_panic             # => age 41
-case r = greet("x".to_heap)
+puts greet("41").or_panic             # => age 41
+case r = greet("x")
 in String     then puts r
 in ParseError then puts it.message    # `it` is the narrowed value
 end
@@ -50,8 +50,8 @@ end
 
 * Memory: main and every spawned fiber have an implicit owning tape.
   Literals are static `Str` views; interpolation builds a `Str` there.
-  `.to_heap` explicitly keeps text as String, including for typed arguments;
-  a String annotation alone does not copy. `text.as_tape` borrows a String;
+  Plain literals use static String in heap places, without copying. Other
+  tape text needs `.to_heap`; locals stay Str. `text.as_tape` borrows String;
   a `Str` reads as a String does (`[a..]`, `split`, `index`,
   `to_i`), a `Str::Builder` takes `<<`, `Ary(T)` and
   `@[OnTape]` structs hold the rest, and `to_heap` copies what must

@@ -11,7 +11,7 @@ tape do
   exit 4 unless MIME.parse?("a/b; x=\"bad").nil?
   exit 5 unless MIME.from_extension("dir/INDEX.HTML") == "text/html"
   exit 6 unless MIME.extensions("TEXT/HTML").to_heap ==
-                [".htm".to_heap, ".html".to_heap]
+                [".htm", ".html"]
   exit 15 unless MIME.compressible?("application/wasm")
   exit 16 if MIME.compressible?("image/png")
   exit 7 unless MIME.compressible?("application/a+json")
@@ -25,9 +25,9 @@ exit 9 unless kept == "text/html; charset=ascii"
 exit 10 unless MIME.with_charset("text/plain") ==
                "text/plain; charset=utf-8"
 exit 11 unless MIME.parse?("a/b; x=y".to_heap) ==
-  {"a/b".to_heap, {"x".to_heap => "y".to_heap}}
+  {"a/b", {"x" => "y"}}
 exit 12 unless MIME.from_extension("x.JSON") == "application/json"
 exit 13 unless MIME.extensions("text/html".to_heap) ==
-  [".htm".to_heap, ".html".to_heap]
+  [".htm", ".html"]
 exit 14 unless MIME.compressible?("text/plain")
 puts "PASS: mime tape and heap APIs"

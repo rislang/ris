@@ -18,6 +18,7 @@ module Iyi
 
     # `number_autocast` defines if casting numeric expressions to larger ones is enabled
     def supports_autocast?(number_autocast : Bool = true)
+      return true if self.is_a?(Call) && self.tape_literal?
       case self
       when NumberLiteral, SymbolLiteral
         true

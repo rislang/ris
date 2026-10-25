@@ -5,7 +5,7 @@ class Cache
   getter body : String
 
   def initialize
-    @body = "".to_heap
+    @body = ""
   end
 
   def store(body : String) : Nil
