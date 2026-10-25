@@ -1,0 +1,8 @@
+def descend(n : Int32) : Int32
+  a = Str::Builder.new
+  a << "abc"
+  view = a.finish
+  child = n > 0 ? descend(n - 1) : 0
+  child + view.size
+end
+tape { descend(2) }

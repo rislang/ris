@@ -990,11 +990,15 @@ struct TapeSlot
       Ary(TapeTable).new(1) { first })
   end
 
-  def to_any : TapeAny
+  def to_any(scratch : TapeConversionScratch) : TapeAny
     t = @table
-    return t.to_any unless t.nil?
+    return t.to_any(scratch) unless t.nil?
     list = @tables
-    return TapeAny.new(list.map { |item| item.to_any }) unless list.nil?
+    unless list.nil?
+      mark = scratch.used
+      list.each { |item| scratch.push(item.to_any(scratch)) }
+      return TapeAny.new(scratch.finish(mark))
+    end
     @value
   end
 end
@@ -1058,14 +1062,64 @@ struct TapeTable
   end
 
   def to_any : TapeAny
+    scratch = TapeConversionScratch.new
+    to_any(scratch)
+  end
+
+  def to_any(scratch : TapeConversionScratch) : TapeAny
     pairs = TapeMap(TapeAny).new
-    @slots.each { |key, slot| pairs[key] = slot.to_any }
+    @slots.each { |key, slot| pairs[key] = slot.to_any(scratch) }
     TapeAny.new(pairs)
+  end
+end
+
+# Conversion arrays are accumulated outside the recursive table walk.
+@[Owner]
+struct TapeConversionScratch
+  getter used : Int32
+
+  def initialize
+    @items = Ary(TapeAny).new
+    @used = 0
+  end
+
+  def push(item : TapeAny) : Nil
+    if @used < @items.size
+      @items[@used] = item
+    else
+      @items << item
+    end
+    @used = @used + 1
+  end
+
+  def finish(mark : Int32) : Ary(TapeAny)
+    items = Ary(TapeAny).new(@used - mark)
+    index = mark
+    while index < @used
+      items << @items[index]
+      index = index + 1
+    end
+    @used = mark
+    items
   end
 end
 
 # Reads one document. Each step answers what it read or the `TOMLError`
 # that stops the read, passed up with `!`; nothing is raised inside.
+# A fixed view of parser-owned key scratch; recursive values borrow it.
+@[OnTape]
+struct KeySlice(T)
+  getter size : Int32
+
+  def initialize(@storage : Ary(T), @start : Int32, @size : Int32)
+  end
+
+  def [](index : Int32) : T
+    raise "key scratch index out of range" if index < 0 || index >= @size
+    @storage[@start + index]
+  end
+end
+
 @[OnTape]
 struct TapeReader
   # The document and the offset in it, on the tape so that a copy of the
@@ -1111,6 +1165,12 @@ struct TapeReader
     @current.value
   end
 
+  @key_parts : Ary(Str)
+  @key_starts : Ary(Int32)
+  @key_used : Int32
+  @array_items : Ary(TapeAny)
+  @array_used : Int32
+  @empty_path : Ary(Str)
   @path : Pointer(Ary(Str))
 
   def path : Ary(Str)
@@ -1141,6 +1201,12 @@ struct TapeReader
     @root = TapeTable.new(0, true, false)
     @current.value = @root
     @path.value = Ary(Str).new
+    @key_parts = Ary(Str).new
+    @key_starts = Ary(Int32).new
+    @key_used = 0
+    @array_items = Ary(TapeAny).new
+    @array_used = 0
+    @empty_path = Ary(Str).new
   end
 
   def document : TapeAny | TOMLError
@@ -1382,7 +1448,7 @@ struct TapeReader
 
   # The dotted name of the first `count` parts of `path` + `parts`.
   private def name(path : Ary(Str),
-                   parts : Ary(Str), count : Int32) : Str
+                   parts : Ary(Str) | KeySlice(Str), count : Int32) : Str
     text = Str::Builder.new(64)
     first = true
     path.each do |part|
@@ -1416,27 +1482,56 @@ struct TapeReader
     "#{what.to_heap} is #{value.kind_name}, not a table"
   end
 
+  # Parse into reusable scratch before descending into a value. Its slices
+  # remain stable while nested inline tables append their own key parts.
+  private def scratch_key : Nil | TOMLError
+    input = bytes
+    input_size = size
+    while true
+      skip_blanks
+      start = pos
+      part = simple_key!
+      if @key_used < @key_parts.size
+        @key_parts[@key_used] = part
+        @key_starts[@key_used] = start
+      else
+        @key_parts << part
+        @key_starts << start
+      end
+      @key_used = @key_used + 1
+      skip_blanks
+      break unless pos < input_size && input[pos] == 46_u8
+      self.pos = pos + 1
+    end
+    nil
+  end
+
   # `key = value`, into `table`, whose header's key is `path`.
   private def pair(table : TapeTable,
                    path : Ary(Str)) : Nil | TOMLError
     input = bytes
     input_size = size
-    parts = Ary(Str).new
-    starts = Ary(Int32).new
-    key(parts, starts)!
+    mark = @key_used
+    scratch_key!
+    count = @key_used - mark
+    parts = KeySlice(Str).new(@key_parts, mark, count)
+    starts = KeySlice(Int32).new(@key_starts, mark, count)
     unless pos < input_size && input[pos] == 61_u8
       return no_equals(path, parts)
     end
     self.pos = pos + 1
     skip_blanks
     item = value(table.depth + parts.size)!
-    place(table, path, parts, starts, item)
+    result = place(table, path, parts, starts, item)
+    @key_used = mark
+    result
   end
 
   # Puts `item` at the dotted key `parts` (which start at `starts`) of
   # `table`, opening the tables on the way as the rules allow.
   private def place(table : TapeTable, path : Ary(Str),
-                    parts : Ary(Str), starts : Ary(Int32),
+                    parts : Ary(Str) | KeySlice(Str),
+                    starts : Ary(Int32) | KeySlice(Int32),
                     item : TapeAny) : Nil | TOMLError
     t = table
     i = 0
@@ -1597,7 +1692,7 @@ struct TapeReader
   end
 
   private def no_equals(path : Ary(Str),
-                        parts : Ary(Str)) : TOMLError
+                        parts : Ary(Str) | KeySlice(Str)) : TOMLError
     fail("#{found(pos)} after the key " \
          "#{name(path, parts, parts.size).to_heap}, " \
          "where '=' should be", pos)
@@ -1917,7 +2012,7 @@ struct TapeReader
     input_size = size
     start = pos
     self.pos = pos + 1
-    items = Ary(TapeAny).new
+    mark = @array_used
     while true
       skip_space!
       return fail("an array that does not close", start) if pos >= input_size
@@ -1925,7 +2020,13 @@ struct TapeReader
         self.pos = pos + 1
         break
       end
-      items << value(depth + 1)!
+      item = value(depth + 1)!
+      if @array_used < @array_items.size
+        @array_items[@array_used] = item
+      else
+        @array_items << item
+      end
+      @array_used = @array_used + 1
       skip_space!
       return fail("an array that does not close", start) if pos >= input_size
       b = input[pos]
@@ -1939,6 +2040,13 @@ struct TapeReader
                           "should be")
       end
     end
+    items = Ary(TapeAny).new(@array_used - mark)
+    index = mark
+    while index < @array_used
+      items << @array_items[index]
+      index = index + 1
+    end
+    @array_used = mark
     TapeAny.new(items)
   end
 
@@ -1952,7 +2060,7 @@ struct TapeReader
     start = pos
     self.pos = pos + 1
     table = TapeTable.new(depth, false, false)
-    empty = Ary(Str).new
+    empty = @empty_path
     skip_blanks
     if pos < input_size && input[pos] == 125_u8
       self.pos = pos + 1

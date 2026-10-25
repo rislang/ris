@@ -1,0 +1,8 @@
+def combine(size : Int32, child : Int32) : Int32
+  size + child
+end
+def descend(n : Int32) : Int32
+  return 0 if n == 0
+  combine(n > 0 ? Ary(Int32).new.size : 0, descend(n - 1))
+end
+tape { descend(2) }

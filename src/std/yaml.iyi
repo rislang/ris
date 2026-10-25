@@ -735,14 +735,26 @@ pub struct TapeValue
   end
 
   def self.view(value : Any) : TapeValue
+    scratch = TapeViewScratch.new
+    view(value, scratch)
+  end
+
+  private def self.view(value : Any, scratch : TapeViewScratch) : TapeValue
     k = value.kind
     if k == Any::KIND_ARRAY
-      items = Ary(TapeValue).new
-      value.as_a.each { |item| items << view(item) }
+      mark = scratch.used
+      value.as_a.each { |item| scratch.push(view(item, scratch)) }
+      items = Ary(TapeValue).new(scratch.used - mark)
+      index = mark
+      while index < scratch.used
+        items << scratch.items[index]
+        index = index + 1
+      end
+      scratch.used = mark
       TapeValue.new(items)
     elsif k == Any::KIND_HASH
       pairs = TapeMap(TapeValue, TapeValue).new
-      value.as_h.each { |key, item| pairs[view(key)] = view(item) }
+      value.as_h.each { |key, item| pairs[view(key, scratch)] = view(item, scratch) }
       TapeValue.new(pairs)
     elsif k == Any::KIND_STRING
       TapeValue.new(value.as_s.as_tape)
@@ -952,6 +964,27 @@ module TapeScalar
   end
 end
 
+# Conversion scratch belongs to the public entry, outside the view cycle.
+@[Owner]
+struct TapeViewScratch
+  getter items : Ary(TapeValue)
+  property used : Int32
+
+  def initialize
+    @items = Ary(TapeValue).new
+    @used = 0
+  end
+
+  def push(value : TapeValue) : Nil
+    if @used < @items.size
+      @items[@used] = value
+    else
+      @items << value
+    end
+    @used = @used + 1
+  end
+end
+
 @[OnTape]
 struct TapeParser
   # Deep enough for any document a person wrote, and shallow enough for a
@@ -999,6 +1032,9 @@ struct TapeParser
   @anchor_depths : TapeMap(Str, Int32)
   @open_peaks : Ary(Int32)
   @buffer : TapeBuffer
+  # Nested sequence parses share scratch owned outside their call cycle.
+  @sequence_scratch : Ary(TapeValue)
+  @sequence_used : Int32
 
   def initialize(text : Str)
     @bytes = text
@@ -1020,6 +1056,8 @@ struct TapeParser
     @anchor_depths = TapeMap(Str, Int32).new
     @open_peaks = Ary(Int32).new
     @buffer = TapeBuffer.new
+    @sequence_scratch = Ary(TapeValue).new
+    @sequence_used = 0
     split_lines
   end
 
@@ -1543,12 +1581,20 @@ struct TapeParser
     end
   end
 
+  private def sequence_push(value : TapeValue) : Nil
+    if @sequence_used < @sequence_scratch.size
+      @sequence_scratch[@sequence_used] = value
+    else
+      @sequence_scratch << value
+    end
+    @sequence_used = @sequence_used + 1
+  end
+
   private def parse_block_sequence(indent : Int32) : TapeValue
     @nodes = @nodes + 1
-    items = Ary(TapeValue).new
-    result = TapeValue.new(items)
+    mark = @sequence_used
     enter(@heads[@line])
-    return result if @error
+    return TapeValue.new(Ary(TapeValue).new) if @error
     while true
       skip_blank_lines
       break if @line >= @starts.size || document_marker?(@line)
@@ -1565,17 +1611,26 @@ struct TapeParser
       pos = skip_blank(dash + 1)
       if pos >= @ends[@line] || @bytes[pos] == 35_u8
         @line = @line + 1
-        items << parse_block_node(indent, false)
+        sequence_push(parse_block_node(indent, false))
       else
         dash_line = @line
         @heads[@line] = pos
-        items << parse_block_node(indent, false)
+        sequence_push(parse_block_node(indent, false))
         @heads[dash_line] = dash
       end
       break if @error
     end
     leave
-    result
+    # Materialize only after recursive children finish; no activation keeps
+    # its own growing array across a child parse.
+    items = Ary(TapeValue).new(@sequence_used - mark)
+    index = mark
+    while index < @sequence_used
+      items << @sequence_scratch[index]
+      index = index + 1
+    end
+    @sequence_used = mark
+    TapeValue.new(items)
   end
 
   private def parse_block_mapping(indent : Int32) : TapeValue
@@ -2230,10 +2285,9 @@ struct TapeParser
   end
 
   private def parse_flow_sequence(opener : Int32) : TapeValue
-    items = Ary(TapeValue).new
-    result = TapeValue.new(items)
+    mark = @sequence_used
     enter(opener)
-    return result if @error
+    return TapeValue.new(Ary(TapeValue).new) if @error
     pos = opener + 1
     while true
       pos = skip_flow_space(pos)
@@ -2287,7 +2341,7 @@ struct TapeParser
         end
         item = TapeValue.new(pair)
       end
-      items << item
+      sequence_push(item)
       if pos < 0
         fail("unterminated flow sequence", opener)
         break
@@ -2304,7 +2358,16 @@ struct TapeParser
       end
     end
     leave
-    result
+    # Materialize only after recursive children finish; no activation keeps
+    # its own growing array across a child parse.
+    items = Ary(TapeValue).new(@sequence_used - mark)
+    index = mark
+    while index < @sequence_used
+      items << @sequence_scratch[index]
+      index = index + 1
+    end
+    @sequence_used = mark
+    TapeValue.new(items)
   end
 
   private def parse_flow_mapping(opener : Int32) : TapeValue

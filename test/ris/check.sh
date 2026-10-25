@@ -57,6 +57,49 @@ else
   status=1
 fi
 
+out=$("$RIS" run test/ris/recursion_scratch.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = 'PASS: recursion scratch' ]; then
+  echo "runs     recursion_scratch"
+else
+  echo "FAILED   recursion_scratch: $out"
+  status=1
+fi
+out=$(
+  for name in local mutual pending callback result view owner \
+      callback_proc dispatch constructing consumed tree branch_pending \
+      forwarded; do
+    expect "recursion_$name" 'cannot recurse with growing tape'
+  done
+)
+if [[ "$out" == *FAILED* ]]; then
+  status=1
+fi
+printf '%s\n' "$out"
+
+out=$("$RIS" run test/ris/yaml.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = 'PASS: yaml tape and heap APIs' ]; then
+  echo "runs     yaml"
+else
+  echo "FAILED   yaml: $out"
+  status=1
+fi
+
+out=$("$RIS" run test/ris/toml.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = 'PASS: toml tape and heap APIs' ]; then
+  echo "runs     toml"
+else
+  echo "FAILED   toml: $out"
+  status=1
+fi
+
+out=$("$RIS" run test/ris/time_tape_offset.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = 'PASS: time tape offsets' ]; then
+  echo "runs     time_tape_offset"
+else
+  echo "FAILED   time_tape_offset: $out"
+  status=1
+fi
+
 # B1 storage restrictions; B2 ordinary def and receiver borrows.
 expect owner_temporary 'owner temporary requires a named declaration'
 expect owner_inline 'owner temporary requires a named declaration'

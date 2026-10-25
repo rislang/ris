@@ -16,6 +16,11 @@ tape do
   exit 4 unless YAML.parse(rendered) == doc
   exit 5 unless w.finish.starts_with?("prefix:name:")
   exit 6 unless YAML.parse?("[bad").nil?
+  nested = YAML.parse("- [1, [2], 3]\n-\n  - 4\n  - [5, 6]\n")
+  exit 9 unless nested[0][1][0].as_i == 2
+  exit 10 unless nested[1][1][1].as_i == 6
+  exit 11 unless YAML.parse(YAML.dump(nested)) == nested
+  exit 12 unless YAML.parse(YAML.dump(nested.to_heap).as_tape) == nested
   kept = doc.to_heap
 end
 exit 7 unless kept["name"].as_s == "café"

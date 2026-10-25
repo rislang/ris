@@ -1,0 +1,9 @@
+def left(n : Int32) : Int32
+  a = Ary(Int32).new
+  child = n > 0 ? right(n - 1) : 0
+  child + a.size
+end
+def right(n : Int32) : Int32
+  left(n)
+end
+tape { left(2) }

@@ -1,0 +1,10 @@
+@[Owner]
+struct Scratch
+  getter data = Ary(Int32).new
+end
+def descend(n : Int32) : Int32
+  owner = Scratch.new
+  child = n > 0 ? descend(n - 1) : 0
+  child + owner.data.size
+end
+tape { descend(2) }

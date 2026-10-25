@@ -9,9 +9,12 @@ check.sh. Delete finished work in the same commit; keep check.sh green.
    values in their own region, or refuse views across the first growth.
    Non-Linux targets still move. Refuse raw owner operations.
    Gate: no transfer of a viewed value.
-4c. [L] Recursion per Goose §7.8: cycle roots, scratch and pending results;
-    replace tape_lifetime_checker.cr's active-cycle skip.
-    Gate: direct and mutual cycles, callbacks and live scratch.
+4a. [M] One call graph of specialized defs, one effect summary per def
+    (shrink, result views, allocation, cycle, suspension), solved once.
+    Shrink, recursion, owner, program, lifetime, pointer and scope checks
+    read it instead of walking target_defs each; 4d-4f extend it.
+    Gate: check.sh refusals unchanged; callbacks, dispatch and opaque
+    targets treated the same in every check.
 4d. [L] Loop root fixed points, including previous-round aliases and views.
     Gate: loop-carried roots, rebinding and clear/refill rounds.
 4e. [L] Owner/path roots, joins, read-back candidates and stored holders.

@@ -93,7 +93,11 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
     node.target_defs.try &.each do |target|
       key = VisitKey.new(target, @scope, binding)
       active_key = {target.object_id, @scope.try(&.object_id)}
-      next if @active.includes?(active_key) || !@visited.add?(key)
+      # Cycle storage was checked over the specialized graph before this
+      # lexical traversal. Re-entry has the same lifetime context; stop
+      # expanding it, rather than treating the cycle as unchecked code.
+      next if !@visited.add?(key)
+      next if @active.includes?(active_key)
       @active.add(active_key)
       previous_owner, previous_block, previous_yield = @owner, @block, @yield_context
       previous_loop_depth = @loop_depth

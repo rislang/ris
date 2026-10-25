@@ -1,0 +1,22 @@
+import std/time::{Time, Location}
+
+tape do
+  inputs = Ary(Str){
+    "2024-01-01T00:30:00+05:30",
+    "2023-12-31T23:30:00-04:00",
+    "2024-02-29T12:30:45Z",
+  }
+  offsets = Ary(Int32){19800, -14400, 0}
+  writer = Str::Builder.new
+  inputs.each_with_index do |text, index|
+    value = Time.parse_rfc3339(text).in(Location.fixed(offsets[index]))
+    writer.clear
+    value.to_rfc3339(0, writer)
+    raise "offset writer" unless writer.finish == text
+    raise "offset string" unless value.to_rfc3339 == text
+    writer.clear
+    value.to_rfc3339(3, writer)
+    raise "fraction" unless Time.parse_rfc3339(writer.finish) == value
+  end
+end
+puts "PASS: time tape offsets"

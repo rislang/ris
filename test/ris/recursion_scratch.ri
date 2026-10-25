@@ -1,0 +1,75 @@
+def scratch(a : Ary(Int32), n : Int32) : Int32
+  a << n
+  return a.size if n == 0
+  child = scratch(a, n - 1)
+  child + a.size
+end
+
+def dead_local(n : Int32) : Int32
+  a = Ary(Int32).new
+  a << n
+  size = a.size
+  return size if n == 0
+  size + dead_local(n - 1)
+end
+
+def views(text : Str, n : Int32) : Int32
+  return text.size if n == 0
+  child = views(text, n - 1)
+  child + text.size
+end
+
+def tail_result(n : Int32) : Ary(Int32)
+  if n == 0
+    Ary(Int32).new
+  else
+    tail_result(n - 1)
+  end
+end
+
+@[OnTape]
+struct TextView
+  getter text : Str
+
+  def initialize(@text)
+  end
+end
+
+def records(view : TextView, n : Int32) : Int32
+  return view.text.size if n == 0
+  child = records(view, n - 1)
+  child + view.text.size
+end
+
+@[Owner]
+struct ScratchOwner
+  getter data = Ary(Int32).new
+end
+
+def owner_scratch(owner : ScratchOwner, n : Int32) : Int32
+  owner.data << n
+  return owner.data.size if n == 0
+  child = owner_scratch(owner, n - 1)
+  child + owner.data.size
+end
+
+def builder_scratch(builder : Str::Builder, n : Int32) : Int32
+  builder << "a"
+  return builder.length if n == 0
+  child = builder_scratch(builder, n - 1)
+  child + builder.length
+end
+
+tape do
+  owner = ScratchOwner.new
+  raise "owner" unless owner_scratch(owner, 2) == 9
+  builder = Str::Builder.new
+  raise "builder" unless builder_scratch(builder, 2) == 9
+  raise "tail result" unless tail_result(2).size == 0
+  a = Ary(Int32).new
+  raise "scratch" unless scratch(a, 2) == 9
+  raise "dead local" unless dead_local(2) == 3
+  raise "records" unless records(TextView.new(Str.new("abc")), 2) == 9
+  raise "views" unless views(Str.new("abc"), 2) == 9
+end
+puts "PASS: recursion scratch"

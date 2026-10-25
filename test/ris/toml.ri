@@ -33,6 +33,7 @@ tape do
     "a = nan\nb = -inf\nc = +inf\nd = -0.0",
     "a = 1979-05-27\nb = 07:32:00.123\nc = 1979-05-27T07:32:00",
     "x = 0.10000000000000000000000000000000000001",
+    "root.a = {nested.b = [1, [2], 3], after = 4}\nroot.tail = 5",
   }
   corpus.each do |text|
     value = TOML.parse(text)

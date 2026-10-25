@@ -1,0 +1,6 @@
+def descend(n : Int32) : Int32
+  tree = Tre(Int32).new
+  child = n > 0 ? descend(n - 1) : 0
+  child + tree.size
+end
+tape { descend(2) }
