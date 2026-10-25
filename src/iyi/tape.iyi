@@ -1106,7 +1106,7 @@ struct Ary(T)
     used = IyiRegion.size_mul((@state + 1_i64).value, width)
     bytes = IyiRegion.size_mul(capacity, width)
     @state.value = IyiRegion.owned_resize(start, stop, used, bytes,
-      @state + 3_i64, (@state + 4_i64).value)
+      @state + 3_i64, (@state + 4_i64).value, width)
     (@state + 2_i64).value = capacity
   end
 
@@ -1866,7 +1866,7 @@ struct Tre(T)
     used = IyiRegion.size_mul((@state + 1_i64).value, width)
     bytes = IyiRegion.size_mul(capacity, width)
     @state.value = IyiRegion.owned_resize(start, stop, used, bytes,
-      @state + 3_i64, (@state + 4_i64).value)
+      @state + 3_i64, (@state + 4_i64).value, width)
     (@state + 2_i64).value = capacity
   end
 end

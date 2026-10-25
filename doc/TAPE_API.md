@@ -77,17 +77,27 @@ end
 
 Each fiber has its own tape; a spawned fiber cannot take its parent's values.
 Size writers and arrays up front, refill with `clear`, write output straight
-to its IO. `RIS_TAPE_STATS=1` counts moves. `@[TapeUnsafe]` is std-only.
+to its IO. `RIS_TAPE_STATS=1` counts side transfers and growth moves.
+`@[TapeUnsafe]` is std-only.
 
 ## Published runtime limits
-`IyiRegion` starts tapes and side regions at 67,108,864 bytes (64 MiB),
+`IyiRegion` starts tapes at 67,108,864 bytes (64 MiB),
 not a cap. Each mapping adds a 64-byte header and rounds to 65,536 bytes.
 Checked UInt64 arithmetic permits at most 2^64 - 65,536 mapped bytes;
 the OS address space and available memory usually impose a smaller limit.
 `Str` byte lengths and `Ary`/`Tre` counts are at most 2^31 - 1.
 Region and side-region lists have no fixed count cap; allocation failure
-is fatal. A displaced growing value gets a side region; growth can move
-it again. Each worker caches at most 64 released initial-size mappings.
+is fatal. On Linux a displaced value transfers once to a side region.
+It reserves up to 1 GiB (`SIDE_RESERVE`, backend policy), capped at
+(2^31 - 1) times the element width. MAP_NORESERVE commits pages on touch;
+a final 64 KiB guard is inaccessible. Growth there never moves, and
+exhaustion exits with an allocation-free fatal error, without fallback.
+Other targets retain moving side mappings pending reservation support.
+Stats count side regions and transfer bytes separately from growth moves.
+The reservation follows
+[Goose §1.2–1.3 and §10.4](reference/goose/docs/goose_spec.md).
+Each worker caches at most 64 released initial-size tape mappings and
+64 reserved side mappings, retaining at most 1 MiB warm in each.
 Each group permits at most 2^31 - 1 live tasks (`IyiGroup::MAX_LIVE`).
 There is no global task cap; metadata and stacks consume memory.
 `IyiFiber::STACK_BYTES` is 262,144 bytes, plus a 4,096-byte guard page.

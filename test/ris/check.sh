@@ -316,7 +316,7 @@ if [ "$out" = '2 2 3 4' ]; then echo "runs     refill_handoff"; else echo "FAILE
 out=$("$RIS" run test/ris/clear.ri 2>&1)
 if [ "$out" = $'2 1 2\n3 2 3\n4 3 4\nxxxxend' ]; then echo "runs     clear"; else echo "FAILED   clear: $out"; status=1; fi
 out=$(RIS_TAPE_STATS=1 "$RIS" run test/ris/side_warm.ri 2>&1)
-if grep -qF '1001 scopes, 3 mappings made, 0 unmapped' <<<"$out" && grep -qF '1000 values moved' <<<"$out"; then echo "runs     side_warm"; else echo "FAILED   side_warm: $out"; status=1; fi
+if grep -qF '1001 scopes, 3 mappings made, 0 unmapped' <<<"$out" && grep -qF '1000 side regions' <<<"$out"; then echo "runs     side_warm"; else echo "FAILED   side_warm: $out"; status=1; fi
 out=$("$RIS" run test/ris/side.ri 2>&1)
 if [ "$out" = $'round 0: intact\nround 1: intact\nround 2: intact' ]; then echo "runs     side"; else echo "FAILED   side: $out"; status=1; fi
 out=$("$RIS" run test/ris/scope_free.ri 2>&1)
@@ -521,6 +521,25 @@ if [ "$?" -ne 0 ] &&
   echo "fatal    unwind_failure"
 else
   echo "FAILED   unwind_failure: $out"; status=1
+fi
+
+# Reserved side growth keeps addresses and uses bounded mappings.
+out=$(RIS_TAPE_STATS=1 "$RIS" run --no-gc test/ris/stable_growth.ri 2>&1)
+if [ "$?" -eq 0 ] &&
+    grep -qF 'PASS: stable interleaved growth' <<<"$out" &&
+    grep -qF '0 growth moves' <<<"$out" &&
+    grep -qF '4 mappings made' <<<"$out" &&
+    grep -qF '2 side regions' <<<"$out"; then
+  echo "runs     stable_growth (--no-gc, bounded mappings)"
+else
+  echo "FAILED   stable_growth: $out"; status=1
+fi
+out=$("$RIS" run --no-gc test/ris/side_overflow.ri 2>&1)
+if [ "$?" -eq 1 ] &&
+    [ "$out" = 'iyi: tape side reservation exhausted: 1073741825' ]; then
+  echo "fatal    side_overflow (--no-gc)"
+else
+  echo "FAILED   side_overflow: $out"; status=1
 fi
 
 # Fatal size errors exit directly, with exact diagnostics and no heap.

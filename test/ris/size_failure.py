@@ -23,7 +23,7 @@ CASES = {
     "l": "iyi: tape size overflow: 18446744073709551608 + 16",
     "m": "iyi: a tape value made outside a tape block",
     "n": "iyi: mapping failed: 4611686018427453440 bytes",
-    "o": "iyi: tape size overflow: 4611686018427387904 * 4",
+    "o": "iyi: tape side reservation exhausted: 4611686018427387904",
     "p": "iyi: tape bad size: -9223372036854775808",
     "q": "iyi: tape array full: 2147483647",
     "r": "iyi: tape offset overflow: 2147483648",

@@ -1,0 +1,41 @@
+# Inspect storage only to verify the runtime's address stability.
+module test/ris/stable_growth
+
+@[PointerUnsafe("test element addresses across reserved side growth")]
+def address(a : Ary(Int32)) : UInt64
+  a.@state.value
+end
+
+@[PointerUnsafe("check saved element pointers after growth")]
+def check_growth
+  local_tape do
+    a = Ary(Int32).new(1)
+    b = Ary(Int32).new(1)
+    padding = Str.new("force both arrays off the tape end")
+    a << 0
+    b << 0
+    a << 1
+    b << 1
+    first_a = address(a)
+    first_b = address(b)
+    view_a = Pointer(Int32).new(first_a)
+    view_b = Pointer(Int32).new(first_b)
+    i = 2
+    # Cross the former 64 MiB side mapping, forcing its old move path.
+    while i < 20000000
+      a << i
+      b << -i
+      i += 1
+    end
+    raise "address moved" unless address(a) == first_a && address(b) == first_b
+    raise "view changed" unless view_a.value == 0 && view_b.value == 0
+    i = 2
+    while i < a.size
+      raise "elements changed" unless a[i] == i && b[i] == -i
+      i += 1
+    end
+    raise "padding" unless padding.bytesize > 0
+  end
+end
+check_growth
+puts "PASS: stable interleaved growth"

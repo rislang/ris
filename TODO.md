@@ -4,11 +4,12 @@ Rules: TAPE_SPEC.md. Work in this dependency order; each gate runs in
 check.sh. Delete finished work in the same commit; keep check.sh green.
 
 3. [L] Named lexical/program owners; refuse copies, moves, temporaries,
-   nesting and raw owner operations. Stable growth: growth now moves a
-   value once (region.iyi:191); give each growing value reserved space
-   (Goose) or change the spec with a changelog entry. Destination
-   construction and partial-construction rollback.
-   Gate: refusal cases, stable addresses, bounded rollback.
+   nesting and raw owner operations. Destination construction and
+   partial-construction rollback. Growth still transfers a displaced
+   value once into its reserved side region, moving published elements
+   (region.iyi tape_resize): start growing values in their own region, or
+   refuse views across the first growth. Non-Linux targets still move.
+   Gate: refusal cases, bounded rollback, no transfer of a viewed value.
 4. [L] Roots and effects: owner/path roots, joins, loop fixed points,
    read-back candidates, holders, operands; specialized call effects;
    contracts for opaque calls and iyimod; live-view shrink, suspension;

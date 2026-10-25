@@ -1,0 +1,14 @@
+# Reach exhaustion without physically filling the reservation.
+module test/ris/side_overflow
+
+@[PointerUnsafe("test reserved side exhaustion before state mutation")]
+def exhaust
+  side = 0_u64
+  start = IyiRegion.tape_bytes(8_u64)
+  IyiRegion.tape_bytes(8_u64)
+  start = IyiRegion.tape_resize(start, start + 8_u64, 0_u64,
+    16_u64, pointerof(side))
+  IyiRegion.tape_resize(start, start + 16_u64, 0_u64,
+    IyiRegion::SIDE_RESERVE + 1_u64, pointerof(side))
+end
+exhaust
