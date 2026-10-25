@@ -39,7 +39,7 @@ tape do
   exit 9 unless dated && dated.expires
   exit 10 unless cookie.to_heap.to_tape == cookie.to_tape
   dates.each do |date|
-    expected = Time::Format::HTTP_DATE.parse(date.to_heap)
+    expected = Time::Format::HTTP_DATE.parse(date)
     line = Str.build { |w| w << "a=b; Expires=" << date }
     parsed = Cookie.parse(line)
     exit 22 unless parsed

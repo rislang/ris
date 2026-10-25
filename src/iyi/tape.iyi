@@ -1883,10 +1883,6 @@ class Object
 end
 
 class String
-  def starts_with?(prefix : Str) : Bool
-    as_tape.starts_with?(prefix)
-  end
-
   def ==(other : Str) : Bool
     other == self
   end
@@ -2191,5 +2187,103 @@ module IyiFloatText
     bits = biased.unsafe_shl(52_u64) | (q & 4503599627370495_u64)
     bits = bits | 9223372036854775808_u64 if negative
     from_bits(bits)
+  end
+end
+
+class Array(T)
+  def join(separator : Str) : Str
+    room = separator.bytesize.to_i64 * (size > 0 ? size - 1 : 0)
+    each do |value|
+      room += value.is_a?(String) ? value.bytesize : 16
+    end
+    raise "joined text is too large" if room > 2147483647_i64
+    Str.build(room.to_i32) do |writer|
+      first = true
+      each do |value|
+        writer << separator unless first
+        writer << value
+        first = false
+      end
+    end
+  end
+end
+
+class Hash(K, V)
+  # A borrowed lookup never stores its key. A default proc may retain it,
+  # so only that missing-key path makes an owned copy.
+  def [](key : Str) : V
+    {% unless K == String %}
+      {% raise "a Str lookup needs Hash(String, V)" %}
+    {% end %}
+    entry = entry_of(key)
+    return @values[entry] if entry >= 0
+    if default = @default
+      return default.call(self, key.to_heap)
+    end
+    raise "no such key #{key.to_heap.inspect}"
+  end
+end
+
+struct Str
+  def byte_index(search : String | Str, offset : Int32 = 0) : Int32?
+    offset = offset + bytesize if offset < 0
+    return nil if offset < 0 || offset > bytesize
+    return offset if search.bytesize == 0
+    return nil if search.bytesize > bytesize - offset
+    m = search.bytesize
+    limit = bytesize - m
+    s = self
+    t = search.as_tape
+    i = offset
+    spent = 0
+    while i <= limit
+      j = 0
+      while j < m && s[i + j] == t[j]
+        j = j + 1
+      end
+      return i if j == m
+      spent = spent + j
+      break if spent > 4 * (i - offset) + 64
+      i = i + 1
+    end
+    return nil if i > limit
+
+    prime = 16777619_u64
+    power = 1_u64
+    want = 0_u64
+    have = 0_u64
+    k = 0
+    while k < m
+      want = want &* prime &+ t[k].to_u64
+      have = have &* prime &+ s[i + k].to_u64
+      power = power &* prime
+      k = k + 1
+    end
+    while true
+      if have == want
+        j = 0
+        while j < m && s[i + j] == t[j]
+          j = j + 1
+        end
+        return i if j == m
+      end
+      return nil if i == limit
+      have = have &* prime &+ s[i + m].to_u64 &- power &* s[i].to_u64
+      i = i + 1
+    end
+  end
+
+  def includes?(text : String | Str) : Bool
+    !byte_index(text).nil?
+  end
+
+  def ends_with?(suffix : String | Str) : Bool
+    size = suffix.bytesize
+    size <= bytesize && self[bytesize - size, size] == suffix
+  end
+
+  # Diagnostic text is retained only when a caller asks for inspection.
+  def inspect : String
+    to_heap.inspect
   end
 end

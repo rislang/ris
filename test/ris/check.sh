@@ -38,6 +38,14 @@ else
   status=1
 fi
 
+out=$("$RIS" run test/ris/borrowed_text.ri 2>&1)
+if [ "$?" -eq 0 ] && grep -qF 'PASS: borrowed std text' <<<"$out"; then
+  echo "runs     borrowed_text"
+else
+  echo "FAILED   borrowed_text: $out"
+  status=1
+fi
+
 expect class_field   "holds the tape type"
 expect struct_field  "is a struct that is not @[OnTape]"
 expect class_var     "the class variable"

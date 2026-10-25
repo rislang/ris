@@ -31,6 +31,6 @@ tape do
   hits = Ary(Hit){Hit.new(line[4, 6], 12)}.to_heap
 end
 puts text
-puts names.join(",".to_heap)
+puts names.join(",")
 puts "#{nums} #{picked}"
 puts "#{hits[0].path} #{hits[0].ms}"

@@ -18,6 +18,6 @@ tape do
   exit 6 unless YAML.parse?("[bad").nil?
   kept = doc.to_heap
 end
-exit 7 unless kept["name".to_heap].as_s == "café"
+exit 7 unless kept["name"].as_s == "café"
 exit 8 unless YAML.parse(YAML.dump(kept)) == kept
 puts "PASS: yaml tape and heap APIs"

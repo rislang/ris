@@ -2,7 +2,6 @@
 
 iyi stays as it is (`String`, `Array`, `Hash`, classes on the GC heap);
 ris text defaults to tape; heap objects remain for retained data.
-
 ## The model
 * Main and each spawned fiber own an implicit tape: bump allocation over
   mappings, chained when full, never moved. The tape is released when its
@@ -20,7 +19,6 @@ ris text defaults to tape; heap objects remain for retained data.
   Each thread caches up to 64 spare mappings, side regions too, warm.
 * Tape storage is not GC-managed, but used tape words are scanned as
   roots: a tape value can hold a reference to an ordinary heap object.
-
 ## Lifetime and storage rules
 No tape value survives the block that owns its storage:
 * Tape values may be locals, arguments and results within that lifetime,
@@ -35,9 +33,11 @@ No tape value survives the block that owns its storage:
 * In user `.ri` files, `"text"` is a zero-copy static `Str` view;
   `"text #{value}"` builds a `Str` on the active tape. std and iyi keep
   their old text rules. Macro code and annotations are compiler metadata.
-* Heap storage and String parameters require explicit `.to_heap`, even
-  for literals; literal `.to_heap` reuses static String bytes, with no copy.
-  String annotations do not copy. `Str.new` copies; `as_tape` borrows.
+* Read-only text APIs accept `Str`; String callers borrow with `as_tape`.
+* Heap storage and String-only parameters need explicit `.to_heap`, even
+  for literals: no implicit heap container literals. Literal `.to_heap`
+  reuses static String bytes. `Str.new` copies; `as_tape` borrows.
+  String annotations do not copy.
 * To retain a value, copy it by name while its source is alive: `to_heap`
   on a `Str`, an `Ary` or `Ary::View` (each element by its own `to_heap`),
   or an `@[OnTape]` struct that defines one. `to_s`, heap interpolation and

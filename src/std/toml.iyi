@@ -519,14 +519,14 @@ pub struct Any
     raise "#{kind_name} has no size"
   end
 
-  def [](key : String) : Any
+  def [](key : String | Str) : Any
     h = as_h
     found = h[key]?
     raise "no such key #{key.inspect}" if found.nil?
     found
   end
 
-  def []?(key : String) : Any?
+  def []?(key : String | Str) : Any?
     h = as_h?
     return nil if h.nil?
     h[key]?
@@ -542,25 +542,25 @@ pub struct Any
     a[index]?
   end
 
-  def dig?(key : String | Int32) : Any?
+  def dig?(key : String | Str | Int32) : Any?
     step?(key)
   end
 
-  def dig?(key : String | Int32, *rest : String | Int32) : Any?
+  def dig?(key : String | Str | Int32, *rest : String | Str | Int32) : Any?
     v = step?(key)
     return nil if v.nil?
     v.dig?(*rest)
   end
 
-  def dig(key : String | Int32) : Any
+  def dig(key : String | Str | Int32) : Any
     step(key)
   end
 
-  def dig(key : String | Int32, *rest : String | Int32) : Any
+  def dig(key : String | Str | Int32, *rest : String | Str | Int32) : Any
     step(key).dig(*rest)
   end
 
-  private def step?(key : String | Int32) : Any?
+  private def step?(key : String | Str | Int32) : Any?
     if key.is_a?(String)
       self[key]?
     else
@@ -568,7 +568,7 @@ pub struct Any
     end
   end
 
-  private def step(key : String | Int32) : Any
+  private def step(key : String | Str | Int32) : Any
     if key.is_a?(String)
       self[key]
     else
@@ -913,7 +913,7 @@ pub struct TapeAny
     step?(key)
   end
 
-  def dig?(key : String | Str | Int32, *rest : String |
+  def dig?(key : String | Str | Int32, *rest : String | Str |
                                                Int32) : TapeAny?
     v = step?(key)
     return nil if v.nil?
@@ -924,7 +924,7 @@ pub struct TapeAny
     step(key)
   end
 
-  def dig(key : String | Str | Int32, *rest : String | Int32) : TapeAny
+  def dig(key : String | Str | Int32, *rest : String | Str | Int32) : TapeAny
     step(key).dig(*rest)
   end
 

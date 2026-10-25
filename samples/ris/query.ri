@@ -18,7 +18,7 @@ QUERIES = [
   "page=10;limit=50&q=caf%C3%A9".to_heap,
 ]
 
-on_tape = Program.args.includes?("tape".to_heap)
+on_tape = Program.args.includes?("tape")
 GC.disable
 before = GC.stats.bytes_since_collection
 sum = 0_i64
@@ -34,8 +34,8 @@ while i < N
     end
   else
     p = Params.parse(text)
-    page = p["page".to_heap]?
-    words = p["q".to_heap]?
+    page = p["page"]?
+    words = p["q"]?
     sum += (page ? page.bytesize : 0) + (words ? words.bytesize : 0) + p.size
   end
   i += 1

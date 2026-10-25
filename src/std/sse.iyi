@@ -150,7 +150,7 @@ pub class EventParser
     @dispatched = 0_i64
   end
 
-  def feed(text : String, & : Event -> Nil) : Nil
+  def feed(text : String | Str, & : Event -> Nil) : Nil
     tape do
       parser = TapeEventParser.new(@last_event_id.as_tape)
       parser.restore(@id_buffer.as_tape, @type.as_tape,

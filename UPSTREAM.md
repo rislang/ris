@@ -57,7 +57,8 @@ has it.
   words at any address on x86_64 and aarch64, its tail as one last word.
 
 ## To make in iyi first
-
+* Collections: `Array#includes?`/`index` and `Hash#fetch(key, default)`
+  accept comparable lookup values without restricting them to stored types.
 * std: `String#rchop`, `String#lchop(String)`; missing when a blog was
   written on web (2026-10-17).
 * `String#[]` indexes bytes while `size` counts characters: at least say
@@ -73,7 +74,6 @@ has it.
   job): darwin's std foundation is a job of its own, the cursor sweep
   (`lsp_positions.py --shard K/N`) four shards, and the Linux and Windows
   std siblings eight; take to iyi, or keep apart when merging iyi.yml.
-
 ## Stays in ris
 
 * Tape: std/http `parse_head` and `ParsedHead`, the tape list in

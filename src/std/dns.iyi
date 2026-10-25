@@ -170,14 +170,14 @@ pub struct DnsName
   # all digits (RFC 3696 2: no top-level domain is), so `999.1.1.1` and
   # `1.2.3` stay what the numeric parser refuses rather than becoming
   # questions to a name server.
-  def self.valid?(name : String) : ::Bool
+  def self.valid?(name : String | Str) : ::Bool
     why(name).nil?
   end
 
   # Why *name* is not a host name, or nil when it is.
-  def self.why(name : String) : String?
+  def self.why(name : String | Str) : String?
     size = name.bytesize
-    raw = name.to_unsafe
+    raw = name.as_tape
     size = size - 1 if size > 1 && raw[size - 1] == 46_u8
     return "empty" if size == 0
     return "longer than #{MAX_LENGTH} characters" if size > MAX_LENGTH

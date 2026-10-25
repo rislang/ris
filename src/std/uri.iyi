@@ -50,7 +50,7 @@ pub struct Params
     @keys.size
   end
 
-  def has_key?(key : String) : Bool
+  def has_key?(key : String | Str) : Bool
     i = 0
     while i < @keys.size
       return true if @keys[i] == key
@@ -60,17 +60,17 @@ pub struct Params
   end
 
   # Returns the first value for *key*, or raises if not found.
-  def [](key : String) : String
+  def [](key : String | Str) : String
     val = self[key]?
     if val
       val
     else
-      raise "missing parameter key: " + key
+      raise "missing parameter key: #{key.to_heap}"
     end
   end
 
   # Returns the first value for *key*, or nil if not found.
-  def []?(key : String) : String?
+  def []?(key : String | Str) : String?
     i = 0
     while i < @keys.size
       return @values[i] if @keys[i] == key
@@ -80,7 +80,7 @@ pub struct Params
   end
 
   # Returns all values associated with *key*.
-  def fetch_all(key : String) : Array(String)
+  def fetch_all(key : String | Str) : Array(String)
     result = [] of String
     i = 0
     while i < @keys.size

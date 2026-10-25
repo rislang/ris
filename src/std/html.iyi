@@ -26,34 +26,10 @@ pub struct HTML
   # Every other byte is copied as it is, by the run: writing each byte as a
   # `Char` wrote a UTF-8 lead or continuation byte as the two-byte encoding
   # of that code point, so "café" came out as "cafÃ©".
-  def self.escape(string : String, io : IyiIO) : Nil
-    raw = string.to_unsafe
-    len = string.bytesize
-    run_start = 0
-    i = 0
-    while i < len
-      b = raw[i]
-      replacement = if b == 38_u8 # &
-                      "&amp;"
-                    elsif b == 60_u8 # <
-                      "&lt;"
-                    elsif b == 62_u8 # >
-                      "&gt;"
-                    elsif b == 34_u8 # "
-                      "&quot;"
-                    elsif b == 39_u8 # '
-                      "&#39;"
-                    else
-                      ""
-                    end
-      if !replacement.empty?
-        io.write(raw + run_start, i - run_start) if i > run_start
-        io.write(replacement)
-        run_start = i + 1
-      end
-      i = i + 1
+  def self.escape(string : String | Str, io : IyiIO) : Nil
+    tape do
+      escape(string.as_tape).to_s(io)
     end
-    io.write(raw + run_start, len - run_start) if len > run_start
   end
 
   def self.escape(string : String) : String
@@ -82,9 +58,14 @@ pub struct HTML
     escaped
   end
 
+  # Escape borrowed text on the caller's tape.
+  def self.escape(string : Str) : Str
+    Str.build(string.bytesize + 16) { |writer| escape(string, writer) }
+  end
+
   # *string* escaped as `escape` escapes it, written into the caller's
   # *writer* on the tape: nothing on the heap.
-  def self.escape(string : String, writer : Str::Builder) : Nil
+  def self.escape(string : String | Str, writer : Str::Builder) : Nil
     writer.append_html_escaped(string)
   end
 

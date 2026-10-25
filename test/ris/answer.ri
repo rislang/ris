@@ -32,9 +32,9 @@ def answer(req : Incoming, res : Outgoing) : Nil
     res.status = 204
     return
   end
-  res.header("X-Seen".to_heap, "yes")
-  if agent = req.header("x-name".to_heap)
-    res.header("X-Echo".to_heap, agent)
+  res.header("X-Seen", "yes")
+  if agent = req.header("x-name")
+    res.header("X-Echo", agent)
   end
   w = res.body
   w.append(req.method)
@@ -48,7 +48,7 @@ def answer(req : Incoming, res : Outgoing) : Nil
     w.append(" x=")
     w.append(x)
   end
-  if name = req.header("x-name".to_heap)
+  if name = req.header("x-name")
     w.append(" name=")
     w.append(name)
   end
@@ -60,7 +60,7 @@ listener = IyiSocket.listen(0)
 got = ""
 group do |g|
   g.spawn { Server.answer(listener) { |req, res| answer(req, res) }; 0 }
-  client = IyiSocket.connect("127.0.0.1".to_heap, listener.local_port).or_panic
+  client = IyiSocket.connect("127.0.0.1", listener.local_port).or_panic
   client.write(REQUESTS).or_panic
   got = read_to_close(client)
   client.close

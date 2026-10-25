@@ -108,24 +108,24 @@ def answer_heap(text : String) : UInt64
   total = 0_i64
   body = JSON.build do |json|
     json.object do
-      json.field "user".to_heap, doc["user".to_heap].as_s
-      json.field "lines".to_heap do
+      json.field "user", doc["user"].as_s
+      json.field "lines" do
         json.array do
-          doc["items".to_heap].as_a.each do |item|
-            line = item["qty".to_heap].as_i64 * item["price".to_heap].as_i64
+          doc["items"].as_a.each do |item|
+            line = item["qty"].as_i64 * item["price"].as_i64
             total += line
             json.object do
-              json.field "sku".to_heap, item["sku".to_heap].as_s
-              json.field "total".to_heap, line
+              json.field "sku", item["sku"].as_s
+              json.field "total", line
             end
           end
         end
       end
-      json.field "total".to_heap, total
+      json.field "total", total
     end
   end
   top = ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" +
-    "Content-Length: #{body.bytesize}\r\n\r\n").to_heap
+    "Content-Length: #{body.bytesize}\r\n\r\n")
   h = fnv(14695981039346656037_u64, top)
   (fnv(h, body) & 0xFFFFFFFFFF_u64) | ((top.bytesize + body.bytesize).to_u64 << 40)
 end

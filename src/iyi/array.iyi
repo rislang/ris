@@ -236,14 +236,11 @@ class Array(T)
   end
 
   def join(separator : String) : String
-    String.build do |io|
-      first = true
-      each do |value|
-        io << separator unless first
-        io << value
-        first = false
-      end
+    result = ""
+    tape do
+      result = join(separator.as_tape).to_heap
     end
+    result
   end
 
   # The sum of the elements, and `T.zero` (src/iyi/number.iyi) when there
@@ -561,13 +558,13 @@ class Array(T)
     result
   end
 
-  def includes?(value : T) : Bool
+  def includes?(value) : Bool
     each { |element| return true if element == value }
     false
   end
 
   # Where a value first is, or nil.
-  def index(value : T) : Int32?
+  def index(value) : Int32?
     index = 0
     while index < @size
       return index if @buffer[index] == value

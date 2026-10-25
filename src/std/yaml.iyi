@@ -240,12 +240,33 @@ pub struct Any
     h[key]?
   end
 
-  def [](key : String) : Any
-    self[Any.new(key)]
+  # A borrowed probe hashes like Any's String case without allocating Any.
+  @[OnTape]
+  struct TextKey
+    getter text : Str
+
+    def initialize(@text : Str)
+    end
+
+    def hash : Int32
+      text.hash
+    end
   end
 
-  def []?(key : String) : Any?
-    self[Any.new(key)]?
+  def ==(key : TextKey) : Bool
+    kind == KIND_STRING && @raw.as(String) == key.text
+  end
+
+  def [](key : String | Str) : Any
+    h = as_h
+    probe = TextKey.new(key.as_tape)
+    h[probe]? || raise "no such key #{key.inspect}"
+  end
+
+  def []?(key : String | Str) : Any?
+    h = as_h?
+    return nil unless h
+    h[TextKey.new(key.as_tape)]?
   end
 
   # An Int32 indexes a sequence and reaches an integer key of a mapping:
@@ -263,25 +284,25 @@ pub struct Any
     a[index]?
   end
 
-  def dig?(key : String | Int32) : Any?
+  def dig?(key : String | Str | Int32) : Any?
     step?(key)
   end
 
-  def dig?(key : String | Int32, *rest : String | Int32) : Any?
+  def dig?(key : String | Str | Int32, *rest : String | Str | Int32) : Any?
     v = step?(key)
     return nil if v.nil?
     v.dig?(*rest)
   end
 
-  def dig(key : String | Int32) : Any
+  def dig(key : String | Str | Int32) : Any
     step(key)
   end
 
-  def dig(key : String | Int32, *rest : String | Int32) : Any
+  def dig(key : String | Str | Int32, *rest : String | Str | Int32) : Any
     step(key).dig(*rest)
   end
 
-  private def step?(key : String | Int32) : Any?
+  private def step?(key : String | Str | Int32) : Any?
     if key.is_a?(String)
       self[key]?
     else
@@ -289,7 +310,7 @@ pub struct Any
     end
   end
 
-  private def step(key : String | Int32) : Any
+  private def step(key : String | Str | Int32) : Any
     if key.is_a?(String)
       self[key]
     else
@@ -701,15 +722,15 @@ pub struct TapeValue
     !(self == other)
   end
 
-  def initialize(value : String)
+  def initialize(value : String | Str)
     @raw = value.as_tape
   end
 
-  def [](key : String) : TapeValue
+  def [](key : String | Str) : TapeValue
     self[TapeValue.new(key)]
   end
 
-  def []?(key : String) : TapeValue?
+  def []?(key : String | Str) : TapeValue?
     self[TapeValue.new(key)]?
   end
 

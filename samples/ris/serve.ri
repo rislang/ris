@@ -37,13 +37,13 @@ def drain(socket : IyiSocket, want : Int64) : Int64
   got
 end
 
-on_tape = Program.args.includes?("answer".to_heap)
+on_tape = Program.args.includes?("answer")
 headers = {"Content-Type".to_heap => "application/json".to_heap}
 reply = Server.format_response(Response.new(200, BODY, headers), false, false)
 want = reply.bytesize.to_i64 * N
 listener = IyiSocket.listen(0)
 batch = REQUEST * 1000
-collecting = Program.args.includes?("gc".to_heap)
+collecting = Program.args.includes?("gc")
 GC.disable unless collecting
 before = GC.stats.bytes_since_collection
 got = 0_i64
@@ -51,7 +51,7 @@ group do |g|
   g.spawn do
     if on_tape
       Server.answer(listener) do |req, res|
-        res.header("Content-Type".to_heap, "application/json")
+        res.header("Content-Type", "application/json")
         res.body.append(BODY)
       end
     else
@@ -59,7 +59,7 @@ group do |g|
     end
     0
   end
-  client = IyiSocket.connect("127.0.0.1".to_heap, listener.local_port).or_panic
+  client = IyiSocket.connect("127.0.0.1", listener.local_port).or_panic
   reader = g.spawn { drain(client, want) }
   (N // 1000).times { client.write(batch).or_panic }
   got = reader.value

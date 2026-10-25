@@ -32,8 +32,8 @@ end
 exit 7 unless kept == "café\nnext"
 parser = EventParser.new
 count = 0
-parser.feed("id: 7\r".to_heap) { |_| exit 8 }
-parser.feed("\ndata: café\ndata: next\n\n".to_heap) do |event|
+parser.feed("id: 7\r") { |_| exit 8 }
+parser.feed("\ndata: café\ndata: next\n\n") do |event|
   count += 1
   exit 9 unless event.data == kept && event.id == "7"
 end

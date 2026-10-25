@@ -271,15 +271,8 @@ class String
 
   # The three the Kemal port's path joining needs, byte-indexed: the same
   # as by character while the strings are ASCII.
-  def starts_with?(prefix : String) : Bool
-    return false if prefix.bytesize > bytesize
-
-    index = 0
-    while index < prefix.bytesize
-      return false unless to_unsafe[index] == prefix.to_unsafe[index]
-      index = index + 1
-    end
-    true
+  def starts_with?(prefix : String | Str) : Bool
+    as_tape.starts_with?(prefix)
   end
 
   # A `Char` above ASCII is more than one byte, and these narrowed it to one
@@ -303,15 +296,8 @@ class String
     byte_slice(text.bytesize, bytesize - text.bytesize)
   end
 
-  def ends_with?(suffix : String) : Bool
-    return false if suffix.bytesize > bytesize
-    offset = bytesize - suffix.bytesize
-    index = 0
-    while index < suffix.bytesize
-      return false unless to_unsafe[offset + index] == suffix.to_unsafe[index]
-      index = index + 1
-    end
-    true
+  def ends_with?(suffix : String | Str) : Bool
+    as_tape.ends_with?(suffix)
   end
 
   # Where a character first is, or nil: the question a parser asks before
@@ -442,7 +428,7 @@ class String
     end
   end
 
-  def includes?(other : String) : Bool
+  def includes?(other : String | Str) : Bool
     !byte_index(other).nil?
   end
 
@@ -453,52 +439,8 @@ class String
   # bytes a position have been compared: a needle that keeps almost
   # matching, `"a" * 1000 + "b"` in a run of `a`, made the naive loop
   # n * m, 222 ms for a megabyte.
-  def byte_index(search : String, offset : Int32 = 0) : Int32?
-    offset = offset + bytesize if offset < 0
-    return nil if offset < 0 || offset > bytesize
-    return offset if search.bytesize == 0
-    return nil if search.bytesize > bytesize - offset
-    m = search.bytesize
-    limit = bytesize - m
-    s = to_unsafe
-    t = search.to_unsafe
-    i = offset
-    spent = 0
-    while i <= limit
-      j = 0
-      while j < m && s[i + j] == t[j]
-        j = j + 1
-      end
-      return i if j == m
-      spent = spent + j
-      break if spent > 4 * (i - offset) + 64
-      i = i + 1
-    end
-    return nil if i > limit
-
-    prime = 16777619_u64
-    power = 1_u64
-    want = 0_u64
-    have = 0_u64
-    k = 0
-    while k < m
-      want = want &* prime &+ t[k].to_u64
-      have = have &* prime &+ s[i + k].to_u64
-      power = power &* prime
-      k = k + 1
-    end
-    while true
-      if have == want
-        j = 0
-        while j < m && s[i + j] == t[j]
-          j = j + 1
-        end
-        return i if j == m
-      end
-      return nil if i == limit
-      have = have &* prime &+ s[i + m].to_u64 &- power &* s[i].to_u64
-      i = i + 1
-    end
+  def byte_index(search : String | Str, offset : Int32 = 0) : Int32?
+    as_tape.byte_index(search, offset)
   end
 
   # Thirty-two bytes a step while they last, then one at a time, and the

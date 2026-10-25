@@ -519,10 +519,16 @@ pub class IyiSocket
   # address's failure alone. Its `code` is the first attempt's, or a
   # timeout's when the time ran out first. A name with one address is
   # connected to as an address is, and fails with that address's error.
-  def self.connect(host : String, port : Int32, timeout_ms : Int32 = -1) : IyiSocket | Cancelled | SocketError
+  def self.connect(
+    host : String | Str,
+    port : Int32,
+    timeout_ms : Int32 = -1,
+  ) : IyiSocket | Cancelled | SocketError
     raise "negative timeout: #{timeout_ms}" if timeout_ms < -1
-    return connect_named(host, port, Resolver.system, timeout_ms) if named?(host)
-    return race(host, port, loopback, timeout_ms) if localhost?(host)
+    if named?(host)
+      return connect_named(host.to_heap, port, Resolver.system, timeout_ms)
+    end
+    return race(host.to_heap, port, loopback, timeout_ms) if localhost?(host)
     addr, family = sockaddr(host, port)
     connect_to(addr, family, endpoint(host, port), timeout_ms)
   end
@@ -530,8 +536,15 @@ pub class IyiSocket
   # The same, with a host name resolved by *resolver*: name servers, a
   # hosts file and search list of the program's choosing, rather than the
   # machine's. An address and `localhost` are what they are either way.
-  def self.connect(host : String, port : Int32, resolver : Resolver, timeout_ms : Int32 = -1) : IyiSocket | Cancelled | SocketError
-    return connect_named(host, port, resolver, timeout_ms) if named?(host)
+  def self.connect(
+    host : String | Str,
+    port : Int32,
+    resolver : Resolver,
+    timeout_ms : Int32 = -1,
+  ) : IyiSocket | Cancelled | SocketError
+    if named?(host)
+      return connect_named(host.to_heap, port, resolver, timeout_ms)
+    end
     connect(host, port, timeout_ms)
   end
 
@@ -540,7 +553,7 @@ pub class IyiSocket
   # is all digits), and not `localhost`, which never leaves the machine
   # (RFC 6761 6.3). Everything else goes to the numeric parsers, whose
   # refusals are what they were.
-  private def self.named?(host : String) : ::Bool
+  private def self.named?(host : String | Str) : ::Bool
     !localhost?(host) && DnsName.valid?(host)
   end
 
@@ -793,8 +806,19 @@ pub class IyiSocket
   # *host* and *port* as a message names them: an IPv6 literal in its
   # brackets, as a URL writes it. Bare, `::1:57456` was an address with
   # no port, and `ff02::1:80` another address altogether.
-  def self.endpoint(host : String, port : Int32) : String
-    host.includes?(":") && !host.starts_with?("[") ? "[#{host}]:#{port}" : "#{host}:#{port}"
+  def self.endpoint(host : String | Str, port : Int32) : String
+    peer = ""
+    tape do
+      text = Str.build(host.bytesize + 16) do |writer|
+        brackets = host.includes?(":") && !host.starts_with?("[")
+        writer << '[' if brackets
+        writer << host
+        writer << ']' if brackets
+        writer << ':' << port
+      end
+      peer = text.to_heap
+    end
+    peer
   end
 
   # The stream socket listening at *path*.
@@ -1002,17 +1026,15 @@ pub class IyiSocket
 
   # *first* then *second*, as one write: a head and its body, which written
   # apart leave the body waiting on the peer's delayed ACK (Nagle).
-  def write(first : String, second : String) : Int32 | Cancelled | SocketError
-    raise "socket is closed" if @fd < 0
-    write_pair(first.to_unsafe, first.bytesize, second.to_unsafe, second.bytesize)
-  end
-
-  # The same for two pieces on the tape, which are not copied.
-  # Pass both tape buffers directly to the OS write call.
+  # Both views go directly to the OS; no piece is retained.
   @[TapeUnsafe]
-  def write(first : Str, second : Str) : Int32 | Cancelled | SocketError
+  def write(
+    first : String | Str,
+    second : String | Str,
+  ) : Int32 | Cancelled | SocketError
     raise "socket is closed" if @fd < 0
-    write_pair(first.to_unsafe, first.bytesize, second.to_unsafe, second.bytesize)
+    write_pair(first.as_tape.to_unsafe, first.bytesize,
+      second.as_tape.to_unsafe, second.bytesize)
   end
 
   # Up to `SENDV_PIECES` of *pieces* from *index*, the first from byte
@@ -1327,7 +1349,7 @@ pub class IyiSocket
   # (`"010.1.1.1"` is refused; glibc's `inet_aton` reads `010` as octal 8,
   # CVE-2021-29921, so it must not quietly be 10 here), plus `localhost`.
   # The refusal inspects the host so a stray space shows.
-  def self.parse_ip(host : String) : IPv4Address
+  def self.parse_ip(host : String | Str) : IPv4Address
     return IPv4Address.new(127_u8, 0_u8, 0_u8, 1_u8) if localhost?(host)
     return IPv4Address.new(0_u8, 0_u8, 0_u8, 0_u8) if host == "0.0.0.0" || host == ""
     read = read_ipv4(host)
@@ -1339,16 +1361,17 @@ pub class IyiSocket
   # answer instead of a panic: the resolver reads the addresses a hosts
   # file and a resolv.conf write, and a line it cannot read is skipped
   # there, not the end of the program.
-  def self.read_ipv4(host : String) : IPv4Address | String
+  def self.read_ipv4(host : String | Str) : IPv4Address | String
     parts = 0
     curr = 0
     has_digit = false
-    bytes = Pointer(UInt8).malloc(4_u64)
+    room = uninitialized StaticArray(UInt8, 4)
+    bytes = pointerof(room).as(Pointer(UInt8))
     index = 0
     len = host.bytesize
 
     while index < len
-      ch = host[index]
+      ch = host.as_tape[index].chr
       if ch == '.'
         return "cannot resolve address: #{host.inspect}" unless has_digit
         return "cannot resolve address: #{host.inspect}" if curr > 255 || parts >= 4
@@ -1386,12 +1409,12 @@ pub class IyiSocket
   # `LOCALHOST` and `localhost.`. Matched exactly, these were "cannot
   # resolve address: \"LOCALHOST\"", and so were `Localhost` and
   # `localhost.`.
-  def self.localhost?(host : String) : ::Bool
+  def self.localhost?(host : String | Str) : ::Bool
     size = host.bytesize
-    size = size - 1 if size == 10 && host.to_unsafe[9] == 46_u8
+    size = size - 1 if size == 10 && host.as_tape[9] == 46_u8
     return false unless size == 9
     name = "localhost".to_unsafe
-    raw = host.to_unsafe
+    raw = host.as_tape
     index = 0
     while index < 9
       # ASCII only: setting bit 5 lowers an upper-case letter and leaves
@@ -1406,7 +1429,7 @@ pub class IyiSocket
   # groups, and a dotted IPv4 tail for the last two (`::ffff:1.2.3.4`). A
   # zone (`fe80::1%eth0`) is refused by name: it names an interface, and
   # this parser has no way to ask the platform which.
-  def self.parse_ipv6(host : String) : IPv6Address
+  def self.parse_ipv6(host : String | Str) : IPv6Address
     read = read_ipv6(host)
     raise read if read.is_a?(String)
     read
@@ -1414,15 +1437,18 @@ pub class IyiSocket
 
   # The reading alone, the refusal's sentence as the answer: see
   # `read_ipv4`.
-  def self.read_ipv6(host : String) : IPv6Address | String
-    groups = Pointer(Int32).malloc(8_u64)
+  def self.read_ipv6(host : String | Str) : IPv6Address | String
+    room = uninitialized StaticArray(Int32, 8)
+    groups = pointerof(room).as(Pointer(Int32))
     count = 0
     gap = -1
     len = host.bytesize
     index = 0
     return ipv6_refused(host, "empty") if len == 0
-    if host[0] == ':'
-      return ipv6_refused(host, "a single leading colon") unless len > 1 && host[1] == ':'
+    if host.as_tape[0].chr == ':'
+      unless len > 1 && host.as_tape[1].chr == ':'
+        return ipv6_refused(host, "a single leading colon")
+      end
       gap = 0
       index = 2
     end
@@ -1431,13 +1457,13 @@ pub class IyiSocket
       start = index
       value = 0
       digits = 0
-      while index < len && hex_digit(host[index]) >= 0
+      while index < len && hex_digit(host.as_tape[index].chr) >= 0
         return ipv6_refused(host, "a group of more than four hex digits") if digits == 4
-        value = value * 16 + hex_digit(host[index])
+        value = value * 16 + hex_digit(host.as_tape[index].chr)
         digits = digits + 1
         index = index + 1
       end
-      if index < len && host[index] == '.'
+      if index < len && host.as_tape[index].chr == '.'
         return ipv6_refused(host, "a dotted tail after more than six groups") if count > 6
         v4 = read_ipv4(host[start, len - start])
         return v4 if v4.is_a?(String)
@@ -1448,17 +1474,29 @@ pub class IyiSocket
         break
       end
       if digits == 0
-        return ipv6_refused(host, "a zone (`%`) names an interface, which is not supported") if host[index] == '%'
-        return ipv6_refused(host, "#{host[index].inspect} is not a hex digit") if host[index] != ':'
+        if host.as_tape[index].chr == '%'
+          return ipv6_refused(host, "a zone (`%`) names an interface, which " \
+            "is not supported")
+        end
+        if host.as_tape[index].chr != ':'
+          return ipv6_refused(host, "#{host.as_tape[index].chr.inspect} is " \
+            "not a hex digit")
+        end
         return ipv6_refused(host, "an empty group")
       end
       groups[count] = value
       count = count + 1
       break if index == len
-      return ipv6_refused(host, "a zone (`%`) names an interface, which is not supported") if host[index] == '%'
-      return ipv6_refused(host, "#{host[index].inspect} is not a hex digit") if host[index] != ':'
+      if host.as_tape[index].chr == '%'
+        return ipv6_refused(host, "a zone (`%`) names an interface, which is " \
+          "not supported")
+      end
+      if host.as_tape[index].chr != ':'
+        return ipv6_refused(host, "#{host.as_tape[index].chr.inspect} is not " \
+          "a hex digit")
+      end
       index = index + 1
-      if index < len && host[index] == ':'
+      if index < len && host.as_tape[index].chr == ':'
         return ipv6_refused(host, "a second `::`") if gap >= 0
         gap = count
         index = index + 1
@@ -1492,7 +1530,7 @@ pub class IyiSocket
     IPv6Address.new(high, low)
   end
 
-  private def self.ipv6_refused(host : String, why : String) : String
+  private def self.ipv6_refused(host : String | Str, why : String) : String
     "cannot resolve address: #{host.inspect}: #{why}"
   end
 
@@ -1505,9 +1543,13 @@ pub class IyiSocket
 
   # A host and port as the address a call takes, and its family: an IPv6
   # literal bare or in brackets, anything else IPv4.
-  def self.sockaddr(host : String, port : Int32) : Tuple(Pointer(UInt8), Int32)
+  def self.sockaddr(
+    host : String | Str,
+    port : Int32,
+  ) : Tuple(Pointer(UInt8), Int32)
     size = host.bytesize
-    if size >= 2 && host[0] == '[' && host[size - 1] == ']'
+    if size >= 2 && host.as_tape[0].chr == '[' &&
+       host.as_tape[size - 1].chr == ']'
       return {make_sockaddr_in6(parse_ipv6(host[1, size - 2]), port), AF_INET6}
     end
     return {make_sockaddr_in6(parse_ipv6(host), port), AF_INET6} if host.includes?(":")

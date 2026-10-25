@@ -18,7 +18,7 @@ TEXTS = [
   "a plain sentence of words".to_heap,
 ]
 
-on_tape = Program.args.includes?("tape".to_heap)
+on_tape = Program.args.includes?("tape")
 GC.disable
 before = GC.stats.bytes_since_collection
 sum = 0_i64

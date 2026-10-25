@@ -59,4 +59,4 @@ DAYS.each_with_index do |log, day|
   end
 end
 
-puts "slowest each day: #{slowest.join(", ".to_heap)}"
+puts "slowest each day: #{slowest.join(", ")}"

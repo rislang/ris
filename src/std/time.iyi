@@ -2169,19 +2169,26 @@ pub struct Time
   #   -0001-01-01T00:00:00Z and 12345-06-07T08:09:10Z, as `to_rfc3339` writes them
   # `Time::Format::RFC_3339.parse` reads the same grammar and answers a
   # `TimeParseError` instead, for text the program did not write itself.
-  def self.parse_rfc3339(str : String) : Time
+  def self.parse_rfc3339(str : String | Str) : Time
     Format::RFC_3339.parse(str).or_panic
   end
 
   # Reads *string* by *pattern*'s directives (see `Time::Format`). A text
   # that names no zone is read at *offset* seconds east of UTC, as Crystal's
   # `Time.parse` reads one at the location it is given.
-  def self.parse(string : String, pattern : String, offset : Int32) : Time | TimeParseError
+  def self.parse(
+    string : String | Str,
+    pattern : String,
+    offset : Int32,
+  ) : Time | TimeParseError
     Format.new(pattern, offset).parse(string)
   end
 
   # `parse` at UTC when the text names no zone.
-  def self.parse_utc(string : String, pattern : String) : Time | TimeParseError
+  def self.parse_utc(
+    string : String | Str,
+    pattern : String,
+  ) : Time | TimeParseError
     Format.new(pattern, 0).parse(string)
   end
 
@@ -2190,25 +2197,32 @@ pub struct Time
   # (a wall time a change repeats or skips is read as `Time.local` reads
   # it), and the time answered is in *location* whether the text named a
   # zone or not.
-  def self.parse(string : String, pattern : String, location : Location) : Time | TimeParseError
+  def self.parse(
+    string : String | Str,
+    pattern : String,
+    location : Location,
+  ) : Time | TimeParseError
     Format.new(pattern, location).parse(string)
   end
 
   # `parse` in the machine's own zone.
-  def self.parse_local(string : String, pattern : String) : Time | TimeParseError
+  def self.parse_local(
+    string : String | Str,
+    pattern : String,
+  ) : Time | TimeParseError
     Format.new(pattern, Location.local).parse(string)
   end
 
-  def self.parse_rfc2822(string : String) : Time | TimeParseError
+  def self.parse_rfc2822(string : String | Str) : Time | TimeParseError
     Format::RFC_2822.parse(string)
   end
 
   # Any of RFC 9110's three HTTP date forms; see `Time::Format::HTTP_DATE`.
-  def self.parse_rfc1123(string : String) : Time | TimeParseError
+  def self.parse_rfc1123(string : String | Str) : Time | TimeParseError
     Format::HTTP_DATE.parse(string)
   end
 
-  def self.parse_iso8601(string : String) : Time | TimeParseError
+  def self.parse_iso8601(string : String | Str) : Time | TimeParseError
     Format::ISO_8601_DATE_TIME.parse(string)
   end
 
@@ -2383,13 +2397,13 @@ pub struct Time
       end
     end
 
-    def parse(string : String) : Time | TimeParseError
+    def parse(string : String | Str) : Time | TimeParseError
       parser = Parser.new(string)
       parser.pattern(@pattern) && parser.at_end
       parser.finish(@offset, @location)
     end
 
-    def parse(string : String, offset : Int32?) : Time | TimeParseError
+    def parse(string : String | Str, offset : Int32?) : Time | TimeParseError
       parser = Parser.new(string)
       parser.pattern(@pattern) && parser.at_end
       parser.finish(offset)
@@ -2647,8 +2661,10 @@ pub struct Time
     # answers whether it matched; the first that did not leaves its sentence
     # in `@error`, and `finish` answers that, so no text a program is handed
     # ends it in a panic.
-    class Parser
-      @bytes : Pointer(UInt8)
+    @[OnTape]
+    struct Parser
+      @input : Str
+      @bytes : Str
       @len : Int32
       @pos : Int32 = 0
       @error : TimeParseError? = nil
@@ -2672,8 +2688,9 @@ pub struct Time
       @week : Int32? = nil
       @day_of_week : Int32? = nil
 
-      def initialize(@input : String)
-        @bytes = @input.to_unsafe
+      def initialize(input : String | Str)
+        @input = input.as_tape
+        @bytes = @input
         @len = @input.bytesize
       end
 
@@ -2698,7 +2715,9 @@ pub struct Time
 
       def fail(what : String) : Bool
         if @error.nil?
-          @error = TimeParseError.new("#{what} at byte #{@pos} of #{@input.inspect}", @input, @pos)
+          @error = TimeParseError.new(
+            "#{what} at byte #{@pos} of #{@input.inspect}",
+            @input.to_heap, @pos)
         end
         false
       end
@@ -2706,7 +2725,7 @@ pub struct Time
       # A sentence about fields that were all read, where no one byte is to
       # blame.
       def refuse(what : String) : TimeParseError
-        TimeParseError.new("#{what} in #{@input.inspect}", @input, @pos)
+        TimeParseError.new("#{what} in #{@input.inspect}", @input.to_heap, @pos)
       end
 
       def text(start : Int32, stop : Int32) : String
@@ -3555,7 +3574,7 @@ pub struct Time
         Format.new("%a, %d %b %Y %H:%M:%S GMT").format(time, 0)
       end
 
-      def self.parse(string : String) : Time | TimeParseError
+      def self.parse(string : String | Str) : Time | TimeParseError
         parser = Parser.new(string)
         parser.http_date
         parser.finish(0)
@@ -3576,7 +3595,7 @@ pub struct Time
         Format.new("%a, %-d %b %Y %H:%M:%S %z").format(time, at)
       end
 
-      def self.parse(string : String) : Time | TimeParseError
+      def self.parse(string : String | Str) : Time | TimeParseError
         parser = Parser.new(string)
         parser.rfc_2822
         parser.finish(0)
@@ -3591,7 +3610,10 @@ pub struct Time
         Format.new("%F").format(time, offset || time.offset)
       end
 
-      def self.parse(string : String, offset : Int32 = 0) : Time | TimeParseError
+      def self.parse(
+        string : String | Str,
+        offset : Int32 = 0,
+      ) : Time | TimeParseError
         parser = Parser.new(string)
         parser.iso_date && parser.at_end
         parser.finish(offset)
@@ -3606,7 +3628,7 @@ pub struct Time
         RFC_3339.format(time, 0, offset)
       end
 
-      def self.parse(string : String) : Time | TimeParseError
+      def self.parse(string : String | Str) : Time | TimeParseError
         parser = Parser.new(string)
         parser.iso_date_time
         parser.finish(nil)
@@ -3621,7 +3643,7 @@ pub struct Time
         Format.new(at == 0 ? "%TZ" : "%T%:z").format(time, at)
       end
 
-      def self.parse(string : String) : Time | TimeParseError
+      def self.parse(string : String | Str) : Time | TimeParseError
         parser = Parser.new(string)
         parser.iso_time && parser.zone_z_or_offset && parser.at_end
         parser.finish(nil)
@@ -3653,10 +3675,12 @@ pub struct Time
         Format.new("%FT%T#{fraction}%:z").format(time, at)
       end
 
-      def self.parse(str : String) : Time | TimeParseError
+      def self.parse(str : String | Str) : Time | TimeParseError
         len = str.bytesize
         if len < 20
-          return TimeParseError.new("RFC 3339 string too short: #{str}", str, len)
+          return TimeParseError.new(
+            "RFC 3339 string too short: #{str.to_heap}",
+            str.to_heap, len)
         end
 
         # The year is what `to_rfc3339` writes: an optional `-`, then four or
@@ -3666,27 +3690,34 @@ pub struct Time
         # an Int32 year needs; an eleventh is out of range whatever it is.
         idx = 0
         negative_year = false
-        if str[0] == '-'
+        if str.as_tape[0].chr == '-'
           negative_year = true
           idx = 1
         end
         year_start = idx
         year_val = 0_i64
         while idx < len
-          code = str.to_unsafe[idx].to_i32
+          code = str.as_tape[idx].to_i32
           break if code < 48 || code > 57
           if idx - year_start >= 10
-            return TimeParseError.new("year out of range in RFC 3339 string: #{str}", str, idx)
+            return TimeParseError.new(
+              "year out of range in RFC 3339 string: #{str.to_heap}",
+              str.to_heap, idx)
           end
           year_val = year_val * 10_i64 + (code - 48).to_i64
           idx = idx + 1
         end
         if idx - year_start < 4
-          return TimeParseError.new("invalid year in RFC 3339 string: fewer than four digits in #{str}", str, year_start)
+          return TimeParseError.new(
+            "invalid year in RFC 3339 string: fewer than four digits in " \
+              "#{str.to_heap}",
+            str.to_heap, year_start)
         end
         year_val = 0_i64 - year_val if negative_year
         if year_val < -2147483648_i64 || year_val > 2147483647_i64
-          return TimeParseError.new("year out of range in RFC 3339 string: #{str}", str, 0)
+          return TimeParseError.new(
+            "year out of range in RFC 3339 string: #{str.to_heap}",
+            str.to_heap, 0)
         end
         y = year_val.to_i32
 
@@ -3694,16 +3725,23 @@ pub struct Time
         # at fixed offsets from it.
         p = idx
         if len < p + 16
-          return TimeParseError.new("RFC 3339 string too short: #{str}", str, len)
+          return TimeParseError.new(
+            "RFC 3339 string too short: #{str.to_heap}",
+            str.to_heap, len)
         end
 
-        if str[p] != '-' || str[p + 3] != '-' || str[p + 9] != ':' || str[p + 12] != ':'
-          return TimeParseError.new("invalid RFC 3339 format delimiters: #{str}", str, p)
+        if str.as_tape[p].chr != '-' || str.as_tape[p + 3].chr != '-' ||
+           str.as_tape[p + 9].chr != ':' || str.as_tape[p + 12].chr != ':'
+          return TimeParseError.new(
+            "invalid RFC 3339 format delimiters: #{str.to_heap}",
+            str.to_heap, p)
         end
 
-        sep = str[p + 6]
+        sep = str.as_tape[p + 6].chr
         if sep != 'T' && sep != 't' && sep != ' '
-          return TimeParseError.new("invalid RFC 3339 date/time separator: #{sep}", str, p + 6)
+          return TimeParseError.new(
+            "invalid RFC 3339 date/time separator: #{sep}",
+            str.to_heap, p + 6)
         end
 
         m = parse_int(str, p + 1, 2)
@@ -3712,24 +3750,28 @@ pub struct Time
         mi = parse_int(str, p + 10, 2)
         s = parse_int(str, p + 13, 2)
         if m < 0 || d < 0 || h < 0 || mi < 0 || s < 0
-          return TimeParseError.new("invalid digit in RFC 3339 string: #{str}", str, p)
+          return TimeParseError.new(
+            "invalid digit in RFC 3339 string: #{str.to_heap}",
+            str.to_heap, p)
         end
 
         idx = p + 15
         nanos = 0
 
         # Optional fractional seconds
-        if idx < len && str[idx] == '.'
+        if idx < len && str.as_tape[idx].chr == '.'
           idx = idx + 1
           start_frac = idx
           while idx < len
-            code = str.to_unsafe[idx].to_i32
+            code = str.as_tape[idx].to_i32
             break if code < 48 || code > 57
             idx = idx + 1
           end
           frac_len = idx - start_frac
           if frac_len == 0
-            return TimeParseError.new("empty fractional seconds in RFC 3339: #{str}", str, idx)
+            return TimeParseError.new(
+              "empty fractional seconds in RFC 3339: #{str.to_heap}",
+              str.to_heap, idx)
           end
 
           # Parse up to 9 digits into nanoseconds
@@ -3737,7 +3779,7 @@ pub struct Time
           pos = 0
           while pos < 9
             if pos < frac_len
-              code = str.to_unsafe[start_frac + pos].to_i32
+              code = str.as_tape[start_frac + pos].to_i32
               frac_val = frac_val * 10 + (code - 48)
             else
               frac_val = frac_val * 10
@@ -3749,10 +3791,12 @@ pub struct Time
 
         # Time zone offset
         if idx >= len
-          return TimeParseError.new("missing timezone in RFC 3339 string: #{str}", str, idx)
+          return TimeParseError.new(
+            "missing timezone in RFC 3339 string: #{str.to_heap}",
+            str.to_heap, idx)
         end
 
-        tz_char = str[idx]
+        tz_char = str.as_tape[idx].chr
         offset_sec = 0_i64
 
         if tz_char == 'Z' || tz_char == 'z'
@@ -3764,12 +3808,13 @@ pub struct Time
           rem_len = len - idx - 1
           oh = 0
           om = 0
-          if rem_len >= 5 && str[idx + 3] == ':'
+          if rem_len >= 5 && str.as_tape[idx + 3].chr == ':'
             # +HH:MM
             oh = parse_int(str, idx + 1, 2)
             om = parse_int(str, idx + 4, 2)
             idx = idx + 6
-          elsif rem_len >= 4 && str[idx + 1].ord >= 48 && str[idx + 1].ord <= 57
+          elsif rem_len >= 4 && str.as_tape[idx + 1] >= 48_u8 &&
+                str.as_tape[idx + 1] <= 57_u8
             # +HHMM
             oh = parse_int(str, idx + 1, 2)
             om = parse_int(str, idx + 3, 2)
@@ -3779,33 +3824,45 @@ pub struct Time
             oh = parse_int(str, idx + 1, 2)
             idx = idx + 3
           else
-            return TimeParseError.new("invalid timezone offset in RFC 3339: #{str}", str, idx)
+            return TimeParseError.new(
+              "invalid timezone offset in RFC 3339: #{str.to_heap}",
+              str.to_heap, idx)
           end
           if oh < 0 || om < 0
-            return TimeParseError.new("invalid digit in RFC 3339 string: #{str}", str, tz_start)
+            return TimeParseError.new(
+              "invalid digit in RFC 3339 string: #{str.to_heap}",
+              str.to_heap, tz_start)
           end
           # An offset is an hour of 00..23 and a minute of 00..59, as the
           # grammar has it: `+99:99` was read as four days and change, and
           # `+24:00` as a day, and the instant moved by that much in silence.
           if oh > 23 || om > 59
-            return TimeParseError.new("invalid timezone offset in RFC 3339 string: #{Time.pad2(oh)}:#{Time.pad2(om)} in #{str}", str, tz_start)
+            return TimeParseError.new(
+              "invalid timezone offset in RFC 3339 string: " \
+                "#{Time.pad2(oh)}:#{Time.pad2(om)} in #{str.to_heap}",
+              str.to_heap, tz_start)
           end
           offset_sec = sign * (oh.to_i64 * 3600_i64 + om.to_i64 * 60_i64)
         else
           # The character whole: its lead byte on its own was `Â` for `²`.
           designator = tz_char
           first = true
-          str[idx, len - idx].each_char do |char|
+          str[idx, len - idx].to_heap.each_char do |char|
             designator = char if first
             first = false
           end
-          return TimeParseError.new("invalid timezone designator in RFC 3339: #{designator}", str, idx)
+          return TimeParseError.new(
+            "invalid timezone designator in RFC 3339: #{designator}",
+            str.to_heap, idx)
         end
 
         # The offset ends the string. `...Zjunk` and `...+05:30:00` both parsed,
         # the text after the offset never looked at.
         if idx != len
-          return TimeParseError.new("trailing text after the timezone in RFC 3339 string: #{str}", str, idx)
+          return TimeParseError.new(
+            "trailing text after the timezone in RFC 3339 string: " \
+              "#{str.to_heap}",
+            str.to_heap, idx)
         end
 
         # The fields are checked the way `Time.utc` checks them, because they
@@ -3815,19 +3872,30 @@ pub struct Time
         # after 59, which is the instant it names on every clock that has no
         # leap seconds.
         if m < 1 || m > 12
-          return TimeParseError.new("invalid month in RFC 3339 string: #{m} in #{str}", str, p + 1)
+          return TimeParseError.new(
+            "invalid month in RFC 3339 string: #{m} in #{str.to_heap}",
+            str.to_heap, p + 1)
         end
         if d < 1 || d > Time.days_in_month(y, m)
-          return TimeParseError.new("invalid day in RFC 3339 string: #{d} for year #{y} month #{m} in #{str}", str, p + 4)
+          return TimeParseError.new(
+            "invalid day in RFC 3339 string: #{d} for year #{y} month #{m} " \
+              "in #{str.to_heap}",
+            str.to_heap, p + 4)
         end
         if h > 23
-          return TimeParseError.new("invalid hour in RFC 3339 string: #{h} in #{str}", str, p + 7)
+          return TimeParseError.new(
+            "invalid hour in RFC 3339 string: #{h} in #{str.to_heap}",
+            str.to_heap, p + 7)
         end
         if mi > 59
-          return TimeParseError.new("invalid minute in RFC 3339 string: #{mi} in #{str}", str, p + 10)
+          return TimeParseError.new(
+            "invalid minute in RFC 3339 string: #{mi} in #{str.to_heap}",
+            str.to_heap, p + 10)
         end
         if s > 60
-          return TimeParseError.new("invalid second in RFC 3339 string: #{s} in #{str}", str, p + 13)
+          return TimeParseError.new(
+            "invalid second in RFC 3339 string: #{s} in #{str.to_heap}",
+            str.to_heap, p + 13)
         end
 
         # Convert to UTC by subtracting the offset from local time
@@ -3838,17 +3906,24 @@ pub struct Time
         # Int32 holds; the sentence is the constructor's, which used to be
         # the panic here.
         if utc_sec < Time::MIN_SECONDS || utc_sec > Time::MAX_SECONDS
-          return TimeParseError.new("year out of range: #{utc_sec} seconds from the epoch is past the years an Int32 holds", str, len)
+          return TimeParseError.new(
+            "year out of range: #{utc_sec} seconds from the epoch is past " \
+              "the years an Int32 holds",
+            str.to_heap, len)
         end
         Time.new(utc_sec, nanos)
       end
 
       # Two digits at *start*, or -1 when either is not a digit.
-      private def self.parse_int(str : String, start : Int32, count : Int32) : Int32
+      private def self.parse_int(
+        str : String | Str,
+        start : Int32,
+        count : Int32,
+      ) : Int32
         val = 0
         i = 0
         while i < count
-          code = str.to_unsafe[start + i].to_i32
+          code = str.as_tape[start + i].to_i32
           return -1 if code < 48 || code > 57
           val = val * 10 + (code - 48)
           i = i + 1

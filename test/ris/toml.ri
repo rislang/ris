@@ -42,11 +42,11 @@ tape do
     exit 17 unless roundtrip.to_heap == value.to_heap
   end
   exit 18 unless parsed["title"].size == 4
-  exit 19 unless parsed.dig("db", "ports".to_heap, 1).as_i == 443_i64
+  exit 19 unless parsed.dig("db", "ports", 1).as_i == 443_i64
   kept = parsed["title"].as_s.to_heap
 end
 parsed = TOML.parse("title = 'café'".to_heap)
 exit 4 if parsed.is_a?(TOMLError)
 exit 14 unless TOML.parse(TOML.dump(parsed)) == parsed
-exit 5 unless parsed["title".to_heap].as_s == kept
+exit 5 unless parsed["title"].as_s == kept
 puts "PASS: toml tape and heap APIs"

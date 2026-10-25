@@ -23,9 +23,9 @@ end
 
 def heap_doc(b : Builder) : Nil
   b.object do
-    b.field "id".to_heap, 7_i64
-    b.field "name".to_heap, "a \"b\"\né \u{1F600} \u0001".to_heap
-    b.field "list".to_heap do
+    b.field "id", 7_i64
+    b.field "name", "a \"b\"\né \u{1F600} \u0001"
+    b.field "list" do
       b.array do
         b.number 1
         b.number -2_i64

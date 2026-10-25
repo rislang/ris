@@ -565,17 +565,17 @@ pub struct Any
     actual < 0 || actual >= a.size ? nil : a[actual]
   end
 
-  def [](key : String) : Any
+  def [](key : String | Str) : Any
     h = as_h? || raise "key #{key.inspect} into a JSON #{kind}"
     h[key]? || raise "no such key #{key.inspect}"
   end
 
-  def []?(key : String) : Any?
+  def []?(key : String | Str) : Any?
     h = as_h?
     h.nil? ? nil : h[key]?
   end
 
-  def dig?(key : String) : Any?
+  def dig?(key : String | Str) : Any?
     self[key]?
   end
 
@@ -583,19 +583,19 @@ pub struct Any
     self[index]?
   end
 
-  def dig?(k : String, *subkeys : String | Int32) : Any?
+  def dig?(k : String | Str, *subkeys : String | Str | Int32) : Any?
     v = self[k]?
     return nil unless v
     v.dig?(*subkeys)
   end
 
-  def dig?(idx : Int32, *subkeys : String | Int32) : Any?
+  def dig?(idx : Int32, *subkeys : String | Str | Int32) : Any?
     v = self[idx]?
     return nil unless v
     v.dig?(*subkeys)
   end
 
-  def dig(key : String) : Any
+  def dig(key : String | Str) : Any
     self[key]
   end
 
@@ -603,11 +603,11 @@ pub struct Any
     self[index]
   end
 
-  def dig(k : String, *subkeys : String | Int32) : Any
+  def dig(k : String | Str, *subkeys : String | Str | Int32) : Any
     self[k].dig(*subkeys)
   end
 
-  def dig(idx : Int32, *subkeys : String | Int32) : Any
+  def dig(idx : Int32, *subkeys : String | Str | Int32) : Any
     self[idx].dig(*subkeys)
   end
 
@@ -2384,13 +2384,13 @@ pub class Builder
     @buffer.append(str)
   end
 
-  def string(val : String) : Nil
+  def string(val : String | Str) : Nil
     before_value
     write_escaped_string(val)
   end
 
-  private def write_escaped_string(val : String) : Nil
-    JSON.each_escaped_byte(Str.view(val), @ascii_only) { |b| @buffer.append(b) }
+  private def write_escaped_string(val : String | Str) : Nil
+    JSON.each_escaped_byte(val.as_tape, @ascii_only) { |b| @buffer.append(b) }
   end
 
   def start_array : Nil
@@ -2448,7 +2448,7 @@ pub class Builder
   # given twice, or two Strings whose bytes are not UTF-8 and are both
   # written as U+FFFD (`{"a\xFF" => 1, "a\xFE" => 2}` was written
   # `{"a\uFFFD":1,"a\uFFFD":2}`, and `JSON.parse` refused it).
-  def field(name : String) : Nil
+  def field(name : String | Str) : Nil
     st = state
     raise "a field outside an object" unless st == OBJECT_FIRST || st == OBJECT_NEXT
     @buffer.append(44_u8) if st == OBJECT_NEXT # ','
@@ -2462,47 +2462,47 @@ pub class Builder
       raise "the key #{name.inspect} is written twice in one object" if earlier == name
       raise "the keys #{earlier.inspect} and #{name.inspect} are both written as #{text}"
     end
-    keys[text] = name
+    keys[text] = name.to_heap
     @buffer.append(58_u8)                         # ':'
     @buffer.append(32_u8) unless @indent_str.nil? # ' '
   end
 
-  def field(name : String, & : -> Nil) : Nil
+  def field(name : String | Str, & : -> Nil) : Nil
     field(name)
     yield
   end
 
-  def field(name : String, val : Any) : Nil
+  def field(name : String | Str, val : Any) : Nil
     field(name)
     val.to_json(self)
   end
 
-  def field(name : String, val : String) : Nil
+  def field(name : String | Str, val : String | Str) : Nil
     field(name)
     string(val)
   end
 
-  def field(name : String, val : Int32) : Nil
+  def field(name : String | Str, val : Int32) : Nil
     field(name)
     number(val)
   end
 
-  def field(name : String, val : Int64) : Nil
+  def field(name : String | Str, val : Int64) : Nil
     field(name)
     number(val)
   end
 
-  def field(name : String, val : Float64) : Nil
+  def field(name : String | Str, val : Float64) : Nil
     field(name)
     number(val)
   end
 
-  def field(name : String, val : Bool) : Nil
+  def field(name : String | Str, val : Bool) : Nil
     field(name)
     bool(val)
   end
 
-  def field(name : String, val : Nil) : Nil
+  def field(name : String | Str, val : Nil) : Nil
     field(name)
     null
   end

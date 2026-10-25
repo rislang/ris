@@ -18,8 +18,8 @@ tape do
   s.each_child(inner) { |i| grand << s[i] }
   none = 0
   s.each_child(empty) { none += 1 }
-  kids_text = kids.join(",".to_heap)
-  grand_text = grand.join(",".to_heap)
+  kids_text = kids.join(",")
+  grand_text = grand.join(",")
   puts "#{s.size} #{kids_text} #{grand_text} #{none} #{s.stop(root)}"
   s.close(inner)
 end

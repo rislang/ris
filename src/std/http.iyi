@@ -1252,7 +1252,7 @@ pub class Request
     @tls_resumed = resumed
   end
 
-  def header(name : String) : String?
+  def header(name : String | Str) : String?
     @headers.each do |key, value|
       return value if HTTP.same_name?(key, name)
     end
@@ -1488,7 +1488,7 @@ pub class Response
   # A header by name, as the server spelled it or otherwise: a field
   # name is case-insensitive (RFC 9110 §5.1), and `content-length` is as
   # common on the wire as `Content-Length`.
-  def header(name : String) : String?
+  def header(name : String | Str) : String?
     @headers.each do |key, value|
       return value if HTTP.same_name?(key, name)
     end
@@ -1500,7 +1500,7 @@ pub class Response
   # §5.3), since a cookie's `Expires` date has a comma in it - two cookies
   # read as "a=1; Expires=Wed, 21 Oct 2026 07:28:00 GMT, b=2", which no
   # split takes back apart. Empty for a field that is not there.
-  def header_values(name : String) : Array(String)
+  def header_values(name : String | Str) : Array(String)
     if apart = @apart
       apart.each do |key, values|
         return values.dup if HTTP.same_name?(key, name)
@@ -1658,7 +1658,7 @@ pub struct ParsedHead
   end
 
   # The value of the first field called *name*, in any case.
-  def field(name : String) : Str?
+  def field(name : String | Str) : Str?
     i = 0
     while i < @fields.size
       f = @fields[i]
@@ -1754,7 +1754,7 @@ pub struct Incoming
   end
 
   # The value of the first field called *name*, in any case.
-  def header(name : String) : Str?
+  def header(name : String | Str) : Str?
     i = 0
     while i < @fields.size
       f = @fields[i]
@@ -1804,20 +1804,15 @@ pub struct Outgoing
   # A header line, checked as `format_response` checks one: a name that is
   # a token, a value with no line break or control character, and none of
   # the lines the server writes itself.
-  def header(name : String, value : String) : Nil
-    header(name, value.as_tape)
-  end
-
-  # The same with a value on the tape: one written there, a stamp
-  # (`Time#to_rfc3339`) or a request's own field, as it is.
-  def header(name : String, value : Str) : Nil
+  def header(name : String | Str, value : String | Str) : Nil
+    value = value.as_tape
     Server.check_line(name, value)
     if HTTP.same_name?(name, "Content-Length") || HTTP.same_name?(name, "Connection") || HTTP.same_name?(name, "Transfer-Encoding")
-      raise "HTTP: #{name} is the server's own line"
+      raise "HTTP: #{name.to_heap} is the server's own line"
     end
     count = @state[1]
     raise "HTTP: more than #{LINES} header lines" if count == LINES
-    @lines[count] = Field.new(name.as_tape, value)
+    @lines[count] = Field.new(name.as_tape, value.as_tape)
     @state[1] = count + 1
   end
 
@@ -2143,15 +2138,19 @@ pub struct Server
   end
 
   # The same for a value on the tape, read where it lies.
-  def self.check_line(name : String, value : Str) : Nil
+  def self.check_line(name : String | Str, value : Str) : Nil
     raise "HTTP: not a header name: #{name.inspect}" unless HTTP.token?(name)
     p = value
     i = 0
     while i < value.bytesize
-      raise "HTTP: header #{name} contains a line break" if p[i] == 13_u8 || p[i] == 10_u8
+      if p[i] == 13_u8 || p[i] == 10_u8
+        raise "HTTP: header #{name.to_heap} contains a line break"
+      end
       i = i + 1
     end
-    raise "HTTP: header #{name} contains a control character" if HTTP.control?(p, value.bytesize)
+    if HTTP.control?(p, value.bytesize)
+      raise "HTTP: header #{name.to_heap} contains a control character"
+    end
   end
 
   # A request too large to be a request: 1 MiB of headers, 64 MiB of body.
@@ -4643,7 +4642,9 @@ pub struct HTTP
       name = line[0, colon]
       return "not a header name: #{name.inspect}" unless token?(name)
       value = trim(line[colon + 1, line.bytesize - colon - 1])
-      return "header #{name} contains a control character" if control?(value)
+      if control?(value)
+        return "header #{name.to_heap} contains a control character"
+      end
       key = name.downcase
       if first = spelled[key]?
         if values = more[first]?
@@ -4792,20 +4793,8 @@ pub struct HTTP
 
   # Two field names for the same field: ASCII case is the only difference
   # a name may carry.
-  def self.same_name?(a : String, b : String) : Bool
-    return false unless a.bytesize == b.bytesize
-    pa = a.to_unsafe
-    pb = b.to_unsafe
-    i = 0
-    while i < a.bytesize
-      ca = pa[i]
-      cb = pb[i]
-      ca = ca + 32_u8 if ca >= 65_u8 && ca <= 90_u8
-      cb = cb + 32_u8 if cb >= 65_u8 && cb <= 90_u8
-      return false unless ca == cb
-      i = i + 1
-    end
-    true
+  def self.same_name?(a : String | Str, b : String | Str) : Bool
+    same_name?(a.as_tape, a.bytesize, b)
   end
 
   # Whether a list of tokens (RFC 9110 §5.6.1), its repeated lines joined
@@ -5102,13 +5091,13 @@ pub struct HTTP
     s[first, last - first]
   end
 
-  def self.same_name?(a : Str, b : String) : Bool
-    same_name?(a, a.bytesize, b)
-  end
-
-  def self.same_name?(pa : Pointer(UInt8) | Str, count : Int32, b : String) : Bool
+  def self.same_name?(
+    pa : Pointer(UInt8) | Str,
+    count : Int32,
+    b : String | Str,
+  ) : Bool
     return false unless count == b.bytesize
-    pb = b.to_unsafe
+    pb = b.as_tape
     i = 0
     while i < count
       ca = pa[i]
@@ -5410,7 +5399,7 @@ pub class Part
     @pending = nil
   end
 
-  def header(name : String) : String?
+  def header(name : String | Str) : String?
     @headers.each do |key, value|
       return value if HTTP.same_name?(key, name)
     end

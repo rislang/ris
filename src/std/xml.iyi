@@ -1239,9 +1239,9 @@ pub struct TapeNode
     nil
   end
 
-  def [](key : String) : Str
+  def [](key : String | Str) : Str
     attributes.each { |attr| return attr.value if attr.name == key }
-    raise "no XML attribute #{key}"
+    raise "no XML attribute #{key.to_heap}"
   end
 
   def text(writer : Str::Builder) : Nil

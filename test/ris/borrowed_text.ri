@@ -1,0 +1,79 @@
+# Read-only std arguments borrow text; retained keys still need to_heap.
+module test/ris/borrowed_text
+
+import std/json::{JSON, Builder}
+import std/uri::{Params}
+import std/http::{HTTP, Server, Response}
+import std/html::{HTML}
+import std/time::{Time, TimeParseError}
+import std/socket::{IyiSocket}
+import std/dns::{DnsName}
+import std/toml::{TOML}
+import std/yaml::{YAML}
+
+keys = {"name".to_heap => 7, "nil".to_heap => 0}
+exit 1 unless keys["name"] == 7 && keys["name"]? == 7
+exit 2 unless keys.has_key?("name") && !keys.has_key?("missing")
+exit 3 unless keys.fetch("missing", 42) == 42
+owned = "name".to_heap
+exit 4 unless owned.hash == "name".hash
+words = ["alpha".to_heap, "beta".to_heap]
+exit 5 unless words.includes?("beta") && words.index("beta") == 1
+exit 6 unless words.join("|") == "alpha|beta"
+exit 7 unless words.join("|".to_heap) == "alpha|beta"
+exit 8 unless "alpha beta".includes?("beta")
+exit 9 unless "alpha beta".to_heap.includes?("beta")
+exit 10 unless "alpha beta".byte_index("beta", -4) == 6
+exit 11 unless "alpha beta".ends_with?("beta")
+exit 12 unless "alpha beta".to_heap.ends_with?("beta")
+exit 13 unless "alpha beta".to_heap.starts_with?("alpha")
+exit 14 unless "aaaaab".byte_index("aab") == 3
+exit 15 unless "".byte_index("") == 0
+exit 16 unless "abc".byte_index("", 4).nil?
+# A default proc may retain a missing key after its source tape ends.
+defaults = Hash(String, Int32).new do |table, key|
+  table[key] = key.bytesize
+end
+local_tape do
+  missing = "key #{7}"
+  exit 17 unless defaults[missing] == 5
+end
+exit 18 unless defaults["key 7"] == 5
+json = JSON.build do |b|
+  b.object do
+    b.field "name", "value #{7}"
+    b.field "list" do
+      b.array { b.number 2 }
+    end
+  end
+end
+parsed = JSON.parse(json)
+exit 19 unless parsed["name"].as_s == "value 7"
+exit 20 unless parsed.dig("list", 0).as_i == 2
+params = Params.parse("name=value".to_heap)
+exit 21 unless params["name"] == "value"
+exit 22 unless params.fetch_all("name").size == 1
+exit 23 unless HTML.escape("é & <") == "é &amp; &lt;"
+writer = Str::Builder.new
+HTML.escape("é & <", writer)
+exit 24 unless writer.finish == "é &amp; &lt;"
+exit 25 unless HTTP.same_name?("X-Test", "x-test")
+exit 26 unless HTTP.same_name?("X-Test".to_heap, "x-test")
+Server.check_line("X-Test", "ok")
+exit 27 unless Time.parse_rfc3339("2024-01-02T03:04:05Z").year == 2024
+bad = Time::Format::HTTP_DATE.parse("not a date")
+exit 28 unless bad.is_a?(TimeParseError)
+exit 29 unless bad.input == "not a date"
+exit 30 unless IyiSocket.parse_ip("127.0.0.1").to_s == "127.0.0.1"
+exit 31 unless IyiSocket.parse_ipv6("::1").to_s == "::1"
+exit 32 unless IyiSocket.localhost?("LOCALHOST.")
+exit 33 unless DnsName.valid?("example.com")
+exit 34 unless !DnsName.valid?("127.0.0.1")
+heap_toml = TOML.parse("name = 'value'".to_heap).or_panic
+exit 35 unless heap_toml["name"].as_s == "value"
+heap_yaml = YAML.parse("name: value".to_heap)
+exit 36 unless heap_yaml["name"].as_s == "value"
+exit 37 unless heap_yaml["missing"]?.nil?
+exit 38 unless IyiSocket.endpoint("::1", 80) == "[::1]:80"
+exit 39 unless IyiSocket.endpoint(owned, 42) == "name:42"
+puts "PASS: borrowed std text"

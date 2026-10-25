@@ -35,7 +35,7 @@ end
 # Written straight into the response body on the request's tape, the
 # text HTML-escaped on the way.
 def status_view(res : Outgoing, name : String, status : String) : Nil
-  res.header("Content-Type".to_heap, "text/html; charset=utf-8")
+  res.header("Content-Type", "text/html; charset=utf-8")
   html = res.body
   html << "<h1>"
   html.append_html_escaped(name)
@@ -46,7 +46,7 @@ end
 
 def not_found(res : Outgoing) : Nil
   res.status = 404
-  res.header("Content-Type".to_heap, "text/plain")
+  res.header("Content-Type", "text/plain")
   res.body << "Not Found\n"
 end
 

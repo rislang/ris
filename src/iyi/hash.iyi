@@ -175,7 +175,7 @@ class Hash(K, V)
 
   # The value, or *default* when the key has none: the call says what a
   # missing key answers, so a default the table was made with is not asked.
-  def fetch(key : K, default : D) : V | D forall D
+  def fetch(key, default : D) : V | D forall D
     entry = entry_of(key)
     entry < 0 ? default : @values[entry]
   end
