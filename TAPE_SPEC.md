@@ -15,9 +15,9 @@ apply. A GC path (to_heap) needs a migration mark; suggest copy_to.
   nothing rooted there escapes or mutates outer tape containers.
 * .ri text literals are static Str; interpolation builds Str on the active
   tape. Read-only text parameters borrow Str, without a String copy.
-* copy_to(owner) deeply copies, keeps aliases and rebases internal links;
-  it cannot extend an external borrow. Cycles or resources need a checked
-  copy routine. No implicit heap fallback or GC roots.
+* Build retained data on its destination (writers, in-place append), else
+  copy_to(owner): Str bytes, Ary/Tre/@[OnTape] fields deep; no aliases kept
+  or borrows extended; pointers, classes, self-relative links refused.
 * Program data initializes once, in order, never suspending or seeing
   incomplete values; its stores obey owner provenance.
 ## Owners and stable growth (Goose §1.3, design/root_structs.md: planned)

@@ -38,6 +38,7 @@ It returns tape data on the caller's tape; the owning scope frees it all:
 * The caller decides what outlives its tape: `copy_to(owner)` on a `Str`,
   `Ary` or `@[OnTape]` struct. `to_heap`, `to_s` to a `String` and
   `@[TapeToHeap]` are migration paths, each a marked heap site to remove.
+  Writing into the caller's `Str::Builder` beats building, then copying.
 * No raw pointers in an API: pass `Str`, `Str::Builder`, `Ary` or an
   `@[OnTape]` struct. Outside `std/` the compiler refuses a `Str`'s
   `to_unsafe` and `Str.new(pointer, size)`; a caller reads with `[]`,
