@@ -3,14 +3,11 @@
 Rules: TAPE_SPEC.md. Work in this dependency order; each gate runs in
 check.sh. Delete finished work in the same commit; keep check.sh green.
 
-1. [M] Trace serve past listen (web now traces one real HTTP request).
-   Replace its startup-answer budget with a bounded request workload.
 2. [L] Failure semantics before heap-backed runtime paths go.
-   Overflow-safe size math (&+/&* in tape.iyi, region.iyi); publish
-   limits (64 MiB is a start size, not a cap); fatal without allocation.
-   ensure LIFO on current locals; raise in cleanup is fatal; exit skips
+   Publish limits (64 MiB is a start size, not a cap).
+   Ensure LIFO on current locals; raise in cleanup is fatal; exit skips
    user cleanup (concurrency.iyi:3690 walks defers); signals set flags.
-   Gate: overflow, exhaustion, panic, cleanup and exit subprocess tests.
+   Gate: panic, cleanup and exit subprocess tests.
 3. [L] Named lexical/program owners; refuse copies, moves, temporaries,
    nesting and raw owner operations. Stable growth: growth now moves a
    value once (region.iyi:191); give each growing value reserved space

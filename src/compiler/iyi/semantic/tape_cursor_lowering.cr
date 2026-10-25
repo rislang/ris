@@ -6,9 +6,10 @@
 #     __text_x = @x.string
 #     __cursor_x = @x.offset
 #     __loop_x = while __cursor_x < lim ... end
-#     @x.advance(__cursor_x &- @x.offset)
+#     @x.__restore_offset(__cursor_x)
 #     __loop_x
 #
+# Steps check signed overflow before updating either cursor.
 # `@x.offset` is the cursor, `@x.string` the text, `@x.advance(k)` adds
 # `k` to the cursor and `@x.offset = v` sets both. The offset is written
 # back where the loop ends, at a `break` too, and before a `return`; a
@@ -75,11 +76,10 @@ class Iyi::TapeCursorLowering < Iyi::Transformer
     @cursor = "__cursor_#{@field}"
   end
 
-  # `@x.advance(cursor &- @x.offset)`: the offset written back.
+  # Write back the checked cursor without narrowing a signed difference.
   def store : ASTNode
     ivar = InstanceVar.new("@#{@field}")
-    back = Call.new(Var.new(@cursor), "&-", Call.new(ivar.clone, "offset"))
-    Call.new(ivar, "advance", back)
+    Call.new(ivar, "__restore_offset", Var.new(@cursor))
   end
 
   def transform(node : Call)
@@ -131,7 +131,8 @@ class Iyi::TapeCursorLowering < Iyi::Transformer
   end
 
   private def step(node : Call, count : ASTNode) : ASTNode
-    sum = Call.new(Var.new(@cursor), "&+", count)
+    sum = Call.new(Path.global("IyiRegion"), "offset_add",
+      [Var.new(@cursor).as(ASTNode), count])
     Assign.new(Var.new(@cursor), sum).at(node)
   end
 

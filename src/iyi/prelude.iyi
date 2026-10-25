@@ -1,4 +1,5 @@
 # iyi's prelude — SPEC.md, "0.1.0", item 3.
+# Failed mappings report their size through stack-buffer writes, then exit.
 #
 #   ./bin/crystal build --prelude=iyi/prelude program.iyi
 #
@@ -1546,8 +1547,7 @@ require "./file"
       fun __iyi_mmap(length : UInt64) : Pointer(Void)
         result = LibC.mmap(Pointer(Void).new(0_u64), length, 3, 0x1002, -1, 0_i64)
         if result.address == 0xFFFFFFFFFFFFFFFF_u64
-          __iyi_write(2, "iyi: out of memory\n".to_unsafe.as(Void*), 19_u64)
-          __iyi_exit(1)
+          RisHeap.mapping_failure(length)
         end
         result
       end
@@ -1579,8 +1579,7 @@ require "./file"
       fun __iyi_mmap(length : UInt64) : Pointer(Void)
         result = LibC.VirtualAlloc(nil, length, 0x3000_i32, 4_i32)
         if result.address == 0_u64
-          __iyi_write(2, "iyi: out of memory\n".to_unsafe.as(Void*), 19_u64)
-          __iyi_exit(1)
+          RisHeap.mapping_failure(length)
         end
         Pointer(Void).new(result.address)
       end
@@ -1643,8 +1642,7 @@ require "./file"
         # A failed raw syscall answers with -errno in the result register
         # rather than a flag: -4095..-1 is errno's whole range.
         if result < 0 && result >= -4095
-          __iyi_write(2, "iyi: out of memory\n".to_unsafe.as(Void*), 19_u64)
-          __iyi_exit(1)
+          RisHeap.mapping_failure(length)
         end
         Pointer(Void).new(result.to_u64)
       end
@@ -7662,8 +7660,7 @@ require "./file"
       # A failed raw syscall answers with -errno in the result register rather
       # than a flag: -4095..-1 is errno's whole range.
       if result < 0 && result >= -4095
-        __iyi_write(2, "iyi: out of memory\n".to_unsafe.as(Void*), 19_u64)
-        __iyi_exit(1)
+        RisHeap.mapping_failure(length)
       end
       Pointer(Void).new(result.to_u64)
     end

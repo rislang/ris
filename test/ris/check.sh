@@ -4,7 +4,7 @@
 # and run, the fibers test must read back what each fiber wrote, a tape must
 # grow past its first mapping in whole 64 KiB grains and refuse an index out
 # of range, a Tre must step over subtrees, and the respond sample must
-# print its known checksum.
+# print its known checksum. Fatal size errors must allocate nothing.
 #
 #   bash test/ris/check.sh
 set -uo pipefail
@@ -463,6 +463,11 @@ if [ "$out" = 2 ]; then
   echo "runs     scanner_words"
 else
   echo "FAILED   scanner_words: $out"
+  status=1
+fi
+
+# Fatal size errors exit directly, with exact diagnostics and no heap.
+if ! python3 test/ris/size_failure.py; then
   status=1
 fi
 

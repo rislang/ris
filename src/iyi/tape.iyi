@@ -1,4 +1,4 @@
-# PROTOTYPE (ris, step B): tape values.
+# Tape values: checked sizes and allocation-free fatal size diagnostics.
 #
 # Main and each spawned fiber own an implicit tape: values are bumped into
 # mappings, chained when full. The owning scope releases them together;
@@ -17,7 +17,8 @@
 #
 # Writers, arrays and trees hold pointers to state blocks on the tape;
 # copies share that state. Its fourth word names the region a value moved
-# to when it grew away from the tape's end (`IyiRegion.tape_resize`). A Str is an immutable byte view.
+# to when it grew away from the tape's end (`IyiRegion.tape_resize`).
+# A Str is an immutable byte view.
 # Copying a tape value does not copy its backing storage.
 
 # Internal ABI: the normalizer lowers only the runtime's own tape guard to
@@ -83,8 +84,16 @@ module Tape
   def self.grown(room : UInt64) : UInt64
     return 1_u64 if room == 0_u64
     limit = 2147483647_u64
-    raise "tape array full: #{limit} elements" if room >= limit
-    room < limit // 2_u64 + 1_u64 ? room &* 2_u64 : limit
+    IyiRegion.size_error("iyi: tape array full: ", limit) if room >= limit
+    room < limit // 2_u64 + 1_u64 ? IyiRegion.size_mul(room, 2_u64) : limit
+  end
+
+  # Check element bytes before count limits, and before allocating state.
+  def self.storage(capacity : Int32 | Int64, width : UInt64) : UInt64
+    count = IyiRegion.nonnegative(capacity.to_i64)
+    bytes = IyiRegion.size_mul(count, width)
+    IyiRegion.count(count)
+    IyiRegion.size_add(40_u64, bytes)
   end
 
   CAPACITY = 67108864_u64
@@ -118,6 +127,7 @@ struct Str
   end
 
   def self.new(ptr : Pointer(UInt8), bytesize : Int32) : self
+    IyiRegion.nonnegative(bytesize.to_i64)
     made = uninitialized self
     pointerof(made.@ptr).value = ptr
     pointerof(made.@bytesize).value = bytesize
@@ -152,15 +162,17 @@ struct Str
   end
 
   def +(other : String | Str) : Str
-    Str.build(bytesize + other.bytesize) do |writer|
+    Str.build(IyiRegion.count(IyiRegion.size_add(
+      bytesize.to_u64, other.bytesize.to_u64)).to_i32) do |writer|
       writer.append(self)
       writer.append(other)
     end
   end
 
   def *(count : Int32) : Str
-    raise "negative repeat count" if count < 0
-    Str.build(bytesize * count) do |writer|
+    repeats = IyiRegion.nonnegative(count.to_i64)
+    room = IyiRegion.count(IyiRegion.size_mul(bytesize.to_u64, repeats))
+    Str.build(room.to_i32) do |writer|
       count.times { writer.append(self) }
     end
   end
@@ -561,8 +573,9 @@ end
 struct Str::Builder
   @state : Pointer(UInt64)
 
-  def initialize(capacity : Int32 = 64)
-    @state = Pointer(UInt64).new(IyiRegion.tape_bytes(40_u64 &+ capacity.to_u64))
+  def initialize(capacity : Int32 | Int64 = 64)
+    bytes = Tape.storage(capacity, 1_u64)
+    @state = Pointer(UInt64).new(IyiRegion.tape_bytes(bytes))
     start = @state.address &+ 40_u64
     @state.value = start
     (@state + 1_i64).value = start &+ capacity.to_u64
@@ -599,6 +612,8 @@ struct Str::Builder
   end
 
   def append(bytes : Pointer(UInt8), count : Int32) : Nil
+    IyiRegion.nonnegative(count.to_i64)
+    IyiRegion.count(IyiRegion.size_add(length.to_u64, count.to_u64))
     cursor = @state.value
     if cursor &+ count.to_u64 > (@state + 1_i64).value
       grow(count.to_u64)
@@ -613,11 +628,12 @@ struct Str::Builder
   # it, and only to hand the address to a system call: `socket.read`
   # (TapePointerChecker).
   def unsafe_append(max : Int32, & : Pointer(UInt8) -> Int32) : Int32
-    raise "negative room: #{max}" if max < 0
-    reserve(length + max)
+    room = IyiRegion.nonnegative(max.to_i64)
+    reserve(IyiRegion.count(IyiRegion.size_add(length.to_u64, room)).to_i32)
     cursor = @state.value
     written = yield Pointer(UInt8).new(cursor)
-    raise "wrote #{written} bytes into room for #{max}" if written > max
+    IyiRegion.size_error("iyi: tape write exceeds room: ", written.to_u64) \
+      if written > max
     @state.value = cursor &+ written.to_u64 if written > 0
     written
   end
@@ -780,8 +796,9 @@ struct Str::Builder
   # Room for *total* bytes in all, so that writing up to them does not grow
   # the writer again: once a request's length is known, its bytes grow in
   # place even after other values have gone on the tape.
-  def reserve(total : Int32) : Nil
-    extra = total - length
+  def reserve(total : Int32 | Int64) : Nil
+    room = IyiRegion.count(IyiRegion.nonnegative(total.to_i64))
+    extra = room.to_i32 - length
     grow(extra.to_u64) if extra > 0 && @state.value &+ extra.to_u64 > (@state + 1_i64).value
   end
 
@@ -789,13 +806,15 @@ struct Str::Builder
   private def grow(extra : UInt64) : Nil
     start = (@state + 2_i64).value
     length = @state.value &- start
-    need = length &+ extra
+    need = IyiRegion.count(IyiRegion.size_add(length, extra))
     capacity = (@state + 1_i64).value &- start
     capacity = 1_u64 if capacity == 0_u64
     while capacity < need
-      capacity = capacity &* 2_u64
+      capacity = capacity > 2147483647_u64 // 2_u64 ? \
+        2147483647_u64 : IyiRegion.size_mul(capacity, 2_u64)
     end
-    start = IyiRegion.owned_resize(start, (@state + 1_i64).value, length, capacity, @state + 3_i64, (@state + 4_i64).value)
+    start = IyiRegion.owned_resize(start, (@state + 1_i64).value,
+      length, capacity, @state + 3_i64, (@state + 4_i64).value)
     @state.value = start &+ length
     (@state + 1_i64).value = start &+ capacity
     (@state + 2_i64).value = start
@@ -864,12 +883,16 @@ struct Str::Scanner
     @offset = position
   end
 
-  # Moves the offset *count* bytes, back when negative, unchecked: a
-  # lexer's step is one add, as `@pos += 1` is. Safe all the same, as
-  # every read checks: past the end, `eos?` holds and `current_byte` is
-  # nil; `offset=` is the checked move.
+  # Moves *count* bytes, back when negative; overflow is fatal.
+  # Reads still check bounds: past the end, eos? holds; offset= checks
+  # against the text. Lowered lexer loops use the same checked addition.
   def advance(count : Int32 = 1) : Int32
-    @offset = @offset &+ count
+    @offset = IyiRegion.offset_add(@offset, count)
+  end
+
+  # Compiler cursor writeback: the checked steps already produced Int32.
+  def __restore_offset(value : Int32) : Int32
+    @offset = value
   end
 
   # Whether the offset is at the end of the text.
@@ -1019,8 +1042,9 @@ end
 struct Ary(T)
   @state : Pointer(UInt64)
 
-  def initialize(capacity : Int32 = 4)
-    @state = Pointer(UInt64).new(IyiRegion.tape_bytes(40_u64 &+ capacity.to_u64 &* sizeof(T).to_u64))
+  def initialize(capacity : Int32 | Int64 = 4)
+    bytes = Tape.storage(capacity, sizeof(T).to_u64)
+    @state = Pointer(UInt64).new(IyiRegion.tape_bytes(bytes))
     @state.value = @state.address &+ 40_u64
     (@state + 1_i64).value = 0_u64
     (@state + 2_i64).value = capacity.to_u64
@@ -1031,7 +1055,7 @@ struct Ary(T)
   # *count* elements, the block giving each by index, in room of exactly
   # that size: it never grows, so it never moves to a region of its own
   # however much the block puts on the tape.
-  def self.new(count : Int32, & : Int32 -> T) : self
+  def self.new(count : Int32 | Int64, & : Int32 -> T) : self
     array = new(count)
     index = 0
     while index < count
@@ -1078,7 +1102,11 @@ struct Ary(T)
     room = (@state + 2_i64).value
     capacity = Tape.grown(room)
     width = sizeof(T).to_u64
-    @state.value = IyiRegion.owned_resize(start, start &+ room &* width, (@state + 1_i64).value &* width, capacity &* width, @state + 3_i64, (@state + 4_i64).value)
+    stop = start &+ IyiRegion.size_mul(room, width)
+    used = IyiRegion.size_mul((@state + 1_i64).value, width)
+    bytes = IyiRegion.size_mul(capacity, width)
+    @state.value = IyiRegion.owned_resize(start, stop, used, bytes,
+      @state + 3_i64, (@state + 4_i64).value)
     (@state + 2_i64).value = capacity
   end
 
@@ -1153,7 +1181,8 @@ struct Ary(T)
     {% end %}
     count = (@state + 1_i64).value
     width = sizeof(I).to_u64
-    while count + width > (@state + 2_i64).value
+    need = IyiRegion.count(IyiRegion.size_add(count, width))
+    while need > (@state + 2_i64).value
       grow
     end
     stored = value
@@ -1170,7 +1199,7 @@ struct Ary(T)
       end
     {% end %}
     Pointer(UInt8).new(@state.value + count).copy_from(bytes, width.to_i32)
-    (@state + 1_i64).value = count + width
+    (@state + 1_i64).value = need
   end
 
   # The bytes of *text* at the end, with one room check and one copy
@@ -1181,11 +1210,12 @@ struct Ary(T)
     {% end %}
     count = (@state + 1_i64).value
     width = text.bytesize.to_u64
-    while count + width > (@state + 2_i64).value
+    need = IyiRegion.count(IyiRegion.size_add(count, width))
+    while need > (@state + 2_i64).value
       grow
     end
     Pointer(UInt8).new(@state.value + count).copy_from(text.to_unsafe, width.to_i32)
-    (@state + 1_i64).value = count + width
+    (@state + 1_i64).value = need
   end
 
   # As `Array#[]`: a negative index counts from the end, and one still out
@@ -1586,7 +1616,8 @@ struct Ary(T)
         {% end %}
       {% end %}
     {% end %}
-    Str.new(Pointer(UInt8).new(@state.value), (size.to_u64 &* sizeof(T).to_u64).to_i32)
+    Str.new(Pointer(UInt8).new(@state.value), IyiRegion.count(
+      IyiRegion.size_mul(size.to_u64, sizeof(T).to_u64)).to_i32)
   end
 
   # The elements *bytes* holds, copied onto the tape: the length must be
@@ -1740,9 +1771,10 @@ end
 struct Tre(T)
   @state : Pointer(UInt64)
 
-  def initialize(capacity : Int32 = 64)
+  def initialize(capacity : Int32 | Int64 = 64)
     width = sizeof(Entry(T)).to_u64
-    @state = Pointer(UInt64).new(IyiRegion.tape_bytes(40_u64 &+ capacity.to_u64 &* width))
+    bytes = Tape.storage(capacity, width)
+    @state = Pointer(UInt64).new(IyiRegion.tape_bytes(bytes))
     @state.value = @state.address &+ 40_u64
     (@state + 1_i64).value = 0_u64
     (@state + 2_i64).value = capacity.to_u64
@@ -1830,7 +1862,11 @@ struct Tre(T)
     room = (@state + 2_i64).value
     capacity = Tape.grown(room)
     width = sizeof(Entry(T)).to_u64
-    @state.value = IyiRegion.owned_resize(start, start &+ room &* width, (@state + 1_i64).value &* width, capacity &* width, @state + 3_i64, (@state + 4_i64).value)
+    stop = start &+ IyiRegion.size_mul(room, width)
+    used = IyiRegion.size_mul((@state + 1_i64).value, width)
+    bytes = IyiRegion.size_mul(capacity, width)
+    @state.value = IyiRegion.owned_resize(start, stop, used, bytes,
+      @state + 3_i64, (@state + 4_i64).value)
     (@state + 2_i64).value = capacity
   end
 end
@@ -2304,7 +2340,7 @@ class Array(T)
     each do |value|
       room += value.is_a?(String) ? value.bytesize : 16
     end
-    raise "joined text is too large" if room > 2147483647_i64
+    IyiRegion.count(room.to_u64)
     Str.build(room.to_i32) do |writer|
       first = true
       each do |value|
