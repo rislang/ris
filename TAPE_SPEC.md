@@ -3,7 +3,8 @@ ris uses static data, scoped tapes and typed pools, no GC or general heap.
 [Goose](doc/reference/goose/README.md) citations inform. iyi's rules,
 cited as [iyi](doc/reference/iyi/source/SPEC.md) and a section (v0.19.1),
 apply as written; only what ris adds is stated. Reuse iyi before designing
-anew. A GC path (to_heap) needs a migration mark; suggest copy_to.
+anew. A GC path (to_heap) needs a migration mark; suggest copy_to. This
+is the target contract; what the code does not meet yet is in TODO.md.
 ## Storage and lifetimes
 * Main and each fiber own an implicit tape. Scope exit restores scratch;
   retained results stay on their destination owner. Suspension retains live
@@ -11,6 +12,10 @@ anew. A GC path (to_heap) needs a migration mark; suggest copy_to.
 * Tape types: Str, Ary(T), Tre(T), builders, scanners, views, @[OnTape]
   structs; all obey the root rules. Structs, inline tagged unions and pools
   replace heap classes; dispatch and union payloads never box.
+* Ary, Tre and builders are handles to shared state: assignment and
+  arguments alias data, length and capacity, so growth through b shows
+  through a; Str and views alias their bytes. Only copy_to copies; Goose's
+  implicit value copies (§4.1) do not apply. Str is read-only.
 * Libraries borrow caller input and build results on the caller's owner;
   nested tape blocks share it. A pending result's region is outside callee
   scratch and its rollback (Goose §10.3). local_tape owns separate scratch;
@@ -47,23 +52,27 @@ anew. A GC path (to_heap) needs a migration mark; suggest copy_to.
 * Recursion (§7.8): no owner, growing local or parameter, temporary or
   pending result is live at a call into a cycle (callbacks too): pass scratch.
 ## Failure, cleanup and exit (iyi III.1, III.1.4; Goose §7.9, §9.3)
-* Errors, panics and defer are iyi's: defer runs innermost first on every
-  exit, on current locals; a panic is caught at a task boundary. ris adds:
+* Errors, panics, defer and exit are iyi's: defer runs innermost first on
+  normal scope exit, panic unwind and exit (the calling task's only), on
+  current locals; a panic is caught at a task boundary. ris adds:
   frame regions are released after the defers; panic data and task
   results are copied to the receiver first. A panic in cleanup is fatal.
 * Exhaustion and bad sizes are checked before mutation, with overflow-safe
   arithmetic; they end as iyi's panic print (allocation-free), no fallback.
   Limits for tape bytes, regions, tasks and native stack are published.
-* Fatal errors and exit skip user cleanup. Signals are std/signal's: the
+* Fatal errors skip user cleanup. Signals are std/signal's: the
   handler sets a flag and wakes a pipe; work runs in a task.
 ## Concurrency and boundaries (iyi III.4; Goose §11.2)
 * Tasks start in an iyi group and never outlive it (III.4.1); work that
   outlives its caller runs in a longer group, such as main's. Data races
   are iyi's Share check (III.4.4). ris adds: owners are built on their
   task's tape; no shared mutable owner, implicit global copy or snapshot.
-  Static or frozen program data is shared read-only, checked per owner.
+  Only Share values (III.4.4) are shared: Str and program data no method
+  writes after init, checked per owner. Ary and its views write through
+  and are never shared; ris has no freeze.
 * Messages use iyi's Channel and select, ChannelClosed and Cancelled
-  (III.4); ris copies flat data into receiver-owned storage. Queues, task
+  (III.4), and carry only Share values, no tape values. Tape messages
+  (owner while queued, copy, release on close) come with TODO 7. Queues, task
   records and wait nodes live in runtime typed pools; a buffered queue is
   bounded and send reports full. A failed receive keeps the message.
 * Callbacks borrow their environment for the call only; an escaping
@@ -77,10 +86,15 @@ anew. A GC path (to_heap) needs a migration mark; suggest copy_to.
 * Pool(T)/SlicePool(T): typed slots/runs; free keeps values valid, stale
   views see typed replacements; generations only guard checked handles.
 * Free keeps memory; reset obeys shrink rules. Run relocation is explicit:
-  holders keep offsets and re-read; old views stay unchanged.
+  holders keep offsets and re-read; old views stay unchanged. Runs holding
+  self-relative links are never relocated (Goose §5.4).
 * Validate bounds, overflow and aligned membership before mutation; foreign
   storage is refused statically or at runtime. No uninitialized slots;
-  self-relative links stay in one region. Validate external byte images.
+  self-relative links stay in one region.
+* External byte images (.load(bytes)) check lengths, alignment, union
+  tags, spans and links (each to an element start in the image) before
+  any value is published; invalid input yields none, never part. This is
+  safety, not integrity: a checksum is the caller's (Goose §9.4).
 * Pool free never closes a resource: resources have explicit cleanup.
 * RIS_TAPE_STATS: owner paths, regions, committed peaks, pool waste, copies
   apart from growth moves. check.sh tests exit, panic, cancel, exhaustion.

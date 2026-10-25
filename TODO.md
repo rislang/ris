@@ -3,6 +3,9 @@
 Rules: TAPE_SPEC.md. Work in this dependency order; each gate runs in
 check.sh. Delete finished work in the same commit; keep check.sh green.
 
+2. [S] exit runs the calling task's defers, as iyi III.1.4: undo the
+   skip in concurrency.iyi and prelude.iyi exit (2a7f97843).
+   Gate: cleanup_exit prints its inner and outer defers, then exits 3.
 3. [L] First transfer: growth still transfers a displaced value once
    into its reserved side region, moving published elements
    (region.iyi tape_resize). Start growing

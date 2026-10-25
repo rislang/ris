@@ -4,6 +4,20 @@ Every change to TAPE_SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one.
 
+## 2026-10-25: aliasing, sharing, messages, exit, byte images
+
+* Added: Ary, Tre and builders are handles; assignment and arguments
+  alias, only copy_to copies; Str is read-only. The spec is the target
+  contract, gaps are in TODO.md. Byte images are checked field by field
+  and never published in part. Runs with self-relative links never move.
+* Changed: sharing is iyi's Share, "frozen" is gone; channels carry only
+  Share values until TODO 7. exit runs the calling task's defers, as
+  iyi III.1.4; only fatal errors skip cleanup.
+* Why: a Codex review found assignment, writability, queued message
+  ownership and byte validation unstated, and ris's exit differed from
+  iyi without a tape reason. The code already aliases (Ary and builders
+  hold one state pointer); Share already defines read-only data.
+
 ## 2026-10-25: reuse iyi's rules instead of restating them
 
 * Changed: errors, panics and defer cite iyi III.1-III.1.4; the fatal
