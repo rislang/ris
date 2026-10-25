@@ -77,17 +77,17 @@ class Iyi::Program
       Prof.span("tape check") do
         IntegerTextDivisionChecker.new(self).run(result)
         TapeChecker.new(self).run
-        TapeOwnerChecker.new(self).run(result)
-        TapeProgramChecker.new(self).run(result)
         tape_graph = TapeCallGraph.new(self, result)
+        TapeOwnerChecker.new(self, tape_graph).run(result)
+        TapeProgramChecker.new(self, tape_graph).run(result)
         tape_shrink = TapeShrinkChecker.new(self, tape_graph)
         tape_shrink.solve
         TapeRecursionChecker.new(self, tape_graph).run(result)
-        result.accept TapeLifetimeChecker.new(self)
+        result.accept TapeLifetimeChecker.new(self, tape_graph)
         tape_shrink.run(result)
-        TapePointerChecker.new(self).run(result)
+        TapePointerChecker.new(self, tape_graph).run(result)
         TapeEscapeChecker.new(self).run(result)
-        TapeScopeChecker.new(self).run(result)
+        TapeScopeChecker.new(self, tape_graph).run(result)
         TapeCheckFreeChecker.new(self).run(result)
         TapeRefillChecker.new(self).run(result)
         TapeStringParameterChecker.new(self).run(result)

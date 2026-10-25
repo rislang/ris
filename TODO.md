@@ -9,15 +9,6 @@ check.sh. Delete finished work in the same commit; keep check.sh green.
    values in their own region, or refuse views across the first growth.
    Non-Linux targets still move. Refuse raw owner operations.
    Gate: no transfer of a viewed value.
-4a. [M] Shared specialized graph and shrink/result-view, fresh-result and
-    cycle summaries now serve shrink and recursion checks. Finish migrating
-    owner, program, lifetime, pointer and scope checks to TapeCallGraph;
-    remove their independent target_defs walks. Extend its per-def effects
-    with general allocation and suspension (fresh growing results alone
-    are tracked today). Solve those effects once; 4e-4f extend the roots
-    and opaque contracts. Keep callback, dispatch and opaque target policy
-    shared by every consumer.
-    Gate: check.sh refusals and outputs unchanged.
 4e. [L] Owner/path roots, joins, read-back candidates and stored holders.
     Gate: branch alternatives, fields, nested holders and emptied holders.
 4f. [L] Specialized call effects, suspension and checked contracts for

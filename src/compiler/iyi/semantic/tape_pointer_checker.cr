@@ -12,23 +12,24 @@ class Iyi::TapePointerChecker
   @seen = Set(UInt64).new
   @defs = [] of Def
 
-  def initialize(@program)
+  getter graph : TapeCallGraph
+
+  def initialize(@program, @graph : TapeCallGraph)
   end
 
   def run(node : ASTNode) : Nil
-    node.accept Collector.new(self)
+    @graph.defs.each_value { |target| reach(target) }
     check node
     @defs.each { |a_def| check a_def.body }
   end
 
   def reach(a_def : Def) : Nil
-    return if TapeRules.runtime?(@program, a_def.location) || !@seen.add?(a_def.object_id)
+    return if @graph.opaque?(a_def) || !@seen.add?(a_def.object_id)
     if TapeRules.unsafe?(@program, a_def)
       TapeFfiFlow.new(self).check(a_def)
     else
       @defs << a_def
     end
-    a_def.body.accept Collector.new(self)
   end
 
   private def check(node : ASTNode) : Nil
@@ -44,14 +45,14 @@ class Iyi::TapePointerChecker
 
   private def view?(node : Call) : Bool
     node.name == "new" && node.args.size == 2 &&
-      !!node.target_defs.try &.any? { |target| tape_string_class?(target.owner) }
+      !!@graph.targets(node).try &.any? { |target| tape_string_class?(target.owner) }
   end
 
   # Whether *node* is `Str::Builder#unsafe_append`, which yields a
   # pointer into the tape: its block's first parameter.
   def yields_pointer?(node : Call) : Bool
     node.name == "unsafe_append" &&
-      !!node.target_defs.try &.any? { |target| target.owner.to_s == "Str::Builder" }
+      !!@graph.targets(node).try &.any? { |target| target.owner.to_s == "Str::Builder" }
   end
 
   def refuse?(node : Call) : String?
@@ -73,24 +74,6 @@ class Iyi::TapePointerChecker
 
   private def tape_string_class?(owner : Type) : Bool
     owner.metaclass? && owner.instance_type.to_s == "Str"
-  end
-
-  class Collector < Visitor
-    def initialize(@checker : TapePointerChecker)
-    end
-
-    def visit(node : Call)
-      node.target_defs.try &.each { |a_def| @checker.reach(a_def) }
-      true
-    end
-
-    def visit(node : Def)
-      false
-    end
-
-    def visit(node : ASTNode)
-      true
-    end
   end
 
   class Finder < Visitor
@@ -231,11 +214,12 @@ class Iyi::TapeFfiFlow
   end
 
   private def to_os?(call : Call, index : Int32) : Bool
-    targets = call.target_defs
+    targets = @checker.graph.targets(call)
     return false unless targets
     targets.any? do |target|
       next os?(target) if target.is_a?(External)
       next true if target.name.starts_with?("__sys") || io_write?(target)
+      next false if @checker.graph.opaque?(target)
       next false unless index < target.args.size
       key = {target.object_id, index}
       found = @reaches[key]?

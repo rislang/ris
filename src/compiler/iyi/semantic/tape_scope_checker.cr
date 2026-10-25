@@ -81,13 +81,16 @@ class Iyi::TapeScopeChecker
     {flag, second.value}
   end
 
-  def initialize(@program : Program)
+  getter graph : TapeCallGraph
+
+  def initialize(@program : Program, @graph : TapeCallGraph)
   end
 
   @seen = Set(UInt64).new
   @decided = [] of Expressions
 
   def run(node : ASTNode) : Nil
+    @graph.defs.each_value { |target| reach(target) }
     check_scope(node, false)
     # A loop's or block's mark left off frees nothing, but its two calls
     # still run each round in an unoptimised build: the body is left as
@@ -107,7 +110,7 @@ class Iyi::TapeScopeChecker
 
   def reach(a_def : Def) : Nil
     return unless @seen.add?(a_def.object_id)
-    owner_tape = a_def.owner.try { |owner| TapeChecker.tape?(@program, owner) } || false
+    owner_tape = a_def.owner?.try { |owner| TapeChecker.tape?(@program, owner) } || false
     params = a_def.args.map(&.name)
     a_def.block_arg.try { |arg| params << arg.name }
     check_scope(a_def.body, owner_tape, params)
@@ -119,74 +122,9 @@ class Iyi::TapeScopeChecker
     end
   end
 
-  # Whether *node* can put anything on the tape: every tape allocation goes
-  # through one of `IyiRegion`'s TAKES, so a body that reaches none of them
-  # through any call it makes
-  # (`h = (h ^ c) &* p`, a getter, `UInt64#<<`) puts nothing there, and its
-  # mark would only cost each round. A def being looked at counts as not
-  # allocating while it is: its other calls decide. Past DEPTH calls down
-  # the answer is yes, as any doubt is.
-  DEPTH = 16
-  TAKES = {"tape_bytes", "tape_resize", "take", "grow_onto", "tape_scope", "tape_local", "tape="}
-  @allocates = {} of UInt64 => Bool
-  @depth = 0
-
+  # Allocation is solved once over the shared specialized graph.
   def allocates?(node : ASTNode) : Bool
-    finder = AllocFinder.new(self)
-    node.accept(finder)
-    finder.found
-  end
-
-  def def_allocates?(a_def : Def) : Bool
-    return @allocates[a_def.object_id] if @allocates.has_key?(a_def.object_id)
-    body = a_def.body
-    return false if body.is_a?(Primitive)
-    return true if @depth >= DEPTH
-    @allocates[a_def.object_id] = false
-    @depth += 1
-    result = allocates?(body)
-    @depth -= 1
-    # A no found under the depth limit may lean on a def still being
-    # looked at; only a yes, or a no at the top, is kept.
-    if result || @depth == 0
-      @allocates[a_def.object_id] = result
-    else
-      @allocates.delete(a_def.object_id)
-    end
-    result
-  end
-
-  class AllocFinder < Visitor
-    getter found = false
-
-    def initialize(@checker : TapeScopeChecker)
-    end
-
-    # A call that never returns (`raise`, `abort`) leaves by unwinding,
-    # which releases the tape past the mark anyway: what its message puts
-    # there does not count.
-    def visit(node : Call)
-      return false if @found
-      return false if node.type?.try(&.no_return?)
-      # The marks themselves only read the tape's cursor.
-      return false if node.name == MARK || node.name == RESET
-      obj = node.obj
-      # The GC heap and its collector never take tape.
-      return false if obj.is_a?(Path) && {"IyiHeap", "IyiMark"}.includes?(obj.names.last?)
-      if obj.is_a?(Path) && obj.names.last? == "IyiRegion" && TAKES.includes?(node.name)
-        @found = true
-        return false
-      end
-      if defs = node.target_defs
-        @found = true if defs.any? { |a_def| @checker.def_allocates?(a_def) }
-      end
-      node.expanded.try &.accept(self)
-      !@found
-    end
-
-    def visit(node : ASTNode)
-      !@found
-    end
+    @graph.allocates?(node)
   end
 
   private def check_scope(scope : ASTNode, owner_tape : Bool, params = [] of String) : Nil
@@ -360,7 +298,6 @@ class Iyi::TapeScopeChecker
     end
 
     def visit(node : Call)
-      node.target_defs.try &.each { |a_def| @checker.reach(a_def) }
       if expanded = node.expanded
         expanded.accept self
       end

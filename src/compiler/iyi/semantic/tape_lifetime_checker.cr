@@ -34,7 +34,9 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
   @visited = Set(VisitKey).new
   @active = Set(Tuple(UInt64, UInt64?)).new
 
-  def initialize(@program : Program)
+  getter graph : TapeCallGraph
+
+  def initialize(@program : Program, @graph : TapeCallGraph)
   end
 
   def visit(node : Def)
@@ -47,7 +49,7 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
       return false
     end
     unless TapeRules.runtime?(@program, node.location)
-      private_heap = node.target_defs.try &.any? do |target|
+      private_heap = @graph.targets(node).try &.any? do |target|
         target.name == "__ris_heap_runtime" ||
           (target.owner?.to_s == "RisHeap.class" && target.name == "runtime")
       end
@@ -86,11 +88,18 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
       return false
     end
 
-    if node.obj.nil? && node.target_defs.try(&.any? { |target| TapeChecker.tape?(@program, target.owner) })
+    if node.obj.nil? && @graph.targets(node).try(&.any? { |target| TapeChecker.tape?(@program, target.owner) })
       check_outer_self(node)
     end
     binding = node.block.try { |block| BlockContext.new(block, @yield_context, @owner, @scope) }
-    node.target_defs.try &.each do |target|
+    @graph.targets(node).try &.each do |target|
+      if @graph.opaque?(target)
+        if binding
+          visit_block(binding.block, binding.owner, binding.parent,
+            !@scope.nil? && binding.scope.same?(@scope))
+        end
+        next
+      end
       key = VisitKey.new(target, @scope, binding)
       active_key = {target.object_id, @scope.try(&.object_id)}
       # Cycle storage was checked over the specialized graph before this
@@ -131,9 +140,9 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
   private def tape_scope?(node : Call) : Bool
     return false unless node.block
     if node.name == "tape" && node.obj.nil?
-      node.target_defs.try &.any?(&.owner.is_a?(Program)) || false
+      @graph.targets(node).try &.any?(&.owner.is_a?(Program)) || false
     elsif node.name == "local_tape" && node.obj.nil?
-      node.target_defs.try &.any?(&.owner.is_a?(Program)) || false
+      @graph.targets(node).try &.any?(&.owner.is_a?(Program)) || false
     else
       false
     end

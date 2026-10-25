@@ -5,6 +5,8 @@ class Iyi::TapeCallGraph
   class Effect
     # Fresh growing result, not general allocation or suspension.
     property allocating = false
+    property allocation = false
+    property suspension = false
     property cyclic = false
     property shrink : TapeShrinkChecker::Summary?
   end
@@ -18,6 +20,9 @@ class Iyi::TapeCallGraph
 
   def initialize(@program, node : ASTNode)
     node.accept Graph.new(self, nil)
+    @program.const_initializers.each { |i| i.value.accept Graph.new(self, nil) }
+    @program.class_var_initializers.each { |i| i.node.accept Graph.new(self, nil) }
+    solve_effects(node)
     # Runtime callees are opaque bodies but can still execute a lexical
     # callback. Keep their outgoing callback edges in cycle reachability.
     @edges.each_key do |id|
@@ -41,6 +46,112 @@ class Iyi::TapeCallGraph
     end
   end
 
+  # Runtime bodies are opaque to safety proofs, but their known allocation
+  # primitives and scheduling APIs still contribute effects. Discover them
+  # once, without adding them to the user defs checked by consumers.
+  @effect_defs = Hash(UInt64, Def).new
+
+  private def solve_effects(root : ASTNode)
+    root.accept Effects.new(self)
+    @program.const_initializers.each { |i| i.value.accept Effects.new(self) }
+    @program.class_var_initializers.each { |i| i.node.accept Effects.new(self) }
+    loop do
+      changed = false
+      @effect_defs.each_value do |target|
+        scan = Effects.new(self)
+        target.body.accept scan
+        effect = @effects[target.object_id]
+        if scan.allocation && !effect.allocation
+          effect.allocation = true
+          changed = true
+        end
+        if scan.suspension && !effect.suspension
+          effect.suspension = true
+          changed = true
+        end
+      end
+      break unless changed
+    end
+  end
+
+  def effect_reach(target : Def)
+    effect = @effects[target.object_id] ||= Effect.new
+    effect.suspension ||= TapeRules.runtime?(@program, target.location) &&
+      (threaded?(target) ||
+        {"sleep", "spawn", "receive", "send"}.includes?(target.name))
+    return if target.iyi_from_artifact? && !target.iyi_body_travelled?
+    return if @effect_defs.has_key?(target.object_id)
+    @effect_defs[target.object_id] = target
+    target.body.accept Effects.new(self)
+  end
+
+  def allocates?(node : ASTNode) : Bool
+    scan = Effects.new(self)
+    node.accept scan
+    scan.allocation
+  end
+
+  def suspends?(node : ASTNode) : Bool
+    scan = Effects.new(self)
+    node.accept scan
+    scan.suspension
+  end
+
+  def threaded?(target : Def) : Bool
+    (target.name == "start" &&
+      (target.owner.to_s.includes?("Thread") ||
+        target.owner.to_s == "IyiWorkers.class")) ||
+      target.name == "spawn_parallel"
+  end
+
+  class Effects < Visitor
+    getter allocation = false
+    getter suspension = false
+    TAKES = {"tape_bytes", "tape_resize", "take", "grow_onto",
+             "tape_scope", "tape_local", "tape="}
+
+    def initialize(@graph : TapeCallGraph)
+    end
+
+    def visit(node : Call)
+      if expanded = node.expanded
+        expanded.accept self
+        return false
+      end
+      return false if node.type?.try(&.no_return?)
+      return false if node.name == TapeScopeChecker::MARK ||
+                      node.name == TapeScopeChecker::RESET
+      obj = node.obj
+      return false if obj.is_a?(Path) &&
+                      {"IyiHeap", "IyiMark"}.includes?(obj.names.last?)
+      @allocation ||= obj.is_a?(Path) && obj.names.last? == "IyiRegion" &&
+                      TAKES.includes?(node.name)
+      @graph.targets(node).try &.each do |target|
+        @graph.effect_reach(target)
+        effect = @graph.effects[target.object_id]
+        @allocation ||= effect.allocation
+        @suspension ||= effect.suspension
+      end
+      true
+    end
+
+    def visit(node : ProcLiteral)
+      @graph.effect_reach(node.def)
+      effect = @graph.effects[node.def.object_id]
+      @allocation ||= effect.allocation
+      @suspension ||= effect.suspension
+      false
+    end
+
+    def visit(node : Def)
+      false
+    end
+
+    def visit(node : ASTNode)
+      true
+    end
+  end
+
   # Cache even absent targets: every consumer sees the same opaque call.
   def targets(call : Call) : Array(Def)?
     @targets.fetch(call.object_id) do
@@ -48,12 +159,16 @@ class Iyi::TapeCallGraph
     end
   end
 
+  def opaque?(target : Def) : Bool
+    TapeRules.runtime?(@program, target.location) ||
+      (target.iyi_from_artifact? && !target.iyi_body_travelled?)
+  end
+
   def reach(target : Def)
-    return if TapeRules.runtime?(@program, target.location)
-    return if target.iyi_from_artifact? && !target.iyi_body_travelled?
+    return if opaque?(target)
     return if @defs.has_key?(target.object_id)
     @defs[target.object_id] = target
-    @effects[target.object_id] = Effect.new
+    @effects[target.object_id] ||= Effect.new
     @edges[target.object_id] ||= Set(UInt64).new
     target.body.accept Graph.new(self, target)
   end

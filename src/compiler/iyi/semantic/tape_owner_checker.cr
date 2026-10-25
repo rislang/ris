@@ -3,7 +3,9 @@
 class Iyi::TapeOwnerChecker
   getter program : Program
 
-  def initialize(@program : Program)
+  getter graph : TapeCallGraph
+
+  def initialize(@program : Program, @graph : TapeCallGraph)
   end
 
   def self.owner?(program : Program, type : Type) : Bool
@@ -40,6 +42,7 @@ class Iyi::TapeOwnerChecker
   @seen = Set(UInt64).new
 
   def run(node : ASTNode) : Nil
+    @graph.defs.each_value { |target| reach(target) }
     node.accept Finder.new(self)
     @program.const_initializers.each { |i| i.value.accept Finder.new(self, initial: i.value) }
     @program.class_var_initializers.each { |i| i.node.accept Finder.new(self, initial: i.node) }
@@ -58,11 +61,10 @@ class Iyi::TapeOwnerChecker
 
   def reach(target : Def) : Nil
     return if target.body.is_a?(Primitive)
-    return if TapeRules.runtime?(@program, target.location)
+    return if @graph.opaque?(target)
     return unless @seen.add?(target.object_id)
     # The compiler's generated constructor returns its fresh receiver.
     if target.name == "new" && target.type?.try { |t| TapeOwnerChecker.owner?(@program, t) }
-      target.body.accept ConstructorCalls.new(self)
       return
     end
     if target.name == "initialize" && TapeOwnerChecker.owner?(@program, target.owner)
@@ -76,20 +78,6 @@ class Iyi::TapeOwnerChecker
                "Declare one owner per scope"
   end
 
-  class ConstructorCalls < Visitor
-    def initialize(@checker : TapeOwnerChecker)
-    end
-
-    def visit(node : Call)
-      node.target_defs.try &.each { |d| @checker.reach(d) }
-      true
-    end
-
-    def visit(node : ASTNode)
-      true
-    end
-  end
-
   # Unoptimized LLVM builds new's temporary, then copies its header into
   # the local/constant slot (owners.ri checks both addresses). Keep that
   # temporary private, including through aliases and receiver helpers.
@@ -101,7 +89,7 @@ class Iyi::TapeOwnerChecker
     end
 
     def rooted?(node : ASTNode) : Bool
-      roots = Roots.new(@aliases, @owner)
+      roots = Roots.new(@checker.graph, @aliases, @owner)
       node.accept roots
       roots.found
     end
@@ -109,7 +97,7 @@ class Iyi::TapeOwnerChecker
     class Roots < Visitor
       getter found = false
 
-      def initialize(@aliases : Set(String), @owner : Type)
+      def initialize(@graph : TapeCallGraph, @aliases : Set(String), @owner : Type)
       end
 
       def visit(node : Var)
@@ -119,7 +107,7 @@ class Iyi::TapeOwnerChecker
 
       def visit(node : Call)
         @found ||= !node.obj &&
-          node.target_defs.try(&.any? { |d| d.owner == @owner }) == true
+          @graph.targets(node).try(&.any? { |d| d.owner == @owner }) == true
         true
       end
 
@@ -161,7 +149,7 @@ class Iyi::TapeOwnerChecker
         expanded.accept self
         return false
       end
-      own = node.target_defs.try &.all? { |d| d.owner == @owner }
+      own = @checker.graph.targets(node).try &.all? { |d| d.owner == @owner }
       # A field's own methods (`@left << 1`) fill it in place; passing a
       # view on as an argument is what could publish the temporary.
       exposes = node.args.any? { |a| view?(a) && rooted?(a) }
@@ -171,7 +159,8 @@ class Iyi::TapeOwnerChecker
                    "construction finishes"
       end
       if own
-        node.target_defs.try &.each do |d|
+        @checker.graph.targets(node).try &.each do |d|
+          next if @checker.graph.opaque?(d)
           d.args.zip(node.args) do |arg, value|
             @aliases << arg.name if rooted?(value)
           end
@@ -221,7 +210,6 @@ class Iyi::TapeOwnerChecker
       # Probes use fake values solely to instantiate the user's defs.
       # Check those bodies, not the probe's temporary union result.
       if node.is_a?(If) && node.iyi_definition_probe?
-        node.accept ConstructorCalls.new(@checker)
         return false
       end
       if @checker.composite?(node)
@@ -277,12 +265,11 @@ class Iyi::TapeOwnerChecker
       if @checker.owner?(node) && !@allowed.includes?(node.object_id)
         @checker.refuse(node, "owner temporary requires a named declaration")
       end
-      node.target_defs.try &.each do |d|
+      @checker.graph.targets(node).try &.each do |d|
         if node.args.any? { |a| @checker.owner?(a) } &&
            (d.is_a?(External) || d.body.is_a?(Primitive))
           @checker.refuse(node, "owner arguments require a direct def call")
         end
-        @checker.reach(d)
       end
       if node.program_initializer?
         if block = node.block

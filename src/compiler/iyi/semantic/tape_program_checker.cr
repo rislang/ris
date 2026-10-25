@@ -61,7 +61,9 @@ class Iyi::TapeProgramChecker
   @has_threads = false
   @mutations = [] of ASTNode
 
-  def initialize(@program : Program)
+  getter graph : TapeCallGraph
+
+  def initialize(@program : Program, @graph : TapeCallGraph)
   end
 
   def tape?(node : ASTNode) : Bool
@@ -78,7 +80,7 @@ class Iyi::TapeProgramChecker
               end
             end
     unless roots
-      use = ProgramUse.new(@program)
+      use = ProgramUse.new(@program, @graph)
       node.accept(use)
       return unless use.found
     end
@@ -249,7 +251,7 @@ class Iyi::TapeProgramChecker
     args = node.args.map { |arg| value(arg, env) }
     node.named_args.try &.each { |arg| value(arg.value, env) }
     node.block_arg.try { |arg| value(arg, env) }
-    targets = node.target_defs
+    targets = @graph.targets(node)
     return Origin::Unknown unless targets
     result : Origin? = nil
     targets.each do |target|
@@ -272,11 +274,9 @@ class Iyi::TapeProgramChecker
           node.raise "Program.tape.run is private; use .copy_to(Program.tape)"
         end
       elsif runtime
-        threaded = (target.name == "start" && target.owner.to_s.includes?("Thread")) ||
-                   target.name == "spawn_parallel" ||
-                   (target.name == "start" && target.owner.to_s == "IyiWorkers.class")
+        threaded = @graph.threaded?(target)
         @has_threads = true if threaded
-        if @program_context && (threaded || {"sleep", "spawn", "receive", "send"}.includes?(node.name))
+        if @program_context && @graph.suspends?(node)
           node.raise "program tape initializers cannot suspend; initialize before spawning fibers"
         end
         tape_receiver = node.obj.try { |obj| tape?(obj) } ||
@@ -342,6 +342,7 @@ class Iyi::TapeProgramChecker
 
   private def reach(target : Def, args : Array(Origin), receiver : Origin,
                     binding : Binding?) : Origin
+    return Origin::Unknown if @graph.opaque?(target)
     unless @program_context
       inputs = [receiver] + args
       # Library code names no program root of a .ri file: it reaches one
@@ -425,7 +426,7 @@ class Iyi::TapeProgramChecker
 
   private def touches_program?(target : Def) : Bool
     @globals.fetch(target.object_id) do
-      finder = GlobalUse.new(@program)
+      finder = GlobalUse.new(@program, @graph)
       target.body.accept(finder)
       @globals[target.object_id] = finder.found
     end
@@ -438,7 +439,7 @@ class Iyi::TapeProgramChecker
     getter found = false
     @seen = Set(UInt64).new
 
-    def initialize(@program : Program)
+    def initialize(@program : Program, @graph : TapeCallGraph)
     end
 
     def visit(node : ClassVar)
@@ -458,13 +459,14 @@ class Iyi::TapeProgramChecker
     end
 
     def visit(node : Call)
-      threaded = node.target_defs.try &.any? do |target|
-        (target.name == "start" &&
-          (target.owner.to_s.includes?("Thread") ||
-            target.owner.to_s == "IyiWorkers.class")) ||
-          target.name == "spawn_parallel"
+      if expanded = node.expanded
+        expanded.accept self
+        return false
       end
-      owner_api = node.target_defs.try &.any? do |target|
+      threaded = @graph.targets(node).try &.any? do |target|
+        @graph.threaded?(target)
+      end
+      owner_api = @graph.targets(node).try &.any? do |target|
         target.owner.to_s == "Program::TapeOwner"
       end
       if threaded || owner_api || node.name == "copy_to" ||
@@ -472,11 +474,18 @@ class Iyi::TapeProgramChecker
          node.name.starts_with?("program_")
         @found = true
       end
-      node.target_defs.try &.each do |target|
-        next if TapeRules.runtime?(@program, target.location)
+      @graph.targets(node).try &.each do |target|
+        next if @graph.opaque?(target)
         target.body.accept(self) if @seen.add?(target.object_id)
       end
       true
+    end
+
+    def visit(node : ProcLiteral)
+      unless @graph.opaque?(node.def)
+        node.def.body.accept(self) if @seen.add?(node.def.object_id)
+      end
+      false
     end
 
     def visit(node : Def)
@@ -494,7 +503,7 @@ class Iyi::TapeProgramChecker
     getter found = false
     @seen = Set(UInt64).new
 
-    def initialize(@program : Program)
+    def initialize(@program : Program, @graph : TapeCallGraph)
     end
 
     # A class variable declared with a nil initializer (`@@r : R? = nil`)
@@ -507,16 +516,27 @@ class Iyi::TapeProgramChecker
     end
 
     def visit(node : Call)
+      if expanded = node.expanded
+        expanded.accept self
+        return false
+      end
       if node.name == "copy_to" ||
          (node.name == "__ris_program_init" && !node.program_initializer?) ||
-         node.target_defs.try(&.any? { |target| target.owner.to_s == "Program::TapeOwner" })
+         @graph.targets(node).try(&.any? { |target| target.owner.to_s == "Program::TapeOwner" })
         @found = true
       end
-      node.target_defs.try &.each do |target|
-        next if TapeRules.runtime?(@program, target.location)
+      @graph.targets(node).try &.each do |target|
+        next if @graph.opaque?(target)
         target.body.accept(self) if @seen.add?(target.object_id)
       end
       true
+    end
+
+    def visit(node : ProcLiteral)
+      unless @graph.opaque?(node.def)
+        node.def.body.accept(self) if @seen.add?(node.def.object_id)
+      end
+      false
     end
 
     def visit(node : Def)

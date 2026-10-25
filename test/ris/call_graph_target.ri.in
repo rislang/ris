@@ -1,0 +1,34 @@
+# Both checker probes keep the same dispatch and proc specializations.
+@[Ffi]
+module call_graph_target
+
+@[Owner]
+struct Workspace
+  getter bytes : Ary(UInt8)
+
+  def initialize
+    @bytes = Ary(UInt8).new
+  end
+end
+
+class Left
+  def invoke(callback)
+    callback.call
+  end
+end
+
+class Right
+  def invoke(callback)
+    callback.call
+  end
+end
+
+def exercise(left : Bool)
+  target = left ? Left.new : Right.new
+  target.invoke(-> do
+    @OPERATION@
+    nil
+  end)
+end
+
+tape { exercise(true) }

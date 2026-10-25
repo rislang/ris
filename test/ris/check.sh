@@ -33,6 +33,35 @@ expect() {
   fi
 }
 
+# Owner and pointer checking see the same callback through union dispatch.
+out=$(
+  graph_dir=$(mktemp -d)
+  graph_probe="$graph_dir/call_graph_target.ri"
+  for checker in owner pointer; do
+    if [ "$checker" = owner ]; then
+      operation='a = Workspace.new; b = a'
+      needle='cannot copy or reassign an owner'
+    else
+      operation='text = Str.new("abc"); text.to_unsafe'
+      needle='to_unsafe` of a Str outside a @[TapeUnsafe] def'
+    fi
+    sed "s/@OPERATION@/$operation/" test/ris/call_graph_target.ri.in \
+      >"$graph_probe"
+    result=$("$RIS" build --no-codegen "$graph_probe" 2>&1)
+    if [ "$?" -ne 0 ] && grep -qF -- "$needle" <<<"$result"; then
+      echo "refused  call_graph_target_$checker"
+    else
+      echo "FAILED   call_graph_target_$checker: $result"
+    fi
+  done
+  rm -f "$graph_probe"
+  rmdir "$graph_dir"
+)
+if [[ "$out" == *FAILED* ]]; then
+  status=1
+fi
+printf '%s\n' "$out"
+
 # A dead view permits refill; live views and pending operands forbid shrink.
 for name in builder_clear builder_truncate builder_shift operand alias span \
     values_at link pop_optional element iterator pointer literal_operand \
