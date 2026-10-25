@@ -317,7 +317,7 @@ def iyimod_format() -> int:
     return int(m.group(1))
 
 
-# iyi's own documents, which ris keeps as they are (CLAUDE.md): their
+# iyi's own documents, which ris keeps as they are (AGENTS.md): their
 # numbers are iyi's at the fork and its merges, not ris's tree, so a claim
 # in one of them is listed and not held. ris's own documents state no size.
 IYI_DOCUMENTS = {"SPEC.md", "CHANGELOG.md", "README.iyi.md"}

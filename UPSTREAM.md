@@ -77,4 +77,4 @@ has it.
 ## Stays in ris
 
 * Tape: std/http `parse_head` and `ParsedHead`, the tape list in
-  `IyiRegion`, `CLAUDE.md`'s tape rules.
+  `IyiRegion`, `AGENTS.md`'s tape rules.
