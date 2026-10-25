@@ -1,0 +1,19 @@
+@[Owner]
+struct Workspace
+  getter left = Ary(Int32).new
+
+  def initialize
+    view : Ary(Int32) = @left
+    publish(view)
+  end
+
+end
+
+def publish(a : Ary(Int32))
+  nil
+end
+
+tape do
+  workspace = Workspace.new
+  nil
+end

@@ -1,8 +1,24 @@
+# initialize fills its own fields in place.
+@[Owner]
+struct Filled
+  getter items = Ary(Int32).new
+
+  def initialize
+    @items << 5
+  end
+end
+
 @[Owner]
 struct Workspace
   getter left : Ary(Int32)
   getter right : Ary(Int32)
   property ticks = 0
+  getter initial_header : UInt64
+
+  @[PointerUnsafe("inspect final field header address")]
+  def header_address : UInt64
+    pointerof(@left).address
+  end
 
   def grow_left
     @ticks += 1
@@ -10,9 +26,16 @@ struct Workspace
     nil
   end
 
+  def accept_view(view : Ary(Int32))
+    nil
+  end
+
+  @[PointerUnsafe("compare constructor and final field header addresses")]
   def initialize
     @left = Ary(Int32).new
     @right = Ary(Int32).new
+    @initial_header = pointerof(@left).address
+    accept_view(@left)
   end
 end
 
@@ -87,8 +110,12 @@ tape do
   grow(borrowed, effect)
   raise "argument storage" unless borrowed.ticks == 3
   raise "argument snapshot" unless count(borrowed) == 401
+  # At -O0 new returns a temporary header, copied into each final slot.
+  # Only numeric addresses escape initialize; no view may observe it.
+  raise "program construction copy" if ROOT.initial_header == ROOT.header_address
   raise "program owner" unless ROOT.left.empty?
   workspace = Workspace.new
+  raise "local construction copy" if workspace.initial_header == workspace.header_address
   100.times do |i|
     workspace.left << i
     workspace.right << i * 2
@@ -96,5 +123,7 @@ tape do
   raise "owner growth" unless workspace.left[99] == 99
   raise "owner growth" unless workspace.right[99] == 198
   raise "owner argument" unless count(workspace) == 200
+  filled = Filled.new
+  raise "owner initialize fill" unless filled.items[0] == 5
   puts "PASS: owner fields"
 end

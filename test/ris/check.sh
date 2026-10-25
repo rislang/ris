@@ -40,6 +40,10 @@ expect owner_implicit_return 'cannot return a local owner from a def'
 expect owner_class 'requires a struct'
 expect owner_copy 'borrow it: pass the owner variable'
 expect owner_proc_argument 'owner arguments require a direct def call'
+for name in self field alias typed_alias getter helper; do
+  expect "owner_initialize_$name" \
+    "cannot publish self or a field view from an owner's initialize"
+done
 out=$("$RIS" run test/ris/owners.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = 'PASS: owner fields' ]; then
   echo "runs     owners"
@@ -47,6 +51,22 @@ else
   echo "FAILED   owners: $out"
   status=1
 fi
+
+# -O0 construction copies a private temporary into local/program storage.
+owner_ir=$(mktemp -d)
+if "$RIS" build --emit llvm-ir -o "$owner_ir/owners" \
+    test/ris/owners.ri >"$owner_ir/log" 2>&1 &&
+    grep -qE '^define internal %Workspace .*Workspace::new' \
+      "$owner_ir/owners.ll" &&
+    grep -qE 'Workspace#initialize.*ptr %_' "$owner_ir/owners.ll" &&
+    grep -qE 'store %Workspace .*ptr %workspace,' "$owner_ir/owners.ll" &&
+    grep -qE 'store %Workspace .*ptr @ROOT,' "$owner_ir/owners.ll"; then
+  echo "lowers   owners (private constructor copy)"
+else
+  echo "FAILED   owners (construction): $(cat "$owner_ir/log")"
+  status=1
+fi
+rm -rf "$owner_ir"
 
 expect heap_exemption \
   'runtime heap exemption is private'

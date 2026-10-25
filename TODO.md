@@ -3,13 +3,14 @@
 Rules: TAPE_SPEC.md. Work in this dependency order; each gate runs in
 check.sh. Delete finished work in the same commit; keep check.sh green.
 
-3. [L] B2: in-place construction and returned borrows. Owner arguments
-   now borrow storage in ordinary defs; primitive/Proc/foreign calls refuse
-   owner arguments. C: partial-construction rollback. A: first transfer:
-   growth still transfers a displaced value once into its reserved side
-   region, moving published elements (region.iyi tape_resize). Start
-   growing values in their own region, or refuse views across the first
-   growth. Non-Linux targets still move. Refuse raw owner operations.
+3. [L] B2: returned borrows: refuse returning any owner (param, program,
+   local); suggest a field view or the owner as an argument. Construction
+   copies a private temporary; initialize cannot publish it.
+   C: partial-construction rollback. A: first transfer: growth still
+   transfers a displaced value once into its reserved side region,
+   moving published elements (region.iyi tape_resize). Start growing
+   values in their own region, or refuse views across the first growth.
+   Non-Linux targets still move. Refuse raw owner operations.
    Gate: reference passing, bounded rollback, no transfer of a viewed value.
 4. [L] Roots and effects: owner/path roots, joins, loop fixed points,
    read-back candidates, holders, operands; specialized call effects;

@@ -62,8 +62,14 @@ helper updates the caller, including through nested calls. Owner methods
 also mutate the receiver in place. Pass owners directly to defs; primitive,
 Proc and foreign calls cannot take owner arguments.
 
-In-place construction and returned borrows remain planned, as does stable
-growth on first transfer.
+Construction currently initializes a private temporary and copies its
+header into the named local or program constant. The address tests and
+unoptimized LLVM checks in `test/ris/check.sh` record this behavior.
+An owner's `initialize` cannot pass `self` or a field view to other defs,
+including through local aliases or owner helpers. Call the owner's own
+methods until construction finishes; those helpers follow the same rule.
+
+Returned borrows and stable growth on first transfer remain planned.
 
 ## Scanner, links, binary fields, trees
 

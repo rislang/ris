@@ -1,5 +1,5 @@
 # Owners have one named binding; codegen borrows ordinary def arguments.
-# Destination construction and returned borrow provenance remain separate.
+# Construction may copy a private temporary; initialize must not publish it.
 class Iyi::TapeOwnerChecker
   getter program : Program
 
@@ -65,6 +65,9 @@ class Iyi::TapeOwnerChecker
       target.body.accept ConstructorCalls.new(self)
       return
     end
+    if target.name == "initialize" && TapeOwnerChecker.owner?(@program, target.owner)
+      target.body.accept Initialization.new(self, target.owner)
+    end
     target.body.accept Finder.new(self, target)
   end
 
@@ -80,6 +83,115 @@ class Iyi::TapeOwnerChecker
     def visit(node : Call)
       node.target_defs.try &.each { |d| @checker.reach(d) }
       true
+    end
+
+    def visit(node : ASTNode)
+      true
+    end
+  end
+
+  # Unoptimized LLVM builds new's temporary, then copies its header into
+  # the local/constant slot (owners.ri checks both addresses). Keep that
+  # temporary private, including through aliases and receiver helpers.
+  class Initialization < Visitor
+    @aliases = Set(String).new
+    @seen = Hash(UInt64, Int32).new
+
+    def initialize(@checker : TapeOwnerChecker, @owner : Type)
+    end
+
+    def rooted?(node : ASTNode) : Bool
+      roots = Roots.new(@aliases, @owner)
+      node.accept roots
+      roots.found
+    end
+
+    class Roots < Visitor
+      getter found = false
+
+      def initialize(@aliases : Set(String), @owner : Type)
+      end
+
+      def visit(node : Var)
+        @found ||= node.name == "self" || @aliases.includes?(node.name)
+        false
+      end
+
+      def visit(node : Call)
+        @found ||= !node.obj &&
+          node.target_defs.try(&.any? { |d| d.owner == @owner }) == true
+        true
+      end
+
+      def visit(node : InstanceVar)
+        @found = true
+        false
+      end
+
+      def visit(node : ASTNode)
+        true
+      end
+    end
+
+    def visit(node : Assign)
+      if node.target.is_a?(Var) && rooted?(node.value)
+        @aliases << node.target.as(Var).name
+      end
+      true
+    end
+
+    def visit(node : TypeDeclaration)
+      if (value = node.value) && node.var.is_a?(Var) && rooted?(value)
+        @aliases << node.var.as(Var).name
+      end
+      true
+    end
+
+    def visit(node : Yield)
+      if node.exps.any? { |e| view?(e) && rooted?(e) }
+        node.raise "cannot publish self or a field view from an owner's " \
+                   "initialize; call the owner's own methods until " \
+                   "construction finishes"
+      end
+      true
+    end
+
+    def visit(node : Call)
+      if expanded = node.expanded
+        expanded.accept self
+        return false
+      end
+      own = node.target_defs.try &.all? { |d| d.owner == @owner }
+      # A field's own methods (`@left << 1`) fill it in place; passing a
+      # view on as an argument is what could publish the temporary.
+      exposes = node.args.any? { |a| view?(a) && rooted?(a) }
+      if exposes && !own
+        node.raise "cannot publish self or a field view from an owner's " \
+                   "initialize; call the owner's own methods until " \
+                   "construction finishes"
+      end
+      if own
+        node.target_defs.try &.each do |d|
+          d.args.zip(node.args) do |arg, value|
+            @aliases << arg.name if rooted?(value)
+          end
+          # Revisit when a later call gives a helper another rooted arg.
+          next if @seen[d.object_id]? == @aliases.size
+          @seen[d.object_id] = @aliases.size
+          d.body.accept self
+        end
+      end
+      true
+    end
+
+    private def view?(node : ASTNode) : Bool
+      node.type?.try do |t|
+        !!TapeChecker.tape_in(@checker.program, t) || t.is_a?(PointerInstanceType)
+      end == true
+    end
+
+    def visit(node : Def | Macro)
+      false
     end
 
     def visit(node : ASTNode)
