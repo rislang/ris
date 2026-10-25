@@ -2345,7 +2345,7 @@ module Iyi
     # Not the compiler's own, which `Program` declares at the top: each does
     # something besides being read, and the ones a declaration needs are
     # written by their own rules (`@[Share]` in `iyi_type_declaration`,
-    # `@[Flags]` on an enum, `@[Link]` on a lib). `@[OnTape]` travels
+    # `@[Flags]` on an enum, `@[Link]` on a lib). Tape markers travel
     # here because its lifetime contract also applies to carried types.
     # The path is an edge, for
     # `inheritance_order`: an annotation has to be declared above the type it
@@ -2353,12 +2353,12 @@ module Iyi
     private def iyi_read_annotations(type : Type) : Array(String)
       written = [] of String
       type.annotations.try &.each do |annotation_type, values|
-        # OnTape is a prelude marker, but unlike decoration it is part of
+        # Tape markers belong to the prelude, but they are part of
         # the type's lifetime contract. Dropping it makes a consumer reject
         # tape fields or, for a pointer-only struct, accept an escaping value.
-        builtin_tape = annotation_type.namespace.is_a?(Program) && annotation_type.name == "OnTape"
+        builtin_tape = annotation_type.namespace.is_a?(Program) && {"OnTape", "Owner"}.includes?(annotation_type.name)
         next if annotation_type.namespace.is_a?(Program) && !builtin_tape
-        name = builtin_tape ? "::OnTape" : iyi_edge_name(type, annotation_type.to_s)
+        name = builtin_tape ? "::#{annotation_type.name}" : iyi_edge_name(type, annotation_type.to_s)
         path = Path.new(name.lchop("::").split("::"), name.starts_with?("::"))
         values.each do |value|
           copy = value.clone

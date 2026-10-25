@@ -77,6 +77,7 @@ class Iyi::Program
       Prof.span("tape check") do
         IntegerTextDivisionChecker.new(self).run(result)
         TapeChecker.new(self).run
+        TapeOwnerChecker.new(self).run(result)
         TapeProgramChecker.new(self).run(result)
         result.accept TapeLifetimeChecker.new(self)
         TapePointerChecker.new(self).run(result)

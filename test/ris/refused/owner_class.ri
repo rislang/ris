@@ -1,0 +1,4 @@
+@[Owner]
+class Bad
+end
+bad = Bad.new

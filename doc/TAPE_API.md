@@ -47,6 +47,19 @@ end
 Tape values may be locals, arguments, results, @[OnTape] fields and
 Ary elements; never class fields, heap containers, procs or channels.
 
+## Named owners: @[Owner]
+
+An `@[Owner]` struct can hold several growing `Ary`, `Str::Builder` or
+`Tre` fields. Bind construction directly to a named local or program
+declaration: `workspace = Workspace.new`. Grow each field independently.
+Declare one owner per scope; pass its variable to helpers to borrow it.
+
+Owners cannot be copied, reassigned, nested in fields or containers,
+combined into tuples or unions (including nilable types), or returned
+from a def as a local value. `@[OnTape]` records keep their existing rules.
+This is the checker gate; reference passing, in-place construction and
+returned borrows remain planned, as does stable growth on first transfer.
+
 ## Scanner, links, binary fields, trees
 
 ```crystal

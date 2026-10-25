@@ -1,0 +1,29 @@
+@[Owner]
+struct Workspace
+  getter left : Ary(Int32)
+  getter right : Ary(Int32)
+
+  def initialize
+    @left = Ary(Int32).new
+    @right = Ary(Int32).new
+  end
+end
+
+ROOT = Workspace.new
+
+def count(w : Workspace) : Int32
+  w.left.size + w.right.size
+end
+
+tape do
+  raise "program owner" unless ROOT.left.empty?
+  workspace = Workspace.new
+  100.times do |i|
+    workspace.left << i
+    workspace.right << i * 2
+  end
+  raise "owner growth" unless workspace.left[99] == 99
+  raise "owner growth" unless workspace.right[99] == 198
+  raise "owner argument" unless count(workspace) == 200
+  puts "PASS: owner fields"
+end

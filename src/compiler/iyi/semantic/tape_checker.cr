@@ -25,6 +25,7 @@ class Iyi::TapeChecker
 
   def self.tape?(program : Program, type : Type) : Bool
     type = type.remove_typedef
+    return true if TapeOwnerChecker.owner?(program, type)
     if type.is_a?(GenericClassInstanceType)
       return !type.generic_type.annotation(program.tape_annotation).nil?
     end
@@ -84,6 +85,20 @@ class Iyi::TapeChecker
   end
 
   def check_fields(type)
+    owner = TapeOwnerChecker.owner?(@program, type)
+    if owner && !type.struct?
+      fail type, nil, "@[Owner] requires a struct; declare one owner per scope"
+    end
+    if type.is_a?(InstanceVarContainer)
+      type.instance_vars.each_value do |ivar|
+        if field_type = ivar.type?
+          if TapeOwnerChecker.owner_in(@program, field_type)
+            fail type, ivar, "cannot store an owner in a field; " \
+                            "borrow it: pass the owner variable"
+          end
+        end
+      end
+    end
     tape = TapeChecker.tape?(@program, type)
     if tape && !type.struct?
       fail type, nil, <<-MSG

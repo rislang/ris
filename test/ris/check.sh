@@ -23,6 +23,30 @@ expect() {
   fi
 }
 
+# B1 owner bindings and storage restrictions.
+expect owner_temporary 'owner temporary requires a named declaration'
+expect owner_inline 'owner temporary requires a named declaration'
+expect owner_copy 'cannot copy or reassign an owner'
+expect owner_reassign 'cannot copy or reassign an owner'
+expect owner_field 'cannot store an owner in a field'
+expect owner_class_field 'cannot store an owner in a field'
+expect owner_ary 'cannot store an owner'
+expect owner_array 'cannot store an owner'
+expect owner_hash 'cannot store an owner'
+expect owner_tuple 'cannot store an owner in a container, tuple or union'
+expect owner_union 'cannot store an owner in a container, tuple or union'
+expect owner_return 'cannot return a local owner from a def'
+expect owner_implicit_return 'cannot return a local owner from a def'
+expect owner_class 'requires a struct'
+expect owner_copy 'borrow it: pass the owner variable'
+out=$("$RIS" run test/ris/owners.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = 'PASS: owner fields' ]; then
+  echo "runs     owners"
+else
+  echo "FAILED   owners: $out"
+  status=1
+fi
+
 expect heap_exemption \
   'runtime heap exemption is private'
 expect string_parameter \

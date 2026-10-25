@@ -1,0 +1,16 @@
+@[Owner]
+struct Workspace
+  getter left : Ary(Int32)
+  getter right : Ary(Int32)
+
+  def initialize
+    @left = Ary(Int32).new
+    @right = Ary(Int32).new
+  end
+end
+
+tape do
+  a = Workspace.new
+  b = {a, 1}
+  nil
+end
