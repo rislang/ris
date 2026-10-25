@@ -1,0 +1,8 @@
+def check_shrink
+  b = Str::Builder.new
+  b << "abc"
+  pair = {b.finish, b.clear}
+  puts pair[0]
+end
+
+tape { check_shrink }

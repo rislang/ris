@@ -1,0 +1,10 @@
+@[PointerUnsafe("exercise view liveness through a raw byte pointer")]
+def check_shrink
+  b = Str::Builder.new
+  b << "abc"
+  bytes = b.finish.to_unsafe
+  b.clear
+  puts bytes[0]
+end
+
+tape { check_shrink }

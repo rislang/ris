@@ -1,0 +1,41 @@
+def consume_byte(byte : UInt8, ignored : Nil)
+  raise "byte" unless byte == 97_u8
+end
+
+def refill
+  b = Str::Builder.new
+  b << "abc"
+  view = b.finish
+  raise "view" unless view == "abc"
+  b.clear
+  b << "def"
+  copied = b.finish.copy_to(Program.tape)
+  b.truncate(1)
+  b.shift(1)
+  raise "copy" unless copied == "def"
+  b << "abc"
+  consume_byte(b.finish[0], b.clear)
+  stale = b.finish
+  stale = Str.new("independent")
+  b.clear
+  raise "rebind" unless stale == "independent"
+  a = Ary(Int32).new
+  a << 1
+  index = 0
+  raise "index" unless a[index] == 1
+  indexes = Ary(Int32).new
+  indexes << 0
+  selected = a.values_at(indexes)
+  raise "selected" unless selected[0] == 1
+  a.pop
+  a.clear
+  3.times do
+    b.clear
+    b << "again"
+    text = b.finish
+    raise "refill" unless text == "again"
+  end
+end
+
+tape { refill }
+puts "PASS: shrink refill"

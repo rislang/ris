@@ -1,0 +1,14 @@
+def consume(view : Str, ignored : Nil)
+  puts view
+end
+
+def check_shrink
+  b = Str::Builder.new
+  b << "abc"
+  alias_b = b
+  v = b.finish
+  alias_b.clear
+  puts v
+end
+
+tape { check_shrink }

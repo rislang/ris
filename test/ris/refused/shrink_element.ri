@@ -1,0 +1,15 @@
+def consume(view : Str, ignored : Nil)
+  puts view
+end
+
+def check_shrink
+  b = Str::Builder.new
+  b << "abc"
+  a = Ary(Str::Builder).new
+  a << b
+  v = a[0]
+  a.clear
+  puts v.finish
+end
+
+tape { check_shrink }

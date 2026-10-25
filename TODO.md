@@ -9,11 +9,19 @@ check.sh. Delete finished work in the same commit; keep check.sh green.
    values in their own region, or refuse views across the first growth.
    Non-Linux targets still move. Refuse raw owner operations.
    Gate: no transfer of a viewed value.
-4. [L] Roots and effects: owner/path roots, joins, loop fixed points,
-   read-back candidates, holders, operands; specialized call effects;
-   contracts for opaque calls and iyimod; live-view shrink, suspension;
-   recursion per Goose §7.8 (tape_lifetime_checker.cr:96 skips it).
-   Gate: alias, dispatch, callback, loop and recursion cases.
+4b. [L] Shrink across calls: specialize receiver/argument roots and
+    propagate shrink and result effects through dispatch and callbacks.
+    Gate: direct, generic, dispatch and callback aliases.
+4c. [L] Recursion per Goose §7.8: cycle roots, scratch and pending results;
+    replace tape_lifetime_checker.cr's active-cycle skip.
+    Gate: direct and mutual cycles, callbacks and live scratch.
+4d. [L] Loop root fixed points, including previous-round aliases and views.
+    Gate: loop-carried roots, rebinding and clear/refill rounds.
+4e. [L] Owner/path roots, joins, read-back candidates and stored holders.
+    Gate: branch alternatives, fields, nested holders and emptied holders.
+4f. [L] Specialized call effects, suspension and checked contracts for
+    opaque calls and iyimod; refuse unproved effects with a safe form.
+    Gate: opaque, imported, suspending and unknown callback targets.
 5. [M] Pending results outside callee scratch and rollback. copy_to
    refuses classes (Object returns self, tape.iyi:1976), pointers and
    self-relative links; stays alias-free. Replace to_heap advice in

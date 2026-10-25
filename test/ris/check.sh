@@ -23,6 +23,19 @@ expect() {
   fi
 }
 
+# A dead view permits refill; live views and pending operands forbid shrink.
+for name in builder_clear builder_truncate builder_shift operand alias span \
+    values_at link pop_optional element iterator pointer literal_operand; do
+  expect "shrink_$name" 'cannot shrink tape storage with a live view'
+done
+out=$("$RIS" run test/ris/shrink_refill.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = 'PASS: shrink refill' ]; then
+  echo "runs     shrink_refill"
+else
+  echo "FAILED   shrink_refill: $out"
+  status=1
+fi
+
 # B1 storage restrictions; B2 ordinary def and receiver borrows.
 expect owner_temporary 'owner temporary requires a named declaration'
 expect owner_inline 'owner temporary requires a named declaration'

@@ -1,0 +1,14 @@
+def consume(view : Str, ignored : Nil)
+  puts view
+end
+
+def check_shrink
+  b = Str::Builder.new
+  b << "abc"
+  b.finish.each_byte do |byte|
+    b.clear
+    puts byte
+  end
+end
+
+tape { check_shrink }

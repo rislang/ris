@@ -80,6 +80,7 @@ class Iyi::Program
         TapeOwnerChecker.new(self).run(result)
         TapeProgramChecker.new(self).run(result)
         result.accept TapeLifetimeChecker.new(self)
+        TapeShrinkChecker.new(self).run(result)
         TapePointerChecker.new(self).run(result)
         TapeEscapeChecker.new(self).run(result)
         TapeScopeChecker.new(self).run(result)
