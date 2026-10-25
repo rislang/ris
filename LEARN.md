@@ -10,7 +10,7 @@
 5. `SPEC.md` (iyi's, long): look things up, don't read it through. Part I
    is the rules (R-1..R-5); III.1 is errors; III.4 is fibers and channels.
 ## 2. The language, in short
-Ruby's syntax with Crystal's types, blocks, unions and nil-safety, plus:
+Read-only text parameters take `Str`; retaining ones may take `String`.
 
 * A file is a module: `.ri`, first line `module shop/order`. Its path is
   the import path; there is no `require`.
@@ -31,7 +31,7 @@ end
 impl Error for ParseError
 end
 
-pub def parse_age(text : String) : Int32 | ParseError
+pub def parse_age(text : Str) : Int32 | ParseError
   age = text.to_i?
   return ParseError.new("not a number: #{text}".to_heap) unless age
   age

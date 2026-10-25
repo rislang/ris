@@ -1,0 +1,47 @@
+import std/env::{ENV}
+
+class KeptText
+  getter name : String
+
+  def initialize(@name : String)
+  end
+
+  def store(name : String) : Nil
+    @name = name
+  end
+end
+
+def push_text(text : String, list : Array(String)) : Nil
+  list << text
+end
+
+def returned(text : String) : String
+  text
+end
+
+def forward(text : String, kept : KeptText) : Nil
+  kept.store(text)
+end
+
+def literal_list(text : String) : Array(String)
+  [text]
+end
+
+def captured(text : String) : Proc(String)
+  -> { text }
+end
+
+# The library may retain a String: do not guess at its contract.
+def environment(text : String) : String?
+  ENV[text]?
+end
+
+kept = KeptText.new("first")
+forward("second", kept)
+list = [] of String
+push_text(returned("third"), list)
+raise "retention" unless kept.name == "second" && list[0] == "third"
+raise "literal" unless literal_list("fourth")[0] == "fourth"
+raise "capture" unless captured("fifth").call == "fifth"
+environment("RIS_NONEXISTENT_RETENTION_TEST")
+puts "PASS: retained String parameters"

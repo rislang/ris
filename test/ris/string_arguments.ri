@@ -1,0 +1,41 @@
+class ArgumentText
+  getter text : String
+
+  def initialize(@text : String)
+  end
+end
+
+def width(text : Str) : Int32
+  text.size
+end
+
+def choose(text : Str) : Int32
+  0
+end
+
+def choose(text : String) : String
+  text
+end
+
+def choose(text : Str, n : Int64) : Int32
+  0
+end
+
+def choose(text : String, n : Int64) : String
+  text
+end
+
+heap = "abc".to_heap + "d"
+field = ArgumentText.new(heap)
+array = [heap]
+before = IyiMark.allocated_since
+raise "variable" unless width(heap) == 4
+raise "field" unless width(field.text) == 4
+raise "element" unless width(array[0]) == 4
+raise "named" unless width(text: heap) == 4
+raise "overload" unless choose(heap).is_a?(String)
+raise "retry overload" unless choose(heap, 1).is_a?(String)
+raise "default type" unless heap.is_a?(String)
+raise "allocated" unless before == IyiMark.allocated_since
+raise "temporary" unless width("abc".to_heap + "d") == 4
+puts "PASS: String arguments borrow without allocation"

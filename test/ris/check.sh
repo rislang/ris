@@ -23,6 +23,16 @@ expect() {
   fi
 }
 
+expect string_parameter \
+  'name : String is only read; take it as Str'
+out=$("$RIS" run test/ris/string_parameters.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = 'PASS: retained String parameters' ]; then
+  echo "runs     string_parameters"
+else
+  echo "FAILED   string_parameters: $out"
+  status=1
+fi
+
 for name in text_constant text_parameter text_array text_capture \
             text_channel; do
   expect "$name" '.to_heap'
@@ -33,6 +43,8 @@ expect text_mixed_array 'to_heap'
 expect text_mixed_hash 'to_heap'
 expect text_literal_field '.to_heap'
 expect text_interpolation_field '.to_heap'
+expect text_interpolation_field \
+  'make it an @[OnTape] struct with a Str field'
 out=$("$RIS" run test/ris/text_default.ri 2>&1)
 if [ "$?" -eq 0 ] && grep -qF 'Str' <<<"$out" &&
     grep -qF 'PASS: default text' <<<"$out"; then
@@ -327,6 +339,13 @@ else
   echo "FAILED   samples/ris/respond"; status=1
 fi
 rm -f "$exe"
+
+out=$("$RIS" run test/ris/string_arguments.ri 2>&1)
+if [ "$out" = 'PASS: String arguments borrow without allocation' ]; then
+  echo "runs     string_arguments"
+else
+  echo "FAILED   string_arguments: $out"; status=1
+fi
 
 # HPACK's tape overload agrees with the retained API across tape scopes.
 out=$("$RIS" run --release test/ris/hpack.ri 2>&1)

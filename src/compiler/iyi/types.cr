@@ -1822,9 +1822,13 @@ module Iyi
     end
   end
 
-  # A static literal view may satisfy a String restriction on retry.
+  # Text arguments may borrow String as Str, or retain static literals.
   class StringAutocastType < AutocastType
-    getter literal : Call
+    getter literal : ASTNode
+
+    def remove_literal
+      literal.type == program.string ? (match || literal.type) : literal.type
+    end
 
     def initialize(program, @literal)
       super(program)

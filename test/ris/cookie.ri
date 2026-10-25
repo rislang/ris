@@ -21,7 +21,7 @@ kept = "".to_heap
 owned = nil.as(Cookie?)
 tape do
   line = "sid=\"abc\"; Path=/x; Domain=.EXAMPLE.COM; Secure; HttpOnly"
-  cookie = Cookie.parse(line.as_tape)
+  cookie = Cookie.parse(line)
   exit 1 unless cookie
   exit 2 unless cookie.name == "sid" && cookie.value == "abc"
   exit 3 unless cookie.domain == "example.com" && cookie.path == "/x"

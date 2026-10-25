@@ -149,18 +149,33 @@ class Iyi::Call
     end
   end
 
+  class RetryLookupWithStringViews < RetryLookupWithLiterals
+  end
+
+  @borrow_string_arguments = false
+
   def lookup_matches
+    @borrow_string_arguments = false
     lookup_matches(with_autocast: false)
   rescue ex : RetryLookupWithLiterals
-    lookup_matches(with_autocast: true)
+    begin
+      lookup_matches(with_autocast: true)
+    rescue RetryLookupWithStringViews
+      @borrow_string_arguments = true
+      lookup_matches(with_autocast: true)
+    end
   end
 
   def lookup_matches(*, with_autocast = false)
     if args.any? { |arg| arg.is_a?(Splat) || arg.is_a?(DoubleSplat) }
       lookup_matches_with_splat(with_autocast)
     else
-      arg_types = args.map(&.type(with_autocast: with_autocast))
-      named_args_types = NamedArgumentType.from_args(named_args, with_autocast)
+      arg_types = args.map do |arg|
+        arg.type(with_autocast: with_autocast,
+                 call_argument: @borrow_string_arguments)
+      end
+      named_args_types = NamedArgumentType.from_args(
+        named_args, with_autocast, @borrow_string_arguments)
       matches = lookup_matches_without_splat arg_types, named_args_types, with_autocast
 
       # If we checked for automatic casts, see if an ambiguous call was produced
@@ -204,7 +219,8 @@ class Iyi::Call
           arg.raise "argument to double splat must be a named tuple, not #{arg_type}"
         end
       else
-        arg_types << arg.type(with_autocast: with_autocast)
+        arg_types << arg.type(with_autocast: with_autocast,
+                 call_argument: @borrow_string_arguments)
       end
     end
 
@@ -216,7 +232,9 @@ class Iyi::Call
         raise "duplicate key: #{named_arg.name}" if named_args_types.any? &.name.==(named_arg.name)
         named_args_types << NamedArgumentType.new(
           named_arg.name,
-          named_arg.value.type(with_autocast: with_autocast),
+          named_arg.value.type(
+            with_autocast: with_autocast,
+            call_argument: @borrow_string_arguments),
           named_arg.location,
         )
       end
@@ -571,12 +589,29 @@ class Iyi::Call
     end
   end
 
+  private def borrow_string_argument(value : ASTNode) : ASTNode
+    value.remove_enclosing_call(self)
+    view = Call.new(value, "as_tape").at(value)
+    # The receiver is already typed; revisiting it would rebind its calls.
+    parent_visitor.prepare_call(view)
+    value.set_enclosing_call(view)
+    view.recalculate
+    view.set_enclosing_call(self)
+    view
+  end
+
   def instantiate(signature, matches, owner, self_type, with_autocast)
     if with_autocast
       args.each_with_index do |arg, index|
         if arg.is_a?(Call) && arg.tape_literal? &&
            matches.any? { |match| match.arg_types[index]? == program.string }
           args[index] = arg.args.first
+        elsif arg.type == program.string && matches.any? { |match|
+                match.arg_types[index]?.try { |t|
+                  t.remove_literal.to_s == "Str"
+                }
+              }
+          args[index] = borrow_string_argument(arg)
         end
       end
       named_args.try &.each do |arg|
@@ -586,6 +621,13 @@ class Iyi::Call
              t.name == arg.name && t.type == program.string
            } }
           arg.value = value.args.first
+        elsif value.type == program.string && matches.any? { |match|
+                match.named_arg_types.try &.any? { |t|
+                  t.name == arg.name &&
+                    t.type.remove_literal.to_s == "Str"
+                }
+              }
+          arg.value = borrow_string_argument(value)
         end
       end
     end

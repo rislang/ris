@@ -33,9 +33,10 @@ No tape value survives the block that owns its storage:
 * In user `.ri` files, `"text"` is a zero-copy static `Str` view;
   `"text #{value}"` builds a `Str` on the active tape. std and iyi keep
   their old text rules. Macro code and annotations are compiler metadata.
-* Read-only text APIs accept `Str`; String callers borrow with `as_tape`.
+* Read-only String parameters are refused; calls borrow String as Str for free.
 * Plain literals become static String in heap places, without a copy:
   String parameters/fields, constants and heap container literal entries.
+  For request-only objects use an `@[OnTape]` struct with `Str` fields.
   Other tape text needs `.to_heap`; locals stay Str. `Str.new` copies;
   `as_tape` borrows. String annotations never copy tape text.
 * To retain a value, copy it by name while its source is alive: `to_heap`
@@ -58,7 +59,6 @@ refills one. `Tre`, simdjson's order: 4.6 MB JSON ×20 in 725 ms.
 | words | 0.22 s, 68 MB | 0.34 s, 90 MB | 0.54 s, 175 MB |
 | graph_csr | 0.64 s, 109 MB | 1.06 s, 108 MB | 1.06 s, 174 MB |
 Recorded: C++ 0.97 s, Rust 1.18 s, Go 1.67 s on respond (ris-bench).
-## Implementation and checks
 `src/iyi/tape.iyi`, `IyiRegion` in `src/iyi/prelude.iyi`, the checks and
 lowerings in `src/compiler/iyi/semantic/tape_*.cr`; `test/ris/check.sh`.
 ## Goose and ris

@@ -52,9 +52,12 @@ require "../types"
 
 module Iyi
   record NamedArgumentType, name : String, type : Type, loc : Location? = nil do
-    def self.from_args(named_args : Array(NamedArgument)?, with_autocast = false)
+    def self.from_args(named_args : Array(NamedArgument)?,
+                       with_autocast = false, borrow_strings = false)
       named_args.try &.map do |named_arg|
-        new(named_arg.name, named_arg.value.type(with_autocast: with_autocast), named_arg.location)
+        type = named_arg.value.type(
+          with_autocast: with_autocast, call_argument: borrow_strings)
+        new(named_arg.name, type, named_arg.location)
       end
     end
 

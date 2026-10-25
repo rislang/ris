@@ -1132,7 +1132,9 @@ module Iyi
       if value.is_a?(Var) && var_type == program.string &&
          value.type?.try(&.to_s) == "Str"
         value.raise "#{value.name} holds tape text; write " \
-                    "the literal in place or keep it with .to_heap"
+                    "the literal in place or keep it with .to_heap. " \
+                    "If the object lives only as long as the request, " \
+                    "make it an @[OnTape] struct with a Str field"
       end
       if value.is_a?(Call) && value.tape_literal? && var_type
         literal_type = StringAutocastType.new(program, value)

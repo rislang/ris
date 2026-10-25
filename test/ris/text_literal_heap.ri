@@ -31,8 +31,9 @@ def choose(text : Str, n : Int64 = 0_i64) : Int32
   1
 end
 
-def choose(text : String, n : Int64 = 0_i64) : Int32
-  2
+
+def choose(text : String, n : Int64 = 0_i64) : String
+  text
 end
 
 user = LiteralUser.new(name: "carol")

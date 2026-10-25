@@ -1851,7 +1851,11 @@ module Iyi
     end
 
     def matches_partially?(type : Type) : Bool
-      type == program.string
+      if literal.type == program.string
+        type.is_a?(NonGenericClassType) && type.name == "Str"
+      else
+        type == program.string
+      end
     end
   end
 

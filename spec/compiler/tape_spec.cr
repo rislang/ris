@@ -109,6 +109,35 @@ describe "ris tape text" do
       CODE
   end
 
+  it "borrows String call arguments in ris and std-style code" do
+    ["ri", "iyi"].each do |extension|
+      tape_compile(<<-'CODE', extension)
+        def width(text : Str) : Int32
+          text.size
+        end
+        def choose(text : Str) : Int32
+          0
+        end
+        def choose(text : String) : String
+          text
+        end
+        heap = "abc".to_heap + "d".to_heap
+        width(heap)
+        width(text: heap)
+        result : String = choose(heap)
+        CODE
+    end
+  end
+
+  it "does not borrow String assignments" do
+    expect_raises(Iyi::TypeException) do
+      tape_compile(<<-'CODE')
+        heap = "abc".to_heap + "d"
+        view : Str = heap
+        CODE
+    end
+  end
+
   it "does not carry literal provenance through locals" do
     expect_raises(Iyi::TypeException, /name holds tape text/) do
       tape_compile(<<-'CODE')
@@ -124,4 +153,51 @@ describe "ris tape text" do
     end
   end
 
+end
+
+describe "ris String parameter retention" do
+  it "refuses a read-only String parameter" do
+    expect_raises(Iyi::TypeException,
+      /name : String is only read; take it as Str/) do
+      tape_compile(<<-'CODE')
+        def width(name : String) : Int32
+          name.size
+        end
+        width("hello")
+        CODE
+    end
+  end
+
+  it "follows a read-only user callee" do
+    expect_raises(Iyi::TypeException, /is only read; take it as Str/) do
+      tape_compile(<<-'CODE')
+        def width(name : String) : Int32
+          name.size
+        end
+        def forwarded(name : String) : Int32
+          width(name)
+        end
+        forwarded("hello")
+        CODE
+    end
+  end
+
+  it "allows an alias returned from a parameter" do
+    tape_compile(<<-'CODE')
+      def retained(name : String) : String
+        alias_name = name
+        alias_name
+      end
+      retained("hello")
+      CODE
+  end
+
+  it "leaves union and generic restrictions alone" do
+    tape_compile(<<-'CODE')
+      def width(name : String | Nil, names : Array(String)) : Int32
+        names.size
+      end
+      width(nil, ["hello"])
+      CODE
+  end
 end

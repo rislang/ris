@@ -37,7 +37,7 @@ retained = [] of HeaderField
     end
     encoded = native_encoder.encode_on_tape(native_fields)
     raise "tape encoding" unless encoded == text
-    decoded = decoder.decode(text.as_tape)
+    decoded = decoder.decode(text)
     raise decoded.message if decoded.is_a?(HpackError)
     raise "field count" unless decoded.size == expected.size
     decoded.each do |field|
@@ -56,7 +56,7 @@ end
   expected = Decoder.new.decode(bytes)
   raise "expected failure" unless expected.is_a?(HpackError)
   tape do
-    decoded = Decoder.new.decode(text.as_tape)
+    decoded = Decoder.new.decode(text)
     raise "accepted malformed block" unless decoded.is_a?(HpackError)
     raise "changed error" unless decoded.message == expected.message
   end

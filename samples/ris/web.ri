@@ -34,7 +34,7 @@ end
 #
 # Written straight into the response body on the request's tape, the
 # text HTML-escaped on the way.
-def status_view(res : Outgoing, name : String, status : String) : Nil
+def status_view(res : Outgoing, name : Str, status : Str) : Nil
   res.header("Content-Type", "text/html; charset=utf-8")
   html = res.body
   html << "<h1>"

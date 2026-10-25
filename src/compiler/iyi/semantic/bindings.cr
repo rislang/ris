@@ -86,10 +86,11 @@ module Iyi
       @type || freeze_type
     end
 
-    def type(*, with_autocast = false)
+    def type(*, with_autocast = false, call_argument = false)
       type = self.type
 
-      if with_autocast && self.is_a?(Call) && self.tape_literal?
+      if with_autocast && ((call_argument && type == type.program.string) ||
+                           (self.is_a?(Call) && self.tape_literal?))
         return StringAutocastType.new(type.program, self)
       end
       if with_autocast
@@ -152,7 +153,9 @@ module Iyi
          TapeChecker.tape_in(
            invalid_type.program, invalid_type).try(&.to_s) == "Str"
         from.raise "text is tape text (Str); keep it with `.to_heap` " \
-                   "for a String field, variable or result"
+                   "for a String field, variable or result. " \
+                   "If the object lives only as long as the request, " \
+                   "make it an @[OnTape] struct with a Str field"
       end
       if !freeze_type.includes_type?(invalid_type.program.nil) && invalid_type.includes_type?(invalid_type.program.nil)
         # This means that an instance variable become nil

@@ -27,7 +27,7 @@ while i < N
   text = QUERIES[i % 3]
   if on_tape
     tape do
-      q = Query.parse(text.as_tape)
+      q = Query.parse(text)
       page = q["page"]?
       words = q["q"]?
       sum += (page ? page.bytesize : 0) + (words ? words.bytesize : 0) + q.size

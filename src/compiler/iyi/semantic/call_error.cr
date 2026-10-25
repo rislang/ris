@@ -411,10 +411,22 @@ class Iyi::Call
       raise_undefined_method(owner, def_name, obj)
     end
 
+    # Keep String overloads, including ones needing numeric autocasts, first.
+    if with_autocast && !@borrow_string_arguments &&
+       (args.any? { |arg| arg.type? == program.string } ||
+        named_args.try &.any? { |arg| arg.value.type? == program.string })
+      ::raise RetryLookupWithStringViews.new
+    end
+
     # If we made a lookup without the special rule for literals,
     # and we have literals in the call, try again with that special rule.
-    if !with_autocast && (args.any?(&.supports_autocast? number_autocast) ||
-       named_args.try &.any? &.value.supports_autocast? number_autocast)
+    if !with_autocast && (args.any? { |arg|
+         arg.supports_autocast?(number_autocast) || arg.type? == program.string
+       } ||
+       named_args.try &.any? { |arg|
+         arg.value.supports_autocast?(number_autocast) ||
+           arg.value.type? == program.string
+       })
       ::raise RetryLookupWithLiterals.new
     end
 

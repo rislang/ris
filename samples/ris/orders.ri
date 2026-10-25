@@ -54,11 +54,6 @@ def fnv(h : UInt64, text : Str) : UInt64
   h
 end
 
-def fnv(h : UInt64, text : String) : UInt64
-  text.each_byte { |c| h = (h ^ c.to_u64) &* 1099511628211_u64 }
-  h
-end
-
 # The request in *bytes*, answered on the caller's tape; the answer's hash.
 def answer(bytes : Str) : UInt64
   head = Server.parse_head(bytes)
@@ -127,7 +122,8 @@ def answer_heap(text : String) : UInt64
   top = ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" +
     "Content-Length: #{body.bytesize}\r\n\r\n")
   h = fnv(14695981039346656037_u64, top)
-  (fnv(h, body) & 0xFFFFFFFFFF_u64) | ((top.bytesize + body.bytesize).to_u64 << 40)
+  (fnv(h, body) & 0xFFFFFFFFFF_u64) |
+    ((top.bytesize + body.bytesize).to_u64 << 40)
 end
 
 heap = Program.args.size > 0 && Program.args[0] == "heap"
@@ -140,7 +136,7 @@ N.times do |i|
   if heap
     got = answer_heap(text)
   else
-    tape { got = answer(text.as_tape) }
+    tape { got = answer(text) }
   end
   bytes += (got >> 40).to_i64
   sum = (sum ^ (got & 0xFFFFFFFFFF_u64)) &* 1099511628211_u64

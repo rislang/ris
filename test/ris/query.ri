@@ -11,7 +11,7 @@ import std/gc::{GC}
 def pairs(text : Str) : String
   out = "".to_heap
   tape do
-    q = Query.parse(text.as_tape)
+    q = Query.parse(text)
     q.each { |key, value| out = out + "[#{key}=#{value}]".to_heap }
   end
   out
