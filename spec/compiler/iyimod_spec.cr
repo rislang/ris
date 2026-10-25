@@ -352,6 +352,25 @@ describe Iyi::IyiMod do
     end
   end
 
+  it "round-trips checked tape parameter effects" do
+    checked = signature("borrow", ["bytes : Str"], "Str").copy_with(
+      tape_contract: "1;0;1;8,12")
+    unknown = signature("opaque", ["bytes : Str"], "Nil")
+    with_temporary_file do |path|
+      Iyi::IyiMod.write sample_artifact(exports: [checked, unknown]), path
+      read = Iyi::IyiMod.read(path).exports.functions
+      read[0].tape_contract.should eq "1;0;1;8,12"
+      effect = Iyi::TapeCallGraph::Contract.decode(read[0].tape_contract)
+      effect.parameters.should eq [8, 12]
+      effect.suspension.should be_true
+      # A binding writer with no analyzed body must emit every effect.
+      opaque = Iyi::TapeCallGraph::Contract.decode(read[1].tape_contract)
+      opaque.parameters.should eq [15, 15]
+      opaque.allocation.should be_true
+      opaque.suspension.should be_true
+    end
+  end
+
   # Everything a consumer needs and the source's `def` line carries. Each of
   # these was absent from the format until a consumer that reads the artifact
   # instead of the source went looking for it: without the block annotation
@@ -2913,7 +2932,8 @@ describe Iyi::IyiMod do
       declarations = String.build do |io|
         Iyi::IyiMod.declarations(Iyi::IyiMod.read(File.join("mods", "boot", "num.iyimod")), io)
       end
-      declarations.should contain "module Helper\n  def self.twice(n : Int32) : Int32"
+      declarations.should contain "module Helper\n"
+      declarations.should contain "  def self.twice(n : Int32) : Int32"
 
       File.delete "boot/num.iyi"
 

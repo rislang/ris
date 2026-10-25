@@ -1514,6 +1514,8 @@ module Iyi
       # ris: `@[Ffi]` as a file's first statement, above its header if it
       # has one, lets the file use raw pointers (`Iyi::FfiBoundaryChecker`).
       types["Ffi"] = AnnotationType.new self, self, "Ffi"
+      # Only DeclarationMarker consumes this artifact transport annotation.
+      types["RisCallContract"] = AnnotationType.new self, self, "RisCallContract"
       # ris: `@[PointerUnsafe("reason")]` on a def lets its body use raw
       # pointers without calling C (`Iyi::FfiBoundaryChecker`).
       types["PointerUnsafe"] = AnnotationType.new self, self, "PointerUnsafe"

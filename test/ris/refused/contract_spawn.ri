@@ -1,0 +1,8 @@
+tape do
+  bytes = Str::Builder.new
+  bytes << "abc"
+  view = bytes.finish
+  group do |g|
+    g.spawn { puts view }
+  end
+end

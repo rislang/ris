@@ -72,7 +72,8 @@ module Iyi::IyiMod
   # and returns it as a first-class aggregate. Linked together the two
   # disagreed on every such call without a word, so a v57 artifact is
   # refused here as any other stale format is.
-  FORMAT_VERSION = 58_u32
+  # v59: signatures carry checked tape effects for bodyless calls.
+  FORMAT_VERSION = 59_u32
 
   FORMAT = IO::ByteFormat::LittleEndian
 
@@ -529,7 +530,8 @@ module Iyi::IyiMod
     # `Pair.new(Dog.new, Dog.new).shown` for a `Dog` that never implemented
     # `Show` and printed `dog,dog`, where the source build refused it.
     free_variable_bounds : Array({String, String}) = [] of {String, String},
-    where_bounds : Array({String, String}) = [] of {String, String}
+    where_bounds : Array({String, String}) = [] of {String, String},
+    tape_contract : String = ""
 
   # A type the module declares: `pub struct`, `pub class`, `pub trait` — and,
   # since the object code started travelling, the ones it does not export.
@@ -1517,7 +1519,7 @@ module Iyi::IyiMod
 
     format_version = file.read_bytes(UInt32, FORMAT)
     unless format_version == FORMAT_VERSION
-      raise Error.new("#{path} is .iyimod format v#{format_version}, this compiler writes v#{FORMAT_VERSION}")
+      raise Error.new("#{path} is .iyimod format v#{format_version}, this compiler writes v#{FORMAT_VERSION}; rebuild the module with --emit-iyimod")
     end
 
     count = file.read_bytes(UInt32, FORMAT)
@@ -2281,6 +2283,9 @@ module Iyi::IyiMod
       annotations: a_def.all_annotations.try(&.map(&.to_s)) || [] of String,
       free_variable_bounds: bound_pairs(a_def.free_var_bounds),
       where_bounds: bound_pairs(a_def.where_bounds),
+      tape_contract: a_def.ris_call_contract ||
+                     TapeCallGraph::Contract.new(Array(Int32).new(a_def.args.size + 1,
+                       TapeCallGraph::Contract::ALL), true, true).encode,
     )
   end
 
@@ -2546,6 +2551,10 @@ module Iyi::IyiMod
   # a def taking `&block : A -> B` and calling it already takes.
   class DeclarationMarker < Visitor
     def visit(node : Def)
+      node.ris_call_contract = @tape_contract
+      @tape_contract = nil
+      primitive = @primitive
+      @primitive = false
       # A def whose body travelled is not a header: the consumer compiles it
       # like any other, which is the whole point of `MonoBodies`. Marking it
       # would turn the body it was given back into an external declaration and
@@ -2568,11 +2577,22 @@ module Iyi::IyiMod
       # `Point.unsafe_construct` in the consumer called one symbol compiled
       # for `Reference`, and the program linked, ran, and answered with a
       # pointer into nothing.
-      if @primitive
+      if primitive
         node.iyi_body_travelled = true
         return false
       end
 
+      unless text = node.ris_call_contract
+        node.raise "imported def lacks a checked tape contract; rebuild the module with --emit-iyimod"
+      end
+      begin
+        checked = TapeCallGraph::Contract.decode(text)
+        unless checked.parameters.size == node.args.size + 1
+          node.raise "invalid tape contract; rebuild the module with --emit-iyimod"
+        end
+      rescue ArgumentError
+        node.raise "invalid tape contract; rebuild the module with --emit-iyimod"
+      end
       node.iyi_from_artifact = true
       node.uses_block_arg = true if node.block_arg.try(&.restriction)
       false
@@ -2582,9 +2602,13 @@ module Iyi::IyiMod
     # a property of it, so what the next `Def` is annotated with is what the
     # last one seen said.
     @primitive = false
+    @tape_contract : String?
 
     def visit(node : Annotation)
-      @primitive = node.path.names.last? == "Primitive"
+      if node.path.names.last? == "RisCallContract"
+        @tape_contract = node.args.first?.as?(StringLiteral).try(&.value)
+      end
+      @primitive = node.path.names.last? == "Primitive" unless node.path.names.last? == "RisCallContract"
       false
     end
 
@@ -2601,7 +2625,10 @@ module Iyi::IyiMod
     def visit(node : ASTNode)
       # Anything between an annotation and a `Def` is something the
       # annotation was not written above.
-      @primitive = false unless node.is_a?(Expressions)
+      unless node.is_a?(Expressions) || node.is_a?(VisibilityModifier)
+        @primitive = false
+        @tape_contract = nil
+      end
       true
     end
   end
@@ -2618,6 +2645,9 @@ module Iyi::IyiMod
     # is what makes the def a machine instruction rather than a promise of a
     # symbol nobody emitted.
     signature.annotations.each { |source| io << indent << source << '\n' }
+    unless signature.tape_contract.empty?
+      io << indent << "@[::RisCallContract(" << signature.tape_contract.inspect << ")]\n"
+    end
     io << indent
     io << "pub " if exported
     io << render_signature(signature) << '\n'
@@ -3587,6 +3617,15 @@ module Iyi::IyiMod
       write_strings io, signature.annotations
       write_pairs io, signature.free_variable_bounds
       write_pairs io, signature.where_bounds
+      contract = signature.tape_contract
+      if contract.empty?
+        # Binding writers can describe code never analyzed for tape effects.
+        # Such a rebuilt boundary carries top, rather than a false proof.
+        count = signature.parameters.count { |arg| !arg.starts_with?("**") }
+        contract = TapeCallGraph::Contract.new(Array(Int32).new(count + 1,
+          TapeCallGraph::Contract::ALL), true, true).encode
+      end
+      write_string io, contract
     end
   end
 
@@ -3603,7 +3642,7 @@ module Iyi::IyiMod
       visibility = read_string(io)
       annotations = read_strings(io)
       Signature.new(name, receiver, parameters, block_parameter, return_type,
-        free_variables, required, visibility, doc, annotations, read_pairs(io), read_pairs(io))
+        free_variables, required, visibility, doc, annotations, read_pairs(io), read_pairs(io), read_string(io))
     end
   end
 

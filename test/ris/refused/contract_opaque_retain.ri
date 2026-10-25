@@ -1,0 +1,9 @@
+def invoke(callback : Proc(Str, Nil), text : Str)
+  callback.call(text)
+end
+
+callback = ->(text : Str) { puts text }
+tape do
+  text = Str.build { |b| b << "abc" }
+  invoke(callback, text)
+end

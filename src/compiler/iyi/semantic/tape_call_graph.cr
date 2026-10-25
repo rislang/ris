@@ -2,6 +2,68 @@
 # bodies remain opaque; all dispatch alternatives and lexical callbacks use
 # the same collection policy. Effects only grow during the fixed point.
 class Iyi::TapeCallGraph
+  # One entry for self followed by each argument. Unknown targets use the
+  # top of this lattice; foreign calls borrow and retain nothing by default.
+  class Contract
+    SHRINK  = 1
+    RETAIN  = 2
+    RESULT  = 4
+    SUSPEND = 8
+    ALL     = SHRINK | RETAIN | RESULT | SUSPEND
+    getter parameters : Array(Int32)
+    getter allocation : Bool
+    getter suspension : Bool
+
+    def initialize(@parameters, @allocation = false, @suspension = false)
+    end
+
+    def self.decode(text : String) : Contract
+      parts = text.split(';')
+      raise ArgumentError.new("invalid tape call contract") unless parts.size == 4 && parts[0] == "1" && {"0", "1"}.includes?(parts[1]) && {"0", "1"}.includes?(parts[2])
+      flags = parts[3].split(',').map(&.to_i)
+      raise ArgumentError.new("invalid tape parameter effects") unless flags.all? { |f| f >= 0 && f <= ALL }
+      new(flags, parts[1] == "1", parts[2] == "1")
+    end
+
+    def encode : String
+      "1;#{allocation ? 1 : 0};#{suspension ? 1 : 0};#{parameters.join(',')}"
+    end
+
+    def join(other : Contract) : Contract
+      count = Math.max(parameters.size, other.parameters.size)
+      flags = Array(Int32).new(count) do |i|
+        (parameters[i]? || ALL) | (other.parameters[i]? || ALL)
+      end
+      Contract.new(flags, allocation || other.allocation,
+        suspension || other.suspension)
+    end
+  end
+
+  def proc_call?(target : Def) : Bool
+    body = target.body
+    body.is_a?(Primitive) && body.name == "proc_call"
+  end
+
+  def contract(target : Def) : Contract?
+    if text = target.ris_call_contract
+      result = Contract.decode(text)
+      unless result.parameters.size == target.args.size + 1
+        target.raise "invalid tape contract; rebuild the module with --emit-iyimod"
+      end
+      result
+    elsif target.is_a?(External)
+      Contract.new(Array(Int32).new(target.args.size + 1, 0))
+    elsif proc_call?(target)
+      # Captures are checked where a proc is formed. The proc handle
+      # itself cannot be shrunk or retained as a borrowed tape argument.
+      Contract.new([0] + Array(Int32).new(target.args.size, Contract::ALL), true, true)
+    else
+      nil
+    end
+  rescue ArgumentError
+    target.raise "invalid tape contract; rebuild the module with --emit-iyimod"
+  end
+
   class Effect
     # Fresh growing result, not general allocation or suspension.
     property allocating = false
@@ -77,8 +139,13 @@ class Iyi::TapeCallGraph
   def effect_reach(target : Def)
     effect = @effects[target.object_id] ||= Effect.new
     effect.suspension ||= TapeRules.runtime?(@program, target.location) &&
-      (threaded?(target) ||
-        {"sleep", "spawn", "receive", "send"}.includes?(target.name))
+                          (threaded?(target) ||
+                           {"sleep", "spawn", "receive", "send"}.includes?(target.name))
+    if checked = contract(target)
+      effect.allocation ||= checked.allocation
+      effect.allocating ||= checked.allocation && growing_type?(target.type?)
+      effect.suspension ||= checked.suspension
+    end
     return if target.iyi_from_artifact? && !target.iyi_body_travelled?
     return if @effect_defs.has_key?(target.object_id)
     @effect_defs[target.object_id] = target
@@ -129,8 +196,12 @@ class Iyi::TapeCallGraph
       @graph.targets(node).try &.each do |target|
         @graph.effect_reach(target)
         effect = @graph.effects[target.object_id]
-        @allocation ||= effect.allocation
-        @suspension ||= effect.suspension
+        # Runtime proc dispatch is an implementation detail, not an
+        # unknown user callback. Lexical callbacks are visited at the call.
+        unless @graph.proc_call?(target) && TapeRules.runtime?(@graph.program, node.location)
+          @allocation ||= effect.allocation
+          @suspension ||= effect.suspension
+        end
       end
       true
     end

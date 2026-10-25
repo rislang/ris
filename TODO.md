@@ -9,9 +9,6 @@ check.sh. Delete finished work in the same commit; keep check.sh green.
    values in their own region, or refuse views across the first growth.
    Non-Linux targets still move. Refuse raw owner operations.
    Gate: no transfer of a viewed value.
-4f. [L] Specialized call effects, suspension and checked contracts for
-    opaque calls and iyimod; refuse unproved effects with a safe form.
-    Gate: opaque, imported, suspending and unknown callback targets.
 5. [M] Pending results outside callee scratch and rollback. copy_to
    copies class instances deep (Object returns self, tape.iyi:1976),
    refuses pointers, self-relative links and self-reaching class types;
@@ -54,3 +51,6 @@ check.sh. Delete finished work in the same commit; keep check.sh green.
 Alongside: RIS_TAPE_STATS gains owner paths, regions, committed peaks,
 pool waste, copies apart from growth moves. Old root doc refs in bench/
 (GC_DESIGN.md, AI_FIRST.md) point to doc/archive/iyi/ when touched.
+Known: spec/compiler/iyimod_spec.cr "carries the constants a module's own
+code reads" fails before and after 4f: runtime constants (STDOUT, ...)
+appear in the module's constant list.

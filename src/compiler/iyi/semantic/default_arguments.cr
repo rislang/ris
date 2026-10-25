@@ -287,6 +287,15 @@ class Iyi::Def
       expansion.body = Expressions.new(body).at(self.body)
     end
 
+    if expansion.iyi_from_artifact? && (text = ris_call_contract)
+      checked = TapeCallGraph::Contract.decode(text)
+      flags = [checked.parameters[0]] + expansion.args.map do |arg|
+        index = args.index { |original| original.name == arg.name }
+        index ? (checked.parameters[index + 1]? || TapeCallGraph::Contract::ALL) : TapeCallGraph::Contract::ALL
+      end
+      expansion.ris_call_contract = TapeCallGraph::Contract.new(flags,
+        checked.allocation, checked.suspension).encode
+    end
     expansion
   end
 end

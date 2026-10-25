@@ -62,6 +62,15 @@ if [[ "$out" == *FAILED* ]]; then
 fi
 printf '%s\n' "$out"
 
+# Checked boundaries: opaque callbacks, module contracts and suspension.
+out=$(python3 test/ris/call_contracts.py 2>&1)
+if [ "$?" -eq 0 ]; then
+  printf '%s\n' "$out"
+else
+  echo "FAILED   call_contracts: $out"
+  status=1
+fi
+
 # A dead view permits refill; live views and pending operands forbid shrink.
 for name in builder_clear builder_truncate builder_shift operand alias span \
     values_at link pop_optional element iterator pointer literal_operand \

@@ -1,0 +1,19 @@
+def exercise
+  bytes = Str::Builder.new
+  bytes << "abc"
+  view = bytes.finish
+  sleep 1
+  sleep 0
+  wait_writable(1, 1)
+  done = Channel(Int32).new
+  group do |g|
+    g.spawn do
+      sleep 1
+      done.send(1)
+    end
+    done.receive
+  end
+  puts view
+end
+
+tape { exercise }

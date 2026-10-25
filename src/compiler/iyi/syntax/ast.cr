@@ -1641,6 +1641,9 @@ module Iyi
     # first and marks the second, and this is the only way back.
     property iyi_origin : Def?
 
+    # Computed tape effects; only artifact reconstruction reads the wire form.
+    property ris_call_contract : String?
+
     # iyi: this def's machine code enumerates the members of an open type, or
     # it calls something whose does (SPEC.md III.6).
     #
@@ -1701,6 +1704,7 @@ module Iyi
       # The clone of an instance answers for the same written def: an expansion
       # of one is still that method's code.
       a_def.iyi_origin = iyi_origin
+      a_def.ris_call_contract = ris_call_contract
       a_def.iyi_open_travel = iyi_open_travel?
       a_def.iyi_defer = iyi_defer?
       a_def.iyi_from_derive = iyi_from_derive?

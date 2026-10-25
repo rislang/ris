@@ -1,0 +1,13 @@
+def invoke(callback : Proc(Str::Builder, Nil), bytes : Str::Builder)
+  chosen = if Program.args.empty?
+             ->(value : Str::Builder) { puts value.finish }
+           else
+             callback
+           end
+  view = bytes.finish
+  chosen.call(bytes)
+  puts view
+end
+
+callback = ->(bytes : Str::Builder) { bytes.clear; nil }
+tape { invoke(callback, Str::Builder.new) }

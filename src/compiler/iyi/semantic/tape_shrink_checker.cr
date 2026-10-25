@@ -7,12 +7,14 @@ class Iyi::TapeShrinkChecker
   # Roots name storage handles; views retain the storage a value borrows.
   # Holder slots carry those borrows separately so replacement can kill them.
   record Value, roots : Array(UInt64), views : Array(View),
-    procs : Array(ProcLiteral) = [] of ProcLiteral
+    procs : Array(ProcLiteral) = [] of ProcLiteral,
+    unknown_proc : Bool = false
   record Use, views : Array(View), node : ASTNode, guards : Guards
   record Shrink, roots : Array(UInt64), at : Int32, node : Call, chain : String,
     guards : Guards
   record Summary, seeds : Array(UInt64), shrinks : Hash(UInt64, String), result : Value,
-    stores : Hash(UInt64, Value) = Hash(UInt64, Value).new
+    stores : Hash(UInt64, Value) = Hash(UInt64, Value).new,
+    retains : Array(UInt64) = [] of UInt64
   alias Env = Hash(String, Value)
 
   EMPTY  = Value.new([] of UInt64, [] of View)
@@ -38,6 +40,8 @@ class Iyi::TapeShrinkChecker
   @root_scopes = Hash(UInt64, Array(UInt64)).new
   @scopes = [] of UInt64
   @checking = false
+  @unproved = [] of Call
+  @retains = [] of UInt64
 
   # Slots live in the environment, so branch and loop joins include stores.
   private def root_birth(root : UInt64) : Int32
@@ -66,7 +70,7 @@ class Iyi::TapeShrinkChecker
 
   private def read_slots(v : Value, env : Env, type : Type?,
                          fields : Array(UInt64)) : Value
-    result = Value.new([] of UInt64, v.views, v.procs)
+    result = Value.new([] of UInt64, v.views, v.procs, v.unknown_proc)
     v.roots.each do |root|
       contents = env[slot(root)]?
       nested = env.keys.any? do |key|
@@ -103,7 +107,7 @@ class Iyi::TapeShrinkChecker
     return v if candidates.empty?
     Value.new((v.roots - unresolved + candidates).uniq,
       (v.views.reject { |view| unresolved.includes?(view.root) } +
-       candidates.map { |r| View.new(r, born, @guards.dup) }).uniq, v.procs)
+       candidates.map { |r| View.new(r, born, @guards.dup) }).uniq, v.procs, v.unknown_proc)
   end
 
   private def candidate_roots(root : UInt64, type : Type, wanted : Type,
@@ -192,7 +196,7 @@ class Iyi::TapeShrinkChecker
     complete = stored(v, env)
     roots.each { |root| check_store(root, complete, node) }
     v = Value.new(v.roots - copied,
-      (v.views - carried).uniq, v.procs)
+      (v.views - carried).uniq, v.procs, v.unknown_proc)
     # An array/builder handle aliases storage; it is not itself a live
     # element view. Otherwise consuming that handle to clear it would
     # falsely keep a view alive across its own clear.
@@ -200,7 +204,7 @@ class Iyi::TapeShrinkChecker
       type = @root_types[root]?
       value_holder?(type) || storage_type?(type)
     end
-    v = Value.new(v.roots, (v.views + borrowed.map { |r| view(r) }).uniq, v.procs)
+    v = Value.new(v.roots, (v.views + borrowed.map { |r| view(r) }).uniq, v.procs, v.unknown_proc)
     roots.each do |root|
       strong = replace && roots.size == 1
       if strong
@@ -359,6 +363,7 @@ class Iyi::TapeShrinkChecker
         @uses.clear
         @shrinks.clear
         @returns = EMPTY
+        @retains.clear
         env = seed_env(target, old.seeds)
         result = merge(value(target.body, env), @returns)
         effects = old.shrinks.dup
@@ -376,11 +381,48 @@ class Iyi::TapeShrinkChecker
           canonical = Value.new(contents.roots, contents.views.map { |v| View.new(v.root, 0) })
           stores[root] = canonical
         end
-        updated = Summary.new(old.seeds, effects, merge(old.result, result), stores)
+        updated = Summary.new(old.seeds, effects, merge(old.result, result), stores,
+          (old.retains + @retains).uniq)
         changed ||= updated != old
         @graph.effects[target.object_id].shrink = updated
       end
       break unless changed
+    end
+    # Project root paths conservatively onto their parameter. The wire
+    # contract may overestimate a field effect, but never loses one.
+    @graph.defs.each_value do |target|
+      next if target.is_a?(External)
+      summary = @graph.effects[target.object_id].shrink.not_nil!
+      effect = @graph.effects[target.object_id]
+      flags = summary.seeds.map do |seed|
+        bits = 0
+        bits |= TapeCallGraph::Contract::SHRINK if summary.shrinks.keys.any? { |r| relative_path(r, seed) }
+        result_roots = summary.result.roots + summary.result.views.map(&.root)
+        # A returned holder may carry the dependency in a nested slot.
+        summary.stores.each do |root, contents|
+          if contains_root?(summary.result.roots, root)
+            result_roots.concat(contents.roots + contents.views.map(&.root))
+          end
+        end
+        bits |= TapeCallGraph::Contract::RESULT if result_roots.any? { |r| relative_path(r, seed) }
+        bits |= TapeCallGraph::Contract::RETAIN if summary.retains.any? { |r| relative_path(r, seed) } || summary.stores.values.any? { |v| source_roots(v).any? { |r| relative_path(r, seed) } }
+        bits |= TapeCallGraph::Contract::SUSPEND if effect.suspension
+        bits
+      end
+      origin = target.iyi_origin || target
+      # Default/named/splat expansions can reorder or omit arguments. A
+      # signature is in the written order, never the expansion's order.
+      if !origin.same?(target)
+        flags = [flags[0]] + origin.args.map do |arg|
+          index = target.args.index { |actual| actual.name == arg.name }
+          index ? flags[index + 1] : TapeCallGraph::Contract::ALL
+        end
+      end
+      checked = TapeCallGraph::Contract.new(flags, effect.allocation, effect.suspension)
+      if old = origin.ris_call_contract
+        checked = checked.join(TapeCallGraph::Contract.decode(old))
+      end
+      origin.ris_call_contract = checked.encode
     end
   end
 
@@ -389,6 +431,8 @@ class Iyi::TapeShrinkChecker
       check(target.body, seed_env(target, @graph.effects[target.object_id].shrink.not_nil!.seeds), target) unless TapeRules.unsafe?(@program, target)
     end
     check(node)
+    @program.const_initializers.each { |i| check(i.value) }
+    @program.class_var_initializers.each { |i| check(i.node) }
   end
 
   private def root_name(root : UInt64) : String
@@ -413,6 +457,7 @@ class Iyi::TapeShrinkChecker
     @shrinks.clear
     @returns = EMPTY
     @checking = true
+    @unproved.clear
     @scopes.clear
     @scopes << owner.object_id if owner
     @root_scopes.clear
@@ -439,6 +484,11 @@ class Iyi::TapeShrinkChecker
         end
       end
     end
+    if call = @unproved.first?
+      call.raise "cannot prove opaque callback retain/escape effects; " \
+                 "use a directly known callback inside the owning scope, " \
+                 "or pass independently owned data instead of tape views"
+    end
   end
 
   private def storage?(node : ASTNode) : Bool
@@ -451,8 +501,11 @@ class Iyi::TapeShrinkChecker
   end
 
   private def reference?(node : ASTNode) : Bool
-    return true if storage?(node)
-    type = node.type?
+    reference_type?(node.type?)
+  end
+
+  private def reference_type?(type : Type?) : Bool
+    return true if storage_type?(type)
     return false unless type
     name = type.remove_typedef.to_s
     name == "Str" || name == "Str::Span" || name.starts_with?("Ary::Link(") || name.includes?("View(") || name.includes?("Iterator") ||
@@ -461,7 +514,7 @@ class Iyi::TapeShrinkChecker
 
   private def merge(a : Value, b : Value) : Value
     Value.new((a.roots + b.roots).uniq, (a.views + b.views).uniq,
-      (a.procs + b.procs).uniq)
+      (a.procs + b.procs).uniq, a.unknown_proc || b.unknown_proc)
   end
 
   # Back edges forget branch choices: the next round can take another
@@ -473,7 +526,7 @@ class Iyi::TapeShrinkChecker
       Value.new(v.roots, v.views.map { |x|
         View.new(x.root, born ? Math.min(born, x.born) : x.born,
           @guards.dup)
-      }.uniq, v.procs)
+      }.uniq, v.procs, v.unknown_proc)
     end
   end
 
@@ -521,7 +574,23 @@ class Iyi::TapeShrinkChecker
     @uses << Use.new(v.views, node, @guards.dup)
   end
 
+  private def proc_type?(type : Type?) : Bool
+    return false unless type
+    type = type.remove_typedef
+    return type.union_types.any? { |member| proc_type?(member) } if type.is_a?(UnionType)
+    type.is_a?(ProcInstanceType)
+  end
+
   def value(node : ASTNode, env : Env) : Value
+    result = evaluate(node, env)
+    if proc_type?(node.type?) && result.procs.empty?
+      Value.new(result.roots, result.views, result.procs, true)
+    else
+      result
+    end
+  end
+
+  private def evaluate(node : ASTNode, env : Env) : Value
     case node
     when Expressions
       result = EMPTY
@@ -624,7 +693,38 @@ class Iyi::TapeShrinkChecker
         after_calls : Env? = nil
         targets.each do |target|
           call_env = before_calls.dup
-          if summary = @graph.effects[target.object_id]?.try(&.shrink)
+          boundary = target.is_a?(External) || @graph.proc_call?(target) ||
+                     (target.iyi_from_artifact? && !target.iyi_body_travelled?)
+          if boundary && target.iyi_from_artifact? && !target.ris_call_contract
+            node.raise "imported def lacks a checked tape contract; rebuild the module with --emit-iyimod"
+          end
+          if boundary && (checked = @graph.contract(target))
+            # A directly known proc is executed below with its environment.
+            unless @graph.proc_call?(target) && !receiver.procs.empty? && !receiver.unknown_proc
+              actuals = [receiver] + target.args.map_with_index do |arg, i|
+                named[arg.external_name]? || args[i]? || EMPTY
+              end
+              summarized = true
+              checked.parameters.each_with_index do |bits, i|
+                # Field paths also model ordinary heap/scalar values. Only
+                # a tape-capable formal can carry a borrowed storage effect.
+                borrowed = i == 0 ? reference_type?(target.owner?) : reference?(target.args[i - 1])
+                next unless borrowed
+                input = actuals[i]? || EMPTY
+                roots = source_roots(input).flat_map { |r| aliases(r, env) }.uniq
+                if bits & TapeCallGraph::Contract::SHRINK != 0
+                  shrink(roots, node, chain("#{node.name} (opaque contract)"))
+                end
+                if bits & TapeCallGraph::Contract::RETAIN != 0 && !roots.empty?
+                  @retains.concat(roots)
+                  @unproved << node if @checking
+                end
+                if bits & TapeCallGraph::Contract::RESULT != 0
+                  call_result = merge(call_result, input)
+                end
+              end
+            end
+          elsif summary = @graph.effects[target.object_id]?.try(&.shrink)
             summarized = true
             actuals = [receiver] + target.args.map_with_index do |arg, i|
               named[arg.external_name]? || args[i]? || EMPTY
@@ -633,6 +733,9 @@ class Iyi::TapeShrinkChecker
               roots = translate(root, summary, actuals).flat_map { |r| aliases(r, env) }.uniq
               shrink(roots, node, chain("#{node.name} -> #{chain}"))
             end
+            retained = summary.retains.flat_map { |r| translate(r, summary, actuals) }
+            @retains.concat(retained)
+            @unproved << node if @checking && !retained.empty?
             summary.stores.each do |root, contents|
               store(translate(root, summary, actuals, node.object_id),
                 translated(contents, summary, actuals, node.object_id), call_env, node)
@@ -659,7 +762,12 @@ class Iyi::TapeShrinkChecker
           joined.each { |key, contents| env[key] = contents }
         end
       elsif !TapeRules.runtime?(@program, node.location)
-        inputs.each { |v| shrink((v.roots + v.views.map(&.root)).uniq, node, chain("#{node.name} (unknown)")) }
+        inputs.each do |v|
+          roots = source_roots(v)
+          shrink(roots.uniq, node, chain("#{node.name} (unknown)"))
+          @retains.concat(roots)
+          @unproved << node if @checking && !roots.empty?
+        end
       end
       # Arguments remain evaluated values until the call consumes them.
       use(receiver, node)
@@ -783,7 +891,9 @@ class Iyi::TapeShrinkChecker
       node.name == "allocate" ? Value.new([node.object_id], [] of View) : EMPTY
     when ProcLiteral
       Value.new([] of UInt64, [] of View, [node])
-    when Def, FunDef, ClassDef, ModuleDef, Macro
+    when ClassDef, ModuleDef
+      value(node.body, Env.new)
+    when Def, FunDef, Macro
       EMPTY
     else
       children = Children.new(self, env, node)
