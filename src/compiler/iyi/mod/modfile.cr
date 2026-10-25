@@ -157,7 +157,7 @@ module Iyi::Mod
           end
           replacements[path] = check_directory(target, source, line_number)
         when "forbid"
-          names = fields[1..].join(" ").split(/[\s,]+/, remove_empty: true)
+          names = fields[1..].flat_map(&.split(',', remove_empty: true))
           if names.empty? || !names.all?(&.in?(FORBIDDABLE))
             raise ModError.new("#{source}:#{line_number}: `forbid` takes `ffi`, `pointer_unsafe` or both, as `forbid ffi, pointer_unsafe`")
           end
