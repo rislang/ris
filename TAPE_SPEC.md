@@ -1,7 +1,9 @@
 # ris tape memory
 ris uses static data, scoped tapes and typed pools, no GC or general heap.
-[Goose](doc/reference/goose/README.md) citations inform; only rules here
-apply. A GC path (to_heap) needs a migration mark; suggest copy_to.
+[Goose](doc/reference/goose/README.md) citations inform. iyi's rules,
+cited as [iyi](doc/reference/iyi/source/SPEC.md) and a section (v0.19.1),
+apply as written; only what ris adds is stated. Reuse iyi before designing
+anew. A GC path (to_heap) needs a migration mark; suggest copy_to.
 ## Storage and lifetimes
 * Main and each fiber own an implicit tape. Scope exit restores scratch;
   retained results stay on their destination owner. Suspension retains live
@@ -18,8 +20,8 @@ apply. A GC path (to_heap) needs a migration mark; suggest copy_to.
 * Build retained data on its destination (writers, in-place append), else
   copy_to(owner): Str bytes, Ary/Tre/@[OnTape] fields deep; no aliases kept
   or borrows extended; pointers, classes, self-relative links refused.
-* Program data initializes once, in order, never suspending or seeing
-  incomplete values; its stores obey owner provenance.
+* Program data initializes in iyi III.5's module order, once, never
+  suspending or seeing incomplete values; stores obey owner provenance.
 ## Owners and stable growth (Goose §1.3, design/root_structs.md: planned)
 * @[Owner] requires a named lexical/program declaration, built in place.
   Arguments borrow; results may borrow an existing owner, never a local.
@@ -44,25 +46,29 @@ apply. A GC path (to_heap) needs a migration mark; suggest copy_to.
   targets and iyimod need checked contracts. Unproved: safe form and chain.
 * Recursion (§7.8): no owner, growing local or parameter, temporary or
   pending result is live at a call into a cycle (callbacks too): pass scratch.
-## Failure, cleanup and exit (Goose §7.9, §9.3)
-* Errors are unions. raise unwinds: ensure runs LIFO on current locals,
-  then frame regions are released; panic data and task results are copied
-  to the receiver first. No unwound frame resumes; raise in cleanup is fatal.
+## Failure, cleanup and exit (iyi III.1, III.1.4; Goose §7.9, §9.3)
+* Errors, panics and defer are iyi's: defer runs innermost first on every
+  exit, on current locals; a panic is caught at a task boundary. ris adds:
+  frame regions are released after the defers; panic data and task
+  results are copied to the receiver first. A panic in cleanup is fatal.
 * Exhaustion and bad sizes are checked before mutation, with overflow-safe
-  arithmetic; they end with an allocation-free fatal message, no fallback.
+  arithmetic; they end as iyi's panic print (allocation-free), no fallback.
   Limits for tape bytes, regions, tasks and native stack are published.
-* Fatal errors and exit skip user cleanup; main's return ends all fibers.
-  Signal handlers only set flags; work runs later in normal code.
-## Concurrency and boundaries (Goose §11.2)
-* Mutable state belongs to its worker/fiber; build owners there. No shared
-  mutable owner, implicit global copy or snapshot. Static or frozen program
-  data may be shared read-only, checked per owner.
-* Messages copy flat data into receiver-owned storage. Queues, task records
-  and wait nodes live in runtime typed pools; queues are bounded and send
-  reports full, closed or cancelled. A failed receive keeps the message.
+* Fatal errors and exit skip user cleanup. Signals are std/signal's: the
+  handler sets a flag and wakes a pipe; work runs in a task.
+## Concurrency and boundaries (iyi III.4; Goose §11.2)
+* Tasks start in an iyi group and never outlive it (III.4.1); work that
+  outlives its caller runs in a longer group, such as main's. Data races
+  are iyi's Share check (III.4.4). ris adds: owners are built on their
+  task's tape; no shared mutable owner, implicit global copy or snapshot.
+  Static or frozen program data is shared read-only, checked per owner.
+* Messages use iyi's Channel and select, ChannelClosed and Cancelled
+  (III.4); ris copies flat data into receiver-owned storage. Queues, task
+  records and wait nodes live in runtime typed pools; a buffered queue is
+  bounded and send reports full. A failed receive keeps the message.
 * Callbacks borrow their environment for the call only; an escaping
   closure copies captures to a named owner or task pool, never a borrow.
-  A fiber may outlive its spawner. Thread-locals hold no fiber borrows.
+  Thread-locals hold no fiber borrows.
 * APIs expose Str, builders, Ary and tape structs, not raw pointers. FFI
   borrows have explicit lifetimes; retained foreign storage has an owner and
   cleanup. Never unwind across foreign frames; foreign threads attach first.

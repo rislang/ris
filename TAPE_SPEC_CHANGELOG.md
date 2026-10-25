@@ -4,6 +4,21 @@ Every change to TAPE_SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one.
 
+## 2026-10-25: reuse iyi's rules instead of restating them
+
+* Changed: errors, panics and defer cite iyi III.1-III.1.4; the fatal
+  message is iyi's panic print; signals are std/signal's; init order is
+  iyi III.5; data races are iyi's Share (III.4.4); messages use iyi's
+  Channel, select, ChannelClosed and Cancelled (III.4). ris states only
+  what tape adds: region release, copies to the receiver, full queues.
+* Changed: "a fiber may outlive its spawner" is replaced by iyi's group
+  rule (III.4.1): a task never outlives its group; long work runs in a
+  longer group, such as main's. "main's return ends all fibers" is gone
+  with it, since main's group joins its tasks.
+* Why: iyi already builds these; two specs saying the same thing drift
+  apart, and the fiber rule contradicted iyi. ris reuses iyi where it
+  fits and designs only what tape needs.
+
 ## 2026-10-25: copy_to matches the code
 
 * Was: copy_to deeply copies, keeps aliases and rebases internal links.
