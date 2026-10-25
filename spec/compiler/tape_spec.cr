@@ -40,13 +40,46 @@ describe "ris tape text" do
     end
   end
 
-  it "rejects tape constants" do
-    expect_raises(Iyi::TypeException, /\.to_heap/) do
+  it "builds tape constants on the program tape" do
+    tape_compile(<<-'CODE')
+      TEXT = "value #{42}"
+      puts TEXT
+      CODE
+  end
+
+  it "requires a program copy through helper aliases" do
+    expect_raises(Iyi::TypeException, /copy it with .copy_to\(Program.tape\)/) do
       tape_compile(<<-'CODE')
-        TEXT = "value #{42}"
-        puts TEXT
+        class State
+          @@log = Ary(Str).new
+          def self.log
+            @@log
+          end
+        end
+        def append(log : Ary(Str), text : Str)
+          log << text
+        end
+        append(State.log, Str.new("request"))
         CODE
     end
+  end
+
+  it "accepts an explicit deep program copy" do
+    tape_compile(<<-'CODE')
+      @[OnTape]
+      struct Saved
+        getter text : Str
+        def initialize(@text)
+        end
+      end
+      class State
+        @@saved : Saved? = nil
+        def self.keep(text : Str)
+          @@saved = Saved.new(text).copy_to(Program.tape)
+        end
+      end
+      local_tape { State.keep(Str.new("request")) }
+      CODE
   end
 
   it "keeps explicit static retention as String" do
@@ -205,7 +238,6 @@ describe "ris tape text" do
         CODE
     end
   end
-
 end
 
 describe "ris String parameter retention" do

@@ -384,8 +384,32 @@ module Iyi
       iyi_declare_artifact_class_vars
 
       alloca_vars @program.vars, @program
+      initialize_program_tape_roots
 
       emit_vars_debug_info(@program.vars) if @debug.variables?
+    end
+
+    # Roots must exist before another kernel thread can read them. Reuse
+    # each root's once guard, including at its later source declaration.
+    private def initialize_program_tape_roots : Nil
+      return unless @program.tape_platform?
+      @program.const_initializers.each do |constant|
+        next unless type = constant.value.type?
+        wrapped = constant.value.as?(Call).try(&.program_initializer?)
+        next unless wrapped || TapeChecker.tape_in(@program, type)
+        constant.read = true
+        constant.no_init_flag = false
+        initialize_const(constant)
+      end
+      @program.class_var_initializers.each do |initializer|
+        next unless variable = initializer.owner.class_vars[initializer.name]?
+        next unless type = variable.type?
+        wrapped = initializer.node.as?(Call).try(&.program_initializer?)
+        next unless wrapped || TapeChecker.tape_in(@program, type)
+        variable.read = true
+        variable.no_init_flag = false
+        initialize_class_var(variable, initializer)
+      end
     end
 
     getter llvm_context
@@ -2515,8 +2539,7 @@ module Iyi
         source = closure_vars.compact_map do |var|
           var.local_vars.first?.try(&.location)
         end.first?
-        closure_ptr = closure_has_inner_pointers ?
-          malloc(closure_type, source) : malloc_atomic(closure_type, source)
+        closure_ptr = closure_has_inner_pointers ? malloc(closure_type, source) : malloc_atomic(closure_type, source)
 
         closure_vars.each_with_index do |var, i|
           current_context.vars[var.name] = LLVMVar.new(gep(closure_type, closure_ptr, 0, i, var.name), var.type)
@@ -2747,13 +2770,13 @@ module Iyi
     end
 
     def ris_heap_allocation(size, source = @call_location ||
-                                         @current_debug_location)
+                              @current_debug_location)
       return unless @program.iyi_object_layout?
       return if context.heap_internal?
       return if HeapPolicy.internal?(context.type.to_s)
       heap_fun = fetch_typed_fun(@main_mod, "__ris_heap_allocation") do
         LLVM::Type.function([@main_llvm_context.int64,
-          @main_llvm_context.void_pointer], @main_llvm_context.void)
+                             @main_llvm_context.void_pointer], @main_llvm_context.void)
       end
       location = source.try(&.expanded_location)
       label = "#{location || "unknown"}: #{context.type}"

@@ -818,10 +818,28 @@ module Iyi
     def transform(node : TypeDeclaration)
       super
       value = node.value
-      if node.var.is_a?(Path) && value.is_a?(Call) && value.tape_literal?
+      if node.var.is_a?(Path) && value.is_a?(Call) && value.tape_literal? &&
+         node.declared_type.to_s != "Str"
         node.value = value.args.first
       end
+      value = node.value
+      if value && !value.simple_literal? &&
+         program_initializer?(node.var, node)
+        node.value = program_initializer(value)
+      end
       node
+    end
+
+    private def program_initializer?(target : ASTNode, node : ASTNode) : Bool
+      program.tape_platform? && tape_text?(node) &&
+        target.is_a?(Path)
+    end
+
+    private def program_initializer(value : ASTNode) : ASTNode
+      call = Call.new(nil, "__ris_program_init",
+        block: Block.new([] of Var, value), global: true).at(value)
+      call.program_initializer = true
+      call
     end
 
     # Checks if the right hand side is dead code.
@@ -832,6 +850,10 @@ module Iyi
         node.value = value.args.first
       end
 
+      if program_initializer?(node.target, node) &&
+         !node.value.simple_literal?
+        node.value = program_initializer(node.value)
+      end
       if @dead_code
         node.value
       else

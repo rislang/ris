@@ -1,0 +1,21 @@
+class State
+  @@values = Ary(Int32).new(1)
+  @@padding = Str.new("after the array")
+  def self.request
+    raise "padding" unless @@padding == "after the array"
+    local_tape do
+      local_tape do
+        scratch = Str.new("request scratch")
+        raise "scratch" unless scratch.bytesize == 15
+      end
+      unless @@values.empty?
+        raise "retained storage" unless @@values[0] == 0
+      end
+      @@values.clear
+      4096.times { |i| @@values << i }
+    end
+    raise "growth" unless @@values.size == 4096 && @@values[4095] == 4095
+  end
+end
+10000.times { State.request }
+puts "PASS: program growth"

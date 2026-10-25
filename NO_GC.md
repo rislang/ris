@@ -10,7 +10,7 @@ GC: `src/iyi/` code stays, unused by a ris build.
 | Goose v2026.3 | ris today | ris target |
 |---|---|---|
 | Data stacks, scope frees §1.3 | Fiber tape, def frees | Same |
-| Globals own a stack §11.1 | Globals on GC heap | Program tape |
+| Globals own a stack §11.1 | Program tape | Built (2a) |
 | Roots, depth check §9.2 | Tape in tape places | Roots over defs |
 | `reusable` pools §5.4 | Classes on the GC | `Pool(T)` |
 | `T&<u32 in pool>` §3.9 | `Ary::Link` | Pool links |
@@ -35,10 +35,16 @@ Goose's array zoo, packed layout and `recursive fn` mark are not needed.
 ## Order (each step: gate green, docs, samples)
 1. **Census and gate: built.** `ris heap [--user] FILE.ri` counts sites;
    `--no-gc` traps; `RIS_HEAP_STATS=1` counts calls; check.sh budgets both.
-2. **Owners.** Program tape for globals, constants, class vars; fiber
-   tape (done); `@[Owner]` struct whose growing fields each take a
-   region, freed with it. `copy_to(owner)` replaces `to_heap` for data a
-   request hands to a longer owner (a session).
+2. **Owners. 2a built:** program tape for constants and class variables,
+   including top-level `@@`; fiber tape already built. Initializers run
+   on `Program.tape` before user code; later stores require program data.
+   `copy_to(Program.tape)` deeply copies Str, Ary, Tre and @[OnTape]
+   fields. Growing state retains its owner; refill Ary with `clear`.
+   Kernel-thread programs may only read roots after initialization; the
+   compiler rejects later writes and program copies, through helpers too.
+   Initializers cannot suspend; uncertain stores require an explicit copy.
+   **2b pending:** @[Owner] structs, with a region per growing field,
+   freed with the owner. The copy API already takes an owner parameter.
 3. **Roots.** A tape value stored in a field or returned carries its
    owner; the store rule of Goose §9.2 checked across fields and defs,
    no annotations. Today's block checks become its special case.

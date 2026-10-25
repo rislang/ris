@@ -61,14 +61,6 @@ class Iyi::TapeChecker
   end
 
   def run
-    @program.const_initializers.each do |constant|
-      if type = constant.value.type?
-        if found = TapeChecker.tape_in(@program, type)
-          constant.value.raise "constant holds tape text or data (#{found}); " \
-                               "keep it with `.to_heap`"
-        end
-      end
-    end
     check_types(@program)
     @program.file_modules.each_value do |file_module|
       check_types(file_module)
@@ -83,7 +75,6 @@ class Iyi::TapeChecker
 
   def check_single(type)
     check_fields(type)
-    check_class_vars(type)
     check_types(type)
     if type.is_a?(GenericType)
       type.each_instantiated_type do |instance|
@@ -103,6 +94,13 @@ class Iyi::TapeChecker
         reference to; declare #{type} as a struct.
         MSG
     end
+    if tape
+      type.lookup_defs("copy_to").each do |a_def|
+        next if TapeRules.runtime?(@program, a_def.location)
+        a_def.raise "copy_to for tape structs is generated deeply; " \
+                    "remove this override and use .copy_to(Program.tape)"
+      end
+    end
     return if tape
     return unless type.is_a?(InstanceVarContainer)
     return if type.is_a?(PrimitiveType) || type.is_a?(ProcInstanceType)
@@ -119,22 +117,6 @@ class Iyi::TapeChecker
         that made it ends. Keep it in a local, a parameter or another @[OnTape]
         struct, or copy what must outlive the scope into an owned value
         (`to_heap` copies a Str or Ary).
-        MSG
-    end
-  end
-
-  def check_class_vars(type)
-    return unless type.is_a?(ClassVarContainer)
-    type.class_vars?.try &.each_value do |cvar|
-      cvar_type = cvar.type?
-      next unless cvar_type
-      found = TapeChecker.tape_in(@program, cvar_type)
-      next unless found
-      fail type, cvar, <<-MSG
-        the class variable `#{cvar.name} : #{cvar_type}` holds the tape type #{found}
-
-        A class variable lives as long as the program, and a tape value only
-        until the tape block that made it ends; keep text with `.to_heap`.
         MSG
     end
   end

@@ -1,0 +1,11 @@
+class State
+  @@log = Ary(Str).new
+  def self.log
+    @@log
+  end
+end
+
+def append(log : Ary(Str), text : Str)
+  log << text
+end
+append(State.log, Str.new("request"))

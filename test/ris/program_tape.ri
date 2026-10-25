@@ -1,0 +1,61 @@
+# Program roots survive request scopes, including independent deep copies.
+@[OnTape]
+struct Saved
+  getter text : Str
+  getter values : Ary(Str)
+  getter pair : Tuple(Str, Ary(Str))
+  getter named : NamedTuple(text: Str)
+
+  def initialize(@text, @values)
+    @pair = {@text, @values}
+    @named = {text: @text}
+  end
+end
+
+TEXT = "program #{42}"
+TYPED_TEXT : Str = "typed program"
+WORDS = Ary(Str){"one", "two"}
+@@shared = Ary(Str){"top level"}
+
+class State
+  @@log : Ary(Int32) = Ary(Int32).new(1)
+  @@text : Str = Str.new("initial")
+  @@saved : Saved? = nil
+  @@tree : Tre(Str)? = nil
+
+  def self.request(n : Int32)
+    local_tape do
+      scratch = Str.new("request #{n}")
+      @@text = scratch.copy_to(Program.tape)
+      @@log << n
+      @@saved = Saved.new(scratch, Ary(Str){scratch}).copy_to(Program.tape)
+      tree = Tre(Str).new(1)
+      root = tree.open(scratch)
+      tree.leaf(scratch)
+      tree.close(root)
+      @@tree = tree.copy_to(Program.tape)
+    end
+  end
+
+  def self.check
+    raise "text" unless @@text == "request 99"
+    raise "log" unless @@log.size == 100 && @@log[99] == 99
+    saved = (@@saved || raise "missing saved")
+    raise "struct" unless saved.text == @@text && saved.values[0] == @@text
+    raise "tuple" unless saved.pair[0] == @@text
+    raise "named tuple" unless saved.named[:text] == @@text
+    tree = (@@tree || raise "missing tree")
+    raise "tree" unless tree.size == 2 && tree.stop(0) == 2
+    raise "tree text" unless tree[1] == @@text
+    @@log.clear
+    100.times { |n| @@log << n }
+    raise "refill" unless @@log.size == 100
+  end
+end
+
+100.times { |n| State.request(n) }
+State.check
+raise "constant" unless TEXT == "program 42" && WORDS[1] == "two"
+raise "typed constant" unless TYPED_TEXT == "typed program"
+raise "top level" unless @@shared[0] == "top level"
+puts "PASS: program tape"

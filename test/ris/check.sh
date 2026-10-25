@@ -37,7 +37,7 @@ else
   status=1
 fi
 
-for name in text_constant text_parameter text_array text_capture \
+for name in text_parameter text_array text_capture \
             text_channel; do
   expect "$name" '.to_heap'
 done
@@ -76,7 +76,7 @@ fi
 
 expect class_field   "holds the tape type"
 expect struct_field  "is a struct that is not @[OnTape]"
-expect class_var     "the class variable"
+expect class_var     "copy it with .copy_to(Program.tape)"
 expect generic_array "Array("
 expect proc_capture  "this block becomes a proc"
 expect integer_text  "integer / in text gives a Float"
@@ -514,6 +514,48 @@ if [ "$?" -eq 0 ] && grep -qF 'class: 1' <<<"$out" &&
   echo "census   heap_kinds (unused def omitted)"
 else
   echo "FAILED   heap_kinds: $out"
+  status=1
+fi
+
+for name in program_alias program_helper program_local_init \
+    program_nested_alias program_loop_alias; do
+  expect "$name" 'copy it with .copy_to(Program.tape)'
+done
+expect program_copy_forged 'program initializer is private'
+expect program_threads 'program tape writes require a single kernel thread'
+expect program_field_thread \
+  'program tape writes require a single kernel thread'
+for name in program_tape program_growth; do
+  out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 \
+    "$RIS" run --no-gc "test/ris/$name.ri" 2>&1)
+  if [ "$?" -eq 0 ] && grep -qF 'PASS: program' <<<"$out" &&
+      grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+    echo "runs     $name (--no-gc)"
+  else
+    echo "FAILED   $name: $out"
+    status=1
+  fi
+done
+mappings=$(sed -n \
+  's/^ris tape:.*scopes, \([0-9]*\) mappings made.*/\1/p' <<<"$out")
+if [ -n "$mappings" ] && [ "$mappings" -le 8 ]; then
+  echo "bounded  program growth ($mappings mappings for 10,000 calls)"
+else
+  echo "FAILED   program growth mappings: $out"
+  status=1
+fi
+out=$("$RIS" run test/ris/program_readers.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = 'PASS: program tape readers' ]; then
+  echo "runs     program_readers (kernel threads)"
+else
+  echo "FAILED   program_readers: $out"
+  status=1
+fi
+out=$("$RIS" run test/ris/program_text.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = 'value 42' ]; then
+  echo "runs     program text constant"
+else
+  echo "FAILED   program text constant: $out"
   status=1
 fi
 

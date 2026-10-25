@@ -4,13 +4,21 @@
 #
 # The request's bytes, the parsed head and the response are made inside
 # `tape do ... end` and freed together when it ends: nothing to collect.
-# Only the user table lives on, on the heap.
+# The user table lives on the program tape.
 
 module samples/request
 
 import std/http::{Server, ParsedHead}
 
-USERS = {42 => "alice", 7 => "bob"}
+@[OnTape]
+struct User
+  getter id : Int32
+  getter name : Str
+  def initialize(@id, @name)
+  end
+end
+
+USERS = Ary(User){User.new(42, "alice"), User.new(7, "bob")}
 
 # GET /users/42 -> 200 {"id":42,"name":"alice"}
 # The body is written into the caller's writer, on its tape.
@@ -23,7 +31,8 @@ def route(head : ParsedHead, body : Str::Builder) : Int32
   end
   return 404 unless path.starts_with?("/users/")
   id = path[7..].to_i? || return 404
-  name = USERS[id]? || return 404
+  user = USERS.find { |user| user.id == id } || return 404
+  name = user.name
   body << %({"id":) << id << %(,"name":") << name << %("})
   200
 end

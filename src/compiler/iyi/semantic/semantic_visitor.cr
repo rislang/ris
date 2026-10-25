@@ -2353,7 +2353,9 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     scope = (@scope || current_type).class_var_owner
 
     if scope.is_a?(Program)
-      node.raise "can't use class variables at the top level"
+      ris = program.tape_platform? &&
+            node.location.try(&.original_filename).try(&.ends_with?(".ri"))
+      node.raise "can't use class variables at the top level" unless ris
     end
 
     scope.as(ClassVarContainer)

@@ -1,0 +1,9 @@
+@[OnTape]
+struct Counter
+  property value : Int32
+  def initialize(@value)
+  end
+end
+COUNTER = Counter.new(0)
+IyiThread.start { nil }.join
+COUNTER.value = 1

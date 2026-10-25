@@ -1,7 +1,6 @@
-# ris tape memory: one tape per fiber, beside iyi's GC
-
+# ris tape memory: program and fiber owners, beside iyi's GC
 iyi stays as it is (`String`, `Array`, `Hash`, classes on the GC heap);
-ris text defaults to tape; heap objects remain for retained data.
+ris text defaults to tape; program state can also stay on tape.
 ## The model
 * Main and each spawned fiber own an implicit tape: bump allocation over
   mappings, chained when full, never moved. The tape is released when its
@@ -21,9 +20,19 @@ ris text defaults to tape; heap objects remain for retained data.
   roots: a tape value can hold a reference to an ordinary heap object.
 ## Lifetime and storage rules
 No tape value survives the block that owns its storage:
-* Tape values may be locals, arguments and results within that lifetime,
-  `@[OnTape]` fields and `Ary` elements; not class or plain struct
-  fields, class variables or heap containers such as `Array(Str)`.
+* Tape values may be locals, arguments, results, `@[OnTape]` fields and
+  `Ary` elements; not class or plain struct fields or heap containers.
+* Constants and class variables, including top-level `@@` variables, may
+  hold program data. Their initializers run on `Program.tape`, eagerly
+  before user code. They cannot suspend. Later stores require program
+  provenance: `value.copy_to(Program.tape)` copies Str, Ary, Tre and
+  @[OnTape] fields deeply. The owner is a parameter; no @[Owner] yet.
+* IyiRegion keeps the program chain beside fiber tapes until exit. Growing
+  containers remember their owner; `clear` reuses room across requests.
+* With kernel threads, program roots are read-only after initialization:
+  the compiler refuses later writes and program copies anywhere in such
+  a program, even before a thread starts or after join. Fibers on one
+  thread may write. Helpers, aliases and unknown provenance are checked.
 * No proc, including a spawned block, captures one. Assignment, `return`,
   `break` and `yield` cannot carry one past its owning block.
 * In `local_tape`, outer `Str` values may be read. Other outer
@@ -39,7 +48,7 @@ No tape value survives the block that owns its storage:
   For request-only objects use an `@[OnTape]` struct with `Str` fields.
   Other tape text needs `.to_heap`; locals stay Str. `Str.new` copies;
   `as_tape` borrows. String annotations never copy tape text.
-* To retain a value, copy it by name while its source is alive: `to_heap`
+* To retain heap data, copy it while its source is alive: `to_heap`
   on a `Str`, an `Ary` or `Ary::View` (each element by its own `to_heap`),
   or an `@[OnTape]` struct that defines one. `to_s`, heap interpolation and
   writing into `String::Builder` need `@[TapeToHeap]`.
@@ -64,17 +73,8 @@ lowerings in `src/compiler/iyi/semantic/tape_*.cr`; `test/ris/check.sh`.
 ## Goose and ris
 | Goose | ris tape | Why |
 |---|---|---|
-| No heap, no GC | Tape beside iyi's GC | Long-lived data stays on the GC |
+| No heap, no GC | Tape beside iyi's GC | Program roots can stay on tape |
 | Scope end frees | Def, loop, block keeping nothing | Proven; not past `next` |
 | One growing value, unmoved | Own region, moved once | No refs into elements |
-| No annotations | Block lifetimes, `@[TapeToHeap]` | The GC holds the rest |
-| Flat data, links | `Ary::Link`, `Str::Span`, `@[Tape::Flat]` | No pointers |
-| Load checks every link | Checked when followed | Same safety, a later error |
-| Built in place | `w.append(f(x))` writes in `w`; `puts "#{x}"` | No copy |
-| Bounds checks elided | `each`, `while i < a.size` | The loop bounds `i` |
-| Index types, `checkfree` | `a.values_at(b)`, `@[CheckFree]` | Checked once |
-| Variable-size enums | No | Unions and the GC suffice |
-| `reusable` pools | No | The GC holds unnested lifetimes |
 | No escaping closures | For tape values only | Procs are heap values |
 | Shared-nothing threads | No tape value on a channel | Send bytes on the heap |
-| No growth across recursion | No such limit | Regions, not one stack |

@@ -1,0 +1,8 @@
+class State
+  @@text : Str? = nil
+  def self.keep(text : Str)
+    @@text = text
+  end
+end
+
+State.keep(__ris_program_init { Str.new("request") })

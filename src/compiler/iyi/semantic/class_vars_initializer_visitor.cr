@@ -79,6 +79,16 @@ module Iyi
         # on its owner yet: the line below this loop is what puts it there.
         class_var.iyi_initialiser_source = node.to_s
 
+        static_text = node.is_a?(Call) && node.tape_literal?
+        if tape_platform? && !node.simple_literal? && !static_text &&
+           node.location.try(&.original_filename).try(&.ends_with?(".ri")) &&
+           !TapePointerCheckerLibrary.library?(node.location)
+          call = Call.new(nil, "__ris_program_init",
+            block: Block.new([] of Var, node), global: true).at(node)
+          call.program_initializer = true
+          node = initializer.node = call
+        end
+
         main_visitor.pushing_type(owner.as(ModuleType)) do
           # Check if we can autocast
           if node.supports_autocast?(!@program.has_flag?("no_number_autocast")) && (class_var_type = class_var.type?)

@@ -12,11 +12,11 @@ import std/html::{HTML}
 import std/gc::{GC}
 
 N = 10000000
-TEXTS = [
-  "Mari Maasikas, Tallinn",
-  "Tom & Jerry <cartoon>",
-  "a plain sentence of words",
-]
+TEXTS = Ary(String){
+  "Mari Maasikas, Tallinn".to_heap,
+  "Tom & Jerry <cartoon>".to_heap,
+  "a plain sentence of words".to_heap,
+}
 
 on_tape = Program.args.includes?("tape")
 GC.disable

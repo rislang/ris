@@ -7,16 +7,25 @@
 # request (`req`, its path a view into the bytes read) and a response
 # (`res`) to write into, sends it, and frees the tape: the request, the
 # view's HTML and every temporary go at once, with nothing to collect.
-# Only the users table lives on, on the heap.
+# The users table lives on the program tape.
 
 module samples/web
 
 import std/socket::{IyiSocket}
 import std/http::{Server, Incoming, Outgoing}
 
-USERS = {
-  1 => {"alice", "Learning sequential memory management :-)"},
-  2 => {"bob", "Bumping pointers, freeing nothing"},
+@[OnTape]
+struct User
+  getter id : Int32
+  getter name : Str
+  getter status : Str
+  def initialize(@id, @name, @status)
+  end
+end
+
+USERS = Ary(User){
+  User.new(1, "alice", "Learning sequential memory management :-)"),
+  User.new(2, "bob", "Bumping pointers, freeing nothing"),
 }
 
 # The user id in "/users/1/status", or nil when the path is another one.
@@ -55,8 +64,8 @@ listener = IyiSocket.listen(port)
 puts "listening on http://localhost:#{listener.local_port}/users/1/status"
 
 Server.answer(listener) do |req, res|
-  if req.method == "GET" && (id = status_id(req.path)) && (user = USERS[id]?)
-    status_view(res, user[0], user[1])
+  if req.method == "GET" && (id = status_id(req.path)) && (user = USERS.find { |user| user.id == id })
+    status_view(res, user.name, user.status)
   else
     not_found(res)
   end

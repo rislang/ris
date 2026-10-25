@@ -31,11 +31,11 @@ def parse(line : Str) : Hit
   Hit.new(parts[0], parts[1], parts[2].to_i, parts[3].to_i)
 end
 
-DAYS = [
+DAYS = Ary(Str){
   "GET /users/1 200 12\nGET /users/2 200 640\nPOST /login 500 30\n" \
   "GET /users/1/status 200 980\n",
   "GET / 200 4\nGET /search 200 1210\nGET /users/9 404 3\n",
-]
+}
 
 slowest = [] of String # on the heap: it lives past every day
 

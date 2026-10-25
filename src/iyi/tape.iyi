@@ -26,6 +26,24 @@ def __iyi_tape_release : Nil
   IyiRegion.release_tape
 end
 
+# Compiler-generated initializer boundary; not a user lifetime escape hatch.
+def __ris_program_init(&)
+  IyiRegion.program_scope { yield }
+end
+
+class Program
+  # An owner parameter today; other owner kinds are added separately.
+  struct TapeOwner
+    def run(&)
+      IyiRegion.program_scope { yield }
+    end
+  end
+
+  def self.tape : TapeOwner
+    TapeOwner.new
+  end
+end
+
 # Runs the block on the fiber's implicit tape, sharing its storage.
 # Main or the spawned body releases it; scopes keeping nothing reset their
 # part. Use local_tape for a separate owning scope of temporaries.
@@ -76,6 +94,10 @@ module Tape
     value.responds_to?(:to_heap) ? value.to_heap : value
   end
 
+  def self.copy_value(value, owner)
+    value.copy_to(owner)
+  end
+
   # A struct is flat when each field is a number, a `Link`, a `Span` or
   # another flat struct: it has no pointer, so its bytes are its value.
   annotation Flat
@@ -123,6 +145,10 @@ struct Str
     bytes = Pointer(UInt8).new(IyiRegion.tape_bytes(text.bytesize.to_u64))
     bytes.copy_from(text.to_unsafe, text.bytesize)
     new(bytes, text.bytesize)
+  end
+
+  def copy_to(owner) : self
+    owner.run { Str.new(self) }
   end
 
   def +(other : String | Str) : Str
@@ -536,12 +562,21 @@ struct Str::Builder
   @state : Pointer(UInt64)
 
   def initialize(capacity : Int32 = 64)
-    @state = Pointer(UInt64).new(IyiRegion.tape_bytes(32_u64 &+ capacity.to_u64))
-    start = @state.address &+ 32_u64
+    @state = Pointer(UInt64).new(IyiRegion.tape_bytes(40_u64 &+ capacity.to_u64))
+    start = @state.address &+ 40_u64
     @state.value = start
     (@state + 1_i64).value = start &+ capacity.to_u64
     (@state + 2_i64).value = start
     (@state + 3_i64).value = 0_u64
+    (@state + 4_i64).value = IyiRegion.program_active? ? 1_u64 : 0_u64
+  end
+
+  def copy_to(owner) : self
+    owner.run do
+      made = self.class.new(length)
+      made.append(finish)
+      made
+    end
   end
 
   @[AlwaysInline]
@@ -760,7 +795,7 @@ struct Str::Builder
     while capacity < need
       capacity = capacity &* 2_u64
     end
-    start = IyiRegion.tape_resize(start, (@state + 1_i64).value, length, capacity, @state + 3_i64)
+    start = IyiRegion.owned_resize(start, (@state + 1_i64).value, length, capacity, @state + 3_i64, (@state + 4_i64).value)
     @state.value = start &+ length
     (@state + 1_i64).value = start &+ capacity
     (@state + 2_i64).value = start
@@ -985,11 +1020,12 @@ struct Ary(T)
   @state : Pointer(UInt64)
 
   def initialize(capacity : Int32 = 4)
-    @state = Pointer(UInt64).new(IyiRegion.tape_bytes(32_u64 &+ capacity.to_u64 &* sizeof(T).to_u64))
-    @state.value = @state.address &+ 32_u64
+    @state = Pointer(UInt64).new(IyiRegion.tape_bytes(40_u64 &+ capacity.to_u64 &* sizeof(T).to_u64))
+    @state.value = @state.address &+ 40_u64
     (@state + 1_i64).value = 0_u64
     (@state + 2_i64).value = capacity.to_u64
     (@state + 3_i64).value = 0_u64
+    (@state + 4_i64).value = IyiRegion.program_active? ? 1_u64 : 0_u64
   end
 
   # *count* elements, the block giving each by index, in room of exactly
@@ -1042,7 +1078,7 @@ struct Ary(T)
     room = (@state + 2_i64).value
     capacity = Tape.grown(room)
     width = sizeof(T).to_u64
-    @state.value = IyiRegion.tape_resize(start, start &+ room &* width, (@state + 1_i64).value &* width, capacity &* width, @state + 3_i64)
+    @state.value = IyiRegion.owned_resize(start, start &+ room &* width, (@state + 1_i64).value &* width, capacity &* width, @state + 3_i64, (@state + 4_i64).value)
     (@state + 2_i64).value = capacity
   end
 
@@ -1508,6 +1544,14 @@ struct Ary(T)
     Ary::View(T).new(self, indexes)
   end
 
+  def copy_to(owner) : self
+    owner.run do
+      made = self.class.new(size)
+      each { |value| made << Tape.copy_value(value, owner) }
+      made
+    end
+  end
+
   # The elements copied into an `Array` on the heap, to keep after the
   # tape ends. An element with a `to_heap` of its own - a Str,
   # an Ary, an @[OnTape] struct that defines one - is copied by it;
@@ -1698,17 +1742,31 @@ struct Tre(T)
 
   def initialize(capacity : Int32 = 64)
     width = sizeof(Entry(T)).to_u64
-    @state = Pointer(UInt64).new(IyiRegion.tape_bytes(32_u64 &+ capacity.to_u64 &* width))
-    @state.value = @state.address &+ 32_u64
+    @state = Pointer(UInt64).new(IyiRegion.tape_bytes(40_u64 &+ capacity.to_u64 &* width))
+    @state.value = @state.address &+ 40_u64
     (@state + 1_i64).value = 0_u64
     (@state + 2_i64).value = capacity.to_u64
     (@state + 3_i64).value = 0_u64
+    (@state + 4_i64).value = IyiRegion.program_active? ? 1_u64 : 0_u64
   end
 
   # Unchecked: `Tape.grown` keeps the room, and so the size, an Int32.
   # The mask tells LLVM it is not negative, as the check did.
   def size : Int32
     ((@state + 1_i64).value & 0x7fffffff_u64).unsafe_to_i32
+  end
+
+  def copy_to(owner) : self
+    owner.run do
+      made = self.class.new(size)
+      index = 0
+      while index < size
+        entry = slot(index).value
+        made.put(Tape.copy_value(entry.value, owner), entry.stop)
+        index += 1
+      end
+      made
+    end
   end
 
   # A value with no children; its index.
@@ -1751,7 +1809,7 @@ struct Tre(T)
     end
   end
 
-  private def put(value : T, stop : Int32) : Int32
+  protected def put(value : T, stop : Int32) : Int32
     count = (@state + 1_i64).value
     grow if count >= (@state + 2_i64).value
     width = sizeof(Entry(T)).to_u64
@@ -1772,7 +1830,7 @@ struct Tre(T)
     room = (@state + 2_i64).value
     capacity = Tape.grown(room)
     width = sizeof(Entry(T)).to_u64
-    @state.value = IyiRegion.tape_resize(start, start &+ room &* width, (@state + 1_i64).value &* width, capacity &* width, @state + 3_i64)
+    @state.value = IyiRegion.owned_resize(start, start &+ room &* width, (@state + 1_i64).value &* width, capacity &* width, @state + 3_i64, (@state + 4_i64).value)
     (@state + 2_i64).value = capacity
   end
 end
@@ -1868,7 +1926,57 @@ end
 
 # Any other value read in `while i < a.size`: `[]` and `[]=` as written,
 # since it may shrink in the loop (TapeCheckFreeLowering).
+# Ordinary values copy by value. Tape structs recursively copy their fields,
+# without calling initialize (which may have unrelated side effects).
+struct Struct
+  def copy_to(owner) : self
+    {% if @type.annotation(OnTape) %}
+      made = self
+      {% for field in @type.instance_vars %}
+        {% if field.type < ::Pointer %}
+          {% raise "copy_to needs owned Str/Ary fields, not raw pointers" %}
+        {% end %}
+        pointerof(made.@{{field.name.id}}).value =
+          Tape.copy_value(@{{field.name.id}}, owner)
+      {% end %}
+      made
+    {% else %}
+      self
+    {% end %}
+  end
+end
+
+struct Tuple
+  def copy_to(owner)
+    {% begin %}
+      { {% for type, i in T %}
+          Tape.copy_value(self[{{i}}], owner),
+        {% end %} }
+    {% end %}
+  end
+end
+
+struct Pointer(T)
+  def copy_to(owner)
+    {% raise "copy_to needs owned Str/Ary data, not raw pointers" %}
+  end
+end
+
+struct NamedTuple
+  def copy_to(owner)
+    {% begin %}
+      { {% for key, type in T %}
+          {{key.id}}: Tape.copy_value(self[{{key.symbolize}}], owner),
+        {% end %} }
+    {% end %}
+  end
+end
+
 class Object
+  def copy_to(owner)
+    self
+  end
+
   def __loop_fetch(index)
     self[index]
   end

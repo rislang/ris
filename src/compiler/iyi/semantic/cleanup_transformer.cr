@@ -673,10 +673,10 @@ module Iyi
         next unless type
         if found = Iyi::TapeChecker.tape_in(@program, type)
           captured.raise "this block becomes a proc, which may run after " \
-            "the tape block that made `#{captured.name} : #{type}` has " \
-            "ended, and #{found} is a tape type: pass what the block " \
-            "needs as a copy (`.to_heap`), or call it inside the scope " \
-            "without keeping it"
+                         "the tape block that made `#{captured.name} : #{type}` has " \
+                         "ended, and #{found} is a tape type: pass what the block " \
+                         "needs as a copy (`.to_heap`), or call it inside the scope " \
+                         "without keeping it"
         end
       end
     end
@@ -901,6 +901,8 @@ module Iyi
       named = NamedConstants.new
       a_def.body.accept named
       named.paths.each do |path, type|
+        # Program roots are frozen by TapeProgramChecker in threaded code.
+        next if TapeChecker.tape_in(@program, type)
         if why = Iyi::Share.reason(type)
           path.raise "#{boundary.subject} names the constant `#{path} : #{type}`, which is not Share: #{why} (SPEC.md III.4.5)"
         end
@@ -939,6 +941,7 @@ module Iyi
       advice = "so every thread that reaches it shares one mutable cell: a data race (SPEC.md III.4.5). Keep the value in an `Atomic`, or behind a `Mutex` (std/mutex)"
       named.vars.each do |class_var, var|
         next if var.thread_local?
+        next if var.type?.try { |type| TapeChecker.tape_in(@program, type) }
         if assign = named.assigns[var]?
           assign.raise "#{boundary.subject} assigns `#{class_var.name}`, a class variable, #{advice}"
         end

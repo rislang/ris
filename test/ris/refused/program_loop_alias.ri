@@ -1,0 +1,16 @@
+class State
+  @@log = Ary(Str).new
+  def self.keep(text : Str)
+    @@log << text
+  end
+end
+text = "static".copy_to(Program.tape)
+a = text
+b = text
+c = text
+3.times do
+  a = b
+  b = c
+  c = Str.new("request")
+end
+State.keep(a)

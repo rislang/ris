@@ -10460,6 +10460,11 @@ fun main(argc : Int32, argv : UInt8**) : Int32
   # Named `test` cases keep going past a failure, so the program's own code
   # ends normally and the exit status is theirs to give (testing.iyi).
   status = IyiTestCases.verdict
+  {% if (!flag?(:gc_none) || flag?(:linux)) && !flag?(:gc_boehm) &&
+          ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) ||
+          flag?(:darwin) || flag?(:win32) || flag?(:wasm32)) %}
+    IyiRegion.release_program
+  {% end %}
   IyiRegion.report_stats
   RisHeap.report
   __iyi_flush_std

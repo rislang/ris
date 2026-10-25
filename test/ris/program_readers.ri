@@ -1,0 +1,22 @@
+# Initializers run on main before readers on other kernel threads.
+WORDS = Ary(Str){"constant reader"}
+@@shared = Ary(Str){"global reader"}
+
+class State
+  @@words = Ary(Str){"program #{42}"}
+  def self.word : Str
+    @@words[0]
+  end
+end
+threads = Ary(IyiThread).new(4)
+4.times do
+  threads << IyiThread.start do
+    1000.times do
+      raise "shared read" unless State.word == "program 42"
+      raise "constant read" unless WORDS[0] == "constant reader"
+      raise "global read" unless @@shared[0] == "global reader"
+    end
+  end
+end
+threads.each(&.join)
+puts "PASS: program tape readers"

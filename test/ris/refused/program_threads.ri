@@ -1,0 +1,7 @@
+class State
+  @@log = Ary(Int32).new
+  def self.add
+    @@log << 1
+  end
+end
+IyiThread.start { State.add }.join
