@@ -182,6 +182,57 @@ class Iyi::TapeShrinkChecker
       (a.procs + b.procs).uniq)
   end
 
+  # Back edges forget branch choices: the next round can take another
+  # branch. Birth positions are canonical while solving, chronological
+  # while checking. Allocation roots are AST identities, so this lattice
+  # (roots, view roots and proc identities) is finite.
+  private def loop_env(env : Env, born : Int32? = nil) : Env
+    env.transform_values do |v|
+      Value.new(v.roots, v.views.map { |x|
+        View.new(x.root, born ? Math.min(born, x.born) : x.born,
+          @guards.dup)
+      }.uniq, v.procs)
+    end
+  end
+
+  private def join_env(a : Env, b : Env) : Env
+    result = a.dup
+    b.each { |key, v| result[key] = merge(result[key]? || EMPTY, v) }
+    result
+  end
+
+  private def loop_value(body : ASTNode, env : Env,
+                         cond : ASTNode? = nil) : Value
+    start = @uses.size
+    shrink_start = @shrinks.size
+    returns = @returns
+    entry = loop_env(env, start)
+    head = entry
+    loop do
+      round = head.dup
+      value(cond, round) if cond
+      value(body, round)
+      updated = loop_env(join_env(entry, round), start)
+      # Speculative rounds establish the environment, not event order.
+      @uses.truncate(0, start)
+      @shrinks.truncate(0, shrink_start)
+      @returns = returns
+      break if updated == head
+      head = updated
+    end
+    round = head.dup
+    result = EMPTY
+    2.times do
+      value(cond, round) if cond
+      result = value(body, round)
+      round = loop_env(round)
+    end
+    # A while condition is evaluated once more on the exit edge.
+    value(cond, round) if cond
+    join_env(head, round).each { |key, v| env[key] = v }
+    result
+  end
+
   private def use(v : Value, node : ASTNode)
     @uses << Use.new(v.views, node, @guards.dup)
   end
@@ -218,6 +269,8 @@ class Iyi::TapeShrinkChecker
       else
         EMPTY
       end
+    when While, Until
+      loop_value(node.body, env, node.cond)
     when Cast
       value(node.obj, env)
     when Call
@@ -280,7 +333,11 @@ class Iyi::TapeShrinkChecker
         yielded = Value.new(derived.roots, yielded_views)
         block.args.each { |arg| outer[arg.name] = yielded }
         @callback_chain << "#{node.name} block"
-        value(block.body, outer)
+        if {"tape", "local_tape"}.includes?(node.name)
+          value(block.body, outer)
+        else
+          loop_value(block.body, outer)
+        end
         @callback_chain.pop
         use(yielded, block)
         env.keys.each { |key| env[key] = merge(env[key], outer[key]? || EMPTY) }
@@ -296,7 +353,8 @@ class Iyi::TapeShrinkChecker
           # The callback may receive any of the call's tape arguments.
           literal.def.args.each { |arg| captured[arg.name] = Value.new(derived.roots, derived.views) }
           @callback_chain << "#{node.name} proc"
-          value(literal.def.body, captured)
+          loop_value(literal.def.body, captured)
+          env.keys.each { |key| env[key] = merge(env[key], captured[key]? || EMPTY) }
           @callback_chain.pop
           @active_procs.delete(literal.object_id)
         end
@@ -322,10 +380,11 @@ class Iyi::TapeShrinkChecker
     when If
       value(node.cond, env)
       left, right = env.dup, env.dup
-      @guards << {node.object_id, true}
+      choice = fresh
+      @guards << {choice, true}
       a = value(node.then, left)
       @guards.pop
-      @guards << {node.object_id, false}
+      @guards << {choice, false}
       b = value(node.else, right)
       @guards.pop
       (left.keys | right.keys).each { |key| env[key] = merge(left[key]? || EMPTY, right[key]? || EMPTY) }

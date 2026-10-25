@@ -1,0 +1,21 @@
+def check_loop
+  b = Str::Builder.new
+  b << "abc"
+  first = Str.new("initial")
+  second = first
+  third = second
+  fourth = third
+  i = 0
+  while i < 6
+    b.clear
+    puts fourth
+    fourth = third
+    third = second
+    second = first
+    b << "abc"
+    first = b.finish
+    i += 1
+  end
+end
+
+tape { check_loop }

@@ -1,0 +1,15 @@
+def check_loop
+  a = Ary(Int32).new
+  a << 1
+  saved = a.link(0, UInt32)
+  i = 0
+  while i < 3
+    a.clear
+    a << 1
+    puts a[saved]
+    saved = a.link(0, UInt32)
+    i += 1
+  end
+end
+
+tape { check_loop }

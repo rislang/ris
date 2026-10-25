@@ -1,0 +1,11 @@
+def check_loop
+  b = Str::Builder.new
+  b << "abc"
+  saved = b.finish
+  b.clear
+  3.times do
+    puts saved
+  end
+end
+
+tape { check_loop }

@@ -35,6 +35,35 @@ def refill
     text = b.finish
     raise "refill" unless text == "again"
   end
+  n = 0
+  while n < 3
+    b.clear
+    b << "while"
+    text = b.finish
+    raise "while refill" unless text == "while"
+    2.times do
+      a.clear
+      a << n
+      a.each do |item|
+        raise "nested refill" unless item == n
+      end
+    end
+    n += 1
+  end
+  until n == 6
+    b.clear
+    b << "until"
+    text = b.finish
+    raise "until refill" unless text == "until"
+    n += 1
+  end
+  loop do
+    b.clear
+    b << "loop"
+    text = b.finish
+    raise "loop refill" unless text == "loop"
+    break
+  end
 end
 
 tape { refill }

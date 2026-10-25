@@ -38,7 +38,9 @@ for name in builder_clear builder_truncate builder_shift operand alias span \
     values_at link pop_optional element iterator pointer literal_operand \
     helper helper_two helper_generic dispatch callback helper_result \
     helper_recursive field_owner field_ontape callback_proc \
-    callback_argument helper_self helper_named; do
+    callback_argument helper_self helper_named loop_clear loop_rebind loop_nested \
+    loop_each loop_branch loop_until loop_backedge loop_array loop_chain \
+    loop_entry loop_forever; do
   expect "shrink_$name" 'cannot shrink tape storage with a live view'
 done
 out=$("$RIS" run test/ris/shrink_refill.ri 2>&1)

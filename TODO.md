@@ -15,11 +15,9 @@ check.sh. Delete finished work in the same commit; keep check.sh green.
 4a. [M] One call graph of specialized defs, one effect summary per def
     (shrink, result views, allocation, cycle, suspension), solved once.
     Shrink, recursion, owner, program, lifetime, pointer and scope checks
-    read it instead of walking target_defs each; 4d-4f extend it.
+    read it instead of walking target_defs each; 4e-4f extend it.
     Gate: check.sh refusals unchanged; callbacks, dispatch and opaque
     targets treated the same in every check.
-4d. [L] Loop root fixed points, including previous-round aliases and views.
-    Gate: loop-carried roots, rebinding and clear/refill rounds.
 4e. [L] Owner/path roots, joins, read-back candidates and stored holders.
     Gate: branch alternatives, fields, nested holders and emptied holders.
 4f. [L] Specialized call effects, suspension and checked contracts for
