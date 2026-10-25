@@ -23,7 +23,7 @@ expect() {
   fi
 }
 
-# B1 owner bindings and storage restrictions.
+# B1 storage restrictions; B2 ordinary def and receiver borrows.
 expect owner_temporary 'owner temporary requires a named declaration'
 expect owner_inline 'owner temporary requires a named declaration'
 expect owner_copy 'cannot copy or reassign an owner'
@@ -39,6 +39,7 @@ expect owner_return 'cannot return a local owner from a def'
 expect owner_implicit_return 'cannot return a local owner from a def'
 expect owner_class 'requires a struct'
 expect owner_copy 'borrow it: pass the owner variable'
+expect owner_proc_argument 'owner arguments require a direct def call'
 out=$("$RIS" run test/ris/owners.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = 'PASS: owner fields' ]; then
   echo "runs     owners"

@@ -2,11 +2,44 @@
 struct Workspace
   getter left : Ary(Int32)
   getter right : Ary(Int32)
+  property ticks = 0
+
+  def grow_left
+    @ticks += 1
+    @left << 123
+    nil
+  end
 
   def initialize
     @left = Ary(Int32).new
     @right = Ary(Int32).new
   end
+end
+
+# Exercise the memory-passed ABI as well as the small Workspace ABI.
+@[Owner]
+struct LargeWorkspace
+  getter padding = {
+    0_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64,
+    0_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64,
+    0_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64,
+  }
+  property ticks = 0
+  getter a = Ary(Int32).new
+  getter b = Ary(Int32).new
+  getter c = Ary(Int32).new
+  getter d = Ary(Int32).new
+  getter e = Ary(Int32).new
+  getter f = Ary(Int32).new
+end
+
+def grow_large(w : LargeWorkspace)
+  w.ticks += 1
+  100.times do |i|
+    w.a << i
+    w.f << i
+  end
+  nil
 end
 
 ROOT = Workspace.new
@@ -15,7 +48,45 @@ def count(w : Workspace) : Int32
   w.left.size + w.right.size
 end
 
+def grow(w : Workspace, ignored : Int32 = 0)
+  w.ticks += 1
+  100.times do |i|
+    w.left << i
+    w.right << i * 2
+  end
+  nil
+end
+
+def middle(w : Workspace)
+  grow(w)
+end
+
+def outer(w : Workspace)
+  middle(w)
+end
+
+def effect : Int32
+  1
+end
+
 tape do
+  large = LargeWorkspace.new
+  grow_large(large)
+  raise "large owner storage" unless large.ticks == 1
+  raise "large owner argument" unless large.a.size == 100
+  raise "large owner argument" unless large.f.size == 100
+  borrowed = Workspace.new
+  # Three calls must all keep the original owner header.
+  outer(borrowed)
+  raise "borrowed fields" unless count(borrowed) == 200
+  raise "nested owner storage" unless borrowed.ticks == 1
+  borrowed.grow_left
+  raise "owner self storage" unless borrowed.ticks == 2
+  raise "owner self" unless borrowed.left.size == 101
+  # Evaluating a later argument must not snapshot an owner.
+  grow(borrowed, effect)
+  raise "argument storage" unless borrowed.ticks == 3
+  raise "argument snapshot" unless count(borrowed) == 401
   raise "program owner" unless ROOT.left.empty?
   workspace = Workspace.new
   100.times do |i|

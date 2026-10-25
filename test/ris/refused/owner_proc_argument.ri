@@ -1,0 +1,10 @@
+@[Owner]
+struct Workspace
+  getter left = Ary(Int32).new
+end
+
+tape do
+  workspace = Workspace.new
+  helper = ->(w : Workspace) { w.left.size }
+  helper.call(workspace)
+end

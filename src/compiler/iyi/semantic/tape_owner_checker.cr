@@ -1,5 +1,5 @@
-# B1: owners have one named binding. B2 supplies reference passing and
-# destination construction; this pass deliberately changes no lowering.
+# Owners have one named binding; codegen borrows ordinary def arguments.
+# Destination construction and returned borrow provenance remain separate.
 class Iyi::TapeOwnerChecker
   getter program : Program
 
@@ -165,9 +165,13 @@ class Iyi::TapeOwnerChecker
       if @checker.owner?(node) && !@allowed.includes?(node.object_id)
         @checker.refuse(node, "owner temporary requires a named declaration")
       end
-      # TODO B2: pass named owner arguments by reference, then check
-      # returned borrows. For now a Var argument is intentionally allowed.
-      node.target_defs.try &.each { |d| @checker.reach(d) }
+      node.target_defs.try &.each do |d|
+        if node.args.any? { |a| @checker.owner?(a) } &&
+           (d.is_a?(External) || d.body.is_a?(Primitive))
+          @checker.refuse(node, "owner arguments require a direct def call")
+        end
+        @checker.reach(d)
+      end
       if node.program_initializer?
         if block = node.block
           body = TapeScopeChecker.parts(block.body).try(&.[1]) || block.body

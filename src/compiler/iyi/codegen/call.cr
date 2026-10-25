@@ -156,7 +156,9 @@ class Iyi::CodeGenVisitor
 
       # - C calling convention passing needs a separate handling of pass-by-value
       # - Primitives might need a separate handling (for example invoking a Proc)
-      if indirect && passed_indirectly?(def_arg.type)
+      if indirect && TapeOwnerChecker.owner?(@program, def_arg.type)
+        # Owners borrow the binding itself, even when later arguments mutate it.
+      elsif indirect && passed_indirectly?(def_arg.type)
         # iyi: the callee gets a pointer and copies the bytes on entry. An
         # argument still to be evaluated may write where this one points -
         # `f(v, v.reset)` - while the value is to be the one read here, as

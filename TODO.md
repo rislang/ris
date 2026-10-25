@@ -3,8 +3,9 @@
 Rules: TAPE_SPEC.md. Work in this dependency order; each gate runs in
 check.sh. Delete finished work in the same commit; keep check.sh green.
 
-3. [L] B2: owner arguments by reference and in-place construction;
-   returned borrows. C: partial-construction rollback. A: first transfer:
+3. [L] B2: in-place construction and returned borrows. Owner arguments
+   now borrow storage in ordinary defs; primitive/Proc/foreign calls refuse
+   owner arguments. C: partial-construction rollback. A: first transfer:
    growth still transfers a displaced value once into its reserved side
    region, moving published elements (region.iyi tape_resize). Start
    growing values in their own region, or refuse views across the first

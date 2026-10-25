@@ -57,8 +57,13 @@ Declare one owner per scope; pass its variable to helpers to borrow it.
 Owners cannot be copied, reassigned, nested in fields or containers,
 combined into tuples or unions (including nilable types), or returned
 from a def as a local value. `@[OnTape]` records keep their existing rules.
-This is the checker gate; reference passing, in-place construction and
-returned borrows remain planned, as does stable growth on first transfer.
+Ordinary def arguments borrow the owner's storage, so field growth in a
+helper updates the caller, including through nested calls. Owner methods
+also mutate the receiver in place. Pass owners directly to defs; primitive,
+Proc and foreign calls cannot take owner arguments.
+
+In-place construction and returned borrows remain planned, as does stable
+growth on first transfer.
 
 ## Scanner, links, binary fields, trees
 
