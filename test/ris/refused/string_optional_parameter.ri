@@ -1,0 +1,6 @@
+def width(name : String?) : Int32
+  name ? name.size : 0
+end
+
+width(nil)
+width("hello".to_heap)

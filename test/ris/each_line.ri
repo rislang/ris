@@ -4,7 +4,7 @@
 def show(text : Str) : Nil
   tape do
     count = 0
-    text.as_tape.each_line do |line|
+    text.each_line do |line|
       print "[#{line}]"
       count += 1
     end

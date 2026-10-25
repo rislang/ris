@@ -1826,8 +1826,26 @@ module Iyi
   class StringAutocastType < AutocastType
     getter literal : ASTNode
 
+    def self.borrowable?(type : Type?) : Bool
+      return false unless type
+      type == type.program.string ||
+        (type.is_a?(NilableType) && type.not_nil_type == type.program.string)
+    end
+
+    def self.view?(type : Type?) : Bool
+      return false unless type
+      type = type.remove_literal
+      if type.is_a?(UnionType)
+        type.union_types.size == 2 && type.union_types.any?(&.nil_type?) &&
+          type.union_types.any? { |part| view?(part) }
+      else
+        type.is_a?(NonGenericClassType) && type.name == "Str"
+      end
+    end
+
     def remove_literal
-      literal.type == program.string ? (match || literal.type) : literal.type
+      StringAutocastType.borrowable?(literal.type) ?
+        (match || literal.type) : literal.type
     end
 
     def initialize(program, @literal)

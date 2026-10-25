@@ -4,7 +4,7 @@ import std/format::{sprintf}
 
 kept = ""
 tape do
-  fmt = "%s|%+08d|%#x|%.2f|%.3e|%.4g|%%".as_tape
+  fmt = "%s|%+08d|%#x|%.2f|%.3e|%.4g|%%"
   args = {"café", -42, 255, 0.125, 1.25, 0.000125}
   w = Str::Builder.new(1)
   w << "prefix:"

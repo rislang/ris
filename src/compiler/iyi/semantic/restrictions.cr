@@ -1846,12 +1846,77 @@ module Iyi
   end
 
   class StringAutocastType
+    def self.view_restriction?(restriction, context) : Bool
+      case restriction
+      when Path
+        type = context.defining_type.lookup_path(restriction).as?(Type)
+        !!type && view?(type.remove_alias)
+      when Union
+        types = restriction.types.compact_map do |part|
+          if part.is_a?(Path)
+            context.defining_type.lookup_path(part).as?(Type)
+          end
+        end
+        types.size == restriction.types.size &&
+          view?(context.instantiated_type.program.type_merge_union_of(types))
+      else
+        false
+      end
+    end
+
+    def restrict(other : Arg, context)
+      if literal.type.is_a?(NilableType) &&
+         StringAutocastType.view_restriction?(other.restriction, context)
+        return restrict(other.restriction, context)
+      end
+      super
+    end
+
+    def restrict(other : Path, context)
+      if literal.type.is_a?(NilableType) &&
+         StringAutocastType.view_restriction?(other, context)
+        type = context.defining_type.lookup_path(other).as(Type)
+        return restrict(type.remove_alias, context)
+      end
+      super
+    end
+
+    # A nilable source must match the whole restriction, never just Str.
+    def restrict(other : Union, context)
+      if literal.type.is_a?(NilableType)
+        types = other.types.compact_map do |part|
+          context.defining_type.lookup_path(part).as?(Type) if part.is_a?(Path)
+        end
+        if types.size == other.types.size
+          return restrict(program.type_merge_union_of(types), context)
+        end
+      end
+      super
+    end
+
+    def restrict(other : UnionType, context)
+      if literal.type.is_a?(NilableType)
+        if matches_exactly?(other)
+          set_exact_match(other)
+          return other
+        end
+        if !exact_match? && matches_partially?(other)
+          add_match(other)
+          return other
+        end
+        return nil
+      end
+      super
+    end
+
     def matches_exactly?(type : Type) : Bool
       literal.type == type
     end
 
     def matches_partially?(type : Type) : Bool
-      if literal.type == program.string
+      if literal.type.is_a?(NilableType)
+        type.is_a?(UnionType) && StringAutocastType.view?(type)
+      elsif literal.type == program.string
         type.is_a?(NonGenericClassType) && type.name == "Str"
       else
         type == program.string

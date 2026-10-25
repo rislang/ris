@@ -25,6 +25,8 @@ expect() {
 
 expect string_parameter \
   'name : String is only read; take it as Str'
+expect string_optional_parameter \
+  'name : String? is only read; take it as Str?'
 out=$("$RIS" run test/ris/string_parameters.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = 'PASS: retained String parameters' ]; then
   echo "runs     string_parameters"

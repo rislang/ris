@@ -129,6 +129,59 @@ describe "ris tape text" do
     end
   end
 
+  it "borrows nilable String arguments without changing overload priority" do
+    ["ri", "iyi"].each do |extension|
+      tape_compile(<<-'CODE', extension)
+        def width(text : Str?) : Int32
+          text ? text.size : 0
+        end
+        def choose(text : Str?, n : Int64) : String?
+          "wrong overload".to_heap
+        end
+        def choose(text : String?, n : Int64) : String?
+          text
+        end
+        def optional(text : String, present : Bool) : String?
+          present ? text : nil
+        end
+        present = optional("abc".to_heap, true)
+        absent = optional("abc".to_heap, false)
+        width(present)
+        width(absent)
+        width(text: present)
+        width(text: absent)
+        width("abc".to_heap)
+        result : String? = choose(present, 1)
+        result = choose(text: absent, n: 1)
+        CODE
+    end
+  end
+
+  it "does not borrow nilable String into a non-nilable parameter" do
+    expect_raises(Iyi::TypeException) do
+      tape_compile(<<-'CODE')
+        def optional(text : String?) : String?
+          text
+        end
+        def width(text : Str) : Int32
+          text.size
+        end
+        width(optional(nil))
+        CODE
+    end
+  end
+
+  it "does not borrow nilable String assignments" do
+    expect_raises(Iyi::TypeException) do
+      tape_compile(<<-'CODE')
+        def optional(text : String?) : String?
+          text
+        end
+        view : Str? = optional("abc".to_heap)
+        CODE
+    end
+  end
+
   it "does not borrow String assignments" do
     expect_raises(Iyi::TypeException) do
       tape_compile(<<-'CODE')
@@ -168,6 +221,18 @@ describe "ris String parameter retention" do
     end
   end
 
+  it "refuses a read-only nilable String parameter" do
+    expect_raises(Iyi::TypeException,
+      /name : String\? is only read; take it as Str\?/) do
+      tape_compile(<<-'CODE')
+        def width(name : String?) : Int32
+          name ? name.size : 0
+        end
+        width(nil)
+        CODE
+    end
+  end
+
   it "follows a read-only user callee" do
     expect_raises(Iyi::TypeException, /is only read; take it as Str/) do
       tape_compile(<<-'CODE')
@@ -192,12 +257,12 @@ describe "ris String parameter retention" do
       CODE
   end
 
-  it "leaves union and generic restrictions alone" do
+  it "leaves other union and generic restrictions alone" do
     tape_compile(<<-'CODE')
-      def width(name : String | Nil, names : Array(String)) : Int32
+      def width(name : String | Int32, names : Array(String)) : Int32
         names.size
       end
-      width(nil, ["hello"])
+      width(1, ["hello"])
       CODE
   end
 end

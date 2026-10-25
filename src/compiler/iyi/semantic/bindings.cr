@@ -89,8 +89,9 @@ module Iyi
     def type(*, with_autocast = false, call_argument = false)
       type = self.type
 
-      if with_autocast && ((call_argument && type == type.program.string) ||
-                           (self.is_a?(Call) && self.tape_literal?))
+      if with_autocast &&
+         ((call_argument && StringAutocastType.borrowable?(type)) ||
+          (self.is_a?(Call) && self.tape_literal?))
         return StringAutocastType.new(type.program, self)
       end
       if with_autocast

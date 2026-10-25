@@ -21,10 +21,19 @@ class Iyi::TapeStringParameterChecker
       next unless user?(a_def)
       a_def.args.each_with_index do |arg, index|
         restriction = arg.restriction
-        next unless restriction.is_a?(Path) &&
-                    restriction.names == ["String"]
+        nilable = restriction.is_a?(Union) &&
+          restriction.types.size == 2 &&
+          restriction.types.all? { |part|
+            part.is_a?(Path) && part.names.in?([["String"], ["Nil"]])
+          } && restriction.types.any? { |part|
+            part.is_a?(Path) && part.names == ["Nil"]
+          }
+        next unless nilable ||
+          (restriction.is_a?(Path) && restriction.names == ["String"])
         next if retains?(a_def, index)
-        arg.raise "#{arg.name} : String is only read; take it as Str " \
+        suffix = nilable ? "?" : ""
+        arg.raise "#{arg.name} : String#{suffix} is only read; " \
+                  "take it as Str#{suffix} " \
                   "(a String or a literal passes at no cost)"
       end
     end
@@ -87,6 +96,11 @@ class Iyi::TapeStringParameterChecker
     end
     # A String (or a container/proc holding it) returned implicitly may
     # carry an alias. Scalar results cannot retain the input text.
+    # A declared String? result may retain text even when specialized to Nil.
+    declared = a_def.return_type
+    retained ||= declared.is_a?(Union) && declared.types.any? { |part|
+      part.is_a?(Path) && part.names == ["String"]
+    }
     result = a_def.body.type?
     if result && result != @program.nil &&
        !result.is_a?(PrimitiveType)

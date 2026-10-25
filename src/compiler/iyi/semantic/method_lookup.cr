@@ -320,7 +320,7 @@ module Iyi
           next
         end
 
-        match_arg_type = arg_type.restrict(arg, context)
+        match_arg_type = restrict_argument(arg_type, arg, context)
         if match_arg_type
           if !named_args && !splat_arg_types && match_arg_type.same?(arg_type) && arg_types.size == 1
             # Optimization: no need to create matched_arg_types if
@@ -338,7 +338,7 @@ module Iyi
 
       if deferred && matched_arg_types
         deferred.each do |arg, arg_index, arg_type, slot|
-          match_arg_type = arg_type.restrict(arg, context)
+          match_arg_type = restrict_argument(arg_type, arg, context)
           return nil unless match_arg_type
           matched_arg_types[slot] = match_arg_type
           mandatory_args[arg_index] = true if mandatory_args
@@ -386,7 +386,8 @@ module Iyi
               end
             end
 
-            match_arg_type = named_arg.type.restrict(a_def.args[found_index], context)
+            match_arg_type = restrict_argument(
+              named_arg.type, a_def.args[found_index], context)
             unless match_arg_type
               return nil
             end
@@ -452,6 +453,18 @@ module Iyi
       context = context.clone if context.bound_free_vars
 
       Match.new(a_def, (matched_arg_types || arg_types), context, matched_named_arg_types)
+    end
+
+    private def restrict_argument(type, arg, context)
+      restricted = type.restrict(arg, context)
+      # Str? must not claim just the Nil arm before a String? overload.
+      # Retry with a view of the whole argument instead.
+      if type.is_a?(NilableType) && StringAutocastType.borrowable?(type) &&
+         restricted.try(&.nil_type?) &&
+         StringAutocastType.view_restriction?(arg.restriction, context)
+        return nil
+      end
+      restricted
     end
 
     def matches_exactly?(match : Match, *, with_autocast : Bool = false)

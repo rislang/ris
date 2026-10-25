@@ -5,6 +5,18 @@ class ArgumentText
   end
 end
 
+class OptionalArgumentText
+  getter calls = 0
+
+  def initialize(@text : String?)
+  end
+
+  def take : String?
+    @calls += 1
+    @text
+  end
+end
+
 def width(text : Str) : Int32
   text.size
 end
@@ -25,9 +37,38 @@ def choose(text : String, n : Int64) : String
   text
 end
 
+def optional_width(text : Str?) : Int32
+  text ? text.size : 0
+end
+
+def optional_choose(text : Str?) : String?
+  "wrong overload".to_heap
+end
+
+def optional_choose(text : String?) : String?
+  text
+end
+
+def optional_choose(text : Str?, n : Int64) : String?
+  "wrong overload".to_heap
+end
+
+def optional_choose(text : String?, n : Int64) : String?
+  text
+end
+
+# A call result keeps its nilable type, even when the value is known here.
+def optional_text(text : String, present : Bool) : String?
+  present ? text : nil
+end
+
 heap = "abc".to_heap + "d"
 field = ArgumentText.new(heap)
 array = [heap]
+present = optional_text(heap, true)
+absent = optional_text(heap, false)
+source = OptionalArgumentText.new(present)
+nil_source = OptionalArgumentText.new(absent)
 before = IyiMark.allocated_since
 raise "variable" unless width(heap) == 4
 raise "field" unless width(field.text) == 4
@@ -36,6 +77,20 @@ raise "named" unless width(text: heap) == 4
 raise "overload" unless choose(heap).is_a?(String)
 raise "retry overload" unless choose(heap, 1).is_a?(String)
 raise "default type" unless heap.is_a?(String)
+raise "optional present" unless optional_width(present) == 4
+raise "optional absent" unless optional_width(absent) == 0
+raise "optional named" unless optional_width(text: present) == 4
+raise "optional named nil" unless optional_width(text: absent) == 0
+raise "non-nil to optional" unless optional_width(heap) == 4
+raise "optional overload" unless optional_choose(present) == heap
+raise "optional nil overload" unless optional_choose(absent).nil?
+raise "optional retry" unless optional_choose(present, 1) == heap
+raise "optional named overload" unless optional_choose(text: absent).nil?
+raise "optional default" unless present.is_a?(String) && absent.nil?
+raise "evaluate once" unless optional_width(source.take) == 4 &&
+  source.calls == 1
+raise "nil evaluate once" unless optional_width(text: nil_source.take) == 0 &&
+  nil_source.calls == 1
 raise "allocated" unless before == IyiMark.allocated_since
 raise "temporary" unless width("abc".to_heap + "d") == 4
 puts "PASS: String arguments borrow without allocation"

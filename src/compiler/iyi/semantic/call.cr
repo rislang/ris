@@ -591,6 +591,26 @@ class Iyi::Call
 
   private def borrow_string_argument(value : ASTNode) : ASTNode
     value.remove_enclosing_call(self)
+    if value.type.is_a?(NilableType)
+      name = program.new_temp_var_name
+      temp = Var.new(name).at(value)
+      assign = Assign.new(temp, value).at(value)
+      # Register the temporary without visiting the already typed value again.
+      meta_var, _ = parent_visitor.assign_to_meta_var(name)
+      meta_var.bind_to(value)
+      meta_var.assigned_to = true
+      parent_visitor.vars[name] = meta_var
+      temp.bind_to(value)
+      assign.bind_to(value)
+      conditional = If.new(Var.new(name),
+        Call.new(Var.new(name), "as_tape").at(value),
+        NilLiteral.new).at(value)
+      conditional.accept(parent_visitor)
+      view = Expressions.new([assign, conditional] of ASTNode).at(value)
+      view.bind_to(conditional)
+      view.set_enclosing_call(self)
+      return view
+    end
     view = Call.new(value, "as_tape").at(value)
     # The receiver is already typed; revisiting it would rebind its calls.
     parent_visitor.prepare_call(view)
@@ -606,9 +626,9 @@ class Iyi::Call
         if arg.is_a?(Call) && arg.tape_literal? &&
            matches.any? { |match| match.arg_types[index]? == program.string }
           args[index] = arg.args.first
-        elsif arg.type == program.string && matches.any? { |match|
+        elsif StringAutocastType.borrowable?(arg.type) && matches.any? { |match|
                 match.arg_types[index]?.try { |t|
-                  t.remove_literal.to_s == "Str"
+                  StringAutocastType.view?(t)
                 }
               }
           args[index] = borrow_string_argument(arg)
@@ -621,10 +641,11 @@ class Iyi::Call
              t.name == arg.name && t.type == program.string
            } }
           arg.value = value.args.first
-        elsif value.type == program.string && matches.any? { |match|
+        elsif StringAutocastType.borrowable?(value.type) &&
+              matches.any? { |match|
                 match.named_arg_types.try &.any? { |t|
                   t.name == arg.name &&
-                    t.type.remove_literal.to_s == "Str"
+                    StringAutocastType.view?(t.type)
                 }
               }
           arg.value = borrow_string_argument(value)

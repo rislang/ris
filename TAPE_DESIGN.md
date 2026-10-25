@@ -33,7 +33,7 @@ No tape value survives the block that owns its storage:
 * In user `.ri` files, `"text"` is a zero-copy static `Str` view;
   `"text #{value}"` builds a `Str` on the active tape. std and iyi keep
   their old text rules. Macro code and annotations are compiler metadata.
-* Read-only String parameters are refused; calls borrow String as Str for free.
+* Read-only String/String? parameters take Str/Str?; calls borrow at no cost.
 * Plain literals become static String in heap places, without a copy:
   String parameters/fields, constants and heap container literal entries.
   For request-only objects use an `@[OnTape]` struct with `Str` fields.

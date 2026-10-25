@@ -413,19 +413,22 @@ class Iyi::Call
 
     # Keep String overloads, including ones needing numeric autocasts, first.
     if with_autocast && !@borrow_string_arguments &&
-       (args.any? { |arg| arg.type? == program.string } ||
-        named_args.try &.any? { |arg| arg.value.type? == program.string })
+       (args.any? { |arg| StringAutocastType.borrowable?(arg.type?) } ||
+        named_args.try &.any? { |arg|
+          StringAutocastType.borrowable?(arg.value.type?)
+        })
       ::raise RetryLookupWithStringViews.new
     end
 
     # If we made a lookup without the special rule for literals,
     # and we have literals in the call, try again with that special rule.
     if !with_autocast && (args.any? { |arg|
-         arg.supports_autocast?(number_autocast) || arg.type? == program.string
+         arg.supports_autocast?(number_autocast) ||
+           StringAutocastType.borrowable?(arg.type?)
        } ||
        named_args.try &.any? { |arg|
          arg.value.supports_autocast?(number_autocast) ||
-           arg.value.type? == program.string
+           StringAutocastType.borrowable?(arg.value.type?)
        })
       ::raise RetryLookupWithLiterals.new
     end
