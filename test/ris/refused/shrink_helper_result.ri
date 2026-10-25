@@ -1,0 +1,13 @@
+def view_of(b : Str::Builder)
+  b.finish
+end
+
+def exercise
+  b = Str::Builder.new
+  b << "abc"
+  v = view_of(b)
+  b.clear
+  puts v
+end
+
+tape { exercise }

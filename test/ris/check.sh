@@ -25,7 +25,10 @@ expect() {
 
 # A dead view permits refill; live views and pending operands forbid shrink.
 for name in builder_clear builder_truncate builder_shift operand alias span \
-    values_at link pop_optional element iterator pointer literal_operand; do
+    values_at link pop_optional element iterator pointer literal_operand \
+    helper helper_two helper_generic dispatch callback helper_result \
+    helper_recursive field_owner field_ontape callback_proc \
+    callback_argument helper_self helper_named; do
   expect "shrink_$name" 'cannot shrink tape storage with a live view'
 done
 out=$("$RIS" run test/ris/shrink_refill.ri 2>&1)
@@ -33,6 +36,14 @@ if [ "$?" -eq 0 ] && [ "$out" = 'PASS: shrink refill' ]; then
   echo "runs     shrink_refill"
 else
   echo "FAILED   shrink_refill: $out"
+  status=1
+fi
+
+out=$("$RIS" run test/ris/shrink_read_helper.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = 'abc' ]; then
+  echo "runs     shrink_read_helper"
+else
+  echo "FAILED   shrink_read_helper: $out"
   status=1
 fi
 

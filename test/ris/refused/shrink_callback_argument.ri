@@ -1,0 +1,13 @@
+def invoke(b : Str::Builder)
+  yield b
+end
+
+def exercise
+  b = Str::Builder.new
+  b << "abc"
+  v = b.finish
+  invoke(b) { |bytes| bytes.clear }
+  puts v
+end
+
+tape { exercise }

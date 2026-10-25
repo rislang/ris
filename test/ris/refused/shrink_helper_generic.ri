@@ -1,0 +1,13 @@
+def reset(b : T) forall T
+  b.clear
+end
+
+def exercise
+  b = Str::Builder.new
+  b << "abc"
+  v = b.finish
+  reset(b)
+  puts v
+end
+
+tape { exercise }

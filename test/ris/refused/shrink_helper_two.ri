@@ -1,0 +1,16 @@
+def reset(b : Str::Builder)
+  b.clear
+end
+def reset_twice(b : Str::Builder)
+  reset(b)
+end
+
+def exercise
+  b = Str::Builder.new
+  b << "abc"
+  v = b.finish
+  reset_twice(b)
+  puts v
+end
+
+tape { exercise }

@@ -1,0 +1,20 @@
+@[OnTape]
+struct Storage
+  getter bytes = Str::Builder.new
+
+  def reset
+    @bytes.clear
+  end
+end
+
+def reset_storage(s : Storage)
+  s.reset
+end
+
+tape do
+  s = Storage.new
+  s.bytes << "abc"
+  v = s.bytes.finish
+  reset_storage(s)
+  puts v
+end

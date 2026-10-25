@@ -1,0 +1,20 @@
+struct Reader
+  def apply(b : Str::Builder)
+    b.length
+  end
+end
+struct Resetter
+  def apply(b : Str::Builder)
+    b.clear
+  end
+end
+
+def exercise
+  b = Str::Builder.new
+  b << "abc"
+  v = b.finish
+  (Program.args.empty? ? Reader.new : Resetter.new).apply(b)
+  puts v
+end
+
+tape { exercise }

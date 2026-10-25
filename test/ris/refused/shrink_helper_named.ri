@@ -1,0 +1,12 @@
+def reset(first : Str::Builder, storage second : Str::Builder)
+  second.clear
+end
+
+tape do
+  a = Str::Builder.new
+  b = Str::Builder.new
+  b << "abc"
+  v = b.finish
+  reset(storage: b, first: a)
+  puts v
+end

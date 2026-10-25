@@ -9,9 +9,6 @@ check.sh. Delete finished work in the same commit; keep check.sh green.
    values in their own region, or refuse views across the first growth.
    Non-Linux targets still move. Refuse raw owner operations.
    Gate: no transfer of a viewed value.
-4b. [L] Shrink across calls: specialize receiver/argument roots and
-    propagate shrink and result effects through dispatch and callbacks.
-    Gate: direct, generic, dispatch and callback aliases.
 4c. [L] Recursion per Goose §7.8: cycle roots, scratch and pending results;
     replace tape_lifetime_checker.cr's active-cycle skip.
     Gate: direct and mutual cycles, callbacks and live scratch.

@@ -1,0 +1,20 @@
+@[Owner]
+struct Storage
+  getter bytes = Str::Builder.new
+
+  def reset
+    @bytes.clear
+  end
+
+  def reset_again
+    reset
+  end
+end
+
+tape do
+  s = Storage.new
+  s.bytes << "abc"
+  v = s.bytes.finish
+  s.reset_again
+  puts v
+end

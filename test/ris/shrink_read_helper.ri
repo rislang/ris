@@ -1,0 +1,43 @@
+def read_length(b : Str::Builder)
+  b.length
+end
+
+def refill(b : Str::Builder) : Str
+  b.clear
+  b << "def"
+  b.finish
+end
+
+@[OnTape]
+struct Buffers
+  getter left = Str::Builder.new
+  getter right = Str::Builder.new
+
+  def reset_right
+    @right.clear
+  end
+end
+
+def exercise
+  b = Str::Builder.new
+  b << "abc"
+  v = b.finish
+  raise "length" unless read_length(b) == 3
+  puts v
+  next_view = refill(b)
+  raise "refill result" unless next_view == "def"
+  # These results are alternatives, consumed before the following clear.
+  if Program.args.empty?
+    b.finish
+  else
+    refill(b)
+  end
+  b.clear
+  buffers = Buffers.new
+  buffers.left << "left"
+  left = buffers.left.finish
+  buffers.reset_right
+  raise "separate field" unless left == "left"
+end
+
+tape { exercise }
