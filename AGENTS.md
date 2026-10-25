@@ -63,7 +63,7 @@ web server keeps a request's bytes, temporaries and response on one tape.
   list it in [UPSTREAM.md](UPSTREAM.md).
 * iyi's and Crystal's documents (SPEC.md, CHANGELOG.md, README.iyi.md, …)
   stay as they are; ris's own are README.md, LEARN.md, TAPE_DESIGN.md,
-  LLVM.md, UPSTREAM.md and AGENTS.md.
+  LLVM.md, UPSTREAM.md, NO_GC.md and AGENTS.md.
 * Build with LLVM 23 or newer: 21 and 22 miscompile ([LLVM.md](LLVM.md)).
 
 ## Length and commits
