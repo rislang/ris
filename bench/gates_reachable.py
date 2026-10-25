@@ -59,7 +59,7 @@ TOOLS = {
     # hold a line, and speed is measured for the whole project later.
     "http2_tape.sh",
     # `python3 bench/tape_memory_svg.py` draws README's tape and heap
-    # picture from TAPE_DESIGN.md's recorded numbers.
+    # picture from ris-bench's recorded respond numbers.
     "tape_memory_svg.py",
     # `bash bench/ct_timing.sh` times std's secret paths dudect-style and
     # fails loudly past |t| = 10. Run by hand on a quiet machine: on a

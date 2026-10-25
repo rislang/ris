@@ -556,7 +556,7 @@ ris-tarball: iyi-tarball
 	cp -R -p "$(O)/iyi-package" "$(O)/ris-package"
 	ln -sf iyi$(EXE) "$(O)/ris-package/bin/ris$(EXE)"
 	$(INSTALL) -d -m 0755 "$(O)/ris-package/share/ris"
-	$(INSTALL) -m 644 README.md LEARN.md TAPE_DESIGN.md LICENSE NOTICE.md \
+	$(INSTALL) -m 644 README.md LEARN.md TAPE_SPEC.md LICENSE NOTICE.md \
 	  "$(O)/ris-package/share/ris/"
 	cp -R -p samples/ris "$(O)/ris-package/share/ris/samples"
 	tar -czf "$(O)/$(RIS_PACKAGE).tar.gz" -C "$(O)/ris-package" .

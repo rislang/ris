@@ -1735,7 +1735,7 @@ end
 # subtree ends when it closes, so its children follow it and a reader
 # steps over a child in one jump. The tree is one growing value, written
 # once, whole: measured faster than a heap tree, where a `Array` per node
-# is slower (TAPE_DESIGN.md, "Layout").
+# is slower (measured in ris-bench).
 @[OnTape]
 struct Tre(T)
   @state : Pointer(UInt64)

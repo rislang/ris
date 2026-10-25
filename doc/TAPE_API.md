@@ -1,9 +1,9 @@
 # Tape API
 
 Every tape type, each with a short example. Start with LEARN.md; exact
-signatures are in `src/iyi/tape.iyi`, the rules in TAPE_DESIGN.md.
+signatures are in `src/iyi/tape.iyi`, the rules in TAPE_SPEC.md.
 
-## Tape, text, arrays, to_heap
+## Tape, text, arrays, copy_to
 
 `tape do … end` holds a request, a parse or a batch; the owning block frees
 all at its end, early exits and panics included. A nested `tape` shares it;
@@ -17,15 +17,15 @@ tape do
   numbers << 3 << 1 << 2
   puts numbers.sorted.sum                   # 6
   line = Str.build { |w| w << "id=" << 7 }
-  kept = line.to_heap                       # a String, kept after the tape
+  kept = line.copy_to(Program.tape)         # kept after the tape
   puts kept                                 # id=7
 end
 ```
 
 Text is bytes: `text[0]` is a UInt8. Strings have `split`, `index`,
 `starts_with?`, `to_i?`; arrays `map`, `select`, `each`, `join(writer)`.
-`to_s` or interpolation to a heap String need `@[TapeToHeap]`; prefer
-`to_heap`. A def may return tape data to a caller whose tape is still open.
+Retain with `copy_to(owner)`; `to_heap`, `to_s` and `@[TapeToHeap]` are
+migration heap sites. A def may return tape data to an open caller tape.
 
 ## Records: @[OnTape]
 
@@ -34,13 +34,13 @@ Text is bytes: `text[0]` is a UInt8. Strings have `split`, `index`,
 struct Row
   getter name : Str
   def initialize(@name); end
-  def to_heap; name.to_heap; end
 end
 
 tape do
   rows = Ary(Row).new
   rows << Row.new("ris".as_tape)
-  puts rows.to_heap[0]                      # ris
+  kept = rows.copy_to(Program.tape)         # rows outlive the tape
+  puts kept[0].name                         # ris
 end
 ```
 

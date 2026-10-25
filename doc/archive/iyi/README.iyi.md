@@ -1,7 +1,7 @@
 # iyi
 
 [![iyi](https://github.com/iyilang/iyi/actions/workflows/iyi.yml/badge.svg)](https://github.com/iyilang/iyi/actions/workflows/iyi.yml)
-[![licence](https://img.shields.io/badge/licence-Apache--2.0-blue.svg)](LICENSE)
+[![licence](https://img.shields.io/badge/licence-Apache--2.0-blue.svg)](../../../LICENSE)
 [![site](https://img.shields.io/badge/site-iyi.dev-black.svg)](https://iyi.dev)
 [![packages](https://img.shields.io/badge/packages-iyipacks-blue.svg)](https://packs.iyi.dev/)
 
@@ -42,7 +42,7 @@ interface without a repository, and a person waits less.
 `require "kemal"` in an iyi file serves HTTP. A `.iyi` file also has rules
 Crystal does not have and refuses things Crystal accepts, and those rules are
 the whole of what follows. The compiler is built on Crystal's, which is
-recorded in the [licence](LICENSE) and [NOTICE.md](NOTICE.md).
+recorded in the [licence](../../../LICENSE) and [NOTICE.md](../../../NOTICE.md).
 
 ## The edit loop
 
@@ -90,7 +90,7 @@ again. Take that rule away and the line you just changed costs **9x less**.
 `bench/incremental.py` refuses to start the clock until all three programs
 print the same total.
 
-The design is in [SPEC.md](SPEC.md), which records what was measured, what was
+The design is in [SPEC.md](../../../SPEC.md), which records what was measured, what was
 thrown away and why. Every number in this README names the command that prints
 it.
 
@@ -140,7 +140,7 @@ end
 mount "/v1", users
 ```
 
-That file is [`samples/iyi/webapp.iyi`](samples/iyi/webapp.iyi), a port of
+That file is [`samples/iyi/webapp.iyi`](../../../samples/iyi/webapp.iyi), a port of
 [Kemal](https://kemalcr.com)'s router, and it runs. Now add a route whose
 handler returns something a body cannot be made of:
 
@@ -336,7 +336,7 @@ machine beside three reference timings. Line counts are `wc -l`, and
 ## Getting it
 
 The released version is 0.19.1, and a build from current source reports the
-same. [`install.sh`](install.sh) (POSIX sh over `curl` and `tar`) picks the
+same. [`install.sh`](../../../install.sh) (POSIX sh over `curl` and `tar`) picks the
 tarball for your machine, linux-x86_64 or darwin-arm64, and refuses anything
 else. It checks the tarball against the release's `SHA256SUMS` and unpacks
 nothing on a mismatch. `IYI_PREFIX` moves the destination and
@@ -359,7 +359,7 @@ The Linux tarball needs glibc 2.31 or newer (Ubuntu 20.04, Debian 11, RHEL 9
 and later), because it is built on Ubuntu 20.04.
 
 **Windows.** The release also carries `iyi-0.19.1-windows-x86_64.zip`, and
-[`install.ps1`](install.ps1) installs it the way `install.sh` installs the
+[`install.ps1`](../../../install.ps1) installs it the way `install.sh` installs the
 tarball: checksums first, `IYI_PREFIX` and `IYI_VERSION` honoured, default
 prefix `%LOCALAPPDATA%\Programs\iyi`, `<prefix>\bin` added to the user's
 `PATH`, no administrator. Saved to disk rather than piped, run it as
@@ -741,7 +741,7 @@ Each one names the rule and the line to write.
 
 ## The samples
 
-Twenty-seven programs in [`samples/iyi`](samples/iyi). Nineteen document a
+Twenty-seven programs in [`samples/iyi`](../../../samples/iyi). Nineteen document a
 part of the design: `hello` (traits and `impl`), `modules` (`import` across
 files), `generics`, `errors`, `collections`, `immutable` (a shareable
 collection), `init_order`, `webapp`, `workers` (a pool and a typed pair of
@@ -870,25 +870,25 @@ not the library.
 
 | | |
 |---|---|
-| [SPEC.md](SPEC.md) | the design, and the record of what measurement settled |
-| [`samples/iyi`](samples/iyi) | twenty-seven programs: nineteen documenting a part of it, seven being a first hour, and `calc`, a language |
-| [`samples/crystal/kemal`](samples/crystal/kemal) | a kemal application, from `shard.yml`: built from source and across four `.iyimod` boundaries |
-| [`src/iyi`](src/iyi) | iyi's own library, 22,608 lines. `--crystal` swaps it for Crystal's |
-| [`src/std`](src/std) | the standard library, in iyi. Opt-in with `import std/...`, outside the prelude's ceiling |
-| [`src/compiler/iyi/iyimod.cr`](src/compiler/iyi/iyimod.cr) | the artifact format |
-| [`bench/incremental.py`](bench/incremental.py) | the edit loop, against Go, generated in both languages |
-| [`bench/build_speed.py`](bench/build_speed.py) | the full builds, and the gate that fails until the target holds |
+| [SPEC.md](../../../SPEC.md) | the design, and the record of what measurement settled |
+| [`samples/iyi`](../../../samples/iyi) | twenty-seven programs: nineteen documenting a part of it, seven being a first hour, and `calc`, a language |
+| [`samples/crystal/kemal`](../../../samples/crystal/kemal) | a kemal application, from `shard.yml`: built from source and across four `.iyimod` boundaries |
+| [`src/iyi`](../../../src/iyi) | iyi's own library, 22,608 lines. `--crystal` swaps it for Crystal's |
+| [`src/std`](../../../src/std) | the standard library, in iyi. Opt-in with `import std/...`, outside the prelude's ceiling |
+| [`src/compiler/iyi/iyimod.cr`](../../../src/compiler/iyi/iyimod.cr) | the artifact format |
+| [`bench/incremental.py`](../../../bench/incremental.py) | the edit loop, against Go, generated in both languages |
+| [`bench/build_speed.py`](../../../bench/build_speed.py) | the full builds, and the gate that fails until the target holds |
 | [GC_DESIGN.md](GC_DESIGN.md) | the collector |
 | [AI_FIRST.md](AI_FIRST.md) | the agent loop, and every recorded run |
 | [CHANGELOG.md](CHANGELOG.md) | what is in a release, and what a later one has to keep faith with |
-| [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | how to contribute, how to report a vulnerability, how to behave |
-| [README.crystal.md](README.crystal.md) | Crystal's own README, kept |
+| [CONTRIBUTING.md](../../../CONTRIBUTING.md), [SECURITY.md](../../../SECURITY.md), [CODE_OF_CONDUCT.md](../../../CODE_OF_CONDUCT.md) | how to contribute, how to report a vulnerability, how to behave |
+| [README.crystal.md](../crystal/README.crystal.md) | Crystal's own README, kept |
 
 ## Licence and provenance
 
 iyi's compiler is built on the Crystal compiler and carries Crystal's licence
 and copyright: Apache 2.0, Copyright 2012-2026 Manas Technology Solutions. See
-[LICENSE](LICENSE) and [NOTICE.md](NOTICE.md). Everything here that is not
+[LICENSE](../../../LICENSE) and [NOTICE.md](../../../NOTICE.md). Everything here that is not
 Crystal's is a change to Crystal's source. `iyi --version` reports
 `iyi 0.19.1 (built on Crystal 1.22.0-dev)`: the language first, then what it
 is built on. The compatibility binary in the same checkout still reports itself

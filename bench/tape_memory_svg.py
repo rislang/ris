@@ -2,7 +2,7 @@
 """Draw the recorded respond comparison for the README.
 
 Run: python3 bench/tape_memory_svg.py
-Results: TAPE_DESIGN.md, respond, median of nine runs.
+Results: ris-bench respond, median of nine runs.
 Playback is 5x slower. Cells are schematic, not measured addresses.
 """
 from pathlib import Path

@@ -1,53 +1,59 @@
-# Contributing
+# Contributing to ris
 
-This is a fork of [Crystal](https://github.com/crystal-lang/crystal), and it is
-pre-release. If your issue is with Crystal the language, it belongs in Crystal's
-tracker, not here; what belongs here is anything about the rules in
-[SPEC.md](SPEC.md), the `.iyimod` artifact, or the compiler's behaviour on a
-`.iyi` file.
+ris is iyi plus Goose's tape memory. Read [AGENTS.md](AGENTS.md) first,
+then [LEARN.md](LEARN.md) and [TAPE_SPEC.md](TAPE_SPEC.md). The target is
+ris programs without a collector; the current migration is recorded in
+TAPE_SPEC.md. The compiler is still built with Crystal.
 
-## Building it
+## Build
 
-You need LLVM 19, a Crystal compiler to bootstrap from, and libgc.
+Use a Crystal bootstrap compiler, LLVM 23 or newer, a C/C++ toolchain and
+libgc for the compiler's default build. LLVM 21 and 22 miscompile code;
+see [LLVM.md](LLVM.md).
 
-```console
-$ make                    # both binaries: .build/crystal and .build/iyi
-$ ./bin/iyi run samples/iyi/hello.iyi
+```sh
+make ris LLVM_CONFIG=/path/to/llvm-23/bin/llvm-config
+./bin/ris run samples/ris/respond.ri
 ```
 
-Two names, and they are not the same program. `./bin/iyi` is the fork: it takes
-`build`, `run` and `mod`, and it is what a person who downloads the tarball
-has. `./bin/crystal` is Crystal's own wrapper around the same compiler, it
-still compiles `.cr` files, and it is what the specs and the bench below use.
+`./bin/ris` is the ris entry point. Internals retain iyi's names to make
+upstream merges manageable. `./bin/crystal` runs the inherited Crystal
+compiler and specs.
 
-## What has to pass
+## Check the change
 
-One workflow, `.github/workflows/iyi.yml`, and it is the whole of CI:
+Run the relevant program or spec first. For tape rules, add an accepted
+example in `test/ris/` and a rejected example in `test/ris/refused/` when
+applicable; each refusal must name the safe replacement.
 
-```console
-$ ./bin/crystal tool format --check src spec
-$ ./bin/crystal spec spec/compiler/iyimod_spec.cr spec/compiler/iyi_import_spec.cr \
-    spec/compiler/semantic/iyi_spec.cr spec/compiler/compiler_spec.cr
-$ make compiler_spec primitives_spec std_spec
-$ bash bench/samples_roundtrip.sh
+```sh
+bash test/ris/check.sh
 ```
 
-The last one is the claim taken literally: it builds the samples, deletes the
-imported modules' source, builds them again from the artifacts, and compares
-what the two programs print.
+For compiler or inherited runtime changes, run the relevant Crystal specs;
+`make compiler_spec`, `make primitives_spec` and `make std_spec` run the
+broader suites. Check formatting of changed Crystal files with
+`./bin/crystal tool format --check PATH`.
 
-## What this repository expects of a change
+## Design and review
 
-**A number, where the change is about speed.** `bench/build_speed.py` prints the
-table and exits non-zero while the front-end target is unmet. SPEC.md records
-what was measured and what was thrown away for the reason it records; a claim
-without a measurement does not go in it.
+* Library APIs work on the caller's tape: take `Str`, return tape views,
+  or write into the caller's builder. Copy retained data at the boundary.
+* Enforce safety in the compiler. Exceptions need a local mark and reason,
+  never a global switch. Follow AGENTS.md for pointer and FFI boundaries.
+* Changes independent of tape belong in iyi first, or in
+  [UPSTREAM.md](UPSTREAM.md) until taken upstream.
+* Per-change speed measurements are paused; move suitable work onto tape.
+  Keep the respond sample and its ris-bench copy in sync.
+* ris documents have at most 80 lines, each at most 80 characters. Commit
+  messages also wrap at 80; use a clear subject and no AI attribution.
+* Preserve the Apache 2.0 licence and inherited copyright notices:
+  [LICENSE](LICENSE), [NOTICE.md](NOTICE.md).
 
-**A sample or a spec, where the change is about the language.** The programs in
-`samples/iyi` each document one part of the design, and they run in CI. The
-prelude grows only when one of them needs something, which is why `basics.iyi`
-exists: it is the first half hour, written down.
+## Inherited references
 
-**Crystal's licence and copyright stay.** Everything here is a change to
-Crystal's source: Apache 2.0, Copyright 2012-2026 Manas Technology Solutions.
-See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md).
+[SPEC.md](SPEC.md) describes inherited language and compiler rules; it is
+not the authority for ris's tape memory model. Historical iyi documents
+are in [doc/archive/iyi/](doc/archive/iyi/), and Crystal's README is in
+[doc/archive/crystal/](doc/archive/crystal/). Their plans and release notes
+record the upstream projects, not ris's current roadmap.

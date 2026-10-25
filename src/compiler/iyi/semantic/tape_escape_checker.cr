@@ -45,7 +45,7 @@ class Iyi::TapeEscapeChecker
     (`append`, `Str.new`) it is copied again. Code that goes \
     tape -> heap -> tape pays this at every turn and loses what the tape \
     saves: the respond sample takes 0.67 s on the tape, 1.55 s on the heap \
-    (TAPE_DESIGN.md).
+    (ris-bench).
 
     Instead pass the Str on; compare and slice it on the tape \
     (`==`, `starts_with?`, `[start, count]`); print it (`puts text`, \

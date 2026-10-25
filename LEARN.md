@@ -3,12 +3,12 @@
 `git clone https://github.com/rislang/ris`, then:
 1. `README.md`: what ris is, and the tape example.
 2. This file: the rules that differ from Ruby and Crystal.
-3. `TAPE_DESIGN.md`: where tape values go; `doc/TAPE_API.md`: examples.
+3. `TAPE_SPEC.md`: where tape values go; `doc/TAPE_API.md`: examples.
 4. `samples/ris/report.ri`: tape written by hand; `samples/ris/hello.ri`
    and `shop/order.ri`: a program and a module it imports. `test/ris/*.ri`
    are small cases; `test/ris/refused/` is what the compiler rejects.
-5. `SPEC.md` (iyi's, long): look things up, don't read it through. Part I
-   is the rules (R-1..R-5); III.1 is errors; III.4 is fibers and channels.
+5. [iyi references](doc/reference/iyi/README.md): unchanged language and
+   library rules. Check snapshot version notes; look up only what you need.
 ## 2. The language, in short
 Read-only text parameters take `Str`; retaining ones may take `String`.
 
