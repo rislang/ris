@@ -11,6 +11,16 @@ set -uo pipefail
 cd "$(dirname "$0")/../.."
 RIS=${RIS:-./bin/ris}
 status=0
+# By default the blocks below run on every core (check_parallel.py).
+if [ -z "${RIS_CHECK_SERIAL:-}" ]; then
+  exec python3 test/ris/check_parallel.py
+fi
+
+# The heap workloads build every sample in release mode, the slowest gate:
+# start them now beside the other checks and collect them at the end.
+heap_log=$(mktemp)
+python3 test/ris/heap_check.py >"$heap_log" 2>&1 &
+heap_pid=$!
 
 expect() {
   local name=$1 needle=$2 out
@@ -664,9 +674,6 @@ done
 if ! python3 test/ris/heap_check_test.py; then
   status=1
 fi
-if ! python3 test/ris/heap_check.py; then
-  status=1
-fi
 out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc test/ris/heap_zero.ri 2>&1)
 if [ "$?" -eq 0 ] && grep -qF 'zero42' <<<"$out" &&
     grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
@@ -791,6 +798,10 @@ else
   echo "FAILED   program text constant: $out"
   status=1
 fi
+
+wait "$heap_pid" || status=1
+cat "$heap_log"
+rm -f "$heap_log"
 
 if [ "$status" -eq 0 ]; then
   echo "PASS: all ris checks"
