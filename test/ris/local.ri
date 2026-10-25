@@ -20,7 +20,7 @@ def early : Int32
 end
 
 check(early == 5)
-check(IyiRegion.tape == 0_u64)
+check(IyiRegion.tape != 0_u64)
 copy = ""
 tape do
   outer = Str.build { |w| w.append("outer") }
@@ -65,5 +65,5 @@ tape do
   check(IyiRegion.tape == saved)
 end
 check(copy == "outer")
-check(IyiRegion.tape == 0_u64)
+check(IyiRegion.tape != 0_u64)
 puts "PASS: local isolation, reuse, nested scopes, borrowed text, retained copy and early exits"

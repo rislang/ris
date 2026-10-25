@@ -6,7 +6,7 @@ def check(ok : Bool) : Nil
 end
 
 def fail_local(events : Array(String)) : Int32
-  defer events << (IyiRegion.tape == 0_u64 ? "empty" : "bad empty")
+  defer events << (IyiRegion.tape != 0_u64 ? "implicit" : "bad implicit")
   tape do
     outer = IyiRegion.tape
     defer events << (IyiRegion.tape == outer ? "outer" : "bad outer")
@@ -47,6 +47,6 @@ group do |g|
   check(!b.value.is_a?(Panicked))
   check(task.value.is_a?(Panicked))
 end
-check(events.join("|") == "nested|local|outer|empty")
-check(IyiRegion.tape == 0_u64)
+check(events.join("|") == "nested|local|outer|implicit")
+check(IyiRegion.tape != 0_u64)
 puts "PASS: local panic cleanup and fiber switching"

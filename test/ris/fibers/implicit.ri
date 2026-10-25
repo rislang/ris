@@ -1,0 +1,29 @@
+module test/ris/fibers/implicit
+
+main_tape = IyiRegion.tape
+handles = Array(IyiFiber).new
+completed = 0
+group do |g|
+  2.times do |n|
+    g.spawn do
+      handles << IyiScheduler.current
+      raise "fiber shares main tape" if IyiRegion.tape == main_tape
+      text = Str.new("fiber")
+      items = Ary(Str).new(2)
+      items << text
+      writer = Str::Builder.new(16)
+      writer << items[0]
+      sleep(1)
+      writer.append_int(n)
+      raise "fiber tape corrupted" unless writer.finish == "fiber#{n}"
+      completed += 1
+    end
+  end
+end
+raise "fiber did not finish" unless completed == 2
+raise "main tape changed" unless IyiRegion.tape == main_tape
+handles.each do |fiber|
+  raise "fiber kept tape" unless fiber.tape == 0_u64
+  raise "fiber kept cleanup" unless fiber.defers.nil?
+end
+puts "PASS: implicit fiber tapes released"

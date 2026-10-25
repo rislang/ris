@@ -7,7 +7,7 @@ def observe(label : String, active : Bool) : Nil
 end
 
 def broken : Int32
-  defer observe("outer panic", false)
+  defer observe("outer panic", true)
   tape do
     defer observe("inner panic", true)
     tape do
@@ -22,5 +22,5 @@ group do |g|
   task = g.spawn { broken }
   puts task.value.is_a?(Panicked)
 end
-puts IyiRegion.tape == 0_u64
+puts IyiRegion.tape != 0_u64
 tape { puts "scope after panic" }

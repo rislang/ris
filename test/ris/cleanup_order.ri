@@ -7,7 +7,7 @@ def observe(label : String, active : Bool) : Nil
 end
 
 def early : Int32
-  defer observe("outer return", false)
+  defer observe("outer return", true)
   tape do
     defer observe("inner return", true)
     return 7
@@ -16,7 +16,7 @@ def early : Int32
 end
 
 def leave : Nil
-  defer observe("outer break", false)
+  defer observe("outer break", true)
   tape do
     defer observe("inner break", true)
     tape do
@@ -26,9 +26,10 @@ def leave : Nil
   end
 end
 
+guard = IyiScheduler.current.defers
 puts early
 leave
-# Reuse the same cached node underneath a different outer defer chain.
+# Nested tape blocks must preserve the implicit owner's cleanup guard.
 puts early
-puts IyiRegion.tape == 0_u64
-puts IyiScheduler.current.defers.nil?
+puts IyiRegion.tape != 0_u64
+puts IyiScheduler.current.defers == guard

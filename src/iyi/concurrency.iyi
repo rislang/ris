@@ -1966,7 +1966,14 @@ class IyiScheduler
     # returned into the trampoline rather than into `switch_to`.
     reap_dying
     body = fiber.proc
-    body.call unless body.is_a?(Nil)
+    {% if !flag?(:gc_none) && !flag?(:gc_boehm) %}
+      # Each spawned body owns a tape, including its panic/exit cleanup.
+      IyiRegion.tape_scope(Tape::CAPACITY) do
+        body.call unless body.is_a?(Nil)
+      end
+    {% else %}
+      body.call unless body.is_a?(Nil)
+    {% end %}
     # Done and its readers woken in one step under the scheduler's lock,
     # which every reader checks `Done` under: a reader on another thread
     # either sees it done or is on the chain this wakes.

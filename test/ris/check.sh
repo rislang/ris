@@ -82,6 +82,19 @@ expect heap_escape_helper \
   "\`to_s\` of a Str outside a @[TapeToHeap] def copies"
 
 
+for name in implicit fibers/implicit implicit_loop; do
+  out=$(RIS_TAPE_STATS=1 "$RIS" run "test/ris/$name.ri" 2>&1)
+  code=$?
+  if [ "$code" -eq 0 ] && grep -qF 'PASS:' <<<"$out" &&
+      { [ "$name" != implicit_loop ] ||
+        grep -qF '1 scopes, 1 mappings made, 0 unmapped' <<<"$out"; }; then
+    echo "runs     $name"
+  else
+    echo "FAILED   $name: $out"
+    status=1
+  fi
+done
+
 out=$("$RIS" run test/ris/escape.ri 2>&1)
 if [ "$out" = 'abc' ]; then
   echo "runs     escape"
@@ -212,7 +225,7 @@ if [ "$out" = '2 2 3 4' ]; then echo "runs     refill_handoff"; else echo "FAILE
 out=$("$RIS" run test/ris/clear.ri 2>&1)
 if [ "$out" = $'2 1 2\n3 2 3\n4 3 4\nxxxxend' ]; then echo "runs     clear"; else echo "FAILED   clear: $out"; status=1; fi
 out=$(RIS_TAPE_STATS=1 "$RIS" run test/ris/side_warm.ri 2>&1)
-if grep -qF '1000 scopes, 2 mappings made, 0 unmapped' <<<"$out" && grep -qF '1000 values moved' <<<"$out"; then echo "runs     side_warm"; else echo "FAILED   side_warm: $out"; status=1; fi
+if grep -qF '1001 scopes, 3 mappings made, 0 unmapped' <<<"$out" && grep -qF '1000 values moved' <<<"$out"; then echo "runs     side_warm"; else echo "FAILED   side_warm: $out"; status=1; fi
 out=$("$RIS" run test/ris/side.ri 2>&1)
 if [ "$out" = $'round 0: intact\nround 1: intact\nround 2: intact' ]; then echo "runs     side"; else echo "FAILED   side: $out"; status=1; fi
 out=$("$RIS" run test/ris/scope_free.ri 2>&1)
@@ -359,4 +372,9 @@ else
   status=1
 fi
 
+if [ "$status" -eq 0 ]; then
+  echo "PASS: all ris checks"
+else
+  echo "FAIL: ris checks"
+fi
 exit $status

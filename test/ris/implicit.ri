@@ -1,0 +1,8 @@
+text = Str.new("hello")
+items = Ary(Str).new(2)
+items << text
+writer = Str::Builder.new(16)
+writer << items[0]
+writer << " tape"
+raise "wrong top-level tape data" unless writer.finish == "hello tape"
+puts "PASS: implicit main tape"

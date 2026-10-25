@@ -1,6 +1,6 @@
 # PROTOTYPE (ris, step B): tape values.
 #
-# `tape do … end` gives the running fiber a tape: values are bumped into
+# Main and each spawned fiber own an implicit tape: values are bumped into
 # mappings, chained when full. The owning scope releases them together;
 # spare mappings keep bounded warm pages for the thread's next scope.
 # Only the types below are made there. Every other allocation - a String, an
@@ -26,11 +26,9 @@ def __iyi_tape_release : Nil
   IyiRegion.release_tape
 end
 
-# Runs the block on the fiber's tape, freed when the block ends. Inside
-# another `tape` it shares that tape and frees nothing: what it made is
-# freed with the outer one, so a library opens one at no cost; a long
-# loop inside one takes `local_tape` for its temporaries. As `group`
-# brings tasks (SPEC III.4.1), a block brings the tape, never a call.
+# Runs the block on the fiber's implicit tape, sharing its storage.
+# Main or the spawned body releases it; scopes keeping nothing reset their
+# part. Use local_tape for a separate owning scope of temporaries.
 #
 # Returns nothing: a block's value is the one thing that leaves it
 # without an assignment the compiler can see, so it is not passed on.
@@ -468,8 +466,8 @@ struct Str
 
   # `"a#{b}"` inside a `tape` block, where the text only goes to `puts` or
   # `print`: the normalizer makes it this call, so the text is written on
-  # the tape rather than built on the heap. With no tape running (a
-  # `spawn`ed fiber, a proc called later) it is built on the heap as
+  # the tape rather than built on the heap. On targets without tape
+  # support it is built on the heap as
   # before and viewed.
   def self.interpolate(*parts : *T) : Str forall T
     if IyiRegion.tape == 0

@@ -5,14 +5,14 @@ the tape is beside it, where short-lived data is made and dropped together.
 [Goose](https://github.com/aardappel/goose)'s data stacks are the model.
 
 ## The model
-* `tape do … end` opens the running fiber's tape: bump allocation over
-  mappings, chained when full, never moved. Allocation without an active
-  tape ends the program. The block normally returns `nil`.
+* Main and each spawned fiber own an implicit tape: bump allocation over
+  mappings, chained when full, never moved. The tape is released when its
+  body ends, including panic and exit. No `tape` block is required.
 * Tape types, a closed set, three letters of the heap type: `Str`, `Ary(T)`,
   `Tre(T)`, their `Str::Builder`, `Str::Scanner`, `Ary::View`; `@[OnTape]`
   structs. Where a value may live is constrained; the rest is iyi's.
-* Nested `tape` blocks share the active tape. Its owning block releases
-  it, on normal and early exits, including panic; a def, loop round or
+* `tape do … end` stays valid, shares the active tape and returns `nil`.
+  Main or the spawned body owns it; a def, loop round or
   block (std's too, unless it holds raw pointers) that keeps nothing
   frees its part each time.
 * `local_tape do … end` owns a separate tape, released at its end, for

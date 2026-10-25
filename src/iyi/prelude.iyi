@@ -3650,7 +3650,7 @@ require "./file"
 
     # ris: the tape. Each fiber's tape is one mapping that `Str` and
     # `Ary` (src/iyi/tape.iyi) bump their bytes into, freed with one
-    # store when the outermost `tape` block ends and kept among the thread's
+    # store when the owning body ends and kept among the thread's
     # spares, so the next scope writes the same warm pages. Only those types
     # allocate here: the allocator's entry points never do, so no object of
     # a library can land on a tape. The collector never sees a tape address
@@ -10813,7 +10813,16 @@ fun main(argc : Int32, argv : UInt8**) : Int32
   {% if flag?(:win32) %}
     __iyi_win_install_fault_handler
   {% end %}
-  LibIyiMain.__iyi_main(argc, argv)
+  {% if !flag?(:gc_none) && !flag?(:gc_boehm) &&
+          ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) ||
+          flag?(:darwin) || flag?(:win32) || flag?(:wasm32)) %}
+    # Own the main fiber's tape; the guard also runs on panic and exit.
+    IyiRegion.tape_scope(Tape::CAPACITY) do
+      LibIyiMain.__iyi_main(argc, argv)
+    end
+  {% else %}
+    LibIyiMain.__iyi_main(argc, argv)
+  {% end %}
   # Named `test` cases keep going past a failure, so the program's own code
   # ends normally and the exit status is theirs to give (testing.iyi).
   status = IyiTestCases.verdict
@@ -10847,7 +10856,13 @@ end
   # platform's contract already lives, and because `main` above stays exactly as
   # it is for every other target.
   fun __main_argc_argv(argc : Int32, argv : UInt8**) : Int32
-    LibIyiMain.__iyi_main(argc, argv)
+    {% if !flag?(:gc_none) && !flag?(:gc_boehm) %}
+      IyiRegion.tape_scope(Tape::CAPACITY) do
+        LibIyiMain.__iyi_main(argc, argv)
+      end
+    {% else %}
+      LibIyiMain.__iyi_main(argc, argv)
+    {% end %}
     status = IyiTestCases.verdict
     __iyi_flush_std
     status

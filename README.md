@@ -23,28 +23,27 @@ ask me to build your personal blog in ris ;-)" Don't start the blog.
 ```
 
 ## Why ris: tape memory, without the GC
-Parse a request and build its response on one tape: bump-allocated, freed at
-once when `tape` ends, with no GC work. HTTP, JSON and Slim all work on it:
+Parse a request and build its response on one tape: bump-allocated, freed
+when main or a spawned body ends. Each has an implicit tape; HTTP, JSON
+and Slim all work on it:
 
 ```crystal
 import std/http::{Server, ParsedHead}  # supports tape memory
 import std/json::{JSON}                # supports tape memory
 import github.com/domify/slim::{Slim}  # supports tape memory
-tape do # one tape for this request
-  bytes = "GET /hello HTTP/1.1\r\nHost: localhost\r\n\r\n".as_tape
-  req = Server.parse_head(bytes) # its fields are views into the bytes
-  if req.is_a?(ParsedHead)
-    body = Str.build do |writer| # JSON written on the tape
-      writer.json { |json| json.object { json.field "path", req.target } }
-    end
-    puts body                             # => {"path":"/hello"}
-    puts Slim.render("views/page.slim")   # h1= req.target => <h1>/hello</h1>
+bytes = "GET /hello HTTP/1.1\r\nHost: localhost\r\n\r\n".as_tape
+req = Server.parse_head(bytes) # its fields are views into the bytes
+if req.is_a?(ParsedHead)
+  body = Str.build do |writer| # JSON written on the tape
+    writer.json { |json| json.object { json.field "path", req.target } }
   end
-end # the tape is freed
+  puts body                             # => {"path":"/hello"}
+  puts Slim.render("views/page.slim")   # h1= req.target => <h1>/hello</h1>
+end
 ```
 
 Other objects use iyi's GC. Tape values go to a file or socket uncopied;
-`Server.answer` gives each request a tape. The compiler refuses a tape value
+`tape` blocks share it; `local_tape` owns its own. The compiler refuses values
 outliving it; `text.to_heap` copies what must. [TAPE_DESIGN.md](TAPE_DESIGN.md).
 
 ## How fast: [ris-bench](https://github.com/rislang/ris-bench)
@@ -61,8 +60,8 @@ with bumpalo 1.03 s. [Slim](https://github.com/domify/slim) (Slang): 4x faster.
 2026-10-17, Ryzen 7 PRO 6850U, 64 connections, three 10 s runs.
 | | 1 core req/s | p99 | memory | 8 CPUs req/s | p99 | memory |
 |---|---|---|---|---|---|---|
-| ris | 6,847-7,168 | **10-11 ms** | **20 MB** | **21,822-22,040** | 9-11 ms | 172 MB |
-| Rust | **7,066-7,187** | 16 ms | 52 MB | 20,639-21,497 | **6-7 ms** | **70 MB** |
+|ris|6,847-7,168|**10-11 ms**|**20 MB**|**21,822-22,040**|9-11 ms|172 MB|
+|Rust|**7,066-7,187**|16 ms|52 MB|20,639-21,497|**6-7 ms**|**70 MB**|
 | Rails¹ | 444 | 226 ms | 309 MB | | | |
 
 ¹ Other machine, gzip: approximate. ris on 8 CPUs: 8 processes, one port.

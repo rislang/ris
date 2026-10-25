@@ -48,19 +48,17 @@ in ParseError then puts it.message    # `it` is the narrowed value
 end
 ```
 
-* Memory: ordinary objects use the GC. For bounded work (a request) use
-  `tape do … end`: `text.as_tape` views a String there, nothing copied;
+* Memory: main and every spawned fiber have an implicit owning tape.
+  `text.as_tape` views a String there, nothing copied;
   a `Str` reads as a String does (`[a..]`, `split`, `index`,
   `to_i`), a `Str::Builder` takes `<<`, `Ary(T)` and
   `@[OnTape]` structs hold the rest, and `to_heap` copies what must
-  outlive the tape. Nested `tape` shares it; `local_tape` owns its own.
-* Tape only where it pays: a hot path that allocates much short-lived
-  data. Elsewhere plain ris is simpler, and copy-out can cost more than
-  it saves. Measure with and without tape (`--release`, median of several
-  runs, time and peak memory); keep tape only for a clear gain.
+  outlive the tape. `tape` shares it; `local_tape` owns a separate tape.
+  A def, loop round or block keeping nothing frees its temporaries.
+  Ordinary objects (`String`, `Array`, classes) still use the GC.
 
 Byte pools: `read_bytes_at(UInt32, at)`, `write_bytes_at(at, v)`, append
-`write_bytes(v)`; no byte loops. Lines: `read_line_tape` in a `tape`. Integer
+`write_bytes(v)`; no byte loops. Lines: `read_line_tape` on the tape. Integer
 `/` in text is refused (a Float): `a // b`, or `a.to_f / b` for a Float.
 Lexers: `Str::Scanner` (`current_byte`, `advance`, `scan`, `skip`) holds text
 and offset; `ris check` warns of an `@pos += 1` that indexes tape text.
