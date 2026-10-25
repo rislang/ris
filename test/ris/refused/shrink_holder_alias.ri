@@ -1,0 +1,16 @@
+@[OnTape]
+struct ArrayHolder
+  getter data : Ary(Int32)
+
+  def initialize(@data)
+  end
+end
+
+tape do
+  data = Ary(Int32).new(1)
+  data << 7
+  holder = ArrayHolder.new(data)
+  view = data.link(0, UInt32)
+  holder.data.clear
+  puts data[view]
+end

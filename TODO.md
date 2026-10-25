@@ -9,8 +9,6 @@ check.sh. Delete finished work in the same commit; keep check.sh green.
    values in their own region, or refuse views across the first growth.
    Non-Linux targets still move. Refuse raw owner operations.
    Gate: no transfer of a viewed value.
-4e. [L] Owner/path roots, joins, read-back candidates and stored holders.
-    Gate: branch alternatives, fields, nested holders and emptied holders.
 4f. [L] Specialized call effects, suspension and checked contracts for
     opaque calls and iyimod; refuse unproved effects with a safe form.
     Gate: opaque, imported, suspending and unknown callback targets.

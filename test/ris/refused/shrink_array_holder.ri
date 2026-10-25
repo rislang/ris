@@ -1,0 +1,8 @@
+tape do
+  bytes = Str::Builder.new
+  bytes << "abc"
+  holder = Ary(Str).new(1)
+  holder << bytes.finish
+  bytes.clear
+  puts holder[0]
+end

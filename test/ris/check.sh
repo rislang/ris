@@ -72,6 +72,22 @@ for name in builder_clear builder_truncate builder_shift operand alias span \
     loop_entry loop_forever; do
   expect "shrink_$name" 'cannot shrink tape storage with a live view'
 done
+# Roots survive joins and holders; an emptied holder releases its view.
+for name in holder nested_holder merged_view array_holder owner_holder \
+    case_view or_view read_back holder_alias inexact_holder; do
+  expect "shrink_$name" 'cannot shrink tape storage with a live view'
+done
+for name in branch_escape store_join return_owner; do
+  expect "root_$name" 'cannot store a view beyond its owner scope'
+done
+out=$("$RIS" run test/ris/roots_holders.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = 'PASS: roots and holders' ]; then
+  echo "runs     roots_holders"
+else
+  echo "FAILED   roots_holders: $out"
+  status=1
+fi
+
 out=$("$RIS" run test/ris/shrink_refill.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = 'PASS: shrink refill' ]; then
   echo "runs     shrink_refill"

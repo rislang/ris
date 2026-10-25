@@ -1,0 +1,12 @@
+tape do
+  left = Str::Builder.new
+  right = Str::Builder.new
+  left << "left"
+  right << "right"
+  view = case Program.args.size
+         when 0 then left.finish
+         else        right.finish
+         end
+  right.clear
+  puts view
+end

@@ -4,12 +4,15 @@
 class Iyi::TapeShrinkChecker
   alias Guards = Array(Tuple(UInt64, Bool))
   record View, root : UInt64, born : Int32, guards : Guards = Guards.new
+  # Roots name storage handles; views retain the storage a value borrows.
+  # Holder slots carry those borrows separately so replacement can kill them.
   record Value, roots : Array(UInt64), views : Array(View),
     procs : Array(ProcLiteral) = [] of ProcLiteral
   record Use, views : Array(View), node : ASTNode, guards : Guards
   record Shrink, roots : Array(UInt64), at : Int32, node : Call, chain : String,
     guards : Guards
-  record Summary, seeds : Array(UInt64), shrinks : Hash(UInt64, String), result : Value
+  record Summary, seeds : Array(UInt64), shrinks : Hash(UInt64, String), result : Value,
+    stores : Hash(UInt64, Value) = Hash(UInt64, Value).new
   alias Env = Hash(String, Value)
 
   EMPTY  = Value.new([] of UInt64, [] of View)
@@ -21,6 +24,8 @@ class Iyi::TapeShrinkChecker
   @uses = [] of Use
   @shrinks = [] of Shrink
 
+  # An owner has one named construction. Intern paths from that declaration
+  # (or a call seed) so sibling fields never share an identity.
   @fields = Hash(Tuple(UInt64, String), UInt64).new
   @parents = Hash(UInt64, Tuple(UInt64, String)).new
   @next_root = 0_u64
@@ -28,6 +33,251 @@ class Iyi::TapeShrinkChecker
   @callback_chain = [] of String
   @active_procs = Set(UInt64).new
   @guards = Guards.new
+  @root_births = Hash(UInt64, Int32).new
+  @root_types = Hash(UInt64, Type).new
+  @root_scopes = Hash(UInt64, Array(UInt64)).new
+  @scopes = [] of UInt64
+  @checking = false
+
+  # Slots live in the environment, so branch and loop joins include stores.
+  private def root_birth(root : UInt64) : Int32
+    @root_births[root]? || @parents[root]?.try { |p| root_birth(p[0]) } || 0
+  end
+
+  private def root_scope(root : UInt64) : Array(UInt64)
+    @root_scopes[root]? || @parents[root]?.try { |p| root_scope(p[0]) } || [] of UInt64
+  end
+
+  private def slot(root : UInt64) : String
+    "#tape:#{root}"
+  end
+
+  private def stored(v : Value, env : Env) : Value
+    result = v
+    env.each do |key, contents|
+      next unless key.starts_with?("#tape:")
+      root = key[6..].to_u64
+      if contains_root?(v.roots, root)
+        result = merge(result, Value.new([] of UInt64, contents.views))
+      end
+    end
+    result
+  end
+
+  private def read_slots(v : Value, env : Env, type : Type?,
+                         fields : Array(UInt64)) : Value
+    result = Value.new([] of UInt64, v.views, v.procs)
+    v.roots.each do |root|
+      contents = env[slot(root)]?
+      nested = env.keys.any? do |key|
+        key.starts_with?("#tape:") && key != slot(root) &&
+          contains_root?([root], key[6..].to_u64)
+      end
+      if !fields.includes?(root)
+        result = merge(result, Value.new([root], [] of View))
+      elsif contents && !value_holder?(type) && !nested
+        result = merge(result, contents)
+      else
+        result = merge(result, read_back(Value.new([root], [] of View), type, env))
+      end
+    end
+    stored(result, env)
+  end
+
+  # A field read without a recorded store bounds a lifetime, not an
+  # identity. Include every compatible owner already in scope at or above
+  # that holder; parameter roots also bound caller storage.
+  private def read_back(v : Value, type : Type?, env : Env) : Value
+    return v unless type && @checking
+    unresolved = v.roots.select { |r| @parents.has_key?(r) && !env.has_key?(slot(r)) }
+    return v if unresolved.empty?
+    candidates = [] of UInt64
+    @root_types.to_a.each do |root, candidate|
+      candidate_roots(root, candidate, type).each do |candidate_root|
+        if unresolved.any? { |r| root_scope(candidate_root).all? { |scope| root_scope(r).includes?(scope) } }
+          candidates << candidate_root
+        end
+      end
+    end
+    born = unresolved.min_of { |r| root_birth(r) }
+    return v if candidates.empty?
+    Value.new((v.roots - unresolved + candidates).uniq,
+      (v.views.reject { |view| unresolved.includes?(view.root) } +
+       candidates.map { |r| View.new(r, born, @guards.dup) }).uniq, v.procs)
+  end
+
+  private def candidate_roots(root : UInt64, type : Type, wanted : Type,
+                              seen = Set(Type).new) : Array(UInt64)
+    type = type.remove_typedef
+    if wanted.is_a?(UnionType)
+      return wanted.union_types.flat_map do |member|
+        candidate_roots(root, type, member, seen.dup)
+      end.uniq
+    end
+    return [] of UInt64 unless seen.add?(type)
+    name = type.to_s
+    target = wanted.remove_typedef.to_s
+    compatible = name == target ||
+                 ({"Str", "Str::Span"}.includes?(target) &&
+                  {"Str::Builder", "Ary(UInt8)"}.includes?(name))
+    result = compatible ? [root] : [] of UInt64
+    # A reference field does not own the bytes it views. By-value nesting
+    # does: inspect it even when its getter has not yet been called.
+    if type.struct? && type.is_a?(InstanceVarContainer) &&
+       !storage_type?(type) && !{"Str", "Str::Span"}.includes?(name)
+      type.instance_vars.each do |field, var|
+        if field_type = var.type?
+          next if {"Str", "Str::Span"}.includes?(field_type.to_s)
+          next if field_type.is_a?(PointerInstanceType)
+          result.concat(candidate_roots(field_root(root, field), field_type,
+            wanted, seen.dup))
+        end
+      end
+    end
+    result
+  end
+
+  private def relative_path(root : UInt64, base : UInt64) : Array(String)?
+    return [] of String if root == base
+    if parent = @parents[root]?
+      relative_path(parent[0], base).try { |path| path + [parent[1]] }
+    end
+  end
+
+  private def aliases(root : UInt64, env : Env,
+                      seen = Set(UInt64).new) : Array(UInt64)
+    return [] of UInt64 unless seen.add?(root)
+    result = [root]
+    if parent = @parents[root]?
+      aliases(parent[0], env, seen).each do |base|
+        result << field_root(base, parent[1])
+      end
+    end
+    env[slot(root)]?.try &.roots.each do |source|
+      # A constructor's receiver is rebased into the field, not shared
+      # by every sibling. Borrowed storage has a separate declaration.
+      next if contains_root?([source], root)
+      result.concat(aliases(source, env, seen))
+    end
+    result.uniq
+  end
+
+  private def store(roots : Array(UInt64), v : Value, env : Env,
+                    node : ASTNode, replace = true)
+    roots = roots.flat_map do |root|
+      if parent = @parents[root]?
+        aliases(parent[0], env).map { |base| field_root(base, parent[1]) }
+      else
+        [root]
+      end
+    end.uniq
+    # Copy a by-value holder's slots, rather than baking its aggregate
+    # roots into the parent. This lets an emptied nested field forget its
+    # roots without changing a separate copy of the holder.
+    copies = Hash(Array(String), Value).new
+    carried = [] of View
+    copied = [] of UInt64
+    v.roots.each do |source|
+      type = @root_types[source]?
+      next unless value_holder?(type)
+      env.each do |key, contents|
+        next unless key.starts_with?("#tape:")
+        path = relative_path(key[6..].to_u64, source)
+        next unless path && !path.empty?
+        copies[path] = merge(copies[path]? || EMPTY, contents)
+        carried.concat(contents.views)
+        copied << source
+      end
+    end
+    complete = stored(v, env)
+    roots.each { |root| check_store(root, complete, node) }
+    v = Value.new(v.roots - copied,
+      (v.views - carried).uniq, v.procs)
+    # An array/builder handle aliases storage; it is not itself a live
+    # element view. Otherwise consuming that handle to clear it would
+    # falsely keep a view alive across its own clear.
+    borrowed = v.roots.reject do |root|
+      type = @root_types[root]?
+      value_holder?(type) || storage_type?(type)
+    end
+    v = Value.new(v.roots, (v.views + borrowed.map { |r| view(r) }).uniq, v.procs)
+    roots.each do |root|
+      strong = replace && roots.size == 1
+      if strong
+        env.reject! do |key, _|
+          key.starts_with?("#tape:") && contains_root?([root], key[6..].to_u64)
+        end
+      end
+      key = slot(root)
+      env[key] = strong ? v : merge(env[key]? || EMPTY, v)
+      copies.each do |path, contents|
+        destination = root
+        path.each { |name| destination = field_root(destination, name) }
+        key = slot(destination)
+        env[key] = strong ? contents : merge(env[key]? || EMPTY, contents)
+      end
+    end
+  end
+
+  private def value_holder?(type : Type?) : Bool
+    return false unless type
+    type = type.remove_typedef
+    if type.is_a?(UnionType)
+      members = type.union_types.select { |t| TapeChecker.tape_in(@program, t) }
+      return !members.empty? && members.all? { |t| value_holder?(t) }
+    end
+    TapeChecker.tape?(@program, type) &&
+      !TapeOwnerChecker.owner?(@program, type) && !storage_type?(type) &&
+      !{"Str", "Str::Span"}.includes?(type.to_s)
+  end
+
+  private def source_roots(v : Value) : Array(UInt64)
+    v.roots.reject { |r| value_holder?(@root_types[r]?) } + v.views.map(&.root)
+  end
+
+  private def source_scope(root : UInt64) : Array(UInt64)
+    declaration = root
+    while parent = @parents[declaration]?
+      declaration = parent[0]
+    end
+    type = @root_types[declaration]?
+    # A copied tape handle's header is not the owner of its bytes. Only
+    # named owners introduce a shorter lifetime than the caller's tape;
+    # a holder's recorded roots carry any such owner through the copy.
+    type && TapeOwnerChecker.owner?(@program, type) ? root_scope(root) : [] of UInt64
+  end
+
+  private def check_store(root : UInt64, v : Value, node : ASTNode)
+    if @checking
+      destinations = root_scope(root)
+      source_roots(v).each do |source|
+        scope = source_scope(source)
+        unless scope.all? { |part| destinations.includes?(part) }
+          node.raise "cannot store a view beyond its owner scope; " \
+                     "copy it with copy_to(owner) before storing it"
+        end
+      end
+    end
+  end
+
+  private def bind(target : Var, v : Value, env : Env, node : ASTNode)
+    binding = "#binding:#{target.name}"
+    declaration = env[binding]? || begin
+      @root_scopes[target.object_id] = @scopes.dup
+      env[binding] = Value.new([target.object_id], [] of View)
+    end
+    declaration.roots.each { |root| check_store(root, stored(v, env), node) }
+    env[target.name] = v
+  end
+
+  private def translated(v : Value, summary : Summary,
+                         inputs : Array(Value), allocation : UInt64? = nil) : Value
+    roots = v.roots.flat_map { |r| translate(r, summary, inputs, allocation) }.uniq
+    views = v.views.flat_map do |v|
+      translate(v.root, summary, inputs, allocation).map { |r| view(r) }
+    end
+    Value.new(roots, views)
+  end
 
   private def view(root : UInt64) : View
     View.new(root, @uses.size, @guards.dup)
@@ -68,19 +318,26 @@ class Iyi::TapeShrinkChecker
   private def seed_env(target : Def, seeds : Array(UInt64)) : Env
     env = Env.new
     env["self"] = Value.new([seeds[0]], [] of View)
+    if owner = target.owner?
+      @root_types[seeds[0]] = owner
+    end
+
     target.args.each_with_index do |arg, i|
+      @root_types[seeds[i + 1]] = arg.type if arg.type?
       env[arg.name] = reference?(arg) ? Value.new([seeds[i + 1]], [] of View) : EMPTY
     end
     env
   end
 
   private def translate(root : UInt64, summary : Summary,
-                        inputs : Array(Value)) : Array(UInt64)
+                        inputs : Array(Value), allocation : UInt64? = nil) : Array(UInt64)
     if i = summary.seeds.index(root)
       input = inputs[i]? || EMPTY
-      input.roots + input.views.map(&.root)
+      input.roots.empty? ? input.views.map(&.root) : input.roots
     elsif parent = @parents[root]?
-      translate(parent[0], summary, inputs).map { |r| field_root(r, parent[1]) }
+      translate(parent[0], summary, inputs, allocation).map { |r| field_root(r, parent[1]) }
+    elsif allocation && summary.result.roots.includes?(root)
+      [allocation]
     else
       [] of UInt64
     end
@@ -102,7 +359,8 @@ class Iyi::TapeShrinkChecker
         @uses.clear
         @shrinks.clear
         @returns = EMPTY
-        result = merge(value(target.body, seed_env(target, old.seeds)), @returns)
+        env = seed_env(target, old.seeds)
+        result = merge(value(target.body, env), @returns)
         effects = old.shrinks.dup
         @shrinks.each do |effect|
           effect.roots.each { |root| effects[root] ||= effect.chain }
@@ -110,7 +368,15 @@ class Iyi::TapeShrinkChecker
         # Local allocations cannot be exported as parameter effects.
         effects.reject! { |root, _| translate(root, old, old.seeds.map { |r| Value.new([r], [] of View) }).empty? }
         result = Value.new(result.roots, result.views.map { |v| View.new(v.root, 0) })
-        updated = Summary.new(old.seeds, effects, merge(old.result, result))
+        stores = old.stores.dup
+        env.each do |key, contents|
+          next unless key.starts_with?("#tape:")
+          root = key[6..].to_u64
+          next if translate(root, old, old.seeds.map { |r| Value.new([r], [] of View) }).empty? && !contains_root?(result.roots, root)
+          canonical = Value.new(contents.roots, contents.views.map { |v| View.new(v.root, 0) })
+          stores[root] = canonical
+        end
+        updated = Summary.new(old.seeds, effects, merge(old.result, result), stores)
         changed ||= updated != old
         @graph.effects[target.object_id].shrink = updated
       end
@@ -120,9 +386,17 @@ class Iyi::TapeShrinkChecker
 
   def run(node : ASTNode)
     @graph.defs.each_value do |target|
-      check(target.body, seed_env(target, @graph.effects[target.object_id].shrink.not_nil!.seeds)) unless TapeRules.unsafe?(@program, target)
+      check(target.body, seed_env(target, @graph.effects[target.object_id].shrink.not_nil!.seeds), target) unless TapeRules.unsafe?(@program, target)
     end
     check(node)
+  end
+
+  private def root_name(root : UInt64) : String
+    if parent = @parents[root]?
+      "#{root_name(parent[0])}.#{parent[1]}"
+    else
+      @root_types[root]?.try(&.to_s) || "tape"
+    end
   end
 
   private def contains_root?(roots : Array(UInt64), root : UInt64) : Bool
@@ -134,17 +408,31 @@ class Iyi::TapeShrinkChecker
     end
   end
 
-  private def check(body : ASTNode, env = Env.new)
+  private def check(body : ASTNode, env = Env.new, owner : Def? = nil)
     @uses.clear
     @shrinks.clear
     @returns = EMPTY
-    value(body, env)
+    @checking = true
+    @scopes.clear
+    @scopes << owner.object_id if owner
+    @root_scopes.clear
+    @root_births.clear
+    @root_types.select! { |root, _| env.values.any? { |v| v.roots.includes?(root) } }
+    result = merge(value(body, env), @returns)
+    if owner && !{"new", "initialize"}.includes?(owner.name)
+      boundary = fresh
+      @root_scopes[boundary] = [] of UInt64
+      check_store(boundary, stored(result, env), body)
+    end
+    @checking = false
     @shrinks.each do |shrink|
       @uses.each_with_index do |use, i|
         next if i < shrink.at
         next unless compatible?(shrink.guards, use.guards)
-        if use.views.any? { |view| view.born <= shrink.at && compatible?(view.guards, shrink.guards) && contains_root?(shrink.roots, view.root) }
+        if live = use.views.find { |view| view.born <= shrink.at && compatible?(view.guards, shrink.guards) && contains_root?(shrink.roots, view.root) }
           shrink.node.raise "cannot shrink tape storage with a live view " \
+                            "of #{root_name(live.root)} while shrinking " \
+                            "#{shrink.roots.map { |r| root_name(r) }.join(", ")}, " \
                             "used at #{use.node.location} via #{shrink.chain}: copy the view first " \
                             "with copy_to(owner), finish using it before " \
                             "shrinking, or keep an index instead of a view"
@@ -197,6 +485,7 @@ class Iyi::TapeShrinkChecker
 
   private def loop_value(body : ASTNode, env : Env,
                          cond : ASTNode? = nil) : Value
+    @scopes << body.object_id
     start = @uses.size
     shrink_start = @shrinks.size
     returns = @returns
@@ -224,6 +513,7 @@ class Iyi::TapeShrinkChecker
     # A while condition is evaluated once more on the exit edge.
     value(cond, round) if cond
     join_env(head, round).each { |key, v| env[key] = v }
+    @scopes.pop
     result
   end
 
@@ -245,20 +535,31 @@ class Iyi::TapeShrinkChecker
                              else
                                EMPTY
                              end
+      v = stored(v, env)
       use(v, node)
       v
     when Assign
       v = value(node.value, env)
       target = node.target
-      if target.is_a?(Var) || target.is_a?(InstanceVar)
-        env[target.name] = v
+      if target.is_a?(InstanceVar)
+        roots = (env["self"]? || EMPTY).roots.map { |r| field_root(r, target.name).as(UInt64) }
+        # Fresh growing fields are built into their own slot. A borrowed
+        # handle instead keeps the identity of the storage it aliases.
+        contents = storage?(node.value) && @graph.fresh?(node.value) ? EMPTY : v
+        store(roots, contents, env, node)
+      elsif target.is_a?(Var)
+        if target.name.starts_with?("__")
+          env[target.name] = v
+        else
+          bind(target, v, env, node)
+        end
       end
       v
     when TypeDeclaration
       if exp = node.value
         v = value(exp, env)
         target = node.var
-        env[target.name] = v if target.is_a?(Var)
+        bind(target, v, env, node) if target.is_a?(Var)
         v
       else
         EMPTY
@@ -271,6 +572,13 @@ class Iyi::TapeShrinkChecker
       return value(node.expanded.not_nil!, env) if node.expanded
       # Specialized-out branches retain syntax without executable targets.
       return EMPTY unless node.type?
+      if node.name == "new"
+        # Ordinary tape allocations use the caller's tape. A named Owner
+        # has its own lexical storage, including each of its field paths.
+        @root_scopes[node.object_id] = storage?(node) || {"Str", "Str::Span"}.includes?(node.type.to_s) ? [] of UInt64 : @scopes.dup
+        @root_types[node.object_id] = node.type
+        @root_births[node.object_id] = @uses.size
+      end
       receiver = node.obj.try { |obj| value(obj, env) } || env["self"]? || EMPTY
       args = node.args.map { |arg| value(arg, env) }
       named = Hash(String, Value).new
@@ -283,32 +591,72 @@ class Iyi::TapeShrinkChecker
                          @graph.targets(node).try &.any? { |target| storage_type?(target.owner) }
       if storage_receiver && SHRINK.includes?(node.name)
         shrink(receiver.roots, node, chain(node.name))
+        if node.name == "clear" && receiver.roots.size == 1
+          env.reject! do |key, _|
+            key.starts_with?("#tape:") && contains_root?(receiver.roots, key[6..].to_u64)
+          end
+        end
+      end
+      if storage_receiver && {"<<", "push", "[]=", "__loop_store", "unchecked_store"}.includes?(node.name)
+        if element = args.last?
+          store(receiver.roots.map { |r| field_root(r, "[]").as(UInt64) }, element, env, node, false)
+        end
+      end
+      element_result : Value? = nil
+      if node.obj.try(&.type?.try(&.to_s.starts_with?("Ary("))) &&
+         {"[]", "[]?", "first", "first?", "last", "last?", "fetch", "__loop_fetch"}.includes?(node.name)
+        elements = receiver.roots.map { |r| field_root(r, "[]").as(UInt64) }
+        if !elements.empty? && elements.all? { |r| env.has_key?(slot(r)) }
+          element_result = elements.reduce(EMPTY) do |result, root|
+            contents = value_holder?(node.type?) ? Value.new([root], [] of View) : env[slot(root)]
+            merge(result, stored(contents, env))
+          end
+        end
       end
       inputs = [receiver] + args
       call_result = EMPTY
+      result_fields = [] of UInt64
       summarized = false
       incomplete_result = false
       targets = @graph.targets(node)
       if targets && !targets.empty?
+        before_calls = env.dup
+        after_calls : Env? = nil
         targets.each do |target|
+          call_env = before_calls.dup
           if summary = @graph.effects[target.object_id]?.try(&.shrink)
             summarized = true
             actuals = [receiver] + target.args.map_with_index do |arg, i|
               named[arg.external_name]? || args[i]? || EMPTY
             end
             summary.shrinks.each do |root, chain|
-              roots = translate(root, summary, actuals)
+              roots = translate(root, summary, actuals).flat_map { |r| aliases(r, env) }.uniq
               shrink(roots, node, chain("#{node.name} -> #{chain}"))
             end
-            roots = summary.result.roots.flat_map { |r| translate(r, summary, actuals) }
-            views = summary.result.views.flat_map { |v| translate(v.root, summary, actuals) }
-            call_result = merge(call_result, Value.new(roots, views.map { |r| view(r) }))
+            summary.stores.each do |root, contents|
+              store(translate(root, summary, actuals, node.object_id),
+                translated(contents, summary, actuals, node.object_id), call_env, node)
+            end
+            # Only a field load needs read-back. Roots forwarded from an
+            # argument already name its storage, even when that storage is
+            # itself a field of another owner.
+            summary.result.roots.each do |root|
+              if @parents.has_key?(root)
+                result_fields.concat(translate(root, summary, actuals, node.object_id))
+              end
+            end
+            call_result = merge(call_result, translated(summary.result, summary, actuals, node.object_id))
           else
             incomplete_result = true
             unless TapeRules.runtime?(@program, target.location)
               inputs.each { |v| shrink((v.roots + v.views.map(&.root)).uniq, node, chain("#{node.name} (opaque)")) }
             end
           end
+          after_calls = after_calls.try { |previous| join_env(previous, call_env) } || call_env
+        end
+        if joined = after_calls
+          env.clear
+          joined.each { |key, contents| env[key] = contents }
         end
       elsif !TapeRules.runtime?(@program, node.location)
         inputs.each { |v| shrink((v.roots + v.views.map(&.root)).uniq, node, chain("#{node.name} (unknown)")) }
@@ -327,11 +675,13 @@ class Iyi::TapeShrinkChecker
         yielded = Value.new(derived.roots, yielded_views)
         block.args.each { |arg| outer[arg.name] = yielded }
         @callback_chain << "#{node.name} block"
+        @scopes << block.object_id
         if {"tape", "local_tape"}.includes?(node.name)
           value(block.body, outer)
         else
           loop_value(block.body, outer)
         end
+        @scopes.pop
         @callback_chain.pop
         use(yielded, block)
         env.keys.each { |key| env[key] = merge(env[key], outer[key]? || EMPTY) }
@@ -354,14 +704,48 @@ class Iyi::TapeShrinkChecker
         end
       end
       if {"copy_to", "dup", "to_heap", "new"}.includes?(node.name)
-        reference?(node) ? Value.new([node.object_id], [] of View) : EMPTY
+        if reference?(node)
+          @root_scopes[node.object_id] = storage?(node) || {"Str", "Str::Span"}.includes?(node.type.to_s) ? [] of UInt64 : @scopes.dup
+          Value.new([node.object_id], [] of View)
+        else
+          EMPTY
+        end
+      elsif element_result && reference?(node)
+        if storage?(node)
+          element_result = merge(element_result,
+            Value.new([] of UInt64, receiver.roots.map { |r| view(r) }))
+        end
+        use(element_result, node)
+        element_result
       elsif summarized && reference?(node)
         call_result = merge(call_result, derived) if incomplete_result
-        views = call_result.views.map { |v| view(v.root) }
-        unless storage?(node)
-          views += call_result.roots.map { |r| view(r) }
+        # Result views are born after the callee's shrinks. Stored views
+        # keep their original birth when read back from a holder.
+        call_result = Value.new(call_result.roots,
+          call_result.views.map { |v| view(v.root) })
+        if !storage?(node) && !VIEWS.includes?(node.name)
+          call_result = read_slots(call_result, env, node.type?, result_fields)
         end
-        Value.new(call_result.roots, views)
+        call_result.roots.each { |r| @root_types[r] ||= node.type }
+        if storage?(node)
+          aliases = call_result.roots.flat_map do |root|
+            (env[slot(root)]?.try(&.roots) || [] of UInt64).reject do |source|
+              # Constructor storage built into a field is represented by
+              # its receiver until rebased here. It is not an alias of
+              # every sibling field in that receiver.
+              contains_root?([source], root)
+            end
+          end
+          call_result = merge(call_result, Value.new(aliases, [] of View))
+        end
+        call_result = stored(call_result, env)
+        views = call_result.views
+        unless storage?(node) || value_holder?(node.type?)
+          views += call_result.roots.reject { |r| env.has_key?(slot(r)) }.map { |r| view(r) }
+        end
+        result = Value.new(call_result.roots, views)
+        use(result, node)
+        result
       elsif reference?(node)
         views = derived.views
         if VIEWS.includes?(node.name) || !storage?(node)
@@ -376,17 +760,27 @@ class Iyi::TapeShrinkChecker
       left, right = env.dup, env.dup
       choice = fresh
       @guards << {choice, true}
+      @scopes << node.then.object_id
       a = value(node.then, left)
+      @scopes.pop
       @guards.pop
       @guards << {choice, false}
+      @scopes << node.else.object_id
       b = value(node.else, right)
+      @scopes.pop
       @guards.pop
       (left.keys | right.keys).each { |key| env[key] = merge(left[key]? || EMPTY, right[key]? || EMPTY) }
-      merge(a, b)
+      result = merge(a, b)
+      boundary = node.object_id
+      @root_scopes[boundary] = @scopes.dup
+      store([boundary], result, env, node)
+      result
     when Return
       result = node.exp.try { |exp| value(exp, env) } || EMPTY
       @returns = merge(@returns, result)
       result
+    when Primitive
+      node.name == "allocate" ? Value.new([node.object_id], [] of View) : EMPTY
     when ProcLiteral
       Value.new([] of UInt64, [] of View, [node])
     when Def, FunDef, ClassDef, ModuleDef, Macro
@@ -419,5 +813,4 @@ class Iyi::TapeShrinkChecker
   def merge_child(a : Value, b : Value) : Value
     merge(a, b)
   end
-
 end

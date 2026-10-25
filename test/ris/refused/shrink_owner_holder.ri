@@ -1,0 +1,13 @@
+@[Owner]
+struct ViewOwner
+  property text : Str = ""
+end
+
+tape do
+  owner = ViewOwner.new
+  bytes = Str::Builder.new
+  bytes << "abc"
+  owner.text = bytes.finish
+  bytes.clear
+  puts owner.text
+end

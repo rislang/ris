@@ -1,0 +1,91 @@
+@[OnTape]
+struct HeldText
+  property text : Str
+
+  def initialize(@text)
+  end
+end
+
+@[OnTape]
+struct NestedText
+  getter inner : HeldText
+
+  def initialize(@inner)
+  end
+end
+
+@[Owner]
+struct SeparateFields
+  property held : Str = ""
+  getter left = Str::Builder.new
+  getter right = Str::Builder.new
+end
+
+@[OnTape]
+struct BorrowedFields
+  getter left : Ary(Int32)
+  getter right : Ary(Int32)
+  getter fresh = Ary(Int32).new
+
+  def initialize(@left, @right)
+  end
+end
+
+def local_holder : Bool
+  owner = SeparateFields.new
+  owner.left << "local"
+  holder = HeldText.new(owner.left.finish)
+  holder.text == "local"
+end
+
+tape do
+  raise "local owner holder" unless local_holder
+  owner = SeparateFields.new
+  owner.left << "abc"
+  owner.right << "xyz"
+  view = owner.right.finish
+  owner.left.clear
+  raise "field path" unless view == "xyz"
+  owner.held = owner.right.finish
+  owner.held = Str.view("")
+  owner.right.clear
+  raise "empty owner field" unless owner.held.empty?
+
+  bytes = Str::Builder.new
+  bytes << "held"
+  holder = HeldText.new(bytes.finish)
+  holder.text = Str.view("")
+  bytes.clear
+  raise "empty holder" unless holder.text.empty?
+  bytes << "nested"
+  alternative = if Program.args.empty?
+                  NestedText.new(HeldText.new(bytes.finish))
+                else
+                  NestedText.new(HeldText.new(Str.view("static")))
+                end
+  raise "branch holder" unless alternative.inner.text.size > 0
+  nested = NestedText.new(HeldText.new(bytes.finish))
+  nested.inner.text = Str.view("")
+  bytes.clear
+  raise "empty nested holder" unless nested.inner.text.empty?
+
+  bytes << "array"
+  array = Ary(Str).new(1)
+  array << bytes.finish
+  copied = array[0]
+  array.clear
+  raise "read-back root" unless copied == "array"
+  bytes.clear
+  raise "empty array" unless array.empty?
+  left = Ary(Int32).new(1)
+  right = Ary(Int32).new(1)
+  left << 1
+  right << 2
+  fields = BorrowedFields.new(left, right)
+  link = right.link(0, UInt32)
+  fields.left.clear
+  fields.fresh.clear
+  raise "borrowed field identity" unless right[link] == 2
+  raise "borrowed field mutation" unless left.empty?
+  puts "PASS: roots and holders"
+end

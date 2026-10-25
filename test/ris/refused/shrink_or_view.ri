@@ -1,0 +1,13 @@
+def maybe_text(bytes : Str::Builder) : Str?
+  Program.args.empty? ? nil : bytes.finish
+end
+
+tape do
+  left = Str::Builder.new
+  right = Str::Builder.new
+  left << "left"
+  right << "right"
+  view = maybe_text(left) || right.finish
+  right.clear
+  puts view
+end

@@ -1,0 +1,12 @@
+@[Owner]
+struct ReturnOwner
+  getter bytes = Str::Builder.new
+end
+
+def escaped : Str
+  owner = ReturnOwner.new
+  owner.bytes << "local"
+  owner.bytes.finish
+end
+
+tape { puts escaped }

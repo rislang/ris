@@ -1,0 +1,22 @@
+@[OnTape]
+struct StoreHolder
+  property text : Str = ""
+end
+
+@[Owner]
+struct StoreOwner
+  getter bytes = Str::Builder.new
+end
+
+tape do
+  left = StoreHolder.new
+  if Program.args.empty?
+    right = StoreHolder.new
+    destination = Program.args.size == 1 ? right : left
+    owner = StoreOwner.new
+    owner.bytes << "temporary"
+    destination.text = owner.bytes.finish
+    nil
+  end
+  puts left.text
+end

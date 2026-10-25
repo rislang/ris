@@ -1,0 +1,23 @@
+@[OnTape]
+struct InnerView
+  property text : Str
+
+  def initialize(@text)
+  end
+end
+
+@[OnTape]
+struct OuterView
+  getter inner : InnerView
+
+  def initialize(@inner)
+  end
+end
+
+tape do
+  bytes = Str::Builder.new
+  bytes << "abc"
+  holder = OuterView.new(InnerView.new(bytes.finish))
+  bytes.clear
+  puts holder.inner.text
+end

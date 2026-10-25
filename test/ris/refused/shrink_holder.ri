@@ -1,0 +1,15 @@
+@[OnTape]
+struct HeldView
+  property text : Str
+
+  def initialize(@text)
+  end
+end
+
+tape do
+  bytes = Str::Builder.new
+  bytes << "abc"
+  holder = HeldView.new(bytes.finish)
+  bytes.clear
+  puts holder.text
+end
