@@ -11,6 +11,8 @@
 # reached it while blocked. Generous margins, because the aarch64 arm of CI
 # runs under emulation.
 
+# ris: calls C (`lib LibC`), and a script builds copies outside bench/.
+@[Ffi]
 import std/gc::{GC}
 
 def fail(message : String) : Nil

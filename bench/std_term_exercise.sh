@@ -43,7 +43,8 @@ if [ -n "$PY" ] && "$PY" -c 'import pty, termios, fcntl' >/dev/null 2>&1 && comm
 fi
 
 IYI="${IYI:-$REPO/bin/iyi}"
-WORK="$(mktemp -d)"
+mkdir -p "$REPO/bench/.work"
+WORK="$(mktemp -d "$REPO/bench/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
 # path built from `pwd` is `/c/...` and finds no prelude at all, and a
 # scratch directory named `/tmp/tmp.X` is silently ignored on that path, so

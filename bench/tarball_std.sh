@@ -33,7 +33,8 @@ ROOT="${1:-$REPO/.build/iyi-package}"
 IYI="$ROOT/bin/iyi"
 SHIPPED="$ROOT/share/iyi/src/std"
 SAMPLES="$ROOT/share/iyi/samples"
-WORK="$(mktemp -d)"
+mkdir -p "$REPO/bench/.work"
+WORK="$(mktemp -d "$REPO/bench/.work/XXXXXX")"
 # And the same for the scratch directory, which is where the compiler is
 # told to write every binary it builds here.
 case "$(uname -s)" in

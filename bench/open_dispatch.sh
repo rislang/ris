@@ -37,7 +37,8 @@ esac
 # wrapper, and on Windows the caller has to point at the built exe itself.
 IYI="${IYI:-$REPO/bin/iyi}"
 FIXTURE="$REPO/bench/open_dispatch_fixture"
-WORK="$(mktemp -d)"
+mkdir -p "$REPO/bench/.work"
+WORK="$(mktemp -d "$REPO/bench/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a
 # scratch directory named `/tmp/tmp.X` is silently ignored on the search
 # path, so the patched copy is never read and the proof that a check can

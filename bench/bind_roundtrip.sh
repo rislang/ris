@@ -28,7 +28,8 @@ IYI="${IYI:-$REPO/bin/iyi}"
 # which is a measurement that never happened rather than one that held.
 STRINGS=""
 command -v strings >/dev/null 2>&1 && STRINGS=strings
-WORK="$(mktemp -d)"
+mkdir -p "$REPO/bench/.work"
+WORK="$(mktemp -d "$REPO/bench/.work/XXXXXX")"
 
 # A native compiler cannot resolve this shell's own path mapping: a search
 # path built from the shell's `pwd` finds no prelude at all, and the sources

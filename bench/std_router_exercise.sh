@@ -47,7 +47,8 @@ for candidate in "${GO:-}" go /usr/local/go/bin/go "$HOME"/.local/share/mise/ins
 done
 
 IYI="${IYI:-$REPO/bin/iyi}"
-WORK="$(mktemp -d)"
+mkdir -p "$REPO/bench/.work"
+WORK="$(mktemp -d "$REPO/bench/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping, so the
 # scratch directory is named the way it reads it.
 case "$(uname -s)" in

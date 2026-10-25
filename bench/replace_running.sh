@@ -26,7 +26,8 @@ esac
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 IYI="${IYI:-$REPO/.build/iyi.exe}"
-WORK="$(mktemp -d)"
+mkdir -p "$REPO/bench/.work"
+WORK="$(mktemp -d "$REPO/bench/.work/XXXXXX")"
 status=0
 step() { echo "== $1"; }
 

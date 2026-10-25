@@ -391,6 +391,10 @@ module Iyi
     # `::Codec` in its own build, and no spelling worked in both.
     property iyi_root_package : {String, String}? = nil
 
+    # ris: the marks the program's own manifest forbids in its files,
+    # `forbid ffi, pointer_unsafe` (`Iyi::FfiBoundaryChecker`).
+    property iyi_forbids : Array(String) = [] of String
+
     # The name the program's own modules live under: the manifest's last
     # segment (`Mod::ModFile.package_name`), or nil.
     def iyi_root_package_name : String?
@@ -1508,6 +1512,9 @@ module Iyi
       # ris: `@[Ffi]` as a file's first statement, above its header if it
       # has one, lets the file use raw pointers (`Iyi::FfiBoundaryChecker`).
       types["Ffi"] = AnnotationType.new self, self, "Ffi"
+      # ris: `@[PointerUnsafe("reason")]` on a def lets its body use raw
+      # pointers without calling C (`Iyi::FfiBoundaryChecker`).
+      types["PointerUnsafe"] = AnnotationType.new self, self, "PointerUnsafe"
 
       # iyi: the marker that makes a union member an error member (SPEC.md
       # III.1.1). Created here rather than declared in the prelude because the

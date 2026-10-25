@@ -67,3 +67,7 @@ __pycache__/
 # ris: scripts/spec-par.sh
 /spec-out/
 /spec-build.log
+
+# ris: the bench scripts' work directories, so the probes they write are
+# std's exercises under bench/ (FfiBoundaryChecker).
+/bench/.work/

@@ -35,7 +35,8 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 # the wrapper in bin is a posix shell script, so a caller that already has a
 # compiler of its own names it through the environment.
 IYI="${IYI:-$REPO/bin/iyi}"
-WORK="$(mktemp -d)"
+mkdir -p "$REPO/bench/.work"
+WORK="$(mktemp -d "$REPO/bench/.work/XXXXXX")"
 
 # A native compiler cannot resolve this shell's own path mapping: a search
 # path built from the shell's `pwd` finds no prelude at all, and a program
@@ -555,7 +556,7 @@ fi
 # ── 4. Failure proof: the interleaving assert is reachable ────────────────
 step "failure proof: a wrong order is refused"
 sed 's/== "bababa"/== "aaabbb"/' "$REPO/bench/concurrency_exercise.iyi" > misordered.iyi
-if ! "$IYI" build --allow-unsafe misordered.iyi -o misordered > build-misordered.log 2>&1; then
+if ! "$IYI" build misordered.iyi -o misordered > build-misordered.log 2>&1; then
   echo "misordered probe failed to build:"
   tail -5 build-misordered.log
   exit 1

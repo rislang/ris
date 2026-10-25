@@ -25,7 +25,8 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 # The gate runs whatever compiler the caller names; `bin/iyi` is a shell
 # wrapper, and on Windows the caller has to point at the built exe itself.
 IYI="${IYI:-$REPO/bin/iyi}"
-WORK="$(mktemp -d)"
+mkdir -p "$REPO/bench/.work"
+WORK="$(mktemp -d "$REPO/bench/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
 # path built from the shell's `pwd` finds no prelude at all, and a cache or
 # mirror named `/tmp/tmp.X` is a directory the compiler cannot open.

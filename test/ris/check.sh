@@ -8,8 +8,6 @@
 #
 #   bash test/ris/check.sh
 set -uo pipefail
-# The pointer rule is tested here, so CI's switch for bench probes is off.
-unset IYI_ALLOW_UNSAFE
 cd "$(dirname "$0")/../.."
 RIS=${RIS:-./bin/ris}
 status=0
@@ -54,6 +52,9 @@ expect ffi_pointer      "\`Pointer\` outside an @[Ffi] module"
 expect ffi_to_unsafe    "Read a byte with \`s.byte_at(i)\`"
 expect ffi_lib          "a \`lib\` block outside an @[Ffi] module"
 expect ffi_string_new   "Build it with \`String.build(capacity)"
+expect pointer_unsafe_reason "takes the reason the def needs a pointer"
+expect pointer_unsafe_stray  "@[PointerUnsafe] marks a def"
+expect pointer_unsafe_lib    "a \`lib\` block outside an @[Ffi] module"
 expect raw_pointer      "to_unsafe\` of a Str outside a @[TapeUnsafe] def"
 expect raw_view         "Str.new(pointer, size)\` outside a @[TapeUnsafe] def"
 expect std/tape_unsafe_codec "reaches no \`lib\` fun or system call"
@@ -112,6 +113,23 @@ if [ "$out" = $'1\ntrue\ntrue\ntrue\nC\ntrue' ]; then echo "runs     scope_clean
 out=$("$RIS" run test/ris/lifetime_flow.ri 2>&1)
 if [ "$out" = $'A\nA\nA\nA' ]; then echo "runs     lifetime_flow"; else echo "FAILED   lifetime_flow: $out"; status=1; fi
 
+out=$("$RIS" run test/ris/pointer_unsafe.ri 2>&1)
+if [ "$out" = 104 ]; then echo "runs     pointer_unsafe"; else echo "FAILED   pointer_unsafe: $out"; status=1; fi
+for name in ffi pointer; do
+  out=$("$RIS" build --no-codegen "test/ris/forbid/$name.ri" 2>&1)
+  if grep -qF "manifest says \`forbid" <<<"$out"; then
+    echo "refused  forbid/$name"
+  else
+    echo "FAILED   forbid/$name: $out"; status=1
+  fi
+done
+out=$("$RIS" unsafe test/ris/forbid 2>&1)
+if grep -qF "pointer.ri:2: @[PointerUnsafe] reads the first byte" <<<"$out" &&
+   grep -qF "ffi.ri:1: @[Ffi]" <<<"$out"; then
+  echo "lists    unsafe"
+else
+  echo "FAILED   unsafe: $out"; status=1
+fi
 out=$("$RIS" run test/ris/ffi_marked.ri 2>&1)
 if [ "$out" = $'4\n111' ]; then echo "runs     ffi_marked"; else echo "FAILED   ffi_marked: $out"; status=1; fi
 

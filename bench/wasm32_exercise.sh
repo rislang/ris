@@ -22,7 +22,8 @@ case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT) PSEP=';' ;;
   *) PSEP=':' ;;
 esac
-WORK="$(mktemp -d)"
+mkdir -p "$REPO/bench/.work"
+WORK="$(mktemp -d "$REPO/bench/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
 # path built from the shell's `pwd` finds no prelude at all, and a scratch
 # directory named `/tmp/tmp.X` is silently ignored on the search path, so

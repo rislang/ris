@@ -16,7 +16,8 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 # The gate runs the compiler the caller names; bin/iyi is a POSIX shell
 # wrapper a Windows build cannot run.
 IYI="${IYI:-$REPO/bin/iyi}"
-WORK="$(mktemp -d)"
+mkdir -p "$REPO/bench/.work"
+WORK="$(mktemp -d "$REPO/bench/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 
 # A native compiler cannot resolve this shell's own path mapping: a search

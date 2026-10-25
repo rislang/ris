@@ -32,7 +32,8 @@ esac
 IYI="${IYI:-$REPO/bin/iyi}"
 CRYSTAL="${CRYSTAL:-$REPO/bin/crystal}"
 FIXTURE="$REPO/bench/migrate_fixture"
-WORK="$(mktemp -d)"
+mkdir -p "$REPO/bench/.work"
+WORK="$(mktemp -d "$REPO/bench/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a
 # scratch directory named `/tmp/tmp.X` is silently ignored on the search
 # path, so the patched copy is never read and the proof that a check can

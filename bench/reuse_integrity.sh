@@ -15,7 +15,8 @@ set -u
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 IYI="${IYI:-$REPO/bin/iyi}"
-WORK="$(mktemp -d)"
+mkdir -p "$REPO/bench/.work"
+WORK="$(mktemp -d "$REPO/bench/.work/XXXXXX")"
 PSEP=":"
 # A native compiler cannot read this shell's path mapping, and a patched
 # prelude it cannot find is a proof that quietly stops proving.

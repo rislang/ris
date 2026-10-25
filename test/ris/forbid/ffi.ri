@@ -1,0 +1,6 @@
+@[Ffi]
+lib LibC5
+  fun getpid : Int32
+end
+
+puts LibC5.getpid

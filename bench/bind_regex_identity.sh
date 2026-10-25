@@ -34,7 +34,8 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 # compilers of its own names them through the environment.
 CRYSTAL="${CRYSTAL:-$REPO/bin/crystal}"
 IYI="${IYI:-$REPO/bin/iyi}"
-WORK="$(mktemp -d)"
+mkdir -p "$REPO/bench/.work"
+WORK="$(mktemp -d "$REPO/bench/.work/XXXXXX")"
 
 # A native compiler cannot resolve this shell's own path mapping: a search
 # path built from the shell's `pwd` finds no prelude at all, and the sources

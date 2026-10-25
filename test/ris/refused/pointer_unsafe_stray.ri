@@ -1,0 +1,3 @@
+@[PointerUnsafe("a mark on no def")]
+x = 1
+puts x

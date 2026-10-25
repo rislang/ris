@@ -29,7 +29,8 @@ for candidate in python3 python; do
 done
 
 IYI="${IYI:-$REPO/bin/iyi}"
-WORK="$(mktemp -d)"
+mkdir -p "$REPO/bench/.work"
+WORK="$(mktemp -d "$REPO/bench/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping (see
 # bench/std_compress_exercise.sh): the paths it is given are Windows'.
 case "$(uname -s)" in

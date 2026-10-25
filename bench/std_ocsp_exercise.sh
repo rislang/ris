@@ -43,7 +43,8 @@ for candidate in /opt/homebrew/opt/openssl@3/bin/openssl /usr/local/opt/openssl@
 done
 
 IYI="${IYI:-$REPO/bin/iyi}"
-WORK="$(mktemp -d)"
+mkdir -p "$REPO/bench/.work"
+WORK="$(mktemp -d "$REPO/bench/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's path mapping: a scratch
 # directory named `/tmp/tmp.X` is not found on Windows, and a patched copy
 # would never be read.

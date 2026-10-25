@@ -51,9 +51,6 @@ on: [push, pull_request]
 # 2026-09-27, and `check_daemon_matches` stopped the CLI specs, the two
 # being one commit. Safe for every step here, so git answers in them.
 env:
-  # ris: the gates' bench scripts write std's probes, pointers and all,
-  # outside bench/; test/ris/check.sh unsets it to test the rule itself.
-  IYI_ALLOW_UNSAFE: "1"
   GIT_CONFIG_COUNT: "1"
   GIT_CONFIG_KEY_0: safe.directory
   GIT_CONFIG_VALUE_0: "*"

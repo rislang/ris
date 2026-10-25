@@ -1,0 +1,10 @@
+@[PointerUnsafe("calling C is @[Ffi]'s")]
+def pid : Int32
+  LibC4.getpid
+end
+
+lib LibC4
+  fun getpid : Int32
+end
+
+puts pid

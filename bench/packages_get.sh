@@ -79,7 +79,8 @@ set -u
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 IYI="${IYI:-$REPO/bin/iyi}"
-WORK="$(mktemp -d)"
+mkdir -p "$REPO/bench/.work"
+WORK="$(mktemp -d "$REPO/bench/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a cache
 # or mirror named `/tmp/tmp.X` is a directory it cannot open.
 case "$(uname -s)" in

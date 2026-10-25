@@ -40,7 +40,8 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 # the built exes themselves.
 CRYSTAL="${CRYSTAL:-$REPO/bin/crystal}"
 IYI="${IYI:-$REPO/bin/iyi}"
-WORK="$(mktemp -d)"
+mkdir -p "$REPO/bench/.work"
+WORK="$(mktemp -d "$REPO/bench/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
 # path built from the shell's `pwd` finds no prelude at all, and a scratch
 # directory named `/tmp/tmp.X` on it is silently ignored, so the boundary

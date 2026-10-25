@@ -18,8 +18,8 @@ Ruby's syntax with Crystal's types, blocks, unions and nil-safety, plus:
   `import shop/order::*`; a URL works too: `import github.com/x/y::{Y}`.
 * `pub` exports. Every `pub def` writes all parameter and return types.
 * No reopening: classes are closed; `impl` goes in the trait's or type's module.
-* No pointers: `s[i]`, `s.byte_at(i)`, `s[a, n]`, `UInt8[N]`; only a module
-  at a C library's edge has them, marked `@[Ffi]` above its `module` line.
+* No pointers: `s[i]`, `s.byte_at(i)`, `s[a, n]`; a C module is `@[Ffi]`, a
+  def `@[PointerUnsafe("why")]`; `forbid ffi, pointer_unsafe` in ris.mod.
 * Errors are union members, no exceptions to catch:
 
 ```crystal

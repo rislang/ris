@@ -29,6 +29,10 @@
 # `../` or absolute - so it can never be mistaken for a module path, and
 # in double quotes when it holds a space: `=> "../my lib"`.
 #
+# ris: `forbid ffi, pointer_unsafe` refuses those marks in the program's own
+# files: `@[Ffi]`, `@[PointerUnsafe]`, or both. A library's promise that it
+# holds no pointers, which the compiler keeps.
+#
 # `#` comments a line out. Versions are `vMAJOR.MINOR.PATCH` — the `v` is
 # part of the spelling because it is part of the git tag the fetcher asks
 # for, and a spelling that round-trips beats one that is reassembled.
@@ -56,9 +60,14 @@ module Iyi::Mod
     getter requirements : Array(Requirement)
     # Module path to the directory it builds from, as written.
     getter replacements : Hash(String, String)
+    # ris: the marks `forbid` names, `ffi` and `pointer_unsafe`.
+    getter forbids : Array(String)
+
+    FORBIDDABLE = %w(ffi pointer_unsafe)
 
     def initialize(@path : String, @requirements : Array(Requirement),
-                   @replacements = {} of String => String)
+                   @replacements = {} of String => String,
+                   @forbids = [] of String)
     end
 
     # Parses manifest text. *source* names the file in errors, because a
@@ -67,6 +76,7 @@ module Iyi::Mod
       module_path = nil
       requirements = [] of Requirement
       replacements = {} of String => String
+      forbids = [] of String
 
       # A byte order mark is not part of the first directive: Windows
       # editors and PowerShell 5.1's `Out-File -Encoding utf8` write one,
@@ -146,8 +156,14 @@ module Iyi::Mod
             raise ModError.new("#{source}:#{line_number}: #{path} is already replaced; one directory builds it")
           end
           replacements[path] = check_directory(target, source, line_number)
+        when "forbid"
+          names = fields[1..].join(" ").split(/[\s,]+/, remove_empty: true)
+          if names.empty? || !names.all?(&.in?(FORBIDDABLE))
+            raise ModError.new("#{source}:#{line_number}: `forbid` takes `ffi`, `pointer_unsafe` or both, as `forbid ffi, pointer_unsafe`")
+          end
+          forbids.concat(names)
         else
-          raise ModError.new("#{source}:#{line_number}: `#{fields.first}` is not a directive; `module`, `require` and `replace` are the three")
+          raise ModError.new("#{source}:#{line_number}: `#{fields.first}` is not a directive; `module`, `require`, `replace` and `forbid` are the four")
         end
       end
 
@@ -155,7 +171,7 @@ module Iyi::Mod
         raise ModError.new("#{source}: no `module` line; a manifest starts by saying whose it is")
       end
 
-      new(module_path, requirements, replacements)
+      new(module_path, requirements, replacements, forbids.uniq)
     end
 
     # Checks *path* by the manifest's own grammar, for a path that arrives

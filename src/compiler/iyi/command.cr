@@ -67,6 +67,7 @@ class Iyi::Command
         spec                     build and run specs (in spec directory)
         test                     run every *_test.iyi: exit 0 passes, anything else fails
         vet                      report unreachable code; findings are the exit code
+        unsafe                   list @[Ffi], @[PointerUnsafe] and @[TapeUnsafe] marks
         tool                     run a tool
         help, --help, -h         show this help
         version, --version, -v   show version
@@ -177,6 +178,10 @@ class Iyi::Command
       # holds its full name.
       options.shift
       check
+    when command == "unsafe"
+      # Exact, like `check`.
+      options.shift
+      unsafe
     when command == "fix"
       # Exact: a verb that writes to files is not something to reach by
       # prefix.
@@ -858,12 +863,6 @@ class Iyi::Command
       opts.on("--no-color", "Disable colored output") do
         @color = false
         compiler.color = false
-      end
-
-      # ris: for a speed experiment, never in a commit: pointers anywhere,
-      # without passing ordinary code off as an `@[Ffi]` module.
-      opts.on("--allow-unsafe", "Allow raw pointers outside @[Ffi] modules,\nfor a speed experiment, never committed") do
-        compiler.allow_unsafe = true
       end
 
       unless no_codegen

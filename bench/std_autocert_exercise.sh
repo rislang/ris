@@ -53,7 +53,8 @@ ORACLE=""
 [ -n "$PY" ] && "$PY" -c 'from cryptography import x509; import ssl' >/dev/null 2>&1 && ORACLE=yes
 
 IYI="${IYI:-$REPO/bin/iyi}"
-WORK="$(mktemp -d)"
+mkdir -p "$REPO/bench/.work"
+WORK="$(mktemp -d "$REPO/bench/.work/XXXXXX")"
 case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT)
     REPO="$(cygpath -m "$REPO")"

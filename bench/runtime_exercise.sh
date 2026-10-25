@@ -16,7 +16,8 @@ set -u
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 IYI="${IYI:-$REPO/bin/iyi}"
-WORK="$(mktemp -d)"
+mkdir -p "$REPO/bench/.work"
+WORK="$(mktemp -d "$REPO/bench/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
 # path built from `pwd` is `/c/...` and finds no prelude at all, and a
 # scratch directory named `/tmp/tmp.X` is silently ignored on that path, so
@@ -133,7 +134,7 @@ grep -q 'deadlock' deadlock.txt || { echo "died without naming the deadlock:"; c
 # 6. Failure proof: interleaving assert can fail
 step "failure proof: a wrong interleaving order is refused"
 sed 's/== "bababa"/== "aaabbb"/' "$REPO/bench/runtime_exercise.iyi" > misordered.iyi
-if ! "$IYI" build --allow-unsafe misordered.iyi -o misordered > build-misordered.log 2>&1; then
+if ! "$IYI" build misordered.iyi -o misordered > build-misordered.log 2>&1; then
   echo "misordered probe failed to build:"
   cat build-misordered.log
   exit 1
@@ -151,7 +152,7 @@ fi
 # 7. Failure proof: IO cancellation assert can fail
 step "failure proof: an uncaught IO block fails rather than silently passing"
 sed 's/outcome.is_a?(Cancelled) ? "cancelled" : "read"/outcome.is_a?(Cancelled) ? "bogus" : "read"/' "$REPO/bench/runtime_exercise.iyi" > uncancelled.iyi
-if ! "$IYI" build --allow-unsafe uncancelled.iyi -o uncancelled > build-uncancelled.log 2>&1; then
+if ! "$IYI" build uncancelled.iyi -o uncancelled > build-uncancelled.log 2>&1; then
   echo "uncancelled probe failed to build:"
   cat build-uncancelled.log
   exit 1

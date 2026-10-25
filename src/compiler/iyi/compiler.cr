@@ -105,11 +105,6 @@ module Iyi
     # (useful to type-check a program)
     property? no_codegen = false
 
-    # ris: `--allow-unsafe` lifts `FfiBoundaryChecker` for one build. It
-    # judges the program's own files, never the prelude's, so it is outside
-    # the prelude's analysis (`OUTSIDE_PRELUDE_ANALYSIS`).
-    property? allow_unsafe = false
-
     # iyi: whether this build's link is the one the compiler builds itself
     # rather than the one `cc` builds for it, and whether that has already been
     # tried and failed. See `iyi_direct_link_command`.
@@ -418,6 +413,7 @@ module Iyi
         end
       end
       program.iyi_root_package = iyi_root_package_of(sources)
+      program.iyi_forbids = iyi_forbids_of(program.iyi_root_package)
       program.warnings = @warnings
       program.iyi_file_overrides = @iyi_file_overrides
       program.iyi_project_root = @iyi_project_root
@@ -534,7 +530,6 @@ module Iyi
       emit_bind emit_targets frame_pointers iyi_direct_link iyi_keep
       iyi_link_driver_only link_flags mattr mcmodel mcpu n_threads no_cleanup
       program progress_tracker single_module stderr target_machine verbose
-      allow_unsafe
     )
 
     # Everything that changes what the prelude analyses *to*. Macros branch on
@@ -3197,6 +3192,7 @@ module Iyi
         end
       end
       program.iyi_root_package = iyi_root_package_of(sources)
+      program.iyi_forbids = iyi_forbids_of(program.iyi_root_package)
       program
     end
 
@@ -3214,6 +3210,16 @@ module Iyi
       {Mod::ModFile.parse(File.read(manifest), manifest).path, root}
     rescue Mod::ModError
       nil
+    end
+
+    # ris: what the program's own manifest forbids (`forbid`), read where
+    # its package was found.
+    private def iyi_forbids_of(package : {String, String}?) : Array(String)
+      return [] of String unless package
+      manifest = Mod::Installer.manifest_in(package[1])
+      Mod::ModFile.parse(File.read(manifest), manifest).forbids
+    rescue Mod::ModError | File::Error
+      [] of String
     end
 
     private def parse(program, sources : Array)
