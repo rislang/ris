@@ -79,9 +79,12 @@ class Iyi::Program
         TapeChecker.new(self).run
         TapeOwnerChecker.new(self).run(result)
         TapeProgramChecker.new(self).run(result)
-        TapeRecursionChecker.new(self).run(result)
+        tape_graph = TapeCallGraph.new(self, result)
+        tape_shrink = TapeShrinkChecker.new(self, tape_graph)
+        tape_shrink.solve
+        TapeRecursionChecker.new(self, tape_graph).run(result)
         result.accept TapeLifetimeChecker.new(self)
-        TapeShrinkChecker.new(self).run(result)
+        tape_shrink.run(result)
         TapePointerChecker.new(self).run(result)
         TapeEscapeChecker.new(self).run(result)
         TapeScopeChecker.new(self).run(result)

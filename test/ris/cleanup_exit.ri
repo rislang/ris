@@ -6,6 +6,7 @@ def observe(label : Str, active : Bool) : Nil
   puts label
 end
 
+# Keep output buffered: exit must flush after running the defers.
 STDOUT.sync = false
 puts "flushed"
 defer observe("outer exit", true)

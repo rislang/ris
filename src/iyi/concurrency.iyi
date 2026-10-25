@@ -1968,7 +1968,7 @@ class IyiScheduler
     reap_dying
     body = fiber.proc
     {% if (!flag?(:gc_none) || flag?(:linux)) && !flag?(:gc_boehm) %}
-      # Each spawned body owns a tape, including its panic cleanup.
+      # Each spawned body owns a tape, including its panic/exit cleanup.
       IyiRegion.tape_scope(Tape::CAPACITY) do
         body.call unless body.is_a?(Nil)
       end
@@ -3670,7 +3670,7 @@ def __iyi_tape_defer_pop : Nil
 end
 
 def __iyi_tape_defer_run : Nil
-  # The panic drain has already detached the node. Drop its old link
+  # The panic/exit drain has already detached the node. Drop its old link
   # before releasing, so a retained task handle does not retain defers.
   node = IyiScheduler.current.tape_cleanup
   node.next_node = nil if node.is_a?(IyiDeferNode)
@@ -3688,10 +3688,24 @@ def __iyi_flush_std : Nil
   STDERR.flush
 end
 
-# ris exit ends the process without user cleanup (TAPE_SPEC.md).
-# Flush runtime streams directly; other fibers end with the process.
+# The program ends here, with *status* as its exit code. What this task
+# deferred runs first, innermost first, as a panic's cleanups do; then the
+# process ends and every other task with it, their cleanups not run -
+# Go's `os.Exit` and Crystal's `exit` alike. A failure a person should
+# read about is a panic (`raise`, SPEC.md III.1.4); this is the other
+# kind of ending, a program that has answered and says so in its status,
+# as `diff` and `grep` do with 1. Before this a program reached for the
+# runtime's own `__iyi_exit`, which skipped the cleanups too.
 def exit(status : Int32 = 0) : NoReturn
+  fiber = IyiScheduler.current
+  fiber.unwinding = true
   IyiScheduler.exiting = true
+  while true
+    node = fiber.defers
+    break unless node.is_a?(IyiDeferNode)
+    fiber.defers = node.next_node
+    node.run
+  end
   IyiRegion.report_stats
   RisHeap.report
   __iyi_flush_std
@@ -3991,7 +4005,10 @@ class IyiGroup
   # A dying owner is not the sign: a cleanup's own group, opened and ended
   # on a panic's path, had its tasks cancelled at its end.
   def join(early : Bool = false) : Nil
-    # Runtime stream flushing during exit must not wait for tasks.
+    # An `exit` runs this task's cleanups and ends the process, the other
+    # tasks with it: a group's join is one of those cleanups, and it waited
+    # for every task - `exit(4)` beside a sibling's minute-long sleep took
+    # the minute.
     return if IyiScheduler.exiting?
     me = IyiScheduler.current
     # The count and the joiner under the scheduler's lock, which a task

@@ -138,5 +138,6 @@ There is no global task cap; metadata and stacks consume memory.
 Main's stack limit is set by the OS; recursion has no fixed cap.
 POSIX fault handlers use a 65,536-byte alternate stack. Exhaustion is fatal.
 `RIS_TAPE_STATS=1` prints these limits from the runtime constants.
-`exit` skips user cleanup and flushes runtime stdio. This differs from
-`doc/reference/iyi/source/SPEC.md` III.1.4 and its exit rule near line 2382.
+`exit` runs the calling task's defers, innermost first, then flushes runtime
+stdio and ends the process, as iyi III.1.4 specifies. Other tasks' defers
+do not run. See [iyi](reference/iyi/source/SPEC.md).

@@ -1,178 +1,27 @@
-# Specialized call cycles and activation-owned growing storage (Goose §7.8).
+# Activation-owned growing storage at specialized cycles (Goose §7.8).
 class Iyi::TapeRecursionChecker
   getter program : Program
-  @defs = Hash(UInt64, Def).new
-  @edges = Hash(UInt64, Set(UInt64)).new
-  @allocating = Set(UInt64).new
 
-  def initialize(@program)
+  def initialize(@program, @graph : TapeCallGraph)
   end
 
   def run(node : ASTNode)
-    node.accept Graph.new(self, nil)
-    # A borrowed growing result (for example as_a) is not fresh scratch.
-    # Propagate fresh return storage through specialized recursive helpers.
-    loop do
-      changed = false
-      @defs.each_value do |target|
-        summary = Result.new(self)
-        fresh = summary.value(target.body)
-        if fresh || summary.returns
-          changed = true if @allocating.add?(target.object_id)
-        end
-      end
-      break unless changed
-    end
-    @defs.each_value do |target|
-      next if TapeRules.runtime?(@program, target.location)
+    @graph.defs.each_value do |target|
       next if TapeRules.unsafe?(@program, target)
       Body.new(self, target).run
     end
   end
 
-  def reach(target : Def)
-    return if TapeRules.runtime?(@program, target.location)
-    return if target.iyi_from_artifact? && !target.iyi_body_travelled?
-    return if @defs.has_key?(target.object_id)
-    @defs[target.object_id] = target
-    @edges[target.object_id] ||= Set(UInt64).new
-    target.body.accept Graph.new(self, target)
-  end
-
-  def edge(owner : Def?, target : Def)
-    if owner
-      (@edges[owner.object_id] ||= Set(UInt64).new).add(target.object_id)
-    end
-    reach(target)
-  end
-
-  def reaches?(from : UInt64, to : UInt64, seen = Set(UInt64).new) : Bool
-    return true if from == to
-    return false unless seen.add?(from)
-    @edges[from]?.try(&.any? { |id| reaches?(id, to, seen) }) || false
-  end
-
   def cycle?(owner : Def, call : Call) : Bool
-    call.target_defs.try(&.any? do |target|
-      reaches?(target.object_id, owner.object_id)
-    end) || false
+    @graph.cycle?(owner, call)
   end
 
   def growing?(node : ASTNode) : Bool
-    growing_type?(node.type?)
-  end
-
-  private def growing_type?(type : Type?) : Bool
-    return false unless type
-    type = type.remove_typedef
-    return type.union_types.any? { |t| growing_type?(t) } if type.is_a?(UnionType)
-    name = type.to_s
-    name == "Str::Builder" || name.starts_with?("Ary(") ||
-      name.starts_with?("Tre(") || TapeOwnerChecker.owner?(@program, type)
+    @graph.growing?(node)
   end
 
   def fresh?(node : ASTNode) : Bool
-    return false unless growing?(node)
-    if node.is_a?(Call)
-      return fresh?(node.expanded.not_nil!) if node.expanded
-      return true if {"new", "copy_to", "dup"}.includes?(node.name)
-      allocated = node.target_defs.try(&.any? do |target|
-        @allocating.includes?(target.object_id)
-      end) || false
-      # A forwarding helper can return a fresh argument unchanged.
-      allocated || node.obj.try { |obj| fresh?(obj) } == true ||
-        node.args.any? { |arg| fresh?(arg) } ||
-        node.block.try { |block| Result.new(self).value(block.body) } == true
-    elsif node.is_a?(Cast)
-      fresh?(node.obj)
-    elsif node.is_a?(If) || node.is_a?(Expressions)
-      Result.new(self).value(node)
-    else
-      false
-    end
-  end
-
-  class Result
-    getter returns = false
-    @env = Hash(String, Bool).new
-
-    def initialize(@checker : TapeRecursionChecker)
-    end
-
-    def value(node : ASTNode) : Bool
-      case node
-      when Expressions
-        result = false
-        node.expressions.each { |exp| result = value(exp) }
-        result
-      when Assign
-        result = value(node.value)
-        @env[node.target.as(Var).name] = result if node.target.is_a?(Var)
-        result
-      when TypeDeclaration
-        result = node.value.try { |exp| value(exp) } || false
-        @env[node.var.as(Var).name] = result if node.var.is_a?(Var)
-        result
-      when Var
-        @env[node.name]? || false
-      when Return
-        result = node.exp.try { |exp| value(exp) } || false
-        @returns ||= result
-        result
-      when If
-        value(node.cond)
-        before = @env.dup
-        left = value(node.then)
-        left_env = @env
-        @env = before
-        right = value(node.else)
-        left_env.each { |name, fresh| @env[name] = fresh || @env[name]? || false }
-        left || right
-      when Cast
-        value(node.obj)
-      when Call
-        return value(node.expanded.not_nil!) if node.expanded
-        forwarded = node.obj.try { |obj| value(obj) } || false
-        node.args.each do |arg|
-          fresh = value(arg)
-          forwarded ||= fresh
-        end
-        @checker.fresh?(node) || (@checker.growing?(node) && forwarded)
-      else
-        false
-      end
-    end
-  end
-
-  class Graph < Visitor
-    def initialize(@checker : TapeRecursionChecker, @owner : Def?)
-    end
-
-    def visit(node : Call)
-      if expanded = node.expanded
-        expanded.accept self
-        return false
-      end
-      node.target_defs.try &.each do |target|
-        @checker.edge(@owner, target)
-        # A yielding callee executes the lexical callback on its call path.
-        node.block.try &.body.accept Graph.new(@checker, target)
-      end
-      true
-    end
-
-    def visit(node : ProcLiteral)
-      @checker.edge(@owner, node.def)
-      false
-    end
-
-    def visit(node : Def)
-      false
-    end
-
-    def visit(node : ASTNode)
-      true
-    end
+    @graph.fresh?(node)
   end
 
   class Body

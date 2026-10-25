@@ -9693,8 +9693,11 @@ end
     IyiDefers.pop_tape
   end
 
-  # ris exit skips user cleanup, including on targets without tasks.
+  # `exit` where there are no tasks: the one registry's cleanups, then the
+  # process (the concurrency targets' is in concurrency.iyi, and so is why
+  # `__iyi_flush_std` is).
   def exit(status : Int32 = 0) : NoReturn
+    IyiDefers.drain
     RisHeap.report
     __iyi_flush_std
     __iyi_exit(status)

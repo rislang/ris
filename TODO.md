@@ -3,21 +3,21 @@
 Rules: TAPE_SPEC.md. Work in this dependency order; each gate runs in
 check.sh. Delete finished work in the same commit; keep check.sh green.
 
-2. [S] exit runs the calling task's defers, as iyi III.1.4: undo the
-   skip in concurrency.iyi and prelude.iyi exit (2a7f97843).
-   Gate: cleanup_exit prints its inner and outer defers, then exits 3.
 3. [L] First transfer: growth still transfers a displaced value once
    into its reserved side region, moving published elements
    (region.iyi tape_resize). Start growing
    values in their own region, or refuse views across the first growth.
    Non-Linux targets still move. Refuse raw owner operations.
    Gate: no transfer of a viewed value.
-4a. [M] One call graph of specialized defs, one effect summary per def
-    (shrink, result views, allocation, cycle, suspension), solved once.
-    Shrink, recursion, owner, program, lifetime, pointer and scope checks
-    read it instead of walking target_defs each; 4e-4f extend it.
-    Gate: check.sh refusals unchanged; callbacks, dispatch and opaque
-    targets treated the same in every check.
+4a. [M] Shared specialized graph and shrink/result-view, fresh-result and
+    cycle summaries now serve shrink and recursion checks. Finish migrating
+    owner, program, lifetime, pointer and scope checks to TapeCallGraph;
+    remove their independent target_defs walks. Extend its per-def effects
+    with general allocation and suspension (fresh growing results alone
+    are tracked today). Solve those effects once; 4e-4f extend the roots
+    and opaque contracts. Keep callback, dispatch and opaque target policy
+    shared by every consumer.
+    Gate: check.sh refusals and outputs unchanged.
 4e. [L] Owner/path roots, joins, read-back candidates and stored holders.
     Gate: branch alternatives, fields, nested holders and emptied holders.
 4f. [L] Specialized call effects, suspension and checked contracts for

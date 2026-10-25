@@ -69,7 +69,7 @@ fi
 out=$(
   for name in local mutual pending callback result view owner \
       callback_proc dispatch constructing consumed tree branch_pending \
-      forwarded; do
+      forwarded runtime_callback; do
     expect "recursion_$name" 'cannot recurse with growing tape'
   done
 )
@@ -308,7 +308,7 @@ if [ "$out" = $'no GC allocation per scope\ntrue' ]; then echo "runs     cleanup
 out=$("$RIS" run test/ris/fibers/cleanup_panic.ri 2>/dev/null)
 if [ "$?" = 0 ] && [ "$out" = $'nested panic\ninner panic\nouter panic\ntrue\ntrue\nscope after panic' ]; then echo "runs     cleanup_panic"; else echo "FAILED   cleanup_panic: $out"; status=1; fi
 out=$("$RIS" run test/ris/cleanup_exit.ri 2>&1)
-if [ "$?" = 3 ] && [ "$out" = 'flushed' ]; then
+if [ "$?" = 3 ] && [ "$out" = $'flushed\ninner exit\nouter exit' ]; then
   echo "runs     cleanup_exit"
 else
   echo "FAILED   cleanup_exit: $out"; status=1

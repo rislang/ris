@@ -18,12 +18,9 @@ class Iyi::TapeShrinkChecker
   VIEWS = {"finish", "span", "slice", "[]", "[]?", "first", "first?",
            "last", "last?", "fetch", "values_at", "to_unsafe", "to_slice",
            "iterator", "each", "each_with_index", "each_byte", "each_line"}
-  @seen = Set(UInt64).new
   @uses = [] of Use
   @shrinks = [] of Shrink
 
-  @defs = [] of Def
-  @summaries = Hash(UInt64, Summary).new
   @fields = Hash(Tuple(UInt64, String), UInt64).new
   @parents = Hash(UInt64, Tuple(UInt64, String)).new
   @next_root = 0_u64
@@ -89,15 +86,19 @@ class Iyi::TapeShrinkChecker
     end
   end
 
-  def initialize(@program : Program)
+  def initialize(@program : Program, @graph : TapeCallGraph)
   end
 
-  def run(node : ASTNode)
-    node.accept Collector.new(self)
+  def solve
+    @graph.defs.each_value do |target|
+      seeds = Array(UInt64).new(target.args.size + 1) { fresh }
+      @graph.effects[target.object_id].shrink =
+        Summary.new(seeds, Hash(UInt64, String).new, EMPTY)
+    end
     loop do
       changed = false
-      @defs.each do |target|
-        old = @summaries[target.object_id]
+      @graph.defs.each_value do |target|
+        old = @graph.effects[target.object_id].shrink.not_nil!
         @uses.clear
         @shrinks.clear
         @returns = EMPTY
@@ -111,24 +112,17 @@ class Iyi::TapeShrinkChecker
         result = Value.new(result.roots, result.views.map { |v| View.new(v.root, 0) })
         updated = Summary.new(old.seeds, effects, merge(old.result, result))
         changed ||= updated != old
-        @summaries[target.object_id] = updated
+        @graph.effects[target.object_id].shrink = updated
       end
       break unless changed
     end
-    @defs.each do |target|
-      check(target.body, seed_env(target, @summaries[target.object_id].seeds)) unless TapeRules.unsafe?(@program, target)
-    end
-    check(node)
   end
 
-  def reach(target : Def)
-    return if TapeRules.runtime?(@program, target.location)
-    return if target.iyi_from_artifact? && !target.iyi_body_travelled?
-    return unless @seen.add?(target.object_id)
-    @defs << target
-    seeds = Array(UInt64).new(target.args.size + 1) { fresh }
-    @summaries[target.object_id] = Summary.new(seeds, Hash(UInt64, String).new, EMPTY)
-    target.body.accept Collector.new(self)
+  def run(node : ASTNode)
+    @graph.defs.each_value do |target|
+      check(target.body, seed_env(target, @graph.effects[target.object_id].shrink.not_nil!.seeds)) unless TapeRules.unsafe?(@program, target)
+    end
+    check(node)
   end
 
   private def contains_root?(roots : Array(UInt64), root : UInt64) : Bool
@@ -286,7 +280,7 @@ class Iyi::TapeShrinkChecker
       end
       node.block_arg.try { |arg| args << value(arg, env) }
       storage_receiver = node.obj.try { |obj| storage?(obj) } ||
-                         node.target_defs.try &.any? { |target| storage_type?(target.owner) }
+                         @graph.targets(node).try &.any? { |target| storage_type?(target.owner) }
       if storage_receiver && SHRINK.includes?(node.name)
         shrink(receiver.roots, node, chain(node.name))
       end
@@ -294,10 +288,10 @@ class Iyi::TapeShrinkChecker
       call_result = EMPTY
       summarized = false
       incomplete_result = false
-      targets = node.target_defs
+      targets = @graph.targets(node)
       if targets && !targets.empty?
         targets.each do |target|
-          if summary = @summaries[target.object_id]?
+          if summary = @graph.effects[target.object_id]?.try(&.shrink)
             summarized = true
             actuals = [receiver] + target.args.map_with_index do |arg, i|
               named[arg.external_name]? || args[i]? || EMPTY
@@ -426,30 +420,4 @@ class Iyi::TapeShrinkChecker
     merge(a, b)
   end
 
-  class Collector < Visitor
-    def initialize(@checker : TapeShrinkChecker)
-    end
-
-    def visit(node : Call)
-      if expanded = node.expanded
-        expanded.accept self
-        return false
-      end
-      node.target_defs.try &.each { |target| @checker.reach(target) }
-      true
-    end
-
-    def visit(node : ProcLiteral)
-      @checker.reach(node.def)
-      false
-    end
-
-    def visit(node : Def)
-      false
-    end
-
-    def visit(node : ASTNode)
-      true
-    end
-  end
 end
