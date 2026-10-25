@@ -16,8 +16,9 @@ import std/http::{Server, Request, Response, Incoming, Outgoing}
 import std/gc::{GC}
 
 N = 200000
-REQUEST = "GET /users/42?full=1 HTTP/1.1\r\nHost: localhost\r\nUser-Agent: bench\r\nAccept: */*\r\n\r\n"
-BODY = %({"id":42,"name":"Mari","email":"mari@example.com"})
+REQUEST = ("GET /users/42?full=1 HTTP/1.1\r\nHost: localhost\r\n" \
+  "User-Agent: bench\r\nAccept: */*\r\n\r\n").to_heap
+BODY = %({"id":42,"name":"Mari","email":"mari@example.com"}).to_heap
 
 # The answers read into one writer on the tape, emptied before each read,
 # so the client puts nothing on the heap and what is counted is the
@@ -36,12 +37,13 @@ def drain(socket : IyiSocket, want : Int64) : Int64
   got
 end
 
-on_tape = Program.args.includes?("answer")
-reply = Server.format_response(Response.new(200, BODY, {"Content-Type" => "application/json"}), false, false)
+on_tape = Program.args.includes?("answer".to_heap)
+headers = {"Content-Type".to_heap => "application/json".to_heap}
+reply = Server.format_response(Response.new(200, BODY, headers), false, false)
 want = reply.bytesize.to_i64 * N
 listener = IyiSocket.listen(0)
 batch = REQUEST * 1000
-collecting = Program.args.includes?("gc")
+collecting = Program.args.includes?("gc".to_heap)
 GC.disable unless collecting
 before = GC.stats.bytes_since_collection
 got = 0_i64
@@ -49,15 +51,15 @@ group do |g|
   g.spawn do
     if on_tape
       Server.answer(listener) do |req, res|
-        res.header("Content-Type", "application/json")
+        res.header("Content-Type".to_heap, "application/json")
         res.body.append(BODY)
       end
     else
-      Server.serve(listener) { |req| Response.new(200, BODY, {"Content-Type" => "application/json"}) }
+      Server.serve(listener) { |req| Response.new(200, BODY, headers) }
     end
     0
   end
-  client = IyiSocket.connect("127.0.0.1", listener.local_port).or_panic
+  client = IyiSocket.connect("127.0.0.1".to_heap, listener.local_port).or_panic
   reader = g.spawn { drain(client, want) }
   (N // 1000).times { client.write(batch).or_panic }
   got = reader.value

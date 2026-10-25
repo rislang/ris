@@ -10,7 +10,7 @@ module samples/request
 
 import std/http::{Server, ParsedHead}
 
-USERS = {42 => "alice", 7 => "bob"}
+USERS = {42 => "alice".to_heap, 7 => "bob".to_heap}
 
 # GET /users/42 -> 200 {"id":42,"name":"alice"}
 # The body is written into the caller's writer, on its tape.
@@ -28,7 +28,7 @@ def route(head : ParsedHead, body : Str::Builder) : Int32
   200
 end
 
-def reason(status : Int32) : String
+def reason(status : Int32) : Str
   case status
   when 200 then "OK"
   when 404 then "Not Found"
@@ -37,9 +37,9 @@ def reason(status : Int32) : String
   end
 end
 
-def handle(raw : String) : Nil
+def handle(raw : Str) : Nil
   tape do
-    head = Server.parse_head(raw.as_tape)
+    head = Server.parse_head(raw)
     unless head.is_a?(ParsedHead)
       puts "400 Bad Request"
       return

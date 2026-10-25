@@ -3,7 +3,7 @@ module test/cookie_tape
 import std/cookie::{Cookie}
 import std/time::{Time}
 
-dates = [
+dates = Ary(Str){
   "Sun, 06 Nov 1994 08:49:37 GMT",
   "Sunday, 06-Nov-94 08:49:37 GMT",
   "Sun Nov  6 08:49:37 1994",
@@ -15,9 +15,9 @@ dates = [
   "Sun, 06 Nov 1994 08:49:37 J",
   "Sun, 31 Feb 1994 08:49:37 GMT",
   "Sun, 06 Nov 1994 08:49:37 GMT trailing",
-]
+}
 
-kept = ""
+kept = "".to_heap
 owned = nil.as(Cookie?)
 tape do
   line = "sid=\"abc\"; Path=/x; Domain=.EXAMPLE.COM; Secure; HttpOnly"
@@ -30,16 +30,16 @@ tape do
   w << "prefix:"
   cookie.to_set_cookie(w)
   exit 5 unless w.finish.starts_with?("prefix:sid=abc; Path=/x")
-  exit 6 unless Cookie.parse("bad".as_tape).nil?
-  pairs = Cookie.parse_header("a=1; b=\"two\"; a=3".as_tape)
+  exit 6 unless Cookie.parse("bad").nil?
+  pairs = Cookie.parse_header("a=1; b=\"two\"; a=3")
   exit 7 unless pairs["a"] == "1" && pairs["b"] == "two"
-  age = Cookie.parse("x=y; Max-Age=0".as_tape)
+  age = Cookie.parse("x=y; Max-Age=0")
   exit 8 unless age && age.max_age == 0_i64
-  dated = Cookie.parse("x=y; Expires=Wed, 21 Oct 2015 07:28:00 GMT".as_tape)
+  dated = Cookie.parse("x=y; Expires=Wed, 21 Oct 2015 07:28:00 GMT")
   exit 9 unless dated && dated.expires
   exit 10 unless cookie.to_heap.to_tape == cookie.to_tape
   dates.each do |date|
-    expected = Time::Format::HTTP_DATE.parse(date)
+    expected = Time::Format::HTTP_DATE.parse(date.to_heap)
     line = Str.build { |w| w << "a=b; Expires=" << date }
     parsed = Cookie.parse(line)
     exit 22 unless parsed
@@ -56,7 +56,8 @@ tape do
 end
 heap = Cookie.parse(kept)
 exit 11 unless heap && heap.to_set_cookie == kept
-exit 12 unless Cookie.parse_header("a=1; a=2") == {"a" => "1"}
+exit 12 unless Cookie.parse_header("a=1; a=2".to_heap) ==
+  {"a".to_heap => "1".to_heap}
 exit 20 unless owned
 exit 21 unless owned.to_set_cookie == kept
 puts "PASS: cookie tape and heap APIs"

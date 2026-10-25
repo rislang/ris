@@ -3074,7 +3074,7 @@ pub struct Document
   end
 
   # The value of the field *name* of the object at *index*, or -1.
-  def at(index : Int32, name : String) : Int32
+  def at(index : Int32, name : String | Str) : Int32
     expect(index, Kind::Object)
     found = -1
     @tree.each_child(index) do |child|

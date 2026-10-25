@@ -145,6 +145,12 @@ module Iyi
     end
 
     def raise_frozen_type(freeze_type, invalid_type, from)
+      if freeze_type.to_s == "String" &&
+         TapeChecker.tape_in(
+           invalid_type.program, invalid_type).try(&.to_s) == "Str"
+        from.raise "text is tape text (Str); keep it with `.to_heap` " \
+                   "for a String field, variable or result"
+      end
       if !freeze_type.includes_type?(invalid_type.program.nil) && invalid_type.includes_type?(invalid_type.program.nil)
         # This means that an instance variable become nil
         if self.is_a?(MetaTypeVar) && (nil_reason = self.nil_reason)

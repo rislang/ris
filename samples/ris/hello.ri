@@ -12,7 +12,7 @@ import shop/order::*
 
 def make_order(id : Int64) : Order
   name = Str.build do |s|
-    "ris".each_char { |c| s.push(c.ord.to_u8) }
+    s << "ris"
   end
   lines = Ary(Int64).new
   lines.push(1200_i64)
@@ -23,11 +23,11 @@ end
 
 # The greeting outlives the tape, so its name is copied off, by name.
 def greet(order : Order) : String
-  "Hello from #{order.customer.to_heap}, order #{order.id}"
+  "Hello from #{order.customer}, order #{order.id}".to_heap
 end
 
 total = 0_i64
-greeting = ""
+greeting = "".to_heap
 tape do
   order = make_order(1_i64)
   total = order_total(order)

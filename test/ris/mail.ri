@@ -4,14 +4,14 @@ import std/mail::{Mail}
 
 kept = ""
 tape do
-  data = "café\nline \t\r\n\x00=".as_tape
+  data = "café\nline \t\r\n\x00="
   w = Str::Builder.new(1)
   w << "prefix:"
   Mail.encode_base64(data, w)
   exit 1 unless w.finish.starts_with?("prefix:")
   encoded = Mail.encode_base64(data)
   exit 2 unless Mail.decode_base64(encoded) == data
-  exit 3 unless Mail.decode_base64("Y!W Jj=ignored".as_tape) == "abc"
+  exit 3 unless Mail.decode_base64("Y!W Jj=ignored") == "abc"
   qp = Mail.encode_quoted_printable(data, true)
   exit 4 unless Mail.decode_quoted_printable(qp) == data
   kept = encoded.to_heap

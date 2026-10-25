@@ -118,6 +118,49 @@ struct Str
     new(text.to_unsafe, text.bytesize)
   end
 
+  # Compatibility for text already on tape; new still makes a copy.
+  def self.new(text : Str) : self
+    bytes = Pointer(UInt8).new(IyiRegion.tape_bytes(text.bytesize.to_u64))
+    bytes.copy_from(text.to_unsafe, text.bytesize)
+    new(bytes, text.bytesize)
+  end
+
+  def +(other : String | Str) : Str
+    Str.build(bytesize + other.bytesize) do |writer|
+      writer.append(self)
+      writer.append(other)
+    end
+  end
+
+  def *(count : Int32) : Str
+    raise "negative repeat count" if count < 0
+    Str.build(bytesize * count) do |writer|
+      count.times { writer.append(self) }
+    end
+  end
+
+  def size : Int32
+    bytesize
+  end
+
+  def byte_at(index : Int32) : UInt8
+    self[index]
+  end
+
+  def as_tape : self
+    self
+  end
+
+  def hash : Int32
+    value = -2128831035
+    each_byte { |byte| value = (value ^ byte.to_i32) &* 16777619 }
+    value
+  end
+
+  def ===(other : String | Str) : Bool
+    self == other
+  end
+
   def bytesize : Int32
     @bytesize
   end
@@ -406,7 +449,7 @@ struct Str
     @bytesize == other.bytesize && same?(other.to_unsafe)
   end
 
-  def starts_with?(prefix : String) : Bool
+  def starts_with?(prefix : String | Str) : Bool
     prefix.bytesize <= @bytesize && Str.new(@ptr, prefix.bytesize) == prefix
   end
 
@@ -464,11 +507,9 @@ struct Str
     writer.finish
   end
 
-  # `"a#{b}"` inside a `tape` block, where the text only goes to `puts` or
-  # `print`: the normalizer makes it this call, so the text is written on
-  # the tape rather than built on the heap. On targets without tape
-  # support it is built on the heap as
-  # before and viewed.
+  # ris interpolation writes every part on the caller's active tape.
+  # Legacy iyi output lowering uses this too; targets without a tape
+  # build a heap String and view it.
   def self.interpolate(*parts : *T) : Str forall T
     if IyiRegion.tape == 0
       return view(String.build do |io|
@@ -1842,6 +1883,18 @@ class Object
 end
 
 class String
+  def starts_with?(prefix : Str) : Bool
+    as_tape.starts_with?(prefix)
+  end
+
+  def ==(other : Str) : Bool
+    other == self
+  end
+
+  def ===(other : Str) : Bool
+    other == self
+  end
+
   # These bytes as a Str, nothing copied: `Str.view`.
   # `as_` for a view at no cost, as `to_heap` is `to_` for a copy.
   def as_tape : Str

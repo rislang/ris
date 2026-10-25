@@ -7,14 +7,14 @@ module test/ris/tape_string
 import std/int
 
 tape do
-  text = Str.new("hello, tape")
+  text = "hello, tape"
   sum = 0
   text.each_byte { |b| sum += b.to_i32 }
   part = text[7, 4]
-  heap = "hello, " + "tape"
+  heap = ("hello, " + "tape").to_heap
   seen = Str.view(heap)
   ok = text[0] == 104_u8 && text[-1] == 101_u8 && part == "tape" &&
-       part == Str.new("tape") && text.starts_with?("hello") &&
+       part == "tape" && text.starts_with?("hello") &&
        !text.starts_with?("tape") && sum == 1034 && text[0, 0].empty? &&
        seen == text && seen[7, 4] == "tape"
   puts ok ? "read through the bounds" : "WRONG"

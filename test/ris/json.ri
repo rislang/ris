@@ -17,15 +17,15 @@ def retain(text : Str) : String
   text.to_s
 end
 
-def check(failures : Array(String), ok : Bool, what : String) : Nil
-  failures << what unless ok
+def check(failures : Array(String), ok : Bool, what : Str) : Nil
+  failures << what.to_heap unless ok
 end
 
 def heap_doc(b : Builder) : Nil
   b.object do
-    b.field "id", 7_i64
-    b.field "name", "a \"b\"\né \u{1F600} \u0001"
-    b.field "list" do
+    b.field "id".to_heap, 7_i64
+    b.field "name".to_heap, "a \"b\"\né \u{1F600} \u0001".to_heap
+    b.field "list".to_heap do
       b.array do
         b.number 1
         b.number -2_i64
@@ -74,16 +74,22 @@ tape do
   check(failures, doc.size(doc.at(doc.root, "e")) == 0 && doc.at(doc.root, "zz") == -1, "empty array, missing key")
   keys = [] of String
   doc.each(doc.root) { |child| keys << retain(doc.key(child)) }
-  check(failures, keys == ["a", "bA", "e"], "keys in order")
+  check(failures, keys == ["a".to_heap, "bA".to_heap, "e".to_heap],
+    "keys in order")
 end
 
-bad = [%([1,]), %({"a" 1}), %(["\\x"]), %(), %([1] 2), %({"k\\u0041":1,"kA":2}),
-       %([01]), %([1e999]), %(["\\ud800"]), %({"a":1,}), %(tru), %([1.5x]),
-       %(["a\nb"]), %({"a":{"b":1,"b":2}}), "[" * 300, %(["\xff"])]
+bad = [
+  %([1,]).to_heap, %({"a" 1}).to_heap, %(["\\x"]).to_heap,
+  %().to_heap, %([1] 2).to_heap, %({"k\\u0041":1,"kA":2}).to_heap,
+  %([01]).to_heap, %([1e999]).to_heap, %(["\\ud800"]).to_heap,
+  %({"a":1,}).to_heap, %(tru).to_heap, %([1.5x]).to_heap,
+  %(["a\nb"]).to_heap, %({"a":{"b":1,"b":2}}).to_heap,
+  ("[" * 300).to_heap, %(["\xff"]).to_heap,
+]
 many = String.build do |io|
-  io << "{"
-  40.times { |i| io << %("k#{i}":#{i},) }
-  io << %("k39":0})
+  io << "{".to_heap
+  40.times { |i| io << %("k#{i}":#{i},).to_heap }
+  io << %("k39":0}).to_heap
 end
 bad << many
 bad.each do |input|
@@ -97,13 +103,13 @@ bad.each do |input|
   end
 end
 
-[nil, 2, "\t"].each do |indent|
+[nil, 2, "\t".to_heap].each do |indent|
   [false, true].each do |ascii|
     heap = JSON.build(indent) do |b|
       b.ascii_only = ascii
       heap_doc(b)
     end
-    tape = ""
+    tape = "".to_heap
     tape do
       w = Str::Builder.new(16)
       w.append("head:")
@@ -142,7 +148,7 @@ tape do
       JSON.write(w, indent, ascii) { |b| b.value(doc, doc.root) }
       heap = JSON.build(indent) do |b|
         b.ascii_only = ascii
-        JSON.parse(text).to_json(b)
+        JSON.parse(text.to_heap).to_json(b)
       end
       message = "copied alike, indent #{indent.inspect}, ascii #{ascii}"
       check(failures, w.finish == heap, message)

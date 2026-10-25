@@ -1,17 +1,7 @@
-# ris: inside a `tape` or `local_tape` block, or a def taking a tape
-# value (a tape runs while one exists), `puts "a#{b}"` and
-# `print "a#{b}"` write their text on the tape. The interpolation is
-# made `Str.interpolate(...)`, which appends each piece to a
-# writer on the running tape; `puts` and `print` take a `Str`.
-# Nothing else changes: the text goes straight to the call, so no tape
-# value is held anywhere new, and with no tape running (a proc called
-# later) `interpolate` builds on the heap as before.
-#
-# A variable is lowered too when the text only passes through it:
-# `line = "a#{b}"; puts line`, where every use of `line` in its scope is
-# such an assignment or a `puts`/`print` of it, all in one tape block.
-# A variable the code around the block uses is left on the heap, as the
-# block may not hand it a tape value.
+# ris user text is lowered by Normalizer: static literals become Str
+# views and every interpolation becomes Str.interpolate. This legacy
+# sink/variable lowering also serves iyi files inside explicit tape
+# scopes, preserving their heap-text default elsewhere.
 class Iyi::TapeTextLowering < Iyi::Visitor
   SINKS = {"puts", "print"}
 

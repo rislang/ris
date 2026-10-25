@@ -10107,7 +10107,7 @@ end
 
 # The panic's own write: descriptor 2 directly, no stream object, no error;
 # `print` raises when a pipe closes and `STDERR` may not exist yet.
-private def __iyi_say(text : String) : Nil
+private def __iyi_say(text : String | Str) : Nil
   written = 0_i64
   total = text.bytesize.to_i64
   while written < total
@@ -10134,7 +10134,8 @@ end
   end
 {% end %}
 
-def raise(message : String, file : String = __FILE__, line : Int32 = __LINE__) : NoReturn
+def raise(message : String | Str, file : String = __FILE__,
+          line : Int32 = __LINE__) : NoReturn
   {% if flag?(:darwin) %}
     callstack = uninitialized Void*[64]
     count = LibC.backtrace(pointerof(callstack).as(Void**), 64)
@@ -10198,7 +10199,7 @@ def raise(message : String, file : String = __FILE__, line : Int32 = __LINE__) :
     end
   {% end %}
   {% if (flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64)) %}
-    IyiScheduler.panic_current(message)
+    IyiScheduler.panic_current(message.to_heap)
   {% else %}
     IyiDefers.drain
     __iyi_flush_std

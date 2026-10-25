@@ -1,5 +1,5 @@
 def temporary(n : Int32) : Int32
-  text = Str.new("hello")
+  text = "hello"
   items = Ary(Int32).new(4)
   items << n
   writer = Str::Builder.new(16)

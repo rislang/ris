@@ -47,9 +47,9 @@ tape do
   pool.write_bytes_at(at, -123456789_i64)
   exit 1 unless pool.read_bytes_at(Int64, at) == -123456789_i64
   exit 1 unless pool[1] == 0xdc_u8 && pool[2] == 0xfe_u8
-  text = "x\x78\x56\x34\x12".as_tape
+  text = "x\x78\x56\x34\x12"
   exit 1 unless text.read_bytes_at(UInt32, 1) == 0x12345678_u32
-  text = "x\xff\xff\xff\xff\xff\xff\xff\xff".as_tape
+  text = "x\xff\xff\xff\xff\xff\xff\xff\xff"
   exit 1 unless text.read_bytes_at(UInt16, 1) == 0xffff_u16
   exit 1 unless text.read_bytes_at(UInt32, 1) == 0xffffffff_u32
   exit 1 unless text.read_bytes_at(UInt64, 1) == 0xffffffffffffffff_u64

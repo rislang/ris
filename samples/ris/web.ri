@@ -15,8 +15,8 @@ import std/socket::{IyiSocket}
 import std/http::{Server, Incoming, Outgoing}
 
 USERS = {
-  1 => {"alice", "Learning sequential memory management :-)"},
-  2 => {"bob", "Bumping pointers, freeing nothing"},
+  1 => {"alice".to_heap, "Learning sequential memory management :-)".to_heap},
+  2 => {"bob".to_heap, "Bumping pointers, freeing nothing".to_heap},
 }
 
 # The user id in "/users/1/status", or nil when the path is another one.
@@ -35,7 +35,7 @@ end
 # Written straight into the response body on the request's tape, the
 # text HTML-escaped on the way.
 def status_view(res : Outgoing, name : String, status : String) : Nil
-  res.header("Content-Type", "text/html; charset=utf-8")
+  res.header("Content-Type".to_heap, "text/html; charset=utf-8")
   html = res.body
   html << "<h1>"
   html.append_html_escaped(name)
@@ -46,7 +46,7 @@ end
 
 def not_found(res : Outgoing) : Nil
   res.status = 404
-  res.header("Content-Type", "text/plain")
+  res.header("Content-Type".to_heap, "text/plain")
   res.body << "Not Found\n"
 end
 

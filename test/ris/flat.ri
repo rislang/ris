@@ -50,7 +50,8 @@ def walk(nodes : Ary(Node), names : Str, at : NodeLink) : Nil
 end
 
 tape do
-  words = {5 => "five", 2 => "two", 8 => "eight", 1 => "one", 9 => "nine"}
+  words = {5 => "five".to_heap, 2 => "two".to_heap,
+           8 => "eight".to_heap, 1 => "one".to_heap, 9 => "nine".to_heap}
   text = Str::Builder.new(32)
   spans = Ary(Str::Span).new(words.size) do |i|
     text.append_span(words.values[i])

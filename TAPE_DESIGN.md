@@ -1,8 +1,7 @@
 # ris tape memory: one tape per fiber, beside iyi's GC
 
 iyi stays as it is (`String`, `Array`, `Hash`, classes on the GC heap);
-the tape is beside it, where short-lived data is made and dropped together.
-[Goose](https://github.com/aardappel/goose)'s data stacks are the model.
+ris text defaults to tape; heap objects remain for retained data.
 
 ## The model
 * Main and each spawned fiber own an implicit tape: bump allocation over
@@ -33,18 +32,20 @@ No tape value survives the block that owns its storage:
   tape values, including mutable containers and `self`, cannot be used;
   prepare owned data before entering. Inner values cannot escape into
   outer variables or containers. Copying a struct does not copy its data.
-* `Str.new(text)` copies heap text onto the tape; `text.as_tape` borrows
-  its bytes, `[start, count]` a slice; `[]` reads a byte. A lexer walks it
-  with `Str::Scanner`: `advance` costs what `@pos += 1` does.
+* In user `.ri` files, `"text"` is a zero-copy static `Str` view;
+  `"text #{value}"` builds a `Str` on the active tape. std and iyi keep
+  their old text rules. Macro code and annotations are compiler metadata.
+* Heap storage and String parameters require explicit `.to_heap`, even
+  for literals; literal `.to_heap` reuses static String bytes, with no copy.
+  String annotations do not copy. `Str.new` copies; `as_tape` borrows.
 * To retain a value, copy it by name while its source is alive: `to_heap`
   on a `Str`, an `Ary` or `Ary::View` (each element by its own `to_heap`),
-  or an `@[OnTape]` struct that defines one. `to_s`, interpolation and
+  or an `@[OnTape]` struct that defines one. `to_s`, heap interpolation and
   writing into `String::Builder` need `@[TapeToHeap]`.
 * Pass tape text on, append to a tape writer, or write directly to a file
   or socket (`puts text`, `io << text`). Avoid tape -> heap -> tape copies.
 * `std/` is under these rules; only `src/iyi/` and a `std/` def marked
   `@[TapeUnsafe]` (refused elsewhere) may use raw pointers or copy freely.
-
 ## Layout: a tape per growing value
 A container grows in place at the tape's end, else moves once to a region
 of its own; `RIS_TAPE_STATS=1` counts moves and mappings at exit. `clear`
@@ -57,7 +58,6 @@ refills one. `Tre`, simdjson's order: 4.6 MB JSON ×20 in 725 ms.
 | words | 0.22 s, 68 MB | 0.34 s, 90 MB | 0.54 s, 175 MB |
 | graph_csr | 0.64 s, 109 MB | 1.06 s, 108 MB | 1.06 s, 174 MB |
 Recorded: C++ 0.97 s, Rust 1.18 s, Go 1.67 s on respond (ris-bench).
-
 ## Implementation and checks
 `src/iyi/tape.iyi`, `IyiRegion` in `src/iyi/prelude.iyi`, the checks and
 lowerings in `src/compiler/iyi/semantic/tape_*.cr`; `test/ris/check.sh`.

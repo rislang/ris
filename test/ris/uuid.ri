@@ -5,7 +5,7 @@ import std/uuid::{UUID}
 kept = ""
 owned = nil.as(UUID?)
 tape do
-  text = "550E8400-E29B-41D4-A716-446655440000".as_tape
+  text = "550E8400-E29B-41D4-A716-446655440000"
   uuid = UUID.parse(text)
   exit 1 unless uuid.version == 4 && uuid.bytes.bytesize == 16
   canonical = uuid.to_tape
@@ -16,7 +16,7 @@ tape do
   uuid.write(w)
   exit 4 unless w.finish ==
                 "prefix:550e8400-e29b-41d4-a716-446655440000"
-  compact = UUID.parse("550e8400e29b41d4a716446655440000".as_tape)
+  compact = UUID.parse("550e8400e29b41d4a716446655440000")
   exit 5 unless compact.to_tape == canonical
   owned = uuid.to_heap
   exit 10 unless UUID.v4_on_tape.version == 4

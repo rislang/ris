@@ -4,7 +4,7 @@ import std/websocket::{WebSocket}
 
 kept = ""
 tape do
-  text = "hello".as_tape
+  text = "hello"
   w = Str::Builder.new(1)
   w << "prefix:"
   WebSocket.frame(text, w)

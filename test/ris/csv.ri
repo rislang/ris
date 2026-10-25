@@ -4,7 +4,7 @@ import std/csv::{CSV}
 
 kept = [] of Array(String)
 tape do
-  rows = CSV.parse("id,name\r\n1,\"café,\"\"yes\"\"\"\n\"\"\n\n".as_tape)
+  rows = CSV.parse("id,name\r\n1,\"café,\"\"yes\"\"\"\n\"\"\n\n")
   exit 1 unless rows.size == 4
   exit 2 unless rows[1][1] == "café,\"yes\""
   exit 3 unless rows[2].size == 1 && rows[2][0].empty?
@@ -17,10 +17,10 @@ tape do
   encoded = CSV.build(rows)
   expected = Str.build { |io| io << "prefix:" << encoded }
   exit 10 unless output == expected
-  bom = CSV.parse("\"\uFEFFid\"".as_tape)
+  bom = CSV.parse("\"\uFEFFid\"")
   exit 11 unless CSV.build(bom) == "\"\uFEFFid\""
   exit 6 unless CSV.parse(CSV.build(rows)).to_heap == rows.to_heap
-  exit 7 unless CSV.parse("\uFEFFa,b".as_tape)[0][0] == "a"
+  exit 7 unless CSV.parse("\uFEFFa,b")[0][0] == "a"
   kept = rows.to_heap
 end
 exit 8 unless CSV.parse(CSV.build(kept)) == kept

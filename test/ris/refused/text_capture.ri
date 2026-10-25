@@ -1,0 +1,3 @@
+text = "static"
+later = -> { puts text }
+later.call

@@ -4,7 +4,7 @@ import std/smtp::{SmtpClient}
 
 kept = ""
 tape do
-  data = ".one\n..two\rthree\r\nlast".as_tape
+  data = ".one\n..two\rthree\r\nlast"
   expected = "..one\r\n...two\r\nthree\r\nlast\r\n.\r\n"
   w = Str::Builder.new(1)
   w << "prefix:"
@@ -12,7 +12,7 @@ tape do
   exit 1 unless w.finish == "prefix:" + expected
   kept = SmtpClient.stuffed(data).to_heap
   exit 2 unless kept == expected
-  exit 3 unless SmtpClient.stuffed("".as_tape) == ".\r\n"
+  exit 3 unless SmtpClient.stuffed("") == ".\r\n"
 end
 exit 4 unless SmtpClient.stuffed(".one\n..two\rthree\r\nlast") == kept
 puts "PASS: smtp tape and heap APIs"

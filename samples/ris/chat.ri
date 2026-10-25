@@ -48,9 +48,9 @@ module Chat
 
   # The action: one request, start to end on one tape. Its bytes, the
   # params and the rendered room are freed together when it ends.
-  def self.create_message(room : Room, request : String) : Nil
+  def self.create_message(room : Room, request : Str) : Nil
     tape do
-      params = message_params(request.as_tape)
+      params = message_params(request)
       if params.nil?
         puts "400 bad request"
       elsif user = room.user(params.user_id)
@@ -98,9 +98,9 @@ module Chat
 end
 
 room = Chat::Room.new
-room.users << Chat::User.new(id: 31, name: "carol")
-room.users << Chat::User.new(id: 7, name: "alice")
-room.users << Chat::User.new(id: 12, name: "bob")
+room.users << Chat::User.new(id: 31, name: "carol".to_heap)
+room.users << Chat::User.new(id: 7, name: "alice".to_heap)
+room.users << Chat::User.new(id: 12, name: "bob".to_heap)
 Chat.create_message(room, "7 Morning!")
 Chat.create_message(room, "12 Deploy is green")
 Chat.create_message(room, "7 Ship it")

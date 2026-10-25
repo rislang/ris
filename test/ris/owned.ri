@@ -5,7 +5,7 @@ class Cache
   getter body : String
 
   def initialize
-    @body = ""
+    @body = "".to_heap
   end
 
   def store(body : String) : Nil
@@ -29,7 +29,7 @@ def retained_page : String
   tape do
     return page.to_s
   end
-  ""
+  "".to_heap
 end
 
 cache = Cache.new

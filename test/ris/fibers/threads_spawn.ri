@@ -8,10 +8,11 @@ import std/gc::{GC}
 import std/text
 
 def check(id : Int64) : Int64
-  text = "fiber-" + id.to_s
+  text = "fiber-".to_heap + id.to_s
   values = [id, id * 2, id * 3]
   sleep(0)
-  ok = text == "fiber-" + id.to_s && values[0] == id && values[2] == id * 3
+  ok = text == "fiber-".to_heap + id.to_s &&
+    values[0] == id && values[2] == id * 3
   ok ? 0_i64 : 1_i64
 end
 

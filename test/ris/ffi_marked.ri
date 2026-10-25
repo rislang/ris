@@ -6,6 +6,6 @@ lib LibC3
   fun strlen(s : UInt8*) : UInt64
 end
 
-text = "four"
+text = "four".to_heap
 puts LibC3.strlen(text.to_unsafe)
 puts text.byte_at(1)

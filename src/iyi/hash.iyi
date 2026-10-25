@@ -84,7 +84,7 @@ class Hash(K, V)
     value
   end
 
-  def []?(key : K) : V?
+  def []?(key) : V?
     entry = entry_of(key)
     entry < 0 ? nil : @values[entry]
   end
@@ -100,7 +100,7 @@ class Hash(K, V)
     @values[entry]
   end
 
-  def has_key?(key : K) : Bool
+  def has_key?(key) : Bool
     entry_of(key) >= 0
   end
 
@@ -550,7 +550,7 @@ class Hash(K, V)
 
   # The key's entry in the dense arrays, -1 when it has none. Protected, so
   # that `==` can ask the other table.
-  protected def entry_of(key : K) : Int32
+  protected def entry_of(key) : Int32
     return -1 if @capacity == 0
     @index[slot_for(key)]
   end
@@ -558,7 +558,7 @@ class Hash(K, V)
   # The index slot this key belongs in: its entry's, or the first tombstone
   # or free slot the probe met. The hash is mixed first: an Int's is itself,
   # and multiples of 65536 shared low bits, 20,000 of them 9.5 s to insert.
-  private def slot_for(key : K) : Int32
+  private def slot_for(key) : Int32
     mask = @capacity * 2 - 1
     slot = ((h = key.hash &* -1640531535) ^ h.unsafe_shr(16)) & mask
     tombstone = -1

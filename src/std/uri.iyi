@@ -274,7 +274,7 @@ pub struct Query
   end
 
   # The first value of *key*, nil when there is none.
-  def []?(key : String) : Str?
+  def []?(key : String | Str) : Str?
     i = 0
     while i < @pairs.size
       pair = @pairs[i]

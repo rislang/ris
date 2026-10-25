@@ -2,30 +2,30 @@ module test/path_tape
 
 import std/path::{Path}
 
-kept = ""
+kept = "".to_heap
 tape do
-  path = Path.posix("/a//b/../c.txt".as_tape)
+  path = Path.posix("/a//b/../c.txt")
   exit 1 unless path.basename == "c.txt"
   exit 2 unless path.extension == ".txt" && path.stem == "c"
   normal = path.normalize
   exit 3 unless normal.name == "/a/c.txt"
   exit 4 unless normal.parent.name == "/a"
-  relative = normal.relative_to?("/a".as_tape)
+  relative = normal.relative_to?("/a")
   exit 5 unless relative && relative.name == "c.txt"
-  exit 6 unless Path.windows("C:/a/../b".as_tape).normalize.name == "C:\\b"
-  exit 7 unless Path.windows("C:".as_tape).join("foo".as_tape).name == "C:foo"
+  exit 6 unless Path.windows("C:/a/../b").normalize.name == "C:\\b"
+  exit 7 unless Path.windows("C:").join("foo").name == "C:foo"
   exit 8 unless path.name == path.to_heap.name
   writer = Str::Builder.new(1)
   writer << "prefix:"
   normal.write(writer)
   exit 9 unless writer.finish == "prefix:/a/c.txt"
-  exit 11 unless Path.posix("".as_tape).normalize.name == "."
-  unc = Path.windows("\\\\srv\\share".as_tape)
+  exit 11 unless Path.posix("").normalize.name == "."
+  unc = Path.windows("\\\\srv\\share")
   exit 12 unless unc.absolute?
-  exit 13 unless unc.join("a".as_tape).name == "\\\\srv\\share\\a"
-  exit 14 unless Path.posix("/a.txt/".as_tape).basename(
-    ".txt".as_tape) == "a"
-  expanded = Path.windows("C:é".as_tape).expand("C:\\a".as_tape)
+  exit 13 unless unc.join("a").name == "\\\\srv\\share\\a"
+  exit 14 unless Path.posix("/a.txt/").basename(
+    ".txt") == "a"
+  expanded = Path.windows("C:é").expand("C:\\a")
   exit 15 unless expanded.name == "C:\\a\\é"
   exit 16 unless normal.parents.to_heap[0].name == "/"
   kept = normal.to_heap.name

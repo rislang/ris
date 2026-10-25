@@ -33,8 +33,8 @@ end
 
 DAYS = [
   "GET /users/1 200 12\nGET /users/2 200 640\nPOST /login 500 30\n" \
-  "GET /users/1/status 200 980\n",
-  "GET / 200 4\nGET /search 200 1210\nGET /users/9 404 3\n",
+  "GET /users/1/status 200 980\n".to_heap,
+  "GET / 200 4\nGET /search 200 1210\nGET /users/9 404 3\n".to_heap,
 ]
 
 slowest = [] of String # on the heap: it lives past every day
@@ -59,4 +59,4 @@ DAYS.each_with_index do |log, day|
   end
 end
 
-puts "slowest each day: #{slowest.join(", ")}"
+puts "slowest each day: #{slowest.join(", ".to_heap)}"

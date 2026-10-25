@@ -8,11 +8,11 @@ import std/gc::{GC}
 
 # The String API beside the tape one: its result is copied off.
 @[TapeToHeap]
-def pairs(text : String) : String
-  out = ""
+def pairs(text : Str) : String
+  out = "".to_heap
   tape do
     q = Query.parse(text.as_tape)
-    q.each { |key, value| out = out + "[#{key.to_s}=#{value.to_s}]" }
+    q.each { |key, value| out = out + "[#{key}=#{value}]".to_heap }
   end
   out
 end
@@ -24,7 +24,7 @@ GC.disable
 before = GC.stats.bytes_since_collection
 found = 0
 tape do
-  q = Query.parse("page=2&q=caf%C3%A9+au+lait".as_tape)
+  q = Query.parse("page=2&q=caf%C3%A9+au+lait")
   page = q["page"]?
   words = q["q"]?
   found = (page ? page.bytesize : 0) + (words ? words.bytesize : 0)

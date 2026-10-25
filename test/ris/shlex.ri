@@ -4,7 +4,7 @@ import std/shlex::{Shlex, ShlexError}
 
 kept = [] of String
 tape do
-  text = "plain 'two words' \"café\" a\\ b ''".as_tape
+  text = "plain 'two words' \"café\" a\\ b ''"
   words = Shlex.split(text)
   exit 1 if words.is_a?(ShlexError)
   exit 2 unless words.size == 5
@@ -17,14 +17,15 @@ tape do
   again = Shlex.split(Shlex.join(words))
   exit 6 if again.is_a?(ShlexError)
   exit 7 unless again.to_heap == words.to_heap
-  exit 8 unless Shlex.quote("a'b".as_tape) == "'a'\"'\"'b'"
-  exit 9 unless Shlex.split("'bad".as_tape).is_a?(ShlexError)
-  exit 10 unless Shlex.split("bad\\".as_tape).is_a?(ShlexError)
-  comments = Shlex.split("a# rest\nb".as_tape, true)
+  exit 8 unless Shlex.quote("a'b") == "'a'\"'\"'b'"
+  exit 9 unless Shlex.split("'bad").is_a?(ShlexError)
+  exit 10 unless Shlex.split("bad\\").is_a?(ShlexError)
+  comments = Shlex.split("a# rest\nb", true)
   exit 11 if comments.is_a?(ShlexError)
-  exit 12 unless comments.to_heap == ["a", "b"]
+  exit 12 unless comments.to_heap == ["a".to_heap, "b".to_heap]
   kept = words.to_heap
 end
-exit 13 unless kept == ["plain", "two words", "café", "a b", ""]
+exit 13 unless kept == ["plain".to_heap, "two words".to_heap,
+  "café".to_heap, "a b".to_heap, "".to_heap]
 exit 14 unless Shlex.split(Shlex.join(kept)) == kept
 puts "PASS: shlex tape and heap APIs"

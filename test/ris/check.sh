@@ -23,6 +23,21 @@ expect() {
   fi
 }
 
+for name in text_constant text_parameter text_array text_capture \
+            text_channel; do
+  expect "$name" '.to_heap'
+done
+expect text_literal_field '.to_heap'
+expect text_interpolation_field '.to_heap'
+out=$("$RIS" run test/ris/text_default.ri 2>&1)
+if [ "$?" -eq 0 ] && grep -qF 'Str' <<<"$out" &&
+    grep -qF 'PASS: default text' <<<"$out"; then
+  echo "runs     text_default"
+else
+  echo "FAILED   text_default: $out"
+  status=1
+fi
+
 expect class_field   "holds the tape type"
 expect struct_field  "is a struct that is not @[OnTape]"
 expect class_var     "the class variable"
@@ -204,8 +219,8 @@ if [ "$out" = 'PASS: parsed, refused alike, written alike, on the tape' ]; then 
 out=$("$RIS" run test/ris/json_repeat.ri 2>&1)
 if grep -qF 'nested keys are no repeat' <<<"$out" && grep -qF 'the key "k77" is written twice in one object' <<<"$out"; then echo "runs     json_repeat"; else echo "FAILED   json_repeat: $out"; status=1; fi
 
-# Interpolation into puts or print is written on the tape, or on the heap
-# when no tape runs; flat data is linked, saved as bytes and loaded back.
+# Interpolation is tape text in every ris scope; flat data is linked,
+# saved as bytes and loaded back.
 out=$("$RIS" run test/ris/interpolate.ri 2>&1)
 if [ "$out" = $'on the tape: 42 -7 1.5 x true\nno newline tape\nitem 1\nitem 2\nends its line\nheap 3\nno tape when called 4\nthrough a var\nagain 1\nkept 2\nkept 2' ]; then echo "runs     interpolate"; else echo "FAILED   interpolate: $out"; status=1; fi
 out=$("$RIS" run test/ris/flat.ri 2>&1)

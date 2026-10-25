@@ -1,0 +1,7 @@
+class Kept
+  @text : String
+  def initialize
+    @text = "literal"
+  end
+end
+Kept.new

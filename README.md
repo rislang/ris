@@ -31,17 +31,19 @@ and Slim all work on it:
 import std/http::{Server, ParsedHead}  # supports tape memory
 import std/json::{JSON}                # supports tape memory
 import github.com/domify/slim::{Slim}  # supports tape memory
-bytes = "GET /hello HTTP/1.1\r\nHost: localhost\r\n\r\n".as_tape
+bytes = "GET /hello HTTP/1.1\r\nHost: localhost\r\n\r\n"
 req = Server.parse_head(bytes) # its fields are views into the bytes
 if req.is_a?(ParsedHead)
   body = Str.build do |writer| # JSON written on the tape
     writer.json { |json| json.object { json.field "path", req.target } }
   end
   puts body                             # => {"path":"/hello"}
-  puts Slim.render("views/page.slim")   # h1= req.target => <h1>/hello</h1>
+  puts Slim.render("views/page.slim".to_heap) # h1= req.target
 end
 ```
 
+Literals are static `Str` views; interpolation builds tape text. Keep text
+on the heap with `.to_heap`; a String annotation requires that explicit copy.
 Other objects use iyi's GC. Tape values go to a file or socket uncopied;
 `tape` blocks share it; `local_tape` owns its own. The compiler refuses values
 outliving it; `text.to_heap` copies what must. [TAPE_DESIGN.md](TAPE_DESIGN.md).

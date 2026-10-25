@@ -8,7 +8,7 @@ group do |g|
     g.spawn do
       handles << IyiScheduler.current
       raise "fiber shares main tape" if IyiRegion.tape == main_tape
-      text = Str.new("fiber")
+      text = "fiber"
       items = Ary(Str).new(2)
       items << text
       writer = Str::Builder.new(16)

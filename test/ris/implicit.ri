@@ -1,4 +1,4 @@
-text = Str.new("hello")
+text = "hello"
 items = Ary(Str).new(2)
 items << text
 writer = Str::Builder.new(16)

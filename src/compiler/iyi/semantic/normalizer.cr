@@ -450,6 +450,12 @@ module Iyi
     end
 
     def transform(node : Call)
+      # Explicit retention of static bytes needs neither a view nor a copy.
+      if node.name == "to_heap" && node.args.empty? && !node.block &&
+         !node.named_args && (text = node.obj).is_a?(StringLiteral) &&
+         tape_text?(text)
+        return text
+      end
       if lowered = TapeInPlace.lower(program, node)
         return lowered.transform(self)
       end
@@ -1011,7 +1017,27 @@ module Iyi
       end
     end
 
+    # Runtime text in ris is a view of static bytes or a tape builder.
+    # Macro code and annotation arguments remain compiler metadata.
+    private def tape_text?(node : ASTNode) : Bool
+      file = node.location.try(&.original_filename)
+      @macro_code == 0 && !!file && file.ends_with?(".ri") &&
+        !TapePointerCheckerLibrary.library?(node.location)
+    end
+
+    def transform(node : Annotation)
+      node
+    end
+
+    def transform(node : StringLiteral)
+      return node unless tape_text?(node)
+      Call.new(Path.global(["Str"]), "view", [node] of ASTNode).at(node)
+    end
+
     def transform(node : StringInterpolation)
+      if tape_text?(node)
+        return TapeTextLowering.interpolate(node).transform(self)
+      end
       # If the interpolation has just one string literal inside it,
       # return that instead of an interpolation
       if node.expressions.size == 1

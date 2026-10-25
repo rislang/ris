@@ -33,23 +33,25 @@ end
 
 pub def parse_age(text : String) : Int32 | ParseError
   age = text.to_i?
-  return ParseError.new("not a number: #{text}") unless age
+  return ParseError.new("not a number: #{text}".to_heap) unless age
   age
 end
 
 def greet(text : String) : String | ParseError
-  "age #{parse_age(text)!}"           # `!` returns the error to the caller
+  "age #{parse_age(text)!}".to_heap # `!` returns an error
 end
 
-puts greet("41").or_panic             # => age 41
-case r = greet("x")
+puts greet("41".to_heap).or_panic             # => age 41
+case r = greet("x".to_heap)
 in String     then puts r
 in ParseError then puts it.message    # `it` is the narrowed value
 end
 ```
 
 * Memory: main and every spawned fiber have an implicit owning tape.
-  `text.as_tape` views a String there, nothing copied;
+  Literals are static `Str` views; interpolation builds a `Str` there.
+  `.to_heap` explicitly keeps text as String, including for typed arguments;
+  a String annotation alone does not copy. `text.as_tape` borrows a String;
   a `Str` reads as a String does (`[a..]`, `split`, `index`,
   `to_i`), a `Str::Builder` takes `<<`, `Ary(T)` and
   `@[OnTape]` structs hold the rest, and `to_heap` copies what must

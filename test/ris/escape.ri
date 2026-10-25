@@ -32,7 +32,7 @@ end
 
 @[TapeToHeap]
 def interpolated_copy(text : Str) : String
-  "#{text}"
+  "#{text}".to_heap
 end
 
 @[TapeToHeap]
@@ -41,9 +41,9 @@ def builder_copy(text : Str) : String
 end
 
 tape do
-  text = Str.new("abc")
+  text = "abc"
   keep(text)
-  empty = Str.new("")
+  empty = ""
   print(empty)
   stdout.print(empty)
   GC.disable

@@ -13,5 +13,5 @@ def past(s : Str) : Int32
 end
 
 tape do
-  puts past(Str.new("ab"))
+  puts past("ab")
 end

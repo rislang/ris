@@ -1,0 +1,4 @@
+def retain(text : String) : String
+  text
+end
+retain("static")

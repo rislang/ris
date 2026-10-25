@@ -7,7 +7,7 @@ module socket_pieces
 import std/socket::{IyiSocket}
 
 def read_all(socket : IyiSocket, count : Int32) : String
-  text = ""
+  text = "".to_heap
   while text.bytesize < count
     chunk = socket.read(65536).or_panic
     break if chunk.empty?
@@ -16,27 +16,27 @@ def read_all(socket : IyiSocket, count : Int32) : String
   text
 end
 
-big = "b" * 1048576
+big = ("b" * 1048576).to_heap
 expected = String.build do |io|
-  io << "head:"
-  100.times { |i| io << i << (i.even? ? "" : ",") }
-  io << big << "end"
+  io << "head:".to_heap
+  100.times { |i| io << i << (i.even? ? "".to_heap : ",".to_heap) }
+  io << big << "end".to_heap
 end
 server = IyiSocket.listen(0)
-client = IyiSocket.connect("127.0.0.1", server.local_port).or_panic
+client = IyiSocket.connect("127.0.0.1".to_heap, server.local_port).or_panic
 conn = server.accept.or_panic
-got = ""
+got = "".to_heap
 group do |g|
   reader = g.spawn { read_all(client, expected.bytesize) }
   tape do
     pieces = Ary(Str).new(4)
-    pieces << "head:".as_tape
+    pieces << "head:"
     100.times do |i|
       pieces << Str.build(4) { |w| w.append_int(i) }
-      pieces << (i.even? ? "".as_tape : ",".as_tape)
+      pieces << (i.even? ? "" : ",")
     end
     pieces << Str.build(big.bytesize) { |w| w.append(big) }
-    pieces << "end".as_tape
+    pieces << "end"
     written = conn.write(pieces).or_panic
     raise "wrote #{written}" unless written == expected.bytesize
   end

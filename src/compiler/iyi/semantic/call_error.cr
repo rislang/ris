@@ -711,6 +711,11 @@ class Iyi::Call
         str << "expected argument #{argument_description} to '#{full_name(owner, def_name)}' to be "
         to_sentence(str, expected_types, " or ")
         str << ", not #{actual_type.devirtualize}"
+        if actual_type.to_s == "Str" &&
+           expected_types.any? { |t| t.to_s == "String" }
+          str << "\nText is tape text; keep it with `.to_heap` "
+          str << "when an API requires String."
+        end
 
         if char_fix && arg.is_a?(CharLiteral)
           str.puts
@@ -800,6 +805,10 @@ class Iyi::Call
   private def raise_no_overload_matches(node, defs, arg_types, inner_exception, suggestion : String? = nil, size : Int32? = nil, &)
     error_message = String.build do |str|
       yield str
+      if named_args.try(&.any? { |arg| arg.value.type?.try(&.to_s) == "Str" })
+        str << "\nText is tape text; keep it with `.to_heap` "
+        str << "when a parameter requires String."
+      end
 
       str.puts
       str.puts

@@ -5,7 +5,7 @@ import std/format::{sprintf}
 kept = ""
 tape do
   fmt = "%s|%+08d|%#x|%.2f|%.3e|%.4g|%%".as_tape
-  args = {"café".as_tape, -42, 255, 0.125, 1.25, 0.000125}
+  args = {"café", -42, 255, 0.125, 1.25, 0.000125}
   w = Str::Builder.new(1)
   w << "prefix:"
   sprintf(fmt, w, args)
@@ -14,12 +14,12 @@ tape do
   exit 1 unless rendered == expected
   exit 2 unless w.finish == "prefix:" + expected
   kept = rendered.to_heap
-  exit 3 unless sprintf("%5.1s".as_tape, "éx".as_tape) == "    é"
-  exit 4 unless sprintf("%d".as_tape, -9223372036854775808_i64) ==
+  exit 3 unless sprintf("%5.1s", "éx") == "    é"
+  exit 4 unless sprintf("%d", -9223372036854775808_i64) ==
     "-9223372036854775808"
-  exit 5 unless sprintf("%.0f".as_tape, 1e23) ==
+  exit 5 unless sprintf("%.0f", 1e23) ==
     "99999999999999991611392"
-  exit 6 unless sprintf("%u".as_tape, 18446744073709551615_u64) ==
+  exit 6 unless sprintf("%u", 18446744073709551615_u64) ==
     "18446744073709551615"
 end
 exit 7 unless sprintf("%s|%+08d|%#x|%.2f|%.3e|%.4g|%%",

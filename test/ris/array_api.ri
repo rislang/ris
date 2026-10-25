@@ -5,8 +5,8 @@ struct Message
   getter user_id : Int32
   getter body : Str
 
-  def initialize(@user_id, body : String)
-    @body = body.as_tape
+  def initialize(@user_id, body : Str)
+    @body = body
   end
 end
 

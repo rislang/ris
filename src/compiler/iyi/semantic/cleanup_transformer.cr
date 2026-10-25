@@ -672,7 +672,11 @@ module Iyi
         type = meta.type?
         next unless type
         if found = Iyi::TapeChecker.tape_in(@program, type)
-          captured.raise "this block becomes a proc, which may run after the tape block that made `#{captured.name} : #{type}` has ended, and #{found} is a tape type: pass what the block needs as a copy (`to_s`), or call it inside the scope without keeping it"
+          captured.raise "this block becomes a proc, which may run after " \
+            "the tape block that made `#{captured.name} : #{type}` has " \
+            "ended, and #{found} is a tape type: pass what the block " \
+            "needs as a copy (`.to_heap`), or call it inside the scope " \
+            "without keeping it"
         end
       end
     end

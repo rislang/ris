@@ -6,7 +6,7 @@ module socket_pair
 import std/socket::{IyiSocket}
 
 def read_all(socket : IyiSocket, count : Int32) : String
-  text = ""
+  text = "".to_heap
   while text.bytesize < count
     chunk = socket.read(65536).or_panic
     break if chunk.empty?
@@ -15,14 +15,14 @@ def read_all(socket : IyiSocket, count : Int32) : String
   text
 end
 
-big = "b" * 1048576
+big = ("b" * 1048576).to_heap
 server = IyiSocket.listen(0)
-client = IyiSocket.connect("127.0.0.1", server.local_port).or_panic
+client = IyiSocket.connect("127.0.0.1".to_heap, server.local_port).or_panic
 conn = server.accept.or_panic
-got = ""
+got = "".to_heap
 group do |g|
   reader = g.spawn { read_all(client, 5 + 3 + 5 + big.bytesize) }
-  conn.write("head:", "abc").or_panic
+  conn.write("head:".to_heap, "abc".to_heap).or_panic
   tape do
     head = Str.build(8) { |w| w.append("tape:") }
     body = Str.build(big.bytesize) { |w| w.append(big) }

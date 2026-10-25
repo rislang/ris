@@ -6,15 +6,18 @@ def check(ok : Bool) : Nil
 end
 
 def fail_local(events : Array(String)) : Int32
-  defer events << (IyiRegion.tape != 0_u64 ? "implicit" : "bad implicit")
+  defer events <<
+    (IyiRegion.tape != 0_u64 ? "implicit" : "bad implicit").to_heap
   tape do
     outer = IyiRegion.tape
-    defer events << (IyiRegion.tape == outer ? "outer" : "bad outer")
+    defer events << (IyiRegion.tape == outer ? "outer" : "bad outer").to_heap
     local_tape do
       local_tape = IyiRegion.tape
-      defer events << (IyiRegion.tape == local_tape ? "local" : "bad local")
+      defer events <<
+        (IyiRegion.tape == local_tape ? "local" : "bad local").to_heap
       local_tape do
-        defer events << (IyiRegion.tape != local_tape ? "nested" : "bad nested")
+        defer events <<
+          (IyiRegion.tape != local_tape ? "nested" : "bad nested").to_heap
         raise "expected local panic"
       end
     end
@@ -47,6 +50,6 @@ group do |g|
   check(!b.value.is_a?(Panicked))
   check(task.value.is_a?(Panicked))
 end
-check(events.join("|") == "nested|local|outer|implicit")
+check(events.join("|".to_heap) == "nested|local|outer|implicit")
 check(IyiRegion.tape != 0_u64)
 puts "PASS: local panic cleanup and fiber switching"

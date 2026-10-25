@@ -20,7 +20,7 @@ def first_word?(s : Str, i : Int32) : Bool
 end
 
 tape do
-  w = Str.new("1234567812345678xyz")
+  w = "1234567812345678xyz"
   puts "#{words(w)} #{first_word?(w, 0)} #{first_word?(w, 1)} #{first_word?(w, 12)}"
   j = -8
   while j + 8 <= w.bytesize

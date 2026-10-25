@@ -1,0 +1,2 @@
+channel = Channel(String).new(1)
+channel.send("static")

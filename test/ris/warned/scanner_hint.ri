@@ -20,5 +20,5 @@ struct Words
 end
 
 tape do
-  puts Words.new("a b c".as_tape).count
+  puts Words.new("a b c").count
 end

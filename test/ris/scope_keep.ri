@@ -10,7 +10,7 @@ tape do
   end
   outer = Str::Builder.new(2)
   50_000.times { |n| outer.append_int(n % 10) }
-  text = Str.new("abc")
+  text = "abc"
   each_text = 0
   3.times { each_text += text.bytesize }
   puts "#{writers[0].length} #{outer.length} #{each_text}"

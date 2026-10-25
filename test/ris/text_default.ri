@@ -1,0 +1,60 @@
+# Every def drops its interpolation when its result keeps no tape data.
+def format_size(n : Int32) : Int32
+  text = "number #{n}"
+  raise "interpolation is not Str" unless text.is_a?(Str)
+  text.bytesize
+end
+
+class KeptText
+  getter text : String
+
+  def initialize
+    @text = "static".to_heap
+  end
+
+  def update(n : Int32)
+    @text = "number #{n}".to_heap
+  end
+end
+
+literal_cursor = IyiHeap.read64(IyiRegion.tape &+ IyiRegion::OFF_CURSOR)
+literal_heap = IyiMark.allocated_since
+literal = "static"
+heap_literal = "static".to_heap
+raise "literal used tape storage" unless literal_cursor ==
+  IyiHeap.read64(IyiRegion.tape &+ IyiRegion::OFF_CURSOR)
+raise "literal allocated on heap" unless literal_heap == IyiMark.allocated_since
+raise "static retention type" unless heap_literal.is_a?(String)
+puts typeof("static")
+raise "literal allocated" unless "static".is_a?(Str)
+before = IyiHeap.read64(IyiRegion.tape &+ IyiRegion::OFF_CURSOR)
+format_size(42)
+raise "def kept interpolation" unless before ==
+  IyiHeap.read64(IyiRegion.tape &+ IyiRegion::OFF_CURSOR)
+keys = Hash(String, Int32).new
+keys["key".to_heap] = 42
+raise "borrowed key lookup" unless keys["key"]? == 42
+raise "borrowed key membership" unless keys.has_key?("key")
+case "key".to_heap
+when "key" then nil
+else raise "case comparison failed"
+end
+i = 0
+while i < 1_000_000
+  format_size(i)
+  i += 1
+end
+after = IyiHeap.read64(IyiRegion.tape &+ IyiRegion::OFF_CURSOR)
+raise "interpolation retained tape" unless before == after
+kept = KeptText.new
+kept.update(42)
+raise "heap copy changed" unless kept.text == "number 42"
+path = "/tmp/ris-text-#{IyiRegion.tape}"
+File.write(path, "contents #{42}")
+raise "File lost tape text" unless File.read(path) == "contents 42"
+raise "File path lookup" unless File.exists?(path)
+File.open(path, "r") do |io|
+  raise "File open tape mode" unless io.read_all == "contents 42"
+end
+File.delete(path)
+puts "PASS: default text, million calls, flat tape, explicit heap"

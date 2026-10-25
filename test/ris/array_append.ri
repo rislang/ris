@@ -4,8 +4,8 @@
 tape do
   a = Ary(UInt8).new(4)
   a.push(62_u8)
-  a.append(Str.new(""))
-  a.append(Str.new("abc"))
+  a.append("")
+  a.append("abc")
   long = Str.new("0123456789" * 10)
   a.append(long)
   ok = a.size == 104 && a[0] == 62_u8 && a[1] == 97_u8 && a[3] == 99_u8

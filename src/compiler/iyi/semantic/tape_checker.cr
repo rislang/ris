@@ -61,6 +61,14 @@ class Iyi::TapeChecker
   end
 
   def run
+    @program.const_initializers.each do |constant|
+      if type = constant.value.type?
+        if found = TapeChecker.tape_in(@program, type)
+          constant.value.raise "constant holds tape text or data (#{found}); " \
+                               "keep it with `.to_heap`"
+        end
+      end
+    end
     check_types(@program)
     @program.file_modules.each_value do |file_module|
       check_types(file_module)
@@ -126,7 +134,7 @@ class Iyi::TapeChecker
         the class variable `#{cvar.name} : #{cvar_type}` holds the tape type #{found}
 
         A class variable lives as long as the program, and a tape value only
-        until the tape block that made it ends.
+        until the tape block that made it ends; keep text with `.to_heap`.
         MSG
     end
   end

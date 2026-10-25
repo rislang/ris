@@ -5,13 +5,13 @@ import std/semantic_version::{SemanticVersion}
 kept = ""
 owned = nil.as(SemanticVersion?)
 tape do
-  version = SemanticVersion.parse("1.2.3-beta.11+build.7\r\n".as_tape)
+  version = SemanticVersion.parse("1.2.3-beta.11+build.7\r\n")
   exit 1 unless version.major == 1 && version.prerelease == "beta.11"
   exit 2 unless version.build == "build.7"
-  exit 3 unless SemanticVersion.parse?("01.2.3".as_tape).nil?
-  exit 4 unless SemanticVersion.parse?("1.2.3-01".as_tape).nil?
-  exit 5 unless SemanticVersion.parse?("1.2.3-a..b".as_tape).nil?
-  earlier = SemanticVersion.parse("1.2.3-beta.2".as_tape)
+  exit 3 unless SemanticVersion.parse?("01.2.3").nil?
+  exit 4 unless SemanticVersion.parse?("1.2.3-01").nil?
+  exit 5 unless SemanticVersion.parse?("1.2.3-a..b").nil?
+  earlier = SemanticVersion.parse("1.2.3-beta.2")
   exit 6 unless (earlier <=> version) < 0
   w = Str::Builder.new(1)
   w << "prefix:"
@@ -19,7 +19,7 @@ tape do
   exit 7 unless w.finish == "prefix:1.2.3-beta.11+build.7"
   exit 8 unless version.to_heap.to_tape == version.to_tape
   owned = version.to_heap
-  huge = "999999999999999999.0.0".as_tape
+  huge = "999999999999999999.0.0"
   exit 12 unless SemanticVersion.valid?(huge)
   exit 13 unless SemanticVersion.parse?(huge).nil?
   kept = version.to_tape.to_heap

@@ -2,21 +2,21 @@
 # `includes?`, `split` (by ASCII and UTF-8 chars), `to_i` and a range; a
 # Writer written with `<<` and printed with `puts` straight from the tape.
 tape do
-  line = "GET /users/1 200 12".as_tape
+  line = "GET /users/1 200 12"
   puts "#{line.index(' ')} #{line.index(' ', 4)} #{line.index('x').nil?}"
   puts "#{line.includes?('/')} #{line.includes?('?')}"
   parts = line.split(' ')
   puts "#{parts.size} #{parts[2].to_i + parts[3].to_i}"
   puts parts[1]
-  pieces = "a,,b,".as_tape.split(',')
+  pieces = "a,,b,".split(',')
   puts "#{pieces.size} #{pieces[1].empty?} #{pieces[3].empty?}"
-  puts "#{"-42".as_tape.to_i} #{"+7".as_tape.to_i} #{"4x".as_tape.to_i?.nil?}"
-  puts "#{"2147483648".as_tape.to_i?.nil?} #{"-2147483648".as_tape.to_i}"
+  puts "#{"-42".to_i} #{"+7".to_i} #{"4x".to_i?.nil?}"
+  puts "#{"2147483648".to_i?.nil?} #{"-2147483648".to_i}"
 
-  rest = "7 Ship it".as_tape
+  rest = "7 Ship it"
   puts "#{rest[2..]}|#{rest[0...1]}|#{rest[-2..]}|#{rest[..-4]}"
   puts rest[9..].empty?
-  arrows = "a→b→café".as_tape
+  arrows = "a→b→café"
   puts "#{arrows.index('→')} #{arrows.index('→', 2)} #{arrows.index('é')}"
   pieces = arrows.split('→')
   puts "#{pieces.size} #{pieces[2]} #{arrows.includes?('ü')}"
@@ -26,5 +26,5 @@ tape do
   puts response
   print response
   puts ""
-  "".as_tape.to_i
+  "".to_i
 end
