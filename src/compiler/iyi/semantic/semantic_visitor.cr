@@ -2300,6 +2300,15 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
       # There is no need to store it, but enforcing
       # arguments makes sense here.
       DeprecatedAnnotation.from(ann)
+    when @program.task_closure_unsafe_annotation
+      reason = ann.args.first?.as?(StringLiteral)
+      unless ann.args.size == 1 && reason && !reason.value.strip.empty?
+        ann.raise "TaskClosureUnsafe needs a reason naming the joined owner"
+      end
+      filename = ann.location.try(&.expanded_location).try(&.filename).to_s
+      unless filename.includes?("/src/std/") || filename.includes?("/src/iyi/")
+        ann.raise "TaskClosureUnsafe is runtime-only; keep the ordinary closure"
+      end
     when @program.experimental_annotation
       # ditto DeprecatedAnnotation
       ExperimentalAnnotation.from(ann)

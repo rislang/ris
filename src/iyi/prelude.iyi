@@ -10552,6 +10552,25 @@ require "./ris"
   # No tape here: what the program's end and the scheduler ask of it
   # answers that there is none.
   class IyiRegion
+    # Internal stable handles retain the collected fallback on targets
+    # without tapes. User tape syntax remains unavailable there.
+    def self.program_bytes(size : UInt64, clear : Bool = false,
+                           type_id : UInt64 = 0_u64) : UInt64
+      memory = Pointer(UInt8).malloc(size)
+      if clear
+        index = 0_u64
+        while index < size
+          (memory + index.to_i64).value = 0_u8
+          index += 1_u64
+        end
+      end
+      memory.address
+    end
+
+    def self.program_object(type : T.class) : T forall T
+      type.allocate
+    end
+
     def self.tape : UInt64
       0_u64
     end

@@ -16,7 +16,8 @@ class File
   # of `fopen`'s "+" modes: a write after a read otherwise lands past the
   # read-ahead, and a read after a write misses what is still buffered.
   def self.open(path : String | Str, mode : String | Str = "r",
-                buffer_size : Int32 = 4096, perm : Int32 = 0o644) : IyiIO
+                buffer_size : Int32 = 4096, perm : Int32 = 0o644,
+                owner : Program::TapeOwner? = nil) : IyiIO
     flags = open_flags(mode)
     read = flags & 1 != 0
     write = flags & 2 != 0
@@ -25,7 +26,7 @@ class File
     append = flags & 16 != 0
     fd = __iyi_open_file(c_path(path), read, write, create, truncate, append, perm)
     raise "cannot open #{path}" if fd < 0_i64
-    IyiIO.new(fd, buffer_size, false)
+    owner ? IyiIO.on_program(fd, buffer_size) : IyiIO.new(fd, buffer_size, false)
   end
 
   def self.open(path : String | Str, mode : String | Str = "r",

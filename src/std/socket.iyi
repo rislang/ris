@@ -385,37 +385,59 @@ end
   end
 {% end %}
 
-pub class IyiSocket
-  getter fd : Int32
+pub struct IyiSocket
+  # Copies share descriptor state, retained on the program owner.
+  struct State
+    property fd : Int32
+    property family : Int32
+    # A unix listener retains its path until close removes it.
+    property path : String? = nil
+    # Per-wait bounds; nil waits without a deadline.
+    property read_timeout_ms : Int32? = nil
+    property write_timeout_ms : Int32? = nil
+    # A read's deferred error must survive copies of the handle.
+    property pending_error : SocketError? = nil
+    property io : Std::Socket::SocketIO? = nil
+
+    def initialize(@fd : Int32, @family : Int32)
+    end
+  end
+
+  @state : Pointer(State)
+
+  def fd : Int32
+    @state.value.fd
+  end
+
+  def object_id : UInt64
+    @state.address
+  end
 
   # The address family, the platform's number for it: an accepted
   # connection is its listener's, and on Windows the socket `AcceptEx`
   # fills in has to be made in it.
-  def initialize(@fd : Int32, @family : Int32 = AF_INET)
+  def initialize(fd : Int32, family : Int32 = AF_INET)
+    @state = Pointer(State).new(IyiRegion.program_bytes(sizeof(State).to_u64))
+    @state.value = State.new(fd, family)
   end
-
-  # The path a unix listener bound, which its `close` removes: nobody else
-  # can bind it while the file is there, and the file outlives the socket.
-  @path : String? = nil
 
   # The bounds on a read's and a write's wait, in milliseconds; nil waits
   # as long as it takes.
-  getter read_timeout_ms : Int32? = nil
-  getter write_timeout_ms : Int32? = nil
-
-  # An error a read met after it already had bytes to answer, which the
-  # next read answers: the kernel reports a reset once and an end of file
-  # after it, so one that was dropped read as a clean end.
-  @pending_error : SocketError? = nil
+  def read_timeout_ms : Int32?
+    @state.value.read_timeout_ms
+  end
+  def write_timeout_ms : Int32?
+    @state.value.write_timeout_ms
+  end
 
   def read_timeout_ms=(ms : Int32?) : Int32?
     raise "negative timeout: #{ms}" if ms.is_a?(Int32) && ms < 0
-    @read_timeout_ms = ms
+    @state.value.read_timeout_ms = ms
   end
 
   def write_timeout_ms=(ms : Int32?) : Int32?
     raise "negative timeout: #{ms}" if ms.is_a?(Int32) && ms < 0
-    @write_timeout_ms = ms
+    @state.value.write_timeout_ms = ms
   end
 
   # Whether a small write goes at once (TCP_NODELAY) rather than waiting
@@ -431,15 +453,15 @@ pub class IyiSocket
   # 1,211 to 10,702 requests a second. A unix socket has no Nagle to turn
   # off: it answers false and is left alone.
   def nodelay=(on : ::Bool) : ::Bool
-    raise "socket is closed" if @fd < 0
-    IyiSocket.__sys_set_nodelay(@fd, on) unless @family == AF_UNIX
+    raise "socket is closed" if @state.value.fd < 0
+    IyiSocket.__sys_set_nodelay(@state.value.fd, on) unless @state.value.family == AF_UNIX
     on
   end
 
   # Whether TCP_NODELAY is on, as the socket's option reads.
   def nodelay? : ::Bool
-    raise "socket is closed" if @fd < 0
-    @family != AF_UNIX && IyiSocket.__sys_nodelay?(@fd)
+    raise "socket is closed" if @state.value.fd < 0
+    @state.value.family != AF_UNIX && IyiSocket.__sys_nodelay?(@state.value.fd)
   end
 
   # What every connected and accepted socket starts with: TCP_NODELAY, on
@@ -449,21 +471,20 @@ pub class IyiSocket
   end
 
   def to_unsafe : Int32
-    @fd
+    @state.value.fd
   end
 
   {% if @top_level.has_constant?("IyiIO") %}
-    @io : Std::Socket::SocketIO? = nil
 
     # This socket as a stream (`SocketIO`), the same one every time, so
     # what one read took ahead the next reads. It was a stream over the
     # descriptor that read a socket with nothing yet to read as failed.
     def to_io : Std::Socket::SocketIO
-      if made = @io
+      if made = @state.value.io
         return made
       end
       made = Std::Socket::SocketIO.new(self)
-      @io = made
+      @state.value.io = made
       made
     end
   {% end %}
@@ -877,18 +898,18 @@ pub class IyiSocket
   end
 
   def accept : IyiSocket | Cancelled | SocketError
-    raise "socket is closed" if @fd < 0
+    raise "socket is closed" if @state.value.fd < 0
     # A `sockaddr_storage`'s room: the peer's address in whichever family.
     storage = uninitialized UInt8[128]
     addr = pointerof(storage).as(Pointer(UInt8))
     len = 128_u32
     while true
-      client_fd = IyiSocket.__sys_accept(@fd, addr, pointerof(len), @family)
+      client_fd = IyiSocket.__sys_accept(@state.value.fd, addr, pointerof(len), @state.value.family)
       if client_fd >= 0
         IyiSocket.__sys_no_sigpipe(client_fd)
-        IyiSocket.__send_at_once(client_fd, @family)
+        IyiSocket.__send_at_once(client_fd, @state.value.family)
         IyiSocket.__sys_set_nonblock(client_fd)
-        return IyiSocket.new(client_fd, @family)
+        return IyiSocket.new(client_fd, @state.value.family)
       end
       unless IyiSocket.__sys_would_block?(client_fd.to_i64)
         error = SocketError.new("accept a connection", IyiSocket.__sys_code(client_fd.to_i64))
@@ -904,10 +925,10 @@ pub class IyiSocket
       # itself the wait — a posted `AcceptEx` that a close completed comes
       # back here with the descriptor already gone, and a wait cannot be
       # asked about a socket that no longer exists.
-      return Cancelled.new if @fd < 0
-      waited = IyiSocket.await_readable(@fd)
+      return Cancelled.new if @state.value.fd < 0
+      waited = IyiSocket.await_readable(@state.value.fd)
       return waited if waited.is_a?(Cancelled)
-      return Cancelled.new if @fd < 0
+      return Cancelled.new if @state.value.fd < 0
     end
   end
 
@@ -917,17 +938,17 @@ pub class IyiSocket
     # `recv(-1)` died of "arithmetic overflow" on the `to_u64`, which names
     # neither the count nor the call; the enumerable's sentence for it.
     raise "negative count: #{max_bytes}" if max_bytes < 0
-    raise "socket is closed" if @fd < 0
-    if (kept = @pending_error).is_a?(SocketError)
-      @pending_error = nil
+    raise "socket is closed" if @state.value.fd < 0
+    if (kept = @state.value.pending_error).is_a?(SocketError)
+      @state.value.pending_error = nil
       return kept
     end
     while true
       got = read_ready(max_bytes)
       return got unless got.nil?
-      waited = IyiSocket.await_readable(@fd, IyiSocket.bound(@read_timeout_ms))
+      waited = IyiSocket.await_readable(@state.value.fd, IyiSocket.bound(@state.value.read_timeout_ms))
       return waited if waited.is_a?(Cancelled)
-      return Cancelled.new if @fd < 0
+      return Cancelled.new if @state.value.fd < 0
       return SocketError.timed_out("read from socket") unless waited
     end
   end
@@ -945,7 +966,7 @@ pub class IyiSocket
   private def read_ready(max_bytes : Int32) : String | SocketError | Nil
     small = uninitialized UInt8[4096]
     first = max_bytes < 4096 ? max_bytes : 4096
-    n = IyiSocket.__sys_recv(@fd, pointerof(small).as(UInt8*), first.to_u64)
+    n = IyiSocket.__sys_recv(@state.value.fd, pointerof(small).as(UInt8*), first.to_u64)
     if n < 0_i64
       return nil if IyiSocket.__sys_would_block?(n)
       return SocketError.new("read from socket", IyiSocket.__sys_code(n))
@@ -959,10 +980,10 @@ pub class IyiSocket
     end
     buffer = Pointer(UInt8).malloc(max_bytes.to_u64)
     buffer.copy_from(pointerof(small).as(UInt8*), count)
-    more = IyiSocket.__sys_recv(@fd, buffer + count, (max_bytes - count).to_u64)
+    more = IyiSocket.__sys_recv(@state.value.fd, buffer + count, (max_bytes - count).to_u64)
     # Nothing more yet: this read ends with what came. An error is the
     # next read's to answer, and is kept for it.
-    @pending_error = SocketError.new("read from socket", IyiSocket.__sys_code(more)) if more < 0_i64 && !IyiSocket.__sys_would_block?(more)
+    @state.value.pending_error = SocketError.new("read from socket", IyiSocket.__sys_code(more)) if more < 0_i64 && !IyiSocket.__sys_would_block?(more)
     total = more > 0_i64 ? count + more.to_i32 : count
     String.new(total) do |target|
       target.copy_from(buffer, total)
@@ -971,18 +992,18 @@ pub class IyiSocket
 
   def read(buffer : Pointer(UInt8), count : Int32) : Int32 | Cancelled | SocketError
     raise "negative count: #{count}" if count < 0
-    raise "socket is closed" if @fd < 0
-    if (kept = @pending_error).is_a?(SocketError)
-      @pending_error = nil
+    raise "socket is closed" if @state.value.fd < 0
+    if (kept = @state.value.pending_error).is_a?(SocketError)
+      @state.value.pending_error = nil
       return kept
     end
     while true
-      n = IyiSocket.__sys_recv(@fd, buffer, count.to_u64)
+      n = IyiSocket.__sys_recv(@state.value.fd, buffer, count.to_u64)
       return n.to_i32 if n >= 0_i64
       return SocketError.new("read from socket", IyiSocket.__sys_code(n)) unless IyiSocket.__sys_would_block?(n)
-      waited = IyiSocket.await_readable(@fd, IyiSocket.bound(@read_timeout_ms))
+      waited = IyiSocket.await_readable(@state.value.fd, IyiSocket.bound(@state.value.read_timeout_ms))
       return waited if waited.is_a?(Cancelled)
-      return Cancelled.new if @fd < 0
+      return Cancelled.new if @state.value.fd < 0
       return SocketError.timed_out("read from socket") unless waited
     end
   end
@@ -1015,19 +1036,19 @@ pub class IyiSocket
     contents = contents.as_tape
     # Checked before the loop: `write("")` on a closed socket has nothing
     # to send and answered 0 where `write("x")` refused.
-    raise "socket is closed" if @fd < 0
+    raise "socket is closed" if @state.value.fd < 0
     write(contents.to_unsafe, contents.bytesize)
   end
 
   def write(buffer : Pointer(UInt8), count : Int32) : Int32 | Cancelled | SocketError
-    raise "socket is closed" if @fd < 0
+    raise "socket is closed" if @state.value.fd < 0
     written = 0
     while written < count
-      n = IyiSocket.__sys_send(@fd, buffer + written, (count - written).to_u64, IyiSocket.bound(@write_timeout_ms))
+      n = IyiSocket.__sys_send(@state.value.fd, buffer + written, (count - written).to_u64, IyiSocket.bound(@state.value.write_timeout_ms))
       if n < 0_i64 && IyiSocket.__sys_would_block?(n)
-        waited = IyiSocket.await_writable(@fd, IyiSocket.bound(@write_timeout_ms))
+        waited = IyiSocket.await_writable(@state.value.fd, IyiSocket.bound(@state.value.write_timeout_ms))
         return waited if waited.is_a?(Cancelled)
-        return Cancelled.new if @fd < 0
+        return Cancelled.new if @state.value.fd < 0
         return SocketError.timed_out("write to socket") unless waited
         next
       end
@@ -1045,7 +1066,7 @@ pub class IyiSocket
     first : String | Str,
     second : String | Str,
   ) : Int32 | Cancelled | SocketError
-    raise "socket is closed" if @fd < 0
+    raise "socket is closed" if @state.value.fd < 0
     write_pair(first.as_tape.to_unsafe, first.bytesize,
       second.as_tape.to_unsafe, second.bytesize)
   end
@@ -1069,14 +1090,14 @@ pub class IyiSocket
       at = at + 1
       from = 0
     end
-    IyiSocket.__sys_sendv(@fd, words, count, IyiSocket.bound(@write_timeout_ms))
+    IyiSocket.__sys_sendv(@state.value.fd, words, count, IyiSocket.bound(@state.value.write_timeout_ms))
   end
 
   # *pieces* in order, as one write where the platform takes several
   # buffers in a call: a head and a page's runs go out without being
   # joined into one buffer first, up to `SENDV_PIECES` a call.
   def write(pieces : Ary(Str)) : Int32 | Cancelled | SocketError
-    raise "socket is closed" if @fd < 0
+    raise "socket is closed" if @state.value.fd < 0
     total = 0
     pieces.each { |piece| total = total + piece.bytesize }
     written = 0
@@ -1089,9 +1110,9 @@ pub class IyiSocket
       end
       n = sendv(pieces, index, offset)
       if n < 0_i64 && IyiSocket.__sys_would_block?(n)
-        waited = IyiSocket.await_writable(@fd, IyiSocket.bound(@write_timeout_ms))
+        waited = IyiSocket.await_writable(@state.value.fd, IyiSocket.bound(@state.value.write_timeout_ms))
         return waited if waited.is_a?(Cancelled)
-        return Cancelled.new if @fd < 0
+        return Cancelled.new if @state.value.fd < 0
         return SocketError.timed_out("write to socket") unless waited
         next
       end
@@ -1121,16 +1142,16 @@ pub class IyiSocket
     written = 0
     while written < total
       n = if written < first_count
-            IyiSocket.__sys_send2(@fd, first + written, (first_count - written).to_u64,
-              second, second_count.to_u64, IyiSocket.bound(@write_timeout_ms))
+            IyiSocket.__sys_send2(@state.value.fd, first + written, (first_count - written).to_u64,
+              second, second_count.to_u64, IyiSocket.bound(@state.value.write_timeout_ms))
           else
             done = written - first_count
-            IyiSocket.__sys_send(@fd, second + done, (second_count - done).to_u64, IyiSocket.bound(@write_timeout_ms))
+            IyiSocket.__sys_send(@state.value.fd, second + done, (second_count - done).to_u64, IyiSocket.bound(@state.value.write_timeout_ms))
           end
       if n < 0_i64 && IyiSocket.__sys_would_block?(n)
-        waited = IyiSocket.await_writable(@fd, IyiSocket.bound(@write_timeout_ms))
+        waited = IyiSocket.await_writable(@state.value.fd, IyiSocket.bound(@state.value.write_timeout_ms))
         return waited if waited.is_a?(Cancelled)
-        return Cancelled.new if @fd < 0
+        return Cancelled.new if @state.value.fd < 0
         return SocketError.timed_out("write to socket") unless waited
         next
       end
@@ -1237,7 +1258,7 @@ pub class IyiSocket
   end
 
   protected def bound_path(path : String) : Nil
-    @path = path
+    @state.value.path = path
   end
 
   # --- Lifecycle and Metadata ---
@@ -1249,43 +1270,43 @@ pub class IyiSocket
   # answers the platform's refusal as a `SocketError`; `close` is still
   # what gives the socket back.
   def close_write : SocketError?
-    raise "socket is closed" if @fd < 0
-    got = IyiSocket.__sys_shutdown_write(@fd)
+    raise "socket is closed" if @state.value.fd < 0
+    got = IyiSocket.__sys_shutdown_write(@state.value.fd)
     return SocketError.new("shut down sending", IyiSocket.__sys_code(got)) if got < 0_i64
     nil
   end
 
   def close : Nil
-    if @fd >= 0
-      fd = @fd
-      @fd = -1
+    if @state.value.fd >= 0
+      fd = @state.value.fd
+      @state.value.fd = -1
       {% if @top_level.has_constant?("IyiScheduler") %}
-        # A fiber parked on this socket is woken first, and finds `@fd`
+        # A fiber parked on this socket is woken first, and finds `@state.value.fd`
         # already gone; then the descriptor goes.
         wake_closed(fd)
       {% end %}
       IyiSocket.__sys_close(fd)
-      path = @path
+      path = @state.value.path
       if path.is_a?(String)
-        @path = nil
+        @state.value.path = nil
         __iyi_unlink(IyiSocket.c_path(path))
       end
     end
   end
 
   def closed? : ::Bool
-    @fd < 0
+    @state.value.fd < 0
   end
 
   # The port sits at the same two bytes of a `sockaddr_in` and a
   # `sockaddr_in6`.
   def local_port : Int32
-    raise "socket is closed" if @fd < 0
-    raise "a unix socket has no port" if @family == AF_UNIX
+    raise "socket is closed" if @state.value.fd < 0
+    raise "a unix socket has no port" if @state.value.family == AF_UNIX
     storage = uninitialized UInt8[128]
     addr = pointerof(storage).as(Pointer(UInt8))
     len = 128_u32
-    res = IyiSocket.__sys_getsockname(@fd, addr, pointerof(len))
+    res = IyiSocket.__sys_getsockname(@state.value.fd, addr, pointerof(len))
     raise "cannot get local port" if res < 0
 
     high = addr[2].to_i32
@@ -1294,12 +1315,12 @@ pub class IyiSocket
   end
 
   def local_address : String
-    raise "socket is closed" if @fd < 0
+    raise "socket is closed" if @state.value.fd < 0
     addr = IyiSocket.__address_room
     len = 128_u32
-    res = IyiSocket.__sys_getsockname(@fd, addr, pointerof(len))
+    res = IyiSocket.__sys_getsockname(@state.value.fd, addr, pointerof(len))
     raise "cannot get local address" if res < 0
-    IyiSocket.__address_text(addr, @family)
+    IyiSocket.__address_text(addr, @state.value.family)
   end
 
   # The other end's address and port, as `local_address` and
@@ -1308,19 +1329,19 @@ pub class IyiSocket
   # when the other end is gone - the connection was reset or never made -
   # which is the peer's doing and no fault of the program's.
   def remote_address : String?
-    raise "socket is closed" if @fd < 0
+    raise "socket is closed" if @state.value.fd < 0
     addr = IyiSocket.__address_room
     len = 128_u32
-    return nil if IyiSocket.__sys_getpeername(@fd, addr, pointerof(len)) < 0
-    IyiSocket.__address_text(addr, @family)
+    return nil if IyiSocket.__sys_getpeername(@state.value.fd, addr, pointerof(len)) < 0
+    IyiSocket.__address_text(addr, @state.value.family)
   end
 
   def remote_port : Int32?
-    raise "socket is closed" if @fd < 0
-    raise "a unix socket has no port" if @family == AF_UNIX
+    raise "socket is closed" if @state.value.fd < 0
+    raise "a unix socket has no port" if @state.value.family == AF_UNIX
     addr = Pointer(UInt8).malloc(128_u64)
     len = 128_u32
-    return nil if IyiSocket.__sys_getpeername(@fd, addr, pointerof(len)) < 0
+    return nil if IyiSocket.__sys_getpeername(@state.value.fd, addr, pointerof(len)) < 0
     (addr[2].to_i32 << 8) | addr[3].to_i32
   end
 
@@ -1328,7 +1349,7 @@ pub class IyiSocket
   # `remote_port` and `local_port` refuse it. std/tls asks before it keys
   # a session's tickets by the port they came from.
   def unix? : ::Bool
-    @family == AF_UNIX
+    @state.value.family == AF_UNIX
   end
 
   # Room for any family's `sockaddr`, zeroed, so a unix path the kernel
@@ -2160,7 +2181,7 @@ pub class IyiSocket
     # — `read`, `write` and `close` on one are `recv`, `send` and
     # `closesocket`. Windows guarantees a handle value fits in 32 bits, so
     # that a 64-bit process can hand one to a 32-bit one, which is what lets
-    # this class go on carrying a socket in its `Int32` `@fd`; and
+    # this class go on carrying a socket in its `Int32` `@state.value.fd`; and
     # INVALID_SOCKET, which is all ones, narrows to -1, the failure every
     # caller above already reads.
     #

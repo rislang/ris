@@ -3099,3 +3099,35 @@ struct UInt8
     writer.append_uint(to_u64, base)
   end
 end
+
+# Internal closure storage. No environment survives its documented owner.
+fun __ris_task_environment(size : UInt64) : Void*
+  Pointer(Void).new(IyiRegion.tape_bytes(size))
+end
+
+fun __ris_program_environment(size : UInt64) : Void*
+  address = 0_u64
+  IyiRegion.program_scope { address = IyiRegion.tape_bytes(size) }
+  Pointer(Void).new(address)
+end
+
+fun __ris_program_object(size : UInt64, type_id : UInt64) : Void*
+  Pointer(Void).new(IyiRegion.program_bytes(size, true, type_id))
+end
+
+class IyiRegion
+  # An existing class field keeps text with an explicit program owner.
+  # String's eight-byte payload header is shared with its normal builder.
+  def self.program_text(text : Str) : String
+    bytes = text.bytesize
+    memory = Pointer(UInt8).new(program_bytes(bytes.to_u64 + 9_u64,
+      true, "".crystal_type_id.to_u64))
+    memory.as(Pointer(Int32))[0] = bytes
+    index = 0
+    text.each_byte do |byte|
+      memory[index + 8] = byte
+      index += 1
+    end
+    memory.as(String)
+  end
+end

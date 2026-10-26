@@ -233,7 +233,8 @@ class Iyi::TapeFfiFlow
     return false unless IO_WRITES.includes?(target.name)
     # `IO` is an alias, of `IyiIO` in ris's prelude.
     return false unless io = @checker.program.types["IO"]?.try(&.remove_alias)
-    owner = target.owner
+    owner = target.owner.devirtualize
+    io = io.devirtualize
     owner == io || owner.ancestors.includes?(io)
   end
 

@@ -1566,6 +1566,7 @@ module Iyi
 
     protected def initialize_metaclass(metaclass)
       metaclass.add_def Def.new("allocate", body: Primitive.new("allocate"))
+      metaclass.add_def Def.new("allocate_on_program", body: Primitive.new("program_allocate"))
     end
 
     def virtual_type
@@ -2313,6 +2314,7 @@ module Iyi
 
     protected def initialize_metaclass(metaclass)
       metaclass.add_def Def.new("allocate", body: Primitive.new("allocate"))
+      metaclass.add_def Def.new("allocate_on_program", body: Primitive.new("program_allocate"))
     end
 
     def type_desc

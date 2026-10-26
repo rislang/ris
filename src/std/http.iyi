@@ -208,49 +208,147 @@ end
 # is closed, and every read waits with the connection in *idle*, for
 # `serve` to end (`close_for_stop`) when the listener closes - one partway
 # through a request as much as one between requests.
-class Conn
-  @socket : IyiSocket
-  @data : Pointer(UInt8)
-  @capacity : Int32
-  @start : Int32
-  @stop : Int32
-  # Where a head's blank line may still begin: the bytes before it have
-  # been searched.
-  @searched : Int32
-  @ended : Bool
-  @failure : Cancelled | SocketError | Nil
-  @listener : IyiSocket?
-  @idle : Hash(UInt64, Conn)?
-  # Handed to an upgrade's protocol (`held`), which writes when it likes.
-  @handed_over : Bool = false
-  # When what is being read must have arrived by (monotonic ns, 0 for no
-  # such time) and what it is, and how long one read may wait otherwise.
-  @deadline : Int64 = 0_i64
-  @deadline_what : String = "read a request's head"
-  @gap : Int32? = nil
-  # A client's `https://` connection: TLS over the socket, which every
-  # read and write then goes through. The socket's timeouts are TLS's too.
-  @stream : TlsStream? = nil
-  # The HTTP/2 connection over it, when the two ends speak that.
-  property h2 : H2Connection? = nil
-  # What an `https://` connection's handshake was made under, for a
-  # client to tell whether it may carry a request made under another.
-  property made_under : TlsMadeUnder? = nil
+struct IdleConns
+  struct Head
+    property first : Conn? = nil
+  end
 
+  @head : Pointer(Head)
+
+  def initialize
+    @head = Pointer(Head).new(IyiRegion.program_bytes(sizeof(Head).to_u64))
+    @head.value = Head.new
+  end
+
+  def []=(id : UInt64, conn : Conn) : Nil
+    conn.idle_next = @head.value.first
+    @head.value.first = conn
+  end
+
+  def delete(id : UInt64) : Nil
+    previous = nil.as(Conn?)
+    current = @head.value.first
+    while current
+      following = current.idle_next
+      if current.socket.object_id == id
+        if previous
+          previous.idle_next = following
+        else
+          @head.value.first = following
+        end
+        current.idle_next = nil
+        return
+      end
+      previous = current
+      current = following
+    end
+  end
+
+  def each_value(& : Conn ->) : Nil
+    current = @head.value.first
+    while current
+      following = current.idle_next
+      yield current
+      current = following
+    end
+  end
+
+  def size : Int32
+    count = 0
+    each_value { |_| count += 1 }
+    count
+  end
+end
+
+struct Conn
   ROOM = 16384
 
-  def initialize(@socket : IyiSocket, @listener : IyiSocket? = nil, @idle : Hash(UInt64, Conn)? = nil, @stream : TlsStream? = nil)
-    @capacity = ROOM
-    @data = Pointer(UInt8).malloc(@capacity.to_u64)
-    @start = 0
-    @stop = 0
-    @searched = 0
-    @ended = false
-    @failure = nil
+  # A stable handle: idle tracking and body readers share the same state.
+  struct State
+    property program_owned : Bool
+    property idle_next : Conn? = nil
+    property socket : IyiSocket
+    property data : Pointer(UInt8)
+    property capacity : Int32
+    property start : Int32
+    property stop : Int32
+    # Where a head's blank line may still begin: the bytes before it have
+    # been searched.
+    property searched : Int32
+    property ended : Bool
+    property failure : Cancelled | SocketError | Nil
+    property listener : IyiSocket?
+    property idle : IdleConns?
+    # Handed to an upgrade's protocol (`held`), which writes when it likes.
+    property handed_over : Bool = false
+    # When what is being read must have arrived by (monotonic ns, 0 for no
+    # such time) and what it is, and how long one read may wait otherwise.
+    property deadline : Int64 = 0_i64
+    property deadline_what : String = "read a request's head"
+    property gap : Int32? = nil
+    # A client's `https://` connection: TLS over the socket, which every
+    # read and write then goes through. The socket's timeouts are TLS's too.
+    property stream : TlsStream? = nil
+    # The HTTP/2 connection over it, when the two ends speak that.
+    property h2 : H2Connection? = nil
+    # What an `https://` connection's handshake was made under, for a
+    # client to tell whether it may carry a request made under another.
+    property made_under : TlsMadeUnder? = nil
+
+    def initialize(@socket : IyiSocket, @listener : IyiSocket? = nil, @idle : IdleConns? = nil, @stream : TlsStream? = nil, @program_owned : Bool = true)
+      @capacity = ROOM
+      address = @program_owned ? IyiRegion.program_bytes(@capacity.to_u64) :
+        IyiRegion.tape_bytes(@capacity.to_u64)
+      @data = Pointer(UInt8).new(address)
+      @start = 0
+      @stop = 0
+      @searched = 0
+      @ended = false
+      @failure = nil
+    end
+  end
+
+  @state : Pointer(State)
+
+  def initialize(socket : IyiSocket, listener : IyiSocket? = nil,
+                 idle : IdleConns? = nil, stream : TlsStream? = nil,
+                 task_owned : Bool = false)
+    @state = Pointer(State).new(0_u64)
+    if task_owned
+      @state = Pointer(State).new(IyiRegion.tape_bytes(sizeof(State).to_u64))
+      @state.value = State.new(socket, listener, idle, stream, false)
+    else
+      @state = Pointer(State).new(IyiRegion.program_bytes(sizeof(State).to_u64))
+      @state.value = State.new(socket, listener, idle, stream)
+    end
+  end
+
+  def h2 : H2Connection?
+    @state.value.h2
+  end
+
+  def h2=(value : H2Connection?)
+    @state.value.h2 = value
+  end
+
+  def made_under : TlsMadeUnder?
+    @state.value.made_under
+  end
+
+  def made_under=(value : TlsMadeUnder?)
+    @state.value.made_under = value
+  end
+
+  def idle_next : Conn?
+    @state.value.idle_next
+  end
+
+  def idle_next=(value : Conn?)
+    @state.value.idle_next = value
   end
 
   def socket : IyiSocket
-    @socket
+    @state.value.socket
   end
 
   # How long a stopping server's close_notify may wait to be written: a
@@ -271,35 +369,35 @@ class Conn
   # it, the connection's own task finds it so: TLS answers that it is
   # closed, and HTTP/2's GOAWAY, after a read that failed, is not written.
   def close_for_stop : Nil
-    if (stream = @stream) && !@handed_over && !@socket.closed?
-      @socket.write_timeout_ms = STOP_WRITE_MS
+    if (stream = @state.value.stream) && !@state.value.handed_over && !@state.value.socket.closed?
+      @state.value.socket.write_timeout_ms = STOP_WRITE_MS
       stream.close_write
     end
-    @socket.close
+    @state.value.socket.close
   end
 
   # What a request is written to: TLS over the socket, or the socket.
   def transport : IyiSocket | TlsStream
-    @stream || @socket
+    @state.value.stream || @state.value.socket
   end
 
   def failure : Cancelled | SocketError | Nil
-    @failure
+    @state.value.failure
   end
 
   # Whether the connection's TLS handshake resumed a session by a ticket
   # rather than checking certificates afresh; false in the clear.
   def resumed? : Bool
-    (stream = @stream) ? stream.resumed? : false
+    (stream = @state.value.stream) ? stream.resumed? : false
   end
 
   # Whether the other end closed its side.
   def ended? : Bool
-    @ended
+    @state.value.ended
   end
 
   def available : Int32
-    @stop - @start
+    @state.value.stop - @state.value.start
   end
 
   # *count* of the bytes that have arrived, from *at* past what has been
@@ -307,24 +405,24 @@ class Conn
   # the next fill, and a view of it would be too.
   def tape_copy(at : Int32 = 0, count : Int32 = available - at) : Str
     raise "bytes #{at}, #{count} past the #{available} that arrived" if at < 0 || count < 0 || at > available - count
-    Str.build(count) { |w| w.append(@data + (@start + at).to_i64, count) }
+    Str.build(count) { |w| w.append(@state.value.data + (@state.value.start + at).to_i64, count) }
   end
 
   # The byte *at* bytes past what has been taken, which must have arrived.
   def peek(at : Int32) : UInt8
-    @data[@start + at]
+    @state.value.data[@state.value.start + at]
   end
 
   def consume(count : Int32) : Nil
-    @start = @start + count
-    @searched = @start if @searched < @start
+    @state.value.start = @state.value.start + count
+    @state.value.searched = @state.value.start if @state.value.searched < @state.value.start
   end
 
   # Up to *max* of the bytes that have arrived, taken; none are read.
   def take(max : Int32) : String
     count = available < max ? available : max
     piece = String.new(count) do |buf|
-      buf.copy_from(@data + @start.to_i64, count)
+      buf.copy_from(@state.value.data + @state.value.start.to_i64, count)
     end
     consume(count)
     piece
@@ -340,44 +438,44 @@ class Conn
   # on a failure (kept in `failure`), and under `serve` once the listener
   # is closed.
   def fill : Bool
-    return false if @ended || !@failure.nil?
-    if listener = @listener
+    return false if @state.value.ended || !@state.value.failure.nil?
+    if listener = @state.value.listener
       return false if listener.closed?
     end
     make_room
-    if @deadline > 0_i64
-      left = (@deadline - Time.monotonic_nanoseconds.to_i64) // 1000000_i64
+    if @state.value.deadline > 0_i64
+      left = (@state.value.deadline - Time.monotonic_nanoseconds.to_i64) // 1000000_i64
       if left <= 0_i64
-        @failure = SocketError.timed_out(@deadline_what)
+        @state.value.failure = SocketError.timed_out(@state.value.deadline_what)
         return false
       end
       # The pause a read may take still holds inside the deadline.
-      if gap = @gap
+      if gap = @state.value.gap
         left = gap.to_i64 if gap > 0 && gap.to_i64 < left
       end
-      @socket.read_timeout_ms = left.to_i32
+      @state.value.socket.read_timeout_ms = left.to_i32
     end
-    if idle = @idle
-      idle[@socket.object_id] = self
+    if idle = @state.value.idle
+      idle[@state.value.socket.object_id] = self
     end
-    stream = @stream
-    got = stream ? stream.read(@data + @stop.to_i64, @capacity - @stop) : @socket.read(@data + @stop.to_i64, @capacity - @stop)
-    if idle = @idle
-      idle.delete(@socket.object_id)
+    stream = @state.value.stream
+    got = stream ? stream.read(@state.value.data + @state.value.stop.to_i64, @state.value.capacity - @state.value.stop) : @state.value.socket.read(@state.value.data + @state.value.stop.to_i64, @state.value.capacity - @state.value.stop)
+    if idle = @state.value.idle
+      idle.delete(@state.value.socket.object_id)
     end
     case got
     in Int32
       if got == 0
-        @ended = true
+        @state.value.ended = true
         return false
       end
-      @stop = @stop + got
+      @state.value.stop = @state.value.stop + got
       true
     in Cancelled
-      @failure = got
+      @state.value.failure = got
       false
     in SocketError
-      @failure = got
+      @state.value.failure = got
       false
     end
   end
@@ -385,9 +483,9 @@ class Conn
   # Each read may wait *gap* ms, and the socket's writes as long (nil: as
   # long as it takes).
   def gap=(gap : Int32?) : Int32?
-    @socket.read_timeout_ms = gap
-    @socket.write_timeout_ms = gap
-    @gap = gap
+    @state.value.socket.read_timeout_ms = gap
+    @state.value.socket.write_timeout_ms = gap
+    @state.value.gap = gap
   end
 
   # What arrives from here must have arrived within *ms* (0: no limit),
@@ -401,19 +499,19 @@ class Conn
   # The same, by the monotonic clock's nanoseconds (0: no limit); *what*
   # is what the timed-out read says it was doing.
   def deadline_at(ns : Int64, what : String = "read a request's head") : Nil
-    @deadline = ns
-    @deadline_what = what
+    @state.value.deadline = ns
+    @state.value.deadline_what = what
   end
 
   def no_deadline : Nil
-    @deadline = 0_i64
-    @socket.read_timeout_ms = @gap
+    @state.value.deadline = 0_i64
+    @state.value.socket.read_timeout_ms = @state.value.gap
   end
 
   # The connection is someone else's protocol's now, which waits as it
   # likes: no deadline and no limit on a read or a write.
   def unlimited : Nil
-    @deadline = 0_i64
+    @state.value.deadline = 0_i64
     self.gap = nil
   end
 
@@ -428,23 +526,32 @@ class Conn
   # Room for a read: what has been taken moves out of the way, and a
   # buffer full of what has not doubles.
   private def make_room : Nil
-    if @start == @stop
-      @start = 0
-      @stop = 0
-      @searched = 0
-    elsif @capacity - @stop < ROOM // 4 && @start > 0
-      held = @stop - @start
+    if @state.value.start == @state.value.stop
+      @state.value.start = 0
+      @state.value.stop = 0
+      @state.value.searched = 0
+    elsif @state.value.capacity - @state.value.stop < ROOM // 4 && @state.value.start > 0
+      held = @state.value.stop - @state.value.start
       # Down, front to back: no byte is written before it is read.
-      @data.copy_from(@data + @start.to_i64, held)
-      @searched = @searched - @start
-      @searched = 0 if @searched < 0
-      @stop = held
-      @start = 0
+      @state.value.data.copy_from(@state.value.data + @state.value.start.to_i64, held)
+      @state.value.searched = @state.value.searched - @state.value.start
+      @state.value.searched = 0 if @state.value.searched < 0
+      @state.value.stop = held
+      @state.value.start = 0
     end
-    if @capacity - @stop < ROOM // 4
-      @capacity = @capacity * 2
-      @data = @data.realloc(@capacity.to_u64)
+    if @state.value.capacity - @state.value.stop < ROOM // 4
+      @state.value.capacity = @state.value.capacity * 2
+      old = @state.value.data
+      grow_buffer(old)
     end
+  end
+
+  private def grow_buffer(old : Pointer(UInt8)) : Nil
+    bytes = @state.value.capacity.to_u64
+    address = @state.value.program_owned ? IyiRegion.program_bytes(bytes) :
+      IyiRegion.tape_bytes(bytes)
+    @state.value.data = Pointer(UInt8).new(address)
+    @state.value.data.copy_from(old, @state.value.stop)
   end
 
   # A head: what comes before the next blank line, taken with it. Empty
@@ -463,20 +570,20 @@ class Conn
           next
         end
       end
-      from = @searched - 3
-      from = @start if from < @start
+      from = @state.value.searched - 3
+      from = @state.value.start if from < @state.value.start
       at = from
-      while at + 3 < @stop
-        if @data[at] == 13_u8 && @data[at + 1] == 10_u8 && @data[at + 2] == 13_u8 && @data[at + 3] == 10_u8
-          head = String.new(at - @start) do |buf|
-            buf.copy_from(@data + @start.to_i64, at - @start)
+      while at + 3 < @state.value.stop
+        if @state.value.data[at] == 13_u8 && @state.value.data[at + 1] == 10_u8 && @state.value.data[at + 2] == 13_u8 && @state.value.data[at + 3] == 10_u8
+          head = String.new(at - @state.value.start) do |buf|
+            buf.copy_from(@state.value.data + @state.value.start.to_i64, at - @state.value.start)
           end
-          consume(at + 4 - @start)
+          consume(at + 4 - @state.value.start)
           return head
         end
         at = at + 1
       end
-      @searched = @stop
+      @state.value.searched = @state.value.stop
       return HTTPError.new("#{what} headers past #{limit} bytes", 431) if available > limit
       return nil unless fill
     end
@@ -491,18 +598,18 @@ class Conn
   def read_line(limit : Int32, what : String) : String | HTTPError | Nil
     searched = 0
     while true
-      at = @start + searched
-      while at + 1 < @stop
-        if @data[at] == 13_u8 && @data[at + 1] == 10_u8
-          line = String.new(at - @start) do |buf|
-            buf.copy_from(@data + @start.to_i64, at - @start)
+      at = @state.value.start + searched
+      while at + 1 < @state.value.stop
+        if @state.value.data[at] == 13_u8 && @state.value.data[at + 1] == 10_u8
+          line = String.new(at - @state.value.start) do |buf|
+            buf.copy_from(@state.value.data + @state.value.start.to_i64, at - @state.value.start)
           end
-          consume(at + 2 - @start)
+          consume(at + 2 - @state.value.start)
           return line
         end
         at = at + 1
       end
-      searched = at - @start
+      searched = at - @state.value.start
       return HTTPError.new("#{what} past #{limit} bytes") if available > limit
       return nil unless fill
     end
@@ -520,18 +627,18 @@ class Conn
   # does, while over TLS a write answers it as an error too. A listener
   # closed before the block starts closes the connection at once.
   def held(& : -> Nil) : Nil
-    idle = @idle
-    listener = @listener
+    idle = @state.value.idle
+    listener = @state.value.listener
     if idle && listener
-      @handed_over = true
+      @state.value.handed_over = true
       if listener.closed?
-        @socket.close
+        @state.value.socket.close
       else
-        idle[@socket.object_id] = self
+        idle[@state.value.socket.object_id] = self
       end
     end
     yield
-    idle.delete(@socket.object_id) if idle
+    idle.delete(@state.value.socket.object_id) if idle
   end
 
   # The connection ended from this side (RFC 9112 section 9.6): GOAWAY
@@ -550,12 +657,12 @@ class Conn
   # same way (closeWriteAndWait) and then waits without reading. A
   # connection that ended or failed is closed at once (`close_now`).
   def close : Nil
-    if h2 = @h2
+    if h2 = @state.value.h2
       h2.goaway
     end
-    if @ended || !@failure.nil?
+    if @state.value.ended || !@state.value.failure.nil?
       close_now
-    elsif stream = @stream
+    elsif stream = @state.value.stream
       stream.close
     else
       linger
@@ -565,11 +672,11 @@ class Conn
   # Closed with nothing waited for: over TLS the close_notify still goes
   # first.
   def close_now : Nil
-    if stream = @stream
+    if stream = @state.value.stream
       stream.close_write
       stream.abort
     else
-      @socket.close
+      @state.value.socket.close
     end
   end
 
@@ -595,7 +702,7 @@ class Conn
   LINGER_MS     = 10000
 
   private def linger : Nil
-    socket = @socket
+    socket = @state.value.socket
     return if socket.closed?
     socket.close_write
     until_ns = Time.monotonic_nanoseconds.to_i64 + LINGER_MS.to_i64 * 1000000_i64
@@ -604,7 +711,7 @@ class Conn
       wait = (until_ns - Time.monotonic_nanoseconds.to_i64) // 1000000_i64
       break if wait <= 0
       socket.read_timeout_ms = wait < LINGER_GAP_MS ? wait.to_i32 : LINGER_GAP_MS
-      got = socket.read(@data, @capacity)
+      got = socket.read(@state.value.data, @state.value.capacity)
       break unless got.is_a?(Int32) && got > 0
       left = left - got
     end
@@ -1653,7 +1760,7 @@ pub struct Server
   private def self.tape_accept_loop(
     listener : IyiSocket, answerer : Proc(Incoming, Outgoing, Nil),
   ) : Nil
-    idle = {} of UInt64 => Conn
+    idle = IdleConns.new
     group do |g|
       pause = 5
       while !listener.closed?
@@ -1691,10 +1798,11 @@ pub struct Server
   # Go's server does. Unread, the panic reached `serve`'s group, which
   # cancelled every other connection and the accept loop and panicked "a
   # task panicked": one request whose block failed took the server down.
+  @[TaskClosureUnsafe("The server task joins every spawned handler")]
   private def self.spawn_tape_handler(
     g : IyiGroup, client : IyiSocket,
     answerer : Proc(Incoming, Outgoing, Nil), listener : IyiSocket,
-    idle : Hash(UInt64, Conn),
+    idle : IdleConns,
   ) : Nil
     g.spawn do
       group do |own|
@@ -1709,12 +1817,13 @@ pub struct Server
     end
   end
 
+  @[TaskClosureUnsafe("Only defers retain this connection frame")]
   private def self.tape_connection(client : IyiSocket,
                                    answerer : Proc(Incoming, Outgoing, Nil),
                                    listener : IyiSocket?,
-                                   idle : Hash(UInt64, Conn)?) : Nil
+                                   idle : IdleConns?) : Nil
     defer client.close
-    conn = Conn.new(client, listener, idle)
+    conn = Conn.new(client, listener, idle, task_owned: true)
     conn.gap = 60000
     while true
       conn.deadline_in(60000)
@@ -1946,7 +2055,7 @@ pub struct Server
     raise "HTTP: a timeout of #{timeout_ms} ms" if timeout_ms < 0
     raise "HTTP: a request timeout of #{request_timeout_ms} ms" if request_timeout_ms < 0
     raise "HTTP: at most #{max_connections} connections" if max_connections < 0
-    idle = {} of UInt64 => Conn
+    idle = IdleConns.new
     # A place per connection served: a send waits while every one is held.
     slots = max_connections > 0 ? Channel(Int32).new(max_connections) : nil
     group do |g|
@@ -2010,7 +2119,7 @@ pub struct Server
   # Go's server does. Unread, the panic reached `serve`'s group, which
   # cancelled every other connection and the accept loop and panicked "a
   # task panicked": one request whose block failed took the server down.
-  private def self.spawn_handler(g : IyiGroup, client : IyiSocket, handler : Proc(Request, Response), listener : IyiSocket, idle : Hash(UInt64, Conn), stream_bodies : Bool, compress : Bool, timeout_ms : Int32, tls : TlsServerConfig?, request_timeout_ms : Int32, slots : Channel(Int32)?) : Nil
+  private def self.spawn_handler(g : IyiGroup, client : IyiSocket, handler : Proc(Request, Response), listener : IyiSocket, idle : IdleConns, stream_bodies : Bool, compress : Bool, timeout_ms : Int32, tls : TlsServerConfig?, request_timeout_ms : Int32, slots : Channel(Int32)?) : Nil
     g.spawn do
       group do |own|
         served = own.spawn do
@@ -2039,7 +2148,7 @@ pub struct Server
   # cancelled, with nothing of this side's waiting to be read, closes at
   # once, and so does one whose client said `close` and sent nothing past
   # its request (`serve_h1`).
-  def self.handle(client : IyiSocket, handler : Proc(Request, Response), listener : IyiSocket? = nil, idle : Hash(UInt64, Conn)? = nil, stream_bodies : Bool = false, compress : Bool = false, timeout_ms : Int32 = 0, tls : TlsServerConfig? = nil, request_timeout_ms : Int32 = 0) : Nil
+  def self.handle(client : IyiSocket, handler : Proc(Request, Response), listener : IyiSocket? = nil, idle : IdleConns? = nil, stream_bodies : Bool = false, compress : Bool = false, timeout_ms : Int32 = 0, tls : TlsServerConfig? = nil, request_timeout_ms : Int32 = 0) : Nil
     defer client.close
     unless config = tls
       serve_connection(client, nil, handler, listener, idle, stream_bodies, compress, timeout_ms, request_timeout_ms)
@@ -2068,7 +2177,7 @@ pub struct Server
     head
   end
 
-  private def self.serve_connection(client : IyiSocket, stream : TlsStream?, handler : Proc(Request, Response), listener : IyiSocket?, idle : Hash(UInt64, Conn)?, stream_bodies : Bool, compress : Bool, timeout_ms : Int32, request_timeout_ms : Int32) : Nil
+  private def self.serve_connection(client : IyiSocket, stream : TlsStream?, handler : Proc(Request, Response), listener : IyiSocket?, idle : IdleConns?, stream_bodies : Bool, compress : Bool, timeout_ms : Int32, request_timeout_ms : Int32) : Nil
     conn = Conn.new(client, listener, idle, stream)
     conn.gap = timeout_ms if timeout_ms > 0
     remote = client.remote_address

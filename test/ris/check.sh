@@ -962,12 +962,12 @@ else
   echo "FAILED   heap_fiber_capture: $out"
   status=1
 fi
-out=$("$RIS" run --no-gc test/ris/heap_fiber_capture.ri 2>&1)
-if [ "$?" -ne 0 ] &&
-    grep -qF 'ris: heap allocation with --no-gc:' <<<"$out"; then
-  echo "refused  heap_fiber_capture (--no-gc trap)"
+out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc test/ris/heap_fiber_capture.ri 2>&1)
+if [ "$?" -eq 0 ] && grep -qxF '42' <<<"$out" &&
+    grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+  echo "runs     heap_fiber_capture (--no-gc owned capture)"
 else
-  echo "FAILED   heap_fiber_capture trap: $out"
+  echo "FAILED   heap_fiber_capture zero heap: $out"
   status=1
 fi
 for name in heap_handles heap_io; do

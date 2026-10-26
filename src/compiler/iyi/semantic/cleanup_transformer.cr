@@ -1607,7 +1607,7 @@ module Iyi
       # For `allocate` on a virtual abstract type we make `extra`
       # be a call to `raise` at runtime. Here we just replace the
       # "allocate" primitive with that raise call.
-      if node.name.in?("allocate", "pre_initialize") && extra
+      if node.name.in?("allocate", "program_allocate", "pre_initialize") && extra
         return extra
       end
 

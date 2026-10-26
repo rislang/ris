@@ -36,8 +36,8 @@ def measured(pattern, text):
 
 
 # Socket workloads vary by a few allocations with timing: their budget is
-# the observed maximum, and only a fall past this slack must lower it.
-NETWORK_SLACK = 4
+# the measured count plus slack; larger falls must lower it.
+NETWORK_SLACK = 2
 
 
 def compare(path, label, actual, budget, slack=0):
@@ -46,6 +46,72 @@ def compare(path, label, actual, budget, slack=0):
     if actual < budget - slack:
         raise RuntimeError(f"{path}: {label} fell {budget} -> {actual}; "
                            "lower heap_budget.txt in this change")
+
+
+def run_workload(binary, args, mode, *, stats=False):
+    """Drive the same workload with either collector configuration."""
+    env = os.environ.copy()
+    env.pop("RIS_HEAP_STATS", None)
+    if stats:
+        env["RIS_HEAP_STATS"] = "1"
+    env.pop("RIS_TAPE_STATS", None)
+    response = b""
+    if mode == "request":
+        with subprocess.Popen([binary, *args], stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, text=True,
+                              env=env) as server:
+            try:
+                with selectors.DefaultSelector() as ready:
+                    ready.register(server.stdout, selectors.EVENT_READ)
+                    if not ready.select(30):
+                        raise RuntimeError(
+                            "web did not announce its listener")
+                    line = server.stdout.readline()
+                if not line:
+                    stdout, stderr = server.communicate(timeout=30)
+                    return subprocess.CompletedProcess(
+                        server.args, server.returncode, stdout, stderr), b""
+                port = measured(r"localhost:(\d+)/", line)
+                address = ("127.0.0.1", port)
+                socket_error = None
+                try:
+                    with socket.create_connection(address, 10) as sock:
+                        sock.sendall(b"GET /users/1/status HTTP/1.1\r\n"
+                                     b"Host: localhost\r\n"
+                                     b"Connection: close\r\n\r\n")
+                        while chunk := sock.recv(65536):
+                            response += chunk
+                except OSError as error:
+                    # An allocation trap may close or reset the socket.
+                    socket_error = error
+                stdout, stderr = server.communicate(timeout=30)
+                if socket_error and server.returncode == 0:
+                    raise socket_error
+                if (server.returncode == 0 and
+                        b"<h1>alice</h1>" not in response):
+                    server.kill()
+                    raise RuntimeError(
+                        f"bad web response: {response!r}")
+                run = subprocess.CompletedProcess(
+                    server.args, server.returncode,
+                    re.sub(r"localhost:\d+/", "localhost:PORT/",
+                           line + stdout), stderr)
+            finally:
+                if server.poll() is None:
+                    server.kill()
+                    server.communicate()
+    else:
+        run = subprocess.run([binary, *args], capture_output=True,
+                             text=True, env=env, timeout=180)
+    return run, response
+
+
+def run_gate(source, binary, args, mode):
+    built = command(["build", "--release", "--no-gc", "-o", binary,
+                     source])
+    if built.returncode:
+        return built, b""
+    return run_workload(binary, args, mode)
 
 
 def main():
@@ -91,51 +157,13 @@ def main():
             Path(source).write_text(text)
             args = ["0"]
         # The no-collector gate builds its own binary: start it now.
-        gate = GATES.submit(command, ["run", "--release", "--no-gc", source,
-                                      "--", *args])
+        gate = GATES.submit(run_gate, source,
+                            str(Path(scratch) / f"gate-{index}"), args, mode)
         binary = str(Path(scratch) / f"sample-{index}")
         result = command(["build", "--release", "-o", binary, source])
         if result.returncode:
             raise RuntimeError(result.stdout + result.stderr)
-        env = dict(os.environ, RIS_HEAP_STATS="1")
-        env.pop("RIS_TAPE_STATS", None)
-        if mode == "request":
-            with subprocess.Popen([binary, *args], stdout=subprocess.PIPE,
-                                  stderr=subprocess.PIPE, text=True,
-                                  env=env) as server:
-                try:
-                    ready = selectors.DefaultSelector()
-                    ready.register(server.stdout, selectors.EVENT_READ)
-                    if not ready.select(30):
-                        server.kill()
-                        raise RuntimeError(
-                            "web did not announce its listener")
-                    line = server.stdout.readline()
-                    ready.close()
-                    port = measured(r"localhost:(\d+)/", line)
-                    address = ("127.0.0.1", port)
-                    with socket.create_connection(address, 10) as sock:
-                        sock.sendall(b"GET /users/1/status HTTP/1.1\r\n"
-                                     b"Host: localhost\r\n"
-                                     b"Connection: close\r\n\r\n")
-                        response = b""
-                        while chunk := sock.recv(65536):
-                            response += chunk
-                    if b"<h1>alice</h1>" not in response:
-                        server.kill()
-                        raise RuntimeError(
-                            f"bad web response: {response!r}")
-                    stdout, stderr = server.communicate(timeout=30)
-                    run = subprocess.CompletedProcess(
-                        server.args, server.returncode,
-                        line + stdout, stderr)
-                finally:
-                    if server.poll() is None:
-                        server.kill()
-                        server.communicate()
-        else:
-            run = subprocess.run([binary, *args], capture_output=True,
-                                 text=True, env=env, timeout=180)
+        run, response = run_workload(binary, args, mode, stats=True)
         if run.returncode:
             raise RuntimeError(f"{path}: {run.stdout}{run.stderr}")
         allocations = measured(r"^ris heap: (\d+) allocations,",
@@ -149,7 +177,7 @@ def main():
                     NETWORK_SLACK if "request" in mode else 0)
         # Every workload also runs behind the no-collector gate. A
         # positive count must trap, a zero count must preserve output.
-        gated = gate.result()
+        gated, gated_response = gate.result()
         gc_refusal = ("std/gc speaks for iyi's own collector" in
                       gated.stderr + gated.stdout)
         if gc_refusal and gated.returncode:
@@ -160,11 +188,13 @@ def main():
                     gated.stderr + gated.stdout):
                 raise RuntimeError(f"{path}: missing trap:\n"
                                    f"{gated.stdout}{gated.stderr}")
-        elif gated.returncode or gated.stdout != run.stdout:
+        elif (gated.returncode or gated.stdout != run.stdout or
+              gated_response != response):
             raise RuntimeError(f"{path}: zero-heap gate failed:\n"
                                f"{gated.stdout}{gated.stderr}")
         notes.append(f"heap     {path} {sites} {allocations} {mode}")
-        return f"{path} {sites} {allocations} {mode}", notes
+        budget = allocations + (NETWORK_SLACK if "request" in mode else 0)
+        return f"{path} {sites} {budget} {mode}", notes
 
     rows = []
     with tempfile.TemporaryDirectory(prefix="ris-heap-") as scratch:

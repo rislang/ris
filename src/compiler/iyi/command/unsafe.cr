@@ -1,7 +1,7 @@
 # ris: `ris unsafe` — every place the program steps past its safety rules,
 # for a review: `@[Ffi]` modules, `@[PointerUnsafe]` defs with their
-# reasons and `@[TapeUnsafe]` defs, under the current directory or the
-# directories given, and what the manifest there forbids. Read from the
+# reasons, `@[TaskClosureUnsafe]` and `@[TapeUnsafe]` defs, under the
+# current directory or those given, and what the manifest forbids. Read from
 # parsed source, so it answers for code that does not type-check yet.
 require "../mod/installer"
 
@@ -13,7 +13,8 @@ class Iyi::Command
 
         List every mark that lifts a safety rule, one per line as
         `file:line: mark`: @[Ffi] modules, @[PointerUnsafe] defs with
-        their reasons, and @[TapeUnsafe] defs. The source is every .ri
+        their reasons, @[TaskClosureUnsafe], and @[TapeUnsafe] defs.
+        The source is every .ri
         and .iyi file under each directory (default: the current one),
         except hidden directories and lib/. A manifest's `forbid` line
         is printed first. Exit 0 whatever is found.
@@ -64,10 +65,10 @@ class Iyi::Command
       case node.path.names
       when ["Ffi"], ["TapeUnsafe"]
         block.call(node, "@[#{node.path.names.first}]")
-      when ["PointerUnsafe"]
+      when ["PointerUnsafe"], ["TaskClosureUnsafe"]
         reason = node.args.first?
         reason = reason.value if reason.is_a?(StringLiteral)
-        block.call(node, "@[PointerUnsafe] #{reason}")
+        block.call(node, "@[#{node.path.names.first}] #{reason}")
       end
     when Expressions
       node.expressions.each { |exp| unsafe_marks(exp, &block) }

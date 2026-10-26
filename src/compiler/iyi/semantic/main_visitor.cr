@@ -2860,7 +2860,7 @@ module Iyi
       # TODO: move these into the case expression above and add return types to
       # their corresponding methods
       case node.name
-      when "allocate"
+      when "allocate", "program_allocate"
         visit_allocate node
       when "pointer_malloc"
         visit_pointer_malloc node
@@ -2903,6 +2903,12 @@ module Iyi
     end
 
     def visit_allocate(node)
+      if node.name == "program_allocate"
+        filename = call.try(&.location).try(&.expanded_location).try(&.filename).to_s
+        unless filename.includes?("/src/iyi/") || filename.includes?("/src/std/")
+          node.raise "allocate_on_program is runtime-only; use an initialized on_program constructor"
+        end
+      end
       instance_type = scope.instance_type
 
       case instance_type

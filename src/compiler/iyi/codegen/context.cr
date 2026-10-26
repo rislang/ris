@@ -3,6 +3,7 @@ require "./codegen"
 class Iyi::CodeGenVisitor
   class Context
     property? heap_internal = false
+    property closure_owner = 0
     property fun : LLVM::Function
     property fun_type : LLVM::Type
     property fun_debug_params = [] of LibLLVM::MetadataRef
@@ -50,6 +51,7 @@ class Iyi::CodeGenVisitor
     def clone
       context = Context.new @fun, @fun_type, @type, @vars
       context.heap_internal = @heap_internal
+      context.closure_owner = @closure_owner
       context.return_type = @return_type
       context.indirect_return = @indirect_return
       context.return_phi = @return_phi

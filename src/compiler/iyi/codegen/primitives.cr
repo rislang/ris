@@ -25,7 +25,7 @@ class Iyi::CodeGenVisitor
               codegen_primitive_convert node, target_def, call_args, checked: true
             when "unchecked_convert"
               codegen_primitive_convert node, target_def, call_args, checked: false
-            when "allocate"
+            when "allocate", "program_allocate"
               codegen_primitive_allocate node, target_def, call_args
             when "pre_initialize"
               codegen_primitive_pre_initialize node, target_def, call_args
@@ -883,7 +883,7 @@ class Iyi::CodeGenVisitor
 
     base_type = type.is_a?(VirtualType) ? type.base_type : type
 
-    allocate_aggregate base_type
+    allocate_aggregate base_type, program_owned: node.name == "program_allocate"
 
     if type.is_a?(VirtualType)
       @last = upcast(@last, type, base_type)

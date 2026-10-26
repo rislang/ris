@@ -1,0 +1,52 @@
+# Socket copies share state; idle connections stop with their server.
+module test/ris/server_owners
+
+import std/socket::{IyiSocket}
+import std/http::{Server}
+import std/log::{Logger, IOBackend, Severity}
+
+listener = IyiSocket.listen(0)
+copy = listener
+copy.close
+raise "socket copy lost close" unless listener.closed?
+
+sink = File.open("/dev/null", "w", owner: Program.tape)
+backend = IOBackend.on_program(sink)
+logger = Logger.on_program("owner", Severity::Info, backend)
+local_tape do
+  source = Str.build(16) { |w| w << "retained" }
+  logger = Logger.on_program(source, Severity::Info, backend)
+end
+local_tape do
+  Str.build(16) { |w| w << "replaced" }
+  nil
+end
+raise "logger borrowed its source" unless logger.source == "retained"
+logger.info("program-owned sink")
+backend.close
+sink.close
+
+listener = IyiSocket.listen(0)
+group do |g|
+  serving = g.spawn do
+    Server.answer(listener) { |req, res| res.body << "ok" }
+    0
+  end
+  first = IyiSocket.connect("127.0.0.1", listener.local_port).or_panic
+  second = IyiSocket.connect("127.0.0.1", listener.local_port).or_panic
+  first.write("GET / HTTP/1.1\r\n").or_panic
+  second.write("GET / HTTP/1.1\r\n").or_panic
+  # Both handlers park on an incomplete head before the listener stops.
+  sleep(10)
+  listener.close
+  serving.value.or_panic
+  bytes = Str::Builder.new(16)
+  raise "first idle peer stayed open" unless first.read(bytes, 16).or_panic == 0
+  bytes.clear
+  ended = second.read(bytes, 16).or_panic
+  raise "second idle peer stayed open" unless ended == 0
+  first.close
+  second.close
+  0
+end
+puts "owners: shared sockets, program log, idle shutdown"

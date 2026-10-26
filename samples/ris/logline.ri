@@ -10,8 +10,8 @@ import std/log::{Logger, IOBackend, Severity}
 import std/gc::{GC}
 
 N = 1000000
-sink = File.open("/dev/null", "w")
-log = Logger.new("web", Severity::Info, IOBackend.new(sink))
+sink = File.open("/dev/null", "w", owner: Program.tape)
+log = Logger.on_program("web", Severity::Info, IOBackend.on_program(sink))
 GC.disable
 before = GC.stats.bytes_since_collection
 i = 0

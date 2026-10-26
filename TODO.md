@@ -17,9 +17,7 @@ How to work (fewer tokens, faster to the goal):
 
 ## A. Budget to zero (do in this order: largest win first)
 
-1. serve.ri 13, web.ri 12: remaining request objects and closures.
-2. logline 4: IO, backend, logger and context mutex objects.
-3. static-user-sites column to 0 for every row.
+1. static-user-sites column to 0 for every row.
 
 ## B. Language pieces the budget needs (pull in only when A is blocked)
 
@@ -29,7 +27,8 @@ How to work (fewer tokens, faster to the goal):
   Each growing value reserves its own address space, committed on use
   (Goose §1.2, §10.4): mmap PROT_NONE, VirtualAlloc on Windows; growth
   never moves, views stay valid.
-* Escaping closures: codegen.cr ProcLiteral wrapper malloc into a pool.
+* Escaping closures outside program and joined task owners: pooled
+  environments, including other captured receivers.
 * Concurrency (src/iyi/concurrency.iyi): task records, wait nodes and
   messages in pools; bounded queue reports full. Only what serve needs.
 

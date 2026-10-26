@@ -151,7 +151,7 @@ class Iyi::HeapCensus < Iyi::Visitor
       next if HeapPolicy.internal_def?(target)
       body = target.body
       type = node.type?
-      initializers(type) if body.is_a?(Primitive) && body.name == "allocate"
+      initializers(type) if body.is_a?(Primitive) && body.name.in?("allocate", "program_allocate")
       if node.name.in?("new", "unsafe_build") && type && type.reference_like? &&
          !type.is_a?(PointerInstanceType) && !type.is_a?(ProcInstanceType)
         file = node.location.try(&.original_filename)

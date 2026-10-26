@@ -324,7 +324,7 @@ class Iyi::Command
           end
           next if a_def.visibility.private? || a_def.visibility.protected?
           # `allocate` is the compiler's; the two type-id hooks are Crystal's runtime ABI, which the prelude implements and no program calls.
-          next if a_def.name.in?("allocate", "initialize", "crystal_type_id", "crystal_instance_type_id", "class_crystal_instance_type_id") || a_def.name.starts_with?("__")
+          next if a_def.name.in?("allocate", "allocate_on_program", "initialize", "crystal_type_id", "crystal_instance_type_id", "class_crystal_instance_type_id") || a_def.name.starts_with?("__")
           signatures << IyiMod.signature(a_def, check_block: false)
         end
       end

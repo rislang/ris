@@ -83,11 +83,22 @@ pub class Mutex(T)
     Mutex(U).build(block.call)
   end
 
+  # Program data, initialized before tasks may reach it.
+  def self.on_program(&block : -> U) : Mutex(U) forall U
+    Mutex(U).build_on_program(block.call)
+  end
+
+  protected def self.build_on_program(value : T) : Mutex(T)
+    mutex = IyiRegion.program_object(Mutex(T))
+    mutex.initialize(value)
+    mutex
+  end
+
   protected def self.build(value : T) : Mutex(T)
     new(value)
   end
 
-  private def initialize(@value : T)
+  protected def initialize(@value : T)
     @word = Atomic(UInt64).new(0_u64)
     @holder = Atomic(UInt64).new(0_u64)
     @holder_thread = Atomic(UInt64).new(0_u64)

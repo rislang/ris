@@ -1052,7 +1052,7 @@ module Iyi
         wrapper_type = llvm_context.struct([
           parent_type.pointer, llvm_type(context.type).pointer,
         ])
-        wrapper = malloc(wrapper_type, node.location)
+        wrapper = ris_environment_malloc(wrapper_type, 1)
         parent_slot = gep(wrapper_type, wrapper, 0, 0)
         self_slot = gep(wrapper_type, wrapper, 0, 1)
         pointer_type = @program.pointer_of(@program.void)
@@ -2493,6 +2493,13 @@ module Iyi
     end
 
     def alloca_vars(vars, obj = nil, args = nil, parent_context = nil, reset_nilable_vars = true)
+      context.closure_owner = if obj.is_a?(Program) || obj.is_a?(FileModule)
+                                2
+                              elsif obj.is_a?(Def) && obj.annotation(@program.task_closure_unsafe_annotation)
+                                1
+                              else
+                                0
+                              end
       self_closured = obj.is_a?(Def) && obj.self_closured?
       closured_vars = closured_vars(vars, obj)
       alloca_non_closured_vars(vars, obj, args, reset_nilable_vars)
@@ -2577,7 +2584,11 @@ module Iyi
         source = closure_vars.compact_map do |var|
           var.local_vars.first?.try(&.location)
         end.first?
-        closure_ptr = closure_has_inner_pointers ? malloc(closure_type, source) : malloc_atomic(closure_type, source)
+        closure_ptr = if current_context.closure_owner != 0
+                        ris_environment_malloc(closure_type, current_context.closure_owner)
+                      else
+                        closure_has_inner_pointers ? malloc(closure_type, source) : malloc_atomic(closure_type, source)
+                      end
 
         closure_vars.each_with_index do |var, i|
           current_context.vars[var.name] = LLVMVar.new(gep(closure_type, closure_ptr, 0, i, var.name), var.type)
@@ -2699,7 +2710,7 @@ module Iyi
       false
     end
 
-    def allocate_aggregate(type)
+    def allocate_aggregate(type, program_owned = false)
       struct_type = llvm_struct_type(type)
       cleared = false
       if type.passed_by_value?
@@ -2707,7 +2718,16 @@ module Iyi
       else
         pointerful = type.is_a?(InstanceVarContainer) && !type.struct? &&
                      type.all_instance_vars.each_value.any? &.type.has_inner_pointers?
-        if @program.iyi_gc_arena? && (new_fun = iyi_new_fun)
+        if program_owned && @program.tape_scopes? && @program.tape_platform?
+          object_fun = fetch_typed_fun(@main_mod, "__ris_program_object") do
+            LLVM::Type.function([@main_llvm_context.int64, @main_llvm_context.int64],
+              @main_llvm_context.void_pointer)
+          end
+          memory = call check_main_fun("__ris_program_object", object_fun),
+            [struct_type.size, builder.zext(type_id(type), llvm_context.int64)]
+          type_ptr = pointer_cast memory, struct_type.pointer
+          cleared = true
+        elsif @program.iyi_gc_arena? && (new_fun = iyi_new_fun)
           # iyi: under the arena a class instance is `__iyi_new`'s: the
           # size, the type id, and whether the object carries the id in a
           # word ahead of it or in its arena's table - the class's
@@ -2820,6 +2840,20 @@ module Iyi
       label = "#{location || "unknown"}: #{context.type}"
       site = builder.global_string_pointer(label)
       call check_main_fun("__ris_heap_allocation", heap_fun), [size, site]
+    end
+
+    # A defer borrows its frame until cleanup. Explicit runtime marks cover
+    # group callbacks joined before their owning task ends. Other closures
+    # retain the ordinary allocator.
+    def ris_environment_malloc(type, owner)
+      unless @program.tape_scopes? && @program.tape_platform?
+        return malloc(type)
+      end
+      name = owner == 2 ? "__ris_program_environment" : "__ris_task_environment"
+      environment_fun = fetch_typed_fun(@main_mod, name) do
+        LLVM::Type.function([@main_llvm_context.int64], @main_llvm_context.void_pointer)
+      end
+      pointer_cast call(check_main_fun(name, environment_fun), type.size), type.pointer
     end
 
     def malloc(type, source = @call_location || @current_debug_location)

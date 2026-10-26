@@ -275,6 +275,12 @@ pub abstract class Backend
 end
 
 pub class IOBackend < Backend
+  def self.on_program(io : IO, formatter : Formatter? = nil) : IOBackend
+    backend = IyiRegion.program_object(IOBackend)
+    backend.initialize(io, formatter)
+    backend
+  end
+
   @formatter : Formatter?
   getter io : IO
 
@@ -435,6 +441,13 @@ class AsyncQueue
 end
 
 pub class Logger
+  def self.on_program(source : Str, level : Severity? = nil,
+                      backend : Backend? = nil) : Logger
+    logger = IyiRegion.program_object(Logger)
+    logger.initialize(IyiRegion.program_text(source), level, backend)
+    logger
+  end
+
   getter source : String
   @level : Severity?
   @backend : Backend?
@@ -709,7 +722,7 @@ pub class Log
   # Every task's open contexts, by the task's fiber; how many are open, so
   # a program that opens none never looks.
   @@contexts : Mutex(Hash(UInt64, Metadata)?) =
-    Mutex.new { nil.as(Hash(UInt64, Metadata)?) }
+    Mutex.on_program { nil.as(Hash(UInt64, Metadata)?) }
   @@open : Atomic(UInt64) = Atomic(UInt64).new(0_u64)
 
   # Runs the block with *data* on every entry logged in this task and in

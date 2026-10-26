@@ -105,6 +105,32 @@ class IyiRegion
     @@tape = saved
   end
 
+  # Stable program-owned storage, sharded by allocating thread. These
+  # chains stay registered as roots until exit, including after a worker
+  # ends. Allocation cannot park a fiber, so restoring its tape is direct.
+  @[ThreadLocal]
+  @@program_storage : UInt64 = 0_u64
+
+  def self.program_bytes(size : UInt64, clear : Bool = false,
+                         type_id : UInt64 = 0_u64) : UInt64
+    saved = @@tape
+    @@program_storage = acquire(CAPACITY) if @@program_storage == 0
+    @@tape = @@program_storage
+    address = take(@@tape, size, clear, type_id)
+    @@program_storage = @@tape
+    @@tape = saved
+    address
+  end
+
+  # Codegen initializes ordinary defaults and records this concrete type,
+  # so virtual calls see program-owned instances as well as heap ones.
+  def self.program_object(type : T.class) : T forall T
+    {% if ([T] + T.ancestors).any? { |t| t.methods.any? { |m| m.name == "finalize" } } %}
+      {% raise "Program-owned objects cannot finalize; close their resources explicitly." %}
+    {% end %}
+    type.allocate_on_program
+  end
+
   def self.release_program : Nil
     # Readers may still be running when main returns. The OS releases
     # this chain at process exit once kernel threads have been started.
@@ -116,6 +142,9 @@ class IyiRegion
     saved = @@tape
     @@tape = @@program_tape
     @@program_tape = 0_u64
+    release_tape if @@tape != 0
+    @@tape = @@program_storage
+    @@program_storage = 0_u64
     release_tape if @@tape != 0
     @@tape = saved
   end
