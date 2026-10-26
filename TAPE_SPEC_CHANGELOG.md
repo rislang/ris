@@ -93,3 +93,9 @@ one.
   what happens when execution fails or stops, and on where closures,
   queues and task records live without a heap. Without those rules a
   no-GC runtime cannot be built correctly.
+
+## 2026-10-26: the tape named as Goose's data stack
+
+* Changed: the Goose citation line says the tape is Goose's data stack.
+* Why: Goose calls it a data stack; without the mapping a reader cannot
+  find the tape in Goose's text.
