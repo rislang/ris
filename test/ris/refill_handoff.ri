@@ -1,12 +1,13 @@
-# Rows handed on before a new one is made are still in use: a new array
-# is right there, and `clear` would empty the row already kept. Allowed.
+# Rows use fixed run handles; refill the temporary row after copying.
 @[OnTape]
 struct Table
-  getter rows : Ary(Ary(Int32))
+  getter rows : Ary(SlicePool::Run(Int32))
+  @pool : SlicePool(Int32)
   @row : Ary(Int32)
 
   def initialize
-    @rows = Ary(Ary(Int32)).new
+    @rows = Ary(SlicePool::Run(Int32)).new
+    @pool = SlicePool(Int32).new
     @row = Ary(Int32).new
   end
 
@@ -15,8 +16,14 @@ struct Table
   end
 
   def end_row : Nil
-    @rows << @row
-    @row = Ary(Int32).new
+    row = @pool.alloc_slice(@row.size)
+    i = 0
+    while i < @row.size
+      row[i] = @row[i]
+      i += 1
+    end
+    @rows << row
+    @row.clear
   end
 
   def take : Ary(Int32)

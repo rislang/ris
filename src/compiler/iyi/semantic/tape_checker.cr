@@ -84,7 +84,43 @@ class Iyi::TapeChecker
     end
   end
 
+  # Views and links are fixed values; growing storage is never an element.
+  private def growing_in(type : Type, visiting = Set(Type).new) : Bool
+    type = type.remove_alias.remove_typedef.remove_alias
+    return false unless visiting.add?(type)
+    if type.is_a?(GenericClassInstanceType)
+      return true if {"Ary", "Tre", "SlicePool"}.includes?(type.generic_type.name)
+    end
+    return true if type.to_s == "Str::Builder" ||
+                   TapeOwnerChecker.owner?(@program, type)
+    case type
+    when UnionType
+      return type.union_types.any? { |t| growing_in(t, visiting) }
+    when TupleInstanceType
+      return type.tuple_types.any? { |t| growing_in(t, visiting) }
+    when NamedTupleInstanceType
+      return type.entries.any? { |e| growing_in(e.type, visiting) }
+    end
+    if type.struct? && type.is_a?(InstanceVarContainer)
+      return type.instance_vars.each_value.any? do |field|
+        field.type?.try { |t| growing_in(t, visiting) } == true
+      end
+    end
+    false
+  end
+
   def check_fields(type)
+    if type.is_a?(GenericClassInstanceType) &&
+       {"Ary", "Tre"}.includes?(type.generic_type.name)
+      type.type_vars.each_value do |var|
+        # An owner element gets the owner checker's own, more exact refusal.
+        if var.is_a?(Var) && (element = var.type?) &&
+           !TapeOwnerChecker.owner_in(@program, element) && growing_in(element)
+          fail type, nil, "#{type} cannot contain growing values in a runtime-sized collection; " \
+                          "use SlicePool(T) with fixed-size elements and run handles"
+        end
+      end
+    end
     owner = TapeOwnerChecker.owner?(@program, type)
     if owner && !type.struct?
       fail type, nil, "@[Owner] requires a struct; declare one owner per scope"

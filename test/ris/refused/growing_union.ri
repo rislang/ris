@@ -1,0 +1,2 @@
+alias GrowingUnion = Int32 | Tuple(Str::Builder, Int32)
+tape { Tre(GrowingUnion).new }

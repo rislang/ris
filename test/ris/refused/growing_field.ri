@@ -1,0 +1,8 @@
+@[OnTape]
+struct GrowingField
+  getter values : Ary(Int32)
+  def initialize
+    @values = Ary(Int32).new
+  end
+end
+tape { Ary(GrowingField).new }

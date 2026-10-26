@@ -33,6 +33,54 @@ expect() {
   fi
 }
 
+# Typed runs reuse, merge, relocate and retain typed stale views.
+out=$("$RIS" run --no-gc test/ris/slice_pool.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = 'PASS: SlicePool' ]; then
+  echo "runs     slice_pool"
+else
+  echo "FAILED   slice_pool: $out"; status=1
+fi
+
+# SlicePool failures are fatal checked errors, including without the GC.
+out=$(
+  exe=$(mktemp)
+  if "$RIS" build --no-gc test/ris/slice_pool_errors.ri -o "$exe"; then
+    for mode in negative overflow foreign foreign_realloc bounds slice \
+      negative_realloc realloc_overflow constructor; do
+      result=$("$exe" "$mode" 2>&1)
+      code=$?
+      case "$mode" in
+        negative|negative_realloc|constructor) expected='iyi: tape bad size: -1' ;;
+        overflow|realloc_overflow)
+          expected='iyi: tape size overflow: 9223372036854775807 * 4' ;;
+        foreign|foreign_realloc)
+          expected='iyi: SlicePool foreign or invalid run: 0' ;;
+        bounds) expected='iyi: SlicePool index out of bounds: 2' ;;
+        slice) expected='iyi: SlicePool slice out of bounds: 0' ;;
+      esac
+      if [ "$code" -eq 1 ] && [ "$result" = "$expected" ]; then
+        echo "fatal    slice_pool_$mode"
+      else
+        echo "FAILED   slice_pool_$mode: $result"
+      fi
+    done
+  else
+    echo "FAILED   slice_pool_errors build"
+  fi
+  rm -f "$exe"
+)
+if [[ "$out" == *FAILED* ]]; then status=1; fi
+printf '%s\n' "$out"
+
+expect slice_pool_links 'realloc_slice refuses self-relative links'
+expect growing_array 'use SlicePool(T)'
+expect growing_tree 'use SlicePool(T)'
+expect growing_field 'use SlicePool(T)'
+expect growing_owner 'cannot store an owner in a container'
+expect growing_union 'use SlicePool(T)'
+expect growing_recursive 'use SlicePool(T)'
+expect shrink_element 'use SlicePool(T)'
+
 # Owner and pointer checking see the same callback through union dispatch.
 out=$(
   graph_dir=$(mktemp -d)
@@ -73,7 +121,7 @@ fi
 
 # A dead view permits refill; live views and pending operands forbid shrink.
 for name in builder_clear builder_truncate builder_shift operand alias span \
-    values_at link pop_optional element iterator pointer literal_operand \
+    values_at link pop_optional iterator pointer literal_operand \
     helper helper_two helper_generic dispatch callback helper_result \
     helper_recursive field_owner field_ontape callback_proc \
     callback_argument helper_self helper_named loop_clear loop_rebind loop_nested \

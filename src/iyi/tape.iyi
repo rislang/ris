@@ -145,7 +145,7 @@ module Tape
       {% if T.class? %}
         {% raise "copy_to refuses self-reaching class types;\nbuild on the destination with Ary nodes and indices" %}
       {% end %}
-    {% elsif T.name.starts_with?("Ary(") || T.name.starts_with?("Tre(") || T < ::Tuple %}
+    {% elsif T.name.starts_with?("Ary(") || T.name.starts_with?("Tre(") || T.name.starts_with?("SlicePool::Run(") || T.name.starts_with?("SlicePool::List(") || T < ::Tuple %}
       {% for member in T.type_vars %}
         check_copy({{member}}, Tuple(*P, T))
       {% end %}
@@ -3129,5 +3129,405 @@ class IyiRegion
       index += 1
     end
     memory.as(String)
+  end
+end
+
+# Typed reusable runs. Freed slots remain initialized until tape release.
+@[OnTape]
+struct SlicePool(T)
+  @data : Ary(T)
+  @free : Ary(Str::Span)
+
+  def initialize(capacity : Int32 | Int64 = 4)
+    @data = Ary(T).new(capacity)
+    @free = Ary(Str::Span).new
+  end
+
+  def size : Int32
+    @data.size
+  end
+
+  private def checked(n : Int32 | Int64) : Int32
+    Tape.storage(n, sizeof(T).to_u64)
+    n.to_i32
+  end
+
+  private def run(at : Int32, n : Int32) : Run(T)
+    Run(T).new(@data, at, n)
+  end
+
+  private def validate(s : Run(T)) : Nil
+    return if s.size == 0
+    if s.@state.address != @data.@state.address || s.offset < 0 || s.size < 0 ||
+       s.offset.to_i64 + s.size > size
+      IyiRegion.size_error("iyi: SlicePool foreign or invalid run: ", 0_u64)
+    end
+  end
+
+  private def default_value : T
+    {% if T < Number %}
+      T.zero
+    {% elsif T == Str %}
+      Str.new("")
+    {% elsif T == Bool %}
+      false
+    {% elsif T == Char %}
+      '\0'
+    {% elsif T.nilable? || T == Nil %}
+      nil
+    {% else %}
+      T.new
+    {% end %}
+  end
+
+  private def extend_to(stop : Int32) : Nil
+    while @data.size < stop
+      @data << default_value
+    end
+  end
+
+  private def defaults(at : Int32, n : Int32) : Nil
+    i = 0
+    while i < n
+      @data[at + i] = default_value
+      i += 1
+    end
+  end
+
+  def alloc_slice(n : Int32 | Int64) : Run(T)
+    count = checked(n)
+    return run(0, 0) if count == 0
+    i = 0
+    while i < @free.size
+      span = @free[i]
+      if span.size >= count || span.start + span.size == size
+        stop = checked(span.start.to_i64 + count)
+        extend_to(stop)
+        take = (count < span.size ? count : span.size)
+        @free[i] = Str::Span.new(span.start + take, span.size - take)
+        defaults(span.start, take)
+        return run(span.start, count)
+      end
+      i += 1
+    end
+    at = size
+    stop = checked(at.to_i64 + count)
+    extend_to(stop)
+    run(at, count)
+  end
+
+  def free_slice(s : Run(T)) : Nil
+    validate(s)
+    return if s.size == 0
+    start = s.offset
+    stop = start + s.size
+    # Compact all touching spans, then insert in sorted order.
+    kept = 0
+    i = 0
+    while i < @free.size
+      span = @free[i]
+      if span.size > 0
+        if span.start <= stop && span.start + span.size >= start
+          start = (start < span.start ? start : span.start)
+          stop = (stop > span.start + span.size ? stop : span.start + span.size)
+        else
+          @free[kept] = span
+          kept += 1
+        end
+      end
+      i += 1
+    end
+    while @free.size > kept
+      @free.pop
+    end
+    @free << Str::Span.new(start, stop - start)
+    i = @free.size - 1
+    while i > 0 && @free[i - 1].start > start
+      @free[i] = @free[i - 1]
+      i -= 1
+    end
+    @free[i] = Str::Span.new(start, stop - start)
+  end
+
+  # Find the post-free placement before touching data or the freelist.
+  private def check_relocation(s : Run(T), count : Int32) : Nil
+    start = s.offset
+    stop = start + s.size
+    @free.each do |span|
+      if span.size > 0 && span.start <= stop && span.start + span.size >= start
+        start = start < span.start ? start : span.start
+        stop = stop > span.start + span.size ? stop : span.start + span.size
+      end
+    end
+    inserted = false
+    @free.each do |span|
+      if !inserted && span.start >= start
+        inserted = true
+        if stop - start >= count || stop == size
+          checked(start.to_i64 + count)
+          return
+        end
+      end
+      next if span.size == 0 || (span.start <= stop && span.start + span.size >= start)
+      if span.size >= count || span.start + span.size == size
+        checked(span.start.to_i64 + count)
+        return
+      end
+    end
+    if !inserted && (stop - start >= count || stop == size)
+      checked(start.to_i64 + count)
+    else
+      checked(size.to_i64 + count)
+    end
+  end
+
+  def realloc_slice(s : Run(T), n : Int32 | Int64) : Run(T)
+    Tape.check_slice_relocation(T, Tuple())
+    count = checked(n)
+    validate(s)
+    return alloc_slice(count) if s.size == 0
+    if count <= s.size
+      free_slice(run(s.offset + count, s.size - count))
+      return run(s.offset, count)
+    end
+    old_stop = s.offset + s.size
+    if old_stop == size
+      stop = checked(s.offset.to_i64 + count)
+      extend_to(stop)
+      return run(s.offset, count)
+    end
+    i = 0
+    while i < @free.size
+      span = @free[i]
+      if span.start == old_stop &&
+         (span.size >= count - s.size || span.start + span.size == size)
+        stop = checked(s.offset.to_i64 + count)
+        extend_to(stop)
+        take = (count - s.size < span.size ? count - s.size : span.size)
+        @free[i] = Str::Span.new(span.start + take, span.size - take)
+        defaults(old_stop, take)
+        return run(s.offset, count)
+      end
+      i += 1
+    end
+    # Save typed values before freeing: the destination can overlap them.
+    check_relocation(s, count)
+    saved = Ary(T).new(s.size) { |k| s[k] }
+    free_slice(s)
+    made = alloc_slice(count)
+    i = 0
+    while i < saved.size
+      made[i] = saved[i]
+      i += 1
+    end
+    made
+  end
+
+  @[OnTape]
+  struct Run(T)
+    getter offset : Int32
+    getter size : Int32
+
+    @state : Pointer(UInt64)
+
+    def initialize(data : Ary(T), @offset : Int32, @size : Int32)
+      if @offset < 0 || @size < 0 || @offset.to_i64 + @size > data.size
+        IyiRegion.size_error("iyi: SlicePool slice out of bounds: ", 0_u64)
+      end
+      @state = data.@state
+    end
+
+    def __iyi_copy_into(target : Pointer(self), work : IyiCopyWork) : Nil
+      made = Ary(T).new(@size) { |i| self[i] }
+      target.value = self.class.new(made, 0, @size)
+      i = @size
+      while i > 0
+        i -= 1
+        work.push(self[i], Pointer(T).new(made.@state.value +
+          i.to_u64 * sizeof(T).to_u64))
+      end
+    end
+
+    def __iyi_pending_copy(owner : IyiPendingCopy) : self
+      return self unless owner.contains?(@state.address)
+      owner.run do
+        made = Ary(T).new(@size) { |i| Tape.copy_value(self[i], owner) }
+        self.class.new(made, 0, @size)
+      end
+    end
+
+    def [](index : Int32) : T
+      check(index)
+      Pointer(T).new(@state.value + (@offset + index).to_u64 *
+        sizeof(T).to_u64).value
+    end
+
+    def []=(index : Int32, value : T) : T
+      check(index)
+      Pointer(T).new(@state.value + (@offset + index).to_u64 *
+        sizeof(T).to_u64).value = value
+    end
+
+    def empty? : Bool
+      @size == 0
+    end
+
+    def each(& : T -> _) : Nil
+      i = 0
+      while i < @size
+        yield self[i]
+        i += 1
+      end
+    end
+
+    def each_with_index(& : T, Int32 -> _) : Nil
+      i = 0
+      while i < @size
+        yield self[i], i
+        i += 1
+      end
+    end
+
+    def map(& : T -> U) : Ary(U) forall U
+      Ary(U).new(@size) { |i| yield self[i] }
+    end
+
+    private def check(index : Int32) : Nil
+      if index < 0 || index >= @size
+        IyiRegion.size_error("iyi: SlicePool index out of bounds: ",
+          index.unsafe_to_u64)
+      end
+    end
+
+    def [](start : Int32, count : Int32) : self
+      if start < 0 || count < 0 || start.to_i64 + count > @size
+        IyiRegion.size_error("iyi: SlicePool slice out of bounds: ", 0_u64)
+      end
+      made = self
+      pointerof(made.@offset).value = @offset + start
+      pointerof(made.@size).value = count
+      made
+    end
+  end
+end
+
+module Tape
+  def self.check_slice_relocation(type : T.class, path : P.class) : Nil forall T, P
+    {% if T.name.starts_with?("Ary::Link(") %}
+      {% raise "SlicePool.realloc_slice refuses self-relative links; use alloc_slice and free_slice without relocation" %}
+    {% elsif !P.type_vars.includes?(T) %}
+      {% if T < Tuple %}
+        {% for member in T.type_vars %}
+          check_slice_relocation({{member}}, Tuple(*P, T))
+        {% end %}
+      {% elsif T < NamedTuple %}
+        {% for key in T.keys %}
+          check_slice_relocation({{T[key]}}, Tuple(*P, T))
+        {% end %}
+      {% elsif T.union? %}
+        {% for member in T.union_types %}
+          check_slice_relocation({{member}}, Tuple(*P, T))
+        {% end %}
+      {% else %}
+        {% for field in T.instance_vars %}
+          check_slice_relocation({{field.type}}, Tuple(*P, T))
+        {% end %}
+      {% end %}
+    {% end %}
+  end
+end
+
+# Mutable lists share typed slice storage; only the run handle changes.
+@[OnTape]
+struct SlicePool::List(T)
+  @[OnTape]
+  struct State(T)
+    property pool : SlicePool(T?)
+    property run : SlicePool::Run(T?)
+    property size : Int32
+
+    def initialize(@pool : SlicePool(T?))
+      @run = @pool.alloc_slice(0)
+      @size = 0
+    end
+  end
+
+  @state : Pointer(State(T))
+
+  def initialize(pool : SlicePool(T?))
+    @state = Pointer(State(T)).new(
+      IyiRegion.tape_bytes(sizeof(State(T)).to_u64))
+    @state.value = State(T).new(pool)
+  end
+
+  def __iyi_copy_into(target : Pointer(self), work : IyiCopyWork) : Nil
+    made = self.class.new(SlicePool(T?).new(size))
+    each { |item| made << item }
+    target.value = made
+    i = size
+    while i > 0
+      i -= 1
+      work.push(self[i].as(T?), Pointer(T?).new(made.@state.value.run.@state.value +
+        (made.@state.value.run.offset + i).to_u64 * sizeof(T?).to_u64))
+    end
+  end
+
+  def __iyi_pending_copy(owner : IyiPendingCopy) : self
+    return self unless owner.contains?(@state.address)
+    cached = owner.lookup(@state.address)
+    if cached != 0
+      made = self
+      pointerof(made.@state).value = Pointer(State(T)).new(cached)
+      return made
+    end
+    owner.run do
+      made = self.class.new(SlicePool(T?).new(size))
+      owner.remember(@state.address, made.@state.address)
+      each { |item| made << Tape.copy_value(item, owner) }
+      made
+    end
+  end
+
+  def size : Int32
+    @state.value.size
+  end
+
+  def empty? : Bool
+    size == 0
+  end
+
+  def [](i : Int32) : T
+    if i < 0 || i >= size
+      IyiRegion.size_error("iyi: SlicePool index out of bounds: ",
+        i.unsafe_to_u64)
+    end
+    @state.value.run[i].as(T)
+  end
+
+  def []=(i : Int32, value : T) : T
+    if i < 0 || i >= size
+      IyiRegion.size_error("iyi: SlicePool index out of bounds: ",
+        i.unsafe_to_u64)
+    end
+    @state.value.run[i] = value
+  end
+
+  def <<(value : T) : Nil
+    state = @state.value
+    if state.size == state.run.size
+      capacity = Tape.grown(state.run.size.to_u64).to_i32
+      state.run = state.pool.realloc_slice(state.run, capacity)
+    end
+    state.run[state.size] = value
+    state.size += 1
+    @state.value = state
+  end
+
+  def each(& : T -> _) : Nil
+    i = 0
+    while i < size
+      yield self[i]
+      i += 1
+    end
   end
 end

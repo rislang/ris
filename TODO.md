@@ -23,16 +23,11 @@ How to work (fewer tokens, faster to the goal):
 
 * Ordinary class `new` on the active tape; check reference lifetimes and
   refuse finalize. Existing copy_to must also handle these instances.
-* SlicePool(T) minimum: typed runs, alloc/free/realloc, checked bounds
-  and membership (TAPE_SPEC 6.1-6.3, Goose §5.4); the safe form 2.2 names.
-* Refuse runtime-sized collections of growing values (Ary of Ary/Builder,
-  growing fields in Ary elements), naming SlicePool (TAPE_SPEC 2.2). This
-  bounds how many growing values live at once, which reservations need.
-* Stable growth from the first published element, after the two above:
+* Stable growth from the first published element, now that runs are available:
   remove the copying transfer in IyiRegion.tape_resize; each growing value
   reserves its own address space (TAPE_SPEC 2.2; Goose §1.2, §10.3-10.4).
-  A first try reserving 1 GiB per value at construction failed: query's
-  mapping and copy_deep's 100,000 nested arrays. Test views held before
+  A first try reserving 1 GiB per value at construction failed on query's
+  mapping and the now-refused nested arrays. Test views held before
   first growth, zero transfers, bounded mappings in serve and respond.
 * Stable growth on every supported tape target: replace moving backends
   outside Linux with address-space reservations and equivalent gates.

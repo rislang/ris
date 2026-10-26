@@ -1,0 +1,2 @@
+alias NestedGrowing = Ary(NestedGrowing) | Int32
+tape { Ary(NestedGrowing).new }

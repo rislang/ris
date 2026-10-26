@@ -1,0 +1,14 @@
+@[OnTape]
+struct PoolLinked
+  getter links : Tuple(Ary::Link(Int32, UInt32), Int32)?
+
+  def initialize
+    @links = nil
+  end
+end
+
+tape do
+  pool = SlicePool(PoolLinked).new
+  run = pool.alloc_slice(1)
+  pool.realloc_slice(run, 2)
+end

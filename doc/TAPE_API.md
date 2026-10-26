@@ -107,6 +107,63 @@ end
 `@[Tape::Flat]` struct holds only numbers, `Str::Span`s (`text[span]`) and
 `Ary::Link(T, UInt16)` indexes; `array.bytes` and `.load(bytes)` round-trip.
 
+## SlicePool
+
+`SlicePool(T)` keeps initialized typed runs in one growing backing array
+on its owner's tape. Use fixed-size elements and keep `SlicePool::Run(T)`
+views in collections instead of growing values. `Ary` and `Tre` refuse
+an element that is or contains `Ary`, `Tre`, `Str::Builder` or an
+`@[Owner]`, including through unions, tuples and `@[OnTape]` fields.
+
+```crystal
+tape do
+  pool = SlicePool(Int32).new(128)
+  row = pool.alloc_slice(4)
+  row[0] = 42
+  rows = Ary(SlicePool::Run(Int32)).new
+  rows << row
+  row = pool.realloc_slice(row, 8)
+  rows[0] = row
+  pool.free_slice(rows[0])
+end
+```
+
+`alloc_slice(n)` takes the first free span large enough, in offset order,
+or extends the backing array, using a free tail first. New and reused
+slots receive defaults: zero for numbers, false for Bool, the zero Char,
+empty Str, nil for nilable types, and `T.new` for other defaultable types.
+`free_slice(run)` merges touching free spans without destroying values or
+closing resources. Stale views still read valid typed values and see
+subsequent replacements. Double free is a logic error, not a resource
+cleanup operation.
+
+A run provides `offset`, `size`, checked `[]` and `[]=`,
+`run[start, count]`, `each`, `each_with_index` and `map`. The handle follows
+the pool's backing storage across growth. `Run.new(array, offset, size)`
+forms a checked view of an existing array; pool operations check its
+membership before changing anything. Empty views free nothing and can
+be reallocated by any pool. Sizes, bounds, overflow and foreign nonempty
+runs fail with allocation-free fatal diagnostics.
+
+`realloc_slice(run, n)` shrinks by freeing the suffix. Growth stays in
+place at the tail, or consumes an adjacent free span (extending a free
+tail when needed). Otherwise it frees the old run and allocates another,
+preserving its typed prefix even when the spans overlap. Keep the returned
+handle: existing handles retain their original offsets and lengths.
+Reallocation refuses elements containing `Ary::Link`; allocate and free
+such runs without relocation. `run.copy_to(owner)` deeply copies the
+viewed elements to the destination tape.
+
+`SlicePool::List(T).new(pool : SlicePool(T?))` is a mutable row backed
+by shared pool runs. It provides `size`, `empty?`, `[]`, `[]=`, `<<` and
+`each`. Copies share one run handle; growth updates that handle for all
+aliases. Multiple lists share the pool's backing reservation. Elements
+must support run relocation. A list's `copy_to(owner)` copies its elements.
+
+YAML tape values store sequence and mapping runs in a shared parser pool.
+TOML uses pooled lists while building tables and fixed runs for arrays;
+collections hold these views rather than nested growing arrays.
+
 ## Lifetimes and speed
 
 Each fiber has its own tape; a spawned fiber cannot take its parent's values.

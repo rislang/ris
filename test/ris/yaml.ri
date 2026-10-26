@@ -6,6 +6,9 @@ kept = YAML.parse("null".to_heap)
 tape do
   text = "name: café\nlist: [1, true, null, 0.125]\nquoted: \"a\\nb\"\n"
   doc = YAML.parse(text)
+  exit 14 unless YAML.parse("[1, 2]")[-1].as_i == 2
+  copied = doc.copy_to(Program.tape)
+  exit 13 unless copied == doc
   exit 1 unless doc["name"].as_s == "café"
   exit 2 unless doc["list"][0].as_i == 1
   exit 3 unless doc["quoted"].as_s == "a\nb"

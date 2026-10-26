@@ -682,7 +682,7 @@ end
 # tables `[[...]]` appends to.
 
 @[OnTape]
-struct TapePair(T)
+pub struct TapePair(T)
   getter key : Str
   getter value : T
 
@@ -692,10 +692,10 @@ end
 
 @[OnTape]
 pub struct TapeMap(T)
-  @pairs : Ary(TapePair(T))
+  @pairs : SlicePool::List(TapePair(T))
 
-  def initialize
-    @pairs = Ary(TapePair(T)).new
+  def initialize(pool : SlicePool(TapePair(T)?) = SlicePool(TapePair(T)?).new)
+    @pairs = SlicePool::List(TapePair(T)).new(pool)
   end
 
   def []?(key : Str | String) : T?
@@ -746,11 +746,11 @@ pub struct TapeAny
   KIND_TABLE    = 6
 
   alias Type = Bool | Int64 | Float64 | Str | TOMLDateTime |
-               Ary(TapeAny) | TapeMap(TapeAny)
+               SlicePool::Run(TapeAny) | TapeMap(TapeAny)
 
   getter raw : Type
 
-  def initialize(@raw : Type)
+  def initialize(@raw : Type = false)
   end
 
   def initialize(value : Int32)
@@ -762,7 +762,7 @@ pub struct TapeAny
   # gives.
   def kind : Int32
     r = @raw
-    if r.is_a?(Ary(TapeAny))
+    if r.is_a?(SlicePool::Run(TapeAny))
       KIND_ARRAY
     elsif r.is_a?(TapeMap(TapeAny))
       KIND_TABLE
@@ -852,13 +852,13 @@ pub struct TapeAny
     kind == KIND_DATETIME ? @raw.as(TOMLDateTime) : nil
   end
 
-  def as_a : Ary(TapeAny)
+  def as_a : SlicePool::Run(TapeAny)
     raise "expected an array, not #{kind_name}" unless kind == KIND_ARRAY
-    @raw.as(Ary(TapeAny))
+    @raw.as(SlicePool::Run(TapeAny))
   end
 
-  def as_a? : Ary(TapeAny)?
-    kind == KIND_ARRAY ? @raw.as(Ary(TapeAny)) : nil
+  def as_a? : SlicePool::Run(TapeAny)?
+    kind == KIND_ARRAY ? @raw.as(SlicePool::Run(TapeAny)) : nil
   end
 
   def as_h : TapeMap(TapeAny)
@@ -873,7 +873,7 @@ pub struct TapeAny
   # Items of an array, keys of a table, characters of a string.
   def size : Int32
     k = kind
-    return @raw.as(Ary(TapeAny)).size if k == KIND_ARRAY
+    return @raw.as(SlicePool::Run(TapeAny)).size if k == KIND_ARRAY
     return @raw.as(TapeMap(TapeAny)).size if k == KIND_TABLE
     if k == KIND_STRING
       count = 0
@@ -899,7 +899,8 @@ pub struct TapeAny
   end
 
   def [](index : Int32) : TapeAny
-    as_a[index]
+    items = as_a
+    items[index < 0 ? items.size + index : index]
   end
 
   def []?(index : Int32) : TapeAny?
@@ -948,7 +949,7 @@ pub struct TapeAny
     raw = @raw
     if raw.is_a?(Str)
       Any.new(raw.to_heap)
-    elsif raw.is_a?(Ary(TapeAny))
+    elsif raw.is_a?(SlicePool::Run(TapeAny))
       items = [] of Any
       raw.each { |item| items << item.to_heap }
       Any.new(items)
@@ -963,7 +964,7 @@ pub struct TapeAny
 end
 
 @[OnTape]
-struct TapeSlot
+pub struct TapeSlot
   VALUE  = 0
   TABLE  = 1
   TABLES = 2
@@ -971,10 +972,10 @@ struct TapeSlot
   getter kind : Int32
   getter value : TapeAny
   getter table : TapeTable?
-  getter tables : Ary(TapeTable)?
+  getter tables : SlicePool::List(TapeTable)?
 
   def initialize(@kind : Int32, @value : TapeAny, @table : TapeTable?,
-                 @tables : Ary(TapeTable)?)
+                 @tables : SlicePool::List(TapeTable)?)
   end
 
   def self.value(value : TapeAny) : TapeSlot
@@ -985,9 +986,10 @@ struct TapeSlot
     new(TABLE, TapeAny.new(false), table, nil)
   end
 
-  def self.tables(first : TapeTable) : TapeSlot
-    new(TABLES, TapeAny.new(false), nil,
-      Ary(TapeTable).new(1) { first })
+  def self.tables(first : TapeTable, pool : SlicePool(TapeTable?)) : TapeSlot
+    list = SlicePool::List(TapeTable).new(pool)
+    list << first
+    new(TABLES, TapeAny.new(false), nil, list)
   end
 
   def to_any(scratch : TapeConversionScratch) : TapeAny
@@ -1017,7 +1019,7 @@ end
 # dotted keys and inline values over three key names, compared against
 # `tomllib`, found no document the two read differently.
 @[OnTape]
-struct TapeTable
+pub struct TapeTable
   @slots : TapeMap(TapeSlot)
 
   def slots : TapeMap(TapeSlot)
@@ -1050,7 +1052,8 @@ struct TapeTable
     @dotted.value = value
   end
 
-  def initialize(depth : Int32, explicit : Bool, dotted : Bool)
+  def initialize(depth : Int32, explicit : Bool, dotted : Bool,
+                 pool : SlicePool(TapePair(TapeSlot)?))
     @explicit = Pointer(Bool).new(
       IyiRegion.tape_bytes(sizeof(Bool).to_u64))
     @dotted = Pointer(Bool).new(
@@ -1058,7 +1061,7 @@ struct TapeTable
     @depth = depth
     @explicit.value = explicit
     @dotted.value = dotted
-    @slots = TapeMap(TapeSlot).new
+    @slots = TapeMap(TapeSlot).new(pool)
   end
 
   def to_any : TapeAny
@@ -1067,7 +1070,7 @@ struct TapeTable
   end
 
   def to_any(scratch : TapeConversionScratch) : TapeAny
-    pairs = TapeMap(TapeAny).new
+    pairs = TapeMap(TapeAny).new(scratch.pairs)
     @slots.each { |key, slot| pairs[key] = slot.to_any(scratch) }
     TapeAny.new(pairs)
   end
@@ -1077,9 +1080,12 @@ end
 @[Owner]
 struct TapeConversionScratch
   getter used : Int32
+  getter pairs : SlicePool(TapePair(TapeAny)?)
 
   def initialize
     @items = Ary(TapeAny).new
+    @pool = SlicePool(TapeAny).new
+    @pairs = SlicePool(TapePair(TapeAny)?).new
     @used = 0
   end
 
@@ -1092,11 +1098,11 @@ struct TapeConversionScratch
     @used = @used + 1
   end
 
-  def finish(mark : Int32) : Ary(TapeAny)
-    items = Ary(TapeAny).new(@used - mark)
+  def finish(mark : Int32) : SlicePool::Run(TapeAny)
+    items = @pool.alloc_slice(@used - mark)
     index = mark
     while index < @used
-      items << @items[index]
+      items[index - mark] = @items[index]
       index = index + 1
     end
     @used = mark
@@ -1168,6 +1174,9 @@ struct TapeReader
   @key_parts : Ary(Str)
   @key_starts : Ary(Int32)
   @key_used : Int32
+  @slot_pool : SlicePool(TapePair(TapeSlot)?)
+  @table_pool : SlicePool(TapeTable?)
+  @value_pool : SlicePool(TapeAny)
   @array_items : Ary(TapeAny)
   @array_used : Int32
   @empty_path : Ary(Str)
@@ -1198,7 +1207,10 @@ struct TapeReader
     @path = Pointer(Ary(Str)).new(
       IyiRegion.tape_bytes(sizeof(Ary(Str)).to_u64))
     @scan.value = Str::Scanner.new(text)
-    @root = TapeTable.new(0, true, false)
+    @slot_pool = SlicePool(TapePair(TapeSlot)?).new
+    @table_pool = SlicePool(TapeTable?).new
+    @value_pool = SlicePool(TapeAny).new
+    @root = TapeTable.new(0, true, false, @slot_pool)
     @current.value = @root
     @path.value = Ary(Str).new
     @key_parts = Ary(Str).new
@@ -1538,7 +1550,7 @@ struct TapeReader
     while i < parts.size - 1
       slot = t.slots[parts[i]]?
       if slot.nil?
-        child = TapeTable.new(t.depth + 1, false, true)
+        child = TapeTable.new(t.depth + 1, false, true, @slot_pool)
         t.slots[parts[i]] = TapeSlot.table(child)
         t = child
       else
@@ -1599,7 +1611,7 @@ struct TapeReader
     while i < parts.size - 1
       slot = t.slots[parts[i]]?
       if slot.nil?
-        child = TapeTable.new(t.depth + 1, false, false)
+        child = TapeTable.new(t.depth + 1, false, false, @slot_pool)
         t.slots[parts[i]] = TapeSlot.table(child)
         t = child
       else
@@ -1621,12 +1633,12 @@ struct TapeReader
     target = t
     if array
       if slot.nil?
-        target = TapeTable.new(t.depth + 1, true, false)
-        t.slots[last] = TapeSlot.tables(target)
+        target = TapeTable.new(t.depth + 1, true, false, @slot_pool)
+        t.slots[last] = TapeSlot.tables(target, @table_pool)
       else
         list = slot.tables
         if !list.nil?
-          target = TapeTable.new(t.depth + 1, true, false)
+          target = TapeTable.new(t.depth + 1, true, false, @slot_pool)
           list << target
         elsif slot.kind == TapeSlot::TABLE
           return fail("[[#{whole.to_heap}]] names the table " \
@@ -1638,7 +1650,7 @@ struct TapeReader
       end
     else
       if slot.nil?
-        target = TapeTable.new(t.depth + 1, true, false)
+        target = TapeTable.new(t.depth + 1, true, false, @slot_pool)
         t.slots[last] = TapeSlot.table(target)
       else
         child = slot.table
@@ -2040,10 +2052,10 @@ struct TapeReader
                           "should be")
       end
     end
-    items = Ary(TapeAny).new(@array_used - mark)
+    items = @value_pool.alloc_slice(@array_used - mark)
     index = mark
     while index < @array_used
-      items << @array_items[index]
+      items[index - mark] = @array_items[index]
       index = index + 1
     end
     @array_used = mark
@@ -2059,7 +2071,7 @@ struct TapeReader
     input_size = size
     start = pos
     self.pos = pos + 1
-    table = TapeTable.new(depth, false, false)
+    table = TapeTable.new(depth, false, false, @slot_pool)
     empty = @empty_path
     skip_blanks
     if pos < input_size && input[pos] == 125_u8

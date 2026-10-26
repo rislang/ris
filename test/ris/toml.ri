@@ -8,6 +8,9 @@ tape do
   exit 1 if parsed.is_a?(TOMLError)
   exit 2 unless parsed["title"].as_s == "café"
   exit 3 unless parsed["db"]["ports"][1].as_i == 443_i64
+  exit 21 unless parsed["db"]["ports"][-1].as_i == 443
+  copied = parsed.copy_to(Program.tape)
+  exit 20 unless copied.to_heap == parsed.to_heap
   writer = Str::Builder.new(1)
   writer << "prefix:"
   TOML.dump(parsed, writer)

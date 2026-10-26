@@ -1,0 +1,144 @@
+@[OnTape]
+struct PoolDefault
+  getter text : Str
+
+  def initialize
+    @text = Str.new("default")
+  end
+end
+
+tape do
+  pool = SlicePool(Int32).new(32)
+  a = pool.alloc_slice(4)
+  a[0] = 17
+  b = pool.alloc_slice(4)
+  b[0] = 29
+  pool.free_slice(a[1, 3])
+  c = pool.alloc_slice(2)
+  raise "first fit" unless c.offset == 1 && c[0] == 0
+  c[0] = 42
+  raise "typed reuse" unless a[1] == 42
+  pool.free_slice(c)
+  pool.free_slice(a[0, 1])
+  d = pool.alloc_slice(4)
+  raise "merge" unless d.offset == 0
+  d[0] = 53
+  moved = pool.realloc_slice(d, 6)
+  raise "relocate" unless moved[0] == 53 && moved.size == 6
+  raise "old view" unless d[0] == 53
+  grown = pool.realloc_slice(moved, 9)
+  raise "tail grow" unless grown.offset == moved.offset && grown[8] == 0
+  small = pool.realloc_slice(grown, 2)
+  same = pool.realloc_slice(small, 5)
+  raise "adjacent grow" unless same.offset == small.offset && same[4] == 0
+  raise "other run" unless b[0] == 29
+end
+
+tape do
+  pool = SlicePool(Int32).new(2)
+  a = pool.alloc_slice(2)
+  a[0] = 7
+  b = pool.alloc_slice(2)
+  pool.free_slice(b)
+  a = pool.realloc_slice(a, 7)
+  raise "free tail growth" unless a.offset == 0 && a[0] == 7 && a[6] == 0
+  pool.free_slice(a[3, 4])
+  c = pool.alloc_slice(6)
+  raise "allocation extends tail" unless c.offset == 3 && c[5] == 0
+  empty = c[2, 0]
+  pool.free_slice(empty)
+  d = pool.realloc_slice(empty, 1)
+  raise "empty realloc" unless d.size == 1
+  copy = a[0, 3].copy_to(Program.tape)
+  a[0] = 99
+  raise "copy run" unless copy[0] == 7
+end
+
+# Free then allocate may overlap the original; copy the old typed prefix.
+tape do
+  pool = SlicePool(Int32).new(16)
+  left = pool.alloc_slice(3)
+  middle = pool.alloc_slice(3)
+  right = pool.alloc_slice(3)
+  middle[0] = 10
+  middle[1] = 20
+  middle[2] = 30
+  pool.free_slice(left)
+  moved = pool.realloc_slice(middle, 5)
+  raise "overlap offset" unless moved.offset == 0
+  raise "overlap values" unless moved[0] == 10 && moved[1] == 20 && moved[2] == 30
+  raise "overlap defaults" unless moved[3] == 0 && moved[4] == 0
+end
+# Many mutable rows share one typed pool; list copies share the handle.
+tape do
+  pool = SlicePool(Int32?).new(4)
+  rows = Ary(SlicePool::List(Int32)).new
+  i = 0
+  while i < 20
+    row = SlicePool::List(Int32).new(pool)
+    row << i
+    rows << row
+    i += 1
+  end
+  alias_row = rows[0]
+  i = 0
+  while i < 20
+    alias_row << i
+    i += 1
+  end
+  raise "list alias" unless rows[0].size == 21 && rows[0][20] == 19
+  raise "other list" unless rows[19][0] == 19
+  copied = rows.copy_to(Program.tape)
+  alias_row[0] = 99
+  raise "list copy" unless copied[0][0] == 0
+end
+# Free in either order, merging both neighbours; skip short front holes.
+tape do
+  pool = SlicePool(Int32).new(16)
+  a = pool.alloc_slice(2)
+  b = pool.alloc_slice(3)
+  c = pool.alloc_slice(4)
+  last = pool.alloc_slice(1)
+  pool.free_slice(a)
+  pool.free_slice(c)
+  hole = pool.alloc_slice(3)
+  raise "first sufficient span" unless hole.offset == 5
+  pool.free_slice(hole)
+  pool.free_slice(b)
+  merged = pool.alloc_slice(9)
+  raise "both neighbours" unless merged.offset == 0
+  zero = pool.realloc_slice(merged, 0)
+  raise "zero shrink" unless zero.size == 0
+  foreign = SlicePool(Int32).new
+  fresh = foreign.realloc_slice(zero, 1)
+  raise "foreign empty growth" unless fresh.size == 1 && fresh[0] == 0
+end
+
+# Defaults are valid typed values, including records with tape views.
+tape do
+  raise "string default" unless SlicePool(Str).new.alloc_slice(1)[0].bytesize == 0
+  raise "bool default" if SlicePool(Bool).new.alloc_slice(1)[0]
+  raise "char default" unless SlicePool(Char).new.alloc_slice(1)[0] == '\0'
+  raise "float default" unless SlicePool(Float64).new.alloc_slice(1)[0] == 0.0
+  pool = SlicePool(PoolDefault).new
+  run = pool.alloc_slice(1)
+  pool.free_slice(run)
+  raise "free record" unless run[0].text == "default"
+  fresh = pool.alloc_slice(1)
+  raise "record default" unless fresh[0].text == "default"
+end
+
+# Links can be reused without relocating a run.
+tape do
+  pool = SlicePool(Ary::Link(Int32, UInt32)?).new(4)
+  run = pool.alloc_slice(2)
+  run[0] = Ary::Link(Int32, UInt32).new(7)
+  pool.free_slice(run)
+  link = run[0]
+  raise "free destroyed typed link" unless link && link.index == 7
+  fresh = pool.alloc_slice(2)
+  raise "link default" unless fresh[0].nil? && run[0].nil?
+  other = SlicePool(Ary::Link(Int32, UInt32)?).new
+  other.free_slice(fresh[0, 0])
+end
+puts "PASS: SlicePool"

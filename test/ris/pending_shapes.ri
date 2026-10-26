@@ -42,15 +42,12 @@ def pending_early(n : Int32) : Str?
   Str.build(8) { |w| w.append("late") }
 end
 
-def pending_aliases : Ary(Str::Builder)
+def pending_aliases : Tuple(Str::Builder, Str::Builder)
   scratch = Str::Builder.new(65_536)
   scratch.push(65_u8)
   writer = Str::Builder.new(8)
   writer.append("a")
-  made = Ary(Str::Builder).new(2)
-  made << writer
-  made << writer
-  made
+  {writer, writer}
 end
 
 tape do

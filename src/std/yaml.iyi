@@ -463,14 +463,57 @@ struct TapeMap(K, V)
     @values << value
   end
 
+  def freeze(pool : SlicePool(TapeValue)) : TapeMapping
+    keys = pool.alloc_slice(size)
+    values = pool.alloc_slice(size)
+    @keys.each_with_index do |key, i|
+      keys[i] = key
+      values[i] = @values[i]
+    end
+    TapeMapping.new(keys, values)
+  end
+
   def each(& : K, V -> _) : Nil
     @keys.each_with_index { |key, i| yield key, @values[i] }
   end
 end
 
 @[OnTape]
+pub struct TapeMapping
+  @keys : SlicePool::Run(TapeValue)
+  @values : SlicePool::Run(TapeValue)
+
+  def initialize(@keys : SlicePool::Run(TapeValue),
+                 @values : SlicePool::Run(TapeValue))
+  end
+
+  def size : Int32
+    @keys.size
+  end
+
+  def []?(key : TapeValue) : TapeValue?
+    @keys.each_with_index do |item, i|
+      return @values[i] if item == key
+    end
+    nil
+  end
+
+  def [](key : TapeValue) : TapeValue
+    self[key]? || raise "missing YAML key"
+  end
+
+  def has_key?(key : TapeValue) : Bool
+    !self[key]?.nil?
+  end
+
+  def each(& : TapeValue, TapeValue -> _) : Nil
+    @keys.each_with_index { |key, i| yield key, @values[i] }
+  end
+end
+
+@[OnTape]
 pub struct TapeValue
-  alias Type = Nil | Bool | Int64 | Float64 | Str | Ary(TapeValue) | TapeMap(TapeValue, TapeValue)
+  alias Type = Nil | Bool | Int64 | Float64 | Str | SlicePool::Run(TapeValue) | TapeMapping
 
   KIND_NIL    = 0
   KIND_BOOL   = 1
@@ -482,7 +525,7 @@ pub struct TapeValue
 
   getter raw : Type
 
-  def initialize(@raw : Type)
+  def initialize(@raw : Type = nil)
   end
 
   def initialize(value : Int32)
@@ -493,9 +536,9 @@ pub struct TapeValue
   # Reference types are tested first on purpose (see the header).
   def kind : Int32
     r = @raw
-    if r.is_a?(Ary(TapeValue))
+    if r.is_a?(SlicePool::Run(TapeValue))
       KIND_ARRAY
-    elsif r.is_a?(TapeMap(TapeValue, TapeValue))
+    elsif r.is_a?(TapeMapping)
       KIND_HASH
     elsif r.is_a?(Str)
       KIND_STRING
@@ -585,29 +628,29 @@ pub struct TapeValue
     kind == KIND_STRING ? @raw.as(Str) : nil
   end
 
-  def as_a : Ary(TapeValue)
+  def as_a : SlicePool::Run(TapeValue)
     raise "expected a sequence, not #{kind_name}" unless kind == KIND_ARRAY
-    @raw.as(Ary(TapeValue))
+    @raw.as(SlicePool::Run(TapeValue))
   end
 
-  def as_a? : Ary(TapeValue)?
-    kind == KIND_ARRAY ? @raw.as(Ary(TapeValue)) : nil
+  def as_a? : SlicePool::Run(TapeValue)?
+    kind == KIND_ARRAY ? @raw.as(SlicePool::Run(TapeValue)) : nil
   end
 
-  def as_h : TapeMap(TapeValue, TapeValue)
+  def as_h : TapeMapping
     raise "expected a mapping, not #{kind_name}" unless kind == KIND_HASH
-    @raw.as(TapeMap(TapeValue, TapeValue))
+    @raw.as(TapeMapping)
   end
 
-  def as_h? : TapeMap(TapeValue, TapeValue)?
-    kind == KIND_HASH ? @raw.as(TapeMap(TapeValue, TapeValue)) : nil
+  def as_h? : TapeMapping?
+    kind == KIND_HASH ? @raw.as(TapeMapping) : nil
   end
 
   # Elements of a sequence, pairs of a mapping, characters of a string.
   def size : Int32
     k = kind
-    return @raw.as(Ary(TapeValue)).size if k == KIND_ARRAY
-    return @raw.as(TapeMap(TapeValue, TapeValue)).size if k == KIND_HASH
+    return @raw.as(SlicePool::Run(TapeValue)).size if k == KIND_ARRAY
+    return @raw.as(TapeMapping).size if k == KIND_HASH
     return @raw.as(Str).bytesize if k == KIND_STRING
     raise "size of #{kind_name}"
   end
@@ -637,7 +680,8 @@ pub struct TapeValue
   # sequence, not a mapping" while `[]?` and `dig?` answered nil.
   def [](index : Int32) : TapeValue
     return self[TapeValue.new(index)] if kind == KIND_HASH
-    as_a[index]
+    items = as_a
+    items[index < 0 ? items.size + index : index]
   end
 
   def []?(index : Int32) : TapeValue?
@@ -696,8 +740,8 @@ pub struct TapeValue
       end
       true
     elsif k == KIND_HASH
-      a = @raw.as(TapeMap(TapeValue, TapeValue))
-      b = other.raw.as(TapeMap(TapeValue, TapeValue))
+      a = @raw.as(TapeMapping)
+      b = other.raw.as(TapeMapping)
       return false unless a.size == b.size
       a.each do |key, value|
         found = b[key]?
@@ -744,10 +788,10 @@ pub struct TapeValue
     if k == Any::KIND_ARRAY
       mark = scratch.used
       value.as_a.each { |item| scratch.push(view(item, scratch)) }
-      items = Ary(TapeValue).new(scratch.used - mark)
+      items = scratch.pool.alloc_slice(scratch.used - mark)
       index = mark
       while index < scratch.used
-        items << scratch.items[index]
+        items[index - mark] = scratch.items[index]
         index = index + 1
       end
       scratch.used = mark
@@ -755,7 +799,7 @@ pub struct TapeValue
     elsif k == Any::KIND_HASH
       pairs = TapeMap(TapeValue, TapeValue).new
       value.as_h.each { |key, item| pairs[view(key, scratch)] = view(item, scratch) }
-      TapeValue.new(pairs)
+      TapeValue.new(pairs.freeze(scratch.pool))
     elsif k == Any::KIND_STRING
       TapeValue.new(value.as_s.as_tape)
     elsif k == Any::KIND_INT
@@ -968,10 +1012,12 @@ end
 @[Owner]
 struct TapeViewScratch
   getter items : Ary(TapeValue)
+  getter pool : SlicePool(TapeValue)
   property used : Int32
 
   def initialize
     @items = Ary(TapeValue).new
+    @pool = SlicePool(TapeValue).new
     @used = 0
   end
 
@@ -1033,6 +1079,7 @@ struct TapeParser
   @open_peaks : Ary(Int32)
   @buffer : TapeBuffer
   # Nested sequence parses share scratch owned outside their call cycle.
+  @pool : SlicePool(TapeValue)
   @sequence_scratch : Ary(TapeValue)
   @sequence_used : Int32
 
@@ -1056,6 +1103,7 @@ struct TapeParser
     @anchor_depths = TapeMap(Str, Int32).new
     @open_peaks = Ary(Int32).new
     @buffer = TapeBuffer.new
+    @pool = SlicePool(TapeValue).new
     @sequence_scratch = Ary(TapeValue).new
     @sequence_used = 0
     split_lines
@@ -1594,7 +1642,7 @@ struct TapeParser
     @nodes = @nodes + 1
     mark = @sequence_used
     enter(@heads[@line])
-    return TapeValue.new(Ary(TapeValue).new) if @error
+    return TapeValue.new(@pool.alloc_slice(0)) if @error
     while true
       skip_blank_lines
       break if @line >= @starts.size || document_marker?(@line)
@@ -1623,10 +1671,10 @@ struct TapeParser
     leave
     # Materialize only after recursive children finish; no activation keeps
     # its own growing array across a child parse.
-    items = Ary(TapeValue).new(@sequence_used - mark)
+    items = @pool.alloc_slice(@sequence_used - mark)
     index = mark
     while index < @sequence_used
-      items << @sequence_scratch[index]
+      items[index - mark] = @sequence_scratch[index]
       index = index + 1
     end
     @sequence_used = mark
@@ -1638,7 +1686,7 @@ struct TapeParser
     pairs = TapeMap(TapeValue, TapeValue).new
     spelled = TapeMap(TapeValue, Bool).new
     merged = false
-    result = TapeValue.new(pairs)
+    result = TapeValue.new(nil)
     enter(@heads[@line])
     return result if @error
     while true
@@ -1733,7 +1781,7 @@ struct TapeParser
       break if @error
     end
     leave
-    result
+    TapeValue.new(pairs.freeze(@pool))
   end
 
   # The merged mappings' pairs go in where the `<<` is; a key already in
@@ -2287,7 +2335,7 @@ struct TapeParser
   private def parse_flow_sequence(opener : Int32) : TapeValue
     mark = @sequence_used
     enter(opener)
-    return TapeValue.new(Ary(TapeValue).new) if @error
+    return TapeValue.new(@pool.alloc_slice(0)) if @error
     pos = opener + 1
     while true
       pos = skip_flow_space(pos)
@@ -2339,7 +2387,7 @@ struct TapeParser
         else
           pair[item] = value
         end
-        item = TapeValue.new(pair)
+        item = TapeValue.new(pair.freeze(@pool))
       end
       sequence_push(item)
       if pos < 0
@@ -2360,10 +2408,10 @@ struct TapeParser
     leave
     # Materialize only after recursive children finish; no activation keeps
     # its own growing array across a child parse.
-    items = Ary(TapeValue).new(@sequence_used - mark)
+    items = @pool.alloc_slice(@sequence_used - mark)
     index = mark
     while index < @sequence_used
-      items << @sequence_scratch[index]
+      items[index - mark] = @sequence_scratch[index]
       index = index + 1
     end
     @sequence_used = mark
@@ -2374,7 +2422,7 @@ struct TapeParser
     pairs = TapeMap(TapeValue, TapeValue).new
     spelled = TapeMap(TapeValue, Bool).new
     merged = false
-    result = TapeValue.new(pairs)
+    result = TapeValue.new(nil)
     enter(opener)
     return result if @error
     pos = opener + 1
@@ -2459,7 +2507,7 @@ struct TapeParser
       end
     end
     leave
-    result
+    TapeValue.new(pairs.freeze(@pool))
   end
 
   # One node inside a flow collection, starting at `pos` (not blank).

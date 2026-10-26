@@ -10,5 +10,5 @@ struct Wrapper
   def initialize(@log)
   end
 end
-container = Ary(Wrapper){Wrapper.new(State.log)}
-container[0].log << Str.new("request")
+holder = Wrapper.new(State.log)
+holder.log << Str.new("request")
