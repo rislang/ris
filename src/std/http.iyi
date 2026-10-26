@@ -857,10 +857,10 @@ pub class BodyReader
   @fault : HTTPError | Cancelled | SocketError | Nil
   @text : String
   @at : Int32
-  # Called once, before the first read that has to wait on the socket: a
+  # Pending until the first read that has to wait on the socket: a
   # server answers `Expect: 100-continue` there, and not before the body
   # is wanted.
-  @hello : Proc(Bool)?
+  @continue_pending : Bool
   # The coding undone as the body is read (`decode`, `decode_zstd`): the
   # stream, and until it starts, the envelope it was asked for and the
   # bytes read to tell deflate's two forms apart.
@@ -869,14 +869,14 @@ pub class BodyReader
   @first : String?
   @zstd : ZstdReader? = nil
 
-  def initialize(@conn : Conn?, @kind : Int32, length : Int64, @limit : Int64, @text : String = "", hello : Proc(Bool)? = nil)
+  def initialize(@conn : Conn?, @kind : Int32, length : Int64, @limit : Int64, @text : String = "", continue_pending : Bool = false)
     @left = @kind == CHUNKED ? -1_i64 : length
     @declared = length
     @total = 0_i64
     @finished = @kind == EMPTY || (@kind == LENGTH && length == 0_i64) || (@kind == TEXT && @text.bytesize == 0)
     @fault = nil
     @at = 0
-    @hello = hello
+    @continue_pending = continue_pending
     @inflater = nil
     @coding = nil
     @first = nil
@@ -1161,13 +1161,16 @@ pub class BodyReader
   # Whether some of the body has arrived to be taken, reading for it.
   private def arrived(conn : Conn) : Bool
     return true if conn.available > 0
-    if hello = @hello
-      @hello = nil
-      unless hello.call
-        return false
-      end
-    end
+    return false unless continue_body(conn)
     conn.fill
+  end
+
+  # Clear before writing: a failure or cancellation must never retry the
+  # interim response. The held connection already owns its transport.
+  private def continue_body(conn : Conn) : Bool
+    return true unless @continue_pending
+    @continue_pending = false
+    conn.transport.write("HTTP/1.1 100 Continue\r\n\r\n").is_a?(Int32)
   end
 
   private def short(conn : Conn) : Cancelled | SocketError | HTTPError
@@ -1184,11 +1187,8 @@ pub class BodyReader
   # A chunk's size line (RFC 9112 §7.1): hexadecimal, extensions after
   # `;` ignored.
   private def chunk_size(conn : Conn) : Int64 | Cancelled | SocketError | HTTPError
-    if hello = @hello
-      if conn.available == 0
-        @hello = nil
-        return remember(HTTPError.new("the connection failed before the body")) unless hello.call
-      end
+    if conn.available == 0
+      return remember(HTTPError.new("the connection failed before the body")) unless continue_body(conn)
     end
     line = conn.read_line(4096, "a chunk size line")
     case line
@@ -2365,15 +2365,10 @@ pub struct Server
   # come. A client told nothing holds its body back, and curl waits a
   # second before every upload past a megabyte.
   private def self.body_reader(conn : Conn, head : RequestHead) : BodyReader
-    hello = nil.as(Proc(Bool)?)
-    if head.expects
-      socket = conn.transport
-      hello = -> { socket.write("HTTP/1.1 100 Continue\r\n\r\n").is_a?(Int32) }
-    end
     if head.chunked
-      BodyReader.new(conn, BodyReader::CHUNKED, 0_i64, MAX_BODY.to_i64, "", hello)
+      BodyReader.new(conn, BodyReader::CHUNKED, 0_i64, MAX_BODY.to_i64, "", head.expects)
     elsif head.length > 0_i64
-      BodyReader.new(conn, BodyReader::LENGTH, head.length, MAX_BODY.to_i64, "", hello)
+      BodyReader.new(conn, BodyReader::LENGTH, head.length, MAX_BODY.to_i64, "", head.expects)
     else
       BodyReader.new(conn, BodyReader::EMPTY, 0_i64, MAX_BODY.to_i64)
     end

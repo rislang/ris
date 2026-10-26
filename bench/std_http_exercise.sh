@@ -3233,9 +3233,9 @@ mutate "a server that moves the rest of the read to a buffer of its own per requ
     @start = 0
     @start = @start + count'
 mutate "a client that reads a head for as long as it comes" 'conn.read_head(Server::MAX_HEAD, "response")' 'conn.read_head(2147483647, "response")'
-mutate "a server that never says 100 Continue" '    if head.expects
-      socket = conn.transport' '    if false
-      socket = conn.transport'
+mutate "a server that never says 100 Continue" '    return true unless @continue_pending
+    @continue_pending = false' '    return true
+    @continue_pending = false'
 mutate "a server whose tasks share the accept loop's variable" '          spawn_handler(g, client, handler, listener, idle, stream_bodies, compress, timeout_ms, tls, request_timeout_ms, slots)' '          accepted = client
           g.spawn do
             handle(accepted, handler)

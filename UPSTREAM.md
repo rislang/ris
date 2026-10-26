@@ -6,6 +6,10 @@ ris, take it to iyi with `git cherry-pick`; strike entries once merged.
 
 ## To take to iyi
 
+* HTTP 100-continue: store pending state in BodyReader and write through
+  its held connection, replacing the retained transport-capturing proc.
+  Preserve the first wait, at-most-once send and existing failure mapping.
+
 * Cleanup reads current receivers; recursive panic and task caps are fatal.
   Fault dispositions use stack storage; signal flags survive a full pipe.
 * CLI env specs: clear inherited `IYI_CACHE_DIR` when checking the Crystal

@@ -60,6 +60,8 @@ def main():
     run.add_argument("--no-gc", action="store_true")
     run.add_argument("--release", action="store_true")
     run.add_argument("source")
+    gate = sub.add_parser("gate", help="build and run a ris test script")
+    gate.add_argument("source")
     sub.add_parser("log", help="show the last snapshot's build and test logs")
     args = parser.parse_args()
     if args.action == "log":
@@ -72,15 +74,20 @@ def main():
             "tail -n 40 build.log; "
             'if [ -f test.log ]; then tail -n 40 test.log; fi')
         return
-    if args.action == "run":
+    if args.action in ("run", "gate"):
         source = (ROOT / args.source).resolve()
         try:
             relative = source.relative_to(ROOT).as_posix()
         except ValueError:
             parser.error("source must be inside this checkout")
-        if not source.is_file() or not relative.endswith(".ri") or not \
-                relative.startswith(("test/ris/", "samples/ris/")):
-            parser.error("source must be a .ri under test/ris or samples/ris")
+        if args.action == "run":
+            valid = relative.endswith(".ri") and relative.startswith(
+                ("test/ris/", "samples/ris/"))
+        else:
+            valid = relative.endswith((".sh", ".py")) and \
+                relative.startswith("test/ris/")
+        if not source.is_file() or not valid:
+            parser.error("run needs a ris test/sample; gate a ris test script")
     directory = snapshot()
     commit = subprocess.check_output(
         ["git", "rev-parse", "--short", "HEAD"], cwd=ROOT,
@@ -95,6 +102,9 @@ def main():
                "else cat build.log; exit 1; fi")
     if args.action == "check":
         test = "RIS_CHECK_JOBS=12 bash test/ris/check.sh"
+    elif args.action == "gate":
+        interpreter = "bash" if relative.endswith(".sh") else "python3"
+        test = shlex.join([interpreter, relative])
     elif args.action == "run":
         flags = []
         if args.no_gc:

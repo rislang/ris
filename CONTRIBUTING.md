@@ -33,6 +33,7 @@ with LLVM 23 and keeps the build and test logs on the server:
 ```sh
 bin/minitest-check build
 bin/minitest-check run --no-gc test/ris/class_copy.ri
+bin/minitest-check gate test/ris/http_continue.sh
 bin/minitest-check check
 bin/minitest-check log
 ```

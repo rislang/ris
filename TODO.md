@@ -22,7 +22,7 @@ How to work (fewer tokens, faster to the goal):
 ## Remaining tape semantics
 
 * Finish ordinary class tape allocation for std-defined migration classes:
-  migrate escaping TlsStream callbacks and log Metadata sharing first.
+  migrate TlsStream connection/body holders and log Metadata sharing.
   Unmarked runtime and std declarations still use the migration allocation
   ABI; selected std classes opt in with @[OnTape].
 * Stable growth on every supported tape target: replace moving backends

@@ -1,0 +1,146 @@
+# Pending 100-continue state owns no transport-capturing closure.
+@[Ffi]
+module test/ris/http_continue
+
+import std/socket::{IyiSocket}
+import std/http::{Server, Response, HTTPError, Conn, BodyReader}
+import std/tuple
+
+{% if flag?(:linux) %}
+lib ContinueSocket
+  fun setsockopt(fd : Int32, level : Int32, option : Int32,
+                 value : Void*, size : UInt32) : Int32
+end
+
+# A reset makes the interim write fail before a body read can run.
+def reset(socket : IyiSocket) : Nil
+  linger = {1, 0}
+  result = ContinueSocket.setsockopt(socket.fd, 1, 13,
+    pointerof(linger).as(Void*), 8_u32)
+  raise "setsockopt" unless result == 0
+  socket.close
+end
+{% end %}
+
+def read_to_close(socket : IyiSocket) : String
+  text = "".to_heap
+  while true
+    piece = socket.read(4096).or_panic
+    return text if piece.empty?
+    text = text + piece
+  end
+end
+
+def exchange(chunked : Bool, reset_peer : Bool = false,
+             cancel : Bool = false) : Nil
+  listener = IyiSocket.listen(0)
+  ready = Channel(Bool).new
+  proceed = Channel(Bool).new
+  passed = false
+  handler_fiber = nil
+  group do |g|
+    serving = g.spawn do
+      Server.serve(listener, stream_bodies: true) do |req|
+        defer listener.close
+        reader = req.body_io
+        if reset_peer
+          ready.send(true).or_panic
+          proceed.receive.or_panic
+        elsif cancel
+          handler_fiber = IyiScheduler.current
+        end
+        if reset_peer || cancel
+          fault = reader.read(1)
+          again = reader.read(1)
+          if reset_peer
+            expected = chunked ? "the connection failed before the body" :
+              "the body ended after 0 of its 3 bytes"
+            passed = fault.is_a?(HTTPError) && fault.reason == expected &&
+              again.is_a?(HTTPError) && again.reason == expected
+          else
+            passed = fault.is_a?(Cancelled) && again.is_a?(Cancelled)
+          end
+        else
+          first = reader.read(1).or_panic
+          ready.send(true).or_panic
+          rest = reader.read_all.or_panic
+          passed = first == "a" && rest == "bc" &&
+            reader.read(1).or_panic.empty?
+        end
+        Response.new(200, "ok")
+      end
+      0
+    end
+    client = IyiSocket.connect("127.0.0.1", listener.local_port).or_panic
+    client.read_timeout_ms = 5000
+    framing = chunked ? "Transfer-Encoding: chunked" : "Content-Length: 3"
+    head = "POST / HTTP/1.1\r\nHost: h\r\n#{framing}\r\n" +
+      "Expect: 100-continue\r\nConnection: close\r\n\r\n"
+    client.write(head).or_panic
+    if reset_peer
+      ready.receive.or_panic
+      {% if flag?(:linux) %}
+        reset(client)
+      {% end %}
+      proceed.send(true).or_panic
+    else
+      interim = "".to_heap
+      while interim.bytesize < 25
+        piece = client.read(25 - interim.bytesize).or_panic
+        raise "EOF before interim" if piece.empty?
+        interim = interim + piece
+      end
+      raise "interim" unless interim == "HTTP/1.1 100 Continue\r\n\r\n"
+      if cancel
+        if fiber = handler_fiber
+          IyiScheduler.cancel(fiber)
+        else
+          raise "missing handler"
+        end
+      else
+        client.write(chunked ? "1\r\na\r\n" : "a").or_panic
+        ready.receive.or_panic
+        client.write(chunked ? "2\r\nbc\r\n0\r\n\r\n" : "bc").or_panic
+      end
+      reply = read_to_close(client)
+      raise "repeated or early interim" if reply.includes?("100 Continue")
+      unless cancel
+        raise "answer" unless reply.starts_with?("HTTP/1.1 200 OK\r\n")
+      end
+      client.close
+    end
+    serving.value.or_panic
+  end
+  raise "body or sticky failure: chunked=#{chunked}, reset=#{reset_peer}, cancel=#{cancel}" unless passed
+end
+
+# The test wrapper exports Conn in a private module copy, so buffering is
+# established before construction rather than assumed from TCP packet size.
+def buffered_body(chunked : Bool) : Nil
+  listener = IyiSocket.listen(0)
+  client = IyiSocket.connect("127.0.0.1", listener.local_port).or_panic
+  server = listener.accept.or_panic
+  body = chunked ? "1\r\na\r\n2\r\nbc\r\n0\r\n\r\n" : "abc"
+  client.write(body).or_panic
+  conn = Conn.new(server)
+  while conn.available < body.bytesize
+    raise "buffer fill" unless conn.fill
+  end
+  kind = chunked ? BodyReader::CHUNKED : BodyReader::LENGTH
+  reader = BodyReader.new(conn, kind, 3_i64, 100_i64, "", true)
+  raise "buffered body" unless reader.read_all.or_panic == "abc"
+  server.close
+  raise "early interim" unless read_to_close(client).empty?
+  client.close
+  listener.close
+end
+
+{false, true}.each do |chunked|
+  exchange(chunked)
+  buffered_body(chunked)
+  exchange(chunked, cancel: true)
+  {% if flag?(:linux) %}
+    exchange(chunked, reset_peer: true)
+  {% end %}
+end
+puts "PASS: pending continue, buffering, framing, failure and cancellation"
