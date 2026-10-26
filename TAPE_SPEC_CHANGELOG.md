@@ -4,6 +4,12 @@ Every change to TAPE_SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one.
 
+## 2026-10-26: 5.2 no longer cites TODO 7
+
+* Changed: 5.2's tape messages "come with TODO 7" now say they are open
+  work in TODO.md.
+* Why: TODO.md dropped its numbered steps; the item is now named there.
+
 ## 2026-10-26: the cassette metaphor
 
 * Added: the opening lines name the tape as a half-joking cassette

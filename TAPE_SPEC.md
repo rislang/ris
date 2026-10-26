@@ -90,9 +90,9 @@ rule goes last in its section; a removed one leaves its number unused.
   has no freeze.
 * 5.2 Messages use iyi's Channel and select, ChannelClosed and Cancelled
   (III.4), and carry only Share values, no tape values. Tape messages (owner
-  while queued, copy, release on close) come with TODO 7. Queues, task records
-  and wait nodes live in runtime typed pools; a buffered queue is bounded and
-  send reports full. A failed receive keeps the message.
+  while queued, copy, release on close) are open work in TODO.md. Queues,
+  task records and wait nodes live in runtime typed pools; a buffered queue is
+  bounded and send reports full. A failed receive keeps the message.
 * 5.3 Callbacks borrow their environment for the call only; an escaping closure
   copies captures to a named owner or task pool, never a borrow. Thread-locals
   hold no fiber borrows.

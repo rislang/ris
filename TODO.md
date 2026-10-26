@@ -23,10 +23,17 @@ How to work (fewer tokens, faster to the goal):
 
 * Ordinary class `new` on the active tape; check reference lifetimes and
   refuse finalize. Existing copy_to must also handle these instances.
-* Stable growth from the first published element: remove the initial
-  copying transfer in IyiRegion.tape_resize. Reserve each growing value's
-  own address space; test views held before its first growth, with zero
-  side transfers and growth moves (TAPE_SPEC 2.2; Goose §1.2, §10.4).
+* SlicePool(T) minimum: typed runs, alloc/free/realloc, checked bounds
+  and membership (TAPE_SPEC 6.1-6.3, Goose §5.4); the safe form 2.2 names.
+* Refuse runtime-sized collections of growing values (Ary of Ary/Builder,
+  growing fields in Ary elements), naming SlicePool (TAPE_SPEC 2.2). This
+  bounds how many growing values live at once, which reservations need.
+* Stable growth from the first published element, after the two above:
+  remove the copying transfer in IyiRegion.tape_resize; each growing value
+  reserves its own address space (TAPE_SPEC 2.2; Goose §1.2, §10.3-10.4).
+  A first try reserving 1 GiB per value at construction failed: query's
+  mapping and copy_deep's 100,000 nested arrays. Test views held before
+  first growth, zero transfers, bounded mappings in serve and respond.
 * Stable growth on every supported tape target: replace moving backends
   outside Linux with address-space reservations and equivalent gates.
 * Escaping closures outside program and joined task owners: pooled
@@ -34,6 +41,11 @@ How to work (fewer tokens, faster to the goal):
   owner, check capture lifetimes and refuse unsupported escapes safely.
 * Validate typed pools as they enter use: bounds, overflow, membership,
   stale views and reset lifetimes (TAPE_SPEC 6.1-6.4).
+* Concurrency storage (TAPE_SPEC 5.2): task records, wait nodes and
+  queues in runtime typed pools; a buffered queue is bounded and send
+  reports full; a failed receive keeps the message.
+* Tape messages on channels (TAPE_SPEC 5.2): the queue owns a
+  queued tape value, receive copies it to the receiver, close releases.
 * For FFI paths in use, enforce borrow lifetimes, retained-storage owners,
   foreign-thread attachment and no unwind across foreign frames.
 
@@ -44,8 +56,8 @@ How to work (fewer tokens, faster to the goal):
 * Remove general allocator fallbacks from ris programs. Distinguish
   gc_none's allocator behavior from ris_no_gc's allocation trap; audit
   remaining std and runtime paths required by supported workloads.
-* Gate repeated server use under --no-gc, including the full serve loop,
-  task cleanup and reused storage; one request is insufficient evidence.
+* Gate repeated server use under --no-gc beyond the full serve loop
+  (passes): task cleanup and reused storage across groups.
 * Define supported no-GC targets and gate each one; unsupported targets
   must fail explicitly rather than silently select a heap fallback.
 * Audit final program binaries for collector linkage and forbidden heap
