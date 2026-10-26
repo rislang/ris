@@ -75,23 +75,23 @@ class Iyi::Program
 
     @progress_tracker.stage("Semantic (tape check)") do
       Prof.span("tape check") do
-        IntegerTextDivisionChecker.new(self).run(result)
-        TapeChecker.new(self).run
-        tape_graph = TapeCallGraph.new(self, result)
-        TapeOwnerChecker.new(self, tape_graph).run(result)
-        TapeProgramChecker.new(self, tape_graph).run(result)
+        Prof.span("tape: IntegerTextDivisionChecker") { IntegerTextDivisionChecker.new(self).run(result) }
+        Prof.span("tape: TapeChecker") { TapeChecker.new(self).run }
+        tape_graph = Prof.span("tape: call graph") { TapeCallGraph.new(self, result) }
+        Prof.span("tape: TapeOwnerChecker") { TapeOwnerChecker.new(self, tape_graph).run(result) }
+        Prof.span("tape: TapeProgramChecker") { TapeProgramChecker.new(self, tape_graph).run(result) }
         tape_shrink = TapeShrinkChecker.new(self, tape_graph)
-        tape_shrink.solve
-        TapeRecursionChecker.new(self, tape_graph).run(result)
-        result.accept TapeLifetimeChecker.new(self, tape_graph)
-        tape_shrink.run(result)
-        TapePointerChecker.new(self, tape_graph).run(result)
-        TapeEscapeChecker.new(self).run(result)
-        TapeScopeChecker.new(self, tape_graph).run(result)
-        TapeCheckFreeChecker.new(self).run(result)
-        TapeRefillChecker.new(self).run(result)
-        TapeStringParameterChecker.new(self).run(result)
-        TapeScannerHint.new(self).run(result)
+        Prof.span("tape: shrink solve") { tape_shrink.solve }
+        Prof.span("tape: TapeRecursionChecker") { TapeRecursionChecker.new(self, tape_graph).run(result) }
+        Prof.span("tape: TapeLifetimeChecker") { result.accept TapeLifetimeChecker.new(self, tape_graph) }
+        Prof.span("tape: shrink run") { tape_shrink.run(result) }
+        Prof.span("tape: TapePointerChecker") { TapePointerChecker.new(self, tape_graph).run(result) }
+        Prof.span("tape: TapeEscapeChecker") { TapeEscapeChecker.new(self).run(result) }
+        Prof.span("tape: TapeScopeChecker") { TapeScopeChecker.new(self, tape_graph).run(result) }
+        Prof.span("tape: TapeCheckFreeChecker") { TapeCheckFreeChecker.new(self).run(result) }
+        Prof.span("tape: TapeRefillChecker") { TapeRefillChecker.new(self).run(result) }
+        Prof.span("tape: TapeStringParameterChecker") { TapeStringParameterChecker.new(self).run(result) }
+        Prof.span("tape: TapeScannerHint") { TapeScannerHint.new(self).run(result) }
       end
     end
 

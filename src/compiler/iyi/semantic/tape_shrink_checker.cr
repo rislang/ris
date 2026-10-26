@@ -15,18 +15,40 @@ class Iyi::TapeShrinkChecker
   record Summary, seeds : Array(UInt64), shrinks : Hash(UInt64, String), result : Value,
     stores : Hash(UInt64, Value) = Hash(UInt64, Value).new,
     retains : Array(UInt64) = [] of UInt64
-  # Keep variable bindings separate from numeric storage identities.
-  record Env, vars = Hash(String, Value).new,
-    slots = Hash(UInt64, Value).new do
-    delegate :[], :[]?, :[]=, :keys, to: vars
+  # Snapshots share variable bindings until the first write. Slot maps
+  # remain independent: stores can replace or remove nested root paths.
+  class Env
+    getter vars : Hash(String, Value)
+    getter slots : Hash(UInt64, Value)
+    @shared : Bool
+    delegate :[], :[]?, :keys, to: vars
 
-    def dup
-      Env.new(vars.dup, slots.dup)
+    def initialize(@vars = Hash(String, Value).new,
+                   @slots = Hash(UInt64, Value).new, @shared = false)
     end
 
-    def clear
-      vars.clear
-      slots.clear
+    def []=(key : String, value : Value)
+      if @shared
+        @vars = @vars.dup
+        @shared = false
+      end
+      @vars[key] = value
+    end
+
+    def dup
+      @shared = true
+      Env.new(vars, slots.dup, true)
+    end
+
+    def replace(other : Env)
+      snapshot = other.dup
+      @vars = snapshot.vars
+      @shared = true
+      @slots = snapshot.slots
+    end
+
+    def ==(other : Env)
+      vars == other.vars && slots == other.slots
     end
   end
 
@@ -125,8 +147,8 @@ class Iyi::TapeShrinkChecker
       end.uniq
     end
     return [] of UInt64 unless seen.add?(type)
-    name = type.to_s
-    target = wanted.remove_typedef.to_s
+    name = type_name(type)
+    target = type_name(wanted.remove_typedef)
     compatible = name == target ||
                  ({"Str", "Str::Span"}.includes?(target) &&
                   {"Str::Builder", "Ary(UInt8)"}.includes?(name))
@@ -137,7 +159,7 @@ class Iyi::TapeShrinkChecker
        !storage_type?(type) && !{"Str", "Str::Span"}.includes?(name)
       type.instance_vars.each do |field, var|
         if field_type = var.type?
-          next if {"Str", "Str::Span"}.includes?(field_type.to_s)
+          next if {"Str", "Str::Span"}.includes?(type_name(field_type))
           next if field_type.is_a?(PointerInstanceType)
           result.concat(candidate_roots(field_root(root, field), field_type,
             wanted, seen.dup))
@@ -226,7 +248,7 @@ class Iyi::TapeShrinkChecker
     end
   end
 
-  private def value_holder?(type : Type?) : Bool
+  private def value_holder_uncached(type : Type?) : Bool
     return false unless type
     type = type.remove_typedef
     if type.is_a?(UnionType)
@@ -235,7 +257,7 @@ class Iyi::TapeShrinkChecker
     end
     type.struct? && TapeChecker.tape?(@program, type) &&
       !TapeOwnerChecker.owner?(@program, type) && !storage_type?(type) &&
-      !{"Str", "Str::Span"}.includes?(type.to_s)
+      !{"Str", "Str::Span"}.includes?(type_name(type))
   end
 
   private def source_roots(v : Value) : Array(UInt64)
@@ -541,12 +563,55 @@ class Iyi::TapeShrinkChecker
     end
   end
 
+  # Types are fixed after semantic cleanup; classify each identity once.
+  @type_names = Hash(Type, String).new
+
+  private def type_name(type : Type) : String
+    @type_names[type] ||= type.to_s
+  end
+
+  @storage_type_cache = Hash(Type, Bool).new
+
+  private def storage_type?(type : Type?) : Bool
+    return storage_type_uncached(type) unless type
+    @storage_type_cache.fetch(type) do
+      @storage_type_cache[type] = storage_type_uncached(type)
+    end
+  end
+
+  @reference_type_cache = Hash(Type, Bool).new
+
+  private def reference_type?(type : Type?) : Bool
+    return reference_type_uncached(type) unless type
+    @reference_type_cache.fetch(type) do
+      @reference_type_cache[type] = reference_type_uncached(type)
+    end
+  end
+
+  @value_holder_cache = Hash(Type, Bool).new
+
+  private def value_holder?(type : Type?) : Bool
+    return value_holder_uncached(type) unless type
+    @value_holder_cache.fetch(type) do
+      @value_holder_cache[type] = value_holder_uncached(type)
+    end
+  end
+
+  @proc_type_cache = Hash(Type, Bool).new
+
+  private def proc_type?(type : Type?) : Bool
+    return proc_type_uncached(type) unless type
+    @proc_type_cache.fetch(type) do
+      @proc_type_cache[type] = proc_type_uncached(type)
+    end
+  end
+
   private def storage?(node : ASTNode) : Bool
     storage_type?(node.type?)
   end
 
-  private def storage_type?(type : Type?) : Bool
-    name = type.try(&.remove_typedef.to_s) || ""
+  private def storage_type_uncached(type : Type?) : Bool
+    name = type.try { |t| type_name(t.remove_typedef) } || ""
     name == "Str::Builder" || name.starts_with?("Ary(") || name.starts_with?("Tre(")
   end
 
@@ -554,10 +619,10 @@ class Iyi::TapeShrinkChecker
     reference_type?(node.type?)
   end
 
-  private def reference_type?(type : Type?) : Bool
+  private def reference_type_uncached(type : Type?) : Bool
     return true if storage_type?(type)
     return false unless type
-    name = type.remove_typedef.to_s
+    name = type_name(type.remove_typedef)
     name == "Str" || name == "Str::Span" || name.starts_with?("Ary::Link(") || name.includes?("View(") || name.includes?("Iterator") ||
       name.starts_with?("Pointer(") || !!TapeChecker.tape_in(@program, type)
   end
@@ -629,7 +694,7 @@ class Iyi::TapeShrinkChecker
     @uses << Use.new(v.views, node, @guards.dup)
   end
 
-  private def proc_type?(type : Type?) : Bool
+  private def proc_type_uncached(type : Type?) : Bool
     return false unless type
     type = type.remove_typedef
     return type.union_types.any? { |member| proc_type?(member) } if type.is_a?(UnionType)
@@ -699,7 +764,7 @@ class Iyi::TapeShrinkChecker
       if node.name == "new"
         # Ordinary tape allocations use the caller's tape. A named Owner
         # has its own lexical storage, including each of its field paths.
-        @root_scopes[node.object_id] = storage?(node) || {"Str", "Str::Span"}.includes?(node.type.to_s) ? [] of UInt64 : @scopes.dup
+        @root_scopes[node.object_id] = storage?(node) || {"Str", "Str::Span"}.includes?(type_name(node.type)) ? [] of UInt64 : @scopes.dup
         @root_types[node.object_id] = node.type
         @root_births[node.object_id] = @uses.size
       end
@@ -727,7 +792,7 @@ class Iyi::TapeShrinkChecker
         end
       end
       element_result : Value? = nil
-      if node.obj.try(&.type?.try(&.to_s.starts_with?("Ary("))) &&
+      if node.obj.try { |obj| obj.type?.try { |t| type_name(t).starts_with?("Ary(") } } &&
          {"[]", "[]?", "first", "first?", "last", "last?", "fetch", "__loop_fetch"}.includes?(node.name)
         elements = receiver.roots.map { |r| field_root(r, "[]").as(UInt64) }
         if !elements.empty? && elements.all? { |r| env.slots.has_key?(r) }
@@ -818,9 +883,7 @@ class Iyi::TapeShrinkChecker
           after_calls = after_calls.try { |previous| join_env(previous, call_env) } || call_env
         end
         if joined = after_calls
-          env.clear
-          joined.vars.each { |key, contents| env[key] = contents }
-          joined.slots.each { |key, contents| env.slots[key] = contents }
+          env.replace(joined)
         end
       elsif !TapeRules.runtime?(@program, node.location)
         inputs.each do |v|
@@ -876,7 +939,7 @@ class Iyi::TapeShrinkChecker
       end
       if {"copy_to", "dup", "to_heap", "new"}.includes?(node.name)
         if reference?(node)
-          @root_scopes[node.object_id] = storage?(node) || {"Str", "Str::Span"}.includes?(node.type.to_s) ? [] of UInt64 : @scopes.dup
+          @root_scopes[node.object_id] = storage?(node) || {"Str", "Str::Span"}.includes?(type_name(node.type)) ? [] of UInt64 : @scopes.dup
           Value.new([node.object_id], [] of View)
         else
           EMPTY
