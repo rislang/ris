@@ -16,12 +16,6 @@ if [ -z "${RIS_CHECK_SERIAL:-}" ]; then
   exec python3 test/ris/check_parallel.py
 fi
 
-# The heap workloads build every sample in release mode, the slowest gate:
-# start them now beside the other checks and collect them at the end.
-heap_log=$(mktemp)
-python3 test/ris/heap_check.py >"$heap_log" 2>&1 &
-heap_pid=$!
-
 expect() {
   local name=$1 needle=$2 out
   out=$("$RIS" build --no-codegen "test/ris/refused/$name.ri" 2>&1)
@@ -1226,9 +1220,9 @@ else
   status=1
 fi
 
-wait "$heap_pid" || status=1
-cat "$heap_log"
-rm -f "$heap_log"
+# Run heap workloads after the other gates to avoid compiler contention.
+# Keep their fixed timeouts: a hung census must still fail.
+python3 test/ris/heap_check.py || status=1
 
 if [ "$status" -eq 0 ]; then
   echo "PASS: all ris checks"

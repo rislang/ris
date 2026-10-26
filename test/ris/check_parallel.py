@@ -4,8 +4,9 @@
 check.sh stays the one list of checks. Its header (settings and the
 expect helper) runs before each block; the blocks are its top-level
 statements (see split), so a block must not read a variable
-another block set. heap_check.py runs as one more job. Each job gets its
-own TMPDIR. RIS_CHECK_SERIAL=1 bash test/ris/check.sh runs it in order.
+another block set. heap_check.py runs after all parallel jobs finish.
+Each job gets its own TMPDIR.
+RIS_CHECK_SERIAL=1 bash test/ris/check.sh runs it in order.
 """
 import concurrent.futures
 import os
@@ -21,12 +22,10 @@ SCRIPT = ROOT / "test/ris/check.sh"
 def split():
     lines = SCRIPT.read_text().splitlines()
     end = lines.index("}") + 1  # the expect helper closes the header
-    # Drop the cd (jobs run in ROOT) and the serial run's heap start.
-    first = lines.index("heap_log=$(mktemp)")
-    last = lines.index("heap_pid=$!")
-    header = [l for i, l in enumerate(lines[:end])
-              if not l.startswith("cd ") and not first <= i <= last]
-    stop = lines.index('wait "$heap_pid" || status=1')
+    # Drop the cd: jobs run in ROOT. The heap gate stays outside the pool.
+    header = [line for line in lines[:end] if not line.startswith("cd ")]
+    stop = lines.index(
+        "# Run heap workloads after the other gates to avoid compiler contention.")
     # A block starts at a top-level comment, `out=$(`, `expect` or `for`
     # once every `if`/`for`/`while`/`case` and quote above it is closed.
     blocks, block, depth, quoted = [], [], 0, False
@@ -80,16 +79,18 @@ def main():
     workers = int(os.environ.get("RIS_CHECK_JOBS", os.cpu_count() or 1))
     with tempfile.TemporaryDirectory(prefix="ris-check-") as scratch:
         with concurrent.futures.ThreadPoolExecutor(workers) as pool:
-            # Start the slowest gate first.
-            heap_job = pool.submit(heap, scratch)
             jobs = [pool.submit(run, header, block, scratch, index)
                     for index, block in enumerate(blocks)]
             status = 0
-            for job in jobs + [heap_job]:
+            for job in jobs:
                 code, out = job.result()
                 sys.stdout.write(out)
                 sys.stdout.flush()
                 status |= code != 0
+        code, out = heap(scratch)
+        sys.stdout.write(out)
+        sys.stdout.flush()
+        status |= code != 0
     print("PASS: all ris checks" if status == 0 else "FAIL: ris checks")
     return status
 

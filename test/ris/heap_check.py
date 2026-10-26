@@ -24,8 +24,10 @@ def command(args, *, stats=False):
     env.pop("RIS_TAPE_STATS", None)
     if stats:
         env["RIS_HEAP_STATS"] = "1"
+    # A release build of a large sample takes minutes on a few cores while
+    # every sample builds at once; a hung compiler still fails.
     return subprocess.run([RIS, *args], capture_output=True, text=True,
-                          env=env, timeout=240)
+                          env=env, timeout=600)
 
 
 def measured(pattern, text):
