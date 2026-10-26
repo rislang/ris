@@ -1,0 +1,15 @@
+module test/ris/params_write_tape
+import std/uri::{Params}
+
+tape do
+  w = Str::Builder.new(256)
+  w << "prefix:"
+  Params.parse("?q=caf%C3%A9+au+lait&x=%FF&x=%zz&empty=&bare".as_tape).to_s(w)
+  raise "serialization" unless w.finish == "prefix:q=caf%C3%A9+au+lait&x=%FF&x=%25zz&empty=&bare="
+  w.clear
+  Params.parse("".as_tape).to_s(w)
+  raise "empty" unless w.finish.empty?
+  Params.parse("=&a=%&b=%0&c=%GG&plus=%2B".as_tape).to_s(w)
+  raise "malformed input" unless w.finish == "=&a=%25&b=%250&c=%25GG&plus=%2B"
+end
+puts "Params serialization: zero heap"

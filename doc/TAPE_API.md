@@ -132,6 +132,23 @@ String messages wrap the borrowed API. A retaining or custom legacy
 backend copies a `TapeEntry` to a heap `Entry` at that boundary. Logger,
 context and backend setup still allocate; their ownership is TODO 5b/9.
 
+## HTTP heads and query serialization
+
+`std/http_head` isolates parsing from transport and clock setup. Its
+`HeadParser.parse_head(bytes : Str)` (also `Server.parse_head`) returns
+`ParsedHead | HeadError | Nil`.
+Head fields view the input; `HeadError.message` is a `Str` diagnostic on
+that same caller tape. The String overload copies at its legacy boundary.
+`Incoming.params` and `Params.parse(text : Str)` return a `Query` with
+decoded fields on the tape.
+
+`Query.to_s(writer)` and legacy `Params.to_s(writer)` append form data to
+the caller's builder, preserving duplicate keys and order. Parsing a
+malformed query escape keeps the literal percent byte; serialization
+escapes it. `URI.encode_www_form(text : Str, writer)` writes each encoded
+byte directly. Reserve up to three output bytes per input byte when
+sizing a builder. `Params.to_s` is a String wrapper around the writer.
+
 ## Published runtime limits
 `IyiRegion` starts tapes at 67,108,864 bytes (64 MiB),
 not a cap. Each mapping adds a 64-byte header and rounds to 65,536 bytes.

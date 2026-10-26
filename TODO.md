@@ -17,8 +17,13 @@ check.sh. Delete finished work in the same commit; keep check.sh green.
    64 bits, numeric builder appends and diagnostic quoting use tape
    writers; their String APIs wrap those writers. log_text and numeric
    success/error gates run with --no-gc, malformed UTF-8 included.
-   Remains: HTTP head diagnostics/params, JSON lexer/parser/writer
-   fallbacks, URI parsing/normalization/encoding, Params serialization,
+   http_head isolates parsing from transport/clock initialization. Head
+   diagnostics return Str; request params use Query views.
+   Query and legacy Params serialize into the caller's builder; form
+   encoding writes bytes directly. HTTP head and query serialization
+   success/error gates run with --no-gc, malformed input included.
+   Remains: URI parsing/normalization and non-form encoding APIs,
+   JSON lexer/parser/writer fallbacks,
    128-bit integer formatting, log registry/context/backend ownership,
    time/HTTP dependency initialization, report retention helpers.
    Gate: each migrated module has zero heap on success and error paths.

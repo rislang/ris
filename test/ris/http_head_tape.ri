@@ -1,0 +1,34 @@
+module test/ris/http_head_tape
+import std/http_head::{HeadParser, ParsedHead, HeadError, Incoming}
+
+def refused(text : Str, expected : Str) : Nil
+  error = HeadParser.parse_head(text)
+  raise "diagnostic" unless error.is_a?(HeadError) && error.message == expected
+end
+
+tape do
+  head = HeadParser.parse_head("GET /?q=hello+world&bad=%zz HTTP/1.1\r\nHost: x\r\n\r\n".as_tape)
+  raise "head" unless head.is_a?(ParsedHead)
+  req = Incoming.new(head.method, "/", "q=hello+world&bad=%zz", head.fields, "")
+  raise "params" unless req.params["q"]? == "hello world"
+  raise "malformed escape" unless req.params["bad"]? == "%zz"
+  raise "incomplete" unless HeadParser.parse_head("GET".as_tape).nil?
+  error = HeadParser.parse_head("bad\xff\r\n\r\n".as_tape)
+  raise "diagnostic" unless error.is_a?(HeadError) && error.message == "not a request line: \"bad\\xFF\""
+  error = HeadParser.parse_head("GET / HTTP/1.1\r\nHost: x\r\nHost: y\r\n\r\n".as_tape)
+  raise "duplicate host" unless error.is_a?(HeadError) && error.message == "Host on 2 lines"
+  refused("G@T / HTTP/1.1\r\n\r\n", "not a method: \"G@T\"")
+  refused("GET / HTTP/2\r\n\r\n", "not an HTTP/1 request: \"HTTP/2\"")
+  refused("GET  HTTP/1.1\r\n\r\n", "not a request target: \"\"")
+  refused("GET / HTTP/1.1\r\nOops\r\n\r\n", "header without a colon: \"Oops\"")
+  refused("GET / HTTP/1.1\r\nBad Name: x\r\n\r\n", "not a header name: \"Bad Name\"")
+  refused("GET / HTTP/1.1\r\nX: a\u0000\r\n\r\n", "header X contains a control character")
+  refused("GET / HTTP/1.1\r\nHost: a b\r\n\r\n", "not a host: \"a b\"")
+  refused("GET / HTTP/1.1\r\n\r\n", "an HTTP/1.1 request without Host")
+  error = HeadParser.parse_head(Str.build(HeadParser::MAX_HEAD + 1) do |w|
+    (HeadParser::MAX_HEAD + 1).times { w << "x" }
+  end)
+  raise "limit" unless error.is_a?(HeadError) && error.status == 431 && error.message == "request headers past 1048576 bytes"
+
+end
+puts "HTTP head: zero heap"

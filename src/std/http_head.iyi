@@ -1,0 +1,411 @@
+# Request head parsing without transport or clock initialization.
+module std/http_head
+
+import std/uri::{Query}
+
+# One field of a request head as it was written: its name, and its value
+# without the blanks around it. Both are views into the bytes the head was
+# read from, on the caller's tape.
+@[OnTape]
+pub struct Field
+  getter name : Str
+  getter value : Str
+
+  def initialize(@name : Str, @value : Str)
+  end
+end
+
+# A request head read where it lies (`Server.parse_head`): the request
+# line's parts and the fields, views into the caller's bytes, nothing
+# copied. The caller retains views with copy_to(owner).
+@[OnTape]
+pub struct ParsedHead
+  getter method : Str
+  getter target : Str
+  getter version : Str
+  getter fields : Ary(Field)
+  # Where the body starts in the bytes: just past the blank line.
+  getter body_start : Int32
+
+  def initialize(@method : Str, @target : Str, @version : Str, @fields : Ary(Field), @body_start : Int32)
+  end
+
+  def http10? : Bool
+    @version == "HTTP/1.0"
+  end
+
+  # Each field as the heap strings a caller keeps: its name as first
+  # spelled, and the values of all its lines joined with ", " (RFC 9110
+  # §5.3), in one string. A head has a few fields, so a repeat is looked
+  # for among them rather than through a table.
+  def each_heap_field(& : String, String -> Nil) : Nil
+    i = 0
+    while i < @fields.size
+      yield @fields[i].name.to_heap, joined_value(i) unless repeated?(i)
+      i = i + 1
+    end
+  end
+
+  # The body's length as `Content-Length` says it, read where it lies: 0
+  # without the field, nil when it is not one length (RFC 9110 §8.6:
+  # digits and nothing else; each line, and each value of a list, the
+  # same). Past 2147483647 it is one past that, too large for any body.
+  def content_length : Int64?
+    found = -1_i64
+    i = 0
+    while i < @fields.size
+      f = @fields[i]
+      if HeadParser.same_name?(f.name, "Content-Length")
+        p = f.value
+        size = f.value.bytesize
+        at = 0
+        while at <= size
+          stop = HeadParser.byte_in(p, at, size, 44_u8)
+          first = at
+          last = stop
+          while first < last && (p[first] == 32_u8 || p[first] == 9_u8)
+            first = first + 1
+          end
+          while last > first && (p[last - 1] == 32_u8 || p[last - 1] == 9_u8)
+            last = last - 1
+          end
+          return nil if first == last
+          n = 0_i64
+          k = first
+          while k < last
+            return nil unless p[k] >= 48_u8 && p[k] <= 57_u8
+            n = n * 10_i64 + (p[k] - 48_u8).to_i64 if n <= 2147483647_i64
+            k = k + 1
+          end
+          n = 2147483648_i64 if n > 2147483647_i64
+          return nil if found >= 0 && n != found
+          found = n
+          at = stop + 1
+        end
+      end
+      i = i + 1
+    end
+    found < 0 ? 0_i64 : found
+  end
+
+  # The value of the first field called *name*, in any case.
+  def field(name : String | Str) : Str?
+    i = 0
+    while i < @fields.size
+      f = @fields[i]
+      return f.value if HeadParser.same_name?(f.name, name)
+      i = i + 1
+    end
+    nil
+  end
+
+  # The value of the field at *index*, and of each later one of its name,
+  # joined with ", " in one string: joined one by one, a head of many lines
+  # of one field cost the square of its size.
+  @[TapeToHeap]
+  private def joined_value(index : Int32) : String
+    name = @fields[index].name
+    total = @fields[index].value.bytesize
+    lines = 1
+    k = index + 1
+    while k < @fields.size
+      if same_field?(@fields[k].name, name)
+        total = total + 2 + @fields[k].value.bytesize
+        lines = lines + 1
+      end
+      k = k + 1
+    end
+    return @fields[index].value.to_heap if lines == 1
+    String.new(total) do |buffer|
+      first = @fields[index].value
+      j = 0
+      while j < first.bytesize
+        buffer[j] = first[j]
+        j = j + 1
+      end
+      at = first.bytesize
+      k = index + 1
+      while k < @fields.size
+        if same_field?(@fields[k].name, name)
+          value = @fields[k].value
+          buffer[at] = 44_u8
+          buffer[at + 1] = 32_u8
+          j = 0
+          while j < value.bytesize
+            buffer[at + 2 + j] = value[j]
+            j = j + 1
+          end
+          at = at + 2 + value.bytesize
+        end
+        k = k + 1
+      end
+    end
+  end
+
+  # Whether a field before *index* has the name of the one at *index*.
+  private def repeated?(index : Int32) : Bool
+    name = @fields[index].name
+    j = 0
+    while j < index
+      return true if same_field?(@fields[j].name, name)
+      j = j + 1
+    end
+    false
+  end
+
+  private def same_field?(a : Str, b : Str) : Bool
+    return false unless a.bytesize == b.bytesize
+    pa = a
+    pb = b
+    i = 0
+    while i < a.bytesize
+      ca = pa[i]
+      cb = pb[i]
+      ca = ca + 32_u8 if ca >= 65_u8 && ca <= 90_u8
+      cb = cb + 32_u8 if cb >= 65_u8 && cb <= 90_u8
+      return false unless ca == cb
+      i = i + 1
+    end
+    true
+  end
+end
+
+# A request as `Server.answer`'s block is handed it: views into the bytes
+# that arrived, on the request's tape, nothing copied. `to_s` copies what
+# the block keeps past its answer.
+@[OnTape]
+pub struct Incoming
+  getter method : Str
+  getter path : Str
+  getter query : Str?
+  getter fields : Ary(Field)
+  getter body : Str
+
+  def initialize(@method : Str, @path : Str, @query : Str?, @fields : Ary(Field), @body : Str)
+  end
+
+  # The value of the first field called *name*, in any case.
+  def header(name : String | Str) : Str?
+    i = 0
+    while i < @fields.size
+      f = @fields[i]
+      return f.value if HeadParser.same_name?(f.name, name)
+      i = i + 1
+    end
+    nil
+  end
+
+  # The query's parameters, read on the request's tape (`Query.parse`).
+  def params : Query
+    q = @query
+    Query.parse(q ? q : @path[0, 0])
+  end
+end
+
+# Why a head is refused, and the status that answers it: 431 for a head
+# past `Server::MAX_HEAD`, 400 otherwise.
+@[OnTape]
+pub struct HeadError
+  getter message : Str
+  getter status : Int32
+
+  def initialize(@message : Str, @status : Int32 = 400)
+  end
+end
+
+pub struct HeadParser
+  MAX_HEAD = 1048576
+
+  # A request head at *from* in *bytes*, read on the caller's tape: nil
+  # until the blank line that ends it has arrived. The parts and fields are
+  # views into *bytes*; temporaries go on the caller's `tape`.
+  def self.parse_head(
+    bytes : Str, from : Int32 = 0, complete : Bool = false,
+  ) : ParsedHead | HeadError | Nil
+    p = bytes
+    n = bytes.bytesize
+    # Past the empty lines a client may send before a request: RFC 9112
+    # §2.2 has a server ignore them. Some clients end a body with an extra
+    # CRLF, and the request after it on the connection was answered 400
+    # "not a request line" and closed.
+    while from + 1 < n && p[from] == 13_u8 && p[from + 1] == 10_u8
+      from = from + 2
+    end
+    split_at = -1
+    i = from
+    while i + 3 < n
+      if p[i] == 13_u8 && p[i + 1] == 10_u8 && p[i + 2] == 13_u8 && p[i + 3] == 10_u8
+        split_at = i
+        break
+      end
+      i = i + 1
+    end
+    split_at = n if complete && split_at < 0
+    if split_at < 0
+      return HeadError.new(Str.build(64) { |w| w << "request headers past " << MAX_HEAD << " bytes" }, 431) if n - from > MAX_HEAD
+      return nil
+    end
+    return HeadError.new("empty request") if split_at == from
+    line_end = HeadParser.crlf_in(p, from, split_at)
+    sp1 = HeadParser.byte_in(p, from, line_end, 32_u8)
+    sp2 = sp1 < line_end ? HeadParser.byte_in(p, sp1 + 1, line_end, 32_u8) : line_end
+    if sp2 >= line_end
+      return head_error("not a request line: ", bytes[from, line_end - from])
+    end
+    method = bytes[from, sp1 - from]
+    target = bytes[sp1 + 1, sp2 - sp1 - 1]
+    version = bytes[sp2 + 1, line_end - sp2 - 1]
+    unless HeadParser.token?(method)
+      return head_error("not a method: ", method)
+    end
+    unless version == "HTTP/1.1" || version == "HTTP/1.0"
+      return head_error("not an HTTP/1 request: ", version)
+    end
+    # A control byte in the target - a bare CR, a NUL - is not part of any
+    # URI (RFC 9112 §2.2, §3.2); passed on, a query with a line break in it
+    # broke the answer of a block that echoed it into a header.
+    if target.bytesize == 0 || HeadParser.control?(target)
+      return head_error("not a request target: ", target)
+    end
+    # Reserve all field slots before publishing any input views.
+    capacity = 0
+    at = line_end + 2
+    while at < split_at
+      capacity += 1
+      at = HeadParser.crlf_in(p, at, split_at) + 2
+    end
+    fields = Ary(Field).new(capacity)
+    hosts = 0
+    at = line_end + 2
+    while at < split_at
+      stop = HeadParser.crlf_in(p, at, split_at)
+      colon = HeadParser.byte_in(p, at, stop, 58_u8)
+      if colon >= stop
+        return head_error("header without a colon: ", bytes[at, stop - at])
+      end
+      unless HeadParser.token?(bytes[at, colon - at])
+        return head_error("not a header name: ", bytes[at, colon - at])
+      end
+      first = colon + 1
+      last = stop
+      while first < last && (p[first] == 32_u8 || p[first] == 9_u8)
+        first = first + 1
+      end
+      while last > first && (p[last - 1] == 32_u8 || p[last - 1] == 9_u8)
+        last = last - 1
+      end
+      name = bytes[at, colon - at]
+      value = bytes[first, last - first]
+      if HeadParser.control?(value)
+        return HeadError.new(
+          Str.build(name.bytesize + 40) { |w| w << "header " << name << " contains a control character" })
+      end
+      # Host (RFC 9112 §3.2): an HTTP/1.1 request names one, no request
+      # names two, and what it names is a host; a server answers 400
+      # otherwise.
+      if HeadParser.same_name?(name, "Host")
+        hosts = hosts + 1
+        unless HeadParser.host?(value)
+          return head_error("not a host: ", value)
+        end
+      end
+      fields.push(Field.new(name, value))
+      at = stop + 2
+    end
+    return HeadError.new(Str.build(32) { |w| w << "Host on " << hosts << " lines" }) if hosts > 1
+    if hosts == 0 && version == "HTTP/1.1"
+      return HeadError.new("an HTTP/1.1 request without Host")
+    end
+    ParsedHead.new(method, target, version, fields, split_at + 4)
+  end
+
+  private def self.head_error(prefix : Str, text : Str) : HeadError
+    HeadError.new(Str.build(prefix.bytesize + text.bytesize * 4 + 16) do |w|
+      w << prefix
+      text.inspect(w)
+    end)
+  end
+
+  def self.same_name?(
+    pa : Str,
+    count : Int32,
+    b : String | Str,
+  ) : Bool
+    return false unless count == b.bytesize
+    pb = b.as_tape
+    i = 0
+    while i < count
+      ca = pa[i]
+      cb = pb[i]
+      ca = ca + 32_u8 if ca >= 65_u8 && ca <= 90_u8
+      cb = cb + 32_u8 if cb >= 65_u8 && cb <= 90_u8
+      return false unless ca == cb
+      i = i + 1
+    end
+    true
+  end
+
+  def self.token?(p : Str, count : Int32 = p.bytesize) : Bool
+    return false if count == 0
+    i = 0
+    while i < count
+      c = p[i]
+      letter = (c >= 65_u8 && c <= 90_u8) || (c >= 97_u8 && c <= 122_u8)
+      digit = c >= 48_u8 && c <= 57_u8
+      mark = c == 33_u8 || (c >= 35_u8 && c <= 39_u8) ||
+             c == 42_u8 || c == 43_u8 || c == 45_u8 || c == 46_u8 ||
+             c == 94_u8 || c == 95_u8 || c == 96_u8 ||
+             c == 124_u8 || c == 126_u8
+      return false unless letter || digit || mark
+      i = i + 1
+    end
+    true
+  end
+
+  def self.control?(p : Str, count : Int32 = p.bytesize) : Bool
+    i = 0
+    while i < count
+      return true if (p[i] < 32_u8 && p[i] != 9_u8) || p[i] == 127_u8
+      i = i + 1
+    end
+    false
+  end
+
+  def self.crlf_in(p : Str, from : Int32, stop : Int32) : Int32
+    i = from
+    while i + 1 < stop
+      return i if p[i] == 13_u8 && p[i + 1] == 10_u8
+      i = i + 1
+    end
+    stop
+  end
+
+  def self.byte_in(p : Str, from : Int32, stop : Int32, byte : UInt8) : Int32
+    i = from
+    while i < stop
+      return i if p[i] == byte
+      i = i + 1
+    end
+    stop
+  end
+
+  def self.host?(p : Str, count : Int32 = p.bytesize) : Bool
+    i = 0
+    while i < count
+      c = p[i]
+      letter = (c >= 65_u8 && c <= 90_u8) || (c >= 97_u8 && c <= 122_u8)
+      digit = c >= 48_u8 && c <= 57_u8
+      # ! $ % & ' ( ) * + , - . : ; = [ ] _ ~
+      mark = c == 33_u8 || (c >= 36_u8 && c <= 46_u8) ||
+             c == 58_u8 || c == 59_u8 ||
+             c == 61_u8 || c == 91_u8 || c == 93_u8 || c == 95_u8 || c == 126_u8
+      return false unless letter || digit || mark
+      i = i + 1
+    end
+    true
+  end
+
+  def self.same_name?(a : String | Str, b : String | Str) : Bool
+    same_name?(a.as_tape, a.bytesize, b)
+  end
+end

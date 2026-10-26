@@ -1,0 +1,24 @@
+module test/ris/http_head_legacy
+import std/http::{Server, HTTPError, ParsedHead}
+import std/uri::{Params}
+
+# The compatibility import must expose the moved type in signatures too.
+def target(head : ParsedHead) : Str
+  head.target
+end
+
+head = Server.parse_head("GET / HTTP/1.1\r\nHost: x\r\n".to_heap)
+raise "legacy head" unless !head.is_a?(HTTPError) && head.path == "/"
+error = Server.parse_head("bad\xff".to_heap)
+raise "legacy diagnostic" unless error.is_a?(HTTPError) && error.message == "HTTP: not a request line: \"bad\\xFF\""
+tape do
+  tape_head = Server.parse_head("GET / HTTP/1.1\r\nHost: x\r\n\r\n".as_tape)
+  raise "delegation" unless tape_head.is_a?(ParsedHead)
+  raise "re-export" unless target(tape_head) == "/"
+  params = Params.parse("q=a+b&x=%zz&x=%FF".to_heap)
+  w = Str::Builder.new(128)
+  params.to_s(w)
+  raise "legacy writer" unless w.finish == "q=a+b&x=%25zz&x=%FF"
+  raise "legacy string" unless params.to_s == w.finish
+end
+puts "HTTP and Params: legacy wrappers"

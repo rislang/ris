@@ -676,6 +676,26 @@ else
 fi
 
 
+# HTTP diagnostics and query serialization use the caller's tape.
+for name in http_head_tape params_write_tape; do
+  out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc "test/ris/$name.ri" 2>&1)
+  if [ "$?" -eq 0 ] &&
+      grep -qF 'zero heap' <<<"$out" &&
+      grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+    echo "runs     $name (--no-gc)"
+  else
+    echo "FAILED   $name: $out"; status=1
+  fi
+done
+
+out=$("$RIS" run test/ris/http_head_legacy.ri 2>&1)
+if [ "$?" -eq 0 ] &&
+    [ "$out" = 'HTTP and Params: legacy wrappers' ]; then
+  echo "runs     http_head_legacy"
+else
+  echo "FAILED   http_head_legacy: $out"; status=1
+fi
+
 # Log text, numeric formatting and quoting use the caller's tape.
 out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc \
   test/ris/text_format_tape.ri 2>&1)

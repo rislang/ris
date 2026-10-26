@@ -164,6 +164,11 @@ pub struct Params
   # Never a panic - the query is whatever a client sent, and `?q=100%`
   # is what browsers send for "100%". `URI.decode` stays strict: it is
   # asked of text a program made.
+  # Tape input returns the tape collection, with views where possible.
+  def self.parse(query : Str) : Query
+    Query.parse(query)
+  end
+
   def self.parse(query : String) : Params
     params = Params.new
     tape do
@@ -173,16 +178,28 @@ pub struct Params
   end
 
   # Encodes parameters to application/x-www-form-urlencoded string.
+  @[TapeToHeap]
   def to_s : String
-    parts = [] of String
-    i = 0
-    while i < @keys.size
-      k_enc = URI.encode_www_form(@keys[i])
-      v_enc = URI.encode_www_form(@values[i])
-      parts << (k_enc + "=" + v_enc)
-      i = i + 1
+    capacity = 0
+    each do |key, value|
+      capacity += (key.bytesize + value.bytesize) * 3 + 2
     end
-    parts.join("&")
+    result = ""
+    tape do
+      result = Str.build(capacity) { |w| to_s(w) }.to_heap
+    end
+    result
+  end
+
+  def to_s(writer : Str::Builder) : Nil
+    i = 0
+    each do |key, value|
+      writer << "&" if i > 0
+      URI.encode_www_form(key.as_tape, writer)
+      writer << "="
+      URI.encode_www_form(value.as_tape, writer)
+      i += 1
+    end
   end
 end
 
@@ -282,6 +299,18 @@ pub struct Query
       i += 1
     end
     nil
+  end
+
+  # Serialize directly into the caller's output, preserving pair order.
+  def to_s(writer : Str::Builder) : Nil
+    i = 0
+    each do |key, value|
+      writer << "&" if i > 0
+      URI.encode_www_form(key, writer)
+      writer << "="
+      URI.encode_www_form(value, writer)
+      i += 1
+    end
   end
 
   # Each name and value, in order.
@@ -640,27 +669,33 @@ pub class URI
   end
 
   private def self.percent_encode(str : String, level : Int32, space_to_plus : Bool) : String
-    bytes = [] of UInt8
-    raw = str.to_unsafe
-    len = str.bytesize
-    i = 0
-    while i < len
-      b = raw[i]
-      if b == 32_u8 && space_to_plus
-        bytes << 43_u8 # '+'
-      elsif keep?(b, level) && !(b == 43_u8 && space_to_plus)
-        bytes << b
-      else
-        bytes << 37_u8 # '%'
-        bytes << hex_char((b.to_i >> 4) & 0xF)
-        bytes << hex_char(b.to_i & 0xF)
-      end
-      i = i + 1
+    result = ""
+    tape do
+      result = Str.build(str.bytesize * 3) do |w|
+        percent_encode(str.as_tape, w, level, space_to_plus)
+      end.to_heap
     end
+    result
+  end
 
-    String.new(bytes.size) do |buf|
-      buf.copy_from(bytes.to_unsafe, bytes.size)
+  private def self.percent_encode(str : Str, writer : Str::Builder,
+                                 level : Int32, space_to_plus : Bool) : Nil
+    str.each_byte do |b|
+      if b == 32_u8 && space_to_plus
+        writer.push(43_u8)
+      elsif keep?(b, level) && !(b == 43_u8 && space_to_plus)
+        writer.push(b)
+      else
+        writer.push(37_u8)
+        writer.push(hex_char((b.to_i >> 4) & 0xF))
+        writer.push(hex_char(b.to_i & 0xF))
+      end
     end
+  end
+
+  def self.encode_www_form(str : Str, writer : Str::Builder,
+                           space_to_plus : Bool = true) : Nil
+    percent_encode(str, writer, 2, space_to_plus)
   end
 
   # Percent-encodes every byte that is neither unreserved nor reserved,
