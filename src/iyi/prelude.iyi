@@ -9760,6 +9760,31 @@ private def __iyi_say(text : String | Str) : Nil
   end
 end
 
+# A panic must reach its defers under --no-gc too. Format the source line
+# on the stack rather than allocating a String before cleanup can run.
+private def __iyi_say(line : Int32) : Nil
+  bytes = uninitialized UInt8[12]
+  buffer = pointerof(bytes).as(UInt8*)
+  index = 12
+  value = line.to_i64
+  value = -value if value < 0
+  loop do
+    index = index - 1
+    buffer[index] = (48 + value % 10).to_u8
+    value = value // 10
+    break if value == 0
+  end
+  if line < 0
+    index = index - 1
+    buffer[index] = 45_u8
+  end
+  while index < 12
+    n = __iyi_write(2, (buffer + index).as(Void*), (12 - index).to_u64)
+    break if n <= 0_i64
+    index = index + n.to_i32
+  end
+end
+
 {% if flag?(:win32) %}
   # A Windows build names the library's files `...\src\std/x.iyi`, the
   # directory's separator the platform's and the module path's `/`, and
@@ -9823,7 +9848,7 @@ def raise(message : String | Str, file : String = __FILE__,
     __iyi_say("  at ")
     __iyi_say(file)
     __iyi_say(":")
-    __iyi_say(line.to_s)
+    __iyi_say(line)
     __iyi_say("\n")
   end
   {% if flag?(:darwin) %}

@@ -244,7 +244,7 @@ if [ "$?" -eq 0 ] &&
     grep -qF 'PASS: owner construction panic cleanup' <<<"$out" &&
     [ "$(grep -cF 'iyi: panic: expected owner construction panic' <<<"$out")" -eq 100 ] &&
     ! grep -qF 'half-built owner became observable' <<<"$out" &&
-    grep -qF '201 scopes, 6 mappings made, 0 unmapped' <<<"$out"; then
+    grep -qF '201 scopes, 5 mappings made, 0 unmapped' <<<"$out"; then
   echo "runs     owner_construction_panic (bounded scope cleanup)"
 else
   echo "FAILED   owner_construction_panic: $out"
@@ -453,6 +453,32 @@ out=$("$RIS" run test/ris/local_cleanup.ri 2>/dev/null)
 if [ "$out" = 'PASS: local panic cleanup and fiber switching' ]; then echo "runs     local_cleanup"; else echo "FAILED   local_cleanup: $out"; status=1; fi
 out=$("$RIS" run test/ris/cleanup_order.ri 2>&1)
 if [ "$out" = $'inner return\nouter return\n7\nnested\ninner break\nouter break\ninner return\nouter return\n7\ntrue\ntrue' ]; then echo "runs     cleanup_order"; else echo "FAILED   cleanup_order: $out"; status=1; fi
+# Captured defer locals stay off the heap on return and panic exits.
+out=$(
+  exec 2>&1
+  exe=$(mktemp)
+  if "$RIS" build --no-gc test/ris/defer_no_gc.ri -o "$exe"; then
+    "$exe" AGENTS.md 2>"$exe.err"
+    code=$?
+    if ! grep -qF 'iyi: panic: expected defer panic' "$exe.err" ||
+        ! grep -qE 'defer_no_gc.ri:[0-9]+$' "$exe.err" ||
+        grep -qF 'heap allocation' "$exe.err"; then
+      cat "$exe.err"
+      code=1
+    fi
+  else
+    code=1
+  fi
+  rm -f "$exe" "$exe.err"
+  exit "$code"
+)
+if [ "$?" -eq 0 ] &&
+    [ "$out" = $'1\nclosed\n2\nclosed\n3\nclosed\npanicked\nPASS: defer without GC' ]; then
+  echo "runs     defer_no_gc"
+else
+  echo "FAILED   defer_no_gc: $out"; status=1
+fi
+
 out=$("$RIS" run test/ris/cleanup_allocations.ri 2>&1)
 if [ "$out" = $'no GC allocation per scope\ntrue' ]; then echo "runs     cleanup_allocations"; else echo "FAILED   cleanup_allocations: $out"; status=1; fi
 out=$("$RIS" run test/ris/fibers/cleanup_panic.ri 2>/dev/null)

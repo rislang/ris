@@ -6,6 +6,10 @@ ris, take it to iyi with `git cherry-pick`; strike entries once merged.
 
 ## To take to iyi
 
+* Stack-allocate capture environments used only by defer callbacks;
+  retain escaping storage when ordinary closures share the captures.
+* Panic source-line diagnostics use a stack buffer so formatting cannot
+  allocate before defer cleanup runs under --no-gc.
 * HTTP 100-continue: store pending state in BodyReader and write through
   its held connection, replacing the retained transport-capturing proc.
   Preserve the first wait, at-most-once send and existing failure mapping.

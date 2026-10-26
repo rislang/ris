@@ -2584,7 +2584,11 @@ module Iyi
         source = closure_vars.compact_map do |var|
           var.local_vars.first?.try(&.location)
         end.first?
-        closure_ptr = if current_context.closure_owner != 0
+        # Defer callbacks finish before this frame returns, including the
+        # panic walk. Mixed captures must retain their escaping lifetime.
+        closure_ptr = if !self_closured && closure_vars.all?(&.iyi_defer_only?)
+                        alloca closure_type
+                      elsif current_context.closure_owner != 0
                         ris_environment_malloc(closure_type, current_context.closure_owner)
                       else
                         closure_has_inner_pointers ? malloc(closure_type, source) : malloc_atomic(closure_type, source)

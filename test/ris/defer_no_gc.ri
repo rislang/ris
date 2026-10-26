@@ -1,0 +1,26 @@
+module test/ris/defer_no_gc
+import std/file
+import std/int
+
+def captured(path : Str, mode : Int32) : Nil
+  io = File.open(path, owner: Program.tape)
+  value = 0
+  # The callbacks must see the current locals, run once, and run in LIFO
+  # order. Closing the captured file must precede the deferred reads.
+  defer puts(io.closed? ? "closed" : "OPEN")
+  defer puts value
+  defer io.close
+  value = mode
+  return if mode == 2
+  # A static String needs no heap copy when the task retains its panic.
+  message : String = "expected defer panic"
+  raise message if mode == 3
+end
+
+captured(Program.arguments[0], 1)
+captured(Program.arguments[0], 2)
+group do |g|
+  task = g.spawn { captured(Program.arguments[0], 3) }
+  puts(task.value.is_a?(Panicked) ? "panicked" : "RETURNED")
+end
+puts "PASS: defer without GC"
