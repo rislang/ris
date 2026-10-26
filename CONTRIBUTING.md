@@ -26,9 +26,19 @@ Run the relevant program or spec first. For tape rules, add an accepted
 example in `test/ris/` and a rejected example in `test/ris/refused/` when
 applicable; each refusal must name the safe replacement.
 
+Run larger builds and test suites on the `minitest` server. The helper
+sends tracked and unignored files to an isolated source snapshot, builds
+with LLVM 23 and keeps the build and test logs on the server:
+
 ```sh
-bash test/ris/check.sh
+bin/minitest-check build
+bin/minitest-check run --no-gc test/ris/class_copy.ri
+bin/minitest-check check
+bin/minitest-check log
 ```
+
+Use the same helper in agent tasks so one saved command permission covers
+the workflow. It uses the existing `ssh minitest` connection.
 
 For compiler or inherited runtime changes, run the relevant Crystal specs;
 `make compiler_spec`, `make primitives_spec` and `make std_spec` run the

@@ -4,6 +4,15 @@ ris is iyi plus Goose's tape memory. These rules are for every agent.
 
 ## Agent first
 
+* Keep authorized work moving until its agreed stopping point. A status
+  question, clarification or related setup task does not stop the main
+  task: answer briefly, then resume it in the same turn.
+* When managing another agent, collect its result, review and verify it,
+  commit when authorized, then assign the agreed next TODO. Do not leave
+  completed agent work waiting merely because a status reply was sent.
+* Report whether work is running, blocked or complete. Do not imply that
+  work continues after ending a turn unless an agent or process is
+  actually running. Stop early only on a real blocker or the user's order.
 * ris is made for the agent that writes a user's program: a choice is
   judged first by how well that agent works with it, so the code it writes
   is fast and safe without extra effort.
@@ -75,6 +84,7 @@ on one tape.
 
 ## Length and commits
 
-* Every dokument line is at most 80 characters: documents, commit messages, help text.
+* Every dokument line is at most 80 characters: documents, commit
+  messages, help text.
 * No `Co-Authored-By` or other AI attribution lines in commits: most work
   is done with agents, so the line is noise. A clear subject, a short body.

@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+"""Build and test the current checkout on minitest, in an isolated snapshot."""
+
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import shlex
+import subprocess
+import tarfile
+import tempfile
+
+
+ROOT = Path(__file__).resolve().parents[1]
+STATE = ROOT / ".build" / "minitest-check.json"
+REMOTE = "/home/minitest/work/rispure-agent-check"
+BOOTSTRAP = "/home/minitest/work/rispure-nogc/.build/crystal"
+LLVM = "/home/minitest/opt/llvm-23.1.3/bin/llvm-config"
+
+
+def ssh(command, **kwargs):
+    return subprocess.run(["ssh", "minitest", command], check=True, **kwargs)
+
+
+def snapshot():
+    files = subprocess.check_output(
+        ["git", "ls-files", "-z", "--cached", "--others",
+         "--exclude-standard"], cwd=ROOT).split(b"\0")
+    archive = tempfile.TemporaryFile()
+    with tarfile.open(fileobj=archive, mode="w") as bundle:
+        for raw in sorted(set(files)):
+            if not raw:
+                continue
+            name = os.fsdecode(raw)
+            path = ROOT / name
+            if path.is_file() or path.is_symlink():
+                bundle.add(path, arcname=name, recursive=False)
+    archive.seek(0)
+    digest = hashlib.file_digest(archive, "sha256").hexdigest()[:16]
+    archive.seek(0)
+    directory = f"{REMOTE}/{digest}"
+    print(f"minitest snapshot: {directory}", flush=True)
+    try:
+        ssh(f"mkdir -p {shlex.quote(directory)} && "
+            f"tar -xf - -C {shlex.quote(directory)}", stdin=archive)
+    finally:
+        archive.close()
+    STATE.parent.mkdir(exist_ok=True)
+    STATE.write_text(json.dumps({"directory": directory}) + "\n")
+    return directory
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="action", required=True)
+    sub.add_parser("build", help="send current sources and build with LLVM 23")
+    sub.add_parser("check", help="build and run the complete ris checks")
+    run = sub.add_parser("run", help="build and run a ris test or sample")
+    run.add_argument("--no-gc", action="store_true")
+    run.add_argument("--release", action="store_true")
+    run.add_argument("source")
+    sub.add_parser("log", help="show the last snapshot's build and test logs")
+    args = parser.parse_args()
+    if args.action == "log":
+        if not STATE.exists():
+            parser.error("no snapshot yet; run build, check or run first")
+        directory = json.loads(STATE.read_text())["directory"]
+        if not directory.startswith(REMOTE + "/"):
+            parser.error("invalid snapshot directory")
+        ssh(f"set -eu; cd {shlex.quote(directory)}; "
+            "tail -n 40 build.log; "
+            'if [ -f test.log ]; then tail -n 40 test.log; fi')
+        return
+    if args.action == "run":
+        source = (ROOT / args.source).resolve()
+        try:
+            relative = source.relative_to(ROOT).as_posix()
+        except ValueError:
+            parser.error("source must be inside this checkout")
+        if not source.is_file() or not relative.endswith(".ri") or not \
+                relative.startswith(("test/ris/", "samples/ris/")):
+            parser.error("source must be a .ri under test/ris or samples/ris")
+    directory = snapshot()
+    commit = subprocess.check_output(
+        ["git", "rev-parse", "--short", "HEAD"], cwd=ROOT,
+        text=True).strip()
+    build = (f"CRYSTAL={shlex.quote(BOOTSTRAP)} "
+             f"LLVM_CONFIG={shlex.quote(LLVM)} "
+             f"IYI_CONFIG_BUILD_COMMIT={shlex.quote(commit)} "
+             "make ris > build.log 2>&1")
+    command = (f"set -eu; cd {shlex.quote(directory)}; "
+               "export IYI_CACHE_DIR=/tmp/rispure-agent-check-cache; "
+               f"if {build}; then tail -n 4 build.log; "
+               "else cat build.log; exit 1; fi")
+    if args.action == "check":
+        test = "RIS_CHECK_JOBS=12 bash test/ris/check.sh"
+    elif args.action == "run":
+        flags = []
+        if args.no_gc:
+            flags.append("--no-gc")
+        if args.release:
+            flags.append("--release")
+        test = shlex.join(["./bin/ris", "run", *flags, relative])
+    else:
+        ssh(command)
+        return
+    command += (f"; if {test} > test.log 2>&1; "
+                "then cat test.log; else cat test.log; exit 1; fi")
+    ssh(command)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except subprocess.CalledProcessError as error:
+        raise SystemExit(error.returncode)
