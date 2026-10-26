@@ -74,6 +74,19 @@ ris, take it to iyi with `git cherry-pick`; strike entries once merged.
   job): darwin's std foundation is a job of its own, the cursor sweep
   (`lsp_positions.py --shard K/N`) four shards, and the Linux and Windows
   std siblings eight; take to iyi, or keep apart when merging iyi.yml.
+* Fixed lookup tables in time, cookies, DNS, MIME, system roots,
+  compression, HPACK, JSON and TLS use static storage; `StaticArray#find`
+  reads it without an Array copy.
+* JSON lexer and token state are values. Span mode needs neither a string
+  buffer nor a short-string cache, and no longer pools heap lexers.
+* Socket accept and local-port queries use stack address buffers.
+* TLS extension bytes are assembled into one sized array; fixed markers
+  can be read directly from static storage.
+* Time locations are immutable values; UTC stores its zone inline and
+  needs no Location object or List backing arrays. A value identity keeps
+  `local?` distinct from structural equality.
+* Loggers allocate child tables only when used; context tables start
+  empty. IOBackend writes the default format without a formatter object.
 ## Stays in ris
 
 * Tape: std/http `parse_head` and `ParsedHead`, the tape list in

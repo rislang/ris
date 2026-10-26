@@ -17,7 +17,7 @@ How to work (fewer tokens, faster to the goal):
 
 ## A. Budget to zero (do in this order: largest win first)
 
-1. static-user-sites column to 0 for every row.
+1. static-user-sites to 0: serve.ri 2 left.
 
 ## B. Language pieces the budget needs (pull in only when A is blocked)
 

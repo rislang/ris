@@ -8,6 +8,18 @@ class Kept
   end
 end
 
+# Value construction and direct allocate use stack storage. Neither is a
+# heap site, even when an explicit initializer reaches the primitive.
+struct InlineValue
+  getter value : Int32
+
+  def initialize(@value : Int32)
+  end
+end
+
+InlineValue.new(7)
+InlineValue.allocate
+
 def unused
   Kept.new(99)
 end

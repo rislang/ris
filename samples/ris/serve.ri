@@ -5,18 +5,18 @@
 # `gc` for the collector on as a server runs it.
 #
 #   ./bin/ris build --release -o serve samples/ris/serve.ri
-#   ./serve           # Server.serve: Request in, Response out, on the heap
-#   ./serve answer    # Server.answer: read and written on the tape
+#   ./serve           # Server.answer: read and written on the tape
+#   ./serve answer    # the same (kept for existing workload commands)
 #   /usr/bin/time -f '%e s %M KB' ./serve answer gc
 
 module samples/serve
 
 import std/socket::{IyiSocket}
-import std/http::{Server, Request, Response, Incoming, Outgoing}
+import std/http::{Server, Outgoing}
 import std/gc::{GC}
 
 N = 200000
-REQUEST = ("GET /users/42?full=1 HTTP/1.1\r\nHost: localhost\r\n" \
+REQUEST = Str.view("GET /users/42?full=1 HTTP/1.1\r\nHost: localhost\r\n" \
   "User-Agent: bench\r\nAccept: */*\r\n\r\n")
 BODY = %({"id":42,"name":"Mari","email":"mari@example.com"})
 
@@ -37,8 +37,6 @@ def drain(socket : IyiSocket, want : Int64) : Int64
   got
 end
 
-on_tape = Program.arguments.includes?("answer")
-headers = on_tape ? nil : {"Content-Type" => "application/json"}
 response = Outgoing.new
 response.header("Content-Type", "application/json")
 response.body << BODY
@@ -52,13 +50,9 @@ before = GC.stats.bytes_since_collection
 got = 0_i64
 group do |g|
   g.spawn do
-    if on_tape
-      Server.answer(listener) do |req, res|
-        res.header("Content-Type", "application/json")
-        res.body.append(BODY)
-      end
-    elsif headers
-      Server.serve(listener) { |req| Response.new(200, BODY, headers) }
+    Server.answer(listener) do |req, res|
+      res.header("Content-Type", "application/json")
+      res.body.append(BODY)
     end
     0
   end

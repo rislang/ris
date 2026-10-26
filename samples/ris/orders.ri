@@ -2,20 +2,19 @@
 #
 #   ./bin/ris build --release -o orders samples/ris/orders.ri
 #   ./orders        # tape: parse_head, JSON.parse, w.json on the tape
-#   ./orders heap   # the same with parse_request, JSON.parse, JSON.build
 #
 # Each of 200,000 requests is a `POST /orders` whose body names a user and
 # 1..8 line items. The handler reads the head, reads the body as JSON,
 # prices the order and answers it as JSON: the user, each line's sku and
 # total, and the order's total, with a head that says its length. Prints
-# the request count, the bytes answered and a checksum, the same in both.
+# the request count, the bytes answered and a checksum.
 
 module samples/orders
 
 import std/int
 import std/text
 import std/http::{Server, ParsedHead}
-import std/json::{JSON, Any, Document}
+import std/json::{JSON}
 
 N = 200000
 
@@ -96,53 +95,13 @@ def answer(bytes : Str) : UInt64
   (fnv(h, body) & 0xFFFFFFFFFF_u64) | ((top.bytesize + body.bytesize).to_u64 << 40)
 end
 
-# The same on the heap: the request, the document and the answer all
-# GC-heap objects.
-@[TapeToHeap]
-def answer_heap(bytes : Str) : UInt64
-  text = bytes.to_heap
-  parsed = Server.parse_request(text)
-  req = parsed.request
-  return 0_u64 unless req
-  doc = JSON.parse(req.body)
-  total = 0_i64
-  body = JSON.build do |json|
-    json.object do
-      json.field "user", doc["user"].as_s
-      json.field "lines" do
-        json.array do
-          doc["items"].as_a.each do |item|
-            line = item["qty"].as_i64 * item["price"].as_i64
-            total += line
-            json.object do
-              json.field "sku", item["sku"].as_s
-              json.field "total", line
-            end
-          end
-        end
-      end
-      json.field "total", total
-    end
-  end
-  top = ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" +
-    "Content-Length: #{body.bytesize}\r\n\r\n")
-  h = fnv(14695981039346656037_u64, top)
-  (fnv(h, body) & 0xFFFFFFFFFF_u64) |
-    ((top.bytesize + body.bytesize).to_u64 << 40)
-end
-
-heap = Program.arguments.size > 0 && Program.arguments[0] == "heap"
 texts = requests
 sum = 0_u64
 bytes = 0_i64
 N.times do |i|
   text = texts[i % texts.size]
   got = 0_u64
-  if heap
-    got = answer_heap(text)
-  else
-    tape { got = answer(text) }
-  end
+  tape { got = answer(text) }
   bytes += (got >> 40).to_i64
   sum = (sum ^ (got & 0xFFFFFFFFFF_u64)) &* 1099511628211_u64
 end

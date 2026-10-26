@@ -163,7 +163,8 @@ class Iyi::HeapCensus < Iyi::Visitor
         add node, kind(type), "#{target.owner}##{node.name}"
       elsif body.is_a?(Primitive) &&
             body.name.in?("allocate", "pointer_malloc", "pointer_realloc")
-        next if body.name == "allocate" && @constructor
+        next if body.name == "allocate" &&
+          (@constructor || type.try(&.passed_by_value?))
         add node, body.name == "allocate" ? kind(type) : "other",
           "#{target.owner}##{node.name} (#{body.name})"
       elsif target.name.in?("__iyi_malloc64", "__iyi_malloc_atomic64",
