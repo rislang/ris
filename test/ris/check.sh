@@ -227,6 +227,33 @@ else
   echo "FAILED   class_copy: $out"
   status=1
 fi
+# Copy jobs use scratch storage; depth never consumes the native stack.
+# Keep build and execution together when check_parallel.py splits blocks.
+out=$(
+  copy_dir=$(mktemp -d)
+  if "$RIS" build test/ris/copy_deep.ri -o "$copy_dir/deep" &&
+      (ulimit -s 1024; "$copy_dir/deep"); then
+    echo 'PASS: bounded copy stack'
+  else
+    echo 'FAILED: bounded copy stack'
+  fi
+  rm -rf "$copy_dir"
+)
+if [[ "$out" != *FAILED* ]] &&
+    grep -qF 'PASS: bounded copy stack' <<<"$out"; then
+  echo "runs     copy_deep (100000 levels, 1 MiB native stack)"
+else
+  echo "FAILED   copy_deep: $out"
+  status=1
+fi
+out=$("$RIS" run test/ris/copy_rollback.ri 2>/dev/null)
+if [ "$?" -eq 0 ] &&
+    [ "$out" = 'PASS: failed copy restores owner usage' ]; then
+  echo "runs     copy_rollback (owner and scratch growth)"
+else
+  echo "FAILED   copy_rollback: $out"
+  status=1
+fi
 for name in copy_class_cycle copy_collection_cycle copy_subclass_cycle \
             copy_named_cycle; do
   expect "$name" 'copy_to refuses self-reaching class types'

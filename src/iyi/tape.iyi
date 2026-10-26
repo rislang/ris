@@ -123,7 +123,9 @@ module Tape
       {% end %}
     {% elsif T < ::Enum || T < ::Number || T == ::Bool || T == ::Char || T == ::Symbol || T == ::Nil || T == ::Str || T == ::Str::Builder %}
     {% elsif P.type_vars.includes?(T) %}
-      {% raise "copy_to refuses self-reaching class types;\nbuild on the destination with Ary nodes and indices" %}
+      {% if T.class? %}
+        {% raise "copy_to refuses self-reaching class types;\nbuild on the destination with Ary nodes and indices" %}
+      {% end %}
     {% elsif T.name.starts_with?("Ary(") || T.name.starts_with?("Tre(") || T < ::Tuple %}
       {% for member in T.type_vars %}
         check_copy({{member}}, Tuple(*P, T))
@@ -154,6 +156,10 @@ end
 # this may not. `to_s` copies it into a retained String explicitly.
 @[OnTape]
 struct Str
+  def __iyi_copy_into(target : Pointer(self), work : IyiCopyWork) : Nil
+    target.value = Str.new(self)
+  end
+
   @ptr : Pointer(UInt8)
   @bytesize : Int32
 
@@ -199,6 +205,10 @@ struct Str
   end
 
   def copy_to(owner) : self
+    Tape.owner_copy(self, owner)
+  end
+
+  def copy_to(owner : IyiPendingCopy) : self
     if owner.is_a?(IyiPendingCopy)
       return self unless owner.contains?(@ptr.address)
     end
@@ -615,6 +625,12 @@ end
 # push is one load, one compare and one store.
 @[OnTape]
 struct Str::Builder
+  def __iyi_copy_into(target : Pointer(self), work : IyiCopyWork) : Nil
+    made = self.class.new(length)
+    made.append(finish)
+    target.value = made
+  end
+
   @state : Pointer(UInt64)
 
   def initialize(capacity : Int32 | Int64 = 64)
@@ -633,6 +649,10 @@ struct Str::Builder
   end
 
   def copy_to(owner) : self
+    Tape.owner_copy(self, owner)
+  end
+
+  def copy_to(owner : IyiPendingCopy) : self
     if owner.is_a?(IyiPendingCopy)
       return self unless owner.contains?(@state.address)
       cached = owner.lookup(@state.address)
@@ -1098,6 +1118,19 @@ end
 # tape type, which no other generic may hold.
 @[OnTape]
 struct Ary(T)
+  def __iyi_copy_into(target : Pointer(self), work : IyiCopyWork) : Nil
+    made = self.class.new(size)
+    # Reserve and publish every slot before any child job runs.
+    each { |value| made << value }
+    target.value = made
+    index = size
+    while index > 0
+      index -= 1
+      work.push(unsafe_at(index), Pointer(T).new(
+        made.@state.value &+ index.to_u64 &* sizeof(T).to_u64))
+    end
+  end
+
   @state : Pointer(UInt64)
 
   def initialize(capacity : Int32 | Int64 = 4)
@@ -1637,6 +1670,10 @@ struct Ary(T)
   end
 
   def copy_to(owner) : self
+    Tape.owner_copy(self, owner)
+  end
+
+  def copy_to(owner : IyiPendingCopy) : self
     if owner.is_a?(IyiPendingCopy)
       return self unless owner.contains?(@state.address)
       cached = owner.lookup(@state.address)
@@ -1841,6 +1878,25 @@ end
 # is slower (measured in ris-bench).
 @[OnTape]
 struct Tre(T)
+  protected def __iyi_copy_slot(index : Int32) : Pointer(T)
+    pointerof(slot(index).value.@value).as(Pointer(T))
+  end
+
+  def __iyi_copy_into(target : Pointer(self), work : IyiCopyWork) : Nil
+    made = self.class.new(size)
+    index = 0
+    while index < size
+      entry = slot(index).value
+      made.put(entry.value, entry.stop)
+      index += 1
+    end
+    target.value = made
+    while index > 0
+      index -= 1
+      work.push(slot(index).value.value, made.__iyi_copy_slot(index))
+    end
+  end
+
   @state : Pointer(UInt64)
 
   def initialize(capacity : Int32 | Int64 = 64)
@@ -1865,6 +1921,10 @@ struct Tre(T)
   end
 
   def copy_to(owner) : self
+    Tape.owner_copy(self, owner)
+  end
+
+  def copy_to(owner : IyiPendingCopy) : self
     if owner.is_a?(IyiPendingCopy)
       return self unless owner.contains?(@state.address)
       cached = owner.lookup(@state.address)
@@ -2048,9 +2108,16 @@ end
 
 # Any other value read in `while i < a.size`: `[]` and `[]=` as written,
 # since it may shrink in the loop (TapeCheckFreeLowering).
-# Ordinary values copy by value. Tape structs recursively copy their fields,
+# Ordinary values copy by value. Tape structs enqueue their field copies,
 # without calling initialize (which may have unrelated side effects).
 struct Struct
+  def __iyi_copy_into(target : Pointer(self), work : IyiCopyWork) : Nil
+    target.value = self
+    {% for field in @type.instance_vars %}
+      work.push(@{{field.name.id}}, pointerof(target.value.@{{field.name.id}}))
+    {% end %}
+  end
+
   def __iyi_pending_copy(owner : IyiPendingCopy) : self
     made = self
     {% for field in @type.instance_vars %}
@@ -2060,25 +2127,20 @@ struct Struct
     made
   end
 
-  def copy_to(owner) : self
-    Tape.check_copy(typeof(self), Tuple())
-    {% if @type.instance_vars.size > 0 %}
-      made = self
-      {% for field in @type.instance_vars %}
-        {% if field.type < ::Pointer %}
-          {% raise "copy_to refuses raw pointers;\nbuild on the destination with Ary nodes and indices" %}
-        {% end %}
-        pointerof(made.@{{field.name.id}}).value =
-          Tape.copy_value(@{{field.name.id}}, owner)
-      {% end %}
-      made
-    {% else %}
-      self
-    {% end %}
+  def copy_to(owner)
+    Tape.owner_copy(self, owner)
   end
 end
 
 struct Tuple
+  def __iyi_copy_into(target : Pointer(self), work : IyiCopyWork) : Nil
+    target.value = self
+    {% for type, i in T %}
+      slot = target.as(Pointer(UInt8)) + offsetof(self, {{i}})
+      work.push(self[{{i}}], slot.as(Pointer({{type}})))
+    {% end %}
+  end
+
   def __iyi_pending_copy(owner : IyiPendingCopy)
     {% begin %}
       { {% for type, i in T %}
@@ -2088,11 +2150,7 @@ struct Tuple
   end
 
   def copy_to(owner)
-    {% begin %}
-      { {% for type, i in T %}
-          Tape.copy_value(self[{{i}}], owner),
-        {% end %} }
-    {% end %}
+    Tape.owner_copy(self, owner)
   end
 end
 
@@ -2103,6 +2161,16 @@ struct Pointer(T)
 end
 
 struct NamedTuple
+  def __iyi_copy_into(target : Pointer(self), work : IyiCopyWork) : Nil
+    target.value = self
+    {% for key, type, i in T %}
+      # Named tuples have the corresponding positional tuple's layout.
+      offset = offsetof(Tuple({% for k in T.keys %}{{T[k]}}, {% end %}), {{i}})
+      slot = target.as(Pointer(UInt8)) + offset
+      work.push(self[{{key.symbolize}}], slot.as(Pointer({{type}})))
+    {% end %}
+  end
+
   def __iyi_pending_copy(owner : IyiPendingCopy)
     {% begin %}
       { {% for key, type in T %}
@@ -2112,35 +2180,31 @@ struct NamedTuple
   end
 
   def copy_to(owner)
-    {% begin %}
-      { {% for key, type in T %}
-          {{key.id}}: Tape.copy_value(self[{{key.symbolize}}], owner),
-        {% end %} }
-    {% end %}
+    Tape.owner_copy(self, owner)
   end
 end
 
 class Object
+  def __iyi_copy_into(target : Pointer(self), work : IyiCopyWork) : Nil
+    {% if @type < ::Enum || @type < ::Number || @type == ::Bool || @type == ::Char || @type == ::Symbol || @type == ::Nil %}
+      target.value = self
+    {% elsif @type.abstract? %}
+      raise "cannot copy an abstract instance"
+    {% else %}
+      made = {{@type}}.allocate
+      target.value = made
+      {% for field in @type.instance_vars %}
+        work.push(@{{field.name.id}}, pointerof(made.@{{field.name.id}}))
+      {% end %}
+    {% end %}
+  end
+
   def __iyi_pending_copy(owner : IyiPendingCopy)
     self
   end
 
   def copy_to(owner)
-    Tape.check_copy(typeof(self), Tuple())
-    {% if @type < ::Enum || @type < ::Number || @type == ::Bool || @type == ::Char || @type == ::Symbol || @type == ::Nil %}
-      self
-    {% elsif @type.abstract? %}
-      raise "cannot copy an abstract instance"
-    {% else %}
-      owner.run do
-        made = {{@type}}.allocate
-        {% for field in @type.instance_vars %}
-          pointerof(made.@{{field.name.id}}).value =
-            Tape.copy_value(@{{field.name.id}}, owner)
-        {% end %}
-        made
-      end
-    {% end %}
+    Tape.owner_copy(self, owner)
   end
 
   def __loop_fetch(index)
@@ -2350,11 +2414,15 @@ end
 
 # A native typed registry node needs neither a closure nor a heap object.
 # Its slots remain on the caller's stack until the panic drain runs it.
+# Explicit owner copies also use this guard: restore the destination before
+# releasing scratch, unless the complete result has been committed.
 struct IyiPendingGuard
   property next_node : IyiDefer?
 
   def initialize(@head : Pointer(UInt64), @depth : Pointer(Int32),
-                 @saved : Pointer(UInt64))
+                 @saved : Pointer(UInt64),
+                 @rollback : IyiScopeMark = IyiScopeMark.new(0_u64, 0_u64, 0_u64),
+                 @committed : Pointer(Bool) = Pointer(Bool).new(0_u64))
     @next_node = nil
   end
 
@@ -2364,6 +2432,7 @@ struct IyiPendingGuard
       IyiRegion.tape = @saved.value
       @depth.value = 0
     end
+    __iyi_scope_reset(@rollback) if @committed.address != 0 && !@committed.value
     __iyi_pending_drop(@head)
   end
 end
@@ -2739,5 +2808,133 @@ struct Str
   # Diagnostic text is retained only when a caller asks for inspection.
   def inspect : String
     to_heap.inspect
+  end
+end
+
+# Jobs own their source value on scratch storage. Destinations are stable
+# slots on the owner (or the root native slot), never a job's native local.
+@[OnTape]
+struct IyiCopyJob(T)
+  def initialize(@value : T, @target : Pointer(T))
+  end
+
+  def self.perform(address : UInt64, work : IyiCopyWork) : Nil
+    job = Pointer(self).new(address).value
+    {% if T.union? %}
+      value = job.@value
+      {% for member in T.union_types %}
+        if value.is_a?({{member}})
+          perform_member(value, job.@target, work)
+          return
+        end
+      {% end %}
+    {% else %}
+      job.@value.__iyi_copy_into(job.@target, work)
+    {% end %}
+  end
+
+  def self.perform_member(value : U, target : Pointer(T),
+                          work : IyiCopyWork) : Nil forall U
+    # A union needs its concrete value in a stable typed slot until all
+    # children finish. The store job runs after them, then tags the union.
+    slot = work.slot(value)
+    work.add(IyiCopyStore(T, U).new(slot, target),
+      ->(address : UInt64, work : IyiCopyWork) {
+        IyiCopyStore(T, U).perform(address, work)
+      })
+    value.__iyi_copy_into(slot, work)
+  end
+end
+
+@[OnTape]
+struct IyiCopyStore(T, U)
+  def initialize(@source : Pointer(U), @target : Pointer(T))
+  end
+
+  def self.perform(address : UInt64, work : IyiCopyWork) : Nil
+    job = Pointer(self).new(address).value
+    job.@target.value = job.@source.value
+  end
+end
+
+struct IyiCopyWork
+  def initialize(@head : Pointer(UInt64), @jobs : Pointer(UInt64),
+                 @depth : Pointer(Int32), @saved : Pointer(UInt64))
+  end
+
+  def scratch(&)
+    @saved.value = IyiRegion.tape
+    @head.value = IyiRegion.acquire(IyiRegion::CAPACITY) if @head.value == 0
+    IyiRegion.tape = @head.value
+    @depth.value = 1
+    result = yield
+    @head.value = IyiRegion.tape
+    IyiRegion.tape = @saved.value
+    @depth.value = 0
+    result
+  end
+
+  def slot(value : T) : Pointer(T) forall T
+    scratch do
+      slot = Pointer(T).new(IyiRegion.tape_bytes(sizeof(T).to_u64))
+      slot.value = value
+      slot
+    end
+  end
+
+  def push(value, target) : Nil
+    # Unwrap recursive aliases before forming Pointer(T); the alias and
+    # its resolved union have the same layout but distinct pointer types.
+    destination = target.as(Pointer(typeof(value)))
+    add(IyiCopyJob(typeof(value)).new(value, destination),
+      ->(address : UInt64, work : IyiCopyWork) {
+        IyiCopyJob(typeof(value)).perform(address, work)
+      })
+  end
+
+  def add(job : T, callback : Proc(UInt64, IyiCopyWork, Nil)) : Nil forall T
+    scratch do
+      # A fixed header carries a noncapturing, type-specialized callback.
+      header = IyiRegion.tape_bytes(16_u64 +
+        sizeof(Proc(UInt64, IyiCopyWork, Nil)).to_u64)
+      IyiHeap.write64(header, @jobs.value)
+      Pointer(Proc(UInt64, IyiCopyWork, Nil)).new(header + 16_u64).value = callback
+      payload = IyiRegion.tape_bytes(sizeof(T).to_u64)
+      Pointer(T).new(payload).value = job
+      IyiHeap.write64(header + 8_u64, payload)
+      @jobs.value = header
+    end
+  end
+
+  def drain : Nil
+    while (header = @jobs.value) != 0
+      @jobs.value = IyiHeap.read64(header)
+      callback = Pointer(Proc(UInt64, IyiCopyWork, Nil)).new(header + 16_u64).value
+      callback.call(IyiHeap.read64(header + 8_u64), self)
+    end
+  end
+end
+
+module Tape
+  def self.owner_copy(value : T, owner) : T forall T
+    check_copy(T, Tuple())
+    owner.run do
+      head = 0_u64
+      jobs = 0_u64
+      depth = 0
+      saved = IyiRegion.tape
+      committed = false
+      guard = IyiPendingGuard.new(pointerof(head), pointerof(depth),
+        pointerof(saved), __iyi_scope_mark(true), pointerof(committed))
+      __iyi_pending_guard(pointerof(guard))
+      work = IyiCopyWork.new(pointerof(head), pointerof(jobs),
+        pointerof(depth), pointerof(saved))
+      result = value
+      work.push(value, pointerof(result))
+      work.drain
+      committed = true
+      __iyi_pending_pop(pointerof(guard))
+      result
+    end
   end
 end

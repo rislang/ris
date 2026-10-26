@@ -9,12 +9,8 @@ check.sh. Delete finished work in the same commit; keep check.sh green.
    values in their own region, or refuse views across the first growth.
    Non-Linux targets still move. Refuse raw owner operations.
    Gate: no transfer of a viewed value.
-5. [M] copy_to now copies class fields deeply and refuses raw pointers,
-   self-relative links and self-reaching shapes, including collections,
-   unions and subclasses. Remaining: allocate class copies on the owner
-   (with step 9), discard partial destination storage on failure, and
-   guarantee bounded native stack use for arbitrarily deep copies.
-   Gate: destination ownership, failed-copy rollback and deep chains.
+5. [M] Remaining: allocate class copies on the owner (with step 9).
+   Gate: destination ownership.
 5b. [M] std text and parsers onto the tape with existing tape types.
    Gate: each migrated module has zero heap on success and error paths.
 6. [L] Pool/SlicePool: typed reuse, checked handles, size, membership,

@@ -1,0 +1,90 @@
+@[OnTape]
+struct CopyChain
+  getter children : Ary(CopyChain)
+  getter text : Str
+
+  def initialize(@children : Ary(CopyChain), @text : Str)
+  end
+end
+
+tape do
+  node = CopyChain.new(Ary(CopyChain).new(0), Str.new("leaf"))
+  100_000.times do
+    children = Ary(CopyChain).new(1)
+    children << node
+    node = CopyChain.new(children, Str.new("node"))
+  end
+  copied = node.copy_to(Program.tape)
+  100_000.times do
+    raise "bad node" unless copied.text == "node"
+    copied = copied.children[0]
+  end
+  raise "bad leaf" unless copied.text == "leaf" && copied.children.empty?
+end
+puts "PASS: 100000 deep owner copy"
+
+alias CopyAry = Ary(CopyAry) | Int32
+alias CopyTre = Tre(CopyTre) | Int32
+
+tape do
+  array = 7.as(CopyAry)
+  tree = 9.as(CopyTre)
+  100_000.times do
+    array = Ary(CopyAry){array}
+    parent = Tre(CopyTre).new(1)
+    parent.leaf(tree)
+    tree = parent
+  end
+  copied_array = array.copy_to(Program.tape)
+  copied_tree = tree.copy_to(Program.tape)
+  100_000.times do
+    if copied_array.is_a?(Ary(CopyAry))
+      copied_array = copied_array[0]
+    else
+      raise "short array chain"
+    end
+    if copied_tree.is_a?(Tre(CopyTre))
+      copied_tree = copied_tree[0]
+    else
+      raise "short tree chain"
+    end
+  end
+  raise "bad array leaf" unless copied_array == 7
+  raise "bad tree leaf" unless copied_tree == 9
+end
+
+# Structural tree nesting is a flat stream; preserve every subtree stop.
+tape do
+  tree = Tre(Str).new(100_001)
+  100_000.times { tree.open(Str.new("branch")) }
+  tree.leaf(Str.new("leaf"))
+  index = 100_000
+  while index > 0
+    index -= 1
+    tree.close(index)
+  end
+  copied = tree.copy_to(Program.tape)
+  raise "bad tree size" unless copied.size == 100_001
+  raise "bad subtree" unless copied.stop(0) == 100_001
+  raise "bad tree leaf" unless copied[100_000] == "leaf"
+end
+puts "PASS: 100000 deep arrays and trees"
+
+# Every union variant and positional/named field must be placed only after
+# its child jobs finish, including unequal alignment and zero-sized values.
+tape do
+  source = {1_u8, {text: Str.new("named"), n: 2_i64},
+    Ary(Str | Int32 | Nil){Str.new("union"), 3, nil}, Str::Builder.new(8)}
+  source[3].append("builder")
+  copied = source.copy_to(Program.tape)
+  source[2][0] = Str.new("changed")
+  source[3].append("!")
+  raise "tuple byte" unless copied[0] == 1_u8
+  raise "named field" unless copied[1][:text] == "named"
+  raise "named integer" unless copied[1][:n] == 2_i64
+  raise "union text" unless copied[2][0] == "union"
+  raise "union integer" unless copied[2][1] == 3
+  raise "union nil" unless copied[2][2].nil?
+  raise "builder" unless copied[3].finish == "builder"
+end
+puts "PASS: copy work list shapes and sharing"

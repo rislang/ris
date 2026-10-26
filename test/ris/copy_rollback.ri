@@ -1,0 +1,67 @@
+# Fault injection after a real leaf copy: the public copy_to must discard
+# both the completed leaf and the rest of the partially built destination.
+struct Str
+  @[PointerUnsafe("inject a panic after a real copy job")]
+  def __iyi_copy_into(target : Pointer(self), work : IyiCopyWork) : Nil
+    previous_def
+    if self == "fail-owner"
+      IyiRegion.tape_bytes(IyiRegion::CAPACITY + 1_u64)
+      raise "forced owner copy failure"
+    elsif self == "fail-scratch"
+      work.scratch do
+        IyiRegion.tape_bytes(IyiRegion::CAPACITY + 1_u64)
+        raise "forced scratch copy failure"
+      end
+    end
+  end
+end
+
+struct CopyUsageProbe
+  getter region : UInt64
+  getter cursor : UInt64
+  getter side : UInt64
+
+  def initialize(@region = 0_u64, @cursor = 0_u64, @side = 0_u64)
+  end
+
+  @[PointerUnsafe("probe destination usage inside the copy transaction")]
+  def __iyi_copy_into(target : Pointer(self), work : IyiCopyWork) : Nil
+    region = IyiRegion.tape
+    target.value = self.class.new(region,
+      IyiHeap.read64(region &+ IyiRegion::OFF_CURSOR),
+      IyiHeap.read64(region &+ IyiRegion::OFF_SIDE))
+  end
+end
+
+def owner_usage : CopyUsageProbe
+  CopyUsageProbe.new.copy_to(Program.tape)
+end
+
+# A task panic lets the parent inspect the same program owner afterwards.
+# Initialize retained data first, so rollback must preserve existing bytes.
+kept = "retained".copy_to(Program.tape)
+["fail-owner", "fail-scratch"].each do |failure|
+  before = owner_usage
+  group do |g|
+    task = g.spawn do
+      saved = IyiRegion.tape
+      defer check_caller_tape(saved)
+      tape do
+        source = Ary(Str){Str.new("first"), Str.new(failure)}
+        source.copy_to(Program.tape)
+      end
+    end
+    raise "missing copy panic" unless task.value.is_a?(Panicked)
+  end
+  after = owner_usage
+  raise "partial destination survived" unless before.region == after.region &&
+    before.cursor == after.cursor && before.side == after.side
+  raise "existing data damaged" unless kept == "retained"
+end
+# Success after both panics also checks the program scope was restored.
+raise "subsequent copy failed" unless "after".copy_to(Program.tape) == "after"
+puts "PASS: failed copy restores owner usage"
+
+def check_caller_tape(saved : UInt64) : Nil
+  raise "copy lost caller tape" unless IyiRegion.tape == saved
+end
