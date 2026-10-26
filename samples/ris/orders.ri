@@ -27,13 +27,14 @@ def xs_next(x : UInt64) : UInt64
   v
 end
 
-# A thousand requests, cycled: the bytes a server would have read.
-@[TapeToHeap]
-def requests : Array(String)
+# A thousand requests on the caller's tape, kept for the whole run.
+# These are the bytes a server would have read, cycled through below.
+def requests : Ary(Str)
   x = 88172645463325252_u64
-  Array(String).new(1000) do |r|
+  Ary(Str).new(1000) do |r|
     x = xs_next(x)
-    body = String.build do |io|
+    # Room for the user and all eight line items before building the head.
+    body = Str.build(448) do |io|
       io << %({"user":"u) << r << (r % 9 == 0 ? %(\\"q\\") : "") << %(","items":[)
       ((x % 8_u64).to_i32 + 1).times do |i|
         x = xs_next(x)
@@ -43,9 +44,11 @@ def requests : Array(String)
       end
       io << "]}"
     end
-    ("POST /orders HTTP/1.1\r\nHost: shop\r\n" +
-      "Content-Type: application/json\r\n" +
-      "Content-Length: #{body.bytesize}\r\n\r\n#{body}").to_heap
+    Str.build(112 + body.bytesize) do |io|
+      io << "POST /orders HTTP/1.1\r\nHost: shop\r\n"
+      io << "Content-Type: application/json\r\nContent-Length: "
+      io << body.bytesize << "\r\n\r\n" << body
+    end
   end
 end
 
@@ -95,7 +98,9 @@ end
 
 # The same on the heap: the request, the document and the answer all
 # GC-heap objects.
-def answer_heap(text : String) : UInt64
+@[TapeToHeap]
+def answer_heap(bytes : Str) : UInt64
+  text = bytes.to_heap
   parsed = Server.parse_request(text)
   req = parsed.request
   return 0_u64 unless req

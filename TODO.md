@@ -17,8 +17,7 @@ How to work (fewer tokens, faster to the goal):
 
 ## A. Budget to zero (do in this order: largest win first)
 
-1. orders.ri 31560: find the hot site (likely a per-row String or
-   class), move it; target under 100.
+1. orders.ri 85: next hot site; target under 10.
 2. serve.ri 111, web.ri 98, request.ri 71: one request path. Shared
    cause first (HTTP/IO/time init); JSON only if the census names it.
 3. logline 20, chat 14, rest under 10: per-site fixes.

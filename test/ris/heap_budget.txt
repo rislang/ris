@@ -6,7 +6,7 @@ samples/ris/chat.ri 11 14 default
 samples/ris/escape.ri 0 5 tape
 samples/ris/hello.ri 1 2 default
 samples/ris/logline.ri 2 20 default
-samples/ris/orders.ri 4 31560 default
+samples/ris/orders.ri 2 85 default
 samples/ris/query.ri 0 5 tape
 samples/ris/report.ri 2 4 default
 samples/ris/request.ri 0 71 default
