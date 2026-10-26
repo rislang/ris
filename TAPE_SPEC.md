@@ -44,6 +44,8 @@ is the target contract; what the code does not meet yet is in TODO.md.
   nested owning fields, owners in arrays/unions; suggest borrowing instead.
 * Each live growing component owns stable space (sizes: backend policy;
   disjoint lifetimes reuse it); growth never moves published elements.
+  Its space is an address-space reservation committed on use (Goose
+  §1.2, §10.4), on every platform; views stay valid across growth.
   A runtime-sized collection of growing values is refused: use SlicePool.
   Roll back partial construction; refuse grow/shrink of the target during
   in-place construction, via helpers or aliases (Goose §4.2-4.3).
@@ -106,5 +108,5 @@ is the target contract; what the code does not meet yet is in TODO.md.
   any value is published; invalid input yields none, never part. This is
   safety, not integrity: a checksum is the caller's (Goose §9.4).
 * Pool free never closes a resource: resources have explicit cleanup.
-* RIS_TAPE_STATS: owner paths, regions, committed peaks, pool waste, copies
-  apart from growth moves. check.sh tests exit, panic, cancel, exhaustion.
+* RIS_TAPE_STATS: owner paths, regions, committed peaks, pool waste, copies.
+  check.sh tests exit, panic, cancel, exhaustion.

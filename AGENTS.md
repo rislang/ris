@@ -56,8 +56,9 @@ on one tape.
 
 * Nothing frees before its block ends: refill an `Ary` field with `clear`,
   never a new one per call (the compiler refuses it).
-* Size growing values from the input up front; one that outgrows its room
-  behind another is copied off. `RIS_TAPE_STATS=1` counts both.
+* Size growing values from the input up front: each reserves its own
+  address space, so growth never moves it. `RIS_TAPE_STATS=1` reports
+  side transfers and growth moves: both should read 0.
 
 ## Upstream, documents, LLVM
 

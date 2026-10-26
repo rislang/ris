@@ -25,8 +25,10 @@ How to work (fewer tokens, faster to the goal):
 
 * Classes on the active tape (`new`), class copies on the owner; roots
   track references, finalize refused.
-* First growth: no transfer of a viewed value (region.iyi tape_resize);
-  refuse views across the first growth, non-Linux still moves.
+* First growth: no transfer of a viewed value (region.iyi tape_resize).
+  Each growing value reserves its own address space, committed on use
+  (Goose §1.2, §10.4): mmap PROT_NONE, VirtualAlloc on Windows; growth
+  never moves, views stay valid.
 * Escaping closures: codegen.cr ProcLiteral wrapper malloc into a pool.
 * Concurrency (src/iyi/concurrency.iyi): task records, wait nodes and
   messages in pools; bounded queue reports full. Only what serve needs.

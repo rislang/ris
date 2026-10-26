@@ -4,6 +4,14 @@ Every change to TAPE_SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one.
 
+## 2026-10-26: growth reserves address space
+
+* Added: each growing value's stable space is an address-space
+  reservation committed on use, on every platform (Goose §1.2, §10.4).
+* Removed: growth moves from RIS_TAPE_STATS; growth no longer moves.
+* Why: the first growth moved viewed values off the tape. Goose keeps
+  views valid across growth by reserving, not by refusing views.
+
 ## 2026-10-25: classes stay, on the tape
 
 * Was: structs, unions and pools replace heap classes; copy_to refuses
