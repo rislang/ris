@@ -1829,8 +1829,14 @@ pub struct Server
       conn.deadline_in(60000)
       return unless conn.available > 0 || conn.fill
       result = nil.as(Int32 | Bool | Nil)
-      tape do
-        result = answered_in_place(client, answerer, conn.tape_copy)
+      loop do
+        tape do
+          result = answered_in_place(client, answerer, conn.tape_copy)
+        end
+        break unless result == -1
+        # A read boundary is not a request boundary. Keep partial bytes
+        # in the connection's task-owned buffer and keep the deadline.
+        return unless conn.fill
       end
       conn.no_deadline
       case result
@@ -1879,17 +1885,20 @@ pub struct Server
   end
 
   # A plain request at *start* in *buffer*, answered where it lies: the
-  # next request's start, false when the connection ends, nil for one the
-  # fast path does not take - not all here, chunked, `Expect`, HTTP/1.0,
-  # an absolute-form target, not HTTP - which `parse_request` reads.
+  # next request's start, -1 when more bytes are needed, false when the
+  # connection ends, nil for one the fast path does not take - chunked,
+  # `Expect`, HTTP/1.0, an absolute-form target, not HTTP - which
+  # `parse_request` reads.
   private def self.answered_in_place(client : IyiSocket, answerer : Proc(Incoming, Outgoing, Nil), bytes : Str) : Int32 | Bool | Nil
     result = nil.as(Int32 | Bool | Nil)
     tape do
       head = parse_head(bytes)
+      return -1 if head.nil?
       if head.is_a?(ParsedHead) && !head.http10? && head.field("Transfer-Encoding").nil? && head.field("Expect").nil? &&
          HTTP.absolute_form(head.target).nil? &&
          (length = head.content_length) &&
-         length <= MAX_BODY.to_i64 && bytes.bytesize - head.body_start >= length
+         length <= MAX_BODY.to_i64
+        return -1 if bytes.bytesize - head.body_start < length
         size = length.to_i32
         close = false
         if conn = head.field("Connection")

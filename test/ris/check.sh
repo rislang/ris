@@ -947,6 +947,17 @@ else
   echo "FAILED   heap_allocator trap: $out"
   status=1
 fi
+# Exercise read boundaries over the full keep-alive workload.
+out=$(RIS_HEAP_STATS=1 "$RIS" run --release --no-gc \
+  samples/ris/serve.ri -- answer 2>&1)
+if [ "$?" -eq 0 ] &&
+    [ "$(grep -v '^ris heap:' <<<"$out")" = '200000 requests' ] &&
+    grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+  echo "runs     serve (200000 requests, --no-gc)"
+else
+  echo "FAILED   serve full loop: $out"
+  status=1
+fi
 out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc test/ris/heap_fibers.ri 2>&1)
 if [ "$?" -eq 0 ] && grep -qF 'fiber42' <<<"$out" &&
     grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
