@@ -19,14 +19,20 @@ How to work (fewer tokens, faster to the goal):
   git log. Remove an item when its guarantee passes its gate, not merely
   when a sample's budget reaches zero.
 
+## Workload blockers (goose-evaluations, 2026-10-26)
+
+* std/math: importing it builds heap tables (Math::SIN_T, math.iyi:41)
+  even when no Math method is called; --no-gc fails on import alone.
+* File metadata on tape: File.size takes String or Path only, so the
+  JSON, YAML and Ninja ports copy the path to the heap. Add Str forms,
+  move callers, then recheck those ports under --no-gc.
+* jq under --no-gc runs 5-13x slower than Goose: find the cause once
+  the ports run; speed tests otherwise stay off.
+
 ## Remaining tape semantics
 
-* Finish ordinary class tape allocation for HTTP migration classes:
-  migrate TlsStream connection/body holders. Opting these holders in
-  reaches joined server captures and opaque streamed-body callbacks;
-  establish checked lifetime contracts before enabling these paths.
-  Unmarked runtime and std declarations still use the migration allocation
-  ABI; selected std classes opt in with @[OnTape].
+* Gate repeated server use under --no-gc beyond the full serve loop
+  (passes): task cleanup and reused storage across groups.
 * Stable growth on every supported tape target: replace moving backends
   outside Linux with address-space reservations and equivalent gates.
 * Escaping closures outside program and joined task owners: pooled
@@ -49,8 +55,6 @@ How to work (fewer tokens, faster to the goal):
 * Remove general allocator fallbacks from ris programs. Distinguish
   gc_none's allocator behavior from ris_no_gc's allocation trap; audit
   remaining std and runtime paths required by supported workloads.
-* Gate repeated server use under --no-gc beyond the full serve loop
-  (passes): task cleanup and reused storage across groups.
 * Define supported no-GC targets and gate each one; unsupported targets
   must fail explicitly rather than silently select a heap fallback.
 * Audit final program binaries for collector linkage and forbidden heap
@@ -60,6 +64,12 @@ How to work (fewer tokens, faster to the goal):
 
 ## Later
 
+* Finish ordinary class tape allocation for HTTP migration classes:
+  migrate TlsStream connection/body holders. Opting these holders in
+  reaches joined server captures and opaque streamed-body callbacks;
+  establish checked lifetime contracts before enabling these paths.
+  Unmarked runtime and std declarations still use the migration allocation
+  ABI; selected std classes opt in with @[OnTape].
 * Complete the Pool/SlicePool surface beyond the validated paths in use.
 * Sweep remaining std modules (collections, IO, errors); heap paths that
   block the default no-GC switch belong in the section above.
