@@ -4,6 +4,11 @@ Every change to TAPE_SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one.
 
+## 2026-10-26: numbered sections and rules
+
+* Added: sections are numbered 1-6, rules N.M; numbers never change.
+* Why: code, errors and commits can cite one rule (TAPE_SPEC 2.3).
+
 ## 2026-10-26: growth reserves address space
 
 * Added: each growing value's stable space is an address-space
