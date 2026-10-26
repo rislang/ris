@@ -1,0 +1,114 @@
+module test/ris/log_metadata
+
+import std/log::{Log, Logger, Severity, Metadata}
+import std/log_text::{LogField}
+
+def first_value(fields : Ary(LogField), value : Str) : Bool
+  fields[0].value == value
+end
+
+100.times do
+  local_tape do
+    log = Logger.new("metadata", Severity::None)
+    fields = Ary(LogField).new(8)
+    first = Metadata.new("id", "old", nil)
+    latest = Metadata.new("id", "new", first)
+    raise "key" unless latest.key == "id" && latest.value == "new"
+    older = latest.rest
+    raise "rest" unless older && older.value == "old"
+    fields.clear
+    latest.append_into(fields)
+    raise "precedence" unless fields.size == 1 && first_value(fields, "new")
+    bound = log.bind(id: 42)
+    bound.info("disabled")
+    Log.with_context(id: 1, outer: "kept") do
+      raise "outer" unless Log.context_size == 2
+      Log.with_context(id: 2) do
+        fields.clear
+        Log.context_into(fields)
+        raise "nested" unless first_value(fields, "2")
+      end
+      fields.clear
+      Log.context_into(fields)
+      raise "restore" unless first_value(fields, "1")
+    end
+    raise "cleanup" if Log.has_context?
+  end
+end
+def inherited_context : Bool
+  raise "inherited" unless Log.context_size == 1
+  Log.with_context(child: "yes") do
+    raise "child context" unless Log.context_size == 2
+  end
+  raise "child restore" unless Log.context_size == 1
+  true
+end
+
+Log.with_context(parent: "yes") do
+  group do |g|
+    child = {% if flag?(:gc_none) || flag?(:gc_boehm) %}
+      g.spawn { inherited_context }
+    {% else %}
+      g.spawn_parallel { inherited_context }
+    {% end %}
+    raise "joined" unless child.value.or_panic
+  end
+end
+raise "parent cleanup" if Log.has_context?
+group do |g|
+  task = g.spawn do
+    Log.with_context(outer: "unwind") do
+      Log.with_context(failed: "yes") do
+        message : String = "expected metadata panic"
+        raise message
+      end
+    end
+  end
+  raise "panic result" unless task.value.is_a?(Panicked)
+end
+raise "panic cleanup" if Log.has_context?
+# A child may keep fields after the enclosing context has closed.
+@@phase : Atomic(UInt64) = Atomic(UInt64).new(0_u64)
+
+def phase : UInt64
+  @@phase.get
+end
+
+def set_phase(value : UInt64) : Nil
+  @@phase.set(value)
+end
+
+def held_context : Bool
+  fields = Ary(LogField).new(2)
+  Log.context_into(fields)
+  set_phase(1_u64)
+  while phase != 2_u64
+    sleep(0)
+  end
+  first_value(fields, "owned 7")
+end
+
+group do |g|
+  task = nil
+  tape do
+    Log.with_context(parent: "owned #{7}") do
+      task = g.spawn { held_context }
+      while phase != 1_u64
+        sleep(0)
+      end
+    end
+  end
+  10.times do
+    tape do
+      writer = Str::Builder.new(64)
+      writer << "overwrite released parent context bytes"
+    end
+  end
+  set_phase(2_u64)
+  if child = task
+    raise "released parent context" unless child.value.or_panic
+  else
+    raise "missing child"
+  end
+end
+puts "PASS: metadata, binding and nested contexts on tape"

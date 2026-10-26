@@ -1,0 +1,7 @@
+import std/log::{Metadata}
+
+kept = nil
+tape do
+  kept = Metadata.new("key", "value", nil)
+end
+puts kept.nil?

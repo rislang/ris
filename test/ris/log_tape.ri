@@ -1,6 +1,6 @@
 module test/ris/log_tape
 
-import std/log::{Logger, IOBackend, MemoryBackend, Severity, Log}
+import std/log::{Logger, IOBackend, MemoryBackend, Severity, Log, Metadata}
 import std/gc::{GC}
 
 sink = File.open("/dev/null", "w")
@@ -28,4 +28,11 @@ Log.with_context(id: 0, request: "ok") do
 end
 last = memory.entries[1]
 raise "metadata precedence" unless last.data["id"] == "2" && last.data["base"] == "a b" && last.data["request"] == "ok"
+parent = log.bind(parent: "p")
+child = Logger.new("direct", Severity::Info, memory, parent,
+  Metadata.new("child", "c", nil))
+child.info("direct")
+last = memory.entries[2]
+raise "constructor metadata" unless last.data["parent"] == "p" &&
+  last.data["child"] == "c"
 puts "logging: tape IO and retaining backend"

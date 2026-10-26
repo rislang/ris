@@ -163,30 +163,91 @@ pub struct TapeEntry
   end
 end
 
-# Keys and values, the newest first: immutable, so a task's context can sit
-# in the table every thread reads.
-pub class Metadata
-  getter key : String
-  getter value : String
-  getter rest : Metadata?
+# Immutable encoded fields, oldest first. Tasks share only read-only tape
+# bytes, never a tape class reference or a mutable collection handle.
+@[OnTape]
+@[Share]
+pub struct Metadata
+  getter bytes : Str
 
-  def initialize(@key : String, @value : String, @rest : Metadata?)
+  def initialize(key : String | Str, value : String | Str, rest : Metadata?)
+    key = key.as_tape
+    value = value.as_tape
+    older = rest ? rest.bytes : "".as_tape
+    size = 12 + key.bytesize + value.bytesize
+    writer = Str::Builder.new(older.bytesize + size)
+    writer.append(older)
+    writer.write_bytes(key.bytesize)
+    writer.write_bytes(value.bytesize)
+    writer.append(key)
+    writer.append(value)
+    writer.write_bytes(size)
+    @bytes = writer.finish
   end
 
-  # Into *into*, the oldest first, so a later key's value replaces an
-  # earlier one's.
-  def merge_into(into : Hash(String, String)) : Nil
-    if older = @rest
-      older.merge_into(into)
+  # A child keeps its own bytes before its parent's context can close.
+  def copy : Metadata
+    writer = Str::Builder.new(@bytes.bytesize)
+    writer.append(@bytes)
+    Metadata.new(writer.finish)
+  end
+
+  def self.combine(older : Metadata, newer : Metadata) : Metadata
+    writer = Str::Builder.new(older.bytes.bytesize + newer.bytes.bytesize)
+    writer.append(older.bytes)
+    writer.append(newer.bytes)
+    Metadata.new(writer.finish)
+  end
+
+  protected def initialize(@bytes : Str)
+  end
+
+  private def last_at : Int32
+    @bytes.bytesize - @bytes.read_bytes_at(Int32, @bytes.bytesize - 4)
+  end
+
+  def key : Str
+    at = last_at
+    @bytes[at + 8, @bytes.read_bytes_at(Int32, at)]
+  end
+
+  def value : Str
+    at = last_at
+    count = @bytes.read_bytes_at(Int32, at)
+    @bytes[at + 8 + count, @bytes.read_bytes_at(Int32, at + 4)]
+  end
+
+  def rest : Metadata?
+    at = last_at
+    at == 0 ? nil : Metadata.new(@bytes[0, at])
+  end
+
+  def each(& : Str, Str -> Nil) : Nil
+    Metadata.each_field(@bytes) { |key, value| yield key, value }
+  end
+
+  def self.each_field(bytes : Str, & : Str, Str -> Nil) : Nil
+    at = 0
+    while at < bytes.bytesize
+      keys = bytes.read_bytes_at(Int32, at)
+      values = bytes.read_bytes_at(Int32, at + 4)
+      yield bytes[at + 8, keys], bytes[at + 8 + keys, values]
+      at += 12 + keys + values
     end
-    into[@key] = @value
+  end
+
+  def self.count_fields(bytes : Str) : Int32
+    count = 0
+    each_field(bytes) { |_, _| count += 1 }
+    count
+  end
+
+  def merge_into(into : Hash(String, String)) : Nil
+    each { |key, value| into[key.to_heap] = value.to_heap }
   end
 
   def append_into(fields : Ary(LogField)) : Nil
-    if older = @rest
-      older.append_into(fields)
-    end
-    LogField.set(fields, @key.as_tape, @value.as_tape)
+    each { |key, value| LogField.set(fields, key, value) }
   end
 
   def to_h : Hash(String, String)
@@ -440,6 +501,28 @@ class AsyncQueue
   end
 end
 
+# Only read-only text crosses into this scratch writer. A tape logger's
+# methods may retain storage in its fields; this writer retains none.
+struct EntryWriter
+  def self.write_entry(source : String, b : Backend, bound : Str,
+                       severity : Severity, message : Str, **data) : Nil
+    tape do
+      count = data.size + Log.context_size + Metadata.count_fields(bound)
+      fields = Ary(LogField).new(count)
+      Log.context_into(fields)
+      Metadata.each_field(bound) { |key, value| LogField.set(fields, key, value) }
+      data.each do |key, value|
+        name = key.to_s.as_tape
+        text = LogField.text(value)
+        LogField.set(fields, name, text)
+      end
+      b.write(TapeEntry.new(source.as_tape, severity, message,
+        Time.utc, fields))
+    end
+  end
+end
+
+@[OnTape]
 pub class Logger
   def self.on_program(source : Str, level : Severity? = nil,
                       backend : Backend? = nil) : Logger
@@ -452,7 +535,7 @@ pub class Logger
   @level : Severity?
   @backend : Backend?
   @parent : Logger?
-  @children : Hash(String, Logger)?
+  @children : Ary(Logger)?
   # What `bind` gave this logger, on every entry it and its children write.
   @bound : Metadata?
 
@@ -462,13 +545,20 @@ pub class Logger
     @parent = parent
     @children = nil
     @bound = bound
+    if bound && parent
+      if older = parent.bound_node
+        @bound = Metadata.combine(older, bound)
+      end
+    end
   end
 
   # A logger for the same source, its level and backend this one's, whose
   # entries all carry *data*: a request's id, a connection's peer.
   def bind(**data) : Logger
-    node = @bound
-    data.each { |key, value| node = Metadata.new(key.to_s, value.to_s, node) }
+    node = nil.as(Metadata?)
+    data.each do |key, value|
+      node = Metadata.new(key.to_s.as_tape, LogField.text(value), node)
+    end
     Logger.new(@source, nil, nil, self, node)
   end
 
@@ -527,8 +617,9 @@ pub class Logger
 
   protected def get_or_create_child(name : String) : Logger
     children = @children
-    if children && (child = children[name]?)
-      return child
+    if children
+      suffix = @parent.nil? && @source.empty? ? name : "#{@source}.#{name}"
+      children.each { |child| return child if child.source == suffix }
     end
 
     # Only the root drops the dot: a child named "" under it has an empty
@@ -537,10 +628,10 @@ pub class Logger
     child_source = @parent.nil? && @source.empty? ? name : "#{@source}.#{name}"
     child = Logger.new(child_source, nil, nil, self)
     unless children
-      children = Hash(String, Logger).new
+      children = Ary(Logger).new
       @children = children
     end
-    children[name] = child
+    children << child
     child
   end
 
@@ -553,17 +644,9 @@ pub class Logger
   def log(severity : Severity, message : Str, **data) : Nil
     return if severity < level || severity == Severity::None
     if b = backend
-      count = data.size + bound_size + Log.context_size
-      fields = Ary(LogField).new(count)
-      Log.context_into(fields)
-      bound_into(fields)
-      data.each do |key, value|
-        name = key.to_s.as_tape
-        text = LogField.text(value)
-        LogField.set(fields, name, text)
-      end
-      b.write(TapeEntry.new(@source.as_tape, severity, message,
-        Time.utc, fields))
+      node = bound_node
+      bytes = node ? node.bytes : "".as_tape
+      EntryWriter.write_entry(@source, b, bytes, severity, message, **data)
     end
   end
 
@@ -573,25 +656,13 @@ pub class Logger
     log(severity, block.call.as_tape, **data)
   end
 
-  protected def bound_size : Int32
-    size = 0
-    if parent = @parent
-      size += parent.bound_size
-    end
-    node = @bound
-    while node
-      size += 1
-      node = node.rest
-    end
-    size
-  end
-
-  protected def bound_into(fields : Ary(LogField)) : Nil
-    if parent = @parent
-      parent.bound_into(fields)
-    end
-    if node = @bound
-      node.append_into(fields)
+  protected def bound_node : Metadata?
+    if bound = @bound
+      bound
+    elsif parent = @parent
+      parent.bound_node
+    else
+      nil
     end
   end
 
@@ -688,7 +759,7 @@ pub class Log
     if r = @@root
       r
     else
-      logger = Logger.new("", Severity::Info, IOBackend.new(STDOUT))
+      logger = Logger.on_program("", Severity::Info, IOBackend.on_program(STDOUT))
       @@root = logger
       logger
     end
@@ -721,8 +792,37 @@ pub class Log
 
   # Every task's open contexts, by the task's fiber; how many are open, so
   # a program that opens none never looks.
-  @@contexts : Mutex(Hash(UInt64, Metadata)?) =
-    Mutex.on_program { nil.as(Hash(UInt64, Metadata)?) }
+  @[OnTape]
+  struct ContextSlot
+    getter id : UInt64
+    getter node : Metadata?
+
+    def initialize(@id : UInt64, @node : Metadata?)
+    end
+  end
+
+  # The lock protects the program-owned slots. Empty slots are reused;
+  # metadata bytes belong to the task whose open context installed them.
+  @@contexts : Ary(ContextSlot) = Ary(ContextSlot).new.copy_to(Program.tape)
+  # Static cleanup releases this lock without a callback environment
+  # capturing either the lock receiver or task-owned metadata.
+  class ContextLock < Mutex(Int32)
+    def self.on_program : ContextLock
+      lock = IyiRegion.program_object(ContextLock)
+      lock.initialize(0)
+      lock
+    end
+
+    def enter : Cancelled?
+      acquire
+    end
+
+    def leave : Nil
+      release
+    end
+  end
+
+  @@context_lock : ContextLock = ContextLock.on_program
   @@open : Atomic(UInt64) = Atomic(UInt64).new(0_u64)
 
   # Runs the block with *data* on every entry logged in this task and in
@@ -733,11 +833,13 @@ pub class Log
     id = task_key
     own = context_of(id)
     node = context_node
-    data.each { |key, value| node = Metadata.new(key.to_s, value.to_s, node) }
+    data.each do |key, value|
+      node = Metadata.new(key.to_s.as_tape, LogField.text(value), node)
+    end
     @@open.add(1_u64)
     store(id, node)
     defer restore(id, own)
-    block.call
+    yield
   end
 
   def self.has_context? : Bool
@@ -788,9 +890,10 @@ pub class Log
     {% if flag?(:wasm32) %}
       context_of(0_u64)
     {% else %}
-      fiber = IyiScheduler.current
+      current = IyiScheduler.current
+      fiber = current
       while true
-        if node = context_of(fiber.object_id)
+        if node = context_of(fiber.object_id, fiber != current)
           return node
         end
         group = fiber.group
@@ -803,25 +906,43 @@ pub class Log
   # The table's blocks never park, so a wait for it is another thread's
   # moment, and a cancelled task, which a wait answers Cancelled, asks
   # again.
-  private def self.context_of(id : UInt64) : Metadata?
-    while true
-      found = @@contexts.get { |table| table ? table[id]? : nil }
-      return found unless found.is_a?(Cancelled)
+  private def self.context_of(id : UInt64, copy : Bool = false) : Metadata?
+    while @@context_lock.enter.is_a?(Cancelled)
     end
+    defer @@context_lock.leave
+    node = context_locked(id)
+    copy && node ? node.copy : node
+  end
+
+  protected def self.context_locked(id : UInt64) : Metadata?
+    node = nil.as(Metadata?)
+    @@contexts.each { |slot| node = slot.node if slot.id == id }
+    node
   end
 
   private def self.store(id : UInt64, node : Metadata?) : Nil
-    while true
-      done = @@contexts.update do |table|
-        if node
-          table ||= {} of UInt64 => Metadata
-          table[id] = node
-        elsif table
-          table.delete(id)
-        end
-        table
+    while @@context_lock.enter.is_a?(Cancelled)
+    end
+    defer @@context_lock.leave
+    store_locked(id, node)
+  end
+
+  protected def self.store_locked(id : UInt64, node : Metadata?) : Nil
+    index = -1
+    empty = -1
+    @@contexts.each_with_index do |slot, i|
+      index = i if slot.id == id
+      empty = i if slot.node.nil?
+    end
+    if index >= 0
+      @@contexts[index] = ContextSlot.new(id, node)
+    elsif node
+      slot = ContextSlot.new(id, node)
+      if empty >= 0
+        @@contexts[empty] = slot
+      else
+        Program.tape.run { @@contexts << slot }
       end
-      return unless done.is_a?(Cancelled)
     end
   end
 

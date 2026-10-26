@@ -217,7 +217,7 @@ pub class Mutex(T)
     @word.get & 1_u64 != 0_u64
   end
 
-  private def acquire : Cancelled?
+  protected def acquire : Cancelled?
     me = Mutex.task_id
     return nil if take(me)
     if @holder.get == me
@@ -269,7 +269,7 @@ pub class Mutex(T)
     true
   end
 
-  private def release : Nil
+  protected def release : Nil
     @holder.set(0_u64)
     @holder_thread.set(0_u64)
     # A change for `wait_for`, counted before the lock is free, so a waiter

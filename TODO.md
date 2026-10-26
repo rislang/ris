@@ -21,8 +21,10 @@ How to work (fewer tokens, faster to the goal):
 
 ## Remaining tape semantics
 
-* Finish ordinary class tape allocation for std-defined migration classes:
-  migrate TlsStream connection/body holders and log Metadata sharing.
+* Finish ordinary class tape allocation for HTTP migration classes:
+  migrate TlsStream connection/body holders. Opting these holders in
+  reaches joined server captures and opaque streamed-body callbacks;
+  establish checked lifetime contracts before enabling these paths.
   Unmarked runtime and std declarations still use the migration allocation
   ABI; selected std classes opt in with @[OnTape].
 * Stable growth on every supported tape target: replace moving backends

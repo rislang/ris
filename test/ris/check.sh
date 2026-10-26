@@ -842,6 +842,22 @@ if [ "$?" -eq 0 ] &&
 else
   echo "FAILED   text_format_tape: $out"; status=1
 fi
+out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc test/ris/log_metadata.ri 2>&1)
+if [ "$?" -eq 0 ] &&
+    grep -qF 'PASS: metadata, binding and nested contexts on tape' <<<"$out" &&
+    grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+  echo "runs     log_metadata (--no-gc)"
+else
+  echo "FAILED   log_metadata: $out"; status=1
+fi
+expect log_metadata_escape 'is a variable of the code around this tape block'
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/log_metadata.ri 2>&1)
+if [ "$?" -eq 0 ] &&
+    grep -qF 'PASS: metadata, binding and nested contexts on tape' <<<"$out"; then
+  echo "runs     log_metadata (parallel inherited context)"
+else
+  echo "FAILED   log_metadata parallel: $out"; status=1
+fi
 out=$("$RIS" run test/ris/log_tape.ri 2>&1)
 if [ "$?" -eq 0 ] &&
     [ "$out" = 'logging: tape IO and retaining backend' ]; then

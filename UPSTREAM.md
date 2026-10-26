@@ -6,6 +6,11 @@ ris, take it to iyi with `git cherry-pick`; strike entries once merged.
 
 ## To take to iyi
 
+* Let Mutex subclasses acquire and release their lock in synchronous
+  methods, without materializing a callback over borrowed arguments.
+* Log.with_context yields directly to its synchronous block instead of
+  materializing a proc; retain context restoration on every exit.
+
 * Stack-allocate capture environments used only by defer callbacks;
   retain escaping storage when ordinary closures share the captures.
 * Panic source-line diagnostics use a stack buffer so formatting cannot
