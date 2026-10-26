@@ -663,20 +663,21 @@ class ::File
     end
   end
 
+  @[OnTape]
   struct Info
     getter size : Int64
     getter permissions : Permissions
     getter type : Type
     getter flags : Flags
     getter modification_time : Int64
-    getter owner_id : String
-    getter group_id : String
+    getter owner_id : Str
+    getter group_id : Str
     getter dev : Int64
     getter ino : UInt64
 
     def initialize(@size : Int64, @permissions : Permissions, @type : Type,
                    @flags : Flags, @modification_time : Int64,
-                   @owner_id : String, @group_id : String,
+                   @owner_id : Str, @group_id : Str,
                    @dev : Int64 = 0_i64, @ino : UInt64 = 0_u64)
     end
 
@@ -712,24 +713,70 @@ class ::File
     end
   end
 
-  def self.info(path : String | Path, follow_symlinks : Bool = true) : Info
+  {% if flag?(:darwin) || flag?(:linux) %}
+    # stat/lstat borrow the NUL-terminated caller-tape path for this call.
+    @[TapeUnsafe]
+    private def self.metadata_stat(path : Str, follow : Bool,
+                                   result : Std::File::LibC::Stat*) : Int32
+      if follow
+        Std::File::LibC.stat(path.to_unsafe, result)
+      else
+        Std::File::LibC.lstat(path.to_unsafe, result)
+      end
+    end
+
+    # access borrows the NUL-terminated caller-tape path for this call.
+    @[TapeUnsafe]
+    private def self.metadata_access(path : Str, mode : Int32) : Int32
+      Std::File::LibC.access(path.to_unsafe, mode)
+    end
+  {% elsif flag?(:win32) %}
+    # The native converter borrows the NUL-terminated caller-tape path.
+    @[TapeUnsafe]
+    private def self.metadata_wide(path : Str) : UInt16*
+      __iyi_wide_path(path.to_unsafe)
+    end
+  {% end %}
+
+  private def self.metadata_path(path : Str | String | Path) : Str
+    text = path.is_a?(Str) ? path : Str.view(path.to_s)
+    writer = Str::Builder.new(text.bytesize + 1)
+    text.each_byte do |byte|
+      raise "path contains a NUL byte" if byte == 0_u8
+      writer.push(byte)
+    end
+    writer.push(0_u8)
+    writer.finish
+  end
+
+  private def self.metadata_id(value : Int32 | UInt32) : Str
+    writer = Str::Builder.new(10)
+    (value.to_i64 & 0xffffffff_i64).to_u64.to_s(writer)
+    writer.finish
+  end
+
+  def self.info(path : Str | String | Path, follow_symlinks : Bool = true) : Info
     res = info?(path, follow_symlinks)
     if res
       res
     else
-      raise "File not found: #{path.to_s}"
+      if path.is_a?(Str)
+        message = Str.build(16 + path.bytesize) do |writer|
+          writer << "File not found: "
+          writer << path
+        end
+        raise message
+      else
+        raise "File not found: #{path.to_s}"
+      end
     end
   end
 
-  def self.info?(path : String | Path, follow_symlinks : Bool = true) : Info?
-    p = path.to_s
+  def self.info?(path : Str | String | Path, follow_symlinks : Bool = true) : Info?
+    p = metadata_path(path)
     {% if flag?(:darwin) %}
       stat_buf = uninitialized Std::File::LibC::Stat
-      ret = if follow_symlinks
-              Std::File::LibC.stat(sys_path(p), pointerof(stat_buf))
-            else
-              Std::File::LibC.lstat(sys_path(p), pointerof(stat_buf))
-            end
+      ret = metadata_stat(p, follow_symlinks, pointerof(stat_buf))
       return nil if ret != 0
 
       mode_int = stat_buf.st_mode_nlink.to_i64 & 0xffff_i64
@@ -753,19 +800,15 @@ class ::File
       file_flags = Flags.new(flag_val)
 
       mtime = stat_buf.st_mtimespec.tv_sec
-      owner = stat_buf.st_uid.to_s
-      group = stat_buf.st_gid.to_s
+      owner = metadata_id(stat_buf.st_uid)
+      group = metadata_id(stat_buf.st_gid)
       dev = stat_buf.st_dev.to_i64
       ino = stat_buf.st_ino
 
       Info.new(stat_buf.st_size, perms, file_type, file_flags, mtime, owner, group, dev, ino)
     {% elsif flag?(:linux) %}
       stat_buf = uninitialized Std::File::LibC::Stat
-      ret = if follow_symlinks
-              Std::File::LibC.stat(sys_path(p), pointerof(stat_buf))
-            else
-              Std::File::LibC.lstat(sys_path(p), pointerof(stat_buf))
-            end
+      ret = metadata_stat(p, follow_symlinks, pointerof(stat_buf))
       return nil if ret != 0
 
       mode_int = stat_buf.st_mode.to_i64 & 0xffff_i64
@@ -789,14 +832,14 @@ class ::File
       file_flags = Flags.new(flag_val)
 
       mtime = stat_buf.st_mtime.tv_sec
-      owner = stat_buf.st_uid.to_s
-      group = stat_buf.st_gid.to_s
+      owner = metadata_id(stat_buf.st_uid)
+      group = metadata_id(stat_buf.st_gid)
       dev = stat_buf.st_dev.to_i64
       ino = stat_buf.st_ino
 
       Info.new(stat_buf.st_size, perms, file_type, file_flags, mtime, owner, group, dev, ino)
     {% elsif flag?(:win32) %}
-      wpath = __iyi_wide_path(sys_path(p))
+      wpath = metadata_wide(p)
       return nil if wpath.address == 0_u64
       data = uninitialized Std::File::LibKernel32::WIN32_FILE_ATTRIBUTE_DATA
       # 0 is GetFileExInfoStandard, the one level this call answers.
@@ -808,8 +851,8 @@ class ::File
         # attributes open the device to see, and what is there is a
         # character device: no size, time or identity, mode 0o666 as
         # `/dev/null`.
-        if refused == 87 && __iyi_path_attributes(sys_path(p)) != -1
-          return Info.new(0_i64, Permissions.new(0o666), Type::CharacterDevice, Flags.new(0), 0_i64, "0", "0")
+        if refused == 87 && __iyi_path_attributes(c_path(path.is_a?(Str) ? path : path.to_s)) != -1
+          return Info.new(0_i64, Permissions.new(0o666), Type::CharacterDevice, Flags.new(0), 0_i64, Str.new("0"), Str.new("0"))
         end
         # A file another process holds without sharing refuses the call
         # (ERROR_SHARING_VIOLATION, 32), and `info` said "File not found"
@@ -915,27 +958,27 @@ class ::File
       # `st_mtime`.
       mtime = (write_ticks - 116444736000000000_i64) // 10000000_i64
 
-      Info.new(size, perms, file_type, Flags.new(0), mtime, "0", "0", dev, ino)
+      Info.new(size, perms, file_type, Flags.new(0), mtime, Str.new("0"), Str.new("0"), dev, ino)
     {% else %}
       nil
     {% end %}
   end
 
-  def self.size(path : String | Path) : Int64
+  def self.size(path : Str | String | Path) : Int64
     info(path).size
   end
 
-  def self.file?(path : String | Path) : Bool
+  def self.file?(path : Str | String | Path) : Bool
     inf = info?(path)
     inf ? inf.file? : false
   end
 
-  def self.directory?(path : String | Path) : Bool
+  def self.directory?(path : Str | String | Path) : Bool
     inf = info?(path)
     inf ? inf.directory? : false
   end
 
-  def self.symlink?(path : String | Path) : Bool
+  def self.symlink?(path : Str | String | Path) : Bool
     inf = info?(path, follow_symlinks: false)
     inf ? inf.symlink? : false
   end
@@ -977,9 +1020,10 @@ class ::File
     end
   {% end %}
 
-  def self.readable?(path : String | Path) : Bool
+  def self.readable?(path : Str | String | Path) : Bool
+    p = metadata_path(path)
     {% if flag?(:darwin) || flag?(:linux) %}
-      Std::File::LibC.access(sys_path(path.to_s), 4) == 0
+      metadata_access(p, 4) == 0
     {% elsif flag?(:win32) %}
       opened = win_opens?(path.to_s, -2147483648) # GENERIC_READ
       return opened unless opened.nil?
@@ -991,9 +1035,10 @@ class ::File
     {% end %}
   end
 
-  def self.writable?(path : String | Path) : Bool
+  def self.writable?(path : Str | String | Path) : Bool
+    p = metadata_path(path)
     {% if flag?(:darwin) || flag?(:linux) %}
-      Std::File::LibC.access(sys_path(path.to_s), 2) == 0
+      metadata_access(p, 2) == 0
     {% elsif flag?(:win32) %}
       opened = win_opens?(path.to_s, 0x40000000) # GENERIC_WRITE
       return opened unless opened.nil?
@@ -1009,9 +1054,10 @@ class ::File
   # and `CreateProcess`'s search go by - and a directory is searchable
   # when it can be read. `cmd.exe` answered false: the made-up mode gave
   # the execute bit to directories alone.
-  def self.executable?(path : String | Path) : Bool
+  def self.executable?(path : Str | String | Path) : Bool
+    p = metadata_path(path)
     {% if flag?(:darwin) || flag?(:linux) %}
-      Std::File::LibC.access(sys_path(path.to_s), 1) == 0
+      metadata_access(p, 1) == 0
     {% elsif flag?(:win32) %}
       inf = info?(path)
       return false unless inf
@@ -1026,12 +1072,12 @@ class ::File
     {% end %}
   end
 
-  def self.empty?(path : String | Path) : Bool
+  def self.empty?(path : Str | String | Path) : Bool
     inf = info?(path)
     inf ? inf.size == 0_i64 : false
   end
 
-  def self.same?(path1 : String | Path, path2 : String | Path) : Bool
+  def self.same?(path1 : Str | String | Path, path2 : Str | String | Path) : Bool
     i1 = info?(path1)
     i2 = info?(path2)
     return false unless i1 && i2
@@ -1621,7 +1667,7 @@ class ::File
     raise "cannot read #{path}" unless File.exists?(path.to_s)
     # Asked before the open: Windows refuses to open a directory at all,
     # with the open's own sentence, where Linux opens it and fails the read.
-    raise "cannot read #{path}: it is a directory, or the read failed" if File.directory?(path.to_s)
+    raise "cannot read #{path}: it is a directory, or the read failed" if File.directory?(path)
     io = File.open(path.to_s, "r", 65536)
     defer io.close
     while line = io.read_line(chomp: true)

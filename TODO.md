@@ -21,9 +21,12 @@ How to work (fewer tokens, faster to the goal):
 
 ## Workload blockers (goose-evaluations, 2026-10-26)
 
-* File metadata on tape: File.size takes String or Path only, so the
-  JSON, YAML and Ninja ports copy the path to the heap. Add Str forms,
-  move callers, then recheck those ports under --no-gc.
+* Windows file metadata: move native wide-path conversion and auxiliary
+  stat buffers onto tape, then gate Str metadata under --no-gc there.
+  POSIX metadata and missing-file errors pass the zero-heap gate.
+* JSON Canada's float parsing reaches IyiBig's heap allocation after
+  dropping File.size(path.to_heap)'s copy. Move the slow float path onto
+  tape and recheck Canada under --no-gc.
 * jq under --no-gc runs 5-13x slower than Goose: find the cause once
   the ports run; speed tests otherwise stay off.
 

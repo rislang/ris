@@ -1,0 +1,40 @@
+module test/ris/file_metadata
+import std/file
+
+input = Program.arguments[0]
+backing = "#{input}not part of the path"
+path = backing[0, input.bytesize]
+missing = "#{path}.missing"
+raise "size" unless File.size(path) == 9
+info = File.info(path)
+raise "info" unless info.file? && info.size == File.size(path)
+raise "ids" if info.owner_id.empty? || info.group_id.empty?
+raise "identity" unless File.same?(path, path)
+raise "exists" unless File.exists?(path) && !File.exists?(missing)
+raise "types" unless File.file?(path) && !File.directory?(path)
+raise "directory" unless File.directory?("test/ris")
+raise "link" if File.symlink?(path)
+raise "readable" unless File.readable?(path)
+raise "writable" unless File.writable?(path)
+raise "executable" if File.executable?(path)
+raise "empty" if File.empty?(path)
+raise "missing info" if File.info?(missing)
+raise "missing predicates" if File.file?(missing) ||
+  File.directory?(missing) || File.symlink?(missing) ||
+  File.readable?(missing) || File.writable?(missing) ||
+  File.executable?(missing) || File.empty?(missing) ||
+  File.same?(path, missing)
+if Program.arguments.size > 2
+  link = Program.arguments[2]
+  raise "symlink" unless File.symlink?(link) && File.file?(link)
+  raise "lstat" unless File.info(link, follow_symlinks: false).symlink?
+  raise "stat" unless File.info(link).same_file?(info)
+end
+if Program.arguments.size > 1 && Program.arguments[1] != "ok"
+  if Program.arguments[1] == "nul"
+    File.info("#{path}\0suffix")
+  end
+  File.size(missing) if Program.arguments[1] == "size"
+  File.info(missing)
+end
+puts "PASS: file metadata, zero heap"

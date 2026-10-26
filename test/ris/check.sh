@@ -33,6 +33,14 @@ expect() {
   fi
 }
 
+# Metadata paths, IDs and missing-file diagnostics stay on tape.
+out=$(RIS="$RIS" bash test/ris/file_metadata.sh 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo "runs     file_metadata (--no-gc, zero heap, missing paths)"
+else
+  echo "FAILED   file_metadata: $out"; status=1
+fi
+
 # Importing math and using its tables must never allocate on the heap.
 out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc test/ris/math_no_heap.ri 2>&1)
 if [ "$?" -eq 0 ] &&

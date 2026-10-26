@@ -3128,7 +3128,7 @@ class IyiScheduler
   # main fiber has no boundary above it, so after its drain the process
   # exits 1. Every registered cleanup on the path has run either way,
   # which is the promise `defer` makes.
-  def self.panic_current(message : String) : NoReturn
+  def self.panic_current(message : String | Str) : NoReturn
     # A panic raised inside one of the scheduler's critical sections - the
     # runtime's own sanity checks raise there - lets the lock go first: the
     # boundary below takes it, and would wait on itself forever.
@@ -3149,7 +3149,14 @@ class IyiScheduler
     # deferred `g.join`, above all — must see that its owner is already
     # dying and keep quiet rather than re-raise into the unwind.
     fiber.panicked = true
-    fiber.panic_message = message
+    # Only a spawned task retains its message beyond this unwind. Copy
+    # tape text here, before cleanup releases it; main exits after cleanup
+    # and needs no retained String. String messages already own their bytes.
+    if message.is_a?(String)
+      fiber.panic_message = message
+    elsif !fiber.proc.is_a?(Nil)
+      fiber.panic_message = message.to_heap
+    end
     # A deadlock found while this fiber waited in a group's join: that join
     # is a cleanup already off the list, and it is finished here as a
     # panicking owner's, its tasks cancelled and their cleanups run.
