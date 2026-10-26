@@ -17,10 +17,9 @@ How to work (fewer tokens, faster to the goal):
 
 ## A. Budget to zero (do in this order: largest win first)
 
-1. orders 9, request 9: UTC's Location and List backing arrays.
-2. serve.ri 39, web.ri 27: request path past the shared startup.
-3. logline 16, chat 14, rest under 10: per-site fixes.
-4. static-user-sites column to 0 for every row.
+1. serve.ri 13, web.ri 12: remaining request objects and closures.
+2. logline 4: IO, backend, logger and context mutex objects.
+3. static-user-sites column to 0 for every row.
 
 ## B. Language pieces the budget needs (pull in only when A is blocked)
 

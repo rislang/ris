@@ -38,8 +38,11 @@ def drain(socket : IyiSocket, want : Int64) : Int64
 end
 
 on_tape = Program.arguments.includes?("answer")
-headers = {"Content-Type" => "application/json"}
-reply = Server.format_response(Response.new(200, BODY, headers), false, false)
+headers = on_tape ? nil : {"Content-Type" => "application/json"}
+response = Outgoing.new
+response.header("Content-Type", "application/json")
+response.body << BODY
+reply = Server.format_response(response, false, false)
 want = reply.bytesize.to_i64 * N
 listener = IyiSocket.listen(0)
 batch = REQUEST * 1000
@@ -54,7 +57,7 @@ group do |g|
         res.header("Content-Type", "application/json")
         res.body.append(BODY)
       end
-    else
+    elsif headers
       Server.serve(listener) { |req| Response.new(200, BODY, headers) }
     end
     0

@@ -806,19 +806,19 @@ pub class IyiSocket
   # *host* and *port* as a message names them: an IPv6 literal in its
   # brackets, as a URL writes it. Bare, `::1:57456` was an address with
   # no port, and `ff02::1:80` another address altogether.
-  def self.endpoint(host : String | Str, port : Int32) : String
-    peer = ""
-    tape do
-      text = Str.build(host.bytesize + 16) do |writer|
-        brackets = host.includes?(":") && !host.starts_with?("[")
-        writer << '[' if brackets
-        writer << host
-        writer << ']' if brackets
-        writer << ':' << port
-      end
-      peer = text.to_heap
+  def self.endpoint(host : Str, port : Int32) : Str
+    Str.build(host.bytesize + 16) do |writer|
+      brackets = host.includes?(":") && !host.starts_with?("[")
+      writer << '[' if brackets
+      writer << host
+      writer << ']' if brackets
+      writer << ':' << port
     end
-    peer
+  end
+
+  @[TapeToHeap]
+  def self.endpoint(host : String, port : Int32) : String
+    endpoint(host.as_tape, port).to_heap
   end
 
   # The stream socket listening at *path*.
@@ -833,7 +833,16 @@ pub class IyiSocket
   # bound reaches `__sys_connect` as well as the wait after it, because
   # on Windows that call is the wait: it parks in `ConnectEx` until the
   # handshake is over.
-  def self.connect_to(addr : Pointer(UInt8), family : Int32, peer : String, ms : Int32 = -1) : IyiSocket | Cancelled | SocketError
+  # The OS borrows the packed address until connect has completed.
+  @[TapeUnsafe]
+  def self.connect_to(addr : Str, family : Int32, peer : String | Str,
+                      ms : Int32 = -1) : IyiSocket | Cancelled | SocketError
+    connect_to(addr.to_unsafe, family, peer, ms)
+  end
+
+  # SocketError still retains its operation text on the heap.
+  @[TapeToHeap]
+  def self.connect_to(addr : Pointer(UInt8), family : Int32, peer : String | Str, ms : Int32 = -1) : IyiSocket | Cancelled | SocketError
     fd = __sys_socket(family)
     return SocketError.new("create a socket", __sys_code(fd.to_i64)) if fd < 0
     __sys_no_sigpipe(fd)
@@ -1000,7 +1009,10 @@ pub class IyiSocket
     read(buffer, count)
   end
 
-  def write(contents : String) : Int32 | Cancelled | SocketError
+  # The OS borrows the text only until the write completes.
+  @[TapeUnsafe]
+  def write(contents : String | Str) : Int32 | Cancelled | SocketError
+    contents = contents.as_tape
     # Checked before the loop: `write("")` on a closed socket has nothing
     # to send and answered 0 where `write("x")` refused.
     raise "socket is closed" if @fd < 0
@@ -1168,7 +1180,10 @@ pub class IyiSocket
     end
   {% end %}
 
-  def self.listen(host : String, port : Int32, backlog : Int32 = 128) : IyiSocket
+  # Bind borrows the address; its legacy failure keeps operation text.
+  @[TapeToHeap]
+  @[TapeUnsafe]
+  def self.listen(host : String | Str, port : Int32, backlog : Int32 = 128) : IyiSocket
     addr, family = sockaddr(host, port)
     fd = __sys_socket(family)
     raise "cannot create socket" if fd < 0
@@ -1179,7 +1194,7 @@ pub class IyiSocket
     # With the reason, which the refusal dropped: a port somebody holds
     # and one the system forbids - on Windows, a range Hyper-V or WSL
     # reserved - read alike.
-    bound = __sys_bind(fd, addr, family)
+    bound = __sys_bind(fd, addr.to_unsafe, family)
     if bound < 0
       code = __sys_code(bound.to_i64)
       __sys_close(fd)
@@ -1548,40 +1563,60 @@ pub class IyiSocket
   def self.sockaddr(
     host : String | Str,
     port : Int32,
-  ) : Tuple(Pointer(UInt8), Int32)
+  ) : Tuple(Str, Int32)
     size = host.bytesize
     if size >= 2 && host.as_tape[0].chr == '[' &&
        host.as_tape[size - 1].chr == ']'
-      return {make_sockaddr_in6(parse_ipv6(host[1, size - 2]), port), AF_INET6}
+      return {address_bytes(parse_ipv6(host[1, size - 2]), port), AF_INET6}
     end
-    return {make_sockaddr_in6(parse_ipv6(host), port), AF_INET6} if host.includes?(":")
-    {make_sockaddr_in(parse_ip(host), port), AF_INET}
+    return {address_bytes(parse_ipv6(host), port), AF_INET6} if host.includes?(":")
+    {address_bytes(parse_ip(host), port), AF_INET}
+  end
+
+  # Packed addresses belong to the caller's tape, through the OS call.
+  def self.address_bytes(ip : IPv4Address, port : Int32) : Str
+    raise "port #{port} is not a port: 0 to 65535" if port < 0 || port > 65535
+    Str.build(16) do |writer|
+      {% if flag?(:darwin) %}
+        writer.push(16_u8)
+        writer.push(2_u8)
+      {% else %}
+        writer.push(2_u8)
+        writer.push(0_u8)
+      {% end %}
+      writer.push(((port >> 8) & 255).to_u8)
+      writer.push((port & 255).to_u8)
+      writer.push(ip.b0)
+      writer.push(ip.b1)
+      writer.push(ip.b2)
+      writer.push(ip.b3)
+      8.times { writer.push(0_u8) }
+    end
+  end
+
+  def self.address_bytes(ip : IPv6Address, port : Int32) : Str
+    raise "port #{port} is not a port: 0 to 65535" if port < 0 || port > 65535
+    Str.build(28) do |writer|
+      {% if flag?(:darwin) %}
+        writer.push(28_u8)
+        writer.push(AF_INET6.to_u8)
+      {% else %}
+        writer.push(AF_INET6.to_u8)
+        writer.push(0_u8)
+      {% end %}
+      writer.push(((port >> 8) & 255).to_u8)
+      writer.push((port & 255).to_u8)
+      4.times { writer.push(0_u8) }
+      16.times { |i| writer.push(ip[i]) }
+      4.times { writer.push(0_u8) }
+    end
   end
 
   # A `sockaddr_in6`: family, port, a zero flow label, the address, a zero
   # scope. The family's number and where it sits are the platform's.
+  @[TapeToHeap]
   def self.make_sockaddr_in6(ip : IPv6Address, port : Int32) : Pointer(UInt8)
-    raise "port #{port} is not a port: 0 to 65535" if port < 0 || port > 65535
-    buffer = Pointer(UInt8).malloc(28_u64)
-    index = 0
-    while index < 28
-      buffer[index] = 0_u8
-      index = index + 1
-    end
-    {% if flag?(:darwin) %}
-      buffer[0] = 28_u8 # sin6_len
-      buffer[1] = AF_INET6.to_u8
-    {% else %}
-      buffer[0] = AF_INET6.to_u8
-    {% end %}
-    buffer[2] = ((port >> 8) & 255).to_u8
-    buffer[3] = (port & 255).to_u8
-    index = 0
-    while index < 16
-      buffer[8 + index] = ip[index]
-      index = index + 1
-    end
-    buffer
+    address_bytes(ip, port).to_heap.to_unsafe
   end
 
   # A `sockaddr_un`: the family, then the path and its NUL. The room for
@@ -1626,36 +1661,9 @@ pub class IyiSocket
     buffer
   end
 
+  @[TapeToHeap]
   def self.make_sockaddr_in(ip : IPv4Address, port : Int32) : Pointer(UInt8)
-    # A port is sixteen bits, and this packed it without asking: `listen`
-    # with 70000 bound 4464 (70000 - 65536) and `-1` bound 65535, so a
-    # program that computed a port wrong was given a different one and told
-    # nothing. Both callers - `connect` and `listen` - come through here.
-    raise "port #{port} is not a port: 0 to 65535" if port < 0 || port > 65535
-    buffer = Pointer(UInt8).malloc(16_u64)
-    index = 0
-    while index < 16
-      buffer[index] = 0_u8
-      index = index + 1
-    end
-
-    {% if flag?(:darwin) %}
-      buffer[0] = 16_u8 # sin_len = 16
-      buffer[1] = 2_u8  # sin_family = AF_INET (2)
-    {% else %}
-      buffer[0] = 2_u8 # sin_family = AF_INET (2) (little-endian uint16)
-      buffer[1] = 0_u8
-    {% end %}
-
-    buffer[2] = ((port >> 8) & 255).to_u8
-    buffer[3] = (port & 255).to_u8
-
-    buffer[4] = ip.b0
-    buffer[5] = ip.b1
-    buffer[6] = ip.b2
-    buffer[7] = ip.b3
-
-    buffer
+    address_bytes(ip, port).to_heap.to_unsafe
   end
 
   # Every close of a socket in this file goes through here. `__iyi_close` is

@@ -5,7 +5,7 @@
 # Each day's log is read on its own tape: its lines, the parsed hits, the
 # filtered and sorted arrays and the report text all go on it, and all
 # are freed at once when `tape do ... end` ends. Only what must outlive
-# the day - its slowest path - is copied to the heap, with `to_heap`.
+# the day - its slowest path - is copied to the program owner, with `copy_to`.
 #
 # Moving a tape value out of its block is refused by the compiler:
 # `kept = hits` inside the block, with `kept` from outside, does not build.
@@ -37,7 +37,7 @@ DAYS = Ary(Str){
   "GET / 200 4\nGET /search 200 1210\nGET /users/9 404 3\n",
 }
 
-slowest = [] of String # on the heap: it lives past every day
+slowest = Ary(Str).new(DAYS.size)
 
 DAYS.each_with_index do |log, day|
   tape do
@@ -54,9 +54,12 @@ DAYS.each_with_index do |log, day|
     top.each { |h| report << " " << h.path << " (" << h.ms << " ms)" }
     puts report
 
-    # The one copy off the tape: the slowest path outlives its day.
-    slowest << top.first.path.to_heap unless top.empty?
+    # The copy to the program owner: the slowest path outlives its day.
+    slowest << top.first.path.copy_to(Program.tape) unless top.empty?
   end
 end
 
-puts "slowest each day: #{slowest.join(", ")}"
+summary = Str::Builder.new(128)
+summary << "slowest each day: "
+slowest.join(summary, ", ")
+puts summary

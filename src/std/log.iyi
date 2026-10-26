@@ -241,6 +241,21 @@ pub class DefaultFormatter < Formatter
     DefaultFormatter.write(entry, writer)
   end
 
+  def self.write(entry : Entry | TapeEntry, io : IO) : Nil
+    tape do
+      writer = Str::Builder.new(128)
+      write(entry, writer)
+      writer << '\n'
+      write_line(io, writer.finish)
+    end
+  end
+
+  # IO accepts bytes only for this synchronous write.
+  @[TapeUnsafe]
+  private def self.write_line(io : IO, line : Str) : Nil
+    io.write(line.to_unsafe, line.bytesize)
+  end
+
   # Also usable without constructing a formatter or backend.
   def self.write(entry : Entry | TapeEntry, writer : Str::Builder) : Nil
     entry.timestamp.to_rfc3339(6, writer)
@@ -260,14 +275,26 @@ pub abstract class Backend
 end
 
 pub class IOBackend < Backend
-  property formatter : Formatter
+  @formatter : Formatter?
   getter io : IO
 
-  def initialize(@io : IO, @formatter : Formatter = DefaultFormatter.new)
+  def initialize(@io : IO, @formatter : Formatter? = nil)
+  end
+
+  def formatter : Formatter
+    @formatter ||= DefaultFormatter.new
+  end
+
+  def formatter=(formatter : Formatter) : Formatter
+    @formatter = formatter
   end
 
   def write(entry : Entry | TapeEntry) : Nil
-    @formatter.format(entry, @io)
+    if formatter = @formatter
+      formatter.format(entry, @io)
+    else
+      DefaultFormatter.write(entry, @io)
+    end
     @io.flush
   end
 
@@ -412,7 +439,7 @@ pub class Logger
   @level : Severity?
   @backend : Backend?
   @parent : Logger?
-  @children : Hash(String, Logger)
+  @children : Hash(String, Logger)?
   # What `bind` gave this logger, on every entry it and its children write.
   @bound : Metadata?
 
@@ -420,7 +447,7 @@ pub class Logger
     @level = level
     @backend = backend
     @parent = parent
-    @children = Hash(String, Logger).new
+    @children = nil
     @bound = bound
   end
 
@@ -486,7 +513,8 @@ pub class Logger
   end
 
   protected def get_or_create_child(name : String) : Logger
-    if child = @children[name]?
+    children = @children
+    if children && (child = children[name]?)
       return child
     end
 
@@ -495,7 +523,11 @@ pub class Logger
     # logger.
     child_source = @parent.nil? && @source.empty? ? name : "#{@source}.#{name}"
     child = Logger.new(child_source, nil, nil, self)
-    @children[name] = child
+    unless children
+      children = Hash(String, Logger).new
+      @children = children
+    end
+    children[name] = child
     child
   end
 
@@ -676,7 +708,8 @@ pub class Log
 
   # Every task's open contexts, by the task's fiber; how many are open, so
   # a program that opens none never looks.
-  @@contexts : Mutex(Hash(UInt64, Metadata)) = Mutex.new { {} of UInt64 => Metadata }
+  @@contexts : Mutex(Hash(UInt64, Metadata)?) =
+    Mutex.new { nil.as(Hash(UInt64, Metadata)?) }
   @@open : Atomic(UInt64) = Atomic(UInt64).new(0_u64)
 
   # Runs the block with *data* on every entry logged in this task and in
@@ -759,19 +792,21 @@ pub class Log
   # again.
   private def self.context_of(id : UInt64) : Metadata?
     while true
-      found = @@contexts.get { |table| table[id]? }
+      found = @@contexts.get { |table| table ? table[id]? : nil }
       return found unless found.is_a?(Cancelled)
     end
   end
 
   private def self.store(id : UInt64, node : Metadata?) : Nil
     while true
-      done = @@contexts.lock do |table|
+      done = @@contexts.update do |table|
         if node
+          table ||= {} of UInt64 => Metadata
           table[id] = node
-        else
+        elsif table
           table.delete(id)
         end
+        table
       end
       return unless done.is_a?(Cancelled)
     end

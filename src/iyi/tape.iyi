@@ -282,6 +282,18 @@ struct Str
 
   # The byte at *index*, from the end when negative; one out of range
   # raises rather than reading what follows. `to_unsafe` is the library's.
+  # Byte order, with a prefix before the text it prefixes, as String's.
+  def <(other : Str) : Bool
+    index = 0
+    while index < @bytesize && index < other.bytesize
+      a = @ptr[index]
+      b = other[index]
+      return a < b if a != b
+      index += 1
+    end
+    @bytesize < other.bytesize
+  end
+
   # One unsigned compare on the way to the byte; a negative index
   # takes the other branch, counted from the end.
   def [](index : Int32) : UInt8

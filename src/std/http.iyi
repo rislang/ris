@@ -1671,7 +1671,9 @@ pub struct Server
           spawn_tape_handler(g, client, answerer, listener, idle)
         end
       end
-      idle.values.each { |waiting| waiting.close_for_stop }
+      waiting = Ary(Conn).new(idle.size)
+      idle.each_value { |conn| waiting << conn }
+      waiting.each { |conn| conn.close_for_stop }
       0
     end
   end
@@ -1794,14 +1796,10 @@ pub struct Server
     result
   end
 
-  # *answerer*'s answer to *req*, written from the tape: its head, then
-  # its body, in one write. Whether the connection goes on.
-  private def self.answered_on_tape?(client : IyiSocket, answerer : Proc(Incoming, Outgoing, Nil), req : Incoming, close : Bool) : Bool
-    res = Outgoing.new
-    answerer.call(req, res)
+  # The tape response's wire head, shared by measurement and serving.
+  def self.format_head(res : Outgoing, close : Bool) : Str
     status = res.status
     raise "HTTP: not a status: #{status}" unless status >= 100 && status <= 999
-    body = res.body.finish
     w = Str::Builder.new(256)
     w << "HTTP/1.1 "
     w.append_int(status)
@@ -1817,13 +1815,29 @@ pub struct Server
     bodiless = (status >= 100 && status < 200) || status == 204 || status == 304
     unless bodiless
       w << "Content-Length: "
-      w.append_int(body.bytesize)
+      w.append_int(res.body.length)
       w << "\r\n"
     end
     w << (close ? "Connection: close\r\n\r\n" : "Connection: keep-alive\r\n\r\n")
+    w.finish
+  end
+
+  def self.format_response(res : Outgoing, head : Bool, close : Bool) : Str
+    top = format_head(res, close)
+    head || HTTP.bodiless?(res.status) ? top : top + res.body.finish
+  end
+
+  # *answerer*'s answer to *req*, written from the tape: its head, then
+  # its body, in one write. Whether the connection goes on.
+  private def self.answered_on_tape?(client : IyiSocket, answerer : Proc(Incoming, Outgoing, Nil), req : Incoming, close : Bool) : Bool
+    res = Outgoing.new
+    answerer.call(req, res)
+    body = res.body.finish
+    top = format_head(res, close)
+    bodiless = HTTP.bodiless?(res.status)
     method = req.method
     sends = !bodiless && !HTTP.same_name?(method, "HEAD")
-    wrote = client.write(w.finish, sends ? body : "".as_tape)
+    wrote = client.write(top, sends ? body : "".as_tape)
     wrote.is_a?(Int32) && !close
   end
 
@@ -1959,7 +1973,9 @@ pub struct Server
       end
       # A copy: a stop's close_notify may wait, and other connections'
       # tasks leave the set meanwhile.
-      idle.values.each { |waiting| waiting.close_for_stop }
+      waiting = Ary(Conn).new(idle.size)
+      idle.each_value { |conn| waiting << conn }
+      waiting.each { |conn| conn.close_for_stop }
       0
     end
   end
@@ -2512,7 +2528,7 @@ pub struct Server
 
   # The response as it goes on the wire, whole: `format_head` for its
   # string body, and the body.
-  def self.format_response(response : Response, head : Bool, close : Bool) : String
+  def self.format_response(response : Response, head : Bool, close : Bool) : Str
     text = format_head(response, head, close, response.body.bytesize.to_i64, false)
     head || HTTP.bodiless?(response.status) ? text : text + response.body
   end
@@ -2528,80 +2544,76 @@ pub struct Server
   # of the next answer, and `Content-Length: 0` on a 304 told a cache that
   # the resource had become empty. A field added on lines of its own
   # (`add_header`) is written a line each.
-  def self.format_head(response : Response, head : Bool, close : Bool, length : Int64?, chunked : Bool, upgrade : Bool = false) : String
-    result = ""
-    tape do
-      # A status line the client half reads as written, refused otherwise as
-      # a request's lines are: `Response.new(200, "OK\r\nSet-Cookie: a=1",
-      # ...)` went out with a header of its own in the reason, and 2000 as
-      # `HTTP/1.1 2000 Server Error`, which `parse_response` refuses.
-      raise "HTTP: not a status: #{response.status}" unless response.status >= 100 && response.status <= 999
-      raise "HTTP: the reason contains a line break" if HTTP.has_break?(response.reason)
-      raise "HTTP: the reason contains a control character" if HTTP.control?(response.reason)
-      text = Str::Builder.new(256)
-      text << "HTTP/1.1 "
-      text.append_int(response.status)
-      text << " "
-      text << response.reason
-      text << "\r\n"
-      has_length = false
-      apart = response.apart
-      response.headers.each do |name, value|
-        raise "HTTP: not a header name: #{name.inspect}" unless HTTP.token?(name)
-        lines = nil.as(Array(String)?)
-        if split = apart
-          lines = split[name]?
+  def self.format_head(response : Response, head : Bool, close : Bool, length : Int64?, chunked : Bool, upgrade : Bool = false) : Str
+    # A status line the client half reads as written, refused otherwise as
+    # a request's lines are: `Response.new(200, "OK\r\nSet-Cookie: a=1",
+    # ...)` went out with a header of its own in the reason, and 2000 as
+    # `HTTP/1.1 2000 Server Error`, which `parse_response` refuses.
+    raise "HTTP: not a status: #{response.status}" unless response.status >= 100 && response.status <= 999
+    raise "HTTP: the reason contains a line break" if HTTP.has_break?(response.reason)
+    raise "HTTP: the reason contains a control character" if HTTP.control?(response.reason)
+    text = Str::Builder.new(256)
+    text << "HTTP/1.1 "
+    text.append_int(response.status)
+    text << " "
+    text << response.reason
+    text << "\r\n"
+    has_length = false
+    apart = response.apart
+    response.headers.each do |name, value|
+      raise "HTTP: not a header name: #{name.inspect}" unless HTTP.token?(name)
+      lines = nil.as(Array(String)?)
+      if split = apart
+        lines = split[name]?
+      end
+      raise "HTTP: header #{name} contains a line break" if HTTP.has_break?(value)
+      raise "HTTP: header #{name} contains a control character" if HTTP.control?(value)
+      next if HTTP.same_name?(name, "Connection") && !upgrade
+      # The body goes with its length or its chunks, which are the server's
+      # to write: a caller's chunked framing went out beside
+      # `Content-Length` (RFC 9112 §6.1), and a caller's length was written
+      # whatever the body was, so "2" on "hello" was read as "he" and "llo"
+      # began the next answer.
+      raise "HTTP: #{name} is not written; the body goes with its length" if HTTP.same_name?(name, "Transfer-Encoding")
+      if HTTP.same_name?(name, "Content-Length")
+        unless head || response.status == 304 || length.nil?
+          n = HTTP.content_length(value)
+          raise "HTTP: #{name} #{value.inspect} is not the body's #{length} bytes" unless n && n == length
         end
-        raise "HTTP: header #{name} contains a line break" if HTTP.has_break?(value)
-        raise "HTTP: header #{name} contains a control character" if HTTP.control?(value)
-        next if HTTP.same_name?(name, "Connection") && !upgrade
-        # The body goes with its length or its chunks, which are the server's
-        # to write: a caller's chunked framing went out beside
-        # `Content-Length` (RFC 9112 §6.1), and a caller's length was written
-        # whatever the body was, so "2" on "hello" was read as "he" and "llo"
-        # began the next answer.
-        raise "HTTP: #{name} is not written; the body goes with its length" if HTTP.same_name?(name, "Transfer-Encoding")
-        if HTTP.same_name?(name, "Content-Length")
-          unless head || response.status == 304 || length.nil?
-            n = HTTP.content_length(value)
-            raise "HTTP: #{name} #{value.inspect} is not the body's #{length} bytes" unless n && n == length
-          end
-          has_length = true
-        end
-        if each_line = lines
-          each_line.each do |line|
-            text << name
-            text << ": "
-            text << line
-            text << "\r\n"
-          end
-        else
+        has_length = true
+      end
+      if each_line = lines
+        each_line.each do |line|
           text << name
           text << ": "
-          text << value
+          text << line
           text << "\r\n"
         end
+      else
+        text << name
+        text << ": "
+        text << value
+        text << "\r\n"
       end
-      unless has_length || HTTP.bodiless?(response.status)
-        if chunked
-          text << "Transfer-Encoding: chunked\r\n"
-        elsif written = length
-          text << "Content-Length: "
-          text.append_int(written)
-          text << "\r\n"
-        end
-      end
-      unless upgrade
-        if close
-          text << "Connection: close\r\n"
-        else
-          text << "Connection: keep-alive\r\n"
-        end
-      end
-      text << "\r\n"
-      result = text.finish.to_heap
     end
-    result
+    unless has_length || HTTP.bodiless?(response.status)
+      if chunked
+        text << "Transfer-Encoding: chunked\r\n"
+      elsif written = length
+        text << "Content-Length: "
+        text.append_int(written)
+        text << "\r\n"
+      end
+    end
+    unless upgrade
+      if close
+        text << "Connection: close\r\n"
+      else
+        text << "Connection: keep-alive\r\n"
+      end
+    end
+    text << "\r\n"
+    text.finish
   end
 end
 

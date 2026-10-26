@@ -42,6 +42,7 @@ import std/traits::{Comparable}
 import std/int
 import std/env::{ENV}
 import std/list::{List}
+import std/tuple
 
 pub struct DayOfWeek
   getter value : Int32
@@ -715,7 +716,7 @@ end
 #
 # A location is built once and never changed, so a `Time` that holds one
 # can cross to another task.
-pub class Location
+pub struct Location
   MIN_SECOND = -9223372036854775807_i64 - 1_i64
   MAX_SECOND = 9223372036854775807_i64
 
@@ -742,19 +743,33 @@ pub class Location
     end
   end
 
+  # Preserve local-location identity while the immutable zone is a value.
+  @@next_identity = Atomic(UInt64).new(0_u64)
+  @identity : UInt64
   getter name : String
-  @zones : List(Zone)
-  @transitions : List(Int64)
-  @transition_zones : List(Int32)
+  @zones : List(Zone) | ::Tuple(Zone)
+  @transitions : List(Int64)?
+  @transition_zones : List(Int32)?
   @rule : TzRule?
 
   protected def initialize(@name : String, zones : Array(Zone), transitions : Array(Int64), transition_zones : Array(Int32), @rule : TzRule?)
+    @identity = @@next_identity.add(1_u64) + 1_u64
     @zones = List(Zone).new(zones)
     @transitions = List(Int64).new(transitions)
     @transition_zones = List(Int32).new(transition_zones)
   end
 
-  UTC = Location.new("UTC", [Zone.new("UTC", 0, false)], [] of Int64, [] of Int32, nil)
+  # UTC's immutable data is inline; it needs no input or List arrays.
+  protected def initialize
+    @identity = 0_u64
+    @name = "UTC"
+    @zones = {Zone.new("UTC", 0, false)}
+    @transitions = nil
+    @transition_zones = nil
+    @rule = nil
+  end
+
+  UTC = Location.new
 
   @@local : Location? = nil
 
@@ -1079,12 +1094,13 @@ pub class Location
 
   # The machine's own zone, the one `Location.local` answers.
   def local? : Bool
-    object_id == Location.local.object_id
+    @identity == Location.local.@identity
   end
 
   # One offset, never changing.
   def fixed? : Bool
-    @transitions.empty? && @rule.nil? && @zones.size == 1
+    transitions = @transitions
+    (transitions.nil? || transitions.empty?) && @rule.nil? && @zones.size == 1
   end
 
   # The zone *time* is in here.
@@ -1098,28 +1114,31 @@ pub class Location
 
   # The zone at *unix*, and the instants it holds from and until.
   private def lookup_range(unix : Int64) : {Zone, Int64, Int64}
-    count = @transitions.size
+    transitions = @transitions
+    count = transitions ? transitions.size : 0
     if count == 0
       if rule = @rule
         return rule_zone(rule, unix)
       end
       return {@zones[0], MIN_SECOND, MAX_SECOND}
     end
-    first = @transitions[0]
+    return {@zones[0], MIN_SECOND, MAX_SECOND} unless transitions
+    transition_zones = @transition_zones || raise "time: transitions without zone indices"
+    first = transitions[0]
     return {@zones[0], MIN_SECOND, first} if unix < first
     low = 0
     high = count
     while high - low > 1
       middle = (low + high) // 2
-      if @transitions[middle] <= unix
+      if transitions[middle] <= unix
         low = middle
       else
         high = middle
       end
     end
-    zone = @zones[@transition_zones[low]]
-    from = @transitions[low]
-    return {zone, from, @transitions[low + 1]} if low + 1 < count
+    zone = @zones[transition_zones[low]]
+    from = transitions[low]
+    return {zone, from, transitions[low + 1]} if low + 1 < count
     if rule = @rule
       ruled, begins, ends = rule_zone(rule, unix)
       return {ruled, begins < from ? from : begins, ends}
@@ -1157,7 +1176,10 @@ pub class Location
   end
 
   def ==(other : Location) : Bool
-    return true if object_id == other.object_id
+    return true if @identity == other.@identity
+    if fixed? && other.fixed?
+      return @name == other.name && @zones[0] == other.@zones[0]
+    end
     return false unless @name == other.name && @zones == other.@zones && @transitions == other.@transitions && @transition_zones == other.@transition_zones
     mine = @rule
     theirs = other.@rule

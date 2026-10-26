@@ -1,34 +1,36 @@
-# A chat room: what lasts lives on the heap, each request on a tape.
+# A chat room: what lasts lives on the program tape, each request on a tape.
 #
 #   ./bin/ris run samples/ris/chat.ri
 #
 # Read it as a Rails controller's `create`: `message_params`, the 403 when
 # the user is not in the room, `create` saving the message, a view
 # rendered. The params and the view are on the request's tape; `create`
-# is the one place anything is copied to the heap.
+# is the one place anything is copied to the program owner.
 
 module Chat
-  # What outlives a request lives on the heap: users, the room, and the
-  # messages posted in it.
-  class User
+  # Users, the room and its posted messages live on the program tape.
+  @[OnTape]
+  struct User
     getter id : Int32
-    getter name : String
+    getter name : Str
 
-    def initialize(*, @id : Int32, @name : String)
+    def initialize(*, @id : Int32, @name : Str)
     end
   end
 
-  class Message
+  @[OnTape]
+  struct Message
     getter user : User
-    getter body : String
+    getter body : Str
 
-    def initialize(*, @user : User, @body : String)
+    def initialize(*, @user : User, @body : Str)
     end
   end
 
-  class Room
-    getter users = Array(User).new
-    getter messages = Array(Message).new
+  @[OnTape]
+  struct Room
+    getter users = Ary(User).new(3)
+    getter messages = Ary(Message).new(3)
 
     def user(id : Int32) : User?
       users.find { |user| user.id == id }
@@ -70,10 +72,10 @@ module Chat
     MessageParams.new(user_id: user_id, body: body)
   end
 
-  # As `@room.messages.create!`: the one copy to the heap, as a posted
+  # As `@room.messages.create!`: copy to the program owner, since a posted
   # message outlives its request.
   def self.create(room : Room, user : User, params : MessageParams) : Nil
-    room.messages << Message.new(user: user, body: params.body.to_heap)
+    room.messages << Message.new(user: user, body: params.body).copy_to(Program.tape)
   end
 
   # The view: the newest message first, then the users by name, all
@@ -89,7 +91,7 @@ module Chat
       response << message.user.name << ": " << message.body
     end
     response << " (users "
-    names = Ary(String).new(room.users.size) { |i| room.users[i].name }
+    names = Ary(Str).new(room.users.size) { |i| room.users[i].name }
     names.sort_in_place
     names.join(response, ", ")
     response << ")"

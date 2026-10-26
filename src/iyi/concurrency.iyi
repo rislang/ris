@@ -960,7 +960,9 @@ class IyiSchedulerState
   # The POSIX poller's waiters by descriptor: fd * 2 for the reader, fd *
   # 2 + 1 for the writer (`IyiScheduler.io_slot`). Made at the first io
   # wait, so a state that never waits on io holds nothing of the heap's.
-  property io_slots : Array(IyiFiber?)?
+  property io_slots : Pointer(IyiFiber?)
+  property io_capacity : Int32
+  @io_region : UInt64
   property pollfd : Int64
 
   # The poller's event buffer, as a *pointer*.
@@ -1066,6 +1068,38 @@ class IyiSchedulerState
     end
   {% end %}
 
+  # Scheduler-owned slots stay registered as GC roots for its lifetime.
+  # No caller keeps a slot view, so growth can release the old region.
+  def io_room(index : Int32) : Pointer(IyiFiber?)
+    return @io_slots if index < @io_capacity
+    capacity = @io_capacity.to_u64
+    capacity = 64_u64 if capacity == 0
+    while capacity <= index.to_u64
+      raise "io descriptor table is full" if capacity >= 1073741824_u64
+      capacity *= 2_u64
+    end
+    {% if (!flag?(:gc_none) || flag?(:linux)) && !flag?(:gc_boehm) &&
+          ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) ||
+           flag?(:darwin) || flag?(:win32) || flag?(:wasm32)) %}
+      bytes = IyiRegion.size_mul(capacity, sizeof(IyiFiber?).to_u64)
+      region = IyiRegion.acquire(IyiRegion.size_add(bytes, 32_u64))
+      start = IyiRegion.take(region, bytes, true, 0_u64)
+      slots = Pointer(IyiFiber?).new(start)
+      slots.copy_from(@io_slots, @io_capacity)
+      previous = @io_region
+      @io_region = region
+      @io_slots = slots
+      @io_capacity = capacity.to_i32
+      IyiRegion.release(previous) if previous != 0
+    {% else %}
+      slots = Pointer(IyiFiber?).malloc(capacity)
+      slots.copy_from(@io_slots, @io_capacity)
+      @io_slots = slots
+      @io_capacity = capacity.to_i32
+    {% end %}
+    @io_slots
+  end
+
   def initialize
     @pollfd = 0_i64
     @events = Pointer(UInt8).new(0_u64)
@@ -1073,7 +1107,9 @@ class IyiSchedulerState
     @sleep_seq = 0_u64
     @parks = 0_u64
     @polled_at = 0_i64
-    @io_slots = nil
+    @io_slots = Pointer(IyiFiber?).new(0_u64)
+    @io_capacity = 0
+    @io_region = 0_u64
     @mail = Atomic(UInt64).new(0_u64)
     @idle = false
     @quiet = false
@@ -2326,10 +2362,9 @@ class IyiScheduler
 
   # The fiber waiting on *fd* in *direction* (1 to read, 4 to write).
   def self.io_slot(fd : Int32, direction : Int32) : IyiFiber?
-    slots = state.io_slots
-    return nil if slots.is_a?(Nil)
+    st = state
     index = fd * 2 + (direction == 1 ? 0 : 1)
-    index < slots.size ? slots[index] : nil
+    index >= 0 && index < st.io_capacity ? st.io_slots[index] : nil
   end
 
   # Onto the io list and into its fd's slot. The list is what says that
@@ -2345,15 +2380,8 @@ class IyiScheduler
     fiber.prev_io = nil
     head.prev_io = fiber if head.is_a?(IyiFiber)
     st.io_head = fiber
-    slots = st.io_slots
-    if slots.is_a?(Nil)
-      slots = [] of IyiFiber?
-      st.io_slots = slots
-    end
     index = fiber.wait_fd * 2 + (fiber.wait_dir == 1 ? 0 : 1)
-    while slots.size <= index
-      slots << nil
-    end
+    slots = st.io_room(index)
     slots[index] = fiber
   end
 
@@ -2375,7 +2403,7 @@ class IyiScheduler
     fiber.prev_io = nil
     slots = st.io_slots
     index = fiber.wait_fd * 2 + (fiber.wait_dir == 1 ? 0 : 1)
-    if slots.is_a?(Array(IyiFiber?)) && index >= 0 && index < slots.size
+    if index >= 0 && index < st.io_capacity
       held = slots[index]
       slots[index] = nil if held.is_a?(IyiFiber) && held.object_id == fiber.object_id
     end
