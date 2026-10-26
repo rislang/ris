@@ -780,6 +780,31 @@ struct Str::Builder
     @state.value = cursor &+ count.to_u64
   end
 
+  # All UInt64 values, including the half that does not fit Int64.
+  def append_uint(value : UInt64, radix : Int32 = 10) : Nil
+    raise "base out of range" if radix < 2 || radix > 36
+    digits = uninitialized StaticArray(UInt8, 64)
+    bytes = pointerof(digits).as(Pointer(UInt8))
+    left = value
+    count = 0
+    base = radix.to_u64
+    while true
+      digit = (left % base).to_i32
+      bytes[63 - count] = (digit < 10 ? 48 + digit : 87 + digit).to_u8
+      count += 1
+      left = left // base
+      break if left == 0_u64
+    end
+    append(bytes + (64 - count), count)
+  end
+
+  def append_int(value : Int64, radix : Int32) : Nil
+    raise "base out of range" if radix < 2 || radix > 36
+    magnitude = value < 0 ? 0_u64 &- value.unsafe_to_u64 : value.to_u64
+    push(45_u8) if value < 0
+    append_uint(magnitude, radix)
+  end
+
   def append_int(value : Int32) : Nil
     append_int(value.to_i64)
   end
@@ -792,6 +817,10 @@ struct Str::Builder
 
   def append_value(value : Int8 | Int16 | Int32 | Int64 | UInt8 | UInt16 | UInt32) : Nil
     append_int(value.to_i64)
+  end
+
+  def append_value(value : UInt64) : Nil
+    append_uint(value)
   end
 
   def append_value(value : Float64) : Nil
@@ -2807,7 +2836,7 @@ struct Str
 
   # Diagnostic text is retained only when a caller asks for inspection.
   def inspect : String
-    to_heap.inspect
+    Str.build(bytesize + 2) { |w| inspect(w) }.to_heap
   end
 end
 
@@ -2936,5 +2965,101 @@ module Tape
       __iyi_pending_pop(pointerof(guard))
       result
     end
+  end
+end
+
+# Heap builders keep their API, writing numeric text on the caller's tape
+# before copying the bytes into their existing buffer. No numeric String.
+class String::Builder
+  def <<(value : Int8 | Int16 | Int32 | Int64 | UInt8 | UInt16 | UInt32 | UInt64 | Float64) : self
+    text = Str.build(65) { |w| w.append_value(value) }
+    text.each_byte { |byte| write_byte(byte) }
+    self
+  end
+end
+
+struct Int64
+  def to_s(writer : Str::Builder, base : Int32 = 10) : Nil
+    writer.append_int(self, base)
+  end
+end
+
+struct UInt64
+  def to_s(writer : Str::Builder, base : Int32 = 10) : Nil
+    writer.append_uint(self, base)
+  end
+end
+
+# Byte-for-byte diagnostic quoting, with the inherited String spelling.
+struct Str
+  def inspect(writer : Str::Builder) : Nil
+    writer.push(34_u8)
+    index = 0
+    while index < bytesize
+      lead = self[index].to_i32
+      width = lead < 0xC2 || lead > 0xF4 ? 1 : lead < 0xE0 ? 2 : lead < 0xF0 ? 3 : 4
+      point = width > 1 ? lead & (0x7F >> width) : lead < 0x80 ? lead : -1
+      k = 1
+      while k < width && point >= 0
+        byte = index + k < bytesize ? self[index + k].to_i32 : 0
+        point = (byte & 0xC0) == 0x80 ? (point << 6) | (byte & 0x3F) : -1
+        k += 1
+      end
+      if width > 1 && (point < (1 << (5 * width - 4)) || point > 0x10FFFF || (point >= 0xD800 && point < 0xE000))
+        point = -1
+      end
+      if point < 0
+        writer << "\\x"
+        inspect_hex(writer, lead, 2)
+        width = 1
+      elsif point == 34 || point == 92
+        writer.push(92_u8)
+        writer.push(point.to_u8)
+      elsif point >= 7 && point <= 13
+        writer.push(92_u8)
+        writer.push("abtnvfr".as_tape[point - 7])
+      elsif point == 27
+        writer << "\\e"
+      elsif point.unsafe_chr.printable?
+        writer.push(92_u8) if point == 35 && index + 1 < bytesize && self[index + 1] == 123_u8
+        writer << self[index, width]
+      elsif point > 0xFFFF
+        writer << "\\u{"
+        inspect_hex(writer, point, 1)
+        writer << "}"
+      else
+        writer << "\\u"
+        inspect_hex(writer, point, 4)
+      end
+      index += width
+    end
+    writer.push(34_u8)
+  end
+
+  private def inspect_hex(writer : Str::Builder, point : Int32, minimum : Int32) : Nil
+    digits = 1
+    temp = point
+    while temp >= 16
+      digits += 1
+      temp = temp // 16
+    end
+    digits = minimum if digits < minimum
+    while digits > 0
+      digit = (point >> ((digits - 1) * 4)) & 15
+      writer.push((digit < 10 ? 48 + digit : 55 + digit).to_u8)
+      digits -= 1
+    end
+  end
+end
+
+struct Int32
+  def to_s(writer : Str::Builder, base : Int32 = 10) : Nil
+    writer.append_int(to_i64, base)
+  end
+end
+
+struct UInt8
+  def to_s(writer : Str::Builder, base : Int32 = 10) : Nil
+    writer.append_uint(to_u64, base)
   end
 end

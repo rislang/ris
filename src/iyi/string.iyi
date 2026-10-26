@@ -209,6 +209,11 @@ class String
   # The literal that spells it, escaped as the other library's, a byte that
   # is no UTF-8 as `\x`: unescaped, `["a\", \"b"]` printed as two strings.
   def inspect : String
+    {% if (!flag?(:gc_none) || flag?(:linux)) && !flag?(:gc_boehm) &&
+          ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) ||
+          flag?(:darwin) || flag?(:win32) || flag?(:wasm32)) %}
+      return Str.build(@bytesize + 2) { |w| as_tape.inspect(w) }.to_heap
+    {% end %}
     io = String::Builder.new(@bytesize + 2) << '"'
     each_point do |point, at|
       next io << "\\x" << to_unsafe[at].to_i32.to_s(16).upcase if point < 0

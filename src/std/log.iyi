@@ -43,6 +43,7 @@ module std/log
 
 import std/time::{Time}
 import std/tuple
+import std/log_text::{LogText, LogField}
 import std/mutex::{Mutex}
 
 pub enum Severity
@@ -120,6 +121,46 @@ pub struct Entry
 
   def initialize(@source : String, @severity : Severity, @message : String, @timestamp : Time = Time.utc, @data : Hash(String, String) = {} of String => String)
   end
+
+  def each_data(& : String, String -> Nil) : Nil
+    @data.each { |key, value| yield key, value }
+  end
+
+  def tape_data : Ary(LogField)
+    fields = Ary(LogField).new(@data.size)
+    each_data do |key, value|
+      fields << LogField.new(key.as_tape, value.as_tape)
+    end
+    fields
+  end
+end
+
+# A synchronous entry borrows its text and metadata on the caller's tape.
+@[OnTape]
+pub struct TapeEntry
+  getter source : Str
+  getter severity : Severity
+  getter message : Str
+  getter timestamp : Time
+  getter data : Ary(LogField)
+
+  def initialize(@source, @severity, @message, @timestamp, @data)
+  end
+
+  def each_data(& : Str, Str -> Nil) : Nil
+    @data.each { |field| yield field.key, field.value }
+  end
+
+  def tape_data : Ary(LogField)
+    @data
+  end
+
+  # A retaining backend explicitly takes ownership of an old-style entry.
+  def to_heap : Entry
+    data = {} of String => String
+    each_data { |key, value| data[key.to_heap] = value.to_heap }
+    Entry.new(@source.to_heap, @severity, @message.to_heap, @timestamp, data)
+  end
 end
 
 # Keys and values, the newest first: immutable, so a task's context can sit
@@ -141,6 +182,13 @@ pub class Metadata
     into[@key] = @value
   end
 
+  def append_into(fields : Ary(LogField)) : Nil
+    if older = @rest
+      older.append_into(fields)
+    end
+    LogField.set(fields, @key.as_tape, @value.as_tape)
+  end
+
   def to_h : Hash(String, String)
     found = {} of String => String
     merge_into(found)
@@ -152,7 +200,7 @@ pub abstract class Formatter
   abstract def format(entry : Entry) : String
 
   # The line written onto a tape, then into *io* in one write.
-  def format(entry : Entry, io : IO) : Nil
+  def format(entry : Entry | TapeEntry, io : IO) : Nil
     tape do
       w = Str::Builder.new(128)
       format(entry, w)
@@ -173,6 +221,9 @@ pub abstract class Formatter
   def format(entry : Entry, writer : Str::Builder) : Nil
     writer << format(entry)
   end
+  def format(entry : TapeEntry, writer : Str::Builder) : Nil
+    writer << format(entry.to_heap)
+  end
 end
 
 pub class DefaultFormatter < Formatter
@@ -186,39 +237,26 @@ pub class DefaultFormatter < Formatter
     line
   end
 
-  def format(entry : Entry, writer : Str::Builder) : Nil
-    entry.timestamp.to_rfc3339(6, writer)
-    writer.push(32_u8)
-    writer << entry.severity.label
-    writer << " - "
-    unless entry.source.empty?
-      writer << entry.source
-      writer << ": "
-    end
-    writer << entry.message
-    unless entry.data.empty?
-      writer << " -- "
-      first = true
-      entry.data.each do |key, value|
-        writer.push(32_u8) unless first
-        first = false
-        writer << key
-        writer.push(61_u8)
-        writer << quoted(value)
-      end
-    end
+  def format(entry : Entry | TapeEntry, writer : Str::Builder) : Nil
+    DefaultFormatter.write(entry, writer)
   end
 
-  # A value as it is, unless a reader could not tell where it ends.
-  private def quoted(value : String) : String
-    plain = !value.empty? && !value.includes?(" ") && !value.includes?("\"") && !value.includes?("=") && !value.includes?("\n")
-    plain ? value : value.inspect
+  # Also usable without constructing a formatter or backend.
+  def self.write(entry : Entry | TapeEntry, writer : Str::Builder) : Nil
+    entry.timestamp.to_rfc3339(6, writer)
+    fields = entry.tape_data
+    LogText.write(entry.source.as_tape, entry.severity.label.as_tape,
+      entry.message.as_tape, fields, writer)
   end
 end
 
 pub abstract class Backend
   abstract def write(entry : Entry) : Nil
   abstract def close : Nil
+
+  def write(entry : TapeEntry) : Nil
+    write(entry.to_heap)
+  end
 end
 
 pub class IOBackend < Backend
@@ -228,7 +266,7 @@ pub class IOBackend < Backend
   def initialize(@io : IO, @formatter : Formatter = DefaultFormatter.new)
   end
 
-  def write(entry : Entry) : Nil
+  def write(entry : Entry | TapeEntry) : Nil
     @formatter.format(entry, @io)
     @io.flush
   end
@@ -464,37 +502,55 @@ pub class Logger
   # None is a level and not a severity: an entry logged at None was
   # written by a logger set to None, the one level meant to write nothing.
   def log(severity : Severity, message : String, **data) : Nil
+    log(severity, message.as_tape, **data)
+  end
+
+  def log(severity : Severity, message : Str, **data) : Nil
     return if severity < level || severity == Severity::None
     if b = backend
-      b.write(Entry.new(@source, severity, message, Time.utc, entry_data(data)))
+      count = data.size + bound_size + Log.context_size
+      fields = Ary(LogField).new(count)
+      Log.context_into(fields)
+      bound_into(fields)
+      data.each do |key, value|
+        name = key.to_s.as_tape
+        text = LogField.text(value)
+        LogField.set(fields, name, text)
+      end
+      b.write(TapeEntry.new(@source.as_tape, severity, message,
+        Time.utc, fields))
     end
   end
 
   def log(severity : Severity, **data, &block : -> String) : Nil
     return if severity < level || severity == Severity::None
-    if b = backend
-      b.write(Entry.new(@source, severity, block.call, Time.utc, entry_data(data)))
-    end
+    return unless backend
+    log(severity, block.call.as_tape, **data)
   end
 
-  private def entry_data(data) : Hash(String, String)
-    found = Log.context
-    bound_into(found)
-    data.each { |key, value| found[key.to_s] = value.to_s }
-    found
-  end
-
-  # The data `bind` gave this logger and its parents, the root's first.
-  protected def bound_into(found : Hash(String, String)) : Nil
+  protected def bound_size : Int32
+    size = 0
     if parent = @parent
-      parent.bound_into(found)
+      size += parent.bound_size
+    end
+    node = @bound
+    while node
+      size += 1
+      node = node.rest
+    end
+    size
+  end
+
+  protected def bound_into(fields : Ary(LogField)) : Nil
+    if parent = @parent
+      parent.bound_into(fields)
     end
     if node = @bound
-      node.merge_into(found)
+      node.append_into(fields)
     end
   end
 
-  def trace(message : String, **data) : Nil
+  def trace(message : String | Str, **data) : Nil
     log(Severity::Trace, message, **data)
   end
 
@@ -502,7 +558,7 @@ pub class Logger
     log(Severity::Trace, **data, &b)
   end
 
-  def debug(message : String, **data) : Nil
+  def debug(message : String | Str, **data) : Nil
     log(Severity::Debug, message, **data)
   end
 
@@ -510,7 +566,7 @@ pub class Logger
     log(Severity::Debug, **data, &b)
   end
 
-  def info(message : String, **data) : Nil
+  def info(message : String | Str, **data) : Nil
     log(Severity::Info, message, **data)
   end
 
@@ -518,7 +574,7 @@ pub class Logger
     log(Severity::Info, **data, &b)
   end
 
-  def notice(message : String, **data) : Nil
+  def notice(message : String | Str, **data) : Nil
     log(Severity::Notice, message, **data)
   end
 
@@ -526,7 +582,7 @@ pub class Logger
     log(Severity::Notice, **data, &b)
   end
 
-  def warn(message : String, **data) : Nil
+  def warn(message : String | Str, **data) : Nil
     log(Severity::Warn, message, **data)
   end
 
@@ -534,7 +590,7 @@ pub class Logger
     log(Severity::Warn, **data, &b)
   end
 
-  def error(message : String, **data) : Nil
+  def error(message : String | Str, **data) : Nil
     log(Severity::Error, message, **data)
   end
 
@@ -542,7 +598,7 @@ pub class Logger
     log(Severity::Error, **data, &b)
   end
 
-  def fatal(message : String, **data) : Nil
+  def fatal(message : String | Str, **data) : Nil
     log(Severity::Fatal, message, **data)
   end
 
@@ -638,6 +694,28 @@ pub class Log
     block.call
   end
 
+  def self.has_context? : Bool
+    @@open.get != 0_u64
+  end
+
+  def self.context_size : Int32
+    return 0 unless has_context?
+    size = 0
+    node = context_node
+    while node
+      size += 1
+      node = node.rest
+    end
+    size
+  end
+
+  def self.context_into(fields : Ary(LogField)) : Nil
+    return unless has_context?
+    if node = context_node
+      node.append_into(fields)
+    end
+  end
+
   # The data this task's open contexts give an entry, the outermost first.
   def self.context : Hash(String, String)
     found = {} of String => String
@@ -720,7 +798,7 @@ pub class Log
     root.backend = backend
   end
 
-  def self.trace(msg : String, **data) : Nil
+  def self.trace(msg : String | Str, **data) : Nil
     root.trace(msg, **data)
   end
 
@@ -728,7 +806,7 @@ pub class Log
     root.trace(**data, &b)
   end
 
-  def self.debug(msg : String, **data) : Nil
+  def self.debug(msg : String | Str, **data) : Nil
     root.debug(msg, **data)
   end
 
@@ -736,7 +814,7 @@ pub class Log
     root.debug(**data, &b)
   end
 
-  def self.info(msg : String, **data) : Nil
+  def self.info(msg : String | Str, **data) : Nil
     root.info(msg, **data)
   end
 
@@ -744,7 +822,7 @@ pub class Log
     root.info(**data, &b)
   end
 
-  def self.notice(msg : String, **data) : Nil
+  def self.notice(msg : String | Str, **data) : Nil
     root.notice(msg, **data)
   end
 
@@ -752,7 +830,7 @@ pub class Log
     root.notice(**data, &b)
   end
 
-  def self.warn(msg : String, **data) : Nil
+  def self.warn(msg : String | Str, **data) : Nil
     root.warn(msg, **data)
   end
 
@@ -760,7 +838,7 @@ pub class Log
     root.warn(**data, &b)
   end
 
-  def self.error(msg : String, **data) : Nil
+  def self.error(msg : String | Str, **data) : Nil
     root.error(msg, **data)
   end
 
@@ -768,7 +846,7 @@ pub class Log
     root.error(**data, &b)
   end
 
-  def self.fatal(msg : String, **data) : Nil
+  def self.fatal(msg : String | Str, **data) : Nil
     root.fatal(msg, **data)
   end
 

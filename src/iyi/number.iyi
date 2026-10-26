@@ -174,6 +174,13 @@ struct UInt64
   end
 
   def to_s(base : Int32) : String
+    {% if (!flag?(:gc_none) || flag?(:linux)) && !flag?(:gc_boehm) &&
+          ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) ||
+          flag?(:darwin) || flag?(:win32) || flag?(:wasm32)) %}
+      raise "base out of range" if base < 2 || base > 36
+      return "0" if self == 0
+      return Str.build(65) { |w| to_s(w, base) }.to_heap
+    {% end %}
     raise "base out of range" if base < 2 || base > 36
     return "0" if self == 0_u64
 
@@ -265,6 +272,13 @@ struct Int64
   # growth per number printed, and printing two million integers took
   # twice Go's time.
   def to_s(base : Int32) : String
+    {% if (!flag?(:gc_none) || flag?(:linux)) && !flag?(:gc_boehm) &&
+          ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) ||
+          flag?(:darwin) || flag?(:win32) || flag?(:wasm32)) %}
+      raise "base out of range" if base < 2 || base > 36
+      return "0" if self == 0
+      return Str.build(65) { |w| to_s(w, base) }.to_heap
+    {% end %}
     raise "base out of range" if base < 2 || base > 36
     return "0" if self == 0_i64
 

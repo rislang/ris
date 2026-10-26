@@ -1,0 +1,58 @@
+# Synchronous log text, written into the caller's builder. The timestamp
+# is supplied by the caller; this module has no clock or backend state.
+module std/log_text
+
+@[OnTape]
+pub struct LogField
+  getter key : Str
+  getter value : Str
+
+  def initialize(@key : Str, @value : Str)
+  end
+
+  def self.text(value : String | Str) : Str
+    value.as_tape
+  end
+
+  def self.text(value) : Str
+    Str.build(65) { |w| w << value }
+  end
+
+  def self.set(fields : Ary(LogField), key : Str, value : Str) : Nil
+    i = 0
+    while i < fields.size
+      if fields[i].key == key
+        fields[i] = LogField.new(key, value)
+        return
+      end
+      i += 1
+    end
+    fields << LogField.new(key, value)
+  end
+end
+
+pub struct LogText
+  def self.write(source : Str, severity : Str, message : Str,
+                 fields : Ary(LogField), writer : Str::Builder) : Nil
+    writer << " " << severity << " - "
+    writer << source << ": " unless source.empty?
+    writer << message
+    first = true
+    fields.each do |field|
+      writer << (first ? " -- " : " ")
+      first = false
+      writer << field.key << "="
+      text = field.value
+      plain = !text.empty?
+      text.each_byte do |byte|
+        plain = false if byte == 32_u8 || byte == 34_u8 ||
+                         byte == 61_u8 || byte == 10_u8
+      end
+      if plain
+        writer << text
+      else
+        text.inspect(writer)
+      end
+    end
+  end
+end

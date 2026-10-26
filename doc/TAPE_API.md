@@ -114,6 +114,24 @@ Size writers and arrays up front, refill with `clear`, write output straight
 to its IO. `RIS_TAPE_STATS=1` counts side transfers and growth moves.
 `@[TapeUnsafe]` is std-only.
 
+## Numeric and log text
+
+`writer << number` writes integer and floating text directly. The
+prelude integers also have `number.to_s(writer, base = 10)` for bases
+2..36, including signed minimum and unsigned maximum values. An invalid
+base panics without heap allocation. `text.inspect(writer)` quotes bytes,
+including malformed UTF-8, into the same builder. The String-returning
+inspection and integer APIs are migration wrappers on these writers.
+
+`std/log_text` has no clock or backend state. Its `LogField` records view
+caller text; `LogText.write(source, severity, message, fields, writer)`
+appends a log line after the timestamp the caller wrote, without a final
+newline. `std/log` uses it for synchronous IO: messages borrow `Str`,
+metadata uses `Ary(LogField)`, and the default formatter writes directly.
+String messages wrap the borrowed API. A retaining or custom legacy
+backend copies a `TapeEntry` to a heap `Entry` at that boundary. Logger,
+context and backend setup still allocate; their ownership is TODO 5b/9.
+
 ## Published runtime limits
 `IyiRegion` starts tapes at 67,108,864 bytes (64 MiB),
 not a cap. Each mapping adds a 64-byte header and rounds to 65,536 bytes.

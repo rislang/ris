@@ -676,6 +676,43 @@ else
 fi
 
 
+# Log text, numeric formatting and quoting use the caller's tape.
+out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc \
+  test/ris/text_format_tape.ri 2>&1)
+if [ "$?" -eq 0 ] &&
+    grep -qF 'text formatting: zero heap' <<<"$out" &&
+    grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+  echo "runs     text_format_tape (--no-gc)"
+else
+  echo "FAILED   text_format_tape: $out"; status=1
+fi
+out=$("$RIS" run test/ris/log_tape.ri 2>&1)
+if [ "$?" -eq 0 ] &&
+    [ "$out" = 'logging: tape IO and retaining backend' ]; then
+  echo "runs     log_tape (metadata and retaining backend)"
+else
+  echo "FAILED   log_tape: $out"; status=1
+fi
+out=$(
+  for name in number_format_error number_format_signed_error; do
+    result=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc \
+      "test/ris/$name.ri" 2>&1)
+    if [ "$?" -ne 0 ] &&
+        grep -qF 'iyi: panic: base out of range' <<<"$result" &&
+        grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$result"; then
+      echo "runs     $name (--no-gc error)"
+    else
+      echo "FAILED   $name: $result"
+      exit 1
+    fi
+  done
+)
+if [ "$?" -eq 0 ]; then
+  echo "$out"
+else
+  echo "$out"; status=1
+fi
+
 # Fixed-width fields, buffered tape lines, and integer text diagnostics.
 out=$("$RIS" run test/ris/little_endian.ri 2>&1)
 if [ "$out" = PASS ]; then

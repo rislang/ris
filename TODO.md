@@ -12,6 +12,15 @@ check.sh. Delete finished work in the same commit; keep check.sh green.
 5. [M] Remaining: allocate class copies on the owner (with step 9).
    Gate: destination ownership.
 5b. [M] std text and parsers onto the tape with existing tape types.
+   Migrated: synchronous log entries and metadata use Str/Ary; log_text
+   writes quoted fields to the caller's builder. Integer text through
+   64 bits, numeric builder appends and diagnostic quoting use tape
+   writers; their String APIs wrap those writers. log_text and numeric
+   success/error gates run with --no-gc, malformed UTF-8 included.
+   Remains: HTTP head diagnostics/params, JSON lexer/parser/writer
+   fallbacks, URI parsing/normalization/encoding, Params serialization,
+   128-bit integer formatting, log registry/context/backend ownership,
+   time/HTTP dependency initialization, report retention helpers.
    Gate: each migrated module has zero heap on success and error paths.
 6. [L] Pool/SlicePool: typed reuse, checked handles, size, membership,
    initialization, link and byte-image validation, reset, explicit

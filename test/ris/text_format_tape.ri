@@ -1,0 +1,40 @@
+module test/ris/text_format_tape
+
+import std/log_text::{LogField, LogText}
+
+w = Str::Builder.new(256)
+w << -9223372036854775808_i64 << " " << 18446744073709551615_u64
+raise "full width decimal" unless w.finish == "-9223372036854775808 18446744073709551615"
+w.clear
+18446744073709551615_u64.to_s(w, 16)
+w << " "
+(-9223372036854775808_i64).to_s(w, 2)
+raise "radices" unless w.finish == "ffffffffffffffff -1000000000000000000000000000000000000000000000000000000000000000"
+w.clear
+0_u64.to_s(w, 36)
+w << " "
+35_u64.to_s(w, 36)
+w << " "
+(-35_i64).to_s(w, 36)
+raise "zero and base36" unless w.finish == "0 z -z"
+w.clear
+fields = Ary(LogField).new(2)
+fields << LogField.new("id", "42")
+fields << LogField.new("name", "a \"b\"\n")
+w << "1970-01-01T00:00:00.000000Z"
+LogText.write("web", "INFO", "done", fields, w)
+raise "log metadata" unless w.finish == "1970-01-01T00:00:00.000000Z INFO - web: done -- id=42 name=\"a \\\"b\\\"\\n\""
+w.clear
+"\xff\u0000é\u2028".inspect(w)
+raise "diagnostic quoting" unless w.finish == "\"\\xFF\\u0000é\\u2028\""
+w.clear
+"\uE000\u{E0001}\e\a\t\r\v\f".inspect(w)
+raise "nonprintable codepoints" unless w.finish == "\"\\uE000\\u{E0001}\\e\\a\\t\\r\\v\\f\""
+w.clear
+w.push(35_u8)
+w.push(123_u8)
+text = w.finish
+quoted = Str::Builder.new(16)
+text.inspect(quoted)
+raise "interpolation escape" unless quoted.finish.bytesize == 5 && quoted.finish[1] == 92_u8
+puts "text formatting: zero heap"
