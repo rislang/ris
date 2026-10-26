@@ -1,4 +1,6 @@
 # ris tape memory
+The tape name is half a joke, after old cassettes: picture one only while
+recording. Reading needs no picture; rewinding happens on its own.
 ris uses static data, scoped tapes and typed pools, no GC or general heap.
 [Goose](doc/reference/goose/README.md) citations inform. iyi's rules,
 cited as [iyi](doc/reference/iyi/source/SPEC.md) and a section (v0.19.1),

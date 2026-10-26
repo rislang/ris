@@ -4,6 +4,12 @@ Every change to TAPE_SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one.
 
+## 2026-10-26: the cassette metaphor
+
+* Added: the opening lines name the tape as a half-joking cassette
+  metaphor, to keep in mind only while recording (allocating).
+* Why: the name invites the picture; it should help, not mislead.
+
 ## 2026-10-26: numbered sections and rules
 
 * Added: sections are numbered 1-6, rules N.M; numbers never change.
