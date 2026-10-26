@@ -9607,10 +9607,18 @@ end
 # (III.1.4); an uncaught panic still reaches main and exits 1. Elsewhere
 # the registry is one global stack and a panic is a clean exit.
 
-# One registered cleanup; a class, since an intrusive list node must be a reference.
+# User defers and native runtime guards share one LIFO cleanup registry.
+{% if (!flag?(:gc_none) || flag?(:linux)) && !flag?(:gc_boehm) &&
+      ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) ||
+      flag?(:darwin) || flag?(:win32) || flag?(:wasm32)) %}
+  alias IyiDefer = IyiDeferNode | Pointer(IyiPendingGuard)
+{% else %}
+  alias IyiDefer = IyiDeferNode
+{% end %}
+
 class IyiDeferNode
   @proc : Proc(Nil)
-  property next_node : IyiDeferNode?
+  property next_node : IyiDefer?
 
   def initialize(@proc : Proc(Nil))
     @next_node = nil
@@ -9624,7 +9632,7 @@ end
 {% unless (flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64)) %}
   # No fibers on this target, so one global stack is exact.
   class IyiDefers
-    @@head : IyiDeferNode?
+    @@head : IyiDefer?
     @@unwinding = false
 
     def self.unwinding? : Bool
@@ -9634,7 +9642,7 @@ end
 
     def self.push_tape : Nil
       node = @@tape_cleanup
-      unless node.is_a?(IyiDeferNode)
+      unless node
         node = IyiDeferNode.new(-> { IyiDefers.run_tape })
         @@tape_cleanup = node
       end
@@ -9643,25 +9651,25 @@ end
 
     def self.pop_tape : Nil
       node = @@tape_cleanup
-      return unless node.is_a?(IyiDeferNode)
+      return unless node
       @@head = node.next_node
       node.next_node = nil
     end
 
     def self.run_tape : Nil
       node = @@tape_cleanup
-      node.next_node = nil if node.is_a?(IyiDeferNode)
+      node.next_node = nil if node
       ::__iyi_tape_release
     end
 
-    def self.push(node : IyiDeferNode) : Nil
+    def self.push(node : IyiDefer) : Nil
       node.next_node = @@head
       @@head = node
     end
 
     def self.pop_run : Nil
       node = @@head
-      return unless node.is_a?(IyiDeferNode)
+      return unless node
       @@head = node.next_node
       node.run
     end
@@ -9670,7 +9678,7 @@ end
       @@unwinding = true
       while true
         node = @@head
-        return unless node.is_a?(IyiDeferNode)
+        return unless node
         @@head = node.next_node
         node.run
       end

@@ -420,7 +420,7 @@ class IyiFiber
 
   # Panics — III.1.4. The registry `defer` pushes onto and the panic
   # path drains; the flag and message a boundary reads after the join.
-  property defers : IyiDeferNode?
+  property defers : IyiDefer?
   property unwinding : Bool = false
   # ris: one non-capturing cleanup, reused by sequential outer tape scopes.
   property tape_cleanup : IyiDeferNode?
@@ -3131,7 +3131,7 @@ class IyiScheduler
 
     while true
       node = fiber.defers
-      break unless node.is_a?(IyiDeferNode)
+      break unless node
       fiber.defers = node.next_node
       node.run
     end
@@ -3173,7 +3173,7 @@ class IyiScheduler
     fiber.unwinding = true
     while true
       node = fiber.defers
-      break unless node.is_a?(IyiDeferNode)
+      break unless node
       fiber.defers = node.next_node
       node.run
     end
@@ -3643,7 +3643,7 @@ end
 def __iyi_defer_pop_run : Nil
   fiber = IyiScheduler.current
   node = fiber.defers
-  return unless node.is_a?(IyiDeferNode)
+  return unless node
   fiber.defers = node.next_node
   node.run
 end
@@ -3653,7 +3653,7 @@ end
 def __iyi_tape_defer_push : Nil
   fiber = IyiScheduler.current
   node = fiber.tape_cleanup
-  unless node.is_a?(IyiDeferNode)
+  unless node
     node = IyiDeferNode.new(-> { __iyi_tape_defer_run })
     fiber.tape_cleanup = node
   end
@@ -3664,7 +3664,7 @@ end
 def __iyi_tape_defer_pop : Nil
   fiber = IyiScheduler.current
   node = fiber.tape_cleanup
-  return unless node.is_a?(IyiDeferNode)
+  return unless node
   fiber.defers = node.next_node
   node.next_node = nil
 end
@@ -3673,7 +3673,7 @@ def __iyi_tape_defer_run : Nil
   # The panic/exit drain has already detached the node. Drop its old link
   # before releasing, so a retained task handle does not retain defers.
   node = IyiScheduler.current.tape_cleanup
-  node.next_node = nil if node.is_a?(IyiDeferNode)
+  node.next_node = nil if node
   ::__iyi_tape_release
 end
 
@@ -3702,7 +3702,7 @@ def exit(status : Int32 = 0) : NoReturn
   IyiScheduler.exiting = true
   while true
     node = fiber.defers
-    break unless node.is_a?(IyiDeferNode)
+    break unless node
     fiber.defers = node.next_node
     node.run
   end

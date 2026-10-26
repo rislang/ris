@@ -1,29 +1,16 @@
-# ris: Goose frees every scope's data when the scope ends. Here a def's
-# body, a `while` body or a block body (not the prelude's) frees what it
-# put on the tape at its end, each round, when nothing it made can
-# outlive it; a `return` or `break` past the end frees nothing. The normalizer writes the body as
-#
-#   __mark = __iyi_scope_mark(false)
-#   __value = (body)
-#   __iyi_scope_reset(__mark)
-#   __value
-#
-# and this checker, once types are known, turns the `false` to `true`
-# where it proves the body keeps nothing: its value (a def's result) is
-# no tape value, no raw pointer or IyiRegion is in it, nothing in the body yields, a variable of the code around it is
-# not assigned a tape value, and a tape value from outside the body - a
-# variable around it, a block parameter - is only a `Str` or
-# read (`[]`, `size`, `each`, ...), never grown, written or passed on.
-# A tape variable of the body's own is assigned first at the body's top
-# level and used nowhere else. Any doubt leaves the mark off: the tape
-# then frees the body's values with the scope, as before.
+# A scope mark records the caller's allocation boundary. Discarded results
+# reset it directly. A def's retained result goes through RESULT instead:
+# fresh storage is staged outside rollback, then copied to the restored
+# caller boundary; borrowed storage is left as a view. The mark stays off
+# unless this checker proves no other storage escapes through side effects.
 class Iyi::TapeScopeChecker
-  MARK  = "__iyi_scope_mark"
-  RESET = "__iyi_scope_reset"
-  READS = {"[]", "[]?", "size", "bytesize", "length", "empty?", "each",
-           "each_byte", "each_with_index", "each_child", "stop", "==",
-           "!=", "starts_with?", "finish", "none?", "index", "start",
-           "map", "sum", "__loop_fetch", "bytes"}
+  MARK   = "__iyi_scope_mark"
+  RESET  = "__iyi_scope_reset"
+  RESULT = "__iyi_scope_result"
+  READS  = {"[]", "[]?", "size", "bytesize", "length", "empty?", "each",
+            "each_byte", "each_with_index", "each_child", "stop", "==",
+            "!=", "starts_with?", "finish", "none?", "index", "start",
+            "map", "sum", "__loop_fetch", "bytes"}
 
   def self.declares?(body : ASTNode) : Bool
     nodes = body.is_a?(Expressions) ? body.expressions : [body]
@@ -61,10 +48,18 @@ class Iyi::TapeScopeChecker
     # and a consumer's block inlined into it must not take them again.
     mark = program.new_temp_var(node).at(body)
     value = program.new_temp_var(node).at(body)
+    body = body.transform(Returns.new(mark)) if node.is_a?(Def)
+    cleanup = if node.is_a?(Def)
+                result = Call.new(nil, RESULT,
+                  [mark.clone, value.clone] of ASTNode, global: true).at(body)
+                Assign.new(value.clone, result).at(body)
+              else
+                Call.new(nil, RESET, mark.clone, global: true).at(body)
+              end
     node.body = Expressions.new([
       Assign.new(mark, Call.new(nil, MARK, on, global: true).at(body)).at(body),
       Assign.new(value, body).at(body),
-      Call.new(nil, RESET, mark.clone, global: true).at(body),
+      cleanup,
       value.clone,
     ] of ASTNode).at(body)
   end
@@ -114,11 +109,71 @@ class Iyi::TapeScopeChecker
     params = a_def.args.map(&.name)
     a_def.block_arg.try { |arg| params << arg.name }
     check_scope(a_def.body, owner_tape, params)
-    # The def's own scope: what it made, unless it is the result.
+    # Retain a supported result while reclaiming the def's other storage.
     if parts = TapeScopeChecker.parts(a_def.body)
       flag, inner = parts
+      # Older artifacts end with RESET rather than result reception. They
+      # must keep the old conservative decision for tape-valued returns.
+      cleanup = a_def.body.as(Expressions).expressions[2]
+      pending = cleanup.is_a?(Assign) && (call = cleanup.value).is_a?(Call) &&
+                call.name == RESULT && pending_type?(a_def.type?)
       flag.value = allocates?(inner) &&
-                   safe?(inner, a_def.type?, a_def.body, owner_tape, params, [] of String)
+                   safe?(inner, pending ? nil : a_def.type?,
+                     a_def.body, owner_tape, params, [] of String)
+    end
+  end
+
+  # Only shapes whose copy preserves borrowed storage can be promoted.
+  # Classes and raw/self-relative pointers retain the conservative path.
+  def pending_type?(type : Type?, seen = Set(Type).new) : Bool
+    return false unless type
+    type = type.remove_typedef
+    return false if type.is_a?(PointerInstanceType) || type.is_a?(ProcInstanceType)
+    return true if type.to_s == "Str" || type.to_s == "Str::Builder"
+    return false unless seen.add?(type)
+    case type
+    when UnionType
+      type.union_types.all? { |member| pending_type?(member, seen.dup) }
+    when TupleInstanceType
+      type.tuple_types.all? { |member| pending_type?(member, seen.dup) }
+    when NamedTupleInstanceType
+      type.entries.all? { |entry| pending_type?(entry.type, seen.dup) }
+    when GenericClassInstanceType
+      if {"Ary", "Tre"}.includes?(type.generic_type.name)
+        type.type_vars.values.all? do |var|
+          var.is_a?(Var) && pending_type?(var.type?, seen.dup)
+        end
+      elsif type.struct?
+        type.instance_vars.values.all? { |var| pending_type?(var.type?, seen.dup) }
+      else
+        !tape?(type)
+      end
+    when NonGenericClassType
+      if type.struct?
+        type.instance_vars.values.all? { |var| pending_type?(var.type?, seen.dup) }
+      else
+        !tape?(type)
+      end
+    else
+      !tape?(type)
+    end
+  end
+
+  # An explicit return must receive its result before the def's rollback,
+  # just like its final expression. Nested defs own their own marks.
+  class Returns < Transformer
+    def initialize(@mark : Var)
+    end
+
+    def transform(node : Return)
+      exp = node.exp || NilLiteral.new.at(node)
+      node.exp = Call.new(nil, RESULT, [@mark.clone, exp] of ASTNode,
+        global: true).at(node)
+      node
+    end
+
+    def transform(node : Def)
+      node
     end
   end
 
@@ -208,6 +263,13 @@ class Iyi::TapeScopeChecker
     def outer_tape?(node : ASTNode) : Bool
       node.is_a?(Var) && !@inner.includes?(node.name) && @checker.tape?(node.type?) &&
         !@checker.tape_string?(node.type?)
+    end
+
+    # Explicit returns receive their value before enclosing cleanup runs.
+    # Keep storage for cleanup that may still read it on those paths.
+    def visit(node : ExceptionHandler)
+      @safe = false
+      false
     end
 
     def visit(node : Yield)

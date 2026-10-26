@@ -9,12 +9,7 @@ check.sh. Delete finished work in the same commit; keep check.sh green.
    values in their own region, or refuse views across the first growth.
    Non-Linux targets still move. Refuse raw owner operations.
    Gate: no transfer of a viewed value.
-5. [M] Pending results outside callee scratch and rollback. Retained
-   tape results still disable reset in TapeScopeChecker. Preserve aliases
-   while placing fresh result storage outside the callee's scratch.
-   Gate: a big temporary and small result in a 10,000-call loop inside
-   one tape, correct results and bounded scratch under RIS_TAPE_STATS.
-   copy_to now copies class fields deeply and refuses raw pointers,
+5. [M] copy_to now copies class fields deeply and refuses raw pointers,
    self-relative links and self-reaching shapes, including collections,
    unions and subclasses. Remaining: allocate class copies on the owner
    (with step 9), discard partial destination storage on failure, and

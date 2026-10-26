@@ -73,6 +73,11 @@ class Iyi::TapeStringParameterChecker
       when ProcLiteral, Block, Yield
         contains?(node, names)
       when Call
+        # Compiler-managed result reception preserves the value's aliases;
+        # it does not retain text merely used to compute a scalar result.
+        # Its arguments are still visited, and returned aliases are checked
+        # by the explicit/implicit return handling below.
+        next false if node.name == TapeScopeChecker::RESULT
         # Raw pointers may escape through operations this pass cannot model.
         next true if node.name == "to_unsafe" &&
                      node.obj.try { |obj| contains?(obj, names) }

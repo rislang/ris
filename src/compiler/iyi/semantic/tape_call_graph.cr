@@ -188,6 +188,12 @@ class Iyi::TapeCallGraph
       return false if node.type?.try(&.no_return?)
       return false if node.name == TapeScopeChecker::MARK ||
                       node.name == TapeScopeChecker::RESET
+      if node.name == TapeScopeChecker::RESULT
+        # The wrapper allocates only compiler-managed result storage, but
+        # an explicit return still evaluates its original expression here.
+        node.args.each &.accept(self)
+        return false
+      end
       obj = node.obj
       return false if obj.is_a?(Path) &&
                       {"IyiHeap", "IyiMark"}.includes?(obj.names.last?)

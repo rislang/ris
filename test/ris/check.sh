@@ -535,6 +535,41 @@ out=$("$RIS" run test/ris/scope_free.ri 2>&1)
 if [ "$out" = $'round 99999\nwhile frees: true\nblock wrote 200000\nblock frees: true\nkept stays: true true\n123\ndef frees: true 5\nresult stays: true 42' ]; then echo "runs     scope_free"; else echo "FAILED   scope_free: $out"; status=1; fi
 out=$("$RIS" run test/ris/scope_keep.ri 2>&1)
 if [ "$out" = "50000 50000 9" ]; then echo "runs     scope_keep"; else echo "FAILED   scope_keep: $out"; status=1; fi
+
+# Retain 10,000 small results without retaining 64 KiB per-call scratch.
+out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 "$RIS" run --no-gc \
+  test/ris/pending_result.ri 2>&1)
+if [ "$?" = 0 ] &&
+   grep -qF 'PASS: pending results and borrowed views' <<<"$out" &&
+   grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out" &&
+   grep -qF '1 scopes, 2 mappings made, 0 unmapped, 0 tapes grown' <<<"$out"; then
+  echo "runs     pending_result (bounded scratch, borrowed input stays a view)"
+else
+  echo "FAILED   pending_result: $out"; status=1
+fi
+out=$("$RIS" run test/ris/pending_shapes.ri 2>&1)
+if [ "$?" = 0 ] &&
+   [ "$out" = 'PASS: pending structs, arrays, trees and early returns' ]; then
+  echo "runs     pending_shapes"
+else
+  echo "FAILED   pending_shapes: $out"; status=1
+fi
+
+out=$("$RIS" run test/ris/pending_regions.ri 2>&1)
+if [ "$?" = 0 ] &&
+   [ "$out" = 'PASS: pending results survive grown and side scratch rollback' ]; then
+  echo "runs     pending_regions"
+else
+  echo "FAILED   pending_regions: $out"; status=1
+fi
+out=$("$RIS" run test/ris/pending_cleanup.ri 2>/dev/null)
+if [ "$?" = 0 ] &&
+   [ "$out" = 'PASS: pending panic restores caller and releases staging' ]; then
+  echo "runs     pending_cleanup"
+else
+  echo "FAILED   pending_cleanup: $out"; status=1
+fi
+
 out=$("$RIS" run test/ris/in_place.ri 2>&1)
 if [ "$out" = $'<li>item n0</li><li>item n1</li><li>item n2</li>\n<li>item n9</li>\nin place: true 1' ]; then echo "runs     in_place"; else echo "FAILED   in_place: $out"; status=1; fi
 out=$("$RIS" run test/ris/array_api.ri 2>&1)

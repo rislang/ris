@@ -107,6 +107,11 @@ module Tape
     value.copy_to(owner)
   end
 
+  # Implicit result placement never invokes a user-defined copy callback.
+  def self.copy_value(value, owner : IyiPendingCopy)
+    value.__iyi_pending_copy(owner)
+  end
+
   # Validate the public shape, not the pointers backing tape containers.
   # The path is a type tuple, so recursive class shapes stop at compile time.
   def self.check_copy(type : T.class, path : P.class) : Nil forall T, P
@@ -189,7 +194,14 @@ struct Str
     new(bytes, text.bytesize)
   end
 
+  def __iyi_pending_copy(owner : IyiPendingCopy) : self
+    copy_to(owner)
+  end
+
   def copy_to(owner) : self
+    if owner.is_a?(IyiPendingCopy)
+      return self unless owner.contains?(@ptr.address)
+    end
     owner.run { Str.new(self) }
   end
 
@@ -616,9 +628,23 @@ struct Str::Builder
     (@state + 4_i64).value = IyiRegion.program_active? ? 1_u64 : 0_u64
   end
 
+  def __iyi_pending_copy(owner : IyiPendingCopy) : self
+    copy_to(owner)
+  end
+
   def copy_to(owner) : self
+    if owner.is_a?(IyiPendingCopy)
+      return self unless owner.contains?(@state.address)
+      cached = owner.lookup(@state.address)
+      if cached != 0
+        made = self
+        pointerof(made.@state).value = Pointer(UInt64).new(cached)
+        return made
+      end
+    end
     owner.run do
       made = self.class.new(length)
+      owner.remember(@state.address, made.@state.address) if owner.is_a?(IyiPendingCopy)
       made.append(finish)
       made
     end
@@ -1606,9 +1632,23 @@ struct Ary(T)
     Ary::View(T).new(self, indexes)
   end
 
+  def __iyi_pending_copy(owner : IyiPendingCopy) : self
+    copy_to(owner)
+  end
+
   def copy_to(owner) : self
+    if owner.is_a?(IyiPendingCopy)
+      return self unless owner.contains?(@state.address)
+      cached = owner.lookup(@state.address)
+      if cached != 0
+        made = self
+        pointerof(made.@state).value = Pointer(UInt64).new(cached)
+        return made
+      end
+    end
     owner.run do
       made = self.class.new(size)
+      owner.remember(@state.address, made.@state.address) if owner.is_a?(IyiPendingCopy)
       each { |value| made << Tape.copy_value(value, owner) }
       made
     end
@@ -1820,9 +1860,23 @@ struct Tre(T)
     ((@state + 1_i64).value & 0x7fffffff_u64).unsafe_to_i32
   end
 
+  def __iyi_pending_copy(owner : IyiPendingCopy) : self
+    copy_to(owner)
+  end
+
   def copy_to(owner) : self
+    if owner.is_a?(IyiPendingCopy)
+      return self unless owner.contains?(@state.address)
+      cached = owner.lookup(@state.address)
+      if cached != 0
+        made = self
+        pointerof(made.@state).value = Pointer(UInt64).new(cached)
+        return made
+      end
+    end
     owner.run do
       made = self.class.new(size)
+      owner.remember(@state.address, made.@state.address) if owner.is_a?(IyiPendingCopy)
       index = 0
       while index < size
         entry = slot(index).value
@@ -1997,6 +2051,15 @@ end
 # Ordinary values copy by value. Tape structs recursively copy their fields,
 # without calling initialize (which may have unrelated side effects).
 struct Struct
+  def __iyi_pending_copy(owner : IyiPendingCopy) : self
+    made = self
+    {% for field in @type.instance_vars %}
+      pointerof(made.@{{field.name.id}}).value =
+        Tape.copy_value(@{{field.name.id}}, owner)
+    {% end %}
+    made
+  end
+
   def copy_to(owner) : self
     Tape.check_copy(typeof(self), Tuple())
     {% if @type.instance_vars.size > 0 %}
@@ -2016,6 +2079,14 @@ struct Struct
 end
 
 struct Tuple
+  def __iyi_pending_copy(owner : IyiPendingCopy)
+    {% begin %}
+      { {% for type, i in T %}
+          Tape.copy_value(self[{{i}}], owner),
+        {% end %} }
+    {% end %}
+  end
+
   def copy_to(owner)
     {% begin %}
       { {% for type, i in T %}
@@ -2032,6 +2103,14 @@ struct Pointer(T)
 end
 
 struct NamedTuple
+  def __iyi_pending_copy(owner : IyiPendingCopy)
+    {% begin %}
+      { {% for key, type in T %}
+          {{key.id}}: Tape.copy_value(self[{{key.symbolize}}], owner),
+        {% end %} }
+    {% end %}
+  end
+
   def copy_to(owner)
     {% begin %}
       { {% for key, type in T %}
@@ -2042,6 +2121,10 @@ struct NamedTuple
 end
 
 class Object
+  def __iyi_pending_copy(owner : IyiPendingCopy)
+    self
+  end
+
   def copy_to(owner)
     Tape.check_copy(typeof(self), Tuple())
     {% if @type < ::Enum || @type < ::Number || @type == ::Bool || @type == ::Char || @type == ::Symbol || @type == ::Nil %}
@@ -2102,11 +2185,11 @@ lib LibTapeCopy
   fun memcpy = "llvm.memcpy.p0.p0.i64"(destination : Pointer(UInt8), source : Pointer(UInt8), count : UInt64, volatile : Bool) : Nil
 end
 
-# Goose's every scope freeing: outside the prelude, the normalizer begins
-# each def body, `while` body and block body with `__iyi_scope_mark(false)` and ends it with `__iyi_scope_reset`.
-# `TapeScopeChecker` turns the mark on where nothing the body puts on the
-# tape can outlive the body, and then each round of the loop frees what it
-# made, sides and grown mappings included. Left off, both do nothing.
+# Outside the prelude, scopes begin with `__iyi_scope_mark(false)`.
+# Loop and block scopes discard scratch; defs receive retained values
+# through `__iyi_scope_result` before reset. TapeScopeChecker enables a
+# mark only when no unhandled escape can outlive it. Reset includes side
+# regions and grown mappings. A disabled mark leaves storage alone.
 struct IyiScopeMark
   getter region : UInt64
   getter cursor : UInt64
@@ -2174,6 +2257,186 @@ def __iyi_scope_release(mark : IyiScopeMark) : Nil
     __iyi_release_pages(low, written &- low) if written > low &+ IyiRegion::KEEP_WARM
   {% end %}
   IyiHeap.write64(region &+ IyiRegion::OFF_CURSOR, mark.cursor)
+end
+
+# A pending result is staged outside the rollback, then copied onto the
+# caller's restored mark. Only fresh backing storage is copied: borrowed
+# handles and byte views keep their original addresses. The two copies buy
+# a simple bounded scratch lifetime without overwriting unread result data.
+struct IyiPendingCopy
+  def initialize(@head : Pointer(UInt64), @depth : Pointer(Int32),
+                 @source : IyiScopeMark, @source_head : UInt64,
+                 @memo : Pointer(UInt64), @back : Bool, @saved : Pointer(UInt64))
+  end
+
+  def contains?(address : UInt64) : Bool
+    region = @source_head
+    while region != 0
+      low = region == @source.region ? @source.cursor : region &+ IyiRegion::DATA
+      return true if address >= low &&
+        address < IyiHeap.read64(region &+ IyiRegion::OFF_CURSOR)
+      side = IyiHeap.read64(region &+ IyiRegion::OFF_SIDE)
+      stop = region == @source.region ? @source.side : 0_u64
+      while side != stop && side != 0
+        return true if address >= side &+ IyiRegion::DATA &&
+          address < IyiHeap.read64(side &+ IyiRegion::OFF_CURSOR)
+        side = IyiHeap.read64(side &+ IyiRegion::OFF_PARENT)
+      end
+      break if region == @source.region
+      region = IyiHeap.read64(region &+ IyiRegion::OFF_PARENT)
+    end
+    false
+  end
+
+  def run(&)
+    return yield if @back || @depth.value > 0
+    @head.value = IyiRegion.acquire(IyiRegion::CAPACITY) if @head.value == 0
+    @saved.value = IyiRegion.tape
+    IyiRegion.tape = @head.value
+    @depth.value = 1
+    value = yield
+    restore(@saved.value)
+    value
+  end
+
+  # Mutable result handles keep their internal sharing across both copies.
+  # The relocation list lives on staging storage, including on copy-back;
+  # no bookkeeping is retained on the caller's tape.
+  def lookup(source : UInt64) : UInt64
+    entry = @memo.value
+    while entry != 0
+      return IyiHeap.read64(entry &+ 8_u64) if IyiHeap.read64(entry) == source
+      entry = IyiHeap.read64(entry &+ 16_u64)
+    end
+    0_u64
+  end
+
+  def remember(source : UInt64, destination : UInt64) : Nil
+    saved = IyiRegion.tape
+    if @back
+      @saved.value = saved
+      @depth.value = 1
+      IyiRegion.tape = @head.value
+    end
+    entry = IyiRegion.tape_bytes(24_u64)
+    IyiHeap.write64(entry, source)
+    IyiHeap.write64(entry &+ 8_u64, destination)
+    IyiHeap.write64(entry &+ 16_u64, @memo.value)
+    @memo.value = entry
+    if @back
+      @head.value = IyiRegion.tape
+      IyiRegion.tape = saved
+      @depth.value = 0
+    end
+  end
+
+  def restore(saved : UInt64) : Nil
+    @head.value = IyiRegion.tape
+    @depth.value = 0
+    IyiRegion.tape = saved
+  end
+end
+
+def __iyi_pending_drop(head : Pointer(UInt64)) : Nil
+  region = head.value
+  head.value = 0_u64
+  while region != 0
+    parent = IyiHeap.read64(region &+ IyiRegion::OFF_PARENT)
+    IyiHeap.write64(region &+ IyiRegion::OFF_PARENT, 0_u64)
+    IyiRegion.release(region)
+    region = parent
+  end
+end
+
+# A native typed registry node needs neither a closure nor a heap object.
+# Its slots remain on the caller's stack until the panic drain runs it.
+struct IyiPendingGuard
+  property next_node : IyiDefer?
+
+  def initialize(@head : Pointer(UInt64), @depth : Pointer(Int32),
+                 @saved : Pointer(UInt64))
+    @next_node = nil
+  end
+
+  def run : Nil
+    if @depth.value != 0
+      @head.value = IyiRegion.tape
+      IyiRegion.tape = @saved.value
+      @depth.value = 0
+    end
+    __iyi_pending_drop(@head)
+  end
+end
+
+# Only Pointer(IyiPendingGuard) is admitted to the defer registry. These
+# methods give its native slot the same small interface as IyiDeferNode.
+struct Pointer(T)
+  def next_node : IyiDefer?
+    value.next_node
+  end
+
+  def next_node=(node : IyiDefer?) : Nil
+    made = value
+    made.next_node = node
+    self.value = made
+  end
+
+  def run : Nil
+    value.run
+  end
+end
+
+def __iyi_pending_guard(guard : Pointer(IyiPendingGuard)) : Nil
+  {% if (flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64)) %}
+    fiber = IyiScheduler.current
+    guard.next_node = fiber.defers
+    fiber.defers = guard
+  {% else %}
+    IyiDefers.push(guard)
+  {% end %}
+end
+
+def __iyi_pending_pop(guard : Pointer(IyiPendingGuard)) : Nil
+  {% if (flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64)) %}
+    IyiScheduler.current.defers = guard.next_node
+    guard.run
+  {% else %}
+    IyiDefers.pop_run
+  {% end %}
+end
+
+def __iyi_scope_result(mark : IyiScopeMark, value : T) : T forall T
+  return value if mark.region == 0
+  {% if T == ::Str || T == ::Str::Builder || T.name.starts_with?("Ary(") || T.name.starts_with?("Tre(") || T.annotation(::OnTape) || T < ::Tuple || T < ::NamedTuple || T.union? %}
+    head = 0_u64
+    depth = 0
+    memo = 0_u64
+    saved = IyiRegion.tape
+    guard = IyiPendingGuard.new(pointerof(head), pointerof(depth), pointerof(saved))
+    __iyi_pending_guard(pointerof(guard))
+    staged = Tape.copy_value(value, IyiPendingCopy.new(
+      pointerof(head), pointerof(depth), mark, IyiRegion.tape,
+      pointerof(memo), false, pointerof(saved)))
+    __iyi_scope_reset(mark)
+    result = if head == 0
+      staged
+    else
+      first = head
+      while (parent = IyiHeap.read64(first &+ IyiRegion::OFF_PARENT)) != 0
+        first = parent
+      end
+      source = IyiScopeMark.new(first, first &+ IyiRegion::DATA, 0_u64)
+      memo = 0_u64
+      Tape.copy_value(staged, IyiPendingCopy.new(
+        pointerof(head), pointerof(depth), source, head, pointerof(memo),
+        true, pointerof(saved)))
+    end
+    __iyi_pending_pop(pointerof(guard))
+    result
+  {% else %}
+    __iyi_scope_reset(mark)
+    value
+  {% end %}
 end
 
 # Numeric text is read directly from tape bytes, as heap text is.

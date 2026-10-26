@@ -1,0 +1,77 @@
+def pending_used : UInt64
+  IyiHeap.read64(IyiRegion.tape &+ IyiRegion::OFF_CURSOR)
+end
+
+@[OnTape]
+struct PendingPair
+  getter first : Str
+  getter second : Str
+
+  def initialize(@first : Str, @second : Str)
+  end
+end
+
+def pending_pair(input : Str) : PendingPair
+  scratch = Str::Builder.new(65_536)
+  scratch.push(65_u8)
+  PendingPair.new(input[1, 2], Str.build(8) { |w| w.append("fresh") })
+end
+
+def pending_array(input : Str) : Ary(Str)
+  scratch = Str::Builder.new(65_536)
+  scratch.push(65_u8)
+  made = Ary(Str).new(2)
+  made << input[1, 2]
+  made << Str.build(8) { |w| w.append("array") }
+  made
+end
+
+def pending_tree : Tre(Str)
+  scratch = Str::Builder.new(65_536)
+  scratch.push(65_u8)
+  made = Tre(Str).new(1)
+  made.leaf(Str.build(8) { |w| w.append("tree") })
+  made
+end
+
+def pending_early(n : Int32) : Str?
+  scratch = Str::Builder.new(65_536)
+  scratch.push(65_u8)
+  return if n == 0
+  return Str.build(8) { |w| w.append("early") } if n == 1
+  Str.build(8) { |w| w.append("late") }
+end
+
+def pending_aliases : Ary(Str::Builder)
+  scratch = Str::Builder.new(65_536)
+  scratch.push(65_u8)
+  writer = Str::Builder.new(8)
+  writer.append("a")
+  made = Ary(Str::Builder).new(2)
+  made << writer
+  made << writer
+  made
+end
+
+tape do
+  aliases = pending_aliases
+  aliases[0].append("b")
+  raise "lost result sharing" unless aliases[1].finish == "ab"
+  input = Str.new("abcd")
+  before = pending_used
+  pair = pending_pair(input)
+  raise "struct scratch retained" if pending_used - before > 1024
+  before = pending_used
+  array = pending_array(input)
+  raise "array scratch retained" if pending_used - before > 1024
+  before = pending_used
+  tree = pending_tree
+  raise "tree scratch retained" if pending_used - before > 1024
+  raise "wrong struct" unless pair.first == "bc" && pair.second == "fresh"
+  raise "wrong array" unless array[0] == "bc" && array[1] == "array"
+  raise "wrong tree" unless tree.size == 1 && tree[0] == "tree"
+  raise "wrong nil return" unless pending_early(0).nil?
+  raise "wrong early return" unless pending_early(1) == "early"
+  raise "wrong final return" unless pending_early(2) == "late"
+  puts "PASS: pending structs, arrays, trees and early returns"
+end

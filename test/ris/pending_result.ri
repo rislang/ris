@@ -1,0 +1,43 @@
+@[PointerUnsafe("test that returned input slices retain their byte address")]
+def pending_address(text : Str) : UInt64
+  IyiHeap.read64(pointerof(text).address)
+end
+
+# Retained results must not retain a helper's scratch allocations.
+def pending_number(n : Int32) : Str
+  big = Str::Builder.new(65_536)
+  big.push(65_u8)
+  Str.build(16) { |w| w.append_int(n) }
+end
+
+def pending_borrow(text : Str, early : Bool) : Str
+  big = Str::Builder.new(65_536)
+  big.push(66_u8)
+  return text[1, 3] if early
+  text[2, 2]
+end
+
+tape do
+  kept = Ary(Str).new(10_000)
+  source = Str.new("abcdef")
+  i = 0
+  while i < 10_000
+    kept << pending_number(i)
+    i += 1
+  end
+  i = 0
+  while i < kept.size
+    expected = Str.build(16) { |w| w.append_int(i) }
+    raise "wrong pending result" unless kept[i] == expected
+    i += 1
+  end
+  early = pending_borrow(source, true)
+  late = pending_borrow(source, false)
+  raise "wrong borrowed result" unless early == "bcd" && late == "cd"
+  address = pending_address(source)
+  raise "copied borrowed early view" unless \
+    pending_address(early) == address + 1
+  raise "copied borrowed final view" unless \
+    pending_address(late) == address + 2
+  puts "PASS: pending results and borrowed views"
+end
