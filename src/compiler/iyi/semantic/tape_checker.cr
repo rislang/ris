@@ -8,8 +8,8 @@ class Iyi::TapeChecker
   def initialize(@program)
   end
 
-  # Runtime classes and unmarked std migrations retain iyi's allocation ABI.
-  # A std class opts into checked tape storage with @[OnTape].
+  # Runtime and std migrations retain iyi's allocation ABI unless marked
+  # @[OnTape], which opts their classes into checked tape storage.
   # Extensions do not change the storage of the original declaration.
   def self.class_instance?(program : Program, type : Type) : Bool
     return false unless program.tape_scopes?
@@ -18,9 +18,8 @@ class Iyi::TapeChecker
     return false unless type.is_a?(ClassType) && !type.struct?
     declaration = type.is_a?(GenericClassInstanceType) ? type.generic_type : type
     !!declaration.locations.try(&.first?).try do |loc|
-      !TapeRules.runtime?(program, loc) &&
-        (!TapeRules.std?(loc) ||
-          !declaration.annotation(program.tape_annotation).nil?)
+      (!TapeRules.runtime?(program, loc) && !TapeRules.std?(loc)) ||
+        !declaration.annotation(program.tape_annotation).nil?
     end
   end
 

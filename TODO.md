@@ -24,9 +24,6 @@ How to work (fewer tokens, faster to the goal):
 * Windows file metadata: move native wide-path conversion and auxiliary
   stat buffers onto tape, then gate Str metadata under --no-gc there.
   POSIX metadata and missing-file errors pass the zero-heap gate.
-* JSON Canada's float parsing reaches IyiBig's heap allocation after
-  dropping File.size(path.to_heap)'s copy. Move the slow float path onto
-  tape and recheck Canada under --no-gc.
 * Tape check speed: orders.ri still spends ~66 s in it, ~49 s in the
   shrink checker's run pass (IYI_PROF=1 shows each checker). Cut its
   per-call environment and value allocation; keep contracts identical.

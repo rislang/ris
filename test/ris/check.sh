@@ -45,6 +45,17 @@ else
   echo "FAILED   math_no_heap: $out"; status=1
 fi
 
+# Decimal conversion includes exact rounding and must stay off the heap.
+out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc \
+  test/ris/float_parse_no_heap.ri 2>&1)
+if [ "$?" -eq 0 ] &&
+    grep -qxF 'PASS: float parsing, zero heap' <<<"$out" &&
+    grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+  echo "runs     float_parse_no_heap (--no-gc, exact result bits)"
+else
+  echo "FAILED   float_parse_no_heap: $out"; status=1
+fi
+
 # Typed runs reuse, merge, relocate and retain typed stale views.
 out=$("$RIS" run --no-gc test/ris/slice_pool.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = 'PASS: SlicePool' ]; then
