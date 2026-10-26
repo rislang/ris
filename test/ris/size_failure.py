@@ -29,6 +29,7 @@ CASES = {
     "r": "iyi: tape offset overflow: 2147483648",
     "s": "iyi: tape offset overflow: -2147483649",
     "t": "iyi: tape offset overflow: 2147483648",
+    "u": "iyi: use growing_state before publishing tape bytes: 8",
 }
 
 

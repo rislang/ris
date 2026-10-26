@@ -244,7 +244,7 @@ if [ "$?" -eq 0 ] &&
     grep -qF 'PASS: owner construction panic cleanup' <<<"$out" &&
     [ "$(grep -cF 'iyi: panic: expected owner construction panic' <<<"$out")" -eq 100 ] &&
     ! grep -qF 'half-built owner became observable' <<<"$out" &&
-    grep -qF '201 scopes, 103 mappings made, 100 unmapped' <<<"$out"; then
+    grep -qF '201 scopes, 6 mappings made, 0 unmapped' <<<"$out"; then
   echo "runs     owner_construction_panic (bounded scope cleanup)"
 else
   echo "FAILED   owner_construction_panic: $out"
@@ -425,7 +425,7 @@ for name in implicit fibers/implicit implicit_loop; do
   code=$?
   if [ "$code" -eq 0 ] && grep -qF 'PASS:' <<<"$out" &&
       { [ "$name" != implicit_loop ] ||
-        grep -qF '1 scopes, 1 mappings made, 0 unmapped' <<<"$out"; }; then
+        grep -qF '1 scopes, 3 mappings made, 0 unmapped' <<<"$out"; }; then
     echo "runs     $name"
   else
     echo "FAILED   $name: $out"
@@ -602,8 +602,42 @@ out=$("$RIS" run test/ris/refill_handoff.ri 2>&1)
 if [ "$out" = '2 2 3 4' ]; then echo "runs     refill_handoff"; else echo "FAILED   refill_handoff: $out"; status=1; fi
 out=$("$RIS" run test/ris/clear.ri 2>&1)
 if [ "$out" = $'2 1 2\n3 2 3\n4 3 4\nxxxxend' ]; then echo "runs     clear"; else echo "FAILED   clear: $out"; status=1; fi
-out=$(RIS_TAPE_STATS=1 "$RIS" run test/ris/side_warm.ri 2>&1)
-if grep -qF '1001 scopes, 3 mappings made, 0 unmapped' <<<"$out" && grep -qF '1000 side regions' <<<"$out"; then echo "runs     side_warm"; else echo "FAILED   side_warm: $out"; status=1; fi
+out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 "$RIS" run --no-gc \
+  test/ris/side_warm.ri 2>&1)
+if [ "$?" -eq 0 ] &&
+    grep -qF '10001 scopes, 4 mappings made, 0 unmapped' <<<"$out" &&
+    grep -qF '0 growth moves' <<<"$out" &&
+    grep -qF '0 side regions (0 transfer bytes copied)' <<<"$out" &&
+    grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+  echo "runs     side_warm (10,000 scopes, no copies or fresh mappings)"
+else
+  echo "FAILED   side_warm: $out"; status=1
+fi
+out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 "$RIS" run --no-gc \
+  test/ris/side_spares.ri 2>&1)
+if [ "$?" -eq 0 ] &&
+    grep -qF 'PASS: mixed side spares reused' <<<"$out" &&
+    grep -qF '3 mappings made, 0 unmapped' <<<"$out" &&
+    grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+  echo "runs     side_spares (mixed reservations reused 10,000 times)"
+else
+  echo "FAILED   side_spares: $out"; status=1
+fi
+out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 "$RIS" run --no-gc \
+  test/ris/query_scope.ri 2>&1)
+code=$?
+mappings=$(sed -n \
+  's/^ris tape:.*scopes, \([0-9]*\) mappings made.*/\1/p' <<<"$out")
+if [ "$code" -eq 0 ] &&
+    grep -qF 'PASS: query scopes reuse reservations' <<<"$out" &&
+    [ -n "$mappings" ] && [ "$mappings" -le 8 ] &&
+    grep -qF '0 side regions (0 transfer bytes copied)' <<<"$out" &&
+    grep -qF '0 growth moves' <<<"$out" &&
+    grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+  echo "runs     query_scope (10,000 rounds, bounded reservations)"
+else
+  echo "FAILED   query_scope: $out"; status=1
+fi
 out=$("$RIS" run test/ris/side.ri 2>&1)
 if [ "$out" = $'round 0: intact\nround 1: intact\nround 2: intact' ]; then echo "runs     side"; else echo "FAILED   side: $out"; status=1; fi
 out=$("$RIS" run test/ris/scope_free.ri 2>&1)
@@ -617,7 +651,7 @@ out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 "$RIS" run --no-gc \
 if [ "$?" = 0 ] &&
    grep -qF 'PASS: pending results and borrowed views' <<<"$out" &&
    grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out" &&
-   grep -qF '1 scopes, 2 mappings made, 0 unmapped, 0 tapes grown' <<<"$out"; then
+   grep -qF '1 scopes, 5 mappings made, 0 unmapped, 0 tapes grown' <<<"$out"; then
   echo "runs     pending_result (bounded scratch, borrowed input stays a view)"
 else
   echo "FAILED   pending_result: $out"; status=1
@@ -915,14 +949,26 @@ if [ "$?" -eq 0 ] &&
     grep -qF 'PASS: stable interleaved growth' <<<"$out" &&
     grep -qF '0 growth moves' <<<"$out" &&
     grep -qF '4 mappings made' <<<"$out" &&
-    grep -qF '2 side regions' <<<"$out"; then
+    grep -qF '0 side regions (0 transfer bytes copied)' <<<"$out"; then
   echo "runs     stable_growth (--no-gc, bounded mappings)"
 else
   echo "FAILED   stable_growth: $out"; status=1
 fi
+out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 "$RIS" run --no-gc \
+  test/ris/stable_components.ri 2>&1)
+if [ "$?" -eq 0 ] &&
+    grep -qF 'PASS: builder and tree stable before first growth' <<<"$out" &&
+    grep -qF '5 mappings made, 0 unmapped' <<<"$out" &&
+    grep -qF '0 growth moves' <<<"$out" &&
+    grep -qF '0 side regions (0 transfer bytes copied)' <<<"$out" &&
+    grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+  echo "runs     stable_components (--no-gc, views before first growth)"
+else
+  echo "FAILED   stable_components: $out"; status=1
+fi
 out=$("$RIS" run --no-gc test/ris/side_overflow.ri 2>&1)
 if [ "$?" -eq 1 ] &&
-    [ "$out" = 'iyi: tape side reservation exhausted: 1073741825' ]; then
+    [ "$out" = 'iyi: tape side reservation exhausted: 134217729' ]; then
   echo "fatal    side_overflow (--no-gc)"
 else
   echo "FAILED   side_overflow: $out"; status=1

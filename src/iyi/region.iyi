@@ -1,4 +1,5 @@
-# Tape mappings grow from 64 MiB; sizes are checked before state changes.
+# Ordinary tapes start at 64 MiB; Linux growing payloads reserve separately.
+# Sizes are checked before state changes.
 # Fatal size errors write literals and stack-buffer numbers, then exit.
 class IyiRegion
   OFF_CURSOR =  0_u64
@@ -9,7 +10,7 @@ class IyiRegion
   # links live in the mapping's own header, so the list has no bound.
   OFF_NEXT = 32_u64
   OFF_PREV = 40_u64
-  # The regions of this one's growing values (`tape_resize`), linked
+  # This tape's growing payload reservations (`growing_state`), linked
   # through their OFF_PARENT words and released with it.
   OFF_SIDE =       48_u64
   DATA     =       64_u64
@@ -290,10 +291,37 @@ class IyiRegion
     take(region, size, false, 0_u64)
   end
 
-  # A displaced value transfers once into its own side region. Linux
-  # reserves address space with MAP_NORESERVE: pages become resident on
-  # first write, without committing the unused reservation. The final
-  # grain is PROT_NONE. Further growth never relocates; exhaustion exits.
+  # Construct growing storage before any element can be published. State
+  # stays on the ordinary tape; Linux payloads each own a guarded virtual
+  # reservation, returned to the side spares at the owning scope's end.
+  def self.growing_state(bytes : UInt64, width : UInt64) : Pointer(UInt64)
+    {% if flag?(:linux) %}
+      capacity = side_capacity(width)
+      payload = bytes &- 40_u64
+      capacity = payload if payload > capacity
+      state = Pointer(UInt64).new(tape_bytes(40_u64))
+      own = acquire_side(capacity)
+      region = @@tape
+      IyiHeap.write64(own &+ OFF_PARENT, IyiHeap.read64(region &+ OFF_SIDE))
+      IyiHeap.write64(region &+ OFF_SIDE, own)
+      start = own &+ DATA
+      IyiHeap.write64(own &+ OFF_CURSOR,
+        (start &+ payload &+ 7_u64) & 0xFFFFFFFFFFFFFFF8_u64)
+      state.value = start
+      (state + 3_i64).value = own
+      state
+    {% else %}
+      state = Pointer(UInt64).new(tape_bytes(bytes))
+      state.value = state.address &+ 40_u64
+      (state + 3_i64).value = 0_u64
+      state
+    {% end %}
+  end
+
+  # Linux growing values own their reservation before publishing elements.
+  # MAP_NORESERVE commits pages on touch; the final grain is PROT_NONE.
+  # A raw, unpublished extent may acquire a reservation on first growth;
+  # a displaced published extent is refused rather than copied.
   # Other targets retain the legacy moving side-region implementation.
   def self.tape_resize(start : UInt64, stop : UInt64, used : UInt64,
                        bytes : UInt64, side : Pointer(UInt64),
@@ -316,6 +344,8 @@ class IyiRegion
       if own != 0
         size_error("iyi: tape side reservation exhausted: ", bytes)
       end
+      size_error("iyi: use growing_state before publishing tape bytes: ", used) \
+        if used != 0
       capacity = side_capacity(width)
       size_error("iyi: tape side reservation exhausted: ", bytes) \
         if bytes > capacity
@@ -328,8 +358,10 @@ class IyiRegion
       @@moved = @@moved &+ 1_u64
       @@moved_bytes = @@moved_bytes &+ used
     {% end %}
-    @@sides = @@sides &+ 1_u64
-    @@side_bytes = @@side_bytes &+ used
+    {% unless flag?(:linux) %}
+      @@sides = @@sides &+ 1_u64
+      @@side_bytes = @@side_bytes &+ used
+    {% end %}
     IyiHeap.write64(own &+ OFF_PARENT, IyiHeap.read64(region &+ OFF_SIDE))
     IyiHeap.write64(region &+ OFF_SIDE, own)
     side.value = own
@@ -337,14 +369,20 @@ class IyiRegion
     moved = own &+ DATA
     IyiHeap.write64(own &+ OFF_CURSOR,
       (moved &+ bytes &+ 7_u64) & 0xFFFFFFFFFFFFFFF8_u64)
-    LibTapeCopy.memcpy(Pointer(UInt8).new(moved),
-      Pointer(UInt8).new(start), used, false)
+    {% unless flag?(:linux) %}
+      LibTapeCopy.memcpy(Pointer(UInt8).new(moved),
+        Pointer(UInt8).new(start), used, false)
+    {% end %}
     moved
   end
 
-  # Backend policy: edit this reservation independently of tape size.
-  # Limit usable bytes to the public element count times element width.
-  SIDE_RESERVE = 1073741824_u64
+  # Linux policy: reserve 128 MiB per growing payload, or its initial
+  # capacity if larger. No reservation grows or relocates: exhaustion is
+  # checked before mutation. MAX_COUNT still bounds the element count.
+  # MAP_NORESERVE avoids commit accounting; scope rollback reuses spares.
+  # The allocation graph must recognize growing_state so those rollbacks
+  # are retained even when constructors no longer call tape_bytes directly.
+  SIDE_RESERVE = 134217728_u64
   SIDE_FIRST = CAPACITY
 
   def self.side_capacity(width : UInt64) : UInt64
@@ -362,13 +400,25 @@ class IyiRegion
     def self.acquire_side(capacity : UInt64) : UInt64
       usable = mapping_length(capacity)
       length = size_add(usable, GRAIN)
+      # Mixed element widths can have different reservation limits. Search
+      # the bounded list so an unlike head cannot force a mmap per scope.
+      previous = 0_u64
       spare = @@side_spare
-      if spare != 0 && IyiHeap.read64(spare &+ OFF_MAP) == length &&
-         IyiHeap.read64(spare &+ OFF_LIMIT) == spare &+ DATA &+ capacity
-        @@side_spare = IyiHeap.read64(spare &+ OFF_PARENT)
-        @@side_spares = @@side_spares &- 1_u64
-        IyiHeap.write64(spare &+ OFF_PARENT, 0_u64)
-        return spare
+      while spare != 0
+        following = IyiHeap.read64(spare &+ OFF_PARENT)
+        if IyiHeap.read64(spare &+ OFF_MAP) == length &&
+           IyiHeap.read64(spare &+ OFF_LIMIT) == spare &+ DATA &+ capacity
+          if previous == 0
+            @@side_spare = following
+          else
+            IyiHeap.write64(previous &+ OFF_PARENT, following)
+          end
+          @@side_spares = @@side_spares &- 1_u64
+          IyiHeap.write64(spare &+ OFF_PARENT, 0_u64)
+          return spare
+        end
+        previous = spare
+        spare = following
       end
       # MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, read/write on touch.
       region = LibC.mmap(Pointer(Void).new(0_u64), length,
@@ -476,8 +526,9 @@ class IyiRegion
   end
 
   # What the tapes did, on standard error, when `RIS_TAPE_STATS` is
-  # set: run as the program ends. Side transfers are separate from
-  # growth moves (zero on Linux); scopes reuse reserved side spares.
+  # set: run as the program ends. Side regions count copying transfers,
+  # not construction reservations. Both copy counts are zero on Linux;
+  # scopes reuse reserved side spares.
   def self.report_stats : Nil
     return unless stats_asked?
     add_stats
@@ -548,6 +599,15 @@ class IyiRegion
   # The thread's spares back to the kernel, when the thread ends.
   def self.drop_spares : Nil
     add_stats
+    side = @@side_spare
+    @@side_spare = 0_u64
+    @@side_spares = 0_u64
+    while side != 0
+      following = IyiHeap.read64(side &+ OFF_PARENT)
+      unregister(side)
+      __iyi_munmap(side, IyiHeap.read64(side &+ OFF_MAP))
+      side = following
+    end
     region = @@spare
     @@spare = 0_u64
     @@spares = 0_u64

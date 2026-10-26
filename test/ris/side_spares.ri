@@ -1,0 +1,14 @@
+# An unlike head must not hide an existing spare further down the list.
+module test/ris/side_spares
+
+@[PointerUnsafe("test mixed reservation reuse without touching payloads")]
+def mixed_spares
+  10000.times do
+    small = IyiRegion.acquire_side(65536_u64)
+    large = IyiRegion.acquire_side(131072_u64)
+    IyiRegion.release(small)
+    IyiRegion.release(large)
+  end
+end
+mixed_spares
+puts "PASS: mixed side spares reused"

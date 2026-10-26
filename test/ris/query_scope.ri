@@ -1,0 +1,25 @@
+# Returned tape handles and optional borrowed text must not pin each round.
+# `words` also names a prelude C-entry local; their scopes are independent.
+module test/ris/query_scope
+
+import std/uri::{Query}
+
+QUERIES = Ary(Str){
+  "q=hello+world&page=2&sort=name",
+  "filter=a%2Cb&x=1&y=&z",
+  "page=10;limit=50&q=caf%C3%A9",
+}
+sum = 0_i64
+i = 0
+while i < 10000
+  text = QUERIES[i % 3]
+  tape do
+    q = Query.parse(text)
+    page = q["page"]?
+    words = q["q"]?
+    sum += (page ? page.bytesize : 0) + (words ? words.bytesize : 0) + q.size
+  end
+  i += 1
+end
+raise "query checksum" unless sum == 96672
+puts "PASS: query scopes reuse reservations"

@@ -235,13 +235,16 @@ Checked UInt64 arithmetic permits at most 2^64 - 65,536 mapped bytes;
 the OS address space and available memory usually impose a smaller limit.
 `Str` byte lengths and `Ary`/`Tre` counts are at most 2^31 - 1.
 Region and side-region lists have no fixed count cap; allocation failure
-is fatal. On Linux a displaced value transfers once to a side region.
-It reserves up to 1 GiB (`SIDE_RESERVE`, backend policy), capped at
-(2^31 - 1) times the element width. MAP_NORESERVE commits pages on touch;
-a final 64 KiB guard is inaccessible. Growth there never moves, and
-exhaustion exits with an allocation-free fatal error, without fallback.
+is fatal. On Linux each growing value reserves its own side region at
+construction, before publishing elements. The default reservation is
+128 MiB (`SIDE_RESERVE`, backend policy), capped at (2^31 - 1) times the
+element width; a larger initial capacity reserves exactly that capacity.
+MAP_NORESERVE commits pages on touch; a final 64 KiB guard is inaccessible.
+Growth never moves elements. Exceeding the reservation exits with an
+allocation-free fatal error, before mutation and without fallback.
 Other targets retain moving side mappings pending reservation support.
-Stats count side regions and transfer bytes separately from growth moves.
+Stats count copying side transfers separately from growth moves; both
+counts are zero on Linux. Construction reservations count as mappings.
 The reservation follows
 [Goose §1.2–1.3 and §10.4](reference/goose/docs/goose_spec.md).
 Each worker caches at most 64 released initial-size tape mappings and

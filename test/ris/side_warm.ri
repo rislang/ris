@@ -1,8 +1,7 @@
-# A value that outgrows its room while another follows it moves to a
-# region of its own (`a`, with `b` after it; `b` grows in place). That
-# region joins the spares when the local tape ends: a thousand scopes use
-# two mappings, plus the implicit main tape (RIS_TAPE_STATS counts them).
-1000.times do
+# Two live growing values each reserve before publishing any elements.
+# Their reservations and the local tape are reused over 10,000 scopes:
+# four mappings including the implicit main tape, with no copying.
+10000.times do
   local_tape do
     a = Ary(Int32).new(4)
     b = Ary(Int32).new(4)

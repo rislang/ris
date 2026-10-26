@@ -64,4 +64,10 @@ when 115
   scanner.advance(-1)
 when 116
   Lexer.new.overflow
+when 117
+  side = 0_u64
+  start = IyiRegion.tape_bytes(8_u64)
+  IyiRegion.tape_bytes(8_u64)
+  IyiRegion.tape_resize(start, start + 8_u64, 8_u64,
+    16_u64, pointerof(side))
 end

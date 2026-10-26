@@ -1,6 +1,6 @@
 # A panic in initialize must release both already-built fields with the
 # enclosing tape. Repeated task scopes must not retain their mappings.
-# Two 40 MB fields exceed the 64 MiB initial mapping in every scope.
+# Both growing fields reserve stable storage before initialize fails.
 @[Owner]
 struct BrokenOwner
   getter left : Ary(Int32)

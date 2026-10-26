@@ -16,8 +16,8 @@
 # around the scope.
 #
 # Writers, arrays and trees hold pointers to state blocks on the tape;
-# copies share that state. Its fourth word names the region a value moved
-# to when it grew away from the tape's end (`IyiRegion.tape_resize`).
+# copies share that state. Its fourth word names its payload reservation
+# on Linux, acquired before any element is published.
 # A Str is an immutable byte view.
 # Copying a tape value does not copy its backing storage.
 
@@ -666,12 +666,10 @@ struct Str::Builder
 
   def initialize(capacity : Int32 | Int64 = 64)
     bytes = Tape.storage(capacity, 1_u64)
-    @state = Pointer(UInt64).new(IyiRegion.tape_bytes(bytes))
-    start = @state.address &+ 40_u64
-    @state.value = start
+    @state = IyiRegion.growing_state(bytes, 1_u64)
+    start = @state.value
     (@state + 1_i64).value = start &+ capacity.to_u64
     (@state + 2_i64).value = start
-    (@state + 3_i64).value = 0_u64
     (@state + 4_i64).value = IyiRegion.program_active? ? 1_u64 : 0_u64
   end
 
@@ -1195,17 +1193,15 @@ struct Ary(T)
 
   def initialize(capacity : Int32 | Int64 = 4)
     bytes = Tape.storage(capacity, sizeof(T).to_u64)
-    @state = Pointer(UInt64).new(IyiRegion.tape_bytes(bytes))
-    @state.value = @state.address &+ 40_u64
+    @state = IyiRegion.growing_state(bytes, sizeof(T).to_u64)
     (@state + 1_i64).value = 0_u64
     (@state + 2_i64).value = capacity.to_u64
-    (@state + 3_i64).value = 0_u64
     (@state + 4_i64).value = IyiRegion.program_active? ? 1_u64 : 0_u64
   end
 
   # *count* elements, the block giving each by index, in room of exactly
-  # that size: it never grows, so it never moves to a region of its own
-  # however much the block puts on the tape.
+  # that size. Linux reserves stable storage even if later appended to;
+  # the block may allocate other growing values while filling it.
   def self.new(count : Int32 | Int64, & : Int32 -> T) : self
     array = new(count)
     index = 0
@@ -1962,11 +1958,9 @@ struct Tre(T)
   def initialize(capacity : Int32 | Int64 = 64)
     width = sizeof(Entry(T)).to_u64
     bytes = Tape.storage(capacity, width)
-    @state = Pointer(UInt64).new(IyiRegion.tape_bytes(bytes))
-    @state.value = @state.address &+ 40_u64
+    @state = IyiRegion.growing_state(bytes, width)
     (@state + 1_i64).value = 0_u64
     (@state + 2_i64).value = capacity.to_u64
-    (@state + 3_i64).value = 0_u64
     (@state + 4_i64).value = IyiRegion.program_active? ? 1_u64 : 0_u64
   end
 

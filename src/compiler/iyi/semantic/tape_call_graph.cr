@@ -174,7 +174,7 @@ class Iyi::TapeCallGraph
   class Effects < Visitor
     getter allocation = false
     getter suspension = false
-    TAKES = {"tape_bytes", "tape_resize", "take", "grow_onto",
+    TAKES = {"tape_bytes", "growing_state", "tape_resize", "take", "grow_onto",
              "tape_scope", "tape_local", "tape="}
 
     def initialize(@graph : TapeCallGraph)

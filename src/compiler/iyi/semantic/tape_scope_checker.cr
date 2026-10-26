@@ -245,7 +245,9 @@ class Iyi::TapeScopeChecker
       false
     end
 
-    def visit(node : Def)
+    # C-entry bodies have their own locals too. Counting prelude memset
+    # made a caller's unrelated `words` look live outside its tape block.
+    def visit(node : Def | FunDef)
       false
     end
 

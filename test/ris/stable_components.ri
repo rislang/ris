@@ -1,0 +1,30 @@
+# Save views before the first growth, then allocate and grow both payloads.
+module test/ris/stable_components
+
+@[PointerUnsafe("test builder and tree views before their first growth")]
+def check_components
+  local_tape do
+    writer = Str::Builder.new(1)
+    tree = Tre(Int32).new(1)
+    writer.push(65_u8)
+    root = tree.open(7)
+    text = writer.finish
+    # Entry(Int32) stores value then stop, both Int32.
+    entry = Pointer(Int32).new(tree.@state.value)
+    first = tree.@state.value
+    padding = Ary(Int32).new(3)
+    writer.append("bcdef")
+    tree.leaf(8)
+    tree.close(root)
+    # A write after growth must be visible through the saved byte view.
+    Pointer(UInt8).new((writer.@state + 2_i64).value).value = 90_u8
+    raise "builder view moved" unless text[0] == 90_u8
+    raise "builder contents" unless writer.finish == "Zbcdef"
+    raise "tree moved" unless first == tree.@state.value
+    raise "tree view stale" unless entry[1] == 2
+    raise "tree contents" unless tree[0] == 7 && tree[1] == 8
+    padding << 1
+  end
+end
+check_components
+puts "PASS: builder and tree stable before first growth"
