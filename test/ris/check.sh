@@ -548,6 +548,15 @@ if grep -qF "PASS: cut back and written over" <<<"$out" && grep -qF "truncate to
 out=$("$RIS" run test/ris/json.ri 2>&1)
 if [ "$out" = 'PASS: parsed, refused alike, written alike, on the tape' ]; then echo "runs     json"; else echo "FAILED   json: $out"; status=1; fi
 
+out=$("$RIS" run test/ris/json_buffer.ri 2>&1)
+if [ "$?" -eq 0 ] &&
+    [ "$out" = 'PASS: JSON tape buffers, aliases, retained strings and errors' ]; then
+  echo "runs     json_buffer"
+else
+  echo "FAILED   json_buffer: $out"; status=1
+fi
+expect json_builder_escape 'is a variable of the code around this tape block'
+
 out=$("$RIS" run test/ris/json_repeat.ri 2>&1)
 if grep -qF 'nested keys are no repeat' <<<"$out" && grep -qF 'the key "k77" is written twice in one object' <<<"$out"; then echo "runs     json_repeat"; else echo "FAILED   json_repeat: $out"; status=1; fi
 

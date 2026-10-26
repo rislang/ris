@@ -22,9 +22,9 @@ How to work (fewer tokens, faster to the goal):
 ## Remaining tape semantics
 
 * Finish ordinary class tape allocation for std-defined migration classes:
-  migrate non-tape holders (JSON StringBuffer), escaping TlsStream callbacks
-  and log Metadata sharing first. Runtime and std declarations still use
-  the migration allocation ABI; user classes have checked roots and copy_to.
+  migrate escaping TlsStream callbacks and log Metadata sharing first.
+  Unmarked runtime and std declarations still use the migration allocation
+  ABI; selected std classes opt in with @[OnTape].
 * Stable growth on every supported tape target: replace moving backends
   outside Linux with address-space reservations and equivalent gates.
 * Escaping closures outside program and joined task owners: pooled
@@ -66,6 +66,10 @@ How to work (fewer tokens, faster to the goal):
 
 ## Known failure to recheck
 
+* Reproduce plain `bench/std_json_exercise.iyi` stack overflow in its
+  deepest nesting cases; also occurs before JSON tape migration
+  (`143ad1e03`). Release correctness passes. Diagnose in iyi first,
+  or record a tape-independent fix in UPSTREAM.md.
 * Reproduce spec/compiler/iyimod_spec.cr's "carries the constants a
   module's own code reads": runtime constants appear in the constant
   list. Determine whether the artifact or the expectation is wrong;

@@ -38,52 +38,32 @@
 module std/json
 
 # A growable byte buffer for the text a string or a document is assembled in.
+@[OnTape]
 class StringBuffer
-  @buffer : Pointer(UInt8)
-  @capacity : Int32
-  @size : Int32
+  @writer : Str::Builder
 
   def initialize(initial_capacity : Int32 = 64)
-    @capacity = initial_capacity < 16 ? 16 : initial_capacity
-    @buffer = Pointer(UInt8).malloc(@capacity.to_u64)
-    @size = 0
+    @writer = Str::Builder.new(initial_capacity < 16 ? 16 : initial_capacity)
   end
 
   def size : Int32
-    @size
+    @writer.length
   end
 
   def clear : Nil
-    @size = 0
+    @writer.clear
   end
 
   def append(byte : UInt8) : Nil
-    ensure_capacity(@size + 1)
-    @buffer[@size] = byte
-    @size = @size + 1
+    @writer.push(byte)
   end
 
   def append(str : String) : Nil
-    len = str.bytesize
-    return if len == 0
-    ensure_capacity(@size + len)
-    (@buffer + @size).copy_from(str.to_unsafe, len)
-    @size = @size + len
+    @writer.append(str.as_tape)
   end
 
   def append(text : Str) : Nil
-    ensure_capacity(@size + text.bytesize)
-    text.each_byte do |b|
-      @buffer[@size] = b
-      @size = @size + 1
-    end
-  end
-
-  def append(bytes : Pointer(UInt8), len : Int32) : Nil
-    return if len == 0
-    ensure_capacity(@size + len)
-    (@buffer + @size).copy_from(bytes, len)
-    @size = @size + len
+    @writer.append(text)
   end
 
   def append_codepoint(codepoint : Int32) : Nil
@@ -104,29 +84,15 @@ class StringBuffer
     end
   end
 
-  private def ensure_capacity(needed : Int32) : Nil
-    return if needed <= @capacity
-    while @capacity < needed
-      @capacity = @capacity * 2
-    end
-    @buffer = @buffer.realloc(@capacity.to_u64)
-  end
-
+  # String migration results own their bytes across buffer reuse.
+  @[TapeToHeap]
   def to_s : String
-    len = @size
-    ptr = @buffer
-    String.new(len) do |target|
-      target.copy_from(ptr, len)
-    end
+    @writer.finish.to_heap
   end
 
-  # The bytes appended since *start*, as a String.
+  @[TapeToHeap]
   def slice_from(start : Int32) : String
-    len = @size - start
-    ptr = @buffer + start
-    String.new(len) do |target|
-      target.copy_from(ptr, len)
-    end
+    @writer.finish[start, size - start].to_heap
   end
 end
 
@@ -865,6 +831,7 @@ end
 # Reads tokens from the bytes of a document. A malformed token is not a
 # panic here: `next_token` answers a token of kind `Error` and `error` holds
 # the sentence, so `JSON.parse?` can answer `nil` and `JSON.parse` can panic.
+@[OnTape]
 struct Lexer
   @input : String
   @pos : Int32
@@ -886,7 +853,7 @@ struct Lexer
     @line_number = 1
     @column_number = 1
     @token = Token.new
-    @string_buffer = StringBuffer.new(64)
+    @string_buffer = StringBuffer.new(input.bytesize)
     @error = nil
     @short = Array(String).new(SHORT_SLOTS) { "" }
     @spans = false
@@ -1524,6 +1491,7 @@ POW10 = {1.0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e1
 # Reads a whole document into an `Any`. Like the lexer it records the first
 # failure instead of panicking; `JSON.parse` and `JSON.parse?` decide what to
 # do with it.
+@[OnTape]
 pub class Parser
   @lexer : Lexer
   @nesting : Int32
@@ -1736,6 +1704,7 @@ end
 # Reads a document one event at a time: `kind` names what the reader is on,
 # the `read_x` methods take it and move on. The grammar is checked as it is
 # read, so a missing comma or colon is refused where it is, with a panic.
+@[OnTape]
 pub class PullParser
   enum Kind
     Null
@@ -2239,6 +2208,7 @@ end
 
 # Writes a document one value at a time. `indent=` makes it pretty;
 # `ascii_only=` escapes every non-ASCII code point.
+@[OnTape]
 pub class Builder
   # Where the writer is: what may be written next.
   ROOT         = 0

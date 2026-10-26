@@ -1,0 +1,38 @@
+# Heap migration strings survive the lexer's reused tape buffer.
+module test/ris/json_buffer
+
+import std/json::{JSON, Parser, PullParser, Builder}
+
+saved = ""
+100.times do
+  local_tape do
+    parsed = JSON.parse("[\"first\\nvalue\",\"second\\tvalue\",\"\\u00e9\"]".to_heap)
+    raise "first text changed" unless parsed[0].as_s == "first\nvalue"
+    raise "second text changed" unless parsed[1].as_s == "second\tvalue"
+    raise "unicode" unless parsed[2].as_s == "é"
+    saved = parsed[0].as_s
+    pull = PullParser.new("[\"one\\n\",\"two\\t\"]".to_heap)
+    first = ""
+    second = ""
+    pull.read_array do
+      if first.empty?
+        first = pull.read_string
+      else
+        second = pull.read_string
+      end
+    end
+    raise "pull reuse" unless first == "one\n" && second == "two\t"
+    builder = Builder.new
+    alias_builder = builder
+    builder.start_array
+    alias_builder.string("escaped\ntext".to_heap)
+    builder.end_array
+    text = builder.to_s
+    raise "builder alias" unless text == "[\"escaped\\ntext\"]"
+    parser = Parser.new("[\"valid\\n\",\"bad\\q\"]".to_heap)
+    parser.parse
+    raise "missing error" if parser.error.nil?
+  end
+  raise "released text" unless saved == "first\nvalue"
+end
+puts "PASS: JSON tape buffers, aliases, retained strings and errors"
