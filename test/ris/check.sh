@@ -33,6 +33,16 @@ expect() {
   fi
 }
 
+# Importing math and using its tables must never allocate on the heap.
+out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc test/ris/math_no_heap.ri 2>&1)
+if [ "$?" -eq 0 ] &&
+    grep -qxF 'PASS: math constants and functions, zero heap' <<<"$out" &&
+    grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+  echo "runs     math_no_heap (--no-gc, exact result bits)"
+else
+  echo "FAILED   math_no_heap: $out"; status=1
+fi
+
 # Typed runs reuse, merge, relocate and retain typed stale views.
 out=$("$RIS" run --no-gc test/ris/slice_pool.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = 'PASS: SlicePool' ]; then

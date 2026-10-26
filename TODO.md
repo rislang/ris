@@ -21,8 +21,6 @@ How to work (fewer tokens, faster to the goal):
 
 ## Workload blockers (goose-evaluations, 2026-10-26)
 
-* std/math: importing it builds heap tables (Math::SIN_T, math.iyi:41)
-  even when no Math method is called; --no-gc fails on import alone.
 * File metadata on tape: File.size takes String or Path only, so the
   JSON, YAML and Ninja ports copy the path to the heap. Add Str forms,
   move callers, then recheck those ports under --no-gc.

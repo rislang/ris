@@ -6,6 +6,9 @@ ris, take it to iyi with `git cherry-pick`; strike entries once merged.
 
 ## To take to iyi
 
+* std/math: use StaticArray for all fixed numeric constant tables,
+  preserving their literal bits without startup heap allocations.
+
 * Let Mutex subclasses acquire and release their lock in synchronous
   methods, without materializing a callback over borrowed arguments.
 * Log.with_context yields directly to its synchronous block instead of

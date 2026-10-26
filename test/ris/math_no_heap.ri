@@ -1,0 +1,224 @@
+module test/ris/math_no_heap
+
+import std/math::{Math}
+
+# Exact bits captured before moving the tables to StaticArray.
+# Include small, ordinary, large and out-of-domain arguments.
+# NaN results are checked by bits too, including their sign and payload.
+
+raise "Math.sin(0.125)" unless
+  IyiFloatText.bits_of(Math.sin(0.125)) == 4593648181988224566_u64
+raise "Math.sin(0.75)" unless
+  IyiFloatText.bits_of(Math.sin(0.75)) == 4604314875676561165_u64
+raise "Math.sin(1.25)" unless
+  IyiFloatText.bits_of(Math.sin(1.25)) == 4606722913101496716_u64
+raise "Math.sin(20.0)" unless
+  IyiFloatText.bits_of(Math.sin(20.0)) == 4606398299327249632_u64
+raise "Math.sin(1.0e100)" unless
+  IyiFloatText.bits_of(Math.sin(1.0e100)) == 13823900616546751321_u64
+raise "Math.cos(0.125)" unless
+  IyiFloatText.bits_of(Math.cos(0.125)) == 4607112141634100179_u64
+raise "Math.cos(0.75)" unless
+  IyiFloatText.bits_of(Math.cos(0.75)) == 4604765686979698975_u64
+raise "Math.cos(1.25)" unless
+  IyiFloatText.bits_of(Math.cos(1.25)) == 4599351962613045586_u64
+raise "Math.cos(20.0)" unless
+  IyiFloatText.bits_of(Math.cos(20.0)) == 4601022972803983423_u64
+raise "Math.cos(1.0e100)" unless
+  IyiFloatText.bits_of(Math.cos(1.0e100)) == 4606504395019403765_u64
+raise "Math.tan(0.125)" unless
+  IyiFloatText.bits_of(Math.tan(0.125)) == 4593695223700591013_u64
+raise "Math.tan(0.75)" unless
+  IyiFloatText.bits_of(Math.tan(0.75)) == 4606566294485004012_u64
+raise "Math.tan(1.25)" unless
+  IyiFloatText.bits_of(Math.tan(1.25)) == 4613959367230894504_u64
+raise "Math.tan(20.0)" unless
+  IyiFloatText.bits_of(Math.tan(20.0)) == 4612220057397406596_u64
+raise "Math.tan(1.0e100)" unless
+  IyiFloatText.bits_of(Math.tan(1.0e100)) == 13824458796861714301_u64
+raise "Math.cbrt(0.125)" unless
+  IyiFloatText.bits_of(Math.cbrt(0.125)) == 4602678819172646912_u64
+raise "Math.cbrt(0.75)" unless
+  IyiFloatText.bits_of(Math.cbrt(0.75)) == 4606358803170042495_u64
+raise "Math.cbrt(1.25)" unless
+  IyiFloatText.bits_of(Math.cbrt(1.25)) == 4607530174806257743_u64
+raise "Math.cbrt(20.0)" unless
+  IyiFloatText.bits_of(Math.cbrt(20.0)) == 4613294743883329774_u64
+raise "Math.cbrt(1.0e100)" unless
+  IyiFloatText.bits_of(Math.cbrt(1.0e100)) == 5105549475051915721_u64
+raise "Math.exp(0.125)" unless
+  IyiFloatText.bits_of(Math.exp(0.125)) == 4607782066123634125_u64
+raise "Math.exp(0.75)" unless
+  IyiFloatText.bits_of(Math.exp(0.75)) == 4611949479042997496_u64
+raise "Math.exp(1.25)" unless
+  IyiFloatText.bits_of(Math.exp(1.25)) == 4615041972421327600_u64
+raise "Math.exp(20.0)" unless
+  IyiFloatText.bits_of(Math.exp(20.0)) == 4736919330018093060_u64
+raise "Math.exp(1.0e100)" unless
+  IyiFloatText.bits_of(Math.exp(1.0e100)) == 9218868437227405312_u64
+raise "Math.exp2(0.125)" unless
+  IyiFloatText.bits_of(Math.exp2(0.125)) == 4607590029391122811_u64
+raise "Math.exp2(0.75)" unless
+  IyiFloatText.bits_of(Math.exp2(0.75)) == 4610252940737434541_u64
+raise "Math.exp2(1.25)" unless
+  IyiFloatText.bits_of(Math.exp2(1.25)) == 4612538131520010005_u64
+raise "Math.exp2(20.0)" unless
+  IyiFloatText.bits_of(Math.exp2(20.0)) == 4697254411347427328_u64
+raise "Math.exp2(1.0e100)" unless
+  IyiFloatText.bits_of(Math.exp2(1.0e100)) == 9218868437227405312_u64
+raise "Math.expm1(0.125)" unless
+  IyiFloatText.bits_of(Math.expm1(0.125)) == 4593965198879469160_u64
+raise "Math.expm1(0.75)" unless
+  IyiFloatText.bits_of(Math.expm1(0.75)) == 4607709340031236592_u64
+raise "Math.expm1(1.25)" unless
+  IyiFloatText.bits_of(Math.expm1(1.25)) == 4612790172607642352_u64
+raise "Math.expm1(20.0)" unless
+  IyiFloatText.bits_of(Math.expm1(20.0)) == 4736919330001315844_u64
+raise "Math.expm1(1.0e100)" unless
+  IyiFloatText.bits_of(Math.expm1(1.0e100)) == 9218868437227405312_u64
+raise "Math.log(0.125)" unless
+  IyiFloatText.bits_of(Math.log(0.125)) == 13835236941730917235_u64
+raise "Math.log(0.75)" unless
+  IyiFloatText.bits_of(Math.log(0.75)) == 13822226076269861778_u64
+raise "Math.log(1.25)" unless
+  IyiFloatText.bits_of(Math.log(1.25)) == 4597207614006925858_u64
+raise "Math.log(20.0)" unless
+  IyiFloatText.bits_of(Math.log(20.0)) == 4613928208175457169_u64
+raise "Math.log(1.0e100)" unless
+  IyiFloatText.bits_of(Math.log(1.0e100)) == 4642305517632050418_u64
+raise "Math.log2(0.125)" unless
+  IyiFloatText.bits_of(Math.log2(0.125)) == 13837309855095848960_u64
+raise "Math.log2(0.75)" unless
+  IyiFloatText.bits_of(Math.log2(0.75)) == 13824520307681069662_u64
+raise "Math.log2(1.25)" unless
+  IyiFloatText.bits_of(Math.log2(1.25)) == 4599470960910605195_u64
+raise "Math.log2(20.0)" unless
+  IyiFloatText.bits_of(Math.log2(20.0)) == 4616552076866802105_u64
+raise "Math.log2(1.0e100)" unless
+  IyiFloatText.bits_of(Math.log2(1.0e100)) == 4644551613898753969_u64
+raise "Math.log10(0.125)" unless
+  IyiFloatText.bits_of(Math.log10(0.125)) == 13829681567857850110_u64
+raise "Math.log10(0.75)" unless
+  IyiFloatText.bits_of(Math.log10(0.75)) == 13817039242280073218_u64
+raise "Math.log10(1.25)" unless
+  IyiFloatText.bits_of(Math.log10(1.25)) == 4591647523038709773_u64
+raise "Math.log10(20.0)" unless
+  IyiFloatText.bits_of(Math.log10(20.0)) == 4608538137376317056_u64
+raise "Math.log10(1.0e100)" unless
+  IyiFloatText.bits_of(Math.log10(1.0e100)) == 4636737291354636288_u64
+raise "Math.log1p(0.125)" unless
+  IyiFloatText.bits_of(Math.log1p(0.125)) == 4593151582831047398_u64
+raise "Math.log1p(0.75)" unless
+  IyiFloatText.bits_of(Math.log1p(0.75)) == 4603215790453309648_u64
+raise "Math.log1p(1.25)" unless
+  IyiFloatText.bits_of(Math.log1p(1.25)) == 4605479429584427084_u64
+raise "Math.log1p(20.0)" unless
+  IyiFloatText.bits_of(Math.log1p(20.0)) == 4614038073858043569_u64
+raise "Math.log1p(1.0e100)" unless
+  IyiFloatText.bits_of(Math.log1p(1.0e100)) == 4642305517632050418_u64
+raise "Math.asin(0.125)" unless
+  IyiFloatText.bits_of(Math.asin(0.125)) == 4593683431280516638_u64
+raise "Math.asin(0.75)" unless
+  IyiFloatText.bits_of(Math.asin(0.75)) == 4605813883671052508_u64
+raise "Math.asin(1.25)" unless
+  IyiFloatText.bits_of(Math.asin(1.25)) == 9221120237041090560_u64
+raise "Math.asin(20.0)" unless
+  IyiFloatText.bits_of(Math.asin(20.0)) == 9221120237041090560_u64
+raise "Math.asin(1.0e100)" unless
+  IyiFloatText.bits_of(Math.asin(1.0e100)) == 9221120237041090560_u64
+raise "Math.acos(0.125)" unless
+  IyiFloatText.bits_of(Math.acos(0.125)) == 4609188630550927701_u64
+raise "Math.acos(0.75)" unless
+  IyiFloatText.bits_of(Math.acos(0.75)) == 4604685030923557205_u64
+raise "Math.acos(1.25)" unless
+  IyiFloatText.bits_of(Math.acos(1.25)) == 9221120237041090560_u64
+raise "Math.acos(20.0)" unless
+  IyiFloatText.bits_of(Math.acos(20.0)) == 9221120237041090560_u64
+raise "Math.acos(1.0e100)" unless
+  IyiFloatText.bits_of(Math.acos(1.0e100)) == 9221120237041090560_u64
+raise "Math.atan(0.125)" unless
+  IyiFloatText.bits_of(Math.atan(0.125)) == 4593625142376804206_u64
+raise "Math.atan(0.75)" unless
+  IyiFloatText.bits_of(Math.atan(0.75)) == 4603971362252824289_u64
+raise "Math.atan(1.25)" unless
+  IyiFloatText.bits_of(Math.atan(1.25)) == 4606246168937394078_u64
+raise "Math.atan(20.0)" unless
+  IyiFloatText.bits_of(Math.atan(20.0)) == 4609528064312317983_u64
+raise "Math.atan(1.0e100)" unless
+  IyiFloatText.bits_of(Math.atan(1.0e100)) == 4609753056924675352_u64
+raise "Math.asinh(0.125)" unless
+  IyiFloatText.bits_of(Math.asinh(0.125)) == 4593648327078799731_u64
+raise "Math.asinh(0.75)" unless
+  IyiFloatText.bits_of(Math.asinh(0.75)) == 4604418534313441775_u64
+raise "Math.asinh(1.25)" unless
+  IyiFloatText.bits_of(Math.asinh(1.25)) == 4607396758674050049_u64
+raise "Math.asinh(20.0)" unless
+  IyiFloatText.bits_of(Math.asinh(20.0)) == 4615490442924797627_u64
+raise "Math.asinh(1.0e100)" unless
+  IyiFloatText.bits_of(Math.asinh(1.0e100)) == 4642329905580363564_u64
+raise "Math.acosh(0.125)" unless
+  IyiFloatText.bits_of(Math.acosh(0.125)) == 18444492273895866368_u64
+raise "Math.acosh(0.75)" unless
+  IyiFloatText.bits_of(Math.acosh(0.75)) == 18444492273895866368_u64
+raise "Math.acosh(1.25)" unless
+  IyiFloatText.bits_of(Math.acosh(1.25)) == 4604418534313441775_u64
+raise "Math.acosh(20.0)" unless
+  IyiFloatText.bits_of(Math.acosh(20.0)) == 4615487628171365471_u64
+raise "Math.acosh(1.0e100)" unless
+  IyiFloatText.bits_of(Math.acosh(1.0e100)) == 4642329905580363564_u64
+raise "Math.atanh(0.125)" unless
+  IyiFloatText.bits_of(Math.atanh(0.125)) == 4593695298552770295_u64
+raise "Math.atanh(0.75)" unless
+  IyiFloatText.bits_of(Math.atanh(0.75)) == 4606938819767458391_u64
+raise "Math.atanh(1.25)" unless
+  IyiFloatText.bits_of(Math.atanh(1.25)) == 18444492273895866368_u64
+raise "Math.atanh(20.0)" unless
+  IyiFloatText.bits_of(Math.atanh(20.0)) == 18444492273895866368_u64
+raise "Math.atanh(1.0e100)" unless
+  IyiFloatText.bits_of(Math.atanh(1.0e100)) == 18444492273895866368_u64
+raise "Math.erf(0.125)" unless
+  IyiFloatText.bits_of(Math.erf(0.125)) == 4594223444351794057_u64
+raise "Math.erf(0.75)" unless
+  IyiFloatText.bits_of(Math.erf(0.75)) == 4604580740038725215_u64
+raise "Math.erf(1.25)" unless
+  IyiFloatText.bits_of(Math.erf(1.25)) == 4606487964892708353_u64
+raise "Math.erf(20.0)" unless
+  IyiFloatText.bits_of(Math.erf(20.0)) == 4607182418800017408_u64
+raise "Math.erf(1.0e100)" unless
+  IyiFloatText.bits_of(Math.erf(1.0e100)) == 4607182418800017408_u64
+raise "Math.erfc(0.125)" unless
+  IyiFloatText.bits_of(Math.erfc(0.125)) == 4605918562784702750_u64
+raise "Math.erfc(0.75)" unless
+  IyiFloatText.bits_of(Math.erfc(0.75)) == 4598874977440490305_u64
+raise "Math.erfc(1.25)" unless
+  IyiFloatText.bits_of(Math.erfc(1.25)) == 4590220051921637372_u64
+raise "Math.erfc(20.0)" unless
+  IyiFloatText.bits_of(Math.erfc(20.0)) == 1984773460301157343_u64
+raise "Math.erfc(1.0e100)" unless
+  IyiFloatText.bits_of(Math.erfc(1.0e100)) == 0_u64
+raise "Math.tgamma(0.125)" unless
+  IyiFloatText.bits_of(Math.tgamma(0.125)) == 4620168482571631905_u64
+raise "Math.tgamma(0.75)" unless
+  IyiFloatText.bits_of(Math.tgamma(0.75)) == 4608197605377242668_u64
+raise "Math.tgamma(1.25)" unless
+  IyiFloatText.bits_of(Math.tgamma(1.25)) == 4606339367261105898_u64
+raise "Math.tgamma(20.0)" unless
+  IyiFloatText.bits_of(Math.tgamma(20.0)) == 4862483217080946688_u64
+raise "Math.tgamma(1.0e100)" unless
+  IyiFloatText.bits_of(Math.tgamma(1.0e100)) == 9218868437227405312_u64
+raise "Math.lgamma(0.125)" unless
+  IyiFloatText.bits_of(Math.lgamma(0.125)) == 4611729744681309616_u64
+raise "Math.lgamma(0.75)" unless
+  IyiFloatText.bits_of(Math.lgamma(0.75)) == 4596491988427475438_u64
+raise "Math.lgamma(1.25)" unless
+  IyiFloatText.bits_of(Math.lgamma(1.25)) == 13815117689612185409_u64
+raise "Math.lgamma(20.0)" unless
+  IyiFloatText.bits_of(Math.lgamma(20.0)) == 4630733413802195333_u64
+raise "Math.lgamma(1.0e100)" unless
+  IyiFloatText.bits_of(Math.lgamma(1.0e100)) == 6138512541617265070_u64
+raise "Math.atan2(0.75, -1.25)" unless
+  IyiFloatText.bits_of(Math.atan2(0.75, -1.25)) == 4613039740022024672_u64
+raise "Math.pow(1.25, 2.75)" unless
+  IyiFloatText.bits_of(Math.pow(1.25, 2.75)) == 4610997650340411513_u64
+
+puts "PASS: math constants and functions, zero heap"

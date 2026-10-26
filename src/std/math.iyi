@@ -5,6 +5,7 @@ module std/math
 # rounds a double past the single's range to its infinity.
 import std/int
 import std/float
+import std/static_array::{StaticArray}
 
 # The hardware instructions this module names. A fused multiply-add is
 # among them on aarch64 only: `llvm.fma.f64` is one instruction there and
@@ -38,7 +39,7 @@ pub struct Math
   # bits and each u128 as hi, lo in the C files' order. Only the
   # round-to-nearest branch of cos.c's subnormalize_dint is kept.
 
-  private SIN_T = [
+  private SIN_T = StaticArray[
     0x0000000000000000_u64, 0x28be60db9391054a_u64, 0x7f09d5f47d4d3770_u64, 0x36d8a5664f10e410_u64,
     0x7f9458eaf7aef158_u64, 0x6dc91b8e909374b8_u64, 0x01924bba82746487_u64, 0x3f877ac72c4a69cf_u64,
     0xba208d7d4baed121_u64, 0x3a671c09ad17df90_u64, 0x4e64758e60d4ce7d_u64, 0x272117e2ef7e4a0e_u64,
@@ -46,18 +47,18 @@ pub struct Math
     0x5d49eeb1faf97c5e_u64, 0xcf41ce7de294a4ba_u64, 0x9afed7ec47e35742_u64, 0x0000000000000000_u64,
   ]
 
-  private SIN_PS = [
+  private SIN_PS = StaticArray[
     0xffffffffffffffff_u64, 0xffffffffffffc396_u64, 0x2aaaaaaaaaaaaaaa_u64, 0xaaaaa9646e8f872e_u64,
     0x0222222222222220_u64, 0x467b898367fb1249_u64, 0x0000000000000000_u64, 0x000d00d00bfff5ee_u64,
   ]
 
-  private SIN_PC = [
+  private SIN_PC = StaticArray[
     0xffffffffffffffff_u64, 0xffffffffffffffff_u64, 0x7fffffffffffffff_u64, 0xfffffffffa998bf0_u64,
     0x0aaaaaaaaaaaaaaa_u64, 0xaaa2caecc94962c7_u64, 0x005b05b05b05ac1a_u64, 0x642013bc289028b6_u64,
     0x0000000000000000_u64, 0x0001a0193d9a550c_u64,
   ]
 
-  private SIN_U1 = [
+  private SIN_U1 = StaticArray[
     0x0000000000000000_u64, 0x0000000000000000_u64, 0x3ff0000000000000_u64, 0x0000000000000000_u64,
     0x3f992155f7a3667e_u64, 0xbbfb1d63091a0130_u64, 0x3feffd886084cd0d_u64, 0xbc81354d4556e4cb_u64,
     0x3fa91f65f10dd814_u64, 0xbc2912bd0d569a90_u64, 0x3feff621e3796d7e_u64, 0xbc6c57bc2e24aa15_u64,
@@ -188,7 +189,7 @@ pub struct Math
     0x3f992155f7a3667e_u64, 0xbbfb1d63091a0130_u64, 0xbfeffd886084cd0d_u64, 0x3c81354d4556e4cb_u64,
   ]
 
-  private SIN_U2 = [
+  private SIN_U2 = StaticArray[
     0x0000000000000000_u64, 0x0000000000000000_u64, 0x3ff0000000000000_u64, 0x0000000000000000_u64,
     0x3f2921fb51aeb57c_u64, 0xbbca6e1d4916c435_u64, 0x3feffffff621619c_u64, 0xbc87507dbbbd8fe6_u64,
     0x3f3921fb49ee4ea6_u64, 0x3bde894d744a453e_u64, 0x3fefffffd8858675_u64, 0xbc879f0e54748eab_u64,
@@ -319,7 +320,7 @@ pub struct Math
     0x3f98ef15d9667fda_u64, 0xbc3668dc9ba82a70_u64, 0x3feffd9235046557_u64, 0xbc7c3c6e16616fb2_u64,
   ]
 
-  private SIN_S1U = [
+  private SIN_S1U = StaticArray[
     0x0000000000000000_u64, 0x0000000000000000_u64, 0x0c8fb2f886ec09f3_u64, 0x76a17954b2b7c517_u64,
     0x1917a6bc29b42be1_u64, 0xd8e72d912977ee71_u64, 0x259020dd1cc27444_u64, 0xc002a2684781f080_u64,
     0x31f17078d34c156c_u64, 0x9732300393f33614_u64, 0x3e33f2f642be355e_u64, 0x90887712e9dc9663_u64,
@@ -339,7 +340,7 @@ pub struct Math
     0xffffffffffffffff_u64, 0xffffffffffffffff_u64,
   ]
 
-  private SIN_S2U = [
+  private SIN_S2U = StaticArray[
     0x0000000000000000_u64, 0x0000000000000000_u64, 0x003243f655d966c0_u64, 0xc3b0abf2b35a62f8_u64,
     0x006487eabb991cb6_u64, 0x11ad1d7b5620834a_u64, 0x0096cbdb41258434_u64, 0xc4a32c4560d01e70_u64,
     0x00c90fc5f66525d2_u64, 0x57480f7956b64707_u64, 0x00fb53a8eb3ec385_u64, 0x328421cf8014d698_u64,
@@ -374,7 +375,7 @@ pub struct Math
     0x0c2b4915da89e0b2_u64, 0x35bfac0f965612e2_u64, 0x0c5d7e4435cfff45_u64, 0xc6718c1dfd2aa612_u64,
   ]
 
-  private SIN_C2U = [
+  private SIN_C2U = StaticArray[
     0xffffffffffffffff_u64, 0xffffffffffffffff_u64, 0xfffffb10b0d19f76_u64, 0x491a703231e0a12e_u64,
     0xffffec42c3773235_u64, 0xec9e2e75cb525f2c_u64, 0xffffd3963882d553_u64, 0x6276b75b91de105e_u64,
     0xffffb10b10e80e95_u64, 0x3031437d7eccb9df_u64, 0xffff84a14dfbcc6a_u64, 0x858425d8b397dee6_u64,
@@ -409,7 +410,7 @@ pub struct Math
     0xffb5ea31da2269e5_u64, 0xbfdfce09aea7ac02_u64, 0xffb38194a87a3097_u64, 0xbadfe70a1ef51116_u64,
   ]
 
-  private COS_T = [
+  private COS_T = StaticArray[
     0x28be60db9391054a_u64, 0x7f09d5f47d4d3770_u64, 0x36d8a5664f10e410_u64, 0x7f9458eaf7aef158_u64,
     0x6dc91b8e909374b8_u64, 0x01924bba82746487_u64, 0x3f877ac72c4a69cf_u64, 0xba208d7d4baed121_u64,
     0x3a671c09ad17df90_u64, 0x4e64758e60d4ce7d_u64, 0x272117e2ef7e4a0e_u64, 0xc7fe25fff7816603_u64,
@@ -417,7 +418,7 @@ pub struct Math
     0xcf41ce7de294a4ba_u64, 0x9afed7ec47e35742_u64, 0x1580cc11bf1edaea_u64, 0xfc33ef0826bd0d87_u64,
   ]
 
-  private COS_S = [
+  private COS_S = StaticArray[
     0x0000000000000000_u64, 0x0000000000000000_u64, 0xc90fc5f66525d257_u64, 0x480f7956b6470765_u64,
     0xc90f87f3380388d5_u64, 0xcb3ff35bd4d81baa_u64, 0x96cb587284b81770_u64, 0xb767005691b9d9d1_u64,
     0xc90e8fe6f63c2330_u64, 0xf1d7d06db39ea9fc_u64, 0xfb514b55ccbe541a_u64, 0xd784e031f9af76d6_u64,
@@ -548,7 +549,7 @@ pub struct Math
     0xb3e7bc248d78802e_u64, 0xa156468ef6c18c60_u64, 0xb4768f550ce389fd_u64, 0x4a85350f69018c55_u64,
   ]
 
-  private COS_S_EX = [
+  private COS_S_EX = StaticArray[
     128_i64, -8_i64, -7_i64, -6_i64, -6_i64, -6_i64, -5_i64, -5_i64,
     -5_i64, -5_i64, -5_i64, -4_i64, -4_i64, -4_i64, -4_i64, -4_i64,
     -4_i64, -4_i64, -4_i64, -4_i64, -4_i64, -3_i64, -3_i64, -3_i64,
@@ -583,7 +584,7 @@ pub struct Math
     0_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64,
   ]
 
-  private COS_C = [
+  private COS_C = StaticArray[
     0x8000000000000000_u64, 0x0000000000000000_u64, 0xffffb10b10e80e95_u64, 0x3031437d7eccb9df_u64,
     0xfffec42c7454926b_u64, 0x38e310779edfec68_u64, 0xfffd3964bc6275ba_u64, 0x69fff9ae0dedb047_u64,
     0xfffb10b4dc96dabb_u64, 0xb47903f7a19f8ee2_u64, 0xfff84a1e29de8571_u64, 0x8cc193c5d508e13f_u64,
@@ -714,7 +715,7 @@ pub struct Math
     0xb6206b9e0c13a892_u64, 0xea7c015f12b987f7_u64, 0xb592e7697f14dd4a_u64, 0x737dd2824b608d13_u64,
   ]
 
-  private COS_C_EX = [
+  private COS_C_EX = StaticArray[
     1_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64,
     0_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64,
     0_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64,
@@ -749,7 +750,7 @@ pub struct Math
     0_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64,
   ]
 
-  private COS_PS = [
+  private COS_PS = StaticArray[
     0xc90fdaa22168c234_u64, 0xc4c6628b80dc1cd1_u64, 0x0000000000000003_u64, 0x0000000000000000_u64,
     0xa55de7312df295f5_u64, 0x5dc72f712aa57db4_u64, 0x0000000000000006_u64, 0x0000000000000001_u64,
     0xa335e33bad570e92_u64, 0x3f33be0021aa54d2_u64, 0x0000000000000007_u64, 0x0000000000000000_u64,
@@ -758,7 +759,7 @@ pub struct Math
     0xf16ab2898eae62f9_u64, 0xa7f0339113b8b3c5_u64, 0x0000000000000004_u64, 0x0000000000000001_u64,
   ]
 
-  private COS_PC = [
+  private COS_PC = StaticArray[
     0x8000000000000000_u64, 0x0000000000000000_u64, 0x0000000000000001_u64, 0x0000000000000000_u64,
     0x9de9e64df22ef2d2_u64, 0x56e26cd9808c1949_u64, 0x0000000000000005_u64, 0x0000000000000001_u64,
     0x81e0f840dad61d9a_u64, 0x9980f00630cb655e_u64, 0x0000000000000007_u64, 0x0000000000000000_u64,
@@ -767,17 +768,17 @@ pub struct Math
     0xd368f6f4207cfe49_u64, 0x0ec63157807ebffa_u64, 0x0000000000000005_u64, 0x0000000000000001_u64,
   ]
 
-  private COS_PSFAST = [
+  private COS_PSFAST = StaticArray[
     0x401921fb54442d18_u64, 0x3cb1a62645446203_u64, 0xc044abbce625be53_u64, 0x405466bc678d8d63_u64,
     0xc05331554ca19669_u64,
   ]
 
-  private COS_PCFAST = [
+  private COS_PCFAST = StaticArray[
     0x3ff0000000000000_u64, 0xbb2923015c000000_u64, 0xc033bd3cc9be45de_u64, 0x40503c1f080ad892_u64,
     0xc0555a5c590f9e6a_u64,
   ]
 
-  private COS_SC = [
+  private COS_SC = StaticArray[
     0x0000000000000000_u64, 0x0000000000000000_u64, 0x3ff0000000000000_u64, 0xbdcc0f6c00000000_u64,
     0x3f6921f892b900fe_u64, 0x3feffff621623fa0_u64, 0xbdc9c7935e000000_u64, 0x3f7921f0ea27ce01_u64,
     0x3fefffd8858eca2e_u64, 0xbddd14d1ac000000_u64, 0x3f82d96af779b0bb_u64, 0x3fefffa72c986392_u64,
@@ -972,7 +973,7 @@ pub struct Math
     0x3fe6c40d89625f63_u64, 0xbe3202f686000000_u64, 0x3fe68ed1e0990551_u64, 0x3fe6b25cf728c350_u64,
   ]
 
-  private COS_EXCEPTIONS = [
+  private COS_EXCEPTIONS = StaticArray[
     0x3e88000000000009_u64, 0x3fefffffffffff70_u64, 0x370b56666666666c_u64, 0x3e98000000000024_u64,
     0x3feffffffffffdc0_u64, 0x376b56666666667e_u64, 0x3ea8000000000090_u64, 0x3feffffffffff700_u64,
     0x37cb5666666666c4_u64, 0x3eb20000000000f3_u64, 0x3fefffffffffebc0_u64, 0x38037642666666fd_u64,
@@ -1760,14 +1761,14 @@ pub struct Math
   # Tables hold the C files' values in their order (doubles as bits, each
   # dint64_t as hi, lo, ex, sgn).
 
-  private TAN_T = [
+  private TAN_T = StaticArray[
     0x28be60db9391054a_u64, 0x7f09d5f47d4d3770_u64, 0x36d8a5664f10e410_u64, 0x7f9458eaf7aef158_u64,
     0x6dc91b8e909374b8_u64, 0x01924bba82746487_u64, 0x3f877ac72c4a69cf_u64, 0xba208d7d4baed121_u64,
     0x3a671c09ad17df90_u64, 0x4e64758e60d4ce7d_u64, 0x272117e2ef7e4a0e_u64, 0xc7fe25fff7816603_u64,
     0xfbcbc462d6829b47_u64, 0xdb4d9fb3c9f2c26d_u64, 0xd3d18fd9a797fa8b_u64, 0x5d49eeb1faf97c5e_u64,
     0xcf41ce7de294a4ba_u64, 0x9afed7ec47e35742_u64, 0x1580cc11bf1edaea_u64, 0xfc33ef0826bd0d87_u64,
   ]
-  private TAN_TINV = [
+  private TAN_TINV = StaticArray[
     0xff00ff00ff00ff02_u64, 0xfe03f80fe03f80ff_u64, 0xfd08e5500fd08e56_u64, 0xfc0fc0fc0fc0fc11_u64,
     0xfb18856506ddaba7_u64, 0xfa232cf252138ac1_u64, 0xf92fb2211855a867_u64, 0xf83e0f83e0f83e11_u64,
     0xf74e3fc22c700f76_u64, 0xf6603d980f6603db_u64, 0xf57403d5d00f5742_u64, 0xf4898d5f85bb3952_u64,
@@ -1833,7 +1834,7 @@ pub struct Math
     0x81c635bc123fdf8e_u64, 0x81848da8faf0d277_u64, 0x814327e3b94f462f_u64, 0x8102040810204081_u64,
     0x80c121b28bd1ba98_u64, 0x8080808080808081_u64, 0x8040201008040201_u64, 0x8000000000000000_u64,
   ]
-  private TAN_S = [
+  private TAN_S = StaticArray[
     0x0000000000000000_u64, 0x0000000000000000_u64, 0x0000000000000080_u64, 0x0000000000000000_u64,
     0xc90fc5f66525d257_u64, 0x480f7956b6470765_u64, 0xfffffffffffffff8_u64, 0x0000000000000000_u64,
     0xc90f87f3380388d5_u64, 0xcb3ff35bd4d81baa_u64, 0xfffffffffffffff9_u64, 0x0000000000000000_u64,
@@ -2091,7 +2092,7 @@ pub struct Math
     0xb3e7bc248d78802e_u64, 0xa156468ef6c18c60_u64, 0x0000000000000000_u64, 0x0000000000000000_u64,
     0xb4768f550ce389fd_u64, 0x4a85350f69018c55_u64, 0x0000000000000000_u64, 0x0000000000000000_u64,
   ]
-  private TAN_C = [
+  private TAN_C = StaticArray[
     0x8000000000000000_u64, 0x0000000000000000_u64, 0x0000000000000001_u64, 0x0000000000000000_u64,
     0xffffb10b10e80e95_u64, 0x3031437d7eccb9df_u64, 0x0000000000000000_u64, 0x0000000000000000_u64,
     0xfffec42c7454926b_u64, 0x38e310779edfec68_u64, 0x0000000000000000_u64, 0x0000000000000000_u64,
@@ -2349,7 +2350,7 @@ pub struct Math
     0xb6206b9e0c13a892_u64, 0xea7c015f12b987f7_u64, 0x0000000000000000_u64, 0x0000000000000000_u64,
     0xb592e7697f14dd4a_u64, 0x737dd2824b608d13_u64, 0x0000000000000000_u64, 0x0000000000000000_u64,
   ]
-  private TAN_PS = [
+  private TAN_PS = StaticArray[
     0xc90fdaa22168c234_u64, 0xc4c6628b80dc1cd1_u64, 0x0000000000000003_u64, 0x0000000000000000_u64,
     0xa55de7312df295f5_u64, 0x5dc72f712aa57db4_u64, 0x0000000000000006_u64, 0x0000000000000001_u64,
     0xa335e33bad570e92_u64, 0x3f33be0021aa54d2_u64, 0x0000000000000007_u64, 0x0000000000000000_u64,
@@ -2357,7 +2358,7 @@ pub struct Math
     0xa83c1a43bf1c6485_u64, 0x7d5f8f76fa7d74ed_u64, 0x0000000000000006_u64, 0x0000000000000000_u64,
     0xf16ab2898eae62f9_u64, 0xa7f0339113b8b3c5_u64, 0x0000000000000004_u64, 0x0000000000000001_u64,
   ]
-  private TAN_PC = [
+  private TAN_PC = StaticArray[
     0x8000000000000000_u64, 0x0000000000000000_u64, 0x0000000000000001_u64, 0x0000000000000000_u64,
     0x9de9e64df22ef2d2_u64, 0x56e26cd9808c1949_u64, 0x0000000000000005_u64, 0x0000000000000001_u64,
     0x81e0f840dad61d9a_u64, 0x9980f00630cb655e_u64, 0x0000000000000007_u64, 0x0000000000000000_u64,
@@ -2365,7 +2366,7 @@ pub struct Math
     0xf0fa83448dd1e094_u64, 0x0e0603ce7044eeba_u64, 0x0000000000000006_u64, 0x0000000000000000_u64,
     0xd368f6f4207cfe49_u64, 0x0ec63157807ebffa_u64, 0x0000000000000005_u64, 0x0000000000000001_u64,
   ]
-  private TAN_SC = [
+  private TAN_SC = StaticArray[
     0x0000000000000000_u64, 0x0000000000000000_u64, 0x3ff0000000000000_u64,
     0xbdcc0f6c00000000_u64, 0x3f6921f892b900fe_u64, 0x3feffff621623fa0_u64,
     0xbdc9c7935e000000_u64, 0x3f7921f0ea27ce01_u64, 0x3fefffd8858eca2e_u64,
@@ -3205,13 +3206,13 @@ pub struct Math
   # change no value; the u128 square in as_hypot_hard is trig_mul64's
   # {hi, lo}. Tables hold cbrt.c's doubles as bits in their order.
 
-  private CBRT_ESCALE = [
+  private CBRT_ESCALE = StaticArray[
     0x3ff0000000000000_u64, 0x3ff428a2f98d728b_u64, 0x3ff965fea53d6e3d_u64,
   ]
-  private CBRT_C = [
+  private CBRT_C = StaticArray[
     0x3fe1b0babccfef9c_u64, 0x3fe2c9a3e94d1da5_u64, 0xbfc4dc30b1a1ddba_u64, 0x3f97a8d3e4ec9b07_u64,
   ]
-  private CBRT_RSC = [
+  private CBRT_RSC = StaticArray[
     0x3ff0000000000000_u64, 0xbff0000000000000_u64, 0x3fe0000000000000_u64, 0xbfe0000000000000_u64, 0x3fd0000000000000_u64, 0xbfd0000000000000_u64,
   ]
 
@@ -3431,7 +3432,7 @@ pub struct Math
 
   # tab[2k] is T[k]'s bits and tab[2k + 1] H[k]'s less (k << 52) / 128,
   # where 2^(k/128) ~= H[k] * (1 + T[k]).
-  private EXP_TAB = [
+  private EXP_TAB = StaticArray[
     0x0_u64, 0x3ff0000000000000_u64, 0x3c9b3b4f1a88bf6e_u64, 0x3feff63da9fb3335_u64,
     0xbc7160139cd8dc5d_u64, 0x3fefec9a3e778061_u64, 0xbc905e7a108766d1_u64, 0x3fefe315e86e7f85_u64,
     0x3c8cd2523567f613_u64, 0x3fefd9b0d3158574_u64, 0xbc8bce8023f98efa_u64, 0x3fefd06b29ddf6de_u64,
@@ -3496,7 +3497,7 @@ pub struct Math
     0x3c8ec3bc41aa2008_u64, 0x3fefba1bee615a27_u64, 0x3c842b94c3a9eb32_u64, 0x3fefc52b376bba97_u64,
     0x3c8a64a931d185ee_u64, 0x3fefd0765b6e4540_u64, 0xbc8e37bae43be3ed_u64, 0x3fefdbfdad9cbe14_u64,
     0x3c77893b4d91cd9d_u64, 0x3fefe7c1819e90d8_u64, 0x3c5305c14160cc89_u64, 0x3feff3c22b8f71f1_u64,
-  ] of UInt64
+  ]
 
   def self.exp(value : Float64) : Float64
     bits = IyiFloatText.bits_of(value)
@@ -3757,7 +3758,7 @@ pub struct Math
 
   # For each of 128 subintervals of z: the bits of 1/c and of log(c), and
   # of c as a high and a low part.
-  private LOG_TAB = [
+  private LOG_TAB = StaticArray[
     0x3ff734f0c3e0de9f_u64, 0xbfd7cc7f79e69000_u64, 0x3fe61000014fb66b_u64, 0x3c7e026c91425b3c_u64,
     0x3ff713786a2ce91f_u64, 0xbfd76feec20d0000_u64, 0x3fe63000034db495_u64, 0x3c8dbfea48005d41_u64,
     0x3ff6f26008fab5a0_u64, 0xbfd713e31351e000_u64, 0x3fe650000d94d478_u64, 0x3c8e7fa786d6a5b7_u64,
@@ -3887,7 +3888,7 @@ pub struct Math
     0x3fe77907f2170657_u64, 0x3fd3d54ffbaf3000_u64, 0x3ff5d0001d4919bc_u64, 0xbc98812afb254729_u64,
     0x3fe756cadbd6130c_u64, 0x3fd432eee32fe000_u64, 0x3ff5efffe7b87a89_u64, 0xbc947eb780ed6904_u64,
 
-  ] of UInt64
+  ]
 
   def self.log(value : Float64) : Float64
     ix = IyiFloatText.bits_of(value)
@@ -3974,7 +3975,7 @@ pub struct Math
   private LOG2_B8       =   -0.14483316576701266
   private LOG2_B9       =    0.13046826811283835
 
-  private LOG2_TAB = [
+  private LOG2_TAB = StaticArray[
     0x3ff724286bb1acf8_u64, 0xbfe1095feecdb000_u64, 0x3fe6200012b90a8e_u64, 0x3c8904ab0644b605_u64,
     0x3ff6e1f766d2cca1_u64, 0xbfe08494bd76d000_u64, 0x3fe66000045734a6_u64, 0x3c61ff9bea62f7a9_u64,
     0x3ff6a13d0e30d48a_u64, 0xbfe00143aee8f800_u64, 0x3fe69fffc325f2c5_u64, 0x3c827ecfcb3c90ba_u64,
@@ -4040,7 +4041,7 @@ pub struct Math
     0x3fe7ad22181415ca_u64, 0x3fdbd0f2aea0e000_u64, 0x3ff59ffff21df7ba_u64, 0x3c87f79f68727b02_u64,
     0x3fe767dcf99eff8c_u64, 0x3fdce0a43dbf4000_u64, 0x3ff5dfffebfc3481_u64, 0xbc9180902e30e93e_u64,
 
-  ] of UInt64
+  ]
 
   def self.log2(value : Float64) : Float64
     ix = IyiFloatText.bits_of(value)
@@ -4272,7 +4273,7 @@ pub struct Math
 
   # For each of 128 subintervals of z in [0x1.69555p-1, 0x1.69555p0]: the
   # bits of 1/c, of log(c) rounded to 2^-43, and of the rest of log(c).
-  private POW_LOG_TAB = [
+  private POW_LOG_TAB = StaticArray[
     0x3ff6a00000000000_u64, 0xbfd62c82f2b9c800_u64, 0x3cfab42428375680_u64,
     0x3ff6800000000000_u64, 0xbfd5d1bdbf580800_u64, 0xbd1ca508d8e0f720_u64,
     0x3ff6600000000000_u64, 0xbfd5767717455800_u64, 0xbd2362a4d5b6506d_u64,
@@ -4401,7 +4402,7 @@ pub struct Math
     0x3fe7000000000000_u64, 0x3fd522ae0738a000_u64, 0x3d2ebe708164c759_u64,
     0x3fe6e00000000000_u64, 0x3fd57bf753c8d000_u64, 0x3d1fadedee5d40ef_u64,
     0x3fe6c00000000000_u64, 0x3fd5d5bddf596000_u64, 0xbd0a0b2a08a465dc_u64,
-  ] of UInt64
+  ]
 
   def self.pow(base : Float64, exp : Float64) : Float64
     ix = IyiFloatText.bits_of(base)
@@ -4908,7 +4909,7 @@ pub struct Math
   # operation for operation. Copyright (c) 2022-2026 Alexei Sibidanov; MIT
   # licence. Tables hold each double's bits in the C files' row-major order.
 
-  private ATAN_A = [
+  private ATAN_A = StaticArray[
     0x0000000000000000_u64, 0x0000000000000000_u64, 0x3f89224e047e368e_u64, 0x3c1a3ca6c727c59d_u64,
     0x3f992346247a91f0_u64, 0x3bf138b0ef96a186_u64, 0x3fa2dbaae9a05db0_u64, 0x3c436e7f8a3f5e42_u64,
     0x3fa927278a3b1162_u64, 0xbbfac986efb92662_u64, 0x3faf7495ea3f3783_u64, 0x3c406ec8011ee816_u64,
@@ -4975,7 +4976,7 @@ pub struct Math
     0x40445e2455e4aaa7_u64, 0xbc3296d577b5e21d_u64, 0x40545eed6854ce99_u64, 0x3c02db53886013ca_u64,
     0x0000000000000000_u64, 0x0000000000000000_u64,
   ]
-  private ATAN_C = [
+  private ATAN_C = StaticArray[
     419_u64, 81_u64, 0_u64, 500_u64, 81_u64, 0_u64, 582_u64, 163_u64,
     0_u64, 745_u64, 163_u64, 0_u64, 908_u64, 326_u64, 0_u64, 1234_u64,
     326_u64, 0_u64, 1559_u64, 651_u64, 0_u64, 2210_u64, 650_u64, 1_u64,
@@ -4989,7 +4990,7 @@ pub struct Math
     175_u64, 64923_u64, 278_u64, 62_u64, 65141_u64, 303_u64, 88_u64, 65358_u64,
     139_u64, 31_u64, 65467_u64, 151_u64, 44_u64,
   ]
-  private ATAN_DB = [
+  private ATAN_DB = StaticArray[
     0x3f80dc89a3b55010_u64, 0x3f80dc70ac228717_u64, 0x3c20000000000000_u64, 0x3f7e3fb41d2d2260_u64,
     0x3f7e3f9013a852f8_u64, 0x3c10000000000000_u64, 0x3fe7ba49f739829f_u64, 0x3fe46ac372243536_u64,
     0x3920000000000000_u64, 0x3fca933fe176b375_u64, 0x3fca33f32ac5ceb5_u64, 0xb8f0000000000000_u64,
@@ -5000,7 +5001,7 @@ pub struct Math
     0x3fe46ac372243536_u64, 0x3910000000000000_u64, 0x3fcd768804487b07_u64, 0x3fccf5676f373ec1_u64,
     0xb910000000000000_u64, 0x3f7bb04a79820063_u64, 0x3f7bb02ed5c5e956_u64, 0xb8c0000000000000_u64,
   ]
-  private INVTRIG_CC = [
+  private INVTRIG_CC = StaticArray[
     0x3ff0000000000000_u64, 0x0000000000000000_u64, 0x3fc5555555555555_u64, 0x3fb33333333333e4_u64,
     0x3fa6db6db6d31f82_u64, 0x3f9f1c71f6889397_u64, 0x3f96e874b7045b46_u64, 0x3f91f753132271e2_u64,
     0x3ff0055a27e0d033_u64, 0xbc9d9ba10494c062_u64, 0x3fc57c00cb5d6c4d_u64, 0x3fb37881f5649a75_u64,
@@ -5068,7 +5069,7 @@ pub struct Math
     0x3ff0c152382d7366_u64, 0xbc9ee6913347c2a6_u64, 0x3fcb8550d62bfb6e_u64, 0x3fbff1bde0fa3cad_u64,
     0x3fb8e5f3ab550989_u64, 0x3fb656be8b38ebaf_u64, 0x3fb5c3c13008a099_u64, 0x3fb662225a1b4f77_u64,
   ]
-  private INVTRIG_S = [
+  private INVTRIG_S = StaticArray[
     0x0000000000000000_u64, 0x0000000000000000_u64, 0xbc2912bd0d569a90_u64, 0x3fa91f65f10dd814_u64,
     0xbc3e2718d26ed688_u64, 0x3fb917a6bc29b42c_u64, 0x3c513000a89a11e0_u64, 0x3fc2c8106e8e613a_u64,
     0xbc626d19b9ff8d82_u64, 0x3fc8f8b83c69a60b_u64, 0xbc642deef11da2c4_u64, 0x3fcf19f97b215f1b_u64,
@@ -5087,18 +5088,18 @@ pub struct Math
     0xbc887df6378811c7_u64, 0x3fefd88da3d12526_u64, 0xbc6c57bc2e24aa15_u64, 0x3feff621e3796d7e_u64,
     0x0000000000000000_u64, 0x3ff0000000000000_u64,
   ]
-  private INVTRIG_C = [
+  private INVTRIG_C = StaticArray[
     0x3ff0000000000000_u64, 0xb93fc2c76456515b_u64, 0x3fc5555555555555_u64, 0x3c65555555623513_u64,
     0x3fb3333333333333_u64, 0x3c49997e3427441b_u64, 0x3fa6db6db6db6db7_u64, 0xbc1cb95ff08658e6_u64,
     0x3f9f1c71c71c6d5b_u64, 0x3c3b125bccdcc89e_u64,
   ]
-  private INVTRIG_CT = [
+  private INVTRIG_CT = StaticArray[
     0x3f96e8ba2ec8cb69_u64, 0x3f91c4ea7a15c997_u64, 0x3f8ca8355d39bb67_u64,
   ]
-  private ASIN_OFF = [
+  private ASIN_OFF = StaticArray[
     0x3ff921fb54442d18_u64, 0x3c91a62633145c07_u64, 0xbff921fb54442d18_u64, 0xbc91a62633145c07_u64,
   ]
-  private ASIN_DB = [
+  private ASIN_DB = StaticArray[
     0x3e57137449123ef6_u64, 0x3e57137449123ef7_u64, 0xbaffffffffffffff_u64, 0x3e5d12ed0af1a27e_u64,
     0x3e5d12ed0af1a27f_u64, 0xb7963676aa7969aa_u64, 0x3e851c4b960778f5_u64, 0x3e851c4b9607790d_u64,
     0x3b2fffffffffffff_u64, 0x3e93cfc2a006a414_u64, 0x3e93cfc2a006a465_u64, 0xb7c1e68bc303367c_u64,
@@ -5461,7 +5462,7 @@ pub struct Math
   # a tint_t is five words h, m, l, ex, sgn: (-1)^sgn (h/2^64 + m/2^128 +
   # l/2^192) 2^ex. Only the exception flags and errno were left out.
 
-  private ATAN2_T2 = [
+  private ATAN2_T2 = StaticArray[
     0x0000000000000000_u64, 0x3f90000000000000_u64, 0x3fa0000000000000_u64, 0x3fa8000000000000_u64,
     0x3fb0000000000000_u64, 0x3fb4000000000000_u64, 0x3fb8000000000000_u64, 0x3fbc000000000000_u64,
     0x3fc0000000000000_u64, 0x3fc2000000000000_u64, 0x3fc4000000000000_u64, 0x3fc6000000000000_u64,
@@ -5480,7 +5481,7 @@ pub struct Math
     0x3fee000000000000_u64, 0x3fee800000000000_u64, 0x3fef000000000000_u64, 0x3fef800000000000_u64,
     0x3ff0000000000000_u64,
   ]
-  private ATAN2_F2 = [
+  private ATAN2_F2 = StaticArray[
     0x0000000000000000_u64, 0x0000000000000000_u64, 0xbca95220c39d4dff_u64, 0x3f8fff555bbb7300_u64,
     0x3ca2542779d776de_u64, 0x3f9ffd55bba97600_u64, 0xbca6061bbe3de53c_u64, 0x3fa7fb818430da40_u64,
     0xbca639269b0da47e_u64, 0x3faff55bb72cfe00_u64, 0xbc84a7663af440f7_u64, 0x3fb3f59f0e7c55a0_u64,
@@ -5515,22 +5516,22 @@ pub struct Math
     0xbc855b9a5e177a1b_u64, 0x3fe89ff5ff57f1f8_u64, 0x3cac27cfaa9f7a14_u64, 0x3fe8e17aa99cc05c_u64,
     0x3c81a62633145c07_u64, 0x3fe921fb54442d18_u64,
   ]
-  private ATAN2_O = [
+  private ATAN2_O = StaticArray[
     0x0000000000000000_u64, 0x0000000000000000_u64, 0x3ff921fb54442d18_u64, 0x3c91a62633145c07_u64,
     0x0000000000000000_u64, 0x0000000000000000_u64, 0xbff921fb54442d18_u64, 0xbc91a62633145c07_u64,
     0x400921fb54442d18_u64, 0x3ca1a62633145c07_u64, 0x3ff921fb54442d18_u64, 0x3c91a62633145c07_u64,
     0xc00921fb54442d18_u64, 0xbca1a62633145c07_u64, 0xbff921fb54442d18_u64, 0xbc91a62633145c07_u64,
   ]
-  private ATAN2_B = [
+  private ATAN2_B = StaticArray[
     0xbfd55555555554d2_u64, 0x3fc999999860e1ca_u64, 0xbfc248ad469844a1_u64,
   ]
-  private ATAN2_B2 = [
+  private ATAN2_B2 = StaticArray[
     0xbfd5555555555555_u64, 0x3fc999999999755e_u64, 0xbfc24924883596f8_u64, 0x3fbc6f7d73531bc2_u64,
   ]
-  private ATAN2_FINF = [
+  private ATAN2_FINF = StaticArray[
     0x3c80000000000000_u64, 0x3fe921fb54442d18_u64, 0x3c90000000000000_u64, 0x4002d97c7f3321d2_u64,
   ]
-  private ATAN2_P = [
+  private ATAN2_P = StaticArray[
     0x82703f8b53112eca_u64, 0x71ce6279d467aa45_u64, 0x019c9b28466b6fc0_u64, 0xfffffffffffffff6_u64, 0x0000000000000000_u64,
     0xb3cf74b427d53e03_u64, 0xee590b839e751890_u64, 0xf2570b12bcb2381a_u64, 0xfffffffffffffff8_u64, 0x0000000000000000_u64,
     0xb08498b17b88c39a_u64, 0x11e37821d784d8fa_u64, 0x2795b14b84b9d78c_u64, 0xfffffffffffffffa_u64, 0x0000000000000000_u64,
@@ -5562,7 +5563,7 @@ pub struct Math
     0xa0ba01b8742ba801_u64, 0xe6dc14a9516d7f04_u64, 0x1f5303d878905d2f_u64, 0xffffffffffffffe7_u64, 0x0000000000000000_u64,
     0x9c0440896ce6515c_u64, 0x0cf3470fa7f10ac3_u64, 0xa9dc80682c111a9d_u64, 0xffffffffffffffc5_u64, 0x0000000000000001_u64,
   ]
-  private ATAN2_Q = [
+  private ATAN2_Q = StaticArray[
     0x82703f8b53112eca_u64, 0x71ce6279d467aa45_u64, 0x019c9b28466b6fc0_u64, 0xfffffffffffffff6_u64, 0x0000000000000000_u64,
     0xb3cf74b427d53e03_u64, 0xee590b839e751890_u64, 0xf2570b12bcb238cf_u64, 0xfffffffffffffff8_u64, 0x0000000000000000_u64,
     0xb33c44af0d43c9e8_u64, 0xf4426f84614701db_u64, 0x979e49dc5b858442_u64, 0xfffffffffffffffa_u64, 0x0000000000000000_u64,
@@ -5594,7 +5595,7 @@ pub struct Math
     0x84b9ada076cd007d_u64, 0x13e55006073f76b1_u64, 0x4cf4259968228f3e_u64, 0xffffffffffffffeb_u64, 0x0000000000000000_u64,
     0xcca4b9046786937d_u64, 0x233c1e691c127c1f_u64, 0xf493e0b7a3de459a_u64, 0xffffffffffffffe6_u64, 0x0000000000000000_u64,
   ]
-  private ATAN2_PI = [
+  private ATAN2_PI = StaticArray[
     0xc90fdaa22168c234_u64, 0xc4c6628b80dc1cd1_u64, 0x29024e088a67cc74_u64, 0x0000000000000002_u64, 0x0000000000000000_u64,
   ]
 
@@ -6229,7 +6230,7 @@ pub struct Math
   private ATANH_INV_LOG2     =      2.8853900817779268
   private ATANH_REFINE_L22   =  9.7352254619037222e-32
 
-  private ASINH_ZERO_CH = [
+  private ASINH_ZERO_CH = StaticArray[
     0xbfc5555555555555_u64, 0xbc65555555555555_u64, 0x3fb3333333333333_u64, 0x3c499999999949df_u64,
     0xbfa6db6db6db6db7_u64, 0x3c32492496091b0c_u64, 0x3f9f1c71c71c71c7_u64, 0x3c1c71a35cfa0671_u64,
     0xbf96e8ba2e8ba2e9_u64, 0x3c317f937248cf81_u64, 0x3f91c4ec4ec4ec4f_u64, 0xbc374e3c1dfd4c3d_u64,
@@ -6238,25 +6239,25 @@ pub struct Math
     0xbf7df3bd104aa267_u64, 0xbc1546da9bc5b32a_u64, 0x3f7a685fc5de7a04_u64, 0x3c140d284a1d67f9_u64,
   ]
 
-  private ASINH_ZERO_CL = [
+  private ASINH_ZERO_CL = StaticArray[
     0xbf77828d553ec800_u64, 0x3f751712f7bee368_u64, 0xbf72e6d98527bcc6_u64, 0x3f70095da47b392c_u64,
     0xbf63b92d6368192c_u64,
   ]
 
-  private ASINH_CL2 = [
+  private ASINH_CL2 = StaticArray[
     0xbfc5555555555555_u64, 0x3fb3333327c57c60_u64,
   ]
 
-  private ASINH_CL4 = [
+  private ASINH_CL4 = StaticArray[
     0xbfc5555555555555_u64, 0x3fb333333332f2ff_u64, 0xbfa6db6d9a665159_u64, 0x3f9f186866d775f0_u64,
   ]
 
-  private ASINH_CL7 = [
+  private ASINH_CL7 = StaticArray[
     0xbfc5555555555555_u64, 0x3fb3333333333310_u64, 0xbfa6db6db6da466c_u64, 0x3f9f1c71c2ea7be4_u64,
     0xbf96e8b651b09d72_u64, 0x3f91c309fc0e69c2_u64, 0xbf8bab7833c1e000_u64,
   ]
 
-  private ASINH_DB = [
+  private ASINH_DB = StaticArray[
     0x3fd00f9476450863_u64, 0x3fcfcb35067f343c_u64, 0x3c60000000000000_u64, 0x3fd1f0a79315b287_u64,
     0x3fd1b68aae88feba_u64, 0x3c70000000000000_u64, 0x3fd2b9618ff7acb7_u64, 0x3fd27781d9aa4e25_u64,
     0xbc70000000000000_u64, 0x3fd389ef683f3aa7_u64, 0x3fd33f52db6df1af_u64, 0x3c70000000000000_u64,
@@ -6286,7 +6287,7 @@ pub struct Math
     0x3cd0000000000000_u64,
   ]
 
-  private ASINH_T1 = [
+  private ASINH_T1 = StaticArray[
     0x3ff0000000000000_u64, 0x3feea4afa0000000_u64, 0x3fed5818e0000000_u64, 0x3fec199be0000000_u64,
     0x3feae89f98000000_u64, 0x3fe9c49180000000_u64, 0x3fe8ace540000000_u64, 0x3fe7a11470000000_u64,
     0x3fe6a09e68000000_u64, 0x3fe5ab07e0000000_u64, 0x3fe4bfdad8000000_u64, 0x3fe3dea650000000_u64,
@@ -6294,28 +6295,28 @@ pub struct Math
     0x3fe0000000000000_u64,
   ]
 
-  private ASINH_T2 = [
+  private ASINH_T2 = StaticArray[
     0x3ff0000000000000_u64, 0x3fefe9d968000000_u64, 0x3fefd3c228000000_u64, 0x3fefbdba38000000_u64,
     0x3fefa7c180000000_u64, 0x3fef91d800000000_u64, 0x3fef7bfdb0000000_u64, 0x3fef663278000000_u64,
     0x3fef507658000000_u64, 0x3fef3ac948000000_u64, 0x3fef252b38000000_u64, 0x3fef0f9c20000000_u64,
     0x3feefa1bf0000000_u64, 0x3feee4aaa0000000_u64, 0x3feecf4830000000_u64, 0x3feeb9f488000000_u64,
   ]
 
-  private ASINH_T3 = [
+  private ASINH_T3 = StaticArray[
     0x3ff0000000000000_u64, 0x3feffe9d20000000_u64, 0x3feffd3a58000000_u64, 0x3feffbd798000000_u64,
     0x3feffa74e8000000_u64, 0x3feff91248000000_u64, 0x3feff7afb8000000_u64, 0x3feff64d38000000_u64,
     0x3feff4eac8000000_u64, 0x3feff38868000000_u64, 0x3feff22618000000_u64, 0x3feff0c3d0000000_u64,
     0x3fefef61a0000000_u64, 0x3fefedff78000000_u64, 0x3fefec9d68000000_u64, 0x3fefeb3b60000000_u64,
   ]
 
-  private ASINH_T4 = [
+  private ASINH_T4 = StaticArray[
     0x3ff0000000000000_u64, 0x3fefffe9d0000000_u64, 0x3fefffd3a0000000_u64, 0x3fefffbd78000000_u64,
     0x3fefffa748000000_u64, 0x3fefff9118000000_u64, 0x3fefff7ae8000000_u64, 0x3fefff64c0000000_u64,
     0x3fefff4e90000000_u64, 0x3fefff3860000000_u64, 0x3fefff2238000000_u64, 0x3fefff0c08000000_u64,
     0x3feffef5d8000000_u64, 0x3feffedfa8000000_u64, 0x3feffec980000000_u64, 0x3feffeb350000000_u64,
   ]
 
-  private ASINH_LL = [
+  private ASINH_LL = StaticArray[
     0x0000000000000000_u64, 0x0000000000000000_u64, 0x0000000000000000_u64, 0x3f962e432b240000_u64,
     0xbd5745af34bb54b8_u64, 0xb9e17e3ec05cde70_u64, 0x3fa62e42e4a80000_u64, 0x3d3111a4eadf3120_u64,
     0x3a2cff3027abb119_u64, 0x3fb0a2b233f10000_u64, 0xbd588ac4ec78af80_u64, 0x3a24fa087ca75dfd_u64,
@@ -6369,16 +6370,16 @@ pub struct Math
     0xba25095048a6b824_u64, 0x3f162e7b00000000_u64, 0xbd3868625640a680_u64, 0xba234bf0db910f65_u64,
   ]
 
-  private ASINH_REFINE_CH = [
+  private ASINH_REFINE_CH = StaticArray[
     0x3fe0000000000000_u64, 0x39024b67ee516e3b_u64, 0xbfd0000000000000_u64, 0xb91932ce43199a8d_u64,
     0x3fc5555555555555_u64, 0x3c655540c15cf91f_u64,
   ]
 
-  private ASINH_REFINE_CL = [
+  private ASINH_REFINE_CL = StaticArray[
     0xbfc0000000000000_u64, 0x3fb9999999a0754f_u64, 0xbfb55555555c3157_u64,
   ]
 
-  private ACOSH_ONE_CH = [
+  private ACOSH_ONE_CH = StaticArray[
     0xbfb5555555555555_u64, 0xbc55555555554af1_u64, 0x3f93333333333333_u64, 0x3c29999998933f0e_u64,
     0xbf76db6db6db6db7_u64, 0x3c024929b16ec6b7_u64, 0x3f5f1c71c71c71c7_u64, 0x3bdc56d45e265e2c_u64,
     0xbf46e8ba2e8ba2e9_u64, 0x3be6d50ce7188d3d_u64, 0x3f31c4ec4ec4ec43_u64, 0x3bdc6791d1cf399a_u64,
@@ -6386,30 +6387,30 @@ pub struct Math
     0xbef3fde50d0cb4b9_u64, 0x3b70335101403d9d_u64, 0x3ee12ef3bf8a0a74_u64, 0x3aff9c6b51787043_u64,
   ]
 
-  private ACOSH_ONE_CL = [
+  private ACOSH_ONE_CL = StaticArray[
     0xbecdf3b9d1296ea9_u64, 0x3eba681d7d2298eb_u64, 0xbea77ead7b1ca449_u64, 0x3e94edd2ddb3721f_u64,
     0xbe81bf173531ee23_u64, 0x3e6613229230e255_u64,
   ]
 
-  private ACOSH_CL9 = [
+  private ACOSH_CL9 = StaticArray[
     0xbfb5555555555555_u64, 0x3f93333333332f95_u64, 0xbf76db6db6d5534c_u64, 0x3f5f1c71c1e04356_u64,
     0xbf46e8b8e3e40d58_u64, 0x3f31c4ba825ac4fe_u64, 0xbf1c9045534e6d9e_u64, 0x3f071fedae26a76b_u64,
     0xbeef1f4f8cc65342_u64,
   ]
 
-  private ACOSH_CL4 = [
+  private ACOSH_CL4 = StaticArray[
     0x3bd5c4b6148816e2_u64, 0xbfd000000000005c_u64, 0xbfb7fffffebf3e6c_u64, 0xbfaaab6691f2bae7_u64,
   ]
 
-  private ACOSH_CL3 = [
+  private ACOSH_CL3 = StaticArray[
     0xbbc7f77c8429c6c6_u64, 0xbfcffffffffff214_u64, 0xbfb8000268641bfe_u64,
   ]
 
-  private ACOSH_CL2 = [
+  private ACOSH_CL2 = StaticArray[
     0x3bc7a0ed2effdd10_u64, 0xbfd000000017d048_u64,
   ]
 
-  private ACOSH_DB = [
+  private ACOSH_DB = StaticArray[
     0x3ff5bff041b260fe_u64, 0x3fea6031cd5f93ba_u64, 0x3c80000000000000_u64, 0x3ff9efdca62b700a_u64,
     0x3ff104b648f113a1_u64, 0x3c90000000000000_u64, 0x3ff9efdca62b700a_u64, 0x3ff104b648f113a1_u64,
     0x3c90000000000000_u64, 0x3ffa5bf3acfde4b2_u64, 0x3ff1585720f35cd9_u64, 0xbc90000000000000_u64,
@@ -6420,23 +6421,23 @@ pub struct Math
     0x402759a2ad4c4d56_u64, 0x3cc0000000000000_u64,
   ]
 
-  private ATANH_C9 = [
+  private ATANH_C9 = StaticArray[
     0x3fc999999999999a_u64, 0x3fc2492492492244_u64, 0x3fbc71c71c79715f_u64, 0x3fb745d16f777723_u64,
     0x3fb3b13ca4174634_u64, 0x3fb110c9724989bd_u64, 0x3fae2d17608a5b2e_u64, 0x3faa0b56308cba0b_u64,
     0x3fafb6341208ad2e_u64,
   ]
 
-  private ATANH_C5 = [
+  private ATANH_C5 = StaticArray[
     0xbff0000000000000_u64, 0x3ff5555555555530_u64, 0xbfffffffffffffa0_u64, 0x40099999e33a6366_u64,
     0xc01555559ef9525f_u64,
   ]
 
-  private ATANH_DB = [
+  private ATANH_DB = StaticArray[
     0x3fd2dbb7b1c91363_u64, 0x3fd36f33d51c264d_u64, 0x3c70000000000000_u64, 0x3fdc493dc899e4a5_u64,
     0x3fde611aa58ab608_u64, 0xbc70000000000000_u64,
   ]
 
-  private ASINH_B = [
+  private ASINH_B = StaticArray[
     301_i64, 27565_i64, 7189_i64, 24786_i64, 13383_i64, 22167_i64, 18923_i64, 19696_i64,
     23845_i64, 17361_i64, 28184_i64, 15150_i64, 31969_i64, 13054_i64, 35231_i64, 11064_i64,
     37996_i64, 9173_i64, 40288_i64, 7372_i64, 42129_i64, 5657_i64, 43542_i64, 4020_i64,
@@ -6447,7 +6448,7 @@ pub struct Math
     16989_i64, -15526_i64, 13107_i64, -16339_i64, 9022_i64, -17126_i64, 4740_i64, -17889_i64,
   ]
 
-  private ASINH_R1 = [
+  private ASINH_R1 = StaticArray[
     0x3ff0000000000000_u64, 0x3fef507600000000_u64, 0x3feea4b000000000_u64, 0x3fedfc9800000000_u64,
     0x3fed581800000000_u64, 0x3fecb72000000000_u64, 0x3fec199c00000000_u64, 0x3feb7f7600000000_u64,
     0x3feae8a000000000_u64, 0x3fea550400000000_u64, 0x3fe9c49200000000_u64, 0x3fe9373800000000_u64,
@@ -6459,7 +6460,7 @@ pub struct Math
     0x3fe0000000000000_u64,
   ]
 
-  private ASINH_R2 = [
+  private ASINH_R2 = StaticArray[
     0x3ff0000000000000_u64, 0x3feffa7400000000_u64, 0x3feff4ea00000000_u64, 0x3fefef6200000000_u64,
     0x3fefe9da00000000_u64, 0x3fefe45200000000_u64, 0x3fefdecc00000000_u64, 0x3fefd94600000000_u64,
     0x3fefd3c200000000_u64, 0x3fefce3e00000000_u64, 0x3fefc8bc00000000_u64, 0x3fefc33a00000000_u64,
@@ -6471,7 +6472,7 @@ pub struct Math
     0x3fef507600000000_u64,
   ]
 
-  private ASINH_L1 = [
+  private ASINH_L1 = StaticArray[
     0x0000000000000000_u64, 0x0000000000000000_u64, 0xbd1269e2038315b3_u64, 0x3f962e4eacd40000_u64,
     0xbd23f2558bddfc47_u64, 0x3fa62e3ce7218000_u64, 0x3d207ea13c34efb5_u64, 0x3fb0a2ab6d3ec000_u64,
     0x3d38f3e77084d3ba_u64, 0x3fb62e4a86d8c000_u64, 0xbd18d92a005f1a7e_u64, 0x3fbbb9db7062c000_u64,
@@ -6491,7 +6492,7 @@ pub struct Math
     0x3d2ef35793c76730_u64, 0x3fe62e42fefa3800_u64,
   ]
 
-  private ASINH_L2 = [
+  private ASINH_L2 = StaticArray[
     0x0000000000000000_u64, 0x0000000000000000_u64, 0x3d35abdac3638e99_u64, 0x3f4631ec81e00000_u64,
     0xbd216b8be9bbe239_u64, 0x3f562fd812700000_u64, 0xbd3364c6315542eb_u64, 0x3f60a25205080000_u64,
     0x3d2734abe459c900_u64, 0x3f662dadc1d00000_u64, 0x3d30cf8a761431bf_u64, 0x3f6bb9ff94d00000_u64,
@@ -6511,12 +6512,12 @@ pub struct Math
     0xbd1269e2038315b3_u64, 0x3f962e4eacd40000_u64,
   ]
 
-  private ASINH_C = [
+  private ASINH_C = StaticArray[
     0xbfe0000000000000_u64, 0x3fd5555555555530_u64, 0xbfcfffffffffffa0_u64, 0x3fc99999e33a6366_u64,
     0xbfc555559ef9525f_u64,
   ]
 
-  private ATANH_CH = [
+  private ATANH_CH = StaticArray[
     0x3fd5555555555555_u64, 0x3c75555555555555_u64, 0x3fc999999999999a_u64, 0xbc6999999999611c_u64,
     0x3fc2492492492492_u64, 0x3c62492490f76b25_u64, 0x3fbc71c71c71c71c_u64, 0x3c5c71cd5c38a112_u64,
     0x3fb745d1745d1746_u64, 0xbc47556c4165f4ca_u64, 0x3fb3b13b13b13b14_u64, 0xbc4b893c3b36052e_u64,
@@ -6526,12 +6527,12 @@ pub struct Math
     0x3fa2f664d60473f9_u64, 0x3c23adb3e2b7f35e_u64,
   ]
 
-  private ATANH_CL = [
+  private ATANH_CL = StaticArray[
     0x3fa1a9a91fd692af_u64, 0x3fa06dfbb35e7f44_u64, 0x3fa037bed4d7588f_u64, 0x3f95aca6d6d720d6_u64,
     0x3fa99ea5700d53a5_u64,
   ]
 
-  private ATANH_B = [
+  private ATANH_B = StaticArray[
     301_i64, 27565_i64, 7189_i64, 24786_i64, 13383_i64, 22167_i64, 18923_i64, 19696_i64,
     23845_i64, 17361_i64, 28184_i64, 15150_i64, 31969_i64, 13054_i64, 35231_i64, 11064_i64,
     37996_i64, 9173_i64, 40288_i64, 7372_i64, 42129_i64, 5657_i64, 43542_i64, 4020_i64,
@@ -6542,7 +6543,7 @@ pub struct Math
     16989_i64, -15526_i64, 13107_i64, -16339_i64, 9022_i64, -17126_i64, 4740_i64, -17889_i64,
   ]
 
-  private ATANH_R1 = [
+  private ATANH_R1 = StaticArray[
     0x3ff0000000000000_u64, 0x3fef507600000000_u64, 0x3feea4b000000000_u64, 0x3fedfc9800000000_u64,
     0x3fed581800000000_u64, 0x3fecb72000000000_u64, 0x3fec199c00000000_u64, 0x3feb7f7600000000_u64,
     0x3feae8a000000000_u64, 0x3fea550400000000_u64, 0x3fe9c49200000000_u64, 0x3fe9373800000000_u64,
@@ -6554,7 +6555,7 @@ pub struct Math
     0x3fe0000000000000_u64,
   ]
 
-  private ATANH_R2 = [
+  private ATANH_R2 = StaticArray[
     0x3ff0000000000000_u64, 0x3feffa7400000000_u64, 0x3feff4ea00000000_u64, 0x3fefef6200000000_u64,
     0x3fefe9da00000000_u64, 0x3fefe45200000000_u64, 0x3fefdecc00000000_u64, 0x3fefd94600000000_u64,
     0x3fefd3c200000000_u64, 0x3fefce3e00000000_u64, 0x3fefc8bc00000000_u64, 0x3fefc33a00000000_u64,
@@ -6566,7 +6567,7 @@ pub struct Math
     0x3fef507600000000_u64,
   ]
 
-  private ATANH_L1 = [
+  private ATANH_L1 = StaticArray[
     0x0000000000000000_u64, 0x0000000000000000_u64, 0xbe4532c1269e2038_u64, 0x3f862e5000000000_u64,
     0x3e4ce42d81b54e84_u64, 0x3f962e3c00000000_u64, 0xbe525826f815ec3d_u64, 0x3fa0a2ac00000000_u64,
     0x3e50db1b1e7cee11_u64, 0x3fa62e4a00000000_u64, 0xbe51f3a8c6c95003_u64, 0x3fabb9dc00000000_u64,
@@ -6586,7 +6587,7 @@ pub struct Math
     0xbe105c610ca86c39_u64, 0x3fd62e4300000000_u64,
   ]
 
-  private ATANH_L2 = [
+  private ATANH_L2 = StaticArray[
     0x0000000000000000_u64, 0x0000000000000000_u64, 0xbe337e152a129e4e_u64, 0x3f36320000000000_u64,
     0xbe53f6c916b8be9c_u64, 0x3f46300000000000_u64, 0x3e520505936739d5_u64, 0x3f50a24000000000_u64,
     0xbe523e2e8cb541ba_u64, 0x3f562dc000000000_u64, 0xbdfacb7983ac4f5e_u64, 0x3f5bba0000000000_u64,
@@ -7372,11 +7373,11 @@ pub struct Math
   private ERF_CH =    1.1283791670955126
   private ERF_CL = 1.533545961316588e-17
 
-  private ERF_C0 = [
+  private ERF_C0 = StaticArray[
     0x3ff20dd750429b6d_u64, 0x3c71ae3a7862d9c4_u64, 0xbfd812746b0379e7_u64, 0x3c6f1a64d72722a2_u64,
     0x3fbce2f21a042b7f_u64, 0xbf9b82ce31189904_u64, 0x3f7565bbf8a0fe0b_u64, 0xbf4bf9f8d2c202e4_u64,
   ]
-  private ERF_C = [
+  private ERF_C = StaticArray[
     0x3fbb0081148a873a_u64, 0xbc2f0295f16ba5d8_u64, 0x3ff1e565bca400d4_u64, 0xbc962d0ac26c78d3_u64,
     0xbfbad8189af6013d_u64, 0xbfd7712743c42914_u64, 0x3faaafd4760d7634_u64, 0x3fbba14988b4127e_u64,
     0xbf91afcdb244078a_u64, 0xbf99d72ee25cf211_u64, 0x3f719502f7beca8f_u64, 0x3f73b955bfd46624_u64,
@@ -7684,7 +7685,7 @@ pub struct Math
     0x3d40b09b02f533a1_u64, 0xbd4ee312fcf48076_u64, 0x3d5812ed2f01f60a_u64, 0xbd601e6391f47ad7_u64,
     0x3d62dce8f6b8c896_u64, 0xbd6365d5011db0df_u64,
   ]
-  private ERF_C2 = [
+  private ERF_C2 = StaticArray[
     0x3fcac45e37fe2526_u64, 0x3c648d48536c61e3_u64, 0x3ff16e2d7093cd8c_u64, 0x3c9979a52f906b4d_u64,
     0xbfca254428ddb453_u64, 0x3c69c98838a77aea_u64, 0xbfd59b3da8e1e176_u64, 0xbc41f650c25d97b0_u64,
     0x3fb988648fe88219_u64, 0xbc55aecf0c7bb6c1_u64, 0x3fb803427310d199_u64, 0xbc5a14576e703eb2_u64,
@@ -8004,7 +8005,7 @@ pub struct Math
     0x3d95e7229a07e7cd_u64, 0x3d39f8121f6c3146_u64, 0xbe0692b2f9b3f445_u64, 0x3d1c8c34f73d3823_u64,
     0x3e6301e540260d52_u64,
   ]
-  private ERF_T1 = [
+  private ERF_T1 = StaticArray[
     0x3ff0000000000000_u64, 0x0000000000000000_u64, 0x3ff02c9a3e778061_u64, 0xbc719083535b085d_u64,
     0x3ff059b0d3158574_u64, 0x3c8d73e2a475b465_u64, 0x3ff0874518759bc8_u64, 0x3c6186be4bb284ff_u64,
     0x3ff0b5586cf9890f_u64, 0x3c98a62e4adc610b_u64, 0x3ff0e3ec32d3d1a2_u64, 0x3c403a1727c57b53_u64,
@@ -8038,7 +8039,7 @@ pub struct Math
     0x3ffea4afa2a490da_u64, 0xbc9e9c23179c2893_u64, 0x3ffefa1bee615a27_u64, 0x3c9dc7f486a4b6b0_u64,
     0x3fff50765b6e4540_u64, 0x3c99d3e12dd8a18b_u64, 0x3fffa7c1819e90d8_u64, 0x3c874853f3a5931e_u64,
   ]
-  private ERF_T2 = [
+  private ERF_T2 = StaticArray[
     0x3ff0000000000000_u64, 0x0000000000000000_u64, 0x3ff000b175effdc7_u64, 0x3c9ae8e38c59c72a_u64,
     0x3ff00162f3904052_u64, 0xbc57b5d0d58ea8f4_u64, 0x3ff0021478e11ce6_u64, 0x3c94115cb6b16a8e_u64,
     0x3ff002c605e2e8cf_u64, 0xbc8d7c96f201bb2f_u64, 0x3ff003779a95f959_u64, 0x3c984711d4c35e9f_u64,
@@ -8072,17 +8073,17 @@ pub struct Math
     0x3ff029ccf99d720a_u64, 0x3c564cbba902ca27_u64, 0x3ff02a803f2d170d_u64, 0x3c94383ef231d207_u64,
     0x3ff02b338c811703_u64, 0x3c94a47a505b3a47_u64, 0x3ff02be6e199c811_u64, 0x3c9e47120223467f_u64,
   ]
-  private ERF_Q1 = [
+  private ERF_Q1 = StaticArray[
     0x3ff0000000000000_u64, 0x3ff0000000000000_u64, 0x3fe0000000000000_u64, 0x3fc5555555995d37_u64,
     0x3fa55555558489dc_u64,
   ]
-  private ERF_P = [
+  private ERF_P = StaticArray[
     0x3ff20dd750429b6d_u64, 0x3c71ae3a914fed80_u64, 0xbfd812746b0379e7_u64, 0x3c6ee12e49ca96ba_u64,
     0x3fbce2f21a042be2_u64, 0xbc52871bc0a0a0d0_u64, 0xbf9b82ce31288b51_u64, 0x3c21003accf1355c_u64,
     0x3f7565bcd0e6a53f_u64, 0xbf4c02db40040cc3_u64, 0x3f1f9a326fa3cf50_u64, 0xbeef4d25e3c73ce9_u64,
     0x3ebb9eb332b31646_u64, 0xbe864a4bd5eca4d7_u64, 0x3e6c0acc2502e94e_u64,
   ]
-  private ERF_EXCEPTIONS_TINY = [
+  private ERF_EXCEPTIONS_TINY = StaticArray[
     0x3c28430fefa15cea_u64, 0x3c2b606ee962afaa_u64, 0x3568f9599a73ba4a_u64, 0x3c2886938a44becb_u64,
     0x3c2bac9d5ed33b8e_u64, 0x35a6ae4b20e95962_u64, 0x3c28ca1724e820ac_u64, 0x3c2bf8cbd443c772_u64,
     0x35b5e680539a8bae_u64, 0x3c38430fefa15cea_u64, 0x3c3b606ee962afaa_u64, 0x3578f85dce14c1a7_u64,
@@ -8213,13 +8214,13 @@ pub struct Math
     0x3fc1182584b11eb2_u64, 0xb951090da30ef177_u64, 0x3fbef3067c6cf276_u64, 0x3fc16067d36b3d43_u64,
     0x397aa0e12c21f3f6_u64,
   ]
-  private ERF_EXCEPTIONS = [
+  private ERF_EXCEPTIONS = StaticArray[
     0x3febc466342a2296_u64, 0x3fe8f7ab15eb5bab_u64, 0xbc8fffffffffffff_u64, 0x3ff589bbd3ae5489_u64,
     0x3fee2d7b84ebf6db_u64, 0x3c8fffffffffffff_u64, 0x3fff9a4a209ca0e4_u64, 0x3fefd542cdc70993_u64,
     0xb93f86f37645446a_u64, 0x4006c196b0b4ae04_u64, 0x3fefff8760068edd_u64, 0xb906f6f53a83af6b_u64,
     0x3fefd5d9d8c9ef66_u64, 0x3feae5d17eb4f408_u64, 0x39603fa708a553b3_u64,
   ]
-  private ERF_ERFC_T = [
+  private ERF_ERFC_T = StaticArray[
     0x3fe20dd750429b6d_u64, 0x3c61a1feb75a48a8_u64, 0xbfd20dd750429b6c_u64, 0x3fdb14c2f863e403_u64,
     0xbff0ecf9db3af35d_u64, 0x400d9eb53ca6eeed_u64, 0xc030a945830d95c8_u64, 0x4056e8a963e2f1f5_u64,
     0xc0829b7ccc8f396f_u64, 0x40b15e716e83c27e_u64, 0xc0e1cfdcfbcaf22a_u64, 0x4111986cc7a7e8fe_u64,
@@ -8241,7 +8242,7 @@ pub struct Math
     0x404e010db42e0da7_u64, 0xc06c5c85250ef6a3_u64, 0x4085e118d9c1eeaf_u64, 0xc098d74be13d3d30_u64,
     0x40a211b1b2b5ac83_u64, 0xc09900be759fc663_u64,
   ]
-  private ERF_ERFC_E2 = [
+  private ERF_ERFC_E2 = StaticArray[
     0x3ff0000000000000_u64, 0xb960000000000000_u64, 0x3ff0000000000000_u64, 0xb9be200000000000_u64,
     0x3fe0000000000000_u64, 0x3a03c00000000000_u64, 0x3fc5555555555555_u64, 0x3c655555555c78d9_u64,
     0x3fa5555555555555_u64, 0x3c455555545616e2_u64, 0x3f81111111111111_u64, 0x3c011110121fc314_u64,
@@ -8250,7 +8251,7 @@ pub struct Math
     0x3e21eed8eff8958b_u64, 0x3de6124613837216_u64, 0x3da93974aaf26a57_u64, 0x3d6ae7f4fd6d0bd9_u64,
     0x3d2ae7e982620b25_u64, 0x3ce94e4ca59460d8_u64, 0x3ca69a2a4b7ef36d_u64, 0x3c6abfe1602308c9_u64,
   ]
-  private ERF_ERFC_TACC = [
+  private ERF_ERFC_TACC = StaticArray[
     0x3fe20dd750429b6d_u64, 0x3c61ae3a912b08f0_u64, 0xbfd20dd750429b6d_u64, 0xbc51ae34c0606d68_u64,
     0x3fdb14c2f863e924_u64, 0xbc796c0f4c848fc8_u64, 0xbff0ecf9db3e71b6_u64, 0x3c645d756bd288b0_u64,
     0x400d9eb53fad4672_u64, 0xbcac61629de9adf2_u64, 0xc030a945f3d147ea_u64, 0x3cb8fec5ad7ece20_u64,
@@ -8327,7 +8328,7 @@ pub struct Math
     0x413c5261ecc0d789_u64, 0xc14138932dc4eafc_u64, 0x414117d4eb18facd_u64, 0xc13af96163e35eca_u64,
     0x4130454a3a63c766_u64, 0xc11c2ebc1d39b44a_u64, 0x40ff3327698e0e6b_u64, 0xc0d094febc3dff35_u64,
   ]
-  private ERF_ERFC_EXCEPTIONS = [
+  private ERF_ERFC_EXCEPTIONS = StaticArray[
     0x4024a42b163f7a7d_u64, 0x361183d60a1f7e3c_u64, 0xb2bfffffffffffff_u64, 0x402a631d4bc7f56b_u64,
     0x2ff3f07281bb43ae_u64, 0xaca0000000000000_u64, 0x4031b2588f5d972e_u64, 0x2362923609150ff0_u64,
     0xa00ffffffffffffd_u64, 0x4031d41cb671cad3_u64, 0x22f5c4d8d179be8c_u64, 0x9f9fffffffffffff_u64,
@@ -8346,7 +8347,7 @@ pub struct Math
     0x4007fa5439251a75_u64, 0x3ef7923ec231992d_u64, 0xb8674f633ea13fec_u64, 0x401a8fb2b7ef1f80_u64,
     0x3bbc1b9f4cda246b_u64, 0x3546fce2e1cae1a5_u64,
   ]
-  private ERF_ERFC_EXCEPTIONS_ACC = [
+  private ERF_ERFC_EXCEPTIONS_ACC = StaticArray[
     0xbc9c5bf891b4ef6b_u64, 0x3ff0000000000001_u64, 0xbc9fffffffffffff_u64, 0xbccfe777a3eb8d58_u64,
     0x3ff0000000000005_u64, 0xbc9fffffffffffff_u64, 0xbced3ed8564296e6_u64, 0x3ff0000000000011_u64,
     0xbc9fffffffffffff_u64, 0xbce29c5b1f9ebd1e_u64, 0x3ff000000000000b_u64, 0xbc9fffffffffffff_u64,
@@ -8361,7 +8362,7 @@ pub struct Math
     0x3c9fffffffffffff_u64, 0xbfbd4af8adb90116_u64, 0x3ff20e8e5d1e73ff_u64, 0x3c9ffffffffffffe_u64,
     0xbfff9a4a209ca0e4_u64, 0x3fffeaa166e384c9_u64, 0x3c9ffffffffffffe_u64,
   ]
-  private ERF_ERFC_EXCEPTIONS_ACC2 = [
+  private ERF_ERFC_EXCEPTIONS_ACC2 = StaticArray[
     0x3c8c5bf891b4ef6b_u64, 0x3fefffffffffffff_u64, 0x3c8ffffffffffffe_u64, 0x3cbfe777a3eb8d58_u64,
     0x3feffffffffffffb_u64, 0x3c8ffffffffffffe_u64, 0x3cd29c5b1f9ebd1e_u64, 0x3feffffffffffff5_u64,
     0x3c8ffffffffffffe_u64, 0x3cdd3ed8564296e6_u64, 0x3fefffffffffffef_u64, 0x3c8ffffffffffffe_u64,
@@ -8686,9 +8687,9 @@ pub struct Math
     {h, l, 2.2250738585072014e-308}
   end
 
-  private ERF_ERFC_ASYMPT_THRESHOLD = [0.114501953125, 0.16887364264604549, 0.216796875, 0.26171875, 0.3046875, 0.3466796875]
+  private ERF_ERFC_ASYMPT_THRESHOLD = StaticArray[0.114501953125, 0.16887364264604549, 0.216796875, 0.26171875, 0.3046875, 0.3466796875]
 
-  private ERF_ERFC_ACCURATE_THRESHOLD = [0.079345703125, 0.1171875, 0.15576171875, 0.19775390625, 0.24462890625,
+  private ERF_ERFC_ACCURATE_THRESHOLD = StaticArray[0.079345703125, 0.1171875, 0.15576171875, 0.19775390625, 0.24462890625,
                                          0.2978515625, 0.3603515625, 0.43359375, 0.521484375, 0.59375]
 
   # erfc(x) ~ h + l for -0x1.7744f8f74e94bp+2 < x < 0x1.b39dc41e48bfdp+4,
@@ -8939,7 +8940,7 @@ pub struct Math
   # e_gamma_r.c, ddcoremath.h). Copyright (c) 2023-2025 Alexei Sibidanov
   # <sibid@uvic.ca>, MIT; tables generated from those files.
   # as_logd's B[]: {c0, c1} pairs
-  private GAMMA_LOG_B = [
+  private GAMMA_LOG_B = StaticArray[
     301_i64, 27565_i64, 7189_i64, 24786_i64, 13383_i64, 22167_i64, 18923_i64, 19696_i64,
     23845_i64, 17361_i64, 28184_i64, 15150_i64, 31969_i64, 13054_i64, 35231_i64, 11064_i64,
     37996_i64, 9173_i64, 40288_i64, 7372_i64, 42129_i64, 5657_i64, 43542_i64, 4020_i64,
@@ -8950,7 +8951,7 @@ pub struct Math
     16989_i64, -15526_i64, 13107_i64, -16339_i64, 9022_i64, -17126_i64, 4740_i64, -17889_i64,
   ]
 
-  private GAMMA_LOG_R1 = [
+  private GAMMA_LOG_R1 = StaticArray[
     0x3ff0000000000000_u64, 0x3fef508000000000_u64, 0x3feea4a000000000_u64, 0x3fedfca000000000_u64,
     0x3fed582000000000_u64, 0x3fecb72000000000_u64, 0x3fec19a000000000_u64, 0x3feb7f8000000000_u64,
     0x3feae8a000000000_u64, 0x3fea550000000000_u64, 0x3fe9c4a000000000_u64, 0x3fe9374000000000_u64,
@@ -8962,7 +8963,7 @@ pub struct Math
     0x3fe0000000000000_u64,
   ]
 
-  private GAMMA_LOG_R2 = [
+  private GAMMA_LOG_R2 = StaticArray[
     0x3ff0000000000000_u64, 0x3feffa7000000000_u64, 0x3feff4f000000000_u64, 0x3fefef6000000000_u64,
     0x3fefe9e000000000_u64, 0x3fefe45000000000_u64, 0x3fefded000000000_u64, 0x3fefd94000000000_u64,
     0x3fefd3c000000000_u64, 0x3fefce4000000000_u64, 0x3fefc8c000000000_u64, 0x3fefc34000000000_u64,
@@ -8974,7 +8975,7 @@ pub struct Math
     0x3fef507000000000_u64,
   ]
 
-  private GAMMA_LOG_L1 = [
+  private GAMMA_LOG_L1 = StaticArray[
     0x0000000000000000_u64, 0x0000000000000000_u64, 0x3da9f5e440f128db_u64, 0x3f962d07ab000000_u64,
     0xbda527d64b444fa3_u64, 0x3fa62f483d000000_u64, 0x3d83aff57187d0cf_u64, 0x3fb0a26721400000_u64,
     0xbd64634c201e2b9c_u64, 0x3fb62e04bc000000_u64, 0xbdbd46364a8017c7_u64, 0x3fbbb9db70800000_u64,
@@ -8994,7 +8995,7 @@ pub struct Math
     0x3db1cf79abc9e3b4_u64, 0x3fe62e42fef80000_u64,
   ]
 
-  private GAMMA_LOG_L2 = [
+  private GAMMA_LOG_L2 = StaticArray[
     0x0000000000000000_u64, 0x0000000000000000_u64, 0x3db2ccace5b018a7_u64, 0x3f4641ef40000000_u64,
     0xbdb88a5cd275513a_u64, 0x3f5623d3f0000000_u64, 0xbd90006a77b80a2d_u64, 0x3f60a45310000000_u64,
     0x3d881a0ebe451dd0_u64, 0x3f6627a998000000_u64, 0x3da4297627f3b4ac_u64, 0x3f6bbc0150000000_u64,
@@ -9013,21 +9014,21 @@ pub struct Math
     0x3d9a0da4813daf37_u64, 0x3f94cbb185000000_u64, 0x3dbb4d3084ac1ad1_u64, 0x3f957d52c8000000_u64,
   ]
 
-  private GAMMA_LOG_C = [
+  private GAMMA_LOG_C = StaticArray[
     0xbfdfffffffffffd3_u64, 0x3fd55555555543d5_u64, 0xbfd000002bb2d74e_u64, 0x3fc999a692c56e4e_u64,
   ]
 
   # as_sinpid/as_sinpipid's c[] and s[]
-  private GAMMA_SINPI_C = [
+  private GAMMA_SINPI_C = StaticArray[
     0xbf33bd3cc9be45de_u64, 0x3e503c1f081b5ac4_u64, 0xbd555d3c7e3bd8bf_u64, 0x3c4e1f4826790653_u64,
   ]
 
-  private GAMMA_SINPI_S = [
+  private GAMMA_SINPI_S = StaticArray[
     0x3f9921fb54442d18_u64, 0xbec4abbce625be53_u64, 0x3dd466bc67748efc_u64, 0xbcd32d26e446373a_u64,
   ]
 
   # as_tgamma_database: {x, hi, lo}
-  private TGAMMA_DB = [
+  private TGAMMA_DB = StaticArray[
     0xc0648ba8e27d09ad_u64, 0x82f0b34f909c5c92_u64, 0x0000100000000000_u64, 0xc061fe464bbe8b7a_u64,
     0x0c5f6e94380a86bf_u64, 0x08f0000000000000_u64, 0xc05dfe438a574b34_u64, 0x16fe0efc1ffa409e_u64,
     0x1390000000000000_u64, 0xc05c008ed7e2be92_u64, 0x9a82820dd1286d5e_u64, 0x9720000000000000_u64,
@@ -9073,7 +9074,7 @@ pub struct Math
     0x4063a0b358e9e93b_u64, 0x79381a5fa517374f_u64, 0x75d0000000000000_u64,
   ]
 
-  private TGAMMA_ACC_CC = [
+  private TGAMMA_ACC_CC = StaticArray[
     0xbfe2788cfc6fb619_u64, 0x3c56cb90701fbfba_u64, 0x3fefa658c23b1578_u64, 0x3c8dd92b465a81dd_u64,
     0xbfed0a118f324b63_u64, 0x3c53a4f48373c073_u64, 0x3fef6a51055096b5_u64, 0x3c7fabe4f73da654_u64,
     0xbfef6c80ec38b67b_u64, 0x3c8c9fc797e7567e_u64, 0x3fefc7e0a6eb310b_u64, 0xbc5042340fb21e2f_u64,
@@ -9090,13 +9091,13 @@ pub struct Math
     0xbff001452e7ff0b7_u64, 0xbc7acc4a235f0de4_u64, 0x3ff001c6c5b18192_u64, 0x3c935874aa96ce14_u64,
   ]
 
-  private TGAMMA_ACC_C = [
+  private TGAMMA_ACC_C = StaticArray[
     0xbfefdf5126e6a83b_u64, 0x3fefd56c1b531709_u64, 0xbff0956741759e58_u64, 0x3ff0b6167d27c5c4_u64,
     0xbfe8e69e55b6dca0_u64, 0x3fe7e124660c827d_u64, 0xbffc797b42bd6745_u64, 0x3ffd688bb8db046c_u64,
   ]
 
   # as_tgamma_accurate's ch[] of each range, concatenated
-  private TGAMMA_ACC_CH = [
+  private TGAMMA_ACC_CH = StaticArray[
     0x3ff0079000000000_u64, 0x4004569000000000_u64, 0x4009cfb000000000_u64, 0x4005d7e800000000_u64,
     0x3ffbbc2000000000_u64, 0x3fec2de000000000_u64, 0x3fd7dd4000000000_u64, 0x3fc1540000000000_u64,
     0x3fa6060000000000_u64, 0x3f88e00000000000_u64, 0x3f69600000000000_u64, 0x3f47800000000000_u64,
@@ -9127,7 +9128,7 @@ pub struct Math
   ]
 
   # and its cl[][2]
-  private TGAMMA_ACC_CL = [
+  private TGAMMA_ACC_CL = StaticArray[
     0xbe835efdada260f0_u64, 0xbb28f77d4b23a815_u64, 0x3ed7df9be2dd4bfe_u64, 0xbb757dcebb38b14a_u64,
     0xbedf2ea2f115251d_u64, 0x3b75db7a1637f6f9_u64, 0xbedba2ee68beb692_u64, 0xbb6379a1eea94b56_u64,
     0xbec453a3cbf93b46_u64, 0xbb5caedf955a404f_u64, 0xbed0705e77cba500_u64, 0x3b77c27c7f017abb_u64,
@@ -9268,7 +9269,7 @@ pub struct Math
   ]
 
   # per range: ch offset, ch count, cl offset (pairs), cl count, i > bound, jm base, eoff
-  private TGAMMA_ACC_REG = [
+  private TGAMMA_ACC_REG = StaticArray[
     0, 14, 0, 34, 159, 160, 942,
     14, 14, 34, 33, 127, 128, 713,
     28, 13, 67, 32, 95, 96, 495,
@@ -9281,13 +9282,13 @@ pub struct Math
   ]
 
   # |x| < 0.25
-  private TGAMMA_SMALL_CC = [
+  private TGAMMA_SMALL_CC = StaticArray[
     0xbfe2788cfc6fb619_u64, 0x3c566d81dd231575_u64, 0x3fefa658c23b1578_u64, 0x3c7dded15c22e35e_u64,
     0xbfed0a118f324b60_u64, 0xbc8bb37df476a7cc_u64, 0x3fef6a51055097c6_u64, 0xbc830eee7e7c5482_u64,
     0xbfef6c80ec38bc47_u64, 0xbc722885891ee90d_u64,
   ]
 
-  private TGAMMA_SMALL_C = [
+  private TGAMMA_SMALL_C = StaticArray[
     0x3fefc7e0a6e9c2c9_u64, 0xbfefdf3f15764246_u64, 0x3feff07b5af9892c_u64, 0xbfeff803d8f584c4_u64,
     0x3feffc07f59b072b_u64, 0xbfeffe00e422ee2e_u64, 0x3fefff102b561602_u64, 0xbfefff9cb7b72f3b_u64,
     0x3feffdcb35bbec92_u64, 0xbfeffcc551b96878_u64, 0x3ff013dde0ace169_u64, 0xbff01baffd0f7e86_u64,
@@ -9295,7 +9296,7 @@ pub struct Math
   ]
 
   # -3 <= x <= 4
-  private TGAMMA_MID_CC = [
+  private TGAMMA_MID_CC = StaticArray[
     0x400a96390899a074_u64, 0xbc56e95430fab070_u64, 0x400d545472146024_u64, 0x3c7c07f9774e12b3_u64,
     0x400491ad1cb98836_u64, 0x3ca51e26c4cfd792_u64, 0x3ff4a0b6a8230929_u64, 0x3c9c1c6993b10594_u64,
     0x3fe0e5d232b95859_u64, 0x3c7d4248748dd78b_u64, 0x3fc71d1672129fee_u64, 0x3c43b47c61245ee6_u64,
@@ -9307,7 +9308,7 @@ pub struct Math
     0x3e2f239fc9cf2155_u64, 0xbac8a95d04bfb2e4_u64, 0x3dee3ea4e1366932_u64, 0xba25c950f5465458_u64,
   ]
 
-  private TGAMMA_MID_C = [
+  private TGAMMA_MID_C = StaticArray[
     0x400a96390899a074_u64, 0x400d545472146024_u64, 0x400491ad1cb98836_u64, 0x3ff4a0b6a8230929_u64,
     0x3fe0e5d232b95859_u64, 0x3fc71d1672129fee_u64, 0x3fabd2afde7e4816_u64, 0x3f8d8376e1031a16_u64,
     0x3f6c9e94992c88c1_u64, 0x3f490ba7276a0c19_u64, 0x3f249cfed9d63c8b_u64, 0x3efec018849c245b_u64,
@@ -9316,7 +9317,7 @@ pub struct Math
   ]
 
   # as_sinpid's st[]: {lo, hi} of sin(i*pi/128)
-  private TGAMMA_ST = [
+  private TGAMMA_ST = StaticArray[
     0x0000000000000000_u64, 0x0000000000000000_u64, 0xbbfb1d63091a0130_u64, 0x3f992155f7a3667e_u64,
     0xbc2912bd0d569a90_u64, 0x3fa91f65f10dd814_u64, 0xbc49a088a8bf6b2c_u64, 0x3fb2d52092ce19f6_u64,
     0xbc3e2718d26ed688_u64, 0x3fb917a6bc29b42c_u64, 0x3c4a2704729ae56d_u64, 0x3fbf564e56a9730e_u64,
@@ -9353,7 +9354,7 @@ pub struct Math
   ]
 
   # as_expd: {lo, hi}
-  private TGAMMA_E0 = [
+  private TGAMMA_E0 = StaticArray[
     0x0000000000000000_u64, 0x3ff0000000000000_u64, 0x3c8d73e2a475b465_u64, 0x3ff059b0d3158574_u64,
     0x3c98a62e4adc610b_u64, 0x3ff0b5586cf9890f_u64, 0xbc96c51039449b3a_u64, 0x3ff11301d0125b51_u64,
     0xbc819041b9d78a76_u64, 0x3ff172b83c7d517b_u64, 0x3c9e016e00a2643c_u64, 0x3ff1d4873168b9aa_u64,
@@ -9372,7 +9373,7 @@ pub struct Math
     0xbc9e9c23179c2893_u64, 0x3ffea4afa2a490da_u64, 0x3c99d3e12dd8a18b_u64, 0x3fff50765b6e4540_u64,
   ]
 
-  private TGAMMA_E1 = [
+  private TGAMMA_E1 = StaticArray[
     0x0000000000000000_u64, 0x3ff0000000000000_u64, 0xbc8d7c96f201bb2f_u64, 0x3ff002c605e2e8cf_u64,
     0xbc75e00e62d6b30d_u64, 0x3ff0058c86da1c0a_u64, 0x3c7da93f90835f75_u64, 0x3ff0085382faef83_u64,
     0xbc84f6b2a7609f71_u64, 0x3ff00b1afa5abcbf_u64, 0xbc6406ac4e81a645_u64, 0x3ff00de2ed0ee0f5_u64,
@@ -9391,21 +9392,21 @@ pub struct Math
     0xbc9abcae24b819df_u64, 0x3ff0540727fc1762_u64, 0x3c806c87433776c9_u64, 0x3ff056dbbebb786b_u64,
   ]
 
-  private TGAMMA_EXP_C = [
+  private TGAMMA_EXP_C = StaticArray[
     0x3f462e42fefa39ef_u64, 0x3bdabc9e3bf9d4d1_u64, 0x3e8ebfbdff82c58e_u64, 0x3b2ec07243b4e585_u64,
     0x3dcc6b08d704a0bf_u64, 0x3a694bac118264d5_u64, 0x3d03b2ab719edc2d_u64, 0x39ab530cee32e3de_u64,
     0x3c35d87fe98a5fc4_u64, 0xb8c63e85fdbde1ca_u64,
   ]
 
   # as_lgamma_asym, x > 11.5 and below
-  private TGAMMA_ASYM_C1 = [
+  private TGAMMA_ASYM_C1 = StaticArray[
     0x3fdacfe390c97d69_u64, 0x3c734acf208a22c4_u64, 0x3fb5555555555555_u64, 0x3c531799ffbcdddb_u64,
     0xbf66c16c16c165a9_u64, 0x3c01eefaee02f690_u64, 0x3f4a01a019ada522_u64, 0xbbd4d52971deb155_u64,
     0xbf4381377e3a546d_u64, 0x3befd1b354a8db62_u64, 0x3f4b9486dc1c9886_u64, 0xbbe2dac4b8cca031_u64,
     0xbf5f3ecd8799f337_u64, 0x3bfda5dd745e3963_u64, 0x3f76d399e5618390_u64, 0x3c115e3000de141a_u64,
   ]
 
-  private TGAMMA_ASYM_C2 = [
+  private TGAMMA_ASYM_C2 = StaticArray[
     0x3fdacfe390c97d69_u64, 0x3c7f06a157d44d5b_u64, 0x3fb5555555555541_u64, 0x3c59d5fc10df4161_u64,
     0xbf66c16c16bfb733_u64, 0xbbf557d8fba9e97a_u64, 0x3f4a01a01651819c_u64, 0xbbedd3c0f402122a_u64,
     0xbf438136b229bfb4_u64, 0xbbc879990edddc5f_u64, 0x3f4b94c0472d00a0_u64, 0x3be215a15f7d9289_u64,
@@ -9416,7 +9417,7 @@ pub struct Math
   ]
 
   # as_lgamma_database: {x, hi, lo}
-  private LGAMMA_DB = [
+  private LGAMMA_DB = StaticArray[
     0xc021b649eb4316fb_u64, 0xc0250332a035af1f_u64, 0xbcc0000000000000_u64, 0xc01808d3e2f56b4f_u64,
     0xbffd779a9ab6cbff_u64, 0x3c90000000000000_u64, 0xc00d02b2008d5bf5_u64, 0xbff67cf93db4863e_u64,
     0xbc90000000000000_u64, 0xc00a123d403647d7_u64, 0xbfe530824ff0740a_u64, 0x3c80000000000000_u64,
@@ -9434,7 +9435,7 @@ pub struct Math
     0x3c90000000000000_u64,
   ]
 
-  private LGAMMA_ACC_C0 = [
+  private LGAMMA_ACC_C0 = StaticArray[
     0xbfe2788cfc6fb619_u64, 0x3c56cb90701fbf92_u64, 0x3fea51a6625307d3_u64, 0x3c71873d891220df_u64,
     0xbfd9a4d55beab2d7_u64, 0x3c44c26d1b4d5994_u64, 0x3fd151322ac7d848_u64, 0x3c6b5f9120fdaca6_u64,
     0xbfca8b9c17aa6149_u64, 0xbc52e826b9f2e3f2_u64, 0x3fc5b40cb100c306_u64, 0x3c44a79a5f96e16f_u64,
@@ -9454,7 +9455,7 @@ pub struct Math
     0xbfa9ea8d7c263a80_u64, 0xbc4bdcf945212655_u64, 0x3fa9f461fd74cc30_u64, 0x3c35e5f99eb89ba4_u64,
   ]
 
-  private LGAMMA_ACC_B = [
+  private LGAMMA_ACC_B = StaticArray[
     0xbfbeeb95b094c191_u64, 0xbc5346863f58b074_u64, 0x3fa2aed059bd608a_u64, 0x3c0cd3d2ca77b58c_u64,
     0x3fdde9e64df22ef3_u64, 0xbc66d48ec99346d4_u64, 0xbfc1ae55b180726c_u64, 0xbc4959aeebbdcd5b_u64,
     0x3fae0f840dad61da_u64, 0xbc4599fc3f5e3cc0_u64, 0xbf9da59d5374a543_u64, 0xbc00628c37280b13_u64,
@@ -9473,7 +9474,7 @@ pub struct Math
   ]
 
   # as_lgamma_accurate near the negative zeros: the zero in three parts
-  private LGAMMA_ROOT_X0 = [
+  private LGAMMA_ROOT_X0 = StaticArray[
     0x4003a7fc9600f86c_u64, 0x3c855f64f98af8d0_u64, 0x391c4b0cd201366a_u64, 0x4005fb410a1bd901_u64,
     0xbc9a19a96d2e6f85_u64, 0xb93140b4ff4b7d60_u64, 0x4009260dbc9e59af_u64, 0x3caf717cd335a7b3_u64,
     0x394d32a2a65bfd63_u64, 0x400fa471547c2fe5_u64, 0x3c770d4561291237_u64, 0xb909e6fadbbc171a_u64,
@@ -9490,7 +9491,7 @@ pub struct Math
   ]
 
   # its c[][2], concatenated
-  private LGAMMA_ROOT_C = [
+  private LGAMMA_ROOT_C = StaticArray[
     0x3ff83fe966af535f_u64, 0xbc8775909a36a68c_u64, 0x3fe36eebb002f55d_u64, 0xbc88d4b2124a39f8_u64,
     0x3f9694a6058a7858_u64, 0xbc21d8c8b9b4d80e_u64, 0x3f91718d7ca09e5b_u64, 0x3c383195b07fd250_u64,
     0x3f57339fe04b2764_u64, 0xbbf48648f4a4bf9e_u64, 0x3f48d32f682aa0bd_u64, 0xbbd90953dadfba01_u64,
@@ -9702,7 +9703,7 @@ pub struct Math
   ]
 
   # per zero: c offset (pairs), count, k
-  private LGAMMA_ROOT_REG = [
+  private LGAMMA_ROOT_REG = StaticArray[
     0, 26, 6, 26, 27, 6,
     53, 20, 7, 73, 20, 7,
     93, 24, 7, 117, 19, 7,
@@ -9715,7 +9716,7 @@ pub struct Math
   ]
 
   # per zero: |fh| bound, sx above, sx below, scale
-  private LGAMMA_ROOT_BND = [
+  private LGAMMA_ROOT_BND = StaticArray[
     0x3fb7400000000000_u64, 0xc004e147ae147ae1_u64, 0xc000000000000000_u64, 0x4020000000000000_u64,
     0x3fb1680000000000_u64, 0xc008000000000000_u64, 0xc004e147ae147ae1_u64, 0x4030000000000000_u64,
     0x3fb2d40000000000_u64, 0xc00c000000000000_u64, 0xc008000000000000_u64, 0x4050000000000000_u64,
@@ -9736,14 +9737,14 @@ pub struct Math
   ]
 
   # __ieee754_lgamma_r's piecewise range borders
-  private LGAMMA_UBRD = [
+  private LGAMMA_UBRD = StaticArray[
     33488896_u64, 33494124_u64, 33500027_u64, 33506610_u64, 33513804_u64,
     33522448_u64, 33526775_u64, 33532032_u64, 33538142_u64, 33545075_u64,
     33552549_u64, 33558855_u64, 33564419_u64, 33571244_u64, 33579562_u64,
     33588441_u64, 33594599_u64, 33602092_u64, 33611223_u64, 33621178_u64,
   ]
 
-  private LGAMMA_OFFS = [
+  private LGAMMA_OFFS = StaticArray[
     0x3fe146cd80000000_u64, 0x3fe3fe8980000000_u64, 0x3fe70aea80000000_u64, 0x3fea67fc00000000_u64,
     0x3fee76db80000000_u64, 0x3ff1708380000000_u64, 0x3ff3c78a80000000_u64, 0x3ff68df200000000_u64,
     0x3ff9bd1400000000_u64, 0x3ffd418680000000_u64, 0x4000d9a640000000_u64, 0x400384b800000000_u64,
@@ -9752,7 +9753,7 @@ pub struct Math
   ]
 
   # 19 x 8
-  private LGAMMA_CL = [
+  private LGAMMA_CL = StaticArray[
     0xc0118ad63ca097e9_u64, 0x401af8e15b715c51_u64, 0xc0256213b7191ba4_u64, 0x403151f165a9425f_u64,
     0xc03c826426e4b7cd_u64, 0x4047c313095e4b75_u64, 0xc0544f3d7d848e78_u64, 0x40613384c97ea99d_u64,
     0xc000f58e76c8d235_u64, 0x40067c3f6b7124f6_u64, 0xc00ec78d7d8185a3_u64, 0x401588d6487de574_u64,
@@ -9794,7 +9795,7 @@ pub struct Math
   ]
 
   # 19 x 5 x 2
-  private LGAMMA_CH = [
+  private LGAMMA_CH = StaticArray[
     0x3fdfdbd7c56b02b5_u64, 0xbc79f8c66985b6f3_u64, 0xbffc771ed8981f3e_u64, 0x3c98d8b72ce9b19d_u64,
     0x4001558ba7c0144d_u64, 0x3ca4fc1fa0f0451c_u64, 0xc001fa938f4d4b53_u64, 0xbcaf29beb3ca3738_u64,
     0x4007f7469f6781ef_u64, 0xbcab59ce1aa03545_u64, 0x3fd71c14e711391e_u64, 0x3c32ad5eb4fb4f59_u64,
@@ -9846,28 +9847,28 @@ pub struct Math
   ]
 
   # |x| < 0.03125
-  private LGAMMA_SMALL_C0 = [
+  private LGAMMA_SMALL_C0 = StaticArray[
     0xbfe2788cfc6fb619_u64, 0x3c56cb9a4ff7c53b_u64, 0x3fea51a6625307d3_u64, 0x3c718722054895e9_u64,
     0xbfd9a4d55beab2d7_u64, 0xbc074ded0474fe66_u64, 0x3fd151322ac7d848_u64, 0x3c7825b3df1d5722_u64,
   ]
 
-  private LGAMMA_SMALL_Q = [
+  private LGAMMA_SMALL_Q = StaticArray[
     0xbfca8b9c17aa5d3d_u64, 0x3fc5b40cb100b9bf_u64, 0xbfc2703a1e13bcbc_u64, 0x3fc010b36b6afdc1_u64,
     0xbfbc8062dd09ec62_u64, 0x3fb9a018c7345316_u64, 0xbfb7578ea8068cc4_u64, 0x3fb566b51c990008_u64,
   ]
 
   # |x| >= 8.29541
-  private LGAMMA_ASYM_C = [
+  private LGAMMA_ASYM_C = StaticArray[
     0x3fdacfe390c97d6a_u64, 0xbc51d9792ced423a_u64, 0x3fb55555555554c1_u64, 0xbc40143af34001bd_u64,
   ]
 
-  private LGAMMA_ASYM_Q = [
+  private LGAMMA_ASYM_Q = StaticArray[
     0xbf66c16c1697de08_u64, 0x3f4a019f47b230fd_u64, 0xbf4380aab821e42e_u64, 0x3f4b617d2c5b5b66_u64,
     0xbf5a7fd66a05ccfc_u64,
   ]
 
   # as_logd_accurate
-  private LGAMMA_LOGACC_H1 = [
+  private LGAMMA_LOGACC_H1 = StaticArray[
     0x0000000000000000_u64, 0x0000000000000000_u64, 0x0000000000000000_u64, 0x3a07052459b95dfc_u64,
     0x3d4d79103c4a36a4_u64, 0x3f962d07ab330000_u64, 0x39c6eaee7553baa0_u64, 0x3d460a6d2eec1732_u64,
     0x3fa62f483cea8000_u64, 0x3a0a79804e7ea455_u64, 0x3d4aff57187d0cec_u64, 0x3fb0a26721424000_u64,
@@ -9895,7 +9896,7 @@ pub struct Math
     0x398f97b57a079a19_u64, 0x3d2ef35793c76730_u64, 0x3fe62e42fefa3800_u64,
   ]
 
-  private LGAMMA_LOGACC_H2 = [
+  private LGAMMA_LOGACC_H2 = StaticArray[
     0x0000000000000000_u64, 0x0000000000000000_u64, 0x0000000000000000_u64, 0x3a04826401258afc_u64,
     0x3d2959cb60314e00_u64, 0x3f4641ef49600000_u64, 0x3a09c71d4cdcb54b_u64, 0x3d4ad196c55762e2_u64,
     0x3f5623d3e9d00000_u64, 0x39f012c2a9a87c83_u64, 0x3d4ff2b108feba50_u64, 0x3f60a4530f780000_u64,
@@ -9923,7 +9924,7 @@ pub struct Math
     0x39fc301f232c0e74_u64, 0x3d4b6fc11defa4a8_u64, 0x3f962f12e1320000_u64,
   ]
 
-  private LGAMMA_LOGACC_C = [
+  private LGAMMA_LOGACC_C = StaticArray[
     0x3ff0000000000000_u64, 0x389a193d7f59d80a_u64, 0xbfe0000000000000_u64, 0x39c8c7d7a8733406_u64,
     0x3fd5555555555555_u64, 0x3c755555554f571d_u64, 0xbfd0000000000000_u64, 0xbb6e516b5d7b8c15_u64,
     0x3fc999999999999a_u64, 0xbc697f2898534175_u64, 0xbfc55555555554b5_u64, 0xbc43834d62d64ec4_u64,
@@ -9932,7 +9933,7 @@ pub struct Math
   ]
 
   # as_sinpipid's stpi[]: {lo, hi} of sin(i*pi/128)/pi
-  private LGAMMA_STPI = [
+  private LGAMMA_STPI = StaticArray[
     0x0000000000000000_u64, 0x0000000000000000_u64, 0x3bfc14eff99a3ff1_u64, 0x3f7fff2d746c8895_u64,
     0xbc18c4d4c1bbe38b_u64, 0x3f8ffcb5e52d1f36_u64, 0xbc208ef2408930eb_u64, 0x3f97fa7329846feb_u64,
     0xbc314daa07929354_u64, 0x3f9ff2d8cc5320c7_u64, 0x3c3d845cf264d016_u64, 0x3fa3f3289bb44643_u64,
@@ -9969,33 +9970,33 @@ pub struct Math
   ]
 
   # as_sinpipid near 1/2: c[2] then cl[3]
-  private LGAMMA_SINPI_NEAR = [
+  private LGAMMA_SINPI_NEAR = StaticArray[
     0xbffa51a6625307d3_u64, 0xbc816cc8f2044a4a_u64, 0x3fe9f9cb402bc42a_u64, 0xbfc86a8e46ddf78d_u64,
     0x3f9ac644e7aa33e6_u64,
   ]
 
   # as_sinpipid_accurate
-  private LGAMMA_SINPIACC_C = [
+  private LGAMMA_SINPIACC_C = StaticArray[
     0xbf33bd3cc9be45de_u64, 0xbbd692b71366c792_u64, 0x3e503c1f081b5ac4_u64, 0xbaf32b342c5da62e_u64,
     0xbd555d3c7e3cbffa_u64, 0x39d17fcb68af9aae_u64, 0x3c4e1f506890e556_u64, 0xb8d56c9658a7cfd5_u64,
     0xbb3a6d193ca649a0_u64, 0x37961669b56f0275_u64,
   ]
 
-  private LGAMMA_SINPIACC_S = [
+  private LGAMMA_SINPIACC_S = StaticArray[
     0x3f9921fb54442d18_u64, 0x3c31a62633145c07_u64, 0xbec4abbce625be53_u64, 0x3b605511c6847960_u64,
     0x3dd466bc6775aae2_u64, 0xba66dc0d14c26b21_u64, 0xbcd32d2cce62bd86_u64, 0x3972ba6dbc4b37c0_u64,
     0x3bc50783487e6b5c_u64, 0xb85b77efed0f9c1f_u64, 0xbaae306ec8cf7c02_u64, 0x3745d2601f85289a_u64,
   ]
 
   # as_lgamma_asym_accurate, x >= 48, >= 14.5, below
-  private LGAMMA_ASYMACC_C48 = [
+  private LGAMMA_ASYMACC_C48 = StaticArray[
     0x3fdacfe390c97d69_u64, 0x3c73494bc9001766_u64, 0x3fb5555555555555_u64, 0x3c555555554133c7_u64,
     0xbf66c16c16c16c17_u64, 0x3bff4c03199d8517_u64, 0x3f4a01a01a01a016_u64, 0x3bdfb315e77b4883_u64,
     0xbf4381381380c1b0_u64, 0xbbec4cc418316ed1_u64, 0x3f4b951e22dd8dfc_u64, 0x3bee8da392824ecf_u64,
     0xbf5f6a875bb1ab7b_u64, 0x3bf27c5fcbab6b5d_u64, 0x3f7a0a6926f49920_u64, 0xbc01f355cbf82229_u64,
   ]
 
-  private LGAMMA_ASYMACC_C14 = [
+  private LGAMMA_ASYMACC_C14 = StaticArray[
     0x3fdacfe390c97d69_u64, 0x3c73494bc9007f28_u64, 0x3fb5555555555555_u64, 0x3c55555554ad7655_u64,
     0xbf66c16c16c16c17_u64, 0x3bff4b73ea546bd4_u64, 0x3f4a01a01a01a01a_u64, 0xbbe464e31b1a609a_u64,
     0xbf43813813813692_u64, 0x3bd63676fd3c851e_u64, 0x3f4b951e2b143b5e_u64, 0x3becfe48021143d1_u64,
@@ -10004,7 +10005,7 @@ pub struct Math
     0xbff5762c9f49fe25_u64, 0x3c9afeff5294ad13_u64, 0x4022ea102098f818_u64, 0x3cc609db97f1bc89_u64,
   ]
 
-  private LGAMMA_ASYMACC_C0 = [
+  private LGAMMA_ASYMACC_C0 = StaticArray[
     0x3fdacfe390c97d69_u64, 0x3c73494bce9b5c50_u64, 0x3fb5555555555555_u64, 0x3c555551a0d18a1d_u64,
     0xbf66c16c16c16c17_u64, 0x3c007171d4a61bb9_u64, 0x3f4a01a01a01a008_u64, 0xbbe49af39145d6e0_u64,
     0xbf438138138124cc_u64, 0xbbdb8f71068f5292_u64, 0x3f4b951e2b09b070_u64, 0xbbd3c8a4c099ae72_u64,
@@ -11079,7 +11080,7 @@ pub struct Math
   # and y1.
   private BESSEL_INVSQRTPI = 5.64189583547756279280e-01
   private BESSEL_TPI       = 6.36619772367581382433e-01
-  private BESSEL_J0_R      = [
+  private BESSEL_J0_R      = StaticArray[
     0.0,
     0.0,
     1.56249999999999947958e-02,
@@ -11087,14 +11088,14 @@ pub struct Math
     1.82954049532700665670e-06,
     -4.61832688532103189199e-09,
   ]
-  private BESSEL_J0_S = [
+  private BESSEL_J0_S = StaticArray[
     0.0,
     1.56191029464890010492e-02,
     1.16926784663337450260e-04,
     5.13546550207318111446e-07,
     1.16614003333790000205e-09,
   ]
-  private BESSEL_Y0_U = [
+  private BESSEL_Y0_U = StaticArray[
     -7.38042951086872317523e-02,
     1.76666452509181115538e-01,
     -1.38185671945596898896e-02,
@@ -11103,13 +11104,13 @@ pub struct Math
     1.95590137035022920206e-08,
     -3.98205194132103398453e-11,
   ]
-  private BESSEL_Y0_V = [
+  private BESSEL_Y0_V = StaticArray[
     1.27304834834123699328e-02,
     7.60068627350353253702e-05,
     2.59150851840457805467e-07,
     4.41110311332675467403e-10,
   ]
-  private BESSEL_P0_R8 = [
+  private BESSEL_P0_R8 = StaticArray[
     0.00000000000000000000e+00,
     -7.03124999999900357484e-02,
     -8.08167041275349795626e+00,
@@ -11117,14 +11118,14 @@ pub struct Math
     -2.48521641009428822144e+03,
     -5.25304380490729545272e+03,
   ]
-  private BESSEL_P0_S8 = [
+  private BESSEL_P0_S8 = StaticArray[
     1.16534364619668181717e+02,
     3.83374475364121826715e+03,
     4.05978572648472545552e+04,
     1.16752972564375915681e+05,
     4.76277284146730962675e+04,
   ]
-  private BESSEL_P0_R5 = [
+  private BESSEL_P0_R5 = StaticArray[
     -1.14125464691894502584e-11,
     -7.03124940873599280078e-02,
     -4.15961064470587782438e+00,
@@ -11132,14 +11133,14 @@ pub struct Math
     -3.31231299649172967747e+02,
     -3.46433388365604912451e+02,
   ]
-  private BESSEL_P0_S5 = [
+  private BESSEL_P0_S5 = StaticArray[
     6.07539382692300335975e+01,
     1.05125230595704579173e+03,
     5.97897094333855784498e+03,
     9.62544514357774460223e+03,
     2.40605815922939109441e+03,
   ]
-  private BESSEL_P0_R3 = [
+  private BESSEL_P0_R3 = StaticArray[
     -2.54704601771951915620e-09,
     -7.03119616381481654654e-02,
     -2.40903221549529611423e+00,
@@ -11147,14 +11148,14 @@ pub struct Math
     -5.80791704701737572236e+01,
     -3.14479470594888503854e+01,
   ]
-  private BESSEL_P0_S3 = [
+  private BESSEL_P0_S3 = StaticArray[
     3.58560338055209726349e+01,
     3.61513983050303863820e+02,
     1.19360783792111533330e+03,
     1.12799679856907414432e+03,
     1.73580930813335754692e+02,
   ]
-  private BESSEL_P0_R2 = [
+  private BESSEL_P0_R2 = StaticArray[
     -8.87534333032526411254e-08,
     -7.03030995483624743247e-02,
     -1.45073846780952986357e+00,
@@ -11162,14 +11163,14 @@ pub struct Math
     -1.11931668860356747786e+01,
     -3.23364579351335335033e+00,
   ]
-  private BESSEL_P0_S2 = [
+  private BESSEL_P0_S2 = StaticArray[
     2.22202997532088808441e+01,
     1.36206794218215208048e+02,
     2.70470278658083486789e+02,
     1.53875394208320329881e+02,
     1.46576176948256193810e+01,
   ]
-  private BESSEL_Q0_R8 = [
+  private BESSEL_Q0_R8 = StaticArray[
     0.00000000000000000000e+00,
     7.32421874999935051953e-02,
     1.17682064682252693899e+01,
@@ -11177,7 +11178,7 @@ pub struct Math
     8.85919720756468632317e+03,
     3.70146267776887834771e+04,
   ]
-  private BESSEL_Q0_S8 = [
+  private BESSEL_Q0_S8 = StaticArray[
     1.63776026895689824414e+02,
     8.09834494656449805916e+03,
     1.42538291419120476348e+05,
@@ -11185,7 +11186,7 @@ pub struct Math
     8.40501579819060512818e+05,
     -3.43899293537866615225e+05,
   ]
-  private BESSEL_Q0_R5 = [
+  private BESSEL_Q0_R5 = StaticArray[
     1.84085963594515531381e-11,
     7.32421766612684765896e-02,
     5.83563508962056953777e+00,
@@ -11193,7 +11194,7 @@ pub struct Math
     1.02724376596164097464e+03,
     1.98997785864605384631e+03,
   ]
-  private BESSEL_Q0_S5 = [
+  private BESSEL_Q0_S5 = StaticArray[
     8.27766102236537761883e+01,
     2.07781416421392987104e+03,
     1.88472887785718085070e+04,
@@ -11201,7 +11202,7 @@ pub struct Math
     3.59767538425114471465e+04,
     -5.35434275601944773371e+03,
   ]
-  private BESSEL_Q0_R3 = [
+  private BESSEL_Q0_R3 = StaticArray[
     4.37741014089738620906e-09,
     7.32411180042911447163e-02,
     3.34423137516170720929e+00,
@@ -11209,7 +11210,7 @@ pub struct Math
     1.70808091340565596283e+02,
     1.66733948696651168575e+02,
   ]
-  private BESSEL_Q0_S3 = [
+  private BESSEL_Q0_S3 = StaticArray[
     4.87588729724587182091e+01,
     7.09689221056606015736e+02,
     3.70414822620111362994e+03,
@@ -11217,7 +11218,7 @@ pub struct Math
     2.51633368920368957333e+03,
     -1.49247451836156386662e+02,
   ]
-  private BESSEL_Q0_R2 = [
+  private BESSEL_Q0_R2 = StaticArray[
     1.50444444886983272379e-07,
     7.32234265963079278272e-02,
     1.99819174093815998816e+00,
@@ -11225,7 +11226,7 @@ pub struct Math
     3.16662317504781540833e+01,
     1.62527075710929267416e+01,
   ]
-  private BESSEL_Q0_S2 = [
+  private BESSEL_Q0_S2 = StaticArray[
     3.03655848355219184498e+01,
     2.69348118608049844624e+02,
     8.44783757595320139444e+02,
@@ -11233,13 +11234,13 @@ pub struct Math
     2.12666388511798828631e+02,
     -5.31095493882666946917e+00,
   ]
-  private BESSEL_J1_R = [
+  private BESSEL_J1_R = StaticArray[
     -6.25000000000000000000e-02,
     1.40705666955189706048e-03,
     -1.59955631084035597520e-05,
     4.96727999609584448412e-08,
   ]
-  private BESSEL_J1_S = [
+  private BESSEL_J1_S = StaticArray[
     0.0,
     1.91537599538363460805e-02,
     1.85946785588630915560e-04,
@@ -11247,21 +11248,21 @@ pub struct Math
     5.04636257076217042715e-09,
     1.23542274426137913908e-11,
   ]
-  private BESSEL_Y1_U = [
+  private BESSEL_Y1_U = StaticArray[
     -1.96057090646238940668e-01,
     5.04438716639811282616e-02,
     -1.91256895875763547298e-03,
     2.35252600561610495928e-05,
     -9.19099158039878874504e-08,
   ]
-  private BESSEL_Y1_V = [
+  private BESSEL_Y1_V = StaticArray[
     1.99167318236649903973e-02,
     2.02552581025135171496e-04,
     1.35608801097516229404e-06,
     6.22741452364621501295e-09,
     1.66559246207992079114e-11,
   ]
-  private BESSEL_P1_R8 = [
+  private BESSEL_P1_R8 = StaticArray[
     0.00000000000000000000e+00,
     1.17187499999988647970e-01,
     1.32394806593073575129e+01,
@@ -11269,14 +11270,14 @@ pub struct Math
     3.87474538913960532227e+03,
     7.91447954031891731574e+03,
   ]
-  private BESSEL_P1_S8 = [
+  private BESSEL_P1_S8 = StaticArray[
     1.14207370375678408436e+02,
     3.65093083420853463394e+03,
     3.69562060269033463555e+04,
     9.76027935934950801311e+04,
     3.08042720627888811578e+04,
   ]
-  private BESSEL_P1_R5 = [
+  private BESSEL_P1_R5 = StaticArray[
     1.31990519556243522749e-11,
     1.17187493190614097638e-01,
     6.80275127868432871736e+00,
@@ -11284,14 +11285,14 @@ pub struct Math
     5.17636139533199752805e+02,
     5.28715201363337541807e+02,
   ]
-  private BESSEL_P1_S5 = [
+  private BESSEL_P1_S5 = StaticArray[
     5.92805987221131331921e+01,
     9.91401418733614377743e+02,
     5.35326695291487976647e+03,
     7.84469031749551231769e+03,
     1.50404688810361062679e+03,
   ]
-  private BESSEL_P1_R3 = [
+  private BESSEL_P1_R3 = StaticArray[
     3.02503916137373618024e-09,
     1.17186865567253592491e-01,
     3.93297750033315640650e+00,
@@ -11299,14 +11300,14 @@ pub struct Math
     9.10550110750781271918e+01,
     4.85590685197364919645e+01,
   ]
-  private BESSEL_P1_S3 = [
+  private BESSEL_P1_S3 = StaticArray[
     3.47913095001251519989e+01,
     3.36762458747825746741e+02,
     1.04687139975775130551e+03,
     8.90811346398256432622e+02,
     1.03787932439639277504e+02,
   ]
-  private BESSEL_P1_R2 = [
+  private BESSEL_P1_R2 = StaticArray[
     1.07710830106873743082e-07,
     1.17176219462683348094e-01,
     2.36851496667608785174e+00,
@@ -11314,14 +11315,14 @@ pub struct Math
     1.76939711271687727390e+01,
     5.07352312588818499250e+00,
   ]
-  private BESSEL_P1_S2 = [
+  private BESSEL_P1_S2 = StaticArray[
     2.14364859363821409488e+01,
     1.25290227168402751090e+02,
     2.32276469057162813669e+02,
     1.17679373287147100768e+02,
     8.36463893371618283368e+00,
   ]
-  private BESSEL_Q1_R8 = [
+  private BESSEL_Q1_R8 = StaticArray[
     0.00000000000000000000e+00,
     -1.02539062499992714161e-01,
     -1.62717534544589987888e+01,
@@ -11329,7 +11330,7 @@ pub struct Math
     -1.18498066702429587167e+04,
     -4.84385124285750353010e+04,
   ]
-  private BESSEL_Q1_S8 = [
+  private BESSEL_Q1_S8 = StaticArray[
     1.61395369700722909556e+02,
     7.82538599923348465381e+03,
     1.33875336287249578163e+05,
@@ -11337,7 +11338,7 @@ pub struct Math
     6.66601232617776375264e+05,
     -2.94490264303834643215e+05,
   ]
-  private BESSEL_Q1_R5 = [
+  private BESSEL_Q1_R5 = StaticArray[
     -2.08979931141764104297e-11,
     -1.02539050241375426231e-01,
     -8.05644828123936029840e+00,
@@ -11345,7 +11346,7 @@ pub struct Math
     -1.37319376065508163265e+03,
     -2.61244440453215656817e+03,
   ]
-  private BESSEL_Q1_S5 = [
+  private BESSEL_Q1_S5 = StaticArray[
     8.12765501384335777857e+01,
     1.99179873460485964642e+03,
     1.74684851924908907677e+04,
@@ -11353,7 +11354,7 @@ pub struct Math
     2.79480751638918118260e+04,
     -4.71918354795128470869e+03,
   ]
-  private BESSEL_Q1_R3 = [
+  private BESSEL_Q1_R3 = StaticArray[
     -5.07831226461766561369e-09,
     -1.02537829820837089745e-01,
     -4.61011581139473403113e+00,
@@ -11361,7 +11362,7 @@ pub struct Math
     -2.28244540737631695038e+02,
     -2.19210128478909325622e+02,
   ]
-  private BESSEL_Q1_S3 = [
+  private BESSEL_Q1_S3 = StaticArray[
     4.76651550323729509273e+01,
     6.73865112676699709482e+02,
     3.38015286679526343505e+03,
@@ -11369,7 +11370,7 @@ pub struct Math
     1.90311919338810798763e+03,
     -1.35201191444307340817e+02,
   ]
-  private BESSEL_Q1_R2 = [
+  private BESSEL_Q1_R2 = StaticArray[
     -1.78381727510958865572e-07,
     -1.02517042607985553460e-01,
     -2.75220568278187460720e+00,
@@ -11377,7 +11378,7 @@ pub struct Math
     -4.23253133372830490089e+01,
     -2.13719211703704061733e+01,
   ]
-  private BESSEL_Q1_S2 = [
+  private BESSEL_Q1_S2 = StaticArray[
     2.95333629060523854548e+01,
     2.52981549982190529136e+02,
     7.57502834868645436472e+02,
