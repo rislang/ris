@@ -37,13 +37,13 @@ def drain(socket : IyiSocket, want : Int64) : Int64
   got
 end
 
-on_tape = Program.args.includes?("answer")
+on_tape = Program.arguments.includes?("answer")
 headers = {"Content-Type" => "application/json"}
 reply = Server.format_response(Response.new(200, BODY, headers), false, false)
 want = reply.bytesize.to_i64 * N
 listener = IyiSocket.listen(0)
 batch = REQUEST * 1000
-collecting = Program.args.includes?("gc")
+collecting = Program.arguments.includes?("gc")
 GC.disable unless collecting
 before = GC.stats.bytes_since_collection
 got = 0_i64

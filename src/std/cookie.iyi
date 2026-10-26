@@ -22,6 +22,8 @@
 
 module std/cookie
 
+import std/static_array::{StaticArray}
+
 import std/http::{HTTP, Response, CookieStore}
 import std/uri::{URI}
 import std/time::{Time, Span}
@@ -507,9 +509,9 @@ end
 # dates are ignored by Cookie.parse, so this reader needs no error strings.
 @[OnTape]
 struct CookieDate
-  DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday",
+  DAYS = StaticArray["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday",
           "Friday", "Saturday"]
-  MONTHS = ["January", "February", "March", "April", "May", "June",
+  MONTHS = StaticArray["January", "February", "March", "April", "May", "June",
             "July", "August", "September", "October", "November",
             "December"]
 
@@ -625,7 +627,7 @@ struct CookieDate
     true
   end
 
-  private def name(names : Array(String), short : Bool) : Int32?
+  private def name(names, short : Bool) : Int32?
     text = letters
     size = text.bytesize
     return nil unless short ? size == 3 : size >= 3
@@ -663,9 +665,9 @@ struct CookieDate
     nil
   end
 
-  ZONES = ["UT", "UTC", "GMT", "EST", "EDT", "CST", "CDT", "MST",
+  ZONES = StaticArray["UT", "UTC", "GMT", "EST", "EDT", "CST", "CDT", "MST",
            "MDT", "PST", "PDT"]
-  OFFSETS = [0, 0, 0, -18000, -14400, -21600, -18000, -25200,
+  OFFSETS = StaticArray[0, 0, 0, -18000, -14400, -21600, -18000, -25200,
              -21600, -28800, -25200]
 
   def self.write(time : Time, writer : Str::Builder) : Nil

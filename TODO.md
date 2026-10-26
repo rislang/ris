@@ -17,10 +17,9 @@ How to work (fewer tokens, faster to the goal):
 
 ## A. Budget to zero (do in this order: largest win first)
 
-1. orders.ri 85: next hot site; target under 10.
-2. serve.ri 111, web.ri 98, request.ri 71: one request path. Shared
-   cause first (HTTP/IO/time init); JSON only if the census names it.
-3. logline 20, chat 14, rest under 10: per-site fixes.
+1. orders 9, request 9: UTC's Location and List backing arrays.
+2. serve.ri 39, web.ri 27: request path past the shared startup.
+3. logline 16, chat 14, rest under 10: per-site fixes.
 4. static-user-sites column to 0 for every row.
 
 ## B. Language pieces the budget needs (pull in only when A is blocked)

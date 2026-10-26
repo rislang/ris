@@ -13,12 +13,16 @@ module std/base64
 
 # A data character's value, by byte; -1 for everything else, which the
 # byte-at-a-time path sorts into whitespace, padding and refusals.
-DECODE_VALUES = Base64.decode_values
+DECODE_VALUES = Base64.decode_values.copy_to(Program.tape)
 
 # Two characters per twelve bits, the first in the low byte: the encoder
 # writes eight characters for every six bytes it reads, as one word.
-PAIRS_STD = Base64.pairs_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")
-PAIRS_URL = Base64.pairs_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
+PAIRS_STD = Base64.pairs_of(
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+).copy_to(Program.tape)
+PAIRS_URL = Base64.pairs_of(
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+).copy_to(Program.tape)
 
 pub struct Base64
   def self.encode(data : String) : String
@@ -140,7 +144,7 @@ pub struct Base64
   # little-endian on every target iyi builds for, which is what the byte
   # order below and the pair table's order are written for.
   private def self.encode_with(data : Str, alphabet : String,
-                               pairs : Array(Int32),
+                               pairs : Ary(Int32),
                                pad : Bool) : Str
     n = data.bytesize
     whole = n - n % 3
@@ -192,13 +196,13 @@ pub struct Base64
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
   end
 
-  protected def self.pairs_of(alphabet : String) : Array(Int32)
+  protected def self.pairs_of(alphabet : String) : Ary(Int32)
     chars = alphabet.to_unsafe
-    Array.new(4096) { |k| chars[k.unsafe_shr(6)].to_i32 | chars[k & 63].to_i32.unsafe_shl(8) }
+    Ary(Int32).new(4096) { |k| chars[k.unsafe_shr(6)].to_i32 | chars[k & 63].to_i32.unsafe_shl(8) }
   end
 
-  protected def self.decode_values : Array(Int32)
-    Array.new(256) { |b| value_of(b.to_u8) }
+  protected def self.decode_values : Ary(Int32)
+    Ary(Int32).new(256) { |b| value_of(b.to_u8) }
   end
 
   private def self.value_of(b : UInt8) : Int32

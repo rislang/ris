@@ -827,7 +827,7 @@ enum TokenKind
   Error
 end
 
-class Token
+struct Token
   property kind : TokenKind
   # A number's text, as the span of the input it was read from: made into
   # a string only when asked, which a reader of the number's value never
@@ -865,19 +865,19 @@ end
 # Reads tokens from the bytes of a document. A malformed token is not a
 # panic here: `next_token` answers a token of kind `Error` and `error` holds
 # the sentence, so `JSON.parse?` can answer `nil` and `JSON.parse` can panic.
-class Lexer
+struct Lexer
   @input : String
   @pos : Int32
   @line_number : Int32
   @column_number : Int32
   @token : Token
-  @string_buffer : StringBuffer
+  @string_buffer : StringBuffer?
   @error : String?
   # Short strings the lexer has already made, by a hash of their bytes: an
   # object's keys are the same few strings in every object of an array,
   # and each was a new substring. A slot holds the last string that hashed
   # there, so a miss costs the substring it always did.
-  @short : Array(String)
+  @short : Array(String)?
   # Strings are spans of the input, not Strings: the tape reader's mode.
   @spans : Bool
 
@@ -901,37 +901,10 @@ class Lexer
     @line_number = 1
     @column_number = 1
     @token = Token.new
-    @string_buffer = StringBuffer.new(16)
+    @string_buffer = nil
     @error = nil
-    @short = [] of String
+    @short = nil
     @spans = true
-  end
-
-  # The thread's spare span lexer, kept between parses: made anew, its
-  # objects were the only heap a parse on the tape made. A parse does not
-  # switch fibers, so one a thread is enough.
-  @[ThreadLocal]
-  @@spare : Lexer? = nil
-
-  def self.spans : Lexer
-    lexer = @@spare
-    return new(true) unless lexer
-    @@spare = nil
-    lexer.restart
-    lexer
-  end
-
-  def self.give_back(lexer : Lexer) : Nil
-    @@spare = lexer
-  end
-
-  protected def restart : Nil
-    @pos = 0
-    @line_number = 1
-    @column_number = 1
-    @token.kind = TokenKind::EOF
-    @token.escaped = false
-    @error = nil
   end
 
   # The input's bytes from *start* as a String, in either mode.
@@ -950,10 +923,11 @@ class Lexer
     h = 2166136261_u64
     text.each_byte { |b| h = (h ^ b.to_u64) &* 16777619_u64 }
     slot = (h ^ h.unsafe_shr(8_u64)).unsafe_to_i32 & (SHORT_SLOTS - 1)
-    cached = @short[slot]
+    short = @short || raise "span lexer has no string cache"
+    cached = short[slot]
     return cached if text == cached
     made = @input[start, size]
-    @short[slot] = made
+    short[slot] = made
     made
   end
 
@@ -1140,9 +1114,10 @@ class Lexer
       return fail("unterminated string", line, col)
     end
 
-    @string_buffer.clear
+    buffer = @string_buffer || raise "span lexer has no string buffer"
+    buffer.clear
     if @pos > start_pos
-      @string_buffer.append(input[start_pos, @pos - start_pos])
+      buffer.append(input[start_pos, @pos - start_pos])
     end
 
     while @pos < input.bytesize
@@ -1150,7 +1125,7 @@ class Lexer
       if b == 34_u8 # '"'
         advance(input)
         set_token(TokenKind::String, line, col)
-        @token.string_value = @string_buffer.to_s
+        @token.string_value = buffer.to_s
         return
       elsif b == 92_u8 # '\\'
         esc_col = @column_number
@@ -1161,28 +1136,28 @@ class Lexer
         esc = current_byte(input)
         case esc
         when 34_u8 # '"'
-          @string_buffer.append(34_u8)
+          buffer.append(34_u8)
           advance(input)
         when 92_u8 # '\\'
-          @string_buffer.append(92_u8)
+          buffer.append(92_u8)
           advance(input)
         when 47_u8 # '/'
-          @string_buffer.append(47_u8)
+          buffer.append(47_u8)
           advance(input)
         when 98_u8 # 'b'
-          @string_buffer.append(8_u8)
+          buffer.append(8_u8)
           advance(input)
         when 102_u8 # 'f'
-          @string_buffer.append(12_u8)
+          buffer.append(12_u8)
           advance(input)
         when 110_u8 # 'n'
-          @string_buffer.append(10_u8)
+          buffer.append(10_u8)
           advance(input)
         when 114_u8 # 'r'
-          @string_buffer.append(13_u8)
+          buffer.append(13_u8)
           advance(input)
         when 116_u8 # 't'
-          @string_buffer.append(9_u8)
+          buffer.append(9_u8)
           advance(input)
         when 117_u8 # 'u'
           u_line = @line_number
@@ -1208,11 +1183,11 @@ class Lexer
             if hex2 < 0xDC00 || hex2 > 0xDFFF
               return fail("invalid surrogate pair: expected low surrogate (0xDC00..0xDFFF), got \\u#{hex2.to_s(16)}", u2_line, u2_col)
             end
-            @string_buffer.append_codepoint(0x10000 + ((hex1 - 0xD800) << 10) + (hex2 - 0xDC00))
+            buffer.append_codepoint(0x10000 + ((hex1 - 0xD800) << 10) + (hex2 - 0xDC00))
           elsif hex1 >= 0xDC00 && hex1 <= 0xDFFF
             return fail("lone low surrogate \\u#{hex1.to_s(16)} without preceding high surrogate", u_line, u_col)
           else
-            @string_buffer.append_codepoint(hex1)
+            buffer.append_codepoint(hex1)
           end
         else
           if esc >= 32_u8 && esc < 127_u8
@@ -1225,9 +1200,9 @@ class Lexer
       elsif b >= 128_u8
         from = @pos
         return unless take_utf8_sequence(input)
-        @string_buffer.append(input[from, @pos - from])
+        buffer.append(input[from, @pos - from])
       else
-        @string_buffer.append(b)
+        buffer.append(b)
         advance(input)
       end
     end
@@ -1543,8 +1518,8 @@ end
 MAX_NESTING = 256
 
 # The powers of ten a double holds exactly, for the lexer's fast path.
-POW10 = [1.0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15,
-         1e16, 1e17, 1e18, 1e19, 1e20, 1e21, 1e22]
+POW10 = {1.0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15,
+         1e16, 1e17, 1e18, 1e19, 1e20, 1e21, 1e22}
 
 # Reads a whole document into an `Any`. Like the lexer it records the first
 # failure instead of panicking; `JSON.parse` and `JSON.parse?` decide what to
@@ -3110,7 +3085,7 @@ pub struct DocumentParser
   @error : String?
 
   def initialize(@input : Str)
-    @lexer = Lexer.spans
+    @lexer = Lexer.new(true)
     @tree = Tre(Node).new(@input.bytesize // 16 + 8)
     @nesting = 0
     @error = nil
@@ -3123,11 +3098,6 @@ pub struct DocumentParser
 
   def document : Document
     Document.new(@tree, @input)
-  end
-
-  # The lexer back to the thread, for the next parse; this parser is done.
-  def finish : Nil
-    Lexer.give_back(@lexer)
   end
 
   private def token : Token
@@ -3361,7 +3331,6 @@ pub struct JSON
     parser.parse
     failure = parser.error
     raise failure unless failure.nil?
-    parser.finish
     parser.document
   end
 
@@ -3369,7 +3338,6 @@ pub struct JSON
   def self.parse?(bytes : Str) : Document?
     parser = DocumentParser.new(bytes)
     parser.parse
-    parser.finish
     return nil unless parser.error.nil?
     parser.document
   end

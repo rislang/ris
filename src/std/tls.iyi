@@ -384,6 +384,8 @@
 
 module std/tls
 
+import std/static_array::{StaticArray}
+
 import std/int
 
 import std/socket::{IyiSocket, SocketError}
@@ -907,7 +909,7 @@ struct TlsSuites
   ECDHE_ECDSA_CHACHA20    = 0xCCA9
   ECDHE_RSA_CHACHA20      = 0xCCA8
   # Offered in this order.
-  TLS12 = [ECDHE_ECDSA_AES_128_GCM, ECDHE_RSA_AES_128_GCM, ECDHE_ECDSA_AES_256_GCM, ECDHE_RSA_AES_256_GCM,
+  TLS12 = StaticArray[ECDHE_ECDSA_AES_128_GCM, ECDHE_RSA_AES_128_GCM, ECDHE_ECDSA_AES_256_GCM, ECDHE_RSA_AES_256_GCM,
            ECDHE_ECDSA_CHACHA20, ECDHE_RSA_CHACHA20]
 
   def self.name(suite : Int32) : String
@@ -1071,8 +1073,8 @@ pub abstract class TlsConnection
   # first: TLS 1.2's groups, and TLS 1.3's after X25519MLKEM768, which a
   # TLS 1.3 server takes whenever it is listed. The draft defines no
   # ServerKeyExchange for the hybrid, so TLS 1.2 has the curves alone.
-  GROUPS12 = [GROUP_X25519, GROUP_SECP256R1, GROUP_SECP384R1]
-  GROUPS   = [GROUP_X25519MLKEM768] + GROUPS12
+  GROUPS12 = StaticArray[GROUP_X25519, GROUP_SECP256R1, GROUP_SECP384R1]
+  GROUPS   = StaticArray[GROUP_X25519MLKEM768, GROUP_X25519, GROUP_SECP256R1, GROUP_SECP384R1]
   # X25519MLKEM768's shares (the draft's section 4): the client's is its
   # ML-KEM-768 encapsulation key, then its X25519 key; the server's is the
   # ML-KEM ciphertext, then its X25519 key.
@@ -2112,7 +2114,7 @@ pub class TlsClient < TlsConnection
   # What became of the early data given to `connect` or `over`.
   getter early_data : TlsEarlyData = TlsEarlyData::Unused
 
-  SIGNATURE_SCHEMES = [0x0403, 0x0503, 0x0603, 0x0807, 0x0804, 0x0805, 0x0806, 0x0401, 0x0501, 0x0601]
+  SIGNATURE_SCHEMES = StaticArray[0x0403, 0x0503, 0x0603, 0x0807, 0x0804, 0x0805, 0x0806, 0x0401, 0x0501, 0x0601]
 
   def initialize(socket : IyiSocket, @host : String, @config : TlsConfig, @session : TlsSession? = nil)
     super(socket, "the server", @host)
@@ -2732,7 +2734,7 @@ pub class TlsClient < TlsConnection
   # encrypted_client_hello of that body before them: the inner one's
   # marker, or GREASE.
   private def client_hello(random : Array(UInt8), session : Array(UInt8), shares : Array({Int32, Array(UInt8)}), cookie : Array(UInt8)?, prefix : Array(UInt8),
-                           ech : Array(UInt8)? = nil) : Array(UInt8)
+                           ech = nil) : Array(UInt8)
     tls12 = @config.min_version == TlsVersion::TLS12
     body = [3_u8, 3_u8] + random + [32_u8] + session
     # TLS 1.3's suites, then TLS 1.2's when it is asked for.
@@ -3551,7 +3553,7 @@ pub class TlsIdentity
   # rsa_pkcs1_sha256, -384 and -512: never in `schemes`, and signed only in
   # a TLS 1.2 ServerKeyExchange, which RFC 5246 section 7.4.1.4.1 lets them
   # sign, for a client that takes no RSA-PSS (`scheme12_for`).
-  RSA_PKCS1 = [0x0401, 0x0501, 0x0601]
+  RSA_PKCS1 = StaticArray[0x0401, 0x0501, 0x0601]
 
   def initialize(@chain : Array(Array(UInt8)), @leaf : Certificate, @schemes : Array(Int32), @seed : Array(UInt8)?, @p256 : P256PrivateKey?, @p384 : P384PrivateKey?, @rsa : RsaPrivateKey?)
   end
@@ -4404,7 +4406,7 @@ pub class TlsServer < TlsConnection
   # the client's signature_algorithms the identity's key makes.
   @scheme : Int32 = 0
 
-  SUITES = [TlsSuites::AES_128_GCM, TlsSuites::AES_256_GCM, TlsSuites::CHACHA20_POLY1305]
+  SUITES = StaticArray[TlsSuites::AES_128_GCM, TlsSuites::AES_256_GCM, TlsSuites::CHACHA20_POLY1305]
   # The early data passed over when a client sends it unasked for: the
   # most a server that takes none need allow (section 4.2.10).
   EARLY_ALLOWANCE = 16 * TlsRecords::MAX_CIPHERTEXT
@@ -5266,7 +5268,7 @@ pub class TlsServer < TlsConnection
   # HelloRetryRequest asking for that group - and, with *ech*, an
   # encrypted_client_hello of it, last (RFC 9849 section 7.2.1).
   private def server_hello(random : Array(UInt8), session : Array(UInt8), group : Int32, share : Array(UInt8)?, psk_identity : Int32 = -1,
-                           ech : Array(UInt8)? = nil) : Array(UInt8)
+                           ech = nil) : Array(UInt8)
     body = [3_u8, 3_u8] + random + [session.size.to_u8] + session + TlsBytes.u16(@suite) + [0_u8]
     extensions = TlsBytes.extension(43, [3_u8, 4_u8])
     if share
@@ -5599,7 +5601,7 @@ pub class TlsServer < TlsConnection
       return "the client offers no #{identity.rsa? ? "ECDHE_RSA" : "ECDHE_ECDSA"} suite with AES-GCM or ChaCha20-Poly1305, which this server's key for it needs in TLS 1.2"
     end
     unless identity.scheme12_for(schemes)
-      return "the client does not take #{TlsIdentity.scheme_names(identity.rsa? ? identity.schemes + TlsIdentity::RSA_PKCS1 : identity.schemes)} signatures, which this server's key for it makes"
+      return "the client does not take #{TlsIdentity.scheme_names(identity.rsa? ? identity.schemes + TlsIdentity::RSA_PKCS1.to_a : identity.schemes)} signatures, which this server's key for it makes"
     end
     key = identity.leaf.public_key
     if (groups = offer.groups) && key.is_a?(EcdsaPublicKey)
@@ -5899,14 +5901,14 @@ struct TlsEch
   EXTENSION        = 0xfe0d
   OUTER_EXTENSIONS = 0xfd00
   # The inner encrypted_client_hello: type inner, and nothing after it.
-  INNER = [1_u8]
+  INNER = StaticArray[1_u8]
   # What a ClientHelloInner leaves to its ClientHelloOuter (section 5.1):
   # supported_groups, signature_algorithms, status_request,
   # supported_versions and key_share - the same in both, together in this
   # client's ClientHello; key_share's data is 1,258 bytes with
   # X25519MLKEM768's share in it (1,220 for that entry, 36 for X25519's,
   # 2 for the list's length), which the inner would otherwise carry again.
-  COMPRESSED = [10, 13, 5, 43, 51]
+  COMPRESSED = StaticArray[10, 13, 5, 43, 51]
 
   # The HPKE info (section 6.1): "tls ech", a zero, the ECHConfig.
   def self.info(config : TlsEchConfig) : Array(UInt8)
@@ -6139,7 +6141,8 @@ struct TlsEch
     parts = parts(message)
     return TlsError.new("a ClientHelloInner that does not read", TlsAlert::DECODE_ERROR) unless parts
     marker = parts.index(EXTENSION)
-    return TlsError.new("a ClientHelloInner without the inner encrypted_client_hello", TlsAlert::ILLEGAL_PARAMETER) unless marker && parts.data(marker) == INNER
+    inner = marker ? parts.data(marker) : nil
+    return TlsError.new("a ClientHelloInner without the inner encrypted_client_hello", TlsAlert::ILLEGAL_PARAMETER) unless inner && inner.size == INNER.size && inner[0] == INNER[0]
     versions = parts.index(43)
     return TlsError.new("a ClientHelloInner that does not offer TLS 1.3 alone", TlsAlert::ILLEGAL_PARAMETER) unless versions && tls13_alone?(parts.data(versions))
     message
@@ -6325,8 +6328,12 @@ struct TlsBytes
     (bytes[at].to_i32 << 16) | (bytes[at + 1].to_i32 << 8) | bytes[at + 2].to_i32
   end
 
-  def self.extension(type : Int32, data : Array(UInt8)) : Array(UInt8)
-    u16(type) + u16(data.size) + data
+  def self.extension(type : Int32, data) : Array(UInt8)
+    result = Array(UInt8).new(4 + data.size)
+    result << ((type >> 8) & 255).to_u8 << (type & 255).to_u8
+    result << ((data.size >> 8) & 255).to_u8 << (data.size & 255).to_u8
+    data.each { |byte| result << byte }
+    result
   end
 
   # A handshake message: its type, a 24-bit length, the body.

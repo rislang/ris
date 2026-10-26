@@ -59,7 +59,7 @@ def not_found(res : Outgoing) : Nil
   res.body << "Not Found\n"
 end
 
-port = Program.args.empty? ? 3000 : Program.args[0].to_i
+port = Program.arguments.empty? ? 3000 : Program.arguments[0].to_i
 listener = IyiSocket.listen(port)
 puts "listening on http://localhost:#{listener.local_port}/users/1/status"
 

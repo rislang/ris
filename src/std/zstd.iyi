@@ -56,6 +56,8 @@
 
 module std/zstd
 
+import std/static_array::{StaticArray}
+
 import std/int
 import std/digest::{XXH64}
 
@@ -88,10 +90,10 @@ class Codes
   getter ml_base : Pointer(Int32)
   getter ml_bits : Pointer(Int32)
 
-  LL_NORM = [4, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 2, 1, 1, 1, 1, 1, -1, -1, -1, -1]
-  ML_NORM = [1, 4, 3, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+  LL_NORM = StaticArray[4, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 2, 1, 1, 1, 1, 1, -1, -1, -1, -1]
+  ML_NORM = StaticArray[1, 4, 3, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
              1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -1, -1, -1, -1, -1, -1, -1]
-  OF_NORM = [1, 1, 1, 1, 1, 1, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -1, -1, -1, -1, -1]
+  OF_NORM = StaticArray[1, 1, 1, 1, 1, 1, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -1, -1, -1, -1, -1]
 
   def initialize
     @ll_base = Codes.fill([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 28, 32, 40,
@@ -106,7 +108,7 @@ class Codes
                            10, 11, 12, 13, 14, 15, 16])
   end
 
-  def self.fill(values : Array(Int32)) : Pointer(Int32)
+  def self.fill(values) : Pointer(Int32)
     p = Pointer(Int32).malloc(values.size.to_u64)
     i = 0
     while i < values.size
@@ -341,7 +343,7 @@ class Decoder
     @error = ZstdError.new("")
   end
 
-  def self.predefined(norm : Array(Int32), log : Int32) : FseTable
+  def self.predefined(norm, log : Int32) : FseTable
     t = FseTable.new
     t.build(Codes.fill(norm), norm.size, log)
     t

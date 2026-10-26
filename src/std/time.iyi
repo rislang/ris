@@ -2357,8 +2357,8 @@ pub struct Time
   # are each a `TimeParseError`, never a panic. A day name is checked to be
   # one and not checked against the date, as Crystal, Go and Python read it.
   struct Format
-    MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
-    DAY_NAMES   = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+    MONTH_NAMES = {"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"}
+    DAY_NAMES   = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"}
 
     getter pattern : String
     getter offset : Int32?
@@ -2877,7 +2877,7 @@ pub struct Time
       # spells, in any case: for *short*, the first three letters of a name
       # and no more; otherwise the start of a name, three letters or longer,
       # as Crystal reads `%B` and `%A`.
-      def name(names : Array(String), short : Bool, what : String) : Int32?
+      def name(names, short : Bool, what : String) : Int32?
         start = @pos
         while @pos < @len && Parser.letter?(@bytes[@pos])
           @pos += 1

@@ -372,6 +372,17 @@ struct ::StaticArray(T, N)
     nil
   end
 
+  # The first entry matching the caller's predicate, without a copy.
+  def find(& : T -> Bool) : T?
+    i = 0
+    while i < N
+      value = to_unsafe[i]
+      return value if yield value
+      i += 1
+    end
+    nil
+  end
+
   # Returns true if *object* is in the array.
   def includes?(object) : Bool
     !index(object).nil?

@@ -3,14 +3,14 @@
 # tape: argv=tape; answer-request: serve argv=answer, one request.
 # request: web argv=0, one HTTP GET.
 samples/ris/chat.ri 11 14 default
-samples/ris/escape.ri 0 5 tape
+samples/ris/escape.ri 0 3 tape
 samples/ris/hello.ri 1 2 default
-samples/ris/logline.ri 2 20 default
-samples/ris/orders.ri 2 85 default
-samples/ris/query.ri 0 5 tape
+samples/ris/logline.ri 2 16 default
+samples/ris/orders.ri 2 9 default
+samples/ris/query.ri 0 3 tape
 samples/ris/report.ri 2 4 default
-samples/ris/request.ri 0 71 default
-samples/ris/respond.ri 0 6 default
-samples/ris/serve.ri 6 111 answer-request
+samples/ris/request.ri 0 9 default
+samples/ris/respond.ri 0 0 default
+samples/ris/serve.ri 6 39 answer-request
 samples/ris/shop/order.ri 0 0 default
-samples/ris/web.ri 0 98 request
+samples/ris/web.ri 0 27 request

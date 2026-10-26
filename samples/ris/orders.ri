@@ -131,7 +131,7 @@ def answer_heap(bytes : Str) : UInt64
     ((top.bytesize + body.bytesize).to_u64 << 40)
 end
 
-heap = Program.args.size > 0 && Program.args[0] == "heap"
+heap = Program.arguments.size > 0 && Program.arguments[0] == "heap"
 texts = requests
 sum = 0_u64
 bytes = 0_i64

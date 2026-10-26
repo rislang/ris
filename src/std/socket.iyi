@@ -870,7 +870,8 @@ pub class IyiSocket
   def accept : IyiSocket | Cancelled | SocketError
     raise "socket is closed" if @fd < 0
     # A `sockaddr_storage`'s room: the peer's address in whichever family.
-    addr = Pointer(UInt8).malloc(128_u64)
+    storage = uninitialized UInt8[128]
+    addr = pointerof(storage).as(Pointer(UInt8))
     len = 128_u32
     while true
       client_fd = IyiSocket.__sys_accept(@fd, addr, pointerof(len), @family)
@@ -1266,7 +1267,8 @@ pub class IyiSocket
   def local_port : Int32
     raise "socket is closed" if @fd < 0
     raise "a unix socket has no port" if @family == AF_UNIX
-    addr = Pointer(UInt8).malloc(128_u64)
+    storage = uninitialized UInt8[128]
+    addr = pointerof(storage).as(Pointer(UInt8))
     len = 128_u32
     res = IyiSocket.__sys_getsockname(@fd, addr, pointerof(len))
     raise "cannot get local port" if res < 0

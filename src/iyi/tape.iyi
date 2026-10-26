@@ -40,6 +40,25 @@ class Program
     end
   end
 
+  # Arguments borrow the process's bytes for the program's lifetime.
+  def self.arguments : Ary(Str)
+    {% if flag?(:win32) %}
+      # Keep the existing UTF-16 command-line decoder during migration.
+      legacy = args
+      Ary(Str).new(legacy.size) { |i| Str.new(legacy[i]) }
+    {% else %}
+      count = ARGC_UNSAFE > 0 ? ARGC_UNSAFE - 1 : 0
+      Ary(Str).new(count) do |i|
+        bytes = ARGV_UNSAFE[i + 1]
+        size = 0
+        while bytes[size] != 0_u8
+          size += 1
+        end
+        Str.new(bytes, size)
+      end
+    {% end %}
+  end
+
   def self.tape : TapeOwner
     TapeOwner.new
   end
@@ -2115,6 +2134,11 @@ class IyiIO
   def puts(text : Str) : Nil
     text.to_s(self)
     write("\n") unless text.bytesize > 0 && text[-1] == 10_u8
+  end
+
+  # Numeric text and its newline share one tape builder and one write.
+  def puts(value : Int) : Nil
+    print(Str.build(66) { |writer| writer << value << '\n' })
   end
 
   # What a writer holds so far, written straight from the tape.

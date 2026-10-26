@@ -10223,6 +10223,10 @@ class Program
         end
       end
       result
+    {% elsif (!flag?(:gc_none) || flag?(:linux)) && !flag?(:gc_boehm) &&
+             ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) ||
+              flag?(:darwin) || flag?(:wasm32)) %}
+      arguments.to_heap
     {% else %}
       result = [] of String
       index = 1
