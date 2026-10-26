@@ -1,0 +1,7 @@
+class Node
+  getter child : NamedTuple(node: Node?)
+  def initialize
+    @child = {node: nil.as(Node?)}
+  end
+end
+Node.new.copy_to(Program.tape)

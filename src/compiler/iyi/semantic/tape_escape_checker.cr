@@ -51,8 +51,8 @@ class Iyi::TapeEscapeChecker
     (`==`, `starts_with?`, `[start, count]`); print it (`puts text`, \
     `io << text` to a file or socket); or append it to a \
     Str::Builder. Only where the text must outlive the tape - a \
-    cache, a broadcast, a record - copy it once, by name: `text.to_heap`, \
-    or `to_heap` on an Ary of it.
+    cache, a broadcast, a record - copy it once, by name: `text.copy_to(owner)`, \
+    or write into the caller's Str::Builder.
     TEXT
 
   def refuse?(node : Call) : String?

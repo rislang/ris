@@ -1,0 +1,7 @@
+class Node
+  getter children : Ary(Node)
+  def initialize
+    @children = Ary(Node).new(1)
+  end
+end
+Node.new.copy_to(Program.tape)

@@ -1,0 +1,8 @@
+class Base
+end
+class Child < Base
+  property parent : Base?
+  def initialize(@parent : Base? = nil)
+  end
+end
+Base.new.copy_to(Program.tape)

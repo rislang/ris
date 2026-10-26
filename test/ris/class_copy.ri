@@ -1,0 +1,27 @@
+class Leaf
+  property n : Int32
+  def initialize(@n : Int32)
+  end
+end
+class Pair
+  getter a : Leaf
+  getter b : Leaf
+  def initialize(@a : Leaf, @b : Leaf)
+  end
+end
+class Child < Pair
+  getter extra : Leaf
+  def initialize(a : Leaf, b : Leaf, @extra : Leaf)
+    super(a, b)
+  end
+end
+leaf = Leaf.new(7)
+x = Child.new(leaf, leaf, leaf)
+y = x.copy_to(Program.tape)
+leaf.n = 8
+y.a.n = 9
+raise "sharing" unless y.b.n == 7 && y.extra.n == 7 && x.a.n == 8
+values = Ary(Leaf){leaf, leaf}.copy_to(Program.tape)
+values[0].n = 10
+raise "array sharing" unless values[1].n == 8 && leaf.n == 8
+puts "PASS: class copies"

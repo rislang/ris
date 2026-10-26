@@ -9,15 +9,17 @@ check.sh. Delete finished work in the same commit; keep check.sh green.
    values in their own region, or refuse views across the first growth.
    Non-Linux targets still move. Refuse raw owner operations.
    Gate: no transfer of a viewed value.
-5. [M] Pending results outside callee scratch and rollback. copy_to
-   copies class instances deep (Object returns self, tape.iyi:1976),
-   refuses pointers, self-relative links and self-reaching class types;
-   stays alias-free. Consider copy_graph_to(owner) only if real code
-   needs it: one identity map for all class and container identities.
-   Replace to_heap advice in tape_escape_checker,
-   tape_lifetime_checker:119, tape_pointer_checker:317 and bindings.cr:156
-   with copy_to(owner) or the caller's builder.
-   Gate: results survive rollback; refused copies; bounded scratch.
+5. [M] Pending results outside callee scratch and rollback. Retained
+   tape results still disable reset in TapeScopeChecker. Preserve aliases
+   while placing fresh result storage outside the callee's scratch.
+   Gate: a big temporary and small result in a 10,000-call loop inside
+   one tape, correct results and bounded scratch under RIS_TAPE_STATS.
+   copy_to now copies class fields deeply and refuses raw pointers,
+   self-relative links and self-reaching shapes, including collections,
+   unions and subclasses. Remaining: allocate class copies on the owner
+   (with step 9), discard partial destination storage on failure, and
+   guarantee bounded native stack use for arbitrarily deep copies.
+   Gate: destination ownership, failed-copy rollback and deep chains.
 5b. [M] std text and parsers onto the tape with existing tape types.
    Gate: each migrated module has zero heap on success and error paths.
 6. [L] Pool/SlicePool: typed reuse, checked handles, size, membership,

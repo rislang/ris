@@ -146,7 +146,7 @@ class Iyi::TapeFfiFlow
       call.raise "the pointer `#{call.name}` yields reaches no `lib` fun or system call: the mark is for the FFI and OS boundary only.\n\nWrite tape text with a Str::Builder's `<<`, `push` and `append`."
     end
     if pointers.empty? && yielders.empty?
-      a_def.raise "@[TapeUnsafe] on a def that hands no tape pointer to the OS: the mark is for the FFI and OS boundary only.\n\nRead tape text with `[]`, `[start, count]` or `each_byte`, and copy it off the tape by name with `to_heap`."
+      a_def.raise "@[TapeUnsafe] on a def that hands no tape pointer to the OS: the mark is for the FFI and OS boundary only.\n\nRead tape text with `[]`, `[start, count]` or `each_byte`, and retain it with `copy_to(owner)` or write into the caller's Str::Builder."
     end
     pointers.each do |pointer|
       next if reaches?(a_def.body, pointer, nil)
@@ -298,7 +298,7 @@ module Iyi::TapeRules
   def self.unsafe?(program : Program, a_def : Def) : Bool
     return false unless ann = a_def.annotation(program.tape_unsafe_annotation)
     unless std?(a_def.location) || runtime?(program, a_def.location)
-      ann.raise "@[TapeUnsafe] outside a `std/` module: it lifts the tape's rules, which keep a program's tape values in their scope.\n\nRead tape text with `[]`, `[start, count]` or `each_byte`, and copy it off the tape by name with `to_heap`."
+      ann.raise "@[TapeUnsafe] outside a `std/` module: it lifts the tape's rules, which keep a program's tape values in their scope.\n\nRead tape text with `[]`, `[start, count]` or `each_byte`, and retain it with `copy_to(owner)` or write into the caller's Str::Builder."
     end
     true
   end

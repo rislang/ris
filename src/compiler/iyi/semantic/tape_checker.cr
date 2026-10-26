@@ -109,10 +109,15 @@ class Iyi::TapeChecker
         reference to; declare #{type} as a struct.
         MSG
     end
-    if tape
+    if tape || type.is_a?(ClassType)
       type.lookup_defs("copy_to").each do |a_def|
         next if TapeRules.runtime?(@program, a_def.location)
-        a_def.raise "copy_to for tape structs is generated deeply; " \
+        # std's own copy_to (Slice's into a target) is another method.
+        next if TapeRules.std?(a_def.location)
+        # Only the owner copy is generated; other arities are unrelated.
+        next unless a_def.args.size == 1
+        kind = tape ? "tape structs" : "class instances and structs"
+        a_def.raise "copy_to for #{kind} is generated deeply; " \
                     "remove this override and use .copy_to(Program.tape)"
       end
     end

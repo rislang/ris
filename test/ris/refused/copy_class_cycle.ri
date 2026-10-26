@@ -1,0 +1,6 @@
+class Node
+  property next : Node?
+  def initialize(@next : Node? = nil)
+  end
+end
+Node.new.copy_to(Program.tape)

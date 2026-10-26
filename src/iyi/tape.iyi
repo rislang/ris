@@ -107,6 +107,38 @@ module Tape
     value.copy_to(owner)
   end
 
+  # Validate the public shape, not the pointers backing tape containers.
+  # The path is a type tuple, so recursive class shapes stop at compile time.
+  def self.check_copy(type : T.class, path : P.class) : Nil forall T, P
+    {% if T < ::Pointer || T.name.starts_with?("Ary::Link(") %}
+      {% raise "copy_to refuses pointers and self-relative links;\nbuild on the destination with Ary nodes and indices" %}
+    {% elsif T.union? %}
+      {% for member in T.union_types %}
+        check_copy({{member}}, P)
+      {% end %}
+    {% elsif T < ::Enum || T < ::Number || T == ::Bool || T == ::Char || T == ::Symbol || T == ::Nil || T == ::Str || T == ::Str::Builder %}
+    {% elsif P.type_vars.includes?(T) %}
+      {% raise "copy_to refuses self-reaching class types;\nbuild on the destination with Ary nodes and indices" %}
+    {% elsif T.name.starts_with?("Ary(") || T.name.starts_with?("Tre(") || T < ::Tuple %}
+      {% for member in T.type_vars %}
+        check_copy({{member}}, Tuple(*P, T))
+      {% end %}
+    {% elsif T < ::NamedTuple %}
+      {% for key in T.keys %}
+        check_copy({{T[key]}}, Tuple(*P, T))
+      {% end %}
+    {% else %}
+      {% for field in T.instance_vars %}
+        check_copy({{field.type}}, Tuple(*P, T))
+      {% end %}
+      {% if T.class? %}
+        {% for child in T.all_subclasses %}
+          check_copy({{child}}, Tuple(*P, T))
+        {% end %}
+      {% end %}
+    {% end %}
+  end
+
   # A struct is flat when each field is a number, a `Link`, a `Span` or
   # another flat struct: it has no pointer, so its bytes are its value.
   annotation Flat
@@ -1966,11 +1998,12 @@ end
 # without calling initialize (which may have unrelated side effects).
 struct Struct
   def copy_to(owner) : self
-    {% if @type.annotation(OnTape) %}
+    Tape.check_copy(typeof(self), Tuple())
+    {% if @type.instance_vars.size > 0 %}
       made = self
       {% for field in @type.instance_vars %}
         {% if field.type < ::Pointer %}
-          {% raise "copy_to needs owned Str/Ary fields, not raw pointers" %}
+          {% raise "copy_to refuses raw pointers;\nbuild on the destination with Ary nodes and indices" %}
         {% end %}
         pointerof(made.@{{field.name.id}}).value =
           Tape.copy_value(@{{field.name.id}}, owner)
@@ -1994,7 +2027,7 @@ end
 
 struct Pointer(T)
   def copy_to(owner)
-    {% raise "copy_to needs owned Str/Ary data, not raw pointers" %}
+    {% raise "copy_to refuses raw pointers;\nbuild on the destination with Ary nodes and indices" %}
   end
 end
 
@@ -2010,7 +2043,21 @@ end
 
 class Object
   def copy_to(owner)
-    self
+    Tape.check_copy(typeof(self), Tuple())
+    {% if @type < ::Enum || @type < ::Number || @type == ::Bool || @type == ::Char || @type == ::Symbol || @type == ::Nil %}
+      self
+    {% elsif @type.abstract? %}
+      raise "cannot copy an abstract instance"
+    {% else %}
+      owner.run do
+        made = {{@type}}.allocate
+        {% for field in @type.instance_vars %}
+          pointerof(made.@{{field.name.id}}).value =
+            Tape.copy_value(@{{field.name.id}}, owner)
+        {% end %}
+        made
+      end
+    {% end %}
   end
 
   def __loop_fetch(index)

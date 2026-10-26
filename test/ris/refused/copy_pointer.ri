@@ -1,0 +1,5 @@
+@[PointerUnsafe("test a raw pointer copy refusal")]
+def copy_pointer
+  Pointer(Int32).new(0_u64).copy_to(Program.tape)
+end
+copy_pointer

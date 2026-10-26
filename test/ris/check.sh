@@ -219,6 +219,22 @@ else
 fi
 rm -rf "$owner_ir"
 
+# Deep copies preserve concrete and inherited fields, splitting sharing.
+out=$("$RIS" run test/ris/class_copy.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = 'PASS: class copies' ]; then
+  echo "runs     class_copy"
+else
+  echo "FAILED   class_copy: $out"
+  status=1
+fi
+for name in copy_class_cycle copy_collection_cycle copy_subclass_cycle \
+            copy_named_cycle; do
+  expect "$name" 'copy_to refuses self-reaching class types'
+done
+expect copy_class_override 'remove this override'
+expect copy_pointer 'build on the destination with Ary nodes and indices'
+expect copy_link 'copy_to refuses pointers and self-relative links'
+
 expect heap_exemption \
   'runtime heap exemption is private'
 expect string_parameter \
@@ -241,8 +257,8 @@ expect text_local_field \
   'name holds tape text; write the literal in place or keep it with .to_heap'
 expect text_mixed_array 'to_heap'
 expect text_mixed_hash 'to_heap'
-expect text_literal_field '.to_heap'
-expect text_interpolation_field '.to_heap'
+expect text_literal_field '.copy_to(owner)'
+expect text_interpolation_field '.copy_to(owner)'
 expect text_interpolation_field \
   'make it an @[OnTape] struct with a Str field'
 out=$("$RIS" run test/ris/text_default.ri 2>&1)
@@ -284,8 +300,8 @@ expect return_escape "cannot return a tape value out of its tape block"
 expect break_escape "cannot break a tape value out of its tape block"
 expect yield_break_escape "cannot break a tape value out of its tape block"
 
-expect return_escape 'Copy the text with `.to_heap`'
-expect outer_var '`to_heap` copies a Str or Ary'
+expect return_escape 'Copy the text with `.copy_to(owner)`'
+expect outer_var '`copy_to(owner)` copies a Str, Ary'
 expect owned_cache "to be String, not Str"
 
 expect local_outer "is a variable of the code around this local_tape block"

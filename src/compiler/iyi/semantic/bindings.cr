@@ -153,8 +153,8 @@ module Iyi
       if freeze_type.to_s == "String" &&
          TapeChecker.tape_in(
            invalid_type.program, invalid_type).try(&.to_s) == "Str"
-        from.raise "text is tape text (Str); keep it with `.to_heap` " \
-                   "for a String field, variable or result. " \
+        from.raise "text is tape text (Str); retain it with `.copy_to(owner)` " \
+                   "in a Str field, variable or result, or write into the caller's builder. " \
                    "If the object lives only as long as the request, " \
                    "make it an @[OnTape] struct with a Str field"
       end

@@ -1,0 +1,6 @@
+class CustomCopy
+  def copy_to(owner)
+    self
+  end
+end
+CustomCopy.new.copy_to(Program.tape)
