@@ -1494,12 +1494,12 @@ POW10 = {1.0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e1
 @[OnTape]
 pub class Parser
   @lexer : Lexer
-  @nesting : Int32
+  @containers : Ary(Tuple(Any, String))
   @error : String?
 
   def initialize(input : String)
     @lexer = Lexer.new(input)
-    @nesting = 0
+    @containers = Ary(Tuple(Any, String)).new(MAX_NESTING)
     @error = nil
     @lexer.next_token
   end
@@ -1534,6 +1534,7 @@ pub class Parser
     if token.kind == TokenKind::EOF
       return fail("empty JSON input", 1, 1)
     end
+    @containers.clear
     result = parse_value
     return result unless @error.nil?
     unless token.kind == TokenKind::EOF
@@ -1561,17 +1562,89 @@ pub class Parser
     end
   end
 
-  # The containers recurse; a scalar is read out of line, so a level of a
-  # deep document costs only the container's frame (as `Any#==`).
+  # Open containers and their pending object keys live on the caller's
+  # tape, so document depth does not consume the task's call stack.
   private def parse_value : Any
-    case token.kind
-    when TokenKind::BeginArray
-      parse_array
-    when TokenKind::BeginObject
-      parse_object
-    else
-      parse_scalar
+    loop do
+      value = Any.new(nil)
+      case token.kind
+      when TokenKind::BeginArray, TokenKind::BeginObject
+        depth = @containers.size + 1
+        if depth > MAX_NESTING
+          return fail("nesting depth of #{depth} exceeds maximum depth #{MAX_NESTING}")
+        end
+        array = token.kind == TokenKind::BeginArray
+        next_token
+        value = array ? Any.new([] of Any) : Any.new({} of String => Any)
+        closing = array ? TokenKind::EndArray : TokenKind::EndObject
+        if token.kind == closing
+          next_token
+        else
+          @containers << {value, ""}
+          read_key unless array
+          return Any.new(nil) unless @error.nil?
+          next
+        end
+      else
+        value = parse_scalar
+        return Any.new(nil) unless @error.nil?
+      end
+
+      # A completed value is attached to its parent. Closing that parent
+      # completes another value, without calling back into parse_value.
+      loop do
+        return value if @containers.empty?
+        container, key = @containers[@containers.size - 1]
+        array = container.as_a?
+        if array
+          array << value
+        else
+          container.as_h[key] = value
+        end
+        closing = array ? TokenKind::EndArray : TokenKind::EndObject
+        case token.kind
+        when TokenKind::Comma
+          comma_line = token.line_number
+          comma_col = token.column_number
+          next_token
+          if token.kind == closing
+            reason = array ? "trailing comma in array" : "trailing comma in object"
+            return fail(reason, comma_line, comma_col)
+          end
+          read_key unless array
+          return Any.new(nil) unless @error.nil?
+          break
+        else
+          unless token.kind == closing
+            reason = array ? "expected ',' or ']' in array" : "expected ',' or '}' in object"
+            return fail(reason)
+          end
+          next_token
+          @containers.pop
+          value = container
+        end
+      end
     end
+  end
+
+  private def read_key : Nil
+    unless token.kind == TokenKind::String
+      fail("expected string key in object")
+      return
+    end
+    container = @containers[@containers.size - 1][0]
+    key = token.string_value
+    if container.as_h.has_key?(key)
+      fail("duplicate key '#{key}'")
+      return
+    end
+    @containers[@containers.size - 1] = {container, key}
+    next_token # the key
+    unless token.kind == TokenKind::Colon
+      fail("expected ':' after object key")
+      return
+    end
+    next_token # ':'
   end
 
   @[NoInline]
@@ -1603,102 +1676,6 @@ pub class Parser
     end
   end
 
-  private def parse_array : Any
-    line = token.line_number
-    col = token.column_number
-
-    @nesting = @nesting + 1
-    if @nesting > MAX_NESTING
-      return fail("nesting depth of #{@nesting} exceeds maximum depth #{MAX_NESTING}", line, col)
-    end
-
-    next_token # '['
-    ary = [] of Any
-
-    if token.kind == TokenKind::EndArray
-      next_token
-      @nesting = @nesting - 1
-      return Any.new(ary)
-    end
-
-    while true
-      ary << parse_value
-      return Any.new(nil) unless @error.nil?
-      case token.kind
-      when TokenKind::Comma
-        comma_line = token.line_number
-        comma_col = token.column_number
-        next_token
-        if token.kind == TokenKind::EndArray
-          return fail("trailing comma in array", comma_line, comma_col)
-        end
-      when TokenKind::EndArray
-        break
-      else
-        return fail("expected ',' or ']' in array")
-      end
-    end
-
-    next_token # ']'
-    @nesting = @nesting - 1
-    Any.new(ary)
-  end
-
-  private def parse_object : Any
-    line = token.line_number
-    col = token.column_number
-
-    @nesting = @nesting + 1
-    if @nesting > MAX_NESTING
-      return fail("nesting depth of #{@nesting} exceeds maximum depth #{MAX_NESTING}", line, col)
-    end
-
-    next_token # '{'
-    obj = {} of String => Any
-
-    if token.kind == TokenKind::EndObject
-      next_token
-      @nesting = @nesting - 1
-      return Any.new(obj)
-    end
-
-    while true
-      unless token.kind == TokenKind::String
-        return fail("expected string key in object")
-      end
-      key = token.string_value
-      if obj.has_key?(key)
-        return fail("duplicate key '#{key}'")
-      end
-
-      next_token # the key
-      unless token.kind == TokenKind::Colon
-        return fail("expected ':' after object key")
-      end
-      next_token # ':'
-
-      obj[key] = parse_value
-      return Any.new(nil) unless @error.nil?
-
-      case token.kind
-      when TokenKind::Comma
-        comma_line = token.line_number
-        comma_col = token.column_number
-        next_token
-        if token.kind == TokenKind::EndObject
-          return fail("trailing comma in object", comma_line, comma_col)
-        end
-      when TokenKind::EndObject
-        break
-      else
-        return fail("expected ',' or '}' in object")
-      end
-    end
-
-    next_token # '}'
-    @nesting = @nesting - 1
-    Any.new(obj)
-  end
 end
 
 # Reads a document one event at a time: `kind` names what the reader is on,

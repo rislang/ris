@@ -66,10 +66,6 @@ How to work (fewer tokens, faster to the goal):
 
 ## Known failure to recheck
 
-* Reproduce plain `bench/std_json_exercise.iyi` stack overflow in its
-  deepest nesting cases; also occurs before JSON tape migration
-  (`143ad1e03`). Release correctness passes. Diagnose in iyi first,
-  or record a tape-independent fix in UPSTREAM.md.
 * Reproduce spec/compiler/iyimod_spec.cr's "carries the constants a
   module's own code reads": runtime constants appear in the constant
   list. Determine whether the artifact or the expectation is wrong;

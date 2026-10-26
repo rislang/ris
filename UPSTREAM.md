@@ -9,6 +9,9 @@ ris, take it to iyi with `git cherry-pick`; strike entries once merged.
 * HTTP 100-continue: store pending state in BodyReader and write through
   its held connection, replacing the retained transport-capturing proc.
   Preserve the first wait, at-most-once send and existing failure mapping.
+* std/json: parse whole documents with an explicit container and pending
+  key stack, avoiding task stack overflow at 256 levels in plain builds.
+  Use an Array in iyi; ris keeps the stack on the caller's tape.
 
 * Cleanup reads current receivers; recursive panic and task caps are fatal.
   Fault dispositions use stack storage; signal flags survive a full pipe.
