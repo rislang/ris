@@ -676,8 +676,8 @@ else
 fi
 
 
-# HTTP diagnostics and query serialization use the caller's tape.
-for name in http_head_tape params_write_tape; do
+# HTTP diagnostics, query serialization and URI use the caller's tape.
+for name in http_head_tape params_write_tape uri_tape; do
   out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc "test/ris/$name.ri" 2>&1)
   if [ "$?" -eq 0 ] &&
       grep -qF 'zero heap' <<<"$out" &&
@@ -687,6 +687,13 @@ for name in http_head_tape params_write_tape; do
     echo "FAILED   $name: $out"; status=1
   fi
 done
+
+out=$("$RIS" run test/ris/uri_legacy.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = 'URI: legacy wrappers' ]; then
+  echo "runs     uri_legacy"
+else
+  echo "FAILED   uri_legacy: $out"; status=1
+fi
 
 out=$("$RIS" run test/ris/http_head_legacy.ri 2>&1)
 if [ "$?" -eq 0 ] &&

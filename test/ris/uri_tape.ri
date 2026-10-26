@@ -1,0 +1,57 @@
+module test/ris/uri_tape
+import std/uri::{URI}
+
+def retained_path : Str
+  parsed = URI.parse("https://host/kept".as_tape)
+  parsed.copy_to(Program.tape).path
+end
+
+tape do
+  raise "retained view" unless retained_path == "/kept"
+  w = Str::Builder.new(512)
+  input = "HTTP://u%3A:p%40@EX%aFAMPLE:80/a/./b/../c?q#f".as_tape
+  parsed = URI.parse(input)
+  raise "path view" unless parsed.path == "/a/./b/../c"
+  parsed.to_s(w)
+  raise "round trip" unless w.finish == input
+  w.clear
+  parsed.normalize.to_s(w)
+  raise "normalize" unless w.finish == "http://u%3A:p%40@ex%AFample/a/c?q#f"
+  w.clear
+  URI.parse("a/..".as_tape).normalize.to_s(w)
+  raise "relative" unless w.finish == "./"
+  raise "empty" unless URI.parse("".as_tape).path.empty?
+  bad = "a b|a\n|:x|ht!tp:x|//[x|//[x]bad|//a@b@c|//h:x|//h:65536|//u%GG@h|//u:p%@h".as_tape.split('|')
+  bad.each do |text|
+    raise "invalid accepted" if URI.parse?(text.as_tape)
+  end
+  cases = "../x|../x|a/..|./|a/../..|../|a/..//x|.//x|/a/../b|/b|/a/.|/a/|/a/..|/|/../x|/x|a/./b|a/b|//H:443/x|//h:443/x|https://H:443|https://h".as_tape.split('|')
+  i = 0
+  while i < cases.size
+    w.clear
+    URI.parse(cases[i]).normalize.to_s(w)
+    raise "normalization case" unless w.finish == cases[i + 1]
+    i += 2
+  end
+  raise "dot segments" unless URI.remove_dot_segments("a/b/../../c/".as_tape) == "/c/"
+  w.clear
+  w << "prefix:"
+  URI.encode("a %+/é".as_tape, w)
+  raise "encode" unless w.finish == "prefix:a%20%25+/%C3%A9"
+  w.clear
+  URI.encode_path("a/b ?".as_tape, w)
+  raise "path encode" unless w.finish == "a/b%20%3F"
+  w.clear
+  URI.encode_path_segment("a/b".as_tape, w)
+  raise "segment encode" unless w.finish == "a%2Fb"
+  w.clear
+  URI.encode_userinfo("a:@;".as_tape, w)
+  raise "userinfo encode" unless w.finish == "a%3A%40;"
+  w.clear
+  w << "kept"
+  raise "invalid decode" if URI.decode?("x%GG".as_tape, w)
+  raise "partial output" unless w.finish == "kept"
+  raise "short decode" if URI.decode?("%0".as_tape)
+  raise "decode" unless URI.decode("%C3%A9%00+".as_tape, true) == "é\0 "
+end
+puts "URI: zero heap"

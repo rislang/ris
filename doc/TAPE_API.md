@@ -149,6 +149,28 @@ escapes it. `URI.encode_www_form(text : Str, writer)` writes each encoded
 byte directly. Reserve up to three output bytes per input byte when
 sizing a builder. `Params.to_s` is a String wrapper around the writer.
 
+## URI references
+
+`URI.parse(text : Str)` returns an `@[OnTape] ParsedURI`. Its scheme,
+host, path, query, fragment, user and password view the input bytes;
+user and password preserve their written escapes. `URI.parse?` returns
+nil for invalid references; `parse` panics with a tape diagnostic.
+`parsed.to_s(writer)` appends a reference to the caller's builder.
+`parsed.normalize` returns a record with lowercase scheme and host,
+uppercase host escapes, no default port and no path dot segments.
+Relative paths retain leading `..` segments until resolution.
+`normalize_in_place` updates a mutable record. Retain the record with
+`copy_to(owner)`; `to_heap` copies into the legacy URI class.
+
+`URI.encode`, `encode_path`, `encode_path_segment`, `encode_userinfo`
+and `encode_www_form` take `Str` and a caller builder. Allow three output
+bytes per input byte. `URI.decode?(text : Str, writer, plus_to_space)`
+returns Bool, validating all escapes before appending any bytes; failure
+leaves existing output intact. Without a writer it returns `Str?`;
+`decode` returns `Str` or panics. Form decoding defaults to translating
+`+` into a space. String APIs copy only at their migration boundary.
+URI resolution and IDNA host conversion remain legacy APIs.
+
 ## Published runtime limits
 `IyiRegion` starts tapes at 67,108,864 bytes (64 MiB),
 not a cap. Each mapping adds a 64-byte header and rounds to 65,536 bytes.

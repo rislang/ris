@@ -1,63 +1,52 @@
 # ris TODO
 
-Rules: TAPE_SPEC.md. Work in this dependency order; each gate runs in
-check.sh. Delete finished work in the same commit; keep check.sh green.
+Rules: TAPE_SPEC.md. Goal: no GC. Measure: test/ris/heap_budget.txt.
 
-3. [L] First transfer: growth still transfers a displaced value once
-   into its reserved side region, moving published elements
-   (region.iyi tape_resize). Start growing
-   values in their own region, or refuse views across the first growth.
-   Non-Linux targets still move. Refuse raw owner operations.
-   Gate: no transfer of a viewed value.
-5. [M] Remaining: allocate class copies on the owner (with step 9).
-   Gate: destination ownership.
-5b. [M] std text and parsers onto the tape with existing tape types.
-   Migrated: synchronous log entries and metadata use Str/Ary; log_text
-   writes quoted fields to the caller's builder. Integer text through
-   64 bits, numeric builder appends and diagnostic quoting use tape
-   writers; their String APIs wrap those writers. log_text and numeric
-   success/error gates run with --no-gc, malformed UTF-8 included.
-   http_head isolates parsing from transport/clock initialization. Head
-   diagnostics return Str; request params use Query views.
-   Query and legacy Params serialize into the caller's builder; form
-   encoding writes bytes directly. HTTP head and query serialization
-   success/error gates run with --no-gc, malformed input included.
-   Remains: URI parsing/normalization and non-form encoding APIs,
-   JSON lexer/parser/writer fallbacks,
-   128-bit integer formatting, log registry/context/backend ownership,
-   time/HTTP dependency initialization, report retention helpers.
-   Gate: each migrated module has zero heap on success and error paths.
-6. [L] Pool/SlicePool: typed reuse, checked handles, size, membership,
-   initialization, link and byte-image validation, reset, explicit
-   relocation; pool free never closes a resource.
-   Gate: stale views stay typed; invalid operations mutate nothing.
-7. [L] Keep iyi's runtime (src/iyi/concurrency.iyi): groups, Channel,
-   select, cancellation, Share, III.5 init order, defer. ris adds: task
-   records, wait nodes, escaping captures and defer closures
-   (codegen.cr ProcLiteral mallocs a wrapper) in pools; copy messages,
-   results and panics to the receiver; a buffered queue is bounded and
-   reports full; failed receive keeps the message; owners per task, TLS
-   without fiber borrows, nonsuspending init, frozen sharing.
-   Gate: full, closed, cancel and group-exit cases with zero heap.
-8. [M] FFI borrow/retain/cleanup, foreign-thread attach, unwind barriers.
-   Start from iyi: a panic walks the defer registry, not frames (III.1.4);
-   check what it does to foreign frames before adding a barrier.
-   Gate: escape refusals, callback attachment, cleanup tests.
-9. [L] Classes on the tape: new allocates on the active tape, roots
-   track references, finalize refused. Unboxed unions and dispatch; the
-   rest of std by module: collections, IO, errors, resources.
-   Gate: class instances and each module zero heap; refusals name the
-   safe form.
-10. [M] Every sample, branch and server request workload at zero heap;
-   replace GC comparisons; keep checksums and the ris-bench respond copy.
-11. [M] No GC by default; remove the ris allocator fallback, exemptions
-   and collector linkage (gc_none still allocates: prelude.iyi:7572).
-   Use iyi's heap census and gc_none trap (UPSTREAM.md), not a new one.
-   Gate: link/symbol audit plus runtime allocation trap.
+How to work (fewer tokens, faster to the goal):
 
-Alongside: RIS_TAPE_STATS gains owner paths, regions, committed peaks,
-pool waste, copies apart from growth moves. Old root doc refs in bench/
-(GC_DESIGN.md, AI_FIRST.md) point to doc/archive/iyi/ when touched.
-Known: spec/compiler/iyimod_spec.cr "carries the constants a module's own
-code reads" fails before and after 4f: runtime constants (STDOUT, ...)
-appear in the module's constant list.
+* Demand first: fix only what a budgeted sample allocates. Run its
+  census, take the largest heap site, move it to tape, lower its budget
+  row in the same commit. A module nothing in the budget hits waits.
+* One change, one gate: the lowered budget row, plus one --no-gc test
+  only where the census cannot see the path (error paths).
+* Replace, don't wrap: when a String API has a tape twin, grep the repo
+  for callers. Few: move them to the tape API and delete the String API
+  in one commit. Many: keep the wrapper for now.
+* TODO holds open work only, one line per item; what is done lives in
+  git log. Delete a line when its budget reaches zero.
+
+## A. Budget to zero (do in this order: largest win first)
+
+1. orders.ri 31560: find the hot site (likely a per-row String or
+   class), move it; target under 100.
+2. serve.ri 111, web.ri 98, request.ri 71: one request path. Shared
+   cause first (HTTP/IO/time init); JSON only if the census names it.
+3. logline 20, chat 14, rest under 10: per-site fixes.
+4. static-user-sites column to 0 for every row.
+
+## B. Language pieces the budget needs (pull in only when A is blocked)
+
+* Classes on the active tape (`new`), class copies on the owner; roots
+  track references, finalize refused.
+* First growth: no transfer of a viewed value (region.iyi tape_resize);
+  refuse views across the first growth, non-Linux still moves.
+* Escaping closures: codegen.cr ProcLiteral wrapper malloc into a pool.
+* Concurrency (src/iyi/concurrency.iyi): task records, wait nodes and
+  messages in pools; bounded queue reports full. Only what serve needs.
+
+## C. Switch off the GC
+
+1. Gate every budget row at 0 in check.sh with the gc_none trap
+   (UPSTREAM.md); replace GC comparisons, keep checksums and ris-bench
+   respond copy.
+2. No GC by default: remove allocator fallback, exemptions, collector
+   linkage (gc_none still allocates: prelude.iyi:7572). Link audit.
+
+## Later (after C, not before)
+
+Pool/SlicePool validation, FFI borrow/attach/unwind barriers, full std
+module sweep (collections, IO, errors), 128-bit formatting, IDNA, URI
+resolution, RIS_TAPE_STATS extras (owner paths, pool waste).
+
+Known: spec/compiler/iyimod_spec.cr "carries the constants a module's
+own code reads" fails: runtime constants appear in the constant list.
