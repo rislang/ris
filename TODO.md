@@ -21,9 +21,6 @@ How to work (fewer tokens, faster to the goal):
 
 ## Workload blockers (goose-evaluations, 2026-10-26)
 
-* Windows file metadata: move native wide-path conversion and auxiliary
-  stat buffers onto tape, then gate Str metadata under --no-gc there.
-  POSIX metadata and missing-file errors pass the zero-heap gate.
 * jq under --no-gc runs 5-13x slower than Goose: find the cause once
   the ports run; speed tests otherwise stay off.
 
@@ -80,3 +77,9 @@ How to work (fewer tokens, faster to the goal):
   module's own code reads": runtime constants appear in the constant
   list. Determine whether the artifact or the expectation is wrong;
   make tape-independent fixes in iyi first, or record them in UPSTREAM.md.
+
+## Windows (on hold: not worked on now)
+
+* Windows file metadata: move native wide-path conversion and auxiliary
+  stat buffers onto tape, then gate Str metadata under --no-gc there.
+  POSIX metadata and missing-file errors pass the zero-heap gate.
