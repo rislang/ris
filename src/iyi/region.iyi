@@ -291,6 +291,14 @@ class IyiRegion
     take(region, size, false, 0_u64)
   end
 
+  # Fixed instances keep dispatch headers and never move. Check before
+  # codegen runs field defaults or initialize, using the fatal tape path.
+  def self.tape_object(size : UInt64, type_id : UInt64) : UInt64
+    region = @@tape
+    no_tape if region == 0
+    take(region, size, true, type_id)
+  end
+
   # Construct growing storage before any element can be published. State
   # stays on the ordinary tape; Linux payloads each own a guarded virtual
   # reservation, returned to the side spares at the owning scope's end.

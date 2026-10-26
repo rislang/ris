@@ -131,7 +131,7 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
     if type.remove_typedef.to_s == "Str"
       "\n\nCopy the text with `.copy_to(owner)` inside the owning #{tape_scope_name}, or write into the caller's Str::Builder."
     else
-      "\n\nBuild an owned value before leaving the scope: `copy_to(owner)` copies a Str, Ary or @[OnTape] struct deeply; or write into the caller's Str::Builder. Copying a tape-bearing struct alone does not copy its storage."
+      "\n\nBuild an owned value before leaving the scope: `copy_to(owner)` copies a Str, Ary, @[OnTape] struct or class instance deeply; or write into the caller's Str::Builder. Copying a tape-bearing struct alone does not copy its storage."
     end
   end
 

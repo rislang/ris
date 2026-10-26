@@ -3105,6 +3105,10 @@ fun __ris_program_environment(size : UInt64) : Void*
   Pointer(Void).new(address)
 end
 
+fun __ris_tape_object(size : UInt64, type_id : UInt64) : Void*
+  Pointer(Void).new(IyiRegion.tape_object(size, type_id))
+end
+
 fun __ris_program_object(size : UInt64, type_id : UInt64) : Void*
   Pointer(Void).new(IyiRegion.program_bytes(size, true, type_id))
 end

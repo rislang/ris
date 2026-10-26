@@ -15,7 +15,7 @@ def make : Resp
   Resp.new(1_i64, Str.build { |s| s.push(97_u8) })
 end
 
-# A class instance lives on the heap, beyond any scope.
+# A class reference must not retain a shorter-lived field.
 class Cache
   @last : Resp?
 
@@ -29,4 +29,4 @@ class Cache
 end
 
 cache = Cache.new
-tape { cache.keep(make) }
+local_tape { cache.keep(make) }

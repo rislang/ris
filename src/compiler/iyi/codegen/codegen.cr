@@ -2727,6 +2727,15 @@ module Iyi
             [struct_type.size, builder.zext(type_id(type), llvm_context.int64)]
           type_ptr = pointer_cast memory, struct_type.pointer
           cleared = true
+        elsif TapeChecker.class_instance?(@program, type) && @program.tape_platform?
+          object_fun = fetch_typed_fun(@main_mod, "__ris_tape_object") do
+            LLVM::Type.function([@main_llvm_context.int64, @main_llvm_context.int64],
+              @main_llvm_context.void_pointer)
+          end
+          memory = call check_main_fun("__ris_tape_object", object_fun),
+            [struct_type.size, builder.zext(type_id(type), llvm_context.int64)]
+          type_ptr = pointer_cast memory, struct_type.pointer
+          cleared = true
         elsif @program.iyi_gc_arena? && (new_fun = iyi_new_fun)
           # iyi: under the arena a class instance is `__iyi_new`'s: the
           # size, the type id, and whether the object carries the id in a

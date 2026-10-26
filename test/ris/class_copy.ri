@@ -24,4 +24,29 @@ raise "sharing" unless y.b.n == 7 && y.extra.n == 7 && x.a.n == 8
 values = Ary(Leaf){leaf, leaf}.copy_to(Program.tape)
 values[0].n = 10
 raise "array sharing" unless values[1].n == 8 && leaf.n == 8
+class TextHolder
+  getter text : Str
+  getter values : Ary(Str)
+  def initialize(@text : Str, @values : Ary(Str))
+  end
+end
+class RetainedClassCopy
+  @@value : TextHolder? = nil
+
+  def self.make
+    local_tape do
+      text = Str.build { |w| w << "retained" }
+      holder = TextHolder.new(text, Ary(Str){text})
+      @@value = holder.copy_to(Program.tape)
+    end
+  end
+
+  def self.check
+    retained = @@value || raise "missing copy"
+    raise "text copy" unless retained.text == "retained"
+    raise "array copy" unless retained.values[0] == "retained"
+  end
+end
+RetainedClassCopy.make
+RetainedClassCopy.check
 puts "PASS: class copies"

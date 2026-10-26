@@ -268,7 +268,7 @@ fi
 rm -rf "$owner_ir"
 
 # Deep copies preserve concrete and inherited fields, splitting sharing.
-out=$("$RIS" run test/ris/class_copy.ri 2>&1)
+out=$("$RIS" run --no-gc test/ris/class_copy.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = 'PASS: class copies' ]; then
   echo "runs     class_copy"
 else
@@ -361,7 +361,12 @@ else
   status=1
 fi
 
-expect class_field   "holds the tape type"
+expect class_field   "cannot use outer tape value"
+expect class_task "this block becomes a proc"
+expect class_share "pass Share scalar data"
+expect class_finalize "tape class instances cannot finalize"
+expect class_inherited_finalize "tape class instances cannot finalize"
+expect class_escape "is a variable of the code around this tape block"
 expect struct_field  "is a struct that is not @[OnTape]"
 expect class_var     "copy it with .copy_to(Program.tape)"
 expect generic_array "Array("
@@ -1017,10 +1022,10 @@ else
   echo "FAILED   heap_zero: $out"
   status=1
 fi
-out=$("$RIS" run --no-gc test/ris/heap_class.ri 2>&1)
-if [ "$?" -ne 0 ] &&
-    grep -qF 'ris: heap allocation with --no-gc:' <<<"$out"; then
-  echo "refused  heap_class (--no-gc trap)"
+out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc test/ris/heap_class.ri 2>&1)
+if [ "$?" -eq 0 ] && grep -qF '42' <<<"$out" &&
+    grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+  echo "runs     heap_class (--no-gc)"
 else
   echo "FAILED   heap_class: $out"
   status=1
@@ -1086,7 +1091,7 @@ for name in heap_handles heap_io; do
   fi
 done
 out=$("$RIS" heap --user test/ris/heap_fields.ri 2>&1)
-if [ "$?" -eq 0 ] && grep -qF 'class: 1' <<<"$out" &&
+if [ "$?" -eq 0 ] && ! grep -qE '^class: [1-9]' <<<"$out" &&
     grep -qF 'array: 1' <<<"$out"; then
   echo "census   heap_fields (instance initializer reached)"
 else
@@ -1094,7 +1099,7 @@ else
   status=1
 fi
 out=$("$RIS" heap --user test/ris/heap_kinds.ri 2>&1)
-if [ "$?" -eq 0 ] && grep -qF 'class: 1' <<<"$out" &&
+if [ "$?" -eq 0 ] && ! grep -qE '^class: [1-9]' <<<"$out" &&
     grep -qF 'string: 1' <<<"$out" && grep -qF 'array: 1' <<<"$out" &&
     grep -qF 'hash: 2' <<<"$out" && grep -qF 'closure: 1' <<<"$out"; then
   echo "census   heap_kinds (unused def omitted)"

@@ -1,0 +1,7 @@
+abstract class Resource
+  def finalize
+  end
+end
+class Child < Resource
+end
+Child.new

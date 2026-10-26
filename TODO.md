@@ -21,8 +21,10 @@ How to work (fewer tokens, faster to the goal):
 
 ## Remaining tape semantics
 
-* Ordinary class `new` on the active tape; check reference lifetimes and
-  refuse finalize. Existing copy_to must also handle these instances.
+* Finish ordinary class tape allocation for std-defined migration classes:
+  migrate non-tape holders (JSON StringBuffer), escaping TlsStream callbacks
+  and log Metadata sharing first. Runtime and std declarations still use
+  the migration allocation ABI; user classes have checked roots and copy_to.
 * Stable growth on every supported tape target: replace moving backends
   outside Linux with address-space reservations and equivalent gates.
 * Escaping closures outside program and joined task owners: pooled

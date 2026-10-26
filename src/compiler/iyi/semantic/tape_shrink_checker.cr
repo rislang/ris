@@ -230,7 +230,7 @@ class Iyi::TapeShrinkChecker
       members = type.union_types.select { |t| TapeChecker.tape_in(@program, t) }
       return !members.empty? && members.all? { |t| value_holder?(t) }
     end
-    TapeChecker.tape?(@program, type) &&
+    type.struct? && TapeChecker.tape?(@program, type) &&
       !TapeOwnerChecker.owner?(@program, type) && !storage_type?(type) &&
       !{"Str", "Str::Span"}.includes?(type.to_s)
   end

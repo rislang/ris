@@ -1,0 +1,7 @@
+class TapeValue
+end
+kept = nil
+tape do
+  kept = TapeValue.new
+end
+puts kept.nil?

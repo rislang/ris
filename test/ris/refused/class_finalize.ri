@@ -1,0 +1,5 @@
+class Resource
+  def finalize
+  end
+end
+Resource.new

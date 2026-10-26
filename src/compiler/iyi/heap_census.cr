@@ -1,5 +1,5 @@
 # Census rules (typed, after lowering; locations deduplicate specializations):
-# class: reference-returning .new and allocate, including exception classes.
+# class: heap-backed .new and allocate; ordinary tape classes are excluded.
 # string: String construction/build/to_heap/interpolation; static literals
 #   are data in the executable and never counted.
 # array/hash: typed Array/Hash/Set construction and literal lowerings.
@@ -33,9 +33,9 @@ module Iyi::HeapPolicy
     name = a_def.owner?.to_s
     file = a_def.location.try(&.original_filename)
     return true if a_def.name == "group" &&
-      file.try(&.ends_with?("/iyi/concurrency.iyi"))
+                   file.try(&.ends_with?("/iyi/concurrency.iyi"))
     return true if a_def.name.starts_with?("__iyi_") &&
-      file.try(&.includes?("/src/iyi/"))
+                   file.try(&.includes?("/src/iyi/"))
     allocator?(a_def) || internal?(name) || (name.in?(%w(IyiIO IyiIO.class)) &&
       a_def.name == "initialize")
   end
@@ -118,7 +118,7 @@ class Iyi::HeapCensus < Iyi::Visitor
         add node, "exemption", "runtime/std exemption: #{detail}"
       end
       string_api = node.obj.try(&.type?).to_s.in?("String", "String.class") ||
-        node.args.any? { |arg| arg.type?.to_s == "String" }
+                   node.args.any? { |arg| arg.type?.to_s == "String" }
       if node.name == "to_heap" ||
          (node.name == "to_s" && node.type?.to_s == "String") ||
          target.annotation(@program.tape_to_heap_annotation) || string_api
@@ -156,15 +156,17 @@ class Iyi::HeapCensus < Iyi::Visitor
          !type.is_a?(PointerInstanceType) && !type.is_a?(ProcInstanceType)
         file = node.location.try(&.original_filename)
         stream = type.to_s == "IyiIO" && !@constructor &&
-          file.try(&.ends_with?("/iyi/io.iyi"))
-        add node, kind(type), "#{type}.new" unless stream
+                 file.try(&.ends_with?("/iyi/io.iyi"))
+        add node, kind(type), "#{type}.new" unless stream ||
+                                                   TapeChecker.class_instance?(@program, type)
       elsif node.name.in?("to_heap", "build") && type &&
             type.reference_like?
         add node, kind(type), "#{target.owner}##{node.name}"
       elsif body.is_a?(Primitive) &&
             body.name.in?("allocate", "pointer_malloc", "pointer_realloc")
         next if body.name == "allocate" &&
-          (@constructor || type.try(&.passed_by_value?))
+                (@constructor || type.try(&.passed_by_value?) ||
+                (type && TapeChecker.class_instance?(@program, type)))
         add node, body.name == "allocate" ? kind(type) : "other",
           "#{target.owner}##{node.name} (#{body.name})"
       elsif target.name.in?("__iyi_malloc64", "__iyi_malloc_atomic64",

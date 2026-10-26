@@ -1,30 +1,29 @@
-# PROTOTYPE (ris, step B): the type-level half of tape safety.
-#
-# A tape type is a struct marked `@[OnTape]`. Its storage - the bytes of a
-# `Str`, the elements of an `Ary` - is the current fiber's tape,
-# and is reclaimed when the `tape` block that made it ends. So a tape value
-# may live in locals, in parameters, in other tape values and in the tape
-# itself, and nowhere that can outlive the scope:
-#
-# * not in a field of a type that is not a tape type: a class instance, or
-#   a struct that is not `@[OnTape]` (which could be stored anywhere),
-# * not in a class variable,
-# * not as a type argument of a generic that is not a tape type:
-#   `Array(Resp)` is a class with a `Pointer(Resp)` field, `Channel(Resp)`
-#   crosses fibers.
-#
-# Each is a fact about types, so this runs once over every type after the
-# main pass, the way `RecursiveStructChecker` does. The flow half - a block
-# capturing a tape value, a `tape` block handing one out - is in
-# `TapeLifetimeChecker`; proc captures are checked during cleanup.
+# Type-level tape safety. Ordinary class references and @[OnTape] structs
+# carry tape roots. Runtime classes retain their migration allocation ABI.
+# LifetimeChecker checks the flow of roots; non-tape holders cannot contain
+# them, and class finalizers cannot run after a region has been released.
 class Iyi::TapeChecker
   @program : Program
 
   def initialize(@program)
   end
 
+  # Runtime and std migration classes retain iyi's allocation ABI.
+  # Extensions do not change the storage of the original declaration.
+  def self.class_instance?(program : Program, type : Type) : Bool
+    return false unless program.tape_scopes?
+    type = type.remove_typedef
+    type = type.base_type if type.is_a?(VirtualType)
+    return false unless type.is_a?(ClassType) && !type.struct?
+    declaration = type.is_a?(GenericClassInstanceType) ? type.generic_type : type
+    !!declaration.locations.try(&.first?).try do |loc|
+      !TapeRules.runtime?(program, loc) && !TapeRules.std?(loc)
+    end
+  end
+
   def self.tape?(program : Program, type : Type) : Bool
     type = type.remove_typedef
+    return true if class_instance?(program, type)
     return true if TapeOwnerChecker.owner?(program, type)
     if type.is_a?(GenericClassInstanceType)
       return !type.generic_type.annotation(program.tape_annotation).nil?
@@ -130,13 +129,13 @@ class Iyi::TapeChecker
         if field_type = ivar.type?
           if TapeOwnerChecker.owner_in(@program, field_type)
             fail type, ivar, "cannot store an owner in a field; " \
-                            "borrow it: pass the owner variable"
+                             "borrow it: pass the owner variable"
           end
         end
       end
     end
     tape = TapeChecker.tape?(@program, type)
-    if tape && !type.struct?
+    if tape && !type.struct? && !TapeChecker.class_instance?(@program, type)
       fail type, nil, <<-MSG
         #{type} is marked @[OnTape] but is a class
 
@@ -145,6 +144,12 @@ class Iyi::TapeChecker
         reference to; declare #{type} as a struct.
         MSG
     end
+    if TapeChecker.class_instance?(@program, type)
+      type.lookup_defs("finalize").each do |a_def|
+        a_def.raise "tape class instances cannot finalize; close resources explicitly; " \
+                    "build retained instances on Program.tape or copy_to(owner)"
+      end
+    end
     if tape || type.is_a?(ClassType)
       type.lookup_defs("copy_to").each do |a_def|
         next if TapeRules.runtime?(@program, a_def.location)
@@ -152,7 +157,7 @@ class Iyi::TapeChecker
         next if TapeRules.std?(a_def.location)
         # Only the owner copy is generated; other arities are unrelated.
         next unless a_def.args.size == 1
-        kind = tape ? "tape structs" : "class instances and structs"
+        kind = tape ? "tape values" : "class instances and structs"
         a_def.raise "copy_to for #{kind} is generated deeply; " \
                     "remove this override and use .copy_to(Program.tape)"
       end

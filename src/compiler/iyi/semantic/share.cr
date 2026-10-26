@@ -48,6 +48,10 @@ module Iyi::Share
   end
 
   private def self.check(type : Type, visiting : Set(Type)) : String?
+    if TapeChecker.class_instance?(type.program, type)
+      return "#{type} is a tape class reference; pass Share scalar data " \
+             "and build the instance inside the receiving task"
+    end
     case type
     when NilType, BoolType, CharType, IntegerType, FloatType, SymbolType, VoidType, NoReturnType
       nil

@@ -1,0 +1,9 @@
+class TaskValue
+  getter n : Int32
+  def initialize(@n : Int32)
+  end
+end
+value = TaskValue.new(1)
+group do |g|
+  g.spawn { puts value.n }
+end
