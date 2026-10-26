@@ -15,10 +15,6 @@ How to work (fewer tokens, faster to the goal):
 * TODO holds open work only, one line per item; what is done lives in
   git log. Delete a line when its budget reaches zero.
 
-## A. Budget to zero (do in this order: largest win first)
-
-1. static-user-sites to 0: serve.ri 2 left.
-
 ## B. Language pieces the budget needs (pull in only when A is blocked)
 
 * Classes on the active tape (`new`), class copies on the owner; roots
@@ -34,11 +30,9 @@ How to work (fewer tokens, faster to the goal):
 
 ## C. Switch off the GC
 
-1. Gate every budget row at 0 in check.sh with the gc_none trap
-   (UPSTREAM.md); replace GC comparisons, keep checksums and ris-bench
-   respond copy.
-2. No GC by default: remove allocator fallback, exemptions, collector
-   linkage (gc_none still allocates: prelude.iyi:7572). Link audit.
+1. No GC by default: remove allocator fallback, exemptions, collector
+   linkage (gc_none still allocates: prelude.iyi:7572). Link audit;
+   full serve loop still allocates and traps with --no-gc.
 
 ## Later (after C, not before)
 

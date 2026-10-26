@@ -1,19 +1,17 @@
 # serve: a server's cost per request, measured on loopback. A client sends
 # N keep-alive requests at once and reads the N answers: a small JSON body
-# and a header of the block's own. Prints the requests and the bytes the
-# GC heap took per request, collection off; time it from outside, with
-# `gc` for the collector on as a server runs it.
+# and a header of the block's own. Prints the request count; report tape
+# memory with RIS_TAPE_STATS=1 and time it from outside.
 #
 #   ./bin/ris build --release -o serve samples/ris/serve.ri
 #   ./serve           # Server.answer: read and written on the tape
 #   ./serve answer    # the same (kept for existing workload commands)
-#   /usr/bin/time -f '%e s %M KB' ./serve answer gc
+#   /usr/bin/time -f '%e s %M KB' env RIS_TAPE_STATS=1 ./serve answer
 
 module samples/serve
 
 import std/socket::{IyiSocket}
 import std/http::{Server, Outgoing}
-import std/gc::{GC}
 
 N = 200000
 REQUEST = Str.view("GET /users/42?full=1 HTTP/1.1\r\nHost: localhost\r\n" \
@@ -37,35 +35,52 @@ def drain(socket : IyiSocket, want : Int64) : Int64
   got
 end
 
+# Program-owned sockets let the joined tasks use noncapturing procs.
+module Loopback
+  @@listener : IyiSocket? = nil
+  @@client : IyiSocket? = nil
+  @@want = 0_i64
+
+  def self.listener : IyiSocket
+    @@listener || raise "listener not set up"
+  end
+
+  def self.client : IyiSocket
+    @@client || raise "client not set up"
+  end
+
+  def self.want : Int64
+    @@want
+  end
+
+  def self.setup(want : Int64) : Nil
+    @@want = want
+    @@listener = IyiSocket.listen(0)
+    @@client = IyiSocket.connect("127.0.0.1", listener.local_port).or_panic
+  end
+end
+
 response = Outgoing.new
 response.header("Content-Type", "application/json")
 response.body << BODY
 reply = Server.format_response(response, false, false)
 want = reply.bytesize.to_i64 * N
-listener = IyiSocket.listen(0)
+Loopback.setup(want)
 batch = REQUEST * 1000
-collecting = Program.arguments.includes?("gc")
-GC.disable unless collecting
-before = GC.stats.bytes_since_collection
 got = 0_i64
 group do |g|
   g.spawn do
-    Server.answer(listener) do |req, res|
+    Server.answer(Loopback.listener) do |req, res|
       res.header("Content-Type", "application/json")
       res.body.append(BODY)
     end
     0
   end
-  client = IyiSocket.connect("127.0.0.1", listener.local_port).or_panic
-  reader = g.spawn { drain(client, want) }
-  (N // 1000).times { client.write(batch).or_panic }
+  reader = g.spawn { drain(Loopback.client, Loopback.want) }
+  (N // 1000).times { Loopback.client.write(batch).or_panic }
   got = reader.value
-  client.close
-  listener.close
+  Loopback.client.close
+  Loopback.listener.close
 end
-raise "read #{got} of #{want} bytes" unless got == want
-if collecting
-  puts "#{N} requests"
-else
-  puts "#{N} requests, #{(GC.stats.bytes_since_collection - before) // N.to_u64} heap bytes a request"
-end
+raise "read #{got} of #{Loopback.want} bytes" unless got == Loopback.want
+puts "#{N} requests"

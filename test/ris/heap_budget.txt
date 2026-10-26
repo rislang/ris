@@ -11,6 +11,6 @@ samples/ris/query.ri 0 0 tape
 samples/ris/report.ri 0 0 default
 samples/ris/request.ri 0 0 default
 samples/ris/respond.ri 0 0 default
-samples/ris/serve.ri 2 2 answer-request
+samples/ris/serve.ri 0 2 answer-request
 samples/ris/shop/order.ri 0 0 default
 samples/ris/web.ri 0 2 request

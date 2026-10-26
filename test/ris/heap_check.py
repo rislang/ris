@@ -175,22 +175,12 @@ def main():
             compare(path, "static sites", sites, old_sites)
             compare(path, "allocations", allocations, old_allocations,
                     NETWORK_SLACK if "request" in mode else 0)
-        # Every workload also runs behind the no-collector gate. A
-        # positive count must trap, a zero count must preserve output.
+        # Every workload must succeed without a collector and preserve
+        # stdout and the full HTTP response, even with network slack.
         gated, gated_response = gate.result()
-        gc_refusal = ("std/gc speaks for iyi's own collector" in
-                      gated.stderr + gated.stdout)
-        if gc_refusal and gated.returncode:
-            notes.append(f"gate     {path}: std/gc requires a collector")
-        elif allocations:
-            if not gated.returncode or (
-                    "ris: heap allocation with --no-gc:" not in
-                    gated.stderr + gated.stdout):
-                raise RuntimeError(f"{path}: missing trap:\n"
-                                   f"{gated.stdout}{gated.stderr}")
-        elif (gated.returncode or gated.stdout != run.stdout or
-              gated_response != response):
-            raise RuntimeError(f"{path}: zero-heap gate failed:\n"
+        if (gated.returncode or gated.stdout != run.stdout or
+                gated_response != response):
+            raise RuntimeError(f"{path}: no-GC gate failed:\n"
                                f"{gated.stdout}{gated.stderr}")
         notes.append(f"heap     {path} {sites} {allocations} {mode}")
         budget = allocations + (NETWORK_SLACK if "request" in mode else 0)
