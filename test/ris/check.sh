@@ -1138,6 +1138,23 @@ else
   echo "FAILED   serve full loop: $out"
   status=1
 fi
+# Repeated joined groups must reuse task and request tape storage.
+out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 "$RIS" run --release --no-gc \
+  test/ris/server_groups.ri 2>&1)
+code=$?
+mappings=$(sed -n \
+  's/^ris tape:.*scopes, \([0-9]*\) mappings made.*/\1/p' <<<"$out")
+if [ "$code" -eq 0 ] &&
+    grep -qxF 'PASS: server groups' <<<"$out" &&
+    grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out" &&
+    [ -n "$mappings" ] && [ "$mappings" -le 28 ] &&
+    grep -qF '0 growth moves' <<<"$out" &&
+    grep -qF '0 side regions (0 transfer bytes copied)' <<<"$out"; then
+  echo "runs     server_groups (20 groups, 20000 requests, bounded tape)"
+else
+  echo "FAILED   server_groups: $out"
+  status=1
+fi
 out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc test/ris/heap_fibers.ri 2>&1)
 if [ "$?" -eq 0 ] && grep -qF 'fiber42' <<<"$out" &&
     grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then

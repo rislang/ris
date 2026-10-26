@@ -26,8 +26,6 @@ How to work (fewer tokens, faster to the goal):
 
 ## Remaining tape semantics
 
-* Gate repeated server use under --no-gc beyond the full serve loop
-  (passes): task cleanup and reused storage across groups.
 * Stable growth on every supported tape target: replace moving backends
   outside Linux with address-space reservations and equivalent gates.
 * Escaping closures outside program and joined task owners: pooled

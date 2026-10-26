@@ -1,0 +1,83 @@
+module test/ris/server_groups
+
+import std/socket::{IyiSocket}
+import std/http::{Server, Outgoing}
+
+N = 1000
+GROUPS = 20
+REQUEST = Str.view("GET /users/42?full=1 HTTP/1.1\r\nHost: localhost\r\n" \
+  "User-Agent: bench\r\nAccept: */*\r\n\r\n")
+BODY = %({"id":42,"name":"Mari","email":"mari@example.com"})
+
+# The answers read into one writer on the tape, emptied before each read,
+# so the client puts nothing on the heap and what is counted is the
+# server's.
+def drain(socket : IyiSocket, want : Int64) : Int64
+  got = 0_i64
+  tape do
+    buffer = Str::Builder.new(65536)
+    while got < want
+      buffer.clear
+      n = socket.read(buffer, 65536).or_panic
+      break if n == 0
+      got += n
+    end
+  end
+  got
+end
+
+# Program-owned sockets let the joined tasks use noncapturing procs.
+module Loopback
+  @@listener : IyiSocket? = nil
+  @@client : IyiSocket? = nil
+  @@want = 0_i64
+
+  def self.listener : IyiSocket
+    @@listener || raise "listener not set up"
+  end
+
+  def self.client : IyiSocket
+    @@client || raise "client not set up"
+  end
+
+  def self.want : Int64
+    @@want
+  end
+
+  def self.setup(want : Int64) : Nil
+    @@want = want
+    @@listener = IyiSocket.listen(0)
+    @@client = IyiSocket.connect("127.0.0.1", listener.local_port).or_panic
+  end
+end
+
+# Recreate the listener and tasks in each group. The enclosing tape is
+# reclaimed after the group joins, including its task records.
+GROUPS.times do
+  local_tape do
+    response = Outgoing.new
+    response.header("Content-Type", "application/json")
+    response.body << BODY
+    reply = Server.format_response(response, false, false)
+    want = reply.bytesize.to_i64 * N
+    Loopback.setup(want)
+    batch = REQUEST * N
+    got = 0_i64
+    group do |g|
+      g.spawn do
+        Server.answer(Loopback.listener) do |req, res|
+          res.header("Content-Type", "application/json")
+          res.body.append(BODY)
+        end
+        0
+      end
+      reader = g.spawn { drain(Loopback.client, Loopback.want) }
+      Loopback.client.write(batch).or_panic
+      got = reader.value.or_panic
+      Loopback.client.close
+      Loopback.listener.close
+    end
+    raise "incomplete response" unless got == Loopback.want
+  end
+end
+puts "PASS: server groups"
