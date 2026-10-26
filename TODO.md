@@ -24,9 +24,6 @@ How to work (fewer tokens, faster to the goal):
 * Windows file metadata: move native wide-path conversion and auxiliary
   stat buffers onto tape, then gate Str metadata under --no-gc there.
   POSIX metadata and missing-file errors pass the zero-heap gate.
-* Tape check speed: orders.ri still spends ~66 s in it, ~49 s in the
-  shrink checker's run pass (IYI_PROF=1 shows each checker). Cut its
-  per-call environment and value allocation; keep contracts identical.
 * jq under --no-gc runs 5-13x slower than Goose: find the cause once
   the ports run; speed tests otherwise stay off.
 

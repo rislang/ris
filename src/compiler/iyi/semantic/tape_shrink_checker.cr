@@ -628,8 +628,12 @@ class Iyi::TapeShrinkChecker
   end
 
   private def merge(a : Value, b : Value) : Value
-    Value.new((a.roots + b.roots).uniq, (a.views + b.views).uniq,
-      (a.procs + b.procs).uniq, a.unknown_proc || b.unknown_proc)
+    if a == EMPTY && b == EMPTY
+      EMPTY
+    else
+      Value.new((a.roots + b.roots).uniq, (a.views + b.views).uniq,
+        (a.procs + b.procs).uniq, a.unknown_proc || b.unknown_proc)
+    end
   end
 
   # Back edges forget branch choices: the next round can take another
@@ -812,7 +816,8 @@ class Iyi::TapeShrinkChecker
         before_calls = env
         after_calls : Env? = nil
         targets.each do |target|
-          call_env = before_calls.dup
+          summary = @graph.effects[target.object_id]?.try(&.shrink)
+          call_env = summary && !summary.stores.empty? ? before_calls.dup : before_calls
           boundary = target.is_a?(External) || @graph.proc_call?(target) ||
                      (target.iyi_from_artifact? && !target.iyi_body_travelled?)
           if boundary && target.iyi_from_artifact? && !target.ris_call_contract
@@ -844,7 +849,7 @@ class Iyi::TapeShrinkChecker
                 end
               end
             end
-          elsif summary = @graph.effects[target.object_id]?.try(&.shrink)
+          elsif summary
             # A proc obtained from a summary can execute a body outside
             # the lexical call tree. Record the summaries it reads too.
             if caller = @solving
@@ -882,7 +887,7 @@ class Iyi::TapeShrinkChecker
           end
           after_calls = after_calls.try { |previous| join_env(previous, call_env) } || call_env
         end
-        if joined = after_calls
+        if (joined = after_calls) && !joined.same?(env)
           env.replace(joined)
         end
       elsif !TapeRules.runtime?(@program, node.location)
