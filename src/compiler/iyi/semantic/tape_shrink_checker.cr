@@ -15,7 +15,20 @@ class Iyi::TapeShrinkChecker
   record Summary, seeds : Array(UInt64), shrinks : Hash(UInt64, String), result : Value,
     stores : Hash(UInt64, Value) = Hash(UInt64, Value).new,
     retains : Array(UInt64) = [] of UInt64
-  alias Env = Hash(String, Value)
+  # Keep variable bindings separate from numeric storage identities.
+  record Env, vars = Hash(String, Value).new,
+    slots = Hash(UInt64, Value).new do
+    delegate :[], :[]?, :[]=, :keys, to: vars
+
+    def dup
+      Env.new(vars.dup, slots.dup)
+    end
+
+    def clear
+      vars.clear
+      slots.clear
+    end
+  end
 
   EMPTY  = Value.new([] of UInt64, [] of View)
   SHRINK = {"clear", "truncate", "pop", "pop?", "shift", "shift?",
@@ -52,15 +65,9 @@ class Iyi::TapeShrinkChecker
     @root_scopes[root]? || @parents[root]?.try { |p| root_scope(p[0]) } || [] of UInt64
   end
 
-  private def slot(root : UInt64) : String
-    "#tape:#{root}"
-  end
-
   private def stored(v : Value, env : Env) : Value
     result = v
-    env.each do |key, contents|
-      next unless key.starts_with?("#tape:")
-      root = key[6..].to_u64
+    env.slots.each do |root, contents|
       if contains_root?(v.roots, root)
         result = merge(result, Value.new([] of UInt64, contents.views))
       end
@@ -72,10 +79,9 @@ class Iyi::TapeShrinkChecker
                          fields : Array(UInt64)) : Value
     result = Value.new([] of UInt64, v.views, v.procs, v.unknown_proc)
     v.roots.each do |root|
-      contents = env[slot(root)]?
-      nested = env.keys.any? do |key|
-        key.starts_with?("#tape:") && key != slot(root) &&
-          contains_root?([root], key[6..].to_u64)
+      contents = env.slots[root]?
+      nested = env.slots.each_key.any? do |key|
+        key != root && contains_root?([root], key)
       end
       if !fields.includes?(root)
         result = merge(result, Value.new([root], [] of View))
@@ -93,7 +99,7 @@ class Iyi::TapeShrinkChecker
   # that holder; parameter roots also bound caller storage.
   private def read_back(v : Value, type : Type?, env : Env) : Value
     return v unless type && @checking
-    unresolved = v.roots.select { |r| @parents.has_key?(r) && !env.has_key?(slot(r)) }
+    unresolved = v.roots.select { |r| @parents.has_key?(r) && !env.slots.has_key?(r) }
     return v if unresolved.empty?
     candidates = [] of UInt64
     @root_types.to_a.each do |root, candidate|
@@ -157,7 +163,7 @@ class Iyi::TapeShrinkChecker
         result << field_root(base, parent[1])
       end
     end
-    env[slot(root)]?.try &.roots.each do |source|
+    env.slots[root]?.try &.roots.each do |source|
       # A constructor's receiver is rebased into the field, not shared
       # by every sibling. Borrowed storage has a separate declaration.
       next if contains_root?([source], root)
@@ -184,9 +190,8 @@ class Iyi::TapeShrinkChecker
     v.roots.each do |source|
       type = @root_types[source]?
       next unless value_holder?(type)
-      env.each do |key, contents|
-        next unless key.starts_with?("#tape:")
-        path = relative_path(key[6..].to_u64, source)
+      env.slots.each do |root, contents|
+        path = relative_path(root, source)
         next unless path && !path.empty?
         copies[path] = merge(copies[path]? || EMPTY, contents)
         carried.concat(contents.views)
@@ -208,17 +213,15 @@ class Iyi::TapeShrinkChecker
     roots.each do |root|
       strong = replace && roots.size == 1
       if strong
-        env.reject! do |key, _|
-          key.starts_with?("#tape:") && contains_root?([root], key[6..].to_u64)
+        env.slots.reject! do |key, _|
+          contains_root?([root], key)
         end
       end
-      key = slot(root)
-      env[key] = strong ? v : merge(env[key]? || EMPTY, v)
+      env.slots[root] = strong ? v : merge(env.slots[root]? || EMPTY, v)
       copies.each do |path, contents|
         destination = root
         path.each { |name| destination = field_root(destination, name) }
-        key = slot(destination)
-        env[key] = strong ? contents : merge(env[key]? || EMPTY, contents)
+        env.slots[destination] = strong ? contents : merge(env.slots[destination]? || EMPTY, contents)
       end
     end
   end
@@ -350,15 +353,58 @@ class Iyi::TapeShrinkChecker
   def initialize(@program : Program, @graph : TapeCallGraph)
   end
 
+  @solving : UInt64?
+  @summary_callers = Hash(UInt64, Set(UInt64)).new
+
+  # Calls in lexical callbacks execute in the enclosing environment too.
+  class Dependencies < Visitor
+    def initialize(@graph : TapeCallGraph, @caller : UInt64,
+                   @callers : Hash(UInt64, Set(UInt64)))
+    end
+
+    def visit(node : Call)
+      if expanded = node.expanded
+        expanded.accept self
+        return false
+      end
+      @graph.targets(node).try &.each do |target|
+        (@callers[target.object_id] ||= Set(UInt64).new) << @caller
+      end
+      true
+    end
+
+    def visit(node : ProcLiteral)
+      node.def.body.accept self
+      false
+    end
+
+    def visit(node : Def)
+      false
+    end
+
+    def visit(node : ASTNode)
+      true
+    end
+  end
+
   def solve
     @graph.defs.each_value do |target|
       seeds = Array(UInt64).new(target.args.size + 1) { fresh }
       @graph.effects[target.object_id].shrink =
         Summary.new(seeds, Hash(UInt64, String).new, EMPTY)
     end
+    callers = Hash(UInt64, Set(UInt64)).new
+    @graph.defs.each_value do |target|
+      target.body.accept Dependencies.new(@graph, target.object_id, callers)
+    end
+    # Keep definition order so the first diagnostic chain stays stable.
+    # Later callers run in this sweep; earlier callers run in the next.
+    dirty = @graph.defs.keys.to_set
     loop do
       changed = false
       @graph.defs.each_value do |target|
+        next unless dirty.delete(target.object_id)
+        @solving = target.object_id
         old = @graph.effects[target.object_id].shrink.not_nil!
         @uses.clear
         @shrinks.clear
@@ -374,20 +420,23 @@ class Iyi::TapeShrinkChecker
         effects.reject! { |root, _| translate(root, old, old.seeds.map { |r| Value.new([r], [] of View) }).empty? }
         result = Value.new(result.roots, result.views.map { |v| View.new(v.root, 0) })
         stores = old.stores.dup
-        env.each do |key, contents|
-          next unless key.starts_with?("#tape:")
-          root = key[6..].to_u64
+        env.slots.each do |root, contents|
           next if translate(root, old, old.seeds.map { |r| Value.new([r], [] of View) }).empty? && !contains_root?(result.roots, root)
           canonical = Value.new(contents.roots, contents.views.map { |v| View.new(v.root, 0) })
           stores[root] = canonical
         end
         updated = Summary.new(old.seeds, effects, merge(old.result, result), stores,
           (old.retains + @retains).uniq)
-        changed ||= updated != old
+        if updated != old
+          changed = true
+          callers[target.object_id]?.try { |ids| dirty.concat(ids) }
+          @summary_callers[target.object_id]?.try { |ids| dirty.concat(ids) }
+        end
         @graph.effects[target.object_id].shrink = updated
       end
       break unless changed
     end
+    @solving = nil
     # Project root paths conservatively onto their parameter. The wire
     # contract may overestimate a field effect, but never loses one.
     @graph.defs.each_value do |target|
@@ -462,7 +511,8 @@ class Iyi::TapeShrinkChecker
     @scopes << owner.object_id if owner
     @root_scopes.clear
     @root_births.clear
-    @root_types.select! { |root, _| env.values.any? { |v| v.roots.includes?(root) } }
+    live = (env.vars.values + env.slots.values).flat_map(&.roots).to_set
+    @root_types.select! { |root, _| live.includes?(root) }
     result = merge(value(body, env), @returns)
     if owner && !{"new", "initialize"}.includes?(owner.name)
       boundary = fresh
@@ -522,17 +572,20 @@ class Iyi::TapeShrinkChecker
   # while checking. Allocation roots are AST identities, so this lattice
   # (roots, view roots and proc identities) is finite.
   private def loop_env(env : Env, born : Int32? = nil) : Env
-    env.transform_values do |v|
+    transform = ->(v : Value) do
       Value.new(v.roots, v.views.map { |x|
         View.new(x.root, born ? Math.min(born, x.born) : x.born,
           @guards.dup)
       }.uniq, v.procs, v.unknown_proc)
     end
+    Env.new(env.vars.transform_values { |v| transform.call(v) },
+      env.slots.transform_values { |v| transform.call(v) })
   end
 
   private def join_env(a : Env, b : Env) : Env
     result = a.dup
-    b.each { |key, v| result[key] = merge(result[key]? || EMPTY, v) }
+    b.vars.each { |key, v| result[key] = merge(result[key]? || EMPTY, v) }
+    b.slots.each { |key, v| result.slots[key] = merge(result.slots[key]? || EMPTY, v) }
     result
   end
 
@@ -565,7 +618,9 @@ class Iyi::TapeShrinkChecker
     end
     # A while condition is evaluated once more on the exit edge.
     value(cond, round) if cond
-    join_env(head, round).each { |key, v| env[key] = v }
+    joined = join_env(head, round)
+    joined.vars.each { |key, v| env[key] = v }
+    joined.slots.each { |key, v| env.slots[key] = v }
     @scopes.pop
     result
   end
@@ -661,8 +716,8 @@ class Iyi::TapeShrinkChecker
       if storage_receiver && SHRINK.includes?(node.name)
         shrink(receiver.roots, node, chain(node.name))
         if node.name == "clear" && receiver.roots.size == 1
-          env.reject! do |key, _|
-            key.starts_with?("#tape:") && contains_root?(receiver.roots, key[6..].to_u64)
+          env.slots.reject! do |key, _|
+            contains_root?(receiver.roots, key)
           end
         end
       end
@@ -675,9 +730,9 @@ class Iyi::TapeShrinkChecker
       if node.obj.try(&.type?.try(&.to_s.starts_with?("Ary("))) &&
          {"[]", "[]?", "first", "first?", "last", "last?", "fetch", "__loop_fetch"}.includes?(node.name)
         elements = receiver.roots.map { |r| field_root(r, "[]").as(UInt64) }
-        if !elements.empty? && elements.all? { |r| env.has_key?(slot(r)) }
+        if !elements.empty? && elements.all? { |r| env.slots.has_key?(r) }
           element_result = elements.reduce(EMPTY) do |result, root|
-            contents = value_holder?(node.type?) ? Value.new([root], [] of View) : env[slot(root)]
+            contents = value_holder?(node.type?) ? Value.new([root], [] of View) : env.slots[root]
             merge(result, stored(contents, env))
           end
         end
@@ -689,7 +744,7 @@ class Iyi::TapeShrinkChecker
       incomplete_result = false
       targets = @graph.targets(node)
       if targets && !targets.empty?
-        before_calls = env.dup
+        before_calls = env
         after_calls : Env? = nil
         targets.each do |target|
           call_env = before_calls.dup
@@ -725,6 +780,11 @@ class Iyi::TapeShrinkChecker
               end
             end
           elsif summary = @graph.effects[target.object_id]?.try(&.shrink)
+            # A proc obtained from a summary can execute a body outside
+            # the lexical call tree. Record the summaries it reads too.
+            if caller = @solving
+              (@summary_callers[target.object_id] ||= Set(UInt64).new) << caller
+            end
             summarized = true
             actuals = [receiver] + target.args.map_with_index do |arg, i|
               named[arg.external_name]? || args[i]? || EMPTY
@@ -759,7 +819,8 @@ class Iyi::TapeShrinkChecker
         end
         if joined = after_calls
           env.clear
-          joined.each { |key, contents| env[key] = contents }
+          joined.vars.each { |key, contents| env[key] = contents }
+          joined.slots.each { |key, contents| env.slots[key] = contents }
         end
       elsif !TapeRules.runtime?(@program, node.location)
         inputs.each do |v|
@@ -793,6 +854,7 @@ class Iyi::TapeShrinkChecker
         @callback_chain.pop
         use(yielded, block)
         env.keys.each { |key| env[key] = merge(env[key], outer[key]? || EMPTY) }
+        env.slots.each_key { |key| env.slots[key] = merge(env.slots[key], outer.slots[key]? || EMPTY) }
       end
       inputs.each do |input|
         input.procs.each do |literal|
@@ -807,6 +869,7 @@ class Iyi::TapeShrinkChecker
           @callback_chain << "#{node.name} proc"
           loop_value(literal.def.body, captured)
           env.keys.each { |key| env[key] = merge(env[key], captured[key]? || EMPTY) }
+          env.slots.each_key { |key| env.slots[key] = merge(env.slots[key], captured.slots[key]? || EMPTY) }
           @callback_chain.pop
           @active_procs.delete(literal.object_id)
         end
@@ -837,7 +900,7 @@ class Iyi::TapeShrinkChecker
         call_result.roots.each { |r| @root_types[r] ||= node.type }
         if storage?(node)
           aliases = call_result.roots.flat_map do |root|
-            (env[slot(root)]?.try(&.roots) || [] of UInt64).reject do |source|
+            (env.slots[root]?.try(&.roots) || [] of UInt64).reject do |source|
               # Constructor storage built into a field is represented by
               # its receiver until rebased here. It is not an alias of
               # every sibling field in that receiver.
@@ -849,7 +912,7 @@ class Iyi::TapeShrinkChecker
         call_result = stored(call_result, env)
         views = call_result.views
         unless storage?(node) || value_holder?(node.type?)
-          views += call_result.roots.reject { |r| env.has_key?(slot(r)) }.map { |r| view(r) }
+          views += call_result.roots.reject { |r| env.slots.has_key?(r) }.map { |r| view(r) }
         end
         result = Value.new(call_result.roots, views)
         use(result, node)
@@ -878,6 +941,9 @@ class Iyi::TapeShrinkChecker
       @scopes.pop
       @guards.pop
       (left.keys | right.keys).each { |key| env[key] = merge(left[key]? || EMPTY, right[key]? || EMPTY) }
+      (left.slots.keys | right.slots.keys).each do |key|
+        env.slots[key] = merge(left.slots[key]? || EMPTY, right.slots[key]? || EMPTY)
+      end
       result = merge(a, b)
       boundary = node.object_id
       @root_scopes[boundary] = @scopes.dup
