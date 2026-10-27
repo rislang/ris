@@ -334,13 +334,14 @@ else
 fi
 
 # Panics end the task; rescue cannot observe a half-built binding.
+# Retained panic text adds one program-owned tape mapping and scope.
 expect owner_construction_rescue 'iyi has no exceptions to rescue'
 out=$(RIS_TAPE_STATS=1 "$RIS" run test/ris/owner_construction_panic.ri 2>&1)
 if [ "$?" -eq 0 ] &&
     grep -qF 'PASS: owner construction panic cleanup' <<<"$out" &&
     [ "$(grep -cF 'iyi: panic: expected owner construction panic' <<<"$out")" -eq 100 ] &&
     ! grep -qF 'half-built owner became observable' <<<"$out" &&
-    grep -qF '201 scopes, 5 mappings made, 0 unmapped' <<<"$out"; then
+    grep -qF '202 scopes, 6 mappings made, 0 unmapped' <<<"$out"; then
   echo "runs     owner_construction_panic (bounded scope cleanup)"
 else
   echo "FAILED   owner_construction_panic: $out"
@@ -666,6 +667,14 @@ if [ "$?" -eq 0 ] &&
   echo "runs     http_continue"
 else
   echo "FAILED   http_continue: $out"; status=1
+fi
+expect http_server_listener 'Server.serve(host, port, config, Handler)'
+expect http_server_resource_config 'open and use resources'
+out=$(RIS="$RIS" python3 test/ris/http_prefork.py 2>&1)
+if [ "$?" -eq 0 ]; then
+  printf '%s\n' "$out"
+else
+  echo "FAILED   http_prefork: $out"; status=1
 fi
 out=$("$RIS" run test/ris/answer.ri 2>&1)
 if [ "$out" = 'PASS: read and answered on the tape, fast path and not' ]; then echo "runs     answer"; else echo "FAILED   answer: $out"; status=1; fi
@@ -1211,6 +1220,12 @@ else
   echo "FAILED   serve full loop: $out"
   status=1
 fi
+out=$("$RIS" run --no-gc test/ris/server_owners.ri 2>&1)
+if [ "$?" -eq 0 ] && grep -qF 'task-local shutdown' <<<"$out"; then
+  echo "runs     server_owners (--no-gc, cancellation cleanup)"
+else
+  echo "FAILED   server_owners: $out"; status=1
+fi
 # Repeated joined groups must reuse task and request tape storage.
 out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 "$RIS" run --release --no-gc \
   test/ris/server_groups.ri 2>&1)
@@ -1220,7 +1235,7 @@ mappings=$(sed -n \
 if [ "$code" -eq 0 ] &&
     grep -qxF 'PASS: server groups' <<<"$out" &&
     grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out" &&
-    [ -n "$mappings" ] && [ "$mappings" -le 28 ] &&
+    [ -n "$mappings" ] && [ "$mappings" -le 29 ] &&
     grep -qF '0 growth moves' <<<"$out" &&
     grep -qF '0 side regions (0 transfer bytes copied)' <<<"$out"; then
   echo "runs     server_groups (20 groups, 20000 requests, bounded tape)"

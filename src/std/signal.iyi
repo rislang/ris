@@ -1,14 +1,14 @@
 # Signals: a program told to stop, as a value it waits for.
 #
 #     group do |g|
-#       g.spawn { Server.serve(listener) { |request| answer(request) }; 0 }
 #       g.spawn do
-#         Signal.wait(Signal::INT, Signal::TERM)
-#         listener.close   # the server stops taking connections
+#         Server.serve("0.0.0.0", 3000, config, Handler)
 #         0
 #       end
+#       Signal.wait(Signal::INT, Signal::TERM)
+#       g.cancel_children  # accepts and in-flight IO stop before join
 #     end
-#     puts "bye"           # the group's end waited for the requests in flight
+#     puts "bye"
 #
 # `wait` parks the fiber until one of the signals it names arrives and
 # answers which, or `Cancelled` if its task is. From the first `wait` that
@@ -16,8 +16,8 @@
 # and SIGTERM no longer end the process - and every arrival is kept until
 # a `wait` takes it, so one that comes before the `wait` is not lost; a
 # signal nobody has named keeps its default. A graceful stop is then
-# ordinary structured concurrency: close what takes new work, let the
-# group join what is in flight.
+# ordinary structured concurrency: cancel the server group and let it
+# join after its task-owned resources close.
 #
 # Underneath, on Linux and darwin, the handler does the one thing a signal
 # handler may: it sets an atomic flag and wakes a pipe. The waiting fiber
@@ -117,8 +117,8 @@ class SignalWaiter
   # The signals whose handler is installed, one bit each.
   @@installed = 0_u64
 
-  def self.listed(signals : Tuple) : Array(Signal)
-    list = [] of Signal
+  def self.listed(signals : Tuple) : Ary(Signal)
+    list = Ary(Signal).new(signals.size)
     index = 0
     while index < signals.size
       list << signals[index]
@@ -176,7 +176,7 @@ class SignalWaiter
     @@write_fd = -1
   {% end %}
 
-  def self.wait(signals : Array(Signal)) : Signal | Cancelled
+  def self.wait(signals : Ary(Signal)) : Signal | Cancelled
     raise "Signal.wait: name at least one signal" if signals.empty?
     wanted = 0_u64
     signals.each do |signal|
@@ -200,7 +200,7 @@ class SignalWaiter
   end
 
   # The first of *signals* that has arrived, taken off the pending bits.
-  private def self.take(signals : Array(Signal)) : Signal?
+  private def self.take(signals : Ary(Signal)) : Signal?
     signals.each do |signal|
       bit = 1_u64.unsafe_shl(signal.value.to_u64)
       if @@pending & bit != 0_u64
@@ -322,7 +322,8 @@ class SignalWaiter
     # write must never block, and the read end is waited on through the
     # poller.
     private def self.open_pipe : Nil
-      fds = Pointer(Int32).malloc(2_u64)
+      storage = uninitialized Int32[2]
+      fds = pointerof(storage).as(Pointer(Int32))
       {% if flag?(:darwin) %}
         raise "Signal.wait: pipe failed" if LibC.pipe(fds) != 0
         2.times do |end_|
@@ -350,14 +351,16 @@ class SignalWaiter
     private def self.handle(signal : Int32) : Nil
       entry = IyiStackGuard.address_of_handler(->(number : Int32, info : Void*, context : Void*) { SignalWaiter.arrived(number) })
       {% if flag?(:darwin) %}
-        action = Pointer(UInt64).malloc(2_u64)
+        storage = uninitialized UInt64[2]
+        action = pointerof(storage).as(Pointer(UInt64))
         action[0] = entry
         # sa_mask 0, sa_flags SA_SIGINFO (0x40) | SA_RESTART (0x02), in the
         # high half.
         action[1] = 0x0000004200000000_u64
         raise "Signal.wait: sigaction failed for #{signal}" if LibC.sigaction(signal, action.as(Void*), Pointer(Void).new(0_u64)) != 0
       {% else %}
-        action = Pointer(UInt64).malloc(4_u64)
+        storage = uninitialized UInt64[4]
+        action = pointerof(storage).as(Pointer(UInt64))
         action[0] = entry
         {% if flag?(:x86_64) %}
           # SA_SIGINFO | SA_RESTORER | SA_RESTART.
@@ -376,12 +379,14 @@ class SignalWaiter
     # *signal*'s action set to SIG_IGN (1) or SIG_DFL (0).
     def self.disposition(signal : Int32, handler : UInt64) : Nil
       {% if flag?(:darwin) %}
-        action = Pointer(UInt64).malloc(2_u64)
+        storage = uninitialized UInt64[2]
+        action = pointerof(storage).as(Pointer(UInt64))
         action[0] = handler
         action[1] = 0_u64
         raise "Signal: sigaction failed for #{signal}" if LibC.sigaction(signal, action.as(Void*), Pointer(Void).new(0_u64)) != 0
       {% else %}
-        action = Pointer(UInt64).malloc(4_u64)
+        storage = uninitialized UInt64[4]
+        action = pointerof(storage).as(Pointer(UInt64))
         4.times { |index| action[index] = 0_u64 }
         action[0] = handler
         done = __iyi_conc_syscall6(IYI_SG_SYS_RT_SIGACTION, signal.to_i64, action.address.to_i64, 0_i64, 8_i64, 0_i64, 0_i64)

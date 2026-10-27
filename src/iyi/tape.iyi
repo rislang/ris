@@ -134,7 +134,7 @@ module Tape
   # Validate the public shape, not the pointers backing tape containers.
   # The path is a type tuple, so recursive class shapes stop at compile time.
   def self.check_copy(type : T.class, path : P.class) : Nil forall T, P
-    {% if T.name == "Std::Socket::IyiSocket" || T.name == "Std::Io::PipeReader" || T.name == "Std::Io::PipeWriter" %}
+    {% if T.name == "Std::Socket::IyiSocket" || T.name == "Std::Io::PipeReader" || T.name == "Std::Io::PipeWriter" || T.name == "RisTaskConfig" %}
       {% raise "resources cannot copy_to; do this work in the receiving task, or send it a message" %}
     {% elsif T < ::Pointer || T.name.starts_with?("Ary::Link(") %}
       {% raise "copy_to refuses pointers and self-relative links;\nbuild on the destination with Ary nodes and indices" %}

@@ -8,6 +8,14 @@ back.
 
 ## To take to iyi
 
+* std/signal: syscall scratch buffers use fixed stack storage. Signal
+  lists use Ary in ris; keep the Array variant in iyi.
+
+* std/socket: optional SO_REUSEPORT on Linux and Darwin, with explicit
+  refusal elsewhere; value-returning listen_result closes failed setup
+  descriptors and lets servers distinguish setup failure from a panic.
+  Task-owned socket state and copied HTTP configuration stay in ris.
+
 * Channel: waking a receiver does not release a buffered slot, so the
   ring never grows; a full send parks and a receive refills its slot.
 

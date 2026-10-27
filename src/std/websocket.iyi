@@ -28,7 +28,7 @@
 # `WebSocketError`; a server that does not answer 101 is the `HTTPError`
 # `HTTP.upgrade` names it with. `wss://` is the same over std/tls, its
 # certificate checked against `HTTP.tls_config` and ALPN offering
-# `http/1.1`; a server under `Server.serve(tls:)` hands `upgrade`'s block
+# `http/1.1`; a server with Handler#tls_config hands `upgrade`'s block
 # the TLS stream in the same way. With `proxy:` the handshake goes through
 # an `http://` proxy's CONNECT tunnel, for `ws://` as for `wss://`, the
 # proxy's credential on the CONNECT alone (std/http's `HTTP.upgrade`).

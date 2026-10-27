@@ -34,6 +34,11 @@ for them until then.
   task; keep IdleConns local. Define shutdown and unsupported-platform
   refusal. Gate: simultaneous listeners, N-connection bound, keepalive/TLS,
   panic/cancel cleanup and existing HTTP tests without resource transfers.
+  The prefork core and std/sample callers are ported. Finish the 45 old
+  listener/block call sites in 13 bench/*.iyi exercise files before this
+  item is removed; those forms now refuse with the factory replacement.
+  The exercises' shared observation state needs copied result messages;
+  autocert's shared-manager exercises also need the manager port below.
 * Enforce Share-or-copy task captures, local and parallel, through captured
   receivers, handlers and reached state; keep all resources in their
   opening task. Gate: mutable/resource captures refused with safe forms,

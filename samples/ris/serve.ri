@@ -11,7 +11,7 @@
 module samples/serve
 
 import std/socket::{IyiSocket}
-import std/http::{Server, Outgoing}
+import std/http::{Server, Incoming, Outgoing}
 
 N = 200000
 REQUEST = Str.view("GET /users/42?full=1 HTTP/1.1\r\nHost: localhost\r\n" \
@@ -35,28 +35,34 @@ def drain(socket : IyiSocket, want : Int64) : Int64
   got
 end
 
-# Program-owned sockets let the joined tasks use noncapturing procs.
-module Loopback
-  @@listener : IyiSocket? = nil
-  @@client : IyiSocket? = nil
-  @@want = 0_i64
+# Select the port before tasks start; only its scalar crosses the board.
+def choose_port : Int32
+  probe = IyiSocket.listen(0)
+  port = probe.local_port
+  probe.close
+  port
+end
 
-  def self.listener : IyiSocket
-    @@listener || raise "listener not set up"
+struct Settings
+  getter port : Int32
+  def initialize(@port)
+  end
+end
+
+struct Ready
+end
+
+struct Handler
+  def initialize(config : Int32)
   end
 
-  def self.client : IyiSocket
-    @@client || raise "client not set up"
+  def listening(port : Int32) : Nil
+    RisBoard.post(Ready.new)
   end
 
-  def self.want : Int64
-    @@want
-  end
-
-  def self.setup(want : Int64) : Nil
-    @@want = want
-    @@listener = IyiSocket.listen(0)
-    @@client = IyiSocket.connect("127.0.0.1", listener.local_port).or_panic
+  def call(req : Incoming, res : Outgoing) : Nil
+    res.header("Content-Type", "application/json")
+    res.body.append(BODY)
   end
 end
 
@@ -65,22 +71,25 @@ response.header("Content-Type", "application/json")
 response.body << BODY
 reply = Server.format_response(response, false, false)
 want = reply.bytesize.to_i64 * N
-Loopback.setup(want)
+port = choose_port
+RisBoard.post(Settings.new(port))
 batch = REQUEST * 1000
 got = 0_i64
 group do |g|
   g.spawn do
-    Server.answer(Loopback.listener) do |req, res|
-      res.header("Content-Type", "application/json")
-      res.body.append(BODY)
-    end
+    settings = RisBoard.take(Settings).or_panic
+    Server.answer("127.0.0.1", settings.port, 0, Handler, max_connections: 1)
     0
   end
-  reader = g.spawn { drain(Loopback.client, Loopback.want) }
-  (N // 1000).times { Loopback.client.write(batch).or_panic }
-  got = reader.value
-  Loopback.client.close
-  Loopback.listener.close
+  RisBoard.take(Ready).or_panic
+  client = IyiSocket.connect("127.0.0.1", port).or_panic
+  # The client owns its socket and alternates bounded writes and reads.
+  (N // 1000).times do
+    client.write(batch).or_panic
+    got += drain(client, reply.bytesize.to_i64 * 1000)
+  end
+  client.close
+  g.cancel_children
 end
-raise "read #{got} of #{Loopback.want} bytes" unless got == Loopback.want
+raise "read #{got} of #{want} bytes" unless got == want
 puts "#{N} requests"

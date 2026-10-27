@@ -164,6 +164,48 @@ keep its IdleConns and mutable handler state local. A configuration copy
 is not a copy of an open listener, TLS connection or manager. Unsupported
 SO_REUSEPORT targets need an explicit refusal, not shared-listener fallback.
 
+The server entry points take an address and a factory type:
+
+```text
+Server.answer(host, port, config, Handler, max_connections: n)
+Server.serve(host, port, config, Handler, max_connections: n)
+```
+
+`Handler.new(config)` runs on each serving task with an independent
+checked packed copy of `config`. `answer` calls `Handler#call(Incoming,
+Outgoing)`; `serve` calls `Handler#call(Request)` and uses its Response.
+A factory type replaces a captured callback: construct mutable routers,
+TLS configuration and managers there, using copied values or file paths.
+An open socket, a proc, a class or a resource-containing config is refused.
+An optional `Handler#tls_config` supplies that task's TLS configuration to
+`serve`; it replaces the old `tls:` argument. An optional
+`Handler#listening(port)` runs after that worker's listener has opened.
+It may post a nominal readiness message to the caller.
+
+The old open-listener/block overloads are refused with the replacement
+form. A caller chooses one port in 1..65535 before starting the pool;
+port zero is refused. `max_connections` is the positive number of serving
+tasks, including connections idle between keep-alive requests. The old
+zero-for-unlimited mode is refused. The kernel distributes new connections
+among listeners; it promises neither equal queues nor global FIFO order.
+
+A supervisor for each serving task observes its completion in an inner
+group. A handler panic unwinds and closes that task's client and listener;
+the supervisor consumes Panicked and starts a fresh worker, rebuilding
+state from the original config. A worker cancelled independently of the
+pool is replaced too. Other workers keep serving. Supervisors
+hold packed configuration only, never sockets, handlers or IdleConns.
+Listener setup errors fail the pool rather than retrying or falling back
+to a shared listener. The pool's joining caller retains the immutable
+packed image until all supervisors and readers have stopped.
+
+Shutdown is cancellation of the enclosing group. It stops pending accepts
+and cancels in-flight reads, writes and TLS handshakes. Client and listener
+defers run before the group joins; an application callback must cooperate
+with cancellation just as any other grouped task must. This API does not
+promise a graceful response drain. A signal waiter can cancel the server's
+group; there is no foreign task closing a listener or traversing IdleConns.
+
 Pipe and socket race IO stay within one task using OS facilities on the
 poller. A pipe pump must interleave reads/writes, preserve partial IO and
 handle EOF, EPIPE and cancel; filling it before reading can deadlock.

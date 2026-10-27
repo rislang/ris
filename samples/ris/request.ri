@@ -4,7 +4,8 @@
 #
 # The request's bytes, the parsed head and the response are made inside
 # `tape do ... end` and freed together when it ends: nothing to collect.
-# The user table lives on the program tape.
+# This parser example has no listener or spawned task. Its users table
+# stays on the caller's tape.
 
 module samples/request
 

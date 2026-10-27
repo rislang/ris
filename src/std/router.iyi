@@ -574,7 +574,9 @@ end
 #     router = Router.new
 #     router.handle("GET /users/{id}") { |req, params| Response.new(200, params["id"]) }
 #     router.handle("/static/") { |req, params| FileServer.serve(root, req) }
-#     Server.serve(listener) { |req| router.call(req) }
+#     # Build this router inside Handler.new(copied_config), then use:
+#     # Handler#call(req) = @router.call(req)
+#     Server.serve("0.0.0.0", 3000, config, Handler)
 #
 # `handle` panics on a pattern that is not one, on one that conflicts with
 # a pattern already registered, and after the router has answered a

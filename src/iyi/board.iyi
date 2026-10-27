@@ -248,7 +248,7 @@ private module RisBoardCodec(T)
     {% elsif T.name.starts_with?("StaticArray(") %}
       {% raise "RisBoard refuses fixed-array layout at #{P}; use Ary of " +
         "Copyable elements" %}
-    {% elsif T.name == "Std::Socket::IyiSocket" || T.name == "Std::Io::PipeReader" || T.name == "Std::Io::PipeWriter" %}
+    {% elsif T.name == "Std::Socket::IyiSocket" || T.name == "Std::Io::PipeReader" || T.name == "Std::Io::PipeWriter" || T.name == "RisTaskConfig" %}
       {% raise "RisBoard refuses resource at #{P}; open and use resources " +
         "in the receiving task" %}
     {% elsif T == Str || T == Nil || T == Bool || T == Char || T == Symbol || T < Number || T < Enum %}
@@ -607,5 +607,38 @@ module RisBoard
     value = answer[0]
     return value if value.is_a?(T)
     raise "board missing committed value"
+  end
+end
+
+# Runtime immutable task configuration image. The joining caller
+# retains the packed bytes until every reader ends; each read constructs
+# independent values on the reading task's tape. No resource is packed.
+struct RisTaskConfig
+  @address : UInt64
+  @length : UInt64
+
+  def initialize(value : T) forall T
+    RisBoardCodec(T).check(Tuple(T), Tuple())
+    offset = 0_u64
+    count = 0_u64
+    RisBoardCodec(T).write(value,
+      RisBoardCursor.new(0_u64, pointerof(offset), pointerof(count)))
+    @length = offset > 0 ? offset : 1_u64
+    @address = __iyi_mmap(@length).address
+    offset = 0_u64
+    count = 0_u64
+    RisBoardCodec(T).write(value,
+      RisBoardCursor.new(@address, pointerof(offset), pointerof(count)))
+  end
+
+  def read(type : T.class) : T forall T
+    offset = 0_u64
+    count = 0_u64
+    RisBoardCodec(T).read(
+      RisBoardCursor.new(@address, pointerof(offset), pointerof(count)))
+  end
+
+  def close : Nil
+    __iyi_munmap(@address, @length)
   end
 end

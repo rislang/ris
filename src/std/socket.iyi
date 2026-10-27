@@ -388,6 +388,7 @@ end
 pub struct IyiSocket
   # Copies share descriptor state, retained on the program owner.
   struct State
+    property task_owned : Bool = false
     property fd : Int32
     property family : Int32
     # A unix listener retains its path until close removes it.
@@ -416,9 +417,13 @@ pub struct IyiSocket
   # The address family, the platform's number for it: an accepted
   # connection is its listener's, and on Windows the socket `AcceptEx`
   # fills in has to be made in it.
-  def initialize(fd : Int32, family : Int32 = AF_INET)
-    @state = Pointer(State).new(RisRegion.program_bytes(sizeof(State).to_u64))
+  def initialize(fd : Int32, family : Int32 = AF_INET,
+                 task_owned : Bool = false)
+    address = task_owned ? RisRegion.tape_bytes(sizeof(State).to_u64) :
+      RisRegion.program_bytes(sizeof(State).to_u64)
+    @state = Pointer(State).new(address)
     @state.value = State.new(fd, family)
+    @state.value.task_owned = task_owned
   end
 
   # The bounds on a read's and a write's wait, in milliseconds; nil waits
@@ -909,7 +914,8 @@ pub struct IyiSocket
         IyiSocket.__sys_no_sigpipe(client_fd)
         IyiSocket.__send_at_once(client_fd, @state.value.family)
         IyiSocket.__sys_set_nonblock(client_fd)
-        return IyiSocket.new(client_fd, @state.value.family)
+        return IyiSocket.new(client_fd, @state.value.family,
+          task_owned: @state.value.task_owned)
       end
       unless IyiSocket.__sys_would_block?(client_fd.to_i64)
         error = SocketError.new("accept a connection", IyiSocket.__sys_code(client_fd.to_i64))
@@ -1201,38 +1207,69 @@ pub struct IyiSocket
     end
   {% end %}
 
-  # Bind borrows the address; its legacy failure keeps operation text.
-  @[TapeToHeap]
+  # A failed setup is a value so a supervisor can distinguish it from a
+  # request panic. The socket is never published before setup succeeds.
   @[TapeUnsafe]
-  def self.listen(host : String | Str, port : Int32, backlog : Int32 = 128) : IyiSocket
+  def self.listen_result(host : String | Str, port : Int32,
+                        backlog : Int32 = 128,
+                        reuse_port : Bool = false,
+                        task_owned : Bool = false) : IyiSocket | SocketError
+    {% unless flag?(:linux) || flag?(:darwin) %}
+      return SocketError.new("SO_REUSEPORT unsupported", 0) if reuse_port
+    {% end %}
     addr, family = sockaddr(host, port)
     fd = __sys_socket(family)
-    raise "cannot create socket" if fd < 0
-
+    return SocketError.new("socket", __sys_code(fd.to_i64)) if fd < 0
     __sys_set_reuseaddr(fd)
+    if reuse_port
+      option = __sys_set_reuseport(fd)
+      if option < 0
+        code = __sys_code(option.to_i64)
+        __sys_close(fd)
+        return SocketError.new("SO_REUSEPORT", code)
+      end
+    end
     __sys_set_v6only(fd) if family == AF_INET6
-
-    # With the reason, which the refusal dropped: a port somebody holds
-    # and one the system forbids - on Windows, a range Hyper-V or WSL
-    # reserved - read alike.
+    # Keep the reason: a port somebody holds and one the system forbids
+    # (including Windows reserved port ranges) must not read alike.
     bound = __sys_bind(fd, addr.to_unsafe, family)
     if bound < 0
       code = __sys_code(bound.to_i64)
       __sys_close(fd)
-      raise "cannot bind socket to #{endpoint(host, port)}: #{SocketError.new("bind", code).reason}"
+      return SocketError.new("bind", code)
     end
-
-    if __sys_listen(fd, backlog) < 0
+    listening = __sys_listen(fd, backlog)
+    if listening < 0
+      code = __sys_code(listening.to_i64)
       __sys_close(fd)
-      raise "cannot listen on socket"
+      return SocketError.new("listen", code)
     end
-
     __sys_set_nonblock(fd)
-    IyiSocket.new(fd, family)
+    IyiSocket.new(fd, family, task_owned: task_owned)
   end
 
-  def self.listen(port : Int32, backlog : Int32 = 128) : IyiSocket
-    listen("0.0.0.0", port, backlog)
+  @[TapeToHeap]
+  def self.listen(host : String | Str, port : Int32, backlog : Int32 = 128,
+                  reuse_port : Bool = false) : IyiSocket
+    result = listen_result(host, port, backlog, reuse_port)
+    if result.is_a?(SocketError)
+      case result.operation
+      when "socket"
+        raise "cannot create socket"
+      when "bind"
+        raise "cannot bind socket to #{endpoint(host, port)}: #{result.reason}"
+      when "listen"
+        raise "cannot listen on socket"
+      else
+        raise "cannot set SO_REUSEPORT: #{result.reason}"
+      end
+    end
+    result
+  end
+
+  def self.listen(port : Int32, backlog : Int32 = 128,
+                  reuse_port : Bool = false) : IyiSocket
+    listen("0.0.0.0", port, backlog, reuse_port)
   end
 
   # A stream socket at *path*. The path must not exist: a socket file an
@@ -1829,6 +1866,11 @@ pub struct IyiSocket
       LibC.setsockopt(fd, 0xffff, 0x0004, pointerof(val).as(Void*), 4_u32)
     end
 
+    def self.__sys_set_reuseport(fd : Int32) : Int32
+      val = 1_i32
+      LibC.setsockopt(fd, 0xffff, 0x0200, pointerof(val).as(Void*), 4_u32)
+    end
+
     # IPV6_V6ONLY (27) at IPPROTO_IPV6 (41).
     def self.__sys_set_v6only(fd : Int32) : Int32
       val = 1_i32
@@ -2093,6 +2135,12 @@ pub struct IyiSocket
     def self.__sys_set_reuseaddr(fd : Int32) : Int32
       val = 1_i32
       __sys5(SYS_SETSOCKOPT, fd.to_i64, 1_i64, 2_i64, pointerof(val).address.to_i64, 4_i64).to_i32
+    end
+
+    def self.__sys_set_reuseport(fd : Int32) : Int32
+      val = 1_i32
+      __sys5(SYS_SETSOCKOPT, fd.to_i64, 1_i64, 15_i64,
+        pointerof(val).address.to_i64, 4_i64).to_i32
     end
 
     # IPV6_V6ONLY (26) at IPPROTO_IPV6 (41).
@@ -2651,6 +2699,10 @@ pub struct IyiSocket
       LibWs2_32.setsockopt(__sys_handle(fd), SOL_SOCKET, -5, pointerof(val).as(Void*), 4)
     end
 
+    def self.__sys_set_reuseport(fd : Int32) : Int32
+      -1
+    end
+
     # IPV6_V6ONLY (27) at IPPROTO_IPV6 (41). Windows' default already, and
     # said anyway: the default is a registry's, and this is the program's.
     def self.__sys_set_v6only(fd : Int32) : Int32
@@ -3009,6 +3061,10 @@ pub struct IyiSocket
     end
 
     def self.__sys_set_reuseaddr(fd : Int32) : Int32
+      -1
+    end
+
+    def self.__sys_set_reuseport(fd : Int32) : Int32
       -1
     end
 

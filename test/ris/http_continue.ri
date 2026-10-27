@@ -3,7 +3,7 @@
 module test/ris/http_continue
 
 import std/socket::{IyiSocket}
-import std/http::{Server, Response, HTTPError, Conn, BodyReader}
+import std/http::{Server, Request, Response, HTTPError, Conn, BodyReader}
 import std/tuple
 
 {% if flag?(:linux) %}
@@ -31,59 +31,89 @@ def read_to_close(socket : IyiSocket) : String
   end
 end
 
+struct Listening
+end
+struct Pending
+end
+struct Proceed
+end
+struct Checked
+  getter passed : Bool
+  def initialize(@passed)
+  end
+end
+
+struct Handler
+  @chunked : Bool
+  @reset_peer : Bool
+  @cancel : Bool
+
+  def initialize(config : Tuple(Bool, Bool, Bool))
+    @chunked, @reset_peer, @cancel = config
+  end
+
+  def listening(port : Int32) : Nil
+    RisBoard.post(Listening.new)
+  end
+
+  def call(req : Request) : Response
+    reader = req.body_io
+    if @reset_peer
+      RisBoard.post(Pending.new)
+      RisBoard.take(Proceed).or_panic
+    elsif @cancel
+      IyiScheduler.cancel(IyiScheduler.current)
+    end
+    passed = false
+    if @reset_peer || @cancel
+      fault = reader.read(1)
+      again = reader.read(1)
+      if @reset_peer
+        expected = @chunked ? "the connection failed before the body" :
+          "the body ended after 0 of its 3 bytes"
+        passed = fault.is_a?(HTTPError) && fault.reason == expected &&
+          again.is_a?(HTTPError) && again.reason == expected
+      else
+        passed = fault.is_a?(Cancelled) && again.is_a?(Cancelled)
+      end
+    else
+      first = reader.read(1).or_panic
+      RisBoard.post(Pending.new)
+      rest = reader.read_all.or_panic
+      passed = first == "a" && rest == "bc" &&
+        reader.read(1).or_panic.empty?
+    end
+    RisBoard.post(Checked.new(passed))
+    Response.new(200, "ok")
+  end
+end
+
 def exchange(chunked : Bool, reset_peer : Bool = false,
              cancel : Bool = false) : Nil
-  listener = IyiSocket.listen(0)
-  ready = Channel(Bool).new
-  proceed = Channel(Bool).new
+  probe = IyiSocket.listen(0)
+  port = probe.local_port
+  probe.close
   passed = false
-  handler_fiber = nil
   group do |g|
-    serving = g.spawn do
-      Server.serve(listener, stream_bodies: true) do |req|
-        defer listener.close
-        reader = req.body_io
-        if reset_peer
-          ready.send(true).or_panic
-          proceed.receive.or_panic
-        elsif cancel
-          handler_fiber = IyiScheduler.current
-        end
-        if reset_peer || cancel
-          fault = reader.read(1)
-          again = reader.read(1)
-          if reset_peer
-            expected = chunked ? "the connection failed before the body" :
-              "the body ended after 0 of its 3 bytes"
-            passed = fault.is_a?(HTTPError) && fault.reason == expected &&
-              again.is_a?(HTTPError) && again.reason == expected
-          else
-            passed = fault.is_a?(Cancelled) && again.is_a?(Cancelled)
-          end
-        else
-          first = reader.read(1).or_panic
-          ready.send(true).or_panic
-          rest = reader.read_all.or_panic
-          passed = first == "a" && rest == "bc" &&
-            reader.read(1).or_panic.empty?
-        end
-        Response.new(200, "ok")
-      end
+    g.spawn do
+      Server.serve("127.0.0.1", port, {chunked, reset_peer, cancel}, Handler,
+        stream_bodies: true, max_connections: 1)
       0
     end
-    client = IyiSocket.connect("127.0.0.1", listener.local_port).or_panic
+    RisBoard.take(Listening).or_panic
+    client = IyiSocket.connect("127.0.0.1", port).or_panic
     client.read_timeout_ms = 5000
     framing = chunked ? "Transfer-Encoding: chunked" : "Content-Length: 3"
     head = "POST / HTTP/1.1\r\nHost: h\r\n#{framing}\r\n" +
       "Expect: 100-continue\r\nConnection: close\r\n\r\n"
     client.write(head).or_panic
     if reset_peer
-      ready.receive.or_panic
+      RisBoard.take(Pending).or_panic
       {% if flag?(:linux) %}
         reset(client)
       {% end %}
-      proceed.send(true).or_panic
-    else
+      RisBoard.post(Proceed.new)
+    elsif !cancel
       interim = "".to_heap
       while interim.bytesize < 25
         piece = client.read(25 - interim.bytesize).or_panic
@@ -91,27 +121,18 @@ def exchange(chunked : Bool, reset_peer : Bool = false,
         interim = interim + piece
       end
       raise "interim" unless interim == "HTTP/1.1 100 Continue\r\n\r\n"
-      if cancel
-        if fiber = handler_fiber
-          IyiScheduler.cancel(fiber)
-        else
-          raise "missing handler"
-        end
-      else
-        client.write(chunked ? "1\r\na\r\n" : "a").or_panic
-        ready.receive.or_panic
-        client.write(chunked ? "2\r\nbc\r\n0\r\n\r\n" : "bc").or_panic
-      end
+      client.write(chunked ? "1\r\na\r\n" : "a").or_panic
+      RisBoard.take(Pending).or_panic
+      client.write(chunked ? "2\r\nbc\r\n0\r\n\r\n" : "bc").or_panic
       reply = read_to_close(client)
       raise "repeated or early interim" if reply.includes?("100 Continue")
-      unless cancel
-        raise "answer" unless reply.starts_with?("HTTP/1.1 200 OK\r\n")
-      end
-      client.close
+      raise "answer" unless reply.starts_with?("HTTP/1.1 200 OK\r\n")
     end
-    serving.value.or_panic
+    passed = RisBoard.take(Checked).or_panic.passed
+    client.close unless client.closed?
+    g.cancel_children
   end
-  raise "body or sticky failure: chunked=#{chunked}, reset=#{reset_peer}, cancel=#{cancel}" unless passed
+  raise "body or sticky failure" unless passed
 end
 
 # The test wrapper exports Conn in a private module copy, so buffering is

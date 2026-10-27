@@ -1,0 +1,68 @@
+# TLS configuration and ticket state are constructed within each worker.
+module test/ris/http_prefork_tls
+
+import std/http::{Server, Request, Response}
+import std/tls::{TlsServerConfig}
+import std/socket::{IyiSocket}
+import std/signal::{Signal}
+import std/time::{Time}
+
+struct Ready
+end
+
+class Handler
+  getter tls_config : TlsServerConfig
+  @calls : Int32 = 0
+
+  def initialize(paths : Tuple(Str, Str))
+    @tls_config = TlsServerConfig.from_pem(
+      File.read(paths[0].to_heap), File.read(paths[1].to_heap)).or_panic
+    @tls_config.alpn = ["h2", "http/1.1"]
+  end
+
+  def listening(port : Int32) : Nil
+    RisBoard.post(Ready.new)
+  end
+
+  def call(req : Request) : Response
+    raise "TLS request panic" if req.path == "/panic"
+    @calls += 1
+    started = Time.monotonic_nanoseconds
+    sleep(100) if req.path == "/hold"
+    body = "#{IyiScheduler.current.object_id} #{@calls} " +
+      "#{started} #{Time.monotonic_nanoseconds}"
+    Response.new(200, body.to_heap)
+  end
+end
+
+port = Program.arguments[0].to_i
+count = Program.arguments[1].to_i
+group do |g|
+  g.spawn do
+    args = Program.arguments
+    Server.serve("127.0.0.1", port, {args[2], args[3]}, Handler,
+      max_connections: count)
+    0
+  end
+  g.spawn do
+    ready = true
+    count.times do
+      if RisBoard.take(Ready).is_a?(Cancelled)
+        ready = false
+        break
+      end
+    end
+    if ready
+      puts "READY"
+      Signal.wait(Signal::TERM)
+      g.cancel_children
+    end
+    0
+  end
+  0
+end
+# Rebind before process exit: OS teardown must not hide leaked listeners.
+probe = IyiSocket.listen("127.0.0.1", port)
+probe.close
+puts "STOPPED"
+sleep(500)

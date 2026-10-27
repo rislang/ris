@@ -838,7 +838,10 @@ end
 # server's own to answer.
 #
 #     responder = AcmeHttp01.new
-#     Server.serve(listener) { |request| responder.answer(request) || app(request) }
+#     # Build responder and app in Handler.new(copied_config).
+#     # Handler#call(request) first asks @responder.answer(request), then
+#     # falls back to @app.call(request).
+#     Server.serve("0.0.0.0", 80, config, Handler)
 pub class AcmeHttp01
   PATH = "/.well-known/acme-challenge/"
   @answers : Hash(String, String) = {} of String => String

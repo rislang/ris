@@ -1,0 +1,10 @@
+module test/ris/refused/http_server_resource_config
+import std/http::{Server, Incoming, Outgoing}
+import std/socket::{IyiSocket}
+struct Handler
+  def initialize(config : IyiSocket)
+  end
+  def call(req : Incoming, res : Outgoing) : Nil
+  end
+end
+Server.answer("127.0.0.1", 3000, IyiSocket.listen(0), Handler)

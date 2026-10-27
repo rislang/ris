@@ -3,20 +3,24 @@
 # nothing else - Go's golang.org/x/crypto/acme/autocert, over std/acme,
 # std/tls and std/http.
 #
-#     import std/autocert::{AutocertManager, AutocertDirCache}
-#     import std/http::{Server, Response}
-#     import std/socket::{IyiSocket}
+# HTTP integration uses Server.serve(host, port, config, Handler), where
+# Handler.new(config) constructs the manager on its own serving task.
+# Copy the directory URL, cache path, domain names and account settings;
+# never pass a live manager, listener or TLS configuration between tasks.
+# Handler#tls_config exposes only that worker's server configuration.
 #
-#     cache = AutocertDirCache.new("/var/lib/app/certs")
-#     manager = AutocertManager.new("https://acme-v02.api.letsencrypt.org/directory", cache, ["example.com", "www.example.com"])
-#     manager.accept_terms = true          # the CA's terms of service, agreed to
-#     manager.email = "admin@example.com"
-#     group do |g|
-#       g.spawn { manager.run; 0 }         # renewals, until `manager.stop`
-#       g.spawn { Server.serve(IyiSocket.listen(80)) { |r| manager.answer(r) || Response.new(404, "") }; 0 }
-#       Server.serve(IyiSocket.listen(443), tls: manager.tls_config) { |r| Response.new(200, "hello") }
-#       0
-#     end
+# A manager owns its challenge state too. Independent HTTP and TLS pools
+# cannot share a mutable manager to answer an HTTP-01 challenge: they need
+# an owner task with copied request/reply messages, or another supported
+# task-local challenge route. That manager integration is still listed in
+# TODO.md. The old shared-manager/listener example is not a safe fallback.
+#
+# A task-local manager is configured with AutocertDirCache for its cache,
+# the ACME directory URL and its allowed domains. Set accept_terms only
+# after accepting the CA's terms, and email to the contact address. Its
+# run method handles renewals until stop; that service must remain under
+# its owning task's group. See doc/MESSAGES.md for manager completion and
+# the remaining timed-wait and reply-routing work.
 #
 # **A certificate per name, on demand.** `tls_config` is a std/tls server
 # config whose `identity_source` is the manager: each ClientHello's
@@ -672,7 +676,8 @@ pub class AutocertManager
 
   # http-01's answer to a request on port 80
   # (`/.well-known/acme-challenge/<token>`), or nil for any other path:
-  # `Server.serve(listener) { |r| manager.answer(r) || ... }`.
+  # A task-local Handler#call asks its own manager's #answer first;
+  # Server.serve(host, port, config, Handler) builds one per worker.
   def answer(request : Request) : Response?
     @http01.answer(request)
   end

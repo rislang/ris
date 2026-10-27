@@ -1,0 +1,68 @@
+# Worker state is copied; sockets are opened and used by their worker.
+module test/ris/http_prefork
+
+import std/http::{Server, Incoming, Outgoing}
+import std/socket::{IyiSocket}
+import std/signal::{Signal}
+import std/time::{Time}
+
+struct Ready
+end
+
+@[OnTape]
+struct Handler
+  @calls : Ary(Int32)
+
+  def initialize(@calls)
+  end
+
+  def listening(port : Int32) : Nil
+    RisBoard.post(Ready.new)
+  end
+
+  def call(req : Incoming, res : Outgoing) : Nil
+    raise "request panic mentioning socket" if req.path == "/panic"
+    if req.path == "/cancel"
+      IyiScheduler.cancel(IyiScheduler.current)
+      return
+    end
+    @calls[0] += 1
+    started = Time.monotonic_nanoseconds
+    sleep(100) if req.path == "/hold"
+    res.body << IyiScheduler.current.object_id << " " << @calls[0]
+    res.body << " " << started << " " << Time.monotonic_nanoseconds
+  end
+end
+
+port = Program.arguments[0].to_i
+count = Program.arguments[1].to_i
+group do |g|
+  g.spawn do
+    config = Ary(Int32){0}
+    Server.answer("127.0.0.1", port, config, Handler,
+      max_connections: count)
+    raise "worker changed caller config" unless config[0] == 0
+    0
+  end
+  g.spawn do
+    ready = true
+    count.times do
+      if RisBoard.take(Ready).is_a?(Cancelled)
+        ready = false
+        break
+      end
+    end
+    if ready
+      puts "READY"
+      Signal.wait(Signal::TERM)
+      g.cancel_children
+    end
+    0
+  end
+  0
+end
+# Rebind before process exit: OS teardown must not hide leaked listeners.
+probe = IyiSocket.listen("127.0.0.1", port)
+probe.close
+puts "STOPPED"
+sleep(500)

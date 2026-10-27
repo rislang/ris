@@ -3156,12 +3156,14 @@ class IyiScheduler
     # dying and keep quiet rather than re-raise into the unwind.
     fiber.panicked = true
     # Only a spawned task retains its message beyond this unwind. Copy
-    # tape text here, before cleanup releases it; main exits after cleanup
-    # and needs no retained String. String messages already own their bytes.
+    # tape text here, before cleanup releases it; main exits after cleanup.
+    # Preserve the legacy String field on the explicit program owner:
+    # retained Panicked values can outlive both the worker and its group.
+    # String messages already own their bytes.
     if message.is_a?(String)
       fiber.panic_message = message
     elsif !fiber.proc.is_a?(Nil)
-      fiber.panic_message = message.to_heap
+      fiber.panic_message = RisRegion.program_text(message)
     end
     # A deadlock found while this fiber waited in a group's join: that join
     # is a cleanup already off the list, and it is finished here as a
@@ -4090,7 +4092,9 @@ class IyiGroup
       child = child.next_child
     end
     IyiSchedLock.unlock
-    raise "a task panicked: " + owed.panic_message if owed.is_a?(IyiFiber) && !me.panicked
+    if owed.is_a?(IyiFiber) && !me.panicked
+      raise "a task panicked: ".as_tape + owed.panic_message.as_tape
+    end
   end
 
   # :nodoc: — the owner taken out of this join by a deadlock

@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import selectors
+import signal
 import socket
 import subprocess
 import sys
@@ -86,6 +87,9 @@ def run_workload(binary, args, mode, *, stats=False):
                 except OSError as error:
                     # An allocation trap may close or reset the socket.
                     socket_error = error
+                # The client has consumed the complete response. Cancel
+                # the fixture's server group through its signal waiter.
+                server.send_signal(signal.SIGTERM)
                 stdout, stderr = server.communicate(timeout=30)
                 if socket_error and server.returncode == 0:
                     raise socket_error
@@ -116,6 +120,36 @@ def run_gate(source, binary, args, mode):
     return run_workload(binary, args, mode)
 
 
+def workload_source(path, scratch):
+    """Build the bounded workload fixture for a sample."""
+    source = path
+    name = Path(path).stem
+    mode = {"escape": "tape", "query": "tape",
+            "serve": "answer-request", "web": "request"}.get(
+                name, "default")
+    args = ["tape"] if mode == "tape" else []
+    if mode == "answer-request":
+        # Keep serve's loopback client and validate one full answer.
+        text = Path(path).read_text()
+        text = text.replace("N = 200000", "N = 1")
+        text = text.replace("REQUEST * 1000", "REQUEST")
+        text = text.replace("(N // 1000).times", "N.times")
+        text = text.replace("reply.bytesize.to_i64 * 1000",
+                            "reply.bytesize.to_i64")
+        source = str(Path(scratch) / f"{name}.ri")
+        Path(source).write_text(text)
+        args = ["answer"]
+    if mode == "request":
+        # Use the real sample's readiness and signal shutdown, with one
+        # task-owned listener. Its port-zero CLI chooses the shared port.
+        text = Path(path).read_text().replace(
+            "COUNT = Server::MAX_CONNECTIONS", "COUNT = 1")
+        source = str(Path(scratch) / f"{name}.ri")
+        Path(source).write_text(text)
+        args = ["0"]
+    return source, args, mode
+
+
 def main():
     budgets = {}
     if not RECORD:
@@ -134,30 +168,7 @@ def main():
         if result.returncode:
             raise RuntimeError(result.stdout + result.stderr)
         sites = measured(r"^total: (\d+)$", result.stdout)
-        source = path
-        name = Path(path).stem
-        mode = {"escape": "tape", "query": "tape",
-                "serve": "answer-request", "web": "request"}.get(
-                    name, "default")
-        args = ["tape"] if mode == "tape" else []
-        if mode == "answer-request":
-            # Keep serve's loopback client and validate one full answer.
-            text = Path(path).read_text()
-            text = text.replace("N = 200000", "N = 1")
-            text = text.replace("REQUEST * 1000", "REQUEST")
-            text = text.replace("(N // 1000).times", "N.times")
-            source = str(Path(scratch) / f"{name}.ri")
-            Path(source).write_text(text)
-            args = ["answer"]
-        if mode == "request":
-            text = Path(path).read_text()
-            # Stop accepting; the active handler still writes its response.
-            text = text.replace("Server.answer(listener) do |req, res|",
-                "Server.answer(listener) do |req, res|\n"
-                "  listener.close")
-            source = str(Path(scratch) / f"{name}.ri")
-            Path(source).write_text(text)
-            args = ["0"]
+        source, args, mode = workload_source(path, scratch)
         # The no-collector gate builds its own binary: start it now.
         gate = GATES.submit(run_gate, source,
                             str(Path(scratch) / f"gate-{index}"), args, mode)

@@ -29,8 +29,10 @@
 # (`header_values` keeps the lines apart, as a `Set-Cookie` must be
 # read), and interim 1xx answers are read past.
 #
-# **The server.** `Server.serve(listener) { |request| Response }`: a
-# fiber per connection under a group, each connection kept alive across
+# **The server.** `Server.serve(host, port, config, Handler)`: N serving
+# tasks open independent SO_REUSEPORT listeners. Handler.new(config) is
+# built from a checked config copy on each task. Its #call(Request)
+# answers a Response, with each connection kept alive across
 # requests until the client or the block's answer says `Connection:
 # close`, the client closes, or sends something that is not HTTP
 # (answered 400 and closed; a body past `Server::MAX_BODY` 413, a head
@@ -216,7 +218,7 @@ struct IdleConns
   @head : Pointer(Head)
 
   def initialize
-    @head = Pointer(Head).new(RisRegion.program_bytes(sizeof(Head).to_u64))
+    @head = Pointer(Head).new(RisRegion.tape_bytes(sizeof(Head).to_u64))
     @head.value = Head.new
   end
 
@@ -1741,6 +1743,14 @@ pub struct Outgoing
   end
 end
 
+# A startup failure is data, not a child Error which cancels its observer
+# before it can distinguish failed setup from a request panic.
+struct RisHttpStartFailure
+  getter error : SocketError
+  def initialize(@error)
+  end
+end
+
 pub struct Server
   # `serve` on the tape: the block reads the request where it arrived and
   # writes its answer into *res*, on the request's tape, freed when the
@@ -1749,77 +1759,34 @@ pub struct Server
   # an absolute-form target, HTTP/1.0) is read as `serve` reads it, then
   # handed on the same way.
   #
-  #   Server.answer(listener) do |req, res|
-  #     res.header("Content-Type", "application/json")
-  #     res.body.json { |json| json.object { json.field "path", req.path } }
+  #   struct Handler
+  #     def initialize(config : Int32)
+  #     end
+  #     def call(req : Incoming, res : Outgoing) : Nil
+  #       res.header("Content-Type", "application/json")
+  #       res.body << "{}"
+  #     end
   #   end
+  #   Server.answer("0.0.0.0", 3000, 0, Handler)
   def self.answer(listener : IyiSocket, &answerer : Incoming, Outgoing -> Nil) : Nil
-    tape_accept_loop(listener, answerer)
+    {% raise "Server.answer refuses an open socket.\n" +
+      "Use Server.answer(host, port, config, Handler), with\n" +
+      "Handler.new(config) and Handler#call(Incoming, Outgoing).\n" +
+      "Cancel its enclosing group to stop." %}
   end
 
-  private def self.tape_accept_loop(
-    listener : IyiSocket, answerer : Proc(Incoming, Outgoing, Nil),
-  ) : Nil
-    idle = IdleConns.new
-    group do |g|
-      pause = 5
-      while !listener.closed?
-        case client = listener.accept
-        in Cancelled
-          break
-        in SocketError
-          # The listener's own trouble - descriptors run out, most often -
-          # is waited out rather than spun on: 5 ms doubling to a second,
-          # as Go's server does, and the next accept that works resets it.
-          sleep(pause)
-          pause = pause * 2 if pause < 1000
-        in IyiSocket
-          pause = 5
-          spawn_tape_handler(g, client, answerer, listener, idle)
-        end
-      end
-      waiting = Ary(Conn).new(idle.size)
-      idle.each_value { |conn| waiting << conn }
-      waiting.each { |conn| conn.close_for_stop }
-      0
-    end
-  end
-
-  # The connection's task, spawned from a method so its block holds this
-  # call's `client`. Spawned from the accept loop, the block held the loop's
-  # own variable, which the next accept overwrote before the task first
-  # ran: connections that arrived together were served by several tasks at
-  # once - "two fibers reading one fd" - and the others by none, and their
-  # clients waited forever.
-  #
-  # The connection runs in a group of its own whose answer is read, so a
-  # block that panics ends its own connection - its defers close it, and the
-  # panic is printed where it happened - and nothing else, which is what
-  # Go's server does. Unread, the panic reached `serve`'s group, which
-  # cancelled every other connection and the accept loop and panicked "a
-  # task panicked": one request whose block failed took the server down.
-  @[TaskClosureUnsafe("The server task joins every spawned handler")]
-  private def self.spawn_tape_handler(
-    g : IyiGroup, client : IyiSocket,
-    answerer : Proc(Incoming, Outgoing, Nil), listener : IyiSocket,
-    idle : IdleConns,
-  ) : Nil
-    g.spawn do
-      group do |own|
-        served = own.spawn do
-          tape_connection(client, answerer, listener, idle)
-          0
-        end
-        served.value
-        0
-      end
-      0
-    end
+  # Each worker constructs Handler.new with its own checked config copy.
+  # Handler#call receives the same request and response as the old block.
+  def self.answer(host : String | Str, port : Int32, config : C,
+                  factory : F.class,
+                  max_connections : Int32 = MAX_CONNECTIONS) : Nil forall C, F
+    prefork(host, port, config, factory, Incoming, max_connections,
+      false, false, 60000, REQUEST_TIMEOUT)
   end
 
   @[TaskClosureUnsafe("Only defers retain this connection frame")]
   private def self.tape_connection(client : IyiSocket,
-                                   answerer : Proc(Incoming, Outgoing, Nil),
+                                   answerer,
                                    listener : IyiSocket?,
                                    idle : IdleConns?) : Nil
     defer client.close
@@ -1889,7 +1856,7 @@ pub struct Server
   # connection ends, nil for one the fast path does not take - chunked,
   # `Expect`, HTTP/1.0, an absolute-form target, not HTTP - which
   # `parse_request` reads.
-  private def self.answered_in_place(client : IyiSocket, answerer : Proc(Incoming, Outgoing, Nil), bytes : Str) : Int32 | Bool | Nil
+  private def self.answered_in_place(client : IyiSocket, answerer, bytes : Str) : Int32 | Bool | Nil
     result = nil.as(Int32 | Bool | Nil)
     tape do
       head = parse_head(bytes)
@@ -1947,7 +1914,7 @@ pub struct Server
 
   # *answerer*'s answer to *req*, written from the tape: its head, then
   # its body, in one write. Whether the connection goes on.
-  private def self.answered_on_tape?(client : IyiSocket, answerer : Proc(Incoming, Outgoing, Nil), req : Incoming, close : Bool) : Bool
+  private def self.answered_on_tape?(client : IyiSocket, answerer, req : Incoming, close : Bool) : Bool
     res = Outgoing.new
     answerer.call(req, res)
     body = res.body.finish
@@ -2003,17 +1970,10 @@ pub struct Server
   # The defaults of `serve`'s *max_connections* and *request_timeout_ms*.
   MAX_CONNECTIONS =   1024
   REQUEST_TIMEOUT = 300000
-  # How often an accept loop held at *max_connections* looks whether its
-  # listener has been closed meanwhile.
-  CAP_CHECK_MS = 250
-
-  # Serve `listener` until it is closed. The block runs on the
-  # connection's fiber, once per request; what it answers is written back.
-  # The close ends a connection waiting on its client too, for its next
-  # request or for the rest of one, and one that is answering ends when its
-  # answer is written: a keep-alive client that sat idle kept `serve` from
-  # returning for as long as it stayed, and so did one that had sent
-  # what has arrived of a request so far - one byte of it was enough.
+  # Serve on N independent SO_REUSEPORT listeners. Each accepting task
+  # serves its own connection through keep-alive and closes it before its
+  # next accept. Cancel the enclosing group to stop accepting, cancel
+  # in-flight IO and close every client and listener before returning.
   #
   # *stream_bodies*: the block reads each request's body from `body_io`
   # rather than being handed it whole. *compress*: an answer whose type
@@ -2044,104 +2004,159 @@ pub struct Server
   # raises it. 0 for none. A connection past it is closed, unanswered, as
   # one past *timeout_ms* is.
   #
-  # *max_connections*: at most this many connections are served at once;
-  # 1024 by default, 0 for no limit. Past it the server stops accepting
-  # until one ends, so the next connection waits in the kernel's listen
-  # queue - queued, not refused, as Go's `netutil.LimitListener` does - and
-  # is served in its turn; a client that gives up waiting goes unserved.
-  # Each served connection holds its place until it closes, a kept-alive
-  # one between requests too, which *timeout_ms* bounds. The process's
-  # own limit on descriptors may come first.
+  # *max_connections*: the number N of serving tasks, 1024 by default,
+  # and the maximum number of connections served simultaneously. It must
+  # be positive; 0 no longer requests an unlimited number of tasks.
+  # Each listener has a kernel queue. SO_REUSEPORT assigns connections to
+  # listeners, without a promise of even distribution or FIFO service
+  # across listeners. A busy worker keeps its own queue waiting while it
+  # serves its current connection, including all keep-alive requests.
+  # The process's descriptor limit may come first.
   #
-  # *tls*: each connection is TLS (std/tls's `TlsServer`, 1.3 or 1.2) under this
-  # configuration, its handshake held to *timeout_ms* too; one whose
+  # *tls*: implement Handler#tls_config to construct task-local TLS state
+  # (std/tls's `TlsServer`, 1.3 or 1.2). The handshake is held to
+  # *timeout_ms* too; one whose
   # handshake fails is closed, the client told why by an alert. Inside
   # it a connection that opens with HTTP/2's preface - as a client whose
-  # ALPN chose `h2` does, when `tls.alpn` offers it - is served HTTP/2,
+  # ALPN chose `h2` does, when `tls_config.alpn` offers it - is served HTTP/2,
   # and any other HTTP/1.1. A `Response.upgrade` block over TLS is handed
   # the `TlsStream`, so a WebSocket is `wss://`.
-  def self.serve(listener : IyiSocket, stream_bodies : Bool = false, compress : Bool = false, timeout_ms : Int32 = 60000, tls : TlsServerConfig? = nil, request_timeout_ms : Int32 = REQUEST_TIMEOUT, max_connections : Int32 = MAX_CONNECTIONS, &handler : Request -> Response) : Nil
-    raise "HTTP: a timeout of #{timeout_ms} ms" if timeout_ms < 0
-    raise "HTTP: a request timeout of #{request_timeout_ms} ms" if request_timeout_ms < 0
-    raise "HTTP: at most #{max_connections} connections" if max_connections < 0
-    idle = IdleConns.new
-    # A place per connection served: a send waits while every one is held.
-    slots = max_connections > 0 ? Channel(Int32).new(max_connections) : nil
-    group do |g|
-      pause = 5
-      while !listener.closed?
-        if room = slots
-          break unless claim(room, listener)
+  #
+  # N task-owned listeners, each serving one complete connection at a
+  # time. There is no unlimited mode: max_connections must be positive.
+  # The factory is a type, not a captured proc. F.new(config) constructs
+  # mutable handler state and optional #tls_config inside each worker.
+  # Configuration must be Copyable (the board's checked packed form).
+  # A handler may implement #listening(port) to announce startup.
+  #
+  # Cancel the enclosing group to stop. Cancellation stops accepts and
+  # cancels in-flight IO; defers close clients and listeners before join.
+  # A request panic closes its connection and listener; its supervisor
+  # consumes Panicked and replaces that worker with fresh local state.
+  # A failed listener setup is fatal, never a shared-listener fallback.
+  # Port zero is refused: choose one port before starting the pool.
+  def self.serve(host : String | Str, port : Int32, config : C,
+                 factory : F.class, stream_bodies : Bool = false,
+                 compress : Bool = false, timeout_ms : Int32 = 60000,
+                 request_timeout_ms : Int32 = REQUEST_TIMEOUT,
+                 max_connections : Int32 = MAX_CONNECTIONS) : Nil forall C, F
+    prefork(host, port, config, factory, Request, max_connections,
+      stream_bodies, compress, timeout_ms, request_timeout_ms)
+  end
+
+  def self.serve(listener : IyiSocket, stream_bodies : Bool = false,
+                 compress : Bool = false, timeout_ms : Int32 = 60000,
+                 tls : TlsServerConfig? = nil,
+                 request_timeout_ms : Int32 = REQUEST_TIMEOUT,
+                 max_connections : Int32 = MAX_CONNECTIONS,
+                 &handler : Request -> Response) : Nil
+    {% raise "Server.serve refuses an open socket or captured handler.\n" +
+      "Use Server.serve(host, port, config, Handler), with\n" +
+      "Handler.new(config), Handler#call(Request), and optional\n" +
+      "Handler#tls_config. Cancel its enclosing group to stop." %}
+  end
+
+  @[TaskClosureUnsafe("serve joins supervisors before releasing packed config")]
+  private def self.prefork(host : String | Str, port : Int32, config : C,
+                           factory : F.class, style : S.class,
+                           count : Int32, stream_bodies : Bool,
+                           compress : Bool, timeout_ms : Int32,
+                           request_timeout_ms : Int32) : Nil forall C, F, S
+    {% unless flag?(:linux) || flag?(:darwin) %}
+      raise "HTTP requires SO_REUSEPORT; use a Linux or Darwin target"
+    {% end %}
+    raise "HTTP: choose a port from 1 to 65535" unless port > 0 && port <= 65535
+    raise "HTTP: max_connections must be a positive task count" if count <= 0
+    raise "HTTP: timeout_ms must be nonnegative" if timeout_ms < 0
+    raise "HTTP: request_timeout_ms must be nonnegative" if request_timeout_ms < 0
+    image = RisTaskConfig.new(
+      {host.as_tape, port, config})
+    defer image.close
+    group do |workers|
+      count.times do
+        supervise(workers, image, typeof({host.as_tape, port, config}),
+          factory, style, stream_bodies, compress, timeout_ms,
+          request_timeout_ms)
+      end
+      0
+    end
+  end
+
+  @[TaskClosureUnsafe("serve joins supervisors and their packed config readers")]
+  private def self.supervise(workers : IyiGroup, image : RisTaskConfig,
+                             configuration_type : C.class,
+                             factory : F.class, style : S.class,
+                             stream_bodies : Bool, compress : Bool,
+                             timeout_ms : Int32,
+                             request_timeout_ms : Int32) : Nil forall C, F, S
+    workers.spawn do
+      while !IyiScheduler.current.cancelled
+        outcome = group do |own|
+          task = own.spawn do
+            run_worker(image.read(C), factory, style, stream_bodies,
+              compress, timeout_ms, request_timeout_ms)
+          end
+          task.value
         end
+        if outcome.is_a?(RisHttpStartFailure)
+          listen_failed(outcome.error)
+        else
+          # A request may cancel its own worker as well as panic. Keep
+          # its place populated unless the pool itself was cancelled.
+          sleep(5) unless IyiScheduler.current.cancelled
+        end
+      end
+      0
+    end
+  end
+
+  private def self.listen_failed(fault : SocketError) : NoReturn
+    message = Str.build(128) do |text|
+      text << "HTTP requires task-owned SO_REUSEPORT listeners: "
+      text << fault.operation << " (OS code " << fault.code << ")"
+    end
+    raise message
+  end
+
+  private def self.run_worker(settings : Tuple(Str, Int32, C),
+                              factory : F.class, style : S.class,
+                              stream_bodies : Bool, compress : Bool,
+                              timeout_ms : Int32,
+                              request_timeout_ms : Int32) forall C, F, S
+    host, port, config = settings
+    # Build state on this task, never in the supervisor.
+    handler = F.new(config)
+    listener = IyiSocket.listen_result(host, port, reuse_port: true, task_owned: true)
+    if listener.is_a?(SocketError)
+      return RisHttpStartFailure.new(listener)
+    end
+    defer listener.close
+    handler.listening(port) if handler.responds_to?(:listening)
+    idle = IdleConns.new
+    tls = handler.responds_to?(:tls_config) ? handler.tls_config : nil
+    pause = 5
+    while !IyiScheduler.current.cancelled
+      stopped = false
+      tape do
         case client = listener.accept
         in Cancelled
-          slots.take_now if slots
-          break
+          stopped = true
         in SocketError
-          slots.take_now if slots
-          # The listener's own trouble - descriptors run out, most often -
-          # is waited out rather than spun on: 5 ms doubling to a second,
-          # as Go's server does, and the next accept that works resets it.
           sleep(pause)
           pause = pause * 2 if pause < 1000
         in IyiSocket
           pause = 5
-          spawn_handler(g, client, handler, listener, idle, stream_bodies, compress, timeout_ms, tls, request_timeout_ms, slots)
+          {% if S == Incoming %}
+            tape_connection(client, handler, listener, idle)
+          {% else %}
+            handle(client, handler, listener, idle, stream_bodies, compress,
+              timeout_ms, tls, request_timeout_ms)
+          {% end %}
         end
       end
-      # A copy: a stop's close_notify may wait, and other connections'
-      # tasks leave the set meanwhile.
-      waiting = Ary(Conn).new(idle.size)
-      idle.each_value { |conn| waiting << conn }
-      waiting.each { |conn| conn.close_for_stop }
-      0
+      break if stopped
     end
-  end
-
-  # A place among *slots* for the next connection, waited for while all
-  # are held: false when *listener* closes first, which is looked at every
-  # `CAP_CHECK_MS` while waiting, since a close does not wake this wait.
-  private def self.claim(slots : Channel(Int32), listener : IyiSocket) : Bool
-    while !listener.closed?
-      claimed = false
-      select
-      when slots.send(0)
-        claimed = true
-      when timeout(CAP_CHECK_MS)
-        nil
-      end
-      return true if claimed
-    end
-    false
-  end
-
-  # The connection's task, spawned from a method so its block holds this
-  # call's `client`. Spawned from the accept loop, the block held the loop's
-  # own variable, which the next accept overwrote before the task first
-  # ran: connections that arrived together were served by several tasks at
-  # once - "two fibers reading one fd" - and the others by none, and their
-  # clients waited forever.
-  #
-  # The connection runs in a group of its own whose answer is read, so a
-  # block that panics ends its own connection - its defers close it, and the
-  # panic is printed where it happened - and nothing else, which is what
-  # Go's server does. Unread, the panic reached `serve`'s group, which
-  # cancelled every other connection and the accept loop and panicked "a
-  # task panicked": one request whose block failed took the server down.
-  private def self.spawn_handler(g : IyiGroup, client : IyiSocket, handler : Proc(Request, Response), listener : IyiSocket, idle : IdleConns, stream_bodies : Bool, compress : Bool, timeout_ms : Int32, tls : TlsServerConfig?, request_timeout_ms : Int32, slots : Channel(Int32)?) : Nil
-    g.spawn do
-      group do |own|
-        served = own.spawn do
-          handle(client, handler, listener, idle, stream_bodies, compress, timeout_ms, tls, request_timeout_ms)
-          0
-        end
-        served.value
-        0
-      end
-      # The connection's place, given back however it ended.
-      slots.take_now if slots
-      0
-    end
+    0
   end
 
   # One connection: requests until the client is done. A request that is
@@ -2157,7 +2172,7 @@ pub struct Server
   # cancelled, with nothing of this side's waiting to be read, closes at
   # once, and so does one whose client said `close` and sent nothing past
   # its request (`serve_h1`).
-  def self.handle(client : IyiSocket, handler : Proc(Request, Response), listener : IyiSocket? = nil, idle : IdleConns? = nil, stream_bodies : Bool = false, compress : Bool = false, timeout_ms : Int32 = 0, tls : TlsServerConfig? = nil, request_timeout_ms : Int32 = 0) : Nil
+  def self.handle(client : IyiSocket, handler, listener : IyiSocket? = nil, idle : IdleConns? = nil, stream_bodies : Bool = false, compress : Bool = false, timeout_ms : Int32 = 0, tls : TlsServerConfig? = nil, request_timeout_ms : Int32 = 0) : Nil
     defer client.close
     unless config = tls
       serve_connection(client, nil, handler, listener, idle, stream_bodies, compress, timeout_ms, request_timeout_ms)
@@ -2186,8 +2201,8 @@ pub struct Server
     head
   end
 
-  private def self.serve_connection(client : IyiSocket, stream : TlsStream?, handler : Proc(Request, Response), listener : IyiSocket?, idle : IdleConns?, stream_bodies : Bool, compress : Bool, timeout_ms : Int32, request_timeout_ms : Int32) : Nil
-    conn = Conn.new(client, listener, idle, stream)
+  private def self.serve_connection(client : IyiSocket, stream : TlsStream?, handler, listener : IyiSocket?, idle : IdleConns?, stream_bodies : Bool, compress : Bool, timeout_ms : Int32, request_timeout_ms : Int32) : Nil
+    conn = Conn.new(client, listener, idle, stream, task_owned: true)
     conn.gap = timeout_ms if timeout_ms > 0
     remote = client.remote_address
     peer = stream ? stream.peer_certificates : [] of Certificate
@@ -2201,7 +2216,7 @@ pub struct Server
 
   # HTTP/1.1's requests on *conn*, one after another: whether this side
   # wrote last - an answer or a refusal - when they end.
-  private def self.serve_h1(conn : Conn, handler : Proc(Request, Response), stream_bodies : Bool, compress : Bool, remote : String?, peer : Array(Certificate), timeout_ms : Int32, request_timeout_ms : Int32) : Bool
+  private def self.serve_h1(conn : Conn, handler, stream_bodies : Bool, compress : Bool, remote : String?, peer : Array(Certificate), timeout_ms : Int32, request_timeout_ms : Int32) : Bool
     while true
       started = Time.monotonic_nanoseconds.to_i64
       whole = until_whole(started, request_timeout_ms)
@@ -2303,7 +2318,7 @@ pub struct Server
   # them meanwhile, so a peer that drips any stream's frames, or PINGs to
   # look alive, is cut off with the rest. It ends with GOAWAY, so this side
   # wrote last: true.
-  private def self.serve_h2(conn : Conn, handler : Proc(Request, Response), stream_bodies : Bool, compress : Bool, remote : String?, peer : Array(Certificate), timeout_ms : Int32, request_timeout_ms : Int32) : Bool
+  private def self.serve_h2(conn : Conn, handler, stream_bodies : Bool, compress : Bool, remote : String?, peer : Array(Certificate), timeout_ms : Int32, request_timeout_ms : Int32) : Bool
     h2 = H2Connection.new(conn, true, MAX_BODY.to_i64)
     return true unless h2.start
     while serve_h2_request(conn, h2, handler, stream_bodies, compress, remote, peer, timeout_ms, request_timeout_ms)
@@ -2313,7 +2328,7 @@ pub struct Server
   end
 
   private def self.serve_h2_request(conn : Conn, h2 : H2Connection,
-                                    handler : Proc(Request, Response),
+                                    handler,
                                     stream_bodies : Bool,
                                     compress : Bool, remote : String?,
                                     peer : Array(Certificate),

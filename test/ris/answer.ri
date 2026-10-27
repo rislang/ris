@@ -56,15 +56,35 @@ def answer(req : Incoming, res : Outgoing) : Nil
   w.append(req.body)
 end
 
-listener = IyiSocket.listen(0)
+struct Ready
+end
+
+struct Handler
+  def initialize(config : Int32)
+  end
+  def listening(port : Int32) : Nil
+    RisBoard.post(Ready.new)
+  end
+  def call(req : Incoming, res : Outgoing) : Nil
+    answer(req, res)
+  end
+end
+
+probe = IyiSocket.listen(0)
+port = probe.local_port
+probe.close
 got = ""
 group do |g|
-  g.spawn { Server.answer(listener) { |req, res| answer(req, res) }; 0 }
-  client = IyiSocket.connect("127.0.0.1", listener.local_port).or_panic
+  g.spawn do
+    Server.answer("127.0.0.1", port, 0, Handler, max_connections: 2)
+    0
+  end
+  2.times { RisBoard.take(Ready).or_panic }
+  client = IyiSocket.connect("127.0.0.1", port).or_panic
   client.write(REQUESTS).or_panic
   got = read_to_close(client)
   client.close
-  listener.close
+  g.cancel_children
 end
 
 def reply(body : Str, close : Bool = false) : String

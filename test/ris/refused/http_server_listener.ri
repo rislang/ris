@@ -1,0 +1,5 @@
+module test/ris/refused/http_server_listener
+import std/http::{Server, Response}
+import std/socket::{IyiSocket}
+listener = IyiSocket.listen(0)
+Server.serve(listener) { |req| Response.new(200, "ok") }
