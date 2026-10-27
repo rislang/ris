@@ -19,22 +19,20 @@ How to work (fewer tokens, faster to the goal):
   git log. Remove an item when its guarantee passes its gate, not merely
   when a sample's budget reaches zero.
 
-## Messages (replace Channel; TAPE_SPEC 5.2, 5.5, 5.6)
+## Messages: RisBoard (TAPE_SPEC 5.2, 5.6; doc/MESSAGES.md)
 
-Design, mechanisms and full gates: doc/MESSAGES.md. One item per step.
-
-* RisInbox on typed pools with task records, wait nodes and owner
-  checks; byte accounting and slot layout first (MESSAGES.md 2, 5.1).
-  Gate: owner death, close with mail, copy rollback, cancelled receive,
-  retirement, GC roots, zero heap under --no-gc. Audit the stash
-  "channel tape WIP" before reusing it.
-* RisActor remains (MESSAGES.md 4, 5.3); gate actor scratch.
-  Request/reply and resource moves/take have dated implementation records.
-* Port std: pipe, http slots, socket race, autocert, samples/workers
-  (MESSAGES.md 5.4). Gate: each port's behavior under its old tests.
-* Remove ris Channel and select; g.spawn becomes g.new_task with the
-  compiler hooks retargeted (MESSAGES.md 5.5). Gate: no target Channel
-  or spawn left, safe-form errors, compiler and runtime suites.
+* Build RisBoard on the inbox pools (slabs, free lists, copy and
+  rollback in src/iyi/inbox.iyi): one queue per type, many takers with
+  a claim so no message is taken twice, limit, take(ms), poll, Str
+  copy, cancellable take. Gate: round trip, types kept apart, distinct
+  messages to parallel takers, FIFO, limits, misses, cancel, zero heap.
+* Port std and samples to RisBoard or one-task IO: http permits, pipe
+  and socket race inside one task, autocert through task.value,
+  samples/workers. Gate: each user's existing behaviour tests.
+* Remove what the old design added: RisInbox, RisWorker, RisSemaphore,
+  RisEvent, request/reply, new_task/new_worker, ordered group drain,
+  owns: and task.take, their compiler checks and tests; then Channel
+  and select. Gate: full check, std tests, --no-gc.
 
 ## Next
 

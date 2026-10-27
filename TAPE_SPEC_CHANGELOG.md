@@ -4,6 +4,24 @@ Every change to TAPE_SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one.
 
+## 2026-10-27: RisBoard, Goose's typed queues, replaces the inbox design
+
+* Changed: 5.2 is RisBoard: one process-wide queue per message type,
+  owned by no task; post never waits and answers false when full,
+  take waits, take(T, ms) and poll answer {T?, Bool}, limit sets a
+  count limit. 5.6 names where ris differs from Goose: fibers in
+  groups, cancellable take, Str copied in and out, nil on a miss,
+  resources stay in their task. 1.4 names board messages as copies;
+  1.5 drops the actor destination note.
+* Removed: 5.5 (RisActor), and from 5.2 and 5.6 RisInbox, RisWorker,
+  RisSemaphore, RisEvent, request/reply, byte budgets, owns:,
+  task.take and the ordered group drain. 5.5's number stays unused.
+* Why: the inbox design grew owners, handles, close order, replies and
+  resource moves, each to answer who owns a message. Goose answers it
+  with one queue per type and copied values, so none of that is
+  needed. Copying Goose instead of inventing keeps the model small.
+  This entry supersedes every earlier 2026-10-27 entry on messages.
+
 ## 2026-10-27: 5.2 points to doc/MESSAGES.md
 
 * Changed: 5.2 names doc/MESSAGES.md, not TODO.md, for the mechanisms.
