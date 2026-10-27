@@ -112,15 +112,24 @@ rule goes last in its section; a removed one leaves its number unused.
   while the group lives. At normal group block end the runtime waits for
   plain tasks, then closes inboxes in creation order, waiting for each
   worker or actor to drain and finish before closing the next; it joins,
-  discards remaining mail and retires records. No manual close or compiler
-  proof is required. Early exit (failure or cancel included) cancels
-  children and wakes waits before joining, discarding and retiring.
-  Nested groups follow the same order; stale handle operations yield Closed.
-  RisSemaphore counts permits: acquire takes one, release returns one and
-  wakes one waiter; hold releases on every exit. Cancelled waits take no
-  permit. RisEvent latches on fire and broadcasts; repeated fire is harmless,
-  later waits succeed until group end. Their waits yield Cancelled on
-  cancellation, TimedOut on timeout.
+  discards remaining mail and retires records. During drain, members and
+  their children may create work: new inboxes append to the closing order;
+  await live plain tasks before closing each next inbox. Seal registration
+  only after all children finish and the closing order is exhausted; later
+  new_* panics with a hint to a live outer group. No manual close or compiler
+  proof is required. This guarantees order, not termination: a plain task
+  waiting on a later worker's shutdown, or endless worker creation, can
+  keep the group from ending. Early exit cancels children and wakes waits
+  before joining, discarding and retiring; new tasks inherit cancellation,
+  new inboxes/workers/actors are refused. Nested groups follow the same
+  order; stale handle operations yield Closed.
+  g.new_semaphore(n) has initial and maximum permits n >= 1: acquire takes
+  one; release returns one, wakes the oldest live waiter and panics above
+  the maximum. Newcomers cannot bypass waiters; cancelled waits take none.
+  hold releases on every exit after successful acquire. Pre-acquire permits
+  to start empty. RisEvent latches on fire and broadcasts; repeated fire is
+  harmless. acquire/wait answer Nil, Cancelled or TimedOut; release/fire
+  answer Nil, fired? Bool. All yield Closed after group end.
   receive(), acquire() and wait() have no deadline; a ms argument uses a
   monotonic clock, 0 polls, negatives follow 4.2. ris has no select or
   Channel. Runtime records live in typed pools; mechanisms remain in TODO.
@@ -152,31 +161,48 @@ rule goes last in its section; a removed one leaves its number unused.
   then TimedOut. A wake transfers nothing. Receive publishes a complete
   copy or rolls back and keeps mail; success survives later cancellation.
   Active copies pin records; closure cannot recycle pinned storage.
-  Full accepts nothing, by count or a positive per-inbox bytes: budget
-  (published default); charge queued/reserved copy storage, splitting aliases.
-  The exact sizing algorithm and reply/scratch bounds remain open in TODO;
-  arithmetic and physical exhaustion follow 4.2. Handles carry type, slot
+  Full accepts nothing, by count or a positive per-inbox bytes: budget,
+  default max(64 KiB, capacity * 4 KiB). Preflight charges root inline size
+  once plus destination allocations and their headers, rounded to 8 bytes:
+  compact live lengths, concrete class instances and split aliases. Charge
+  reserved copies until commit/rollback; exclude unused address reservation,
+  page slack, pool bookkeeping and scratch. Publish separate finite runtime
+  limits for excluded storage; bytes: is not an RSS cap. Arithmetic and
+  physical exhaustion follow 4.2. Handles carry type, slot
   and generation; wrap retires the slot, stale handles never reach reuse.
   Runtime pools expose no payload views and keep occupied slots typed (6.x).
   GC roots cover active payloads and copies; clear only after committed
   receive, discard or rollback, never on graceful close alone.
+  Refuse top-level message/reply alternatives overlapping Closed, Cancelled,
+  TimedOut, Full or Expired, through aliases and base types too; suggest a
+  wrapper struct, whose fields may hold them. receive answers T, Closed or
+  Cancelled (also TimedOut when timed); successful data is not boxed.
   request waits for a copied reply: R, Full, Closed, TimedOut or Cancelled.
   Its argument must resolve to exactly one Request(M, R) union arm; refuse
   ambiguity with a hint to distinct tagged payloads. Both M and R obey 5.2.
   Only the runtime makes envelopes; plain send cannot forward a Request.
   Accepted messages survive request timeout/cancel; effects are not undone.
   Graceful close permits replies; owner death closes unanswered slots,
-  while a committed reply survives it. reply uses a one-shot slot: Nil on
-  commit, Expired for retired, timed-out or cancelled tokens without copying;
-  duplicate replies while live panic. Reply is never Full; exhaustion is 4.2.
+  while a committed reply survives it. request(..., reply_bytes:) sets a
+  positive requester-side reply budget, default 64 KiB, outside inbox bytes.
+  reply answers Nil on commit, Expired for retired/timed-out/cancelled tokens,
+  or Full if the copy exceeds that budget. Expired and Full copy nothing;
+  Full leaves the slot open for a smaller reply and the requester waiting
+  until commit or its timeout/cancel. Duplicate committed replies while
+  live panic. Physical exhaustion remains 4.2.
   Refuse known self-request, else check task identity and panic; suggest a
   local call, send or another task. Resources never copy as messages or
   through copy_to. owns: moves a resource at task start, also for workers
   and actors, e.g. g.new_task(owns: client): exclude surviving aliases and
   refuse later creator use, suggesting work in the receiving task or a
-  message to it. Cleanup belongs to the receiver. Task.value is not a move
-  and refuses resource results: keep the resource in its worker. Transfer
-  out needs a checked one-shot take, still open work in TODO.
+  message to it. Cleanup belongs to the receiver. Returning a resource
+  moves it into a checked result slot before child cleanup/tape release;
+  exclude surviving aliases and transfer its cleanup obligation. Task.value
+  refuses resource results with a hint to task.take. Only the group's owner
+  may take such a result: join then move it once, copying other tape data to
+  the caller; cancellation before claim consumes nothing. A second live
+  take panics; retired handles yield Closed. Panic delivery is value's.
+  Group end closes unclaimed resource results on normal and early exit.
 ## 6. Pools, validation, tooling (Goose §5.4, §9.3-9.4)
 * 6.1 Pool(T)/SlicePool(T): typed slots/runs; free keeps values valid, stale
   views see typed replacements; generations only guard checked handles.

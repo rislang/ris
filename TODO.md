@@ -36,8 +36,8 @@ How to work (fewer tokens, faster to the goal):
   Borrowed Run constructors now retain Ary shrink lifetimes; gates cover
   constructor bounds and foreign Ary storage as well as pool storage.
 * Replace Channel with RisActor, RisInbox, RisWorker, RisSemaphore and
-  RisEvent (TAPE_SPEC 5.2, 5.5, 5.6). The language choices below are the
-  target; byte sizing and listed mechanisms still need design and gates.
+  RisEvent (TAPE_SPEC 5.2, 5.5, 5.6). The five round 1 choices are fixed;
+  implement the target with the mechanisms and gates below.
   * `g.new_actor(T, n, state: S, init: ->(s : S) { }) { |state, msg| }`
     makes RisActor(T), externally a RisWorker. Lower S.new to one named
     worker-local owner, never a stored owner field or returned startup
@@ -49,7 +49,7 @@ How to work (fewer tokens, faster to the goal):
     its own group. Capacity >= 1; 0 is refused with a hint to request,
     negatives/overflow follow 4.2. No public RisInbox.new. Methods: send,
     <<, receive, receive(ms), request, close, closed?, size, empty?,
-    capacity. Worker adds value and done?. Stale operations yield Closed.
+    capacity. Worker adds value, take and done?. Stale operations yield Closed.
   * Send handles are Share regardless of T and preserve runtime identity;
     this never extends a payload borrow. Workers/actors stay on their
     creating task's thread, including creation from a parallel task.
@@ -63,25 +63,42 @@ How to work (fewer tokens, faster to the goal):
     Accepted mail survives requester timeout/cancel; work may take effect.
     Graceful close permits replies; owner death closes unanswered slots.
     A committed reply survives owner death. Expired tokens copy nothing;
-    duplicate replies while live panic; stale tokens remain Expired.
-  * `g.new_semaphore(n)`: acquire, acquire(ms), release, hold { }.
-    Count permits; a cancelled wait consumes none; hold releases on all
-    exits. `g.new_event`: fire, wait, wait(ms), fired?. Fire latches and
-    broadcasts, including to later waits. Define permit limits, initial
-    zero, over-release, fairness and exact wait result types before ports.
-    All stale operations yield Closed; waits can yield Cancelled/TimedOut.
-    No deadline waits forever, 0 polls, negatives follow 4.2.
+    duplicate committed replies while live panic; stale tokens are Expired.
+    request(..., reply_bytes:) supplies a positive budget, default 64 KiB,
+    charged to the requester-side slot, not inbox bytes. Oversize reply is
+    Full before any copy; leave the slot open and requester waiting so a
+    smaller value can retry. Expired beats Full; check liveness again at
+    commit. Physical exhaustion follows 4.2, never a reply-budget failure.
+  * `g.new_semaphore(n)`: initial = maximum n >= 1. FIFO live waiters,
+    no newcomer bypass; over-release panics. Pre-acquire n to start empty.
+    acquire/acquire(ms) and event wait/wait(ms): Nil | Cancelled | TimedOut;
+    release/fire: Nil; fired?: Bool; all add Closed after group end.
+    hold releases only after successful acquire and on every exit.
+    Event fire is idempotent, latched and broadcast to later waiters too.
+    No deadline waits forever, 0 polls, negatives follow 4.2. Implement
+    wake without permit consumption; cancellation removes the waiter and
+    wakes its successor. Gate FIFO, no barging, over-release, pre-acquired
+    empty credits, cancelled wake, hold unwind and stale observations.
   * `g.new_task(owns: client) { ... }`, also new_worker/new_actor, moves
     the resource at start. Check exclusive ownership through aliases and
     holders; creator use after handoff is refused with a hint to work in
     the receiving task or send to it. Define the call/start commit point,
     failed creation, inherited cancellation, cleanup transfer and resources
     never entering the body. Gate deferred closes and captured aliases.
-    Task.value never moves and refuses resource results with a hint to
-    keep the resource in its worker. Design a checked one-shot take from a
-    joined task, with unread-result cleanup,
-    repeated/competing takes and surviving-alias refusal, before moving
-    socket race results. No fd-as-number escape from resource checks.
+    Task.value refuses resource results with a hint to task.take. Result
+    return consumes child ownership into a group-owned typed slot before
+    child defers/tape release: disarm/transfer close obligations, exclude
+    surviving aliases and stage copyable tape fields. take joins and pins
+    the result while staging caller-owned copies; rollback leaves the slot
+    unclaimed. Only group owner can commit Unclaimed -> Claimed and move
+    resources; cleanup responsibility changes atomically at that point.
+    Cancel before claim consumes nothing; a second live take panics, stale
+    handles yield Closed; keep value's panic-delivery behavior. Retain
+    unclaimed results independently of the live-child list. Group cleanup
+    claims/closes resource fields once on normal or early exit; cleanup
+    panic follows 4.1. Gate mixed resource/tape results, deferred close,
+    aliases, double take, cancel/copy panic before claim, no take, stale
+    take and child panic. No fd-as-number escape from resource checks.
   * Normal group block end is runtime work: wait for plain tasks; close
     inboxes in creation order and await each worker/actor drain and finish
     before closing the next; join; discard leftovers and retire records.
@@ -89,9 +106,21 @@ How to work (fewer tokens, faster to the goal):
     Earlier programmer close is allowed, never required or proved.
     Early exit cancels children and wakes waits before joining/discarding.
     Owner death discards unread mail immediately and ends pending requests.
-    Track task kinds and inbox creation order in group records; define
-    task launches during drain, registration after block end and failure
-    during normal drain. Nested groups and main need the same protocol.
+    Track task kinds and inbox creation order in group records. Members
+    and their descendants may register during drain: append new inboxes to
+    the tail, never reopen closed entries; await all live plain tasks at
+    each next-inbox barrier, repeating if new tasks appear. Under the
+    scheduler lock, seal only with an exhausted closing cursor, no live
+    children and no in-flight registration reservation. Validation and
+    registration must use that same protocol; the old unlocked @ended
+    check before adopt is insufficient. After sealing, new_* panics:
+    "the group has ended; create this work in a live outer group".
+    Failure during drain switches to cancelling and bypasses ordered drain;
+    new tasks inherit cancel, new inbox/worker/actor creation is refused.
+    Nested groups and main use the same protocol. Order is guaranteed, not
+    termination: a plain task awaiting a later worker's shutdown or endless
+    worker creation can prevent group end. Gate finite tail creation,
+    grandchildren, registration vs sealing and cancellation during drain.
   * Transactional send/receive/reply: reserve, copy, commit or rollback.
     Wake alone never consumes mail. Waits decide Cancelled, data, Closed,
     TimedOut at the commit point; send ignores cancellation and decides
@@ -112,13 +141,26 @@ How to work (fewer tokens, faster to the goal):
     pending-result helpers preserve borrows and are not message transport.
     Specify lock ordering among scheduler, region registry and collector;
     keep deep-copy work outside the scheduler lock with panic-safe guards.
-  * Byte budget algorithm remains open: per-inbox published default,
-    queued plus reserved deep-copy storage, splitting aliases. Specify
-    alignment, live lengths vs capacities, metadata and stable address
-    reservations separately. Preflight overflow and count before mutation;
-    Full accepts nothing. Bound reply slots and copy scratch separately;
-    reply never yields Full, physical exhaustion remains fatal under 4.2.
-    Set numeric defaults and publish accounting before the pool layout gate.
+  * Generate one sizing/copy plan: root inline slot once, each destination
+    allocation's payload plus allocation header rounded to 8 bytes. Count
+    Ary live length * sizeof(element), its state, Builder live bytes/state,
+    Tre live Entry storage and concrete class instances. Walk only extra
+    backing allocations after counting inline fields, not inline fields
+    twice. Split aliases and stop preflight as soon as over budget; no user
+    callbacks. Source data must remain stable through preflight and copy.
+    Default inbox bytes = max(64 KiB, capacity * 4 KiB), positive override;
+    checked arithmetic before mutation. Count queued and reserved copies;
+    rollback releases reservations. Exclude unused address reservation,
+    page slack, pool metadata and scratch; publish separate finite runtime
+    limits for these costs. bytes: is not an RSS cap. Reply sizing uses the
+    same plan with request reply_bytes, default 64 KiB, outside inbox bytes.
+    A Full reply copies nothing and preserves the live slot for retry;
+    Full never delivers a reply or resets the request deadline. Physical
+    exhaustion remains fatal under 4.2. Gate empty containers, headers,
+    classes, unions, split aliases, compact capacity, aligned accounting,
+    budget overflow, concurrent reservations and rollback, oversized reply
+    then smaller success, Full vs expiry, timeout after Full and no copy on
+    Full/Expired. Publish limits/accounting before the pool layout gate.
   * Actor lowering needs checked state destinations, field provenance,
     scratch separate from state, and reset after defers on every exit.
     Ordinary local_tape currently refuses outer mutable tape access;
@@ -130,14 +172,18 @@ How to work (fewer tokens, faster to the goal):
     Check blocking effects transitively through cleanup, dispatch, FFI and
     artifact contracts; unknown effects need checked contracts (3.4).
     Parallel actor APIs remain later work.
-  * Keep raw data outcomes unambiguous: choose tagged success results or
-    refuse payload types overlapping Closed/Cancelled/TimedOut. Settle
-    token retention and forwarding for asynchronous replies; never enqueue
+  * Keep plain outcome unions: refuse top-level T/R alternatives
+    overlapping Closed/Cancelled/TimedOut/Full/Expired, including bare
+    control types, aliases and broad base types such as Error. Suggest a
+    distinct wrapper struct; do not ban control values in its fields or
+    Request's already-wrapped M. Check after specialization and dispatch;
+    gate bare types, alias/union/base overlap and accepted wrapper fields.
+    Settle token retention/forwarding for asynchronous replies; never enqueue
     the same Request twice. Static self-request refusal covers proven task
     identity only; runtime checks unknown identity. Name a local call, send
     or another task as the safe form; cross-worker call cycles remain possible.
   Steps, each with a gate:
-  2. Settle byte accounting, lifecycle and slot layout first. Build RisInbox
+  2. Implement accounting/lifecycle and gate slot layout first. Build RisInbox
      on typed pools with task records, wait nodes and owner checks together:
      known wrong receiver is a compile error, dynamic misuse a panic with
      the safe form. Scalars inline, Str copied per message. Gate owner
@@ -152,8 +198,10 @@ How to work (fewer tokens, faster to the goal):
      Gate group-end order with a producer before its consumer, main,
      nested groups, early cancel, drain failure and task launches in drain;
      no programmer close or compiler termination proof. Gate expired and
-     duplicate replies, ambiguous Request unions, self-request and resource
-     move refusal (later use, aliases, captures, defer). Actor gates:
+     duplicate replies, reply Full/retry/timeout, ambiguous Request unions,
+     control-type collisions, self-request and resource move refusal (later
+     use, aliases, captures, defer), one-shot take and unclaimed cleanup.
+     Actor gates:
      state outside scratch, reset on every exit, retained destination
      writes, exhaustive message unions, reply only on Request, forbidden
      wait/block with a task/worker hint, panic ends worker. Tape stats:
@@ -164,9 +212,11 @@ How to work (fewer tokens, faster to the goal):
      HTTP slots use a semaphore; accept hands client into a task via owns:,
      permit release in defer survives isolated handler failure. Socket
      race uses an owner inbox of indices and wrapped attempt results to
-     avoid sibling cancellation on SocketError; joined one-shot take and
-     loser cleanup are prerequisites. Autocert uses tagged worker mail,
-     renewal deadlines and per-flight latched events or retained reply
+     avoid sibling cancellation on SocketError. Take the winner inside the
+     group, cancel/join losers and let group cleanup close unclaimed
+     successes; completion indices must also cover attempt panic. Autocert
+     uses tagged worker mail, renewal deadlines and per-flight latched
+     events or retained reply
      tokens; preserve broadcast completion and terminal data lifetime.
      Reserve credits/control capacity or use timed stop checks so Full
      cannot lose Stop/Done. An event does not itself wake inbox receive.

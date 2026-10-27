@@ -4,6 +4,24 @@ Every change to TAPE_SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one.
 
+## 2026-10-27: message budgets, result take and drain registration
+
+* Changed: 5.2 and 5.6 settle the five round 1 choices: aligned deep-copy
+  accounting and inbox defaults, requester-side reply_bytes, checked
+  one-shot resource result take, bounded FIFO semaphores, plain outcome
+  unions with colliding data refused, and dynamic registration in drain.
+  Oversized reply yields Full without copying or closing the reply slot;
+  a smaller reply may retry while the requester keeps waiting. Physical
+  exhaustion remains 4.2. Group end gives order, not termination.
+* Changed: TODO replaces these open choices with sizing/copy plans,
+  result-slot ownership/cleanup, atomic sealing and implementation gates.
+* Why: agents need one safe form for each case and runtime storage needs
+  fixed accounting and lifecycle rules. Alias-safe result publication is
+  required before a take; wakeups cannot consume cancelled permits. Drain
+  may append work but must seal against racing registrations. This entry
+  supersedes earlier claims that reply never yields Full, result take and
+  byte accounting are open, or drain registration is still undecided.
+
 ## 2026-10-27: reviewed message contract and runtime group shutdown
 
 * Changed: 5.2 gives normal group shutdown to the runtime: wait for plain
