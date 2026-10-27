@@ -16,6 +16,10 @@ back.
   descriptors and lets servers distinguish setup failure from a panic.
   Task-owned socket state and copied HTTP configuration stay in ris.
 
+* `IyiTask#wait(ms : Int32)` observes completion without consuming the
+  result or cancelling the task. Each reader has its own timer; answers
+  are Nil for Done, TimedOut or Cancelled. `value` still reads the result.
+
 * Channel: waking a receiver does not release a buffered slot, so the
   ring never grows; a full send parks and a receive refills its slot.
 

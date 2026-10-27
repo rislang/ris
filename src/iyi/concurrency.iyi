@@ -15,6 +15,7 @@
 #     u = g.spawn_parallel { crunch() }  # a task on a worker: III.4.13
 #   end                       # the block cannot be left until every task is done
 #   t.value                   # joins, then answers what the block returned
+#   t.wait(ms)                # Nil (Done) | TimedOut | Cancelled
 #   sleep(ms)                 # Nil | Cancelled
 #   wait_readable(fd)         # Nil | Cancelled — the poller, made visible
 #   wait_writable(fd)         # Nil | Cancelled — the other direction
@@ -508,6 +509,7 @@ class IyiFiber
   # whichever of the two wakes it takes it off the other. `timed_out` says
   # the deadline did.
   property io_timed : Bool
+  property join_timed : Bool = false
   property timed_out : Bool
   property wait_fd : Int32
   # Which way it waits on `wait_fd`: 1 to read, 4 to write - epoll's IN
@@ -2445,6 +2447,45 @@ class IyiScheduler
     IyiSchedLock.unlock
   end
 
+  # A deadline belongs to this reader, never to the task being read.
+  # Keep the join chain and timer until this reader resumes: completion
+  # on another scheduler may wake it but cannot edit its sleep heap.
+  def self.join(fiber : IyiFiber, ms : Int32) : Nil | TimedOut | Cancelled
+    me = current
+    IyiSchedLock.lock
+    if me.cancelled
+      IyiSchedLock.unlock
+      return Cancelled.new
+    end
+    if fiber.state == IyiFiberState::Done
+      IyiSchedLock.unlock
+      return nil
+    end
+    if ms <= 0
+      IyiSchedLock.unlock
+      return TimedOut.new
+    end
+    me.awaited = fiber
+    me.next_joiner = fiber.joiner
+    fiber.joiner = me
+    me.state = IyiFiberState::Joining
+    me.join_timed = true
+    me.deadline = __iyi_monotonic_ns + ms.to_i64 * 1000000_i64
+    sleep_insert(me)
+    IyiSchedLock.unlock
+    reschedule
+    IyiSchedLock.lock
+    sleep_remove(me) if me.join_timed
+    me.join_timed = false
+    leave_joiners(fiber, me) if me.awaited.is_a?(IyiFiber)
+    cancelled = me.cancelled
+    done = fiber.state == IyiFiberState::Done
+    IyiSchedLock.unlock
+    return Cancelled.new if cancelled
+    return nil if done
+    TimedOut.new
+  end
+
   # Every fiber waiting on *fiber*, woken in the order they came: the
   # chain is pushed at its head, so it is turned round first.
   def self.wake_joiners(fiber : IyiFiber) : Nil
@@ -2527,7 +2568,7 @@ class IyiScheduler
     # A reader of a task the walk above did not reach is woken to stop
     # (`join`); one whose task it reached waits for that task to end.
     task = fiber.awaited
-    if fiber.state == IyiFiberState::Joining && task.is_a?(IyiFiber) && !task.cancelled
+    if fiber.state == IyiFiberState::Joining && task.is_a?(IyiFiber) && (!task.cancelled || fiber.join_timed)
       leave_joiners(task, fiber)
       ready(fiber)
     end
@@ -2796,6 +2837,16 @@ class IyiScheduler
       return unless head.is_a?(IyiFiber)
       return if head.deadline > now
       sleep_remove(head)
+      if head.join_timed
+        IyiSchedLock.lock
+        head.join_timed = false
+        if task = head.awaited
+          leave_joiners(task, head)
+        end
+        enqueue(head) unless head.state == IyiFiberState::Runnable
+        IyiSchedLock.unlock
+        next
+      end
       if head.io_timed
         # An io wait whose deadline came first.
         head.io_timed = false
@@ -3814,6 +3865,10 @@ end
 
 # ── Tasks and groups — III.4.1 ─────────────────────────────────────────
 
+# A non-consuming wait expired. This is a status, not a task failure.
+struct TimedOut
+end
+
 # What `g.spawn` answers. `value` joins, then repeats what the task's
 # block returned — the whole union, error members included, so `case`
 # handles a task's failure exactly the way III.4.3 says (the group has
@@ -3841,6 +3896,12 @@ class IyiTask(T)
 
   def done? : Bool
     @fiber.state == IyiFiberState::Done
+  end
+
+  # nil means Done (including panic/cancellation); read value separately.
+  # Timing out or cancelling this reader never cancels the retained task.
+  def wait(ms : Int32) : Nil | TimedOut | Cancelled
+    IyiScheduler.join(@fiber, ms)
   end
 
   def value : T | Panicked

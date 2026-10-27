@@ -52,7 +52,7 @@ for them until then.
   records. Gate: staggered attempts, early failure/winner, timeout/cancel,
   all losing sockets closed and existing race tests on supported targets.
 * Port autocert flights to retained task results for completion broadcast.
-  Add timed nonconsuming task waits: value has no timed wait yet; one
+  Timed nonconsuming task waits are available as IyiTask#wait(ms); one
   handshake timeout must not cancel shared work. Keep manager/cache state
   in one task serving copied board messages, or independently per task;
   isolate protocols and route replies without stealing other waiters' mail.

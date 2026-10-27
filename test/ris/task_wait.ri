@@ -1,0 +1,110 @@
+struct ReleaseOrder
+end
+struct ReleaseCancelledOrder
+end
+struct ReleaseParallelOrder
+end
+
+# A retained completion has many readers with independent deadlines.
+group do |orders|
+  order = orders.spawn do
+    RisBoard.take(ReleaseOrder)
+    73
+  end
+  raise "poll consumed" unless order.wait(0).is_a?(TimedOut)
+  group do |readers|
+    32.times do
+      readers.spawn do
+        raise "broadcast deadline" unless order.wait(2000).nil?
+        raise "broadcast result" unless order.value == 73
+        0
+      end
+    end
+    short = readers.spawn { order.wait(1).is_a?(TimedOut) }
+    long = readers.spawn do
+      raise "long deadline" unless order.wait(2000).nil?
+      order.value == 73
+    end
+    another = readers.spawn do
+      raise "other deadline" unless order.wait(2000).nil?
+      order.value == 73
+    end
+    raise "short deadline" unless short.value == true
+    raise "release" unless RisBoard.post(ReleaseOrder.new)
+    raise "first reader" unless long.value == true
+    raise "second reader" unless another.value == true
+  end
+  raise "retained completion" unless order.wait(-1).nil?
+  raise "repeat result" unless order.value == 73
+end
+# Cancelling a reader leaves an outer group's task alone.
+group do |orders|
+  order = orders.spawn do
+    RisBoard.take(ReleaseCancelledOrder)
+    91
+  end
+  group do |readers|
+    reader = readers.spawn { order.wait(2000).is_a?(Cancelled) }
+    sleep 1
+    readers.cancel_children
+    raise "cancelled reader" unless reader.value == true
+  end
+  raise "release cancelled" unless RisBoard.post(ReleaseCancelledOrder.new)
+  raise "cancel reached order" unless order.wait(2000).nil?
+  raise "cancel changed result" unless order.value == 91
+end
+# Completion includes deferred cleanup, as value does.
+group do |g|
+  task = g.spawn do
+    defer sleep 20
+    12
+  end
+  raise "cleanup not done" unless task.wait(1).is_a?(TimedOut)
+  raise "cleanup done" unless task.wait(2000).nil?
+  raise "cleanup result" unless task.value == 12
+end
+# Completion wins when the scheduler resumes after both deadlines.
+group do |g|
+  task = g.spawn { 19 }
+  reader = g.spawn do
+    raise "late completion" unless task.wait(1).nil?
+    task.value == 19
+  end
+  sleep 0
+  until_ns = __iyi_monotonic_ns + 5000000_i64
+  while __iyi_monotonic_ns < until_ns
+  end
+  raise "late reader" unless reader.value == true
+end
+# A retired completion timer must not wake a later, unrelated sleep.
+group do |g|
+  task = g.spawn { 21 }
+  raise "early completion" unless task.wait(5).nil?
+  started = __iyi_monotonic_ns
+  sleep 15
+  raise "stale timer" if __iyi_monotonic_ns - started < 10000000_i64
+end
+# Cross-scheduler completion wakes a timed join on this scheduler.
+{% unless flag?(:gc_none) || flag?(:gc_boehm) %}
+  group do |g|
+    task = g.spawn_parallel do
+      RisBoard.take(ReleaseParallelOrder)
+      29
+    end
+    raise "parallel timeout" unless task.wait(1).is_a?(TimedOut)
+    raise "parallel release" unless RisBoard.post(ReleaseParallelOrder.new)
+    raise "parallel completion" unless task.wait(2000).nil?
+    raise "parallel result" unless task.value == 29
+  end
+{% end %}
+# A completed panic is Done; wait does not consume or catch the panic.
+group do |g|
+  task = g.spawn do
+    message : String = "wait panic"
+    raise message
+  end
+  raise "panic completion" unless task.wait(2000).nil?
+  panic = task.value
+  raise "panic value" unless panic.is_a?(Panicked)
+end
+puts "PASS: task waits"

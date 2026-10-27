@@ -67,6 +67,23 @@ expect board_recursive 'use Tre or Ary nodes with checked integer indices'
 expect board_closure 'send Str, Ary bytes or a value struct'
 expect board_owner 'send Str, Ary bytes or a value struct'
 
+# Timed joins broadcast completion without cancelling the retained task.
+for mode in gc no-gc; do
+  flags=()
+  [ "$mode" = gc ] || flags+=(--no-gc)
+  out=$(RIS_HEAP_STATS=1 "$RIS" run "${flags[@]}" \
+    test/ris/task_wait.ri 2>&1)
+  code=$?
+  if [ "$code" -eq 0 ] &&
+      grep -qxF 'PASS: task waits' <<<"$out" &&
+      { [ "$mode" = gc ] ||
+        grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; }; then
+    echo "runs     task_wait ($mode, broadcast, deadlines, cancel, panic)"
+  else
+    echo "FAILED   task_wait ($mode): $out"; status=1
+  fi
+done
+
 # Joining waits for cleanup and refuses later adoption.
 out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc \
   test/ris/group_lifecycle.ri 2>&1)

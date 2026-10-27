@@ -226,9 +226,14 @@ loopholes: construct independent handlers and connection state per task.
 Many readers of one completion use a retained IyiTask result and value,
 subject to task-handle Share checks. Results are copied to each reader's
 tape; this is completion broadcast, not a consuming message or a timed
-wait. Autocert needs timed nonconsuming task waits with separate handshake
-deadlines: one waiter's timeout must not cancel the common order. value
-alone does not provide this yet; TODO records that and manager wake/stop.
+wait. `IyiTask#wait(ms : Int32)` observes completion without consuming its
+result: Nil means Done, including panic or cancellation; TimedOut means
+this reader's deadline expired; Cancelled means this reader was cancelled.
+Cancellation wins over completion, then completion wins over timeout.
+A nonpositive duration polls. Each reader has its own deadline; neither
+timeout nor reader cancellation cancels the task. Read `value` separately
+to receive its result or Panicked. Completion includes deferred cleanup.
+Autocert still needs its manager ownership and wake/stop protocol port.
 
 IyiTask#value is not Goose's thread_wait: it answers the task's result
 or Panicked, not a status Bool, and a task handle is not a message. In
