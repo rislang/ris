@@ -295,7 +295,7 @@ class IyiBig
 
   def initialize(value : UInt64, capacity : Int32 = START)
     @capacity = capacity
-    @limbs = Pointer(UInt64).new(IyiRegion.tape_bytes(capacity.to_u64 * 8_u64))
+    @limbs = Pointer(UInt64).new(RisRegion.tape_bytes(capacity.to_u64 * 8_u64))
     @size = 0
     while value != 0_u64
       @limbs[@size] = value & MASK
@@ -340,7 +340,7 @@ class IyiBig
     while capacity < limbs
       capacity = capacity * 2
     end
-    limbs = Pointer(UInt64).new(IyiRegion.tape_bytes(capacity.to_u64 * 8_u64))
+    limbs = Pointer(UInt64).new(RisRegion.tape_bytes(capacity.to_u64 * 8_u64))
     index = 0
     while index < @size
       limbs[index] = @limbs[index]

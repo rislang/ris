@@ -1,5 +1,5 @@
 def pending_used : UInt64
-  IyiHeap.read64(IyiRegion.tape &+ IyiRegion::OFF_CURSOR)
+  IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)
 end
 
 @[OnTape]

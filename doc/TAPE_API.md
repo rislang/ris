@@ -229,7 +229,7 @@ leaves existing output intact. Without a writer it returns `Str?`;
 URI resolution and IDNA host conversion remain legacy APIs.
 
 ## Published runtime limits
-`IyiRegion` starts tapes at 67,108,864 bytes (64 MiB),
+`RisRegion` starts tapes at 67,108,864 bytes (64 MiB),
 not a cap. Each mapping adds a 64-byte header and rounds to 65,536 bytes.
 Checked UInt64 arithmetic permits at most 2^64 - 65,536 mapped bytes;
 the OS address space and available memory usually impose a smaller limit.

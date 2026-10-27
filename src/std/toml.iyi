@@ -1055,9 +1055,9 @@ pub struct TapeTable
   def initialize(depth : Int32, explicit : Bool, dotted : Bool,
                  pool : SlicePool(TapePair(TapeSlot)?))
     @explicit = Pointer(Bool).new(
-      IyiRegion.tape_bytes(sizeof(Bool).to_u64))
+      RisRegion.tape_bytes(sizeof(Bool).to_u64))
     @dotted = Pointer(Bool).new(
-      IyiRegion.tape_bytes(sizeof(Bool).to_u64))
+      RisRegion.tape_bytes(sizeof(Bool).to_u64))
     @depth = depth
     @explicit.value = explicit
     @dotted.value = dotted
@@ -1201,11 +1201,11 @@ struct TapeReader
 
   def initialize(text : Str)
     @scan = Pointer(Str::Scanner).new(
-      IyiRegion.tape_bytes(sizeof(Str::Scanner).to_u64))
+      RisRegion.tape_bytes(sizeof(Str::Scanner).to_u64))
     @current = Pointer(TapeTable).new(
-      IyiRegion.tape_bytes(sizeof(TapeTable).to_u64))
+      RisRegion.tape_bytes(sizeof(TapeTable).to_u64))
     @path = Pointer(Ary(Str)).new(
-      IyiRegion.tape_bytes(sizeof(Ary(Str)).to_u64))
+      RisRegion.tape_bytes(sizeof(Ary(Str)).to_u64))
     @scan.value = Str::Scanner.new(text)
     @slot_pool = SlicePool(TapePair(TapeSlot)?).new
     @table_pool = SlicePool(TapeTable?).new

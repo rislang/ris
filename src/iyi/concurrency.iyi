@@ -1093,16 +1093,16 @@ class IyiSchedulerState
     {% if (!flag?(:gc_none) || flag?(:linux)) && !flag?(:gc_boehm) &&
           ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) ||
            flag?(:darwin) || flag?(:win32) || flag?(:wasm32)) %}
-      bytes = IyiRegion.size_mul(capacity, sizeof(IyiFiber?).to_u64)
-      region = IyiRegion.acquire(IyiRegion.size_add(bytes, 32_u64))
-      start = IyiRegion.take(region, bytes, true, 0_u64)
+      bytes = RisRegion.size_mul(capacity, sizeof(IyiFiber?).to_u64)
+      region = RisRegion.acquire(RisRegion.size_add(bytes, 32_u64))
+      start = RisRegion.take(region, bytes, true, 0_u64)
       slots = Pointer(IyiFiber?).new(start)
       slots.copy_from(@io_slots, @io_capacity)
       previous = @io_region
       @io_region = region
       @io_slots = slots
       @io_capacity = capacity.to_i32
-      IyiRegion.release(previous) if previous != 0
+      RisRegion.release(previous) if previous != 0
     {% else %}
       slots = Pointer(IyiFiber?).malloc(capacity)
       slots.copy_from(@io_slots, @io_capacity)
@@ -1591,7 +1591,7 @@ class IyiScheduler
       base = following
     end
     state.stack_pool = 0_u64
-    IyiRegion.drop_spares
+    RisRegion.drop_spares
     @@state = nil
   end
 
@@ -1991,8 +1991,8 @@ class IyiScheduler
     end
     state.current = fiber
     {% if (!flag?(:gc_none) || flag?(:linux)) && !flag?(:gc_boehm) %}
-      previous.tape = IyiRegion.tape
-      IyiRegion.tape = fiber.tape
+      previous.tape = RisRegion.tape
+      RisRegion.tape = fiber.tape
     {% end %}
     __iyi_ctx_swap(previous.sp_slot, fiber.sp_slot)
     # Running from here, on its own stack, and not before: the collector's
@@ -2017,7 +2017,7 @@ class IyiScheduler
     body = fiber.proc
     {% if (!flag?(:gc_none) || flag?(:linux)) && !flag?(:gc_boehm) %}
       # Each spawned body owns a tape, including its panic/exit cleanup.
-      IyiRegion.tape_scope(Tape::CAPACITY) do
+      RisRegion.tape_scope(Tape::CAPACITY) do
         body.call unless body.is_a?(Nil)
       end
     {% else %}
@@ -3753,7 +3753,7 @@ def exit(status : Int32 = 0) : NoReturn
     fiber.defers = node.next_node
     node.run
   end
-  IyiRegion.report_stats
+  RisRegion.report_stats
   RisHeap.report
   __iyi_flush_std
   __iyi_exit(status)

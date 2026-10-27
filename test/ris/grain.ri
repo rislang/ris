@@ -7,14 +7,14 @@ def whole(region : UInt64) : Bool
 end
 
 tape do
-  first = IyiRegion.tape
+  first = RisRegion.tape
   ok = whole(first)
   # Many values, not one growing one: a growing value takes a region of
   # its own (TAPE_SPEC.md), and these fill the tape past its mapping.
   chunk = "a" * (1024 * 1024)
   pieces = Ary(Str).new(71) { |_| Str.new(chunk) }
-  grown = IyiRegion.tape
+  grown = RisRegion.tape
   ok &&= grown != first && whole(grown) && pieces.size == 71
-  local_tape { ok &&= IyiRegion.tape != grown && whole(IyiRegion.tape) }
+  local_tape { ok &&= RisRegion.tape != grown && whole(RisRegion.tape) }
   puts ok ? "PASS: tape mappings are whole 64 KiB grains" : "FAILED"
 end

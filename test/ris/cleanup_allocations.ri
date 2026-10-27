@@ -19,4 +19,4 @@ after = GC.stats.bytes_since_collection
 GC.enable
 raise "tape scopes allocated on the GC heap" unless after == before
 puts "no GC allocation per scope"
-puts IyiRegion.tape != 0_u64
+puts RisRegion.tape != 0_u64

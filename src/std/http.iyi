@@ -216,7 +216,7 @@ struct IdleConns
   @head : Pointer(Head)
 
   def initialize
-    @head = Pointer(Head).new(IyiRegion.program_bytes(sizeof(Head).to_u64))
+    @head = Pointer(Head).new(RisRegion.program_bytes(sizeof(Head).to_u64))
     @head.value = Head.new
   end
 
@@ -297,8 +297,8 @@ struct Conn
 
     def initialize(@socket : IyiSocket, @listener : IyiSocket? = nil, @idle : IdleConns? = nil, @stream : TlsStream? = nil, @program_owned : Bool = true)
       @capacity = ROOM
-      address = @program_owned ? IyiRegion.program_bytes(@capacity.to_u64) :
-        IyiRegion.tape_bytes(@capacity.to_u64)
+      address = @program_owned ? RisRegion.program_bytes(@capacity.to_u64) :
+        RisRegion.tape_bytes(@capacity.to_u64)
       @data = Pointer(UInt8).new(address)
       @start = 0
       @stop = 0
@@ -315,10 +315,10 @@ struct Conn
                  task_owned : Bool = false)
     @state = Pointer(State).new(0_u64)
     if task_owned
-      @state = Pointer(State).new(IyiRegion.tape_bytes(sizeof(State).to_u64))
+      @state = Pointer(State).new(RisRegion.tape_bytes(sizeof(State).to_u64))
       @state.value = State.new(socket, listener, idle, stream, false)
     else
-      @state = Pointer(State).new(IyiRegion.program_bytes(sizeof(State).to_u64))
+      @state = Pointer(State).new(RisRegion.program_bytes(sizeof(State).to_u64))
       @state.value = State.new(socket, listener, idle, stream)
     end
   end
@@ -548,8 +548,8 @@ struct Conn
 
   private def grow_buffer(old : Pointer(UInt8)) : Nil
     bytes = @state.value.capacity.to_u64
-    address = @state.value.program_owned ? IyiRegion.program_bytes(bytes) :
-      IyiRegion.tape_bytes(bytes)
+    address = @state.value.program_owned ? RisRegion.program_bytes(bytes) :
+      RisRegion.tape_bytes(bytes)
     @state.value.data = Pointer(UInt8).new(address)
     @state.value.data.copy_from(old, @state.value.stop)
   end

@@ -268,7 +268,7 @@ class Iyi::TapeProgramChecker
         mutation(node)
         result = node.args.first?.try(&.type?.try(&.to_s)) == "Program::TapeOwner" ? Origin::Program : Origin::Unknown
       elsif runtime && ((target.owner.to_s == "Program::TapeOwner" && node.name == "run") ||
-            (target.owner.to_s == "IyiRegion.class" &&
+            (target.owner.to_s == "RisRegion.class" &&
             (node.name.starts_with?("program_") || node.name == "release_program")))
         unless TapeRules.runtime?(@program, node.location)
           node.raise "Program.tape.run is private; use .copy_to(Program.tape)"

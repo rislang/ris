@@ -120,7 +120,7 @@ pub struct TapeHeaders
 
   def initialize(@capacity : Int32)
     bytes = @capacity.to_u64 * sizeof(TapeHeaderField).to_u64
-    @fields = Pointer(TapeHeaderField).new(IyiRegion.tape_bytes(bytes))
+    @fields = Pointer(TapeHeaderField).new(RisRegion.tape_bytes(bytes))
     @size = 0
   end
 

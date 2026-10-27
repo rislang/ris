@@ -14,6 +14,9 @@ ris, take it to iyi with `git cherry-pick`; strike entries once merged.
   spawn and spawn_parallel, the name saying what you get. ris renames
   them when Channel goes (TODO.md); iyi may take the names.
 
+* std/int: popcount and the zero counts through LLVM's bit intrinsics,
+  carried by `IyiBits` (bf760fcb3); the name stays for iyi.
+
 * std/math: use StaticArray for all fixed numeric constant tables,
   preserving their literal bits without startup heap allocations.
 
@@ -117,4 +120,4 @@ ris, take it to iyi with `git cherry-pick`; strike entries once merged.
 ## Stays in ris
 
 * Tape: std/http `parse_head` and `ParsedHead`, the tape list in
-  `IyiRegion`, `AGENTS.md`'s tape rules.
+  `RisRegion`, `AGENTS.md`'s tape rules.

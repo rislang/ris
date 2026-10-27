@@ -13,7 +13,7 @@ def pending_from_side : Str
 end
 
 def pending_region : UInt64
-  IyiRegion.tape
+  RisRegion.tape
 end
 
 tape do

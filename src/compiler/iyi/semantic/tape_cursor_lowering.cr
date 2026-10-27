@@ -131,7 +131,7 @@ class Iyi::TapeCursorLowering < Iyi::Transformer
   end
 
   private def step(node : Call, count : ASTNode) : ASTNode
-    sum = Call.new(Path.global("IyiRegion"), "offset_add",
+    sum = Call.new(Path.global("RisRegion"), "offset_add",
       [Var.new(@cursor).as(ASTNode), count])
     Assign.new(Var.new(@cursor), sum).at(node)
   end

@@ -56,7 +56,7 @@ class IyiIO
   # A stream retained for the program's lifetime, such as a log sink.
   def self.on_program(fd : Int64, buffer_size : Int32 = 4096,
                       sync : Bool = false) : IyiIO
-    io = IyiRegion.program_object(IyiIO)
+    io = RisRegion.program_object(IyiIO)
     io.initialize(fd, buffer_size, sync)
     io
   end

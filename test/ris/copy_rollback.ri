@@ -2,14 +2,14 @@
 # both the completed leaf and the rest of the partially built destination.
 struct Str
   @[PointerUnsafe("inject a panic after a real copy job")]
-  def __iyi_copy_into(target : Pointer(self), work : IyiCopyWork) : Nil
+  def __iyi_copy_into(target : Pointer(self), work : RisCopyWork) : Nil
     previous_def
     if self == "fail-owner"
-      IyiRegion.tape_bytes(IyiRegion::CAPACITY + 1_u64)
+      RisRegion.tape_bytes(RisRegion::CAPACITY + 1_u64)
       raise "forced owner copy failure"
     elsif self == "fail-scratch"
       work.scratch do
-        IyiRegion.tape_bytes(IyiRegion::CAPACITY + 1_u64)
+        RisRegion.tape_bytes(RisRegion::CAPACITY + 1_u64)
         raise "forced scratch copy failure"
       end
     end
@@ -25,11 +25,11 @@ struct CopyUsageProbe
   end
 
   @[PointerUnsafe("probe destination usage inside the copy transaction")]
-  def __iyi_copy_into(target : Pointer(self), work : IyiCopyWork) : Nil
-    region = IyiRegion.tape
+  def __iyi_copy_into(target : Pointer(self), work : RisCopyWork) : Nil
+    region = RisRegion.tape
     target.value = self.class.new(region,
-      IyiHeap.read64(region &+ IyiRegion::OFF_CURSOR),
-      IyiHeap.read64(region &+ IyiRegion::OFF_SIDE))
+      IyiHeap.read64(region &+ RisRegion::OFF_CURSOR),
+      IyiHeap.read64(region &+ RisRegion::OFF_SIDE))
   end
 end
 
@@ -44,7 +44,7 @@ kept = "retained".copy_to(Program.tape)
   before = owner_usage
   group do |g|
     task = g.spawn do
-      saved = IyiRegion.tape
+      saved = RisRegion.tape
       defer check_caller_tape(saved)
       tape do
         source = Ary(Str){Str.new("first"), Str.new(failure)}
@@ -63,5 +63,5 @@ raise "subsequent copy failed" unless "after".copy_to(Program.tape) == "after"
 puts "PASS: failed copy restores owner usage"
 
 def check_caller_tape(saved : UInt64) : Nil
-  raise "copy lost caller tape" unless IyiRegion.tape == saved
+  raise "copy lost caller tape" unless RisRegion.tape == saved
 end

@@ -1,7 +1,7 @@
 # Ordinary tapes start at 64 MiB; Linux growing payloads reserve separately.
 # Sizes are checked before state changes.
 # Fatal size errors write literals and stack-buffer numbers, then exit.
-class IyiRegion
+class RisRegion
   OFF_CURSOR =  0_u64
   OFF_LIMIT  =  8_u64
   OFF_PARENT = 16_u64

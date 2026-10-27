@@ -89,7 +89,7 @@ pub class Mutex(T)
   end
 
   protected def self.build_on_program(value : T) : Mutex(T)
-    mutex = IyiRegion.program_object(Mutex(T))
+    mutex = RisRegion.program_object(Mutex(T))
     mutex.initialize(value)
     mutex
   end

@@ -337,7 +337,7 @@ end
 
 pub class IOBackend < Backend
   def self.on_program(io : IO, formatter : Formatter? = nil) : IOBackend
-    backend = IyiRegion.program_object(IOBackend)
+    backend = RisRegion.program_object(IOBackend)
     backend.initialize(io, formatter)
     backend
   end
@@ -526,8 +526,8 @@ end
 pub class Logger
   def self.on_program(source : Str, level : Severity? = nil,
                       backend : Backend? = nil) : Logger
-    logger = IyiRegion.program_object(Logger)
-    logger.initialize(IyiRegion.program_text(source), level, backend)
+    logger = RisRegion.program_object(Logger)
+    logger.initialize(RisRegion.program_text(source), level, backend)
     logger
   end
 
@@ -808,7 +808,7 @@ pub class Log
   # capturing either the lock receiver or task-owned metadata.
   class ContextLock < Mutex(Int32)
     def self.on_program : ContextLock
-      lock = IyiRegion.program_object(ContextLock)
+      lock = RisRegion.program_object(ContextLock)
       lock.initialize(0)
       lock
     end

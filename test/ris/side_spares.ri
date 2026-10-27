@@ -4,10 +4,10 @@ module test/ris/side_spares
 @[PointerUnsafe("test mixed reservation reuse without touching payloads")]
 def mixed_spares
   10000.times do
-    small = IyiRegion.acquire_side(65536_u64)
-    large = IyiRegion.acquire_side(131072_u64)
-    IyiRegion.release(small)
-    IyiRegion.release(large)
+    small = RisRegion.acquire_side(65536_u64)
+    large = RisRegion.acquire_side(131072_u64)
+    RisRegion.release(small)
+    RisRegion.release(large)
   end
 end
 mixed_spares

@@ -75,6 +75,8 @@ on one tape.
   list it in [UPSTREAM.md](UPSTREAM.md).
 * Rename an iyi name only where ris changes what it does (Channel became
   RisInbox); keep the rest, Iyi* runtime types included, for merges.
+  A runtime type iyi does not have is Ris* (RisRegion, RisHeap); one
+  that does not need tape goes to UPSTREAM.md under its Iyi* name.
 * Keep inherited documents in doc/archive/iyi/ and doc/archive/crystal/;
   SPEC.md stays at the root as an inherited language reference.
   ris's own docs include CONTRIBUTING.md; TAPE_SPEC.md rules tape memory.

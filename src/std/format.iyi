@@ -122,7 +122,7 @@ module ::IyiFloatText
       k = k - 1
     end
 
-    digits = Pointer(UInt8).new(IyiRegion.tape_bytes(24_u64))
+    digits = Pointer(UInt8).new(RisRegion.tape_bytes(24_u64))
     count = 0
     while true
       r.mul_small(10_u64)

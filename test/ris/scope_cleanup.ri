@@ -10,18 +10,18 @@ def early : Int32
 end
 
 puts early
-puts IyiRegion.tape != 0_u64
+puts RisRegion.tape != 0_u64
 tape do
   tape do
     text = Str.build { |w| w.push(66_u8) }
     break text.bytesize
   end
-  puts IyiRegion.tape != 0_u64
+  puts RisRegion.tape != 0_u64
   break 7
 end
-puts IyiRegion.tape != 0_u64
+puts RisRegion.tape != 0_u64
 tape do
   text = Str.build { |w| w.push(67_u8) }
   puts text
 end
-puts IyiRegion.tape != 0_u64
+puts RisRegion.tape != 0_u64

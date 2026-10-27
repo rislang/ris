@@ -264,23 +264,23 @@ pub struct TapeEventParser
   # header for why).
   def initialize(last_event_id : Str = "".as_tape)
     @last_event_id = Pointer(Str).new(
-      IyiRegion.tape_bytes(sizeof(Str).to_u64))
+      RisRegion.tape_bytes(sizeof(Str).to_u64))
     @retry = Pointer(Int32?).new(
-      IyiRegion.tape_bytes(sizeof(Int32?).to_u64))
+      RisRegion.tape_bytes(sizeof(Int32?).to_u64))
     @dispatched = Pointer(Int64).new(
-      IyiRegion.tape_bytes(sizeof(Int64).to_u64))
+      RisRegion.tape_bytes(sizeof(Int64).to_u64))
     @id_buffer = Pointer(Str).new(
-      IyiRegion.tape_bytes(sizeof(Str).to_u64))
+      RisRegion.tape_bytes(sizeof(Str).to_u64))
     @type = Pointer(Str).new(
-      IyiRegion.tape_bytes(sizeof(Str).to_u64))
+      RisRegion.tape_bytes(sizeof(Str).to_u64))
     @data = Pointer(Str::Builder).new(
-      IyiRegion.tape_bytes(sizeof(Str::Builder).to_u64))
+      RisRegion.tape_bytes(sizeof(Str::Builder).to_u64))
     @line = Pointer(Str::Builder).new(
-      IyiRegion.tape_bytes(sizeof(Str::Builder).to_u64))
+      RisRegion.tape_bytes(sizeof(Str::Builder).to_u64))
     @after_cr = Pointer(Bool).new(
-      IyiRegion.tape_bytes(sizeof(Bool).to_u64))
+      RisRegion.tape_bytes(sizeof(Bool).to_u64))
     @first = Pointer(Bool).new(
-      IyiRegion.tape_bytes(sizeof(Bool).to_u64))
+      RisRegion.tape_bytes(sizeof(Bool).to_u64))
     @last_event_id.value = last_event_id
     @id_buffer.value = @last_event_id.value
     @type.value = "".as_tape

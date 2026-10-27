@@ -5,21 +5,21 @@ module test/ris/pending_cleanup
 def pending_failure : NoReturn
   head = 0_u64
   depth = 0
-  saved = IyiRegion.tape
-  guard = IyiPendingGuard.new(pointerof(head), pointerof(depth),
+  saved = RisRegion.tape
+  guard = RisPendingGuard.new(pointerof(head), pointerof(depth),
     pointerof(saved))
   __iyi_pending_guard(pointerof(guard))
-  head = IyiRegion.acquire(IyiRegion::CAPACITY)
-  IyiRegion.tape = head
+  head = RisRegion.acquire(RisRegion::CAPACITY)
+  RisRegion.tape = head
   depth = 1
   # Force growth before the guard has had a normal return to save its head.
-  IyiRegion.tape_bytes(IyiRegion::CAPACITY + 1_u64)
+  RisRegion.tape_bytes(RisRegion::CAPACITY + 1_u64)
   raise "pending cleanup test"
 end
 
 group do |g|
   task = g.spawn do
-    saved = IyiRegion.tape
+    saved = RisRegion.tape
     defer check_pending_restored(saved)
     pending_failure
   end
@@ -28,5 +28,5 @@ end
 puts "PASS: pending panic restores caller and releases staging"
 
 def check_pending_restored(saved : UInt64) : Nil
-  raise "pending cleanup lost caller" unless IyiRegion.tape == saved
+  raise "pending cleanup lost caller" unless RisRegion.tape == saved
 end

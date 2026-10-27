@@ -16,7 +16,7 @@
 module Iyi::HeapPolicy
   def self.internal?(name : String) : Bool
     base = name.gsub(".class", "").gsub(":Module", "").split('(').first
-    base.in?(%w(IyiHeap IyiRegion IyiRoots IyiMark IyiRuntimeLock
+    base.in?(%w(IyiHeap RisRegion IyiRoots IyiMark IyiRuntimeLock
       IyiFiber IyiScheduler IyiSchedulerState IyiStackGuard IyiDefers
       IyiGroup IyiTask IyiWorkers
       IyiDeferNode IyiOnce RisHeap))

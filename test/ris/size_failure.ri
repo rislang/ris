@@ -34,24 +34,24 @@ when 103
 when 104
   Str.new("ab") * 2147483647
 when 105
-  IyiRegion.mapping_length(18446744073709551615_u64)
+  RisRegion.mapping_length(18446744073709551615_u64)
 when 106
-  IyiRegion.mapping_length(18446744073709551551_u64)
+  RisRegion.mapping_length(18446744073709551551_u64)
 when 107
-  IyiRegion.tape_bytes(18446744073709551615_u64)
+  RisRegion.tape_bytes(18446744073709551615_u64)
 when 108
-  IyiRegion.tape_bytes(18446744073709551608_u64)
+  RisRegion.tape_bytes(18446744073709551608_u64)
 when 109
-  IyiRegion.tape = 0_u64
-  IyiRegion.tape_bytes(1_u64)
+  RisRegion.tape = 0_u64
+  RisRegion.tape_bytes(1_u64)
 when 110
-  IyiRegion.acquire(4611686018427387904_u64)
+  RisRegion.acquire(4611686018427387904_u64)
 when 111
   side = 0_u64
-  IyiRegion.tape_resize(0_u64, 0_u64, 0_u64,
+  RisRegion.tape_resize(0_u64, 0_u64, 0_u64,
     4611686018427387904_u64, pointerof(side))
 when 112
-  IyiRegion.nonnegative(-9223372036854775808_i64)
+  RisRegion.nonnegative(-9223372036854775808_i64)
 when 113
   Tape.grown(2147483647_u64)
 when 114
@@ -66,8 +66,8 @@ when 116
   Lexer.new.overflow
 when 117
   side = 0_u64
-  start = IyiRegion.tape_bytes(8_u64)
-  IyiRegion.tape_bytes(8_u64)
-  IyiRegion.tape_resize(start, start + 8_u64, 8_u64,
+  start = RisRegion.tape_bytes(8_u64)
+  RisRegion.tape_bytes(8_u64)
+  RisRegion.tape_resize(start, start + 8_u64, 8_u64,
     16_u64, pointerof(side))
 end

@@ -146,7 +146,7 @@ class File
       i += 1
     end
     buffer = if path.is_a?(Str)
-               Pointer(UInt8).new(IyiRegion.tape_bytes((n + 1).to_u64))
+               Pointer(UInt8).new(RisRegion.tape_bytes((n + 1).to_u64))
              else
                Pointer(UInt8).malloc((n + 1).to_u64)
              end

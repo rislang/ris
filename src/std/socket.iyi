@@ -417,7 +417,7 @@ pub struct IyiSocket
   # connection is its listener's, and on Windows the socket `AcceptEx`
   # fills in has to be made in it.
   def initialize(fd : Int32, family : Int32 = AF_INET)
-    @state = Pointer(State).new(IyiRegion.program_bytes(sizeof(State).to_u64))
+    @state = Pointer(State).new(RisRegion.program_bytes(sizeof(State).to_u64))
     @state.value = State.new(fd, family)
   end
 

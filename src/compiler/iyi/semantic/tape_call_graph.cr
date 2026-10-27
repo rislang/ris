@@ -197,7 +197,7 @@ class Iyi::TapeCallGraph
       obj = node.obj
       return false if obj.is_a?(Path) &&
                       {"IyiHeap", "IyiMark"}.includes?(obj.names.last?)
-      @allocation ||= obj.is_a?(Path) && obj.names.last? == "IyiRegion" &&
+      @allocation ||= obj.is_a?(Path) && obj.names.last? == "RisRegion" &&
                       TAKES.includes?(node.name)
       @graph.targets(node).try &.each do |target|
         @graph.effect_reach(target)

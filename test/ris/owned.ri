@@ -47,5 +47,5 @@ tape do
 end
 raise "retained text changed after scope reuse" unless cache.body == "café <&>"
 raise "owned return changed" unless retained_page == "café <&>"
-raise "return lost implicit tape" unless IyiRegion.tape != 0_u64
+raise "return lost implicit tape" unless RisRegion.tape != 0_u64
 puts "PASS: explicit owned copy, typed cache boundary, UTF-8, empty text and scope reuse"

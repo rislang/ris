@@ -336,7 +336,7 @@ class Iyi::TapeScopeChecker
     end
 
     def visit(node : Path)
-      @safe = false if node.names.last? == "IyiRegion" || node.names.last? == "IyiHeap"
+      @safe = false if node.names.last? == "RisRegion" || node.names.last? == "IyiHeap"
       false
     end
 

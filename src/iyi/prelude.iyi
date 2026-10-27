@@ -4497,7 +4497,7 @@ require "./file"
         each_thread_root(visit)
         each_fiber_root(visit)
         each_global_root(visit)
-        IyiRegion.each_root(visit)
+        RisRegion.each_root(visit)
       end
 
       # The root set as a helper sees it at the mark's second stop: every
@@ -4508,7 +4508,7 @@ require "./file"
         each_thread_root(visit)
         each_fiber_root(visit)
         each_global_root(visit)
-        IyiRegion.each_root(visit)
+        RisRegion.each_root(visit)
       end
     end
 
@@ -8258,8 +8258,8 @@ require "./file"
       # the running tape is a global, and each region names its parent and
       # side regions in its header, so the chain stays reachable. Released,
       # a region is only unlinked: the collector frees it. The layout and
-      # the entry points are the mmap tape's (`IyiRegion` above).
-      class IyiRegion
+      # the entry points are the mmap tape's (`RisRegion` above).
+      class RisRegion
         OFF_CURSOR = 0_u64
         OFF_LIMIT  = 8_u64
         OFF_PARENT = 16_u64
@@ -9611,7 +9611,7 @@ end
 {% if (!flag?(:gc_none) || flag?(:linux)) && !flag?(:gc_boehm) &&
       ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) ||
       flag?(:darwin) || flag?(:win32) || flag?(:wasm32)) %}
-  alias IyiDefer = IyiDeferNode | Pointer(IyiPendingGuard)
+  alias IyiDefer = IyiDeferNode | Pointer(RisPendingGuard)
 {% else %}
   alias IyiDefer = IyiDeferNode
 {% end %}
@@ -10504,7 +10504,7 @@ fun main(argc : Int32, argv : UInt8**) : Int32
           ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) ||
           flag?(:darwin) || flag?(:win32) || flag?(:wasm32)) %}
     # Own the main fiber's tape; the guard also runs on panic and exit.
-    IyiRegion.tape_scope(Tape::CAPACITY) do
+    RisRegion.tape_scope(Tape::CAPACITY) do
       LibIyiMain.__iyi_main(argc, argv)
     end
   {% else %}
@@ -10516,9 +10516,9 @@ fun main(argc : Int32, argv : UInt8**) : Int32
   {% if (!flag?(:gc_none) || flag?(:linux)) && !flag?(:gc_boehm) &&
           ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) ||
           flag?(:darwin) || flag?(:win32) || flag?(:wasm32)) %}
-    IyiRegion.release_program
+    RisRegion.release_program
   {% end %}
-  IyiRegion.report_stats
+  RisRegion.report_stats
   RisHeap.report
   __iyi_flush_std
   {% if flag?(:win32) %}
@@ -10550,7 +10550,7 @@ end
   # it is for every other target.
   fun __main_argc_argv(argc : Int32, argv : UInt8**) : Int32
     {% if !flag?(:gc_none) && !flag?(:gc_boehm) %}
-      IyiRegion.tape_scope(Tape::CAPACITY) do
+      RisRegion.tape_scope(Tape::CAPACITY) do
         LibIyiMain.__iyi_main(argc, argv)
       end
     {% else %}
@@ -10576,7 +10576,7 @@ require "./ris"
 {% else %}
   # No tape here: what the program's end and the scheduler ask of it
   # answers that there is none.
-  class IyiRegion
+  class RisRegion
     # Internal stable handles retain the collected fallback on targets
     # without tapes. User tape syntax remains unavailable there.
     def self.program_bytes(size : UInt64, clear : Bool = false,

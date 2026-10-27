@@ -1,13 +1,13 @@
 module test/ris/fibers/implicit
 
-main_tape = IyiRegion.tape
+main_tape = RisRegion.tape
 handles = Array(IyiFiber).new
 completed = 0
 group do |g|
   2.times do |n|
     g.spawn do
       handles << IyiScheduler.current
-      raise "fiber shares main tape" if IyiRegion.tape == main_tape
+      raise "fiber shares main tape" if RisRegion.tape == main_tape
       text = "fiber"
       items = Ary(Str).new(2)
       items << text
@@ -21,7 +21,7 @@ group do |g|
   end
 end
 raise "fiber did not finish" unless completed == 2
-raise "main tape changed" unless IyiRegion.tape == main_tape
+raise "main tape changed" unless RisRegion.tape == main_tape
 handles.each do |fiber|
   raise "fiber kept tape" unless fiber.tape == 0_u64
   raise "fiber kept cleanup" unless fiber.defers.nil?

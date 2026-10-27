@@ -1,7 +1,7 @@
 # Goose's every scope freeing: a loop round or block that keeps nothing
 # frees what it put on the tape; one that keeps something does not.
 def used : UInt64
-  IyiHeap.read64(IyiRegion.tape &+ IyiRegion::OFF_CURSOR)
+  IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)
 end
 
 tape do
