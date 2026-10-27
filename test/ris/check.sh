@@ -49,6 +49,27 @@ for name in fifo str lifecycle scalars nonowner storage owner_cost reuse \
   fi
 done
 
+# Group-owned synchronization uses runtime pools even without a GC.
+for name in basic fifo lifecycle linear; do
+  out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc \
+    "test/ris/sync_$name.ri" 2>&1)
+  if [ "$?" -eq 0 ] &&
+      grep -qxF "PASS: sync $name" <<<"$out" &&
+      grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+    echo "runs     sync_$name (--no-gc, zero heap)"
+  else
+    echo "FAILED   sync_$name: $out"; status=1
+  fi
+done
+
+# Owning Share handles cross scheduler boundaries without sharing tape data.
+out=$("$RIS" run test/ris/sync_parallel.ri 2>&1)
+if [ "$?" -eq 0 ] && grep -qxF 'PASS: sync parallel' <<<"$out"; then
+  echo "runs     sync_parallel (four workers)"
+else
+  echo "FAILED   sync_parallel: $out"; status=1
+fi
+
 # Cancelled wakes and failed receiver copies preserve queued messages.
 for name in cancel copy; do
   out=$("$RIS" run "test/ris/inbox_$name.ri" 2>&1)
@@ -105,6 +126,7 @@ fi
 expect inbox_payload 'use g.new_inbox with a scalar or Str'
 expect inbox_constructor "private method 'new'"
 expect inbox_forge 'inbox pool storage is private; use g.new_inbox(T, n)'
+expect sync_forge 'sync pool storage is private; use g.new_semaphore(n)'
 
 # A pipe's writer waits while the pipe is full (930722c made it panic).
 out=$("$RIS" run test/ris/pipe_wait.ri 2>&1)

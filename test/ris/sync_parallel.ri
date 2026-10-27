@@ -1,0 +1,19 @@
+module test/ris/sync_parallel
+
+IyiWorkers.count = 4
+group do |g|
+  s = g.new_semaphore(1)
+  e = g.new_event
+  s.acquire
+  100.times do
+    g.spawn_parallel do
+      raise "parallel latch" unless e.wait(5000).nil?
+      raise "parallel semaphore" unless s.acquire(5000).nil?
+      s.release
+      nil
+    end
+  end
+  e.fire
+  s.release
+end
+puts "PASS: sync parallel"

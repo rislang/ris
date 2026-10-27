@@ -1,0 +1,297 @@
+# Scheduler-locked runtime storage; handles never retain group pointers.
+struct RisSyncRecord
+  property generation : UInt64 = 1_u64
+  property live : Bool = false
+  property following : Int32 = -1
+  property permits : Int64 = 0_i64
+  property maximum : Int64 = 0_i64
+  property fired : Bool = false
+  property head : UInt64 = 0_u64
+  property tail : UInt64 = 0_u64
+
+  def initialize
+  end
+end
+
+module RisSyncPool
+  RECORDS = 4096
+  @@storage : UInt64 = 0_u64
+  @@free : Int32 = 0
+
+  def self.record(slot : Int32) : Pointer(RisSyncRecord)
+    Pointer(RisSyncRecord).new(@@storage) + slot
+  end
+
+  def self.allocate(group : IyiGroup, permits : Int64) : Tuple(Int32, UInt64)
+    if @@storage == 0
+      @@storage = __iyi_mmap(RECORDS.to_u64 * sizeof(RisSyncRecord)).address
+      RECORDS.times do |i|
+        record(i).value = RisSyncRecord.new
+        record(i).value.following = i + 1 < RECORDS ? i + 1 : -1
+      end
+    end
+    slot = @@free
+    if slot < 0
+      RisHeap.text("ris: fatal: sync pool exhausted; use fewer live semaphores or events\n")
+      __iyi_exit(1)
+    end
+    p = record(slot)
+    @@free = p.value.following
+    r = RisSyncRecord.new
+    r.generation = p.value.generation
+    r.live = true
+    r.permits = permits
+    r.maximum = permits
+    r.following = group.owned_sync_head
+    p.value = r
+    group.owned_sync_head = slot
+    {slot, r.generation}
+  end
+
+  def self.valid?(slot : Int32, generation : UInt64) : Bool
+    @@storage != 0 && slot >= 0 && slot < RECORDS &&
+      record(slot).value.live && record(slot).value.generation == generation
+  end
+
+  def self.fiber(id : UInt64) : IyiFiber
+    Pointer(Void).new(id).as(IyiFiber)
+  end
+
+  def self.wake(p : Pointer(RisSyncRecord), all : Bool = false) : Nil
+    id = p.value.head
+    while id != 0
+      f = fiber(id)
+      IyiScheduler.ready(f) if f.state == IyiFiberState::WaitingCh
+      break unless all
+      id = f.sync_next
+    end
+  end
+
+  def self.append(p : Pointer(RisSyncRecord), f : IyiFiber) : Nil
+    f.sync_prev = p.value.tail
+    f.sync_next = 0_u64
+    if f.sync_prev == 0
+      p.value.head = f.object_id
+    else
+      fiber(f.sync_prev).sync_next = f.object_id
+    end
+    p.value.tail = f.object_id
+  end
+
+  def self.remove(p : Pointer(RisSyncRecord), f : IyiFiber) : Nil
+    if f.sync_prev == 0
+      p.value.head = f.sync_next
+    else
+      fiber(f.sync_prev).sync_next = f.sync_next
+    end
+    if f.sync_next == 0
+      p.value.tail = f.sync_prev
+    else
+      fiber(f.sync_next).sync_prev = f.sync_prev
+    end
+    f.sync_prev = 0_u64
+    f.sync_next = 0_u64
+    wake(p) if p.value.permits > 0 || p.value.fired
+  end
+
+  def self.group_ended(group : IyiGroup) : Nil
+    while group.owned_sync_head >= 0
+      slot = group.owned_sync_head
+      p = record(slot)
+      group.owned_sync_head = p.value.following
+      p.value.live = false
+      wake(p, true)
+      unless p.value.generation == 18446744073709551615_u64
+        p.value.generation = p.value.generation + 1_u64
+        p.value.following = @@free
+        @@free = slot
+      end
+    end
+  end
+
+  def self.wait(slot : Int32, generation : UInt64, event : Bool,
+                ms : Int32?) : Nil | Cancelled | TimedOut | RisInbox::Closed
+    f = IyiScheduler.current
+    queued = false
+    IyiSchedLock.lock
+    unless valid?(slot, generation)
+      IyiSchedLock.unlock
+      return RisInbox::Closed.new
+    end
+    if ms.is_a?(Int32) && ms < 0
+      IyiSchedLock.unlock
+      raise "negative wait size; use 0 to poll or omit the deadline to wait"
+    end
+    deadline = nil
+    if ms.is_a?(Int32)
+      now = __iyi_monotonic_ns
+      duration = ms.to_i64 * 1000000_i64
+      limit = 9223372036854775807_i64
+      deadline = now > limit - duration ? limit : now + duration
+    end
+    loop do
+      unless valid?(slot, generation)
+        IyiSchedLock.unlock
+        return RisInbox::Closed.new
+      end
+      p = record(slot)
+      if f.cancelled
+        remove(p, f) if queued
+        IyiSchedLock.unlock
+        return Cancelled.new
+      end
+      first = queued ? p.value.head == f.object_id : p.value.head == 0
+      available = event ? p.value.fired : p.value.permits > 0 && first
+      if available
+        p.value.permits = p.value.permits - 1 unless event
+        remove(p, f) if queued
+        IyiSchedLock.unlock
+        return nil
+      end
+      if deadline.is_a?(Int64) && __iyi_monotonic_ns >= deadline
+        remove(p, f) if queued
+        IyiSchedLock.unlock
+        return TimedOut.new
+      end
+      unless queued
+        append(p, f)
+        queued = true
+      end
+      IyiScheduler.park(f)
+      if deadline.is_a?(Int64)
+        f.deadline = deadline
+        IyiScheduler.sleep_insert(f)
+      end
+      IyiSchedLock.unlock
+      IyiScheduler.reschedule
+      IyiScheduler.sleep_remove(f) if deadline.is_a?(Int64)
+      IyiSchedLock.lock
+    end
+  end
+end
+
+@[Share(owns: true)]
+struct RisSemaphore
+  private def initialize(@slot : Int32, @generation : UInt64)
+  end
+
+  private def self.new(slot : Int32, generation : UInt64) : self
+    made = uninitialized self
+    pointerof(made.@slot).value = slot
+    pointerof(made.@generation).value = generation
+    made
+  end
+
+  def self.__create(slot : Int32, generation : UInt64) : self
+    new(slot, generation)
+  end
+
+  def acquire
+    RisSyncPool.wait(@slot, @generation, false, nil)
+  end
+
+  def acquire(ms : Int32)
+    RisSyncPool.wait(@slot, @generation, false, ms)
+  end
+
+  def hold(&block : -> T) forall T
+    result = acquire
+    return result unless result.is_a?(Nil)
+    slot = @slot
+    generation = @generation
+    defer RisSemaphore.__create(slot, generation).release
+    block.call
+  end
+
+  def release : Nil | RisInbox::Closed
+    IyiSchedLock.lock
+    unless RisSyncPool.valid?(@slot, @generation)
+      IyiSchedLock.unlock
+      return RisInbox::Closed.new
+    end
+    p = RisSyncPool.record(@slot)
+    if p.value.permits == p.value.maximum
+      IyiSchedLock.unlock
+      raise "semaphore over-release; release only an acquired permit"
+    end
+    p.value.permits = p.value.permits + 1
+    RisSyncPool.wake(p)
+    IyiSchedLock.unlock
+    nil
+  end
+end
+
+@[Share(owns: true)]
+struct RisEvent
+  private def initialize(@slot : Int32, @generation : UInt64)
+  end
+
+  private def self.new(slot : Int32, generation : UInt64) : self
+    made = uninitialized self
+    pointerof(made.@slot).value = slot
+    pointerof(made.@generation).value = generation
+    made
+  end
+
+  def self.__create(slot : Int32, generation : UInt64) : self
+    new(slot, generation)
+  end
+
+  def wait
+    RisSyncPool.wait(@slot, @generation, true, nil)
+  end
+
+  def wait(ms : Int32)
+    RisSyncPool.wait(@slot, @generation, true, ms)
+  end
+
+  def fired? : Bool | RisInbox::Closed
+    IyiSchedLock.lock
+    unless RisSyncPool.valid?(@slot, @generation)
+      IyiSchedLock.unlock
+      return RisInbox::Closed.new
+    end
+    result = RisSyncPool.record(@slot).value.fired
+    IyiSchedLock.unlock
+    result
+  end
+
+  def fire : Nil | RisInbox::Closed
+    IyiSchedLock.lock
+    unless RisSyncPool.valid?(@slot, @generation)
+      IyiSchedLock.unlock
+      return RisInbox::Closed.new
+    end
+    p = RisSyncPool.record(@slot)
+    p.value.fired = true
+    RisSyncPool.wake(p, true)
+    IyiSchedLock.unlock
+    nil
+  end
+end
+
+class IyiGroup
+  def new_semaphore(n : Int32 | Int64) : RisSemaphore
+    if n < 1
+      raise "semaphore permits must be positive; use 1 and pre-acquire to start empty"
+    end
+    slot, generation = new_sync(n.to_i64)
+    RisSemaphore.__create(slot, generation)
+  end
+
+  def new_event : RisEvent
+    slot, generation = new_sync(0_i64)
+    RisEvent.__create(slot, generation)
+  end
+
+  private def new_sync(permits : Int64) : Tuple(Int32, UInt64)
+    IyiSchedLock.lock
+    if @ended || @cancelled || IyiScheduler.current.cancelled
+      IyiSchedLock.unlock
+      raise "synchronization needs a live group; use a live outer group"
+    end
+    result = RisSyncPool.allocate(self, permits)
+    IyiSchedLock.unlock
+    result
+  end
+end

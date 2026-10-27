@@ -415,6 +415,8 @@ enum IyiFiberState : Int32
 end
 
 class IyiFiber
+  property sync_prev : UInt64 = 0_u64
+  property sync_next : UInt64 = 0_u64
   property inbox_worker : Bool = false
   property owned_inbox_head : Int32 = -1
   property inbox_copy_slot : Int32 = -1
@@ -3873,6 +3875,9 @@ class IyiGroup
     end
   end
 
+  # Updated only under IyiSchedLock, through adoption and Done.
+  getter plain_live : Int32 = 0
+  property owned_sync_head : Int32 = -1
   @live : Int32
   getter first_failure : UInt64
   @first_child : IyiFiber?
@@ -3995,6 +4000,7 @@ class IyiGroup
     @first_child = fiber
     fiber.group = self
     @live = @live + 1
+    @plain_live += 1 unless fiber.inbox_worker
   end
 
   # The one place a task body becomes a stored proc. A captured block is
@@ -4033,6 +4039,7 @@ class IyiGroup
 
   def child_finished(failed : Bool) : Nil
     @live = @live - 1
+    @plain_live -= 1 unless IyiScheduler.current.inbox_worker
     record_failure if failed
     # Every completion can finish a plain-task or worker barrier.
     joiner = @joiner
@@ -4103,6 +4110,7 @@ class IyiGroup
       IyiSchedLock.lock
       me.joining = nil
     end
+    RisSyncPool.group_ended(self)
     RisInboxPool.group_ended(object_id)
     @ended = true
     me.open_group = @outer
@@ -4128,12 +4136,7 @@ class IyiGroup
   end
 
   private def plain_tasks_live? : Bool
-    child = @first_child
-    while child.is_a?(IyiFiber)
-      return true if !child.inbox_worker && child.state != IyiFiberState::Done
-      child = child.next_child
-    end
-    false
+    @plain_live > 0
   end
 
   # :nodoc: — the owner taken out of this join by a deadlock
@@ -5011,3 +5014,4 @@ end
 {% end %}
 
 require "./inbox"
+require "./sync"

@@ -1,0 +1,21 @@
+module test/ris/sync_linear
+
+ended = group do |g|
+  e = g.new_event
+  10000.times do
+    g.spawn do
+      e.wait
+      nil
+    end
+  end
+  raise "plain adoption count" unless g.plain_live == 10000
+  worker = g.new_worker(Int32, 1) do |inbox|
+    inbox.receive
+    nil
+  end
+  raise "worker counted as plain" unless g.plain_live == 10000
+  e.fire
+  g
+end
+raise "completion count" unless ended.plain_live == 0
+puts "PASS: sync linear"

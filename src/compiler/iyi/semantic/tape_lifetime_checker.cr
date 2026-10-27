@@ -58,6 +58,16 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
         owner.starts_with?("RisInboxPool") ||
           (target.name == "__create" && owner.starts_with?("RisInbox("))
       end
+      private_sync = @graph.targets(node).try &.any? do |target|
+        owner = target.owner?.to_s
+        owner.starts_with?("RisSyncPool") ||
+          (target.name == "__create" &&
+            owner.in?(%w(RisSemaphore.class RisEvent.class)))
+      end
+      if private_sync
+        node.raise "sync pool storage is private; use g.new_semaphore(n) " \
+                   "or g.new_event and their handle methods."
+      end
       if private_inbox
         node.raise "inbox pool storage is private; use g.new_inbox(T, n) " \
                    "and its send, receive or close methods."

@@ -279,9 +279,83 @@ inbox_races now alternates
 plain and zero-timeout receive in its pinned-copy cancellation gate.
 Existing group/task gates remain part of the full check.
 
-Semaphore, event, request/reply, owns:, task.take and RisActor are still
-open parts of step 5.3. This slice does not extend supported payloads,
-resource transfer, actor scratch or static receiver checking.
+Request/reply, owns:, task.take and RisActor remain open in step 5.3.
+This slice does not extend supported payloads, resource transfer, actor
+scratch or static receiver checking.
+
+### Semaphore and event (step 5.3, 2026-10-27)
+
+`g.new_semaphore(n)` now supplies initial and maximum permits n >= 1.
+Zero and negative counts panic with the pre-acquire safe form: make a
+positive semaphore, then acquire its permits to start empty. acquire and
+acquire(ms) return Nil, Cancelled, TimedOut or RisInbox::Closed. release
+returns Nil or Closed and panics when all maximum permits are available.
+Permit accounting commits under the scheduler lock, after cancellation
+and handle validation. Waking a task never consumes a permit.
+
+Each semaphore has a FIFO of parked tasks. A newcomer cannot acquire
+while that queue is nonempty, including when the head has been readied
+but has not committed. Cancellation removes its waiter without taking a
+permit and wakes the successor if a permit is available. Timeout also
+unlinks the waiter. Queue links live in the runtime's typed task records;
+each task can have only one active blocking call. Removing a waiter is
+constant work, with no scan of tasks or pool slots.
+
+hold runs its block only after successful acquisition, returns the
+block's answer and releases through defer on every exit, including panic.
+The deferred call captures slot and generation scalars rather than
+boxing the handle receiver. Failed acquisition returns its status and
+never installs a release.
+
+`g.new_event` supplies wait, wait(ms), fire and fired?. fire latches the
+event and readies every present waiter. Later waits succeed immediately;
+repeated fire is harmless. Group cancellation wakes parked waits with
+Cancelled. Both timed APIs use one monotonic deadline, saturating the
+addition; zero polls and negative milliseconds panic with poll and
+unbounded-wait safe forms. Available data wins over timeout, while
+cancellation wins before a live acquisition commits.
+
+Both handles are owning Share values containing only slot and generation.
+Their records share a scheduler-locked mmap-backed typed pool with 4096
+slots and a chain owned by each group. Pool exhaustion is fatal with a
+hint to reduce live synchronization objects. Group end retires that
+chain, advances generations
+and returns slots to the free list. Generation wrap permanently retires a
+slot. Stale operations return RisInbox::Closed before inspecting task
+cancellation. Reusing this existing status keeps one Closed case across
+inboxes, semaphores and events, without adding a duplicate status type.
+No stale operation dereferences a stored group pointer. Compiler checks
+refuse direct pool access and forged handles with group-factory hints.
+
+The ordered plain-task barrier now reads a live plain-task counter.
+Adoption increments it and completion decrements it under the scheduler
+lock; workers are excluded at adoption. Normal return, panic and stopped
+cancelled tasks all use the completion path. Each barrier decision is
+constant work rather than walking the remaining children after every
+completion. Final panic reporting and cancellation may still walk once.
+
+New check.sh gates:
+
+* sync_basic: pre-acquired empty start, acquire timeout, hold result and
+  release, event poll/timeout, 100-waiter broadcast and later latched wait.
+* sync_fifo: ordered acquisition, no barging after waking the queue head,
+  cancellation between wake and commit, successor wake, preserved permit,
+  timeout removal and event cancellation on group cancel.
+* sync_lifecycle: stale operations after slot reuse, closed hold skips its
+  block, hold release during panic, over-release panic, invalid counts and
+  safe-form hints.
+* sync_linear: 10,000 plain tasks plus an inbox worker, with exact live
+  counter assertions before release and after group end. This is a
+  structural linearity gate: the barrier uses only the counter; it does
+  not impose a machine-dependent timing bound.
+* sync_parallel: owning Share handles, timed waits and contended permits
+  across four worker schedulers.
+* sync_forge: direct handle construction through the runtime factory is
+  refused with group-factory hints.
+
+The four single-thread executable gates require zero reported heap
+allocations under --no-gc. Request/reply, owns:, task.take and RisActor
+are later slices.
 
 ## 3. Lifecycle: group end and resources
 
