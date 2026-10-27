@@ -79,7 +79,8 @@ on one tape.
 * Change TAPE_SPEC.md only with a dated entry and its reason in
   [TAPE_SPEC_CHANGELOG.md](TAPE_SPEC_CHANGELOG.md), in the same commit.
 * Cite doc/reference/iyi/ for unchanged iyi rules, doc/reference/goose/
-  for Goose designs. Record only ris differences; check snapshot versions.
+  for Goose designs, doc/reference/koja/ for messages between tasks.
+  Record only ris differences; check snapshot versions.
 * Build with LLVM 23 or newer: 21 and 22 miscompile ([LLVM.md](LLVM.md)).
 
 ## Length and commits

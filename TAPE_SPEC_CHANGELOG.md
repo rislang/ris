@@ -4,6 +4,23 @@ Every change to TAPE_SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one.
 
+## 2026-10-27: owned message queues replace Channel
+
+* Changed: 5.2 replaces iyi's Channel with RisQue(T). The making task
+  owns a queue and alone receives; others hold a Share send handle.
+  Send copies per message and never waits; receive copies to the
+  owner's tape. Any holder closes and the owner drains, as with
+  Channel; the owner's end discards. RisSemaphore and RisEvent take
+  over Channel's other jobs: connection limits, back-pressure and done
+  signals. 1.4 names queue messages beside copy_to as the copies.
+* Why: a waiting send, rendezvous, send in select and many receivers
+  each hold a message no single tape owns. ris chooses one receiver
+  per queue and copies at both ends, so a message outlives the
+  sender's tape. This diverges from iyi; Goose and Koja inform it.
+  Ris* names ris runtime objects and leaves Que, Queue, Semaphore and
+  Event to programs; Tape* names values on a tape, which a queue is
+  not. Names may change once the model works.
+
 ## 2026-10-26: 5.2 no longer cites TODO 7
 
 * Changed: 5.2's tape messages "come with TODO 7" now say they are open
