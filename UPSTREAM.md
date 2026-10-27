@@ -11,9 +11,8 @@ ris, take it to iyi with `git cherry-pick`; strike entries once merged.
   ris drops Channel for RisInbox (TAPE_SPEC 5.2); review before taking.
 
 * Group methods named new_*: g.new_task and g.new_parallel_task replace
-  spawn and spawn_parallel, the name saying what you get; IyiTask and
-  IyiGroup become RisTask and RisGroup. ris renames them when Channel
-  goes (TODO.md); iyi may take the names.
+  spawn and spawn_parallel, the name saying what you get. ris renames
+  them when Channel goes (TODO.md); iyi may take the names.
 
 * std/math: use StaticArray for all fixed numeric constant tables,
   preserving their literal bits without startup heap allocations.

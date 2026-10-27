@@ -81,9 +81,8 @@ How to work (fewer tokens, faster to the goal):
      UPSTREAM.md. In the same pass free ris of spawn: g.spawn becomes
      g.new_task, g.spawn_parallel g.new_parallel_task, and a spawn in
      ris code is refused with a hint to them. The name says what you
-     get, as Ruby's Thread.new does. IyiTask becomes RisTask and
-     IyiGroup RisGroup, beside RisInbox, RisSemaphore and RisEvent;
-     task.value stays (Ruby's Thread#value). The compiler matches the names:
+     get, as Ruby's Thread.new does. IyiTask and IyiGroup keep their
+     names: they do not change. The compiler matches the names:
      the group join in normalizer.cr (iyi_direct_spawn) and the Share
      check on a parallel block must follow, with error texts. About
      600 uses, most in bench/; spec/ and the host compiler keep
