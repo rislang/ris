@@ -30,9 +30,17 @@ expect() {
 # Buffered channels stay bounded, including wakes and cancelled receives.
 out=$("$RIS" run test/ris/channel_bounded.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = 'PASS: bounded channels' ]; then
-  echo "runs     channel_bounded (full, cancellation, close, rendezvous)"
+  echo "runs     channel_bounded (full waits, cancellation, close, rendezvous)"
 else
   echo "FAILED   channel_bounded: $out"; status=1
+fi
+
+# A pipe's writer waits while the pipe is full (930722c made it panic).
+out=$("$RIS" run test/ris/pipe_wait.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = 'PASS: pipe writer waits' ]; then
+  echo "runs     pipe_wait (writer waits, order)"
+else
+  echo "FAILED   pipe_wait: $out"; status=1
 fi
 
 # Channel storage remains heap-backed until the typed-pool migration.

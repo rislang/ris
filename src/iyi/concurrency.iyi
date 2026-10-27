@@ -389,18 +389,6 @@ impl Error for ChannelClosed
   end
 end
 
-# A buffered send never parks or grows the queue.
-pub struct ChannelFull
-  def initialize
-  end
-end
-
-impl Error for ChannelFull
-  def message : String
-    "channel full"
-  end
-end
-
 # ── A fiber ────────────────────────────────────────────────────────────
 #
 # Not user-facing (III.4.6): a raw spawn is the leak III.4.1 exists to
@@ -4196,7 +4184,7 @@ class Channel(T)
     @spare_send = nil
   end
 
-  def send(value : T) : Nil | ChannelClosed | ChannelFull | Cancelled
+  def send(value : T) : Nil | ChannelClosed | Cancelled
     fiber = IyiScheduler.current
     IyiSchedLock.lock
     if fiber.cancelled
@@ -4209,11 +4197,8 @@ class Channel(T)
       return answer
     end
 
-    if @capacity > 0
-      IyiSchedLock.unlock
-      return ChannelFull.new
-    end
-
+    # A full buffer parks the sender too: a receive moves its value into
+    # the slot it frees (`take_now`), so the ring never grows.
     # Park carrying the value. The wake tells one of three stories, and
     # the box is the witness for the one that matters: emptied means
     # delivered, whatever else has happened since. A box still full is a

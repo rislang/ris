@@ -1,0 +1,36 @@
+module test/ris/pipe_wait
+
+import std/io
+
+# A pipe's writer waits while its room is full, then every write
+# arrives whole and in order (IyiIO.pipe; 930722c had it panic).
+# Events: i for "wrote i", 100 for "reading", 200 + i for "read line i".
+pipe_in, pipe_out = IyiIO.pipe(2)
+events = [] of Int32
+group do |g|
+  g.spawn do
+    5.times do |i|
+      pipe_out.puts "line #{i}"
+      events << i
+    end
+    pipe_out.close
+    0
+  end
+  g.spawn do
+    sleep(1)
+    events << 100
+    n = 0
+    while line = pipe_in.read_line(chomp: true)
+      raise "line #{n}" unless line == "line #{n}"
+      events << 200 + n
+      n += 1
+    end
+    0
+  end
+end
+# The reader starts before the writer is done: the writer waited for it.
+reading = events.index(100) || 99
+raise "writer waits: #{events.join(",")}" unless events[0] == 0 && reading < 5
+raise "all written" unless events.select { |e| e < 100 } == [0, 1, 2, 3, 4]
+raise "order" unless events.select { |e| e >= 200 } == [200, 201, 202, 203, 204]
+puts "PASS: pipe writer waits"

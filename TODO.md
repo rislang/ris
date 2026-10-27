@@ -94,9 +94,6 @@ How to work (fewer tokens, faster to the goal):
      check on a parallel block must follow, with error texts. About
      600 uses, most in bench/; spec/ and the host compiler keep
      Crystal's spawn.
-* Until then a full buffered Channel#send waits again: undo only that
-  part of 930722c, which broke IyiIO.pipe. Keep its fix that waking a
-  receiver does not free a slot. No try_send: Channel is going.
 * For FFI paths in use, enforce borrow lifetimes, retained-storage owners,
   foreign-thread attachment and no unwind across foreign frames.
 

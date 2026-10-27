@@ -8,8 +8,8 @@ back.
 
 ## To take to iyi
 
-* Channel: bounded buffered sends report ChannelFull without parking;
-  waking a receiver does not release its buffered slot or grow the ring.
+* Channel: waking a receiver does not release a buffered slot, so the
+  ring never grows; a full send parks and a receive refills its slot.
   ris drops Channel for RisInbox (TAPE_SPEC 5.2); review before taking.
 
 * Group methods named new_*: g.new_task and g.new_parallel_task replace

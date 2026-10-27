@@ -17,17 +17,42 @@ q = Queues.buffered
 100.times do
   raise "first send" unless q.send(11).nil?
   raise "second send" unless q.send(22).nil?
-  full = q.send(33)
-  raise "full send" unless full.is_a?(ChannelFull)
-  raise "full message" unless full.message == "channel full"
   selected = Channel.non_blocking_select({q.send_select_action(99)}, 0)
   raise "full select" unless selected[0] == -1
   raise "first receive" unless q.receive == 11
   raise "wrap send" unless q.send(44).nil?
-  raise "wrapped full" unless q.send(55).is_a?(ChannelFull)
   raise "second receive" unless q.receive == 22
   raise "wrapped receive" unless q.receive == 44
 end
+
+# A send to a full buffer waits; a receive moves its value into the slot
+# it frees, in the order the senders parked.
+group do |g|
+  q.send(31)
+  q.send(32)
+  third = g.spawn { Queues.buffered.send(33) }
+  fourth = g.spawn { Queues.buffered.send(34) }
+  sleep(1)
+  raise "parked third" if third.done?
+  raise "fifo 31" unless q.receive == 31
+  raise "fifo 32" unless q.receive == 32
+  raise "fifo 33" unless q.receive == 33
+  raise "fifo 34" unless q.receive == 34
+  raise "third sent" unless third.value.nil?
+  raise "fourth sent" unless fourth.value.nil?
+end
+
+# A cancelled waiting send leaves nothing behind.
+group do |g|
+  q.send(41)
+  q.send(42)
+  g.spawn { Queues.buffered.send(43) }
+  sleep(1)
+  g.cancel_children
+end
+raise "kept 41" unless q.receive == 41
+raise "kept 42" unless q.receive == 42
+raise "no 43" unless Channel.non_blocking_select({q.receive_select_action}, 0)[0] == -1
 
 # Both receivers park. Waking them must not free either buffered slot.
 # Cancelled receives must leave both messages for the next receiver.
@@ -37,7 +62,6 @@ group do |g|
   sleep(1)
   raise "wake first" unless q.send(61).nil?
   raise "wake second" unless q.send(62).nil?
-  raise "woken full" unless q.send(63).is_a?(ChannelFull)
   selected = Channel.non_blocking_select({q.send_select_action(99)}, 0)
   raise "woken select" unless selected[0] == -1
   g.cancel_children
