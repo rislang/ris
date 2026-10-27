@@ -1,0 +1,38 @@
+module test/ris/inbox_lifecycle
+
+stale = group do |g|
+  q = g.new_inbox(Str, 2)
+  q.send(Str.new("discard at group end"))
+  q
+end
+raise "stale send" unless stale.send(Str.new("late")).is_a?(RisInbox::Closed)
+raise "stale receive" unless stale.receive.is_a?(RisInbox::Closed)
+raise "stale close" unless stale.close.is_a?(RisInbox::Closed)
+raise "stale size" unless stale.size.is_a?(RisInbox::Closed)
+group do |g|
+  fresh = g.new_inbox(Int32, 1)
+  fresh.send(99)
+  raise "generation" unless stale.receive.is_a?(RisInbox::Closed)
+  raise "fresh" unless fresh.receive == 99
+  owner = g.spawn do
+    q = g.new_inbox(Str, 2)
+    q.send(Str.new("discard on owner death"))
+    q
+  end
+  dead = owner.value
+  raise "owner closed" unless dead.is_a?(RisInbox(Str)) &&
+    dead.closed?.is_a?(RisInbox::Closed)
+  raise "owner discarded" unless dead.is_a?(RisInbox(Str)) && dead.size.is_a?(RisInbox::Closed)
+  # Exceed both pool sizes over time. Dead owners must return all slots.
+  4100.times do
+    task = g.spawn do
+      q = g.new_inbox(Str, 17)
+      17.times do
+        raise "reuse send" unless q.send(Str.new("discard")).nil?
+      end
+      nil
+    end
+    raise "reuse owner" unless task.value.nil?
+  end
+end
+puts "PASS: inbox lifecycle"

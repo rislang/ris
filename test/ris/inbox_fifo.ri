@@ -1,0 +1,46 @@
+module test/ris/inbox_fifo
+
+group do |g|
+  q = g.new_inbox(Int32, 2)
+  raise "capacity" unless q.capacity == 2
+  100.times do
+    raise "send" unless q.send(11).nil?
+    raise "append" unless (q << 22).nil?
+    full = q.send(33)
+    raise "full count" unless full.is_a?(RisInbox::Full)
+    raise "full text" unless full.is_a?(RisInbox::Full) &&
+      full.message == "inbox full"
+    raise "size" unless q.size == 2
+    raise "fifo" unless q.receive == 11
+    raise "wrap send" unless q.send(44).nil?
+    raise "fifo second" unless q.receive == 22
+    raise "wrap receive" unless q.receive == 44
+    raise "empty" unless q.empty? == true
+  end
+  q.send(55)
+  q.close
+  raise "closed" unless q.closed? == true
+  raise "closed before full" unless q.send(66).is_a?(RisInbox::Closed)
+  raise "drain" unless q.receive == 55
+  closed = q.receive
+  raise "drained" unless closed.is_a?(RisInbox::Closed)
+  raise "closed text" unless closed.is_a?(RisInbox::Closed) &&
+    closed.message == "inbox closed"
+  waiting = g.new_inbox(Int32, 1)
+  sender = g.spawn do
+    sleep(1)
+    waiting.send(77)
+    nil
+  end
+  raise "wait wake" unless waiting.receive == 77
+  sender.value
+  shutdown = g.new_inbox(Int32, 1)
+  closer = g.spawn do
+    sleep(1)
+    shutdown.close
+    nil
+  end
+  raise "close wake" unless shutdown.receive.is_a?(RisInbox::Closed)
+  closer.value
+end
+puts "PASS: inbox fifo"

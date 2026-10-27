@@ -1,0 +1,47 @@
+module test/ris/inbox_str
+
+group do |g|
+  q = g.new_inbox(Str, 2, bytes: 64)
+  sender = g.spawn do
+    local_tape do
+      text = Str.new("hello")
+      raise "send text" unless q.send(text).nil?
+    end
+    nil
+  end
+  sender.value
+  raise "text count" unless q.size == 1
+  # Str is 16 inline bytes, plus a 16-byte header and 8 rounded bytes.
+  raise "full bytes" unless q.send(Str.new("world")).is_a?(RisInbox::Full)
+  value = q.receive
+  raise "owned copy" unless value.is_a?(Str) && value == "hello"
+  raise "budget refunded" unless q.send(Str.new("world")).nil?
+  q.close
+  value = q.receive
+  raise "closed text drain" unless value.is_a?(Str) && value == "world"
+  raise "closed text" unless q.receive.is_a?(RisInbox::Closed)
+  exact = g.new_inbox(Str, 1, bytes: 40)
+  raise "exact budget" unless exact.send(Str.new("12345678")).nil?
+  exact.receive
+  raise "rounded budget" unless exact.send(Str.new("123456789")).is_a?(RisInbox::Full)
+  empty = g.new_inbox(Str, 1, bytes: 32)
+  raise "empty header" unless empty.send(Str.new("")).nil?
+  value = empty.receive
+  raise "empty receive" unless value.is_a?(Str) && value.bytesize == 0
+  under = g.new_inbox(Str, 1, bytes: 31)
+  raise "empty header full" unless under.send(Str.new("")).is_a?(RisInbox::Full)
+  text = Str.build(65505) { |w| 65505.times { w.push(120_u8) } }
+  default = g.new_inbox(Str, 1)
+  raise "default 64k" unless default.send(text[0, 65504]).nil?
+  default.receive
+  raise "default full" unless default.send(text).is_a?(RisInbox::Full)
+  scaled = g.new_inbox(Str, 17)
+  raise "scaled first" unless scaled.send(text[0, 32768]).nil?
+  raise "scaled second" unless scaled.send(text[0, 32768]).nil?
+  scaled.receive
+  scaled.receive
+  small = g.new_inbox(Int32, 2, bytes: 8)
+  raise "scalar budget" unless small.send(1).nil?
+  raise "scalar bytes full" unless small.send(2).is_a?(RisInbox::Full)
+end
+puts "PASS: inbox str"

@@ -1,0 +1,5 @@
+module test/ris/refused/inbox_payload
+
+group do |g|
+  g.new_inbox(Ary(Int32), 1)
+end

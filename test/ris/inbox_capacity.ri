@@ -1,0 +1,5 @@
+module test/ris/inbox_capacity
+
+group do |g|
+  g.new_inbox(Int32, 0)
+end

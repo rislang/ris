@@ -35,6 +35,43 @@ else
   echo "FAILED   channel_bounded: $out"; status=1
 fi
 
+# Inbox pools retain mail through close and return storage on retirement.
+for name in fifo str lifecycle scalars nonowner; do
+  out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc \
+    "test/ris/inbox_$name.ri" 2>&1)
+  if [ "$?" -eq 0 ] &&
+      grep -qxF "PASS: inbox $name" <<<"$out" &&
+      grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+    echo "runs     inbox_$name (--no-gc, zero heap)"
+  else
+    echo "FAILED   inbox_$name: $out"; status=1
+  fi
+done
+
+# Cancelled wakes and failed receiver copies preserve queued messages.
+for name in cancel copy; do
+  out=$("$RIS" run "test/ris/inbox_$name.ri" 2>&1)
+  if [ "$?" -eq 0 ] && grep -qxF "PASS: inbox $name" <<<"$out"; then
+    echo "runs     inbox_$name (transactional receive)"
+  else
+    echo "FAILED   inbox_$name: $out"; status=1
+  fi
+done
+
+# Zero capacity must name the rendezvous replacement.
+out=$("$RIS" run test/ris/inbox_capacity.ri 2>&1)
+if [ "$?" -ne 0 ] &&
+    grep -qF 'use request for rendezvous' <<<"$out"; then
+  echo "refused  inbox_capacity (use request)"
+else
+  echo "FAILED   inbox_capacity: $out"; status=1
+fi
+
+# Only supported payloads and runtime-created handles enter the pools.
+expect inbox_payload 'use g.new_inbox with a scalar or Str'
+expect inbox_constructor "private method 'new'"
+expect inbox_forge 'inbox pool storage is private; use g.new_inbox(T, n)'
+
 # A pipe's writer waits while the pipe is full (930722c made it panic).
 out=$("$RIS" run test/ris/pipe_wait.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = 'PASS: pipe writer waits' ]; then

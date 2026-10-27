@@ -1,0 +1,471 @@
+# Runtime-only typed pools. All access is under IyiSchedLock except a
+# pinned copy's private message bytes. No pool contains a borrowed Str.
+struct RisInboxRecord
+  property generation : UInt64 = 1_u64
+  property live : Bool = false
+  property closed : Bool = false
+  property owner : UInt64 = 0_u64
+  property group : UInt64 = 0_u64
+  property capacity : Int32 = 0
+  property count : Int32 = 0
+  property budget : UInt64 = 0_u64
+  property used : UInt64 = 0_u64
+  property head : Int32 = -1
+  property tail : Int32 = -1
+  property pins : Int32 = 0
+  # One receiver, hence one reusable typed wait node per inbox.
+  property waiting : Bool = false
+  property nonce : UInt64 = 0_u64
+
+  def initialize
+  end
+end
+
+struct RisInboxMessage
+  property live : Bool = false
+  property following : Int32 = -1
+  property charge : UInt64 = 0_u64
+  property text : UInt64 = 0_u64
+  property length : Int32 = 0
+  # Inline scalar representation; read only with the handle's T.
+  property bits : UInt128 = 0_u128
+
+  def initialize
+  end
+end
+
+module RisInboxPool
+  RECORDS = 4096
+  MESSAGES = 65536
+  @@records : UInt64 = 0_u64
+  @@messages : UInt64 = 0_u64
+
+  def self.init : Nil
+    return if @@records != 0
+    @@records = __iyi_mmap(RECORDS.to_u64 * sizeof(RisInboxRecord)).address
+    @@messages = __iyi_mmap(MESSAGES.to_u64 * sizeof(RisInboxMessage)).address
+    i = 0
+    while i < RECORDS
+      record(i).value = RisInboxRecord.new
+      i += 1
+    end
+    i = 0
+    while i < MESSAGES
+      message(i).value = RisInboxMessage.new
+      i += 1
+    end
+  end
+
+  def self.record(slot : Int32) : Pointer(RisInboxRecord)
+    Pointer(RisInboxRecord).new(@@records) + slot
+  end
+
+  def self.message(slot : Int32) : Pointer(RisInboxMessage)
+    Pointer(RisInboxMessage).new(@@messages) + slot
+  end
+
+  def self.valid?(slot : Int32, generation : UInt64) : Bool
+    @@records != 0 && slot >= 0 && slot < RECORDS &&
+      record(slot).value.live && record(slot).value.generation == generation
+  end
+
+  def self.exhausted : NoReturn
+    RisHeap.text("ris: fatal: inbox pool exhausted; use fewer live inboxes or messages\n")
+    __iyi_exit(1)
+  end
+
+  def self.allocate(owner : UInt64, group : UInt64, capacity : Int32,
+                    budget : UInt64) : Tuple(Int32, UInt64)
+    init
+    i = 0
+    while i < RECORDS
+      p = record(i)
+      r = p.value
+      if !r.live && r.pins == 0 && r.generation != 18446744073709551615_u64
+        generation = r.generation
+        r = RisInboxRecord.new
+        r.generation = generation
+        r.live = true
+        r.closed = false
+        r.owner = owner
+        r.group = group
+        r.capacity = capacity
+        r.budget = budget
+        p.value = r
+        return {i, r.generation}
+      end
+      i += 1
+    end
+    exhausted
+  end
+
+  def self.allocate_message : Int32
+    i = 0
+    while i < MESSAGES
+      p = message(i)
+      unless p.value.live
+        m = RisInboxMessage.new
+        m.live = true
+        p.value = m
+        return i
+      end
+      i += 1
+    end
+    exhausted
+  end
+
+  def self.release(slot : Int32) : Nil
+    m = message(slot).value
+    __iyi_munmap(m.text, m.length.to_u64 + 16_u64) if m.text != 0
+    message(slot).value = RisInboxMessage.new
+  end
+
+  def self.wake(r : Pointer(RisInboxRecord)) : Nil
+    value = r.value
+    if value.waiting
+      fiber = Pointer(Void).new(value.owner).as(IyiFiber)
+      if fiber.state == IyiFiberState::WaitingCh &&
+         fiber.park_nonce == value.nonce
+        IyiScheduler.ready(fiber)
+      end
+      value.waiting = false
+      r.value = value
+    end
+  end
+
+  def self.discard(r : Pointer(RisInboxRecord)) : Nil
+    value = r.value
+    value.closed = true
+    r.value = value
+    wake(r)
+    value = r.value
+    return if value.pins != 0
+    while value.head >= 0
+      next_slot = message(value.head).value.following
+      release(value.head)
+      value.head = next_slot
+    end
+    value.tail = -1
+    value.count = 0
+    value.used = 0_u64
+    r.value = value
+  end
+
+  # Called before the task leaves the scheduler registry, including panic.
+  def self.owner_died(owner : UInt64) : Nil
+    return if @@records == 0
+    i = 0
+    while i < RECORDS
+      p = record(i)
+      if p.value.live && p.value.owner == owner
+        retire(p)
+      end
+      i += 1
+    end
+  end
+
+  def self.retire(p : Pointer(RisInboxRecord)) : Nil
+    discard(p)
+    r = p.value
+    r.live = false
+    r.generation += 1_u64 unless r.generation == 18446744073709551615_u64
+    p.value = r
+  end
+
+  def self.group_ended(group : UInt64) : Nil
+    return if @@records == 0
+    i = 0
+    while i < RECORDS
+      p = record(i)
+      if p.value.live && p.value.group == group
+        retire(p)
+      end
+      i += 1
+    end
+  end
+end
+
+@[Share(owns: true)]
+struct RisInbox(T)
+  @slot : Int32
+  @generation : UInt64
+
+  private def initialize(@slot : Int32, @generation : UInt64)
+  end
+
+  private def self.new(slot : Int32, generation : UInt64) : self
+    made = uninitialized self
+    pointerof(made.@slot).value = slot
+    pointerof(made.@generation).value = generation
+    made
+  end
+
+  def self.__create(slot : Int32, generation : UInt64) : self
+    new(slot, generation)
+  end
+
+  pub struct Full
+    def initialize
+    end
+  end
+
+  pub struct Closed
+    def initialize
+    end
+  end
+
+  def send(value : T) : Nil | Full | Closed
+    fiber = IyiScheduler.current
+    defer __iyi_inbox_send_cleanup
+    IyiSchedLock.lock
+    unless RisInboxPool.valid?(@slot, @generation)
+      IyiSchedLock.unlock
+      return Closed.new
+    end
+    p = RisInboxPool.record(@slot)
+    r = p.value
+    if r.closed
+      IyiSchedLock.unlock
+      return Closed.new
+    end
+    charge = (sizeof(T).to_u64 + 7_u64) & 0xFFFFFFFFFFFFFFF8_u64
+    {% if T == Str %}
+      charge += (value.bytesize.to_u64 + 16_u64 + 7_u64) & 0xFFFFFFFFFFFFFFF8_u64
+    {% end %}
+    if r.count >= r.capacity || charge > r.budget - r.used
+      IyiSchedLock.unlock
+      return Full.new
+    end
+    slot = RisInboxPool.allocate_message
+    m = RisInboxPool.message(slot).value
+    m.charge = charge
+    RisInboxPool.message(slot).value = m
+    r.count += 1
+    r.used += charge
+    r.pins += 1
+    fiber.inbox_send_slot = @slot
+    fiber.inbox_send_message = slot
+    p.value = r
+    IyiSchedLock.unlock
+    {% if T == Str %}
+      m.length = value.bytesize
+      m.text = __iyi_mmap(m.length.to_u64 + 16_u64).address
+      IyiSchedLock.lock
+      RisInboxPool.message(slot).value = m
+      IyiSchedLock.unlock
+      Pointer(UInt8).new(m.text + 16_u64).copy_from(value.to_unsafe, m.length)
+    {% else %}
+      pointerof(m.@bits).as(Pointer(T)).value = value
+    {% end %}
+    IyiSchedLock.lock
+    r = p.value
+    r.pins -= 1
+    fiber.inbox_send_slot = -1
+    fiber.inbox_send_message = -1
+    RisInboxPool.message(slot).value = m
+    if !r.live || r.closed
+      r.count -= 1
+      r.used -= charge
+      p.value = r
+      RisInboxPool.release(slot)
+      RisInboxPool.discard(p) unless r.live
+      IyiSchedLock.unlock
+      return Closed.new
+    end
+    if r.tail < 0
+      r.head = slot
+    else
+      previous = RisInboxPool.message(r.tail).value
+      previous.following = slot
+      RisInboxPool.message(r.tail).value = previous
+    end
+    r.tail = slot
+    p.value = r
+    RisInboxPool.wake(p)
+    IyiSchedLock.unlock
+    nil
+  end
+
+  def <<(value : T) : Nil | Full | Closed
+    send(value)
+  end
+
+  def receive : T | Closed | Cancelled
+    fiber = IyiScheduler.current
+    defer __iyi_inbox_copy_cleanup
+    IyiSchedLock.lock
+    loop do
+      unless RisInboxPool.valid?(@slot, @generation)
+        IyiSchedLock.unlock
+        return Closed.new
+      end
+      p = RisInboxPool.record(@slot)
+      r = p.value
+      if r.owner != fiber.object_id
+        IyiSchedLock.unlock
+        raise "only the inbox owner receives; send to it, or make the inbox in the receiving task"
+      end
+      if fiber.cancelled
+        IyiSchedLock.unlock
+        return Cancelled.new
+      end
+      if r.head >= 0
+        slot = r.head
+        m = RisInboxPool.message(slot).value
+        r.pins += 1
+        fiber.inbox_copy_slot = @slot
+        p.value = r
+        IyiSchedLock.unlock
+        value = uninitialized T
+        {% if T == Str %}
+          value = Str.new(Str.new(Pointer(UInt8).new(m.text + 16_u64), m.length))
+        {% else %}
+          value = pointerof(m.@bits).as(Pointer(T)).value
+        {% end %}
+        IyiSchedLock.lock
+        r = p.value
+        r.pins -= 1
+        fiber.inbox_copy_slot = -1
+        p.value = r
+        unless r.live && r.generation == @generation
+          RisInboxPool.discard(p)
+          IyiSchedLock.unlock
+          return Closed.new
+        end
+        if fiber.cancelled
+          IyiSchedLock.unlock
+          return Cancelled.new
+        end
+        r.head = m.following
+        r.tail = -1 if r.head < 0
+        r.count -= 1
+        r.used -= m.charge
+        p.value = r
+        RisInboxPool.release(slot)
+        IyiSchedLock.unlock
+        return value
+      end
+      if r.closed
+        IyiSchedLock.unlock
+        return Closed.new
+      end
+      r.nonce = IyiScheduler.park(fiber)
+      r.waiting = true
+      p.value = r
+      IyiSchedLock.unlock
+      IyiScheduler.reschedule
+      IyiSchedLock.lock
+    end
+  end
+
+  def close : Nil | Closed
+    IyiSchedLock.lock
+    unless RisInboxPool.valid?(@slot, @generation)
+      IyiSchedLock.unlock
+      return Closed.new
+    end
+    p = RisInboxPool.record(@slot)
+    r = p.value
+    r.closed = true
+    p.value = r
+    RisInboxPool.wake(p)
+    IyiSchedLock.unlock
+    nil
+  end
+
+  {% for method in [:closed?, :size, :empty?, :capacity] %}
+    def {{method.id}}
+      IyiSchedLock.lock
+      unless RisInboxPool.valid?(@slot, @generation)
+        IyiSchedLock.unlock
+        return Closed.new
+      end
+      r = RisInboxPool.record(@slot).value
+      IyiSchedLock.unlock
+      {% if method == :closed? %}
+        r.closed
+      {% elsif method == :size %}
+        r.count
+      {% elsif method == :empty? %}
+        r.count == 0
+      {% else %}
+        r.capacity
+      {% end %}
+    end
+  {% end %}
+end
+
+impl Error for RisInbox::Full
+  def message : String
+    "inbox full"
+  end
+end
+
+impl Error for RisInbox::Closed
+  def message : String
+    "inbox closed"
+  end
+end
+
+class IyiGroup
+  def new_inbox(type : T.class, capacity : Int32 | Int64,
+                *, bytes : Int32 | Int64 | UInt64 | Nil = nil) : RisInbox(T) forall T
+    {% unless T == Int8 || T == Int16 || T == Int32 || T == Int64 ||
+              T == Int128 || T == UInt8 || T == UInt16 || T == UInt32 ||
+              T == UInt64 || T == UInt128 || T == Float32 || T == Float64 ||
+              T == Bool || T == Char || T == Symbol || T == Nil ||
+              T < Enum || T == Str %}
+      {% raise "RisInbox payload is not supported yet; use g.new_inbox with a scalar or Str" %}
+    {% end %}
+    n = RisRegion.count(RisRegion.nonnegative(capacity.to_i64))
+    raise "inbox capacity 0 is refused; use request for rendezvous" if n == 0
+    budget = bytes.is_a?(Nil) ? (n < 16_u64 ? 65536_u64 : n * 4096_u64) :
+      bytes.is_a?(UInt64) ? bytes : RisRegion.nonnegative(bytes.to_i64)
+    raise "inbox bytes must be positive; use bytes: 65536" if budget == 0
+    IyiSchedLock.lock
+    if @ended || @cancelled || IyiScheduler.current.cancelled
+      IyiSchedLock.unlock
+      raise "inbox needs a live group; use a live outer group"
+    end
+    slot, generation = RisInboxPool.allocate(IyiScheduler.current.object_id,
+      object_id, n.to_i32, budget)
+    IyiSchedLock.unlock
+    RisInbox(T).__create(slot, generation)
+  end
+end
+
+# Noncapturing unwind guard: a failed receive keeps its queued message.
+# The owner-death hook subsequently discards it if the task actually dies.
+def __iyi_inbox_copy_cleanup : Nil
+  fiber = IyiScheduler.current
+  slot = fiber.inbox_copy_slot
+  return if slot < 0
+  IyiSchedLock.lock
+  p = RisInboxPool.record(slot)
+  r = p.value
+  r.pins -= 1
+  p.value = r
+  fiber.inbox_copy_slot = -1
+  RisInboxPool.discard(p) unless r.live
+  IyiSchedLock.unlock
+end
+
+# A reservation is private until publication. Unwind returns both credits.
+def __iyi_inbox_send_cleanup : Nil
+  fiber = IyiScheduler.current
+  slot = fiber.inbox_send_slot
+  return if slot < 0
+  IyiSchedLock.lock
+  p = RisInboxPool.record(slot)
+  r = p.value
+  message = fiber.inbox_send_message
+  r.pins -= 1
+  r.count -= 1
+  r.used -= RisInboxPool.message(message).value.charge
+  p.value = r
+  RisInboxPool.release(message)
+  fiber.inbox_send_slot = -1
+  fiber.inbox_send_message = -1
+  RisInboxPool.discard(p) unless r.live
+  IyiSchedLock.unlock
+end
