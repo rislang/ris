@@ -108,6 +108,12 @@ How to work (fewer tokens, faster to the goal):
 * Extend RIS_TAPE_STATS with owner paths and pool waste.
 * Stable growth on every supported tape target: replace moving backends
   outside Linux with address-space reservations and equivalent gates.
+* A tape hash map, laid out as Ruby's Hash (st_table): entries in an Ary
+  in insertion order, bins an Ary(Int32) of indices into it, Str keys as
+  views, no pointers, so it is flat and copied whole like Tre. Replace
+  the four linear-scan TapeMap copies in std/yaml.iyi, toml.iyi,
+  xml.iyi and mail.iyi. Name it after Str and Ary (Hsh or Map). Gate:
+  O(1) lookup on a large map, insertion order kept, zero heap.
 
 ## Known failure to recheck
 
