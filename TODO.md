@@ -35,50 +35,57 @@ How to work (fewer tokens, faster to the goal):
   overflow, membership, stale views, reset lifetimes and external images.
   Borrowed Run constructors now retain Ary shrink lifetimes; gates cover
   constructor bounds and foreign Ary storage as well as pool storage.
-* Concurrency storage (TAPE_SPEC 5.2): task records, wait nodes and
-  bounded queues in runtime typed pools; preserve queued messages on
-  pool failures and prove zero heap under --no-gc.
-* Replace Channel with RisInbox, RisSemaphore and RisEvent (TAPE_SPEC
-  5.2). Names (may change once the model works):
-  * `g.new_inbox(T, n)` (owner: the calling task, not the group) and
-    `g.new_worker(T, n) { |inbox| }` (owner: the new task; the parent
-    gets a task it can send to) make a `RisInbox(T)`; `RisInbox.new` is not
-    public, so every inbox ends with a group. `send` and `<<`,
-    `receive`, `receive(ms)` (0 does not wait), `close`, `closed?`,
-    `size`, `empty?`, `capacity`. Not push/pop: Ary#pop takes the
-    last element.
-  * `RisInbox::Request(M, R)`: `q.request(msg, ms)`, `req.message`,
+* Replace Channel with RisInbox, RisWorker, RisSemaphore and RisEvent
+  (TAPE_SPEC 5.2). Names (may change once the model works):
+  * `g.new_inbox(T, n)` makes a `RisInbox(T)` owned by the calling task,
+    not the group; `RisInbox.new` is not public, so every inbox ends
+    with a group. Main makes them in its own `group do |g|`. `send` and
+    `<<`, `receive`, `receive(ms)` (0 does not wait), `close`,
+    `closed?`, `size`, `empty?`, `capacity`. Not push/pop: Ary#pop
+    takes the last element.
+  * `g.new_worker(T, n) { |inbox| }` makes a `RisWorker(T)`: a task
+    owning a RisInbox(T), which the block receives from. The worker
+    has `send`, `<<`, `request`, `close`, `closed?` (to its inbox),
+    `value` and `done?` (as IyiTask). Share, like the send handle.
+  * `RisInbox::Request(M, R)`: `w.request(msg, ms)`, `req.message`,
     `req.reply(value)`; a one-shot reply slot with a token, so a late
-    or second reply is refused and a reply is never Full.
+    or second reply is refused and a reply is never Full. One inbox
+    takes requests and plain messages as a union:
+    `RisInbox(Str | RisInbox::Request(Str, Int32))`.
   * `g.new_semaphore(n)`: `RisSemaphore` with `acquire`, `acquire(ms)`,
     `release`, `hold { }`. `g.new_event`: `RisEvent` with `fire`, `wait`,
-    `wait(ms)`, `fired?`.
+    `wait(ms)`, `fired?`. Their waiters get Cancelled at the group's end.
   * Errors: `RisInbox::Full`, `RisInbox::Closed`, `TimedOut`,
-    `Cancelled`.
+    `Cancelled`. Send never answers Cancelled: it does not wait.
+  * No select: a task waiting on several sources takes them through
+    one inbox with tagged messages (a union), as Erlang does, and waits
+    with receive(ms).
   Open in the contract: error order (Cancelled first, then Closed
   over Full or TimedOut), handle generations, receive(ms) on a
   monotonic deadline (negative refused), reply results (expired,
-  duplicate, owner gone), self-request refused, select arms (owned
-  receives, timeout and else; send arms refused with a hint), GC roots
-  for pool references, published byte limits per 4.2. A message is
-  what copy_to accepts, so Ary is not refused.
+  duplicate, owner gone), self-request refused, GC roots for pool
+  references, the published byte limit for queued messages (4.2). A
+  message is what copy_to accepts, so Ary is not refused.
   Steps, each with a gate (design review of 2026-10-27):
-  1. Settle the above, the typed request API and whether select stays
-     over inboxes or only receive(ms) remains.
-  2. RisInbox on typed pools: scalars inline, Str copies per message,
-     close, owner end, rollback; move the Str channel work in progress
-     (copy on receive, release on close, failed receives keep mail).
+  1. Settle the above and the typed request API.
+  2. RisInbox on typed pools, with task records and wait nodes: scalars
+     inline, Str copies per message, close, group end, rollback;
+     preserve queued messages on pool failures and prove zero heap
+     under --no-gc. Take from the Str channel work (local git stash
+     "channel tape WIP"): copy on receive, release on close, failed
+     receives keep mail.
   3. Owner checks (compile error, runtime refusal) and cross-thread
      send handles for parallel tasks.
-  4. receive(ms), RisSemaphore, RisEvent, request/reply; gate dead
-     owner, expired reply, self-request and owner end with queued mail
-     (Koja MEMORY-MODEL.md, Process boundaries).
+  4. receive(ms), RisWorker, RisSemaphore, RisEvent, request/reply;
+     gate dead owner, expired reply, self-request and group end with
+     queued mail (Koja MEMORY-MODEL.md, Process boundaries).
   5. Port std: pipe (semaphore credits), http slots (semaphore),
-     socket race (inbox), autocert done (event), samples/workers.
-  6. Retarget select lowering to inboxes, or refuse it with a hint to
-     receive(ms), per step 1; port bench and tests (host Crystal
-     Channel stays); remove Channel; review the 930722c entry in
-     UPSTREAM.md. In the same pass free ris of spawn: g.spawn becomes
+     socket race (inbox), autocert (one inbox of tagged messages and
+     an event), samples/workers.
+  6. Refuse select with a hint to receive(ms) and tagged messages;
+     port bench and tests (host Crystal Channel stays); remove Channel;
+     review the 930722c entry in UPSTREAM.md. In the same pass free ris
+     of spawn: g.spawn becomes
      g.new_task, g.spawn_parallel g.new_parallel_task, and a spawn in
      ris code is refused with a hint to them. The name says what you
      get, as Ruby's Thread.new does. IyiTask and IyiGroup keep their
@@ -87,8 +94,9 @@ How to work (fewer tokens, faster to the goal):
      check on a parallel block must follow, with error texts. About
      600 uses, most in bench/; spec/ and the host compiler keep
      Crystal's spawn.
-* Until then Channel#send waits again while full and try_send answers
-  ChannelFull: 930722c broke IyiIO.pipe, whose writes must wait.
+* Until then a full buffered Channel#send waits again: undo only that
+  part of 930722c, which broke IyiIO.pipe. Keep its fix that waking a
+  receiver does not free a slot. No try_send: Channel is going.
 * For FFI paths in use, enforce borrow lifetimes, retained-storage owners,
   foreign-thread attachment and no unwind across foreign frames.
 

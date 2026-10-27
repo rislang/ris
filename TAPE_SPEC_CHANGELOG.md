@@ -4,6 +4,18 @@ Every change to TAPE_SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one.
 
+## 2026-10-27: RisWorker, no select, group end and limits
+
+* Changed: 5.2 gives `g.new_worker` a RisWorker (a task owning an
+  inbox), says main makes inboxes in its own group, drops select,
+  wakes semaphore and event waiters with Cancelled at the group's end,
+  keeps Cancelled out of send and asks one published byte limit for
+  queued messages.
+* Why: new_worker returns what its name says. One receiver and tagged
+  messages cover several sources without select, as in Erlang, and
+  spare the compiler's select lowering. A send never waits, so it has
+  nothing to cancel. 4.2 asks published limits.
+
 ## 2026-10-27: group methods named new_*
 
 * Changed: 5.2's `g.inbox` is `g.new_inbox` and `g.spawn_inbox` is
