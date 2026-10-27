@@ -132,7 +132,7 @@ rule goes last in its section; a removed one leaves its number unused.
   answer Nil, fired? Bool. All yield Closed after group end.
   receive(), acquire() and wait() have no deadline; a ms argument uses a
   monotonic clock, 0 polls, negatives follow 4.2. ris has no select or
-  Channel. Runtime records live in typed pools; mechanisms remain in TODO.
+  Channel. Runtime records live in typed pools; mechanisms: doc/MESSAGES.md.
 * 5.3 Callbacks borrow their environment for the call only; an escaping closure
   copies captures to a named owner or task pool, never a borrow. Thread-locals
   hold no fiber borrows.

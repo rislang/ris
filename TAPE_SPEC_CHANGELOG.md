@@ -4,6 +4,12 @@ Every change to TAPE_SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one.
 
+## 2026-10-27: 5.2 points to doc/MESSAGES.md
+
+* Changed: 5.2 names doc/MESSAGES.md, not TODO.md, for the mechanisms.
+* Why: the design moved out of a 190-line TODO item, so TODO keeps one
+  item per step as its rules ask.
+
 ## 2026-10-27: message budgets, result take and drain registration
 
 * Changed: 5.2 and 5.6 settle the five round 1 choices: aligned deep-copy
