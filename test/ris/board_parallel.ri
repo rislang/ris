@@ -1,0 +1,70 @@
+macro board_spawn(g, &block)
+  {% if flag?(:gc_none) %}
+    {{g}}.spawn {{block}}
+  {% else %}
+    {{g}}.spawn_parallel {{block}}
+  {% end %}
+end
+
+# Every delivered id is acknowledged on a separate nominal queue.
+struct BoardParallel
+  getter id : Int64
+  def initialize(@id : Int64)
+  end
+end
+
+struct BoardReceipt
+  getter id : Int64
+  def initialize(@id : Int64)
+  end
+end
+
+def board_consume : Int64
+  total = 0_i64
+  index = 0
+  while index < 200
+    value = RisBoard.take(BoardParallel)
+    raise "cancelled" unless value.is_a?(BoardParallel)
+    raise "receipt" unless RisBoard.post(BoardReceipt.new(value.id))
+    total += value.id
+    index += 1
+  end
+  total
+end
+
+group do |g|
+  a = board_spawn(g) { board_consume }
+  b = board_spawn(g) { board_consume }
+  c = board_spawn(g) { board_consume }
+  d = board_spawn(g) { board_consume }
+  p = board_spawn(g) do
+    index = 1_i64
+    while index <= 800_i64
+      raise "post" unless RisBoard.post(BoardParallel.new(index))
+      index += 1_i64
+    end
+    true
+  end
+  raise "producer" unless p.value == true
+  av = a.value
+  bv = b.value
+  cv = c.value
+  dv = d.value
+  raise "cancelled" unless av.is_a?(Int64) && bv.is_a?(Int64) &&
+    cv.is_a?(Int64) && dv.is_a?(Int64)
+  raise "unique delivery" unless av + bv + cv + dv == 320400_i64
+end
+seen = Ary(Bool).new(801, false)
+index = 0
+while index < 800
+  receipt = RisBoard.take(BoardReceipt)
+  raise "cancelled" unless receipt.is_a?(BoardReceipt)
+  id = receipt.id.to_i32
+  raise "invalid id" unless id > 0 && id <= 800
+  raise "duplicate" if seen[id]
+  seen[id] = true
+  index += 1
+end
+raise "extra receipt" unless RisBoard.poll(BoardReceipt) == {nil, false}
+raise "extra" unless RisBoard.poll(BoardParallel) == {nil, false}
+puts "PASS: board parallel"

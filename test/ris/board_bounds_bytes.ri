@@ -1,0 +1,4 @@
+# A fresh process: no count limit may disguise the physical byte refusal.
+text = "x" * 16777217
+RisBoard.post(text)
+raise "oversized image published"

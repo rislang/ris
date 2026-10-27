@@ -1,0 +1,4 @@
+struct BoardBadLimit
+end
+RisBoard.limit(BoardBadLimit, 0_i64)
+raise "invalid limit accepted"

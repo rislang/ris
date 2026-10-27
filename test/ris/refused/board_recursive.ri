@@ -1,0 +1,7 @@
+@[OnTape]
+struct BoardRecursive
+  @children : Ary(BoardRecursive)
+  def initialize(@children : Ary(BoardRecursive))
+  end
+end
+RisBoard.limit(BoardRecursive, 1_i64)

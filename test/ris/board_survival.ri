@@ -1,0 +1,33 @@
+@[OnTape]
+struct BoardSurvivor(T)
+  getter text : Str
+  getter tag : T
+  def initialize(@text : Str, @tag : T)
+  end
+end
+struct BoardEmpty
+end
+
+group do |g|
+  child = g.spawn do
+    RisBoard.limit(BoardSurvivor(Int32), 1_i64)
+    text = Str.build { |b| b << "retained" }
+    RisBoard.post(BoardSurvivor(Int32).new(text, 10))
+  end
+  raise "child post" unless child.value == true
+end
+raise "limit lost" if RisBoard.post(BoardSurvivor(Int32).new("later", 11))
+raise "generic identity" unless RisBoard.post(
+  BoardSurvivor(Int64).new("other", 12_i64))
+value = RisBoard.take(BoardSurvivor(Int32))
+raise "survival" unless value.is_a?(BoardSurvivor(Int32)) &&
+  value.text == "retained" && value.tag == 10
+other = RisBoard.take(BoardSurvivor(Int64))
+raise "generic value" unless other.is_a?(BoardSurvivor(Int64)) &&
+  other.text == "other" && other.tag == 12_i64
+RisBoard.limit(BoardEmpty, 1_i64)
+raise "empty" unless RisBoard.post(BoardEmpty.new)
+raise "empty count" if RisBoard.post(BoardEmpty.new)
+raise "empty take" unless RisBoard.take(BoardEmpty).is_a?(BoardEmpty)
+raise "empty reuse" unless RisBoard.post(BoardEmpty.new)
+puts "PASS: board survival"

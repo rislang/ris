@@ -1,0 +1,59 @@
+macro board_spawn(g, &block)
+  {% if flag?(:gc_none) %}
+    {{g}}.spawn {{block}}
+  {% else %}
+    {{g}}.spawn_parallel {{block}}
+  {% end %}
+end
+
+struct BoardLimitRace
+  getter number : Int32
+  def initialize(@number : Int32)
+  end
+end
+
+def board_racing_posts : Int64
+  count = 0_i64
+  index = 0
+  while index < 1000
+    count += 1_i64 if RisBoard.post(BoardLimitRace.new(index))
+    sleep 0 if index % 31 == 0
+    index += 1
+  end
+  count
+end
+
+RisBoard.limit(BoardLimitRace, 5000_i64)
+raise "initial mail" unless RisBoard.post(BoardLimitRace.new(-1))
+accepted = group do |g|
+  a = board_spawn(g) { board_racing_posts }
+  b = board_spawn(g) { board_racing_posts }
+  setter = board_spawn(g) do
+    RisBoard.limit(BoardLimitRace, 1_i64)
+    # No consumer runs, so every later admission must fail.
+    index = 0
+    while index < 100
+      raise "post after lowering" if RisBoard.post(BoardLimitRace.new(9999))
+      index += 1
+    end
+    true
+  end
+  raise "setter" unless setter.value == true
+  av = a.value
+  bv = b.value
+  raise "poster cancelled" unless av.is_a?(Int64) && bv.is_a?(Int64)
+  av + bv
+end
+first = RisBoard.take(BoardLimitRace)
+raise "FIFO" unless first.is_a?(BoardLimitRace) && first.number == -1
+count = 0_i64
+loop do
+  answer = RisBoard.poll(BoardLimitRace)
+  raise "cancelled" if answer.is_a?(Cancelled)
+  break unless answer[1]
+  count += 1_i64
+end
+raise "lowering lost mail" unless count == accepted
+raise "reuse" unless RisBoard.post(BoardLimitRace.new(5))
+raise "persisted bound" if RisBoard.post(BoardLimitRace.new(6))
+puts "PASS: board racing limits"

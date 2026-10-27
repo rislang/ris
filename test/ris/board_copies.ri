@@ -1,0 +1,55 @@
+@[PointerUnsafe("gate reads container capacity without exposing a new API")]
+def board_capacity(value : T) : UInt64 forall T
+  state = pointerof(value.@state).value
+  (state + 2_i64).value
+end
+
+enum BoardColor
+  Red = 7
+  Blue = 19
+end
+
+@[OnTape]
+struct BoardNested
+  getter text : Str
+  getter items : Ary(Str)
+  getter tree : Tre(Str)
+  getter color : BoardColor
+  getter choice : Str | Int64
+  getter again : Ary(Str)
+
+  def initialize(@text : Str, @items : Ary(Str), @tree : Tre(Str),
+                 @color : BoardColor, @choice : Str | Int64,
+                 @again : Ary(Str))
+  end
+end
+
+items = Ary(Str).new(20)
+items << "first" << "second"
+tree = Tre(Str).new(20)
+root = tree.open("root")
+tree.leaf("leaf")
+tree.close(root)
+tree.open("unfinished")
+message = BoardNested.new("hello", items, tree, BoardColor::Blue,
+  "choice", items)
+raise "post" unless RisBoard.post(message)
+raise "source changed" unless items.size == 2 && tree.size == 3
+items[0] = "changed"
+items << "later"
+answer = RisBoard.take(BoardNested)
+raise "cancelled" unless answer.is_a?(BoardNested)
+raise "text" unless answer.text == "hello"
+raise "nested" unless answer.items.size == 2 && answer.items[0] == "first"
+raise "array capacity" unless board_capacity(answer.items) == 2_u64
+raise "tree capacity" unless board_capacity(answer.tree) == 3_u64
+raise "enum" unless answer.color == BoardColor::Blue
+raise "union" unless answer.choice == "choice"
+raise "tree" unless answer.tree[1] == "leaf" && answer.tree.stop(0) == 2
+# Closing an open entry verifies that -1 survived the private image.
+answer.tree.close(2)
+raise "tree end" unless answer.tree.stop(2) == 3
+answer.items[0] = "receiver"
+raise "aliases not split" unless answer.again[0] == "first"
+raise "source modified" unless items[0] == "changed" && items.size == 3
+puts "PASS: board copies"

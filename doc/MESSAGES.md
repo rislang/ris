@@ -68,8 +68,29 @@ equal to size. Copies keep concrete types and enum values and run no
 user code. Owners, classes, pointers, resources, closures and fields
 containing them are refused. No receiver borrows sender bytes or a
 runtime pool view. GC and no-GC storage obey the same lifetime and
-transactional copy rules. Per- message count and packed- byte bounds are
-published; exceeding one is 4.2.
+transactional copy rules.
+
+The core has these physical bounds, independent of limit(T, n):
+
+* At most 4,096 distinct canonical specialized queue types per process.
+  Registry slots and their limits last until process end.
+* At most 65,536 live message images across all queues. A private image
+  being packed also occupies one slot until publication or rollback.
+* At most 16,777,216 packed bytes per message, including counts, union
+  tags and fixed fields. No pointer or spare container capacity is packed.
+* At most 1,048,576 value occurrences per message. The root, every struct
+  field, every container element and each live union arm count. Container
+  lengths and Tre stop metadata occupy bytes but add no occurrences.
+
+An empty message still occupies one queue place and one image slot.
+Exceeding a physical bound follows TAPE_SPEC 4.2, rather than returning
+false. Byte slabs are reused; images above the slab classes use private
+mappings released after consumption. Total mapping capacity is subject to
+OS exhaustion. A take's destination remains subject to the tape limits.
+Wait records live on their suspended takers' stacks, bounded by the
+runtime's task and stack limits. The scheduler roots those stacks and
+fibers in GC builds; packed images and registry slots hold no GC objects.
+No-GC builds use typed runtime mappings and no general heap allocation.
 
 Board packing is private; it is not the to_bytes/from_bytes image. To
 send a linked structure, encode it to Str or Ary(UInt8), post that and

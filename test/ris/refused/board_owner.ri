@@ -1,0 +1,4 @@
+@[Owner]
+struct BoardOwner
+end
+RisBoard.poll(BoardOwner)

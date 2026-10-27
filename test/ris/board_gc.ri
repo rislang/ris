@@ -1,0 +1,50 @@
+module test/ris/board_gc
+import std/gc::{GC}
+
+@[OnTape]
+struct BoardGcMail
+  getter words : Ary(Str)
+  def initialize(@words : Ary(Str))
+  end
+end
+
+group do |g|
+  reader = g.spawn_parallel do
+    count = 0
+    while count < 200
+      value = RisBoard.take(BoardGcMail, 10000_i64)
+      raise "cancelled" if value.is_a?(Cancelled)
+      mail = value[0]
+      raise "missing" unless value[1] && mail.is_a?(BoardGcMail)
+      raise "collected mail" unless mail.words.size == 2 &&
+        mail.words[0] == "persistent" && mail.words[1] == "bytes"
+      count += 1
+    end
+    count
+  end
+  writer = g.spawn_parallel do
+    index = 0
+    while index < 200
+      values = Ary(Str).new(2)
+      values << Str.build { |b| b << "persistent" }
+      values << Str.build { |b| b << "bytes" }
+      raise "post" unless RisBoard.post(BoardGcMail.new(values))
+      sleep 0
+      index += 1
+    end
+    index
+  end
+  collector = g.spawn_parallel do
+    index = 0
+    while index < 200
+      GC.collect
+      sleep 0
+      index += 1
+    end
+    index
+  end
+  raise "reader" unless reader.value == 200
+  raise "writer" unless writer.value == 200
+  raise "collector" unless collector.value == 200
+end
+puts "PASS: board GC"

@@ -1,0 +1,3 @@
+class BoardReference
+end
+RisBoard.limit(BoardReference, 1_i64)

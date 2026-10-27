@@ -1,0 +1,35 @@
+struct BoardJob
+  getter value : Int32
+  def initialize(@value : Int32)
+  end
+end
+alias BoardJobAlias = BoardJob
+
+def board_value(value : BoardJob | Cancelled) : Int32
+  return value.value if value.is_a?(BoardJob)
+  raise "unexpected cancellation"
+end
+
+raise "post" unless RisBoard.post(BoardJob.new(1))
+raise "alias" unless board_value(RisBoard.take(BoardJobAlias)) == 1
+RisBoard.limit(BoardJob, 2_i64)
+raise "post" unless RisBoard.post(BoardJob.new(2))
+raise "post" unless RisBoard.post(BoardJob.new(3))
+raise "full" if RisBoard.post(BoardJob.new(4))
+RisBoard.limit(BoardJobAlias, 1_i64)
+raise "lower" if RisBoard.post(BoardJob.new(5))
+raise "FIFO" unless board_value(RisBoard.take(BoardJob)) == 2
+raise "lower retained" if RisBoard.post(BoardJob.new(5))
+raise "FIFO" unless board_value(RisBoard.take(BoardJob)) == 3
+raise "miss" unless RisBoard.poll(BoardJob) == {nil, false}
+raise "Nil post" unless RisBoard.post(nil)
+raise "Nil delivery" unless RisBoard.poll(Nil) == {nil, true}
+raise "Nil miss" unless RisBoard.poll(Nil) == {nil, false}
+# Exercise the slot and byte-slab free lists past the live-image bound.
+index = 0
+while index < 66000
+  raise "reuse post" unless RisBoard.post(BoardJob.new(index))
+  raise "reuse take" unless board_value(RisBoard.take(BoardJob)) == index
+  index += 1
+end
+puts "PASS: board core"

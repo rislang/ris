@@ -1,0 +1,9 @@
+@[Ffi]
+module test/ris/refused/board_pointer
+
+struct BoardPointer
+  @value : Pointer(Int32)
+  def initialize(@value : Pointer(Int32))
+  end
+end
+RisBoard.take(BoardPointer)

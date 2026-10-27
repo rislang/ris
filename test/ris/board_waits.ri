@@ -1,0 +1,63 @@
+struct BoardWake
+  getter number : Int32
+  def initialize(@number : Int32)
+  end
+end
+struct BoardNever
+end
+
+group do |g|
+  reader = g.spawn do
+    value = RisBoard.take(BoardWake)
+    value.is_a?(BoardWake) ? value.number : -1
+  end
+  sleep 1
+  raise "post" unless RisBoard.post(BoardWake.new(42))
+  raise "wake" unless reader.value == 42
+end
+group do |g|
+  reader = g.spawn do
+    answer = RisBoard.take(BoardWake, 1_i64)
+    raise "cancelled" if answer.is_a?(Cancelled)
+    value = answer[0]
+    answer[1] && value.is_a?(BoardWake) && value.number == 43
+  end
+  sleep 0
+  # Delay this scheduler past the deadline without waking its sleeper.
+  until_ns = __iyi_monotonic_ns + 5000000_i64
+  while __iyi_monotonic_ns < until_ns
+  end
+  raise "late post" unless RisBoard.post(BoardWake.new(43))
+  raise "data before timeout commit" unless reader.value == true
+end
+raise "timeout" unless RisBoard.take(BoardNever, 1_i64) == {nil, false}
+raise "negative poll" unless RisBoard.take(BoardNever, -1_i64) == {nil, false}
+group do |g|
+  waiter = g.spawn do
+    value = RisBoard.take(BoardNever, 9223372036854775807_i64)
+    value.is_a?(Cancelled)
+  end
+  sleep 1
+  g.cancel_children
+  raise "timed cancellation" unless waiter.value == true
+end
+# Cancellation precedes data, even when entering a poll already cancelled.
+group do |g|
+  reader = g.spawn do
+    sleep 2
+    a = RisBoard.poll(BoardWake)
+    b = RisBoard.take(BoardWake, 0_i64)
+    c = RisBoard.take(BoardWake)
+    posted = RisBoard.post(BoardWake.new(8))
+    a.is_a?(Cancelled) && b.is_a?(Cancelled) &&
+      c.is_a?(Cancelled) && posted
+  end
+  raise "post" unless RisBoard.post(BoardWake.new(7))
+  g.cancel_children
+  raise "entry cancellation" unless reader.value == true
+end
+one = RisBoard.take(BoardWake)
+two = RisBoard.take(BoardWake)
+raise "cancel consumed" unless one.is_a?(BoardWake) && one.number == 7
+raise "post ignored cancellation" unless two.is_a?(BoardWake) && two.number == 8
+puts "PASS: board waits"

@@ -22,27 +22,12 @@ How to work (fewer tokens, faster to the goal):
 ## Messages: RisBoard (TAPE_SPEC 5.2, 5.6; doc/MESSAGES.md)
 
 Order, fastest with fewest tokens: one Sol low run per item, fixes
-resumed in the same session, one full minitest check per item. After the
-board core, HTTP, pipe/socket race and autocert touch different files and
-may run two at a time in separate worktrees. Pipe/socket race needs
+resumed in the same session, one full minitest check per item. HTTP,
+pipe/socket race and autocert touch different files and may run two at a
+time in separate worktrees. Pipe/socket race needs
 poller work for several IO waits at once and may come last; Channel stays
 for them until then.
 
-* Build board core from reusable inbox slabs/free lists, not owner/drain
-  hooks: canonical specialized keys across modules, alias identity, union
-  wrappers, multi-taker waits/claims, recursive struct/Str codecs, copy
-  rollback, linearized count limits and cancellation/data/timeout commit.
-  Give registry, waiters, messages and results GC roots or no-GC storage;
-  publish physical limits. Gate: FIFO, unique parallel delivery, lowered
-  limits racing posts, partial-copy panic/cancel, timed/poll cancellation,
-  queued Nil, nested copies/enums, task/group survival, GC stress, zero
-  heap and --no-gc link audit. Copyable gates: Ary(Str) and nested
-  structs packed with no source pointer, self-containing types refused,
-  user link fields refused, open Tre (-1) and end stops kept, aliases
-  split, empty values counted, source unchanged during packing, the
-  check at limit too, huge values over the published bound end as 4.2.
-  Keep @[Tape::Flat] (raw-byte images) a separate property. Isolate tests
-  with fresh nominal types; fresh processes for unlimited queues.
 * Port samples/workers to nominal Job/Result, in-band Job quit variants,
   checked post results and explicit cancellation handling. Gate: expected
   results, bounded refusal without spinning, accepted quits and clean join.

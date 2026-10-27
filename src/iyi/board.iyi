@@ -1,0 +1,611 @@
+# Runtime-private board storage. Mutations require the
+# scheduler lock; unpublished copies may write their own bytes unlocked.
+# release returns unpublished storage on rollback as well as after use.
+private struct RisMessageRecord
+  property free_next : Int32 = -1
+  property recycled : Bool = false
+  property generation : UInt64 = 1_u64
+  property live : Bool = false
+  property pins : Int32 = 0
+  property type_key : Int32 = 0
+  property head : Int32 = -1
+  property tail : Int32 = -1
+  property count : Int64 = 0_i64
+  property limit : Int64 = 9223372036854775807_i64
+  property waiters : UInt64 = 0_u64
+  property claimed : Bool = false
+
+  def initialize
+  end
+end
+
+private struct RisMessageImage
+  property live : Bool = false
+  property following : Int32 = -1
+  property text : UInt64 = 0_u64
+  property length : Int32 = 0
+
+  def initialize
+  end
+end
+
+private module RisMessagePool
+  RECORDS = 4096
+  MESSAGES = 65536
+  @@record_free : Int32 = 0
+  @@message_free : Int32 = 0
+  @@storage_heads : UInt64 = 0_u64
+  @@storage_maps : UInt64 = 0_u64
+  @@records : UInt64 = 0_u64
+  @@messages : UInt64 = 0_u64
+
+  {% if flag?(:ris_board_test_panic) || flag?(:ris_board_test_cancel) %}
+    @@copy_faulted : Bool = false
+
+    def self.copy_fault : Nil
+      return if @@copy_faulted
+      @@copy_faulted = true
+      {% if flag?(:ris_board_test_panic) %}
+        raise "board test: partial destination copy"
+      {% else %}
+        IyiScheduler.cancel(IyiScheduler.current)
+      {% end %}
+    end
+  {% end %}
+
+  def self.init : Nil
+    return if @@records != 0
+    @@records = __iyi_mmap(RECORDS.to_u64 * sizeof(RisMessageRecord)).address
+    @@messages = __iyi_mmap(MESSAGES.to_u64 * sizeof(RisMessageImage)).address
+    @@storage_heads = __iyi_mmap(16_u64 * 8_u64).address
+    i = 0
+    while i < RECORDS
+      record(i).value = RisMessageRecord.new
+      pointerof(record(i).value.@free_next).value = i + 1 < RECORDS ? i + 1 : -1
+      i += 1
+    end
+    i = 0
+    while i < MESSAGES
+      message(i).value = RisMessageImage.new
+      pointerof(message(i).value.@following).value = i + 1 < MESSAGES ? i + 1 : -1
+      i += 1
+    end
+  end
+
+  def self.record(slot : Int32) : Pointer(RisMessageRecord)
+    Pointer(RisMessageRecord).new(@@records) + slot
+  end
+
+  def self.message(slot : Int32) : Pointer(RisMessageImage)
+    Pointer(RisMessageImage).new(@@messages) + slot
+  end
+
+  def self.valid?(slot : Int32, generation : UInt64) : Bool
+    @@records != 0 && slot >= 0 && slot < RECORDS &&
+      record(slot).value.live && record(slot).value.generation == generation
+  end
+
+  def self.exhausted(bound : Int32) : NoReturn
+    RisRegion.size_error("ris: board storage exhausted; slot bound: ",
+      bound.to_u64)
+  end
+
+  def self.allocate : Tuple(Int32, UInt64)
+    init
+    slot = @@record_free
+    exhausted(RECORDS) if slot < 0
+    p = record(slot)
+    generation = p.value.generation
+    @@record_free = p.value.free_next
+    r = RisMessageRecord.new
+    r.generation = generation
+    r.live = true
+    p.value = r
+    {slot, generation}
+  end
+
+  # Retire only after every private copy has released its pin.
+  def self.retire(slot : Int32, generation : UInt64) : Nil
+    return unless valid?(slot, generation)
+    p = record(slot)
+    r = p.value
+    r.live = false
+    r.generation += 1_u64 unless r.generation == 18446744073709551615_u64
+    p.value = r
+    recycle(p)
+  end
+
+  def self.allocate_message : Int32
+    i = @@message_free
+    exhausted(MESSAGES) if i < 0
+    @@message_free = message(i).value.following
+    m = RisMessageImage.new
+    m.live = true
+    message(i).value = m
+    i
+  end
+
+  # Power-of-two classes 32 bytes through 1 MiB, including the header.
+  # Slabs have at least 64 KiB; larger texts map directly.
+  def self.storage_size(length : Int32) : UInt64
+    size = 32_u64
+    needed = length.to_u64 + 16_u64
+    while size < needed && size < 1048576_u64
+      size *= 2_u64
+    end
+    size
+  end
+
+  def self.storage_head(size : UInt64) : Pointer(UInt64)
+    index = 0
+    n = 32_u64
+    while n < size
+      index += 1
+      n *= 2_u64
+    end
+    Pointer(UInt64).new(@@storage_heads) + index
+  end
+
+  def self.allocate_text(length : Int32) : UInt64
+    needed = length.to_u64 + 16_u64
+    if needed > 1048576_u64
+      @@storage_maps += 1_u64
+      return __iyi_mmap(needed).address
+    end
+    size = storage_size(length)
+    head = storage_head(size)
+    if head.value == 0
+      bytes = size < 65536_u64 ? 65536_u64 : size
+      @@storage_maps += 1_u64
+      base = __iyi_mmap(bytes).address
+      offset = 0_u64
+      while offset < bytes
+        Pointer(UInt64).new(base + offset).value = head.value
+        head.value = base + offset
+        offset += size
+      end
+    end
+    result = head.value
+    head.value = Pointer(UInt64).new(result).value
+    result
+  end
+
+  def self.release(slot : Int32) : Nil
+    m = message(slot).value
+    if m.text != 0
+      if m.length.to_u64 + 16_u64 > 1048576_u64
+        __iyi_munmap(m.text, m.length.to_u64 + 16_u64)
+      else
+        head = storage_head(storage_size(m.length))
+        Pointer(UInt64).new(m.text).value = head.value
+        head.value = m.text
+      end
+    end
+    message(slot).value = RisMessageImage.new
+    pointerof(message(slot).value.@following).value = @@message_free
+    @@message_free = slot
+  end
+
+  def self.storage_maps : UInt64
+    @@storage_maps
+  end
+
+  def self.recycle(p : Pointer(RisMessageRecord)) : Nil
+    r = p.value
+    return if r.live || r.pins != 0 || r.recycled
+    return if r.generation == 18446744073709551615_u64
+    r.recycled = true
+    r.free_next = @@record_free
+    @@record_free = (p - Pointer(RisMessageRecord).new(@@records)).to_i32
+    p.value = r
+  end
+
+end
+
+# Process-wide typed mail. All queue state and claims use IyiSchedLock.
+# Packed images contain bytes only; waiter references live on fiber stacks.
+private struct RisBoardCursor
+  MAX_BYTES = 16777216_u64
+  MAX_COUNT = 1048576_u64
+
+  def initialize(@base : UInt64, @offset : Pointer(UInt64),
+                 @count : Pointer(UInt64))
+  end
+
+  def entry : Nil
+    @count.value += 1_u64
+    RisRegion.size_error("ris: board count exceeds 1048576: ",
+      @count.value) if @count.value > MAX_COUNT
+  end
+
+  def bytes(size : UInt64) : UInt64
+    start = @offset.value
+    RisRegion.size_error("ris: board image exceeds 16777216 bytes: ",
+      size) if size > MAX_BYTES || start > MAX_BYTES - size
+    @offset.value = start + size
+    @base == 0 ? 0_u64 : @base + start
+  end
+
+  def scalar(value : T) : Nil forall T
+    at = bytes(sizeof(T).to_u64)
+    Pointer(T).new(at).unaligned_value = value if at != 0
+  end
+
+  def read_scalar(type : T.class) : T forall T
+    Pointer(T).new(bytes(sizeof(T).to_u64)).unaligned_value
+  end
+end
+
+private module RisBoardCodec(T)
+  # The ancestor tuple makes rejection terminate even for recursive types.
+  def self.check(path : P.class, ancestors : A.class) : Nil forall P, A
+    {% if A.type_vars.includes?(T) %}
+      {% raise "RisBoard refuses self-containing type at #{P}; use Tre or " +
+        "Ary nodes with checked integer indices" %}
+    {% elsif T.name.starts_with?("Ary::Link(") || T.name.includes?("::Link(") %}
+      {% raise "RisBoard refuses user link field at #{P}; use Ary nodes " +
+        "with checked integer indices" %}
+    {% elsif T.name.starts_with?("StaticArray(") %}
+      {% raise "RisBoard refuses fixed-array layout at #{P}; use Ary of " +
+        "Copyable elements" %}
+    {% elsif T.name == "Std::Socket::IyiSocket" || T.name == "Std::Io::PipeReader" || T.name == "Std::Io::PipeWriter" %}
+      {% raise "RisBoard refuses resource at #{P}; open and use resources " +
+        "in the receiving task" %}
+    {% elsif T == Str || T == Nil || T == Bool || T == Char || T == Symbol || T < Number || T < Enum %}
+    {% elsif T.name.starts_with?("Ary(") || T.name.starts_with?("Tre(") %}
+      RisBoardCodec({{T.type_vars[0]}}).check(P, Tuple(*A, T))
+    {% elsif T < Tuple %}
+      {% for member in T.type_vars %}
+        RisBoardCodec({{member}}).check(P, Tuple(*A, T))
+      {% end %}
+    {% elsif T < NamedTuple %}
+      {% for key in T.keys %}
+        RisBoardCodec({{T[key]}}).check(P, Tuple(*A, T))
+      {% end %}
+    {% elsif T.union? %}
+      {% for arm in T.union_types %}
+        RisBoardCodec({{arm}}).check(P, Tuple(*A, T))
+      {% end %}
+    {% elsif T.struct? && !T.annotation(Owner) && !T.name.starts_with?("Pointer(") && !T.name.starts_with?("Proc(") %}
+      {% for field in T.instance_vars %}
+        RisBoardCodec({{field.type}}).check(
+          Tuple(*P, NamedTuple({{field.name.id}}: {{field.type}})), Tuple(*A, T))
+      {% end %}
+    {% else %}
+      {% raise "RisBoard refuses #{T} at #{P}; send Str, Ary bytes or a " +
+        "value struct and open resources in the receiving task" %}
+    {% end %}
+  end
+
+  def self.write(value : T, cursor : RisBoardCursor) : Nil
+    cursor.entry
+    {% if T == Str %}
+      cursor.scalar(value.bytesize)
+      at = cursor.bytes(value.bytesize.to_u64)
+      Pointer(UInt8).new(at).copy_from(value.to_unsafe, value.bytesize) if at != 0
+    {% elsif T.name.starts_with?("Ary(") %}
+      cursor.scalar(value.size)
+      value.each { |item| RisBoardCodec({{T.type_vars[0]}}).write(item, cursor) }
+    {% elsif T.name.starts_with?("Tre(") %}
+      cursor.scalar(value.size)
+      index = 0
+      while index < value.size
+        cursor.scalar(value.__ris_board_stop(index))
+        RisBoardCodec({{T.type_vars[0]}}).write(value[index], cursor)
+        index += 1
+      end
+    {% elsif T < Tuple %}
+      {% for member, index in T.type_vars %}
+        RisBoardCodec({{member}}).write(value[{{index}}], cursor)
+      {% end %}
+    {% elsif T < NamedTuple %}
+      {% for key in T.keys %}
+        RisBoardCodec({{T[key]}}).write(value[{{key.symbolize}}], cursor)
+      {% end %}
+    {% elsif T.union? %}
+      {% for arm, index in T.union_types %}
+        if value.is_a?({{arm}})
+          cursor.scalar({{index}}.to_i32)
+          RisBoardCodec({{arm}}).write(value, cursor)
+          return
+        end
+      {% end %}
+    {% elsif T == Nil || T == Bool || T == Char || T == Symbol || T < Number || T < Enum %}
+      cursor.scalar(value)
+    {% else %}
+      {% for field in T.instance_vars %}
+        RisBoardCodec({{field.type}}).write(
+          pointerof(value.@{{field.name.id}}).value, cursor)
+      {% end %}
+    {% end %}
+  end
+
+  def self.read(cursor : RisBoardCursor) : T
+    cursor.entry
+    {% if T == Str %}
+      count = cursor.read_scalar(Int32)
+      made = Str.new(Str.new(
+        Pointer(UInt8).new(cursor.bytes(count.to_u64)), count))
+      {% if flag?(:ris_board_test_panic) || flag?(:ris_board_test_cancel) %}
+        RisMessagePool.copy_fault
+      {% end %}
+      made
+    {% elsif T.name.starts_with?("Ary(") %}
+      count = cursor.read_scalar(Int32)
+      T.new(count) { RisBoardCodec({{T.type_vars[0]}}).read(cursor) }
+    {% elsif T.name.starts_with?("Tre(") %}
+      count = cursor.read_scalar(Int32)
+      made = T.new(count)
+      index = 0
+      while index < count
+        stop = cursor.read_scalar(Int32)
+        made.__ris_board_put(RisBoardCodec({{T.type_vars[0]}}).read(cursor), stop)
+        index += 1
+      end
+      made
+    {% elsif T < Tuple %}
+      { {% for member in T.type_vars %}
+        RisBoardCodec({{member}}).read(cursor),
+      {% end %} }
+    {% elsif T < NamedTuple %}
+      { {% for key in T.keys %}
+        {{key}}: RisBoardCodec({{T[key]}}).read(cursor),
+      {% end %} }
+    {% elsif T.union? %}
+      tag = cursor.read_scalar(Int32)
+      {% for arm, index in T.union_types %}
+        return RisBoardCodec({{arm}}).read(cursor) if tag == {{index}}
+      {% end %}
+      raise "invalid board union tag"
+    {% elsif T == Nil || T == Bool || T == Char || T == Symbol || T < Number || T < Enum %}
+      cursor.read_scalar(T)
+    {% else %}
+      made = uninitialized T
+      {% for field in T.instance_vars %}
+        pointerof(made.@{{field.name.id}}).value =
+          RisBoardCodec({{field.type}}).read(cursor)
+      {% end %}
+      made
+    {% end %}
+  end
+end
+
+struct Tre(T)
+  def __ris_board_stop(index : Int32) : Int32
+    slot(index).value.stop
+  end
+
+  def __ris_board_put(value : T, stop : Int32) : Nil
+    put(value, stop)
+  end
+end
+
+private struct RisBoardWait
+  property following : UInt64 = 0_u64
+  getter fiber : IyiFiber
+  getter nonce : UInt64
+
+  def initialize(@fiber : IyiFiber, @nonce : UInt64)
+  end
+end
+
+private struct RisBoardQueue(T)
+  def self.check : Nil
+    {% if T.union? %}
+      {% raise "RisBoard refuses bare union keys; use a nominal struct " +
+        "with a union field" %}
+    {% elsif T == Cancelled %}
+      {% raise "RisBoard refuses top-level Cancelled; wrap that data in a " +
+        "nominal message struct" %}
+    {% end %}
+    RisBoardCodec(T).check(Tuple(T), Tuple())
+  end
+
+  # Called only under the scheduler lock; allocate the type's registry slot
+  # on first use. Generic specialization supplies the canonical type key.
+  def self.init : Pointer(RisMessageRecord)
+    RisMessagePool.init
+    key = T.crystal_type_id
+    index = 0
+    while index < RisMessagePool::RECORDS
+      record = RisMessagePool.record(index)
+      return record if record.value.live && record.value.type_key == key
+      index += 1
+    end
+    slot = RisMessagePool.allocate[0]
+    record = RisMessagePool.record(slot)
+    pointerof(record.value.@type_key).value = key
+    record
+  end
+
+  def self.limit(n : Int64) : Nil
+    check
+    RisRegion.size_error("ris: board limit must be positive: ",
+      n.unsafe_to_u64) if n <= 0
+    IyiSchedLock.lock
+    defer IyiSchedLock.release_held
+    queue = init
+    pointerof(queue.value.@limit).value = n
+  end
+
+  def self.release_unpublished(slot : Int32, published : Pointer(Bool)) : Nil
+    unless published.value
+      IyiSchedLock.lock unless IyiSchedLock.held_here?
+      RisMessagePool.release(slot)
+      IyiSchedLock.release_held
+    end
+  end
+
+  def self.finish_take(queue : Pointer(RisMessageRecord),
+                       mark : RisScopeMark, committed : Pointer(Bool)) : Nil
+    unless committed.value
+      __iyi_scope_reset(mark)
+      {% if flag?(:ris_board_test_panic) || flag?(:ris_board_test_cancel) %}
+        after = __iyi_scope_mark(true)
+        unless after.region == mark.region && after.cursor == mark.cursor &&
+            after.side == mark.side
+          raise "board test: destination rollback failed"
+        end
+      {% end %}
+      # panic_current releases the lock before running deferred cleanup.
+      IyiSchedLock.lock unless IyiSchedLock.held_here?
+      pointerof(queue.value.@claimed).value = false
+      wake(queue)
+    end
+    IyiSchedLock.release_held
+  end
+
+  def self.wake(queue : Pointer(RisMessageRecord)) : Nil
+    at = queue.value.waiters
+    while at != 0
+      waiter = Pointer(RisBoardWait).new(at).value
+      fiber = waiter.fiber
+      if fiber.state == IyiFiberState::WaitingCh &&
+          fiber.park_nonce == waiter.nonce
+        IyiScheduler.ready(fiber)
+      end
+      at = waiter.following
+    end
+  end
+
+  def self.post(value : T) : Bool
+    check
+    offset = 0_u64
+    count = 0_u64
+    RisBoardCodec(T).write(value,
+      RisBoardCursor.new(0_u64, pointerof(offset), pointerof(count)))
+    length = offset.to_i32
+    IyiSchedLock.lock
+    defer IyiSchedLock.release_held
+    queue = init
+    return false if queue.value.count >= queue.value.limit
+    slot = RisMessagePool.allocate_message
+    published = false
+    defer release_unpublished(slot, pointerof(published))
+    image = RisMessagePool.message(slot)
+    pointerof(image.value.@length).value = length
+    pointerof(image.value.@text).value = RisMessagePool.allocate_text(length)
+    offset = 0_u64
+    count = 0_u64
+    RisBoardCodec(T).write(value, RisBoardCursor.new(
+      image.value.text + 16_u64, pointerof(offset), pointerof(count)))
+    pointerof(image.value.@following).value = -1
+    if queue.value.tail < 0
+      pointerof(queue.value.@head).value = slot
+    else
+      pointerof(RisMessagePool.message(queue.value.tail).value.@following).value = slot
+    end
+    pointerof(queue.value.@tail).value = slot
+    pointerof(queue.value.@count).value += 1_i64
+    published = true
+    wake(queue)
+    true
+  end
+
+  def self.unlink(queue : Pointer(RisMessageRecord), address : UInt64) : Nil
+    at = queue.value.waiters
+    previous = 0_u64
+    while at != 0
+      node = Pointer(RisBoardWait).new(at)
+      if at == address
+        if previous == 0
+          pointerof(queue.value.@waiters).value = node.value.following
+        else
+          pointerof(Pointer(RisBoardWait).new(previous).value.@following).value = node.value.following
+        end
+        return
+      end
+      previous = at
+      at = node.value.following
+    end
+  end
+
+  def self.take(ms : Int64, forever : Bool) : Tuple(T?, Bool) | Cancelled
+    check
+    fiber = IyiScheduler.current
+    now = __iyi_monotonic_ns
+    maximum = 9223372036854775807_i64
+    deadline = ms <= 0 ? now : (ms > (maximum - now) // 1000000_i64 ? maximum : now + ms * 1000000_i64)
+    IyiSchedLock.lock
+    queue = init
+    while true
+      if fiber.cancelled
+        IyiSchedLock.unlock
+        return Cancelled.new
+      end
+      if queue.value.head >= 0 && !queue.value.claimed
+        return consume(queue)
+      end
+      # A head claimed by an unwinding take is still mail. Resolve that
+      # claim before allowing a poll/deadline miss; a failed take cannot
+      # make existing data disappear even briefly from the commit order.
+      if !forever && queue.value.head < 0 &&
+          __iyi_monotonic_ns >= deadline
+        IyiSchedLock.unlock
+        return {nil, false}
+      end
+      waiter = RisBoardWait.new(fiber, IyiScheduler.park(fiber))
+      waiter.following = queue.value.waiters
+      pointerof(queue.value.@waiters).value = pointerof(waiter).address
+      unless forever || queue.value.claimed
+        fiber.deadline = deadline
+        IyiScheduler.sleep_insert(fiber)
+      end
+      IyiSchedLock.unlock
+      IyiScheduler.reschedule
+      IyiSchedLock.lock
+      IyiScheduler.sleep_remove(fiber) unless forever
+      unlink(queue, pointerof(waiter).address)
+    end
+  end
+
+  # The claim survives panic_current releasing the scheduler lock. Cleanup
+  # restores the destination before making the unchanged head available.
+  def self.consume(queue : Pointer(RisMessageRecord)) : Tuple(T?, Bool) | Cancelled
+    mark = __iyi_scope_mark(true)
+    committed = false
+    pointerof(queue.value.@claimed).value = true
+    defer finish_take(queue, mark, pointerof(committed))
+    image = RisMessagePool.message(queue.value.head).value
+    offset = 0_u64
+    count = 0_u64
+    value = RisBoardCodec(T).read(RisBoardCursor.new(
+      image.text + 16_u64, pointerof(offset), pointerof(count)))
+    return Cancelled.new if IyiScheduler.current.cancelled
+    slot = queue.value.head
+    pointerof(queue.value.@head).value = image.following
+    pointerof(queue.value.@tail).value = -1 if queue.value.head < 0
+    pointerof(queue.value.@count).value -= 1_i64
+    RisMessagePool.release(slot)
+    pointerof(queue.value.@claimed).value = false
+    committed = true
+    wake(queue)
+    {value, true}
+  end
+end
+
+module RisBoard
+  def self.post(value : T) : Bool forall T
+    RisBoardQueue(T).post(value)
+  end
+
+  def self.limit(type : T.class, n : Int64) : Nil forall T
+    RisBoardQueue(T).limit(n)
+  end
+
+  def self.poll(type : T.class) : Tuple(T?, Bool) | Cancelled forall T
+    RisBoardQueue(T).take(0_i64, false)
+  end
+
+  def self.take(type : T.class, ms : Int64) : Tuple(T?, Bool) | Cancelled forall T
+    RisBoardQueue(T).take(ms, false)
+  end
+
+  def self.take(type : T.class) : T | Cancelled forall T
+    answer = RisBoardQueue(T).take(0_i64, true)
+    return answer if answer.is_a?(Cancelled)
+    value = answer[0]
+    return value if value.is_a?(T)
+    raise "board missing committed value"
+  end
+end

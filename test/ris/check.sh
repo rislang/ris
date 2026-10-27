@@ -41,6 +41,24 @@ expect reflection_private 'does not export'
 # Runtime storage has no application API.
 expect message_storage_private 'undefined constant RisMessagePool'
 
+# The board core owns typed queues independently of tasks and groups.
+out=$(RIS="$RIS" bash test/ris/board_checks.sh 2>&1)
+if [ "$?" -eq 0 ]; then
+  printf '%s\n' "$out"
+else
+  echo "FAILED   board core checks: $out"; status=1
+fi
+
+expect board_union 'use a nominal struct with a union field'
+expect board_cancelled 'wrap that data in a nominal message struct'
+expect board_pointer 'NamedTuple(value: Pointer(Int32))'
+expect board_class_limit 'send Str, Ary bytes or a value struct'
+expect board_class_post 'send Str, Ary bytes or a value struct'
+expect board_link 'use Ary nodes with checked integer indices'
+expect board_recursive 'use Tre or Ary nodes with checked integer indices'
+expect board_closure 'send Str, Ary bytes or a value struct'
+expect board_owner 'send Str, Ary bytes or a value struct'
+
 # Joining waits for cleanup and refuses later adoption.
 out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc \
   test/ris/group_lifecycle.ri 2>&1)
