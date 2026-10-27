@@ -132,13 +132,15 @@ rule goes last in its section; a removed one leaves its number unused.
   Cancelled consumes nothing; partial copies and claims roll back. Data
   present at commit may win after a delayed deadline wake. Top-level
   Cancelled keys are refused: wrap that data in a nominal message.
-  Payloads are numeric scalars, Bool, Char, Symbol, Nil, enums, Str and
-  value structs recursively containing these or unions of them, unlike
-  Goose's flat-value universe. Compiler-generated copies preserve concrete
-  types and enum values, copy every Str's bytes in and out to the taker's
-  tape, split sharing as in 1.7 and run no user code. Owners, pointers,
-  resources, closures, classes and Ary are refused at every depth, with
-  the safe form named. A post publishes a complete copy or nothing; take
+  Payloads are flat, as Goose's: numeric scalars, Bool, Char, Symbol,
+  Nil, enums, Str, Ary(T) and Tre(T) of flat T, and value structs
+  recursively containing these or unions of them; the compiler checks it
+  at post and take, with no marker. A Str, Ary or Tre is copied whole in
+  and out to the taker's tape, as Goose copies its arrays; Tre links stay
+  inside the copy. Compiler-generated copies preserve concrete types and
+  enum values, split sharing as in 1.7 and run no user code. Owners,
+  pointers, resources, closures and classes are refused at every depth,
+  with the safe form named. A post publishes a complete copy or nothing; take
   copies out before removal. Claims prevent duplicate delivery and keep
   FIFO through failure. No view into runtime pools escapes. Private typed
   pools own message bytes; GC builds root live runtime references and clear

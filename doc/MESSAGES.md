@@ -50,21 +50,24 @@ user callbacks. Group end neither closes nor drains the board.
 
 ## Copies and task boundaries
 
-Messages are numeric scalars, Bool, Char, Symbol, Nil, enums, Str and
-value structs recursively containing these or unions of them. Generated
-copies preserve enum values and concrete types, copy every Str's bytes,
-split sharing as in 1.7 and run no user code. Owners, Ary, classes,
-pointers, resources, closures and fields containing them are refused.
+Messages are flat: numeric scalars, Bool, Char, Symbol, Nil, enums,
+Str, Ary(T) and Tre(T) of flat T, and value structs recursively
+containing these or unions of them. The compiler checks this at post
+and take; no marker is needed. Generated copies preserve enum values
+and concrete types, copy Str, Ary and Tre whole, split sharing as in 1.7
+and run no user code. Owners, classes, pointers, resources, closures
+and fields containing them are refused.
 No receiver borrows sender bytes or a runtime pool view. GC and no-GC
 storage must obey the same lifetime and transactional copy rules.
 
-Unlike Goose's flat-value universe, Str is a view requiring a deep copy;
-Ary is not accepted. A miss is nil rather than Goose's zero T. Tasks are
-grouped fibers, with cancellable waits, Share checks and panic/defer
-cleanup. Every task, local or parallel, captures only Share values or
-independent checked copies on its own tape; no shared mutable borrows.
-This includes receivers and reached program state. A copied closure
-must satisfy those checks, not retain a hidden manager or resource.
+Unlike Goose, where arrays are values, Str, Ary and Tre are views on a
+tape, so the board copies them whole; Tre links stay inside the copy. A
+miss is nil rather than Goose's zero T. Tasks are grouped fibers, with
+cancellable waits, Share checks and panic/defer cleanup. Every task,
+local or parallel, captures only Share values or independent checked
+copies on its own tape; no shared mutable borrows. This includes
+receivers and reached program state. A copied closure must satisfy those
+checks, not retain a hidden manager or resource.
 
 ## Workers and shutdown
 

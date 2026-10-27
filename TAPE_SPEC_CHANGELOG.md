@@ -4,6 +4,17 @@ Every change to TAPE_SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one.
 
+## 2026-10-27: board messages are flat; Ary and Tre allowed
+
+* Changed: 5.6 calls board payloads flat, as Goose does, and admits
+  Ary(T) and Tre(T) of flat T beside Str: each is copied whole in and
+  out, and Tre links stay inside the copy. The compiler checks flatness
+  at post and take; no marker type or annotation.
+* Why: refusing Ary was never decided; the inbox rule had allowed what
+  copy_to accepts. Goose queues take flat variable-size arrays, and
+  copy_to already copies Ary and Tre (1.7). Goose's ban on index types
+  does not apply: a Tre's links point only into itself.
+
 ## 2026-10-27: reviewed board contract and task-local resources
 
 * Changed: 5.1/5.3 require Share captures or independent checked copies
