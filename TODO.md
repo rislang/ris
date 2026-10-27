@@ -38,19 +38,23 @@ How to work (fewer tokens, faster to the goal):
 * Concurrency storage (TAPE_SPEC 5.2): task records, wait nodes and
   bounded queues in runtime typed pools; preserve queued messages on
   pool failures and prove zero heap under --no-gc.
-* Replace Channel with RisQue, RisSemaphore and RisEvent (TAPE_SPEC
+* Replace Channel with RisInbox, RisSemaphore and RisEvent (TAPE_SPEC
   5.2). Names (may change once the model works):
-  * `g.que(T, n)`, `g.spawn_que(T, n) { |q| }` make a `RisQue(T)`;
-    `send` and `<<`, `receive`, `receive(ms)` (0 does not wait),
-    `close`, `closed?`, `size`, `empty?`, `capacity`. Not push/pop:
-    Ary#pop takes the last element.
-  * `RisQue::Request(M, R)`: `q.request(msg, ms)`, `req.message`,
+  * `g.inbox(T, n)` (owner: the calling task, not the group) and
+    `g.spawn_inbox(T, n) { |inbox| }` (owner: the child; the parent
+    gets the send handle) make a `RisInbox(T)`; `RisInbox.new` is not
+    public, so every inbox ends with a group. `send` and `<<`,
+    `receive`, `receive(ms)` (0 does not wait), `close`, `closed?`,
+    `size`, `empty?`, `capacity`. Not push/pop: Ary#pop takes the
+    last element.
+  * `RisInbox::Request(M, R)`: `q.request(msg, ms)`, `req.message`,
     `req.reply(value)`; a one-shot reply slot with a token, so a late
     or second reply is refused and a reply is never Full.
   * `g.semaphore(n)`: `RisSemaphore` with `acquire`, `acquire(ms)`,
     `release`, `hold { }`. `g.event`: `RisEvent` with `fire`, `wait`,
     `wait(ms)`, `fired?`.
-  * Errors: `RisQue::Full`, `RisQue::Closed`, `TimedOut`, `Cancelled`.
+  * Errors: `RisInbox::Full`, `RisInbox::Closed`, `TimedOut`,
+    `Cancelled`.
   Open in the contract: error order (Cancelled first, then Closed
   over Full or TimedOut), handle generations, receive(ms) on a
   monotonic deadline (negative refused), reply results (expired,
@@ -60,8 +64,8 @@ How to work (fewer tokens, faster to the goal):
   what copy_to accepts, so Ary is not refused.
   Steps, each with a gate (design review of 2026-10-27):
   1. Settle the above, the typed request API and whether select stays
-     over queues or only receive(ms) remains.
-  2. RisQue on typed pools: scalars inline, Str copies per message,
+     over inboxes or only receive(ms) remains.
+  2. RisInbox on typed pools: scalars inline, Str copies per message,
      close, owner end, rollback; move the Str channel work in progress
      (copy on receive, release on close, failed receives keep mail).
   3. Owner checks (compile error, runtime refusal) and cross-thread
@@ -70,8 +74,8 @@ How to work (fewer tokens, faster to the goal):
      owner, expired reply, self-request and owner end with queued mail
      (Koja MEMORY-MODEL.md, Process boundaries).
   5. Port std: pipe (semaphore credits), http slots (semaphore),
-     socket race (queue), autocert done (event), samples/workers.
-  6. Retarget select lowering to queues, or refuse it with a hint to
+     socket race (inbox), autocert done (event), samples/workers.
+  6. Retarget select lowering to inboxes, or refuse it with a hint to
      receive(ms), per step 1; port bench and tests (host Crystal
      Channel stays); remove Channel; review the 930722c entry in
      UPSTREAM.md.

@@ -24,7 +24,7 @@ rule goes last in its section; a removed one leaves its number unused.
   (Program.tape) or copied there with copy_to.
 * 1.4 Ary, Tre and builders are handles to shared state: assignment and
   arguments alias data, length and capacity, so growth through b shows through
-  a; Str and views alias their bytes. Only copy_to and queue messages (5.2)
+  a; Str and views alias their bytes. Only copy_to and inbox messages (5.2)
   copy; Goose's implicit value copies (§4.1) do not apply. Str is read-only.
 * 1.5 Libraries borrow caller input and build results on the caller's owner;
   nested tape blocks share it. A pending result's region is outside callee
@@ -88,22 +88,23 @@ rule goes last in its section; a removed one leaves its number unused.
   (III.4.4) are shared: Str and program data no method writes after init,
   checked per owner. Ary and its views write through and are never shared; ris
   has no freeze.
-* 5.2 Tasks pass messages through `RisQue(T)`, after Goose's typed queues
-  (§11.2) and Koja's process boundary
-  ([MEMORY-MODEL.md](doc/reference/koja/design/MEMORY-MODEL.md)). The task
-  that makes a queue, main included, owns it and alone receives; a child
-  makes its own and hands out its send handle. The handle is Share (5.1)
-  and goes stale when the queue ends. A message is what copy_to accepts
-  (1.7), copied by its rules at send and at receive. Send copies
-  into the queue's own storage, releasable per message, and never waits:
-  RisQue::Full, RisQue::Closed. Receive copies to the owner's current
-  tape, then releases the message; a failed or cancelled receive keeps
-  it. Any holder may close: sends are refused, the owner drains what is
-  queued, then gets Closed. The owner's end discards what is left.
-  `request` waits for a reply copied the same way. Waiting for room or a
-  signal uses RisSemaphore and RisEvent. Exhaustion follows 4.2. Queues,
-  task records, wait nodes and reply slots live in runtime typed pools.
-  ris has no Channel; this is open work in TODO.md.
+* 5.2 Tasks pass messages through a `RisInbox(T)`, after Goose's typed
+  queues (§11.2) and Koja's process boundary
+  ([MEMORY-MODEL.md](doc/reference/koja/design/MEMORY-MODEL.md)).
+  `g.inbox` makes one owned by the calling task, main included, and
+  `g.spawn_inbox` one owned by the new child; only the owner receives.
+  The inbox ends with its group g. Its send handle is Share (5.1) and
+  goes stale when the inbox ends. A message is what copy_to accepts
+  (1.7), copied by its rules at send and at receive. Send copies into
+  the inbox's own storage, releasable per message, and never waits:
+  RisInbox::Full, RisInbox::Closed. Receive copies to the owner's
+  current tape, then releases the message; a failed or cancelled
+  receive keeps it. Any holder may close: sends are refused, the owner
+  drains what is queued, then gets Closed. Its end discards what is
+  left. `request` waits for a reply copied the same way. Waiting for
+  room or a signal uses RisSemaphore and RisEvent. Exhaustion follows
+  4.2. Inboxes, task records, wait nodes and reply slots live in
+  runtime typed pools. ris has no Channel; this is open work in TODO.md.
 * 5.3 Callbacks borrow their environment for the call only; an escaping closure
   copies captures to a named owner or task pool, never a borrow. Thread-locals
   hold no fiber borrows.

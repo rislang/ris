@@ -4,6 +4,15 @@ Every change to TAPE_SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one.
 
+## 2026-10-27: RisQue becomes RisInbox, made by its group
+
+* Changed: 5.2 names the queue RisInbox(T). `g.inbox` makes one owned
+  by the calling task, `g.spawn_inbox` one owned by the new child; the
+  inbox ends with its group g.
+* Why: an inbox has one receiver, which "queue" (Ruby's Queue has
+  many) does not say. Making it only through a group gives every inbox
+  an end, as g.spawn does for tasks (iyi III.4.1).
+
 ## 2026-10-27: owned message queues replace Channel
 
 * Changed: 5.2 replaces iyi's Channel with RisQue(T). The making task
