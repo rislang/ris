@@ -19,25 +19,6 @@ How to work (fewer tokens, faster to the goal):
   git log. Remove an item when its guarantee passes its gate, not merely
   when a sample's budget reaches zero.
 
-## Workload blockers (goose-evaluations, 2026-10-26)
-
-* jq under --no-gc runs 5-13x slower than Goose: find the cause once
-  the ports run; speed tests otherwise stay off.
-
-## Remaining tape semantics
-
-* Stable growth on every supported tape target: replace moving backends
-  outside Linux with address-space reservations and equivalent gates.
-* Escaping closures outside program and joined task owners: pooled
-  environments, including captured receivers; release them with their
-  owner, check capture lifetimes and refuse unsupported escapes safely.
-* Finish typed pool validation (TAPE_SPEC 6.1-6.4): audit remaining bounds,
-  overflow, membership, stale views, reset lifetimes and external images.
-  Borrowed Run constructors now retain Ary shrink lifetimes; gates cover
-  constructor bounds and foreign Ary storage as well as pool storage.
-* For FFI paths in use, enforce borrow lifetimes, retained-storage owners,
-  foreign-thread attachment and no unwind across foreign frames.
-
 ## Messages (replace Channel; TAPE_SPEC 5.2, 5.5, 5.6)
 
 Design, mechanisms and full gates: doc/MESSAGES.md. One item per step.
@@ -58,6 +39,18 @@ Design, mechanisms and full gates: doc/MESSAGES.md. One item per step.
 * Remove ris Channel and select; g.spawn becomes g.new_task with the
   compiler hooks retargeted (MESSAGES.md 5.5). Gate: no target Channel
   or spawn left, safe-form errors, compiler and runtime suites.
+
+## Next
+
+* Escaping closures outside program and joined task owners: pooled
+  environments, including captured receivers; release them with their
+  owner, check capture lifetimes and refuse unsupported escapes safely.
+* Finish typed pool validation (TAPE_SPEC 6.1-6.4): audit remaining bounds,
+  overflow, membership, stale views, reset lifetimes and external images.
+  Borrowed Run constructors now retain Ary shrink lifetimes; gates cover
+  constructor bounds and foreign Ary storage as well as pool storage.
+* For FFI paths in use, enforce borrow lifetimes, retained-storage owners,
+  foreign-thread attachment and no unwind across foreign frames.
 
 ## Remove the heap and switch off the GC
 
@@ -86,6 +79,8 @@ Design, mechanisms and full gates: doc/MESSAGES.md. One item per step.
   block the default no-GC switch belong in the section above.
 * Add 128-bit formatting, IDNA and URI resolution.
 * Extend RIS_TAPE_STATS with owner paths and pool waste.
+* Stable growth on every supported tape target: replace moving backends
+  outside Linux with address-space reservations and equivalent gates.
 
 ## Known failure to recheck
 
