@@ -35,6 +35,14 @@ else
   echo "FAILED   channel_bounded: $out"; status=1
 fi
 
+# Workers consume in-band quits and fail bounded posts without spinning.
+out=$(RIS="$RIS" python3 test/ris/workers_check.py 2>&1)
+if [ "$?" -eq 0 ]; then
+  printf '%s\n' "$out"
+else
+  echo "FAILED   workers sample: $out"; status=1
+fi
+
 # Reflection must not expose unrelated private declarations.
 expect reflection_private 'does not export'
 

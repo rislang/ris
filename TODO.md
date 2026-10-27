@@ -28,9 +28,6 @@ time in separate worktrees. Pipe/socket race needs
 poller work for several IO waits at once and may come last; Channel stays
 for them until then.
 
-* Port samples/workers to nominal Job/Result, in-band Job quit variants,
-  checked post results and explicit cancellation handling. Gate: expected
-  results, bounded refusal without spinning, accepted quits and clean join.
 * Port HTTP to N tasks, each opening a SO_REUSEPORT listener on the same
   port and accepting/serving its own connections. Task count is the
   connection limit; no permits/semaphore. Copy config and handlers per

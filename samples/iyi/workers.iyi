@@ -1,52 +1,85 @@
-# The first program with tasks in it - SPEC.md III.4, as a person writes it.
+# A worker pool and a typed pair of tasks (SPEC.md III.4).
 #
-#   ./bin/iyi run samples/iyi/workers.iyi
-#
-# Two shapes cover most of what a program wants from concurrency. A pool:
-# jobs go down one channel, workers answer up another, and the group's end
-# is the join. A pair: two things fetched at once, the group typed by what
-# they answer, so an error from either leaves as an ordinary member of the
-# union (III.4.3, III.4.9). Nothing here is a rule the other samples do not
-# state; it is the two programs a person writes first.
+#   ./bin/ris run samples/iyi/workers.iyi
 module samples/workers
 
-# 1. A pool of three workers over six jobs.
-jobs = Channel(Int32).new(8)
-results = Channel(Int32).new(8)
+# 1. Work and quit share one nominal queue; results use another.
+pub struct Job
+  pub struct Work
+    getter number : Int32
+
+    def initialize(@number : Int32)
+    end
+  end
+
+  pub struct Quit
+  end
+
+  getter kind : Work | Quit
+
+  def initialize(@kind : Work | Quit)
+  end
+
+  def self.work(number : Int32) : Job
+    new(Work.new(number))
+  end
+
+  def self.quit : Job
+    new(Quit.new)
+  end
+end
+
+pub struct Result
+  getter square : Int32
+
+  def initialize(@square : Int32)
+  end
+end
+
+# Room for all six jobs and three quits, even before workers run.
+RisBoard.limit(Job, 9_i64)
+RisBoard.limit(Result, 6_i64)
 
 group do |g|
   3.times do
     g.spawn do
       loop do
-        case jobs.receive
-        in Int32         then results.send(it * it)
-        in ChannelClosed then break # no more jobs: this worker is done
-        in Cancelled     then break
+        job = RisBoard.take(Job)
+        break if job.is_a?(Cancelled)
+        case job.kind
+        in Job::Work
+          unless RisBoard.post(Result.new(it.number * it.number))
+            raise "result queue full; result was not published"
+          end
+        in Job::Quit then break
         end
       end
       0
     end
   end
 
-  g.spawn do
-    (1..6).each { |n| jobs.send(n) }
-    jobs.close
-    0
+  (1..6).each do |n|
+    unless RisBoard.post(Job.work(n))
+      raise "job queue full; job was not published"
+    end
+  end
+  # Each accepted quit ends one worker, after earlier work is taken.
+  3.times do
+    unless RisBoard.post(Job.quit)
+      raise "job queue full; quit was not published"
+    end
   end
 
   total = 0
   6.times do
-    case results.receive
-    in Int32         then total += it
-    in ChannelClosed then break
-    in Cancelled     then break
-    end
+    result = RisBoard.take(Result)
+    raise "result collection cancelled" if result.is_a?(Cancelled)
+    total += result.square
   end
   puts total # => 91, the squares of one to six
 end
 
-# The group's `end` waited for every worker: none outlives the scope that
-# started it (III.4.1).
+# Group end joins every worker; it does not close or drain the board.
 
 # 2. Two fetches at once, and the pair or the first error.
 struct Timeout
