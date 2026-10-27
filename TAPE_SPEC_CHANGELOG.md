@@ -4,6 +4,27 @@ Every change to TAPE_SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one.
 
+## 2026-10-27: reviewed board contract and task-local resources
+
+* Changed: 5.1/5.3 require Share captures or independent checked copies
+  for every task, including local tasks and reached state. std managers
+  keep per-task copies or serve copied messages from one owning task.
+  1.4 includes checked boundary copies; 4.1 retains copyable results
+  and copies them to each reader's tape.
+  5.2 fixes canonical specialized keys, union wrappers, cancellation
+  signatures, Nil outcomes, linearized limits and publication FIFO.
+  Mail and limits survive tasks/groups; quits are accepted Job variants.
+  5.6 fixes cancellation/data/timeout priority, recursive generated copies,
+  claims/rollback and GC/no-GC storage. Resources never cross tasks:
+  HTTP uses N own-listener SO_REUSEPORT tasks; pipe and socket races use
+  one-task OS IO on the poller. No resource move, owns: or task.take.
+* Why: the review found ambiguous outcomes and queue identities, unsafe
+  reuse of single-owner inbox mechanics and std ports needing resource
+  transfer. The chosen resource model instead keeps every resource with
+  its opener. These rules settle the layout and port prerequisites before
+  implementation. This entry supersedes the earlier RisBoard entry where
+  they differ; doc/MESSAGES.md and TODO.md follow these choices.
+
 ## 2026-10-27: RisBoard, Goose's typed queues, replaces the inbox design
 
 * Changed: 5.2 is RisBoard: one process-wide queue per message type,

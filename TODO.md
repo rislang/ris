@@ -21,18 +21,51 @@ How to work (fewer tokens, faster to the goal):
 
 ## Messages: RisBoard (TAPE_SPEC 5.2, 5.6; doc/MESSAGES.md)
 
-* Build RisBoard on the inbox pools (slabs, free lists, copy and
-  rollback in src/iyi/inbox.iyi): one queue per type, many takers with
-  a claim so no message is taken twice, limit, take(ms), poll, Str
-  copy, cancellable take. Gate: round trip, types kept apart, distinct
-  messages to parallel takers, FIFO, limits, misses, cancel, zero heap.
-* Port std and samples to RisBoard or one-task IO: http permits, pipe
-  and socket race inside one task, autocert through task.value,
-  samples/workers. Gate: each user's existing behaviour tests.
-* Remove what the old design added: RisInbox, RisWorker, RisSemaphore,
-  RisEvent, request/reply, new_task/new_worker, ordered group drain,
-  owns: and task.take, their compiler checks and tests; then Channel
-  and select. Gate: full check, std tests, --no-gc.
+* Build board core from reusable inbox slabs/free lists, not owner/drain
+  hooks: canonical specialized keys across modules, alias identity, union
+  wrappers, multi-taker waits/claims, recursive struct/Str codecs, copy
+  rollback, linearized count limits and cancellation/data/timeout commit.
+  Give registry, waiters, messages and results GC roots or no-GC storage;
+  publish physical limits. Gate: FIFO, unique parallel delivery, lowered
+  limits racing posts, partial-copy panic/cancel, timed/poll cancellation,
+  queued Nil, nested copies/enums, task/group survival, GC stress, zero
+  heap and --no-gc link audit. Isolate tests with fresh nominal types;
+  use fresh processes to test initially unlimited queues.
+* Enforce Share-or-copy task captures, local and parallel, through captured
+  receivers, handlers and reached state; keep all resources in their
+  opening task. Gate: mutable/resource captures refused with safe forms,
+  independent config copies, retained results copied to multiple readers.
+* Port HTTP to N tasks, each opening a SO_REUSEPORT listener on the same
+  port and accepting/serving its own connections. Task count is the
+  connection limit; no permits/semaphore. Copy config and handlers per
+  task; keep IdleConns local. Define shutdown and unsupported-platform
+  refusal. Gate: simultaneous listeners, N-connection bound, keepalive/TLS,
+  panic/cancel cleanup and existing HTTP tests without resource transfers.
+* Port pipe to one-task OS IO on the poller: nonblocking reads/writes,
+  partial-write buffers, EOF-after-drain, EPIPE and cancellation. Settle
+  the old piece-count capacity API versus OS byte capacity. Gate: full
+  pipe progress, partial IO, reader/writer close, cancel and pipe tests.
+* Port socket race to one task with multiple in-flight OS connects and
+  poller interests, next-launch/deadline timers and Windows completion
+  records. Gate: staggered attempts, early failure/winner, timeout/cancel,
+  all losing sockets closed and existing race tests on supported targets.
+* Port autocert flights to retained task results for completion broadcast.
+  Add timed nonconsuming task waits: value has no timed wait yet; one
+  handshake timeout must not cancel shared work. Keep manager/cache state
+  in one task serving copied board messages, or independently per task;
+  isolate protocols and route replies without stealing other waiters' mail.
+  Replace wake/halt/select with tagged control messages or local OS wakes.
+  Gate: many waiters, independent deadlines, renewal/stop, manager isolation,
+  panic/cancel/result lifetime and existing autocert tests.
+* Port samples/workers to nominal Job/Result, in-band Job quit variants,
+  checked post results and explicit cancellation handling. Gate: expected
+  results, bounded refusal without spinning, accepted quits and clean join.
+* Remove RisInbox, RisWorker, RisSemaphore, RisEvent, request/reply,
+  new_task/new_worker, owns:, task.take and ordered drain code, compiler
+  checks and obsolete tests after ports pass. Gate: no remaining users,
+  replacement diagnostics, full check, std tests and --no-gc.
+* Remove Channel/select after all replacement gates pass. Gate: no
+  remaining users, full check, std/samples tests and --no-gc link audit.
 
 ## Next
 

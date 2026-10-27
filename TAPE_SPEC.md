@@ -24,8 +24,9 @@ rule goes last in its section; a removed one leaves its number unused.
   (Program.tape) or copied there with copy_to.
 * 1.4 Ary, Tre and builders are handles to shared state: assignment and
   arguments alias data, length and capacity, so growth through b shows through
-  a; Str and views alias their bytes. Only copy_to and board messages (5.2)
-  copy; Goose's implicit value copies (§4.1) do not apply. Str is read-only.
+  a; Str and views alias their bytes. copy_to and checked boundary copies
+  (4.1, 5.1-5.3, 5.6) copy; Goose's implicit value copies (§4.1) do not
+  apply. Str is read-only.
 * 1.5 Libraries borrow caller input and build results on the caller's owner;
   nested tape blocks share it. A pending result's region is outside callee
   scratch and its rollback (Goose §10.3). local_tape owns separate scratch;
@@ -73,8 +74,9 @@ rule goes last in its section; a removed one leaves its number unused.
 * 4.1 Errors, panics, defer and exit are iyi's: defer runs innermost first on
   normal scope exit, panic unwind and exit (the calling task's only), on current
   locals; a panic is caught at a task boundary. ris adds: frame regions are
-  released after the defers; panic data and copyable task results are
-  copied to the receiver first (resources: 5.6). A panic in cleanup is fatal.
+  released after the defers; panic data and copyable task results survive
+  on retained result storage and are copied to each reader's tape (5.6).
+  A panic in cleanup is fatal.
 * 4.2 Exhaustion and bad sizes are checked before mutation, with overflow-safe
   arithmetic; they end as iyi's panic print (allocation-free), no fallback.
   Limits for tape bytes, regions, tasks and native stack are published.
@@ -82,45 +84,72 @@ rule goes last in its section; a removed one leaves its number unused.
   a flag and wakes a pipe; work runs in a task.
 ## 5. Concurrency and boundaries (iyi III.4; Goose §11.2)
 * 5.1 Tasks start in an iyi group and never outlive it (III.4.1); work that
-  outlives its caller runs in a longer group, such as main's. Data races are
-  iyi's Share check (III.4.4). ris adds: owners are built on their task's tape;
-  no shared mutable owner, implicit global copy or snapshot. Only Share values
-  (III.4.4) are shared: Str and program data no method writes after init,
-  checked per owner. Ary and its views write through and are never shared; ris
-  has no freeze.
-* 5.2 Tasks pass messages through RisBoard, Goose's typed queues (§11.2):
-  one process-wide queue per element type, owned by no task. Any task
-  posts and any task takes; each message goes to exactly one taker, in
-  the order of successful posts. RisBoard.post(v) copies v in and never
-  waits: true, or false when the queue is at its limit, queueing
-  nothing. RisBoard.take(T) waits for one; take(T, ms) and poll(T)
-  answer {T?, Bool}, nil on a miss; ms <= 0 polls. RisBoard.limit(T, n)
-  sets a count limit, n >= 1 (unlimited until set); lowering it keeps
-  queued messages and posts fail until fewer than n remain. post takes
-  exactly the queue's type; roles are distinct nominal types (struct
-  Job, struct Result). There is no new, close, owner, handle or reply:
-  to stop workers, post one quit message per worker and let the group
-  end wait. Many waiters on one result read IyiTask#value (Goose's
-  thread_wait). ris has no Channel or select.
+  outlives its caller runs in a longer group, such as main's. ris adds:
+  every task, local or parallel, captures only Share values (III.4.4) or
+  independent checked copies on its own tape (1.7), never mutable borrows.
+  Check captures, receivers and reached program state transitively. Owners
+  are built on their task's tape; no shared mutable owner, implicit global
+  copy or snapshot. Str and program data shared read-only have no writer
+  after init, checked per owner. Ary and its views are never shared; no
+  freeze. Resources are opened, used and closed by the same task (5.6).
+* 5.2 RisBoard copies Goose's typed-queue transport (§11.2), not its thread,
+  global-copy or abort model. Main and tasks use one process-wide queue per
+  canonical specialized type across modules: aliases share a key, generic
+  arguments distinguish keys. Bare unions are refused: use a nominal struct
+  with a union field. post(v) uses the exact static type, no conversion or
+  runtime-arm routing; roles use distinct nominal types, Job and Result.
+  post(v) : Bool copies in: true on publication, false when full, nothing
+  queued. It ignores cancellation and never waits for capacity; runtime
+  locking and copying take time. take(T) : T | Cancelled waits for one;
+  take(T, ms : Int64) and poll(T) answer {T?, Bool} | Cancelled:
+  {v, true}, or {nil, false} on a miss; queued Nil gives {nil, true}.
+  ms <= 0 polls; positive waits use a saturating monotonic deadline.
+  limit(T, n : Int64) : Nil sets a count limit, unlimited until set;
+  n <= 0 follows 4.2. Lowering keeps mail; posts fail while count >= n.
+  Admission, limit and consumption are linearized; unpublished copies do
+  not count. FIFO is publication order per type, a ris clarification;
+  no taker fairness or cross-type order is promised. Mail and limits
+  survive task/group end and cancellation. Mail lasts until taken or process
+  end; limits last until changed or process end. No new, close, owner,
+  handle or reply.
+  Quit is a variant of Job: post one accepted quit per worker, then join;
+  group end invents no quits and drains no queues. Completion broadcast
+  uses IyiTask#value, subject to handle sharing and result-copy rules,
+  not a timed wait. ris has no Channel or select; see doc/MESSAGES.md.
 * 5.3 Callbacks borrow their environment for the call only; an escaping closure
-  copies captures to a named owner or task pool, never a borrow. Thread-locals
-  hold no fiber borrows.
+  copies captures to a named owner or task pool, never a borrow. Task
+  closures obey 5.1, including captured handlers and receivers. std managers
+  use independent per-task config/state, or one task owns state and serves
+  copied board messages; no shared mutable autocert manager or IdleConns.
+  Thread-locals hold no fiber borrows.
 * 5.4 APIs expose Str, builders, Ary and tape structs, not raw pointers. FFI
   borrows have explicit lifetimes; retained foreign storage has an owner and
   cleanup. Never unwind across foreign frames; foreign threads attach first.
   Safety exceptions are marks with reasons, never a global switch.
-* 5.6 Where ris differs from Goose. Tasks are iyi fibers in groups (5.1),
-  not detached threads: a waiting take parks its fiber, and a cancelled
-  take answers Cancelled and consumes nothing. Messages are scalars,
-  enums, Str and value structs of these; Str bytes are copied in at post
-  and out to the taker's current tape, as Goose copies its flat values.
-  Owners, pointers, resources, closures, class instances and Ary are
-  refused with the safe form named. A miss is nil, not a zero value. A
-  post publishes a complete copy or nothing; a take copies out before
-  it removes the message. Queues and messages live in runtime typed
-  pools; exhaustion follows 4.2. A resource (a socket, a pipe end) stays
-  in the task that opened it and never crosses tasks: IO between tasks
-  moves copied data.
+* 5.6 ris uses grouped iyi fibers (5.1), not detached Goose threads; a
+  waiting take parks its fiber. At one consume commit, cancellation wins,
+  then data, then timeout, including poll and already-cancelled entry.
+  Cancelled consumes nothing; partial copies and claims roll back. Data
+  present at commit may win after a delayed deadline wake. Top-level
+  Cancelled keys are refused: wrap that data in a nominal message.
+  Payloads are numeric scalars, Bool, Char, Symbol, Nil, enums, Str and
+  value structs recursively containing these or unions of them, unlike
+  Goose's flat-value universe. Compiler-generated copies preserve concrete
+  types and enum values, copy every Str's bytes in and out to the taker's
+  tape, split sharing as in 1.7 and run no user code. Owners, pointers,
+  resources, closures, classes and Ary are refused at every depth, with
+  the safe form named. A post publishes a complete copy or nothing; take
+  copies out before removal. Claims prevent duplicate delivery and keep
+  FIFO through failure. No view into runtime pools escapes. Private typed
+  pools own message bytes; GC builds root live runtime references and clear
+  retired roots, no-GC builds use no general heap. Exhaustion follows 4.2.
+  At process end queued copies are discarded without user callbacks; task
+  cleanup and fatal errors still follow 4.1/4.3. A socket or pipe end never
+  crosses tasks: no owns:, task.take, resource move or exception. An HTTP
+  server uses N tasks, each opening its own SO_REUSEPORT listener on the
+  same port and accepting and serving one connection at a time; N limits
+  connections, with no permits or semaphore. Pipe and socket race IO stay
+  in one task using OS facilities on the poller; board IO copies data.
 ## 6. Pools, validation, tooling (Goose §5.4, §9.3-9.4)
 * 6.1 Pool(T)/SlicePool(T): typed slots/runs; free keeps values valid, stale
   views see typed replacements; generations only guard checked handles.
