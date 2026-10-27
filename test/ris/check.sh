@@ -49,6 +49,36 @@ for name in fifo str lifecycle scalars nonowner storage owner_cost reuse \
   fi
 done
 
+# Request/reply uses a separate bounded pool and copies onto caller tapes.
+for name in basic lifecycle panics edges enum; do
+  out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc \
+    "test/ris/request_$name.ri" 2>&1)
+  if [ "$?" -eq 0 ] &&
+      grep -qxF "PASS: request $name" <<<"$out" &&
+      grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+    echo "runs     request_$name (--no-gc, zero heap)"
+  else
+    echo "FAILED   request_$name: $out"; status=1
+  fi
+done
+out=$(IYI_WORKERS=4 timeout 120 "$RIS" run \
+  test/ris/request_parallel.ri 2>&1)
+if [ "$?" -eq 0 ] && grep -qxF 'PASS: request parallel' <<<"$out"; then
+  echo "runs     request_parallel (four workers, 800 replies)"
+else
+  echo "FAILED   request_parallel: $out"; status=1
+fi
+expect request_ambiguous 'use distinct tagged payloads'
+expect request_missing 'use distinct tagged payloads'
+expect request_send 'plain send of Request is refused; use request'
+expect request_forge 'inbox pool storage is private'
+expect request_constructor "private method 'new'"
+expect request_base_collision 'control type collision; use a wrapper struct'
+expect request_alias_collision 'control type collision; use a wrapper struct'
+expect request_reflection_private 'does not export'
+expect request_collision 'control type collision; use a wrapper struct'
+expect request_reply_collision 'control type collision; use a wrapper struct'
+
 # Group-owned synchronization uses runtime pools even without a GC.
 for name in basic fifo lifecycle linear; do
   out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc \

@@ -147,7 +147,46 @@ class Iyi::Type
       root.type_vars.has_key?(node.names.first)
     end
 
+    # A reflected generic argument already crossed the caller's import wall.
+    # Macro interpolation spells its canonical name; it is still that bound
+    # type, not a new grant to reach unrelated private declarations.
+    private def bound_macro_type(node : Path) : Type?
+      return unless node.names.size > 1
+      candidate = @root.lookup_path(node, include_private: true)
+      return unless candidate.is_a?(Type)
+      root = @root.instance_type
+      seen = Set(UInt64).new
+      if root.is_a?(GenericInstanceType)
+        root.type_vars.each_value do |argument|
+          if argument.is_a?(Var) && bound_argument?(argument.type, candidate, seen)
+            return candidate
+          end
+        end
+      end
+      @free_vars.try &.each_value do |argument|
+        if argument.is_a?(Type) && bound_argument?(argument, candidate, seen)
+          return candidate
+        end
+      end
+      nil
+    end
+
+    private def bound_argument?(argument : Type, candidate : Type,
+                                seen : Set(UInt64)) : Bool
+      return true if argument == candidate
+      return false unless seen.add?(argument.object_id)
+      if argument.is_a?(UnionType)
+        return argument.union_types.any? { |part| bound_argument?(part, candidate, seen) }
+      elsif argument.is_a?(GenericInstanceType)
+        return argument.type_vars.each_value.any? do |part|
+          part.is_a?(Var) && bound_argument?(part.type, candidate, seen)
+        end
+      end
+      false
+    end
+
     def lookup_type_var?(node : Path)
+      reflected = false
       # Check if the Path begins with a free variable
       if !node.global? && (free_var = @free_vars.try &.[node.names.first]?)
         if node.names.size == 1
@@ -157,6 +196,10 @@ class Iyi::Type
         end
       else
         type = @root.lookup_path(node, include_private: @include_private || node.iyi_from_artifact? || node.iyi_synthetic?)
+        unless type
+          type = bound_macro_type(node)
+          reflected = !type.nil?
+        end
         type ||= iyi_supertrait_assoc_type(node)
       end
 
@@ -178,7 +221,7 @@ class Iyi::Type
       # `pub import`s. Only on authoritative lookups: a speculative one
       # (`@raise` off — overload matching trying restrictions) must
       # keep its answer, not acquire a new way to fail.
-      if @raise && type.is_a?(Type) && !type_var_name?(node)
+      if @raise && type.is_a?(Type) && !type_var_name?(node) && !reflected
         @root.program.iyi_check_import_reach(node, type)
       end
 

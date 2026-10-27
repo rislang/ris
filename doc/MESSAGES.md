@@ -24,7 +24,8 @@ Names may change once the model works.
   creating task's thread, including creation from a parallel task.
   Message data, including Ary, copies by 1.7; no resources or owners.
   Runtime handles and reply tokens must not traverse record pointers.
-* `RisInbox::Request(M, R)`: w.request(msg, ms), req.message,
+* `RisInbox::Request(M, R)`: w.request(msg, ms, reply_bytes: ...),
+  req.message,
   req.reply(value). Resolve exactly one arm for each argument, through
   aliases, overlapping unions and subclasses; suggest distinct tagged
   payloads on ambiguity. Only runtime code constructs envelopes; refuse
@@ -356,6 +357,115 @@ New check.sh gates:
 The four single-thread executable gates require zero reported heap
 allocations under --no-gc. Request/reply, owns:, task.take and RisActor
 are later slices.
+
+### Request/reply slice (2026-10-27)
+
+Request/reply now extends the scalar and Str transport. An inbox may hold
+plain messages and request arms together, for example:
+
+```ris
+RisInbox(Str | RisInbox::Request(Str, Int32))
+```
+
+Both RisInbox and RisWorker expose `request(msg, ms, reply_bytes: 65536)`.
+Specialization selects exactly one Request arm whose M accepts the argument
+and infers R from it. Missing and ambiguous arms name distinct tagged
+payloads as the safe form. Tagged struct transport remains a later slice;
+current M and R support concrete scalars, Str and their unions. Envelopes
+cannot nest. Only runtime code creates them; public construction, runtime
+factories and plain send of an envelope are refused. `<<` follows send.
+The receiver gets a typed Request with `message` and `reply(value)`.
+
+The monotonic deadline starts at request entry, before allocation and
+publication, and covers enqueue and reply wait. Milliseconds are Int32;
+negative values panic with a poll hint. Saturating Int64 addition avoids
+overflow. Enqueue returns Full immediately when either inbox limit is
+exceeded, and Closed when closed or stale. A successful enqueue persists
+even when the requester later times out or is cancelled. An accepted
+request can therefore have effects after its caller stops waiting.
+Request returns R, Full, Closed, TimedOut or Cancelled. Str replies are
+copied to the requester's current tape before reply storage is released.
+
+A separate mmap pool holds 4,096 typed reply records per process, outside
+the inbox byte budget. Each handle contains a slot and 64-bit generation;
+wrap retires the slot permanently. Reply storage uses the existing typed
+message pool and text slabs, so its occupied payloads share the 65,536
+message-record limit. Records contain requester and owner task identities,
+a deadline, a positive reply byte budget and an explicit state. No record
+retains a pointer into a caller's tape. Physical exhaustion is fatal, as
+for inbox storage. Reply tokens expose no record or payload pointers.
+
+One scheduler-locked state machine decides open, committed, owner-closed
+or expired. Reply first checks the generation and open state, then caller
+cancellation and the original deadline. Expired beats byte sizing. The
+same inline-plus-backing sizing plan charges the declared R once, plus
+rounded text storage and its 16-byte header. Full copies nothing and
+leaves the slot open for a smaller reply, without restarting its deadline.
+
+This slice copies only scalar bits and text bytes. Reply preflight, private
+storage copy and publication are serialized by the scheduler lock; the
+deadline is checked again before publication and an expired private copy
+is discarded. There are no user callbacks or tape allocations in this
+critical section. Inbox send copies and receive copies retain their
+existing pinned transactions outside the scheduler lock. Requester tape
+copy runs outside the lock after commitment; an unwind guard releases its
+slot and any committed storage on success, enqueue failure or panic.
+Future deep payload copy needs the reserved/pinned reply transaction from
+section 2 before extending this codec to containers or user structs.
+
+Reply returns Nil on commitment, Full before any over-budget copy, or
+Expired for timed-out, cancelled, closed or retired tokens. A duplicate
+committed reply while the slot is live panics. Retirement increments its
+generation before reuse; late tokens cannot address a replacement request.
+Graceful inbox close preserves queued requests and their reply slots.
+Owner completion, including panic, closes open slots and wakes requesters;
+it never overwrites a committed reply. Owner cleanup follows an intrusive
+chain of its own reply slots, without scanning unrelated requests. A
+committed reply wins over later requester cancellation and owner death.
+Wait wakes transfer no data.
+
+Requesting one's own inbox panics with a local call, a send or another
+task as the alternatives. Known self-request cases are not yet refused
+statically. Top-level message and reply alternatives overlapping Closed,
+Cancelled, TimedOut, Full or Expired are refused through aliases and base
+types too, with a wrapper struct hint. Wrapper struct transport remains a
+later slice; its fields will be allowed to contain control values.
+
+New check.sh gates:
+
+* request_basic: worker round trip, Str payload and reply copied between
+  tapes, a union of plain Str and Request messages, and scalar/Str union
+  tags inside payloads and replies.
+* request_lifecycle: accepted work after timeout, late reply Expired,
+  queued request replied after graceful close, owner death while waiting,
+  reply Full then smaller success, and cancellation of a requester while
+  the independently owned inbox continues processing its request.
+* request_panics: runtime self-request and its safe-form hint, duplicate
+  committed reply panic, and committed reply surviving owner panic.
+* request_edges: enqueue Full and Closed, poll timeout, generation reuse
+  with an outstanding old envelope, Full preserving the wait deadline,
+  and Expired taking precedence over an oversized late reply.
+* request_enum: private enum payloads, replies and a plain/request union.
+  Macro reflection preserves bound type identity across module visibility.
+* request_reflection_private: generic reflection cannot name an unrelated
+  private type that was never supplied as a generic argument.
+* request_parallel: 800 Str request/reply copies from eight parallel tasks
+  across four worker schedulers, with one inbox owner.
+* request_ambiguous and request_missing: specialization refuses multiple
+  or absent matching arms, naming distinct tagged payloads.
+* request_send: plain send of an envelope is refused with a request hint.
+* request_forge and request_constructor: runtime factory access and public
+  envelope construction are refused.
+* request_collision and request_reply_collision: top-level message/reply
+  control alternatives are refused with a wrapper struct hint.
+* request_alias_collision and request_base_collision: collision checks
+  follow aliases and recognize a control value's base Error type.
+
+All five single-thread executable gates require zero reported heap
+allocations under --no-gc. owns:, task.take and RisActor remain later
+slices. Request-specific copy-failure injection, generation-wrap and
+physical-exhaustion gates remain open, as do static self-request checks
+and general message/container transport.
 
 ## 3. Lifecycle: group end and resources
 

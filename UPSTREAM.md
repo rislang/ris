@@ -128,3 +128,7 @@ back.
 
 * Tape: std/http `parse_head` and `ParsedHead`, the tape list in
   `RisRegion`, `AGENTS.md`'s tape rules.
+
+* Generic macro reflection: preserve access to private types already bound
+  as generic arguments when interpolation emits their canonical names.
+  Keep unrelated private declarations behind the import/export wall.

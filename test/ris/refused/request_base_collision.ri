@@ -1,0 +1,5 @@
+module test/ris/refused/request_base_collision
+
+group do |g|
+  g.new_inbox(Error, 1)
+end

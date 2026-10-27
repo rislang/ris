@@ -1,0 +1,56 @@
+module test/ris/request_edges
+
+# Inbox count and byte limits are independent of requester reply limits.
+group do |g|
+  release = g.new_event
+  w = g.new_worker(Int32 | RisInbox::Request(Int32, Int32), 1) do |q|
+    release.wait
+    raise "retained plain" unless q.receive == 7
+  end
+  w.send(7)
+  raise "enqueue full" unless w.request(1, 1000).is_a?(RisInbox::Full)
+  w.close
+  raise "enqueue closed" unless w.request(1, 1000).is_a?(RisInbox::Closed)
+  release.fire
+  w.value
+end
+
+# Retiring and reusing a reply slot cannot revive its old generation.
+group do |g|
+  expired = g.new_event
+  resume = g.new_event
+  first = g.new_worker(RisInbox::Request(Int32, Int32), 1) do |q|
+    old = q.receive
+    expired.fire
+    resume.wait
+    if old.is_a?(RisInbox::Request(Int32, Int32))
+      raise "stale token" unless old.reply(99).is_a?(RisInbox::Expired)
+    end
+  end
+  raise "poll" unless first.request(1, 0).is_a?(TimedOut)
+  expired.wait
+  second = g.new_worker(RisInbox::Request(Int32, Int32), 1) do |q|
+    req = q.receive
+    resume.fire
+    first.value
+    req.reply(42) if req.is_a?(RisInbox::Request(Int32, Int32))
+  end
+  raise "replacement" unless second.request(2, 1000) == 42
+end
+
+# A Full retry after deadline is Expired before checking the budget.
+group do |g|
+  done = g.new_event
+  w = g.new_worker(RisInbox::Request(Int32, Str), 1) do |q|
+    req = q.receive
+    if req.is_a?(RisInbox::Request(Int32, Str))
+      raise "full before timeout" unless req.reply(Str.new("large")).is_a?(RisInbox::Full)
+      sleep(15)
+      raise "expiry beats full" unless req.reply(Str.new("large")).is_a?(RisInbox::Expired)
+      done.fire
+    end
+  end
+  raise "full kept waiting" unless w.request(1, 5, reply_bytes: 1).is_a?(TimedOut)
+  done.wait
+end
+puts "PASS: request edges"

@@ -418,6 +418,7 @@ class IyiFiber
   property sync_prev : UInt64 = 0_u64
   property sync_next : UInt64 = 0_u64
   property inbox_worker : Bool = false
+  property owned_reply_head : Int32 = -1
   property owned_inbox_head : Int32 = -1
   property inbox_copy_slot : Int32 = -1
   property inbox_send_slot : Int32 = -1

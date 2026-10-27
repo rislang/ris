@@ -1,0 +1,31 @@
+module test/ris/request_panics
+
+group do |g|
+  t = g.spawn do
+    q = g.new_inbox(RisInbox::Request(Int32, Int32), 1)
+    q.request(1, 1000)
+  end
+  result = t.value
+  raise "self request" unless result.is_a?(Panicked)
+  if result.is_a?(Panicked)
+    raise "self hint" unless result.message.includes?("local call, a send or another task")
+  end
+end
+
+group do |g|
+  w = g.new_worker(RisInbox::Request(Int32, Int32), 1) do |inbox|
+    req = inbox.receive
+    if req.is_a?(RisInbox::Request(Int32, Int32))
+      req.reply(42)
+      req.reply(43)
+    end
+  end
+  # The committed value survives the owner's duplicate-reply panic.
+  raise "committed reply" unless w.request(1, 1000) == 42
+  result = w.value
+  raise "duplicate" unless result.is_a?(Panicked)
+  if result.is_a?(Panicked)
+    raise "duplicate hint" unless result.message.includes?("reply only once")
+  end
+end
+puts "PASS: request panics"

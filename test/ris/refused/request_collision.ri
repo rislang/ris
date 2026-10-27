@@ -1,0 +1,5 @@
+module test/ris/refused/request_collision
+
+group do |g|
+  g.new_inbox(Int32 | RisInbox::Closed, 1)
+end

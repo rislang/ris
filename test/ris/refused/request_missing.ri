@@ -1,0 +1,6 @@
+module test/ris/refused/request_missing
+
+group do |g|
+  q = g.new_inbox(RisInbox::Request(Str, Int32), 1)
+  q.request(1, 0)
+end

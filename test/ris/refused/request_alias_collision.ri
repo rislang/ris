@@ -1,0 +1,7 @@
+module test/ris/refused/request_alias_collision
+
+alias ReplyControl = Int32 | RisInbox::Expired
+
+group do |g|
+  g.new_inbox(RisInbox::Request(Str, ReplyControl), 1)
+end

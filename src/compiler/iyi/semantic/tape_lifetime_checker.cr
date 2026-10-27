@@ -56,6 +56,10 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
       private_inbox = @graph.targets(node).try &.any? do |target|
         owner = target.owner?.to_s
         owner.starts_with?("RisInboxPool") ||
+          owner.starts_with?("RisReplyPool") ||
+          owner.starts_with?("RisInboxCodec(") ||
+          (target.name == "__create" &&
+            owner.starts_with?("RisInbox::Request(")) ||
           (target.name == "__create" && owner.starts_with?("RisInbox("))
       end
       private_sync = @graph.targets(node).try &.any? do |target|
@@ -70,7 +74,7 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
       end
       if private_inbox
         node.raise "inbox pool storage is private; use g.new_inbox(T, n) " \
-                   "and its send, receive or close methods."
+                   "and its send, receive, request or close methods."
       end
       if private_heap
         node.raise "runtime heap exemption is private; remove this call. " \

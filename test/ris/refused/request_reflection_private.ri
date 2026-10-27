@@ -1,0 +1,15 @@
+module test/ris/refused/request_reflection_private
+
+enum Hidden
+  Value
+end
+
+struct Peek(T)
+  def self.peek
+    {% if T == Int32 %}
+      Test::Ris::Refused::RequestReflectionPrivate::Hidden
+    {% end %}
+  end
+end
+
+Peek(Int32).peek
