@@ -131,13 +131,64 @@ separate cache cap. Str length is at most 2,147,483,647 bytes. Above the
 Receive copies use the caller's existing tape limits and spare-mapping
 policy. Physical pool or mapping exhaustion is fatal, distinct from an
 inbox's Full budget.
-Cross-thread race, generation-wrap and fatal-exhaustion gates remain for
-later steps; current gates cover reuse, stale handles and copy rollback.
+Fatal-exhaustion gates remain for later steps. The gates below extend
+reuse, stale-handle and copy-rollback coverage across threads.
 The storage gate sends and receives 100,000 small texts after warm-up;
 `__ris_inbox_storage_maps` counts message-storage mmap calls and must
 stay unchanged. `__ris_inbox_owner_touches` counts owner-death record
 visits; 10,000 tasks without inboxes must add zero with another inbox
 live. Both gates run under `--no-gc` and assert zero heap allocations.
+
+### Cross-thread handles and cancellation (step 5.2, 2026-10-27)
+
+The owning Share annotation on RisInbox already accepts handles for every
+supported scalar and Str payload at spawn_parallel's capture boundary.
+No compiler exemption was needed. inbox_parallel instantiates each scalar
+kind, enums and Str; a separate refusal keeps an unrelated Array capture
+non-Share beside the inbox handle. Passing a handle extends no Str borrow.
+The Str gate retains a received value while recycled message storage is
+overwritten and checks that the retained bytes do not change.
+
+All pool initialization, record/message free-list operations, slab mapping,
+slab free-list operations and retirement run under IyiSchedLock. Only a
+pinned copy's private bytes are accessed outside that lock. Owner-death
+hooks in normal return, panic and cancellation, and group-end cleanup,
+hold the same lock. Inbox wake uses IyiScheduler.ready: a foreign-thread
+wake posts to the owner's home scheduler and rings its poller. It never
+moves the owner onto the sender's scheduler. Gates cover owners created
+on the main scheduler and on a parallel worker.
+
+A receive must read its message's following link at commit under the lock.
+The old pre-copy snapshot could miss an append during the unlocked copy,
+losing queued mail. The runtime now reloads that link. inbox_parallel runs
+four parallel senders with 1,000 messages each, repeated 20 times, checking
+exact counts and each sender's order at the owner. inbox_races forces an
+append while receive is pinned and verifies both deliveries exactly once.
+
+inbox_reuse checks every method, including << and observations, on handles
+from group end and owner death across 10,000 subsequent slot reuses. The
+ris_inbox_test build flag enables a near-wrap generation hook, identity
+inspection and locked pin/message/release counters. These are absent from
+ordinary builds. inbox_wrap starts at UInt64::MAX - 2, checks the final
+reusable generation, then verifies that 10,000 allocations never reuse
+the retired slot. Stale generations stay Closed throughout.
+
+inbox_races repeats three forced cancellation interleavings 100 times:
+owner death while another thread holds a send reservation; cancellation
+of an owner parked in receive followed by a foreign-thread publication;
+and cancellation while a worker owner's receive copy is pinned. Send
+ignores cancellation while the owner lives. Receive cancellation consumes
+nothing. Owner death defers physical discard until pins are released.
+The gates check retained mail before death, zero pins and live messages
+after cleanup, and exactly one release for every message. Instrumented
+release also refuses a double release. Pause hooks run outside the lock.
+
+inbox_reuse and inbox_wrap run under --no-gc with zero heap allocations.
+The parallel and race gates run on the normal threaded runtime with four
+workers. The runtime explicitly refuses spawn_parallel under --no-gc
+(and gc_boehm); check.sh gates that refusal rather than claiming no-GC
+parallel coverage. Deadline races, richer payloads, workers and actors,
+static receiver checks and physical exhaustion remain later steps.
 
 ## 3. Lifecycle: group end and resources
 

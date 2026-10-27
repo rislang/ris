@@ -48,6 +48,13 @@ module RisInboxPool
   @@storage_heads : UInt64 = 0_u64
   @@storage_maps : UInt64 = 0_u64
   @@owner_touches : UInt64 = 0_u64
+  {% if flag?(:ris_inbox_test) %}
+    @@test_releases : UInt64 = 0_u64
+
+    def self.test_releases : UInt64
+      @@test_releases
+    end
+  {% end %}
   @@records : UInt64 = 0_u64
   @@messages : UInt64 = 0_u64
 
@@ -172,6 +179,10 @@ module RisInboxPool
 
   def self.release(slot : Int32) : Nil
     m = message(slot).value
+    {% if flag?(:ris_inbox_test) %}
+      raise "inbox message released twice" unless m.live
+      @@test_releases += 1_u64
+    {% end %}
     if m.text != 0
       if m.length.to_u64 + 16_u64 > 1048576_u64
         __iyi_munmap(m.text, m.length.to_u64 + 16_u64)
@@ -304,6 +315,33 @@ struct RisInbox(T)
     end
   end
 
+  {% if flag?(:ris_inbox_test) %}
+    # Race gates replace these outside the pool lock.
+    private def __test_send_pinned : Nil
+    end
+
+    private def __test_receive_pinned : Nil
+    end
+
+    # Test-only transition: keep identity while moving near the wrap limit.
+    def __test_near_wrap : self
+      IyiSchedLock.lock
+      unless RisInboxPool.valid?(@slot, @generation)
+        IyiSchedLock.unlock
+        raise "wrap hook needs a live inbox"
+      end
+      p = RisInboxPool.record(@slot)
+      p.value.generation = 18446744073709551613_u64
+      result = self.class.__create(@slot, p.value.generation)
+      IyiSchedLock.unlock
+      result
+    end
+
+    def __test_identity : Tuple(Int32, UInt64)
+      {@slot, @generation}
+    end
+  {% end %}
+
   def send(value : T) : Nil | Full | Closed
     fiber = IyiScheduler.current
     defer __iyi_inbox_send_cleanup
@@ -337,6 +375,9 @@ struct RisInbox(T)
     fiber.inbox_send_message = slot
     p.value = r
     IyiSchedLock.unlock
+    {% if flag?(:ris_inbox_test) %}
+      __test_send_pinned
+    {% end %}
     {% if T == Str %}
       m.length = value.bytesize
       IyiSchedLock.lock
@@ -406,6 +447,9 @@ struct RisInbox(T)
         fiber.inbox_copy_slot = @slot
         p.value = r
         IyiSchedLock.unlock
+        {% if flag?(:ris_inbox_test) %}
+          __test_receive_pinned
+        {% end %}
         value = uninitialized T
         {% if T == Str %}
           value = Str.new(Str.new(Pointer(UInt8).new(m.text + 16_u64), m.length))
@@ -426,7 +470,9 @@ struct RisInbox(T)
           IyiSchedLock.unlock
           return Cancelled.new
         end
-        r.head = m.following
+        # A sender may append while the receiver copies outside the lock.
+        # Read the queue link at commit, not from the pre-copy snapshot.
+        r.head = RisInboxPool.message(slot).value.following
         r.tail = -1 if r.head < 0
         r.count -= 1
         r.used -= m.charge
@@ -574,3 +620,28 @@ def __ris_inbox_owner_touches : UInt64
   IyiSchedLock.unlock
   value
 end
+
+{% if flag?(:ris_inbox_test) %}
+  def __ris_inbox_test_releases : UInt64
+    IyiSchedLock.lock
+    value = RisInboxPool.test_releases
+    IyiSchedLock.unlock
+    value
+  end
+
+  # Pool audit for deterministic race gates, under the pool's sole lock.
+  def __ris_inbox_test_counts : Tuple(Int32, Int32)
+    IyiSchedLock.lock
+    RisInboxPool.init
+    pins = 0
+    messages = 0
+    RisInboxPool::RECORDS.times do |i|
+      pins += RisInboxPool.record(i).value.pins
+    end
+    RisInboxPool::MESSAGES.times do |i|
+      messages += 1 if RisInboxPool.message(i).value.live
+    end
+    IyiSchedLock.unlock
+    {pins, messages}
+  end
+{% end %}

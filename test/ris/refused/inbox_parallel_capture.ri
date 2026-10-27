@@ -1,0 +1,7 @@
+module test/ris/refused/inbox_parallel_capture
+
+group do |g|
+  q = g.new_inbox(Int32, 1)
+  bytes = [7]
+  g.spawn_parallel { q.send(bytes[0]) }
+end

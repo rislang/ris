@@ -1,0 +1,168 @@
+module test/ris/inbox_races
+
+module ::InboxRace
+  @@phase : Atomic(Int32) = Atomic(Int32).new(0)
+  @@mode : Atomic(Int32) = Atomic(Int32).new(0)
+  @@inbox : RisInbox(Str)? = nil
+
+  def self.phase : Int32
+    @@phase.get
+  end
+
+  def self.phase=(value : Int32) : Nil
+    @@phase.set(value)
+  end
+
+  def self.mode : Int32
+    @@mode.get
+  end
+
+  def self.mode=(value : Int32) : Nil
+    @@mode.set(value)
+  end
+
+  def self.publish(q : RisInbox(Str)) : Nil
+    @@inbox = q
+    self.phase = 1
+  end
+
+  def self.inbox : RisInbox(Str)
+    q = @@inbox
+    return q if q
+    raise "missing published inbox"
+  end
+
+  def self.wait(value : Int32) : Nil
+    while phase != value
+      # A cancelled task still needs to yield for this test handshake.
+      IyiScheduler.enqueue(IyiScheduler.current)
+      IyiScheduler.reschedule
+    end
+  end
+
+  def self.pause : Nil
+    self.phase = 2
+    wait(3)
+  end
+end
+
+struct ::RisInbox(T)
+  private def __test_send_pinned : Nil
+    InboxRace.pause if InboxRace.mode == 1
+  end
+
+  private def __test_receive_pinned : Nil
+    InboxRace.pause if InboxRace.mode == 3 || InboxRace.mode == 4
+  end
+end
+
+def cancel(task : IyiTask(T)) : Nil forall T
+  IyiSchedLock.lock
+  IyiScheduler.cancel(task.fiber)
+  IyiSchedLock.unlock
+end
+
+# Check that cancellation cannot consume mail before its receive commit.
+def retained(q : RisInbox(Str)) : Nil
+  raise "cancel consumed mail" unless q.size == 1
+  raise "copy pin leaked" unless __ris_inbox_test_counts == {0, 1}
+end
+
+100.times do
+  released = __ris_inbox_test_releases
+  # Appending while receive is pinned must preserve the new queue link.
+  InboxRace.phase = 0
+  InboxRace.mode = 4
+  group do |g|
+    owner = g.spawn_parallel do
+      group do |inner|
+        q = inner.new_inbox(Str, 2)
+        home = IyiScheduler.state.object_id
+        q.send(Str.new("first"))
+        InboxRace.publish(q)
+        raise "first" unless q.receive == "first"
+        raise "appended mail lost" unless q.receive == "second"
+        raise "duplicate" unless q.size == 0
+        raise "worker owner migrated" unless IyiScheduler.state.object_id == home
+      end
+      nil
+    end
+    InboxRace.wait(2)
+    raise "append" unless InboxRace.inbox.send(Str.new("second")).nil?
+    InboxRace.mode = 0
+    InboxRace.phase = 3
+    raise "append join" unless owner.value.nil?
+    raise "append cleanup" unless __ris_inbox_test_counts == {0, 0}
+  end
+
+  # Owner death during a sender's reserved, unpublished copy.
+  InboxRace.phase = 0
+  InboxRace.mode = 1
+  group do |g|
+    owner = g.spawn do
+      q = g.new_inbox(Str, 1)
+      InboxRace.publish(q)
+      raise "owner cancel" unless q.receive.is_a?(Cancelled)
+      nil
+    end
+    InboxRace.wait(1)
+    q = InboxRace.inbox
+    sender = g.spawn_parallel { q.send(Str.new("in flight")) }
+    InboxRace.wait(2)
+    raise "send not pinned" unless __ris_inbox_test_counts == {1, 1}
+    cancel(owner)
+    raise "owner join" unless owner.value.nil?
+    raise "death freed pinned mail" unless __ris_inbox_test_counts == {1, 1}
+    InboxRace.phase = 3
+    raise "dead send committed" unless sender.value.is_a?(RisInbox::Closed)
+    raise "send cleanup" unless __ris_inbox_test_counts == {0, 0}
+  end
+
+  # A parked owner is woken by cancel; another thread may still publish.
+  InboxRace.phase = 0
+  InboxRace.mode = 2
+  group do |g|
+    owner = g.spawn do
+      q = g.new_inbox(Str, 1)
+      InboxRace.publish(q)
+      raise "park cancel" unless q.receive.is_a?(Cancelled)
+      InboxRace.wait(3)
+      retained(q)
+      nil
+    end
+    InboxRace.wait(1)
+    IyiSchedLock.lock
+    raise "owner not parked" unless owner.fiber.state == IyiFiberState::WaitingCh
+    IyiScheduler.cancel(owner.fiber)
+    IyiSchedLock.unlock
+    q = InboxRace.inbox
+    sender = g.spawn_parallel { q.send(Str.new("after cancel")) }
+    raise "cancel refused send" unless sender.value.nil?
+    InboxRace.phase = 3
+    raise "park owner join" unless owner.value.nil?
+    raise "park discard" unless __ris_inbox_test_counts == {0, 0}
+  end
+
+  # Cancellation after pinning a real receive copy leaves its mail queued.
+  InboxRace.phase = 0
+  InboxRace.mode = 3
+  group do |g|
+    owner = g.spawn_parallel do
+      group do |inner|
+        q = inner.new_inbox(Str, 1)
+        raise "seed" unless q.send(Str.new("receive copy")).nil?
+        raise "copy cancel" unless q.receive.is_a?(Cancelled)
+        retained(q)
+      end
+      nil
+    end
+    InboxRace.wait(2)
+    raise "receive not pinned" unless __ris_inbox_test_counts == {1, 1}
+    cancel(owner)
+    InboxRace.phase = 3
+    raise "copy owner join" unless owner.value.nil?
+    raise "copy discard" unless __ris_inbox_test_counts == {0, 0}
+  end
+  raise "discard count" unless __ris_inbox_test_releases == released + 5_u64
+end
+puts "PASS: inbox races"

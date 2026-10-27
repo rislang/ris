@@ -1,0 +1,84 @@
+module test/ris/inbox_parallel
+
+import std/int
+import std/float
+
+# Each task has its own captured sender number, never a loop's shared cell.
+def start_sender(g : IyiGroup, q : RisInbox(Int32), sender : Int32)
+  g.spawn_parallel do
+    1000.times do |sequence|
+      loop do
+        result = q.send(sender * 1000 + sequence)
+        break if result.nil?
+        raise "sender closed" if result.is_a?(RisInbox::Closed)
+        sleep(0)
+      end
+    end
+    nil
+  end
+end
+
+# Instantiate the Share boundary for every supported payload family.
+def scalar(g : IyiGroup, value : T) : Nil forall T
+  q = g.new_inbox(T, 1)
+  sender = g.spawn_parallel { q.send(value) }
+  got = q.receive
+  raise "scalar receive #{T}" unless got == value
+  raise "scalar sender" unless sender.value.nil?
+end
+
+enum Flag : UInt64
+  High = 9223372036854775808_u64
+end
+
+group do |g|
+  scalar(g, -128_i8)
+  scalar(g, -32768_i16)
+  scalar(g, -2147483648_i32)
+  scalar(g, -9223372036854775808_i64)
+  scalar(g, 170141183460469231731687303715884105727_i128)
+  scalar(g, 255_u8)
+  scalar(g, 65535_u16)
+  scalar(g, 4294967295_u32)
+  scalar(g, 18446744073709551615_u64)
+  scalar(g, 340282366920938463463374607431768211455_u128)
+  scalar(g, 1.5_f32)
+  scalar(g, -2.75_f64)
+  scalar(g, true)
+  scalar(g, 'λ')
+  scalar(g, :symbol)
+  scalar(g, nil)
+  scalar(g, Flag::High)
+  q = g.new_inbox(Str, 1)
+  sender = g.spawn_parallel { q.send(Str.new("worker text")) }
+  got = q.receive
+  raise "text receive" unless got == "worker text"
+  q.send(Str.new("overwrite!!"))
+  raise "new text" unless q.receive == "overwrite!!"
+  raise "escaped pool view" unless got == "worker text"
+  raise "text sender" unless sender.value.nil?
+end
+
+20.times do
+  group do |g|
+    q = g.new_inbox(Int32, 32)
+    home = IyiScheduler.state.object_id
+    4.times { |sender| start_sender(g, q, sender) }
+    next_sequence = Ary(Int32).new(4)
+    4.times { next_sequence << 0 }
+    4000.times do
+      value = q.receive
+      raise "receive" unless value.is_a?(Int32)
+      if value.is_a?(Int32)
+        sender = value // 1000
+        raise "sender range" unless sender >= 0 && sender < 4
+        raise "sender order" unless value % 1000 == next_sequence[sender]
+        next_sequence[sender] += 1
+      end
+      raise "owner migrated" unless IyiScheduler.state.object_id == home
+    end
+    4.times { |sender| raise "count" unless next_sequence[sender] == 1000 }
+    raise "duplicate" unless q.size == 0
+  end
+end
+puts "PASS: inbox parallel"

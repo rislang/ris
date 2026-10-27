@@ -1,0 +1,26 @@
+module test/ris/inbox_wrap
+
+slot = -1
+stale = group do |g|
+  q = g.new_inbox(Int32, 1).__test_near_wrap
+  slot = q.__test_identity[0]
+  q
+end
+# Retirement increments to MAX-1, which can be used once more.
+last = group do |g|
+  q = g.new_inbox(Int32, 1)
+  raise "reuse slot" unless q.__test_identity ==
+    {slot, 18446744073709551614_u64}
+  raise "old generation" unless stale.send(1).is_a?(RisInbox::Closed)
+  q
+end
+10000.times do
+  group do |g|
+    q = g.new_inbox(Int32, 1)
+    raise "wrapped slot reused" if q.__test_identity[0] == slot
+    raise "stale" unless stale.receive.is_a?(RisInbox::Closed)
+    raise "last" unless last.send(1).is_a?(RisInbox::Closed)
+    raise "fresh" unless q.send(2).nil? && q.receive == 2
+  end
+end
+puts "PASS: inbox wrap"

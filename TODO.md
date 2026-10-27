@@ -28,9 +28,6 @@ Design, mechanisms and full gates: doc/MESSAGES.md. One item per step.
   Gate: owner death, close with mail, copy rollback, cancelled receive,
   retirement, GC roots, zero heap under --no-gc. Audit the stash
   "channel tape WIP" before reusing it.
-* Cross-thread handles, generation reuse and wrap, cancellation races
-  (MESSAGES.md 5.2). Gate: stale use after group end, no escaped pool
-  payload views.
 * Timed receive, worker, actor, semaphore, event, request/reply, owns:
   and task.take (MESSAGES.md 1, 3, 4, 5.3). Gate: group-end order,
   replies, collisions, self-request, resource moves, actor scratch.

@@ -1,0 +1,27 @@
+module test/ris/inbox_reuse
+
+def closed(q : RisInbox(Int32)) : Nil
+  raise "send" unless q.send(7).is_a?(RisInbox::Closed)
+  raise "shift" unless (q << 7).is_a?(RisInbox::Closed)
+  raise "receive" unless q.receive.is_a?(RisInbox::Closed)
+  raise "close" unless q.close.is_a?(RisInbox::Closed)
+  raise "closed" unless q.closed?.is_a?(RisInbox::Closed)
+  raise "size" unless q.size.is_a?(RisInbox::Closed)
+  raise "empty" unless q.empty?.is_a?(RisInbox::Closed)
+  raise "capacity" unless q.capacity.is_a?(RisInbox::Closed)
+end
+
+stale = group { |g| g.new_inbox(Int32, 1) }
+group do |g|
+  dead = g.spawn { g.new_inbox(Int32, 1) }.value.or_panic
+  10000.times do
+    group do |inner|
+      fresh = inner.new_inbox(Int32, 1)
+      raise "fresh send" unless fresh.send(99).nil?
+      closed(stale)
+      closed(dead)
+      raise "stale touched reused mail" unless fresh.receive == 99
+    end
+  end
+end
+puts "PASS: inbox reuse"
