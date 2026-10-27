@@ -141,4 +141,16 @@ tape do
   other = SlicePool(Ary::Link(Int32, UInt32)?).new
   other.free_slice(fresh[0, 0])
 end
+# Borrowed runs keep their Ary alive; a dead or copied view permits refill.
+tape do
+  data = Ary(Int32).new(2) { |i| i + 10 }
+  run = SlicePool::Run(Int32).new(data, 0, 2)
+  copy = run.copy_to(Program.tape)
+  raise "borrowed run" unless run[1] == 11
+  data.clear
+  data << 99
+  raise "copied borrowed run" unless copy[0] == 10 && copy[1] == 11
+  fresh = SlicePool::Run(Int32).new(data, 0, 1)
+  raise "refilled borrowed run" unless fresh[0] == 99
+end
 puts "PASS: SlicePool"

@@ -69,17 +69,19 @@ out=$(
   exe=$(mktemp)
   if "$RIS" build --no-gc test/ris/slice_pool_errors.ri -o "$exe"; then
     for mode in negative overflow foreign foreign_realloc bounds slice \
-      negative_realloc realloc_overflow constructor; do
+      negative_realloc realloc_overflow constructor run_negative_offset \
+      run_negative_size run_overflow run_past_end borrowed_foreign; do
       result=$("$exe" "$mode" 2>&1)
       code=$?
       case "$mode" in
         negative|negative_realloc|constructor) expected='iyi: tape bad size: -1' ;;
         overflow|realloc_overflow)
           expected='iyi: tape size overflow: 9223372036854775807 * 4' ;;
-        foreign|foreign_realloc)
+        foreign|foreign_realloc|borrowed_foreign)
           expected='iyi: SlicePool foreign or invalid run: 0' ;;
         bounds) expected='iyi: SlicePool index out of bounds: 2' ;;
-        slice) expected='iyi: SlicePool slice out of bounds: 0' ;;
+        slice|run_negative_offset|run_negative_size|run_overflow|run_past_end)
+          expected='iyi: SlicePool slice out of bounds: 0' ;;
       esac
       if [ "$code" -eq 1 ] && [ "$result" = "$expected" ]; then
         echo "fatal    slice_pool_$mode"
@@ -149,7 +151,7 @@ for name in builder_clear builder_truncate builder_shift operand alias span \
     helper_recursive field_owner field_ontape callback_proc \
     callback_argument helper_self helper_named loop_clear loop_rebind loop_nested \
     loop_each loop_branch loop_until loop_backedge loop_array loop_chain \
-    loop_entry loop_forever; do
+    loop_entry loop_forever pool_run pool_run_pop pool_run_helper; do
   expect "shrink_$name" 'cannot shrink tape storage with a live view'
 done
 # Roots survive joins and holders; an emptied holder releases its view.

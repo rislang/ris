@@ -1,0 +1,11 @@
+def borrow_run(data : Ary(Int32))
+  SlicePool::Run(Int32).new(data, 0, data.size)
+end
+
+tape do
+  data = Ary(Int32).new(2) { |i| i }
+  alias_data = data
+  run = borrow_run(data)[1, 1]
+  alias_data.clear
+  puts run[0]
+end

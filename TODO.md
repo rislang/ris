@@ -31,8 +31,10 @@ How to work (fewer tokens, faster to the goal):
 * Escaping closures outside program and joined task owners: pooled
   environments, including captured receivers; release them with their
   owner, check capture lifetimes and refuse unsupported escapes safely.
-* Validate typed pools as they enter use: bounds, overflow, membership,
-  stale views and reset lifetimes (TAPE_SPEC 6.1-6.4).
+* Finish typed pool validation (TAPE_SPEC 6.1-6.4): audit remaining bounds,
+  overflow, membership, stale views, reset lifetimes and external images.
+  Borrowed Run constructors now retain Ary shrink lifetimes; gates cover
+  constructor bounds and foreign Ary storage as well as pool storage.
 * Concurrency storage (TAPE_SPEC 5.2): task records, wait nodes and
   queues in runtime typed pools; a buffered queue is bounded and send
   reports full; a failed receive keeps the message.

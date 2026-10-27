@@ -942,7 +942,12 @@ class Iyi::TapeShrinkChecker
           @active_procs.delete(literal.object_id)
         end
       end
-      if {"copy_to", "dup", "to_heap", "new"}.includes?(node.name)
+      if node.name == "new" && type_name(node.type).starts_with?("SlicePool::Run(")
+        # A run borrows initialized slots from its Ary argument. Unlike
+        # allocating constructors, it must retain that storage's lifetime.
+        Value.new([] of UInt64,
+          (derived.views + derived.roots.map { |root| view(root) }).uniq)
+      elsif {"copy_to", "dup", "to_heap", "new"}.includes?(node.name)
         if reference?(node)
           @root_scopes[node.object_id] = storage?(node) || {"Str", "Str::Span"}.includes?(type_name(node.type)) ? [] of UInt64 : @scopes.dup
           Value.new([node.object_id], [] of View)
