@@ -4,6 +4,20 @@ Every change to TAPE_SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one.
 
+## 2026-10-27: 5.6 message outcomes
+
+* Added: 5.6 settles the open points: error order, slot generations,
+  monotonic waits (0 polls, negative is 4.2), Full by count or a byte
+  budget, request results and R from the Request variant, Expired and
+  double replies, self-request refused, actor start from a state type
+  and init block, resources moving only as a joined task's result,
+  handles across threads, GC roots for pool slots.
+* Why: implementers and agents need one answer per case. A cancel
+  must lose no message; a stale handle must never reach a reused slot;
+  a byte budget keeps Full a recoverable answer and leaves 4.2 for real
+  exhaustion; a joined child cannot use what it returned, so its result
+  is a checked move.
+
 ## 2026-10-27: RisActor, the main tool for messages
 
 * Added: 5.5 RisActor, a RisWorker whose receive loop the compiler

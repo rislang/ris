@@ -37,7 +37,8 @@ How to work (fewer tokens, faster to the goal):
   constructor bounds and foreign Ary storage as well as pool storage.
 * Replace Channel with RisActor, RisInbox, RisWorker, RisSemaphore and
   RisEvent (TAPE_SPEC 5.2, 5.5). Names (may change once the model works):
-  * `g.new_actor(T, n, ...) { |state, msg| }` makes a `RisActor(T)`, the
+  * `g.new_actor(T, n, state: S, init: ->(s : S) { }) { |state, msg| }`
+    makes a `RisActor(T)` (TAPE_SPEC 5.5, 5.6), the
     main tool: the compiler writes the loop, the handler borrows state
     built in place in the worker and handles one message on scratch.
     Outside it is a RisWorker. Actors: counters, caches, collectors,
@@ -56,7 +57,9 @@ How to work (fewer tokens, faster to the goal):
     `value` and `done?` (as IyiTask). Share, like the send handle.
   * `RisInbox::Request(M, R)`: `w.request(msg, ms)`, `req.message`,
     `req.reply(value)`; a one-shot reply slot with a token, so a late
-    or second reply is refused and a reply is never Full. One inbox
+    reply answers `RisInbox::Expired`, a second one panics and a reply
+    is never Full. R comes from the inbox's Request variant for M; two
+    variants for one M are a compile error. One inbox
     takes requests and plain messages as a union:
     `RisInbox(Str | RisInbox::Request(Str, Int32))`.
   * `g.new_semaphore(n)`: `RisSemaphore` with `acquire`, `acquire(ms)`,
@@ -67,18 +70,11 @@ How to work (fewer tokens, faster to the goal):
   * No select: a task waiting on several sources takes them through
     one inbox with tagged messages (a union), as Erlang does, and waits
     with receive(ms).
-  Open in the contract: error order (Cancelled first, then Closed
-  over Full or TimedOut), handle generations, receive(ms) on a
-  monotonic deadline (negative refused), reply results (expired,
-  duplicate, owner gone), self-request refused, GC roots for pool
-  references, the published byte limit for queued messages (4.2). A
-  message is what copy_to accepts, so Ary is not refused. Also open:
-  the actor's startup syntax (a type and copied config, state built
-  in the child; not `state: owner`), a socket or other resource handed
-  between tasks (a checked move, not a copied descriptor), and which
-  tasks and actors may run on other threads and how handles cross.
+  The contract is TAPE_SPEC 5.2, 5.5 and 5.6 (settled 2026-10-27). A
+  message is what copy_to accepts, so Ary is not refused. The socket
+  race moves its winner as the joined attempt's result. Parallel
+  actors are later work.
   Steps, each with a gate (design review of 2026-10-27):
-  1. Settle the above and the typed request API.
   2. RisInbox on typed pools, with task records and wait nodes: scalars
      inline, Str copies per message, close, group end, rollback;
      preserve queued messages on pool failures and prove zero heap

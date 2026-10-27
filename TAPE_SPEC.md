@@ -131,6 +131,25 @@ rule goes last in its section; a removed one leaves its number unused.
   ends the worker; partly changed state never resumes. Outside, an
   actor is a RisWorker (5.2). Goose's root structs inform the state
   owner ([root_structs.md](doc/reference/goose/docs/design/root_structs.md)).
+* 5.6 Message outcomes. A cancelled caller gets Cancelled first and loses
+  no message; then receive takes a queued message before Closed, and
+  Closed beats TimedOut; send answers Closed before Full. A handle names
+  a pool slot and its generation: a stale one answers Closed, never
+  reaches a reused slot. A wait in ms runs on a monotonic clock; 0 does
+  not wait; a negative wait is a bad size (4.2). An inbox is Full by
+  count or by its byte budget (`bytes:`, published default); region
+  exhaustion stays 4.2. `request` answers R, Full, Closed, TimedOut or
+  Cancelled; R comes from the inbox's one Request variant for the
+  message type. Closed also ends a request whose owner ends unreplied.
+  `reply` answers Nil or RisInbox::Expired when the asker is gone; a
+  second reply panics. Requesting one's own inbox is refused, at compile
+  time when known, else as a panic naming a task or a send. An actor
+  starts from a state type: S.new runs in the worker, then an `init`
+  block with copied captures (5.3). A resource crosses tasks only as a
+  joined task's result (4.1): the child has ended, so it moves. Inbox,
+  worker and actor handles are Share and cross threads; the actors and
+  workers run on their group's thread. GC builds root pool slots and
+  clear them on receive and close.
 ## 6. Pools, validation, tooling (Goose §5.4, §9.3-9.4)
 * 6.1 Pool(T)/SlicePool(T): typed slots/runs; free keeps values valid, stale
   views see typed replacements; generations only guard checked handles.
