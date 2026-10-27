@@ -40,9 +40,9 @@ How to work (fewer tokens, faster to the goal):
   pool failures and prove zero heap under --no-gc.
 * Replace Channel with RisInbox, RisSemaphore and RisEvent (TAPE_SPEC
   5.2). Names (may change once the model works):
-  * `g.inbox(T, n)` (owner: the calling task, not the group) and
-    `g.spawn_inbox(T, n) { |inbox| }` (owner: the child; the parent
-    gets the send handle) make a `RisInbox(T)`; `RisInbox.new` is not
+  * `g.new_inbox(T, n)` (owner: the calling task, not the group) and
+    `g.new_worker(T, n) { |inbox| }` (owner: the new task; the parent
+    gets a task it can send to) make a `RisInbox(T)`; `RisInbox.new` is not
     public, so every inbox ends with a group. `send` and `<<`,
     `receive`, `receive(ms)` (0 does not wait), `close`, `closed?`,
     `size`, `empty?`, `capacity`. Not push/pop: Ary#pop takes the
@@ -50,8 +50,8 @@ How to work (fewer tokens, faster to the goal):
   * `RisInbox::Request(M, R)`: `q.request(msg, ms)`, `req.message`,
     `req.reply(value)`; a one-shot reply slot with a token, so a late
     or second reply is refused and a reply is never Full.
-  * `g.semaphore(n)`: `RisSemaphore` with `acquire`, `acquire(ms)`,
-    `release`, `hold { }`. `g.event`: `RisEvent` with `fire`, `wait`,
+  * `g.new_semaphore(n)`: `RisSemaphore` with `acquire`, `acquire(ms)`,
+    `release`, `hold { }`. `g.new_event`: `RisEvent` with `fire`, `wait`,
     `wait(ms)`, `fired?`.
   * Errors: `RisInbox::Full`, `RisInbox::Closed`, `TimedOut`,
     `Cancelled`.
@@ -69,7 +69,7 @@ How to work (fewer tokens, faster to the goal):
      close, owner end, rollback; move the Str channel work in progress
      (copy on receive, release on close, failed receives keep mail).
   3. Owner checks (compile error, runtime refusal) and cross-thread
-     send handles for spawn_parallel.
+     send handles for parallel tasks.
   4. receive(ms), RisSemaphore, RisEvent, request/reply; gate dead
      owner, expired reply, self-request and owner end with queued mail
      (Koja MEMORY-MODEL.md, Process boundaries).
@@ -78,7 +78,16 @@ How to work (fewer tokens, faster to the goal):
   6. Retarget select lowering to inboxes, or refuse it with a hint to
      receive(ms), per step 1; port bench and tests (host Crystal
      Channel stays); remove Channel; review the 930722c entry in
-     UPSTREAM.md.
+     UPSTREAM.md. In the same pass free ris of spawn: g.spawn becomes
+     g.new_task, g.spawn_parallel g.new_parallel_task, and a spawn in
+     ris code is refused with a hint to them. The name says what you
+     get, as Ruby's Thread.new does. IyiTask becomes RisTask and
+     IyiGroup RisGroup, beside RisInbox, RisSemaphore and RisEvent;
+     task.value stays (Ruby's Thread#value). The compiler matches the names:
+     the group join in normalizer.cr (iyi_direct_spawn) and the Share
+     check on a parallel block must follow, with error texts. About
+     600 uses, most in bench/; spec/ and the host compiler keep
+     Crystal's spawn.
 * Until then Channel#send waits again while full and try_send answers
   ChannelFull: 930722c broke IyiIO.pipe, whose writes must wait.
 * For FFI paths in use, enforce borrow lifetimes, retained-storage owners,

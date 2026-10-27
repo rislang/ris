@@ -4,6 +4,15 @@ Every change to TAPE_SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one.
 
+## 2026-10-27: group methods named new_*
+
+* Changed: 5.2's `g.inbox` is `g.new_inbox` and `g.spawn_inbox` is
+  `g.new_worker`, a task owning an inbox.
+* Why: a noun method without arguments reads as a getter (`g.event`
+  as the group's one event), and spawn says only that something
+  starts. new_* names the object you get, as Ruby's Thread.new does.
+  ris drops spawn for g.new_task when Channel goes (TODO.md).
+
 ## 2026-10-27: RisQue becomes RisInbox, made by its group
 
 * Changed: 5.2 names the queue RisInbox(T). `g.inbox` makes one owned

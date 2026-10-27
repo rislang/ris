@@ -91,8 +91,8 @@ rule goes last in its section; a removed one leaves its number unused.
 * 5.2 Tasks pass messages through a `RisInbox(T)`, after Goose's typed
   queues (§11.2) and Koja's process boundary
   ([MEMORY-MODEL.md](doc/reference/koja/design/MEMORY-MODEL.md)).
-  `g.inbox` makes one owned by the calling task, main included, and
-  `g.spawn_inbox` one owned by the new child; only the owner receives.
+  `g.new_inbox` makes one owned by the calling task, main included, and
+  `g.new_worker` a task owning one; only the owner receives.
   The inbox ends with its group g. Its send handle is Share (5.1) and
   goes stale when the inbox ends. A message is what copy_to accepts
   (1.7), copied by its rules at send and at receive. Send copies into
