@@ -1,6 +1,12 @@
 # Runtime-only typed pools. All access is under IyiSchedLock except a
 # pinned copy's private message bytes. No pool contains a borrowed Str.
 struct RisInboxRecord
+  property free_next : Int32 = -1
+  property recycled : Bool = false
+  property owner_prev : Int32 = -1
+  property owner_next : Int32 = -1
+  property group_prev : Int32 = -1
+  property group_next : Int32 = -1
   property generation : UInt64 = 1_u64
   property live : Bool = false
   property closed : Bool = false
@@ -37,6 +43,11 @@ end
 module RisInboxPool
   RECORDS = 4096
   MESSAGES = 65536
+  @@record_free : Int32 = 0
+  @@message_free : Int32 = 0
+  @@storage_heads : UInt64 = 0_u64
+  @@storage_maps : UInt64 = 0_u64
+  @@owner_touches : UInt64 = 0_u64
   @@records : UInt64 = 0_u64
   @@messages : UInt64 = 0_u64
 
@@ -44,14 +55,17 @@ module RisInboxPool
     return if @@records != 0
     @@records = __iyi_mmap(RECORDS.to_u64 * sizeof(RisInboxRecord)).address
     @@messages = __iyi_mmap(MESSAGES.to_u64 * sizeof(RisInboxMessage)).address
+    @@storage_heads = __iyi_mmap(16_u64 * 8_u64).address
     i = 0
     while i < RECORDS
       record(i).value = RisInboxRecord.new
+      record(i).value.free_next = i + 1 < RECORDS ? i + 1 : -1
       i += 1
     end
     i = 0
     while i < MESSAGES
       message(i).value = RisInboxMessage.new
+      message(i).value.following = i + 1 < MESSAGES ? i + 1 : -1
       i += 1
     end
   end
@@ -77,47 +91,117 @@ module RisInboxPool
   def self.allocate(owner : UInt64, group : UInt64, capacity : Int32,
                     budget : UInt64) : Tuple(Int32, UInt64)
     init
-    i = 0
-    while i < RECORDS
-      p = record(i)
-      r = p.value
-      if !r.live && r.pins == 0 && r.generation != 18446744073709551615_u64
-        generation = r.generation
-        r = RisInboxRecord.new
-        r.generation = generation
-        r.live = true
-        r.closed = false
-        r.owner = owner
-        r.group = group
-        r.capacity = capacity
-        r.budget = budget
-        p.value = r
-        return {i, r.generation}
-      end
-      i += 1
-    end
-    exhausted
+    i = @@record_free
+    exhausted if i < 0
+    p = record(i)
+    generation = p.value.generation
+    @@record_free = p.value.free_next
+    r = RisInboxRecord.new
+    r.generation = generation
+    r.live = true
+    r.owner = owner
+    r.group = group
+    r.capacity = capacity
+    r.budget = budget
+    fiber = Pointer(Void).new(owner).as(IyiFiber)
+    scope = Pointer(Void).new(group).as(IyiGroup)
+    r.owner_next = fiber.owned_inbox_head
+    r.group_next = scope.owned_inbox_head
+    record(r.owner_next).value.owner_prev = i if r.owner_next >= 0
+    record(r.group_next).value.group_prev = i if r.group_next >= 0
+    fiber.owned_inbox_head = i
+    scope.owned_inbox_head = i
+    p.value = r
+    {i, generation}
   end
 
   def self.allocate_message : Int32
-    i = 0
-    while i < MESSAGES
-      p = message(i)
-      unless p.value.live
-        m = RisInboxMessage.new
-        m.live = true
-        p.value = m
-        return i
-      end
-      i += 1
+    i = @@message_free
+    exhausted if i < 0
+    @@message_free = message(i).value.following
+    m = RisInboxMessage.new
+    m.live = true
+    message(i).value = m
+    i
+  end
+
+  # Power-of-two classes 32 bytes through 1 MiB, including the header.
+  # Slabs have at least 64 KiB; larger texts map directly.
+  def self.storage_size(length : Int32) : UInt64
+    size = 32_u64
+    needed = length.to_u64 + 16_u64
+    while size < needed && size < 1048576_u64
+      size *= 2_u64
     end
-    exhausted
+    size
+  end
+
+  def self.storage_head(size : UInt64) : Pointer(UInt64)
+    index = 0
+    n = 32_u64
+    while n < size
+      index += 1
+      n *= 2_u64
+    end
+    Pointer(UInt64).new(@@storage_heads) + index
+  end
+
+  def self.allocate_text(length : Int32) : UInt64
+    needed = length.to_u64 + 16_u64
+    if needed > 1048576_u64
+      @@storage_maps += 1_u64
+      return __iyi_mmap(needed).address
+    end
+    size = storage_size(length)
+    head = storage_head(size)
+    if head.value == 0
+      bytes = size < 65536_u64 ? 65536_u64 : size
+      @@storage_maps += 1_u64
+      base = __iyi_mmap(bytes).address
+      offset = 0_u64
+      while offset < bytes
+        Pointer(UInt64).new(base + offset).value = head.value
+        head.value = base + offset
+        offset += size
+      end
+    end
+    result = head.value
+    head.value = Pointer(UInt64).new(result).value
+    result
   end
 
   def self.release(slot : Int32) : Nil
     m = message(slot).value
-    __iyi_munmap(m.text, m.length.to_u64 + 16_u64) if m.text != 0
+    if m.text != 0
+      if m.length.to_u64 + 16_u64 > 1048576_u64
+        __iyi_munmap(m.text, m.length.to_u64 + 16_u64)
+      else
+        head = storage_head(storage_size(m.length))
+        Pointer(UInt64).new(m.text).value = head.value
+        head.value = m.text
+      end
+    end
     message(slot).value = RisInboxMessage.new
+    message(slot).value.following = @@message_free
+    @@message_free = slot
+  end
+
+  def self.storage_maps : UInt64
+    @@storage_maps
+  end
+
+  def self.owner_touches : UInt64
+    @@owner_touches
+  end
+
+  def self.recycle(p : Pointer(RisInboxRecord)) : Nil
+    r = p.value
+    return if r.live || r.pins != 0 || r.recycled
+    return if r.generation == 18446744073709551615_u64
+    r.recycled = true
+    r.free_next = @@record_free
+    @@record_free = (p - Pointer(RisInboxRecord).new(@@records)).to_i32
+    p.value = r
   end
 
   def self.wake(r : Pointer(RisInboxRecord)) : Nil
@@ -149,38 +233,44 @@ module RisInboxPool
     value.count = 0
     value.used = 0_u64
     r.value = value
+    recycle(r)
   end
 
   # Called before the task leaves the scheduler registry, including panic.
   def self.owner_died(owner : UInt64) : Nil
-    return if @@records == 0
-    i = 0
-    while i < RECORDS
-      p = record(i)
-      if p.value.live && p.value.owner == owner
-        retire(p)
-      end
-      i += 1
+    fiber = Pointer(Void).new(owner).as(IyiFiber)
+    while fiber.owned_inbox_head >= 0
+      @@owner_touches += 1_u64
+      retire(record(fiber.owned_inbox_head))
     end
   end
 
   def self.retire(p : Pointer(RisInboxRecord)) : Nil
-    discard(p)
     r = p.value
+    fiber = Pointer(Void).new(r.owner).as(IyiFiber)
+    scope = Pointer(Void).new(r.group).as(IyiGroup)
+    if r.owner_prev < 0
+      fiber.owned_inbox_head = r.owner_next
+    else
+      record(r.owner_prev).value.owner_next = r.owner_next
+    end
+    record(r.owner_next).value.owner_prev = r.owner_prev if r.owner_next >= 0
+    if r.group_prev < 0
+      scope.owned_inbox_head = r.group_next
+    else
+      record(r.group_prev).value.group_next = r.group_next
+    end
+    record(r.group_next).value.group_prev = r.group_prev if r.group_next >= 0
     r.live = false
     r.generation += 1_u64 unless r.generation == 18446744073709551615_u64
     p.value = r
+    discard(p)
   end
 
   def self.group_ended(group : UInt64) : Nil
-    return if @@records == 0
-    i = 0
-    while i < RECORDS
-      p = record(i)
-      if p.value.live && p.value.group == group
-        retire(p)
-      end
-      i += 1
+    scope = Pointer(Void).new(group).as(IyiGroup)
+    while scope.owned_inbox_head >= 0
+      retire(record(scope.owned_inbox_head))
     end
   end
 end
@@ -249,8 +339,8 @@ struct RisInbox(T)
     IyiSchedLock.unlock
     {% if T == Str %}
       m.length = value.bytesize
-      m.text = __iyi_mmap(m.length.to_u64 + 16_u64).address
       IyiSchedLock.lock
+      m.text = RisInboxPool.allocate_text(m.length)
       RisInboxPool.message(slot).value = m
       IyiSchedLock.unlock
       Pointer(UInt8).new(m.text + 16_u64).copy_from(value.to_unsafe, m.length)
@@ -468,4 +558,19 @@ def __iyi_inbox_send_cleanup : Nil
   fiber.inbox_send_message = -1
   RisInboxPool.discard(p) unless r.live
   IyiSchedLock.unlock
+end
+
+# Test counters are read under the same lock as pool mutations.
+def __ris_inbox_storage_maps : UInt64
+  IyiSchedLock.lock
+  value = RisInboxPool.storage_maps
+  IyiSchedLock.unlock
+  value
+end
+
+def __ris_inbox_owner_touches : UInt64
+  IyiSchedLock.lock
+  value = RisInboxPool.owner_touches
+  IyiSchedLock.unlock
+  value
 end

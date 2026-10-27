@@ -415,6 +415,7 @@ enum IyiFiberState : Int32
 end
 
 class IyiFiber
+  property owned_inbox_head : Int32 = -1
   property inbox_copy_slot : Int32 = -1
   property inbox_send_slot : Int32 = -1
   property inbox_send_message : Int32 = -1
@@ -3858,6 +3859,7 @@ class IyiTask(T)
 end
 
 class IyiGroup
+  property owned_inbox_head : Int32 = -1
   MAX_LIVE = 2147483647
 
   def self.check_count(live : Int32) : Nil

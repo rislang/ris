@@ -1,0 +1,21 @@
+module test/ris/inbox_owner_cost
+
+group do |g|
+  # Initialize the pools and keep an unrelated inbox live throughout.
+  q = g.new_inbox(Int32, 1)
+  touches = __ris_inbox_owner_touches
+  10000.times do
+    task = g.spawn { nil }
+    raise "task end" unless task.value.nil?
+  end
+  raise "empty owner scanned records" unless __ris_inbox_owner_touches == touches
+  task = g.spawn do
+    own = g.new_inbox(Int32, 1)
+    nil
+  end
+  task.value
+  raise "owned visit" unless __ris_inbox_owner_touches == touches + 1_u64
+  q.send(42)
+  raise "unrelated inbox" unless q.receive == 42
+end
+puts "PASS: inbox owner_cost"

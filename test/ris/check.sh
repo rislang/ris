@@ -36,7 +36,7 @@ else
 fi
 
 # Inbox pools retain mail through close and return storage on retirement.
-for name in fifo str lifecycle scalars nonowner; do
+for name in fifo str lifecycle scalars nonowner storage owner_cost; do
   out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc \
     "test/ris/inbox_$name.ri" 2>&1)
   if [ "$?" -eq 0 ] &&

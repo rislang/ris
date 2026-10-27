@@ -101,31 +101,43 @@ and std remain unchanged. Receive has no deadline; unknown receiver
 identity is checked at runtime. Static receiver checking remains open.
 
 The runtime maps typed pools of 4,096 inbox records and 65,536 message
-records per process. One reusable wait node is embedded in each inbox
-record; the existing scheduler registry keeps a waiting owner alive.
+records per process, allocated from free lists. Intrusive owner and group
+chains make retirement visit only their own inboxes. Pinned retired slots
+return to the free list after the last copy. One wait node per inbox
+keeps a waiting owner alive through the scheduler registry.
 Handles contain a slot and 64-bit generation. Retirement invalidates the
 handle, and generation wrap permanently retires its slot. Owner death
 and group end discard mail and retire records; graceful close retains
 mail. Ordered worker drain is not implemented by this slice.
 
-Scalars occupy inline message storage. Each Str message owns a separate
-byte mapping, released on committed receive or discard. Accounting is
-`round8(sizeof(T))` plus, for Str, `round8(16 + bytesize)`; 16 is the
-allocation header size. Empty Str still costs its header. The default
-budget is `max(65536, capacity * 4096)`; explicit budgets must be positive.
+Scalars occupy inline message storage. Str bytes use reusable mapped
+slabs with power-of-two classes from 32 bytes through 1 MiB, including
+the header. Each slab is at least 64 KiB. Committed receive or discard
+returns the block to its class. Larger allocations map and unmap directly.
+Accounting is `round8(sizeof(T))` plus, for Str,
+`round8(16 + bytesize)`; 16 is the allocation header size. Empty Str still
+costs its header. The default budget is `max(65536, capacity * 4096)`;
+explicit budgets must be positive.
 Count and byte reservations include in-flight copies. A copy runs outside
 the scheduler lock, pins its record, and publishes or rolls back under
 that lock. Cancellation after a receive copy preserves queued mail.
 Unwind guards return reservations and pins before owner-death cleanup.
 
 Excluded storage has finite limits: the two fixed metadata pools above,
-one wait node per inbox, and one OS-page-rounded mapping per live Str
-message, whose length is at most 2,147,483,647 bytes plus its header.
-There is no inbox mapping cache or scratch mapping. Receive copies use
-the caller's existing tape limits and spare-mapping policy. Physical pool
-or mapping exhaustion is fatal, distinct from an inbox's Full budget.
+one wait node per inbox, and cached slabs retained for process lifetime.
+Slabs grow with peak simultaneous demand in each class; there is no
+separate cache cap. Str length is at most 2,147,483,647 bytes. Above the
+1 MiB allocation threshold each live Str has a page-rounded mapping.
+Receive copies use the caller's existing tape limits and spare-mapping
+policy. Physical pool or mapping exhaustion is fatal, distinct from an
+inbox's Full budget.
 Cross-thread race, generation-wrap and fatal-exhaustion gates remain for
 later steps; current gates cover reuse, stale handles and copy rollback.
+The storage gate sends and receives 100,000 small texts after warm-up;
+`__ris_inbox_storage_maps` counts message-storage mmap calls and must
+stay unchanged. `__ris_inbox_owner_touches` counts owner-death record
+visits; 10,000 tasks without inboxes must add zero with another inbox
+live. Both gates run under `--no-gc` and assert zero heap allocations.
 
 ## 3. Lifecycle: group end and resources
 
