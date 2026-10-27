@@ -35,8 +35,15 @@ How to work (fewer tokens, faster to the goal):
   overflow, membership, stale views, reset lifetimes and external images.
   Borrowed Run constructors now retain Ary shrink lifetimes; gates cover
   constructor bounds and foreign Ary storage as well as pool storage.
-* Replace Channel with RisInbox, RisWorker, RisSemaphore and RisEvent
-  (TAPE_SPEC 5.2). Names (may change once the model works):
+* Replace Channel with RisActor, RisInbox, RisWorker, RisSemaphore and
+  RisEvent (TAPE_SPEC 5.2, 5.5). Names (may change once the model works):
+  * `g.new_actor(T, n, ...) { |state, msg| }` makes a `RisActor(T)`, the
+    main tool: the compiler writes the loop, the handler borrows state
+    built in place in the worker and handles one message on scratch.
+    Outside it is a RisWorker. Actors: counters, caches, collectors,
+    routing. Workers: http accept, socket race, pipe, autocert. Tasks:
+    paired fetches, CPU work; a logger that writes IO is a task or a
+    worker, an actor only queues lines.
   * `g.new_inbox(T, n)` makes a `RisInbox(T)` owned by the calling task,
     not the group; `RisInbox.new` is not public, so every inbox ends
     with a group. Main makes them in its own `group do |g|`. `send` and
@@ -65,7 +72,11 @@ How to work (fewer tokens, faster to the goal):
   monotonic deadline (negative refused), reply results (expired,
   duplicate, owner gone), self-request refused, GC roots for pool
   references, the published byte limit for queued messages (4.2). A
-  message is what copy_to accepts, so Ary is not refused.
+  message is what copy_to accepts, so Ary is not refused. Also open:
+  the actor's startup syntax (a type and copied config, state built
+  in the child; not `state: owner`), a socket or other resource handed
+  between tasks (a checked move, not a copied descriptor), and which
+  tasks and actors may run on other threads and how handles cross.
   Steps, each with a gate (design review of 2026-10-27):
   1. Settle the above and the typed request API.
   2. RisInbox on typed pools, with task records and wait nodes: scalars
@@ -76,9 +87,15 @@ How to work (fewer tokens, faster to the goal):
      receives keep mail.
   3. Owner checks (compile error, runtime refusal) and cross-thread
      send handles for parallel tasks.
-  4. receive(ms), RisWorker, RisSemaphore, RisEvent, request/reply;
-     gate dead owner, expired reply, self-request and group end with
-     queued mail (Koja MEMORY-MODEL.md, Process boundaries).
+  4. receive(ms), RisWorker, RisActor, RisSemaphore, RisEvent,
+     request/reply; gate dead owner, expired reply, self-request and
+     group end with queued mail (Koja MEMORY-MODEL.md, Process
+     boundaries). RisActor release gates: state outside scratch, reset
+     on every exit, copy_to(state) and state writers kept, a scratch
+     handle stored in state refused, waits and blocking calls in a
+     handler refused with a hint to a task or a worker, exhaustive
+     message unions, reply only on a Request, panic ends the worker;
+     RIS_TAPE_STATS growth moves and side transfers read 0.
   5. Port std: pipe (semaphore credits), http slots (semaphore),
      socket race (inbox), autocert (one inbox of tagged messages and
      an event), samples/workers.

@@ -29,7 +29,9 @@ rule goes last in its section; a removed one leaves its number unused.
 * 1.5 Libraries borrow caller input and build results on the caller's owner;
   nested tape blocks share it. A pending result's region is outside callee
   scratch and its rollback (Goose §10.3). local_tape owns separate scratch;
-  nothing rooted there escapes or mutates outer tape containers.
+  nothing rooted there escapes or mutates outer tape containers. A checked
+  destination write may: copy_to(owner) or a destination writer puts the
+  bytes on that owner, never a scratch-rooted handle (5.5).
 * 1.6 .ri text literals are static Str; interpolation builds Str on the active
   tape. Read-only text parameters borrow Str, without a String copy.
 * 1.7 Build retained data on its destination (writers, in-place append), else
@@ -115,6 +117,20 @@ rule goes last in its section; a removed one leaves its number unused.
   borrows have explicit lifetimes; retained foreign storage has an owner and
   cleanup. Never unwind across foreign frames; foreign threads attach first.
   Safety exceptions are marks with reasons, never a global switch.
+* 5.5 `g.new_actor` makes a RisActor, the main tool for messages: a
+  RisWorker whose receive loop the compiler writes. The worker builds its
+  named state in place from copied startup data; an owner is never
+  passed, copied or returned as a startup value (2.1). State and its
+  growing parts live outside scratch (2.2). Each handler borrows the
+  state and gets one typed message on scratch, reset after the handler on
+  every exit and never freeing state. It mutates state in place and
+  returns Nil; retained data goes through copy_to(state) or a state
+  writer (1.5, 1.7). A handler never waits or blocks: it starts a task
+  with copied input and gets a completion message, or the code is a
+  RisWorker. It replies only through a typed RisInbox::Request. A panic
+  ends the worker; partly changed state never resumes. Outside, an
+  actor is a RisWorker (5.2). Goose's root structs inform the state
+  owner ([root_structs.md](doc/reference/goose/docs/design/root_structs.md)).
 ## 6. Pools, validation, tooling (Goose §5.4, §9.3-9.4)
 * 6.1 Pool(T)/SlicePool(T): typed slots/runs; free keeps values valid, stale
   views see typed replacements; generations only guard checked handles.

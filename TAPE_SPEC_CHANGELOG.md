@@ -4,6 +4,18 @@ Every change to TAPE_SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one.
 
+## 2026-10-27: RisActor, the main tool for messages
+
+* Added: 5.5 RisActor, a RisWorker whose receive loop the compiler
+  writes: state built in place in the worker, one message per scratch
+  reset, in-place mutation, no waits in a handler, a panic ends it.
+  1.5 says a checked destination write (copy_to, a destination writer)
+  may reach an outer owner from local scratch; a scratch handle may not.
+* Why: one message, one scratch tape matches ris's one tape per request
+  and is Goose-shaped (a state owner beside short-lived data stacks).
+  A handler is easier for an agent to write right than a receive loop.
+  Returning state would copy it per message; in place it does not.
+
 ## 2026-10-27: RisWorker, no select, group end and limits
 
 * Changed: 5.2 gives `g.new_worker` a RisWorker (a task owning an
