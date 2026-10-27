@@ -112,8 +112,10 @@ How to work (fewer tokens, faster to the goal):
   in insertion order, bins an Ary(Int32) of indices into it, Str keys as
   views, no pointers, so it is flat and copied whole like Tre. Replace
   the four linear-scan TapeMap copies in std/yaml.iyi, toml.iyi,
-  xml.iyi and mail.iyi. Name it after Str and Ary (Hsh or Map). Gate:
-  O(1) lookup on a large map, insertion order kept, zero heap.
+  xml.iyi and mail.iyi. Start from src/iyi/hash.iyi (the same compact
+  layout on Pointers): swap them for Ary; take Crystal's linear scan for
+  small maps and index width by capacity. Name it after Str and Ary (Hsh
+  or Map). Gate: O(1) lookup on a large map, insertion order, zero heap.
 
 ## Known failure to recheck
 
