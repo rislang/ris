@@ -114,13 +114,14 @@ for them until then.
 
 ## Known failure to recheck
 
+* Compiler specs (seed 71173, 2026-10-27): recheck macro/macro_methods,
+  iyimod, compiler, and codegen/{proc,closure}_spec.cr; four failures and
+  two errors preceded a signal 11 crash in the closure group, so no
+  failure summary was printed.
 * Reproduce spec/compiler/iyimod_spec.cr's "carries the constants a
   module's own code reads": runtime constants appear in the constant
   list. Determine whether the artifact or the expectation is wrong;
   make tape-independent fixes in iyi first, or record them in UPSTREAM.md.
-* `make compiler_spec` does not build: src/compiler/iyi/command/
-  migrate.cr:2065 calls rchop on String | Nil (seen 2026-10-27, before
-  and after the inbox work). Compiler specs cannot run until it does.
 * bench/concurrency_exercise.sh fails with "pipe2 failed" after its
   32,000 sleepers test (seen 2026-10-27 before the group-end change).
 * bench/http2_exercise: the 1 MiB POST in "a megabyte up through the

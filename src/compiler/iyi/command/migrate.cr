@@ -2061,11 +2061,14 @@ class Iyi::Command
     # where Crystal's was the mutation — hence the note.
     private def rewrite_bangs(line : String, notes : Notes, source_line : Int32 = 0, inferred : ParamTypes? = nil) : String
       return line if line.strip.starts_with?('#')
-      if (match = DEF_NAME.match(line)) && (name = match[1] || "").ends_with?('!')
-        bare = name.rchop
-        renamed = @bang_renames.includes?(bare) ? bare + "_in_place" : bare
-        notes.add "bang", "#{path}: `def #{name}` became `def #{renamed}` - `!` can't be part of a name (III.1.7)" unless @bang_renames.includes?(bare)
-        return line.sub(name, renamed)
+      if match = DEF_NAME.match(line)
+        name = match[1] || ""
+        if name.ends_with?('!')
+          bare = name.rchop
+          renamed = @bang_renames.includes?(bare) ? bare + "_in_place" : bare
+          notes.add "bang", "#{path}: `def #{name}` became `def #{renamed}` - `!` can't be part of a name (III.1.7)" unless @bang_renames.includes?(bare)
+          return line.sub(name, renamed)
+        end
       end
       # A bang call that *is* the statement was there for the mutation and
       # nothing reads the copy. Whose method it is decides the rewrite, and

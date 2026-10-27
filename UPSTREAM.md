@@ -20,6 +20,9 @@ back.
   result or cancelling the task. Each reader has its own timer; answers
   are Nil for Done, TimedOut or Cancelled. `value` still reads the result.
 
+* Migration bang rewrites: narrow the optional definition-name capture
+  before checking or removing its bang suffix in the compiler spec build.
+
 * Channel: waking a receiver does not release a buffered slot, so the
   ring never grows; a full send parks and a receive refills its slot.
 
