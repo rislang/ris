@@ -108,7 +108,9 @@ rule goes last in its section; a removed one leaves its number unused.
   n <= 0 follows 4.2. Lowering keeps mail; posts fail while count >= n.
   Admission, limit and consumption are linearized; unpublished copies do
   not count. FIFO is publication order per type, a ris clarification;
-  no taker fairness or cross-type order is promised. Mail and limits
+  no taker fairness or cross-type order is promised. A task's completed
+  posts still precede its later calls; a Done message does not prove
+  that earlier jobs were taken. Mail and limits
   survive task/group end and cancellation. Mail lasts until taken or process
   end; limits last until changed or process end. No new, close, owner,
   handle or reply.
@@ -132,26 +134,41 @@ rule goes last in its section; a removed one leaves its number unused.
   Cancelled consumes nothing; partial copies and claims roll back. Data
   present at commit may win after a delayed deadline wake. Top-level
   Cancelled keys are refused: wrap that data in a nominal message.
-  Payloads are flat, as Goose's: numeric scalars, Bool, Char, Symbol,
-  Nil, enums, Str, Ary(T) and Tre(T) of flat T, and value structs
-  recursively containing these or unions of them; the compiler checks it
-  at post and take, with no marker. A Str, Ary or Tre is copied whole in
-  and out to the taker's tape, as Goose copies its arrays; Tre links stay
-  inside the copy. Compiler-generated copies preserve concrete types and
-  enum values, split sharing as in 1.7 and run no user code. Owners,
-  pointers, resources, closures and classes are refused at every depth,
-  with the safe form named. A post publishes a complete copy or nothing; take
-  copies out before removal. Claims prevent duplicate delivery and keep
-  FIFO through failure. No view into runtime pools escapes. Private typed
-  pools own message bytes; GC builds root live runtime references and clear
-  retired roots, no-GC builds use no general heap. Exhaustion follows 4.2.
-  At process end queued copies are discarded without user callbacks; task
-  cleanup and fatal errors still follow 4.1/4.3. A socket or pipe end never
-  crosses tasks: no owns:, task.take, resource move or exception. An HTTP
-  server uses N tasks, each opening its own SO_REUSEPORT listener on the
-  same port and accepting and serving one connection at a time; N limits
-  connections, with no permits or semaphore. Pipe and socket race IO stay
-  in one task using OS facilities on the poller; board IO copies data.
+  A message is Copyable: it has a finite, self-contained packed form (Goose
+  calls this flat). Copyable types are numeric scalars, Bool, Char, Symbol,
+  Nil, enums, Str, Ary(T) and Tre(T) of Copyable T, and value structs or
+  unions of these. Str, Ary and Tre are handles; the board packs their live
+  data, not pointers, so Copyable is not raw-byte safe (@[Tape::Flat]). The
+  compiler infers it, with no marker, at post, take, poll and limit after
+  specialization. A type that contains itself through fields, unions, Ary or
+  Tre is refused: keep recursive data in a Tre or in a node array with checked
+  integer indices (2.2 still applies). User link fields (Ary::Link and other
+  self-relative links) stay refused as in 1.7; only Tre's own stop boundaries
+  cross, kept relative to the copied entries, with an open container's -1 and
+  a stop equal to size preserved. A post packs counts, fixed fields, live
+  union tags and live elements into one owned image, recursively, with no
+  backing pointer and no spare capacity, sized with checked arithmetic before
+  publication; the source and its aliases stay unchanged meanwhile. Each
+  copied occurrence of a handle gets independent state, splitting sharing as
+  in 1.7; an empty value carries its count and still takes one place under the
+  limit. take unpacks fresh containers and bytes on the taker's tape, with
+  capacity equal to size. Copies keep concrete types and enum values and run
+  no user code. Count and packed-byte bounds per message are published;
+  exceeding one follows 4.2, not false. Board packing is private and is not
+  the to_bytes/from_bytes image. Owners, pointers, resources, closures and
+  classes are refused at every depth, with the safe form named. A post
+  publishes a complete copy or nothing; take copies out before removal. Claims
+  prevent duplicate delivery and keep FIFO through failure. No view into
+  runtime pools escapes. Private typed pools own message bytes; GC builds root
+  live runtime references and clear retired roots, no-GC builds use no general
+  heap. Exhaustion follows 4.2. At process end queued copies are discarded
+  without user callbacks; task cleanup and fatal errors still follow 4.1/4.3.
+  A socket or pipe end never crosses tasks: no owns:, task.take, resource move
+  or exception. An HTTP server uses N tasks, each opening its own SO_REUSEPORT
+  listener on the same port and accepting and serving one connection at a
+  time; N limits connections, with no permits or semaphore. Pipe and socket
+  race IO stay in one task using OS facilities on the poller; board IO copies
+  data.
 ## 6. Pools, validation, tooling (Goose §5.4, §9.3-9.4)
 * 6.1 Pool(T)/SlicePool(T): typed slots/runs; free keeps values valid, stale
   views see typed replacements; generations only guard checked handles.

@@ -29,8 +29,13 @@ How to work (fewer tokens, faster to the goal):
   publish physical limits. Gate: FIFO, unique parallel delivery, lowered
   limits racing posts, partial-copy panic/cancel, timed/poll cancellation,
   queued Nil, nested copies/enums, task/group survival, GC stress, zero
-  heap and --no-gc link audit. Isolate tests with fresh nominal types;
-  use fresh processes to test initially unlimited queues.
+  heap and --no-gc link audit. Copyable gates: Ary(Str) and nested
+  structs packed with no source pointer, self-containing types refused,
+  user link fields refused, open Tre (-1) and end stops kept, aliases
+  split, empty values counted, source unchanged during packing, the
+  check at limit too, huge values over the published bound end as 4.2.
+  Keep @[Tape::Flat] (raw-byte images) a separate property. Isolate tests
+  with fresh nominal types; fresh processes for unlimited queues.
 * Enforce Share-or-copy task captures, local and parallel, through captured
   receivers, handlers and reached state; keep all resources in their
   opening task. Gate: mutable/resource captures refused with safe forms,
@@ -110,7 +115,7 @@ How to work (fewer tokens, faster to the goal):
   outside Linux with address-space reservations and equivalent gates.
 * A tape hash map, laid out as Ruby's Hash (st_table): entries in an Ary
   in insertion order, bins an Ary(Int32) of indices into it, Str keys as
-  views, no pointers, so it is flat and copied whole like Tre. Replace
+  views; links are indices, so it is Copyable and packed like Tre. Replace
   the four linear-scan TapeMap copies in std/yaml.iyi, toml.iyi,
   xml.iyi and mail.iyi. Start from src/iyi/hash.iyi (the same compact
   layout on Pointers): swap them for Ary; take Crystal's linear scan for

@@ -4,6 +4,23 @@ Every change to TAPE_SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one.
 
+## 2026-10-27: board messages are Copyable, packed as one image
+
+* Changed: 5.6 names the message property Copyable (Goose's flat): a
+  finite, self-contained packed form, inferred by the compiler at post,
+  take, poll and limit. A post packs counts, fields, union tags and live
+  elements of Str, Ary and Tre into one owned image, sized before
+  publication with the source unchanged; take unpacks fresh containers.
+  Self-containing types and user link fields are refused; only Tre's own
+  stop boundaries cross, open -1 kept. Empty values count under the
+  limit; per-message bounds are published and exceeding one is 4.2.
+  Packing is not the to_bytes image. 5.2 notes there is no cross-type
+  order, but a task's completed posts precede its later calls.
+* Why: a review found that "flat" meant two things in ris (Goose's
+  property and @[Tape::Flat] raw bytes), that "copied whole" left nested
+  Str pointers and cycles open, and that limit skipped the type check.
+  Copyable follows Ruby's -able names and Ractor's "copy" for messages.
+
 ## 2026-10-27: board messages are flat; Ary and Tre allowed
 
 * Changed: 5.6 calls board payloads flat, as Goose does, and admits

@@ -50,24 +50,41 @@ user callbacks. Group end neither closes nor drains the board.
 
 ## Copies and task boundaries
 
-Messages are flat: numeric scalars, Bool, Char, Symbol, Nil, enums,
-Str, Ary(T) and Tre(T) of flat T, and value structs recursively
-containing these or unions of them. The compiler checks this at post
-and take; no marker is needed. Generated copies preserve enum values
-and concrete types, copy Str, Ary and Tre whole, split sharing as in 1.7
-and run no user code. Owners, classes, pointers, resources, closures
-and fields containing them are refused.
-No receiver borrows sender bytes or a runtime pool view. GC and no-GC
-storage must obey the same lifetime and transactional copy rules.
+A message is Copyable: it has a finite, self-contained packed form
+(Goose calls this flat). Copyable types are numeric scalars, Bool, Char,
+Symbol, Nil, enums, Str, Ary(T) and Tre(T) of Copyable T, and value
+structs or unions of these. The compiler infers this at post, take, poll
+and limit; no marker is needed. Copyable differs from @[Tape::Flat],
+which marks raw-byte images: Str, Ary and Tre are handles, and the board
+packs their live data, never their pointers. A type that contains itself
+through fields, unions, Ary or Tre is refused; keep recursive data in a
+Tre or a node array with checked indices. User link fields stay refused;
+only Tre's own stop boundaries cross, relative to the copied entries. A
+post packs counts, fixed fields, union tags and live elements into one
+owned image, sized before publication, while the source stays unchanged;
+each handle occurrence gets its own copy, and an empty value still
+counts once under the limit. take unpacks fresh containers with capacity
+equal to size. Copies keep concrete types and enum values and run no
+user code. Owners, classes, pointers, resources, closures and fields
+containing them are refused. No receiver borrows sender bytes or a
+runtime pool view. GC and no-GC storage obey the same lifetime and
+transactional copy rules. Per- message count and packed- byte bounds are
+published; exceeding one is 4.2.
+
+Board packing is private; it is not the to_bytes/from_bytes image. To
+send a linked structure, encode it to Str or Ary(UInt8), post that and
+validate it before decoding. Static Str uses the same copy rule; sharing
+static program data between tasks does not admit other views or pointers
+as messages.
 
 Unlike Goose, where arrays are values, Str, Ary and Tre are views on a
-tape, so the board copies them whole; Tre links stay inside the copy. A
-miss is nil rather than Goose's zero T. Tasks are grouped fibers, with
-cancellable waits, Share checks and panic/defer cleanup. Every task,
-local or parallel, captures only Share values or independent checked
-copies on its own tape; no shared mutable borrows. This includes
-receivers and reached program state. A copied closure must satisfy those
-checks, not retain a hidden manager or resource.
+tape, so the board packs their data. A miss is nil rather than Goose's
+zero T. Tasks are grouped fibers, with cancellable waits, Share checks
+and panic/defer cleanup. Every task, local or parallel, captures only
+Share values or independent checked copies on its own tape; no shared
+mutable borrows. This includes receivers and reached program state. A
+copied closure must satisfy those checks, not retain a hidden manager or
+resource.
 
 ## Workers and shutdown
 
@@ -149,3 +166,13 @@ tape; this is completion broadcast, not a consuming message or a timed
 wait. Autocert needs timed nonconsuming task waits with separate handshake
 deadlines: one waiter's timeout must not cancel the common order. value
 alone does not provide this yet; TODO records that and manager wake/stop.
+
+IyiTask#value is not Goose's thread_wait: it answers the task's result
+or Panicked, not a status Bool, and a task handle is not a message. In
+Goose results flow back through queues; do the same with a Result type,
+and keep value for completion inside the group that made the task. To
+let one failed worker end without failing its siblings, run it in an
+inner group of a supervisor task and handle Panicked there; ordinary
+groups fail fast (iyi III.4.3). Goose's hardware_threads sizes workers
+by its stack budget; ris has no counterpart yet, and task count is not
+the native worker count (IyiWorkers).
