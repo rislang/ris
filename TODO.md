@@ -36,8 +36,8 @@ How to work (fewer tokens, faster to the goal):
   Borrowed Run constructors now retain Ary shrink lifetimes; gates cover
   constructor bounds and foreign Ary storage as well as pool storage.
 * Concurrency storage (TAPE_SPEC 5.2): task records, wait nodes and
-  queues in runtime typed pools; a buffered queue is bounded and send
-  reports full; a failed receive keeps the message.
+  bounded queues in runtime typed pools; preserve queued messages on
+  pool failures and prove zero heap under --no-gc.
 * Tape messages on channels (TAPE_SPEC 5.2): the queue owns a
   queued tape value, receive copies it to the receiver, close releases.
 * For FFI paths in use, enforce borrow lifetimes, retained-storage owners,

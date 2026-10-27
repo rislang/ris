@@ -6,6 +6,9 @@ ris, take it to iyi with `git cherry-pick`; strike entries once merged.
 
 ## To take to iyi
 
+* Channel: bounded buffered sends report ChannelFull without parking;
+  waking a receiver does not release its buffered slot or grow the ring.
+
 * std/math: use StaticArray for all fixed numeric constant tables,
   preserving their literal bits without startup heap allocations.
 

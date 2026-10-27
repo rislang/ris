@@ -27,6 +27,25 @@ expect() {
   fi
 }
 
+# Buffered channels stay bounded, including wakes and cancelled receives.
+out=$("$RIS" run test/ris/channel_bounded.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = 'PASS: bounded channels' ]; then
+  echo "runs     channel_bounded (full, cancellation, close, rendezvous)"
+else
+  echo "FAILED   channel_bounded: $out"; status=1
+fi
+
+# Channel storage remains heap-backed until the typed-pool migration.
+# Keep the no-GC refusal: this semantic slice must add no exemption.
+out=$("$RIS" run --no-gc test/ris/channel_bounded.ri 2>&1)
+if [ "$?" -ne 0 ] &&
+    grep -qF 'ris: heap allocation with --no-gc:' <<<"$out" &&
+    grep -qF 'Channel(Int32).class' <<<"$out"; then
+  echo "refused  channel_bounded (--no-gc heap storage)"
+else
+  echo "FAILED   channel_bounded no-GC refusal: $out"; status=1
+fi
+
 # Metadata paths, IDs and missing-file diagnostics stay on tape.
 out=$(RIS="$RIS" bash test/ris/file_metadata.sh 2>&1)
 if [ "$?" -eq 0 ]; then

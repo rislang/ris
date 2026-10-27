@@ -389,6 +389,18 @@ impl Error for ChannelClosed
   end
 end
 
+# A buffered send never parks or grows the queue.
+pub struct ChannelFull
+  def initialize
+  end
+end
+
+impl Error for ChannelFull
+  def message : String
+    "channel full"
+  end
+end
+
 # ── A fiber ────────────────────────────────────────────────────────────
 #
 # Not user-facing (III.4.6): a raw spawn is the leak III.4.1 exists to
@@ -4184,7 +4196,7 @@ class Channel(T)
     @spare_send = nil
   end
 
-  def send(value : T) : Nil | ChannelClosed | Cancelled
+  def send(value : T) : Nil | ChannelClosed | ChannelFull | Cancelled
     fiber = IyiScheduler.current
     IyiSchedLock.lock
     if fiber.cancelled
@@ -4195,6 +4207,11 @@ class Channel(T)
       answer = put_now(value)
       IyiSchedLock.unlock
       return answer
+    end
+
+    if @capacity > 0
+      IyiSchedLock.unlock
+      return ChannelFull.new
     end
 
     # Park carrying the value. The wake tells one of three stories, and
@@ -4309,7 +4326,7 @@ class Channel(T)
   end
 
   def send_ready? : Bool
-    @closed || @count < @capacity || receiver_waiting?
+    @closed || @count < @capacity || (@capacity == 0 && receiver_waiting?)
   end
 
   # Assumes `send_ready?`. A rendezvous puts the value in the parked
@@ -4322,12 +4339,9 @@ class Channel(T)
   def put_now(value : T) : Nil | ChannelClosed
     return ChannelClosed.new if @closed
     return nil if @capacity == 0 && hand(value)
-    if wake_receiver
-      push_item(value)
-      return nil
-    end
     if @count < @capacity
       push_item(value)
+      wake_receiver
       return nil
     end
     raise "put_now on a full channel"
@@ -4341,21 +4355,10 @@ class Channel(T)
     IyiSendSelect(T).new(self, value)
   end
 
-  # Onto the ring's end. A buffered channel can be asked for more than
-  # its capacity: senders that each woke a parked receiver before any of
-  # them ran have all those values in hand, so a full ring doubles.
+  # The readiness check reserves a slot under the scheduler lock.
+  # Waking a receiver does not release that slot; only a receive does.
   private def push_item(value : T) : Nil
-    if @count == @slots
-      grown = Pointer(T).malloc((@slots * 2).to_u64)
-      index = 0
-      while index < @count
-        grown[index] = @ring[(@first + index) % @slots]
-        index = index + 1
-      end
-      @ring = grown
-      @first = 0
-      @slots = @slots * 2
-    end
+    raise "push_item on a full channel" if @count == @slots
     at = @first + @count
     at = at - @slots if at >= @slots
     @ring[at] = value

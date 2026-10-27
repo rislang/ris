@@ -1,0 +1,62 @@
+module test/ris/channel_bounded
+
+module Queues
+  @@buffered = Channel(Int32).new(2)
+  @@rendezvous = Channel(Int32).new
+
+  def self.buffered : Channel(Int32)
+    @@buffered
+  end
+
+  def self.rendezvous : Channel(Int32)
+    @@rendezvous
+  end
+end
+
+q = Queues.buffered
+100.times do
+  raise "first send" unless q.send(11).nil?
+  raise "second send" unless q.send(22).nil?
+  full = q.send(33)
+  raise "full send" unless full.is_a?(ChannelFull)
+  raise "full message" unless full.message == "channel full"
+  selected = Channel.non_blocking_select({q.send_select_action(99)}, 0)
+  raise "full select" unless selected[0] == -1
+  raise "first receive" unless q.receive == 11
+  raise "wrap send" unless q.send(44).nil?
+  raise "wrapped full" unless q.send(55).is_a?(ChannelFull)
+  raise "second receive" unless q.receive == 22
+  raise "wrapped receive" unless q.receive == 44
+end
+
+# Both receivers park. Waking them must not free either buffered slot.
+# Cancelled receives must leave both messages for the next receiver.
+group do |g|
+  a = g.spawn { Queues.buffered.receive }
+  b = g.spawn { Queues.buffered.receive }
+  sleep(1)
+  raise "wake first" unless q.send(61).nil?
+  raise "wake second" unless q.send(62).nil?
+  raise "woken full" unless q.send(63).is_a?(ChannelFull)
+  selected = Channel.non_blocking_select({q.send_select_action(99)}, 0)
+  raise "woken select" unless selected[0] == -1
+  g.cancel_children
+  raise "cancel first" unless a.value.is_a?(Cancelled)
+  raise "cancel second" unless b.value.is_a?(Cancelled)
+end
+raise "retained first" unless q.receive == 61
+raise "retained second" unless q.receive == 62
+q.send(71)
+q.close
+raise "closed send" unless q.send(72).is_a?(ChannelClosed)
+raise "closed drain" unless q.receive == 71
+raise "closed receive" unless q.receive.is_a?(ChannelClosed)
+
+# An unbuffered send still parks until its receiver takes the value.
+group do |g|
+  sender = g.spawn { Queues.rendezvous.send(81) }
+  sleep(1)
+  raise "rendezvous" unless Queues.rendezvous.receive == 81
+  raise "sender" unless sender.value.nil?
+end
+puts "PASS: bounded channels"
