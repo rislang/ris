@@ -21,6 +21,19 @@ How to work (fewer tokens, faster to the goal):
 
 ## Messages: RisBoard (TAPE_SPEC 5.2, 5.6; doc/MESSAGES.md)
 
+Order, fastest with fewest tokens: one Sol low run per item, fixes
+resumed in the same session, one full minitest check per item. After the
+board core, HTTP, pipe/socket race and autocert touch different files and
+may run two at a time in separate worktrees. Pipe/socket race needs
+poller work for several IO waits at once and may come last; Channel stays
+for them until then.
+
+* Remove first, as mechanical work no std user depends on: RisInbox,
+  RisWorker, RisSemaphore, RisEvent, request/reply, new_task/new_worker,
+  owns:, task.take, resources.iyi and the ordered group drain, with their
+  compiler checks and tests. Keep inbox.iyi's slabs, free lists, copy and
+  rollback for the board core. Gate: no remaining users, full check, std
+  tests and --no-gc.
 * Build board core from reusable inbox slabs/free lists, not owner/drain
   hooks: canonical specialized keys across modules, alias identity, union
   wrappers, multi-taker waits/claims, recursive struct/Str codecs, copy
@@ -36,16 +49,19 @@ How to work (fewer tokens, faster to the goal):
   check at limit too, huge values over the published bound end as 4.2.
   Keep @[Tape::Flat] (raw-byte images) a separate property. Isolate tests
   with fresh nominal types; fresh processes for unlimited queues.
-* Enforce Share-or-copy task captures, local and parallel, through captured
-  receivers, handlers and reached state; keep all resources in their
-  opening task. Gate: mutable/resource captures refused with safe forms,
-  independent config copies, retained results copied to multiple readers.
+* Port samples/workers to nominal Job/Result, in-band Job quit variants,
+  checked post results and explicit cancellation handling. Gate: expected
+  results, bounded refusal without spinning, accepted quits and clean join.
 * Port HTTP to N tasks, each opening a SO_REUSEPORT listener on the same
   port and accepting/serving its own connections. Task count is the
   connection limit; no permits/semaphore. Copy config and handlers per
   task; keep IdleConns local. Define shutdown and unsupported-platform
   refusal. Gate: simultaneous listeners, N-connection bound, keepalive/TLS,
   panic/cancel cleanup and existing HTTP tests without resource transfers.
+* Enforce Share-or-copy task captures, local and parallel, through captured
+  receivers, handlers and reached state; keep all resources in their
+  opening task. Gate: mutable/resource captures refused with safe forms,
+  independent config copies, retained results copied to multiple readers.
 * Port pipe to one-task OS IO on the poller: nonblocking reads/writes,
   partial-write buffers, EOF-after-drain, EPIPE and cancellation. Settle
   the old piece-count capacity API versus OS byte capacity. Gate: full
@@ -62,13 +78,6 @@ How to work (fewer tokens, faster to the goal):
   Replace wake/halt/select with tagged control messages or local OS wakes.
   Gate: many waiters, independent deadlines, renewal/stop, manager isolation,
   panic/cancel/result lifetime and existing autocert tests.
-* Port samples/workers to nominal Job/Result, in-band Job quit variants,
-  checked post results and explicit cancellation handling. Gate: expected
-  results, bounded refusal without spinning, accepted quits and clean join.
-* Remove RisInbox, RisWorker, RisSemaphore, RisEvent, request/reply,
-  new_task/new_worker, owns:, task.take and ordered drain code, compiler
-  checks and obsolete tests after ports pass. Gate: no remaining users,
-  replacement diagnostics, full check, std tests and --no-gc.
 * Remove Channel/select after all replacement gates pass. Gate: no
   remaining users, full check, std/samples tests and --no-gc link audit.
 
