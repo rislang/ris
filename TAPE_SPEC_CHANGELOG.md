@@ -4,6 +4,31 @@ Every change to TAPE_SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one.
 
+## 2026-10-27: reviewed message contract and runtime group shutdown
+
+* Changed: 5.2 gives normal group shutdown to the runtime: wait for plain
+  tasks, close inboxes in creation order and await each worker/actor's
+  drain, join, discard and retire. Early exit cancels and wakes before
+  joining. Owner death discards sooner; graceful close retains mail.
+* Changed: 5.2, 5.5 and 5.6 define transport identity, creating-task thread
+  affinity, worker-local state and scratch reset, transactional receive,
+  pinning, slot generations and GC root clearing. Send ignores cancel;
+  waits order Cancelled, data, Closed and TimedOut. Capacity starts at 1;
+  request supplies rendezvous. Events latch and broadcast; semaphores
+  count permits; omitted deadlines wait forever, 0 polls, negatives fail.
+* Changed: 5.6 makes accepted requests survive caller timeout/cancel,
+  resolves Request arms uniquely and defines live duplicates vs expired
+  reply tokens. owns: moves resources into new tasks, workers or actors;
+  later creator use is refused. Task.value never moves a resource;
+  checked one-shot result take remains open. 4.1 qualifies result copies.
+  Byte sizing and remaining mechanism choices are explicit TODO work.
+* Why: the contract review found contradictions that would invalidate
+  pool layouts and std ports. Joining alone proves no exclusive resource
+  ownership, clearing on close loses mail, and cancelling only after join
+  cannot end a waiting worker. This entry supersedes conflicting claims
+  in earlier 2026-10-27 entries, including owner/group end, release on
+  close, send cancellation, joined-result moves and settled outcomes.
+
 ## 2026-10-27: 5.6 message outcomes
 
 * Added: 5.6 settles the open points: error order, slot generations,

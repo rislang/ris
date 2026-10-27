@@ -75,8 +75,8 @@ rule goes last in its section; a removed one leaves its number unused.
 * 4.1 Errors, panics, defer and exit are iyi's: defer runs innermost first on
   normal scope exit, panic unwind and exit (the calling task's only), on current
   locals; a panic is caught at a task boundary. ris adds: frame regions are
-  released after the defers; panic data and task results are copied to the
-  receiver first. A panic in cleanup is fatal.
+  released after the defers; panic data and copyable task results are
+  copied to the receiver first (resources: 5.6). A panic in cleanup is fatal.
 * 4.2 Exhaustion and bad sizes are checked before mutation, with overflow-safe
   arithmetic; they end as iyi's panic print (allocation-free), no fallback.
   Limits for tape bytes, regions, tasks and native stack are published.
@@ -90,26 +90,40 @@ rule goes last in its section; a removed one leaves its number unused.
   (III.4.4) are shared: Str and program data no method writes after init,
   checked per owner. Ary and its views write through and are never shared; ris
   has no freeze.
-* 5.2 Tasks pass messages through a `RisInbox(T)`, after Goose's typed
+* 5.2 Tasks pass messages through `RisInbox(T)`, after Goose's typed
   queues (§11.2) and Koja's process boundary
   ([MEMORY-MODEL.md](doc/reference/koja/design/MEMORY-MODEL.md)).
-  `g.new_inbox` makes one owned by the calling task and `g.new_worker` a
-  RisWorker, a task owning one; only the owner receives. Main makes them
-  in its own group. An inbox ends with its group g; its send handle and
-  a RisWorker are Share (5.1) and go stale then. A message is what
-  copy_to accepts (1.7), copied by its rules at send and at receive.
-  Send copies into the inbox's own storage, releasable per message, and
-  never waits or answers Cancelled: RisInbox::Full, RisInbox::Closed.
-  Receive copies to the owner's current tape, then releases the message;
-  a failed or cancelled receive keeps it. Any holder may close: sends
-  are refused, the owner drains what is queued, then gets Closed. The
-  group's end discards what is left. `request` waits for a reply copied
-  the same way. Waiting for room or a signal uses RisSemaphore and
-  RisEvent; their waiters get Cancelled when the group ends. A wait
-  takes a timeout (`receive(ms)`); ris has no select and no Channel.
-  Exhaustion follows 4.2, with one published byte limit for queued
-  messages. Inboxes, task records, wait nodes and reply slots live in
-  runtime typed pools. This is open work in TODO.md.
+  `g.new_inbox` makes one owned by the calling task; `g.new_worker` makes
+  a RisWorker owning one. Only the owner receives: refuse known misuse,
+  else panic with a hint to send or create an inbox in the receiving task.
+  Main uses its own group. Capacity is at least 1; refuse 0 with a hint
+  to request for rendezvous; negatives and overflow follow 4.2.
+  Send copies payloads by 1.7 into inbox-owned per-message storage; receive
+  copies them out. Resources and owners are refused recursively. Runtime
+  handles and reply tokens copy identity, never their records; Request
+  envelopes copy only their payload.
+  Send handles, workers and actors are Share regardless of payload type;
+  sharing a handle extends no tape borrow (3.x). They cross threads;
+  workers and actors run on their creating task's thread.
+  Send never waits and ignores task cancellation: Closed before Full.
+  Receive copies to the owner's current tape before releasing queued mail.
+  Any holder may close: refuse sends, retain mail to drain, then Closed.
+  Owner death discards unread mail and closes unanswered requests even
+  while the group lives. At normal group block end the runtime waits for
+  plain tasks, then closes inboxes in creation order, waiting for each
+  worker or actor to drain and finish before closing the next; it joins,
+  discards remaining mail and retires records. No manual close or compiler
+  proof is required. Early exit (failure or cancel included) cancels
+  children and wakes waits before joining, discarding and retiring.
+  Nested groups follow the same order; stale handle operations yield Closed.
+  RisSemaphore counts permits: acquire takes one, release returns one and
+  wakes one waiter; hold releases on every exit. Cancelled waits take no
+  permit. RisEvent latches on fire and broadcasts; repeated fire is harmless,
+  later waits succeed until group end. Their waits yield Cancelled on
+  cancellation, TimedOut on timeout.
+  receive(), acquire() and wait() have no deadline; a ms argument uses a
+  monotonic clock, 0 polls, negatives follow 4.2. ris has no select or
+  Channel. Runtime records live in typed pools; mechanisms remain in TODO.
 * 5.3 Callbacks borrow their environment for the call only; an escaping closure
   copies captures to a named owner or task pool, never a borrow. Thread-locals
   hold no fiber borrows.
@@ -117,39 +131,52 @@ rule goes last in its section; a removed one leaves its number unused.
   borrows have explicit lifetimes; retained foreign storage has an owner and
   cleanup. Never unwind across foreign frames; foreign threads attach first.
   Safety exceptions are marks with reasons, never a global switch.
-* 5.5 `g.new_actor` makes a RisActor, the main tool for messages: a
-  RisWorker whose receive loop the compiler writes. The worker builds its
-  named state in place from copied startup data; an owner is never
-  passed, copied or returned as a startup value (2.1). State and its
-  growing parts live outside scratch (2.2). Each handler borrows the
-  state and gets one typed message on scratch, reset after the handler on
-  every exit and never freeing state. It mutates state in place and
-  returns Nil; retained data goes through copy_to(state) or a state
-  writer (1.5, 1.7). A handler never waits or blocks: it starts a task
-  with copied input and gets a completion message, or the code is a
-  RisWorker. It replies only through a typed RisInbox::Request. A panic
-  ends the worker; partly changed state never resumes. Outside, an
-  actor is a RisWorker (5.2). Goose's root structs inform the state
-  owner ([root_structs.md](doc/reference/goose/docs/design/root_structs.md)).
-* 5.6 Message outcomes. A cancelled caller gets Cancelled first and loses
-  no message; then receive takes a queued message before Closed, and
-  Closed beats TimedOut; send answers Closed before Full. A handle names
-  a pool slot and its generation: a stale one answers Closed, never
-  reaches a reused slot. A wait in ms runs on a monotonic clock; 0 does
-  not wait; a negative wait is a bad size (4.2). An inbox is Full by
-  count or by its byte budget (`bytes:`, published default); region
-  exhaustion stays 4.2. `request` answers R, Full, Closed, TimedOut or
-  Cancelled; R comes from the inbox's one Request variant for the
-  message type. Closed also ends a request whose owner ends unreplied.
-  `reply` answers Nil or RisInbox::Expired when the asker is gone; a
-  second reply panics. Requesting one's own inbox is refused, at compile
-  time when known, else as a panic naming a task or a send. An actor
-  starts from a state type: S.new runs in the worker, then an `init`
-  block with copied captures (5.3). A resource crosses tasks only as a
-  joined task's result (4.1): the child has ended, so it moves. Inbox,
-  worker and actor handles are Share and cross threads; the actors and
-  workers run on their group's thread. GC builds root pool slots and
-  clear them on receive and close.
+* 5.5 `g.new_actor` makes a RisActor, a RisWorker whose receive loop the
+  compiler writes. From `state: S` it declares one named worker-local
+  state in place with S.new, then runs init with copied captures (5.3).
+  Startup never waits or publishes state borrows; sends may queue during
+  it. Owners are never startup values or actor fields (2.1); resources
+  enter only through owns: (5.6). State and growing parts stay outside
+  handler scratch (2.2). Each handler borrows state and one typed message;
+  scratch resets after its defers on every exit, never freeing state.
+  It mutates state in place and returns Nil; retain data with
+  copy_to(state) or a checked state writer, never scratch roots (1.5, 1.7).
+  Check no-wait transitively, including cleanup and foreign contracts:
+  launch a task with copied input and receive completion, or use a worker.
+  Launch and send do not wait; task captures retain no state/message borrow.
+  Reply only through a typed Request. A startup or handler panic ends the
+  worker and closes its inbox; partly changed state never resumes.
+  Outside it is a RisWorker (5.2). Goose's root structs inform state
+  ([root_structs.md](doc/reference/goose/docs/design/root_structs.md)).
+* 5.6 Waits decide at one commit point: Cancelled, available data, Closed,
+  then TimedOut. A wake transfers nothing. Receive publishes a complete
+  copy or rolls back and keeps mail; success survives later cancellation.
+  Active copies pin records; closure cannot recycle pinned storage.
+  Full accepts nothing, by count or a positive per-inbox bytes: budget
+  (published default); charge queued/reserved copy storage, splitting aliases.
+  The exact sizing algorithm and reply/scratch bounds remain open in TODO;
+  arithmetic and physical exhaustion follow 4.2. Handles carry type, slot
+  and generation; wrap retires the slot, stale handles never reach reuse.
+  Runtime pools expose no payload views and keep occupied slots typed (6.x).
+  GC roots cover active payloads and copies; clear only after committed
+  receive, discard or rollback, never on graceful close alone.
+  request waits for a copied reply: R, Full, Closed, TimedOut or Cancelled.
+  Its argument must resolve to exactly one Request(M, R) union arm; refuse
+  ambiguity with a hint to distinct tagged payloads. Both M and R obey 5.2.
+  Only the runtime makes envelopes; plain send cannot forward a Request.
+  Accepted messages survive request timeout/cancel; effects are not undone.
+  Graceful close permits replies; owner death closes unanswered slots,
+  while a committed reply survives it. reply uses a one-shot slot: Nil on
+  commit, Expired for retired, timed-out or cancelled tokens without copying;
+  duplicate replies while live panic. Reply is never Full; exhaustion is 4.2.
+  Refuse known self-request, else check task identity and panic; suggest a
+  local call, send or another task. Resources never copy as messages or
+  through copy_to. owns: moves a resource at task start, also for workers
+  and actors, e.g. g.new_task(owns: client): exclude surviving aliases and
+  refuse later creator use, suggesting work in the receiving task or a
+  message to it. Cleanup belongs to the receiver. Task.value is not a move
+  and refuses resource results: keep the resource in its worker. Transfer
+  out needs a checked one-shot take, still open work in TODO.
 ## 6. Pools, validation, tooling (Goose §5.4, §9.3-9.4)
 * 6.1 Pool(T)/SlicePool(T): typed slots/runs; free keeps values valid, stale
   views see typed replacements; generations only guard checked handles.
