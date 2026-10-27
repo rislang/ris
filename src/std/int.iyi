@@ -33,7 +33,7 @@ module std/int
 
 # The processor's bit counts, one LLVM signature per width: an unsigned type
 # passes its bits as the signed type of its width, and a zero counts as the
-# width. `IyiBits` carries them to the methods below, which live on the
+# width. `RisBits` carries them to the methods below, which live on the
 # prelude's types and so cannot see this module's own lib.
 lib LibLLVMBits # llvm.ctpop.iN llvm.ctlz.iN llvm.cttz.iN
   {% for w in [8, 16, 32, 64, 128] %}
@@ -43,7 +43,7 @@ lib LibLLVMBits # llvm.ctpop.iN llvm.ctlz.iN llvm.cttz.iN
   {% end %}
 end
 
-pub struct IyiBits
+pub struct RisBits
   {% for w in [8, 16, 32, 64, 128] %}
     def self.popcount(x : Int{{ w }}) : Int32
       LibLLVMBits.ctpop{{ w }}(x).to_i32
@@ -502,15 +502,15 @@ end
       # A negative value has its sign bits counted: `(-1).popcount` is 32.
       {% raw = signed ? "self" : "unsafe_to_i#{bits}" %}
       def popcount : Int32
-        ::Std::Int::IyiBits.popcount({{ raw.id }})
+        ::Std::Int::RisBits.popcount({{ raw.id }})
       end
 
       def leading_zeros_count : Int32
-        ::Std::Int::IyiBits.leading_zeros({{ raw.id }})
+        ::Std::Int::RisBits.leading_zeros({{ raw.id }})
       end
 
       def trailing_zeros_count : Int32
-        ::Std::Int::IyiBits.trailing_zeros({{ raw.id }})
+        ::Std::Int::RisBits.trailing_zeros({{ raw.id }})
       end
 
       # Bits needed to write the value, the sign excluded: `255.bit_length`

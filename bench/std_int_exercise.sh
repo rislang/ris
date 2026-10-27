@@ -141,7 +141,7 @@ else
   "$PY" - <<PY
 from pathlib import Path
 src = Path("$REPO/src/std/int.iyi").read_text()
-old = '::Std::Int::IyiBits.popcount({{ raw.id }})'
+old = '::Std::Int::RisBits.popcount({{ raw.id }})'
 if old not in src:
     raise SystemExit("patch site missing")
 Path("$WORK/patched/std/int.iyi").write_text(src.replace(old, '0', 1))

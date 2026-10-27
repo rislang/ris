@@ -3,6 +3,8 @@
 ris is iyi plus tape memory. A change that does not depend on tape belongs
 in iyi: make it there first and merge it into ris, or, if it was made in
 ris, take it to iyi with `git cherry-pick`; strike entries once merged.
+A Ris* type goes to iyi as Iyi*; ris renames it when the merge brings it
+back.
 
 ## To take to iyi
 
@@ -15,7 +17,7 @@ ris, take it to iyi with `git cherry-pick`; strike entries once merged.
   them when Channel goes (TODO.md); iyi may take the names.
 
 * std/int: popcount and the zero counts through LLVM's bit intrinsics,
-  carried by `IyiBits` (bf760fcb3); the name stays for iyi.
+  carried by `RisBits` (bf760fcb3), which goes to iyi as `IyiBits`.
 
 * std/math: use StaticArray for all fixed numeric constant tables,
   preserving their literal bits without startup heap allocations.
