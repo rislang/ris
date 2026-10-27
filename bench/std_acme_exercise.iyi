@@ -21,10 +21,326 @@
 #                   for OpenSSL and Python's cryptography to read;
 #   alpn-serve DIR  one TLS handshake with the tls-alpn-01 config on a
 #                   port written to DIR/port;
-#   pebble DIRECTORY MINICA MANAGEMENT CHALLTESTSRV HTTP_PORT TLS_PORT OUT REJECT [RSA_PEM]
+#   pebble DIRECTORY MINICA MANAGEMENT CHALLTESTSRV HTTP_PORT TLS_PORT OUT
+# REJECT [RSA_PEM]
 #                   whole orders against Let's Encrypt's Pebble, by
 #                   http-01, dns-01 and tls-alpn-01, the chains checked by
 #                   std/x509 against Pebble's root and written to OUT.
+
+module bench/std_acme_exercise
+
+# The probe owns its socket only until it chooses a nonzero pool port.
+# Ready and Stop are keyed by factory, so simultaneous pools do not steal
+# one another's lifecycle messages. Stop gives the response time to flush.
+# These exercises still use std's legacy String APIs and assertions.
+# Board messages themselves own copied tape text; this is the heap adapter.
+@[TapeToHeap]
+def ris_heap_text(value : Str) : String
+  value.to_s
+end
+
+import std/file::{File}
+
+module RisExerciseServer
+  struct RisReady(H)
+  end
+
+  struct RisStop(H)
+  end
+
+  @[OnTape]
+  struct RisConfig(C, H)
+    getter value : C
+
+    def initialize(@value)
+    end
+  end
+
+  def self.port : Int32
+    probe = IyiSocket.listen("127.0.0.1", 0)
+    port = probe.local_port
+    probe.close
+    port
+  end
+
+  def self.ready(handler : H.class) : Nil forall H
+    raise "ready queue full" unless RisBoard.post(RisReady(H).new)
+  end
+
+  def self.wait(handler : H.class) : Nil forall H
+    ready = RisBoard.take(RisReady(H), 10000_i64)
+    raise "cancelled before listening" if ready.is_a?(Cancelled)
+    raise "server did not listen within 10 s" unless ready[1]
+  end
+
+  def self.stop(handler : H.class) : Nil forall H
+    raise "stop queue full" unless RisBoard.post(RisStop(H).new)
+  end
+
+  def self.serve(port : Int32, config : C, handler : H.class,
+                 stream_bodies : Bool = false, compress : Bool = false,
+                 timeout_ms : Int32 = 60000,
+                 request_timeout_ms : Int32 = Server::REQUEST_TIMEOUT,
+                 max_connections : Int32 = 64,
+                 print_port : Bool = false,
+                 port_file : String? = nil) : Nil forall C, H
+    raise "config queue full" unless RisBoard.post(RisConfig(C, H).new(config))
+    group do |pool|
+      pool.spawn do
+        copied = RisBoard.take(RisConfig(C, H))
+        unless copied.is_a?(Cancelled)
+          Server.serve("127.0.0.1", port, copied.value, handler,
+            stream_bodies: stream_bodies, compress: compress,
+            timeout_ms: timeout_ms, request_timeout_ms: request_timeout_ms,
+            max_connections: max_connections)
+        end
+        0
+      end
+      pool.spawn do
+        unless RisBoard.take(RisStop(H)).is_a?(Cancelled)
+          sleep(50)
+          pool.cancel_children
+        end
+        0
+      end
+      if print_port || port_file
+        wait(handler)
+        puts port if print_port
+        File.write(port_file, port.to_s) if port_file
+      end
+      0
+    end
+  end
+end
+
+@[OnTape]
+struct RisAcmeSnapshot
+  getter requests : Int32
+  getter reused : Int32
+  getter unknown : Int32
+  getter misplaced : Int32
+  getter der_signatures : Int32
+  getter bad_signatures : Int32
+  getter wrong_urls : Int32
+  getter not_empty : Int32
+  getter bad_nonce_sent : Int32
+  getter retried_with_sent : Bool
+  getter terms : Bool
+  getter gap_ms : Int64
+  getter csr_verified : Bool
+  getter csr_names : Ary(Str)
+  getter rolled : Bool
+  getter after_roll : Bool
+
+  def initialize(@requests, @reused, @unknown, @misplaced, @der_signatures, @bad_signatures, @wrong_urls, @not_empty, @bad_nonce_sent, @retried_with_sent, @terms, @gap_ms, @csr_verified, @csr_names, @rolled, @after_roll)
+  end
+end
+
+class RisAcmeView
+  getter base : String
+  getter plain : String
+  @requests : Int32 = 0
+  @reused : Int32 = 0
+  @unknown : Int32 = 0
+  @misplaced : Int32 = 0
+  @der_signatures : Int32 = 0
+  @bad_signatures : Int32 = 0
+  @wrong_urls : Int32 = 0
+  @not_empty : Int32 = 0
+  @bad_nonce_sent : Int32 = 0
+  @retried_with_sent : Bool = false
+  @terms : Bool = false
+  @gap_ms : Int64 = -1_i64
+  @csr_verified : Bool = false
+  @csr_names : Array(String) = [] of String
+  @rolled : Bool = false
+  @after_roll : Bool = false
+
+  def initialize(@base)
+    @plain = @base.sub("https://", "http://")
+  end
+
+  def refresh : Nil
+    loop do
+      result = RisBoard.poll(RisAcmeSnapshot)
+      break if result.is_a?(Cancelled)
+      current = result[0]
+      break unless current
+      @requests = current.requests
+      @reused = current.reused
+      @unknown = current.unknown
+      @misplaced = current.misplaced
+      @der_signatures = current.der_signatures
+      @bad_signatures = current.bad_signatures
+      @wrong_urls = current.wrong_urls
+      @not_empty = current.not_empty
+      @bad_nonce_sent = current.bad_nonce_sent
+      @retried_with_sent = current.retried_with_sent
+      @terms = current.terms
+      @gap_ms = current.gap_ms
+      @csr_verified = current.csr_verified
+      @csr_names = Array(String).new(current.csr_names.size) { |i| ris_heap_text(current.csr_names[i]) }
+      @rolled = current.rolled
+      @after_roll = current.after_roll
+    end
+  end
+
+  def requests : Int32
+    refresh
+    @requests
+  end
+
+  def reused : Int32
+    refresh
+    @reused
+  end
+
+  def unknown : Int32
+    refresh
+    @unknown
+  end
+
+  def misplaced : Int32
+    refresh
+    @misplaced
+  end
+
+  def der_signatures : Int32
+    refresh
+    @der_signatures
+  end
+
+  def bad_signatures : Int32
+    refresh
+    @bad_signatures
+  end
+
+  def wrong_urls : Int32
+    refresh
+    @wrong_urls
+  end
+
+  def not_empty : Int32
+    refresh
+    @not_empty
+  end
+
+  def bad_nonce_sent : Int32
+    refresh
+    @bad_nonce_sent
+  end
+
+  def retried_with_sent : Bool
+    refresh
+    @retried_with_sent
+  end
+
+  def terms : Bool
+    refresh
+    @terms
+  end
+
+  def gap_ms : Int64
+    refresh
+    @gap_ms
+  end
+
+  def csr_verified : Bool
+    refresh
+    @csr_verified
+  end
+
+  def csr_names : Array(String)
+    refresh
+    @csr_names
+  end
+
+  def rolled : Bool
+    refresh
+    @rolled
+  end
+
+  def after_roll : Bool
+    refresh
+    @after_roll
+  end
+end
+
+@[OnTape]
+struct RisAcmeChallenge
+  getter token : Str
+  getter authorization : Str
+
+  def initialize(@token, @authorization)
+  end
+end
+
+@[OnTape]
+struct RisAcmeAlpn
+  getter domain : Str
+  getter authorization : Str
+
+  def initialize(@domain, @authorization)
+  end
+end
+
+struct RisAcmeHandshake
+end
+
+class RisAcmeResponder
+  def add(token : String, authorization : String) : Nil
+    unless RisBoard.post(RisAcmeChallenge.new(token.as_tape, authorization.as_tape))
+      raise "challenge queue full"
+    end
+  end
+end
+
+class RisAcmeScriptHandler
+  @script : Script
+  @tls : TlsServerConfig
+
+  def initialize(config : {Str, Str})
+    @script = Script.new(ris_heap_text(config[0]), ris_heap_text(config[1]))
+    @tls = TlsServerConfig.from_pem(LEAF_PEM, KEY_PEM).or_panic
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisAcmeScriptHandler)
+  end
+
+  def tls_config : TlsServerConfig
+    @tls
+  end
+
+  def call(req) : Response
+    response = @script.answer(req)
+    @script.publish
+    response
+  end
+end
+
+class RisAcmeChallengeHandler
+  @responder : AcmeHttp01
+
+  def initialize(config)
+    @responder = AcmeHttp01.new
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisAcmeChallengeHandler)
+  end
+
+  def call(req) : Response
+    loop do
+      got = RisBoard.poll(RisAcmeChallenge)
+      break if got.is_a?(Cancelled)
+      update = got[0]
+      break unless update
+      @responder.add(ris_heap_text(update.token), ris_heap_text(update.authorization))
+    end
+    @responder.answer(req) || Response.new(404, "not a challenge")
+  end
+end
 
 import std/text
 
@@ -388,6 +704,11 @@ class Script
     @plain = @base.sub("https://", "http://")
   end
 
+  def publish : Nil
+    snapshot = RisAcmeSnapshot.new(@requests, @reused, @unknown, @misplaced, @der_signatures, @bad_signatures, @wrong_urls, @not_empty, @bad_nonce_sent, @retried_with_sent, @terms, @gap_ms, @csr_verified, Ary(Str).new(@csr_names.size) { |i| @csr_names[i].as_tape }, @rolled, @after_roll)
+    raise "script observation queue full" unless RisBoard.post(snapshot)
+  end
+
   def fresh : String
     @counter = @counter + 1
     nonce = "nonce-#{@counter}"
@@ -631,7 +952,7 @@ def same_key?(a : RsaPublicKey | EcdsaPublicKey | Ed25519PublicKey, b : RsaPubli
   AcmeJws.jwk(a) == AcmeJws.jwk(b)
 end
 
-def counters(script : Script, step : String) : Nil
+def counters(script : RisAcmeView, step : String) : Nil
   check script.reused == 0, "each nonce used once (at #{step})"
   check script.unknown == 0, "every nonce sent is one the server issued (at #{step})"
   check script.misplaced == 0, "jwk for newAccount alone and kid after it (at #{step})"
@@ -641,7 +962,7 @@ def counters(script : Script, step : String) : Nil
   check script.not_empty == 0, "POST-as-GET's payload empty and a challenge's {} (at #{step})"
 end
 
-def scripted(script : Script, certificate_pem : String) : Nil
+def scripted(script : RisAcmeView, certificate_pem : String) : Nil
   account = SigningKey.p256
   client = AcmeClient.new("#{script.base}/dir", account, 5000).or_panic
   check client.directory.terms_of_service == "https://iyi-acme.example/terms", "the directory's termsOfService read"
@@ -759,38 +1080,28 @@ def scripted_checks : Nil
     at = at + 64
   end
   pem = "-----BEGIN CERTIFICATE-----\n#{lines.join("\n")}\n-----END CERTIFICATE-----\n"
-  listener = IyiSocket.listen("127.0.0.1", 0)
-  script = Script.new("https://localhost:#{listener.local_port}", pem)
+  listener = RisExerciseServer.port
+  base = "https://localhost:#{listener}"
   trust = TlsConfig.new
   trust.roots = Certificate.from_pem(ROOT_PEM).or_panic
   trust.alpn = ["http/1.1"]
   HTTP.tls_config = trust
-  served = TlsServerConfig.from_pem(LEAF_PEM, KEY_PEM).or_panic
-  outcome = "no answer"
   group do |g|
     g.spawn do
-      Server.serve(listener, tls: served) { |req| script.answer(req) }
+      RisExerciseServer.serve(listener, {base.as_tape, pem.as_tape}, RisAcmeScriptHandler, max_connections: 1)
       0
     end
-    g.spawn do
-      group do |inner|
-        task = inner.spawn do
-          scripted(script, pem)
-          "held"
-        end
-        case got = task.value
-        in Panicked
-          outcome = got.message
-        in String
-          outcome = got
-        end
-        0
-      end
-      listener.close
-      0
+    RisExerciseServer.wait(RisAcmeScriptHandler)
+    task = g.spawn do
+      scripted(RisAcmeView.new(base), pem)
+      "held"
     end
+    got = task.value
+    RisExerciseServer.stop(RisAcmeScriptHandler)
+    raise got.message if got.is_a?(Panicked)
+    raise "no script result" unless got == "held"
+    0
   end
-  raise outcome unless outcome == "held"
   puts "  a problem document, a badNonce sent again, Retry-After honoured, a finalize with its CSR checked,"
   puts "  the chain, a key rollover, an invalid challenge, waits ended by their polls and their time,"
   puts "  and every http:// URL refused by name"
@@ -841,11 +1152,6 @@ end
 
 # The tls-alpn-01 config the TLS listener shows, set once the challenge
 # is known.
-class AlpnHolder
-  property config : TlsServerConfig? = nil
-  property handshakes : Int32 = 0
-end
-
 def pem_of(der : Array(UInt8)) : String
   body = Base64.encode(text(der))
   lines = [] of String
@@ -860,7 +1166,7 @@ end
 # One order for *domain* by *kind*, answered here, finalized with
 # *domain_key*: the chain, checked by std/x509 against *roots* for the
 # domain, written to *folder*.
-def obtain(acme : AcmeClient, domain : String, kind : String, domain_key : SigningKey, responder : AcmeHttp01, holder : AlpnHolder,
+def obtain(acme : AcmeClient, domain : String, kind : String, domain_key : SigningKey, responder : RisAcmeResponder,
            challtestsrv : String, roots : Array(Certificate), folder : String) : Nil
   order = acme.new_order([domain])
   check order.is_a?(AcmeOrder), "#{kind}: newOrder for #{domain}: #{order}"
@@ -880,7 +1186,7 @@ def obtain(acme : AcmeClient, domain : String, kind : String, domain_key : Signi
       set = HTTP.post("#{challtestsrv}/set-txt", record)
       check set.is_a?(Response) && set.status == 200, "dns-01: challtestsrv took the TXT record for #{domain}"
     else
-      holder.config = AcmeTlsAlpn01.config(domain, key_authorization).or_panic
+      raise "ALPN config queue full" unless RisBoard.post(RisAcmeAlpn.new(domain.as_tape, key_authorization.as_tape))
     end
     answered = acme.respond(challenge)
     check answered.is_a?(AcmeChallenge), "#{kind}: the challenge for #{domain} answered: #{answered}"
@@ -912,28 +1218,37 @@ def pebble(args : Array(String)) : Nil
   root_pem = root.as(Response).body
   File.write("#{folder}/root.pem", root_pem)
   roots = Certificate.from_pem(root_pem).or_panic
-  responder = AcmeHttp01.new
-  holder = AlpnHolder.new
-  http_listener = IyiSocket.listen("127.0.0.1", http_port)
-  tls_listener = IyiSocket.listen("127.0.0.1", tls_port)
-  outcome = "no answer"
   retries = 0
   group do |g|
     g.spawn do
-      Server.serve(http_listener) { |req| responder.answer(req) || Response.new(404, "not a challenge") }
+      RisExerciseServer.serve(http_port, 0, RisAcmeChallengeHandler, max_connections: 1)
       0
     end
+    RisExerciseServer.wait(RisAcmeChallengeHandler)
     g.spawn do
+      tls_listener = IyiSocket.listen("127.0.0.1", tls_port)
+      defer tls_listener.close
+      current = nil.as(TlsServerConfig?)
       while true
         socket = tls_listener.accept
         break unless socket.is_a?(IyiSocket)
-        current = holder.config
-        if current
+        loop do
+          update = RisBoard.poll(RisAcmeAlpn)
+          break if update.is_a?(Cancelled)
+          alpn_update = update[0]
+          break unless alpn_update
+          current = AcmeTlsAlpn01.config(ris_heap_text(alpn_update.domain), ris_heap_text(alpn_update.authorization)).or_panic
+        end
+        if alpn_config = current
           socket.read_timeout_ms = 10000
-          conn = TlsServer.over(socket, current, 10000)
+          conn = TlsServer.over(socket, alpn_config, 10000)
           if conn.is_a?(TlsServer)
-            holder.handshakes = holder.handshakes + 1 if conn.alpn_protocol == AcmeTlsAlpn01::PROTOCOL
+            if conn.alpn_protocol == AcmeTlsAlpn01::PROTOCOL
+              raise "handshake queue full" unless RisBoard.post(RisAcmeHandshake.new)
+            end
             conn.close
+          else
+            socket.close
           end
         else
           socket.close
@@ -941,27 +1256,18 @@ def pebble(args : Array(String)) : Nil
       end
       0
     end
-    g.spawn do
-      group do |inner|
-        task = inner.spawn do
-          retries = run_pebble(directory, challtestsrv, folder, roots, responder, holder, rsa_pems)
-          "held"
-        end
-        case got = task.value
-        in Panicked
-          outcome = got.message
-        in String
-          outcome = got
-        end
-        0
-      end
-      http_listener.close
-      tls_listener.close
-      0
+    task = g.spawn do
+      run_pebble(directory, challtestsrv, folder, roots, RisAcmeResponder.new, rsa_pems)
     end
+    got = task.value
+    g.cancel_children
+    raise got.message if got.is_a?(Panicked)
+    raise "no Pebble result" unless got.is_a?(Int32)
+    retries = got
+    0
   end
-  raise outcome unless outcome == "held"
-  check holder.handshakes > 0, "Pebble's VA made a TLS handshake under acme-tls/1 with this server"
+  handshake = RisBoard.poll(RisAcmeHandshake)
+  check !handshake.is_a?(Cancelled) && handshake[1], "Pebble's VA made a TLS handshake under acme-tls/1 with this server"
   if reject > 0
     check retries > 0, "with #{reject}% of nonces refused, badNonce answers were sent again: #{retries}"
   end
@@ -969,8 +1275,8 @@ def pebble(args : Array(String)) : Nil
   puts "PEBBLE HELD"
 end
 
-def run_pebble(directory : String, challtestsrv : String, folder : String, roots : Array(Certificate), responder : AcmeHttp01,
-               holder : AlpnHolder, rsa_pems : Array(String)) : Int32
+def run_pebble(directory : String, challtestsrv : String, folder : String, roots : Array(Certificate), responder : RisAcmeResponder,
+               rsa_pems : Array(String)) : Int32
   retries = 0
   acme = AcmeClient.new(directory, SigningKey.p256)
   check acme.is_a?(AcmeClient), "Pebble's directory read over HTTPS, its certificate checked against Pebble's test root: #{acme}"
@@ -978,9 +1284,9 @@ def run_pebble(directory : String, challtestsrv : String, folder : String, roots
   account = acme.register(["mailto:acme@iyi-acme.example"], terms_agreed: true)
   check account.is_a?(String), "an ES256 account made at Pebble: #{account}"
   puts "  an ES256 account: #{account}"
-  obtain(acme, "http01.iyi-acme.example", "http-01", SigningKey.p256, responder, holder, challtestsrv, roots, folder)
-  obtain(acme, "dns01.iyi-acme.example", "dns-01", SigningKey.p384, responder, holder, challtestsrv, roots, folder)
-  obtain(acme, "alpn01.iyi-acme.example", "tls-alpn-01", SigningKey.p256, responder, holder, challtestsrv, roots, folder)
+  obtain(acme, "http01.iyi-acme.example", "http-01", SigningKey.p256, responder, challtestsrv, roots, folder)
+  obtain(acme, "dns01.iyi-acme.example", "dns-01", SigningKey.p384, responder, challtestsrv, roots, folder)
+  obtain(acme, "alpn01.iyi-acme.example", "tls-alpn-01", SigningKey.p256, responder, challtestsrv, roots, folder)
   blocked = acme.new_order(["blocked.example"])
   check blocked.is_a?(AcmeError) && blocked.problem_type == "urn:ietf:params:acme:error:rejectedIdentifier" && !blocked.detail.empty?,
     "Pebble's problem document for a blocked name is an error naming its type and detail: #{blocked}"
@@ -990,7 +1296,7 @@ def run_pebble(directory : String, challtestsrv : String, folder : String, roots
   wide = AcmeClient.new(directory, SigningKey.p384).or_panic
   check wide.register(terms_agreed: true).is_a?(String), "an ES384 account made at Pebble"
   domain_key = rsa_pems.empty? ? SigningKey.p256 : SigningKey.from_pem(File.read(rsa_pems[1])).or_panic
-  obtain(wide, "es384.iyi-acme.example", "dns-01", domain_key, responder, holder, challtestsrv, roots, folder)
+  obtain(wide, "es384.iyi-acme.example", "dns-01", domain_key, responder, challtestsrv, roots, folder)
   retries = retries + wide.bad_nonce_retries
 
   if rsa_pems.empty?
@@ -1001,7 +1307,7 @@ def run_pebble(directory : String, challtestsrv : String, folder : String, roots
     check made.is_a?(String), "an RS256 account made at Pebble: #{made}"
     rolled = rsa.roll_key(SigningKey.p256)
     check rolled.nil?, "the RS256 account's key rolled over to P-256 at Pebble: #{rolled}"
-    obtain(rsa, "rollover.iyi-acme.example", "dns-01", SigningKey.p256, responder, holder, challtestsrv, roots, folder)
+    obtain(rsa, "rollover.iyi-acme.example", "dns-01", SigningKey.p256, responder, challtestsrv, roots, folder)
     again = AcmeClient.new(directory, SigningKey.from_pem(File.read(rsa_pems[0])).or_panic).or_panic
     gone = again.register(only_existing: true)
     check gone.is_a?(AcmeError) && gone.problem_type == "urn:ietf:params:acme:error:accountDoesNotExist", "after the rollover the old key finds no account: #{gone}"

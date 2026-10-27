@@ -2172,7 +2172,7 @@ pub struct Server
   # cancelled, with nothing of this side's waiting to be read, closes at
   # once, and so does one whose client said `close` and sent nothing past
   # its request (`serve_h1`).
-  def self.handle(client : IyiSocket, handler, listener : IyiSocket? = nil, idle : IdleConns? = nil, stream_bodies : Bool = false, compress : Bool = false, timeout_ms : Int32 = 0, tls : TlsServerConfig? = nil, request_timeout_ms : Int32 = 0) : Nil
+  private def self.handle(client : IyiSocket, handler, listener : IyiSocket? = nil, idle : IdleConns? = nil, stream_bodies : Bool = false, compress : Bool = false, timeout_ms : Int32 = 0, tls : TlsServerConfig? = nil, request_timeout_ms : Int32 = 0) : Nil
     defer client.close
     unless config = tls
       serve_connection(client, nil, handler, listener, idle, stream_bodies, compress, timeout_ms, request_timeout_ms)

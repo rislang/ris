@@ -9,6 +9,133 @@
 
 module bench/std_sse_exercise
 
+# The probe owns its socket only until it chooses a nonzero pool port.
+# Ready and Stop are keyed by factory, so simultaneous pools do not steal
+# one another's lifecycle messages. Stop gives the response time to flush.
+import std/file::{File}
+
+module RisExerciseServer
+  struct RisReady(H)
+  end
+
+  struct RisStop(H)
+  end
+
+  @[OnTape]
+  struct RisConfig(C, H)
+    getter value : C
+
+    def initialize(@value)
+    end
+  end
+
+  def self.port : Int32
+    probe = IyiSocket.listen("127.0.0.1", 0)
+    port = probe.local_port
+    probe.close
+    port
+  end
+
+  def self.ready(handler : H.class) : Nil forall H
+    raise "ready queue full" unless RisBoard.post(RisReady(H).new)
+  end
+
+  def self.wait(handler : H.class) : Nil forall H
+    ready = RisBoard.take(RisReady(H), 10000_i64)
+    raise "cancelled before listening" if ready.is_a?(Cancelled)
+    raise "server did not listen within 10 s" unless ready[1]
+  end
+
+  def self.stop(handler : H.class) : Nil forall H
+    raise "stop queue full" unless RisBoard.post(RisStop(H).new)
+  end
+
+  def self.serve(port : Int32, config : C, handler : H.class,
+                 stream_bodies : Bool = false, compress : Bool = false,
+                 timeout_ms : Int32 = 60000,
+                 request_timeout_ms : Int32 = Server::REQUEST_TIMEOUT,
+                 max_connections : Int32 = 64,
+                 print_port : Bool = false,
+                 port_file : String? = nil) : Nil forall C, H
+    raise "config queue full" unless RisBoard.post(RisConfig(C, H).new(config))
+    group do |pool|
+      pool.spawn do
+        copied = RisBoard.take(RisConfig(C, H))
+        unless copied.is_a?(Cancelled)
+          Server.serve("127.0.0.1", port, copied.value, handler,
+            stream_bodies: stream_bodies, compress: compress,
+            timeout_ms: timeout_ms, request_timeout_ms: request_timeout_ms,
+            max_connections: max_connections)
+        end
+        0
+      end
+      pool.spawn do
+        unless RisBoard.take(RisStop(H)).is_a?(Cancelled)
+          sleep(50)
+          pool.cancel_children
+        end
+        0
+      end
+      if print_port || port_file
+        wait(handler)
+        puts port if print_port
+        File.write(port_file, port.to_s) if port_file
+      end
+      0
+    end
+  end
+end
+
+struct RisTicks
+  getter count : Int32
+  getter gone : Bool
+
+  def initialize(@count, @gone)
+  end
+end
+
+class RisSse1Handler
+  @routes : Routes
+
+  def initialize(config)
+    @routes = Routes.new
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisSse1Handler)
+  end
+
+  def call(req) : Response
+    if req.path == "/stop"
+      RisExerciseServer.stop(RisSse1Handler)
+      Response.new(200, "bye")
+    else
+      @routes.answer(req)
+    end
+  end
+end
+
+class RisSse2Handler
+  @routes : Routes
+
+  def initialize(config)
+    @routes = Routes.new
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisSse2Handler)
+  end
+
+  def call(req) : Response
+    if req.path == "/stop"
+      RisExerciseServer.stop(RisSse2Handler)
+      Response.new(200, "bye")
+    else
+      @routes.answer(req)
+    end
+  end
+end
+
 def assert_true(cond : Bool, msg : String) : Nil
   raise "ASSERTION FAILED: #{msg}" unless cond
 end
@@ -209,8 +336,17 @@ class Routes
         end
         @ticks_gone = events.gone?
         @ticks_end = n
+        raise "ticks queue full" unless RisBoard.post(RisTicks.new(n, @ticks_gone))
       end
     when "/ticks-status"
+      if got = RisBoard.poll(RisTicks)
+        unless got.is_a?(Cancelled)
+          if tick = got[0]
+            @ticks_end = tick.count
+            @ticks_gone = tick.gone
+          end
+        end
+      end
       Response.new(200, @ticks_end < 0 ? "running" : "ended #{@ticks_gone} #{@ticks_end}")
     when "/resume"
       from = (req.header("Last-Event-ID") || "0").to_i
@@ -227,17 +363,9 @@ args = Program.args
 
 # `serve`: a port, then streams until /stop, for Python and curl.
 if args.size > 0 && args[0] == "serve"
-  serving = IyiSocket.listen("127.0.0.1", 0)
-  puts serving.local_port
+  serving = RisExerciseServer.port
   routes = Routes.new
-  Server.serve(serving) do |req|
-    if req.path == "/stop"
-      serving.close
-      Response.new(200, "bye")
-    else
-      routes.answer(req)
-    end
-  end
+  RisExerciseServer.serve(serving, 0, RisSse1Handler, print_port: true)
   __iyi_exit(0)
 end
 
@@ -362,21 +490,15 @@ end
 puts "  four streams whole and in pieces of 1, 2, 3, 5; a CRLF and a character split"
 
 puts "\n== the server's lines, and its own client reading them"
-listener = IyiSocket.listen("127.0.0.1", 0)
-base = "http://127.0.0.1:#{listener.local_port}"
-routes = Routes.new
+listener = RisExerciseServer.port
+base = "http://127.0.0.1:#{listener}"
+ticks_written = 0
 group do |g|
   g.spawn do
-    Server.serve(listener) do |req|
-      if req.path == "/stop"
-        listener.close
-        Response.new(200, "bye")
-      else
-        routes.answer(req)
-      end
-    end
+    RisExerciseServer.serve(listener, 0, RisSse2Handler)
     0
   end
+  RisExerciseServer.wait(RisSse2Handler)
   raw = HTTP.get(base + "/events").or_panic
   assert_str FEED_TEXT, raw.body, "the lines SSE.stream writes"
   assert_true raw.header("Content-Type") == "text/event-stream" && raw.header("Cache-Control") == "no-cache", "text/event-stream, no-cache: #{raw.headers}"
@@ -409,11 +531,12 @@ group do |g|
     status = HTTP.get(base + "/ticks-status").or_panic.body
     tries = tries + 1
   end
-  assert_true status.starts_with?("ended true ") && routes.ticks_end < 2000, "a client gone ends the stream's loop, and gone? says so: #{status}"
+  assert_true status.starts_with?("ended true ") && status.split(" ")[2].to_i < 2000, "a client gone ends the stream's loop, and gone? says so: #{status}"
+  ticks_written = status.split(" ")[2].to_i
   HTTP.get(base + "/stop").or_panic
   0
 end
-puts "  every line as written, the headers, a round trip, Last-Event-ID served, a client gone (#{routes.ticks_end} ticks written)"
+puts "  every line as written, the headers, a round trip, Last-Event-ID served, a client gone (#{ticks_written} ticks written)"
 
 puts "\n== reconnection"
 # Five connections: cut mid-chunk inside an event, ended by the close,

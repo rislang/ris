@@ -2800,14 +2800,57 @@ def talked(req : Request) : Response
   end
 end
 
-config = TlsServerConfig.from_pem(File.read(Program.args[1]), File.read(Program.args[2])).or_panic
-config.alpn = ["h2", "http/1.1"]
-plain = IyiSocket.listen("127.0.0.1", 0)
-secure = IyiSocket.listen("127.0.0.1", 0)
-File.write(Program.args[0], "#{plain.local_port} #{secure.local_port}")
+struct OriginReady
+end
+
+class PlainOrigin
+  def initialize(config)
+  end
+  def listening(port : Int32) : Nil
+    raise "ready queue full" unless RisBoard.post(OriginReady.new)
+  end
+  def call(req : Request) : Response
+    told(req)
+  end
+end
+
+class SecureOrigin < PlainOrigin
+  @tls : TlsServerConfig
+  @[TapeToHeap]
+  def initialize(config : {Str, Str})
+    @tls = TlsServerConfig.from_pem(config[0].to_s, config[1].to_s).or_panic
+    @tls.alpn = ["h2", "http/1.1"]
+  end
+  def tls_config : TlsServerConfig
+    @tls
+  end
+end
+
+def pool_port : Int32
+  probe = IyiSocket.listen("127.0.0.1", 0)
+  port = probe.local_port
+  probe.close
+  port
+end
+
+plain = pool_port
+secure = pool_port
+chain = Program.args[1]
+key = Program.args[2]
 group do |g|
-  g.spawn { Server.serve(plain) { |req| told(req) }; 0 }
-  g.spawn { Server.serve(secure, tls: config) { |req| told(req) }; 0 }
+  g.spawn do
+    Server.serve("127.0.0.1", plain, 0, PlainOrigin,
+      max_connections: 8)
+    0
+  end
+  g.spawn do
+    config = {File.read(chain).as_tape, File.read(key).as_tape}
+    Server.serve("127.0.0.1", secure, config, SecureOrigin,
+      max_connections: 8)
+    0
+  end
+  16.times { RisBoard.take(OriginReady) }
+  File.write(Program.args[0], "#{plain} #{secure}")
   0
 end
 IYI

@@ -30,6 +30,199 @@
 
 module bench/std_http_resume
 
+# The probe owns its socket only until it chooses a nonzero pool port.
+# Ready and Stop are keyed by factory, so simultaneous pools do not steal
+# one another's lifecycle messages. Stop gives the response time to flush.
+# These exercises still use std's legacy String APIs and assertions.
+# Board messages themselves own copied tape text; this is the heap adapter.
+@[TapeToHeap]
+def ris_heap_text(value : Str) : String
+  value.to_s
+end
+
+import std/file::{File}
+
+module RisExerciseServer
+  struct RisReady(H)
+  end
+
+  struct RisStop(H)
+  end
+
+  @[OnTape]
+  struct RisConfig(C, H)
+    getter value : C
+
+    def initialize(@value)
+    end
+  end
+
+  def self.port : Int32
+    probe = IyiSocket.listen("127.0.0.1", 0)
+    port = probe.local_port
+    probe.close
+    port
+  end
+
+  def self.ready(handler : H.class) : Nil forall H
+    raise "ready queue full" unless RisBoard.post(RisReady(H).new)
+  end
+
+  def self.wait(handler : H.class) : Nil forall H
+    ready = RisBoard.take(RisReady(H), 10000_i64)
+    raise "cancelled before listening" if ready.is_a?(Cancelled)
+    raise "server did not listen within 10 s" unless ready[1]
+  end
+
+  def self.stop(handler : H.class) : Nil forall H
+    raise "stop queue full" unless RisBoard.post(RisStop(H).new)
+  end
+
+  def self.serve(port : Int32, config : C, handler : H.class,
+                 stream_bodies : Bool = false, compress : Bool = false,
+                 timeout_ms : Int32 = 60000,
+                 request_timeout_ms : Int32 = Server::REQUEST_TIMEOUT,
+                 max_connections : Int32 = 64,
+                 print_port : Bool = false,
+                 port_file : String? = nil) : Nil forall C, H
+    raise "config queue full" unless RisBoard.post(RisConfig(C, H).new(config))
+    group do |pool|
+      pool.spawn do
+        copied = RisBoard.take(RisConfig(C, H))
+        unless copied.is_a?(Cancelled)
+          Server.serve("127.0.0.1", port, copied.value, handler,
+            stream_bodies: stream_bodies, compress: compress,
+            timeout_ms: timeout_ms, request_timeout_ms: request_timeout_ms,
+            max_connections: max_connections)
+        end
+        0
+      end
+      pool.spawn do
+        unless RisBoard.take(RisStop(H)).is_a?(Cancelled)
+          sleep(50)
+          pool.cancel_children
+        end
+        0
+      end
+      if print_port || port_file
+        wait(handler)
+        puts port if print_port
+        File.write(port_file, port.to_s) if port_file
+      end
+      0
+    end
+  end
+end
+
+class RisResume0Handler
+  @tls : TlsServerConfig
+
+  def initialize(tickets : Int32)
+    @tls = TlsServerConfig.from_pem(LEAF_PEM + ROOT_PEM, KEY_PEM).or_panic
+    @tls.tickets = tickets
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisResume0Handler)
+  end
+
+  def tls_config : TlsServerConfig
+    @tls
+  end
+
+  def call(req) : Response
+    RisExerciseServer.stop(RisResume0Handler) if req.path == "/stop"
+    answer(req)
+  end
+end
+
+class RisResume1Handler
+  @tls : TlsServerConfig
+
+  def initialize(tickets : Int32)
+    @tls = TlsServerConfig.from_pem(LEAF_PEM + ROOT_PEM, KEY_PEM).or_panic
+    @tls.tickets = tickets
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisResume1Handler)
+  end
+
+  def tls_config : TlsServerConfig
+    @tls
+  end
+
+  def call(req) : Response
+    RisExerciseServer.stop(RisResume1Handler) if req.path == "/stop"
+    answer(req)
+  end
+end
+
+class RisResume2Handler
+  @tls : TlsServerConfig
+
+  def initialize(tickets : Int32)
+    @tls = TlsServerConfig.from_pem(LEAF_PEM + ROOT_PEM, KEY_PEM).or_panic
+    @tls.tickets = tickets
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisResume2Handler)
+  end
+
+  def tls_config : TlsServerConfig
+    @tls
+  end
+
+  def call(req) : Response
+    RisExerciseServer.stop(RisResume2Handler) if req.path == "/stop"
+    answer(req)
+  end
+end
+
+class RisResume3Handler
+  @tls : TlsServerConfig
+
+  def initialize(tickets : Int32)
+    @tls = TlsServerConfig.from_pem(LEAF_PEM + ROOT_PEM, KEY_PEM).or_panic
+    @tls.tickets = tickets
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisResume3Handler)
+  end
+
+  def tls_config : TlsServerConfig
+    @tls
+  end
+
+  def call(req) : Response
+    RisExerciseServer.stop(RisResume3Handler) if req.path == "/stop"
+    answer(req)
+  end
+end
+
+class RisResumePeerHandler
+  @tls : TlsServerConfig
+
+  def initialize(config : {Str, Str})
+    @tls = TlsServerConfig.from_pem(ris_heap_text(config[0]), ris_heap_text(config[1])).or_panic
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisResumePeerHandler)
+  end
+
+  def tls_config : TlsServerConfig
+    @tls
+  end
+
+  def call(req) : Response
+    RisExerciseServer.stop(RisResumePeerHandler) if req.path == "/quit"
+    answer(req)
+  end
+end
+
 import std/http::{HTTP, HTTPClient, HTTPError, Request, Response, Server}
 import std/socket::{IyiSocket, SocketError}
 import std/tls::{TlsClient, TlsConfig, TlsError, TlsServerConfig, TlsSession}
@@ -141,25 +334,33 @@ def check(label : String, got : String, wanted : String, failures : Array(String
 end
 
 if mode.empty?
-  shared = TlsServerConfig.from_pem(LEAF_PEM + ROOT_PEM, KEY_PEM).or_panic
-  generous = TlsServerConfig.from_pem(LEAF_PEM + ROOT_PEM, KEY_PEM).or_panic
-  generous.tickets = 8
-  listeners = [IyiSocket.listen("127.0.0.1", 0), IyiSocket.listen("127.0.0.1", 0), IyiSocket.listen("127.0.0.1", 0), IyiSocket.listen("127.0.0.1", 0)]
-  bases = listeners.map { |l| "https://localhost:#{l.local_port}/" }
-  origins = listeners.map { |l| "https://localhost:#{l.local_port}" }
+  listeners = [RisExerciseServer.port, RisExerciseServer.port, RisExerciseServer.port, RisExerciseServer.port]
+  bases = listeners.map { |l| "https://localhost:#{l}/" }
+  origins = listeners.map { |l| "https://localhost:#{l}" }
   roots = Certificate.from_pem(ROOT_PEM).or_panic
   other = Certificate.from_pem(OTHER_ROOT_PEM).or_panic
   failures = [] of String
   group do |g|
-    listeners.each_with_index do |listener, i|
-      g.spawn do
-        Server.serve(listener, tls: i == 3 ? generous : shared) do |req|
-          listener.close if req.path == "/stop"
-          answer(req)
-        end
-        0
-      end
+    g.spawn do
+      RisExerciseServer.serve(listeners[0], 2, RisResume0Handler, max_connections: 1)
+      0
     end
+    RisExerciseServer.wait(RisResume0Handler)
+    g.spawn do
+      RisExerciseServer.serve(listeners[1], 2, RisResume1Handler, max_connections: 1)
+      0
+    end
+    RisExerciseServer.wait(RisResume1Handler)
+    g.spawn do
+      RisExerciseServer.serve(listeners[2], 2, RisResume2Handler, max_connections: 1)
+      0
+    end
+    RisExerciseServer.wait(RisResume2Handler)
+    g.spawn do
+      RisExerciseServer.serve(listeners[3], 8, RisResume3Handler, max_connections: 1)
+      0
+    end
+    RisExerciseServer.wait(RisResume3Handler)
     g.spawn do
       config = TlsConfig.new
       config.roots = roots
@@ -264,13 +465,8 @@ if mode == "s_server"
 end
 
 if mode == "serve"
-  config = TlsServerConfig.from_pem(File.read(args[2]), File.read(args[3])).or_panic
-  listener = IyiSocket.listen("127.0.0.1", 0)
-  File.write(args[1], listener.local_port.to_s)
-  Server.serve(listener, tls: config) do |req|
-    listener.close if req.path == "/quit"
-    answer(req)
-  end
+  listener = RisExerciseServer.port
+  RisExerciseServer.serve(listener, {File.read(args[2]).as_tape, File.read(args[3]).as_tape}, RisResumePeerHandler, max_connections: 1, port_file: args[1])
   exit 0
 end
 

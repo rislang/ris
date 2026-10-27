@@ -123,6 +123,14 @@ for them until then.
   and after the inbox work). Compiler specs cannot run until it does.
 * bench/concurrency_exercise.sh fails with "pipe2 failed" after its
   32,000 sleepers test (seen 2026-10-27 before the group-end change).
+* bench/http2_exercise: the 1 MiB POST in "a megabyte up through the
+  windows" reaches the handler corrupted since the prefork server
+  (passes at ca4553c38).
+* bench/std_websocket_exercise.sh: the bare-socket copy refuses
+  @[TaskClosureUnsafe] at std/http.iyi:1787, and x86_64-windows-msvc
+  rejects Str in File.extname.
+* The mutation phases of std_acme, cookie, router, sse and websocket
+  .sh run past 20 minutes; check whether they finish at all.
 
 ## Windows (on hold: not worked on now)
 

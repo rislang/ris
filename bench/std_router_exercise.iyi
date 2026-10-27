@@ -5,6 +5,129 @@
 
 module bench/std_router_exercise
 
+# The probe owns its socket only until it chooses a nonzero pool port.
+# Ready and Stop are keyed by factory, so simultaneous pools do not steal
+# one another's lifecycle messages. Stop gives the response time to flush.
+import std/file::{File}
+
+module RisExerciseServer
+  struct RisReady(H)
+  end
+
+  struct RisStop(H)
+  end
+
+  @[OnTape]
+  struct RisConfig(C, H)
+    getter value : C
+
+    def initialize(@value)
+    end
+  end
+
+  def self.port : Int32
+    probe = IyiSocket.listen("127.0.0.1", 0)
+    port = probe.local_port
+    probe.close
+    port
+  end
+
+  def self.ready(handler : H.class) : Nil forall H
+    raise "ready queue full" unless RisBoard.post(RisReady(H).new)
+  end
+
+  def self.wait(handler : H.class) : Nil forall H
+    ready = RisBoard.take(RisReady(H), 10000_i64)
+    raise "cancelled before listening" if ready.is_a?(Cancelled)
+    raise "server did not listen within 10 s" unless ready[1]
+  end
+
+  def self.stop(handler : H.class) : Nil forall H
+    raise "stop queue full" unless RisBoard.post(RisStop(H).new)
+  end
+
+  def self.serve(port : Int32, config : C, handler : H.class,
+                 stream_bodies : Bool = false, compress : Bool = false,
+                 timeout_ms : Int32 = 60000,
+                 request_timeout_ms : Int32 = Server::REQUEST_TIMEOUT,
+                 max_connections : Int32 = 64,
+                 print_port : Bool = false,
+                 port_file : String? = nil) : Nil forall C, H
+    raise "config queue full" unless RisBoard.post(RisConfig(C, H).new(config))
+    group do |pool|
+      pool.spawn do
+        copied = RisBoard.take(RisConfig(C, H))
+        unless copied.is_a?(Cancelled)
+          Server.serve("127.0.0.1", port, copied.value, handler,
+            stream_bodies: stream_bodies, compress: compress,
+            timeout_ms: timeout_ms, request_timeout_ms: request_timeout_ms,
+            max_connections: max_connections)
+        end
+        0
+      end
+      pool.spawn do
+        unless RisBoard.take(RisStop(H)).is_a?(Cancelled)
+          sleep(50)
+          pool.cancel_children
+        end
+        0
+      end
+      if print_port || port_file
+        wait(handler)
+        puts port if print_port
+        File.write(port_file, port.to_s) if port_file
+      end
+      0
+    end
+  end
+end
+
+class RisRouter1Handler
+  @router : Router
+
+  def initialize(config)
+    @router = Router.new
+    @router.handle("GET /users/{id}") { |_, params| Response.new(200, "user " + params["id"]) }
+    @router.handle("POST /users/{id}") { |req, params| Response.new(201, "posted " + params["id"] + ": " + req.body) }
+    @router.handle("/static/") { |req, _| Response.new(200, "static " + req.path) }
+    @router.handle("GET /{$}") { |_, _| Response.new(200, "home") }
+    @router.handle("GET /stop") do |_, _|
+      RisExerciseServer.stop(RisRouter1Handler)
+      Response.new(200, "bye")
+    end
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisRouter1Handler)
+  end
+
+  def call(req) : Response
+    @router.call(req)
+  end
+end
+
+class RisRouter2Handler
+  @router : Router
+
+  def initialize(config)
+    @router = Router.new
+    @router.handle("GET /users/{id}") { |_, params| Response.new(200, "user " + params["id"]) }
+    @router.handle("/static/") { |req, _| Response.new(200, "static " + req.path) }
+    @router.handle("GET /stop") do |_, _|
+      RisExerciseServer.stop(RisRouter2Handler)
+      Response.new(200, "bye")
+    end
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisRouter2Handler)
+  end
+
+  def call(req) : Response
+    @router.call(req)
+  end
+end
+
 def assert_true(cond : Bool, msg : String) : Nil
   raise "ASSERTION FAILED: #{msg}" unless cond
 end
@@ -301,18 +424,8 @@ if args.size > 0 && args[0] == "table"
   __iyi_exit(0)
 end
 if args.size > 0 && args[0] == "serve"
-  serving = IyiSocket.listen("127.0.0.1", 0)
-  puts serving.local_port
-  router = Router.new
-  router.handle("GET /users/{id}") { |_, params| Response.new(200, "user " + params["id"]) }
-  router.handle("POST /users/{id}") { |req, params| Response.new(201, "posted " + params["id"] + ": " + req.body) }
-  router.handle("/static/") { |req, _| Response.new(200, "static " + req.path) }
-  router.handle("GET /{$}") { |_, _| Response.new(200, "home") }
-  router.handle("GET /stop") do |_, _|
-    serving.close
-    Response.new(200, "bye")
-  end
-  Server.serve(serving) { |req| router.call(req) }
+  serving = RisExerciseServer.port
+  RisExerciseServer.serve(serving, 0, RisRouter1Handler, print_port: true)
   __iyi_exit(0)
 end
 
@@ -412,20 +525,14 @@ puts "  #{HOSTS.size} patterns, #{hosts} requests: a host's pattern first, its p
 puts "\n== a real server"
 # Through std/http both ways: a HEAD of a GET pattern, a 405's Allow and
 # a redirect as they go over the wire.
-listener = IyiSocket.listen("127.0.0.1", 0)
-base = "http://127.0.0.1:#{listener.local_port}"
+listener = RisExerciseServer.port
+base = "http://127.0.0.1:#{listener}"
 group do |g|
   g.spawn do
-    router = Router.new
-    router.handle("GET /users/{id}") { |_, params| Response.new(200, "user " + params["id"]) }
-    router.handle("/static/") { |req, _| Response.new(200, "static " + req.path) }
-    router.handle("GET /stop") do |_, _|
-      listener.close
-      Response.new(200, "bye")
-    end
-    Server.serve(listener) { |req| router.call(req) }
+    RisExerciseServer.serve(listener, 0, RisRouter2Handler)
     0
   end
+  RisExerciseServer.wait(RisRouter2Handler)
   g.spawn do
     user = HTTP.get(base + "/users/J%C3%BCrgen").or_panic
     assert_true user.status == 200 && user.body == "user Jürgen", "a wildcard over the wire: #{user.status} #{user.body}"

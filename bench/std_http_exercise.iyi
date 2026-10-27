@@ -5,12 +5,590 @@
 
 module bench/std_http_exercise
 
+# The probe owns its socket only until it chooses a nonzero pool port.
+# Ready and Stop are keyed by factory, so simultaneous pools do not steal
+# one another's lifecycle messages. Stop gives the response time to flush.
+# These exercises still use std's legacy String APIs and assertions.
+# Board messages themselves own copied tape text; this is the heap adapter.
+@[TapeToHeap]
+def ris_heap_text(value : Str) : String
+  value.to_s
+end
+
+import std/file::{File}
+
+module RisExerciseServer
+  struct RisReady(H)
+  end
+
+  struct RisStop(H)
+  end
+
+  @[OnTape]
+  struct RisConfig(C, H)
+    getter value : C
+
+    def initialize(@value)
+    end
+  end
+
+  def self.port : Int32
+    probe = IyiSocket.listen("127.0.0.1", 0)
+    port = probe.local_port
+    probe.close
+    port
+  end
+
+  def self.ready(handler : H.class) : Nil forall H
+    raise "ready queue full" unless RisBoard.post(RisReady(H).new)
+  end
+
+  def self.wait(handler : H.class) : Nil forall H
+    ready = RisBoard.take(RisReady(H), 10000_i64)
+    raise "cancelled before listening" if ready.is_a?(Cancelled)
+    raise "server did not listen within 10 s" unless ready[1]
+  end
+
+  def self.stop(handler : H.class) : Nil forall H
+    raise "stop queue full" unless RisBoard.post(RisStop(H).new)
+  end
+
+  def self.serve(port : Int32, config : C, handler : H.class,
+                 stream_bodies : Bool = false, compress : Bool = false,
+                 timeout_ms : Int32 = 60000,
+                 request_timeout_ms : Int32 = Server::REQUEST_TIMEOUT,
+                 max_connections : Int32 = 64,
+                 print_port : Bool = false,
+                 port_file : String? = nil) : Nil forall C, H
+    raise "config queue full" unless RisBoard.post(RisConfig(C, H).new(config))
+    group do |pool|
+      pool.spawn do
+        copied = RisBoard.take(RisConfig(C, H))
+        unless copied.is_a?(Cancelled)
+          Server.serve("127.0.0.1", port, copied.value, handler,
+            stream_bodies: stream_bodies, compress: compress,
+            timeout_ms: timeout_ms, request_timeout_ms: request_timeout_ms,
+            max_connections: max_connections)
+        end
+        0
+      end
+      pool.spawn do
+        unless RisBoard.take(RisStop(H)).is_a?(Cancelled)
+          sleep(50)
+          pool.cancel_children
+        end
+        0
+      end
+      if print_port || port_file
+        wait(handler)
+        puts port if print_port
+        File.write(port_file, port.to_s) if port_file
+      end
+      0
+    end
+    loop do
+      retired = RisBoard.poll(RisReady(H))
+      break if retired.is_a?(Cancelled) || !retired[1]
+    end
+  end
+end
+
+struct RisHttpIdleClosed
+  getter time : Int64
+
+  def initialize(@time)
+  end
+end
+
+struct RisHttpIdleReturned
+  getter time : Int64
+
+  def initialize(@time)
+  end
+end
+
+struct RisHttpUpStopped
+  getter time : Int64
+
+  def initialize(@time)
+  end
+end
+
+struct RisHttpUpReturned
+  getter time : Int64
+
+  def initialize(@time)
+  end
+end
+
+@[OnTape]
+struct RisHttpSeen
+  getter line : Str
+
+  def initialize(@line)
+  end
+end
+
+struct RisHttpPiece
+end
+
+class RisHttp1Handler
+  def initialize(config)
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisHttpFactory)
+  end
+
+  def call(req) : Response
+    RisExerciseServer.stop(RisHttpFactory) if req.path == "/stop"
+    Response.new(200, "ok")
+  end
+end
+
+class RisHttp2Handler
+  def initialize(config)
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisHttpFactory)
+  end
+
+  def call(req) : Response
+    raise "request observation queue full" unless RisBoard.post(RisHttpSeen.new((req.method + " " + req.path).as_tape))
+    if req.path == "/echo"
+      Response.new(200, req.body, {"X-Query" => req.query || "-", "X-Agent" => req.header("user-agent") || "-"})
+    elsif req.path == "/nothing"
+      Response.new(204)
+    elsif req.path == "/size"
+      Response.new(200, req.body.bytesize.to_s)
+    elsif req.path == "/stop"
+      RisExerciseServer.stop(RisHttpFactory)
+      Response.new(200, "bye")
+    elsif req.path == "/fail"
+      raise "the block failed on /fail"
+    else
+      Response.new(404, "no #{req.path}\n")
+    end
+  end
+end
+
+class RisHttp3Handler
+  def initialize(config)
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisHttpFactory)
+  end
+
+  def call(req) : Response
+    if req.path == "/bye"
+      Response.new(200, "bye", {"Connection" => "close"})
+    else
+      RisExerciseServer.stop(RisHttpFactory)
+      Response.new(200, "stopped")
+    end
+  end
+end
+
+class RisHttp4Handler
+  def initialize(config)
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisHttpFactory)
+  end
+
+  def call(req) : Response
+    Response.new(200, req.query || "-")
+  end
+end
+
+class RisHttp5Handler
+  def initialize(config)
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisHttpFactory)
+  end
+
+  def call(req) : Response
+    RisExerciseServer.stop(RisHttpFactory) if req.path == "/stop"
+    Response.new(200, "#{req.method} #{req.path} #{req.body}")
+  end
+end
+
+class RisHttp6Handler
+  @stream_dir : String
+
+  def initialize(config : Str)
+    @stream_dir = ris_heap_text(config)
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisHttpFactory)
+  end
+
+  def call(req) : Response
+    if req.path == "/stop"
+      RisExerciseServer.stop(RisHttpFactory)
+      Response.new(200, "bye")
+    elsif req.path == "/count"
+      total = 0_i64
+      pieces = 0
+      io = req.body_io
+      while true
+        piece = io.read(65536).or_panic
+        break if piece.bytesize == 0
+        if pieces == 0
+          raise "piece queue full" unless RisBoard.post(RisHttpPiece.new)
+        end
+        total = total + piece.bytesize.to_i64
+        pieces = pieces + 1
+      end
+      Response.new(200, "#{total}")
+    elsif req.path == "/whole"
+      Response.new(200, req.body)
+    elsif req.path == "/ignore"
+      Response.new(200, "ignored")
+    elsif req.path == "/slow"
+      Response.stream(200, {"Content-Type" => "text/plain"}) do |w|
+        w.write("first,")
+        sleep(400)
+        w.write("second")
+        nil
+      end
+    elsif req.path == "/file"
+      Response.new(200, File.open(@stream_dir + "/up.bin"), {"Content-Type" => "application/octet-stream"})
+    elsif req.path == "/file-sized"
+      Response.new(200, File.open(@stream_dir + "/up.bin"), {"Content-Length" => "300000"})
+    else
+      Response.new(404, "no")
+    end
+  end
+end
+
+class RisHttp7Handler
+  @long_text : String
+
+  def initialize(config)
+    @long_text = "the quick brown fox jumps over the lazy dog. " * 400
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisHttpFactory)
+  end
+
+  def call(req) : Response
+    if req.path == "/stop"
+      RisExerciseServer.stop(RisHttpFactory)
+      Response.new(200, "bye")
+    elsif req.path == "/text"
+      Response.new(200, @long_text, {"Content-Type" => "text/plain"})
+    elsif req.path == "/short"
+      Response.new(200, "short", {"Content-Type" => "text/plain"})
+    elsif req.path == "/png"
+      Response.new(200, @long_text, {"Content-Type" => "image/png"})
+    elsif req.path == "/own"
+      Response.new(200, Gzip.compress("mine"), {"Content-Type" => "text/plain", "Content-Encoding" => "gzip"})
+    elsif req.path == "/zstd-own"
+      Response.new(200, Zstd.compress("mine"), {"Content-Type" => "text/plain", "Content-Encoding" => "zstd"})
+    elsif req.path == "/accept"
+      Response.new(200, req.header("Accept-Encoding") || "-")
+    elsif req.path == "/zstd-corrupt"
+      bad = Zstd.compress(@long_text)
+      Response.new(200, bad[0, 40] + "garbage" + bad[47, bad.bytesize - 47], {"Content-Encoding" => "zstd"})
+    elsif req.path == "/zstd-16mib"
+      Response.new(200, zstd_hello(0x70), {"Content-Encoding" => "zstd"})
+    elsif req.path == "/zstd-8mib"
+      Response.new(200, zstd_hello(0x68), {"Content-Encoding" => "zstd"})
+    elsif req.path == "/zstd-frames"
+      # Two frames, a hundred bytes a chunk: the frames' ends and the
+      # chunks' fall where they fall.
+      zframes = Zstd.compress(@long_text[0, 9000]) + Zstd.compress(@long_text[9000, @long_text.bytesize - 9000])
+      Response.stream(200, {"Content-Type" => "text/plain", "Content-Encoding" => "zstd"}) do |w|
+        at = 0
+        while at < zframes.bytesize
+          n = zframes.bytesize - at < 100 ? zframes.bytesize - at : 100
+          w.write(zframes[at, n])
+          at = at + n
+        end
+        nil
+      end
+    elsif req.path == "/vary"
+      Response.new(200, @long_text, {"Content-Type" => "text/html", "Vary" => "Cookie"})
+    elsif req.path == "/stream"
+      Response.stream(200, {"Content-Type" => "application/json"}) do |w|
+        5.times { |i| w.write("{\"n\":#{i}}\n") }
+        nil
+      end
+    elsif req.path == "/zlib"
+      Response.new(200, Zlib.compress(@long_text), {"Content-Encoding" => "deflate"})
+    elsif req.path == "/raw-deflate"
+      Response.new(200, Deflate.compress(@long_text), {"Content-Encoding" => "deflate"})
+    elsif req.path == "/corrupt"
+      bad = Gzip.compress(@long_text)
+      Response.new(200, bad[0, 40] + "garbage" + bad[47, bad.bytesize - 47], {"Content-Encoding" => "gzip"})
+    elsif req.path == "/br"
+      Response.new(200, "pretend", {"Content-Encoding" => "br"})
+    else
+      Response.new(404, "no")
+    end
+  end
+end
+
+class RisHttp8Handler
+  @other_base : String
+
+  def initialize(config : Str)
+    @other_base = ris_heap_text(config)
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisHttpFactory)
+  end
+
+  def call(req) : Response
+    case req.path
+    when "/stop"
+      RisExerciseServer.stop(RisHttpFactory)
+      Response.new(200, "bye")
+    when "/301", "/302", "/303", "/307", "/308"
+      Response.new(req.path[1, 3].to_i, "", {"Location" => "/echo?from=#{req.path[1, 3]}"})
+    when "/away"
+      Response.new(302, "", {"Location" => @other_base + "/echo"})
+    when "/relative"
+      Response.new(302, "", {"Location" => "sub/../echo"})
+    when "/loop"
+      Response.new(302, "", {"Location" => "/loop"})
+    when "/ftp"
+      Response.new(302, "", {"Location" => "ftp://127.0.0.1/"})
+    when "/echo"
+      Response.new(200, "#{req.method} #{req.query || "-"} #{req.body} auth=#{req.header("Authorization") || "-"} type=#{req.header("Content-Type") || "-"}")
+    else
+      Response.new(404, "no")
+    end
+  end
+end
+
+class RisHttp9Handler
+  def initialize(config)
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisHttpOtherFactory)
+  end
+
+  def call(req) : Response
+    RisExerciseServer.stop(RisHttpOtherFactory) if req.path == "/stop"
+    Response.new(200, "other auth=#{req.header("Authorization") || "-"} cookie=#{req.header("Cookie") || "-"}")
+  end
+end
+
+class RisHttp10Handler
+  def initialize(config)
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisHttpFactory)
+  end
+
+  def call(req) : Response
+    if req.path == "/stop"
+      RisExerciseServer.stop(RisHttpFactory)
+      Response.new(200, "bye")
+    elsif req.path == "/form"
+      Response.new(200, req.form.to_s)
+    elsif req.path == "/parts"
+      said = ""
+      if parts = req.multipart
+        while true
+          part = parts.next_part
+          break if part.nil?
+          if part.is_a?(Part)
+            data = part.read_all
+            said = said + "#{part.name || "-"}|#{part.filename || "-"}|#{part.content_type || "-"}|#{data.is_a?(String) ? data : data.message};"
+          else
+            said = said + "error: #{part.message}"
+            break
+          end
+        end
+      else
+        said = "not multipart"
+      end
+      Response.new(200, said)
+    else
+      Response.new(404, "no")
+    end
+  end
+end
+
+class RisHttp11Handler
+  def initialize(config)
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisHttpFactory)
+  end
+
+  def call(req) : Response
+    if req.path == "/stop"
+      RisExerciseServer.stop(RisHttpFactory)
+      Response.new(200, "bye")
+    elsif req.path == "/close"
+      Response.new(200, "closing", {"Connection" => "close"})
+    elsif req.path == "/who"
+      Response.new(200, req.remote_address || "-")
+    elsif req.path == "/mid"
+      Response.new(200, "m" * 30000, {"Content-Type" => "image/png"})
+    elsif req.path == "/big"
+      Response.new(200, "b" * 200000, {"Content-Type" => "image/png"})
+    elsif req.path == "/text"
+      Response.new(200, "t" * 200000, {"Content-Type" => "text/plain"})
+    else
+      Response.new(200, req.method + " " + req.path + " " + req.body)
+    end
+  end
+end
+
+class RisHttp12Handler
+  def initialize(config)
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisHttpFactory)
+  end
+
+  def call(req) : Response
+    if req.path == "/stop"
+      RisExerciseServer.stop(RisHttpFactory)
+      Response.new(200, "bye")
+    elsif req.header("Upgrade") == "echo"
+      Response.upgrade({"Upgrade" => "echo", "Connection" => "Upgrade"}) do |sock, _|
+        got = sock.read(100)
+        sock.write("echo:" + got) if got.is_a?(String)
+        nil
+      end
+    else
+      Response.new(200, "ok")
+    end
+  end
+end
+
+class RisHttp13Handler
+  def initialize(config)
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisHttpFactory)
+  end
+
+  def call(req) : Response
+    RisExerciseServer.stop(RisHttpFactory) if req.path == "/stop"
+    Response.new(200, "ok")
+  end
+end
+
+class RisHttp14Handler
+  def initialize(config)
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisHttpFactory)
+  end
+
+  def call(req) : Response
+    if req.path == "/stop"
+      RisExerciseServer.stop(RisHttpFactory)
+      Response.new(200, "bye")
+    elsif req.header("Upgrade") == "echo"
+      Response.upgrade({"Upgrade" => "echo", "Connection" => "Upgrade"}) do |sock, leftover|
+        said = leftover
+        while said.bytesize < 4
+          got = sock.read(100)
+          break unless got.is_a?(String) && got.bytesize > 0
+          said = said + got
+        end
+        sock.write("echo:" + said) if said.bytesize >= 4
+        nil
+      end
+    else
+      Response.new(426, "upgrade to echo\n", {"Upgrade" => "echo"})
+    end
+  end
+end
+
 def assert_true(cond : Bool, msg : String) : Nil
   raise "ASSERTION FAILED: #{msg}" unless cond
 end
 
 def assert_str(expected : String, actual : String, msg : String) : Nil
   raise "ASSERTION FAILED: #{msg}\n  expected #{expected.inspect}\n  got      #{actual.inspect}" unless expected == actual
+end
+
+# A single HTTP implementation serves the sequential scenarios. Only
+# copied scenario settings cross the task boundary; handlers stay local.
+class RisHttpFactory
+  @handler : RisHttp1Handler | RisHttp2Handler | RisHttp3Handler | RisHttp4Handler | RisHttp5Handler | RisHttp6Handler | RisHttp7Handler | RisHttp8Handler | RisHttp9Handler | RisHttp10Handler | RisHttp11Handler | RisHttp12Handler | RisHttp13Handler | RisHttp14Handler
+
+  def initialize(config : {Int32, Str})
+    @handler = case config[0]
+               when 1
+                 RisHttp1Handler.new(0)
+               when 2
+                 RisHttp2Handler.new(0)
+               when 3
+                 RisHttp3Handler.new(0)
+               when 4
+                 RisHttp4Handler.new(0)
+               when 5
+                 RisHttp5Handler.new(0)
+               when 6
+                 RisHttp6Handler.new(config[1])
+               when 7
+                 RisHttp7Handler.new(0)
+               when 8
+                 RisHttp8Handler.new(config[1])
+               when 9
+                 RisHttp9Handler.new(0)
+               when 10
+                 RisHttp10Handler.new(0)
+               when 11
+                 RisHttp11Handler.new(0)
+               when 12
+                 RisHttp12Handler.new(0)
+               when 13
+                 RisHttp13Handler.new(0)
+               when 14
+                 RisHttp14Handler.new(0)
+               else
+                 raise "unknown HTTP exercise scenario"
+               end
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisHttpFactory)
+  end
+
+  def call(req) : Response
+    @handler.call(req)
+  end
+end
+
+class RisHttpOtherFactory
+  @handler : RisHttp9Handler
+
+  def initialize(config)
+    @handler = RisHttp9Handler.new(0)
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisHttpOtherFactory)
+  end
+
+  def call(req) : Response
+    @handler.call(req)
+  end
 end
 
 import std/http::{HTTP, HTTPClient, Response, Request, Server, HTTPError, MultipartBuilder, Part}
@@ -281,7 +859,7 @@ assert_str "400 not a request target: \"/?a\\nb\"", server_reads("GET /?a\nb HTT
 assert_str "400 header User-Agent contains a control character", server_reads("GET / HTTP/1.1\r\nUser-Agent: a\rb\r\n\r\n"), "a value with a bare CR is a 400"
 assert_str "refused: HTTP: header X-A contains a control character", client_reads("HTTP/1.1 200 OK\r\nX-A: a\u0000b\r\n\r\n"), "an answer's value with a NUL is refused"
 assert_str "refused: HTTP: header X-A contains a control character", answer { HTTP.format_request("GET", "/", "127.0.0.1", "", {"X-A" => "a\u0000b"}) }, "a value with a NUL is not written"
-assert_str "refused: HTTP: header X-A contains a control character", answer { Server.format_response(Response.new(200, "", {"X-A" => "a\u0000b"}), false, false) }, "an answer's value with a NUL is not written"
+assert_str "refused: HTTP: header X-A contains a control character", answer { ris_heap_text(Server.format_response(Response.new(200, "", {"X-A" => "a\u0000b"}), false, false)) }, "an answer's value with a NUL is not written"
 assert_str "refused: HTTP: not a status line: HTTP/1.1 200 O\rK", client_reads("HTTP/1.1 200 O\rK\r\n\r\n"), "a reason with a bare CR is refused"
 puts "  control characters in values, targets and reasons are refused"
 
@@ -289,12 +867,12 @@ puts "  control characters in values, targets and reasons are refused"
 # "hello" was read as "he", and "llo" began the next answer on the
 # connection. The body goes with its length, so a caller's chunked framing
 # went out beside `Content-Length: 5` and was refused by the client.
-assert_str "refused: HTTP: Content-Length \"2\" is not the body's 5 bytes", answer { Server.format_response(Response.new(200, "hello", {"Content-Length" => "2"}), false, false) }, "a length short of the body is not written"
-assert_str "refused: HTTP: content-length \"100\" is not the body's 5 bytes", answer { Server.format_response(Response.new(200, "hello", {"content-length" => "100"}), false, false) }, "a length past the body is not written"
-assert_str "refused: HTTP: Transfer-Encoding is not written; the body goes with its length", answer { Server.format_response(Response.new(200, "hello", {"Transfer-Encoding" => "chunked"}), false, false) }, "a caller's chunked framing is not written"
-assert_str "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: keep-alive\r\n\r\nhello", Server.format_response(Response.new(200, "hello", {"Content-Length" => "5"}), false, false), "the body's own length is written once"
-assert_str "HTTP/1.1 200 OK\r\nContent-Length: 99\r\nConnection: keep-alive\r\n\r\n", Server.format_response(Response.new(200, "", {"Content-Length" => "99"}), true, false), "a HEAD's length is the caller's"
-assert_str "HTTP/1.1 304 Not Modified\r\nContent-Length: 99\r\nConnection: keep-alive\r\n\r\n", Server.format_response(Response.new(304, "", {"Content-Length" => "99"}), false, false), "and a 304's"
+assert_str "refused: HTTP: Content-Length \"2\" is not the body's 5 bytes", answer { ris_heap_text(Server.format_response(Response.new(200, "hello", {"Content-Length" => "2"}), false, false)) }, "a length short of the body is not written"
+assert_str "refused: HTTP: content-length \"100\" is not the body's 5 bytes", answer { ris_heap_text(Server.format_response(Response.new(200, "hello", {"content-length" => "100"}), false, false)) }, "a length past the body is not written"
+assert_str "refused: HTTP: Transfer-Encoding is not written; the body goes with its length", answer { ris_heap_text(Server.format_response(Response.new(200, "hello", {"Transfer-Encoding" => "chunked"}), false, false)) }, "a caller's chunked framing is not written"
+assert_str "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: keep-alive\r\n\r\nhello", ris_heap_text(Server.format_response(Response.new(200, "hello", {"Content-Length" => "5"}), false, false)), "the body's own length is written once"
+assert_str "HTTP/1.1 200 OK\r\nContent-Length: 99\r\nConnection: keep-alive\r\n\r\n", ris_heap_text(Server.format_response(Response.new(200, "", {"Content-Length" => "99"}), true, false)), "a HEAD's length is the caller's"
+assert_str "HTTP/1.1 304 Not Modified\r\nContent-Length: 99\r\nConnection: keep-alive\r\n\r\n", ris_heap_text(Server.format_response(Response.new(304, "", {"Content-Length" => "99"}), false, false)), "and a 304's"
 puts "  a caller's Content-Length is the body's except on a HEAD or a 304, and its Transfer-Encoding is refused"
 
 # A field on several lines is one field, its values in order (RFC 9110
@@ -336,8 +914,8 @@ puts "  status lines are three digits under an HTTP version, and interim answers
 
 # A 1xx, 204 or 304 carries no content and writes no length of its own
 # (RFC 9110 §8.6, §15): the body was the next answer's first bytes.
-assert_str "HTTP/1.1 204 No Content\r\nConnection: keep-alive\r\n\r\n", Server.format_response(Response.new(204, "x"), false, false), "a 204 writes no body and no length"
-assert_str "HTTP/1.1 304 Not Modified\r\nConnection: close\r\n\r\n", Server.format_response(Response.new(304, "x"), false, true), "a 304 writes no body and no length"
+assert_str "HTTP/1.1 204 No Content\r\nConnection: keep-alive\r\n\r\n", ris_heap_text(Server.format_response(Response.new(204, "x"), false, false)), "a 204 writes no body and no length"
+assert_str "HTTP/1.1 304 Not Modified\r\nConnection: close\r\n\r\n", ris_heap_text(Server.format_response(Response.new(304, "x"), false, true)), "a 304 writes no body and no length"
 # The absolute form a server must accept (RFC 9112 §3.2.2) is read for
 # its path, as the other library reads it.
 assert_str "GET /a/b ?x=1 Host=example.com; \"\" keep", server_reads("GET http://example.com/a/b?x=1 HTTP/1.1\r\nHost: example.com\r\n\r\n"), "an absolute-form target's path"
@@ -361,11 +939,11 @@ puts "  a request names one host, an HTTP/1.1 one must, and an absolute-form tar
 # A status line is written only as the client half reads it: a reason
 # with a CRLF went out as a header of its own, `Set-Cookie: admin=1`, and
 # 2000 as `HTTP/1.1 2000 Server Error`, which `parse_response` refuses.
-assert_str "refused: HTTP: the reason contains a line break", answer { Server.format_response(Response.new(200, "OK\r\nSet-Cookie: admin=1", {} of String => String, "hi"), false, false) }, "a reason with a CRLF is not written"
-assert_str "refused: HTTP: the reason contains a control character", answer { Server.format_response(Response.new(200, "O\u0000K", {} of String => String, ""), false, false) }, "a reason with a NUL is not written"
-assert_str "refused: HTTP: not a status: 2000", answer { Server.format_response(Response.new(2000, "x"), false, false) }, "a four-digit status is not written"
-assert_str "refused: HTTP: not a status: 99", answer { Server.format_response(Response.new(99, "x"), false, false) }, "a status under 100 is not written"
-assert_str "999 Server Error Content-Length=1;Connection=close; \"x\"", client_reads(Server.format_response(Response.new(999, "x"), false, true)), "999 is a status, and read back as written"
+assert_str "refused: HTTP: the reason contains a line break", answer { ris_heap_text(Server.format_response(Response.new(200, "OK\r\nSet-Cookie: admin=1", {} of String => String, "hi"), false, false)) }, "a reason with a CRLF is not written"
+assert_str "refused: HTTP: the reason contains a control character", answer { ris_heap_text(Server.format_response(Response.new(200, "O\u0000K", {} of String => String, ""), false, false)) }, "a reason with a NUL is not written"
+assert_str "refused: HTTP: not a status: 2000", answer { ris_heap_text(Server.format_response(Response.new(2000, "x"), false, false)) }, "a four-digit status is not written"
+assert_str "refused: HTTP: not a status: 99", answer { ris_heap_text(Server.format_response(Response.new(99, "x"), false, false)) }, "a status under 100 is not written"
+assert_str "999 Server Error Content-Length=1;Connection=close; \"x\"", client_reads(ris_heap_text(Server.format_response(Response.new(999, "x"), false, true))), "999 is a status, and read back as written"
 puts "  a status outside 100 to 999, or a reason with a line break, is not written"
 
 puts "\n== over a socket"
@@ -377,29 +955,31 @@ listener = IyiSocket.listen(0)
 port = listener.local_port
 fd = listener.to_unsafe
 server = IyiThread.start do
-  l = IyiSocket.new(fd)
-  i = 0
-  while i < 5
-    conn = l.accept.or_panic
-    saw = read_request(conn).or_panic
-    line = first_line(saw)
-    reply = if i == 0
-              "HTTP/1.1 200 OK\r\ncontent-length: #{saw.bytesize}\r\n\r\n" + saw
-            elsif i == 1
-              "HTTP/1.1 201 Created\r\nTransfer-Encoding: chunked\r\n\r\n" + chunked(saw)
-            elsif i == 2
-              "HTTP/1.1 200 OK\r\nContent-Length: 99\r\nX-Request-Line: #{line}\r\n\r\n"
-            elsif i == 3
-              "HTTP/1.1 200 OK\r\nContent-Length: #{saw.bytesize}\r\n\r\n" + saw
-            else
-              has_length = saw.includes?("Content-Length") ? "yes" : "no"
-              "HTTP/1.1 204 No Content\r\nX-Request-Line: #{line}\r\nX-Request-Has-Length: #{has_length}\r\n\r\n"
-            end
-    conn.write(reply)
-    conn.close
-    i = i + 1
+  tape do
+    l = IyiSocket.new(fd)
+    i = 0
+    while i < 5
+      conn = l.accept.or_panic
+      saw = read_request(conn).or_panic
+      line = first_line(saw)
+      reply = if i == 0
+                "HTTP/1.1 200 OK\r\ncontent-length: #{saw.bytesize}\r\n\r\n" + saw
+              elsif i == 1
+                "HTTP/1.1 201 Created\r\nTransfer-Encoding: chunked\r\n\r\n" + chunked(saw)
+              elsif i == 2
+                "HTTP/1.1 200 OK\r\nContent-Length: 99\r\nX-Request-Line: #{line}\r\n\r\n"
+              elsif i == 3
+                "HTTP/1.1 200 OK\r\nContent-Length: #{saw.bytesize}\r\n\r\n" + saw
+              else
+                has_length = saw.includes?("Content-Length") ? "yes" : "no"
+                "HTTP/1.1 204 No Content\r\nX-Request-Line: #{line}\r\nX-Request-Has-Length: #{has_length}\r\n\r\n"
+              end
+      conn.write(reply)
+      conn.close
+      i = i + 1
+    end
+    nil
   end
-  nil
 end
 
 base = "http://127.0.0.1:#{port}"
@@ -441,16 +1021,18 @@ whole = IyiSocket.listen("127.0.0.1", 0)
 whole_port = whole.local_port
 whole_fd = whole.to_unsafe
 whole_server = IyiThread.start do
-  l = IyiSocket.new(whole_fd)
-  2.times do |i|
-    conn = l.accept.or_panic
-    read_request(conn).or_panic
-    conn.write(i == 0 ? "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi" : "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nhi\r\n0\r\n\r\n").or_panic
-    conn.read_timeout_ms = 3000
-    conn.read(16)
-    conn.close
+  tape do
+    l = IyiSocket.new(whole_fd)
+    2.times do |i|
+      conn = l.accept.or_panic
+      read_request(conn).or_panic
+      conn.write(i == 0 ? "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi" : "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nhi\r\n0\r\n\r\n").or_panic
+      conn.read_timeout_ms = 3000
+      conn.read(16)
+      conn.close
+    end
+    nil
   end
-  nil
 end
 whole_started = __iyi_monotonic_ns
 r = HTTP.get("http://127.0.0.1:#{whole_port}/held").or_panic
@@ -468,12 +1050,14 @@ v6 = IyiSocket.listen("::1", 0)
 v6_port = v6.local_port
 v6_fd = v6.to_unsafe
 v6_server = IyiThread.start do
-  l = IyiSocket.new(v6_fd)
-  conn = l.accept.or_panic
-  saw = read_request(conn).or_panic
-  conn.write("HTTP/1.1 200 OK\r\nContent-Length: #{saw.bytesize}\r\n\r\n" + saw)
-  conn.close
-  nil
+  tape do
+    l = IyiSocket.new(v6_fd)
+    conn = l.accept.or_panic
+    saw = read_request(conn).or_panic
+    conn.write("HTTP/1.1 200 OK\r\nContent-Length: #{saw.bytesize}\r\n\r\n" + saw)
+    conn.close
+    nil
+  end
 end
 # Written in capitals, as RFC 3986 lets a scheme be: it was "only http://".
 r = HTTP.get("HTTP://[::1]:#{v6_port}/six").or_panic
@@ -488,15 +1072,17 @@ cookie_listener = IyiSocket.listen("127.0.0.1", 0)
 cookie_port = cookie_listener.local_port
 cookie_fd = cookie_listener.to_unsafe
 cookie_server = IyiThread.start do
-  l = IyiSocket.new(cookie_fd)
-  2.times do |i|
-    conn = l.accept.or_panic
-    read_request(conn).or_panic
-    framed = i == 0 ? "Transfer-Encoding: chunked\r\n\r\n2\r\nhi\r\n0\r\n\r\n" : "Content-Length: 2\r\n\r\nhi"
-    conn.write("HTTP/1.1 200 OK\r\nSet-Cookie: a=1; Expires=Wed, 21 Oct 2026 07:28:00 GMT\r\nSet-Cookie: b=2\r\n" + framed).or_panic
-    conn.close
+  tape do
+    l = IyiSocket.new(cookie_fd)
+    2.times do |i|
+      conn = l.accept.or_panic
+      read_request(conn).or_panic
+      framed = i == 0 ? "Transfer-Encoding: chunked\r\n\r\n2\r\nhi\r\n0\r\n\r\n" : "Content-Length: 2\r\n\r\nhi"
+      conn.write("HTTP/1.1 200 OK\r\nSet-Cookie: a=1; Expires=Wed, 21 Oct 2026 07:28:00 GMT\r\nSet-Cookie: b=2\r\n" + framed).or_panic
+      conn.close
+    end
+    nil
   end
-  nil
 end
 ["chunked", "length"].each do |framing|
   r = HTTP.get("http://localhost:#{cookie_port}/#{framing}").or_panic
@@ -516,16 +1102,18 @@ endless_port = endless.local_port
 endless_fd = endless.to_unsafe
 endless_sent = Atomic(Int32).new(0)
 endless_server = IyiThread.start do
-  l = IyiSocket.new(endless_fd)
-  conn = l.accept.or_panic
-  read_request(conn).or_panic
-  conn.write("HTTP/1.1 200 OK\r\nX-Long: ")
-  field = "a" * 65536
-  while endless_sent.get < 1024 && conn.write(field).is_a?(Int32)
-    endless_sent.add(1)
+  tape do
+    l = IyiSocket.new(endless_fd)
+    conn = l.accept.or_panic
+    read_request(conn).or_panic
+    conn.write("HTTP/1.1 200 OK\r\nX-Long: ")
+    field = "a" * 65536
+    while endless_sent.get < 1024 && conn.write(field).is_a?(Int32)
+      endless_sent.add(1)
+    end
+    conn.close
+    nil
   end
-  conn.close
-  nil
 end
 endless_said = answer { HTTP.get("http://127.0.0.1:#{endless_port}/long").or_panic.status.to_s }
 endless_server.join
@@ -551,19 +1139,17 @@ end
 # `serve` from returning for as long as it stayed, and so did one that
 # had sent what has arrived of a request so far: here the three seconds
 # each sleeps.
-idle_listener = IyiSocket.listen("127.0.0.1", 0)
-idle_port = idle_listener.local_port
+idle_listener = RisExerciseServer.port
+idle_port = idle_listener
 idle_closed = 0_i64
 idle_returned = 0_i64
 group do |g|
   g.spawn do
-    Server.serve(idle_listener) do |req|
-      idle_listener.close if req.path == "/stop"
-      Response.new(200, "ok")
-    end
-    idle_returned = __iyi_monotonic_ns
+    RisExerciseServer.serve(idle_listener, {1, "".as_tape}, RisHttpFactory)
+    raise "timing queue full" unless RisBoard.post(RisHttpIdleReturned.new(__iyi_monotonic_ns))
     0
   end
+  RisExerciseServer.wait(RisHttpFactory)
   g.spawn { partway(idle_port, "G") }
   g.spawn { partway(idle_port, "GET /a HTTP/1.1\r\nHost: x\r\n") }
   g.spawn { partway(idle_port, "POST /a HTTP/1.1\r\nHost: x\r\nContent-Length: 10\r\n\r\nabc") }
@@ -574,13 +1160,19 @@ group do |g|
     keeper.read(256)
     # The four are in, and what has arrived of each is read.
     sleep(200)
-    idle_closed = __iyi_monotonic_ns
+    raise "timing queue full" unless RisBoard.post(RisHttpIdleClosed.new(__iyi_monotonic_ns))
     HTTP.get("http://127.0.0.1:#{idle_port}/stop").or_panic
     sleep(3000)
     keeper.close
     0
   end
 end
+idle_closed_result = RisBoard.take(RisHttpIdleClosed)
+raise "timing cancelled" if idle_closed_result.is_a?(Cancelled)
+idle_closed = idle_closed_result.time
+idle_returned_result = RisBoard.take(RisHttpIdleReturned)
+raise "timing cancelled" if idle_returned_result.is_a?(Cancelled)
+idle_returned = idle_returned_result.time
 idle_ms = (idle_returned - idle_closed) // 1000000_i64
 # The idle one and the four closed with the listener, what has arrived of
 # their requests unanswered.
@@ -591,30 +1183,15 @@ puts "\n== the server, from a raw socket"
 # What the server does with the wire: keep-alive across requests, a
 # chunked request body, HEAD, a request that is not HTTP, and `Connection:
 # close`. The client here is a bare socket so every byte is ours.
-listener = IyiSocket.listen(0)
-sport = listener.local_port
+listener = RisExerciseServer.port
+sport = listener
 seen_paths = [] of String
 group do |g|
   g.spawn do
-    Server.serve(listener) do |req|
-      seen_paths << req.method + " " + req.path
-      if req.path == "/echo"
-        Response.new(200, req.body, {"X-Query" => req.query || "-", "X-Agent" => req.header("user-agent") || "-"})
-      elsif req.path == "/nothing"
-        Response.new(204)
-      elsif req.path == "/size"
-        Response.new(200, req.body.bytesize.to_s)
-      elsif req.path == "/stop"
-        listener.close
-        Response.new(200, "bye")
-      elsif req.path == "/fail"
-        raise "the block failed on /fail"
-      else
-        Response.new(404, "no #{req.path}\n")
-      end
-    end
+    RisExerciseServer.serve(listener, {2, "".as_tape}, RisHttpFactory)
     0
   end
+  RisExerciseServer.wait(RisHttpFactory)
   g.spawn do
     c = IyiSocket.connect("127.0.0.1", sport).or_panic
     # Two requests on one connection, the second chunked, then a HEAD.
@@ -820,6 +1397,11 @@ end
 # The thousand written together and the head in pieces reached the block;
 # the 400s did not, nor the body that was declared and never came: only
 # what has arrived whole is answered. The block that panicked ran.
+1217.times do
+  observation = RisBoard.take(RisHttpSeen)
+  raise "request observation cancelled" if observation.is_a?(Cancelled)
+  seen_paths << ris_heap_text(observation.line)
+end
 assert_true seen_paths.size == 1217, "the block ran 1217 times, not #{seen_paths.size}"
 assert_str "POST /echo", seen_paths[0], "the first request's line"
 assert_str "HEAD /echo", seen_paths[2], "the HEAD's"
@@ -829,20 +1411,14 @@ puts "\n== the block's own close"
 # An answer whose `Connection` says `close` closes the connection after
 # it, as Go's server and Python's do: the line was dropped, `keep-alive`
 # written in its place, and the next request on the connection served.
-closer = IyiSocket.listen(0)
-closer_port = closer.local_port
+closer = RisExerciseServer.port
+closer_port = closer
 group do |g|
   g.spawn do
-    Server.serve(closer) do |req|
-      if req.path == "/bye"
-        Response.new(200, "bye", {"Connection" => "close"})
-      else
-        closer.close
-        Response.new(200, "stopped")
-      end
-    end
+    RisExerciseServer.serve(closer, {3, "".as_tape}, RisHttpFactory)
     0
   end
+  RisExerciseServer.wait(RisHttpFactory)
   g.spawn do
     bye = IyiSocket.connect("127.0.0.1", closer_port).or_panic
     bye.write("GET /bye HTTP/1.1\r\nHost: x\r\n\r\n").or_panic
@@ -857,34 +1433,32 @@ end
 puts "  a block's Connection: close closes the connection after its answer"
 
 puts "\n== a burst of connections"
-# Twenty connections waiting, each with its request written, when the
-# server starts: its accept loop takes them one after another without
-# waiting, and each must get a task of its own. The tasks held the loop's
-# variable and not its value, which the next accept overwrote before they
-# ran: connections that came together were read by several tasks - "two
-# fibers reading one fd" - and the rest by none, their clients waiting for
-# an answer that never came.
-burst_listener = IyiSocket.listen(0)
-burst_port = burst_listener.local_port
-burst = [] of IyiSocket
-20.times do |i|
-  b = IyiSocket.connect("127.0.0.1", burst_port).or_panic
-  b.write("GET /burst?n=#{i} HTTP/1.1\r\nHost: x\r\n\r\n").or_panic
-  b.read_timeout_ms = 10000
-  burst << b
-end
+# Twenty connections open and write their requests before the client reads
+# any answer. Each must answer its own query, including connections that
+# the kernel queues on a busy worker. This keeps the burst's original
+# regression: no connection may be read by two tasks or left unanswered.
+burst_listener = RisExerciseServer.port
+burst_port = burst_listener
 group do |g|
   g.spawn do
-    Server.serve(burst_listener) { |req| Response.new(200, req.query || "-") }
+    RisExerciseServer.serve(burst_listener, {4, "".as_tape}, RisHttpFactory)
     0
   end
+  RisExerciseServer.wait(RisHttpFactory)
   g.spawn do
+    burst = [] of IyiSocket
+    20.times do |i|
+      b = IyiSocket.connect("127.0.0.1", burst_port).or_panic
+      b.write("GET /burst?n=#{i} HTTP/1.1\r\nHost: x\r\n\r\n").or_panic
+      b.read_timeout_ms = 10000
+      burst << b
+    end
     burst.each_with_index do |b, i|
       rb = HTTP.parse_response(read_response(b))
       assert_str "n=#{i}", rb.body, "connection #{i} of a burst answered its own request"
       b.close
     end
-    burst_listener.close
+    RisExerciseServer.stop(RisHttpFactory)
     0
   end
 end
@@ -893,16 +1467,14 @@ puts "  twenty connections that arrived together, each answered its own request"
 puts "\n== empty lines before a request"
 # An empty line before a request is skipped (RFC 9112 §2.2): a client that
 # ended its body with one more CRLF had its next request answered 400.
-blank = IyiSocket.listen(0)
-blank_port = blank.local_port
+blank = RisExerciseServer.port
+blank_port = blank
 group do |g|
   g.spawn do
-    Server.serve(blank) do |req|
-      blank.close if req.path == "/stop"
-      Response.new(200, "#{req.method} #{req.path} #{req.body}")
-    end
+    RisExerciseServer.serve(blank, {5, "".as_tape}, RisHttpFactory)
     0
   end
+  RisExerciseServer.wait(RisHttpFactory)
   g.spawn do
     lines = IyiSocket.connect("127.0.0.1", blank_port).or_panic
     lines.write("POST /a HTTP/1.1\r\nHost: x\r\nContent-Length: 2\r\n\r\nhi\r\n").or_panic
@@ -926,49 +1498,16 @@ puts "\n== bodies as streams"
 stream_dir = Dir.tempdir + "/iyi_http_exercise_" + Random::Secure.hex(6)
 Dir.mkdir_p(stream_dir)
 File.write(stream_dir + "/up.bin", "U" * 300000)
-stream_l = IyiSocket.listen("127.0.0.1", 0)
-stream_port = stream_l.local_port
+stream_l = RisExerciseServer.port
+stream_port = stream_l
 stream_base = "http://127.0.0.1:#{stream_port}"
 first_piece_seen = false
 group do |g|
   g.spawn do
-    Server.serve(stream_l, stream_bodies: true) do |req|
-      if req.path == "/stop"
-        stream_l.close
-        Response.new(200, "bye")
-      elsif req.path == "/count"
-        total = 0_i64
-        pieces = 0
-        io = req.body_io
-        while true
-          piece = io.read(65536).or_panic
-          break if piece.bytesize == 0
-          first_piece_seen = true
-          total = total + piece.bytesize.to_i64
-          pieces = pieces + 1
-        end
-        Response.new(200, "#{total}")
-      elsif req.path == "/whole"
-        Response.new(200, req.body)
-      elsif req.path == "/ignore"
-        Response.new(200, "ignored")
-      elsif req.path == "/slow"
-        Response.stream(200, {"Content-Type" => "text/plain"}) do |w|
-          w.write("first,")
-          sleep(400)
-          w.write("second")
-          nil
-        end
-      elsif req.path == "/file"
-        Response.new(200, File.open(stream_dir + "/up.bin"), {"Content-Type" => "application/octet-stream"})
-      elsif req.path == "/file-sized"
-        Response.new(200, File.open(stream_dir + "/up.bin"), {"Content-Length" => "300000"})
-      else
-        Response.new(404, "no")
-      end
-    end
+    RisExerciseServer.serve(stream_l, {6, stream_dir.as_tape}, RisHttpFactory, stream_bodies: true)
     0
   end
+  RisExerciseServer.wait(RisHttpFactory)
   g.spawn do
     # An upload from a stream goes chunked, as it is read.
     counted = HTTP.post(stream_base + "/count", File.open(stream_dir + "/up.bin")).or_panic
@@ -976,14 +1515,11 @@ group do |g|
     assert_str "abc", HTTP.post(stream_base + "/whole", "abc").or_panic.body, "a streaming server's `body` reads the rest whole"
     # The block reads its body while the client is still sending it: half
     # is written, and the rest only once the block has seen a piece.
+    RisBoard.take(RisHttpPiece)
     half = IyiSocket.connect("127.0.0.1", stream_port).or_panic
     half.write("POST /count HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n").or_panic
-    waited = 0
-    while !first_piece_seen && waited < 300
-      sleep(10)
-      waited = waited + 1
-    end
-    assert_true first_piece_seen, "the block read the first piece of a body whose end had not been sent"
+    piece_observation = RisBoard.take(RisHttpPiece, 3000_i64)
+    assert_true !piece_observation.is_a?(Cancelled) && piece_observation[1], "the block read the first piece of a body whose end had not been sent"
     half.write("6\r\n world\r\n0\r\n\r\n").or_panic
     assert_str "11", HTTP.parse_response(read_response(half)).body, "and the rest after it"
     # What a block leaves unread is read past, so the next request on the
@@ -1095,70 +1631,16 @@ def zstd_hello(descriptor : Int32) : String
   framed + "hello"
 end
 
-coding_l = IyiSocket.listen("127.0.0.1", 0)
-coding_port = coding_l.local_port
+coding_l = RisExerciseServer.port
+coding_port = coding_l
 coding_base = "http://127.0.0.1:#{coding_port}"
 long_text = "the quick brown fox jumps over the lazy dog. " * 400
 group do |g|
   g.spawn do
-    Server.serve(coding_l, compress: true) do |req|
-      if req.path == "/stop"
-        coding_l.close
-        Response.new(200, "bye")
-      elsif req.path == "/text"
-        Response.new(200, long_text, {"Content-Type" => "text/plain"})
-      elsif req.path == "/short"
-        Response.new(200, "short", {"Content-Type" => "text/plain"})
-      elsif req.path == "/png"
-        Response.new(200, long_text, {"Content-Type" => "image/png"})
-      elsif req.path == "/own"
-        Response.new(200, Gzip.compress("mine"), {"Content-Type" => "text/plain", "Content-Encoding" => "gzip"})
-      elsif req.path == "/zstd-own"
-        Response.new(200, Zstd.compress("mine"), {"Content-Type" => "text/plain", "Content-Encoding" => "zstd"})
-      elsif req.path == "/accept"
-        Response.new(200, req.header("Accept-Encoding") || "-")
-      elsif req.path == "/zstd-corrupt"
-        bad = Zstd.compress(long_text)
-        Response.new(200, bad[0, 40] + "garbage" + bad[47, bad.bytesize - 47], {"Content-Encoding" => "zstd"})
-      elsif req.path == "/zstd-16mib"
-        Response.new(200, zstd_hello(0x70), {"Content-Encoding" => "zstd"})
-      elsif req.path == "/zstd-8mib"
-        Response.new(200, zstd_hello(0x68), {"Content-Encoding" => "zstd"})
-      elsif req.path == "/zstd-frames"
-        # Two frames, a hundred bytes a chunk: the frames' ends and the
-        # chunks' fall where they fall.
-        zframes = Zstd.compress(long_text[0, 9000]) + Zstd.compress(long_text[9000, long_text.bytesize - 9000])
-        Response.stream(200, {"Content-Type" => "text/plain", "Content-Encoding" => "zstd"}) do |w|
-          at = 0
-          while at < zframes.bytesize
-            n = zframes.bytesize - at < 100 ? zframes.bytesize - at : 100
-            w.write(zframes[at, n])
-            at = at + n
-          end
-          nil
-        end
-      elsif req.path == "/vary"
-        Response.new(200, long_text, {"Content-Type" => "text/html", "Vary" => "Cookie"})
-      elsif req.path == "/stream"
-        Response.stream(200, {"Content-Type" => "application/json"}) do |w|
-          5.times { |i| w.write("{\"n\":#{i}}\n") }
-          nil
-        end
-      elsif req.path == "/zlib"
-        Response.new(200, Zlib.compress(long_text), {"Content-Encoding" => "deflate"})
-      elsif req.path == "/raw-deflate"
-        Response.new(200, Deflate.compress(long_text), {"Content-Encoding" => "deflate"})
-      elsif req.path == "/corrupt"
-        bad = Gzip.compress(long_text)
-        Response.new(200, bad[0, 40] + "garbage" + bad[47, bad.bytesize - 47], {"Content-Encoding" => "gzip"})
-      elsif req.path == "/br"
-        Response.new(200, "pretend", {"Content-Encoding" => "br"})
-      else
-        Response.new(404, "no")
-      end
-    end
+    RisExerciseServer.serve(coding_l, {7, "".as_tape}, RisHttpFactory, compress: true)
     0
   end
+  RisExerciseServer.wait(RisHttpFactory)
   g.spawn do
     said = HTTP.get(coding_base + "/accept").or_panic
     assert_str "gzip, deflate, zstd", said.body, "the client asks for gzip, deflate and zstd"
@@ -1250,43 +1732,22 @@ puts "\n== redirects"
 # RFC 9110 §15.4: 301 and 302 make a POST a GET, 303 makes anything but a
 # HEAD a GET, 307 and 308 keep the method and the body; credentials do
 # not cross to another host; a loop stops.
-hop_l = IyiSocket.listen("127.0.0.1", 0)
-hop_port = hop_l.local_port
+hop_l = RisExerciseServer.port
+hop_port = hop_l
 hop_base = "http://127.0.0.1:#{hop_port}"
-other_l = IyiSocket.listen("127.0.0.1", 0)
-other_base = "http://127.0.0.1:#{other_l.local_port}"
+other_l = RisExerciseServer.port
+other_base = "http://127.0.0.1:#{other_l}"
 group do |g|
   g.spawn do
-    Server.serve(hop_l) do |req|
-      case req.path
-      when "/stop"
-        hop_l.close
-        Response.new(200, "bye")
-      when "/301", "/302", "/303", "/307", "/308"
-        Response.new(req.path[1, 3].to_i, "", {"Location" => "/echo?from=#{req.path[1, 3]}"})
-      when "/away"
-        Response.new(302, "", {"Location" => other_base + "/echo"})
-      when "/relative"
-        Response.new(302, "", {"Location" => "sub/../echo"})
-      when "/loop"
-        Response.new(302, "", {"Location" => "/loop"})
-      when "/ftp"
-        Response.new(302, "", {"Location" => "ftp://127.0.0.1/"})
-      when "/echo"
-        Response.new(200, "#{req.method} #{req.query || "-"} #{req.body} auth=#{req.header("Authorization") || "-"} type=#{req.header("Content-Type") || "-"}")
-      else
-        Response.new(404, "no")
-      end
-    end
+    RisExerciseServer.serve(hop_l, {8, other_base.as_tape}, RisHttpFactory)
     0
   end
+  RisExerciseServer.wait(RisHttpFactory)
   g.spawn do
-    Server.serve(other_l) do |req|
-      other_l.close if req.path == "/stop"
-      Response.new(200, "other auth=#{req.header("Authorization") || "-"} cookie=#{req.header("Cookie") || "-"}")
-    end
+    RisExerciseServer.serve(other_l, {9, "".as_tape}, RisHttpOtherFactory)
     0
   end
+  RisExerciseServer.wait(RisHttpOtherFactory)
   g.spawn do
     form = {"Content-Type" => "text/plain", "Authorization" => "Bearer t"}
     assert_str "GET from=301  auth=Bearer t type=-", HTTP.post(hop_base + "/301", "data", form).or_panic.body, "301 makes a POST a GET"
@@ -1318,41 +1779,15 @@ puts "  301, 302, 303, 307, 308, another host, relative, a loop, https, redirect
 puts "\n== forms"
 # A urlencoded body is the query's fields after; a multipart one is read
 # a part at a time as it arrives, its boundary found across reads.
-form_l = IyiSocket.listen("127.0.0.1", 0)
-form_port = form_l.local_port
+form_l = RisExerciseServer.port
+form_port = form_l
 form_base = "http://127.0.0.1:#{form_port}"
 group do |g|
   g.spawn do
-    Server.serve(form_l, stream_bodies: true) do |req|
-      if req.path == "/stop"
-        form_l.close
-        Response.new(200, "bye")
-      elsif req.path == "/form"
-        Response.new(200, req.form.to_s)
-      elsif req.path == "/parts"
-        said = ""
-        if parts = req.multipart
-          while true
-            part = parts.next_part
-            break if part.nil?
-            if part.is_a?(Part)
-              data = part.read_all
-              said = said + "#{part.name || "-"}|#{part.filename || "-"}|#{part.content_type || "-"}|#{data.is_a?(String) ? data : data.message};"
-            else
-              said = said + "error: #{part.message}"
-              break
-            end
-          end
-        else
-          said = "not multipart"
-        end
-        Response.new(200, said)
-      else
-        Response.new(404, "no")
-      end
-    end
+    RisExerciseServer.serve(form_l, {10, "".as_tape}, RisHttpFactory, stream_bodies: true)
     0
   end
+  RisExerciseServer.wait(RisHttpFactory)
   g.spawn do
     urlenc = {"Content-Type" => "application/x-www-form-urlencoded"}
     assert_str "q=1&a=x+y&b=%26", HTTP.post(form_base + "/form?q=1", "a=x+y&b=%26", urlenc).or_panic.body, "query fields, then the body's"
@@ -1407,30 +1842,14 @@ puts "\n== kept connections"
 # said `close`, or left more than 64 KiB unread, or the server closed the
 # connection while it waited - a GET then goes again on a new one, a POST
 # does not.
-kept_l = IyiSocket.listen("127.0.0.1", 0)
-kept_base = "http://127.0.0.1:#{kept_l.local_port}"
+kept_l = RisExerciseServer.port
+kept_base = "http://127.0.0.1:#{kept_l}"
 group do |g|
   g.spawn do
-    Server.serve(kept_l, compress: true) do |req|
-      if req.path == "/stop"
-        kept_l.close
-        Response.new(200, "bye")
-      elsif req.path == "/close"
-        Response.new(200, "closing", {"Connection" => "close"})
-      elsif req.path == "/who"
-        Response.new(200, req.remote_address || "-")
-      elsif req.path == "/mid"
-        Response.new(200, "m" * 30000, {"Content-Type" => "image/png"})
-      elsif req.path == "/big"
-        Response.new(200, "b" * 200000, {"Content-Type" => "image/png"})
-      elsif req.path == "/text"
-        Response.new(200, "t" * 200000, {"Content-Type" => "text/plain"})
-      else
-        Response.new(200, req.method + " " + req.path + " " + req.body)
-      end
-    end
+    RisExerciseServer.serve(kept_l, {11, "".as_tape}, RisHttpFactory, compress: true)
     0
   end
+  RisExerciseServer.wait(RisHttpFactory)
   g.spawn do
     kc = HTTPClient.new
     10.times { |i| assert_str "GET /n#{i} ", kc.get(kept_base + "/n#{i}").or_panic.body, "request #{i} on a kept connection" }
@@ -1510,26 +1929,14 @@ def closed_on?(c : IyiSocket) : Bool
   false
 end
 
-slow_l = IyiSocket.listen("127.0.0.1", 0)
-slow_port = slow_l.local_port
+slow_l = RisExerciseServer.port
+slow_port = slow_l
 group do |g|
   g.spawn do
-    Server.serve(slow_l, timeout_ms: 1000) do |req|
-      if req.path == "/stop"
-        slow_l.close
-        Response.new(200, "bye")
-      elsif req.header("Upgrade") == "echo"
-        Response.upgrade({"Upgrade" => "echo", "Connection" => "Upgrade"}) do |sock, _|
-          got = sock.read(100)
-          sock.write("echo:" + got) if got.is_a?(String)
-          nil
-        end
-      else
-        Response.new(200, "ok")
-      end
-    end
+    RisExerciseServer.serve(slow_l, {12, "".as_tape}, RisHttpFactory, timeout_ms: 1000)
     0
   end
+  RisExerciseServer.wait(RisHttpFactory)
   g.spawn do
     silent = IyiSocket.connect("127.0.0.1", slow_port).or_panic
     started = __iyi_monotonic_ns
@@ -1587,17 +1994,15 @@ group do |g|
   end
 end
 # With none, an idle connection is kept.
-none_l = IyiSocket.listen("127.0.0.1", 0)
+none_l = RisExerciseServer.port
 group do |g|
   g.spawn do
-    Server.serve(none_l, timeout_ms: 0) do |req|
-      none_l.close if req.path == "/stop"
-      Response.new(200, "ok")
-    end
+    RisExerciseServer.serve(none_l, {13, "".as_tape}, RisHttpFactory, timeout_ms: 0)
     0
   end
+  RisExerciseServer.wait(RisHttpFactory)
   g.spawn do
-    waiting = IyiSocket.connect("127.0.0.1", none_l.local_port).or_panic
+    waiting = IyiSocket.connect("127.0.0.1", none_l).or_panic
     sleep(700)
     waiting.write("GET /stop HTTP/1.1\r\nHost: x\r\n\r\n").or_panic
     assert_true HTTP.parse_response(read_response(waiting)).body == "ok", "timeout_ms: 0 keeps an idle connection"
@@ -1636,36 +2041,19 @@ puts "  nothing sent, a byte every 100 ms, a head in pieces in time, an idle kep
 puts "\n== upgrades"
 # A 101 hands the connection to the block, with the bytes the client sent
 # after its request; the client is handed it the same way.
-up_l = IyiSocket.listen("127.0.0.1", 0)
-up_base = "http://127.0.0.1:#{up_l.local_port}"
+up_l = RisExerciseServer.port
+up_base = "http://127.0.0.1:#{up_l}"
 up_stopped = 0_i64
 up_returned = 0_i64
 group do |g|
   g.spawn do
-    Server.serve(up_l) do |req|
-      if req.path == "/stop"
-        up_l.close
-        Response.new(200, "bye")
-      elsif req.header("Upgrade") == "echo"
-        Response.upgrade({"Upgrade" => "echo", "Connection" => "Upgrade"}) do |sock, leftover|
-          said = leftover
-          while said.bytesize < 4
-            got = sock.read(100)
-            break unless got.is_a?(String) && got.bytesize > 0
-            said = said + got
-          end
-          sock.write("echo:" + said) if said.bytesize >= 4
-          nil
-        end
-      else
-        Response.new(426, "upgrade to echo\n", {"Upgrade" => "echo"})
-      end
-    end
-    up_returned = __iyi_monotonic_ns
+    RisExerciseServer.serve(up_l, {14, "".as_tape}, RisHttpFactory)
+    raise "timing queue full" unless RisBoard.post(RisHttpUpReturned.new(__iyi_monotonic_ns))
     0
   end
+  RisExerciseServer.wait(RisHttpFactory)
   g.spawn do
-    raw = IyiSocket.connect("127.0.0.1", up_l.local_port).or_panic
+    raw = IyiSocket.connect("127.0.0.1", up_l).or_panic
     raw.write("GET /chat HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: echo\r\n\r\nping").or_panic
     switched = read_to_close(raw)
     raw.close
@@ -1685,13 +2073,19 @@ group do |g|
     # A connection handed over and still open when the listener closes is
     # closed with it: `serve` waited for its client, three seconds here.
     stays = HTTP.upgrade(up_base + "/chat", "echo").or_panic
-    up_stopped = __iyi_monotonic_ns
+    raise "timing queue full" unless RisBoard.post(RisHttpUpStopped.new(__iyi_monotonic_ns))
     HTTP.get(up_base + "/stop").or_panic
     sleep(3000)
     stays.socket.close
     0
   end
 end
+up_stopped_result = RisBoard.take(RisHttpUpStopped)
+raise "timing cancelled" if up_stopped_result.is_a?(Cancelled)
+up_stopped = up_stopped_result.time
+up_returned_result = RisBoard.take(RisHttpUpReturned)
+raise "timing cancelled" if up_returned_result.is_a?(Cancelled)
+up_returned = up_returned_result.time
 up_ms = (up_returned - up_stopped) // 1000000_i64
 assert_true up_ms < 2000, "serve returns when its listener closes beside a connection it handed over, not #{up_ms} ms later"
 puts "  a 101 from a raw socket, HTTP.upgrade, a refusal, a handed-over connection closed with the listener"
@@ -1768,36 +2162,38 @@ proxy_l = IyiSocket.listen("127.0.0.1", 0)
 proxy_port = proxy_l.local_port
 proxy_fd = proxy_l.to_unsafe
 proxy_server = IyiThread.start do
-  l = IyiSocket.new(proxy_fd)
-  7.times do |i|
-    conn = l.accept.or_panic
-    rounds = i == 1 || i == 5 ? 2 : 1
-    rounds.times do |round|
-      saw = read_request(conn).or_panic
-      # A CONNECT not as the check below expects it is answered with what
-      # the proxy saw, for the client's error to name.
-      reply = if i == 0 || i == 1
-                "HTTP/1.1 200 OK\r\nContent-Length: #{saw.bytesize}\r\n\r\n" + saw
-              elsif i == 2
-                fine = saw == "CONNECT secure.test:443 HTTP/1.1\r\nHost: secure.test:443\r\nProxy-Authorization: Basic dXNlcjpwQHNz\r\n\r\n"
-                "HTTP/1.1 407 #{fine ? "Proxy Authentication Required" : saw.inspect}\r\nProxy-Authenticate: Basic realm=\"gate\"\r\nContent-Length: 0\r\n\r\n"
-              elsif i == 3
-                fine = saw == "CONNECT [::1]:8443 HTTP/1.1\r\nHost: [::1]:8443\r\nProxy-Authorization: Basic Z2F0ZTpzM2NyZXQ=\r\n\r\n"
-                "HTTP/1.1 403 #{fine ? "Forbidden" : saw.inspect}\r\nContent-Length: 0\r\n\r\n"
-              elsif i == 5 && round == 0
-                fine = saw == "CONNECT up.test:80 HTTP/1.1\r\nHost: up.test:80\r\nProxy-Authorization: Basic dXNlcjpwQHNz\r\n\r\n"
-                fine ? "HTTP/1.1 200 Connection established\r\n\r\n" : "HTTP/1.1 407 #{saw.inspect}\r\nContent-Length: 0\r\n\r\n"
-              elsif i == 5
-                # Inside the tunnel, the origin's 101 and what it was sent.
-                "HTTP/1.1 101 Switching Protocols\r\nUpgrade: echo\r\nConnection: Upgrade\r\n\r\n" + saw
-              else
-                "HTTP/1.1 200 Connection established\r\n\r\njunk"
-              end
-      conn.write(reply).or_panic
+  tape do
+    l = IyiSocket.new(proxy_fd)
+    7.times do |i|
+      conn = l.accept.or_panic
+      rounds = i == 1 || i == 5 ? 2 : 1
+      rounds.times do |round|
+        saw = read_request(conn).or_panic
+        # A CONNECT not as the check below expects it is answered with what
+        # the proxy saw, for the client's error to name.
+        reply = if i == 0 || i == 1
+                  "HTTP/1.1 200 OK\r\nContent-Length: #{saw.bytesize}\r\n\r\n" + saw
+                elsif i == 2
+                  fine = saw == "CONNECT secure.test:443 HTTP/1.1\r\nHost: secure.test:443\r\nProxy-Authorization: Basic dXNlcjpwQHNz\r\n\r\n"
+                  "HTTP/1.1 407 #{fine ? "Proxy Authentication Required" : saw.inspect}\r\nProxy-Authenticate: Basic realm=\"gate\"\r\nContent-Length: 0\r\n\r\n"
+                elsif i == 3
+                  fine = saw == "CONNECT [::1]:8443 HTTP/1.1\r\nHost: [::1]:8443\r\nProxy-Authorization: Basic Z2F0ZTpzM2NyZXQ=\r\n\r\n"
+                  "HTTP/1.1 403 #{fine ? "Forbidden" : saw.inspect}\r\nContent-Length: 0\r\n\r\n"
+                elsif i == 5 && round == 0
+                  fine = saw == "CONNECT up.test:80 HTTP/1.1\r\nHost: up.test:80\r\nProxy-Authorization: Basic dXNlcjpwQHNz\r\n\r\n"
+                  fine ? "HTTP/1.1 200 Connection established\r\n\r\n" : "HTTP/1.1 407 #{saw.inspect}\r\nContent-Length: 0\r\n\r\n"
+                elsif i == 5
+                  # Inside the tunnel, the origin's 101 and what it was sent.
+                  "HTTP/1.1 101 Switching Protocols\r\nUpgrade: echo\r\nConnection: Upgrade\r\n\r\n" + saw
+                else
+                  "HTTP/1.1 200 Connection established\r\n\r\njunk"
+                end
+        conn.write(reply).or_panic
+      end
+      conn.close
     end
-    conn.close
+    nil
   end
-  nil
 end
 proxy_url = "http://user:p%40ss@127.0.0.1:#{proxy_port}"
 through = HTTP.request("GET", "http://origin.test:8080/a?b=1", {"Proxy-Authorization" => "Basic other"}, proxy: proxy_url).or_panic

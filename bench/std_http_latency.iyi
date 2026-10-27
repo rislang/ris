@@ -3,7 +3,8 @@
 # ACK put 40 ms into.
 #
 #   ./bin/iyi run bench/std_http_latency.iyi
-#   ./bin/iyi run bench/std_http_latency.iyi self CHAIN.pem KEY.pem ROOT.pem COUNT
+#   ./bin/iyi run bench/std_http_latency.iyi self CHAIN.pem KEY.pem ROOT.pem
+# COUNT
 #   ./bin/iyi run bench/std_http_latency.iyi s_server PORT ROOT.pem COUNT
 #   ./bin/iyi run bench/std_http_latency.iyi serve PORTFILE CHAIN.pem KEY.pem
 #   ./bin/iyi run bench/std_http_latency.iyi once CHAIN.pem KEY.pem ROOT.pem
@@ -28,6 +29,168 @@
 # stays well under the least stall.
 
 module bench/std_http_latency
+
+# The probe owns its socket only until it chooses a nonzero pool port.
+# Ready and Stop are keyed by factory, so simultaneous pools do not steal
+# one another's lifecycle messages. Stop gives the response time to flush.
+# These exercises still use std's legacy String APIs and assertions.
+# Board messages themselves own copied tape text; this is the heap adapter.
+@[TapeToHeap]
+def ris_heap_text(value : Str) : String
+  value.to_s
+end
+
+import std/file::{File}
+
+module RisExerciseServer
+  struct RisReady(H)
+  end
+
+  struct RisStop(H)
+  end
+
+  @[OnTape]
+  struct RisConfig(C, H)
+    getter value : C
+
+    def initialize(@value)
+    end
+  end
+
+  def self.port : Int32
+    probe = IyiSocket.listen("127.0.0.1", 0)
+    port = probe.local_port
+    probe.close
+    port
+  end
+
+  def self.ready(handler : H.class) : Nil forall H
+    raise "ready queue full" unless RisBoard.post(RisReady(H).new)
+  end
+
+  def self.wait(handler : H.class) : Nil forall H
+    ready = RisBoard.take(RisReady(H), 10000_i64)
+    raise "cancelled before listening" if ready.is_a?(Cancelled)
+    raise "server did not listen within 10 s" unless ready[1]
+  end
+
+  def self.stop(handler : H.class) : Nil forall H
+    raise "stop queue full" unless RisBoard.post(RisStop(H).new)
+  end
+
+  def self.serve(port : Int32, config : C, handler : H.class,
+                 stream_bodies : Bool = false, compress : Bool = false,
+                 timeout_ms : Int32 = 60000,
+                 request_timeout_ms : Int32 = Server::REQUEST_TIMEOUT,
+                 max_connections : Int32 = 64,
+                 print_port : Bool = false,
+                 port_file : String? = nil) : Nil forall C, H
+    raise "config queue full" unless RisBoard.post(RisConfig(C, H).new(config))
+    group do |pool|
+      pool.spawn do
+        copied = RisBoard.take(RisConfig(C, H))
+        unless copied.is_a?(Cancelled)
+          Server.serve("127.0.0.1", port, copied.value, handler,
+            stream_bodies: stream_bodies, compress: compress,
+            timeout_ms: timeout_ms, request_timeout_ms: request_timeout_ms,
+            max_connections: max_connections)
+        end
+        0
+      end
+      pool.spawn do
+        unless RisBoard.take(RisStop(H)).is_a?(Cancelled)
+          sleep(50)
+          pool.cancel_children
+        end
+        0
+      end
+      if print_port || port_file
+        wait(handler)
+        puts port if print_port
+        File.write(port_file, port.to_s) if port_file
+      end
+      0
+    end
+  end
+end
+
+@[OnTape]
+struct RisLatencyResult
+  getter times : Ary(Int64)
+
+  def initialize(@times)
+  end
+end
+
+class RisLatency1Handler
+  def initialize(config)
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisLatency1Handler)
+  end
+
+  def call(req) : Response
+    RisExerciseServer.stop(RisLatency1Handler) if req.path == "/stop"
+    answer(req.path)
+  end
+end
+
+class RisLatency2Handler
+  @tls : TlsServerConfig
+
+  def initialize(config : {Str, Str})
+    @tls = server_config(ris_heap_text(config[0]), ris_heap_text(config[1]))
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisLatency2Handler)
+  end
+
+  def tls_config : TlsServerConfig
+    @tls
+  end
+
+  def call(req) : Response
+    RisExerciseServer.stop(RisLatency2Handler) if req.path == "/stop"
+    answer(req.path)
+  end
+end
+
+class RisLatency3Handler
+  @tls : TlsServerConfig
+
+  def initialize(config : {Str, Str})
+    @tls = server_config(ris_heap_text(config[0]), ris_heap_text(config[1]))
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisLatency3Handler)
+  end
+
+  def tls_config : TlsServerConfig
+    @tls
+  end
+
+  def call(req) : Response
+    RisExerciseServer.stop(RisLatency3Handler) if req.path == "/quit"
+    Response.new(200, "ok")
+  end
+end
+
+class RisLatency4Handler
+  def initialize(config)
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisLatency4Handler)
+  end
+
+  def call(req) : Response
+    RisExerciseServer.stop(RisLatency4Handler) if req.path == "/stop"
+    answer(req.path)
+  end
+end
 
 import std/http::{HTTP, HTTPClient, Response, Server}
 import std/socket::{IyiSocket}
@@ -133,39 +296,34 @@ args = Program.args
 mode = args.size > 0 ? args[0] : ""
 
 if mode == "self" || mode == "once"
-  secure = server_config(args[1], args[2])
   config = client_config(args[3])
   HTTP.tls_config = config
   count = mode == "self" ? args[4].to_i : 0
-  plain = IyiSocket.listen("127.0.0.1", 0)
-  tls = IyiSocket.listen("127.0.0.1", 0)
+  plain = RisExerciseServer.port
+  tls = RisExerciseServer.port
   group do |g|
     g.spawn do
-      Server.serve(plain) do |req|
-        plain.close if req.path == "/stop"
-        answer(req.path)
-      end
+      RisExerciseServer.serve(plain, 0, RisLatency1Handler)
       0
     end
+    RisExerciseServer.wait(RisLatency1Handler)
     g.spawn do
-      Server.serve(tls, tls: secure) do |req|
-        tls.close if req.path == "/stop"
-        answer(req.path)
-      end
+      RisExerciseServer.serve(tls, {args[1].as_tape, args[2].as_tape}, RisLatency2Handler)
       0
     end
+    RisExerciseServer.wait(RisLatency2Handler)
     g.spawn do
       if mode == "once"
-        HTTP.get("https://localhost:#{tls.local_port}/").or_panic
+        HTTP.get("https://localhost:#{tls}/").or_panic
       else
-        report("plain http://, std/http at both ends, a GET on a new connection", gets("http://127.0.0.1:#{plain.local_port}/", count))
-        report("plain http://, a kept connection, an answer the server streams", gets("http://127.0.0.1:#{plain.local_port}/stream", count, 1))
-        report("https://, std/http at both ends, a GET on a new connection", gets("https://localhost:#{tls.local_port}/", count))
-        report("https://, a kept connection, an answer the server streams", gets("https://localhost:#{tls.local_port}/stream", count, 1))
-        report("https://, Nagle on at the client, its handshake and a GET", nagle_gets(tls.local_port, config, count))
+        report("plain http://, std/http at both ends, a GET on a new connection", gets("http://127.0.0.1:#{plain}/", count))
+        report("plain http://, a kept connection, an answer the server streams", gets("http://127.0.0.1:#{plain}/stream", count, 1))
+        report("https://, std/http at both ends, a GET on a new connection", gets("https://localhost:#{tls}/", count))
+        report("https://, a kept connection, an answer the server streams", gets("https://localhost:#{tls}/stream", count, 1))
+        report("https://, Nagle on at the client, its handshake and a GET", nagle_gets(tls, config, count))
       end
-      HTTP.get("http://127.0.0.1:#{plain.local_port}/stop")
-      HTTP.get("https://localhost:#{tls.local_port}/stop")
+      HTTP.get("http://127.0.0.1:#{plain}/stop")
+      HTTP.get("https://localhost:#{tls}/stop")
       0
     end
   end
@@ -183,12 +341,8 @@ if mode == "s_server"
 end
 
 if mode == "serve"
-  listener = IyiSocket.listen("127.0.0.1", 0)
-  File.write(args[1], listener.local_port.to_s)
-  Server.serve(listener, tls: server_config(args[2], args[3])) do |req|
-    listener.close if req.path == "/quit"
-    Response.new(200, "ok")
-  end
+  listener = RisExerciseServer.port
+  RisExerciseServer.serve(listener, {args[2].as_tape, args[3].as_tape}, RisLatency3Handler, port_file: args[1])
   exit 0
 end
 
@@ -212,22 +366,26 @@ client.nodelay = false
 raise "nodelay: TCP_NODELAY still set after nodelay = false" if client.nodelay?
 client.close
 accepted.close
+listener.close
+listener = RisExerciseServer.port
 puts "nodelay: TCP_NODELAY set on the connected and the accepted socket, and cleared by nodelay = false"
 streamed = [] of Int64
 group do |g|
   g.spawn do
-    Server.serve(listener) do |req|
-      listener.close if req.path == "/stop"
-      answer(req.path)
-    end
+    RisExerciseServer.serve(listener, 0, RisLatency4Handler)
     0
   end
+  RisExerciseServer.wait(RisLatency4Handler)
   g.spawn do
-    streamed = gets("http://127.0.0.1:#{listener.local_port}/stream", 30, 1)
-    HTTP.get("http://127.0.0.1:#{listener.local_port}/stop")
+    measured = gets("http://127.0.0.1:#{listener}/stream", 30, 1)
+    HTTP.get("http://127.0.0.1:#{listener}/stop")
+    raise "latency queue full" unless RisBoard.post(RisLatencyResult.new(Ary(Int64).new(measured.size) { |i| measured[i] }))
     0
   end
 end
+result = RisBoard.take(RisLatencyResult)
+raise "latency cancelled" if result.is_a?(Cancelled)
+streamed = Array(Int64).new(result.times.size) { |i| result.times[i] }
 median = median_ns(streamed)
 raise "a streamed answer on a kept connection: #{ms(median)}, past #{BOUND_MS} ms (the median of #{streamed.size})" unless median < BOUND_MS.to_i64 * 1000000_i64
 puts "a streamed answer on a kept connection: under #{BOUND_MS} ms, the median of #{streamed.size}"

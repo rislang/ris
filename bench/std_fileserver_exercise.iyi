@@ -5,6 +5,132 @@
 
 module bench/std_fileserver_exercise
 
+# The probe owns its socket only until it chooses a nonzero pool port.
+# Ready and Stop are keyed by factory, so simultaneous pools do not steal
+# one another's lifecycle messages. Stop gives the response time to flush.
+# These exercises still use std's legacy String APIs and assertions.
+# Board messages themselves own copied tape text; this is the heap adapter.
+@[TapeToHeap]
+def ris_heap_text(value : Str) : String
+  value.to_s
+end
+
+import std/file::{File}
+
+module RisExerciseServer
+  struct RisReady(H)
+  end
+
+  struct RisStop(H)
+  end
+
+  @[OnTape]
+  struct RisConfig(C, H)
+    getter value : C
+
+    def initialize(@value)
+    end
+  end
+
+  def self.port : Int32
+    probe = IyiSocket.listen("127.0.0.1", 0)
+    port = probe.local_port
+    probe.close
+    port
+  end
+
+  def self.ready(handler : H.class) : Nil forall H
+    raise "ready queue full" unless RisBoard.post(RisReady(H).new)
+  end
+
+  def self.wait(handler : H.class) : Nil forall H
+    ready = RisBoard.take(RisReady(H), 10000_i64)
+    raise "cancelled before listening" if ready.is_a?(Cancelled)
+    raise "server did not listen within 10 s" unless ready[1]
+  end
+
+  def self.stop(handler : H.class) : Nil forall H
+    raise "stop queue full" unless RisBoard.post(RisStop(H).new)
+  end
+
+  def self.serve(port : Int32, config : C, handler : H.class,
+                 stream_bodies : Bool = false, compress : Bool = false,
+                 timeout_ms : Int32 = 60000,
+                 request_timeout_ms : Int32 = Server::REQUEST_TIMEOUT,
+                 max_connections : Int32 = 64,
+                 print_port : Bool = false,
+                 port_file : String? = nil) : Nil forall C, H
+    raise "config queue full" unless RisBoard.post(RisConfig(C, H).new(config))
+    group do |pool|
+      pool.spawn do
+        copied = RisBoard.take(RisConfig(C, H))
+        unless copied.is_a?(Cancelled)
+          Server.serve("127.0.0.1", port, copied.value, handler,
+            stream_bodies: stream_bodies, compress: compress,
+            timeout_ms: timeout_ms, request_timeout_ms: request_timeout_ms,
+            max_connections: max_connections)
+        end
+        0
+      end
+      pool.spawn do
+        unless RisBoard.take(RisStop(H)).is_a?(Cancelled)
+          sleep(50)
+          pool.cancel_children
+        end
+        0
+      end
+      if print_port || port_file
+        wait(handler)
+        puts port if print_port
+        File.write(port_file, port.to_s) if port_file
+      end
+      0
+    end
+  end
+end
+
+class RisFiles1Handler
+  @root : String
+
+  def initialize(root : Str)
+    @root = ris_heap_text(root)
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisFiles1Handler)
+  end
+
+  def call(req) : Response
+    if req.path == "/stop"
+      RisExerciseServer.stop(RisFiles1Handler)
+      Response.new(200, "bye")
+    else
+      FileServer.serve(@root, req)
+    end
+  end
+end
+
+class RisFiles2Handler
+  @root : String
+
+  def initialize(root : Str)
+    @root = ris_heap_text(root)
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisFiles2Handler)
+  end
+
+  def call(req) : Response
+    if req.path == "/stop"
+      RisExerciseServer.stop(RisFiles2Handler)
+      Response.new(200, "bye")
+    else
+      FileServer.serve(@root, req)
+    end
+  end
+end
+
 def assert_true(cond : Bool, msg : String) : Nil
   raise "ASSERTION FAILED: #{msg}" unless cond
 end
@@ -47,17 +173,9 @@ end
 # script's Python client.
 args = Program.args
 if args.size > 1 && args[0] == "serve"
-  serving = IyiSocket.listen("127.0.0.1", 0)
-  puts serving.local_port
+  serving = RisExerciseServer.port
   root = args[1]
-  Server.serve(serving) do |req|
-    if req.path == "/stop"
-      serving.close
-      Response.new(200, "bye")
-    else
-      FileServer.serve(root, req)
-    end
-  end
+  RisExerciseServer.serve(serving, Str.new(root), RisFiles1Handler, print_port: true)
   __iyi_exit(0)
 end
 
@@ -70,21 +188,15 @@ File.write(stream_dir + "/www/index.html", "<h1>home</h1>")
 File.write(stream_dir + "/www/data.json", "{\"a\":1}")
 File.write(stream_dir + "/www/docs/a b.txt", "0123456789abcdefghij")
 File.write(stream_dir + "/secret.txt", "secret")
-files_l = IyiSocket.listen("127.0.0.1", 0)
-files_port = files_l.local_port
+files_l = RisExerciseServer.port
+files_port = files_l
 files_base = "http://127.0.0.1:#{files_port}"
 group do |g|
   g.spawn do
-    Server.serve(files_l) do |req|
-      if req.path == "/stop"
-        files_l.close
-        Response.new(200, "bye")
-      else
-        FileServer.serve(stream_dir + "/www", req)
-      end
-    end
+    RisExerciseServer.serve(files_l, Str.new(stream_dir + "/www"), RisFiles2Handler)
     0
   end
+  RisExerciseServer.wait(RisFiles2Handler)
   g.spawn do
     home = HTTP.get(files_base + "/").or_panic
     assert_true home.status == 200 && home.body == "<h1>home</h1>" && home.header("Content-Type") == "text/html; charset=utf-8", "/ is the index: #{home.header("Content-Type")}"
