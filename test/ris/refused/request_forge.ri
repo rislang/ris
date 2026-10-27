@@ -1,3 +1,0 @@
-module test/ris/refused/request_forge
-
-RisInbox::Request(Int32, Int32).__create(1, 0, 1_u64)

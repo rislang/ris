@@ -1,8 +1,0 @@
-module test/ris/refused/resource_after
-import std/socket::{IyiSocket}
-
-socket = IyiSocket.listen(0)
-group do |g|
-  g.new_task(owns: socket) { socket.close; 0 }
-  socket.close
-end

@@ -1,3 +1,0 @@
-module test/ris/refused/inbox_constructor
-
-RisInbox(Int32).new(0, 1_u64)

@@ -1,3 +1,0 @@
-module test/ris/refused/inbox_forge
-
-RisInbox(Int32).__create(0, 1_u64)

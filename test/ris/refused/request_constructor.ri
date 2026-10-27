@@ -1,3 +1,0 @@
-module test/ris/refused/request_constructor
-
-RisInbox::Request(Int32, Int32).new(1, 0, 1_u64)

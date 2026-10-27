@@ -1,4 +1,3 @@
-require "./resources"
 
 # iyi's concurrency runtime — SPEC.md III.4, built in the order III.4.8
 # settled: a scheduler, cancellable blocking primitives, then `group` and
@@ -417,14 +416,6 @@ enum IyiFiberState : Int32
 end
 
 class IyiFiber
-  property sync_prev : UInt64 = 0_u64
-  property sync_next : UInt64 = 0_u64
-  property inbox_worker : Bool = false
-  property owned_reply_head : Int32 = -1
-  property owned_inbox_head : Int32 = -1
-  property inbox_copy_slot : Int32 = -1
-  property inbox_send_slot : Int32 = -1
-  property inbox_send_message : Int32 = -1
   property state : IyiFiberState
   property cancelled : Bool
 
@@ -2025,7 +2016,6 @@ class IyiScheduler
     # which every reader checks `Done` under: a reader on another thread
     # either sees it done or is on the chain this wakes.
     IyiSchedLock.lock
-    RisInboxPool.owner_died(fiber.object_id)
     fiber.state = IyiFiberState::Done
     g = fiber.group
     if g.is_a?(IyiGroup)
@@ -3196,7 +3186,6 @@ class IyiScheduler
 
     g = fiber.group
     IyiSchedLock.lock
-    RisInboxPool.owner_died(fiber.object_id)
     fiber.state = IyiFiberState::Done
     g.child_panicked(fiber.cancelled) if g.is_a?(IyiGroup)
     wake_joiners(fiber)
@@ -3230,7 +3219,6 @@ class IyiScheduler
       g.child_finished(false)
       g.drop_child(fiber)
     end
-    RisInboxPool.owner_died(fiber.object_id)
     fiber.state = IyiFiberState::Done
     wake_joiners(fiber)
     IyiSchedLock.unlock
@@ -3829,21 +3817,13 @@ end
 # handles a task's failure exactly the way III.4.3 says (the group has
 # already applied its policy by then; reading the value is optional).
 # Any number of fibers may read it, before the task ends or after.
-class IyiTask(T) < RisResourceResult
+class IyiTask(T)
   @fiber : IyiFiber
   @box : UInt64 = 0_u64
-  # Keep non-resource result storage visible to the precise GC. An
-  # integer address alone does not retain the allocation or its contents.
+  # Keep result storage visible to the precise GC.
   @result_root : Pointer(Void) = Pointer(Void).new(0_u64)
-  @claimed : Bool = false
-  @retired : Bool = false
-  @group : IyiGroup
 
-  def initialize(@fiber : IyiFiber, @group : IyiGroup)
-    if RisResources.contains(T)
-      self.next_result = @group.resource_results
-      @group.resource_results = self
-    end
+  def initialize(@fiber : IyiFiber, group : IyiGroup)
   end
 
   def fiber : IyiFiber
@@ -3851,55 +3831,10 @@ class IyiTask(T) < RisResourceResult
   end
 
   def finish(value : T) : Nil
-    if RisResources.contains(T)
-      staged = RisResources.stage(value, RisResultOwner.new(@group))
-      RisResources.transfer(staged, @fiber.object_id)
-      RisResultOwner.new(@group).run do
-        @box = RisRegion.tape_bytes(sizeof(T).to_u64)
-        Pointer(T).new(@box).value = staged
-      end
-    else
-      slot = Pointer(T).malloc(1_u64)
-      slot.value = value
-      @result_root = slot.as(Pointer(Void))
-      @box = slot.address
-    end
-  end
-
-  def retire : Nil
-    return if @retired
-    @retired = true
-    unless @claimed || (@box == 0_u64)
-      RisResources.release(Pointer(T).new(@box).value, @fiber.object_id)
-    end
-    @box = 0_u64
-  end
-
-  def take : T | Panicked | Cancelled | RisInbox::Closed
-    unless IyiScheduler.current.object_id == @group.owner.object_id
-      raise "only the group's owning task may take; send it a message"
-    end
-    return RisInbox::Closed.new if @retired
-    IyiScheduler.join(@fiber)
-    return Cancelled.new if IyiScheduler.current.cancelled
-    raise "task result already taken; take only once" if @claimed
-    if @fiber.panicked
-      @fiber.panic_delivered = true
-      return Panicked.new(@fiber.panic_message)
-    end
-    return Panicked.new("a cancelled task has no result") if (@box == 0_u64)
-    result = RisResources.stage(Pointer(T).new(@box).value, RisCurrentResultOwner.new)
-    IyiSchedLock.lock
-    if IyiScheduler.current.cancelled
-      IyiSchedLock.unlock
-      return Cancelled.new
-    end
-    RisResources.claim(result, @fiber.object_id)
-    @claimed = true
-    @box = 0_u64
-    @result_root = Pointer(Void).new(0_u64)
-    IyiSchedLock.unlock
-    result
+    slot = Pointer(T).malloc(1_u64)
+    slot.value = value
+    @result_root = slot.as(Pointer(Void))
+    @box = slot.address
   end
 
   def done? : Bool
@@ -3907,7 +3842,6 @@ class IyiTask(T) < RisResourceResult
   end
 
   def value : T | Panicked
-    RisResources.check_value(T)
     IyiScheduler.join(@fiber)
     # III.1.4, literal: reading the panicked task's value *catches* the
     # panic — it arrives as the error value it became at the boundary,
@@ -3923,13 +3857,6 @@ class IyiTask(T) < RisResourceResult
 end
 
 class IyiGroup
-  property owned_inbox_head : Int32 = -1
-  property owned_inbox_tail : Int32 = -1
-  property closing_inbox : Int32 = -1
-  property draining_inboxes : Bool = false
-  property resource_results : RisResourceResult? = nil
-  property result_tape : UInt64 = 0_u64
-  property result_depth : Int32 = 0
   MAX_LIVE = 2147483647
 
   def self.check_count(live : Int32) : Nil
@@ -3939,9 +3866,6 @@ class IyiGroup
     end
   end
 
-  # Updated only under IyiSchedLock, through adoption and Done.
-  getter plain_live : Int32 = 0
-  property owned_sync_head : Int32 = -1
   @live : Int32
   getter first_failure : UInt64
   @first_child : IyiFiber?
@@ -3995,20 +3919,6 @@ class IyiGroup
     end
     adopt(fiber)
     IyiScheduler.enqueue(fiber)
-    task
-  end
-
-  def new_task(&block : -> T) : IyiTask(T) forall T
-    spawn { block.call }
-  end
-
-  def new_task(*, owns : U, &block : -> T) : IyiTask(T) forall T, U
-    RisResources.check_owned(U)
-    task = spawn do
-      defer RisResources.close_owned(owns, IyiScheduler.current.object_id)
-      block.call
-    end
-    RisResources.handoff(owns, task.fiber.object_id)
     task
   end
 
@@ -4078,7 +3988,6 @@ class IyiGroup
     @first_child = fiber
     fiber.group = self
     @live = @live + 1
-    @plain_live += 1 unless fiber.inbox_worker
   end
 
   # The one place a task body becomes a stored proc. A captured block is
@@ -4117,9 +4026,8 @@ class IyiGroup
 
   def child_finished(failed : Bool) : Nil
     @live = @live - 1
-    @plain_live -= 1 unless IyiScheduler.current.inbox_worker
     record_failure if failed
-    # Every completion can finish a plain-task or worker barrier.
+    # Wake the joiner to recheck the live child count.
     joiner = @joiner
     if joiner.is_a?(IyiFiber)
       @joiner = nil
@@ -4153,33 +4061,7 @@ class IyiGroup
     # finishing on another thread takes to count itself out (III.4.13).
     IyiSchedLock.lock
     cancel_children_locked if early
-    loop do
-      if !@cancelled && !plain_tasks_live?
-        unless draining_inboxes
-          self.closing_inbox = owned_inbox_head
-          self.draining_inboxes = true
-        end
-        slot = closing_inbox
-        if slot >= 0
-          p = RisInboxPool.record(slot)
-          r = p.value
-          r.closed = true
-          p.value = r
-          RisInboxPool.wake(p)
-          if r.worker == 0_u64 ||
-             Pointer(Void).new(r.worker).as(IyiFiber).state == IyiFiberState::Done
-            self.closing_inbox = r.group_next
-            next
-          end
-        elsif @live == 0
-          # Adoption and inbox registration validate under this same lock.
-          @ended = true
-          break
-        end
-      elsif @live == 0
-        @ended = true
-        break
-      end
+    while @live > 0
       @joiner = me
       me.joining = self
       me.state = IyiFiberState::Joining
@@ -4188,8 +4070,6 @@ class IyiGroup
       IyiSchedLock.lock
       me.joining = nil
     end
-    RisSyncPool.group_ended(self)
-    RisInboxPool.group_ended(object_id)
     @ended = true
     me.open_group = @outer
     # The boundary owes a re-raise for any panic *nobody read*: a bug
@@ -4210,27 +4090,7 @@ class IyiGroup
       child = child.next_child
     end
     IyiSchedLock.unlock
-    result = resource_results
-    self.resource_results = nil
-    while result
-      following = result.next_result
-      result.next_result = nil
-      result.retire
-      result = following
-    end
-    region = result_tape
-    while region != 0_u64
-      parent = IyiHeap.read64(region &+ RisRegion::OFF_PARENT)
-      IyiHeap.write64(region &+ RisRegion::OFF_PARENT, 0_u64)
-      RisRegion.release(region)
-      region = parent
-    end
-    self.result_tape = 0_u64
     raise "a task panicked: " + owed.panic_message if owed.is_a?(IyiFiber) && !me.panicked
-  end
-
-  private def plain_tasks_live? : Bool
-    @plain_live > 0
   end
 
   # :nodoc: — the owner taken out of this join by a deadlock
@@ -5108,4 +4968,3 @@ end
 {% end %}
 
 require "./inbox"
-require "./sync"

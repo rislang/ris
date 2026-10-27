@@ -1,5 +1,0 @@
-module test/ris/refused/request_reply_collision
-
-group do |g|
-  g.new_inbox(RisInbox::Request(Str, Int32 | TimedOut), 1)
-end

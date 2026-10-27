@@ -1,7 +1,0 @@
-module test/ris/refused/resource_value
-import std/socket::{IyiSocket}
-
-group do |g|
-  task = g.new_task { IyiSocket.listen(0) }
-  task.value
-end

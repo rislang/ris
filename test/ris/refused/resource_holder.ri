@@ -1,8 +1,0 @@
-module test/ris/refused/resource_holder
-import std/socket::{IyiSocket}
-
-socket = IyiSocket.listen(0)
-holder = {socket}
-group do |g|
-  g.new_task(owns: socket) { holder[0].close; 0 }
-end

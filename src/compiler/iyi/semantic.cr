@@ -78,7 +78,6 @@ class Iyi::Program
         Prof.span("tape: IntegerTextDivisionChecker") { IntegerTextDivisionChecker.new(self).run(result) }
         Prof.span("tape: TapeChecker") { TapeChecker.new(self).run }
         tape_graph = Prof.span("tape: call graph") { TapeCallGraph.new(self, result) }
-        ResourceChecker.new(self, tape_graph).run(result)
         Prof.span("tape: TapeOwnerChecker") { TapeOwnerChecker.new(self, tape_graph).run(result) }
         Prof.span("tape: TapeProgramChecker") { TapeProgramChecker.new(self, tape_graph).run(result) }
         tape_shrink = TapeShrinkChecker.new(self, tape_graph)

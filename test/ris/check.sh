@@ -35,153 +35,23 @@ else
   echo "FAILED   channel_bounded: $out"; status=1
 fi
 
-# Inbox pools retain mail through close and return storage on retirement.
-for name in fifo str lifecycle scalars nonowner storage owner_cost reuse \
-    timed worker drain early negative sealed; do
-  out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc \
-    "test/ris/inbox_$name.ri" 2>&1)
-  if [ "$?" -eq 0 ] &&
-      grep -qxF "PASS: inbox $name" <<<"$out" &&
-      grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
-    echo "runs     inbox_$name (--no-gc, zero heap)"
-  else
-    echo "FAILED   inbox_$name: $out"; status=1
-  fi
-done
+# Reflection must not expose unrelated private declarations.
+expect reflection_private 'does not export'
 
-# Request/reply uses a separate bounded pool and copies onto caller tapes.
-for name in basic lifecycle panics edges enum; do
-  out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc \
-    "test/ris/request_$name.ri" 2>&1)
-  if [ "$?" -eq 0 ] &&
-      grep -qxF "PASS: request $name" <<<"$out" &&
-      grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
-    echo "runs     request_$name (--no-gc, zero heap)"
-  else
-    echo "FAILED   request_$name: $out"; status=1
-  fi
-done
-out=$(IYI_WORKERS=4 timeout 120 "$RIS" run \
-  test/ris/request_parallel.ri 2>&1)
-if [ "$?" -eq 0 ] && grep -qxF 'PASS: request parallel' <<<"$out"; then
-  echo "runs     request_parallel (four workers, 800 replies)"
-else
-  echo "FAILED   request_parallel: $out"; status=1
-fi
-expect request_ambiguous 'use distinct tagged payloads'
-expect request_missing 'use distinct tagged payloads'
-expect request_send 'plain send of Request is refused; use request'
-expect request_forge 'inbox pool storage is private'
-expect request_constructor "private method 'new'"
-expect request_base_collision 'control type collision; use a wrapper struct'
-expect request_alias_collision 'control type collision; use a wrapper struct'
-expect request_reflection_private 'does not export'
-expect request_collision 'control type collision; use a wrapper struct'
-expect request_reply_collision 'control type collision; use a wrapper struct'
+# Runtime storage has no application API.
+expect message_storage_private 'undefined constant RisMessagePool'
 
-# Resource handoff and one-time group-owned results.
-for name in moves take double_take failed lifecycle cancel cleanup_panic; do
-  out=$("$RIS" run "test/ris/resource_$name.ri" 2>&1)
-  if [ "$?" -eq 0 ] &&
-      grep -qxF "PASS: resource ${name//_/ }" <<<"$out"; then
-    echo "runs     resource_$name"
-  else
-    echo "FAILED   resource_$name: $out"; status=1
-  fi
-done
-expect resource_after 'was moved at task start'
-expect resource_alias 'exclusive ownership'
-expect resource_holder 'exclusive ownership'
-expect resource_typed_alias 'exclusive ownership'
-expect resource_twice 'was moved at task start'
-expect resource_value 'use task.take'
-expect resource_message 'resources are never messages'
-expect resource_request_m 'resources are never messages'
-expect resource_request_r 'resources are never messages'
-expect resource_copy 'resources cannot copy_to'
-expect resource_fd 'descriptor cannot escape as a number'
-expect resource_private 'ownership storage is private'
-expect resource_capture 'captured alias survives'
-expect resource_defer_use 'was moved into the task result'
-
-# Group-owned synchronization uses runtime pools even without a GC.
-for name in basic fifo lifecycle linear; do
-  out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc \
-    "test/ris/sync_$name.ri" 2>&1)
-  if [ "$?" -eq 0 ] &&
-      grep -qxF "PASS: sync $name" <<<"$out" &&
-      grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
-    echo "runs     sync_$name (--no-gc, zero heap)"
-  else
-    echo "FAILED   sync_$name: $out"; status=1
-  fi
-done
-
-# Owning Share handles cross scheduler boundaries without sharing tape data.
-out=$("$RIS" run test/ris/sync_parallel.ri 2>&1)
-if [ "$?" -eq 0 ] && grep -qxF 'PASS: sync parallel' <<<"$out"; then
-  echo "runs     sync_parallel (four workers)"
-else
-  echo "FAILED   sync_parallel: $out"; status=1
-fi
-
-# Cancelled wakes and failed receiver copies preserve queued messages.
-for name in cancel copy; do
-  out=$("$RIS" run "test/ris/inbox_$name.ri" 2>&1)
-  if [ "$?" -eq 0 ] && grep -qxF "PASS: inbox $name" <<<"$out"; then
-    echo "runs     inbox_$name (transactional receive)"
-  else
-    echo "FAILED   inbox_$name: $out"; status=1
-  fi
-done
-
-# Wrap hooks exist only in this explicitly instrumented test build.
-out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc -D ris_inbox_test \
-  test/ris/inbox_wrap.ri 2>&1)
-if [ "$?" -eq 0 ] && grep -qxF 'PASS: inbox wrap' <<<"$out" &&
-    grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
-  echo "runs     inbox_wrap (--no-gc, zero heap, retired slot)"
-else
-  echo "FAILED   inbox_wrap: $out"; status=1
-fi
-
-# Parallel tasks need the normal threaded runtime, unavailable under no-GC.
-for name in parallel races worker_parallel registration; do
-  out=$(IYI_WORKERS=4 timeout 120 "$RIS" run -D ris_inbox_test \
-    "test/ris/inbox_$name.ri" 2>&1)
-  if [ "$?" -eq 0 ] && grep -qxF "PASS: inbox $name" <<<"$out"; then
-    echo "runs     inbox_$name (threaded runtime)"
-  else
-    echo "FAILED   inbox_$name: $out"; status=1
-  fi
-done
-
-# Owning Share handles must not make unrelated mutable captures Share.
-expect inbox_parallel_capture 'which is not Share'
-
-# Keep the explicit no-GC threading boundary visible.
-out=$("$RIS" build --no-codegen --no-gc \
-  test/ris/inbox_parallel.ri 2>&1)
-if [ "$?" -ne 0 ] && grep -qF 'spawn_parallel needs threads' <<<"$out"; then
-  echo "refused  inbox_parallel (--no-gc has no worker threads)"
-else
-  echo "FAILED   inbox_parallel no-GC boundary: $out"; status=1
-fi
-
-# Zero capacity must name the rendezvous replacement.
-out=$("$RIS" run test/ris/inbox_capacity.ri 2>&1)
+# Joining waits for cleanup and refuses later adoption.
+out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc \
+  test/ris/group_lifecycle.ri 2>&1)
 if [ "$?" -ne 0 ] &&
-    grep -qF 'use request for rendezvous' <<<"$out"; then
-  echo "refused  inbox_capacity (use request)"
+    grep -qxF 'PASS: group lifecycle' <<<"$out" &&
+    grep -qF 'the group has ended' <<<"$out" &&
+    grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+  echo "runs     group_lifecycle (--no-gc, zero heap, ended refusal)"
 else
-  echo "FAILED   inbox_capacity: $out"; status=1
+  echo "FAILED   group_lifecycle: $out"; status=1
 fi
-
-# Only supported payloads and runtime-created handles enter the pools.
-expect inbox_payload 'use g.new_inbox with a scalar or Str'
-expect inbox_constructor "private method 'new'"
-expect inbox_forge 'inbox pool storage is private; use g.new_inbox(T, n)'
-expect sync_forge 'sync pool storage is private; use g.new_semaphore(n)'
 
 # A pipe's writer waits while the pipe is full (930722c made it panic).
 out=$("$RIS" run test/ris/pipe_wait.ri 2>&1)

@@ -1,7 +1,0 @@
-module test/ris/refused/request_send
-
-group do |g|
-  q = g.new_inbox(RisInbox::Request(Int32, Int32), 1)
-  req = q.receive
-  q.send(req) if req.is_a?(RisInbox::Request(Int32, Int32))
-end

@@ -394,7 +394,6 @@ module Iyi
     # ris: the marks the program's own manifest forbids in its files,
     # `forbid ffi, pointer_unsafe` (`Iyi::FfiBoundaryChecker`).
     property iyi_forbids : Array(String) = [] of String
-    getter ris_resource_ffi_files = Set(String).new
 
     # The name the program's own modules live under: the manifest's last
     # segment (`Mod::ModFile.package_name`), or nil.

@@ -1,4 +1,0 @@
-module test/ris/refused/sync_forge
-
-s = RisSemaphore.__create(0, 1_u64)
-s.acquire

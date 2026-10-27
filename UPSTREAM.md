@@ -10,11 +10,6 @@ back.
 
 * Channel: waking a receiver does not release a buffered slot, so the
   ring never grows; a full send parks and a receive refills its slot.
-  ris drops Channel for RisInbox (TAPE_SPEC 5.2); review before taking.
-
-* Group methods named new_*: g.new_task and g.new_parallel_task replace
-  spawn and spawn_parallel, the name saying what you get. ris renames
-  them when Channel goes (TODO.md); iyi may take the names.
 
 * std/int: popcount and the zero counts through LLVM's bit intrinsics,
   carried by `RisBits` (bf760fcb3), which goes to iyi as `IyiBits`.
@@ -121,12 +116,6 @@ back.
   empty. IOBackend writes the default format without a formatter object.
 * Task launch validates ended state atomically with adoption; completed
   tasks stay live through tape cleanup before waking the group joiner.
-  Live plain-task accounting makes ordered group barriers constant work
-  per completion; the counter excludes inbox workers. The ordered inbox
-  drain, worker API and pooled semaphore/event handles stay in ris.
-* Resource handoff and task result slots are tape-specific in this slice.
-  The new_task alias and exclusive resource diagnostics accompany that
-  implementation; evaluate their non-tape parts when porting task APIs.
 
 ## Stays in ris
 

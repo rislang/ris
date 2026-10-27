@@ -1,0 +1,3 @@
+module test/ris/refused/message_storage_private
+
+RisMessagePool.allocate

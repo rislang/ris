@@ -28,12 +28,6 @@ may run two at a time in separate worktrees. Pipe/socket race needs
 poller work for several IO waits at once and may come last; Channel stays
 for them until then.
 
-* Remove first, as mechanical work no std user depends on: RisInbox,
-  RisWorker, RisSemaphore, RisEvent, request/reply, new_task/new_worker,
-  owns:, task.take, resources.iyi and the ordered group drain, with their
-  compiler checks and tests. Keep inbox.iyi's slabs, free lists, copy and
-  rollback for the board core. Gate: no remaining users, full check, std
-  tests and --no-gc.
 * Build board core from reusable inbox slabs/free lists, not owner/drain
   hooks: canonical specialized keys across modules, alias identity, union
   wrappers, multi-taker waits/claims, recursive struct/Str codecs, copy

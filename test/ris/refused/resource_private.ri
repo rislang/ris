@@ -1,5 +1,0 @@
-module test/ris/refused/resource_private
-import std/socket::{IyiSocket}
-
-socket = IyiSocket.listen(0)
-socket.__ris_resource(:claim, 0_u64)

@@ -1,6 +1,0 @@
-module test/ris/refused/resource_request_m
-import std/socket::{IyiSocket}
-
-group do |g|
-  g.new_inbox(RisInbox::Request(IyiSocket, Int32), 1)
-end

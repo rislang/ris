@@ -38,13 +38,6 @@ class Iyi::TapeChecker
   # pointer, or nil.
   def self.tape_in(program : Program, type : Type, visiting = Set(Type).new) : Type?
     return nil unless visiting.add?(type)
-    if type.is_a?(GenericClassInstanceType) && type.generic_type.name == "IyiTask"
-      return nil if type.type_vars.values.any? do |v|
-        v.is_a?(Var) && v.type?.try { |t| ResourceChecker.resource?(t) } == true
-      end
-    end
-    return nil if type.to_s.starts_with?("RisInbox(") ||
-                  type.to_s.starts_with?("RisWorkerTask(")
     return type if tape?(program, type)
     case type
     when UnionType

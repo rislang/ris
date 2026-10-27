@@ -1,0 +1,26 @@
+module test/ris/group_lifecycle
+
+module Completion
+  @@cleaned = false
+
+  def self.cleanup : Nil
+    sleep 1
+    @@cleaned = true
+  end
+
+  def self.cleaned? : Bool
+    @@cleaned
+  end
+end
+
+g = IyiGroup.new
+task = g.spawn do
+  defer Completion.cleanup
+  17
+end
+g.join
+raise "join returned before cleanup" unless Completion.cleaned?
+raise "task result changed" unless task.value == 17
+puts "PASS: group lifecycle"
+# The ended-state check must fail before the new child is adopted.
+g.spawn { 23 }

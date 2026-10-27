@@ -53,29 +53,6 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
         target.name == "__ris_heap_runtime" ||
           (target.owner?.to_s == "RisHeap.class" && target.name == "runtime")
       end
-      private_inbox = @graph.targets(node).try &.any? do |target|
-        owner = target.owner?.to_s
-        owner.starts_with?("RisInboxPool") ||
-          owner.starts_with?("RisReplyPool") ||
-          owner.starts_with?("RisInboxCodec(") ||
-          (target.name == "__create" &&
-            owner.starts_with?("RisInbox::Request(")) ||
-          (target.name == "__create" && owner.starts_with?("RisInbox("))
-      end
-      private_sync = @graph.targets(node).try &.any? do |target|
-        owner = target.owner?.to_s
-        owner.starts_with?("RisSyncPool") ||
-          (target.name == "__create" &&
-            owner.in?(%w(RisSemaphore.class RisEvent.class)))
-      end
-      if private_sync
-        node.raise "sync pool storage is private; use g.new_semaphore(n) " \
-                   "or g.new_event and their handle methods."
-      end
-      if private_inbox
-        node.raise "inbox pool storage is private; use g.new_inbox(T, n) " \
-                   "and its send, receive, request or close methods."
-      end
       if private_heap
         node.raise "runtime heap exemption is private; remove this call. " \
                    "Keep values in Str, Ary or @[OnTape] structs."
