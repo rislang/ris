@@ -229,7 +229,8 @@ plain barrier advances the cursor but retains its unread mail until all
 children join; final group cleanup then discards it and retires the record.
 Plain tasks created during drain are awaited again before advancing, and
 newly created inboxes append to the tail. Returning a failure during
-drain immediately cancels siblings; explicit cancellation and early block exit do the same. All
+drain immediately cancels siblings; explicit cancellation and early
+block exit do the same. All
 these paths wake waiters, join children, discard leftovers and retire.
 
 A task's body reports failure immediately, but its live count and child
