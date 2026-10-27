@@ -43,6 +43,7 @@ module Iyi::FfiBoundaryChecker
                    "Call C from a package that allows it, or take the " \
                    "`forbid` line out of the manifest."
       end
+      program.ris_resource_ffi_files << File.expand_path(filename)
       return
     end
     node.accept Finder.new(forbids)

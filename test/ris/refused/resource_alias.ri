@@ -1,0 +1,8 @@
+module test/ris/refused/resource_alias
+import std/socket::{IyiSocket}
+
+socket = IyiSocket.listen(0)
+alias_socket = socket
+group do |g|
+  g.new_task(owns: socket) { alias_socket.close; 0 }
+end

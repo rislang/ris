@@ -1,0 +1,19 @@
+module test/ris/resource_cleanup_panic
+import std/socket::{IyiSocket}
+
+port = 0
+group do |g|
+  child = g.new_task do
+    socket = IyiSocket.listen(0)
+    port = socket.local_port
+    defer socket.close
+    defer raise "cleanup failed"
+    socket
+  end
+  result = child.take
+  raise "cleanup panic lost" unless result.is_a?(Panicked)
+end
+raise "child did not run" if port == 0
+reopened = IyiSocket.listen(port)
+reopened.close
+puts "PASS: resource cleanup panic"

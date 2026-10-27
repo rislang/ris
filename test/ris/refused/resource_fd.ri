@@ -1,0 +1,6 @@
+module test/ris/refused/resource_fd
+import std/socket::{IyiSocket}
+
+socket = IyiSocket.listen(0)
+number = socket.fd
+socket.close

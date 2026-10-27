@@ -737,6 +737,14 @@ struct RisWorkerTask(T, R)
     @task.value
   end
 
+  def __resource_fiber : IyiFiber
+    @task.fiber
+  end
+
+  def take
+    @task.take
+  end
+
   def done? : Bool
     @task.done?
   end
@@ -750,7 +758,7 @@ class IyiGroup
     fiber = IyiFiber.new
     fiber.home = IyiScheduler.state
     fiber.inbox_worker = true
-    task = IyiTask(R).new(fiber)
+    task = IyiTask(R).new(fiber, self)
     inbox = create_inbox(type, capacity, bytes, fiber, true)
     runner = self
     install(fiber) do
@@ -761,6 +769,18 @@ class IyiGroup
     IyiScheduler.register(fiber)
     IyiScheduler.enqueue(fiber)
     RisWorkerTask(T, R).new(inbox, task)
+  end
+
+  def new_worker(type : T.class, capacity : Int32 | Int64,
+                 *, owns : U, bytes : Int32 | Int64 | UInt64 | Nil = nil,
+                 &block : RisInbox(T) -> R) forall T, R, U
+    RisResources.check_owned(U)
+    worker = new_worker(type, capacity, bytes: bytes) do |inbox|
+      defer RisResources.close_owned(owns, IyiScheduler.current.object_id)
+      block.call(inbox)
+    end
+    RisResources.handoff(owns, worker.__resource_fiber.object_id)
+    worker
   end
 end
 
@@ -782,7 +802,9 @@ end
 module RisInboxCodec(T)
   def self.validate : Nil
     {% for arm in T.union_types %}
-      {% if RisInbox::Closed <= arm || RisInbox::Full <= arm ||
+      {% if arm.name == "Std::Socket::IyiSocket" || arm.name == "Std::Io::PipeReader" || arm.name == "Std::Io::PipeWriter" %}
+        {% raise "resources are never messages; do this work in the receiving task, or send it a message" %}
+      {% elsif RisInbox::Closed <= arm || RisInbox::Full <= arm ||
             RisInbox::Expired <= arm || Cancelled <= arm || TimedOut <= arm %}
         {% raise "message/reply control type collision; use a wrapper struct" %}
       {% elsif arm < RisRequestEnvelope %}

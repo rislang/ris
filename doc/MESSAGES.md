@@ -512,6 +512,88 @@ and general message/container transport.
   aliases, double take, cancel/copy panic before claim, no take, stale
   take and child panic. No fd-as-number escape from resource checks.
 
+### Resource moves and take (2026-10-27)
+
+The resource universe in this slice is a short, closed list:
+`Std::Socket::IyiSocket`, `Std::Io::PipeReader` and
+`Std::Io::PipeWriter`. There is no public resource annotation yet. These
+three types already share descriptor or close state across copies; that
+state can hold the task identity and result-slot identity without copying
+an OS resource. An annotation would also need an enforceable protocol
+for a new type's aliasing and close behavior. The closed list avoids
+claiming that arbitrary user-defined close methods satisfy that protocol.
+The compiler and runtime both name this list explicitly.
+
+`g.new_task { ... }` is available beside `spawn`, which stays until the
+rename step. `g.new_task(owns: socket) { ... }` and
+`g.new_worker(T, n, owns: writer) { |inbox| ... }` transfer one named
+resource. Creation prepares the task and, for a worker, registers its
+inbox before transferring ownership. Adoption/registration failure has
+not changed the resource's owner. Successful enqueue cannot yield on
+these local-task paths; handoff finishes before the child can run.
+Inherited cancellation still runs the receiving body and its cleanup.
+The receiver automatically closes its owned resource at the body's end,
+including panic and cancellation. An explicit receiver close is harmless.
+A resource returned as the result transfers that close obligation instead.
+
+The compiler follows local aliases and resource-bearing holders. It
+conservatively rejects a surviving named alias at handoff, a captured alias,
+a later creator use and a repeated owns:. Tuple projections have separate
+identities, so moving a pipe writer does not consume its reader. Passing a
+resource to an ordinary helper is conservatively treated as a possible
+retained alias; do that helper work in the receiving task before any further
+handoff. Defer-generated closes are allowed: a close from an old owner
+becomes inert after handoff, and a child's deferred close becomes inert once
+a result slot owns the resource. Other deferred uses remain subject to the
+move check. Diagnostics name the repair: do this work in the receiving task,
+or send it a message. Resource descriptors cannot escape into unmarked user
+code as numbers; an explicit @[Ffi] module remains the OS-call boundary.
+Ownership-state helpers and result placement are private.
+
+Task-body lowering places a resource-bearing result before that body's
+lexical defers. It stages copyable fields, including Str bytes, into the
+group's result tape and fills a typed cleanup slot. The slot is registered
+independently of the live-child list before ownership changes, so a panic
+in a later child defer cannot lose the close obligation. Resource state
+retains identity; the OS resource is never copied. Scalar task results
+retain their existing repeatable value behavior.
+
+A resource-bearing task result requires `task.take`; `value` is a compiler
+error with a take hint. Only the task that opened the group may take.
+Take joins, preserves value's panic delivery, checks cancellation, stages
+copyable fields onto the taker's tape, checks cancellation again and then
+claims ownership under the scheduler lock. Staging invokes no user copy
+callback. Cancellation before claim leaves the group slot unclaimed. A
+second live take panics; a handle retired by group end returns Closed.
+The group closes all unclaimed resource fields and releases its result
+tape on normal and early exit. A claimed result's receiver owns its close.
+
+Resources are refused as inbox payloads, either Request type parameter,
+and through copy_to, including resource-bearing holders. Sending a
+copyable message to the task that owns a resource is the safe alternative.
+RisActor and the std ports remain separate TODO steps.
+
+The gates registered in check.sh are:
+
+* `resource_moves`: pipe writer handoff to a task and a worker, real data
+  read from the other end, explicit and automatic receiving closes.
+* `resource_take`: a winning listener plus copied Str and Ary(Str),
+  deferred child close transfer, and an unclaimed loser whose localhost
+  port can reopen.
+* `resource_double_take`: a second live take panics with the once hint.
+* `resource_failed`: ended-group adoption fails and the creator's deferred
+  pipe close still reaches the reader.
+* `resource_lifecycle`: early-return cleanup, stale take returning Closed,
+  and refusal of a taker that did not open the group.
+* `resource_cleanup_panic`: a result placed before child cleanup remains
+  group-owned when a later deferred action panics.
+* `resource_cancel`: a cancelled owner consumes no result; group cleanup
+  releases the listener so its localhost port can reopen.
+* Refused programs cover creator use, captured aliases and holders,
+  repeated owns:, value on a resource result, inbox resources, both
+  Request parameters, copy_to, descriptor escape, private state access,
+  and deferred use of an already returned resource.
+
 ## 4. Actor lowering and compiler checks
 
 * Actor lowering needs checked state destinations, field provenance,

@@ -1,0 +1,28 @@
+module test/ris/resource_cancel
+import std/socket::{IyiSocket}
+
+port = 0
+cancelled = false
+group do |outer|
+  owner = outer.new_task do
+    group do |g|
+      result = g.new_task do
+        socket = IyiSocket.listen(0)
+        port = socket.local_port
+        defer socket.close
+        socket
+      end
+      sleep(1000)
+      cancelled = result.take.is_a?(Cancelled)
+    end
+    0
+  end
+  sleep(10)
+  outer.cancel_children
+  owner.value
+end
+raise "take ignored cancellation" unless cancelled
+raise "child did not run" if port == 0
+reopened = IyiSocket.listen(port)
+reopened.close
+puts "PASS: resource cancel"

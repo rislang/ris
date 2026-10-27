@@ -28,9 +28,8 @@ Design, mechanisms and full gates: doc/MESSAGES.md. One item per step.
   Gate: owner death, close with mail, copy rollback, cancelled receive,
   retirement, GC roots, zero heap under --no-gc. Audit the stash
   "channel tape WIP" before reusing it.
-* owns:, task.take and RisActor remain (MESSAGES.md 3, 4, 5.3).
-  Request/reply is implemented; see the dated section 2 record.
-  Remaining gates: resource moves and actor scratch.
+* RisActor remains (MESSAGES.md 4, 5.3); gate actor scratch.
+  Request/reply and resource moves/take have dated implementation records.
 * Port std: pipe, http slots, socket race, autocert, samples/workers
   (MESSAGES.md 5.4). Gate: each port's behavior under its old tests.
 * Remove ris Channel and select; g.spawn becomes g.new_task with the

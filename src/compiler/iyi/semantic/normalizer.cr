@@ -458,7 +458,47 @@ module Iyi
       end
     end
 
+    # Place task resource results before lowering lexical defers. The
+    # runtime helper is an identity for every non-resource result.
+    private def resource_result(node : ASTNode) : ASTNode
+      case node
+      when Expressions
+        unless node.expressions.empty?
+          node.expressions[-1] = resource_result(node.expressions.last)
+        end
+        node
+      when Case
+        node.whens.each { |arm| arm.body = resource_result(arm.body) }
+        node.else = node.else.try { |body| resource_result(body) }
+        node
+      when ExceptionHandler
+        node.body = resource_result(node.body)
+        node.rescues.try &.each { |arm| arm.body = resource_result(arm.body) }
+        node.else = node.else.try { |body| resource_result(body) }
+        node
+      when NilLiteral, Nop
+        node
+      when Next
+        node.exp = node.exp.try { |value| resource_result(value) }
+        node
+      when If
+        node.then = resource_result(node.then)
+        node.else = resource_result(node.else)
+        node
+      else
+        Call.new(nil, "__ris_task_result", node, global: true).at(node).tap(&.resource_result=(true))
+      end
+    end
+
     def transform(node : Call)
+      if program.tape_platform? && @macro_code == 0 &&
+         {"spawn", "new_task", "new_worker"}.includes?(node.name) &&
+         !TapeScopeRuntime.runtime?(node.location) &&
+         !TapeScopeRuntime.prelude?(program, node.location)
+        if block = node.block
+          block.body = resource_result(block.body)
+        end
+      end
       # Explicit retention of static bytes needs neither a view nor a copy.
       if node.name == "to_heap" && node.args.empty? && !node.block &&
          !node.named_args && (text = node.obj).is_a?(StringLiteral) &&

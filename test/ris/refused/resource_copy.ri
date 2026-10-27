@@ -1,0 +1,5 @@
+module test/ris/refused/resource_copy
+import std/socket::{IyiSocket}
+
+socket = IyiSocket.listen(0)
+socket.copy_to(Program.tape)

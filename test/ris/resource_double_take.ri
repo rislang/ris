@@ -1,0 +1,20 @@
+module test/ris/resource_double_take
+import std/socket::{IyiSocket}
+
+group do |outer|
+  owner = outer.new_task do
+    group do |g|
+      task = g.new_task { IyiSocket.listen(0) }
+      value = task.take
+      value.close if value.is_a?(IyiSocket)
+      task.take
+    end
+    0
+  end
+  result = owner.value
+  raise "second take did not panic" unless result.is_a?(Panicked)
+  if result.is_a?(Panicked)
+    raise "wrong panic" unless result.message.includes?("take only once")
+  end
+end
+puts "PASS: resource double take"

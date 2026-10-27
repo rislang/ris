@@ -3,6 +3,8 @@
 # shared by `puts`, `print` and `File`.
 
 class IyiIO
+  @ris_owner : UInt64 = 0_u64
+  @ris_slot : UInt64 = 0_u64
   @fd : Int64
   @closed : Bool
   @eof : Bool
@@ -372,7 +374,33 @@ class IyiIO
     end
   end
 
+  {% if @top_level.has_constant?("IyiScheduler") %}
+  def __ris_resource(action : Symbol, identity : UInt64) : Nil
+    if action == :handoff
+      @ris_owner = identity
+    elsif action == :transfer
+      @ris_slot = identity
+    elsif action == :claim
+      raise "resource result slot changed" unless @ris_slot == identity
+      @ris_slot = 0_u64
+      @ris_owner = IyiScheduler.current.object_id
+    elsif action == :release
+      return unless @ris_slot == identity
+      @ris_slot = 0_u64
+      @ris_owner = IyiScheduler.current.object_id
+      close
+    elsif action == :close
+      close if @ris_owner == identity && @ris_slot == 0_u64
+    end
+  end
+
+  {% end %}
+
   def close : Nil
+    {% if @top_level.has_constant?("IyiScheduler") && (@type.name == "Std::Io::PipeReader" || @type.name == "Std::Io::PipeWriter") %}
+    return if @ris_slot != 0_u64
+    return if @ris_owner != 0_u64 && @ris_owner != IyiScheduler.current.object_id
+    {% end %}
     return if @closed
     flush if @write_pos > 0
     low_level_close(@fd)

@@ -1,0 +1,6 @@
+module test/ris/refused/resource_message
+import std/socket::{IyiSocket}
+
+group do |g|
+  g.new_inbox(IyiSocket, 1)
+end

@@ -79,6 +79,31 @@ expect request_reflection_private 'does not export'
 expect request_collision 'control type collision; use a wrapper struct'
 expect request_reply_collision 'control type collision; use a wrapper struct'
 
+# Resource handoff and one-time group-owned results.
+for name in moves take double_take failed lifecycle cancel cleanup_panic; do
+  out=$("$RIS" run "test/ris/resource_$name.ri" 2>&1)
+  if [ "$?" -eq 0 ] &&
+      grep -qxF "PASS: resource ${name//_/ }" <<<"$out"; then
+    echo "runs     resource_$name"
+  else
+    echo "FAILED   resource_$name: $out"; status=1
+  fi
+done
+expect resource_after 'was moved at task start'
+expect resource_alias 'exclusive ownership'
+expect resource_holder 'exclusive ownership'
+expect resource_typed_alias 'exclusive ownership'
+expect resource_twice 'was moved at task start'
+expect resource_value 'use task.take'
+expect resource_message 'resources are never messages'
+expect resource_request_m 'resources are never messages'
+expect resource_request_r 'resources are never messages'
+expect resource_copy 'resources cannot copy_to'
+expect resource_fd 'descriptor cannot escape as a number'
+expect resource_private 'ownership storage is private'
+expect resource_capture 'captured alias survives'
+expect resource_defer_use 'was moved into the task result'
+
 # Group-owned synchronization uses runtime pools even without a GC.
 for name in basic fifo lifecycle linear; do
   out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc \

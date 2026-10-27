@@ -1,0 +1,10 @@
+module test/ris/refused/resource_defer_use
+import std/socket::{IyiSocket}
+
+group do |g|
+  g.new_task do
+    socket = IyiSocket.listen(0)
+    defer puts socket.local_port
+    socket
+  end
+end

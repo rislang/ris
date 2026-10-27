@@ -388,6 +388,8 @@ end
 pub struct IyiSocket
   # Copies share descriptor state, retained on the program owner.
   struct State
+    property ris_owner : UInt64 = 0_u64
+    property ris_slot : UInt64 = 0_u64
     property fd : Int32
     property family : Int32
     # A unix listener retains its path until close removes it.
@@ -1276,7 +1278,33 @@ pub struct IyiSocket
     nil
   end
 
+  {% if @top_level.has_constant?("IyiScheduler") %}
+  def __ris_resource(action : Symbol, identity : UInt64) : Nil
+    if action == :handoff
+      @state.value.ris_owner = identity
+    elsif action == :transfer
+      @state.value.ris_slot = identity
+    elsif action == :claim
+      raise "resource result slot changed" unless @state.value.ris_slot == identity
+      @state.value.ris_slot = 0_u64
+      @state.value.ris_owner = IyiScheduler.current.object_id
+    elsif action == :release
+      return unless @state.value.ris_slot == identity
+      @state.value.ris_slot = 0_u64
+      @state.value.ris_owner = IyiScheduler.current.object_id
+      close
+    elsif action == :close
+      close if @state.value.ris_owner == identity && @state.value.ris_slot == 0_u64
+    end
+  end
+
+  {% end %}
+
   def close : Nil
+    {% if @top_level.has_constant?("IyiScheduler") %}
+    return if @state.value.ris_slot != 0_u64
+    return if @state.value.ris_owner != 0_u64 && @state.value.ris_owner != IyiScheduler.current.object_id
+    {% end %}
     if @state.value.fd >= 0
       fd = @state.value.fd
       @state.value.fd = -1

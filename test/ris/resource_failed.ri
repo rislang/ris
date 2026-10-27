@@ -1,0 +1,19 @@
+module test/ris/resource_failed
+import std/io
+
+reader, writer = IyiIO.pipe
+group do |outer|
+  creator = outer.new_task(owns: writer) do
+    ended = IyiGroup.new
+    ended.join
+    defer writer.close
+    ended.new_task(owns: writer) { writer.puts("bad"); 0 }
+    0
+  end
+  result = creator.value
+  raise "creation should fail" unless result.is_a?(Panicked)
+  # Creator's defer still owns the close when adoption fails.
+  raise "failed creation stole resource" unless reader.read_line.nil?
+end
+reader.close
+puts "PASS: resource failed"

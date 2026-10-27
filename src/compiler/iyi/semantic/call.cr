@@ -110,6 +110,10 @@ class Iyi::Call
     # ```
     #
     # So this is definitely a tradeoff.
+    if resource_result? && (value = args.first?) && value.type?.try(&.no_return?)
+      bind_to value
+      return
+    end
     return if args.any? &.type?.try &.no_return?
     return if named_args.try &.any? &.value.type?.try &.no_return?
 
