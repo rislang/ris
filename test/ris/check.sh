@@ -36,7 +36,8 @@ else
 fi
 
 # Inbox pools retain mail through close and return storage on retirement.
-for name in fifo str lifecycle scalars nonowner storage owner_cost reuse; do
+for name in fifo str lifecycle scalars nonowner storage owner_cost reuse \
+    timed worker drain early negative sealed; do
   out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc \
     "test/ris/inbox_$name.ri" 2>&1)
   if [ "$?" -eq 0 ] &&
@@ -69,7 +70,7 @@ else
 fi
 
 # Parallel tasks need the normal threaded runtime, unavailable under no-GC.
-for name in parallel races; do
+for name in parallel races worker_parallel registration; do
   out=$(IYI_WORKERS=4 timeout 120 "$RIS" run -D ris_inbox_test \
     "test/ris/inbox_$name.ri" 2>&1)
   if [ "$?" -eq 0 ] && grep -qxF "PASS: inbox $name" <<<"$out"; then

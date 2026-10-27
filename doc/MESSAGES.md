@@ -97,8 +97,9 @@ Names may change once the model works.
 `g.new_inbox(T, n, bytes: ...)` now creates a task-owned handle for
 concrete integer and float scalars, Bool, Char, Symbol, Nil, enums and Str.
 Other payloads name scalar or Str inboxes as the supported form. Channel
-and std remain unchanged. Receive has no deadline; unknown receiver
-identity is checked at runtime. Static receiver checking remains open.
+and std remain unchanged. This first slice had no receive deadline; the
+timed entry point is settled below. Unknown receiver identity is checked
+at runtime. Static receiver checking remains open.
 
 The runtime maps typed pools of 4,096 inbox records and 65,536 message
 records per process, allocated from free lists. Intrusive owner and group
@@ -108,7 +109,7 @@ keeps a waiting owner alive through the scheduler registry.
 Handles contain a slot and 64-bit generation. Retirement invalidates the
 handle, and generation wrap permanently retires its slot. Owner death
 and group end discard mail and retire records; graceful close retains
-mail. Ordered worker drain is not implemented by this slice.
+mail. Ordered worker drain was added by the step 5.3 slice below.
 
 Scalars occupy inline message storage. Str bytes use reusable mapped
 slabs with power-of-two classes from 32 bytes through 1 MiB, including
@@ -187,8 +188,99 @@ inbox_reuse and inbox_wrap run under --no-gc with zero heap allocations.
 The parallel and race gates run on the normal threaded runtime with four
 workers. The runtime explicitly refuses spawn_parallel under --no-gc
 (and gc_boehm); check.sh gates that refusal rather than claiming no-GC
-parallel coverage. Deadline races, richer payloads, workers and actors,
-static receiver checks and physical exhaustion remain later steps.
+parallel coverage. The step 5.3 slice below adds deadlines and workers.
+Richer payloads, actors, static receiver checks and physical exhaustion
+remain later steps.
+
+### Timed receive and ordered workers (step 5.3, 2026-10-27)
+
+`receive(ms : Int32)` now starts one monotonic deadline at entry. Zero
+polls; a negative size panics with the safe forms `receive(0)` to poll
+and plain `receive` to wait. The millisecond conversion fits Int64 and
+the deadline addition saturates rather than overflowing. Plain receive
+keeps its deadline-free result type. `TimedOut` implements Error with
+message "timed out". A timed call adds TimedOut to T, Closed and Cancelled.
+
+The scheduler lock protects the decision: Cancelled before queued data,
+then Closed, then TimedOut. A copied message commits under that same lock;
+a deadline expiring during the copy does not beat available data. Cancel
+before commit preserves the queued message. A parked timed receive uses
+the owner's sleep heap and removes its deadline when it resumes, whether
+woken by data, close, cancellation or timeout. Wakes consume no message.
+The inbox nonce still prevents a stale wake from waking an unrelated wait.
+
+`g.new_worker(T, n, bytes: ...) { |inbox| ... }` creates a local task and
+its task-owned inbox in one locked registration. The worker receives its
+inbox directly; a caller gets send, <<, close, closed?, size, empty?,
+capacity, value and done?. The public `RisWorker(T)` interface is a
+module, implemented by the value handle `RisWorkerTask(T, R)`. R preserves
+the block's result type through IyiTask without adding a heap wrapper or
+boxing the result. The handle is owning Share, just like RisInbox; it
+copies identity and grants no receive access. It extends no payload borrow.
+The compiler treats the handle as runtime identity, so a Str payload
+parameter is not mistaken for a captured Str borrow. Workers created by
+parallel tasks stay on their creating scheduler.
+
+Group inbox records now append at the tail in creation order. Normal
+join waits for all live plain tasks, closes the oldest remaining inbox,
+and waits for its worker to finish before advancing. Owner death removes
+its records under the scheduler lock. Closing an ordinary inbox after the
+plain barrier advances the cursor but retains its unread mail until all
+children join; final group cleanup then discards it and retires the record.
+Plain tasks created during drain are awaited again before advancing, and
+newly created inboxes append to the tail. Returning a failure during
+drain immediately cancels siblings; explicit cancellation and early block exit do the same. All
+these paths wake waiters, join children, discard leftovers and retire.
+
+A task's body reports failure immediately, but its live count and child
+list entry remain until its tape cleanup and owner-death cleanup finish.
+The final Done transition, count change and barrier wake share the lock.
+This prevents a foreign scheduler from advancing a barrier while a task
+is still cleaning up. Panics retain their existing delivery policy.
+
+Registration and sealing use that same scheduler lock. A task's adoption
+is its registration commit, before enqueue; worker adoption and inbox
+allocation commit together. Preparation before adoption publishes no work
+to the group, so it needs no separate reservation. A draining group seals
+only when its inbox chain is exhausted and its live count is zero. A
+registration either commits before that seal and is joined, or panics:
+"the group has ended; create this work in a live outer group". The old
+unlocked ended check is gone from both task launch paths. Cancelled groups
+still accept already-cancelled plain tasks; inbox and worker creation are
+refused with a live-group hint.
+
+The new gates in check.sh cover these decisions:
+
+* inbox_timed: zero poll, elapsed monotonic timeout, timed data/close wakes,
+  data before Closed/TimedOut, Closed before TimedOut, and cancellation
+  before queued data without consumption. Data/close wakes remove timers.
+* inbox_negative: a negative timeout panics and names both safe forms.
+* inbox_worker: round trip, inbox observations, typed result, done? and
+  stale inbox closure after worker death.
+* inbox_drain: automatic closure without programmer close, producer before
+  consumer, plain descendants at the first barrier, and workers and plain
+  tasks registered while a worker drains, and unread main-owned mail
+  retained through graceful close until the final join.
+* inbox_early: timed wait cancellation, cancellation during drain, returned
+  failure during drain, and an early break which joins cancelled workers.
+* inbox_sealed: ended groups refuse task, inbox and worker registration
+  with the exact safe-form panic.
+* inbox_worker_parallel: owning Share scalar/Str worker captures and scheduler
+  affinity for workers created on both main and parallel schedulers.
+* inbox_registration: 100 concurrent local/parallel task and worker
+  registration attempts
+  versus sealing; accepted work finishes before group end, refused work
+  never runs.
+
+The timed, worker, drain, early, negative and sealed gates require zero
+reported heap allocations under --no-gc. Threaded gates use four workers.
+inbox_races now alternates
+plain and zero-timeout receive in its pinned-copy cancellation gate.
+Existing group/task gates remain part of the full check.
+
+Semaphore, event, request/reply, owns:, task.take and RisActor are still
+open parts of step 5.3. This slice does not extend supported payloads,
+resource transfer, actor scratch or static receiver checking.
 
 ## 3. Lifecycle: group end and resources
 

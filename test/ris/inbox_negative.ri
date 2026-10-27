@@ -1,0 +1,16 @@
+module test/ris/inbox_negative
+
+group do |g|
+  t = g.spawn do
+    q = g.new_inbox(Int32, 1)
+    q.receive(-1)
+    nil
+  end
+  result = t.value
+  raise "negative receive accepted" unless result.is_a?(Panicked)
+  if result.is_a?(Panicked)
+    raise "safe form missing" unless result.message.includes?(
+      "use receive(0) to poll or receive to wait")
+  end
+end
+puts "PASS: inbox negative"

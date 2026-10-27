@@ -1,0 +1,90 @@
+module test/ris/inbox_drain
+
+# No explicit close: the producer drains before its consumer closes.
+consumer = nil
+received = 0
+producer_done = false
+consumer_done = false
+group do |g|
+  producer = g.new_worker(Int32, 2) do |inbox|
+    loop do
+      v = inbox.receive
+      break if v.is_a?(RisInbox::Closed)
+      target = consumer
+      raise "consumer missing" unless target
+      raise "consumer closed too soon" unless target.send(v).nil? if v.is_a?(Int32)
+    end
+    producer_done = true
+    nil
+  end
+  producer.send(11)
+  producer.send(12)
+  consumer = g.new_worker(Int32, 2) do |inbox|
+    loop do
+      v = inbox.receive
+      break if v.is_a?(RisInbox::Closed)
+      received += v if v.is_a?(Int32)
+    end
+    raise "producer order" unless producer_done
+    consumer_done = true
+    nil
+  end
+end
+raise "drain result" unless received == 23 && consumer_done
+
+# A plain task (and its new plain child) must finish before closing workers.
+plain_done = false
+group do |g|
+  w = g.new_worker(Int32, 2) do |inbox|
+    raise "plain barrier" unless inbox.receive == 99
+    raise "plain completion barrier" unless plain_done
+    raise "auto close" unless inbox.receive.is_a?(RisInbox::Closed)
+    nil
+  end
+  g.spawn do
+    sleep(1)
+    g.spawn do
+      sleep(1)
+      w.send(99)
+      plain_done = true
+      nil
+    end
+    nil
+  end
+end
+
+# Finite tail registration while the closing cursor is already draining.
+tail_done = false
+barrier_done = false
+group do |g|
+  g.new_worker(Int32, 1) do |inbox|
+    raise "first closed" unless inbox.receive.is_a?(RisInbox::Closed)
+    tail = g.new_worker(Int32, 1) do |q|
+      raise "tail closed" unless q.receive.is_a?(RisInbox::Closed)
+      raise "new plain barrier" unless barrier_done
+      tail_done = true
+      nil
+    end
+    g.spawn do
+      sleep(1)
+      barrier_done = true
+      nil
+    end
+    nil
+  end
+end
+raise "registered tail joined" unless tail_done
+# Graceful close retains main-owned unread mail until every worker joins.
+stale = group do |g|
+  retained = g.new_inbox(Int32, 1)
+  retained.send(73)
+  g.new_worker(Int32, 1) do |q|
+    raise "observer closed" unless q.receive.is_a?(RisInbox::Closed)
+    raise "main inbox gracefully closed" unless retained.closed? == true
+    raise "main mail retained until join" unless retained.size == 1
+    nil
+  end
+  retained
+end
+raise "main inbox retired" unless stale.size.is_a?(RisInbox::Closed)
+puts "PASS: inbox drain"

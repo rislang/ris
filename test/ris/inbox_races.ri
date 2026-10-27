@@ -68,7 +68,7 @@ def retained(q : RisInbox(Str)) : Nil
   raise "copy pin leaked" unless __ris_inbox_test_counts == {0, 1}
 end
 
-100.times do
+100.times do |iteration|
   released = __ris_inbox_test_releases
   # Appending while receive is pinned must preserve the new queue link.
   InboxRace.phase = 0
@@ -151,7 +151,8 @@ end
       group do |inner|
         q = inner.new_inbox(Str, 1)
         raise "seed" unless q.send(Str.new("receive copy")).nil?
-        raise "copy cancel" unless q.receive.is_a?(Cancelled)
+        result = iteration % 2 == 0 ? q.receive : q.receive(0)
+        raise "copy cancel" unless result.is_a?(Cancelled)
         retained(q)
       end
       nil

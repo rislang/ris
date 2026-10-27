@@ -10,6 +10,7 @@ struct RisInboxRecord
   property generation : UInt64 = 1_u64
   property live : Bool = false
   property closed : Bool = false
+  property worker : UInt64 = 0_u64
   property owner : UInt64 = 0_u64
   property group : UInt64 = 0_u64
   property capacity : Int32 = 0
@@ -113,11 +114,18 @@ module RisInboxPool
     fiber = Pointer(Void).new(owner).as(IyiFiber)
     scope = Pointer(Void).new(group).as(IyiGroup)
     r.owner_next = fiber.owned_inbox_head
-    r.group_next = scope.owned_inbox_head
+    r.group_prev = scope.owned_inbox_tail
     record(r.owner_next).value.owner_prev = i if r.owner_next >= 0
-    record(r.group_next).value.group_prev = i if r.group_next >= 0
+    if r.group_prev >= 0
+      record(r.group_prev).value.group_next = i
+    else
+      scope.owned_inbox_head = i
+    end
     fiber.owned_inbox_head = i
-    scope.owned_inbox_head = i
+    scope.owned_inbox_tail = i
+    if scope.draining_inboxes && scope.closing_inbox < 0
+      scope.closing_inbox = i
+    end
     p.value = r
     {i, generation}
   end
@@ -266,12 +274,18 @@ module RisInboxPool
       record(r.owner_prev).value.owner_next = r.owner_next
     end
     record(r.owner_next).value.owner_prev = r.owner_prev if r.owner_next >= 0
+    slot = (p - Pointer(RisInboxRecord).new(@@records)).to_i32
+    scope.closing_inbox = r.group_next if scope.closing_inbox == slot
     if r.group_prev < 0
       scope.owned_inbox_head = r.group_next
     else
       record(r.group_prev).value.group_next = r.group_next
     end
-    record(r.group_next).value.group_prev = r.group_prev if r.group_next >= 0
+    if r.group_next >= 0
+      record(r.group_next).value.group_prev = r.group_prev
+    else
+      scope.owned_inbox_tail = r.group_prev
+    end
     r.live = false
     r.generation += 1_u64 unless r.generation == 18446744073709551615_u64
     p.value = r
@@ -422,10 +436,28 @@ struct RisInbox(T)
   end
 
   def receive : T | Closed | Cancelled
+    result = receive_until(nil)
+    # A deadline-free call cannot time out.
+    result.is_a?(TimedOut) ? raise("unexpected inbox timeout") : result
+  end
+
+  def receive(ms : Int32) : T | Closed | Cancelled | TimedOut
+    raise "negative receive size; use receive(0) to poll or receive to wait" if ms < 0
+    now = __iyi_monotonic_ns
+    duration = ms.to_i64 * 1000000_i64
+    limit = 9223372036854775807_i64
+    receive_until(now > limit - duration ? limit : now + duration)
+  end
+
+  private def receive_until(deadline : Int64?) : T | Closed | Cancelled | TimedOut
     fiber = IyiScheduler.current
     defer __iyi_inbox_copy_cleanup
     IyiSchedLock.lock
     loop do
+      if fiber.cancelled
+        IyiSchedLock.unlock
+        return Cancelled.new
+      end
       unless RisInboxPool.valid?(@slot, @generation)
         IyiSchedLock.unlock
         return Closed.new
@@ -463,8 +495,9 @@ struct RisInbox(T)
         p.value = r
         unless r.live && r.generation == @generation
           RisInboxPool.discard(p)
+          cancelled = fiber.cancelled
           IyiSchedLock.unlock
-          return Closed.new
+          return cancelled ? Cancelled.new : Closed.new
         end
         if fiber.cancelled
           IyiSchedLock.unlock
@@ -485,12 +518,24 @@ struct RisInbox(T)
         IyiSchedLock.unlock
         return Closed.new
       end
+      if deadline.is_a?(Int64) && __iyi_monotonic_ns >= deadline
+        IyiSchedLock.unlock
+        return TimedOut.new
+      end
       r.nonce = IyiScheduler.park(fiber)
       r.waiting = true
       p.value = r
+      if deadline.is_a?(Int64)
+        fiber.deadline = deadline
+        IyiScheduler.sleep_insert(fiber)
+      end
       IyiSchedLock.unlock
       IyiScheduler.reschedule
+      IyiScheduler.sleep_remove(fiber) if deadline.is_a?(Int64)
       IyiSchedLock.lock
+      if RisInboxPool.valid?(@slot, @generation)
+        RisInboxPool.record(@slot).value.waiting = false
+      end
     end
   end
 
@@ -546,6 +591,12 @@ end
 class IyiGroup
   def new_inbox(type : T.class, capacity : Int32 | Int64,
                 *, bytes : Int32 | Int64 | UInt64 | Nil = nil) : RisInbox(T) forall T
+    create_inbox(type, capacity, bytes, IyiScheduler.current)
+  end
+
+  private def create_inbox(type : T.class, capacity : Int32 | Int64,
+                           bytes : Int32 | Int64 | UInt64 | Nil,
+                           owner : IyiFiber, worker : Bool = false) : RisInbox(T) forall T
     {% unless T == Int8 || T == Int16 || T == Int32 || T == Int64 ||
               T == Int128 || T == UInt8 || T == UInt16 || T == UInt32 ||
               T == UInt64 || T == UInt128 || T == Float32 || T == Float64 ||
@@ -559,12 +610,18 @@ class IyiGroup
       bytes.is_a?(UInt64) ? bytes : RisRegion.nonnegative(bytes.to_i64)
     raise "inbox bytes must be positive; use bytes: 65536" if budget == 0
     IyiSchedLock.lock
-    if @ended || @cancelled || IyiScheduler.current.cancelled
+    if @ended
+      IyiSchedLock.unlock
+      raise "the group has ended; create this work in a live outer group"
+    end
+    if @cancelled || IyiScheduler.current.cancelled
       IyiSchedLock.unlock
       raise "inbox needs a live group; use a live outer group"
     end
-    slot, generation = RisInboxPool.allocate(IyiScheduler.current.object_id,
+    adopt_locked(owner) if worker
+    slot, generation = RisInboxPool.allocate(owner.object_id,
       object_id, n.to_i32, budget)
+    RisInboxPool.record(slot).value.worker = owner.object_id if worker
     IyiSchedLock.unlock
     RisInbox(T).__create(slot, generation)
   end
@@ -645,3 +702,72 @@ end
     {pins, messages}
   end
 {% end %}
+
+# Shared identity only; the result remains typed by the concrete task handle.
+module RisWorker(T)
+  {% for method in [:close, :closed?, :size, :empty?, :capacity] %}
+    def {{method.id}}
+      @inbox.{{method.id}}
+    end
+  {% end %}
+
+  def send(value : T)
+    @inbox.send(value)
+  end
+
+  def <<(value : T)
+    send(value)
+  end
+
+  abstract def value
+  abstract def done? : Bool
+end
+
+@[Share(owns: true)]
+struct RisWorkerTask(T, R)
+  include RisWorker(T)
+
+  def initialize(@inbox : RisInbox(T), @task : IyiTask(R))
+  end
+
+  def value
+    @task.value
+  end
+
+  def done? : Bool
+    @task.done?
+  end
+end
+
+class IyiGroup
+  def new_worker(type : T.class, capacity : Int32 | Int64,
+                 *, bytes : Int32 | Int64 | UInt64 | Nil = nil,
+                 &block : RisInbox(T) -> R) forall T, R
+    IyiScheduler.make_stacks_with { |fresh| fresh.prepare_stack } unless IyiScheduler.makes_stacks?
+    fiber = IyiFiber.new
+    fiber.home = IyiScheduler.state
+    fiber.inbox_worker = true
+    task = IyiTask(R).new(fiber)
+    inbox = create_inbox(type, capacity, bytes, fiber, true)
+    runner = self
+    install(fiber) do
+      value = block.call(inbox)
+      task.finish(value)
+      runner.finished(fiber, value.is_a?(::Error))
+    end
+    IyiScheduler.register(fiber)
+    IyiScheduler.enqueue(fiber)
+    RisWorkerTask(T, R).new(inbox, task)
+  end
+end
+
+pub struct TimedOut
+  def initialize
+  end
+end
+
+impl Error for TimedOut
+  def message : String
+    "timed out"
+  end
+end

@@ -1,0 +1,67 @@
+module test/ris/inbox_worker_parallel
+
+# The public worker interface retains a typed task result in a value handle.
+def check_interface(w : RisWorker(Int32)) : Nil
+  raise "interface capacity" unless w.capacity == 2
+end
+
+group do |g|
+  replies = g.new_inbox(Int32, 2)
+  home = IyiScheduler.state.object_id
+  worker = g.new_worker(Int32, 2) do |q|
+    raise "worker moved threads" unless IyiScheduler.state.object_id == home
+    n = q.receive(10000)
+    replies.send(n + 1) if n.is_a?(Int32)
+    nil
+  end
+  check_interface(worker)
+  g.spawn_parallel do
+    raise "shared worker send" unless worker.send(40).nil?
+    nil
+  end
+  raise "worker reply" unless replies.receive(10000) == 41
+end
+
+# A Str payload parameter describes messages, never a borrowed field.
+group do |g|
+  text = g.new_worker(Str, 1) do |q|
+    raise "shared text" unless q.receive(10000) == "hello"
+    nil
+  end
+  g.spawn_parallel do
+    raise "shared text send" unless text.send(Str.new("hello")).nil?
+    nil
+  end
+end
+
+# A worker created on a parallel scheduler stays on that scheduler.
+module ::WorkerHome
+  @@group : IyiGroup? = nil
+
+  def self.scope=(g : IyiGroup) : Nil
+    @@group = g
+  end
+
+  def self.scope : IyiGroup
+    g = @@group
+    return g if g
+    raise "missing group"
+  end
+end
+
+group do |g|
+  WorkerHome.scope = g
+  outer = g.spawn_parallel do
+    parent = IyiScheduler.state.object_id
+    worker = WorkerHome.scope.new_worker(Int32, 1) do |q|
+      raise "foreign worker migrated" unless IyiScheduler.state.object_id == parent
+      raise "foreign receive" unless q.receive(10000) == 9
+      nil
+    end
+    worker.send(9)
+    raise "foreign worker result" unless worker.value.nil?
+    nil
+  end
+  raise "parallel owner" unless outer.value.nil?
+end
+puts "PASS: inbox worker_parallel"

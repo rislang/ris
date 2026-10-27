@@ -1,0 +1,19 @@
+module test/ris/inbox_worker
+
+group do |g|
+  replies = g.new_inbox(Int32, 2)
+  w = g.new_worker(Int32, 2, bytes: 64) do |inbox|
+    n = inbox.receive
+    replies.send(n + 1) if n.is_a?(Int32)
+    42
+  end
+  raise "capacity" unless w.capacity == 2
+  raise "initial empty" unless w.empty? == true
+  raise "send" unless (w << 6).nil?
+  raise "size" unless w.size == 1
+  raise "round trip" unless replies.receive == 7
+  raise "value" unless w.value == 42
+  raise "done" unless w.done?
+  raise "stale" unless w.closed?.is_a?(RisInbox::Closed)
+end
+puts "PASS: inbox worker"

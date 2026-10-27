@@ -119,6 +119,9 @@ back.
   `local?` distinct from structural equality.
 * Loggers allocate child tables only when used; context tables start
   empty. IOBackend writes the default format without a formatter object.
+* Task launch validates ended state atomically with adoption; completed
+  tasks stay live through tape cleanup before waking the group joiner.
+  The ordered inbox drain and worker API stay in ris.
 ## Stays in ris
 
 * Tape: std/http `parse_head` and `ParsedHead`, the tape list in

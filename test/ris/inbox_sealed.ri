@@ -1,0 +1,26 @@
+module test/ris/inbox_sealed
+
+dead = group do |g|
+  g
+end
+3.times do |kind|
+  group do |g|
+    t = g.spawn do
+      if kind == 0
+        dead.spawn { nil }
+      elsif kind == 1
+        dead.new_inbox(Int32, 1)
+      else
+        dead.new_worker(Int32, 1) { |q| nil }
+      end
+      nil
+    end
+    result = t.value
+    raise "sealed registration accepted" unless result.is_a?(Panicked)
+    if result.is_a?(Panicked)
+      raise "sealed safe form" unless result.message ==
+        "the group has ended; create this work in a live outer group"
+    end
+  end
+end
+puts "PASS: inbox sealed"

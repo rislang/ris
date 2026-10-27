@@ -415,6 +415,7 @@ enum IyiFiberState : Int32
 end
 
 class IyiFiber
+  property inbox_worker : Bool = false
   property owned_inbox_head : Int32 = -1
   property inbox_copy_slot : Int32 = -1
   property inbox_send_slot : Int32 = -1
@@ -2021,6 +2022,11 @@ class IyiScheduler
     IyiSchedLock.lock
     RisInboxPool.owner_died(fiber.object_id)
     fiber.state = IyiFiberState::Done
+    g = fiber.group
+    if g.is_a?(IyiGroup)
+      g.child_finished(false)
+      g.drop_child(fiber)
+    end
     wake_joiners(fiber)
     IyiSchedLock.unlock
     # Never returns: a done fiber is never enqueued, so the switch away
@@ -3184,15 +3190,10 @@ class IyiScheduler
     end
 
     g = fiber.group
-    if g.is_a?(IyiGroup)
-      IyiSchedLock.lock
-      g.child_panicked(fiber.cancelled)
-      IyiSchedLock.unlock
-    end
-
     IyiSchedLock.lock
     RisInboxPool.owner_died(fiber.object_id)
     fiber.state = IyiFiberState::Done
+    g.child_panicked(fiber.cancelled) if g.is_a?(IyiGroup)
     wake_joiners(fiber)
     IyiSchedLock.unlock
     state.dying = fiber
@@ -3860,6 +3861,9 @@ end
 
 class IyiGroup
   property owned_inbox_head : Int32 = -1
+  property owned_inbox_tail : Int32 = -1
+  property closing_inbox : Int32 = -1
+  property draining_inboxes : Bool = false
   MAX_LIVE = 2147483647
 
   def self.check_count(live : Int32) : Nil
@@ -3910,8 +3914,6 @@ class IyiGroup
   # cancelled from its first wait on. It runs on this thread, beside its
   # spawner, for its whole life.
   def spawn(&block : -> T) : IyiTask(T) forall T
-    raise "a task spawned on a group whose block has ended: no scope is left to join it" if @ended
-    IyiGroup.check_count(@live)
     IyiScheduler.make_stacks_with { |fresh| fresh.prepare_stack } unless IyiScheduler.makes_stacks?
     fiber = IyiFiber.new
     fiber.home = IyiScheduler.state
@@ -3936,8 +3938,6 @@ class IyiGroup
     # values, as the block a thread runs may (III.4.4,
     # `CleanupTransformer#check_share_boundary`).
     def spawn_parallel(&block : -> T) : IyiTask(T) forall T
-      raise "a task spawned on a group whose block has ended: no scope is left to join it" if @ended
-      IyiGroup.check_count(@live)
       IyiScheduler.make_stacks_with { |fresh| fresh.prepare_stack } unless IyiScheduler.makes_stacks?
       IyiWorkers.start
       fiber = IyiFiber.new
@@ -3963,21 +3963,29 @@ class IyiGroup
 
   # :nodoc: — the end of a task's body, on its own stack: the group told,
   # under the scheduler's lock, since the group's owner may be on another
-  # thread (III.4.13). An error answer is a failure unless the task was
-  # cancelled.
+  # thread (III.4.13). Report failure now; completion is counted only at
+  # Done after tape cleanup. An error is a failure unless already cancelled.
   def finished(fiber : IyiFiber, error : Bool) : Nil
     IyiSchedLock.lock
-    child_finished(error && !fiber.cancelled)
-    drop_child(fiber)
+    record_failure if error && !fiber.cancelled
     IyiSchedLock.unlock
   end
 
   # A new child on the list and counted live, cancelled from the start
   # when its spawner or this group already is.
   private def adopt(fiber : IyiFiber) : Nil
-    spawner = IyiScheduler.current
-    IyiScheduler.register(fiber)
     IyiSchedLock.lock
+    adopt_locked(fiber)
+    IyiSchedLock.unlock
+    IyiScheduler.register(fiber)
+  end
+
+  private def adopt_locked(fiber : IyiFiber) : Nil
+    if @ended
+      IyiSchedLock.unlock
+      raise "the group has ended; create this work in a live outer group"
+    end
+    spawner = IyiScheduler.current
     IyiGroup.check_count(@live)
     fiber.cancelled = spawner.cancelled || @cancelled
     fiber.next_child = @first_child
@@ -3987,7 +3995,6 @@ class IyiGroup
     @first_child = fiber
     fiber.group = self
     @live = @live + 1
-    IyiSchedLock.unlock
   end
 
   # The one place a task body becomes a stored proc. A captured block is
@@ -4017,18 +4024,21 @@ class IyiGroup
     fiber.prev_child = nil
   end
 
-  def child_finished(failed : Bool) : Nil
-    @live = @live - 1
-    if failed && @first_failure == 0_u64
+  private def record_failure : Nil
+    if @first_failure == 0_u64
       @first_failure = IyiScheduler.current.object_id
       cancel_children_locked
     end
-    if @live == 0
-      joiner = @joiner
-      if joiner.is_a?(IyiFiber)
-        @joiner = nil
-        IyiScheduler.ready(joiner)
-      end
+  end
+
+  def child_finished(failed : Bool) : Nil
+    @live = @live - 1
+    record_failure if failed
+    # Every completion can finish a plain-task or worker barrier.
+    joiner = @joiner
+    if joiner.is_a?(IyiFiber)
+      @joiner = nil
+      IyiScheduler.ready(joiner)
     end
   end
 
@@ -4058,7 +4068,33 @@ class IyiGroup
     # finishing on another thread takes to count itself out (III.4.13).
     IyiSchedLock.lock
     cancel_children_locked if early
-    while @live > 0
+    loop do
+      if !@cancelled && !plain_tasks_live?
+        unless draining_inboxes
+          self.closing_inbox = owned_inbox_head
+          self.draining_inboxes = true
+        end
+        slot = closing_inbox
+        if slot >= 0
+          p = RisInboxPool.record(slot)
+          r = p.value
+          r.closed = true
+          p.value = r
+          RisInboxPool.wake(p)
+          if r.worker == 0_u64 ||
+             Pointer(Void).new(r.worker).as(IyiFiber).state == IyiFiberState::Done
+            self.closing_inbox = r.group_next
+            next
+          end
+        elsif @live == 0
+          # Adoption and inbox registration validate under this same lock.
+          @ended = true
+          break
+        end
+      elsif @live == 0
+        @ended = true
+        break
+      end
       @joiner = me
       me.joining = self
       me.state = IyiFiberState::Joining
@@ -4089,6 +4125,15 @@ class IyiGroup
     end
     IyiSchedLock.unlock
     raise "a task panicked: " + owed.panic_message if owed.is_a?(IyiFiber) && !me.panicked
+  end
+
+  private def plain_tasks_live? : Bool
+    child = @first_child
+    while child.is_a?(IyiFiber)
+      return true if !child.inbox_worker && child.state != IyiFiberState::Done
+      child = child.next_child
+    end
+    false
   end
 
   # :nodoc: — the owner taken out of this join by a deadlock

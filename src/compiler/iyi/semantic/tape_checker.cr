@@ -38,7 +38,8 @@ class Iyi::TapeChecker
   # pointer, or nil.
   def self.tape_in(program : Program, type : Type, visiting = Set(Type).new) : Type?
     return nil unless visiting.add?(type)
-    return nil if type.to_s.starts_with?("RisInbox(")
+    return nil if type.to_s.starts_with?("RisInbox(") ||
+                  type.to_s.starts_with?("RisWorkerTask(")
     return type if tape?(program, type)
     case type
     when UnionType
