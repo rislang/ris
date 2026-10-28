@@ -24,16 +24,21 @@ How to work (fewer tokens, faster to the goal):
 All work in this checkout, one full check per item; Codex is out of
 usage until 2026-11-02. Pipe is an OS pipe on Linux and macOS (Channel
 elsewhere). Done: HTTP/2 1 MiB POST, websocket bare copy, autocert part
-A, OS pipe, socket race without Channel. Next in order: captures, then
-autocert part B, then Channel/select removal.
+A, OS pipe, socket race without Channel, 5.1 local task captures. Next
+in order: bench ports, then autocert part B, then Channel/select removal.
 
 * Give a task-owned Conn an owner-level buffer growth path: growth in a
   nested tape block ends with the block, so TLS/HTTP/2 connections stay
   program-owned (one buffer per connection never freed) until then.
-* Enforce Share-or-copy task captures, local and parallel, through captured
-  receivers, handlers and reached state; keep all resources in their
-  opening task. Gate: mutable/resource captures refused with safe forms,
-  independent config copies, retained results copied to multiple readers.
+* Port the benches to 5.1 task captures: the compiler now refuses a local
+  task's non-Share capture unless handed off. First refusals in
+  collect_trigger, concurrency, runtime, server_load, socket, stdin_park,
+  and std_ dns, file, http, http_latency, http_resume, http_stop, json,
+  mutex, process, signal, sse, term, tls, udp, websocket, yaml. Shared
+  locals become task values or board messages; a listener stopped from
+  another task needs a Share stop handle (design it, do not mark it).
+* 5.1 left: receivers and state reached through called methods (only the
+  block's own captures are checked), aliases of a handed-off value.
 * Port socket race to one task with multiple in-flight OS connects and
   poller interests, next-launch/deadline timers and Windows completion
   records. It no longer uses Channel/select: the caller polls its attempt

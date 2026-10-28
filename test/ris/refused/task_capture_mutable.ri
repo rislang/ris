@@ -1,0 +1,5 @@
+# Local tasks share the spawner's Array: a mutable borrow (5.1).
+seen = [] of Int32
+group do |g|
+  2.times { g.spawn { seen << 1 } }
+end

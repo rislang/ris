@@ -842,6 +842,7 @@ class ProcessChild
   # awaited here once the output has closed. A cancellation met anywhere
   # ends the child first, so the group's join has nothing left to wait
   # for, and is answered once the child has been waited for.
+  @[TaskClosureUnsafe("finish joins the pipe tasks before the child ends")]
   def finish(input : String?, capture : ::Bool) : ProcessResult | Cancelled
     stdout = ""
     stderr = ""

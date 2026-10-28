@@ -1,0 +1,6 @@
+# A local task assigns a local of its spawner: one cell, two tasks (5.1).
+count = 0
+group do |g|
+  g.spawn { count = 1 }
+end
+puts count

@@ -21,7 +21,11 @@ client = IyiSocket.connect("127.0.0.1", server.local_port).or_panic
 conn = server.accept.or_panic
 got = "".to_heap
 group do |g|
-  reader = g.spawn { read_all(client, 5 + 3 + 5 + big.bytesize) }
+  reader = g.spawn do
+    text = read_all(client, 5 + 3 + 5 + big.bytesize)
+    client.close
+    text
+  end
   conn.write("head:", "abc").or_panic
   tape do
     head = Str.build(8) { |w| w.append("tape:") }
@@ -30,7 +34,6 @@ group do |g|
   end
   got = reader.value.or_panic
 end
-client.close
 conn.close
 server.close
 if got == "head:abc" + "tape:" + big

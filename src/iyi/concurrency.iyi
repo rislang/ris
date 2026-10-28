@@ -3874,6 +3874,9 @@ end
 # handles a task's failure exactly the way III.4.3 says (the group has
 # already applied its policy by then; reading the value is optional).
 # Any number of fibers may read it, before the task ends or after.
+# A handle is Share when its value is: other tasks wait on it and read
+# the value (TAPE_SPEC 5.2, completion broadcast).
+@[Share]
 class IyiTask(T)
   @fiber : IyiFiber
   @box : UInt64 = 0_u64

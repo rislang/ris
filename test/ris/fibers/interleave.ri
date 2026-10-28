@@ -26,8 +26,12 @@ end
 wrong_a = 0
 wrong_b = 0
 group do |g|
-  g.spawn { wrong_a = fill(65_u8, 10) + fill(67_u8, 40) }
-  g.spawn { wrong_b = fill(66_u8, 50) }
+  a = g.spawn { fill(65_u8, 10) + fill(67_u8, 40) }
+  b = g.spawn { fill(66_u8, 50) }
+  got_a = a.value
+  got_b = b.value
+  wrong_a = got_a.is_a?(Int32) ? got_a : -1
+  wrong_b = got_b.is_a?(Int32) ? got_b : -1
 end
 puts "fiber A wrong: #{wrong_a}"
 puts "fiber B wrong: #{wrong_b}"

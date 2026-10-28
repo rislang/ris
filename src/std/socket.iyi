@@ -690,7 +690,7 @@ pub struct IyiSocket
       return attempt(host, port, addresses[0], timeout_ms) if addresses.size == 1
       count = addresses.size
       outcomes = Array(IyiSocket | Cancelled | SocketError | Nil).new(count, nil)
-      tasks = Array(IyiTask(Int32)).new(count)
+      tasks = Array(IyiTask(Attempt)).new(count)
       seen = Array(Bool).new(count, false)
       deadline = timeout_ms < 0 ? -1_i64 : Resolver.now_ms + timeout_ms.to_i64
       winner = -1
@@ -707,7 +707,7 @@ pub struct IyiSocket
             break
           end
           if started < count && now >= next_at
-            tasks << start_attempt(g, outcomes, started, host, port, addresses[started])
+            tasks << start_attempt(g, host, port, addresses[started])
             started = started + 1
             running = running + 1
             next_at = now + ATTEMPT_DELAY_MS.to_i64
@@ -724,6 +724,8 @@ pub struct IyiSocket
           end
           next if finished.nil?
           running = running - 1
+          done = tasks[finished].value
+          outcomes[finished] = done.is_a?(Attempt) ? done.outcome : Cancelled.new
           if outcomes[finished].is_a?(IyiSocket)
             winner = finished
             break
@@ -733,6 +735,16 @@ pub struct IyiSocket
         end
         g.cancel_children
         0
+      end
+      # Attempts that ended after the loop left: their sockets are closed
+      # below with the other losers.
+      index = 0
+      while index < tasks.size
+        unless seen[index]
+          done = tasks[index].value
+          outcomes[index] = done.outcome if done.is_a?(Attempt)
+        end
+        index = index + 1
       end
       index = 0
       while index < count
@@ -748,14 +760,17 @@ pub struct IyiSocket
       every_address_failed(host, port, addresses, outcomes, started, out_of_time ? timeout_ms : -1)
     end
 
-    # One attempt, a task of the race's group: its answer kept at *index*.
-    # The task answers 0, not the outcome: a
-    # `SocketError` answered is a failure under the group's policy (SPEC.md
-    # III.4.3), and it would cancel the attempts still racing.
-    private def self.start_attempt(g : IyiGroup, outcomes : Array(IyiSocket | Cancelled | SocketError | Nil), index : Int32, host : String, port : Int32, address : IPAddress) : IyiTask(Int32)
+    # What one attempt answers, wrapped: a `SocketError` answered bare is
+    # a failure under the group's policy (SPEC.md III.4.3), and it would
+    # cancel the attempts still racing.
+    private record Attempt, outcome : IyiSocket | Cancelled | SocketError
+
+    # One attempt, a task of the race's group. It captures only copied
+    # Share values (TAPE_SPEC 5.1); the caller reads its answer from the
+    # task's value.
+    private def self.start_attempt(g : IyiGroup, host : String, port : Int32, address : IPAddress) : IyiTask(Attempt)
       g.spawn do
-        outcomes[index] = attempt(host, port, address, -1)
-        0
+        Attempt.new(attempt(host, port, address, -1))
       end
     end
 
@@ -763,7 +778,7 @@ pub struct IyiSocket
     # first (-1: no bound), `Cancelled` when the caller was. It waits on the
     # oldest running attempt in slices of 2 ms and looks at all of them
     # between slices: a later one may fail first.
-    private def self.next_finished(tasks : Array(IyiTask(Int32)), seen : Array(Bool), ms : Int32) : Int32 | Cancelled | Nil
+    private def self.next_finished(tasks : Array(IyiTask(Attempt)), seen : Array(Bool), ms : Int32) : Int32 | Cancelled | Nil
       until_ms = ms < 0 ? -1_i64 : Resolver.now_ms + ms.to_i64
       while true
         oldest = -1

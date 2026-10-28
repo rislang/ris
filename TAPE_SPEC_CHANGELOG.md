@@ -4,6 +4,16 @@ Every change to TAPE_SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one.
 
+## 2026-10-28: a local task takes a handed-off value
+
+* Changed: 5.1 lets a local task capture a non-Share value its spawner
+  hands off: spawned once directly in the group block, never read or
+  assigned by the spawner after the spawn. IyiTask handles are Share.
+* Why: the compiler now enforces 5.1 for local tasks, not only parallel
+  ones. A server hands an accepted socket to its handler task and a pipe
+  end goes to the task that uses it; both are moves, not shared borrows.
+  Completion broadcast (5.2) needs task handles that other tasks wait on.
+
 ## 2026-10-27: board messages are Copyable, packed as one image
 
 * Changed: 5.6 names the message property Copyable (Goose's flat): a

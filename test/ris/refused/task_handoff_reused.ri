@@ -1,0 +1,7 @@
+# A value handed to a task is not read by its spawner again (5.1).
+import std/socket::{IyiSocket}
+server = IyiSocket.listen(0)
+group do |g|
+  g.spawn { server.close }
+end
+puts server.local_port

@@ -21,8 +21,9 @@ def run(base : Int64) : Int64
   n = 0_i64
   while n < 4000_i64
     wrong = wrong + group do |g|
-      a = g.spawn { check(base + n) }
-      b = g.spawn { check(base + n + 1_000_000_i64) }
+      id = base + n
+      a = g.spawn { check(id) }
+      b = g.spawn { check(id + 1_000_000_i64) }
       av = a.value
       bv = b.value
       (av.is_a?(Int64) ? av : 1_i64) + (bv.is_a?(Int64) ? bv : 1_i64)

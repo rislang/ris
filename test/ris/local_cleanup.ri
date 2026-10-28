@@ -5,19 +5,24 @@ def check(ok : Bool) : Nil
   raise "local cleanup check failed" unless ok
 end
 
-def fail_local(events : Array(String)) : Int32
-  defer events <<
-    (RisRegion.tape != 0_u64 ? "implicit" : "bad implicit").to_heap
+# A cleanup's event: its code, negative when it saw the wrong tape. The
+# task posts them on the board; the spawner takes them after the group.
+record CleanupEvent, code : Int32
+
+def note(code : Int32, ok : Bool) : Nil
+  check(RisBoard.post(CleanupEvent.new(ok ? code : -code)))
+end
+
+def fail_local : Int32
+  defer note(4, RisRegion.tape != 0_u64)
   tape do
     outer = RisRegion.tape
-    defer events << (RisRegion.tape == outer ? "outer" : "bad outer").to_heap
+    defer note(3, RisRegion.tape == outer)
     local_tape do
       local_tape = RisRegion.tape
-      defer events <<
-        (RisRegion.tape == local_tape ? "local" : "bad local").to_heap
+      defer note(2, RisRegion.tape == local_tape)
       local_tape do
-        defer events <<
-          (RisRegion.tape != local_tape ? "nested" : "bad nested").to_heap
+        defer note(1, RisRegion.tape != local_tape)
         raise "expected local panic"
       end
     end
@@ -41,15 +46,19 @@ def interleave(tag : UInt8) : Nil
   end
 end
 
-events = Array(String).new
 group do |g|
   a = g.spawn { interleave(65_u8) }
   b = g.spawn { interleave(66_u8) }
-  task = g.spawn { fail_local(events) }
+  task = g.spawn { fail_local }
   check(!a.value.is_a?(Panicked))
   check(!b.value.is_a?(Panicked))
   check(task.value.is_a?(Panicked))
 end
-check(events.join("|") == "nested|local|outer|implicit")
+4.times do |index|
+  event = RisBoard.poll(CleanupEvent)
+  next check(false) if event.is_a?(Cancelled)
+  got = event[0]
+  check(!got.nil? && got.code == index + 1)
+end
 check(RisRegion.tape != 0_u64)
 puts "PASS: local panic cleanup and fiber switching"

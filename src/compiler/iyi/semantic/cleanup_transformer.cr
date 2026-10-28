@@ -707,6 +707,8 @@ module Iyi
                  THREAD_BOUNDARY
                elsif target_def.name == "spawn_parallel" && !owner.metaclass? && owner.to_s == "IyiGroup"
                  PARALLEL_BOUNDARY
+               elsif target_def.name == "spawn" && !owner.metaclass? && owner.to_s == "IyiGroup" && !task_closure_unsafe_scope?
+                 LOCAL_BOUNDARY
                end
       owning = thread ? nil : share_owning_type(owner)
       return unless thread || owning
@@ -736,7 +738,7 @@ module Iyi
         check_share_class_var_types(a_def, subject, consequence)
       elsif thread
         subject = thread.subject
-        consequence = "(SPEC.md III.4.4)"
+        consequence = thread.consequence
         check_thread_constants_share(a_def, thread)
         check_thread_class_vars_share(a_def, thread)
       end
@@ -761,8 +763,8 @@ module Iyi
           next if meta.belongs_to?(a_def)
           type = meta.type?
           next unless type
-          if why = Iyi::Share.reason(type)
-            captured.raise "#{subject} captures `#{captured.name} : #{type}`, which is not Share: #{why}#{owning ? "; " : " "}#{consequence}"
+          if (why = Iyi::Share.reason(type)) && !(thread == LOCAL_BOUNDARY && handed_off?(node, captured, meta))
+            captured.raise "#{subject} captures `#{captured.name} : #{type}`, which is not Share: #{why}#{owning || thread == LOCAL_BOUNDARY ? "; " : " "}#{consequence}"
           end
           # A block behind a lock runs in the task that called it, so a
           # local it assigns is that task's alone; only a thread's block
@@ -781,7 +783,7 @@ module Iyi
         if self_type = @current_def.try(&.owner)
           unless self_type.is_a?(Program) || self_type.metaclass?
             if why = Iyi::Share.reason(self_type)
-              block.raise "#{subject} captures `self : #{self_type}`, which is not Share: #{why}#{owning ? "; " : " "}#{consequence}"
+              block.raise "#{subject} captures `self : #{self_type}`, which is not Share: #{why}#{owning || thread == LOCAL_BOUNDARY ? "; " : " "}#{consequence}"
             end
           end
         end
@@ -824,7 +826,53 @@ module Iyi
 
     # iyi: who the two parties to a shared cell are, in the sentences the
     # thread check and the parallel task's check refuse one with.
-    record ShareBoundary, subject : String, local_owner : String, pair : String, again : String, after : String
+    record ShareBoundary, subject : String, local_owner : String, pair : String, again : String, after : String,
+      consequence : String = "(SPEC.md III.4.4)",
+      race : String = "a data race (SPEC.md III.4.4)",
+      cure : String = "keep the value in an `Atomic`, or behind a `Mutex` (std/mutex)"
+
+    # ris: a local task runs on its spawner's thread, but it is still a
+    # task of its own (TAPE_SPEC 5.1): it captures only Share values,
+    # never a mutable borrow of its spawner's state or a resource.
+    LOCAL_BOUNDARY = ShareBoundary.new(
+      subject: "the block spawn runs as another task",
+      local_owner: "a local of the code that spawned the task, so the task and its spawner",
+      pair: "the task and the code that spawned it",
+      again: "spawns the task again",
+      after: "the task was spawned",
+      consequence: "a task captures only Share values or a copy it makes itself; pass a Copyable value through RisBoard (post/take), or open the resource inside the task (TAPE_SPEC 5.1)",
+      race: "a mutable borrow across tasks (TAPE_SPEC 5.1)",
+      cure: "send the value through RisBoard (post/take), or answer it from the task's `value`")
+
+    # ris: a value the spawner hands to a local task and never reads again
+    # is the task's alone, as a resource opened in it would be (TAPE_SPEC
+    # 5.1): `g.spawn { serve(client) }` with no later `client`. Spawned in a
+    # loop or a block that runs again, the cell is the next one's too.
+    private def handed_off?(start : Call, captured : Var, meta : MetaVar) : Bool
+      scope = meta.context
+      body, vars = case scope
+                   when Def, Block then {scope.body, scope.vars}
+                   else                 {@top_level, @program.vars}
+                   end
+      walk = CaptureAssignments.new(@program, meta, start, vars)
+      body.try &.accept(walk)
+      return false unless walk.found_start?
+      if use = walk.uses.first?
+        use.raise "`#{captured.name}` is read here, after it was handed to the task spawned at line #{start.location.try(&.line_number)}: the task owns it now (TAPE_SPEC 5.1). Use it only inside the task, or hand the task a copy"
+      end
+      # Only `group do |g|` runs its block once; any other block or loop
+      # may spawn again with the same cell.
+      walk.start_regions.all? do |region|
+        region.is_a?(Block) && region.args.size == 1 &&
+          region.args[0].type?.to_s == "IyiGroup"
+      end
+    end
+
+    # A def marked `@[TaskClosureUnsafe("…")]` names the owner that joins
+    # its tasks; its spawns are std's reviewed exceptions to 5.1.
+    private def task_closure_unsafe_scope? : Bool
+      !!@current_def.try(&.annotation(@program.task_closure_unsafe_annotation))
+    end
 
     THREAD_BOUNDARY = ShareBoundary.new(
       subject: "the block IyiThread.start runs on another thread",
@@ -859,7 +907,7 @@ module Iyi
       inside = CaptureAssignments.new(@program, meta, nil, a_def.vars)
       a_def.body.accept inside
       if first = inside.assigns.first?
-        first[0].raise "#{boundary.subject} assigns `#{name}`, #{boundary.local_owner} share one mutable cell: a data race (SPEC.md III.4.4). Keep the value in an `Atomic`, or behind a `Mutex` (std/mutex)"
+        first[0].raise "#{boundary.subject} assigns `#{name}`, #{boundary.local_owner} share one mutable cell: #{boundary.race}. #{boundary.cure[0].upcase}#{boundary.cure[1..]}"
       end
 
       scope = meta.context
@@ -870,9 +918,9 @@ module Iyi
       outside = CaptureAssignments.new(@program, meta, start, vars)
       body.try &.accept(outside)
       line = start.location.try(&.line_number)
-      advice = "so #{boundary.pair} share one mutable cell: a data race (SPEC.md III.4.4). " \
+      advice = "so #{boundary.pair} share one mutable cell: #{boundary.race}. " \
                "Capture a local that is assigned once (a block's own locals are new on every call), " \
-               "or keep the value in an `Atomic`, or behind a `Mutex` (std/mutex)"
+               "or #{boundary.cure}"
       # Not found, or found assigned nowhere: the walk does not know this
       # scope, and the typer's answer stands.
       unless outside.found_start? && !outside.assigns.empty?
@@ -1007,6 +1055,7 @@ module Iyi
     class CaptureAssignments < Visitor
       getter assigns = [] of {ASTNode, Array(ASTNode), Bool}
       getter start_regions = [] of ASTNode
+      getter uses = [] of Var
       getter? found_start = false
 
       def initialize(@program : Program, @meta : MetaVar, @start : Call?, vars : MetaVars?)
@@ -1101,6 +1150,15 @@ module Iyi
       # A method's body is not this scope's code. A module's is: an iyi
       # file's top level is the body of the `module` its header names.
       def visit(node : Def | Macro | LibDef | AnnotationDef)
+        false
+      end
+
+      # ris: a read of the variable once the task has started; a handed-off
+      # value is never read by its spawner again.
+      def visit(node : Var)
+        if @found_start && @scopes.last.try(&.[node.name]?).same?(@meta)
+          @uses << node
+        end
         false
       end
 

@@ -67,6 +67,11 @@ expect board_recursive 'use Tre or Ary nodes with checked integer indices'
 expect board_closure 'send Str, Ary bytes or a value struct'
 expect board_owner 'send Str, Ary bytes or a value struct'
 
+# Tasks capture Share values, or take a value handed off (TAPE_SPEC 5.1).
+expect task_capture_mutable 'pass a Copyable value through RisBoard'
+expect task_capture_assigned 'a mutable borrow across tasks'
+expect task_handoff_reused 'the task owns it now'
+
 # Timed joins broadcast completion without cancelling the retained task.
 for mode in gc no-gc; do
   flags=()

@@ -471,49 +471,61 @@ puts "  MultiWriter puts, <<, write_byte, print, flush, close and use as an IyiI
 # ---------------------------------------------------------------------------
 
 puts "\n== a pipe between tasks"
+# Events cross tasks on the board (TAPE_SPEC 5.1): 1 "written", 100
+# "reading", then the byte count and 0 for a clean end.
+record PipeEvent, code : Int32
+
 # A reader that starts late: the writer waits while the kernel's room is
 # full, and every byte reaches the reader in order; closing the writer is
 # the reader's end.
 pipe_in, pipe_out = IyiIO.pipe
-pipe_events = [] of String
 pipe_piece = ("0123456789abcdef" * 1024).to_heap
 group do |g|
   g.spawn do
     64.times { pipe_out.write(pipe_piece) }
-    pipe_events << "written"
+    RisBoard.post(PipeEvent.new(1))
     pipe_out.close
     0
   end
   g.spawn do
     sleep(20)
-    pipe_events << "reading"
+    RisBoard.post(PipeEvent.new(100))
     pipe_total = 0
     while (got = pipe_in.read_bytes(65536)).bytesize > 0
       pipe_total += got.bytesize
     end
-    pipe_events << "read #{pipe_total}"
+    RisBoard.post(PipeEvent.new(pipe_total))
+    RisBoard.post(PipeEvent.new(pipe_in.read_failed? ? -1 : 0))
     0
   end
 end
-assert_str("reading,written,read 1048576", pipe_events.join(","), "a pipe's writer waits while its room is full")
-assert_true(!pipe_in.read_failed?, "a pipe whose writer closed ended cleanly")
+pipe_events = [] of Int32
+4.times do
+  event = RisBoard.poll(PipeEvent)
+  next if event.is_a?(Cancelled)
+  if got = event[0]
+    pipe_events << got.code
+  end
+end
+assert_str("100,1,1048576,0", pipe_events.join(","), "a pipe's writer waits while its room is full, and its reader ends cleanly")
 # A copy through a pipe, in 4 KB writes, and one write of 20,000 bytes that
 # a 4 KB read takes in parts: every byte arrives.
 copy_in, copy_out = IyiIO.pipe
-copy_sink = Memory.new
-group do |g|
+copied = group do |g|
   g.spawn do
     IyiIO.copy(Memory.new("abc" * 50_000), copy_out)
     copy_out.write("z" * 20_000)
     copy_out.close
     0
   end
-  g.spawn do
+  reader = g.spawn do
+    copy_sink = Memory.new
     IyiIO.copy(copy_in, copy_sink)
-    0
+    copy_sink.to_s
   end
+  got = reader.value
+  got.is_a?(String) ? got : ""
 end
-copied = copy_sink.to_s
 assert_int(170_000_i64, copied.bytesize.to_i64, "a copy through a pipe arrives whole")
 assert_true(copied.ends_with?("abc" + "z" * 20_000), "and in order")
 # The reader gone, the next write refused, as a pipe's is.

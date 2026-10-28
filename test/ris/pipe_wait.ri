@@ -6,20 +6,21 @@ import std/text
 # A pipe's writer waits while the kernel's room is full, then every byte
 # arrives whole and in order; closing the writer is the reader's end, and
 # a write after the reader closed is refused, not a SIGPIPE.
-# Events: 1 for "all written", 100 for "reading".
+# Events on the board: 1 for "all written", 100 for "reading".
+record PipeEvent, code : Int32
+
 pipe_in, pipe_out = IyiIO.pipe
-events = [] of Int32
 piece = ("0123456789abcdef" * 1024).to_heap
 group do |g|
   g.spawn do
     64.times { pipe_out.write(piece) }
-    events << 1
+    RisBoard.post(PipeEvent.new(1))
     pipe_out.close
     0
   end
   g.spawn do
     sleep(20)
-    events << 100
+    RisBoard.post(PipeEvent.new(100))
     total = 0
     while (got = pipe_in.read_bytes(65536)).bytesize > 0
       got.each_byte do |byte|
@@ -28,7 +29,16 @@ group do |g|
       end
     end
     raise "total #{total}" unless total == piece.bytesize * 64
+    pipe_in.close
     0
+  end
+end
+events = [] of Int32
+2.times do
+  event = RisBoard.poll(PipeEvent)
+  next if event.is_a?(Cancelled)
+  if got = event[0]
+    events << got.code
   end
 end
 raise "writer waits: #{events.join(",")}" unless events == [100, 1]
