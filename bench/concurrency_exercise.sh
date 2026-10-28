@@ -31,10 +31,13 @@
 #      --release build that keeps doubles in those registers.
 set -u
 
+# The idle-reader exercise opens over four thousand pipe descriptors.
+ulimit -n 8192
+
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 # the wrapper in bin is a posix shell script, so a caller that already has a
 # compiler of its own names it through the environment.
-IYI="${IYI:-$REPO/bin/iyi}"
+IYI="${IYI:-$REPO/bin/ris}"
 mkdir -p "$REPO/bench/.work"
 WORK="$(mktemp -d "$REPO/bench/.work/XXXXXX")"
 
@@ -151,9 +154,9 @@ fi
 printf '  exits 1 at "%s"\n' "$(grep -m1 'held the thread' stdin-blocking.txt | sed 's/^FAIL: //')"
 
 # ── 2. The dependency floor ───────────────────────────────────────────────
-# On Linux the five allowed names are the C runtime template's, not the
-# prelude's — bench/dependency_floor.sh spells out why — and the runtime is
-# raw syscalls, so it may add nothing beyond them. On darwin every call is
+# On Linux the C runtime startup names and tape's mmap/mprotect are the
+# allowed symbols; the scheduler otherwise uses raw syscalls. See
+# bench/dependency_floor.sh for the inherited floor. On darwin each call is
 # a libSystem symbol by design (III.9: raw syscalls are not a stable ABI
 # there), so the floor is the exact list below plus libSystem as the one
 # linked library; a new name is a dependency being taken on and belongs in
@@ -221,7 +224,7 @@ else
     *)
       added="$("$NM" -u exercise |
         sed -e 's/^ *[wU] *//' -e 's/@.*$//' |
-        grep -v -E '^(_ITM_deregisterTMCloneTable|_ITM_registerTMCloneTable|__cxa_finalize|__gmon_start__|__libc_start_main)$' |
+        grep -v -E '^(_ITM_deregisterTMCloneTable|_ITM_registerTMCloneTable|__cxa_finalize|__gmon_start__|__libc_start_main|mmap|mprotect)$' |
         grep -cv '^\s*$')"
       if [ "$added" -ne 0 ]; then
         echo "the runtime put $added undefined symbols back on the link line:"
@@ -276,10 +279,10 @@ record Pong, n : Int32
 # The owner waits on the board (`panicked`, `finished`) or on the
 # worker's value (`value`) when the deadlock is found.
 def waits(how : String) : Nil
-  defer STDERR.puts("cleanup: owner")
+  defer puts("cleanup: owner")
   group do |g|
     worker = g.spawn do
-      defer STDERR.puts("cleanup: worker")
+      defer puts("cleanup: worker")
       RisBoard.post(Result.new(compute(7))) if how == "panicked"
       RisBoard.take(Result) if how == "value"
       0
@@ -294,16 +297,16 @@ end
 
 # Two tasks wait on each other while the owner waits in the group's join.
 def crossed : Nil
-  defer STDERR.puts("cleanup: owner")
+  defer puts("cleanup: owner")
   group do |g|
     g.spawn do
-      defer STDERR.puts("cleanup: task a")
+      defer puts("cleanup: task a")
       RisBoard.take(Ping)
       RisBoard.post(Pong.new(1))
       0
     end
     g.spawn do
-      defer STDERR.puts("cleanup: task b")
+      defer puts("cleanup: task b")
       RisBoard.take(Pong)
       RisBoard.post(Ping.new(1))
       0
@@ -385,11 +388,13 @@ step "sleep(0) lets a runnable task run"
 cat > yielding.iyi <<'IYI'
 module yielding
 
-flag = false
-spins = 0
+record YieldFlag, n : Int32
 group do |g|
   g.spawn do
-    while !flag
+    spins = 0
+    loop do
+      flag = RisBoard.poll(YieldFlag)
+      break if !flag.is_a?(Cancelled) && flag[1]
       spins = spins + 1
       sleep(0)
       if spins > 1000000
@@ -401,7 +406,7 @@ group do |g|
     0
   end
   g.spawn do
-    flag = true
+    RisBoard.post(YieldFlag.new(1))
     0
   end
   0
@@ -516,7 +521,7 @@ if ! "$IYI" build late_spawn.iyi -o late_spawn > build-late-spawn.log 2>&1; then
 fi
 timeout 30 ./late_spawn > late_spawn.txt 2>&1
 code=$?
-if [ "$code" -ne 1 ] || ! grep -q 'panic: a task spawned on a group whose block has ended' late_spawn.txt ||
+if [ "$code" -ne 1 ] || ! grep -q 'panic: the group has ended; create this work in a live outer group' late_spawn.txt ||
    grep -q '^the late' late_spawn.txt; then
   echo "a task spawned on an ended group exited $code:"
   cat late_spawn.txt
@@ -672,7 +677,7 @@ sleep_proof "a sleep queue that puts the latest first" latest \
 case "$(uname -s)" in
   Linux)
     sleep_proof "an io waiter found by walking every waiter" walked_io \
-      '/^    index < slots.size \? slots\[index\] : nil$/ { print "    found_waiter = nil"; print "    walk = state.io_head"; print "    while walk.is_a?(IyiFiber)"; print "      found_waiter = walk if walk.wait_fd == fd && walk.wait_dir == direction"; print "      walk = walk.next_io"; print "    end"; print "    found_waiter"; found = 1; next }
+      '/^    index >= 0 && index < st.io_capacity \? st.io_slots\[index\] : nil$/ { print "    found_waiter = nil"; print "    walk = st.io_head"; print "    while walk.is_a?(IyiFiber)"; print "      found_waiter = walk if walk.wait_fd == fd && walk.wait_dir == direction"; print "      walk = walk.next_io"; print "    end"; print "    found_waiter"; found = 1; next }
        { print } END { if (!found) exit 3 }' \
       'FAIL: io: 5000 round trips'
     ;;

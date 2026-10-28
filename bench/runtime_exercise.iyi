@@ -29,6 +29,31 @@ def log_msg(msg : String) : Nil
   __iyi_write(1, msg.to_unsafe.as(Void*), msg.size.to_u64)
 end
 
+# Task observations are copied onto the board, in publication order.
+@[OnTape]
+record BenchText, text : Str
+record BenchNumber, n : Int64
+
+def note(text : String) : Nil
+  RisBoard.post(BenchText.new(Str.build { |w| w.append(text) }))
+end
+
+def hear : String
+  event = RisBoard.take(BenchText)
+  raise "missing task observation" unless event.is_a?(BenchText)
+  event.text.to_heap
+end
+
+def number(n : Int64) : Nil
+  RisBoard.post(BenchNumber.new(n))
+end
+
+def read_number : Int64
+  event = RisBoard.take(BenchNumber)
+  raise "missing task number" unless event.is_a?(BenchNumber)
+  event.n
+end
+
 def fail(message : String) : Nil
   log_msg("FAIL: " + message + "\n")
   __iyi_exit(1)
@@ -123,7 +148,7 @@ group do |g|
     round = 0
     while round < 3
       RisBoard.take(RPing)
-      order = order + "a"
+      note("a")
       RisBoard.post(RPong.new(1))
       round = round + 1
     end
@@ -132,7 +157,7 @@ group do |g|
   g.spawn do
     round = 0
     while round < 3
-      order = order + "b"
+      note("b")
       RisBoard.post(RPing.new(1))
       RisBoard.take(RPong)
       round = round + 1
@@ -141,6 +166,7 @@ group do |g|
   end
 end
 
+6.times { order = order + hear }
 fail("interleaving: expected bababa, got #{order}") unless order == "bababa"
 log_msg("interleaved: " + order + "\n")
 
@@ -166,7 +192,7 @@ victim_saw = ""
 group do |g|
   victim = g.spawn do
     slept = sleep(10000)
-    victim_saw = slept.is_a?(Cancelled) ? "cancelled" : "slept"
+    note(slept.is_a?(Cancelled) ? "cancelled" : "slept")
     slept
   end
   g.spawn do
@@ -175,6 +201,7 @@ group do |g|
   end
 end
 cancelled_after = elapsed_ms(started)
+victim_saw = hear
 fail("cancellation never reached the sleeping task") unless victim_saw == "cancelled"
 fail("cancellation took #{cancelled_after} ms against a 10 s sleep") if cancelled_after >= 5000
 log_msg("a failing task cancelled a sibling blocked in sleep, in #{cancelled_after} ms\n")
@@ -193,7 +220,7 @@ drained = ""
 group do |g|
   g.spawn do
     outcome = two_naps
-    drained = outcome.is_a?(Cancelled) ? "propagated" : "finished"
+    note(outcome.is_a?(Cancelled) ? "propagated" : "finished")
     outcome
   end
   g.spawn do
@@ -201,6 +228,7 @@ group do |g|
     TaskFailed.new
   end
 end
+drained = hear
 fail("`!` did not propagate Cancelled out of the task body") unless drained == "propagated"
 fail("draining a cancelled task took #{elapsed_ms(started)} ms") if elapsed_ms(started) >= 5000
 log_msg("a cancelled task drained through `!`\n")
@@ -214,20 +242,20 @@ io_order = ""
 
 group do |g|
   g.spawn do
-    io_order = io_order + "parked,"
+    note("parked,")
     buffer = Pointer(UInt8).malloc(1_u64)
     got = iyi_read(read_fd, buffer.as(Void*), 1_u64)
     case got
     in Int64
-      io_order = io_order + "read:#{buffer.value.to_i64}"
+      note("read:#{buffer.value.to_i64}")
     in Cancelled
-      io_order = io_order + "cancelled"
+      note("cancelled")
     end
     0
   end
   g.spawn do
     sleep(40)
-    io_order = io_order + "wrote,"
+    note("wrote,")
     byte = Pointer(UInt8).malloc(1_u64)
     byte.value = 7_u8
     __iyi_write(write_fd, byte.as(Void*), 1_u64)
@@ -235,6 +263,7 @@ group do |g|
   end
 end
 
+3.times { io_order = io_order + hear }
 fail("poller: expected parked,wrote,read:7 got #{io_order}") unless io_order == "parked,wrote,read:7"
 log_msg("a read parked in the poller and a sleeping writer woke it\n")
 
@@ -249,7 +278,7 @@ group do |g|
   g.spawn do
     buf = Pointer(UInt8).malloc(1_u64)
     outcome = iyi_read(io_read_fd, buf.as(Void*), 1_u64)
-    io_victim_saw = outcome.is_a?(Cancelled) ? "cancelled" : "read"
+    note(outcome.is_a?(Cancelled) ? "cancelled" : "read")
     outcome
   end
   g.spawn do
@@ -259,6 +288,7 @@ group do |g|
 end
 
 io_cancelled_after = elapsed_ms(started)
+io_victim_saw = hear
 fail("cancellation never reached the IO-blocked task: #{io_victim_saw}") unless io_victim_saw == "cancelled"
 fail("cancellation of IO took #{io_cancelled_after} ms") if io_cancelled_after >= 5000
 log_msg("a failing task cancelled a sibling blocked in IO, in #{io_cancelled_after} ms\n")
@@ -280,21 +310,20 @@ log_msg("task.value joined and answered\n")
 # 9. Deferred join on early return out of group block
 log_msg("step 9: deferred join\n")
 
-def leaves_early(finished : Pointer(Int32)) : Nil
+def leaves_early : Nil
   group do |g|
     g.spawn do
       sleep(30)
-      finished.value = 1
+      number(1_i64)
       0
     end
     return
   end
 end
 
-flag = Pointer(Int32).malloc(4_u64)
-flag.value = 0
-leaves_early(flag)
-fail("a `return` out of the group block left its task running") unless flag.value == 1
+leaves_early
+flag = read_number
+fail("a `return` out of the group block left its task running") unless flag == 1
 log_msg("an early return still joined the group\n")
 
 # 15. Typed group
@@ -365,8 +394,8 @@ def captured_total(n : Int32) : Int32
   total = 0
   group do |g|
     case int_or_text(n)
-    in Int32  then g.spawn { total += it }
-    in String then g.spawn { total += it.size }
+    in Int32  then t = g.spawn { it }; total = t.value.or_panic
+    in String then t = g.spawn { it.size }; total = t.value.or_panic
     end
   end
   case int_or_text(n + 1)

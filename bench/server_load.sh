@@ -34,7 +34,7 @@ case "$(uname -s)" in
   *) PSEP=':' ;;
 esac
 
-IYI="${IYI:-$REPO/bin/iyi}"
+IYI="${IYI:-$REPO/bin/ris}"
 mkdir -p "$REPO/bench/.work"
 WORK="$(mktemp -d "$REPO/bench/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search

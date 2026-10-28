@@ -127,53 +127,59 @@ pub def canaries(rounds : Int32) : Int32
   bad
 end
 
-listener = IyiSocket.listen(0)
-port = listener.local_port
-puts "serving on " + port.to_s
+record ServerPort, port : Int32
+record ServerTop, top : UInt64
+
+def serve_next(listener : IyiSocket) : Nil
+  accepted = listener.accept.or_panic
+  group do |connection|
+    connection.spawn do
+      RisBoard.post(ServerTop.new(serve(accepted)))
+      0
+    end
+  end
+end
 
 tops = [] of UInt64
 bad = 0
-
 canary_bad = 0
 
 group do |outer|
   outer.spawn { churn }
+  canary = outer.spawn { canaries(60) }
   outer.spawn do
-    canary_bad = canaries(60)
-    0
-  end
-
-  outer.spawn do
+    listener = IyiSocket.listen(0)
+    port = listener.local_port
+    puts "serving on " + port.to_s
+    RisBoard.post(ServerPort.new(port))
     n = 0
     while n < ROUNDS
-      case client = listener.accept
-      in Cancelled
-        n = ROUNDS
-      in SocketError
-        raise client.message
-      in IyiSocket
-        accepted = client
-        outer.spawn do
-          tops << serve(accepted)
-          0
-        end
-        n = n + 1
-      end
-    end
-    0
-  end
-
-  outer.spawn do
-    n = 0
-    while n < ROUNDS
-      bad = bad + ask(port, n)
+      serve_next(listener)
       n = n + 1
     end
+
+    listener.close
     0
   end
+  requester = outer.spawn do
+    address = RisBoard.take(ServerPort)
+    raise "no server port" unless address.is_a?(ServerPort)
+    failures = 0
+    n = 0
+    while n < ROUNDS
+      failures = failures + ask(address.port, n)
+      n = n + 1
+    end
+    failures
+  end
+  bad = requester.value.or_panic
+  canary_bad = canary.value.or_panic
 end
-
-listener.close
+ROUNDS.times do
+  event = RisBoard.take(ServerTop)
+  raise "no server stack" unless event.is_a?(ServerTop)
+  tops << event.top
+end
 
 distinct = [] of UInt64
 tops.each do |top|

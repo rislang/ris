@@ -15,7 +15,7 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-IYI="${IYI:-$REPO/bin/iyi}"
+IYI="${IYI:-$REPO/bin/ris}"
 mkdir -p "$REPO/bench/.work"
 WORK="$(mktemp -d "$REPO/bench/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -78,6 +78,7 @@ if ! "$IYI" build --cross-compile --target x86_64-windows-gnu "$REPO/bench/runti
 fi
 
 # 4. Dependency floor
+# Tape adds mmap/mprotect to Linux's inherited C runtime startup names.
 step "dependency floor: runtime stays on platform doorway"
 case "$(uname -s)" in
   Darwin)
@@ -98,7 +99,7 @@ case "$(uname -s)" in
   *)
     added="$(nm -u exercise |
       sed -e 's/^ *[wU] *//' -e 's/@.*$//' |
-      grep -v -E '^(_ITM_deregisterTMCloneTable|_ITM_registerTMCloneTable|__cxa_finalize|__gmon_start__|__libc_start_main)$' |
+      grep -v -E '^(_ITM_deregisterTMCloneTable|_ITM_registerTMCloneTable|__cxa_finalize|__gmon_start__|__libc_start_main|mmap|mprotect)$' |
       grep -cv '^\s*$')"
     if [ "$added" -ne 0 ]; then
       echo "the runtime put $added undefined symbols back on the link line:"

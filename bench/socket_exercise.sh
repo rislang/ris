@@ -18,7 +18,7 @@ case "$(uname -s)" in
   *) PSEP=':' ;;
 esac
 
-IYI="${IYI:-$REPO/bin/iyi}"
+IYI="${IYI:-$REPO/bin/ris}"
 mkdir -p "$REPO/bench/.work"
 WORK="$(mktemp -d "$REPO/bench/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -130,7 +130,7 @@ else
   echo "  recv(-1): exits 1 at \"$(grep -m1 'negative count' "$WORK/negative.out" | sed 's/^iyi: panic: //')\""
 fi
 
-echo "== two fibers reading one socket are refused"
+echo "== two tasks borrowing one socket are refused"
 # On every platform: the readiness one of them is woken for is not the
 # other's. Windows posted both reads and let them take the bytes in turns,
 # so a program written there panicked everywhere else.
@@ -149,12 +149,12 @@ group do |g|
 end
 puts "two readers were let in"
 IYI
-if timeout -k 5 60 "$IYI" run "$WORK/readers.iyi" > "$WORK/readers.out" 2>&1; then
+if timeout -k 5 60 "$IYI" build --no-codegen "$WORK/readers.iyi" > "$WORK/readers.out" 2>&1; then
   echo "  two readers were let in"; status=1
-elif ! grep -q "two fibers reading one fd" "$WORK/readers.out"; then
+elif ! grep -q "the task owns it now" "$WORK/readers.out"; then
   echo "  two readers were refused, but not by name:"; sed 's/^/    /' "$WORK/readers.out"; status=1
 else
-  echo "  two readers: exits 1 at \"$(grep -m1 'two fibers' "$WORK/readers.out" | sed 's/^iyi: panic: //')\""
+  echo "  two readers: refused at compile time (the task owns it now)"
 fi
 
 echo
@@ -169,6 +169,11 @@ prove_fails() {
   mkdir -p "$WORK/$dir/std"
   cp -R "$REPO/src/std/." "$WORK/$dir/std/"
   awk "$script" "$REPO/src/std/socket.iyi" > "$WORK/$dir/std/socket.iyi"
+  if cmp -s "$REPO/src/std/socket.iyi" "$WORK/$dir/std/socket.iyi"; then
+    echo "  $label: the patch changed nothing"
+    status=1
+    return
+  fi
   if ! IYI_PATH="$WORK/$dir${PSEP}$REPO/src" "$IYI" build $flag \
        -o "$WORK/$dir/program" "$REPO/bench/socket_exercise.iyi" \
        >"$WORK/$dir/build.log" 2>&1; then
@@ -210,16 +215,16 @@ prove_fails "a socket read that takes all it may read from the heap" heapread "s
 
 # The peer's name asked of this end: `getsockname` for `getpeername`.
 prove_fails "the peer's address read from this end" peername "remote_port:" \
-  '{ sub(/return nil if IyiSocket.__sys_getpeername\(@fd, addr, pointerof\(len\)\) < 0$/, "return nil if IyiSocket.__sys_getsockname(@fd, addr, pointerof(len)) < 0"); print }'
+  '{ sub(/return nil if IyiSocket.__sys_getpeername\(@state\.value\.fd, addr, pointerof\(len\)\) < 0$/, "return nil if IyiSocket.__sys_getsockname(@state.value.fd, addr, pointerof(len)) < 0"); print }'
 
 # Nagle left on: at the connected end, at the accepted end, and a
 # `nodelay = false` that sets nothing.
 prove_fails "a connected socket left with Nagle on" nagleconnect "nodelay: the connected end" \
   '{ sub(/^    __send_at_once\(fd, family\)$/, ""); print }'
 prove_fails "an accepted socket left with Nagle on" nagleaccept "nodelay: the accepted end" \
-  '{ sub(/^        IyiSocket.__send_at_once\(client_fd, @family\)$/, ""); print }'
+  '{ sub(/^        IyiSocket.__send_at_once\(client_fd, @state\.value\.family\)$/, ""); print }'
 prove_fails "nodelay = false that sets nothing" naglesetter "nodelay: TCP_NODELAY still set" \
-  '{ sub(/^    IyiSocket.__sys_set_nodelay\(@fd, on\) unless @family == AF_UNIX$/, ""); print }'
+  '{ sub(/^    IyiSocket.__sys_set_nodelay\(@state\.value\.fd, on\) unless @state\.value\.family == AF_UNIX$/, ""); print }'
 
 # 5. A write to a gone peer panicking, as it did
 prove_fails "a gone peer is a panic" panicwrite "cannot write to socket" \
@@ -228,7 +233,7 @@ prove_fails "a gone peer is a panic" panicwrite "cannot write to socket" \
 # 5b. `localhost` raced ::1 first, as a name with a route to ::1 is: the
 #     refusal names the two the other way round.
 prove_fails "localhost raced ::1 first" localhostorder "localhost_race:" \
-  '{ sub(/return race\(host, port, loopback, timeout_ms\) if localhost\?\(host\)/, "return race(host, port, loopback.reversed, timeout_ms) if localhost?(host)"); print }'
+  '{ sub(/return race\(host.to_heap, port, loopback, timeout_ms\) if localhost\?\(host\)/, "return race(host.to_heap, port, loopback.reversed, timeout_ms) if localhost?(host)"); print }'
 # 5c. The attempt delay an hour: ::1 starts only once 127.0.0.1 has been
 #     refused, which Windows takes 2 s to do. Elsewhere the refusal is at
 #     once and the delay is never waited; std_dns_exercise.sh proves it
@@ -284,36 +289,10 @@ case "$(uname -s)" in
     echo "  SIGPIPE on a gone peer: Linux's MSG_NOSIGNAL, proved there" ;;
 esac
 
-# 7. The poller keeping one waiter per fd, as it did: the reading fiber
-#    and the writing fiber cannot both wait on the socket. The registry is
-#    the readiness pollers'; Windows' completion port parks each posted
-#    operation on its own OVERLAPPED and has no such rule to break.
-case "$(uname -s)" in
-  MINGW* | MSYS* | CYGWIN* | Windows_NT)
-    echo "  one waiter per fd: epoll's and kqueue's rule, proved there" ;;
-  *)
-mkdir -p "$WORK/onewaiter/iyi"
-cp -R "$REPO/src/iyi/." "$WORK/onewaiter/iyi/"
-awk '{ sub(/raise "two fibers #\{direction == 1 \? "reading" : "writing"\} one fd" if others & direction != 0/, "raise \"two fibers waiting on one fd\" if others != 0"); print }' \
-  "$REPO/src/iyi/concurrency.iyi" > "$WORK/onewaiter/iyi/concurrency.iyi"
-if cmp -s "$REPO/src/iyi/concurrency.iyi" "$WORK/onewaiter/iyi/concurrency.iyi"; then
-  echo "  one waiter per fd: the patch changed nothing"
-  status=1
-elif ! IYI_PATH="$WORK/onewaiter${PSEP}$REPO/src" "$IYI" build -o "$WORK/onewaiter/program" \
-     "$REPO/bench/socket_exercise.iyi" >"$WORK/onewaiter/build.log" 2>&1; then
-  echo "  one waiter per fd: the patched prelude did not build"
-  status=1
-elif timeout 60 "$WORK/onewaiter/program" >"$WORK/onewaiter/out" 2>&1; then
-  echo "  one waiter per fd: the exercise still passed, so it does not test this"
-  status=1
-elif grep -q "two fibers waiting on one fd" "$WORK/onewaiter/out"; then
-  echo "  one waiter per fd: exits at \"two fibers waiting on one fd\""
-else
-  echo "  one waiter per fd: failed, but not at the second waiter"
-  tail -2 "$WORK/onewaiter/out" | sed 's/^/    /'
-  status=1
-fi ;;
-esac
+# A socket has one task owner under TAPE_SPEC 5.1. The compile refusal
+# above replaces the old two-waiter mutation proof: that program cannot
+# be expressed with a safe socket API until it supports split endpoints.
+echo "  one waiter per fd: shared socket refused at compile time"
 
 # 11. An io wait that ends before its deadline and stays in the sleep heap:
 #     the deadline comes later and ends whatever the fiber waits on then.
@@ -353,7 +332,7 @@ fi
 prove_fails "ipv6 written uncompressed" badsix "ipv6:" \
   '{ sub(/best_size = 1$/, "best_size = 8"); print }'
 prove_fails "an IPv6 socket made as IPv4" badfamily "cannot bind socket to \[::1\]:0" \
-  '{ sub(/return \{make_sockaddr_in6\(parse_ipv6\(host\), port\), AF_INET6\}/, "return {make_sockaddr_in6(parse_ipv6(host), port), AF_INET}"); print }'
+  '{ sub(/return \{address_bytes\(parse_ipv6\(host\), port\), AF_INET6\}/, "return {address_bytes(parse_ipv6(host), port), AF_INET}"); print }'
 
 # 9. A unix listener whose close leaves its file: the path cannot be bound
 #    again.
@@ -362,7 +341,7 @@ prove_fails "a unix listener's file left behind" unixleft "cannot bind socket to
 # A unix socket that says it is not one, which std/tls would then ask the
 # port of.
 prove_fails "a unix socket taken for TCP" unixtcp "unix?: the unix ends say false" \
-  '{ sub(/^    @family == AF_UNIX$/, "    false"); print }'
+  '{ sub(/^    @state\.value\.family == AF_UNIX$/, "    false"); print }'
 
 # 10. A read whose deadline passes and which waits on regardless.
 prove_fails "a read timeout not kept" untimed "timeout: the read answered" \
@@ -372,15 +351,27 @@ prove_fails "a read timeout not kept" untimed "timeout: the read answered" \
 prove_fails "local port returns 0" badport "local_port failed:" \
   '{ sub(/\(high << 8\) \| low/, "0"); print }'
 
-# The read's buffer inlined into the frame that waits: an optimised build
-# then parks every reader on its last 4 KB.
+# Put the receive buffer in the frame that waits. Merely forcing an inline
+# no longer does that reliably: LLVM can split the two calls' stack slots.
 prove_fails "a read whose buffer waits with it" inlined_read "retain: a reader parked" \
-  '{ sub(/^  @\[NoInline\]$/, "  @[AlwaysInline]"); print }' --release
+  '/^  private def read_ready/ {
+     sub(/String \| SocketError \| Nil/, "String | SocketError | Cancelled | Nil")
+   }
+   { print }
+   /^    n = IyiSocket.__sys_recv.*pointerof\(small\)/ {
+     print "    while n < 0_i64 && IyiSocket.__sys_would_block?(n)"
+     print "      waited = IyiSocket.await_readable(@state.value.fd, IyiSocket.bound(@state.value.read_timeout_ms))"
+     print "      return waited if waited.is_a?(Cancelled)"
+     print "      return Cancelled.new if @state.value.fd < 0"
+     print "      return SocketError.timed_out(\"read from socket\") unless waited"
+     print "      n = IyiSocket.__sys_recv(@state.value.fd, pointerof(small).as(UInt8*), first.to_u64)"
+     print "    end"
+   }' --release
 
 # A socket's stream made anew at each `to_io`: the second line, already in
 # the first stream's read-ahead, is never read, and the read times out.
 prove_fails "a socket's stream made anew each time" fresh_io "stream: two lines in one write" \
-  '{ sub(/^      @io = made$/, ""); print }'
+  '{ sub(/^      @state\.value\.io = made$/, ""); print }'
 
 # A read the socket refuses taken for a clean end: `read_failed?` says no.
 prove_fails "a refused socket read taken for the end" quiet_end "stream: a timed-out read" \
@@ -392,7 +383,7 @@ prove_fails "a refused socket read taken for the end" quiet_end "stream: a timed
 case "$(uname -s)" in
   Linux)
     prove_fails "a reset dropped after a full chunk" reset_dropped "reset_after_chunk:" \
-      '{ sub(/^    @pending_error = SocketError.new\("read from socket".*$/, ""); print }'
+      '{ sub(/^    @state\.value\.pending_error = SocketError.new\("read from socket".*$/, ""); print }'
     # 13. A half-close that ends nothing: the peer waits for an end that
     #     never comes. And one that ends both halves: the answer sent
     #     after it is lost. Each patches the Linux arm, so it is measured

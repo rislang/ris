@@ -30,6 +30,31 @@ impl Error for TaskFailed
   end
 end
 
+# Task observations are copied onto the board, in publication order.
+@[OnTape]
+record BenchText, text : Str
+record BenchNumber, n : Int64
+
+def note(text : String) : Nil
+  RisBoard.post(BenchText.new(Str.build { |w| w.append(text) }))
+end
+
+def hear : String
+  event = RisBoard.take(BenchText)
+  raise "missing task observation" unless event.is_a?(BenchText)
+  event.text.to_heap
+end
+
+def number(n : Int64) : Nil
+  RisBoard.post(BenchNumber.new(n))
+end
+
+def read_number : Int64
+  event = RisBoard.take(BenchNumber)
+  raise "missing task number" unless event.is_a?(BenchNumber)
+  event.n
+end
+
 def fail(message : String) : Nil
   print "FAIL: #{message}\n"
   __iyi_exit(1)
@@ -62,20 +87,29 @@ first = ""
 group do |g|
   g.spawn do
     line = stdin.gets
-    ticks_at_read = ticks
-    first = line || ""
+    note(line || "")
+    number(0_i64)
     0
   end
   g.spawn do
     n = 0
     while n < 5
       sleep(100)
-      ticks = ticks + 1
+      number(1_i64)
       n = n + 1
     end
     0
   end
 end
+first = hear
+# A zero marks the read among the ticker's five publications.
+6.times do
+  mark = read_number
+  break if mark == 0
+  ticks = ticks + 1
+end
+ticks_at_read = ticks
+(5 - ticks).times { read_number }
 fail("a fiber reading standard input held the thread: its sibling ticked #{ticks_at_read} times while it waited") if ticks_at_read <= 0
 fail("the first line read #{first.inspect}, not the line sent") unless first == "first\n"
 puts "a fiber reading stdin parked: its sibling ticked #{ticks_at_read} times before the line came"
@@ -87,7 +121,7 @@ group do |g|
   g.spawn do
     buffer = Pointer(UInt8).malloc(64_u64)
     got = iyi_read(0, buffer.as(Void*), 64_u64)
-    saw = got.is_a?(Cancelled) ? "cancelled" : "read #{got}"
+    note(got.is_a?(Cancelled) ? "cancelled" : "read #{got}")
     got
   end
   g.spawn do
@@ -96,6 +130,7 @@ group do |g|
   end
 end
 ended = elapsed_ms(started)
+saw = hear
 fail("cancellation never reached the fiber reading stdin: it #{saw}") unless saw == "cancelled"
 fail("cancelling the fiber reading stdin took #{ended} ms, against a line two seconds away") if ended >= 1000
 second = stdin.gets
@@ -111,7 +146,7 @@ withdrawn = "not asked"
 group do |g|
   g.spawn do
     line = stdin.gets
-    withdrawn = line.nil? ? "nil" : line
+    note(line.nil? ? "nil" : line)
     0
   end
   g.spawn do
@@ -119,6 +154,7 @@ group do |g|
     TaskFailed.new
   end
 end
+withdrawn = hear
 fail("a line read cancelled before its line came answered #{withdrawn.inspect}") unless withdrawn == "nil"
 # The next line is read by another `IyiThread` while this one's scheduler
 # keeps polling, sleeping in steps until it is done.
@@ -126,7 +162,9 @@ fail("a line read cancelled before its line came answered #{withdrawn.inspect}")
 # for the line sent and 2 for anything else, through a cell both may touch.
 third_read = Atomic(Int32).new(0)
 reader = IyiThread.start do
-  third_read.set(stdin.gets == "third\n" ? 1 : 2)
+  tape do
+    third_read.set(stdin.gets == "third\n" ? 1 : 2)
+  end
   nil
 end
 polls = 0

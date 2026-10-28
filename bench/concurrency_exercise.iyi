@@ -15,6 +15,37 @@
 @[Ffi]
 import std/gc::{GC}
 
+# Task observations are copied onto the board, in publication order.
+@[OnTape]
+record BenchText, text : Str
+record BenchNumber, n : Int64
+record BenchMark, index : Int32, at : Int64
+
+def board_ready(type : T.class) : Bool forall T
+  answer = RisBoard.poll(T)
+  !answer.is_a?(Cancelled) && answer[1]
+end
+
+def note(text : String) : Nil
+  RisBoard.post(BenchText.new(Str.build { |w| w.append(text) }))
+end
+
+def hear : String
+  event = RisBoard.take(BenchText)
+  raise "missing task observation" unless event.is_a?(BenchText)
+  event.text.to_heap
+end
+
+def number(n : Int64) : Nil
+  RisBoard.post(BenchNumber.new(n))
+end
+
+def read_number : Int64
+  event = RisBoard.take(BenchNumber)
+  raise "missing task number" unless event.is_a?(BenchNumber)
+  event.n
+end
+
 def fail(message : String) : Nil
   puts "FAIL: #{message}"
   __iyi_exit(1)
@@ -94,6 +125,9 @@ record CBack, n : Int32
 record CBusy, n : Int32, quit : Bool
 record CBusyBack, n : Int32
 record CTwin, n : Int32
+record CSpin, n : Int32
+record CStop, n : Int32
+record CByte, n : Int32
 
 # ── 0. Sleepers wake in deadline order, each costing its own insertion ────
 #
@@ -111,11 +145,12 @@ group do |g|
   32000.times do |k|
     g.spawn do
       sleep(k * 7919 % 7 + 1)
-      woke << IyiScheduler.current.deadline
+      number(IyiScheduler.current.deadline)
       0
     end
   end
 end
+32000.times { woke << read_number }
 steps = IyiScheduler.sleep_steps - steps_before
 i = 1
 while i < woke.size
@@ -141,6 +176,10 @@ puts "32000 sleepers woke in deadline order, #{steps // 32000} queue steps each"
     idle.times { crowd << make_pipe }
     ping = make_pipe
     pong = make_pipe
+    ping_read = ping[0]
+    ping_write = ping[1]
+    pong_read = pong[0]
+    pong_write = pong[1]
     took = 0_i64
     group do |g|
       crowd.each do |pipe|
@@ -154,22 +193,25 @@ puts "32000 sleepers woke in deadline order, #{steps // 32000} queue steps each"
       g.spawn do
         buffer = Pointer(UInt8).malloc(1_u64)
         rounds.times do
-          iyi_read(ping[0], buffer.as(Void*), 1_u64)
-          __iyi_write(pong[1], buffer.as(Void*), 1_u64)
+          iyi_read(ping_read, buffer.as(Void*), 1_u64)
+          __iyi_write(pong_write, buffer.as(Void*), 1_u64)
         end
         0
       end
-      g.spawn do
+      runner = g.spawn do
         buffer = Pointer(UInt8).malloc(1_u64)
         buffer.value = 1_u8
         started = __iyi_monotonic_ns
         rounds.times do
-          __iyi_write(ping[1], buffer.as(Void*), 1_u64)
-          iyi_read(pong[0], buffer.as(Void*), 1_u64)
+          __iyi_write(ping_write, buffer.as(Void*), 1_u64)
+          iyi_read(pong_read, buffer.as(Void*), 1_u64)
         end
-        took = __iyi_monotonic_ns - started
-        crowd.each { |pipe| __iyi_write(pipe[1], buffer.as(Void*), 1_u64) }
-        0
+        __iyi_monotonic_ns - started
+      end
+      answer = runner.value
+      took = answer.is_a?(Int64) ? answer : -1_i64
+      crowd.each do |pipe|
+        __iyi_write(pipe[1], "x".to_unsafe.as(Void*), 1_u64)
       end
     end
     (crowd + [ping, pong]).each do |pipe|
@@ -205,7 +247,7 @@ group do |g|
     round = 0
     while round < 3
       RisBoard.take(CPing)
-      order = order + "a"
+      note("a")
       RisBoard.post(CPong.new(1))
       round = round + 1
     end
@@ -214,7 +256,7 @@ group do |g|
   g.spawn do
     round = 0
     while round < 3
-      order = order + "b"
+      note("b")
       RisBoard.post(CPing.new(1))
       RisBoard.take(CPong)
       round = round + 1
@@ -223,6 +265,7 @@ group do |g|
   end
 end
 
+6.times { order = order + hear }
 fail("interleaving: expected bababa, got #{order}") unless order == "bababa"
 puts "interleaved: #{order}"
 
@@ -233,20 +276,25 @@ puts "interleaved: #{order}"
 # that stalls cannot fail it however slow it is - the elapsed time this was
 # once held to, under 260 ms for two 150 ms sleeps, was 529 ms once on a
 # Windows runner, where a Windows machine ran the same build in 150. The
-# marks are written to the heap as they are taken, so none of them is a
-# register carried across a fiber switch.
+# marks are copied onto the board as they are taken, so none of them is
+# a register carried across a fiber switch.
 marks = [0_i64, 0_i64, 0_i64, 0_i64]
 group do |g|
   g.spawn do
-    marks[0] = __iyi_monotonic_ns
+    RisBoard.post(BenchMark.new(0, __iyi_monotonic_ns))
     sleep(150)
-    marks[1] = __iyi_monotonic_ns
+    RisBoard.post(BenchMark.new(1, __iyi_monotonic_ns))
   end
   g.spawn do
-    marks[2] = __iyi_monotonic_ns
+    RisBoard.post(BenchMark.new(2, __iyi_monotonic_ns))
     sleep(150)
-    marks[3] = __iyi_monotonic_ns
+    RisBoard.post(BenchMark.new(3, __iyi_monotonic_ns))
   end
+end
+4.times do
+  mark = RisBoard.take(BenchMark)
+  raise "missing overlap observation" unless mark.is_a?(BenchMark)
+  marks[mark.index] = mark.at
 end
 unless marks[0] < marks[3] && marks[2] < marks[1]
   fail("overlap: two 150 ms sleeps ran one after the other, which is sequential")
@@ -261,7 +309,7 @@ victim_saw = ""
 group do |g|
   victim = g.spawn do
     slept = sleep(10000)
-    victim_saw = slept.is_a?(Cancelled) ? "cancelled" : "slept"
+    note(slept.is_a?(Cancelled) ? "cancelled" : "slept")
     slept
   end
   g.spawn do
@@ -270,6 +318,7 @@ group do |g|
   end
 end
 cancelled_after = elapsed_ms(started)
+victim_saw = hear
 fail("cancellation never reached the sleeping task") unless victim_saw == "cancelled"
 fail("cancellation took #{cancelled_after} ms against a 10 s sleep") if cancelled_after >= 5000
 puts "a failing task cancelled a sibling blocked in sleep, in #{cancelled_after} ms"
@@ -286,7 +335,7 @@ drained = ""
 group do |g|
   g.spawn do
     outcome = two_naps
-    drained = outcome.is_a?(Cancelled) ? "propagated" : "finished"
+    note(outcome.is_a?(Cancelled) ? "propagated" : "finished")
     outcome
   end
   g.spawn do
@@ -294,6 +343,7 @@ group do |g|
     TaskFailed.new
   end
 end
+drained = hear
 fail("`!` did not propagate Cancelled out of the task body") unless drained == "propagated"
 fail("draining a cancelled task took #{elapsed_ms(started)} ms") if elapsed_ms(started) >= 5000
 puts "a cancelled task drained through `!`"
@@ -306,20 +356,20 @@ io_order = ""
 
 group do |g|
   g.spawn do
-    io_order = io_order + "parked,"
+    note("parked,")
     buffer = Pointer(UInt8).malloc(1_u64)
     got = iyi_read(read_fd, buffer.as(Void*), 1_u64)
     case got
     in Int64
-      io_order = io_order + "read:#{buffer.value.to_i64}"
+      note("read:#{buffer.value.to_i64}")
     in Cancelled
-      io_order = io_order + "cancelled"
+      note("cancelled")
     end
     0
   end
   g.spawn do
     sleep(40)
-    io_order = io_order + "wrote,"
+    note("wrote,")
     byte = Pointer(UInt8).malloc(1_u64)
     byte.value = 7_u8
     __iyi_write(write_fd, byte.as(Void*), 1_u64)
@@ -327,6 +377,7 @@ group do |g|
   end
 end
 
+3.times { io_order = io_order + hear }
 fail("poller: expected parked,wrote,read:7 — got #{io_order}") unless io_order == "parked,wrote,read:7"
 puts "a read parked in the poller and a sleeping writer woke it"
 
@@ -338,25 +389,29 @@ puts "a read parked in the poller and a sleeping writer woke it"
 # and then reads, so there the cancelled wait leaves them in the pipe.
 # Either keeps them; neither writes into a buffer after its call is over.
 kept_fds = make_pipe
-kept_answer = "not asked"
-kept = Pointer(UInt8).malloc(4_u64)
-group do |g|
-  g.spawn do
-    got = iyi_read(kept_fds[0], kept.as(Void*), 3_u64)
-    kept_answer = got.is_a?(Cancelled) ? "cancelled" : "#{got} bytes"
-    0
+kept_read = kept_fds[0]
+kept_write = kept_fds[1]
+kept_result = group do |g|
+  reader = g.spawn do
+    kept = Pointer(UInt8).malloc(4_u64)
+    got = iyi_read(kept_read, kept.as(Void*), 3_u64)
+    {got.is_a?(Cancelled) ? "cancelled" : "#{got} bytes", kept}
   end
   g.spawn do
     sleep(20)
-    __iyi_write(kept_fds[1], "abc".to_unsafe.as(Void*), 3_u64)
+    __iyi_write(kept_write, "abc".to_unsafe.as(Void*), 3_u64)
     TaskFailed.new
   end
+  reader.value.or_panic
 end
+# The task is done: its result hands the heap fixture back for inspection.
+kept_answer = kept_result[0]
+kept = kept_result[1]
 kept_at_answer = "#{kept[0]},#{kept[1]},#{kept[2]}"
 kept_left = 0_i64
-if wait_readable(kept_fds[0].to_i32, 300) == true
+if wait_readable(kept_read.to_i32, 300) == true
   rest = Pointer(UInt8).malloc(4_u64)
-  more = iyi_read(kept_fds[0], rest.as(Void*), 3_u64)
+  more = iyi_read(kept_read, rest.as(Void*), 3_u64)
   kept_left = more if more.is_a?(Int64)
 end
 kept_later = "#{kept[0]},#{kept[1]},#{kept[2]}"
@@ -456,17 +511,18 @@ group do |g|
   end
   g.spawn do
     v = slow_task.value
-    readers = readers + ",a:#{v.is_a?(Int32) ? v : -1}"
+    note(",a:#{v.is_a?(Int32) ? v : -1}")
     0
   end
   g.spawn do
     v = slow_task.value
-    readers = readers + ",b:#{v.is_a?(Int32) ? v : -1}"
+    note(",b:#{v.is_a?(Int32) ? v : -1}")
     0
   end
   v = slow_task.value
-  readers = readers + "owner:#{v.is_a?(Int32) ? v : -1}"
+  note("owner:#{v.is_a?(Int32) ? v : -1}")
 end
+3.times { readers = readers + hear }
 fail("readers: expected owner:42,a:42,b:42 — got #{readers}") unless readers == "owner:42,a:42,b:42"
 broken_readers = ""
 group do |g|
@@ -478,11 +534,12 @@ group do |g|
   2.times do
     g.spawn do
       v = failing_task.value
-      broken_readers = broken_readers + (v.is_a?(Panicked) ? "P" : "?")
+      note(v.is_a?(Panicked) ? "P" : "?")
       0
     end
   end
 end
+2.times { broken_readers = broken_readers + hear }
 fail("readers of a panicked task saw #{broken_readers}") unless broken_readers == "PP"
 puts "three fibers read one task's value, and two read a panicked one's"
 
@@ -493,14 +550,13 @@ puts "three fibers read one task's value, and two read a panicked one's"
 # reader of an outer group's task held its failed group until that task
 # ended, 6 s here against a 5 s bound, and with an outer task waiting on
 # the inner group's end the program died "deadlock".
-def read_outer(outer_task : IyiTask(Int32), log : Array(String)) : Int32
-  defer log << "reader's defer ran"
+def read_outer(outer_task : IyiTask(Int32)) : Int32
+  defer note("reader's defer ran")
   got = outer_task.value
-  log << "reader read #{got.is_a?(Int32) ? got : -1}"
+  note("reader read #{got.is_a?(Int32) ? got : -1}")
   0
 end
 
-reader_log = [] of String
 reader_said = ""
 inner_ms = 0_i64
 started = __iyi_monotonic_ns
@@ -510,7 +566,7 @@ group do |g|
     7
   end
   group do |h|
-    reader = h.spawn { read_outer(outer_task, reader_log) }
+    reader = h.spawn { read_outer(outer_task) }
     h.spawn do
       sleep(20)
       TaskFailed.new
@@ -522,26 +578,25 @@ group do |g|
   RisBoard.post(CRelease.new(1))
 end
 fail("a cancelled reader of an outer task held its group #{inner_ms} ms") if inner_ms >= 5000
-heard_reader = reader_log.join(", ")
+heard_reader = hear
 fail("a cancelled reader of an outer task: #{heard_reader}; its handle said #{reader_said}") unless heard_reader == "reader's defer ran" && reader_said == "a task stopped by its cancellation has no value"
 puts "a cancel stopped a task reading an outer group's task, under 5 s, and its defer ran"
 
 # ── 8. The join is deferred: an early return cannot leak a task ─────────
-def leaves_early(finished : Pointer(Int32)) : Nil
+def leaves_early : Nil
   group do |g|
     g.spawn do
       sleep(30)
-      finished.value = 1
+      number(1_i64)
       0
     end
     return
   end
 end
 
-flag = Pointer(Int32).malloc(4_u64)
-flag.value = 0
-leaves_early(flag)
-fail("a `return` out of the group block left its task running") unless flag.value == 1
+leaves_early
+flag = read_number
+fail("a `return` out of the group block left its task running") unless flag == 1
 puts "an early return still joined the group"
 
 # ── 8b. A group left early, or cancelled from outside, cancels its tasks ─
@@ -563,10 +618,10 @@ def refusal(fails : Bool) : Int32 | TaskFailed
   0
 end
 
-def leave_by_return(log : Array(String)) : Int32
+def leave_by_return : Int32
   group do |g|
     g.spawn do
-      log << "return " + napped(10000)
+      note("return " + napped(10000))
       0
     end
     return 5
@@ -574,10 +629,10 @@ def leave_by_return(log : Array(String)) : Int32
   0
 end
 
-def leave_by_bang(log : Array(String)) : Int32 | TaskFailed
+def leave_by_bang : Int32 | TaskFailed
   group do |g|
     g.spawn do
-      log << "! " + napped(10000)
+      note("! " + napped(10000))
       0
     end
     refusal(true)!
@@ -585,11 +640,11 @@ def leave_by_bang(log : Array(String)) : Int32 | TaskFailed
   0
 end
 
-def typed_inner(log : Array(String)) : Tuple(String, Int32) | Cancelled | Panicked
+def typed_inner : Tuple(String, Int32) | Cancelled | Panicked
   group do |h|
     a = h.spawn do
       saw = napped(10000)
-      log << "typed " + saw
+      note("typed " + saw)
       saw
     end
     b = h.spawn { 2 }
@@ -598,16 +653,17 @@ end
 
 early = [] of String
 started = __iyi_monotonic_ns
-fail("a `return 5` out of a group block answered something else") unless leave_by_return(early) == 5
-fail("a `!` out of a group block did not leave as the error") unless leave_by_bang(early).is_a?(TaskFailed)
+fail("a `return 5` out of a group block answered something else") unless leave_by_return == 5
+fail("a `!` out of a group block did not leave as the error") unless leave_by_bang.is_a?(TaskFailed)
 group do |g|
   g.spawn do
-    early << "break " + napped(10000)
+    note("break " + napped(10000))
     0
   end
   break
 end
 fail("leaving a group block early took #{elapsed_ms(started)} ms beside 10 s sleeps") if elapsed_ms(started) >= 5000
+3.times { early << hear }
 fail("leaving a group block early did not cancel its task: #{early}") unless early == ["return cancelled", "! cancelled", "break cancelled"]
 puts "a block left by `return`, `!` or `break` cancelled its sleeping task, under 5 s"
 
@@ -617,22 +673,22 @@ group do |g|
   g.spawn do
     group do |h|
       h.spawn do
-        outer << "joined " + napped(10000)
+        note("joined " + napped(10000))
         0
       end
     end
     0
   end
   g.spawn do
-    answered = typed_inner(outer)
-    outer << "typed answered " + (answered.is_a?(Tuple(String, Int32)) ? answered[0] : "an error")
+    answered = typed_inner
+    note("typed answered " + (answered.is_a?(Tuple(String, Int32)) ? answered[0] : "an error"))
     0
   end
   g.spawn do
-    outer << "owner " + napped(10000)
+    note("owner " + napped(10000))
     group do |h|
       h.spawn do
-        outer << "started late " + napped(10000)
+        note("started late " + napped(10000))
         0
       end
     end
@@ -644,6 +700,7 @@ group do |g|
   end
 end
 fail("a failing group took #{elapsed_ms(started)} ms to stop its grandchildren") if elapsed_ms(started) >= 5000
+5.times { outer << hear }
 heard = outer.sorted.join(", ")
 unless heard == "joined cancelled, owner cancelled, started late cancelled, typed answered cancelled, typed cancelled"
   fail("a cancel did not reach a task's own group: #{heard}")
@@ -658,10 +715,11 @@ group do |g|
   g.spawn { TaskFailed.new }
   sleep(10)
   g.spawn do
-    late_saw = napped(10000)
+    note(napped(10000))
     0
   end
 end
+late_saw = hear
 fail("a task spawned on a failed group #{late_saw}, and the group took #{elapsed_ms(started)} ms") unless late_saw == "cancelled" && elapsed_ms(started) < 5000
 puts "a task spawned on a group after its failure started cancelled, under 5 s"
 
@@ -670,10 +728,10 @@ puts "a task spawned on a group after its failure started cancelled, under 5 s"
 # a `defer`'s own group - its block finished, nothing failed in it - had
 # its 30 ms sleep answer `Cancelled`, where the same cleanup run on a
 # normal return slept it.
-def cleanup_naps(log : Array(String)) : Nil
+def cleanup_naps : Nil
   group do |h|
     h.spawn do
-      log << napped(30)
+      note(napped(30))
       0
     end
   end
@@ -682,12 +740,13 @@ end
 cleanup_log = [] of String
 group do |g|
   t = g.spawn do
-    defer cleanup_naps(cleanup_log)
+    defer cleanup_naps
     raise "a task whose cleanup opens a group panicked, as it was meant to"
     0
   end
   t.value
 end
+cleanup_log << hear
 fail("a group a panicking task's cleanup opened: #{cleanup_log}") unless cleanup_log == ["slept"]
 puts "a group a cleanup opens on a panic's path ran its task uncancelled"
 
@@ -896,14 +955,15 @@ theirs = [-1.25, -2.25, -3.25, -4.25, -5.25, -6.25, -7.25, -8.25, -9.25, -10.25]
 changed = 0
 group do |g|
   g.spawn do
-    changed = changed + hold_doubles(mine, 1000, true)
+    number(hold_doubles(mine, 1000, true).to_i64)
     0
   end
   g.spawn do
-    changed = changed + hold_doubles(theirs, 1000, false)
+    number(hold_doubles(theirs, 1000, false).to_i64)
     0
   end
 end
+changed = read_number + read_number
 fail("switch: #{changed} checks found a double changed across a fiber switch") if changed != 0
 puts "ten doubles each, held by two fibers across 2,000 switches, unchanged"
 
@@ -918,11 +978,12 @@ burst_tops = [] of UInt64
 group do |g|
   2000.times do
     g.spawn do
-      burst_tops << IyiScheduler.current.stack_top
+      number(IyiScheduler.current.stack_top.to_i64)
       0
     end
   end
 end
+2000.times { burst_tops << read_number.to_u64 }
 burst_distinct = [] of UInt64
 burst_tops.each { |top| burst_distinct << top unless burst_distinct.includes?(top) }
 fail("burst: #{burst_tops.size} of 2000 tasks ran") if burst_tops.size != 2000
@@ -938,40 +999,39 @@ puts "2000 spawned tasks ran on #{burst_distinct.size} stacks"
 # 200 ms bound, generous for the emulated arm; a wait that starves runs
 # into the loops' own 2 s cap instead, and is named.
 spin_started = __iyi_monotonic_ns
-spin_flag = false
 spin_seen = -1_i64
 group do |g|
   g.spawn do
     sleep(10)
-    spin_flag = true
+    RisBoard.post(CSpin.new(1))
     0
   end
   g.spawn do
     spins = 0
-    while !spin_flag
+    while !board_ready(CSpin)
       spins = spins + 1
       break if spins % 1024 == 0 && elapsed_ms(spin_started) >= 2000
       sleep(0)
     end
-    spin_seen = elapsed_ms(spin_started)
+    number(elapsed_ms(spin_started))
     0
   end
 end
+spin_seen = read_number
 fail("starvation: a 10 ms sleeper beside a sleep(0) loop woke after #{spin_seen} ms, over the 200 ms bound") if spin_seen >= 200
 
-busy_stop = false
 busy_started = __iyi_monotonic_ns
 busy_woke = -1_i64
 group do |g|
   g.spawn do
     sleep(50)
-    busy_woke = elapsed_ms(busy_started)
-    busy_stop = true
+    number(elapsed_ms(busy_started))
+    RisBoard.post(CStop.new(1))
     0
   end
   g.spawn do
     rounds = 0
-    while !busy_stop
+    while !board_ready(CStop)
       RisBoard.post(CBusy.new(rounds, false))
       RisBoard.take(CBusyBack)
       rounds = rounds + 1
@@ -990,34 +1050,36 @@ group do |g|
     0
   end
 end
+busy_woke = read_number
 fail("starvation: a 50 ms sleeper beside a channel ping-pong woke after #{busy_woke} ms, over the 200 ms bound") if busy_woke >= 200
 
 busy_fds = make_pipe
-byte_seen = false
-byte_started = __iyi_monotonic_ns
+busy_read = busy_fds[0]
+busy_write = busy_fds[1]
 byte_after = -1_i64
 group do |g|
   g.spawn do
     buffer = Pointer(UInt8).malloc(1_u64)
-    iyi_read(busy_fds[0], buffer.as(Void*), 1_u64)
-    byte_seen = true
+    iyi_read(busy_read, buffer.as(Void*), 1_u64)
+    RisBoard.post(CByte.new(1))
     0
   end
   g.spawn do
     byte = Pointer(UInt8).malloc(1_u64)
     byte.value = 9_u8
-    byte_started = __iyi_monotonic_ns
-    __iyi_write(busy_fds[1], byte.as(Void*), 1_u64)
+    writing_started = __iyi_monotonic_ns
+    __iyi_write(busy_write, byte.as(Void*), 1_u64)
     spins = 0
-    while !byte_seen
+    while !board_ready(CByte)
       spins = spins + 1
-      break if spins % 1024 == 0 && elapsed_ms(byte_started) >= 2000
+      break if spins % 1024 == 0 && elapsed_ms(writing_started) >= 2000
       sleep(0)
     end
-    byte_after = elapsed_ms(byte_started)
+    number(elapsed_ms(writing_started))
     0
   end
 end
+byte_after = read_number
 fail("starvation: a byte written to a pipe beside a sleep(0) loop was read after #{byte_after} ms, over the 200 ms bound") if byte_after >= 200
 puts "a sleep(0) loop and a channel ping-pong let a sleeper and a pipe's reader in, under the 200 ms bound"
 
@@ -1036,10 +1098,11 @@ group do |g|
   end
   g.spawn do
     value = twin.value
-    held = value.is_a?(Int32) ? value : -1
+    number((value.is_a?(Int32) ? value : -1).to_i64)
     0
   end
 end
+held = read_number
 twin = CTwin.new(7)
 passed = 0
 group do |g|
@@ -1049,10 +1112,11 @@ group do |g|
   end
   g.spawn do
     value = RisBoard.take(CTwin)
-    passed = value.is_a?(CTwin) ? value.n : -1
+    number((value.is_a?(CTwin) ? value.n : -1).to_i64)
     0
   end
 end
+passed = read_number
 fail("a block's own task handle read #{held} and the later value passed #{passed}, not 41 and 7") unless held == 41 && passed == 7
 [2].each do |n|
   named = n
