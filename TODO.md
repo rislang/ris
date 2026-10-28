@@ -21,9 +21,11 @@ How to work (fewer tokens, faster to the goal):
 
 ## Messages: RisBoard (TAPE_SPEC 5.2, 5.6; doc/MESSAGES.md)
 
-Order, fastest with fewest tokens: one Sol low run per item, fixes
-resumed in the same session, one full check per item, all in this
-checkout. Pipe is an OS pipe on Linux and macOS (Channel elsewhere).
+All work in this checkout, one full check per item; Codex is out of
+usage until 2026-11-02. Pipe is an OS pipe on Linux and macOS (Channel
+elsewhere). Done: HTTP/2 1 MiB POST, websocket bare copy, autocert part
+A, OS pipe, socket race without Channel. Next in order: captures, then
+autocert part B, then Channel/select removal.
 
 * Give a task-owned Conn an owner-level buffer growth path: growth in a
   nested tape block ends with the block, so TLS/HTTP/2 connections stay
@@ -48,7 +50,11 @@ checkout. Pipe is an OS pipe on Linux and macOS (Channel elsewhere).
   including real TLS deadline/parallel-server cases, Pebble, restarts and
   mutation checks. Preserve the policy probe's copied board observations;
   its Counter is no longer captured by the listener task.
-* Remove Channel/select after all replacement gates pass. Gate: no
+* Remove Channel/select after all replacement gates pass. Users left:
+  std/io.iyi's pipe fallback (other targets: refuse, or poller pipe);
+  bench parallel, collect_trigger, std_mutex.sh, root, thread, metric,
+  concurrency, runtime, std_http_exercise.sh; test/ris channel_bounded,
+  fibers/spares, fibers/many, contract_suspend and check.sh. Gate: no
   remaining users, full check, std/samples tests and --no-gc link audit.
 
 ## Next
@@ -118,6 +124,9 @@ checkout. Pipe is an OS pipe on Linux and macOS (Channel elsewhere).
 * .iyimod artifacts drop @[OnTape] on types: a build from std artifacts
   refuses File::Info's Str fields (bench/std_websocket_exercise.sh,
   "does not run the same from its artifacts").
+* bench/socket_exercise.sh ends "something above failed": several
+  mutations are not caught and a unix-socket mutation fails with "the
+  address is in use". Race checks pass; compare with 05b93f1e2.
 * The mutation phases of std_acme, cookie, router, sse and websocket
   .sh run past 20 minutes; check whether they finish at all.
 
