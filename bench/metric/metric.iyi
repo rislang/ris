@@ -4,7 +4,7 @@ module metric
 # which checks its own answer against the one the Crystal program prints.
 # `bench/metric_port.sh` builds it and requires every answer, which makes it
 # a whole-library correctness check - float printing, `Random`, BigInt,
-# regex, JSON, Complex, channels - as much as a benchmark.
+# regex, JSON, Complex, board messages - as much as a benchmark.
 #
 #   iyi build --release -o metric metric.iyi && ./metric
 #   ./metric Brainfuck2
@@ -1370,74 +1370,36 @@ end
 # ---------------------------------------------------------------------------
 # Threadring
 #
-# Crystal spawns 503 fibers that never end and lets the program exit under
-# them. A task here belongs to a `group` and the group's `end` joins it, so
-# the ring's mailboxes are closed once the answer is in and every loop leaves
-# on `ChannelClosed`.
+# Crystal spawns 503 fibers that never end and passes a token around them
+# through one mailbox each. The board has one queue per message type, not
+# per receiver, so the token names its holder: 503 tasks take tokens in
+# turn and pass each on to the next name, and the one that takes the token
+# at zero posts its name as the answer, then one quit per task ends them.
 # ---------------------------------------------------------------------------
 THREAD_COUNT = 503
 
-class Receiver
-  @name : Int32
-  @res : Channel(Int32)
-  @mailbox : Channel(Int32)
-  @next : Receiver?
+record RingToken, holder : Int32, count : Int32, quit : Bool
+record RingAnswer, name : Int32
 
-  def initialize(name : Int32, res : Channel(Int32))
-    @name = name
-    @res = res
-    @mailbox = Channel(Int32).new
-    @next = nil
-  end
-
-  def set_next(n : Receiver) : Nil
-    @next = n
-  end
-
-  def put(msg : Int32) : Nil
-    @mailbox.send(msg)
-    nil
-  end
-
-  def close_mailbox : Nil
-    @mailbox.close
-  end
-
-  def messageloop : Nil
-    while true
-      msg = @mailbox.receive
-      if msg.is_a?(Int32)
-        if msg == 0
-          @res.send(@name)
-        else
-          nxt = @next
-          nxt.put(msg - 1) unless nxt.nil?
-        end
-      else
-        break
-      end
+def ring_loop : Nil
+  while true
+    token = RisBoard.take(RingToken)
+    break unless token.is_a?(RingToken)
+    break if token.quit
+    if token.count == 0
+      RisBoard.post(RingAnswer.new(token.holder))
+    else
+      RisBoard.post(RingToken.new(token.holder % THREAD_COUNT + 1, token.count - 1, false))
     end
   end
 end
 
 class Threadring
   @n : Int32
-  @res : Channel(Int32)
-  @receivers : Array(Receiver)
   @result : Int32
 
   def initialize(n : Int32)
     @n = n
-    @res = Channel(Int32).new
-    rs = Channel(Int32).new
-    @res = rs
-    @receivers = Array.new(THREAD_COUNT) { |i| Receiver.new(i + 1, rs) }
-    i = 0
-    while i < THREAD_COUNT - 1
-      @receivers[i].set_next(@receivers[i + 1])
-      i = i + 1
-    end
-    @receivers[THREAD_COUNT - 1].set_next(@receivers[0])
     @result = 0
   end
 end
@@ -1448,22 +1410,20 @@ impl Bench for Threadring
   end
 
   def run : Nil
-    receivers = @receivers
-    res = @res
     n = @n
-    group do |g|
-      THREAD_COUNT.times do |i|
+    answer = group do |g|
+      THREAD_COUNT.times do
         g.spawn do
-          receivers[i].messageloop
+          ring_loop
           0
         end
       end
-      receivers[0].put(n)
-      answer = res.receive
-      @result = answer.is_a?(Int32) ? answer : -1
-      receivers.each { |r| r.close_mailbox }
-      0
+      RisBoard.post(RingToken.new(1, n, false))
+      got = RisBoard.take(RingAnswer)
+      THREAD_COUNT.times { RisBoard.post(RingToken.new(0, 0, true)) }
+      got.is_a?(RingAnswer) ? got.name : -1
     end
+    @result = answer
     nil
   end
 

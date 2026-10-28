@@ -111,9 +111,10 @@ esac
 # 5. Failure proof: deadlock
 step "failure proof: deadlock is a diagnosis, not a hang"
 cat > deadlock.iyi <<'IYI'
-channel = Channel(Int32).new(1)
-value = channel.receive
-puts value.is_a?(Int32)
+record Never, n : Int32
+
+value = RisBoard.take(Never)
+puts value.is_a?(Never)
 IYI
 if ! "$IYI" build deadlock.iyi -o deadlock > build-deadlock.log 2>&1; then
   echo "deadlock probe failed to build:"

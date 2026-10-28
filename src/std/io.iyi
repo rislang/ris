@@ -151,8 +151,8 @@ class ::IyiIO
       fds = Std::Io::PipeSys.make
       {Std::Io::PipeReader.new(fds[0]), Std::Io::PipeWriter.new(fds[1])}
     {% else %}
-      channel = Channel(String).new(16)
-      {Std::Io::PipeReader.new(channel), Std::Io::PipeWriter.new(channel)}
+      raise "IyiIO.pipe is only on Linux and macOS"
+      {Std::Io::PipeReader.new, Std::Io::PipeWriter.new}
     {% end %}
   end
 end
@@ -294,80 +294,45 @@ end
     end
   end
 {% else %}
-# The reading end of `IyiIO.pipe`.
+# Other targets have no pipe yet: `IyiIO.pipe` panics there, and these
+# ends exist only so code that names them typechecks everywhere.
 pub class PipeReader < IyiIO
-  @channel : Channel(String)
-  # The piece being read, and how much of it is read.
-  @piece : String
-  @taken : Int32
-
-  def initialize(@channel : Channel(String))
+  def initialize
     super(-1_i64, 4096, false)
-    @piece = ""
-    @taken = 0
   end
 
-  # A cancelled wait is withdrawn (-2), not the end: the next read waits
-  # again.
   private def low_level_read(target_fd : Int64, buffer : Void*, count : UInt64) : Int64
-    while @taken >= @piece.bytesize
-      got = @channel.receive
-      return 0_i64 if got.is_a?(ChannelClosed)
-      return -2_i64 if got.is_a?(Cancelled)
-      @piece = got
-      @taken = 0
-    end
-    left = @piece.bytesize - @taken
-    moved = count < left.to_u64 ? count.to_i64.to_i32 : left
-    buffer.as(Pointer(UInt8)).copy_from(@piece.to_unsafe + @taken, moved)
-    @taken = @taken + moved
-    moved.to_i64
+    raise "IyiIO.pipe is only on Linux and macOS" if count >= 0_u64
+    -1_i64
   end
 
-  # A panic under a condition that always holds, then a value of the
-  # declared type: a body that is only a panic is NoReturn, the type its
-  # machine code is named by, and a build from std/io's artifact names the
-  # call by the declared one (as std/user's lookups do; SPEC.md IV.1g).
   private def low_level_write(target_fd : Int64, buffer : Void*, count : UInt64) : Int64
     raise "a pipe's reader is not written to" if count >= 0_u64
     -1_i64
   end
 
   private def low_level_close(target_fd : Int64) : Nil
-    @channel.close
   end
 end
 
-# The writing end of `IyiIO.pipe`: every write is sent at once.
 pub class PipeWriter < IyiIO
-  @channel : Channel(String)
-
-  def initialize(@channel : Channel(String))
+  def initialize
     super(-1_i64, 4096, true)
   end
 
-  # A write is a stream's, which has no error to answer: one the pipe
-  # refuses panics, saying why, as a write to a closed descriptor does.
   private def low_level_write(target_fd : Int64, buffer : Void*, count : UInt64) : Int64
-    size = count.to_i64.to_i32
-    piece = String.new(size) { |target| target.copy_from(buffer.as(Pointer(UInt8)), size) }
-    sent = @channel.send(piece)
-    return count.to_i64 if sent.nil?
-    raise "a write to a pipe whose reader is closed" if sent.is_a?(ChannelClosed)
-    raise "a write to a full pipe, its task cancelled while it waited"
+    raise "IyiIO.pipe is only on Linux and macOS" if count >= 0_u64
+    -1_i64
   end
 
-  # As the reader's write: a panic, and the declared type.
   private def low_level_read(target_fd : Int64, buffer : Void*, count : UInt64) : Int64
     raise "a pipe's writer is not read from" if count >= 0_u64
     -1_i64
   end
 
   private def low_level_close(target_fd : Int64) : Nil
-    @channel.close
   end
 end
-
 {% end %}
 
 # An `IyiIO` over bytes in memory. Writes land at the cursor and grow the

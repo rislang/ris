@@ -29,14 +29,6 @@ expect() {
   fi
 }
 
-# Buffered channels stay bounded, including wakes and cancelled receives.
-out=$("$RIS" run test/ris/channel_bounded.ri 2>&1)
-if [ "$?" -eq 0 ] && [ "$out" = 'PASS: bounded channels' ]; then
-  echo "runs     channel_bounded (full waits, cancellation, close, rendezvous)"
-else
-  echo "FAILED   channel_bounded: $out"; status=1
-fi
-
 # Workers consume in-band quits and fail bounded posts without spinning.
 out=$(RIS="$RIS" python3 test/ris/workers_check.py 2>&1)
 if [ "$?" -eq 0 ]; then
@@ -73,6 +65,8 @@ expect board_owner 'send Str, Ary bytes or a value struct'
 expect task_capture_mutable 'pass a Copyable value through RisBoard'
 expect task_capture_assigned 'a mutable borrow across tasks'
 expect task_handoff_reused 'the task owns it now'
+expect select_gone 'ris has no select'
+expect channel_gone 'undefined constant Channel'
 
 # Timed joins broadcast completion without cancelling the retained task.
 for mode in gc no-gc; do
@@ -130,17 +124,6 @@ if [ "$?" -eq 0 ] && grep -qxF 'PASS: pipe writer waits' <<<"$out"; then
   echo "runs     pipe_wait (OS pipe: writer waits, order, closed reader)"
 else
   echo "FAILED   pipe_wait: $out"; status=1
-fi
-
-# Channel storage remains heap-backed until the typed-pool migration.
-# Keep the no-GC refusal: this semantic slice must add no exemption.
-out=$("$RIS" run --no-gc test/ris/channel_bounded.ri 2>&1)
-if [ "$?" -ne 0 ] &&
-    grep -qF 'ris: heap allocation with --no-gc:' <<<"$out" &&
-    grep -qF 'Channel(Int32).class' <<<"$out"; then
-  echo "refused  channel_bounded (--no-gc heap storage)"
-else
-  echo "FAILED   channel_bounded no-GC refusal: $out"; status=1
 fi
 
 # Metadata paths, IDs and missing-file diagnostics stay on tape.
@@ -466,8 +449,7 @@ else
   status=1
 fi
 
-for name in text_parameter text_array text_capture \
-            text_channel; do
+for name in text_parameter text_array text_capture; do
   expect "$name" '.to_heap'
 done
 expect text_local_field \

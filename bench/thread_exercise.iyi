@@ -17,6 +17,15 @@
 # removes the thread-root walk from a copy of the prelude to prove the
 # live-list check fails by name.
 
+# Rendezvous between a fiber and its spawner, on the board (TAPE_SPEC 5.2).
+record BenchReady, code : Int32
+record BenchRelease, code : Int32
+record BenchVerdict, code : Int32
+
+def board_code(got : BenchReady | BenchRelease | BenchVerdict | Cancelled) : Int32
+  got.is_a?(Cancelled) ? -1 : got.code
+end
+
 {% if !flag?(:gc_none) && !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64))) %}
   def fail(message : String) : Nil
     print "FAIL: #{message}\n"
@@ -199,25 +208,22 @@
     # the only reference to an object while the thread's main fiber
     # churns, which is the fiber root walk on a thread whose main fiber
     # has a top of its own.
-    ready = Channel(Int32).new
-    release = Channel(Int32).new
-    verdict = Channel(Int32).new
     group do |g|
       g.spawn do
         kept = Ledger.new(100)
         keep = build_list(100, seed &+ 7000_u64, kept)
         sum = checksum(keep)
-        ready.send(1)
-        release.receive
+        RisBoard.post(BenchReady.new(1))
+        RisBoard.take(BenchRelease)
         bad = 0
         bad = 1 if kept.freed != 0_i64 || checksum(keep) != sum
-        verdict.send(bad)
+        RisBoard.post(BenchVerdict.new(bad))
         0
       end
-      ready.receive
+      RisBoard.take(BenchReady)
       churn(40000)
-      release.send(1)
-      fail("thread #{seed.to_i64}: a parked fiber's list did not survive the thread's churn") if verdict.receive != 0
+      RisBoard.post(BenchRelease.new(1))
+      fail("thread #{seed.to_i64}: a parked fiber's list did not survive the thread's churn") if board_code(RisBoard.take(BenchVerdict)) != 0
     end
     fail("thread #{seed.to_i64}: the live list's checksum changed after the fibers") if checksum(list) != expected
     Tally.verified.value.add(1_u64)

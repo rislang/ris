@@ -1,0 +1,5 @@
+# ris has no select: RisBoard.take(T, ms) waits for one message.
+select
+when timeout_select_action(1)
+  puts "late"
+end

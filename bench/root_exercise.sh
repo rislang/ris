@@ -495,24 +495,22 @@ echo
 echo "== the main stack is found past thousands of task stacks"
 cat > "$WORK/tasks.iyi" <<'IYI'
 IyiMark.auto = false
-parked = Channel(Int32).new
-seen = 0
-group do |g|
+record Wake, n : Int32
+
+seen = group do |g|
   3000.times do
     g.spawn do
-      case parked.receive
-      in Int32         then it
-      in ChannelClosed then 0
-      in Cancelled     then 0
-      end
+      got = RisBoard.take(Wake)
+      got.is_a?(Wake) ? got.n : 0
     end
   end
-  g.spawn do
+  collector = g.spawn do
     IyiMark.collect
-    seen = 1
-    parked.close
-    0
+    3000.times { RisBoard.post(Wake.new(0)) }
+    1
   end
+  got = collector.value
+  got.is_a?(Int32) ? got : 0
 end
 puts "tasks: 3000 parked, a collection after them, and it found the main stack (#{seen})"
 IYI

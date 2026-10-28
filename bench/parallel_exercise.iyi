@@ -9,8 +9,8 @@
 # than one of them, and each stays on the thread that started it across
 # every park; a thousand of them run exactly once each; workers that run
 # out steal what another worker's tasks spawned; values cross threads
-# through channels exactly once and in each sender's order; a cancel
-# reaches a task asleep or parked on a channel on another thread, and a
+# on the board exactly once and in each sender's order; a cancel
+# reaches a task asleep or parked on a board take on another thread, and a
 # task still waiting in the pool starts cancelled; a panic stops at the
 # task's boundary on whatever thread it ran; collections stop workers
 # with live lists on their fibers' stacks and free nothing of them; and
@@ -160,7 +160,7 @@
 
   # Placement: parallel tasks run on the pool, not on the spawning thread,
   # on more than one worker, and each stays on the thread that started it
-  # across every park - a sleep and a channel handoff from the main thread.
+  # across every park - a sleep and a board take from the main thread.
   #
   # Every task, as it starts, counts itself and then keeps its worker busy
   # - spinning, never parking - until a second task has started. A worker
@@ -170,10 +170,18 @@
   # queue before the other workers wake, which an optimised build on a
   # runner once did, all 16 on one worker. Waited for 10 s at most, and
   # named if it never comes; one worker running all of them still fails.
+  # Messages between the tasks below, on the board (TAPE_SPEC 5.2): one
+  # process-wide queue per type, taken once each.
+  record Ping, n : Int32
+  record FanItem, producer : Int32, index : Int32
+  record StageJob, n : Int64, quit : Bool
+  record StageAnswer, n : Int64
+  record WorkItem, n : Int64, quit : Bool
+  record Never, n : Int32
+
   def placement(watch : Int32) : Nil
     watched("placement", watch) do
       main_thread = thread_here
-      pings = Channel(Int32).new
       arrived = Tally.new
       seen = [] of UInt64
       group do |g|
@@ -190,12 +198,12 @@
             spin(2_000_000_i64, (i + 1).to_u64)
             sleep(2)
             second = thread_here
-            pings.receive
+            RisBoard.take(Ping)
             {first, second, thread_here}
           end
           handles << task
         end
-        16.times { pings.send(1) }
+        16.times { RisBoard.post(Ping.new(1)) }
         handles.each do |handle|
           ids = handle.value
           fail("placement: a parallel task answered #{ids}") unless ids.is_a?(Tuple(UInt64, UInt64, UInt64))
@@ -205,7 +213,7 @@
         end
       end
       fail("placement: 16 parallel tasks all ran on one worker of #{IyiWorkers.count}") if seen.size < 2
-      puts "placement: 16 parallel tasks on #{seen.size} of #{IyiWorkers.count} workers, none on the spawning thread, none moved across a sleep and a channel"
+      puts "placement: 16 parallel tasks on #{seen.size} of #{IyiWorkers.count} workers, none on the spawning thread, none moved across a sleep and a board take"
     end
   end
 
@@ -263,32 +271,31 @@
     end
   end
 
-  # Values cross threads through channels exactly once and in each
-  # sender's order: producers on the pool, the consumer on the main
-  # thread; then a pipeline through a parallel stage, in order; then
-  # several parallel consumers of one channel, each value taken once.
+  # Values cross threads on the board exactly once and in each sender's
+  # order: producers on the pool, the consumer on the main thread; then a
+  # pipeline through a parallel stage, in order; then several parallel
+  # consumers of one message type, each value taken once.
   def channels(watch : Int32) : Nil
     watched("channels", watch) do
       producers = 6
       per = 20000
-      fan = Channel(Tuple(Int32, Int32)).new(64)
       expected = Array(Int32).new(producers, 0)
       group do |g|
         producers.times do |p|
           g.spawn_parallel do
             i = 0
             while i < per
-              fan.send({p, i})
+              fail("channels: a fan-in post was refused") unless RisBoard.post(FanItem.new(p, i))
               i = i + 1
             end
             0
           end
         end
         (producers * per).times do
-          got = fan.receive
-          fail("channels: a fan-in receive answered #{got}") unless got.is_a?(Tuple(Int32, Int32))
-          who = got[0]
-          fail("channels: producer #{who} sent #{got[1]} where #{expected[who]} was next") unless got[1] == expected[who]
+          got = RisBoard.take(FanItem)
+          fail("channels: a fan-in take answered #{got}") unless got.is_a?(FanItem)
+          who = got.producer
+          fail("channels: producer #{who} sent #{got.index} where #{expected[who]} was next") unless got.index == expected[who]
           expected[who] = expected[who] + 1
         end
       end
@@ -296,46 +303,45 @@
         fail("channels: producer #{who} delivered #{count} of #{per}") unless count == per
       end
 
-      jobs = Channel(Int64).new
-      results = Channel(Int64).new
       group do |g|
         g.spawn_parallel do
           while true
-            job = jobs.receive
-            break unless job.is_a?(Int64)
-            results.send(job * job)
+            job = RisBoard.take(StageJob)
+            break unless job.is_a?(StageJob)
+            break if job.quit
+            RisBoard.post(StageAnswer.new(job.n * job.n))
           end
           0
         end
         n = 0_i64
         while n < 5000_i64
-          jobs.send(n)
-          answer = results.receive
-          fail("channels: the stage answered #{answer} for #{n}") unless answer == n * n
+          RisBoard.post(StageJob.new(n, false))
+          answer = RisBoard.take(StageAnswer)
+          fail("channels: the stage answered #{answer} for #{n}") unless answer.is_a?(StageAnswer) && answer.n == n * n
           n = n + 1_i64
         end
-        jobs.close
+        RisBoard.post(StageJob.new(0_i64, true))
       end
 
-      work = Channel(Int64).new(32)
       tally = Tally.new
       group do |g|
         4.times do
           g.spawn_parallel do
             while true
-              item = work.receive
-              break unless item.is_a?(Int64)
-              tally.add(item)
+              item = RisBoard.take(WorkItem)
+              break unless item.is_a?(WorkItem)
+              break if item.quit
+              tally.add(item.n)
             end
             0
           end
         end
         n = 0_i64
         while n < 40000_i64
-          work.send(n)
+          RisBoard.post(WorkItem.new(n, false))
           n = n + 1_i64
         end
-        work.close
+        4.times { RisBoard.post(WorkItem.new(0_i64, true)) }
       end
       fail("channels: 4 consumers took #{tally.count} of 40000 values") unless tally.count == 40000_i64
       fail("channels: 4 consumers summed #{tally.sum}") unless tally.sum == 799980000_i64
@@ -344,17 +350,16 @@
   end
 
   # A cancel reaches a task on another thread: asleep, parked on a
-  # channel, and still waiting in the pool to start.
+  # board take, and still waiting in the pool to start.
   def cancel(watch : Int32) : Nil
     watched("cancel", watch) do
-      never = Channel(Int32).new
       started = __iyi_monotonic_ns
       slept = 0
       parked = 0
       pinned = 0
       group do |g|
         sleeper = g.spawn_parallel { sleep(10000).is_a?(Cancelled) ? 1 : 0 }
-        waiter = g.spawn_parallel { never.receive.is_a?(Cancelled) ? 1 : 0 }
+        waiter = g.spawn_parallel { RisBoard.take(Never).is_a?(Cancelled) ? 1 : 0 }
         local = g.spawn { sleep(10000).is_a?(Cancelled) ? 1 : 0 }
         g.spawn_parallel do
           sleep(100)
@@ -369,7 +374,7 @@
       end
       took = elapsed_ms(started)
       fail("cancel: a task asleep on another thread was not cancelled") unless slept == 1
-      fail("cancel: a task parked on a channel on another thread was not cancelled") unless parked == 1
+      fail("cancel: a task parked on a board take on another thread was not cancelled") unless parked == 1
       fail("cancel: a task on the spawning thread was not cancelled by a parallel failure") unless pinned == 1
       fail("cancel: a failure took #{took} ms to cancel its siblings across threads") if took >= 3000
 
@@ -380,10 +385,9 @@
       # and the group does not wait a second per worker.
       started = __iyi_monotonic_ns
       waited = Tally.new
-      go = Channel(Int32).new
       group do |g|
         g.spawn_parallel do
-          go.receive
+          RisBoard.take(Ping)
           Boom.new
         end
         (IyiWorkers.count * 8).times do
@@ -392,11 +396,11 @@
             0
           end
         end
-        go.send(1)
+        RisBoard.post(Ping.new(1))
       end
       queued = elapsed_ms(started)
       fail("cancel: #{waited.count} tasks waiting in the pool ran uncancelled, #{queued} ms") if waited.count > 0 || queued >= 3000
-      puts "cancel: a failure on the pool cancelled a sleeper and a channel waiter on other threads and a task on this one in #{took} ms, and #{IyiWorkers.count * 8} tasks waiting in the pool in #{queued} ms"
+      puts "cancel: a failure on the pool cancelled a sleeper and a board waiter on other threads and a task on this one in #{took} ms, and #{IyiWorkers.count * 8} tasks waiting in the pool in #{queued} ms"
     end
   end
 

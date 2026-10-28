@@ -1,0 +1,2 @@
+# ris has no Channel: RisBoard carries messages between tasks.
+channel = Channel(Int32).new(1)

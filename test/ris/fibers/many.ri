@@ -4,7 +4,7 @@ module test/ris/fibers/many
 import std/int
 import std/gc::{GC}
 
-def hold(i : Int32, done : Channel(Int64)) : Nil
+def hold(i : Int32) : Int64
   total = 0_i64
   tape do
     values = Ary(Int64).new(4)
@@ -12,28 +12,28 @@ def hold(i : Int32, done : Channel(Int64)) : Nil
     sleep(200)
     values.each { |v| total = total + v }
   end
-  done.send(total)
+  total
 end
 
-def start(g : IyiGroup, i : Int32, done : Channel(Int64)) : Nil
-  g.spawn do
-    hold(i, done)
-    0
-  end
+def start(g : IyiGroup, i : Int32) : IyiTask(Int64)
+  g.spawn { hold(i) }
 end
 
 N = 1000
-done = Channel(Int64).new(N)
 group do |g|
+  tasks = Array(IyiTask(Int64)).new(N)
   i = 0
   while i < N
-    start(g, i, done)
+    tasks << start(g, i)
     i = i + 1
   end
   sleep(50)
   GC.collect
   sum = 0_i64
-  N.times { sum = sum + done.receive.or_panic }
+  tasks.each do |task|
+    got = task.value
+    sum = sum + got if got.is_a?(Int64)
+  end
   puts "#{N} tapes at once, sum #{sum}"
   0
 end

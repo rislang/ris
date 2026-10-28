@@ -76,7 +76,7 @@ if ! timeout 60 ./exercise > answers.txt 2>&1; then
 fi
 grep -q 'every property held' answers.txt || { cat answers.txt; exit 1; }
 # A panic on a task's stack is printed and the program goes on, so the
-# scheduler's own complaint is looked for here (step 16a's select race).
+# scheduler's own complaint is looked for here.
 if grep -q 'a done fiber was scheduled' answers.txt; then
   echo "the exercise scheduled a finished fiber:"
   grep -m3 'a done fiber' answers.txt
@@ -235,9 +235,10 @@ fi
 # ── 3. Failure proof: a deadlock dies loudly ──────────────────────────────
 step "failure proof: deadlock is a diagnosis, not a hang"
 cat > deadlock.iyi <<'IYI'
-channel = Channel(Int32).new(1)
-value = channel.receive
-puts value.is_a?(Int32)
+record Never, n : Int32
+
+value = RisBoard.take(Never)
+puts value.is_a?(Never)
 IYI
 if ! "$IYI" build deadlock.iyi -o deadlock > build-deadlock.log 2>&1; then
   echo "deadlock probe failed to build:"
@@ -268,22 +269,25 @@ def compute(n : Int32) : Int32
   [1, 2, 3][n]
 end
 
-# The owner waits on a channel (`panicked`, `finished`) or on the
+record Result, n : Int32
+record Ping, n : Int32
+record Pong, n : Int32
+
+# The owner waits on the board (`panicked`, `finished`) or on the
 # worker's value (`value`) when the deadlock is found.
 def waits(how : String) : Nil
   defer STDERR.puts("cleanup: owner")
-  result = Channel(Int32).new
   group do |g|
     worker = g.spawn do
       defer STDERR.puts("cleanup: worker")
-      result.send(compute(7)) if how == "panicked"
-      result.receive if how == "value"
+      RisBoard.post(Result.new(compute(7))) if how == "panicked"
+      RisBoard.take(Result) if how == "value"
       0
     end
     if how == "value"
       worker.value
     else
-      result.receive
+      RisBoard.take(Result)
     end
   end
 end
@@ -291,19 +295,17 @@ end
 # Two tasks wait on each other while the owner waits in the group's join.
 def crossed : Nil
   defer STDERR.puts("cleanup: owner")
-  a = Channel(Int32).new
-  b = Channel(Int32).new
   group do |g|
     g.spawn do
       defer STDERR.puts("cleanup: task a")
-      a.receive
-      b.send(1)
+      RisBoard.take(Ping)
+      RisBoard.post(Pong.new(1))
       0
     end
     g.spawn do
       defer STDERR.puts("cleanup: task b")
-      b.receive
-      a.send(1)
+      RisBoard.take(Pong)
+      RisBoard.post(Ping.new(1))
       0
     end
   end
@@ -665,21 +667,6 @@ sleep_proof "a sleep queue that puts the latest first" latest \
   '/^    a.deadline < b.deadline \|\| \(a.deadline == b.deadline && a.sleep_seq < b.sleep_seq\)$/ { print "    a.deadline > b.deadline || (a.deadline == b.deadline && a.sleep_seq < b.sleep_seq)"; found = 1; next }
    { print } END { if (!found) exit 3 }' \
   'FAIL: sleep: a sleeper woke before'
-
-# ── 7b. Failure proofs: a node taken from the heap for every park, and a
-#      send node handed out while its sender has yet to read it ───────────
-sleep_proof "a receive node allocated for every park" fresh_waiter \
-  '/^    if waiter.is_a\?\(IyiWaiter\) && !waiter.linked$/ { print "    if waiter.is_a?(IyiWaiter) && false"; found = 1; next }
-   { print } END { if (!found) exit 3 }' \
-  'FAIL: ring:'
-sleep_proof "a send node allocated for every park" fresh_sender \
-  '/^    if node.is_a\?\(IyiSendNode\(T\)\) && node.read && !node.linked$/ { print "    if node.is_a?(IyiSendNode(T)) && false"; found = 1; next }
-   { print } END { if (!found) exit 3 }' \
-  'FAIL: ring:'
-sleep_proof "a send node handed out before its sender read it" unread_sender \
-  '/^    if node.is_a\?\(IyiSendNode\(T\)\) && node.read && !node.linked$/ { print "    if node.is_a?(IyiSendNode(T)) && !node.linked"; found = 1; next }
-   { print } END { if (!found) exit 3 }' \
-  'FAIL: receipt:'
 
 # ── 8. Failure proof: an io list walked for every event ─────────────────
 case "$(uname -s)" in

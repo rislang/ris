@@ -22,10 +22,11 @@ How to work (fewer tokens, faster to the goal):
 ## Messages: RisBoard (TAPE_SPEC 5.2, 5.6; doc/MESSAGES.md)
 
 All work in this checkout, one full check per item; Codex is out of
-usage until 2026-11-02. Pipe is an OS pipe on Linux and macOS (Channel
+usage until 2026-11-02. Pipe is an OS pipe on Linux and macOS (refused
 elsewhere). Done: HTTP/2 1 MiB POST, websocket bare copy, autocert part
-A, OS pipe, socket race without Channel, 5.1 local task captures. Next
-in order: bench ports, then autocert part B, then Channel/select removal.
+A, OS pipe, socket race without Channel, 5.1 local task captures,
+Channel and select removed. Next in order: bench ports, then autocert
+part B.
 
 * Give a task-owned Conn an owner-level buffer growth path: growth in a
   nested tape block ends with the block, so TLS/HTTP/2 connections stay
@@ -55,12 +56,9 @@ in order: bench ports, then autocert part B, then Channel/select removal.
   including real TLS deadline/parallel-server cases, Pebble, restarts and
   mutation checks. Preserve the policy probe's copied board observations;
   its Counter is no longer captured by the listener task.
-* Remove Channel/select after all replacement gates pass. Users left:
-  std/io.iyi's pipe fallback (other targets: refuse, or poller pipe);
-  bench parallel, collect_trigger, std_mutex.sh, root, thread, metric,
-  concurrency, runtime, std_http_exercise.sh; test/ris channel_bounded,
-  fibers/spares, fibers/many, contract_suspend and check.sh. Gate: no
-  remaining users, full check, std/samples tests and --no-gc link audit.
+* Drop the dead Channel leftovers in src/iyi/concurrency.iyi: IyiWaiter,
+  spare_waiter, IyiFiberState::WaitingCh's channel comments and the
+  channel/select notes in the scheduler's comments.
 
 ## Next
 
@@ -124,6 +122,10 @@ in order: bench ports, then autocert part B, then Channel/select removal.
   make tape-independent fixes in iyi first, or record them in UPSTREAM.md.
 * bench/concurrency_exercise.sh fails with "pipe2 failed" after its
   32,000 sleepers test (seen 2026-10-27 before the group-end change).
+* Typecheck failures that predate the Channel removal:
+  bench/parallel_exercise.iyi:124 (a task value's Panicked arm),
+  bench/thread_exercise.iyi:286 (tape type Rendezvous in a proc) and
+  bench/metric/metric.iyi (Array of the tape type Planet).
 * x86_64-windows-msvc does not typecheck std/socket.iyi:572
   (connect_named: opaque callback effects); fix with the socket race.
 * .iyimod artifacts drop @[OnTape] on types: a build from std artifacts

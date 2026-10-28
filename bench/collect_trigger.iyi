@@ -19,6 +19,15 @@
 # Not under `samples/`: the sample count is a gated number, and samples are
 # explanations rather than torture tests.
 
+# Rendezvous between a fiber and its spawner, on the board (TAPE_SPEC 5.2).
+record BenchReady, code : Int32
+record BenchRelease, code : Int32
+record BenchVerdict, code : Int32
+
+def board_code(got : BenchReady | BenchRelease | BenchVerdict | Cancelled) : Int32
+  got.is_a?(Cancelled) ? -1 : got.code
+end
+
 {% if !flag?(:gc_none) && !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || flag?(:darwin) || (flag?(:win32) && flag?(:x86_64))) %}
   def count(value : UInt64) : String
     value.to_i64.to_s
@@ -254,36 +263,33 @@
   # fiber-stack root walk carrying its weight under the trigger rather than
   # under the root exercise's hand-run walk.
   {% if (flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64)) %}
-    ready = Channel(Int32).new
-    release = Channel(Int32).new
-    verdict = Channel(Int32).new
     before_fibers = IyiMark.collections
     group do |g|
       g.spawn do
         keep = Pointer(UInt8).malloc(80_u64)
-        index = 0_u64
-        while index < 80_u64
-          (keep + index.to_i64).value = 0x7B_u8
-          index = index + 1_u64
+        at = 0_u64
+        while at < 80_u64
+          (keep + at.to_i64).value = 0x7B_u8
+          at = at + 1_u64
         end
-        ready.send(1)
-        release.receive
+        RisBoard.post(BenchReady.new(1))
+        RisBoard.take(BenchRelease)
         bad = 0
-        index = 0_u64
-        while index < 80_u64
-          bad = 1 if (keep + index.to_i64).value != 0x7B_u8
-          index = index + 1_u64
+        at = 0_u64
+        while at < 80_u64
+          bad = 1 if (keep + at.to_i64).value != 0x7B_u8
+          at = at + 1_u64
         end
-        verdict.send(bad)
+        RisBoard.post(BenchVerdict.new(bad))
         0
       end
-      ready.receive
+      RisBoard.take(BenchReady)
       # Twice the budget that stands, whatever the last mark left it at:
       # one crossing is certain, and one collection is what the fiber's
       # reference has to live through.
       churn(IyiMark.budget * 2_u64)
-      release.send(1)
-      answer = verdict.receive
+      RisBoard.post(BenchRelease.new(1))
+      answer = board_code(RisBoard.take(BenchVerdict))
       raise "fiber: a parked fiber's only reference was collected under pressure" if answer != 0
     end
     IyiMark.settle

@@ -1,20 +1,14 @@
 # Exercises SPEC.md III.4 concurrency runtime on Windows x86_64, Linux, and Darwin.
 #
 # Properties asserted:
-# 1. Genuine task interleaving across channels in a group (ping-pong order).
+# 1. Genuine task interleaving across board messages in a group (ping-pong order).
 # 2. Overlapping waits (anti-sequential clock).
 # 3. Cancellation reaching a task blocked in sleep.
 # 4. Error unwrap `!` draining a cancelled task through later waits.
 # 5. Poller: a read parks the fiber, and another fiber wakes it by writing.
 # 6. Cancellation reaching a task blocked in IO (CancelIoEx on Windows).
-# 7. Channel close waking parked receivers with ChannelClosed.
 # 8. Task joining and value propagation via task.value.
 # 9. Deferred join on early return out of group block.
-# 10. Rendezvous send parking until received, and receiver completing send.
-# 11. FIFO order of parked rendezvous sends.
-# 12. Cancelled rendezvous send dying undelivered.
-# 13. Channel close failing parked senders.
-# 14. Select taking ready arm, parked send arm winning, select with else.
 # 15. Typed group returning tuple on success and error on failure.
 # 16. Dynamic group keeping general form.
 # 17. A task and a proc capturing a `case` branch's `it` at the branch's type.
@@ -107,14 +101,17 @@ impl Error for TaskFailed
   end
 end
 
+# Messages between the tasks below, on the board (TAPE_SPEC 5.2).
+record RPing, n : Int32
+record RPong, n : Int32
+record RDrain, n : Int32
+
 # 1. Genuine task interleaving
 slot0 = read_teb_tls_slot
 log_msg("main teb_tls_slot: ")
 log_msg(slot0 == 0_u64 ? "null\n" : "non-null\n")
 
 log_msg("step 1: interleaving\n")
-ping = Channel(Int32).new(1)
-pong = Channel(Int32).new(1)
 order = ""
 
 group do |g|
@@ -125,9 +122,9 @@ group do |g|
 
     round = 0
     while round < 3
-      ping.receive
+      RisBoard.take(RPing)
       order = order + "a"
-      pong.send(1)
+      RisBoard.post(RPong.new(1))
       round = round + 1
     end
     0
@@ -136,8 +133,8 @@ group do |g|
     round = 0
     while round < 3
       order = order + "b"
-      ping.send(1)
-      pong.receive
+      RisBoard.post(RPing.new(1))
+      RisBoard.take(RPong)
       round = round + 1
     end
     0
@@ -266,25 +263,6 @@ fail("cancellation never reached the IO-blocked task: #{io_victim_saw}") unless 
 fail("cancellation of IO took #{io_cancelled_after} ms") if io_cancelled_after >= 5000
 log_msg("a failing task cancelled a sibling blocked in IO, in #{io_cancelled_after} ms\n")
 
-# 7. Channel close waking parked receivers with ChannelClosed
-log_msg("step 7: channel close\n")
-late = Channel(Int32).new(1)
-closed_saw = ""
-group do |g|
-  g.spawn do
-    value = late.receive
-    closed_saw = value.is_a?(ChannelClosed) ? "closed" : "value"
-    0
-  end
-  g.spawn do
-    sleep(20)
-    late.close
-    0
-  end
-end
-fail("close did not wake the parked receiver with ChannelClosed") unless closed_saw == "closed"
-log_msg("close woke a parked receiver with ChannelClosed\n")
-
 # 8. task.value joins and answers what block returned
 log_msg("step 8: task.value\n")
 doubled = 0
@@ -319,173 +297,6 @@ leaves_early(flag)
 fail("a `return` out of the group block left its task running") unless flag.value == 1
 log_msg("an early return still joined the group\n")
 
-# 10. Rendezvous send parks until value is taken, receiver completes send
-log_msg("step 10: rendezvous\n")
-meet = Channel(Int32).new
-meet_order = ""
-group do |g|
-  g.spawn do
-    meet_order = meet_order + "s0,"
-    meet.send(11)
-    meet_order = meet_order + "s1"
-    0
-  end
-  g.spawn do
-    sleep(20)
-    meet_order = meet_order + "r,"
-    value = meet.receive
-    value.is_a?(Int32) ? value : -1
-  end
-end
-fail("rendezvous: expected s0,r,s1 got #{meet_order}") unless meet_order == "s0,r,s1"
-log_msg("a rendezvous send parked until its value was taken\n")
-
-meet2 = Channel(Int32).new
-got2 = 0
-group do |g|
-  g.spawn do
-    value = meet2.receive
-    got2 = value.is_a?(Int32) ? value : -1
-    0
-  end
-  g.spawn do
-    sleep(20)
-    meet2.send(23)
-    0
-  end
-end
-fail("rendezvous: the parked receiver got #{got2}") unless got2 == 23
-log_msg("a parked receiver completed a rendezvous send\n")
-
-# 11. FIFO order of parked rendezvous sends
-log_msg("step 11: FIFO rendezvous\n")
-
-def spawn_send(g : IyiGroup, fifo : Channel(Int32), n : Int32) : Nil
-  g.spawn do
-    fifo.send(n)
-    0
-  end
-  nil
-end
-
-fifo = Channel(Int32).new
-fifo_drained = ""
-group do |g|
-  index = 1
-  while index <= 3
-    spawn_send(g, fifo, index)
-    index = index + 1
-  end
-  g.spawn do
-    sleep(20)
-    round = 0
-    while round < 3
-      value = fifo.receive
-      fifo_drained = fifo_drained + (value.is_a?(Int32) ? value.to_s : "?")
-      round = round + 1
-    end
-    0
-  end
-end
-fail("rendezvous FIFO: expected 123, got #{fifo_drained}") unless fifo_drained == "123"
-log_msg("parked sends completed in park order\n")
-
-# 12. Cancelled rendezvous send dies undelivered
-log_msg("step 12: cancelled send\n")
-lonely = Channel(Int32).new
-sender_saw = ""
-group do |g|
-  g.spawn do
-    outcome = lonely.send(99)
-    sender_saw = outcome.is_a?(Cancelled) ? "cancelled" : "sent"
-    outcome
-  end
-  g.spawn do
-    sleep(20)
-    TaskFailed.new
-  end
-end
-fail("a parked sender was not cancelled: #{sender_saw}") unless sender_saw == "cancelled"
-lonely.close
-received_late = lonely.receive
-fail("a cancelled send's value was delivered anyway") if received_late.is_a?(Int32)
-log_msg("a cancelled rendezvous send died undelivered\n")
-
-# 13. Channel close failing parked senders
-log_msg("step 13: closed send\n")
-doomed = Channel(Int32).new
-closed_send = ""
-group do |g|
-  g.spawn do
-    outcome = doomed.send(7)
-    closed_send = outcome.is_a?(ChannelClosed) ? "refused" : "other"
-    0
-  end
-  g.spawn do
-    sleep(20)
-    doomed.close
-    0
-  end
-end
-fail("close did not fail the parked sender: #{closed_send}") unless closed_send == "refused"
-log_msg("close failed a parked sender with ChannelClosed\n")
-
-# 14. Select taking ready arm, parked send arm winning, select with else
-log_msg("step 14: select\n")
-left = Channel(Int32).new
-right = Channel(String).new
-picked = ""
-group do |g|
-  g.spawn do
-    sleep(20)
-    right.send("hello")
-    0
-  end
-  g.spawn do
-    select
-    when n = left.receive
-      picked = "left"
-    when s = right.receive
-      picked = s.is_a?(String) ? "right:#{s}" : "right:?"
-    end
-    0
-  end
-end
-fail("select: expected right:hello, got #{picked}") unless picked == "right:hello"
-log_msg("select took the arm that became ready\n")
-
-narrow = Channel(Int32).new
-sent_arm = ""
-group do |g|
-  g.spawn do
-    select
-    when narrow.send(31)
-      sent_arm = "sent"
-    when n = Channel(Int32).new(1).receive
-      sent_arm = "impossible"
-    end
-    0
-  end
-  g.spawn do
-    sleep(20)
-    value = narrow.receive
-    value.is_a?(Int32) ? value : -1
-  end
-end
-fail("select: the parked send arm saw #{sent_arm}") unless sent_arm == "sent"
-log_msg("a select's send arm won while parked\n")
-
-idle = Channel(Int32).new
-took_else = ""
-select
-when n = idle.receive
-  took_else = "arm"
-else
-  took_else = "else"
-end
-fail("select else: got #{took_else}") unless took_else == "else"
-log_msg("select with nothing ready took its else\n")
-
 # 15. Typed group
 log_msg("step 15: typed group\n")
 
@@ -517,18 +328,24 @@ log_msg("a typed group's first failure left as the error\n")
 
 # 16. Dynamic group keeps general form
 log_msg("step 16: dynamic group\n")
-drainer = Channel(Int32).new(3)
+def spawn_send(g : IyiGroup, n : Int32) : Nil
+  g.spawn do
+    RisBoard.post(RDrain.new(n))
+    0
+  end
+end
+
 shape = group do |g|
   index = 0
   while index < 3
-    spawn_send(g, drainer, index)
+    spawn_send(g, index)
     index = index + 1
   end
 end
 fail("a loop-spawning group grew a type") unless shape.is_a?(Nil)
 round = 0
 while round < 3
-  drainer.receive
+  RisBoard.take(RDrain)
   round = round + 1
 end
 log_msg("dynamic group kept the general form\n")

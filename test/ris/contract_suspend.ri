@@ -5,13 +5,12 @@ def exercise
   sleep 1
   sleep 0
   wait_writable(1, 1)
-  done = Channel(Int32).new
   group do |g|
-    g.spawn do
+    task = g.spawn do
       sleep 1
-      done.send(1)
+      1
     end
-    done.receive
+    task.value
   end
   puts view
 end

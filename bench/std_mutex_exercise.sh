@@ -163,9 +163,8 @@ import std/mutex::{Mutex}
 m = Mutex.new { [0] }
 group do |g|
   g.spawn do
-    # A channel nobody else holds: the block may not capture one that is
-    # not Share, so the holder makes its own, and waits on it for good.
-    m.lock { |a| a[0] = Channel(Int32).new.receive.or_panic }.or_panic
+    # The holder waits for good, until the deadlock or a cancel ends it.
+    m.lock { |a| a[0] = sleep(3_600_000).is_a?(Cancelled) ? 2 : 3 }.or_panic
     0
   end
   g.spawn do

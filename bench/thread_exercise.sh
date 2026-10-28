@@ -634,8 +634,6 @@ class Tally
 end
 
 def pair(id : Int32, trips : Int32) : Nil
-  there = Channel(Int32).new(1)
-  back = Channel(Int32).new(1)
   group do |g|
     2.times do |side|
       g.spawn do
@@ -643,13 +641,8 @@ def pair(id : Int32, trips : Int32) : Nil
         mine = build(300, seed)
         wrong = 0
         trips.times do |t|
-          if side == 0
-            there.send(t)
-            back.receive
-          else
-            there.receive
-            back.send(t)
-          end
+          # Each side parks in turn: the board has no per-pair queue.
+          sleep(0)
           build(20, 0_i64) if t % 8 == 0
           wrong = wrong + 1 if t % 64 == 0 && !intact?(mine, 300, seed)
         end

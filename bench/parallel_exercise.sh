@@ -9,9 +9,9 @@
 #   1. The exercise holds every property, plain and --release: parallel
 #      tasks start on the pool and on more than one worker, each stays on
 #      the thread that started it, a thousand run exactly once, an atomic
-#      count loses nothing, channels carry values across threads once each
+#      count loses nothing, board messages cross threads once each
 #      and in each sender's order, a cancel reaches a task asleep, parked
-#      on a channel, or still waiting in the pool, a panic stops at the
+#      on a board take, or still waiting in the pool, a panic stops at the
 #      task's boundary, idle workers steal, collections keep the workers'
 #      lists, and the typed group answers.
 #   2. The binary keeps the dependency floor the concurrency gate holds,
@@ -21,10 +21,10 @@
 #      per worker - a pool that is parallel only in name cannot pass it.
 #      The table for 1, 2, 4 and 8 workers (as far as the cores go) is
 #      printed for the record.
-#   4. A deadlock across threads - a parallel task waiting on a channel
+#   4. A deadlock across threads - a parallel task waiting on a board take
 #      nobody sends on - is named, not hung.
 #   5. `Share` gates the parallel block at compile time: a captured
-#      `Array`, a `Channel` of arrays, a local assigned after the spawn, and
+#      `Array`, a local assigned after the spawn, and
 #      a loop's local are refused, each by name.
 #   6. Failure proofs against broken copies of the runtime, each caught at
 #      the named check: a cross-thread wake that does not ring (a lost
@@ -211,10 +211,11 @@ step "a deadlock across threads is a diagnosis, not a hang"
 cat > paralleldeadlock.iyi <<'IYI'
 module paralleldeadlock
 
-never = Channel(Int32).new
+record Never, n : Int32
+
 group do |g|
   g.spawn_parallel do
-    never.receive
+    RisBoard.take(Never)
     0
   end
 end
@@ -246,11 +247,6 @@ refused shares_array 'the block spawn_parallel runs on another thread captures `
 items = [1, 2, 3]
 group do |g|
   g.spawn_parallel { items.size }
-end'
-refused shares_channel_of_arrays 'captures `lists : Channel(Array(Int32))`, which is not Share' '
-lists = Channel(Array(Int32)).new(1)
-group do |g|
-  g.spawn_parallel { lists.close }
 end'
 refused assigns_after '`count` is assigned here, after the task was spawned' '
 def launch(g : IyiGroup) : Nil

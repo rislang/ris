@@ -884,6 +884,11 @@ module Iyi
     #       ...
     #
     def expand(node : Select)
+      # ris: no Channel, so no select (TAPE_SPEC 5.2).
+      if @program.iyi_prelude?
+        node.raise "ris has no select: wait for one message with RisBoard.take(T, ms), " \
+                   "or for a task with task.wait(ms) (TAPE_SPEC 5.2, doc/MESSAGES.md)"
+      end
       index_name = @program.new_temp_var_name
       value_name = @program.new_temp_var_name
       # iyi: the select's third answer, whether the arm's operation

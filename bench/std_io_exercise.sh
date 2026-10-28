@@ -371,11 +371,7 @@ patched_fails "a file chomps a lone CR" patched_cr_file "lines(chomp) on a file 
 echo
 echo "== negative proof: a pipe that holds writes, ends badly or drops a piece is caught"
 patched_fails "a pipe's writer that buffers" patched_pipe_buffered "a pipe's writer waits while its room is full" \
-  '    super(-1_i64, 4096, true)=>    super(-1_i64, 4096, false)'
-patched_fails "a pipe's end taken for a failure" patched_pipe_failed "a pipe whose writer closed ended cleanly" \
-  '      return 0_i64 if got.is_a?(ChannelClosed)=>      return -1_i64 if got.is_a?(ChannelClosed)'
-patched_fails "a piece larger than the read, its rest dropped" patched_pipe_dropped "a copy through a pipe arrives whole" \
-  '    @taken = @taken + moved=>    @taken = @piece.bytesize'
+  '      super(fd.to_i64, 4096, true)=>      super(fd.to_i64, 4096, false)'
 
 echo
 echo "== negative proof: a Delimited that answers eof from its inner stream is caught"

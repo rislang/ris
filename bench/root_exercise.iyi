@@ -16,6 +16,15 @@
 # Not under `samples/`: the sample count is a gated number and samples are
 # explanations, not torture tests.
 
+# Rendezvous between a fiber and its spawner, on the board (TAPE_SPEC 5.2).
+record BenchReady, code : Int32
+record BenchRelease, code : Int32
+record BenchVerdict, code : Int32
+
+def board_code(got : BenchReady | BenchRelease | BenchVerdict | Cancelled) : Int32
+  got.is_a?(Cancelled) ? -1 : got.code
+end
+
 {% if !flag?(:gc_none) && !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || flag?(:darwin) || (flag?(:win32) && flag?(:x86_64))) %}
   # The allocation-pressure trigger is off for this exercise: it
   # choreographs colours and free lists across explicit collections,
@@ -477,31 +486,29 @@
   # root), and suspends with the only reference in its own frame. The walk
   # then runs from the main fiber, and the address must be among the found
   # bases — the case that was this collector's recorded gap: an object
-  # reachable only from a fiber the scheduler holds. The channel dance is
-  # what pins the timeline: `ready.receive` parks main so the fiber runs
+  # reachable only from a fiber the scheduler holds. The board rendezvous is
+  # what pins the timeline: `RisBoard.take(BenchReady)` parks main so the fiber runs
   # as far as its own `ready.send`, after which its saved stack holds
   # `keep` and the walk can ask about it.
   {% if (flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64)) %}
     Tally.forget_wanted
     Tally.reset
-    ready = Channel(Int32).new
-    release = Channel(Int32).new
     group do |g|
       g.spawn do
         keep = Pointer(UInt8).malloc(96_u64)
         Tally.want(keep.address)
-        ready.send(1)
-        release.receive
+        RisBoard.post(BenchReady.new(1))
+        RisBoard.take(BenchRelease)
         keep[0] = 1_u8
         0
       end
-      ready.receive
+      RisBoard.take(BenchReady)
       IyiRoots.each_root(RECORD)
       fiber_root = Tally.wanted(0_u64)
       unless Tally.found?(fiber_root)
         raise "fiber root: 0x#{hex(fiber_root)} lives only on a suspended fiber's stack and the walk did not find it"
       end
-      release.send(1)
+      RisBoard.post(BenchRelease.new(1))
     end
     print "  fiber root: an address held only on a suspended fiber's stack was found by the walk\n"
   {% end %}
