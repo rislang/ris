@@ -148,6 +148,16 @@ else
   echo "FAILED   group_lifecycle: $out"; status=1
 fi
 
+# Everyday String/Array/Hash calls in a program stay on the tape.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/core_api.ri 2>&1)
+if [ "$?" -eq 0 ] && grep -qxF 'HELLO, WORLD' <<<"$out" &&
+    grep -qxF '00042' <<<"$out" && grep -qxF '78' <<<"$out" &&
+    grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+  echo "runs     core_api (Str, Ary and Map surface, zero heap)"
+else
+  echo "FAILED   core_api: $out"; status=1
+fi
+
 # A pipe's writer waits while the pipe is full (930722c made it panic).
 out=$("$RIS" run test/ris/pipe_wait.ri 2>&1)
 if [ "$?" -eq 0 ] && grep -qxF 'PASS: pipe writer waits' <<<"$out"; then

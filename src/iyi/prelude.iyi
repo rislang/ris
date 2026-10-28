@@ -10565,6 +10565,7 @@ require "./ris"
       flag?(:darwin) || flag?(:win32) || flag?(:wasm32)) %}
   require "./tape"
   require "./map"
+  require "./tape_core"
 {% else %}
   # No tape here: what the program's end and the scheduler ask of it
   # answers that there is none.

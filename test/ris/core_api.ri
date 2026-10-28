@@ -1,0 +1,22 @@
+module test/ris/core_api
+
+# Everyday String/Array/Hash calls in a program answer tape values: no heap.
+line = "  Hello, World  "
+puts line.strip.upcase
+words = "a,b,,c".split(",")
+puts words.size
+puts "the quick brown".split.size
+puts "abc".reverse + "x".rjust(3, '.')
+puts "aXbXc".gsub("X", "-")
+nums = [5, 3, 9, 1]
+puts nums.sort[0], nums.max, nums.min, nums.sort_by { |x| -x }[0]
+puts nums.reject { |x| x > 4 }.size
+puts [1, 1, 2].uniq.size
+puts nums[10]?.nil?
+counts = "a b a c a".split.tally
+puts counts.fetch("a".as_tape, 0)
+m = {"x" => 1, "y" => 2}
+puts m.map { |k, v| v * 10 }.sum
+puts 42.to_s.rjust(5, '0')
+puts "café".chars.size
+puts 7.to_s + String.build { |io| io << 8 }

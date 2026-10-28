@@ -458,6 +458,16 @@ module Iyi
       end
     end
 
+    # Code a program wrote, not std, the runtime or an artifact.
+    private def ris_program_code?(node : ASTNode) : Bool
+      return false unless program.iyi_prelude?
+      location = node.location
+      return false unless location
+      return false if TapeScopeRuntime.runtime?(location)
+      file = location.original_filename.try(&.gsub('\\', '/')) || ""
+      !(file.includes?("/src/std/") || file.ends_with?(".iyimod"))
+    end
+
     def transform(node : Call)
       # Library panic and output messages use the caller's tape too.
       # Their values are consumed here, never retained as heap Strings.
@@ -465,6 +475,18 @@ module Iyi
          node.name.in?("puts", "print", "raise")
         node.args.map! do |arg|
           arg.is_a?(StringInterpolation) ? TapeTextLowering.interpolate(arg) : arg
+        end
+      end
+      # ris: in a program, `x.to_s` and `String.build` make tape text (a
+      # Str), as interpolation does; std and the runtime keep String.
+      if @macro_code == 0 && program.tape_platform? && ris_program_code?(node)
+        if node.name == "to_s" && (obj = node.obj) && node.args.empty? &&
+           !node.block && !node.named_args && !node.block_arg
+          return Call.new(Path.global("Str").at(node), "interpolate", obj).at(node).transform(self)
+        end
+        if node.name == "build" && (obj = node.obj).is_a?(Path) &&
+           obj.names == ["String"]
+          node.obj = Path.global("Str").at(obj)
         end
       end
       # Explicit retention of static bytes needs neither a view nor a copy.
