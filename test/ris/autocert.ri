@@ -14,7 +14,7 @@ class FakeIssuer < AutocertView
   def issue(name : String) : AutocertError?
     prior = cache.get("attempt")
     count = prior.is_a?(String) ? prior.to_i + 1 : 1
-    cache.put("attempt", count.to_s)
+    cache.put("attempt", count.to_s.to_heap)
     if config.directory_url == "panic"
       cache.put("challenge-http-flight", "proof")
       defer cache.delete("challenge-http-flight")
@@ -258,7 +258,7 @@ group do |readers|
     tls = worker.tls_config
     challenge = worker.identity_for("localhost", ["acme-tls/1"])
     request = Request.new("GET", "/.well-known/acme-challenge/token",
-      nil, {} of String => String, "")
+      nil, ::Hash(String, String).new, "")
     answer = worker.answer(request)
     tls.alpn.includes?("acme-tls/1") &&
       challenge.is_a?(TlsIdentity) && answer && answer.status == 200 &&

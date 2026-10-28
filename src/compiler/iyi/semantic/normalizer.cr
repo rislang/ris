@@ -1176,6 +1176,7 @@ module Iyi
         case node.names.first
         when "Hash"  then return Path.global("Hsh").at(node)
         when "Array" then return Path.global("Ary").at(node)
+        when "String" then return Path.global("Str").at(node)
         end
       end
       node
