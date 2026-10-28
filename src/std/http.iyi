@@ -2202,7 +2202,9 @@ pub struct Server
   end
 
   private def self.serve_connection(client : IyiSocket, stream : TlsStream?, handler, listener : IyiSocket?, idle : IdleConns?, stream_bodies : Bool, compress : Bool, timeout_ms : Int32, request_timeout_ms : Int32) : Nil
-    conn = Conn.new(client, listener, idle, stream, task_owned: true)
+    # Program-owned: HTTP/2 grows the buffer inside a frame's tape block,
+    # and a task-owned buffer grown there ends with that block.
+    conn = Conn.new(client, listener, idle, stream)
     conn.gap = timeout_ms if timeout_ms > 0
     remote = client.remote_address
     peer = stream ? stream.peer_certificates : [] of Certificate
