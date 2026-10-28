@@ -1,36 +1,47 @@
 module test/ris/pipe_wait
 
 import std/io
+import std/text
 
-# A pipe's writer waits while its room is full, then every write
-# arrives whole and in order (IyiIO.pipe; 930722c had it panic).
-# Events: i for "wrote i", 100 for "reading", 200 + i for "read line i".
-pipe_in, pipe_out = IyiIO.pipe(2)
+# A pipe's writer waits while the kernel's room is full, then every byte
+# arrives whole and in order; closing the writer is the reader's end, and
+# a write after the reader closed is refused, not a SIGPIPE.
+# Events: 1 for "all written", 100 for "reading".
+pipe_in, pipe_out = IyiIO.pipe
 events = [] of Int32
+piece = ("0123456789abcdef" * 1024).to_heap
 group do |g|
   g.spawn do
-    5.times do |i|
-      pipe_out.puts "line #{i}"
-      events << i
-    end
+    64.times { pipe_out.write(piece) }
+    events << 1
     pipe_out.close
     0
   end
   g.spawn do
-    sleep(1)
+    sleep(20)
     events << 100
-    n = 0
-    while line = pipe_in.read_line(chomp: true)
-      raise "line #{n}" unless line == "line #{n}"
-      events << 200 + n
-      n += 1
+    total = 0
+    while (got = pipe_in.read_bytes(65536)).bytesize > 0
+      got.each_byte do |byte|
+        raise "byte #{total}" unless byte == piece.byte_at(total % 16)
+        total += 1
+      end
     end
+    raise "total #{total}" unless total == piece.bytesize * 64
     0
   end
 end
-# The reader starts before the writer is done: the writer waited for it.
-reading = events.index(100) || 99
-raise "writer waits: #{events.join(",")}" unless events[0] == 0 && reading < 5
-raise "all written" unless events.select { |e| e < 100 } == [0, 1, 2, 3, 4]
-raise "order" unless events.select { |e| e >= 200 } == [200, 201, 202, 203, 204]
+raise "writer waits: #{events.join(",")}" unless events == [100, 1]
+gone_in, gone_out = IyiIO.pipe
+gone_in.close
+outcome = group do |g|
+  g.spawn do
+    gone_out.write("x")
+    gone_out.flush
+    0
+  end.value
+end
+refused = outcome.is_a?(Panicked) &&
+  outcome.message.includes?("reader is closed")
+raise "closed reader: #{outcome.inspect}" unless refused
 puts "PASS: pipe writer waits"

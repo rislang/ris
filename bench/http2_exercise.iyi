@@ -232,7 +232,7 @@ def answer(req : Request) : Response
       end
     end
   when "/pipe"
-    reader, writer = IyiIO.pipe(16)
+    reader, writer = IyiIO.pipe
     whole = pattern(param(req, "n"))
     at = 0
     while at < whole.bytesize

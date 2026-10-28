@@ -141,18 +141,159 @@ class ::IyiIO
   #       g.spawn { IyiIO.copy(reader, socket.io); 0 }
   #     end
   #
-  # Each write is delivered at once, as one piece, and a write waits while
-  # *capacity* pieces are unread; a read waits for one. Closing the writer
-  # ends the reader after the last piece; closing the reader refuses the
-  # next write, as a pipe whose reader is gone does. The pipe is its
-  # thread's, for the tasks on the thread that made it.
-  def self.pipe(capacity : Int32 = 16) : {Std::Io::PipeReader, Std::Io::PipeWriter}
-    raise "a pipe holds at least one write, not #{capacity}" if capacity < 1
-    channel = Channel(String).new(capacity)
-    {Std::Io::PipeReader.new(channel), Std::Io::PipeWriter.new(channel)}
+  # An OS pipe on Linux and macOS: a write waits while the kernel's room
+  # (64 KiB on Linux) is full, a read waits for bytes; both park on the
+  # poller, never the thread. Closing the writer ends the reader after
+  # the last byte; closing the reader refuses the next write (EPIPE, never
+  # SIGPIPE). Other targets keep an in-process queue of writes.
+  def self.pipe : {Std::Io::PipeReader, Std::Io::PipeWriter}
+    {% if flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64)) || flag?(:darwin) %}
+      fds = Std::Io::PipeSys.make
+      {Std::Io::PipeReader.new(fds[0]), Std::Io::PipeWriter.new(fds[1])}
+    {% else %}
+      channel = Channel(String).new(16)
+      {Std::Io::PipeReader.new(channel), Std::Io::PipeWriter.new(channel)}
+    {% end %}
   end
 end
 
+{% if flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64)) || flag?(:darwin) %}
+  # The descriptors under `IyiIO.pipe`: both ends close-on-exec and
+  # nonblocking, so a wait parks on the poller.
+  module PipeSys
+    {% if flag?(:darwin) %}
+      lib LibPipe
+        fun pipe(fds : Int32*) : Int32
+        fun fcntl(fd : Int32, command : Int32, ...) : Int32
+        fun write(fd : Int32, buffer : Void*, count : UInt64) : Int64
+        fun error_location = __error : Int32*
+      end
+
+      def self.make : {Int32, Int32}
+        pair = uninitialized Int32[2]
+        fds = pointerof(pair).as(Int32*)
+        raise "pipe: errno #{LibPipe.error_location.value}" if LibPipe.pipe(fds) != 0
+        2.times do |i|
+          fd = fds[i]
+          LibPipe.fcntl(fd, 2, 1)                              # F_SETFD FD_CLOEXEC
+          LibPipe.fcntl(fd, 4, LibPipe.fcntl(fd, 3) | 4)       # F_SETFL O_NONBLOCK
+        end
+        LibPipe.fcntl(fds[1], 73, 1)                           # F_SETNOSIGPIPE
+        {fds[0], fds[1]}
+      end
+
+      # The count, or -errno.
+      def self.write(fd : Int32, buffer : Pointer(UInt8), count : Int32) : Int64
+        put = LibPipe.write(fd, buffer.as(Void*), count.to_u64)
+        put < 0_i64 ? -(LibPipe.error_location.value.to_i64) : put
+      end
+    {% else %}
+      {% if flag?(:x86_64) %}
+        SYS_WRITE           =   1_i64
+        SYS_FCNTL           =  72_i64
+        SYS_PIPE2           = 293_i64
+        SYS_RT_SIGPROCMASK  =  14_i64
+        SYS_RT_SIGTIMEDWAIT = 128_i64
+      {% else %}
+        SYS_WRITE           =  64_i64
+        SYS_FCNTL           =  25_i64
+        SYS_PIPE2           =  59_i64
+        SYS_RT_SIGPROCMASK  = 135_i64
+        SYS_RT_SIGTIMEDWAIT = 137_i64
+      {% end %}
+
+      def self.make : {Int32, Int32}
+        pair = uninitialized Int32[2]
+        fds = pointerof(pair).as(Int32*)
+        # O_CLOEXEC | O_NONBLOCK
+        made = __iyi_conc_syscall3(SYS_PIPE2, fds.address.to_i64, 0x80800_i64, 0_i64)
+        raise "pipe: errno #{-made}" if made < 0_i64
+        {fds[0], fds[1]}
+      end
+
+      # The count, or -errno. A write to a pipe whose reader is gone raises
+      # SIGPIPE on this thread: it is held for the write and taken off the
+      # thread when the write answered EPIPE, as std/process's writes do.
+      def self.write(fd : Int32, buffer : Pointer(UInt8), count : Int32) : Int64
+        masks = uninitialized UInt64[4]
+        at = pointerof(masks).as(UInt64*)
+        at[0] = 1_u64.unsafe_shl(12_u64) # SIGPIPE, 13
+        at[1] = 0_u64
+        at[2] = 0_u64
+        at[3] = 0_u64
+        __iyi_conc_syscall6(SYS_RT_SIGPROCMASK, 0_i64, at.address.to_i64, (at + 1).address.to_i64, 8_i64, 0_i64, 0_i64)
+        put = __iyi_conc_syscall3(SYS_WRITE, fd.to_i64, buffer.address.to_i64, count.to_i64)
+        if put == -32_i64
+          __iyi_conc_syscall6(SYS_RT_SIGTIMEDWAIT, at.address.to_i64, 0_i64, (at + 2).address.to_i64, 8_i64, 0_i64, 0_i64)
+        end
+        __iyi_conc_syscall6(SYS_RT_SIGPROCMASK, 2_i64, (at + 1).address.to_i64, 0_i64, 8_i64, 0_i64, 0_i64)
+        put
+      end
+    {% end %}
+  end
+
+  # The reading end of `IyiIO.pipe`.
+  pub class PipeReader < IyiIO
+    def initialize(fd : Int32)
+      super(fd.to_i64, 4096, false)
+    end
+
+    # A cancelled wait is withdrawn (-2), not the end: the next read waits
+    # again.
+    private def low_level_read(target_fd : Int64, buffer : Void*, count : UInt64) : Int64
+      got = iyi_read(target_fd.to_i32, buffer, count)
+      got.is_a?(Cancelled) ? -2_i64 : got
+    end
+
+    private def low_level_write(target_fd : Int64, buffer : Void*, count : UInt64) : Int64
+      raise "a pipe's reader is not written to" if count >= 0_u64
+      -1_i64
+    end
+
+    private def low_level_close(target_fd : Int64) : Nil
+      wake_closed(target_fd.to_i32)
+      __iyi_close(target_fd)
+    end
+  end
+
+  # The writing end of `IyiIO.pipe`: a write returns when all of it is in
+  # the pipe.
+  pub class PipeWriter < IyiIO
+    def initialize(fd : Int32)
+      super(fd.to_i64, 4096, true)
+    end
+
+    private def low_level_write(target_fd : Int64, buffer : Void*, count : UInt64) : Int64
+      fd = target_fd.to_i32
+      bytes = buffer.as(Pointer(UInt8))
+      size = count.to_i64.to_i32
+      done = 0
+      while done < size
+        put = PipeSys.write(fd, bytes + done, size - done)
+        if put >= 0_i64
+          done = done + put.to_i32
+        elsif put == -11_i64 || put == -35_i64 # EAGAIN, Linux and macOS
+          raise "a write to a full pipe, its task cancelled while it waited" if wait_writable(fd).is_a?(Cancelled)
+        elsif put == -32_i64
+          raise "a write to a pipe whose reader is closed"
+        elsif put != -4_i64 # EINTR is tried again
+          raise "a write to a pipe: errno #{-put}"
+        end
+      end
+      count.to_i64
+    end
+
+    private def low_level_read(target_fd : Int64, buffer : Void*, count : UInt64) : Int64
+      raise "a pipe's writer is not read from" if count >= 0_u64
+      -1_i64
+    end
+
+    private def low_level_close(target_fd : Int64) : Nil
+      wake_closed(target_fd.to_i32)
+      __iyi_close(target_fd)
+    end
+  end
+{% else %}
 # The reading end of `IyiIO.pipe`.
 pub class PipeReader < IyiIO
   @channel : Channel(String)
@@ -226,6 +367,8 @@ pub class PipeWriter < IyiIO
     @channel.close
   end
 end
+
+{% end %}
 
 # An `IyiIO` over bytes in memory. Writes land at the cursor and grow the
 # buffer; reads advance the cursor; `to_s` is the whole buffer.

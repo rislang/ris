@@ -119,8 +119,8 @@ fi
 
 # A pipe's writer waits while the pipe is full (930722c made it panic).
 out=$("$RIS" run test/ris/pipe_wait.ri 2>&1)
-if [ "$?" -eq 0 ] && [ "$out" = 'PASS: pipe writer waits' ]; then
-  echo "runs     pipe_wait (writer waits, order)"
+if [ "$?" -eq 0 ] && grep -qxF 'PASS: pipe writer waits' <<<"$out"; then
+  echo "runs     pipe_wait (OS pipe: writer waits, order, closed reader)"
 else
   echo "FAILED   pipe_wait: $out"; status=1
 fi
