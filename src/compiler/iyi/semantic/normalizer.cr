@@ -479,7 +479,8 @@ module Iyi
       end
       # ris: in a program, `x.to_s` and `String.build` make tape text (a
       # Str), as interpolation does; std and the runtime keep String.
-      if @macro_code == 0 && program.tape_platform? && ris_program_code?(node)
+      if @macro_code == 0 && program.tape_platform? && ris_program_code?(node) &&
+         @current_def.try(&.return_type).try(&.to_s) != "String"
         if node.name == "to_s" && (obj = node.obj) && node.args.empty? &&
            !node.block && !node.named_args && !node.block_arg
           return Call.new(Path.global("Str").at(node), "interpolate", obj).at(node).transform(self)

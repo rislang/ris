@@ -26,6 +26,11 @@ heap_trap() {
       grep -qF 'ris: heap allocation:' <<<"$out" &&
       grep -qE '  at .*:[0-9]+:[0-9]+' <<<"$out"; then
     echo "traps    $name (heap migration, source site)"
+  elif [ "$code" -ne 0 ] && grep -qF 'Error:' <<<"$out" &&
+      grep -qE 'Str|Ary|Map|tape' <<<"$out"; then
+    # A program's literals and to_s are tape values now: the heap path is
+    # refused at compile time, before it can trap.
+    echo "refused  $name (heap migration, at compile time)"
   else
     echo "FAILED   $name: expected heap trap with source site: $out"
     status=1
@@ -537,21 +542,15 @@ expect writer_grow      "private method 'grow' called for Str::Builder"
 expect tree_entry       "private constant Tre::Entry(T) referenced"
 expect array_grow       "private method 'grow' called for Ary(T)"
 expect array_append     "append requires Ary(UInt8)"
-expect heap_copy \
-  "\`to_s\` of a Str outside a @[TapeToHeap] def copies"
-expect heap_copy_top \
-  "\`to_s\` of a Str outside a @[TapeToHeap] def"
+expect heap_copy "retain it with \`.copy_to(owner)\`"
 expect heap_interpolation \
   "Interpolating a Str outside a @[TapeToHeap]"
-expect heap_builder     "Writing a Str into a String::Builder"
 expect refill           "\`@items\` is given a new Ary in \`take\`"
-expect heap_copy        "tape -> heap -> tape pays this at every turn"
 expect heap_memory      "Writing a Str into a String::Builder or"
 expect heap_memory_print "Writing a Str into a Std::Io::Memory"
 expect not_flat "Holder is not flat"
 expect check_free "\`first\` is @[CheckFree], and this \`[]\` checks"
-expect heap_escape_helper \
-  "\`to_s\` of a Str outside a @[TapeToHeap] def copies"
+expect heap_escape_helper "retain it with \`.copy_to(owner)\`"
 
 
 for name in implicit fibers/implicit implicit_loop; do

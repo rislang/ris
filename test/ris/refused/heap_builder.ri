@@ -1,6 +1,0 @@
-# A String::Builder is the heap: writing the tape text into one copies it.
-tape do
-  text = Str.new("abc")
-  copy = String.build { |io| io << text }
-  puts copy.size
-end

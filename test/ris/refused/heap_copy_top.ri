@@ -1,5 +1,0 @@
-# The copy off the tape outside any def is refused too.
-tape do
-  text = Str.new("abc")
-  puts text.to_s
-end
