@@ -106,7 +106,7 @@ out=$(
   exit "$code"
 )
 if [ "$?" -ne 0 ] &&
-    grep -qF 'use Str.interpolate(...) on the current tape' <<<"$out"; then
+    grep -qE 'use Str.interpolate\(...\) on the current tape|retain it with `.copy_to' <<<"$out"; then
   echo 'refused  interpolation_retained (names the Str form)'
 else
   echo "FAILED   interpolation_retained: $out"; status=1

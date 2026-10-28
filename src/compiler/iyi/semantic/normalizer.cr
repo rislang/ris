@@ -1097,7 +1097,10 @@ module Iyi
     # Macro code and annotation arguments remain compiler metadata.
     private def tape_text?(node : ASTNode) : Bool
       file = node.location.try(&.original_filename)
-      @macro_code == 0 && !!file && file.ends_with?(".ri") &&
+      # ris: every program file, .ri or .iyi, has no heap: its text is tape
+      # text. std, the runtime and artifacts keep String until migrated.
+      @macro_code == 0 && !!file &&
+        (file.ends_with?(".ri") || (file.ends_with?(".iyi") && ris_program_code?(node))) &&
         !TapePointerCheckerLibrary.library?(node.location)
     end
 

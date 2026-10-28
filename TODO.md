@@ -90,6 +90,12 @@ part B.
 
 ## Remove the heap and switch off the GC
 
+* A task's value of a tape type (Str, Ary, Map, @[OnTape]) is refused:
+  the task's tape ends with it. Copy the result onto the joiner's tape
+  at task.value (TAPE_SPEC 5.2 result copy). Blocks samples/iyi/workers
+  (tasks answer "<name>" text) and test/ris/workers_check.py.
+* Error#message answers String, which a program cannot build without a
+  heap: let it answer Str (or write into a builder) across std.
 * Kernel threads and spawn_parallel without a collector: thread.iyi and
   the parallel pool are gated on !gc_none, so ris programs have no
   IyiThread and run every task on one core. Split the stop-the-world
