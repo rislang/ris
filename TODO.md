@@ -26,11 +26,9 @@ resumed in the same session, one full check per item, all in this
 checkout. Pipe/socket race need poller work for several IO waits at
 once; Channel stays for them until then.
 
-* Finish the HTTP prefork port: the server, std, samples and bench
-  exercises are ported; fix the websocket failures listed
-  under Known failure, then remove this item. A task-owned Conn
-  must not grow its buffer inside a nested tape block: TLS/HTTP/2
-  connections stay program-owned until growth has an owner-level path.
+* Give a task-owned Conn an owner-level buffer growth path: growth in a
+  nested tape block ends with the block, so TLS/HTTP/2 connections stay
+  program-owned (one buffer per connection never freed) until then.
 * Enforce Share-or-copy task captures, local and parallel, through captured
   receivers, handlers and reached state; keep all resources in their
   opening task. Gate: mutable/resource captures refused with safe forms,
@@ -119,9 +117,8 @@ once; Channel stays for them until then.
   make tape-independent fixes in iyi first, or record them in UPSTREAM.md.
 * bench/concurrency_exercise.sh fails with "pipe2 failed" after its
   32,000 sleepers test (seen 2026-10-27 before the group-end change).
-* bench/std_websocket_exercise.sh: the bare-socket copy refuses
-  @[TaskClosureUnsafe] at std/http.iyi:1787, and x86_64-windows-msvc
-  rejects Str in File.extname.
+* x86_64-windows-msvc does not typecheck std/socket.iyi:572
+  (connect_named: opaque callback effects); fix with the socket race.
 * The mutation phases of std_acme, cookie, router, sse and websocket
   .sh run past 20 minutes; check whether they finish at all.
 

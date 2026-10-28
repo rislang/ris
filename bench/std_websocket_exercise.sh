@@ -1013,8 +1013,10 @@ closed 1000 done'
   # Python client, reading TLS, must fail.
   if [ -s "$WORK/ws-client.py" ]; then
     rm -rf "$WORK/bare"
-    mkdir -p "$WORK/bare/std"
-    if ! "$PY" - "$REPO/src/std/http.iyi" "$WORK/bare/std/http.iyi" <<'PY'
+    # Under src/std/, where runtime annotations such as
+    # @[TaskClosureUnsafe] are allowed.
+    mkdir -p "$WORK/bare/src/std"
+    if ! "$PY" - "$REPO/src/std/http.iyi" "$WORK/bare/src/std/http.iyi" <<'PY'
 import sys
 src = open(sys.argv[1], encoding="utf-8").read()
 old = "      conn.held { takeover.call(socket, leftover) }"
@@ -1025,7 +1027,7 @@ PY
     then
       echo "  the bare-socket patch did not apply"
       status=1
-    elif ! IYI_PATH="$WORK/bare${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/ws-bare" "$REPO/bench/std_websocket_exercise.iyi" >"$WORK/bare.log" 2>&1; then
+    elif ! IYI_PATH="$WORK/bare/src${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/ws-bare" "$REPO/bench/std_websocket_exercise.iyi" >"$WORK/bare.log" 2>&1; then
       echo "  the bare-socket copy did not compile"
       sed -n '1,6p' "$WORK/bare.log" | sed 's/^/    /'
       status=1

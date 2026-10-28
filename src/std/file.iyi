@@ -1062,7 +1062,7 @@ class ::File
       inf = info?(path)
       return false unless inf
       return readable?(path) if inf.directory?
-      extension = extname(path).upcase
+      extension = extname(path.is_a?(Str) ? path.to_heap : path).upcase
       return false if extension.empty?
       pathext = Program.env("PATHEXT") || ".COM;.EXE;.BAT;.CMD"
       pathext.upcase.split(';').includes?(extension) && readable?(path)
