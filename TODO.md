@@ -21,15 +21,18 @@ How to work (fewer tokens, faster to the goal):
 
 ## Estimates (2026-10-28, rough)
 
-Codex Sol low tokens; review adds 10-30%. Before testing ris programs:
-the first two rows. Update a row when its work starts or ends.
+Codex Sol low tokens; review adds 10-30%. Done 2026-10-28: no GC is the
+only mode; program literals, to_s, prints, closures and task values are
+on the tape, with the core Str/Ary/Map API. Before testing ris programs:
+the std row. Update a row when its work starts or ends.
 
 | Work                                  | Size     | Time      | Tokens    |
 |---------------------------------------|----------|-----------|-----------|
-| No GC is the only program mode         | medium   | 1-2 h     | 100-200k  |
-| std paths that still use the heap     | large    | 1-3+ days | 300k-1M+  |
-| 5.1 bench ports, part 1 (6 benches)   | medium   | 1-2 h     | 150-250k  |
-| 5.1 bench ports, std_* + SocketStop   | med-lrg  | 3-5 h     | 300-500k  |
+| std paths that still use the heap     | large    | 1-3 days  | 300k-1M   |
+| Kernel threads without a collector    | large    | 1-2 days  | 300-500k  |
+| Task value: @[OnTape] and nested      | medium   | 2-4 h     | 100-200k  |
+| Closure env inside a nested tape do   | medium   | 2-4 h     | 100-200k  |
+| 5.1 std_* bench ports: verify no GC   | medium   | 2-4 h     | 150-300k  |
 | 5.1 holes: reached state, aliases     | large    | 4-8 h     | 200-400k  |
 | Autocert part B                       | medium   | 2-4 h     | 150-300k  |
 | Task-owned Conn buffer growth         | med-lrg  | 3-5 h     | 150-300k  |
@@ -109,21 +112,12 @@ part B.
   remaining std and runtime paths required by supported workloads.
 * Audit final program binaries for collector linkage and forbidden heap
   allocator dependencies; keep the compiler's own GC choice separate.
-* Finish check.sh under the sole no-GC mode. Library output and panic
-  interpolation now use Str; sync stdout's newline uses a tape builder.
-  Allocation sites use call locations without requiring debug metadata,
-  and closure environments fall back to their defining scope's location.
-  cleanup_panic, copy_rollback and both 1 MiB socket tests now pass.
-* Pipe and autocert need shared endpoint ownership. Simply marking
-  PipeReader/PipeWriter OnTape correctly refuses spawned-task captures.
-  Choose generation-checked typed pool handles or checked joined borrows;
-  then migrate their buffers and read_bytes API onto the caller's tape.
-* program_threads, program_field_thread and program_readers still use
-  IyiThread, absent under gc_none. Choose a supported no-GC native-thread
-  API and its storage/lifecycle before restoring these thread gates.
-* cleanup_self retains an ordinary self-capturing closure. Prove its
-  local lifetime and allocate its frame on the stack, or define checked
-  tape ownership for ordinary escaping closures; do not exempt its heap.
+* Finish check.sh under the sole no-GC mode. Seven left: autocert
+  lifecycle, hpack, http_continue, answer, http_prefork,
+  time_tape_offset (std String paths) and fibers/spares (memory).
+* Pipe ends are program objects (56 bytes each, kept until exit) and
+  IyiIO#read_str answers tape text. Replace with generation-checked
+  typed pool handles so a closed pipe's end is reused; autocert next.
 * HTTP answer's slow request path still uses String-based read_head and
   body readers. Migrate those before claiming chunked/Expect/HTTP/1.0
   answer parity without a heap. Recheck prefork, TLS and samples/ris/web.
