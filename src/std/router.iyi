@@ -288,24 +288,6 @@ pub class Pattern
   # The wildcards' values when *path* - a request path, rooted and clean,
   # still percent-encoded - matches this pattern's path; nil when it does
   # not. The method and host are not looked at.
-  def match(path : String) : Hash(String, String)?
-    result = nil.as(Hash(String, String)?)
-    tape do
-      found = match(path.as_tape)
-      result = found.to_heap if found
-    end
-    result
-  end
-
-  def self.pieces(path : String) : Array(String)?
-    result = nil.as(Array(String)?)
-    tape do
-      parts = pieces(path.as_tape)
-      result = parts.to_heap if parts
-    end
-    result
-  end
-
   def match(path : String) : Captures?
     pieces = Pattern.pieces(path)
     pieces ? match_pieces(pieces) : nil

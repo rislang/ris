@@ -119,7 +119,7 @@ pub enum RsaHash
   SHA384
   SHA512
 
-  def digest(data : Array(UInt8)) : Array(UInt8)
+  def digest(data : Array::View(UInt8)) : Array(UInt8)
     case self
     when RsaHash::SHA1   then Std::Digest::SHA1.hash_bytes(data)
     when RsaHash::SHA256 then Std::Digest::SHA256.hash_bytes(data)
@@ -163,7 +163,7 @@ pub struct RsaPublicKey
   MAX_BITS       = 16384
 
   # The key from a modulus and an exponent, each big-endian.
-  def self.new(modulus : Array(UInt8), exponent : Array(UInt8)) : RsaPublicKey | RsaError
+  def self.new(modulus : Array::View(UInt8), exponent : Array::View(UInt8)) : RsaPublicKey | RsaError
     n = BigInt.from_bytes(modulus)
     e = BigInt.from_bytes(exponent)
     bits = RsaBytes.bit_length(modulus)
@@ -182,7 +182,7 @@ pub struct RsaPublicKey
   end
 
   # An RSAPublicKey (RFC 8017 appendix A.1.1): SEQUENCE { modulus, exponent }.
-  def self.from_pkcs1(der : Array(UInt8)) : RsaPublicKey | RsaError
+  def self.from_pkcs1(der : Array::View(UInt8)) : RsaPublicKey | RsaError
     value = RsaBytes.asn1_value(Der.parse(der))!
     fields = RsaBytes.asn1_values(value.sequence)!
     return RsaError.new("an RSAPublicKey of #{fields.size} values, not 2") unless fields.size == 2
@@ -192,7 +192,7 @@ pub struct RsaPublicKey
   end
 
   # A SubjectPublicKeyInfo (RFC 5280 section 4.1.2.7) naming rsaEncryption.
-  def self.from_spki(der : Array(UInt8)) : RsaPublicKey | RsaError
+  def self.from_spki(der : Array::View(UInt8)) : RsaPublicKey | RsaError
     value = RsaBytes.asn1_value(Der.parse(der))!
     from_spki(value)
   end
@@ -212,7 +212,7 @@ pub struct RsaPublicKey
 
   # Whether *signature* is the PKCS #1 v1.5 signature (RSASSA-PKCS1-v1_5,
   # section 8.2.2) of *message* under *hash*.
-  def verify_pkcs1v15(hash : RsaHash, message : Array(UInt8) | String, signature : Array(UInt8)) : Bool
+  def verify_pkcs1v15(hash : RsaHash, message : Array::View(UInt8) | String, signature : Array::View(UInt8)) : Bool
     em = open(signature)
     return false unless em
     prefix = hash.digest_info_prefix
@@ -230,7 +230,7 @@ pub struct RsaPublicKey
   # Whether *signature* is an RSASSA-PSS signature (section 8.1.2) of
   # *message* under *hash*, MGF1 over the same hash, with a salt of
   # *salt_length* bytes (the digest's length when nil).
-  def verify_pss(hash : RsaHash, message : Array(UInt8) | String, signature : Array(UInt8), salt_length : Int32? = nil) : Bool
+  def verify_pss(hash : RsaHash, message : Array::View(UInt8) | String, signature : Array::View(UInt8), salt_length : Int32? = nil) : Bool
     s_len = salt_length || hash.size
     return false if s_len < 0
     m = open_value(signature)
@@ -265,13 +265,13 @@ pub struct RsaPublicKey
   # RSAVP1 (section 5.2.2) and I2OSP into the modulus's length: the
   # encoded message a signature opens to, or nil for one that is not a
   # signature under this key.
-  private def open(signature : Array(UInt8)) : Array(UInt8)?
+  private def open(signature : Array::View(UInt8)) : Array(UInt8)?
     m = open_value(signature)
     return nil unless m
     m.to_bytes(@size)
   end
 
-  private def open_value(signature : Array(UInt8)) : BigInt?
+  private def open_value(signature : Array::View(UInt8)) : BigInt?
     return nil unless signature.size == @size
     s = BigInt.from_bytes(signature)
     return nil unless s < @modulus
@@ -301,7 +301,7 @@ pub struct RsaPrivateKey
 
   # The key from its eight numbers, each big-endian - n, e, d, p, q, dp,
   # dq, qi - or why they are not one.
-  def self.new(modulus : Array(UInt8), exponent : Array(UInt8), d : Array(UInt8), p : Array(UInt8), q : Array(UInt8),
+  def self.new(modulus : Array::View(UInt8), exponent : Array::View(UInt8), d : Array::View(UInt8), p : Array::View(UInt8), q : Array(UInt8),
                dp : Array(UInt8), dq : Array(UInt8), qi : Array(UInt8)) : RsaPrivateKey | RsaError
     public = RsaPublicKey.new(modulus, exponent)!
     return RsaError.new("a private key of #{public.bits} bits, under the #{MIN_BITS} this signs with") if public.bits < MIN_BITS
@@ -345,7 +345,7 @@ pub struct RsaPrivateKey
 
   # An RSAPrivateKey (appendix A.1.2) of two primes: version 0 and the
   # eight numbers.
-  def self.from_pkcs1(der : Array(UInt8)) : RsaPrivateKey | RsaError
+  def self.from_pkcs1(der : Array::View(UInt8)) : RsaPrivateKey | RsaError
     fields = RsaBytes.asn1_values(RsaBytes.asn1_value(Der.parse(der))!.sequence)!
     version = fields.empty? ? nil : fields[0].integer
     if version.is_a?(Int64) && version == 1_i64
@@ -360,7 +360,7 @@ pub struct RsaPrivateKey
   # A PKCS #8 PrivateKeyInfo or OneAsymmetricKey (RFC 5958) naming
   # rsaEncryption, its privateKey an RSAPrivateKey. Attributes are passed
   # over; a public key, which version 1 may carry, must be the key's own.
-  def self.from_pkcs8(der : Array(UInt8)) : RsaPrivateKey | RsaError
+  def self.from_pkcs8(der : Array::View(UInt8)) : RsaPrivateKey | RsaError
     fields = RsaBytes.asn1_values(RsaBytes.asn1_value(Der.parse(der))!.sequence)!
     return RsaError.new("a PrivateKeyInfo of #{fields.size} values") if fields.size < 3
     version = fields[0].integer
@@ -404,7 +404,7 @@ pub struct RsaPrivateKey
 
   # RSASSA-PKCS1-v1_5 (section 8.2.1) of *message* under *hash*: 0x00
   # 0x01, the 0xFF padding, 0x00, the hash's DigestInfo and the digest.
-  def sign_pkcs1v15(hash : RsaHash, message : Array(UInt8) | String) : Array(UInt8)
+  def sign_pkcs1v15(hash : RsaHash, message : Array::View(UInt8) | String) : Array(UInt8)
     signable(hash)
     t = hash.digest_info_prefix + hash.digest(RsaBytes.of(message))
     em = Array(UInt8).new(size, 0xFF_u8)
@@ -418,7 +418,7 @@ pub struct RsaPrivateKey
   # RSASSA-PSS (section 8.1.1) of *message* under *hash*, MGF1 over the
   # same hash: EMSA-PSS-ENCODE (section 9.1.1) with a salt as long as the
   # digest, drawn as the module's header says.
-  def sign_pss(hash : RsaHash, message : Array(UInt8) | String) : Array(UInt8)
+  def sign_pss(hash : RsaHash, message : Array::View(UInt8) | String) : Array(UInt8)
     signable(hash)
     m_hash = hash.digest(RsaBytes.of(message))
     h_len = hash.size
@@ -443,7 +443,7 @@ pub struct RsaPrivateKey
   # given out. The two halves are the private exponents', so they go
   # through `pow_mod_secret`; p and q are odd, their product being n,
   # which is odd.
-  private def rsasp1(em : Array(UInt8)) : Array(UInt8)
+  private def rsasp1(em : Array::View(UInt8)) : Array(UInt8)
     m = BigInt.from_bytes(em)
     r, r_inverse = blinding(em)
     c = (m * r.pow_mod(@e, @n)) % @n
@@ -459,7 +459,7 @@ pub struct RsaPrivateKey
   # r, an HMAC of the encoded message under the key's own secret reduced
   # mod n, and r^-1 mod n; the next counter's r in the 2^-1000 case of one
   # with no inverse.
-  private def blinding(em : Array(UInt8)) : {BigInt, BigInt}
+  private def blinding(em : Array::View(UInt8)) : {BigInt, BigInt}
     counter = 0_u8
     while true
       wide = [] of UInt8
@@ -524,7 +524,7 @@ end
 # The lengths and the mask PSS needs, the HMAC signing draws on, and
 # std/asn1's errors as this one's.
 struct RsaBytes
-  def self.mac(hash : RsaHash, key : Array(UInt8), data : Array(UInt8)) : Array(UInt8)
+  def self.mac(hash : RsaHash, key : Array::View(UInt8), data : Array::View(UInt8)) : Array(UInt8)
     case hash
     when RsaHash::SHA256 then HMAC.digest(SHA256, key, data)
     when RsaHash::SHA384 then HMAC.digest(SHA384, key, data)
@@ -533,7 +533,7 @@ struct RsaBytes
   end
 
   # The length in bits of the big-endian *bytes*, leading zeros not counted.
-  def self.bit_length(bytes : Array(UInt8)) : Int32
+  def self.bit_length(bytes : Array::View(UInt8)) : Int32
     i = 0
     while i < bytes.size && bytes[i] == 0_u8
       i = i + 1
@@ -549,7 +549,7 @@ struct RsaBytes
   end
 
   # MGF1 (appendix B.2.1): *size* bytes of Hash(seed || counter) blocks.
-  def self.mgf1(hash : RsaHash, seed : Array(UInt8), size : Int32) : Array(UInt8)
+  def self.mgf1(hash : RsaHash, seed : Array::View(UInt8), size : Int32) : Array(UInt8)
     mask = [] of UInt8
     counter = 0_u32
     while mask.size < size
@@ -558,12 +558,13 @@ struct RsaBytes
       mask.concat(hash.digest(block))
       counter = counter + 1
     end
-    mask[0, size]
+    mask.truncate(size)
+    mask
   end
 
-  def self.of(message : Array(UInt8) | String) : Array(UInt8)
-    return message if message.is_a?(Array(UInt8))
-    Array(UInt8).new(message.bytesize) { |i| message.to_unsafe[i] }
+  def self.of(message : Array::View(UInt8) | String) : Array::View(UInt8)
+    return message if message.is_a?(Array::View(UInt8))
+    Array(UInt8).new(message.bytesize) { |i| message[i] }.view
   end
 
   def self.from_hex(hex : String) : Array(UInt8)

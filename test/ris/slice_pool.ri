@@ -7,6 +7,22 @@ struct PoolDefault
   end
 end
 
+@[OnTape]
+private struct PrivatePoolValue
+  getter text : String
+
+  def initialize(@text : String)
+  end
+end
+
+tape do
+  pool = SlicePool(PrivatePoolValue).new(4)
+  run = pool.alloc_slice(1, PrivatePoolValue.new("private"))
+  grown = pool.realloc_slice(run, 2, PrivatePoolValue.new("next"))
+  raise "private pool type" unless grown[0].text == "private" &&
+    grown[1].text == "next"
+end
+
 tape do
   pool = SlicePool(Int32).new(32)
   a = pool.alloc_slice(4)

@@ -100,6 +100,7 @@ class Iyi::TapeChecker
     return false unless visiting.add?(type)
     if type.is_a?(GenericClassInstanceType)
       return false if type.to_s.starts_with?("Array::View(") ||
+                      type.to_s.starts_with?("Tre::View(") ||
                       type.to_s.starts_with?("SlicePool::Run(")
       return true if {"Array", "Tre", "SlicePool"}.includes?(type.generic_type.name)
     end

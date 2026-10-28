@@ -377,9 +377,39 @@ end
 pub struct Any
   alias Type = Nil | Bool | Int64 | Float64 | String | Array(Any) | Hash(String, Any)
 
-  getter raw : Type
+  getter document : Document
+  @index : Int32
 
-  def initialize(@raw : Type)
+  def initialize(value : Type)
+    parser = DocumentParser.new(JSON.to_json(value))
+    parser.parse
+    failure = parser.error
+    raise failure unless failure.nil?
+    @document = parser.document
+    @index = 0
+  end
+
+  def initialize(@document : Document, @index : Int32 = 0)
+  end
+
+  def raw : Type
+    case @document.kind(@index)
+    when Document::Kind::Null then nil
+    when Document::Kind::Bool then @document.bool(@index)
+    when Document::Kind::Int then @document.int(@index)
+    when Document::Kind::Float then @document.float(@index)
+    when Document::Kind::String then @document.string(@index)
+    when Document::Kind::Array
+      result = Array(Any).new(@document.size(@index))
+      @document.each(@index) { |child| result << Any.new(@document, child) }
+      result
+    else
+      result = Hash(String, Any).new(@document.size(@index))
+      @document.each(@index) do |child|
+        result[@document.key(child)] = Any.new(@document, child)
+      end
+      result
+    end
   end
 
   def self.new(val : Int32) : Any
@@ -389,9 +419,9 @@ pub struct Any
   # The kind of value this is, in the word a refusal uses: `null`, `bool`,
   # `integer`, `float`, `string`, `array` or `object`.
   def kind : String
-    if @raw.nil?
+    if raw.nil?
       "null"
-    elsif @raw.is_a?(Bool)
+    elsif raw.is_a?(Bool)
       "bool"
     elsif as_s?
       "string"
@@ -407,17 +437,17 @@ pub struct Any
   end
 
   def as_nil : Nil
-    raise "as_nil of a JSON #{kind}" unless @raw.nil?
+    raise "as_nil of a JSON #{kind}" unless raw.nil?
     nil
   end
 
   def as_bool : Bool
-    raise "as_bool of a JSON #{kind}" unless @raw.is_a?(Bool)
-    @raw.as(Bool)
+    raise "as_bool of a JSON #{kind}" unless raw.is_a?(Bool)
+    raw.as(Bool)
   end
 
   def as_bool? : Bool?
-    case r = @raw
+    case r = raw
     when Bool then r
     else           nil
     end
@@ -442,7 +472,7 @@ pub struct Any
   end
 
   def as_i64? : Int64?
-    case r = @raw
+    case r = raw
     when Int64 then r
     else            nil
     end
@@ -454,7 +484,7 @@ pub struct Any
   end
 
   def as_f? : Float64?
-    case r = @raw
+    case r = raw
     when Float64 then r
     when Int64   then r.to_f64
     else              nil
@@ -462,7 +492,7 @@ pub struct Any
   end
 
   protected def float_value? : Float64?
-    case r = @raw
+    case r = raw
     when Float64 then r
     else              nil
     end
@@ -473,7 +503,7 @@ pub struct Any
   end
 
   def as_s? : String?
-    case r = @raw
+    case r = raw
     when String then r
     else             nil
     end
@@ -484,7 +514,7 @@ pub struct Any
   end
 
   def as_a? : Array(Any)?
-    case r = @raw
+    case r = raw
     when Array(Any) then r
     else                 nil
     end
@@ -495,7 +525,7 @@ pub struct Any
   end
 
   def as_h? : Hash(String, Any)?
-    case r = @raw
+    case r = raw
     when Hash(String, Any) then r
     else                        nil
     end
@@ -585,41 +615,35 @@ pub struct Any
   # scalar's locals sat in each level's frame, and a 256-level document
   # compared in a task ran Windows' 256 KB stack out.
   def ==(other : Any) : Bool
-    if a = as_a?
-      b = other.as_a?
-      return false if b.nil?
-      return false if a.size != b.size
-      idx = 0
-      while idx < a.size
-        return false unless a[idx] == b[idx]
-        idx = idx + 1
+    pending = Array(Tuple(Any, Any)).new
+    pending << {self, other}
+    until pending.empty?
+      left, right = pending.pop
+      if a = left.as_a?
+        b = right.as_a?
+        return false unless b && a.size == b.size
+        a.each_with_index { |child, i| pending << {child, b[i]} }
+      elsif a = left.as_h?
+        b = right.as_h?
+        return false unless b && a.size == b.size
+        a.each do |key, child|
+          value = b[key]?
+          return false unless value
+          pending << {child, value}
+        end
+      else
+        return false unless left.scalar_equals?(right)
       end
-      true
-    elsif h = as_h?
-      oh = other.as_h?
-      return false if oh.nil?
-      return false if h.size != oh.size
-      keys = h.keys
-      idx = 0
-      while idx < keys.size
-        k = keys[idx]
-        ov = oh[k]?
-        return false if ov.nil?
-        return false unless h[k] == ov
-        idx = idx + 1
-      end
-      true
-    else
-      scalar_equals?(other)
     end
+    true
   end
 
   @[NoInline]
-  private def scalar_equals?(other : Any) : Bool
-    if @raw.nil?
+  protected def scalar_equals?(other : Any) : Bool
+    if raw.nil?
       other.raw.nil?
-    elsif @raw.is_a?(Bool)
-      other.raw.is_a?(Bool) && @raw.as(Bool) == other.raw.as(Bool)
+    elsif raw.is_a?(Bool)
+      other.raw.is_a?(Bool) && raw.as(Bool) == other.raw.as(Bool)
     elsif s = as_s?
       o = other.as_s?
       o.nil? ? false : s == o
@@ -657,36 +681,46 @@ pub struct Any
   # The containers recurse; a scalar is hashed out of line, so a level of
   # a deep document costs only the container's frame (as `==`).
   def hash : Int32
-    if a = as_a?
-      # As an `Array` hashes. It was `31 * h + e`, an integer hashing as
-      # itself: `[1,0]` and `[0,31]` hashed alike, and a 150 by 150 grid of
-      # `[i, j]` had 4,769 hashes for its 22,500 values.
-      a.hash
-    elsif h = as_h?
-      # A sum over the pairs, each pair's two hashes packed into one word and
-      # put through splitmix64's finaliser, so the terms share no structure
-      # the sum could cancel. It was the sum of `31 * k.hash + v.hash`:
-      # `{"a":1,"b":2}` and `{"a":2,"b":1}` hashed alike, and 160,000 objects
-      # `{"x":i,"y":j}` took 26 s to go into a `Hash(Any, Bool)`.
-      value = 0x9E3779B97F4A7C15_u64 ^ h.size.to_i64.unsafe_to_u64
-      h.each do |k, v|
-        pair = k.hash.to_i64.unsafe_to_u64.unsafe_shl(32_u64) | (v.hash.to_i64.unsafe_to_u64 & 0xFFFFFFFF_u64)
-        pair = (pair ^ pair.unsafe_shr(30_u64)) &* 0xBF58476D1CE4E5B9_u64
-        pair = (pair ^ pair.unsafe_shr(27_u64)) &* 0x94D049BB133111EB_u64
-        value = value &+ (pair ^ pair.unsafe_shr(31_u64))
+    stop = @document.tree.stop(@index)
+    hashes = Array(Int32).new(stop - @index, 0)
+    index = stop - 1
+    while index >= @index
+      kind = @document.kind(index)
+      if kind == Document::Kind::Array
+        value = 0x9E3779B97F4A7C15_u64 ^
+          @document.size(index).to_i64.unsafe_to_u64
+        @document.each(index) do |child|
+          value = (value ^ hashes[child - @index].to_i64.unsafe_to_u64) &*
+            0x100000001B3_u64
+          value = value ^ value.unsafe_shr(29_u64)
+        end
+        hashes[index - @index] = value.hash
+      elsif kind == Document::Kind::Object
+        value = 0x9E3779B97F4A7C15_u64 ^
+          @document.size(index).to_i64.unsafe_to_u64
+        @document.each(index) do |child|
+          pair = @document.key(child).hash.to_i64.unsafe_to_u64
+            .unsafe_shl(32_u64) |
+            (hashes[child - @index].to_i64.unsafe_to_u64 & 0xFFFFFFFF_u64)
+          pair = (pair ^ pair.unsafe_shr(30_u64)) &* 0xBF58476D1CE4E5B9_u64
+          pair = (pair ^ pair.unsafe_shr(27_u64)) &* 0x94D049BB133111EB_u64
+          value = value &+ (pair ^ pair.unsafe_shr(31_u64))
+        end
+        hashes[index - @index] = value.hash
+      else
+        hashes[index - @index] = Any.new(@document, index).scalar_hash
       end
-      value.hash
-    else
-      scalar_hash
+      index -= 1
     end
+    hashes[0]
   end
 
   @[NoInline]
-  private def scalar_hash : Int32
-    if @raw.nil?
+  protected def scalar_hash : Int32
+    if raw.nil?
       0
-    elsif @raw.is_a?(Bool)
-      @raw.as(Bool) ? 1 : 2
+    elsif raw.is_a?(Bool)
+      raw.as(Bool) ? 1 : 2
     elsif s = as_s?
       s.hash
     elsif i = as_i64?
@@ -730,7 +764,7 @@ pub struct Any
   def to_s : String
     if s = as_s?
       s
-    elsif @raw.nil?
+    elsif raw.nil?
       ""
     else
       to_json
@@ -744,36 +778,7 @@ end
 
 impl ToJSON for Any
   def to_json(json : Builder) : Nil
-    if @raw.nil?
-      json.null
-    elsif @raw.is_a?(Bool)
-      json.bool(@raw.as(Bool))
-    elsif s = as_s?
-      json.string(s)
-    elsif i = as_i64?
-      json.number(i)
-    elsif f = float_value?
-      json.number(f)
-    elsif a = as_a?
-      json.start_array
-      idx = 0
-      while idx < a.size
-        a[idx].to_json(json)
-        idx = idx + 1
-      end
-      json.end_array
-    elsif h = as_h?
-      json.start_object
-      keys = h.keys
-      idx = 0
-      while idx < keys.size
-        k = keys[idx]
-        json.field(k)
-        h[k].to_json(json)
-        idx = idx + 1
-      end
-      json.end_object
-    end
+    @document.to_json(json, @index)
   end
 end
 
@@ -794,6 +799,7 @@ enum TokenKind
   Error
 end
 
+@[OnTape]
 struct Token
   property kind : TokenKind
   # A number's text, as the span of the input it was read from: made into
@@ -841,11 +847,6 @@ struct Lexer
   @token : Token
   @string_buffer : StringBuffer?
   @error : String?
-  # Short strings the lexer has already made, by a hash of their bytes: an
-  # object's keys are the same few strings in every object of an array,
-  # and each was a new substring. A slot holds the last string that hashed
-  # there, so a miss costs the substring it always did.
-  @short : Array(String)?
   # Strings are spans of the input, not Strings: the tape reader's mode.
   @spans : Bool
 
@@ -856,7 +857,6 @@ struct Lexer
     @token = Token.new
     @string_buffer = StringBuffer.new(input.bytesize)
     @error = nil
-    @short = Array(String).new(SHORT_SLOTS) { "" }
     @spans = false
   end
 
@@ -871,7 +871,6 @@ struct Lexer
     @token = Token.new
     @string_buffer = nil
     @error = nil
-    @short = nil
     @spans = true
   end
 
@@ -881,22 +880,9 @@ struct Lexer
     input[start, size].to_heap
   end
 
-  SHORT_SLOTS = 256
-  SHORT_MAX   =  24
-
-  # The string the input spells from *start* for *size* bytes.
+  # A token borrows the input instead of caching copies of short text.
   private def text_at(input : String, start : Int32, size : Int32) : String
-    return @input[start, size] if size > SHORT_MAX || size == 0
-    text = input[start, size]
-    h = 2166136261_u64
-    text.each_byte { |b| h = (h ^ b.to_u64) &* 16777619_u64 }
-    slot = (h ^ h.unsafe_shr(8_u64)).unsafe_to_i32 & (SHORT_SLOTS - 1)
-    short = @short || raise "span lexer has no string cache"
-    cached = short[slot]
-    return cached if text == cached
-    made = @input[start, size]
-    short[slot] = made
-    made
+    input[start, size]
   end
 
   def token : Token
@@ -1027,7 +1013,7 @@ struct Lexer
   # `true`, `false`, `null`: the whole word, and nothing joined to it.
   private def consume_word(input : String, word : String, kind : TokenKind, line : Int32, col : Int32) : Nil
     start = @pos
-    expected = word.to_unsafe
+    expected = word
     i = 0
     while i < word.bytesize
       if current_byte(input) != expected[i]
@@ -1494,189 +1480,20 @@ POW10 = {1.0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e1
 # do with it.
 @[OnTape]
 pub class Parser
-  @lexer : Lexer
-  @containers : Array(Tuple(Any, String))
-  @error : String?
+  @parser : DocumentParser
 
   def initialize(input : String)
-    @lexer = Lexer.new(input)
-    @containers = Array(Tuple(Any, String)).new(MAX_NESTING)
-    @error = nil
-    @lexer.next_token
+    @parser = DocumentParser.new(input)
   end
 
   def error : String?
-    @error
-  end
-
-  private def token : Token
-    @lexer.token
-  end
-
-  private def next_token : Token
-    @lexer.next_token
-  end
-
-  # The lexer's sentence when the current token is the one it refused, the
-  # parser's otherwise. The first failure is the one kept.
-  private def fail(reason : String, line : Int32, col : Int32) : Any
-    if @error.nil?
-      lexer_error = @lexer.error
-      @error = lexer_error.nil? ? "#{reason} at line #{line}, column #{col}" : lexer_error
-    end
-    Any.new(nil)
-  end
-
-  private def fail(reason : String) : Any
-    fail(reason, token.line_number, token.column_number)
+    @parser.error
   end
 
   def parse : Any
-    if token.kind == TokenKind::EOF
-      return fail("empty JSON input", 1, 1)
-    end
-    @containers.clear
-    result = parse_value
-    return result unless @error.nil?
-    unless token.kind == TokenKind::EOF
-      return fail("unexpected #{token_text} after JSON root value")
-    end
-    result
+    @parser.parse
+    Any.new(@parser.document)
   end
-
-  private def token_text : String
-    case token.kind
-    when TokenKind::BeginArray  then "'['"
-    when TokenKind::BeginObject then "'{'"
-    when TokenKind::EndArray    then "']'"
-    when TokenKind::EndObject   then "'}'"
-    when TokenKind::Colon       then "':'"
-    when TokenKind::Comma       then "','"
-    when TokenKind::True        then "'true'"
-    when TokenKind::False       then "'false'"
-    when TokenKind::Null        then "'null'"
-    when TokenKind::EOF         then "end of input"
-    when TokenKind::String      then "string"
-    when TokenKind::Int         then "number #{token.raw_value}"
-    when TokenKind::Float       then "number #{token.raw_value}"
-    else                             "value"
-    end
-  end
-
-  # Open containers and their pending object keys live on the caller's
-  # tape, so document depth does not consume the task's call stack.
-  private def parse_value : Any
-    loop do
-      value = Any.new(nil)
-      case token.kind
-      when TokenKind::BeginArray, TokenKind::BeginObject
-        depth = @containers.size + 1
-        if depth > MAX_NESTING
-          return fail("nesting depth of #{depth} exceeds maximum depth #{MAX_NESTING}")
-        end
-        array = token.kind == TokenKind::BeginArray
-        next_token
-        value = array ? Any.new([] of Any) : Any.new({} of String => Any)
-        closing = array ? TokenKind::EndArray : TokenKind::EndObject
-        if token.kind == closing
-          next_token
-        else
-          @containers << {value, ""}
-          read_key unless array
-          return Any.new(nil) unless @error.nil?
-          next
-        end
-      else
-        value = parse_scalar
-        return Any.new(nil) unless @error.nil?
-      end
-
-      # A completed value is attached to its parent. Closing that parent
-      # completes another value, without calling back into parse_value.
-      loop do
-        return value if @containers.empty?
-        container, key = @containers[@containers.size - 1]
-        array = container.as_a?
-        if array
-          array << value
-        else
-          container.as_h[key] = value
-        end
-        closing = array ? TokenKind::EndArray : TokenKind::EndObject
-        case token.kind
-        when TokenKind::Comma
-          comma_line = token.line_number
-          comma_col = token.column_number
-          next_token
-          if token.kind == closing
-            reason = array ? "trailing comma in array" : "trailing comma in object"
-            return fail(reason, comma_line, comma_col)
-          end
-          read_key unless array
-          return Any.new(nil) unless @error.nil?
-          break
-        else
-          unless token.kind == closing
-            reason = array ? "expected ',' or ']' in array" : "expected ',' or '}' in object"
-            return fail(reason)
-          end
-          next_token
-          @containers.pop
-          value = container
-        end
-      end
-    end
-  end
-
-  private def read_key : Nil
-    unless token.kind == TokenKind::String
-      fail("expected string key in object")
-      return
-    end
-    container = @containers[@containers.size - 1][0]
-    key = token.string_value
-    if container.as_h.has_key?(key)
-      fail("duplicate key '#{key}'")
-      return
-    end
-    @containers[@containers.size - 1] = {container, key}
-    next_token # the key
-    unless token.kind == TokenKind::Colon
-      fail("expected ':' after object key")
-      return
-    end
-    next_token # ':'
-  end
-
-  @[NoInline]
-  private def parse_scalar : Any
-    case token.kind
-    when TokenKind::Null
-      next_token
-      Any.new(nil)
-    when TokenKind::True
-      next_token
-      Any.new(true)
-    when TokenKind::False
-      next_token
-      Any.new(false)
-    when TokenKind::Int
-      val = token.int_value
-      next_token
-      Any.new(val)
-    when TokenKind::Float
-      val = token.float_value
-      next_token
-      Any.new(val)
-    when TokenKind::String
-      str = token.string_value
-      next_token
-      Any.new(str)
-    else
-      fail("unexpected #{token_text}")
-    end
-  end
-
 end
 
 # Reads a document one event at a time: `kind` names what the reader is on,
@@ -2203,7 +2020,9 @@ pub class Builder
   @states : Array(Int32)
   # The key texts of every object still open, innermost last, each with the
   # String it was written from.
-  @keys : Array(Hash(String, String))
+  @keys : Hash(Tuple(Int32, String), String)
+  @key_scopes : Array(Int32)
+  @next_scope : Int32
 
   property max_nesting : Int32
   property ascii_only : Bool
@@ -2213,7 +2032,9 @@ pub class Builder
     @indent_str = nil
     @level = 0
     @states = [ROOT]
-    @keys = [] of Hash(String, String)
+    @keys = Hash(Tuple(Int32, String), String).new
+    @key_scopes = Array(Int32).new(MAX_NESTING)
+    @next_scope = 0
     @max_nesting = MAX_NESTING
     @ascii_only = false
   end
@@ -2345,7 +2166,8 @@ pub class Builder
     @level = @level + 1
     raise "nesting depth of #{@level} exceeds maximum depth #{@max_nesting}" if @level > @max_nesting
     @states << OBJECT_FIRST
-    @keys << Hash(String, String).new
+    @key_scopes << @next_scope
+    @next_scope += 1
   end
 
   def end_object : Nil
@@ -2353,7 +2175,8 @@ pub class Builder
     raise "end_object with a field's value still due" if st == OBJECT_VALUE
     raise "end_object without start_object" unless st == OBJECT_FIRST || st == OBJECT_NEXT
     @states.pop
-    @keys.pop
+    scope = @key_scopes.pop
+    @keys.reject_in_place { |key, _| key[0] == scope }
     @level = @level - 1
     write_indent if st == OBJECT_NEXT
     @buffer.append(125_u8) # '}'
@@ -2380,12 +2203,12 @@ pub class Builder
     from = @buffer.size
     write_escaped_string(name)
     text = @buffer.slice_from(from)
-    keys = @keys.last
-    if earlier = keys[text]?
+    key = {@key_scopes.last, text}
+    if earlier = @keys[key]?
       raise "the key #{name.inspect} is written twice in one object" if earlier == name
       raise "the keys #{earlier.inspect} and #{name.inspect} are both written as #{text}"
     end
-    keys[text] = name.to_heap
+    @keys[key] = name.dup
     @buffer.append(58_u8)                         # ':'
     @buffer.append(32_u8) unless @indent_str.nil? # ' '
   end
@@ -2930,10 +2753,10 @@ pub struct Document
     Object
   end
 
-  getter tree : Tre(Node)
+  getter tree : Tre::View(Node)
   getter input : String
 
-  def initialize(@tree : Tre(Node), @input : String)
+  def initialize(@tree : Tre::View(Node), @input : String)
   end
 
   def to_json : String
@@ -2957,10 +2780,11 @@ pub struct Document
   end
 
   # Walk preorder nodes with a bounded stack of open container indices.
-  def to_json(builder : Builder) : Nil
+  def to_json(builder : Builder, root : Int32 = 0) : Nil
     parents = Array(Int32).new(MAX_NESTING)
-    index = 0
-    while index < @tree.size
+    index = root
+    stop = @tree.stop(root)
+    while index < stop
       if parent = parents.last?
         builder.field(key(index)) if kind(parent) == Kind::Object
       end
@@ -3107,7 +2931,7 @@ pub struct DocumentParser
   end
 
   def document : Document
-    Document.new(@tree, @input)
+    Document.new(@tree.view, @input)
   end
 
   private def token : Token
@@ -3336,7 +3160,7 @@ pub struct JSON
   # The document in *bytes* read onto the caller's tape, its strings views
   # into *bytes*; panics with the line and column of the first thing it
   # refuses, as `parse(String)` does.
-  def self.parse(bytes : String) : Document
+  def self.document(bytes : String) : Document
     parser = DocumentParser.new(bytes)
     parser.parse
     failure = parser.error
@@ -3345,7 +3169,7 @@ pub struct JSON
   end
 
   # The document in *bytes* on the tape, or `nil` when it is not one.
-  def self.parse?(bytes : String) : Document?
+  def self.document?(bytes : String) : Document?
     parser = DocumentParser.new(bytes)
     parser.parse
     return nil unless parser.error.nil?
@@ -3527,7 +3351,7 @@ pub struct JSON
   end
 
   private def self.hex_u4(val : Int32, & : UInt8 -> Nil) : Nil
-    hex = "0123456789abcdef".to_unsafe
+    hex = "0123456789abcdef"
     yield 92_u8
     yield 117_u8
     yield hex[(val >> 12) & 0x0F]
@@ -3707,7 +3531,7 @@ pub struct JSON
   # `DarkRed` as `dark_red`, and `HTTPCode` as `http_code`: a capital starts
   # a word after a small letter or a digit, or before one.
   private def self.underscore(name : String) : String
-    bytes = name.to_unsafe
+    bytes = name
     String.build do |text|
       index = 0
       while index < name.bytesize
@@ -3732,7 +3556,7 @@ pub struct JSON
   # A member's name as it is matched: small letters, no underscores, so
   # `"dark_red"`, `"DarkRed"` and `"DARK_RED"` are one name.
   private def self.enum_key(name : String) : String
-    bytes = name.to_unsafe
+    bytes = name
     String.build do |text|
       index = 0
       while index < name.bytesize
@@ -3830,7 +3654,7 @@ pub struct JSON
   # Whether the number's text is an integer literal: an optional minus and
   # digits, no fraction or exponent.
   private def self.integer_digits?(raw : String) : Bool
-    bytes = raw.to_unsafe
+    bytes = raw
     i = bytes[0] == 45_u8 ? 1 : 0
     return false if i >= raw.bytesize
     while i < raw.bytesize
@@ -3842,7 +3666,7 @@ pub struct JSON
 
   # The UInt64 these digits spell, or nil when they do not fit.
   private def self.digits_to_u64?(raw : String) : UInt64?
-    bytes = raw.to_unsafe
+    bytes = raw
     return nil if bytes[0] == 45_u8
     val = 0_u64
     i = 0

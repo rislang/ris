@@ -128,7 +128,7 @@ pub struct Der
   MAX_DEPTH = 64
 
   # The one value *bytes* hold, and nothing after it.
-  def self.parse(bytes : Array(UInt8)) : DerValue | Asn1Error
+  def self.parse(bytes : Array::View(UInt8)) : DerValue | Asn1Error
     value = DerValue.read(bytes, 0, bytes.size)!
     if value.end_offset != bytes.size
       return Asn1Error.new("#{bytes.size - value.end_offset} bytes after the value", value.end_offset)
@@ -166,6 +166,7 @@ end
 
 # One value: its identifier, and where its header and content are in the
 # bytes it was read from.
+@[OnTape]
 pub struct DerValue
   getter tag_class : DerClass
   getter tag : Int32
@@ -173,9 +174,9 @@ pub struct DerValue
   getter header_size : Int32
   getter content_size : Int32
   @constructed : Bool
-  @data : Array(UInt8)
+  @data : Array::View(UInt8)
 
-  def initialize(@data : Array(UInt8), @tag_class : DerClass, @constructed : Bool, @tag : Int32,
+  def initialize(@data : Array::View(UInt8), @tag_class : DerClass, @constructed : Bool, @tag : Int32,
                  @offset : Int32, @header_size : Int32, @content_size : Int32)
   end
 
@@ -252,18 +253,17 @@ pub struct DerValue
   def same_raw?(other : DerValue) : Bool
     size = @header_size + @content_size
     return false unless size == other.header_size + other.content_size
-    mine = @data.to_unsafe + @offset.to_i64
-    theirs = other.raw_at
     index = 0
     while index < size
-      return false unless mine[index] == theirs[index]
-      index = index + 1
+      return false unless @data[@offset + index] ==
+        other.raw_byte(index)
+      index += 1
     end
     true
   end
 
-  protected def raw_at : Pointer(UInt8)
-    @data.to_unsafe + @offset.to_i64
+  protected def raw_byte(index : Int32) : UInt8
+    @data[@offset + index]
   end
 
   # A SEQUENCE's elements: `children`, after checking it is one.
@@ -343,7 +343,7 @@ pub struct DerValue
     content
   end
 
-  private def int64(bytes : Array(UInt8), what : String) : Int64 | Asn1Error
+  private def int64(bytes : Array::View(UInt8), what : String) : Int64 | Asn1Error
     return Asn1Error.new("#{what} of #{bytes.size} bytes, past an Int64", @offset) if bytes.size > 8
     value = bytes[0] >= 0x80_u8 ? -1_i64 : 0_i64
     bytes.each { |b| value = (value << 8) | b.to_i64 }
@@ -356,7 +356,7 @@ pub struct DerValue
   def unsigned_integer : Array(UInt8) | Asn1Error
     bytes = integer_bytes!
     return Asn1Error.new("a negative INTEGER where a non-negative one is expected", @offset) if bytes[0] >= 0x80_u8
-    bytes.size > 1 && bytes[0] == 0_u8 ? bytes[1, bytes.size - 1] : bytes
+    bytes.size > 1 && bytes[0] == 0_u8 ? bytes[1, bytes.size - 1].to_a : bytes
   end
 
   # An OBJECT IDENTIFIER in dotted form, `"2.5.4.3"`. A subidentifier past
@@ -540,7 +540,7 @@ pub struct DerValue
   end
 
   # One value's header at *at*, its content within *stop*.
-  def self.read(data : Array(UInt8), at : Int32, stop : Int32) : DerValue | Asn1Error
+  def self.read(data : Array::View(UInt8), at : Int32, stop : Int32) : DerValue | Asn1Error
     start = at
     return Asn1Error.new("a value expected and the bytes ended", at) if at >= stop
     first = data[at]
@@ -617,7 +617,9 @@ pub struct DerValue
   end
 
   private def ascii_text : String
-    String.new(@content_size) { |p| p.copy_from(@data.to_unsafe + content_offset.to_i64, @content_size) }
+    String.build(@content_size) do |writer|
+      @content_size.times { |i| writer.push(@data[content_offset + i]) }
+    end
   end
 
   # BMPString (*width* 2) or UniversalString (4), big-endian, to UTF-8.
@@ -678,7 +680,7 @@ struct DerText
   end
 
   # The first offset in [*from*, *stop*) whose byte the block refuses, or -1.
-  def self.first_outside(data : Array(UInt8), from : Int32, stop : Int32, & : UInt8 -> Bool) : Int32
+  def self.first_outside(data : Array::View(UInt8), from : Int32, stop : Int32, & : UInt8 -> Bool) : Int32
     i = from
     while i < stop
       return i unless yield data[i]
@@ -689,7 +691,7 @@ struct DerText
 
   # Well-formed UTF-8 (RFC 3629): no overlong form, no surrogate, nothing
   # past U+10FFFF, no sequence cut short.
-  def self.utf8?(data : Array(UInt8), from : Int32, stop : Int32) : Bool
+  def self.utf8?(data : Array::View(UInt8), from : Int32, stop : Int32) : Bool
     i = from
     while i < stop
       b = data[i]

@@ -1,0 +1,43 @@
+module array_view_argument
+
+def total(values : Array::View(Int32)) : Int32
+  result = 0
+  values.each { |value| result += value }
+  result
+end
+
+def byte_count(values : Array::View(UInt8)) : Int32
+  values.size
+end
+
+def generic_first(values : Array::View(T)) : T forall T
+  values[0]
+end
+
+def preferred(values : Array(Int32)) : Int32
+  1
+end
+
+def preferred(values : Array::View(Int32)) : Int32
+  2
+end
+
+values = [1, 2, 3]
+raise "whole array" unless total(values) == 6
+raise "named argument" unless total(values: values) == 6
+raise "subview" unless total(values[1, 2]) == 5
+raise "generic view" unless generic_first(values) == 1
+raise "exact overload" unless preferred(values) == 1
+raise "bytes" unless byte_count([1_u8, 2_u8]) == 2
+def mixed_size(values : String | Array::View(UInt8)) : Int32
+  values.is_a?(String) ? values.bytesize : values.size
+end
+
+mixed = ARGV.empty? ? [1_u8, 2_u8] : "abc"
+raise "union view" unless mixed_size(mixed) == 2
+bytes = [97_u8, 98_u8, 99_u8]
+raise "contiguous byte view" unless bytes[1, 2].bytes == "bc"
+raise "gathered byte view" unless bytes.values_at([2, 0]).bytes == "ca"
+values.drop_prefix(1)
+raise "consume prefix" unless values == [2, 3]
+puts "PASS: whole-array view arguments"

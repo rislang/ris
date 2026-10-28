@@ -27,7 +27,7 @@ class Iyi::TapeProgramChecker
 
   alias Env = Hash(String, Origin)
   READ_VIEWS = {"[]", "[]?", "first", "first?", "last", "last?", "fetch",
-                "finish", "as_tape", "view", "unchecked", "__loop_fetch",
+                "finish", "as_tape", "view", "as_view", "unchecked", "__loop_fetch",
                 "find", "max_by", "min_by", "pop", "pop?", "string",
                 "rest", "peek", "scan", "check", "scan_until", "check_until"}
   YIELDS_VIEWS = {"each", "each_with_index", "each_child", "each_line",
@@ -96,7 +96,12 @@ class Iyi::TapeProgramChecker
     saved = @program_context
     @program_context = false
     result = value(node, Env.new)
-    refuse(node) if tape?(node) && !result.program?
+    type = node.type?
+    fixed = type.is_a?(GenericClassInstanceType) &&
+      type.generic_type == @program.static_array
+    static_elements = fixed && result.kind == :local &&
+      result.element.try(&.program?)
+    refuse(node) if tape?(node) && !result.program? && !static_elements
     @program_context = saved
   end
 
@@ -173,6 +178,12 @@ class Iyi::TapeProgramChecker
                end
              end
              result
+           when UninitializedVar
+             origin = Origin.new(:local)
+             if variable = node.var.as?(Var)
+               env[variable.name] = origin
+             end
+             origin
            when TypeDeclaration
              return Origin::Program if node.var.is_a?(ClassVar) || node.var.is_a?(Path)
              if exp = node.value
@@ -251,6 +262,20 @@ class Iyi::TapeProgramChecker
     args = node.args.map { |arg| value(arg, env) }
     node.named_args.try &.each { |arg| value(arg.value, env) }
     node.block_arg.try { |arg| value(arg, env) }
+    receiver_type = node.obj.try(&.type?)
+    if receiver_type.is_a?(GenericClassInstanceType) &&
+       receiver_type.generic_type == @program.static_array
+      if node.name == "[]=" || node.name == "unsafe_put"
+        stored = args.last
+        refuse(node) if receiver.program? && !stored.program?
+        receiver.element = receiver.element.try do |old|
+          join(old, stored)
+        end || stored
+        return stored
+      elsif node.name == "[]" || node.name == "unsafe_fetch"
+        return receiver.element || viewed(receiver)
+      end
+    end
     targets = @graph.targets(node)
     return Origin::Unknown unless targets
     result : Origin? = nil

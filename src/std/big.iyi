@@ -156,7 +156,7 @@ pub struct BigInt
   # The big-endian *bytes* as a non-negative BigInt: a key, a signature, a
   # coordinate as cryptography writes them. Four bytes a limb, the low
   # limb from the last four.
-  def self.from_bytes(bytes : Array(UInt8)) : BigInt
+  def self.from_bytes(bytes : Array::View(UInt8)) : BigInt
     limbs = Array(UInt64).new((bytes.size + 3) // 4, 0_u64)
     n = bytes.size
     i = 0

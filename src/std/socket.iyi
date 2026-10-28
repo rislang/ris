@@ -3192,6 +3192,7 @@ end
 
 # One name server: the address a call takes, its family, and how a
 # message names it (`192.0.2.1:53`).
+@[OnTape]
 struct NameServer
   getter address : Pointer(UInt8)
   getter family : Int32

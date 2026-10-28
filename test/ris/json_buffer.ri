@@ -1,4 +1,4 @@
-# Heap migration strings survive the lexer's reused tape buffer.
+# Explicitly retained strings survive the lexer's reused tape buffer.
 module test/ris/json_buffer
 
 import std/json::{JSON, Parser, PullParser, Builder}
@@ -10,7 +10,7 @@ saved = ""
     raise "first text changed" unless parsed[0].as_s == "first\nvalue"
     raise "second text changed" unless parsed[1].as_s == "second\tvalue"
     raise "unicode" unless parsed[2].as_s == "é"
-    saved = parsed[0].as_s
+    saved = parsed[0].as_s.copy_to(Program.tape)
     pull = PullParser.new("[\"one\\n\",\"two\\t\"]".to_heap)
     first = ""
     second = ""

@@ -1823,13 +1823,17 @@ module Iyi
     end
   end
 
-  # Text arguments may borrow String as Str, or retain static literals.
+  # Arguments may borrow text or a whole-array view.
   class StringAutocastType < AutocastType
     getter literal : ASTNode
 
     def self.borrowable?(type : Type?) : Bool
       return false unless type
-      type == type.program.string ||
+      (type.is_a?(UnionType) &&
+       type.union_types.any? { |part| borrowable?(part) }) ||
+        (type.is_a?(GenericClassInstanceType) &&
+         type.generic_type.name == "Array") ||
+        type == type.program.string ||
         (type.is_a?(NilableType) && type.not_nil_type == type.program.string)
     end
 
@@ -1837,10 +1841,12 @@ module Iyi
       return false unless type
       type = type.remove_literal
       if type.is_a?(UnionType)
-        type.union_types.size == 2 && type.union_types.any?(&.nil_type?) &&
-          type.union_types.any? { |part| view?(part) }
+        type.union_types.all? { |part| part.nil_type? || view?(part) }
       else
-        type.is_a?(NonGenericClassType) && type.name == "String"
+        (type.is_a?(NonGenericClassType) && type.name == "String") ||
+          (type.is_a?(GenericClassInstanceType) &&
+           type.generic_type.name == "View" &&
+           type.to_s.starts_with?("Array::View("))
       end
     end
 

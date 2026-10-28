@@ -17,7 +17,7 @@ dates = Array(String){
   "Sun, 06 Nov 1994 08:49:37 GMT trailing",
 }
 
-kept = "".to_heap
+kept = ""
 owned = nil.as(Cookie?)
 tape do
   line = "sid=\"abc\"; Path=/x; Domain=.EXAMPLE.COM; Secure; HttpOnly"
@@ -37,7 +37,7 @@ tape do
   exit 8 unless age && age.max_age == 0_i64
   dated = Cookie.parse("x=y; Expires=Wed, 21 Oct 2015 07:28:00 GMT")
   exit 9 unless dated && dated.expires
-  exit 10 unless cookie.to_heap.to_tape == cookie.to_tape
+  exit 10 unless cookie.copy_to(Program.tape).to_tape == cookie.to_tape
   dates.each do |date|
     expected = Time::Format::HTTP_DATE.parse(date)
     line = String.build { |w| w << "a=b; Expires=" << date }
@@ -51,13 +51,13 @@ tape do
       exit 25 unless parsed.expires.nil?
     end
   end
-  owned = cookie.to_heap
-  kept = cookie.to_tape.to_heap
+  owned = cookie.copy_to(Program.tape)
+  kept = cookie.to_tape.copy_to(Program.tape)
 end
-heap = Cookie.parse(kept)
-exit 11 unless heap && heap.to_set_cookie == kept
-exit 12 unless Cookie.parse_header("a=1; a=2".to_heap) ==
+parsed = Cookie.parse(kept)
+exit 11 unless parsed && parsed.to_set_cookie == kept
+exit 12 unless Cookie.parse_header("a=1; a=2") ==
   {"a" => "1"}
 exit 20 unless owned
 exit 21 unless owned.to_set_cookie == kept
-puts "PASS: cookie tape and heap APIs"
+puts "PASS: cookie views and explicit retained copy"

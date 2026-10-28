@@ -32,6 +32,7 @@ module std/crypto
 import std/int
 import std/digest::{Digest}
 
+@[OnTape]
 pub class HMAC
   @inner : Digest
   @outer : Digest
@@ -40,7 +41,7 @@ pub class HMAC
   @hashed : Array(UInt8)
   @finished : Bool
 
-  def initialize(algorithm : H.class, key : String | Array(UInt8)) forall H
+  def initialize(algorithm : H.class, key : String | Array::View(UInt8)) forall H
     @inner = algorithm.new
     @outer = algorithm.new
     @inner_start = algorithm.new
@@ -52,11 +53,11 @@ pub class HMAC
     pad = Array(UInt8).new(block, 0_u8)
     bytes, count = CryptoBytes.of(key)
     if count > block
-      @inner.update(bytes, count)
+      @inner.update(bytes)
       @inner.final(pad)
       @inner.reset
     else
-      pad.to_unsafe.copy_from(bytes, count)
+      count.times { |i| pad[i] = bytes[i] }
     end
     i = 0
     while i < block
@@ -74,11 +75,11 @@ pub class HMAC
     @outer.copy_from(@outer_start)
   end
 
-  def self.digest(algorithm : H.class, key : String | Array(UInt8), data : String | Array(UInt8)) : Array(UInt8) forall H
+  def self.digest(algorithm : H.class, key : String | Array::View(UInt8), data : String | Array::View(UInt8)) : Array(UInt8) forall H
     HMAC.new(algorithm, key).update(data).final
   end
 
-  def self.hexdigest(algorithm : H.class, key : String | Array(UInt8), data : String | Array(UInt8)) : String forall H
+  def self.hexdigest(algorithm : H.class, key : String | Array::View(UInt8), data : String | Array::View(UInt8)) : String forall H
     HMAC.new(algorithm, key).update(data).hexfinal
   end
 
@@ -87,9 +88,10 @@ pub class HMAC
     @hashed.size
   end
 
-  def update(data : String | Array(UInt8)) : self
-    bytes, count = CryptoBytes.of(data)
-    update(bytes, count)
+  def update(data : String | Array::View(UInt8)) : self
+    raise "HMAC: update after final; reset first" if @finished
+    @inner.update(data)
+    self
   end
 
   def update(data : Pointer(UInt8), count : Int32) : self
@@ -133,13 +135,13 @@ end
 # An empty salt is the RFC's default, a hash's length of zeros, which is
 # the same key to HMAC.
 pub struct HKDF
-  def self.extract(algorithm : H.class, salt : String | Array(UInt8), ikm : String | Array(UInt8)) : Array(UInt8) forall H
+  def self.extract(algorithm : H.class, salt : String | Array::View(UInt8), ikm : String | Array::View(UInt8)) : Array(UInt8) forall H
     HMAC.digest(algorithm, salt, ikm)
   end
 
   # At most 255 hashes' worth of bytes, which is what a one-byte block
   # counter can number.
-  def self.expand(algorithm : H.class, prk : String | Array(UInt8), info : String | Array(UInt8), length : Int32) : Array(UInt8) forall H
+  def self.expand(algorithm : H.class, prk : String | Array::View(UInt8), info : String | Array::View(UInt8), length : Int32) : Array(UInt8) forall H
     mac = HMAC.new(algorithm, prk)
     size = mac.digest_size
     if length < 0 || length > 255 * size
@@ -152,20 +154,20 @@ pub struct HKDF
     n = 1
     while done < length
       mac.reset
-      mac.update(block.to_unsafe, size) if n > 1
+      mac.update(block) if n > 1
       mac.update(info)
       counter[0] = n.to_u8
       mac.update(counter)
       mac.final(block)
       take = length - done < size ? length - done : size
-      (okm.to_unsafe + done.to_i64).copy_from(block.to_unsafe, take)
+      take.times { |i| okm[done + i] = block[i] }
       done = done + take
       n = n + 1
     end
     okm
   end
 
-  def self.derive(algorithm : H.class, ikm : String | Array(UInt8), salt : String | Array(UInt8), info : String | Array(UInt8), length : Int32) : Array(UInt8) forall H
+  def self.derive(algorithm : H.class, ikm : String | Array::View(UInt8), salt : String | Array::View(UInt8), info : String | Array::View(UInt8), length : Int32) : Array(UInt8) forall H
     expand(algorithm, extract(algorithm, salt, ikm), info, length)
   end
 end
@@ -174,7 +176,7 @@ end
 # from a password, made deliberately slow by *iterations*. OWASP's figure
 # for HMAC-SHA256 is 600,000.
 pub struct PBKDF2
-  def self.derive(algorithm : H.class, password : String | Array(UInt8), salt : String | Array(UInt8), iterations : Int32, length : Int32) : Array(UInt8) forall H
+  def self.derive(algorithm : H.class, password : String | Array::View(UInt8), salt : String | Array::View(UInt8), iterations : Int32, length : Int32) : Array(UInt8) forall H
     raise "PBKDF2: the iteration count must be at least 1, not #{iterations}" if iterations < 1
     raise "PBKDF2: the key length must be at least 1 byte, not #{length}" if length < 1
     mac = HMAC.new(algorithm, password)
@@ -194,11 +196,11 @@ pub struct PBKDF2
       mac.update(salt)
       mac.update(index)
       mac.final(u)
-      t.to_unsafe.copy_from(u.to_unsafe, size)
+      size.times { |i| t[i] = u[i] }
       round = 1
       while round < iterations
         mac.reset
-        mac.update(u.to_unsafe, size)
+        mac.update(u)
         mac.final(u)
         i = 0
         while i < size
@@ -208,7 +210,7 @@ pub struct PBKDF2
         round = round + 1
       end
       take = length - done < size ? length - done : size
-      (key.to_unsafe + done.to_i64).copy_from(t.to_unsafe, take)
+      take.times { |i| key[done + i] = t[i] }
       done = done + take
       block = block + 1
     end
@@ -222,7 +224,7 @@ pub struct Subtle
   # differences are gathered with `|` rather than tested one at a time.
   # Byte strings of different sizes answer false at once, so the size is
   # not a secret this keeps.
-  def self.constant_time_compare(a : String | Array(UInt8), b : String | Array(UInt8)) : Bool
+  def self.constant_time_compare(a : String | Array::View(UInt8), b : String | Array::View(UInt8)) : Bool
     pa, na = CryptoBytes.of(a)
     pb, nb = CryptoBytes.of(b)
     return false if na != nb
@@ -237,12 +239,10 @@ pub struct Subtle
 end
 
 struct CryptoBytes
-  def self.of(data : String | Array(UInt8)) : {Pointer(UInt8), Int32}
-    if data.is_a?(String)
-      {data.to_unsafe, data.bytesize}
-    else
-      {data.to_unsafe, data.size}
-    end
+  alias Data = String | Array::View(UInt8)
+
+  def self.of(data : Data) : Tuple(Data, Int32)
+    {data, data.is_a?(String) ? data.bytesize : data.size}
   end
 
   def self.hex(bytes : Array(UInt8)) : String

@@ -488,7 +488,7 @@ struct ::StaticArray(T, N)
   macro [](*args)
     %array = uninitialized ::StaticArray(typeof({{args.splat}}), {{args.size}})
     {% for arg, i in args %}
-      %array.to_unsafe[{{i}}] = {{arg}}
+      %array[{{i}}] = {{arg}}
     {% end %}
     %array
   end

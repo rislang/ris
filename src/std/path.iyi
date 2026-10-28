@@ -317,7 +317,7 @@ pub struct Path
 
   private def concat(first : String,
                      second : String) : String
-    String.build { |w| w << first << second }
+    first + second
   end
 
   private def anchor_indices : Tuple(Int32, Int32)

@@ -77,11 +77,11 @@ pub abstract class Digest
     @block_size
   end
 
-  def self.hexdigest(data : String | Array(UInt8)) : String
+  def self.hexdigest(data : String | Array::View(UInt8)) : String
     new.update(data).hexfinal
   end
 
-  def self.hash_bytes(data : String | Array(UInt8)) : Array(UInt8)
+  def self.hash_bytes(data : String | Array::View(UInt8)) : Array(UInt8)
     new.update(data).final
   end
 
@@ -116,8 +116,8 @@ pub abstract class Digest
     self
   end
 
-  def update(data : Array(UInt8)) : self
-    update(data.to_unsafe, data.size)
+  def update(data : Array::View(UInt8)) : self
+    update(data.bytes)
   end
 
   def update(data : Pointer(UInt8), count : Int32) : self
@@ -957,11 +957,11 @@ pub abstract class Shake
   end
 
   # *count* bytes of the output for *data*.
-  def self.hash_bytes(data : String | Array(UInt8), count : Int32) : Array(UInt8)
+  def self.hash_bytes(data : String | Array::View(UInt8), count : Int32) : Array(UInt8)
     new.update(data).read(count)
   end
 
-  def self.hexdigest(data : String | Array(UInt8), count : Int32) : String
+  def self.hexdigest(data : String | Array::View(UInt8), count : Int32) : String
     DigestUtil.hex(hash_bytes(data, count), count)
   end
 
@@ -984,8 +984,8 @@ pub abstract class Shake
     update(data.to_unsafe, data.bytesize)
   end
 
-  def update(data : Array(UInt8)) : self
-    update(data.to_unsafe, data.size)
+  def update(data : Array::View(UInt8)) : self
+    update(data.bytes)
   end
 
   def update(data : Pointer(UInt8), count : Int32) : self

@@ -593,9 +593,11 @@ pub class WebSocket
     scheme = colon ? url[0, colon].downcase : ""
     return WebSocketError.new("not a ws:// or wss:// URL: #{url.inspect}") unless (scheme == "ws" || scheme == "wss") && colon
     target = (scheme == "wss" ? "https" : "http") + url[colon, url.bytesize - colon]
-    nonce = Pointer(UInt8).malloc(16_u64)
-    Random::Secure.fill(nonce, 16)
-    key = Base64.encode(String.new(16) { |dst| dst.copy_from(nonce, 16) })
+    nonce = Array(UInt8).new(16, 0_u8)
+    Random::Secure.random_bytes(nonce)
+    key = Base64.encode(String.build(16) do |writer|
+      nonce.each { |byte| writer.push(byte) }
+    end)
     sent = headers.dup
     sent["Sec-WebSocket-Key"] = key
     sent["Sec-WebSocket-Version"] = "13"
@@ -849,9 +851,10 @@ pub class WebSocket
     tape do
       key = nil.as(UInt32?)
       if @client
-        random = 0_u32
-        Random::Secure.fill(pointerof(random).as(UInt8*), 4)
-        key = random
+        random = Array(UInt8).new(4, 0_u8)
+        Random::Secure.random_bytes(random)
+        key = random[0].to_u32 | (random[1].to_u32 << 8) |
+          (random[2].to_u32 << 16) | (random[3].to_u32 << 24)
       end
       frame = WebSocket.frame(payload.as_tape, opcode, key, compressed)
       socket = @socket

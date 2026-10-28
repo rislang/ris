@@ -176,6 +176,7 @@ import std/file::{File}
   end
 {% end %}
 
+@[OnTape]
 pub class Dir
   getter path : String
 
@@ -330,7 +331,7 @@ pub class Dir
     @closed
   end
 
-  def each(&block : String -> Nil) : Nil
+  def each(& : String -> Nil) : Nil
     while entry = read
       yield entry
     end
@@ -345,7 +346,7 @@ pub class Dir
     res
   end
 
-  def each_child(&block : String -> Nil) : Nil
+  def each_child(& : String -> Nil) : Nil
     rewind
     while entry = read
       if entry != "." && entry != ".."
@@ -464,7 +465,7 @@ pub class Dir
     trailing ? dir[0, dir.bytesize - 1] : dir
   end
 
-  def self.each(dirname : String | Path, &block : String -> Nil) : Nil
+  def self.each(dirname : String | Path, & : String -> Nil) : Nil
     Dir.open(dirname) do |dir|
       dir.each do |filename|
         yield filename
@@ -479,7 +480,7 @@ pub class Dir
     [] of String
   end
 
-  def self.each_child(dirname : String | Path, &block : String -> Nil) : Nil
+  def self.each_child(dirname : String | Path, & : String -> Nil) : Nil
     Dir.open(dirname) do |dir|
       dir.each_child do |filename|
         yield filename
@@ -655,12 +656,12 @@ pub class Dir
     res
   end
 
-  def self.glob(patterns : String | Array(String), &block : String -> Nil) : Nil
+  def self.glob(patterns : String | Array(String), & : String -> Nil) : Nil
     if patterns.is_a?(String)
-      glob_single(patterns, &block)
+      glob_single(patterns) { |entry| yield entry }
     else
       patterns.each do |p|
-        glob_single(p, &block)
+        glob_single(p) { |entry| yield entry }
       end
     end
   end
@@ -695,7 +696,7 @@ pub class Dir
   # nothing; and `*` backtracked at every position, four times slower for
   # each star - nine of them against one forty-character name took 30
   # seconds where `File.match?` takes none.
-  private def self.glob_single(pattern : String, &block : String -> Nil) : Nil
+  private def self.glob_single(pattern : String, & : String -> Nil) : Nil
     expanded = [] of String
     glob_expand(pattern, expanded)
     expanded.each do |one|
@@ -744,7 +745,7 @@ pub class Dir
         next
       end
       seen = {} of String => Bool
-      glob_step(root, segs, seps, 0, tail, seen, &block)
+      glob_step(root, segs, seps, 0, tail, seen) { |entry| yield entry }
     end
   end
 
@@ -817,7 +818,7 @@ pub class Dir
 
   # *tail* is the separator a pattern ends in, which asks for directories
   # and is written after each.
-  private def self.glob_yield(path : String, tail : String?, seen : Hash(String, Bool), &block : String -> Nil) : Nil
+  private def self.glob_yield(path : String, tail : String?, seen : Hash(String, Bool), & : String -> Nil) : Nil
     if tail
       return unless Dir.exists?(path)
       path = path + tail unless glob_rooted?(path)
@@ -828,46 +829,56 @@ pub class Dir
   end
 
   # The segments from *index* on, below *path* (nil is the current directory).
-  private def self.glob_step(path : String?, segs : Array(String), seps : Array(String), index : Int32,
-                             tail : String?, seen : Hash(String, Bool), &block : String -> Nil) : Nil
-    if index == segs.size
-      glob_yield(path || ".", tail, seen, &block)
-      return
-    end
-    seg = segs[index]
-    sep = seps[index]
-    entry = index == segs.size - 1 && !tail
-    if seg == "**" && !entry
-      # No directory, then each directory below, at any depth.
-      glob_step(path, segs, seps, index + 1, tail, seen, &block)
-      glob_children(path, false) do |name|
-        full = glob_join(path, name, sep)
-        glob_step(full, segs, seps, index, tail, seen, &block) if glob_dir?(full)
+  private def self.glob_step(path : String?, segs : Array(String),
+                             seps : Array(String), index : Int32,
+                             tail : String?, seen : Hash(String, Bool),
+                             & : String -> Nil) : Nil
+    pending = Array(Tuple(String?, Int32)).new
+    pending << {path, index}
+    until pending.empty?
+      current, at = pending.pop
+      if at == segs.size
+        glob_yield(current || ".", tail, seen) { |name| yield name }
+        next
       end
-    elsif glob_literal?(seg)
-      full = glob_join(path, seg, sep)
-      if entry
-        glob_yield(full, nil, seen, &block) if File.exists?(full) || File.symlink?(full)
-      else
-        glob_step(full, segs, seps, index + 1, tail, seen, &block)
-      end
-    else
-      glob_children(path, seg.starts_with?('.')) do |name|
-        next unless File.match?(name, seg)
-        full = glob_join(path, name, sep)
+      seg = segs[at]
+      sep = seps[at]
+      entry = at == segs.size - 1 && !tail
+      children = Array(Tuple(String?, Int32)).new
+      if seg == "**" && !entry
+        children << {current, at + 1}
+        glob_children(current, false) do |name|
+          full = glob_join(current, name, sep)
+          children << {full, at} if glob_dir?(full)
+        end
+      elsif glob_literal?(seg)
+        full = glob_join(current, seg, sep)
         if entry
-          glob_yield(full, nil, seen, &block)
-        elsif glob_dir?(full)
-          glob_step(full, segs, seps, index + 1, tail, seen, &block)
+          if File.exists?(full) || File.symlink?(full)
+            glob_yield(full, nil, seen) { |name| yield name }
+          end
+        else
+          children << {full, at + 1}
+        end
+      else
+        glob_children(current, seg.starts_with?('.')) do |name|
+          next unless File.match?(name, seg)
+          full = glob_join(current, name, sep)
+          if entry
+            glob_yield(full, nil, seen) { |found| yield found }
+          elsif glob_dir?(full)
+            children << {full, at + 1}
+          end
         end
       end
+      children.reverse_each { |child| pending << child }
     end
   end
 
   # The names in *path* a wildcard may answer: every one but the hidden,
   # which only a segment written with a leading `.` answers - `.*` lists
   # them as a shell's does, and `*` and `**` pass over them.
-  private def self.glob_children(path : String?, hidden : Bool, &block : String -> Nil) : Nil
+  private def self.glob_children(path : String?, hidden : Bool, & : String -> Nil) : Nil
     dir = path || "."
     return unless Dir.exists?(dir)
     Dir.each_child(dir) do |name|

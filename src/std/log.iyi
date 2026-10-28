@@ -110,6 +110,7 @@ pub enum Severity
   end
 end
 
+@[OnTape]
 pub struct Entry
   getter source : String
   getter severity : Severity
@@ -117,13 +118,20 @@ pub struct Entry
   getter timestamp : Time
   # The task's context, the logger's bound data and the call's own, in
   # that order, a later key's value over an earlier's.
-  getter data : Hash(String, String)
+  @data : Array::View(LogField)
 
-  def initialize(@source : String, @severity : Severity, @message : String, @timestamp : Time = Time.utc, @data : Hash(String, String) = {} of String => String)
+  def data : Hash(String, String)
+    fields = Hash(String, String).new(@data.size)
+    each_data { |key, value| fields[key] = value }
+    fields
+  end
+
+  def initialize(@source : String, @severity : Severity, @message : String, @timestamp : Time = Time.utc, data : Hash(String, String) = {} of String => String)
+    @data = data.map { |key, value| LogField.new(key, value) }.view
   end
 
   def each_data(& : String, String -> Nil) : Nil
-    @data.each { |key, value| yield key, value }
+    @data.each { |field| yield field.key, field.value }
   end
 
   def tape_data : Array(LogField)
@@ -464,7 +472,7 @@ pub class MemoryBackend < Backend
   end
 
   def clear : Nil
-    @entries = [] of Entry
+    @entries.clear
   end
 end
 

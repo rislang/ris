@@ -1023,7 +1023,7 @@ class Iyi::TapeShrinkChecker
           @active_procs.delete(literal.object_id)
         end
       end
-      if {"[]", "view", "slice_from", "new"}.includes?(node.name) &&
+      if {"[]", "view", "as_view", "slice_from", "new"}.includes?(node.name) &&
          type_name(node.type).starts_with?("Array::View(")
         source = node.name == "new" ? derived : receiver
         Value.new([] of UInt64,

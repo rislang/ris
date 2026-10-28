@@ -151,6 +151,7 @@ module std/process
 # exit code a shell would report for it, 128 plus the signal. On Windows
 # `signal` is always 0 and a crash is its exception code, `0xC0000005` for
 # an access violation, read as an Int32.
+@[OnTape]
 pub struct ProcessResult
   getter exit_code : Int32
   getter signal : Int32
@@ -167,6 +168,7 @@ end
 
 # A program that could not be started, and the platform's error number for
 # why. `directory` is set when it was the directory it was to run in.
+@[OnTape]
 pub struct ProcessError
   getter command : String
   getter code : Int32
@@ -352,6 +354,7 @@ pub struct Process
 end
 
 # A child started by `Process.spawn`, running beside this program.
+@[OnTape]
 pub class ChildProcess
   @child : ProcessChild
   @stdin : ChildInput?
@@ -435,6 +438,7 @@ pub class ChildProcess
 end
 
 # The child's standard input, as a pipe this program writes.
+@[OnTape]
 pub class ChildInput
   @child : ProcessChild
 
@@ -456,6 +460,7 @@ end
 
 # One of the child's output streams, as a pipe this program reads. Each
 # read parks until the child has written, or its end of the pipe closed.
+@[OnTape]
 pub class ChildOutput
   @child : ProcessChild
   @output : ::Bool
@@ -529,6 +534,7 @@ pub class ChildOutput
   end
 end
 
+@[OnTape]
 class ProcessChild
   NOT_FOUND = 2
   # A `.bat` or `.cmd`, which is refused rather than run (see the top).
@@ -681,7 +687,7 @@ class ProcessChild
   # argument there and run something else. That is a program's mistake,
   # not the child's, so it is a panic.
   def self.check_text(who : String, text : String, what : String) : Nil
-    bytes = text.to_unsafe
+    bytes = text
     index = 0
     while index < text.bytesize
       raise "#{who}: #{what} contains a NUL byte" if bytes[index] == 0_u8
@@ -818,13 +824,13 @@ class ProcessChild
   # A NUL-terminated copy, for the platform's calls.
   def self.c_text(text : String) : Pointer(UInt8)
     copy = Pointer(UInt8).malloc((text.bytesize + 1).to_u64)
-    copy.copy_from(text.to_unsafe, text.bytesize)
+    text.bytesize.times { |i| copy[i] = text[i] }
     copy[text.bytesize] = 0_u8
     copy
   end
 
   def self.separator?(text : String) : ::Bool
-    bytes = text.to_unsafe
+    bytes = text
     index = 0
     while index < text.bytesize
       byte = bytes[index]
@@ -1307,6 +1313,7 @@ class ProcessChild
     # All of *text* written to the child's input, parking on the port while
     # the pipe is full: true once it is all written, false when the child's
     # end closed first.
+    @[TapeUnsafe("writes caller bytes to the child pipe before returning")]
     def send_input(text : String) : ::Bool | Cancelled
       handle = @input
       offset = 0
@@ -1775,6 +1782,7 @@ class ProcessChild
     # All of *text* written to the child's input, parking while the pipe is
     # full: true once it is all written, false when the child's end closed
     # first (EPIPE, which is not raised as a signal: see `sys_write`).
+    @[TapeUnsafe("writes caller bytes to the child pipe before returning")]
     def send_input(text : String) : ::Bool | Cancelled
       offset = 0
       while offset < text.bytesize

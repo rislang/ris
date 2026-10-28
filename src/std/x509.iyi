@@ -428,7 +428,7 @@ pub struct X509
   # (serverAuth, the default) or a client's (clientAuth), each certificate
   # that carries extKeyUsage allowing it. See the module's header for what
   # else is checked.
-  def self.verify(leaf : Certificate, intermediates : Array(Certificate), roots : Array(Certificate),
+  def self.verify(leaf : Certificate, intermediates : Array::View(Certificate), roots : Array::View(Certificate),
                   host : String? = nil, now : Time = Time.utc, purpose : X509Purpose = X509Purpose::Server) : Array(Certificate) | X509Error
     problem = leaf_error(leaf, host, now, purpose)
     return X509Error.new(problem) if problem
@@ -546,7 +546,7 @@ pub struct X509
   # matches, or nil; why each candidate failed goes to *failures*. Each
   # candidate weighed counts in *checks*, and past `MAX_SIGNATURE_CHECKS`
   # the search gives up.
-  private def self.grow(chain : Array(Certificate), intermediates : Array(Certificate), roots : Array(Certificate),
+  private def self.grow(chain : Array(Certificate), intermediates : Array::View(Certificate), roots : Array::View(Certificate),
                         now : Time, failures : Array(String), purpose : X509Purpose, checks : Array(Int32)) : Array(Certificate)?
     child = chain[chain.size - 1]
     roots.each do |root|
@@ -975,7 +975,7 @@ struct X509Names
   end
 
   # Whether *mask* is ones, then zeros, as a CIDR prefix is.
-  def self.prefix_mask?(mask : Array(UInt8)) : Bool
+  def self.prefix_mask?(mask : Array::View(UInt8)) : Bool
     zeros = false
     mask.each do |b|
       8.times do |k|
@@ -1231,12 +1231,13 @@ end
 # An extension a certificate this module writes carries beside its
 # subjectAltName: its OID, whether it is critical, and *value*, the DER
 # that extnValue's OCTET STRING holds.
+@[OnTape]
 pub struct X509Extension
   getter oid : String
   getter critical : Bool
-  getter value : Array(UInt8)
+  getter value : Array::View(UInt8)
 
-  def initialize(@oid : String, @critical : Bool, @value : Array(UInt8))
+  def initialize(@oid : String, @critical : Bool, @value : Array::View(UInt8))
   end
 end
 
@@ -1475,7 +1476,7 @@ struct X509Der
     while at < magnitude.size - 1 && magnitude[at] == 0_u8
       at = at + 1
     end
-    body = magnitude.empty? ? [0_u8] : magnitude[at, magnitude.size - at]
+    body = magnitude.empty? ? [0_u8] : magnitude[at, magnitude.size - at].to_a
     body[0] >= 0x80_u8 ? [0_u8] + body : body
   end
 

@@ -140,7 +140,7 @@ pub struct MlKem768
     h = SHA3_256.new.update(ek, ENCAPSULATION_KEY_SIZE).final
     g = SHA3_512.new.update(mp, 32).update(h).final
     ciphertext = MlKemPke.encrypt(t, a, mp, g.to_unsafe + 32)
-    {ciphertext, g[0, 32]}
+    {ciphertext, g[0, 32].to_a}
   end
 end
 

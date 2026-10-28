@@ -1,0 +1,10 @@
+module array_view_argument_shrink
+
+def borrow(values : Array::View(Int32)) : Array::View(Int32)
+  values
+end
+
+values = [1, 2, 3]
+view = borrow(values)
+values.clear
+puts view[0]

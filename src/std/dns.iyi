@@ -67,6 +67,7 @@ import std/base64::{Base64}
 # (`not_found?`, NXDOMAIN - authoritative, not worth asking again) from a
 # server that failed (`server_failure?`, SERVFAIL - maybe worth asking
 # again later) without reading a sentence.
+@[OnTape]
 pub struct DnsError
   NOT_FOUND      = 1
   NO_ADDRESS     = 2
@@ -284,6 +285,7 @@ pub struct DnsName
 end
 
 # One resource record from an answer section.
+@[OnTape]
 pub struct DnsRecord
   A     =  1
   CNAME =  5
@@ -358,6 +360,7 @@ end
 # `to_s` is the record's data in presentation format as dig 9.20 prints it,
 # for reading the record while debugging: bench/std_dns_exercise.sh holds
 # the two to the same text, record by record.
+@[OnTape]
 pub struct SvcbRecord
   # The SvcParamKeys this module reads (RFC 9460 section 14.3.2, and RFC
   # 9848's ech).
@@ -377,10 +380,10 @@ pub struct SvcbRecord
   getter target : String
   # The keys in their order, which is increasing, and each one's value as
   # it came.
-  getter keys : Array(Int32)
-  getter values : Array(Bytes)
+  getter keys : Array::View(Int32)
+  getter values : Array::View(Bytes)
 
-  def initialize(@owner : String, @priority : Int32, @target : String, @keys : Array(Int32), @values : Array(Bytes))
+  def initialize(@owner : String, @priority : Int32, @target : String, @keys : Array::View(Int32), @values : Array::View(Bytes))
   end
 
   # AliasMode: the service is at the target's records of the same type.
@@ -740,6 +743,7 @@ end
 # endpoint; where `aliases` is above 0 the name is still one to connect
 # to (section 3's last endpoint), and "." says the service is not there
 # (section 2.5.1). `Resolver#https_records` answers one.
+@[OnTape]
 pub struct SvcbAnswer
   # The most AliasMode records one resolution follows. Section 2.4.2 asks
   # for a bound and at least one; AliasMode is there for the zone apex,
@@ -751,9 +755,9 @@ pub struct SvcbAnswer
 
   getter name : String
   getter aliases : Int32
-  getter records : Array(SvcbRecord)
+  getter records : Array::View(SvcbRecord)
 
-  def initialize(@name : String, @aliases : Int32, @records : Array(SvcbRecord))
+  def initialize(@name : String, @aliases : Int32, @records : Array::View(SvcbRecord))
   end
 
   # An AliasMode record's target was ".": the service says it is not there.
@@ -763,6 +767,7 @@ pub struct SvcbAnswer
 end
 
 # A query, and the reading of an answer to one.
+@[OnTape]
 pub struct DnsMessage
   # The aliases one lookup follows, in one answer and across the queries a
   # dangling chain needs: glibc and musl both stop well short of this, and
@@ -804,12 +809,12 @@ pub struct DnsMessage
   getter question_name : String
   getter question_type : Int32
   getter question_class : Int32
-  getter answers : Array(DnsRecord)
+  getter answers : Array::View(DnsRecord)
 
   # *extended_rcode* is the upper eight bits of the RCODE, from the
   # answer's OPT record (RFC 6891 6.1.3); 0 without one.
   def initialize(@id : UInt16, @flags : Int32, @question_name : String, @question_type : Int32,
-                 @question_class : Int32, @answers : Array(DnsRecord), @extended_rcode : Int32 = 0)
+                 @question_class : Int32, @answers : Array::View(DnsRecord), @extended_rcode : Int32 = 0)
   end
 
   def response? : ::Bool
@@ -1035,16 +1040,13 @@ pub struct DnsMessage
     DnsTapeMessage.new(id, flags, question_name, question_type, question_class, answers, extended_rcode)
   end
 
-  # *packet* read onto a tape of its own and copied off it: the message a
-  # caller keeps.
+  # Read on the caller's tape; no nested owner or escaping temporary.
   def self.parse(packet : Bytes) : DnsMessage | DnsError
-    result = malformed("not read").as(DnsMessage | DnsError)
-    tape do
-      bytes = String.build(packet.size) { |w| w.append(packet.to_unsafe, packet.size) }
-      read = parse(bytes)
-      result = read.is_a?(DnsError) ? read : read.to_heap
+    bytes = String.build(packet.size) do |writer|
+      packet.size.times { |i| writer.push(packet[i]) }
     end
-    result
+    read = parse(bytes)
+    read.is_a?(DnsError) ? read : read.to_heap
   end
 
   # Whether this is the answer to query *id* for *name* and *type*: a
@@ -1193,11 +1195,11 @@ pub struct DnsTapeMessage
   getter question_name : String
   getter question_type : Int32
   getter question_class : Int32
-  getter answers : Array(DnsTapeRecord)
+  getter answers : Array::View(DnsTapeRecord)
   getter extended_rcode : Int32
 
   def initialize(@id : UInt16, @flags : Int32, @question_name : String, @question_type : Int32,
-                 @question_class : Int32, @answers : Array(DnsTapeRecord), @extended_rcode : Int32)
+                 @question_class : Int32, @answers : Array::View(DnsTapeRecord), @extended_rcode : Int32)
   end
 
   def response? : ::Bool
@@ -1241,6 +1243,7 @@ pub struct DnsTapeMessage
 end
 
 # `/etc/resolv.conf`, as resolv.conf(5) describes it and glibc reads it.
+@[OnTape]
 pub struct ResolvConf
   # glibc's MAXNS: a fourth `nameserver` line is ignored there too.
   MAX_NAMESERVERS = 3

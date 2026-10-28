@@ -35,98 +35,6 @@ import std/time::{Time, Span}
 # has no name-value pair. `to_set_cookie` writes one, refusing a name or
 # value that would break the line. `expires` is the instant it lapses,
 # from `Max-Age` before `Expires` (§5.3, step 3); nil is a session cookie.
-pub class Cookie
-  getter name : String
-  getter value : String
-  getter path : String?
-  getter domain : String?
-  getter expires : Time?
-  getter max_age : Int64?
-  getter secure : Bool
-  getter http_only : Bool
-  getter same_site : String?
-
-  def initialize(@name : String, @value : String, @path : String? = nil, @domain : String? = nil, @expires : Time? = nil, @max_age : Int64? = nil, @secure : Bool = false, @http_only : Bool = false, @same_site : String? = nil)
-  end
-
-  def self.parse(line : String) : Cookie?
-    result = nil.as(Cookie?)
-    tape do
-      if parsed = parse(line.as_tape)
-        result = parsed.to_heap
-      end
-    end
-    result
-  end
-
-  def self.parse(line : String) : TapeCookie?
-    TapeCookie.parse(line)
-  end
-
-  # The cookies an answer's `Set-Cookie` lines set, a line each.
-  def self.from_response(response : Response) : Array(Cookie)
-    found = [] of Cookie
-    response.header_values("Set-Cookie").each do |line|
-      if cookie = Cookie.parse(line)
-        found << cookie
-      end
-    end
-    found
-  end
-
-  # The pairs of a request's `Cookie` header: `a=1; b=2`.
-  def self.parse_header(value : String) : Hash(String, String)
-    result = Hash(String, String).new
-    tape do
-      result = parse_header(value.as_tape).to_heap
-    end
-    result
-  end
-
-  def self.parse_header(value : String) : TapeCookiePairs
-    found = TapeCookiePairs.new
-    value.split(';').each do |part|
-      eq = part.index('=')
-      next unless eq
-      name = TapeCookie.trim(part[0, eq])
-      next if name.empty?
-      text = TapeCookie.trim(part[eq + 1, part.bytesize - eq - 1])
-      if text.bytesize >= 2 && text[0] == 34_u8 && text[-1] == 34_u8
-        text = text[1, text.bytesize - 2]
-      end
-      found[name] = text unless found[name]?
-    end
-    found
-  end
-
-  # The `Set-Cookie` value a server writes (§4.1). A name is a token, and a
-  # value the cookie-octets: a space, a comma, a semicolon, a backslash or
-  # a quote inside one would end it or another field early.
-  def to_set_cookie : String
-    result = ""
-    tape do
-      result = to_tape.to_heap
-    end
-    result
-  end
-
-  def to_tape : String
-    String.build { |w| to_set_cookie(w) }
-  end
-
-  def to_set_cookie(writer : String::Builder) : Nil
-    TapeCookie.view(self).to_set_cookie(writer)
-  end
-
-  # Whether the cookie has lapsed at *now*.
-  def expired?(now : Time) : Bool
-    if lapse = @expires
-      return lapse <= now
-    end
-    false
-  end
-end
-
 # The cookies a client keeps between requests (RFC 6265 §5.3, §5.4): what
 # each answer's `Set-Cookie` lines set, by domain and path, and what a
 # request to a URL sends back. A cookie without `Domain` goes back to its
@@ -137,6 +45,7 @@ end
 # cookie is taken from an `https://` answer only, and goes back over
 # `https://` only (§5.4 step 1). A jar may be shared by tasks on one
 # thread, not across threads.
+@[OnTape]
 pub class CookieJar
   # Each cookie, the host it was set by (what one without a `Domain` goes
   # back to), and the order it was made in.
@@ -270,7 +179,7 @@ end
 
 # A Set-Cookie line's fields, retained with the caller's input bytes.
 @[OnTape]
-pub struct TapeCookie
+pub struct Cookie
   getter name : String
   getter value : String
   getter path : String?
@@ -289,14 +198,14 @@ pub struct TapeCookie
                  @same_site : String? = nil)
   end
 
-  def self.parse(line : String) : TapeCookie?
+  def self.parse(line : String) : Cookie?
     parts = line.split(';')
     return nil if parts.empty?
     pair = parts[0]
     eq = pair.index('=')
     return nil unless eq
-    name = TapeCookie.trim(pair[0, eq])
-    value = TapeCookie.trim(pair[eq + 1, pair.bytesize - eq - 1])
+    name = Cookie.trim(pair[0, eq])
+    value = Cookie.trim(pair[eq + 1, pair.bytesize - eq - 1])
     return nil if name.bytesize == 0
     if value.bytesize >= 2 && value[0] == 34_u8 && value[-1] == 34_u8
       value = value[1, value.bytesize - 2]
@@ -316,9 +225,9 @@ pub struct TapeCookie
       text = "".as_tape
       if at = attribute.index('=')
         key = attribute[0, at]
-        text = TapeCookie.trim(attribute[at + 1, attribute.bytesize - at - 1])
+        text = Cookie.trim(attribute[at + 1, attribute.bytesize - at - 1])
       end
-      key = lower(TapeCookie.trim(key))
+      key = lower(Cookie.trim(key))
       if key == "expires"
         expires = CookieDate.new(text).parse || expires
       elsif key == "max-age"
@@ -341,7 +250,7 @@ pub struct TapeCookie
     if age = max_age
       expires = age <= 0_i64 ? Time.unix(0_i64) : Time.utc + Span.seconds(age)
     end
-    TapeCookie.new(name, value, path, domain, expires, max_age, secure,
+    Cookie.new(name, value, path, domain, expires, max_age, secure,
       http_only, same_site)
   end
 
@@ -363,7 +272,7 @@ pub struct TapeCookie
 
   def to_set_cookie(text : String::Builder) : Nil
     unless HTTP.token?(@name)
-      raise "Cookie: not a cookie name: #{@name.to_heap.inspect}"
+      raise "Cookie: not a cookie name: #{@name.inspect}"
     end
     p = @value
     i = 0
@@ -373,8 +282,8 @@ pub struct TapeCookie
              (c >= 0x2D_u8 && c <= 0x3A_u8) ||
              (c >= 0x3C_u8 && c <= 0x5B_u8) ||
              (c >= 0x5D_u8 && c <= 0x7E_u8)
-        raise "Cookie: #{@name.to_heap} has a byte a cookie value " \
-              "cannot hold: #{@value.to_heap.inspect}"
+        raise "Cookie: #{@name} has a byte a cookie value " \
+              "cannot hold: #{@value.inspect}"
       end
       i = i + 1
     end
@@ -403,24 +312,44 @@ pub struct TapeCookie
     String.build { |w| to_set_cookie(w) }
   end
 
-  def self.view(cookie : Cookie) : TapeCookie
-    path = cookie.path
-    domain = cookie.domain
-    same = cookie.same_site
-    new(cookie.name.as_tape, cookie.value.as_tape,
-      path ? path.as_tape : nil, domain ? domain.as_tape : nil,
-      cookie.expires, cookie.max_age, cookie.secure, cookie.http_only,
-      same ? same.as_tape : nil)
+  def copy_to(owner) : self
+    Tape.owner_copy(self, owner)
   end
 
-  def to_heap : Cookie
-    path = @path
-    domain = @domain
-    same = @same_site
-    Cookie.new(@name.to_heap, @value.to_heap,
-      path ? path.to_heap : nil, domain ? domain.to_heap : nil,
-      @expires, @max_age, @secure, @http_only,
-      same ? same.to_heap : nil)
+  def to_set_cookie : String
+    String.build { |writer| to_set_cookie(writer) }
+  end
+
+  def expired?(now : Time) : Bool
+    lapse = @expires
+    lapse ? lapse <= now : false
+  end
+
+  # The cookies an answer's `Set-Cookie` lines set, a line each.
+  def self.from_response(response : Response) : Array(Cookie)
+    found = [] of Cookie
+    response.header_values("Set-Cookie").each do |line|
+      if cookie = Cookie.parse(line)
+        found << cookie
+      end
+    end
+    found
+  end
+
+  def self.parse_header(value : String) : Hash(String, String)
+    found = Hash(String, String).new
+    value.split(';').each do |part|
+      eq = part.index('=')
+      next unless eq
+      name = Cookie.trim(part[0, eq])
+      next if name.empty?
+      text = Cookie.trim(part[eq + 1, part.bytesize - eq - 1])
+      if text.bytesize >= 2 && text[0] == 34_u8 && text[-1] == 34_u8
+        text = text[1, text.bytesize - 2]
+      end
+      found[name] = text unless found[name]?
+    end
+    found
   end
 
   def self.trim(text : String) : String
@@ -444,70 +373,6 @@ pub struct TapeCookie
   end
 end
 
-@[OnTape]
-pub struct TapeCookiePair
-  getter key : String
-  getter value : String
-
-  def initialize(@key : String, @value : String)
-  end
-end
-
-@[OnTape]
-pub struct TapeCookiePairs
-  @entries : Array(TapeCookiePair)
-
-  def initialize
-    @entries = Array(TapeCookiePair).new
-  end
-
-  def []?(key : String | String) : String?
-    @entries.each do |field|
-      return field.value if field.key == key
-    end
-    nil
-  end
-
-  def [](key : String | String) : String
-    self[key]? || raise "COOKIE: missing key"
-  end
-
-  def []=(key : String, value : String) : Nil
-    @entries.each_with_index do |field, i|
-      if field.key == key
-        @entries[i] = TapeCookiePair.new(key, value)
-        return
-      end
-    end
-    @entries << TapeCookiePair.new(key, value)
-  end
-
-  def size : Int32
-    @entries.size
-  end
-
-  def empty? : Bool
-    @entries.empty?
-  end
-
-  def has_key?(key : String | String) : Bool
-    !self[key]?.nil?
-  end
-
-  def each(& : String, String -> Nil) : Nil
-    @entries.each { |field| yield field.key, field.value }
-  end
-
-  def to_heap : Hash(String, String)
-    result = Hash(String, String).new
-    each { |key, value| result[key.to_heap] = value.to_heap }
-    result
-  end
-end
-
-# The HTTP-date grammar from std/time, scanned over a tape view. Invalid
-# dates are ignored by Cookie.parse, so this reader needs no error strings.
-@[OnTape]
 struct CookieDate
   DAYS = StaticArray["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday",
           "Friday", "Saturday"]

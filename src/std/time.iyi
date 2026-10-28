@@ -125,6 +125,7 @@ end
 # panic: a header or a log line from somewhere else is not a bug in the
 # program reading it. `message` is the sentence, naming the byte the parser
 # stood at and the text; `position` is that byte, counted from 0.
+@[OnTape]
 pub struct TimeParseError
   getter message : String
   getter input : String
@@ -397,6 +398,7 @@ end
 # zone by that name, or the bytes are not a zone: a name the program was
 # handed or a file on the machine is not a bug in the program, so it is a
 # value and not a panic.
+@[OnTape]
 pub struct LocationError
   getter message : String
 
@@ -465,6 +467,7 @@ end
 # summer, from 02:00 on the last Sunday of March to 03:00 on the last Sunday
 # of October. A zone without a summer is just its name and offset, `<+03>-3`.
 # The offsets are written west of UTC and kept here east of it.
+@[OnTape]
 struct TzRule
   MIN_SECOND = -9223372036854775807_i64 - 1_i64
   MAX_SECOND = 9223372036854775807_i64
@@ -571,13 +574,14 @@ end
 
 # Reads a TZ string a byte at a time; every step answers nil, or false,
 # when the text is not what it asks for.
+@[OnTape]
 class TzText
-  @bytes : Pointer(UInt8)
+  @bytes : String
   @len : Int32
   @pos : Int32
 
   def initialize(text : String)
-    @bytes = text.to_unsafe
+    @bytes = text
     @len = text.bytesize
     @pos = 0
   end
@@ -686,9 +690,7 @@ class TzText
   end
 
   private def slice(start : Int32, stop : Int32) : String
-    String.new(stop - start) do |buf|
-      buf.copy_from(@bytes + start.to_i64, stop - start)
-    end
+    @bytes[start, stop - start]
   end
 end
 
@@ -716,12 +718,14 @@ end
 #
 # A location is built once and never changed, so a `Time` that holds one
 # can cross to another task.
+@[OnTape]
 pub struct Location
   MIN_SECOND = -9223372036854775807_i64 - 1_i64
   MAX_SECOND = 9223372036854775807_i64
 
   # One offset a location keeps: its abbreviation (`CEST`, `+03`), its
   # seconds east of UTC, and whether it is summer time.
+  @[OnTape]
   struct Zone
     getter name : String
     getter offset : Int32
@@ -1203,6 +1207,7 @@ pub struct Location
   end
 end
 
+@[OnTape]
 pub struct Time
   getter seconds : Int64
   getter nanoseconds : Int32
@@ -2378,6 +2383,7 @@ pub struct Time
   # month does not have, a name that is not one and text after the pattern
   # are each a `TimeParseError`, never a panic. A day name is checked to be
   # one and not checked against the date, as Crystal, Go and Python read it.
+  @[OnTape]
   struct Format
     MONTH_NAMES = {"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"}
     DAY_NAMES   = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"}
@@ -2449,6 +2455,7 @@ pub struct Time
     # per `format` rather than once per directive. *zone* is what `%Z`
     # writes, the location's abbreviation; with none it writes `UTC` at
     # offset 0 and the offset at any other.
+    @[OnTape]
     struct Fields
       getter year : Int32
       getter month : Int32

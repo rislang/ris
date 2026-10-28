@@ -1846,6 +1846,39 @@ module Iyi
   end
 
   class StringAutocastType
+    private def borrowed_array_type(source : Type) : Type
+      if source.is_a?(GenericClassInstanceType) &&
+         source.generic_type.name == "Array"
+        view = source.generic_type.lookup_type(Path.new(["View"]))
+          .as(GenericClassType)
+        view.instantiate(source.type_vars.values.map do |v|
+          v.as(Var).type.as(TypeVar)
+        end)
+      elsif source.is_a?(UnionType)
+        program.type_merge_union_of(source.union_types.map do |part|
+          borrowed_array_type(part)
+        end).not_nil!
+      else
+        source
+      end
+    end
+
+    private def array_view_type
+      source = literal.type
+      converted = borrowed_array_type(source)
+      converted == source ? nil : converted
+    end
+
+    def restrict(other : Generic, context)
+      if view = array_view_type
+        if result = view.restrict(other, context)
+          add_match(result)
+          return result
+        end
+      end
+      super
+    end
+
     def self.view_restriction?(restriction, context) : Bool
       case restriction
       when Path
@@ -1883,6 +1916,14 @@ module Iyi
 
     # A nilable source must match the whole restriction, never just Str.
     def restrict(other : Union, context)
+      if view = array_view_type
+        type = context.defining_type.lookup_type(other,
+          free_vars: context.bound_free_vars)
+        if view.implements?(type)
+          add_match(type)
+          return type
+        end
+      end
       if literal.type.is_a?(NilableType)
         types = other.types.compact_map do |part|
           context.defining_type.lookup_path(part).as?(Type) if part.is_a?(Path)
@@ -1895,7 +1936,7 @@ module Iyi
     end
 
     def restrict(other : UnionType, context)
-      if literal.type.is_a?(NilableType)
+      if array_view_type || literal.type.is_a?(NilableType)
         if matches_exactly?(other)
           set_exact_match(other)
           return other
@@ -1914,7 +1955,9 @@ module Iyi
     end
 
     def matches_partially?(type : Type) : Bool
-      if literal.type.is_a?(NilableType)
+      if view = array_view_type
+        view.implements?(type)
+      elsif literal.type.is_a?(NilableType)
         type.is_a?(UnionType) && StringAutocastType.view?(type)
       elsif literal.type == program.string
         type.is_a?(NonGenericClassType) && type.name == "String"

@@ -1,0 +1,6 @@
+module static_array_request
+
+import std/static_array::{StaticArray}
+
+TEXT = StaticArray[String.build { |writer| writer << 42 }]
+puts TEXT[0]

@@ -28,11 +28,12 @@ import std/iterator::{Iterator, Stop}
 # Rust says this with ownership and pays nothing; here it costs one copy at the
 # boundary, once, and it is the honest price of not having that machinery.
 @[Share]
+@[OnTape]
 pub struct List(T)
-  @items : Array(T)
+  @items : Array::View(T)
 
   def initialize(items : Array(T))
-    @items = items.dup
+    @items = items.dup.view
   end
 
   # A list over an array nothing else holds: the one `appended` or
@@ -45,7 +46,7 @@ pub struct List(T)
   end
 
   protected def adopt(items : Array(T)) : Nil
-    @items = items
+    @items = items.view
   end
 
   def size : Int32
@@ -211,6 +212,7 @@ end
 # source by value, and this struct was copied into it, so
 # `it.first(2).to_a` and then `it.to_a` gave [1, 2] and [1, 2, 3, 4] where
 # an iterator over an array gives [1, 2] and [3, 4].
+@[OnTape]
 pub class ListIterator(T)
   def initialize(@list : List(T))
     @index = 0

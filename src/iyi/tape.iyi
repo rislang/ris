@@ -3513,27 +3513,7 @@ end
 
 module Tape
   def self.check_slice_relocation(type : T.class, path : P.class) : Nil forall T, P
-    {% if T.name.starts_with?("Array::Link(") %}
-      {% raise "SlicePool.realloc_slice refuses self-relative links; use alloc_slice and free_slice without relocation" %}
-    {% elsif !P.type_vars.includes?(T) %}
-      {% if T < Tuple %}
-        {% for member in T.type_vars %}
-          check_slice_relocation({{member}}, Tuple(*P, T))
-        {% end %}
-      {% elsif T < NamedTuple %}
-        {% for key in T.keys %}
-          check_slice_relocation({{T[key]}}, Tuple(*P, T))
-        {% end %}
-      {% elsif T.union? %}
-        {% for member in T.union_types %}
-          check_slice_relocation({{member}}, Tuple(*P, T))
-        {% end %}
-      {% else %}
-        {% for field in T.instance_vars %}
-          check_slice_relocation({{field.type}}, Tuple(*P, T))
-        {% end %}
-      {% end %}
-    {% end %}
+    # The compiler checks the resolved fields without naming private types.
   end
 end
 

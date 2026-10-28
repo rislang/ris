@@ -611,7 +611,9 @@ class Iyi::Call
       view.set_enclosing_call(self)
       return view
     end
-    view = Call.new(value, "as_tape").at(value)
+    method = value.type.is_a?(GenericClassInstanceType) ||
+      value.type.is_a?(UnionType) ? "as_view" : "as_tape"
+    view = Call.new(value, method).at(value)
     # The receiver is already typed; revisiting it would rebind its calls.
     parent_visitor.prepare_call(view)
     value.set_enclosing_call(view)
@@ -620,7 +622,33 @@ class Iyi::Call
     view
   end
 
+  private def check_slice_relocation(type : Type,
+                                     seen = Set(Type).new) : Nil
+    return unless seen.add?(type)
+    if type.to_s.starts_with?("Array::Link(")
+      raise "SlicePool.realloc_slice refuses self-relative links; " \
+            "use alloc_slice and free_slice without relocation"
+    end
+    case type
+    when UnionType
+      type.union_types.each { |part| check_slice_relocation(part, seen) }
+    when TupleInstanceType
+      type.tuple_types.each { |part| check_slice_relocation(part, seen) }
+    when NamedTupleInstanceType
+      type.entries.each { |entry| check_slice_relocation(entry.type, seen) }
+    else
+      if type.is_a?(InstanceVarContainer)
+        type.instance_vars.each_value do |field|
+          field.type?.try { |part| check_slice_relocation(part, seen) }
+        end
+      end
+    end
+  end
+
   def instantiate(signature, matches, owner, self_type, with_autocast)
+    if name == "check_slice_relocation" && owner.to_s == "Tape:Module"
+      check_slice_relocation(args.first.type.instance_type)
+    end
     if with_autocast
       args.each_with_index do |arg, index|
         if arg.is_a?(Call) && arg.tape_literal? &&

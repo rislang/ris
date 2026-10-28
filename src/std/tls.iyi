@@ -699,7 +699,8 @@ pub class TlsKeySchedule
       a = hmac(secret, a)
       out.concat(hmac(secret, a + labelled))
     end
-    out[0, length]
+    out.truncate(length)
+    out
   end
 end
 
@@ -721,9 +722,9 @@ pub class TlsRecordCipher
     key = schedule.expand_label(secret, "key", [] of UInt8, size)
     @iv = schedule.expand_label(secret, "iv", [] of UInt8, 12)
     if suite == TlsSuites::CHACHA20_POLY1305
-      @chacha = ChaCha20Poly1305.new(key)
+      @chacha = ChaCha20Poly1305.new(key.bytes)
     else
-      @gcm = AesGcm.new(key)
+      @gcm = AesGcm.new(key.bytes)
     end
   end
 
@@ -732,12 +733,13 @@ pub class TlsRecordCipher
   # record's eight-byte explicit nonce is added (RFC 5288 section 3), or
   # ChaCha20-Poly1305's twelve bytes, XORed with the sequence number as TLS
   # 1.3 does it (RFC 7905 section 2).
-  def initialize(suite : Int32, key : Array(UInt8), @iv : Array(UInt8))
+  def initialize(suite : Int32, key : Array::View(UInt8), iv : Array::View(UInt8))
+    @iv = iv.to_a
     @tls12 = true
     if TlsSuites.chacha?(suite)
-      @chacha = ChaCha20Poly1305.new(key)
+      @chacha = ChaCha20Poly1305.new(key.bytes)
     else
-      @gcm = AesGcm.new(key)
+      @gcm = AesGcm.new(key.bytes)
     end
   end
 
@@ -878,10 +880,10 @@ pub class TlsRecordCipher
 
   # The whole record that carries *content* of *type*, protected: sealed
   # by `seal_at` in a buffer of its own.
-  def seal(type : UInt8, content : Array(UInt8)) : Array(UInt8)
+  def seal(type : UInt8, content : Array::View(UInt8)) : Array(UInt8)
     at = prefix
     buffer = Pointer(UInt8).malloc((at + content.size + OVERHEAD).to_u64)
-    (buffer + at.to_i64).copy_from(content.to_unsafe, content.size)
+    content.each_with_index { |byte, i| buffer[at + i] = byte }
     length = seal_at(type, buffer, content.size)
     TlsBytes.bytes(buffer, length)
   end
@@ -1833,7 +1835,7 @@ pub abstract class TlsConnection
 
   private def add_handshake(content : Array(UInt8)) : Nil
     if @handshake_at > 0
-      @handshake = @handshake[@handshake_at, handshake_left]
+      @handshake.drop_prefix(@handshake_at)
       @handshake_at = 0
     end
     @handshake.concat(content)
@@ -1847,10 +1849,12 @@ pub abstract class TlsConnection
     length = TlsBytes.u24_at(@handshake, @handshake_at + 1)
     return TlsError.new("a handshake message of #{length} bytes", TlsAlert::DECODE_ERROR) if length > MAX_HANDSHAKE
     return nil if left < 4 + length
-    message = @handshake[@handshake_at, 4 + length]
+    message = Array(UInt8).new(4 + length) do |i|
+      @handshake[@handshake_at + i]
+    end
     @handshake_at = @handshake_at + 4 + length
     if @handshake_at == @handshake.size
-      @handshake = [] of UInt8
+      @handshake.clear
       @handshake_at = 0
     end
     message
@@ -3102,7 +3106,7 @@ pub class TlsClient < TlsConnection
 
   # A CertificateStatus's body (RFC 6066 section 8): status_type ocsp (1),
   # then the OCSPResponse's DER, which is not empty.
-  def self.certificate_status(data : Array(UInt8)) : Array(UInt8) | TlsError
+  def self.certificate_status(data : Array::View(UInt8)) : Array(UInt8) | TlsError
     field = TlsReader.new(data)
     type = field.u8
     response = field.bytes(field.u24)
@@ -4043,7 +4047,7 @@ pub class TlsTicketKeys
       key = @previous
     end
     return nil unless key
-    opened = key.open(ticket[8, 12], ticket[20, ticket.size - 20], name)
+    opened = key.open(ticket[8, 12].bytes, ticket[20, ticket.size - 20].bytes, name)
     return nil if opened.is_a?(AeadError)
     TlsBytes.of(opened)
   end
@@ -4139,8 +4143,8 @@ pub class TlsReplayGuard
       @head = @head + 1
     end
     return unless @head > 1024 && @head * 2 > @binders.size
-    @binders = @binders[@head, @binders.size - @head]
-    @times = @times[@head, @times.size - @head]
+    @binders.drop_prefix(@head)
+    @times.drop_prefix(@head)
     @head = 0
   end
 end
@@ -4514,9 +4518,11 @@ pub class TlsServer < TlsConnection
       @early_unread.concat(got) if got
     end
     size = @early_unread.size < max ? @early_unread.size : max
-    chunk = @early_unread[0, size]
-    @early_unread = @early_unread[size, @early_unread.size - size]
-    TlsBytes.text(chunk)
+    text = String.build(size) do |writer|
+      size.times { |i| writer.push(@early_unread[i]) }
+    end
+    @early_unread.drop_prefix(size)
+    text
   end
 
   # The rest of a handshake whose early data was taken: the early data not
@@ -5893,7 +5899,7 @@ class TlsHelloParts
 
   def data(index : Int32) : Array(UInt8)
     entry = @extensions[index]
-    @message[entry[1], entry[2]]
+    @message[entry[1], entry[2]].to_a
   end
 
   # Where the first extension of *type* is among them.
@@ -6079,7 +6085,7 @@ struct TlsEch
   # ClientHelloOuterAAD (section 5.2): the ClientHello without its
   # message header, the payload's *size* bytes at *at* zero.
   def self.aad(message : Array(UInt8), at : Int32, size : Int32) : Array(UInt8)
-    aad = message[4, message.size - 4]
+    aad = Array(UInt8).new(message.size - 4) { |i| message[4 + i] }
     aad.fill(0_u8, at - 4, size)
     aad
   end
@@ -6217,10 +6223,11 @@ end
 
 # Reads a message field by field; a read past the end marks it short and
 # answers zeros, so a caller checks once.
+@[OnTape]
 class TlsReader
   getter short : Bool = false
 
-  def initialize(@data : Array(UInt8))
+  def initialize(@data : Array::View(UInt8))
     @at = 0
   end
 
@@ -6260,7 +6267,7 @@ class TlsReader
   def bytes(count : Int32) : Array(UInt8)
     start = take(count)
     return [] of UInt8 if start.nil?
-    @data[start, count]
+    Array(UInt8).new(count) { |i| @data[start + i] }
   end
 
   private def take(count : Int32) : Int32?
@@ -6288,8 +6295,8 @@ struct TlsBytes
     bytes
   end
 
-  def self.text(bytes : Array(UInt8)) : String
-    String.new(bytes.size) { |buf| buf.copy_from(bytes.to_unsafe, bytes.size) }
+  def self.text(bytes : Array::View(UInt8)) : String
+    bytes.bytes
   end
 
   def self.u16(value : Int32) : Array(UInt8)
@@ -6347,7 +6354,7 @@ struct TlsBytes
     [type.to_u8, ((body.size >> 16) & 0xFF).to_u8, ((body.size >> 8) & 0xFF).to_u8, (body.size & 0xFF).to_u8] + body
   end
 
-  def self.hex(bytes : Array(UInt8)) : String
+  def self.hex(bytes : Array::View(UInt8)) : String
     String.build do |io|
       bytes.each do |b|
         io << "0123456789abcdef"[b.to_i32 >> 4]
