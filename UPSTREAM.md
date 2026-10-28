@@ -8,6 +8,11 @@ back.
 
 ## To take to iyi
 
+* std/acme: optional task-owned HTTPClient for the directory and all
+  signed exchanges. It lets independent sessions select TLS trust roots
+  without changing HTTP.tls_config for other tasks. The caller closes
+  the supplied transport; the protocol and default API stay unchanged.
+
 * std/signal: syscall scratch buffers use fixed stack storage. Signal
   lists use Ary in ris; keep the Array variant in iyi.
 

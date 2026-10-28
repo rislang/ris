@@ -217,11 +217,35 @@ move, descriptor-as-message workaround or safety exception.
 
 ## Managers and completion broadcast
 
-A manager such as autocert has independent state per task, or one task
-owns its mutable state and serves copied board messages. That service
-must coordinate reply routing; multiple waiters cannot selectively take
-by an id field. Handler procs and IdleConns are not shared-manager
-loopholes: construct independent handlers and connection state per task.
+A manager has independent state per task, or one task owns its mutable
+state and serves copied board messages. Multiple waiters cannot selectively
+consume messages by an id field. Handler procs and IdleConns are not
+shared-manager loopholes: construct independent handlers and connection
+state per task.
+
+Autocert uses one process-wide AutocertOrder queue for certificate names
+and a tagged Stop order. Only one manager may run in a process, including
+when configurations name different cache directories. AutocertConfig is
+Copyable data: URL, cache directory, allowed hosts, contact, terms, timing,
+challenge names and PEM trust roots. Construct AutocertView in each serving
+task; its TLS callbacks and parsed identities stay on that task.
+
+The cache directory broadcasts completion. Certificates and private keys
+are published together by atomic rename; <name>.error holds until_ms and
+the failure detail. Every waiter sees that failure until until_ms. HTTP
+and TLS challenge entries are also read from the cache by server tasks.
+There are no replies to route or steal. Each waiter polls at 50 ms,
+doubling to 500 ms, bounded by its own handshake deadline and wait_ms.
+Its timeout never cancels the manager's flight.
+
+The manager owns flight handles, failures and renewal scheduling. Each
+flight has an independent protocol session under the same cached account
+key: a mutable ACME client cannot be captured by another task. The manager
+prepares the account key before starting concurrent flights. Servers
+compare cached PEM with their task-local version and rebuild identities
+when renewal publishes a change, even within one filesystem timestamp.
+Stopping joins and cancels flights; valid cached certificates keep serving.
+Part B of the autocert port covers the bench exercise and its driver.
 
 Many readers of one completion use a retained IyiTask result and value,
 subject to task-handle Share checks. Results are copied to each reader's
@@ -233,7 +257,8 @@ Cancellation wins over completion, then completion wins over timeout.
 A nonpositive duration polls. Each reader has its own deadline; neither
 timeout nor reader cancellation cancels the task. Read `value` separately
 to receive its result or Panicked. Completion includes deferred cleanup.
-Autocert still needs its manager ownership and wake/stop protocol port.
+Autocert uses these retained handles only inside the manager. Handshake
+completion is the shared cache, so no task handle crosses into a server.
 
 IyiTask#value is not Goose's thread_wait: it answers the task's result
 or Panicked, not a status Bool, and a task handle is not a message. In

@@ -1,0 +1,274 @@
+# A local protocol double publishes the same atomic PEM/cache entries as
+# ACME finalization. It owns all mutable state on its flight task.
+import std/autocert::{Autocert, AutocertConfig, AutocertView,
+  AutocertOrder, AutocertDirCache, AutocertError}
+import std/file::{File}
+import std/http::{Request}
+import std/text
+import std/indexable
+import std/tls::{TlsIdentity, TlsError}
+import std/time::{Time}
+
+@[OnTape]
+class FakeIssuer < AutocertView
+  def issue(name : String) : AutocertError?
+    prior = cache.get("attempt")
+    count = prior.is_a?(String) ? prior.to_i + 1 : 1
+    cache.put("attempt", count.to_s)
+    if config.directory_url == "panic"
+      cache.put("challenge-http-flight", "proof")
+      defer cache.delete("challenge-http-flight")
+      raise "flight panic"
+    end
+    if config.directory_url == "hold"
+      cache.put("challenge-http-flight", "proof")
+      defer cache.delete("challenge-http-flight")
+      sleep 10000
+      return nil
+    end
+    sleep 250
+    return AutocertError.new("the local CA refused this order") if config.directory_url == "fail"
+    path = "#{config.cache_dir}/#{count == 1 ? "first" : "second"}.pem"
+    cache.put(name, File.read(path))
+  end
+end
+
+def settings(root : Str, mode : Str) : AutocertConfig
+  hosts = Ary(Str).new(1)
+  hosts << "localhost"
+  config = AutocertConfig.new(mode, root, hosts)
+  config.roots_pem = File.read("#{root}/roots.pem").as_tape
+  config.wait_ms = 3000
+  config.retry_ms = 1000
+  config
+end
+
+@[OnTape]
+struct ManagerConfig
+  getter config : AutocertConfig
+  def initialize(@config : AutocertConfig)
+  end
+end
+@[OnTape]
+struct ReaderConfig
+  getter config : AutocertConfig
+  getter left_ms : Int32
+  def initialize(@config : AutocertConfig, @left_ms : Int32 = 3000)
+  end
+end
+
+def start_manager(group : IyiGroup, config : AutocertConfig) : IyiTask(Bool)
+  RisBoard.post(ManagerConfig.new(config))
+  group.spawn do
+    startup = RisBoard.take(ManagerConfig)
+    startup.is_a?(ManagerConfig) && Autocert.run(startup.config, FakeIssuer).nil?
+  end
+end
+
+def reader_settings : ReaderConfig
+  got = RisBoard.take(ReaderConfig)
+  raise "reader config cancelled" unless got.is_a?(ReaderConfig)
+  got
+end
+
+def count(config : AutocertConfig) : Int32
+  text = AutocertDirCache.new(config.cache_dir.to_heap).get("attempt")
+  text.is_a?(String) ? text.to_i : 0
+end
+
+struct ServerReady
+end
+struct ServerReloaded
+end
+struct ServeAfterStop
+end
+
+def persistent_server : Bool
+  view = AutocertView.new(reader_settings.config)
+  first = view.identity_for("localhost", nil)
+  return false unless first.is_a?(TlsIdentity)
+  serial = first.leaf.serial
+  RisBoard.post(ServerReady.new)
+  deadline = Time.monotonic.total_milliseconds.to_i64 + 20000
+  loop do
+    return false if Time.monotonic.total_milliseconds.to_i64 >= deadline
+    sleep 50
+    latest = view.identity_for("localhost", nil)
+    if latest.is_a?(TlsIdentity) && latest.leaf.serial != serial
+      RisBoard.post(ServerReloaded.new)
+      break
+    end
+  end
+  return false if RisBoard.take(ServeAfterStop).is_a?(Cancelled)
+  view.identity_for("localhost", nil).is_a?(TlsIdentity)
+end
+
+root = Program.arguments[0]
+config = settings(root, "success")
+# Config and the tagged stop order must pass the actual Copyable codec.
+raise "config post" unless RisBoard.post(config)
+copied = RisBoard.take(AutocertConfig)
+raise "config copy" unless copied.is_a?(AutocertConfig)
+copied.hosts[0] = "changed"
+raise "config aliases" unless config.hosts[0] == "localhost"
+raise "stop post" unless RisBoard.post(AutocertOrder.stop)
+raise "stop copy" unless RisBoard.take(AutocertOrder).is_a?(AutocertOrder)
+group do |service|
+  manager = start_manager(service, config)
+  sleep 10
+  second = Autocert.run(config, FakeIssuer)
+  raise "manager isolation" unless second && second.message.includes?("one board protocol per process")
+  group do |waiters|
+    RisBoard.post(ReaderConfig.new(config, 20))
+    short = waiters.spawn do
+      view = AutocertView.new(reader_settings.config)
+      result = view.identity_for("localhost", nil, 20)
+      result.is_a?(TlsError) && result.message.includes?("20 ms left of the handshake's time")
+    end
+    # Every task constructs its own view; no identity or manager crosses.
+    readers = Ary(IyiTask(Bool)).new(16)
+    16.times do
+      RisBoard.post(ReaderConfig.new(config))
+      readers << waiters.spawn do
+        view = AutocertView.new(reader_settings.config)
+        r = view.identity_for("localhost", nil, 3000)
+        r.is_a?(TlsIdentity)
+      end
+    end
+    raise "short deadline" unless short.value == true
+    readers.each { |reader| raise "completion broadcast" unless reader.value == true }
+  end
+  raise "dedupe" unless count(config) == 1
+  puts "PASS: autocert waiters, independent deadlines, one flight"
+  group do |servers|
+    RisBoard.post(ReaderConfig.new(config))
+    RisBoard.post(ReaderConfig.new(config))
+    a = servers.spawn { persistent_server }
+    b = servers.spawn { persistent_server }
+    2.times do
+      ready = RisBoard.take(ServerReady, 3000_i64)
+      raise "server ready" if ready.is_a?(Cancelled) || !ready[1]
+    end
+    # This view must reload a different serial after actual timed renewal.
+    view = AutocertView.new(config)
+    first = view.identity_for("localhost", nil)
+    raise "first identity" unless first.is_a?(TlsIdentity)
+    serial = first.leaf.serial
+    until_ms = Time.monotonic.total_milliseconds.to_i64 + 20000
+    renewed = false
+    while Time.monotonic.total_milliseconds.to_i64 < until_ms
+      sleep 50
+      latest = view.identity_for("localhost", nil)
+      if latest.is_a?(TlsIdentity) && latest.leaf.serial != serial
+        renewed = true
+        break
+      end
+    end
+    raise "renewal reload" unless renewed && count(config) == 2
+    raise "stop post" unless Autocert.stop
+    raise "manager stop deadline" unless manager.wait(2000).nil?
+    raise "manager stop" unless manager.value == true
+    raise "serve after stop" unless view.identity_for("localhost", nil).is_a?(TlsIdentity)
+    2.times do
+      loaded = RisBoard.take(ServerReloaded, 3000_i64)
+      raise "server reload" if loaded.is_a?(Cancelled) || !loaded[1]
+    end
+    RisBoard.post(ServeAfterStop.new)
+    RisBoard.post(ServeAfterStop.new)
+    raise "servers after stop" unless a.value == true && b.value == true
+    puts "PASS: autocert renewal reload, stop preserves cached serving"
+  end
+end
+
+# Start a new manager only after the previous manager and flights ended.
+failure_config = settings("#{root}/failure", "fail")
+group do |service|
+  manager = start_manager(service, failure_config)
+  group do |waiters|
+    readers = Ary(IyiTask(Bool)).new(12)
+    12.times do
+      RisBoard.post(ReaderConfig.new(failure_config))
+      readers << waiters.spawn do
+        result = AutocertView.new(reader_settings.config).identity_for("localhost", nil)
+        result.is_a?(TlsError) && result.message.includes?("autocert: the local CA refused this order")
+      end
+    end
+    readers.each { |reader| raise "failure broadcast" unless reader.value == true }
+  end
+  raise "failure dedupe" unless count(failure_config) == 1
+  stored = AutocertDirCache.new(failure_config.cache_dir.to_heap).get("localhost.error")
+  raise "failure persisted" unless stored.is_a?(String)
+  until_ms = stored.split("\n")[0].to_i64
+  view = AutocertView.new(failure_config)
+  raise "failure too early" unless view.cached_failure("localhost", until_ms - 1)
+  raise "failure too late" if view.cached_failure("localhost", until_ms)
+  same = view.identity_for("localhost", nil, 1)
+  raise "remembered failure" unless same.is_a?(TlsError) &&
+    same.message.includes?("autocert: the local CA refused this order")
+  remaining = until_ms - Time.utc.to_unix_ms
+  sleep(remaining.to_i32 + 10) if remaining > 0
+  retried = view.identity_for("localhost", nil)
+  raise "retry after expiry" unless retried.is_a?(TlsError) &&
+    count(failure_config) == 2
+  Autocert.stop
+  raise "failure manager stop" unless manager.value == true
+end
+puts "PASS: autocert failure broadcast and until_ms boundary"
+
+panic_config = settings("#{root}/panic", "panic")
+group do |service|
+  manager = start_manager(service, panic_config)
+  error = AutocertView.new(panic_config).identity_for("localhost", nil)
+  raise "panic visible" unless error.is_a?(TlsError) && error.message.includes?("flight panic")
+  cache = AutocertDirCache.new(panic_config.cache_dir.to_heap)
+  raise "panic certificate" unless cache.get("localhost").nil?
+  raise "panic challenge" unless cache.get("challenge-http-flight").nil?
+  Autocert.stop
+  raise "panic manager live" unless manager.value == true
+end
+puts "PASS: autocert panic publishes failure without partial certificate"
+
+cancel_config = settings("#{root}/cancel", "hold")
+group do |service|
+  manager = start_manager(service, cancel_config)
+  RisBoard.post(AutocertOrder.new("localhost"))
+  deadline = Time.monotonic.total_milliseconds.to_i64 + 3000
+  while count(cancel_config) == 0
+    raise "cancel flight start" if Time.monotonic.total_milliseconds.to_i64 >= deadline
+    sleep 10
+  end
+  Autocert.stop
+  raise "cancel stop deadline" unless manager.wait(2000).nil?
+  raise "cancel manager stop" unless manager.value == true
+  cache = AutocertDirCache.new(cancel_config.cache_dir.to_heap)
+  raise "cancel certificate" unless cache.get("localhost").nil?
+  raise "cancel failure" unless cache.get("localhost.error").nil?
+  raise "cancel challenge" unless cache.get("challenge-http-flight").nil?
+end
+puts "PASS: autocert cancellation cleans the flight and cache"
+
+# Real challenge material is read by a separately configured server task.
+view = AutocertView.new(config)
+raise "challenge publish" unless view.add_challenge("localhost", "token",
+  "token.thumbprint").nil?
+group do |readers|
+  RisBoard.post(ReaderConfig.new(config))
+  task = readers.spawn do
+    worker = AutocertView.new(reader_settings.config)
+    tls = worker.tls_config
+    challenge = worker.identity_for("localhost", ["acme-tls/1"])
+    request = Request.new("GET", "/.well-known/acme-challenge/token",
+      nil, {} of String => String, "")
+    answer = worker.answer(request)
+    tls.alpn.includes?("acme-tls/1") &&
+      challenge.is_a?(TlsIdentity) && answer && answer.status == 200 &&
+      answer.body == "token.thumbprint"
+  end
+  raise "challenge broadcast" unless task.value == true
+end
+view.remove_challenge("localhost", "token")
+raise "challenge retired" unless view.identity_for("localhost",
+  ["acme-tls/1"]).is_a?(TlsError)
+raise "host policy" unless view.identity_for("evil.example",
+  nil).is_a?(TlsError)
+puts "PASS: autocert cached TLS/HTTP challenges and task-local TLS config"

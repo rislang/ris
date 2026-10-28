@@ -1,0 +1,39 @@
+# The public config and orders carry finite copied data, with no heap.
+import std/autocert::{Autocert, AutocertConfig, AutocertOrder,
+  AutocertControl}
+
+hosts = Ary(Str).new(2)
+hosts << "localhost" << "other.example"
+config = AutocertConfig.new("https://ca.example/directory", "/tmp/cache",
+  hosts)
+config.email = "contact@example.com"
+config.accept_terms = true
+config.wait_ms = 1234
+config.retry_ms = 4321
+config.roots_pem = "certificate roots"
+config.ca_roots_pem = "ACME roots"
+raise "config post" unless RisBoard.post(config)
+config.hosts[0] = "sender changed"
+copy = RisBoard.take(AutocertConfig)
+raise "config receive" unless copy.is_a?(AutocertConfig)
+raise "config host copy" unless copy.hosts[0] == "localhost"
+raise "config fields" unless copy.wait_ms == 1234 && copy.retry_ms == 4321
+raise "config contact" unless copy.email == "contact@example.com"
+raise "config terms" unless copy.accept_terms
+raise "config roots" unless copy.roots_pem == "certificate roots"
+raise "config CA roots" unless copy.ca_roots_pem == "ACME roots"
+copy.challenges[0] = "changed"
+raise "config challenges copied" unless config.challenges[0] == "tls-alpn-01"
+RisBoard.limit(AutocertOrder, 1_i64)
+raise "name post" unless RisBoard.post(AutocertOrder.new("localhost"))
+raise "bounded post" if RisBoard.post(AutocertOrder.new("other.example"))
+raise "bounded stop" if Autocert.stop
+order = RisBoard.take(AutocertOrder)
+raise "name receive" unless order.is_a?(AutocertOrder)
+raise "name variant" unless order.control == AutocertControl::Certificate
+raise "name data" unless order.name == "localhost"
+raise "stop post" unless Autocert.stop
+stop = RisBoard.take(AutocertOrder)
+raise "stop receive" unless stop.is_a?(AutocertOrder)
+raise "stop variant" unless stop.control == AutocertControl::Stop
+puts "PASS: autocert Copyable config, bounded orders and stop"

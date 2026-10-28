@@ -41,17 +41,16 @@ once; Channel stays for them until then.
   poller interests, next-launch/deadline timers and Windows completion
   records. Gate: staggered attempts, early failure/winner, timeout/cancel,
   all losing sockets closed and existing race tests on supported targets.
-* Port autocert flights to retained task results for completion broadcast.
-  Timed nonconsuming task waits are available as IyiTask#wait(ms); one
-  handshake timeout must not cancel shared work. Keep manager/cache state
-  in one task serving copied board messages, or independently per task;
-  isolate protocols and route replies without stealing other waiters' mail.
-  Replace wake/halt/select with tagged control messages or local OS wakes.
-  Gate: many waiters, independent deadlines, renewal/stop, manager isolation,
-  panic/cancel/result lifetime and existing autocert tests.
-  Part A is begun on branch autocert-wip (577035543, does not compile:
-  std/autocert.iyi:637 interpolates a Str to the heap); rebase it on
-  no-gc and continue from there.
+* Port autocert to one manager with copied board orders and cached results.
+  Part A implements Copyable config, task-local views, tagged stop,
+  independent cache-poll deadlines, failure broadcast and expiry, renewal
+  reload and process-wide manager isolation. Flights own protocol sessions
+  under the manager's group; no mutable client crosses task boundaries.
+  Gates: test/ris/autocert.ri and autocert_wire.ri, registered in check.sh.
+  Part B remains: finish bench/std_autocert_exercise.iyi and its driver,
+  including real TLS deadline/parallel-server cases, Pebble, restarts and
+  mutation checks. Preserve the policy probe's copied board observations;
+  its Counter is no longer captured by the listener task.
 * Remove Channel/select after all replacement gates pass. Gate: no
   remaining users, full check, std/samples tests and --no-gc link audit.
 

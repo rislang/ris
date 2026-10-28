@@ -84,6 +84,27 @@ for mode in gc no-gc; do
   fi
 done
 
+# Autocert broadcasts cache results with independent waiter deadlines.
+out=$(RIS="$RIS" python3 test/ris/autocert_checks.py 2>&1)
+if [ "$?" -eq 0 ] &&
+    grep -qF 'PASS: autocert cancellation' <<<"$out"; then
+  printf '%s\n' "$out"
+else
+  echo "FAILED   autocert lifecycle: $out"; status=1
+fi
+
+# Config and name/stop variants pass the Copyable codec without heap IO.
+out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc \
+  test/ris/autocert_wire.ri 2>&1)
+if [ "$?" -eq 0 ] &&
+    grep -qxF 'PASS: autocert Copyable config, bounded orders and stop' \
+      <<<"$out" &&
+    grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+  echo 'runs     autocert_wire (--no-gc, zero heap, config, orders, stop)'
+else
+  echo "FAILED   autocert wire: $out"; status=1
+fi
+
 # Joining waits for cleanup and refuses later adoption.
 out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc \
   test/ris/group_lifecycle.ri 2>&1)

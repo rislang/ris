@@ -3282,6 +3282,10 @@ pub struct HTTP
   # What an `https://` request is checked against and offers: the
   # system's roots, and ALPN's `http/1.1`, unless a program sets its own -
   # roots of its own for a server it runs, say.
+  # This setting is process-wide. A task with independent trust uses
+  # HTTPClient.new(tls: local_config) and passes that client to requests.
+  # Autocert flights use this form; server workers build AutocertView
+  # from their copied AutocertConfig, then expose view.tls_config.
   def self.tls_config : TlsConfig
     if held = @@tls
       return held

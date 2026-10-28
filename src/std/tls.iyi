@@ -6,7 +6,8 @@
 #     import std/tls::{TlsClient, TlsConfig, TlsError}
 #
 #     conn = TlsClient.connect("example.com", 443).or_panic
-#     conn.write("GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
+#     conn.write("GET / HTTP/1.1\r\nHost: example.com\r\nConnection:
+# close\r\n\r\n")
 #     while (chunk = conn.read.or_panic) != ""
 #       print chunk
 #     end
@@ -14,7 +15,8 @@
 #
 #     import std/tls::{TlsServer, TlsServerConfig}
 #
-#     config = TlsServerConfig.from_pem(File.read("chain.pem"), File.read("key.pem")).or_panic
+#     config = TlsServerConfig.from_pem(File.read("chain.pem"),
+# File.read("key.pem")).or_panic
 #     config.alpn = ["h2", "http/1.1"]
 #     conn = TlsServer.over(listener.accept.as(IyiSocket), config).or_panic
 #     conn.read                                  # what the client sent
@@ -159,7 +161,7 @@
 # the server_name, the ALPN protocols the client offered and the
 # milliseconds left of the handshake's deadline, it answers an identity,
 # nil for the config's own choice, or an error that refuses the
-# handshake with the alert it names. std/autocert's manager is one,
+# handshake with the alert it names. std/autocert's task-local view is one,
 # answering certificates it gets from an ACME CA as they are asked for,
 # and tls-alpn-01's challenge certificate (RFC 8737) on the same listener.
 # With `client_roots` the server asks for a client's certificate, checks
@@ -222,7 +224,8 @@
 # 8446's downgrade sentinel, so a client that offered 1.3 and had it
 # taken out on the way refuses it; a client that says it is falling back
 # (TLS_FALLBACK_SCSV, RFC 7507) is refused, inappropriate_fallback, since
-# this server speaks 1.3. renegotiation_info (RFC 5746) is answered to a client that signals
+# this server speaks 1.3. renegotiation_info (RFC 5746) is answered to a client
+# that signals
 # it by the extension or the SCSV, and refused when not empty; a
 # ClientHello after the handshake - a renegotiation - is answered with the
 # no_renegotiation warning, and the connection ends with it. No session
@@ -711,7 +714,8 @@ pub class TlsRecordCipher
   # TLS 1.2's records: the content type in the header, no padding.
   @tls12 : Bool = false
 
-  # TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256.
+  # TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384,
+  # TLS_CHACHA20_POLY1305_SHA256.
   def initialize(suite : Int32, schedule : TlsKeySchedule, secret : Array(UInt8))
     size = suite == TlsSuites::AES_128_GCM ? 16 : 32
     key = schedule.expand_label(secret, "key", [] of UInt8, size)
@@ -3538,7 +3542,8 @@ pub class TlsIdentity
   @p256 : P256PrivateKey?
   @p384 : P384PrivateKey?
   @rsa : RsaPrivateKey?
-  # The OCSP response a server staples for this chain (`TlsServerConfig#staple`),
+  # The OCSP response a server staples for this chain
+  # (`TlsServerConfig#staple`),
   # its DER and the SingleResponse for the leaf.
   getter ocsp_staple : Array(UInt8)? = nil
   @ocsp_response : OcspResponse? = nil
@@ -5181,7 +5186,8 @@ pub class TlsServer < TlsConnection
         # in a ClientHello.
         return TlsError.new("ech_outer_extensions in a ClientHello", TlsAlert::ILLEGAL_PARAMETER)
       else
-        # Every other extension - padding, signed_certificate_timestamp and whatever a
+        # Every other extension - padding, signed_certificate_timestamp and
+        # whatever a
         # client adds - is passed over, as section 4.2 says a server does
         # with what it does not use.
       end

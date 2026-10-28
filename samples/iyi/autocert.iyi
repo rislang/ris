@@ -1,0 +1,68 @@
+# Run with DIRECTORY CACHE HOST EMAIL accept-terms [TLS_PORT HTTP_PORT].
+# Accept the CA's terms before passing accept-terms. Use ports 443/80
+# for public validation, or forward those ports to the chosen listeners.
+# Config is built independently on the manager and server tasks.
+import std/autocert::{Autocert, AutocertConfig, AutocertView}
+import std/http::{Server, Request, Response}
+import std/tls::{TlsServerConfig}
+import std/signal::{Signal}
+
+@[OnTape]
+class HttpHandler
+  @view : AutocertView
+
+  def initialize(config : AutocertConfig)
+    @view = AutocertView.new(config)
+  end
+
+  def call(request : Request) : Response
+    @view.answer(request) || Response.new(200, "hello from ris\n")
+  end
+end
+
+@[OnTape]
+class TlsHandler < HttpHandler
+  getter tls_config : TlsServerConfig
+
+  def initialize(config : AutocertConfig)
+    super(config)
+    @tls_config = @view.tls_config
+  end
+end
+
+def configuration : AutocertConfig
+  args = Program.arguments
+  if args.size < 5
+    raise "DIRECTORY CACHE HOST EMAIL accept-terms [TLS_PORT HTTP_PORT]"
+  end
+  hosts = Ary(Str).new(1)
+  hosts << args[2]
+  config = AutocertConfig.new(args[0], args[1], hosts)
+  config.email = args[3]
+  config.accept_terms = args[4] == "accept-terms".as_tape
+  config
+end
+
+group do |g|
+  g.spawn do
+    if failed = Autocert.run(configuration)
+      raise failed.message
+    end
+    0
+  end
+  g.spawn do
+    args = Program.arguments
+    port = args.size > 6 ? args[6].to_i : 80
+    Server.serve("0.0.0.0", port, configuration, HttpHandler)
+    0
+  end
+  g.spawn do
+    Signal.wait(Signal::TERM)
+    g.cancel_children
+    0
+  end
+  args = Program.arguments
+  port = args.size > 5 ? args[5].to_i : 443
+  Server.serve("0.0.0.0", port, configuration, TlsHandler)
+  0
+end

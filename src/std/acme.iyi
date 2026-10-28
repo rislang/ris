@@ -6,17 +6,21 @@
 #     import std/x509::{SigningKey}
 #
 #     account = SigningKey.p256         # the account is this key: keep it
-#     acme = AcmeClient.new("https://acme-v02.api.letsencrypt.org/directory", account).or_panic
+#     acme = AcmeClient.new("https://acme-v02.api.letsencrypt.org/directory",
+# account).or_panic
 #     acme.register(["mailto:admin@example.com"], terms_agreed: true).or_panic
 #     order = acme.new_order(["example.com"]).or_panic
 #     order.authorizations.each do |url|
-#       challenge = acme.authorization(url).or_panic.challenge("http-01").or_panic
+#       challenge =
+# acme.authorization(url).or_panic.challenge("http-01").or_panic
 #       responder.add(challenge.token, acme.key_authorization(challenge.token))
 #       acme.respond(challenge).or_panic
 #       acme.wait_authorization(url).or_panic
 #     end
-#     order = acme.finalize(order, SigningKey.p256).or_panic  # the CSR, then polled
-#     pem = acme.certificate(order).or_panic                  # the chain, leaf first
+#     order = acme.finalize(order, SigningKey.p256).or_panic  # the CSR, then
+# polled
+#     pem = acme.certificate(order).or_panic                  # the chain, leaf
+# first
 #
 # **Requests.** `AcmeClient.new` reads the directory (section 7.1.1). Every
 # request after it is a POST whose body is a JWS in the flattened JSON
@@ -64,7 +68,7 @@
 # one that offers only other protocols). That config is for a listener
 # of its own on port 443 while the CA validates; a server already on 443
 # shows the certificate beside its own through its config's
-# `identity_source`, which sees the client's ALPN, as std/autocert does.
+# `identity_source`, which sees the client's ALPN, as AutocertView does.
 # A domain past 64 characters has no tls-alpn-01 certificate: std/x509
 # refuses a self-signed one whose common name is that long (RFC 5280's
 # ub-common-name), so such a name is proved by http-01 or dns-01.
@@ -91,7 +95,7 @@
 #
 # Not here: external account binding (section 7.3.4) - a directory that
 # requires it is refused by name at `register`; renewal - when to order
-# again is the caller's (std/autocert's manager is one such caller), and
+# again is the caller's (std/autocert's flight is one such caller), and
 # ACME Renewal Information (RFC 9773) is not read; revocation (section
 # 7.6), account deactivation and updates past `register`,
 # pre-authorization (newAuthz), IP identifiers (RFC 8738), alternate
@@ -112,7 +116,7 @@ import std/rsa::{RsaPublicKey}
 import std/ecdsa::{EcdsaPublicKey, EcdsaCurve}
 import std/curve25519::{Ed25519PublicKey}
 import std/asn1::{Der, Asn1Error}
-import std/http::{HTTP, HTTPError, Request, Response}
+import std/http::{HTTP, HTTPClient, HTTPError, Request, Response}
 import std/socket::{SocketError}
 import std/tls::{TlsServerConfig, TlsError}
 import std/json::{JSON, Any}
@@ -311,7 +315,9 @@ pub class AcmeClient
   @nonce : String? = nil
   @thumbprint : String
 
-  def initialize(@directory_url : String, @key : SigningKey, @directory : AcmeDirectory, @timeout_ms : Int32)
+  @http : HTTPClient?
+
+  def initialize(@directory_url : String, @key : SigningKey, @directory : AcmeDirectory, @timeout_ms : Int32, @http : HTTPClient? = nil)
     @thumbprint = AcmeJws.thumbprint(@key.public_key)
   end
 
@@ -319,16 +325,18 @@ pub class AcmeClient
   # *key*: the directory read, or why it could not be. *account_url*, an
   # account `register` answered before, is the `kid` from the start, so a
   # session that kept it need not register again. Both are `https://`.
-  def self.new(url : String, key : SigningKey, timeout_ms : Int32 = 30000, account_url : String? = nil) : AcmeClient | AcmeError
+  # Supply a task-owned HTTPClient as http for independent TLS trust
+  # and transport state; the caller closes that client after the session.
+  def self.new(url : String, key : SigningKey, timeout_ms : Int32 = 30000, account_url : String? = nil, http : HTTPClient? = nil) : AcmeClient | AcmeError
     raise "acme: a timeout is a count of milliseconds, at least 1, not #{timeout_ms}" if timeout_ms < 1
     if account_url
       refused = https(account_url, "the account")
       return refused if refused
     end
-    response = AcmeClient.exchange("GET", url, "", nil, timeout_ms)!
+    response = AcmeClient.exchange("GET", url, "", nil, timeout_ms, http)!
     problem = response.problem("the directory")
     return problem if problem
-    client = AcmeClient.new(url, key, AcmeDirectory.parse(response.body)!, timeout_ms)
+    client = AcmeClient.new(url, key, AcmeDirectory.parse(response.body)!, timeout_ms, http)
     client.account = account_url
     client
   end
@@ -529,7 +537,7 @@ pub class AcmeClient
       kid = use_jwk ? nil : @account_url
       return AcmeError.new("a request to #{url} before the account is known: register first") unless use_jwk || kid
       body = AcmeJws.sign(@key, AcmeJws.header(@key, nonce, url, kid), payload)
-      response = AcmeClient.exchange("POST", url, body, accept, @timeout_ms)!
+      response = AcmeClient.exchange("POST", url, body, accept, @timeout_ms, @http)!
       @nonce = response.nonce
       problem = response.problem("POST #{url}")
       if problem && problem.problem_type == AcmeError::BAD_NONCE && retries < MAX_BAD_NONCE
@@ -550,7 +558,7 @@ pub class AcmeClient
       @nonce = nil
       return held
     end
-    response = AcmeClient.exchange("HEAD", @directory.new_nonce, "", nil, @timeout_ms)!
+    response = AcmeClient.exchange("HEAD", @directory.new_nonce, "", nil, @timeout_ms, @http)!
     problem = response.problem("newNonce")
     return problem if problem
     nonce = response.nonce
@@ -600,13 +608,13 @@ pub class AcmeClient
 
   # One HTTP exchange, its answer read whole up to `MAX_BODY`; nothing
   # sent to a URL that is not `https://`.
-  protected def self.exchange(method : String, url : String, body : String, accept : String?, timeout_ms : Int32) : AcmeResponse | AcmeError
+  protected def self.exchange(method : String, url : String, body : String, accept : String?, timeout_ms : Int32, http : HTTPClient? = nil) : AcmeResponse | AcmeError
     refused = https(url, method)
     return refused if refused
     headers = {"User-Agent" => USER_AGENT}
     headers["Content-Type"] = "application/jose+json" if method == "POST"
     headers["Accept"] = accept if accept
-    answer = HTTP.open(method, url, headers, body, redirects: 0, decompress: false, timeout_ms: timeout_ms) do |r|
+    answer = HTTP.open(method, url, headers, body, redirects: 0, decompress: false, timeout_ms: timeout_ms, client: http) do |r|
       text = r.body_io.read_all(MAX_BODY)
       if text.is_a?(String)
         AcmeResponse.new(r.status, r.header("Replay-Nonce"), r.header("Location"), r.header("Retry-After"), r.header("Content-Type") || "", text)
