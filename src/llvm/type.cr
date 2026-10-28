@@ -169,6 +169,11 @@ struct LLVM::Type
     Value.new LibLLVM.const_real_of_string_and_size(self, string, string.bytesize)
   end
 
+  def const_struct(values : Array(LLVM::Value)) : Value
+    Value.new LibLLVM.const_named_struct(self,
+      values.to_unsafe.as(LibLLVM::ValueRef*), values.size)
+  end
+
   def const_array(values : Array(LLVM::Value)) : Value
     Value.new LibLLVM.const_array(self, (values.to_unsafe.as(LibLLVM::ValueRef*)), values.size)
   end

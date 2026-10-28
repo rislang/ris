@@ -8,7 +8,8 @@
 # it (`samples/iyi/visited.iyi`) walks a graph with a cycle in it, and
 # `add` answering whether the element was new is the one bit that walk
 # needs.
-class Set(T)
+@[OnTape]
+struct Set(T)
   @entries : Hash(T, Bool)
 
   def initialize

@@ -19,6 +19,7 @@ group do |g|
   puts tup[0] if tup.is_a?(Tuple(String, String))
   puts n.value
 end
+@[OnTape]
 struct Tm
   getter what : String
   def initialize(@what : String)

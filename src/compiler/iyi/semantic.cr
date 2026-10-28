@@ -90,7 +90,6 @@ class Iyi::Program
         Prof.span("tape: TapeScopeChecker") { TapeScopeChecker.new(self, tape_graph).run(result) }
         Prof.span("tape: TapeCheckFreeChecker") { TapeCheckFreeChecker.new(self).run(result) }
         Prof.span("tape: TapeRefillChecker") { TapeRefillChecker.new(self).run(result) }
-        Prof.span("tape: TapeStringParameterChecker") { TapeStringParameterChecker.new(self).run(result) }
         Prof.span("tape: TapeScannerHint") { TapeScannerHint.new(self).run(result) }
       end
     end

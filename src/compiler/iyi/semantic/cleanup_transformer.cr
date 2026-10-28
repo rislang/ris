@@ -500,6 +500,16 @@ module Iyi
         return expanded.transform self
       end
 
+      if (targets = node.target_defs) && targets.size == 1 &&
+         targets[0].name == "spawn" && targets[0].owner.to_s == "IyiGroup"
+        if (joined = node.block.try(&.fun_literal)).is_a?(ProcLiteral)
+          @joined_task_blocks << joined.def
+        end
+        if (joined = node.block_arg).is_a?(ProcLiteral)
+          @joined_task_blocks << joined.def
+        end
+      end
+
       # Need to transform these manually because node.block doesn't
       # need to be transformed if it has a fun_literal
       # ~~~
@@ -603,6 +613,12 @@ module Iyi
           elsif obj_type && obj_type.extern? && node.name.ends_with?('=')
             check_args_are_not_closure node, "can't set closure as C #{obj_type.type_desc} member"
           end
+          target = target_defs[0]
+          if target.name == "spawn" && target.owner.to_s == "IyiGroup" &&
+             (joined_block = node.block) &&
+             (joined_proc = joined_block.fun_literal).is_a?(ProcLiteral)
+            @joined_task_blocks << joined_proc.def
+          end
           check_share_boundary(node, target_defs[0])
         end
         if (block = node.block) && (fun_literal = block.fun_literal).is_a?(ProcLiteral)
@@ -661,6 +677,8 @@ module Iyi
     # PROTOTYPE (ris, step B): a block that becomes a proc - `-> { }`, the
     # block `spawn` or a callback keeps - may run after the tape block it
     # was made in has ended, so it may not capture a tape value.
+    @joined_task_blocks = Set(Def).new
+
     def check_tape_captures(a_def : Def)
       # A lowered defer runs before its owning tape is released.
       return if a_def.iyi_defer?
@@ -674,10 +692,13 @@ module Iyi
         type = meta.type?
         next unless type
         if found = Iyi::TapeChecker.tape_in(@program, type)
+          # A group joins before its caller's tape ends. Immutable text
+          # can be borrowed; Share checks still forbid reassigned captures.
+          next if @joined_task_blocks.includes?(a_def) && type == @program.string
           captured.raise "this block becomes a proc, which may run after " \
                          "the tape block that made `#{captured.name} : #{type}` has " \
                          "ended, and #{found} is a tape type: pass what the block " \
-                         "needs as independently owned data (.to_heap for text), " \
+                         "needs as owned data (copy_to(owner)), " \
                          "build tape values " \
                          "inside the spawned task, or call the block inside " \
                          "the scope without keeping it"

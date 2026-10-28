@@ -72,36 +72,6 @@ module Iyi
       nil_type.null
     end
 
-    # A string literal's global. Under iyi's layout: the object header
-    # word first - the type id in its high half, where every object
-    # carries it (GC_DESIGN.md Stage 5, `object_header.cr`) - then the
-    # object itself, which is what the program's pointer names; the word
-    # is eight bytes and keeps the object eight-aligned. Under Crystal's:
-    # the type id in front, as an `i32`.
-    def llvm_string_type(bytesize)
-      if @program.iyi_object_layout?
-        @llvm_context.struct [
-          @llvm_context.int64, # the object header word
-          llvm_string_object_type(bytesize),
-        ]
-      else
-        @llvm_context.struct [
-          @llvm_context.int32,                    # type_id
-          @llvm_context.int32,                    # @bytesize
-          @llvm_context.int32,                    # @length
-          @llvm_context.int8.array(bytesize + 1), # @c
-        ]
-      end
-    end
-
-    def llvm_string_object_type(bytesize)
-      @llvm_context.struct [
-        @llvm_context.int32,                    # @bytesize
-        @llvm_context.int32,                    # @length
-        @llvm_context.int8.array(bytesize + 1), # @c
-      ]
-    end
-
     def llvm_type(type, wants_size = false)
       type = type.remove_indirection
 

@@ -365,6 +365,7 @@ end
 # `.or`) handles it like any other failure. A panic nobody reads still
 # re-raises at the join: observed bugs are values, unobserved bugs are
 # loud.
+@[OnTape]
 pub struct Panicked
   getter text : String
 
@@ -414,7 +415,37 @@ class IyiFiber
   # ris: one non-capturing cleanup, reused by sequential outer tape scopes.
   property tape_cleanup : IyiDeferNode?
   property panicked : Bool
-  property panic_message : String
+  # ris (TAPE_SPEC 4.1): the message lives in a result region the group
+  # keeps, as a task value does (IyiTask#finish); 0 means none. A
+  # reader copies it onto its own tape before keeping it.
+  @panic_box : UInt64 = 0_u64
+
+  def panic_message : String
+    return "" if @panic_box == 0_u64
+    Pointer(String).new(@panic_box).value
+  end
+
+  def panic_message=(text : String) : String
+    group = @group
+    if group.is_a?(IyiGroup)
+      holder = RisResultRegion.new(RisRegion.acquire(Tape::CAPACITY))
+      keep_panic(text, holder)
+      group.keep_result(holder.region)
+    else
+      # A root fiber has no group; its panic ends the run.
+      keep_panic(text, Program.tape)
+    end
+    text
+  end
+
+  private def keep_panic(text : String, owner) : Nil
+    kept = Tape.owner_copy(text, owner)
+    owner.run do
+      address = RisRegion.tape_bytes(sizeof(String).to_u64)
+      Pointer(String).new(address).value = kept
+      @panic_box = address
+    end
+  end
   # Set when a handle read delivered the panic as a `Panicked` value:
   # the join stops owing a re-raise for a bug somebody observed.
   property panic_delivered : Bool
@@ -562,7 +593,8 @@ class IyiFiber
     @defers = nil
     @tape_cleanup = nil
     @panicked = false
-    @panic_message = ""
+    @panic_bytes = "".to_unsafe
+    @panic_size = 0
     @panic_delivered = false
     @group = nil
     @home = nil
@@ -3025,7 +3057,7 @@ class IyiScheduler
   # main fiber has no boundary above it, so after its drain the process
   # exits 1. Every registered cleanup on the path has run either way,
   # which is the promise `defer` makes.
-  def self.panic_current(message : String | String) : NoReturn
+  def self.panic_current(message : String) : NoReturn
     # A panic raised inside one of the scheduler's critical sections - the
     # runtime's own sanity checks raise there - lets the lock go first: the
     # boundary below takes it, and would wait on itself forever.
@@ -3046,16 +3078,8 @@ class IyiScheduler
     # deferred `g.join`, above all — must see that its owner is already
     # dying and keep quiet rather than re-raise into the unwind.
     fiber.panicked = true
-    # Only a spawned task retains its message beyond this unwind. Copy
-    # tape text here, before cleanup releases it; main exits after cleanup.
-    # Preserve the legacy String field on the explicit program owner:
-    # retained Panicked values can outlive both the worker and its group.
-    # String messages already own their bytes.
-    if message.is_a?(String)
-      fiber.panic_message = message
-    elsif !fiber.proc.is_a?(Nil)
-      fiber.panic_message = RisRegion.program_text(message)
-    end
+    # The panic result may outlive the worker's tape and its group.
+    fiber.panic_message = message
     # A deadlock found while this fiber waited in a group's join: that join
     # is a cleanup already off the list, and it is finished here as a
     # panicking owner's, its tasks cancelled and their cleanups run.
@@ -3718,8 +3742,6 @@ class IyiTask(T)
   @fiber : IyiFiber
   @group : IyiGroup
   @box : UInt64 = 0_u64
-  # Keep result storage visible to the precise GC.
-  @result_root : Pointer(Void) = Pointer(Void).new(0_u64)
 
   def initialize(@fiber : IyiFiber, @group : IyiGroup)
   end
@@ -3733,26 +3755,15 @@ class IyiTask(T)
   end
 
   def finish(value : T) : Nil
-    {% if T.union_types.any? { |t| t <= ::String || t.name.starts_with?("Array(") || t.name.starts_with?("Hash(") || t.name.starts_with?("Tre(") || (t < ::Tuple && t.type_vars.any? { |m| m <= ::String || m.name.starts_with?("Array(") || m.name.starts_with?("Hash(") }) } %}
-      if true
-        region = RisRegion.acquire(Tape::CAPACITY)
-        holder = RisResultRegion.new(region)
-        value = Tape.owner_copy(value, holder)
-        saved = RisRegion.tape
-        RisRegion.tape = holder.region
-        address = RisRegion.tape_bytes(sizeof(T).to_u64)
-        Pointer(T).new(address).value = value
-        last = RisRegion.tape
-        RisRegion.tape = saved
-        @group.keep_result(last)
-        @box = address
-        return
-      end
-    {% end %}
-    slot = Pointer(T).malloc(1_u64)
-    slot.value = value
-    @result_root = slot.as(Pointer(Void))
-    @box = slot.address
+    region = RisRegion.acquire(Tape::CAPACITY)
+    holder = RisResultRegion.new(region)
+    value = Tape.owner_copy(value, holder)
+    holder.run do
+      address = RisRegion.tape_bytes(sizeof(T).to_u64)
+      Pointer(T).new(address).value = value
+      @box = address
+    end
+    @group.keep_result(holder.region)
   end
 
   def done? : Bool
@@ -3776,11 +3787,8 @@ class IyiTask(T)
       return Panicked.new(@fiber.panic_message)
     end
     return Panicked.new("a task stopped by its cancellation has no value") if (@box == 0_u64)
-    {% if T.union_types.any? { |t| t <= ::String || t.name.starts_with?("Array(") || t.name.starts_with?("Hash(") || t.name.starts_with?("Tre(") || (t < ::Tuple && t.type_vars.any? { |m| m <= ::String || m.name.starts_with?("Array(") || m.name.starts_with?("Hash(") }) } %}
-      # A copy on the reader's current tape, as many readers as there are.
-      return Tape.owner_copy(Pointer(T).new(@box).value, RisCurrentTape.new)
-    {% end %}
-    Pointer(T).new(@box).value
+    # Deeply copy every result shape, including nested tape structs.
+    Tape.owner_copy(Pointer(T).new(@box).value, RisCurrentTape.new)
   end
 end
 

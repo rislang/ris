@@ -938,7 +938,7 @@ module Iyi
     end
 
     def visit(node : StringLiteral)
-      @last = build_string_constant(node.value, node.value)
+      @last = address_of_string_constant(node.value, node.value)
       false
     end
 
@@ -2016,8 +2016,8 @@ module Iyi
       if func = crystal_raise_cast_failed_fun
         call_args = [
           cast_to_void_pointer(type_id_to_class_name(type_id)),
-          cast_to_void_pointer(build_string_constant(to_type.to_s)),
-          location ? cast_to_void_pointer(build_string_constant(location.expanded_location.to_s)) : llvm_context.void_pointer.null,
+          cast_to_void_pointer(address_of_string_constant(to_type.to_s)),
+          location ? cast_to_void_pointer(address_of_string_constant(location.expanded_location.to_s)) : llvm_context.void_pointer.null,
         ] of LLVM::Value
 
         if (rescue_block = @rescue_block)
@@ -2059,7 +2059,7 @@ module Iyi
       end
 
       str_ptr = gep llvm_type(@program.string).array(@program.llvm_id.@ids.size), global, 0, type_id
-      load llvm_type(@program.string), str_ptr
+      str_ptr
     end
 
     def create_type_id_to_class_name_map
@@ -3269,6 +3269,13 @@ module Iyi
       @last = last
     end
 
+    def address_of_string_constant(str, name = "str")
+      value = build_string_constant(str, name)
+      address = alloca llvm_type(@program.string)
+      store value, address
+      address
+    end
+
     def build_string_constant(str, name = "str", *, llvm_mod = @llvm_mod, llvm_typer = @llvm_typer)
       name = "#{name[0..18]}..." if name.bytesize > 18
       name = name.gsub '@', '.'
@@ -3276,34 +3283,18 @@ module Iyi
       key = StringKey.new(llvm_mod, str)
       @strings.put_if_absent(key) do
         llvm_context = llvm_mod.context
-        global = llvm_mod.globals.add(llvm_typer.llvm_string_type(str.bytesize), name.gsub('\\', "\\\\"))
+        bytes = llvm_context.const_string(str)
+        global = llvm_mod.globals.add(bytes.type, name.gsub('\\', "\\\\"))
         global.linkage = LLVM::Linkage::Private
         global.global_constant = true
-        if @program.iyi_object_layout?
-          # The header word: the type id in its high half, the low half -
-          # the collector's colour, flags and parity - zero, and never
-          # written, because the marker refuses an address outside its
-          # arenas before it touches a header. The program's pointer is to
-          # the object, past the word.
-          global.initializer = llvm_context.const_struct [
-            llvm_context.int64.const_int(@program.llvm_id.type_id(@program.string).to_i64 << 32),
-            llvm_context.const_struct([
-              llvm_context.int32.const_int(str.bytesize),
-              llvm_context.int32.const_int(str.size),
-              llvm_context.const_string(str),
-            ]),
-          ]
-          object = llvm_context.const_inbounds_gep(llvm_typer.llvm_string_type(str.bytesize), global, [llvm_context.int32.const_int(0), llvm_context.int32.const_int(1)])
-          pointer_cast object, llvm_typer.llvm_type(@program.string)
-        else
-          global.initializer = llvm_context.const_struct [
-            llvm_context.int32.const_int(@program.llvm_id.type_id(@program.string)), # in practice, should always be 1
-            llvm_context.int32.const_int(str.bytesize),
-            llvm_context.int32.const_int(str.size),
-            llvm_context.const_string(str),
-          ]
-          pointer_cast global, llvm_typer.llvm_type(@program.string)
-        end
+        global.initializer = bytes
+        pointer = llvm_context.const_inbounds_gep(bytes.type, global, [
+          llvm_context.int32.const_int(0), llvm_context.int32.const_int(0),
+        ])
+        llvm_typer.llvm_type(@program.string).const_struct([
+          pointer,
+          llvm_context.int32.const_int(str.bytesize),
+        ])
       end
     end
 

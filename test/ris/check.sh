@@ -158,7 +158,7 @@ fi
 
 # A task answers tape values; the reader gets its own copy. Zero heap.
 out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/task_tape_result.ri 2>&1)
-if [ "$?" -eq 0 ] && [ "$out" = $'<42>\n60\n5\nslow\n<ok>\nris heap: 0 allocations, 0 bytes' ]; then
+if [ "$?" -eq 0 ] && [ "$out" = $'<42>\n60\n7\nONE\n5\nslow\n<ok>\nris heap: 0 allocations, 0 bytes' ]; then
   echo "runs     task_tape_result (String, Array, Hash and tuple values, zero heap)"
 else
   echo "FAILED   task_tape_result: $out"; status=1
@@ -172,6 +172,19 @@ if [ "$?" -eq 0 ] && grep -qxF 'HELLO, WORLD' <<<"$out" &&
   echo "runs     core_api (String, Array and Hash surface, zero heap)"
 else
   echo "FAILED   core_api: $out"; status=1
+fi
+
+# No raw allocator bypasses the typed owner model.
+expect heap_pointer 'General allocation is unavailable'
+
+# Std foundations retain state in typed runs and expose tape error text.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/std_foundations.ri 2>&1)
+if [ "$?" -eq 0 ] &&
+    grep -qF 'std foundations ok' <<<"$out" &&
+    grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+  echo "runs     std_foundations (typed owner and error text, zero heap)"
+else
+  echo "FAILED   std_foundations: $out"; status=1
 fi
 
 # A pipe's writer waits while the pipe is full (930722c made it panic).

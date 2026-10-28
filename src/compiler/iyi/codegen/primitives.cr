@@ -1092,7 +1092,7 @@ class Iyi::CodeGenVisitor
     table_type = string.array(@symbol_table_values.size)
     table = define_symbol_table(@llvm_mod, @llvm_typer)
     string_ptr = gep table_type, table, int(0), call_args[0]
-    load(string, string_ptr)
+    string_ptr
   end
 
   def codegen_primitive_class(node, target_def, call_args)

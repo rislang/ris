@@ -179,7 +179,7 @@ struct UInt64
           flag?(:darwin) || flag?(:win32) || flag?(:wasm32)) %}
       raise "base out of range" if base < 2 || base > 36
       return "0" if self == 0
-      return String.build(65) { |w| to_s(w, base) }.to_heap
+      return String.build(65) { |w| to_s(w, base) }
     {% end %}
     raise "base out of range" if base < 2 || base > 36
     return "0" if self == 0_u64
@@ -277,7 +277,7 @@ struct Int64
           flag?(:darwin) || flag?(:win32) || flag?(:wasm32)) %}
       raise "base out of range" if base < 2 || base > 36
       return "0" if self == 0
-      return String.build(65) { |w| to_s(w, base) }.to_heap
+      return String.build(65) { |w| to_s(w, base) }
     {% end %}
     raise "base out of range" if base < 2 || base > 36
     return "0" if self == 0_i64

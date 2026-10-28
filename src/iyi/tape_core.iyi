@@ -3,7 +3,7 @@
 # on the current tape; names follow Crystal's String and Array.
 
 struct String
-  def split(separator : String | String) : Array(String)
+  def split(separator : String) : Array(String)
     pieces = Array(String).new
     if separator.bytesize == 0
       i = 0
@@ -96,15 +96,15 @@ struct String
     self
   end
 
-  def includes?(search : String | String) : Bool
+  def includes?(search : String) : Bool
     !byte_index(search).nil?
   end
 
-  def index(search : String | String, offset : Int32 = 0) : Int32?
+  def index(search : String, offset : Int32 = 0) : Int32?
     byte_index(search, offset)
   end
 
-  def count(search : String | String) : Int32
+  def count(search : String) : Int32
     return 0 if search.bytesize == 0
     n = 0
     at = 0
@@ -116,7 +116,7 @@ struct String
   end
 
   # Every *search* replaced by *replacement*.
-  def gsub(search : String | String, replacement : String | String) : String
+  def gsub(search : String, replacement : String) : String
     return self if search.bytesize == 0
     String.build(bytesize) do |w|
       start = 0
@@ -130,7 +130,7 @@ struct String
   end
 
   # The first *search* replaced by *replacement*.
-  def sub(search : String | String, replacement : String | String) : String
+  def sub(search : String, replacement : String) : String
     at = byte_index(search)
     return self unless at
     String.build(bytesize) do |w|
@@ -166,15 +166,34 @@ struct String
     i = 0
     while i < bytesize
       lead = self[i].to_i32
-      width = lead < 0x80 ? 1 : lead < 0xE0 ? 2 : lead < 0xF0 ? 3 : 4
+      width = if lead < 0x80
+                1
+              elsif lead >= 0xC2 && lead <= 0xDF
+                2
+              elsif lead >= 0xE0 && lead <= 0xEF
+                3
+              elsif lead >= 0xF0 && lead <= 0xF4
+                4
+              else
+                0
+              end
+      valid = width > 0 && i <= bytesize - width
       point = width == 1 ? lead : lead & (0x7F >> width)
       k = 1
-      while k < width && i + k < bytesize
-        point = (point << 6) | (self[i + k].to_i32 & 0x3F)
+      while valid && k < width
+        byte = self[i + k].to_i32
+        valid = byte >= 0x80 && byte <= 0xBF
+        if k == 1
+          valid = false if (lead == 0xE0 && byte < 0xA0) ||
+                           (lead == 0xED && byte >= 0xA0) ||
+                           (lead == 0xF0 && byte < 0x90) ||
+                           (lead == 0xF4 && byte >= 0x90)
+        end
+        point = (point << 6) | (byte & 0x3F)
         k += 1
       end
-      yield point.unsafe_chr
-      i += width
+      yield (valid ? point : 0xFFFD).unsafe_chr
+      i += valid ? width : 1
     end
   end
 
@@ -398,8 +417,6 @@ struct String::Builder
   def append_inspect(value) : Nil
     if value.is_a?(String)
       value.inspect(self)
-    elsif value.is_a?(String)
-      String.new(value).inspect(self)
     elsif value.is_a?(Char)
       push(39_u8)
       append_value(value)
@@ -409,5 +426,90 @@ struct String::Builder
     else
       append_value(value)
     end
+  end
+end
+
+struct String
+  # Byte slices borrow their source; no builder or byte copy is involved.
+  def byte_slice(start : Int32, count : Int32) : String
+    self[start, count]
+  end
+
+  def byte_slice(start : Int32) : String
+    start += bytesize if start < 0
+    self[start, bytesize - start]
+  end
+
+  def to_i(base : Int32) : Int32
+    value = to_i64?(base)
+    raise "invalid Int32 text" unless value
+    raise "Int32 text out of range" if value < -2147483648_i64 ||
+                                       value > 2147483647_i64
+    value.to_i32
+  end
+
+  def to_i64(base : Int32 = 10) : Int64
+    to_i64?(base) || raise "invalid Int64 text"
+  end
+end
+
+struct Hash(K, V)
+  def fetch(key : K) : V
+    self[key]
+  end
+
+  def fetch(key : K, & : K -> U) : V | U forall U
+    index = find(key)
+    index < 0 ? yield(key) : @values[index]
+  end
+end
+
+struct Char
+  def bytesize : Int32
+    point = ord
+    point < 0x80 ? 1 : point < 0x800 ? 2 : point < 0x10000 ? 3 : 4
+  end
+
+  def to_s : String
+    String.build(bytesize) { |writer| writer.append_value(self) }
+  end
+end
+
+struct String
+  # The old view keeps its original length. Extend only at the exact end
+  # of the current mapping's live bytes, so no existing bytes change.
+  def __ris_append(other : String) : String
+    region = RisRegion.tape
+    start = @ptr.address
+    stop = RisRegion.size_add(start, bytesize.to_u64)
+    size = RisRegion.count(RisRegion.size_add(bytesize.to_u64,
+      other.bytesize.to_u64))
+    if region != 0 && start >= region + RisRegion::DATA &&
+       stop == IyiHeap.read64(region + RisRegion::OFF_CURSOR)
+      finish = RisRegion.size_add(start, size.to_u64)
+      aligned = RisRegion.size_add(finish, 7_u64) & 0xFFFFFFFFFFFFFFF8_u64
+      if aligned <= IyiHeap.read64(region + RisRegion::OFF_LIMIT)
+        (@ptr + bytesize).copy_from(other.to_unsafe, other.bytesize)
+        IyiHeap.write64(region + RisRegion::OFF_CURSOR, aligned)
+        return String.new(@ptr, size.to_i32)
+      end
+    end
+    self + other
+  end
+
+  def __ris_append(other) : String
+    String.build { |writer| writer << self << other }
+  end
+end
+
+struct String
+  def <=>(other : String) : Int32
+    i = 0
+    while i < bytesize && i < other.bytesize
+      difference = self[i].to_i32 - other[i].to_i32
+      return difference if difference != 0
+      i += 1
+    end
+    bytesize - other.bytesize
   end
 end

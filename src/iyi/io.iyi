@@ -2,6 +2,7 @@
 # streams, files, pipes and sockets - one read path and one write path,
 # shared by `puts`, `print` and `File`.
 
+@[OnTape]
 class IyiIO
   @fd : Int64
   @closed : Bool
@@ -32,12 +33,12 @@ class IyiIO
     @eof = false
 
     @read_capacity = buffer_size
-    @read_buffer = Pointer(UInt8).malloc(buffer_size.to_u64)
+    @read_buffer = Pointer(UInt8).new(RisRegion.tape_bytes(buffer_size.to_u64))
     @read_pos = 0
     @read_limit = 0
 
     @write_capacity = buffer_size
-    @write_buffer = Pointer(UInt8).malloc(buffer_size.to_u64)
+    @write_buffer = Pointer(UInt8).new(RisRegion.tape_bytes(buffer_size.to_u64))
     @write_pos = 0
     {% if flag?(:win32) %}
       # A character device answers the console's own question if it was
@@ -57,7 +58,7 @@ class IyiIO
   def self.on_program(fd : Int64, buffer_size : Int32 = 4096,
                       sync : Bool = false) : IyiIO
     io = RisRegion.program_object(IyiIO)
-    io.initialize(fd, buffer_size, sync)
+    RisRegion.program_scope { io.initialize(fd, buffer_size, sync) }
     io
   end
 
@@ -125,32 +126,19 @@ class IyiIO
     raise "cannot read from closed IO" if @closed
     return "" if count <= 0
 
-    total_read = 0
-    result_cap = count < @read_capacity ? count : @read_capacity
-    result_buf = Pointer(UInt8).malloc(result_cap.to_u64)
-
-    while total_read < count
+    writer = String::Builder.new(count)
+    while writer.length < count
       avail = @read_limit - @read_pos
       if avail > 0
-        needed = count - total_read
-        to_copy = avail < needed ? avail : needed
-        if total_read + to_copy > result_cap
-          result_cap = count - result_cap < result_cap ? count : result_cap * 2
-          result_buf = result_buf.realloc(result_cap.to_u64)
-        end
-        (result_buf + total_read).copy_from(@read_buffer + @read_pos, to_copy)
-        total_read = total_read + to_copy
-        @read_pos = @read_pos + to_copy
+        needed = count - writer.length
+        take = avail < needed ? avail : needed
+        writer.append(String.new(@read_buffer + @read_pos, take))
+        @read_pos += take
       else
-        break if @eof
-        filled = fill_buffer
-        break if filled <= 0
+        break if @eof || fill_buffer <= 0
       end
     end
-
-    String.new(total_read) do |target|
-      target.copy_from(result_buf, total_read)
-    end
+    writer.finish
   end
 
   # Up to *count* bytes as tape text: what is buffered, then one fill of
@@ -188,40 +176,26 @@ class IyiIO
     raise "cannot read from closed IO" if @closed
     return read_sized(size.to_i32) if size > 0_i64 && size < 2147483647_i64 && @read_pos >= @read_limit && !@eof
 
-    capacity = 8192_i64
-    buffer = Pointer(UInt8).malloc(capacity.to_u64)
-    filled = 0_i64
-
+    writer = String::Builder.new(size > 0 && size < 2147483647 ?
+      size.to_i32 : 8192)
     avail = @read_limit - @read_pos
     if avail > 0
-      while avail > capacity
-        capacity = capacity * 2
-      end
-      buffer = buffer.realloc(capacity.to_u64) if capacity > 8192
-      buffer.copy_from(@read_buffer + @read_pos, avail)
-      filled = avail.to_i64
+      writer.append(String.new(@read_buffer + @read_pos, avail))
       @read_pos = @read_limit
     end
-
     until @eof
-      if capacity - filled < 65536 && capacity < 2147483648_i64
-        capacity = capacity * 2
-        buffer = buffer.realloc(capacity.to_u64)
+      got = 0_i64
+      writer.unsafe_append(65536) do |buffer|
+        got = low_level_read(@fd, buffer.as(Void*), 65536_u64)
+        got > 0 ? got.to_i32 : 0
       end
-      got = low_level_read(@fd, (buffer + filled).as(Void*), (capacity - filled).to_u64)
-      if got <= 0_i64
+      if got <= 0
         @read_pos = 0
-        @read_limit = got < 0_i64 ? -1 : 0
+        @read_limit = got < 0 ? -1 : 0
         @eof = true
-      else
-        filled = filled + got
-        raise "the stream is past the 2147483647 bytes a string holds" if filled > 2147483647
       end
     end
-
-    String.new(filled.to_i32) do |target|
-      target.copy_from(buffer, filled.to_i32)
-    end
+    writer.finish
   end
 
   # Straight into the string: grown and then copied out, `File.read` of a
@@ -263,46 +237,25 @@ class IyiIO
       return String.new(len) { |target| target.copy_from(start_ptr, len) }
     end
 
-    # Multi-buffer path: accumulate until newline or EOF. The capacity is
-    # Int64: in Int32, a line over 1 GiB panicked "arithmetic overflow".
-    line_cap = 256_i64
-    line_buf = Pointer(UInt8).malloc(line_cap.to_u64)
-    line_len = 0
-
-    while true
+    writer = String::Builder.new(@read_capacity)
+    loop do
       avail = @read_limit - @read_pos
       if avail > 0
-        j = @read_pos
-        while j < @read_limit && @read_buffer[j] != 10_u8
-          j = j + 1
+        stop = @read_pos
+        while stop < @read_limit && @read_buffer[stop] != 10_u8
+          stop += 1
         end
-        newline = j < @read_limit
-        take = newline ? j - @read_pos + 1 : avail
-        wanted = line_len.to_i64 + take
-        raise "a line is past the 2147483647 bytes a string holds" if wanted > 2147483647
-        if wanted > line_cap
-          while wanted > line_cap
-            line_cap = line_cap * 2
-          end
-          line_buf = line_buf.realloc(line_cap.to_u64)
-        end
-        (line_buf + line_len).copy_from(@read_buffer + @read_pos, take)
-        line_len = wanted.to_i32
-        @read_pos = @read_pos + take
+        newline = stop < @read_limit
+        take = newline ? stop - @read_pos + 1 : avail
+        writer.append(String.new(@read_buffer + @read_pos, take))
+        @read_pos += take
         break if newline
       end
-
-      break if @eof
-      got = fill_buffer
-      break if got <= 0
+      break if @eof || fill_buffer <= 0
     end
-
-    return nil if line_len == 0 && @eof
-
-    # A `\r` ends a line only before a `\n`; a final lone one is kept.
-    len = line_len
-    len = len - (len > 1 && line_buf[len - 2] == 13_u8 ? 2 : 1) if chomp && len > 0 && line_buf[len - 1] == 10_u8
-    String.new(len) { |target| target.copy_from(line_buf, len) }
+    text = writer.finish
+    return nil if text.empty? && @eof
+    chomp ? text.chomp : text
   end
 
   def gets(chomp : Bool = false) : String?

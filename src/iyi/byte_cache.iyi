@@ -1,0 +1,49 @@
+# A reusable cache entry owned by its server/session, not by a request.
+# Keep one named owner. Borrow it in handlers; copy incoming bytes into
+# its typed pool and write outgoing bytes into the caller's builder.
+@[Owner]
+struct RisByteCache
+  @bytes : SlicePool(UInt8)
+  @entry : SlicePool::Run(UInt8)?
+
+  def initialize(capacity : Int32 = 1024)
+    @bytes = SlicePool(UInt8).new(capacity)
+    @entry = nil
+  end
+
+  def store(text : String) : Nil
+    if old = @entry
+      @bytes.free_slice(old)
+    end
+    run = @bytes.alloc_slice(text.bytesize)
+    index = 0
+    text.each_byte do |byte|
+      run[index] = byte
+      index += 1
+    end
+    @entry = run
+    nil
+  end
+
+  def write_to(writer : String::Builder) : Nil
+    if run = @entry
+      index = 0
+      while index < run.size
+        writer.push(run[index])
+        index += 1
+      end
+    end
+  end
+
+  def clear : Nil
+    if run = @entry
+      @bytes.free_slice(run)
+      @entry = nil
+    end
+  end
+
+  # Exposes reuse for tests and capacity planning, without a raw pointer.
+  def retained_slots : Int32
+    @bytes.size
+  end
+end

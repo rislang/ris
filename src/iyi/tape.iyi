@@ -3,10 +3,8 @@
 # Main and each spawned fiber own an implicit tape: values are bumped into
 # mappings, chained when full. The owning scope releases them together;
 # spare mappings keep bounded warm pages for the thread's next scope.
-# Only the types below are made there. Every other allocation - a String, an
-# Array, anything a library builds and keeps - goes to the collected heap as
-# it always did, which is what makes this safe where a region that took
-# every allocation was not: no object can land on the tape by accident.
+# String, Array, Hash and Tre store their dynamic data on the active tape.
+# Retained values are copied into an explicit longer-lived owner.
 #
 # What keeps a tape value from outliving its scope is the compiler: every
 # struct marked `@[OnTape]` is a tape type, and `Iyi::TapeChecker` and
@@ -71,8 +69,7 @@ end
 # Returns nothing: a block's value is the one thing that leaves it
 # without an assignment the compiler can see, so it is not passed on.
 # What must outlive the block is copied into a variable of the code
-# around it (`total = page.sum`, `body = retain(text)`, where `retain`
-# copies with `to_s` in a `@[TapeToHeap]` def).
+# around it with `copy_to(owner)`.
 def tape(&) : Nil
   RisRegion.tape_scope(Tape::CAPACITY) { yield }
   nil
@@ -116,11 +113,6 @@ module Tape
   end
 
   CAPACITY = 67108864_u64
-
-  # An element as `to_heap` keeps it: its own copy, or itself.
-  def self.heap_value(value)
-    value.responds_to?(:to_heap) ? value.to_heap : value
-  end
 
   def self.copy_value(value, owner)
     value.copy_to(owner)
@@ -173,8 +165,7 @@ module Tape
   end
 end
 
-# Bytes on the tape. Not a `String`: a `String` may be kept anywhere, and
-# this may not. `to_s` copies it into a retained String explicitly.
+# An immutable view of static bytes or bytes belonging to a tape owner.
 @[OnTape]
 struct String
   def __iyi_copy_into(target : Pointer(self), work : RisCopyWork) : Nil
@@ -206,19 +197,18 @@ struct String
     new(bytes, text.bytesize)
   end
 
-  # A view of *text*'s bytes, nothing copied: a String is never changed,
-  # and the view's pointer, a root on the tape and the stack, keeps it
-  # alive while the view is (the collector takes an interior pointer to
-  # its object).
+  # A view of immutable bytes. The source owner must outlive the view.
   def self.view(text : String) : self
     new(text.to_unsafe, text.bytesize)
   end
 
-  # Compatibility for text already on tape; new still makes a copy.
-  def self.new(text : String) : self
-    bytes = Pointer(UInt8).new(RisRegion.tape_bytes(text.bytesize.to_u64))
-    bytes.copy_from(text.to_unsafe, text.bytesize)
-    new(bytes, text.bytesize)
+  # Allocate writable bytes on the caller's tape, including a C terminator.
+  def self.new(size : Int32, & : Pointer(UInt8) -> _) : self
+    RisRegion.nonnegative(size.to_i64)
+    bytes = Pointer(UInt8).new(RisRegion.tape_bytes(size.to_u64 + 1_u64))
+    yield bytes
+    bytes[size] = 0_u8
+    new(bytes, size)
   end
 
   def __iyi_pending_copy(owner : RisPendingCopy) : self
@@ -236,7 +226,7 @@ struct String
     owner.run { String.new(self) }
   end
 
-  def +(other : String | String) : String
+  def +(other : String) : String
     String.build(RisRegion.count(RisRegion.size_add(
       bytesize.to_u64, other.bytesize.to_u64)).to_i32) do |writer|
       writer.append(self)
@@ -270,7 +260,7 @@ struct String
     value
   end
 
-  def ===(other : String | String) : Bool
+  def ===(other : String) : Bool
     self == other
   end
 
@@ -570,11 +560,7 @@ struct String
     @bytesize == other.bytesize && same?(other.to_unsafe)
   end
 
-  def ==(other : String) : Bool
-    @bytesize == other.bytesize && same?(other.to_unsafe)
-  end
-
-  def starts_with?(prefix : String | String) : Bool
+  def starts_with?(prefix : String) : Bool
     prefix.bytesize <= @bytesize && String.new(@ptr, prefix.bytesize) == prefix
   end
 
@@ -600,26 +586,15 @@ struct String
     @ptr
   end
 
-  # Copy these borrowed bytes into an independent GC-managed String.
-  # Application copies require a `@[TapeToHeap]` def, called while the
-  # source is alive, for example when retaining text in a cache/task.
-  # The source is unchanged and remains valid until its scope ends.
+  def dup : String
+    String.new(self)
+  end
+
+  # Copies stay on the current tape; retention requires copy_to(owner).
   def to_s : String
-    String.new(@bytesize) do |buffer|
-      LibTapeCopy.memcpy(buffer, @ptr, @bytesize.to_u64, false) if @bytesize > 0
-    end
+    dup
   end
 
-  # The copy to keep after the tape ends, by its own name so it is seen
-  # where it is made: anywhere, where `to_s` needs a @[TapeToHeap] def.
-  def to_heap : String
-    to_s
-  end
-
-  # Writes the bytes to *io*, a file or socket, with no copy on the heap
-  # (`puts text`, `io << text`). A `String::Builder` or `std/io::Memory` is
-  # the heap: `TapeEscapeChecker` refuses writing into one outside an
-  # `@[TapeToHeap]` def.
   def to_s(io : IyiIO) : Nil
     io.write(@ptr, @bytesize)
   end
@@ -634,6 +609,10 @@ struct String
 
   # ris interpolation writes every part on the caller's active tape.
   # Legacy iyi output lowering uses this too, on the caller's tape.
+  def self.interpolation(*parts : *T) : String forall T
+    interpolate(*parts)
+  end
+
   def self.interpolate(*parts : *T) : String forall T
     build do |writer|
       {% for i in 0...T.size %}
@@ -833,7 +812,7 @@ struct String::Builder
 
   # A piece of an interpolation: text and numbers written in place, any
   # other value as its `to_s`.
-  def append_value(value : String | String) : Nil
+  def append_value(value : String) : Nil
     append(value)
   end
 
@@ -850,7 +829,22 @@ struct String::Builder
   end
 
   def append_value(value : Char) : Nil
-    value.each_byte { |byte| push(byte) }
+    point = value.ord
+    if point < 0x80
+      push(point.to_u8)
+    elsif point < 0x800
+      push((0xC0 | (point >> 6)).to_u8)
+      push((0x80 | (point & 0x3F)).to_u8)
+    elsif point < 0x10000
+      push((0xE0 | (point >> 12)).to_u8)
+      push((0x80 | ((point >> 6) & 0x3F)).to_u8)
+      push((0x80 | (point & 0x3F)).to_u8)
+    else
+      push((0xF0 | (point >> 18)).to_u8)
+      push((0x80 | ((point >> 12) & 0x3F)).to_u8)
+      push((0x80 | ((point >> 6) & 0x3F)).to_u8)
+      push((0x80 | (point & 0x3F)).to_u8)
+    end
   end
 
   def append_value(value : Nil) : Nil
@@ -956,7 +950,7 @@ struct String::Builder
   end
 
   # Appends *text* and says where it is: a `Span` of the finished string.
-  def append_span(text : String | String) : String::Span
+  def append_span(text : String) : String::Span
     start = length
     append(text)
     String::Span.new(start, text.bytesize)
@@ -1054,7 +1048,7 @@ struct String::Scanner
 
   # Matches *pattern* at the offset and moves past it, answering what
   # matched, or nil without moving.
-  def scan(pattern : String | String | Char | Int32) : String?
+  def scan(pattern : String | Char | Int32) : String?
     size = here(pattern)
     return nil unless size
     found = @string[@offset, size]
@@ -1063,21 +1057,21 @@ struct String::Scanner
   end
 
   # `scan`, answering how many bytes the offset moved.
-  def skip(pattern : String | String | Char | Int32) : Int32?
+  def skip(pattern : String | Char | Int32) : Int32?
     size = here(pattern)
     @offset = @offset + size if size
     size
   end
 
   # What `scan` would answer, without moving.
-  def check(pattern : String | String | Char | Int32) : String?
+  def check(pattern : String | Char | Int32) : String?
     size = here(pattern)
     size ? @string[@offset, size] : nil
   end
 
   # Searches for *pattern* from the offset and moves past the match,
   # answering everything from the offset to the match's end.
-  def scan_until(pattern : String | String | Char) : String?
+  def scan_until(pattern : String | Char) : String?
     stop = until_end(pattern)
     return nil unless stop
     found = @string[@offset, stop - @offset]
@@ -1086,7 +1080,7 @@ struct String::Scanner
   end
 
   # `scan_until`, answering how many bytes the offset moved.
-  def skip_until(pattern : String | String | Char) : Int32?
+  def skip_until(pattern : String | Char) : Int32?
     stop = until_end(pattern)
     return nil unless stop
     moved = stop - @offset
@@ -1095,13 +1089,13 @@ struct String::Scanner
   end
 
   # What `scan_until` would answer, without moving.
-  def check_until(pattern : String | String | Char) : String?
+  def check_until(pattern : String | Char) : String?
     stop = until_end(pattern)
     stop ? @string[@offset, stop - @offset] : nil
   end
 
   # How many bytes *pattern* matches at the offset, without moving, or nil.
-  def matches?(pattern : String | String | Char) : Int32?
+  def matches?(pattern : String | Char) : Int32?
     here(pattern)
   end
 
@@ -1145,10 +1139,6 @@ struct String::Scanner
   private def until_end(char : Char) : Int32?
     found = @string.index(char, @offset)
     found ? found + char.bytesize : nil
-  end
-
-  private def until_end(text : String) : Int32?
-    until_end(String.view(text))
   end
 
   private def until_end(text : String) : Int32?
@@ -1646,7 +1636,7 @@ struct Array(T)
 
   # The elements written into *writer*, *separator* between them: where
   # `Array#join` builds a heap String, this one adds to the caller's text.
-  def join(writer : String::Builder, separator : String | String = "") : Nil
+  def join(writer : String::Builder, separator : String = "") : Nil
     each_with_index do |value, index|
       writer.append(separator) if index > 0
       writer.append_value(value)
@@ -1654,7 +1644,7 @@ struct Array(T)
   end
 
   # The elements joined on the current tape, as Array#join answers them.
-  def join(separator : String | String = "") : String
+  def join(separator : String = "") : String
     String.build(16 * (size + 1)) { |writer| join(writer, separator) }
   end
 
@@ -1749,15 +1739,6 @@ struct Array(T)
       each { |value| made << Tape.copy_value(value, owner) }
       made
     end
-  end
-
-  # The elements copied into an `Array` on the heap, to keep after the
-  # tape ends. An element with a `to_heap` of its own - a String,
-  # an Array, an @[OnTape] struct that defines one - is copied by it;
-  # any other is taken as it is. A tape element with none is refused, as
-  # no `Array` may hold a tape value.
-  def to_heap
-    Array(typeof(Tape.heap_value(unsafe_at(0)))).new(size) { |index| Tape.heap_value(unsafe_at(index)) }
   end
 
   # For `IndexView`, whose indexes are known in range.
@@ -1862,11 +1843,7 @@ struct Array::View(T)
     @at.each { |index| yield @target.unchecked(index) }
   end
 
-  # The viewed elements, in the view's order, copied to the heap as
-  # `Array#to_heap` copies them.
-  def to_heap
-    Array(typeof(Tape.heap_value(@target.unchecked(0)))).new(size) { |k| Tape.heap_value(self[k]) }
-  end
+
 end
 
 # A typed link to an element of an `Array(T)`: its index in `I`
@@ -2177,7 +2154,10 @@ struct Struct
   def __iyi_copy_into(target : Pointer(self), work : RisCopyWork) : Nil
     target.value = self
     {% for field in @type.instance_vars %}
-      work.push(@{{field.name.id}}, pointerof(target.value.@{{field.name.id}}))
+      slot = target.as(Pointer(UInt8)) +
+        offsetof(self, @{{field.name.id}})
+      work.push(@{{field.name.id}},
+        slot.as(Pointer(typeof(@{{field.name.id}}))))
     {% end %}
   end
 
@@ -2248,6 +2228,11 @@ struct NamedTuple
 end
 
 class Object
+  # Historical spelling: a deep copy on this tape, never a heap escape.
+  def to_heap
+    Tape.owner_copy(self, RisCurrentTape.new)
+  end
+
   def __iyi_copy_into(target : Pointer(self), work : RisCopyWork) : Nil
     {% if @type < ::Enum || @type < ::Number || @type == ::Bool || @type == ::Char || @type == ::Symbol || @type == ::Nil %}
       target.value = self
@@ -2555,7 +2540,7 @@ module IyiFloatText
   def self.parse(text : String) : Float64
     bytes = text.to_unsafe
     size = text.bytesize
-    raise "not a number: #{text.to_heap.inspect}" if size == 0
+    raise "not a number: #{text.inspect}" if size == 0
     at = 0
     negative = false
     if bytes[0] == 45_u8 || bytes[0] == 43_u8
@@ -2592,17 +2577,17 @@ module IyiFloatText
         seen_point = true
       elsif (byte == 101_u8 || byte == 69_u8) && any
         at = at + 1
-        raise "not a number: #{text.to_heap.inspect}" if at >= size
+        raise "not a number: #{text.inspect}" if at >= size
         exponent_negative = false
         if bytes[at] == 45_u8 || bytes[at] == 43_u8
           exponent_negative = bytes[at] == 45_u8
           at = at + 1
         end
-        raise "not a number: #{text.to_heap.inspect}" if at >= size
+        raise "not a number: #{text.inspect}" if at >= size
         read = 0
         while at < size
           byte = bytes[at]
-          raise "not a number: #{text.to_heap.inspect}" if byte < 48_u8 || byte > 57_u8
+          raise "not a number: #{text.inspect}" if byte < 48_u8 || byte > 57_u8
           # Read past what any double needs: the digits move the exponent
           # by up to the text's length, and a cap of 100000 read
           # "0.<999999 zeros>1e1000000" as 0.0.
@@ -2612,11 +2597,11 @@ module IyiFloatText
         exponent = exponent + (exponent_negative ? 0 - read : read)
         break
       else
-        raise "not a number: #{text.to_heap.inspect}"
+        raise "not a number: #{text.inspect}"
       end
       at = at + 1
     end
-    raise "not a number: #{text.to_heap.inspect}" unless any
+    raise "not a number: #{text.inspect}" unless any
     return from_bits(negative ? 9223372036854775808_u64 : 0_u64) if w == 0_u64
     bits = nearest(exponent, w)
     return parse_exact(text) if truncated && nearest(exponent, w &+ 1_u64) != bits
@@ -2664,28 +2649,28 @@ module IyiFloatText
         seen_point = true
       elsif (byte == 101_u8 || byte == 69_u8) && any
         at = at + 1
-        raise "not a number: #{text.to_heap.inspect}" if at >= size
+        raise "not a number: #{text.inspect}" if at >= size
         exponent_negative = false
         if bytes[at] == 45_u8 || bytes[at] == 43_u8
           exponent_negative = bytes[at] == 45_u8
           at = at + 1
         end
-        raise "not a number: #{text.to_heap.inspect}" if at >= size
+        raise "not a number: #{text.inspect}" if at >= size
         read = 0
         while at < size
           byte = bytes[at]
-          raise "not a number: #{text.to_heap.inspect}" if byte < 48_u8 || byte > 57_u8
+          raise "not a number: #{text.inspect}" if byte < 48_u8 || byte > 57_u8
           read = read * 10 + (byte - 48_u8).to_i32 if read < 100000000
           at = at + 1
         end
         exponent = exponent + (exponent_negative ? 0 - read : read)
         break
       else
-        raise "not a number: #{text.to_heap.inspect}"
+        raise "not a number: #{text.inspect}"
       end
       at = at + 1
     end
-    raise "not a number: #{text.to_heap.inspect}" unless any
+    raise "not a number: #{text.inspect}" unless any
     return from_bits(negative ? 9223372036854775808_u64 : 0_u64) if mantissa.size == 0
     # Far outside the format either way: the value is under
     # 10^(digits + exponent) and at least a tenth of that.
@@ -2758,7 +2743,7 @@ end
 
 
 struct String
-  def byte_index(search : String | String, offset : Int32 = 0) : Int32?
+  def byte_index(search : String, offset : Int32 = 0) : Int32?
     offset = offset + bytesize if offset < 0
     return nil if offset < 0 || offset > bytesize
     return offset if search.bytesize == 0
@@ -2806,18 +2791,18 @@ struct String
     end
   end
 
-  def includes?(text : String | String) : Bool
+  def includes?(text : String) : Bool
     !byte_index(text).nil?
   end
 
-  def ends_with?(suffix : String | String) : Bool
+  def ends_with?(suffix : String) : Bool
     size = suffix.bytesize
     size <= bytesize && self[bytesize - size, size] == suffix
   end
 
   # Diagnostic text is retained only when a caller asks for inspection.
   def inspect : String
-    String.build(bytesize + 2) { |w| inspect(w) }.to_heap
+    String.build(bytesize + 2) { |w| inspect(w) }
   end
 end
 
@@ -2949,8 +2934,7 @@ module Tape
   end
 end
 
-# Heap builders keep their API, writing numeric text on the caller's tape
-# before copying the bytes into their existing buffer. No numeric String.
+# Numeric formatting writes directly into the caller's tape builder.
 
 struct Int64
   def to_s(writer : String::Builder, base : Int32 = 10) : Nil
@@ -3058,19 +3042,9 @@ fun __ris_program_object(size : UInt64, type_id : UInt64) : Void*
 end
 
 class RisRegion
-  # An existing class field keeps text with an explicit program owner.
-  # String's eight-byte payload header is shared with its normal builder.
+  # Copy retained text to the explicit program owner.
   def self.program_text(text : String) : String
-    bytes = text.bytesize
-    memory = Pointer(UInt8).new(program_bytes(bytes.to_u64 + 9_u64,
-      true, "".crystal_type_id.to_u64))
-    memory.as(Pointer(Int32))[0] = bytes
-    index = 0
-    text.each_byte do |byte|
-      memory[index + 8] = byte
-      index += 1
-    end
-    memory.as(String)
+    text.copy_to(Program.tape)
   end
 end
 

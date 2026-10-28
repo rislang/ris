@@ -1,0 +1,5 @@
+@[PointerUnsafe("verify raw allocation cannot bypass typed owners")]
+def allocate
+  Pointer(UInt8).malloc(16_u64)
+end
+allocate

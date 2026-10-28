@@ -1408,22 +1408,22 @@ module Iyi
       static_array.declare_instance_var("@buffer", static_array.type_parameter("T"))
       static_array.can_be_stored = false
 
-      types["String"] = string = @string = NonGenericClassType.new self, self, "String", reference
-      string.declare_instance_var("@bytesize", int32)
-      string.declare_instance_var("@length", int32)
-      string.declare_instance_var("@c", uint8)
-
       types["Class"] = klass = @class = MetaclassType.new(self, object, value, "Class")
       klass.can_be_stored = false
 
       types["Struct"] = struct_t = @struct_t = NonGenericClassType.new self, self, "Struct", value
       abstract_value_type(struct_t)
 
+      types["String"] = string = @string = NonGenericClassType.new self, self, "String", struct_t
+      string.struct = true
+
       types["Enumerable"] = @enumerable = GenericModuleType.new self, self, "Enumerable", ["T"]
       types["Indexable"] = @indexable = GenericModuleType.new self, self, "Indexable", ["T"]
 
-      types["Array"] = @array = GenericClassType.new self, self, "Array", reference, ["T"]
-      types["Hash"] = @hash_type = GenericClassType.new self, self, "Hash", reference, ["K", "V"]
+      types["Array"] = @array = GenericClassType.new self, self, "Array", struct_t, ["T"]
+      @array.not_nil!.struct = true
+      types["Hash"] = @hash_type = GenericClassType.new self, self, "Hash", struct_t, ["K", "V"]
+      @hash_type.not_nil!.struct = true
       types["Regex"] = @regex = NonGenericClassType.new self, self, "Regex", reference
       types["Range"] = range = @range = GenericClassType.new self, self, "Range", struct_t, ["B", "E"]
       range.struct = true

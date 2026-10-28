@@ -134,6 +134,8 @@ lib LibLLVM
   {% else %}
     fun const_string_in_context2 = LLVMConstStringInContext2(c : ContextRef, str : Char*, length : SizeT, dont_null_terminate : Bool) : ValueRef
   {% end %}
+  fun const_named_struct = LLVMConstNamedStruct(type : TypeRef,
+    values : ValueRef*, count : UInt) : ValueRef
   fun const_struct_in_context = LLVMConstStructInContext(c : ContextRef, constant_vals : ValueRef*, count : UInt, packed : Bool) : ValueRef
   fun const_in_bounds_gep2 = LLVMConstInBoundsGEP2(ty : TypeRef, constant_val : ValueRef, constant_indices : ValueRef*, num_indices : UInt) : ValueRef
   fun const_array = LLVMConstArray(element_ty : TypeRef, constant_vals : ValueRef*, length : UInt) : ValueRef

@@ -107,6 +107,11 @@ class Iyi::CodeGenVisitor
     set_current_debug_location const.locations.try &.first? if @debug.line_numbers?
 
     global = declare_const(const)
+    if literal = const.value.as?(StringLiteral)
+      global.initializer = build_string_constant(literal.value)
+      global.global_constant = true
+      return
+    end
     request_value(const.value)
 
     const_type = const.value.type
@@ -156,6 +161,13 @@ class Iyi::CodeGenVisitor
   end
 
   def initialize_const(const)
+    if literal = const.value.as?(StringLiteral)
+      global = declare_const(const)
+      global.initializer = build_string_constant(literal.value)
+      global.global_constant = true
+      return global
+    end
+
     # If the constant wasn't read yet, we can initialize it right now and
     # avoid checking an "initialized" flag every time we read it.
     const.no_init_flag = true unless const.read?
@@ -193,6 +205,13 @@ class Iyi::CodeGenVisitor
           context.vars = LLVMVars.new
 
           alloca_vars const.fake_def.try(&.vars), const.fake_def
+
+          if literal = const.value.as?(StringLiteral)
+            global.initializer = build_string_constant(literal.value)
+            global.global_constant = true
+            ret
+            next
+          end
 
           request_value(const.value)
 

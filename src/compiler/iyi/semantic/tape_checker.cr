@@ -176,14 +176,13 @@ class Iyi::TapeChecker
       next unless ivar_type
       found = TapeChecker.tape_in(@program, ivar_type)
       next unless found
-      where = type.struct? ? "a struct that is not @[OnTape], so it may itself be stored anywhere" : "a class, which lives on the heap"
+      where = type.struct? ? "a struct without @[OnTape]" : "a class"
       fail type, ivar, <<-MSG
         #{type}'s field `#{ivar.name} : #{ivar_type}` holds the tape type #{found}
 
-        #{type} is #{where}, and a tape value lives only until the tape block
-        that made it ends. Keep it in a local, a parameter or another @[OnTape]
-        struct, or copy what must outlive the scope into an owned value
-        (`to_heap` copies a Str or Ary).
+        #{type} is #{where}; its field needs an explicit tape lifetime.
+        Use an @[OnTape] struct for request data. Retain data with
+        copy_to(owner), or store it in a typed Pool/SlicePool owner.
         MSG
     end
   end

@@ -1,0 +1,73 @@
+module test/ris/std_foundations
+
+# Program initialization constructs one named owner. Handler temporaries
+# are released on return; the typed pool retains only copied bytes.
+CACHE = RisByteCache.new(32)
+
+def handle(cache : RisByteCache, text : String)
+  cache.store(text.upcase)
+end
+
+handle(CACHE, "first")
+assert String.build { |writer| CACHE.write_to(writer) } == "FIRST"
+handle(CACHE, "next")
+assert String.build { |writer| CACHE.write_to(writer) } == "NEXT"
+assert CACHE.retained_slots == 5
+CACHE.clear
+assert String.build { |writer| CACHE.write_to(writer) }.empty?
+
+@[OnTape]
+struct ReadError
+  getter text : String
+
+  def initialize(@text : String)
+  end
+end
+
+impl Error for ReadError
+  def message : String
+    text
+  end
+end
+
+def read_error(path : String) : ReadError
+  ReadError.new(String.interpolate("cannot read ", path))
+end
+
+error = read_error("page")
+assert error.message == "cannot read page"
+kept = error.copy_to(Program.tape)
+assert kept.message == error.message
+assert "abcdef".byte_slice(2, 3) == "cde"
+assert "abcdef".byte_slice(-2) == "ef"
+assert "ff".to_i(16) == 255
+assert "-42".to_i64 == -42_i64
+assert({"a" => 1}.fetch("missing") { |key| key.bytesize } == 7)
+assert :static_text.to_s == "static_text"
+assert 'é'.to_s == "é"
+
+# Buffered reads grow on tape and preserve their results across refills.
+path = (Program.env("TMPDIR") || "/tmp") + "/ris-std-foundations-io"
+File.write(path, "a" * 9000 + "\r\nrest")
+File.open(path, buffer_size: 32) do |io|
+  line = io.read_line(chomp: true)
+  assert line == "a" * 9000
+  assert io.read_bytes(2) == "re"
+  assert io.read_all == "st"
+end
+File.delete(path)
+text = "hello"
+old = text
+text << "!"
+assert text == "hello!" && old == "hello"
+text.upcase!
+assert text == "HELLO!"
+top = String.new("12345678")
+previous = top
+top << "x"
+assert top == "12345678x" && previous == "12345678"
+assert old.to_heap == old
+assert "abc".dup == "abc"
+assert "a".<=>("b") < 0
+assert "\xFF".chars[0].ord == 0xFFFD
+puts "std foundations ok"

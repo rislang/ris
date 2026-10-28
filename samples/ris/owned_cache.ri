@@ -1,0 +1,14 @@
+module samples/ris/owned_cache
+
+# One named program owner, borrowed by each request handler.
+CACHE = RisByteCache.new(1024)
+
+def request(cache : RisByteCache, input : String)
+  cache.store(input.strip.upcase)
+end
+
+request(CACHE, "  first request  ")
+puts String.build { |writer| CACHE.write_to(writer) }
+request(CACHE, "next")
+puts String.build { |writer| CACHE.write_to(writer) }
+CACHE.clear

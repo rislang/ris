@@ -468,6 +468,8 @@ module Iyi
       !(file.includes?("/src/std/") || file.ends_with?(".iyimod"))
     end
 
+    @ris_string_mutations = Set(UInt64).new
+
     def transform(node : Call)
       # Library panic and output messages use the caller's tape too.
       # Their values are consumed here, never retained as heap Strings.
@@ -498,11 +500,29 @@ module Iyi
           node.obj = Path.global("String").at(obj)
         end
       end
-      # Explicit retention of static bytes needs neither a view nor a copy.
-      if node.name == "to_heap" && node.args.empty? && !node.block &&
-         !node.named_args && (text = node.obj).is_a?(StringLiteral) &&
-         tape_text?(text)
-        return text
+      # String mutation spells a rebinding. Other receivers keep their
+      # ordinary methods; the type test disappears after specialization.
+      if program.tape_platform? && @macro_code == 0 &&
+         !@ris_string_mutations.includes?(node.object_id) &&
+         ((node.name == "<<" && node.args.size == 1) ||
+          node.name.in?("upcase!", "downcase!", "capitalize!", "strip!",
+            "lstrip!", "rstrip!", "chomp!", "reverse!", "gsub!", "sub!")) &&
+         !node.block && !node.block_arg &&
+         ((receiver = node.obj).is_a?(Var) || receiver.is_a?(InstanceVar))
+        @ris_string_mutations << node.object_id
+        method = node.name == "<<" ? "__ris_append" : node.name.rchop
+        temporary = program.new_temp_var.at(node)
+        value = Call.new(temporary.clone, method,
+          node.args.map(&.clone)).at(node)
+        value.named_args = node.named_args.try &.map(&.clone)
+        rebound = Assign.new(receiver.clone, value).at(node)
+        node.obj = temporary.clone
+        test = IsA.new(temporary.clone,
+          Path.global("String").at(node)).at(node)
+        return Expressions.new([
+          Assign.new(temporary, receiver.clone).at(node),
+          If.new(test, rebound, node).at(node),
+        ] of ASTNode).at(node).transform(self)
       end
       if lowered = TapeInPlace.lower(program, node)
         return lowered.transform(self)
@@ -680,6 +700,17 @@ module Iyi
     # `::Error` rather than `Error`, so that a module of its own with that name
     # cannot change what the operator means.
     def transform(node : Propagate)
+      # The standard text bang spellings rebind. Other attached bangs
+      # retain iyi's error propagation (for example read(path)!).
+      if program.tape_platform? && (call = node.exp).is_a?(Call) &&
+         call.iyi_banged? && !call.block && !call.block_arg &&
+         call.name.in?("upcase", "downcase", "capitalize", "strip",
+           "lstrip", "rstrip", "chomp", "reverse", "gsub", "sub") &&
+         ((receiver = call.obj).is_a?(Var) || receiver.is_a?(InstanceVar))
+        plain = call.clone
+        plain.iyi_banged = false
+        return Assign.new(receiver.clone, plain).at(node).transform(self)
+      end
       if (group = node.exp).is_a?(Call) && group.iyi_group?
         @propagated_group = group
       end
