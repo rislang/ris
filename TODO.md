@@ -93,6 +93,9 @@ part B.
 
 ## Remove the heap and switch off the GC
 
+* Runtime objects (fibers, tasks, internal buffers) take program storage
+  through IyiHeap.alloc and are never freed: a server that spawns a task
+  per connection grows. Give them Pool owners that reuse freed slots.
 * std/uri: URI.parse of a String, then normalize.to_s, answers
   "//@:80/a/c?q#f": the fields are lost (test/ris/uri_legacy.ri, out of
   check.sh). Parsing a String works. Fix the String path or drop it.
