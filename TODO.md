@@ -22,23 +22,13 @@ How to work (fewer tokens, faster to the goal):
 ## Messages: RisBoard (TAPE_SPEC 5.2, 5.6; doc/MESSAGES.md)
 
 Order, fastest with fewest tokens: one Sol low run per item, fixes
-resumed in the same session, one full minitest check per item. HTTP,
-pipe/socket race and autocert touch different files and may run two at a
-time in separate worktrees. Pipe/socket race needs
-poller work for several IO waits at once and may come last; Channel stays
-for them until then.
+resumed in the same session, one full check per item, all in this
+checkout. Pipe/socket race need poller work for several IO waits at
+once; Channel stays for them until then.
 
-* Port HTTP to N tasks, each opening a SO_REUSEPORT listener on the same
-  port and accepting/serving its own connections. Task count is the
-  connection limit; no permits/semaphore. Copy config and handlers per
-  task; keep IdleConns local. Define shutdown and unsupported-platform
-  refusal. Gate: simultaneous listeners, N-connection bound, keepalive/TLS,
-  panic/cancel cleanup and existing HTTP tests without resource transfers.
-  The prefork core and std/sample callers are ported. Finish the 45 old
-  listener/block call sites in 13 bench/*.iyi exercise files before this
-  item is removed; those forms now refuse with the factory replacement.
-  The exercises' shared observation state needs copied result messages;
-  autocert's shared-manager exercises also need the manager port below.
+* Finish the HTTP prefork port: the server, std, samples and bench
+  exercises are ported; fix the http2 and websocket failures listed
+  under Known failure, then remove this item.
 * Enforce Share-or-copy task captures, local and parallel, through captured
   receivers, handlers and reached state; keep all resources in their
   opening task. Gate: mutable/resource captures refused with safe forms,
@@ -59,6 +49,9 @@ for them until then.
   Replace wake/halt/select with tagged control messages or local OS wakes.
   Gate: many waiters, independent deadlines, renewal/stop, manager isolation,
   panic/cancel/result lifetime and existing autocert tests.
+  Part A is begun on branch autocert-wip (577035543, does not compile:
+  std/autocert.iyi:637 interpolates a Str to the heap); rebase it on
+  no-gc and continue from there.
 * Remove Channel/select after all replacement gates pass. Gate: no
   remaining users, full check, std/samples tests and --no-gc link audit.
 
