@@ -751,6 +751,6 @@ pub struct SSE
   def self.event_stream?(type : String) : Bool
     parsed = MIME.parse?(type)
     return false unless parsed
-    parsed[0] == "text/event-stream"
+    parsed.essence == "text/event-stream"
   end
 end

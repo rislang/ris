@@ -635,10 +635,152 @@ struct Array(T)
   private def __reverse_slots(left : Int32, right : Int32) : Nil
     while left < right
       value = unsafe_at(left)
-      unchecked_store(left, unsafe_at(right))
-      unchecked_store(right, value)
+      Pointer(T).new(@state.value + left.to_u64 * sizeof(T).to_u64).value =
+        unsafe_at(right)
+      Pointer(T).new(@state.value + right.to_u64 * sizeof(T).to_u64).value =
+        value
       left += 1
       right -= 1
     end
+  end
+end
+
+struct Array(T)
+  def view : Array::View(T)
+    self[0, size]
+  end
+
+  def truncate(count : Int32) : Nil
+    raise "array truncate out of bounds" if count < 0 || count > size
+    i = count
+    while i < size
+      release(unsafe_at(i))
+      i += 1
+    end
+    (@state + 1_i64).value = count.to_u64
+  end
+end
+
+struct Array::View(T)
+  def view : self
+    self
+  end
+
+  def [](start : Int32, count : Int32) : self
+    raise "array view out of bounds" if start < 0 || count < 0 ||
+      start > size - count
+    if at = @at
+      indexes = Array(Int32).new(count) { |i| at[start + i] }
+      self.class.new(@target, indexes)
+    else
+      self.class.new(@target, @offset + start, count)
+    end
+  end
+
+  def slice_from(start : Int32) : self
+    self[start, size - start]
+  end
+
+  def empty? : Bool
+    size == 0
+  end
+
+  def last : T
+    self[size - 1]
+  end
+
+  def dup : Array(T)
+    to_a
+  end
+end
+
+struct Array(T)
+  def concat(values : Array::View(T)) : self
+    values.each { |value| self << value }
+    self
+  end
+end
+
+struct Array(T)
+  def shift : T
+    raise "shift of an empty array" if empty?
+    __remove_slot(0)
+  end
+
+  def shift? : T?
+    empty? ? nil : shift
+  end
+
+  def unshift(value : T) : self
+    push(value)
+    last = unsafe_at(size - 1)
+    i = size - 1
+    while i > 0
+      Pointer(T).new(@state.value + i.to_u64 * sizeof(T).to_u64).value =
+        unsafe_at(i - 1)
+      i -= 1
+    end
+    Pointer(T).new(@state.value).value = last
+    self
+  end
+
+  def compact
+    result = Array(typeof(self[0].not_nil!)).new(size)
+    each { |value| result << value.not_nil! unless value.nil? }
+    result
+  end
+
+  def +(other : Array::View(T)) : self
+    result = self.class.new(size + other.size)
+    each { |value| result << value }
+    other.each { |value| result << value }
+    result
+  end
+end
+
+struct Array::View(T)
+  def map(& : T -> U) : Array(U) forall U
+    Array(U).new(size) { |i| yield self[i] }
+  end
+end
+
+struct Hash(K, V)
+  def dup : self
+    Tape.owner_copy(self, RisCurrentTape.new)
+  end
+
+  def reject_in_place(& : K, V -> Bool) : self
+    removed = Array(K).new(size)
+    each { |key, value| removed << key if yield key, value }
+    removed.each { |key| delete(key) }
+    self
+  end
+end
+
+struct String
+  def starts_with?(char : Char) : Bool
+    return false if bytesize < char.bytesize
+    i = 0
+    char.each_byte do |byte|
+      return false unless self[i] == byte
+      i += 1
+    end
+    true
+  end
+
+  def ends_with?(char : Char) : Bool
+    return false if bytesize < char.bytesize
+    i = bytesize - char.bytesize
+    char.each_byte do |byte|
+      return false unless self[i] == byte
+      i += 1
+    end
+    true
+  end
+end
+
+struct String::Builder
+  def write(text : String) : Nil
+    append(text)
   end
 end

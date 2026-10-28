@@ -47,6 +47,7 @@ import std/traits::{Comparable}
   end
 {% end %}
 
+@[OnTape]
 pub struct Path
   pub enum Kind : UInt8
     POSIX   = 0
@@ -73,31 +74,6 @@ pub struct Path
   getter kind : Kind
 
   def initialize(@name : String = "", @kind : Kind = Kind.native)
-  end
-
-  def self.new(name : String,
-               kind : Kind = Kind.native) : TapePath
-    TapePath.new(name, kind)
-  end
-
-  def self.posix(name : String) : TapePath
-    TapePath.new(name, Kind::POSIX)
-  end
-
-  def self.windows(name : String) : TapePath
-    TapePath.new(name, Kind::WINDOWS)
-  end
-
-  def self.[](name : String) : TapePath
-    TapePath.new(name)
-  end
-
-  def self.[](parts : Array(String)) : TapePath
-    TapePath.new("".as_tape).join(parts)
-  end
-
-  def to_tape : TapePath
-    TapePath.new(@name.as_tape, @kind)
   end
 
   def self.new(path : Path) : Path
@@ -128,22 +104,6 @@ pub struct Path
     Path.new(name, Kind::WINDOWS)
   end
 
-  def posix? : Bool
-    @kind.posix?
-  end
-
-  def windows? : Bool
-    @kind.windows?
-  end
-
-  def native? : Bool
-    @kind == Kind.native
-  end
-
-  def empty? : Bool
-    @name.empty?
-  end
-
   def to_s : String
     @name
   end
@@ -165,341 +125,6 @@ pub struct Path
     io.write(inspect)
   end
 
-  def to_posix : Path
-    result = self
-    tape do
-      result = to_tape.to_posix.to_heap
-    end
-    result
-  end
-
-  def to_windows : Path
-    result = self
-    tape do
-      result = to_tape.to_windows.to_heap
-    end
-    result
-  end
-
-  def to_native : Path
-    Kind.native.windows? ? to_windows : to_posix
-  end
-
-  def to_kind(kind : Kind) : Path
-    kind.windows? ? to_windows : to_posix
-  end
-
-  private def separator : String
-    posix? ? "/" : "\\"
-  end
-
-  private def sep?(b : UInt8) : Bool
-    b == 47_u8 || (windows? && b == 92_u8)
-  end
-
-  # Bytes of the drive and of the anchor (drive plus root); 0 where there
-  # is none. A root without a drive (`/`, `\foo`) is anchor 1, drive 0.
-  private def anchor_indices : Tuple(Int32, Int32)
-    len = @name.bytesize
-    return {0, 0} if len == 0
-    ptr = @name.to_unsafe
-    b0 = ptr[0]
-
-    unless windows?
-      return b0 == 47_u8 ? {0, 1} : {0, 0}
-    end
-
-    letter = (b0 >= 65_u8 && b0 <= 90_u8) || (b0 >= 97_u8 && b0 <= 122_u8)
-    if letter && len >= 2 && ptr[1] == 58_u8 # "C:"
-      return len >= 3 && sep?(ptr[2]) ? {2, 3} : {2, 2}
-    end
-
-    return {0, 0} unless sep?(b0)
-    if len >= 5 && sep?(ptr[1]) && !sep?(ptr[2])
-      # "\\server\share": a host run, a separator, a share run. After
-      # `\\?\UNC\` the host comes after the prefix: read as host `?` and
-      # share `UNC`, `\\?\UNC\srv\sh\x` had the drive `\\?\UNC`, and
-      # `\\?\UNC\srv\other\x` relative to `\\?\UNC\srv\sh` was `..\other\x`,
-      # across shares.
-      i = long_unc? ? 8 : 2
-      while i < len && !sep?(ptr[i])
-        i = i + 1
-      end
-      if i + 1 < len && !sep?(ptr[i + 1])
-        i = i + 1
-        while i < len && !sep?(ptr[i])
-          i = i + 1
-        end
-        share_end = i
-        while i < len && sep?(ptr[i])
-          i = i + 1
-        end
-        return {share_end, i}
-      end
-    end
-    {0, 1}
-  end
-
-  # `\\?\UNC\` at the start, `UNC` in any case and either separator, as
-  # Python's `splitroot` matches it.
-  private def long_unc? : Bool
-    ptr = @name.to_unsafe
-    return false unless @name.bytesize > 8 && ptr[2] == 63_u8 &&
-                        sep?(ptr[3]) && sep?(ptr[7])
-    (ptr[4] | 32_u8) == 117_u8 && (ptr[5] | 32_u8) == 110_u8 &&
-      (ptr[6] | 32_u8) == 99_u8
-  end
-
-  def drive : String?
-    result = nil.as(String?)
-    tape do
-      if value = to_tape.drive
-        result = value.to_heap
-      end
-    end
-    result
-  end
-
-  def root : String?
-    result = nil.as(String?)
-    tape do
-      if value = to_tape.root
-        result = value.to_heap
-      end
-    end
-    result
-  end
-
-  def anchor : String?
-    result = nil.as(String?)
-    tape do
-      if value = to_tape.anchor
-        result = value.to_heap
-      end
-    end
-    result
-  end
-
-  # A share is absolute without a separator after it: `\\server\share` is
-  # the share's root, as Windows and Python read it. It was relative, so
-  # after `Dir.cd` to a share every `expand` panicked "base is not
-  # absolute".
-  def absolute? : Bool
-    drive_end, anchor_end = anchor_indices
-    if posix?
-      anchor_end > 0
-    else
-      drive_end > 0 && (anchor_end > drive_end || share?)
-    end
-  end
-
-  # A `\\server\share` drive, where `C:` is the other kind.
-  private def share? : Bool
-    drive_end, _ = anchor_indices
-    drive_end > 0 && sep?(@name.to_unsafe[0])
-  end
-
-  # The anchor with the root a share has whether written or not.
-  protected def rooted_anchor : String
-    found = anchor || ""
-    share? && root.nil? ? found + separator : found
-  end
-
-  def relative? : Bool
-    !absolute?
-  end
-
-  def ends_with_separator? : Bool
-    len = @name.bytesize
-    len > 0 && sep?(@name.to_unsafe[len - 1])
-  end
-
-  # The last byte that is not a trailing separator, plus one; the anchor
-  # keeps its own separator.
-  private def trimmed_end : Int32
-    _, anchor_end = anchor_indices
-    last = @name.bytesize
-    while last > anchor_end && sep?(@name.to_unsafe[last - 1])
-      last = last - 1
-    end
-    last
-  end
-
-  # The last component; the anchor, or the empty name, is its own. A
-  # *suffix* found at the end is left off.
-  def basename(suffix : String? = nil) : String
-    result = ""
-    tape do
-      ending = suffix ? suffix.as_tape : nil
-      result = to_tape.basename(ending).to_heap
-    end
-    result
-  end
-
-  # Everything before the last component: `"."` for a bare name, the
-  # anchor for a single component under it.
-  def dirname : String
-    result = ""
-    tape do
-      result = to_tape.dirname.to_heap
-    end
-    result
-  end
-
-  def parent : Path
-    result = self
-    tape do
-      result = to_tape.parent.to_heap
-    end
-    result
-  end
-
-  # Every ancestor, the outermost first: `"a/b/c"` has `"."`, `"a"`,
-  # `"a/b"`; `"/a/b"` has `"/"`, `"/a"`. Each is a `parent` of the one
-  # after it, so it keeps the spelling `parent` keeps: rebuilt from
-  # `parts` and joined with `separator`, `Path.windows("C:/a/b/c")` had
-  # `"C:/a\\b"` where its `parent` is `"C:/a/b"`.
-  def parents : Array(Path)
-    result = [] of Path
-    tape do
-      result = to_tape.parents.to_heap
-    end
-    result
-  end
-
-  def each_parent(&block : Path -> Nil) : Nil
-    parents.each do |p|
-      yield p
-    end
-  end
-
-  # The last `.suffix` of the basename, with its dot; none for a name
-  # that starts with its only dot (`.bashrc`) or ends with one (`foo.`).
-  def extension : String
-    result = ""
-    tape do
-      result = to_tape.extension.to_heap
-    end
-    result
-  end
-
-  def stem : String
-    result = ""
-    tape do
-      result = to_tape.stem.to_heap
-    end
-    result
-  end
-
-  # The anchor, if any, then each non-empty component.
-  def parts : Array(String)
-    result = [] of String
-    tape do
-      result = to_tape.parts.to_heap
-    end
-    result
-  end
-
-  def each_part(&block : String -> Nil) : Nil
-    parts.each do |p|
-      yield p
-    end
-  end
-
-  # `self` with *part* under it; a *part* with an anchor of its own is
-  # the answer by itself, and an empty one changes nothing. A Windows
-  # anchor can be half of one, and then the other half is `self`'s, as
-  # ntpath joins and Windows reads the name: a root with no drive is on
-  # `self`'s drive, and a drive-relative *part* on `self`'s drive goes
-  # under `self`. Answered by itself, `C:\a` joined with `\b` was `\b`,
-  # a root on whatever drive is current, and with `C:b` it was `C:b`,
-  # where `expand` read both on `C:\a`.
-  def join(part : String) : Path
-    result = self
-    tape do
-      result = to_tape.join(part.as_tape).to_heap
-    end
-    result
-  end
-
-  def join(part : Path) : Path
-    join(part.name)
-  end
-
-  def join(first : String | Path, second : String | Path) : Path
-    join(first).join(second)
-  end
-
-  def join(first : String | Path, second : String | Path, third : String | Path) : Path
-    join(first).join(second).join(third)
-  end
-
-  def join(parts : Array(String)) : Path
-    result = self
-    tape do
-      views = Array(String).new(parts.size)
-      parts.each { |part| views << part.as_tape }
-      result = to_tape.join(views).to_heap
-    end
-    result
-  end
-
-  def /(part : String | Path) : Path
-    join(part)
-  end
-
-  # `.` dropped, `..` folded into the component before it (kept at the
-  # front of a relative path, dropped under a root), separators collapsed.
-  def normalize : Path
-    result = self
-    tape do
-      result = to_tape.normalize.to_heap
-    end
-    result
-  end
-
-  # The path that reaches `self` from *base*, or nil where none can be
-  # spelled: different anchors, or a *base* that climbs through `..`.
-  def relative_to?(base : Path | String) : Path?
-    result = nil.as(Path?)
-    tape do
-      origin = base.is_a?(Path) ? base.to_tape : TapePath.new(base.as_tape, @kind)
-      if relative = to_tape.relative_to?(origin)
-        result = relative.to_heap
-      end
-    end
-    result
-  end
-
-  def relative_to(base : Path | String) : Path
-    relative_to?(base) || raise "no relative path from #{base.to_s.inspect} to #{@name.inspect}"
-  end
-
-  # Absolute and normalized, under *base* when relative. *base* is
-  # `Program.env("PWD")` when not given (on Windows, never), the
-  # process's own directory when nothing set that, and a relative path
-  # with neither is refused.
-  # `home: true` reads a leading `~` from the home directory the
-  # platform names.
-  def expand(base : Path | String | Nil = nil, home : Bool = false) : Path
-    result = self
-    tape do
-      origin = if base.is_a?(Path)
-                 base.to_tape
-               elsif base.is_a?(String)
-                 base.as_tape
-               else
-                 nil
-               end
-      result = to_tape.expand(origin, home).to_heap
-    end
-    result
-  end
-
-  def sibling(name : String | Path) : Path
-    parent.join(name)
-  end
-
   def <=>(other : Path) : Int32
     r = if windows? || other.windows?
           Path.compare_strings_ci(@name, other.name)
@@ -518,8 +143,8 @@ pub struct Path
     (windows? ? Path.windows_fold(@name) : @name).hash &* 31 &+ @kind.value.to_i32
   end
 
-  def self.compare_strings(s1 : String | String,
-                           s2 : String | String) : Int32
+  def self.compare_strings(s1 : String,
+                           s2 : String) : Int32
     len1 = s1.bytesize
     len2 = s2.bytesize
     min_len = len1 < len2 ? len1 : len2
@@ -537,8 +162,8 @@ pub struct Path
 
   # As the two names' `windows_fold`s compare, read here without folding
   # either while both are ASCII.
-  def self.compare_strings_ci(s1 : String | String,
-                              s2 : String | String) : Int32
+  def self.compare_strings_ci(s1 : String,
+                              s2 : String) : Int32
     len1 = s1.bytesize
     len2 = s2.bytesize
     min_len = len1 < len2 ? len1 : len2
@@ -586,27 +211,6 @@ pub struct Path
     end
   end
 
-  def self.windows_fold(s : String) : String
-    {% if flag?(:win32) %}
-      index = 0
-      while index < s.bytesize && s.to_unsafe[index] < 128_u8
-        index = index + 1
-      end
-      if index < s.bytesize
-        folded = native_fold(s)
-        return folded if folded
-      end
-    {% end %}
-    String.new(s.bytesize) do |buffer|
-      at = 0
-      while at < s.bytesize
-        byte = s.to_unsafe[at]
-        byte = byte + 32_u8 if byte >= 65_u8 && byte <= 90_u8
-        buffer[at] = byte == 47_u8 ? 92_u8 : byte
-        at = at + 1
-      end
-    end
-  end
 
   {% if flag?(:win32) %}
     # Text that is not UTF-8 has no UTF-16 to fold, and is folded as ASCII.
@@ -682,22 +286,7 @@ end
 
 # Lexical path data owned by the caller's tape. Slices view the name.
 @[OnTape]
-pub struct TapePath
-  alias Kind = Path::Kind
-  getter name : String
-  getter kind : Kind
-
-  def initialize(@name : String, @kind : Kind = Kind.native)
-  end
-
-  def to_heap : Path
-    Path.new(@name.to_heap, @kind)
-  end
-
-  def to_tape : String
-    @name
-  end
-
+pub struct Path
   def write(writer : String::Builder) : Nil
     writer << @name
   end
@@ -727,7 +316,7 @@ pub struct TapePath
   end
 
   private def concat(first : String,
-                     second : String | String) : String
+                     second : String) : String
     String.build { |w| w << first << second }
   end
 
@@ -931,12 +520,12 @@ pub struct TapePath
     res
   end
 
-  def parent : TapePath
-    TapePath.new(dirname, @kind)
+  def parent : Path
+    Path.new(dirname, @kind)
   end
 
-  def parents : Array(TapePath)
-    result = Array(TapePath).new
+  def parents : Array(Path)
+    result = Array(Path).new
     return result if @name.empty?
     child = self
     up = parent
@@ -961,19 +550,19 @@ pub struct TapePath
     parts.each { |part| yield part }
   end
 
-  def each_parent(& : TapePath -> Nil) : Nil
+  def each_parent(& : Path -> Nil) : Nil
     parents.each { |path| yield path }
   end
 
-  def join(part : String) : TapePath
+  def join(part : String) : Path
     return self if part.empty?
-    other = TapePath.new(part, @kind)
+    other = Path.new(part, @kind)
     return other if @name.empty?
     if other.anchor
       own = drive
       their = other.drive
       if own && their.nil?
-        return TapePath.new(concat(own, part), @kind)
+        return Path.new(concat(own, part), @kind)
       end
       unless own && their && other.root.nil? && same?(own, their)
         return other
@@ -988,41 +577,41 @@ pub struct TapePath
       writer << separator unless ends_with_separator? || bare
       writer << part
     end
-    TapePath.new(joined, @kind)
+    Path.new(joined, @kind)
   end
 
-  def join(part : TapePath) : TapePath
+  def join(part : Path) : Path
     join(part.name)
   end
 
-  def join(first : String | TapePath,
-           second : String | TapePath) : TapePath
+  def join(first : String | Path,
+           second : String | Path) : Path
     join(first).join(second)
   end
 
-  def join(first : String | TapePath,
-           second : String | TapePath,
-           third : String | TapePath) : TapePath
+  def join(first : String | Path,
+           second : String | Path,
+           third : String | Path) : Path
     join(first).join(second).join(third)
   end
 
-  def join(parts : Array(String)) : TapePath
+  def join(parts : Array(String)) : Path
     current = self
     parts.each { |part| current = current.join(part) }
     current
   end
 
-  def /(part : String | TapePath) : TapePath
+  def /(part : String | Path) : Path
     join(part)
   end
 
-  def sibling(part : String | TapePath) : TapePath
+  def sibling(part : String | Path) : Path
     parent.join(part)
   end
 
-  def normalize : TapePath
+  def normalize : Path
     text = String.build { |writer| normalize(writer) }
-    TapePath.new(text, @kind)
+    Path.new(text, @kind)
   end
 
   def normalize(writer : String::Builder) : Nil
@@ -1072,8 +661,8 @@ pub struct TapePath
     end
   end
 
-  def relative_to?(base : TapePath | String) : TapePath?
-    base = TapePath.new(base, @kind) if base.is_a?(String)
+  def relative_to?(base : Path | String) : Path?
+    base = Path.new(base, @kind) if base.is_a?(String)
     target = normalize
     origin = base.to_kind(@kind).normalize
     ta = target.rooted_anchor
@@ -1111,10 +700,10 @@ pub struct TapePath
       end
       writer << '.' if count == 0
     end
-    TapePath.new(text, @kind)
+    Path.new(text, @kind)
   end
 
-  def relative_to(base : TapePath | String) : TapePath
+  def relative_to(base : Path | String) : Path
     relative_to?(base) || raise "no relative path between these anchors"
   end
 
@@ -1122,8 +711,8 @@ pub struct TapePath
   # `USERPROFILE`, and `HOME` shows up only under a POSIX-shaped shell
   # such as MSYS or a CI runner. So win32 asks both, its own name first;
   # every other platform asks `HOME` alone.
-  def expand(base : TapePath | String | Nil = nil,
-             home : Bool = false) : TapePath
+  def expand(base : Path | String | Nil = nil,
+             home : Bool = false) : Path
     name = @name
     if home && (name == "~" || name.starts_with?("~/") ||
        (windows? && name.starts_with?("~\\")))
@@ -1143,12 +732,12 @@ pub struct TapePath
                end
              end
     end
-    path = TapePath.new(name, @kind)
+    path = Path.new(name, @kind)
     return path.normalize if path.absolute?
-    origin = if base.is_a?(TapePath)
+    origin = if base.is_a?(Path)
                base.to_kind(@kind)
              elsif base.is_a?(String)
-               TapePath.new(base, @kind)
+               Path.new(base, @kind)
              else
                pwd = nil.as(String?)
                {% if flag?(:win32) %}
@@ -1157,7 +746,7 @@ pub struct TapePath
                  pwd = Program.env("PWD") || Program.cwd
                {% end %}
                raise "cannot expand a path: no base given" unless pwd
-               TapePath.new(pwd.as_tape, @kind)
+               Path.new(pwd.as_tape, @kind)
              end
     raise "cannot expand a path: base is not absolute" unless origin.absolute?
     if windows?
@@ -1168,31 +757,31 @@ pub struct TapePath
           writer << own << separator
           writer << name[own.bytesize, name.bytesize - own.bytesize]
         end
-        return TapePath.new(text, @kind).normalize
+        return Path.new(text, @kind).normalize
       end
     end
     origin.join(path).normalize
   end
 
-  def to_posix : TapePath
+  def to_posix : Path
     return self if posix?
     text = String.build do |writer|
       @name.each_byte do |byte|
         writer.push(byte == 92_u8 ? 47_u8 : byte)
       end
     end
-    TapePath.new(text, Kind::POSIX)
+    Path.new(text, Kind::POSIX)
   end
 
-  def to_windows : TapePath
-    TapePath.new(@name, Kind::WINDOWS)
+  def to_windows : Path
+    Path.new(@name, Kind::WINDOWS)
   end
 
-  def to_kind(kind : Kind) : TapePath
+  def to_kind(kind : Kind) : Path
     kind.windows? ? to_windows : to_posix
   end
 
-  def to_native : TapePath
+  def to_native : Path
     to_kind(Kind.native)
   end
 end

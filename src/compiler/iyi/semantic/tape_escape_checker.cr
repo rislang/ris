@@ -25,6 +25,12 @@ class Iyi::TapeEscapeChecker
   # General allocation has no representation in the tape-only runtime.
   def refuse?(node : Call) : String?
     return nil if TapeRules.runtime?(@program, node.location)
+    if node.type?.try(&.to_s) == "RisPoolStorage"
+      return "pool storage is private; use Array(T).new(capacity)"
+    end
+    if node.name.in?("__pool_copy", "__release_run", "__remove_slot")
+      return "pool handles are private; store arrays in Array or Hash"
+    end
     if node.name.in?("malloc", "realloc") && (receiver = node.obj.try(&.type?))
       receiver = receiver.instance_type if receiver.metaclass?
       if receiver.is_a?(PointerInstanceType)

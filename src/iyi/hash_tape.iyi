@@ -1,8 +1,8 @@
 # A hash map on the tape, laid out as Ruby's Hash (st_table): entries in
 # insertion order in parallel Array columns, and `@bins`, an Array(Int32) of
-# entry indices probed linearly (-1 empty). A deleted entry stays in its
-# column, marked dead, so indices in the bins never move; links are
-# indices, so the map holds no pointer of its own. Everything lives on
+# entry indices probed linearly (-1 empty). Deletion compacts the columns
+# and rebuilds the bins, returning owned runs for reuse. Links are indices,
+# so the map holds no pointer of its own. Everything lives on
 # the tape that is current at `new`, and goes when that tape's scope ends.
 #
 # A program's `{k => v}` and `{} of K => V` are a Hash (the compiler's
@@ -80,13 +80,25 @@ struct Hash(K, V)
     find(key) >= 0
   end
 
-  # The value the key had, or nil. Its entry stays in place, dead.
+  # Return a caller-owned value and reclaim the removed entry's runs.
   def delete(key : K) : V?
     index = find(key)
     return nil if index < 0
-    @live[index] = false
+    value = @values.__remove_slot(index)
+    @keys.__remove_slot(index)
+    @live.__remove_slot(index)
     @head[0] = size - 1
-    @values[index]
+    i = 0
+    while i < @bins.size
+      @bins[i] = -1
+      i += 1
+    end
+    i = 0
+    while i < @keys.size
+      place(@keys[i], i)
+      i += 1
+    end
+    value
   end
 
   def clear : Nil

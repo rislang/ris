@@ -1,0 +1,8 @@
+module test/ris/refused/program_run_view
+
+CACHE = Array(Array(Int32)).new
+CACHE << [1, 2]
+inner = CACHE[0]
+view = inner[0, 1]
+inner << 3
+puts view[0]

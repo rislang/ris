@@ -99,6 +99,8 @@ class Iyi::TapeChecker
     type = type.remove_alias.remove_typedef.remove_alias
     return false unless visiting.add?(type)
     if type.is_a?(GenericClassInstanceType)
+      return false if type.to_s.starts_with?("Array::View(") ||
+                      type.to_s.starts_with?("SlicePool::Run(")
       return true if {"Array", "Tre", "SlicePool"}.includes?(type.generic_type.name)
     end
     return true if type.to_s == "String::Builder" ||
@@ -125,7 +127,10 @@ class Iyi::TapeChecker
       type.type_vars.each_value do |var|
         # An owner element gets the owner checker's own, more exact refusal.
         if var.is_a?(Var) && (element = var.type?) &&
-           !TapeOwnerChecker.owner_in(@program, element) && growing_in(element)
+           !TapeOwnerChecker.owner_in(@program, element) && growing_in(element) &&
+           !(type.generic_type.name == "Array" &&
+             element.is_a?(GenericClassInstanceType) &&
+             element.generic_type.name == "Array")
           fail type, nil, "#{type} cannot contain growing values in a runtime-sized collection; " \
                           "use SlicePool(T) with fixed-size elements and run handles"
         end

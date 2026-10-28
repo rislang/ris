@@ -1,0 +1,7 @@
+module test/ris/refused/hash_run_view
+
+map = {"a" => [1, 2]}
+inner = map["a"]
+view = inner[0, 1]
+inner << 3
+puts view[0]

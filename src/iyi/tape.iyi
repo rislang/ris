@@ -1170,22 +1170,38 @@ end
 struct Array(T)
   def __iyi_copy_into(target : Pointer(self), work : RisCopyWork) : Nil
     made = self.class.new(size)
-    # Reserve and publish every slot before any child job runs.
     each { |value| made << value }
     target.value = made
-    index = size
-    while index > 0
-      index -= 1
-      work.push(unsafe_at(index), Pointer(T).new(
-        made.@state.value &+ index.to_u64 &* sizeof(T).to_u64))
-    end
+    made.__iyi_copy_children(work)
+  end
+
+  protected def __iyi_copy_children(work : RisCopyWork) : Nil
+    {% if T < Array %}
+      each { |value| value.__iyi_copy_children(work) }
+    {% else %}
+      {% if T == String %}
+        return if (@state + 4_i64).value == 1_u64 ||
+                  (@state + 4_i64).value == 3_u64
+      {% end %}
+      index = size
+      while index > 0
+        index -= 1
+        work.push(unsafe_at(index), Pointer(T).new(
+          @state.value &+ index.to_u64 &* sizeof(T).to_u64))
+      end
+    {% end %}
   end
 
   @state : Pointer(UInt64)
 
-  def initialize(capacity : Int32 | Int64 = 4)
+  def initialize(capacity : Int32 | Int64 = 4,
+                 storage : RisPoolStorage? = nil)
     bytes = Tape.storage(capacity, sizeof(T).to_u64)
-    @state = RisRegion.growing_state(bytes, sizeof(T).to_u64)
+    @state = RisRegion.growing_state(bytes, sizeof(T).to_u64, 8_u64)
+    (@state + 5_i64).value = 0_u64
+    (@state + 6_i64).value = 0_u64
+    (@state + 7_i64).value = storage ? 0_u64 : RisArrayPool(T).children
+
     (@state + 1_i64).value = 0_u64
     (@state + 2_i64).value = capacity.to_u64
     (@state + 4_i64).value = RisRegion.program_active? ? 1_u64 : 0_u64
@@ -1229,10 +1245,109 @@ struct Array(T)
   def push(value : T) : Nil
     size = (@state + 1_i64).value
     if size >= (@state + 2_i64).value
-      grow
+      if (@state + 4_i64).value >= 2_u64
+        grow_run(value)
+      else
+        grow
+      end
     end
-    Pointer(T).new(@state.value &+ size &* sizeof(T).to_u64).value = value
+    Pointer(T).new(@state.value &+ size &* sizeof(T).to_u64).value = stored(value)
     (@state + 1_i64).value = size &+ 1_u64
+  end
+
+  # Diagnostic counts include freed slots retained for the next store.
+  def __pool_usage : Tuple(Int32, Int32)
+    return {0, 0} if (@state + 7_i64).value == 0_u64
+    {% if T < Array %}
+      pool = Pointer(RisArrayPool({{T.type_vars[0]}})).new(
+        (@state + 7_i64).value)
+      {pool.value.data.size, pool.value.handles.size}
+    {% elsif T == String %}
+      pool = Pointer(SlicePool(UInt8)).new((@state + 7_i64).value)
+      {pool.value.size, 0}
+    {% else %}
+      {0, 0}
+    {% end %}
+  end
+
+  # Nested elements are fixed handles to runs owned by this container.
+  protected def stored(value : T) : T
+    return value if (@state + 7_i64).value == 0_u64
+    {% if T < Array %}
+      pool = Pointer(RisArrayPool({{T.type_vars[0]}})).new(
+        (@state + 7_i64).value)
+      value.__pool_copy(pool)
+    {% elsif T == String %}
+      if (@state + 4_i64).value == 1_u64 ||
+         (@state + 4_i64).value == 3_u64
+        pool = Pointer(SlicePool(UInt8)).new((@state + 7_i64).value)
+        pool.value.store(value).string
+      else
+        value
+      end
+    {% else %}
+      value
+    {% end %}
+  end
+
+  private def release(value : T) : Nil
+    return if (@state + 7_i64).value == 0_u64
+    {% if T < Array %}
+      value.__release_run
+    {% elsif T == String %}
+      if (@state + 4_i64).value == 1_u64 ||
+         (@state + 4_i64).value == 3_u64
+        pool = Pointer(SlicePool(UInt8)).new((@state + 7_i64).value)
+        at = (value.to_unsafe.address - pool.value.@data.@state.value).to_i32
+        pool.value.free_slice(SlicePool::Run(UInt8).new(
+          pool.value.@data, at, value.bytesize))
+      end
+    {% end %}
+  end
+
+  def __pool_copy(pool : Pointer(RisArrayPool(T))) : self
+    run = if empty?
+      SlicePool::Run(T).new(pool.value.data.@data, 0, 0)
+    else
+      pool.value.data.alloc_slice(size, self[0])
+    end
+    header = pool.value.handles.alloc_slice(1,
+      StaticArray(UInt64, 8).new)
+    state = Pointer(UInt64).new(header.@state.value +
+      header.offset.to_u64 * sizeof(StaticArray(UInt64, 8)).to_u64)
+    state.value = run.@state.value + run.offset.to_u64 * sizeof(T).to_u64
+    (state + 1_i64).value = size.to_u64
+    (state + 2_i64).value = size.to_u64
+    (state + 3_i64).value = header.offset.to_u64
+    (state + 4_i64).value = pool.value.program? ? 3_u64 : 2_u64
+    (state + 5_i64).value = pool.address
+    (state + 6_i64).value = run.offset.to_u64
+    (state + 7_i64).value = pool.value.child_pool
+    made = self
+    pointerof(made.@state).value = state
+    each_with_index { |value, i| run[i] = made.stored(value) }
+    made
+  end
+
+  def __release_run : Nil
+    return unless (@state + 4_i64).value >= 2_u64
+    each { |value| release(value) }
+    pool = Pointer(RisArrayPool(T)).new((@state + 5_i64).value)
+    pool.value.data.free_slice(SlicePool::Run(T).new(pool.value.data.@data,
+      (@state + 6_i64).value.to_i32, (@state + 2_i64).value.to_i32))
+    pool.value.handles.free_slice(SlicePool::Run(StaticArray(UInt64, 8)).new(
+      pool.value.handles.@data, (@state + 3_i64).value.to_i32, 1))
+  end
+
+  private def grow_run(fill : T) : Nil
+    pool = Pointer(RisArrayPool(T)).new((@state + 5_i64).value)
+    old = SlicePool::Run(T).new(pool.value.data.@data,
+      (@state + 6_i64).value.to_i32, (@state + 2_i64).value.to_i32)
+    capacity = Tape.grown((@state + 2_i64).value).to_i32
+    run = pool.value.data.realloc_slice(old, capacity, fill)
+    @state.value = run.@state.value + run.offset.to_u64 * sizeof(T).to_u64
+    (@state + 2_i64).value = capacity.to_u64
+    (@state + 6_i64).value = run.offset.to_u64
   end
 
   @[NoInline]
@@ -1322,7 +1437,11 @@ struct Array(T)
     width = sizeof(I).to_u64
     need = RisRegion.count(RisRegion.size_add(count, width))
     while need > (@state + 2_i64).value
-      grow
+      if (@state + 4_i64).value >= 2_u64
+        grow_run(0_u8)
+      else
+        grow
+      end
     end
     stored = value
     bytes = pointerof(stored).as(Pointer(UInt8))
@@ -1351,7 +1470,11 @@ struct Array(T)
     width = text.bytesize.to_u64
     need = RisRegion.count(RisRegion.size_add(count, width))
     while need > (@state + 2_i64).value
-      grow
+      if (@state + 4_i64).value >= 2_u64
+        grow_run(0_u8)
+      else
+        grow
+      end
     end
     Pointer(UInt8).new(@state.value + count).copy_from(text.to_unsafe, width.to_i32)
     (@state + 1_i64).value = need
@@ -1382,7 +1505,10 @@ struct Array(T)
         Tape.out_of_range(asked, count, "elements")
       end
     end
-    Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value = value
+    replacement = stored(value)
+    release(unsafe_at(index))
+    Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value = replacement
+    value
   end
 
   # `[]` in `while i < a.size`, where the loop keeps *index* below the
@@ -1396,7 +1522,10 @@ struct Array(T)
   @[AlwaysInline]
   def __loop_store(index : Int32, value : T) : T
     Tape.out_of_range(index, size, "elements") if index < 0
-    Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value = value
+    replacement = stored(value)
+    release(unsafe_at(index))
+    Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value = replacement
+    value
   end
 
   # The element at *link*, checked as `[]` checks an index: a link read
@@ -1454,13 +1583,29 @@ struct Array(T)
     total
   end
 
-  # Removes and returns the last element. Empty is a mistake, as with
-  # `Array#pop`; `pop?` answers nil.
+  # Removal returns a caller-owned value before releasing its pool run.
   def pop : T
     raise "pop of an empty array" if empty?
-    count = (@state + 1_i64).value &- 1_u64
-    (@state + 1_i64).value = count
-    unsafe_at(count.to_i32)
+    __remove_slot(size - 1)
+  end
+
+  def __remove_slot(index : Int32) : T
+    value = self[index]
+    result = value
+    {% if T < Array || T == String %}
+      if (@state + 7_i64).value != 0_u64
+        result = Tape.owner_copy(value, RisCurrentTape.new)
+      end
+    {% end %}
+    release(value)
+    i = index
+    while i + 1 < size
+      Pointer(T).new(@state.value + i.to_u64 * sizeof(T).to_u64).value =
+        unsafe_at(i + 1)
+      i += 1
+    end
+    (@state + 1_i64).value -= 1_u64
+    result
   end
 
   def pop? : T?
@@ -1472,6 +1617,7 @@ struct Array(T)
   # every one of them (a tokenizer's queue, one per token: 110 MB for a
   # 4.5 MB page).
   def clear : Nil
+    each { |value| release(value) }
     (@state + 1_i64).value = 0_u64
   end
 
@@ -1707,7 +1853,12 @@ struct Array(T)
 
   # The elements put in the order *order* names, from a copy of them.
   private def reorder(order : Array(Int32)) : self
-    copy = dup
+    copy = self
+    {% if T == String || T < Array %}
+      copy = Tape.owner_copy(self, RisCurrentTape.new)
+    {% else %}
+      copy = dup
+    {% end %}
     order.each_with_index { |from, to| unchecked_store(to, copy.unchecked(from)) }
     self
   end
@@ -1750,7 +1901,10 @@ struct Array(T)
   end
 
   protected def unchecked_store(index : Int32, value : T) : T
-    Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value = value
+    replacement = stored(value)
+    release(unsafe_at(index))
+    Pointer(T).new(@state.value &+ index.to_u64 &* sizeof(T).to_u64).value = replacement
+    value
   end
 
   @[AlwaysInline]
@@ -3085,7 +3239,7 @@ struct SlicePool(T)
   @free : Array(String::Span)
 
   def initialize(capacity : Int32 | Int64 = 4)
-    @data = Array(T).new(capacity)
+    @data = Array(T).new(capacity, RisPoolStorage.new)
     @free = Array(String::Span).new
   end
 
@@ -3126,21 +3280,25 @@ struct SlicePool(T)
     {% end %}
   end
 
-  private def extend_to(stop : Int32) : Nil
+  private def extend_to(stop : Int32, fill : T) : Nil
     while @data.size < stop
-      @data << default_value
+      @data << fill
     end
   end
 
-  private def defaults(at : Int32, n : Int32) : Nil
+  private def defaults(at : Int32, n : Int32, fill : T) : Nil
     i = 0
     while i < n
-      @data[at + i] = default_value
+      @data[at + i] = fill
       i += 1
     end
   end
 
   def alloc_slice(n : Int32 | Int64) : Run(T)
+    alloc_slice(n, default_value)
+  end
+
+  def alloc_slice(n : Int32 | Int64, fill : T) : Run(T)
     count = checked(n)
     return run(0, 0) if count == 0
     i = 0
@@ -3148,17 +3306,17 @@ struct SlicePool(T)
       span = @free[i]
       if span.size >= count || span.start + span.size == size
         stop = checked(span.start.to_i64 + count)
-        extend_to(stop)
+        extend_to(stop, fill)
         take = (count < span.size ? count : span.size)
         @free[i] = String::Span.new(span.start + take, span.size - take)
-        defaults(span.start, take)
+        defaults(span.start, take, fill)
         return run(span.start, count)
       end
       i += 1
     end
     at = size
     stop = checked(at.to_i64 + count)
-    extend_to(stop)
+    extend_to(stop, fill)
     run(at, count)
   end
 
@@ -3228,10 +3386,14 @@ struct SlicePool(T)
   end
 
   def realloc_slice(s : Run(T), n : Int32 | Int64) : Run(T)
+    realloc_slice(s, n, default_value)
+  end
+
+  def realloc_slice(s : Run(T), n : Int32 | Int64, fill : T) : Run(T)
     Tape.check_slice_relocation(T, Tuple())
     count = checked(n)
     validate(s)
-    return alloc_slice(count) if s.size == 0
+    return alloc_slice(count, fill) if s.size == 0
     if count <= s.size
       free_slice(run(s.offset + count, s.size - count))
       return run(s.offset, count)
@@ -3239,7 +3401,7 @@ struct SlicePool(T)
     old_stop = s.offset + s.size
     if old_stop == size
       stop = checked(s.offset.to_i64 + count)
-      extend_to(stop)
+      extend_to(stop, fill)
       return run(s.offset, count)
     end
     i = 0
@@ -3248,19 +3410,20 @@ struct SlicePool(T)
       if span.start == old_stop &&
          (span.size >= count - s.size || span.start + span.size == size)
         stop = checked(s.offset.to_i64 + count)
-        extend_to(stop)
+        extend_to(stop, fill)
         take = (count - s.size < span.size ? count - s.size : span.size)
         @free[i] = String::Span.new(span.start + take, span.size - take)
-        defaults(old_stop, take)
+        defaults(old_stop, take, fill)
         return run(s.offset, count)
       end
       i += 1
     end
     # Save typed values before freeing: the destination can overlap them.
     check_relocation(s, count)
-    saved = Array(T).new(s.size) { |k| s[k] }
+    saved = Array(T).new(s.size, RisPoolStorage.new)
+    s.each { |value| saved << value }
     free_slice(s)
-    made = alloc_slice(count)
+    made = alloc_slice(count, fill)
     i = 0
     while i < saved.size
       made[i] = saved[i]
@@ -3476,4 +3639,45 @@ struct SlicePool::List(T)
       i += 1
     end
   end
+end
+
+# Each nested container owns typed payload runs and reusable handle slots.
+@[OnTape]
+private struct RisArrayPool(T)
+  getter data : SlicePool(T)
+  getter handles : SlicePool(StaticArray(UInt64, 8))
+  getter child_pool : UInt64
+  @program : Bool
+
+  def program? : Bool
+    @program
+  end
+
+  def initialize
+    @data = SlicePool(T).new
+    @handles = SlicePool(StaticArray(UInt64, 8)).new
+    @child_pool = self.class.children
+    @program = RisRegion.program_active?
+  end
+
+  def self.children : UInt64
+    {% if T < Array %}
+      pool = Pointer(RisArrayPool({{T.type_vars[0]}})).new(
+        RisRegion.tape_bytes(sizeof(RisArrayPool({{T.type_vars[0]}})).to_u64))
+      pool.value = RisArrayPool({{T.type_vars[0]}}).new
+      pool.address
+    {% elsif T == String %}
+      return 0_u64 unless RisRegion.program_active?
+      pool = Pointer(SlicePool(UInt8)).new(
+        RisRegion.tape_bytes(sizeof(SlicePool(UInt8)).to_u64))
+      pool.value = SlicePool(UInt8).new
+      pool.address
+    {% else %}
+      0_u64
+    {% end %}
+  end
+end
+
+# Runtime-only marker for a pool's already placed slots.
+private struct RisPoolStorage
 end

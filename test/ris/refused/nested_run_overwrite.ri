@@ -1,0 +1,6 @@
+module test/ris/refused/nested_run_overwrite
+
+outer = [[1, 2], [3]]
+inner = outer[0]
+outer[0] = [4]
+puts inner[0]

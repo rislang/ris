@@ -2,7 +2,7 @@ module test/path_tape
 
 import std/path::{Path}
 
-kept = "".to_heap
+kept = ""
 tape do
   path = Path.posix("/a//b/../c.txt")
   exit 1 unless path.basename == "c.txt"
@@ -14,7 +14,7 @@ tape do
   exit 5 unless relative && relative.name == "c.txt"
   exit 6 unless Path.windows("C:/a/../b").normalize.name == "C:\\b"
   exit 7 unless Path.windows("C:").join("foo").name == "C:foo"
-  exit 8 unless path.name == path.to_heap.name
+  exit 8 unless path.name == path.copy_to(Program.tape).name
   writer = String::Builder.new(1)
   writer << "prefix:"
   normal.write(writer)
@@ -27,8 +27,8 @@ tape do
     ".txt") == "a"
   expanded = Path.windows("C:é").expand("C:\\a")
   exit 15 unless expanded.name == "C:\\a\\é"
-  exit 16 unless normal.parents.to_heap[0].name == "/"
-  kept = normal.to_heap.name
+  exit 16 unless normal.parents[0].name == "/"
+  kept = normal.name.copy_to(Program.tape)
 end
 exit 10 unless Path.posix("/a//b/../c.txt").normalize.name == kept
-puts "PASS: path tape and heap APIs"
+puts "PASS: path on tape"

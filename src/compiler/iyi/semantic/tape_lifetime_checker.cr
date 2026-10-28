@@ -33,6 +33,8 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
   @contexts = Set(ASTNode).new.compare_by_identity
   @visited = Set(VisitKey).new
   @active = Set(Tuple(UInt64, UInt64?)).new
+  @program_vars = Set(Tuple(UInt64, String)).new
+  @request_vars = Set(Tuple(UInt64, String)).new
 
   getter graph : TapeCallGraph
 
@@ -167,11 +169,14 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
   # local storage. Str is immutable and safe to borrow for reads.
   # Raw pointer access remains explicitly outside tape lifetime guarantees.
   def visit(node : Var)
+    return false if @program_vars.includes?(variable_key(node.name))
     if @local_tape && (type = node.type?) && TapeChecker.tape_in(@program, type) && type.remove_typedef.to_s != "String"
       meta = @block.try(&.vars.try(&.[node.name]?)) || @owner.try(&.vars.try(&.[node.name]?))
       context = meta.try &.context
       unless context.is_a?(ASTNode) && @contexts.includes?(context)
-        node.raise "cannot use outer tape value `#{node.name}` inside local_tape: it could retain temporary storage; copy it into owned data before entering (outer String values may be read)"
+        node.raise "cannot use outer tape value `#{node.name}` inside local_tape:\n" \
+                   "it could retain temporary storage; use copy_to(owner) before entering.\n" \
+                   "Outer String values may be read."
       end
     end
     false
@@ -179,7 +184,8 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
 
   private def check_outer_self(node : ASTNode)
     if @local_tape && (owner = @owner) && !@contexts.includes?(owner) && TapeChecker.tape?(@program, owner.owner) && owner.owner.to_s != "String"
-      node.raise "cannot use outer tape value `self` inside local_tape: copy it into owned data before entering"
+      node.raise "cannot use outer tape value `self` inside local_tape:\n" \
+                 "use copy_to(owner) before entering"
     end
   end
 
@@ -194,6 +200,21 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
   end
 
   def visit(node : Assign)
+    if target = node.target.as?(Var)
+      key = variable_key(target.name)
+      if program_value?(node.value) && !@request_vars.includes?(key)
+        @program_vars << key
+      else
+        @program_vars.delete(key)
+        @request_vars << key
+      end
+    end
+    # A rebinding does not read the old value. An explicit program copy
+    # safely replaces a handle declared outside the local tape.
+    if node.target.is_a?(Var) && program_copy?(node.value)
+      node.value.accept self
+      return false
+    end
     if @scope && node.target.is_a?(Var) && !program_copy?(node.value) &&
        (type = node.value.type?) && TapeChecker.tape_in(@program, type)
       name = node.target.as(Var).name
@@ -204,6 +225,44 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
       end
     end
     true
+  end
+
+  private def variable_key(name : String) : Tuple(UInt64, String)
+    meta = @block.try(&.vars.try(&.[name]?)) ||
+           @owner.try(&.vars.try(&.[name]?)) || @program.vars[name]?
+    {meta.try(&.context).try(&.object_id) || 0_u64, name}
+  end
+
+  private def program_value?(node : ASTNode, self_owned = false,
+                             seen = Set(UInt64).new) : Bool
+    return true if program_copy?(node)
+    case node
+    when Path
+      !node.target_const.nil?
+    when ClassVar, Global
+      true
+    when InstanceVar
+      self_owned
+    when Var
+      @program_vars.includes?(variable_key(node.name))
+    when Expressions
+      program_value?(node.expressions.last, self_owned, seen)
+    when Return
+      node.exp.try { |exp| program_value?(exp, self_owned, seen) } || false
+    when Call
+      targets = @graph.targets(node)
+      return false unless targets && !targets.empty?
+      receiver_owned = node.obj.try do |obj|
+        program_value?(obj, self_owned, seen)
+      end || self_owned
+      targets.all? do |target|
+        next false unless seen.add?(target.object_id)
+        body = TapeScopeChecker.parts(target.body).try(&.[1]) || target.body
+        program_value?(body, receiver_owned, seen.dup)
+      end
+    else
+      false
+    end
   end
 
   # An explicit program copy outlives every request/local tape scope.

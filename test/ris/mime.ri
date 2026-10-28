@@ -2,7 +2,7 @@ module test/mime_tape
 
 import std/mime::{MIME}
 
-kept = "".to_heap
+kept = ""
 tape do
   parsed = MIME.parse?(" Text/HTML; X=one; x=\"two\\ words\"")
   exit 1 unless parsed
@@ -10,7 +10,7 @@ tape do
   exit 3 unless parsed.params["x"] == "two words"
   exit 4 unless MIME.parse?("a/b; x=\"bad").nil?
   exit 5 unless MIME.from_extension("dir/INDEX.HTML") == "text/html"
-  exit 6 unless MIME.extensions("TEXT/HTML").to_heap ==
+  exit 6 unless MIME.extensions("TEXT/HTML") ==
                 [".htm", ".html"]
   exit 15 unless MIME.compressible?("application/wasm")
   exit 16 if MIME.compressible?("image/png")
@@ -19,15 +19,16 @@ tape do
   w << "prefix:"
   MIME.with_charset("text/html", w)
   exit 8 unless w.finish == "prefix:text/html; charset=utf-8"
-  kept = MIME.with_charset("text/html; charset=ascii").to_heap
+  kept = MIME.with_charset("text/html; charset=ascii").copy_to(Program.tape)
 end
 exit 9 unless kept == "text/html; charset=ascii"
 exit 10 unless MIME.with_charset("text/plain") ==
                "text/plain; charset=utf-8"
-exit 11 unless MIME.parse?("a/b; x=y".to_heap) ==
-  {"a/b", {"x" => "y"}}
+parsed = MIME.parse?("a/b; x=y")
+exit 11 unless parsed && parsed.essence == "a/b" &&
+  parsed.params["x"] == "y"
 exit 12 unless MIME.from_extension("x.JSON") == "application/json"
-exit 13 unless MIME.extensions("text/html".to_heap) ==
+exit 13 unless MIME.extensions("text/html") ==
   [".htm", ".html"]
 exit 14 unless MIME.compressible?("text/plain")
-puts "PASS: mime tape and heap APIs"
+puts "PASS: mime on tape"

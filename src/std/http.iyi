@@ -1404,7 +1404,7 @@ pub class Request
     type = header("Content-Type")
     if type
       parsed = MIME.parse?(type)
-      if parsed && parsed[0] == "application/x-www-form-urlencoded"
+      if parsed && parsed.essence == "application/x-www-form-urlencoded"
         Params.parse(body).each { |name, value| fields.add(name, value) }
       end
     end
@@ -1927,8 +1927,8 @@ pub struct Server
     wrote.is_a?(Int32) && !close
   end
 
-  def self.parse_head(bytes : String, from : Int32 = 0,
-                      complete : Bool = false) : ParsedHead | HeadError | Nil
+  def self.parse_head(bytes : String, from : Int32,
+                      complete : Bool) : ParsedHead | HeadError | Nil
     HeadParser.parse_head(bytes, from, complete)
   end
 
@@ -2580,7 +2580,7 @@ pub struct Server
     tape do
       case head = parse_head(text.as_tape, 0, true)
       in ParsedHead
-        result = heap_head(head)
+        result = request_head_view(head)
       in HeadError
         result = HTTPError.new(head.message.to_heap, head.status)
       in Nil
@@ -2590,7 +2590,7 @@ pub struct Server
     result || HTTPError.new("incomplete request")
   end
 
-  private def self.heap_head(head : ParsedHead) : RequestHead | HTTPError
+  private def self.request_head_view(head : ParsedHead) : RequestHead | HTTPError
     method = head.method.to_heap
     target = head.target.to_heap
     version = head.version.to_heap
@@ -4572,7 +4572,7 @@ pub struct HTTP
   # chunk ends it. What follows the last chunk is trailers, which nothing
   # here reads.
   def self.decode_chunked(text : String) : String
-    p = text.to_unsafe
+    p = text
     n = text.bytesize
     # One builder for the body: adding each chunk to the body so far copied
     # it once per chunk.
@@ -4591,7 +4591,7 @@ pub struct HTTP
       break if size == 0
       # `size` may be 2^31 - 1: `i + size` passed Int32's end and panicked.
       raise "HTTP: chunked body ends inside a chunk" if size > n - i
-      out.write(p + i, size)
+      out.append(text[i, size])
       i = i + size
       raise "HTTP: a chunk is not followed by CRLF" unless i + 1 < n && p[i] == 13_u8 && p[i + 1] == 10_u8
       i = i + 2
@@ -5104,7 +5104,8 @@ pub class Multipart
   def self.boundary(content_type : String) : String?
     parsed = MIME.parse?(content_type)
     return nil unless parsed
-    media, params = parsed
+    media = parsed.essence
+    params = parsed.params
     return nil unless media.starts_with?("multipart/")
     found = params["boundary"]?
     return nil unless found && found.bytesize >= 1 && found.bytesize <= 70
@@ -5303,7 +5304,7 @@ pub class Part
     return nil unless value
     parsed = MIME.parse?("x/" + value)
     if parsed
-      return parsed[1][key]?
+      return parsed.params[key]?
     end
     nil
   end

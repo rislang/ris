@@ -8,7 +8,7 @@
 #
 # BigInt is sign-magnitude:
 #   @sign : Int32          -1 negative, 0 zero, 1 positive
-#   @limbs : Array(UInt64) little-endian 32-bit digits, no leading zeros
+#   @limbs : Array(UInt64) | Array::View(UInt64) little-endian 32-bit digits, no leading zeros
 #
 # Each limb holds 32 bits in a 64-bit word so that a 32x32 product plus two
 # carries still fits the word; the canonical form (zero is sign 0 with no
@@ -66,9 +66,41 @@ module std/big
 import std/int
 import std/traits::{Comparable, Num, Hashable}
 
+@[OnTape]
+private struct RisMulFrame
+  property a : Array::View(UInt64)
+  property b : Array::View(UInt64)
+  property z0 : Array::View(UInt64)
+  property z2 : Array::View(UInt64)
+  property res : Array::View(UInt64)
+  property stage : Int32
+  property k : Int32
+  property offset : Int32
+
+  def initialize(a : Array::View(UInt64), b : Array::View(UInt64))
+    na = a.size
+    nb = b.size
+    while na > 0 && a[na - 1] == 0_u64
+      na -= 1
+    end
+    while nb > 0 && b[nb - 1] == 0_u64
+      nb -= 1
+    end
+    @a = a[0, na]
+    @b = b[0, nb]
+    @z0 = @a[0, 0]
+    @z2 = @z0
+    @res = @z0
+    @stage = 0
+    @k = 0
+    @offset = 0
+  end
+end
+
+@[OnTape]
 pub struct BigInt
   getter sign : Int32
-  getter limbs : Array(UInt64)
+  getter limbs : Array::View(UInt64)
 
   # Crossover point above which Karatsuba multiplication is used.
   # Empirically measured: schoolbook is faster below 64 limbs (2048 bits)
@@ -77,17 +109,14 @@ pub struct BigInt
 
   # Raw constructor from sign and limbs. Trims leading zero limbs to enforce
   # the canonical representation invariant: zero has empty limbs and sign 0.
-  def initialize(sign : Int32, limbs : Array(UInt64))
-    while limbs.size > 0 && limbs.last == 0_u64
-      limbs.pop
+  def initialize(sign : Int32,
+                 limbs : Array(UInt64) | Array::View(UInt64))
+    count = limbs.size
+    while count > 0 && limbs[count - 1] == 0_u64
+      count -= 1
     end
-    if limbs.empty?
-      @sign = 0
-      @limbs = limbs
-    else
-      @sign = sign < 0 ? -1 : (sign > 0 ? 1 : 0)
-      @limbs = limbs
-    end
+    @sign = count == 0 ? 0 : (sign < 0 ? -1 : (sign > 0 ? 1 : 0))
+    @limbs = limbs[0, count]
   end
 
   # Constructs a BigInt from an Int64.
@@ -168,7 +197,7 @@ pub struct BigInt
   def self.parse(str : String, base : Int32 = 10) : BigInt
     raise "invalid base: #{base} (must be 2..36)" if base < 2 || base > 36
 
-    bytes = str.to_unsafe
+    bytes = str
     start_idx = 0
     end_idx = str.bytesize - 1
     while start_idx <= end_idx && (bytes[start_idx] == 32_u8 || bytes[start_idx] == 9_u8 || bytes[start_idx] == 10_u8 || bytes[start_idx] == 13_u8)
@@ -319,7 +348,7 @@ pub struct BigInt
         i = i + 1
       end
       carry = value
-      w = limbs.to_unsafe
+      w = limbs.view
       j = 0
       size = limbs.size
       while j < size
@@ -388,8 +417,8 @@ pub struct BigInt
     if @limbs.size != other.limbs.size
       return @limbs.size < other.limbs.size ? -1 : 1
     end
-    a = @limbs.to_unsafe
-    b = other.limbs.to_unsafe
+    a = @limbs.view
+    b = other.limbs.view
     i = @limbs.size - 1
     while i >= 0
       return a[i] < b[i] ? -1 : 1 if a[i] != b[i]
@@ -518,15 +547,15 @@ pub struct BigInt
   # The limb loops below go through the arrays' pointers: every index is
   # inside the sizes they are given, and a bounds check and a growth check
   # per limb were most of what adding, multiplying and dividing cost.
-  private def add_abs_limbs(a : Array(UInt64), b : Array(UInt64)) : Array(UInt64)
+  private def add_abs_limbs(a : Array(UInt64) | Array::View(UInt64), b : Array(UInt64) | Array::View(UInt64)) : Array(UInt64)
     long = a.size >= b.size ? a : b
     short = a.size >= b.size ? b : a
     n = long.size
     m = short.size
-    res = Array(UInt64).unsafe_build(n + 1)
-    r = res.to_unsafe
-    x = long.to_unsafe
-    y = short.to_unsafe
+    res = Array(UInt64).new(n + 1, 0_u64)
+    r = res.view
+    x = long.view
+    y = short.view
     carry = 0_u64
     i = 0
     while i < m
@@ -542,18 +571,18 @@ pub struct BigInt
       i = i + 1
     end
     r[n] = carry
-    res.unsafe_set_size(carry > 0_u64 ? n + 1 : n)
+    res.truncate(carry > 0_u64 ? n + 1 : n)
     res
   end
 
   # |a| - |b|, |a| at least |b|.
-  private def sub_abs_limbs(a : Array(UInt64), b : Array(UInt64)) : Array(UInt64)
+  private def sub_abs_limbs(a : Array(UInt64) | Array::View(UInt64), b : Array(UInt64) | Array::View(UInt64)) : Array(UInt64)
     n = a.size
     m = b.size
-    res = Array(UInt64).unsafe_build(n)
-    r = res.to_unsafe
-    x = a.to_unsafe
-    y = b.to_unsafe
+    res = Array(UInt64).new(n, 0_u64)
+    r = res.view
+    x = a.view
+    y = b.view
     borrow = 0_u64
     i = 0
     while i < n
@@ -596,11 +625,11 @@ pub struct BigInt
   end
 
   # |a| times one limb, in one pass.
-  private def mul_limb(a : Array(UInt64), limb : UInt64) : Array(UInt64)
+  private def mul_limb(a : Array(UInt64) | Array::View(UInt64), limb : UInt64) : Array(UInt64)
     n = a.size
-    res = Array(UInt64).unsafe_build(n + 1)
-    r = res.to_unsafe
-    x = a.to_unsafe
+    res = Array(UInt64).new(n + 1, 0_u64)
+    r = res.view
+    x = a.view
     carry = 0_u64
     i = 0
     while i < n
@@ -610,18 +639,18 @@ pub struct BigInt
       i = i + 1
     end
     r[n] = carry
-    res.unsafe_set_size(carry > 0_u64 ? n + 1 : n)
+    res.truncate(carry > 0_u64 ? n + 1 : n)
     res
   end
 
-  # The result starts at zero: `Pointer.malloc` clears what it hands out.
-  private def mul_schoolbook(a : Array(UInt64), b : Array(UInt64)) : Array(UInt64)
+  # The product starts with zero limbs on the caller's tape.
+  private def mul_schoolbook(a : Array(UInt64) | Array::View(UInt64), b : Array(UInt64) | Array::View(UInt64)) : Array(UInt64)
     n = a.size
     m = b.size
-    res = Array(UInt64).unsafe_build(n + m)
-    r = res.to_unsafe
-    x = a.to_unsafe
-    y = b.to_unsafe
+    res = Array(UInt64).new(n + m, 0_u64)
+    r = res.view
+    x = a.view
+    y = b.view
     i = 0
     while i < n
       a_limb = x[i]
@@ -643,26 +672,12 @@ pub struct BigInt
     while size > 0 && r[size - 1] == 0_u64
       size = size - 1
     end
-    res.unsafe_set_size(size)
+    res.truncate(size)
     res
   end
 
-  private def slice_limbs(a : Array(UInt64), start : Int32, count : Int32) : Array(UInt64)
-    res = Array(UInt64).new(count)
-    i = 0
-    while i < count
-      idx = start + i
-      res << (idx < a.size ? a[idx] : 0_u64)
-      i = i + 1
-    end
-    while res.size > 0 && res.last == 0_u64
-      res.pop
-    end
-    res
-  end
-
-  private def shift_limbs_left(a : Array(UInt64), k : Int32) : Array(UInt64)
-    return a if a.empty? || k <= 0
+  private def shift_limbs_left(a : Array(UInt64) | Array::View(UInt64), k : Int32) : Array(UInt64)
+    return a.dup if a.empty? || k <= 0
     res = Array(UInt64).new(a.size + k) { 0_u64 }
     i = 0
     while i < a.size
@@ -672,77 +687,98 @@ pub struct BigInt
     res
   end
 
-  private def mul_karatsuba(a : Array(UInt64), b : Array(UInt64), threshold : Int32) : Array(UInt64)
-    if a.size < threshold || b.size < threshold || a.empty? || b.empty?
-      return mul_schoolbook(a, b)
-    end
-
-    n = a.size > b.size ? a.size : b.size
-    k = (n + 1) // 2
-
-    # The split below takes k limbs off each side for the low halves and
-    # the rest for the high ones, which is a negative count for a side
-    # shorter than k: `3 ** 10000` multiplies a squared base by a result
-    # a fraction of its size, and panicked "negative capacity". A side that
-    # short is multiplied against the other in pieces of its own size.
-    if a.size < k || b.size < k
-      return mul_unbalanced(a.size < b.size ? a : b, a.size < b.size ? b : a, threshold)
-    end
-
-    x0 = slice_limbs(a, 0, k)
-    x1 = slice_limbs(a, k, a.size - k)
-    y0 = slice_limbs(b, 0, k)
-    y1 = slice_limbs(b, k, b.size - k)
-
-    z0 = mul_karatsuba(x0, y0, threshold)
-    z2 = mul_karatsuba(x1, y1, threshold)
-
-    xsum = add_abs_limbs(x0, x1)
-    ysum = add_abs_limbs(y0, y1)
-    z1_raw = mul_karatsuba(xsum, ysum, threshold)
-    z1 = sub_abs_limbs(sub_abs_limbs(z1_raw, z0), z2)
-
-    z2_shifted = shift_limbs_left(z2, 2 * k)
-    z1_shifted = shift_limbs_left(z1, k)
-    add_abs_limbs(add_abs_limbs(z2_shifted, z1_shifted), z0)
-  end
-
-  # |short| times |long|, where `long` is more than twice as long: `long` in
-  # pieces of `short`'s size, each piece's product added in at its offset.
-  # The result starts at zero (`mul_schoolbook`), and a carry out of a
-  # piece's product stops before n + m, because the whole product fits.
-  private def mul_unbalanced(short : Array(UInt64), long : Array(UInt64), threshold : Int32) : Array(UInt64)
-    m = short.size
-    n = long.size
-    res = Array(UInt64).unsafe_build(n + m)
-    r = res.to_unsafe
-    offset = 0
-    while offset < n
-      count = n - offset < m ? n - offset : m
-      piece = mul_karatsuba(short, slice_limbs(long, offset, count), threshold)
-      p = piece.to_unsafe
-      carry = 0_u64
-      i = 0
-      while i < piece.size
-        sum = r[offset + i] &+ p[i] &+ carry
-        r[offset + i] = sum & 0xFFFFFFFF_u64
-        carry = sum.unsafe_shr(32_u64)
-        i = i + 1
+  # An explicit stack keeps scratch on the caller's tape. Each frame
+  # holds fixed views; no growing local crosses a recursive call.
+  private def mul_karatsuba(a : Array(UInt64) | Array::View(UInt64),
+                           b : Array(UInt64) | Array::View(UInt64),
+                           threshold : Int32) : Array::View(UInt64)
+    frames = Array(RisMulFrame).new(32, RisMulFrame.new(a.view, b.view))
+    depth = 1
+    result = a.view[0, 0]
+    until depth == 0
+      frame = frames[depth - 1]
+      x = frame.a
+      y = frame.b
+      if frame.stage == 0
+        if x.size < threshold || y.size < threshold || x.empty? || y.empty?
+          result = mul_schoolbook(x, y).view
+          depth -= 1
+          next
+        end
+        n = x.size > y.size ? x.size : y.size
+        frame.k = (n + 1) // 2
+        if x.size < frame.k || y.size < frame.k
+          if x.size > y.size
+            frame.a = y
+            frame.b = x
+          end
+          frame.res = Array(UInt64).new(n + frame.a.size, 0_u64).view
+          frame.stage = 10
+          frames[depth - 1] = frame
+          count = frame.a.size < frame.b.size ? frame.a.size : frame.b.size
+          frames[depth] = RisMulFrame.new(frame.a, frame.b[0, count])
+          depth += 1
+        else
+          frame.stage = 1
+          frames[depth - 1] = frame
+          frames[depth] = RisMulFrame.new(x[0, frame.k], y[0, frame.k])
+          depth += 1
+        end
+      elsif frame.stage == 1
+        frame.z0 = result
+        frame.stage = 2
+        frames[depth - 1] = frame
+        frames[depth] = RisMulFrame.new(x[frame.k, x.size - frame.k],
+          y[frame.k, y.size - frame.k])
+        depth += 1
+      elsif frame.stage == 2
+        frame.z2 = result
+        frame.stage = 3
+        frames[depth - 1] = frame
+        xsum = add_abs_limbs(x[0, frame.k], x[frame.k, x.size - frame.k])
+        ysum = add_abs_limbs(y[0, frame.k], y[frame.k, y.size - frame.k])
+        frames[depth] = RisMulFrame.new(xsum.view, ysum.view)
+        depth += 1
+      elsif frame.stage == 3
+        middle = sub_abs_limbs(sub_abs_limbs(result, frame.z0), frame.z2)
+        high = shift_limbs_left(frame.z2, 2 * frame.k)
+        mid = shift_limbs_left(middle, frame.k)
+        result = add_abs_limbs(add_abs_limbs(frame.z0, mid), high).view
+        depth -= 1
+      else
+        r = frame.res
+        carry = 0_u64
+        i = 0
+        while i < result.size
+          sum = r[frame.offset + i] &+ result[i] &+ carry
+          r[frame.offset + i] = sum & 0xFFFFFFFF_u64
+          carry = sum.unsafe_shr(32_u64)
+          i += 1
+        end
+        while carry > 0_u64
+          sum = r[frame.offset + i] &+ carry
+          r[frame.offset + i] = sum & 0xFFFFFFFF_u64
+          carry = sum.unsafe_shr(32_u64)
+          i += 1
+        end
+        frame.offset += x.size
+        if frame.offset >= y.size
+          count = r.size
+          while count > 0 && r[count - 1] == 0_u64
+            count -= 1
+          end
+          result = r[0, count]
+          depth -= 1
+        else
+          frames[depth - 1] = frame
+          left = y.size - frame.offset
+          count = left < x.size ? left : x.size
+          frames[depth] = RisMulFrame.new(x, y[frame.offset, count])
+          depth += 1
+        end
       end
-      while carry > 0_u64
-        sum = r[offset + i] &+ carry
-        r[offset + i] = sum & 0xFFFFFFFF_u64
-        carry = sum.unsafe_shr(32_u64)
-        i = i + 1
-      end
-      offset = offset + m
     end
-    size = n + m
-    while size > 0 && r[size - 1] == 0_u64
-      size = size - 1
-    end
-    res.unsafe_set_size(size)
-    res
+    result
   end
 
   # Division and Modulo. Returns {quotient, remainder}.
@@ -785,9 +821,9 @@ pub struct BigInt
     # Single-limb divisor optimization: O(m) division
     if other.limbs.size == 1
       v0 = other.limbs[0]
-      q_limbs = Array(UInt64).unsafe_build(@limbs.size)
-      q = q_limbs.to_unsafe
-      u = @limbs.to_unsafe
+      q_limbs = Array(UInt64).new(@limbs.size, 0_u64)
+      q = q_limbs.view
+      u = @limbs.view
       rem = 0_u64
       i = @limbs.size - 1
       while i >= 0
@@ -833,10 +869,10 @@ pub struct BigInt
       u_prime << 0_u64
     end
 
-    q_limbs = Array(UInt64).unsafe_build(m + 1)
-    qp = q_limbs.to_unsafe
-    up = u_prime.to_unsafe
-    vp = v_prime.to_unsafe
+    q_limbs = Array(UInt64).new(m + 1, 0_u64)
+    qp = q_limbs.view
+    up = u_prime.view
+    vp = v_prime.view
     vn1 = vp[n - 1]
     vn2 = vp[n - 2]
 
@@ -934,10 +970,10 @@ pub struct BigInt
     q = BigInt.window(@limbs, shift) // (BigInt.window(other.limbs, shift) + 1_u64)
     n = @limbs.size
     m = other.limbs.size
-    res = Array(UInt64).unsafe_build(n)
-    r = res.to_unsafe
-    u = @limbs.to_unsafe
-    v = other.limbs.to_unsafe
+    res = Array(UInt64).new(n, 0_u64)
+    r = res.view
+    u = @limbs.view
+    v = other.limbs.view
     carry = 0_u64
     borrow = 0_u64
     i = 0
@@ -955,7 +991,6 @@ pub struct BigInt
       end
       i = i + 1
     end
-    res.unsafe_set_size(n)
     while BigInt.limbs_at_least(r, n, v, m)
       borrow = 0_u64
       i = 0
@@ -979,7 +1014,7 @@ pub struct BigInt
   end
 
   # |value| over 2^shift, for one under 2^64: the limbs from bit *shift*.
-  protected def self.window(limbs : Array(UInt64), shift : Int32) : UInt64
+  protected def self.window(limbs : Array(UInt64) | Array::View(UInt64), shift : Int32) : UInt64
     i = shift >> 5
     s = (shift & 31).to_u64
     w = limbs[i].unsafe_shr(s)
@@ -989,7 +1024,7 @@ pub struct BigInt
   end
 
   # Whether the *n* limbs at *r* are at least the *m* at *v*.
-  protected def self.limbs_at_least(r : Pointer(UInt64), n : Int32, v : Pointer(UInt64), m : Int32) : Bool
+  protected def self.limbs_at_least(r : Array::View(UInt64), n : Int32, v : Array::View(UInt64), m : Int32) : Bool
     i = n - 1
     while i >= m
       return true if r[i] != 0_u64
@@ -1027,12 +1062,12 @@ pub struct BigInt
     self % BigInt.new(other.to_i64)
   end
 
-  private def shift_left_limbs(limbs : Array(UInt64), bits : UInt64) : Array(UInt64)
+  private def shift_left_limbs(limbs : Array(UInt64) | Array::View(UInt64), bits : UInt64) : Array(UInt64)
     return limbs.dup if bits == 0_u64
     n = limbs.size
-    res = Array(UInt64).unsafe_build(n + 1)
-    r = res.to_unsafe
-    x = limbs.to_unsafe
+    res = Array(UInt64).new(n + 1, 0_u64)
+    r = res.view
+    x = limbs.view
     carry = 0_u64
     rshift = 32_u64 - bits
     i = 0
@@ -1043,16 +1078,16 @@ pub struct BigInt
       i = i + 1
     end
     r[n] = carry
-    res.unsafe_set_size(carry > 0_u64 ? n + 1 : n)
+    res.truncate(carry > 0_u64 ? n + 1 : n)
     res
   end
 
-  private def shift_right_limbs(limbs : Array(UInt64), bits : UInt64) : Array(UInt64)
+  private def shift_right_limbs(limbs : Array(UInt64) | Array::View(UInt64), bits : UInt64) : Array(UInt64)
     return limbs.dup if bits == 0_u64
     n = limbs.size
-    res = Array(UInt64).unsafe_build(n)
-    r = res.to_unsafe
-    x = limbs.to_unsafe
+    res = Array(UInt64).new(n, 0_u64)
+    r = res.view
+    x = limbs.view
     carry = 0_u64
     lshift = 32_u64 - bits
     i = n - 1
@@ -1066,7 +1101,7 @@ pub struct BigInt
     while size > 0 && r[size - 1] == 0_u64
       size = size - 1
     end
-    res.unsafe_set_size(size)
+    res.truncate(size)
     res
   end
 
@@ -1249,11 +1284,11 @@ pub struct BigInt
     limb_shift = count // 32
     bit_shift = (count % 32).to_u64
 
-    # Zero limbs below, from `Pointer.malloc`, and the shifted ones above.
+    # Zero limbs below and the shifted ones above, on the caller's tape.
     n = @limbs.size
-    res_limbs = Array(UInt64).unsafe_build(n + limb_shift + 1)
-    r = res_limbs.to_unsafe + limb_shift.to_i64
-    x = @limbs.to_unsafe
+    res_limbs = Array(UInt64).new(n + limb_shift + 1, 0_u64)
+    r = res_limbs.view.slice_from(limb_shift)
+    x = @limbs.view
     carry = 0_u64
     rshift = 32_u64 - bit_shift
     i = 0
@@ -1264,7 +1299,7 @@ pub struct BigInt
       i = i + 1
     end
     r[n] = carry
-    res_limbs.unsafe_set_size(carry > 0_u64 ? n + limb_shift + 1 : n + limb_shift)
+    res_limbs.truncate(carry > 0_u64 ? n + limb_shift + 1 : n + limb_shift)
     BigInt.new(@sign, res_limbs)
   end
 
@@ -1488,8 +1523,19 @@ pub struct BigInt
   # and 16: 3 ** 400000 took a second in decimal and in binary, and nine
   # and a half in base 7.
   def to_s(base : Int32) : String
+    String.build { |writer| to_s(writer, base) }
+  end
+
+  def to_s(writer : String::Builder) : Nil
+    to_s(writer, 10)
+  end
+
+  def to_s(writer : String::Builder, base : Int32) : Nil
     raise "invalid base: #{base} (must be 2..36)" if base < 2 || base > 36
-    return "0" if zero?
+    if zero?
+      writer << '0'
+      return
+    end
 
     digits = Array(UInt8).new(@limbs.size * 32 // BigInt.bits_per_digit(base) + 2)
     if base & (base - 1) == 0
@@ -1528,16 +1574,11 @@ pub struct BigInt
       digits.pop
     end
 
-    negative = @sign < 0
-    lead = negative ? 1 : 0
-    count = digits.size
-    String.new(count + lead) do |bytes|
-      bytes[0] = 45_u8 if negative
-      i = 0
-      while i < count
-        bytes[lead + i] = digits[count - 1 - i]
-        i = i + 1
-      end
+    writer.push(45_u8) if @sign < 0
+    i = digits.size - 1
+    while i >= 0
+      writer.push(digits[i])
+      i -= 1
     end
   end
 
@@ -1585,7 +1626,7 @@ pub struct BigInt
     start = sink.size
     work = Array(UInt64).new(@limbs.size)
     work.concat(@limbs)
-    w = work.to_unsafe
+    w = work.view
     size = work.size
     while size > 0
       rem = 0_u64
@@ -1864,6 +1905,7 @@ end
 # with `@zero`, a zero read through an atomic load, which the optimiser
 # cannot see the value of; the assembly of a --release build shows the and
 # and the or in both loops, every time.
+@[OnTape]
 struct Montgomery
   @m : Array(UInt64)
   @n : Int32
@@ -1896,7 +1938,7 @@ struct Montgomery
   end
 
   # BigInt's 32-bit limbs two to a word, *n* words.
-  def self.words(limbs : Array(UInt64), n : Int32) : Array(UInt64)
+  def self.words(limbs : Array(UInt64) | Array::View(UInt64), n : Int32) : Array(UInt64)
     res = Array(UInt64).new(n, 0_u64)
     i = 0
     while i < limbs.size
@@ -1907,7 +1949,7 @@ struct Montgomery
   end
 
   # The bits a BigInt's limbs take to write.
-  def self.bit_length(limbs : Array(UInt64)) : Int32
+  def self.bit_length(limbs : Array(UInt64) | Array::View(UInt64)) : Int32
     return 0 if limbs.empty?
     top = limbs.last
     bits = (limbs.size - 1) * 32
@@ -1919,7 +1961,7 @@ struct Montgomery
   end
 
   # Bit *i* of a BigInt's limbs, 0 past the top.
-  def self.bit(limbs : Array(UInt64), i : Int32) : Int32
+  def self.bit(limbs : Array(UInt64) | Array::View(UInt64), i : Int32) : Int32
     return 0 if (i >> 5) >= limbs.size
     (limbs[i >> 5].unsafe_shr((i & 31).to_u64) & 1_u64).to_i32
   end
@@ -1952,7 +1994,7 @@ struct Montgomery
   # of 64 n, h its odd part.
   private def constants(bits : Int32) : Nil
     n = @n
-    x = @one.to_unsafe
+    x = @one.view
     x[(bits - 1) >> 6] = 1_u64.unsafe_shl(((bits - 1) & 63).to_u64)
     (64 * n - bits + 1).times { double(x) }
     return unless @secret
@@ -1962,7 +2004,7 @@ struct Montgomery
       h = h >> 1
       s = s + 1
     end
-    r = @r2.to_unsafe
+    r = @r2.view
     i = 0
     while i < n
       r[i] = x[i]
@@ -1973,9 +2015,9 @@ struct Montgomery
   end
 
   # x = 2x mod m, in place.
-  private def double(x : Pointer(UInt64)) : Nil
+  private def double(x : Array::View(UInt64)) : Nil
     n = @n
-    t = @t.to_unsafe
+    t = @t.view
     carry = 0_u64
     i = 0
     while i < n
@@ -1990,9 +2032,9 @@ struct Montgomery
   # the difference is always taken and one of the two kept by a mask. t is
   # under 2m, so top - borrow is 0 (keep the difference) or -1 (keep t),
   # and its high word is the mask. r is not t.
-  private def reduce(t : Pointer(UInt64), top : UInt64, r : Pointer(UInt64)) : Nil
+  private def reduce(t : Array::View(UInt64), top : UInt64, r : Array::View(UInt64)) : Nil
     n = @n
-    m = @m.to_unsafe
+    m = @m.view
     borrow = 0_u64
     j = 0
     while j < n
@@ -2028,11 +2070,11 @@ struct Montgomery
   # fully unrolled for 16 words by a macro, 622 ns (LLVM spilled and
   # shuffled the products through vector registers); the sums split into
   # one of low words and one of high, no faster.
-  def mul(a : Pointer(UInt64), b : Pointer(UInt64), r : Pointer(UInt64)) : Nil
+  def mul(a : Array::View(UInt64), b : Array::View(UInt64), r : Array::View(UInt64)) : Nil
     n = @n
-    m = @m.to_unsafe
-    t = @t.to_unsafe
-    q = @p.to_unsafe
+    m = @m.view
+    t = @t.view
+    q = @p.view
     inv = @inv
     acc = 0_u128
     top = 0_u64
@@ -2092,11 +2134,11 @@ struct Montgomery
   # and the reduction in rows (separated operand scanning), and takes 222
   # (measured as `mul` is); the products and the reduction interleaved in
   # one set of columns took 235.
-  def sqr(a : Pointer(UInt64), r : Pointer(UInt64)) : Nil
+  def sqr(a : Array::View(UInt64), r : Array::View(UInt64)) : Nil
     n = @n
-    m = @m.to_unsafe
-    q = @t.to_unsafe
-    p = @p.to_unsafe
+    m = @m.view
+    q = @t.view
+    p = @p.view
     inv = @inv
     acc = 0_u128
     top = 0_u64
@@ -2179,10 +2221,10 @@ struct Montgomery
   end
 
   # *base*, below m, into Montgomery form at *r*.
-  private def enter(base : BigInt, r : Pointer(UInt64)) : Nil
+  private def enter(base : BigInt, r : Array::View(UInt64)) : Nil
     if @secret
       x = Montgomery.words(base.limbs, @n)
-      mul(x.to_unsafe, @r2.to_unsafe, r)
+      mul(x.view, @r2.view, r)
     else
       x = Montgomery.words(((base << (64 * @n)) % @mod).limbs, @n)
       i = 0
@@ -2194,13 +2236,13 @@ struct Montgomery
   end
 
   # The value at *a* out of Montgomery form, as a BigInt: a times 1 / R.
-  private def leave(a : Pointer(UInt64)) : BigInt
+  private def leave(a : Array::View(UInt64)) : BigInt
     n = @n
     one = Array(UInt64).new(n, 0_u64)
     one[0] = 1_u64
     out = Array(UInt64).new(n, 0_u64)
-    o = out.to_unsafe
-    mul(a, one.to_unsafe, o)
+    o = out.view
+    mul(a, one.view, o)
     limbs = Array(UInt64).new(2 * n, 0_u64)
     i = 0
     while i < n
@@ -2218,23 +2260,23 @@ struct Montgomery
   def pow(base : BigInt, exp : BigInt) : BigInt
     n = @n
     bits = Montgomery.bit_length(exp.limbs)
-    return leave(@one.to_unsafe) if bits == 0
+    return leave(@one.view) if bits == 0
     k = Montgomery.window(bits)
     size = 1 << (k - 1)
     table = Array(UInt64).new(size * n, 0_u64)
-    tp = table.to_unsafe
+    tp = table.view
     enter(base, tp)
     if size > 1
       g2 = Array(UInt64).new(n, 0_u64)
-      sqr(tp, g2.to_unsafe)
+      sqr(tp, g2.view)
       i = 1
       while i < size
-        mul(tp + ((i - 1) * n).to_i64, g2.to_unsafe, tp + (i * n).to_i64)
+        mul(tp.slice_from(((i - 1) * n)), g2.view, tp.slice_from((i * n)))
         i = i + 1
       end
     end
     acc = Array(UInt64).new(n, 0_u64)
-    ap = acc.to_unsafe
+    ap = acc.view
     limbs = exp.limbs
     started = false
     i = bits - 1
@@ -2254,7 +2296,7 @@ struct Montgomery
           value = value * 2 + Montgomery.bit(limbs, j)
           j = j - 1
         end
-        entry = tp + ((value >> 1) * n).to_i64
+        entry = tp.slice_from(((value >> 1) * n))
         if started
           (i - low + 1).times { sqr(ap, ap) }
           mul(ap, entry, ap)
@@ -2287,28 +2329,28 @@ struct Montgomery
     k = 5 if k > 5
     size = 1 << k
     table = Array(UInt64).new(size * n, 0_u64)
-    tp = table.to_unsafe
-    one = @one.to_unsafe
+    tp = table.view
+    one = @one.view
     j = 0
     while j < n
       tp[j] = one[j]
       j = j + 1
     end
-    enter(base, tp + n.to_i64)
+    enter(base, tp.slice_from(n))
     i = 2
     while i < size
-      mul(tp + ((i - 1) * n).to_i64, tp + n.to_i64, tp + (i * n).to_i64)
+      mul(tp.slice_from(((i - 1) * n)), tp.slice_from(n), tp.slice_from((i * n)))
       i = i + 1
     end
     acc = Array(UInt64).new(n, 0_u64)
-    ap = acc.to_unsafe
+    ap = acc.view
     j = 0
     while j < n
       ap[j] = one[j]
       j = j + 1
     end
     chosen = Array(UInt64).new(n, 0_u64)
-    cp = chosen.to_unsafe
+    cp = chosen.view
     limbs = exp.limbs
     zero = @zero.get
     w = (width + k - 1) // k - 1
@@ -2329,7 +2371,7 @@ struct Montgomery
       while e < size
         d = e.to_u64 ^ value
         mask = ((d | (0_u64 &- d)).unsafe_shr(63_u64) &- 1_u64) ^ zero
-        entry = tp + (e * n).to_i64
+        entry = tp.slice_from((e * n))
         j = 0
         while j < n
           cp[j] = cp[j] | (entry[j] & mask)
@@ -2369,17 +2411,17 @@ struct Montgomery
   # 2.5, where Fermat's x^(n - 2) on std/ecdsa's words took 10.
   def inverse(x : BigInt) : BigInt?
     n = @n
-    m = @m.to_unsafe
+    m = @m.view
     zero = @zero.get
     a = Montgomery.words(x.limbs, n)
     b = @m.dup
     u = Array(UInt64).new(n, 0_u64)
     u[0] = 1_u64
     v = Array(UInt64).new(n, 0_u64)
-    ap = a.to_unsafe
-    bp = b.to_unsafe
-    up = u.to_unsafe
-    vp = v.to_unsafe
+    ap = a.view
+    bp = b.view
+    up = u.view
+    vp = v.view
     rounds = (2 * Montgomery.bit_length(@mod.limbs) - 1 + 30) // 31
     rounds.times do
       # The length of the longer of a and b, at least 64, and the 33 bits
@@ -2536,9 +2578,9 @@ struct Montgomery
   # The n words at *r* and the signed word *top* above them, a value in
   # (-2m, 3m), taken into [0, m): m added twice where the value is
   # negative, then taken off twice where what is left is at least m.
-  private def into_range(r : Pointer(UInt64), top : UInt64) : Nil
+  private def into_range(r : Array::View(UInt64), top : UInt64) : Nil
     n = @n
-    m = @m.to_unsafe
+    m = @m.view
     zero = @zero.get
     2.times do
       negative = top.unsafe_to_i64.unsafe_shr(63).unsafe_to_u64 ^ zero
@@ -2552,7 +2594,7 @@ struct Montgomery
       end
       top = top &+ carry
     end
-    t = @t.to_unsafe
+    t = @t.view
     2.times do
       borrow = 0_u64
       j = 0
@@ -2573,7 +2615,7 @@ struct Montgomery
   end
 
   # The n words at *r* negated, two's complement, where *mask* is all ones.
-  def self.negate(r : Pointer(UInt64), n : Int32, mask : UInt64) : Nil
+  def self.negate(r : Array::View(UInt64), n : Int32, mask : UInt64) : Nil
     carry = mask & 1_u64
     j = 0
     while j < n
@@ -2612,6 +2654,7 @@ struct Montgomery
   end
 end
 
+@[OnTape]
 pub struct BigDecimal
   getter value : BigInt
   getter scale : Int32
@@ -2635,7 +2678,7 @@ pub struct BigDecimal
     negative = false
     idx = 0
     len = str.bytesize
-    ptr = str.to_unsafe
+    ptr = str
 
     if ptr[0] == 45_u8 # '-'
       negative = true
@@ -2838,7 +2881,7 @@ pub struct BigDecimal
   protected def strip_zeros(limit : Int32) : Tuple(BigInt, Int32)
     return {@value, 0} if limit <= 0 || !(@value % BigInt.new(10_i64)).zero?
     digits = @value.abs.to_s
-    bytes = digits.to_unsafe
+    bytes = digits
     last = digits.bytesize - 1
     count = 0
     while count < limit && count < last && bytes[last - count] == 48_u8
@@ -2855,24 +2898,28 @@ pub struct BigDecimal
   # Zero is `0` whatever its scale; every other value prints every digit of
   # its scale, so `1.10` stays `1.10`.
   def to_s : String
-    return "0" if @value.zero?
-    v_str = @value.abs.to_s
-    prefix = negative? ? "-" : ""
+    String.build { |writer| to_s(writer) }
+  end
 
-    # The zeros in one string each: a string grown by one per zero copied
-    # it per zero, and `1e50000` took 2.9 s to print where the same value
-    # as a BigInt took 57 ms.
+  def to_s(writer : String::Builder) : Nil
+    if @value.zero?
+      writer << '0'
+      return
+    end
+    writer << '-' if negative?
     if @scale <= 0
-      zeros = "0" * -@scale
-      prefix + v_str + zeros
-    elsif v_str.size <= @scale
-      leading_zeros = "0" * (@scale - v_str.size)
-      prefix + "0." + leading_zeros + v_str
+      @value.abs.to_s(writer)
+      (-@scale).times { writer << '0' }
     else
-      split_pos = v_str.size - @scale
-      int_part = v_str[0, split_pos]
-      frac_part = v_str[split_pos, @scale]
-      prefix + int_part + "." + frac_part
+      digits = @value.abs.to_s
+      if digits.size <= @scale
+        writer << "0."
+        (@scale - digits.size).times { writer << '0' }
+        writer << digits
+      else
+        at = digits.size - @scale
+        writer << digits[0, at] << '.' << digits[at, @scale]
+      end
     end
   end
 
@@ -2968,6 +3015,7 @@ impl Hashable for BigDecimal
   end
 end
 
+@[OnTape]
 pub struct BigRational
   getter numerator : BigInt
   getter denominator : BigInt
@@ -3088,7 +3136,15 @@ pub struct BigRational
   end
 
   def to_s : String
-    @denominator == 1_i64 ? @numerator.to_s : "#{@numerator}/#{@denominator}"
+    String.build { |writer| to_s(writer) }
+  end
+
+  def to_s(writer : String::Builder) : Nil
+    @numerator.to_s(writer)
+    unless @denominator == 1_i64
+      writer << '/'
+      @denominator.to_s(writer)
+    end
   end
 
   def inspect : String
@@ -3199,6 +3255,7 @@ end
 # is no NaN or infinity: dividing by zero, the square root of a negative
 # number, a NaN or an infinite double, a precision under 1 and a string
 # that is no number are refused.
+@[OnTape]
 pub struct BigFloat
   DEFAULT_PRECISION = 128
 
@@ -3225,9 +3282,7 @@ pub struct BigFloat
 
   # The double's exact value, rounded to *precision* bits.
   def self.new(value : Float64, precision : Int32 = DEFAULT_PRECISION) : BigFloat
-    holder = Pointer(Float64).malloc(1_u64)
-    holder.value = value
-    bits = Pointer(UInt64).new(holder.address).value
+    bits = IyiFloatText.bits_of(value)
     exponent_bits = bits.unsafe_shr(52_u64) & 2047_u64
     fraction = bits & 4503599627370495_u64
     raise "BigFloat: #{value} is not a finite number" if exponent_bits == 2047_u64
@@ -3257,7 +3312,7 @@ pub struct BigFloat
   # As `new`, nil for a string that is no number.
   def self.parse?(text : String, precision : Int32 = DEFAULT_PRECISION) : BigFloat?
     check(precision)
-    bytes = text.to_unsafe
+    bytes = text
     size = text.bytesize
     at = 0
     negative = false
@@ -3501,9 +3556,8 @@ pub struct BigFloat
   def to_f64 : Float64
     return 0.0 if @mantissa.zero?
     if top > 1025_i64
-      infinity = Pointer(UInt64).malloc(1_u64)
-      infinity.value = @negative ? 0xFFF0000000000000_u64 : 0x7FF0000000000000_u64
-      return Pointer(Float64).new(infinity.address).value
+      bits = @negative ? 0xFFF0000000000000_u64 : 0x7FF0000000000000_u64
+      return IyiFloatText.from_bits(bits)
     end
     return @negative ? -0.0 : 0.0 if top < -1080_i64
     to_big_r.to_f64
@@ -3561,7 +3615,14 @@ pub struct BigFloat
   # precision, the nearest such when there are two; written as
   # `Float64#to_s` writes a double.
   def to_s : String
-    return "0.0" if zero?
+    String.build { |writer| to_s(writer) }
+  end
+
+  def to_s(writer : String::Builder) : Nil
+    if zero?
+      writer << "0.0"
+      return
+    end
     lead = decimal_lead
     # Enough digits always read back: ceil(precision · log10 2) + 1.
     low = 1
@@ -3579,11 +3640,12 @@ pub struct BigFloat
     text = best[0].to_s
     # Trailing zeros are the place's, not digits: 100 is one digit.
     stop = text.bytesize
-    while stop > 1 && text.to_unsafe[stop - 1] == 48_u8
+    while stop > 1 && text[stop - 1] == 48_u8
       stop = stop - 1
     end
     point = best[1] + text.bytesize.to_i64 - 1_i64
-    (@negative ? "-" : "") + BigFloat.place(text[0, stop], point)
+    writer << '-' if @negative
+    BigFloat.place(writer, text[0, stop], point)
   end
 
   def inspect : String
@@ -3592,19 +3654,29 @@ pub struct BigFloat
 
   # *digits* with its first digit at 10^*point*, as `Float64#to_s` puts
   # a point: positional from 10^-4 to 10^14, an exponent outside.
-  protected def self.place(digits : String, point : Int64) : String
+  protected def self.place(writer : String::Builder, digits : String,
+                           point : Int64) : Nil
     if point >= -4_i64 && point < 15_i64
       if point >= 0_i64
-        whole_size = point.to_i32 + 1
-        if digits.bytesize <= whole_size
-          return digits + "0" * (whole_size - digits.bytesize) + ".0"
+        whole = point.to_i32 + 1
+        if digits.bytesize <= whole
+          writer << digits
+          (whole - digits.bytesize).times { writer << '0' }
+          writer << ".0"
+        else
+          writer << digits[0, whole] << '.'
+          writer << digits[whole, digits.bytesize - whole]
         end
-        return digits[0, whole_size] + "." + digits[whole_size, digits.bytesize - whole_size]
+      else
+        writer << "0."
+        (-1_i64 - point).to_i32.times { writer << '0' }
+        writer << digits
       end
-      return "0." + "0" * (-1_i64 - point).to_i32 + digits
+    else
+      writer << digits[0, 1] << '.'
+      writer << (digits.bytesize > 1 ? digits[1, digits.bytesize - 1] : "0")
+      writer << 'e' << (point < 0_i64 ? '-' : '+') << point.abs
     end
-    fraction = digits.bytesize > 1 ? digits[1, digits.bytesize - 1] : "0"
-    digits[0, 1] + "." + fraction + "e" + (point < 0_i64 ? "-" : "+") + point.abs.to_s
   end
 
   # The power of ten of the leading decimal digit: 10^lead <= |self| <
@@ -3787,7 +3859,7 @@ struct ::Int32
   end
 end
 
-class ::String
+struct ::String
   def to_big_i : Std::Big::BigInt
     Std::Big::BigInt.new(self)
   end

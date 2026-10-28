@@ -1,57 +1,11 @@
-# Standard text processing library for iyi.
+# Byte-indexed String processing on the caller's tape.
 #
-# Answers the two architectural questions:
-#
-# 1. UTF-8 and byte indexing convention:
-#    iyi's `String#size` counts UTF-8 code points (decoded in
-#    `src/iyi/string.iyi`, a byte that begins none counted as one U+FFFD),
-#    while `bytesize` counts raw bytes.
-#    Following the prelude's established convention, all string indexing
-#    (`[]`, `[start, count]`), slice operations, and search offsets
-#    (`index`, `rindex`, `sub`, `gsub`, `split`) are strictly
-#    BYTE-INDEXED.
-#    For example, with `s = "héllo"`, `s.size` is 5, `s.bytesize` is 6,
-#    `s[1]` is byte 195 (0xC3), `s[2]` is byte 169 (0xA9), and `s.index('l')`
-#    returns byte offset 3. This guarantees O(1) indexing and byte-slice
-#    alignment without hidden multi-byte traversals.
-#    Multi-byte UTF-8 awareness is preserved where character boundaries
-#    matter: `Char#to_s` encodes multi-byte Unicode code points into 1 to 4
-#    valid UTF-8 bytes rather than truncating to a single byte; `chars`
-#    and `each_char` decode full Unicode code points so `"héllo".chars.size`
-#    equals `"héllo".size` (5); and `reverse` reverses decoded characters
-#    so `"héllo".reverse` produces `"olléh"` rather than invalid byte sequences.
-#
-# 2. Garbage collector and allocation safety:
-#    Every string constructed in this library allocates through
-#    `String.new(bytesize) { |buffer| ... }`. This routes directly to
-#    `String.memory`, ensuring `IyiHeap.new_object` is called with the
-#    canonical `String` type ID, headed=true, atomic=true, and that the
-#    object header words (byte length and scanned character count) are
-#    properly initialized. No headless buffers, raw pointer arithmetic, or
-#    out-of-band allocations are used.
-#
-# 3. Regular expressions:
-#    `sub` and `gsub` here take exact string and character patterns. A
-#    pattern is `std/regex`'s `Regex`, iyi's own linear-time engine, which
-#    adds `match`, `=~`, `index`, `sub`, `gsub` and `scan` taking a `Regex`
-#    to `String`; import both and each call takes the one its argument names.
-#
-# 4. Scope and omissions from Crystal's string.cr (5,922 lines):
-#    Normalization (NFC, NFD, NFKC, NFKD), case folding, the Unicode
-#    categories and grapheme clusters are `std/unicode`'s, and regex
-#    matching is `std/regex`'s. What neither module nor this one carries:
-#    iconv encoding conversions, C string null-byte guards, and decades of
-#    legacy Ruby compatibility aliases. This library provides the core operations
-#    that real programs reach for: whitespace stripping, splitting, joining,
-#    indexing, substitutions, transformations (tr, squeeze, delete, count,
-#    center), character inspection, and robust conversions with nilable
-#    failure paths.
-#
-# Written against iyi's own prelude, and only that one. Its `index`, `split`
-# and `sub` are byte-indexed by the convention above, which is not Crystal's,
-# and the names it gives `::String` and `::Char` are names Crystal has — so
-# `import std/text` in a `--crystal` program is refused rather than replacing
-# the library's methods under the whole program (SPEC.md III.6).
+# String.size and bytesize count bytes. each_char decodes UTF-8 and chars
+# answers decoded characters; a malformed byte answers U+FFFD. Search
+# offsets and slices count bytes, and a slice views its source bytes.
+# New text is written into String::Builder on the caller's tape. Lookup
+# tables are typed Arrays on that tape; no raw pointer or heap is needed.
+# Unicode normalization is in std/unicode and matching in std/regex.
 
 module std/text
 
@@ -119,6 +73,45 @@ struct ::Char
 end
 
 struct ::String
+  private def point_at(at : Int32, width : Int32) : Int32
+    lead = self[at].to_i32
+    return lead < 128 ? lead : -1 if width == 1
+    point = lead & (0x7F >> width)
+    i = 1
+    while i < width
+      point = (point << 6) | (self[at + i].to_i32 & 0x3F)
+      i += 1
+    end
+    point
+  end
+
+  private def each_point(& : Int32, Int32 -> _) : Nil
+    at = 0
+    while at < bytesize
+      width = point_width(at)
+      yield point_at(at, width), at
+      at += width
+    end
+  end
+
+  private def space_end : Int32
+    each_point do |point, at|
+      return at if point < 0 || !point.unsafe_chr.whitespace?
+    end
+    bytesize
+  end
+
+  private def space_start(first : Int32) : Int32
+    stop = bytesize
+    while stop > first
+      at = char_start(stop)
+      point = point_at(at, stop - at)
+      break if point < 0 || !point.unsafe_chr.whitespace?
+      stop = at
+    end
+    stop
+  end
+
   # The whitespace `blank?`, `lstrip` and `rstrip` look through is the
   # prelude's `Char#whitespace?`, decoded, so `strip` with no argument agrees
   # with these and with the other library: `"\u3000".blank?` was false.
@@ -161,8 +154,8 @@ struct ::String
   end
 
   # The ASCII bytes of *chars*, as a 256-entry mask.
-  private def ascii_mask(chars : String) : Pointer(Bool)
-    mask = Pointer(Bool).malloc(256_u64)
+  private def ascii_mask(chars : String) : Array(Bool)
+    mask = Array(Bool).new(256, false)
     i = 0
     while i < 256
       mask[i] = false
@@ -170,7 +163,7 @@ struct ::String
     end
     i = 0
     while i < chars.bytesize
-      mask[chars.to_unsafe[i].to_i] = true if chars.to_unsafe[i] < 0x80_u8
+      mask[chars[i].to_i] = true if chars[i] < 0x80_u8
       i = i + 1
     end
     mask
@@ -182,8 +175,8 @@ struct ::String
   # begins no character is U+FFFD, as `each_char` reads it and as `delete`
   # looks it up, and so is one in *chars*: neither was ever named, even by a
   # set holding that very byte.
-  private def named_at?(at : Int32, width : Int32, mask : Pointer(Bool), chars : String) : Bool
-    return mask[to_unsafe[at].to_i] if to_unsafe[at] < 0x80_u8
+  private def named_at?(at : Int32, width : Int32, mask : Array(Bool), chars : String) : Bool
+    return mask[self[at].to_i] if self[at] < 0x80_u8
     return chars.chars.includes?('\uFFFD') if width == 1 || (width == 3 && byte_run?(at, "\uFFFD"))
     !chars.index(byte_slice(at, width)).nil?
   end
@@ -193,13 +186,13 @@ struct ::String
   # lead instead read an overlong form, a surrogate or a stray continuation
   # byte as part of the character before it.
   private def point_width(at : Int32) : Int32
-    lead = to_unsafe[at].to_i32
+    lead = self[at].to_i32
     width = lead < 0xC2 || lead > 0xF4 ? 1 : lead < 0xE0 ? 2 : lead < 0xF0 ? 3 : 4
     return 1 if width == 1 || at + width > bytesize
     point = lead & (0x7F >> width)
     k = 1
     while k < width
-      byte = to_unsafe[at + k].to_i32
+      byte = self[at + k].to_i32
       return 1 unless (byte & 0xC0) == 0x80
       point = (point << 6) | (byte & 0x3F)
       k = k + 1
@@ -213,7 +206,7 @@ struct ::String
   # alone.
   private def char_start(stop : Int32) : Int32
     start = stop - 1
-    while start > 0 && stop - start < 4 && (to_unsafe[start] & 0xC0_u8) == 0x80_u8
+    while start > 0 && stop - start < 4 && (self[start] & 0xC0_u8) == 0x80_u8
       start = start - 1
     end
     point_width(start) == stop - start ? start : stop - 1
@@ -240,7 +233,7 @@ struct ::String
   private def byte_run?(at : Int32, text : String) : Bool
     return false if at < 0 || at + text.bytesize > bytesize
     matched = 0
-    while matched < text.bytesize && to_unsafe[at + matched] == text.to_unsafe[matched]
+    while matched < text.bytesize && self[at + matched] == text[matched]
       matched = matched + 1
     end
     matched == text.bytesize
@@ -278,7 +271,7 @@ struct ::String
 
   def chop : String
     return "" if empty?
-    if bytesize >= 2 && to_unsafe[bytesize - 2] == 13_u8 && to_unsafe[bytesize - 1] == 10_u8
+    if bytesize >= 2 && self[bytesize - 2] == 13_u8 && self[bytesize - 1] == 10_u8
       return byte_slice(0, bytesize - 2)
     end
     # The last character, not the last byte: `"hé".chop` cut `é` in half
@@ -342,14 +335,14 @@ struct ::String
     token_start = 0
     i = 0
     while i < bytesize
-      b = to_unsafe[i].unsafe_chr
+      b = self[i].unsafe_chr
       if b.ascii_whitespace?
         if in_token
           pieces << byte_slice(token_start, i - token_start)
           in_token = false
           if limit > 1 && pieces.size == limit - 1
             j = i + 1
-            while j < bytesize && to_unsafe[j].unsafe_chr.ascii_whitespace?
+            while j < bytesize && self[j].unsafe_chr.ascii_whitespace?
               j = j + 1
             end
             if j < bytesize
@@ -392,8 +385,8 @@ struct ::String
     max_start = bytesize - s_len
     i = offset > max_start ? max_start : offset
 
-    s_ptr = to_unsafe
-    t_ptr = search.to_unsafe
+    s_ptr = self
+    t_ptr = search
 
     # Backwards, the way `byte_index` goes forwards: naive while that is
     # cheap, a rolling hash once more than four bytes a position have been
@@ -491,11 +484,11 @@ struct ::String
       return String.build(bytesize + 16) do |io|
         start = 0
         each_point do |_, at|
-          io.write(to_unsafe + start, at - start)
+          io.append(self[start, at - start])
           io << yield search
           start = at
         end
-        io.write(to_unsafe + start, bytesize - start)
+        io.append(self[start, bytesize - start])
         io << yield search
       end
     end
@@ -506,11 +499,11 @@ struct ::String
     s_len = search.bytesize
     String.build(bytesize) do |io|
       while (idx = index(search, start))
-        io.write(to_unsafe + start, idx - start)
+        io.append(self[start, idx - start])
         io << yield search
         start = idx + s_len
       end
-      io.write(to_unsafe + start, bytesize - start)
+      io.append(self[start, bytesize - start])
     end
   end
 
@@ -523,11 +516,11 @@ struct ::String
     s_len = text.bytesize
     String.build(bytesize) do |io|
       while (idx = index(text, start))
-        io.write(to_unsafe + start, idx - start)
+        io.append(self[start, idx - start])
         io << yield search
         start = idx + s_len
       end
-      io.write(to_unsafe + start, bytesize - start)
+      io.append(self[start, bytesize - start])
     end
   end
 
@@ -554,7 +547,7 @@ struct ::String
   # byte it becomes. The first time a source names a byte is the one that
   # counts, as `index` found it before.
   private def tr_bytes(sources : Array(Char), targets : Array(Char)) : String
-    table = Pointer(Int32).malloc(256_u64)
+    table = Array(Int32).new(256, -1)
     i = 0
     while i < 256
       table[i] = -1
@@ -571,7 +564,7 @@ struct ::String
                               end
       i = i - 1
     end
-    source = to_unsafe
+    source = self
     if targets.empty?
       return String.build(bytesize) do |io|
         at = 0
@@ -582,12 +575,12 @@ struct ::String
         end
       end
     end
-    String.new(bytesize) do |buffer|
+    String.build(bytesize) do |buffer|
       at = 0
       while at < bytesize
         byte = source[at]
         mapped = table[byte.to_i32]
-        buffer[at] = mapped < 0 ? byte : mapped.to_u8
+        buffer.push(mapped < 0 ? byte : mapped.to_u8)
         at = at + 1
       end
     end
@@ -817,7 +810,7 @@ struct ::String
     arr = [] of UInt8
     i = 0
     while i < bytesize
-      arr << to_unsafe[i]
+      arr << self[i]
       i = i + 1
     end
     arr
@@ -830,8 +823,8 @@ struct ::String
     stop = space_start(index)
     return nil if index == stop
 
-    negative = to_unsafe[index] == 45_u8
-    if negative || to_unsafe[index] == 43_u8
+    negative = self[index] == 45_u8
+    if negative || self[index] == 43_u8
       return nil if index + 1 == stop
       index = index + 1
     end
@@ -848,7 +841,7 @@ struct ::String
 
     value = 0
     while index < stop
-      b = to_unsafe[index]
+      b = self[index]
       digit = -1
       if b >= 48_u8 && b <= 57_u8
         digit = (b - 48_u8).to_i
@@ -889,12 +882,12 @@ struct ::String
     raise "base #{base} out of range (2..36)" if base < 2 || base > 36
     index = space_end
     stop = space_start(index)
-    index = index + 1 if index < stop && to_unsafe[index] == 43_u8
+    index = index + 1 if index < stop && self[index] == 43_u8
     return nil if index == stop
     radix = base.to_u64
     value = 0_u64
     while index < stop
-      b = to_unsafe[index]
+      b = self[index]
       digit = if b >= 48_u8 && b <= 57_u8
                 (b - 48_u8).to_u64
               elsif b >= 97_u8 && b <= 122_u8
@@ -929,7 +922,7 @@ struct ::String
 
 
   def to_f? : Float64?
-    bytes = to_unsafe
+    bytes = self
     first = space_end
     stop = space_start(first)
     at = first
@@ -988,7 +981,7 @@ struct ::String
     return false if at + word.bytesize > stop
     i = 0
     while i < word.bytesize
-      return false unless (to_unsafe[at + i] | 0x20_u8) == word.to_unsafe[i]
+      return false unless (self[at + i] | 0x20_u8) == word[i]
       i = i + 1
     end
     true
@@ -996,10 +989,10 @@ struct ::String
 
   # A `(...)` of letters, digits and `_` running to *stop*.
   private def nan_payload?(at : Int32, stop : Int32) : Bool
-    return false unless stop - at >= 2 && to_unsafe[at] == 40_u8 && to_unsafe[stop - 1] == 41_u8
+    return false unless stop - at >= 2 && self[at] == 40_u8 && self[stop - 1] == 41_u8
     i = at + 1
     while i < stop - 1
-      b = to_unsafe[i]
+      b = self[i]
       letter = (b | 0x20_u8) >= 97_u8 && (b | 0x20_u8) <= 122_u8
       return false unless letter || (b >= 48_u8 && b <= 57_u8) || b == 95_u8
       i = i + 1

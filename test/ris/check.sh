@@ -275,7 +275,22 @@ if [[ "$out" == *FAILED* ]]; then status=1; fi
 printf '%s\n' "$out"
 
 expect slice_pool_links 'realloc_slice refuses self-relative links'
-expect growing_array 'use SlicePool(T)'
+# Nested arrays are pooled handles, including hash values.
+for name in nested_containers long_lived_containers static_array_copy \
+    big_tape mime path std_text_tape; do
+  out=$(RIS_HEAP_STATS=1 "$RIS" run "test/ris/$name.ri" 2>&1)
+  if [ "$?" -eq 0 ] && grep -qF 'PASS:' <<<"$out" &&
+      grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+    echo "runs     $name (zero heap)"
+  else
+    echo "FAILED   $name: $out"; status=1
+  fi
+done
+for name in nested_run_view nested_run_helper_view program_run_view \
+    hash_run_view nested_run_field_view; do
+  expect "$name" 'cannot grow a pool run with a live view'
+done
+expect nested_run_overwrite 'cannot shrink tape storage with a live view'
 expect growing_tree 'use SlicePool(T)'
 expect growing_field 'use SlicePool(T)'
 expect growing_owner 'cannot store an owner in a container'
@@ -1303,10 +1318,17 @@ else
   status=1
 fi
 
-for name in program_alias program_helper program_local_init \
-    program_nested_alias program_loop_alias; do
-  expect "$name" 'copy it with .copy_to(Program.tape)'
+for name in program_alias program_helper program_nested_alias \
+    program_loop_alias; do
+  out=$(RIS_HEAP_STATS=1 "$RIS" run "test/ris/$name.ri" 2>&1)
+  if [ "$?" -eq 0 ] &&
+      grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+    echo "runs     $name (owned container store)"
+  else
+    echo "FAILED   $name: $out"; status=1
+  fi
 done
+expect program_local_init 'copy it with .copy_to(Program.tape)'
 expect program_copy_forged 'program initializer is private'
 # Without a collector there is no IyiThread yet (thread.iyi is gated on
 # the collector); these return when kernel threads do (TODO.md).

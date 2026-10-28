@@ -1,0 +1,37 @@
+module test/ris/big_tape
+
+import std/big::{BigInt, BigDecimal, BigRational, BigFloat}
+
+a = BigInt.new("12345678901234567890")
+b = BigInt.new("987654321")
+raise "big addition" unless (a + b).to_s == "12345678902222222211"
+raise "big product" unless (a * b).to_s == "12193263112482853211126352690"
+q, r = a.divmod(b)
+raise "big division" unless q * b + r == a
+raise "big shift" unless ((a << 37) >> 37) == a
+raise "big hex" unless BigInt.new("ff", 16).to_s(16) == "ff"
+raise "big decimal" unless (BigDecimal.new("1.25") *
+  BigDecimal.new("2")).to_s == "2.50"
+raise "big rational" unless BigRational.new("3/4").to_s == "3/4"
+raise "big float" unless BigFloat.new(1.5).to_f64 == 1.5
+x = BigInt.new("f" * 600, 16)
+y = BigInt.new("f" * 640, 16)
+raise "balanced Karatsuba" unless x * y ==
+  (BigInt.one << 4960) - (BigInt.one << 2560) -
+  (BigInt.one << 2400) + BigInt.one
+y = BigInt.new("f" * 2400, 16)
+raise "unbalanced Karatsuba" unless x * y ==
+  (BigInt.one << 12000) - (BigInt.one << 9600) -
+  (BigInt.one << 2400) + BigInt.one
+raise "Montgomery power" unless BigInt.new(2).pow_mod(
+  BigInt.new(10), BigInt.new(17)) == BigInt.new(4)
+raise "secret power" unless BigInt.new(2).pow_mod_secret(
+  BigInt.new(10), BigInt.new(17)) == BigInt.new(4)
+raise "secret inverse" unless BigInt.new(3).inverse_mod_secret(
+  BigInt.new(17)) == BigInt.new(6)
+text = String.build do |writer|
+  writer << BigInt.new(42) << ',' << BigDecimal.new("1.50") << ','
+  writer << BigRational.new("3/4") << ',' << BigFloat.new(1.5)
+end
+raise "big builder output" unless text == "42,1.50,3/4,1.5"
+puts "PASS: big on tape"

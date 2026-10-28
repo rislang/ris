@@ -4029,7 +4029,7 @@ pub struct Unicode
 end
 
 # The other library's names for the same questions, on the string.
-class ::String
+struct ::String
   def graphemes : Array(String)
     Std::Unicode::Unicode.graphemes(self)
   end

@@ -1,0 +1,17 @@
+module test/ris/refused/nested_run_field_view
+
+@[OnTape]
+struct Holder
+  getter row : Array(Int32)
+  def initialize(@row : Array(Int32))
+  end
+  def append
+    @row << 3
+  end
+end
+
+outer = [[1, 2], [3]]
+holder = Holder.new(outer[0])
+view = holder.row[0, 1]
+holder.append
+puts view[0]

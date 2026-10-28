@@ -1,0 +1,50 @@
+module test/ris/long_lived_containers
+
+CACHE = Array(String).new
+ROWS = Array(Array(Int32)).new
+TABLE = Hash(String, Array(String)).new
+
+def store
+  local_tape do
+    CACHE << "request-" + 7.to_s
+    ROWS << [1, 2]
+    TABLE["key-" + 1.to_s] = ["value-" + 2.to_s]
+  end
+end
+
+store
+raise "retained text lost" unless CACHE[0] == "request-7"
+raise "retained row lost" unless ROWS[0][1] == 2
+raise "retained hash lost" unless TABLE["key-1"][0] == "value-2"
+1000.times do |i|
+  local_tape do
+    CACHE[0] = "replacement-" + i.to_s
+    ROWS[0] = [i]
+    TABLE["key-1"] = [i.to_s]
+    raise "replacement lost" unless ROWS[0][0] == i
+  end
+end
+raise "retained replacement lost" unless CACHE[0] == "replacement-999"
+raise "payload runs leaked" unless ROWS.__pool_usage[0] <= 4
+raise "handle slots leaked" unless ROWS.__pool_usage[1] <= 2
+raise "text runs leaked" unless CACHE.__pool_usage[0] <= 64
+removed = TABLE.delete("key-1")
+raise "removed value lost" unless removed && removed[0] == "999"
+CACHE.clear
+ROWS.clear
+TABLE.clear
+
+class Registry
+  getter texts : Array(String)
+  def initialize
+    @texts = Array(String).new
+  end
+end
+
+REGISTRY = Registry.new
+local_tape do
+  REGISTRY.texts << "field-" + 3.to_s
+end
+raise "program field lost" unless REGISTRY.texts[0] == "field-3"
+REGISTRY.texts.clear
+puts "PASS: long-lived containers"

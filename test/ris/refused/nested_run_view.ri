@@ -1,0 +1,7 @@
+module test/ris/refused/nested_run_view
+
+outer = [[1, 2], [3]]
+inner = outer[0]
+view = inner[0, 1]
+inner << 4
+puts view[0]

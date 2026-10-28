@@ -1,0 +1,13 @@
+module test/ris/std_text_tape
+
+import std/text
+
+raise "Unicode whitespace" unless "\u3000\t".blank?
+raise "integer whitespace" unless "\u3000-42\u3000".to_i == -42
+raise "character strip" unless "ééhelloé".lstrip('é') == "helloé"
+raise "set strip" unless "éhelloé".rstrip("é") == "éhello"
+raise "translation" unless "aabc".tr("ab", "XY") == "XXYc"
+raise "squeeze" unless "ééaa".squeeze == "éa"
+raise "block substitution" unless "abc".gsub("b") { |s| s.upcase } == "aBc"
+raise "floating whitespace" unless "\u3000-1.5\u3000".to_f? == -1.5
+puts "PASS: text on tape"

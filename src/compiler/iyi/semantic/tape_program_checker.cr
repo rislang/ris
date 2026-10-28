@@ -291,6 +291,16 @@ class Iyi::TapeProgramChecker
           node.args.each_with_index do |arg, i|
             copies_bytes = target.owner.to_s == "String::Builder" ||
                            (target.owner.to_s == "Array(UInt8)" && node.name == "append")
+            if target.owner.is_a?(GenericClassInstanceType) &&
+               target.owner.as(GenericClassInstanceType).generic_type.name == "Array"
+              copies_bytes ||= target.owner.to_s == "Array(String)" ||
+                               target.owner.to_s.starts_with?("Array(Array(")
+            end
+            if target.owner.is_a?(GenericClassInstanceType) &&
+               target.owner.as(GenericClassInstanceType).generic_type.name == "Hash"
+              copies_bytes ||= arg.type.to_s == "String" ||
+                               arg.type.to_s.starts_with?("Array(")
+            end
             refuse(arg) if tape?(arg) && !args[i].program? && !copies_bytes
           end
           mutation(node)

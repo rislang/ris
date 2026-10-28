@@ -25,58 +25,9 @@ module std/mime
 import std/static_array::{StaticArray}
 
 pub struct MIME
-  def self.from_extension?(name : String) : String?
-    result = nil.as(String?)
-    tape do
-      if found = from_extension?(name.as_tape)
-        result = found.to_heap
-      end
-    end
-    result
-  end
-
-  def self.from_extension(name : String,
-                          default : String = "application/octet-stream") : String
-    from_extension?(name) || default
-  end
-
-  def self.extensions(media_type : String) : Array(String)
-    result = [] of String
-    tape do
-      result = extensions(media_type.as_tape).to_heap
-    end
-    result
-  end
-
-  def self.compressible?(media_type : String) : Bool
-    result = false
-    tape do
-      result = compressible?(media_type.as_tape)
-    end
-    result
-  end
-
-  def self.with_charset(media_type : String) : String
-    result = ""
-    tape do
-      result = with_charset(media_type.as_tape).to_heap
-    end
-    result
-  end
-
   def self.with_charset(media_type : String,
                         writer : String::Builder) : Nil
     writer << with_charset(media_type)
-  end
-
-  def self.parse?(value : String) : {String, Hash(String, String)}?
-    result = nil.as({String, Hash(String, String)}?)
-    tape do
-      if parsed = parse?(value.as_tape)
-        result = parsed.to_heap
-      end
-    end
-    result
   end
 
   private def self.downcase(text : String) : String
@@ -301,7 +252,7 @@ pub struct MIME
   # values as written; a name given twice keeps its last value. Nil when
   # any part is not a token, a parameter has no `=`, or a quote is left
   # open.
-  def self.parse?(value : String) : TapeMediaType?
+  def self.parse?(value : String) : RisMediaType?
     bytes = value
     size = value.bytesize
     pos = skip_ows(bytes, 0, size)
@@ -313,7 +264,7 @@ pub struct MIME
     pos = skip_token(bytes, pos, size)
     return nil if pos == sub_start
     essence = lower(slice(value, type_start, pos - type_start))
-    params = TapeParameters.new
+    params = RisParameters.new
     loop do
       pos = skip_ows(bytes, pos, size)
       break if pos >= size
@@ -338,7 +289,7 @@ pub struct MIME
         params[name] = slice(value, value_start, pos - value_start)
       end
     end
-    TapeMediaType.new(essence, params)
+    RisMediaType.new(essence, params)
   end
 
   # The type and subtype lowercased, or nil when the value does not parse.
@@ -423,7 +374,7 @@ pub struct MIME
 end
 
 @[OnTape]
-pub struct TapeParameter
+pub struct RisParameter
   getter key : String
   getter value : String
 
@@ -432,32 +383,32 @@ pub struct TapeParameter
 end
 
 @[OnTape]
-pub struct TapeParameters
-  @entries : Array(TapeParameter)
+pub struct RisParameters
+  @entries : Array(RisParameter)
 
   def initialize
-    @entries = Array(TapeParameter).new
+    @entries = Array(RisParameter).new
   end
 
-  def []?(key : String | String) : String?
+  def []?(key : String) : String?
     @entries.each do |field|
       return field.value if field.key == key
     end
     nil
   end
 
-  def [](key : String | String) : String
+  def [](key : String) : String
     self[key]? || raise "MIME: missing key"
   end
 
   def []=(key : String, value : String) : Nil
     @entries.each_with_index do |field, i|
       if field.key == key
-        @entries[i] = TapeParameter.new(key, value)
+        @entries[i] = RisParameter.new(key, value)
         return
       end
     end
-    @entries << TapeParameter.new(key, value)
+    @entries << RisParameter.new(key, value)
   end
 
   def size : Int32
@@ -468,7 +419,7 @@ pub struct TapeParameters
     @entries.empty?
   end
 
-  def has_key?(key : String | String) : Bool
+  def has_key?(key : String) : Bool
     !self[key]?.nil?
   end
 
@@ -476,22 +427,16 @@ pub struct TapeParameters
     @entries.each { |field| yield field.key, field.value }
   end
 
-  def to_heap : Hash(String, String)
-    result = Hash(String, String).new
-    each { |key, value| result[key.to_heap] = value.to_heap }
-    result
-  end
+
 end
 
 @[OnTape]
-pub struct TapeMediaType
+pub struct RisMediaType
   getter essence : String
-  getter params : TapeParameters
+  getter params : RisParameters
 
-  def initialize(@essence : String, @params : TapeParameters)
+  def initialize(@essence : String, @params : RisParameters)
   end
 
-  def to_heap : {String, Hash(String, String)}
-    {@essence.to_heap, @params.to_heap}
-  end
+
 end

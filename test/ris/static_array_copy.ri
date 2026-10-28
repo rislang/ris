@@ -1,0 +1,28 @@
+module test/ris/static_array_copy
+
+import std/static_array
+
+saved = StaticArray(String, 3).new("unused")
+local_tape do
+  source = StaticArray(String, 3).new do |i|
+    "slot-" + i.to_s
+  end
+  saved = source.copy_to(Program.tape)
+end
+3.times do |i|
+  raise "static copy lost" unless saved[i] == "slot-" + i.to_s
+end
+group do |g|
+  task = g.spawn do
+    StaticArray(String, 3).new { |i| "task-" + i.to_s }
+  end
+  result = task.value
+  if result.is_a?(StaticArray(String, 3))
+    3.times do |i|
+      raise "static task copy lost" unless result[i] == "task-" + i.to_s
+    end
+  else
+    raise "static task failed"
+  end
+end
+puts "PASS: StaticArray deep copy"

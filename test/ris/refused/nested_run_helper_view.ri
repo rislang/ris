@@ -1,0 +1,11 @@
+module test/ris/refused/nested_run_helper_view
+
+def append(row : Array(Int32))
+  row << 4
+end
+
+outer = [[1, 2], [3]]
+inner = outer[0]
+view = inner[0, 1]
+append(inner)
+puts view[0]
