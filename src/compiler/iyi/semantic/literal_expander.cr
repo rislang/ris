@@ -254,8 +254,8 @@ module Iyi
     #
     # Equivalent to a hash-like literal using `::Hash`.
     def expand(node : HashLiteral)
-      # ris: a program's hash literal is a tape Map (src/iyi/map.iyi).
-      return expand_named(node, Path.global("Map")) if ris_program_literal?(node)
+      # ris: a program's hash literal is a tape Hsh (src/iyi/hsh.iyi).
+      return expand_named(node, Path.global("Hsh")) if ris_program_literal?(node)
       expand_named(node, Path.global("Hash"))
     end
 
@@ -301,7 +301,7 @@ module Iyi
       if of = node.of
         # `generic_type` is nil here
         type_vars = [of.key, of.value] of ASTNode
-        generic = Generic.new(Path.global(ris_program_literal?(node) ? "Map" : "Hash"), type_vars).at(node)
+        generic = Generic.new(Path.global(ris_program_literal?(node) ? "Hsh" : "Hash"), type_vars).at(node)
       elsif generic_type
         # `node.entries` is non-empty here
         typeof_key = TypeOf.new(node.entries.map_with_index { |x, i| (key_temp_vars.try(&.[i]) || x.key).clone.as(ASTNode) }).at(node)

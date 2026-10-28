@@ -2724,6 +2724,16 @@ module Iyi
       false
     end
 
+    # ris: without a collector a std class instance is on the current tape
+    # too (unchecked: std keeps its migration lifetimes until it moves to
+    # @[OnTape]); the runtime's own classes keep their allocation.
+    private def ris_std_class?(type) : Bool
+      return false unless @program.has_flag?("ris_no_gc")
+      base = type.is_a?(GenericClassInstanceType) ? type.generic_type : type
+      return false unless base.is_a?(ClassType) && !base.struct?
+      !!base.locations.try(&.first?).try { |loc| TapeRules.std?(loc) }
+    end
+
     def allocate_aggregate(type, program_owned = false)
       struct_type = llvm_struct_type(type)
       cleared = false
@@ -2741,7 +2751,7 @@ module Iyi
             [struct_type.size, builder.zext(type_id(type), llvm_context.int64)]
           type_ptr = pointer_cast memory, struct_type.pointer
           cleared = true
-        elsif TapeChecker.class_instance?(@program, type) && @program.tape_platform?
+        elsif @program.tape_platform? && (TapeChecker.class_instance?(@program, type) || ris_std_class?(type))
           object_fun = fetch_typed_fun(@main_mod, "__ris_tape_object") do
             LLVM::Type.function([@main_llvm_context.int64, @main_llvm_context.int64],
               @main_llvm_context.void_pointer)

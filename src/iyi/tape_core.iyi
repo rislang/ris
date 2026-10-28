@@ -298,32 +298,32 @@ struct Ary(T)
     result
   end
 
-  def tally : Map(T, Int32)
-    counts = Map(T, Int32).new
+  def tally : Hsh(T, Int32)
+    counts = Hsh(T, Int32).new
     each { |v| counts[v] = counts.fetch(v, 0) + 1 }
     counts
   end
 end
 
-struct Map(K, V)
+struct Hsh(K, V)
   def map(& : K, V -> U) : Ary(U) forall U
     result = Ary(U).new(size < 4 ? 4 : size)
     each { |k, v| result << (yield k, v) }
     result
   end
 
-  def select(& : K, V -> Bool) : Map(K, V)
-    result = Map(K, V).new(size)
+  def select(& : K, V -> Bool) : Hsh(K, V)
+    result = Hsh(K, V).new(size)
     each { |k, v| result[k] = v if yield k, v }
     result
   end
 
-  def reject(& : K, V -> Bool) : Map(K, V)
+  def reject(& : K, V -> Bool) : Hsh(K, V)
     self.select { |k, v| !(yield k, v) }
   end
 
-  def transform_values(& : V -> U) : Map(K, U) forall U
-    result = Map(K, U).new(size)
+  def transform_values(& : V -> U) : Hsh(K, U) forall U
+    result = Hsh(K, U).new(size)
     each { |k, v| result[k] = yield v }
     result
   end
@@ -372,7 +372,7 @@ struct Str::Builder
     push(93_u8)
   end
 
-  def append_value(value : Map) : Nil
+  def append_value(value : Hsh) : Nil
     push(123_u8)
     first = true
     value.each do |key, item|

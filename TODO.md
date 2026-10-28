@@ -23,7 +23,7 @@ How to work (fewer tokens, faster to the goal):
 
 Codex Sol low tokens; review adds 10-30%. Done 2026-10-28: no GC is the
 only mode; program literals, to_s, prints, closures and task values are
-on the tape, with the core Str/Ary/Map API. Before testing ris programs:
+on the tape, with the core Str/Ary/Hsh API. Before testing ris programs:
 the std row. Update a row when its work starts or ends.
 
 | Work                                  | Size     | Time      | Tokens    |
@@ -98,7 +98,7 @@ part B.
   before the task reads freed captures. Allocate it at the group's or
   the def's scope, or refuse the spawn there. std keeps its marks.
 * A task's tape value is copied into a group result region and onto the
-  reader's tape for Str, Ary, Map, Tre and tuples of them; @[OnTape]
+  reader's tape for Str, Ary, Hsh, Tre and tuples of them; @[OnTape]
   structs and nested containers are still refused.
 * Error#message answers String, which a program cannot build without a
   heap: let it answer Str (or write into a builder) across std.

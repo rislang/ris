@@ -27,10 +27,13 @@ heap_trap() {
       grep -qE '  at .*:[0-9]+:[0-9]+' <<<"$out"; then
     echo "traps    $name (heap migration, source site)"
   elif [ "$code" -ne 0 ] && grep -qF 'Error:' <<<"$out" &&
-      grep -qE 'Str|Ary|Map|tape' <<<"$out"; then
+      grep -qE 'Str|Ary|Hsh|tape' <<<"$out"; then
     # A program's literals and to_s are tape values now: the heap path is
     # refused at compile time, before it can trap.
     echo "refused  $name (heap migration, at compile time)"
+  elif [ "$code" -eq 0 ] && grep -qF 'PASS' <<<"$out"; then
+    # A program's Array, Hash and text are tape types now: no heap left.
+    echo "runs     $name (heap migration now on the tape)"
   else
     echo "FAILED   $name: expected heap trap with source site: $out"
     status=1
@@ -156,7 +159,7 @@ fi
 # A task answers tape values; the reader gets its own copy. Zero heap.
 out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/task_tape_result.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = $'<42>\n60\n5\nslow\n<ok>\nris heap: 0 allocations, 0 bytes' ]; then
-  echo "runs     task_tape_result (Str, Ary, Map and tuple values, zero heap)"
+  echo "runs     task_tape_result (Str, Ary, Hsh and tuple values, zero heap)"
 else
   echo "FAILED   task_tape_result: $out"; status=1
 fi
@@ -166,7 +169,7 @@ out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/core_api.ri 2>&1)
 if [ "$?" -eq 0 ] && grep -qxF 'HELLO, WORLD' <<<"$out" &&
     grep -qxF '00042' <<<"$out" && grep -qxF '78' <<<"$out" &&
     grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
-  echo "runs     core_api (Str, Ary and Map surface, zero heap)"
+  echo "runs     core_api (Str, Ary and Hsh surface, zero heap)"
 else
   echo "FAILED   core_api: $out"; status=1
 fi

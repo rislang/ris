@@ -1,4 +1,4 @@
 module test/ris/heap_handles
 
 # The runtime owns fibers; a user's heap array of handles is still a value.
-Array(IyiFiber).new
+::Array(IyiFiber).new

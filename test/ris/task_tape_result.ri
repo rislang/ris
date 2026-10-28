@@ -1,6 +1,6 @@
 module test/ris/task_tape_result
 
-# A task answers tape values (Str, Ary, Map, tuples); a def's closures
+# A task answers tape values (Str, Ary, Hsh, tuples); a def's closures
 # and a struct holding a String survive the copy. Zero heap.
 record Pair, a : Int32, b : Int32
 group do |g|
@@ -14,7 +14,7 @@ group do |g|
   arr = u.value
   puts arr.sum if arr.is_a?(Ary(Int32))
   m = v.value
-  puts m["k"] if m.is_a?(Map(Str, Int32))
+  puts m["k"] if m.is_a?(Hsh(Str, Int32))
   tup = w.value
   puts tup[0] if tup.is_a?(Tuple(Str, Str))
   puts n.value

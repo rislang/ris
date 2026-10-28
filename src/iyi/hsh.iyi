@@ -5,16 +5,16 @@
 # indices, so the map holds no pointer of its own. Everything lives on
 # the tape that is current at `new`, and goes when that tape's scope ends.
 #
-# A program's `{k => v}` and `{} of K => V` are a Map (the compiler's
+# A program's `{k => v}` and `{} of K => V` are a Hsh (the compiler's
 # literal expander); std and the runtime keep Hash until they migrate.
 @[OnTape]
-struct Map(K, V)
+struct Hsh(K, V)
   @keys : Ary(K)
   @values : Ary(V)
   @live : Ary(Bool)
   @bins : Ary(Int32)
   # [0] is the live count. Every column is an Ary, shared by copies of the
-  # struct, so a Map passed to a method is the same map.
+  # struct, so a Hsh passed to a method is the same map.
   @head : Ary(Int32)
 
   def initialize(capacity : Int32 = 8)
@@ -22,7 +22,7 @@ struct Map(K, V)
     @keys = Ary(K).new(capacity)
     @values = Ary(V).new(capacity)
     @live = Ary(Bool).new(capacity)
-    @bins = Ary(Int32).new(Map.bin_count(capacity), -1)
+    @bins = Ary(Int32).new(Hsh.bin_count(capacity), -1)
     @head = Ary(Int32).new(1, 0)
   end
 
@@ -62,7 +62,7 @@ struct Map(K, V)
 
   def [](key : K) : V
     index = find(key)
-    raise "Map: missing key #{key}" if index < 0
+    raise "Hsh: missing key #{key}" if index < 0
     @values[index]
   end
 

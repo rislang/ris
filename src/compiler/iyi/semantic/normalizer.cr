@@ -597,6 +597,9 @@ module Iyi
       @bound_scope = @macro_code == 0 && !@macro_expansion ? node.body : nil
       @bound_params = params
       node = super
+      # The signature's names too: `def f(x : Hash(K, V)) : Array(T)`.
+      node.return_type = node.return_type.try &.transform(self)
+      node.args.each { |arg| arg.restriction = arg.restriction.try &.transform(self) }
       @bound_scope, @bound_params = outer_scope, outer_params
       @current_def = nil
 
@@ -1163,6 +1166,19 @@ module Iyi
       call = Call.new(Path.global(["Str"]), "view", [node] of ASTNode).at(node)
       call.tape_literal = true
       call
+    end
+
+    # ris: in a program, `Hash` and `Array` name the tape Hsh and Ary, so
+    # Ruby's names work and stay off the heap; std keeps the heap types.
+    def transform(node : Path)
+      if @macro_code == 0 && node.names.size == 1 && !node.global? &&
+         ris_program_code?(node)
+        case node.names.first
+        when "Hash"  then return Path.global("Hsh").at(node)
+        when "Array" then return Path.global("Ary").at(node)
+        end
+      end
+      node
     end
 
     def transform(node : StringInterpolation)

@@ -26,8 +26,8 @@ end
 
 kept = Kept.new(42)
 text = "value #{kept.value}".to_heap
-array = Array(Int32).new(2)
-hash = Hash(Int32, Int32).new
+array = ::Array(Int32).new(2)
+hash = ::Hash(Int32, Int32).new
 set = Set(Int32).new
 captured = 3
 proc = -> { captured + 1 }
