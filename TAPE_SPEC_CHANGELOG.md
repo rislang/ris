@@ -12,6 +12,7 @@ one.
   String's `<<` rebinds, nested containers hold pool runs behind handles,
   long-lived containers own a SlicePool so delete frees, and other stores
   that would outlive their tape are compile errors naming copy_to.
+  1.6 and 5.4 are rewrapped after the rename.
 * Why: the user's decision. Goose has no heap at any layer (§1.2), and a
   Ruby programmer should write Ruby without learning a second set of
   types; implicit copies happen only where they are bounded and freed.

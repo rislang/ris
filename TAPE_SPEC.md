@@ -31,8 +31,8 @@ rule goes last in its section; a removed one leaves its number unused.
   nested tape blocks share it. A pending result's region is outside callee
   scratch and its rollback (Goose §10.3). local_tape owns separate scratch;
   nothing rooted there escapes or mutates outer tape containers.
-* 1.6 .ri text literals are static String; interpolation builds String on the active
-  tape. Read-only text parameters borrow String, without a String copy.
+* 1.6 Text literals are static String views; interpolation builds a
+  String on the active tape. Text parameters borrow, never copy.
 * 1.7 Build retained data on its destination (writers, in-place append), else
   copy_to(owner) deep-copies String bytes, Array/Tre/@[OnTape] fields and class
   instances, splitting all sharing and extending no borrows. It keeps concrete
@@ -127,9 +127,10 @@ rule goes last in its section; a removed one leaves its number unused.
   use independent per-task config/state, or one task owns state and serves
   copied board messages; no shared mutable autocert manager or IdleConns.
   Thread-locals hold no fiber borrows.
-* 5.4 APIs expose String, builders, Array and tape structs, not raw pointers. FFI
-  borrows have explicit lifetimes; retained foreign storage has an owner and
-  cleanup. Never unwind across foreign frames; foreign threads attach first.
+* 5.4 APIs expose String, builders, Array and tape structs, not raw
+  pointers. FFI borrows have explicit lifetimes; retained foreign storage
+  has an owner and cleanup. Never unwind across foreign frames; foreign
+  threads attach first.
   Safety exceptions are marks with reasons, never a global switch.
 * 5.6 ris uses grouped iyi fibers (5.1), not detached Goose threads; a
   waiting take parks its fiber. At one consume commit, cancellation wins,
