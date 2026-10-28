@@ -61,12 +61,12 @@ class Iyi::TapeEscapeChecker
     if node.name == "to_s" && node.args.empty? && !node.block &&
        tape_string?(receiver.try(&.type?))
       return "`to_s` of a Str outside a @[TapeToHeap] def copies " \
-             "the text to the GC heap.\n\n#{WHY}"
+             "the text to the heap.\n\n#{WHY}"
     end
     if heap_buffer?(receiver.try(&.type?)) &&
        node.args.any? { |arg| tape_string?(arg.type?) }
       return "Writing a Str into a #{receiver.not_nil!.type} " \
-             "outside a @[TapeToHeap] def copies the text to the GC heap." \
+             "outside a @[TapeToHeap] def copies the text to the heap." \
              "\n\n#{WHY}"
     end
     # `"#{text}"`, expanded to `String.interpolation(...)`.
@@ -74,7 +74,7 @@ class Iyi::TapeEscapeChecker
        receiver.try(&.type?).try(&.metaclass?) &&
        node.args.any? { |arg| tape_string?(arg.type?) }
       return "Interpolating a Str outside a @[TapeToHeap] def " \
-             "copies the text to the GC heap.\n\n#{WHY}"
+             "copies the text to the heap.\n\n#{WHY}"
     end
     if @program.has_flag?("ris_no_gc") && node.name == "interpolation" &&
        receiver.try(&.type?) == @program.string.metaclass &&
@@ -87,7 +87,7 @@ class Iyi::TapeEscapeChecker
        node.args.any? { |arg| heap_buffer?(arg.type?) }
       return "Writing a Str into a String::Builder or " \
              "IO::Memory outside a @[TapeToHeap] def copies the text " \
-             "to the GC heap.\n\n#{WHY}"
+             "to the heap.\n\n#{WHY}"
     end
     nil
   end

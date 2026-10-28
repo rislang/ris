@@ -149,7 +149,10 @@ class ::IyiIO
   def self.pipe : {Std::Io::PipeReader, Std::Io::PipeWriter}
     {% if flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64)) || flag?(:darwin) %}
       fds = Std::Io::PipeSys.make
-      {Std::Io::PipeReader.new(fds[0]), Std::Io::PipeWriter.new(fds[1])}
+      # Program objects, as the standard streams are: a pipe end may be
+      # handed to a task, so it is not on the caller's tape. 56 bytes each
+      # stay until the program ends.
+      {Std::Io::PipeReader.on_program(fds[0]), Std::Io::PipeWriter.on_program(fds[1])}
     {% else %}
       raise "IyiIO.pipe is only on Linux and macOS"
       {Std::Io::PipeReader.new, Std::Io::PipeWriter.new}
@@ -234,6 +237,12 @@ end
 
   # The reading end of `IyiIO.pipe`.
   pub class PipeReader < IyiIO
+    def self.on_program(fd : Int32) : PipeReader
+      io = RisRegion.program_object(PipeReader)
+      io.initialize(fd)
+      io
+    end
+
     def initialize(fd : Int32)
       super(fd.to_i64, 4096, false)
     end
@@ -259,6 +268,12 @@ end
   # The writing end of `IyiIO.pipe`: a write returns when all of it is in
   # the pipe.
   pub class PipeWriter < IyiIO
+    def self.on_program(fd : Int32) : PipeWriter
+      io = RisRegion.program_object(PipeWriter)
+      io.initialize(fd)
+      io
+    end
+
     def initialize(fd : Int32)
       super(fd.to_i64, 4096, true)
     end

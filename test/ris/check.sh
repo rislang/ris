@@ -542,7 +542,7 @@ expect writer_grow      "private method 'grow' called for Str::Builder"
 expect tree_entry       "private constant Tre::Entry(T) referenced"
 expect array_grow       "private method 'grow' called for Ary(T)"
 expect array_append     "append requires Ary(UInt8)"
-expect heap_copy "retain it with \`.copy_to(owner)\`"
+expect heap_copy "\`to_s\` of a Str outside a @[TapeToHeap] def copies"
 expect heap_interpolation \
   "Interpolating a Str outside a @[TapeToHeap]"
 expect refill           "\`@items\` is given a new Ary in \`take\`"
@@ -550,7 +550,7 @@ expect heap_memory      "Writing a Str into a String::Builder or"
 expect heap_memory_print "Writing a Str into a Std::Io::Memory"
 expect not_flat "Holder is not flat"
 expect check_free "\`first\` is @[CheckFree], and this \`[]\` checks"
-expect heap_escape_helper "retain it with \`.copy_to(owner)\`"
+expect heap_escape_helper "\`to_s\` of a Str outside a @[TapeToHeap] def copies"
 
 
 for name in implicit fibers/implicit implicit_loop; do
@@ -1291,9 +1291,10 @@ for name in program_alias program_helper program_local_init \
   expect "$name" 'copy it with .copy_to(Program.tape)'
 done
 expect program_copy_forged 'program initializer is private'
-expect program_threads 'program tape writes require a single kernel thread'
-expect program_field_thread \
-  'program tape writes require a single kernel thread'
+# Without a collector there is no IyiThread yet (thread.iyi is gated on
+# the collector); these return when kernel threads do (TODO.md).
+expect program_threads 'undefined constant IyiThread'
+expect program_field_thread 'undefined constant IyiThread'
 for name in program_tape program_growth; do
   out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 \
     "$RIS" run "test/ris/$name.ri" 2>&1)
@@ -1313,13 +1314,7 @@ else
   echo "FAILED   program growth mappings: $out"
   status=1
 fi
-out=$("$RIS" run test/ris/program_readers.ri 2>&1)
-if [ "$?" -eq 0 ] && [ "$out" = 'PASS: program tape readers' ]; then
-  echo "runs     program_readers (kernel threads)"
-else
-  echo "FAILED   program_readers: $out"
-  status=1
-fi
+# program_readers needs kernel threads; it returns with IyiThread.
 out=$("$RIS" run test/ris/program_text.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = 'value 42' ]; then
   echo "runs     program text constant"

@@ -196,6 +196,17 @@ struct Str
 end
 
 struct Ary(T)
+  # Element by element, as Array#== compares.
+  def ==(other : Ary) : Bool
+    return false unless size == other.size
+    i = 0
+    while i < size
+      return false unless self[i] == other[i]
+      i += 1
+    end
+    true
+  end
+
   def sort : self
     sorted
   end

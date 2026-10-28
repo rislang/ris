@@ -90,6 +90,11 @@ part B.
 
 ## Remove the heap and switch off the GC
 
+* Kernel threads and spawn_parallel without a collector: thread.iyi and
+  the parallel pool are gated on !gc_none, so ris programs have no
+  IyiThread and run every task on one core. Split the stop-the-world
+  collector parts from the thread code; restore program_readers,
+  program_threads and program_field_thread (test/ris/check.sh).
 * Remove general allocator fallbacks from ris programs. Distinguish
   gc_none's allocator behavior from ris_no_gc's allocation trap; audit
   remaining std and runtime paths required by supported workloads.

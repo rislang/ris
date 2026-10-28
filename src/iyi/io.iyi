@@ -153,6 +153,28 @@ class IyiIO
     end
   end
 
+  # Up to *count* bytes as tape text: what is buffered, then one fill of
+  # the buffer when it is empty. Empty at the end of the stream.
+  def read_str(count : Int32) : Str
+    raise "cannot read from closed IO" if @closed
+    return Str.new("") if count <= 0
+    if @read_pos >= @read_limit
+      return Str.new("") if @eof
+      return Str.new("") if fill_buffer <= 0
+    end
+    avail = @read_limit - @read_pos
+    take = avail < count ? avail : count
+    from = @read_buffer + @read_pos
+    @read_pos = @read_pos + take
+    Str.build(take) do |w|
+      i = 0
+      while i < take
+        w.push(from[i])
+        i = i + 1
+      end
+    end
+  end
+
   # What is buffered, then the rest straight into the growing result, as
   # much as it has room for each time: through the stream's own buffer
   # it was a read and a copy per 4 KB, and an 86 MB file took 150 ms to
@@ -325,6 +347,11 @@ class IyiIO
   end
 
   def write(text : String) : Nil
+    write(text.to_unsafe, text.bytesize)
+  end
+
+  # Tape text, written where it lies.
+  def write(text : Str) : Nil
     write(text.to_unsafe, text.bytesize)
   end
 
