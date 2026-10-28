@@ -4,6 +4,18 @@ Every change to TAPE_SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one.
 
+## 2026-10-28: String, Array, Hash and Tre are the tape types; section 7
+
+* Changed: section 7 replaces "Program targets and allocation". The tape
+  types are named String, Array, Hash and Tre; there is no heap type and
+  no fallback allocator. Ruby's syntax stays: the compiler places memory.
+  String's `<<` rebinds, nested containers hold pool runs behind handles,
+  long-lived containers own a SlicePool so delete frees, and other stores
+  that would outlive their tape are compile errors naming copy_to.
+* Why: the user's decision. Goose has no heap at any layer (§1.2), and a
+  Ruby programmer should write Ruby without learning a second set of
+  types; implicit copies happen only where they are bounded and freed.
+
 ## 2026-10-28: programs always run without a collector
 
 * Changed: removed --no-gc; every program traps heap allocation and uses

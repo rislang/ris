@@ -189,9 +189,30 @@ rule goes last in its section; a removed one leaves its number unused.
 * 6.6 RIS_TAPE_STATS: owner paths, regions, committed peaks, pool waste, copies.
   check.sh tests exit, panic, cancel, exhaustion.
 
-## Program targets and allocation
+## 7. Types, memory and Ruby syntax (doc/TAPE_TYPES.md; Goose §1.2, §3.7)
 
-Every ris and iyi program runs without a collector. Heap allocation traps;
-use a tape value and copy_to for data that must outlive its current tape.
-Programs build only for Linux x86_64 and aarch64. Other targets fail at
-compile time. The compiler executable keeps its own GC and build choices.
+* 7.1 No heap, no collector, no fallback allocator, no heap type. Memory is
+  static data, tapes, `Program.tape` and typed pools (Goose §1.2, §5.4).
+  Programs build only for Linux x86_64 and aarch64; other targets fail at
+  compile time. The compiler executable keeps its own GC.
+* 7.2 The data types are String, Array, Hash and Tre, on the tape. String
+  is a read-only view of bytes; a literal views static bytes; building
+  text (`+`, interpolation, `to_s`, `String.build`) writes on the current
+  tape. Array is grow-only in its own reservation, never moving. Hash is
+  open addressing in place, in insertion order. Tre is a tree in one array
+  with index links.
+* 7.3 Ruby's and Crystal's syntax stays as written; the compiler places
+  memory. `s << x` on a String appends in place when `s` tops its tape,
+  else rebinds `s` to `s + x`; bang methods rebind. After `t = s; s << x`,
+  `t` keeps the old text: a String is immutable.
+* 7.4 Nested containers (`Array(Array(T))`, `Hash(K, Array(V))`) hold
+  their inner arrays as runs of a SlicePool they own; `outer[i]` answers a
+  handle to its run, so a change through it shows in the container. No
+  view into a run outlives its next growth.
+* 7.5 A long-lived container (a constant, a class variable, a field of a
+  program-owned object) owns a SlicePool for what it holds. A store copies
+  the value into a run of that pool; delete, clear and overwrite give the
+  run back. Only this store copies implicitly.
+* 7.6 Any other store of a tape value into something that outlives it is
+  a compile error naming the forms that work: `copy_to(owner)` or a
+  long-lived container (1.x, 3.x).
