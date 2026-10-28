@@ -2831,15 +2831,6 @@ module Iyi
       end
     end
 
-    # Only synchronous runtime array construction is bracketed. User blocks
-    # are evaluated before this guard and cannot run inside its extent.
-    def ris_heap_runtime(delta)
-      heap_fun = fetch_typed_fun(@main_mod, "__ris_heap_runtime") do
-        LLVM::Type.function([@main_llvm_context.int32], @main_llvm_context.void)
-      end
-      call check_main_fun("__ris_heap_runtime", heap_fun), int32(delta)
-    end
-
     def ris_heap_allocation(size, source = @call_location ||
                               @current_debug_location)
       return unless @program.iyi_object_layout?

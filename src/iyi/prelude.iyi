@@ -10513,6 +10513,8 @@ fun main(argc : Int32, argv : UInt8**) : Int32
   # Named `test` cases keep going past a failure, so the program's own code
   # ends normally and the exit status is theirs to give (testing.iyi).
   status = IyiTestCases.verdict
+  # Standard stream objects belong to program storage; flush before release.
+  __iyi_flush_std
   {% if (!flag?(:gc_none) || flag?(:linux)) && !flag?(:gc_boehm) &&
           ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) ||
           flag?(:darwin) || flag?(:win32) || flag?(:wasm32)) %}
@@ -10520,7 +10522,6 @@ fun main(argc : Int32, argv : UInt8**) : Int32
   {% end %}
   RisRegion.report_stats
   RisHeap.report
-  __iyi_flush_std
   {% if flag?(:win32) %}
     # Not back into the C runtime, whose `exit` is `ExitProcess`, for the
     # reason `__iyi_exit` is not: a mark helper stopping this thread as it

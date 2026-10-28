@@ -10,13 +10,6 @@
 
 # Allocation accounting and mapping failures allocate nothing, even on exit.
 class RisHeap
-  @[ThreadLocal]
-  @@runtime_depth : Int32 = 0
-
-  def self.runtime(delta : Int32) : Nil
-    @@runtime_depth = @@runtime_depth + delta
-  end
-
   @@count : UInt64 = 0_u64
   @@bytes : UInt64 = 0_u64
   @@reported : Bool = false
@@ -48,7 +41,6 @@ class RisHeap
 
   def self.allocation(size : UInt64,
                       site : UInt8* = Pointer(UInt8).new(0_u64)) : Nil
-    return if @@runtime_depth > 0
     IyiRuntimeLock.lock
     @@count = @@count &+ 1_u64
     @@bytes = @@bytes &+ size
@@ -100,8 +92,4 @@ end
 
 fun __ris_heap_allocation(size : UInt64, site : UInt8*) : Nil
   RisHeap.allocation(size, site)
-end
-
-fun __ris_heap_runtime(delta : Int32) : Nil
-  RisHeap.runtime(delta)
 end

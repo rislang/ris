@@ -32,16 +32,7 @@ class Iyi::CodeGenVisitor
         codegen_call_with_block(node, block, owner, call_args)
       end
     else
-      runtime_array = @program.iyi_object_layout? && context.heap_internal? &&
-        node.name == "new" && node.type.to_s.starts_with?("Array(")
-      standard_stream = @program.iyi_object_layout? &&
-        node.name == "new" && node.type.to_s == "IyiIO" &&
-        context.type.is_a?(Program) &&
-        node.location.try(&.original_filename).try(&.ends_with?("/iyi/io.iyi"))
-      runtime_array ||= !!standard_stream
-      ris_heap_runtime(1) if runtime_array
       codegen_call(node, node.target_def, owner, call_args)
-      ris_heap_runtime(-1) if runtime_array && !@builder.end
     end
 
     false

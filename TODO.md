@@ -56,10 +56,6 @@ part B.
   including real TLS deadline/parallel-server cases, Pebble, restarts and
   mutation checks. Preserve the policy probe's copied board observations;
   its Counter is no longer captured by the listener task.
-* Drop the dead Channel leftovers in src/iyi/concurrency.iyi: IyiWaiter,
-  spare_waiter, IyiFiberState::WaitingCh's channel comments and the
-  channel/select notes in the scheduler's comments.
-
 ## Next
 
 * Escaping closures outside program and joined task owners: pooled
@@ -74,8 +70,6 @@ part B.
 
 ## Remove the heap and switch off the GC
 
-* Audit runtime allocations hidden by RisHeap.runtime_depth; migrate the
-  remaining sites, then remove counting and --no-gc enforcement exemptions.
 * Remove general allocator fallbacks from ris programs. Distinguish
   gc_none's allocator behavior from ris_no_gc's allocation trap; audit
   remaining std and runtime paths required by supported workloads.

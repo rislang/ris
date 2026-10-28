@@ -435,8 +435,6 @@ expect copy_class_override 'remove this override'
 expect copy_pointer 'build on the destination with Ary nodes and indices'
 expect copy_link 'copy_to refuses pointers and self-relative links'
 
-expect heap_exemption \
-  'runtime heap exemption is private'
 expect string_parameter \
   'name : String is only read; take it as Str'
 expect string_optional_parameter \
@@ -554,7 +552,7 @@ for name in implicit fibers/implicit implicit_loop; do
   code=$?
   if [ "$code" -eq 0 ] && grep -qF 'PASS:' <<<"$out" &&
       { [ "$name" != implicit_loop ] ||
-        grep -qF '1 scopes, 3 mappings made, 0 unmapped' <<<"$out"; }; then
+        grep -qF '2 scopes, 4 mappings made, 0 unmapped' <<<"$out"; }; then
     echo "runs     $name"
   else
     echo "FAILED   $name: $out"
@@ -784,7 +782,7 @@ if [ "$out" = $'2 1 2\n3 2 3\n4 3 4\nxxxxend' ]; then echo "runs     clear"; els
 out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 "$RIS" run --no-gc \
   test/ris/side_warm.ri 2>&1)
 if [ "$?" -eq 0 ] &&
-    grep -qF '10001 scopes, 4 mappings made, 0 unmapped' <<<"$out" &&
+    grep -qF '10002 scopes, 5 mappings made, 0 unmapped' <<<"$out" &&
     grep -qF '0 growth moves' <<<"$out" &&
     grep -qF '0 side regions (0 transfer bytes copied)' <<<"$out" &&
     grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
@@ -796,7 +794,7 @@ out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 "$RIS" run --no-gc \
   test/ris/side_spares.ri 2>&1)
 if [ "$?" -eq 0 ] &&
     grep -qF 'PASS: mixed side spares reused' <<<"$out" &&
-    grep -qF '3 mappings made, 0 unmapped' <<<"$out" &&
+    grep -qF '4 mappings made, 0 unmapped' <<<"$out" &&
     grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
   echo "runs     side_spares (mixed reservations reused 10,000 times)"
 else
@@ -830,7 +828,7 @@ out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 "$RIS" run --no-gc \
 if [ "$?" = 0 ] &&
    grep -qF 'PASS: pending results and borrowed views' <<<"$out" &&
    grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out" &&
-   grep -qF '1 scopes, 5 mappings made, 0 unmapped, 0 tapes grown' <<<"$out"; then
+   grep -qF '2 scopes, 6 mappings made, 0 unmapped, 0 tapes grown' <<<"$out"; then
   echo "runs     pending_result (bounded scratch, borrowed input stays a view)"
 else
   echo "FAILED   pending_result: $out"; status=1
@@ -1139,11 +1137,12 @@ else
 fi
 
 # Reserved side growth keeps addresses and uses bounded mappings.
+# Counts include the program storage mapping for standard streams.
 out=$(RIS_TAPE_STATS=1 "$RIS" run --no-gc test/ris/stable_growth.ri 2>&1)
 if [ "$?" -eq 0 ] &&
     grep -qF 'PASS: stable interleaved growth' <<<"$out" &&
     grep -qF '0 growth moves' <<<"$out" &&
-    grep -qF '4 mappings made' <<<"$out" &&
+    grep -qF '5 mappings made' <<<"$out" &&
     grep -qF '0 side regions (0 transfer bytes copied)' <<<"$out"; then
   echo "runs     stable_growth (--no-gc, bounded mappings)"
 else
@@ -1153,7 +1152,7 @@ out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 "$RIS" run --no-gc \
   test/ris/stable_components.ri 2>&1)
 if [ "$?" -eq 0 ] &&
     grep -qF 'PASS: builder and tree stable before first growth' <<<"$out" &&
-    grep -qF '5 mappings made, 0 unmapped' <<<"$out" &&
+    grep -qF '6 mappings made, 0 unmapped' <<<"$out" &&
     grep -qF '0 growth moves' <<<"$out" &&
     grep -qF '0 side regions (0 transfer bytes copied)' <<<"$out" &&
     grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then

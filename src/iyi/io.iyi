@@ -428,9 +428,10 @@ end
 
 alias IO = IyiIO
 
-STDIN  = IyiIO.new(0_i64, buffer_size: 4096, sync: false)
-STDOUT = IyiIO.new(1_i64, buffer_size: 4096, sync: true)
-STDERR = IyiIO.new(2_i64, buffer_size: 4096, sync: true)
+# Standard streams live until program shutdown, outside any caller tape.
+STDIN  = IyiIO.on_program(0_i64, buffer_size: 4096, sync: false)
+STDOUT = IyiIO.on_program(1_i64, buffer_size: 4096, sync: true)
+STDERR = IyiIO.on_program(2_i64, buffer_size: 4096, sync: true)
 
 def stdin : IyiIO
   STDIN

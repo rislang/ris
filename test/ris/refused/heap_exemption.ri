@@ -1,3 +1,0 @@
-module test/ris/refused/heap_exemption
-
-RisHeap.runtime(1)
