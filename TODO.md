@@ -35,7 +35,7 @@ the first two rows. Update a row when its work starts or ends.
 | Task-owned Conn buffer growth         | med-lrg  | 3-5 h     | 150-300k  |
 | .iyimod keeps @[OnTape]               | small    | 1-2 h     | 50-100k   |
 | Compiler specs signal 11              | unknown  | 2 h-1 day | 100-300k  |
-| macOS tape backend                    | large    | days      | 500k+     |
+| macOS arm64 (needs a Mac to test)     | medium   | 1-2 days  | 200-400k  |
 | Windows                               | large    | days      | 500k+     |
 
 ## Messages: RisBoard (TAPE_SPEC 5.2, 5.6; doc/MESSAGES.md)
