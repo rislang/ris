@@ -93,6 +93,16 @@ part B.
 
 ## Remove the heap and switch off the GC
 
+* std/uri: URI.parse of a String, then normalize.to_s, answers
+  "//@:80/a/c?q#f": the fields are lost (test/ris/uri_legacy.ri, out of
+  check.sh). Parsing a Str works. Fix the String path or drop it.
+* std's target, as Goose does it (doc/reference/goose/docs/design/
+  owning_dynamic_data.md): short-lived String/Array/Hash on the caller's
+  tape; long-lived state (HPACK tables, autocert cache, log sinks) in
+  typed Pool/SlicePool with explicit free and index links. Until then the
+  no-GC malloc is the old bump allocator with the trap off: std works but
+  never frees, so a long-running server leaks (RIS_HEAP_STATS=1 shows
+  it). Remove the bump allocator and restore the trap when std is moved.
 * A program def's closure environment is on its current tape (codegen
   closure_owner 1): a task spawned inside a nested `tape do` that ends
   before the task reads freed captures. Allocate it at the group's or

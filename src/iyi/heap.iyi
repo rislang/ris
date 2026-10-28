@@ -45,7 +45,7 @@ class RisHeap
     @@count = @@count &+ 1_u64
     @@bytes = @@bytes &+ size
     IyiRuntimeLock.unlock
-    {% if flag?(:ris_no_gc) %}
+    {% if flag?(:ris_no_gc_trap) %}
       text("ris: heap allocation: ")
       number(size)
       text(" bytes\n")

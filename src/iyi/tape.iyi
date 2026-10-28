@@ -856,8 +856,14 @@ struct Str::Builder
   def append_value(value : Nil) : Nil
   end
 
-  def append_value(value) : Nil
-    append(value.to_s)
+  # A type that writes itself into a Str::Builder does so here, on the
+  # tape; any other value through its String.
+  def append_value(value : T) : Nil forall T
+    {% if T.methods.any? { |m| m.name == "to_s" && m.args.size == 1 && m.args[0].restriction.stringify.includes?("Str::Builder") } %}
+      value.to_s(self)
+    {% else %}
+      append(value.to_s)
+    {% end %}
   end
 
   # *text* with `&`, `<`, `>`, `"` and `'` escaped as `ERB::Util.html_escape`
