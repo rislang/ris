@@ -13,7 +13,9 @@ RIS=${RIS:-./bin/ris}
 status=0
 # By default the blocks below run on every core (check_parallel.py).
 if [ -z "${RIS_CHECK_SERIAL:-}" ]; then
-  exec python3 test/ris/check_parallel.py
+  python3 test/ris/check_parallel.py; rc=$?
+  bash scripts/kill-tests.sh
+  exit $rc
 fi
 
 expect() {
@@ -1388,4 +1390,5 @@ if [ "$status" -eq 0 ]; then
 else
   echo "FAIL: ris checks"
 fi
+bash scripts/kill-tests.sh
 exit $status

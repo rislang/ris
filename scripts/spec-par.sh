@@ -41,6 +41,7 @@ t=$(date +%s)
 run compiler_spec $big; run std_spec $rest
 run primitives_spec 1; run cli_spec 1
 wait
+bash scripts/kill-tests.sh
 echo "specs   $(( $(date +%s) - t ))s"
 
 # The examples that failed in their part, run again one at a time.
