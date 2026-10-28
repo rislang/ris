@@ -902,7 +902,7 @@ module ::IyiFormat
     value = 0_i64
     index = start
     while index < stop
-      value = value * 10_i64 + (format_string.to_unsafe[index] - 48_u8).to_i64
+      value = value * 10_i64 + (format_string[index] - 48_u8).to_i64
       raise "#{what} must be at most 2147483647, not #{format_string[start, stop - start]}" if value > 2147483647_i64
       index = index + 1
     end
@@ -1110,7 +1110,7 @@ end
 # `::String` is the prelude's type wherever this file is read, so a bare
 # `sprintf` in one of these bodies is a name `String` does not have -
 # `undefined method 'sprintf' for String.class`, which is R-2b saying so.
-class ::String
+struct ::String
   def self.format(format_string : String, *args : *T) : String forall T
     Std::Format.sprintf(format_string, *args)
   end

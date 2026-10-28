@@ -1898,6 +1898,12 @@ module Iyi
     end
 
     def restrict(other : Arg, context)
+      if view = array_view_type
+        if result = view.restrict(other, context)
+          add_match(result)
+          return result
+        end
+      end
       if literal.type.is_a?(NilableType) &&
          StringAutocastType.view_restriction?(other.restriction, context)
         return restrict(other.restriction, context)

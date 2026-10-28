@@ -3403,10 +3403,10 @@ pub class Resolver
     colons = 0
     index = 0
     while index < size
-      colons = colons + 1 if text.to_unsafe[index] == 58_u8
+      colons = colons + 1 if text[index] == 58_u8
       index = index + 1
     end
-    if size > 0 && text.to_unsafe[0] == 91_u8 # [
+    if size > 0 && text[0] == 91_u8 # [
       close = text.index(']')
       return "not a name server address: #{text.inspect}" if close.nil?
       host = text[1, close - 1]
@@ -3439,7 +3439,7 @@ pub class Resolver
   def resolve(host : String) : Array(IPAddress) | DnsError | Cancelled
     size = host.bytesize
     literal = host
-    literal = host[1, size - 2] if size >= 2 && host.to_unsafe[0] == 91_u8 && host.to_unsafe[size - 1] == 93_u8
+    literal = host[1, size - 2] if size >= 2 && host[0] == 91_u8 && host[size - 1] == 93_u8
     if literal.includes?(":")
       six = IyiSocket.read_ipv6(literal)
       return DnsError.new(DnsError::INVALID_NAME, host, "", six) if six.is_a?(String)
@@ -3858,6 +3858,8 @@ pub class Resolver
     sent = IyiSocket.__sys_dgram_send(fd, query.to_unsafe, query.size.to_u64)
     return failed(name, server, SocketError.new("send", IyiSocket.__sys_code(sent))) if sent < 0_i64
     unread = nil.as(DnsError?)
+    label = server.label
+    datagram = String::Builder.new(DATAGRAM_ROOM)
     deadline = Resolver.now_ms + @timeout_ms.to_i64
     while true
       left = deadline - Resolver.now_ms
@@ -3865,33 +3867,32 @@ pub class Resolver
       ready = IyiSocket.__sys_dgram_wait(fd, left.to_i32)
       return ready if ready.is_a?(Cancelled)
       next unless ready
-      # Each datagram is received onto a tape and read there; only the
-      # answer is copied off it, and the rest - another's datagram, a
-      # forger's guess, one that does not read - goes with the tape.
+      # The decoded answer and its bytes belong to the caller's tape.
       got = nil.as(DnsMessage | DnsError | SocketError | Nil)
-      tape do
-        datagram = String::Builder.new(DATAGRAM_ROOM)
-        count = Resolver.receive(fd, datagram)
-        if count < 0_i64
-          got = SocketError.new("receive", IyiSocket.__sys_code(count)) unless IyiSocket.__sys_would_block?(count)
-        else
-          packet = datagram.finish
-          # Somebody else's datagram, or a forger's guess: not an answer.
-          if packet.bytesize >= 2 && ((packet[0].to_i32 << 8) | packet[1].to_i32) == id.to_i32
-            message = DnsMessage.parse(packet)
-            if message.is_a?(DnsError)
-              got = message.about(name, server.label)
-            elsif message.answers?(id, name, type)
-              got = message
-            end
-          end
-        end
+      datagram.clear
+      count = Resolver.receive(fd, datagram)
+      if count < 0_i64
+        got = SocketError.new("receive", IyiSocket.__sys_code(count)) unless IyiSocket.__sys_would_block?(count)
+      else
+        got = decoded_answer(datagram.finish.dup, id, name, type, label)
       end
       return failed(name, server, got) if got.is_a?(SocketError)
       return got if got.is_a?(DnsMessage)
       unread = got if got.is_a?(DnsError)
     end
-    unread || DnsError.new(DnsError::TIMED_OUT, name, server.label)
+    unread || DnsError.new(DnsError::TIMED_OUT, name, label)
+  end
+
+  private def decoded_answer(packet : String, id : UInt16, name : String,
+                             type : Int32, server : String) : DnsMessage | DnsError | Nil
+    return nil unless packet.bytesize >= 2 &&
+      ((packet[0].to_i32 << 8) | packet[1].to_i32) == id.to_i32
+    message = DnsMessage.parse(packet)
+    if message.is_a?(DnsError)
+      DnsError.new(message.kind, name, server, message.detail.dup)
+    elsif message.answers?(id, name, type)
+      message.to_heap
+    end
   end
 
   # The largest datagram an answer can be.

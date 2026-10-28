@@ -1428,7 +1428,7 @@ end
 # made of. Each value is written whole, its length in the shortest form,
 # so what comes out is the one encoding std/asn1 reads back.
 struct X509Der
-  def self.tlv(tag : UInt8, content : Array(UInt8)) : Array(UInt8)
+  def self.tlv(tag : UInt8, content : Array::View(UInt8)) : Array(UInt8)
     out = [tag]
     n = content.size
     if n < 128
@@ -1460,18 +1460,18 @@ struct X509Der
     tlv(0x31_u8, join(parts))
   end
 
-  def self.explicit(number : Int32, content : Array(UInt8)) : Array(UInt8)
+  def self.explicit(number : Int32, content : Array::View(UInt8)) : Array(UInt8)
     tlv((0xA0 | number).to_u8, content)
   end
 
   # A non-negative INTEGER from its big-endian bytes: leading zeros taken
   # off, and one put back where the top bit would read as a sign.
-  def self.integer(magnitude : Array(UInt8)) : Array(UInt8)
+  def self.integer(magnitude : Array::View(UInt8)) : Array(UInt8)
     tlv(0x02_u8, integer_content(magnitude))
   end
 
   # What `integer` writes inside its tag and length.
-  def self.integer_content(magnitude : Array(UInt8)) : Array(UInt8)
+  def self.integer_content(magnitude : Array::View(UInt8)) : Array(UInt8)
     at = 0
     while at < magnitude.size - 1 && magnitude[at] == 0_u8
       at = at + 1
@@ -1521,11 +1521,11 @@ struct X509Der
     out
   end
 
-  def self.bit_string(bytes : Array(UInt8)) : Array(UInt8)
+  def self.bit_string(bytes : Array::View(UInt8)) : Array(UInt8)
     tlv(0x03_u8, [0_u8] + bytes)
   end
 
-  def self.octet_string(bytes : Array(UInt8)) : Array(UInt8)
+  def self.octet_string(bytes : Array::View(UInt8)) : Array(UInt8)
     tlv(0x04_u8, bytes)
   end
 
@@ -1561,7 +1561,7 @@ struct X509Der
 
   # An Extension: its OID, critical when it is (DER leaves out the
   # default FALSE), and *value* inside extnValue's OCTET STRING.
-  def self.extension(id : String, critical : Bool, value : Array(UInt8)) : Array(UInt8)
+  def self.extension(id : String, critical : Bool, value : Array::View(UInt8)) : Array(UInt8)
     parts = [oid(id)]
     parts << boolean(true) if critical
     parts << octet_string(value)

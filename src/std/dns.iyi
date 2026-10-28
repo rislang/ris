@@ -1140,17 +1140,12 @@ pub struct DnsMessage
     {text.finish, ends}
   end
 
-  # `read_name` for a caller holding the message on the heap.
+  # Decode on the caller's tape, as for a String message.
   def self.read_name(packet : Bytes, at : Int32) : Tuple(String, Int32)?
-    result = nil.as(Tuple(String, Int32)?)
-    tape do
-      bytes = String.build(packet.size) { |w| w.append(packet.to_unsafe, packet.size) }
-      if read = read_name(bytes, at)
-        name, ends = read
-        result = {name.to_heap, ends}
-      end
+    bytes = String.build(packet.size) do |writer|
+      packet.each { |byte| writer.push(byte) }
     end
-    result
+    read_name(bytes, at)
   end
 
   def self.malformed(why : String) : DnsError

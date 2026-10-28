@@ -591,7 +591,9 @@ class Iyi::Call
 
   private def borrow_string_argument(value : ASTNode) : ASTNode
     value.remove_enclosing_call(self)
-    if value.type.is_a?(NilableType)
+    source_type = value.type
+    if source_type.is_a?(UnionType) &&
+       source_type.union_types.any?(&.nil_type?)
       name = program.new_temp_var_name
       temp = Var.new(name).at(value)
       assign = Assign.new(temp, value).at(value)
@@ -603,7 +605,7 @@ class Iyi::Call
       temp.bind_to(value)
       assign.bind_to(value)
       conditional = If.new(Var.new(name),
-        Call.new(Var.new(name), "as_tape").at(value),
+        Call.new(Var.new(name), "as_view").at(value),
         NilLiteral.new).at(value)
       conditional.accept(parent_visitor)
       view = Expressions.new([assign, conditional] of ASTNode).at(value)
@@ -645,7 +647,63 @@ class Iyi::Call
     end
   end
 
+  # Validate reflected layouts directly so private field types stay private.
+  private def check_tape_copy(type : Type, path : Set(Type), task : Bool)
+    type = type.remove_alias.remove_typedef.remove_alias.devirtualize
+    name = type.to_s
+    if name.in?("Std::Socket::IyiSocket", "Std::Io::PipeReader",
+                "Std::Io::PipeWriter", "RisTaskConfig")
+      unless task && name != "RisTaskConfig"
+        raise "resources cannot copy_to; transfer them through a joined task"
+      end
+      return
+    end
+    if type.is_a?(PointerInstanceType) || name.starts_with?("Array::Link(")
+      raise "copy_to refuses pointers and self-relative links;\n" \
+            "build on the destination with Array nodes and indices"
+    end
+    if type.is_a?(UnionType)
+      type.union_types.each { |part| check_tape_copy(part, path, task) }
+      return
+    end
+    return if type.is_a?(EnumType) || type.implements?(program.number) ||
+              type == program.bool || type == program.char ||
+              type == program.symbol || type.nil_type? ||
+              type == program.string || name == "String::Builder"
+    if path.includes?(type)
+      unless type.struct?
+        raise "copy_to refuses self-reaching class types;\n" \
+              "build on the destination with Array nodes and indices"
+      end
+      return
+    end
+    nested = path.dup.add(type)
+    if type.is_a?(TupleInstanceType)
+      type.tuple_types.each { |part| check_tape_copy(part, nested, task) }
+    elsif type.is_a?(NamedTupleInstanceType)
+      type.entries.each { |entry| check_tape_copy(entry.type, nested, task) }
+    elsif type.is_a?(GenericClassInstanceType) &&
+          {"Array", "Tre", "Run", "List"}.includes?(type.generic_type.name) &&
+          (name.starts_with?("Array(") || name.starts_with?("Tre(") ||
+           name.starts_with?("SlicePool::"))
+      type.type_vars.each_value do |var|
+        check_tape_copy(var.as(Var).type, nested, task)
+      end
+    elsif type.is_a?(InstanceVarContainer)
+      type.all_instance_vars.each_value do |field|
+        field.type?.try { |part| check_tape_copy(part, nested, task) }
+      end
+      if type.is_a?(ClassType) && !type.struct?
+        type.subclasses.each { |child| check_tape_copy(child, nested, task) }
+      end
+    end
+  end
+
   def instantiate(signature, matches, owner, self_type, with_autocast)
+    if name == "check_copy" && owner.to_s == "Tape:Module"
+      task = args[2]?.try(&.type.instance_type.to_s) == "RisTaskCopy"
+      check_tape_copy(args.first.type.instance_type, Set(Type).new, task)
+    end
     if name == "check_slice_relocation" && owner.to_s == "Tape:Module"
       check_slice_relocation(args.first.type.instance_type)
     end

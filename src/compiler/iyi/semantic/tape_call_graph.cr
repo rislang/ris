@@ -224,6 +224,11 @@ class Iyi::TapeCallGraph
       false
     end
 
+    def visit(node : MacroIf | MacroFor | MacroExpression | MacroVerbatim)
+      node.expanded.try &.accept(self)
+      false
+    end
+
     def visit(node : ASTNode)
       true
     end
@@ -378,6 +383,11 @@ class Iyi::TapeCallGraph
     end
 
     def visit(node : Def)
+      false
+    end
+
+    def visit(node : MacroIf | MacroFor | MacroExpression | MacroVerbatim)
+      node.expanded.try &.accept(self)
       false
     end
 

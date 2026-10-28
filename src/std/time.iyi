@@ -773,7 +773,7 @@ pub struct Location
     @rule = nil
   end
 
-  UTC = Location.new
+  UTC = Location.new.copy_to(Program.tape)
 
   @@local : Location? = nil
 
@@ -812,7 +812,7 @@ pub struct Location
   # A location from the bytes of a TZif file, RFC 8536, named *name*.
   # Anything that is not one is refused with what was wrong and where.
   def self.read_zoneinfo(name : String, data : String) : Location | LocationError
-    p = data.to_unsafe
+    p = data
     size = data.bytesize
     return LocationError.new("#{name}: not a TZif file: #{size} bytes is shorter than its header") if size < 44
     return LocationError.new("#{name}: not a TZif file: it does not begin with TZif") unless tzif_magic?(p)
@@ -825,7 +825,7 @@ pub struct Location
       return LocationError.new("#{name}: the TZif file's header counts more than any zone holds") unless first
       return LocationError.new("#{name}: the TZif file ends inside its first data block") if 44 + first + 44 > size
       at = 44 + first
-      return LocationError.new("#{name}: the TZif file's second header does not begin with TZif") unless tzif_magic?(p + at.to_i64)
+      return LocationError.new("#{name}: the TZif file's second header does not begin with TZif") unless tzif_magic?(p[at, size - at])
       width = 8
     end
     data_size = block_size(p, at, width)
@@ -898,8 +898,9 @@ pub struct Location
       return cached
     end
     found = read_local
-    @@local = found
-    found
+    kept = found.copy_to(Program.tape)
+    @@local = kept
+    kept
   end
 
   private def self.read_local : Location
@@ -967,7 +968,7 @@ pub struct Location
   def self.read_windows_zone(name : String, data : String) : Location | LocationError
     size = data.bytesize
     return LocationError.new("#{name}: not a TIME_ZONE_INFORMATION: #{size} bytes, not 172") if size != 172
-    info = data.to_unsafe
+    info = data
     bias = s32_le(info, 0)
     std_offset = -(bias + s32_le(info, 84)) * 60
     dst_offset = -(bias + s32_le(info, 168)) * 60
@@ -994,7 +995,7 @@ pub struct Location
   # The SYSTEMTIME at *at*: wYear, wMonth, wDayOfWeek, wDay, wHour,
   # wMinute, wSecond, wMilliseconds, each an unsigned WORD. Nil is no rule;
   # an error is fields no day has.
-  private def self.windows_date(info : Pointer(UInt8), at : Int32) : TzDate | LocationError | Nil
+  private def self.windows_date(info : String, at : Int32) : TzDate | LocationError | Nil
     year = u16_le(info, at)
     month = u16_le(info, at + 2)
     return nil if year != 0 || month == 0
@@ -1009,12 +1010,12 @@ pub struct Location
     TzDate.new(0, month, week, weekday, hour * 3600 + minute * 60 + second)
   end
 
-  private def self.u16_le(p : Pointer(UInt8), at : Int32) : Int32
+  private def self.u16_le(p : String, at : Int32) : Int32
     p[at].to_i32 | (p[at + 1].to_i32 << 8)
   end
 
   # A signed little-endian LONG, from the 32 bits' two's complement.
-  private def self.s32_le(p : Pointer(UInt8), at : Int32) : Int64
+  private def self.s32_le(p : String, at : Int32) : Int64
     value = p[at].to_i64 | (p[at + 1].to_i64 << 8) | (p[at + 2].to_i64 << 16) | (p[at + 3].to_i64 << 24)
     value >= 2147483648_i64 ? value - 4294967296_i64 : value
   end
@@ -1035,14 +1036,14 @@ pub struct Location
   # The bytes of the file at *path*, or nil when there is none to read: no
   # such file, a directory, or a read that failed. Nothing here panics,
   # because the answer to a name the database lacks is an error value.
+  @[TapeUnsafe("passes the terminated path to the file system call")]
   private def self.read_file(path : String) : String?
     {% if flag?(:wasm32) %}
       nil
     {% else %}
       return nil if path.byte_index("\u0000")
-      c_path = Pointer(UInt8).malloc((path.bytesize + 1).to_u64)
-      c_path.copy_from(path.to_unsafe, path.bytesize)
-      c_path[path.bytesize] = 0_u8
+      terminated = path + "\0"
+      c_path = terminated.to_unsafe
       {% if flag?(:win32) %}
         # Windows refuses to open a directory at all, where POSIX opens it
         # and fails the read; FILE_ATTRIBUTE_DIRECTORY is 0x10.
@@ -1058,14 +1059,14 @@ pub struct Location
     {% end %}
   end
 
-  private def self.tzif_magic?(p : Pointer(UInt8)) : Bool
+  private def self.tzif_magic?(p : String) : Bool
     p[0] == 84_u8 && p[1] == 90_u8 && p[2] == 105_u8 && p[3] == 102_u8
   end
 
   # The bytes of the data block after the header at *at*, with times of
   # *width* bytes, or nil when a count is past what any zone holds: a
   # header is not trusted into an allocation or an overflow.
-  private def self.block_size(p : Pointer(UInt8), at : Int32, width : Int32) : Int32?
+  private def self.block_size(p : String, at : Int32, width : Int32) : Int32?
     isut = u32(p, at + 20)
     isstd = u32(p, at + 24)
     leap = u32(p, at + 28)
@@ -1077,19 +1078,17 @@ pub struct Location
   end
 
   # A 32-bit big-endian word, unsigned and signed.
-  private def self.u32(p : Pointer(UInt8), at : Int32) : Int64
+  private def self.u32(p : String, at : Int32) : Int64
     (p[at].to_i64 << 24) | (p[at + 1].to_i64 << 16) | (p[at + 2].to_i64 << 8) | p[at + 3].to_i64
   end
 
-  private def self.s32(p : Pointer(UInt8), at : Int32) : Int64
+  private def self.s32(p : String, at : Int32) : Int64
     value = u32(p, at)
     value >= 2147483648_i64 ? value - 4294967296_i64 : value
   end
 
-  private def self.bytes_at(p : Pointer(UInt8), at : Int32, count : Int32) : String
-    String.new(count) do |buf|
-      buf.copy_from(p + at.to_i64, count)
-    end
+  private def self.bytes_at(p : String, at : Int32, count : Int32) : String
+    p[at, count]
   end
 
   def utc? : Bool
@@ -1380,6 +1379,7 @@ pub struct Time
 
       # AT_SYSINFO_EHDR (33) from /proc/self/auxv: where the vDSO's ELF
       # header is mapped. 0 when the file cannot be read.
+      @[TapeUnsafe("opens the auxv path for the vDSO lookup")]
       def self.vdso_base : UInt64
         path = "/proc/self/auxv"
         fd = raw_syscall(2_i64, path.to_unsafe.address.to_i64, 0_i64, 0_i64) # open, O_RDONLY
@@ -1477,7 +1477,7 @@ pub struct Time
       end
 
       def self.c_name?(at : UInt64, name : String) : Bool
-        n = name.to_unsafe
+        n = name
         i = 0
         while i < name.bytesize
           return false unless read_u8(at + i.to_u64) == n[i]
@@ -2385,8 +2385,14 @@ pub struct Time
   # one and not checked against the date, as Crystal, Go and Python read it.
   @[OnTape]
   struct Format
-    MONTH_NAMES = {"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"}
-    DAY_NAMES   = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"}
+    MONTH_NAMES = {
+      "January", "February", "March", "April", "May", "June", "July",
+      "August", "September", "October", "November", "December",
+    }.copy_to(Program.tape)
+    DAY_NAMES = {
+      "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
+      "Saturday",
+    }.copy_to(Program.tape)
 
     getter pattern : String
     getter offset : Int32?
@@ -2531,7 +2537,7 @@ pub struct Time
     # byte after the `%`: it is text, and so is what follows it, as Crystal
     # writes `%Q` back out as `%Q`.
     def self.lex(pattern : String, i : Int32) : {Int32, Char, Char, Int32, Int32}
-      bytes = pattern.to_unsafe
+      bytes = pattern
       len = pattern.bytesize
       j = i + 1
       flag = '\0'
@@ -2572,7 +2578,7 @@ pub struct Time
     end
 
     def self.write(io : String::Builder, pattern : String, f : Fields) : Nil
-      bytes = pattern.to_unsafe
+      bytes = pattern
       len = pattern.bytesize
       i = 0
       while i < len
@@ -2896,7 +2902,7 @@ pub struct Time
       def same_letters?(start : Int32, name : String, size : Int32) : Bool
         k = 0
         while k < size
-          return false if (@bytes[start + k] | 0x20_u8) != (name.to_unsafe[k] | 0x20_u8)
+          return false if (@bytes[start + k] | 0x20_u8) != (name[k] | 0x20_u8)
           k += 1
         end
         true
@@ -3104,7 +3110,7 @@ pub struct Time
       end
 
       def pattern(pattern : String) : Bool
-        bytes = pattern.to_unsafe
+        bytes = pattern
         len = pattern.bytesize
         i = 0
         while i < len

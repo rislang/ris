@@ -89,7 +89,7 @@ def in_pieces(d : Digest, bytes : Array(UInt8)) : String
   step = 1
   while i < bytes.size
     stop = i + step > bytes.size ? bytes.size : i + step
-    d.update(bytes.to_unsafe + i.to_i64, stop - i)
+    d.update(bytes[i, stop - i], stop - i)
     i = stop
     step = step + 7
   end
@@ -203,11 +203,11 @@ puts "  CRC-32 and Adler-32"
 # bytes, and cuts either side of 5,552 bytes in the long one, where
 # Adler-32's reduction falls inside the first piece or straddles the two.
 def crc_in_pieces(s : String, cut : Int32) : UInt32
-  CRC32.update(CRC32.update(0_u32, s.to_unsafe, cut), s.to_unsafe + cut.to_i64, s.bytesize - cut)
+  CRC32.update(CRC32.update(0_u32, s, cut), s[cut, s.bytesize - cut], s.bytesize - cut)
 end
 
 def adler_in_pieces(s : String, cut : Int32) : UInt32
-  Adler32.update(Adler32.update(1_u32, s.to_unsafe, cut), s.to_unsafe + cut.to_i64, s.bytesize - cut)
+  Adler32.update(Adler32.update(1_u32, s, cut), s[cut, s.bytesize - cut], s.bytesize - cut)
 end
 
 mixed = String.new(300) do |dst|
@@ -227,7 +227,7 @@ end
   assert_true crc_in_pieces(ones, at) == CRC32.checksum(ones), "crc in pieces of the long one, cut at #{at}"
   assert_true adler_in_pieces(ones, at) == Adler32.checksum(ones), "adler in pieces of the long one, cut at #{at}"
 end
-assert_true CRC32.update(0_u32, mixed.to_unsafe, 0) == 0_u32 && Adler32.update(1_u32, mixed.to_unsafe, 0) == 1_u32, "nothing taken is the start"
+assert_true CRC32.update(0_u32, mixed, 0) == 0_u32 && Adler32.update(1_u32, mixed, 0) == 1_u32, "nothing taken is the start"
 puts "  CRC-32 and Adler-32 in pieces, cut anywhere"
 
 # CRC-64/XZ: reveng's catalogue gives 995dc9bbdf1939fa as its check
@@ -240,7 +240,7 @@ assert_str "0000000000000000", CRC64.hexdigest(""), "crc64 empty"
 assert_str "1f641a570685fc3f", CRC64.hexdigest("abcdefghijklmnopqrstuvwxyz0123456789" * 3), "crc64 of 108 bytes, as liblzma has it"
 
 def crc64_in_pieces(s : String, cut : Int32) : UInt64
-  CRC64.update(CRC64.update(0_u64, s.to_unsafe, cut), s.to_unsafe + cut.to_i64, s.bytesize - cut)
+  CRC64.update(CRC64.update(0_u64, s, cut), s[cut, s.bytesize - cut], s.bytesize - cut)
 end
 
 cut = 0
@@ -251,7 +251,7 @@ end
 [1, 7, 8, 9, 5552, 11103].each do |at|
   assert_true crc64_in_pieces(ones, at) == CRC64.checksum(ones), "crc64 in pieces of the long one, cut at #{at}"
 end
-assert_true CRC64.update(0_u64, mixed.to_unsafe, 0) == 0_u64, "crc64: nothing taken is the start"
+assert_true CRC64.update(0_u64, mixed, 0) == 0_u64, "crc64: nothing taken is the start"
 puts "  CRC-64 of the check value, of nothing, and in pieces, cut anywhere"
 
 # What a checksum costs against a pass that only adds the bytes up: CRC-32
@@ -260,7 +260,7 @@ puts "  CRC-64 of the check value, of nothing, and in pieces, cut anywhere"
 # code, so the ratio means nothing there and is not asked.
 {% unless flag?(:release) %}
   def byte_sum(s : String) : UInt32
-    p = s.to_unsafe
+    p = s
     sum = 0_u32
     i = 0
     while i < s.bytesize
@@ -315,15 +315,15 @@ assert_str "51a7c25008bf8063", XXH64.hexdigest("z" * 100, 1_u64), "xxh64 of 100 
 cut = 0
 while cut <= 300
   h = XXH64.new
-  h.update(mixed.to_unsafe, cut)
-  h.update(mixed.to_unsafe + cut.to_i64, 300 - cut)
+  h.update(mixed, cut)
+  h.update(mixed[cut, 300 - cut], 300 - cut)
   assert_true h.digest == XXH64.checksum(mixed), "xxh64 in pieces, cut at #{cut}"
   cut = cut + 1
 end
 h = XXH64.new
-h.update(mixed.to_unsafe, 50)
+h.update(mixed, 50)
 midway = h.digest
-h.update(mixed.to_unsafe + 50_i64, 250)
+h.update(mixed[50, 250], 250)
 assert_true midway == XXH64.checksum(mixed[0, 50]) && h.digest == XXH64.checksum(mixed), "xxh64 asked midway goes on as if it had not been"
 h.reset
 assert_true h.digest == XXH64.checksum(""), "xxh64 reset is the hash of nothing"

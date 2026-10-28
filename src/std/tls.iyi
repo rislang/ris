@@ -613,7 +613,7 @@ pub class TlsKeySchedule
     @sha384 ? SHA384.hash_bytes(data) : SHA256.hash_bytes(data)
   end
 
-  def extract(salt : Array(UInt8), ikm : Array(UInt8)) : Array(UInt8)
+  def extract(salt : Array::View(UInt8), ikm : Array::View(UInt8)) : Array(UInt8)
     @sha384 ? HKDF.extract(SHA384, salt, ikm) : HKDF.extract(SHA256, salt, ikm)
   end
 
@@ -5883,21 +5883,21 @@ end
 # A ClientHello's fields, and its extensions by where they lie in it:
 # what a ClientHelloOuter is built from and read by.
 class TlsHelloParts
-  getter message : Array(UInt8)
-  getter version : Array(UInt8)
-  getter random : Array(UInt8)
-  getter session : Array(UInt8)
-  getter suites : Array(UInt8)
-  getter compression : Array(UInt8)
+  getter message : Array::View(UInt8)
+  getter version : Array::View(UInt8)
+  getter random : Array::View(UInt8)
+  getter session : Array::View(UInt8)
+  getter suites : Array::View(UInt8)
+  getter compression : Array::View(UInt8)
   # Each extension's type, and where its data starts in `message` and how
   # many bytes it is.
   getter extensions : Array({Int32, Int32, Int32})
 
-  def initialize(@message : Array(UInt8), @version : Array(UInt8), @random : Array(UInt8), @session : Array(UInt8), @suites : Array(UInt8),
-                 @compression : Array(UInt8), @extensions : Array({Int32, Int32, Int32}))
+  def initialize(@message : Array::View(UInt8), @version : Array::View(UInt8), @random : Array::View(UInt8), @session : Array::View(UInt8), @suites : Array::View(UInt8),
+                 @compression : Array::View(UInt8), @extensions : Array({Int32, Int32, Int32}))
   end
 
-  def data(index : Int32) : Array(UInt8)
+  def data(index : Int32) : Array::View(UInt8)
     entry = @extensions[index]
     @message[entry[1], entry[2]].to_a
   end
@@ -6162,7 +6162,7 @@ struct TlsEch
 
   # Whether supported_versions *data* offers TLS 1.3 and nothing older,
   # GREASE values (RFC 8701's 0x?A?A, both bytes alike) passed over.
-  private def self.tls13_alone?(data : Array(UInt8)) : Bool
+  private def self.tls13_alone?(data : Array::View(UInt8)) : Bool
     field = TlsReader.new(data)
     listed = TlsBytes.u16_list(field.bytes(field.u8))
     return false if field.short? || !field.done?
@@ -6192,7 +6192,7 @@ struct TlsEch
   # ClientHelloInner's random) over the hash of *transcript* - the inner
   # handshake to this ServerHello or HelloRetryRequest, its confirmation's
   # bytes zero - eight bytes, under *schedule*'s hash.
-  def self.confirmation(schedule : TlsKeySchedule, inner_random : Array(UInt8), transcript : Array(UInt8), hrr : Bool) : Array(UInt8)
+  def self.confirmation(schedule : TlsKeySchedule, inner_random : Array::View(UInt8), transcript : Array(UInt8), hrr : Bool) : Array(UInt8)
     secret = schedule.extract(schedule.zeros, inner_random)
     schedule.expand_label(secret, hrr ? "hrr ech accept confirmation" : "ech accept confirmation", schedule.hash(transcript), 8)
   end
@@ -6216,7 +6216,7 @@ struct TlsEch
     copy
   end
 
-  private def self.u16_at(bytes : Array(UInt8), at : Int32) : Int32
+  private def self.u16_at(bytes : Array::View(UInt8), at : Int32) : Int32
     (bytes[at].to_i32 << 8) | bytes[at + 1].to_i32
   end
 end

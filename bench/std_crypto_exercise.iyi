@@ -13,11 +13,11 @@ def assert_str(expected : String, actual : String, msg : String) : Nil
   raise "ASSERTION FAILED: #{msg}\n  expected #{expected.inspect}\n  got      #{actual.inspect}" unless expected == actual
 end
 
-def hex(bytes : Array(UInt8)) : String
+def hex(bytes : Array::View(UInt8)) : String
   digits = "0123456789abcdef"
   text = ""
   bytes.each do |b|
-    text = text + digits[b.to_i32 >> 4].to_s + digits[b.to_i32 & 15].to_s
+    text = text + digits[b.to_i32 >> 4, 1] + digits[b.to_i32 & 15, 1]
   end
   text
 end

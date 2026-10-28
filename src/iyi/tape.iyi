@@ -124,42 +124,10 @@ module Tape
   end
 
   # Validate the public shape, not the pointers backing tape containers.
-  # The path is a type tuple, so recursive class shapes stop at compile time.
+  # The compiler tracks visited types and refuses recursive class shapes.
   def self.check_copy(type : T.class, path : P.class,
                       task : Task.class = Nil) : Nil forall T, P, Task
-    {% if T.name == "Std::Socket::IyiSocket" || T.name == "Std::Io::PipeReader" || T.name == "Std::Io::PipeWriter" || T.name == "RisTaskConfig" %}
-      {% unless Task == RisTaskCopy && T.name != "RisTaskConfig" %}
-        {% raise "resources cannot copy_to; transfer them through a joined task" %}
-      {% end %}
-    {% elsif T < ::Pointer || T.name.starts_with?("Array::Link(") %}
-      {% raise "copy_to refuses pointers and self-relative links;\nbuild on the destination with Array nodes and indices" %}
-    {% elsif T.union? %}
-      {% for member in T.union_types %}
-        check_copy({{member}}, P, task)
-      {% end %}
-    {% elsif T < ::Enum || T < ::Number || T == ::Bool || T == ::Char || T == ::Symbol || T == ::Nil || T == ::String || T == ::String::Builder %}
-    {% elsif P.type_vars.includes?(T) %}
-      {% if T.class? %}
-        {% raise "copy_to refuses self-reaching class types;\nbuild on the destination with Array nodes and indices" %}
-      {% end %}
-    {% elsif T.name.starts_with?("Array(") || T.name.starts_with?("Tre(") || T.name.starts_with?("SlicePool::Run(") || T.name.starts_with?("SlicePool::List(") || T < ::Tuple %}
-      {% for member in T.type_vars %}
-        check_copy({{member}}, Tuple(*P, T), task)
-      {% end %}
-    {% elsif T < ::NamedTuple %}
-      {% for key in T.keys %}
-        check_copy({{T[key]}}, Tuple(*P, T), task)
-      {% end %}
-    {% else %}
-      {% for field in T.instance_vars %}
-        check_copy({{field.type}}, Tuple(*P, T), task)
-      {% end %}
-      {% if T.class? %}
-        {% for child in T.all_subclasses %}
-          check_copy({{child}}, Tuple(*P, T), task)
-        {% end %}
-      {% end %}
-    {% end %}
+    # The compiler checks the reflected shape without spelling private types.
   end
 
   # A struct is flat when each field is a number, a `Link`, a `Span` or

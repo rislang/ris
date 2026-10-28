@@ -929,3 +929,9 @@ struct Array::View(T)
     value.hash
   end
 end
+
+struct Array::View(T)
+  def as_view : self
+    self
+  end
+end

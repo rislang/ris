@@ -272,6 +272,11 @@ class Iyi::TapeFfiFlow
       true
     end
 
+    def visit(node : MacroIf | MacroFor | MacroExpression | MacroVerbatim)
+      node.expanded.try &.accept(self)
+      false
+    end
+
     def visit(node : Def)
       false
     end

@@ -209,7 +209,7 @@ pub enum HpkeKem
   # DeriveKeyPair makes of *randomness* (at least Nsk bytes). An
   # `HpkeError` when a Diffie-Hellman step is refused: *recipient* is an
   # X25519 key of small order.
-  def encapsulate(recipient : HpkePublicKey, randomness : String | Array(UInt8), sender_key : HpkePrivateKey | Nil = nil) : {Array(UInt8), Array(UInt8)} | HpkeError
+  def encapsulate(recipient : HpkePublicKey, randomness : String | Array::View(UInt8), sender_key : HpkePrivateKey | Nil = nil) : {Array(UInt8), Array(UInt8)} | HpkeError
     HpkeKeys.same_kem(self, recipient.kem, "the recipient's public key")
     ephemeral = HpkePrivateKey.derive(self, randomness)
     dh = ephemeral.agree(recipient.bytes)
@@ -229,7 +229,7 @@ pub enum HpkeKem
   # Decap, or AuthDecap when *sender_public* is given (section 4.1): the
   # shared secret *enc* carries to *key*, or an `HpkeError` for an *enc*
   # of the wrong length, not a point of the curve, or of small order.
-  def decapsulate(key : HpkePrivateKey, enc : String | Array(UInt8), sender_public : HpkePublicKey | Nil = nil) : Array(UInt8) | HpkeError
+  def decapsulate(key : HpkePrivateKey, enc : String | Array::View(UInt8), sender_public : HpkePublicKey | Nil = nil) : Array(UInt8) | HpkeError
     HpkeKeys.same_kem(self, key.kem, "the recipient's key")
     sent = HpkeBytes.array(enc)
     unless sent.size == public_key_size
@@ -280,7 +280,7 @@ pub enum HpkeKdf
   end
 
   # HMAC under the hash, keyed with *key*.
-  def mac(key : String | Array(UInt8)) : HMAC
+  def mac(key : String | Array::View(UInt8)) : HMAC
     case self
     when HpkeKdf::HkdfSha256 then HMAC.new(SHA256, key)
     when HpkeKdf::HkdfSha384 then HMAC.new(SHA384, key)
@@ -364,8 +364,8 @@ pub struct HpkeSuite
   # which of *psk* and *psk_id*, and *sender_key*, are given: the sender's
   # context, whose `enc` goes to the recipient. An `HpkeError` when the
   # encapsulation is refused (*recipient* is an X25519 key of small order).
-  def sender(recipient : HpkePublicKey, info : String | Array(UInt8), randomness : String | Array(UInt8),
-             psk : String | Array(UInt8) | Nil = nil, psk_id : String | Array(UInt8) | Nil = nil,
+  def sender(recipient : HpkePublicKey, info : String | Array::View(UInt8), randomness : String | Array::View(UInt8),
+             psk : String | Array::View(UInt8) | Nil = nil, psk_id : String | Array::View(UInt8) | Nil = nil,
              sender_key : HpkePrivateKey | Nil = nil) : HpkeSender | HpkeError
     mode = HpkeKeys.mode(psk, psk_id, !sender_key.nil?)
     sent = @kem.encapsulate(recipient, randomness, sender_key)
@@ -377,8 +377,8 @@ pub struct HpkeSuite
   # recipient's context for *enc*, or an `HpkeError` when *enc* is refused.
   # The mode is chosen as `sender`'s is, by *sender_public* in place of
   # the sender's key.
-  def recipient(key : HpkePrivateKey, enc : String | Array(UInt8), info : String | Array(UInt8),
-                psk : String | Array(UInt8) | Nil = nil, psk_id : String | Array(UInt8) | Nil = nil,
+  def recipient(key : HpkePrivateKey, enc : String | Array::View(UInt8), info : String | Array::View(UInt8),
+                psk : String | Array::View(UInt8) | Nil = nil, psk_id : String | Array::View(UInt8) | Nil = nil,
                 sender_public : HpkePublicKey | Nil = nil) : HpkeRecipient | HpkeError
     mode = HpkeKeys.mode(psk, psk_id, !sender_public.nil?)
     secret = @kem.decapsulate(key, enc, sender_public)
@@ -388,8 +388,8 @@ pub struct HpkeSuite
 
   # Single-shot Seal<MODE> (section 6.1): enc and *plaintext* sealed, the
   # context's first message.
-  def seal(recipient : HpkePublicKey, info : String | Array(UInt8), aad : String | Array(UInt8), plaintext : String | Array(UInt8),
-           randomness : String | Array(UInt8), psk : String | Array(UInt8) | Nil = nil, psk_id : String | Array(UInt8) | Nil = nil,
+  def seal(recipient : HpkePublicKey, info : String | Array::View(UInt8), aad : String | Array::View(UInt8), plaintext : String | Array::View(UInt8),
+           randomness : String | Array::View(UInt8), psk : String | Array::View(UInt8) | Nil = nil, psk_id : String | Array::View(UInt8) | Nil = nil,
            sender_key : HpkePrivateKey | Nil = nil) : {Array(UInt8), String} | HpkeError
     context = sender(recipient, info, randomness, psk, psk_id, sender_key)
     return context if context.is_a?(HpkeError)
@@ -399,8 +399,8 @@ pub struct HpkeSuite
   end
 
   # Single-shot Open<MODE> (section 6.1): the plaintext, or an `HpkeError`.
-  def open(key : HpkePrivateKey, enc : String | Array(UInt8), info : String | Array(UInt8), aad : String | Array(UInt8),
-           ciphertext : String | Array(UInt8), psk : String | Array(UInt8) | Nil = nil, psk_id : String | Array(UInt8) | Nil = nil,
+  def open(key : HpkePrivateKey, enc : String | Array::View(UInt8), info : String | Array::View(UInt8), aad : String | Array::View(UInt8),
+           ciphertext : String | Array::View(UInt8), psk : String | Array::View(UInt8) | Nil = nil, psk_id : String | Array::View(UInt8) | Nil = nil,
            sender_public : HpkePublicKey | Nil = nil) : String | HpkeError
     context = recipient(key, enc, info, psk, psk_id, sender_public)
     return context if context.is_a?(HpkeError)
@@ -409,8 +409,8 @@ pub struct HpkeSuite
 
   # Single-shot SendExport<MODE> (section 6.2): enc and *length* bytes
   # exported under *exporter_context*.
-  def send_export(recipient : HpkePublicKey, info : String | Array(UInt8), exporter_context : String | Array(UInt8), length : Int32,
-                  randomness : String | Array(UInt8), psk : String | Array(UInt8) | Nil = nil, psk_id : String | Array(UInt8) | Nil = nil,
+  def send_export(recipient : HpkePublicKey, info : String | Array::View(UInt8), exporter_context : String | Array::View(UInt8), length : Int32,
+                  randomness : String | Array::View(UInt8), psk : String | Array::View(UInt8) | Nil = nil, psk_id : String | Array::View(UInt8) | Nil = nil,
                   sender_key : HpkePrivateKey | Nil = nil) : {Array(UInt8), Array(UInt8)} | HpkeError
     context = sender(recipient, info, randomness, psk, psk_id, sender_key)
     return context if context.is_a?(HpkeError)
@@ -419,8 +419,8 @@ pub struct HpkeSuite
 
   # Single-shot ReceiveExport<MODE> (section 6.2): what `send_export`
   # exported, or an `HpkeError` when *enc* is refused.
-  def receive_export(key : HpkePrivateKey, enc : String | Array(UInt8), info : String | Array(UInt8), exporter_context : String | Array(UInt8),
-                     length : Int32, psk : String | Array(UInt8) | Nil = nil, psk_id : String | Array(UInt8) | Nil = nil,
+  def receive_export(key : HpkePrivateKey, enc : String | Array::View(UInt8), info : String | Array::View(UInt8), exporter_context : String | Array::View(UInt8),
+                     length : Int32, psk : String | Array::View(UInt8) | Nil = nil, psk_id : String | Array::View(UInt8) | Nil = nil,
                      sender_public : HpkePublicKey | Nil = nil) : Array(UInt8) | HpkeError
     context = recipient(key, enc, info, psk, psk_id, sender_public)
     return context if context.is_a?(HpkeError)
@@ -440,7 +440,7 @@ pub struct HpkePublicKey
 
   # DeserializePublicKey, validated: the key *bytes* are, or an
   # `HpkeError` for the wrong length or a point not on the curve.
-  def self.from_bytes(kem : HpkeKem, bytes : String | Array(UInt8)) : HpkePublicKey | HpkeError
+  def self.from_bytes(kem : HpkeKem, bytes : String | Array::View(UInt8)) : HpkePublicKey | HpkeError
     raw = HpkeBytes.copy(bytes)
     unless raw.size == kem.public_key_size
       return HpkeError.new("HPKE: a #{kem.name} public key is #{kem.public_key_size} bytes, not #{raw.size}")
@@ -467,7 +467,7 @@ pub struct HpkePrivateKey
   # DeriveKeyPair (section 7.1.3): the key pair of *ikm*, at least Nsk
   # bytes, under the KEM's own KDF. For P-256 and P-384, candidates are
   # drawn until one is in [1, n - 1].
-  def self.derive(kem : HpkeKem, ikm : String | Array(UInt8)) : HpkePrivateKey
+  def self.derive(kem : HpkeKem, ikm : String | Array::View(UInt8)) : HpkePrivateKey
     raw = HpkeBytes.array(ikm)
     size = kem.private_key_size
     raise "HPKE: a #{kem.name} key's input keying material is at least #{size} bytes, not #{raw.size}" if raw.size < size
@@ -491,7 +491,7 @@ pub struct HpkePrivateKey
   # DeserializePrivateKey: the key *bytes* are, or an `HpkeError` for the
   # wrong length or, on P-256 and P-384, a scalar not in [1, n - 1]. An
   # X25519 key is clamped (section 7.1.2).
-  def self.from_bytes(kem : HpkeKem, bytes : String | Array(UInt8)) : HpkePrivateKey | HpkeError
+  def self.from_bytes(kem : HpkeKem, bytes : String | Array::View(UInt8)) : HpkePrivateKey | HpkeError
     raw = HpkeBytes.copy(bytes)
     unless raw.size == kem.private_key_size
       return HpkeError.new("HPKE: a #{kem.name} private key is #{kem.private_key_size} bytes, not #{raw.size}")
@@ -532,7 +532,7 @@ pub struct HpkePrivateKey
   # X25519 secret, or the x-coordinate of the product on P-256 and P-384.
   # An `HpkeError` for a peer of the wrong length, a point not on the
   # curve, or an all-zero X25519 secret (section 7.1.4).
-  def agree(peer : String | Array(UInt8)) : Array(UInt8) | HpkeError
+  def agree(peer : String | Array::View(UInt8)) : Array(UInt8) | HpkeError
     curve = @curve
     if curve.nil?
       got = X25519.shared(@secret, peer)
@@ -558,13 +558,13 @@ pub class HpkeSender
   # ContextS.Seal: *plaintext* sealed under the next nonce, *aad*
   # authenticated with it; or an `HpkeError` once the sequence is at
   # 2^96 - 1, with nothing sealed.
-  def seal(plaintext : String | Array(UInt8), aad : String | Array(UInt8) = "") : String | HpkeError
+  def seal(plaintext : String | Array::View(UInt8), aad : String | Array::View(UInt8) = "") : String | HpkeError
     @cipher.seal(plaintext, aad)
   end
 
   # Context.Export (section 5.3): *length* bytes, at most 255 hashes,
   # bound to *exporter_context*.
-  def export(exporter_context : String | Array(UInt8), length : Int32) : Array(UInt8)
+  def export(exporter_context : String | Array::View(UInt8), length : Int32) : Array(UInt8)
     @cipher.export(exporter_context, length)
   end
 
@@ -594,12 +594,12 @@ pub class HpkeRecipient
   # ContextR.Open: the plaintext of *ciphertext* at the next nonce, or an
   # `HpkeError` - its tag does not match, or the sequence is at 2^96 - 1 -
   # with the sequence left where it was.
-  def open(ciphertext : String | Array(UInt8), aad : String | Array(UInt8) = "") : String | HpkeError
+  def open(ciphertext : String | Array::View(UInt8), aad : String | Array::View(UInt8) = "") : String | HpkeError
     @cipher.open(ciphertext, aad)
   end
 
   # Context.Export (section 5.3).
-  def export(exporter_context : String | Array(UInt8), length : Int32) : Array(UInt8)
+  def export(exporter_context : String | Array::View(UInt8), length : Int32) : Array(UInt8)
     @cipher.export(exporter_context, length)
   end
 
@@ -635,8 +635,8 @@ class HpkeCipher
   @base_nonce : Array(UInt8)
   @exporter_secret : Array(UInt8)
 
-  def initialize(suite : HpkeSuite, @mode : HpkeMode, shared_secret : Array(UInt8), info : String | Array(UInt8),
-                 psk : String | Array(UInt8) | Nil, psk_id : String | Array(UInt8) | Nil)
+  def initialize(suite : HpkeSuite, @mode : HpkeMode, shared_secret : Array(UInt8), info : String | Array::View(UInt8),
+                 psk : String | Array::View(UInt8) | Nil, psk_id : String | Array::View(UInt8) | Nil)
     @aead = suite.aead
     @kdf = suite.kdf
     @sequence = 0_u128
@@ -656,7 +656,7 @@ class HpkeCipher
            end
   end
 
-  def seal(plaintext : String | Array(UInt8), aad : String | Array(UInt8)) : String | HpkeError
+  def seal(plaintext : String | Array::View(UInt8), aad : String | Array::View(UInt8)) : String | HpkeError
     box = @box
     raise "HPKE: an export-only context seals nothing" if box.nil?
     return HpkeError.new("HPKE: the context's nonces are spent: sequence 2^96 - 1 is never sealed at") if @sequence >= LAST
@@ -665,7 +665,7 @@ class HpkeCipher
     sealed
   end
 
-  def open(ciphertext : String | Array(UInt8), aad : String | Array(UInt8)) : String | HpkeError
+  def open(ciphertext : String | Array::View(UInt8), aad : String | Array::View(UInt8)) : String | HpkeError
     box = @box
     raise "HPKE: an export-only context opens nothing" if box.nil?
     return HpkeError.new("HPKE: the context's nonces are spent: sequence 2^96 - 1 is never opened at") if @sequence >= LAST
@@ -675,7 +675,7 @@ class HpkeCipher
     opened
   end
 
-  def export(exporter_context : String | Array(UInt8), length : Int32) : Array(UInt8)
+  def export(exporter_context : String | Array::View(UInt8), length : Int32) : Array(UInt8)
     most = 255 * @kdf.hash_size
     raise "HPKE: an export is 0 to #{most} bytes under #{@kdf.name}, not #{length}" if length < 0 || length > most
     @labels.expand(@exporter_secret, "sec", HpkeBytes.array(exporter_context), length)
@@ -734,7 +734,7 @@ end
 
 struct HpkeKeys
   # Section 5.1's VerifyPSKInputs, and the mode the inputs make.
-  def self.mode(psk : String | Array(UInt8) | Nil, psk_id : String | Array(UInt8) | Nil, auth : Bool) : HpkeMode
+  def self.mode(psk : String | Array::View(UInt8) | Nil, psk_id : String | Array::View(UInt8) | Nil, auth : Bool) : HpkeMode
     raise "HPKE: a psk needs its psk_id, and a psk_id its psk (section 5.1)" if psk.nil? != psk_id.nil?
     if psk && psk_id
       size = HpkeBytes.array(psk).size
@@ -751,16 +751,15 @@ struct HpkeKeys
 end
 
 struct HpkeBytes
-  # The bytes of *data*: a String's copied out, an Array as it is.
-  def self.array(data : String | Array(UInt8)) : Array(UInt8)
-    return data unless data.is_a?(String)
-    p = data.to_unsafe
-    Array(UInt8).new(data.bytesize) { |i| p[i] }
+  # Copy the borrowed bytes onto the caller's tape.
+  def self.array(data : String | Array::View(UInt8)) : Array(UInt8)
+    size = data.is_a?(String) ? data.bytesize : data.size
+    Array(UInt8).new(size) { |i| data[i] }
   end
 
   # The bytes of *data*, always a copy: what a key keeps.
-  def self.copy(data : String | Array(UInt8)) : Array(UInt8)
-    data.is_a?(String) ? array(data) : data.dup
+  def self.copy(data : String | Array::View(UInt8)) : Array(UInt8)
+    array(data)
   end
 
   # I2OSP(n, 2).

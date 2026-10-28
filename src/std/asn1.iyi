@@ -72,6 +72,7 @@ import std/time::{Time}
 # What `Der.parse`, `children` and the typed readers answer for bytes that
 # are not the DER they were asked for: a sentence, and the offset in the
 # bytes `Der.parse` was given where the trouble is.
+@[OnTape]
 pub struct Asn1Error
   getter message : String
   getter offset : Int32

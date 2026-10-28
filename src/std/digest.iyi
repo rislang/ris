@@ -34,8 +34,9 @@ import std/int
 # one padded with a one bit, zeros and the message's length in bits, and
 # each block is compressed into the state. A subclass is the state and
 # its compression; this is the cutting and the padding.
+@[OnTape]
 pub abstract class Digest
-  @block : Pointer(UInt8)
+  @block : Array(UInt8)
   @block_size : Int32
   @fill : Int32
   @length : UInt64
@@ -43,7 +44,7 @@ pub abstract class Digest
 
   def initialize(block_size : Int32)
     @block_size = block_size
-    @block = Pointer(UInt8).malloc(block_size.to_u64)
+    @block = Array(UInt8).new(block_size, 0_u8)
     @fill = 0
     @length = 0_u64
     @finished = false
@@ -58,10 +59,10 @@ pub abstract class Digest
   private abstract def start : Nil
 
   # One block of `block_size` bytes into the state.
-  private abstract def compress(block : Pointer(UInt8)) : Nil
+  private abstract def compress(block : String | Array::View(UInt8)) : Nil
 
   # The first `digest_size` bytes of the state, in the algorithm's order.
-  private abstract def write_state(dst : Pointer(UInt8)) : Nil
+  private abstract def write_state(dst : Array(UInt8)) : Nil
 
   # Another digest's state into this one's, which is the same algorithm.
   private abstract def take_state(other : Digest) : Nil
@@ -93,10 +94,6 @@ pub abstract class Digest
     start
   end
 
-  def update(data : String) : self
-    update(data.to_unsafe, data.bytesize)
-  end
-
   # Text on the caller's tape, read where it lies with `[]`, a byte at a
   # time into the block: the tape gives no pointer to compress from.
   def update(data : String) : self
@@ -120,7 +117,7 @@ pub abstract class Digest
     update(data.bytes)
   end
 
-  def update(data : Pointer(UInt8), count : Int32) : self
+  def update(data : String | Array::View(UInt8), count : Int32) : self
     raise "#{self.class}: update after final; reset first" if @finished
     raise "#{self.class}: a negative count of bytes: #{count}" if count < 0
     @length = @length &+ count.to_u64
@@ -128,7 +125,7 @@ pub abstract class Digest
     if @fill > 0
       take = @block_size - @fill
       take = count if count < take
-      (@block + @fill.to_i64).copy_from(data, take)
+      take.times { |i| @block[@fill + i] = data[i] }
       @fill = @fill + take
       done = take
       if @fill == @block_size
@@ -138,11 +135,11 @@ pub abstract class Digest
     end
     # Whole blocks straight from the caller's bytes, with no copy.
     while count - done >= @block_size
-      compress(data + done.to_i64)
+      compress(data[done, count - done])
       done = done + @block_size
     end
     if done < count
-      @block.copy_from(data + done.to_i64, count - done)
+      (count - done).times { |i| @block[i] = data[done + i] }
       @fill = count - done
     end
     self
@@ -154,7 +151,7 @@ pub abstract class Digest
     raise "#{self.class}: final called twice; reset first" if @finished
     raise "#{self.class}: #{dst.size} bytes cannot hold a #{digest_size}-byte digest" if dst.size < digest_size
     pad
-    write_state(dst.to_unsafe)
+    write_state(dst)
     @finished = true
   end
 
@@ -175,7 +172,7 @@ pub abstract class Digest
     unless other.crystal_type_id == crystal_type_id
       raise "#{self.class}: cannot take the state of a #{other.class}"
     end
-    @block.copy_from(other.@block, @block_size)
+    @block_size.times { |i| @block[i] = other.@block[i] }
     @fill = other.@fill
     @length = other.@length
     @finished = other.@finished
@@ -210,7 +207,7 @@ pub abstract class Digest
     bits = @length.unsafe_shl(3)
     at = @block_size - 8
     if field == 16
-      DigestUtil.store_u64_be(@block + (at - 8).to_i64, @length.unsafe_shr(61))
+      DigestUtil.store_u64_be(@block, @length.unsafe_shr(61), at - 8)
     end
     if little_endian?
       i = 0
@@ -219,20 +216,21 @@ pub abstract class Digest
         i = i + 1
       end
     else
-      DigestUtil.store_u64_be(@block + at.to_i64, bits)
+      DigestUtil.store_u64_be(@block, bits, at)
     end
     compress(@block)
     @fill = 0
   end
 end
 
+@[OnTape]
 pub class MD5 < Digest
-  @h : Pointer(UInt32)
-  @w : Pointer(UInt32)
+  @h : Array(UInt32)
+  @w : Array(UInt32)
 
   def initialize
-    @h = Pointer(UInt32).malloc(4_u64)
-    @w = Pointer(UInt32).malloc(16_u64)
+    @h = Array(UInt32).new(4, 0_u32)
+    @w = Array(UInt32).new(16, 0_u32)
     super(64)
   end
 
@@ -252,10 +250,10 @@ pub class MD5 < Digest
   end
 
   private def take_state(other : Digest) : Nil
-    @h.copy_from(other.as(MD5).@h, 4)
+    4.times { |i| @h[i] = other.as(MD5).@h[i] }
   end
 
-  private def write_state(dst : Pointer(UInt8)) : Nil
+  private def write_state(dst : Array(UInt8)) : Nil
     i = 0
     while i < 16
       dst[i] = (@h[i >> 2].unsafe_shr((i & 3) * 8) & 255_u32).to_u8
@@ -263,7 +261,7 @@ pub class MD5 < Digest
     end
   end
 
-  private def compress(block : Pointer(UInt8)) : Nil
+  private def compress(block : String | Array::View(UInt8)) : Nil
     w = @w
     i = 0
     while i < 16
@@ -367,13 +365,14 @@ pub class MD5 < Digest
   end
 end
 
+@[OnTape]
 pub class SHA1 < Digest
-  @h : Pointer(UInt32)
-  @w : Pointer(UInt32)
+  @h : Array(UInt32)
+  @w : Array(UInt32)
 
   def initialize
-    @h = Pointer(UInt32).malloc(5_u64)
-    @w = Pointer(UInt32).malloc(80_u64)
+    @h = Array(UInt32).new(5, 0_u32)
+    @w = Array(UInt32).new(80, 0_u32)
     super(64)
   end
 
@@ -390,14 +389,14 @@ pub class SHA1 < Digest
   end
 
   private def take_state(other : Digest) : Nil
-    @h.copy_from(other.as(SHA1).@h, 5)
+    5.times { |i| @h[i] = other.as(SHA1).@h[i] }
   end
 
-  private def write_state(dst : Pointer(UInt8)) : Nil
+  private def write_state(dst : Array(UInt8)) : Nil
     DigestUtil.store_u32s_be(dst, @h, 20)
   end
 
-  private def compress(block : Pointer(UInt8)) : Nil
+  private def compress(block : String | Array::View(UInt8)) : Nil
     w = @w
     DigestUtil.load_u32s_be(w, block, 16)
     i = 16
@@ -445,13 +444,14 @@ end
 
 # SHA-256, FIPS 180-4 §6.2. SHA-224 is the same compression from another
 # starting state, its digest the first 28 bytes.
+@[OnTape]
 pub class SHA256 < Digest
-  @h : Pointer(UInt32)
-  @w : Pointer(UInt32)
+  @h : Array(UInt32)
+  @w : Array(UInt32)
 
   def initialize
-    @h = Pointer(UInt32).malloc(8_u64)
-    @w = Pointer(UInt32).malloc(64_u64)
+    @h = Array(UInt32).new(8, 0_u32)
+    @w = Array(UInt32).new(64, 0_u32)
     super(64)
   end
 
@@ -471,14 +471,14 @@ pub class SHA256 < Digest
   end
 
   private def take_state(other : Digest) : Nil
-    @h.copy_from(other.as(SHA256).@h, 8)
+    8.times { |i| @h[i] = other.as(SHA256).@h[i] }
   end
 
-  private def write_state(dst : Pointer(UInt8)) : Nil
+  private def write_state(dst : Array(UInt8)) : Nil
     DigestUtil.store_u32s_be(dst, @h, digest_size)
   end
 
-  private def compress(block : Pointer(UInt8)) : Nil
+  private def compress(block : String | Array::View(UInt8)) : Nil
     w = @w
     k = round_constants
     DigestUtil.load_u32s_be(w, block, 16)
@@ -528,12 +528,12 @@ pub class SHA256 < Digest
     @h[7] = @h[7] &+ hh
   end
 
-  @@k = Pointer(UInt32).new(0_u64)
+  @@k = Array(UInt32).new.copy_to(Program.tape)
 
   # The 64 round constants, made once: the first 32 bits of the
   # fractional parts of the cube roots of the first 64 primes.
-  private def round_constants : Pointer(UInt32)
-    return @@k if @@k.address != 0_u64
+  private def round_constants : Array(UInt32)
+    return @@k if @@k.empty? == false
     words = [
       0x428a2f98_u32, 0x71374491_u32, 0xb5c0fbcf_u32, 0xe9b5dba5_u32,
       0x3956c25b_u32, 0x59f111f1_u32, 0x923f82a4_u32, 0xab1c5ed5_u32,
@@ -552,13 +552,15 @@ pub class SHA256 < Digest
       0x748f82ee_u32, 0x78a5636f_u32, 0x84c87814_u32, 0x8cc70208_u32,
       0x90befffa_u32, 0xa4506ceb_u32, 0xbef9a3f7_u32, 0xc67178f2_u32,
     ]
-    table = Pointer(UInt32).malloc(64_u64)
-    table.copy_from(words.to_unsafe, 64)
-    @@k = table
-    table
+    table = Array(UInt32).new(64, 0_u32)
+    64.times { |i| table[i] = words[i] }
+    kept = table.copy_to(Program.tape)
+    @@k = kept
+    kept
   end
 end
 
+@[OnTape]
 pub class SHA224 < SHA256
   def digest_size : Int32
     28
@@ -581,13 +583,14 @@ end
 # SHA-512, FIPS 180-4 §6.4: 64-bit words, 128-byte blocks, 80 rounds.
 # SHA-384 is the same compression from another starting state, its digest
 # the first 48 bytes.
+@[OnTape]
 pub class SHA512 < Digest
-  @h : Pointer(UInt64)
-  @w : Pointer(UInt64)
+  @h : Array(UInt64)
+  @w : Array(UInt64)
 
   def initialize
-    @h = Pointer(UInt64).malloc(8_u64)
-    @w = Pointer(UInt64).malloc(80_u64)
+    @h = Array(UInt64).new(8, 0_u64)
+    @w = Array(UInt64).new(80, 0_u64)
     super(128)
   end
 
@@ -607,10 +610,10 @@ pub class SHA512 < Digest
   end
 
   private def take_state(other : Digest) : Nil
-    @h.copy_from(other.as(SHA512).@h, 8)
+    8.times { |i| @h[i] = other.as(SHA512).@h[i] }
   end
 
-  private def write_state(dst : Pointer(UInt8)) : Nil
+  private def write_state(dst : Array(UInt8)) : Nil
     i = 0
     while i < digest_size
       dst[i] = (@h[i >> 3].unsafe_shr(56 - (i & 7) * 8) & 255_u64).to_u8
@@ -618,12 +621,12 @@ pub class SHA512 < Digest
     end
   end
 
-  private def compress(block : Pointer(UInt8)) : Nil
+  private def compress(block : String | Array::View(UInt8)) : Nil
     w = @w
     k = round_constants
     i = 0
     while i < 16
-      w[i] = DigestUtil.load_u64_be(block + (i * 8).to_i64)
+      w[i] = DigestUtil.load_u64_be(block[i * 8, 8])
       i = i + 1
     end
     while i < 80
@@ -665,12 +668,12 @@ pub class SHA512 < Digest
     @h[7] = @h[7] &+ hh
   end
 
-  @@k = Pointer(UInt64).new(0_u64)
+  @@k = Array(UInt64).new.copy_to(Program.tape)
 
   # The 80 round constants, made once: the first 64 bits of the
   # fractional parts of the cube roots of the first 80 primes.
-  private def round_constants : Pointer(UInt64)
-    return @@k if @@k.address != 0_u64
+  private def round_constants : Array(UInt64)
+    return @@k if @@k.empty? == false
     words = [
       0x428a2f98d728ae22_u64, 0x7137449123ef65cd_u64, 0xb5c0fbcfec4d3b2f_u64, 0xe9b5dba58189dbbc_u64,
       0x3956c25bf348b538_u64, 0x59f111f1b605d019_u64, 0x923f82a4af194f9b_u64, 0xab1c5ed5da6d8118_u64,
@@ -693,13 +696,15 @@ pub class SHA512 < Digest
       0x28db77f523047d84_u64, 0x32caab7b40c72493_u64, 0x3c9ebe0a15c9bebc_u64, 0x431d67c49c100d4c_u64,
       0x4cc5d4becb3e42b6_u64, 0x597f299cfc657e2a_u64, 0x5fcb6fab3ad6faec_u64, 0x6c44198c4a475817_u64,
     ]
-    table = Pointer(UInt64).malloc(80_u64)
-    table.copy_from(words.to_unsafe, 80)
-    @@k = table
-    table
+    table = Array(UInt64).new(80, 0_u64)
+    80.times { |i| table[i] = words[i] }
+    kept = table.copy_to(Program.tape)
+    @@k = kept
+    kept
   end
 end
 
+@[OnTape]
 pub class SHA384 < SHA512
   def digest_size : Int32
     48
@@ -725,13 +730,13 @@ end
 # (lane 1, then each lane pi sends it to), the compact form of the
 # Keccak team's reference, so the step needs one lane of temporary.
 struct Keccak
-  @@tables = Pointer(UInt64).new(0_u64)
+  @@tables = Array(UInt64).new.copy_to(Program.tape)
 
   # The 24 iota round constants, then the 24 rho offsets of the lanes the
   # cycle visits, then the 24 lanes themselves, FIPS 202 sections 3.2.2
   # to 3.2.5.
-  private def self.tables : Pointer(UInt64)
-    return @@tables if @@tables.address != 0_u64
+  private def self.tables : Array(UInt64)
+    return @@tables if @@tables.empty? == false
     words = [
       0x0000000000000001_u64, 0x0000000000008082_u64, 0x800000000000808a_u64, 0x8000000080008000_u64,
       0x000000000000808b_u64, 0x0000000080000001_u64, 0x8000000080008081_u64, 0x8000000000008009_u64,
@@ -744,10 +749,11 @@ struct Keccak
       10_u64, 7_u64, 11_u64, 17_u64, 18_u64, 3_u64, 5_u64, 16_u64, 8_u64, 21_u64, 24_u64, 4_u64,
       15_u64, 23_u64, 19_u64, 13_u64, 12_u64, 2_u64, 20_u64, 14_u64, 22_u64, 9_u64, 6_u64, 1_u64,
     ]
-    table = Pointer(UInt64).malloc(72_u64)
-    table.copy_from(words.to_unsafe, 72)
-    @@tables = table
-    table
+    table = Array(UInt64).new(72, 0_u64)
+    72.times { |i| table[i] = words[i] }
+    kept = table.copy_to(Program.tape)
+    @@tables = kept
+    kept
   end
 
   # Every rotation here is by 1 to 63, so no branch for a zero.
@@ -756,7 +762,7 @@ struct Keccak
   end
 
   # The 24 rounds over the 25 lanes at *a*; *c* is five lanes of scratch.
-  def self.permute(a : Pointer(UInt64), c : Pointer(UInt64)) : Nil
+  def self.permute(a : Array(UInt64), c : Array(UInt64)) : Nil
     t = tables
     round = 0
     while round < 24
@@ -808,10 +814,10 @@ struct Keccak
   end
 
   # One block of *rate* bytes xored into the lanes, then the permutation.
-  def self.absorb(a : Pointer(UInt64), c : Pointer(UInt64), block : Pointer(UInt8), rate : Int32) : Nil
+  def self.absorb(a : Array(UInt64), c : Array(UInt64), block : String | Array::View(UInt8), rate : Int32) : Nil
     i = 0
     while i < rate // 8
-      p = block + (i * 8).to_i64
+      p = block[i * 8, 8]
       lane = 0_u64
       k = 7
       while k >= 0
@@ -828,7 +834,7 @@ struct Keccak
   # for SHAKE's `1111`) with pad10*1's first one bit after them, zeros,
   # and pad10*1's last one bit at the top of the block's last byte. A
   # suffix landing in the last byte shares it with that bit.
-  def self.pad(a : Pointer(UInt64), c : Pointer(UInt64), block : Pointer(UInt8), fill : Int32, rate : Int32, suffix : UInt8) : Nil
+  def self.pad(a : Array(UInt64), c : Array(UInt64), block : Array(UInt8), fill : Int32, rate : Int32, suffix : UInt8) : Nil
     block[fill] = suffix
     i = fill + 1
     while i < rate
@@ -839,7 +845,7 @@ struct Keccak
     absorb(a, c, block, rate)
   end
 
-  def self.byte(a : Pointer(UInt64), i : Int32) : UInt8
+  def self.byte(a : Array(UInt64), i : Int32) : UInt8
     (a[i >> 3].unsafe_shr((i & 7) * 8) & 255_u64).to_u8
   end
 end
@@ -850,13 +856,14 @@ end
 # kept and its padding is replaced. The digest is shorter than the rate
 # in all four, so it is the first bytes of the state after the last
 # block, with no further permutation.
+@[OnTape]
 pub abstract class SHA3 < Digest
-  @a : Pointer(UInt64)
-  @c : Pointer(UInt64)
+  @a : Array(UInt64)
+  @c : Array(UInt64)
 
   def initialize(rate : Int32)
-    @a = Pointer(UInt64).malloc(25_u64)
-    @c = Pointer(UInt64).malloc(5_u64)
+    @a = Array(UInt64).new(25, 0_u64)
+    @c = Array(UInt64).new(5, 0_u64)
     super(rate)
   end
 
@@ -872,10 +879,10 @@ pub abstract class SHA3 < Digest
   # `as` because a cast from an unrelated digest is a compile error.
   private def take_state(other : Digest) : Nil
     from = other.as?(SHA3)
-    @a.copy_from(from.@a, 25) if from
+    25.times { |i| @a[i] = from.@a[i] } if from
   end
 
-  private def write_state(dst : Pointer(UInt8)) : Nil
+  private def write_state(dst : Array(UInt8)) : Nil
     i = 0
     while i < digest_size
       dst[i] = Keccak.byte(@a, i)
@@ -883,7 +890,7 @@ pub abstract class SHA3 < Digest
     end
   end
 
-  private def compress(block : Pointer(UInt8)) : Nil
+  private def compress(block : String | Array::View(UInt8)) : Nil
     Keccak.absorb(@a, @c, block, @block_size)
   end
 
@@ -893,6 +900,7 @@ pub abstract class SHA3 < Digest
   end
 end
 
+@[OnTape]
 pub class SHA3_224 < SHA3
   def initialize
     super(144)
@@ -903,6 +911,7 @@ pub class SHA3_224 < SHA3
   end
 end
 
+@[OnTape]
 pub class SHA3_256 < SHA3
   def initialize
     super(200 - 2 * 32)
@@ -913,6 +922,7 @@ pub class SHA3_256 < SHA3
   end
 end
 
+@[OnTape]
 pub class SHA3_384 < SHA3
   def initialize
     super(104)
@@ -923,6 +933,7 @@ pub class SHA3_384 < SHA3
   end
 end
 
+@[OnTape]
 pub class SHA3_512 < SHA3
   def initialize
     super(72)
@@ -939,19 +950,20 @@ end
 # stopped, so reads of 3 and 5 bytes are the first 8 bytes of one read.
 # Absorbing after squeezing would be a different function, not more
 # input, and is refused until `reset`.
+@[OnTape]
 pub abstract class Shake
-  @a : Pointer(UInt64)
-  @c : Pointer(UInt64)
-  @block : Pointer(UInt8)
+  @a : Array(UInt64)
+  @c : Array(UInt64)
+  @block : Array(UInt8)
   @rate : Int32
   @fill : Int32
   @squeezing : Bool
 
   def initialize(rate : Int32)
     @rate = rate
-    @a = Pointer(UInt64).malloc(25_u64)
-    @c = Pointer(UInt64).malloc(5_u64)
-    @block = Pointer(UInt8).malloc(rate.to_u64)
+    @a = Array(UInt64).new(25, 0_u64)
+    @c = Array(UInt64).new(5, 0_u64)
+    @block = Array(UInt8).new(rate, 0_u8)
     @fill = 0
     @squeezing = false
   end
@@ -981,21 +993,21 @@ pub abstract class Shake
   end
 
   def update(data : String) : self
-    update(data.to_unsafe, data.bytesize)
+    update(data, data.bytesize)
   end
 
   def update(data : Array::View(UInt8)) : self
     update(data.bytes)
   end
 
-  def update(data : Pointer(UInt8), count : Int32) : self
+  def update(data : String | Array::View(UInt8), count : Int32) : self
     raise "#{self.class}: update after read; reset first" if @squeezing
     raise "#{self.class}: a negative count of bytes: #{count}" if count < 0
     done = 0
     if @fill > 0
       take = @rate - @fill
       take = count if count < take
-      (@block + @fill.to_i64).copy_from(data, take)
+      take.times { |i| @block[@fill + i] = data[i] }
       @fill = @fill + take
       done = take
       if @fill == @rate
@@ -1004,11 +1016,11 @@ pub abstract class Shake
       end
     end
     while count - done >= @rate
-      Keccak.absorb(@a, @c, data + done.to_i64, @rate)
+      Keccak.absorb(@a, @c, data[done, count - done], @rate)
       done = done + @rate
     end
     if done < count
-      @block.copy_from(data + done.to_i64, count - done)
+      (count - done).times { |i| @block[i] = data[done + i] }
       @fill = count - done
     end
     self
@@ -1042,12 +1054,14 @@ pub abstract class Shake
   end
 end
 
+@[OnTape]
 pub class SHAKE128 < Shake
   def initialize
     super(168)
   end
 end
 
+@[OnTape]
 pub class SHAKE256 < Shake
   def initialize
     super(136)
@@ -1062,13 +1076,13 @@ end
 # number `checksum` answers for the two joined.
 pub struct CRC32
   def self.checksum(data : String) : UInt32
-    update(0_u32, data.to_unsafe, data.bytesize)
+    update(0_u32, data, data.bytesize)
   end
 
   # Eight bytes a step through eight tables (slicing-by-8), where it had
   # been one bit a step: twenty megabytes took 105 ms, which was most of
   # what `Gzip.decompress` spent, the inflating itself taking 30.
-  def self.update(crc : UInt32, data : Pointer(UInt8), count : Int32) : UInt32
+  def self.update(crc : UInt32, data : String | Array::View(UInt8), count : Int32) : UInt32
     raise "CRC32: a negative count of bytes: #{count}" if count < 0
     t = tables
     crc = crc ^ 0xffffffff_u32
@@ -1089,13 +1103,13 @@ pub struct CRC32
     crc ^ 0xffffffff_u32
   end
 
-  @@tables = Pointer(UInt32).new(0_u64)
+  @@tables = Array(UInt32).new.copy_to(Program.tape)
 
   # The eight tables, made once: the first is the byte-at-a-time table,
   # and each after it is one more byte of zeros through the one before.
-  private def self.tables : Pointer(UInt32)
-    return @@tables if @@tables.address != 0_u64
-    t = Pointer(UInt32).malloc(2048_u64)
+  private def self.tables : Array(UInt32)
+    return @@tables if @@tables.empty? == false
+    t = Array(UInt32).new(2048, 0_u32)
     n = 0
     while n < 256
       c = n.to_u32
@@ -1117,8 +1131,9 @@ pub struct CRC32
       end
       slice = slice + 1
     end
-    @@tables = t
-    t
+    kept = t.copy_to(Program.tape)
+    @@tables = kept
+    kept
   end
 
   def self.hexdigest(data : String) : String
@@ -1131,10 +1146,10 @@ end
 # zlib's `adler32(adler, buf, len)`.
 pub struct Adler32
   def self.checksum(data : String) : UInt32
-    update(1_u32, data.to_unsafe, data.bytesize)
+    update(1_u32, data, data.bytesize)
   end
 
-  def self.update(sum : UInt32, data : Pointer(UInt8), count : Int32) : UInt32
+  def self.update(sum : UInt32, data : String | Array::View(UInt8), count : Int32) : UInt32
     raise "Adler32: a negative count of bytes: #{count}" if count < 0
     a = (sum & 0xffff_u32) % 65521_u32
     b = sum.unsafe_shr(16) % 65521_u32
@@ -1171,14 +1186,14 @@ end
 # little-endian.
 pub struct CRC64
   def self.checksum(data : String) : UInt64
-    update(0_u64, data.to_unsafe, data.bytesize)
+    update(0_u64, data, data.bytesize)
   end
 
   # Eight bytes a step through eight tables, as `CRC32` goes: the bytes
   # loaded as one little-endian word, xored into the checksum, and each
   # of the eight looked up in the table for how many bytes of zeros
   # follow it in the step.
-  def self.update(crc : UInt64, data : Pointer(UInt8), count : Int32) : UInt64
+  def self.update(crc : UInt64, data : String | Array::View(UInt8), count : Int32) : UInt64
     raise "CRC64: a negative count of bytes: #{count}" if count < 0
     t = tables
     crc = crc ^ 0xffffffffffffffff_u64
@@ -1201,12 +1216,12 @@ pub struct CRC64
     crc ^ 0xffffffffffffffff_u64
   end
 
-  @@tables = Pointer(UInt64).new(0_u64)
+  @@tables = Array(UInt64).new.copy_to(Program.tape)
 
   # The eight tables, made once, as `CRC32` makes its own.
-  private def self.tables : Pointer(UInt64)
-    return @@tables if @@tables.address != 0_u64
-    t = Pointer(UInt64).malloc(2048_u64)
+  private def self.tables : Array(UInt64)
+    return @@tables if @@tables.empty? == false
+    t = Array(UInt64).new(2048, 0_u64)
     n = 0
     while n < 256
       c = n.to_u64
@@ -1228,8 +1243,9 @@ pub struct CRC64
       end
       slice = slice + 1
     end
-    @@tables = t
-    t
+    kept = t.copy_to(Program.tape)
+    @@tables = kept
+    kept
   end
 
   def self.hexdigest(data : String) : String
@@ -1251,6 +1267,7 @@ end
 # asked midway and the hash go on. `hexdigest` is xxhash's canonical form,
 # most significant byte first. A word of the message is loaded as one
 # little-endian load, which is what every target iyi builds for is.
+@[OnTape]
 pub class XXH64
   P1 = 0x9E3779B185EBCA87_u64
   P2 = 0xC2B2AE3D27D4EB4F_u64
@@ -1265,7 +1282,7 @@ pub class XXH64
   @v4 : UInt64
   @total : UInt64
   # The stripe in progress: up to 31 bytes a 32-byte stripe has not had.
-  @stripe : Pointer(UInt8)
+  @stripe : Array(UInt8)
   @fill : Int32
 
   def initialize(seed : UInt64 = 0_u64)
@@ -1275,14 +1292,14 @@ pub class XXH64
     @v3 = 0_u64
     @v4 = 0_u64
     @total = 0_u64
-    @stripe = Pointer(UInt8).malloc(32_u64)
+    @stripe = Array(UInt8).new(32, 0_u8)
     @fill = 0
     reset
   end
 
   def self.checksum(data : String, seed : UInt64 = 0_u64) : UInt64
     h = new(seed)
-    h.update(data.to_unsafe, data.bytesize)
+    h.update(data, data.bytesize)
     h.digest
   end
 
@@ -1302,17 +1319,17 @@ pub class XXH64
   end
 
   def update(data : String) : Nil
-    update(data.to_unsafe, data.bytesize)
+    update(data, data.bytesize)
   end
 
-  def update(data : Pointer(UInt8), count : Int32) : Nil
+  def update(data : String | Array::View(UInt8), count : Int32) : Nil
     raise "XXH64: a negative count of bytes: #{count}" if count < 0
     @total = @total &+ count.to_u64
     i = 0
     if @fill > 0
       take = 32 - @fill
       take = count if count < take
-      (@stripe + @fill.to_i64).copy_from(data, take)
+      take.times { |j| @stripe[@fill + j] = data[j] }
       @fill = @fill + take
       i = take
       return if @fill < 32
@@ -1324,11 +1341,11 @@ pub class XXH64
     v3 = @v3
     v4 = @v4
     while i + 32 <= count
-      p = data + i.to_i64
-      v1 = XXH64.round(v1, p.as(Pointer(UInt64)).value)
-      v2 = XXH64.round(v2, (p + 8_i64).as(Pointer(UInt64)).value)
-      v3 = XXH64.round(v3, (p + 16_i64).as(Pointer(UInt64)).value)
-      v4 = XXH64.round(v4, (p + 24_i64).as(Pointer(UInt64)).value)
+      p = data[i, count - i]
+      v1 = XXH64.round(v1, DigestUtil.load_le(p, 0, 8))
+      v2 = XXH64.round(v2, DigestUtil.load_le(p, 8, 8))
+      v3 = XXH64.round(v3, DigestUtil.load_le(p, 16, 8))
+      v4 = XXH64.round(v4, DigestUtil.load_le(p, 24, 8))
       i = i + 32
     end
     @v1 = v1
@@ -1336,7 +1353,7 @@ pub class XXH64
     @v3 = v3
     @v4 = v4
     if i < count
-      @stripe.copy_from(data + i.to_i64, count - i)
+      (count - i).times { |j| @stripe[j] = data[i + j] }
       @fill = count - i
     end
   end
@@ -1359,12 +1376,12 @@ pub class XXH64
     n = @fill
     i = 0
     while i + 8 <= n
-      h = h ^ XXH64.round(0_u64, (p + i.to_i64).as(Pointer(UInt64)).value)
+      h = h ^ XXH64.round(0_u64, DigestUtil.load_le(p, i, 8))
       h = XXH64.rotl(h, 27) &* P1 &+ P4
       i = i + 8
     end
     if i + 4 <= n
-      h = h ^ ((p + i.to_i64).as(Pointer(UInt32)).value.to_u64 &* P1)
+      h = h ^ (DigestUtil.load_le(p, i, 4).to_u32.to_u64 &* P1)
       h = XXH64.rotl(h, 23) &* P2 &+ P3
       i = i + 4
     end
@@ -1380,11 +1397,11 @@ pub class XXH64
     h ^ h.unsafe_shr(32)
   end
 
-  private def stripe(p : Pointer(UInt8)) : Nil
-    @v1 = XXH64.round(@v1, p.as(Pointer(UInt64)).value)
-    @v2 = XXH64.round(@v2, (p + 8_i64).as(Pointer(UInt64)).value)
-    @v3 = XXH64.round(@v3, (p + 16_i64).as(Pointer(UInt64)).value)
-    @v4 = XXH64.round(@v4, (p + 24_i64).as(Pointer(UInt64)).value)
+  private def stripe(p : String | Array::View(UInt8)) : Nil
+    @v1 = XXH64.round(@v1, DigestUtil.load_le(p, 0, 8))
+    @v2 = XXH64.round(@v2, DigestUtil.load_le(p, 8, 8))
+    @v3 = XXH64.round(@v3, DigestUtil.load_le(p, 16, 8))
+    @v4 = XXH64.round(@v4, DigestUtil.load_le(p, 24, 8))
   end
 
   def self.round(acc : UInt64, input : UInt64) : UInt64
@@ -1401,6 +1418,13 @@ pub class XXH64
 end
 
 struct DigestUtil
+  def self.load_le(bytes : String | Array::View(UInt8), at : Int32,
+                   count : Int32) : UInt64
+    value = 0_u64
+    count.times { |i| value |= bytes[at + i].to_u64 << (i * 8) }
+    value
+  end
+
   def self.rotl(x : UInt32, n : Int32) : UInt32
     n = n & 31
     return x if n == 0
@@ -1441,7 +1465,7 @@ struct DigestUtil
     {d &+ temp1, temp1 &+ s0 &+ maj}
   end
 
-  def self.load_u32s_be(words : Pointer(UInt32), bytes : Pointer(UInt8), count : Int32) : Nil
+  def self.load_u32s_be(words : Array(UInt32), bytes : String | Array::View(UInt8), count : Int32) : Nil
     i = 0
     while i < count
       j = i * 4
@@ -1452,7 +1476,7 @@ struct DigestUtil
 
   # The first *count* bytes of *words*, each word most significant byte
   # first.
-  def self.store_u32s_be(dst : Pointer(UInt8), words : Pointer(UInt32), count : Int32) : Nil
+  def self.store_u32s_be(dst : Array(UInt8), words : Array(UInt32), count : Int32) : Nil
     i = 0
     while i < count
       dst[i] = (words[i >> 2].unsafe_shr(24 - (i & 3) * 8) & 255_u32).to_u8
@@ -1460,7 +1484,7 @@ struct DigestUtil
     end
   end
 
-  def self.load_u64_be(bytes : Pointer(UInt8)) : UInt64
+  def self.load_u64_be(bytes : String | Array::View(UInt8)) : UInt64
     value = 0_u64
     i = 0
     while i < 8
@@ -1470,15 +1494,15 @@ struct DigestUtil
     value
   end
 
-  def self.store_u64_be(dst : Pointer(UInt8), value : UInt64) : Nil
+  def self.store_u64_be(dst : Array(UInt8), value : UInt64, offset : Int32 = 0) : Nil
     i = 0
     while i < 8
-      dst[i] = (value.unsafe_shr(56 - i * 8) & 255_u64).to_u8
+      dst[offset + i] = (value.unsafe_shr(56 - i * 8) & 255_u64).to_u8
       i = i + 1
     end
   end
 
-  def self.hex(bytes : Array(UInt8), n : Int32) : String
+  def self.hex(bytes : Array::View(UInt8), n : Int32) : String
     String.new(n * 2) do |buf|
       i = 0
       while i < n

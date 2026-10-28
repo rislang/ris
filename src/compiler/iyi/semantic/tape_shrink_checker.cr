@@ -762,6 +762,8 @@ class Iyi::TapeShrinkChecker
 
   private def evaluate(node : ASTNode, env : Env) : Value
     case node
+    when MacroIf, MacroFor, MacroExpression, MacroVerbatim
+      node.expanded.try { |expanded| value(expanded, env) } || EMPTY
     when Expressions
       result = EMPTY
       node.expressions.each { |exp| result = value(exp, env) }
@@ -775,6 +777,7 @@ class Iyi::TapeShrinkChecker
     when ClassVar, Global
       global_value(node.var.object_id, node.type?)
     when Var, InstanceVar
+      return EMPTY unless reference?(node)
       v = env[node.name] ||= if node.is_a?(InstanceVar)
                                Value.new((env["self"]? || EMPTY).roots.map { |r| field_root(r, node.name).as(UInt64) }, [] of View)
                              elsif reference?(node)
@@ -991,7 +994,7 @@ class Iyi::TapeShrinkChecker
           yielded_views += receiver.roots.map { |root| view(root) }
         end
         yielded = Value.new(derived.roots, yielded_views)
-        block.args.each { |arg| outer[arg.name] = yielded }
+        block.args.each { |arg| outer[arg.name] = reference?(arg) ? yielded : EMPTY }
         @callback_chain << "#{node.name} block"
         @scopes << block.object_id
         if {"tape", "local_tape"}.includes?(node.name)

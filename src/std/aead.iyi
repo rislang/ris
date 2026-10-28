@@ -107,7 +107,7 @@ pub class AES
   @rounds : Int32
   @keys : Pointer(UInt64)
 
-  def initialize(key : String | Array(UInt8))
+  def initialize(key : String | Array::View(UInt8))
     bytes, size = AeadBytes.of(key)
     raise "AES: a key is 16, 24 or 32 bytes, not #{size}" unless size == 16 || size == 24 || size == 32
     @keys = Pointer(UInt64).malloc(AesCore::KEY_WORDS)
@@ -115,13 +115,13 @@ pub class AES
   end
 
   # FIPS 197's Cipher: 16 bytes in, 16 out.
-  def encrypt_block(block : String | Array(UInt8)) : String
+  def encrypt_block(block : String | Array::View(UInt8)) : String
     src = AeadBytes.exactly(block, 16, "AES: a block")
     String.new(16) { |buf| AesCore.encrypt(@keys, @rounds, src, buf, 1) }
   end
 
   # FIPS 197's InvCipher: the block `encrypt_block` answered, back.
-  def decrypt_block(block : String | Array(UInt8)) : String
+  def decrypt_block(block : String | Array::View(UInt8)) : String
     src = AeadBytes.exactly(block, 16, "AES: a block")
     String.new(16) { |buf| AesCore.decrypt(@keys, @rounds, src, buf, 1) }
   end
@@ -141,7 +141,7 @@ pub class AesGcm
   # three bit-reversed, six words a power from H up (`Ghash.prepare`).
   @powers : Pointer(UInt64)
 
-  def initialize(key : String | Array(UInt8))
+  def initialize(key : String | Array::View(UInt8))
     bytes, size = AeadBytes.of(key)
     raise "AesGcm: a key is 16, 24 or 32 bytes, not #{size}" unless size == 16 || size == 24 || size == 32
     keys = Pointer(UInt64).malloc(AesCore::KEY_WORDS)
@@ -171,7 +171,7 @@ pub class AesGcm
   end
 
   # The ciphertext of *plaintext*, as long as it, and the 16-byte tag.
-  def seal(nonce : String | Array(UInt8), plaintext : String | Array(UInt8), aad : String | Array(UInt8) = "") : String
+  def seal(nonce : String | Array::View(UInt8), plaintext : String | Array::View(UInt8), aad : String | Array::View(UInt8) = "") : String
     n = AeadBytes.exactly(nonce, 12, "AesGcm: a nonce")
     pt, size = AeadBytes.of(plaintext)
     ad, ad_size = AeadBytes.of(aad)
@@ -183,7 +183,7 @@ pub class AesGcm
 
   # The plaintext *sealed* came from, when its tag is the one this key,
   # *nonce* and *aad* give; else an `AeadError`, and nothing decrypted.
-  def open(nonce : String | Array(UInt8), sealed : String | Array(UInt8), aad : String | Array(UInt8) = "") : String | AeadError
+  def open(nonce : String | Array::View(UInt8), sealed : String | Array::View(UInt8), aad : String | Array::View(UInt8) = "") : String | AeadError
     n = AeadBytes.exactly(nonce, 12, "AesGcm: a nonce")
     ct, total = AeadBytes.of(sealed)
     ad, ad_size = AeadBytes.of(aad)
@@ -334,7 +334,7 @@ pub class ChaCha20
   @used : Int32
   @counter : UInt64
 
-  def initialize(key : String | Array(UInt8), nonce : String | Array(UInt8), counter : UInt32 = 0_u32)
+  def initialize(key : String | Array::View(UInt8), nonce : String | Array::View(UInt8), counter : UInt32 = 0_u32)
     k = AeadBytes.exactly(key, 32, "ChaCha20: a key")
     n = AeadBytes.exactly(nonce, 12, "ChaCha20: a nonce")
     @state = Pointer(UInt32).malloc(16_u64)
@@ -344,7 +344,7 @@ pub class ChaCha20
     @counter = counter.to_u64
   end
 
-  def xor(data : String | Array(UInt8)) : String
+  def xor(data : String | Array::View(UInt8)) : String
     src, count = AeadBytes.of(data)
     String.new(count) { |buf| xor(src, buf, count) }
   end
@@ -388,7 +388,7 @@ pub class Poly1305
   @fill : Int32
   @finished : Bool
 
-  def initialize(key : String | Array(UInt8))
+  def initialize(key : String | Array::View(UInt8))
     k = AeadBytes.exactly(key, 32, "Poly1305: a key")
     @state = Pointer(UInt64).malloc(PolyCore::WORDS)
     PolyCore.start(@state, k)
@@ -397,11 +397,11 @@ pub class Poly1305
     @finished = false
   end
 
-  def self.mac(key : String | Array(UInt8), data : String | Array(UInt8)) : String
+  def self.mac(key : String | Array::View(UInt8), data : String | Array::View(UInt8)) : String
     new(key).update(data).final
   end
 
-  def update(data : String | Array(UInt8)) : self
+  def update(data : String | Array::View(UInt8)) : self
     bytes, count = AeadBytes.of(data)
     update(bytes, count)
   end
@@ -457,13 +457,13 @@ end
 pub class ChaCha20Poly1305
   @key : Pointer(UInt8)
 
-  def initialize(key : String | Array(UInt8))
+  def initialize(key : String | Array::View(UInt8))
     @key = Pointer(UInt8).malloc(32_u64)
     @key.copy_from(AeadBytes.exactly(key, 32, "ChaCha20Poly1305: a key"), 32)
   end
 
   # The ciphertext of *plaintext*, as long as it, and the 16-byte tag.
-  def seal(nonce : String | Array(UInt8), plaintext : String | Array(UInt8), aad : String | Array(UInt8) = "") : String
+  def seal(nonce : String | Array::View(UInt8), plaintext : String | Array::View(UInt8), aad : String | Array::View(UInt8) = "") : String
     words = uninitialized StaticArray(UInt32, 16)
     state = pointerof(words).as(Pointer(UInt32))
     ChaChaCore.start(state, @key, AeadBytes.exactly(nonce, 12, "ChaCha20Poly1305: a nonce"))
@@ -477,7 +477,7 @@ pub class ChaCha20Poly1305
 
   # The plaintext *sealed* came from, when its tag is the one this key,
   # *nonce* and *aad* give; else an `AeadError`, and nothing decrypted.
-  def open(nonce : String | Array(UInt8), sealed : String | Array(UInt8), aad : String | Array(UInt8) = "") : String | AeadError
+  def open(nonce : String | Array::View(UInt8), sealed : String | Array::View(UInt8), aad : String | Array::View(UInt8) = "") : String | AeadError
     words = uninitialized StaticArray(UInt32, 16)
     state = pointerof(words).as(Pointer(UInt32))
     ChaChaCore.start(state, @key, AeadBytes.exactly(nonce, 12, "ChaCha20Poly1305: a nonce"))
@@ -1500,17 +1500,17 @@ struct PolyCore
 end
 
 struct AeadBytes
-  def self.of(data : String | Array(UInt8)) : {Pointer(UInt8), Int32}
+  def self.of(data : String | Array::View(UInt8)) : {Pointer(UInt8), Int32}
     if data.is_a?(String)
       {data.to_unsafe, data.bytesize}
     else
-      {data.to_unsafe, data.size}
+      {data.bytes.to_unsafe, data.size}
     end
   end
 
   # *data*'s bytes, which must be *size* of them; *what* names them in
   # the refusal.
-  def self.exactly(data : String | Array(UInt8), size : Int32, what : String) : Pointer(UInt8)
+  def self.exactly(data : String | Array::View(UInt8), size : Int32, what : String) : Pointer(UInt8)
     bytes, count = of(data)
     raise "#{what} is #{size} bytes, not #{count}" unless count == size
     bytes
