@@ -1,0 +1,256 @@
+# Indexed operations on tape arrays.
+struct Array(T)
+  def insert(index : Int32, value : T) : self
+    index += size + 1 if index < 0
+    raise "array insertion out of bounds" if index < 0 || index > size
+    self[index, 0] = value
+    self
+  end
+
+  # Removes and answers the element at index, shifting what follows left.
+  def delete_at(index : Int32) : T
+    index += size if index < 0
+    raise "array deletion out of bounds" if index < 0 || index >= size
+    __remove_slot(index)
+  end
+
+  # Removes every element the block answers true for, in place, keeping
+  # the order of the rest.
+  def delete_if(& : T -> Bool) : self
+    i = 0
+    while i < size
+      if yield self[i]
+        __remove_slot(i)
+      else
+        i += 1
+      end
+    end
+    self
+  end
+
+  # Keeps only the elements the block answers true for, in place.
+  def keep_if(& : T -> Bool) : Array(T)
+    delete_if { |x| !(yield x) }
+  end
+
+  # Forgets every element.
+
+  # A copy rotated so that the element at position n comes first; the
+  # past participle names the copy, as `sorted` and `reversed` do, and
+  # `rotate_in_place` is the one that moves this array.
+  def rotated(n : Int32 = 1) : Array(T)
+    copy = dup
+    copy.rotate_in_place(n)
+    copy
+  end
+
+  # Removes the nils in place.
+  def compact_in_place : Array(T)
+    delete_if { |x| x.nil? }
+  end
+
+  # Every pair with an element of the other array, this array's order
+  # first. Not `product`: on an `Enumerable`, `product` is the
+  # multiplicative fold, and one name means one thing.
+  def cartesian(other : Array(U)) : Array(Tuple(T, U)) forall U
+    result = Array(Tuple(T, U)).new(size * other.size)
+    each do |a|
+      other.each { |b| result << {a, b} }
+    end
+    result
+  end
+
+  # The same pairs, handed to a block in the same order, with no array of
+  # them made - the other library's `each_cartesian`.
+  def each_cartesian(other : Array(U), & : T, U -> _) : Nil forall U
+    each do |a|
+      other.each { |b| yield a, b }
+    end
+  end
+  def each_index(& : Int32 -> Nil) : Nil
+    i = 0
+    while i < size
+      yield i
+      i = i + 1
+    end
+  end
+  def reverse_each(& : T -> Nil) : Nil
+    i = size - 1
+    while i >= 0
+      yield __api_fetch(i)
+      i = i - 1
+    end
+  end
+  def fetch(index : Int32, default : T) : T
+    index = size + index if index < 0
+    if index < 0 || index >= size
+      default
+    else
+      __api_fetch(index)
+    end
+  end
+  def fetch(index : Int32, & : Int32 -> T) : T
+    orig = index
+    index = size + index if index < 0
+    if index < 0 || index >= size
+      yield orig
+    else
+      __api_fetch(index)
+    end
+  end
+  def rindex(value : T) : Int32?
+    i = size - 1
+    while i >= 0
+      return i if __api_fetch(i) == value
+      i = i - 1
+    end
+    nil
+  end
+  def rindex(& : T -> Bool) : Int32?
+    i = size - 1
+    while i >= 0
+      return i if yield __api_fetch(i)
+      i = i - 1
+    end
+    nil
+  end
+  def bsearch(& : T -> Bool) : T?
+    idx = bsearch_index { |val| yield val }
+    idx ? __api_fetch(idx) : nil
+  end
+  def bsearch_index(& : T -> Bool) : Int32?
+    low = 0
+    high = size
+    while low < high
+      mid = low + (high - low) // 2
+      if yield __api_fetch(mid)
+        high = mid
+      else
+        low = mid + 1
+      end
+    end
+    low < size && (yield __api_fetch(low)) ? low : nil
+  end
+  def values_at(*indexes : Int32) : Array(T)
+    result = Array(T).new(indexes.size)
+    i = 0
+    while i < indexes.size
+      result << self[indexes[i]]
+      i = i + 1
+    end
+    result
+  end
+  def values_at(indexes : Array(Int32)) : Array(T)
+    result = Array(T).new(indexes.size)
+    i = 0
+    while i < indexes.size
+      result << self[indexes[i]]
+      i = i + 1
+    end
+    result
+  end
+  def dig(index : Int32) : T
+    self[index]
+  end
+  def dig?(index : Int32) : T?
+    self[index]?
+  end
+  def equals?(other : self) : Bool
+    return false unless size == other.size
+    i = 0
+    while i < size
+      return false unless __api_fetch(i) == other.__api_fetch(i)
+      i = i + 1
+    end
+    true
+  end
+  def equals?(other : self, & : T, T -> Bool) : Bool
+    return false unless size == other.size
+    i = 0
+    while i < size
+      return false unless yield __api_fetch(i), other.__api_fetch(i)
+      i = i + 1
+    end
+    true
+  end
+  def update(index : Int32, & : T -> T) : T
+    asked = index
+    index = size + index if index < 0
+    raise "index #{asked} out of range for #{size} elements" if index < 0 || index >= size
+    val = yield __api_fetch(index)
+    __api_put(index, val)
+    val
+  end
+  def swap(index0 : Int32, index1 : Int32) : self
+    asked0 = index0
+    asked1 = index1
+    index0 = size + index0 if index0 < 0
+    index1 = size + index1 if index1 < 0
+    raise "index #{asked0} out of range for #{size} elements" if index0 < 0 || index0 >= size
+    raise "index #{asked1} out of range for #{size} elements" if index1 < 0 || index1 >= size
+    unless index0 == index1
+      tmp = __api_fetch(index0)
+      __api_put(index0, __api_fetch(index1))
+      __api_put(index1, tmp)
+    end
+    self
+  end
+  def reverse_in_place : self
+    reverse_between(0, size - 1)
+    self
+  end
+  def rotate_in_place(n : Int32 = 1) : self
+    return self if size <= 1
+    k = n % size
+    k = k + size if k < 0
+    return self if k == 0
+    reverse_between(0, k - 1)
+    reverse_between(k, size - 1)
+    reverse_between(0, size - 1)
+    self
+  end
+  def fill(value : T) : self
+    i = 0
+    while i < size
+      __api_put(i, value)
+      i = i + 1
+    end
+    self
+  end
+  def fill(value : T, offset : Int32, count : Int32) : self
+    raise "negative count: #{count}" if count < 0
+    asked = offset
+    offset = size + offset if offset < 0
+    raise "index #{asked} out of range for #{size} elements" if offset < 0 || offset > size
+    raise "index #{offset.to_i64 + count} out of range for #{size} elements" if count > size - offset
+    i = 0
+    while i < count
+      __api_put(offset + i, value)
+      i = i + 1
+    end
+    self
+  end
+  def fill(& : Int32 -> T) : self
+    i = 0
+    while i < size
+      __api_put(i, yield i)
+      i = i + 1
+    end
+    self
+  end
+  private def reverse_between(left : Int32, right : Int32) : Nil
+    while left < right
+      swap(left, right)
+      left += 1
+      right -= 1
+    end
+  end
+
+  protected def __api_fetch(index : Int32) : T
+    self[index]
+  end
+
+  private def __api_put(index : Int32, value : T) : T
+    self[index] = value
+  end
+end

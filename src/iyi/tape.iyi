@@ -336,7 +336,12 @@ struct String
 
   # *count* bytes from *start*, a view of these: nothing is copied.
   def [](start : Int32, count : Int32) : String
-    raise "bytes #{start}, #{count} out of range for #{@bytesize}" if start < 0 || count < 0 || start > @bytesize - count
+    raise "negative count: #{count}" if count < 0
+    start += @bytesize if start < 0
+    if start < 0 || start > @bytesize
+      raise "string slice start out of bounds"
+    end
+    count = @bytesize - start if count > @bytesize - start
     String.new(@ptr + start, count)
   end
 
@@ -390,6 +395,8 @@ struct String
   # Where *char* first is from *offset*, or nil, byte-indexed as
   # `String#index` is; a char past ASCII by its UTF-8 bytes.
   def index(char : Char, offset : Int32 = 0) : Int32?
+    offset += bytesize if offset < 0
+    return nil if offset < 0 || offset > bytesize
     if char.ord < 128
       byte = char.ord.to_u8
       at = offset
@@ -444,24 +451,7 @@ struct String
   end
 
   def to_i? : Int32?
-    return nil if @bytesize == 0
-    index = 0
-    negative = @ptr[0] == 45_u8
-    if negative || @ptr[0] == 43_u8
-      return nil if @bytesize == 1
-      index = 1
-    end
-    value = 0
-    while index < @bytesize
-      digit = @ptr[index].to_i - 48
-      return nil if digit < 0 || digit > 9
-      return nil if value < -214748364 || (value == -214748364 && digit > 8)
-      value = value * 10 - digit
-      index = index + 1
-    end
-    return value if negative
-    return nil if value == -2147483648
-    0 - value
+    to_i?(10)
   end
 
   def to_i64? : Int64?
@@ -1242,7 +1232,7 @@ struct Array(T)
     self
   end
 
-  def push(value : T) : Nil
+  def push(value : T) : self
     size = (@state + 1_i64).value
     if size >= (@state + 2_i64).value
       if (@state + 4_i64).value >= 2_u64
@@ -1253,6 +1243,7 @@ struct Array(T)
     end
     Pointer(T).new(@state.value &+ size &* sizeof(T).to_u64).value = stored(value)
     (@state + 1_i64).value = size &+ 1_u64
+    self
   end
 
   # Diagnostic counts include freed slots retained for the next store.

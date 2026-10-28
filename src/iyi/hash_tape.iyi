@@ -71,7 +71,7 @@ struct Hash(K, V)
     index < 0 ? nil : @values[index]
   end
 
-  def fetch(key : K, default : V) : V
+  def fetch(key : K, default : D) : V | D forall D
     index = find(key)
     index < 0 ? default : @values[index]
   end
@@ -101,7 +101,7 @@ struct Hash(K, V)
     value
   end
 
-  def clear : Nil
+  def clear : self
     @keys.clear
     @values.clear
     @live.clear
@@ -111,6 +111,7 @@ struct Hash(K, V)
       i = i + 1
     end
     @head[0] = 0
+    self
   end
 
   # Live entries in insertion order.

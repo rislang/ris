@@ -1,0 +1,29 @@
+module test/ris/hash_api
+
+h = {"a" => 1, "b" => 2}
+raise "merge" unless h.merge({"b" => 3})["b"] == 3
+h.merge_in_place({"b" => 3}) { |k, x, y| x + y }
+raise "merge block" unless h["b"] == 5
+raise "update" unless h.update("a") { |v| v + 1 } == 1
+raise "stored update" unless h["a"] == 2
+raise "dig" unless h.dig("a") == 2 && h.dig?("z").nil?
+raise "lookup" unless h.has_value?(5) && h.key_for(5) == "b"
+raise "invert" unless h.invert[5] == "b"
+raise "values" unless h.values_at("b", "a") == [5, 2]
+raise "put" unless h.put_if_absent("a", 99) == 2
+raise "put block" unless h.put_if_absent("c") { |k| 7 } == 7
+h.transform_values_in_place { |v, k| v * 2 }
+raise "transform" unless h["b"] == 10
+raise "keys" unless h.transform_keys { |k, v| k.upcase }["B"] == 10
+raise "delete fallback" unless h.delete("z") { |k| 9 } == 9
+raise "equality" unless {"a" => 1} == {"a" => 1}
+raise "order" unless h.shift == {"a", 4}
+h.select_in_place { |k, v| k == "b" }
+raise "select" unless h.size == 1 && h.first_value == 10
+raise "transform key" unless h.transform_values { |v, k| k }["b"] == "b"
+raise "generic default" unless h.fetch("missing", false) == false
+n = {"a" => nil, "b" => 2} of String => Int32?
+raise "compact" unless n.compact == {"b" => 2}
+raise "generic sum" unless h.sum { |k, v| v.to_i64 } == 10_i64
+raise "clear return" unless h.clear.empty?
+puts "PASS: hash_api"

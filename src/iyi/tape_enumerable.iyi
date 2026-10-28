@@ -1,0 +1,400 @@
+# Enumerable operations on tape arrays.
+struct Array(T)
+  def to_a : Array(T)
+    result = [] of T
+    each { |e| result << e }
+    result
+  end
+  def present? : Bool
+    !empty?
+  end
+  def none?(& : T -> Bool) : Bool
+    each { |e| return false if yield e }
+    true
+  end
+  def one?(& : T -> Bool) : Bool
+    found = false
+    each do |e|
+      if yield e
+        return false if found
+        found = true
+      end
+    end
+    found
+  end
+  def index(& : T -> Bool) : Int32?
+    i = 0
+    each do |e|
+      return i if yield e
+      i = i + 1
+    end
+    nil
+  end
+  def map_with_index(& : T, Int32 -> U) : Array(U) forall U
+    result = [] of U
+    i = 0
+    each do |e|
+      result << yield e, i
+      i = i + 1
+    end
+    result
+  end
+  def partition(& : T -> Bool) : Array(Array(T))
+    yes = [] of T
+    no = [] of T
+    each do |e|
+      if yield e
+        yes << e
+      else
+        no << e
+      end
+    end
+    [yes, no]
+  end
+  def take(n : Int32) : Array(T)
+    raise "negative count: #{n}" if n < 0
+    result = [] of T
+    return result if n == 0
+    each do |e|
+      result << e
+      return result if result.size >= n
+    end
+    result
+  end
+  def skip(n : Int32) : Array(T)
+    raise "negative count: #{n}" if n < 0
+    result = [] of T
+    i = 0
+    each do |e|
+      result << e if i >= n
+      i = i + 1
+    end
+    result
+  end
+  def take_while(& : T -> Bool) : Array(T)
+    result = [] of T
+    each do |e|
+      return result unless yield e
+      result << e
+    end
+    result
+  end
+  def skip_while(& : T -> Bool) : Array(T)
+    result = [] of T
+    skipping = true
+    each do |e|
+      skipping = false if skipping && !yield e
+      result << e unless skipping
+    end
+    result
+  end
+  def each_with_object(obj : U, & : T, U -> Nil) : U forall U
+    each { |e| yield e, obj }
+    obj
+  end
+  def max? : T?
+    best = nil
+    each do |e|
+      current = best
+      best = e if current.nil? || (e > current)
+    end
+    best
+  end
+  def min? : T?
+    best = nil
+    each do |e|
+      current = best
+      best = e if current.nil? || (e < current)
+    end
+    best
+  end
+  def product : T
+    acc = {% if T == Float64 %} 1.0
+          {% elsif T == Int64 %} 1_i64
+          {% elsif T == UInt64 %} 1_u64
+          {% elsif T == UInt8 %} 1_u8
+          {% else %} 1.as(T) {% end %}
+    each { |e| acc = acc * e }
+    acc
+  end
+  def max_by?(& : T -> U) : T? forall U
+    max_by_entry { |e| yield e }[0]
+  end
+  def group_by(& : T -> U) : Hash(U, Array(T)) forall U
+    groups = {} of U => Array(T)
+    each do |e|
+      key = yield e
+      bucket = groups[key]?
+      if bucket.nil?
+        groups[key] = [e]
+      else
+        bucket << e
+      end
+    end
+    groups
+  end
+  def index_by(& : T -> U) : Hash(U, T) forall U
+    result = {} of U => T
+    each { |e| result[yield e] = e }
+    result
+  end
+  def to_h(& : T -> Tuple(K, V)) : Hash(K, V) forall K, V
+    result = {} of K => V
+    each do |e|
+      pair = yield e
+      result[pair[0]] = pair[1]
+    end
+    result
+  end
+  def each_cons(n : Int32, & : Array(T) -> Nil) : Nil
+    raise "cons size must be positive" if n <= 0
+    window = [] of T
+    each do |e|
+      window << e
+      window.shift if window.size > n
+      yield window.dup if window.size == n
+    end
+  end
+  def each_slice(n : Int32) : Array(Array(T))
+    raise "slice size must be positive" if n <= 0
+    result = Array(Array(T)).new((size + n - 1) // n)
+    each_slice(n) { |part| result << part }
+    result
+  end
+  def in_slices_of(n : Int32) : Array(Array(T))
+    each_slice(n)
+  end
+  def each_cons(n : Int32) : Array(Array(T))
+    raise "cons size must be positive" if n <= 0
+    result = [] of Array(T)
+    window = [] of T
+    each do |e|
+      window << e
+      window.shift if window.size > n
+      result << window.dup if window.size == n
+    end
+    result
+  end
+  def each_cons_pair(& : T, T -> Nil) : Nil
+    started = false
+    previous = nil
+    each do |e|
+      yield previous.as(T), e if started
+      previous = e
+      started = true
+    end
+  end
+  def each_step(n : Int32, & : T -> Nil) : Nil
+    raise "step size must be positive" if n <= 0
+    i = 0
+    each do |e|
+      yield e if i % n == 0
+      i = i + 1
+    end
+  end
+  def chunk_while(& : T, T -> Bool) : Array(Array(T))
+    chunks = [] of Array(T)
+    current = [] of T
+    started = false
+    previous = nil
+    each do |e|
+      if !started || (yield previous.as(T), e)
+        current << e
+      else
+        chunks << current
+        current = [e]
+      end
+      previous = e
+      started = true
+    end
+    chunks << current unless current.empty?
+    chunks
+  end
+  def cycle(n : Int32, & : T -> Nil) : Nil
+    i = 0
+    while i < n
+      each { |e| yield e }
+      i = i + 1
+    end
+  end
+  def find_value(& : T -> U?) : U? forall U
+    each do |e|
+      value = yield e
+      return value if value
+    end
+    nil
+  end
+  def accumulate(initial : U, & : U, T -> U) : Array(U) forall U
+    acc = initial
+    result = [acc]
+    each do |e|
+      acc = yield acc, e
+      result << acc
+    end
+    result
+  end
+  def reduce?(& : T, T -> T) : T?
+    found = false
+    acc = nil
+    each do |e|
+      acc = found ? (yield acc.as(T), e) : e
+      found = true
+    end
+    acc
+  end
+  def in_groups_of(n : Int32, filler : T) : Array(Array(T))
+    raise "group size must be positive" if n <= 0
+    groups = each_slice(n)
+    last = groups.last?
+    if last
+      while last.size < n
+        last << filler
+      end
+    end
+    groups
+  end
+  def min_by?(& : T -> U) : T? forall U
+    min_by_entry { |e| yield e }[0]
+  end
+  def max_of?(& : T -> U) : U? forall U
+    best = nil
+    each do |e|
+      key = yield e
+      current = best
+      best = key if current.nil? || (key > current)
+    end
+    best
+  end
+  def max_of(& : T -> U) : U forall U
+    found = max_of? { |e| yield e }
+    return found unless found.nil?
+    raise "max_of of an empty collection"
+  end
+  def min_of?(& : T -> U) : U? forall U
+    best = nil
+    each do |e|
+      key = yield e
+      current = best
+      best = key if current.nil? || (key < current)
+    end
+    best
+  end
+  def min_of(& : T -> U) : U forall U
+    found = min_of? { |e| yield e }
+    return found unless found.nil?
+    raise "min_of of an empty collection"
+  end
+  def minmax? : Tuple(T?, T?)
+    low = nil
+    high = nil
+    each do |e|
+      cur_low = low
+      low = e if cur_low.nil? || e < cur_low
+      cur_high = high
+      high = e if cur_high.nil? || e > cur_high
+    end
+    {low, high}
+  end
+  def minmax : Tuple(T, T)
+    pair = minmax?
+    low = pair[0]
+    high = pair[1]
+    if low.nil? || high.nil?
+      raise "minmax of an empty collection"
+    end
+    {low, high}
+  end
+  def minmax_by?(& : T -> U) : Tuple(T?, T?) forall U
+    entry = minmax_by_entry { |e| yield e }
+    {entry[0], entry[1]}
+  end
+  def minmax_by(& : T -> U) : Tuple(T, T) forall U
+    entry = minmax_by_entry { |e| yield e }
+    raise "minmax_by of an empty collection" if entry[2].nil?
+    {entry[0].as(T), entry[1].as(T)}
+  end
+  def minmax_of?(& : T -> U) : Tuple(U?, U?) forall U
+    low = nil
+    high = nil
+    each do |e|
+      key = yield e
+      cur_low = low
+      if cur_low.nil? || key < cur_low
+        low = key
+      end
+      cur_high = high
+      if cur_high.nil? || key > cur_high
+        high = key
+      end
+    end
+    {low, high}
+  end
+  def minmax_of(& : T -> U) : Tuple(U, U) forall U
+    pair = minmax_of? { |e| yield e }
+    low = pair[0]
+    high = pair[1]
+    if low.nil? || high.nil?
+      raise "minmax_of of an empty collection"
+    end
+    {low, high}
+  end
+  def tally_by(& : T -> U) : Hash(U, Int32) forall U
+    counts = {} of U => Int32
+    each do |e|
+      key = yield e
+      counts[key] = (counts[key]? || 0) + 1
+    end
+    counts
+  end
+  def sum_by(& : T -> U) : U forall U
+    acc = U.zero
+    each { |e| acc = acc + (yield e) }
+    acc
+  end
+  private def max_by_entry(& : T -> U) : Tuple(T?, U?) forall U
+    best = nil
+    best_key = nil
+    each do |e|
+      key = yield e
+      current = best_key
+      if current.nil? || (key > current)
+        best = e
+        best_key = key
+      end
+    end
+    {best, best_key}
+  end
+  private def min_by_entry(& : T -> U) : Tuple(T?, U?) forall U
+    best = nil
+    best_key = nil
+    each do |e|
+      key = yield e
+      current = best_key
+      if current.nil? || (key < current)
+        best = e
+        best_key = key
+      end
+    end
+    {best, best_key}
+  end
+  private def minmax_by_entry(& : T -> U) : Tuple(T?, T?, U?) forall U
+    min_elem = nil
+    max_elem = nil
+    min_key = nil
+    max_key = nil
+    each do |e|
+      key = yield e
+      cur_min = min_key
+      if cur_min.nil? || key < cur_min
+        min_elem = e
+        min_key = key
+      end
+      cur_max = max_key
+      if cur_max.nil? || key > cur_max
+        max_elem = e
+        max_key = key
+      end
+    end
+    {min_elem, max_elem, min_key}
+  end
+end

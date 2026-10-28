@@ -1,0 +1,42 @@
+module test/ris/string_api
+
+raise "byte size" unless "café".size == 5
+raise "optional byte" unless "abc"[-1]? == 99_u8
+raise "bounds" unless "abc"[3]?.nil?
+raise "repeat" unless "ab" * 3 == "ababab"
+raise "empty repeat" unless ("ab" * 0).empty?
+raise "chomp" unless "café".chomp('é') == "caf"
+raise "lchop" unless "éclair".lchop('é') == "clair"
+raise "negative search" unless "aba".index('a', -1) == 2
+raise "search bounds" unless "a".index('a', -9).nil?
+raise "search" unless "café".index('é') == 3
+raise "split" unless "a:b::".split(':').size == 4
+raise "strip" unless " x \r\n".strip == "x"
+raise "case" unless "hi".upcase == "HI"
+raise "replace" unless "ababa".gsub("ba", "!") == "a!!"
+a = "old"
+b = a
+a << "new"
+raise "rebind" unless a == "oldnew" && b == "old"
+raise "unicode words" unless "a\u3000b".split == ["a", "b"]
+raise "unicode strip" unless "\u3000x\u00a0".strip == "x"
+raise "reverse unicode" unless "café".reverse == "éfac"
+raise "empty separator" unless "café".split("") == ["c", "a", "f", "é"]
+raise "slice" unless "abc"[-2, 99] == "bc" && "abc"[-2..-1] == "bc"
+raise "char classes" unless 'a'.letter? && '9'.digit? && ' '.whitespace?
+raise "unicode space" unless '\u3000'.whitespace?
+raise "char inspect" unless '\n'.inspect == "'\\n'"
+raise "trim characters" unless "..abc..".strip('.') == "abc"
+raise "chop" unless "café".chop == "caf"
+raise "right search" unless "ababa".rindex("ba") == 3
+raise "limited split" unless "a:b:c".split(':', 2) == ["a", "b:c"]
+raise "translate" unless "abc".tr("a-c", "x-z") == "xyz"
+raise "delete" unless "abca".delete('a') == "bc"
+raise "squeeze" unless "aabbcc".squeeze == "abc"
+raise "center" unless "x".center(3, '.') == ".x."
+raise "unsigned parse" unless "ff".to_u64(16) == 255_u64
+raise "partition" unless "a:b".partition(':') == {"a", ":", "b"}
+raise "blank" unless " \t".blank?
+raise "array text" unless [1, 2].to_s == "[1, 2]"
+raise "hash text" unless {"a" => 1}.to_s == "{\"a\" => 1}"
+puts "PASS: string_api"

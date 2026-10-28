@@ -29,6 +29,7 @@ import std/idna::{IDNA, IdnaError}
 
 # An ordered multi-value collection representing URI query parameters
 # or application/x-www-form-urlencoded form data.
+@[OnTape]
 pub struct Params
   @keys : Array(String)
   @values : Array(String)
@@ -166,30 +167,19 @@ pub struct Params
   # is what browsers send for "100%". `URI.decode` stays strict: it is
   # asked of text a program made.
   # Tape input returns the tape collection, with views where possible.
-  def self.parse(query : String) : Query
-    Query.parse(query)
-  end
-
   def self.parse(query : String) : Params
     params = Params.new
-    tape do
-      Query.parse(query.as_tape).each { |key, value| params.add(key.to_heap, value.to_heap) }
-    end
+    Query.parse(query).each { |key, value| params.add(key, value) }
     params
   end
 
   # Encodes parameters to application/x-www-form-urlencoded string.
-  @[TapeToHeap]
   def to_s : String
     capacity = 0
     each do |key, value|
       capacity += (key.bytesize + value.bytesize) * 3 + 2
     end
-    result = ""
-    tape do
-      result = String.build(capacity) { |w| to_s(w) }.to_heap
-    end
-    result
+    String.build(capacity) { |w| to_s(w) }
   end
 
   def to_s(writer : String::Builder) : Nil
@@ -235,19 +225,11 @@ pub struct ParsedURI
   def written_userinfo(@user : String?, @password : String?) : Nil
   end
 
-  @[TapeToHeap]
-  def to_heap : URI
-    result = URI.new(
-      scheme: heap(@scheme), host: heap(@host),
-      port: @port, path: @path.to_heap, query: heap(@query),
-      fragment: heap(@fragment))
-    result.written_userinfo(heap(@user), heap(@password))
+  def to_uri : URI
+    result = URI.new(scheme: @scheme, host: @host, port: @port,
+      path: @path, query: @query, fragment: @fragment)
+    result.written_userinfo(@user, @password)
     result
-  end
-
-  @[TapeToHeap]
-  private def heap(text : String?) : String?
-    text ? text.to_heap : nil
   end
 
   def to_s(w : String::Builder) : Nil
@@ -347,6 +329,7 @@ pub struct ParsedURI
   end
 end
 
+@[OnTape]
 pub class URI
   @scheme : String?
   @user : String?
@@ -524,27 +507,17 @@ pub class URI
     end
   end
 
-  @[TapeToHeap]
   def authority : String?
     return nil unless @host || @user || @port
-    result = ""
-    tape do
-      result = String.build { |w| authority(w) }.to_heap
-    end
-    result
+    String.build { |w| authority(w) }
   end
 
   def to_s(w : String::Builder) : Nil
     as_tape.to_s(w)
   end
 
-  @[TapeToHeap]
   def to_s : String
-    result = ""
-    tape do
-      result = String.build { |w| to_s(w) }.to_heap
-    end
-    result
+    String.build { |w| to_s(w) }
   end
 
   # Hashing follows `==` (below), the eight parts mixed as a tuple's members
@@ -655,15 +628,10 @@ pub class URI
     end
   end
 
-  @[TapeToHeap]
   private def self.percent_encode(str : String, level : Int32, space_to_plus : Bool) : String
-    result = ""
-    tape do
-      result = String.build(str.bytesize * 3) do |w|
-        percent_encode(str.as_tape, w, level, space_to_plus)
-      end.to_heap
+    String.build(str.bytesize * 3) do |w|
+      percent_encode(str, w, level, space_to_plus)
     end
-    result
   end
 
   private def self.percent_encode(str : String, writer : String::Builder,
@@ -789,28 +757,9 @@ pub class URI
     decode(str, plus_to_space)
   end
 
-  @[TapeToHeap]
-  def self.decode?(str : String, plus_to_space : Bool = false) : String?
-    result = nil
-    tape do
-      if decoded = decode?(str.as_tape, plus_to_space)
-        result = decoded.to_heap
-      end
-    end
-    result
-  end
 
-  def self.decode_www_form?(str : String, plus_to_space : Bool = true) : String?
-    decode?(str, plus_to_space: plus_to_space)
-  end
 
-  def self.decode(str : String, plus_to_space : Bool = false) : String
-    decode?(str, plus_to_space: plus_to_space) || raise "malformed percent escape in #{str.inspect}"
-  end
 
-  def self.decode_www_form(str : String, plus_to_space : Bool = true) : String
-    decode(str, plus_to_space: plus_to_space)
-  end
 
   # =========================================================================
   # RFC 3986 Section 3 & 4: URI Parsing
@@ -834,25 +783,7 @@ pub class URI
     raise result
   end
 
-  @[TapeToHeap]
-  def self.parse?(raw_url : String) : URI?
-    result = nil
-    tape do
-      if parsed = parse?(raw_url.as_tape)
-        result = parsed.to_heap
-      end
-    end
-    result
-  end
 
-  @[TapeToHeap]
-  def self.parse(raw_url : String) : URI
-    result = URI.new
-    tape do
-      result = parse(raw_url.as_tape).to_heap
-    end
-    result
-  end
 
   private def self.scheme_byte?(c : UInt8, first : Bool) : Bool
     return true if (c >= 97_u8 && c <= 122_u8) || (c >= 65_u8 && c <= 90_u8)
@@ -1061,14 +992,6 @@ pub class URI
   # rest of the path into a new string, so removing the dot segments took
   # time in the square of the path's length: 132 KB of `/a/./b/../c` took
   # 12.8 s in a release build, where splitting it at its slashes took 3 ms.
-  @[TapeToHeap]
-  def self.remove_dot_segments(path : String) : String
-    result = ""
-    tape do
-      result = remove_dot_segments(path.as_tape).to_heap
-    end
-    result
-  end
 
   def self.remove_dot_segments(path : String) : String
     raw = path
@@ -1133,14 +1056,6 @@ pub class URI
   # reference's own segments stays, since only the base knows what it
   # climbs out of, and a path that ends in a dot segment names a
   # directory, so `a/..` is `./`.
-  @[TapeToHeap]
-  def self.remove_relative_dot_segments(path : String) : String
-    result = ""
-    tape do
-      result = remove_relative_dot_segments(path.as_tape).to_heap
-    end
-    result
-  end
 
   def self.remove_relative_dot_segments(path : String) : String
     return path if path.empty?
@@ -1181,7 +1096,7 @@ pub class URI
 
   # Resolves *ref* against this URI as Base URI according to RFC 3986 section 5.2.
   def resolve(ref : URI | String) : URI
-    r = ref.is_a?(URI) ? ref : URI.parse(ref)
+    r = ref.is_a?(URI) ? ref : URI.parse(ref).to_uri
 
     # 5.2.2. Transform References
     t = URI.new
@@ -1266,13 +1181,8 @@ pub class URI
     end
   end
 
-  @[TapeToHeap]
   def normalize : URI
-    result = URI.new
-    tape do
-      result = as_tape.normalize.to_heap
-    end
-    result
+    as_tape.normalize.to_uri
   end
 
   def normalize_in_place : URI

@@ -2936,6 +2936,60 @@ pub struct Document
   def initialize(@tree : Tre(Node), @input : String)
   end
 
+  def to_json : String
+    builder = Builder.new
+    to_json(builder)
+    builder.to_s
+  end
+
+  def to_pretty_json(indent : String = "  ") : String
+    builder = Builder.new
+    builder.indent = indent
+    to_json(builder)
+    builder.to_s
+  end
+
+  def to_ascii_json : String
+    builder = Builder.new
+    builder.ascii_only = true
+    to_json(builder)
+    builder.to_s
+  end
+
+  # Walk preorder nodes with a bounded stack of open container indices.
+  def to_json(builder : Builder) : Nil
+    parents = Array(Int32).new(MAX_NESTING)
+    index = 0
+    while index < @tree.size
+      if parent = parents.last?
+        builder.field(key(index)) if kind(parent) == Kind::Object
+      end
+      case kind(index)
+      when Kind::Null then builder.null
+      when Kind::Bool then builder.bool(bool(index))
+      when Kind::Int then builder.number(int(index))
+      when Kind::Float then builder.number(float(index))
+      when Kind::String then builder.string(string(index))
+      when Kind::Array
+        builder.start_array
+        parents << index
+      when Kind::Object
+        builder.start_object
+        parents << index
+      end
+      index += 1
+      while parent = parents.last?
+        break unless @tree.stop(parent) == index
+        parents.pop
+        if kind(parent) == Kind::Object
+          builder.end_object
+        else
+          builder.end_array
+        end
+      end
+    end
+  end
+
   def root : Int32
     0
   end

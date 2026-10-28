@@ -1,0 +1,606 @@
+# Collection operations on the caller's tape.
+
+struct Array(T)
+
+  def uniq : Array(T)
+    result = Array(T).new(size)
+    seen = {} of T => Bool
+    each do |value|
+      next if seen.has_key?(value)
+      seen[value] = true
+      result << value
+    end
+    result
+  end
+
+  def uniq(& : T -> U) : Array(T) forall U
+    result = Array(T).new(size)
+    seen = {} of U => Bool
+    each do |value|
+      key = yield value
+      next if seen.has_key?(key)
+      seen[key] = true
+      result << value
+    end
+    result
+  end
+
+  def -(other : Array(T)) : Array(T)
+    result = Array(T).new(size)
+    if other.size <= 16
+      each { |value| result << value unless other.includes?(value) }
+    else
+      present = other.presence
+      each { |value| result << value unless present.has_key?(value) }
+    end
+    result
+  end
+
+  def &(other : Array(T)) : Array(T)
+    present = other.presence
+    result = Array(T).new(size < other.size ? size : other.size)
+    each do |value|
+      next unless present.has_key?(value)
+      present.delete(value)
+      result << value
+    end
+    result
+  end
+
+  def |(other : Array(U)) : Array(T | U) forall U
+    result = Array(T | U).new(size + other.size)
+    seen = Hash(T | U, Bool).new
+    each do |value|
+      next if seen.has_key?(value)
+      seen[value] = true
+      result << value
+    end
+    other.each do |value|
+      next if seen.has_key?(value)
+      seen[value] = true
+      result << value
+    end
+    result
+  end
+
+  def *(times : Int32) : Array(T)
+    raise "negative count: #{times}" if times < 0
+    result = Array(T).new(size * times)
+    round = 0
+    while round < times
+      each { |value| result << value }
+      round = round + 1
+    end
+    result
+  end
+
+  def flatten
+    result = Array(typeof(flatten_element(self))).new(size)
+    each { |value| flatten_into(result, value) }
+    result
+  end
+
+  def transpose
+    width = empty? ? 0 : self[0].size
+    each_with_index do |row, at|
+      raise "transpose of rows of unequal size: row #{at} has #{row.size} elements, row 0 has #{width}" unless row.size == width
+    end
+    result = Array(Array(typeof(self[0][0]))).new(width)
+    column = 0
+    while column < width
+      line = Array(typeof(self[0][0])).new(size)
+      each { |row| line << row[column] }
+      result << line
+      column = column + 1
+    end
+    result
+  end
+
+  def to_set : Set(T)
+    set = Set(T).new
+    each { |value| set.add(value) }
+    set
+  end
+
+  def zip(other : Array(U)) : Array(Tuple(T, U)) forall U
+    result = Array(Tuple(T, U)).new(size)
+    index = 0
+    while index < size
+      result << {self[index], other[index]}
+      index = index + 1
+    end
+    result
+  end
+
+  def zip(other : Array(U), & : T, U -> _) : Nil forall U
+    index = 0
+    while index < size
+      yield self[index], other[index]
+      index = index + 1
+    end
+  end
+
+  protected def presence : Hash(T, Bool)
+    table = {} of T => Bool
+    each { |value| table[value] = true }
+    table
+  end
+
+  private def flatten_element(value)
+    if value.is_a?(Array)
+      flatten_element(value[0])
+    else
+      value
+    end
+  end
+
+  private def flatten_into(result, value) : Nil
+    if value.is_a?(Array)
+      value.each { |inner| flatten_into(result, inner) }
+    else
+      result << value
+    end
+  end
+
+end
+
+
+struct Hash(K, V)
+
+  def dig(key : K)
+    self[key]
+  end
+
+  def dig(key : K, *subkeys)
+    value = self[key]
+    return value.dig(*subkeys) if value.responds_to?(:dig)
+    raise "the value at #{key.inspect} is not a table to dig into"
+  end
+
+  def dig?(key : K)
+    self[key]?
+  end
+
+  def dig?(key : K, *subkeys)
+    value = self[key]?
+    value.responds_to?(:dig?) ? value.dig?(*subkeys) : nil
+  end
+
+  def merge(other : Hash(L, W)) : Hash(K | L, V | W) forall L, W
+    result = Hash(K | L, V | W).new
+    result.merge_in_place(self)
+    result.merge_in_place(other)
+  end
+
+  def merge(other : Hash(L, W), & : L, V | W, W -> V | W) : Hash(K | L, V | W) forall L, W
+    result = Hash(K | L, V | W).new
+    result.merge_in_place(self)
+    result.merge_in_place(other) { |key, mine, theirs| yield key, mine, theirs }
+  end
+
+  def merge_in_place(other : Hash(L, W)) : Hash(K, V) forall L, W
+    other.each { |key, value| self[key] = value }
+    self
+  end
+
+  def transform_keys(& : K, V -> L) : Hash(L, V) forall L
+    result = Hash(L, V).new
+    each { |key, value| result[yield key, value] = value }
+    result
+  end
+
+  def select_in_place(& : K, V -> Bool) : Hash(K, V)
+    reject_in_place { |key, value| !(yield key, value) }
+  end
+
+
+
+  def has_value?(value : V) : Bool
+    each { |key, stored| return true if stored == value }
+    false
+  end
+
+  def key_for?(value : V) : K?
+    each { |key, stored| return key if stored == value }
+    nil
+  end
+
+  def key_for(value : V) : K
+    each { |key, stored| return key if stored == value }
+    raise "no key for the value #{value.inspect}"
+  end
+
+  def invert : Hash(V, K)
+    result = Hash(V, K).new
+    each { |key, value| result[value] = key }
+    result
+  end
+
+  def values_at(*keys : K) : Array(V)
+    result = Array(V).new(keys.size)
+    at = 0
+    while at < keys.size
+      result << self[keys[at]]
+      at = at + 1
+    end
+    result
+  end
+
+  def all?(& : K, V -> Bool) : Bool
+    each { |key, value| return false unless yield key, value }
+    true
+  end
+
+  def to_h : Hash(K, V)
+    self
+  end
+
+  def sorted_by(& : K, V -> U) : Array(Tuple(K, V)) forall U
+    to_a.sorted_by { |pair| yield pair[0], pair[1] }
+  end
+
+end
+
+struct String
+
+  def []?(index : Int32) : UInt8?
+    index += bytesize if index < 0
+    index >= 0 && index < bytesize ? self[index] : nil
+  end
+
+
+  def chomp(char : Char) : String
+    ends_with?(char) ? self[0, bytesize - char.bytesize] : self
+  end
+
+  def lchop(char : Char) : String
+    starts_with?(char) ? self[char.bytesize, bytesize - char.bytesize] : self
+  end
+end
+
+struct Array(T)
+  def push(*values : T) : self
+    i = 0
+    while i < values.size
+      push(values[i])
+      i += 1
+    end
+    self
+  end
+
+  def unshift(*values : T) : self
+    i = values.size
+    while i > 0
+      i -= 1
+      unshift(values[i])
+    end
+    self
+  end
+
+  def first(n : Int32) : self
+    raise "negative count: #{n}" if n < 0
+    count = n < size ? n : size
+    self.class.new(count) { |i| self[i] }
+  end
+
+  def last(n : Int32) : self
+    raise "negative count: #{n}" if n < 0
+    count = n < size ? n : size
+    start = size - count
+    self.class.new(count) { |i| self[start + i] }
+  end
+
+  def sum(& : T -> U) : U forall U
+    total = U.zero
+    each { |value| total += yield value }
+    total
+  end
+
+  def delete(value : T) : T?
+    found = nil
+    i = size
+    while i > 0
+      i -= 1
+      if self[i] == value
+        removed = __remove_slot(i)
+        found = removed if found.nil?
+      end
+    end
+    found
+  end
+
+  def hash : Int32
+    value = 0x9E3779B97F4A7C15_u64 ^ size.to_i64.unsafe_to_u64
+    each do |element|
+      value = (value ^ element.hash.to_i64.unsafe_to_u64) &* 0x100000001B3_u64
+      value = value ^ value.unsafe_shr(29_u64)
+    end
+    value.hash
+  end
+end
+
+struct Hash(K, V)
+  def merge_in_place(other : Hash(L, W), & : L, V, W -> V) : self forall L, W
+    other.each do |key, value|
+      self[key] = has_key?(key) ? (yield key, self[key], value) : value
+    end
+    self
+  end
+
+  def update(key : K, & : V -> V) : V
+    old = self[key]
+    self[key] = yield old
+    old
+  end
+
+  def transform_values_in_place(& : V, K -> V) : self
+    each { |key, value| self[key] = yield value, key }
+    self
+  end
+
+  def compact
+    result = Hash(K, typeof(api_compact_value)).new(size)
+    each do |key, value|
+      result[key] = value unless value.nil?
+    end
+    result
+  end
+
+  private def api_compact_value
+    value = first_value
+    raise "nil value" if value.nil?
+    value
+  end
+
+  def first_key? : K?
+    each { |key, value| return key }
+    nil
+  end
+
+  def first_value? : V?
+    each { |key, value| return value }
+    nil
+  end
+
+  def first_key : K
+    each { |key, value| return key }
+    raise "first_key of an empty hash"
+  end
+
+  def first_value : V
+    each { |key, value| return value }
+    raise "first_value of an empty hash"
+  end
+
+  def shift : Tuple(K, V)
+    each do |key, value|
+      kept_key = Tape.owner_copy(key, RisCurrentTape.new)
+      kept_value = delete(key)
+      return {kept_key, kept_value.as(V)}
+    end
+    raise "shift of an empty hash"
+  end
+
+  def shift? : Tuple(K, V)?
+    empty? ? nil : shift
+  end
+
+  def put_if_absent(key : K, value : V) : V
+    put_if_absent(key) { value }
+  end
+
+  def put_if_absent(key : K, & : K -> V) : V
+    return self[key] if has_key?(key)
+    self[key] = yield key
+  end
+
+  def delete(key : K, & : K -> U) : V | U forall U
+    return yield key unless has_key?(key)
+    value = self[key]
+    delete(key)
+    value
+  end
+
+  def ==(other : Hash(K, V)) : Bool
+    return false unless size == other.size
+    each do |key, value|
+      return false unless other.has_key?(key) && other[key] == value
+    end
+    true
+  end
+
+  def hash : Int32
+    total = 0x9E3779B97F4A7C15_u64 ^ size.to_i64.unsafe_to_u64
+    each do |key, value|
+      pair = {key, value}.hash.to_i64.unsafe_to_u64 &* 0x100000001B3_u64
+      total = total &+ (pair ^ pair.unsafe_shr(29_u64))
+    end
+    total.hash
+  end
+end
+
+struct Array(T)
+  # Compatibility for initialized storage: never publish unwritten elements.
+  def self.unsafe_build(capacity : Int32) : self
+    new(capacity)
+  end
+
+  def unsafe_set_size(count : Int32) : Nil
+    if count > size
+      raise "use Array.new(count) { |i| value } to initialize every element"
+    end
+    truncate(count)
+  end
+
+  private def api_span?(start : Int32, count : Int32)
+    return nil if count < 0
+    start += size if start < 0
+    return nil if start < 0 || start > size
+    {start, count < size - start ? count : size - start}
+  end
+
+  private def api_range?(range : Range(B, E)) forall B, E
+    first = range.begin
+    start = first.nil? ? 0 : first
+    start += size if start < 0
+    return nil if start < 0 || start > size
+    last = range.end
+    stop = last.nil? ? size : (last < 0 ? size + last : last)
+    if stop >= size
+      stop = size
+    elsif !range.exclusive?
+      stop += 1
+    end
+    {start, stop > start ? stop - start : 0}
+  end
+
+  def []?(start : Int32, count : Int32) : Array::View(T)?
+    if span = api_span?(start, count)
+      self[span[0], span[1]]
+    end
+  end
+
+  def [](range : Range(B, E)) : Array::View(T) forall B, E
+    span = api_range?(range)
+    raise "array range out of bounds" unless span
+    self[span[0], span[1]]
+  end
+
+  def []?(range : Range(B, E)) : Array::View(T)? forall B, E
+    if span = api_range?(range)
+      self[span[0], span[1]]
+    end
+  end
+
+  private def api_splice(start : Int32, count : Int32, values : Array(T))
+    span = api_span?(start, count)
+    raise "array replacement out of bounds" unless span
+    at, removed = span
+    # A source may alias this array, or one of its nested pool runs.
+    source = values.dup
+    tail = self.class.new(size - at - removed) do |i|
+      self[at + removed + i]
+    end
+    while size > at
+      pop
+    end
+    concat(source)
+    concat(tail)
+  end
+
+  def []=(start : Int32, count : Int32, value : T) : T
+    api_splice(start, count, self.class.new(1, value))
+    value
+  end
+
+  def []=(start : Int32, count : Int32, values : Array(T)) : Array(T)
+    api_splice(start, count, values)
+    values
+  end
+
+  def []=(range : Range(B, E), value : T) : T forall B, E
+    span = api_range?(range)
+    raise "array replacement out of bounds" unless span
+    self[span[0], span[1]] = value
+  end
+
+  def []=(range : Range(B, E), values : Array(T)) : Array(T) forall B, E
+    span = api_range?(range)
+    raise "array replacement out of bounds" unless span
+    self[span[0], span[1]] = values
+  end
+
+  def truncate(start : Int32, count : Int32) : self
+    span = api_span?(start, count)
+    raise "array truncation out of bounds" unless span
+    span[0].times { shift }
+    truncate(span[1])
+    self
+  end
+
+  def truncate(range : Range(B, E)) : self forall B, E
+    span = api_range?(range)
+    raise "array truncation out of bounds" unless span
+    truncate(span[0], span[1])
+  end
+end
+
+struct Char
+  def inspect : String
+    String.build(12) { |io| inspect_into(io << '\'', '\'') << '\'' }
+  end
+  def inspect_into(io : String::Builder, quote : Char) : String::Builder
+    o = ord
+    return io << '\\' << self if self == quote || self == '\\'
+    return io << '\\' << "abtnvfr"[o - 7].unsafe_chr if o >= 7 && o <= 13
+    return io << (o == 27 ? "\\e" : "\\0") if o == 27 || (o == 0 && quote == '\'')
+    return io << self if printable?
+    hex = o.to_s(16).upcase
+    io << (o > 0xFFFF ? "\\u{" + hex + "}" : "\\u" + hex.rjust(4, '0'))
+  end
+  def printable? : Bool
+    o = ord
+    return o >= 0x20 && o != 0x7F if o < 0x80
+    !(o <= 0xA0 || whitespace? || o.in?(0xAD, 0x61C, 0x6DD, 0x70F, 0x8E2, 0x180E, 0xFEFF, 0x110BD, 0x110CD, 0xE0001) ||
+      (o >= 0x600 && o <= 0x605) || (o >= 0x890 && o <= 0x891) || (o >= 0x200B && o <= 0x200F) || (o >= 0x202A && o <= 0x202E) ||
+      (o >= 0x2060 && o <= 0x2064) || (o >= 0x2066 && o <= 0x206F) || (o >= 0xFFF9 && o <= 0xFFFB) || (o >= 0x13430 && o <= 0x1343F) ||
+      (o >= 0x1BCA0 && o <= 0x1BCA3) || (o >= 0x1D173 && o <= 0x1D17A) || (o >= 0xE0020 && o <= 0xE007F) ||
+      (o >= 0xE000 && o <= 0xF8FF) || (o >= 0xF0000 && (o & 0xFFFF) < 0xFFFE))
+  end
+  def letter? : Bool
+    (self >= 'a' && self <= 'z') || (self >= 'A' && self <= 'Z')
+  end
+  def digit? : Bool
+    self >= '0' && self <= '9'
+  end
+  def alphanumeric? : Bool
+    letter? || digit?
+  end
+  def whitespace? : Bool
+    return ord.in?(0xA0, 0x1680, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000) || (ord >= 0x2000 && ord <= 0x200A) if ord > 0x7F
+    self == ' ' || (self >= '\t' && self <= '\r')
+  end
+end
+
+struct String::Builder
+  def empty? : Bool
+    bytesize == 0
+  end
+end
+
+struct Array(T)
+  def to_s : String
+    String.build { |writer| writer.append_value(self) }
+  end
+
+  def inspect : String
+    to_s
+  end
+end
+
+struct Hash(K, V)
+  def to_s : String
+    String.build { |writer| writer.append_value(self) }
+  end
+
+  def inspect : String
+    to_s
+  end
+end
+
+struct String::Builder
+  # Runtime and marked FFI callers can append an initialized byte span.
+  def write(bytes : Pointer(UInt8), count : Int32) : Nil
+    append(bytes, count)
+  end
+end
+
+struct String
+  def self.new : self
+    ""
+  end
+
+  def dup : self
+    String.new(self)
+  end
+end

@@ -65,6 +65,7 @@ module std/idna
 import std/unicode::{Unicode}
 
 # What `Punycode.decode` answers for input that is not Punycode.
+@[OnTape]
 pub struct PunycodeError
   getter message : String
 
@@ -84,6 +85,7 @@ end
 
 # What `IDNA.to_ascii`, `IDNA.to_unicode` and `URI.ascii_host` answer for a
 # name they cannot carry: the sentence names the label and why.
+@[OnTape]
 pub struct IdnaError
   getter message : String
 

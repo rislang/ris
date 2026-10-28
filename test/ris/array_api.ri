@@ -1,3 +1,62 @@
+module test/ris/array_api
+
+a = [1, 2, 1, 3]
+raise "difference" unless a - [2] == [1, 1, 3]
+raise "intersection" unless a & [1, 3] == [1, 3]
+raise "union" unless a | [3, 4] == [1, 2, 3, 4]
+raise "repeat" unless [1, 2] * 2 == [1, 2, 1, 2]
+raise "key uniq" unless a.uniq { |x| x % 2 } == [1, 2]
+raise "zip" unless [1, 2].zip([3, 4])[1] == {2, 4}
+raise "prefix" unless a.first(2) == [1, 2]
+raise "suffix" unless a.last(2) == [1, 3]
+raise "sum" unless a.sum { |x| x.to_i64 } == 7_i64
+a.push(4, 5)
+a.unshift(-1, 0)
+raise "mutate" unless a.first == -1 && a.last == 5
+raise "delete" unless a.delete(1) == 1 && !a.includes?(1)
+raise "transpose" unless [[1, 2], [3, 4]].transpose[0] == [1, 3]
+raise "flatten" unless [[1, 2], [3]].flatten == [1, 2, 3]
+raise "false compact map" unless [1].compact_map { |x| false } == [false]
+raise "string max" unless ["a", "b"].max == "b"
+raise "compact" unless ([nil, 1, 2] of Int32?).compact == [1, 2]
+raise "product" unless [1, 2, 3].product == 6
+raise "float product" unless [1.5, 2.0].product == 3.0
+raise "empty product" unless ([] of Int32).product == 1
+# Transforms, views and replacement exercise core methods without imports.
+b = [1, 2, 3, 4]
+raise "range view" unless b[1..2].to_a == [2, 3]
+raise "optional range" unless b[9..10]?.nil?
+raise "optional span" unless (b[1, 99]? || raise "span").size == 3
+b[1, 2] = [8, 9, 10]
+raise "splice" unless b == [1, 8, 9, 10, 4]
+b[1..3] = 2
+raise "range splice" unless b == [1, 2, 4]
+b.insert(2, 3)
+raise "insert" unless b == [1, 2, 3, 4]
+raise "delete at" unless b.delete_at(-1) == 4
+b.reverse_in_place
+raise "reverse in place" unless b == [3, 2, 1]
+b.rotate_in_place
+raise "rotate" unless b == [2, 1, 3]
+b.fill { |i| i + 1 }
+raise "fill" unless b == [1, 2, 3]
+raise "fetch" unless b.fetch(9, 7) == 7
+raise "search" unless b.bsearch { |x| x >= 2 } == 2
+raise "reverse search" unless b.rindex { |x| x <= 2 } == 1
+raise "values at" unless b.values_at(0, -1) == [1, 3]
+raise "take" unless b.take(2) == [1, 2] && b.skip(2) == [3]
+raise "map index" unless b.map_with_index { |x, i| x + i } == [1, 3, 5]
+raise "group" unless b.group_by { |x| x % 2 }[1] == [1, 3]
+raise "partition" unless b.partition { |x| x > 1 }[0] == [2, 3]
+raise "windows" unless b.each_cons(2)[1] == [2, 3]
+raise "slices" unless b.each_slice(2)[1] == [3]
+raise "minmax" unless b.minmax == {1, 3}
+raise "minmax key" unless b.minmax_by { |x| -x } == {3, 1}
+raise "accumulate" unless b.accumulate(0) { |a, x| a + x } == [0, 1, 3, 6]
+raise "reduce" unless b.reduce? { |a, x| a + x } == 6
+raise "tally by" unless b.tally_by { |x| x % 2 }[1] == 2
+raise "cartesian" unless b.cartesian([0]).size == 3
+
 # Array asked what iyi's Array is asked, on a chat app's models:
 # users post messages in a room.
 @[OnTape]
@@ -71,5 +130,6 @@ tape do
 
   empty = Array(Message).new
   puts "#{empty.empty?} #{empty.first?.nil?} #{empty.pop?.nil?}"
-  empty.first
 end
+
+puts "PASS: array_api"
