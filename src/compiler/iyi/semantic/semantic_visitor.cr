@@ -2306,7 +2306,10 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
         ann.raise "TaskClosureUnsafe needs a reason naming the joined owner"
       end
       filename = ann.location.try(&.expanded_location).try(&.filename).to_s
-      unless filename.includes?("/src/std/") || filename.includes?("/src/iyi/")
+      # A .iyimod artifact of std or the runtime was checked when emitted.
+      artifact = filename.ends_with?(".iyimod") &&
+                 (filename.includes?("/std/") || filename.includes?("/iyi/"))
+      unless filename.includes?("/src/std/") || filename.includes?("/src/iyi/") || artifact
         ann.raise "TaskClosureUnsafe is runtime-only; keep the ordinary closure"
       end
     when @program.experimental_annotation

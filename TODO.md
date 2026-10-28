@@ -119,6 +119,9 @@ once; Channel stays for them until then.
   32,000 sleepers test (seen 2026-10-27 before the group-end change).
 * x86_64-windows-msvc does not typecheck std/socket.iyi:572
   (connect_named: opaque callback effects); fix with the socket race.
+* .iyimod artifacts drop @[OnTape] on types: a build from std artifacts
+  refuses File::Info's Str fields (bench/std_websocket_exercise.sh,
+  "does not run the same from its artifacts").
 * The mutation phases of std_acme, cookie, router, sse and websocket
   .sh run past 20 minutes; check whether they finish at all.
 

@@ -1741,7 +1741,12 @@ module Iyi
     end
 
     def visit(node : IsA)
-      node.obj.accept self
+      # `(item = it.next).is_a?(Stop)` keeps its parentheses.
+      if node.obj.is_a?(Assign) || node.obj.is_a?(OpAssign)
+        in_parenthesis(true, node.obj)
+      else
+        node.obj.accept self
+      end
       if node.nil_check?
         @str << ".nil?"
       else
