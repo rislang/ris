@@ -3803,13 +3803,10 @@ guard_breaks "an HTTP/2 body bounded per read alone" guard_h2 \
   '      conn.deadline_at(whole, "read a request") if whole > 0_i64
       unless stream_bodies' '      unless stream_bodies' \
   h2 "an HTTP/2 body a frame of a byte at a time"
-guard_breaks "connections served without a cap" guard_cap \
-  'slots = max_connections > 0 ? Channel(Int32).new(max_connections) : nil' 'slots = nil.as(Channel(Int32)?)' \
-  cap "cap"
-guard_breaks "a connection's place never given back" guard_leak \
-  "      # The connection's place, given back however it ended.
-      slots.take_now if slots
-" "" \
+guard_breaks "connections served past the cap" guard_cap \
+  '      count.times do
+        supervise(workers' '      (count * 4).times do
+        supervise(workers' \
   cap "cap"
 guard_breaks "a head held to the whole request's deadline alone" guard_head \
   '    head = timeout_ms > 0 ? started + timeout_ms.to_i64 * 1000000_i64 : 0_i64' '    head = 0_i64' \

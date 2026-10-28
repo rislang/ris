@@ -460,7 +460,7 @@ private struct RisBoardQueue(T)
     while at != 0
       waiter = Pointer(RisBoardWait).new(at).value
       fiber = waiter.fiber
-      if fiber.state == IyiFiberState::WaitingCh &&
+      if fiber.state == IyiFiberState::WaitingPeer &&
           fiber.park_nonce == waiter.nonce
         IyiScheduler.ready(fiber)
       end

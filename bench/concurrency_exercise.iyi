@@ -1026,8 +1026,8 @@ puts "a sleep(0) loop and a channel ping-pong let a sleeper and a pipe's reader 
 # A task handle held by a group's block and read by a sibling task, and a
 # value the program names the same after that block: two variables, so
 # two cells. The compiler gave every closure the later variable's cell,
-# and died building this with "BUG: trying to downcast IyiTask(Int32) <-
-# Channel(Int32)"; a proc reading a block's own Int32 beside a later String
+# and died building this with "BUG: trying to downcast" between the
+# task handle and the later value; a proc reading a block's own Int32 beside a later String
 # of the same name died the same way.
 held = 0
 group do |g|

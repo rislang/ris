@@ -1,7 +1,7 @@
 
 # iyi's concurrency runtime — SPEC.md III.4, built in the order III.4.8
-# settled: a scheduler, cancellable blocking primitives, then `group` and
-# `Channel`. Every scheduler thread runs fibers of its own, and what makes
+# settled: a scheduler, cancellable blocking primitives, then `group`;
+# messages between tasks are RisBoard's (board.iyi). Every scheduler thread runs fibers of its own, and what makes
 # that concurrency rather than sequence is the poller — a fiber that would
 # block parks itself and the scheduler runs another, so two tasks' waits
 # overlap on one thread. What makes it parallelism is the pool (III.4.13):
@@ -67,7 +67,7 @@ fun __iyi_ctx_swap(current : Pointer(UInt64), target : Pointer(UInt64)) : Nil
     # as the eight integer registers, and a switch is a call: a value the
     # compiler kept in one of them over `send` or `receive` was the other
     # fiber's when the call returned. Measured on a --release build, two
-    # fibers each holding ten doubles over a channel handoff read the
+    # fibers each holding ten doubles over a handoff read the
     # other's in 4,000 of 4,000 checks. Carried in the frame now, between
     # the integer registers and the two TEB words; `movups`, because the
     # frame's alignment is the caller's.
@@ -389,7 +389,7 @@ end
 # now (`src/iyi/enum.iyi`), and the comment was the argument for keeping the
 # integer - what those comparisons cost is measured, so naming them is a
 # change that has to be measured too. It was: `bench/server_load.sh`'s shape
-# holds and 2,000,000 channel round trips cost what they cost before, plain
+# holds and 2,000,000 message round trips cost what they cost before, plain
 # and optimised, because `==` on an enum is its value compared and the
 # member is a constant.
 enum IyiFiberState : Int32
@@ -397,7 +397,7 @@ enum IyiFiberState : Int32
   Runnable  = 1 # in the run queue, an inbox, or the pool's queues
   Sleeping  = 2 # in the sleep list, by deadline
   WaitingIo = 3 # in the io list, registered with the poller
-  WaitingCh = 4 # parked in a channel's queue
+  WaitingPeer = 4 # parked on a peer: a board take, a join
   Joining   = 5 # parked on another fiber's completion
   Done      = 6 # never scheduled again; its stack is never reused
   Pooled    = 7 # a pool worker's own fiber, which waits for nothing
@@ -448,7 +448,7 @@ class IyiFiber
 
   # Intrusive links. A fiber waits on at most one thing at a time, so one
   # link per queue kind is enough, and none of them allocate on the wait
-  # path except a channel's node.
+  # path.
   property next_run : IyiFiber?
   property next_io : IyiFiber?
   # The one before on the io list, where the list is the POSIX poller's
@@ -510,20 +510,13 @@ class IyiFiber
   property io_bytes_read : Int64
 
   # Which park this fiber is suspended in, counted up at every park. A
-  # channel node names the park it was made for, and a node whose nonce is
+  # waiter names the park it was made for, and one whose nonce is
   # not the fiber's current one is a leftover — a park the fiber already
   # left through cancellation — so a wake skips it and keeps looking, and
   # nobody has to unlink a node from a queue whose type the scheduler
   # cannot see. This is also what `select` will lean on: several nodes,
   # one nonce, and the losers go stale by arithmetic.
   property park_nonce : UInt64
-
-  # The receive node this fiber parked with last, kept for its next
-  # receive (`Channel#park_receive_node`): a ring of tasks passing a
-  # value parks on every receive, and a node a park was fifteen million
-  # allocations in crystal-metric's Threadring. Reused only once no
-  # queue holds it.
-  property spare_waiter : IyiWaiter?
 
   # 256 KiB of stack and one guard page under it, so running off the end
   # is a fault at a page rather than a quiet corruption of a neighbour's
@@ -600,7 +593,6 @@ class IyiFiber
     @wait_fd = -1
     @wait_dir = 0
     @park_nonce = 0_u64
-    @spare_waiter = nil
     @next_fiber = nil
     @prev_fiber = nil
     @prev_child = nil
@@ -796,58 +788,6 @@ class IyiFiber
   # while suspended, which is the only time the walk asks.
   def saved_sp : UInt64
     @sp
-  end
-end
-
-# A channel's receiver node. The node rather than the fiber carries the
-# queue membership; whether it still *means* anything is the nonce's
-# question, answered where fibers say (`IyiFiber#park_nonce`).
-class IyiWaiter
-  @fiber : IyiFiber
-  @nonce : UInt64
-  property next_node : IyiWaiter?
-  property prev_node : IyiWaiter?
-  # In a channel's queue: set when parked there, cleared when the node
-  # leaves it (`Channel#unlink_receiver`), from the head or from wherever
-  # it stands. A node still linked - one a cancelled park has not taken
-  # out yet - is never parked again, or its link would join two queues.
-  property linked : Bool
-  # Where a rendezvous sender puts its value: the address of a `T` the
-  # parked receive owns, written only while the node is `current?`, so
-  # only while that receive is suspended in the park that made it. The
-  # flag is the receipt: a woken receive that was handed a value answers
-  # it, whatever else has happened since (`Channel#hand`).
-  @slot : UInt64
-  property handed : Bool
-
-  def initialize(@fiber : IyiFiber, @nonce : UInt64, @slot : UInt64)
-    @next_node = nil
-    @prev_node = nil
-    @linked = false
-    @handed = false
-  end
-
-  # The same node for another park of the same fiber.
-  def renew(nonce : UInt64, slot : UInt64) : Nil
-    @nonce = nonce
-    @slot = slot
-    @next_node = nil
-    @prev_node = nil
-    @handed = false
-  end
-
-  def fiber : IyiFiber
-    @fiber
-  end
-
-  def slot : UInt64
-    @slot
-  end
-
-  # Still the park it was made for: the fiber is channel-parked and has
-  # not parked anywhere newer.
-  def current? : Bool
-    @fiber.state == IyiFiberState::WaitingCh && @fiber.park_nonce == @nonce
   end
 end
 
@@ -1052,12 +992,11 @@ class IyiSchedulerState
   end
 end
 
-# The scheduler's lock (SPEC.md III.4.13): channels, groups, the joiner
+# The scheduler's lock (SPEC.md III.4.13): board waits, groups, the joiner
 # chains, every thread's inbox and the pool's queues are behind it once a
 # second scheduler thread exists, and before that it is a load and a
-# branch. One lock for all of them, not one per channel: `select` parks
-# on several channels at once and a cancel walks groups whose tasks are on
-# several threads, and one lock has no order to get wrong. A holder never
+# branch. One lock for all of them, not one per queue: a cancel walks
+# groups whose tasks are on several threads, and one lock has no order to get wrong. A holder never
 # parks a fiber or waits on anything with it held - every park lets go of
 # it before `reschedule` - so what it covers is a few pointer moves.
 #
@@ -1261,7 +1200,7 @@ class IyiScheduler
 
   # Every *live* fiber, intrusively linked, for the collector's root
   # walk (GC_DESIGN.md Stage 3). The queues cannot serve that walk: a
-  # channel-parked fiber lives in the channel's own node list, which the
+  # fiber parked on the board is in the board's waiter list, which the
   # scheduler cannot see, and a joiner hangs off the fiber it waits on.
   #
   # It used to be every fiber *ever made*, on the grounds that a done
@@ -1555,27 +1494,14 @@ class IyiScheduler
     fiber.stack_top
   end
 
-  # A channel park: the nonce that distinguishes this suspension from
-  # every earlier one, so a queue node a cancellation left behind is
-  # skipped by arithmetic rather than unlinked by hand. `select` parks
-  # once and stamps every arm's node with the one nonce.
+  # A peer park: the nonce that distinguishes this suspension from
+  # every earlier one, so a waiter a cancellation left behind is
+  # skipped by arithmetic rather than unlinked by hand.
   def self.park(fiber : IyiFiber) : UInt64
     nonce = fiber.park_nonce + 1
     fiber.park_nonce = nonce
-    fiber.state = IyiFiberState::WaitingCh
+    fiber.state = IyiFiberState::WaitingPeer
     nonce
-  end
-
-  # Zero the value *slot* holds, once a channel has handed it out, so the
-  # channel does not keep it reachable (`Channel#shift_item`,
-  # `IyiSendNode#take`). Read again only after a store writes it anew.
-  def self.forget(slot : Pointer(T)) : Nil forall T
-    bytes = slot.as(Pointer(UInt8))
-    index = 0
-    while index < sizeof(T)
-      bytes[index] = 0_u8
-      index = index + 1
-    end
   end
 
   def self.enqueue(fiber : IyiFiber) : Nil
@@ -1600,7 +1526,7 @@ class IyiScheduler
     head
   end
 
-  # A fiber parked on a peer - a channel, a join - made runnable by whoever
+  # A fiber parked on a peer - a board take, a join - made runnable by whoever
   # ends its wait, on whatever thread that is (SPEC.md III.4.13). A run
   # queue is its own thread's alone, so a fiber woken from another thread
   # goes into its home's inbox, and that thread is rung if it waits in its
@@ -1809,7 +1735,7 @@ class IyiScheduler
   # Both were looked at only once the run queue was empty, and a yield
   # keeps it full: a task polling a flag with `sleep(0)` spun 20,000,000
   # times in 666-813 ms while the task sleeping 10 ms to set it never woke,
-  # and a `sleep(50)` beside a channel ping-pong woke after 545-669 ms, when
+  # and a `sleep(50)` beside a message ping-pong woke after 545-669 ms, when
   # the ping-pong had stopped by itself. The poller is a system call, and
   # asked every 256 parks it put 15 ns on a 90 ns round trip beside a parked
   # `accept`; the clock alone is not measurable there.
@@ -2452,7 +2378,7 @@ class IyiScheduler
   # parked on, it is unparked here and its next (or current) blocking
   # primitive answers `Cancelled`; running or runnable, the flag is enough.
   #
-  # The fiber may be another thread's (III.4.13). A peer wait - a channel,
+  # The fiber may be another thread's (III.4.13). A peer wait - a board take,
   # a join - is behind the scheduler's lock, which the caller holds, and is
   # ended here; a sleep or an io wait is in its own thread's lists, and the
   # cancel is posted there for that thread to end. A parallel task not
@@ -2465,7 +2391,7 @@ class IyiScheduler
     if home.is_a?(IyiSchedulerState)
       if !@@shared || home.object_id == state.object_id
         cancel_wait(fiber)
-      elsif fiber.state == IyiFiberState::WaitingCh
+      elsif fiber.state == IyiFiberState::WaitingPeer
         ready(fiber)
       elsif fiber.state != IyiFiberState::Joining
         post_cancel(home, fiber)
@@ -2522,10 +2448,10 @@ class IyiScheduler
         io_remove(fiber)
         enqueue(fiber)
       {% end %}
-    elsif fiber.state == IyiFiberState::WaitingCh
-      # The channel's node is left where it is: waking bumps nothing here,
-      # because the enqueue below changes the state the node's `current?`
-      # reads, and every wake skips a node that is no longer current.
+    elsif fiber.state == IyiFiberState::WaitingPeer
+      # The board's waiter is left where it is: waking bumps nothing here,
+      # because the enqueue below changes the state the waiter reads, and
+      # every wake skips a waiter that is no longer current.
       enqueue(fiber)
     end
   end
@@ -2782,10 +2708,9 @@ class IyiScheduler
           io_remove(head)
         {% end %}
       end
-      # A select with a timeout arm is in this heap and a channel's queues
-      # at once, and either can wake it: one already woken is not queued
-      # twice. Its `unpark` takes it out of here when it runs. A channel's
-      # wake may come from another thread, under the scheduler's lock, so
+      # A timed board take is in this heap and the board's waiters at
+      # once, and either can wake it: one already woken is not queued
+      # twice. A board's wake may come from another thread, under the scheduler's lock, so
       # the look and the enqueue are under it too.
       if @@shared
         IyiSchedLock.lock
@@ -3164,14 +3089,11 @@ class IyiScheduler
   end
 
   # III.4.2's other ending: a cancelled task stopped where no answer can
-  # carry its `Cancelled`, `Channel.select` with no bound arm for one. Its
+  # carry its `Cancelled`. Its
   # pending defers run innermost first, as a panic's do, and its group
   # counts it as a cancelled task, not a failure; nothing is printed. Its
   # handle has no value to give, and `IyiTask#value` says so as
   # `Panicked`, the union's one member for a task that did not finish.
-  # Such a select answered `Cancelled` to its first arm, which runs
-  # nothing unbound, so a loop around it spun at a full core and its
-  # group's join waited forever.
   def self.stop_current : NoReturn
     fiber = current
     fiber.unwinding = true
