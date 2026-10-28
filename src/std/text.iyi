@@ -118,7 +118,7 @@ struct ::Char
   end
 end
 
-class ::String
+struct ::String
   # The whitespace `blank?`, `lstrip` and `rstrip` look through is the
   # prelude's `Char#whitespace?`, decoded, so `strip` with no argument agrees
   # with these and with the other library: `"\u3000".blank?` was false.
@@ -130,10 +130,7 @@ class ::String
     blank? ? nil : self
   end
 
-  def lstrip : String
-    first = space_end
-    byte_slice(first, bytesize - first)
-  end
+
 
   # A `Char` above ASCII is more than one byte, and this family narrowed it
   # to one with a checked convert: `"a☃b".index('☃', 0)` panicked with
@@ -228,9 +225,7 @@ class ::String
     true
   end
 
-  def rstrip : String
-    byte_slice(0, space_start(0))
-  end
+
 
   def rstrip(char : Char) : String
     text = char.to_s
@@ -271,14 +266,7 @@ class ::String
     lstrip(chars).rstrip(chars)
   end
 
-  def chomp : String
-    if bytesize >= 2 && to_unsafe[bytesize - 2] == 13_u8 && to_unsafe[bytesize - 1] == 10_u8
-      return byte_slice(0, bytesize - 2)
-    elsif bytesize >= 1 && (to_unsafe[bytesize - 1] == 10_u8 || to_unsafe[bytesize - 1] == 13_u8)
-      return byte_slice(0, bytesize - 1)
-    end
-    self
-  end
+
 
   # `"\n"` is every line ending, as `chomp` with no argument reads it and as
   # the other library answers: `"a\r\n".chomp("\n")` is `"a"`.
@@ -309,7 +297,7 @@ class ::String
   # stood for none: `"a,b".split(",", -1)` was `["a", "b"]` here and
   # `["a,b"]` there. An empty string is one empty piece whatever the
   # limit, as it is without one: `"".split(",", -1)` was `[]`.
-  def split(separator : String, limit : Int32? = nil) : Array(String)
+  def split(separator : String, limit : Int32?) : Array(String)
     return [self] if empty? || (limit && limit <= 1)
     limit = limit || 0
 
@@ -345,9 +333,6 @@ class ::String
     split(separator.to_s, limit)
   end
 
-  def split : Array(String)
-    split(nil)
-  end
 
   def split(limit : Int32?) : Array(String)
     return [self] if limit && limit <= 1
@@ -387,19 +372,7 @@ class ::String
     pieces
   end
 
-  def index(char : Char, offset : Int32) : Int32?
-    index(char.to_s, offset)
-  end
 
-  def index(search : String, offset : Int32 = 0) : Int32?
-    offset = bytesize + offset if offset < 0
-    return nil if offset < 0
-    return offset if search.bytesize == 0 && offset <= bytesize
-    # Room left, not an end: `offset + search.bytesize` overflowed for an
-    # offset near the top of `Int32` and panicked where the answer is nil.
-    return nil if offset > bytesize - search.bytesize
-    byte_index(search, offset)
-  end
 
   def rindex(char : Char, offset : Int32) : Int32?
     rindex(char.to_s, offset)
@@ -473,11 +446,6 @@ class ::String
     rindex(search, bytesize - search.bytesize)
   end
 
-  def sub(search : String, replacement : String) : String
-    idx = index(search)
-    return self unless idx
-    byte_slice(0, idx) + replacement + byte_slice(idx + search.bytesize, bytesize - idx - search.bytesize)
-  end
 
   def sub(search : Char, replacement : Char) : String
     sub(search.to_s, replacement.to_s)
@@ -508,11 +476,6 @@ class ::String
   # `sub` matches it at the start: `"abc".gsub("", "-")` is `"-a-b-c-"`, the
   # other library's answer, where it was `"abc"`. A byte that begins no
   # character is kept, a unit of its own.
-  def gsub(search : String, replacement : String) : String
-    return gsub(search) { replacement } if search.empty?
-    pieces = split(search)
-    pieces.join(replacement)
-  end
 
   def gsub(search : Char, replacement : Char) : String
     gsub(search.to_s, replacement.to_s)
@@ -568,39 +531,7 @@ class ::String
     end
   end
 
-  def capitalize : String
-    return "" if empty?
-    String.new(bytesize) do |buffer|
-      b0 = to_unsafe[0]
-      buffer[0] = (b0 >= 97_u8 && b0 <= 122_u8) ? (b0 - 32_u8) : b0
-      i = 1
-      while i < bytesize
-        b = to_unsafe[i]
-        buffer[i] = (b >= 65_u8 && b <= 90_u8) ? (b + 32_u8) : b
-        i = i + 1
-      end
-    end
-  end
 
-  # Mapped per character. The 256-entry byte table this used could not hold
-  # a character above ASCII: `"a☃".tr("☃", "x")` answered `"axxx"`, one `x`
-  # per byte of the character it was asked to replace once. Both sets name
-  # runs: `a-z` is the twenty-six letters, and a `-` at either end is
-  # itself, as the other library's `delete` sets read them. Its `tr` pairs
-  # the characters positionally, a `-` among them, so
-  # `"bab".tr("a-c", "A-C")` is `"bAb"` there and `"BAB"` here.
-  #
-  # Both sets in ASCII - the common case, and a DNA complement's - are one
-  # 256-entry byte table built once and one pass over the bytes, which a
-  # character above ASCII passes through untouched because none of its
-  # bytes is under 0x80. A byte that begins no character is not one of
-  # those: the table kept it as it stood where the per-character map
-  # writes U+FFFD, so text holding one takes that map too. Otherwise the
-  # map is per character. A `to` shorter than `from` repeats its last
-  # character, which is the rule the other library follows; an empty one
-  # deletes the character. Each character was looked up in an array of
-  # one-character strings and the answer appended to a string rebuilt every
-  # time, and a 130 MB `tr` did not finish.
   def tr(from : String, to : String) : String
     return self if from.empty?
     sources = tr_set(from)
@@ -881,13 +812,6 @@ class ::String
     end
   end
 
-  def chars : Array(Char)
-    arr = [] of Char
-    each_char do |c|
-      arr << c
-    end
-    arr
-  end
 
   def bytes : Array(UInt8)
     arr = [] of UInt8
@@ -899,44 +823,7 @@ class ::String
     arr
   end
 
-  def each_byte(& : UInt8 -> Nil) : Nil
-    i = 0
-    while i < bytesize
-      yield to_unsafe[i]
-      i = i + 1
-    end
-  end
 
-  # Scanned, a line at a time: `lines` first built the whole array - 2.4
-  # million strings for a 143 MB text - and `chomp` a second string for each.
-  # The same lines, a final newline closing the last rather than opening an
-  # empty one, and a `\r` before a newline left off.
-  def each_line(& : String -> Nil) : Nil
-    source = to_unsafe
-    start = 0
-    at = 0
-    while at < bytesize
-      if source[at] == 10_u8
-        stop = at > start && source[at - 1] == 13_u8 ? at - 1 : at
-        yield byte_slice(start, stop - start)
-        start = at + 1
-      end
-      at = at + 1
-    end
-    if start < bytesize
-      # No newline after it, so a `\r` here is text: `"b\r"` is `"b\r"`.
-      yield byte_slice(start, bytesize - start)
-    end
-  end
-
-  def to_i(base : Int32) : Int32
-    to_i?(base) || raise "not a number in base #{base}: #{inspect}"
-  end
-
-  # Whitespace before and after the number is not part of it, as the other
-  # library reads one (`Char#whitespace?`, so a no-break space too); inside
-  # it is still refused. `" 42".to_i64?`, `"ff ".to_i?(16)` and a line
-  # read with its `\n` were nil here, and 42 and 255 there.
   def to_i?(base : Int32) : Int32?
     raise "base #{base} out of range (2..36)" if base < 2 || base > 36
     index = space_end
@@ -1037,68 +924,10 @@ class ::String
     self[range.begin, count < 0 ? 0 : (count > bytesize ? bytesize : count.to_i32)]
   end
 
-  def to_i64 : Int64
-    to_i64? || raise "not a number: #{inspect}"
-  end
 
-  def to_i64(base : Int32) : Int64
-    to_i64?(base) || raise "not a number in base #{base}: #{inspect}"
-  end
 
-  def to_i64? : Int64?
-    to_i64?(10)
-  end
 
-  def to_i64?(base : Int32) : Int64?
-    raise "base #{base} out of range (2..36)" if base < 2 || base > 36
-    index = space_end
-    stop = space_start(index)
-    return nil if index == stop
 
-    negative = to_unsafe[index] == 45_u8
-    if negative || to_unsafe[index] == 43_u8
-      return nil if index + 1 == stop
-      index = index + 1
-    end
-
-    # The same negative accumulation, for the type whose own `MIN` a program
-    # is most likely to read back: a nanosecond timestamp is an `Int64`.
-    radix = base.to_i64
-    limit = -9223372036854775808_i64
-    bound = limit // radix
-    cutoff = 0_i64 - (limit - bound * radix)
-
-    value = 0_i64
-    while index < stop
-      b = to_unsafe[index]
-      digit = -1_i64
-      if b >= 48_u8 && b <= 57_u8
-        digit = (b - 48_u8).to_i64
-      elsif b >= 97_u8 && b <= 122_u8
-        digit = (b - 97_u8).to_i64 + 10_i64
-      elsif b >= 65_u8 && b <= 90_u8
-        digit = (b - 65_u8).to_i64 + 10_i64
-      else
-        return nil
-      end
-      return nil if digit >= radix
-      return nil if value < bound || (value == bound && digit > cutoff)
-      value = value * radix - digit
-      index = index + 1
-    end
-
-    return value if negative
-    return nil if value == limit
-    0_i64 - value
-  end
-
-  # The other library's reading, whitespace around it aside: a sign, then
-  # `inf`, `infinity` or `nan` in any case (a `nan` may close with a `(...)`
-  # of letters, digits and `_`), or decimal digits. Text whose value leaves
-  # the range is nil, as that reader's ERANGE makes it: nonzero digits that
-  # round to zero, or digits that round past the largest double. Here
-  # `"1e400".to_f?` was Infinity, `"1e-400".to_f?` 0.0, and only `Infinity`
-  # and `NaN` spelled so were words: `"inf".to_f?` was nil.
   def to_f? : Float64?
     bytes = to_unsafe
     first = space_end
@@ -1184,23 +1013,6 @@ class ::String
   # with the lead before it kept `C0 80` and a stray byte after `é` whole.
   # It decoded the whole string into an array of `Char`s first - four
   # bytes each, 520 MB to reverse 130 MB of ASCII.
-  def reverse : String
-    source = to_unsafe
-    String.new(bytesize) do |buffer|
-      at = 0
-      stop = bytesize
-      while stop > 0
-        start = char_start(stop)
-        k = start
-        while k < stop
-          buffer[at] = source[k]
-          at = at + 1
-          k = k + 1
-        end
-        stop = start
-      end
-    end
-  end
 
   def partition(separator : String) : Tuple(String, String, String)
     idx = index(separator)
@@ -1247,10 +1059,4 @@ class ::String
   # `byte_slice` and `Array#join` with no separator are the prelude's, and
   # `each_char` and `Char#to_s` are too now that they decode and encode
   # UTF-8 there: this module writes what the prelude does not have (R-3).
-end
-
-class ::Array(T)
-  def join(separator : Char) : String
-    join(separator.to_s)
-  end
 end

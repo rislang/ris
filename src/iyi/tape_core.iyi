@@ -513,3 +513,132 @@ struct String
     bytesize - other.bytesize
   end
 end
+
+struct String::Builder
+  def bytesize : Int32
+    length
+  end
+
+  def write_byte(byte : UInt8) : Nil
+    push(byte)
+  end
+end
+
+struct Array(T)
+  # Internal FFI borrow; consumers keep the Array as the owning value.
+  def to_unsafe : Pointer(T)
+    Pointer(T).new(@state.value)
+  end
+end
+
+struct Char
+  def printable? : Bool
+    point = ord
+    point >= 32 && !(point >= 127 && point <= 159)
+  end
+
+  def each_byte(& : UInt8 -> _) : Nil
+    point = ord
+    if point < 0x80
+      yield point.to_u8
+    elsif point < 0x800
+      yield (0xC0 | (point >> 6)).to_u8
+      yield (0x80 | (point & 0x3F)).to_u8
+    elsif point < 0x10000
+      yield (0xE0 | (point >> 12)).to_u8
+      yield (0x80 | ((point >> 6) & 0x3F)).to_u8
+      yield (0x80 | (point & 0x3F)).to_u8
+    else
+      yield (0xF0 | (point >> 18)).to_u8
+      yield (0x80 | ((point >> 12) & 0x3F)).to_u8
+      yield (0x80 | ((point >> 6) & 0x3F)).to_u8
+      yield (0x80 | (point & 0x3F)).to_u8
+    end
+  end
+end
+
+struct Array(T)
+  def [](start : Int32, count : Int32) : Array::View(T)
+    start += size if start < 0
+    Array::View(T).new(self, start, count)
+  end
+end
+
+struct Array(T)
+  def join(separator : Char) : String
+    join(separator.to_s)
+  end
+end
+
+struct SlicePool(T)
+  def store(text : String) : Run(UInt8)
+    {% unless T == UInt8 %}
+      {% raise "store(String) needs SlicePool(UInt8)" %}
+    {% end %}
+    run = alloc_slice(text.bytesize)
+    i = 0
+    text.each_byte do |byte|
+      run[i] = byte
+      i += 1
+    end
+    run
+  end
+end
+
+struct SlicePool::Run(T)
+  # A view, valid until the owning run is freed or relocated.
+  def string : String
+    {% unless T == UInt8 %}
+      {% raise "string needs a SlicePool(UInt8) run" %}
+    {% end %}
+    address = @state.value + @offset.to_u64
+    String.new(Pointer(UInt8).new(address), @size)
+  end
+end
+
+struct StaticArray(T, N)
+  def __iyi_copy_into(target : Pointer(self), work : RisCopyWork) : Nil
+    target.value = self
+    i = 0
+    while i < N
+      slot = target.as(Pointer(UInt8)) + i.to_i64 * sizeof(T)
+      source = pointerof(@buffer) + i
+      work.push(source.value, slot.as(Pointer(T)))
+      i += 1
+    end
+  end
+
+  def __iyi_pending_copy(owner : RisPendingCopy) : self
+    made = self
+    i = 0
+    while i < N
+      slots = pointerof(made).as(Pointer(T))
+      slots[i] = Tape.copy_value(slots[i], owner)
+      i += 1
+    end
+    made
+  end
+end
+
+struct Array(T)
+  # Reorder fixed-size slots without changing their backing owner or size.
+  def __rotate_slots(steps : Int32) : Nil
+    return if size < 2
+    shift = steps % size
+    shift += size if shift < 0
+    return if shift == 0
+    __reverse_slots(0, shift - 1)
+    __reverse_slots(shift, size - 1)
+    __reverse_slots(0, size - 1)
+  end
+
+  private def __reverse_slots(left : Int32, right : Int32) : Nil
+    while left < right
+      value = unsafe_at(left)
+      unchecked_store(left, unsafe_at(right))
+      unchecked_store(right, value)
+      left += 1
+      right -= 1
+    end
+  end
+end

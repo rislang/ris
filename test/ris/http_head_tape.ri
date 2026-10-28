@@ -30,5 +30,11 @@ tape do
   end)
   raise "limit" unless error.is_a?(HeadError) && error.status == 431 && error.message == "request headers past 1048576 bytes"
 
+  joined = HeadParser.parse_head(
+    "GET / HTTP/1.1\r\nHost: x\r\nX: one\r\nX: two\r\n\r\n")
+  raise "joined head" unless joined.is_a?(ParsedHead)
+  fields = String::Builder.new(64)
+  joined.each_field { |name, value| fields << name << ":" << value << ";" }
+  raise "joined values" unless fields.finish == "Host:x;X:one, two;"
 end
 puts "HTTP head: zero heap"

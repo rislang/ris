@@ -373,6 +373,7 @@ end
 
 # One JSON value of any kind, the result of `JSON.parse`. The `as_x` methods
 # panic when the value is of another kind; the `as_x?` ones answer `nil`.
+@[OnTape]
 pub struct Any
   alias Type = Nil | Bool | Int64 | Float64 | String | Array(Any) | Hash(String, Any)
 
@@ -531,17 +532,17 @@ pub struct Any
     actual < 0 || actual >= a.size ? nil : a[actual]
   end
 
-  def [](key : String | String) : Any
+  def [](key : String) : Any
     h = as_h? || raise "key #{key.inspect} into a JSON #{kind}"
     h[key]? || raise "no such key #{key.inspect}"
   end
 
-  def []?(key : String | String) : Any?
+  def []?(key : String) : Any?
     h = as_h?
     h.nil? ? nil : h[key]?
   end
 
-  def dig?(key : String | String) : Any?
+  def dig?(key : String) : Any?
     self[key]?
   end
 
@@ -549,19 +550,19 @@ pub struct Any
     self[index]?
   end
 
-  def dig?(k : String | String, *subkeys : String | String | Int32) : Any?
+  def dig?(k : String, *subkeys : String | Int32) : Any?
     v = self[k]?
     return nil unless v
     v.dig?(*subkeys)
   end
 
-  def dig?(idx : Int32, *subkeys : String | String | Int32) : Any?
+  def dig?(idx : Int32, *subkeys : String | Int32) : Any?
     v = self[idx]?
     return nil unless v
     v.dig?(*subkeys)
   end
 
-  def dig(key : String | String) : Any
+  def dig(key : String) : Any
     self[key]
   end
 
@@ -569,11 +570,11 @@ pub struct Any
     self[index]
   end
 
-  def dig(k : String | String, *subkeys : String | String | Int32) : Any
+  def dig(k : String, *subkeys : String | Int32) : Any
     self[k].dig(*subkeys)
   end
 
-  def dig(idx : Int32, *subkeys : String | String | Int32) : Any
+  def dig(idx : Int32, *subkeys : String | Int32) : Any
     self[idx].dig(*subkeys)
   end
 
@@ -2306,12 +2307,12 @@ pub class Builder
     @buffer.append(str)
   end
 
-  def string(val : String | String) : Nil
+  def string(val : String) : Nil
     before_value
     write_escaped_string(val)
   end
 
-  private def write_escaped_string(val : String | String) : Nil
+  private def write_escaped_string(val : String) : Nil
     JSON.each_escaped_byte(val.as_tape, @ascii_only) { |b| @buffer.append(b) }
   end
 
@@ -2370,7 +2371,7 @@ pub class Builder
   # given twice, or two Strings whose bytes are not UTF-8 and are both
   # written as U+FFFD (`{"a\xFF" => 1, "a\xFE" => 2}` was written
   # `{"a\uFFFD":1,"a\uFFFD":2}`, and `JSON.parse` refused it).
-  def field(name : String | String) : Nil
+  def field(name : String) : Nil
     st = state
     raise "a field outside an object" unless st == OBJECT_FIRST || st == OBJECT_NEXT
     @buffer.append(44_u8) if st == OBJECT_NEXT # ','
@@ -2389,42 +2390,42 @@ pub class Builder
     @buffer.append(32_u8) unless @indent_str.nil? # ' '
   end
 
-  def field(name : String | String, & : -> Nil) : Nil
+  def field(name : String, & : -> Nil) : Nil
     field(name)
     yield
   end
 
-  def field(name : String | String, val : Any) : Nil
+  def field(name : String, val : Any) : Nil
     field(name)
     val.to_json(self)
   end
 
-  def field(name : String | String, val : String | String) : Nil
+  def field(name : String, val : String) : Nil
     field(name)
     string(val)
   end
 
-  def field(name : String | String, val : Int32) : Nil
+  def field(name : String, val : Int32) : Nil
     field(name)
     number(val)
   end
 
-  def field(name : String | String, val : Int64) : Nil
+  def field(name : String, val : Int64) : Nil
     field(name)
     number(val)
   end
 
-  def field(name : String | String, val : Float64) : Nil
+  def field(name : String, val : Float64) : Nil
     field(name)
     number(val)
   end
 
-  def field(name : String | String, val : Bool) : Nil
+  def field(name : String, val : Bool) : Nil
     field(name)
     bool(val)
   end
 
-  def field(name : String | String, val : Nil) : Nil
+  def field(name : String, val : Nil) : Nil
     field(name)
     null
   end
@@ -2758,42 +2759,42 @@ pub struct Writer
     table[1] = table[1] + 1
   end
 
-  def field(name : String | String, & : -> Nil) : Nil
+  def field(name : String, & : -> Nil) : Nil
     field(name)
     yield
   end
 
-  def field(name : String | String, val : String) : Nil
+  def field(name : String, val : String) : Nil
     field(name)
     string(val)
   end
 
-  def field(name : String | String, val : String) : Nil
+  def field(name : String, val : String) : Nil
     field(name)
     string(val)
   end
 
-  def field(name : String | String, val : Int32) : Nil
+  def field(name : String, val : Int32) : Nil
     field(name)
     number(val)
   end
 
-  def field(name : String | String, val : Int64) : Nil
+  def field(name : String, val : Int64) : Nil
     field(name)
     number(val)
   end
 
-  def field(name : String | String, val : Float64) : Nil
+  def field(name : String, val : Float64) : Nil
     field(name)
     number(val)
   end
 
-  def field(name : String | String, val : Bool) : Nil
+  def field(name : String, val : Bool) : Nil
     field(name)
     bool(val)
   end
 
-  def field(name : String | String, val : Nil) : Nil
+  def field(name : String, val : Nil) : Nil
     field(name)
     null
   end
@@ -3004,7 +3005,7 @@ pub struct Document
   end
 
   # The value of the field *name* of the object at *index*, or -1.
-  def at(index : Int32, name : String | String) : Int32
+  def at(index : Int32, name : String) : Int32
     expect(index, Kind::Object)
     found = -1
     @tree.each_child(index) do |child|
@@ -3301,7 +3302,7 @@ pub struct JSON
   # through a `Writer` the block is handed: `build` makes a String,
   # `write` adds to one. Per-level state is on this method's stack;
   # key spans and hash bins grow on the caller's tape.
-  def self.write(writer : String::Builder, indent : String | String | Int32 | Nil = nil, ascii_only : Bool = false, & : Writer -> Nil) : Nil
+  def self.write(writer : String::Builder, indent : String | Int32 | Nil = nil, ascii_only : Bool = false, & : Writer -> Nil) : Nil
     slots = uninitialized Int32[784]
     text = case indent
            when Int32

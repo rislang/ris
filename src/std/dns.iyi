@@ -1279,7 +1279,7 @@ pub struct ResolvConf
       when "domain"
         search = words.size > 1 ? [words[1]] : [] of String
       when "search"
-        search = words[1, words.size - 1]
+        search = words[1, words.size - 1].to_a
       when "options"
         index = 1
         while index < words.size

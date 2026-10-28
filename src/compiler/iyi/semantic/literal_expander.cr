@@ -177,15 +177,9 @@ module Iyi
     #
     # If `T` is an uninstantiated generic type, injects a `typeof` with the
     # element types.
-    # A literal written in a program, not in std or the runtime.
+    # The prelude, std and programs use the same tape collection ABI.
     private def ris_program_literal?(node : ASTNode) : Bool
-      return false unless @program.iyi_prelude?
-      location = node.location
-      return false unless location
-      return false if TapeScopeRuntime.runtime?(location)
-      file = location.original_filename.try(&.gsub('\\', '/')) || ""
-      return false if file.includes?("/src/std/") || file.ends_with?(".iyimod")
-      true
+      @program.iyi_prelude?
     end
 
     # `[a, b]` -> `Ary(T).new(n)` with each element pushed: storage on the

@@ -393,16 +393,14 @@ end
 # not the double's, decide where the digits stop. The notation is the
 # prelude's `Float64#to_s`'s.
 module Float32Text
+  @[PointerUnsafe("bitcast a local Float32 without allocating storage")]
   def self.bits_of(value : Float32) : UInt32
-    holder = Pointer(Float32).malloc(1_u64)
-    holder.value = value
-    Pointer(UInt32).new(holder.address).value
+    pointerof(value).as(Pointer(UInt32)).value
   end
 
+  @[PointerUnsafe("bitcast local bits without allocating storage")]
   def self.from_bits(bits : UInt32) : Float32
-    holder = Pointer(UInt32).malloc(1_u64)
-    holder.value = bits
-    Pointer(Float32).new(holder.address).value
+    pointerof(bits).as(Pointer(Float32)).value
   end
 
   def self.text(bits32 : UInt32) : String

@@ -3,7 +3,7 @@
 module test/ris/hpack
 
 import std/hpack::{Encoder, Decoder, HpackError,
-                  TapeHeaders, TapeHeaderField, IndexingMode}
+                  TapeHeaders, TapeHeaderField, IndexingMode, DynamicTable}
 
 encoder = Encoder.new
 decoder = Decoder.new
@@ -22,7 +22,7 @@ decoder = Decoder.new
       String.new("secret"), IndexingMode::NeverIndexed))
     fields.push(TapeHeaderField.new(String.new("x-raw"),
       String.new("utf8: ü and NUL: \x00"), IndexingMode::WithoutIndexing))
-    encoded = encoder.encode_on_tape(fields)
+    encoded = encoder.encode(fields)
     decoded = decoder.decode(encoded)
     raise decoded.message if decoded.is_a?(HpackError)
     raise "field count" unless decoded.size == 5
@@ -51,4 +51,20 @@ tape do
   raise "size limit" unless size.is_a?(HpackError)
   raise "size error" unless size.message.starts_with?("Decompression bomb")
 end
+# A connection owns its runs; request text never becomes table storage.
+def churn(table : DynamicTable, index : Int32) : Nil
+  table.add("key#{index % 3}", "v" * (index % 23 + 1))
+end
+
+table = DynamicTable.new(128)
+table.add("original", "retained")
+field = table.get(1)
+raise "missing retained field" unless field
+kept = field.copy_to(RisCurrentTape.new)
+1000.times { |index| churn(table, index) }
+raise "pool reuse" unless table.byte_slots <= 512
+raise "retained copy" unless kept.name == "original" && kept.value == "retained"
+table.clear
+raise "table clear" unless table.empty? && table.size == 0
+
 puts "PASS: tape HPACK fields, retained tables and malformed input"

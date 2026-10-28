@@ -197,7 +197,7 @@ pub struct Base64
   end
 
   protected def self.pairs_of(alphabet : String) : Array(Int32)
-    chars = alphabet.to_unsafe
+    chars = alphabet
     Array(Int32).new(4096) { |k| chars[k.unsafe_shr(6)].to_i32 | chars[k & 63].to_i32.unsafe_shl(8) }
   end
 

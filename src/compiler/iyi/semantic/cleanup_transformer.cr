@@ -504,9 +504,11 @@ module Iyi
          targets[0].name == "spawn" && targets[0].owner.to_s == "IyiGroup"
         if (joined = node.block.try(&.fun_literal)).is_a?(ProcLiteral)
           @joined_task_blocks << joined.def
+          @joined_task_calls[joined.def] = node
         end
         if (joined = node.block_arg).is_a?(ProcLiteral)
           @joined_task_blocks << joined.def
+          @joined_task_calls[joined.def] = node
         end
       end
 
@@ -618,6 +620,7 @@ module Iyi
              (joined_block = node.block) &&
              (joined_proc = joined_block.fun_literal).is_a?(ProcLiteral)
             @joined_task_blocks << joined_proc.def
+            @joined_task_calls[joined_proc.def] = node
           end
           check_share_boundary(node, target_defs[0])
         end
@@ -678,6 +681,7 @@ module Iyi
     # block `spawn` or a callback keeps - may run after the tape block it
     # was made in has ended, so it may not capture a tape value.
     @joined_task_blocks = Set(Def).new
+    @joined_task_calls = Hash(Def, Call).new
 
     def check_tape_captures(a_def : Def)
       # A lowered defer runs before its owning tape is released.
@@ -695,6 +699,12 @@ module Iyi
           # A group joins before its caller's tape ends. Immutable text
           # can be borrowed; Share checks still forbid reassigned captures.
           next if @joined_task_blocks.includes?(a_def) && type == @program.string
+          if type.to_s.in?("Std::Socket::IyiSocket",
+               "Std::Io::PipeReader", "Std::Io::PipeWriter") &&
+             (call = @joined_task_calls[a_def]?) &&
+             handed_off?(call, captured, meta)
+            next
+          end
           captured.raise "this block becomes a proc, which may run after " \
                          "the tape block that made `#{captured.name} : #{type}` has " \
                          "ended, and #{found} is a tape type: pass what the block " \

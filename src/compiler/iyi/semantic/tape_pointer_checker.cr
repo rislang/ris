@@ -39,7 +39,13 @@ class Iyi::TapePointerChecker
   # The pointer *node* takes out of tape text or views as tape text: a
   # `Str`'s `to_unsafe`, or the pointer `Str.new` views.
   def pointer_of(node : Call) : ASTNode?
-    return node if node.name == "to_unsafe" && (receiver = node.obj) && tape_string?(receiver.type?)
+    if node.name == "to_unsafe" && (receiver = node.obj) &&
+       (tape_string?(receiver.type?) ||
+        receiver.type?.try(&.remove_typedef).is_a?(GenericClassInstanceType) &&
+        receiver.type.remove_typedef.as(GenericClassInstanceType).generic_type ==
+          @program.array)
+      return node
+    end
     node.args[0] if view?(node)
   end
 
@@ -62,7 +68,7 @@ class Iyi::TapePointerChecker
     end
     return nil unless pointer_of(node)
     unless view?(node)
-      return "`to_unsafe` of a String outside a @[TapeUnsafe] def: the pointer reads past its bytes as readily as within them, and after its scope the next scope's.\n\nRead it with `[]`, `[start, count]` or `each_byte`, which check their bounds."
+      return "`to_unsafe` of a #{node.obj.try(&.type?)} outside a @[TapeUnsafe] def: the pointer reads past its bytes as readily as within them, and after its scope the next scope's.\n\nRead it with `[]`, `[start, count]` or `each_byte`, which check their bounds."
     end
     "`String.new(pointer, size)` outside a @[TapeUnsafe] def: a view of any address, which the tape's checks do not see.\n\nCopy a String onto the tape with `String.new(text)`, view one with `String.view(text)`, or a part of a tape string with `[start, count]`."
   end
@@ -219,6 +225,12 @@ class Iyi::TapeFfiFlow
     targets.any? do |target|
       next os?(target) if target.is_a?(External)
       next true if target.name.starts_with?("__sys") || io_write?(target)
+      if TapeRules.runtime?(@checker.program, target.location) &&
+         target.name.in?("__iyi_write", "__iyi_read", "__iyi_open_read",
+           "__iyi_open_write", "__iyi_openat", "__iyi_file_read",
+           "__iyi_file_write", "__iyi_getcwd", "__iyi_unlink")
+        next true
+      end
       next false if @checker.graph.opaque?(target)
       next false unless index < target.args.size
       key = {target.object_id, index}

@@ -1,7 +1,7 @@
 # Request head parsing without transport or clock initialization.
 module std/http_head
 
-import std/uri::{Query}
+import std/query::{Query}
 
 # One field of a request head as it was written: its name, and its value
 # without the blanks around it. Both are views into the bytes the head was
@@ -34,14 +34,14 @@ pub struct ParsedHead
     @version == "HTTP/1.0"
   end
 
-  # Each field as the heap strings a caller keeps: its name as first
+  # Each field on the caller's tape: its name as first
   # spelled, and the values of all its lines joined with ", " (RFC 9110
   # §5.3), in one string. A head has a few fields, so a repeat is looked
   # for among them rather than through a table.
-  def each_heap_field(& : String, String -> Nil) : Nil
+  def each_field(& : String, String -> Nil) : Nil
     i = 0
     while i < @fields.size
-      yield @fields[i].name.to_heap, joined_value(i) unless repeated?(i)
+      yield @fields[i].name, joined_value(i) unless repeated?(i)
       i = i + 1
     end
   end
@@ -89,7 +89,7 @@ pub struct ParsedHead
   end
 
   # The value of the first field called *name*, in any case.
-  def field(name : String | String) : String?
+  def field(name : String) : String?
     i = 0
     while i < @fields.size
       f = @fields[i]
@@ -102,7 +102,6 @@ pub struct ParsedHead
   # The value of the field at *index*, and of each later one of its name,
   # joined with ", " in one string: joined one by one, a head of many lines
   # of one field cost the square of its size.
-  @[TapeToHeap]
   private def joined_value(index : Int32) : String
     name = @fields[index].name
     total = @fields[index].value.bytesize
@@ -115,29 +114,15 @@ pub struct ParsedHead
       end
       k = k + 1
     end
-    return @fields[index].value.to_heap if lines == 1
-    String.new(total) do |buffer|
-      first = @fields[index].value
-      j = 0
-      while j < first.bytesize
-        buffer[j] = first[j]
-        j = j + 1
-      end
-      at = first.bytesize
+    return @fields[index].value if lines == 1
+    String.build(total) do |writer|
+      writer << @fields[index].value
       k = index + 1
       while k < @fields.size
         if same_field?(@fields[k].name, name)
-          value = @fields[k].value
-          buffer[at] = 44_u8
-          buffer[at + 1] = 32_u8
-          j = 0
-          while j < value.bytesize
-            buffer[at + 2 + j] = value[j]
-            j = j + 1
-          end
-          at = at + 2 + value.bytesize
+          writer << ", " << @fields[k].value
         end
-        k = k + 1
+        k += 1
       end
     end
   end
@@ -185,7 +170,7 @@ pub struct Incoming
   end
 
   # The value of the first field called *name*, in any case.
-  def header(name : String | String) : String?
+  def header(name : String) : String?
     i = 0
     while i < @fields.size
       f = @fields[i]
@@ -329,7 +314,7 @@ pub struct HeadParser
   def self.same_name?(
     pa : String,
     count : Int32,
-    b : String | String,
+    b : String,
   ) : Bool
     return false unless count == b.bytesize
     pb = b.as_tape
@@ -405,7 +390,7 @@ pub struct HeadParser
     true
   end
 
-  def self.same_name?(a : String | String, b : String | String) : Bool
+  def self.same_name?(a : String, b : String) : Bool
     same_name?(a.as_tape, a.bytesize, b)
   end
 end

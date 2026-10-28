@@ -30,10 +30,8 @@ module std/hpack
 import std/static_array::{StaticArray}
 
 import std/traits
-import std/slice::{Slice, Bytes}
-import std/text
 
-pub alias Bytes = Std::Slice::Bytes
+pub alias Bytes = Array(UInt8)
 
 # ---------------------------------------------------------------------------
 # HeaderField: Ordered representation of a single header name-value pair
@@ -54,6 +52,7 @@ pub struct IndexingMode
   NeverIndexed    = IndexingMode.new(2)
 end
 
+@[OnTape]
 pub struct HeaderField
   getter name : String
   getter value : String
@@ -64,6 +63,10 @@ pub struct HeaderField
 
   def initialize(@name : String, @value : String, never_indexed : Bool)
     @indexing = never_indexed ? IndexingMode::NeverIndexed : IndexingMode::Incremental
+  end
+
+  def self.view(field : HeaderField) : HeaderField
+    field
   end
 
   def never_indexed : Bool
@@ -84,70 +87,44 @@ pub struct HeaderField
   end
 end
 
-# A decoded field on the caller's tape. Indexed fields borrow the table;
-# literals borrow the input, or are Huffman-decoded onto the same tape.
-@[OnTape]
-pub struct TapeHeaderField
-  @owned : HeaderField?
-  getter name : String
-  getter value : String
-  getter indexing : IndexingMode
-
-  def initialize(@name : String, @value : String,
-                 @indexing : IndexingMode = IndexingMode::Incremental,
-                 @owned : HeaderField? = nil)
-  end
-
-  def self.view(field : HeaderField) : self
-    new(field.name.as_tape, field.value.as_tape,
-      field.indexing, field)
-  end
-
-  def retained : HeaderField
-    if owned = @owned
-      return owned
-    end
-    HeaderField.new(@name.to_heap, @value.to_heap, @indexing)
-  end
-end
+# Both names denote the same tape field; there is no retained heap form.
+pub alias TapeHeaderField = HeaderField
 
 # Fixed slots: strings may grow while decoding, but this list never does.
 @[OnTape]
 pub struct TapeHeaders
-  @fields : Pointer(TapeHeaderField)
+  @fields : Array(HeaderField)
   @capacity : Int32
-  getter size : Int32
 
   def initialize(@capacity : Int32)
-    bytes = @capacity.to_u64 * sizeof(TapeHeaderField).to_u64
-    @fields = Pointer(TapeHeaderField).new(RisRegion.tape_bytes(bytes))
-    @size = 0
+    @fields = Array(HeaderField).new(@capacity)
   end
 
-  def push(field : TapeHeaderField) : Nil
-    raise "header list full" if @size >= @capacity
-    @fields[@size] = field
-    @size = @size + 1
+  def size : Int32
+    @fields.size
   end
 
-  def [](index : Int32) : TapeHeaderField
-    raise "header index out of bounds" if index < 0 || index >= @size
+  def push(field : HeaderField) : Nil
+    raise "header list full" if size >= @capacity
+    @fields << field
+    nil
+  end
+
+  def [](index : Int32) : HeaderField
     @fields[index]
   end
 
-  def each(& : TapeHeaderField -> Nil) : Nil
-    i = 0
-    while i < @size
-      yield @fields[i]
-      i = i + 1
-    end
+  def each(& : HeaderField -> Nil) : Nil
+    @fields.each { |field| yield field }
   end
+
 end
 
 # ---------------------------------------------------------------------------
 # HpackError: Error type for HPACK decoding and encoding failures
 # ---------------------------------------------------------------------------
 
+@[OnTape]
 pub struct HpackError
   getter message : String
 
@@ -233,7 +210,7 @@ pub class StaticTable
     HeaderField.new("vary", ""),
     HeaderField.new("via", ""),
     HeaderField.new("www-authenticate", ""),
-  ]
+  ].copy_to(Program.tape)
 
   def self.size : Int32
     61
@@ -247,8 +224,8 @@ pub class StaticTable
     end
   end
 
-  def self.find(name : String | String,
-                value : String | String) : Tuple(Int32, Bool)
+  def self.find(name : String,
+                value : String) : Tuple(Int32, Bool)
     name_idx = 0
     i = 1
     while i <= 61
@@ -265,7 +242,7 @@ pub class StaticTable
     {name_idx, false}
   end
 
-  def self.find_name(name : String | String) : Int32
+  def self.find_name(name : String) : Int32
     i = 1
     while i <= 61
       if name == ENTRIES[i].name
@@ -281,11 +258,51 @@ end
 # DynamicTable: FIFO eviction header table bounded by octet capacity
 # ---------------------------------------------------------------------------
 
+@[OnTape]
 pub class DynamicTable
   getter max_size : Int32
   getter settings_max_size : Int32
   getter size : Int32
-  getter entries : Array(HeaderField)
+  @[OnTape]
+  private struct StoredField
+    getter name_run : SlicePool::Run(UInt8)
+    getter value_run : SlicePool::Run(UInt8)
+    getter indexing : IndexingMode
+
+    def initialize(@name_run : SlicePool::Run(UInt8),
+                   @value_run : SlicePool::Run(UInt8),
+                   @indexing : IndexingMode)
+    end
+
+    def name : String
+      @name_run.string
+    end
+
+    def value : String
+      @value_run.string
+    end
+
+    def size : Int32
+      @name_run.size + @value_run.size + 32
+    end
+
+    def view : HeaderField
+      HeaderField.new(name, value, @indexing)
+    end
+  end
+
+  @bytes : SlicePool(UInt8)
+  @entries : Array(StoredField)
+
+  # Live and free byte slots retained for reuse by this connection.
+  def byte_slots : Int32
+    @bytes.size
+  end
+
+  def entries : Array(HeaderField)
+    @entries.map { |entry| entry.view }
+  end
+
 
   # A table is made within the limit it is resized within: made above it,
   # an encoder's table outgrew the peer's, and an Encoder made with 8192
@@ -296,7 +313,8 @@ pub class DynamicTable
       raise err.message
     end
     @size = 0
-    @entries = [] of HeaderField
+    @bytes = SlicePool(UInt8).new(@max_size)
+    @entries = Array(StoredField).new(@max_size // 32 + 1)
   end
 
   def self.size_error(new_max : Int32, limit : Int32) : HpackError?
@@ -328,26 +346,41 @@ pub class DynamicTable
     @settings_max_size = limit
   end
 
-  def add(name : String, value : String, never_indexed : Bool = false) : Nil
-    field = HeaderField.new(name, value, never_indexed)
-    entry_size = field.size
+  def add(name : String, value : String,
+          never_indexed : Bool = false) : Nil
+    entry_size = name.bytesize + value.bytesize + 32
     if entry_size > @max_size
-      @entries = [] of HeaderField
-      @size = 0
+      clear
       return
     end
     while @size + entry_size > @max_size && !@entries.empty?
-      removed = @entries.pop
-      @size = @size - removed.size
+      evict_last
     end
-    new_entries = [field]
-    i = 0
-    while i < @entries.size
-      new_entries << @entries[i]
-      i = i + 1
+    # Bytes are copied at the connection's owning store, not retained
+    # from the request that supplied them. Eviction returns both runs.
+    indexing = never_indexed ? IndexingMode::NeverIndexed :
+      IndexingMode::Incremental
+    field = StoredField.new(@bytes.store(name), @bytes.store(value), indexing)
+    @entries << field
+    @entries.__rotate_slots(-1)
+    @size += entry_size
+    nil
+  end
+
+  def clear : Nil
+    until @entries.empty?
+      evict_last
     end
-    @entries = new_entries
-    @size = @size + entry_size
+  end
+
+  private def evict_last : Nil
+    removed = @entries[@entries.size - 1]
+    bytes = removed.size
+    @bytes.free_slice(removed.name_run)
+    @bytes.free_slice(removed.value_run)
+    @size -= bytes
+    @entries.pop
+    nil
   end
 
   def add(field : HeaderField) : Nil
@@ -356,21 +389,20 @@ pub class DynamicTable
 
   private def evict_to_fit : Nil
     while @size > @max_size && !@entries.empty?
-      removed = @entries.pop
-      @size = @size - removed.size
+      evict_last
     end
   end
 
   def get(relative_index : Int32) : HeaderField?
     if relative_index >= 1 && relative_index <= @entries.size
-      @entries[relative_index - 1]
+      @entries[relative_index - 1].view
     else
       nil
     end
   end
 
-  def find(name : String | String,
-           value : String | String) : Tuple(Int32, Bool)
+  def find(name : String,
+           value : String) : Tuple(Int32, Bool)
     name_idx = 0
     i = 0
     while i < @entries.size
@@ -387,7 +419,7 @@ pub class DynamicTable
     {name_idx, false}
   end
 
-  def find_name(name : String | String) : Int32
+  def find_name(name : String) : Int32
     i = 0
     while i < @entries.size
       if name == @entries[i].name
@@ -414,8 +446,8 @@ pub class Table
     end
   end
 
-  def self.find(dynamic_table : DynamicTable, name : String | String,
-                value : String | String) : Tuple(Int32, Bool)
+  def self.find(dynamic_table : DynamicTable, name : String,
+                value : String) : Tuple(Int32, Bool)
     s_idx, s_exact = StaticTable.find(name, value)
     return {s_idx, true} if s_exact
 
@@ -434,7 +466,7 @@ pub class Table
   end
 
   def self.find_name(dynamic_table : DynamicTable,
-                     name : String | String) : Int32
+                     name : String) : Int32
     s_idx = StaticTable.find_name(name)
     return s_idx if s_idx > 0
     d_idx = dynamic_table.find_name(name)
@@ -474,7 +506,7 @@ pub class Integer
 
   def self.decode(bytes : Bytes | String, offset : Int32,
                   prefix_bits : Int32) : Tuple(UInt64, Int32) | HpackError
-    size = bytes.is_a?(String) ? bytes.bytesize : bytes.size
+    size = bytes.is_a?(String) ? bytes.size : bytes.size
     if prefix_bits < 1 || prefix_bits > 8
       return HpackError.new("Invalid prefix_bits: #{prefix_bits}")
     end
@@ -539,13 +571,13 @@ HUFFMAN_NEXT_STATE = StaticArray[66, 1, 93, 2, 104, 3, 119, 4, 144, 5, 75, 6, 12
 HUFFMAN_SYMBOL = StaticArray[-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 0, 36, -1, -1, -1, -1, -1, -1, 123, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 1, 135, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 254, -1, 2, 3, -1, -1, 4, 5, 6, 7, -1, -1, -1, -1, 8, 11, -1, -1, -1, -1, 239, -1, 9, 142, -1, -1, -1, -1, -1, -1, 249, -1, -1, -1, 10, 13, 12, 14, -1, -1, 15, 16, 17, 18, -1, -1, -1, -1, 19, 20, 21, 23, 22, 256, -1, -1, 24, 25, 26, 27, -1, -1, 28, 29, 30, 31, -1, -1, -1, -1, -1, -1, -1, -1, 32, 37, -1, -1, 33, 34, 124, -1, 35, 62, -1, -1, 38, 42, 63, -1, 39, 43, 40, 41, 44, 59, 45, 46, -1, -1, -1, -1, 47, 51, -1, -1, -1, -1, 48, 49, 50, 97, 52, 53, -1, -1, 54, 55, 56, 57, -1, -1, -1, -1, -1, -1, -1, -1, 58, 66, 60, 96, -1, -1, -1, -1, 61, 65, 64, 91, 67, 68, -1, -1, -1, -1, -1, -1, 69, 70, 71, 72, -1, -1, 73, 74, 75, 76, -1, -1, -1, -1, 77, 78, 79, 80, -1, -1, 81, 82, 83, 84, -1, -1, -1, -1, 85, 86, 87, 89, 88, 90, -1, -1, -1, -1, 92, 195, 93, 126, 94, 125, 95, 98, -1, -1, 99, 101, -1, -1, 100, 102, 103, 104, 105, 111, -1, -1, 106, 107, -1, -1, 108, 109, 110, 112, 113, 118, 114, 117, 115, 116, -1, -1, 119, 120, 121, 122, 127, 220, 208, -1, 128, 130, -1, -1, -1, -1, -1, -1, 230, -1, 129, 132, -1, -1, -1, -1, 131, 162, -1, -1, 133, 134, 136, 146, 137, 138, -1, -1, 139, 140, 141, 143, -1, -1, 144, 145, -1, -1, -1, -1, -1, -1, 147, 149, 148, 159, 150, 151, -1, -1, 152, 155, -1, -1, -1, -1, 153, 161, -1, -1, -1, -1, 154, 156, 157, 158, 160, 163, -1, -1, 164, 169, -1, -1, -1, -1, 165, 166, 167, 172, 168, 174, 170, 173, -1, -1, -1, -1, 171, 206, -1, -1, 175, 180, -1, -1, -1, -1, 176, 177, -1, -1, -1, -1, 178, 181, 179, 209, 182, 183, 184, 194, 185, 186, -1, -1, 187, 189, -1, -1, 188, 191, 190, 196, -1, -1, -1, -1, -1, -1, 192, 193, 197, 231, -1, -1, 198, 228, -1, -1, -1, -1, 199, 207, 200, 201, -1, -1, 202, 205, -1, -1, -1, -1, 255, -1, 203, 204, 210, 213, -1, -1, -1, -1, -1, -1, 211, 212, 214, 221, 215, 225, -1, -1, 216, 217, -1, -1, 218, 219, -1, -1, 222, 223, 224, 226, 227, 229, 232, 233, 234, 235, 236, 237, 238, 240, 241, 244, 242, 243, -1, -1, -1, -1, 245, 246, 247, 248, -1, -1, 250, 251, 252, 253]
 
 pub class Huffman
-  def self.encode(input : String | String,
+  def self.encode(input : String,
                   buffer : Array(UInt8) | String::Builder) : Nil
     bit_buf = 0_u64
     bits_in_buf = 0_i32
     i = 0
     while i < input.bytesize
-      byte_val = (input.is_a?(String) ? input.to_unsafe[i] : input[i]).to_i32
+      byte_val = input[i].to_i32
       code = HUFFMAN_CODES[byte_val]
       code_len = HUFFMAN_LENS[byte_val]
 
@@ -576,23 +608,15 @@ pub class Huffman
   end
 
   def self.encode(input : Bytes) : Bytes
-    # Convert slice to String without copying for encoding
-    str = String.new(input.size) do |b|
-      j = 0
-      while j < input.size
-        b[j] = input[j]
-        j = j + 1
-      end
-    end
-    encode(str)
+    encode(input.bytes)
   end
 
-  def self.encoded_size(input : String | String) : Int32
+  def self.encoded_size(input : String) : Int32
     # Int64: thirty bits a byte passed Int32 at 72 MB and panicked.
     total_bits = 0_i64
     i = 0
     while i < input.bytesize
-      byte_val = (input.is_a?(String) ? input.to_unsafe[i] : input[i]).to_i32
+      byte_val = input[i].to_i32
       total_bits = total_bits + HUFFMAN_LENS[byte_val].to_i64
       i = i + 1
     end
@@ -601,12 +625,7 @@ pub class Huffman
 
   def self.decode(bytes : Bytes, offset : Int32,
                   length : Int32) : String | HpackError
-    result = HpackError.new("not decoded").as(String | HpackError)
-    tape do
-      decoded = decode_bytes(bytes, offset, length)
-      result = decoded.is_a?(HpackError) ? decoded : decoded.to_heap
-    end
-    result
+    decode_bytes(bytes, offset, length)
   end
 
   def self.decode(bytes : String, offset : Int32,
@@ -619,8 +638,8 @@ pub class Huffman
                                 length : Int32) : String | HpackError
     # `offset + length` overflowed and panicked on a length near Int32's
     # largest; the room left after *offset* cannot.
-    if offset < 0 || length < 0 || offset > bytes.bytesize ||
-       length > bytes.bytesize - offset
+    if offset < 0 || length < 0 || offset > bytes.size ||
+       length > bytes.size - offset
       return HpackError.new("Huffman decode: offset/length out of bounds")
     end
     out_chars = String::Builder.new(length)
@@ -671,6 +690,7 @@ end
 # Decoder: HPACK wire-format decoder with security protections
 # ---------------------------------------------------------------------------
 
+@[OnTape]
 pub class Decoder
   getter dynamic_table : DynamicTable
   getter protocol_max_table_size : Int32
@@ -702,7 +722,7 @@ pub class Decoder
 
   private def decode_fields(payload : Bytes | String)
     headers = if payload.is_a?(String)
-                capacity = payload.bytesize
+                capacity = payload.size
                 capacity = @max_header_count if capacity > @max_header_count
                 TapeHeaders.new(capacity > 0 ? capacity : 0)
               else
@@ -719,7 +739,7 @@ pub class Decoder
     header_count = 0_i32
     seen_field = false
 
-    while offset < payload.bytesize
+    while offset < payload.size
       b = payload[offset]
 
       if (b & 0x80_u8) != 0_u8
@@ -753,9 +773,9 @@ pub class Decoder
         end
 
         if headers.is_a?(TapeHeaders)
-          headers.push(TapeHeaderField.view(field))
+          headers.push(field.copy_to(RisCurrentTape.new))
         else
-          headers.push(field)
+          headers.push(field.copy_to(RisCurrentTape.new))
         end
         seen_field = true
       elsif (b & 0x40_u8) != 0_u8
@@ -767,7 +787,7 @@ pub class Decoder
         idx_u = dec_int[0]
         offset = dec_int[1]
 
-        name = "".as(String | String)
+        name = "".as(String)
         if idx_u > 0_u64
           max_idx = 61 + @dynamic_table.length
           if idx_u > max_idx.to_u64
@@ -803,7 +823,7 @@ pub class Decoder
           return HpackError.new("Decompression bomb: decoded header list exceeds #{@max_header_list_size} octets")
         end
 
-        owned = HeaderField.new(name.to_heap, val.to_heap)
+        owned = HeaderField.new(name, val).copy_to(RisCurrentTape.new)
         @dynamic_table.add(owned.name, owned.value, false)
         if headers.is_a?(TapeHeaders)
           headers.push(TapeHeaderField.view(owned))
@@ -840,7 +860,7 @@ pub class Decoder
         idx_u = dec_int[0]
         offset = dec_int[1]
 
-        name = "".as(String | String)
+        name = "".as(String)
         if idx_u > 0_u64
           max_idx = 61 + @dynamic_table.length
           if idx_u > max_idx.to_u64
@@ -880,7 +900,7 @@ pub class Decoder
           headers.push(TapeHeaderField.new(tape_view(name), tape_view(val),
             IndexingMode::NeverIndexed))
         else
-          headers.push(HeaderField.new(name.to_heap, val.to_heap,
+          headers.push(HeaderField.new(name, val,
             IndexingMode::NeverIndexed))
         end
         seen_field = true
@@ -893,7 +913,7 @@ pub class Decoder
         idx_u = dec_int[0]
         offset = dec_int[1]
 
-        name = "".as(String | String)
+        name = "".as(String)
         if idx_u > 0_u64
           max_idx = 61 + @dynamic_table.length
           if idx_u > max_idx.to_u64
@@ -933,7 +953,7 @@ pub class Decoder
           headers.push(TapeHeaderField.new(tape_view(name), tape_view(val),
             IndexingMode::WithoutIndexing))
         else
-          headers.push(HeaderField.new(name.to_heap, val.to_heap,
+          headers.push(HeaderField.new(name, val,
             IndexingMode::WithoutIndexing))
         end
         seen_field = true
@@ -943,7 +963,7 @@ pub class Decoder
     headers
   end
 
-  private def tape_view(value : String | String) : String
+  private def tape_view(value : String) : String
     value.is_a?(String) ? value : value.as_tape
   end
 
@@ -986,7 +1006,7 @@ pub class Decoder
   private def decode_string(
     payload : String, offset : Int32,
   ) : Tuple(String, Int32) | HpackError
-    if offset >= payload.bytesize
+    if offset >= payload.size
       return HpackError.new("Unexpected EOF decoding string literal")
     end
     huffman = (payload[offset] & 0x80_u8) != 0_u8
@@ -996,7 +1016,7 @@ pub class Decoder
     end
     str_len_u = dec_len[0]
     offset = dec_len[1]
-    avail = payload.bytesize - offset
+    avail = payload.size - offset
     if str_len_u > avail.to_u64
       return HpackError.new("Unexpected EOF reading string data " +
                             "(need #{str_len_u} bytes, available #{avail})")
@@ -1020,6 +1040,7 @@ end
 # Encoder: HPACK wire-format encoder
 # ---------------------------------------------------------------------------
 
+@[OnTape]
 pub class Encoder
   getter dynamic_table : DynamicTable
   getter protocol_max_table_size : Int32
@@ -1063,18 +1084,9 @@ pub class Encoder
     nil
   end
 
-  def encode(headers : Array(HeaderField), force_huffman : Bool? = nil) : Bytes
-    result = Bytes.empty
-    tape do
-      encoded = encode_on_tape(headers, force_huffman)
-      result = Bytes.new(encoded.bytesize) { |i| encoded[i] }
-    end
-    result
-  end
-
-  # Wire bytes on the caller's tape; the dynamic table stays on the heap.
-  def encode_on_tape(headers : Array(HeaderField) | TapeHeaders,
-                     force_huffman : Bool? = nil) : String
+  # Wire bytes are built on the caller's tape.
+  def encode(headers : Array(HeaderField) | TapeHeaders,
+             force_huffman : Bool? = nil) : String
     huff = force_huffman.nil? ? @use_huffman : force_huffman
     buffer = String::Builder.new(128)
 
@@ -1096,6 +1108,11 @@ pub class Encoder
     end
 
     buffer.finish
+  end
+
+  def encode_on_tape(headers : Array(HeaderField) | TapeHeaders,
+                     force_huffman : Bool? = nil) : String
+    encode(headers, force_huffman)
   end
 
   private def encode_field(field : HeaderField | TapeHeaderField,
@@ -1133,18 +1150,18 @@ pub class Encoder
         # 6.2.1 Literal Header Field with Incremental Indexing, Indexed Name (01xxxxxx)
         Integer.encode(idx.to_u64, 6, 0x40_u8, buffer)
         encode_string(field.value, buffer, huff)
-        @dynamic_table.add(field.name.to_heap, field.value.to_heap, false)
+        @dynamic_table.add(field.name, field.value, false)
       else
         # 6.2.1 Literal Header Field with Incremental Indexing, New Name (01000000)
         buffer.push(0x40_u8)
         encode_string(field.name, buffer, huff)
         encode_string(field.value, buffer, huff)
-        @dynamic_table.add(field.name.to_heap, field.value.to_heap, false)
+        @dynamic_table.add(field.name, field.value, false)
       end
     end
   end
 
-  private def encode_string(str : String | String,
+  private def encode_string(str : String,
                             buffer : Array(UInt8) | String::Builder,
                             huff : Bool) : Nil
     if huff
@@ -1156,7 +1173,7 @@ pub class Encoder
       Integer.encode(raw_len.to_u64, 7, 0_u8, buffer)
       j = 0
       while j < raw_len
-        buffer.push((str.is_a?(String) ? str.to_unsafe[j] : str[j]))
+        buffer.push(str[j])
         j = j + 1
       end
     end

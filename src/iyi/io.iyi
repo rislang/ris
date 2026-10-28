@@ -122,6 +122,17 @@ class IyiIO
   # `Reader#read_bytes` does: allocated whole first, 10 bytes read with a
   # count of 1,500,000,000 took 1.6 GB. It starts at the stream's buffer,
   # the most one piece is, so one doubling holds the next piece.
+  # A byte read borrows the existing buffer; no temporary text is built.
+  def read_byte : UInt8?
+    raise "cannot read from closed IO" if @closed
+    if @read_pos >= @read_limit
+      return nil if @eof || fill_buffer <= 0
+    end
+    byte = @read_buffer[@read_pos]
+    @read_pos += 1
+    byte
+  end
+
   def read_bytes(count : Int32) : String
     raise "cannot read from closed IO" if @closed
     return "" if count <= 0

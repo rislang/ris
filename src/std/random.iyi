@@ -41,7 +41,6 @@ module std/random
 
 import std/int
 import std/base64::{Base64}
-import std/time::{Time}
 
 {% if flag?(:win32) %}
   # The entropy source Windows offers a program that only wants bytes.
@@ -229,14 +228,13 @@ pub class Random
   # reaches this module through std/indexable's `sample`, and an import
   # back would be a cycle.
   def random_bytes(buffer : Array(UInt8)) : Nil
-    p = buffer.to_unsafe
     n = buffer.size
     i = 0
     while i < n
       word = next_u
       k = 0
       while k < 4 && i < n
-        p[i] = ((word >> (k * 8)) & 255_u32).to_u8
+        buffer[i] = ((word >> (k * 8)) & 255_u32).to_u8
         k = k + 1
         i = i + 1
       end
@@ -253,13 +251,11 @@ pub class Random
   # *n* random bytes as two lowercase hex digits each.
   def hex(n : Int32 = 16) : String
     bytes = random_bytes(n)
-    digits = "0123456789abcdef".to_unsafe
-    String.new(n * 2) do |dst|
-      i = 0
-      while i < n
-        dst[i * 2] = digits[(bytes[i] >> 4).to_i32]
-        dst[i * 2 + 1] = digits[(bytes[i] & 15_u8).to_i32]
-        i = i + 1
+    digits = "0123456789abcdef"
+    String.build(n * 2) do |writer|
+      bytes.each do |byte|
+        writer.push(digits[(byte >> 4).to_i32])
+        writer.push(digits[(byte & 15_u8).to_i32])
       end
     end
   end
@@ -276,7 +272,7 @@ pub class Random
     text = Base64.urlsafe_encode(Random.text_of(random_bytes(n)))
     return text if padding
     size = text.bytesize
-    while size > 0 && text.to_unsafe[size - 1] == 61_u8
+    while size > 0 && text[size - 1] == 61_u8
       size = size - 1
     end
     text[0, size]
@@ -310,7 +306,7 @@ pub class Random
 
   # The bytes as a String, which is how std/base64 takes them.
   protected def self.text_of(bytes : Array(UInt8)) : String
-    String.new(bytes.size) { |dst| dst.copy_from(bytes.to_unsafe, bytes.size) }
+    bytes.bytes
   end
 
   # The same draws without a generator in hand, from one seeded the first
@@ -396,13 +392,9 @@ pub class Random
   # `Random::Secure` makes. wasm32 seeds from the clocks, as it did before
   # it had a `Random::Secure`.
   private def self.entropy : UInt64
-    {% if flag?(:wasm32) %}
-      Time.utc.to_unix.to_u64 ^ Time.monotonic.total_nanoseconds.to_u64
-    {% else %}
-      word = 0_u64
-      Secure.fill(pointerof(word).as(UInt8*), 8)
-      word
-    {% end %}
+    word = 0_u64
+    Secure.__sys_fill(pointerof(word).as(UInt8*), 8)
+    word
   end
 end
 
@@ -422,13 +414,14 @@ class Random::Secure < Random
 
   def next_u : UInt32
     word = 0_u32
-    Secure.fill(pointerof(word).as(UInt8*), 4)
+    Secure.__sys_fill(pointerof(word).as(UInt8*), 4)
     word
   end
 
   # The whole buffer in one request rather than four bytes at a time.
+  @[TapeUnsafe("the OS fills the borrowed byte array during this call")]
   def random_bytes(buffer : Array(UInt8)) : Nil
-    Secure.fill(buffer.to_unsafe, buffer.size)
+    Secure.__sys_fill(buffer.to_unsafe, buffer.size)
   end
 
   private def self.shared : Random
@@ -438,7 +431,7 @@ class Random::Secure < Random
   # *count* bytes at *buffer*, every one from the platform's entropy source,
   # or a panic that says why there are none: a byte that only looks random
   # is never the answer.
-  def self.fill(buffer : Pointer(UInt8), count : Int32) : Nil
+  def self.__sys_fill(buffer : Pointer(UInt8), count : Int32) : Nil
     raise "Random::Secure: a negative count of bytes: #{count}" if count < 0
     return if count == 0
     {% if flag?(:linux) %}
@@ -507,6 +500,7 @@ class Random::Secure < Random
     # checks: in a chroot or a container where `getrandom` is hidden and
     # someone else wrote `/dev`, a regular file or a pipe there would
     # otherwise be every key's source.
+    @[TapeUnsafe("the OS borrows the static entropy-device path")]
     private def self.from_device(buffer : Pointer(UInt8), count : Int32) : Nil
       fd = __iyi_open_read(URANDOM.to_unsafe)
       raise "Random::Secure: #{URANDOM} could not be opened (#{fd})" if fd < 0_i64
@@ -557,7 +551,7 @@ class Random::Secure < Random
   {% end %}
 end
 
-class ::Array(T)
+struct ::Array(T)
   # Fisher-Yates from the back, `rand(i + 1)` a step: the other library's
   # `shuffle!`, so a seeded generator puts the elements where it would.
   def shuffle_in_place(random : Std::Random::Random? = nil) : Array(T)

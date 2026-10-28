@@ -1,7 +1,6 @@
 module test/ris/pipe_wait
 
 import std/io
-import std/text
 
 # A pipe's writer waits while the kernel's room is full, then every byte
 # arrives whole and in order; closing the writer is the reader's end, and

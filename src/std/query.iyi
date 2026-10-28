@@ -1,0 +1,152 @@
+# Query fields borrow input bytes or decoded bytes on the caller's tape.
+module std/query
+
+# A query's parameters read on the caller's tape, as `Params.parse` reads
+# them: `&` and `;` part the pairs, `+` is a space, `%XX` the byte, and a
+# `%` before no two hex digits itself. A name or value with neither `+`
+# nor `%` is a view of the query; one with them is decoded onto the tape.
+# The pairs are made at their final size, counted first.
+@[OnTape]
+pub struct Query
+  getter pairs : Array(QueryPair)
+
+  def initialize(@pairs : Array(QueryPair))
+  end
+
+  def self.parse(query : String) : Query
+    from = query.bytesize > 0 && query[0] == 63_u8 ? 1 : 0
+    count = 0
+    each_part(query, from) { |_, _| count += 1 }
+    none = query[0, 0]
+    pairs = Array(QueryPair).new(count) { QueryPair.new(none, none) }
+    at = 0
+    each_part(query, from) do |start, stop|
+      eq = start
+      while eq < stop && query[eq] != 61_u8
+        eq += 1
+      end
+      key = decoded(query, start, eq)
+      value = eq < stop ? decoded(query, eq + 1, stop) : none
+      pairs[at] = QueryPair.new(key, value)
+      at += 1
+    end
+    Query.new(pairs)
+  end
+
+  # The start and end of each part between `&` and `;` that is not empty.
+  private def self.each_part(query : String, from : Int32, & : Int32, Int32 -> Nil) : Nil
+    start = from
+    i = from
+    size = query.bytesize
+    while i <= size
+      if i == size || query[i] == 38_u8 || query[i] == 59_u8
+        yield start, i if i > start
+        start = i + 1
+      end
+      i += 1
+    end
+  end
+
+  # The bytes from *start* to *stop*, decoded: themselves when there is
+  # nothing to decode, else a new string on the tape.
+  private def self.decoded(query : String, start : Int32, stop : Int32) : String
+    plain = true
+    i = start
+    while i < stop
+      b = query[i]
+      plain = false if b == 43_u8 || b == 37_u8
+      i += 1
+    end
+    return query[start, stop - start] if plain
+    String.build(stop - start) do |w|
+      i = start
+      while i < stop
+        b = query[i]
+        if b == 43_u8
+          w.push(32_u8)
+          i += 1
+        elsif b == 37_u8 && i + 2 < stop && hex(query[i + 1]) >= 0 && hex(query[i + 2]) >= 0
+          w.push(((hex(query[i + 1]) << 4) | hex(query[i + 2])).to_u8)
+          i += 3
+        else
+          w.push(b)
+          i += 1
+        end
+      end
+    end
+  end
+
+  # A hex digit's value, -1 for another byte.
+  private def self.hex(b : UInt8) : Int32
+    return (b - 48_u8).to_i32 if b >= 48_u8 && b <= 57_u8
+    return (b - 87_u8).to_i32 if b >= 97_u8 && b <= 102_u8
+    return (b - 55_u8).to_i32 if b >= 65_u8 && b <= 70_u8
+    -1
+  end
+
+  def size : Int32
+    @pairs.size
+  end
+
+  # The first value of *key*, nil when there is none.
+  def []?(key : String) : String?
+    i = 0
+    while i < @pairs.size
+      pair = @pairs[i]
+      return pair.value if pair.key == key
+      i += 1
+    end
+    nil
+  end
+
+  # Serialize directly into the caller's output, preserving pair order.
+  def to_s(writer : String::Builder) : Nil
+    i = 0
+    each do |key, value|
+      writer << "&" if i > 0
+      Query.encode_component(key, writer)
+      writer << "="
+      Query.encode_component(value, writer)
+      i += 1
+    end
+  end
+
+  # application/x-www-form-urlencoded, written into the caller's output.
+  def self.encode_component(text : String, writer : String::Builder) : Nil
+    digits = "0123456789ABCDEF"
+    text.each_byte do |byte|
+      if (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) ||
+         (byte >= 48 && byte <= 57) || byte == 42 || byte == 45 ||
+         byte == 46 || byte == 95
+        writer.push(byte)
+      elsif byte == 32
+        writer.push(43_u8)
+      else
+        writer.push(37_u8)
+        writer.push(digits[(byte.to_i32 >> 4) & 15])
+        writer.push(digits[byte.to_i32 & 15])
+      end
+    end
+  end
+
+  # Each name and value, in order.
+  def each(& : String, String -> Nil) : Nil
+    i = 0
+    while i < @pairs.size
+      pair = @pairs[i]
+      yield pair.key, pair.value
+      i += 1
+    end
+  end
+end
+
+# One name and value of a `Query`.
+@[OnTape]
+pub struct QueryPair
+  getter key : String
+  getter value : String
+
+  def initialize(@key : String, @value : String)
+  end
+end
+

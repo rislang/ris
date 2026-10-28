@@ -1,0 +1,44 @@
+module test/ris/std_io_tape
+
+import std/io::{Memory, Sized, Delimited, MultiWriter, Hexdump, ByteFormat}
+
+memory = Memory.new("first\r\nsecond")
+assert memory.read_line(chomp: true) == "first"
+assert memory.read_all == "second"
+memory.clear
+memory.write("hello")
+memory.rewind
+assert memory.read_bytes(2) == "he"
+assert memory.read_all == "llo"
+assert memory.to_s == "hello"
+
+sized = Sized.new(Memory.new("abcdef"), 3)
+assert sized.read_all == "abc"
+source = Memory.new("one--two")
+delimited = Delimited.new(source, "--")
+assert delimited.read_all == "one"
+assert source.read_all == "two"
+
+left = Memory.new
+right = Memory.new
+writer = MultiWriter.new([left.as(IyiIO), right.as(IyiIO)])
+writer.write("both")
+writer.flush
+assert left.to_s == "both" && right.to_s == "both"
+
+encoded = Memory.new
+ByteFormat::LittleEndian.encode(-42_i32, encoded)
+encoded.rewind
+assert ByteFormat::LittleEndian.decode_int32(encoded) == -42
+encoded.clear
+ByteFormat::BigEndian.encode(18446744073709551615_u64, encoded)
+encoded.rewind
+assert ByteFormat::BigEndian.decode_uint64(encoded) == 18446744073709551615_u64
+
+wire = String.build { |writer| ByteFormat::BigEndian.encode(255_i32, writer) }
+assert ByteFormat::BigEndian.decode_int32(wire) == 255
+
+output = Memory.new
+Hexdump.new(output).dump("hi")
+assert output.to_s.includes?("68 69")
+puts "stdio tape ok"

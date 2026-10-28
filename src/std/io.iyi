@@ -23,7 +23,7 @@
 # ASCII between bars.
 #
 # `ByteFormat::LittleEndian` / `BigEndian` encode and decode Int32, Int64,
-# UInt64 and UInt8 into bytes, into a pointer or an `IyiIO`, through
+# UInt64 and UInt8 into a String::Builder or an IyiIO, through
 # unsigned byte arithmetic: every value, negative or not, round-trips.
 # `SystemEndian` follows the target; `NetworkEndian` is big-endian.
 #
@@ -34,13 +34,6 @@
 module std/io
 
 class ::IyiIO
-  # The next byte, or nil at the end.
-  def read_byte : UInt8?
-    chunk = read_bytes(1)
-    return nil if chunk.bytesize == 0
-    chunk.to_unsafe[0]
-  end
-
   def write_byte(byte : UInt8) : Nil
     b = byte
     write(pointerof(b), 1)
@@ -237,6 +230,11 @@ end
 
   # The reading end of `IyiIO.pipe`.
   pub class PipeReader < IyiIO
+  # A joined task transfers the same resource reference, never a new fd.
+  def __iyi_copy_into(target : Pointer(self), work : RisCopyWork) : Nil
+    target.value = self
+  end
+
     def self.on_program(fd : Int32) : PipeReader
       io = RisRegion.program_object(PipeReader)
       io.initialize(fd)
@@ -268,6 +266,11 @@ end
   # The writing end of `IyiIO.pipe`: a write returns when all of it is in
   # the pipe.
   pub class PipeWriter < IyiIO
+  # A joined task transfers the same resource reference, never a new fd.
+  def __iyi_copy_into(target : Pointer(self), work : RisCopyWork) : Nil
+    target.value = self
+  end
+
     def self.on_program(fd : Int32) : PipeWriter
       io = RisRegion.program_object(PipeWriter)
       io.initialize(fd)
@@ -311,6 +314,7 @@ end
 {% else %}
 # Other targets have no pipe yet: `IyiIO.pipe` panics there, and these
 # ends exist only so code that names them typechecks everywhere.
+@[OnTape]
 pub class PipeReader < IyiIO
   def initialize
     super(-1_i64, 4096, false)
@@ -330,6 +334,7 @@ pub class PipeReader < IyiIO
   end
 end
 
+@[OnTape]
 pub class PipeWriter < IyiIO
   def initialize
     super(-1_i64, 4096, true)
@@ -352,8 +357,9 @@ end
 
 # An `IyiIO` over bytes in memory. Writes land at the cursor and grow the
 # buffer; reads advance the cursor; `to_s` is the whole buffer.
+@[OnTape]
 pub class Memory < IyiIO
-  @buffer : Pointer(UInt8)
+  @buffer : Array(UInt8)
   @capacity : Int32
   @bytesize : Int32
   @pos : Int32
@@ -363,7 +369,7 @@ pub class Memory < IyiIO
     raise "negative capacity: #{capacity}" if capacity < 0
     super(-1_i64, 16, false)
     @capacity = capacity < 16 ? 16 : capacity
-    @buffer = Pointer(UInt8).malloc(@capacity.to_u64)
+    @buffer = Array(UInt8).new(@capacity, 0_u8)
     @bytesize = 0
     @pos = 0
     @shut = false
@@ -374,8 +380,8 @@ pub class Memory < IyiIO
     super(-1_i64, 16, false)
     len = text.bytesize
     @capacity = len < 16 ? 16 : len
-    @buffer = Pointer(UInt8).malloc(@capacity.to_u64)
-    @buffer.copy_from(text.to_unsafe, len)
+    @buffer = Array(UInt8).new(@capacity, 0_u8)
+    len.times { |i| @buffer[i] = text[i] }
     @bytesize = len
     @pos = 0
     @shut = false
@@ -436,9 +442,7 @@ pub class Memory < IyiIO
   end
 
   def to_s : String
-    String.new(@bytesize) do |target|
-      target.copy_from(@buffer, @bytesize)
-    end
+    String.build(@bytesize) { |writer| @bytesize.times { |i| writer.push(@buffer[i]) } }
   end
 
   def read_byte : UInt8?
@@ -456,9 +460,7 @@ pub class Memory < IyiIO
     take = count < avail ? count : avail
     start = @pos
     @pos = @pos + take
-    String.new(take) do |target|
-      target.copy_from(@buffer + start, take)
-    end
+    String.build(take) { |writer| take.times { |i| writer.push(@buffer[start + i]) } }
   end
 
   def read_all : String
@@ -488,9 +490,7 @@ pub class Memory < IyiIO
       len = len - 1
       len = len - 1 if len > 0 && @buffer[start + len - 1] == 13_u8
     end
-    String.new(len) do |target|
-      target.copy_from(@buffer + start, len)
-    end
+    String.build(len) { |writer| len.times { |i| writer.push(@buffer[start + i]) } }
   end
 
   def write(bytes : Pointer(UInt8), count : Int32) : Nil
@@ -503,11 +503,13 @@ pub class Memory < IyiIO
       while grown < needed
         grown = grown * 2
       end
-      @buffer = @buffer.realloc(grown.to_u64)
+      while @buffer.size < grown
+        @buffer << 0_u8
+      end
       @capacity = grown
     end
 
-    (@buffer + @pos).copy_from(bytes, count)
+    count.times { |i| @buffer[@pos + i] = bytes[i] }
     @pos = needed
     @bytesize = needed if needed > @bytesize
   end
@@ -515,6 +517,7 @@ end
 
 # A reader built on `read_byte` alone; `Sized` and `Delimited` supply the
 # byte and refuse writes.
+@[OnTape]
 abstract class Reader < IyiIO
   def initialize
     super(-1_i64, 16, false)
@@ -533,68 +536,38 @@ abstract class Reader < IyiIO
   # front took 2 GB to read two bytes under a limit of Int32::MAX.
   def read_bytes(count : Int32) : String
     raise "negative count: #{count}" if count < 0
-    capacity = count < 256 ? count : 256
-    buffer = Pointer(UInt8).malloc(capacity.to_u64)
-    filled = 0
-    while filled < count
-      b = read_byte
-      break unless b
-      if filled == capacity
-        capacity = count - capacity < capacity ? count : capacity * 2
-        buffer = buffer.realloc(capacity.to_u64)
-      end
-      buffer[filled] = b
-      filled = filled + 1
+    writer = String::Builder.new(count < 256 ? count : 256)
+    while writer.length < count
+      byte = read_byte
+      break unless byte
+      writer.push(byte)
     end
-    String.new(filled) do |target|
-      target.copy_from(buffer, filled)
-    end
+    writer.finish
   end
 
   def read_all : String
-    capacity = 256
-    buffer = Pointer(UInt8).malloc(capacity.to_u64)
-    filled = 0
-    while b = read_byte
-      if filled == capacity
-        capacity = capacity * 2
-        buffer = buffer.realloc(capacity.to_u64)
-      end
-      buffer[filled] = b
-      filled = filled + 1
+    writer = String::Builder.new(256)
+    while byte = read_byte
+      writer.push(byte)
     end
-    String.new(filled) do |target|
-      target.copy_from(buffer, filled)
-    end
+    writer.finish
   end
 
   def read_line(chomp : Bool = false) : String?
-    capacity = 256
-    buffer = Pointer(UInt8).malloc(capacity.to_u64)
-    filled = 0
-    while b = read_byte
-      if filled == capacity
-        capacity = capacity * 2
-        buffer = buffer.realloc(capacity.to_u64)
-      end
-      buffer[filled] = b
-      filled = filled + 1
-      break if b == 10_u8
+    writer = String::Builder.new(256)
+    while byte = read_byte
+      writer.push(byte)
+      break if byte == 10_u8
     end
-    return nil if filled == 0
-
-    len = filled
-    if chomp && buffer[len - 1] == 10_u8
-      len = len - 1
-      len = len - 1 if len > 0 && buffer[len - 1] == 13_u8
-    end
-    String.new(len) do |target|
-      target.copy_from(buffer, len)
-    end
+    text = writer.finish
+    return nil if text.empty?
+    chomp ? text.chomp : text
   end
+
 end
 
 # At most `limit` bytes of another stream.
+@[OnTape]
 pub class Sized < Reader
   @io : IyiIO
   @remaining : Int32
@@ -625,34 +598,7 @@ pub class Sized < Reader
   # stream's `read_bytes` allocates the whole count before it reads, and
   # `read_all` under a limit of Int32::MAX took 2 GB to read two bytes.
   def read_bytes(count : Int32) : String
-    raise "negative count: #{count}" if count < 0
-    take = count < @remaining ? count : @remaining
-    return read_piece(take) if take <= 65536
-
-    capacity = 65536
-    buffer = Pointer(UInt8).malloc(capacity.to_u64)
-    filled = 0
-    while filled < take
-      want = take - filled
-      want = 65536 if want > 65536
-      chunk = read_piece(want)
-      break if chunk.bytesize == 0
-      if filled + chunk.bytesize > capacity
-        capacity = take - capacity < capacity ? take : capacity * 2
-        buffer = buffer.realloc(capacity.to_u64)
-      end
-      (buffer + filled).copy_from(chunk.to_unsafe, chunk.bytesize)
-      filled = filled + chunk.bytesize
-    end
-    String.new(filled) do |target|
-      target.copy_from(buffer, filled)
-    end
-  end
-
-  private def read_piece(want : Int32) : String
-    chunk = @io.read_bytes(want)
-    @remaining = @remaining - chunk.bytesize
-    chunk
+    super(count)
   end
 
   def read_all : String
@@ -667,12 +613,13 @@ end
 # Another stream up to a delimiter. The delimiter is consumed and not
 # answered; the inner stream is left just past it. Without a delimiter
 # the whole rest of the stream is answered.
+@[OnTape]
 pub class Delimited < Reader
   @io : IyiIO
   @delimiter : String
   @matched : Int32
   @finished : Bool
-  @out : Pointer(UInt8)
+  @out : Array(UInt8)
   @out_pos : Int32
   @out_len : Int32
 
@@ -681,7 +628,7 @@ pub class Delimited < Reader
     super()
     @matched = 0
     @finished = false
-    @out = Pointer(UInt8).malloc((@delimiter.bytesize + 1).to_u64)
+    @out = Array(UInt8).new(@delimiter.bytesize + 1, 0_u8)
     @out_pos = 0
     @out_len = 0
   end
@@ -727,7 +674,7 @@ pub class Delimited < Reader
       @matched = 0
       i = 0
       while i < held
-        @out[i] = @delimiter.to_unsafe[i]
+        @out[i] = @delimiter[i]
         i = i + 1
       end
       @out_len = held
@@ -738,7 +685,7 @@ pub class Delimited < Reader
   # are held back; on a mismatch the first held byte is content and the
   # rest, then `b`, are matched again from the start.
   private def feed(b : UInt8) : Nil
-    pattern = @delimiter.to_unsafe
+    pattern = @delimiter
     if b == pattern[@matched]
       @matched = @matched + 1
       if @matched == @delimiter.bytesize
@@ -769,6 +716,7 @@ end
 
 # One stream written to several. `close` closes this writer, not the
 # streams behind it.
+@[OnTape]
 pub class MultiWriter < IyiIO
   @writers : Array(IyiIO)
   @shut : Bool
@@ -823,6 +771,7 @@ pub class MultiWriter < IyiIO
 end
 
 # Bytes printed sixteen to a line, `hexdump -C` style, on an `IyiIO`.
+@[OnTape]
 pub class Hexdump
   HEX = "0123456789abcdef"
 
@@ -831,10 +780,11 @@ pub class Hexdump
   def initialize(@out : IyiIO)
   end
 
-  def dump(bytes : Pointer(UInt8), count : Int32) : Nil
+  private def dump_bytes(bytes : String, count : Int32) : Nil
     raise "negative count: #{count}" if count < 0
-    line = Pointer(UInt8).malloc(80_u64)
-    hex = HEX.to_unsafe
+    line = Array(UInt8).new(80, 0_u8)
+    writer = String::Builder.new(80)
+    hex = HEX
     offset = 0
     while offset < count
       chunk = count - offset
@@ -882,7 +832,9 @@ pub class Hexdump
       end
       line[at] = 124_u8
       line[at + 1] = 10_u8
-      @out.write(line, at + 2)
+      writer.clear
+      (at + 2).times { |i| writer.push(line[i]) }
+      @out.write(writer.finish)
 
       offset = offset + chunk
     end
@@ -890,7 +842,7 @@ pub class Hexdump
   end
 
   def dump(text : String) : Nil
-    dump(text.to_unsafe, text.bytesize)
+    dump_bytes(text, text.bytesize)
   end
 
   # Everything left in `source`.
@@ -925,25 +877,25 @@ pub struct ByteFormat
     end
 
     # The low `count` bytes of `bits`, least significant first.
-    def self.put_little(bits : UInt64, buffer : Pointer(UInt8), count : Int32) : Nil
+    def self.put_little(bits : UInt64, buffer : String::Builder | IyiIO, count : Int32) : Nil
       i = 0
       while i < count
-        buffer[i] = (bits & 0xff_u64).to_u8
+        buffer.write_byte((bits & 0xff_u64).to_u8)
         bits = bits.unsafe_shr(8_u64)
         i = i + 1
       end
     end
 
-    def self.put_big(bits : UInt64, buffer : Pointer(UInt8), count : Int32) : Nil
+    def self.put_big(bits : UInt64, buffer : String::Builder | IyiIO,
+                     count : Int32) : Nil
       i = count - 1
       while i >= 0
-        buffer[i] = (bits & 0xff_u64).to_u8
-        bits = bits.unsafe_shr(8_u64)
-        i = i - 1
+        buffer.write_byte(((bits.unsafe_shr((i * 8).to_u64)) & 0xff_u64).to_u8)
+        i -= 1
       end
     end
 
-    def self.get_little(buffer : Pointer(UInt8), count : Int32) : UInt64
+    def self.get_little(buffer : String, count : Int32) : UInt64
       bits = 0_u64
       i = count - 1
       while i >= 0
@@ -953,7 +905,7 @@ pub struct ByteFormat
       bits
     end
 
-    def self.get_big(buffer : Pointer(UInt8), count : Int32) : UInt64
+    def self.get_big(buffer : String, count : Int32) : UInt64
       bits = 0_u64
       i = 0
       while i < count
@@ -972,146 +924,110 @@ pub struct ByteFormat
   end
 
   pub struct LittleEndian
-    def self.encode(value : Int32, buffer : Pointer(UInt8)) : Nil
+    def self.encode(value : Int32, buffer : String::Builder | IyiIO) : Nil
       Bits.put_little(Bits.of_int32(value), buffer, 4)
     end
 
-    def self.encode(value : Int64, buffer : Pointer(UInt8)) : Nil
+    def self.encode(value : Int64, buffer : String::Builder | IyiIO) : Nil
       Bits.put_little(Bits.of_int64(value), buffer, 8)
     end
 
-    def self.encode(value : UInt64, buffer : Pointer(UInt8)) : Nil
+    def self.encode(value : UInt64, buffer : String::Builder | IyiIO) : Nil
       Bits.put_little(value, buffer, 8)
     end
 
-    def self.encode(value : UInt8, buffer : Pointer(UInt8)) : Nil
-      buffer[0] = value
+    def self.encode(value : UInt8, buffer : String::Builder | IyiIO) : Nil
+      buffer.write_byte(value)
     end
 
-    def self.encode(value : Int32, io : IyiIO) : Nil
-      buffer = Pointer(UInt8).malloc(4_u64)
-      encode(value, buffer)
-      io.write(buffer, 4)
-    end
 
-    def self.encode(value : Int64, io : IyiIO) : Nil
-      buffer = Pointer(UInt8).malloc(8_u64)
-      encode(value, buffer)
-      io.write(buffer, 8)
-    end
 
-    def self.encode(value : UInt64, io : IyiIO) : Nil
-      buffer = Pointer(UInt8).malloc(8_u64)
-      encode(value, buffer)
-      io.write(buffer, 8)
-    end
 
-    def self.encode(value : UInt8, io : IyiIO) : Nil
-      io.write_byte(value)
-    end
 
-    def self.decode_int32(buffer : Pointer(UInt8)) : Int32
+    def self.decode_int32(buffer : String) : Int32
       Bits.to_int32(Bits.get_little(buffer, 4))
     end
 
-    def self.decode_int64(buffer : Pointer(UInt8)) : Int64
+    def self.decode_int64(buffer : String) : Int64
       Bits.to_int64(Bits.get_little(buffer, 8))
     end
 
-    def self.decode_uint64(buffer : Pointer(UInt8)) : UInt64
+    def self.decode_uint64(buffer : String) : UInt64
       Bits.get_little(buffer, 8)
     end
 
-    def self.decode_uint8(buffer : Pointer(UInt8)) : UInt8
+    def self.decode_uint8(buffer : String) : UInt8
       buffer[0]
     end
 
     def self.decode_int32(io : IyiIO) : Int32
-      decode_int32(Bits.take(io, 4).to_unsafe)
+      Bits.to_int32(Bits.get_little(Bits.take(io, 4), 4))
     end
 
     def self.decode_int64(io : IyiIO) : Int64
-      decode_int64(Bits.take(io, 8).to_unsafe)
+      Bits.to_int64(Bits.get_little(Bits.take(io, 8), 8))
     end
 
     def self.decode_uint64(io : IyiIO) : UInt64
-      decode_uint64(Bits.take(io, 8).to_unsafe)
+      Bits.get_little(Bits.take(io, 8), 8)
     end
 
     def self.decode_uint8(io : IyiIO) : UInt8
-      Bits.take(io, 1).to_unsafe[0]
+      Bits.take(io, 1)[0]
     end
   end
 
   pub struct BigEndian
-    def self.encode(value : Int32, buffer : Pointer(UInt8)) : Nil
+    def self.encode(value : Int32, buffer : String::Builder | IyiIO) : Nil
       Bits.put_big(Bits.of_int32(value), buffer, 4)
     end
 
-    def self.encode(value : Int64, buffer : Pointer(UInt8)) : Nil
+    def self.encode(value : Int64, buffer : String::Builder | IyiIO) : Nil
       Bits.put_big(Bits.of_int64(value), buffer, 8)
     end
 
-    def self.encode(value : UInt64, buffer : Pointer(UInt8)) : Nil
+    def self.encode(value : UInt64, buffer : String::Builder | IyiIO) : Nil
       Bits.put_big(value, buffer, 8)
     end
 
-    def self.encode(value : UInt8, buffer : Pointer(UInt8)) : Nil
-      buffer[0] = value
+    def self.encode(value : UInt8, buffer : String::Builder | IyiIO) : Nil
+      buffer.write_byte(value)
     end
 
-    def self.encode(value : Int32, io : IyiIO) : Nil
-      buffer = Pointer(UInt8).malloc(4_u64)
-      encode(value, buffer)
-      io.write(buffer, 4)
-    end
 
-    def self.encode(value : Int64, io : IyiIO) : Nil
-      buffer = Pointer(UInt8).malloc(8_u64)
-      encode(value, buffer)
-      io.write(buffer, 8)
-    end
 
-    def self.encode(value : UInt64, io : IyiIO) : Nil
-      buffer = Pointer(UInt8).malloc(8_u64)
-      encode(value, buffer)
-      io.write(buffer, 8)
-    end
 
-    def self.encode(value : UInt8, io : IyiIO) : Nil
-      io.write_byte(value)
-    end
 
-    def self.decode_int32(buffer : Pointer(UInt8)) : Int32
+    def self.decode_int32(buffer : String) : Int32
       Bits.to_int32(Bits.get_big(buffer, 4))
     end
 
-    def self.decode_int64(buffer : Pointer(UInt8)) : Int64
+    def self.decode_int64(buffer : String) : Int64
       Bits.to_int64(Bits.get_big(buffer, 8))
     end
 
-    def self.decode_uint64(buffer : Pointer(UInt8)) : UInt64
+    def self.decode_uint64(buffer : String) : UInt64
       Bits.get_big(buffer, 8)
     end
 
-    def self.decode_uint8(buffer : Pointer(UInt8)) : UInt8
+    def self.decode_uint8(buffer : String) : UInt8
       buffer[0]
     end
 
     def self.decode_int32(io : IyiIO) : Int32
-      decode_int32(Bits.take(io, 4).to_unsafe)
+      Bits.to_int32(Bits.get_big(Bits.take(io, 4), 4))
     end
 
     def self.decode_int64(io : IyiIO) : Int64
-      decode_int64(Bits.take(io, 8).to_unsafe)
+      Bits.to_int64(Bits.get_big(Bits.take(io, 8), 8))
     end
 
     def self.decode_uint64(io : IyiIO) : UInt64
-      decode_uint64(Bits.take(io, 8).to_unsafe)
+      Bits.get_big(Bits.take(io, 8), 8)
     end
 
     def self.decode_uint8(io : IyiIO) : UInt8
-      Bits.take(io, 1).to_unsafe[0]
+      Bits.take(io, 1)[0]
     end
   end
 

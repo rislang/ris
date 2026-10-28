@@ -26,7 +26,7 @@
 #
 # `IndexableMutable : Indexable` adds one more requirement, `unsafe_put`,
 # and from it in-place `update`, `swap`, `reverse_in_place`,
-# `rotate_in_place` and `fill`. The `class ::Array(T)` reopen at the end
+# `rotate_in_place` and `fill`. The `struct ::Array(T)` reopen at the end
 # gives the prelude's array its mutators (`insert`, `delete_at`, `delete_if`,
 # `keep_if`, `clear`, `rotated`, `compact_in_place`, `cartesian`).
 #
@@ -540,7 +540,7 @@ impl Indexable for Array(T) forall T
   type Elem = T
 
   def unsafe_fetch(index : Int32) : T
-    to_unsafe[index]
+    self[index]
   end
 end
 
@@ -548,7 +548,7 @@ impl IndexableMutable for Array(T) forall T
   type Elem = T
 
   def unsafe_put(index : Int32, value : T) : T
-    to_unsafe[index] = value
+    self[index] = value
   end
 end
 
@@ -557,7 +557,7 @@ end
 # its ivars, so the prelude's layout stays its own. `swap`, `fill`,
 # `reverse_in_place` and `rotate_in_place` come from `IndexableMutable`
 # above and are not repeated here.
-class ::Array(T)
+struct ::Array(T)
   # Inserts value at index, shifting what follows right. An index of
   # `size` appends; `-1` also appends, as the position after the last.
   def insert(index : Int32, value : T) : Array(T)
@@ -615,10 +615,6 @@ class ::Array(T)
   end
 
   # Forgets every element.
-  def clear : Array(T)
-    unsafe_set_size(0)
-    self
-  end
 
   # A copy rotated so that the element at position n comes first; the
   # past participle names the copy, as `sorted` and `reversed` do, and

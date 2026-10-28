@@ -3757,7 +3757,7 @@ class IyiTask(T)
   def finish(value : T) : Nil
     region = RisRegion.acquire(Tape::CAPACITY)
     holder = RisResultRegion.new(region)
-    value = Tape.owner_copy(value, holder)
+    value = Tape.task_copy(value, holder)
     holder.run do
       address = RisRegion.tape_bytes(sizeof(T).to_u64)
       Pointer(T).new(address).value = value
@@ -3788,7 +3788,7 @@ class IyiTask(T)
     end
     return Panicked.new("a task stopped by its cancellation has no value") if (@box == 0_u64)
     # Deeply copy every result shape, including nested tape structs.
-    Tape.owner_copy(Pointer(T).new(@box).value, RisCurrentTape.new)
+    Tape.task_copy(Pointer(T).new(@box).value, RisCurrentTape.new)
   end
 end
 

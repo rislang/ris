@@ -195,6 +195,15 @@ else
   echo "FAILED   pipe_wait: $out"; status=1
 fi
 
+# Memory streams, reader wrappers and byte formats stay on the tape.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/std_io_tape.ri 2>&1)
+if [ "$?" -eq 0 ] && grep -qxF 'stdio tape ok' <<<"$out" &&
+    grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+  echo "runs     std_io_tape (zero heap)"
+else
+  echo "FAILED   std_io_tape: $out"; status=1
+fi
+
 # Metadata paths, IDs and missing-file diagnostics stay on tape.
 out=$(RIS="$RIS" bash test/ris/file_metadata.sh 2>&1)
 if [ "$?" -eq 0 ]; then

@@ -181,6 +181,7 @@ import std/time::{Time}
 # What the other end did that HTTP does not allow, as a value: `reason` is
 # the sentence, `status` the answer a server gives a request that did it
 # (400, or 413 and 431 for the limits). `message` says it is HTTP's.
+@[OnTape]
 pub struct HTTPError
   getter reason : String
   getter status : Int32
@@ -1368,7 +1369,7 @@ pub class Request
     @tls_resumed = resumed
   end
 
-  def header(name : String | String) : String?
+  def header(name : String) : String?
     @headers.each do |key, value|
       return value if HTTP.same_name?(key, name)
     end
@@ -1604,7 +1605,7 @@ pub class Response
   # A header by name, as the server spelled it or otherwise: a field
   # name is case-insensitive (RFC 9110 §5.1), and `content-length` is as
   # common on the wire as `Content-Length`.
-  def header(name : String | String) : String?
+  def header(name : String) : String?
     @headers.each do |key, value|
       return value if HTTP.same_name?(key, name)
     end
@@ -1616,7 +1617,7 @@ pub class Response
   # §5.3), since a cookie's `Expires` date has a comma in it - two cookies
   # read as "a=1; Expires=Wed, 21 Oct 2026 07:28:00 GMT, b=2", which no
   # split takes back apart. Empty for a field that is not there.
-  def header_values(name : String | String) : Array(String)
+  def header_values(name : String) : Array(String)
     if apart = @apart
       apart.each do |key, values|
         return values.dup if HTTP.same_name?(key, name)
@@ -1721,7 +1722,7 @@ pub struct Outgoing
   # A header line, checked as `format_response` checks one: a name that is
   # a token, a value with no line break or control character, and none of
   # the lines the server writes itself.
-  def header(name : String | String, value : String | String) : Nil
+  def header(name : String, value : String) : Nil
     value = value.as_tape
     Server.check_line(name, value)
     if HTTP.same_name?(name, "Content-Length") || HTTP.same_name?(name, "Connection") || HTTP.same_name?(name, "Transfer-Encoding")
@@ -1777,7 +1778,7 @@ pub struct Server
 
   # Each worker constructs Handler.new with its own checked config copy.
   # Handler#call receives the same request and response as the old block.
-  def self.answer(host : String | String, port : Int32, config : C,
+  def self.answer(host : String, port : Int32, config : C,
                   factory : F.class,
                   max_connections : Int32 = MAX_CONNECTIONS) : Nil forall C, F
     prefork(host, port, config, factory, Incoming, max_connections,
@@ -1941,7 +1942,7 @@ pub struct Server
   end
 
   # The same for a value on the tape, read where it lies.
-  def self.check_line(name : String | String, value : String) : Nil
+  def self.check_line(name : String, value : String) : Nil
     raise "HTTP: not a header name: #{name.inspect}" unless HTTP.token?(name)
     p = value
     i = 0
@@ -2035,7 +2036,7 @@ pub struct Server
   # consumes Panicked and replaces that worker with fresh local state.
   # A failed listener setup is fatal, never a shared-listener fallback.
   # Port zero is refused: choose one port before starting the pool.
-  def self.serve(host : String | String, port : Int32, config : C,
+  def self.serve(host : String, port : Int32, config : C,
                  factory : F.class, stream_bodies : Bool = false,
                  compress : Bool = false, timeout_ms : Int32 = 60000,
                  request_timeout_ms : Int32 = REQUEST_TIMEOUT,
@@ -2057,7 +2058,7 @@ pub struct Server
   end
 
   @[TaskClosureUnsafe("serve joins supervisors before releasing packed config")]
-  private def self.prefork(host : String | String, port : Int32, config : C,
+  private def self.prefork(host : String, port : Int32, config : C,
                            factory : F.class, style : S.class,
                            count : Int32, stream_bodies : Bool,
                            compress : Bool, timeout_ms : Int32,
@@ -2594,7 +2595,7 @@ pub struct Server
     target = head.target.to_heap
     version = head.version.to_heap
     headers = {} of String => String
-    head.each_heap_field { |name, value| headers[name] = value }
+    head.each_field { |name, value| headers[name] = value }
     host_name = "Host"
     headers.each do |name, _|
       host_name = name if HTTP.same_name?(name, "Host")
@@ -4643,7 +4644,7 @@ pub struct HTTP
 
   # Two field names for the same field: ASCII case is the only difference
   # a name may carry.
-  def self.same_name?(a : String | String, b : String | String) : Bool
+  def self.same_name?(a : String, b : String) : Bool
     same_name?(a.as_tape, a.bytesize, b)
   end
 
@@ -4944,7 +4945,7 @@ pub struct HTTP
   def self.same_name?(
     pa : Pointer(UInt8) | String,
     count : Int32,
-    b : String | String,
+    b : String,
   ) : Bool
     return false unless count == b.bytesize
     pb = b.as_tape
@@ -5249,7 +5250,7 @@ pub class Part
     @pending = nil
   end
 
-  def header(name : String | String) : String?
+  def header(name : String) : String?
     @headers.each do |key, value|
       return value if HTTP.same_name?(key, name)
     end
@@ -6006,7 +6007,7 @@ class H2Connection
 
   # One frame, in one write.
   def write_frame(type : Int32, flags : Int32, id : Int32,
-                  payload : String | String) : Bool
+                  payload : String) : Bool
     return false unless @failure.nil? || (type == GOAWAY && @failure.is_a?(HTTPError))
     n = payload.bytesize
     head = String.new(9) do |b|
@@ -6485,7 +6486,7 @@ class H2Connection
     nil
   end
 
-  def self.connection_specific?(name : String | String) : Bool
+  def self.connection_specific?(name : String) : Bool
     name == "connection" || name == "keep-alive" || name == "proxy-connection" || name == "transfer-encoding" || name == "upgrade"
   end
 
@@ -6661,7 +6662,7 @@ class H2Connection
     end
   end
 
-  def self.read_u32(text : String | String, at : Int32) : Int32
+  def self.read_u32(text : String, at : Int32) : Int32
     p = text.is_a?(String) ? text.to_unsafe : text
     (p[at].to_i32 << 24) | (p[at + 1].to_i32 << 16) | (p[at + 2].to_i32 << 8) | p[at + 3].to_i32
   end

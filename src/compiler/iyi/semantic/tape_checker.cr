@@ -28,6 +28,11 @@ class Iyi::TapeChecker
     return true if class_instance?(program, type)
     return true if TapeOwnerChecker.owner?(program, type)
     if type.is_a?(GenericClassInstanceType)
+      if type.generic_type == program.static_array &&
+         (element = type.type_vars["T"]?).is_a?(Var) &&
+         (element_type = element.type?)
+        return !tape_in(program, element_type).nil?
+      end
       return !type.generic_type.annotation(program.tape_annotation).nil?
     end
     return false unless type.is_a?(Annotatable)

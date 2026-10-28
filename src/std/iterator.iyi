@@ -374,6 +374,7 @@ end
 
 # The source an endless range gets: it counts up by one from the beginning
 # with no end, as an endless range does in the other library.
+@[OnTape]
 pub class EndlessRangeIterator(B)
   def initialize(@current : B)
   end
@@ -409,6 +410,7 @@ end
 # Each type defines `next` once and its `impl` names only `Elem`, as
 # `NumericStepIterator` (std/steppable) does: every adaptor carried the same
 # `next` twice, once on the type and once in the `impl`.
+@[OnTape]
 pub class ArrayIterator(T)
   def initialize(@array : Array(T))
     @index = 0
@@ -433,6 +435,7 @@ end
 # `Range#each` does, and stops at the end rather than stepping past it:
 # on an inclusive range whose end is the type's largest value, the step
 # after the last element would overflow.
+@[OnTape]
 pub class RangeIterator(B, E)
   @range : Range(B, E)
   @current : B
@@ -468,6 +471,7 @@ end
 # array per call, so asking per element was a copy of the table per step —
 # and then walks that snapshot, so a hash that changes under the iterator
 # does not change what it yields.
+@[OnTape]
 pub class KeyIterator(K, V)
   @keys : Array(K)
   @index : Int32
@@ -489,6 +493,8 @@ impl Iterator for KeyIterator(K, V) forall K, V
   type Elem = K
 end
 
+@[OnTape]
+
 pub class ValueIterator(K, V)
   @values : Array(V)
   @index : Int32
@@ -509,6 +515,8 @@ end
 impl Iterator for ValueIterator(K, V) forall K, V
   type Elem = V
 end
+
+@[OnTape]
 
 pub class EntryIterator(K, V)
   @keys : Array(K)
@@ -587,6 +595,8 @@ impl Iterator for RejectIterator(I, T) forall I, T
   type Elem = T
 end
 
+@[OnTape]
+
 pub class TakeIterator(I, T)
   def initialize(@iter : I, @n : Int32)
     @count = 0
@@ -608,6 +618,8 @@ end
 impl Iterator for TakeIterator(I, T) forall I, T
   type Elem = T
 end
+
+@[OnTape]
 
 pub class TakeWhileIterator(I, T)
   def initialize(@iter : I, @func : T -> Bool)
@@ -633,6 +645,8 @@ impl Iterator for TakeWhileIterator(I, T) forall I, T
   type Elem = T
 end
 
+@[OnTape]
+
 pub class SkipIterator(I, T)
   def initialize(@iter : I, @n : Int32)
     @skipped = 0
@@ -653,6 +667,8 @@ end
 impl Iterator for SkipIterator(I, T) forall I, T
   type Elem = T
 end
+
+@[OnTape]
 
 pub class SkipWhileIterator(I, T)
   def initialize(@iter : I, @func : T -> Bool)
@@ -701,6 +717,8 @@ impl Iterator for ZipIterator(I1, T1, I2, T2) forall I1, T1, I2, T2
   type Elem = Tuple(T1, T2)
 end
 
+@[OnTape]
+
 pub class ChainIterator(I1, I2, T)
   def initialize(@iter1 : I1, @iter2 : I2)
     @first_done = false
@@ -721,6 +739,8 @@ end
 impl Iterator for ChainIterator(I1, I2, T) forall I1, I2, T
   type Elem = T
 end
+
+@[OnTape]
 
 pub class FlatMapIterator(I, T, U)
   def initialize(@iter : I, @func : T -> Array(U))
@@ -774,6 +794,8 @@ impl Iterator for SliceIterator(I, T) forall I, T
   type Elem = Array(T)
 end
 
+@[OnTape]
+
 pub class ConsIterator(I, T)
   def initialize(@iter : I, @n : Int32)
     @window = [] of T
@@ -807,6 +829,8 @@ impl Iterator for ConsIterator(I, T) forall I, T
   type Elem = Array(T)
 end
 
+@[OnTape]
+
 pub class WithIndexIterator(I, T)
   def initialize(@iter : I, @offset : Int32)
     @index = @offset
@@ -827,6 +851,8 @@ end
 impl Iterator for WithIndexIterator(I, T) forall I, T
   type Elem = Tuple(T, Int32)
 end
+
+@[OnTape]
 
 pub class CycleIterator(I, T)
   def initialize(@iter : I)
@@ -862,6 +888,8 @@ end
 impl Iterator for CycleIterator(I, T) forall I, T
   type Elem = T
 end
+
+@[OnTape]
 
 pub class CycleNIterator(I, T)
   def initialize(@iter : I, @n : Int32)
@@ -902,6 +930,8 @@ end
 impl Iterator for CycleNIterator(I, T) forall I, T
   type Elem = T
 end
+
+@[OnTape]
 
 pub class StepIterator(I, T)
   def initialize(@iter : I, @by : Int32)
