@@ -53,6 +53,10 @@ class Iyi::TapeChecker
       # values it is called with: `Proc(Str, Nil)` holds no tape.
       return nil
     when GenericClassInstanceType
+      # ris: a task's tape value is copied into its group's result region
+      # at finish and onto the reader's tape at `value`: the handle holds
+      # no tape of the spawner's.
+      return nil if type.generic_type.name == "IyiTask"
       type.type_vars.each_value do |type_var|
         if type_var.is_a?(Var) && (var_type = type_var.type?)
           tape_in(program, var_type, visiting).try { |found| return found }

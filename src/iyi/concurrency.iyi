@@ -3716,18 +3716,39 @@ end
 @[Share]
 class IyiTask(T)
   @fiber : IyiFiber
+  @group : IyiGroup
   @box : UInt64 = 0_u64
   # Keep result storage visible to the precise GC.
   @result_root : Pointer(Void) = Pointer(Void).new(0_u64)
 
-  def initialize(@fiber : IyiFiber, group : IyiGroup)
+  def initialize(@fiber : IyiFiber, @group : IyiGroup)
   end
+
+  # ris: T holds tape values (Str, Ary, Map, Tre). The task's own
+  # tape ends with it, so its value is copied into a result region the
+  # group keeps until it ends, and each reader gets a copy on its tape.
 
   def fiber : IyiFiber
     @fiber
   end
 
   def finish(value : T) : Nil
+    {% if T.union_types.any? { |t| t <= ::Str || t.name.starts_with?("Ary(") || t.name.starts_with?("Map(") || t.name.starts_with?("Tre(") || (t < ::Tuple && t.type_vars.any? { |m| m <= ::Str || m.name.starts_with?("Ary(") || m.name.starts_with?("Map(") }) } %}
+      if true
+        region = RisRegion.acquire(Tape::CAPACITY)
+        holder = RisResultRegion.new(region)
+        value = Tape.owner_copy(value, holder)
+        saved = RisRegion.tape
+        RisRegion.tape = holder.region
+        address = RisRegion.tape_bytes(sizeof(T).to_u64)
+        Pointer(T).new(address).value = value
+        last = RisRegion.tape
+        RisRegion.tape = saved
+        @group.keep_result(last)
+        @box = address
+        return
+      end
+    {% end %}
     slot = Pointer(T).malloc(1_u64)
     slot.value = value
     @result_root = slot.as(Pointer(Void))
@@ -3755,12 +3776,66 @@ class IyiTask(T)
       return Panicked.new(@fiber.panic_message)
     end
     return Panicked.new("a task stopped by its cancellation has no value") if (@box == 0_u64)
+    {% if T.union_types.any? { |t| t <= ::Str || t.name.starts_with?("Ary(") || t.name.starts_with?("Map(") || t.name.starts_with?("Tre(") || (t < ::Tuple && t.type_vars.any? { |m| m <= ::Str || m.name.starts_with?("Ary(") || m.name.starts_with?("Map(") }) } %}
+      # A copy on the reader's current tape, as many readers as there are.
+      return Tape.owner_copy(Pointer(T).new(@box).value, RisCurrentTape.new)
+    {% end %}
     Pointer(T).new(@box).value
+  end
+end
+
+# Where a task's tape value is copied when it finishes: a fresh region
+# that also holds the value's slot and its node in the group's chain.
+struct RisResultRegion
+  getter region : UInt64
+
+  def initialize(@region : UInt64)
+  end
+
+  def run(&)
+    saved = RisRegion.tape
+    RisRegion.tape = @region
+    result = yield
+    @region = RisRegion.tape
+    RisRegion.tape = saved
+    result
+  end
+end
+
+# The reader's own tape: Tape.owner_copy runs here without switching.
+struct RisCurrentTape
+  def run(&)
+    yield
   end
 end
 
 class IyiGroup
   MAX_LIVE = 2147483647
+
+  def keep_result(region : UInt64) : Nil
+    saved = RisRegion.tape
+    RisRegion.tape = region
+    node = RisRegion.tape_bytes(16_u64)
+    RisRegion.tape = saved
+    IyiSchedLock.lock
+    IyiHeap.write64(node, @results)
+    IyiHeap.write64(node &+ 8_u64, region)
+    @results = node
+    IyiSchedLock.unlock
+  end
+
+  private def release_results : Nil
+    node = @results
+    @results = 0_u64
+    saved = RisRegion.tape
+    while node != 0_u64
+      following = IyiHeap.read64(node)
+      RisRegion.tape = IyiHeap.read64(node &+ 8_u64)
+      RisRegion.release_tape
+      node = following
+    end
+    RisRegion.tape = saved
+  end
 
   def self.check_count(live : Int32) : Nil
     if live >= MAX_LIVE
@@ -3785,6 +3860,9 @@ class IyiGroup
   # cancelled: one spawned 10 ms after a sibling's failure had cancelled
   # the group slept its full 2000 ms, and the group's join with it.
   @cancelled : Bool
+  # Result regions of tasks whose value holds tape values: a chain of
+  # 16-byte nodes {next node, region}, each node inside its region.
+  @results : UInt64 = 0_u64
 
   def initialize
     @live = 0
@@ -3974,6 +4052,7 @@ class IyiGroup
       me.joining = nil
     end
     @ended = true
+    release_results
     me.open_group = @outer
     # The boundary owes a re-raise for any panic *nobody read*: a bug
     # observed through its handle already became a `Panicked` value

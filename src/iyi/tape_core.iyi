@@ -351,3 +351,63 @@ struct Map(K, V)
     result
   end
 end
+
+struct Str::Builder
+  def append_value(value : Bool) : Nil
+    append(value ? "true" : "false")
+  end
+
+  def append_value(value : Symbol) : Nil
+    append(value.to_s)
+  end
+
+  def append_value(value : Ary) : Nil
+    push(91_u8)
+    first = true
+    value.each do |item|
+      append(", ") unless first
+      append_inspect(item)
+      first = false
+    end
+    push(93_u8)
+  end
+
+  def append_value(value : Map) : Nil
+    push(123_u8)
+    first = true
+    value.each do |key, item|
+      append(", ") unless first
+      append_inspect(key)
+      append(" => ")
+      append_inspect(item)
+      first = false
+    end
+    push(125_u8)
+  end
+
+  def append_value(value : Tuple(*T)) : Nil forall T
+    push(123_u8)
+    {% for i in 0...T.size %}
+      append(", ") if {{i}} > 0
+      append_inspect(value[{{i}}])
+    {% end %}
+    push(125_u8)
+  end
+
+  # A value as `inspect` shows it inside a collection: text quoted.
+  def append_inspect(value) : Nil
+    if value.is_a?(Str)
+      value.inspect(self)
+    elsif value.is_a?(String)
+      Str.new(value).inspect(self)
+    elsif value.is_a?(Char)
+      push(39_u8)
+      append_value(value)
+      push(39_u8)
+    elsif value.nil?
+      append("nil")
+    else
+      append_value(value)
+    end
+  end
+end

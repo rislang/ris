@@ -2297,6 +2297,21 @@ class String
   def to_heap : String
     self
   end
+
+  # A String never changes and, without a collector, is static text or a
+  # program object: copying keeps the same one. The generic object copy
+  # took only its declared fields, the first byte of the text.
+  def copy_to(owner) : String
+    self
+  end
+
+  def __iyi_copy_into(target : Pointer(self), work : RisCopyWork) : Nil
+    target.value = self
+  end
+
+  def __iyi_pending_copy(owner : RisPendingCopy) : String
+    self
+  end
 end
 
 # The intrinsic a writer appends with: the platform's `memcpy`, at its

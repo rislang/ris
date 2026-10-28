@@ -474,7 +474,15 @@ module Iyi
       if @macro_code == 0 && program.tape_platform? &&
          node.name.in?("puts", "print", "raise")
         node.args.map! do |arg|
-          arg.is_a?(StringInterpolation) ? TapeTextLowering.interpolate(arg) : arg
+          if arg.is_a?(StringInterpolation)
+            TapeTextLowering.interpolate(arg)
+          elsif node.name != "raise" && ris_program_code?(node) &&
+                !arg.is_a?(StringLiteral) && !arg.is_a?(Splat)
+            # A program prints any value as tape text, not a heap String.
+            Call.new(Path.global("Str").at(arg), "interpolate", arg).at(arg)
+          else
+            arg
+          end
         end
       end
       # ris: in a program, `x.to_s` and `String.build` make tape text (a

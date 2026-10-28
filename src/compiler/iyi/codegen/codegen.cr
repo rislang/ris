@@ -2497,6 +2497,14 @@ module Iyi
                                 2
                               elsif obj.is_a?(Def) && obj.annotation(@program.task_closure_unsafe_annotation)
                                 1
+                              elsif obj.is_a?(Def) && @program.has_flag?("ris_no_gc") &&
+                                    (loc = obj.location) &&
+                                    !TapeRules.runtime?(@program, loc) && !TapeRules.std?(loc)
+                                # ris: no collector, so a def's closure
+                                # environment is on its current tape, which
+                                # outlives every proc the tape rules let it
+                                # make (TAPE_SPEC 5.3).
+                                1
                               else
                                 0
                               end

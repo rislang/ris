@@ -153,6 +153,14 @@ else
   echo "FAILED   group_lifecycle: $out"; status=1
 fi
 
+# A task answers tape values; the reader gets its own copy. Zero heap.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/task_tape_result.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = $'<42>\n60\n5\nslow\n<ok>\nris heap: 0 allocations, 0 bytes' ]; then
+  echo "runs     task_tape_result (Str, Ary, Map and tuple values, zero heap)"
+else
+  echo "FAILED   task_tape_result: $out"; status=1
+fi
+
 # Everyday String/Array/Hash calls in a program stay on the tape.
 out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/core_api.ri 2>&1)
 if [ "$?" -eq 0 ] && grep -qxF 'HELLO, WORLD' <<<"$out" &&
