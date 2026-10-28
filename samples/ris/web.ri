@@ -19,22 +19,22 @@ import std/http::{Server, Incoming, Outgoing}
 @[OnTape]
 pub struct User
   getter id : Int32
-  getter name : Str
-  getter status : Str
+  getter name : String
+  getter status : String
   def initialize(@id, @name, @status)
   end
 end
 
 # Construct configuration on the server task before it copies to workers.
-def users : Ary(User)
-  Ary(User){
+def users : Array(User)
+  Array(User){
     User.new(1, "alice", "Learning sequential memory management :-)"),
     User.new(2, "bob", "Bumping pointers, freeing nothing"),
   }
 end
 
 # The user id in "/users/1/status", or nil when the path is another one.
-def status_id(path : Str) : Int32?
+def status_id(path : String) : Int32?
   parts = path.split('/')
   return nil unless parts.size == 4 && parts[1] == "users"
   return nil unless parts[3] == "status"
@@ -48,7 +48,7 @@ end
 #
 # Written straight into the response body on the request's tape, the
 # text HTML-escaped on the way.
-def status_view(res : Outgoing, name : Str, status : Str) : Nil
+def status_view(res : Outgoing, name : String, status : String) : Nil
   res.header("Content-Type", "text/html; charset=utf-8")
   html = res.body
   html << "<h1>"
@@ -69,7 +69,7 @@ end
 
 @[OnTape]
 struct Handler
-  @users : Ary(User)
+  @users : Array(User)
 
   def initialize(@users)
   end

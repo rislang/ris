@@ -9,7 +9,7 @@ class Right
   end
 end
 def descend(n : Int32) : Int32
-  a = Ary(Int32).new
+  a = Array(Int32).new
   receiver = n > 0 ? Left.new : Right.new
   child = n > 0 ? receiver.step(n - 1) : 0
   child + a.size

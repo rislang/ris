@@ -98,7 +98,7 @@ module Iyi::FfiBoundaryChecker
       return unless node.names == ["Pointer"]
       "`Pointer` outside an @[Ffi] module or @[PointerUnsafe] def.\n\n" \
       "Hold bytes in a String (`s[i]`, `s[a, n]`, `s.byte_at(i)`), a " \
-      "`UInt8[N]`, an `Array(UInt8)` or a `Str`."
+      "`UInt8[N]`, an `Array(UInt8)` or a `String`."
     when LibDef
       "a `lib` block outside an @[Ffi] module: calling C is the boundary.\n\n" \
       "Put the binding in a module of its own, mark it `@[Ffi]`, and give " \

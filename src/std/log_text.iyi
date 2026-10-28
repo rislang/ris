@@ -4,21 +4,21 @@ module std/log_text
 
 @[OnTape]
 pub struct LogField
-  getter key : Str
-  getter value : Str
+  getter key : String
+  getter value : String
 
-  def initialize(@key : Str, @value : Str)
+  def initialize(@key : String, @value : String)
   end
 
-  def self.text(value : String | Str) : Str
+  def self.text(value : String | String) : String
     value.as_tape
   end
 
-  def self.text(value) : Str
-    Str.build(65) { |w| w << value }
+  def self.text(value) : String
+    String.build(65) { |w| w << value }
   end
 
-  def self.set(fields : Ary(LogField), key : Str, value : Str) : Nil
+  def self.set(fields : Array(LogField), key : String, value : String) : Nil
     i = 0
     while i < fields.size
       if fields[i].key == key
@@ -32,8 +32,8 @@ pub struct LogField
 end
 
 pub struct LogText
-  def self.write(source : Str, severity : Str, message : Str,
-                 fields : Ary(LogField), writer : Str::Builder) : Nil
+  def self.write(source : String, severity : String, message : String,
+                 fields : Array(LogField), writer : String::Builder) : Nil
     writer << " " << severity << " - "
     writer << source << ": " unless source.empty?
     writer << message

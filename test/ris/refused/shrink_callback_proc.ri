@@ -1,12 +1,12 @@
-def invoke(callback, b : Str::Builder)
+def invoke(callback, b : String::Builder)
   callback.call(b)
 end
 
 def exercise
-  b = Str::Builder.new
+  b = String::Builder.new
   b << "abc"
   v = b.finish
-  callback = ->(bytes : Str::Builder) { bytes.clear }
+  callback = ->(bytes : String::Builder) { bytes.clear }
   invoke(callback, b)
   puts v
 end

@@ -35,7 +35,7 @@ module bench/std_acme_exercise
 # These exercises still use std's legacy String APIs and assertions.
 # Board messages themselves own copied tape text; this is the heap adapter.
 @[TapeToHeap]
-def ris_heap_text(value : Str) : String
+def ris_heap_text(value : String) : String
   value.to_s
 end
 
@@ -128,7 +128,7 @@ struct RisAcmeSnapshot
   getter terms : Bool
   getter gap_ms : Int64
   getter csr_verified : Bool
-  getter csr_names : Ary(Str)
+  getter csr_names : Array(String)
   getter rolled : Bool
   getter after_roll : Bool
 
@@ -268,8 +268,8 @@ end
 
 @[OnTape]
 struct RisAcmeChallenge
-  getter token : Str
-  getter authorization : Str
+  getter token : String
+  getter authorization : String
 
   def initialize(@token, @authorization)
   end
@@ -277,8 +277,8 @@ end
 
 @[OnTape]
 struct RisAcmeAlpn
-  getter domain : Str
-  getter authorization : Str
+  getter domain : String
+  getter authorization : String
 
   def initialize(@domain, @authorization)
   end
@@ -299,7 +299,7 @@ class RisAcmeScriptHandler
   @script : Script
   @tls : TlsServerConfig
 
-  def initialize(config : {Str, Str})
+  def initialize(config : {String, String})
     @script = Script.new(ris_heap_text(config[0]), ris_heap_text(config[1]))
     @tls = TlsServerConfig.from_pem(LEAF_PEM, KEY_PEM).or_panic
   end
@@ -705,7 +705,7 @@ class Script
   end
 
   def publish : Nil
-    snapshot = RisAcmeSnapshot.new(@requests, @reused, @unknown, @misplaced, @der_signatures, @bad_signatures, @wrong_urls, @not_empty, @bad_nonce_sent, @retried_with_sent, @terms, @gap_ms, @csr_verified, Ary(Str).new(@csr_names.size) { |i| @csr_names[i].as_tape }, @rolled, @after_roll)
+    snapshot = RisAcmeSnapshot.new(@requests, @reused, @unknown, @misplaced, @der_signatures, @bad_signatures, @wrong_urls, @not_empty, @bad_nonce_sent, @retried_with_sent, @terms, @gap_ms, @csr_verified, Array(String).new(@csr_names.size) { |i| @csr_names[i].as_tape }, @rolled, @after_roll)
     raise "script observation queue full" unless RisBoard.post(snapshot)
   end
 

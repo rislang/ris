@@ -6,7 +6,7 @@ kept = ""
 tape do
   data = ".one\n..two\rthree\r\nlast"
   expected = "..one\r\n...two\r\nthree\r\nlast\r\n.\r\n"
-  w = Str::Builder.new(1)
+  w = String::Builder.new(1)
   w << "prefix:"
   SmtpClient.stuffed(data, w)
   exit 1 unless w.finish == "prefix:" + expected

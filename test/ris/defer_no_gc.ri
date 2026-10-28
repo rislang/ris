@@ -2,7 +2,7 @@ module test/ris/defer_no_gc
 import std/file
 import std/int
 
-def captured(path : Str, mode : Int32) : Nil
+def captured(path : String, mode : Int32) : Nil
   io = File.open(path, owner: Program.tape)
   value = 0
   # The callbacks must see the current locals, run once, and run in LIFO

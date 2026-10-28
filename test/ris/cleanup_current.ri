@@ -18,7 +18,7 @@ end
 group do |g|
   task = g.spawn do
     local_tape do
-      text = Str.build { |w| w << "alive" }
+      text = String.build { |w| w << "alive" }
       value = 6
       defer puts text
       defer puts value

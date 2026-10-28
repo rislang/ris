@@ -129,7 +129,7 @@ class Iyi::TapeScopeChecker
     return false unless type
     type = type.remove_typedef
     return false if type.is_a?(PointerInstanceType) || type.is_a?(ProcInstanceType)
-    return true if type.to_s == "Str" || type.to_s == "Str::Builder"
+    return true if type.to_s == "String" || type.to_s == "String::Builder"
     return false unless seen.add?(type)
     case type
     when UnionType
@@ -139,7 +139,7 @@ class Iyi::TapeScopeChecker
     when NamedTupleInstanceType
       type.entries.all? { |entry| pending_type?(entry.type, seen.dup) }
     when GenericClassInstanceType
-      if {"Ary", "Tre"}.includes?(type.generic_type.name)
+      if {"Array", "Tre"}.includes?(type.generic_type.name)
         type.type_vars.values.all? do |var|
           var.is_a?(Var) && pending_type?(var.type?, seen.dup)
         end
@@ -191,7 +191,7 @@ class Iyi::TapeScopeChecker
   end
 
   def tape_string?(type : Type?) : Bool
-    !type.nil? && type.remove_typedef.to_s == "Str"
+    !type.nil? && type.remove_typedef.to_s == "String"
   end
 
   # Whether *body*, inside *scope*, keeps nothing it puts on the tape.

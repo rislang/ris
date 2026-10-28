@@ -1,15 +1,15 @@
 @[Owner]
 struct Workspace
-  getter left : Ary(Int32)
-  getter right : Ary(Int32)
+  getter left : Array(Int32)
+  getter right : Array(Int32)
 
   def initialize
-    @left = Ary(Int32).new
-    @right = Ary(Int32).new
+    @left = Array(Int32).new
+    @right = Array(Int32).new
   end
 end
 
 tape do
-  a = Ary(Workspace).new
+  a = Array(Workspace).new
   nil
 end

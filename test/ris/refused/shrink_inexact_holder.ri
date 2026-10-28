@@ -1,19 +1,19 @@
 @[OnTape]
 struct InexactHolder
-  getter text : Str
+  getter text : String
 
   def initialize(@text)
   end
 end
 
-def read_then_shrink(holder : InexactHolder, bytes : Str::Builder)
+def read_then_shrink(holder : InexactHolder, bytes : String::Builder)
   text = holder.text
   bytes.clear
   puts text
 end
 
 tape do
-  bytes = Str::Builder.new
+  bytes = String::Builder.new
   bytes << "held"
   read_then_shrink(InexactHolder.new(bytes.finish), bytes)
 end

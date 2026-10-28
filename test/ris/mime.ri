@@ -15,7 +15,7 @@ tape do
   exit 15 unless MIME.compressible?("application/wasm")
   exit 16 if MIME.compressible?("image/png")
   exit 7 unless MIME.compressible?("application/a+json")
-  w = Str::Builder.new(1)
+  w = String::Builder.new(1)
   w << "prefix:"
   MIME.with_charset("text/html", w)
   exit 8 unless w.finish == "prefix:text/html; charset=utf-8"

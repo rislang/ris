@@ -18,7 +18,7 @@
 # Writers, arrays and trees hold pointers to state blocks on the tape;
 # copies share that state. Its fourth word names its payload reservation
 # on Linux, acquired before any element is published.
-# A Str is an immutable byte view.
+# A String is an immutable byte view.
 # Copying a tape value does not copy its backing storage.
 
 # Internal ABI: the normalizer lowers only the runtime's own tape guard to
@@ -41,20 +41,20 @@ class Program
   end
 
   # Arguments borrow the process's bytes for the program's lifetime.
-  def self.arguments : Ary(Str)
+  def self.arguments : Array(String)
     {% if flag?(:win32) %}
       # Keep the existing UTF-16 command-line decoder during migration.
       legacy = args
-      Ary(Str).new(legacy.size) { |i| Str.new(legacy[i]) }
+      Array(String).new(legacy.size) { |i| String.new(legacy[i]) }
     {% else %}
       count = ARGC_UNSAFE > 0 ? ARGC_UNSAFE - 1 : 0
-      Ary(Str).new(count) do |i|
+      Array(String).new(count) do |i|
         bytes = ARGV_UNSAFE[i + 1]
         size = 0
         while bytes[size] != 0_u8
           size += 1
         end
-        Str.new(bytes, size)
+        String.new(bytes, size)
       end
     {% end %}
   end
@@ -80,14 +80,14 @@ end
 
 # A tape of its own, even inside a `tape` block, freed when the block
 # ends: for work whose temporaries should not stay on the outer tape
-# until it ends. Copy what is kept before leaving. Outer `Str`s
+# until it ends. Copy what is kept before leaving. Outer `String`s
 # may be read; other outer tape values become owned data first.
 def local_tape(&) : Nil
   RisRegion.tape_local(Tape::CAPACITY) { yield }
   nil
 end
 
-# Internals of the tape types: `Str`, `Ary`, `Tre` and theirs.
+# Internals of the tape types: `String`, `Array`, `Tre` and theirs.
 module Tape
   # An index out of range: raised out of line, so the `[]` inlined at
   # every read keeps only its compare and branch, not the building of
@@ -136,18 +136,18 @@ module Tape
   def self.check_copy(type : T.class, path : P.class) : Nil forall T, P
     {% if T.name == "Std::Socket::IyiSocket" || T.name == "Std::Io::PipeReader" || T.name == "Std::Io::PipeWriter" || T.name == "RisTaskConfig" %}
       {% raise "resources cannot copy_to; do this work in the receiving task, or send it a message" %}
-    {% elsif T < ::Pointer || T.name.starts_with?("Ary::Link(") %}
-      {% raise "copy_to refuses pointers and self-relative links;\nbuild on the destination with Ary nodes and indices" %}
+    {% elsif T < ::Pointer || T.name.starts_with?("Array::Link(") %}
+      {% raise "copy_to refuses pointers and self-relative links;\nbuild on the destination with Array nodes and indices" %}
     {% elsif T.union? %}
       {% for member in T.union_types %}
         check_copy({{member}}, P)
       {% end %}
-    {% elsif T < ::Enum || T < ::Number || T == ::Bool || T == ::Char || T == ::Symbol || T == ::Nil || T == ::Str || T == ::Str::Builder %}
+    {% elsif T < ::Enum || T < ::Number || T == ::Bool || T == ::Char || T == ::Symbol || T == ::Nil || T == ::String || T == ::String::Builder %}
     {% elsif P.type_vars.includes?(T) %}
       {% if T.class? %}
-        {% raise "copy_to refuses self-reaching class types;\nbuild on the destination with Ary nodes and indices" %}
+        {% raise "copy_to refuses self-reaching class types;\nbuild on the destination with Array nodes and indices" %}
       {% end %}
-    {% elsif T.name.starts_with?("Ary(") || T.name.starts_with?("Tre(") || T.name.starts_with?("SlicePool::Run(") || T.name.starts_with?("SlicePool::List(") || T < ::Tuple %}
+    {% elsif T.name.starts_with?("Array(") || T.name.starts_with?("Tre(") || T.name.starts_with?("SlicePool::Run(") || T.name.starts_with?("SlicePool::List(") || T < ::Tuple %}
       {% for member in T.type_vars %}
         check_copy({{member}}, Tuple(*P, T))
       {% end %}
@@ -176,9 +176,9 @@ end
 # Bytes on the tape. Not a `String`: a `String` may be kept anywhere, and
 # this may not. `to_s` copies it into a retained String explicitly.
 @[OnTape]
-struct Str
+struct String
   def __iyi_copy_into(target : Pointer(self), work : RisCopyWork) : Nil
-    target.value = Str.new(self)
+    target.value = String.new(self)
   end
 
   @ptr : Pointer(UInt8)
@@ -215,7 +215,7 @@ struct Str
   end
 
   # Compatibility for text already on tape; new still makes a copy.
-  def self.new(text : Str) : self
+  def self.new(text : String) : self
     bytes = Pointer(UInt8).new(RisRegion.tape_bytes(text.bytesize.to_u64))
     bytes.copy_from(text.to_unsafe, text.bytesize)
     new(bytes, text.bytesize)
@@ -233,21 +233,21 @@ struct Str
     if owner.is_a?(RisPendingCopy)
       return self unless owner.contains?(@ptr.address)
     end
-    owner.run { Str.new(self) }
+    owner.run { String.new(self) }
   end
 
-  def +(other : String | Str) : Str
-    Str.build(RisRegion.count(RisRegion.size_add(
+  def +(other : String | String) : String
+    String.build(RisRegion.count(RisRegion.size_add(
       bytesize.to_u64, other.bytesize.to_u64)).to_i32) do |writer|
       writer.append(self)
       writer.append(other)
     end
   end
 
-  def *(count : Int32) : Str
+  def *(count : Int32) : String
     repeats = RisRegion.nonnegative(count.to_i64)
     room = RisRegion.count(RisRegion.size_mul(bytesize.to_u64, repeats))
-    Str.build(room.to_i32) do |writer|
+    String.build(room.to_i32) do |writer|
       count.times { writer.append(self) }
     end
   end
@@ -270,7 +270,7 @@ struct Str
     value
   end
 
-  def ===(other : String | Str) : Bool
+  def ===(other : String | String) : Bool
     self == other
   end
 
@@ -285,7 +285,7 @@ struct Str
   # The byte at *index*, from the end when negative; one out of range
   # raises rather than reading what follows. `to_unsafe` is the library's.
   # Byte order, with a prefix before the text it prefixes, as String's.
-  def <(other : Str) : Bool
+  def <(other : String) : Bool
     index = 0
     while index < @bytesize && index < other.bytesize
       a = @ptr[index]
@@ -342,16 +342,16 @@ struct Str
   end
 
   # *count* bytes from *start*, a view of these: nothing is copied.
-  def [](start : Int32, count : Int32) : Str
+  def [](start : Int32, count : Int32) : String
     raise "bytes #{start}, #{count} out of range for #{@bytesize}" if start < 0 || count < 0 || start > @bytesize - count
-    Str.new(@ptr + start, count)
+    String.new(@ptr + start, count)
   end
 
   # The bytes *range* names, a view, as `Array#[](range)` reads one: a
   # negative end counts from the last, an endless one runs to it, and a
   # range that begins past the end is refused. `line[space + 1..]` is
   # the rest of the line.
-  def [](range : Range(B, E)) : Str forall B, E
+  def [](range : Range(B, E)) : String forall B, E
     from = range.begin
     start = from.nil? ? 0 : from
     start = @bytesize + start if start < 0
@@ -363,7 +363,7 @@ struct Str
     elsif !range.exclusive?
       stop = stop + 1
     end
-    Str.new(@ptr + start, stop > start ? stop - start : 0)
+    String.new(@ptr + start, stop > start ? stop - start : 0)
   end
 
   def each_byte(& : UInt8 -> _) : Nil
@@ -377,20 +377,20 @@ struct Str
   # Each line, as `String#each_line` (std/text) splits them: a final
   # newline closing the last rather than opening an empty one, and a `\r`
   # before a newline left off. Each line is a view: nothing is copied.
-  def each_line(& : Str -> Nil) : Nil
+  def each_line(& : String -> Nil) : Nil
     start = 0
     at = 0
     while at < @bytesize
       if @ptr[at] == 10_u8
         stop = at > start && @ptr[at - 1] == 13_u8 ? at - 1 : at
-        yield Str.new(@ptr + start, stop - start)
+        yield String.new(@ptr + start, stop - start)
         start = at + 1
       end
       at = at + 1
     end
     if start < @bytesize
       # No newline after it, so a `\r` here is text: `"b\r"` is `"b\r"`.
-      yield Str.new(@ptr + start, @bytesize - start)
+      yield String.new(@ptr + start, @bytesize - start)
     end
   end
 
@@ -432,9 +432,9 @@ struct Str
 
   # The pieces between each *separator*, as `String#split(Char)` cuts
   # them, empty ones kept; each a view, in a new array on the tape.
-  def split(separator : Char) : Ary(Str)
+  def split(separator : Char) : Array(String)
     width = separator.bytesize
-    pieces = Ary(Str).new
+    pieces = Array(String).new
     start = 0
     while at = index(separator, start)
       pieces << self[start, at - start]
@@ -542,7 +542,7 @@ struct Str
 
   # The text *span* names, a view: checked, as a span read from bytes is
   # never trusted.
-  def [](span : Str::Span) : Str
+  def [](span : String::Span) : String
     self[span.start, span.size]
   end
 
@@ -566,7 +566,7 @@ struct Str
     {% end %}
   end
 
-  def ==(other : Str) : Bool
+  def ==(other : String) : Bool
     @bytesize == other.bytesize && same?(other.to_unsafe)
   end
 
@@ -574,8 +574,8 @@ struct Str
     @bytesize == other.bytesize && same?(other.to_unsafe)
   end
 
-  def starts_with?(prefix : String | Str) : Bool
-    prefix.bytesize <= @bytesize && Str.new(@ptr, prefix.bytesize) == prefix
+  def starts_with?(prefix : String | String) : Bool
+    prefix.bytesize <= @bytesize && String.new(@ptr, prefix.bytesize) == prefix
   end
 
   # Eight bytes a step, as `String#==` does: keys and paths, a hash
@@ -626,15 +626,15 @@ struct Str
 
   # Writes the bytes the block pushes straight onto the tape, where the
   # string will stay: no buffer to copy out of.
-  def self.build(capacity : Int32 = 64, & : Str::Builder -> _) : Str
-    writer = Str::Builder.new(capacity)
+  def self.build(capacity : Int32 = 64, & : String::Builder -> _) : String
+    writer = String::Builder.new(capacity)
     yield writer
     writer.finish
   end
 
   # ris interpolation writes every part on the caller's active tape.
   # Legacy iyi output lowering uses this too, on the caller's tape.
-  def self.interpolate(*parts : *T) : Str forall T
+  def self.interpolate(*parts : *T) : String forall T
     build do |writer|
       {% for i in 0...T.size %}
         writer.append_value(parts[{{i}}])
@@ -648,7 +648,7 @@ end
 # the struct points at. Addresses rather than a length and capacity, so a
 # push is one load, one compare and one store.
 @[OnTape]
-struct Str::Builder
+struct String::Builder
   def __iyi_copy_into(target : Pointer(self), work : RisCopyWork) : Nil
     made = self.class.new(length)
     made.append(finish)
@@ -707,7 +707,7 @@ struct Str::Builder
     append(text.to_unsafe, text.bytesize)
   end
 
-  def append(text : Str) : Nil
+  def append(text : String) : Nil
     append(text.to_unsafe, text.bytesize)
   end
 
@@ -738,7 +738,7 @@ struct Str::Builder
     written
   end
 
-  # *value*'s bytes, little-endian, as `Ary#write_bytes` writes
+  # *value*'s bytes, little-endian, as `Array#write_bytes` writes
   # them: a codec writes a word at a time.
   def write_bytes(value : I) : Nil forall I
     {% unless I == UInt16 || I == UInt32 || I == UInt64 ||
@@ -833,7 +833,7 @@ struct Str::Builder
 
   # A piece of an interpolation: text and numbers written in place, any
   # other value as its `to_s`.
-  def append_value(value : String | Str) : Nil
+  def append_value(value : String | String) : Nil
     append(value)
   end
 
@@ -856,10 +856,10 @@ struct Str::Builder
   def append_value(value : Nil) : Nil
   end
 
-  # A type that writes itself into a Str::Builder does so here, on the
+  # A type that writes itself into a String::Builder does so here, on the
   # tape; any other value through its String.
   def append_value(value : T) : Nil forall T
-    {% if T.methods.any? { |m| m.name == "to_s" && m.args.size == 1 && m.args[0].restriction.stringify.includes?("Str::Builder") } %}
+    {% if T.methods.any? { |m| m.name == "to_s" && m.args.size == 1 && m.args[0].restriction.stringify.includes?("String::Builder") } %}
       value.to_s(self)
     {% else %}
       append(value.to_s)
@@ -881,7 +881,7 @@ struct Str::Builder
   end
 
   # The same for text on the tape: a template's value, a request's field.
-  def append_html_escaped(text : Str) : Nil
+  def append_html_escaped(text : String) : Nil
     html_escaped(text.to_unsafe, text.bytesize)
   end
 
@@ -956,20 +956,20 @@ struct Str::Builder
   end
 
   # Appends *text* and says where it is: a `Span` of the finished string.
-  def append_span(text : String | Str) : Str::Span
+  def append_span(text : String | String) : String::Span
     start = length
     append(text)
-    Str::Span.new(start, text.bytesize)
+    String::Span.new(start, text.bytesize)
   end
 
-  # The text written so far, as `String::Builder#to_s` gives it: a `Str`
+  # The text written so far, as `String::Builder#to_s` gives it: a `String`
   # viewing the builder's bytes, nothing copied.
-  def to_s : Str
+  def to_s : String
     start = (@state + 2_i64).value
-    Str.new(Pointer(UInt8).new(start), (@state.value &- start).to_i32)
+    String.new(Pointer(UInt8).new(start), (@state.value &- start).to_i32)
   end
 
-  def finish : Str
+  def finish : String
     to_s
   end
 
@@ -987,11 +987,11 @@ end
 # counts are bytes. No regex and no groups: a lexer on the tape reads
 # bytes, strings and characters.
 @[OnTape]
-struct Str::Scanner
-  @string : Str
+struct String::Scanner
+  @string : String
   @offset : Int32
 
-  def initialize(@string : Str)
+  def initialize(@string : String)
     @offset = 0
   end
 
@@ -1002,7 +1002,7 @@ struct Str::Scanner
   end
 
   # The text being scanned.
-  def string : Str
+  def string : String
     @string
   end
 
@@ -1036,7 +1036,7 @@ struct Str::Scanner
   end
 
   # The text from the offset on.
-  def rest : Str
+  def rest : String
     @string[@offset, @string.bytesize - @offset]
   end
 
@@ -1046,7 +1046,7 @@ struct Str::Scanner
   end
 
   # Up to *count* bytes from the offset, without moving: fewer at the end.
-  def peek(count : Int32) : Str
+  def peek(count : Int32) : String
     raise "scanner: negative lookahead count: #{count}" if count < 0
     left = @string.bytesize - @offset
     @string[@offset, count < left ? count : left]
@@ -1054,7 +1054,7 @@ struct Str::Scanner
 
   # Matches *pattern* at the offset and moves past it, answering what
   # matched, or nil without moving.
-  def scan(pattern : Str | String | Char | Int32) : Str?
+  def scan(pattern : String | String | Char | Int32) : String?
     size = here(pattern)
     return nil unless size
     found = @string[@offset, size]
@@ -1063,21 +1063,21 @@ struct Str::Scanner
   end
 
   # `scan`, answering how many bytes the offset moved.
-  def skip(pattern : Str | String | Char | Int32) : Int32?
+  def skip(pattern : String | String | Char | Int32) : Int32?
     size = here(pattern)
     @offset = @offset + size if size
     size
   end
 
   # What `scan` would answer, without moving.
-  def check(pattern : Str | String | Char | Int32) : Str?
+  def check(pattern : String | String | Char | Int32) : String?
     size = here(pattern)
     size ? @string[@offset, size] : nil
   end
 
   # Searches for *pattern* from the offset and moves past the match,
   # answering everything from the offset to the match's end.
-  def scan_until(pattern : Str | String | Char) : Str?
+  def scan_until(pattern : String | String | Char) : String?
     stop = until_end(pattern)
     return nil unless stop
     found = @string[@offset, stop - @offset]
@@ -1086,7 +1086,7 @@ struct Str::Scanner
   end
 
   # `scan_until`, answering how many bytes the offset moved.
-  def skip_until(pattern : Str | String | Char) : Int32?
+  def skip_until(pattern : String | String | Char) : Int32?
     stop = until_end(pattern)
     return nil unless stop
     moved = stop - @offset
@@ -1095,13 +1095,13 @@ struct Str::Scanner
   end
 
   # What `scan_until` would answer, without moving.
-  def check_until(pattern : Str | String | Char) : Str?
+  def check_until(pattern : String | String | Char) : String?
     stop = until_end(pattern)
     stop ? @string[@offset, stop - @offset] : nil
   end
 
   # How many bytes *pattern* matches at the offset, without moving, or nil.
-  def matches?(pattern : Str | String | Char) : Int32?
+  def matches?(pattern : String | String | Char) : Int32?
     here(pattern)
   end
 
@@ -1121,10 +1121,10 @@ struct Str::Scanner
   end
 
   private def here(text : String) : Int32?
-    here(Str.view(text))
+    here(String.view(text))
   end
 
-  private def here(text : Str) : Int32?
+  private def here(text : String) : Int32?
     at?(text, @offset) ? text.bytesize : nil
   end
 
@@ -1148,10 +1148,10 @@ struct Str::Scanner
   end
 
   private def until_end(text : String) : Int32?
-    until_end(Str.view(text))
+    until_end(String.view(text))
   end
 
-  private def until_end(text : Str) : Int32?
+  private def until_end(text : String) : Int32?
     at = @offset
     while at + text.bytesize <= @string.bytesize
       return at + text.bytesize if at?(text, at)
@@ -1160,7 +1160,7 @@ struct Str::Scanner
     nil
   end
 
-  private def at?(text : Str, at : Int32) : Bool
+  private def at?(text : String, at : Int32) : Bool
     return false if text.bytesize > @string.bytesize - at
     i = 0
     while i < text.bytesize
@@ -1174,7 +1174,7 @@ end
 # Elements on the tape. `T` is held by value, so an element may itself be a
 # tape type, which no other generic may hold.
 @[OnTape]
-struct Ary(T)
+struct Array(T)
   def __iyi_copy_into(target : Pointer(self), work : RisCopyWork) : Nil
     made = self.class.new(size)
     # Reserve and publish every slot before any child job runs.
@@ -1226,7 +1226,7 @@ struct Ary(T)
     size == 0
   end
 
-  # `push` that answers the array, so `Ary(Int32){1, 2, 3}` builds
+  # `push` that answers the array, so `Array(Int32){1, 2, 3}` builds
   # one as `Set{1, 2}` does.
   def <<(value : T) : self
     push(value)
@@ -1263,7 +1263,7 @@ struct Ary(T)
       {% raise "little-endian fields need a 16/32/64-bit integer" %}
     {% end %}
     {% unless T == UInt8 %}
-      {% raise "little-endian fields require Ary(UInt8)" %}
+      {% raise "little-endian fields require Array(UInt8)" %}
     {% end %}
     width = sizeof(I)
     if at < 0 || at > size - width
@@ -1293,7 +1293,7 @@ struct Ary(T)
       {% raise "little-endian fields need a 16/32/64-bit integer" %}
     {% end %}
     {% unless T == UInt8 %}
-      {% raise "little-endian fields require Ary(UInt8)" %}
+      {% raise "little-endian fields require Array(UInt8)" %}
     {% end %}
     width = sizeof(I)
     if at < 0 || at > size - width
@@ -1323,7 +1323,7 @@ struct Ary(T)
       {% raise "little-endian fields need a 16/32/64-bit integer" %}
     {% end %}
     {% unless T == UInt8 %}
-      {% raise "little-endian fields require Ary(UInt8)" %}
+      {% raise "little-endian fields require Array(UInt8)" %}
     {% end %}
     count = (@state + 1_i64).value
     width = sizeof(I).to_u64
@@ -1350,9 +1350,9 @@ struct Ary(T)
 
   # The bytes of *text* at the end, with one room check and one copy
   # rather than a `push` or `write_bytes` per byte or word.
-  def append(text : Str) : Nil
+  def append(text : String) : Nil
     {% unless T == UInt8 %}
-      {% raise "append requires Ary(UInt8)" %}
+      {% raise "append requires Array(UInt8)" %}
     {% end %}
     count = (@state + 1_i64).value
     width = text.bytesize.to_u64
@@ -1408,25 +1408,25 @@ struct Ary(T)
 
   # The element at *link*, checked as `[]` checks an index: a link read
   # from bytes is never trusted.
-  def [](link : Ary::Link(T, I)) : T forall I
+  def [](link : Array::Link(T, I)) : T forall I
     self[link.index]
   end
 
-  def []=(link : Ary::Link(T, I), value : T) : T forall I
+  def []=(link : Array::Link(T, I), value : T) : T forall I
     self[link.index] = value
   end
 
   # A link to the element at *index*, stored in an `I`: `UInt8`, `UInt16`
   # or `UInt32` (the default) bytes rather than a pointer's eight.
-  def link(index : Int32, width : I.class = UInt32) : Ary::Link(T, I) forall I
+  def link(index : Int32, width : I.class = UInt32) : Array::Link(T, I) forall I
     Tape.out_of_range(index, size, "elements") if index < 0 || index >= size
-    Ary::Link(T, I).new(index)
+    Array::Link(T, I).new(index)
   end
 
   # The index the next `push` takes, as a link: a node can name a child
   # before the child is pushed.
-  def next_link(width : I.class = UInt32) : Ary::Link(T, I) forall I
-    Ary::Link(T, I).new(size)
+  def next_link(width : I.class = UInt32) : Array::Link(T, I) forall I
+    Array::Link(T, I).new(size)
   end
 
   # Each element in order. The loop's own bound keeps the index in range,
@@ -1451,8 +1451,8 @@ struct Ary(T)
 
   # A new array of what the block gives for each element, sized first so
   # the block may put other values on the tape.
-  def map(& : T -> U) : Ary(U) forall U
-    Ary(U).new(size) { |index| yield unsafe_at(index) }
+  def map(& : T -> U) : Array(U) forall U
+    Array(U).new(size) { |index| yield unsafe_at(index) }
   end
 
   def sum : T
@@ -1576,29 +1576,29 @@ struct Ary(T)
   # The arrays below are new ones on the same tape, freed with it, as
   # `Array`'s are new ones on the heap; an element may be a tape value.
   def select(& : T -> Bool) : self
-    result = Ary(T).new(size)
+    result = Array(T).new(size)
     each { |value| result.push(value) if yield value }
     result
   end
 
   def reject(& : T -> Bool) : self
-    result = Ary(T).new(size)
+    result = Array(T).new(size)
     each { |value| result.push(value) unless yield value }
     result
   end
 
   def reversed : self
     count = size
-    Ary(T).new(count) { |index| unsafe_at(count - 1 - index) }
+    Array(T).new(count) { |index| unsafe_at(count - 1 - index) }
   end
 
   def dup : self
-    Ary(T).new(size) { |index| unsafe_at(index) }
+    Array(T).new(size) { |index| unsafe_at(index) }
   end
 
   # The two in order, as a new array; neither operand changes.
-  def +(other : Ary(T)) : self
-    joined = Ary(T).new(size + other.size)
+  def +(other : Array(T)) : self
+    joined = Array(T).new(size + other.size)
     each { |value| joined.push(value) }
     other.each { |value| joined.push(value) }
     joined
@@ -1606,7 +1606,7 @@ struct Ary(T)
 
   # *other*'s elements after the last. Its length is read once, so
   # `a.concat(a)` doubles `a` rather than growing without end.
-  def concat(other : Ary(T)) : self
+  def concat(other : Array(T)) : self
     taking = other.size
     index = 0
     while index < taking
@@ -1646,7 +1646,7 @@ struct Ary(T)
 
   # The elements written into *writer*, *separator* between them: where
   # `Array#join` builds a heap String, this one adds to the caller's text.
-  def join(writer : Str::Builder, separator : String | Str = "") : Nil
+  def join(writer : String::Builder, separator : String | String = "") : Nil
     each_with_index do |value, index|
       writer.append(separator) if index > 0
       writer.append_value(value)
@@ -1654,17 +1654,17 @@ struct Ary(T)
   end
 
   # The elements joined on the current tape, as Array#join answers them.
-  def join(separator : String | Str = "") : Str
-    Str.build(16 * (size + 1)) { |writer| join(writer, separator) }
+  def join(separator : String | String = "") : String
+    String.build(16 * (size + 1)) { |writer| join(writer, separator) }
   end
 
   # The indexes in sorted order, by *compare* on two of them: runs of 16
   # by insertion, then merged in pairs, as `Array#sort_in_place` does.
   # Indexes rather than elements are moved, so the scratch room is two
   # arrays of Int32 on the tape whatever `T` is.
-  private def order(& : Int32, Int32 -> Int32) : Ary(Int32)
+  private def order(& : Int32, Int32 -> Int32) : Array(Int32)
     count = size
-    from = Ary(Int32).new(count) { |index| index }
+    from = Array(Int32).new(count) { |index| index }
     start = 0
     while start < count
       finish = start + 16 < count ? start + 16 : count
@@ -1681,7 +1681,7 @@ struct Ary(T)
       end
       start = finish
     end
-    into = Ary(Int32).new(count, 0)
+    into = Array(Int32).new(count, 0)
     width = 16
     while width < count
       low = 0
@@ -1713,16 +1713,16 @@ struct Ary(T)
   end
 
   # The elements put in the order *order* names, from a copy of them.
-  private def reorder(order : Ary(Int32)) : self
+  private def reorder(order : Array(Int32)) : self
     copy = dup
     order.each_with_index { |from, to| unchecked_store(to, copy.unchecked(from)) }
     self
   end
 
   # The indexes in *indexes*, each checked against this array once, for
-  # reads with no check after (`Ary::View`).
-  def values_at(indexes : Ary(Int32)) : Ary::View(T)
-    Ary::View(T).new(self, indexes)
+  # reads with no check after (`Array::View`).
+  def values_at(indexes : Array(Int32)) : Array::View(T)
+    Array::View(T).new(self, indexes)
   end
 
   def __iyi_pending_copy(owner : RisPendingCopy) : self
@@ -1752,8 +1752,8 @@ struct Ary(T)
   end
 
   # The elements copied into an `Array` on the heap, to keep after the
-  # tape ends. An element with a `to_heap` of its own - a Str,
-  # an Ary, an @[OnTape] struct that defines one - is copied by it;
+  # tape ends. An element with a `to_heap` of its own - a String,
+  # an Array, an @[OnTape] struct that defines one - is copied by it;
   # any other is taken as it is. A tape element with none is refused, as
   # no `Array` may hold a tape value.
   def to_heap
@@ -1777,25 +1777,25 @@ struct Ary(T)
   # The elements' bytes, nothing copied: write them to a file or socket
   # and `load` them back. `T` must be flat (see `Tape::Flat`), with no
   # pointer in it, which `Link` and `Span` are not.
-  def bytes : Str
+  def bytes : String
     {% begin %}
       {% for t in [T] + T.instance_vars.map(&.type) %}
-        {% unless t < ::Number || t.name.starts_with?("Ary::Link(") || t == ::Str::Span || t.annotation(::Tape::Flat) %}
-          {% raise "#{T} is not flat: #{t} in it is not a number, an Ary::Link, a Str::Span or an @[Tape::Flat] struct" %}
+        {% unless t < ::Number || t.name.starts_with?("Array::Link(") || t == ::String::Span || t.annotation(::Tape::Flat) %}
+          {% raise "#{T} is not flat: #{t} in it is not a number, an Array::Link, a String::Span or an @[Tape::Flat] struct" %}
         {% end %}
       {% end %}
     {% end %}
-    Str.new(Pointer(UInt8).new(@state.value), RisRegion.count(
+    String.new(Pointer(UInt8).new(@state.value), RisRegion.count(
       RisRegion.size_mul(size.to_u64, sizeof(T).to_u64)).to_i32)
   end
 
   # The elements *bytes* holds, copied onto the tape: the length must be
   # whole elements, and each link is checked when it is followed.
-  def self.load(bytes : Str) : self
+  def self.load(bytes : String) : self
     {% begin %}
       {% for t in [T] + T.instance_vars.map(&.type) %}
-        {% unless t < ::Number || t.name.starts_with?("Ary::Link(") || t == ::Str::Span || t.annotation(::Tape::Flat) %}
-          {% raise "#{T} is not flat: #{t} in it is not a number, an Ary::Link, a Str::Span or an @[Tape::Flat] struct" %}
+        {% unless t < ::Number || t.name.starts_with?("Array::Link(") || t == ::String::Span || t.annotation(::Tape::Flat) %}
+          {% raise "#{T} is not flat: #{t} in it is not a number, an Array::Link, a String::Span or an @[Tape::Flat] struct" %}
         {% end %}
       {% end %}
     {% end %}
@@ -1815,13 +1815,13 @@ end
 # a copy no one else can change. CSR's `dist[adj[k]]` is
 # `dist.values_at(adj)[k]`, checked when the edges come in.
 @[OnTape]
-struct Ary::View(T)
-  @target : Ary(T)
-  @at : Ary(Int32)
+struct Array::View(T)
+  @target : Array(T)
+  @at : Array(Int32)
 
-  def initialize(@target : Ary(T), indexes : Ary(Int32))
+  def initialize(@target : Array(T), indexes : Array(Int32))
     count = target.size
-    @at = Ary(Int32).new(indexes.size) do |k|
+    @at = Array(Int32).new(indexes.size) do |k|
       index = indexes.__loop_fetch(k)
       Tape.out_of_range(index, count, "elements") if index < 0 || index >= count
       index
@@ -1863,38 +1863,38 @@ struct Ary::View(T)
   end
 
   # The viewed elements, in the view's order, copied to the heap as
-  # `Ary#to_heap` copies them.
+  # `Array#to_heap` copies them.
   def to_heap
     Array(typeof(Tape.heap_value(@target.unchecked(0)))).new(size) { |k| Tape.heap_value(self[k]) }
   end
 end
 
-# A typed link to an element of an `Ary(T)`: its index in `I`
+# A typed link to an element of an `Array(T)`: its index in `I`
 # bytes. It holds no pointer, so it stays valid while the array grows and
 # moves, may be kept in any value, and is the same in bytes written out
 # and loaded back. The array checks it when followed.
-struct Ary::Link(T, I)
+struct Array::Link(T, I)
   @index : I
 
   def initialize(index : Int32)
-    raise "link #{index} does not fit #{sizeof(I)} bytes" if index < 0 || index.to_u64 >= Ary::Link.top(I)
-    @index = Ary::Link.narrow(index.to_u64, I)
+    raise "link #{index} does not fit #{sizeof(I)} bytes" if index < 0 || index.to_u64 >= Array::Link.top(I)
+    @index = Array::Link.narrow(index.to_u64, I)
   end
 
   # The link to nothing: `none?` is true.
   def self.none : self
-    new(Ary::Link.narrow(Ary::Link.top(I), I), none: true)
+    new(Array::Link.narrow(Array::Link.top(I), I), none: true)
   end
 
   protected def initialize(@index : I, *, none : Bool)
   end
 
   def none? : Bool
-    wide == Ary::Link.top(I)
+    wide == Array::Link.top(I)
   end
 
   def index : Int32
-    raise "Ary::Link: none" if none?
+    raise "Array::Link: none" if none?
     wide.to_i32
   end
 
@@ -1920,9 +1920,9 @@ struct Ary::Link(T, I)
   end
 end
 
-# Text inside a `Str`, as its start and length: a record holds
+# Text inside a `String`, as its start and length: a record holds
 # its text this way, flat, beside the one string all its text is in.
-struct Str::Span
+struct String::Span
   getter start : Int32
   getter size : Int32
 
@@ -2089,7 +2089,7 @@ end
 class IyiIO
   # As `read_line`, onto the caller's active tape and with no heap String:
   # a line in the buffer is one copy; one across refills grows a writer.
-  def read_line_tape(chomp : Bool = false) : Str?
+  def read_line_tape(chomp : Bool = false) : String?
     raise "cannot read from closed IO" if @closed
     if @read_pos >= @read_limit
       return nil if @eof
@@ -2107,9 +2107,9 @@ class IyiIO
       # Copied: the buffer is refilled under a view of it.
       bytes = Pointer(UInt8).new(RisRegion.tape_bytes(len.to_u64))
       bytes.copy_from(start_ptr, len)
-      return Str.new(bytes, len)
+      return String.new(bytes, len)
     end
-    writer = Str::Builder.new(256)
+    writer = String::Builder.new(256)
     while true
       start = @read_pos
       j = start
@@ -2136,36 +2136,36 @@ class IyiIO
     text[0, len]
   end
 
-  def print(text : Str) : Nil
+  def print(text : String) : Nil
     text.to_s(self)
   end
 
   # As `puts(String)`: text that already ends its line gets no second one.
-  def puts(text : Str) : Nil
+  def puts(text : String) : Nil
     text.to_s(self)
     write("\n") unless text.bytesize > 0 && text[-1] == 10_u8
   end
 
   # Numeric text and its newline share one tape builder and one write.
   def puts(value : Int) : Nil
-    print(Str.build(66) { |writer| writer << value << '\n' })
+    print(String.build(66) { |writer| writer << value << '\n' })
   end
 
   # What a writer holds so far, written straight from the tape.
-  def print(writer : Str::Builder) : Nil
+  def print(writer : String::Builder) : Nil
     print(writer.finish)
   end
 
-  def puts(writer : Str::Builder) : Nil
+  def puts(writer : String::Builder) : Nil
     puts(writer.finish)
   end
 end
 
-def print(text : Str) : Nil
+def print(text : String) : Nil
   stdout.print(text)
 end
 
-def print(writer : Str::Builder) : Nil
+def print(writer : String::Builder) : Nil
   stdout.print(writer)
 end
 
@@ -2219,7 +2219,7 @@ end
 
 struct Pointer(T)
   def copy_to(owner)
-    {% raise "copy_to refuses raw pointers;\nbuild on the destination with Ary nodes and indices" %}
+    {% raise "copy_to refuses raw pointers;\nbuild on the destination with Array nodes and indices" %}
   end
 end
 
@@ -2283,42 +2283,6 @@ class Object
   end
 end
 
-class String
-  def ==(other : Str) : Bool
-    other == self
-  end
-
-  def ===(other : Str) : Bool
-    other == self
-  end
-
-  # These bytes as a Str, nothing copied: `Str.view`.
-  # `as_` for a view at no cost, as `to_heap` is `to_` for a copy.
-  def as_tape : Str
-    Str.view(self)
-  end
-
-  # Already on the heap: itself, nothing copied. Code holding a String or
-  # a Str calls `to_heap` on either.
-  def to_heap : String
-    self
-  end
-
-  # A String never changes and, without a collector, is static text or a
-  # program object: copying keeps the same one. The generic object copy
-  # took only its declared fields, the first byte of the text.
-  def copy_to(owner) : String
-    self
-  end
-
-  def __iyi_copy_into(target : Pointer(self), work : RisCopyWork) : Nil
-    target.value = self
-  end
-
-  def __iyi_pending_copy(owner : RisPendingCopy) : String
-    self
-  end
-end
 
 # The intrinsic a writer appends with: the platform's `memcpy`, at its
 # speed, where a loop is vectorised only to SSE2. What is appended never
@@ -2554,7 +2518,7 @@ end
 
 def __iyi_scope_result(mark : RisScopeMark, value : T) : T forall T
   return value if mark.region == 0
-  {% if T == ::Str || T == ::Str::Builder || T.name.starts_with?("Ary(") || T.name.starts_with?("Tre(") || T.annotation(::OnTape) || T < ::Tuple || T < ::NamedTuple || T.union? %}
+  {% if T == ::String || T == ::String::Builder || T.name.starts_with?("Array(") || T.name.starts_with?("Tre(") || T.annotation(::OnTape) || T < ::Tuple || T < ::NamedTuple || T.union? %}
     head = 0_u64
     depth = 0
     memo = 0_u64
@@ -2588,7 +2552,7 @@ end
 
 # Numeric text is read directly from tape bytes, as heap text is.
 module IyiFloatText
-  def self.parse(text : Str) : Float64
+  def self.parse(text : String) : Float64
     bytes = text.to_unsafe
     size = text.bytesize
     raise "not a number: #{text.to_heap.inspect}" if size == 0
@@ -2662,7 +2626,7 @@ module IyiFloatText
   # The digits read into a bignum - all of them to 800, which is past the
   # 767 that can decide a double, any beyond only telling whether the rest
   # is zero - and the quotient taken to 54 bits with a sticky remainder.
-  def self.parse_exact(text : Str) : Float64
+  def self.parse_exact(text : String) : Float64
     bytes = text.to_unsafe
     size = text.bytesize
     at = 0
@@ -2791,42 +2755,10 @@ module IyiFloatText
   end
 end
 
-class Array(T)
-  def join(separator : Str) : Str
-    room = separator.bytesize.to_i64 * (size > 0 ? size - 1 : 0)
-    each do |value|
-      room += value.is_a?(String) ? value.bytesize : 16
-    end
-    RisRegion.count(room.to_u64)
-    Str.build(room.to_i32) do |writer|
-      first = true
-      each do |value|
-        writer << separator unless first
-        writer << value
-        first = false
-      end
-    end
-  end
-end
 
-class Hash(K, V)
-  # A borrowed lookup never stores its key. A default proc may retain it,
-  # so only that missing-key path makes an owned copy.
-  def [](key : Str) : V
-    {% unless K == String %}
-      {% raise "a Str lookup needs Hash(String, V)" %}
-    {% end %}
-    entry = entry_of(key)
-    return @values[entry] if entry >= 0
-    if default = @default
-      return default.call(self, key.to_heap)
-    end
-    raise "no such key #{key.to_heap.inspect}"
-  end
-end
 
-struct Str
-  def byte_index(search : String | Str, offset : Int32 = 0) : Int32?
+struct String
+  def byte_index(search : String | String, offset : Int32 = 0) : Int32?
     offset = offset + bytesize if offset < 0
     return nil if offset < 0 || offset > bytesize
     return offset if search.bytesize == 0
@@ -2874,18 +2806,18 @@ struct Str
     end
   end
 
-  def includes?(text : String | Str) : Bool
+  def includes?(text : String | String) : Bool
     !byte_index(text).nil?
   end
 
-  def ends_with?(suffix : String | Str) : Bool
+  def ends_with?(suffix : String | String) : Bool
     size = suffix.bytesize
     size <= bytesize && self[bytesize - size, size] == suffix
   end
 
   # Diagnostic text is retained only when a caller asks for inspection.
   def inspect : String
-    Str.build(bytesize + 2) { |w| inspect(w) }.to_heap
+    String.build(bytesize + 2) { |w| inspect(w) }.to_heap
   end
 end
 
@@ -3019,29 +2951,22 @@ end
 
 # Heap builders keep their API, writing numeric text on the caller's tape
 # before copying the bytes into their existing buffer. No numeric String.
-class String::Builder
-  def <<(value : Int8 | Int16 | Int32 | Int64 | UInt8 | UInt16 | UInt32 | UInt64 | Float64) : self
-    text = Str.build(65) { |w| w.append_value(value) }
-    text.each_byte { |byte| write_byte(byte) }
-    self
-  end
-end
 
 struct Int64
-  def to_s(writer : Str::Builder, base : Int32 = 10) : Nil
+  def to_s(writer : String::Builder, base : Int32 = 10) : Nil
     writer.append_int(self, base)
   end
 end
 
 struct UInt64
-  def to_s(writer : Str::Builder, base : Int32 = 10) : Nil
+  def to_s(writer : String::Builder, base : Int32 = 10) : Nil
     writer.append_uint(self, base)
   end
 end
 
 # Byte-for-byte diagnostic quoting, with the inherited String spelling.
-struct Str
-  def inspect(writer : Str::Builder) : Nil
+struct String
+  def inspect(writer : String::Builder) : Nil
     writer.push(34_u8)
     index = 0
     while index < bytesize
@@ -3085,7 +3010,7 @@ struct Str
     writer.push(34_u8)
   end
 
-  private def inspect_hex(writer : Str::Builder, point : Int32, minimum : Int32) : Nil
+  private def inspect_hex(writer : String::Builder, point : Int32, minimum : Int32) : Nil
     digits = 1
     temp = point
     while temp >= 16
@@ -3102,13 +3027,13 @@ struct Str
 end
 
 struct Int32
-  def to_s(writer : Str::Builder, base : Int32 = 10) : Nil
+  def to_s(writer : String::Builder, base : Int32 = 10) : Nil
     writer.append_int(to_i64, base)
   end
 end
 
 struct UInt8
-  def to_s(writer : Str::Builder, base : Int32 = 10) : Nil
+  def to_s(writer : String::Builder, base : Int32 = 10) : Nil
     writer.append_uint(to_u64, base)
   end
 end
@@ -3135,7 +3060,7 @@ end
 class RisRegion
   # An existing class field keeps text with an explicit program owner.
   # String's eight-byte payload header is shared with its normal builder.
-  def self.program_text(text : Str) : String
+  def self.program_text(text : String) : String
     bytes = text.bytesize
     memory = Pointer(UInt8).new(program_bytes(bytes.to_u64 + 9_u64,
       true, "".crystal_type_id.to_u64))
@@ -3152,12 +3077,12 @@ end
 # Typed reusable runs. Freed slots remain initialized until tape release.
 @[OnTape]
 struct SlicePool(T)
-  @data : Ary(T)
-  @free : Ary(Str::Span)
+  @data : Array(T)
+  @free : Array(String::Span)
 
   def initialize(capacity : Int32 | Int64 = 4)
-    @data = Ary(T).new(capacity)
-    @free = Ary(Str::Span).new
+    @data = Array(T).new(capacity)
+    @free = Array(String::Span).new
   end
 
   def size : Int32
@@ -3184,8 +3109,8 @@ struct SlicePool(T)
   private def default_value : T
     {% if T < Number %}
       T.zero
-    {% elsif T == Str %}
-      Str.new("")
+    {% elsif T == String %}
+      String.new("")
     {% elsif T == Bool %}
       false
     {% elsif T == Char %}
@@ -3221,7 +3146,7 @@ struct SlicePool(T)
         stop = checked(span.start.to_i64 + count)
         extend_to(stop)
         take = (count < span.size ? count : span.size)
-        @free[i] = Str::Span.new(span.start + take, span.size - take)
+        @free[i] = String::Span.new(span.start + take, span.size - take)
         defaults(span.start, take)
         return run(span.start, count)
       end
@@ -3257,13 +3182,13 @@ struct SlicePool(T)
     while @free.size > kept
       @free.pop
     end
-    @free << Str::Span.new(start, stop - start)
+    @free << String::Span.new(start, stop - start)
     i = @free.size - 1
     while i > 0 && @free[i - 1].start > start
       @free[i] = @free[i - 1]
       i -= 1
     end
-    @free[i] = Str::Span.new(start, stop - start)
+    @free[i] = String::Span.new(start, stop - start)
   end
 
   # Find the post-free placement before touching data or the freelist.
@@ -3321,7 +3246,7 @@ struct SlicePool(T)
         stop = checked(s.offset.to_i64 + count)
         extend_to(stop)
         take = (count - s.size < span.size ? count - s.size : span.size)
-        @free[i] = Str::Span.new(span.start + take, span.size - take)
+        @free[i] = String::Span.new(span.start + take, span.size - take)
         defaults(old_stop, take)
         return run(s.offset, count)
       end
@@ -3329,7 +3254,7 @@ struct SlicePool(T)
     end
     # Save typed values before freeing: the destination can overlap them.
     check_relocation(s, count)
-    saved = Ary(T).new(s.size) { |k| s[k] }
+    saved = Array(T).new(s.size) { |k| s[k] }
     free_slice(s)
     made = alloc_slice(count)
     i = 0
@@ -3347,7 +3272,7 @@ struct SlicePool(T)
 
     @state : Pointer(UInt64)
 
-    def initialize(data : Ary(T), @offset : Int32, @size : Int32)
+    def initialize(data : Array(T), @offset : Int32, @size : Int32)
       if @offset < 0 || @size < 0 || @offset.to_i64 + @size > data.size
         RisRegion.size_error("iyi: SlicePool slice out of bounds: ", 0_u64)
       end
@@ -3355,7 +3280,7 @@ struct SlicePool(T)
     end
 
     def __iyi_copy_into(target : Pointer(self), work : RisCopyWork) : Nil
-      made = Ary(T).new(@size) { |i| self[i] }
+      made = Array(T).new(@size) { |i| self[i] }
       target.value = self.class.new(made, 0, @size)
       i = @size
       while i > 0
@@ -3368,7 +3293,7 @@ struct SlicePool(T)
     def __iyi_pending_copy(owner : RisPendingCopy) : self
       return self unless owner.contains?(@state.address)
       owner.run do
-        made = Ary(T).new(@size) { |i| Tape.copy_value(self[i], owner) }
+        made = Array(T).new(@size) { |i| Tape.copy_value(self[i], owner) }
         self.class.new(made, 0, @size)
       end
     end
@@ -3405,8 +3330,8 @@ struct SlicePool(T)
       end
     end
 
-    def map(& : T -> U) : Ary(U) forall U
-      Ary(U).new(@size) { |i| yield self[i] }
+    def map(& : T -> U) : Array(U) forall U
+      Array(U).new(@size) { |i| yield self[i] }
     end
 
     private def check(index : Int32) : Nil
@@ -3430,7 +3355,7 @@ end
 
 module Tape
   def self.check_slice_relocation(type : T.class, path : P.class) : Nil forall T, P
-    {% if T.name.starts_with?("Ary::Link(") %}
+    {% if T.name.starts_with?("Array::Link(") %}
       {% raise "SlicePool.realloc_slice refuses self-relative links; use alloc_slice and free_slice without relocation" %}
     {% elsif !P.type_vars.includes?(T) %}
       {% if T < Tuple %}

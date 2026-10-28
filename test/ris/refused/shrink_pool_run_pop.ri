@@ -1,5 +1,5 @@
 tape do
-  data = Ary(Int32).new(2) { |i| i }
+  data = Array(Int32).new(2) { |i| i }
   run = SlicePool::Run(Int32).new(data, 0, 2)
   data.pop
   run[1] = 7

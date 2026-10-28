@@ -1,10 +1,10 @@
 # Program roots survive request scopes, including independent deep copies.
 @[OnTape]
 struct Saved
-  getter text : Str
-  getter values : Ary(Str)
-  getter pair : Tuple(Str, Ary(Str))
-  getter named : NamedTuple(text: Str)
+  getter text : String
+  getter values : Array(String)
+  getter pair : Tuple(String, Array(String))
+  getter named : NamedTuple(text: String)
 
   def initialize(@text, @values)
     @pair = {@text, @values}
@@ -13,23 +13,23 @@ struct Saved
 end
 
 TEXT = "program #{42}"
-TYPED_TEXT : Str = "typed program"
-WORDS = Ary(Str){"one", "two"}
-@@shared = Ary(Str){"top level"}
+TYPED_TEXT : String = "typed program"
+WORDS = Array(String){"one", "two"}
+@@shared = Array(String){"top level"}
 
 class State
-  @@log : Ary(Int32) = Ary(Int32).new(1)
-  @@text : Str = Str.new("initial")
+  @@log : Array(Int32) = Array(Int32).new(1)
+  @@text : String = String.new("initial")
   @@saved : Saved? = nil
-  @@tree : Tre(Str)? = nil
+  @@tree : Tre(String)? = nil
 
   def self.request(n : Int32)
     local_tape do
-      scratch = Str.new("request #{n}")
+      scratch = String.new("request #{n}")
       @@text = scratch.copy_to(Program.tape)
       @@log << n
-      @@saved = Saved.new(scratch, Ary(Str){scratch}).copy_to(Program.tape)
-      tree = Tre(Str).new(1)
+      @@saved = Saved.new(scratch, Array(String){scratch}).copy_to(Program.tape)
+      tree = Tre(String).new(1)
       root = tree.open(scratch)
       tree.leaf(scratch)
       tree.close(root)

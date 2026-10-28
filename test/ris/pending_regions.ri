@@ -1,13 +1,13 @@
-def pending_after_growth : Str
-  temporary = Str::Builder.new(70 * 1024 * 1024)
+def pending_after_growth : String
+  temporary = String::Builder.new(70 * 1024 * 1024)
   temporary.push(65_u8)
-  Str.build(8) { |w| w.append("grown") }
+  String.build(8) { |w| w.append("grown") }
 end
 
-def pending_from_side : Str
-  writer = Str::Builder.new(1)
+def pending_from_side : String
+  writer = String::Builder.new(1)
   writer.push(65_u8)
-  blocker = Str::Builder.new(8)
+  blocker = String::Builder.new(8)
   writer.append("BCDEFGHIJK")
   writer.finish[1, 3]
 end

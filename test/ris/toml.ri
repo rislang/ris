@@ -11,11 +11,11 @@ tape do
   exit 21 unless parsed["db"]["ports"][-1].as_i == 443
   copied = parsed.copy_to(Program.tape)
   exit 20 unless copied.to_heap == parsed.to_heap
-  writer = Str::Builder.new(1)
+  writer = String::Builder.new(1)
   writer << "prefix:"
   TOML.dump(parsed, writer)
   encoded = TOML.dump(parsed)
-  expected = Str.build { |w| w << "prefix:" << encoded }
+  expected = String.build { |w| w << "prefix:" << encoded }
   exit 6 unless writer.finish == expected
   again = TOML.parse(encoded)
   exit 7 if again.is_a?(TOMLError)
@@ -27,7 +27,7 @@ tape do
   exit 11 if dates.is_a?(TOMLError)
   exit 12 unless dates.to_heap == values.to_heap
   exit 13 unless TOML.parse("x=1\nx=2").is_a?(TOMLError)
-  corpus = Ary(Str){
+  corpus = Array(String){
     "x = \"line\\nquote\\\"\"",
     "x = \"\"\"\nmultiline\ntext\"\"\"",
     "x = {a = 1, b = ['a', true]}\ny.z = 2",

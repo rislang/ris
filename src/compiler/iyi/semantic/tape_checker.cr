@@ -94,9 +94,9 @@ class Iyi::TapeChecker
     type = type.remove_alias.remove_typedef.remove_alias
     return false unless visiting.add?(type)
     if type.is_a?(GenericClassInstanceType)
-      return true if {"Ary", "Tre", "SlicePool"}.includes?(type.generic_type.name)
+      return true if {"Array", "Tre", "SlicePool"}.includes?(type.generic_type.name)
     end
-    return true if type.to_s == "Str::Builder" ||
+    return true if type.to_s == "String::Builder" ||
                    TapeOwnerChecker.owner?(@program, type)
     case type
     when UnionType
@@ -116,7 +116,7 @@ class Iyi::TapeChecker
 
   def check_fields(type)
     if type.is_a?(GenericClassInstanceType) &&
-       {"Ary", "Tre"}.includes?(type.generic_type.name)
+       {"Array", "Tre"}.includes?(type.generic_type.name)
       type.type_vars.each_value do |var|
         # An owner element gets the owner checker's own, more exact refusal.
         if var.is_a?(Var) && (element = var.type?) &&

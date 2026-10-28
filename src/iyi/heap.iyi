@@ -49,7 +49,7 @@ class RisHeap
       text("ris: heap allocation: ")
       number(size)
       text(" bytes\n")
-      text("  use Str, Ary or @[OnTape]; copy_to(owner) to retain data\n")
+      text("  use String, Array or @[OnTape]; copy_to(owner) to retain data\n")
       if site.address != 0_u64
         text("  at ")
         length = 0_u64

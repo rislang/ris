@@ -1,10 +1,10 @@
 class State
-  @@log = Ary(Str).new
+  @@log = Array(String).new
   def self.log
     @@log
   end
 end
 alias_of_global = State.log
 local_tape do
-  alias_of_global << Str.new("request")
+  alias_of_global << String.new("request")
 end

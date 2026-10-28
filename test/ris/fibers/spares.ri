@@ -10,7 +10,7 @@ import std/text
 
 # Minor faults so far, the tenth field of `/proc/self/stat` after the name.
 def minor_faults : Int64
-  stat = Str.build(4096) { |writer| File.read("/proc/self/stat", writer) }
+  stat = String.build(4096) { |writer| File.read("/proc/self/stat", writer) }
   tail = stat.split(')')[-1]
   fields = tail[1, tail.bytesize - 1].split(' ')
   fields[7].to_i64? || raise "invalid proc stat"
@@ -19,7 +19,7 @@ end
 def hold : Int64
   sum = 0_i64
   tape do
-    text = Str.build(512 * 1024) do |w|
+    text = String.build(512 * 1024) do |w|
       n = 0
       while n < 512 * 1024
         w.push((97 + n % 26).to_u8)
@@ -39,7 +39,7 @@ end
 def round : Int64
   total = 0_i64
   group do |g|
-    tasks = Ary(IyiTask(Int64)).new(8)
+    tasks = Array(IyiTask(Int64)).new(8)
     8.times { tasks << start(g) }
     tasks.each do |task|
       got = task.value
@@ -51,7 +51,7 @@ def round : Int64
 end
 
 def resident_kb : Int64
-  text = Str.build(4096) { |writer| File.read("/proc/self/status", writer) }
+  text = String.build(4096) { |writer| File.read("/proc/self/status", writer) }
   text.split('\n').each do |line|
     if line.starts_with?("RssAnon:")
       return line.split(' ').reject(&.empty?)[1].to_i64? ||
@@ -69,7 +69,7 @@ puts faults < 128 ? "warm: #{total // 1024} KiB written again" : "COLD: #{faults
 
 before_kb = resident_kb
 tape do
-  big = Str.build(8 * 1024 * 1024) do |w|
+  big = String.build(8 * 1024 * 1024) do |w|
     n = 0
     while n < 8 * 1024 * 1024
       w.push(1_u8)

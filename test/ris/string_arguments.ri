@@ -17,11 +17,11 @@ class OptionalArgumentText
   end
 end
 
-def width(text : Str) : Int32
+def width(text : String) : Int32
   text.size
 end
 
-def choose(text : Str) : Int32
+def choose(text : String) : Int32
   0
 end
 
@@ -29,7 +29,7 @@ def choose(text : String) : String
   text
 end
 
-def choose(text : Str, n : Int64) : Int32
+def choose(text : String, n : Int64) : Int32
   0
 end
 
@@ -37,11 +37,11 @@ def choose(text : String, n : Int64) : String
   text
 end
 
-def optional_width(text : Str?) : Int32
+def optional_width(text : String?) : Int32
   text ? text.size : 0
 end
 
-def optional_choose(text : Str?) : String?
+def optional_choose(text : String?) : String?
   "wrong overload".to_heap
 end
 
@@ -49,7 +49,7 @@ def optional_choose(text : String?) : String?
   text
 end
 
-def optional_choose(text : Str?, n : Int64) : String?
+def optional_choose(text : String?, n : Int64) : String?
   "wrong overload".to_heap
 end
 

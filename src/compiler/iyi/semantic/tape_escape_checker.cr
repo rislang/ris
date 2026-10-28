@@ -60,12 +60,12 @@ class Iyi::TapeEscapeChecker
     receiver = node.obj
     if node.name == "to_s" && node.args.empty? && !node.block &&
        tape_string?(receiver.try(&.type?))
-      return "`to_s` of a Str outside a @[TapeToHeap] def copies " \
+      return "`to_s` of a String outside a @[TapeToHeap] def copies " \
              "the text to the heap.\n\n#{WHY}"
     end
     if heap_buffer?(receiver.try(&.type?)) &&
        node.args.any? { |arg| tape_string?(arg.type?) }
-      return "Writing a Str into a #{receiver.not_nil!.type} " \
+      return "Writing a String into a #{receiver.not_nil!.type} " \
              "outside a @[TapeToHeap] def copies the text to the heap." \
              "\n\n#{WHY}"
     end
@@ -73,19 +73,19 @@ class Iyi::TapeEscapeChecker
     if node.name == "interpolation" &&
        receiver.try(&.type?).try(&.metaclass?) &&
        node.args.any? { |arg| tape_string?(arg.type?) }
-      return "Interpolating a Str outside a @[TapeToHeap] def " \
+      return "Interpolating a String outside a @[TapeToHeap] def " \
              "copies the text to the heap.\n\n#{WHY}"
     end
     if @program.has_flag?("ris_no_gc") && node.name == "interpolation" &&
        receiver.try(&.type?) == @program.string.metaclass &&
        !TapeRules.std?(node.location)
       return "String interpolation needs heap storage;\n" \
-             "use Str.interpolate(...) on the current tape,\n" \
+             "use String.interpolate(...) on the current tape,\n" \
              "and copy_to(owner) to retain the result"
     end
     if tape_string?(receiver.try(&.type?)) &&
        node.args.any? { |arg| heap_buffer?(arg.type?) }
-      return "Writing a Str into a String::Builder or " \
+      return "Writing a String into a String::Builder or " \
              "IO::Memory outside a @[TapeToHeap] def copies the text " \
              "to the heap.\n\n#{WHY}"
     end
@@ -94,7 +94,7 @@ class Iyi::TapeEscapeChecker
 
   private def tape_string?(type : Type?) : Bool
     return false unless type
-    type.remove_typedef.to_s == "Str"
+    type.remove_typedef.to_s == "String"
   end
 
   # Where text written lands on the GC heap, unlike a file or a socket.

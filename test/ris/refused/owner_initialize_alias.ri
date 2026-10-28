@@ -1,6 +1,6 @@
 @[Owner]
 struct Workspace
-  getter left = Ary(Int32).new
+  getter left = Array(Int32).new
 
   def initialize
     view = @left
@@ -9,7 +9,7 @@ struct Workspace
 
 end
 
-def publish(a : Ary(Int32))
+def publish(a : Array(Int32))
   nil
 end
 

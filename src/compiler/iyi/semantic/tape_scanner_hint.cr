@@ -27,7 +27,7 @@ class Iyi::TapeScannerHint
     @steps.each do |key, node|
       next unless @indexed.includes?(key)
       name = key[1]
-      @program.warnings.add_warning(node, "`#{name}` walks tape text by hand: it is stepped here and read as an index into a Str.\n\nStr::Scanner keeps the text and its offset as one value: `scan`, `skip` and `check` match at the offset and answer views, `current_byte` and `peek` look ahead, `advance` steps as `@pos += 1` does, at the same cost.")
+      @program.warnings.add_warning(node, "`#{name}` walks tape text by hand: it is stepped here and read as an index into a String.\n\nStr::Scanner keeps the text and its offset as one value: `scan`, `skip` and `check` match at the offset and answer views, `current_byte` and `peek` look ahead, `advance` steps as `@pos += 1` does, at the same cost.")
     end
   end
 
@@ -51,7 +51,7 @@ class Iyi::TapeScannerHint
 
   def index(node : Call, owner : UInt64) : Nil
     return unless node.name == "[]" && node.args.size == 1
-    return unless node.obj.try(&.type?).try(&.remove_typedef.to_s) == "Str"
+    return unless node.obj.try(&.type?).try(&.remove_typedef.to_s) == "String"
     arg = node.args[0]
     arg = arg.obj.not_nil! if arg.is_a?(Call) && {"+", "-"}.includes?(arg.name) && arg.obj
     @indexed << {owner, arg.name} if arg.is_a?(InstanceVar)

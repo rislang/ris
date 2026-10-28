@@ -1,2 +1,2 @@
-alias NestedGrowing = Ary(NestedGrowing) | Int32
-tape { Ary(NestedGrowing).new }
+alias NestedGrowing = Array(NestedGrowing) | Int32
+tape { Array(NestedGrowing).new }

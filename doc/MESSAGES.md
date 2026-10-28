@@ -52,12 +52,12 @@ user callbacks. Group end neither closes nor drains the board.
 
 A message is Copyable: it has a finite, self-contained packed form
 (Goose calls this flat). Copyable types are numeric scalars, Bool, Char,
-Symbol, Nil, enums, Str, Ary(T) and Tre(T) of Copyable T, and value
+Symbol, Nil, enums, String, Array(T) and Tre(T) of Copyable T, and value
 structs or unions of these. The compiler infers this at post, take, poll
 and limit; no marker is needed. Copyable differs from @[Tape::Flat],
-which marks raw-byte images: Str, Ary and Tre are handles, and the board
+which marks raw-byte images: String, Array and Tre are handles, and the board
 packs their live data, never their pointers. A type that contains itself
-through fields, unions, Ary or Tre is refused; keep recursive data in a
+through fields, unions, Array or Tre is refused; keep recursive data in a
 Tre or a node array with checked indices. User link fields stay refused;
 only Tre's own stop boundaries cross, relative to the copied entries. A
 post packs counts, fixed fields, union tags and live elements into one
@@ -93,12 +93,12 @@ fibers in GC builds; packed images and registry slots hold no GC objects.
 No-GC builds use typed runtime mappings and no general heap allocation.
 
 Board packing is private; it is not the to_bytes/from_bytes image. To
-send a linked structure, encode it to Str or Ary(UInt8), post that and
-validate it before decoding. Static Str uses the same copy rule; sharing
+send a linked structure, encode it to String or Array(UInt8), post that and
+validate it before decoding. Static String uses the same copy rule; sharing
 static program data between tasks does not admit other views or pointers
 as messages.
 
-Unlike Goose, where arrays are values, Str, Ary and Tre are views on a
+Unlike Goose, where arrays are values, String, Array and Tre are views on a
 tape, so the board packs their data. A miss is nil rather than Goose's
 zero T. Tasks are grouped fibers, with cancellable waits, Share checks
 and panic/defer cleanup. Every task, local or parallel, captures only

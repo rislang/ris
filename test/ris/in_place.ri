@@ -1,8 +1,8 @@
 # Goose's results built in place: `page.append(row(...))` writes the row
 # straight into `page`, where `row` would build it and `append` copy it.
-def row(name : Str, count : Int32) : Str
+def row(name : String, count : Int32) : String
   label = "n"
-  Str.build do |w|
+  String.build do |w|
     w.append("<li>")
     w.append(name)
     w.append(" ")
@@ -17,7 +17,7 @@ def used : UInt64
 end
 
 tape do
-  page = Str::Builder.new(4096)
+  page = String::Builder.new(4096)
   name = "item"
   before = used
   3.times { |i| page.append(row(name, i)) }

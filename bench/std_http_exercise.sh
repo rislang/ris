@@ -2817,7 +2817,7 @@ end
 class SecureOrigin < PlainOrigin
   @tls : TlsServerConfig
   @[TapeToHeap]
-  def initialize(config : {Str, Str})
+  def initialize(config : {String, String})
     @tls = TlsServerConfig.from_pem(config[0].to_s, config[1].to_s).or_panic
     @tls.alpn = ["h2", "http/1.1"]
   end

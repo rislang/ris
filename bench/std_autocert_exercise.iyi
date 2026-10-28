@@ -40,7 +40,7 @@ import std/time::{Time, Span}
 # are updated in Part B; observations still use the existing board probe.
 def autocert_view(directory : String, cache : AutocertDirCache,
                   hosts : Array(String)) : AutocertView
-  names = Ary(Str).new(hosts.size)
+  names = Array(String).new(hosts.size)
   hosts.each { |name| names << name.as_tape }
   AutocertView.new(AutocertConfig.new(directory.as_tape,
     cache.dir.as_tape, names))
@@ -63,9 +63,9 @@ end
 
 @[OnTape]
 struct AutocertBenchClient
-  getter name : Str
+  getter name : String
   getter port : Int32
-  def initialize(@name : Str, @port : Int32)
+  def initialize(@name : String, @port : Int32)
   end
 end
 
@@ -73,9 +73,9 @@ end
 class AutocertBenchHandler
   @view : AutocertView
   getter tls_config : TlsServerConfig?
-  @ready : Str
+  @ready : String
 
-  def initialize(settings : Tuple(AutocertConfig, Bool, Str))
+  def initialize(settings : Tuple(AutocertConfig, Bool, String))
     config, tls, @ready = settings
     @view = AutocertView.new(config)
     @tls_config = tls ? @view.tls_config : nil
@@ -402,7 +402,7 @@ def serve(args : Array(String)) : Nil
   config.accept_terms = true
   config.email = "autocert@iyi-autocert.example".as_tape
   offered = challenges.split(",")
-  methods = Ary(Str).new(offered.size)
+  methods = Array(String).new(offered.size)
   offered.each { |method| methods << method.as_tape }
   config.challenges = methods
   group do |g|

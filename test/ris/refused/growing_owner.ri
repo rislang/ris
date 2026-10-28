@@ -3,4 +3,4 @@ struct GrowingOwner
   def initialize
   end
 end
-tape { Ary(GrowingOwner).new }
+tape { Array(GrowingOwner).new }

@@ -14,7 +14,7 @@ import std/socket::{IyiSocket}
 import std/http::{Server, Incoming, Outgoing}
 
 N = 200000
-REQUEST = Str.view("GET /users/42?full=1 HTTP/1.1\r\nHost: localhost\r\n" \
+REQUEST = String.view("GET /users/42?full=1 HTTP/1.1\r\nHost: localhost\r\n" \
   "User-Agent: bench\r\nAccept: */*\r\n\r\n")
 BODY = %({"id":42,"name":"Mari","email":"mari@example.com"})
 
@@ -24,7 +24,7 @@ BODY = %({"id":42,"name":"Mari","email":"mari@example.com"})
 def drain(socket : IyiSocket, want : Int64) : Int64
   got = 0_i64
   tape do
-    buffer = Str::Builder.new(65536)
+    buffer = String::Builder.new(65536)
     while got < want
       buffer.clear
       n = socket.read(buffer, 65536).or_panic

@@ -118,10 +118,10 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
   end
 
   private def ownership_hint(type : Type) : String
-    if type.remove_typedef.to_s == "Str"
-      "\n\nCopy the text with `.copy_to(owner)` inside the owning #{tape_scope_name}, or write into the caller's Str::Builder."
+    if type.remove_typedef.to_s == "String"
+      "\n\nCopy the text with `.copy_to(owner)` inside the owning #{tape_scope_name}, or write into the caller's String::Builder."
     else
-      "\n\nBuild an owned value before leaving the scope: `copy_to(owner)` copies a Str, Ary, @[OnTape] struct or class instance deeply; or write into the caller's Str::Builder. Copying a tape-bearing struct alone does not copy its storage."
+      "\n\nBuild an owned value before leaving the scope: `copy_to(owner)` copies a String, Array, @[OnTape] struct or class instance deeply; or write into the caller's String::Builder. Copying a tape-bearing struct alone does not copy its storage."
     end
   end
 
@@ -167,18 +167,18 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
   # local storage. Str is immutable and safe to borrow for reads.
   # Raw pointer access remains explicitly outside tape lifetime guarantees.
   def visit(node : Var)
-    if @local_tape && (type = node.type?) && TapeChecker.tape_in(@program, type) && type.remove_typedef.to_s != "Str"
+    if @local_tape && (type = node.type?) && TapeChecker.tape_in(@program, type) && type.remove_typedef.to_s != "String"
       meta = @block.try(&.vars.try(&.[node.name]?)) || @owner.try(&.vars.try(&.[node.name]?))
       context = meta.try &.context
       unless context.is_a?(ASTNode) && @contexts.includes?(context)
-        node.raise "cannot use outer tape value `#{node.name}` inside local_tape: it could retain temporary storage; copy it into owned data before entering (outer Str values may be read)"
+        node.raise "cannot use outer tape value `#{node.name}` inside local_tape: it could retain temporary storage; copy it into owned data before entering (outer String values may be read)"
       end
     end
     false
   end
 
   private def check_outer_self(node : ASTNode)
-    if @local_tape && (owner = @owner) && !@contexts.includes?(owner) && TapeChecker.tape?(@program, owner.owner) && owner.owner.to_s != "Str"
+    if @local_tape && (owner = @owner) && !@contexts.includes?(owner) && TapeChecker.tape?(@program, owner.owner) && owner.owner.to_s != "String"
       node.raise "cannot use outer tape value `self` inside local_tape: copy it into owned data before entering"
     end
   end

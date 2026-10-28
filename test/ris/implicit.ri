@@ -1,7 +1,7 @@
 text = "hello"
-items = Ary(Str).new(2)
+items = Array(String).new(2)
 items << text
-writer = Str::Builder.new(16)
+writer = String::Builder.new(16)
 writer << items[0]
 writer << " tape"
 raise "wrong top-level tape data" unless writer.finish == "hello tape"

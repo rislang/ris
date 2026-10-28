@@ -117,8 +117,8 @@ class SignalWaiter
   # The signals whose handler is installed, one bit each.
   @@installed = 0_u64
 
-  def self.listed(signals : Tuple) : Ary(Signal)
-    list = Ary(Signal).new(signals.size)
+  def self.listed(signals : Tuple) : Array(Signal)
+    list = Array(Signal).new(signals.size)
     index = 0
     while index < signals.size
       list << signals[index]
@@ -176,7 +176,7 @@ class SignalWaiter
     @@write_fd = -1
   {% end %}
 
-  def self.wait(signals : Ary(Signal)) : Signal | Cancelled
+  def self.wait(signals : Array(Signal)) : Signal | Cancelled
     raise "Signal.wait: name at least one signal" if signals.empty?
     wanted = 0_u64
     signals.each do |signal|
@@ -200,7 +200,7 @@ class SignalWaiter
   end
 
   # The first of *signals* that has arrived, taken off the pending bits.
-  private def self.take(signals : Ary(Signal)) : Signal?
+  private def self.take(signals : Array(Signal)) : Signal?
     signals.each do |signal|
       bit = 1_u64.unsafe_shl(signal.value.to_u64)
       if @@pending & bit != 0_u64

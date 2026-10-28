@@ -1,4 +1,4 @@
 # A link too wide for its bytes is refused when made.
 tape do
-  Ary::Link(Int32, UInt8).new(255)
+  Array::Link(Int32, UInt8).new(255)
 end

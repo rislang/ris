@@ -20,15 +20,15 @@ tape do
   when "slice"
     run[1, 2]
   when "run_negative_offset"
-    SlicePool::Run(Int32).new(Ary(Int32).new, -1, 0)
+    SlicePool::Run(Int32).new(Array(Int32).new, -1, 0)
   when "run_negative_size"
-    SlicePool::Run(Int32).new(Ary(Int32).new, 0, -1)
+    SlicePool::Run(Int32).new(Array(Int32).new, 0, -1)
   when "run_overflow"
-    SlicePool::Run(Int32).new(Ary(Int32).new, 2147483647, 2147483647)
+    SlicePool::Run(Int32).new(Array(Int32).new, 2147483647, 2147483647)
   when "run_past_end"
-    SlicePool::Run(Int32).new(Ary(Int32).new(4), 0, 1)
+    SlicePool::Run(Int32).new(Array(Int32).new(4), 0, 1)
   when "borrowed_foreign"
-    data = Ary(Int32).new(1) { 7 }
+    data = Array(Int32).new(1) { 7 }
     pool.free_slice(SlicePool::Run(Int32).new(data, 0, 1))
   when "negative_realloc"
     pool.realloc_slice(run, -1)

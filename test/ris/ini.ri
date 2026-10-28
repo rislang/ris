@@ -7,7 +7,7 @@ tape do
   doc = INI.parse("\uFEFFtop=yes\r\n[s]\na = café\n[s]\na=last\n")
   exit 1 unless doc[""]["top"] == "yes"
   exit 2 unless doc["s"]["a"] == "last"
-  w = Str::Builder.new(1)
+  w = String::Builder.new(1)
   w << "prefix:"
   INI.build(doc, w, true)
   exit 3 unless w.finish == "prefix:top = yes\n[s]\na = last\n\n"

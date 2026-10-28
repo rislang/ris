@@ -6,8 +6,8 @@ module socket_pieces
 
 import std/socket::{IyiSocket}
 
-def read_all(socket : IyiSocket, count : Int32) : Str
-  writer = Str::Builder.new(count)
+def read_all(socket : IyiSocket, count : Int32) : String
+  writer = String::Builder.new(count)
   while writer.length < count
     got = socket.read(writer, count - writer.length).or_panic
     break if got == 0
@@ -16,8 +16,8 @@ def read_all(socket : IyiSocket, count : Int32) : Str
 end
 
 big = ("b" * 1048576)
-def expected_text : Str
-  Str.build(1049000) do |io|
+def expected_text : String
+  String.build(1049000) do |io|
     io << "head:"
     100.times { |i| io << i << (i.even? ? "" : ",") }
     io << ("b" * 1048576) << "end"
@@ -36,13 +36,13 @@ group do |g|
     text == expected
   end
   tape do
-    pieces = Ary(Str).new(4)
+    pieces = Array(String).new(4)
     pieces << "head:"
     100.times do |i|
-      pieces << Str.build(4) { |w| w.append_int(i) }
+      pieces << String.build(4) { |w| w.append_int(i) }
       pieces << (i.even? ? "" : ",")
     end
-    pieces << Str.build(big.bytesize) { |w| w.append(big) }
+    pieces << String.build(big.bytesize) { |w| w.append(big) }
     pieces << "end"
     written = conn.write(pieces).or_panic
     raise "wrote #{written}" unless written == expected_size

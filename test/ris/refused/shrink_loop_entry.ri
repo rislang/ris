@@ -1,5 +1,5 @@
 def check_loop
-  b = Str::Builder.new
+  b = String::Builder.new
   b << "abc"
   saved = b.finish
   b.clear

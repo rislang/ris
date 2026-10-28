@@ -1,8 +1,8 @@
-def relay(a : Ary(Int32)) : Ary(Int32)
+def relay(a : Array(Int32)) : Array(Int32)
   a
 end
 def descend(n : Int32) : Int32
-  a = relay(Ary(Int32).new)
+  a = relay(Array(Int32).new)
   child = n > 0 ? descend(n - 1) : 0
   child + a.size
 end

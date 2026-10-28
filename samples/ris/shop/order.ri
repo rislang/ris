@@ -7,10 +7,10 @@ module shop/order
 @[OnTape]
 pub struct Order
   getter id : Int64
-  getter customer : Str
-  getter lines : Ary(Int64)
+  getter customer : String
+  getter lines : Array(Int64)
 
-  def initialize(@id : Int64, @customer : Str, @lines : Ary(Int64))
+  def initialize(@id : Int64, @customer : String, @lines : Array(Int64))
   end
 end
 

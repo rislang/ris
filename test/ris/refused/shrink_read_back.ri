@@ -1,17 +1,17 @@
 @[OnTape]
 struct ReadHolder
-  property text : Str
+  property text : String
 
   def initialize(@text)
   end
 end
 
 tape do
-  bytes = Str::Builder.new
+  bytes = String::Builder.new
   bytes << "abc"
   holder = ReadHolder.new(bytes.finish)
   text = holder.text
-  holder.text = Str.view("")
+  holder.text = String.view("")
   bytes.clear
   puts text
 end

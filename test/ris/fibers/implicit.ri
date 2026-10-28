@@ -1,18 +1,18 @@
 module test/ris/fibers/implicit
 
 main_tape = RisRegion.tape
-handles = Ary(IyiFiber).new(2)
+handles = Array(IyiFiber).new(2)
 completed = 0
 group do |g|
-  tasks = Ary(IyiTask(IyiFiber)).new(2)
+  tasks = Array(IyiTask(IyiFiber)).new(2)
   2.times do |n|
     tasks << g.spawn do
       fiber = IyiScheduler.current
       raise "fiber shares main tape" if RisRegion.tape == main_tape
       text = "fiber"
-      items = Ary(Str).new(2)
+      items = Array(String).new(2)
       items << text
-      writer = Str::Builder.new(16)
+      writer = String::Builder.new(16)
       writer << items[0]
       sleep(1)
       writer.append_int(n)

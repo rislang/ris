@@ -1,7 +1,7 @@
 class Node
-  getter children : Ary(Node)
+  getter children : Array(Node)
   def initialize
-    @children = Ary(Node).new(1)
+    @children = Array(Node).new(1)
   end
 end
 Node.new.copy_to(Program.tape)

@@ -5,8 +5,8 @@ module socket_pair
 
 import std/socket::{IyiSocket}
 
-def read_all(socket : IyiSocket, count : Int32) : Str
-  writer = Str::Builder.new(count)
+def read_all(socket : IyiSocket, count : Int32) : String
+  writer = String::Builder.new(count)
   while writer.length < count
     got = socket.read(writer, count - writer.length).or_panic
     break if got == 0
@@ -28,8 +28,8 @@ group do |g|
   end
   conn.write("head:", "abc").or_panic
   tape do
-    head = Str.build(8) { |w| w.append("tape:") }
-    body = Str.build(big.bytesize) { |w| w.append(big) }
+    head = String.build(8) { |w| w.append("tape:") }
+    body = String.build(big.bytesize) { |w| w.append(big) }
     conn.write(head, body).or_panic
   end
   matches = reader.value.or_panic

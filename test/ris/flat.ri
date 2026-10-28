@@ -4,17 +4,17 @@
 @[Tape::Flat]
 struct Node
   getter key : Int32
-  getter name : Str::Span
-  property left : Ary::Link(Node, UInt16)
-  property right : Ary::Link(Node, UInt16)
+  getter name : String::Span
+  property left : Array::Link(Node, UInt16)
+  property right : Array::Link(Node, UInt16)
 
   def initialize(@key, @name)
-    @left = Ary::Link(Node, UInt16).none
-    @right = Ary::Link(Node, UInt16).none
+    @left = Array::Link(Node, UInt16).none
+    @right = Array::Link(Node, UInt16).none
   end
 end
 
-def insert(nodes : Ary(Node), key : Int32, name : Str::Span) : Nil
+def insert(nodes : Array(Node), key : Int32, name : String::Span) : Nil
   link = nodes.next_link(UInt16)
   nodes.push(Node.new(key, name))
   return if link.index == 0
@@ -39,9 +39,9 @@ def insert(nodes : Ary(Node), key : Int32, name : Str::Span) : Nil
   end
 end
 
-alias NodeLink = Ary::Link(Node, UInt16)
+alias NodeLink = Array::Link(Node, UInt16)
 
-def walk(nodes : Ary(Node), names : Str, at : NodeLink) : Nil
+def walk(nodes : Array(Node), names : String, at : NodeLink) : Nil
   return if at.none?
   node = nodes[at]
   walk(nodes, names, node.left)
@@ -52,12 +52,12 @@ end
 tape do
   words = {5 => "five", 2 => "two",
            8 => "eight", 1 => "one", 9 => "nine"}
-  text = Str::Builder.new(32)
-  spans = Ary(Str::Span).new(words.size) do |i|
+  text = String::Builder.new(32)
+  spans = Array(String::Span).new(words.size) do |i|
     text.append_span(words.values[i])
   end
   names = text.finish
-  nodes = Ary(Node).new(8)
+  nodes = Array(Node).new(8)
   i = 0
   words.each_key do |key|
     insert(nodes, key, spans[i])
@@ -65,7 +65,7 @@ tape do
   end
   puts "#{sizeof(Node)} bytes a node"
   saved = nodes.bytes
-  loaded = Ary(Node).load(saved)
+  loaded = Array(Node).load(saved)
   walk(loaded, names, loaded.link(0, UInt16))
   puts nodes.map { |node| node.key }.sum
 end

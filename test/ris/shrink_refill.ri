@@ -3,7 +3,7 @@ def consume_byte(byte : UInt8, ignored : Nil)
 end
 
 def refill
-  b = Str::Builder.new
+  b = String::Builder.new
   b << "abc"
   view = b.finish
   raise "view" unless view == "abc"
@@ -16,14 +16,14 @@ def refill
   b << "abc"
   consume_byte(b.finish[0], b.clear)
   stale = b.finish
-  stale = Str.new("independent")
+  stale = String.new("independent")
   b.clear
   raise "rebind" unless stale == "independent"
-  a = Ary(Int32).new
+  a = Array(Int32).new
   a << 1
   index = 0
   raise "index" unless a[index] == 1
-  indexes = Ary(Int32).new
+  indexes = Array(Int32).new
   indexes << 0
   selected = a.values_at(indexes)
   raise "selected" unless selected[0] == 1

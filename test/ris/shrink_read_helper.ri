@@ -1,8 +1,8 @@
-def read_length(b : Str::Builder)
+def read_length(b : String::Builder)
   b.length
 end
 
-def refill(b : Str::Builder) : Str
+def refill(b : String::Builder) : String
   b.clear
   b << "def"
   b.finish
@@ -10,8 +10,8 @@ end
 
 @[OnTape]
 struct Buffers
-  getter left = Str::Builder.new
-  getter right = Str::Builder.new
+  getter left = String::Builder.new
+  getter right = String::Builder.new
 
   def reset_right
     @right.clear
@@ -19,7 +19,7 @@ struct Buffers
 end
 
 def exercise
-  b = Str::Builder.new
+  b = String::Builder.new
   b << "abc"
   v = b.finish
   raise "length" unless read_length(b) == 3

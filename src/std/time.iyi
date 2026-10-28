@@ -2039,7 +2039,7 @@ pub struct Time
               flag?(:darwin) || flag?(:win32)) %}
       text = ""
       tape do
-        w = Str::Builder.new(32)
+        w = String::Builder.new(32)
         to_rfc3339(fraction_digits, w)
         text = w.finish.to_heap
       end
@@ -2075,7 +2075,7 @@ pub struct Time
 
   # The same written into the caller's *writer* on the tape: no string
   # per field, nothing on the heap.
-  def to_rfc3339(fraction_digits : Int32, writer : Str::Builder) : Nil
+  def to_rfc3339(fraction_digits : Int32, writer : String::Builder) : Nil
     if @offset % 60 != 0
       Time.unix(@seconds, @nanoseconds).to_rfc3339(fraction_digits, writer)
       return
@@ -2118,7 +2118,7 @@ pub struct Time
 
   # *value* in decimal, zero-padded to *width* digits, as `pad4` and its
   # kin pad it: a value of more digits is written whole.
-  def self.put_digits(writer : Str::Builder, value : Int64, width : Int32) : Nil
+  def self.put_digits(writer : String::Builder, value : Int64, width : Int32) : Nil
     if value < 0
       writer.push(45_u8)
       value = -value
@@ -2196,7 +2196,7 @@ pub struct Time
   #   -0001-01-01T00:00:00Z and 12345-06-07T08:09:10Z, as `to_rfc3339` writes them
   # `Time::Format::RFC_3339.parse` reads the same grammar and answers a
   # `TimeParseError` instead, for text the program did not write itself.
-  def self.parse_rfc3339(str : String | Str) : Time
+  def self.parse_rfc3339(str : String | String) : Time
     Format::RFC_3339.parse(str).or_panic
   end
 
@@ -2204,7 +2204,7 @@ pub struct Time
   # that names no zone is read at *offset* seconds east of UTC, as Crystal's
   # `Time.parse` reads one at the location it is given.
   def self.parse(
-    string : String | Str,
+    string : String | String,
     pattern : String,
     offset : Int32,
   ) : Time | TimeParseError
@@ -2213,7 +2213,7 @@ pub struct Time
 
   # `parse` at UTC when the text names no zone.
   def self.parse_utc(
-    string : String | Str,
+    string : String | String,
     pattern : String,
   ) : Time | TimeParseError
     Format.new(pattern, 0).parse(string)
@@ -2225,7 +2225,7 @@ pub struct Time
   # it), and the time answered is in *location* whether the text named a
   # zone or not.
   def self.parse(
-    string : String | Str,
+    string : String | String,
     pattern : String,
     location : Location,
   ) : Time | TimeParseError
@@ -2234,22 +2234,22 @@ pub struct Time
 
   # `parse` in the machine's own zone.
   def self.parse_local(
-    string : String | Str,
+    string : String | String,
     pattern : String,
   ) : Time | TimeParseError
     Format.new(pattern, Location.local).parse(string)
   end
 
-  def self.parse_rfc2822(string : String | Str) : Time | TimeParseError
+  def self.parse_rfc2822(string : String | String) : Time | TimeParseError
     Format::RFC_2822.parse(string)
   end
 
   # Any of RFC 9110's three HTTP date forms; see `Time::Format::HTTP_DATE`.
-  def self.parse_rfc1123(string : String | Str) : Time | TimeParseError
+  def self.parse_rfc1123(string : String | String) : Time | TimeParseError
     Format::HTTP_DATE.parse(string)
   end
 
-  def self.parse_iso8601(string : String | Str) : Time | TimeParseError
+  def self.parse_iso8601(string : String | String) : Time | TimeParseError
     Format::ISO_8601_DATE_TIME.parse(string)
   end
 
@@ -2424,13 +2424,13 @@ pub struct Time
       end
     end
 
-    def parse(string : String | Str) : Time | TimeParseError
+    def parse(string : String | String) : Time | TimeParseError
       parser = Parser.new(string)
       parser.pattern(@pattern) && parser.at_end
       parser.finish(@offset, @location)
     end
 
-    def parse(string : String | Str, offset : Int32?) : Time | TimeParseError
+    def parse(string : String | String, offset : Int32?) : Time | TimeParseError
       parser = Parser.new(string)
       parser.pattern(@pattern) && parser.at_end
       parser.finish(offset)
@@ -2690,8 +2690,8 @@ pub struct Time
     # ends it in a panic.
     @[OnTape]
     struct Parser
-      @input : Str
-      @bytes : Str
+      @input : String
+      @bytes : String
       @len : Int32
       @pos : Int32 = 0
       @error : TimeParseError? = nil
@@ -2715,7 +2715,7 @@ pub struct Time
       @week : Int32? = nil
       @day_of_week : Int32? = nil
 
-      def initialize(input : String | Str)
+      def initialize(input : String | String)
         @input = input.as_tape
         @bytes = @input
         @len = @input.bytesize
@@ -3601,7 +3601,7 @@ pub struct Time
         Format.new("%a, %d %b %Y %H:%M:%S GMT").format(time, 0)
       end
 
-      def self.parse(string : String | Str) : Time | TimeParseError
+      def self.parse(string : String | String) : Time | TimeParseError
         parser = Parser.new(string)
         parser.http_date
         parser.finish(0)
@@ -3622,7 +3622,7 @@ pub struct Time
         Format.new("%a, %-d %b %Y %H:%M:%S %z").format(time, at)
       end
 
-      def self.parse(string : String | Str) : Time | TimeParseError
+      def self.parse(string : String | String) : Time | TimeParseError
         parser = Parser.new(string)
         parser.rfc_2822
         parser.finish(0)
@@ -3638,7 +3638,7 @@ pub struct Time
       end
 
       def self.parse(
-        string : String | Str,
+        string : String | String,
         offset : Int32 = 0,
       ) : Time | TimeParseError
         parser = Parser.new(string)
@@ -3655,7 +3655,7 @@ pub struct Time
         RFC_3339.format(time, 0, offset)
       end
 
-      def self.parse(string : String | Str) : Time | TimeParseError
+      def self.parse(string : String | String) : Time | TimeParseError
         parser = Parser.new(string)
         parser.iso_date_time
         parser.finish(nil)
@@ -3670,7 +3670,7 @@ pub struct Time
         Format.new(at == 0 ? "%TZ" : "%T%:z").format(time, at)
       end
 
-      def self.parse(string : String | Str) : Time | TimeParseError
+      def self.parse(string : String | String) : Time | TimeParseError
         parser = Parser.new(string)
         parser.iso_time && parser.zone_z_or_offset && parser.at_end
         parser.finish(nil)
@@ -3702,7 +3702,7 @@ pub struct Time
         Format.new("%FT%T#{fraction}%:z").format(time, at)
       end
 
-      def self.parse(str : String | Str) : Time | TimeParseError
+      def self.parse(str : String | String) : Time | TimeParseError
         len = str.bytesize
         if len < 20
           return TimeParseError.new(
@@ -3943,7 +3943,7 @@ pub struct Time
 
       # Two digits at *start*, or -1 when either is not a digit.
       private def self.parse_int(
-        str : String | Str,
+        str : String | String,
         start : Int32,
         count : Int32,
       ) : Int32

@@ -6,7 +6,7 @@ end
 
 tape do
   escaped = with_local do
-    break Str.build { |w| w.append("inner") }
+    break String.build { |w| w.append("inner") }
   end
   puts escaped.to_s
 end

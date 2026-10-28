@@ -1,8 +1,8 @@
 class State
-  @@text : Str? = nil
-  def self.keep(text : Str)
+  @@text : String? = nil
+  def self.keep(text : String)
     @@text = text
   end
 end
-INIT = local_tape { State.keep(Str.new("short")) }
+INIT = local_tape { State.keep(String.new("short")) }
 puts INIT

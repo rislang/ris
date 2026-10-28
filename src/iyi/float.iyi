@@ -257,20 +257,6 @@ struct Int64
   end
 end
 
-class String
-  # The double nearest the decimal written here, correctly rounded: the
-  # digits and the exponent are read into the printer's bignum and the
-  # quotient taken to 54 bits with a sticky remainder, so what `to_s`
-  # wrote reads back as the same double, every time, and "0.1" is the
-  # double the literal `0.1` is. Accepts `-1.5`, `2.5e-3`, `1E10`, `.5`,
-  # `7.`, `Infinity`, `NaN`, with `Char#whitespace?` around as `to_i?`
-  # takes it; raises "not a number" for anything else.
-  def to_f : Float64
-    first = space_end
-    last = space_start(first)
-    IyiFloatText.parse(first == 0 && last == @bytesize ? self : byte_slice(first, last - first))
-  end
-end
 
 # The bignum the printer needs and nothing more: unsigned, 32-bit limbs in
 # 64-bit words so a limb product and a carry fit, little-endian. Eighty

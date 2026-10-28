@@ -11,7 +11,7 @@ module bench/std_fileserver_exercise
 # These exercises still use std's legacy String APIs and assertions.
 # Board messages themselves own copied tape text; this is the heap adapter.
 @[TapeToHeap]
-def ris_heap_text(value : Str) : String
+def ris_heap_text(value : String) : String
   value.to_s
 end
 
@@ -92,7 +92,7 @@ end
 class RisFiles1Handler
   @root : String
 
-  def initialize(root : Str)
+  def initialize(root : String)
     @root = ris_heap_text(root)
   end
 
@@ -113,7 +113,7 @@ end
 class RisFiles2Handler
   @root : String
 
-  def initialize(root : Str)
+  def initialize(root : String)
     @root = ris_heap_text(root)
   end
 
@@ -175,7 +175,7 @@ args = Program.args
 if args.size > 1 && args[0] == "serve"
   serving = RisExerciseServer.port
   root = args[1]
-  RisExerciseServer.serve(serving, Str.new(root), RisFiles1Handler, print_port: true)
+  RisExerciseServer.serve(serving, String.new(root), RisFiles1Handler, print_port: true)
   __iyi_exit(0)
 end
 
@@ -193,7 +193,7 @@ files_port = files_l
 files_base = "http://127.0.0.1:#{files_port}"
 group do |g|
   g.spawn do
-    RisExerciseServer.serve(files_l, Str.new(stream_dir + "/www"), RisFiles2Handler)
+    RisExerciseServer.serve(files_l, String.new(stream_dir + "/www"), RisFiles2Handler)
     0
   end
   RisExerciseServer.wait(RisFiles2Handler)

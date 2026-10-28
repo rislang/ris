@@ -670,14 +670,14 @@ class ::File
     getter type : Type
     getter flags : Flags
     getter modification_time : Int64
-    getter owner_id : Str
-    getter group_id : Str
+    getter owner_id : String
+    getter group_id : String
     getter dev : Int64
     getter ino : UInt64
 
     def initialize(@size : Int64, @permissions : Permissions, @type : Type,
                    @flags : Flags, @modification_time : Int64,
-                   @owner_id : Str, @group_id : Str,
+                   @owner_id : String, @group_id : String,
                    @dev : Int64 = 0_i64, @ino : UInt64 = 0_u64)
     end
 
@@ -716,7 +716,7 @@ class ::File
   {% if flag?(:darwin) || flag?(:linux) %}
     # stat/lstat borrow the NUL-terminated caller-tape path for this call.
     @[TapeUnsafe]
-    private def self.metadata_stat(path : Str, follow : Bool,
+    private def self.metadata_stat(path : String, follow : Bool,
                                    result : Std::File::LibC::Stat*) : Int32
       if follow
         Std::File::LibC.stat(path.to_unsafe, result)
@@ -727,20 +727,20 @@ class ::File
 
     # access borrows the NUL-terminated caller-tape path for this call.
     @[TapeUnsafe]
-    private def self.metadata_access(path : Str, mode : Int32) : Int32
+    private def self.metadata_access(path : String, mode : Int32) : Int32
       Std::File::LibC.access(path.to_unsafe, mode)
     end
   {% elsif flag?(:win32) %}
     # The native converter borrows the NUL-terminated caller-tape path.
     @[TapeUnsafe]
-    private def self.metadata_wide(path : Str) : UInt16*
+    private def self.metadata_wide(path : String) : UInt16*
       __iyi_wide_path(path.to_unsafe)
     end
   {% end %}
 
-  private def self.metadata_path(path : Str | String | Path) : Str
-    text = path.is_a?(Str) ? path : Str.view(path.to_s)
-    writer = Str::Builder.new(text.bytesize + 1)
+  private def self.metadata_path(path : String | String | Path) : String
+    text = path.is_a?(String) ? path : String.view(path.to_s)
+    writer = String::Builder.new(text.bytesize + 1)
     text.each_byte do |byte|
       raise "path contains a NUL byte" if byte == 0_u8
       writer.push(byte)
@@ -749,19 +749,19 @@ class ::File
     writer.finish
   end
 
-  private def self.metadata_id(value : Int32 | UInt32) : Str
-    writer = Str::Builder.new(10)
+  private def self.metadata_id(value : Int32 | UInt32) : String
+    writer = String::Builder.new(10)
     (value.to_i64 & 0xffffffff_i64).to_u64.to_s(writer)
     writer.finish
   end
 
-  def self.info(path : Str | String | Path, follow_symlinks : Bool = true) : Info
+  def self.info(path : String | String | Path, follow_symlinks : Bool = true) : Info
     res = info?(path, follow_symlinks)
     if res
       res
     else
-      if path.is_a?(Str)
-        message = Str.build(16 + path.bytesize) do |writer|
+      if path.is_a?(String)
+        message = String.build(16 + path.bytesize) do |writer|
           writer << "File not found: "
           writer << path
         end
@@ -772,7 +772,7 @@ class ::File
     end
   end
 
-  def self.info?(path : Str | String | Path, follow_symlinks : Bool = true) : Info?
+  def self.info?(path : String | String | Path, follow_symlinks : Bool = true) : Info?
     p = metadata_path(path)
     {% if flag?(:darwin) %}
       stat_buf = uninitialized Std::File::LibC::Stat
@@ -851,8 +851,8 @@ class ::File
         # attributes open the device to see, and what is there is a
         # character device: no size, time or identity, mode 0o666 as
         # `/dev/null`.
-        if refused == 87 && __iyi_path_attributes(c_path(path.is_a?(Str) ? path : path.to_s)) != -1
-          return Info.new(0_i64, Permissions.new(0o666), Type::CharacterDevice, Flags.new(0), 0_i64, Str.new("0"), Str.new("0"))
+        if refused == 87 && __iyi_path_attributes(c_path(path.is_a?(String) ? path : path.to_s)) != -1
+          return Info.new(0_i64, Permissions.new(0o666), Type::CharacterDevice, Flags.new(0), 0_i64, String.new("0"), String.new("0"))
         end
         # A file another process holds without sharing refuses the call
         # (ERROR_SHARING_VIOLATION, 32), and `info` said "File not found"
@@ -958,27 +958,27 @@ class ::File
       # `st_mtime`.
       mtime = (write_ticks - 116444736000000000_i64) // 10000000_i64
 
-      Info.new(size, perms, file_type, Flags.new(0), mtime, Str.new("0"), Str.new("0"), dev, ino)
+      Info.new(size, perms, file_type, Flags.new(0), mtime, String.new("0"), String.new("0"), dev, ino)
     {% else %}
       nil
     {% end %}
   end
 
-  def self.size(path : Str | String | Path) : Int64
+  def self.size(path : String | String | Path) : Int64
     info(path).size
   end
 
-  def self.file?(path : Str | String | Path) : Bool
+  def self.file?(path : String | String | Path) : Bool
     inf = info?(path)
     inf ? inf.file? : false
   end
 
-  def self.directory?(path : Str | String | Path) : Bool
+  def self.directory?(path : String | String | Path) : Bool
     inf = info?(path)
     inf ? inf.directory? : false
   end
 
-  def self.symlink?(path : Str | String | Path) : Bool
+  def self.symlink?(path : String | String | Path) : Bool
     inf = info?(path, follow_symlinks: false)
     inf ? inf.symlink? : false
   end
@@ -1020,7 +1020,7 @@ class ::File
     end
   {% end %}
 
-  def self.readable?(path : Str | String | Path) : Bool
+  def self.readable?(path : String | String | Path) : Bool
     p = metadata_path(path)
     {% if flag?(:darwin) || flag?(:linux) %}
       metadata_access(p, 4) == 0
@@ -1035,7 +1035,7 @@ class ::File
     {% end %}
   end
 
-  def self.writable?(path : Str | String | Path) : Bool
+  def self.writable?(path : String | String | Path) : Bool
     p = metadata_path(path)
     {% if flag?(:darwin) || flag?(:linux) %}
       metadata_access(p, 2) == 0
@@ -1054,7 +1054,7 @@ class ::File
   # and `CreateProcess`'s search go by - and a directory is searchable
   # when it can be read. `cmd.exe` answered false: the made-up mode gave
   # the execute bit to directories alone.
-  def self.executable?(path : Str | String | Path) : Bool
+  def self.executable?(path : String | String | Path) : Bool
     p = metadata_path(path)
     {% if flag?(:darwin) || flag?(:linux) %}
       metadata_access(p, 1) == 0
@@ -1062,7 +1062,7 @@ class ::File
       inf = info?(path)
       return false unless inf
       return readable?(path) if inf.directory?
-      extension = extname(path.is_a?(Str) ? path.to_heap : path).upcase
+      extension = extname(path.is_a?(String) ? path.to_heap : path).upcase
       return false if extension.empty?
       pathext = Program.env("PATHEXT") || ".COM;.EXE;.BAT;.CMD"
       pathext.upcase.split(';').includes?(extension) && readable?(path)
@@ -1072,12 +1072,12 @@ class ::File
     {% end %}
   end
 
-  def self.empty?(path : Str | String | Path) : Bool
+  def self.empty?(path : String | String | Path) : Bool
     inf = info?(path)
     inf ? inf.size == 0_i64 : false
   end
 
-  def self.same?(path1 : Str | String | Path, path2 : Str | String | Path) : Bool
+  def self.same?(path1 : String | String | Path, path2 : String | String | Path) : Bool
     i1 = info?(path1)
     i2 = info?(path2)
     return false unless i1 && i2

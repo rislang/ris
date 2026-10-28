@@ -1,6 +1,6 @@
 @[Owner]
 struct Broken
-  getter left = Ary(Int32).new(20000)
+  getter left = Array(Int32).new(20000)
 
   def initialize(fail : Bool)
     raise "expected" if fail

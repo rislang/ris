@@ -4,7 +4,7 @@ import std/sse::{SSE, EventParser, TapeEventParser}
 
 kept = "".to_heap
 tape do
-  writer = Str::Builder.new(1)
+  writer = String::Builder.new(1)
   writer << "prefix:"
   SSE.encode("a\r\nb\r", writer,
     "update", "7", 0)
@@ -12,7 +12,7 @@ tape do
     "update", "7", 0)
   expected = "event: update\nid: 7\nretry: 0\ndata: a\ndata: b\ndata:\n\n"
   exit 11 unless encoded == expected
-  prefixed = Str.build { |w| w << "prefix:" << encoded }
+  prefixed = String.build { |w| w << "prefix:" << encoded }
   exit 12 unless writer.finish == prefixed
   exit 13 unless SSE.comment("a\r\nb\r") == ": a\n: b\n:\n"
   parser = TapeEventParser.new

@@ -150,7 +150,7 @@ pub class EventParser
     @dispatched = 0_i64
   end
 
-  def feed(text : String | Str, & : Event -> Nil) : Nil
+  def feed(text : String | String, & : Event -> Nil) : Nil
     tape do
       parser = TapeEventParser.new(@last_event_id.as_tape)
       parser.restore(@id_buffer.as_tape, @type.as_tape,
@@ -186,12 +186,12 @@ end
 
 @[OnTape]
 pub struct TapeEvent
-  getter event : Str
-  getter data : Str
-  getter id : Str
+  getter event : String
+  getter data : String
+  getter id : String
 
-  def initialize(@event : Str, @data : Str,
-                 @id : Str)
+  def initialize(@event : String, @data : String,
+                 @id : String)
   end
 
   def to_heap : Event
@@ -201,9 +201,9 @@ end
 
 @[OnTape]
 pub struct TapeEventParser
-  @last_event_id : Pointer(Str)
+  @last_event_id : Pointer(String)
 
-  def last_event_id : Str
+  def last_event_id : String
     @last_event_id.value
   end
 
@@ -219,27 +219,27 @@ pub struct TapeEventParser
     @dispatched.value
   end
 
-  @id_buffer : Pointer(Str)
+  @id_buffer : Pointer(String)
 
-  def id_buffer : Str
+  def id_buffer : String
     @id_buffer.value
   end
 
-  @type : Pointer(Str)
+  @type : Pointer(String)
 
-  def type : Str
+  def type : String
     @type.value
   end
 
-  @data : Pointer(Str::Builder)
+  @data : Pointer(String::Builder)
 
-  def data : Str::Builder
+  def data : String::Builder
     @data.value
   end
 
-  @line : Pointer(Str::Builder)
+  @line : Pointer(String::Builder)
 
-  def line : Str::Builder
+  def line : String::Builder
     @line.value
   end
 
@@ -262,21 +262,21 @@ pub struct TapeEventParser
   # A parser for a stream whose last event ID is *last_event_id* so far:
   # a reconnection's, which carries the one before it (see the module's
   # header for why).
-  def initialize(last_event_id : Str = "".as_tape)
-    @last_event_id = Pointer(Str).new(
-      RisRegion.tape_bytes(sizeof(Str).to_u64))
+  def initialize(last_event_id : String = "".as_tape)
+    @last_event_id = Pointer(String).new(
+      RisRegion.tape_bytes(sizeof(String).to_u64))
     @retry = Pointer(Int32?).new(
       RisRegion.tape_bytes(sizeof(Int32?).to_u64))
     @dispatched = Pointer(Int64).new(
       RisRegion.tape_bytes(sizeof(Int64).to_u64))
-    @id_buffer = Pointer(Str).new(
-      RisRegion.tape_bytes(sizeof(Str).to_u64))
-    @type = Pointer(Str).new(
-      RisRegion.tape_bytes(sizeof(Str).to_u64))
-    @data = Pointer(Str::Builder).new(
-      RisRegion.tape_bytes(sizeof(Str::Builder).to_u64))
-    @line = Pointer(Str::Builder).new(
-      RisRegion.tape_bytes(sizeof(Str::Builder).to_u64))
+    @id_buffer = Pointer(String).new(
+      RisRegion.tape_bytes(sizeof(String).to_u64))
+    @type = Pointer(String).new(
+      RisRegion.tape_bytes(sizeof(String).to_u64))
+    @data = Pointer(String::Builder).new(
+      RisRegion.tape_bytes(sizeof(String::Builder).to_u64))
+    @line = Pointer(String::Builder).new(
+      RisRegion.tape_bytes(sizeof(String::Builder).to_u64))
     @after_cr = Pointer(Bool).new(
       RisRegion.tape_bytes(sizeof(Bool).to_u64))
     @first = Pointer(Bool).new(
@@ -284,24 +284,24 @@ pub struct TapeEventParser
     @last_event_id.value = last_event_id
     @id_buffer.value = @last_event_id.value
     @type.value = "".as_tape
-    @data.value = Str::Builder.new(64)
-    @line.value = Str::Builder.new(64)
+    @data.value = String::Builder.new(64)
+    @line.value = String::Builder.new(64)
     @after_cr.value = false
     @first.value = true
     @retry.value = nil
     @dispatched.value = 0_i64
   end
 
-  def data_buffer : Str
+  def data_buffer : String
     @data.value.finish
   end
 
-  def line_buffer : Str
+  def line_buffer : String
     @line.value.finish
   end
 
-  def restore(id : Str, type : Str,
-              data : Str, line : Str,
+  def restore(id : String, type : String,
+              data : String, line : String,
               after_cr : Bool, first : Bool, retry : Int32?,
               dispatched : Int64) : Nil
     @id_buffer.value = id
@@ -314,7 +314,7 @@ pub struct TapeEventParser
     @dispatched.value = dispatched
   end
 
-  def feed(text : Str, & : TapeEvent -> Nil) : Nil
+  def feed(text : String, & : TapeEvent -> Nil) : Nil
     p = text
     n = text.bytesize
     i = 0
@@ -332,7 +332,7 @@ pub struct TapeEventParser
         if @line.value.length > 0
           @line.value << line
           line = @line.value.finish
-          @line.value = Str::Builder.new(64)
+          @line.value = String::Builder.new(64)
         end
         i = i + 1
         if c == 13_u8
@@ -356,14 +356,14 @@ pub struct TapeEventParser
   # The end of the stream: a line or an event not yet ended is discarded,
   # not dispatched. The last event ID and the reconnection time stay.
   def finish : Nil
-    @line.value = Str::Builder.new(64)
-    @data.value = Str::Builder.new(64)
+    @line.value = String::Builder.new(64)
+    @data.value = String::Builder.new(64)
     @type.value = "".as_tape
     @after_cr.value = false
   end
 
   # One line, its end taken off: the event it dispatches, if it does.
-  private def take(bytes : Str) : TapeEvent?
+  private def take(bytes : String) : TapeEvent?
     line = SSE.clean(bytes)
     if @first.value
       @first.value = false
@@ -409,7 +409,7 @@ pub struct TapeEventParser
     end
     data = @data.value.finish
     data = data[0, data.bytesize - 1] if !data.empty? && data[-1] == 10_u8
-    @data.value = Str::Builder.new(64)
+    @data.value = String::Builder.new(64)
     kind = @type.value.empty? ? "message".as_tape : @type.value
     event = TapeEvent.new(kind, data, @last_event_id.value)
     @type.value = "".as_tape
@@ -419,7 +419,7 @@ pub struct TapeEventParser
 
   # A `retry` value: ASCII digits and nothing else, base ten, saturating
   # at `MAX_RETRY`; nil for anything else, the empty value included.
-  def self.digits(text : Str) : Int32?
+  def self.digits(text : String) : Int32?
     return nil if text.bytesize == 0
     p = text
     value = 0_i64
@@ -486,14 +486,14 @@ pub struct SSE
     result
   end
 
-  def self.encode(data : Str, event : Str? = nil,
-                  id : Str? = nil,
-                  retry : Int32? = nil) : Str
-    Str.build { |w| encode(data, w, event, id, retry) }
+  def self.encode(data : String, event : String? = nil,
+                  id : String? = nil,
+                  retry : Int32? = nil) : String
+    String.build { |w| encode(data, w, event, id, retry) }
   end
 
-  def self.encode(data : Str, writer : Str::Builder,
-                  event : Str? = nil, id : Str? = nil,
+  def self.encode(data : String, writer : String::Builder,
+                  event : String? = nil, id : String? = nil,
                   retry : Int32? = nil) : Nil
     # Validate every field before changing the caller's writer.
     if kind = event
@@ -533,12 +533,12 @@ pub struct SSE
     result
   end
 
-  def self.comment(text : Str) : Str
-    Str.build { |w| comment(text, w) }
+  def self.comment(text : String) : String
+    String.build { |w| comment(text, w) }
   end
 
-  def self.comment(text : Str,
-                   writer : Str::Builder) : Nil
+  def self.comment(text : String,
+                   writer : String::Builder) : Nil
     utf8(text, "a comment")
     lines(text) do |line|
       writer << ':'
@@ -547,11 +547,11 @@ pub struct SSE
     end
   end
 
-  private def self.breaks?(text : Str) : Bool
+  private def self.breaks?(text : String) : Bool
     text.includes?('\n') || text.includes?('\r')
   end
 
-  private def self.utf8(text : Str, what : String) : Nil
+  private def self.utf8(text : String, what : String) : Nil
     at = 0
     while at < text.bytesize
       width = sequence_at(text, text.bytesize, at)
@@ -562,8 +562,8 @@ pub struct SSE
     end
   end
 
-  private def self.lines(text : Str,
-                         & : Str -> Nil) : Nil
+  private def self.lines(text : String,
+                         & : String -> Nil) : Nil
     start = 0
     at = 0
     while at < text.bytesize
@@ -583,7 +583,7 @@ pub struct SSE
   end
 
   # UTF-8 replacement uses the Encoding Standard's maximal subpart.
-  def self.clean(bytes : Str) : Str
+  def self.clean(bytes : String) : String
     at = 0
     while at < bytes.bytesize
       length = sequence_at(bytes, bytes.bytesize, at)
@@ -591,7 +591,7 @@ pub struct SSE
       at += length
     end
     return bytes if at == bytes.bytesize
-    writer = Str::Builder.new(bytes.bytesize)
+    writer = String::Builder.new(bytes.bytesize)
     writer << bytes[0, at]
     while at < bytes.bytesize
       length = sequence_at(bytes, bytes.bytesize, at)
@@ -606,7 +606,7 @@ pub struct SSE
     writer.finish
   end
 
-  private def self.sequence_at(bytes : Str,
+  private def self.sequence_at(bytes : String,
                                size : Int32, at : Int32) : Int32
     lead = bytes[at]
     return 1 if lead < 0x80_u8

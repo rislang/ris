@@ -17,7 +17,7 @@ module bench/std_websocket_exercise
 # These exercises still use std's legacy String APIs and assertions.
 # Board messages themselves own copied tape text; this is the heap adapter.
 @[TapeToHeap]
-def ris_heap_text(value : Str) : String
+def ris_heap_text(value : String) : String
   value.to_s
 end
 
@@ -103,7 +103,7 @@ end
 
 @[OnTape]
 struct RisWsHeader
-  getter text : Str
+  getter text : String
 
   def initialize(@text)
   end
@@ -111,7 +111,7 @@ end
 
 @[OnTape]
 struct RisWsAgreed
-  getter text : Str
+  getter text : String
 
   def initialize(@text)
   end
@@ -119,7 +119,7 @@ end
 
 @[OnTape]
 struct RisWsOrigin
-  getter text : Str
+  getter text : String
 
   def initialize(@text)
   end
@@ -127,7 +127,7 @@ end
 
 @[OnTape]
 struct RisWsProxy
-  getter text : Str
+  getter text : String
 
   def initialize(@text)
   end
@@ -136,7 +136,7 @@ end
 class RisWs1Handler
   @tls : TlsServerConfig?
 
-  def initialize(config : {Str, Str})
+  def initialize(config : {String, String})
     @tls = config[0].empty? ? nil : TlsServerConfig.from_pem(ris_heap_text(config[0]), ris_heap_text(config[1])).or_panic
   end
 
@@ -762,7 +762,7 @@ end
 
 # The server for the script's peers: under TLS when a chain and key are
 # given (`wss://`).
-def serve(chain : Str, key : Str) : Nil
+def serve(chain : String, key : String) : Nil
   listener = RisExerciseServer.port
   RisExerciseServer.serve(listener, {chain, key}, RisWs1Handler, print_port: true)
   puts "stopped"

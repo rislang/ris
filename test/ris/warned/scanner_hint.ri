@@ -1,11 +1,11 @@
 # A lexer that steps its own offset through tape text: warned, with
-# Str::Scanner named as the way to keep text and offset together.
+# String::Scanner named as the way to keep text and offset together.
 @[OnTape]
 struct Words
-  @text : Str
+  @text : String
   @pos : Int32
 
-  def initialize(@text : Str)
+  def initialize(@text : String)
     @pos = 0
   end
 

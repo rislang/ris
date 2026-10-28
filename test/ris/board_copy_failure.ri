@@ -1,12 +1,12 @@
 @[OnTape]
 struct BoardCopyFailure
-  getter text : Str
-  getter after : Ary(Str)
-  def initialize(@text : Str, @after : Ary(Str))
+  getter text : String
+  getter after : Array(String)
+  def initialize(@text : String, @after : Array(String))
   end
 end
 
-values = Ary(Str).new(1)
+values = Array(String).new(1)
 values << "after"
 raise "post" unless RisBoard.post(BoardCopyFailure.new("before", values))
 group do |g|

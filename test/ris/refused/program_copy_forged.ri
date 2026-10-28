@@ -1,8 +1,8 @@
 class State
-  @@text : Str? = nil
-  def self.keep(text : Str)
+  @@text : String? = nil
+  def self.keep(text : String)
     @@text = text
   end
 end
 
-State.keep(__ris_program_init { Str.new("request") })
+State.keep(__ris_program_init { String.new("request") })

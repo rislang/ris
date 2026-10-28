@@ -1,6 +1,6 @@
 # A runtime body is opaque, but its lexical callback can reenter the cycle.
 def descend(n : Int32) : Int32
-  local = Ary(Int32).new
+  local = Array(Int32).new
   local << n
   local.each do |value|
     descend(value - 1) if value > 0

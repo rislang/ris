@@ -4,10 +4,10 @@ module call_graph_target
 
 @[Owner]
 struct Workspace
-  getter bytes : Ary(UInt8)
+  getter bytes : Array(UInt8)
 
   def initialize
-    @bytes = Ary(UInt8).new
+    @bytes = Array(UInt8).new
   end
 end
 

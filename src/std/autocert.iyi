@@ -248,7 +248,7 @@ struct AutocertFiles
     image = RisTaskConfig.new(path.as_tape)
     defer image.close
     group do |g|
-      task = g.spawn { File.read(image.read(Str).to_heap) }
+      task = g.spawn { File.read(image.read(String).to_heap) }
       got = task.value
       if got.is_a?(Panicked)
         # A concurrent success may retire an error/challenge entry after
@@ -270,7 +270,7 @@ struct AutocertFiles
     error = nil.as(AutocertError?)
     group do |g|
       task = g.spawn do
-        folder, target, bytes = image.read(Tuple(Str, Str, Str))
+        folder, target, bytes = image.read(Tuple(String, String, String))
         Dir.mkdir_p(folder.to_heap, 0o700) unless Dir.exists?(folder.to_heap)
         temporary = "#{target.to_heap}.#{AutocertPem.hex(Random::Secure.random_bytes(8))}.tmp"
         defer File.delete(temporary) if File.exists?(temporary)
@@ -292,7 +292,7 @@ struct AutocertFiles
     error = nil.as(AutocertError?)
     group do |g|
       task = g.spawn do
-        input = image.read(Str).to_heap
+        input = image.read(String).to_heap
         File.delete(input) if File.exists?(input)
         0
       end
@@ -327,20 +327,20 @@ end
 # Configuration is finite Copyable data, including PEM trust roots.
 @[OnTape]
 pub struct AutocertConfig
-  getter directory_url : Str
-  getter cache_dir : Str
-  getter hosts : Ary(Str)
-  property email : Str = "".as_tape
+  getter directory_url : String
+  getter cache_dir : String
+  getter hosts : Array(String)
+  property email : String = "".as_tape
   property accept_terms : Bool = false
   property wait_ms : Int32 = 60000
   property retry_ms : Int32 = 60000
   property renew_before_ms : Int64 = 2592000000_i64
-  property challenges : Ary(Str)
-  property roots_pem : Str = "".as_tape
-  property ca_roots_pem : Str = "".as_tape
+  property challenges : Array(String)
+  property roots_pem : String = "".as_tape
+  property ca_roots_pem : String = "".as_tape
 
-  def initialize(@directory_url : Str, @cache_dir : Str, @hosts : Ary(Str))
-    @challenges = Ary(Str).new(2)
+  def initialize(@directory_url : String, @cache_dir : String, @hosts : Array(String))
+    @challenges = Array(String).new(2)
     @challenges << "tls-alpn-01".as_tape << "http-01".as_tape
   end
 
@@ -356,10 +356,10 @@ end
 
 @[OnTape]
 pub struct AutocertOrder
-  getter name : Str
+  getter name : String
   getter control : AutocertControl
 
-  def initialize(@name : Str, @control : AutocertControl = AutocertControl::Certificate)
+  def initialize(@name : String, @control : AutocertControl = AutocertControl::Certificate)
   end
 
   def self.stop : AutocertOrder
@@ -414,7 +414,7 @@ pub class AutocertView
     identity
   end
 
-  def identity_for(server_name : String?, alpn : Array(String) | Ary(String) | Nil, left_ms : Int32? = nil) : TlsIdentity | TlsError
+  def identity_for(server_name : String?, alpn : Array(String) | Array(String) | Nil, left_ms : Int32? = nil) : TlsIdentity | TlsError
     return TlsError.new("autocert: the client names no host (server_name)", TlsAlert::UNRECOGNIZED_NAME) unless server_name
     name = server_name.downcase
     if alpn && alpn.size == 1 && alpn[0] == AcmeTlsAlpn01::PROTOCOL
@@ -772,7 +772,7 @@ pub struct Autocert
         # Completed flights need no mailbox replies: poll retained tasks
         # while there are any, then return to the renewal deadline.
         wake_at = now + 50_i64 unless flights.empty?
-        due = nil.as(Str?)
+        due = nil.as(String?)
         held.each do |name, certificate|
           next if flights.has_key?(name)
           if certificate.renew_at_ms <= now
@@ -817,19 +817,19 @@ pub struct Autocert
 
   @[TaskClosureUnsafe("run joins flights before closing their packed inputs")]
   private def self.start_flight(g : IyiGroup, config : AutocertConfig,
-                               name : Str, retry_delay : Int64,
+                               name : String, retry_delay : Int64,
                                factory : F.class) forall F
     image = RisTaskConfig.new({config, name, retry_delay})
     task = g.spawn do
       # A flight panic belongs to this inner group, never its siblings.
       outcome = group do |own|
         flight = own.spawn do
-          settings, flight_name, delay = image.read(Tuple(AutocertConfig, Str, Int64))
+          settings, flight_name, delay = image.read(Tuple(AutocertConfig, String, Int64))
           F.new(settings).issue(flight_name.to_heap)
         end
         flight.value
       end
-      settings, flight_name, delay = image.read(Tuple(AutocertConfig, Str, Int64))
+      settings, flight_name, delay = image.read(Tuple(AutocertConfig, String, Int64))
       flight_error = if outcome.is_a?(Panicked)
         AutocertError.new(outcome.message)
       elsif outcome.is_a?(AutocertError)

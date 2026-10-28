@@ -6,7 +6,7 @@ import std/int
 def hold(i : Int32) : Int64
   total = 0_i64
   tape do
-    values = Ary(Int64).new(4)
+    values = Array(Int64).new(4)
     values.push(i.to_i64)
     sleep(200)
     values.each { |v| total = total + v }
@@ -16,7 +16,7 @@ end
 
 N = 1000
 group do |g|
-  tasks = Ary(IyiTask(Int64)).new(N)
+  tasks = Array(IyiTask(Int64)).new(N)
   N.times do |i|
     tasks << g.spawn { hold(i) }
   end

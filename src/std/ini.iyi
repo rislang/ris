@@ -39,7 +39,7 @@ pub struct INI
     result
   end
 
-  def self.parse(string : Str) : TapeINI
+  def self.parse(string : String) : TapeINI
     text = string.starts_with?("\uFEFF") ? string[3..] : string
     parse_lines(text.split('\n'))
   end
@@ -48,7 +48,7 @@ pub struct INI
     parse(io.read_all)
   end
 
-  private def self.parse_lines(lines : Ary(Str)) : TapeINI
+  private def self.parse_lines(lines : Array(String)) : TapeINI
     ini = TapeINI.new
     current_section = TapeProperties.new
     ini["".as_tape] = current_section
@@ -120,7 +120,7 @@ pub struct INI
 
   # The 1-based character column of byte *index* in *line*: every byte
   # that is not a UTF-8 continuation byte begins a character.
-  private def self.column(line : Str, index : Int32) : Int32
+  private def self.column(line : String, index : Int32) : Int32
     raw = line
     count = 0
     i = 0
@@ -146,11 +146,11 @@ pub struct INI
     result
   end
 
-  def self.build(ini : TapeINI, space : Bool = false) : Str
-    Str.build { |w| build(ini, w, space) }
+  def self.build(ini : TapeINI, space : Bool = false) : String
+    String.build { |w| build(ini, w, space) }
   end
 
-  def self.build(ini : TapeINI, writer : Str::Builder,
+  def self.build(ini : TapeINI, writer : String::Builder,
                  space : Bool = false) : Nil
     delim = space ? " = " : "="
     # Written verbatim, a value holding a line break wrote lines of its
@@ -202,7 +202,7 @@ pub struct INI
     io.write(build(ini, space))
   end
 
-  private def self.unwritable_section(name : Str) : String?
+  private def self.unwritable_section(name : String) : String?
     return "it holds a line break" if line_break?(name)
     return "it holds `]`" if name.includes?(']')
     nil
@@ -212,7 +212,7 @@ pub struct INI
   # mark, so a top-level key opening with one, written first, came back
   # without it: `{"" => {"\uFEFFkey" => "v"}}` read back as `key`. Which
   # key is first is the hash's order, so it is refused wherever it is.
-  private def self.unwritable_key(key : Str) : String?
+  private def self.unwritable_key(key : String) : String?
     return "it is empty" if key.empty?
     return "it holds a line break" if line_break?(key)
     return "it holds `=`" if key.includes?('=')
@@ -227,13 +227,13 @@ pub struct INI
     nil
   end
 
-  private def self.unwritable_value(value : Str) : String?
+  private def self.unwritable_value(value : String) : String?
     return "it holds a line break" if line_break?(value)
     return "blanks at either end are not read back" if value != trim(value)
     nil
   end
 
-  private def self.trim(text : Str) : Str
+  private def self.trim(text : String) : String
     first = 0
     last = text.bytesize
     while first < last
@@ -253,7 +253,7 @@ pub struct INI
   end
 
   # Char#whitespace?'s UTF-8 bytes, as String#strip reads them.
-  private def self.blank_width(text : Str, at : Int32) : Int32
+  private def self.blank_width(text : String, at : Int32) : Int32
     b = text[at]
     return 1 if b == 32_u8 || (b >= 9_u8 && b <= 13_u8)
     left = text.bytesize - at
@@ -273,7 +273,7 @@ pub struct INI
     0
   end
 
-  private def self.line_break?(text : Str) : Bool
+  private def self.line_break?(text : String) : Bool
     text.includes?('\n') || text.includes?('\r')
   end
 end
@@ -281,33 +281,33 @@ end
 # Ordered fields on the caller's tape; names and values view the input.
 @[OnTape]
 pub struct TapeProperty
-  getter key : Str
-  getter value : Str
+  getter key : String
+  getter value : String
 
-  def initialize(@key : Str, @value : Str)
+  def initialize(@key : String, @value : String)
   end
 end
 
 @[OnTape]
 pub struct TapeProperties
-  @entries : Ary(TapeProperty)
+  @entries : Array(TapeProperty)
 
   def initialize
-    @entries = Ary(TapeProperty).new
+    @entries = Array(TapeProperty).new
   end
 
-  def []?(key : String | Str) : Str?
+  def []?(key : String | String) : String?
     @entries.each do |field|
       return field.value if field.key == key
     end
     nil
   end
 
-  def [](key : String | Str) : Str
+  def [](key : String | String) : String
     self[key]? || raise "INI: missing key"
   end
 
-  def []=(key : Str, value : Str) : Nil
+  def []=(key : String, value : String) : Nil
     @entries.each_with_index do |field, i|
       if field.key == key
         @entries[i] = TapeProperty.new(key, value)
@@ -325,11 +325,11 @@ pub struct TapeProperties
     @entries.empty?
   end
 
-  def has_key?(key : String | Str) : Bool
+  def has_key?(key : String | String) : Bool
     !self[key]?.nil?
   end
 
-  def each(& : Str, Str -> Nil) : Nil
+  def each(& : String, String -> Nil) : Nil
     @entries.each { |field| yield field.key, field.value }
   end
 
@@ -343,33 +343,33 @@ end
 # Ordered fields on the caller's tape; names and values view the input.
 @[OnTape]
 pub struct TapeSection
-  getter key : Str
+  getter key : String
   getter value : TapeProperties
 
-  def initialize(@key : Str, @value : TapeProperties)
+  def initialize(@key : String, @value : TapeProperties)
   end
 end
 
 @[OnTape]
 pub struct TapeINI
-  @entries : Ary(TapeSection)
+  @entries : Array(TapeSection)
 
   def initialize
-    @entries = Ary(TapeSection).new
+    @entries = Array(TapeSection).new
   end
 
-  def []?(key : String | Str) : TapeProperties?
+  def []?(key : String | String) : TapeProperties?
     @entries.each do |field|
       return field.value if field.key == key
     end
     nil
   end
 
-  def [](key : String | Str) : TapeProperties
+  def [](key : String | String) : TapeProperties
     self[key]? || raise "INI: missing key"
   end
 
-  def []=(key : Str, value : TapeProperties) : Nil
+  def []=(key : String, value : TapeProperties) : Nil
     @entries.each_with_index do |field, i|
       if field.key == key
         @entries[i] = TapeSection.new(key, value)
@@ -387,11 +387,11 @@ pub struct TapeINI
     @entries.empty?
   end
 
-  def has_key?(key : String | Str) : Bool
+  def has_key?(key : String | String) : Bool
     !self[key]?.nil?
   end
 
-  def each(& : Str, TapeProperties -> Nil) : Nil
+  def each(& : String, TapeProperties -> Nil) : Nil
     @entries.each { |field| yield field.key, field.value }
   end
 

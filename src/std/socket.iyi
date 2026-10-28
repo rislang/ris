@@ -546,7 +546,7 @@ pub struct IyiSocket
   # timeout's when the time ran out first. A name with one address is
   # connected to as an address is, and fails with that address's error.
   def self.connect(
-    host : String | Str,
+    host : String | String,
     port : Int32,
     timeout_ms : Int32 = -1,
   ) : IyiSocket | Cancelled | SocketError
@@ -563,7 +563,7 @@ pub struct IyiSocket
   # hosts file and search list of the program's choosing, rather than the
   # machine's. An address and `localhost` are what they are either way.
   def self.connect(
-    host : String | Str,
+    host : String | String,
     port : Int32,
     resolver : Resolver,
     timeout_ms : Int32 = -1,
@@ -579,7 +579,7 @@ pub struct IyiSocket
   # is all digits), and not `localhost`, which never leaves the machine
   # (RFC 6761 6.3). Everything else goes to the numeric parsers, whose
   # refusals are what they were.
-  private def self.named?(host : String | Str) : ::Bool
+  private def self.named?(host : String | String) : ::Bool
     !localhost?(host) && DnsName.valid?(host)
   end
 
@@ -865,8 +865,8 @@ pub struct IyiSocket
   # *host* and *port* as a message names them: an IPv6 literal in its
   # brackets, as a URL writes it. Bare, `::1:57456` was an address with
   # no port, and `ff02::1:80` another address altogether.
-  def self.endpoint(host : Str, port : Int32) : Str
-    Str.build(host.bytesize + 16) do |writer|
+  def self.endpoint(host : String, port : Int32) : String
+    String.build(host.bytesize + 16) do |writer|
       brackets = host.includes?(":") && !host.starts_with?("[")
       writer << '[' if brackets
       writer << host
@@ -894,14 +894,14 @@ pub struct IyiSocket
   # handshake is over.
   # The OS borrows the packed address until connect has completed.
   @[TapeUnsafe]
-  def self.connect_to(addr : Str, family : Int32, peer : String | Str,
+  def self.connect_to(addr : String, family : Int32, peer : String | String,
                       ms : Int32 = -1) : IyiSocket | Cancelled | SocketError
     connect_to(addr.to_unsafe, family, peer, ms)
   end
 
   # SocketError still retains its operation text on the heap.
   @[TapeToHeap]
-  def self.connect_to(addr : Pointer(UInt8), family : Int32, peer : String | Str, ms : Int32 = -1) : IyiSocket | Cancelled | SocketError
+  def self.connect_to(addr : Pointer(UInt8), family : Int32, peer : String | String, ms : Int32 = -1) : IyiSocket | Cancelled | SocketError
     fd = __sys_socket(family)
     return SocketError.new("create a socket", __sys_code(fd.to_i64)) if fd < 0
     __sys_no_sigpipe(fd)
@@ -1051,7 +1051,7 @@ pub struct IyiSocket
   # writes straight into the writer's room, nothing copied. Answers how
   # many came, 0 at the end of the stream.
   @[TapeUnsafe]
-  def read(writer : Str::Builder, max : Int32) : Int32 | Cancelled | SocketError
+  def read(writer : String::Builder, max : Int32) : Int32 | Cancelled | SocketError
     result = 0.as(Int32 | Cancelled | SocketError)
     writer.unsafe_append(max) do |room|
       got = read(room, max)
@@ -1071,7 +1071,7 @@ pub struct IyiSocket
 
   # The OS borrows the text only until the write completes.
   @[TapeUnsafe]
-  def write(contents : String | Str) : Int32 | Cancelled | SocketError
+  def write(contents : String | String) : Int32 | Cancelled | SocketError
     contents = contents.as_tape
     # Checked before the loop: `write("")` on a closed socket has nothing
     # to send and answered 0 where `write("x")` refused.
@@ -1102,8 +1102,8 @@ pub struct IyiSocket
   # Both views go directly to the OS; no piece is retained.
   @[TapeUnsafe]
   def write(
-    first : String | Str,
-    second : String | Str,
+    first : String | String,
+    second : String | String,
   ) : Int32 | Cancelled | SocketError
     raise "socket is closed" if @state.value.fd < 0
     write_pair(first.as_tape.to_unsafe, first.bytesize,
@@ -1113,7 +1113,7 @@ pub struct IyiSocket
   # Up to `SENDV_PIECES` of *pieces* from *index*, the first from byte
   # *offset*, in one sendv: their tape addresses go into the iovec.
   @[TapeUnsafe]
-  private def sendv(pieces : Ary(Str), index : Int32, offset : Int32) : Int64
+  private def sendv(pieces : Array(String), index : Int32, offset : Int32) : Int64
     iov = uninitialized UInt64[128]
     words = pointerof(iov).as(UInt64*)
     count = 0
@@ -1135,7 +1135,7 @@ pub struct IyiSocket
   # *pieces* in order, as one write where the platform takes several
   # buffers in a call: a head and a page's runs go out without being
   # joined into one buffer first, up to `SENDV_PIECES` a call.
-  def write(pieces : Ary(Str)) : Int32 | Cancelled | SocketError
+  def write(pieces : Array(String)) : Int32 | Cancelled | SocketError
     raise "socket is closed" if @state.value.fd < 0
     total = 0
     pieces.each { |piece| total = total + piece.bytesize }
@@ -1243,7 +1243,7 @@ pub struct IyiSocket
   # A failed setup is a value so a supervisor can distinguish it from a
   # request panic. The socket is never published before setup succeeds.
   @[TapeUnsafe]
-  def self.listen_result(host : String | Str, port : Int32,
+  def self.listen_result(host : String | String, port : Int32,
                         backlog : Int32 = 128,
                         reuse_port : Bool = false,
                         task_owned : Bool = false) : IyiSocket | SocketError
@@ -1282,7 +1282,7 @@ pub struct IyiSocket
   end
 
   @[TapeToHeap]
-  def self.listen(host : String | Str, port : Int32, backlog : Int32 = 128,
+  def self.listen(host : String | String, port : Int32, backlog : Int32 = 128,
                   reuse_port : Bool = false) : IyiSocket
     result = listen_result(host, port, backlog, reuse_port)
     if result.is_a?(SocketError)
@@ -1457,7 +1457,7 @@ pub struct IyiSocket
   # (`"010.1.1.1"` is refused; glibc's `inet_aton` reads `010` as octal 8,
   # CVE-2021-29921, so it must not quietly be 10 here), plus `localhost`.
   # The refusal inspects the host so a stray space shows.
-  def self.parse_ip(host : String | Str) : IPv4Address
+  def self.parse_ip(host : String | String) : IPv4Address
     return IPv4Address.new(127_u8, 0_u8, 0_u8, 1_u8) if localhost?(host)
     return IPv4Address.new(0_u8, 0_u8, 0_u8, 0_u8) if host == "0.0.0.0" || host == ""
     read = read_ipv4(host)
@@ -1469,7 +1469,7 @@ pub struct IyiSocket
   # answer instead of a panic: the resolver reads the addresses a hosts
   # file and a resolv.conf write, and a line it cannot read is skipped
   # there, not the end of the program.
-  def self.read_ipv4(host : String | Str) : IPv4Address | String
+  def self.read_ipv4(host : String | String) : IPv4Address | String
     parts = 0
     curr = 0
     has_digit = false
@@ -1517,7 +1517,7 @@ pub struct IyiSocket
   # `LOCALHOST` and `localhost.`. Matched exactly, these were "cannot
   # resolve address: \"LOCALHOST\"", and so were `Localhost` and
   # `localhost.`.
-  def self.localhost?(host : String | Str) : ::Bool
+  def self.localhost?(host : String | String) : ::Bool
     size = host.bytesize
     size = size - 1 if size == 10 && host.as_tape[9] == 46_u8
     return false unless size == 9
@@ -1537,7 +1537,7 @@ pub struct IyiSocket
   # groups, and a dotted IPv4 tail for the last two (`::ffff:1.2.3.4`). A
   # zone (`fe80::1%eth0`) is refused by name: it names an interface, and
   # this parser has no way to ask the platform which.
-  def self.parse_ipv6(host : String | Str) : IPv6Address
+  def self.parse_ipv6(host : String | String) : IPv6Address
     read = read_ipv6(host)
     raise read if read.is_a?(String)
     read
@@ -1545,7 +1545,7 @@ pub struct IyiSocket
 
   # The reading alone, the refusal's sentence as the answer: see
   # `read_ipv4`.
-  def self.read_ipv6(host : String | Str) : IPv6Address | String
+  def self.read_ipv6(host : String | String) : IPv6Address | String
     room = uninitialized StaticArray(Int32, 8)
     groups = pointerof(room).as(Pointer(Int32))
     count = 0
@@ -1638,7 +1638,7 @@ pub struct IyiSocket
     IPv6Address.new(high, low)
   end
 
-  private def self.ipv6_refused(host : String | Str, why : String) : String
+  private def self.ipv6_refused(host : String | String, why : String) : String
     "cannot resolve address: #{host.inspect}: #{why}"
   end
 
@@ -1652,9 +1652,9 @@ pub struct IyiSocket
   # A host and port as the address a call takes, and its family: an IPv6
   # literal bare or in brackets, anything else IPv4.
   def self.sockaddr(
-    host : String | Str,
+    host : String | String,
     port : Int32,
-  ) : Tuple(Str, Int32)
+  ) : Tuple(String, Int32)
     size = host.bytesize
     if size >= 2 && host.as_tape[0].chr == '[' &&
        host.as_tape[size - 1].chr == ']'
@@ -1665,9 +1665,9 @@ pub struct IyiSocket
   end
 
   # Packed addresses belong to the caller's tape, through the OS call.
-  def self.address_bytes(ip : IPv4Address, port : Int32) : Str
+  def self.address_bytes(ip : IPv4Address, port : Int32) : String
     raise "port #{port} is not a port: 0 to 65535" if port < 0 || port > 65535
-    Str.build(16) do |writer|
+    String.build(16) do |writer|
       {% if flag?(:darwin) %}
         writer.push(16_u8)
         writer.push(2_u8)
@@ -1685,9 +1685,9 @@ pub struct IyiSocket
     end
   end
 
-  def self.address_bytes(ip : IPv6Address, port : Int32) : Str
+  def self.address_bytes(ip : IPv6Address, port : Int32) : String
     raise "port #{port} is not a port: 0 to 65535" if port < 0 || port > 65535
-    Str.build(28) do |writer|
+    String.build(28) do |writer|
       {% if flag?(:darwin) %}
         writer.push(28_u8)
         writer.push(AF_INET6.to_u8)
@@ -3863,7 +3863,7 @@ pub class Resolver
       # forger's guess, one that does not read - goes with the tape.
       got = nil.as(DnsMessage | DnsError | SocketError | Nil)
       tape do
-        datagram = Str::Builder.new(DATAGRAM_ROOM)
+        datagram = String::Builder.new(DATAGRAM_ROOM)
         count = Resolver.receive(fd, datagram)
         if count < 0_i64
           got = SocketError.new("receive", IyiSocket.__sys_code(count)) unless IyiSocket.__sys_would_block?(count)
@@ -3893,7 +3893,7 @@ pub class Resolver
   # One datagram from *fd* onto the end of *writer*: its size, or the
   # receive's negative error.
   @[TapeUnsafe]
-  def self.receive(fd : Int32, writer : Str::Builder) : Int64
+  def self.receive(fd : Int32, writer : String::Builder) : Int64
     count = 0_i64
     writer.unsafe_append(DATAGRAM_ROOM) do |room|
       count = IyiSocket.__sys_recv(fd, room, DATAGRAM_ROOM.to_u64)

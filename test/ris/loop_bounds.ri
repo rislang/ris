@@ -1,7 +1,7 @@
 # `while i < a.size` reads and writes `a[i]` with no second bound check;
 # a negative start is still refused, and a heap Array is read as written.
 tape do
-  a = Ary(Int64).new(3) { |i| (i * 10).to_i64 }
+  a = Array(Int64).new(3) { |i| (i * 10).to_i64 }
   i = 0
   while i < a.size
     a[i] = a[i] + 1_i64

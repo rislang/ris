@@ -5,7 +5,7 @@ module test/ris/size_failure
 @[OnTape]
 struct Lexer
   def initialize
-    @sc = Str::Scanner.new(Str.new("x"))
+    @sc = String::Scanner.new(String.new("x"))
   end
 
   def overflow
@@ -18,21 +18,21 @@ end
 
 case ARGV_UNSAFE[1][0]
 when 97 # a: count cannot fit the tape type's public Int32 length.
-  Ary(UInt8).new(2147483648_i64)
+  Array(UInt8).new(2147483648_i64)
 when 98 # b: check element bytes before narrowing a huge count.
-  Ary(UInt64).new(4611686018427387904_i64)
+  Array(UInt64).new(4611686018427387904_i64)
 when 99
-  Ary(Int32).new(-1)
+  Array(Int32).new(-1)
 when 100
-  Str::Builder.new(-1)
+  String::Builder.new(-1)
 when 101
   Tre(Int32).new(-1)
 when 102
-  Str::Builder.new.reserve(-1)
+  String::Builder.new.reserve(-1)
 when 103
-  Str::Builder.new.reserve(2147483648_i64)
+  String::Builder.new.reserve(2147483648_i64)
 when 104
-  Str.new("ab") * 2147483647
+  String.new("ab") * 2147483647
 when 105
   RisRegion.mapping_length(18446744073709551615_u64)
 when 106
@@ -55,11 +55,11 @@ when 112
 when 113
   Tape.grown(2147483647_u64)
 when 114
-  scanner = Str::Scanner.new(Str.new("x"))
+  scanner = String::Scanner.new(String.new("x"))
   scanner.advance(2147483647)
   scanner.advance
 when 115
-  scanner = Str::Scanner.new(Str.new("x"))
+  scanner = String::Scanner.new(String.new("x"))
   scanner.advance(-2147483648)
   scanner.advance(-1)
 when 116

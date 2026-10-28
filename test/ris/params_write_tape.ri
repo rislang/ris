@@ -2,7 +2,7 @@ module test/ris/params_write_tape
 import std/uri::{Params}
 
 tape do
-  w = Str::Builder.new(256)
+  w = String::Builder.new(256)
   w << "prefix:"
   Params.parse("?q=caf%C3%A9+au+lait&x=%FF&x=%zz&empty=&bare".as_tape).to_s(w)
   raise "serialization" unless w.finish == "prefix:q=caf%C3%A9+au+lait&x=%FF&x=%25zz&empty=&bare="

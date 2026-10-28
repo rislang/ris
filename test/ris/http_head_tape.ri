@@ -1,7 +1,7 @@
 module test/ris/http_head_tape
 import std/http_head::{HeadParser, ParsedHead, HeadError, Incoming}
 
-def refused(text : Str, expected : Str) : Nil
+def refused(text : String, expected : String) : Nil
   error = HeadParser.parse_head(text)
   raise "diagnostic" unless error.is_a?(HeadError) && error.message == expected
 end
@@ -25,7 +25,7 @@ tape do
   refused("GET / HTTP/1.1\r\nX: a\u0000\r\n\r\n", "header X contains a control character")
   refused("GET / HTTP/1.1\r\nHost: a b\r\n\r\n", "not a host: \"a b\"")
   refused("GET / HTTP/1.1\r\n\r\n", "an HTTP/1.1 request without Host")
-  error = HeadParser.parse_head(Str.build(HeadParser::MAX_HEAD + 1) do |w|
+  error = HeadParser.parse_head(String.build(HeadParser::MAX_HEAD + 1) do |w|
     (HeadParser::MAX_HEAD + 1).times { w << "x" }
   end)
   raise "limit" unless error.is_a?(HeadError) && error.status == 431 && error.message == "request headers past 1048576 bytes"

@@ -16,8 +16,8 @@ module samples/report
 # The method and path are views into the line, not copies.
 @[OnTape]
 struct Hit
-  getter method : Str
-  getter path : Str
+  getter method : String
+  getter path : String
   getter status : Int32
   getter ms : Int32
 
@@ -26,29 +26,29 @@ struct Hit
 end
 
 # The line cut at its spaces into a Hit; every part is a view.
-def parse(line : Str) : Hit
+def parse(line : String) : Hit
   parts = line.split(' ')
   Hit.new(parts[0], parts[1], parts[2].to_i, parts[3].to_i)
 end
 
-DAYS = Ary(Str){
+DAYS = Array(String){
   "GET /users/1 200 12\nGET /users/2 200 640\nPOST /login 500 30\n" \
   "GET /users/1/status 200 980\n",
   "GET / 200 4\nGET /search 200 1210\nGET /users/9 404 3\n",
 }
 
-slowest = Ary(Str).new(DAYS.size)
+slowest = Array(String).new(DAYS.size)
 
 DAYS.each_with_index do |log, day|
   tape do
-    hits = Ary(Hit).new
+    hits = Array(Hit).new
     log.as_tape.each_line { |line| hits << parse(line) }
 
     errors = hits.count { |h| h.status >= 500 }
     slow = hits.select { |h| h.ms > 500 }
     top = slow.sorted_by { |h| -h.ms }
 
-    report = Str::Builder.new(256)
+    report = String::Builder.new(256)
     report << "day " << day + 1 << ": " << hits.size << " hits, "
     report << errors << " errors, slow:"
     top.each { |h| report << " " << h.path << " (" << h.ms << " ms)" }
@@ -59,7 +59,7 @@ DAYS.each_with_index do |log, day|
   end
 end
 
-summary = Str::Builder.new(128)
+summary = String::Builder.new(128)
 summary << "slowest each day: "
 slowest.join(summary, ", ")
 puts summary

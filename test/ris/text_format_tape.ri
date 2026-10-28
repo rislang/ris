@@ -2,7 +2,7 @@ module test/ris/text_format_tape
 
 import std/log_text::{LogField, LogText}
 
-w = Str::Builder.new(256)
+w = String::Builder.new(256)
 w << -9223372036854775808_i64 << " " << 18446744073709551615_u64
 raise "full width decimal" unless w.finish == "-9223372036854775808 18446744073709551615"
 w.clear
@@ -18,7 +18,7 @@ w << " "
 (-35_i64).to_s(w, 36)
 raise "zero and base36" unless w.finish == "0 z -z"
 w.clear
-fields = Ary(LogField).new(2)
+fields = Array(LogField).new(2)
 fields << LogField.new("id", "42")
 fields << LogField.new("name", "a \"b\"\n")
 w << "1970-01-01T00:00:00.000000Z"
@@ -34,7 +34,7 @@ w.clear
 w.push(35_u8)
 w.push(123_u8)
 text = w.finish
-quoted = Str::Builder.new(16)
+quoted = String::Builder.new(16)
 text.inspect(quoted)
 raise "interpolation escape" unless quoted.finish.bytesize == 5 && quoted.finish[1] == 92_u8
 puts "text formatting: zero heap"

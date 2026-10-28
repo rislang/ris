@@ -1,7 +1,7 @@
 module test/ris/fibers/cleanup_panic
 import std/int
 
-def observe(label : Str, active : Bool) : Nil
+def observe(label : String, active : Bool) : Nil
   raise "wrong tape lifetime at #{label}" unless (RisRegion.tape != 0_u64) == active
   puts label
 end

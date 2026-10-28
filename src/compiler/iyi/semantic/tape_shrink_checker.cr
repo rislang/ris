@@ -150,16 +150,16 @@ class Iyi::TapeShrinkChecker
     name = type_name(type)
     target = type_name(wanted.remove_typedef)
     compatible = name == target ||
-                 ({"Str", "Str::Span"}.includes?(target) &&
-                  {"Str::Builder", "Ary(UInt8)"}.includes?(name))
+                 ({"String", "String::Span"}.includes?(target) &&
+                  {"String::Builder", "Array(UInt8)"}.includes?(name))
     result = compatible ? [root] : [] of UInt64
     # A reference field does not own the bytes it views. By-value nesting
     # does: inspect it even when its getter has not yet been called.
     if type.struct? && type.is_a?(InstanceVarContainer) &&
-       !storage_type?(type) && !{"Str", "Str::Span"}.includes?(name)
+       !storage_type?(type) && !{"String", "String::Span"}.includes?(name)
       type.instance_vars.each do |field, var|
         if field_type = var.type?
-          next if {"Str", "Str::Span"}.includes?(type_name(field_type))
+          next if {"String", "String::Span"}.includes?(type_name(field_type))
           next if field_type.is_a?(PointerInstanceType)
           result.concat(candidate_roots(field_root(root, field), field_type,
             wanted, seen.dup))
@@ -257,7 +257,7 @@ class Iyi::TapeShrinkChecker
     end
     type.struct? && TapeChecker.tape?(@program, type) &&
       !TapeOwnerChecker.owner?(@program, type) && !storage_type?(type) &&
-      !{"Str", "Str::Span"}.includes?(type_name(type))
+      !{"String", "String::Span"}.includes?(type_name(type))
   end
 
   private def source_roots(v : Value) : Array(UInt64)
@@ -612,7 +612,7 @@ class Iyi::TapeShrinkChecker
 
   private def storage_type_uncached(type : Type?) : Bool
     name = type.try { |t| type_name(t.remove_typedef) } || ""
-    name == "Str::Builder" || name.starts_with?("Ary(") || name.starts_with?("Tre(")
+    name == "String::Builder" || name.starts_with?("Array(") || name.starts_with?("Tre(")
   end
 
   private def reference?(node : ASTNode) : Bool
@@ -623,7 +623,7 @@ class Iyi::TapeShrinkChecker
     return true if storage_type?(type)
     return false unless type
     name = type_name(type.remove_typedef)
-    name == "Str" || name == "Str::Span" || name.starts_with?("Ary::Link(") || name.includes?("View(") || name.includes?("Iterator") ||
+    name == "String" || name == "String::Span" || name.starts_with?("Array::Link(") || name.includes?("View(") || name.includes?("Iterator") ||
       name.starts_with?("Pointer(") || !!TapeChecker.tape_in(@program, type)
   end
 
@@ -768,7 +768,7 @@ class Iyi::TapeShrinkChecker
       if node.name == "new"
         # Ordinary tape allocations use the caller's tape. A named Owner
         # has its own lexical storage, including each of its field paths.
-        @root_scopes[node.object_id] = storage?(node) || {"Str", "Str::Span"}.includes?(type_name(node.type)) ? [] of UInt64 : @scopes.dup
+        @root_scopes[node.object_id] = storage?(node) || {"String", "String::Span"}.includes?(type_name(node.type)) ? [] of UInt64 : @scopes.dup
         @root_types[node.object_id] = node.type
         @root_births[node.object_id] = @uses.size
       end
@@ -796,7 +796,7 @@ class Iyi::TapeShrinkChecker
         end
       end
       element_result : Value? = nil
-      if node.obj.try { |obj| obj.type?.try { |t| type_name(t).starts_with?("Ary(") } } &&
+      if node.obj.try { |obj| obj.type?.try { |t| type_name(t).starts_with?("Array(") } } &&
          {"[]", "[]?", "first", "first?", "last", "last?", "fetch", "__loop_fetch"}.includes?(node.name)
         elements = receiver.roots.map { |r| field_root(r, "[]").as(UInt64) }
         if !elements.empty? && elements.all? { |r| env.slots.has_key?(r) }
@@ -949,7 +949,7 @@ class Iyi::TapeShrinkChecker
           (derived.views + derived.roots.map { |root| view(root) }).uniq)
       elsif {"copy_to", "dup", "to_heap", "new"}.includes?(node.name)
         if reference?(node)
-          @root_scopes[node.object_id] = storage?(node) || {"Str", "Str::Span"}.includes?(type_name(node.type)) ? [] of UInt64 : @scopes.dup
+          @root_scopes[node.object_id] = storage?(node) || {"String", "String::Span"}.includes?(type_name(node.type)) ? [] of UInt64 : @scopes.dup
           Value.new([node.object_id], [] of View)
         else
           EMPTY

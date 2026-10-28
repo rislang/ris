@@ -50,7 +50,7 @@ group do |g|
     cv.is_a?(Int64) && dv.is_a?(Int64)
   raise "unique delivery" unless av + bv + cv + dv == 320400_i64
 end
-seen = Ary(Bool).new(801, false)
+seen = Array(Bool).new(801, false)
 index = 0
 while index < 800
   receipt = RisBoard.take(BoardReceipt)

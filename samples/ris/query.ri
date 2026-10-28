@@ -9,7 +9,7 @@ module samples/query_bench
 import std/uri::{Query}
 
 N = 1000000
-QUERIES = Ary(Str){
+QUERIES = Array(String){
   "q=hello+world&page=2&sort=name",
   "filter=a%2Cb&x=1&y=&z",
   "page=10;limit=50&q=caf%C3%A9",

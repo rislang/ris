@@ -2,6 +2,6 @@ module test/ris/refused/array_grow
 
 # An array grows itself when `push` finds it full.
 tape do
-  a = Ary(Int32).new(4)
+  a = Array(Int32).new(4)
   a.grow
 end

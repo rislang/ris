@@ -1,9 +1,9 @@
-def invoke(b : Str::Builder)
+def invoke(b : String::Builder)
   yield b
 end
 
 def exercise
-  b = Str::Builder.new
+  b = String::Builder.new
   b << "abc"
   v = b.finish
   invoke(b) { |bytes| bytes.clear }

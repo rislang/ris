@@ -1,8 +1,8 @@
-def invoke(callback : Proc(Str::Builder, Nil), bytes : Str::Builder)
+def invoke(callback : Proc(String::Builder, Nil), bytes : String::Builder)
   view = bytes.finish
   callback.call(bytes)
   puts view
 end
 
-callback = ->(bytes : Str::Builder) { bytes.clear; nil }
-tape { invoke(callback, Str::Builder.new) }
+callback = ->(bytes : String::Builder) { bytes.clear; nil }
+tape { invoke(callback, String::Builder.new) }

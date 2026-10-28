@@ -1,5 +1,5 @@
 def descend(n : Int32) : Int32
-  a = Ary(Int32).new
+  a = Array(Int32).new
   a << n
   child = n > 0 ? descend(n - 1) : 0
   child + a.size

@@ -1,8 +1,8 @@
 def temporary(n : Int32) : Int32
   text = "hello"
-  items = Ary(Int32).new(4)
+  items = Array(Int32).new(4)
   items << n
-  writer = Str::Builder.new(16)
+  writer = String::Builder.new(16)
   writer << text
   writer.append_int(items[0])
   writer.length

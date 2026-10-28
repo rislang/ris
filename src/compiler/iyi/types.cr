@@ -1840,7 +1840,7 @@ module Iyi
         type.union_types.size == 2 && type.union_types.any?(&.nil_type?) &&
           type.union_types.any? { |part| view?(part) }
       else
-        type.is_a?(NonGenericClassType) && type.name == "Str"
+        type.is_a?(NonGenericClassType) && type.name == "String"
       end
     end
 

@@ -3,16 +3,16 @@
 # own, past the first one's size, and freed with the tape.
 3.times do |round|
   tape do
-    a = Str::Builder.new(4)
-    b = Str::Builder.new(4)
-    names = Ary(Str).new
+    a = String::Builder.new(4)
+    b = String::Builder.new(4)
+    names = Array(String).new
     count = 300_000
     i = 0
     while i < count
       a.push((65 + i % 26).to_u8)
       b.push((97 + i % 26).to_u8)
       a.push(10_u8) if i % 100_000 == 99_999
-      names.push(Str.build { |w| w.append_int(i) }) if i % 1000 == 0
+      names.push(String.build { |w| w.append_int(i) }) if i % 1000 == 0
       i += 1
     end
     x = a.finish

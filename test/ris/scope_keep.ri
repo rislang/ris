@@ -1,14 +1,14 @@
 # Rounds that grow a value from outside the loop, even through a new name
 # or a block's parameter, keep their tape: nothing they wrote is lost.
 tape do
-  writers = {Str::Builder.new(2)}
+  writers = {String::Builder.new(2)}
   i = 0
   while i < 50_000
     w = writers[0]
     w.push(120_u8)
     i += 1
   end
-  outer = Str::Builder.new(2)
+  outer = String::Builder.new(2)
   50_000.times { |n| outer.append_int(n % 10) }
   text = "abc"
   each_text = 0

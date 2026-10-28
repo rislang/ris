@@ -126,8 +126,8 @@ pub struct Entry
     @data.each { |key, value| yield key, value }
   end
 
-  def tape_data : Ary(LogField)
-    fields = Ary(LogField).new(@data.size)
+  def tape_data : Array(LogField)
+    fields = Array(LogField).new(@data.size)
     each_data do |key, value|
       fields << LogField.new(key.as_tape, value.as_tape)
     end
@@ -138,20 +138,20 @@ end
 # A synchronous entry borrows its text and metadata on the caller's tape.
 @[OnTape]
 pub struct TapeEntry
-  getter source : Str
+  getter source : String
   getter severity : Severity
-  getter message : Str
+  getter message : String
   getter timestamp : Time
-  getter data : Ary(LogField)
+  getter data : Array(LogField)
 
   def initialize(@source, @severity, @message, @timestamp, @data)
   end
 
-  def each_data(& : Str, Str -> Nil) : Nil
+  def each_data(& : String, String -> Nil) : Nil
     @data.each { |field| yield field.key, field.value }
   end
 
-  def tape_data : Ary(LogField)
+  def tape_data : Array(LogField)
     @data
   end
 
@@ -168,14 +168,14 @@ end
 @[OnTape]
 @[Share]
 pub struct Metadata
-  getter bytes : Str
+  getter bytes : String
 
-  def initialize(key : String | Str, value : String | Str, rest : Metadata?)
+  def initialize(key : String | String, value : String | String, rest : Metadata?)
     key = key.as_tape
     value = value.as_tape
     older = rest ? rest.bytes : "".as_tape
     size = 12 + key.bytesize + value.bytesize
-    writer = Str::Builder.new(older.bytesize + size)
+    writer = String::Builder.new(older.bytesize + size)
     writer.append(older)
     writer.write_bytes(key.bytesize)
     writer.write_bytes(value.bytesize)
@@ -187,31 +187,31 @@ pub struct Metadata
 
   # A child keeps its own bytes before its parent's context can close.
   def copy : Metadata
-    writer = Str::Builder.new(@bytes.bytesize)
+    writer = String::Builder.new(@bytes.bytesize)
     writer.append(@bytes)
     Metadata.new(writer.finish)
   end
 
   def self.combine(older : Metadata, newer : Metadata) : Metadata
-    writer = Str::Builder.new(older.bytes.bytesize + newer.bytes.bytesize)
+    writer = String::Builder.new(older.bytes.bytesize + newer.bytes.bytesize)
     writer.append(older.bytes)
     writer.append(newer.bytes)
     Metadata.new(writer.finish)
   end
 
-  protected def initialize(@bytes : Str)
+  protected def initialize(@bytes : String)
   end
 
   private def last_at : Int32
     @bytes.bytesize - @bytes.read_bytes_at(Int32, @bytes.bytesize - 4)
   end
 
-  def key : Str
+  def key : String
     at = last_at
     @bytes[at + 8, @bytes.read_bytes_at(Int32, at)]
   end
 
-  def value : Str
+  def value : String
     at = last_at
     count = @bytes.read_bytes_at(Int32, at)
     @bytes[at + 8 + count, @bytes.read_bytes_at(Int32, at + 4)]
@@ -222,11 +222,11 @@ pub struct Metadata
     at == 0 ? nil : Metadata.new(@bytes[0, at])
   end
 
-  def each(& : Str, Str -> Nil) : Nil
+  def each(& : String, String -> Nil) : Nil
     Metadata.each_field(@bytes) { |key, value| yield key, value }
   end
 
-  def self.each_field(bytes : Str, & : Str, Str -> Nil) : Nil
+  def self.each_field(bytes : String, & : String, String -> Nil) : Nil
     at = 0
     while at < bytes.bytesize
       keys = bytes.read_bytes_at(Int32, at)
@@ -236,7 +236,7 @@ pub struct Metadata
     end
   end
 
-  def self.count_fields(bytes : Str) : Int32
+  def self.count_fields(bytes : String) : Int32
     count = 0
     each_field(bytes) { |_, _| count += 1 }
     count
@@ -246,7 +246,7 @@ pub struct Metadata
     each { |key, value| into[key.to_heap] = value.to_heap }
   end
 
-  def append_into(fields : Ary(LogField)) : Nil
+  def append_into(fields : Array(LogField)) : Nil
     each { |key, value| LogField.set(fields, key, value) }
   end
 
@@ -263,7 +263,7 @@ pub abstract class Formatter
   # The line written onto a tape, then into *io* in one write.
   def format(entry : Entry | TapeEntry, io : IO) : Nil
     tape do
-      w = Str::Builder.new(128)
+      w = String::Builder.new(128)
       format(entry, w)
       w.push(10_u8)
       line = w.finish
@@ -273,16 +273,16 @@ pub abstract class Formatter
 
   # IO's byte write interface requires a pointer and a byte count.
   @[TapeUnsafe]
-  private def write_line(io : IO, line : Str) : Nil
+  private def write_line(io : IO, line : String) : Nil
     io.write(line.to_unsafe, line.bytesize)
   end
 
   # The line written into the caller's *writer*: `format(entry)` unless a
   # formatter writes it there itself.
-  def format(entry : Entry, writer : Str::Builder) : Nil
+  def format(entry : Entry, writer : String::Builder) : Nil
     writer << format(entry)
   end
-  def format(entry : TapeEntry, writer : Str::Builder) : Nil
+  def format(entry : TapeEntry, writer : String::Builder) : Nil
     writer << format(entry.to_heap)
   end
 end
@@ -291,20 +291,20 @@ pub class DefaultFormatter < Formatter
   def format(entry : Entry) : String
     line = ""
     tape do
-      w = Str::Builder.new(128)
+      w = String::Builder.new(128)
       format(entry, w)
       line = w.finish.to_heap
     end
     line
   end
 
-  def format(entry : Entry | TapeEntry, writer : Str::Builder) : Nil
+  def format(entry : Entry | TapeEntry, writer : String::Builder) : Nil
     DefaultFormatter.write(entry, writer)
   end
 
   def self.write(entry : Entry | TapeEntry, io : IO) : Nil
     tape do
-      writer = Str::Builder.new(128)
+      writer = String::Builder.new(128)
       write(entry, writer)
       writer << '\n'
       write_line(io, writer.finish)
@@ -313,12 +313,12 @@ pub class DefaultFormatter < Formatter
 
   # IO accepts bytes only for this synchronous write.
   @[TapeUnsafe]
-  private def self.write_line(io : IO, line : Str) : Nil
+  private def self.write_line(io : IO, line : String) : Nil
     io.write(line.to_unsafe, line.bytesize)
   end
 
   # Also usable without constructing a formatter or backend.
-  def self.write(entry : Entry | TapeEntry, writer : Str::Builder) : Nil
+  def self.write(entry : Entry | TapeEntry, writer : String::Builder) : Nil
     entry.timestamp.to_rfc3339(6, writer)
     fields = entry.tape_data
     LogText.write(entry.source.as_tape, entry.severity.label.as_tape,
@@ -372,16 +372,16 @@ end
 
 @[OnTape]
 pub struct RisLogEntry
-  getter source : Str
+  getter source : String
   getter severity : Severity
-  getter message : Str
-  @data : Str
+  getter message : String
+  @data : String
   @seconds : Int64
   @nanoseconds : Int32
 
   def initialize(entry : TapeEntry)
     @source, @severity, @message = entry.source, entry.severity, entry.message
-    @data = Str.build do |writer|
+    @data = String.build do |writer|
       entry.each_data do |key, value|
         writer.write_bytes(key.bytesize)
         writer.write_bytes(value.bytesize)
@@ -397,8 +397,8 @@ pub struct RisLogEntry
       Time.unix(@seconds, @nanoseconds), data)
   end
 
-  def data : Ary(LogField)
-    fields = Ary(LogField).new(Metadata.count_fields(@data))
+  def data : Array(LogField)
+    fields = Array(LogField).new(Metadata.count_fields(@data))
     Metadata.each_field(@data) do |key, value|
       fields << LogField.new(key, value)
     end
@@ -410,10 +410,10 @@ end
 # Its container belongs to the caller and is reused by clear.
 @[OnTape]
 pub class RisMemoryBackend < Backend
-  getter entries : Ary(RisLogEntry)
+  getter entries : Array(RisLogEntry)
 
   def initialize(@owner : Program::TapeOwner)
-    @entries = Ary(RisLogEntry).new(16)
+    @entries = Array(RisLogEntry).new(16)
   end
 
   def write(entry : TapeEntry) : Nil
@@ -425,10 +425,10 @@ pub class RisMemoryBackend < Backend
       entry.message.as_tape, entry.timestamp, entry.tape_data))
   end
 
-  def output : Ary(Str)
-    lines = Ary(Str).new(@entries.size)
+  def output : Array(String)
+    lines = Array(String).new(@entries.size)
     @entries.each do |entry|
-      lines << Str.build do |writer|
+      lines << String.build do |writer|
         DefaultFormatter.write(entry.tape_entry, writer)
       end
     end
@@ -577,11 +577,11 @@ end
 # Only read-only text crosses into this scratch writer. A tape logger's
 # methods may retain storage in its fields; this writer retains none.
 struct EntryWriter
-  def self.write_entry(source : String, b : Backend, bound : Str,
-                       severity : Severity, message : Str, **data) : Nil
+  def self.write_entry(source : String, b : Backend, bound : String,
+                       severity : Severity, message : String, **data) : Nil
     tape do
       count = data.size + Log.context_size + Metadata.count_fields(bound)
-      fields = Ary(LogField).new(count)
+      fields = Array(LogField).new(count)
       Log.context_into(fields)
       Metadata.each_field(bound) { |key, value| LogField.set(fields, key, value) }
       data.each do |key, value|
@@ -597,7 +597,7 @@ end
 
 @[OnTape]
 pub class Logger
-  def self.on_program(source : Str, level : Severity? = nil,
+  def self.on_program(source : String, level : Severity? = nil,
                       backend : Backend? = nil) : Logger
     logger = RisRegion.program_object(Logger)
     logger.initialize(RisRegion.program_text(source), level, backend)
@@ -608,7 +608,7 @@ pub class Logger
   @level : Severity?
   @backend : Backend?
   @parent : Logger?
-  @children : Ary(Logger)?
+  @children : Array(Logger)?
   # What `bind` gave this logger, on every entry it and its children write.
   @bound : Metadata?
 
@@ -701,7 +701,7 @@ pub class Logger
     child_source = @parent.nil? && @source.empty? ? name : "#{@source}.#{name}"
     child = Logger.new(child_source, nil, nil, self)
     unless children
-      children = Ary(Logger).new
+      children = Array(Logger).new
       @children = children
     end
     children << child
@@ -714,7 +714,7 @@ pub class Logger
     log(severity, message.as_tape, **data)
   end
 
-  def log(severity : Severity, message : Str, **data) : Nil
+  def log(severity : Severity, message : String, **data) : Nil
     return if severity < level || severity == Severity::None
     if b = backend
       node = bound_node
@@ -739,7 +739,7 @@ pub class Logger
     end
   end
 
-  def trace(message : String | Str, **data) : Nil
+  def trace(message : String | String, **data) : Nil
     log(Severity::Trace, message, **data)
   end
 
@@ -747,7 +747,7 @@ pub class Logger
     log(Severity::Trace, **data, &b)
   end
 
-  def debug(message : String | Str, **data) : Nil
+  def debug(message : String | String, **data) : Nil
     log(Severity::Debug, message, **data)
   end
 
@@ -755,7 +755,7 @@ pub class Logger
     log(Severity::Debug, **data, &b)
   end
 
-  def info(message : String | Str, **data) : Nil
+  def info(message : String | String, **data) : Nil
     log(Severity::Info, message, **data)
   end
 
@@ -763,7 +763,7 @@ pub class Logger
     log(Severity::Info, **data, &b)
   end
 
-  def notice(message : String | Str, **data) : Nil
+  def notice(message : String | String, **data) : Nil
     log(Severity::Notice, message, **data)
   end
 
@@ -771,7 +771,7 @@ pub class Logger
     log(Severity::Notice, **data, &b)
   end
 
-  def warn(message : String | Str, **data) : Nil
+  def warn(message : String | String, **data) : Nil
     log(Severity::Warn, message, **data)
   end
 
@@ -779,7 +779,7 @@ pub class Logger
     log(Severity::Warn, **data, &b)
   end
 
-  def error(message : String | Str, **data) : Nil
+  def error(message : String | String, **data) : Nil
     log(Severity::Error, message, **data)
   end
 
@@ -787,7 +787,7 @@ pub class Logger
     log(Severity::Error, **data, &b)
   end
 
-  def fatal(message : String | Str, **data) : Nil
+  def fatal(message : String | String, **data) : Nil
     log(Severity::Fatal, message, **data)
   end
 
@@ -876,7 +876,7 @@ pub class Log
 
   # The lock protects the program-owned slots. Empty slots are reused;
   # metadata bytes belong to the task whose open context installed them.
-  @@contexts : Ary(ContextSlot) = Ary(ContextSlot).new.copy_to(Program.tape)
+  @@contexts : Array(ContextSlot) = Array(ContextSlot).new.copy_to(Program.tape)
   # Static cleanup releases this lock without a callback environment
   # capturing either the lock receiver or task-owned metadata.
   class ContextLock < Mutex(Int32)
@@ -930,7 +930,7 @@ pub class Log
     size
   end
 
-  def self.context_into(fields : Ary(LogField)) : Nil
+  def self.context_into(fields : Array(LogField)) : Nil
     return unless has_context?
     if node = context_node
       node.append_into(fields)
@@ -1040,7 +1040,7 @@ pub class Log
     root.backend = backend
   end
 
-  def self.trace(msg : String | Str, **data) : Nil
+  def self.trace(msg : String | String, **data) : Nil
     root.trace(msg, **data)
   end
 
@@ -1048,7 +1048,7 @@ pub class Log
     root.trace(**data, &b)
   end
 
-  def self.debug(msg : String | Str, **data) : Nil
+  def self.debug(msg : String | String, **data) : Nil
     root.debug(msg, **data)
   end
 
@@ -1056,7 +1056,7 @@ pub class Log
     root.debug(**data, &b)
   end
 
-  def self.info(msg : String | Str, **data) : Nil
+  def self.info(msg : String | String, **data) : Nil
     root.info(msg, **data)
   end
 
@@ -1064,7 +1064,7 @@ pub class Log
     root.info(**data, &b)
   end
 
-  def self.notice(msg : String | Str, **data) : Nil
+  def self.notice(msg : String | String, **data) : Nil
     root.notice(msg, **data)
   end
 
@@ -1072,7 +1072,7 @@ pub class Log
     root.notice(**data, &b)
   end
 
-  def self.warn(msg : String | Str, **data) : Nil
+  def self.warn(msg : String | String, **data) : Nil
     root.warn(msg, **data)
   end
 
@@ -1080,7 +1080,7 @@ pub class Log
     root.warn(**data, &b)
   end
 
-  def self.error(msg : String | Str, **data) : Nil
+  def self.error(msg : String | String, **data) : Nil
     root.error(msg, **data)
   end
 
@@ -1088,7 +1088,7 @@ pub class Log
     root.error(**data, &b)
   end
 
-  def self.fatal(msg : String | Str, **data) : Nil
+  def self.fatal(msg : String | String, **data) : Nil
     root.fatal(msg, **data)
   end
 

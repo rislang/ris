@@ -1,6 +1,6 @@
 tape do
-  bytes = Str::Builder.new
+  bytes = String::Builder.new
   bytes << "abc"
-  read = ->(value : Str::Builder) { value.finish.bytesize }
+  read = ->(value : String::Builder) { value.finish.bytesize }
   puts read.call(bytes)
 end

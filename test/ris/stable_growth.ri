@@ -2,16 +2,16 @@
 module test/ris/stable_growth
 
 @[PointerUnsafe("test element addresses across reserved side growth")]
-def address(a : Ary(Int32)) : UInt64
+def address(a : Array(Int32)) : UInt64
   a.@state.value
 end
 
 @[PointerUnsafe("check saved element pointers after growth")]
 def check_growth
   local_tape do
-    a = Ary(Int32).new(1)
-    b = Ary(Int32).new(1)
-    padding = Str.new("force both arrays off the tape end")
+    a = Array(Int32).new(1)
+    b = Array(Int32).new(1)
+    padding = String.new("force both arrays off the tape end")
     a << 0
     b << 0
     first_a = address(a)

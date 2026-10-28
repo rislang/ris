@@ -1,6 +1,6 @@
 # Interpolation builds a heap String from the tape text, as `to_s` does.
 tape do
-  text = Str.new("abc")
+  text = String.new("abc")
   greeting = String.interpolation("hello ".to_heap, text)
   puts greeting.size
 end

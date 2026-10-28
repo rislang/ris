@@ -89,11 +89,11 @@ end
 @[OnTape]
 pub struct TapeHeaderField
   @owned : HeaderField?
-  getter name : Str
-  getter value : Str
+  getter name : String
+  getter value : String
   getter indexing : IndexingMode
 
-  def initialize(@name : Str, @value : Str,
+  def initialize(@name : String, @value : String,
                  @indexing : IndexingMode = IndexingMode::Incremental,
                  @owned : HeaderField? = nil)
   end
@@ -247,8 +247,8 @@ pub class StaticTable
     end
   end
 
-  def self.find(name : String | Str,
-                value : String | Str) : Tuple(Int32, Bool)
+  def self.find(name : String | String,
+                value : String | String) : Tuple(Int32, Bool)
     name_idx = 0
     i = 1
     while i <= 61
@@ -265,7 +265,7 @@ pub class StaticTable
     {name_idx, false}
   end
 
-  def self.find_name(name : String | Str) : Int32
+  def self.find_name(name : String | String) : Int32
     i = 1
     while i <= 61
       if name == ENTRIES[i].name
@@ -369,8 +369,8 @@ pub class DynamicTable
     end
   end
 
-  def find(name : String | Str,
-           value : String | Str) : Tuple(Int32, Bool)
+  def find(name : String | String,
+           value : String | String) : Tuple(Int32, Bool)
     name_idx = 0
     i = 0
     while i < @entries.size
@@ -387,7 +387,7 @@ pub class DynamicTable
     {name_idx, false}
   end
 
-  def find_name(name : String | Str) : Int32
+  def find_name(name : String | String) : Int32
     i = 0
     while i < @entries.size
       if name == @entries[i].name
@@ -414,8 +414,8 @@ pub class Table
     end
   end
 
-  def self.find(dynamic_table : DynamicTable, name : String | Str,
-                value : String | Str) : Tuple(Int32, Bool)
+  def self.find(dynamic_table : DynamicTable, name : String | String,
+                value : String | String) : Tuple(Int32, Bool)
     s_idx, s_exact = StaticTable.find(name, value)
     return {s_idx, true} if s_exact
 
@@ -434,7 +434,7 @@ pub class Table
   end
 
   def self.find_name(dynamic_table : DynamicTable,
-                     name : String | Str) : Int32
+                     name : String | String) : Int32
     s_idx = StaticTable.find_name(name)
     return s_idx if s_idx > 0
     d_idx = dynamic_table.find_name(name)
@@ -449,7 +449,7 @@ end
 
 pub class Integer
   def self.encode(val : UInt64, prefix_bits : Int32, prefix_byte : UInt8,
-                  buffer : Array(UInt8) | Str::Builder) : Nil
+                  buffer : Array(UInt8) | String::Builder) : Nil
     raise "prefix_bits must be between 1 and 8" if prefix_bits < 1 || prefix_bits > 8
     prefix_max = (1_u64.unsafe_shl(prefix_bits)) - 1_u64
     if val < prefix_max
@@ -472,9 +472,9 @@ pub class Integer
     Bytes.new(buf.size) { |i| buf[i] }
   end
 
-  def self.decode(bytes : Bytes | Str, offset : Int32,
+  def self.decode(bytes : Bytes | String, offset : Int32,
                   prefix_bits : Int32) : Tuple(UInt64, Int32) | HpackError
-    size = bytes.is_a?(Str) ? bytes.bytesize : bytes.size
+    size = bytes.is_a?(String) ? bytes.bytesize : bytes.size
     if prefix_bits < 1 || prefix_bits > 8
       return HpackError.new("Invalid prefix_bits: #{prefix_bits}")
     end
@@ -539,8 +539,8 @@ HUFFMAN_NEXT_STATE = StaticArray[66, 1, 93, 2, 104, 3, 119, 4, 144, 5, 75, 6, 12
 HUFFMAN_SYMBOL = StaticArray[-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 0, 36, -1, -1, -1, -1, -1, -1, 123, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 1, 135, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 254, -1, 2, 3, -1, -1, 4, 5, 6, 7, -1, -1, -1, -1, 8, 11, -1, -1, -1, -1, 239, -1, 9, 142, -1, -1, -1, -1, -1, -1, 249, -1, -1, -1, 10, 13, 12, 14, -1, -1, 15, 16, 17, 18, -1, -1, -1, -1, 19, 20, 21, 23, 22, 256, -1, -1, 24, 25, 26, 27, -1, -1, 28, 29, 30, 31, -1, -1, -1, -1, -1, -1, -1, -1, 32, 37, -1, -1, 33, 34, 124, -1, 35, 62, -1, -1, 38, 42, 63, -1, 39, 43, 40, 41, 44, 59, 45, 46, -1, -1, -1, -1, 47, 51, -1, -1, -1, -1, 48, 49, 50, 97, 52, 53, -1, -1, 54, 55, 56, 57, -1, -1, -1, -1, -1, -1, -1, -1, 58, 66, 60, 96, -1, -1, -1, -1, 61, 65, 64, 91, 67, 68, -1, -1, -1, -1, -1, -1, 69, 70, 71, 72, -1, -1, 73, 74, 75, 76, -1, -1, -1, -1, 77, 78, 79, 80, -1, -1, 81, 82, 83, 84, -1, -1, -1, -1, 85, 86, 87, 89, 88, 90, -1, -1, -1, -1, 92, 195, 93, 126, 94, 125, 95, 98, -1, -1, 99, 101, -1, -1, 100, 102, 103, 104, 105, 111, -1, -1, 106, 107, -1, -1, 108, 109, 110, 112, 113, 118, 114, 117, 115, 116, -1, -1, 119, 120, 121, 122, 127, 220, 208, -1, 128, 130, -1, -1, -1, -1, -1, -1, 230, -1, 129, 132, -1, -1, -1, -1, 131, 162, -1, -1, 133, 134, 136, 146, 137, 138, -1, -1, 139, 140, 141, 143, -1, -1, 144, 145, -1, -1, -1, -1, -1, -1, 147, 149, 148, 159, 150, 151, -1, -1, 152, 155, -1, -1, -1, -1, 153, 161, -1, -1, -1, -1, 154, 156, 157, 158, 160, 163, -1, -1, 164, 169, -1, -1, -1, -1, 165, 166, 167, 172, 168, 174, 170, 173, -1, -1, -1, -1, 171, 206, -1, -1, 175, 180, -1, -1, -1, -1, 176, 177, -1, -1, -1, -1, 178, 181, 179, 209, 182, 183, 184, 194, 185, 186, -1, -1, 187, 189, -1, -1, 188, 191, 190, 196, -1, -1, -1, -1, -1, -1, 192, 193, 197, 231, -1, -1, 198, 228, -1, -1, -1, -1, 199, 207, 200, 201, -1, -1, 202, 205, -1, -1, -1, -1, 255, -1, 203, 204, 210, 213, -1, -1, -1, -1, -1, -1, 211, 212, 214, 221, 215, 225, -1, -1, 216, 217, -1, -1, 218, 219, -1, -1, 222, 223, 224, 226, 227, 229, 232, 233, 234, 235, 236, 237, 238, 240, 241, 244, 242, 243, -1, -1, -1, -1, 245, 246, 247, 248, -1, -1, 250, 251, 252, 253]
 
 pub class Huffman
-  def self.encode(input : String | Str,
-                  buffer : Array(UInt8) | Str::Builder) : Nil
+  def self.encode(input : String | String,
+                  buffer : Array(UInt8) | String::Builder) : Nil
     bit_buf = 0_u64
     bits_in_buf = 0_i32
     i = 0
@@ -587,7 +587,7 @@ pub class Huffman
     encode(str)
   end
 
-  def self.encoded_size(input : String | Str) : Int32
+  def self.encoded_size(input : String | String) : Int32
     # Int64: thirty bits a byte passed Int32 at 72 MB and panicked.
     total_bits = 0_i64
     i = 0
@@ -609,21 +609,21 @@ pub class Huffman
     result
   end
 
-  def self.decode(bytes : Str, offset : Int32,
-                  length : Int32) : Str | HpackError
+  def self.decode(bytes : String, offset : Int32,
+                  length : Int32) : String | HpackError
     decode_bytes(bytes, offset, length)
   end
 
-  private def self.decode_bytes(bytes : Bytes | Str,
+  private def self.decode_bytes(bytes : Bytes | String,
                                 offset : Int32,
-                                length : Int32) : Str | HpackError
+                                length : Int32) : String | HpackError
     # `offset + length` overflowed and panicked on a length near Int32's
     # largest; the room left after *offset* cannot.
     if offset < 0 || length < 0 || offset > bytes.bytesize ||
        length > bytes.bytesize - offset
       return HpackError.new("Huffman decode: offset/length out of bounds")
     end
-    out_chars = Str::Builder.new(length)
+    out_chars = String::Builder.new(length)
     state = 0_i32
     bits_since_sym = 0_i32
     i = 0
@@ -696,12 +696,12 @@ pub class Decoder
     decode_fields(payload).as(Array(HeaderField) | HpackError)
   end
 
-  def decode(payload : Str) : TapeHeaders | HpackError
+  def decode(payload : String) : TapeHeaders | HpackError
     decode_fields(payload).as(TapeHeaders | HpackError)
   end
 
-  private def decode_fields(payload : Bytes | Str)
-    headers = if payload.is_a?(Str)
+  private def decode_fields(payload : Bytes | String)
+    headers = if payload.is_a?(String)
                 capacity = payload.bytesize
                 capacity = @max_header_count if capacity > @max_header_count
                 TapeHeaders.new(capacity > 0 ? capacity : 0)
@@ -767,7 +767,7 @@ pub class Decoder
         idx_u = dec_int[0]
         offset = dec_int[1]
 
-        name = "".as(String | Str)
+        name = "".as(String | String)
         if idx_u > 0_u64
           max_idx = 61 + @dynamic_table.length
           if idx_u > max_idx.to_u64
@@ -840,7 +840,7 @@ pub class Decoder
         idx_u = dec_int[0]
         offset = dec_int[1]
 
-        name = "".as(String | Str)
+        name = "".as(String | String)
         if idx_u > 0_u64
           max_idx = 61 + @dynamic_table.length
           if idx_u > max_idx.to_u64
@@ -893,7 +893,7 @@ pub class Decoder
         idx_u = dec_int[0]
         offset = dec_int[1]
 
-        name = "".as(String | Str)
+        name = "".as(String | String)
         if idx_u > 0_u64
           max_idx = 61 + @dynamic_table.length
           if idx_u > max_idx.to_u64
@@ -943,8 +943,8 @@ pub class Decoder
     headers
   end
 
-  private def tape_view(value : String | Str) : Str
-    value.is_a?(Str) ? value : value.as_tape
+  private def tape_view(value : String | String) : String
+    value.is_a?(String) ? value : value.as_tape
   end
 
   private def decode_string(payload : Bytes, offset : Int32) : Tuple(String, Int32) | HpackError
@@ -984,8 +984,8 @@ pub class Decoder
   end
 
   private def decode_string(
-    payload : Str, offset : Int32,
-  ) : Tuple(Str, Int32) | HpackError
+    payload : String, offset : Int32,
+  ) : Tuple(String, Int32) | HpackError
     if offset >= payload.bytesize
       return HpackError.new("Unexpected EOF decoding string literal")
     end
@@ -1074,9 +1074,9 @@ pub class Encoder
 
   # Wire bytes on the caller's tape; the dynamic table stays on the heap.
   def encode_on_tape(headers : Array(HeaderField) | TapeHeaders,
-                     force_huffman : Bool? = nil) : Str
+                     force_huffman : Bool? = nil) : String
     huff = force_huffman.nil? ? @use_huffman : force_huffman
-    buffer = Str::Builder.new(128)
+    buffer = String::Builder.new(128)
 
     if @pending_table_size_update
       # RFC 7541 4.2: if the max size changed more than once since the last
@@ -1099,7 +1099,7 @@ pub class Encoder
   end
 
   private def encode_field(field : HeaderField | TapeHeaderField,
-                           buffer : Array(UInt8) | Str::Builder,
+                           buffer : Array(UInt8) | String::Builder,
                            huff : Bool) : Nil
     if field.indexing == IndexingMode::NeverIndexed
       # 6.2.3 Literal Header Field Never Indexed (0001xxxx)
@@ -1144,8 +1144,8 @@ pub class Encoder
     end
   end
 
-  private def encode_string(str : String | Str,
-                            buffer : Array(UInt8) | Str::Builder,
+  private def encode_string(str : String | String,
+                            buffer : Array(UInt8) | String::Builder,
                             huff : Bool) : Nil
     if huff
       huff_len = Huffman.encoded_size(str)

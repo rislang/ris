@@ -1,11 +1,11 @@
 @[Owner]
 struct ViewOwner
-  property text : Str = ""
+  property text : String = ""
 end
 
 tape do
   owner = ViewOwner.new
-  bytes = Str::Builder.new
+  bytes = String::Builder.new
   bytes << "abc"
   owner.text = bytes.finish
   bytes.clear

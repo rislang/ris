@@ -7,6 +7,6 @@ end
 
 kept = nil
 with_tape do
-  kept = Str.build { |w| w.push(65_u8) }
+  kept = String.build { |w| w.push(65_u8) }
 end
 puts kept.nil?

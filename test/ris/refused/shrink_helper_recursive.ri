@@ -1,4 +1,4 @@
-def reset(b : Str::Builder, n : Int32)
+def reset(b : String::Builder, n : Int32)
   if n > 0
     reset(b, n - 1)
   else
@@ -7,7 +7,7 @@ def reset(b : Str::Builder, n : Int32)
 end
 
 def exercise
-  b = Str::Builder.new
+  b = String::Builder.new
   b << "abc"
   v = b.finish
   reset(b, 2)

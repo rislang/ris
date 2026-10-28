@@ -11,7 +11,7 @@ end
 
 @[OnTape]
 struct Handler
-  @calls : Ary(Int32)
+  @calls : Array(Int32)
 
   def initialize(@calls)
   end
@@ -38,7 +38,7 @@ port = Program.arguments[0].to_i
 count = Program.arguments[1].to_i
 group do |g|
   g.spawn do
-    config = Ary(Int32){0}
+    config = Array(Int32){0}
     Server.answer("127.0.0.1", port, config, Handler,
       max_connections: count)
     raise "worker changed caller config" unless config[0] == 0

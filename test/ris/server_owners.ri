@@ -12,7 +12,7 @@ raise "socket copy lost close" unless listener.closed?
 
 sink = File.open("/dev/null", "w", owner: Program.tape)
 backend = IOBackend.on_program(sink)
-source = Str::Builder.new(16)
+source = String::Builder.new(16)
 source << "retained"
 logger = Logger.on_program(source.finish, Severity::Info, backend)
 source.clear
@@ -53,7 +53,7 @@ group do |g|
   sleep(10)
   g.cancel_children
 end
-bytes = Str::Builder.new(16)
+bytes = String::Builder.new(16)
 if peer = first
   peer.read_timeout_ms = 1000
   result = peer.read(bytes, 16)

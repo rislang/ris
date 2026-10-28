@@ -3,12 +3,12 @@
 # Both growing fields reserve stable storage before initialize fails.
 @[Owner]
 struct BrokenOwner
-  getter left : Ary(Int32)
-  getter right : Ary(Int32)
+  getter left : Array(Int32)
+  getter right : Array(Int32)
 
   def initialize(fail : Bool)
-    @left = Ary(Int32).new(10_000_000)
-    @right = Ary(Int32).new(10_000_000)
+    @left = Array(Int32).new(10_000_000)
+    @right = Array(Int32).new(10_000_000)
     @left << 17
     @right << 23
     raise "expected owner construction panic" if fail

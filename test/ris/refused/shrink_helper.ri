@@ -1,9 +1,9 @@
-def reset(b : Str::Builder)
+def reset(b : String::Builder)
   b.clear
 end
 
 def exercise
-  b = Str::Builder.new
+  b = String::Builder.new
   b << "abc"
   v = b.finish
   reset(b)

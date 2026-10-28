@@ -6,8 +6,8 @@ module test/ris/query_test
 import std/uri::{Query}
 
 # The caller owns both parsed views and the rendered pairs.
-def pairs(text : Str) : Str
-  Str.build(text.bytesize + 16) do |writer|
+def pairs(text : String) : String
+  String.build(text.bytesize + 16) do |writer|
     Query.parse(text).each do |key, value|
       writer << '[' << key << '=' << value << ']'
     end

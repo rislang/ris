@@ -1,13 +1,13 @@
-def consume(view : Str, ignored : Nil)
+def consume(view : String, ignored : Nil)
   puts view
 end
 
 def check_shrink
-  b = Str::Builder.new
+  b = String::Builder.new
   b << "abc"
-  a = Ary(Int32).new
+  a = Array(Int32).new
   a << 1
-  indexes = Ary(Int32).new
+  indexes = Array(Int32).new
   indexes << 0
   v = a.values_at(indexes)
   a.clear

@@ -241,18 +241,18 @@ private module RisBoardCodec(T)
   def self.check(path : P.class, ancestors : A.class) : Nil forall P, A
     {% if A.type_vars.includes?(T) %}
       {% raise "RisBoard refuses self-containing type at #{P}; use Tre or " +
-        "Ary nodes with checked integer indices" %}
-    {% elsif T.name.starts_with?("Ary::Link(") || T.name.includes?("::Link(") %}
-      {% raise "RisBoard refuses user link field at #{P}; use Ary nodes " +
+        "Array nodes with checked integer indices" %}
+    {% elsif T.name.starts_with?("Array::Link(") || T.name.includes?("::Link(") %}
+      {% raise "RisBoard refuses user link field at #{P}; use Array nodes " +
         "with checked integer indices" %}
     {% elsif T.name.starts_with?("StaticArray(") %}
-      {% raise "RisBoard refuses fixed-array layout at #{P}; use Ary of " +
+      {% raise "RisBoard refuses fixed-array layout at #{P}; use Array of " +
         "Copyable elements" %}
     {% elsif T.name == "Std::Socket::IyiSocket" || T.name == "Std::Io::PipeReader" || T.name == "Std::Io::PipeWriter" || T.name == "RisTaskConfig" %}
       {% raise "RisBoard refuses resource at #{P}; open and use resources " +
         "in the receiving task" %}
-    {% elsif T == Str || T == Nil || T == Bool || T == Char || T == Symbol || T < Number || T < Enum %}
-    {% elsif T.name.starts_with?("Ary(") || T.name.starts_with?("Tre(") %}
+    {% elsif T == String || T == Nil || T == Bool || T == Char || T == Symbol || T < Number || T < Enum %}
+    {% elsif T.name.starts_with?("Array(") || T.name.starts_with?("Tre(") %}
       RisBoardCodec({{T.type_vars[0]}}).check(P, Tuple(*A, T))
     {% elsif T < Tuple %}
       {% for member in T.type_vars %}
@@ -272,18 +272,18 @@ private module RisBoardCodec(T)
           Tuple(*P, NamedTuple({{field.name.id}}: {{field.type}})), Tuple(*A, T))
       {% end %}
     {% else %}
-      {% raise "RisBoard refuses #{T} at #{P}; send Str, Ary bytes or a " +
+      {% raise "RisBoard refuses #{T} at #{P}; send String, Array bytes or a " +
         "value struct and open resources in the receiving task" %}
     {% end %}
   end
 
   def self.write(value : T, cursor : RisBoardCursor) : Nil
     cursor.entry
-    {% if T == Str %}
+    {% if T == String %}
       cursor.scalar(value.bytesize)
       at = cursor.bytes(value.bytesize.to_u64)
       Pointer(UInt8).new(at).copy_from(value.to_unsafe, value.bytesize) if at != 0
-    {% elsif T.name.starts_with?("Ary(") %}
+    {% elsif T.name.starts_with?("Array(") %}
       cursor.scalar(value.size)
       value.each { |item| RisBoardCodec({{T.type_vars[0]}}).write(item, cursor) }
     {% elsif T.name.starts_with?("Tre(") %}
@@ -322,15 +322,15 @@ private module RisBoardCodec(T)
 
   def self.read(cursor : RisBoardCursor) : T
     cursor.entry
-    {% if T == Str %}
+    {% if T == String %}
       count = cursor.read_scalar(Int32)
-      made = Str.new(Str.new(
+      made = String.new(String.new(
         Pointer(UInt8).new(cursor.bytes(count.to_u64)), count))
       {% if flag?(:ris_board_test_panic) || flag?(:ris_board_test_cancel) %}
         RisMessagePool.copy_fault
       {% end %}
       made
-    {% elsif T.name.starts_with?("Ary(") %}
+    {% elsif T.name.starts_with?("Array(") %}
       count = cursor.read_scalar(Int32)
       T.new(count) { RisBoardCodec({{T.type_vars[0]}}).read(cursor) }
     {% elsif T.name.starts_with?("Tre(") %}

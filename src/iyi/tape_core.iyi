@@ -1,10 +1,10 @@
-# The everyday String and Array surface on Str and Ary, so a program's
+# The everyday String and Array surface on String and Array, so a program's
 # usual calls answer tape values and need no heap. Every result is built
 # on the current tape; names follow Crystal's String and Array.
 
-struct Str
-  def split(separator : String | Str) : Ary(Str)
-    pieces = Ary(Str).new
+struct String
+  def split(separator : String | String) : Array(String)
+    pieces = Array(String).new
     if separator.bytesize == 0
       i = 0
       while i < bytesize
@@ -24,15 +24,15 @@ struct Str
 
   # Words split on runs of ASCII whitespace, as String#split with no
   # argument.
-  def split : Ary(Str)
-    pieces = Ary(Str).new
+  def split : Array(String)
+    pieces = Array(String).new
     i = 0
     while i < bytesize
-      while i < bytesize && Str.space?(self[i])
+      while i < bytesize && String.space?(self[i])
         i += 1
       end
       start = i
-      while i < bytesize && !Str.space?(self[i])
+      while i < bytesize && !String.space?(self[i])
         i += 1
       end
       pieces << self[start, i - start] if i > start
@@ -44,20 +44,20 @@ struct Str
     byte == 32_u8 || (byte >= 9_u8 && byte <= 13_u8)
   end
 
-  def upcase : Str
-    Str.build(bytesize) do |w|
+  def upcase : String
+    String.build(bytesize) do |w|
       each_byte { |b| w.push(b >= 97_u8 && b <= 122_u8 ? b - 32_u8 : b) }
     end
   end
 
-  def downcase : Str
-    Str.build(bytesize) do |w|
+  def downcase : String
+    String.build(bytesize) do |w|
       each_byte { |b| w.push(b >= 65_u8 && b <= 90_u8 ? b + 32_u8 : b) }
     end
   end
 
-  def capitalize : Str
-    Str.build(bytesize) do |w|
+  def capitalize : String
+    String.build(bytesize) do |w|
       i = 0
       each_byte do |b|
         if i == 0
@@ -70,41 +70,41 @@ struct Str
     end
   end
 
-  def lstrip : Str
+  def lstrip : String
     i = 0
-    while i < bytesize && Str.space?(self[i])
+    while i < bytesize && String.space?(self[i])
       i += 1
     end
     self[i, bytesize - i]
   end
 
-  def rstrip : Str
+  def rstrip : String
     j = bytesize
-    while j > 0 && Str.space?(self[j - 1])
+    while j > 0 && String.space?(self[j - 1])
       j -= 1
     end
     self[0, j]
   end
 
-  def strip : Str
+  def strip : String
     lstrip.rstrip
   end
 
-  def chomp : Str
+  def chomp : String
     return self[0, bytesize - 2] if bytesize >= 2 && self[bytesize - 2] == 13_u8 && self[bytesize - 1] == 10_u8
     return self[0, bytesize - 1] if bytesize >= 1 && self[bytesize - 1] == 10_u8
     self
   end
 
-  def includes?(search : String | Str) : Bool
+  def includes?(search : String | String) : Bool
     !byte_index(search).nil?
   end
 
-  def index(search : String | Str, offset : Int32 = 0) : Int32?
+  def index(search : String | String, offset : Int32 = 0) : Int32?
     byte_index(search, offset)
   end
 
-  def count(search : String | Str) : Int32
+  def count(search : String | String) : Int32
     return 0 if search.bytesize == 0
     n = 0
     at = 0
@@ -116,9 +116,9 @@ struct Str
   end
 
   # Every *search* replaced by *replacement*.
-  def gsub(search : String | Str, replacement : String | Str) : Str
+  def gsub(search : String | String, replacement : String | String) : String
     return self if search.bytesize == 0
-    Str.build(bytesize) do |w|
+    String.build(bytesize) do |w|
       start = 0
       while at = byte_index(search, start)
         w.append(self[start, at - start])
@@ -130,18 +130,18 @@ struct Str
   end
 
   # The first *search* replaced by *replacement*.
-  def sub(search : String | Str, replacement : String | Str) : Str
+  def sub(search : String | String, replacement : String | String) : String
     at = byte_index(search)
     return self unless at
-    Str.build(bytesize) do |w|
+    String.build(bytesize) do |w|
       w.append(self[0, at])
       w.append(replacement)
       w.append(self[at + search.bytesize, bytesize - at - search.bytesize])
     end
   end
 
-  def reverse : Str
-    Str.build(bytesize) do |w|
+  def reverse : String
+    String.build(bytesize) do |w|
       i = bytesize
       while i > 0
         i -= 1
@@ -150,14 +150,14 @@ struct Str
     end
   end
 
-  def lines : Ary(Str)
-    result = Ary(Str).new
+  def lines : Array(String)
+    result = Array(String).new
     each_line { |line| result << line }
     result
   end
 
-  def chars : Ary(Char)
-    result = Ary(Char).new(bytesize < 4 ? 4 : bytesize)
+  def chars : Array(Char)
+    result = Array(Char).new(bytesize < 4 ? 4 : bytesize)
     each_char { |c| result << c }
     result
   end
@@ -178,26 +178,26 @@ struct Str
     end
   end
 
-  def ljust(width : Int32, pad : Char = ' ') : Str
+  def ljust(width : Int32, pad : Char = ' ') : String
     return self if bytesize >= width
-    Str.build(width) do |w|
+    String.build(width) do |w|
       w.append(self)
       (width - bytesize).times { w << pad }
     end
   end
 
-  def rjust(width : Int32, pad : Char = ' ') : Str
+  def rjust(width : Int32, pad : Char = ' ') : String
     return self if bytesize >= width
-    Str.build(width) do |w|
+    String.build(width) do |w|
       (width - bytesize).times { w << pad }
       w.append(self)
     end
   end
 end
 
-struct Ary(T)
+struct Array(T)
   # Element by element, as Array#== compares.
-  def ==(other : Ary) : Bool
+  def ==(other : Array) : Bool
     return false unless size == other.size
     i = 0
     while i < size
@@ -224,7 +224,7 @@ struct Ary(T)
   end
 
   def last : T
-    raise "Ary#last: empty" if size == 0
+    raise "Array#last: empty" if size == 0
     self[size - 1]
   end
 
@@ -238,14 +238,14 @@ struct Ary(T)
   end
 
   def min : T
-    raise "Ary#min: empty" if size == 0
+    raise "Array#min: empty" if size == 0
     best = self[0]
     each { |v| best = v if v < best }
     best
   end
 
   def max : T
-    raise "Ary#max: empty" if size == 0
+    raise "Array#max: empty" if size == 0
     best = self[0]
     each { |v| best = v if v > best }
     best
@@ -257,7 +257,7 @@ struct Ary(T)
     result
   end
 
-  def each_slice(n : Int32, & : Ary(T) -> Nil) : Nil
+  def each_slice(n : Int32, & : Array(T) -> Nil) : Nil
     i = 0
     while i < size
       piece = self.class.new(n < 4 ? 4 : n)
@@ -282,8 +282,8 @@ struct Ary(T)
     acc
   end
 
-  def compact_map(& : T -> U?) : Ary(U) forall U
-    result = Ary(U).new(size < 4 ? 4 : size)
+  def compact_map(& : T -> U?) : Array(U) forall U
+    result = Array(U).new(size < 4 ? 4 : size)
     each do |v|
       if got = yield v
         result << got
@@ -292,38 +292,38 @@ struct Ary(T)
     result
   end
 
-  def flat_map(& : T -> Ary(U)) : Ary(U) forall U
-    result = Ary(U).new(size < 4 ? 4 : size)
+  def flat_map(& : T -> Array(U)) : Array(U) forall U
+    result = Array(U).new(size < 4 ? 4 : size)
     each { |v| (yield v).each { |u| result << u } }
     result
   end
 
-  def tally : Hsh(T, Int32)
-    counts = Hsh(T, Int32).new
+  def tally : Hash(T, Int32)
+    counts = Hash(T, Int32).new
     each { |v| counts[v] = counts.fetch(v, 0) + 1 }
     counts
   end
 end
 
-struct Hsh(K, V)
-  def map(& : K, V -> U) : Ary(U) forall U
-    result = Ary(U).new(size < 4 ? 4 : size)
+struct Hash(K, V)
+  def map(& : K, V -> U) : Array(U) forall U
+    result = Array(U).new(size < 4 ? 4 : size)
     each { |k, v| result << (yield k, v) }
     result
   end
 
-  def select(& : K, V -> Bool) : Hsh(K, V)
-    result = Hsh(K, V).new(size)
+  def select(& : K, V -> Bool) : Hash(K, V)
+    result = Hash(K, V).new(size)
     each { |k, v| result[k] = v if yield k, v }
     result
   end
 
-  def reject(& : K, V -> Bool) : Hsh(K, V)
+  def reject(& : K, V -> Bool) : Hash(K, V)
     self.select { |k, v| !(yield k, v) }
   end
 
-  def transform_values(& : V -> U) : Hsh(K, U) forall U
-    result = Hsh(K, U).new(size)
+  def transform_values(& : V -> U) : Hash(K, U) forall U
+    result = Hash(K, U).new(size)
     each { |k, v| result[k] = yield v }
     result
   end
@@ -345,14 +345,14 @@ struct Hsh(K, V)
     n
   end
 
-  def to_a : Ary(Tuple(K, V))
-    result = Ary(Tuple(K, V)).new(size < 4 ? 4 : size)
+  def to_a : Array(Tuple(K, V))
+    result = Array(Tuple(K, V)).new(size < 4 ? 4 : size)
     each { |k, v| result << {k, v} }
     result
   end
 end
 
-struct Str::Builder
+struct String::Builder
   def append_value(value : Bool) : Nil
     append(value ? "true" : "false")
   end
@@ -361,7 +361,7 @@ struct Str::Builder
     append(value.to_s)
   end
 
-  def append_value(value : Ary) : Nil
+  def append_value(value : Array) : Nil
     push(91_u8)
     first = true
     value.each do |item|
@@ -372,7 +372,7 @@ struct Str::Builder
     push(93_u8)
   end
 
-  def append_value(value : Hsh) : Nil
+  def append_value(value : Hash) : Nil
     push(123_u8)
     first = true
     value.each do |key, item|
@@ -396,10 +396,10 @@ struct Str::Builder
 
   # A value as `inspect` shows it inside a collection: text quoted.
   def append_inspect(value) : Nil
-    if value.is_a?(Str)
+    if value.is_a?(String)
       value.inspect(self)
     elsif value.is_a?(String)
-      Str.new(value).inspect(self)
+      String.new(value).inspect(self)
     elsif value.is_a?(Char)
       push(39_u8)
       append_value(value)

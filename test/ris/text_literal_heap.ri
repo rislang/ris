@@ -27,7 +27,7 @@ def retained(text : String) : String
   text
 end
 
-def choose(text : Str, n : Int64 = 0_i64) : Int32
+def choose(text : String, n : Int64 = 0_i64) : Int32
   1
 end
 
@@ -51,7 +51,7 @@ raise "container types" unless list.is_a?(Array(String)) &&
   named[:name].is_a?(String)
 raise "constant types" unless TEXT.is_a?(String) && TYPED.is_a?(String) &&
   USERS[42].is_a?(String) && NESTED[0][:name].is_a?(String)
-raise "default type" unless typeof("a") == Str && choose("a") == 1
+raise "default type" unless typeof("a") == String && choose("a") == 1
 raise "numeric retry" unless choose("a", 1) == 1
 raise "named argument" unless user.name == "carol"
 raise "class initializer" unless LiteralUser.title == "Again"

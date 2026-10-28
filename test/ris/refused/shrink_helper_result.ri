@@ -1,9 +1,9 @@
-def view_of(b : Str::Builder)
+def view_of(b : String::Builder)
   b.finish
 end
 
 def exercise
-  b = Str::Builder.new
+  b = String::Builder.new
   b << "abc"
   v = view_of(b)
   b.clear

@@ -1,11 +1,11 @@
 class State
-  @@values = Ary(Int32).new(1)
-  @@padding = Str.new("after the array")
+  @@values = Array(Int32).new(1)
+  @@padding = String.new("after the array")
   def self.request
     raise "padding" unless @@padding == "after the array"
     local_tape do
       local_tape do
-        scratch = Str.new("request scratch")
+        scratch = String.new("request scratch")
         raise "scratch" unless scratch.bytesize == 15
       end
       unless @@values.empty?

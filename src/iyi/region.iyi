@@ -268,7 +268,7 @@ class RisRegion
     __iyi_exit(1)
   end
 
-  # Str lengths and Ary/Tre element counts are signed 32-bit values.
+  # String lengths and Array/Tre element counts are signed 32-bit values.
   def self.count(value : UInt64) : UInt64
     size_error("iyi: tape size exceeds 2147483647: ", value) \
       if value > MAX_COUNT

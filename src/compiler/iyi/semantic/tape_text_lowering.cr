@@ -10,7 +10,7 @@ class Iyi::TapeTextLowering < Iyi::Visitor
       (node.name == "tape" || node.name == "local_tape")
   end
 
-  TAPE_TYPES = {"Str", "Ary", "Tre"}
+  TAPE_TYPES = {"String", "Array", "Tre"}
 
   # Whether a restriction names a tape type as a whole word. No regex:
   # the compiler built on the floor carries no pcre2.
@@ -36,7 +36,7 @@ class Iyi::TapeTextLowering < Iyi::Visitor
   end
 
   def self.interpolate(arg : ASTNode) : ASTNode
-    path = Path.global(["Str"]).at(arg)
+    path = Path.global(["String"]).at(arg)
     Call.new(path, "interpolate", arg.expressions).at(arg)
   end
 

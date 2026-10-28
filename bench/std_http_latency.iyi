@@ -36,7 +36,7 @@ module bench/std_http_latency
 # These exercises still use std's legacy String APIs and assertions.
 # Board messages themselves own copied tape text; this is the heap adapter.
 @[TapeToHeap]
-def ris_heap_text(value : Str) : String
+def ris_heap_text(value : String) : String
   value.to_s
 end
 
@@ -116,7 +116,7 @@ end
 
 @[OnTape]
 struct RisLatencyResult
-  getter times : Ary(Int64)
+  getter times : Array(Int64)
 
   def initialize(@times)
   end
@@ -139,7 +139,7 @@ end
 class RisLatency2Handler
   @tls : TlsServerConfig
 
-  def initialize(config : {Str, Str})
+  def initialize(config : {String, String})
     @tls = server_config(ris_heap_text(config[0]), ris_heap_text(config[1]))
   end
 
@@ -160,7 +160,7 @@ end
 class RisLatency3Handler
   @tls : TlsServerConfig
 
-  def initialize(config : {Str, Str})
+  def initialize(config : {String, String})
     @tls = server_config(ris_heap_text(config[0]), ris_heap_text(config[1]))
   end
 
@@ -379,7 +379,7 @@ group do |g|
   g.spawn do
     measured = gets("http://127.0.0.1:#{listener}/stream", 30, 1)
     HTTP.get("http://127.0.0.1:#{listener}/stop")
-    raise "latency queue full" unless RisBoard.post(RisLatencyResult.new(Ary(Int64).new(measured.size) { |i| measured[i] }))
+    raise "latency queue full" unless RisBoard.post(RisLatencyResult.new(Array(Int64).new(measured.size) { |i| measured[i] }))
     0
   end
 end

@@ -1,6 +1,6 @@
 module test/ris/number_format_signed_error
 
-writer = Str::Builder.new(65)
+writer = String::Builder.new(65)
 writer << "prefix"
 (-1_i64).to_s(writer, 37)
 raise "invalid radix accepted"

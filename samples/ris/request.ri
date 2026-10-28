@@ -14,16 +14,16 @@ import std/http::{Server, ParsedHead}
 @[OnTape]
 struct User
   getter id : Int32
-  getter name : Str
+  getter name : String
   def initialize(@id, @name)
   end
 end
 
-USERS = Ary(User){User.new(42, "alice"), User.new(7, "bob")}
+USERS = Array(User){User.new(42, "alice"), User.new(7, "bob")}
 
 # GET /users/42 -> 200 {"id":42,"name":"alice"}
 # The body is written into the caller's writer, on its tape.
-def route(head : ParsedHead, body : Str::Builder) : Int32
+def route(head : ParsedHead, body : String::Builder) : Int32
   path = head.target
   return 405 unless head.method == "GET"
   if path == "/"
@@ -38,7 +38,7 @@ def route(head : ParsedHead, body : Str::Builder) : Int32
   200
 end
 
-def reason(status : Int32) : Str
+def reason(status : Int32) : String
   case status
   when 200 then "OK"
   when 404 then "Not Found"
@@ -47,14 +47,14 @@ def reason(status : Int32) : Str
   end
 end
 
-def handle(raw : Str) : Nil
+def handle(raw : String) : Nil
   tape do
     head = Server.parse_head(raw)
     unless head.is_a?(ParsedHead)
       puts "400 Bad Request"
       return
     end
-    body = Str::Builder.new(128)
+    body = String::Builder.new(128)
     status = route(head, body)
     puts "#{status} #{reason(status)} #{body.finish}"
   end

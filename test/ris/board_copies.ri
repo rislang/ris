@@ -11,22 +11,22 @@ end
 
 @[OnTape]
 struct BoardNested
-  getter text : Str
-  getter items : Ary(Str)
-  getter tree : Tre(Str)
+  getter text : String
+  getter items : Array(String)
+  getter tree : Tre(String)
   getter color : BoardColor
-  getter choice : Str | Int64
-  getter again : Ary(Str)
+  getter choice : String | Int64
+  getter again : Array(String)
 
-  def initialize(@text : Str, @items : Ary(Str), @tree : Tre(Str),
-                 @color : BoardColor, @choice : Str | Int64,
-                 @again : Ary(Str))
+  def initialize(@text : String, @items : Array(String), @tree : Tre(String),
+                 @color : BoardColor, @choice : String | Int64,
+                 @again : Array(String))
   end
 end
 
-items = Ary(Str).new(20)
+items = Array(String).new(20)
 items << "first" << "second"
-tree = Tre(Str).new(20)
+tree = Tre(String).new(20)
 root = tree.open("root")
 tree.leaf("leaf")
 tree.close(root)

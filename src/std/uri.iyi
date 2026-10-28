@@ -50,7 +50,7 @@ pub struct Params
     @keys.size
   end
 
-  def has_key?(key : String | Str) : Bool
+  def has_key?(key : String | String) : Bool
     i = 0
     while i < @keys.size
       return true if @keys[i] == key
@@ -60,7 +60,7 @@ pub struct Params
   end
 
   # Returns the first value for *key*, or raises if not found.
-  def [](key : String | Str) : String
+  def [](key : String | String) : String
     val = self[key]?
     if val
       val
@@ -70,7 +70,7 @@ pub struct Params
   end
 
   # Returns the first value for *key*, or nil if not found.
-  def []?(key : String | Str) : String?
+  def []?(key : String | String) : String?
     i = 0
     while i < @keys.size
       return @values[i] if @keys[i] == key
@@ -80,7 +80,7 @@ pub struct Params
   end
 
   # Returns all values associated with *key*.
-  def fetch_all(key : String | Str) : Array(String)
+  def fetch_all(key : String | String) : Array(String)
     result = [] of String
     i = 0
     while i < @keys.size
@@ -165,7 +165,7 @@ pub struct Params
   # is what browsers send for "100%". `URI.decode` stays strict: it is
   # asked of text a program made.
   # Tape input returns the tape collection, with views where possible.
-  def self.parse(query : Str) : Query
+  def self.parse(query : String) : Query
     Query.parse(query)
   end
 
@@ -186,12 +186,12 @@ pub struct Params
     end
     result = ""
     tape do
-      result = Str.build(capacity) { |w| to_s(w) }.to_heap
+      result = String.build(capacity) { |w| to_s(w) }.to_heap
     end
     result
   end
 
-  def to_s(writer : Str::Builder) : Nil
+  def to_s(writer : String::Builder) : Nil
     i = 0
     each do |key, value|
       writer << "&" if i > 0
@@ -210,17 +210,17 @@ end
 # The pairs are made at their final size, counted first.
 @[OnTape]
 pub struct Query
-  getter pairs : Ary(QueryPair)
+  getter pairs : Array(QueryPair)
 
-  def initialize(@pairs : Ary(QueryPair))
+  def initialize(@pairs : Array(QueryPair))
   end
 
-  def self.parse(query : Str) : Query
+  def self.parse(query : String) : Query
     from = query.bytesize > 0 && query[0] == 63_u8 ? 1 : 0
     count = 0
     each_part(query, from) { |_, _| count += 1 }
     none = query[0, 0]
-    pairs = Ary(QueryPair).new(count) { QueryPair.new(none, none) }
+    pairs = Array(QueryPair).new(count) { QueryPair.new(none, none) }
     at = 0
     each_part(query, from) do |start, stop|
       eq = start
@@ -236,7 +236,7 @@ pub struct Query
   end
 
   # The start and end of each part between `&` and `;` that is not empty.
-  private def self.each_part(query : Str, from : Int32, & : Int32, Int32 -> Nil) : Nil
+  private def self.each_part(query : String, from : Int32, & : Int32, Int32 -> Nil) : Nil
     start = from
     i = from
     size = query.bytesize
@@ -251,7 +251,7 @@ pub struct Query
 
   # The bytes from *start* to *stop*, decoded: themselves when there is
   # nothing to decode, else a new string on the tape.
-  private def self.decoded(query : Str, start : Int32, stop : Int32) : Str
+  private def self.decoded(query : String, start : Int32, stop : Int32) : String
     plain = true
     i = start
     while i < stop
@@ -260,7 +260,7 @@ pub struct Query
       i += 1
     end
     return query[start, stop - start] if plain
-    Str.build(stop - start) do |w|
+    String.build(stop - start) do |w|
       i = start
       while i < stop
         b = query[i]
@@ -291,7 +291,7 @@ pub struct Query
   end
 
   # The first value of *key*, nil when there is none.
-  def []?(key : String | Str) : Str?
+  def []?(key : String | String) : String?
     i = 0
     while i < @pairs.size
       pair = @pairs[i]
@@ -302,7 +302,7 @@ pub struct Query
   end
 
   # Serialize directly into the caller's output, preserving pair order.
-  def to_s(writer : Str::Builder) : Nil
+  def to_s(writer : String::Builder) : Nil
     i = 0
     each do |key, value|
       writer << "&" if i > 0
@@ -314,7 +314,7 @@ pub struct Query
   end
 
   # Each name and value, in order.
-  def each(& : Str, Str -> Nil) : Nil
+  def each(& : String, String -> Nil) : Nil
     i = 0
     while i < @pairs.size
       pair = @pairs[i]
@@ -327,10 +327,10 @@ end
 # One name and value of a `Query`.
 @[OnTape]
 pub struct QueryPair
-  getter key : Str
-  getter value : Str
+  getter key : String
+  getter value : String
 
-  def initialize(@key : Str, @value : Str)
+  def initialize(@key : String, @value : String)
   end
 end
 
@@ -338,14 +338,14 @@ end
 # User and password are stored as written, including percent escapes.
 @[OnTape]
 pub struct ParsedURI
-  property scheme : Str?
-  property user : Str?
-  property password : Str?
-  property host : Str?
+  property scheme : String?
+  property user : String?
+  property password : String?
+  property host : String?
   property port : Int32?
-  property path : Str
-  property query : Str?
-  property fragment : Str?
+  property path : String
+  property query : String?
+  property fragment : String?
 
   def initialize
     @scheme = nil
@@ -358,7 +358,7 @@ pub struct ParsedURI
     @fragment = nil
   end
 
-  def written_userinfo(@user : Str?, @password : Str?) : Nil
+  def written_userinfo(@user : String?, @password : String?) : Nil
   end
 
   @[TapeToHeap]
@@ -372,11 +372,11 @@ pub struct ParsedURI
   end
 
   @[TapeToHeap]
-  private def heap(text : Str?) : String?
+  private def heap(text : String?) : String?
     text ? text.to_heap : nil
   end
 
-  def to_s(w : Str::Builder) : Nil
+  def to_s(w : String::Builder) : Nil
     if scheme = @scheme
       w << scheme << ":"
     end
@@ -446,8 +446,8 @@ pub struct ParsedURI
     self
   end
 
-  private def lower(text : Str, escapes : Bool) : Str
-    Str.build(text.bytesize) do |w|
+  private def lower(text : String, escapes : Bool) : String
+    String.build(text.bytesize) do |w|
       i = 0
       while i < text.bytesize
         b = text[i]
@@ -634,7 +634,7 @@ pub class URI
   end
 
   # `userinfo@host:port`, the userinfo and host written as stored.
-  def authority(w : Str::Builder) : Nil
+  def authority(w : String::Builder) : Nil
     if user = @user
       w << user
       if password = @password
@@ -655,12 +655,12 @@ pub class URI
     return nil unless @host || @user || @port
     result = ""
     tape do
-      result = Str.build { |w| authority(w) }.to_heap
+      result = String.build { |w| authority(w) }.to_heap
     end
     result
   end
 
-  def to_s(w : Str::Builder) : Nil
+  def to_s(w : String::Builder) : Nil
     as_tape.to_s(w)
   end
 
@@ -668,7 +668,7 @@ pub class URI
   def to_s : String
     result = ""
     tape do
-      result = Str.build { |w| to_s(w) }.to_heap
+      result = String.build { |w| to_s(w) }.to_heap
     end
     result
   end
@@ -785,14 +785,14 @@ pub class URI
   private def self.percent_encode(str : String, level : Int32, space_to_plus : Bool) : String
     result = ""
     tape do
-      result = Str.build(str.bytesize * 3) do |w|
+      result = String.build(str.bytesize * 3) do |w|
         percent_encode(str.as_tape, w, level, space_to_plus)
       end.to_heap
     end
     result
   end
 
-  private def self.percent_encode(str : Str, writer : Str::Builder,
+  private def self.percent_encode(str : String, writer : String::Builder,
                                  level : Int32, space_to_plus : Bool) : Nil
     str.each_byte do |b|
       if b == 32_u8 && space_to_plus
@@ -807,25 +807,25 @@ pub class URI
     end
   end
 
-  def self.encode_www_form(str : Str, writer : Str::Builder,
+  def self.encode_www_form(str : String, writer : String::Builder,
                            space_to_plus : Bool = true) : Nil
     percent_encode(str, writer, 2, space_to_plus)
   end
 
-  def self.encode(str : Str, writer : Str::Builder,
+  def self.encode(str : String, writer : String::Builder,
                   space_to_plus : Bool = false) : Nil
     percent_encode(str, writer, 0, space_to_plus)
   end
 
-  def self.encode_path(str : Str, writer : Str::Builder) : Nil
+  def self.encode_path(str : String, writer : String::Builder) : Nil
     percent_encode(str, writer, 1, false)
   end
 
-  def self.encode_userinfo(str : Str, writer : Str::Builder) : Nil
+  def self.encode_userinfo(str : String, writer : String::Builder) : Nil
     percent_encode(str, writer, 3, false)
   end
 
-  def self.encode_path_segment(str : Str, writer : Str::Builder) : Nil
+  def self.encode_path_segment(str : String, writer : String::Builder) : Nil
     percent_encode(str, writer, 2, false)
   end
 
@@ -866,7 +866,7 @@ pub class URI
   # `decode?` answers nil and `decode` panics for a `%` not followed by
   # two hex digits; a multi-byte UTF-8 character encoded byte by byte
   # comes back as the character.
-  private def self.valid_escapes?(str : Str) : Bool
+  private def self.valid_escapes?(str : String) : Bool
     i = 0
     while i < str.bytesize
       if str[i] == 37_u8
@@ -880,7 +880,7 @@ pub class URI
     true
   end
 
-  def self.decode?(str : Str, writer : Str::Builder,
+  def self.decode?(str : String, writer : String::Builder,
                    plus_to_space : Bool = false) : Bool
     return false unless valid_escapes?(str)
     i = 0
@@ -897,21 +897,21 @@ pub class URI
     true
   end
 
-  def self.decode?(str : Str, plus_to_space : Bool = false) : Str?
+  def self.decode?(str : String, plus_to_space : Bool = false) : String?
     return str if !str.index('%') && (!plus_to_space || !str.index('+'))
-    writer = Str::Builder.new(str.bytesize)
+    writer = String::Builder.new(str.bytesize)
     decode?(str, writer, plus_to_space) ? writer.finish : nil
   end
 
-  def self.decode(str : Str, plus_to_space : Bool = false) : Str
+  def self.decode(str : String, plus_to_space : Bool = false) : String
     decode?(str, plus_to_space) || raise "malformed percent escape"
   end
 
-  def self.decode_www_form?(str : Str, plus_to_space : Bool = true) : Str?
+  def self.decode_www_form?(str : String, plus_to_space : Bool = true) : String?
     decode?(str, plus_to_space)
   end
 
-  def self.decode_www_form(str : Str, plus_to_space : Bool = true) : Str
+  def self.decode_www_form(str : String, plus_to_space : Bool = true) : String
     decode(str, plus_to_space)
   end
 
@@ -949,12 +949,12 @@ pub class URI
   # in ...`), a `[` in the host with no `]`, a host with a byte a host
   # cannot hold, and a port that is not decimal digits or is above 65535.
   # Percent escapes are not checked here; `decode` does that.
-  def self.parse?(raw_url : Str) : ParsedURI?
+  def self.parse?(raw_url : String) : ParsedURI?
     result = scan(raw_url)
     result.is_a?(ParsedURI) ? result : nil
   end
 
-  def self.parse(raw_url : Str) : ParsedURI
+  def self.parse(raw_url : String) : ParsedURI
     result = scan(raw_url)
     return result if result.is_a?(ParsedURI)
     raise result
@@ -987,7 +987,7 @@ pub class URI
   end
 
   # Input views on success, or a diagnostic on the caller's tape.
-  private def self.scan(s : Str) : ParsedURI | Str
+  private def self.scan(s : String) : ParsedURI | String
     uri = ParsedURI.new
     raw = s
     len = s.bytesize
@@ -996,7 +996,7 @@ pub class URI
     while i < len
       b = raw[i]
       if b == 32_u8
-        return Str.build(s.bytesize * 4 + 128) do |w|
+        return String.build(s.bytesize * 4 + 128) do |w|
           w << "space at byte "
           w << i
           w << " in "
@@ -1004,7 +1004,7 @@ pub class URI
         end
       end
       if b < 32_u8 || b == 127_u8
-        return Str.build(s.bytesize * 4 + 128) do |w|
+        return String.build(s.bytesize * 4 + 128) do |w|
           w << "control character at byte "
           w << i
           w << " in "
@@ -1029,7 +1029,7 @@ pub class URI
         k = k + 1
       end
       if i == 0 || k < i
-        return Str.build(s.bytesize * 4 + 128) do |w|
+        return String.build(s.bytesize * 4 + 128) do |w|
           w << "invalid scheme "
           s[0, i].inspect(w)
           w << " in "
@@ -1061,7 +1061,7 @@ pub class URI
         # Kept as written, escapes and all; the getters decode. A '+' in
         # it is a '+', not a space.
         unless valid_escapes?(user)
-          return Str.build(s.bytesize * 4 + 128) do |w|
+          return String.build(s.bytesize * 4 + 128) do |w|
             w << "malformed percent escape in userinfo "
             uinfo.inspect(w)
             w << " in "
@@ -1069,7 +1069,7 @@ pub class URI
           end
         end
         if password && !valid_escapes?(password)
-          return Str.build(s.bytesize * 4 + 128) do |w|
+          return String.build(s.bytesize * 4 + 128) do |w|
             w << "malformed percent escape in userinfo "
             uinfo.inspect(w)
             w << " in "
@@ -1084,7 +1084,7 @@ pub class URI
       if host_port.starts_with?("[")
         bracket_end = host_port.index(']')
         unless bracket_end
-          return Str.build(s.bytesize * 4 + 128) do |w|
+          return String.build(s.bytesize * 4 + 128) do |w|
             w << "unterminated IPv6 host "
             host_port.inspect(w)
             w << " in "
@@ -1096,7 +1096,7 @@ pub class URI
         if rest.starts_with?(":")
           port_str = rest[1, rest.bytesize - 1]
         elsif !rest.empty?
-          return Str.build(s.bytesize * 4 + 128) do |w|
+          return String.build(s.bytesize * 4 + 128) do |w|
             w << "invalid host "
             host_port.inspect(w)
             w << " in "
@@ -1114,7 +1114,7 @@ pub class URI
         while j < host.bytesize
           c = hp[j]
           unless unreserved?(c) || sub_delim?(c) || c == 37_u8 || c >= 128_u8
-            return Str.build(s.bytesize * 4 + 128) do |w|
+            return String.build(s.bytesize * 4 + 128) do |w|
               w << "invalid host "
               host.inspect(w)
               w << " in "
@@ -1132,7 +1132,7 @@ pub class URI
         while j < port_str.bytesize
           c = pp[j]
           if c < 48_u8 || c > 57_u8
-            return Str.build(s.bytesize * 4 + 128) do |w|
+            return String.build(s.bytesize * 4 + 128) do |w|
               w << "invalid port "
               port_str.inspect(w)
               w << " in "
@@ -1143,7 +1143,7 @@ pub class URI
         end
         port = port_str.to_i?
         if port.nil? || port > 65535
-          return Str.build(s.bytesize * 4 + 128) do |w|
+          return String.build(s.bytesize * 4 + 128) do |w|
             w << "port "
             w << port_str
             w << " out of range in "
@@ -1196,12 +1196,12 @@ pub class URI
     result
   end
 
-  def self.remove_dot_segments(path : Str) : Str
+  def self.remove_dot_segments(path : String) : String
     raw = path
     len = path.bytesize
     capacity = 1
     path.each_byte { |b| capacity += 1 if b == 47_u8 }
-    output_segments = Ary(Str).new(capacity)
+    output_segments = Array(String).new(capacity)
     i = 0
     while i < len
       rest = len - i
@@ -1251,7 +1251,7 @@ pub class URI
         i = j
       end
     end
-    Str.build(path.bytesize) { |w| output_segments.join(w) }
+    String.build(path.bytesize) { |w| output_segments.join(w) }
   end
 
   # The dot segments of a relative reference's path taken out as resolving
@@ -1268,10 +1268,10 @@ pub class URI
     result
   end
 
-  def self.remove_relative_dot_segments(path : Str) : Str
+  def self.remove_relative_dot_segments(path : String) : String
     return path if path.empty?
     segments = path.split('/')
-    kept = Ary(Str).new(segments.size)
+    kept = Array(String).new(segments.size)
     directory = false
     i = 0
     while i < segments.size
@@ -1294,7 +1294,7 @@ pub class URI
     return "./".as_tape if kept.empty?
     # An empty first segment needs ./ so it remains a relative path.
     return "./".as_tape if kept.size == 1 && kept[0].empty?
-    Str.build(path.bytesize + 2) do |w|
+    String.build(path.bytesize + 2) do |w|
       w << "./" if kept[0].empty?
       kept.join(w, "/")
       w << "/" if directory

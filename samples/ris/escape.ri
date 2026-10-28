@@ -9,7 +9,7 @@ module samples/escape_bench
 import std/html::{HTML}
 
 N = 10000000
-TEXTS = Ary(Str){
+TEXTS = Array(String){
   "Mari Maasikas, Tallinn",
   "Tom & Jerry <cartoon>",
   "a plain sentence of words",
@@ -19,7 +19,7 @@ sum = 0_i64
 i = 0
 while i < N
   tape do
-    w = Str::Builder.new(64)
+    w = String::Builder.new(64)
     HTML.escape(TEXTS[i % 3], w)
     sum += w.length
   end

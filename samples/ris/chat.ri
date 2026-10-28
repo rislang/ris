@@ -12,25 +12,25 @@ module Chat
   @[OnTape]
   struct User
     getter id : Int32
-    getter name : Str
+    getter name : String
 
-    def initialize(*, @id : Int32, @name : Str)
+    def initialize(*, @id : Int32, @name : String)
     end
   end
 
   @[OnTape]
   struct Message
     getter user : User
-    getter body : Str
+    getter body : String
 
-    def initialize(*, @user : User, @body : Str)
+    def initialize(*, @user : User, @body : String)
     end
   end
 
   @[OnTape]
   struct Room
-    getter users = Ary(User).new(3)
-    getter messages = Ary(Message).new(3)
+    getter users = Array(User).new(3)
+    getter messages = Array(Message).new(3)
 
     def user(id : Int32) : User?
       users.find { |user| user.id == id }
@@ -42,15 +42,15 @@ module Chat
   @[OnTape]
   struct MessageParams
     getter user_id : Int32
-    getter body : Str
+    getter body : String
 
-    def initialize(*, @user_id : Int32, @body : Str)
+    def initialize(*, @user_id : Int32, @body : String)
     end
   end
 
   # The action: one request, start to end on one tape. Its bytes, the
   # params and the rendered room are freed together when it ends.
-  def self.create_message(room : Room, request : Str) : Nil
+  def self.create_message(room : Room, request : String) : Nil
     tape do
       params = message_params(request)
       if params.nil?
@@ -65,7 +65,7 @@ module Chat
   end
 
   # "7 Ship it": a user id, one space, the text. Nil when it is not.
-  def self.message_params(request : Str) : MessageParams?
+  def self.message_params(request : String) : MessageParams?
     space = request.index(' ') || return nil
     user_id = request[0, space].to_i? || return nil
     body = request[space + 1..]
@@ -82,8 +82,8 @@ module Chat
   # written into one response on the tape.
   def self.render_room(room : Room) : Nil
     count = room.messages.size
-    newest = Ary(Int32).new(count) { |i| count - 1 - i }
-    response = Str::Builder.new(256)
+    newest = Array(Int32).new(count) { |i| count - 1 - i }
+    response = String::Builder.new(256)
     response << "200 "
     newest.each_with_index do |i, k|
       message = room.messages[i]
@@ -91,7 +91,7 @@ module Chat
       response << message.user.name << ": " << message.body
     end
     response << " (users "
-    names = Ary(Str).new(room.users.size) { |i| room.users[i].name }
+    names = Array(String).new(room.users.size) { |i| room.users[i].name }
     names.sort_in_place
     names.join(response, ", ")
     response << ")"

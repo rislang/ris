@@ -36,7 +36,7 @@ module bench/std_http_resume
 # These exercises still use std's legacy String APIs and assertions.
 # Board messages themselves own copied tape text; this is the heap adapter.
 @[TapeToHeap]
-def ris_heap_text(value : Str) : String
+def ris_heap_text(value : String) : String
   value.to_s
 end
 
@@ -205,7 +205,7 @@ end
 class RisResumePeerHandler
   @tls : TlsServerConfig
 
-  def initialize(config : {Str, Str})
+  def initialize(config : {String, String})
     @tls = TlsServerConfig.from_pem(ris_heap_text(config[0]), ris_heap_text(config[1])).or_panic
   end
 

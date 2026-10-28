@@ -1,5 +1,5 @@
 def exercise
-  bytes = Str::Builder.new
+  bytes = String::Builder.new
   bytes << "abc"
   view = bytes.finish
   sleep 1

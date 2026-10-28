@@ -1,9 +1,9 @@
 def check_loop
-  b = Str::Builder.new
+  b = String::Builder.new
   b << "abc"
-  saved = Str.new("initial")
+  saved = String.new("initial")
   i = 0
-  rounds = Ary(Int32).new
+  rounds = Array(Int32).new
   rounds << 1 << 2 << 3
   rounds.each do
     b.clear

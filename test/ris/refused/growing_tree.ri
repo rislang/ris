@@ -1,1 +1,1 @@
-tape { Tre(Str::Builder).new }
+tape { Tre(String::Builder).new }

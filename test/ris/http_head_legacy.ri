@@ -3,7 +3,7 @@ import std/http::{Server, HTTPError, ParsedHead}
 import std/uri::{Params}
 
 # The compatibility import must expose the moved type in signatures too.
-def target(head : ParsedHead) : Str
+def target(head : ParsedHead) : String
   head.target
 end
 
@@ -16,7 +16,7 @@ tape do
   raise "delegation" unless tape_head.is_a?(ParsedHead)
   raise "re-export" unless target(tape_head) == "/"
   params = Params.parse("q=a+b&x=%zz&x=%FF".to_heap)
-  w = Str::Builder.new(128)
+  w = String::Builder.new(128)
   params.to_s(w)
   raise "legacy writer" unless w.finish == "q=a+b&x=%25zz&x=%FF"
   raise "legacy string" unless params.to_s == w.finish

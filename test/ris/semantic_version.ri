@@ -13,7 +13,7 @@ tape do
   exit 5 unless SemanticVersion.parse?("1.2.3-a..b").nil?
   earlier = SemanticVersion.parse("1.2.3-beta.2")
   exit 6 unless (earlier <=> version) < 0
-  w = Str::Builder.new(1)
+  w = String::Builder.new(1)
   w << "prefix:"
   version.write(w)
   exit 7 unless w.finish == "prefix:1.2.3-beta.11+build.7"

@@ -479,7 +479,7 @@ module Iyi
           elsif node.name != "raise" && ris_program_code?(node) &&
                 !arg.is_a?(StringLiteral) && !arg.is_a?(Splat)
             # A program prints any value as tape text, not a heap String.
-            Call.new(Path.global("Str").at(arg), "interpolate", arg).at(arg)
+            Call.new(Path.global("String").at(arg), "interpolate", arg).at(arg)
           else
             arg
           end
@@ -491,11 +491,11 @@ module Iyi
          @current_def.try(&.return_type).try(&.to_s) != "String"
         if node.name == "to_s" && (obj = node.obj) && node.args.empty? &&
            !node.block && !node.named_args && !node.block_arg
-          return Call.new(Path.global("Str").at(node), "interpolate", obj).at(node).transform(self)
+          return Call.new(Path.global("String").at(node), "interpolate", obj).at(node).transform(self)
         end
         if node.name == "build" && (obj = node.obj).is_a?(Path) &&
            obj.names == ["String"]
-          node.obj = Path.global("Str").at(obj)
+          node.obj = Path.global("String").at(obj)
         end
       end
       # Explicit retention of static bytes needs neither a view nor a copy.
@@ -825,7 +825,7 @@ module Iyi
     end
 
     private def scanner_path?(type) : Bool
-      type.is_a?(Path) && type.names == ["Str", "Scanner"]
+      type.is_a?(Path) && type.names == ["String", "Scanner"]
     end
 
     def transform(node : ModuleDef)
@@ -861,7 +861,7 @@ module Iyi
       super
       value = node.value
       if node.var.is_a?(Path) && value.is_a?(Call) && value.tape_literal? &&
-         node.declared_type.to_s != "Str"
+         node.declared_type.to_s != "String"
         node.value = value.args.first
       end
       value = node.value
@@ -1163,7 +1163,7 @@ module Iyi
 
     def transform(node : StringLiteral)
       return node unless tape_text?(node)
-      call = Call.new(Path.global(["Str"]), "view", [node] of ASTNode).at(node)
+      call = Call.new(Path.global(["String"]), "view", [node] of ASTNode).at(node)
       call.tape_literal = true
       call
     end
@@ -1174,9 +1174,9 @@ module Iyi
       if @macro_code == 0 && node.names.size == 1 && !node.global? &&
          ris_program_code?(node)
         case node.names.first
-        when "Hash"  then return Path.global("Hsh").at(node)
-        when "Array" then return Path.global("Ary").at(node)
-        when "String" then return Path.global("Str").at(node)
+        when "Hash"  then return Path.global("Hash").at(node)
+        when "Array" then return Path.global("Array").at(node)
+        when "String" then return Path.global("String").at(node)
         end
       end
       node

@@ -53,7 +53,7 @@ class Iyi::TapeRecursionChecker
         if live || pending
           detail = live ? "local `#{live}`" : "temporary or pending result"
           call.raise "cannot recurse with growing tape #{detail} live across the call: " \
-                     "pass scratch owned outside the cycle (an Ary, Str::Builder or owner parameter), " \
+                     "pass scratch owned outside the cycle (an Array, String::Builder or owner parameter), " \
                      "or end the local's use before the call"
         end
       end

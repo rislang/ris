@@ -23,14 +23,11 @@ require "./macros"
 require "./object"
 require "./number"
 require "./float"
-require "./string"
-require "./array"
 # `Enum` after `array` and `string`, which are what its `values`, `names` and
 # `to_s` answer with. The type itself is predefined — every `enum` a program
 # writes inherits it — so this file is the surface rather than the type.
 require "./enum"
 require "./range"
-require "./hash"
 require "./set"
 # `Atomic(T)`, on every target: LLVM's instructions lower to plain loads
 # and stores where a target has one thread (wasm32), so no gate here.
@@ -3636,8 +3633,8 @@ require "./file"
       end
     end
 
-    # ris: the tape. Each fiber's tape is one mapping that `Str` and
-    # `Ary` (src/iyi/tape.iyi) bump their bytes into, freed with one
+    # ris: the tape. Each fiber's tape is one mapping that `String` and
+    # `Array` (src/iyi/tape.iyi) bump their bytes into, freed with one
     # store when the owning body ends and kept among the thread's
     # spares, so the next scope writes the same warm pages. Only those types
     # allocate here: the allocator's entry points never do, so no object of
@@ -9740,7 +9737,7 @@ end
 
 # The panic's own write: descriptor 2 directly, no stream object, no error;
 # `print` raises when a pipe closes and `STDERR` may not exist yet.
-private def __iyi_say(text : String | Str) : Nil
+private def __iyi_say(text : String | String) : Nil
   written = 0_i64
   total = text.bytesize.to_i64
   while written < total
@@ -9792,7 +9789,7 @@ end
   end
 {% end %}
 
-def raise(message : String | Str, file : String = __FILE__,
+def raise(message : String | String, file : String = __FILE__,
           line : Int32 = __LINE__) : NoReturn
   unwinding = begin
   {% if (flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) ||
@@ -10564,7 +10561,7 @@ require "./ris"
       ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) ||
       flag?(:darwin) || flag?(:win32) || flag?(:wasm32)) %}
   require "./tape"
-  require "./hsh"
+  require "./hash_tape"
   require "./tape_core"
 {% else %}
   # No tape here: what the program's end and the scheduler ask of it

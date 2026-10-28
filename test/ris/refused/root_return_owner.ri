@@ -1,9 +1,9 @@
 @[Owner]
 struct ReturnOwner
-  getter bytes = Str::Builder.new
+  getter bytes = String::Builder.new
 end
 
-def escaped : Str
+def escaped : String
   owner = ReturnOwner.new
   owner.bytes << "local"
   owner.bytes.finish

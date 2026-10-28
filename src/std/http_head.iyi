@@ -8,10 +8,10 @@ import std/uri::{Query}
 # read from, on the caller's tape.
 @[OnTape]
 pub struct Field
-  getter name : Str
-  getter value : Str
+  getter name : String
+  getter value : String
 
-  def initialize(@name : Str, @value : Str)
+  def initialize(@name : String, @value : String)
   end
 end
 
@@ -20,14 +20,14 @@ end
 # copied. The caller retains views with copy_to(owner).
 @[OnTape]
 pub struct ParsedHead
-  getter method : Str
-  getter target : Str
-  getter version : Str
-  getter fields : Ary(Field)
+  getter method : String
+  getter target : String
+  getter version : String
+  getter fields : Array(Field)
   # Where the body starts in the bytes: just past the blank line.
   getter body_start : Int32
 
-  def initialize(@method : Str, @target : Str, @version : Str, @fields : Ary(Field), @body_start : Int32)
+  def initialize(@method : String, @target : String, @version : String, @fields : Array(Field), @body_start : Int32)
   end
 
   def http10? : Bool
@@ -89,7 +89,7 @@ pub struct ParsedHead
   end
 
   # The value of the first field called *name*, in any case.
-  def field(name : String | Str) : Str?
+  def field(name : String | String) : String?
     i = 0
     while i < @fields.size
       f = @fields[i]
@@ -153,7 +153,7 @@ pub struct ParsedHead
     false
   end
 
-  private def same_field?(a : Str, b : Str) : Bool
+  private def same_field?(a : String, b : String) : Bool
     return false unless a.bytesize == b.bytesize
     pa = a
     pb = b
@@ -175,17 +175,17 @@ end
 # the block keeps past its answer.
 @[OnTape]
 pub struct Incoming
-  getter method : Str
-  getter path : Str
-  getter query : Str?
-  getter fields : Ary(Field)
-  getter body : Str
+  getter method : String
+  getter path : String
+  getter query : String?
+  getter fields : Array(Field)
+  getter body : String
 
-  def initialize(@method : Str, @path : Str, @query : Str?, @fields : Ary(Field), @body : Str)
+  def initialize(@method : String, @path : String, @query : String?, @fields : Array(Field), @body : String)
   end
 
   # The value of the first field called *name*, in any case.
-  def header(name : String | Str) : Str?
+  def header(name : String | String) : String?
     i = 0
     while i < @fields.size
       f = @fields[i]
@@ -206,10 +206,10 @@ end
 # past `Server::MAX_HEAD`, 400 otherwise.
 @[OnTape]
 pub struct HeadError
-  getter message : Str
+  getter message : String
   getter status : Int32
 
-  def initialize(@message : Str, @status : Int32 = 400)
+  def initialize(@message : String, @status : Int32 = 400)
   end
 end
 
@@ -220,7 +220,7 @@ pub struct HeadParser
   # until the blank line that ends it has arrived. The parts and fields are
   # views into *bytes*; temporaries go on the caller's `tape`.
   def self.parse_head(
-    bytes : Str, from : Int32 = 0, complete : Bool = false,
+    bytes : String, from : Int32 = 0, complete : Bool = false,
   ) : ParsedHead | HeadError | Nil
     p = bytes
     n = bytes.bytesize
@@ -242,7 +242,7 @@ pub struct HeadParser
     end
     split_at = n if complete && split_at < 0
     if split_at < 0
-      return HeadError.new(Str.build(64) { |w| w << "request headers past " << MAX_HEAD << " bytes" }, 431) if n - from > MAX_HEAD
+      return HeadError.new(String.build(64) { |w| w << "request headers past " << MAX_HEAD << " bytes" }, 431) if n - from > MAX_HEAD
       return nil
     end
     return HeadError.new("empty request") if split_at == from
@@ -274,7 +274,7 @@ pub struct HeadParser
       capacity += 1
       at = HeadParser.crlf_in(p, at, split_at) + 2
     end
-    fields = Ary(Field).new(capacity)
+    fields = Array(Field).new(capacity)
     hosts = 0
     at = line_end + 2
     while at < split_at
@@ -298,7 +298,7 @@ pub struct HeadParser
       value = bytes[first, last - first]
       if HeadParser.control?(value)
         return HeadError.new(
-          Str.build(name.bytesize + 40) { |w| w << "header " << name << " contains a control character" })
+          String.build(name.bytesize + 40) { |w| w << "header " << name << " contains a control character" })
       end
       # Host (RFC 9112 §3.2): an HTTP/1.1 request names one, no request
       # names two, and what it names is a host; a server answers 400
@@ -312,24 +312,24 @@ pub struct HeadParser
       fields.push(Field.new(name, value))
       at = stop + 2
     end
-    return HeadError.new(Str.build(32) { |w| w << "Host on " << hosts << " lines" }) if hosts > 1
+    return HeadError.new(String.build(32) { |w| w << "Host on " << hosts << " lines" }) if hosts > 1
     if hosts == 0 && version == "HTTP/1.1"
       return HeadError.new("an HTTP/1.1 request without Host")
     end
     ParsedHead.new(method, target, version, fields, split_at + 4)
   end
 
-  private def self.head_error(prefix : Str, text : Str) : HeadError
-    HeadError.new(Str.build(prefix.bytesize + text.bytesize * 4 + 16) do |w|
+  private def self.head_error(prefix : String, text : String) : HeadError
+    HeadError.new(String.build(prefix.bytesize + text.bytesize * 4 + 16) do |w|
       w << prefix
       text.inspect(w)
     end)
   end
 
   def self.same_name?(
-    pa : Str,
+    pa : String,
     count : Int32,
-    b : String | Str,
+    b : String | String,
   ) : Bool
     return false unless count == b.bytesize
     pb = b.as_tape
@@ -345,7 +345,7 @@ pub struct HeadParser
     true
   end
 
-  def self.token?(p : Str, count : Int32 = p.bytesize) : Bool
+  def self.token?(p : String, count : Int32 = p.bytesize) : Bool
     return false if count == 0
     i = 0
     while i < count
@@ -362,7 +362,7 @@ pub struct HeadParser
     true
   end
 
-  def self.control?(p : Str, count : Int32 = p.bytesize) : Bool
+  def self.control?(p : String, count : Int32 = p.bytesize) : Bool
     i = 0
     while i < count
       return true if (p[i] < 32_u8 && p[i] != 9_u8) || p[i] == 127_u8
@@ -371,7 +371,7 @@ pub struct HeadParser
     false
   end
 
-  def self.crlf_in(p : Str, from : Int32, stop : Int32) : Int32
+  def self.crlf_in(p : String, from : Int32, stop : Int32) : Int32
     i = from
     while i + 1 < stop
       return i if p[i] == 13_u8 && p[i + 1] == 10_u8
@@ -380,7 +380,7 @@ pub struct HeadParser
     stop
   end
 
-  def self.byte_in(p : Str, from : Int32, stop : Int32, byte : UInt8) : Int32
+  def self.byte_in(p : String, from : Int32, stop : Int32, byte : UInt8) : Int32
     i = from
     while i < stop
       return i if p[i] == byte
@@ -389,7 +389,7 @@ pub struct HeadParser
     stop
   end
 
-  def self.host?(p : Str, count : Int32 = p.bytesize) : Bool
+  def self.host?(p : String, count : Int32 = p.bytesize) : Bool
     i = 0
     while i < count
       c = p[i]
@@ -405,7 +405,7 @@ pub struct HeadParser
     true
   end
 
-  def self.same_name?(a : String | Str, b : String | Str) : Bool
+  def self.same_name?(a : String | String, b : String | String) : Bool
     same_name?(a.as_tape, a.bytesize, b)
   end
 end

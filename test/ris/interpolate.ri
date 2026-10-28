@@ -3,7 +3,7 @@ tape do
   name = "tape"
   puts "on the #{name}: #{42} #{-7_i64} #{1.5} #{'x'} #{nil}#{true}"
   print "no newline #{name}\n"
-  Ary(Int32){1, 2}.each { |i| puts "item #{i}" }
+  Array(Int32){1, 2}.each { |i| puts "item #{i}" }
   puts "ends its line\n"
 end
 proc = ->(i : Int32) { puts "heap #{i}" }

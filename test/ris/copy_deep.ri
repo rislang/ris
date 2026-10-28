@@ -1,8 +1,8 @@
 # Structural tree nesting is a flat stream; preserve every subtree stop.
 tape do
-  tree = Tre(Str).new(100_001)
-  100_000.times { tree.open(Str.new("branch")) }
-  tree.leaf(Str.new("leaf"))
+  tree = Tre(String).new(100_001)
+  100_000.times { tree.open(String.new("branch")) }
+  tree.leaf(String.new("leaf"))
   index = 100_000
   while index > 0
     index -= 1
@@ -18,11 +18,11 @@ puts "PASS: 100000 deep arrays and trees"
 # Every union variant and positional/named field must be placed only after
 # its child jobs finish, including unequal alignment and zero-sized values.
 tape do
-  source = {1_u8, {text: Str.new("named"), n: 2_i64},
-    Ary(Str | Int32 | Nil){Str.new("union"), 3, nil}, Str::Builder.new(8)}
+  source = {1_u8, {text: String.new("named"), n: 2_i64},
+    Array(String | Int32 | Nil){String.new("union"), 3, nil}, String::Builder.new(8)}
   source[3].append("builder")
   copied = source.copy_to(Program.tape)
-  source[2][0] = Str.new("changed")
+  source[2][0] = String.new("changed")
   source[3].append("!")
   raise "tuple byte" unless copied[0] == 1_u8
   raise "named field" unless copied[1][:text] == "named"

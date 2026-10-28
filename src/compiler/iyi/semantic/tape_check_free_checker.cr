@@ -52,7 +52,7 @@ class Iyi::TapeCheckFreeChecker
                    "Index in `while i < a.size` (i only `+= 1`), use " \
                    "`each`, `map` or `sum`, or check the indexes once " \
                    "where they come in: `target.values_at(array)` gives " \
-                   "an Ary::View that reads without a check."
+                   "an Array::View that reads without a check."
       end
       true
     end

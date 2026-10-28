@@ -10,8 +10,8 @@ module test/ris/answer
 import std/socket::{IyiSocket}
 import std/http::{Server, Incoming, Outgoing}
 
-def read_to_close(socket : IyiSocket) : Str
-  writer = Str::Builder.new(4096)
+def read_to_close(socket : IyiSocket) : String
+  writer = String::Builder.new(4096)
   while true
     got = socket.read(writer, 65536).or_panic
     break if got == 0
@@ -86,7 +86,7 @@ group do |g|
   g.cancel_children
 end
 
-def reply(body : Str, close : Bool = false) : Str
+def reply(body : String, close : Bool = false) : String
   ("HTTP/1.1 200 OK\r\nX-Seen: yes\r\n" +
     "Content-Length: #{body.bytesize}\r\n" +
     "Connection: #{close ? "close" : "keep-alive"}\r\n\r\n") +

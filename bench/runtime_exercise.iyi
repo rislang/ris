@@ -31,11 +31,11 @@ end
 
 # Task observations are copied onto the board, in publication order.
 @[OnTape]
-record BenchText, text : Str
+record BenchText, text : String
 record BenchNumber, n : Int64
 
 def note(text : String) : Nil
-  RisBoard.post(BenchText.new(Str.build { |w| w.append(text) }))
+  RisBoard.post(BenchText.new(String.build { |w| w.append(text) }))
 end
 
 def hear : String

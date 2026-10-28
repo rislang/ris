@@ -40,10 +40,10 @@ module Iyi
       last = statements.last?
       return nil unless last.is_a?(Call) && last.name == "build" && last.args.empty?
       path = last.obj
-      return nil unless path.is_a?(Path) && path.names == ["Str"]
+      return nil unless path.is_a?(Path) && path.names == ["String"]
       block = last.block
       return nil unless block && block.args.size == 1
-      dest = Arg.new("__dest", restriction: Path.global(["Str", "Builder"]))
+      dest = Arg.new("__dest", restriction: Path.global(["String", "Builder"]))
       lines = statements[0...-1].map(&.clone)
       lines << Assign.new(Var.new(block.args.first.name), Var.new("__dest"))
       lines << block.body.clone
@@ -66,7 +66,7 @@ module Iyi
       return nil unless program.tape_into[inner.name]?
       return nil if TapePointerCheckerLibrary.library?(node.location)
       temp = program.new_temp_var.at(node)
-      writer = Path.global(["Str", "Builder"]).at(node)
+      writer = Path.global(["String", "Builder"]).at(node)
       into = Call.new(inner.obj.clone, PREFIX + inner.name, [temp.clone] + inner.args.map(&.clone)).at(inner)
       fallback = Call.new(temp.clone, "append", inner.clone).at(node)
       program.tape_into_plain << fallback.object_id

@@ -1,14 +1,14 @@
 module test/ris/uri_tape
 import std/uri::{URI}
 
-def retained_path : Str
+def retained_path : String
   parsed = URI.parse("https://host/kept".as_tape)
   parsed.copy_to(Program.tape).path
 end
 
 tape do
   raise "retained view" unless retained_path == "/kept"
-  w = Str::Builder.new(512)
+  w = String::Builder.new(512)
   input = "HTTP://u%3A:p%40@EX%aFAMPLE:80/a/./b/../c?q#f".as_tape
   parsed = URI.parse(input)
   raise "path view" unless parsed.path == "/a/./b/../c"

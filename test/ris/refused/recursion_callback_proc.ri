@@ -1,13 +1,13 @@
-def invoke(callback, a : Ary(Int32), n : Int32) : Int32
+def invoke(callback, a : Array(Int32), n : Int32) : Int32
   callback.call(a, n)
 end
-def descend(a : Ary(Int32), n : Int32) : Int32
+def descend(a : Array(Int32), n : Int32) : Int32
   return 0 if n == 0
-  local = Ary(Int32).new
-  callback = ->(scratch : Ary(Int32), depth : Int32) do
+  local = Array(Int32).new
+  callback = ->(scratch : Array(Int32), depth : Int32) do
     descend(scratch, depth - 1)
   end
   child = invoke(callback, a, n)
   child + local.size
 end
-tape { descend(Ary(Int32).new, 2) }
+tape { descend(Array(Int32).new, 2) }

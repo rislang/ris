@@ -15,7 +15,7 @@ class File
   # a write in "r+" or "w+" move with `seek` (std/file), as C's stdio asks
   # of `fopen`'s "+" modes: a write after a read otherwise lands past the
   # read-ahead, and a read after a write misses what is still buffered.
-  def self.open(path : String | Str, mode : String | Str = "r",
+  def self.open(path : String | String, mode : String | String = "r",
                 buffer_size : Int32 = 4096, perm : Int32 = 0o644,
                 owner : Program::TapeOwner? = nil) : IyiIO
     flags = open_flags(mode)
@@ -29,7 +29,7 @@ class File
     owner ? IyiIO.on_program(fd, buffer_size) : IyiIO.new(fd, buffer_size, false)
   end
 
-  def self.open(path : String | Str, mode : String | Str = "r",
+  def self.open(path : String | String, mode : String | String = "r",
                 buffer_size : Int32 = 4096, perm : Int32 = 0o644,
                 & : IyiIO -> Nil) : Nil
     io = open(path, mode, buffer_size, perm)
@@ -40,7 +40,7 @@ class File
   # The mode as bits: 1 read, 2 write, 4 create, 8 truncate, 16 append.
   # "b" goes after the letter, before or after the "+", once, as Crystal
   # spells it.
-  private def self.open_flags(mode : String | Str) : Int32
+  private def self.open_flags(mode : String | String) : Int32
     case mode
     when "r", "rb"          then 1
     when "w", "wb"          then 2 | 4 | 8
@@ -54,7 +54,7 @@ class File
   end
 
   # Read into the caller's storage, including files with no stated size.
-  def self.read(path : Str, writer : Str::Builder) : Nil
+  def self.read(path : String, writer : String::Builder) : Nil
     fd = __iyi_open_read(c_path(path))
     raise "cannot read #{path}" if fd < 0_i64
     defer __iyi_close(fd)
@@ -69,7 +69,7 @@ class File
     end
   end
 
-  def self.read(path : String | Str) : String
+  def self.read(path : String | String) : String
     fd = __iyi_open_read(c_path(path))
     if fd < 0_i64
       # POSIX opens a directory and fails at the read, which is where the
@@ -123,7 +123,7 @@ class File
     end
   {% end %}
 
-  def self.write(path : String | Str, contents : String | Str) : Nil
+  def self.write(path : String | String, contents : String | String) : Nil
     fd = __iyi_open_write(c_path(path))
     raise "cannot write #{path}" if fd < 0_i64
     io = IyiIO.new(fd, 4096, false)
@@ -132,7 +132,7 @@ class File
     io.flush
   end
 
-  def self.exists?(path : String | Str) : Bool
+  def self.exists?(path : String | String) : Bool
     {% if flag?(:wasm32) %}
       raise "File.exists? is not available on wasm32-wasi: path_open needs a preopened directory fd"
     {% elsif flag?(:win32) %}
@@ -150,18 +150,18 @@ class File
     {% end %}
   end
 
-  def self.delete(path : String | Str) : Nil
+  def self.delete(path : String | String) : Nil
     raise "cannot delete #{path}" if __iyi_unlink(c_path(path)) < 0
   end
 
-  private def self.c_path(path : String | Str) : UInt8*
+  private def self.c_path(path : String | String) : UInt8*
     n = path.bytesize
     i = 0
     while i < n
       raise "path contains a NUL byte" if path.to_unsafe[i] == 0
       i += 1
     end
-    buffer = if path.is_a?(Str)
+    buffer = if path.is_a?(String)
                Pointer(UInt8).new(RisRegion.tape_bytes((n + 1).to_u64))
              else
                Pointer(UInt8).malloc((n + 1).to_u64)

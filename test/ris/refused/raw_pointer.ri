@@ -1,9 +1,9 @@
-# A Str's pointer outside the library: it reads past the string's
+# A String's pointer outside the library: it reads past the string's
 # bytes as readily as within them.
 @[Ffi]
 module test/ris/refused/raw_pointer
 
 tape do
-  text = Str.new("abc")
+  text = String.new("abc")
   puts text.to_unsafe[3]
 end

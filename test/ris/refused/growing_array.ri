@@ -1,1 +1,1 @@
-tape { Ary(Ary(Int32)).new }
+tape { Array(Array(Int32)).new }

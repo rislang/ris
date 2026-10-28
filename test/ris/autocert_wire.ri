@@ -2,7 +2,7 @@
 import std/autocert::{Autocert, AutocertConfig, AutocertOrder,
   AutocertControl}
 
-hosts = Ary(Str).new(2)
+hosts = Array(String).new(2)
 hosts << "localhost" << "other.example"
 config = AutocertConfig.new("https://ca.example/directory", "/tmp/cache",
   hosts)

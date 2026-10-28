@@ -3,7 +3,7 @@ import std/int
 
 def work : Nil
   tape do
-    items = Ary(Int64).new(0)
+    items = Array(Int64).new(0)
     items.push(7_i64)
     tape { items.push(8_i64) }
   end

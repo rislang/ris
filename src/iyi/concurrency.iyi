@@ -3025,7 +3025,7 @@ class IyiScheduler
   # main fiber has no boundary above it, so after its drain the process
   # exits 1. Every registered cleanup on the path has run either way,
   # which is the promise `defer` makes.
-  def self.panic_current(message : String | Str) : NoReturn
+  def self.panic_current(message : String | String) : NoReturn
     # A panic raised inside one of the scheduler's critical sections - the
     # runtime's own sanity checks raise there - lets the lock go first: the
     # boundary below takes it, and would wait on itself forever.
@@ -3724,7 +3724,7 @@ class IyiTask(T)
   def initialize(@fiber : IyiFiber, @group : IyiGroup)
   end
 
-  # ris: T holds tape values (Str, Ary, Hsh, Tre). The task's own
+  # ris: T holds tape values (String, Array, Hash, Tre). The task's own
   # tape ends with it, so its value is copied into a result region the
   # group keeps until it ends, and each reader gets a copy on its tape.
 
@@ -3733,7 +3733,7 @@ class IyiTask(T)
   end
 
   def finish(value : T) : Nil
-    {% if T.union_types.any? { |t| t <= ::Str || t.name.starts_with?("Ary(") || t.name.starts_with?("Hsh(") || t.name.starts_with?("Tre(") || (t < ::Tuple && t.type_vars.any? { |m| m <= ::Str || m.name.starts_with?("Ary(") || m.name.starts_with?("Hsh(") }) } %}
+    {% if T.union_types.any? { |t| t <= ::String || t.name.starts_with?("Array(") || t.name.starts_with?("Hash(") || t.name.starts_with?("Tre(") || (t < ::Tuple && t.type_vars.any? { |m| m <= ::String || m.name.starts_with?("Array(") || m.name.starts_with?("Hash(") }) } %}
       if true
         region = RisRegion.acquire(Tape::CAPACITY)
         holder = RisResultRegion.new(region)
@@ -3776,7 +3776,7 @@ class IyiTask(T)
       return Panicked.new(@fiber.panic_message)
     end
     return Panicked.new("a task stopped by its cancellation has no value") if (@box == 0_u64)
-    {% if T.union_types.any? { |t| t <= ::Str || t.name.starts_with?("Ary(") || t.name.starts_with?("Hsh(") || t.name.starts_with?("Tre(") || (t < ::Tuple && t.type_vars.any? { |m| m <= ::Str || m.name.starts_with?("Ary(") || m.name.starts_with?("Hsh(") }) } %}
+    {% if T.union_types.any? { |t| t <= ::String || t.name.starts_with?("Array(") || t.name.starts_with?("Hash(") || t.name.starts_with?("Tre(") || (t < ::Tuple && t.type_vars.any? { |m| m <= ::String || m.name.starts_with?("Array(") || m.name.starts_with?("Hash(") }) } %}
       # A copy on the reader's current tape, as many readers as there are.
       return Tape.owner_copy(Pointer(T).new(@box).value, RisCurrentTape.new)
     {% end %}

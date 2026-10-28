@@ -1,1 +1,1 @@
-Ary::Link(Int32, UInt32).new(0).copy_to(Program.tape)
+Array::Link(Int32, UInt32).new(0).copy_to(Program.tape)

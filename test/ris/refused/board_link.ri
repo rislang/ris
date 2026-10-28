@@ -1,1 +1,1 @@
-RisBoard.poll(Ary::Link(Int32, Int32))
+RisBoard.poll(Array::Link(Int32, Int32))

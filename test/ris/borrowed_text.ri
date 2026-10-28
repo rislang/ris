@@ -54,7 +54,7 @@ params = Params.parse("name=value".to_heap)
 exit 21 unless params["name"] == "value"
 exit 22 unless params.fetch_all("name").size == 1
 exit 23 unless HTML.escape("é & <") == "é &amp; &lt;"
-writer = Str::Builder.new
+writer = String::Builder.new
 HTML.escape("é & <", writer)
 exit 24 unless writer.finish == "é &amp; &lt;"
 exit 25 unless HTTP.same_name?("X-Test", "x-test")

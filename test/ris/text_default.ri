@@ -1,7 +1,7 @@
 # Every def drops its interpolation when its result keeps no tape data.
 def format_size(n : Int32) : Int32
   text = "number #{n}"
-  raise "interpolation is not Str" unless text.is_a?(Str)
+  raise "interpolation is not String" unless text.is_a?(String)
   text.bytesize
 end
 
@@ -12,7 +12,7 @@ raise "literal used tape storage" unless literal_cursor ==
   IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)
 raise "static retention type" unless heap_literal.is_a?(String)
 puts typeof("static")
-raise "literal allocated" unless "static".is_a?(Str)
+raise "literal allocated" unless "static".is_a?(String)
 before = IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)
 format_size(42)
 raise "def kept interpolation" unless before ==

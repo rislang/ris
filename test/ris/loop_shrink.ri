@@ -1,6 +1,6 @@
 # Each mode runs separately: bounds failures abort the process.
 @[CheckFree]
-def last_checked_free(a : Ary(Int32)) : Int32
+def last_checked_free(a : Array(Int32)) : Int32
   i = 0
   value = 0
   while i < a.size
@@ -12,7 +12,7 @@ def last_checked_free(a : Ary(Int32)) : Int32
 end
 
 @[CheckFree]
-def word_checked_free(a : Str) : UInt64
+def word_checked_free(a : String) : UInt64
   i = 0
   value = 0_u64
   while i + 8 <= a.size
@@ -22,14 +22,14 @@ def word_checked_free(a : Str) : UInt64
   value
 end
 
-def shrink(a : Ary(Int32)) : Bool
+def shrink(a : Array(Int32)) : Bool
   a.clear
   true
 end
 
 @[OnTape]
 struct Shrinker
-  def initialize(@a : Ary(Int32))
+  def initialize(@a : Array(Int32))
   end
 
   def clear : Bool
@@ -43,7 +43,7 @@ struct Shrinker
   end
 end
 
-def cleared(a : Ary(Int32))
+def cleared(a : Array(Int32))
   i = 0
   while i < a.size
     a.clear
@@ -52,7 +52,7 @@ def cleared(a : Ary(Int32))
   end
 end
 
-def stored(a : Ary(Int32))
+def stored(a : Array(Int32))
   i = 0
   while i < a.size
     a.clear
@@ -61,7 +61,7 @@ def stored(a : Ary(Int32))
   end
 end
 
-def popped(a : Ary(Int32))
+def popped(a : Array(Int32))
   i = 0
   while i < a.size
     a.pop
@@ -70,7 +70,7 @@ def popped(a : Ary(Int32))
   end
 end
 
-def popped_optional(a : Ary(Int32))
+def popped_optional(a : Array(Int32))
   i = 0
   while i < a.size
     a.pop?
@@ -79,7 +79,7 @@ def popped_optional(a : Ary(Int32))
   end
 end
 
-def argument(a : Ary(Int32))
+def argument(a : Array(Int32))
   i = 0
   while i < a.size
     shrink(a)
@@ -88,7 +88,7 @@ def argument(a : Ary(Int32))
   end
 end
 
-def yielded(a : Ary(Int32), &)
+def yielded(a : Array(Int32), &)
   i = 0
   while i < a.size
     yield a
@@ -97,7 +97,7 @@ def yielded(a : Ary(Int32), &)
   end
 end
 
-def held(a : Ary(Int32), holder : Shrinker)
+def held(a : Array(Int32), holder : Shrinker)
   i = 0
   while i < a.size
     holder.clear
@@ -106,7 +106,7 @@ def held(a : Ary(Int32), holder : Shrinker)
   end
 end
 
-def held_operator(a : Ary(Int32), holder : Shrinker)
+def held_operator(a : Array(Int32), holder : Shrinker)
   i = 0
   while i < a.size
     holder += 1
@@ -115,7 +115,7 @@ def held_operator(a : Ary(Int32), holder : Shrinker)
   end
 end
 
-def condition(a : Ary(Int32))
+def condition(a : Array(Int32))
   i = 0
   while i < a.size && shrink(a)
     a[i]
@@ -123,14 +123,14 @@ def condition(a : Ary(Int32))
   end
 end
 
-def if_condition(a : Ary(Int32))
+def if_condition(a : Array(Int32))
   i = 0
   if i < a.size && shrink(a) && a[i]
     puts "unreachable"
   end
 end
 
-def words(a : Ary(UInt8))
+def words(a : Array(UInt8))
   i = 0
   while i + 8 <= a.size
     a.clear
@@ -139,7 +139,7 @@ def words(a : Ary(UInt8))
   end
 end
 
-def cached(a : Ary(Int32))
+def cached(a : Array(Int32))
   n = a.size
   a.clear
   i = 0
@@ -152,7 +152,7 @@ end
 # Give the mutable builder an indexed view for this lowering regression.
 @[OnTape]
 struct IndexedBuilder
-  def initialize(@writer : Str::Builder)
+  def initialize(@writer : String::Builder)
   end
 
   def truncate(count : Int32)
@@ -213,12 +213,12 @@ def truncated_words(a : IndexedBuilder)
 end
 
 tape do
-  a = Ary(Int32).new(1) { 42 }
-  bytes = Ary(UInt8).new(8) { 1_u8 }
-  builder = Str::Builder.new(1)
+  a = Array(Int32).new(1) { 42 }
+  bytes = Array(UInt8).new(8) { 1_u8 }
+  builder = String::Builder.new(1)
   builder.append("x")
   arguments = Program.arguments
-  mode = arguments.empty? ? Str.new("") : arguments[0]
+  mode = arguments.empty? ? String.new("") : arguments[0]
   case mode
   when "safe"
     puts last_checked_free(a)

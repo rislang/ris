@@ -3,6 +3,6 @@ def combine(size : Int32, child : Int32) : Int32
 end
 def descend(n : Int32) : Int32
   return 0 if n == 0
-  combine(Ary(Int32).new.size, descend(n - 1))
+  combine(Array(Int32).new.size, descend(n - 1))
 end
 tape { descend(2) }

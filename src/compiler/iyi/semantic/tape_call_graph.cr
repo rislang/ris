@@ -278,7 +278,7 @@ class Iyi::TapeCallGraph
     type = type.remove_typedef
     return type.union_types.any? { |t| growing_type?(t) } if type.is_a?(UnionType)
     name = type.to_s
-    name == "Str::Builder" || name.starts_with?("Ary(") ||
+    name == "String::Builder" || name.starts_with?("Array(") ||
       name.starts_with?("Tre(") || TapeOwnerChecker.owner?(@program, type)
   end
 

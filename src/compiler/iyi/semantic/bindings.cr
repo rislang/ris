@@ -152,11 +152,11 @@ module Iyi
     def raise_frozen_type(freeze_type, invalid_type, from)
       if freeze_type.to_s == "String" &&
          TapeChecker.tape_in(
-           invalid_type.program, invalid_type).try(&.to_s) == "Str"
-        from.raise "text is tape text (Str); retain it with `.copy_to(owner)` " \
-                   "in a Str field, variable or result, or write into the caller's builder. " \
+           invalid_type.program, invalid_type).try(&.to_s) == "String"
+        from.raise "text is tape text (String); retain it with `.copy_to(owner)` " \
+                   "in a String field, variable or result, or write into the caller's builder. " \
                    "If the object lives only as long as the request, " \
-                   "make it an @[OnTape] struct with a Str field"
+                   "make it an @[OnTape] struct with a String field"
       end
       if !freeze_type.includes_type?(invalid_type.program.nil) && invalid_type.includes_type?(invalid_type.program.nil)
         # This means that an instance variable become nil

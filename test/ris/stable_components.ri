@@ -4,7 +4,7 @@ module test/ris/stable_components
 @[PointerUnsafe("test builder and tree views before their first growth")]
 def check_components
   local_tape do
-    writer = Str::Builder.new(1)
+    writer = String::Builder.new(1)
     tree = Tre(Int32).new(1)
     writer.push(65_u8)
     root = tree.open(7)
@@ -12,7 +12,7 @@ def check_components
     # Entry(Int32) stores value then stop, both Int32.
     entry = Pointer(Int32).new(tree.@state.value)
     first = tree.@state.value
-    padding = Ary(Int32).new(3)
+    padding = Array(Int32).new(3)
     writer.append("bcdef")
     tree.leaf(8)
     tree.close(root)

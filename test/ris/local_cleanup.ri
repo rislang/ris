@@ -32,10 +32,10 @@ end
 
 def interleave(tag : UInt8) : Nil
   tape do
-    outer = Str.build { |w| w.push(tag) }
+    outer = String.build { |w| w.push(tag) }
     saved = RisRegion.tape
     local_tape do
-      text = Str.build { |w| w.append(outer) }
+      text = String.build { |w| w.append(outer) }
       current = RisRegion.tape
       sleep(1)
       check(RisRegion.tape == current)

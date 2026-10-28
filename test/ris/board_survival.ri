@@ -1,8 +1,8 @@
 @[OnTape]
 struct BoardSurvivor(T)
-  getter text : Str
+  getter text : String
   getter tag : T
-  def initialize(@text : Str, @tag : T)
+  def initialize(@text : String, @tag : T)
   end
 end
 struct BoardEmpty
@@ -11,7 +11,7 @@ end
 group do |g|
   child = g.spawn do
     RisBoard.limit(BoardSurvivor(Int32), 1_i64)
-    text = Str.build { |b| b << "retained" }
+    text = String.build { |b| b << "retained" }
     RisBoard.post(BoardSurvivor(Int32).new(text, 10))
   end
   raise "child post" unless child.value == true

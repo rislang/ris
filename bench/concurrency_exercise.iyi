@@ -17,7 +17,7 @@ import std/gc::{GC}
 
 # Task observations are copied onto the board, in publication order.
 @[OnTape]
-record BenchText, text : Str
+record BenchText, text : String
 record BenchNumber, n : Int64
 record BenchMark, index : Int32, at : Int64
 
@@ -27,7 +27,7 @@ def board_ready(type : T.class) : Bool forall T
 end
 
 def note(text : String) : Nil
-  RisBoard.post(BenchText.new(Str.build { |w| w.append(text) }))
+  RisBoard.post(BenchText.new(String.build { |w| w.append(text) }))
 end
 
 def hear : String

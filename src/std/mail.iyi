@@ -132,13 +132,13 @@ end
 
 # Bytes, characters and charsets: what the rest is written over.
 struct MailText
-  def self.cut(text : Str, start : Int32,
-               stop : Int32) : Str
+  def self.cut(text : String, start : Int32,
+               stop : Int32) : String
     text[start, stop > start ? stop - start : 0]
   end
 
-  def self.lower(text : Str) : Str
-    Str.build do |w|
+  def self.lower(text : String) : String
+    String.build do |w|
       text.each_byte do |byte|
         byte += 32_u8 if byte >= 65_u8 && byte <= 90_u8
         w.push(byte)
@@ -146,7 +146,7 @@ struct MailText
     end
   end
 
-  def self.trim(text : Str) : Str
+  def self.trim(text : String) : String
     a = 0
     b = text.bytesize
     while a < b && text[a] <= 32_u8
@@ -158,12 +158,12 @@ struct MailText
     text[a, b - a]
   end
 
-  def self.ends?(text : Str, suffix : String) : Bool
+  def self.ends?(text : String, suffix : String) : Bool
     n = suffix.bytesize
     text.bytesize >= n && text[text.bytesize - n, n] == suffix
   end
 
-  def self.contains?(text : Str, part : String) : Bool
+  def self.contains?(text : String, part : String) : Bool
     i = 0
     while i + part.bytesize <= text.bytesize
       return true if text[i, part.bytesize] == part
@@ -172,15 +172,15 @@ struct MailText
     false
   end
 
-  def self.base64_decode(text : Str) : Str
-    Str.build { |w| base64_decode(text, w) }
+  def self.base64_decode(text : String) : String
+    String.build { |w| base64_decode(text, w) }
   end
 
-  def self.qp_decode(text : Str) : Str
-    Str.build { |w| qp_decode(text, w) }
+  def self.qp_decode(text : String) : String
+    String.build { |w| qp_decode(text, w) }
   end
 
-  def self.charset(name : Str) : String?
+  def self.charset(name : String) : String?
     case MailText.lower(MailText.trim(name))
     when "utf-8", "utf8"
       "utf-8"
@@ -198,7 +198,7 @@ struct MailText
   end
 
   # *data*, in *name*'s charset, as UTF-8.
-  def self.decode(data : Str, name : Str) : Str | MailError
+  def self.decode(data : String, name : String) : String | MailError
     kind = MailText.charset(name)
     return MailError.new("the charset #{name.to_heap.inspect} is not one std/mail reads (UTF-8, US-ASCII, ISO-8859-1, ISO-8859-15, windows-1252)") unless kind
     p = data
@@ -215,7 +215,7 @@ struct MailText
       end
       return data
     end
-    io = Str::Builder.new(n + n // 4 + 1)
+    io = String::Builder.new(n + n // 4 + 1)
     while i < n
       b = p[i].to_i32
       if b < 128
@@ -235,11 +235,11 @@ struct MailText
     io.finish
   end
 
-  def self.lf(text : Str) : Str
+  def self.lf(text : String) : String
     return text unless MailText.contains?(text, "\r\n")
     p = text
     n = text.bytesize
-    io = Str::Builder.new(n)
+    io = String::Builder.new(n)
     i = 0
     while i < n
       io.push(p[i]) unless p[i] == 13_u8 && i + 1 < n && p[i + 1] == 10_u8
@@ -248,11 +248,11 @@ struct MailText
     io.finish
   end
 
-  def self.decode_words(text : Str) : Str
+  def self.decode_words(text : String) : String
     return text unless MailText.contains?(text, "=?")
     p = text
     n = text.bytesize
-    io = Str::Builder.new(n)
+    io = String::Builder.new(n)
     i = 0
     after_word = false
     while i < n
@@ -285,8 +285,8 @@ struct MailText
 
   # The encoded-words that are the whole of `text[start, stop)`, decoded,
   # or nil when it is anything else.
-  def self.words_in(text : Str, start : Int32, stop : Int32) : Str?
-    io = Str::Builder.new(stop - start)
+  def self.words_in(text : String, start : Int32, stop : Int32) : String?
+    io = String::Builder.new(stop - start)
     at = start
     while at < stop
       one = MailText.word_at(text, at, stop)
@@ -297,7 +297,7 @@ struct MailText
     at == start ? nil : io.finish
   end
 
-  def self.word_at(text : Str, at : Int32, stop : Int32) : {Str, Int32}?
+  def self.word_at(text : String, at : Int32, stop : Int32) : {String, Int32}?
     p = text
     return nil unless at + 1 < stop && p[at] == 61_u8 && p[at + 1] == 63_u8
     c0 = at + 2
@@ -316,7 +316,7 @@ struct MailText
     charset = MailText.cut(text, c0, c1)
     star = charset.index('*')
     charset = charset[0, star] if star
-    raw = nil.as(Str?)
+    raw = nil.as(String?)
     if enc == 81_u8 || enc == 113_u8
       raw = MailText.q_decode(text, t0, t1)
     elsif enc == 66_u8 || enc == 98_u8
@@ -328,9 +328,9 @@ struct MailText
     {decoded, t1 + 2}
   end
 
-  def self.q_decode(text : Str, start : Int32, stop : Int32) : Str?
+  def self.q_decode(text : String, start : Int32, stop : Int32) : String?
     p = text
-    io = Str::Builder.new(stop - start)
+    io = String::Builder.new(stop - start)
     i = start
     while i < stop
       b = p[i]
@@ -354,7 +354,7 @@ struct MailText
 
   # The alphabet, then at most two `=` at the end: missing padding is
   # taken, as readers take it.
-  def self.b_decode(text : Str, start : Int32, stop : Int32) : Str?
+  def self.b_decode(text : String, start : Int32, stop : Int32) : String?
     p = text
     e = stop
     pads = 0
@@ -371,7 +371,7 @@ struct MailText
     MailText.base64_decode(MailText.cut(text, start, e))
   end
 
-  def self.content_type(value : Str) : {Str, TapeMap(Str, Str)}?
+  def self.content_type(value : String) : {String, TapeMap(String, String)}?
     scan = TapeMailScan.new(value)
     return nil if scan.skip_cfws
     major = scan.token
@@ -380,11 +380,11 @@ struct MailText
     return nil if scan.skip_cfws
     minor = scan.token
     return nil if minor.empty?
-    {Str.build { |w| w << MailText.lower(major) << "/" << MailText.lower(minor) }, MailText.params(scan)}
+    {String.build { |w| w << MailText.lower(major) << "/" << MailText.lower(minor) }, MailText.params(scan)}
   end
 
   # A Content-Disposition's kind in lower case, and its parameters.
-  def self.disposition(value : Str) : {Str, TapeMap(Str, Str)}?
+  def self.disposition(value : String) : {String, TapeMap(String, String)}?
     scan = TapeMailScan.new(value)
     return nil if scan.skip_cfws
     kind = scan.token
@@ -395,8 +395,8 @@ struct MailText
   # `; name=value` after `scan`, names in lower case, RFC 2231's extended
   # values and continuations put together. A parameter that cannot be read
   # ends the list; what came before it is kept.
-  def self.params(scan : TapeMailScan) : TapeMap(Str, Str)
-    raw = Ary({Str, Str}).new
+  def self.params(scan : TapeMailScan) : TapeMap(String, String)
+    raw = Array({String, String}).new
     while true
       break if scan.skip_cfws
       break if scan.done? || scan.peek != 59_u8
@@ -419,10 +419,10 @@ struct MailText
     MailText.assemble(raw)
   end
 
-  def self.assemble(raw : Ary({Str, Str})) : TapeMap(Str, Str)
-    result = TapeMap(Str, Str).new
-    plain = TapeMap(Str, Str).new
-    pieces = TapeMap(Str, Ary({Int32, Str, Bool})).new
+  def self.assemble(raw : Array({String, String})) : TapeMap(String, String)
+    result = TapeMap(String, String).new
+    plain = TapeMap(String, String).new
+    pieces = TapeMap(String, Array({Int32, String, Bool})).new
     raw.each do |pair|
       name = pair[0]
       value = pair[1]
@@ -432,7 +432,7 @@ struct MailText
       else
         base = name[0, star]
         rest = MailText.cut(name, star + 1, name.bytesize)
-        list = pieces[base]? || Ary({Int32, Str, Bool}).new
+        list = pieces[base]? || Array({Int32, String, Bool}).new
         if rest.empty?
           list << {-1, value, true}
         else
@@ -458,18 +458,18 @@ struct MailText
 
   # A value that is encoded-words and nothing else - how some mailers
   # write a file name - decoded; any other as it is.
-  def self.whole_words(value : Str) : Str
+  def self.whole_words(value : String) : String
     return value unless value.starts_with?("=?") && MailText.ends?(value, "?=")
     decoded = MailText.decode_words(value)
     decoded
   end
 
-  def self.continued(list : Ary({Int32, Str, Bool})) : Str?
+  def self.continued(list : Array({Int32, String, Bool})) : String?
     list.each do |piece|
       return MailText.extended(piece[1], true) if piece[0] == -1
     end
     sorted = list.sorted_by { |piece| piece[0] }
-    bytes = Str::Builder.new(64)
+    bytes = String::Builder.new(64)
     charset = "".as_tape
     expect = 0
     sorted.each do |piece|
@@ -497,7 +497,7 @@ struct MailText
 
   # `charset'language'%XX...`, or with *prefixed* false just the
   # percent-encoded bytes.
-  def self.extended(value : Str, prefixed : Bool) : Str
+  def self.extended(value : String, prefixed : Bool) : String
     charset = "".as_tape
     text = value
     first = value.index('\'')
@@ -511,17 +511,17 @@ struct MailText
 
   # Bytes from RFC 2231's charset in UTF-8; as they are when the charset
   # is none or not one this reads.
-  def self.in_charset(bytes : Str, charset : Str) : Str
+  def self.in_charset(bytes : String, charset : String) : String
     return bytes if charset.empty?
     decoded = MailText.decode(bytes, charset)
     decoded.is_a?(MailError) ? bytes : decoded
   end
 
-  def self.percent_decode(text : Str) : Str
+  def self.percent_decode(text : String) : String
     return text unless MailText.contains?(text, "%")
     p = text
     n = text.bytesize
-    io = Str::Builder.new(n)
+    io = String::Builder.new(n)
     i = 0
     while i < n
       if p[i] == 37_u8 && i + 2 < n && MailText.hex_value(p[i + 1]) >= 0 && MailText.hex_value(p[i + 2]) >= 0
@@ -565,7 +565,7 @@ struct MailText
     io.write_byte(HEX.to_unsafe[b.to_i32 & 15])
   end
 
-  def self.ascii?(text : String | Str) : Bool
+  def self.ascii?(text : String | String) : Bool
     p = text.to_unsafe
     i = 0
     while i < text.bytesize
@@ -587,7 +587,7 @@ struct MailText
 
   # Whether *text* is well-formed UTF-8: no overlong form, no surrogate,
   # nothing past U+10FFFF.
-  def self.utf8?(text : String | Str) : Bool
+  def self.utf8?(text : String | String) : Bool
     p = text.is_a?(String) ? text.to_unsafe : text
     n = text.bytesize
     i = 0
@@ -663,7 +663,7 @@ struct MailText
     end
   end
 
-  def self.append_utf8(io : Str::Builder, cp : Int32) : Nil
+  def self.append_utf8(io : String::Builder, cp : Int32) : Nil
     if cp < 0x80
       io.push(cp.to_u8)
     elsif cp < 0x800
@@ -801,15 +801,15 @@ struct MailText
     -1
   end
 
-  def self.escape(io : Str::Builder, b : UInt8,
+  def self.escape(io : String::Builder, b : UInt8,
                   mark : UInt8 = 61_u8) : Nil
     io.push(mark)
     io.push(HEX.to_unsafe[b.to_i32 >> 4])
     io.push(HEX.to_unsafe[b.to_i32 & 15])
   end
 
-  def self.base64_encode(data : Str,
-                         io : Str::Builder) : Nil
+  def self.base64_encode(data : String,
+                         io : String::Builder) : Nil
     flat = Base64.encode(data)
     n = flat.bytesize
     p = flat
@@ -826,8 +826,8 @@ struct MailText
   # Characters outside the alphabet are passed over, as section 6.8 has
   # it, and the first `=` ends the data; bits short of a byte at the end
   # are dropped.
-  def self.base64_decode(text : Str,
-                         io : Str::Builder) : Nil
+  def self.base64_decode(text : String,
+                         io : String::Builder) : Nil
     p = text
     n = text.bytesize
     acc = 0
@@ -858,14 +858,14 @@ struct MailText
   # more than 76 is cut at 75 and a soft break, never inside an escape;
   # a space or tab at a line's end is escaped, or kept before a soft
   # break where there is no room for its escape.
-  def self.qp_encode(data : Str, binary : Bool,
-                     io : Str::Builder) : Nil
+  def self.qp_encode(data : String, binary : Bool,
+                     io : String::Builder) : Nil
     p = data
     n = data.bytesize
-    line = Str::Builder.new(128)
+    line = String::Builder.new(128)
     i = 0
     while i < n
-      line = Str::Builder.new(128)
+      line = String::Builder.new(128)
       while i < n
         b = p[i]
         break if !binary && (b == 13_u8 || b == 10_u8)
@@ -887,7 +887,7 @@ struct MailText
   end
 
   # One encoded line, cut into lines of 76 or fewer.
-  def self.qp_wrap(io : Str::Builder, e : Str) : Nil
+  def self.qp_wrap(io : String::Builder, e : String) : Nil
     p = e
     size = e.bytesize
     start = 0
@@ -928,8 +928,8 @@ struct MailText
   # dropped first (rule 3: a gateway may have added them), a line's last
   # `=` is a soft break, `=` and two hex digits - either case - a byte,
   # and any other `=` is itself.
-  def self.qp_decode(text : Str,
-                     io : Str::Builder) : Nil
+  def self.qp_decode(text : String,
+                     io : String::Builder) : Nil
     p = text
     n = text.bytesize
     i = 0
@@ -970,7 +970,7 @@ struct MailText
   def self.base64_encode(data : String) : String
     result = ""
     tape do
-      w = Str::Builder.new(128)
+      w = String::Builder.new(128)
       base64_encode(data.as_tape, w)
       result = w.finish.to_heap
     end
@@ -983,7 +983,7 @@ struct MailText
   def self.base64_decode(text : String) : String
     result = ""
     tape do
-      w = Str::Builder.new(128)
+      w = String::Builder.new(128)
       base64_decode(text.as_tape, w)
       result = w.finish.to_heap
     end
@@ -1001,7 +1001,7 @@ struct MailText
   def self.qp_encode(data : String, binary : Bool) : String
     result = ""
     tape do
-      w = Str::Builder.new(128)
+      w = String::Builder.new(128)
       qp_encode(data.as_tape, binary, w)
       result = w.finish.to_heap
     end
@@ -1053,7 +1053,7 @@ struct MailText
   def self.qp_decode(text : String) : String
     result = ""
     tape do
-      w = Str::Builder.new(128)
+      w = String::Builder.new(128)
       qp_decode(text.as_tape, w)
       result = w.finish.to_heap
     end
@@ -1528,7 +1528,7 @@ struct MailText
     raise "mail: the #{name} header is not UTF-8" unless MailText.utf8?(value)
   end
 
-  def self.field_name?(name : String | Str) : Bool
+  def self.field_name?(name : String | String) : Bool
     return false if name.empty?
     p = name.is_a?(String) ? name.to_unsafe : name
     i = 0
@@ -1544,12 +1544,12 @@ end
 # passed over, tokens and quoted strings read.
 @[OnTape]
 struct TapeMap(K, V)
-  @keys : Ary(K)
-  @values : Ary(V)
+  @keys : Array(K)
+  @values : Array(V)
 
   def initialize
-    @keys = Ary(K).new
-    @values = Ary(V).new
+    @keys = Array(K).new
+    @values = Array(V).new
   end
 
   def empty? : Bool
@@ -1595,10 +1595,10 @@ end
 @[OnTape]
 struct TapeMailScan
   getter at : Int32
-  @text : Str
+  @text : String
   @n : Int32
 
-  def initialize(@text : Str, @at : Int32 = 0)
+  def initialize(@text : String, @at : Int32 = 0)
     @n = @text.bytesize
   end
 
@@ -1643,7 +1643,7 @@ struct TapeMailScan
     nil
   end
 
-  def token : Str
+  def token : String
     start = @at
     while @at < @n && MailText.token?(@text[@at])
       @at = @at + 1
@@ -1651,7 +1651,7 @@ struct TapeMailScan
     MailText.cut(@text, start, @at)
   end
 
-  def atom : Str
+  def atom : String
     start = @at
     while @at < @n && MailText.atext?(@text[@at])
       @at = @at + 1
@@ -1659,7 +1659,7 @@ struct TapeMailScan
     MailText.cut(@text, start, @at)
   end
 
-  def digits : Str
+  def digits : String
     start = @at
     while @at < @n && @text[@at] >= 48_u8 && @text[@at] <= 57_u8
       @at = @at + 1
@@ -1667,7 +1667,7 @@ struct TapeMailScan
     MailText.cut(@text, start, @at)
   end
 
-  def letters : Str
+  def letters : String
     start = @at
     while @at < @n &&
           ((@text[@at] >= 65_u8 && @text[@at] <= 90_u8) ||
@@ -1677,7 +1677,7 @@ struct TapeMailScan
     MailText.cut(@text, start, @at)
   end
 
-  def bare_value : Str
+  def bare_value : String
     start = @at
     while @at < @n && @text[@at] != 59_u8 && @text[@at] > 32_u8 &&
           @text[@at] != 40_u8
@@ -1687,9 +1687,9 @@ struct TapeMailScan
   end
 
   # The quoted string at `"`, its quoted-pairs resolved.
-  def quoted : Str | MailError
+  def quoted : String | MailError
     @at = @at + 1
-    io = Str::Builder.new(32)
+    io = String::Builder.new(32)
     while @at < @n
       b = @text[@at]
       if b == 34_u8
@@ -1708,7 +1708,7 @@ struct TapeMailScan
   end
 
   # A domain literal at `[`, brackets kept.
-  def literal : Str | MailError
+  def literal : String | MailError
     start = @at
     @at = @at + 1
     while @at < @n
@@ -2265,7 +2265,7 @@ pub struct Mail
   MAX_DEPTH = 32
 
   # A message read from *text*: its header section, then its body.
-  def self.parse(text : Str) : TapePart | MailError
+  def self.parse(text : String) : TapePart | MailError
     TapePart.parse(text)
   end
 
@@ -2395,39 +2395,39 @@ pub struct Mail
     MailText.qp_decode(text)
   end
 
-  def self.encode_base64(data : Str) : Str
-    Str.build { |w| encode_base64(data, w) }
+  def self.encode_base64(data : String) : String
+    String.build { |w| encode_base64(data, w) }
   end
 
-  def self.encode_base64(data : Str,
-                         writer : Str::Builder) : Nil
+  def self.encode_base64(data : String,
+                         writer : String::Builder) : Nil
     MailText.base64_encode(data, writer)
   end
 
-  def self.decode_base64(text : Str) : Str
-    Str.build { |w| decode_base64(text, w) }
+  def self.decode_base64(text : String) : String
+    String.build { |w| decode_base64(text, w) }
   end
 
-  def self.decode_base64(text : Str,
-                         writer : Str::Builder) : Nil
+  def self.decode_base64(text : String,
+                         writer : String::Builder) : Nil
     MailText.base64_decode(text, writer)
   end
 
-  def self.encode_quoted_printable(data : Str, binary : Bool = false) : Str
-    Str.build { |w| encode_quoted_printable(data, w, binary) }
+  def self.encode_quoted_printable(data : String, binary : Bool = false) : String
+    String.build { |w| encode_quoted_printable(data, w, binary) }
   end
 
-  def self.encode_quoted_printable(data : Str,
-                                   writer : Str::Builder, binary : Bool = false) : Nil
+  def self.encode_quoted_printable(data : String,
+                                   writer : String::Builder, binary : Bool = false) : Nil
     MailText.qp_encode(data, binary, writer)
   end
 
-  def self.decode_quoted_printable(text : Str) : Str
-    Str.build { |w| decode_quoted_printable(text, w) }
+  def self.decode_quoted_printable(text : String) : String
+    String.build { |w| decode_quoted_printable(text, w) }
   end
 
-  def self.decode_quoted_printable(text : Str,
-                                   writer : Str::Builder) : Nil
+  def self.decode_quoted_printable(text : String,
+                                   writer : String::Builder) : Nil
     MailText.qp_decode(text, writer)
   end
 
@@ -2814,30 +2814,30 @@ pub struct Mail
   struct TapePart
     # Each field's name as written and its value unfolded, whitespace at
     # either end dropped, nothing decoded.
-    getter headers : Ary({Str, Str})
+    getter headers : Array({String, String})
     # The parts of a multipart, or the message a `message/rfc822` holds.
-    getter parts : Ary(TapePart)
+    getter parts : Array(TapePart)
     # `type/subtype` in lower case: `text/plain` when the part names none,
     # or names one that cannot be read (RFC 2045 section 5.2).
-    getter media_type : Str
-    @params : TapeMap(Str, Str)
-    @source : Str
+    getter media_type : String
+    @params : TapeMap(String, String)
+    @source : String
     @body_at : Int32
     @body_end : Int32
 
-    def initialize(@source : Str, @headers : Ary({Str, Str}), @media_type : Str, @params : TapeMap(Str, Str), @body_at : Int32, @body_end : Int32, @parts : Ary(TapePart))
+    def initialize(@source : String, @headers : Array({String, String}), @media_type : String, @params : TapeMap(String, String), @body_at : Int32, @body_end : Int32, @parts : Array(TapePart))
     end
 
-    def self.parse(text : Str) : TapePart | MailError
+    def self.parse(text : String) : TapePart | MailError
       TapePart.read(text, 0, text.bytesize, 0, "text/plain".as_tape)
     end
 
-    protected def self.read(source : Str, start : Int32, stop : Int32, depth : Int32, default_type : Str) : TapePart | MailError
+    protected def self.read(source : String, start : Int32, stop : Int32, depth : Int32, default_type : String) : TapePart | MailError
       return MailError.new("parts are nested deeper than #{MAX_DEPTH}") if depth > MAX_DEPTH
       p = source
-      headers = Ary({Str, Str}).new
-      name = nil.as(Str?)
-      value = Str::Builder.new(64)
+      headers = Array({String, String}).new
+      name = nil.as(String?)
+      value = String::Builder.new(64)
       body_at = stop
       line = 0
       i = start
@@ -2872,11 +2872,11 @@ pub struct Mail
           field = MailText.cut(source, i, stem)
           unless colon < e && MailText.field_name?(field)
             shown = MailText.cut(source, i, e)
-            shown = Str.build { |w| w << shown[0, 60] << "..." } if shown.bytesize > 64
+            shown = String.build { |w| w << shown[0, 60] << "..." } if shown.bytesize > 64
             return MailError.new("line #{line} of a header section is not a field: #{shown.to_heap.inspect}")
           end
           name = field
-          value = Str::Builder.new(64)
+          value = String::Builder.new(64)
           value << source[colon + 1, e - colon - 1]
         end
         body_at = after
@@ -2886,7 +2886,7 @@ pub struct Mail
         headers << {field, TapePart.trim(value.finish)}
       end
       media = default_type
-      params = TapeMap(Str, Str).new
+      params = TapeMap(String, String).new
       if type = TapePart.first(headers, "content-type")
         parsed = MailText.content_type(type)
         if parsed
@@ -2896,7 +2896,7 @@ pub struct Mail
           media = "text/plain".as_tape
         end
       end
-      parts = Ary(TapePart).new
+      parts = Array(TapePart).new
       if media.starts_with?("multipart/")
         boundary = params["boundary".as_tape]?
         unless boundary && !boundary.empty?
@@ -2921,7 +2921,7 @@ pub struct Mail
       TapePart.new(source, headers, media, params, body_at, stop, parts)
     end
 
-    protected def self.trim(value : Str) : Str
+    protected def self.trim(value : String) : String
       p = value
       a = 0
       b = value.bytesize
@@ -2934,7 +2934,7 @@ pub struct Mail
       a == 0 && b == value.bytesize ? value : MailText.cut(value, a, b)
     end
 
-    protected def self.first(headers : Ary({Str, Str}), lower : String) : Str?
+    protected def self.first(headers : Array({String, String}), lower : String) : String?
       headers.each do |pair|
         return pair[1] if MailText.lower(pair[0]) == lower
       end
@@ -2944,11 +2944,11 @@ pub struct Mail
     # The parts of a multipart body: between `--boundary` lines, the line
     # break before each line its own; to the `--boundary--` line. The
     # preamble and the epilogue are passed over.
-    protected def self.split(source : Str, start : Int32, stop : Int32, boundary : Str, media : Str) : Ary({Int32, Int32}) | MailError
+    protected def self.split(source : String, start : Int32, stop : Int32, boundary : String, media : String) : Array({Int32, Int32}) | MailError
       p = source
-      mark = Str.build { |w| w << "--" << boundary }
+      mark = String.build { |w| w << "--" << boundary }
       size = mark.bytesize
-      ranges = Ary({Int32, Int32}).new
+      ranges = Array({Int32, Int32}).new
       open_at = -1
       i = start
       while i < stop
@@ -3005,15 +3005,15 @@ pub struct Mail
     end
 
     # The first field named *name*, any case, its encoded-words decoded.
-    def header(name : String) : Str?
+    def header(name : String) : String?
       raw = raw_header(name)
       raw ? MailText.decode_words(raw) : nil
     end
 
     # Every field named *name*, in order, decoded.
-    def header_values(name : String) : Ary(Str)
+    def header_values(name : String) : Array(String)
       lower = name.downcase
-      found = Ary(Str).new
+      found = Array(String).new
       @headers.each do |pair|
         found << MailText.decode_words(pair[1]) if MailText.lower(pair[0]) == lower
       end
@@ -3021,29 +3021,29 @@ pub struct Mail
     end
 
     # The first field named *name*, as written.
-    def raw_header(name : String) : Str?
+    def raw_header(name : String) : String?
       TapePart.first(@headers, name.downcase)
     end
 
-    def subject : Str?
+    def subject : String?
       header("Subject")
     end
 
     # The mailboxes of every field named *name* - `From`, `To`, `Cc` -
     # none when there is no such field.
     # A Content-Type parameter, RFC 2231's decoded.
-    def param(name : String) : Str?
+    def param(name : String) : String?
       @params[name.downcase.as_tape]?
     end
 
     # The charset text is in: `us-ascii` when none is named (RFC 2045
     # section 5.2), in lower case.
-    def charset : Str
+    def charset : String
       MailText.lower(@params["charset".as_tape]? || "us-ascii".as_tape)
     end
 
     # The disposition in lower case - `attachment`, `inline` - or nil.
-    def disposition : Str?
+    def disposition : String?
       raw = raw_header("Content-Disposition")
       return nil unless raw
       parsed = MailText.disposition(raw)
@@ -3051,7 +3051,7 @@ pub struct Mail
     end
 
     # The file name of Content-Disposition, or else Content-Type's `name`.
-    def filename : Str?
+    def filename : String?
       if raw = raw_header("Content-Disposition")
         parsed = MailText.disposition(raw)
         if parsed
@@ -3071,13 +3071,13 @@ pub struct Mail
     end
 
     # The transfer encoding in lower case: `7bit` when none is named.
-    def transfer_encoding : Str
+    def transfer_encoding : String
       MailText.lower(MailText.trim(
         raw_header("Content-Transfer-Encoding") || "7bit".as_tape))
     end
 
     # The bytes the body stands for, its transfer encoding undone.
-    def body : Str | MailError
+    def body : String | MailError
       raw = MailText.cut(@source, @body_at, @body_end)
       case encoding = transfer_encoding
       when "7bit", "8bit", "binary"
@@ -3092,7 +3092,7 @@ pub struct Mail
     end
 
     # The body as text in UTF-8, from the part's charset, each CRLF an LF.
-    def text : Str | MailError
+    def text : String | MailError
       bytes = body
       return bytes if bytes.is_a?(MailError)
       decoded = MailText.decode(bytes, charset)

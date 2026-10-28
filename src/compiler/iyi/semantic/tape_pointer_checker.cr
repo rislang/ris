@@ -52,28 +52,28 @@ class Iyi::TapePointerChecker
   # pointer into the tape: its block's first parameter.
   def yields_pointer?(node : Call) : Bool
     node.name == "unsafe_append" &&
-      !!@graph.targets(node).try &.any? { |target| target.owner.to_s == "Str::Builder" }
+      !!@graph.targets(node).try &.any? { |target| target.owner.to_s == "String::Builder" }
   end
 
   def refuse?(node : Call) : String?
     return nil if TapeRules.runtime?(@program, node.location)
     if yields_pointer?(node)
-      return "`#{node.name}` outside a @[TapeUnsafe] def: it yields a pointer into the tape, for a system call to write into.\n\nWrite tape text with a Str::Builder's `<<`, `push` and `append`."
+      return "`#{node.name}` outside a @[TapeUnsafe] def: it yields a pointer into the tape, for a system call to write into.\n\nWrite tape text with a String::Builder's `<<`, `push` and `append`."
     end
     return nil unless pointer_of(node)
     unless view?(node)
-      return "`to_unsafe` of a Str outside a @[TapeUnsafe] def: the pointer reads past its bytes as readily as within them, and after its scope the next scope's.\n\nRead it with `[]`, `[start, count]` or `each_byte`, which check their bounds."
+      return "`to_unsafe` of a String outside a @[TapeUnsafe] def: the pointer reads past its bytes as readily as within them, and after its scope the next scope's.\n\nRead it with `[]`, `[start, count]` or `each_byte`, which check their bounds."
     end
-    "`Str.new(pointer, size)` outside a @[TapeUnsafe] def: a view of any address, which the tape's checks do not see.\n\nCopy a String onto the tape with `Str.new(text)`, view one with `Str.view(text)`, or a part of a tape string with `[start, count]`."
+    "`String.new(pointer, size)` outside a @[TapeUnsafe] def: a view of any address, which the tape's checks do not see.\n\nCopy a String onto the tape with `String.new(text)`, view one with `String.view(text)`, or a part of a tape string with `[start, count]`."
   end
 
   private def tape_string?(type : Type?) : Bool
     return false unless type
-    type.remove_typedef.to_s == "Str"
+    type.remove_typedef.to_s == "String"
   end
 
   private def tape_string_class?(owner : Type) : Bool
-    owner.metaclass? && owner.instance_type.to_s == "Str"
+    owner.metaclass? && owner.instance_type.to_s == "String"
   end
 
   class Finder < Visitor
@@ -143,14 +143,14 @@ class Iyi::TapeFfiFlow
       block = call.block
       param = block.try &.args.first?
       next if block && param && reaches?(block.body, nil, param.name)
-      call.raise "the pointer `#{call.name}` yields reaches no `lib` fun or system call: the mark is for the FFI and OS boundary only.\n\nWrite tape text with a Str::Builder's `<<`, `push` and `append`."
+      call.raise "the pointer `#{call.name}` yields reaches no `lib` fun or system call: the mark is for the FFI and OS boundary only.\n\nWrite tape text with a String::Builder's `<<`, `push` and `append`."
     end
     if pointers.empty? && yielders.empty?
-      a_def.raise "@[TapeUnsafe] on a def that hands no tape pointer to the OS: the mark is for the FFI and OS boundary only.\n\nRead tape text with `[]`, `[start, count]` or `each_byte`, and retain it with `copy_to(owner)` or write into the caller's Str::Builder."
+      a_def.raise "@[TapeUnsafe] on a def that hands no tape pointer to the OS: the mark is for the FFI and OS boundary only.\n\nRead tape text with `[]`, `[start, count]` or `each_byte`, and retain it with `copy_to(owner)` or write into the caller's String::Builder."
     end
     pointers.each do |pointer|
       next if reaches?(a_def.body, pointer, nil)
-      pointer.raise "a tape pointer in a @[TapeUnsafe] def that reaches no `lib` fun or system call: the mark is for the FFI and OS boundary only.\n\nRead tape text with `[]`, `[start, count]` or `each_byte`, and write it with a Str::Builder."
+      pointer.raise "a tape pointer in a @[TapeUnsafe] def that reaches no `lib` fun or system call: the mark is for the FFI and OS boundary only.\n\nRead tape text with `[]`, `[start, count]` or `each_byte`, and write it with a String::Builder."
     end
   end
 
@@ -299,7 +299,7 @@ module Iyi::TapeRules
   def self.unsafe?(program : Program, a_def : Def) : Bool
     return false unless ann = a_def.annotation(program.tape_unsafe_annotation)
     unless std?(a_def.location) || runtime?(program, a_def.location)
-      ann.raise "@[TapeUnsafe] outside a `std/` module: it lifts the tape's rules, which keep a program's tape values in their scope.\n\nRead tape text with `[]`, `[start, count]` or `each_byte`, and retain it with `copy_to(owner)` or write into the caller's Str::Builder."
+      ann.raise "@[TapeUnsafe] outside a `std/` module: it lifts the tape's rules, which keep a program's tape values in their scope.\n\nRead tape text with `[]`, `[start, count]` or `each_byte`, and retain it with `copy_to(owner)` or write into the caller's String::Builder."
     end
     true
   end

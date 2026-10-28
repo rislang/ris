@@ -4,7 +4,7 @@ import std/int
 group do |g|
   task = g.spawn do
     local_tape do
-      text = Str.build { |w| w << "cancel alive" }
+      text = String.build { |w| w << "cancel alive" }
       value = 1
       defer puts text
       defer puts value

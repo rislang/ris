@@ -95,7 +95,7 @@ impl Error for Timeout
   end
 end
 
-def read(name : String) : Str | Timeout
+def read(name : String) : String | Timeout
   return Timeout.new(name) if name == "slow"
   "<#{name}>"
 end
@@ -103,7 +103,7 @@ end
 # `end!` makes the group a value: the tuple of what the two tasks answered,
 # or the first error member. `Panicked` is there because a task that panics
 # answers it (III.1.4), and the signature says so.
-def both(a : String, b : String) : Tuple(Str, Str) | Timeout | Panicked
+def both(a : String, b : String) : Tuple(String, String) | Timeout | Panicked
   group do |g|
     x = g.spawn { read(a) }
     y = g.spawn { read(b) }
@@ -111,13 +111,13 @@ def both(a : String, b : String) : Tuple(Str, Str) | Timeout | Panicked
 end
 
 case both("one", "two")
-in Tuple(Str, Str)       then puts it # => {"<one>", "<two>"}
+in Tuple(String, String)       then puts it # => {"<one>", "<two>"}
 in Timeout               then puts it.message
 in Panicked              then puts "panicked"
 end
 
 case both("one", "slow")
-in Tuple(Str, Str)       then puts it
+in Tuple(String, String)       then puts it
 in Timeout               then puts "#{it.message} timed out" # => slow timed out
 in Panicked              then puts "panicked"
 end

@@ -12,16 +12,16 @@ decoder = Decoder.new
   encoder.set_max_table_size(128) if i == 5
   tape do
     fields = TapeHeaders.new(5)
-    fields.push(TapeHeaderField.new(Str.new(":method"), Str.new("GET"),
+    fields.push(TapeHeaderField.new(String.new(":method"), String.new("GET"),
       IndexingMode::Incremental))
-    fields.push(TapeHeaderField.new(Str.new(":path"), Str.new("/hello?q=1"),
+    fields.push(TapeHeaderField.new(String.new(":path"), String.new("/hello?q=1"),
       IndexingMode::Incremental))
-    fields.push(TapeHeaderField.new(Str.new("x-indexed"),
-      Str.new("retained by the table"), IndexingMode::Incremental))
-    fields.push(TapeHeaderField.new(Str.new("authorization"),
-      Str.new("secret"), IndexingMode::NeverIndexed))
-    fields.push(TapeHeaderField.new(Str.new("x-raw"),
-      Str.new("utf8: ü and NUL: \x00"), IndexingMode::WithoutIndexing))
+    fields.push(TapeHeaderField.new(String.new("x-indexed"),
+      String.new("retained by the table"), IndexingMode::Incremental))
+    fields.push(TapeHeaderField.new(String.new("authorization"),
+      String.new("secret"), IndexingMode::NeverIndexed))
+    fields.push(TapeHeaderField.new(String.new("x-raw"),
+      String.new("utf8: ü and NUL: \x00"), IndexingMode::WithoutIndexing))
     encoded = encoder.encode_on_tape(fields)
     decoded = decoder.decode(encoded)
     raise decoded.message if decoded.is_a?(HpackError)

@@ -1,5 +1,5 @@
 def descend(n : Int32) : Int32
   return 0 if n == 0
-  Ary(Int32).new(descend(n - 1)).size
+  Array(Int32).new(descend(n - 1)).size
 end
 tape { descend(2) }

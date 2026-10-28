@@ -3,7 +3,7 @@ def invoke(&block : -> Int32) : Int32
 end
 def descend(n : Int32) : Int32
   return 0 if n == 0
-  a = Ary(Int32).new
+  a = Array(Int32).new
   child = invoke { descend(n - 1) }
   child + a.size
 end

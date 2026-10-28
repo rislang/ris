@@ -1,6 +1,6 @@
 class State
-  @@log = Ary(Str).new
-  def self.keep(text : Str)
+  @@log = Array(String).new
+  def self.keep(text : String)
     @@log << text
   end
 end
@@ -11,6 +11,6 @@ c = text
 3.times do
   a = b
   b = c
-  c = Str.new("request")
+  c = String.new("request")
 end
 State.keep(a)

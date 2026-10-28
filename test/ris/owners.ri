@@ -1,7 +1,7 @@
 # initialize fills its own fields in place.
 @[Owner]
 struct Filled
-  getter items = Ary(Int32).new
+  getter items = Array(Int32).new
 
   def initialize
     @items << 5
@@ -10,8 +10,8 @@ end
 
 @[Owner]
 struct Workspace
-  getter left : Ary(Int32)
-  getter right : Ary(Int32)
+  getter left : Array(Int32)
+  getter right : Array(Int32)
   property ticks = 0
   getter initial_header : UInt64
 
@@ -26,14 +26,14 @@ struct Workspace
     nil
   end
 
-  def accept_view(view : Ary(Int32))
+  def accept_view(view : Array(Int32))
     nil
   end
 
   @[PointerUnsafe("compare constructor and final field header addresses")]
   def initialize
-    @left = Ary(Int32).new
-    @right = Ary(Int32).new
+    @left = Array(Int32).new
+    @right = Array(Int32).new
     @initial_header = pointerof(@left).address
     accept_view(@left)
   end
@@ -48,12 +48,12 @@ struct LargeWorkspace
     0_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64,
   }
   property ticks = 0
-  getter a = Ary(Int32).new
-  getter b = Ary(Int32).new
-  getter c = Ary(Int32).new
-  getter d = Ary(Int32).new
-  getter e = Ary(Int32).new
-  getter f = Ary(Int32).new
+  getter a = Array(Int32).new
+  getter b = Array(Int32).new
+  getter c = Array(Int32).new
+  getter d = Array(Int32).new
+  getter e = Array(Int32).new
+  getter f = Array(Int32).new
 end
 
 def grow_large(w : LargeWorkspace)
@@ -67,11 +67,11 @@ end
 
 ROOT = Workspace.new
 
-def left_view(w : Workspace) : Ary(Int32)
+def left_view(w : Workspace) : Array(Int32)
   w.left
 end
 
-def explicit_view(w : Workspace) : Ary(Int32)
+def explicit_view(w : Workspace) : Array(Int32)
   return w.left
 end
 

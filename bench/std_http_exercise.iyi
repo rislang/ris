@@ -11,7 +11,7 @@ module bench/std_http_exercise
 # These exercises still use std's legacy String APIs and assertions.
 # Board messages themselves own copied tape text; this is the heap adapter.
 @[TapeToHeap]
-def ris_heap_text(value : Str) : String
+def ris_heap_text(value : String) : String
   value.to_s
 end
 
@@ -123,7 +123,7 @@ end
 
 @[OnTape]
 struct RisHttpSeen
-  getter line : Str
+  getter line : String
 
   def initialize(@line)
   end
@@ -221,7 +221,7 @@ end
 class RisHttp6Handler
   @stream_dir : String
 
-  def initialize(config : Str)
+  def initialize(config : String)
     @stream_dir = ris_heap_text(config)
   end
 
@@ -340,7 +340,7 @@ end
 class RisHttp8Handler
   @other_base : String
 
-  def initialize(config : Str)
+  def initialize(config : String)
     @other_base = ris_heap_text(config)
   end
 
@@ -531,7 +531,7 @@ end
 class RisHttpFactory
   @handler : RisHttp1Handler | RisHttp2Handler | RisHttp3Handler | RisHttp4Handler | RisHttp5Handler | RisHttp6Handler | RisHttp7Handler | RisHttp8Handler | RisHttp9Handler | RisHttp10Handler | RisHttp11Handler | RisHttp12Handler | RisHttp13Handler | RisHttp14Handler
 
-  def initialize(config : {Int32, Str})
+  def initialize(config : {Int32, String})
     @handler = case config[0]
                when 1
                  RisHttp1Handler.new(0)

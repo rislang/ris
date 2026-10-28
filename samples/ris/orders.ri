@@ -28,12 +28,12 @@ end
 
 # A thousand requests on the caller's tape, kept for the whole run.
 # These are the bytes a server would have read, cycled through below.
-def requests : Ary(Str)
+def requests : Array(String)
   x = 88172645463325252_u64
-  Ary(Str).new(1000) do |r|
+  Array(String).new(1000) do |r|
     x = xs_next(x)
     # Room for the user and all eight line items before building the head.
-    body = Str.build(448) do |io|
+    body = String.build(448) do |io|
       io << %({"user":"u) << r << (r % 9 == 0 ? %(\\"q\\") : "") << %(","items":[)
       ((x % 8_u64).to_i32 + 1).times do |i|
         x = xs_next(x)
@@ -43,7 +43,7 @@ def requests : Ary(Str)
       end
       io << "]}"
     end
-    Str.build(112 + body.bytesize) do |io|
+    String.build(112 + body.bytesize) do |io|
       io << "POST /orders HTTP/1.1\r\nHost: shop\r\n"
       io << "Content-Type: application/json\r\nContent-Length: "
       io << body.bytesize << "\r\n\r\n" << body
@@ -51,19 +51,19 @@ def requests : Ary(Str)
   end
 end
 
-def fnv(h : UInt64, text : Str) : UInt64
+def fnv(h : UInt64, text : String) : UInt64
   text.each_byte { |c| h = (h ^ c.to_u64) &* 1099511628211_u64 }
   h
 end
 
 # The request in *bytes*, answered on the caller's tape; the answer's hash.
-def answer(bytes : Str) : UInt64
+def answer(bytes : String) : UInt64
   head = Server.parse_head(bytes)
   return 0_u64 unless head.is_a?(ParsedHead)
   size = head.content_length
   return 0_u64 unless size
   doc = JSON.parse(bytes[head.body_start, size.to_i32])
-  w = Str::Builder.new(256)
+  w = String::Builder.new(256)
   w.json do |json|
     total = 0_i64
     json.object do
@@ -86,7 +86,7 @@ def answer(bytes : Str) : UInt64
     end
   end
   body = w.finish
-  top = Str.build(96) do |line|
+  top = String.build(96) do |line|
     line.append("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ")
     line.append_int(body.bytesize)
     line.append("\r\n\r\n")

@@ -1,5 +1,5 @@
-def descend(n : Int32) : Ary(Int32)
-  return Ary(Int32).new if n == 0
+def descend(n : Int32) : Array(Int32)
+  return Array(Int32).new if n == 0
   a = descend(n - 1)
   a
 end

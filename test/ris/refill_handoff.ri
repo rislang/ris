@@ -1,14 +1,14 @@
 # Rows use fixed run handles; refill the temporary row after copying.
 @[OnTape]
 struct Table
-  getter rows : Ary(SlicePool::Run(Int32))
+  getter rows : Array(SlicePool::Run(Int32))
   @pool : SlicePool(Int32)
-  @row : Ary(Int32)
+  @row : Array(Int32)
 
   def initialize
-    @rows = Ary(SlicePool::Run(Int32)).new
+    @rows = Array(SlicePool::Run(Int32)).new
     @pool = SlicePool(Int32).new
-    @row = Ary(Int32).new
+    @row = Array(Int32).new
   end
 
   def add(value : Int32) : Nil
@@ -26,9 +26,9 @@ struct Table
     @row.clear
   end
 
-  def take : Ary(Int32)
+  def take : Array(Int32)
     batch = @row
-    @row = Ary(Int32).new
+    @row = Array(Int32).new
     batch
   end
 end

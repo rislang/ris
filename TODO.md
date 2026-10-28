@@ -23,7 +23,7 @@ How to work (fewer tokens, faster to the goal):
 
 Codex Sol low tokens; review adds 10-30%. Done 2026-10-28: no GC is the
 only mode; program literals, to_s, prints, closures and task values are
-on the tape, with the core Str/Ary/Hsh API. Before testing ris programs:
+on the tape, with the core String/Array/Hash API. Before testing ris programs:
 the std row. Update a row when its work starts or ends.
 
 | Work                                  | Size     | Time      | Tokens    |
@@ -86,8 +86,8 @@ part B.
   owner, check capture lifetimes and refuse unsupported escapes safely.
 * Finish typed pool validation (TAPE_SPEC 6.1-6.4): audit remaining bounds,
   overflow, membership, stale views, reset lifetimes and external images.
-  Borrowed Run constructors now retain Ary shrink lifetimes; gates cover
-  constructor bounds and foreign Ary storage as well as pool storage.
+  Borrowed Run constructors now retain Array shrink lifetimes; gates cover
+  constructor bounds and foreign Array storage as well as pool storage.
 * For FFI paths in use, enforce borrow lifetimes, retained-storage owners,
   foreign-thread attachment and no unwind across foreign frames.
 
@@ -95,7 +95,7 @@ part B.
 
 * std/uri: URI.parse of a String, then normalize.to_s, answers
   "//@:80/a/c?q#f": the fields are lost (test/ris/uri_legacy.ri, out of
-  check.sh). Parsing a Str works. Fix the String path or drop it.
+  check.sh). Parsing a String works. Fix the String path or drop it.
 * std's target, as Goose does it (doc/reference/goose/docs/design/
   owning_dynamic_data.md): short-lived String/Array/Hash on the caller's
   tape; long-lived state (HPACK tables, autocert cache, log sinks) in
@@ -108,10 +108,10 @@ part B.
   before the task reads freed captures. Allocate it at the group's or
   the def's scope, or refuse the spawn there. std keeps its marks.
 * A task's tape value is copied into a group result region and onto the
-  reader's tape for Str, Ary, Hsh, Tre and tuples of them; @[OnTape]
+  reader's tape for String, Array, Hash, Tre and tuples of them; @[OnTape]
   structs and nested containers are still refused.
 * Error#message answers String, which a program cannot build without a
-  heap: let it answer Str (or write into a builder) across std.
+  heap: let it answer String (or write into a builder) across std.
 * Kernel threads and spawn_parallel without a collector: thread.iyi and
   the parallel pool are gated on !gc_none, so ris programs have no
   IyiThread and run every task on one core. Split the stop-the-world
@@ -149,13 +149,13 @@ part B.
 * Extend RIS_TAPE_STATS with owner paths and pool waste.
 * Stable growth on every supported tape target: replace moving backends
   outside Linux with address-space reservations and equivalent gates.
-* A tape hash map, laid out as Ruby's Hash (st_table): entries in an Ary
-  in insertion order, bins an Ary(Int32) of indices into it, Str keys as
+* A tape hash map, laid out as Ruby's Hash (st_table): entries in an Array
+  in insertion order, bins an Array(Int32) of indices into it, String keys as
   views; links are indices, so it is Copyable and packed like Tre. Replace
   the four linear-scan TapeMap copies in std/yaml.iyi, toml.iyi,
   xml.iyi and mail.iyi. Start from src/iyi/hash.iyi (the same compact
-  layout on Pointers): swap them for Ary; take Crystal's linear scan for
-  small maps and index width by capacity. Name it after Str and Ary (Hsh
+  layout on Pointers): swap them for Array; take Crystal's linear scan for
+  small maps and index width by capacity. Name it after String and Array (Hash
   or Map). Gate: O(1) lookup on a large map, insertion order, zero heap.
 
 ## Known failure to recheck
@@ -176,7 +176,7 @@ part B.
 * x86_64-windows-msvc does not typecheck std/socket.iyi:572
   (connect_named: opaque callback effects); fix with the socket race.
 * .iyimod artifacts drop @[OnTape] on types: a build from std artifacts
-  refuses File::Info's Str fields (bench/std_websocket_exercise.sh,
+  refuses File::Info's String fields (bench/std_websocket_exercise.sh,
   "does not run the same from its artifacts").
 * bench/socket_exercise.sh ends "something above failed": several
   mutations are not caught and a unix-socket mutation fails with "the
@@ -187,5 +187,5 @@ part B.
 ## Windows (on hold: not worked on now)
 
 * Windows file metadata: move native wide-path conversion and auxiliary
-  stat buffers onto tape, then gate zero-heap Str metadata there.
+  stat buffers onto tape, then gate zero-heap String metadata there.
   POSIX metadata and missing-file errors pass the zero-heap gate.

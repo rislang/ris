@@ -1,9 +1,9 @@
 @[OnTape]
 struct PoolDefault
-  getter text : Str
+  getter text : String
 
   def initialize
-    @text = Str.new("default")
+    @text = String.new("default")
   end
 end
 
@@ -72,7 +72,7 @@ end
 # Many mutable rows share one typed pool; list copies share the handle.
 tape do
   pool = SlicePool(Int32?).new(4)
-  rows = Ary(SlicePool::List(Int32)).new
+  rows = Array(SlicePool::List(Int32)).new
   i = 0
   while i < 20
     row = SlicePool::List(Int32).new(pool)
@@ -116,7 +116,7 @@ end
 
 # Defaults are valid typed values, including records with tape views.
 tape do
-  raise "string default" unless SlicePool(Str).new.alloc_slice(1)[0].bytesize == 0
+  raise "string default" unless SlicePool(String).new.alloc_slice(1)[0].bytesize == 0
   raise "bool default" if SlicePool(Bool).new.alloc_slice(1)[0]
   raise "char default" unless SlicePool(Char).new.alloc_slice(1)[0] == '\0'
   raise "float default" unless SlicePool(Float64).new.alloc_slice(1)[0] == 0.0
@@ -130,20 +130,20 @@ end
 
 # Links can be reused without relocating a run.
 tape do
-  pool = SlicePool(Ary::Link(Int32, UInt32)?).new(4)
+  pool = SlicePool(Array::Link(Int32, UInt32)?).new(4)
   run = pool.alloc_slice(2)
-  run[0] = Ary::Link(Int32, UInt32).new(7)
+  run[0] = Array::Link(Int32, UInt32).new(7)
   pool.free_slice(run)
   link = run[0]
   raise "free destroyed typed link" unless link && link.index == 7
   fresh = pool.alloc_slice(2)
   raise "link default" unless fresh[0].nil? && run[0].nil?
-  other = SlicePool(Ary::Link(Int32, UInt32)?).new
+  other = SlicePool(Array::Link(Int32, UInt32)?).new
   other.free_slice(fresh[0, 0])
 end
-# Borrowed runs keep their Ary alive; a dead or copied view permits refill.
+# Borrowed runs keep their Array alive; a dead or copied view permits refill.
 tape do
-  data = Ary(Int32).new(2) { |i| i + 10 }
+  data = Array(Int32).new(2) { |i| i + 10 }
   run = SlicePool::Run(Int32).new(data, 0, 2)
   copy = run.copy_to(Program.tape)
   raise "borrowed run" unless run[1] == 11

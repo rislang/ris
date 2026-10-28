@@ -33,7 +33,7 @@ class Iyi::TapeStringParameterChecker
         next if retains?(a_def, index)
         suffix = nilable ? "?" : ""
         arg.raise "#{arg.name} : String#{suffix} is only read; " \
-                  "take it as Str#{suffix} " \
+                  "take it as String#{suffix} " \
                   "(a String or a literal passes at no cost)"
       end
     end
@@ -91,7 +91,7 @@ class Iyi::TapeStringParameterChecker
           targets.any? do |target|
             param = target.args[i]?
             next true unless param
-            next false if param.type?.try(&.to_s) == "Str"
+            next false if param.type?.try(&.to_s) == "String"
             retains?(target, i)
           end
         end

@@ -1,4 +1,4 @@
 # The root and every element count; this exceeds the per-image count.
-values = Ary(Int32).new(1048576) { |index| index }
+values = Array(Int32).new(1048576) { |index| index }
 RisBoard.post(values)
 raise "oversized element count published"

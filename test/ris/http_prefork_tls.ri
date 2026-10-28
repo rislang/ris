@@ -14,7 +14,7 @@ class Handler
   getter tls_config : TlsServerConfig
   @calls : Int32 = 0
 
-  def initialize(paths : Tuple(Str, Str))
+  def initialize(paths : Tuple(String, String))
     @tls_config = TlsServerConfig.from_pem(
       File.read(paths[0].to_heap), File.read(paths[1].to_heap)).or_panic
     @tls_config.alpn = ::Array(String){"h2".to_heap, "http/1.1".to_heap}

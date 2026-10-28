@@ -1,10 +1,10 @@
-def reset(first : Str::Builder, storage second : Str::Builder)
+def reset(first : String::Builder, storage second : String::Builder)
   second.clear
 end
 
 tape do
-  a = Str::Builder.new
-  b = Str::Builder.new
+  a = String::Builder.new
+  b = String::Builder.new
   b << "abc"
   v = b.finish
   reset(storage: b, first: a)

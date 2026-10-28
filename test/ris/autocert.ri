@@ -33,8 +33,8 @@ class FakeIssuer < AutocertView
   end
 end
 
-def settings(root : Str, mode : Str) : AutocertConfig
-  hosts = Ary(Str).new(1)
+def settings(root : String, mode : String) : AutocertConfig
+  hosts = Array(String).new(1)
   hosts << "localhost"
   config = AutocertConfig.new(mode, root, hosts)
   config.roots_pem = File.read("#{root}/roots.pem").as_tape
@@ -126,7 +126,7 @@ group do |service|
       result.is_a?(TlsError) && result.message.includes?("20 ms left of the handshake's time")
     end
     # Every task constructs its own view; no identity or manager crosses.
-    readers = Ary(IyiTask(Bool)).new(16)
+    readers = Array(IyiTask(Bool)).new(16)
     16.times do
       RisBoard.post(ReaderConfig.new(config))
       readers << waiters.spawn do
@@ -185,7 +185,7 @@ failure_config = settings("#{root}/failure", "fail")
 group do |service|
   manager = start_manager(service, failure_config)
   group do |waiters|
-    readers = Ary(IyiTask(Bool)).new(12)
+    readers = Array(IyiTask(Bool)).new(12)
     12.times do
       RisBoard.post(ReaderConfig.new(failure_config))
       readers << waiters.spawn do

@@ -1,10 +1,10 @@
 @[Owner]
 struct BranchOwner
-  getter bytes = Str::Builder.new
+  getter bytes = String::Builder.new
 end
 
 tape do
-  outer = Str::Builder.new
+  outer = String::Builder.new
   text = if Program.args.empty?
            owner = BranchOwner.new
            owner.bytes << "inner"

@@ -1917,7 +1917,7 @@ module Iyi
       if literal.type.is_a?(NilableType)
         type.is_a?(UnionType) && StringAutocastType.view?(type)
       elsif literal.type == program.string
-        type.is_a?(NonGenericClassType) && type.name == "Str"
+        type.is_a?(NonGenericClassType) && type.name == "String"
       else
         type == program.string
       end

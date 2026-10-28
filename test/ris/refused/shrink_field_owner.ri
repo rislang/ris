@@ -1,6 +1,6 @@
 @[Owner]
 struct Storage
-  getter bytes = Str::Builder.new
+  getter bytes = String::Builder.new
 
   def reset
     @bytes.clear

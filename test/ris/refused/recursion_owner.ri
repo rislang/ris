@@ -1,6 +1,6 @@
 @[Owner]
 struct Scratch
-  getter data = Ary(Int32).new
+  getter data = Array(Int32).new
 end
 def descend(n : Int32) : Int32
   owner = Scratch.new

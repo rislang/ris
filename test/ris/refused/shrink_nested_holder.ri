@@ -1,6 +1,6 @@
 @[OnTape]
 struct InnerView
-  property text : Str
+  property text : String
 
   def initialize(@text)
   end
@@ -15,7 +15,7 @@ struct OuterView
 end
 
 tape do
-  bytes = Str::Builder.new
+  bytes = String::Builder.new
   bytes << "abc"
   holder = OuterView.new(InnerView.new(bytes.finish))
   bytes.clear

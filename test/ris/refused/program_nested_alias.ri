@@ -1,14 +1,14 @@
 class State
-  @@log = Ary(Str).new
+  @@log = Array(String).new
   def self.log
     @@log
   end
 end
 @[OnTape]
 struct Wrapper
-  getter log : Ary(Str)
+  getter log : Array(String)
   def initialize(@log)
   end
 end
 holder = Wrapper.new(State.log)
-holder.log << Str.new("request")
+holder.log << String.new("request")

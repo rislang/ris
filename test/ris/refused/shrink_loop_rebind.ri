@@ -1,9 +1,9 @@
 def check_loop
-  b = Str::Builder.new
+  b = String::Builder.new
   b << "abc"
-  saved = Str.new("initial")
+  saved = String.new("initial")
   i = 0
-  other = Str::Builder.new
+  other = String::Builder.new
   other << "other"
   alias_b = other
   while i < 3

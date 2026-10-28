@@ -1,14 +1,14 @@
 # Initializers run on main before readers on other kernel threads.
-WORDS = Ary(Str){"constant reader"}
-@@shared = Ary(Str){"global reader"}
+WORDS = Array(String){"constant reader"}
+@@shared = Array(String){"global reader"}
 
 class State
-  @@words = Ary(Str){"program #{42}"}
-  def self.word : Str
+  @@words = Array(String){"program #{42}"}
+  def self.word : String
     @@words[0]
   end
 end
-threads = Ary(IyiThread).new(4)
+threads = Array(IyiThread).new(4)
 4.times do
   threads << IyiThread.start do
     1000.times do

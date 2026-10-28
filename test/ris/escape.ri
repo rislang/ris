@@ -7,12 +7,12 @@ import std/io::{Memory}
 CACHE = [] of String
 
 @[TapeToHeap]
-def keep(text : Str) : Nil
+def keep(text : String) : Nil
   CACHE << text.to_s
 end
 
 @[TapeToHeap]
-def memory_copy(text : Str) : String
+def memory_copy(text : String) : String
   memory = Memory.new
   text.to_s(memory)
   10.times do
@@ -25,12 +25,12 @@ def memory_copy(text : Str) : String
 end
 
 @[TapeToHeap]
-def interpolated_copy(text : Str) : String
+def interpolated_copy(text : String) : String
   "#{text}".to_heap
 end
 
 @[TapeToHeap]
-def builder_copy(text : Str) : String
+def builder_copy(text : String) : String
   String.build { |io| io << text }
 end
 

@@ -1,16 +1,16 @@
 struct Reader
-  def apply(b : Str::Builder)
+  def apply(b : String::Builder)
     b.length
   end
 end
 struct Resetter
-  def apply(b : Str::Builder)
+  def apply(b : String::Builder)
     b.clear
   end
 end
 
 def exercise
-  b = Str::Builder.new
+  b = String::Builder.new
   b << "abc"
   v = b.finish
   (Program.args.empty? ? Reader.new : Resetter.new).apply(b)

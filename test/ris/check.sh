@@ -27,7 +27,7 @@ heap_trap() {
       grep -qE '  at .*:[0-9]+:[0-9]+' <<<"$out"; then
     echo "traps    $name (heap migration, source site)"
   elif [ "$code" -ne 0 ] && grep -qF 'Error:' <<<"$out" &&
-      grep -qE 'Str|Ary|Hsh|tape' <<<"$out"; then
+      grep -qE 'String|Array|Hash|tape' <<<"$out"; then
     # A program's literals and to_s are tape values now: the heap path is
     # refused at compile time, before it can trap.
     echo "refused  $name (heap migration, at compile time)"
@@ -76,12 +76,12 @@ fi
 expect board_union 'use a nominal struct with a union field'
 expect board_cancelled 'wrap that data in a nominal message struct'
 expect board_pointer 'NamedTuple(value: Pointer(Int32))'
-expect board_class_limit 'send Str, Ary bytes or a value struct'
-expect board_class_post 'send Str, Ary bytes or a value struct'
-expect board_link 'use Ary nodes with checked integer indices'
-expect board_recursive 'use Tre or Ary nodes with checked integer indices'
-expect board_closure 'send Str, Ary bytes or a value struct'
-expect board_owner 'send Str, Ary bytes or a value struct'
+expect board_class_limit 'send String, Array bytes or a value struct'
+expect board_class_post 'send String, Array bytes or a value struct'
+expect board_link 'use Array nodes with checked integer indices'
+expect board_recursive 'use Tre or Array nodes with checked integer indices'
+expect board_closure 'send String, Array bytes or a value struct'
+expect board_owner 'send String, Array bytes or a value struct'
 
 # Tasks capture Share values, or take a value handed off (TAPE_SPEC 5.1).
 expect task_capture_mutable 'build tape values inside the spawn'
@@ -109,8 +109,8 @@ out=$(
   exit "$code"
 )
 if [ "$?" -ne 0 ] &&
-    grep -qE 'use Str.interpolate\(...\) on the current tape|retain it with `.copy_to' <<<"$out"; then
-  echo 'refused  interpolation_retained (names the Str form)'
+    grep -qE 'use String.interpolate\(...\) on the current tape|retain it with `.copy_to' <<<"$out"; then
+  echo 'refused  interpolation_retained (names the String form)'
 else
   echo "FAILED   interpolation_retained: $out"; status=1
 fi
@@ -118,7 +118,7 @@ out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/interpolation_sinks.ri 2>&1)
 if [ "$?" -eq 0 ] &&
     grep -qxF 'PASS: interpolation sinks' <<<"$out" &&
     grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
-  echo 'runs     interpolation_sinks (library output, Str argument, panic)'
+  echo 'runs     interpolation_sinks (library output, String argument, panic)'
 else
   echo "FAILED   interpolation_sinks: $out"; status=1
 fi
@@ -159,7 +159,7 @@ fi
 # A task answers tape values; the reader gets its own copy. Zero heap.
 out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/task_tape_result.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = $'<42>\n60\n5\nslow\n<ok>\nris heap: 0 allocations, 0 bytes' ]; then
-  echo "runs     task_tape_result (Str, Ary, Hsh and tuple values, zero heap)"
+  echo "runs     task_tape_result (String, Array, Hash and tuple values, zero heap)"
 else
   echo "FAILED   task_tape_result: $out"; status=1
 fi
@@ -169,7 +169,7 @@ out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/core_api.ri 2>&1)
 if [ "$?" -eq 0 ] && grep -qxF 'HELLO, WORLD' <<<"$out" &&
     grep -qxF '00042' <<<"$out" && grep -qxF '78' <<<"$out" &&
     grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
-  echo "runs     core_api (Str, Ary and Hsh surface, zero heap)"
+  echo "runs     core_api (String, Array and Hash surface, zero heap)"
 else
   echo "FAILED   core_api: $out"; status=1
 fi
@@ -270,8 +270,8 @@ out=$(
       operation='a = Workspace.new; b = a'
       needle='cannot copy or reassign an owner'
     else
-      operation='text = Str.new("abc"); text.to_unsafe'
-      needle='to_unsafe` of a Str outside a @[TapeUnsafe] def'
+      operation='text = String.new("abc"); text.to_unsafe'
+      needle='to_unsafe` of a String outside a @[TapeUnsafe] def'
     fi
     sed "s/@OPERATION@/$operation/" test/ris/call_graph_target.ri.in \
       >"$graph_probe"
@@ -388,7 +388,7 @@ expect owner_return 'cannot return an owner from a def'
 expect owner_implicit_return 'cannot return an owner from a def'
 for name in param explicit_param program explicit_program self local; do
   expect "owner_return_$name" \
-    'cannot return an owner from a def; return a field view (Str/Ary) or take the owner as an argument'
+    'cannot return an owner from a def; return a field view (String/Array) or take the owner as an argument'
 done
 expect owner_class 'requires a struct'
 expect owner_copy 'borrow it: pass the owner variable'
@@ -476,13 +476,13 @@ for name in copy_class_cycle copy_collection_cycle copy_subclass_cycle \
   expect "$name" 'copy_to refuses self-reaching class types'
 done
 expect copy_class_override 'remove this override'
-expect copy_pointer 'build on the destination with Ary nodes and indices'
+expect copy_pointer 'build on the destination with Array nodes and indices'
 expect copy_link 'copy_to refuses pointers and self-relative links'
 
 expect string_parameter \
-  'name : String is only read; take it as Str'
+  'name : String is only read; take it as String'
 expect string_optional_parameter \
-  'name : String? is only read; take it as Str?'
+  'name : String? is only read; take it as String?'
 heap_trap string_parameters
 
 for name in text_parameter text_array text_capture; do
@@ -493,9 +493,9 @@ expect text_local_field \
 expect text_literal_field '.copy_to(owner)'
 expect text_interpolation_field '.copy_to(owner)'
 expect text_interpolation_field \
-  'make it an @[OnTape] struct with a Str field'
+  'make it an @[OnTape] struct with a String field'
 out=$("$RIS" run test/ris/text_default.ri 2>&1)
-if [ "$?" -eq 0 ] && grep -qF 'Str' <<<"$out" &&
+if [ "$?" -eq 0 ] && grep -qF 'String' <<<"$out" &&
     grep -qF 'PASS: default text' <<<"$out"; then
   echo "runs     text_default"
 else
@@ -526,8 +526,8 @@ expect break_escape "cannot break a tape value out of its tape block"
 expect yield_break_escape "cannot break a tape value out of its tape block"
 
 expect return_escape 'Copy the text with `.copy_to(owner)`'
-expect outer_var '`copy_to(owner)` copies a Str, Ary'
-expect owned_cache "to be String, not Str"
+expect outer_var '`copy_to(owner)` copies a String, Array'
+expect owned_cache "to be String, not String"
 
 expect local_outer "is a variable of the code around this local_tape block"
 expect local_mutate "cannot use outer tape value"
@@ -543,25 +543,25 @@ expect ffi_string_new   "Build it with \`String.build(capacity)"
 expect pointer_unsafe_reason "takes the reason the def needs a pointer"
 expect pointer_unsafe_stray  "@[PointerUnsafe] marks a def"
 expect pointer_unsafe_lib    "a \`lib\` block outside an @[Ffi] module"
-expect raw_pointer      "to_unsafe\` of a Str outside a @[TapeUnsafe] def"
-expect raw_view         "Str.new(pointer, size)\` outside a @[TapeUnsafe] def"
+expect raw_pointer      "to_unsafe\` of a String outside a @[TapeUnsafe] def"
+expect raw_view         "String.new(pointer, size)\` outside a @[TapeUnsafe] def"
 expect std/tape_unsafe_codec "reaches no \`lib\` fun or system call"
 expect std/tape_unsafe_no_pointer "hands no tape pointer to the OS"
 expect tape_pointer "\`unsafe_append\` outside a @[TapeUnsafe] def"
 expect std/tape_pointer_codec "the pointer \`unsafe_append\` yields reaches no"
-expect writer_grow      "private method 'grow' called for Str::Builder"
+expect writer_grow      "private method 'grow' called for String::Builder"
 expect tree_entry       "private constant Tre::Entry(T) referenced"
-expect array_grow       "private method 'grow' called for Ary(T)"
-expect array_append     "append requires Ary(UInt8)"
-expect heap_copy "\`to_s\` of a Str outside a @[TapeToHeap] def copies"
+expect array_grow       "private method 'grow' called for Array(T)"
+expect array_append     "append requires Array(UInt8)"
+expect heap_copy "\`to_s\` of a String outside a @[TapeToHeap] def copies"
 expect heap_interpolation \
-  "Interpolating a Str outside a @[TapeToHeap]"
-expect refill           "\`@items\` is given a new Ary in \`take\`"
-expect heap_memory      "Writing a Str into a String::Builder or"
-expect heap_memory_print "Writing a Str into a Std::Io::Memory"
+  "Interpolating a String outside a @[TapeToHeap]"
+expect refill           "\`@items\` is given a new Array in \`take\`"
+expect heap_memory      "Writing a String into a String::Builder or"
+expect heap_memory_print "Writing a String into a Std::Io::Memory"
 expect not_flat "Holder is not flat"
 expect check_free "\`first\` is @[CheckFree], and this \`[]\` checks"
-expect heap_escape_helper "\`to_s\` of a Str outside a @[TapeToHeap] def copies"
+expect heap_escape_helper "\`to_s\` of a String outside a @[TapeToHeap] def copies"
 
 
 for name in implicit fibers/implicit implicit_loop; do
@@ -689,7 +689,7 @@ if [ "$out" = '0 -42 9223372036854775807 -9223372036854775808 a&amp;b&lt;c&gt;&q
 
 # Two pieces, String or on the tape, go out in one socket write.
 out=$("$RIS" run test/ris/tape_primitives.ri 2>&1)
-if [ "$out" = 'PASS: write_bytes, shift and Str::Scanner' ]; then echo "runs     tape_primitives"; else echo "FAILED   tape_primitives: $out"; status=1; fi
+if [ "$out" = 'PASS: write_bytes, shift and String::Scanner' ]; then echo "runs     tape_primitives"; else echo "FAILED   tape_primitives: $out"; status=1; fi
 out=$("$RIS" run test/ris/socket_pair.ri 2>&1)
 if [ "$out" = 'PASS: two pieces in one write, String and on the tape, 1 MiB' ]; then echo "runs     socket_pair"; else echo "FAILED   socket_pair: $out"; status=1; fi
 out=$("$RIS" run test/ris/socket_pieces.ri 2>&1)
@@ -1051,7 +1051,7 @@ for name in le_array_read le_array_write le_string_read le_offset_overflow; do
 done
 
 # A lexer that steps its own offset through tape text is warned, not
-# refused; the same lexer on Str::Scanner is not.
+# refused; the same lexer on String::Scanner is not.
 out=$("$RIS" check test/ris/warned/scanner_hint.ri 2>&1)
 if [ $? -eq 0 ] && grep -qF '`@pos` walks tape text by hand' <<<"$out"; then
   echo "warned   scanner_hint"

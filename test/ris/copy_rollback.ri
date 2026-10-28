@@ -1,6 +1,6 @@
 # Fault injection after a real leaf copy: the public copy_to must discard
 # both the completed leaf and the rest of the partially built destination.
-struct Str
+struct String
   @[PointerUnsafe("inject a panic after a real copy job")]
   def __iyi_copy_into(target : Pointer(self), work : RisCopyWork) : Nil
     previous_def
@@ -48,7 +48,7 @@ kept = "retained".copy_to(Program.tape)
       saved = RisRegion.tape
       defer check_caller_tape(saved)
       tape do
-        source = Ary(Str){Str.new("first"), Str.new(failure)}
+        source = Array(String){String.new("first"), String.new(failure)}
         source.copy_to(Program.tape)
       end
     end

@@ -3,14 +3,14 @@ module test/ris/log_metadata
 import std/log::{Log, Logger, Severity, Metadata}
 import std/log_text::{LogField}
 
-def first_value(fields : Ary(LogField), value : Str) : Bool
+def first_value(fields : Array(LogField), value : String) : Bool
   fields[0].value == value
 end
 
 100.times do
   local_tape do
     log = Logger.new("metadata", Severity::None)
-    fields = Ary(LogField).new(8)
+    fields = Array(LogField).new(8)
     first = Metadata.new("id", "old", nil)
     latest = Metadata.new("id", "new", first)
     raise "key" unless latest.key == "id" && latest.value == "new"
@@ -75,7 +75,7 @@ def set_phase(value : UInt64) : Nil
 end
 
 def held_context : Bool
-  fields = Ary(LogField).new(2)
+  fields = Array(LogField).new(2)
   Log.context_into(fields)
   set_phase(1_u64)
   while phase != 2_u64
@@ -96,7 +96,7 @@ group do |g|
   end
   10.times do
     tape do
-      writer = Str::Builder.new(64)
+      writer = String::Builder.new(64)
       writer << "overwrite released parent context bytes"
     end
   end

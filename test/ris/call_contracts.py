@@ -53,14 +53,14 @@ with tempfile.TemporaryDirectory(prefix="ris-call-contracts-") as directory:
     (work / "app").mkdir()
     library = work / "app/effects.ri"
     library.write_text("""module app/effects
-pub def clear(bytes : Str::Builder) : Nil
+pub def clear(bytes : String::Builder) : Nil
   bytes.clear
   nil
 end
-pub def view(bytes : Str::Builder, ignored : Int32 = 0) : Str
+pub def view(bytes : String::Builder, ignored : Int32 = 0) : String
   bytes.finish
 end
-pub def pause(bytes : Str::Builder) : Nil
+pub def pause(bytes : String::Builder) : Nil
   sleep 1
   nil
 end
@@ -79,7 +79,7 @@ end
     def program(body):
         main.write_text("module main\nimport app/effects\n"
                         "def exercise\n"
-                        "  b = Str::Builder.new\n  b << \"abc\"\n"
+                        "  b = String::Builder.new\n  b << \"abc\"\n"
                         + body + "\nend\ntape { exercise }\n"
                         "puts App::Effects::Counter.value\n")
 
@@ -140,7 +140,7 @@ print("accepts  directly known callback with tape argument")
 with tempfile.TemporaryDirectory(prefix="ris-call-defaults-") as directory:
     main = Path(directory) / "main.ri"
     main.write_text('''TEXT = "value #{42}"
-WORDS = Ary(Str){"one", "two"}
+WORDS = Array(String){"one", "two"}
 class Greeter
   def initialize(@hello : Proc(Bool)?)
   end
@@ -164,9 +164,9 @@ puts TEXT, WORDS[0]
     build(main)
     print("accepts  program construction and non-tape callback inputs")
 
-    main.write_text('''def initial : Str
+    main.write_text('''def initial : String
   sleep 0
-  Str.new("bad")
+  String.new("bad")
 end
 TEXT = initial
 puts TEXT

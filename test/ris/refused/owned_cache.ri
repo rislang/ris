@@ -7,6 +7,6 @@ end
 
 cache = Cache.new
 tape do
-  borrowed = Str.build { |writer| writer.append("temporary") }
+  borrowed = String.build { |writer| writer.append("temporary") }
   cache.store(borrowed)
 end

@@ -12,7 +12,7 @@ record PipeEvent, code : Int32
 pipe_in, pipe_out = IyiIO.pipe
 group do |g|
   g.spawn do
-    piece = Str.build(16384) { |w| 1024.times { w << "0123456789abcdef" } }
+    piece = String.build(16384) { |w| 1024.times { w << "0123456789abcdef" } }
     64.times { pipe_out.write(piece) }
     RisBoard.post(PipeEvent.new(1))
     pipe_out.close

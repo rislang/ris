@@ -1,6 +1,6 @@
-def invoke(callback : Proc(Str::Builder, Nil), bytes : Str::Builder)
+def invoke(callback : Proc(String::Builder, Nil), bytes : String::Builder)
   chosen = if Program.args.empty?
-             ->(value : Str::Builder) { puts value.finish }
+             ->(value : String::Builder) { puts value.finish }
            else
              callback
            end
@@ -9,5 +9,5 @@ def invoke(callback : Proc(Str::Builder, Nil), bytes : Str::Builder)
   puts view
 end
 
-callback = ->(bytes : Str::Builder) { bytes.clear; nil }
-tape { invoke(callback, Str::Builder.new) }
+callback = ->(bytes : String::Builder) { bytes.clear; nil }
+tape { invoke(callback, String::Builder.new) }

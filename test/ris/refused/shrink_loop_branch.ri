@@ -1,7 +1,7 @@
 def check_loop
-  b = Str::Builder.new
+  b = String::Builder.new
   b << "abc"
-  saved = Str.new("initial")
+  saved = String.new("initial")
   i = 0
   while i < 3
     if i == 0

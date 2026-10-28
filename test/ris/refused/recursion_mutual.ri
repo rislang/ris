@@ -1,5 +1,5 @@
 def left(n : Int32) : Int32
-  a = Ary(Int32).new
+  a = Array(Int32).new
   child = n > 0 ? right(n - 1) : 0
   child + a.size
 end

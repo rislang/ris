@@ -1,25 +1,25 @@
 @[PointerUnsafe("test that returned input slices retain their byte address")]
-def pending_address(text : Str) : UInt64
+def pending_address(text : String) : UInt64
   IyiHeap.read64(pointerof(text).address)
 end
 
 # Retained results must not retain a helper's scratch allocations.
-def pending_number(n : Int32) : Str
-  big = Str::Builder.new(65_536)
+def pending_number(n : Int32) : String
+  big = String::Builder.new(65_536)
   big.push(65_u8)
-  Str.build(16) { |w| w.append_int(n) }
+  String.build(16) { |w| w.append_int(n) }
 end
 
-def pending_borrow(text : Str, early : Bool) : Str
-  big = Str::Builder.new(65_536)
+def pending_borrow(text : String, early : Bool) : String
+  big = String::Builder.new(65_536)
   big.push(66_u8)
   return text[1, 3] if early
   text[2, 2]
 end
 
 tape do
-  kept = Ary(Str).new(10_000)
-  source = Str.new("abcdef")
+  kept = Array(String).new(10_000)
+  source = String.new("abcdef")
   i = 0
   while i < 10_000
     kept << pending_number(i)
@@ -27,7 +27,7 @@ tape do
   end
   i = 0
   while i < kept.size
-    expected = Str.build(16) { |w| w.append_int(i) }
+    expected = String.build(16) { |w| w.append_int(i) }
     raise "wrong pending result" unless kept[i] == expected
     i += 1
   end

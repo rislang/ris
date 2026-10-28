@@ -2,11 +2,11 @@
 module test/ris/refused/return_escape
 import std/int
 
-def escaped : Str
+def escaped : String
   tape do
-    return Str.build { |w| w.push(65_u8) }
+    return String.build { |w| w.push(65_u8) }
   end
-  Str.new(Pointer(UInt8).new(0_u64), 0)
+  String.new(Pointer(UInt8).new(0_u64), 0)
 end
 
 puts escaped.to_s

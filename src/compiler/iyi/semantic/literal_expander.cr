@@ -191,7 +191,7 @@ module Iyi
     # `[a, b]` -> `Ary(T).new(n)` with each element pushed: storage on the
     # current tape, no heap.
     private def expand_tape_array(node, type_var, elem_temp_vars, elem_temp_var_count, capacity)
-      generic = Generic.new(Path.global("Ary"), type_var).at(node)
+      generic = Generic.new(Path.global("Array"), type_var).at(node)
       initial = capacity < 4 ? 4 : capacity
       ary_var = new_temp_var.at(node)
       exps = Array(ASTNode).new(node.elements.size + elem_temp_var_count + 2)
@@ -255,7 +255,7 @@ module Iyi
     # Equivalent to a hash-like literal using `::Hash`.
     def expand(node : HashLiteral)
       # ris: a program's hash literal is a tape Hsh (src/iyi/hsh.iyi).
-      return expand_named(node, Path.global("Hsh")) if ris_program_literal?(node)
+      return expand_named(node, Path.global("Hash")) if ris_program_literal?(node)
       expand_named(node, Path.global("Hash"))
     end
 
@@ -301,7 +301,7 @@ module Iyi
       if of = node.of
         # `generic_type` is nil here
         type_vars = [of.key, of.value] of ASTNode
-        generic = Generic.new(Path.global(ris_program_literal?(node) ? "Hsh" : "Hash"), type_vars).at(node)
+        generic = Generic.new(Path.global(ris_program_literal?(node) ? "Hash" : "Hash"), type_vars).at(node)
       elsif generic_type
         # `node.entries` is non-empty here
         typeof_key = TypeOf.new(node.entries.map_with_index { |x, i| (key_temp_vars.try(&.[i]) || x.key).clone.as(ASTNode) }).at(node)

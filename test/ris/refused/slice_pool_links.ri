@@ -1,6 +1,6 @@
 @[OnTape]
 struct PoolLinked
-  getter links : Tuple(Ary::Link(Int32, UInt32), Int32)?
+  getter links : Tuple(Array::Link(Int32, UInt32), Int32)?
 
   def initialize
     @links = nil

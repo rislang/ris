@@ -11,10 +11,10 @@ module samples/hello
 import shop/order::*
 
 def make_order(id : Int64) : Order
-  name = Str.build do |s|
+  name = String.build do |s|
     s << "ris"
   end
-  lines = Ary(Int64).new
+  lines = Array(Int64).new
   lines.push(1200_i64)
   lines.push(350_i64)
   lines.push(99_i64)
@@ -22,12 +22,12 @@ def make_order(id : Int64) : Order
 end
 
 # The caller's builder keeps the greeting past the order's tape.
-def greet(order : Order, greeting : Str::Builder) : Nil
+def greet(order : Order, greeting : String::Builder) : Nil
   greeting << "Hello from " << order.customer << ", order " << order.id
 end
 
 total = 0_i64
-greeting = Str::Builder.new(64)
+greeting = String::Builder.new(64)
 tape do
   order = make_order(1_i64)
   total = order_total(order)

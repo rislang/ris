@@ -42,12 +42,12 @@ class Iyi::TapeRefillChecker
     return unless value.is_a?(Call) && value.name == "new"
     return unless tape_array?(value.type?)
     return if reads.any? { |read| read.name == target.name && before?(read, node) }
-    node.raise "`#{target.name}` is given a new Ary in `#{a_def.name}`, not in `initialize`: the one it held stays on the tape until the tape block ends, one for every call.\n\nEmpty it with `#{target.name}.clear` and fill it again, which keeps its room. When the old one is still wanted, hand it on first in this def (`list << #{target.name}`, `old = #{target.name}`, `return #{target.name}`) and the new one is allowed."
+    node.raise "`#{target.name}` is given a new Array in `#{a_def.name}`, not in `initialize`: the one it held stays on the tape until the tape block ends, one for every call.\n\nEmpty it with `#{target.name}.clear` and fill it again, which keeps its room. When the old one is still wanted, hand it on first in this def (`list << #{target.name}`, `old = #{target.name}`, `return #{target.name}`) and the new one is allowed."
   end
 
   private def tape_array?(type : Type?) : Bool
     return false unless type
-    type.remove_typedef.to_s.starts_with?("Ary(")
+    type.remove_typedef.to_s.starts_with?("Array(")
   end
 
   private def before?(read : ASTNode, node : ASTNode) : Bool

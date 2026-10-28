@@ -14,7 +14,7 @@ rule goes last in its section; a removed one leaves its number unused.
 * 1.1 Main and each fiber own an implicit tape. Scope exit restores scratch;
   retained results stay on their destination owner. Suspension retains live
   storage. Every exit, normal or unwinding, releases owned regions once.
-* 1.2 Tape types: Str, Ary(T), Tre(T), builders, scanners, views, @[OnTape]
+* 1.2 Tape types: String, Array(T), Tre(T), builders, scanners, views, @[OnTape]
   structs and class instances; all obey the root rules. Dispatch and union
   payloads never box.
 * 1.3 Classes stay: new allocates the instance on the active tape, checked
@@ -22,23 +22,23 @@ rule goes last in its section; a removed one leaves its number unused.
   and never move; finalize is refused (resources have explicit cleanup); class
   instances are not Share. Long-lived ones are built on their owner's tape
   (Program.tape) or copied there with copy_to.
-* 1.4 Ary, Tre and builders are handles to shared state: assignment and
+* 1.4 Array, Tre and builders are handles to shared state: assignment and
   arguments alias data, length and capacity, so growth through b shows through
-  a; Str and views alias their bytes. copy_to and checked boundary copies
+  a; String and views alias their bytes. copy_to and checked boundary copies
   (4.1, 5.1-5.3, 5.6) copy; Goose's implicit value copies (§4.1) do not
-  apply. Str is read-only.
+  apply. String is read-only.
 * 1.5 Libraries borrow caller input and build results on the caller's owner;
   nested tape blocks share it. A pending result's region is outside callee
   scratch and its rollback (Goose §10.3). local_tape owns separate scratch;
   nothing rooted there escapes or mutates outer tape containers.
-* 1.6 .ri text literals are static Str; interpolation builds Str on the active
-  tape. Read-only text parameters borrow Str, without a String copy.
+* 1.6 .ri text literals are static String; interpolation builds String on the active
+  tape. Read-only text parameters borrow String, without a String copy.
 * 1.7 Build retained data on its destination (writers, in-place append), else
-  copy_to(owner) deep-copies Str bytes, Ary/Tre/@[OnTape] fields and class
+  copy_to(owner) deep-copies String bytes, Array/Tre/@[OnTape] fields and class
   instances, splitting all sharing and extending no borrows. It keeps concrete
   types and inherited fields and runs no initialize or callbacks. Refuse
   pointers, self-relative links and self-reaching class types (via collections,
-  unions or subclasses): build those on the destination with Ary nodes and
+  unions or subclasses): build those on the destination with Array nodes and
   indices. Publish only complete results; discard partial destination storage on
   failure; deep chains never overflow the stack.
 * 1.8 Program data initializes in iyi III.5's module order, once, never
@@ -89,8 +89,8 @@ rule goes last in its section; a removed one leaves its number unused.
   independent checked copies on its own tape (1.7), never mutable borrows.
   Check captures, receivers and reached program state transitively. Owners
   are built on their task's tape; no shared mutable owner, implicit global
-  copy or snapshot. Str and program data shared read-only have no writer
-  after init, checked per owner. Ary and its views are never shared; no
+  copy or snapshot. String and program data shared read-only have no writer
+  after init, checked per owner. Array and its views are never shared; no
   freeze. Resources are opened, used and closed by the same task (5.6).
   A local task may take one value handed off: spawned once in its group
   block, never read or assigned by the spawner after the spawn; the task
@@ -127,7 +127,7 @@ rule goes last in its section; a removed one leaves its number unused.
   use independent per-task config/state, or one task owns state and serves
   copied board messages; no shared mutable autocert manager or IdleConns.
   Thread-locals hold no fiber borrows.
-* 5.4 APIs expose Str, builders, Ary and tape structs, not raw pointers. FFI
+* 5.4 APIs expose String, builders, Array and tape structs, not raw pointers. FFI
   borrows have explicit lifetimes; retained foreign storage has an owner and
   cleanup. Never unwind across foreign frames; foreign threads attach first.
   Safety exceptions are marks with reasons, never a global switch.
@@ -139,13 +139,13 @@ rule goes last in its section; a removed one leaves its number unused.
   Cancelled keys are refused: wrap that data in a nominal message.
   A message is Copyable: it has a finite, self-contained packed form (Goose
   calls this flat). Copyable types are numeric scalars, Bool, Char, Symbol,
-  Nil, enums, Str, Ary(T) and Tre(T) of Copyable T, and value structs or
-  unions of these. Str, Ary and Tre are handles; the board packs their live
+  Nil, enums, String, Array(T) and Tre(T) of Copyable T, and value structs or
+  unions of these. String, Array and Tre are handles; the board packs their live
   data, not pointers, so Copyable is not raw-byte safe (@[Tape::Flat]). The
   compiler infers it, with no marker, at post, take, poll and limit after
-  specialization. A type that contains itself through fields, unions, Ary or
+  specialization. A type that contains itself through fields, unions, Array or
   Tre is refused: keep recursive data in a Tre or in a node array with checked
-  integer indices (2.2 still applies). User link fields (Ary::Link and other
+  integer indices (2.2 still applies). User link fields (Array::Link and other
   self-relative links) stay refused as in 1.7; only Tre's own stop boundaries
   cross, kept relative to the copied entries, with an open container's -1 and
   a stop equal to size preserved. A post packs counts, fixed fields, live

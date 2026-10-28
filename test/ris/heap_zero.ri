@@ -2,13 +2,13 @@ module test/ris/heap_zero
 
 @[OnTape]
 struct Item
-  getter name : Str
+  getter name : String
   getter value : Int32
-  def initialize(@name : Str, @value : Int32)
+  def initialize(@name : String, @value : Int32)
   end
 end
 
-items = Ary(Item).new(2)
+items = Array(Item).new(2)
 items << Item.new("zero", 42)
-text = Str.build(16) { |s| s << items[0].name << items[0].value }
+text = String.build(16) { |s| s << items[0].name << items[0].value }
 puts text

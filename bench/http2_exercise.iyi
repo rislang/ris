@@ -44,7 +44,7 @@ module bench/http2_exercise
 # These exercises still use std's legacy String APIs and assertions.
 # Board messages themselves own copied tape text; this is the heap adapter.
 @[TapeToHeap]
-def ris_heap_text(value : Str) : String
+def ris_heap_text(value : String) : String
   value.to_s
 end
 
@@ -126,7 +126,7 @@ class RisH2Handler
   @tls : TlsServerConfig?
   @closing : Bool
 
-  def initialize(config : {Str, Str, Str, Bool})
+  def initialize(config : {String, String, String, Bool})
     @closing = config[3]
     @tls = nil.as(TlsServerConfig?)
     unless config[0].empty?

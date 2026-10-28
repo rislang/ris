@@ -289,8 +289,8 @@ class Iyi::TapeProgramChecker
         end
         if tape_receiver && program_target?(receiver, node) && writes
           node.args.each_with_index do |arg, i|
-            copies_bytes = target.owner.to_s == "Str::Builder" ||
-                           (target.owner.to_s == "Ary(UInt8)" && node.name == "append")
+            copies_bytes = target.owner.to_s == "String::Builder" ||
+                           (target.owner.to_s == "Array(UInt8)" && node.name == "append")
             refuse(arg) if tape?(arg) && !args[i].program? && !copies_bytes
           end
           mutation(node)
@@ -315,7 +315,7 @@ class Iyi::TapeProgramChecker
           end
           @program_context = saved
         end
-        origin = if node.name == "view" && target.owner.to_s == "Str.class"
+        origin = if node.name == "view" && target.owner.to_s == "String.class"
                    Origin::Program
                  elsif READ_VIEWS.includes?(node.name) && tape_receiver
                    receiver.element || viewed(receiver)

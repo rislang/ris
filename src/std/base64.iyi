@@ -33,12 +33,12 @@ pub struct Base64
     result
   end
 
-  def self.encode(data : Str) : Str
+  def self.encode(data : String) : String
     encode_with(data, plus_slash, PAIRS_STD, true)
   end
 
-  def self.encode(data : Str,
-                  writer : Str::Builder) : Nil
+  def self.encode(data : String,
+                  writer : String::Builder) : Nil
     writer << encode(data)
   end
 
@@ -50,12 +50,12 @@ pub struct Base64
     result
   end
 
-  def self.urlsafe_encode(data : Str) : Str
+  def self.urlsafe_encode(data : String) : String
     encode_with(data, minus_underscore, PAIRS_URL, true)
   end
 
-  def self.urlsafe_encode(data : Str,
-                          writer : Str::Builder) : Nil
+  def self.urlsafe_encode(data : String,
+                          writer : String::Builder) : Nil
     writer << urlsafe_encode(data)
   end
 
@@ -68,19 +68,19 @@ pub struct Base64
   end
 
   # Room for every byte the text can hold, sized up front.
-  def self.decode(text : Str) : Str
-    Str.build(text.bytesize // 4 * 3 + 3) do |w|
+  def self.decode(text : String) : String
+    String.build(text.bytesize // 4 * 3 + 3) do |w|
       decode_into(w, text)
     end
   end
 
-  def self.decode(text : Str,
-                  writer : Str::Builder) : Nil
+  def self.decode(text : String,
+                  writer : String::Builder) : Nil
     writer << decode(text)
   end
 
   # Decodes *src* into *w*.
-  private def self.decode_into(w : Str::Builder, src : Str) : Nil
+  private def self.decode_into(w : String::Builder, src : String) : Nil
     values = DECODE_VALUES
     n = src.bytesize
     acc = 0
@@ -143,13 +143,13 @@ pub struct Base64
   # eight bytes can be read; then three bytes at a time. Words are
   # little-endian on every target iyi builds for, which is what the byte
   # order below and the pair table's order are written for.
-  private def self.encode_with(data : Str, alphabet : String,
-                               pairs : Ary(Int32),
-                               pad : Bool) : Str
+  private def self.encode_with(data : String, alphabet : String,
+                               pairs : Array(Int32),
+                               pad : Bool) : String
     n = data.bytesize
     whole = n - n % 3
-    table = Str.view(alphabet)
-    Str.build((n + 2) // 3 * 4) do |w|
+    table = String.view(alphabet)
+    String.build((n + 2) // 3 * 4) do |w|
       i = 0
       while i &+ 8 <= n
         word = data.read_bytes_at(UInt64, i)
@@ -196,13 +196,13 @@ pub struct Base64
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
   end
 
-  protected def self.pairs_of(alphabet : String) : Ary(Int32)
+  protected def self.pairs_of(alphabet : String) : Array(Int32)
     chars = alphabet.to_unsafe
-    Ary(Int32).new(4096) { |k| chars[k.unsafe_shr(6)].to_i32 | chars[k & 63].to_i32.unsafe_shl(8) }
+    Array(Int32).new(4096) { |k| chars[k.unsafe_shr(6)].to_i32 | chars[k & 63].to_i32.unsafe_shl(8) }
   end
 
-  protected def self.decode_values : Ary(Int32)
-    Ary(Int32).new(256) { |b| value_of(b.to_u8) }
+  protected def self.decode_values : Array(Int32)
+    Array(Int32).new(256) { |b| value_of(b.to_u8) }
   end
 
   private def self.value_of(b : UInt8) : Int32

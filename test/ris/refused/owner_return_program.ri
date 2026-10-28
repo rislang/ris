@@ -1,6 +1,6 @@
 @[Owner]
 struct Workspace
-  getter left = Ary(Int32).new
+  getter left = Array(Int32).new
 end
 
 ROOT = Workspace.new

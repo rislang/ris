@@ -244,7 +244,7 @@ module Iyi
     "HashMap"   => "`Hash(K, V)` is the name here: `{\"a\" => 1}` is a `Hash(String, Int32)`.",
     "BTreeMap"  => "`Hash(K, V)` is the name here: `{\"a\" => 1}` is a `Hash(String, Int32)`.",
     "Boolean"   => "`Bool` is the name here.",
-    "Str"       => "`String` is the name here.",
+    "String"       => "`String` is the name here.",
     "Result"    => "There is no `Result`: an error is a member of the return type's union, `Int32 | ParseError`, with `impl Error for ParseError` (SPEC.md III.1).",
     "Option"    => "There is no `Option`: a value that may be nil is `T?`, `Int32?`.",
     "Mutex"     => "There is no `Mutex`: an `Atomic(Int32)` keeps a shared count (SPEC.md III.4.10), and a `Channel` hands values between tasks.",
@@ -726,7 +726,7 @@ class Iyi::Call
         str << "expected argument #{argument_description} to '#{full_name(owner, def_name)}' to be "
         to_sentence(str, expected_types, " or ")
         str << ", not #{actual_type.devirtualize}"
-        if actual_type.to_s == "Str" &&
+        if actual_type.to_s == "String" &&
            expected_types.any? { |t| t.to_s == "String" }
           str << "\nText is tape text; keep it with `.to_heap` "
           str << "when an API requires String."
@@ -820,7 +820,7 @@ class Iyi::Call
   private def raise_no_overload_matches(node, defs, arg_types, inner_exception, suggestion : String? = nil, size : Int32? = nil, &)
     error_message = String.build do |str|
       yield str
-      if named_args.try(&.any? { |arg| arg.value.type?.try(&.to_s) == "Str" })
+      if named_args.try(&.any? { |arg| arg.value.type?.try(&.to_s) == "String" })
         str << "\nText is tape text; keep it with `.to_heap` "
         str << "when a parameter requires String."
       end

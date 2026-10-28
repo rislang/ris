@@ -3,7 +3,7 @@ def invoke
 end
 
 def exercise
-  b = Str::Builder.new
+  b = String::Builder.new
   b << "abc"
   v = b.finish
   invoke { b.clear }

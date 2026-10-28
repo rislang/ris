@@ -301,7 +301,7 @@ class Iyi::TapeOwnerChecker
 
     private def refuse_return(node : ASTNode) : NoReturn
       node.raise "cannot return an owner from a def; " \
-                 "return a field view (Str/Ary) or " \
+                 "return a field view (String/Array) or " \
                  "take the owner as an argument"
     end
 

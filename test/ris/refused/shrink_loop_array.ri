@@ -1,5 +1,5 @@
 def check_loop
-  a = Ary(Int32).new
+  a = Array(Int32).new
   a << 1
   saved = a.link(0, UInt32)
   i = 0

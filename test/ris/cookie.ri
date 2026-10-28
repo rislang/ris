@@ -3,7 +3,7 @@ module test/cookie_tape
 import std/cookie::{Cookie}
 import std/time::{Time}
 
-dates = Ary(Str){
+dates = Array(String){
   "Sun, 06 Nov 1994 08:49:37 GMT",
   "Sunday, 06-Nov-94 08:49:37 GMT",
   "Sun Nov  6 08:49:37 1994",
@@ -26,7 +26,7 @@ tape do
   exit 2 unless cookie.name == "sid" && cookie.value == "abc"
   exit 3 unless cookie.domain == "example.com" && cookie.path == "/x"
   exit 4 unless cookie.secure && cookie.http_only
-  w = Str::Builder.new(1)
+  w = String::Builder.new(1)
   w << "prefix:"
   cookie.to_set_cookie(w)
   exit 5 unless w.finish.starts_with?("prefix:sid=abc; Path=/x")
@@ -40,7 +40,7 @@ tape do
   exit 10 unless cookie.to_heap.to_tape == cookie.to_tape
   dates.each do |date|
     expected = Time::Format::HTTP_DATE.parse(date)
-    line = Str.build { |w| w << "a=b; Expires=" << date }
+    line = String.build { |w| w << "a=b; Expires=" << date }
     parsed = Cookie.parse(line)
     exit 22 unless parsed
     if expected.is_a?(Time)
