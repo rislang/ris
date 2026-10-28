@@ -664,9 +664,9 @@ pub struct IyiSocket
 
   {% if @top_level.has_constant?("IyiScheduler") %}
     # *addresses*, in order, raced (see `connect`). The caller is the race:
-    # each attempt is a task of a group opened here, the caller waits on a
-    # channel for the next one to be in, with the time until the next
-    # attempt is due, or the deadline, as the bound on the wait, and it
+    # each attempt is a task of a group opened here, the caller waits for
+    # the next one to be done, with the time until the next attempt is
+    # due, or the deadline, as the bound on the wait, and it
     # starts attempts as that time comes or a failure frees it. Tasks,
     # not sockets polled from here, because a connect parks its caller
     # until the handshake is over - on Windows inside `ConnectEx` itself,
@@ -690,7 +690,8 @@ pub struct IyiSocket
       return attempt(host, port, addresses[0], timeout_ms) if addresses.size == 1
       count = addresses.size
       outcomes = Array(IyiSocket | Cancelled | SocketError | Nil).new(count, nil)
-      done = Channel(Int32).new(count)
+      tasks = Array(IyiTask(Int32)).new(count)
+      seen = Array(Bool).new(count, false)
       deadline = timeout_ms < 0 ? -1_i64 : Resolver.now_ms + timeout_ms.to_i64
       winner = -1
       started = 0
@@ -706,7 +707,7 @@ pub struct IyiSocket
             break
           end
           if started < count && now >= next_at
-            start_attempt(g, outcomes, done, started, host, port, addresses[started])
+            tasks << start_attempt(g, outcomes, started, host, port, addresses[started])
             started = started + 1
             running = running + 1
             next_at = now + ATTEMPT_DELAY_MS.to_i64
@@ -716,7 +717,7 @@ pub struct IyiSocket
           break if running == 0 && started == count
           wake = started < count ? next_at : -1_i64
           wake = deadline if deadline >= 0_i64 && (wake < 0_i64 || deadline < wake)
-          finished = next_finished(done, wake < 0_i64 ? -1 : (wake - now).to_i32)
+          finished = next_finished(tasks, seen, wake < 0_i64 ? -1 : (wake - now).to_i32)
           if finished.is_a?(Cancelled)
             cancelled = true
             break
@@ -747,33 +748,50 @@ pub struct IyiSocket
       every_address_failed(host, port, addresses, outcomes, started, out_of_time ? timeout_ms : -1)
     end
 
-    # One attempt, a task of the race's group: its answer kept at *index*,
-    # and *index* sent once it is in. The task answers 0, not the outcome: a
+    # One attempt, a task of the race's group: its answer kept at *index*.
+    # The task answers 0, not the outcome: a
     # `SocketError` answered is a failure under the group's policy (SPEC.md
     # III.4.3), and it would cancel the attempts still racing.
-    private def self.start_attempt(g : IyiGroup, outcomes : Array(IyiSocket | Cancelled | SocketError | Nil), done : Channel(Int32), index : Int32, host : String, port : Int32, address : IPAddress) : Nil
+    private def self.start_attempt(g : IyiGroup, outcomes : Array(IyiSocket | Cancelled | SocketError | Nil), index : Int32, host : String, port : Int32, address : IPAddress) : IyiTask(Int32)
       g.spawn do
         outcomes[index] = attempt(host, port, address, -1)
-        done.send(index)
         0
       end
     end
 
-    # The index of the next attempt that is in, nil when *ms* ran out
-    # first (-1: no bound), `Cancelled` when the caller was.
-    private def self.next_finished(done : Channel(Int32), ms : Int32) : Int32 | Cancelled | Nil
-      if ms < 0
-        got = done.receive
-        return got.is_a?(Int32) ? got : Cancelled.new
+    # The index of the next attempt that is done, nil when *ms* ran out
+    # first (-1: no bound), `Cancelled` when the caller was. It waits on the
+    # oldest running attempt in slices of 2 ms and looks at all of them
+    # between slices: a later one may fail first.
+    private def self.next_finished(tasks : Array(IyiTask(Int32)), seen : Array(Bool), ms : Int32) : Int32 | Cancelled | Nil
+      until_ms = ms < 0 ? -1_i64 : Resolver.now_ms + ms.to_i64
+      while true
+        oldest = -1
+        index = 0
+        while index < tasks.size
+          unless seen[index]
+            if tasks[index].done?
+              seen[index] = true
+              return index
+            end
+            oldest = index if oldest < 0
+          end
+          index = index + 1
+        end
+        slice = 2
+        if until_ms >= 0_i64
+          left = until_ms - Resolver.now_ms
+          return nil if left <= 0_i64
+          slice = left.to_i32 if left < 2_i64
+        end
+        if oldest < 0
+          # Nothing running: only the time until the next start is left.
+          return nil if until_ms < 0_i64
+          return Cancelled.new if sleep(slice).is_a?(Cancelled)
+        elsif tasks[oldest].wait(slice).is_a?(Cancelled)
+          return Cancelled.new
+        end
       end
-      answer = nil.as(Int32 | Cancelled | Nil)
-      select
-      when got = done.receive
-        answer = got.is_a?(Int32) ? got : Cancelled.new
-      when timeout(ms)
-        answer = nil
-      end
-      answer
     end
   {% else %}
     # Without the runtime there is no task to race in: the addresses are

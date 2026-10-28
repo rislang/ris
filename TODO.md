@@ -23,8 +23,7 @@ How to work (fewer tokens, faster to the goal):
 
 Order, fastest with fewest tokens: one Sol low run per item, fixes
 resumed in the same session, one full check per item, all in this
-checkout. Pipe/socket race need poller work for several IO waits at
-once; Channel stays for them until then.
+checkout. Pipe is an OS pipe on Linux and macOS (Channel elsewhere).
 
 * Give a task-owned Conn an owner-level buffer growth path: growth in a
   nested tape block ends with the block, so TLS/HTTP/2 connections stay
@@ -33,13 +32,11 @@ once; Channel stays for them until then.
   receivers, handlers and reached state; keep all resources in their
   opening task. Gate: mutable/resource captures refused with safe forms,
   independent config copies, retained results copied to multiple readers.
-* Port pipe to one-task OS IO on the poller: nonblocking reads/writes,
-  partial-write buffers, EOF-after-drain, EPIPE and cancellation. Settle
-  the old piece-count capacity API versus OS byte capacity. Gate: full
-  pipe progress, partial IO, reader/writer close, cancel and pipe tests.
 * Port socket race to one task with multiple in-flight OS connects and
   poller interests, next-launch/deadline timers and Windows completion
-  records. Gate: staggered attempts, early failure/winner, timeout/cancel,
+  records. It no longer uses Channel/select: the caller polls its attempt
+  tasks (2 ms slices), and the attempts still write a shared outcome
+  array. Gate: staggered attempts, early failure/winner, timeout/cancel,
   all losing sockets closed and existing race tests on supported targets.
 * Port autocert to one manager with copied board orders and cached results.
   Part A implements Copyable config, task-local views, tagged stop,
