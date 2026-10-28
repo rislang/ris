@@ -126,7 +126,7 @@ def exercise(binary):
             listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             listener.bind(("127.0.0.1", port))
             listener.listen()
-        print("PASS: cancel closes clients and listeners; zero heap --no-gc")
+        print("PASS: cancel closes clients and listeners; zero heap")
     except BaseException:
         if process.poll() is not None:
             print(process.stderr.read(), flush=True)
@@ -238,7 +238,7 @@ def exercise_tls(binary, cert, key):
 def main():
     with tempfile.TemporaryDirectory(prefix="ris-http-prefork-") as work:
         binary = Path(work) / "server"
-        build = subprocess.run([RIS, "build", "--no-gc", "-o", str(binary),
+        build = subprocess.run([RIS, "build", "-o", str(binary),
                                 str(ROOT / "test/ris/http_prefork.ri")],
                                capture_output=True, text=True, timeout=240)
         assert build.returncode == 0, build.stdout + build.stderr

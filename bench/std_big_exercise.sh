@@ -841,7 +841,7 @@ if [ -x "$REPO/bin/crystal" ]; then
   fi
 fi
 crossed=0
-for target in x86_64-linux-gnu aarch64-darwin x86_64-windows-msvc aarch64-linux-gnu x86_64-linux-musl; do
+for target in x86_64-linux-gnu aarch64-linux-gnu x86_64-linux-musl; do
   if ! "$IYI" build --no-codegen --target "$target" "$REPO/bench/std_big_exercise.iyi" -o "$WORK/cross" >"$WORK/cross.log" 2>&1; then
     echo "  FAIL: the exercise does not typecheck for $target: $(grep -m1 Error "$WORK/cross.log")"
     status=1

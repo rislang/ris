@@ -124,37 +124,6 @@ def check_build_pair(wrong: list[str], held: list[str]) -> None:
     held.append(f"the generated pair is {measured_iyi} iyi and {measured_go} Go lines, as README.iyi.md says")
 
 
-def check_gc_arms(wrong: list[str], held: list[str]) -> None:
-    """GC_DESIGN.md's columns must be arms `bench/gc_default.py` still has.
-
-    This is the check that catches a table nobody can re-run: the default
-    allocator was flipped on the strength of that very table, the script's
-    arm names moved with the flip, and the header row kept naming a flag
-    (`-Dgc_iyi`) the script no longer passes.
-    """
-    gc = load("bench/gc_default.py")
-    text = doc("GC_DESIGN.md")
-    header = quoted(text, r"\| workload \| (.+) \|\n\|---", "GC_DESIGN.md", wrong)
-    if not header:
-        return
-    columns = [cell.strip() for cell in header[0].split("|")]
-    if len(columns) != len(gc.ARMS):
-        wrong.append(
-            f"GC_DESIGN.md: the table has {len(columns)} measured columns, "
-            f"bench/gc_default.py has {len(gc.ARMS)} arms ({', '.join(gc.ARMS)})"
-        )
-        return
-    for arm, flags in gc.ARMS.items():
-        needle = flags[0] if flags else "default"
-        if not any(needle in column for column in columns):
-            wrong.append(
-                f"GC_DESIGN.md: no column names `{needle}`, which is how "
-                f"bench/gc_default.py spells its `{arm}` arm today"
-            )
-    if not wrong:
-        held.append(f"GC_DESIGN.md's columns are gc_default.py's {len(gc.ARMS)} arms")
-
-
 def check_macro_sizes(wrong: list[str], held: list[str]) -> None:
     """Every N in SPEC.md's macro tables must be a size `macro_cost.py` sweeps."""
     source = (REPO / "bench/macro_cost.py").read_text()
@@ -231,9 +200,7 @@ UNCHECKABLE = [
     "the artifact-vs-source front end (bench/artifact_speed.py, needs a release compiler)",
     "the boundary's percentages (bench/bind_speed.py, needs two release compilers)",
     "the daemon's seconds and its 26% (bench/daemon_full_build.py, needs a release daemon)",
-    "the allocator table's seconds and RSS (bench/gc_default.py, needs release builds)",
     "the macro tables' seconds (bench/macro_cost.py, needs a release compiler)",
-    "the resident-set band (bench/resident_probe.py, needs a release build)",
     "the runtime ratios (bench/runtime.py, needs release builds of both libraries)",
 ]
 
@@ -244,7 +211,6 @@ def main() -> int:
     for check in (
         check_bind_speed,
         check_build_pair,
-        check_gc_arms,
         check_macro_sizes,
         check_daemon_shape,
         check_context_threshold,

@@ -18,12 +18,10 @@ class KeptText
 end
 
 literal_cursor = IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)
-literal_heap = IyiMark.allocated_since
 literal = "static"
 heap_literal = "static".to_heap
 raise "literal used tape storage" unless literal_cursor ==
   IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)
-raise "literal allocated on heap" unless literal_heap == IyiMark.allocated_since
 raise "static retention type" unless heap_literal.is_a?(String)
 puts typeof("static")
 raise "literal allocated" unless "static".is_a?(Str)

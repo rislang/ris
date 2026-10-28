@@ -1330,20 +1330,10 @@ require "./file"
 # `bench/doc_numbers.py` counts these lines out of the library figure the
 # SPEC holds to its ceiling, by these two marks.
 #
-# The allocator, selected rather than declared, because the selection has to be
-# a real seam a different allocator is swapped in at. The seam has carried
-# three defaults: Boehm (0.1.0), then nothing — allocate and never collect —
-# after the dependency floor measured libgc as the last library a default
-# build could not refuse (SPEC.md III.9), and now the owned collector, once
-# GC_DESIGN.md's stages were built, gated, and measured against both
-# predecessors (`bench/gc_default.py`). `-Dgc_boehm` still buys libgc and its
-# collection; `-Dgc_none` still buys the bump pointer and its unbounded
-# floor-clean speed; a plain build gets the collector that pays for itself.
-#
-# Written out in full rather than put behind a `GC` module the way the standard
-# library has it. There are four call sites and all of them are in this file,
-# so the module would buy nothing but a frame on every allocation of a build
-# that is not optimised.
+# Legacy collector implementations remain for source compatibility.
+# Program builds always define gc_none and ris_no_gc: they use the Linux
+# runtime mappings below and trap program allocations in RisHeap.
+# The compiler executable is built independently with Crystal's runtime.
 {% if flag?(:gc_boehm) %}
   # `pkg_config: "bdw-gc"` is how Crystal's own `gc/boehm.cr` names the
   # library, and it is what lets a homebrew-installed collector link on
@@ -1390,7 +1380,7 @@ require "./file"
     # size-class arena of GC_DESIGN.md's Stage 2, the roots, the marker,
     # the sweep and the allocation-pressure trigger — a plain `iyi build`
     # gets all of it, and the flip was a measurement before it was a
-    # decision (`bench/gc_default.py`, the table in GC_DESIGN.md): the
+    # decision (the retired GC gates, the table in GC_DESIGN.md): the
     # collector wins or ties every time column against the bump pointer
     # and Boehm alike, and holds RSS at the live set where a heap that
     # never frees holds it at the garbage.
@@ -2006,7 +1996,7 @@ require "./file"
       # that stops it. The fast path — pop the cache's list, or carve the
       # cache's own arena — takes no lock and touches no shared word; what
       # it costs is one thread-local read per allocation, and
-      # `bench/arena_exercise.sh` prints the number.
+      # the retired GC gates prints the number.
       #
       # The centre is the class free lists the sweep fills, the arena list
       # and the large list, behind one spin lock (`CENTRAL_LOCK`, a word on
@@ -3029,7 +3019,7 @@ require "./file"
 
       # Pages the sweep handed back cold, pages it kept warm, pages the
       # carve took up again and how many of those were warm, in all: the
-      # exercises and `bench/resident_probe.iyi` read them.
+      # exercises and the retired GC gates read them.
       def self.pages_released : UInt64
         @@pages_released
       end
@@ -3279,7 +3269,7 @@ require "./file"
           # the thread linked the chunk back after it, onto the dropped
           # list it had read, while the sweep relinked the same chunks as
           # dead: handed out twice, and a batch head's tagged word stamped
-          # as an index. `bench/concurrent_mark.sh`'s bursts of frees faulted
+          # as an index. the retired GC gates's bursts of frees faulted
           # or lost a chunk in 25 runs of 30.
           write64(table.address &+ CACHE_INSIDE, read64(table.address &+ CACHE_INSIDE) &+ 1_u64)
           slot = chunk_index(arena, head)
@@ -3291,7 +3281,7 @@ require "./file"
           # dead - and the slice linked it into its batch while it sat on
           # this cache's list: handed out twice. Freed between the read and
           # the write, it lost its free flag to the survivor's restamp.
-          # `bench/concurrent_mark.sh`'s bursts of frees, whose aged chunks
+          # the retired GC gates's bursts of frees, whose aged chunks
           # are freed while a slice of their arena is in flight, on four
           # cores beside two busy loops: the plain build faulted in 4 runs
           # of 1,000 and the release build in 108 of 1,000, and a copy
@@ -3749,7 +3739,7 @@ require "./file"
     # pointer to a live object be", asked of the one thread this language has,
     # and the answer to "is this word one", asked of the heap Stage 2 built.
     # Stage 5 passes a marking function to `IyiRoots.each_root` and that is
-    # the whole interface it needs; `bench/root_exercise.iyi` is the only
+    # the whole interface it needs; the retired GC gates is the only
     # caller until then, and it is what says the mechanism works.
     #
     # Conservative, and deliberately biased toward retaining. A word that is
@@ -3950,7 +3940,7 @@ require "./file"
       # `GC_clear_a_few_frames` does. The collector's frames are built over
       # what earlier, deeper calls left there, and a slot one of them never
       # writes is scanned with that stale word in it: the dead helper in
-      # `bench/root_exercise.iyi` built 32 MB, returned, and the next
+      # the retired GC gates built 32 MB, returned, and the next
       # `IyiMark.collect` under --release still marked all of it, reached
       # from a word 184 bytes under the caller's stack pointer. Two KiB is
       # several times the deepest collector stack measured (448 bytes, a
@@ -4719,7 +4709,7 @@ require "./file"
       # spun and printed nothing more. Collections back to back with
       # helpers, 24 runs at a time on twelve cores, plain builds: 200 of
       # them with a 2 MiB block live never ended in 23 runs of 24,000,
-      # and bench/sweep_exercise.iyi in 14 of 24,000, each in its steady
+      # and the retired GC gates in 14 of 24,000, each in its steady
       # or rounding section. Windows' job 120284584748 sat 2 h 25 min in
       # the gate that builds and runs that program - a stall this could
       # be, and nothing in its log shows that it was. Opened last, 0 of
@@ -5802,7 +5792,7 @@ require "./file"
 
       # Objects the helpers blackened in the last mark: zero means the
       # helpers were woken and found nothing to share, which
-      # `bench/parallel_mark.sh` refuses.
+      # the retired GC gates refuses.
       def self.helper_black : UInt64
         @@helper_black
       end
@@ -7061,7 +7051,7 @@ require "./file"
         # sweep; the loop (`bench/windows_exercise.iyi`) passes lazily now,
         # and so do the trigger, sweep, mark, root and thread exercises
         # that had never been asked about Windows at all -
-        # `bench/collect_trigger.sh` names a pause that sweeps, and failed
+        # the retired GC gates names a pause that sweeps, and failed
         # on this line: 25 collections, 0 arenas swept by the allocator.
         {% if (flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64)) %}
           while eager && sweep_one_held
@@ -9760,7 +9750,7 @@ private def __iyi_say(text : String | Str) : Nil
   end
 end
 
-# A panic must reach its defers under --no-gc too. Format the source line
+# A panic must reach its defers under too. Format the source line
 # on the stack rather than allocating a String before cleanup can run.
 private def __iyi_say(line : Int32) : Nil
   bytes = uninitialized UInt8[12]

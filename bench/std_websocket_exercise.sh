@@ -1065,7 +1065,7 @@ else
   diff "$WORK/r1/source.out" "$WORK/r1/artifact.out" 2>/dev/null | sed -n '1,6p' | sed 's/^/    /'
   status=1
 fi
-for target in x86_64-linux-gnu aarch64-darwin x86_64-windows-msvc aarch64-linux-gnu x86_64-linux-musl; do
+for target in x86_64-linux-gnu aarch64-linux-gnu x86_64-linux-musl; do
   if ! "$IYI" build --no-codegen --target "$target" -o "$WORK/cross-$target" "$REPO/bench/std_websocket_exercise.iyi" > "$WORK/cross-$target.log" 2>&1; then
     echo "  FAIL: $target: $(grep -m1 -E 'Error|BUG' "$WORK/cross-$target.log" | cut -c1-140)"
     status=1

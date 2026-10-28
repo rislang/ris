@@ -521,19 +521,13 @@ for source in "$REPO"/bench/std_*_exercise.iyi; do
   #   * `std_big_exercise` prints how long three exponentiations took, for
   #     its driver to set beside Python's, and raises if the fast one is
   #     not three times the old.
-  #   * `std_gc_exercise` prints how many bytes a collection freed, which
-  #     is a property of what the build allocated and not of the program.
   #   * `std_time_exercise` prints the clock.
-  #   * `std_weak_ref_exercise` prints how many targets a conservative root
-  #     still reached - a register's leftover, which two builds allocate
-  #     differently - and how many reads four threads made beside the
-  #     collector in two seconds.
   #
   # Named rather than guessed at. A rule that decided this by running the
   # binary twice would pass the clock and still fail the collector, whose
   # two runs agree with each other and not across builds.
   case "$name" in
-    std_big_exercise | std_gc_exercise | std_time_exercise | std_weak_ref_exercise)
+    std_big_exercise | std_time_exercise)
       continue
       ;;
   esac
@@ -588,7 +582,7 @@ echo "== and on the platforms this runner is not"
 # resolves, and because it costs half a second per exercise instead of
 # five: the whole sweep over four targets is a minute.
 unportable=""
-for target in aarch64-darwin x86_64-windows-msvc aarch64-linux-gnu x86_64-linux-musl; do
+for target in aarch64-linux-gnu x86_64-linux-musl; do
   for source in "$REPO"/bench/std_*_exercise.iyi; do
     name="$(basename "$source" .iyi)"
     work="$WORK/cross/$target/$name"
@@ -610,7 +604,7 @@ if [ -n "$unportable" ]; then
   echo "  FAIL: cannot be consumed on another platform:$unportable"
   status=1
 else
-  echo "  every exercise reads its own artifacts on darwin, windows, aarch64 and musl"
+  echo "  every exercise reads its own artifacts on Linux aarch64 and x86_64 musl"
 fi
 
 echo
@@ -629,7 +623,7 @@ mkdir -p "$together"
   echo 'puts 1'
 } > "$together/all.iyi"
 apart=""
-for target in "" x86_64-windows-msvc aarch64-darwin aarch64-linux-gnu x86_64-linux-musl; do
+for target in "" aarch64-linux-gnu x86_64-linux-musl; do
   if [ -n "$target" ]; then
     flags=(--no-codegen --target "$target")
   else
@@ -644,7 +638,7 @@ if [ -n "$apart" ]; then
   echo "  FAIL: every std module does not compile together on:$apart"
   status=1
 else
-  echo "  every std module compiles beside every other, std/bool among them, on five targets"
+  echo "  every std module compiles beside every other, std/bool among them, on supported Linux targets"
 fi
 
 echo

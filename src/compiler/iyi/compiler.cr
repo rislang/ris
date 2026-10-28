@@ -3161,6 +3161,8 @@ module Iyi
       program.flags << "debug" unless debug.none?
       program.flags << "static" if static?
       program.flags.concat @flags
+      program.flags << "gc_none"
+      program.flags << "ris_no_gc"
       program.define_crystal_constants
       program.wants_doc = wants_doc? || !@emit_iyimod.nil?
       program.color = color?

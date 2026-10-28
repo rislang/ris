@@ -1,12 +1,9 @@
 module line_tape
-import std/gc::{GC}
 
 tape do
   writer = Str::Builder.new(16)
   writer.append("warm")
 end
-GC.disable
-before = GC.stats.bytes_since_collection
 
 count = 0
 while true
@@ -34,7 +31,4 @@ while true
 end
 exit 1 unless count == 10003
 
-after = GC.stats.bytes_since_collection
-GC.enable
-exit 1 unless before == after
 puts "PASS"

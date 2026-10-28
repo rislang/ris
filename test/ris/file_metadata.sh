@@ -5,7 +5,7 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 printf 'metadata\n' > "$work/file"
 ln -s "$work/file" "$work/link"
-"$RIS" build --no-gc test/ris/file_metadata.ri -o "$work/gate"
+"$RIS" build test/ris/file_metadata.ri -o "$work/gate"
 for mode in ok size info nul; do
   code=0
   out=$(RIS_HEAP_STATS=1 "$work/gate" "$work/file" "$mode" \

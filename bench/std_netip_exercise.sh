@@ -902,7 +902,7 @@ if [ -x "$REPO/bin/crystal" ]; then
   fi
 fi
 apart=""
-for target in x86_64-linux-gnu aarch64-darwin x86_64-windows-msvc aarch64-linux-gnu x86_64-linux-musl; do
+for target in x86_64-linux-gnu aarch64-linux-gnu x86_64-linux-musl; do
   if ! "$IYI" build --no-codegen --target "$target" -o "$WORK/cross" "$REPO/bench/std_netip_exercise.iyi" >"$WORK/cross.log" 2>&1; then
     echo "  $target: $(grep -m1 -E 'Error|BUG' "$WORK/cross.log")"
     apart="$apart $target"

@@ -113,7 +113,7 @@ def run_workload(binary, args, mode, *, stats=False):
 
 
 def run_gate(source, binary, args, mode):
-    built = command(["build", "--release", "--no-gc", "-o", binary,
+    built = command(["build", "--release", "-o", binary,
                      source])
     if built.returncode:
         return built, b""

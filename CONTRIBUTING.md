@@ -1,9 +1,10 @@
 # Contributing to ris
 
 ris is iyi plus Goose's tape memory. Read [AGENTS.md](AGENTS.md) first,
-then [LEARN.md](LEARN.md) and [TAPE_SPEC.md](TAPE_SPEC.md). The target is
-ris programs without a collector; the current migration is recorded in
-TAPE_SPEC.md. The compiler is still built with Crystal.
+then [LEARN.md](LEARN.md) and [TAPE_SPEC.md](TAPE_SPEC.md). Every ris program
+runs without a collector on Linux x86_64 or aarch64. Heap allocation
+traps; use tape values and copy_to for retained data. The compiler is
+still built with Crystal.
 
 ## Build
 
@@ -32,7 +33,7 @@ with LLVM 23 and keeps the build and test logs on the server:
 
 ```sh
 bin/minitest-check build
-bin/minitest-check run --no-gc test/ris/class_copy.ri
+bin/minitest-check run test/ris/class_copy.ri
 bin/minitest-check gate test/ris/http_continue.sh
 bin/minitest-check check
 bin/minitest-check log

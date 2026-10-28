@@ -50,7 +50,6 @@ end
 
 import std/dir::{Dir}
 import std/file::{File}
-import std/gc::{GC}
 
 def clean_tree(dir_path : String) : Nil
   return unless Dir.exists?(dir_path)
@@ -228,7 +227,6 @@ reader = Dir.new(many_dir)
 if first_seen = reader.read
   seen << first_seen
 end
-GC.collect
 2000.times { small_fill << "A" * 600 }
 8.times { large_fill << "B" * 32800 }
 while name_seen = reader.read
@@ -249,7 +247,6 @@ walked = 0
   Dir.glob(tree + "/**/*.txt") do |_|
     walked = walked + 1
     if walked % 7 == 0
-      GC.collect
       8.times { small_fill << "A" * 600 }
       large_fill << "B" * 32800
     end
@@ -380,7 +377,6 @@ Dir.each_child(walk_dir) do |name|
   walk_seen = walk_seen + 1
   foreign = foreign + 1 unless own.has_key?(name)
   if walk_seen % 20 == 0
-    GC.collect
     Dir.children(walk_dir + "_other")
   end
 end

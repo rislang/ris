@@ -6,7 +6,7 @@ ris uses static data, scoped tapes and typed pools, no GC or general heap.
 data stack. iyi's rules,
 cited as [iyi](doc/reference/iyi/source/SPEC.md) and a section (v0.19.1),
 apply as written; only what ris adds is stated. Reuse iyi before designing
-anew. A GC path (to_heap) needs a migration mark; suggest copy_to. This
+anew. A heap path (to_heap) needs a migration mark; suggest copy_to. This
 is the target contract; what the code does not meet yet is in TODO.md.
 Cite a rule by its number (TAPE_SPEC 2.3). Numbers never change: a new
 rule goes last in its section; a removed one leaves its number unused.
@@ -162,9 +162,9 @@ rule goes last in its section; a removed one leaves its number unused.
   classes are refused at every depth, with the safe form named. A post
   publishes a complete copy or nothing; take copies out before removal. Claims
   prevent duplicate delivery and keep FIFO through failure. No view into
-  runtime pools escapes. Private typed pools own message bytes; GC builds root
-  live runtime references and clear retired roots, no-GC builds use no general
-  heap. Exhaustion follows 4.2. At process end queued copies are discarded
+  runtime pools escapes. Private typed pools own message bytes without a
+  general heap. Exhaustion follows 4.2. At process end queued copies are
+  discarded
   without user callbacks; task cleanup and fatal errors still follow 4.1/4.3.
   A socket or pipe end never crosses tasks: no owns:, task.take, resource move
   or exception. An HTTP server uses N tasks, each opening its own SO_REUSEPORT
@@ -188,3 +188,10 @@ rule goes last in its section; a removed one leaves its number unused.
 * 6.5 Pool free never closes a resource: resources have explicit cleanup.
 * 6.6 RIS_TAPE_STATS: owner paths, regions, committed peaks, pool waste, copies.
   check.sh tests exit, panic, cancel, exhaustion.
+
+## Program targets and allocation
+
+Every ris and iyi program runs without a collector. Heap allocation traps;
+use a tape value and copy_to for data that must outlive its current tape.
+Programs build only for Linux x86_64 and aarch64. Other targets fail at
+compile time. The compiler executable keeps its own GC and build choices.

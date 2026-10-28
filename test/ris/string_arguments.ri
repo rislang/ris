@@ -69,7 +69,6 @@ present = optional_text(heap, true)
 absent = optional_text(heap, false)
 source = OptionalArgumentText.new(present)
 nil_source = OptionalArgumentText.new(absent)
-before = IyiMark.allocated_since
 raise "variable" unless width(heap) == 4
 raise "field" unless width(field.text) == 4
 raise "element" unless width(array[0]) == 4
@@ -91,6 +90,5 @@ raise "evaluate once" unless optional_width(source.take) == 4 &&
   source.calls == 1
 raise "nil evaluate once" unless optional_width(text: nil_source.take) == 0 &&
   nil_source.calls == 1
-raise "allocated" unless before == IyiMark.allocated_since
 raise "temporary" unless width("abc".to_heap + "d") == 4
 puts "PASS: String arguments borrow without allocation"

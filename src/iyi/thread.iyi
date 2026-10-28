@@ -859,7 +859,7 @@
       # and `GetThreadContext` waits for that: one suspend and one wait at a
       # time made a stop the sum of those waits. Beside 48 threads computing
       # on twelve cores a stop took 85 to 275 ms that way, and 0 to 13 asked
-      # all at once (bench/thread_exercise.sh).
+      # all at once (the retired GC gates).
       private def self.suspend_others(line : UInt64) : Int64
         cursor = @@lines
         while cursor != 0

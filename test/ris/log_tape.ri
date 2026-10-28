@@ -1,16 +1,12 @@
 module test/ris/log_tape
 
 import std/log::{Logger, IOBackend, MemoryBackend, Severity, Log, Metadata}
-import std/gc::{GC}
 
 sink = File.open("/dev/null", "w")
 backend = IOBackend.new(sink)
 log = Logger.new("web", Severity::Info, backend)
 # Includes the caller's temporary integer text and quoted metadata.
-GC.disable
-before = GC.stats.bytes_since_collection
 100.times { log.info("done", id: 42, name: "a \"b\"\n") }
-raise "logging allocated" unless GC.stats.bytes_since_collection == before
 memory = MemoryBackend.new
 log.backend = memory
 log.info("done", id: 42)
@@ -20,9 +16,7 @@ raise "retained output" unless memory.output[0].includes?("INFO - web: done -- i
 log.backend = backend
 bound = log.bind(id: 1, base: "a b")
 Log.with_context(id: 0, request: "ok") do
-  before = GC.stats.bytes_since_collection
   100.times { bound.info("done", id: 2) }
-  raise "context logging allocated" unless GC.stats.bytes_since_collection == before
   bound.backend = memory
   bound.info("merged", id: 2)
 end

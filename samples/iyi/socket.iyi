@@ -10,7 +10,7 @@ module samples/socket
 import std/socket::{IyiSocket}
 
 # Server listens on an ephemeral port. The number the kernel picks is different
-# on every run, so it is used rather than printed: `bench/arena_exercise.sh`
+# on every run, so it is used rather than printed: the retired GC gates
 # runs every sample twice and asks for identical output, and a sample that
 # prints its port is a sample that can never answer that.
 server = IyiSocket.listen(0)

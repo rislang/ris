@@ -1,5 +1,8 @@
 # ris: rubyist in stack memory with agents
 
+Programs always run without a collector on Linux x86_64 or aarch64.
+Heap allocation traps; use tape values and copy_to for retained data.
+
 ris is a Ruby-like language whose hot paths run on tape memory, with no GC,
 built on [iyi](https://github.com/iyilang/iyi), a fork of Crystal. Source:
 [github.com/rislang/ris](https://github.com/rislang/ris).

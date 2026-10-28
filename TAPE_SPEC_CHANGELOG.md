@@ -4,6 +4,13 @@ Every change to TAPE_SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one.
 
+## 2026-10-28: programs always run without a collector
+
+* Changed: removed --no-gc; every program traps heap allocation and uses
+  no collector. Supported program targets are Linux x86_64 and aarch64.
+* Why: tape memory is the only program memory model, with no GC escape.
+  The compiler executable keeps its independent collector choice.
+
 ## 2026-10-28: a local task takes a handed-off value
 
 * Changed: 5.1 lets a local task capture a non-Share value its spawner

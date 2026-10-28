@@ -4,7 +4,6 @@
 module test/ris/query_test
 
 import std/uri::{Query}
-import std/gc::{GC}
 
 # The String API beside the tape one: its result is copied off.
 @[TapeToHeap]
@@ -20,8 +19,6 @@ end
 ok = pairs("?a=1&b=2;c=3&&d&e=") == "[a=1][b=2][c=3][d=][e=]" &&
      pairs("q=hello+world&x=%41%2c%zz&p=100%") == "[q=hello world][x=A,%zz][p=100%]" &&
      pairs("") == "" && pairs("?") == "" && pairs("=v&k=") == "[=v][k=]"
-GC.disable
-before = GC.stats.bytes_since_collection
 found = 0
 tape do
   q = Query.parse("page=2&q=caf%C3%A9+au+lait")
@@ -29,5 +26,5 @@ tape do
   words = q["q"]?
   found = (page ? page.bytesize : 0) + (words ? words.bytesize : 0)
 end
-ok &&= found == 1 + 13 && GC.stats.bytes_since_collection == before
+ok &&= found == 1 + 13
 puts ok ? "PASS: read as Params reads, nothing on the heap" : "FAILED"

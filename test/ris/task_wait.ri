@@ -84,19 +84,6 @@ group do |g|
   sleep 15
   raise "stale timer" if __iyi_monotonic_ns - started < 10000000_i64
 end
-# Cross-scheduler completion wakes a timed join on this scheduler.
-{% unless flag?(:gc_none) || flag?(:gc_boehm) %}
-  group do |g|
-    task = g.spawn_parallel do
-      RisBoard.take(ReleaseParallelOrder)
-      29
-    end
-    raise "parallel timeout" unless task.wait(1).is_a?(TimedOut)
-    raise "parallel release" unless RisBoard.post(ReleaseParallelOrder.new)
-    raise "parallel completion" unless task.wait(2000).nil?
-    raise "parallel result" unless task.value == 29
-  end
-{% end %}
 # A completed panic is Done; wait does not consume or catch the panic.
 group do |g|
   task = g.spawn do

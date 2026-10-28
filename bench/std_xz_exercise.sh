@@ -389,7 +389,7 @@ fi
 
 echo
 echo "== on the platforms this runner is not"
-for target in x86_64-linux-gnu aarch64-darwin x86_64-windows-msvc aarch64-linux-gnu x86_64-linux-musl; do
+for target in x86_64-linux-gnu aarch64-linux-gnu x86_64-linux-musl; do
   if "$IYI" build --no-codegen --target "$target" -o "$WORK/cross" "$REPO/bench/std_xz_exercise.iyi" >"$WORK/cross.log" 2>&1; then
     echo "  $target: typechecks"
   else

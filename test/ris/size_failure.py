@@ -40,7 +40,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="ris-size-") as scratch:
         binary = str(Path(scratch) / "failure")
         build = subprocess.run(
-            [RIS, "build", "--release", "--no-gc", "-o", binary,
+            [RIS, "build", "--release", "-o", binary,
              "test/ris/size_failure.ri"], capture_output=True, text=True,
             env=env, timeout=240)
         if build.returncode:
@@ -52,7 +52,7 @@ def main():
                     run.stderr != expected + "\n"):
                 raise RuntimeError(f"{mode}: {run.returncode}, "
                                    f"{run.stdout!r}, {run.stderr!r}")
-            print(f"fatal    size_failure ({mode}, --no-gc)")
+            print(f"fatal    size_failure ({mode})")
 
 
 if __name__ == "__main__":

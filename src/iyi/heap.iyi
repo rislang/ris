@@ -1,11 +1,11 @@
 {% if flag?(:ris_no_gc) && !(flag?(:linux) &&
         (flag?(:x86_64) || flag?(:aarch64))) %}
-  {% raise "--no-gc currently needs Linux x86_64 or aarch64; " \
-           "build without --no-gc on this target." %}
+  {% raise "ris programs need Linux x86_64 or aarch64; " \
+           "build for a supported Linux target." %}
 {% end %}
 
 {% if flag?(:ris_no_gc) && flag?(:gc_boehm) %}
-  {% raise "--no-gc cannot link Boehm; drop -Dgc_boehm." %}
+  {% raise "ris programs cannot link Boehm; drop -Dgc_boehm." %}
 {% end %}
 
 # Allocation accounting and mapping failures allocate nothing, even on exit.
@@ -46,9 +46,10 @@ class RisHeap
     @@bytes = @@bytes &+ size
     IyiRuntimeLock.unlock
     {% if flag?(:ris_no_gc) %}
-      text("ris: heap allocation with --no-gc: ")
+      text("ris: heap allocation: ")
       number(size)
       text(" bytes\n")
+      text("  use Str, Ary or @[OnTape]; copy_to(owner) to retain data\n")
       if site.address != 0_u64
         text("  at ")
         length = 0_u64

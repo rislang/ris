@@ -1,9 +1,5 @@
 macro board_spawn(g, &block)
-  {% if flag?(:gc_none) %}
-    {{g}}.spawn {{block}}
-  {% else %}
-    {{g}}.spawn_parallel {{block}}
-  {% end %}
+  {{g}}.spawn {{block}}
 end
 
 struct BoardLimitRace

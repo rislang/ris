@@ -863,11 +863,6 @@ class Iyi::Command
         setup_compiler_warning_options(opts, compiler)
       end
 
-      opts.on("--no-gc", "Trap program heap use; link without GC") do
-        compiler.flags << "gc_none"
-        compiler.flags << "ris_no_gc"
-      end
-
       opts.on("--no-color", "Disable colored output") do
         @color = false
         compiler.color = false
@@ -1042,8 +1037,8 @@ class Iyi::Command
       end
     end
 
-    if compiler.flags.includes?("ris_no_gc") && compiler.crystal_library?
-      abort! "--no-gc needs ris's runtime; drop --crystal", :USAGE_ERROR
+    if compiler.crystal_library?
+      abort! "ris programs need ris's runtime; drop --crystal", :USAGE_ERROR
     end
     compiler.link_flags = link_flags.join(' ') unless link_flags.empty?
 

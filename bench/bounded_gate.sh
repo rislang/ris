@@ -7,13 +7,13 @@
 # output goes where this script's does, as it is written.
 #
 # Windows' collector gates ran as one step, one after another, with no bound
-# of their own: in job 120284584748 bench/sweep_exercise.sh printed its
+# of their own: in job 120284584748 the retired GC gates printed its
 # first line and then nothing until the job was cancelled at its 150 minutes,
 # 2 h 25 min later, and the log could not say whether the compiler, the
 # linker or the program was the one still running, nor what its threads
 # were doing. Master's green run of the same job two hours earlier (job
 # 120284541992, on four cores) took 9 min 37 s for all eight gates, the
-# longest of them bench/thread_exercise.sh at 4 min 33 s.
+# longest of them the retired GC gates at 4 min 33 s.
 #
 # When the bound fires, before anything is ended: every process under the
 # gate, and on Windows each of their threads - its state, what it waits on,

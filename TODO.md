@@ -19,6 +19,25 @@ How to work (fewer tokens, faster to the goal):
   git log. Remove an item when its guarantee passes its gate, not merely
   when a sample's budget reaches zero.
 
+## Estimates (2026-10-28, rough)
+
+Codex Sol low tokens; review adds 10-30%. Before testing ris programs:
+the first two rows. Update a row when its work starts or ends.
+
+| Work                                  | Size     | Time      | Tokens    |
+|---------------------------------------|----------|-----------|-----------|
+| No GC is the only program mode         | medium   | 1-2 h     | 100-200k  |
+| std paths that still use the heap     | large    | 1-3+ days | 300k-1M+  |
+| 5.1 bench ports, part 1 (6 benches)   | medium   | 1-2 h     | 150-250k  |
+| 5.1 bench ports, std_* + SocketStop   | med-lrg  | 3-5 h     | 300-500k  |
+| 5.1 holes: reached state, aliases     | large    | 4-8 h     | 200-400k  |
+| Autocert part B                       | medium   | 2-4 h     | 150-300k  |
+| Task-owned Conn buffer growth         | med-lrg  | 3-5 h     | 150-300k  |
+| .iyimod keeps @[OnTape]               | small    | 1-2 h     | 50-100k   |
+| Compiler specs signal 11              | unknown  | 2 h-1 day | 100-300k  |
+| macOS tape backend                    | large    | days      | 500k+     |
+| Windows                               | large    | days      | 500k+     |
+
 ## Messages: RisBoard (TAPE_SPEC 5.2, 5.6; doc/MESSAGES.md)
 
 All work in this checkout, one full check per item; Codex is out of
@@ -56,6 +75,7 @@ part B.
   including real TLS deadline/parallel-server cases, Pebble, restarts and
   mutation checks. Preserve the policy probe's copied board observations;
   its Counter is no longer captured by the listener task.
+
 ## Next
 
 * Escaping closures outside program and joined task owners: pooled
@@ -73,12 +93,15 @@ part B.
 * Remove general allocator fallbacks from ris programs. Distinguish
   gc_none's allocator behavior from ris_no_gc's allocation trap; audit
   remaining std and runtime paths required by supported workloads.
-* Define supported no-GC targets and gate each one; unsupported targets
-  must fail explicitly rather than silently select a heap fallback.
 * Audit final program binaries for collector linkage and forbidden heap
   allocator dependencies; keep the compiler's own GC choice separate.
-* Make no-GC behavior the default after the semantic, runtime, workload
-  and link gates pass; remove obsolete collector paths in ris programs.
+* check.sh fails since no GC is the only mode: 69 heap traps (string
+  interpolation such as puts "#{x}", to_heap/String-API tests, pipe,
+  autocert, socket 1 MiB, http prefork/answer, json_repeat) and seven
+  other failures (program_threads, program_field_thread, program_readers:
+  IyiThread; cleanup_panic, cleanup_self, copy_rollback, samples/ris/web).
+  The trap no longer prints its file and line.
+* Remove remaining obsolete collector paths in ris programs.
 
 ## Later
 
@@ -117,8 +140,7 @@ part B.
 * bench/concurrency_exercise.sh fails with "pipe2 failed" after its
   32,000 sleepers test (seen 2026-10-27 before the group-end change).
 * Typecheck failures that predate the Channel removal:
-  bench/parallel_exercise.iyi:124 (a task value's Panicked arm),
-  bench/thread_exercise.iyi:286 (tape type Rendezvous in a proc) and
+  bench/parallel_exercise.iyi:124 (a task value's Panicked arm) and
   bench/metric/metric.iyi (Array of the tape type Planet).
 * x86_64-windows-msvc does not typecheck std/socket.iyi:572
   (connect_named: opaque callback effects); fix with the socket race.
@@ -134,5 +156,5 @@ part B.
 ## Windows (on hold: not worked on now)
 
 * Windows file metadata: move native wide-path conversion and auxiliary
-  stat buffers onto tape, then gate Str metadata under --no-gc there.
+  stat buffers onto tape, then gate zero-heap Str metadata there.
   POSIX metadata and missing-file errors pass the zero-heap gate.

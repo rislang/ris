@@ -26,9 +26,8 @@
 module std/gc
 
 {% if flag?(:gc_none) %}
-  {% raise "std/gc speaks for iyi's own collector, and -Dgc_none builds without one: " \
-           "there is nothing to collect, nothing to count and no heap to ask about. " \
-           "Drop the import or drop the flag." %}
+  {% raise "ris programs have no collector; remove the std/gc import " \
+           "and use tape values with copy_to(owner) for retained data." %}
 {% elsif flag?(:gc_boehm) %}
   {% raise "std/gc speaks for iyi's own collector, and -Dgc_boehm borrows another: " \
            "its counters and its notion of a heap pointer are not the ones this " \
@@ -119,7 +118,7 @@ pub struct GC
   # large-mapping list, and another thread's `free` or sweep unlinks and
   # unmaps those nodes under that lock. Walked without it, beside three
   # threads whose large chunks come and go, two seconds of `is_heap_ptr`
-  # died of a memory fault in 10 runs of 10 (`bench/std_gc_exercise.iyi`).
+  # died of a memory fault in 10 runs of 10 (the retired GC exercise).
   def self.is_heap_ptr(pointer : Void*) : Bool
     return false if pointer.address == 0_u64
     IyiHeap.lock
@@ -136,7 +135,7 @@ pub struct GC
   # allocation started could stop this walk on a mapping, unlink and unmap
   # it, and the walk's next read was of memory gone: beside three threads
   # allocating, two seconds of `stats` died of a memory fault in 10 runs
-  # of 10 (`bench/std_gc_exercise.iyi`).
+  # of 10 (the retired GC exercise).
   def self.stats : Stats
     mapped = 0_u64
     IyiHeap.lock

@@ -6,7 +6,6 @@
 module test/ris/json
 
 import std/int
-import std/gc::{GC}
 import std/json::{JSON, Builder, Writer, Document, DocumentParser, Parser}
 
 failures = [] of String
@@ -162,9 +161,7 @@ tape do
   check(failures, w.finish == %({"a":5,"bA":6,"e":5}), message)
 end
 
-GC.disable
 small = %({"id":1,"name":"us\\"er","tags":["a","b"],"ok":true,"n":null})
-before = IyiMark.allocated_since
 total = 0_i64
 2000.times do
   tape do
@@ -178,9 +175,6 @@ total = 0_i64
     total = total &+ w.length
   end
 end
-per = (IyiMark.allocated_since - before) // 2000
-GC.enable
-check(failures, per == 0, "a parse and a build on the tape: #{per} heap bytes")
 check(failures, total == 2000 * small.bytesize, "written #{total}")
 
 if failures.empty?

@@ -6,7 +6,6 @@
 module bench/std_env_exercise
 
 import std/env::{ENV}
-import std/gc::{GC}
 
 def assert_true(cond : Bool, msg : String) : Nil
   raise "ASSERTION FAILED: #{msg}" unless cond
@@ -200,10 +199,8 @@ path_was = ENV["PATH"]?
 if path_was
   ENV["PATH"] = path_was + PREFIX
 end
-GC.collect
 churn = [] of String
 20000.times { |i| churn << "c" * 48 + i.to_s }
-GC.collect
 assert_str kept, ENV[K2], "a variable set before two collections"
 assert_true ENV.keys.includes?(K2), "a variable set before two collections is enumerated"
 if path_was

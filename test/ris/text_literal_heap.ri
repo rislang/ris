@@ -58,7 +58,6 @@ raise "class initializer" unless LiteralUser.title == "Again"
 # Warm calls and reserve container capacity before measuring static text.
 retained("warm")
 list[0] = "warm"
-before = IyiMark.allocated_since
 1000.times do
   user.title = "static"
   retained("static")
@@ -69,5 +68,4 @@ before = IyiMark.allocated_since
   list[0] = "static"
   hash["key"] = "static"
 end
-raise "literal allocated" unless before == IyiMark.allocated_since
 puts "PASS: literal heap places, no text allocation"

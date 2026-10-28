@@ -95,11 +95,11 @@ done
 # runtime's own threads, so it pays what a thread pays and nothing else:
 #
 #   Linux    nothing of the pool's own: a worker is a thread, which in ris
-#            is glibc's (`pthread_create`, bench/thread_exercise.sh), the
+#            is glibc's (`pthread_create`, the retired GC gates), the
 #            stop by `tgkill`, the doorbell by `eventfd2`, both syscalls.
 #            `environ` is the one name, the C runtime's table
 #            `IYI_WORKERS` is read from through `Program.env`.
-#   darwin   the runtime's list (bench/thread_exercise.sh spells it out),
+#   darwin   the runtime's list (the retired GC gates spells it out),
 #            the thread floor's names a started thread costs -
 #            `pthread_create`, `pthread_kill` and `sigaction` for the
 #            thread and the stop, `pipe`/`read`/`write` for the stop's

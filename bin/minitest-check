@@ -57,7 +57,6 @@ def main():
     sub.add_parser("build", help="send current sources and build with LLVM 23")
     sub.add_parser("check", help="build and run the complete ris checks")
     run = sub.add_parser("run", help="build and run a ris test or sample")
-    run.add_argument("--no-gc", action="store_true")
     run.add_argument("--release", action="store_true")
     run.add_argument("source")
     gate = sub.add_parser("gate", help="build and run a ris test script")
@@ -107,8 +106,6 @@ def main():
         test = shlex.join([interpreter, relative])
     elif args.action == "run":
         flags = []
-        if args.no_gc:
-            flags.append("--no-gc")
         if args.release:
             flags.append("--release")
         test = shlex.join(["./bin/ris", "run", *flags, relative])

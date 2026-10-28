@@ -62,7 +62,6 @@ module Iyi
         --crystal                build against Crystal's standard library
         --emit-iyimod DIR        write a .iyimod per imported module into DIR
         --use-iyimod DIR         compile imports from DIR's .iyimod files
-        --no-gc                  trap program heap use; link without GC
         --no-codegen             analyse only, produce nothing
         --release                optimise, and take longer about it
     USAGE

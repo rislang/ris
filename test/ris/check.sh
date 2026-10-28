@@ -69,21 +69,13 @@ expect select_gone 'ris has no select'
 expect channel_gone 'undefined constant Channel'
 
 # Timed joins broadcast completion without cancelling the retained task.
-for mode in gc no-gc; do
-  flags=()
-  [ "$mode" = gc ] || flags+=(--no-gc)
-  out=$(RIS_HEAP_STATS=1 "$RIS" run "${flags[@]}" \
-    test/ris/task_wait.ri 2>&1)
-  code=$?
-  if [ "$code" -eq 0 ] &&
-      grep -qxF 'PASS: task waits' <<<"$out" &&
-      { [ "$mode" = gc ] ||
-        grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; }; then
-    echo "runs     task_wait ($mode, broadcast, deadlines, cancel, panic)"
-  else
-    echo "FAILED   task_wait ($mode): $out"; status=1
-  fi
-done
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/task_wait.ri 2>&1)
+if [ "$?" -eq 0 ] && grep -qxF 'PASS: task waits' <<<"$out" &&
+    grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+  echo "runs     task_wait (broadcast, deadlines, cancel, panic)"
+else
+  echo "FAILED   task_wait: $out"; status=1
+fi
 
 # Autocert broadcasts cache results with independent waiter deadlines.
 out=$(RIS="$RIS" python3 test/ris/autocert_checks.py 2>&1)
@@ -95,25 +87,25 @@ else
 fi
 
 # Config and name/stop variants pass the Copyable codec without heap IO.
-out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc \
+out=$(RIS_HEAP_STATS=1 "$RIS" run \
   test/ris/autocert_wire.ri 2>&1)
 if [ "$?" -eq 0 ] &&
     grep -qxF 'PASS: autocert Copyable config, bounded orders and stop' \
       <<<"$out" &&
     grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
-  echo 'runs     autocert_wire (--no-gc, zero heap, config, orders, stop)'
+  echo 'runs     autocert_wire (no GC, zero heap, config, orders, stop)'
 else
   echo "FAILED   autocert wire: $out"; status=1
 fi
 
 # Joining waits for cleanup and refuses later adoption.
-out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc \
+out=$(RIS_HEAP_STATS=1 "$RIS" run \
   test/ris/group_lifecycle.ri 2>&1)
 if [ "$?" -ne 0 ] &&
     grep -qxF 'PASS: group lifecycle' <<<"$out" &&
     grep -qF 'the group has ended' <<<"$out" &&
     grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
-  echo "runs     group_lifecycle (--no-gc, zero heap, ended refusal)"
+  echo "runs     group_lifecycle (no GC, zero heap, ended refusal)"
 else
   echo "FAILED   group_lifecycle: $out"; status=1
 fi
@@ -129,34 +121,34 @@ fi
 # Metadata paths, IDs and missing-file diagnostics stay on tape.
 out=$(RIS="$RIS" bash test/ris/file_metadata.sh 2>&1)
 if [ "$?" -eq 0 ]; then
-  echo "runs     file_metadata (--no-gc, zero heap, missing paths)"
+  echo "runs     file_metadata (no GC, zero heap, missing paths)"
 else
   echo "FAILED   file_metadata: $out"; status=1
 fi
 
 # Importing math and using its tables must never allocate on the heap.
-out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc test/ris/math_no_heap.ri 2>&1)
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/math_no_heap.ri 2>&1)
 if [ "$?" -eq 0 ] &&
     grep -qxF 'PASS: math constants and functions, zero heap' <<<"$out" &&
     grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
-  echo "runs     math_no_heap (--no-gc, exact result bits)"
+  echo "runs     math_no_heap (no GC, exact result bits)"
 else
   echo "FAILED   math_no_heap: $out"; status=1
 fi
 
 # Decimal conversion includes exact rounding and must stay off the heap.
-out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc \
+out=$(RIS_HEAP_STATS=1 "$RIS" run \
   test/ris/float_parse_no_heap.ri 2>&1)
 if [ "$?" -eq 0 ] &&
     grep -qxF 'PASS: float parsing, zero heap' <<<"$out" &&
     grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
-  echo "runs     float_parse_no_heap (--no-gc, exact result bits)"
+  echo "runs     float_parse_no_heap (no GC, exact result bits)"
 else
   echo "FAILED   float_parse_no_heap: $out"; status=1
 fi
 
 # Typed runs reuse, merge, relocate and retain typed stale views.
-out=$("$RIS" run --no-gc test/ris/slice_pool.ri 2>&1)
+out=$("$RIS" run test/ris/slice_pool.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = 'PASS: SlicePool' ]; then
   echo "runs     slice_pool"
 else
@@ -166,7 +158,7 @@ fi
 # SlicePool failures are fatal checked errors, including without the GC.
 out=$(
   exe=$(mktemp)
-  if "$RIS" build --no-gc test/ris/slice_pool_errors.ri -o "$exe"; then
+  if "$RIS" build test/ris/slice_pool_errors.ri -o "$exe"; then
     for mode in negative overflow foreign foreign_realloc bounds slice \
       negative_realloc realloc_overflow constructor run_negative_offset \
       run_negative_size run_overflow run_past_end borrowed_foreign; do
@@ -393,7 +385,7 @@ fi
 rm -rf "$owner_ir"
 
 # Deep copies preserve concrete and inherited fields, splitting sharing.
-out=$("$RIS" run --no-gc test/ris/class_copy.ri 2>&1)
+out=$("$RIS" run test/ris/class_copy.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = 'PASS: class copies' ]; then
   echo "runs     class_copy"
 else
@@ -579,7 +571,7 @@ if [ "$out" = $'inner return\nouter return\n7\nnested\ninner break\nouter break\
 out=$(
   exec 2>&1
   exe=$(mktemp)
-  if "$RIS" build --no-gc test/ris/defer_no_gc.ri -o "$exe"; then
+  if "$RIS" build test/ris/defer_no_gc.ri -o "$exe"; then
     "$exe" AGENTS.md 2>"$exe.err"
     code=$?
     if ! grep -qF 'iyi: panic: expected defer panic' "$exe.err" ||
@@ -649,8 +641,6 @@ if [ "$out" = $'fiber A wrong: 0\nfiber B wrong: 0' ]; then echo "runs     fiber
 out=$("$RIS" run test/ris/fibers/many.ri 2>&1)
 if [ "$out" = "1000 tapes at once, sum 499500" ]; then echo "runs     fibers/many"; else echo "FAILED   fibers/many: $out"; status=1; fi
 
-out=$("$RIS" run --release test/ris/fibers/threads_spawn.ri 2>&1)
-if [ "$out" = 'PASS: 4 threads, 32,000 tasks, collected throughout' ]; then echo "runs     fibers/threads_spawn"; else echo "FAILED   fibers/threads_spawn: $out"; status=1; fi
 
 out=$("$RIS" run test/ris/fibers/spares.ri 2>&1)
 if [ "$out" = $'warm: 4096 KiB written again\n8388608\ntrimmed' ]; then echo "runs     fibers/spares"; else echo "FAILED   fibers/spares: $out"; status=1; fi
@@ -779,7 +769,7 @@ out=$("$RIS" run test/ris/refill_handoff.ri 2>&1)
 if [ "$out" = '2 2 3 4' ]; then echo "runs     refill_handoff"; else echo "FAILED   refill_handoff: $out"; status=1; fi
 out=$("$RIS" run test/ris/clear.ri 2>&1)
 if [ "$out" = $'2 1 2\n3 2 3\n4 3 4\nxxxxend' ]; then echo "runs     clear"; else echo "FAILED   clear: $out"; status=1; fi
-out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 "$RIS" run --no-gc \
+out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 "$RIS" run \
   test/ris/side_warm.ri 2>&1)
 if [ "$?" -eq 0 ] &&
     grep -qF '10002 scopes, 5 mappings made, 0 unmapped' <<<"$out" &&
@@ -790,7 +780,7 @@ if [ "$?" -eq 0 ] &&
 else
   echo "FAILED   side_warm: $out"; status=1
 fi
-out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 "$RIS" run --no-gc \
+out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 "$RIS" run \
   test/ris/side_spares.ri 2>&1)
 if [ "$?" -eq 0 ] &&
     grep -qF 'PASS: mixed side spares reused' <<<"$out" &&
@@ -800,7 +790,7 @@ if [ "$?" -eq 0 ] &&
 else
   echo "FAILED   side_spares: $out"; status=1
 fi
-out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 "$RIS" run --no-gc \
+out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 "$RIS" run \
   test/ris/query_scope.ri 2>&1)
 code=$?
 mappings=$(sed -n \
@@ -823,7 +813,7 @@ out=$("$RIS" run test/ris/scope_keep.ri 2>&1)
 if [ "$out" = "50000 50000 9" ]; then echo "runs     scope_keep"; else echo "FAILED   scope_keep: $out"; status=1; fi
 
 # Retain 10,000 small results without retaining 64 KiB per-call scratch.
-out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 "$RIS" run --no-gc \
+out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 "$RIS" run \
   test/ris/pending_result.ri 2>&1)
 if [ "$?" = 0 ] &&
    grep -qF 'PASS: pending results and borrowed views' <<<"$out" &&
@@ -937,11 +927,11 @@ fi
 
 # HTTP diagnostics, query serialization and URI use the caller's tape.
 for name in http_head_tape params_write_tape uri_tape; do
-  out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc "test/ris/$name.ri" 2>&1)
+  out=$(RIS_HEAP_STATS=1 "$RIS" run "test/ris/$name.ri" 2>&1)
   if [ "$?" -eq 0 ] &&
       grep -qF 'zero heap' <<<"$out" &&
       grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
-    echo "runs     $name (--no-gc)"
+    echo "runs     $name (no GC)"
   else
     echo "FAILED   $name: $out"; status=1
   fi
@@ -963,20 +953,20 @@ else
 fi
 
 # Log text, numeric formatting and quoting use the caller's tape.
-out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc \
+out=$(RIS_HEAP_STATS=1 "$RIS" run \
   test/ris/text_format_tape.ri 2>&1)
 if [ "$?" -eq 0 ] &&
     grep -qF 'text formatting: zero heap' <<<"$out" &&
     grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
-  echo "runs     text_format_tape (--no-gc)"
+  echo "runs     text_format_tape (no GC)"
 else
   echo "FAILED   text_format_tape: $out"; status=1
 fi
-out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc test/ris/log_metadata.ri 2>&1)
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/log_metadata.ri 2>&1)
 if [ "$?" -eq 0 ] &&
     grep -qF 'PASS: metadata, binding and nested contexts on tape' <<<"$out" &&
     grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
-  echo "runs     log_metadata (--no-gc)"
+  echo "runs     log_metadata (no GC)"
 else
   echo "FAILED   log_metadata: $out"; status=1
 fi
@@ -997,12 +987,12 @@ else
 fi
 out=$(
   for name in number_format_error number_format_signed_error; do
-    result=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc \
+    result=$(RIS_HEAP_STATS=1 "$RIS" run \
       "test/ris/$name.ri" 2>&1)
     if [ "$?" -ne 0 ] &&
         grep -qF 'iyi: panic: base out of range' <<<"$result" &&
         grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$result"; then
-      echo "runs     $name (--no-gc error)"
+      echo "runs     $name (no GC error)"
     else
       echo "FAILED   $name: $result"
       exit 1
@@ -1101,9 +1091,9 @@ if [ "$?" -eq 0 ] && [ "$out" = $'9\ncancel alive\ncancel done' ]; then
 else
   echo "FAILED   cleanup_cancel: $out"; status=1
 fi
-out=$("$RIS" run --no-gc test/ris/fault_no_heap.ri 2>&1)
+out=$("$RIS" run test/ris/fault_no_heap.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = 'fault path: zero heap' ]; then
-  echo "runs     fault_no_heap (--no-gc)"
+  echo "runs     fault_no_heap (no GC)"
 else
   echo "FAILED   fault_no_heap: $out"; status=1
 fi
@@ -1113,17 +1103,17 @@ if [ "$?" -eq 0 ] && [ "$out" = $'2\n4\n5\n7\nalive' ]; then
 else
   echo "FAILED   cleanup_current: $out"; status=1
 fi
-out=$("$RIS" run --no-gc test/ris/task_limit.ri 2>&1)
+out=$("$RIS" run test/ris/task_limit.ri 2>&1)
 if [ "$?" -eq 1 ] &&
     [ "$out" = 'ris: fatal: group task limit 2147483647 reached' ]; then
-  echo "fatal    task_limit (--no-gc)"
+  echo "fatal    task_limit (no GC)"
 else
   echo "FAILED   task_limit: $out"; status=1
 fi
-out=$("$RIS" run --no-gc test/ris/unwind_no_heap.ri 2>&1)
+out=$("$RIS" run test/ris/unwind_no_heap.ri 2>&1)
 if [ "$?" -eq 1 ] &&
     [ "$out" = 'ris: fatal: raise during cleanup unwinding' ]; then
-  echo "fatal    unwind_no_heap (--no-gc)"
+  echo "fatal    unwind_no_heap (no GC)"
 else
   echo "FAILED   unwind_no_heap: $out"; status=1
 fi
@@ -1138,17 +1128,17 @@ fi
 
 # Reserved side growth keeps addresses and uses bounded mappings.
 # Counts include the program storage mapping for standard streams.
-out=$(RIS_TAPE_STATS=1 "$RIS" run --no-gc test/ris/stable_growth.ri 2>&1)
+out=$(RIS_TAPE_STATS=1 "$RIS" run test/ris/stable_growth.ri 2>&1)
 if [ "$?" -eq 0 ] &&
     grep -qF 'PASS: stable interleaved growth' <<<"$out" &&
     grep -qF '0 growth moves' <<<"$out" &&
     grep -qF '5 mappings made' <<<"$out" &&
     grep -qF '0 side regions (0 transfer bytes copied)' <<<"$out"; then
-  echo "runs     stable_growth (--no-gc, bounded mappings)"
+  echo "runs     stable_growth (no GC, bounded mappings)"
 else
   echo "FAILED   stable_growth: $out"; status=1
 fi
-out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 "$RIS" run --no-gc \
+out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 "$RIS" run \
   test/ris/stable_components.ri 2>&1)
 if [ "$?" -eq 0 ] &&
     grep -qF 'PASS: builder and tree stable before first growth' <<<"$out" &&
@@ -1156,14 +1146,14 @@ if [ "$?" -eq 0 ] &&
     grep -qF '0 growth moves' <<<"$out" &&
     grep -qF '0 side regions (0 transfer bytes copied)' <<<"$out" &&
     grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
-  echo "runs     stable_components (--no-gc, views before first growth)"
+  echo "runs     stable_components (no GC, views before first growth)"
 else
   echo "FAILED   stable_components: $out"; status=1
 fi
-out=$("$RIS" run --no-gc test/ris/side_overflow.ri 2>&1)
+out=$("$RIS" run test/ris/side_overflow.ri 2>&1)
 if [ "$?" -eq 1 ] &&
     [ "$out" = 'iyi: tape side reservation exhausted: 134217729' ]; then
-  echo "fatal    side_overflow (--no-gc)"
+  echo "fatal    side_overflow (no GC)"
 else
   echo "FAILED   side_overflow: $out"; status=1
 fi
@@ -1203,57 +1193,49 @@ done
 if ! python3 test/ris/heap_check_test.py; then
   status=1
 fi
-out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc test/ris/heap_zero.ri 2>&1)
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/heap_zero.ri 2>&1)
 if [ "$?" -eq 0 ] && grep -qF 'zero42' <<<"$out" &&
     grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
-  echo "runs     heap_zero (--no-gc)"
+  echo "runs     heap_zero (no GC)"
 else
   echo "FAILED   heap_zero: $out"
   status=1
 fi
-out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc test/ris/heap_class.ri 2>&1)
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/heap_class.ri 2>&1)
 if [ "$?" -eq 0 ] && grep -qF '42' <<<"$out" &&
     grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
-  echo "runs     heap_class (--no-gc)"
+  echo "runs     heap_class (no GC)"
 else
   echo "FAILED   heap_class: $out"
   status=1
 fi
-out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/heap_allocator.ri 2>&1)
-if [ "$?" -eq 0 ] &&
-    grep -qF 'ris heap: 1 allocations, 7 bytes' <<<"$out"; then
-  echo "counts   heap_allocator (direct ABI)"
-else
-  echo "FAILED   heap_allocator: $out"
-  status=1
-fi
-out=$("$RIS" run --no-gc test/ris/heap_allocator.ri 2>&1)
+out=$("$RIS" run test/ris/heap_allocator.ri 2>&1)
 if [ "$?" -ne 0 ] &&
-    grep -qF 'ris: heap allocation with --no-gc: 7 bytes' <<<"$out"; then
-  echo "refused  heap_allocator (--no-gc trap)"
+    grep -qF 'ris: heap allocation: 7 bytes' <<<"$out"; then
+  echo "refused  heap_allocator (no GC trap)"
 else
   echo "FAILED   heap_allocator trap: $out"
   status=1
 fi
 # Exercise read boundaries over the full keep-alive workload.
-out=$(RIS_HEAP_STATS=1 "$RIS" run --release --no-gc \
+out=$(RIS_HEAP_STATS=1 "$RIS" run --release \
   samples/ris/serve.ri -- answer 2>&1)
 if [ "$?" -eq 0 ] &&
     [ "$(grep -v '^ris heap:' <<<"$out")" = '200000 requests' ] &&
     grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
-  echo "runs     serve (200000 requests, --no-gc)"
+  echo "runs     serve (200000 requests)"
 else
   echo "FAILED   serve full loop: $out"
   status=1
 fi
-out=$("$RIS" run --no-gc test/ris/server_owners.ri 2>&1)
+out=$("$RIS" run test/ris/server_owners.ri 2>&1)
 if [ "$?" -eq 0 ] && grep -qF 'task-local shutdown' <<<"$out"; then
-  echo "runs     server_owners (--no-gc, cancellation cleanup)"
+  echo "runs     server_owners (no GC, cancellation cleanup)"
 else
   echo "FAILED   server_owners: $out"; status=1
 fi
 # Repeated joined groups must reuse task and request tape storage.
-out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 "$RIS" run --release --no-gc \
+out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 "$RIS" run --release \
   test/ris/server_groups.ri 2>&1)
 code=$?
 mappings=$(sed -n \
@@ -1269,10 +1251,10 @@ else
   echo "FAILED   server_groups: $out"
   status=1
 fi
-out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc test/ris/heap_fibers.ri 2>&1)
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/heap_fibers.ri 2>&1)
 if [ "$?" -eq 0 ] && grep -qF 'fiber42' <<<"$out" &&
     grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
-  echo "runs     heap_fibers (--no-gc runtime bookkeeping)"
+  echo "runs     heap_fibers (no GC runtime bookkeeping)"
 else
   echo "FAILED   heap_fibers: $out"
   status=1
@@ -1284,18 +1266,18 @@ else
   echo "FAILED   heap_fiber_capture: $out"
   status=1
 fi
-out=$(RIS_HEAP_STATS=1 "$RIS" run --no-gc test/ris/heap_fiber_capture.ri 2>&1)
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/heap_fiber_capture.ri 2>&1)
 if [ "$?" -eq 0 ] && grep -qxF '42' <<<"$out" &&
     grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
-  echo "runs     heap_fiber_capture (--no-gc owned capture)"
+  echo "runs     heap_fiber_capture (no GC owned capture)"
 else
   echo "FAILED   heap_fiber_capture zero heap: $out"
   status=1
 fi
 for name in heap_handles heap_io; do
-  out=$("$RIS" run --no-gc "test/ris/$name.ri" 2>&1)
+  out=$("$RIS" run "test/ris/$name.ri" 2>&1)
   if [ "$?" -ne 0 ] &&
-      grep -qF 'ris: heap allocation with --no-gc:' <<<"$out"; then
+      grep -qF 'ris: heap allocation:' <<<"$out"; then
     echo "refused  $name (program value, not runtime metadata)"
   else
     echo "FAILED   $name: $out"
@@ -1330,10 +1312,10 @@ expect program_field_thread \
   'program tape writes require a single kernel thread'
 for name in program_tape program_growth; do
   out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 \
-    "$RIS" run --no-gc "test/ris/$name.ri" 2>&1)
+    "$RIS" run "test/ris/$name.ri" 2>&1)
   if [ "$?" -eq 0 ] && grep -qF 'PASS: program' <<<"$out" &&
       grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
-    echo "runs     $name (--no-gc)"
+    echo "runs     $name (no GC)"
   else
     echo "FAILED   $name: $out"
     status=1

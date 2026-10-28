@@ -46,11 +46,7 @@ end
 
 Log.with_context(parent: "yes") do
   group do |g|
-    child = {% if flag?(:gc_none) || flag?(:gc_boehm) %}
-      g.spawn { inherited_context }
-    {% else %}
-      g.spawn_parallel { inherited_context }
-    {% end %}
+    child = g.spawn { inherited_context }
     raise "joined" unless child.value.or_panic
   end
 end

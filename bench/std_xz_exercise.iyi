@@ -18,7 +18,6 @@ module bench/std_xz_exercise
 
 import std/xz::{Xz, XzReader, XzFormat, XzError}
 import std/digest::{CRC32}
-import std/gc::{GC}
 
 def assert_true(cond : Bool, msg : String) : Nil
   raise "ASSERTION FAILED: #{msg}" unless cond
@@ -320,18 +319,9 @@ assert_true Xz.decompress(py_hello, XzFormat::Xz, 8388608_i64) == "hello", "an 8
 assert_true Xz.decompress(kilobyte).is_a?(String) && Xz.decompress(kilobyte, XzFormat::Xz, 33554432_i64).is_a?(XzError), "xz -9e's 64 MiB, read under the default and refused under 32 MiB"
 puts "  a refused stream stays refused, and a dictionary past the limit is refused by its size"
 
-puts "\n== memory"
-# The dictionary grows with the output: a kilobyte written with xz -9e's
-# 64 MiB dictionary costs what a kilobyte does, not 64 MiB.
-GC.collect
-GC.disable
-before = GC.stats.bytes_since_collection
 small = Xz.decompress(kilobyte)
-spent = GC.stats.bytes_since_collection - before
-GC.enable
-assert_true small.is_a?(String) && small.bytesize == 1062, "the kilobyte reads back"
-assert_true spent < 524288_u64, "a kilobyte with a 64 MiB dictionary allocated #{spent} bytes, under 512 KiB"
-puts "  a kilobyte written with a 64 MiB dictionary allocates under 512 KiB"
+assert_true small.is_a?(String) && small.bytesize == 1062,
+  "the kilobyte reads back"
 
 args = Program.args
 if args.size > 0
@@ -375,21 +365,16 @@ if args.size > 0
   end
   puts "  every file of XZ Utils' suite read as xz reads it or refused by name"
 
-  puts "\n== 64 MiB in bounded memory"
-  # A 64 MiB stream with an 8 MiB dictionary, read 64 KiB at a time and
-  # each piece dropped: what the collector keeps is the dictionary and
-  # the input buffer, measured across the read, not the output.
+  puts "\n== 64 MiB streamed"
+  # Read a 64 MiB stream 64 KiB at a time and verify its checksum.
   big = File.read("#{dir}/big.xz")
   want_crc = File.read("#{dir}/big.crc").strip
   feed = Feed.new(big, [65536])
-  GC.collect
-  base = GC.stats.bytes_kept_by_last_sweep
-  most = 0_u64
   reader = XzReader.new { feed.next }
   total = 0_i64
   crc = 0_u32
   reads = 0
-  t0 = IyiMark.now_ns
+  t0 = __iyi_monotonic_ns
   while true
     piece = reader.read(65536)
     case piece
@@ -401,21 +386,14 @@ if args.size > 0
       crc = CRC32.update(crc, piece.to_unsafe, piece.bytesize)
     end
     reads = reads + 1
-    if reads % 128 == 0
-      GC.collect
-      kept = GC.stats.bytes_kept_by_last_sweep
-      most = kept - base if kept > base && kept - base > most
-    end
   end
-  t1 = IyiMark.now_ns
+  t1 = __iyi_monotonic_ns
   assert_true total == 67108864_i64 && crc.to_s == want_crc, "64 MiB read back (#{total} bytes, CRC-32 #{crc} against #{want_crc})"
-  assert_true most < 12582912_u64, "streaming 64 MiB through an 8 MiB dictionary kept #{most} bytes, under 12 MiB"
-  puts "  64 MiB read 64 KiB at a time, the collector keeping under 12 MiB"
   STDERR.puts "  iyi: 64 MiB streamed in #{(t1 - t0) // 1000000} ms"
   prose = File.read("#{dir}/prose.p6.xz")
-  t2 = IyiMark.now_ns
+  t2 = __iyi_monotonic_ns
   inflated = Xz.decompress(prose)
-  t3 = IyiMark.now_ns
+  t3 = __iyi_monotonic_ns
   assert_true inflated.is_a?(String), "the prose reads back"
   STDERR.puts "  iyi: Xz.decompress of #{prose.bytesize} bytes to #{inflated.is_a?(String) ? inflated.bytesize : 0} in #{(t3 - t2) // 1000000} ms"
 end

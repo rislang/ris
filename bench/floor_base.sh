@@ -14,8 +14,8 @@
 # The reason each name is here is recorded beside the full list in
 # bench/dependency_floor.sh, which is this plus what the standard library's
 # platform modules add. The gates whose lists are *exact* — the runtime's
-# own twelve in bench/thread_exercise.sh, the thread variants in
-# bench/thread_floor.sh, the collector's in bench/mark_exercise.sh — stay
+# own twelve in the retired GC gates, the thread variants in
+# bench/thread_floor.sh, the collector's in the retired GC gates — stay
 # written out, because "nothing else" is what they assert.
 #
 # darwin: libSystem is the platform's only stable interface, so the prelude

@@ -16,7 +16,7 @@ class Iyi::Command
         migration/opaque/exemption are overlapping audit categories;
         total counts allocation kinds only, not audit categories.
         RIS_HEAP_STATS=1 prints program allocations and bytes at exit.
-        build/run --no-gc links gc_none on Linux and traps heap allocation.
+        build/run links no collector and traps heap allocation.
         HELP
       return
     end
