@@ -225,6 +225,48 @@ pub struct ParsedURI
   def written_userinfo(@user : String?, @password : String?) : Nil
   end
 
+  # IPv6 brackets belong to the URI, not the socket address.
+  def hostname : String?
+    h = @host
+    h ? URI.unwrap_ipv6(h) : nil
+  end
+
+  # RFC 3986 section 5.2. Fields continue to view their source texts;
+  # only a merged path needs new bytes on the caller's tape.
+  def resolve(ref : ParsedURI | String) : ParsedURI
+    r = ref.is_a?(ParsedURI) ? ref : URI.parse(ref)
+    t = r
+    if r.scheme
+      t.path = URI.remove_dot_segments(r.path)
+      return t
+    end
+    t.scheme = @scheme
+    if r.host || r.user || r.port
+      t.path = URI.remove_dot_segments(r.path)
+      return t
+    end
+    t.host = @host
+    t.port = @port
+    t.written_userinfo(@user, @password)
+    if r.path.empty?
+      t.path = @path
+      t.query = @query unless r.query
+    elsif r.path.starts_with?("/")
+      t.path = URI.remove_dot_segments(r.path)
+    else
+      authority = !@host.nil? || !@user.nil? || !@port.nil?
+      merged = if authority && @path.empty?
+                 "/" + r.path
+               elsif slash = @path.rindex('/')
+                 @path[0, slash + 1] + r.path
+               else
+                 r.path
+               end
+      t.path = URI.remove_dot_segments(merged)
+    end
+    t
+  end
+
   def to_uri : URI
     result = URI.new(scheme: @scheme, host: @host, port: @port,
       path: @path, query: @query, fragment: @fragment)
@@ -272,6 +314,10 @@ pub struct ParsedURI
     if value = @fragment
       w << "#" << value
     end
+  end
+
+  def to_s : String
+    String.build { |writer| to_s(writer) }
   end
 
   def normalize : ParsedURI
@@ -513,7 +559,45 @@ pub class URI
   end
 
   def to_s(w : String::Builder) : Nil
-    as_tape.to_s(w)
+    if scheme = @scheme
+      w << scheme << ":"
+    end
+    auth = !@host.nil? || !@user.nil? || !@port.nil?
+    if auth
+      w << "//"
+      if user = @user
+        w << user
+        if value = @password
+          w << ":" << value
+        end
+        w << "@"
+      end
+      if host = @host
+        w << host
+      end
+      if value = @port
+        w << ":" << value
+      end
+      w << "/" if !@path.empty? && !@path.starts_with?("/")
+    elsif @path.starts_with?("//")
+      w << "/."
+    elsif @scheme.nil?
+      i = 0
+      while i < @path.bytesize && @path[i] != 47_u8
+        if @path[i] == 58_u8
+          w << "./"
+          break
+        end
+        i += 1
+      end
+    end
+    w << @path
+    if value = @query
+      w << "?" << value
+    end
+    if value = @fragment
+      w << "#" << value
+    end
   end
 
   def to_s : String

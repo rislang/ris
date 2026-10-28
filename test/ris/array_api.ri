@@ -25,6 +25,14 @@ raise "empty product" unless ([] of Int32).product == 1
 # Transforms, views and replacement exercise core methods without imports.
 b = [1, 2, 3, 4]
 raise "range view" unless b[1..2].to_a == [2, 3]
+raise "view equality" unless b[1, 2] == [2, 3]
+raise "view inequality" if b[1, 2] == [2]
+raise "view join" unless b[1, 2].join(":") == "2:3"
+writer = String::Builder.new
+writer << "prefix:"
+b[1, 2].join(writer, "/")
+raise "view writer" unless writer.finish == "prefix:2/3"
+raise "empty view join" unless b[0, 0].join.empty?
 raise "optional range" unless b[9..10]?.nil?
 raise "optional span" unless (b[1, 99]? || raise "span").size == 3
 b[1, 2] = [8, 9, 10]

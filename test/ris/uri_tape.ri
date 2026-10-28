@@ -53,5 +53,22 @@ tape do
   raise "partial output" unless w.finish == "kept"
   raise "short decode" if URI.decode?("%0".as_tape)
   raise "decode" unless URI.decode("%C3%A9%00+".as_tape, true) == "é\0 "
+  base = URI.parse("http://a/b/c/d;p?q")
+  refs = ["g", "./g", "g/", "/g", "//g", "?y", "g?y", "#s",
+          "g#s", "g?y#s", ";x", "", ".", "..", "../g", "../../g"]
+  expected = ["http://a/b/c/g", "http://a/b/c/g", "http://a/b/c/g/",
+              "http://a/g", "http://g", "http://a/b/c/d;p?y",
+              "http://a/b/c/g?y", "http://a/b/c/d;p?q#s",
+              "http://a/b/c/g#s", "http://a/b/c/g?y#s", "http://a/b/c/;x",
+              "http://a/b/c/d;p?q", "http://a/b/c/", "http://a/b/",
+              "http://a/b/g", "http://a/g"]
+  refs.each_with_index do |ref, i|
+    w.clear
+    base.resolve(ref).to_s(w)
+    raise "relative resolution" unless w.finish == expected[i]
+  end
+  raise "IPv6 hostname" unless URI.parse("http://[::1]:80/").hostname == "::1"
+  raise "absent hostname" unless URI.parse("../g").hostname.nil?
+
 end
 puts "URI: zero heap"

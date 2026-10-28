@@ -773,3 +773,34 @@ struct String::Builder
     append(text)
   end
 end
+
+struct Array::View(T)
+  def join(writer : String::Builder, separator : String = "") : Nil
+    i = 0
+    while i < size
+      writer << separator if i > 0
+      writer << self[i]
+      i += 1
+    end
+  end
+
+  def join(separator : String = "") : String
+    String.build { |writer| join(writer, separator) }
+  end
+
+  def join(separator : Char) : String
+    join(separator.to_s)
+  end
+end
+
+struct Array::View(T)
+  def ==(other : Array(U) | Array::View(U)) : Bool forall U
+    return false unless size == other.size
+    i = 0
+    while i < size
+      return false unless self[i] == other[i]
+      i += 1
+    end
+    true
+  end
+end

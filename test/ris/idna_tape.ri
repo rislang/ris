@@ -1,0 +1,25 @@
+module test/ris/idna_tape
+
+import std/idna::{IDNA, IdnaError, Punycode, PunycodeError}
+import std/unicode::{Unicode}
+
+# The decoded tables must survive the first caller's scratch scope.
+local_tape do
+  raise "letter table" unless Unicode.letter?('A')
+  raise "category table" unless Unicode.general_category('A') == "Lu"
+  raise "case orbit" unless Unicode.case_orbit('k').size == 3
+end
+local_tape do
+  raise "retained letter table" unless Unicode.letter?('\u{17001}')
+  raise "retained category table" unless Unicode.general_category('A') == "Lu"
+  raise "retained case orbit" unless Unicode.case_orbit('k').size == 3
+  raise "punycode" unless Punycode.encode("bücher") == "bcher-kva"
+  raise "decode" unless Punycode.decode("bcher-kva") == "bücher"
+  raise "ASCII host" unless IDNA.to_ascii("Bücher.example") ==
+    "xn--bcher-kva.example"
+  raise "Unicode host" unless IDNA.to_unicode("xn--bcher-kva.example") ==
+    "bücher.example"
+  raise "invalid label" unless IDNA.to_ascii("-bad.example").is_a?(IdnaError)
+  raise "invalid punycode" unless Punycode.decode("!").is_a?(PunycodeError)
+end
+puts "IDNA: zero heap"

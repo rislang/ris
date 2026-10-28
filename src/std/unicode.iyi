@@ -2756,125 +2756,125 @@ pub struct Unicode
   @@grapheme : Array(Int32)?
 
   private def self.letter_table : Array(Int32)
-    @@letter ||= decode(LETTER)
+    @@letter ||= decode(LETTER).copy_to(Program.tape)
   end
 
   private def self.number_table : Array(Int32)
-    @@number ||= decode(NUMBER)
+    @@number ||= decode(NUMBER).copy_to(Program.tape)
   end
 
   private def self.mark_table : Array(Int32)
-    @@mark ||= decode(MARK)
+    @@mark ||= decode(MARK).copy_to(Program.tape)
   end
 
   private def self.whitespace_table : Array(Int32)
-    @@whitespace ||= decode(WHITESPACE)
+    @@whitespace ||= decode(WHITESPACE).copy_to(Program.tape)
   end
 
   private def self.control_table : Array(Int32)
-    @@control ||= decode(CONTROL)
+    @@control ||= decode(CONTROL).copy_to(Program.tape)
   end
 
   private def self.lowercase_table : Array(Int32)
-    @@lowercase ||= decode(LOWERCASE)
+    @@lowercase ||= decode(LOWERCASE).copy_to(Program.tape)
   end
 
   private def self.uppercase_table : Array(Int32)
-    @@uppercase ||= decode(UPPERCASE)
+    @@uppercase ||= decode(UPPERCASE).copy_to(Program.tape)
   end
 
   private def self.titlecase_table : Array(Int32)
-    @@titlecase ||= decode(TITLECASE)
+    @@titlecase ||= decode(TITLECASE).copy_to(Program.tape)
   end
 
   private def self.cased_table : Array(Int32)
-    @@cased ||= decode(CASED)
+    @@cased ||= decode(CASED).copy_to(Program.tape)
   end
 
   private def self.case_ignorable_table : Array(Int32)
-    @@case_ignorable ||= decode(CASE_IGNORABLE)
+    @@case_ignorable ||= decode(CASE_IGNORABLE).copy_to(Program.tape)
   end
 
   private def self.upcase_table : Array(Int32)
-    @@upcase ||= decode(UPCASE)
+    @@upcase ||= decode(UPCASE).copy_to(Program.tape)
   end
 
   private def self.downcase_table : Array(Int32)
-    @@downcase ||= decode(DOWNCASE)
+    @@downcase ||= decode(DOWNCASE).copy_to(Program.tape)
   end
 
   private def self.alternate_table : Array(Int32)
-    @@alternate ||= decode(ALTERNATE)
+    @@alternate ||= decode(ALTERNATE).copy_to(Program.tape)
   end
 
   private def self.casefold_table : Array(Int32)
-    @@casefold ||= decode(CASEFOLD)
+    @@casefold ||= decode(CASEFOLD).copy_to(Program.tape)
   end
 
   private def self.special_upcase_table : Array(Int32)
-    @@special_upcase ||= decode(SPECIAL_UPCASE)
+    @@special_upcase ||= decode(SPECIAL_UPCASE).copy_to(Program.tape)
   end
 
   private def self.special_downcase_table : Array(Int32)
-    @@special_downcase ||= decode(SPECIAL_DOWNCASE)
+    @@special_downcase ||= decode(SPECIAL_DOWNCASE).copy_to(Program.tape)
   end
 
   private def self.special_titlecase_table : Array(Int32)
-    @@special_titlecase ||= decode(SPECIAL_TITLECASE)
+    @@special_titlecase ||= decode(SPECIAL_TITLECASE).copy_to(Program.tape)
   end
 
   private def self.special_fold_table : Array(Int32)
-    @@special_fold ||= decode(SPECIAL_FOLD)
+    @@special_fold ||= decode(SPECIAL_FOLD).copy_to(Program.tape)
   end
 
   private def self.combining_class_table : Array(Int32)
-    @@combining_class ||= decode(COMBINING_CLASS)
+    @@combining_class ||= decode(COMBINING_CLASS).copy_to(Program.tape)
   end
 
   private def self.canonical_decomposition_table : Array(Int32)
-    @@canonical_decomposition ||= decode(CANONICAL_DECOMPOSITION)
+    @@canonical_decomposition ||= decode(CANONICAL_DECOMPOSITION).copy_to(Program.tape)
   end
 
   private def self.compatibility_decomposition_table : Array(Int32)
-    @@compatibility_decomposition ||= decode(COMPATIBILITY_DECOMPOSITION)
+    @@compatibility_decomposition ||= decode(COMPATIBILITY_DECOMPOSITION).copy_to(Program.tape)
   end
 
   private def self.compatibility_data_table : Array(Int32)
-    @@compatibility_data ||= decode(COMPATIBILITY_DATA)
+    @@compatibility_data ||= decode(COMPATIBILITY_DATA).copy_to(Program.tape)
   end
 
   private def self.composition_table : Array(Int32)
-    @@composition ||= decode(COMPOSITION)
+    @@composition ||= decode(COMPOSITION).copy_to(Program.tape)
   end
 
   private def self.general_category_table : Array(Int32)
-    @@general_category ||= decode(GENERAL_CATEGORY)
+    @@general_category ||= decode(GENERAL_CATEGORY).copy_to(Program.tape)
   end
 
   private def self.script_table : Array(Int32)
-    @@script ||= decode(SCRIPT)
+    @@script ||= decode(SCRIPT).copy_to(Program.tape)
   end
 
   private def self.category_names : Array(String)
-    @@category_names ||= CATEGORY_NAMES.split(',')
+    @@category_names ||= CATEGORY_NAMES.split(',').copy_to(Program.tape)
   end
 
   private def self.script_names : Array(String)
-    @@script_names ||= SCRIPT_NAMES.split(',')
+    @@script_names ||= SCRIPT_NAMES.split(',').copy_to(Program.tape)
   end
 
   private def self.simple_fold_table : Array(Int32)
-    @@simple_fold ||= decode(SIMPLE_FOLD)
+    @@simple_fold ||= decode(SIMPLE_FOLD).copy_to(Program.tape)
   end
 
   private def self.grapheme_table : Array(Int32)
-    @@grapheme ||= decode(GRAPHEME)
+    @@grapheme ||= decode(GRAPHEME).copy_to(Program.tape)
   end
 
   # The integers a table string spells, in order: a sign, decimal digits,
   # a comma between.
   private def self.decode(text : String) : Array(Int32)
-    bytes = text.to_unsafe
+    bytes = text
     size = text.bytesize
     result = Array(Int32).new(size // 4)
     index = 0
@@ -2900,7 +2900,7 @@ pub struct Unicode
   # sorted by `from`, so the first row whose `to` is not below the needle is
   # the only candidate.
   private def self.search_range(table : Array(Int32), width : Int32, needle : Int32) : Int32
-    data = table.to_unsafe
+    data = table
     low = 0
     high = table.size // width
     while low < high
@@ -2919,7 +2919,7 @@ pub struct Unicode
   # The row of a table keyed by its first integer, as the index of that
   # integer, or -1.
   private def self.search_key(table : Array(Int32), width : Int32, needle : Int32) : Int32
-    data = table.to_unsafe
+    data = table
     low = 0
     high = table.size // width
     while low < high
@@ -2939,7 +2939,7 @@ pub struct Unicode
   private def self.in_category?(table : Array(Int32), cp : Int32) : Bool
     at = search_range(table, 3, cp)
     return false if at < 0
-    data = table.to_unsafe
+    data = table
     (cp - data[at]) % data[at + 2] == 0
   end
 
@@ -3000,7 +3000,7 @@ pub struct Unicode
   def self.general_category(char : Char) : String
     table = general_category_table
     at = search_range(table, 3, char.ord)
-    at < 0 ? "Cn" : category_names[table.to_unsafe[at + 2]]
+    at < 0 ? "Cn" : category_names[table[at + 2]]
   end
 
   # The script a character is written in, as `Scripts.txt` names it:
@@ -3010,7 +3010,7 @@ pub struct Unicode
   def self.script(char : Char) : String
     table = script_table
     at = search_range(table, 3, char.ord)
-    at < 0 ? "Unknown" : script_names[table.to_unsafe[at + 2]]
+    at < 0 ? "Unknown" : script_names[table[at + 2]]
   end
 
   # The code points a property names, as sorted `{from, to}` pairs that
@@ -3042,7 +3042,7 @@ pub struct Unicode
     end
     return nil if wanted.empty?
     ranges = [] of Int32
-    data = table.to_unsafe
+    data = table
     row = 0
     while row < table.size
       if wanted.includes?(data[row + 2])
@@ -3069,20 +3069,20 @@ pub struct Unicode
     return cp - 1 if cp == 0x1C5 || cp == 0x1C8 || cp == 0x1CB || cp == 0x1F2
     table = upcase_table
     at = search_range(table, 3, cp)
-    return cp + table.to_unsafe[at + 2] if at >= 0
+    return cp + table[at + 2] if at >= 0
     alternate = alternate_table
     at = search_range(alternate, 2, cp)
-    return cp - 1 if at >= 0 && (cp - alternate.to_unsafe[at]).odd?
+    return cp - 1 if at >= 0 && (cp - alternate[at]).odd?
     cp
   end
 
   private def self.simple_downcase(cp : Int32) : Int32
     table = downcase_table
     at = search_range(table, 3, cp)
-    return cp + table.to_unsafe[at + 2] if at >= 0
+    return cp + table[at + 2] if at >= 0
     alternate = alternate_table
     at = search_range(alternate, 2, cp)
-    return cp + 1 if at >= 0 && (cp - alternate.to_unsafe[at]).even?
+    return cp + 1 if at >= 0 && (cp - alternate[at]).even?
     cp
   end
 
@@ -3116,7 +3116,7 @@ pub struct Unicode
   private def self.yield_special(table : Array(Int32), cp : Int32, & : Int32 -> Nil) : Bool
     at = search_key(table, 4, cp)
     return false if at < 0
-    data = table.to_unsafe
+    data = table
     yield data[at + 1]
     yield data[at + 2] unless data[at + 2] == 0
     yield data[at + 3] unless data[at + 3] == 0
@@ -3201,8 +3201,8 @@ pub struct Unicode
     end
     table = special_titlecase_table
     at = search_key(table, 4, cp)
-    if at >= 0 && table.to_unsafe[at + 2] == 0
-      return table.to_unsafe[at + 1].unsafe_chr
+    if at >= 0 && table[at + 2] == 0
+      return table[at + 1].unsafe_chr
     end
     simple_upcase(cp).unsafe_chr
   end
@@ -3233,10 +3233,10 @@ pub struct Unicode
     cp = char.ord
     table = casefold_table
     at = search_range(table, 3, cp)
-    return (cp + table.to_unsafe[at + 2]).unsafe_chr if at >= 0
+    return (cp + table[at + 2]).unsafe_chr if at >= 0
     special = special_fold_table
     at = search_key(special, 4, cp)
-    return special.to_unsafe[at + 1].unsafe_chr if at >= 0 && special.to_unsafe[at + 2] == 0
+    return special[at + 1].unsafe_chr if at >= 0 && special[at + 2] == 0
     char
   end
 
@@ -3246,7 +3246,7 @@ pub struct Unicode
     table = casefold_table
     at = search_range(table, 3, cp)
     if at >= 0
-      yield (cp + table.to_unsafe[at + 2]).unsafe_chr
+      yield (cp + table[at + 2]).unsafe_chr
       return
     end
     return if yield_special(special_fold_table, cp) { |part| yield part.unsafe_chr }
@@ -3287,7 +3287,7 @@ pub struct Unicode
   private def self.simple_fold(cp : Int32) : Int32
     table = simple_fold_table
     at = search_key(table, 2, cp)
-    at >= 0 ? table.to_unsafe[at + 1] : foldcase(cp.unsafe_chr).ord
+    at >= 0 ? table[at + 1] : foldcase(cp.unsafe_chr).ord
   end
 
   # The simple foldings read backwards: each folded code point to every
@@ -3295,20 +3295,20 @@ pub struct Unicode
   # the tables `simple_fold` reads, in the order it reads them, so a code
   # point one table folds is not folded again by a later one.
   private def self.orbits : Hash(Int32, Array(Int32))
-    @@orbits ||= build_orbits
+    @@orbits ||= build_orbits.copy_to(Program.tape)
   end
 
   private def self.build_orbits : Hash(Int32, Array(Int32))
     map = Hash(Int32, Array(Int32)).new
     simple = simple_fold_table
-    data = simple.to_unsafe
+    data = simple
     row = 0
     while row < simple.size
       join_orbit(map, data[row + 1], data[row])
       row = row + 2
     end
     table = casefold_table
-    data = table.to_unsafe
+    data = table
     row = 0
     while row < table.size
       cp = data[row]
@@ -3319,7 +3319,7 @@ pub struct Unicode
       row = row + 3
     end
     special = special_fold_table
-    data = special.to_unsafe
+    data = special
     row = 0
     while row < special.size
       if data[row + 2] == 0 && search_range(table, 3, data[row]) < 0 && search_key(simple, 2, data[row]) < 0
@@ -3332,11 +3332,7 @@ pub struct Unicode
   end
 
   private def self.join_orbit(map : Hash(Int32, Array(Int32)), folded : Int32, cp : Int32) : Nil
-    members = map[folded]?
-    unless members
-      members = [folded]
-      map[folded] = members
-    end
+    members = map.put_if_absent(folded) { [folded] }
     members << cp unless members.includes?(cp)
   end
 
@@ -3481,7 +3477,7 @@ pub struct Unicode
   # the length of the maximal ill-formed subpart there — the bytes that could
   # still have begun a well-formed sequence, at least the one byte. That is
   # the unit U+FFFD replaces, which is what the standard recommends.
-  private def self.sequence_at(bytes : Pointer(UInt8), size : Int32, at : Int32) : Int32
+  private def self.sequence_at(bytes : String | Array(UInt8), size : Int32, at : Int32) : Int32
     lead = bytes[at]
     return 1 if lead < 0x80_u8
     need = 0
@@ -3520,7 +3516,7 @@ pub struct Unicode
     taken
   end
 
-  private def self.valid_bytes?(bytes : Pointer(UInt8), size : Int32) : Bool
+  private def self.valid_bytes?(bytes : String | Array(UInt8), size : Int32) : Bool
     at = 0
     while at < size
       length = sequence_at(bytes, size, at)
@@ -3532,15 +3528,15 @@ pub struct Unicode
 
   # Whether the string's bytes are well-formed UTF-8.
   def self.valid?(text : String) : Bool
-    valid_bytes?(text.to_unsafe, text.bytesize)
+    valid_bytes?(text, text.bytesize)
   end
 
   # Whether the bytes are well-formed UTF-8.
   def self.valid?(bytes : Array(UInt8)) : Bool
-    valid_bytes?(bytes.to_unsafe, bytes.size)
+    valid_bytes?(bytes, bytes.size)
   end
 
-  private def self.clean_bytes(bytes : Pointer(UInt8), size : Int32) : String
+  private def self.clean_bytes(bytes : String | Array(UInt8), size : Int32) : String
     total = 0
     at = 0
     while at < size
@@ -3553,21 +3549,16 @@ pub struct Unicode
         at = at + length
       end
     end
-    String.new(total) do |buffer|
+    String.build(total) do |buffer|
       at = 0
-      written = 0
       while at < size
         length = sequence_at(bytes, size, at)
         if length < 0
-          buffer[written] = 0xEF_u8
-          buffer[written + 1] = 0xBF_u8
-          buffer[written + 2] = 0xBD_u8
-          written = written + 3
-          at = at - length
+          buffer << '\u{FFFD}'
+          at -= length
         else
-          (buffer + written).copy_from(bytes + at, length)
-          written = written + length
-          at = at + length
+          length.times { |i| buffer.push(bytes[at + i]) }
+          at += length
         end
       end
     end
@@ -3577,16 +3568,16 @@ pub struct Unicode
   # well-formed string is answered as it is.
   def self.clean(text : String) : String
     return text if valid?(text)
-    clean_bytes(text.to_unsafe, text.bytesize)
+    clean_bytes(text, text.bytesize)
   end
 
   # The bytes as a string, every maximal ill-formed subpart replaced by U+FFFD.
   def self.clean(bytes : Array(UInt8)) : String
-    clean_bytes(bytes.to_unsafe, bytes.size)
+    clean_bytes(bytes, bytes.size)
   end
 
   private def self.check_utf8(text : String) : Nil
-    bytes = text.to_unsafe
+    bytes = text
     size = text.bytesize
     at = 0
     while at < size
@@ -3597,7 +3588,7 @@ pub struct Unicode
   end
 
   private def self.ascii_only?(text : String) : Bool
-    bytes = text.to_unsafe
+    bytes = text
     at = 0
     while at < text.bytesize
       return false if bytes[at] >= 0x80_u8
@@ -3623,29 +3614,8 @@ pub struct Unicode
   private def self.from_codepoints(points : Array(Int32)) : String
     total = 0
     points.each { |cp| total = total + utf8_width(cp) }
-    String.new(total) do |buffer|
-      at = 0
-      points.each do |cp|
-        if cp < 0x80
-          buffer[at] = cp.to_u8
-          at = at + 1
-        elsif cp < 0x800
-          buffer[at] = (0xC0 | (cp >> 6)).to_u8
-          buffer[at + 1] = (0x80 | (cp & 0x3F)).to_u8
-          at = at + 2
-        elsif cp < 0x10000
-          buffer[at] = (0xE0 | (cp >> 12)).to_u8
-          buffer[at + 1] = (0x80 | ((cp >> 6) & 0x3F)).to_u8
-          buffer[at + 2] = (0x80 | (cp & 0x3F)).to_u8
-          at = at + 3
-        else
-          buffer[at] = (0xF0 | (cp >> 18)).to_u8
-          buffer[at + 1] = (0x80 | ((cp >> 12) & 0x3F)).to_u8
-          buffer[at + 2] = (0x80 | ((cp >> 6) & 0x3F)).to_u8
-          buffer[at + 3] = (0x80 | (cp & 0x3F)).to_u8
-          at = at + 4
-        end
-      end
+    String.build(total) do |buffer|
+      points.each { |cp| buffer << cp.unsafe_chr }
     end
   end
 
@@ -3761,13 +3731,23 @@ pub struct Unicode
   private def self.combining_class(cp : Int32) : Int32
     table = combining_class_table
     at = search_range(table, 3, cp)
-    at < 0 ? 0 : table.to_unsafe[at + 2]
+    at < 0 ? 0 : table[at + 2]
   end
 
   # Appends the full decomposition of *cp*: Hangul by arithmetic, then the
   # canonical mapping, then — under a compatibility form — the compatibility
   # mapping, each part decomposed again.
-  private def self.decompose(points : Array(Int32), cp : Int32, compatibility : Bool) : Nil
+  private def self.decompose(points : Array(Int32), cp : Int32,
+                             compatibility : Bool) : Nil
+    decompose_into(points, cp, compatibility, canonical_decomposition_table,
+      compatibility_decomposition_table, compatibility_data_table)
+  end
+
+  private def self.decompose_into(points : Array(Int32), cp : Int32,
+                                  compatibility : Bool,
+                                  canonical : Array(Int32),
+                                  compat : Array(Int32),
+                                  data : Array(Int32)) : Nil
     if cp >= HANGUL_S_BASE && cp < HANGUL_S_BASE + HANGUL_S_COUNT
       s_index = cp - HANGUL_S_BASE
       points << HANGUL_L_BASE + s_index // HANGUL_N_COUNT
@@ -3776,24 +3756,24 @@ pub struct Unicode
       points << trailing unless trailing == HANGUL_T_BASE
       return
     end
-    canonical = canonical_decomposition_table
     at = search_key(canonical, 3, cp)
     if at >= 0
-      decompose(points, canonical.to_unsafe[at + 1], compatibility)
-      second = canonical.to_unsafe[at + 2]
-      decompose(points, second, compatibility) unless second == 0
+      decompose_into(points, canonical[at + 1], compatibility,
+        canonical, compat, data)
+      second = canonical[at + 2]
+      decompose_into(points, second, compatibility,
+        canonical, compat, data) unless second == 0
       return
     end
     if compatibility
-      compat = compatibility_decomposition_table
       at = search_key(compat, 3, cp)
       if at >= 0
-        data = compatibility_data_table
-        offset = compat.to_unsafe[at + 1]
-        count = compat.to_unsafe[at + 2]
+        offset = compat[at + 1]
+        count = compat[at + 2]
         index = 0
         while index < count
-          decompose(points, data[offset + index], compatibility)
+          decompose_into(points, data[offset + index], compatibility,
+            canonical, compat, data)
           index = index + 1
         end
         return
@@ -3847,7 +3827,7 @@ pub struct Unicode
       return first + (second - HANGUL_T_BASE)
     end
     table = composition_table
-    data = table.to_unsafe
+    data = table
     low = 0
     high = table.size // 3
     while low < high
@@ -3943,8 +3923,8 @@ pub struct Unicode
   end
 
   # Each grapheme cluster, in order.
-  def self.each_grapheme(text : String, &block : String -> _) : Nil
-    bytes = text.to_unsafe
+  def self.each_grapheme(text : String, & : String -> _) : Nil
+    bytes = text
     size = text.bytesize
     return if size == 0
     start = 0
@@ -3964,7 +3944,7 @@ pub struct Unicode
       width = length < 0 ? 0 - length : length
       value = length < 0 ? 0 : grapheme_value(code_point_at(bytes, at, length))
       if at > 0 && grapheme_break?(previous, value, indicators, joined, conjunct && linked)
-        block.call(text[start, at - start])
+        yield text[start, at - start]
         start = at
       end
       kind = value & 15
@@ -3984,7 +3964,7 @@ pub struct Unicode
       previous = value
       at = at + width
     end
-    block.call(text[start, size - start])
+    yield text[start, size - start]
   end
 
   # UAX #29's rules between a code point and the next, in its order: true
@@ -4011,11 +3991,11 @@ pub struct Unicode
     return 0 if cp >= 0x20 && cp < 0x7F
     table = grapheme_table
     at = search_range(table, 3, cp)
-    at < 0 ? 0 : table.to_unsafe[at + 2]
+    at < 0 ? 0 : table[at + 2]
   end
 
   # The code point a well-formed sequence of *length* bytes at *at* spells.
-  private def self.code_point_at(bytes : Pointer(UInt8), at : Int32, length : Int32) : Int32
+  private def self.code_point_at(bytes : String | Array(UInt8), at : Int32, length : Int32) : Int32
     lead = bytes[at].to_i32
     return lead if length == 1
     cp = length == 2 ? lead & 0x1F : (length == 3 ? lead & 0x0F : lead & 0x07)
@@ -4038,7 +4018,7 @@ struct ::String
     Std::Unicode::Unicode.grapheme_size(self)
   end
 
-  def each_grapheme(&block : String -> _) : Nil
-    Std::Unicode::Unicode.each_grapheme(self, &block)
+  def each_grapheme(& : String -> _) : Nil
+    Std::Unicode::Unicode.each_grapheme(self) { |cluster| yield cluster }
   end
 end

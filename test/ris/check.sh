@@ -976,7 +976,7 @@ fi
 
 
 # HTTP diagnostics, query serialization and URI use the caller's tape.
-for name in http_head_tape params_write_tape uri_tape; do
+for name in http_head_tape params_write_tape uri_tape idna_tape; do
   out=$(RIS_HEAP_STATS=1 "$RIS" run "test/ris/$name.ri" 2>&1)
   if [ "$?" -eq 0 ] &&
       grep -qF 'zero heap' <<<"$out" &&

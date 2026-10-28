@@ -26,4 +26,10 @@ n = {"a" => nil, "b" => 2} of String => Int32?
 raise "compact" unless n.compact == {"b" => 2}
 raise "generic sum" unless h.sum { |k, v| v.to_i64 } == 10_i64
 raise "clear return" unless h.clear.empty?
+nested = Hash(Int32, Array(Int32)).new
+run = nested.put_if_absent(1) { [2] }
+run << 3
+raise "inserted run handle" unless nested[1] == [2, 3]
+nested.put_if_absent(1) { [9] } << 4
+raise "existing run handle" unless nested[1] == [2, 3, 4]
 puts "PASS: hash_api"

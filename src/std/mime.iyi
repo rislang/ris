@@ -22,7 +22,7 @@
 
 module std/mime
 
-import std/static_array::{StaticArray}
+import std/tuple
 
 pub struct MIME
   def self.with_charset(media_type : String,
@@ -55,7 +55,7 @@ pub struct MIME
 
   # Extension without its dot, lowercase, then the media type. The first
   # entry of a type is not special; `extensions` sorts them.
-  TABLE = StaticArray[
+  TABLE = {
     {"html", "text/html"}, {"htm", "text/html"},
     {"css", "text/css"},
     {"js", "text/javascript"}, {"mjs", "text/javascript"},
@@ -137,7 +137,7 @@ pub struct MIME
     {"iso", "application/x-iso9660-image"},
     {"bin", "application/octet-stream"},
     {"jar", "application/java-archive"},
-  ]
+  }.copy_to(Program.tape)
 
   # The text lowercased, and the text itself when it has no uppercase
   # ASCII, which is nearly always, so nothing is allocated for it.
