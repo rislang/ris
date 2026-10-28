@@ -2503,7 +2503,8 @@ module Iyi
       self_closured = obj.is_a?(Def) && obj.self_closured?
       closured_vars = closured_vars(vars, obj)
       alloca_non_closured_vars(vars, obj, args, reset_nilable_vars)
-      malloc_closure closured_vars, context, parent_context, self_closured
+      malloc_closure closured_vars, context, parent_context, self_closured,
+        (obj.is_a?(ASTNode) ? obj.location : nil)
     end
 
     def alloca_non_closured_vars(vars, obj = nil, args = nil, reset_nilable_vars = true)
@@ -2572,7 +2573,8 @@ module Iyi
       closure_vars
     end
 
-    def malloc_closure(closure_vars, current_context, parent_context = nil, self_closured = false)
+    def malloc_closure(closure_vars, current_context, parent_context = nil,
+                       self_closured = false, scope_location = nil)
       parent_closure_type = parent_context.try &.closure_type
 
       if closure_vars || self_closured
@@ -2583,7 +2585,7 @@ module Iyi
           @llvm_typer.closure_context_type(closure_vars, parent_closure_type, (self_closured ? current_context.type : nil))
         source = closure_vars.compact_map do |var|
           var.local_vars.first?.try(&.location)
-        end.first?
+        end.first? || scope_location
         # Defer callbacks finish before this frame returns, including the
         # panic walk. Mixed captures must retain their escaping lifetime.
         closure_ptr = if !self_closured && closure_vars.all?(&.iyi_defer_only?)

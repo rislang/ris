@@ -5,15 +5,13 @@ module test/ris/query_test
 
 import std/uri::{Query}
 
-# The String API beside the tape one: its result is copied off.
-@[TapeToHeap]
-def pairs(text : Str) : String
-  out = "".to_heap
-  tape do
-    q = Query.parse(text)
-    q.each { |key, value| out = out + "[#{key}=#{value}]".to_heap }
+# The caller owns both parsed views and the rendered pairs.
+def pairs(text : Str) : Str
+  Str.build(text.bytesize + 16) do |writer|
+    Query.parse(text).each do |key, value|
+      writer << '[' << key << '=' << value << ']'
+    end
   end
-  out
 end
 
 ok = pairs("?a=1&b=2;c=3&&d&e=") == "[a=1][b=2][c=3][d=][e=]" &&

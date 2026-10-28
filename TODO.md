@@ -95,12 +95,25 @@ part B.
   remaining std and runtime paths required by supported workloads.
 * Audit final program binaries for collector linkage and forbidden heap
   allocator dependencies; keep the compiler's own GC choice separate.
-* check.sh fails since no GC is the only mode: 69 heap traps (string
-  interpolation such as puts "#{x}", to_heap/String-API tests, pipe,
-  autocert, socket 1 MiB, http prefork/answer, json_repeat) and seven
-  other failures (program_threads, program_field_thread, program_readers:
-  IyiThread; cleanup_panic, cleanup_self, copy_rollback, samples/ris/web).
-  The trap no longer prints its file and line.
+* Finish check.sh under the sole no-GC mode. Library output and panic
+  interpolation now use Str; sync stdout's newline uses a tape builder.
+  Allocation sites use call locations without requiring debug metadata,
+  and closure environments fall back to their defining scope's location.
+  cleanup_panic, copy_rollback and both 1 MiB socket tests now pass.
+* Pipe and autocert need shared endpoint ownership. Simply marking
+  PipeReader/PipeWriter OnTape correctly refuses spawned-task captures.
+  Choose generation-checked typed pool handles or checked joined borrows;
+  then migrate their buffers and read_bytes API onto the caller's tape.
+* program_threads, program_field_thread and program_readers still use
+  IyiThread, absent under gc_none. Choose a supported no-GC native-thread
+  API and its storage/lifecycle before restoring these thread gates.
+* cleanup_self retains an ordinary self-capturing closure. Prove its
+  local lifetime and allocate its frame on the stack, or define checked
+  tape ownership for ordinary escaping closures; do not exempt its heap.
+* HTTP answer's slow request path still uses String-based read_head and
+  body readers. Migrate those before claiming chunked/Expect/HTTP/1.0
+  answer parity without a heap. Recheck prefork, TLS and samples/ris/web.
+* Finish mixed String/tape migration fixtures and no-GC logging gates.
 * Remove remaining obsolete collector paths in ris programs.
 
 ## Later

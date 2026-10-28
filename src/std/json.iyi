@@ -2448,12 +2448,12 @@ end
 # A document's state in a `Writer`, on the stack of `JSON.write`:
 # the level, the count of keys of the open objects, then per level a state,
 # the first key of each open object and its id in the hash table, and the
-# last id; the keys are (start, size) spans of the output. Past
-# `TAPE_KEYS` keys open at once they go to the heap.
+# last id. Key spans and hash bins reserve stable room on the caller's
+# tape, starting with TAPE_KEYS spans.
 TAPE_STATES = MAX_NESTING + 2
 TAPE_KEYS   = 128
 # Past this many keys an object's are found through a hash table on the
-# heap, not compared one by one: 50,000 keys took 1.7 s, the heap 11 ms.
+# tape, not compared one by one.
 TAPE_LINEAR = 32
 
 # Writes a document into the caller's `Str::Builder`, as `Builder`
@@ -2463,12 +2463,15 @@ TAPE_LINEAR = 32
 pub struct Writer
   @out : Str::Builder
   @slots : Pointer(Int32)
-  @keys : Pointer(Pointer(Int32))
-  @table : Pointer(Pointer(UInt64))
-  @indent : String?
+  @keys : Ary(Int32)
+  @table : Ary(UInt64)
+  @indent : Str?
   @ascii_only : Bool
 
-  def initialize(@out : Str::Builder, @slots : Pointer(Int32), @keys : Pointer(Pointer(Int32)), @table : Pointer(Pointer(UInt64)), @indent : String?, @ascii_only : Bool)
+  def initialize(@out : Str::Builder, @slots : Pointer(Int32),
+                 @indent : Str?, @ascii_only : Bool)
+    @keys = Ary(Int32).new(2 * TAPE_KEYS)
+    @table = Ary(UInt64).new(130)
     @slots[0] = 0
     @slots[1] = 0
     @slots[2] = Builder::ROOT
@@ -2656,7 +2659,7 @@ pub struct Writer
     length = @out.length - from
     text = @out.finish
     written = text[from, length]
-    keys = @keys.value
+    keys = @keys
     first = @slots[2 + TAPE_STATES + level]
     count = @slots[1]
     id = table_id(level)
@@ -2677,27 +2680,24 @@ pub struct Writer
           i = i + 1
         end
       end
-      table = @table.value
+      table = @table
       mask = table[0] - 1
       slot = id.to_u64.unsafe_shl(32_u64) | hash(written)
-      at = slot & mask
+      at = (slot & mask).to_i32
       while (got = table[2 + 2 * at]) != 0
         if got == slot
           k = table[3 + 2 * at].to_i32
           repeated(name, written) if keys[2 * k + 1] == length && text[keys[2 * k], length] == written
         end
-        at = (at + 1) & mask
+        at = (at + 1) & mask.to_i32
       end
     end
-    if count >= TAPE_KEYS && (count & (count - 1)) == 0
-      # Past the stack's room: the spans move to the heap, doubling.
-      grown = Pointer(Int32).malloc((4 * count).to_u64)
-      grown.copy_from(keys, 2 * count)
-      @keys.value = grown
-      keys = grown
+    if 2 * count == keys.size
+      keys << from << length
+    else
+      keys[2 * count] = from
+      keys[2 * count + 1] = length
     end
-    keys[2 * count] = from
-    keys[2 * count + 1] = length
     @slots[1] = count + 1
     index(id, text, keys, count) if id != 0
     @out.push(58_u8)
@@ -2705,8 +2705,13 @@ pub struct Writer
   end
 
   private def repeated(name : Str, written : Str) : Nil
-    raise "the key #{name.to_heap.inspect} is written twice in one object" if JSON.utf8?(name)
-    raise "the key #{name.to_heap.inspect} is written as #{written.to_heap}, as an earlier key was"
+    quoted = Str.build(name.bytesize + 2) { |writer| name.inspect(writer) }
+    if JSON.utf8?(name)
+      raise Str.interpolate("the key ", quoted,
+        " is written twice in one object")
+    end
+    raise Str.interpolate("the key ", quoted, " is written as ", written,
+      ", as an earlier key was")
   end
 
   # FNV-1a of a key's written text, 32 bits and never 0.
@@ -2719,31 +2724,34 @@ pub struct Writer
 
   # Key *k* of the object *id* into the table: (id, hash) to *k*, open
   # addressing, doubled past half full.
-  private def index(id : Int32, text : Str, keys : Pointer(Int32), k : Int32) : Nil
-    table = @table.value
-    if table.address == 0 || table[1] * 2 >= table[0]
-      room = table.address == 0 ? 64_u64 : table[0] * 2
-      grown = Pointer(UInt64).malloc((2 + 2 * room).to_u64)
-      grown[0] = room
-      grown[1] = 0_u64
-      unless table.address == 0
-        j = 0_u64
-        while j < table[0]
-          put(grown, table[2 + 2 * j], table[3 + 2 * j]) if table[2 + 2 * j] != 0
-          j = j + 1
+  private def index(id : Int32, text : Str, keys : Ary(Int32), k : Int32) : Nil
+    table = @table
+    if table.empty? || table[1] * 2 >= table[0]
+      room = table.empty? ? 64 : table[0].to_i32 * 2
+      previous = Ary(UInt64).new(table.size)
+      table.each { |word| previous << word }
+      table.clear
+      table << room.to_u64 << 0_u64
+      (2 * room).times { table << 0_u64 }
+      unless previous.empty?
+        j = 0
+        while j < previous[0].to_i32
+          if previous[2 + 2 * j] != 0
+            put(table, previous[2 + 2 * j], previous[3 + 2 * j])
+          end
+          j += 1
         end
       end
-      @table.value = grown
-      table = grown
     end
-    put(table, id.to_u64.unsafe_shl(32_u64) | hash(text[keys[2 * k], keys[2 * k + 1]]), k.to_u64)
+    put(table, id.to_u64.unsafe_shl(32_u64) |
+      hash(text[keys[2 * k], keys[2 * k + 1]]), k.to_u64)
   end
 
-  private def put(table : Pointer(UInt64), slot : UInt64, value : UInt64) : Nil
+  private def put(table : Ary(UInt64), slot : UInt64, value : UInt64) : Nil
     mask = table[0] - 1
-    at = slot & mask
+    at = (slot & mask).to_i32
     while table[2 + 2 * at] != 0
-      at = (at + 1) & mask
+      at = (at + 1) & mask.to_i32
     end
     table[2 + 2 * at] = slot
     table[3 + 2 * at] = value
@@ -3291,16 +3299,20 @@ pub struct JSON
 
   # A document written into the caller's *writer*, after what it holds,
   # through a `Writer` the block is handed: `build` makes a String,
-  # `write` adds to one. Its state is on this method's stack: the JSON
-  # writer is not used after the block.
-  def self.write(writer : Str::Builder, indent : String | Int32 | Nil = nil, ascii_only : Bool = false, & : Writer -> Nil) : Nil
+  # `write` adds to one. Per-level state is on this method's stack;
+  # key spans and hash bins grow on the caller's tape.
+  def self.write(writer : Str::Builder, indent : String | Str | Int32 | Nil = nil, ascii_only : Bool = false, & : Writer -> Nil) : Nil
     slots = uninitialized Int32[784]
-    spans = uninitialized Int32[256]
-    keys = pointerof(spans).as(Pointer(Int32))
-    table = Pointer(UInt64).new(0_u64)
-    text = indent.is_a?(Int32) ? (indent.as(Int32) > 0 ? " " * indent.as(Int32) : nil) : indent.as(String?)
+    text = case indent
+           when Int32
+             indent > 0 ? Str.view(" ") * indent : nil
+           when String
+             Str.view(indent)
+           else
+             indent
+           end
     text = nil if text && text.empty?
-    json = Writer.new(writer, pointerof(slots).as(Pointer(Int32)), pointerof(keys), pointerof(table), text, ascii_only)
+    json = Writer.new(writer, pointerof(slots).as(Pointer(Int32)), text, ascii_only)
     yield json
     json.finish
   end

@@ -1,7 +1,7 @@
 module test/ris/heap_fields
 
 class Kept
-  @items = [1, 2]
+  @items = Array(Int32).new(2)
   def initialize
   end
 end

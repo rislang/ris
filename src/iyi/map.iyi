@@ -1,0 +1,170 @@
+# A hash map on the tape, laid out as Ruby's Hash (st_table): entries in
+# insertion order in parallel Ary columns, and `@bins`, an Ary(Int32) of
+# entry indices probed linearly (-1 empty). A deleted entry stays in its
+# column, marked dead, so indices in the bins never move; links are
+# indices, so the map holds no pointer of its own. Everything lives on
+# the tape that is current at `new`, and goes when that tape's scope ends.
+#
+# A program's `{k => v}` and `{} of K => V` are a Map (the compiler's
+# literal expander); std and the runtime keep Hash until they migrate.
+@[OnTape]
+struct Map(K, V)
+  @keys : Ary(K)
+  @values : Ary(V)
+  @live : Ary(Bool)
+  @bins : Ary(Int32)
+  # [0] is the live count. Every column is an Ary, shared by copies of the
+  # struct, so a Map passed to a method is the same map.
+  @head : Ary(Int32)
+
+  def initialize(capacity : Int32 = 8)
+    capacity = 8 if capacity < 8
+    @keys = Ary(K).new(capacity)
+    @values = Ary(V).new(capacity)
+    @live = Ary(Bool).new(capacity)
+    @bins = Ary(Int32).new(Map.bin_count(capacity), -1)
+    @head = Ary(Int32).new(1, 0)
+  end
+
+  # Bins for *entries*: a power of two at least twice as many, so a probe
+  # meets an empty bin soon.
+  def self.bin_count(entries : Int32) : Int32
+    bins = 16
+    while bins < entries * 2
+      bins = bins * 2
+    end
+    bins
+  end
+
+  def size : Int32
+    @head[0]
+  end
+
+  def empty? : Bool
+    size == 0
+  end
+
+  def []=(key : K, value : V) : V
+    index = find(key)
+    if index >= 0
+      @values[index] = value
+      return value
+    end
+    grow if (@keys.size + 1) * 2 > @bins.size
+    entry = @keys.size
+    @keys.push(key)
+    @values.push(value)
+    @live.push(true)
+    place(key, entry)
+    @head[0] = size + 1
+    value
+  end
+
+  def [](key : K) : V
+    index = find(key)
+    raise "Map: missing key #{key}" if index < 0
+    @values[index]
+  end
+
+  def []?(key : K) : V?
+    index = find(key)
+    index < 0 ? nil : @values[index]
+  end
+
+  def fetch(key : K, default : V) : V
+    index = find(key)
+    index < 0 ? default : @values[index]
+  end
+
+  def has_key?(key : K) : Bool
+    find(key) >= 0
+  end
+
+  # The value the key had, or nil. Its entry stays in place, dead.
+  def delete(key : K) : V?
+    index = find(key)
+    return nil if index < 0
+    @live[index] = false
+    @head[0] = size - 1
+    @values[index]
+  end
+
+  def clear : Nil
+    @keys.clear
+    @values.clear
+    @live.clear
+    i = 0
+    while i < @bins.size
+      @bins[i] = -1
+      i = i + 1
+    end
+    @head[0] = 0
+  end
+
+  # Live entries in insertion order.
+  def each(& : K, V -> Nil) : Nil
+    i = 0
+    while i < @keys.size
+      yield @keys[i], @values[i] if @live[i]
+      i = i + 1
+    end
+  end
+
+  def each_key(& : K -> Nil) : Nil
+    each { |key, _| yield key }
+  end
+
+  def each_value(& : V -> Nil) : Nil
+    each { |_, value| yield value }
+  end
+
+  def keys : Ary(K)
+    result = Ary(K).new(size < 4 ? 4 : size)
+    each { |key, _| result.push(key) }
+    result
+  end
+
+  def values : Ary(V)
+    result = Ary(V).new(size < 4 ? 4 : size)
+    each { |_, value| result.push(value) }
+    result
+  end
+
+  # The entry index of a live key, or -1.
+  private def find(key : K) : Int32
+    mask = @bins.size - 1
+    slot = key.hash & mask
+    while true
+      entry = @bins[slot]
+      return -1 if entry < 0
+      return entry if @live[entry] && @keys[entry] == key
+      slot = (slot + 1) & mask
+    end
+  end
+
+  private def place(key : K, entry : Int32) : Nil
+    mask = @bins.size - 1
+    slot = key.hash & mask
+    while @bins[slot] >= 0
+      slot = (slot + 1) & mask
+    end
+    @bins[slot] = entry
+  end
+
+  # Twice the bins, in place (the Ary grows in its own reservation), and
+  # rebuilt from the live entries. Size a map up front to avoid this.
+  private def grow : Nil
+    old = @bins.size
+    i = 0
+    while i < old
+      @bins[i] = -1
+      @bins.push(-1)
+      i = i + 1
+    end
+    i = 0
+    while i < @keys.size
+      place(@keys[i], i) if @live[i]
+      i = i + 1
+    end
+  end
+end

@@ -53,6 +53,22 @@ class File
     end
   end
 
+  # Read into the caller's storage, including files with no stated size.
+  def self.read(path : Str, writer : Str::Builder) : Nil
+    fd = __iyi_open_read(c_path(path))
+    raise "cannot read #{path}" if fd < 0_i64
+    defer __iyi_close(fd)
+    loop do
+      count = 0_i64
+      writer.unsafe_append(4096) do |buffer|
+        count = __iyi_read(fd, buffer.as(Void*), 4096_u64)
+        count > 0 ? count.to_i32 : 0
+      end
+      raise "cannot read #{path}: the read failed" if count < 0
+      break if count == 0
+    end
+  end
+
   def self.read(path : String | Str) : String
     fd = __iyi_open_read(c_path(path))
     if fd < 0_i64

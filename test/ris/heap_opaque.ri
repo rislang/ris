@@ -13,7 +13,7 @@ class Second
   end
 end
 
-value = Program.args.empty? ? First.new : Second.new
+value = Program.arguments.empty? ? First.new : Second.new
 puts value.value
 callback = -> { 3 }
 puts callback.call

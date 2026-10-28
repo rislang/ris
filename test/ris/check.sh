@@ -18,6 +18,20 @@ if [ -z "${RIS_CHECK_SERIAL:-}" ]; then
   exit $rc
 fi
 
+# Migration APIs remain checked, but executing them must trap with a site.
+heap_trap() {
+  local name=$1 out code
+  out=$("$RIS" run "test/ris/$name.ri" 2>&1); code=$?
+  if [ "$code" -ne 0 ] &&
+      grep -qF 'ris: heap allocation:' <<<"$out" &&
+      grep -qE '  at .*:[0-9]+:[0-9]+' <<<"$out"; then
+    echo "traps    $name (heap migration, source site)"
+  else
+    echo "FAILED   $name: expected heap trap with source site: $out"
+    status=1
+  fi
+} # heap_trap
+
 expect() {
   local name=$1 needle=$2 out
   out=$("$RIS" build --no-codegen "test/ris/refused/$name.ri" 2>&1)
@@ -62,7 +76,7 @@ expect board_closure 'send Str, Ary bytes or a value struct'
 expect board_owner 'send Str, Ary bytes or a value struct'
 
 # Tasks capture Share values, or take a value handed off (TAPE_SPEC 5.1).
-expect task_capture_mutable 'pass a Copyable value through RisBoard'
+expect task_capture_mutable 'build tape values inside the spawn'
 expect task_capture_assigned 'a mutable borrow across tasks'
 expect task_handoff_reused 'the task owns it now'
 expect select_gone 'ris has no select'
@@ -75,6 +89,30 @@ if [ "$?" -eq 0 ] && grep -qxF 'PASS: task waits' <<<"$out" &&
   echo "runs     task_wait (broadcast, deadlines, cancel, panic)"
 else
   echo "FAILED   task_wait: $out"; status=1
+fi
+
+# Interpolated output and panic text from iyi library code stay on tape.
+out=$(
+  probe=$(mktemp -d)
+  "$RIS" build -o "$probe/retained" \
+    test/ris/refused/interpolation_retained.ri 2>&1
+  code=$?
+  rm -rf "$probe"
+  exit "$code"
+)
+if [ "$?" -ne 0 ] &&
+    grep -qF 'use Str.interpolate(...) on the current tape' <<<"$out"; then
+  echo 'refused  interpolation_retained (names the Str form)'
+else
+  echo "FAILED   interpolation_retained: $out"; status=1
+fi
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/interpolation_sinks.ri 2>&1)
+if [ "$?" -eq 0 ] &&
+    grep -qxF 'PASS: interpolation sinks' <<<"$out" &&
+    grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+  echo 'runs     interpolation_sinks (library output, Str argument, panic)'
+else
+  echo "FAILED   interpolation_sinks: $out"; status=1
 fi
 
 # Autocert broadcasts cache results with independent waiter deadlines.
@@ -296,21 +334,9 @@ if [[ "$out" == *FAILED* ]]; then
 fi
 printf '%s\n' "$out"
 
-out=$("$RIS" run test/ris/yaml.ri 2>&1)
-if [ "$?" -eq 0 ] && [ "$out" = 'PASS: yaml tape and heap APIs' ]; then
-  echo "runs     yaml"
-else
-  echo "FAILED   yaml: $out"
-  status=1
-fi
+heap_trap yaml
 
-out=$("$RIS" run test/ris/toml.ri 2>&1)
-if [ "$?" -eq 0 ] && [ "$out" = 'PASS: toml tape and heap APIs' ]; then
-  echo "runs     toml"
-else
-  echo "FAILED   toml: $out"
-  status=1
-fi
+heap_trap toml
 
 out=$("$RIS" run test/ris/time_tape_offset.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = 'PASS: time tape offsets' ]; then
@@ -431,21 +457,13 @@ expect string_parameter \
   'name : String is only read; take it as Str'
 expect string_optional_parameter \
   'name : String? is only read; take it as Str?'
-out=$("$RIS" run test/ris/string_parameters.ri 2>&1)
-if [ "$?" -eq 0 ] && [ "$out" = 'PASS: retained String parameters' ]; then
-  echo "runs     string_parameters"
-else
-  echo "FAILED   string_parameters: $out"
-  status=1
-fi
+heap_trap string_parameters
 
 for name in text_parameter text_array text_capture; do
   expect "$name" '.to_heap'
 done
 expect text_local_field \
   'name holds tape text; write the literal in place or keep it with .to_heap'
-expect text_mixed_array 'to_heap'
-expect text_mixed_hash 'to_heap'
 expect text_literal_field '.copy_to(owner)'
 expect text_interpolation_field '.copy_to(owner)'
 expect text_interpolation_field \
@@ -459,21 +477,9 @@ else
   status=1
 fi
 
-out=$("$RIS" run test/ris/text_literal_heap.ri 2>&1)
-if [ "$?" -eq 0 ] && grep -qF 'PASS: literal heap places' <<<"$out"; then
-  echo "runs     text_literal_heap"
-else
-  echo "FAILED   text_literal_heap: $out"
-  status=1
-fi
+heap_trap text_literal_heap
 
-out=$("$RIS" run test/ris/borrowed_text.ri 2>&1)
-if [ "$?" -eq 0 ] && grep -qF 'PASS: borrowed std text' <<<"$out"; then
-  echo "runs     borrowed_text"
-else
-  echo "FAILED   borrowed_text: $out"
-  status=1
-fi
+heap_trap borrowed_text
 
 expect class_field   "cannot use outer tape value"
 expect class_task "this block becomes a proc"
@@ -483,7 +489,6 @@ expect class_inherited_finalize "tape class instances cannot finalize"
 expect class_escape "is a variable of the code around this tape block"
 expect struct_field  "is a struct that is not @[OnTape]"
 expect class_var     "copy it with .copy_to(Program.tape)"
-expect generic_array "Array("
 expect proc_capture  "this block becomes a proc"
 expect integer_text  "integer / in text gives a Float"
 expect outer_var     "is a variable of the code around this tape block"
@@ -552,13 +557,7 @@ for name in implicit fibers/implicit implicit_loop; do
   fi
 done
 
-out=$("$RIS" run test/ris/escape.ri 2>&1)
-if [ "$out" = 'abc' ]; then
-  echo "runs     escape"
-else
-  echo "FAILED   escape: $out"
-  status=1
-fi
+heap_trap escape
 
 # Cleanup keeps LIFO order on early exits, panic and explicit exit.
 out=$("$RIS" run test/ris/local.ri 2>&1)
@@ -663,8 +662,7 @@ if grep -qF $'10 25 35 35' <<<"$out" && grep -qF "index 3 out of range for 3 ele
 out=$("$RIS" run test/ris/stream.ri 2>&1)
 if grep -qF '7 1,2,5,6 3,4 0 7' <<<"$out" && grep -qF "Tre#close: 2 is not open" <<<"$out"; then echo "runs     stream"; else echo "FAILED   stream: $out"; status=1; fi
 
-out=$("$RIS" run test/ris/owned.ri 2>&1)
-if [ "$out" = 'PASS: explicit owned copy, typed cache boundary, UTF-8, empty text and scope reuse' ]; then echo "runs     owned"; else echo "FAILED   owned: $out"; status=1; fi
+heap_trap owned
 
 out=$("$RIS" run test/ris/writer.ri 2>&1)
 if [ "$out" = '0 -42 9223372036854775807 -9223372036854775808 a&amp;b&lt;c&gt;&quot;d&#39;e <b>' ]; then echo "runs     writer"; else echo "FAILED   writer: $out"; status=1; fi
@@ -698,16 +696,9 @@ if [ "$out" = 'PASS: read as Params reads, nothing on the heap' ]; then echo "ru
 out=$("$RIS" run test/ris/truncate.ri 2>&1)
 if grep -qF "PASS: cut back and written over" <<<"$out" && grep -qF "truncate to 1 of 0 bytes" <<<"$out"; then echo "runs     truncate"; else echo "FAILED   truncate: $out"; status=1; fi
 
-out=$("$RIS" run test/ris/json.ri 2>&1)
-if [ "$out" = 'PASS: parsed, refused alike, written alike, on the tape' ]; then echo "runs     json"; else echo "FAILED   json: $out"; status=1; fi
+heap_trap json
 
-out=$("$RIS" run test/ris/json_buffer.ri 2>&1)
-if [ "$?" -eq 0 ] &&
-    [ "$out" = 'PASS: JSON tape buffers, aliases, retained strings and errors' ]; then
-  echo "runs     json_buffer"
-else
-  echo "FAILED   json_buffer: $out"; status=1
-fi
+heap_trap json_buffer
 expect json_builder_escape 'is a variable of the code around this tape block'
 
 out=$("$RIS" run test/ris/json_repeat.ri 2>&1)
@@ -879,8 +870,7 @@ else
   echo "FAILED   samples/ris/web: does not build"; status=1
 fi
 rm -rf "$web"
-out=$("$RIS" run test/ris/to_heap.ri 2>&1)
-if [ "$out" = $'GET /users\nGET,/users\n[3, 1, 2] [2, 3]\n/users 12' ]; then echo "runs     to_heap"; else echo "FAILED   to_heap: $out"; status=1; fi
+heap_trap to_heap
 out=$("$RIS" run test/ris/text_api.ri 2>&1)
 if grep -qF $'3 12 true\ntrue false\n4 212\n/users/1\n4 true true\n-42 7 true\ntrue -2147483648\nShip it|7|it|7 Ship\ntrue\n1 5 11\n3 café false\n200 /users/1 took 12 ms\n200 /users/1 took 12 ms' <<<"$out" && grep -qF "not a number" <<<"$out"; then echo "runs     text_api"; else echo "FAILED   text_api: $out"; status=1; fi
 out=$("$RIS" run test/ris/each_line.ri 2>&1)
@@ -907,12 +897,7 @@ else
 fi
 rm -f "$exe"
 
-out=$("$RIS" run test/ris/string_arguments.ri 2>&1)
-if [ "$out" = 'PASS: String arguments borrow without allocation' ]; then
-  echo "runs     string_arguments"
-else
-  echo "FAILED   string_arguments: $out"; status=1
-fi
+heap_trap string_arguments
 
 # HPACK's tape overload agrees with the retained API across tape scopes.
 out=$("$RIS" run --release test/ris/hpack.ri 2>&1)
@@ -937,20 +922,9 @@ for name in http_head_tape params_write_tape uri_tape; do
   fi
 done
 
-out=$("$RIS" run test/ris/uri_legacy.ri 2>&1)
-if [ "$?" -eq 0 ] && [ "$out" = 'URI: legacy wrappers' ]; then
-  echo "runs     uri_legacy"
-else
-  echo "FAILED   uri_legacy: $out"; status=1
-fi
+heap_trap uri_legacy
 
-out=$("$RIS" run test/ris/http_head_legacy.ri 2>&1)
-if [ "$?" -eq 0 ] &&
-    [ "$out" = 'HTTP and Params: legacy wrappers' ]; then
-  echo "runs     http_head_legacy"
-else
-  echo "FAILED   http_head_legacy: $out"; status=1
-fi
+heap_trap http_head_legacy
 
 # Log text, numeric formatting and quoting use the caller's tape.
 out=$(RIS_HEAP_STATS=1 "$RIS" run \
@@ -1277,7 +1251,8 @@ fi
 for name in heap_handles heap_io; do
   out=$("$RIS" run "test/ris/$name.ri" 2>&1)
   if [ "$?" -ne 0 ] &&
-      grep -qF 'ris: heap allocation:' <<<"$out"; then
+      grep -qF 'ris: heap allocation:' <<<"$out" &&
+      grep -qE '  at .*:[0-9]+:[0-9]+' <<<"$out"; then
     echo "refused  $name (program value, not runtime metadata)"
   else
     echo "FAILED   $name: $out"

@@ -3,7 +3,7 @@
 # sink/variable lowering also serves iyi files inside explicit tape
 # scopes, preserving their heap-text default elsewhere.
 class Iyi::TapeTextLowering < Iyi::Visitor
-  SINKS = {"puts", "print"}
+  SINKS = {"puts", "print", "raise"}
 
   def self.tape_block?(node : Call) : Bool
     node.obj.nil? && !node.block.nil? &&

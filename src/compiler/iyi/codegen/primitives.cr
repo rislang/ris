@@ -16,7 +16,9 @@ class Iyi::CodeGenVisitor
   end
 
   def codegen_primitive(call, node, target_def, call_args)
-    @call_location = call.try &.name_location
+    # Allocation diagnostics need a source even without debug metadata.
+    # Synthesized calls need not have a separate name location.
+    @call_location = call.try { |value| value.name_location || value.location }
 
     @last = case node.name
             when "binary"

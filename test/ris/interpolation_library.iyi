@@ -1,0 +1,13 @@
+module test/ris/interpolation_library
+
+pub struct RisInterpolationProbe
+  def self.output(value : Int32) : Nil
+    print "print #{value}\n"
+    puts "puts #{value}"
+  end
+
+  def self.panic(value : Int32) : NoReturn
+    raise "message #{value}"
+  end
+
+end

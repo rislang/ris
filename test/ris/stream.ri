@@ -12,14 +12,14 @@ tape do
   s.close(empty)
   s.leaf(6)
   s.close(root)
-  kids = [] of Int32
+  kids = Ary(Int32).new(4)
   s.each_child(root) { |i| kids << s[i] }
-  grand = [] of Int32
+  grand = Ary(Int32).new(2)
   s.each_child(inner) { |i| grand << s[i] }
   none = 0
   s.each_child(empty) { none += 1 }
-  kids_text = kids.join(",")
-  grand_text = grand.join(",")
+  kids_text = Str.build(16) { |writer| kids.join(writer, ",") }
+  grand_text = Str.build(8) { |writer| grand.join(writer, ",") }
   puts "#{s.size} #{kids_text} #{grand_text} #{none} #{s.stop(root)}"
   s.close(inner)
 end

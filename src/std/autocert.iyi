@@ -414,7 +414,7 @@ pub class AutocertView
     identity
   end
 
-  def identity_for(server_name : String?, alpn : Array(String)?, left_ms : Int32? = nil) : TlsIdentity | TlsError
+  def identity_for(server_name : String?, alpn : Array(String) | Ary(String) | Nil, left_ms : Int32? = nil) : TlsIdentity | TlsError
     return TlsError.new("autocert: the client names no host (server_name)", TlsAlert::UNRECOGNIZED_NAME) unless server_name
     name = server_name.downcase
     if alpn && alpn.size == 1 && alpn[0] == AcmeTlsAlpn01::PROTOCOL

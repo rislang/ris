@@ -633,17 +633,8 @@ struct Str
   end
 
   # ris interpolation writes every part on the caller's active tape.
-  # Legacy iyi output lowering uses this too; targets without a tape
-  # build a heap String and view it.
+  # Legacy iyi output lowering uses this too, on the caller's tape.
   def self.interpolate(*parts : *T) : Str forall T
-    if RisRegion.tape == 0
-      return view(String.build do |io|
-        {% for i in 0...T.size %}
-          part = parts[{{i}}]
-          io << (part.is_a?(Str) ? part.to_s : part)
-        {% end %}
-      end)
-    end
     build do |writer|
       {% for i in 0...T.size %}
         writer.append_value(parts[{{i}}])
@@ -1654,6 +1645,11 @@ struct Ary(T)
       writer.append(separator) if index > 0
       writer.append_value(value)
     end
+  end
+
+  # The elements joined on the current tape, as Array#join answers them.
+  def join(separator : String | Str = "") : Str
+    Str.build(16 * (size + 1)) { |writer| join(writer, separator) }
   end
 
   # The indexes in sorted order, by *compare* on two of them: runs of 16

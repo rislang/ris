@@ -370,6 +370,79 @@ pub class IOBackend < Backend
   end
 end
 
+@[OnTape]
+pub struct RisLogEntry
+  getter source : Str
+  getter severity : Severity
+  getter message : Str
+  @data : Str
+  @seconds : Int64
+  @nanoseconds : Int32
+
+  def initialize(entry : TapeEntry)
+    @source, @severity, @message = entry.source, entry.severity, entry.message
+    @data = Str.build do |writer|
+      entry.each_data do |key, value|
+        writer.write_bytes(key.bytesize)
+        writer.write_bytes(value.bytesize)
+        writer << key << value
+        writer.write_bytes(12 + key.bytesize + value.bytesize)
+      end
+    end
+    @seconds, @nanoseconds = entry.timestamp.seconds, entry.timestamp.nanoseconds
+  end
+
+  def tape_entry : TapeEntry
+    TapeEntry.new(@source, @severity, @message,
+      Time.unix(@seconds, @nanoseconds), data)
+  end
+
+  def data : Ary(LogField)
+    fields = Ary(LogField).new(Metadata.count_fields(@data))
+    Metadata.each_field(@data) do |key, value|
+      fields << LogField.new(key, value)
+    end
+    fields
+  end
+end
+
+# A caller-owned backend retains entry bytes on the explicit program owner.
+# Its container belongs to the caller and is reused by clear.
+@[OnTape]
+pub class RisMemoryBackend < Backend
+  getter entries : Ary(RisLogEntry)
+
+  def initialize(@owner : Program::TapeOwner)
+    @entries = Ary(RisLogEntry).new(16)
+  end
+
+  def write(entry : TapeEntry) : Nil
+    @entries << RisLogEntry.new(entry).copy_to(@owner)
+  end
+
+  def write(entry : Entry) : Nil
+    write(TapeEntry.new(entry.source.as_tape, entry.severity,
+      entry.message.as_tape, entry.timestamp, entry.tape_data))
+  end
+
+  def output : Ary(Str)
+    lines = Ary(Str).new(@entries.size)
+    @entries.each do |entry|
+      lines << Str.build do |writer|
+        DefaultFormatter.write(entry.tape_entry, writer)
+      end
+    end
+    lines
+  end
+
+  def clear : Nil
+    @entries.clear
+  end
+
+  def close : Nil
+  end
+end
+
 pub class MemoryBackend < Backend
   property formatter : Formatter
   getter entries : Array(Entry)

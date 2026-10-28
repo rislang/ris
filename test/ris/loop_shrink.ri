@@ -217,7 +217,9 @@ tape do
   bytes = Ary(UInt8).new(8) { 1_u8 }
   builder = Str::Builder.new(1)
   builder.append("x")
-  case Program.args[0]?
+  arguments = Program.arguments
+  mode = arguments.empty? ? Str.new("") : arguments[0]
+  case mode
   when "safe"
     puts last_checked_free(a)
     puts word_checked_free("12345678")

@@ -10,10 +10,10 @@ import std/text
 
 # Minor faults so far, the tenth field of `/proc/self/stat` after the name.
 def minor_faults : Int64
-  stat = File.read("/proc/self/stat")
-  close = stat.rindex(')') || 0
-  fields = stat[close + 2, stat.bytesize - close - 2].split(' ')
-  fields[7].to_i64
+  stat = Str.build(4096) { |writer| File.read("/proc/self/stat", writer) }
+  tail = stat.split(')')[-1]
+  fields = tail[1, tail.bytesize - 1].split(' ')
+  fields[7].to_i64? || raise "invalid proc stat"
 end
 
 def hold : Int64
@@ -39,7 +39,7 @@ end
 def round : Int64
   total = 0_i64
   group do |g|
-    tasks = Array(IyiTask(Int64)).new(8)
+    tasks = Ary(IyiTask(Int64)).new(8)
     8.times { tasks << start(g) }
     tasks.each do |task|
       got = task.value
@@ -51,8 +51,12 @@ def round : Int64
 end
 
 def resident_kb : Int64
-  File.read("/proc/self/status").split('\n').each do |line|
-    return line.split(' ').reject(&.empty?)[1].to_i64 if line.starts_with?("RssAnon:")
+  text = Str.build(4096) { |writer| File.read("/proc/self/status", writer) }
+  text.split('\n').each do |line|
+    if line.starts_with?("RssAnon:")
+      return line.split(' ').reject(&.empty?)[1].to_i64? ||
+        raise "invalid proc status"
+    end
   end
   0_i64
 end

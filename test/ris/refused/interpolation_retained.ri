@@ -1,0 +1,5 @@
+module test/ris/refused/interpolation_retained
+
+import test/ris/retained_interpolation::{RisRetainedInterpolation}
+
+RisRetainedInterpolation.retained(42)

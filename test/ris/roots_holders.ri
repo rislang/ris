@@ -58,7 +58,7 @@ tape do
   bytes.clear
   raise "empty holder" unless holder.text.empty?
   bytes << "nested"
-  alternative = if Program.args.empty?
+  alternative = if Program.arguments.empty?
                   NestedText.new(HeldText.new(bytes.finish))
                 else
                   NestedText.new(HeldText.new(Str.view("static")))

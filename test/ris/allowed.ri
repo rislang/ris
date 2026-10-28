@@ -11,11 +11,6 @@ struct Resp
   end
 end
 
-# The copy a caller keeps, made at the boundary it leaves the tape by.
-@[TapeToHeap]
-def retain(text : Str) : String
-  text.to_s
-end
 
 def make : Resp
   Resp.new(1_i64, Str.build { |s| s.push(97_u8) })
@@ -43,6 +38,6 @@ tape do
   items.push(make)
   page = Page.new(items)
   puts total(page)
-  copied = retain(page.items[0].user)
+  copied = page.items[0].user.copy_to(Program.tape)
 end
 puts copied

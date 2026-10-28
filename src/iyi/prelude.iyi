@@ -10564,6 +10564,7 @@ require "./ris"
       ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) ||
       flag?(:darwin) || flag?(:win32) || flag?(:wasm32)) %}
   require "./tape"
+  require "./map"
 {% else %}
   # No tape here: what the program's end and the scheduler ask of it
   # answers that there is none.

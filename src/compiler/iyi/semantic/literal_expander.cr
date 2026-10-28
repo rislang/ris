@@ -50,6 +50,12 @@ module Iyi
 
       capacity = node.elements.count { |elem| !elem.is_a?(Splat) }
 
+      # ris: a program's array literal is a tape Ary; std and the runtime
+      # keep Array until their migration (TAPE_SPEC 1.x, no GC).
+      if ris_program_literal?(node) && !node.elements.any?(Splat)
+        return expand_tape_array(node, type_var, elem_temp_vars, elem_temp_var_count, capacity)
+      end
+
       generic = Generic.new(Path.global("Array"), type_var).at(node)
 
       if node.elements.any?(Splat)
@@ -171,6 +177,37 @@ module Iyi
     #
     # If `T` is an uninstantiated generic type, injects a `typeof` with the
     # element types.
+    # A literal written in a program, not in std or the runtime.
+    private def ris_program_literal?(node : ASTNode) : Bool
+      return false unless @program.iyi_prelude?
+      location = node.location
+      return false unless location
+      return false if TapeScopeRuntime.runtime?(location)
+      file = location.original_filename.try(&.gsub('\\', '/')) || ""
+      return false if file.includes?("/src/std/") || file.ends_with?(".iyimod")
+      true
+    end
+
+    # `[a, b]` -> `Ary(T).new(n)` with each element pushed: storage on the
+    # current tape, no heap.
+    private def expand_tape_array(node, type_var, elem_temp_vars, elem_temp_var_count, capacity)
+      generic = Generic.new(Path.global("Ary"), type_var).at(node)
+      initial = capacity < 4 ? 4 : capacity
+      ary_var = new_temp_var.at(node)
+      exps = Array(ASTNode).new(node.elements.size + elem_temp_var_count + 2)
+      elem_temp_vars.try &.each_with_index do |elem_temp_var, i|
+        next unless elem_temp_var
+        exps << Assign.new(elem_temp_var, node.elements[i].clone).at(elem_temp_var)
+      end
+      exps << Assign.new(ary_var.clone, Call.new(generic, "new", NumberLiteral.new(initial).at(node)).at(node)).at(node)
+      node.elements.each_with_index do |elem, i|
+        temp_var = elem_temp_vars.try &.[i]
+        exps << Call.new(ary_var.clone, "push", (temp_var || elem).clone).at(node)
+      end
+      exps << ary_var.clone
+      Expressions.new(exps).at(node)
+    end
+
     def expand_named(node : ArrayLiteral, generic_type : ASTNode?)
       elem_temp_vars, elem_temp_var_count = complex_elem_temp_vars(node.elements)
       if generic_type
@@ -217,6 +254,8 @@ module Iyi
     #
     # Equivalent to a hash-like literal using `::Hash`.
     def expand(node : HashLiteral)
+      # ris: a program's hash literal is a tape Map (src/iyi/map.iyi).
+      return expand_named(node, Path.global("Map")) if ris_program_literal?(node)
       expand_named(node, Path.global("Hash"))
     end
 
@@ -262,7 +301,7 @@ module Iyi
       if of = node.of
         # `generic_type` is nil here
         type_vars = [of.key, of.value] of ASTNode
-        generic = Generic.new(Path.global("Hash"), type_vars).at(node)
+        generic = Generic.new(Path.global(ris_program_literal?(node) ? "Map" : "Hash"), type_vars).at(node)
       elsif generic_type
         # `node.entries` is non-empty here
         typeof_key = TypeOf.new(node.entries.map_with_index { |x, i| (key_temp_vars.try(&.[i]) || x.key).clone.as(ASTNode) }).at(node)

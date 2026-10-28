@@ -40,10 +40,11 @@ end
 # A task panic lets the parent inspect the same program owner afterwards.
 # Initialize retained data first, so rollback must preserve existing bytes.
 kept = "retained".copy_to(Program.tape)
-["fail-owner", "fail-scratch"].each do |failure|
+2.times do |which|
   before = owner_usage
   group do |g|
     task = g.spawn do
+      failure = which == 0 ? "fail-owner" : "fail-scratch"
       saved = RisRegion.tape
       defer check_caller_tape(saved)
       tape do

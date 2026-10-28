@@ -1,10 +1,10 @@
 module test/ris/fibers/implicit
 
 main_tape = RisRegion.tape
-handles = Array(IyiFiber).new
+handles = Ary(IyiFiber).new(2)
 completed = 0
 group do |g|
-  tasks = Array(IyiTask(IyiFiber)).new
+  tasks = Ary(IyiTask(IyiFiber)).new(2)
   2.times do |n|
     tasks << g.spawn do
       fiber = IyiScheduler.current

@@ -10,14 +10,13 @@ module test/ris/answer
 import std/socket::{IyiSocket}
 import std/http::{Server, Incoming, Outgoing}
 
-def read_to_close(socket : IyiSocket) : String
-  text = "".to_heap
+def read_to_close(socket : IyiSocket) : Str
+  writer = Str::Builder.new(4096)
   while true
-    chunk = socket.read(65536).or_panic
-    break if chunk.empty?
-    text = text + chunk
+    got = socket.read(writer, 65536).or_panic
+    break if got == 0
   end
-  text
+  writer.finish
 end
 
 REQUESTS = ("GET /echo?x=1 HTTP/1.1\r\nHost: h\r\nX-Name: mari\r\n\r\n" +
@@ -25,7 +24,7 @@ REQUESTS = ("GET /echo?x=1 HTTP/1.1\r\nHost: h\r\nX-Name: mari\r\n\r\n" +
            "POST /echo HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n0\r\n\r\n" +
            "HEAD /echo HTTP/1.1\r\nHost: h\r\n\r\n" +
            "GET /none HTTP/1.1\r\nHost: h\r\n\r\n" +
-           "GET /last HTTP/1.1\r\nHost: h\r\nConnection: close\r\n\r\n").to_heap
+           "GET /last HTTP/1.1\r\nHost: h\r\nConnection: close\r\n\r\n")
 
 def answer(req : Incoming, res : Outgoing) : Nil
   if req.path == "/none"
@@ -87,11 +86,11 @@ group do |g|
   g.cancel_children
 end
 
-def reply(body : Str, close : Bool = false) : String
+def reply(body : Str, close : Bool = false) : Str
   ("HTTP/1.1 200 OK\r\nX-Seen: yes\r\n" +
     "Content-Length: #{body.bytesize}\r\n" +
-    "Connection: #{close ? "close" : "keep-alive"}\r\n\r\n").to_heap +
-    body.to_heap
+    "Connection: #{close ? "close" : "keep-alive"}\r\n\r\n") +
+    body
 end
 
 want = "HTTP/1.1 200 OK\r\nX-Seen: yes\r\nX-Echo: mari\r\nContent-Length: 33\r\nConnection: keep-alive\r\n\r\nGET /echo?x=1 x=1 name=mari body=" +

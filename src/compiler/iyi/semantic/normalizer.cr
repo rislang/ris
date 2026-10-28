@@ -459,6 +459,14 @@ module Iyi
     end
 
     def transform(node : Call)
+      # Library panic and output messages use the caller's tape too.
+      # Their values are consumed here, never retained as heap Strings.
+      if @macro_code == 0 && program.tape_platform? &&
+         node.name.in?("puts", "print", "raise")
+        node.args.map! do |arg|
+          arg.is_a?(StringInterpolation) ? TapeTextLowering.interpolate(arg) : arg
+        end
+      end
       # Explicit retention of static bytes needs neither a view nor a copy.
       if node.name == "to_heap" && node.args.empty? && !node.block &&
          !node.named_args && (text = node.obj).is_a?(StringLiteral) &&

@@ -1,0 +1,16 @@
+module test/ris/interpolation_sinks
+
+import test/ris/interpolation_library::{RisInterpolationProbe}
+
+def consume(text : Str) : Nil
+  raise "wrong tape argument" unless text == "argument 42"
+end
+
+consume("argument #{42}")
+RisInterpolationProbe.output(42)
+group do |g|
+  outcome = g.spawn { RisInterpolationProbe.panic(42) }.value
+  raise "missing panic" unless outcome.is_a?(Panicked)
+  raise "wrong panic text" unless outcome.message == "message 42"
+end
+puts "PASS: interpolation sinks"

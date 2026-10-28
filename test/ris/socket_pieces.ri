@@ -6,31 +6,34 @@ module socket_pieces
 
 import std/socket::{IyiSocket}
 
-def read_all(socket : IyiSocket, count : Int32) : String
-  text = "".to_heap
-  while text.bytesize < count
-    chunk = socket.read(65536).or_panic
-    break if chunk.empty?
-    text = text + chunk
+def read_all(socket : IyiSocket, count : Int32) : Str
+  writer = Str::Builder.new(count)
+  while writer.length < count
+    got = socket.read(writer, count - writer.length).or_panic
+    break if got == 0
   end
-  text
+  writer.finish
 end
 
-big = ("b" * 1048576).to_heap
-expected = String.build do |io|
-  io << "head:".to_heap
-  100.times { |i| io << i << (i.even? ? "".to_heap : ",".to_heap) }
-  io << big << "end".to_heap
+big = ("b" * 1048576)
+def expected_text : Str
+  Str.build(1049000) do |io|
+    io << "head:"
+    100.times { |i| io << i << (i.even? ? "" : ",") }
+    io << ("b" * 1048576) << "end"
+  end
 end
+expected_size = expected_text.bytesize
 server = IyiSocket.listen(0)
 client = IyiSocket.connect("127.0.0.1", server.local_port).or_panic
 conn = server.accept.or_panic
-got = "".to_heap
+matches = false
 group do |g|
   reader = g.spawn do
+    expected = expected_text
     text = read_all(client, expected.bytesize)
     client.close
-    text
+    text == expected
   end
   tape do
     pieces = Ary(Str).new(4)
@@ -42,14 +45,14 @@ group do |g|
     pieces << Str.build(big.bytesize) { |w| w.append(big) }
     pieces << "end"
     written = conn.write(pieces).or_panic
-    raise "wrote #{written}" unless written == expected.bytesize
+    raise "wrote #{written}" unless written == expected_size
   end
-  got = reader.value.or_panic
+  matches = reader.value.or_panic
 end
 conn.close
 server.close
-if got == expected
+if matches
   puts "PASS: 203 pieces in order, empty ones and 1 MiB among them"
 else
-  puts "FAILED: #{got.bytesize} bytes of #{expected.bytesize}"
+  raise "socket pieces differ"
 end

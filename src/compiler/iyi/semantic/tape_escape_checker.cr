@@ -76,6 +76,13 @@ class Iyi::TapeEscapeChecker
       return "Interpolating a Str outside a @[TapeToHeap] def " \
              "copies the text to the GC heap.\n\n#{WHY}"
     end
+    if @program.has_flag?("ris_no_gc") && node.name == "interpolation" &&
+       receiver.try(&.type?) == @program.string.metaclass &&
+       !TapeRules.std?(node.location)
+      return "String interpolation needs heap storage;\n" \
+             "use Str.interpolate(...) on the current tape,\n" \
+             "and copy_to(owner) to retain the result"
+    end
     if tape_string?(receiver.try(&.type?)) &&
        node.args.any? { |arg| heap_buffer?(arg.type?) }
       return "Writing a Str into a String::Builder or " \

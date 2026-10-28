@@ -331,8 +331,12 @@ class IyiIO
   # One write of the line on a sync stream: the text and its newline as two
   # let another thread's line in between - 750 of 80,000 lines from four.
   def write_line(text : String = "") : Nil
-    write(@sync ? text + "\n" : text)
-    write("\n") unless @sync
+    if @sync
+      print(Str.build(text.bytesize + 1) { |writer| writer << text << '\n' })
+    else
+      write(text)
+      write("\n")
+    end
   end
 
   def print(text : String) : Nil

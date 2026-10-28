@@ -27,7 +27,7 @@ def exercise
   next_view = refill(b)
   raise "refill result" unless next_view == "def"
   # These results are alternatives, consumed before the following clear.
-  if Program.args.empty?
+  if Program.arguments.empty?
     b.finish
   else
     refill(b)

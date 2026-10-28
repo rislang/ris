@@ -13,7 +13,7 @@ tape do
       b.field "inner" do
         b.object { 100.times { |i| b.field "k#{i}", i } }
       end
-      100.times { |i| b.field "k#{i}", i }
+      300.times { |i| b.field "k#{i}", i }
       puts "nested keys are no repeat"
       b.field "k77", 0
     end

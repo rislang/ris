@@ -14,17 +14,11 @@ def hold(i : Int32) : Int64
   total
 end
 
-def start(g : IyiGroup, i : Int32) : IyiTask(Int64)
-  g.spawn { hold(i) }
-end
-
 N = 1000
 group do |g|
-  tasks = Array(IyiTask(Int64)).new(N)
-  i = 0
-  while i < N
-    tasks << start(g, i)
-    i = i + 1
+  tasks = Ary(IyiTask(Int64)).new(N)
+  N.times do |i|
+    tasks << g.spawn { hold(i) }
   end
   sleep(50)
   sum = 0_i64

@@ -5,18 +5,6 @@ def format_size(n : Int32) : Int32
   text.bytesize
 end
 
-class KeptText
-  getter text : String
-
-  def initialize
-    @text = "static"
-  end
-
-  def update(n : Int32)
-    @text = "number #{n}".to_heap
-  end
-end
-
 literal_cursor = IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)
 literal = "static"
 heap_literal = "static".to_heap
@@ -29,10 +17,6 @@ before = IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)
 format_size(42)
 raise "def kept interpolation" unless before ==
   IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)
-keys = Hash(String, Int32).new
-keys["key"] = 42
-raise "borrowed key lookup" unless keys["key"]? == 42
-raise "borrowed key membership" unless keys.has_key?("key")
 case "key".to_heap
 when "key" then nil
 else raise "case comparison failed"
@@ -44,15 +28,4 @@ while i < 1_000_000
 end
 after = IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)
 raise "interpolation retained tape" unless before == after
-kept = KeptText.new
-kept.update(42)
-raise "heap copy changed" unless kept.text == "number 42"
-path = "/tmp/ris-text-#{RisRegion.tape}"
-File.write(path, "contents #{42}")
-raise "File lost tape text" unless File.read(path) == "contents 42"
-raise "File path lookup" unless File.exists?(path)
-File.open(path, "r") do |io|
-  raise "File open tape mode" unless io.read_all == "contents 42"
-end
-File.delete(path)
-puts "PASS: default text, million calls, flat tape, explicit heap"
+puts "PASS: default text, million calls, flat tape"

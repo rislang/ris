@@ -1,0 +1,7 @@
+module test/ris/retained_interpolation
+
+pub struct RisRetainedInterpolation
+  def self.retained(value : Int32) : String
+    "retained #{value}"
+  end
+end

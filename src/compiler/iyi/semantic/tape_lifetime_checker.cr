@@ -194,7 +194,8 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
   end
 
   def visit(node : Assign)
-    if @scope && node.target.is_a?(Var) && (type = node.value.type?) && TapeChecker.tape_in(@program, type)
+    if @scope && node.target.is_a?(Var) && !program_copy?(node.value) &&
+       (type = node.value.type?) && TapeChecker.tape_in(@program, type)
       name = node.target.as(Var).name
       meta = @block.try(&.vars.try(&.[name]?)) || @owner.try(&.vars.try(&.[name]?))
       context = meta.try &.context
@@ -203,6 +204,17 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
       end
     end
     true
+  end
+
+  # An explicit program copy outlives every request/local tape scope.
+  # Match the typed runtime operation, never a user method with that name.
+  private def program_copy?(node : ASTNode) : Bool
+    return false unless node.is_a?(Call) && node.name == "copy_to"
+    return false unless node.args.first?.try(&.type?.try(&.to_s)) ==
+                        "Program::TapeOwner"
+    @graph.targets(node).try(&.all? do |target|
+      TapeRules.runtime?(@program, target.location)
+    end) || false
   end
 
   def visit(node : Return)

@@ -3,7 +3,7 @@ tape do
   name = "tape"
   puts "on the #{name}: #{42} #{-7_i64} #{1.5} #{'x'} #{nil}#{true}"
   print "no newline #{name}\n"
-  [1, 2].each { |i| puts "item #{i}" }
+  Ary(Int32){1, 2}.each { |i| puts "item #{i}" }
   puts "ends its line\n"
 end
 proc = ->(i : Int32) { puts "heap #{i}" }
@@ -13,8 +13,8 @@ tape do
   later = ->(i : Int32) { puts "no tape when called #{i}"; i }
 end
 later.call(4)
-# Locals keep tape text; retained text leaves through explicit .to_heap.
-kept = "".to_heap
+# Locals keep tape text; retained text is copied onto Program.tape.
+kept = ""
 tape do
   name = "var"
   line = "through a #{name}"
@@ -22,7 +22,7 @@ tape do
   line = "again #{1}"
   print line
   puts
-  kept = "kept #{2}".to_heap
+  kept = "kept #{2}".copy_to(Program.tape)
   puts kept
 end
 puts kept

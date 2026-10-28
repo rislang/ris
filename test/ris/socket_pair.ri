@@ -5,26 +5,26 @@ module socket_pair
 
 import std/socket::{IyiSocket}
 
-def read_all(socket : IyiSocket, count : Int32) : String
-  text = "".to_heap
-  while text.bytesize < count
-    chunk = socket.read(65536).or_panic
-    break if chunk.empty?
-    text = text + chunk
+def read_all(socket : IyiSocket, count : Int32) : Str
+  writer = Str::Builder.new(count)
+  while writer.length < count
+    got = socket.read(writer, count - writer.length).or_panic
+    break if got == 0
   end
-  text
+  writer.finish
 end
 
-big = ("b" * 1048576).to_heap
+big = ("b" * 1048576)
 server = IyiSocket.listen(0)
 client = IyiSocket.connect("127.0.0.1", server.local_port).or_panic
 conn = server.accept.or_panic
-got = "".to_heap
+matches = false
 group do |g|
   reader = g.spawn do
-    text = read_all(client, 5 + 3 + 5 + big.bytesize)
+    expected = "head:abctape:" + ("b" * 1048576)
+    text = read_all(client, expected.bytesize)
     client.close
-    text
+    text == expected
   end
   conn.write("head:", "abc").or_panic
   tape do
@@ -32,12 +32,12 @@ group do |g|
     body = Str.build(big.bytesize) { |w| w.append(big) }
     conn.write(head, body).or_panic
   end
-  got = reader.value.or_panic
+  matches = reader.value.or_panic
 end
 conn.close
 server.close
-if got == "head:abc" + "tape:" + big
+if matches
   puts "PASS: two pieces in one write, String and on the tape, 1 MiB"
 else
-  puts "FAILED: #{got.bytesize} bytes"
+  raise "socket bytes differ"
 end

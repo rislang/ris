@@ -23,7 +23,7 @@ def forward(text : String, kept : KeptText) : Nil
   kept.store(text)
 end
 
-def literal_list(text : String) : Array(String)
+def literal_list(text : String) : Ary(String)
   [text]
 end
 
