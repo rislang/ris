@@ -247,7 +247,7 @@ module Iyi
     "String"       => "`String` is the name here.",
     "Result"    => "There is no `Result`: an error is a member of the return type's union, `Int32 | ParseError`, with `impl Error for ParseError` (SPEC.md III.1).",
     "Option"    => "There is no `Option`: a value that may be nil is `T?`, `Int32?`.",
-    "Mutex"     => "There is no `Mutex`: an `Atomic(Int32)` keeps a shared count (SPEC.md III.4.10), and a `Channel` hands values between tasks.",
+    "Mutex"     => "There is no `Mutex`: an `Atomic(Int32)` keeps a shared count (SPEC.md III.4.10), and one owner task keeps shared state that the others send RisBoard messages to.",
     "Thread"    => "A kernel thread is `IyiThread.start { ... }` (SPEC.md III.4.11); a task is `g.spawn { ... }` inside `group do |g| ... end`.",
     "WaitGroup" => "A `group do |g| ... end` waits for every task it started (SPEC.md III.4.9).",
   }

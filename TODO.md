@@ -67,8 +67,8 @@ part B.
     TlsServerConfig/TlsConfig into a server task: needs a Copyable or
     Share config, or one server task per section as binding_server),
     udp:274 (UdpSocket shared by a receive task and the caller), dns:951
-    (server task and client share `log`, sockets), mutex (a tape Mutex
-    in a joined task: needs a rule for Share(owns) tape types), sse
+    (server task and client share `log`, sockets), mutex (bench
+    deleted with Mutex, 2026-10-29), sse
     (std/sse.iyi:546 parser), websocket (std/websocket.iyi:380 chosen).
   - not captures: http_latency, http_resume, http_stop stop at
     std/http.iyi:6052 (`@failure = got`, program-tape store); socket,
@@ -271,9 +271,8 @@ first):
     the rollback, not the hook. A struct leaf now injects the failure.
   * slice_pool: fixed. Array growth uses __relocate_slice; links are
     refused where a run joins a pool (nested Array, test nested_links).
-    flat.ri still fails: the shrink checker counts Array::Link as a view
-    (tape_shrink_checker.cr:860), so push after next_link is refused.
-    A link is an index and survives growth: drop it from that list.
+    flat.ri: fixed; the shrink checker no longer counts Array::Link
+    as a view.
   * pointer_unsafe and ffi_marked: done. An @[Ffi] module passes
     `text.to_unsafe` straight to a lib fun; elsewhere it stays refused
     (pointer_unsafe_to_unsafe, ffi_to_unsafe_stored).
@@ -287,19 +286,18 @@ first):
     http_prefork at http.iyi:6052; samples/ris/request at :2627.
 * growing_owner: fixed; an owner held in an Array or RisTree (also a
   SlicePool's @data) gets the container refusal.
-* samples/ris/web.ri does not build: std/http.iyi:2627
-  (`headers[host_name] = named`) is refused as a Hash shrink with a live
-  view, after about 7 minutes of checking (seen 2026-10-29 on the base).
-* The server programs (answer, server_groups, web, http_continue) now
-  all stop at one shrink refusal: tape_connection's `conn.fill`
-  (http.iyi:1806, h2_preface? at 2222 in http_continue) "shrinks"
-  Conn.@state.@deadline_what.@stream.@tls via TLS take_handshake's
-  `@handshake.clear` with a live view of the same root. FIELD_DEPTH 4
-  folds the TLS fields onto one root, and the SocketError stored in
-  `@state.value.failure` from a TLS read is taken as a view of it.
-  FIELD_DEPTH 6 removes the fold but checking exceeds 15 minutes. Fix:
-  a String built by interpolation or a fresh error views no receiver
-  storage, or fold by type, not depth. http_continue.sh exports Conn.
+* Server programs (answer, server_groups, web, server_owners, serve,
+  http_prefork) pass the shrink checker in about 75 s; request builds.
+  Fixed: a callee field mapped onto a base whose type lacks it (a
+  String) is dropped, not folded (conn.fill); a branch ending in
+  `return` bounds its shrinks; an If with one leaving branch guards
+  what follows; Host replaced while filling the table (:2627); H2
+  flush clears after the write. They now stop at the to_unsafe rule
+  in std (38e98018d): compress.iyi:426 keeps `data.to_unsafe` in a
+  field (http.iyi's reads moved to byte_at).
+* http_continue.sh stops in 11 s at http.iyi:2218 serve_h1: "live
+  view of Conn.@state.@stream ... held block -> call (opaque
+  contract)".
 * Compiler specs (run with LLVM_CONFIG set to LLVM 23; without it
   bin/crystal links the system LLVM 21): no signal 11 any more. Left:
   compiler_spec lines 484, 522, 568 use Channel and select (port to

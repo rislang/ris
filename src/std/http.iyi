@@ -996,8 +996,7 @@ pub class BodyReader
         break if got.bytesize == 0
         first = first + got
       end
-      p = first.to_unsafe
-      zlib = first.bytesize >= 2 && (p[0] & 15_u8) == 8_u8 && ((p[0].to_i32 << 8) | p[1].to_i32) % 31 == 0
+      zlib = first.bytesize >= 2 && (first.byte_at(0) & 15_u8) == 8_u8 && ((first.byte_at(0).to_i32 << 8) | first.byte_at(1).to_i32) % 31 == 0
       envelope = Envelope::Raw unless zlib
       @first = first
     end
@@ -1040,14 +1039,9 @@ pub class BodyReader
     end
     return "" if pieces.empty?
     return pieces[0] if pieces.size == 1
-    String.new(total.to_i32) do |whole|
-      at = 0
-      pieces.each do |piece|
-        (whole + at.to_i64).copy_from(piece.to_unsafe, piece.bytesize)
-        at = at + piece.bytesize
-      end
-      nil
-    end
+    whole = ""
+    pieces.each { |piece| whole << piece }
+    whole
   end
 
   # Reads past the rest of the body, *limit* bytes at most: whether it
@@ -2312,7 +2306,7 @@ pub struct Server
     while seen < wanted.bytesize
       return false if conn.available <= seen && !conn.fill
       while seen < conn.available && seen < wanted.bytesize
-        return false if conn.peek(seen) != wanted.to_unsafe[seen]
+        return false if conn.peek(seen) != wanted.byte_at(seen)
         seen = seen + 1
       end
     end
@@ -2603,20 +2597,15 @@ pub struct Server
     target = head.target.to_heap
     version = head.version.to_heap
     headers = {} of String => String
-    head.each_field { |name, value| headers[name] = value }
-    host_name = "Host"
-    headers.each do |name, _|
-      host_name = name if HTTP.same_name?(name, "Host")
-    end
     # The absolute form (RFC 9112 §3.2.2), which a server must accept,
     # names the path after the authority: `http://h/x?q` is path `/x` and
     # query `q`, as the other library reads it, where the block was handed
     # `http://h/x` as the path.
     origin = target
+    host = nil.as(String?)
     if authority = HTTP.absolute_form(target)
-      p = target.to_unsafe
       after_authority = authority
-      while after_authority < target.bytesize && p[after_authority] != 47_u8 && p[after_authority] != 63_u8
+      while after_authority < target.bytesize && target.byte_at(after_authority) != 47_u8 && target.byte_at(after_authority) != 63_u8
         after_authority = after_authority + 1
       end
       # And its authority is the host, whatever the Host line says: `GET
@@ -2624,9 +2613,23 @@ pub struct Server
       # it was handed the line's, and had no way to the target's.
       named = target[authority, after_authority - authority]
       return HTTPError.new("not a host: #{named.inspect}") unless named.bytesize > 0 && HTTP.host?(named)
-      headers[host_name] = named
+      host = named
       origin = target[after_authority, target.bytesize - after_authority]
       origin = "/" + origin if origin.bytesize == 0 || origin.starts_with?("?")
+    end
+    # The table is filled once, the Host line's value replaced by the
+    # target's authority: no key of the table is held while it grows.
+    named_host = false
+    head.each_field do |name, value|
+      if host && HTTP.same_name?(name, "Host")
+        named_host = true
+        headers[name] = host
+      else
+        headers[name] = value
+      end
+    end
+    if host && !named_host
+      headers["Host"] = host
     end
     path = origin
     query = nil.as(String?)
@@ -4068,9 +4071,8 @@ pub struct HTTP
   # capitals, which std/idna's IDNA2008 refuses - and carried by
   # `IDNA.to_ascii`; as it is when it has no such form.
   private def self.ascii_name(host : String) : String
-    raw = host.to_unsafe
     at = 0
-    while at < host.bytesize && raw[at] < 128_u8
+    while at < host.bytesize && host.byte_at(at) < 128_u8
       at = at + 1
     end
     return host if at == host.bytesize || !Unicode.valid?(host)
@@ -4122,16 +4124,15 @@ pub struct HTTP
   # Go's `net.SplitHostPort`: `host:port` or `[host]:port`, the port
   # possibly empty; nil where it has no port, or too many colons.
   private def self.split_host_port(text : String) : {String, String}?
-    raw = text.to_unsafe
     n = text.bytesize
     colon = -1
     i = 0
     while i < n
-      colon = i if raw[i] == 58_u8
+      colon = i if text.byte_at(i) == 58_u8
       i = i + 1
     end
     return nil if colon < 0
-    if n > 0 && raw[0] == 91_u8
+    if n > 0 && text.byte_at(0) == 91_u8
       close = text.index(']')
       return nil unless close && close + 1 == colon
       host = text[1, close - 1]
@@ -4386,15 +4387,14 @@ pub struct HTTP
   # and is read as 1, unless it is all zeros.
   private def self.weight_of(text : String) : Int32
     return 0 if zero_weight?(text)
-    p = text.to_unsafe
     n = text.bytesize
-    return 1000 unless p[0] == 48_u8 && n > 2 && n <= 5 && p[1] == 46_u8
+    return 1000 unless text.byte_at(0) == 48_u8 && n > 2 && n <= 5 && text.byte_at(1) == 46_u8
     value = 0
     scale = 100
     i = 2
     while i < n
-      return 1000 unless p[i] >= 48_u8 && p[i] <= 57_u8
-      value = value + (p[i] - 48_u8).to_i32 * scale
+      return 1000 unless text.byte_at(i) >= 48_u8 && text.byte_at(i) <= 57_u8
+      value = value + (text.byte_at(i) - 48_u8).to_i32 * scale
       scale = scale // 10
       i = i + 1
     end
@@ -4405,11 +4405,10 @@ pub struct HTTP
   # §12.4.2); anything else is some preference, and a `q` that is not a
   # number is not a refusal either.
   private def self.zero_weight?(text : String) : Bool
-    p = text.to_unsafe
-    return false unless text.bytesize > 0 && p[0] == 48_u8
+    return false unless text.bytesize > 0 && text.byte_at(0) == 48_u8
     i = 1
     while i < text.bytesize
-      return false unless p[i] == 48_u8 || p[i] == 46_u8
+      return false unless text.byte_at(i) == 48_u8 || text.byte_at(i) == 46_u8
       i = i + 1
     end
     true
@@ -4435,7 +4434,7 @@ pub struct HTTP
   # *n* in lowercase hexadecimal: a chunk's size line.
   def self.hex_text(n : Int64) : String
     return "0" if n == 0
-    digits = "0123456789abcdef".to_unsafe
+    digits = "0123456789abcdef"
     count = 0
     probe = n
     while probe > 0
@@ -4446,7 +4445,7 @@ pub struct HTTP
       i = count - 1
       value = n
       while i >= 0
-        buf[i] = digits[(value & 15_i64).to_i32]
+        buf[i] = digits.byte_at((value & 15_i64).to_i32)
         value = value >> 4
         i = i - 1
       end
@@ -4550,7 +4549,7 @@ pub struct HTTP
   end
 
   private def self.folded?(line : String) : Bool
-    line.bytesize > 0 && (line.to_unsafe[0] == 32_u8 || line.to_unsafe[0] == 9_u8)
+    line.bytesize > 0 && (line.byte_at(0) == 32_u8 || line.byte_at(0) == 9_u8)
   end
 
   # A `Content-Length` as a number, or nil when it is not one. Repeated
@@ -4568,11 +4567,10 @@ pub struct HTTP
     # Digits and nothing else (RFC 9110 §8.6): `to_i?` took a sign, and
     # `+2` was a length.
     return nil unless first.bytesize > 0 && digits?(first)
-    p = first.to_unsafe
     n = 0_i64
     i = 0
     while i < first.bytesize
-      n = n * 10_i64 + (p[i] - 48_u8).to_i64
+      n = n * 10_i64 + (first.byte_at(i) - 48_u8).to_i64
       return 2147483648_i64 if n > 2147483647_i64
       i = i + 1
     end
@@ -4614,20 +4612,18 @@ pub struct HTTP
   # Where *text* goes on at *from* past the empty lines there: what a
   # server skips before a request line (RFC 9112 §2.2).
   def self.past_empty_lines(text : String, from : Int32) : Int32
-    p = text.to_unsafe
     at = from
-    while at + 1 < text.bytesize && p[at] == 13_u8 && p[at + 1] == 10_u8
+    while at + 1 < text.bytesize && text.byte_at(at) == 13_u8 && text.byte_at(at + 1) == 10_u8
       at = at + 2
     end
     at
   end
 
   def self.find_headers_end(text : String, from : Int32 = 0) : Int32?
-    p = text.to_unsafe
     n = text.bytesize
     i = from
     while i + 3 < n
-      if p[i] == 13_u8 && p[i + 1] == 10_u8 && p[i + 2] == 13_u8 && p[i + 3] == 10_u8
+      if text.byte_at(i) == 13_u8 && text.byte_at(i + 1) == 10_u8 && text.byte_at(i + 2) == 13_u8 && text.byte_at(i + 3) == 10_u8
         return i
       end
       i = i + 1
@@ -4637,12 +4633,11 @@ pub struct HTTP
 
   def self.split_crlf(text : String) : Array(String)
     lines = [] of String
-    p = text.to_unsafe
     n = text.bytesize
     start = 0
     i = 0
     while i < n
-      if p[i] == 13_u8 && i + 1 < n && p[i + 1] == 10_u8
+      if text.byte_at(i) == 13_u8 && i + 1 < n && text.byte_at(i + 1) == 10_u8
         lines << text[start, i - start]
         i = i + 2
         start = i
@@ -4672,10 +4667,9 @@ pub struct HTTP
   # A token (RFC 9110 §5.6.2): what a method or a field name is made of.
   def self.token?(text : String) : Bool
     return false if text.bytesize == 0
-    p = text.to_unsafe
     i = 0
     while i < text.bytesize
-      c = p[i]
+      c = text.byte_at(i)
       letter = (c >= 65_u8 && c <= 90_u8) || (c >= 97_u8 && c <= 122_u8)
       digit = c >= 48_u8 && c <= 57_u8
       mark = c == 33_u8 || (c >= 35_u8 && c <= 39_u8) ||
@@ -4689,10 +4683,9 @@ pub struct HTTP
   end
 
   def self.has_break?(text : String) : Bool
-    p = text.to_unsafe
     i = 0
     while i < text.bytesize
-      return true if p[i] == 13_u8 || p[i] == 10_u8
+      return true if text.byte_at(i) == 13_u8 || text.byte_at(i) == 10_u8
       i = i + 1
     end
     false
@@ -4701,10 +4694,9 @@ pub struct HTTP
   # A byte a request line may not carry: a blank, which ends its part, or
   # a control character.
   private def self.has_space_or_control?(text : String) : Bool
-    p = text.to_unsafe
     i = 0
     while i < text.bytesize
-      return true if p[i] <= 32_u8 || p[i] == 127_u8
+      return true if text.byte_at(i) <= 32_u8 || text.byte_at(i) == 127_u8
       i = i + 1
     end
     false
@@ -4713,25 +4705,24 @@ pub struct HTTP
   # *target* with each byte past 127 written `%XX`, as a browser and Go's
   # client send it; the target itself when it has none.
   private def self.ascii_target(target : String) : String
-    p = target.to_unsafe
     n = target.bytesize
     high = 0
     i = 0
     while i < n
-      high = high + 1 if p[i] > 127_u8
+      high = high + 1 if target.byte_at(i) > 127_u8
       i = i + 1
     end
     return target if high == 0
-    digits = "0123456789ABCDEF".to_unsafe
+    digits = "0123456789ABCDEF"
     String.new(n + high * 2) do |buf|
       at = 0
       i = 0
       while i < n
-        b = p[i]
+        b = target.byte_at(i)
         if b > 127_u8
           buf[at] = 37_u8
-          buf[at + 1] = digits[b.to_i32 // 16]
-          buf[at + 2] = digits[b.to_i32 % 16]
+          buf[at + 1] = digits.byte_at(b.to_i32 // 16)
+          buf[at + 2] = digits.byte_at(b.to_i32 % 16)
           at = at + 3
         else
           buf[at] = b
@@ -4745,10 +4736,9 @@ pub struct HTTP
   # A control character other than a tab, or DEL: what a field value may
   # not hold (RFC 9110 §5.5), nor a request target or a reason phrase.
   def self.control?(text : String) : Bool
-    p = text.to_unsafe
     i = 0
     while i < text.bytesize
-      return true if (p[i] < 32_u8 && p[i] != 9_u8) || p[i] == 127_u8
+      return true if (text.byte_at(i) < 32_u8 && text.byte_at(i) != 9_u8) || text.byte_at(i) == 127_u8
       i = i + 1
     end
     false
@@ -4769,10 +4759,9 @@ pub struct HTTP
   # authority (RFC 9112 §3.2). A blank, a `/`, an `@` - the bytes another
   # host or a path begins with - are not.
   def self.host?(text : String) : Bool
-    p = text.to_unsafe
     i = 0
     while i < text.bytesize
-      c = p[i]
+      c = text.byte_at(i)
       letter = (c >= 65_u8 && c <= 90_u8) || (c >= 97_u8 && c <= 122_u8)
       digit = c >= 48_u8 && c <= 57_u8
       # ! $ % & ' ( ) * + , - . : ; = [ ] _ ~
@@ -4786,11 +4775,10 @@ pub struct HTTP
   end
 
   private def self.find_crlf(text : String, from : Int32) : Int32?
-    p = text.to_unsafe
     n = text.bytesize
     i = from
     while i + 1 < n
-      return i if p[i] == 13_u8 && p[i + 1] == 10_u8
+      return i if text.byte_at(i) == 13_u8 && text.byte_at(i + 1) == 10_u8
       i = i + 1
     end
     nil
@@ -4800,11 +4788,10 @@ pub struct HTTP
   # one past what an Int32 holds.
   def self.hex(text : String) : Int32?
     return nil if text.bytesize == 0
-    p = text.to_unsafe
     value = 0
     i = 0
     while i < text.bytesize
-      c = p[i]
+      c = text.byte_at(i)
       digit = if c >= 48_u8 && c <= 57_u8
                 (c - 48_u8).to_i32
               elsif c >= 97_u8 && c <= 102_u8
@@ -4829,7 +4816,7 @@ pub struct HTTP
     # to 099; `HTTP/x` was a version, and a reason could hold a bare CR.
     return HTTPError.new("not a status line: #{line}") unless line.starts_with?("HTTP/")
     sp1 = line.index(' ')
-    return HTTPError.new("not a status line: #{line}") unless sp1 && sp1 == 8 && digits?(line[5, 1]) && line.to_unsafe[6] == 46_u8 && digits?(line[7, 1])
+    return HTTPError.new("not a status line: #{line}") unless sp1 && sp1 == 8 && digits?(line[5, 1]) && line.byte_at(6) == 46_u8 && digits?(line[7, 1])
     rest = line[sp1 + 1, line.bytesize - sp1 - 1]
     sp2 = rest.index(' ')
     code_text = sp2 ? rest[0, sp2] : rest
@@ -4841,10 +4828,9 @@ pub struct HTTP
   end
 
   private def self.digits?(text : String) : Bool
-    p = text.to_unsafe
     i = 0
     while i < text.bytesize
-      return false unless p[i] >= 48_u8 && p[i] <= 57_u8
+      return false unless text.byte_at(i) >= 48_u8 && text.byte_at(i) <= 57_u8
       i = i + 1
     end
     true
@@ -4908,7 +4894,6 @@ pub struct HTTP
   # it has not all arrived, or why it is not a chunked body. What
   # `decode_chunked` will then read whole.
   def self.chunked_end(text : String, from : Int32 = 0) : Int32 | String | Nil
-    p = text.to_unsafe
     n = text.bytesize
     i = from
     while true
@@ -4934,7 +4919,7 @@ pub struct HTTP
       # panicked.
       return nil if size > n - i - 2
       i = i + size
-      return "a chunk is not followed by CRLF" unless p[i] == 13_u8 && p[i + 1] == 10_u8
+      return "a chunk is not followed by CRLF" unless text.byte_at(i) == 13_u8 && text.byte_at(i + 1) == 10_u8
       i = i + 2
     end
   end
@@ -4942,13 +4927,12 @@ pub struct HTTP
   # Without the blanks at either end (RFC 9112 §5.1: field values are
   # trimmed of the whitespace around them).
   def self.trim(s : String) : String
-    p = s.to_unsafe
     first = 0
     last = s.bytesize
-    while first < last && (p[first] == 32_u8 || p[first] == 9_u8)
+    while first < last && (s.byte_at(first) == 32_u8 || s.byte_at(first) == 9_u8)
       first = first + 1
     end
-    while last > first && (p[last - 1] == 32_u8 || p[last - 1] == 9_u8)
+    while last > first && (s.byte_at(last - 1) == 32_u8 || s.byte_at(last - 1) == 9_u8)
       last = last - 1
     end
     s[first, last - first]
@@ -5031,10 +5015,9 @@ pub struct HTTP
 
   def self.same_bytes?(p : Pointer(UInt8), count : Int32, text : String) : Bool
     return false unless count == text.bytesize
-    t = text.to_unsafe
     i = 0
     while i < count
-      return false unless p[i] == t[i]
+      return false unless p[i] == text.byte_at(i)
       i = i + 1
     end
     true
@@ -5167,7 +5150,7 @@ pub class Multipart
         return more unless more.is_a?(Bool)
         return HTTPError.new("multipart body ends after a boundary") unless more
       end
-      c = @held.to_unsafe[skip]
+      c = @held.byte_at(skip)
       break unless c == 32_u8 || c == 9_u8
       skip = skip + 1
     end
@@ -6062,9 +6045,10 @@ class H2Connection
   def flush : Bool
     return @failure.nil? if @pending.empty?
     whole = @pending.size == 1 ? @pending[0] : @pending.join("")
+    # Written before the clear: `whole` may be the first element.
+    got = @conn.transport.write(whole)
     @pending.clear
     @pending_size = 0
-    got = @conn.transport.write(whole)
     return true if got.is_a?(Int32)
     # This connection outlives the request tape the error was made on:
     # keep only its scalar code, never its request-tape strings.
@@ -6492,9 +6476,9 @@ class H2Connection
         v = f.value
         return nil unless v.bytesize == 3
         v.each_byte { |b| return nil unless b >= 48_u8 && b <= 57_u8 }
-        status = ((v.is_a?(String) ? v.to_unsafe : v)[0] - 48_u8).to_i32 * 100 +
-                 ((v.is_a?(String) ? v.to_unsafe : v)[1] - 48_u8).to_i32 * 10 +
-                 ((v.is_a?(String) ? v.to_unsafe : v)[2] - 48_u8).to_i32
+        status = ((v.is_a?(String) ? v.byte_at(0) : v[0]) - 48_u8).to_i32 * 100 +
+                 ((v.is_a?(String) ? v.byte_at(1) : v[1]) - 48_u8).to_i32 * 10 +
+                 ((v.is_a?(String) ? v.byte_at(2) : v[2]) - 48_u8).to_i32
       else
         regular = true
         return nil if field_flaw(f)
@@ -6518,8 +6502,8 @@ class H2Connection
     v = f.value
     v.each_byte { |b| return "a value holding NUL, CR or LF" if b == 0_u8 || b == 13_u8 || b == 10_u8 }
     if v.bytesize > 0
-      first = (v.is_a?(String) ? v.to_unsafe : v)[0]
-      last = (v.is_a?(String) ? v.to_unsafe : v)[v.bytesize - 1]
+      first = (v.is_a?(String) ? v.byte_at(0) : v[0])
+      last = (v.is_a?(String) ? v.byte_at(v.bytesize - 1) : v[v.bytesize - 1])
       return "a value beginning or ending in white space" if first == 32_u8 || first == 9_u8 || last == 32_u8 || last == 9_u8
     end
     nil
@@ -6651,8 +6635,8 @@ class H2Connection
   # past and HTTP/2 refuses.
   def self.trimmed(value : String) : String
     return value if value.empty?
-    first = value.to_unsafe[0]
-    last = value.to_unsafe[value.bytesize - 1]
+    first = value.byte_at(0)
+    last = value.byte_at(value.bytesize - 1)
     return value unless first == 32_u8 || first == 9_u8 || last == 32_u8 || last == 9_u8
     HTTP.trim(value)
   end
@@ -6702,8 +6686,7 @@ class H2Connection
   end
 
   def self.read_u32(text : String, at : Int32) : Int32
-    p = text.is_a?(String) ? text.to_unsafe : text
-    (p[at].to_i32 << 24) | (p[at + 1].to_i32 << 16) | (p[at + 2].to_i32 << 8) | p[at + 3].to_i32
+    (text.byte_at(at).to_i32 << 24) | (text.byte_at(at + 1).to_i32 << 16) | (text.byte_at(at + 2).to_i32 << 8) | text.byte_at(at + 3).to_i32
   end
 
   def self.error_name(code : Int32) : String

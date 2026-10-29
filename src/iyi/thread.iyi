@@ -17,8 +17,8 @@
 #
 # What a thread is not, said here rather than found: it is not a task. No
 # group owns it and nothing cancels it. What crosses threads is what
-# `Share` (SPEC.md III.4.4) lets the block capture: `Atomic(T)`, state
-# behind a `Mutex(T)` (std/mutex), immutable values, RisBoard messages
+# `Share` (SPEC.md III.4.4) lets the block capture: `Atomic(T)`,
+# immutable values, RisBoard messages
 # (TAPE_SPEC 5.2), and memory the program keeps straight
 # itself. A thread gets a scheduler state when it starts and a heap cache
 # on first touch, so it may spawn fibers and it allocates without a lock;

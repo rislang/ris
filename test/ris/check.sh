@@ -127,6 +127,7 @@ fi
 expect task_handoff_reused 'the task owns it now'
 expect select_gone 'ris has no select'
 expect channel_gone 'undefined constant Channel'
+expect mutex_gone 'ris has no std/mutex'
 
 # Timed joins broadcast completion without cancelling the retained task.
 out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/task_wait.ri 2>&1)
@@ -663,7 +664,7 @@ heap_trap borrowed_text
 
 expect class_field   "cannot use outer tape value"
 expect class_task "this block becomes a proc"
-expect class_share "pass Share scalar data"
+expect class_share 'ClassShareValue is a tape type'
 expect class_finalize "tape class instances cannot finalize"
 expect class_inherited_finalize "tape class instances cannot finalize"
 expect class_escape "is a variable of the code around this tape block"

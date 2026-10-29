@@ -3,7 +3,9 @@
 # Specialized call summaries converge before checking view liveness.
 class Iyi::TapeShrinkChecker
   alias Guards = Array(Tuple(UInt64, Bool))
-  record View, root : UInt64, born : Int32, guards : Guards = Guards.new
+  # An index view (Array::Link) survives growth but not a shrink.
+  record View, root : UInt64, born : Int32, guards : Guards = Guards.new,
+    index : Bool = false
   # Roots name storage handles; views retain the storage a value borrows.
   # Holder slots carry those borrows separately so replacement can kill them.
   record Value, roots : Array(UInt64), views : Array(View),
@@ -12,7 +14,7 @@ class Iyi::TapeShrinkChecker
   record Use, views : Array(View), node : ASTNode, guards : Guards,
     holder : String = ""
   record Shrink, roots : Array(UInt64), at : Int32, node : Call, chain : String,
-    guards : Guards, growth : Bool = false
+    guards : Guards, growth : Bool = false, last_use : Int32? = nil
   record Summary, seeds : Array(UInt64), shrinks : Hash(UInt64, String), result : Value,
     stores : Hash(UInt64, Value) = Hash(UInt64, Value).new,
     retains : Array(UInt64) = [] of UInt64,
@@ -76,6 +78,9 @@ class Iyi::TapeShrinkChecker
   @callback_chain = [] of String
   @active_procs = Set(UInt64).new
   @guards = Guards.new
+  # Set by an If one of whose branches never falls through: the guard of
+  # the branch that does, which the rest of its block runs under.
+  @fallthrough = Guards.new
   @root_births = Hash(UInt64, Int32).new
   @root_types = Hash(UInt64, Type).new
   @root_scopes = Hash(UInt64, Array(UInt64)).new
@@ -327,7 +332,7 @@ class Iyi::TapeShrinkChecker
                          inputs : Array(Value), allocation : UInt64? = nil) : Value
     roots = v.roots.flat_map { |r| translate(r, summary, inputs, allocation) }.uniq
     views = v.views.flat_map do |v|
-      translate(v.root, summary, inputs, allocation).map { |r| view(r) }
+      translate(v.root, summary, inputs, allocation).map { |r| view(r).copy_with(index: v.index) }
     end
     Value.new(roots, views)
   end
@@ -393,6 +398,19 @@ class Iyi::TapeShrinkChecker
     use(EMPTY, node)
   end
 
+  # A branch that ends in `return` leaves the def: nothing used after it
+  # in the def's text runs after its shrinks (a caller sees them through
+  # the summary). Uses inside the branch still count.
+  private def leave_branch(branch : ASTNode, from : Int32) : Nil
+    return unless @checking
+    last = branch.is_a?(Expressions) ? branch.expressions.last? : branch
+    return unless last.is_a?(Return)
+    (from...@shrinks.size).each do |i|
+      shrink = @shrinks[i]
+      @shrinks[i] = shrink.copy_with(last_use: shrink.last_use || @uses.size)
+    end
+  end
+
   private def compatible?(a : Guards, b : Guards) : Bool
     !a.any? { |x| b.any? { |y| x[0] == y[0] && x[1] != y[1] } }
   end
@@ -437,6 +455,52 @@ class Iyi::TapeShrinkChecker
     end
   end
 
+  # Whether *base*'s type, when known, has the instance variable *name*.
+  # Unknown types and synthetic names fit, keeping the effect.
+  private def field_fits?(base : UInt64, name : String) : Bool
+    return true unless name.starts_with?('@') && !name.starts_with?("@__")
+    type = field_type(base)
+    return true unless type
+    type_fits?(type.remove_typedef, name)
+  end
+
+  # root_type, seeing through pointers and unions on the way down.
+  private def field_type(root : UInt64) : Type?
+    if type = @root_types[root]?
+      return type
+    end
+    parent = @parents[root]?
+    return nil unless parent
+    owners = [field_type(parent[0]).try(&.remove_typedef)].compact
+    found = [] of Type
+    while owner = owners.pop?
+      case owner
+      when UnionType
+        owner.union_types.each { |member| owners << member.remove_typedef }
+      when PointerInstanceType
+        owners << owner.element_type.remove_typedef
+      when InstanceVarContainer
+        owner.instance_vars[parent[1]]?.try(&.type?).try { |t| found << t }
+      end
+    end
+    found.size == 1 ? found[0] : nil
+  end
+
+  private def type_fits?(type : Type, name : String) : Bool
+    case type
+    when UnionType
+      type.union_types.any? { |member| type_fits?(member.remove_typedef, name) }
+    when PointerInstanceType
+      type_fits?(type.element_type.remove_typedef, name)
+    when NilType
+      false
+    when InstanceVarContainer
+      type.instance_vars.has_key?(name)
+    else
+      true
+    end
+  end
+
   private def seed_env(target : Def, seeds : Array(UInt64)) : Env
     env = Env.new
     env["self"] = Value.new([seeds[0]], [] of View)
@@ -457,7 +521,12 @@ class Iyi::TapeShrinkChecker
       input = inputs[i]? || EMPTY
       input.roots.empty? ? input.views.map(&.root) : input.roots
     elsif parent = @parents[root]?
-      translate(parent[0], summary, inputs, allocation).map do |base|
+      bases = translate(parent[0], summary, inputs, allocation)
+      # A view taken as a base (a String an argument borrows) has none of
+      # the callee's fields: mapping them there would invent paths such as
+      # String.@stream.@tls, which then alias unrelated storage.
+      bases = bases.select { |base| field_fits?(base, parent[1]) }
+      bases.map do |base|
         mapped = field_root(base, parent[1])
         if @text_only && (type = @root_types[root]?)
           @root_types[mapped] ||= type
@@ -607,11 +676,11 @@ class Iyi::TapeShrinkChecker
             Value.new([r], [] of View)
           end).empty?
         end
-        result = Value.new(result.roots, result.views.map { |v| View.new(v.root, 0) })
+        result = Value.new(result.roots, result.views.map { |v| View.new(v.root, 0, index: v.index) })
         stores = old.stores.dup
         env.slots.each do |root, contents|
           next if translate(root, old, old.seeds.map { |r| Value.new([r], [] of View) }).empty? && !contains_root?(result.roots, root)
-          canonical = Value.new(contents.roots, contents.views.map { |v| View.new(v.root, 0) })
+          canonical = Value.new(contents.roots, contents.views.map { |v| View.new(v.root, 0, index: v.index) })
           stores[root] = canonical
         end
         updated = Summary.new(old.seeds, effects, merge(old.result, result), stores,
@@ -777,8 +846,9 @@ class Iyi::TapeShrinkChecker
       end
       @uses.each_with_index do |use, i|
         next if i < shrink.at
+        next if (last = shrink.last_use) && i >= last
         next unless compatible?(shrink.guards, use.guards)
-        if live = use.views.find { |view| view.born <= shrink.at && compatible?(view.guards, shrink.guards) && contains_root?(shrink.roots, view.root) }
+        if live = use.views.find { |view| !(shrink.growth && view.index) && view.born <= shrink.at && compatible?(view.guards, shrink.guards) && contains_root?(shrink.roots, view.root) }
           action = shrink.growth ? "grow a pool run" : "shrink tape storage"
           shrink.node.raise "cannot #{action} with a live view " \
                             "of #{root_name(live.root)} while shrinking " \
@@ -878,7 +948,7 @@ class Iyi::TapeShrinkChecker
     transform = ->(v : Value) do
       Value.new(v.roots, v.views.map { |x|
         View.new(x.root, born ? Math.min(born, x.born) : x.born,
-          @guards.dup)
+          @guards.dup, x.index)
       }.uniq, v.procs, v.unknown_proc)
     end
     Env.new(env.vars.transform_values { |v| transform.call(v) },
@@ -944,11 +1014,20 @@ class Iyi::TapeShrinkChecker
 
   def value(node : ASTNode, env : Env) : Value
     result = evaluate(node, env)
+    if node.is_a?(Call) && link_type?(node.type?) && !result.views.empty?
+      result = Value.new(result.roots,
+        result.views.map(&.copy_with(index: true)), result.procs,
+        result.unknown_proc)
+    end
     if proc_type?(node.type?) && result.procs.empty?
       Value.new(result.roots, result.views, result.procs, true)
     else
       result
     end
+  end
+
+  private def link_type?(type : Type?) : Bool
+    !!type.try { |t| type_name(t.remove_typedef).starts_with?("Array::Link(") }
   end
 
   private def possible_array?(type : Type?) : Bool
@@ -977,7 +1056,16 @@ class Iyi::TapeShrinkChecker
       node.expanded.try { |expanded| value(expanded, env) } || EMPTY
     when Expressions
       result = EMPTY
-      node.expressions.each { |exp| result = value(exp, env) }
+      mark = @guards.size
+      node.expressions.each do |exp|
+        @fallthrough = Guards.new
+        result = value(exp, env)
+        @guards.concat(@fallthrough) if exp.is_a?(If) || exp.is_a?(Expressions)
+      end
+      # A branch that left (`if ... return`) guards the rest of the block,
+      # and what follows the block too.
+      @fallthrough = @guards[mark..]
+      @guards.pop(@guards.size - mark)
       result
     when Path
       if constant = node.target_const
@@ -1409,16 +1497,36 @@ class Iyi::TapeShrinkChecker
       value(node.cond, env)
       left, right = env.dup, env.dup
       choice = fresh
+      mark = @guards.size
       @guards << {choice, true}
       @scopes << node.then.object_id
+      @fallthrough = Guards.new
+      shrinks_before = @shrinks.size
       a = value(node.then, left)
+      leave_branch(node.then, shrinks_before)
+      then_after = node.then.is_a?(If) || node.then.is_a?(Expressions) ? @fallthrough : Guards.new
       @scopes.pop
-      @guards.pop
+      @guards.pop(@guards.size - mark)
       @guards << {choice, false}
       @scopes << node.else.object_id
+      @fallthrough = Guards.new
+      shrinks_before = @shrinks.size
       b = value(node.else, right)
+      leave_branch(node.else, shrinks_before)
+      else_after = node.else.is_a?(If) || node.else.is_a?(Expressions) ? @fallthrough : Guards.new
       @scopes.pop
-      @guards.pop
+      @guards.pop(@guards.size - mark)
+      # What follows an If one of whose branches never falls through runs
+      # only after the other: its events are on that branch's guard.
+      left_leaves = node.then.type?.is_a?(NoReturnType)
+      right_leaves = node.else.type?.is_a?(NoReturnType)
+      @fallthrough = if left_leaves && !right_leaves
+                       [{choice, false}] + else_after
+                     elsif right_leaves && !left_leaves
+                       [{choice, true}] + then_after
+                     else
+                       Guards.new
+                     end
       (left.keys | right.keys).each { |key| env[key] = merge(left[key]? || EMPTY, right[key]? || EMPTY) }
       (left.slots.keys | right.slots.keys).each do |key|
         env.slots[key] = merge(left.slots[key]? || EMPTY, right.slots[key]? || EMPTY)

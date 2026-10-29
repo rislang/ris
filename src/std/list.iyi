@@ -5,7 +5,7 @@
 # This exists because a count said it had to. III.4.7 measured what `Share`
 # would cost and found clean-sheet iyi code 77% shareable as written — and that
 # **every** failure in it was a type holding an `Array`. With no shareable
-# collection the only way past the marker is `Mutex(Array(T))` everywhere, and
+# collection the only way past the marker is a lock around every `Array(T)`, and
 # an escape hatch used routinely is the definition of a failed rule. So the
 # standard library owes the language this type; it is not a convenience.
 #

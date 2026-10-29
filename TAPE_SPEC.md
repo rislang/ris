@@ -121,7 +121,8 @@ rule goes last in its section; a removed one leaves its number unused.
   Quit is a variant of Job: post one accepted quit per worker, then join;
   group end invents no quits and drains no queues. Completion broadcast
   uses IyiTask#value, subject to handle sharing and result-copy rules,
-  not a timed wait. ris has no Channel or select; see doc/MESSAGES.md.
+  not a timed wait. ris has no Channel, select or Mutex; see
+  doc/MESSAGES.md.
 * 5.3 Callbacks borrow their environment for the call only; an escaping closure
   copies captures to a named owner or task pool, never a borrow. Task
   closures obey 5.1, including captured handlers and receivers. std managers

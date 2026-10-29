@@ -44,7 +44,6 @@ module std/log
 import std/time::{Time}
 import std/tuple
 import std/log_text::{LogText, LogField}
-import std/mutex::{Mutex}
 
 pub enum Severity
   Trace  = 0
@@ -503,14 +502,14 @@ end
 @[OnTape]
 pub class AsyncBackend < Backend
   property formatter : Formatter
-  @queue : Mutex(AsyncQueue)
+  @queue : AsyncQueue
   @closed : Bool
   {% if !flag?(:gc_none) && !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64))) %}
     @writer : IyiThread? = nil
   {% end %}
 
   def initialize(io : IO = STDOUT, @formatter : Formatter = DefaultFormatter.new)
-    @queue = Mutex.new { AsyncQueue.new }
+    @queue = AsyncQueue.new
     @closed = false
     handle = io.handle
     raise "AsyncBackend: the IO has no descriptor to write to" if handle < 0_i64
@@ -519,9 +518,12 @@ pub class AsyncBackend < Backend
       @writer = IyiThread.start do
         out = IyiIO.new(handle)
         while true
-          batch = queue.wait_for { |q| q.take }
-          # A thread is no task, and nothing cancels it.
-          raise "AsyncBackend: the writer thread was cancelled" if batch.is_a?(Cancelled)
+          batch = queue.take
+          unless batch
+            # Nothing queued: look again in a millisecond.
+            IyiScheduler.sleep_current(1)
+            next
+          end
           out.write(batch[0])
           out.flush
           break if batch[1]
@@ -543,17 +545,13 @@ pub class AsyncBackend < Backend
   def write(entry : Entry) : Nil
     raise "AsyncBackend: an entry written after close" if @closed
     line = @formatter.format(entry) + "\n"
-    while true
-      return unless @queue.lock { |q| q.push(line) }.is_a?(Cancelled)
-    end
+    @queue.push(line)
   end
 
   def close : Nil
     return if @closed
     @closed = true
-    while true
-      break unless @queue.lock { |q| q.close }.is_a?(Cancelled)
-    end
+    @queue.close
     {% if !flag?(:gc_none) && !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64))) %}
       if writer = @writer
         writer.join
@@ -562,32 +560,52 @@ pub class AsyncBackend < Backend
   end
 end
 
-# The lines an `AsyncBackend` has queued, behind its Mutex.
+# The lines an `AsyncBackend` has queued. An `Atomic` word guards them:
+# each method holds it for a few steps and never waits inside, and only
+# these methods reach the lines, so the queue may cross to the writer.
 @[OnTape]
+@[Share(owns: true)]
 class AsyncQueue
+  @word : Atomic(Int32)
   @lines : Array(String)
   @closed : Bool
 
   def initialize
+    @word = Atomic(Int32).new(0)
     @lines = [] of String
     @closed = false
   end
 
   def push(line : String) : Nil
+    enter
+    defer leave
     @lines << line
   end
 
   def close : Nil
+    enter
+    defer leave
     @closed = true
   end
 
   # Every line queued, as one string, and whether the queue is closed:
   # nil while it is empty and open, which the writer waits through.
   def take : {String, Bool}?
+    enter
+    defer leave
     return nil if @lines.empty? && !@closed
     text = @lines.join
     @lines.clear
     {text, @closed}
+  end
+
+  private def enter : Nil
+    while !@word.compare_and_set(0, 1)[1]
+    end
+  end
+
+  private def leave : Nil
+    @word.set(0)
   end
 end
 
@@ -883,25 +901,9 @@ pub class Log
   # Encoded contexts live in pool runs; overwrite and delete reuse bytes.
   @@contexts : Hash(UInt64, String) =
     Hash(UInt64, String).new.copy_to(Program.tape)
-  # Static cleanup releases this lock without a callback environment
-  # capturing either the lock receiver or task-owned metadata.
-  class ContextLock < Mutex(Int32)
-    def self.on_program : ContextLock
-      lock = RisRegion.program_object(ContextLock)
-      lock.initialize(0)
-      lock
-    end
-
-    def enter : Cancelled?
-      acquire
-    end
-
-    def leave : Nil
-      release
-    end
-  end
-
-  @@context_lock : ContextLock = ContextLock.on_program
+  # Guards the table: 1 while a task reads or writes it. Its holders
+  # never park, so a waiter spins for a few steps of another thread.
+  @@context_word : Atomic(Int32) = Atomic(Int32).new(0)
   @@open : Atomic(UInt64) = Atomic(UInt64).new(0_u64)
 
   # Runs the block with *data* on every entry logged in this task and in
@@ -983,15 +985,22 @@ pub class Log
     {% end %}
   end
 
-  # The table's blocks never park, so a wait for it is another thread's
-  # moment, and a cancelled task, which a wait answers Cancelled, asks
-  # again.
+  # The table's holders never park, so a wait for it is another thread's
+  # moment.
   private def self.context_of(id : UInt64, copy : Bool = false) : Metadata?
-    while @@context_lock.enter.is_a?(Cancelled)
-    end
-    defer @@context_lock.leave
+    context_enter
+    defer context_leave
     node = context_locked(id)
     copy && node ? node.copy : node
+  end
+
+  private def self.context_enter : Nil
+    while !@@context_word.compare_and_set(0, 1)[1]
+    end
+  end
+
+  private def self.context_leave : Nil
+    @@context_word.set(0)
   end
 
   # A copy of the nearest starter's context, for a task without its own.
@@ -1012,9 +1021,8 @@ pub class Log
 
   # A copy of *id*'s context on the current tape, never a table view.
   private def self.context_copy(id : UInt64) : Metadata?
-    while @@context_lock.enter.is_a?(Cancelled)
-    end
-    defer @@context_lock.leave
+    context_enter
+    defer context_leave
     if bytes = @@contexts[id]?
       Metadata.new(bytes.copy_to(RisCurrentTape.new))
     end
@@ -1026,9 +1034,8 @@ pub class Log
   end
 
   private def self.store(id : UInt64, node : Metadata?) : Nil
-    while @@context_lock.enter.is_a?(Cancelled)
-    end
-    defer @@context_lock.leave
+    context_enter
+    defer context_leave
     store_locked(id, node)
   end
 

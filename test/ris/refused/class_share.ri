@@ -1,7 +1,9 @@
-import std/mutex::{Mutex}
-
 class ClassShareValue
 end
 
-locked = Mutex.new { ClassShareValue.new }
-locked.get { |value| value }
+value = ClassShareValue.new
+thread = IyiThread.start do
+  value
+  nil
+end
+thread.join

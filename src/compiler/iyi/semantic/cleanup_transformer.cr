@@ -932,7 +932,7 @@ module Iyi
     record ShareBoundary, subject : String, local_owner : String, pair : String, again : String, after : String,
       consequence : String = "(SPEC.md III.4.4)",
       race : String = "a data race (SPEC.md III.4.4)",
-      cure : String = "keep the value in an `Atomic`, or behind a `Mutex` (std/mutex)"
+      cure : String = "keep the value in an `Atomic`, or in one owner task that the others send RisBoard messages to"
 
     # ris: a local task runs on its spawner's thread, but it is still a
     # task of its own (TAPE_SPEC 5.1): it captures only Share values,
@@ -1093,7 +1093,7 @@ module Iyi
     def check_thread_class_vars_share(a_def : Def, boundary : ShareBoundary) : Nil
       named = NamedClassVars.new
       a_def.body.accept named
-      advice = "so every thread that reaches it shares one mutable cell: a data race (SPEC.md III.4.5). Keep the value in an `Atomic`, or behind a `Mutex` (std/mutex)"
+      advice = "so every thread that reaches it shares one mutable cell: a data race (SPEC.md III.4.5). Keep the value in an `Atomic`, or in one owner task that the others send RisBoard messages to"
       named.vars.each do |class_var, var|
         next if var.thread_local?
         next if var.type?.try { |type| TapeChecker.tape_in(@program, type) }

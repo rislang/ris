@@ -142,6 +142,13 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
   end
 
   def visit(node : ImportDecl)
+    # ris: Mutex went as Channel and select did (TAPE_SPEC_CHANGELOG.md).
+    if node.path.join('/') == "std/mutex"
+      node.raise "ris has no std/mutex: keep a shared count in an `Atomic` " \
+                 "(`Atomic(Int32)`), and keep shared state in one owner task " \
+                 "that the others send RisBoard messages to (TAPE_SPEC 5.2)"
+    end
+
     if expanded = node.expanded
       expanded.accept self
       return false
@@ -156,6 +163,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     node.path = path.split('/') unless path == written
     location = node.location
     relative_to = location.try &.original_filename
+
 
     # iyi: a package import (SPEC.md III.7). The manifest's prefix table is
     # asked first — longest prefix first, so `/v2` is a different module —

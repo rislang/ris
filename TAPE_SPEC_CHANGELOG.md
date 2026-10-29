@@ -4,6 +4,15 @@ Every change to TAPE_SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one.
 
+## 2026-10-29: Mutex is gone
+
+* Changed: 5.2 says ris has no Mutex beside Channel and select.
+  `import std/mutex` is a compile error naming an `Atomic` for a count
+  and an owner task fed RisBoard messages for shared state; std/log's
+  context table and AsyncBackend queue use an `Atomic` word instead.
+* Why: the user's decision. A lock shares mutable state between tasks,
+  which tape ownership (5.1) rules out; RisBoard and Atomic cover it.
+
 ## 2026-10-29: Tre is RisTree
 
 * Changed: 1.2, 1.4, 1.7, 5.6, 7.2 name the tree type RisTree; its
