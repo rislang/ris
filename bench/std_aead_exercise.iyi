@@ -17,43 +17,44 @@ end
 
 # The bytes a hex string spells.
 def b(hex : String) : String
-  p = hex.to_unsafe
-  String.new(hex.bytesize // 2) do |buf|
-    i = 0
-    while i < hex.bytesize // 2
-      hi = p[i * 2].to_i32
-      lo = p[i * 2 + 1].to_i32
-      hi = hi >= 97 ? hi - 87 : hi - 48
-      lo = lo >= 97 ? lo - 87 : lo - 48
-      buf[i] = (hi * 16 + lo).to_u8
-      i = i + 1
-    end
+  out = String::Builder.new
+  i = 0
+  while i < hex.bytesize // 2
+    hi = hex[i * 2].to_i32
+    lo = hex[i * 2 + 1].to_i32
+    hi = hi >= 97 ? hi - 87 : hi - 48
+    lo = lo >= 97 ? lo - 87 : lo - 48
+    out.push((hi * 16 + lo).to_u8)
+    i = i + 1
   end
+  out.finish
 end
 
 def hex(bytes : String) : String
-  digits = "0123456789abcdef".to_unsafe
-  p = bytes.to_unsafe
-  String.new(bytes.bytesize * 2) do |buf|
-    i = 0
-    while i < bytes.bytesize
-      buf[i * 2] = digits[p[i].to_i32 >> 4]
-      buf[i * 2 + 1] = digits[p[i].to_i32 & 15]
-      i = i + 1
-    end
+  digits = "0123456789abcdef"
+  out = String::Builder.new
+  i = 0
+  while i < bytes.bytesize
+    out.push(digits[bytes[i].to_i32 >> 4])
+    out.push(digits[bytes[i].to_i32 & 15])
+    i = i + 1
   end
+  out.finish
 end
 
 def array_of(bytes : String) : Array(UInt8)
-  Array(UInt8).new(bytes.bytesize) { |i| bytes.to_unsafe[i] }
+  Array(UInt8).new(bytes.bytesize) { |i| bytes[i] }
 end
 
 # *bytes* with bit *bit* of byte *at* turned.
 def flip(bytes : String, at : Int32, bit : Int32) : String
-  String.new(bytes.bytesize) do |buf|
-    buf.copy_from(bytes.to_unsafe, bytes.bytesize)
-    buf[at] = buf[at] ^ 1_u8.unsafe_shl(bit)
+  out = String::Builder.new
+  i = 0
+  while i < bytes.bytesize
+    out.push(i == at ? bytes[i] ^ 1_u8.unsafe_shl(bit) : bytes[i])
+    i = i + 1
   end
+  out.finish
 end
 
 # What `open` answered, as hex, or the error's sentence.
@@ -165,7 +166,7 @@ puts "  a flipped tag, ciphertext, additional data or nonce, another key, a leng
 # block of key stream is 64 zero bytes XORed.
 puts "\n== chacha20"
 k = b("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
-zeros = String.new(64) { |buf| 64.times { |i| buf[i] = 0_u8 } }
+zeros = b("00" * 64)
 assert_str "10f1e7e4d13b5915500fdd1fa32071c4c7d1f4c733c068030422aa9ac3d46c4ed2826446079faa0914c2d705d98b02a2b5129cd1de164eb9cbd083e8a2503c4e", hex(ChaCha20.new(k, b("000000090000004a00000000"), 1_u32).xor(zeros)), "rfc 8439 2.3.2 block"
 sunscreen = "Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it."
 sunscreen_ct = "6e2e359a2568f98041ba0728dd0d6981e97e7aec1d4360c20a27afccfd9fae0bf91b65c5524733ab8f593dabcd62b3571639d624e65152ab8f530c359f0861d807ca0dbf500d6a6156a38e088a22b65e52bc514d16ccf806818ce91ab77937365af90bbf74a35be6b40b8eedf2785e42874d"

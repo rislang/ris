@@ -154,33 +154,31 @@ import std/text
 
 # A field is "x" and then hex, so an empty one is still a field.
 def b(field : String) : String
-  p = field.to_unsafe + 1_i64
   size = (field.bytesize - 1) // 2
-  String.new(size) do |buf|
-    i = 0
-    while i < size
-      hi = p[i * 2].to_i32
-      lo = p[i * 2 + 1].to_i32
-      hi = hi >= 97 ? hi - 87 : hi - 48
-      lo = lo >= 97 ? lo - 87 : lo - 48
-      buf[i] = (hi * 16 + lo).to_u8
-      i = i + 1
-    end
+  out = String::Builder.new
+  i = 0
+  while i < size
+    hi = field[1 + i * 2].to_i32
+    lo = field[2 + i * 2].to_i32
+    hi = hi >= 97 ? hi - 87 : hi - 48
+    lo = lo >= 97 ? lo - 87 : lo - 48
+    out.push((hi * 16 + lo).to_u8)
+    i = i + 1
   end
+  out.finish
 end
 
 def x(bytes : String) : String
-  digits = "0123456789abcdef".to_unsafe
-  p = bytes.to_unsafe
-  String.new(bytes.bytesize * 2 + 1) do |buf|
-    buf[0] = 120_u8
-    i = 0
-    while i < bytes.bytesize
-      buf[i * 2 + 1] = digits[p[i].to_i32 >> 4]
-      buf[i * 2 + 2] = digits[p[i].to_i32 & 15]
-      i = i + 1
-    end
+  digits = "0123456789abcdef"
+  out = String::Builder.new
+  out.push(120_u8)
+  i = 0
+  while i < bytes.bytesize
+    out.push(digits[bytes[i].to_i32 >> 4])
+    out.push(digits[bytes[i].to_i32 & 15])
+    i = i + 1
   end
+  out.finish
 end
 
 def said(result : String | AeadError) : String
@@ -398,13 +396,14 @@ cat >"$WORK/speed.iyi" <<'IYI'
 module speed
 
 import std/aead::{AesGcm, ChaCha20Poly1305}
+import std/time::{Time}
 
 def best(& : -> String) : Int64
   fastest = 0_i64
   3.times do |k|
-    t0 = IyiMark.now_ns
+    t0 = Time.monotonic_nanoseconds
     sealed = yield
-    t = (IyiMark.now_ns - t0).to_i64
+    t = (Time.monotonic_nanoseconds - t0).to_i64
     raise "sealed #{sealed.bytesize} bytes" unless sealed.bytesize == (16 << 20) + 16
     fastest = t if k == 0 || t < fastest
   end
@@ -412,13 +411,13 @@ def best(& : -> String) : Int64
 end
 
 size = 16 << 20
-data = String.new(size) do |buf|
-  i = 0
-  while i < size
-    buf[i] = (i & 255).to_u8
-    i = i + 1
-  end
+built = String::Builder.new
+i = 0
+while i < size
+  built.push((i & 255).to_u8)
+  i = i + 1
 end
+data = built.finish
 nonce = "twelve bytes"
 g128 = AesGcm.new("sixteen byte key")
 g256 = AesGcm.new("thirty-two bytes of key material")
@@ -480,10 +479,10 @@ when "chacha-nonce-8"
   ChaCha20.new(key32, "8 bytes!")
 when "chacha-counter-wraps"
   stream = ChaCha20.new(key32, nonce, 0xffffffff_u32)
-  stream.xor(String.new(64) { |buf| 64.times { |i| buf[i] = 0_u8 } })
+  stream.xor(Array(UInt8).new(64, 0_u8))
   stream.xor("one byte past block 2^32 - 1")
 when "chacha-negative-count"
-  ChaCha20.new(key32, nonce).xor(key32.to_unsafe, key32.to_unsafe, -1)
+  ChaCha20.new(key32, nonce).xor(Array(UInt8).new(1, 0_u8), 0, -1)
 when "poly-key-16"
   Poly1305.new(key16)
 when "poly-final-twice"
@@ -495,7 +494,7 @@ when "poly-update-after-final"
   mac.final
   mac.update("more")
 when "poly-negative-count"
-  Poly1305.new(key32).update(key32.to_unsafe, -1)
+  Poly1305.new(key32).update(key32, 0, -1)
 when "cp-key-31"
   ChaCha20Poly1305.new(key32[0, 31])
 when "cp-nonce-24"
@@ -625,7 +624,7 @@ prove_broken "GHASH dropping a short last block's low half" "gcm test case 4" \
 # A comparison that keeps only the last byte's difference passes a tag
 # that is wrong anywhere else.
 prove_broken "a tag compared by its last byte" "gcm: a tag with its first byte flipped is refused" \
-  'diff = diff | (a[i] ^ b[i])' 'diff = a[i] ^ b[i]'
+  'diff = diff | (a[i] ^ buffer[at + i])' 'diff = a[i] ^ buffer[at + i]'
 prove_broken "a tag compared short of its last byte" "gcm: a tag with its last byte flipped is refused" \
   '    while i < 16
       diff' '    while i < 15
@@ -639,7 +638,7 @@ prove_broken "a ChaCha20 piece starting a new block" "chacha20 in pieces" \
 prove_broken "Poly1305's r unclamped" "rfc 8439 2.5.2" \
   '& 0x3ffff03_u64' '& 0x3ffffff_u64'
 prove_broken "a short last block given 2^128 rather than its 1 byte" "rfc 8439 2.5.2" \
-  'PolyCore.blocks(@state, @buffer, 16, 0_u64)' 'PolyCore.blocks(@state, @buffer, 16, PolyCore::FULL)'
+  'PolyCore.blocks(state, buffer, 16, 0_u64)' 'PolyCore.blocks(state, buffer, 16, PolyCore::FULL)'
 # Vector #5's accumulator ends at 2^130 - 2, past p and short of 2^130:
 # only the final subtraction of p brings it down to 3.
 prove_broken "Poly1305's last reduction mod p left out" "rfc 8439 a.3 #5" \

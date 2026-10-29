@@ -106,25 +106,39 @@ end
 # building block; a message wants a mode, `AesGcm`.
 pub class AES
   @rounds : Int32
-  @keys : Pointer(UInt64)
+  @keys : StaticArray(UInt64, 240)
 
-  def initialize(key : String | Array::View(UInt8))
-    bytes, size = AeadBytes.of(key)
+  @[PointerUnsafe("the cipher core expands the key into this object's words")]
+  def initialize(key : String | Array::View(UInt8) | Array(UInt8))
+    size = AeadBytes.size(key)
     raise "AES: a key is 16, 24 or 32 bytes, not #{size}" unless size == 16 || size == 24 || size == 32
-    @keys = Pointer(UInt64).malloc(AesCore::KEY_WORDS)
-    @rounds = AesCore.expand(bytes, size, @keys)
+    @keys = uninitialized StaticArray(UInt64, 240)
+    local = uninitialized StaticArray(UInt8, 32)
+    bytes = pointerof(local).as(Pointer(UInt8))
+    AeadBytes.load(key, 0, bytes, size)
+    @rounds = AesCore.expand(bytes, size, pointerof(@keys).as(Pointer(UInt64)))
   end
 
   # FIPS 197's Cipher: 16 bytes in, 16 out.
-  def encrypt_block(block : String | Array::View(UInt8)) : String
-    src = AeadBytes.exactly(block, 16, "AES: a block")
-    String.new(16) { |buf| AesCore.encrypt(@keys, @rounds, src, buf, 1) }
+  @[PointerUnsafe("the cipher core works on local blocks")]
+  def encrypt_block(block : String | Array::View(UInt8) | Array(UInt8)) : String
+    AeadBytes.exactly(block, 16, "AES: a block")
+    local = uninitialized StaticArray(UInt8, 16)
+    bytes = pointerof(local).as(Pointer(UInt8))
+    AeadBytes.load(block, 0, bytes, 16)
+    AesCore.encrypt(pointerof(@keys).as(Pointer(UInt64)), @rounds, bytes, bytes, 1)
+    AeadBytes.text(bytes, 16)
   end
 
   # FIPS 197's InvCipher: the block `encrypt_block` answered, back.
-  def decrypt_block(block : String | Array::View(UInt8)) : String
-    src = AeadBytes.exactly(block, 16, "AES: a block")
-    String.new(16) { |buf| AesCore.decrypt(@keys, @rounds, src, buf, 1) }
+  @[PointerUnsafe("the cipher core works on local blocks")]
+  def decrypt_block(block : String | Array::View(UInt8) | Array(UInt8)) : String
+    AeadBytes.exactly(block, 16, "AES: a block")
+    local = uninitialized StaticArray(UInt8, 16)
+    bytes = pointerof(local).as(Pointer(UInt8))
+    AeadBytes.load(block, 0, bytes, 16)
+    AesCore.decrypt(pointerof(@keys).as(Pointer(UInt64)), @rounds, bytes, bytes, 1)
+    AeadBytes.text(bytes, 16)
   end
 end
 
@@ -134,18 +148,27 @@ end
 # lengths in bits, XORed with the key stream of the nonce's counter
 # block. The nonce is 12 bytes, and the counter block is it and a 32-bit
 # counter that starts at 1 (§7.1).
+#
+# Callers pass String, a byte view or an Array, never a pointer: the
+# cipher core works on local blocks, and data is read with `[]`.
 pub class AesGcm
   @rounds : Int32
-  @keys : Pointer(UInt64)
+  @keys : StaticArray(UInt64, 240)
   # H, the hash key, AES of the zero block, and H^2, H^3 and H^4, each
   # kept as BearSSL keeps H: its low and high halves, their XOR, and the
   # three bit-reversed, six words a power from H up (`Ghash.prepare`).
-  @powers : Pointer(UInt64)
+  @powers : StaticArray(UInt64, 24)
 
-  def initialize(key : String | Array::View(UInt8))
-    bytes, size = AeadBytes.of(key)
+  @[PointerUnsafe("the cipher core expands the key into this object's words")]
+  def initialize(key : String | Array::View(UInt8) | Array(UInt8))
+    size = AeadBytes.size(key)
     raise "AesGcm: a key is 16, 24 or 32 bytes, not #{size}" unless size == 16 || size == 24 || size == 32
-    keys = Pointer(UInt64).malloc(AesCore::KEY_WORDS)
+    @keys = uninitialized StaticArray(UInt64, 240)
+    @powers = uninitialized StaticArray(UInt64, 24)
+    local = uninitialized StaticArray(UInt8, 32)
+    bytes = pointerof(local).as(Pointer(UInt8))
+    AeadBytes.load(key, 0, bytes, size)
+    keys = pointerof(@keys).as(Pointer(UInt64))
     rounds = AesCore.expand(bytes, size, keys)
     zero = uninitialized StaticArray(UInt64, 2)
     words = pointerof(zero).as(Pointer(UInt64))
@@ -155,7 +178,7 @@ pub class AesGcm
     AesCore.encrypt(keys, rounds, h, h, 1)
     h1 = AeadBytes.be64(h)
     h0 = AeadBytes.be64(h + 8_i64)
-    powers = Pointer(UInt64).malloc(24_u64)
+    powers = pointerof(@powers).as(Pointer(UInt64))
     Ghash.prepare(powers, h1, h0)
     p1 = h1
     p0 = h0
@@ -166,67 +189,87 @@ pub class AesGcm
       Ghash.prepare(powers + (k * 6).to_i64, p1, p0)
       k = k + 1
     end
-    @keys = keys
     @rounds = rounds
-    @powers = powers
   end
 
   # The ciphertext of *plaintext*, as long as it, and the 16-byte tag.
-  def seal(nonce : String | Array::View(UInt8), plaintext : String | Array::View(UInt8), aad : String | Array::View(UInt8) = "") : String
-    n = AeadBytes.exactly(nonce, 12, "AesGcm: a nonce")
-    pt, size = AeadBytes.of(plaintext)
-    ad, ad_size = AeadBytes.of(aad)
-    String.new(size + 16) do |buf|
-      ctr(n, pt, buf, size)
-      tag(n, ad, ad_size, buf, size, buf + size.to_i64)
-    end
+  def seal(nonce : String | Array::View(UInt8) | Array(UInt8), plaintext : String | Array::View(UInt8) | Array(UInt8), aad : String | Array::View(UInt8) | Array(UInt8) = "") : String
+    size = AeadBytes.size(plaintext)
+    buffer = AeadBytes.copy(plaintext, size + 16)
+    seal_at(nonce, buffer, 0, size, aad)
+    AeadBytes.text(buffer, 0, size + 16)
   end
 
   # The plaintext *sealed* came from, when its tag is the one this key,
   # *nonce* and *aad* give; else an `AeadError`, and nothing decrypted.
-  def open(nonce : String | Array::View(UInt8), sealed : String | Array::View(UInt8), aad : String | Array::View(UInt8) = "") : String | AeadError
-    n = AeadBytes.exactly(nonce, 12, "AesGcm: a nonce")
-    ct, total = AeadBytes.of(sealed)
-    ad, ad_size = AeadBytes.of(aad)
-    return AeadError.new("AesGcm: #{total} bytes cannot be sealed: the tag alone is 16") if total < 16
-    size = total - 16
-    want = uninitialized StaticArray(UInt64, 2)
-    expected = pointerof(want).as(Pointer(UInt8))
-    tag(n, ad, ad_size, ct, size, expected)
-    unless AeadBytes.same_tag?(expected, ct + size.to_i64)
-      return AeadError.new("AesGcm: the tag does not match: the sealed bytes, the additional data, the nonce or the key is not what was sealed")
-    end
-    String.new(size) { |buf| ctr(n, ct, buf, size) }
+  def open(nonce : String | Array::View(UInt8) | Array(UInt8), sealed : String | Array::View(UInt8) | Array(UInt8), aad : String | Array::View(UInt8) | Array(UInt8) = "") : String | AeadError
+    total = AeadBytes.size(sealed)
+    buffer = AeadBytes.copy(sealed, total)
+    opened = open_at(nonce, buffer, 0, total, aad)
+    return opened if opened.is_a?(AeadError)
+    AeadBytes.text(buffer, 0, opened)
   end
 
-  # *size* bytes at *buffer* sealed where they lie, the 16-byte tag
-  # written after them: a record layer's own buffer, sealed with nothing
-  # made. *nonce* is 12 bytes.
-  def seal_at(nonce : Pointer(UInt8), buffer : Pointer(UInt8), size : Int32, aad : Pointer(UInt8), aad_size : Int32) : Nil
-    ctr(nonce, buffer, buffer, size)
-    tag(nonce, aad, aad_size, buffer, size, buffer + size.to_i64)
+  # The *size* bytes of *buffer* from *at* sealed where they lie, the
+  # 16-byte tag written after them: a record layer's own buffer, sealed
+  # with nothing made. *nonce* is 12 bytes.
+  @[PointerUnsafe("the cipher core works on local blocks")]
+  def seal_at(nonce : String | Array::View(UInt8) | Array(UInt8), buffer : Array(UInt8), at : Int32, size : Int32, aad : String | Array::View(UInt8) | Array(UInt8)) : Nil
+    AeadBytes.exactly(nonce, 12, "AesGcm: a nonce")
+    local = uninitialized StaticArray(UInt8, 16)
+    n = pointerof(local).as(Pointer(UInt8))
+    AeadBytes.load(nonce, 0, n, 12)
+    ctr(n, buffer, at, size)
+    want = uninitialized StaticArray(UInt64, 2)
+    tagged = pointerof(want).as(Pointer(UInt8))
+    tag(n, aad, buffer, at, size, tagged)
+    AeadBytes.store(tagged, buffer, at + size, 16)
   end
 
-  # The *total* sealed bytes at *buffer* opened where they lie: the size of
-  # the plaintext now at *buffer*, or an `AeadError` and nothing decrypted.
-  def open_at(nonce : Pointer(UInt8), buffer : Pointer(UInt8), total : Int32, aad : Pointer(UInt8), aad_size : Int32) : Int32 | AeadError
+  # The *total* sealed bytes of *buffer* from *at* opened where they lie:
+  # the size of the plaintext now there, or an `AeadError` and nothing
+  # decrypted.
+  @[PointerUnsafe("the cipher core works on local blocks")]
+  def open_at(nonce : String | Array::View(UInt8) | Array(UInt8), buffer : Array(UInt8), at : Int32, total : Int32, aad : String | Array::View(UInt8) | Array(UInt8)) : Int32 | AeadError
+    AeadBytes.exactly(nonce, 12, "AesGcm: a nonce")
     return AeadError.new("AesGcm: #{total} bytes cannot be sealed: the tag alone is 16") if total < 16
     size = total - 16
+    local = uninitialized StaticArray(UInt8, 16)
+    n = pointerof(local).as(Pointer(UInt8))
+    AeadBytes.load(nonce, 0, n, 12)
     want = uninitialized StaticArray(UInt64, 2)
     expected = pointerof(want).as(Pointer(UInt8))
-    tag(nonce, aad, aad_size, buffer, size, expected)
-    unless AeadBytes.same_tag?(expected, buffer + size.to_i64)
+    tag(n, aad, buffer, at, size, expected)
+    unless AeadBytes.same_tag?(expected, buffer, at + size)
       return AeadError.new("AesGcm: the tag does not match: the sealed bytes, the additional data, the nonce or the key is not what was sealed")
     end
-    ctr(nonce, buffer, buffer, size)
+    ctr(n, buffer, at, size)
     size
   end
 
-  # *size* bytes from *src* to *dst*, XORed with the key stream of the
-  # counter blocks from 2 on (§7.1: the first, 1, is the tag's), four
-  # blocks to an AES call, which is what the bitsliced cipher does at
-  # once.
-  private def ctr(nonce : Pointer(UInt8), src : Pointer(UInt8), dst : Pointer(UInt8), size : Int32) : Nil
+  # Migration: tls's record layer still seals its own malloc'd buffers
+  # through pointers. Remove with the tls port (TODO "std port").
+  @[PointerUnsafe("migration for tls's malloc'd record buffers")]
+  def seal_at(nonce : Pointer(UInt8), buffer : Pointer(UInt8), size : Int32, aad : Pointer(UInt8), aad_size : Int32) : Nil
+    work = AeadBytes.from(buffer, size + 16)
+    seal_at(AeadBytes.from(nonce, 12), work, 0, size, AeadBytes.from(aad, aad_size))
+    AeadBytes.back(work, buffer, size + 16)
+  end
+
+  @[PointerUnsafe("migration for tls's malloc'd record buffers")]
+  def open_at(nonce : Pointer(UInt8), buffer : Pointer(UInt8), total : Int32, aad : Pointer(UInt8), aad_size : Int32) : Int32 | AeadError
+    work = AeadBytes.from(buffer, total)
+    opened = open_at(AeadBytes.from(nonce, 12), work, 0, total, AeadBytes.from(aad, aad_size))
+    AeadBytes.back(work, buffer, total) unless opened.is_a?(AeadError)
+    opened
+  end
+
+  # The *size* bytes of *buffer* from *at*, XORed in place with the key
+  # stream of the counter blocks from 2 on (§7.1: the first, 1, is the
+  # tag's), four blocks to an AES call, which is what the bitsliced cipher
+  # does at once.
+  @[PointerUnsafe("the cipher core works on local blocks")]
+  private def ctr(nonce : Pointer(UInt8), buffer : Array(UInt8), at : Int32, size : Int32) : Nil
     counters = uninitialized StaticArray(UInt8, 64)
     blocks = pointerof(counters).as(Pointer(UInt8))
     pad = uninitialized StaticArray(UInt8, 64)
@@ -236,6 +279,7 @@ pub class AesGcm
       (blocks + (b * 16).to_i64).copy_from(nonce, 12)
       b = b + 1
     end
+    keys = pointerof(@keys).as(Pointer(UInt64))
     counter = 2_u32
     done = 0
     while done < size
@@ -248,21 +292,23 @@ pub class AesGcm
         counter = counter &+ 1_u32
         b = b + 1
       end
-      AesCore.encrypt(@keys, @rounds, blocks, stream, count)
-      AeadBytes.xor(src + done.to_i64, stream, dst + done.to_i64, take)
+      AesCore.encrypt(keys, @rounds, blocks, stream, count)
+      AeadBytes.xor_into(buffer, at + done, stream, take)
       done = done + take
     end
   end
 
-  # The tag of *size* bytes of ciphertext at *ct* into *dst* (§7.1 steps
-  # 5 and 6).
-  private def tag(nonce : Pointer(UInt8), aad : Pointer(UInt8), aad_size : Int32, ct : Pointer(UInt8), size : Int32, dst : Pointer(UInt8)) : Nil
+  # The tag of *size* bytes of ciphertext in *ct* from *at* into *dst*
+  # (§7.1 steps 5 and 6).
+  @[PointerUnsafe("the cipher core works on local blocks")]
+  private def tag(nonce : Pointer(UInt8), aad : String | Array::View(UInt8) | Array(UInt8), ct : Array(UInt8), at : Int32, size : Int32, dst : Pointer(UInt8)) : Nil
     state = uninitialized StaticArray(UInt64, 2)
     y = pointerof(state).as(Pointer(UInt64))
     y[0] = 0_u64
     y[1] = 0_u64
-    ghash(y, aad, aad_size)
-    ghash(y, ct, size)
+    aad_size = AeadBytes.size(aad)
+    ghash_of(y, aad, 0, aad_size)
+    ghash_of(y, ct, at, size)
     sizes = uninitialized StaticArray(UInt64, 2)
     lengths = pointerof(sizes).as(Pointer(UInt8))
     AeadBytes.put_be64(lengths, aad_size.to_u64 &* 8_u64)
@@ -272,9 +318,25 @@ pub class AesGcm
     j0 = pointerof(first).as(Pointer(UInt8))
     j0.copy_from(nonce, 12)
     AeadBytes.put_be32(j0 + 12_i64, 1_u32)
-    AesCore.encrypt(@keys, @rounds, j0, j0, 1)
+    AesCore.encrypt(pointerof(@keys).as(Pointer(UInt64)), @rounds, j0, j0, 1)
     AeadBytes.put_be64(dst, y[0] ^ AeadBytes.be64(j0))
     AeadBytes.put_be64(dst + 8_i64, y[1] ^ AeadBytes.be64(j0 + 8_i64))
+  end
+
+  # GHASH of *count* bytes of *data* from *at*, 64 at a time through a
+  # local block; only the last piece is shorter, so only it is padded.
+  @[PointerUnsafe("the cipher core works on local blocks")]
+  private def ghash_of(y : Pointer(UInt64), data : String | Array::View(UInt8) | Array(UInt8), at : Int32, count : Int32) : Nil
+    piece = uninitialized StaticArray(UInt8, 64)
+    bytes = pointerof(piece).as(Pointer(UInt8))
+    done = 0
+    while done < count
+      left = count - done
+      take = left < 64 ? left : 64
+      AeadBytes.load(data, at + done, bytes, take)
+      ghash(y, bytes, take)
+      done = done + take
+    end
   end
 
   # GHASH (§6.4) of *count* bytes into the running value *y* (its high
@@ -288,8 +350,9 @@ pub class AesGcm
   # X4 H: everything after the six carry-less products is linear, so the
   # four products' pieces are summed first and the bit reversals, the
   # shift and the reduction done once for the four.
+  @[PointerUnsafe("the cipher core works on local blocks")]
   private def ghash(y : Pointer(UInt64), data : Pointer(UInt8), count : Int32) : Nil
-    hp = @powers
+    hp = pointerof(@powers).as(Pointer(UInt64))
     y1 = y[0]
     y0 = y[1]
     done = 0
@@ -330,47 +393,59 @@ end
 # key stream; a stream run past block 2^32 - 1 is refused rather than
 # wrapped onto key stream already used.
 pub class ChaCha20
-  @state : Pointer(UInt32)
-  @stream : Pointer(UInt8)
+  @state : StaticArray(UInt32, 16)
+  @stream : StaticArray(UInt8, 64)
   @used : Int32
   @counter : UInt64
 
-  def initialize(key : String | Array::View(UInt8), nonce : String | Array::View(UInt8), counter : UInt32 = 0_u32)
-    k = AeadBytes.exactly(key, 32, "ChaCha20: a key")
-    n = AeadBytes.exactly(nonce, 12, "ChaCha20: a nonce")
-    @state = Pointer(UInt32).malloc(16_u64)
-    ChaChaCore.start(@state, k, n)
-    @stream = Pointer(UInt8).malloc(64_u64)
+  @[PointerUnsafe("the cipher core starts this object's state from local copies")]
+  def initialize(key : String | Array::View(UInt8) | Array(UInt8), nonce : String | Array::View(UInt8) | Array(UInt8), counter : UInt32 = 0_u32)
+    AeadBytes.exactly(key, 32, "ChaCha20: a key")
+    AeadBytes.exactly(nonce, 12, "ChaCha20: a nonce")
+    @state = uninitialized StaticArray(UInt32, 16)
+    @stream = uninitialized StaticArray(UInt8, 64)
+    k = uninitialized StaticArray(UInt8, 32)
+    n = uninitialized StaticArray(UInt8, 12)
+    AeadBytes.load(key, 0, pointerof(k).as(Pointer(UInt8)), 32)
+    AeadBytes.load(nonce, 0, pointerof(n).as(Pointer(UInt8)), 12)
+    ChaChaCore.start(pointerof(@state).as(Pointer(UInt32)),
+      pointerof(k).as(Pointer(UInt8)), pointerof(n).as(Pointer(UInt8)))
     @used = 64
     @counter = counter.to_u64
   end
 
-  def xor(data : String | Array::View(UInt8)) : String
-    src, count = AeadBytes.of(data)
-    String.new(count) { |buf| xor(src, buf, count) }
+  def xor(data : String | Array::View(UInt8) | Array(UInt8)) : String
+    count = AeadBytes.size(data)
+    buffer = AeadBytes.copy(data, count)
+    xor(buffer, 0, count)
+    AeadBytes.text(buffer, 0, count)
   end
 
-  # *count* bytes from *src* to *dst*, which may be the same bytes.
-  def xor(src : Pointer(UInt8), dst : Pointer(UInt8), count : Int32) : Nil
+  # The *count* bytes of *buffer* from *at*, XORed in place.
+  @[PointerUnsafe("reads this object's key stream")]
+  def xor(buffer : Array(UInt8), at : Int32, count : Int32) : Nil
     raise "ChaCha20: a negative count of bytes: #{count}" if count < 0
+    stream = pointerof(@stream).as(Pointer(UInt8))
     done = 0
     while done < count
       next_block if @used == 64
       left = count - done
       take = 64 - @used
       take = left if left < take
-      AeadBytes.xor(src + done.to_i64, @stream + @used.to_i64, dst + done.to_i64, take)
+      AeadBytes.xor_into(buffer, at + done, stream + @used.to_i64, take)
       @used = @used + take
       done = done + take
     end
   end
 
+  @[PointerUnsafe("the cipher core writes this object's key stream")]
   private def next_block : Nil
     if @counter > 0xffffffff_u64
       raise "ChaCha20: the key stream ends at block 2^32 - 1; RFC 8439's counter is 32 bits and is not wrapped"
     end
-    @state[12] = @counter.unsafe_to_u32
-    ChaChaCore.block(@state, @stream)
+    state = pointerof(@state).as(Pointer(UInt32))
+    state[12] = @counter.unsafe_to_u32
+    ChaChaCore.block(state, pointerof(@stream).as(Pointer(UInt8)))
     @counter = @counter + 1_u64
     @used = 0
   end
@@ -384,69 +459,71 @@ end
 # arrives, `final` once is the same in pieces. A tag someone sent is
 # compared with std/crypto's `Subtle.constant_time_compare`, not `==`.
 pub class Poly1305
-  @state : Pointer(UInt64)
-  @buffer : Pointer(UInt8)
+  @state : StaticArray(UInt64, 14)
+  @buffer : StaticArray(UInt8, 16)
   @fill : Int32
   @finished : Bool
 
-  def initialize(key : String | Array::View(UInt8))
-    k = AeadBytes.exactly(key, 32, "Poly1305: a key")
-    @state = Pointer(UInt64).malloc(PolyCore::WORDS)
-    PolyCore.start(@state, k)
-    @buffer = Pointer(UInt8).malloc(16_u64)
+  @[PointerUnsafe("the MAC core starts this object's state from a local copy")]
+  def initialize(key : String | Array::View(UInt8) | Array(UInt8))
+    AeadBytes.exactly(key, 32, "Poly1305: a key")
+    @state = uninitialized StaticArray(UInt64, 14)
+    @buffer = uninitialized StaticArray(UInt8, 16)
+    k = uninitialized StaticArray(UInt8, 32)
+    AeadBytes.load(key, 0, pointerof(k).as(Pointer(UInt8)), 32)
+    PolyCore.start(pointerof(@state).as(Pointer(UInt64)), pointerof(k).as(Pointer(UInt8)))
     @fill = 0
     @finished = false
   end
 
-  def self.mac(key : String | Array::View(UInt8), data : String | Array::View(UInt8)) : String
+  def self.mac(key : String | Array::View(UInt8) | Array(UInt8), data : String | Array::View(UInt8) | Array(UInt8)) : String
     new(key).update(data).final
   end
 
-  def update(data : String | Array::View(UInt8)) : self
-    bytes, count = AeadBytes.of(data)
-    update(bytes, count)
+  def update(data : String | Array::View(UInt8) | Array(UInt8)) : self
+    update(data, 0, AeadBytes.size(data))
   end
 
-  def update(data : Pointer(UInt8), count : Int32) : self
+  # *count* bytes of *data* from *at*, one block at a time through this
+  # object's own buffer.
+  @[PointerUnsafe("the MAC core reads this object's buffer")]
+  def update(data : String | Array::View(UInt8) | Array(UInt8), at : Int32, count : Int32) : self
     raise "Poly1305: update after final; a key authenticates one message" if @finished
     raise "Poly1305: a negative count of bytes: #{count}" if count < 0
-    done = 0
-    if @fill > 0
-      take = 16 - @fill
-      take = count if count < take
-      (@buffer + @fill.to_i64).copy_from(data, take)
-      @fill = @fill + take
-      done = take
+    buffer = pointerof(@buffer).as(Pointer(UInt8))
+    i = 0
+    while i < count
+      buffer[@fill] = data[at + i]
+      @fill = @fill + 1
       if @fill == 16
-        PolyCore.blocks(@state, @buffer, 16, PolyCore::FULL)
+        PolyCore.blocks(pointerof(@state).as(Pointer(UInt64)), buffer, 16, PolyCore::FULL)
         @fill = 0
       end
-    end
-    whole = (count - done) & ~15
-    PolyCore.blocks(@state, data + done.to_i64, whole, PolyCore::FULL)
-    done = done + whole
-    if done < count
-      @buffer.copy_from(data + done.to_i64, count - done)
-      @fill = count - done
+      i = i + 1
     end
     self
   end
 
   # The 16-byte tag. A last block shorter than 16 bytes carries its own
   # 1 bit after its bytes (§2.5.1), rather than the 2^128 of a whole one.
+  @[PointerUnsafe("the MAC core reads this object's state")]
   def final : String
     raise "Poly1305: final called twice; a key authenticates one message" if @finished
     @finished = true
+    state = pointerof(@state).as(Pointer(UInt64))
+    buffer = pointerof(@buffer).as(Pointer(UInt8))
     if @fill > 0
-      @buffer[@fill] = 1_u8
+      buffer[@fill] = 1_u8
       i = @fill + 1
       while i < 16
-        @buffer[i] = 0_u8
+        buffer[i] = 0_u8
         i = i + 1
       end
-      PolyCore.blocks(@state, @buffer, 16, 0_u64)
+      PolyCore.blocks(state, buffer, 16, 0_u64)
     end
-    String.new(16) { |buf| PolyCore.finish(@state, buf) }
+    tag = uninitialized StaticArray(UInt8, 16)
+    PolyCore.finish(state, pointerof(tag).as(Pointer(UInt8)))
+    AeadBytes.text(pointerof(tag).as(Pointer(UInt8)), 16)
   end
 end
 
@@ -456,76 +533,114 @@ end
 # ciphertext, each padded with zeros to 16 bytes, then their lengths as
 # 64-bit little-endian numbers.
 pub class ChaCha20Poly1305
-  @key : Pointer(UInt8)
+  @key : StaticArray(UInt8, 32)
 
-  def initialize(key : String | Array::View(UInt8))
-    @key = Pointer(UInt8).malloc(32_u64)
-    @key.copy_from(AeadBytes.exactly(key, 32, "ChaCha20Poly1305: a key"), 32)
+  @[PointerUnsafe("copies the key into this object's own bytes")]
+  def initialize(key : String | Array::View(UInt8) | Array(UInt8))
+    AeadBytes.exactly(key, 32, "ChaCha20Poly1305: a key")
+    @key = uninitialized StaticArray(UInt8, 32)
+    AeadBytes.load(key, 0, pointerof(@key).as(Pointer(UInt8)), 32)
   end
 
   # The ciphertext of *plaintext*, as long as it, and the 16-byte tag.
-  def seal(nonce : String | Array::View(UInt8), plaintext : String | Array::View(UInt8), aad : String | Array::View(UInt8) = "") : String
-    words = uninitialized StaticArray(UInt32, 16)
-    state = pointerof(words).as(Pointer(UInt32))
-    ChaChaCore.start(state, @key, AeadBytes.exactly(nonce, 12, "ChaCha20Poly1305: a nonce"))
-    pt, size = AeadBytes.of(plaintext)
-    ad, ad_size = AeadBytes.of(aad)
-    String.new(size + 16) do |buf|
-      ChaChaCore.xor(state, 1_u32, pt, buf, size)
-      tag(state, ad, ad_size, buf, size, buf + size.to_i64)
-    end
+  def seal(nonce : String | Array::View(UInt8) | Array(UInt8), plaintext : String | Array::View(UInt8) | Array(UInt8), aad : String | Array::View(UInt8) | Array(UInt8) = "") : String
+    size = AeadBytes.size(plaintext)
+    buffer = AeadBytes.copy(plaintext, size + 16)
+    seal_at(nonce, buffer, 0, size, aad)
+    AeadBytes.text(buffer, 0, size + 16)
   end
 
   # The plaintext *sealed* came from, when its tag is the one this key,
   # *nonce* and *aad* give; else an `AeadError`, and nothing decrypted.
-  def open(nonce : String | Array::View(UInt8), sealed : String | Array::View(UInt8), aad : String | Array::View(UInt8) = "") : String | AeadError
+  def open(nonce : String | Array::View(UInt8) | Array(UInt8), sealed : String | Array::View(UInt8) | Array(UInt8), aad : String | Array::View(UInt8) | Array(UInt8) = "") : String | AeadError
+    total = AeadBytes.size(sealed)
+    buffer = AeadBytes.copy(sealed, total)
+    opened = open_at(nonce, buffer, 0, total, aad)
+    return opened if opened.is_a?(AeadError)
+    AeadBytes.text(buffer, 0, opened)
+  end
+
+  # The *size* bytes of *buffer* from *at* sealed where they lie, the
+  # 16-byte tag written after them: a record layer's own buffer, sealed
+  # with nothing made. *nonce* is 12 bytes.
+  @[PointerUnsafe("the cipher core works on local blocks")]
+  def seal_at(nonce : String | Array::View(UInt8) | Array(UInt8), buffer : Array(UInt8), at : Int32, size : Int32, aad : String | Array::View(UInt8) | Array(UInt8)) : Nil
     words = uninitialized StaticArray(UInt32, 16)
     state = pointerof(words).as(Pointer(UInt32))
-    ChaChaCore.start(state, @key, AeadBytes.exactly(nonce, 12, "ChaCha20Poly1305: a nonce"))
-    ct, total = AeadBytes.of(sealed)
-    ad, ad_size = AeadBytes.of(aad)
+    start(state, nonce)
+    stream_xor(state, buffer, at, size)
+    want = uninitialized StaticArray(UInt64, 2)
+    tagged = pointerof(want).as(Pointer(UInt8))
+    tag(state, aad, buffer, at, size, tagged)
+    AeadBytes.store(tagged, buffer, at + size, 16)
+  end
+
+  # The *total* sealed bytes of *buffer* from *at* opened where they lie:
+  # the size of the plaintext now there, or an `AeadError` and nothing
+  # decrypted.
+  @[PointerUnsafe("the cipher core works on local blocks")]
+  def open_at(nonce : String | Array::View(UInt8) | Array(UInt8), buffer : Array(UInt8), at : Int32, total : Int32, aad : String | Array::View(UInt8) | Array(UInt8)) : Int32 | AeadError
+    words = uninitialized StaticArray(UInt32, 16)
+    state = pointerof(words).as(Pointer(UInt32))
+    start(state, nonce)
     return AeadError.new("ChaCha20Poly1305: #{total} bytes cannot be sealed: the tag alone is 16") if total < 16
     size = total - 16
     want = uninitialized StaticArray(UInt64, 2)
     expected = pointerof(want).as(Pointer(UInt8))
-    tag(state, ad, ad_size, ct, size, expected)
-    unless AeadBytes.same_tag?(expected, ct + size.to_i64)
+    tag(state, aad, buffer, at, size, expected)
+    unless AeadBytes.same_tag?(expected, buffer, at + size)
       return AeadError.new("ChaCha20Poly1305: the tag does not match: the sealed bytes, the additional data, the nonce or the key is not what was sealed")
     end
-    String.new(size) { |buf| ChaChaCore.xor(state, 1_u32, ct, buf, size) }
-  end
-
-  # *size* bytes at *buffer* sealed where they lie, the 16-byte tag
-  # written after them: a record layer's own buffer, sealed with nothing
-  # made. *nonce* is 12 bytes.
-  def seal_at(nonce : Pointer(UInt8), buffer : Pointer(UInt8), size : Int32, aad : Pointer(UInt8), aad_size : Int32) : Nil
-    words = uninitialized StaticArray(UInt32, 16)
-    state = pointerof(words).as(Pointer(UInt32))
-    ChaChaCore.start(state, @key, nonce)
-    ChaChaCore.xor(state, 1_u32, buffer, buffer, size)
-    tag(state, aad, aad_size, buffer, size, buffer + size.to_i64)
-  end
-
-  # The *total* sealed bytes at *buffer* opened where they lie: the size of
-  # the plaintext now at *buffer*, or an `AeadError` and nothing decrypted.
-  def open_at(nonce : Pointer(UInt8), buffer : Pointer(UInt8), total : Int32, aad : Pointer(UInt8), aad_size : Int32) : Int32 | AeadError
-    return AeadError.new("ChaCha20Poly1305: #{total} bytes cannot be sealed: the tag alone is 16") if total < 16
-    words = uninitialized StaticArray(UInt32, 16)
-    state = pointerof(words).as(Pointer(UInt32))
-    ChaChaCore.start(state, @key, nonce)
-    size = total - 16
-    want = uninitialized StaticArray(UInt64, 2)
-    expected = pointerof(want).as(Pointer(UInt8))
-    tag(state, aad, aad_size, buffer, size, expected)
-    unless AeadBytes.same_tag?(expected, buffer + size.to_i64)
-      return AeadError.new("ChaCha20Poly1305: the tag does not match: the sealed bytes, the additional data, the nonce or the key is not what was sealed")
-    end
-    ChaChaCore.xor(state, 1_u32, buffer, buffer, size)
+    stream_xor(state, buffer, at, size)
     size
   end
 
-  # §2.8's tag of *size* bytes of ciphertext at *ct*, into *dst*.
-  private def tag(state : Pointer(UInt32), aad : Pointer(UInt8), aad_size : Int32, ct : Pointer(UInt8), size : Int32, dst : Pointer(UInt8)) : Nil
+  # Migration: tls's record layer still seals its own malloc'd buffers
+  # through pointers. Remove with the tls port (TODO "std port").
+  @[PointerUnsafe("migration for tls's malloc'd record buffers")]
+  def seal_at(nonce : Pointer(UInt8), buffer : Pointer(UInt8), size : Int32, aad : Pointer(UInt8), aad_size : Int32) : Nil
+    work = AeadBytes.from(buffer, size + 16)
+    seal_at(AeadBytes.from(nonce, 12), work, 0, size, AeadBytes.from(aad, aad_size))
+    AeadBytes.back(work, buffer, size + 16)
+  end
+
+  @[PointerUnsafe("migration for tls's malloc'd record buffers")]
+  def open_at(nonce : Pointer(UInt8), buffer : Pointer(UInt8), total : Int32, aad : Pointer(UInt8), aad_size : Int32) : Int32 | AeadError
+    work = AeadBytes.from(buffer, total)
+    opened = open_at(AeadBytes.from(nonce, 12), work, 0, total, AeadBytes.from(aad, aad_size))
+    AeadBytes.back(work, buffer, total) unless opened.is_a?(AeadError)
+    opened
+  end
+
+  @[PointerUnsafe("the cipher core starts a local state")]
+  private def start(state : Pointer(UInt32), nonce : String | Array::View(UInt8) | Array(UInt8)) : Nil
+    AeadBytes.exactly(nonce, 12, "ChaCha20Poly1305: a nonce")
+    n = uninitialized StaticArray(UInt8, 12)
+    AeadBytes.load(nonce, 0, pointerof(n).as(Pointer(UInt8)), 12)
+    ChaChaCore.start(state, pointerof(@key).as(Pointer(UInt8)), pointerof(n).as(Pointer(UInt8)))
+  end
+
+  # The key stream from block 1 XORed into *size* bytes of *buffer*.
+  @[PointerUnsafe("the cipher core writes a local block")]
+  private def stream_xor(state : Pointer(UInt32), buffer : Array(UInt8), at : Int32, size : Int32) : Nil
+    pad = uninitialized StaticArray(UInt8, 64)
+    stream = pointerof(pad).as(Pointer(UInt8))
+    counter = 1_u32
+    done = 0
+    while done < size
+      state[12] = counter
+      ChaChaCore.block(state, stream)
+      counter = counter &+ 1_u32
+      left = size - done
+      take = left < 64 ? left : 64
+      AeadBytes.xor_into(buffer, at + done, stream, take)
+      done = done + take
+    end
+  end
+
+  # §2.8's tag of *size* bytes of ciphertext in *ct* from *at*, into *dst*.
+  @[PointerUnsafe("the MAC core works on local blocks")]
+  private def tag(state : Pointer(UInt32), aad : String | Array::View(UInt8) | Array(UInt8), ct : Array(UInt8), at : Int32, size : Int32, dst : Pointer(UInt8)) : Nil
     block = uninitialized StaticArray(UInt8, 64)
     one_time = pointerof(block).as(Pointer(UInt8))
     state[12] = 0_u32
@@ -533,14 +648,31 @@ pub class ChaCha20Poly1305
     words = uninitialized StaticArray(UInt64, 14)
     mac = pointerof(words).as(Pointer(UInt64))
     PolyCore.start(mac, one_time)
-    PolyCore.padded(mac, aad, aad_size)
-    PolyCore.padded(mac, ct, size)
+    aad_size = AeadBytes.size(aad)
+    padded_of(mac, aad, 0, aad_size)
+    padded_of(mac, ct, at, size)
     sizes = uninitialized StaticArray(UInt64, 2)
     lengths = pointerof(sizes).as(Pointer(UInt8))
     AeadBytes.put_le64(lengths, aad_size.to_u64)
     AeadBytes.put_le64(lengths + 8_i64, size.to_u64)
     PolyCore.blocks(mac, lengths, 16, PolyCore::FULL)
     PolyCore.finish(mac, dst)
+  end
+
+  # Poly1305 of *count* bytes of *data* from *at*, padded with zeros to
+  # 16, 64 at a time through a local block.
+  @[PointerUnsafe("the MAC core works on local blocks")]
+  private def padded_of(mac : Pointer(UInt64), data : String | Array::View(UInt8) | Array(UInt8), at : Int32, count : Int32) : Nil
+    piece = uninitialized StaticArray(UInt8, 64)
+    bytes = pointerof(piece).as(Pointer(UInt8))
+    done = 0
+    while done < count
+      left = count - done
+      take = left < 64 ? left : 64
+      AeadBytes.load(data, at + done, bytes, take)
+      PolyCore.padded(mac, bytes, take)
+      done = done + take
+    end
   end
 end
 
@@ -1501,31 +1633,108 @@ struct PolyCore
 end
 
 struct AeadBytes
-  def self.of(data : String | Array::View(UInt8)) : {Pointer(UInt8), Int32}
-    if data.is_a?(String)
-      {data.to_unsafe, data.bytesize}
-    else
-      {data.bytes.to_unsafe, data.size}
+  alias Input = String | Array::View(UInt8) | Array(UInt8)
+
+  def self.size(data : Input) : Int32
+    data.is_a?(String) ? data.bytesize : data.size
+  end
+
+  # Refuses *data* unless it is *size* bytes; *what* names them.
+  def self.exactly(data : Input, size : Int32, what : String) : Nil
+    count = size(data)
+    raise "#{what} is #{size} bytes, not #{count}" unless count == size
+  end
+
+  # *count* bytes of *data* from *at* into a cipher's local block, read
+  # with `[]`, which checks their bounds.
+  @[PointerUnsafe("writes a cipher's own local block")]
+  def self.load(data : Input, at : Int32, dst : Pointer(UInt8), count : Int32) : Nil
+    i = 0
+    while i < count
+      dst[i] = data[at + i]
+      i = i + 1
     end
   end
 
-  # *data*'s bytes, which must be *size* of them; *what* names them in
-  # the refusal.
-  def self.exactly(data : String | Array::View(UInt8), size : Int32, what : String) : Pointer(UInt8)
-    bytes, count = of(data)
-    raise "#{what} is #{size} bytes, not #{count}" unless count == size
-    bytes
+  # Migration for tls: *count* bytes at a malloc'd pointer, as an Array.
+  @[PointerUnsafe("migration for tls's malloc'd record buffers")]
+  def self.from(src : Pointer(UInt8), count : Int32) : Array(UInt8)
+    Array(UInt8).new(count) { |i| src[i] }
   end
 
-  # Whether the 16 bytes at *a* and *b* are the same, in a time that
-  # does not depend on where they differ: every byte is read and the
-  # differences gathered with `|`, as std/crypto's `Subtle` does, here
-  # on the tag where it lies rather than on a copy.
-  def self.same_tag?(a : Pointer(UInt8), b : Pointer(UInt8)) : Bool
+  @[PointerUnsafe("migration for tls's malloc'd record buffers")]
+  def self.back(buffer : Array(UInt8), dst : Pointer(UInt8), count : Int32) : Nil
+    i = 0
+    while i < count
+      dst[i] = buffer[i]
+      i = i + 1
+    end
+  end
+
+  # *count* bytes of a local block into *buffer* from *at*.
+  @[PointerUnsafe("reads a cipher's own local block")]
+  def self.store(src : Pointer(UInt8), buffer : Array(UInt8), at : Int32, count : Int32) : Nil
+    i = 0
+    while i < count
+      buffer[at + i] = src[i]
+      i = i + 1
+    end
+  end
+
+  # *count* bytes of key stream XORed into *buffer* from *at*.
+  @[PointerUnsafe("reads a cipher's own local key stream")]
+  def self.xor_into(buffer : Array(UInt8), at : Int32, stream : Pointer(UInt8), count : Int32) : Nil
+    i = 0
+    while i < count
+      buffer[at + i] = buffer[at + i] ^ stream[i]
+      i = i + 1
+    end
+  end
+
+  # *data*'s bytes in a new Array of *room* bytes, zero past them: where
+  # a seal writes its ciphertext and tag.
+  def self.copy(data : Input, room : Int32) : Array(UInt8)
+    buffer = Array(UInt8).new(room, 0_u8)
+    count = size(data)
+    i = 0
+    while i < count
+      buffer[i] = data[i]
+      i = i + 1
+    end
+    buffer
+  end
+
+  # *count* bytes of *buffer* from *at* as text on the caller's tape.
+  def self.text(buffer : Array(UInt8), at : Int32, count : Int32) : String
+    text = String::Builder.new
+    i = 0
+    while i < count
+      text.push(buffer[at + i])
+      i = i + 1
+    end
+    text.finish
+  end
+
+  @[PointerUnsafe("reads a cipher's own local block")]
+  def self.text(src : Pointer(UInt8), count : Int32) : String
+    text = String::Builder.new
+    i = 0
+    while i < count
+      text.push(src[i])
+      i = i + 1
+    end
+    text.finish
+  end
+
+  # Whether the 16 bytes of a local tag and of *buffer* from *at* are the
+  # same, in a time that depends only on the count: every byte read, the
+  # differences gathered with `|`, as std/crypto's `Subtle` does.
+  @[PointerUnsafe("reads a cipher's own local tag")]
+  def self.same_tag?(a : Pointer(UInt8), buffer : Array(UInt8), at : Int32) : Bool
     diff = 0_u8
     i = 0
     while i < 16
-      diff = diff | (a[i] ^ b[i])
+      diff = diff | (a[i] ^ buffer[at + i])
       i = i + 1
     end
     diff == 0_u8

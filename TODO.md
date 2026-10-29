@@ -134,6 +134,20 @@ first):
   Extend both to src/std with the std port, then move its ~320 plain
   builders. test/ and src/iyi/ keep their literal capacities.
 
+## std port (session state: tape_state.txt; group one, then group two)
+
+* Done: std/aead reads input with `[]` into the cipher's local blocks,
+  never a pointer to tape bytes; keys live in StaticArray fields, not
+  malloc (bench/std_aead_exercise.sh holds: vectors, python oracle,
+  refusals, mutations). Left: it runs ~100 MB/s, copying byte by byte
+  at the boundary; and the pointer `seal_at`/`open_at` migration
+  overloads, until tls's record layer is ported.
+* tls: the record layer seals malloc'd Pointer buffers (@outbox, record
+  copies) and reads 37 pointer sites; move them to Array(UInt8) and the
+  Array `seal_at`/`open_at`, then drop aead's pointer overloads.
+* Then, as tape_state.txt orders them: log, autocert's nested Hash, sse,
+  http, websocket, cookie, router; group two smallest first.
+
 ## Next
 
 * Escaping closures outside program and joined task owners: pooled
