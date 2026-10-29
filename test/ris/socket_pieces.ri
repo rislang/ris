@@ -17,11 +17,10 @@ end
 
 big = ("b" * 1048576)
 def expected_text : String
-  String.build(1049000) do |io|
-    io << "head:"
-    100.times { |i| io << i << (i.even? ? "" : ",") }
-    io << ("b" * 1048576) << "end"
-  end
+  text = "head:"
+  100.times { |i| text << i << (i.even? ? "" : ",") }
+  text << ("b" * 1048576) << "end"
+  text
 end
 expected_size = expected_text.bytesize
 server = IyiSocket.listen(0)

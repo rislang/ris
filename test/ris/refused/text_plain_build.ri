@@ -1,0 +1,7 @@
+# A String.build that only appends is a String local.
+tape do
+  line = String.build do |io|
+    io << "a" << 1
+  end
+  puts line
+end

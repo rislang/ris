@@ -1,0 +1,6 @@
+# A builder that only appends and is read back is a String local.
+tape do
+  text = String::Builder.new(64)
+  text << "hello, " << "ris"
+  puts text.finish
+end

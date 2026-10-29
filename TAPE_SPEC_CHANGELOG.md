@@ -4,6 +4,14 @@ Every change to TAPE_SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one.
 
+## 2026-10-29: a builder that only appends is refused
+
+* Changed: 7.3. In a program, a String::Builder local or String.build
+  argument used only with `<<`, `finish` and `to_s` is a compile error
+  naming `text = ""`; one passed to a call or used for bytes stays.
+* Why: the user's decision. One way to build text; a String local grows
+  in place, so the builder adds a type and two steps for nothing.
+
 ## 2026-10-29: an appended String grows in its own reservation
 
 * Changed: 7.3. A String local or field that gets `<<` owns a growing

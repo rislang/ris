@@ -119,17 +119,21 @@ first):
   Others are refused naming that form (test/ris/text_param.ri,
   refused/text_lend_*). std (.iyi) does not lend yet.
 * Crystal code to ris through `ris fix`: each common refusal carries a
-  `suggested_edit` that fix applies. First `String.build` and
-  `String::Builder.new` -> `s = ""` and `<<`, an `IO` text parameter ->
-  `String::Builder`, a new Array per call -> `clear`,
-  `Builder.new(64)`/`Array(T).new(64)` -> no capacity. Gate per rule: a
-  Crystal-style file that `ris fix` turns into one that compiles, and
-  fix leaves alone what it cannot prove.
-* Refuse `String::Builder.new` and `String.build` outside src/iyi/,
-  naming `s = ""` and `<<`; move std, tests and samples (about 300
-  sites). Arbitrary literal capacities are gone from src/std and
-  samples (`Builder.new(64)`, `Array(T).new(8)`); test/ and src/iyi/
-  keep theirs until this step.
+  `suggested_edit` that fix applies. Done: a plain `String::Builder.new`
+  -> `""`. Left: its `x.finish` -> `x` (a second edit), String.build
+  blocks, an `IO` text parameter -> `String::Builder`, a new Array per
+  call -> `clear`. Gate per rule: a Crystal-style file that `ris fix`
+  turns into one that compiles, and fix leaves alone what it cannot
+  prove.
+* Done: in programs, a String::Builder local or String.build argument
+  that only appends (`<<`) and is read back (`finish`, `to_s`) is
+  refused, naming `text = ""` (test/ris/refused/text_plain_build*.ri,
+  text_builder_kept.ri). A builder with byte methods, passed to a call
+  or unused stays legal: an overload on String (`join(separator)`)
+  would take the text silently. 19 test and sample files moved.
+* std (.iyi) builders: lend and the refusal apply to .ri programs only.
+  Extend both to src/std with the std port, then move its ~320 plain
+  builders. test/ and src/iyi/ keep their literal capacities.
 
 ## After Text: Tre becomes a std library type
 

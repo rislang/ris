@@ -5,6 +5,7 @@ end
 
 tape do
   outer = String::Builder.new
+  outer.append("outer")
   text = if Program.args.empty?
            owner = BranchOwner.new
            owner.bytes << "inner"

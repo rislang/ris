@@ -1,0 +1,19 @@
+# Builders that do more than append stay: bytes, a call argument, an
+# unused reservation.
+def fill(io : String::Builder)
+  io << "filled"
+  nil
+end
+
+tape do
+  bytes = String::Builder.new
+  bytes.push(97_u8)
+  raise "push" unless bytes.finish == "a"
+  passed = String::Builder.new
+  fill(passed)
+  raise "argument" unless passed.finish == "filled"
+  room = String::Builder.new(1024)
+  number = String.build { |w| w.append_int(42) }
+  raise "append_int" unless number == "42"
+end
+puts "PASS: builders that do more than append"

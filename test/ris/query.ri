@@ -7,11 +7,11 @@ import std/uri::{Query}
 
 # The caller owns both parsed views and the rendered pairs.
 def pairs(text : String) : String
-  String.build(text.bytesize + 16) do |writer|
-    Query.parse(text).each do |key, value|
-      writer << '[' << key << '=' << value << ']'
-    end
+  rendered = ""
+  Query.parse(text).each do |key, value|
+    rendered << '[' << key << '=' << value << ']'
   end
+  rendered
 end
 
 ok = pairs("?a=1&b=2;c=3&&d&e=") == "[a=1][b=2][c=3][d=][e=]" &&

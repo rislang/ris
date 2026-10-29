@@ -32,22 +32,19 @@ def requests : Array(String)
   x = 88172645463325252_u64
   Array(String).new(1000) do |r|
     x = xs_next(x)
-    # Room for the user and all eight line items before building the head.
-    body = String.build(448) do |io|
-      io << %({"user":"u) << r << (r % 9 == 0 ? %(\\"q\\") : "") << %(","items":[)
-      ((x % 8_u64).to_i32 + 1).times do |i|
-        x = xs_next(x)
-        io << "," if i > 0
-        io << %({"sku":"SKU-) << (x % 100000_u64) << %(","qty":) << (x % 5_u64 + 1)
-        io << %(,"price":) << (x % 99900_u64 + 100) << "}"
-      end
-      io << "]}"
+    body = %({"user":"u)
+    body << r << (r % 9 == 0 ? %(\\"q\\") : "") << %(","items":[)
+    ((x % 8_u64).to_i32 + 1).times do |i|
+      x = xs_next(x)
+      body << "," if i > 0
+      body << %({"sku":"SKU-) << (x % 100000_u64) << %(","qty":) << (x % 5_u64 + 1)
+      body << %(,"price":) << (x % 99900_u64 + 100) << "}"
     end
-    String.build(112 + body.bytesize) do |io|
-      io << "POST /orders HTTP/1.1\r\nHost: shop\r\n"
-      io << "Content-Type: application/json\r\nContent-Length: "
-      io << body.bytesize << "\r\n\r\n" << body
-    end
+    body << "]}"
+    request = "POST /orders HTTP/1.1\r\nHost: shop\r\n"
+    request << "Content-Type: application/json\r\nContent-Length: "
+    request << body.bytesize << "\r\n\r\n" << body
+    request
   end
 end
 

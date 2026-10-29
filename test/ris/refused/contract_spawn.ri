@@ -1,6 +1,6 @@
 tape do
   bytes = String::Builder.new
-  bytes << "abc"
+  bytes.append("abc")
   view = bytes.finish
   group do |g|
     g.spawn { puts view }

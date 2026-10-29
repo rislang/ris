@@ -209,7 +209,9 @@ rule goes last in its section; a removed one leaves its number unused.
   owner. Reading it gives a String view: after `t = s; s << x`, `t` keeps
   the old text, as a String is immutable. Rebinding starts a fresh
   reservation at the next append; text never appended reserves nothing.
-  Bang methods rebind.
+  Bang methods rebind. A String::Builder that a program only appends to
+  and reads back is refused, naming `text = ""`; one passed to a call or
+  used for bytes stays.
 * 7.4 Nested containers (`Array(Array(T))`, `Hash(K, Array(V))`) hold
   their inner arrays as runs of a SlicePool they own; `outer[i]` answers a
   handle to its run, so a change through it shows in the container. No

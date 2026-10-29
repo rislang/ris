@@ -569,6 +569,112 @@ module Iyi
       end
     end
 
+    # How a program uses one String::Builder local or String.build block
+    # argument. When every use is `<<`, `finish` or `to_s`, `text = ""` does
+    # the same and the builder is refused (TODO "Text"). A builder passed to
+    # a call stays: an overload on String (`join(separator)`) would take the
+    # text silently, and an untyped parameter would get a String.
+    class BuilderUses < Visitor
+      SIMPLE = {"<<", "finish", "to_s"}
+      getter total = 0
+      getter accounted = 0
+      getter assigns = 0
+      getter appends = 0
+
+      def initialize(@name : String)
+      end
+
+      # An unused builder may hold room on purpose: only appended ones.
+      def simple? : Bool
+        @appends > 0 && @total == @accounted && @assigns <= 1
+      end
+
+      def visit(node : Var)
+        @total += 1 if node.name == @name
+        true
+      end
+
+      def visit(node : Assign)
+        if (target = node.target).is_a?(Var) && target.name == @name
+          @accounted += 1
+          @assigns += 1
+        end
+        true
+      end
+
+      def visit(node : Call)
+        if (obj = node.obj).is_a?(Var) && obj.name == @name &&
+           SIMPLE.includes?(node.name)
+          @accounted += 1
+          @appends += 1 if node.name == "<<"
+        end
+        true
+      end
+
+      def visit(node : Def | ClassDef | ModuleDef | Macro)
+        false
+      end
+
+      def visit(node : ASTNode)
+        true
+      end
+    end
+
+    class BuilderStarts < Visitor
+      getter locals = [] of {String, Call}
+      getter blocks = [] of {String, Call}
+
+      def visit(node : Assign)
+        if (target = node.target).is_a?(Var) && (value = node.value).is_a?(Call) &&
+           value.name == "new" && (obj = value.obj).is_a?(Path) &&
+           obj.names == ["String", "Builder"] && !value.block
+          @locals << {target.name, value}
+        end
+        true
+      end
+
+      def visit(node : Call)
+        if node.name == "build" && (obj = node.obj).is_a?(Path) &&
+           obj.names == ["String"] && (block = node.block) &&
+           block.args.size == 1
+          @blocks << {block.args.first.name, node}
+        end
+        true
+      end
+
+      def visit(node : Def | ClassDef | ModuleDef | Macro)
+        false
+      end
+
+      def visit(node : ASTNode)
+        true
+      end
+    end
+
+    private def refuse_plain_builders(body : ASTNode) : Nil
+      return unless ris_program_code?(body)
+      starts = BuilderStarts.new
+      body.accept(starts)
+      starts.locals.each do |name, call|
+        uses = BuilderUses.new(name)
+        body.accept(uses)
+        next unless uses.simple?
+        call.raise "`#{name}` only appends and is read back: write " \
+                   "`#{name} = \"\"`, append with `<<` and read `#{name}` " \
+                   "itself (not `#{name}.finish`). A String local grows in " \
+                   "place and is lent to String::Builder parameters.",
+          suggestion: "\"\""
+      end
+      starts.blocks.each do |name, call|
+        uses = BuilderUses.new(name)
+        call.block.not_nil!.body.accept(uses)
+        next unless uses.simple?
+        call.raise "this String.build only appends: write `#{name} = \"\"`, " \
+                   "append with `<<`, then use `#{name}`. A String local " \
+                   "grows in place and is lent to String::Builder parameters."
+      end
+    end
+
     private def growing_slot(receiver : ASTNode) : ASTNode
       case receiver
       when Var
@@ -591,6 +697,7 @@ module Iyi
       @ris_text_slots = {} of String => Var
       return body unless program.tape_platform? && @macro_code == 0 &&
                          !TapeScopeRuntime.runtime?(body.location)
+      refuse_plain_builders(body)
       scan = GrowingTextScan.new
       body.accept(scan)
       @ris_growing_locals = scan.locals

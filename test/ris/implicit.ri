@@ -1,8 +1,8 @@
 text = "hello"
 items = Array(String).new(2)
 items << text
-writer = String::Builder.new(16)
+writer = ""
 writer << items[0]
 writer << " tape"
-raise "wrong top-level tape data" unless writer.finish == "hello tape"
+raise "wrong top-level tape data" unless writer == "hello tape"
 puts "PASS: implicit main tape"

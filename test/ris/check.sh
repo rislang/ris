@@ -1218,6 +1218,10 @@ expect text_param_append 'Take `io : String::Builder`'
 for kind in field parameter literal; do
   expect "text_lend_$kind" 'Pass a local String variable started from text'
 done
+expect text_plain_builder 'only appends and is read back: write `text = ""`'
+expect text_plain_build 'this String.build only appends: write `io = ""`'
+out=$("$RIS" run test/ris/text_builder_kept.ri 2>&1)
+if grep -qF 'PASS: builders that do more than append' <<<"$out"; then echo "runs     text_builder_kept"; else echo "FAILED   text_builder_kept: $out"; status=1; fi
 out=$("$RIS" run test/ris/text_param.ri 2>&1)
 if grep -qF 'PASS: appends through parameters' <<<"$out"; then echo "runs     text_param"; else echo "FAILED   text_param: $out"; status=1; fi
 out=$(RIS_TAPE_STATS=1 "$RIS" run test/ris/text_grow.ri 2>&1)

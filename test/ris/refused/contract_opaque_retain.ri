@@ -4,6 +4,7 @@ end
 
 callback = ->(text : String) { puts text }
 tape do
-  text = String.build { |b| b << "abc" }
+  text = ""
+  text << "abc"
   invoke(callback, text)
 end

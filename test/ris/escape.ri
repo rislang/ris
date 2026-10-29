@@ -31,7 +31,7 @@ end
 
 @[TapeToHeap]
 def builder_copy(text : String) : String
-  String.build { |io| io << text }
+  String.build { |io| io.append(text) }
 end
 
 tape do

@@ -11,9 +11,8 @@ module samples/hello
 import shop/order::*
 
 def make_order(id : Int64) : Order
-  name = String.build do |s|
-    s << "ris"
-  end
+  name = ""
+  name << "ris"
   lines = Array(Int64).new
   lines.push(1200_i64)
   lines.push(350_i64)

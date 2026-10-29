@@ -3,8 +3,6 @@ def consume(view : String, ignored : Nil)
 end
 
 def check_shrink
-  b = String::Builder.new
-  b << "abc"
   a = Array(Int32).new
   a << 1
   v = a.link(0, UInt32)

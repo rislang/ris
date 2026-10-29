@@ -1,8 +1,8 @@
 tape do
   left = String::Builder.new
   right = String::Builder.new
-  left << "left"
-  right << "right"
+  left.append("left")
+  right.append("right")
   view = if Program.args.empty?
            left.finish
          else
