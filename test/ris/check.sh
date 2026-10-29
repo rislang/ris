@@ -563,15 +563,8 @@ expect copy_class_override 'remove this override'
 expect copy_pointer 'build on the destination with Array nodes and indices'
 expect copy_link 'copy_to refuses pointers and self-relative links'
 
-expect string_parameter \
-  'name : String is only read; take it as String'
-expect string_optional_parameter \
-  'name : String? is only read; take it as String?'
 heap_trap string_parameters
 
-for name in text_parameter text_array; do
-  expect "$name" '.to_heap'
-done
 expect text_capture 'pass what the block needs as owned data (copy_to(owner))'
 # These old heap-boundary refusals are safe on the object's tape now.
 # Keep the original fixtures and check their text after scratch resets.
@@ -650,15 +643,9 @@ expect writer_grow      "private method 'grow' called for String::Builder"
 expect tree_entry       "private constant RisTree::Entry(T) referenced"
 expect array_grow       "private method 'grow' called for Array(T)"
 expect array_append     "append requires Array(UInt8)"
-expect heap_copy "\`to_s\` of a String outside a @[TapeToHeap] def copies"
-expect heap_interpolation \
-  "Interpolating a String outside a @[TapeToHeap]"
 expect refill           "\`@items\` is given a new Array in \`take\`"
-expect heap_memory      "Writing a String into a String::Builder or"
-expect heap_memory_print "Writing a String into a Std::Io::Memory"
 expect not_flat "Holder is not flat"
 expect check_free "\`first\` is @[CheckFree], and this \`[]\` checks"
-expect heap_escape_helper "\`to_s\` of a String outside a @[TapeToHeap] def copies"
 
 
 for name in implicit fibers/implicit implicit_loop; do

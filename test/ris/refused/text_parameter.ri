@@ -1,4 +1,0 @@
-def retain(text : String) : String
-  text
-end
-retain("value #{42}")

@@ -1,2 +1,0 @@
-kept = [] of String
-kept << "value #{42}"

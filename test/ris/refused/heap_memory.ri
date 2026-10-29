@@ -1,9 +1,0 @@
-module test/ris/refused/heap_memory
-
-import std/io::{Memory}
-
-tape do
-  text = String.new("abc")
-  memory = Memory.new
-  text.to_s(memory)
-end

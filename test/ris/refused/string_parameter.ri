@@ -1,4 +1,0 @@
-def width(name : String) : Int32
-  name.size
-end
-puts width("alice")
