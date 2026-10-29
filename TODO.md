@@ -112,7 +112,11 @@ first):
 * Refuse `String::Builder.new` and `String.build` outside src/iyi/,
   naming `s = ""` and `<<`; move std, tests and samples (about 300
   sites). Until then, drop arbitrary capacities (`Builder.new(64)`):
-  on Linux they change nothing (no moves either way).
+  on Linux they change nothing (no moves either way). The same step
+  drops the arbitrary Array capacities (`Array(T).new(64)`, ~20 in std).
+* After Text: weigh `a = []` without `of T`, its type taken from later
+  `<<` (Ruby's form; std has ~450 `[] of T`). Type inference, not
+  memory: estimate the inference change and its risk first.
 
 ## Next
 
