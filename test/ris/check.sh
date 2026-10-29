@@ -1490,16 +1490,17 @@ fi
 # (TODO.md, Goose-style std).
 out=$("$RIS" heap --user test/ris/heap_fields.ri 2>&1)
 if [ "$?" -eq 0 ] && ! grep -qE '^class: [1-9]' <<<"$out" &&
-    grep -qF 'array: 1' <<<"$out"; then
-  echo "census   heap_fields (instance initializer reached)"
+    grep -qxF 'array: 0' <<<"$out"; then
+  echo "census   heap_fields (initializer's Array is on the tape)"
 else
   echo "FAILED   heap_fields: $out"
   status=1
 fi
 out=$("$RIS" heap --user test/ris/heap_kinds.ri 2>&1)
 if [ "$?" -eq 0 ] && ! grep -qE '^class: [1-9]' <<<"$out" &&
-    grep -qF 'string: 1' <<<"$out" && grep -qF 'array: 1' <<<"$out" &&
-    grep -qF 'hash: 2' <<<"$out" && grep -qF 'closure: 1' <<<"$out"; then
+    grep -qxF 'string: 0' <<<"$out" && grep -qxF 'array: 0' <<<"$out" &&
+    grep -qxF 'hash: 0' <<<"$out" && grep -qxF 'closure: 1' <<<"$out"; then
+  # String, Array and Hash are tape types: only the closure counts.
   echo "census   heap_kinds (unused def omitted)"
 else
   echo "FAILED   heap_kinds: $out"

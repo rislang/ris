@@ -23,7 +23,7 @@
 
 module std/uri
 
-import std/query
+pub import std/query
 import std/text
 import std/idna::{IDNA, IdnaError}
 

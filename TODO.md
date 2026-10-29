@@ -234,6 +234,36 @@ first):
 
 ## Known failure to recheck
 
+* check.sh triage (2026-10-29, two full runs on minitest agree; all
+  deterministic, none load or temp-path races; fail at 5a375faec too):
+  * Tape stats one higher than gated: side_warm 10003 scopes, 6 mappings
+    (gate 10002, 5); side_spares 5 (4); pending_result 7 (6);
+    stable_growth 6 (5); stable_components 7 (6); query_scope 9 (<= 8);
+    owner_construction_panic 303 scopes, 9 mappings (202, 6): one more
+    scope per panic. Find the extra mapping/scope before moving gates.
+  * text_default.ri:31: a def whose Int32 result drops its interpolation
+    keeps tape over a million calls ("interpolation retained tape").
+  * index_view: `dist.values_at(adj)` is no view: index(3) is nil and
+    writes through it miss dist (prints "last names , ... dist -1").
+  * copy_rollback.ri:55: the String#__iyi_copy_into override is not
+    called by Array(String)#copy_to, so the forced copy failure never
+    panics ("missing copy panic").
+  * slice_pool.ri:148 and flat.ri:17: alloc_slice/next_link instantiate
+    realloc_slice, whose relocation check refuses Array::Link
+    (tape.iyi:3392) though no user code relocates.
+  * pointer_unsafe and ffi_marked: `to_unsafe` in an @[PointerUnsafe]
+    def or an @[Ffi] C call is refused as needing @[TapeUnsafe]; the
+    marks AGENTS.md names should satisfy the String pointer rule.
+  * Refusals tape-only retired, fixtures stale? interpolation_retained
+    now builds (returning "retained #{v}"); call_contracts'
+    contract_spawn (task capturing a view, group inside tape) builds.
+    Decide: drop the fixtures or restore the rules.
+  * autocert lifecycle and wire: Array(Hash(String, Json::Any)) cannot
+    hold growing values (SlicePool rule).
+  * log_metadata, log_tape, samples/ris/orders: log.iyi:279 "cannot grow
+    a pool run with a live view of TapeEntry.@source"; heap and
+    server_owners stop at log.iyi:362; answer, serve, server_groups,
+    http_prefork at http.iyi:6052; samples/ris/request at :2627.
 * growing_owner refuses with the field rule, not the container one.
 * samples/ris/web.ri does not build: std/http.iyi:2627
   (`headers[host_name] = named`) is refused as a Hash shrink with a live
