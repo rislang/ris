@@ -652,10 +652,12 @@ pub struct IyiSocket
   # Whether this machine has a route to *address*: a UDP connect only
   # looks the destination up and records it, and fails at once without a
   # route (ENETUNREACH).
+  # The OS borrows the address for this UDP connect.
+  @[TapeUnsafe]
   private def self.routed?(address : IPv6Address) : ::Bool
     fd = __sys_dgram_socket(AF_INET6)
     return false if fd < 0
-    connected = __sys_dgram_connect(fd, make_sockaddr_in6(address, 9), AF_INET6)
+    connected = __sys_dgram_connect(fd, make_sockaddr_in6(address, 9).to_unsafe, AF_INET6)
     __sys_close(fd)
     connected >= 0
   end
@@ -997,41 +999,22 @@ pub struct IyiSocket
     end
   end
 
-  # What is here now, nil when nothing is. Received into the stack first:
-  # a buffer of `max_bytes` on the heap per read was garbage the size of
-  # the request for every answer - a server reading 64 KB at a time made
-  # 64 KB of it per 30-byte request, and collected every few dozen
-  # requests. Past what the stack held, what else is already here is taken
-  # without waiting. Its own frame, never inlined, and it never parks: the
-  # wait is the caller's, so a fiber parked on a read keeps no 4 KB of the
-  # last bytes it read where the collector scans it - it would scan them on
-  # every parked connection, and hold whatever they happened to point at.
-  @[NoInline]
+  # Receive into the caller's tape; the OS borrows the builder's room.
+  @[TapeUnsafe]
   private def read_ready(max_bytes : Int32) : String | SocketError | Nil
-    small = uninitialized UInt8[4096]
-    first = max_bytes < 4096 ? max_bytes : 4096
-    n = IyiSocket.__sys_recv(@state.value.fd, pointerof(small).as(UInt8*), first.to_u64)
-    if n < 0_i64
-      return nil if IyiSocket.__sys_would_block?(n)
-      return SocketError.new("read from socket", IyiSocket.__sys_code(n))
+    writer = String::Builder.new(max_bytes)
+    received = 0_i64
+    writer.unsafe_append(max_bytes) do |room|
+      received = IyiSocket.__sys_recv(@state.value.fd, room,
+        max_bytes.to_u64)
+      received > 0_i64 ? received.to_i32 : 0
     end
-    count = n.to_i32
-    return "" if count == 0
-    if count < first || max_bytes == first
-      return String.new(count) do |target|
-        target.copy_from(pointerof(small).as(UInt8*), count)
-      end
+    if received < 0_i64
+      return nil if IyiSocket.__sys_would_block?(received)
+      return SocketError.new("read from socket",
+        IyiSocket.__sys_code(received))
     end
-    buffer = Pointer(UInt8).malloc(max_bytes.to_u64)
-    buffer.copy_from(pointerof(small).as(UInt8*), count)
-    more = IyiSocket.__sys_recv(@state.value.fd, buffer + count, (max_bytes - count).to_u64)
-    # Nothing more yet: this read ends with what came. An error is the
-    # next read's to answer, and is kept for it.
-    @state.value.pending_error = SocketError.new("read from socket", IyiSocket.__sys_code(more)) if more < 0_i64 && !IyiSocket.__sys_would_block?(more)
-    total = more > 0_i64 ? count + more.to_i32 : count
-    String.new(total) do |target|
-      target.copy_from(buffer, total)
-    end
+    writer.finish
   end
 
   def read(buffer : Pointer(UInt8), count : Int32) : Int32 | Cancelled | SocketError
@@ -1314,11 +1297,13 @@ pub struct IyiSocket
   # earlier run left behind is refused rather than taken over, since
   # which program owns it is not something a bind can know. `close`
   # removes the file.
+  # The OS borrows the address during bind.
+  @[TapeUnsafe]
   def self.listen_unix(path : String, backlog : Int32 = 128) : IyiSocket
     addr = make_sockaddr_un(path)
     fd = __sys_socket(AF_UNIX)
     raise "cannot create socket" if fd < 0
-    if (bound = __sys_bind(fd, addr, AF_UNIX)) < 0
+    if (bound = __sys_bind(fd, addr.to_unsafe, AF_UNIX)) < 0
       __sys_close(fd)
       raise "cannot bind socket to #{path.inspect}: #{SocketError.new("bind", __sys_code(bound.to_i64)).reason}"
     end
@@ -1351,6 +1336,8 @@ pub struct IyiSocket
     nil
   end
 
+  # The OS borrows the terminated path during unlink.
+  @[TapeUnsafe]
   def close : Nil
     if @state.value.fd >= 0
       fd = @state.value.fd
@@ -1364,7 +1351,7 @@ pub struct IyiSocket
       path = @state.value.path
       if path.is_a?(String)
         @state.value.path = nil
-        __iyi_unlink(IyiSocket.c_path(path))
+        __iyi_unlink(IyiSocket.c_path(path).to_unsafe)
       end
     end
   end
@@ -1391,7 +1378,8 @@ pub struct IyiSocket
 
   def local_address : String
     raise "socket is closed" if @state.value.fd < 0
-    addr = IyiSocket.__address_room
+    storage = StaticArray(UInt8, 128).new(0_u8)
+    addr = pointerof(storage).as(Pointer(UInt8))
     len = 128_u32
     res = IyiSocket.__sys_getsockname(@state.value.fd, addr, pointerof(len))
     raise "cannot get local address" if res < 0
@@ -1405,7 +1393,8 @@ pub struct IyiSocket
   # which is the peer's doing and no fault of the program's.
   def remote_address : String?
     raise "socket is closed" if @state.value.fd < 0
-    addr = IyiSocket.__address_room
+    storage = StaticArray(UInt8, 128).new(0_u8)
+    addr = pointerof(storage).as(Pointer(UInt8))
     len = 128_u32
     return nil if IyiSocket.__sys_getpeername(@state.value.fd, addr, pointerof(len)) < 0
     IyiSocket.__address_text(addr, @state.value.family)
@@ -1414,7 +1403,8 @@ pub struct IyiSocket
   def remote_port : Int32?
     raise "socket is closed" if @state.value.fd < 0
     raise "a unix socket has no port" if @state.value.family == AF_UNIX
-    addr = Pointer(UInt8).malloc(128_u64)
+    storage = StaticArray(UInt8, 128).new(0_u8)
+    addr = pointerof(storage).as(Pointer(UInt8))
     len = 128_u32
     return nil if IyiSocket.__sys_getpeername(@state.value.fd, addr, pointerof(len)) < 0
     (addr[2].to_i32 << 8) | addr[3].to_i32
@@ -1425,18 +1415,6 @@ pub struct IyiSocket
   # a session's tickets by the port they came from.
   def unix? : ::Bool
     @state.value.family == AF_UNIX
-  end
-
-  # Room for any family's `sockaddr`, zeroed, so a unix path the kernel
-  # did not end with a NUL still ends.
-  def self.__address_room : Pointer(UInt8)
-    addr = Pointer(UInt8).malloc(128_u64)
-    index = 0
-    while index < 128
-      addr[index] = 0_u8
-      index = index + 1
-    end
-    addr
   end
 
   # A `sockaddr` the kernel filled, as text: dotted IPv4, IPv6 written as
@@ -1454,6 +1432,13 @@ pub struct IyiSocket
       return String.new(ends - 2) { |target| target.copy_from(addr + 2_u64, ends - 2) }
     end
     "#{addr[4]}.#{addr[5]}.#{addr[6]}.#{addr[7]}"
+  end
+
+  # The kernel borrows the packed address during this call.
+  @[TapeUnsafe]
+  def self.__sys_dgram_connect(fd : Int32, addr : String,
+                               family : Int32) : Int32
+    __sys_dgram_connect(fd, addr.to_unsafe, family)
   end
 
   # --- Address and Struct Construction ---
@@ -1526,7 +1511,7 @@ pub struct IyiSocket
     size = host.bytesize
     size = size - 1 if size == 10 && host.as_tape[9] == 46_u8
     return false unless size == 9
-    name = "localhost".to_unsafe
+    name = "localhost"
     raw = host.as_tape
     index = 0
     while index < 9
@@ -1710,56 +1695,39 @@ pub struct IyiSocket
 
   # A `sockaddr_in6`: family, port, a zero flow label, the address, a zero
   # scope. The family's number and where it sits are the platform's.
-  @[TapeToHeap]
-  def self.make_sockaddr_in6(ip : IPv6Address, port : Int32) : Pointer(UInt8)
-    address_bytes(ip, port).to_heap.to_unsafe
+  def self.make_sockaddr_in6(ip : IPv6Address, port : Int32) : String
+    address_bytes(ip, port)
   end
 
   # A `sockaddr_un`: the family, then the path and its NUL. The room for
   # the path is the platform's - 104 bytes on darwin, 108 elsewhere - and a
   # longer one is refused rather than cut, since a cut path is another
   # path.
-  def self.make_sockaddr_un(path : String) : Pointer(UInt8)
+  def self.make_sockaddr_un(path : String) : String
     size = path.bytesize
     raise "a unix socket path is empty" if size == 0
-    room = 108
-    {% if flag?(:darwin) %}
-      room = 104
-    {% end %}
-    raise "unix socket path #{path.inspect} is #{size} bytes, and the platform's limit is #{room - 1}" if size >= room
-    buffer = Pointer(UInt8).malloc(112_u64)
-    index = 0
-    while index < 112
-      buffer[index] = 0_u8
-      index = index + 1
+    raise "a unix socket path exceeds 107 bytes" if size >= 108
+    String.build(112) do |writer|
+      writer.push(AF_UNIX.to_u8)
+      writer.push(0_u8)
+      path.each_byte do |byte|
+        raise "a unix socket path has a NUL byte" if byte == 0_u8
+        writer.push(byte)
+      end
+      (110 - size).times { writer.push(0_u8) }
     end
-    {% if flag?(:darwin) %}
-      buffer[0] = 106_u8 # sun_len
-      buffer[1] = AF_UNIX.to_u8
-    {% else %}
-      buffer[0] = AF_UNIX.to_u8
-    {% end %}
-    source = path.to_unsafe
-    index = 0
-    while index < size
-      raise "unix socket path #{path.inspect} has a NUL byte" if source[index] == 0_u8
-      buffer[2 + index] = source[index]
-      index = index + 1
-    end
-    buffer
   end
 
   # *path* with the NUL a system call reads to.
-  def self.c_path(path : String) : Pointer(UInt8)
-    buffer = Pointer(UInt8).malloc((path.bytesize + 1).to_u64)
-    buffer.copy_from(path.to_unsafe, path.bytesize)
-    buffer[path.bytesize] = 0_u8
-    buffer
+  def self.c_path(path : String) : String
+    String.build(path.bytesize + 1) do |writer|
+      writer << path
+      writer.push(0_u8)
+    end
   end
 
-  @[TapeToHeap]
-  def self.make_sockaddr_in(ip : IPv4Address, port : Int32) : Pointer(UInt8)
-    address_bytes(ip, port).to_heap.to_unsafe
+  def self.make_sockaddr_in(ip : IPv4Address, port : Int32) : String
+    address_bytes(ip, port)
   end
 
   # Every close of a socket in this file goes through here. `__iyi_close` is
@@ -3194,11 +3162,11 @@ end
 # message names it (`192.0.2.1:53`).
 @[OnTape]
 struct NameServer
-  getter address : Pointer(UInt8)
+  getter address : String
   getter family : Int32
   getter label : String
 
-  def initialize(@address : Pointer(UInt8), @family : Int32, @label : String)
+  def initialize(@address : String, @family : Int32, @label : String)
   end
 end
 
@@ -3385,8 +3353,10 @@ pub class Resolver
   # *path*'s text, or nil when it cannot be opened. Not `File.read`, which
   # panics on a missing file: a machine without a hosts file is a
   # machine, not a mistake.
+  # The OS borrows the terminated path during open.
+  @[TapeUnsafe]
   private def self.read_text(path : String) : String?
-    fd = __iyi_open_read(IyiSocket.c_path(path))
+    fd = __iyi_open_read(IyiSocket.c_path(path).to_unsafe)
     return nil if fd < 0_i64
     io = IyiIO.new(fd, 4096, false)
     defer io.close

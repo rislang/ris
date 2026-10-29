@@ -77,6 +77,7 @@ import std/digest::{CRC32, CRC64, SHA256}
 # What `XzReader#read` and `Xz.decompress` answer for a stream they cannot
 # read: one that is corrupt, whose check or index or sizes do not match,
 # that ends early, or whose dictionary is past the caller's limit.
+@[OnTape]
 pub struct XzError
   getter message : String
 

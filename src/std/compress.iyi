@@ -52,6 +52,7 @@ import std/digest::{CRC32, Adler32}
 # What `Inflater#read` answers for a stream it cannot read: one that is
 # corrupt, whose checksum or length does not match, or that ends early.
 # `message` is the sentence the whole-string calls panic with.
+@[OnTape]
 pub struct CompressError
   getter message : String
 
@@ -698,7 +699,7 @@ class Inflate
     b = byte
     if b >= 0
       @scratch[0] = b.to_u8
-      @hcrc = CRC32.update(@hcrc, @scratch, 1)
+      @hcrc = CRC32.update_byte(@hcrc, @scratch[0])
     end
     b
   end
@@ -796,9 +797,13 @@ class Inflate
     n = @pos - @summed
     return if n == 0
     if @envelope == Envelope::Gzip
-      @check = CRC32.update(@check, @buf + @summed.to_i64, n)
+      n.times do |i|
+        @check = CRC32.update_byte(@check, @buf[@summed + i])
+      end
     elsif @envelope == Envelope::Zlib
-      @check = Adler32.update(@check, @buf + @summed.to_i64, n)
+      n.times do |i|
+        @check = Adler32.update_byte(@check, @buf[@summed + i])
+      end
     end
     @size = @size &+ n.to_u32
     @summed = @pos
@@ -1232,9 +1237,9 @@ pub class Deflater
     head = header
     return head if data.bytesize == 0
     if @envelope == Envelope::Gzip
-      @check = CRC32.update(@check, data.to_unsafe, data.bytesize)
+      @check = CRC32.update(@check, data, data.bytesize)
     elsif @envelope == Envelope::Zlib
-      @check = Adler32.update(@check, data.to_unsafe, data.bytesize)
+      @check = Adler32.update(@check, data, data.bytesize)
     end
     @size = @size &+ data.bytesize.to_u32
     @core.stream(data, Encoder::SYNC)

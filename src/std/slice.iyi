@@ -18,6 +18,7 @@ import std/iterator::{Iterator, Stop}
 # unexported one is unreachable from a consumer, which R-2 now says out loud.
 pub alias Bytes = Slice(UInt8)
 
+@[OnTape]
 pub struct Slice(T)
   @pointer : Pointer(T)
   @size : Int32
@@ -39,10 +40,11 @@ pub struct Slice(T)
     @size = size
   end
 
-  # Allocates a slice of *size* elements on the heap.
+  # Reserves *size* elements on the caller's tape.
   def self.new(size : Int32, *, read_only : Bool = false) : self
     raise "negative size: #{size}" if size < 0
-    pointer = size == 0 ? Pointer(T).new(0_u64) : Pointer(T).malloc(size.to_u64)
+    pointer = Pointer(T).new(
+      RisRegion.tape_bytes(size.to_u64 * sizeof(T).to_u64))
     new(pointer, size, read_only: read_only)
   end
 
@@ -54,7 +56,8 @@ pub struct Slice(T)
   # `Slice.new(3) { |i| i + 1 }` and `Slice.new(3, 7)` did not compile.
   def self.new(size : Int32, value : T, *, read_only : Bool = false) : Slice(T)
     raise "negative size: #{size}" if size < 0
-    pointer = size == 0 ? Pointer(T).new(0_u64) : Pointer(T).malloc(size.to_u64)
+    pointer = Pointer(T).new(
+      RisRegion.tape_bytes(size.to_u64 * sizeof(T).to_u64))
     slice = new(pointer, size, read_only: false)
     slice.fill(value)
     new(pointer, size, read_only: read_only)
@@ -63,7 +66,8 @@ pub struct Slice(T)
   # Allocates a slice of *size* elements initialized by yielding each index.
   def self.new(size : Int32, & : Int32 -> T) : Slice(T)
     raise "negative size: #{size}" if size < 0
-    pointer = size == 0 ? Pointer(T).new(0_u64) : Pointer(T).malloc(size.to_u64)
+    pointer = Pointer(T).new(
+      RisRegion.tape_bytes(size.to_u64 * sizeof(T).to_u64))
     i = 0
     while i < size
       pointer[i] = yield i
@@ -74,7 +78,8 @@ pub struct Slice(T)
 
   def self.new(size : Int32, *, read_only : Bool, & : Int32 -> T) : Slice(T)
     raise "negative size: #{size}" if size < 0
-    pointer = size == 0 ? Pointer(T).new(0_u64) : Pointer(T).malloc(size.to_u64)
+    pointer = Pointer(T).new(
+      RisRegion.tape_bytes(size.to_u64 * sizeof(T).to_u64))
     i = 0
     while i < size
       pointer[i] = yield i
@@ -498,6 +503,7 @@ end
 # by value, and a struct source was copied into it, so `it.first(2).to_a`
 # and then `it.to_a` gave [1, 2] and [1, 2, 3, 4] where an array's iterator
 # gives [1, 2] and [3, 4].
+@[OnTape]
 pub class SliceIterator(T)
   def initialize(@slice : Slice(T))
     @index = 0

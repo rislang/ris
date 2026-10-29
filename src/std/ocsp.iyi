@@ -80,6 +80,7 @@ import std/digest::{SHA1, SHA256, SHA384, SHA512}
 import std/time::{Time}
 
 # What reading or checking a response answers when it fails.
+@[OnTape]
 pub struct OcspError
   getter message : String
   # The responseStatus of a responder that answered with no response: 1
@@ -149,13 +150,14 @@ end
 # A CertID (RFC 6960 section 4.1.1): the hash it is made under, the hashes
 # of the issuer's name and key, and the certificate's serial number (its
 # two's-complement bytes, as `Certificate#serial` holds it).
+@[OnTape]
 pub struct OcspCertId
   getter hash : OcspHash
-  getter issuer_name_hash : Array(UInt8)
-  getter issuer_key_hash : Array(UInt8)
-  getter serial : Array(UInt8)
+  getter issuer_name_hash : Array::View(UInt8)
+  getter issuer_key_hash : Array::View(UInt8)
+  getter serial : Array::View(UInt8)
 
-  def initialize(@hash : OcspHash, @issuer_name_hash : Array(UInt8), @issuer_key_hash : Array(UInt8), @serial : Array(UInt8))
+  def initialize(@hash : OcspHash, @issuer_name_hash : Array::View(UInt8), @issuer_key_hash : Array::View(UInt8), @serial : Array::View(UInt8))
   end
 
   # *leaf*'s CertID, *issuer* its issuer's certificate.
@@ -182,6 +184,7 @@ end
 # One SingleResponse (RFC 6960 section 4.2.1): a certificate's status,
 # when it was revoked and why (a CRLReason, nil when not given), and the
 # time the status is for.
+@[OnTape]
 pub struct OcspSingleResponse
   getter cert_id : OcspCertId
   getter status : OcspCertStatus
@@ -613,7 +616,7 @@ end
 
 # The DER a request is written in: what `Ocsp.request` needs, and no more.
 struct OcspDer
-  def self.tlv(tag : UInt8, content : Array(UInt8)) : Array(UInt8)
+  def self.tlv(tag : UInt8, content : Array::View(UInt8)) : Array(UInt8)
     size = content.size
     return [tag, size.to_u8] + content if size < 128
     length = [] of UInt8

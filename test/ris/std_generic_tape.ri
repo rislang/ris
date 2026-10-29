@@ -1,0 +1,25 @@
+module test/ris/std_generic_tape
+
+import std/heap::{Heap}
+import std/mutex::{Mutex}
+import std/derives::{Name, Show}
+import std/set
+import std/levenshtein
+
+h = Heap(Int32).new
+h.push(3)
+h.push(1)
+h.push(2)
+raise "heap order" unless h.pop == 1 && h.pop == 2 && h.pop == 3
+raise "heap empty" unless h.empty?
+lock = Mutex.new { 3 }
+raise "mutex get" unless lock.get { |value| value + 1 }.or_panic == 4
+raise "derived text" unless Name.new("value").show == "<value>"
+a = Set(Int32).new
+a.add(1)
+b = Set(Int32).new
+b.add(2)
+raise "set union" unless (a | b).size == 2
+raise "unicode edits" unless Levenshtein.distance("", "café") == 4
+raise "transposition" unless Levenshtein.osa_distance("cuont", "count") == 1
+puts "PASS: generic tape classes"

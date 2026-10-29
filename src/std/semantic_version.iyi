@@ -21,170 +21,24 @@ module std/semantic_version
 
 import std/traits::{Comparable}
 
+@[OnTape]
 pub struct SemanticVersion
   getter major : Int32
   getter minor : Int32
   getter patch : Int32
+  getter prerelease : String
   getter build : String?
-  getter prerelease : Prerelease
-
-  # The dot-separated identifiers after `-`; a numeric identifier is held
-  # as a number so that `beta.2 < beta.11`, and one too long for an Int32
-  # is held as its digits and still ordered as a number.
-  struct Prerelease
-    getter identifiers : Array(String | Int32)
-
-    def self.parse(str : String) : self
-      identifiers = [] of String | Int32
-      tape do
-        unless str.empty?
-          str.as_tape.split('.').each do |part|
-            n = part.to_i?
-            if n && part[0] >= 48_u8 && part[0] <= 57_u8
-              identifiers << n
-            else
-              identifiers << part.to_heap
-            end
-          end
-        end
-      end
-      new(identifiers)
-    end
-
-    def initialize(@identifiers : Array(String | Int32) = [] of String | Int32)
-    end
-
-    def empty? : Bool
-      @identifiers.empty?
-    end
-
-    def to_s(io : IO) : Nil
-      io.write(to_s)
-    end
-
-    def to_s : String
-      result = ""
-      tape do
-        result = String.build { |w| write(w) }.to_heap
-      end
-      result
-    end
-
-    def write(writer : String::Builder) : Nil
-      @identifiers.each_with_index do |identifier, i|
-        writer << "." if i > 0
-        writer << identifier
-      end
-    end
-
-    # `Prerelease`, not `self`: spelled `self` it was the very method the
-    # `impl Comparable` below defines, which replaced it, and that one's
-    # `self <=> other` then called itself until the stack ran out.
-    def <=>(other : Prerelease) : Int32
-      if @identifiers.empty?
-        return other.identifiers.empty? ? 0 : 1
-      elsif other.identifiers.empty?
-        return -1
-      end
-
-      i = 0
-      while i < @identifiers.size
-        return 1 if i >= other.identifiers.size
-        r = compare_identifier(@identifiers[i], other.identifiers[i])
-        return r if r != 0
-        i += 1
-      end
-
-      @identifiers.size < other.identifiers.size ? -1 : 0
-    end
-
-    private def compare_identifier(x : String | Int32, y : String | Int32) : Int32
-      if x.is_a?(Int32)
-        if y.is_a?(Int32)
-          x == y ? 0 : (x < y ? -1 : 1)
-        else
-          -1
-        end
-      else
-        if y.is_a?(Int32)
-          1
-        elsif digits?(x) || digits?(y)
-          # A digit run held as a string is a number past Int32: numeric
-          # before alphanumeric, a longer number the larger. Compared as
-          # bytes, `100000000000` came before `99999999999`.
-          return digits?(x) ? -1 : 1 unless digits?(x) && digits?(y)
-          return x.bytesize < y.bytesize ? -1 : 1 if x.bytesize != y.bytesize
-          x == y ? 0 : (x < y ? -1 : 1)
-        else
-          x == y ? 0 : (x < y ? -1 : 1)
-        end
-      end
-    end
-
-    private def digits?(s : String) : Bool
-      return false if s.empty?
-      ptr = s.to_unsafe
-      i = 0
-      while i < s.bytesize
-        return false unless ptr[i] >= 48_u8 && ptr[i] <= 57_u8
-        i += 1
-      end
-      true
-    end
-
-    def ==(other : Prerelease) : Bool
-      (self <=> other) == 0
-    end
-
-    def hash : Int32
-      value = 17
-      i = 0
-      while i < @identifiers.size
-        value = (value &* 31) &+ @identifiers[i].hash
-        i += 1
-      end
-      value
-    end
-  end
-
-  impl Comparable for Prerelease
-    def <=>(other : self) : Int32
-      self <=> other
-    end
-  end
-
-  def self.valid?(str : String) : Bool
-    result = false
-    tape do
-      result = valid?(str.as_tape)
-    end
-    result
-  end
 
   def self.valid?(str : String) : Bool
     !scan(str).nil?
   end
 
-  def self.parse(str : String) : self
-    parse?(str) || raise "not a semantic version: #{str.inspect}"
-  end
-
-  def self.parse(str : String) : TapeSemanticVersion
+  def self.parse(str : String) : SemanticVersion
     parse?(str) ||
-      raise "not a semantic version: #{str.to_heap.inspect}"
+      raise "not a semantic version: #{str.inspect}"
   end
 
-  def self.parse?(str : String) : self?
-    result = nil.as(SemanticVersion?)
-    tape do
-      if parsed = parse?(str.as_tape)
-        result = parsed.to_heap
-      end
-    end
-    result
-  end
-
-  def self.parse?(str : String) : TapeSemanticVersion?
+  def self.parse?(str : String) : SemanticVersion?
     parts = scan(str)
     return nil unless parts
     major_range, minor_range, patch_range, pre_range, build_range = parts
@@ -194,7 +48,7 @@ pub struct SemanticVersion
     return nil unless major && minor && patch
     pre = pre_range ? str[pre_range] : "".as_tape
     build = build_range ? str[build_range] : nil
-    TapeSemanticVersion.new(major, minor, patch, pre, build)
+    SemanticVersion.new(major, minor, patch, pre, build)
   end
 
   # Byte ranges of the five fields, or nil where the grammar is not met.
@@ -287,120 +141,15 @@ pub struct SemanticVersion
     true
   end
 
-  def initialize(@major : Int32, @minor : Int32, @patch : Int32, prerelease : String | Prerelease | Nil = nil, @build : String? = nil)
-    raise "negative version field: #{@major}.#{@minor}.#{@patch}" if @major < 0 || @minor < 0 || @patch < 0
-    @prerelease = case prerelease
-                  when Prerelease
-                    prerelease
-                  when String
-                    Prerelease.parse(prerelease)
-                  else
-                    Prerelease.new
-                  end
-  end
-
-  def to_s(io : IO) : Nil
-    io.write(to_s)
+  def initialize(@major : Int32, @minor : Int32, @patch : Int32,
+                 @prerelease : String = "", @build : String? = nil)
+    if @major < 0 || @minor < 0 || @patch < 0
+      raise "negative version field: #{@major}.#{@minor}.#{@patch}"
+    end
   end
 
   def to_s : String
-    result = ""
-    tape do
-      result = to_tape.to_heap
-    end
-    result
-  end
-
-  def to_tape : String
-    String.build { |w| write(w) }
-  end
-
-  def write(writer : String::Builder) : Nil
-    writer << @major << "." << @minor << "." << @patch
-    unless @prerelease.empty?
-      writer << "-"
-      @prerelease.write(writer)
-    end
-    if b = @build
-      writer << "+" << b
-    end
-  end
-
-  def copy_with(major : Int32 = @major, minor : Int32 = @minor, patch : Int32 = @patch, prerelease : String | Prerelease | Nil = @prerelease, build : String? = @build) : SemanticVersion
-    SemanticVersion.new(major, minor, patch, prerelease, build)
-  end
-
-  def bump_major : self
-    copy_with(major: @major + 1, minor: 0, patch: 0, prerelease: nil, build: nil)
-  end
-
-  def bump_minor : self
-    copy_with(minor: @minor + 1, patch: 0, prerelease: nil, build: nil)
-  end
-
-  # A prerelease of a patch is bumped to that patch; a release to the next.
-  def bump_patch : self
-    if @prerelease.empty?
-      copy_with(patch: @patch + 1, prerelease: nil, build: nil)
-    else
-      copy_with(prerelease: nil, build: nil)
-    end
-  end
-
-  # Precedence, with build metadata ignored as the standard says. The
-  # parameter is `SemanticVersion` for the reason `Prerelease#<=>` gives:
-  # as `self` the `impl Comparable` replaced this, and every `<=>`, `==`,
-  # `<` and sort recursed until the stack ran out (a hang under --release).
-  def <=>(other : SemanticVersion) : Int32
-    r = @major == other.major ? 0 : (@major < other.major ? -1 : 1)
-    return r unless r == 0
-    r = @minor == other.minor ? 0 : (@minor < other.minor ? -1 : 1)
-    return r unless r == 0
-    r = @patch == other.patch ? 0 : (@patch < other.patch ? -1 : 1)
-    return r unless r == 0
-    @prerelease <=> other.prerelease
-  end
-
-  # Identity, with build metadata read: `1.0.0+a` is not `1.0.0+b`.
-  def ==(other : SemanticVersion) : Bool
-    (self <=> other) == 0 && @build == other.build
-  end
-
-  def hash : Int32
-    value = @major
-    value = (value &* 31) &+ @minor
-    value = (value &* 31) &+ @patch
-    value = (value &* 31) &+ @prerelease.hash
-    if b = @build
-      value = (value &* 31) &+ b.hash
-    end
-    value
-  end
-end
-
-impl Comparable for SemanticVersion
-  def <=>(other : self) : Int32
-    self <=> other
-  end
-end
-
-# Numeric fields and views of the prerelease and build bytes.
-@[OnTape]
-pub struct TapeSemanticVersion
-  getter major : Int32
-  getter minor : Int32
-  getter patch : Int32
-  getter prerelease : String
-  getter build : String?
-
-  def initialize(@major : Int32, @minor : Int32, @patch : Int32,
-                 @prerelease : String, @build : String?)
-  end
-
-  def to_heap : SemanticVersion
-    build = @build
-    SemanticVersion.new(@major, @minor, @patch, @prerelease.to_heap,
-      build ? build.to_heap : nil)
+    to_tape
   end
 
   def to_tape : String
@@ -415,7 +164,7 @@ pub struct TapeSemanticVersion
     end
   end
 
-  def <=>(other : TapeSemanticVersion) : Int32
+  def <=>(other : SemanticVersion) : Int32
     r = compare(@major, other.major)
     return r unless r == 0
     r = compare(@minor, other.minor)
@@ -447,7 +196,7 @@ pub struct TapeSemanticVersion
     compare(left.size, right.size)
   end
 
-  def ==(other : TapeSemanticVersion) : Bool
+  def ==(other : SemanticVersion) : Bool
     (self <=> other) == 0 && @build == other.build
   end
 
@@ -458,5 +207,11 @@ pub struct TapeSemanticVersion
   private def digits?(text : String) : Bool
     text.each_byte { |b| return false unless b >= 48_u8 && b <= 57_u8 }
     true
+  end
+end
+
+impl Comparable for SemanticVersion
+  def <=>(other : self) : Int32
+    self <=> other
   end
 end

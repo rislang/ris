@@ -15,7 +15,8 @@ class Iyi::TapeChecker
     return false unless program.tape_scopes?
     type = type.remove_typedef
     type = type.base_type if type.is_a?(VirtualType)
-    return false unless type.is_a?(ClassType) && !type.struct?
+    return false unless (type.is_a?(ClassType) ||
+                         type.is_a?(GenericClassInstanceType)) && !type.struct?
     declaration = type.is_a?(GenericClassInstanceType) ? type.generic_type : type
     !!declaration.locations.try(&.first?).try do |loc|
       (!TapeRules.runtime?(program, loc) && !TapeRules.std?(loc)) ||

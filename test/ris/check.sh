@@ -964,6 +964,19 @@ rm -f "$exe"
 
 heap_trap string_arguments
 
+# Generic std classes and crypto inputs use checked tape storage.
+for name in std_generic_tape curve_views mlkem_views shlex base32 \
+            semantic_version uuid; do
+  out=$(RIS_HEAP_STATS=1 "$RIS" run "test/ris/$name.ri" 2>&1)
+  if [ "$?" -eq 0 ] &&
+      grep -qE 'PASS:|ALL CHECKS PASSED' <<<"$out" &&
+      grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+    echo "runs     $name (no GC)"
+  else
+    echo "FAILED   $name: $out"; status=1
+  fi
+done
+
 # HPACK's tape overload agrees with the retained API across tape scopes.
 out=$("$RIS" run --release test/ris/hpack.ri 2>&1)
 if [ "$out" = \

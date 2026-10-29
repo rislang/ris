@@ -212,7 +212,7 @@ pub struct DnsName
   # *name* without the trailing dot that makes it absolute.
   def self.relative(name : String) : String
     size = name.bytesize
-    size > 1 && name.to_unsafe[size - 1] == 46_u8 ? name[0, size - 1] : name
+    size > 1 && name[size - 1] == 46_u8 ? name[0, size - 1] : name
   end
 
   # Two names are the same name in any case (RFC 4343), with or without
@@ -221,31 +221,11 @@ pub struct DnsName
     left = relative(a)
     right = relative(b)
     return false unless left.bytesize == right.bytesize
-    x = left.to_unsafe
-    y = right.to_unsafe
+    x = left
+    y = right
     index = 0
     while index < left.bytesize
       p = x[index]
-      q = y[index]
-      p = p | 32_u8 if p >= 65_u8 && p <= 90_u8
-      q = q | 32_u8 if q >= 65_u8 && q <= 90_u8
-      return false unless p == q
-      index = index + 1
-    end
-    true
-  end
-
-  # `same?` for a name read onto the tape (`DnsMessage.parse`), read where
-  # it lies.
-  def self.same?(a : String, b : String) : ::Bool
-    size = a.bytesize
-    size = size - 1 if size > 1 && a[size - 1] == 46_u8
-    right = relative(b)
-    return false unless size == right.bytesize
-    y = right.to_unsafe
-    index = 0
-    while index < size
-      p = a[index]
       q = y[index]
       p = p | 32_u8 if p >= 65_u8 && p <= 90_u8
       q = q | 32_u8 if q >= 65_u8 && q <= 90_u8
@@ -262,11 +242,11 @@ pub struct DnsName
   # it is last. A candidate longer than a name can be is left out.
   def self.candidates(name : String, search : Array(String), ndots : Int32) : Array(String)
     size = name.bytesize
-    return [relative(name)] if size > 1 && name.to_unsafe[size - 1] == 46_u8
+    return [relative(name)] if size > 1 && name[size - 1] == 46_u8
     dots = 0
     index = 0
     while index < size
-      dots = dots + 1 if name.to_unsafe[index] == 46_u8
+      dots = dots + 1 if name[index] == 46_u8
       index = index + 1
     end
     under = [] of String
@@ -611,7 +591,7 @@ pub struct SvcbRecord
           text << ',' if place > 0
           at = 0
           while at < id.bytesize
-            SvcbRecord.write_alpn_byte(text, id.to_unsafe[at])
+            SvcbRecord.write_alpn_byte(text, id[at])
             at = at + 1
           end
         end
@@ -639,7 +619,7 @@ pub struct SvcbRecord
   # *name*, absolute, as BIND writes one: `"`, `(`, `)`, `;`, `\`, `@`
   # and `$` after a backslash, a byte outside printable ASCII as `\DDD`.
   def self.write_name(text : String::Builder, name : String) : Nil
-    raw = name.to_unsafe
+    raw = name
     index = 0
     while index < name.bytesize
       byte = raw[index]
@@ -871,14 +851,14 @@ pub struct DnsMessage
     raw[2] = 1_u8 # RD
     raw[5] = 1_u8 # QDCOUNT
     at = 12
-    text = relative.to_unsafe
+    text = relative
     start = 0
     index = 0
     while index <= relative.bytesize
       if index == relative.bytesize || text[index] == 46_u8
         length = index - start
         raw[at] = length.to_u8
-        (raw + at + 1).copy_from(text + start, length)
+        length.times { |i| raw[at + 1 + i] = text[start + i] }
         at = at + 1 + length
         start = index + 1
       end
@@ -1328,7 +1308,7 @@ struct DnsText
   # written on Windows), to the first `#` or `;`.
   def self.words(line : String) : Array(String)
     words = [] of String
-    raw = line.to_unsafe
+    raw = line
     size = line.bytesize
     start = -1
     index = 0

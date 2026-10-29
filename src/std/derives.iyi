@@ -14,6 +14,7 @@ end
 # A type this module exports, implementing a trait this module exports. A derive
 # in another module gets to ask about both, and both arrive from this module's
 # `.iyimod` when its source is gone.
+@[OnTape]
 pub struct Name
   @text : String
 

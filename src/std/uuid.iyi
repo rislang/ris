@@ -19,23 +19,19 @@ import std/int
 import std/random::{Random}
 import std/time::{Time}
 
+@[OnTape]
 pub struct UUID
-  @bytes : Array(UInt8)
+  getter bytes : String
 
-  # The sixteen bytes are the UUID's own, copied in here and out of
-  # `bytes`, as the other library's are a value: held as the caller's
-  # array, a buffer reused for the next record changed every UUID made
-  # from it (`b[0] = 255_u8` after `UUID.new(b)` turned `00000000-...`
-  # into `ff000000-...`), and `u.bytes[1] = 255_u8` changed a UUID that
-  # was already a hash key, which its table then could not find.
-  def initialize(bytes : Array(UInt8))
-    raise "UUID: need 16 bytes, got #{bytes.size}" if bytes.size != 16
-    @bytes = bytes.dup
+  def initialize(@bytes : String)
+    raise "UUID: need 16 bytes" unless @bytes.bytesize == 16
   end
 
-  def initialize(bytes : String)
-    raise "UUID: need 16 bytes" unless bytes.bytesize == 16
-    @bytes = Array(UInt8).new(16) { |i| bytes[i] }
+  def initialize(bytes : Array::View(UInt8))
+    raise "UUID: need 16 bytes" unless bytes.size == 16
+    @bytes = String.build(16) do |writer|
+      bytes.each { |byte| writer.push(byte) }
+    end
   end
 
   # Sixteen bytes from the operating system, six bits of them then set to
@@ -45,20 +41,10 @@ pub struct UUID
   # outputs do not give that state away, where a version 4 UUID promises
   # 122 bits nobody can predict.
   def self.v4 : UUID
-    result = nil.as(UUID?)
-    tape do
-      result = v4_on_tape.to_heap
-    end
-    result || raise "UUID: no result"
-  end
-
-  def self.v4_on_tape : TapeUUID
-    storage = uninitialized StaticArray(UInt8, 16)
-    bytes = pointerof(storage).as(Pointer(UInt8))
-    Random::Secure.fill(bytes, 16)
+    bytes = Random::Secure.random_bytes(16)
     bytes[6] = (bytes[6] & 0x0f_u8) | 0x40_u8
     bytes[8] = (bytes[8] & 0x3f_u8) | 0x80_u8
-    TapeUUID.new(String.build(16) do |writer|
+    UUID.new(String.build(16) do |writer|
       i = 0
       while i < 16
         writer.push(bytes[i])
@@ -85,17 +71,7 @@ pub struct UUID
   # 62 bits after the counter are random every time, so two processes in
   # one millisecond still do not collide.
   def self.v7 : UUID
-    result = nil.as(UUID?)
-    tape do
-      result = v7_on_tape.to_heap
-    end
-    result || raise "UUID: no result"
-  end
-
-  def self.v7_on_tape : TapeUUID
-    storage = uninitialized StaticArray(UInt8, 16)
-    bytes = pointerof(storage).as(Pointer(UInt8))
-    Random::Secure.fill(bytes, 16)
+    bytes = Random::Secure.random_bytes(16)
     now = Time.utc.to_unix_ms
     if now > @@v7_ms
       @@v7_ms = now
@@ -115,7 +91,7 @@ pub struct UUID
     bytes[6] = (0x70 | (@@v7_counter >> 8)).to_u8
     bytes[7] = (@@v7_counter & 255).to_u8
     bytes[8] = (bytes[8] & 0x3f_u8) | 0x80_u8
-    TapeUUID.new(String.build(16) do |writer|
+    UUID.new(String.build(16) do |writer|
       i = 0
       while i < 16
         writer.push(bytes[i])
@@ -125,18 +101,10 @@ pub struct UUID
   end
 
   def self.parse(text : String) : UUID
-    result = nil.as(UUID?)
-    tape do
-      result = parse(text.as_tape).to_heap
-    end
-    result || raise "UUID: no result"
-  end
-
-  def self.parse(text : String) : TapeUUID
     n = text.bytesize
     unless n == 32 || (n == 36 && text[8] == 45_u8 &&
            text[13] == 45_u8 && text[18] == 45_u8 && text[23] == 45_u8)
-      raise "UUID: not 32 hex digits: #{text.to_heap}"
+      raise "UUID: not 32 hex digits: #{text}"
     end
     bytes = String.build(16) do |w|
       i = 0
@@ -151,15 +119,11 @@ pub struct UUID
         i += 2
       end
     end
-    TapeUUID.new(bytes)
+    UUID.new(bytes)
   end
 
   def to_s : String
-    result = ""
-    tape do
-      result = to_tape.to_heap
-    end
-    result
+    to_tape
   end
 
   def to_tape : String
@@ -172,13 +136,10 @@ pub struct UUID
     while i < 16
       writer << "-" if i == 4 || i == 6 || i == 8 || i == 10
       b = @bytes[i].to_i32
-      writer << digits[b >> 4] << digits[b & 15]
+      writer.push(digits[b >> 4])
+      writer.push(digits[b & 15])
       i += 1
     end
-  end
-
-  def bytes : Array(UInt8)
-    @bytes.dup
   end
 
   def ==(other : UUID) : Bool
@@ -191,7 +152,7 @@ pub struct UUID
     true
   end
 
-  protected def stored : Array(UInt8)
+  protected def stored : String
     @bytes
   end
 
@@ -213,38 +174,5 @@ pub struct UUID
     return o - 97 + 10 if o >= 97 && o <= 102
     return o - 65 + 10 if o >= 65 && o <= 70
     raise "UUID: not a hex digit: #{ch}"
-  end
-end
-
-# Sixteen decoded bytes on the caller's tape.
-@[OnTape]
-pub struct TapeUUID
-  getter bytes : String
-
-  def initialize(@bytes : String)
-    raise "UUID: need 16 bytes" unless @bytes.bytesize == 16
-  end
-
-  def version : Int32
-    (@bytes[6].to_i32 >> 4) & 15
-  end
-
-  def to_heap : UUID
-    UUID.new(@bytes)
-  end
-
-  def to_tape : String
-    String.build(36) { |w| write(w) }
-  end
-
-  def write(writer : String::Builder) : Nil
-    digits = "0123456789abcdef"
-    i = 0
-    while i < 16
-      writer << "-" if i == 4 || i == 6 || i == 8 || i == 10
-      b = @bytes[i].to_i32
-      writer << digits[b >> 4] << digits[b & 15]
-      i += 1
-    end
   end
 end

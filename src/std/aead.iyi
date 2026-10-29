@@ -83,6 +83,7 @@ import std/int
 
 # What `open` answers for sealed bytes it will not open: shorter than a
 # tag, or whose tag does not match.
+@[OnTape]
 pub struct AeadError
   getter message : String
 

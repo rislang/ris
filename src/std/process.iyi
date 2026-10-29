@@ -497,7 +497,7 @@ pub class ChildOutput
         line = @pending[0, at + 1]
         @pending = @pending[at + 1, @pending.bytesize - at - 1]
         return line unless chomp
-        cut = at > 0 && line.to_unsafe[at - 1] == 13_u8 ? at - 1 : at
+        cut = at > 0 && line[at - 1] == 13_u8 ? at - 1 : at
         return line[0, cut]
       end
       if @finished

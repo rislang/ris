@@ -25,7 +25,7 @@ module std/cookie
 import std/static_array::{StaticArray}
 
 import std/http::{HTTP, Response, CookieStore}
-import std/uri::{URI}
+import std/uri::{URI, ParsedURI}
 import std/time::{Time, Span}
 
 # A cookie (RFC 6265): what a `Set-Cookie` line says, and what a jar
@@ -133,7 +133,7 @@ pub class CookieJar
   end
 
   # Whether *uri* is over a secure protocol: `https://` (and `wss://`).
-  protected def self.secure?(uri : URI) : Bool
+  protected def self.secure?(uri : ParsedURI) : Bool
     scheme = (uri.scheme || "").downcase
     scheme == "https" || scheme == "wss"
   end
@@ -144,7 +144,7 @@ pub class CookieJar
     return true if host == domain
     return false unless host.ends_with?("." + domain)
     return false if host.includes?(":")
-    p = host.to_unsafe
+    p = host
     i = 0
     while i < host.bytesize
       return true unless p[i] == 46_u8 || (p[i] >= 48_u8 && p[i] <= 57_u8)
@@ -157,14 +157,14 @@ pub class CookieJar
   protected def self.path_match?(request : String, cookie : String) : Bool
     return true if request == cookie
     return false unless request.starts_with?(cookie)
-    cookie.ends_with?("/") || request.to_unsafe[cookie.bytesize] == 47_u8
+    cookie.ends_with?("/") || request[cookie.bytesize] == 47_u8
   end
 
   # §5.1.4: the request path up to its last `/`, or `/`.
   protected def self.default_path(path : String) : String
     return "/" unless path.starts_with?("/")
     last = 0
-    p = path.to_unsafe
+    p = path
     i = 0
     while i < path.bytesize
       last = i if p[i] == 47_u8
@@ -486,7 +486,7 @@ struct CookieDate
     return false if text.bytesize > name.bytesize
     i = 0
     while i < text.bytesize
-      return false if (text[i] | 0x20_u8) != (name.to_unsafe[i] | 0x20_u8)
+      return false if (text[i] | 0x20_u8) != (name[i] | 0x20_u8)
       i += 1
     end
     true

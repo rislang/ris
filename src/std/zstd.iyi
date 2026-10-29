@@ -65,6 +65,7 @@ import std/digest::{XXH64}
 # cannot read: one that is corrupt, that ends early, whose checksum or
 # content size does not match, or that asks for what this decoder does
 # not give (a dictionary, a window past the caller's limit).
+@[OnTape]
 pub struct ZstdError
   getter message : String
 
@@ -611,7 +612,7 @@ class Decoder
 
   private def end_block : Nil
     n = @pos - @block_start
-    @hash.update(@buf + @block_start.to_i64, n) if @checked
+    n.times { |i| @hash.update_byte(@buf[@block_start + i]) } if @checked
     @produced = @produced + n.to_u64
     if @sized && @produced > @content_size
       return fail("zstd: the frame holds more than the #{@content_size} bytes its header says")

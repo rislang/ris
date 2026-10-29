@@ -1075,6 +1075,12 @@ end
 # and `update(update(0, a), b)` is the CRC-32 of *a* then *b*, the same
 # number `checksum` answers for the two joined.
 pub struct CRC32
+  def self.update_byte(crc : UInt32, byte : UInt8) : UInt32
+    raw = crc ^ 0xffffffff_u32
+    (tables[((raw ^ byte.to_u32) & 255_u32).to_i32] ^
+      raw.unsafe_shr(8)) ^ 0xffffffff_u32
+  end
+
   def self.checksum(data : String) : UInt32
     update(0_u32, data, data.bytesize)
   end
@@ -1145,6 +1151,12 @@ end
 # finished Adler-32, and 1 is the start (the Adler-32 of nothing), as in
 # zlib's `adler32(adler, buf, len)`.
 pub struct Adler32
+  def self.update_byte(sum : UInt32, byte : UInt8) : UInt32
+    a = ((sum & 0xffff_u32) + byte.to_u32) % 65521_u32
+    b = (sum.unsafe_shr(16) + a) % 65521_u32
+    (b << 16) | a
+  end
+
   def self.checksum(data : String) : UInt32
     update(1_u32, data, data.bytesize)
   end
@@ -1316,6 +1328,16 @@ pub class XXH64
     @v4 = @seed &- P1
     @total = 0_u64
     @fill = 0
+  end
+
+  def update_byte(byte : UInt8) : Nil
+    @total = @total &+ 1_u64
+    @stripe[@fill] = byte
+    @fill = @fill + 1
+    if @fill == 32
+      stripe(@stripe)
+      @fill = 0
+    end
   end
 
   def update(data : String) : Nil

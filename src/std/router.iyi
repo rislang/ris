@@ -85,6 +85,7 @@ import std/uri::{URI}
 
 # Why a pattern is refused: `Pattern.parse`'s answer for text that is not
 # a pattern. `Router#handle` panics with its `message`.
+@[OnTape]
 pub struct RouterError
   getter reason : String
 

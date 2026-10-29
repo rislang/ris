@@ -91,6 +91,7 @@ import std/int
 import std/digest::{SHA512}
 
 # What is wrong with a peer's key: `message` is the sentence.
+@[OnTape]
 pub struct CurveError
   getter message : String
 
@@ -117,16 +118,15 @@ pub struct X25519
   # multiples, so the clamped scalar times B on the Edwards curve, by the
   # fixed-base table, gives the same u as the ladder from 9 does: 8
   # microseconds where the ladder took 20.
-  def self.public_key(private_key : String | Array(UInt8)) : String
+  def self.public_key(private_key : String | Array::View(UInt8)) : String
     k, n = CurveBytes.of(private_key)
     raise "X25519: a private key is 32 bytes, not #{n}" unless n == 32
-    clamped = uninitialized UInt8[32]
-    c = pointerof(clamped).as(Pointer(UInt8))
-    c.copy_from(k, 32)
+    c = Array(UInt8).new(32, 0_u8)
+    32.times { |i| c[i] = k[i] }
     c[0] = c[0] & 248_u8
     c[31] = (c[31] & 127_u8) | 64_u8
     result = CurvePoint.base_mult(c).montgomery_u
-    String.new(32) { |buf| result.to_bytes(buf) }
+    CurveBytes.text(32) { |buf| result.to_bytes(buf) }
   end
 
   # The secret *private_key* shares with the owner of *peer_public*. A
@@ -134,14 +134,14 @@ pub struct X25519
   # small order, RFC 7748 §6.1), are a `CurveError`. Whether the secret was
   # zero is the one thing that leaves the ladder by a branch, and it says
   # nothing of the private key: which keys give zero depends on the peer's.
-  def self.shared(private_key : String | Array(UInt8), peer_public : String | Array(UInt8)) : String | CurveError
+  def self.shared(private_key : String | Array::View(UInt8), peer_public : String | Array::View(UInt8)) : String | CurveError
     k, n = CurveBytes.of(private_key)
     raise "X25519: a private key is 32 bytes, not #{n}" unless n == 32
     u, m = CurveBytes.of(peer_public)
     return CurveError.new("X25519: a public key is 32 bytes, not #{m}") unless m == 32
     result = CurveLadder.x25519(k, CurveField.from_bytes(u))
-    secret = String.new(32) { |buf| result.to_bytes(buf) }
-    p = secret.to_unsafe
+    secret = CurveBytes.text(32) { |buf| result.to_bytes(buf) }
+    p = secret
     seen = 0_u8
     i = 0
     while i < 32
@@ -161,10 +161,10 @@ end
 # deterministic: one seed and one message give one signature.
 pub struct Ed25519
   # The 32-byte public key of *seed*, RFC 8032 §5.1.5.
-  def self.public_key(seed : String | Array(UInt8)) : String
+  def self.public_key(seed : String | Array::View(UInt8)) : String
     h = expand(seed)
-    a = CurvePoint.base_mult(h.to_unsafe)
-    String.new(32) { |buf| a.encode(buf) }
+    a = CurvePoint.base_mult(h)
+    CurveBytes.text(32) { |buf| a.encode(buf) }
   end
 
   # The 64-byte signature of *message* under *seed*, RFC 8032 §5.1.6:
@@ -172,24 +172,21 @@ pub struct Ed25519
   # S = (r + SHA-512(R || A || M) * s) mod L. The public key A is worked
   # out again from the seed, which costs a second multiplication of the
   # base point; the two are each a fixed-window constant-time one.
-  def self.sign(seed : String | Array(UInt8), message : String | Array(UInt8)) : String
+  def self.sign(seed : String | Array::View(UInt8), message : String | Array::View(UInt8)) : String
     h = expand(seed)
-    hp = h.to_unsafe
+    hp = h
     mp, mn = CurveBytes.of(message)
-    public = uninitialized UInt8[32]
-    pp = pointerof(public).as(Pointer(UInt8))
+    pp = Array(UInt8).new(32, 0_u8)
     CurvePoint.base_mult(hp).encode(pp)
-    nonce = SHA512.new.update(hp + 32, 32).update(mp, mn).final
-    r = uninitialized UInt8[32]
-    rp = pointerof(r).as(Pointer(UInt8))
-    CurveScalar.reduce_bytes(nonce.to_unsafe, rp)
-    String.new(64) do |sig|
+    nonce = SHA512.new.update(CurveBytes.tail(hp, 32), 32).update(mp, mn).final
+    rp = Array(UInt8).new(32, 0_u8)
+    CurveScalar.reduce_bytes(nonce, rp)
+    CurveBytes.text(64) do |sig|
       CurvePoint.base_mult(rp).encode(sig)
       challenge = SHA512.new.update(sig, 32).update(pp, 32).update(mp, mn).final
-      k = uninitialized UInt8[32]
-      kp = pointerof(k).as(Pointer(UInt8))
-      CurveScalar.reduce_bytes(challenge.to_unsafe, kp)
-      CurveScalar.mul_add(kp, hp, rp, sig + 32)
+      kp = Array(UInt8).new(32, 0_u8)
+      CurveScalar.reduce_bytes(challenge, kp)
+      CurveScalar.mul_add(kp, hp, rp, CurveBytes.tail(sig, 32))
     end
   end
 
@@ -198,21 +195,19 @@ pub struct Ed25519
   # not a panic, for a key or signature of the wrong size, a key that is
   # not a canonical encoding of a point on the curve, and an S of L or
   # more.
-  def self.verify(public_key : String | Array(UInt8), message : String | Array(UInt8), signature : String | Array(UInt8)) : Bool
+  def self.verify(public_key : String | Array::View(UInt8), message : String | Array::View(UInt8), signature : String | Array::View(UInt8)) : Bool
     ap, an = CurveBytes.of(public_key)
     mp, mn = CurveBytes.of(message)
     sp, sn = CurveBytes.of(signature)
     return false unless an == 32 && sn == 64
-    return false unless CurveScalar.canonical?(sp + 32)
+    return false unless CurveScalar.canonical?(CurveBytes.tail(sp, 32))
     a = CurvePoint.decode(ap)
     return false unless a
     challenge = SHA512.new.update(sp, 32).update(ap, 32).update(mp, mn).final
-    k = uninitialized UInt8[32]
-    kp = pointerof(k).as(Pointer(UInt8))
-    CurveScalar.reduce_bytes(challenge.to_unsafe, kp)
-    check = uninitialized UInt8[32]
-    cp = pointerof(check).as(Pointer(UInt8))
-    CurvePoint.double_mult_vartime(sp + 32, kp, a).encode(cp)
+    kp = Array(UInt8).new(32, 0_u8)
+    CurveScalar.reduce_bytes(challenge, kp)
+    cp = Array(UInt8).new(32, 0_u8)
+    CurvePoint.double_mult_vartime(CurveBytes.tail(sp, 32), kp, a).encode(cp)
     i = 0
     while i < 32
       return false unless cp[i] == sp[i]
@@ -222,7 +217,7 @@ pub struct Ed25519
   end
 
   # SHA-512 of the seed, its first half clamped into the secret scalar.
-  private def self.expand(seed : String | Array(UInt8)) : Array(UInt8)
+  private def self.expand(seed : String | Array::View(UInt8)) : Array(UInt8)
     sp, n = CurveBytes.of(seed)
     raise "Ed25519: a seed is 32 bytes, not #{n}" unless n == 32
     h = SHA512.new.update(sp, 32).final
@@ -236,6 +231,7 @@ end
 # 8410): the 32 bytes, checked once to be the canonical encoding of a point
 # on the curve, so a key read from outside that is not one is refused where
 # it is read rather than failing every signature later.
+@[OnTape]
 pub struct Ed25519PublicKey
   getter bytes : Array(UInt8)
 
@@ -244,7 +240,7 @@ pub struct Ed25519PublicKey
 
   # The key *bytes* encode, or a `CurveError`: not 32 bytes, or not a
   # canonical encoding of a point on the curve (RFC 8032 §5.1.3).
-  def self.from_bytes(bytes : String | Array(UInt8)) : Ed25519PublicKey | CurveError
+  def self.from_bytes(bytes : String | Array::View(UInt8)) : Ed25519PublicKey | CurveError
     p, n = CurveBytes.of(bytes)
     return CurveError.new("Ed25519: a public key is 32 bytes, not #{n}") unless n == 32
     return CurveError.new("Ed25519: the public key is not a point on the curve, or not its canonical encoding") unless CurvePoint.decode(p)
@@ -259,16 +255,15 @@ pub struct Ed25519PublicKey
 
   # Whether *signature* is this key's signature of *message*, as
   # `Ed25519.verify` answers it.
-  def verify(message : String | Array(UInt8), signature : String | Array(UInt8)) : Bool
+  def verify(message : String | Array::View(UInt8), signature : String | Array::View(UInt8)) : Bool
     Ed25519.verify(@bytes, message, signature)
   end
 end
 
 # The Montgomery ladder of RFC 7748 §5, in the RFC's own names.
 struct CurveLadder
-  def self.x25519(scalar : Pointer(UInt8), x1 : CurveField) : CurveField
-    clamped = uninitialized UInt8[32]
-    k = pointerof(clamped).as(Pointer(UInt8))
+  def self.x25519(scalar : String | Array::View(UInt8), x1 : CurveField) : CurveField
+    k = Array(UInt8).new(32, 0_u8)
     i = 0
     while i < 32
       k[i] = scalar[i]
@@ -357,11 +352,11 @@ struct CurveField
   # 32 bytes little-endian, bit 255 dropped (RFC 7748 §5 masks it, and RFC
   # 8032 §5.1.3 reads it apart as x's sign). A value from p up to 2^255 - 1
   # is kept as it is and reduces in the arithmetic.
-  def self.from_bytes(b : Pointer(UInt8)) : CurveField
+  def self.from_bytes(b : String | Array::View(UInt8)) : CurveField
     w0 = CurveBytes.load64(b)
-    w1 = CurveBytes.load64(b + 8)
-    w2 = CurveBytes.load64(b + 16)
-    w3 = CurveBytes.load64(b + 24)
+    w1 = CurveBytes.load64(CurveBytes.tail(b, 8))
+    w2 = CurveBytes.load64(CurveBytes.tail(b, 16))
+    w3 = CurveBytes.load64(CurveBytes.tail(b, 24))
     new(w0 & MASK,
       (w0.unsafe_shr(51) | w1.unsafe_shl(13)) & MASK,
       (w1.unsafe_shr(38) | w2.unsafe_shl(26)) & MASK,
@@ -370,12 +365,12 @@ struct CurveField
   end
 
   # The canonical 32 bytes, little-endian, of the value reduced below p.
-  def to_bytes(dst : Pointer(UInt8)) : Nil
+  def to_bytes(dst : Array::View(UInt8)) : Nil
     r = reduced
     CurveBytes.store64(dst, r.l0 | r.l1.unsafe_shl(51))
-    CurveBytes.store64(dst + 8, r.l1.unsafe_shr(13) | r.l2.unsafe_shl(38))
-    CurveBytes.store64(dst + 16, r.l2.unsafe_shr(26) | r.l3.unsafe_shl(25))
-    CurveBytes.store64(dst + 24, r.l3.unsafe_shr(39) | r.l4.unsafe_shl(12))
+    CurveBytes.store64(CurveBytes.tail(dst, 8), r.l1.unsafe_shr(13) | r.l2.unsafe_shl(38))
+    CurveBytes.store64(CurveBytes.tail(dst, 16), r.l2.unsafe_shr(26) | r.l3.unsafe_shl(25))
+    CurveBytes.store64(CurveBytes.tail(dst, 24), r.l3.unsafe_shr(39) | r.l4.unsafe_shl(12))
   end
 
   # The limbs carried below 2^51 and the value brought below p: after a
@@ -641,7 +636,7 @@ struct CurvePoint
   end
 
   # RFC 8032 §5.1.2: y's 255 bits, and x's low bit in bit 255.
-  def encode(dst : Pointer(UInt8)) : Nil
+  def encode(dst : Array::View(UInt8)) : Nil
     inverse = @z.invert
     (@y * inverse).to_bytes(dst)
     dst[31] = dst[31] | (@x * inverse).parity.unsafe_shl(7)
@@ -650,10 +645,9 @@ struct CurvePoint
   # RFC 8032 §5.1.3, strict: nil for a y of p or more, for a y with no x on
   # the curve, and for x = 0 with the sign bit set, so only the one
   # canonical encoding of each point decodes. On public bytes only.
-  def self.decode(src : Pointer(UInt8)) : CurvePoint | Nil
+  def self.decode(src : String | Array::View(UInt8)) : CurvePoint | Nil
     y = CurveField.from_bytes(src)
-    again = uninitialized UInt8[32]
-    ap = pointerof(again).as(Pointer(UInt8))
+    ap = Array(UInt8).new(32, 0_u8)
     y.to_bytes(ap)
     i = 0
     while i < 31
@@ -689,7 +683,7 @@ struct CurvePoint
   # eight entries touched, and its sign applied by a mask; a zero digit
   # adds the identity like any other. This is ref10's
   # `ge_scalarmult_base` (Bernstein, Duif, Lange, Schwabe and Yang).
-  def self.base_mult(k : Pointer(UInt8)) : CurvePoint
+  def self.base_mult(k : String | Array::View(UInt8)) : CurvePoint
     table = CurveBaseTable.get
     digits = uninitialized UInt64[64]
     e = pointerof(digits).as(Pointer(UInt64))
@@ -748,7 +742,7 @@ struct CurvePoint
 
   # [s]B - [k]A for public *s*, *k* and *a*, both in one pass of doublings
   # (Straus), zero windows skipped: what verification computes.
-  def self.double_mult_vartime(s : Pointer(UInt8), k : Pointer(UInt8), a : CurvePoint) : CurvePoint
+  def self.double_mult_vartime(s : String | Array::View(UInt8), k : String | Array::View(UInt8), a : CurvePoint) : CurvePoint
     tb = uninitialized CurveCached[16]
     ta = uninitialized CurveCached[16]
     bp = pointerof(tb).as(Pointer(CurveCached))
@@ -783,7 +777,7 @@ struct CurvePoint
   end
 
   # The *i*th 4-bit window of a 32-byte little-endian scalar.
-  private def self.nibble(k : Pointer(UInt8), i : Int32) : UInt64
+  private def self.nibble(k : String | Array::View(UInt8), i : Int32) : UInt64
     k[i >> 1].to_u64.unsafe_shr((i & 1) * 4) & 15_u64
   end
 end
@@ -825,11 +819,14 @@ end
 # old 4-bit window cost. Two threads that reach it first both work it
 # out and store the same table.
 struct CurveBaseTable
-  @@table = Pointer(CurvePrecomp).new(0_u64)
+  TABLE = build.copy_to(Program.tape)
 
-  def self.get : Pointer(CurvePrecomp)
-    return @@table if @@table.address != 0_u64
-    points = Pointer(CurvePoint).malloc(256_u64)
+  def self.get : Array::View(CurvePrecomp)
+    TABLE[0, TABLE.size]
+  end
+
+  def self.build : Array(CurvePrecomp)
+    points = Array(CurvePoint).new(256, CurvePoint.base)
     p = CurvePoint.base
     row = 0
     while row < 32
@@ -849,7 +846,7 @@ struct CurveBaseTable
     # the last, and each inverse unwound from it. No Z is zero: none of
     # these points is the identity, and the extended formulas keep Z
     # nonzero for the others.
-    before = Pointer(CurveField).malloc(256_u64)
+    before = Array(CurveField).new(256, CurveField.one)
     run = CurveField.one
     i = 0
     while i < 256
@@ -858,7 +855,8 @@ struct CurveBaseTable
       i = i + 1
     end
     inverse = run.invert
-    table = Pointer(CurvePrecomp).malloc(256_u64)
+    table = Array(CurvePrecomp).new(256,
+      CurvePrecomp.new(CurveField.one, CurveField.one, CurveField.zero))
     i = 255
     while i >= 0
       point = points[i]
@@ -869,7 +867,6 @@ struct CurveBaseTable
       table[i] = CurvePrecomp.new(y + x, y - x, x * y * CurveField.d2)
       i = i - 1
     end
-    @@table = table
     table
   end
 
@@ -877,13 +874,13 @@ struct CurveBaseTable
   # complement): every entry of the row read, and all but |digit|'s
   # masked away; the identity for zero; then negated by a mask when the
   # digit is.
-  def self.pick(table : Pointer(CurvePrecomp), row : Int32, digit : UInt64) : CurvePrecomp
+  def self.pick(table : Array::View(CurvePrecomp), row : Int32, digit : UInt64) : CurvePrecomp
     negative = digit.unsafe_shr(63)
     index = (digit ^ (0_u64 &- negative)) &+ negative
     ypx = CurveField.one
     ymx = CurveField.one
     xy2d = CurveField.zero
-    base = table + (row * 8).to_i64
+    base = table[row * 8, 8]
     j = 1
     while j <= 8
       diff = j.to_u64 ^ index
@@ -915,12 +912,12 @@ struct CurveScalar
   L3 = 0x1000000000000000_u64
 
   # 64 little-endian bytes (a SHA-512 output) mod L, into 32 at *dst*.
-  def self.reduce_bytes(src : Pointer(UInt8), dst : Pointer(UInt8)) : Nil
+  def self.reduce_bytes(src : String | Array::View(UInt8), dst : Array::View(UInt8)) : Nil
     words = uninitialized UInt64[8]
     w = pointerof(words).as(Pointer(UInt64))
     i = 0
     while i < 8
-      w[i] = CurveBytes.load64(src + i * 8)
+      w[i] = CurveBytes.load64(CurveBytes.tail(src, i * 8))
       i = i + 1
     end
     reduce_words(w, 8, dst)
@@ -929,24 +926,24 @@ struct CurveScalar
   # (k * s + r) mod L, RFC 8032 §5.1.6's S: the 512-bit k * s worked out in
   # full, r added, and the sum reduced. *s* is the clamped secret scalar,
   # below 2^255 and not reduced first, as the RFC has it.
-  def self.mul_add(k : Pointer(UInt8), s : Pointer(UInt8), r : Pointer(UInt8), dst : Pointer(UInt8)) : Nil
+  def self.mul_add(k : String | Array::View(UInt8), s : String | Array::View(UInt8), r : String | Array::View(UInt8), dst : Array::View(UInt8)) : Nil
     words = uninitialized UInt64[8]
     w = pointerof(words).as(Pointer(UInt64))
     i = 0
     while i < 4
-      w[i] = CurveBytes.load64(r + i * 8)
+      w[i] = CurveBytes.load64(CurveBytes.tail(r, i * 8))
       w[i + 4] = 0_u64
       i = i + 1
     end
     i = 0
     while i < 4
-      ki = CurveBytes.load64(k + i * 8).to_u128
+      ki = CurveBytes.load64(CurveBytes.tail(k, i * 8)).to_u128
       carry = 0_u128
       j = 0
       while j < 4
         # (2^64 - 1)^2 + 2 (2^64 - 1) is 2^128 - 1: a product, a limb and
         # a carry fit.
-        sum = ki &* CurveBytes.load64(s + j * 8).to_u128 &+ w[i + j].to_u128 &+ carry
+        sum = ki &* CurveBytes.load64(CurveBytes.tail(s, j * 8)).to_u128 &+ w[i + j].to_u128 &+ carry
         w[i + j] = sum.unsafe_to_u64
         carry = sum.unsafe_shr(64)
         j = j + 1
@@ -966,11 +963,11 @@ struct CurveScalar
 
   # Whether 32 little-endian bytes are below L: RFC 8032 §5.1.7's check on
   # S. Public, so it may say so as soon as it knows.
-  def self.canonical?(s : Pointer(UInt8)) : Bool
+  def self.canonical?(s : String | Array::View(UInt8)) : Bool
     s0 = CurveBytes.load64(s)
-    s1 = CurveBytes.load64(s + 8)
-    s2 = CurveBytes.load64(s + 16)
-    s3 = CurveBytes.load64(s + 24)
+    s1 = CurveBytes.load64(CurveBytes.tail(s, 8))
+    s2 = CurveBytes.load64(CurveBytes.tail(s, 16))
+    s3 = CurveBytes.load64(CurveBytes.tail(s, 24))
     _, _, _, _, borrow = minus_l(s0, s1, s2, s3)
     borrow == 1_u64
   end
@@ -981,7 +978,7 @@ struct CurveScalar
   # the quotient or one more, so r - q L is in (-L, L), and L is added
   # back by a mask when it went below zero. The same steps whatever the
   # bytes, eight to a word where a bit at a time took 64.
-  private def self.reduce_words(w : Pointer(UInt64), count : Int32, dst : Pointer(UInt8)) : Nil
+  private def self.reduce_words(w : Pointer(UInt64), count : Int32, dst : Array::View(UInt8)) : Nil
     r0 = 0_u64
     r1 = 0_u64
     r2 = 0_u64
@@ -1024,9 +1021,9 @@ struct CurveScalar
       i = i - 1
     end
     CurveBytes.store64(dst, r0)
-    CurveBytes.store64(dst + 8, r1)
-    CurveBytes.store64(dst + 16, r2)
-    CurveBytes.store64(dst + 24, r3)
+    CurveBytes.store64(CurveBytes.tail(dst, 8), r1)
+    CurveBytes.store64(CurveBytes.tail(dst, 16), r2)
+    CurveBytes.store64(CurveBytes.tail(dst, 24), r3)
   end
 
   # r - L in four limbs, and 1 if it borrowed (r < L), else 0: the borrow
@@ -1045,20 +1042,27 @@ struct CurveScalar
 end
 
 struct CurveBytes
-  def self.of(data : String | Array(UInt8)) : {Pointer(UInt8), Int32}
-    if data.is_a?(String)
-      {data.to_unsafe, data.bytesize}
-    else
-      {data.to_unsafe, data.size}
-    end
+  def self.of(data : String | Array::View(UInt8))
+    {data, data.is_a?(String) ? data.bytesize : data.size}
   end
 
-  def self.load64(p : Pointer(UInt8)) : UInt64
+  def self.tail(data : String | Array::View(UInt8), offset : Int32)
+    size = data.is_a?(String) ? data.bytesize : data.size
+    data[offset, size - offset]
+  end
+
+  def self.text(size : Int32, & : Array::View(UInt8) -> _) : String
+    bytes = Array(UInt8).new(size, 0_u8)
+    yield bytes[0, size]
+    String.build(size) { |writer| bytes.each { |b| writer.push(b) } }
+  end
+
+  def self.load64(p : String | Array::View(UInt8)) : UInt64
     p[0].to_u64 | p[1].to_u64.unsafe_shl(8) | p[2].to_u64.unsafe_shl(16) | p[3].to_u64.unsafe_shl(24) |
       p[4].to_u64.unsafe_shl(32) | p[5].to_u64.unsafe_shl(40) | p[6].to_u64.unsafe_shl(48) | p[7].to_u64.unsafe_shl(56)
   end
 
-  def self.store64(dst : Pointer(UInt8), v : UInt64) : Nil
+  def self.store64(dst : Array::View(UInt8), v : UInt64) : Nil
     i = 0
     while i < 8
       dst[i] = v.unsafe_shr(i * 8).unsafe_to_u8

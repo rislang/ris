@@ -390,12 +390,14 @@ import std/path::{Path}
     # The absolute path with every `.`, `..` and symbolic link resolved, or
     # null when a component does not exist. Forty links deep is the limit,
     # as it is in libc.
-    def self.realpath(path : UInt8*, resolved : UInt8*) : UInt8*
-      text = c_text(path)
-      return Pointer(UInt8).new(0_u64) if text.bytesize == 0
-      if text.to_unsafe[0] != 47_u8
-        cwd = Pointer(UInt8).malloc(4096_u64)
-        return Pointer(UInt8).new(0_u64) if sys(SYS_GETCWD, cwd.address.to_i64, 4096_i64, 0_i64) < 0_i64
+    @[TapeUnsafe("passes terminated paths to kernel calls")]
+    def self.realpath(path : String) : String?
+      text = path
+      return nil if text.bytesize == 0
+      if text[0] != 47_u8
+        cwd_room = uninitialized UInt8[4096]
+        cwd = pointerof(cwd_room).as(Pointer(UInt8))
+        return nil if sys(SYS_GETCWD, cwd.address.to_i64, 4096_i64, 0_i64) < 0_i64
         text = c_text(cwd) + "/" + text
       end
       hops = 0
@@ -403,13 +405,13 @@ import std/path::{Path}
       rest = text
       while rest.bytesize > 0
         i = 0
-        while i < rest.bytesize && rest.to_unsafe[i] == 47_u8
+        while i < rest.bytesize && rest[i] == 47_u8
           i = i + 1
         end
         rest = rest[i, rest.bytesize - i]
         break if rest.bytesize == 0
         j = 0
-        while j < rest.bytesize && rest.to_unsafe[j] != 47_u8
+        while j < rest.bytesize && rest[j] != 47_u8
           j = j + 1
         end
         part = rest[0, j]
@@ -417,35 +419,34 @@ import std/path::{Path}
         next if part == "."
         if part == ".."
           k = done.bytesize
-          while k > 0 && done.to_unsafe[k - 1] != 47_u8
+          while k > 0 && done[k - 1] != 47_u8
             k = k - 1
           end
           done = k > 0 ? done[0, k - 1] : ""
           next
         end
         candidate = done + "/" + part
-        buf = Pointer(UInt8).malloc(4096_u64)
-        n = readlink(c_bytes(candidate), buf, 4095_u64)
+        link_room = uninitialized UInt8[4096]
+        buf = pointerof(link_room).as(Pointer(UInt8))
+        n = readlink(c_bytes(candidate).to_unsafe, buf, 4095_u64)
         if n > 0_i64
           hops = hops + 1
-          return Pointer(UInt8).new(0_u64) if hops > 40
+          return nil if hops > 40
           target = String.new(n.to_i) { |t| t.copy_from(buf, n.to_i) }
           rest = target + (rest.bytesize > 0 ? "/" + rest : "")
-          done = "" if target.to_unsafe[0] == 47_u8
+          done = "" if target[0] == 47_u8
           next
         end
         st = uninitialized Stat
-        return Pointer(UInt8).new(0_u64) if lstat(c_bytes(candidate), pointerof(st)) != 0
+        return nil if lstat(c_bytes(candidate).to_unsafe, pointerof(st)) != 0
         # Anything but a directory ends the path: `f/`, `f/.` and `f/..`
         # of a file are ENOTDIR, as libc answers, not `f` and its parent.
-        return Pointer(UInt8).new(0_u64) if rest.bytesize > 0 && (st.st_mode & 0o170000) != 0o040000
+        return nil if rest.bytesize > 0 && (st.st_mode & 0o170000) != 0o040000
         done = candidate
       end
       done = "/" if done.bytesize == 0
-      return Pointer(UInt8).new(0_u64) if done.bytesize >= 4096
-      resolved.copy_from(done.to_unsafe, done.bytesize)
-      resolved[done.bytesize] = 0_u8
-      resolved
+      return nil if done.bytesize >= 4096
+      done
     end
 
     private def self.c_text(p : UInt8*) : String
@@ -456,12 +457,13 @@ import std/path::{Path}
       String.new(n) { |t| t.copy_from(p, n) }
     end
 
-    private def self.c_bytes(s : String) : UInt8*
-      buf = Pointer(UInt8).malloc(s.bytesize.to_u64 + 1_u64)
-      buf.copy_from(s.to_unsafe, s.bytesize)
-      buf[s.bytesize] = 0_u8
-      buf
+    private def self.c_bytes(s : String) : String
+      String.build(s.bytesize + 1) do |writer|
+        writer << s
+        writer.push(0_u8)
+      end
     end
+
   end
 {% end %}
 class ::File
@@ -1458,11 +1460,17 @@ class ::File
     {% end %}
   end
 
-  @[TapeUnsafe("passes terminated tape bytes to the OS")]
+  {% unless flag?(:linux) %}
+    @[TapeUnsafe("passes terminated tape bytes to the OS")]
+  {% end %}
   def self.real_path(path : String | Path) : String
     p = path.to_s
-    {% if flag?(:darwin) || flag?(:linux) %}
-      buf = Pointer(UInt8).malloc(4096_u64)
+    {% if flag?(:linux) %}
+      Std::File::LibC.realpath(p) ||
+        raise "Cannot resolve realpath for #{p}"
+    {% elsif flag?(:darwin) %}
+      room = uninitialized UInt8[4096]
+      buf = pointerof(room).as(Pointer(UInt8))
       res = Std::File::LibC.realpath(sys_path(p).to_unsafe, buf)
       if res.address == 0_u64
         raise "Cannot resolve realpath for #{p}"
@@ -1698,7 +1706,7 @@ class ::File
   # half of a two-byte character, `[a]` and `{a,b}` were literal text,
   # and `*a*a*a*a*a*a*a*a*a*a*b` against forty `a`s did not finish.
   def self.match?(path : String | Path, pattern : String) : Bool
-    stack = Pointer(Int32).malloc(20_u64)
+    stack = Array(Int32).new(20, 0)
     glob_from(pattern, path.to_s, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, stack, 0)
   end
 
@@ -1777,7 +1785,7 @@ class ::File
   # first *size* entries (an opening brace's index, then its branch's) the
   # braces being matched. A star's resumption point is `w_*`, the last
   # globstar's `s_*`; a path index of zero there means none.
-  private def self.glob_from(pattern : String, path : String, match_start : Int32, gi : Int32, pi : Int32, depth : Int32, w_gi : Int32, w_pi : Int32, w_depth : Int32, s_gi : Int32, s_pi : Int32, s_depth : Int32, stack : Pointer(Int32), size : Int32) : Bool
+  private def self.glob_from(pattern : String, path : String, match_start : Int32, gi : Int32, pi : Int32, depth : Int32, w_gi : Int32, w_pi : Int32, w_depth : Int32, s_gi : Int32, s_pi : Int32, s_depth : Int32, stack : Array::View(Int32), size : Int32) : Bool
     g = pattern
     gn = pattern.bytesize
     s = path
@@ -1909,7 +1917,7 @@ class ::File
 
   # Each branch of the brace at *open*, tried in turn with the state as it
   # stands, the brace pushed so the branch's end finds its way back.
-  private def self.glob_brace(pattern : String, path : String, open : Int32, pi : Int32, w_gi : Int32, w_pi : Int32, w_depth : Int32, s_gi : Int32, s_pi : Int32, s_depth : Int32, stack : Pointer(Int32), size : Int32) : Bool
+  private def self.glob_brace(pattern : String, path : String, open : Int32, pi : Int32, w_gi : Int32, w_pi : Int32, w_depth : Int32, s_gi : Int32, s_pi : Int32, s_depth : Int32, stack : Array::View(Int32), size : Int32) : Bool
     g = pattern
     gn = pattern.bytesize
     depth = 0
@@ -1942,7 +1950,7 @@ class ::File
     false
   end
 
-  private def self.glob_branch(pattern : String, path : String, open : Int32, branch : Int32, pi : Int32, w_gi : Int32, w_pi : Int32, w_depth : Int32, s_gi : Int32, s_pi : Int32, s_depth : Int32, stack : Pointer(Int32), size : Int32) : Bool
+  private def self.glob_branch(pattern : String, path : String, open : Int32, branch : Int32, pi : Int32, w_gi : Int32, w_pi : Int32, w_depth : Int32, s_gi : Int32, s_pi : Int32, s_depth : Int32, stack : Array::View(Int32), size : Int32) : Bool
     raise "File.match?: braces nested past ten in #{pattern.inspect}" if size >= 10
     stack[size * 2] = open
     stack[size * 2 + 1] = branch

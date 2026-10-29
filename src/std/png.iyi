@@ -75,6 +75,7 @@ import std/digest::{CRC32}
 
 # What is wrong with a PNG file: `message` names the chunk, and its offset
 # in the file where that helps.
+@[OnTape]
 pub struct PngError
   getter message : String
 

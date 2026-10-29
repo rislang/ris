@@ -935,3 +935,10 @@ struct Array::View(T)
     self
   end
 end
+
+struct Array(T)
+  # Identity of the reservation, independent of its current contents.
+  def same_storage?(other : self) : Bool
+    @state == other.@state
+  end
+end

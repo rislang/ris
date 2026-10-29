@@ -118,6 +118,7 @@ module std/toml
 
 # What is wrong with a document, and where: `line` and `column` count from
 # 1, a column in characters. `message` is "<reason> at line L, column C".
+@[OnTape]
 pub struct TOMLError
   getter reason : String
   getter line : Int32

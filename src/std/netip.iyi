@@ -95,6 +95,7 @@ import std/int
 import std/traits::{Comparable}
 
 # Why a text is not an address or a prefix: `message` names the text.
+@[OnTape]
 pub struct NetipError
   getter message : String
 

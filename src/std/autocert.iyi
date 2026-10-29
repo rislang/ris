@@ -165,6 +165,7 @@ import std/base64::{Base64}
 import std/time::{Time, Span}
 
 # Why a certificate could not be had, or the cache not read or written.
+@[OnTape]
 pub struct AutocertError
   getter detail : String
 

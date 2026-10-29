@@ -86,6 +86,7 @@ pub enum OTPAlgorithm
 end
 
 # What `OTPAuth.parse` answers for a URI it cannot read.
+@[OnTape]
 pub struct OTPError
   getter message : String
 

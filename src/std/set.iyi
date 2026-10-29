@@ -27,7 +27,7 @@ module std/set
 
 import std/enumerable::{Enumerable}
 
-class ::Set(T)
+struct ::Set(T)
   # Adds value and answers the set, for chaining: `set << 1 << 2`.
   def <<(value : T) : Set(T)
     add(value)

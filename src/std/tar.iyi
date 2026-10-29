@@ -113,6 +113,7 @@ import std/dir::{Dir}
 
 # What is wrong with an archive: `message` is the sentence, which names
 # the entry, or the header's offset in the (uncompressed) stream.
+@[OnTape]
 pub struct TarError
   getter message : String
 

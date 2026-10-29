@@ -140,6 +140,7 @@ import std/ecdsa::{EcdsaPublicKey, EcdsaCurve, EcdsaError}
 
 # What is wrong with an encapsulation, a key, a ciphertext or a suite from
 # outside, or a context out of nonces: `message` is the sentence.
+@[OnTape]
 pub struct HpkeError
   getter message : String
 

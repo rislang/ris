@@ -94,6 +94,7 @@ import std/crypto::{HMAC}
 import std/base64::{Base64}
 
 # What reading a key answers for bytes that are not an RSA key.
+@[OnTape]
 pub struct RsaError
   getter message : String
 
@@ -151,6 +152,7 @@ pub enum RsaHash
   end
 end
 
+@[OnTape]
 pub struct RsaPublicKey
   getter modulus : BigInt
   getter exponent : BigInt
@@ -281,6 +283,7 @@ end
 
 # An RSA private key with its CRT parameters (RFC 8017 section 3.2, the
 # first representation and the second together), which signs.
+@[OnTape]
 pub struct RsaPrivateKey
   getter public_key : RsaPublicKey
   @n : BigInt

@@ -29,6 +29,7 @@ if Program.arguments.size > 2
   raise "symlink" unless File.symlink?(link) && File.file?(link)
   raise "lstat" unless File.info(link, follow_symlinks: false).symlink?
   raise "stat" unless File.info(link).same_file?(info)
+  raise "realpath" unless File.real_path(link) == File.real_path(path)
 end
 if Program.arguments.size > 1 && Program.arguments[1] != "ok"
   if Program.arguments[1] == "nul"
@@ -37,4 +38,6 @@ if Program.arguments.size > 1 && Program.arguments[1] != "ok"
   File.size(missing) if Program.arguments[1] == "size"
   File.info(missing)
 end
+raise "glob" unless File.match?("a/b.txt", "**/*.{txt,ri}")
+raise "glob refusal" if File.match?("a/b.bin", "**/*.{txt,ri}")
 puts "PASS: file metadata, zero heap"

@@ -99,6 +99,7 @@ import std/base64::{Base64}
 import std/idna::{IDNA, IdnaError}
 
 # What reading a certificate, or checking a chain, answers when it fails.
+@[OnTape]
 pub struct X509Error
   getter message : String
 

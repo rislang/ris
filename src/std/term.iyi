@@ -133,6 +133,7 @@ module std/term
 # A terminal that could not be put in the mode asked for, and the
 # platform's error number for why: errno on Linux and darwin, the
 # `GetLastError` code on Windows.
+@[OnTape]
 pub struct TermError
   getter operation : String
   getter fd : Int64

@@ -23,9 +23,9 @@ tape do
   comments = Shlex.split("a# rest\nb", true)
   exit 11 if comments.is_a?(ShlexError)
   exit 12 unless comments.to_heap == ["a", "b"]
-  kept = words.to_heap
+  kept = words.copy_to(Program.tape)
 end
 exit 13 unless kept == ["plain", "two words",
   "café", "a b", ""]
 exit 14 unless Shlex.split(Shlex.join(kept)) == kept
-puts "PASS: shlex tape and heap APIs"
+puts "PASS: shlex views and owned copy"

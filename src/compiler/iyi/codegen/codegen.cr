@@ -2499,7 +2499,7 @@ module Iyi
                                 1
                               elsif obj.is_a?(Def) && @program.has_flag?("ris_no_gc") &&
                                     (loc = obj.location) &&
-                                    !TapeRules.runtime?(@program, loc) && !TapeRules.std?(loc)
+                                    !TapeRules.runtime?(@program, loc)
                                 # ris: no collector, so a def's closure
                                 # environment is on its current tape, which
                                 # outlives every proc the tape rules let it

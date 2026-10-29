@@ -113,6 +113,7 @@ import std/text
 
 # What a message, a header or an address is that it should not be, as a
 # value: `reason` says what; `message` says it is mail's.
+@[OnTape]
 pub struct MailError
   getter reason : String
 

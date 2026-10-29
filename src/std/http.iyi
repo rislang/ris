@@ -3120,7 +3120,9 @@ pub class HTTPClient
   # connection by the same record. It becomes the one the origin's kept
   # connections are taken under (`https_current`). The origin's
   # configurations from under another *base* go.
-  protected def https_config(origin : String, base : TlsConfig, ech : Array(UInt8)?, alpn : Array(String)) : TlsConfig
+  protected def https_config(origin : String, base : TlsConfig,
+                         ech : Array::View(UInt8)?,
+                         alpn : Array::View(String)) : TlsConfig
     kept = [] of HttpsBound
     found = nil.as(HttpsBound?)
     @bound.each do |held|
@@ -3139,8 +3141,8 @@ pub class HTTPClient
       config = base
       unless ech == base.ech_configs && alpn == base.alpn
         config = base.dup
-        config.ech_configs = ech
-        config.alpn = alpn
+        config.ech_configs = ech ? ech.to_a : nil
+        config.alpn = alpn.to_a
       end
       held = HttpsBound.new(origin, TlsMadeUnder.new(base), ech, alpn, config)
     end
@@ -3185,11 +3187,11 @@ end
 class HttpsBound
   getter origin : String
   getter under : TlsMadeUnder
-  getter ech : Array(UInt8)?
-  getter alpn : Array(String)
+  getter ech : Array::View(UInt8)?
+  getter alpn : Array::View(String)
   getter config : TlsConfig
 
-  def initialize(@origin : String, @under : TlsMadeUnder, @ech : Array(UInt8)?, @alpn : Array(String), @config : TlsConfig)
+  def initialize(@origin : String, @under : TlsMadeUnder, @ech : Array::View(UInt8)?, @alpn : Array::View(String), @config : TlsConfig)
   end
 end
 
@@ -3197,13 +3199,14 @@ end
 # reads it: the host and port to connect to, the ECHConfigList to encrypt
 # the ClientHello under (nil: none), and the protocols to offer by ALPN,
 # in order.
+@[OnTape]
 pub struct HttpsEndpoint
   getter host : String
   getter port : Int32
-  getter ech : Array(UInt8)?
-  getter alpn : Array(String)
+  getter ech : Array::View(UInt8)?
+  getter alpn : Array::View(String)
 
-  def initialize(@host : String, @port : Int32, @ech : Array(UInt8)?, @alpn : Array(String))
+  def initialize(@host : String, @port : Int32, @ech : Array::View(UInt8)?, @alpn : Array::View(String))
   end
 end
 
@@ -5880,7 +5883,7 @@ class H2Connection
     # Ready streams live on the connection until selected by the server.
     # This is the ownership boundary; rejected heads never copy out.
     s.fields = Array(Std::Hpack::HeaderField).new(decoded.size) do |i|
-      decoded[i].retained
+      decoded[i]
     end
     if declared = H2Connection.field(decoded, "content-length")
       n = HTTP.content_length(declared.to_heap)

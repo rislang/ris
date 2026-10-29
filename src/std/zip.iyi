@@ -119,6 +119,7 @@ import std/dir::{Dir}
 
 # What is wrong with an archive or an entry: `message` is the sentence,
 # which says which entry where there is one.
+@[OnTape]
 pub struct ZipError
   getter message : String
 

@@ -90,6 +90,7 @@ import std/mime::{MIME}
 # an answer that is not a 200, one that is not `text/event-stream`, or a
 # stream that kept ending with no event until the client gave up.
 # `status` is the answer's. `message` says it is SSE's.
+@[OnTape]
 pub struct SSEError
   getter reason : String
   getter status : Int32

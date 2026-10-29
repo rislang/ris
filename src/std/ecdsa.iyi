@@ -62,6 +62,7 @@ import std/big::{BigInt}
 import std/digest::{SHA256, SHA384, SHA512}
 
 # What reading a key answers for bytes that are not an ECDSA public key.
+@[OnTape]
 pub struct EcdsaError
   getter message : String
 
@@ -132,6 +133,7 @@ pub enum EcdsaCurve
   end
 end
 
+@[OnTape]
 pub struct EcdsaPublicKey
   getter curve : EcdsaCurve
   getter x : BigInt

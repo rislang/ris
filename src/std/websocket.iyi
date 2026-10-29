@@ -162,6 +162,7 @@ import std/compress::{Deflater, Inflater, Envelope, CompressError}
 # code it stands for (1002 a protocol error, 1007 bytes that are not
 # UTF-8, 1009 a message too large, 1006 a connection that ended without
 # a close). `message` says it is WebSocket's.
+@[OnTape]
 pub struct WebSocketError
   getter reason : String
   getter code : Int32

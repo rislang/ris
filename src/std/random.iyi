@@ -75,6 +75,7 @@ import std/base64::{Base64}
   end
 {% end %}
 
+@[OnTape]
 pub class Random
   @state : UInt64
   @inc : UInt64
@@ -405,6 +406,7 @@ end
 # seed: each draw is a fresh request to the kernel (or libSystem, or the
 # Windows or WASI host), and nothing is held between draws, so a `fork`
 # cannot hand the child the parent's next value.
+@[OnTape]
 class Random::Secure < Random
   # The generator fields a `Random` carries, which nothing here reads.
   def initialize

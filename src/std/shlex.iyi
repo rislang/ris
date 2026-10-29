@@ -54,6 +54,7 @@ module std/shlex
 
 # Why a text does not split: an unclosed quote or a final backslash.
 # `offset` is the byte where the quote or the backslash stands.
+@[OnTape]
 pub struct ShlexError
   getter message : String
   getter offset : Int32
@@ -76,17 +77,6 @@ end
 pub struct Shlex
   # The words of *text*, quotes and backslashes taken off as `sh` takes
   # them; with *comments*, `#` to the end of the line is skipped.
-  def self.split(text : String,
-                 comments : ::Bool = false) : Array(String) | ShlexError
-    result = [] of String
-    tape do
-      parsed = split(text.as_tape, comments)
-      return parsed if parsed.is_a?(ShlexError)
-      result = parsed.to_heap
-    end
-    result
-  end
-
   def self.split(text : String,
                  comments : ::Bool = false) : Array(String) | ShlexError
     raw = text
@@ -156,14 +146,6 @@ pub struct Shlex
   # *arg* as one shell word: as it is when every byte is a letter, a
   # digit or one of `%+,-./:=@_`, `''` when empty, else single-quoted.
   def self.quote(arg : String) : String
-    result = ""
-    tape do
-      result = quote(arg.as_tape).to_heap
-    end
-    result
-  end
-
-  def self.quote(arg : String) : String
     String.build(arg.bytesize + 8) { |w| quote(arg, w) }
   end
 
@@ -196,16 +178,6 @@ pub struct Shlex
   end
 
   # Quoted arguments separated by one space.
-  def self.join(args : Array(String)) : String
-    result = ""
-    tape do
-      words = Array(String).new(args.size)
-      args.each { |arg| words << arg.as_tape }
-      result = join(words).to_heap
-    end
-    result
-  end
-
   def self.join(args : Array(String)) : String
     String.build { |w| join(args, w) }
   end

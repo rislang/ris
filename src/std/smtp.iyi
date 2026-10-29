@@ -78,6 +78,7 @@ import std/digest::{MD5}
 # What a session answered that it should not have, or could not do, as a
 # value. `code` is the reply's code, 0 when there was no reply to have
 # one; `reply` the reply's text, its lines joined with newlines.
+@[OnTape]
 pub struct SmtpError
   getter reason : String
   getter code : Int32

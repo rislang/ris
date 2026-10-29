@@ -18,10 +18,9 @@ tape do
   Base32.encode("f", w, false)
   Base32Hex.decode("CO======", w)
   exit 7 unless w.finish == "prefix:MYf"
-  kept = encoded.to_heap
+  kept = encoded.copy_to(Program.tape)
 end
-exit 8 unless Base32.decode(kept) == [102_u8, 111_u8, 111_u8,
-                                       98_u8, 97_u8, 114_u8]
+exit 8 unless Base32.decode(kept) == "foobar"
 exit 9 unless Base32.encode("foo", false) == "MZXW6"
-exit 10 unless Base32Hex.decode("CO======") == [102_u8]
-puts "PASS: base32 tape and heap APIs"
+exit 10 unless Base32Hex.decode("CO======") == "f"
+puts "PASS: base32 views and owned copy"

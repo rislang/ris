@@ -17,16 +17,16 @@ tape do
   w << "prefix:"
   version.write(w)
   exit 7 unless w.finish == "prefix:1.2.3-beta.11+build.7"
-  exit 8 unless version.to_heap.to_tape == version.to_tape
-  owned = version.to_heap
+  exit 8 unless version.to_tape == version.to_tape
+  owned = version.copy_to(Program.tape)
   huge = "999999999999999999.0.0"
   exit 12 unless SemanticVersion.valid?(huge)
   exit 13 unless SemanticVersion.parse?(huge).nil?
-  kept = version.to_tape.to_heap
+  kept = version.to_tape.copy_to(Program.tape)
 end
 exit 9 unless SemanticVersion.parse(kept).to_s == kept
 exit 10 unless SemanticVersion.valid?("1.2.3")
 exit 11 unless SemanticVersion.parse?("1.2").nil?
 exit 20 unless owned
 exit 21 unless owned.to_s == kept
-puts "PASS: semantic_version tape and heap APIs"
+puts "PASS: semantic_version views and owned copy"

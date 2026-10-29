@@ -2261,7 +2261,7 @@ end
 # whether the pattern occurs anywhere, as the other library's `match?`
 # does - `Regex#match?` asks whether it spans the whole text, and is a
 # different question. Positions are bytes, as every iyi `index` is.
-class ::String
+struct ::String
   def match(pattern : Std::Regex::Regex, pos : Int32 = 0) : Std::Regex::Regex::MatchData?
     pattern.match(self, pos)
   end

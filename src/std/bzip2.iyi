@@ -84,6 +84,7 @@ import std/int
 # What `Bzip2Reader#read` and `Bzip2.decompress` answer for a stream they
 # cannot read: one that is corrupt, whose CRC does not match, or that ends
 # early.
+@[OnTape]
 pub struct Bzip2Error
   getter message : String
 

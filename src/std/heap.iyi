@@ -9,6 +9,7 @@ module std/heap
 
 import std/traits::{Comparable}
 
+@[OnTape]
 pub class Heap(T)
   @items : Array(T)
 

@@ -447,6 +447,7 @@ end
 
 # What a connection answers when it cannot be made or kept, or a read that
 # came back with nothing yet.
+@[OnTape]
 pub struct TlsError
   getter message : String
   # The alert this refusal sends the peer (`TlsAlert`), or nil: none for a
@@ -2244,13 +2245,15 @@ pub class TlsClient < TlsConnection
     # X25519 key in both, as OpenSSL and Chrome send them, so its ladder
     # runs once.
     kem = nil.as(MlKem768PrivateKey?)
-    shares = [] of {Int32, Array(UInt8)}
+    shares = [] of {Int32, Array::View(UInt8)}
     if @config.post_quantum
       pq = MlKem768PrivateKey.from_seed(Random::Secure.random_bytes(64))
       kem = pq
-      shares << {GROUP_X25519MLKEM768, pq.encapsulation_key + public_key}
+      hybrid_share = pq.encapsulation_key + public_key
+      shares << {GROUP_X25519MLKEM768,
+        hybrid_share[0, hybrid_share.size]}
     end
-    shares << {GROUP_X25519, public_key}
+    shares << {GROUP_X25519, public_key[0, public_key.size]}
     # Encrypted Client Hello (RFC 9849): with `ech_configs`, *hello* is the
     # ClientHelloInner - the one the transcript follows if the server takes
     # it - and *wire* the ClientHelloOuter that carries it encrypted;
@@ -2334,7 +2337,8 @@ pub class TlsClient < TlsConnection
       if reply.named_group == GROUP_SECP256R1 || reply.named_group == GROUP_SECP384R1
         key = ec_ephemeral(reply.named_group)
         ephemeral = key
-        shares = [{reply.named_group, key.public_point}]
+        point = key.public_point
+        shares = [{reply.named_group, point[0, point.size]}]
       end
       # The second ClientHelloInner goes in a second ClientHelloOuter,
       # sealed by the same HPKE context, its enc empty (section 6.1.5); a
@@ -2741,7 +2745,7 @@ pub class TlsClient < TlsConnection
   # ClientHello to its binders (section 4.2.11.2). With *ech*, an
   # encrypted_client_hello of that body before them: the inner one's
   # marker, or GREASE.
-  private def client_hello(random : Array(UInt8), session : Array(UInt8), shares : Array({Int32, Array(UInt8)}), cookie : Array(UInt8)?, prefix : Array(UInt8),
+  private def client_hello(random : Array(UInt8), session : Array(UInt8), shares : Array({Int32, Array::View(UInt8)}), cookie : Array(UInt8)?, prefix : Array(UInt8),
                            ech = nil) : Array(UInt8)
     tls12 = @config.min_version == TlsVersion::TLS12
     body = [3_u8, 3_u8] + random + [32_u8] + session
@@ -2825,7 +2829,7 @@ pub class TlsClient < TlsConnection
     compression = reader.u8
     extensions = reader.bytes(reader.u16)
     return TlsError.new("a ServerHello cut short", TlsAlert::DECODE_ERROR) if reader.short? || !reader.done?
-    found = [] of {Int32, Array(UInt8)}
+    found = [] of {Int32, Array::View(UInt8)}
     seen = [] of Int32
     list = TlsReader.new(extensions)
     until list.done?
@@ -2834,7 +2838,7 @@ pub class TlsClient < TlsConnection
       return TlsError.new("ServerHello extensions cut short", TlsAlert::DECODE_ERROR) if list.short?
       return TlsError.new("extension #{type} twice in a ServerHello", TlsAlert::ILLEGAL_PARAMETER) if seen.includes?(type)
       seen << type
-      found << {type, data}
+      found << {type, data[0, data.size]}
     end
     # With TLS 1.2 asked for, a ServerHello with no supported_versions is
     # 1.2's; without, it is a server that does not speak 1.3, refused below.
@@ -2922,7 +2926,7 @@ pub class TlsClient < TlsConnection
   # extended master secret among its extensions, which may answer what was
   # offered and nothing else.
   private def server_hello12(version : Int32, random : Array(UInt8), echo : Array(UInt8), suite : Int32, compression : Int32,
-                             extensions : Array({Int32, Array(UInt8)}), session : Array(UInt8)) : TlsServerHello | TlsError
+                             extensions : Array({Int32, Array::View(UInt8)}), session : Array(UInt8)) : TlsServerHello | TlsError
     unless version == 0x0303
       return TlsError.new("the server chose version 0x#{version.to_s(16)}, before TLS 1.2, which this does not speak", TlsAlert::PROTOCOL_VERSION)
     end
@@ -3025,14 +3029,14 @@ pub class TlsClient < TlsConnection
 
   # server_name's acknowledgement (RFC 6066 section 3): empty, and only of
   # a name this client sent - none goes for an address.
-  private def server_name_ack(data : Array(UInt8)) : TlsError?
+  private def server_name_ack(data : Array::View(UInt8)) : TlsError?
     return TlsError.new("a server_name acknowledgement of a name not sent", TlsAlert::UNSUPPORTED_EXTENSION) if TlsBytes.ip_literal?(@name)
     return TlsError.new("a server_name acknowledgement that is not empty", TlsAlert::DECODE_ERROR) unless data.empty?
     nil
   end
 
   # ALPN's answer (RFC 7301 section 3.1): one protocol, one offered.
-  private def alpn_answer(data : Array(UInt8)) : TlsError?
+  private def alpn_answer(data : Array::View(UInt8)) : TlsError?
     return TlsError.new("an ALPN answer to no offer", TlsAlert::UNSUPPORTED_EXTENSION) if @config.alpn.empty?
     field = TlsReader.new(data)
     names = TlsReader.new(field.bytes(field.u16))
@@ -3400,7 +3404,7 @@ pub class TlsMadeUnder
     return false unless @config.object_id == config.object_id
     roots = config.roots
     held = @roots
-    return false unless held.nil? ? roots.nil? : (!roots.nil? && held.object_id == roots.object_id)
+    return false unless held.nil? ? roots.nil? : (!roots.nil? && held.same_storage?(roots))
     identity = config.identity
     mine = @identity
     return false unless mine.nil? ? identity.nil? : (!identity.nil? && mine.object_id == identity.object_id)
@@ -4036,7 +4040,7 @@ pub class TlsTicketKeys
 
   # The state *ticket* seals, when a key still held at *now_ms* opens it;
   # nil for any other bytes.
-  def open(ticket : Array(UInt8), now_ms : Int64, period_ms : Int64) : Array(UInt8)?
+  def open(ticket : Array::View(UInt8), now_ms : Int64, period_ms : Int64) : Array(UInt8)?
     rotate_if_due(now_ms, period_ms)
     return nil if ticket.size < 8 + 12 + 16
     name = ticket[0, 8]
@@ -4216,7 +4220,7 @@ pub class TlsTicket
   # The session *ticket* seals, opened by *keys* at *now_ms*: nil when no
   # key held opens it, or when its lifetime is over by this server's own
   # count from its issue.
-  def self.open(keys : TlsTicketKeys, ticket : Array(UInt8), now_ms : Int64, period_ms : Int64) : TlsTicket?
+  def self.open(keys : TlsTicketKeys, ticket : Array::View(UInt8), now_ms : Int64, period_ms : Int64) : TlsTicket?
     state = keys.open(ticket, now_ms, period_ms)
     return nil unless state
     opened = decode(state)
@@ -4333,7 +4337,7 @@ class TlsOffer
   # and their binders, and the bytes the binders take at the ClientHello's
   # end; psk_key_exchange_modes; and why no identity of this server's can
   # be shown, when a ticket may still be taken instead.
-  property identities : Array({Array(UInt8), Int64}) = [] of {Array(UInt8), Int64}
+  property identities : Array({Array::View(UInt8), Int64}) = [] of {Array::View(UInt8), Int64}
   property binders : Array(Array(UInt8)) = [] of Array(UInt8)
   property binders_size : Int32 = 0
   property psk_modes : Array(UInt8) = [] of UInt8
@@ -5063,7 +5067,7 @@ pub class TlsServer < TlsConnection
     formats = nil
     extended = nil
     renegotiation = nil
-    identities = [] of {Array(UInt8), Int64}
+    identities = [] of {Array::View(UInt8), Int64}
     binders = [] of Array(UInt8)
     binders_size = 0
     psk_modes = nil
@@ -5133,7 +5137,7 @@ pub class TlsServer < TlsConnection
           ticket = named.bytes(named.u16)
           age = named.u32
           return TlsError.new("a pre_shared_key's identities cut short", TlsAlert::DECODE_ERROR) if named.short? || ticket.empty?
-          identities << {ticket, age}
+          identities << {ticket[0, ticket.size], age}
         end
         each = TlsReader.new(bound)
         until each.done?
@@ -5673,10 +5677,10 @@ pub class TlsEchConfig
   getter maximum_name_length : Int32
   getter public_name : String
   # Its extensions (section 4.2), each its type and data.
-  getter extensions : Array({Int32, Array(UInt8)})
+  getter extensions : Array({Int32, Array::View(UInt8)})
 
   def initialize(@raw : Array(UInt8), @config_id : Int32, @kem_id : Int32, @public_key : Array(UInt8), @suites : Array({Int32, Int32}),
-                 @maximum_name_length : Int32, @public_name : String, @extensions : Array({Int32, Array(UInt8)}))
+                 @maximum_name_length : Int32, @public_name : String, @extensions : Array({Int32, Array::View(UInt8)}))
   end
 
   # The ECHConfigs of version 0xfe0d an ECHConfigList holds, in its order -
@@ -5729,13 +5733,13 @@ pub class TlsEchConfig
       suites << {(suite_bytes[i].to_i32 << 8) | suite_bytes[i + 1].to_i32, (suite_bytes[i + 2].to_i32 << 8) | suite_bytes[i + 3].to_i32}
       i = i + 4
     end
-    extensions = [] of {Int32, Array(UInt8)}
+    extensions = [] of {Int32, Array::View(UInt8)}
     list = TlsReader.new(extension_bytes)
     until list.done?
       type = list.u16
       data = list.bytes(list.u16)
       return "an ECHConfig's extensions cut short" if list.short?
-      extensions << {type, data}
+      extensions << {type, data[0, data.size]}
     end
     TlsEchConfig.new(raw, id, kem, key, suites, longest, TlsBytes.text(name), extensions)
   end
@@ -5899,7 +5903,7 @@ class TlsHelloParts
 
   def data(index : Int32) : Array::View(UInt8)
     entry = @extensions[index]
-    @message[entry[1], entry[2]].to_a
+    @message[entry[1], entry[2]]
   end
 
   # Where the first extension of *type* is among them.
@@ -6029,7 +6033,7 @@ struct TlsEch
   end
 
   # A pre_shared_key's body as *offered*'s is shaped, its bytes random.
-  private def self.grease_psk(offered : Array(UInt8)) : Array(UInt8)
+  private def self.grease_psk(offered : Array::View(UInt8)) : Array(UInt8)
     field = TlsReader.new(offered)
     named = TlsReader.new(field.bytes(field.u16))
     bound = TlsReader.new(field.bytes(field.u16))

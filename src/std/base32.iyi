@@ -42,6 +42,7 @@
 module std/base32
 
 # What `decode` answers for a text that is not base32.
+@[OnTape]
 pub struct Base32Error
   getter message : String
 
@@ -68,27 +69,13 @@ BASE32HEX_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUV"
 
 # A data character's value, by byte, in either case; -1 for everything
 # else.
-BASE32_VALUES    = Base32Codec.values_of(BASE32_ALPHABET)
-BASE32HEX_VALUES = Base32Codec.values_of(BASE32HEX_ALPHABET)
+BASE32_VALUES = Base32Codec.values_of(
+  BASE32_ALPHABET).copy_to(Program.tape)
+BASE32HEX_VALUES = Base32Codec.values_of(
+  BASE32HEX_ALPHABET).copy_to(Program.tape)
 
 # RFC 4648 section 6, the alphabet authenticator secrets are written in.
 pub struct Base32
-  def self.encode(data : String | Array(UInt8),
-                  padding : Bool = true) : String
-    result = ""
-    tape do
-      view = if data.is_a?(String)
-               data.as_tape
-             else
-               String.build(data.size) do |writer|
-                 data.each { |byte| writer.push(byte) }
-               end
-             end
-      result = encode(view, padding).to_heap
-    end
-    result
-  end
-
   def self.encode(data : String,
                   padding : Bool = true) : String
     Base32Codec.encode(data, BASE32_ALPHABET, padding)
@@ -97,16 +84,6 @@ pub struct Base32
   def self.encode(data : String, writer : String::Builder,
                   padding : Bool = true) : Nil
     writer << encode(data, padding)
-  end
-
-  def self.decode(text : String) : Array(UInt8) | Base32Error
-    result = [] of UInt8
-    tape do
-      decoded = decode(text.as_tape)
-      return decoded if decoded.is_a?(Base32Error)
-      decoded.each_byte { |byte| result << byte }
-    end
-    result
   end
 
   def self.decode(text : String) : String | Base32Error
@@ -126,22 +103,6 @@ end
 # RFC 4648 section 7, the extended-hex alphabet: what DNSSEC's NSEC3
 # records (RFC 5155) write their hashed names in.
 pub struct Base32Hex
-  def self.encode(data : String | Array(UInt8),
-                  padding : Bool = true) : String
-    result = ""
-    tape do
-      view = if data.is_a?(String)
-               data.as_tape
-             else
-               String.build(data.size) do |writer|
-                 data.each { |byte| writer.push(byte) }
-               end
-             end
-      result = encode(view, padding).to_heap
-    end
-    result
-  end
-
   def self.encode(data : String,
                   padding : Bool = true) : String
     Base32Codec.encode(data, BASE32HEX_ALPHABET, padding)
@@ -150,16 +111,6 @@ pub struct Base32Hex
   def self.encode(data : String, writer : String::Builder,
                   padding : Bool = true) : Nil
     writer << encode(data, padding)
-  end
-
-  def self.decode(text : String) : Array(UInt8) | Base32Error
-    result = [] of UInt8
-    tape do
-      decoded = decode(text.as_tape)
-      return decoded if decoded.is_a?(Base32Error)
-      decoded.each_byte { |byte| result << byte }
-    end
-    result
   end
 
   def self.decode(text : String) : String | Base32Error
@@ -181,7 +132,7 @@ struct Base32Codec
                   padding : Bool) : String
     src = data
     n = data.bytesize
-    table = alphabet.to_unsafe
+    table = alphabet
     # Eight characters for every five bytes; the last group's characters
     # are its bits rounded up to fives, and padding brings it to eight.
     chars = (n.to_i64 * 8 + 4) // 5
@@ -221,7 +172,7 @@ struct Base32Codec
                   name : String) : String | Base32Error
     src = text
     n = text.bytesize
-    table = values.to_unsafe
+    table = values
     # The data characters run to the first `=`, and everything after it
     # must be `=`.
     data = 0
@@ -295,7 +246,7 @@ struct Base32Codec
   end
 
   protected def self.values_of(alphabet : String) : Array(Int32)
-    chars = alphabet.to_unsafe
+    chars = alphabet
     values = Array(Int32).new(256, -1)
     k = 0
     while k < 32
