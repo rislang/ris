@@ -232,6 +232,13 @@ first):
 
 ## Known failure to recheck
 
+* 15 refusal gates now compile (checked 2026-10-29): string_parameter,
+  string_optional_parameter, text_parameter, text_array,
+  text_local_field, text_literal_field, text_interpolation_field,
+  class_share, class_var, owned_cache, heap_copy, heap_interpolation,
+  heap_memory, heap_memory_print, heap_escape_helper. For each, decide:
+  a rule tape-only retired (delete the gate) or a lost refusal (restore
+  it). growing_owner refuses with the field rule, not the container one.
 * samples/ris/web.ri does not build: std/http.iyi:2627
   (`headers[host_name] = named`) is refused as a Hash shrink with a live
   view, after about 7 minutes of checking (seen 2026-10-29 on the base).

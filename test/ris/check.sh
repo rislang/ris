@@ -569,9 +569,10 @@ expect string_optional_parameter \
   'name : String? is only read; take it as String?'
 heap_trap string_parameters
 
-for name in text_parameter text_array text_capture; do
+for name in text_parameter text_array; do
   expect "$name" '.to_heap'
 done
+expect text_capture 'pass what the block needs as owned data (copy_to(owner))'
 expect text_local_field \
   'name holds tape text; write the literal in place or keep it with .to_heap'
 expect text_literal_field '.copy_to(owner)'
@@ -597,7 +598,7 @@ expect class_share "pass Share scalar data"
 expect class_finalize "tape class instances cannot finalize"
 expect class_inherited_finalize "tape class instances cannot finalize"
 expect class_escape "is a variable of the code around this tape block"
-expect struct_field  "is a struct that is not @[OnTape]"
+expect struct_field  'Use an @[OnTape] struct for request data'
 expect class_var     "copy it with .copy_to(Program.tape)"
 expect proc_capture  "this block becomes a proc"
 expect integer_text  "integer / in text gives a Float"
