@@ -29,6 +29,7 @@ the std row. Update a row when its work starts or ends.
 | Work                                  | Size     | Time      | Tokens    |
 |---------------------------------------|----------|-----------|-----------|
 | std paths that still use the heap     | large    | 1-3 days  | 300k-1M   |
+| Text: `s = ""` + `<<`, no Builder.new | medium   | 6-10 h    | 300-500k  |
 | Kernel threads without a collector    | large    | 1-2 days  | 300-500k  |
 | Task value: @[OnTape] and nested      | medium   | 2-4 h     | 100-200k  |
 | Closure env inside a nested tape do   | medium   | 2-4 h     | 100-200k  |
@@ -78,6 +79,40 @@ part B.
   including real TLS deadline/parallel-server cases, Pebble, restarts and
   mutation checks. Preserve the policy probe's copied board observations;
   its Counter is no longer captured by the listener task.
+
+## Text: `s = ""` and `<<`, no Builder.new (user decision 2026-10-29)
+
+One text type and one way to append; the compiler decides where text
+grows. `String::Builder` stays only as a parameter type ("append to the
+caller's text"). Change TAPE_SPEC 7.3 in the step that implements it.
+
+```crystal
+out = "Viga: "          # a view of the literal, no cost
+out << code << '\n'     # first << reserves and copies the literal once
+@data << value          # a field grows in its own reservation, too
+greet(out)              # def greet(io : String::Builder): out grows
+@data = ""              # reuses the reservation if no view outlives it
+```
+
+In order, one gate each (RIS_TAPE_STATS: 0 moves, 0 copies after the
+first):
+
+* A local or field String that gets `<<` (or goes to a String::Builder
+  parameter) owns a growing reservation from its first append; the
+  literal or other start text is copied once. Reading it gives a String
+  view; growth never moves or changes bytes a view sees. Never appended:
+  no reservation.
+* `s = ""` on a growing String reuses its reservation only when the
+  compiler proves no view of the old text is still live (stored in a
+  container, a field, another def, a task). Unsure: refuse, naming
+  `copy_to(owner)`. Gates: each escape kind refused, a mutation test.
+* `<<` on a String parameter is refused: it names `io : String::Builder`
+  or returning a new String. The copying `s + x` fallback is refused in
+  loops and on fields.
+* Refuse `String::Builder.new` and `String.build` outside src/iyi/,
+  naming `s = ""` and `<<`; move std, tests and samples (about 300
+  sites). Until then, drop arbitrary capacities (`Builder.new(64)`):
+  on Linux they change nothing (no moves either way).
 
 ## Next
 
