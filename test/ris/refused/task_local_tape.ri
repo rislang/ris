@@ -1,0 +1,20 @@
+# A task spawned inside a `local_tape` into a group opened outside it
+# reads its captures after the local tape has freed them: here it
+# printed 99, the second block's value, instead of 42.
+def run
+  group do |g|
+    local_tape do
+      n = 42_i64
+      g.spawn do
+        sleep 0
+        puts "task reads #{n}"
+      end
+    end
+    local_tape do
+      m = 99_i64
+      g.spawn { puts "second #{m}" }
+      sleep 0
+    end
+  end
+end
+run

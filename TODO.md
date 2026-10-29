@@ -179,9 +179,12 @@ first):
   never frees, so a long-running server leaks (RIS_HEAP_STATS=1 shows
   it). Remove the bump allocator and restore the trap when std is moved.
 * A program def's closure environment is on its current tape (codegen
-  closure_owner 1): a task spawned inside a nested `tape do` that ends
-  before the task reads freed captures. Allocate it at the group's or
-  the def's scope, or refuse the spawn there. std keeps its marks.
+  closure_owner 1). A spawn with captures inside a `local_tape` block
+  into a group opened outside it is refused (task_local_tape); a nested
+  `tape do` shares the outer tape; a call inside a `local_tape` to a def
+  that (transitively) spawns with captures into a group it was handed is
+  refused (task_local_tape_helper). Left: a spawn reached through a
+  proc call, which the check cannot follow. std keeps its marks.
 * Error#message answers String, which a program cannot build without a
   heap: let it answer String (or write into a builder) across std.
 * Kernel threads without a collector on darwin arm64 and win32: Linux

@@ -114,6 +114,16 @@ expect board_owner 'send String, Array bytes or a value struct'
 # Tasks capture Share values, or take a value handed off (TAPE_SPEC 5.1).
 expect task_capture_mutable 'build tape values inside the spawn'
 expect task_capture_assigned 'a mutable borrow across tasks'
+expect task_local_tape 'open the `group` inside the `local_tape` block'
+expect task_local_tape_helper 'call `via` outside the `local_tape` block'
+
+# A task's captures outlive a local_tape when the group is inside it.
+out=$("$RIS" run test/ris/task_local_tape.ri 2>&1)
+if [ "$?" -eq 0 ] && grep -qxF 'PASS: task local_tape' <<<"$out"; then
+  echo "runs     task_local_tape (group inside, spawn outside)"
+else
+  echo "FAILED   task_local_tape: $out"; status=1
+fi
 expect task_handoff_reused 'the task owns it now'
 expect select_gone 'ris has no select'
 expect channel_gone 'undefined constant Channel'

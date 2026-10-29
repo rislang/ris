@@ -523,7 +523,10 @@ module Iyi
       if (node_block = node.block) && !node_block.fun_literal
         # TODO: if the block isn't used in any of the target defs we could
         # avoid transforming it, because it probably isn't typed **at all**
+        scope_mark = ris_scope_mark(node)
+        @ris_scope_marks << scope_mark if scope_mark
         node.block = node_block.transform(self)
+        @ris_scope_marks.pop if scope_mark
       end
 
       if node_block_arg = node.block_arg
@@ -635,7 +638,10 @@ module Iyi
             node.bubbling_exception do
               @current_def = target_def
               @def_nest_count += 1
+              saved_marks = @ris_scope_marks
+              @ris_scope_marks = [] of Symbol
               target_def.body = target_def.body.transform(self)
+              @ris_scope_marks = saved_marks
               @def_nest_count -= 1
               @current_def = current_def
             end
@@ -645,6 +651,7 @@ module Iyi
           # where the call happens also raises.
           current_def.raises = true if current_def && target_def.raises?
         end
+        check_local_tape_helper_call(node, target_defs, current_def)
 
         if node.target_defs.not_nil!.empty?
           exps = [] of ASTNode
@@ -677,17 +684,78 @@ module Iyi
       node
     end
 
+    # ris: a closure environment is on the tape current where its scope
+    # starts. A task spawned inside a `local_tape` into a group opened
+    # outside it can outlive that tape, so its captures would be freed.
+    private def check_local_tape_spawn(a_def : Def, vars) : Nil
+      return unless @joined_task_blocks.includes?(a_def)
+      return unless @program.has_flag?("ris_no_gc")
+      mark = @ris_scope_marks.last?
+      return if mark == :group
+      ClosuredVarsCollector.collect(a_def).each do |captured|
+        next unless captured.is_a?(Var)
+        meta = vars.try &.[captured.name]?
+        next unless meta
+        next if meta.belongs_to?(a_def)
+        unless mark
+          # The group was handed in: the caller decides if this is safe.
+          @current_def.try { |helper| @ris_spawning_helpers << helper }
+          return
+        end
+        captured.raise "this task captures `#{captured.name}` inside a " \
+                       "`local_tape` block, which ends and frees the " \
+                       "captures before the task's group joins: open the " \
+                       "`group` inside the `local_tape` block, or spawn " \
+                       "outside the `local_tape` block"
+      end
+    end
+
+    # ris: defs that spawn a task with captures into a group they did not
+    # open. Called inside a `local_tape` with no `group` opened between,
+    # the task could read captures the local tape freed.
+    @ris_spawning_helpers = Set(Def).new
+
+    private def check_local_tape_helper_call(node : Call, target_defs,
+                                             current_def) : Nil
+      return unless @program.has_flag?("ris_no_gc")
+      return unless target_defs.any? { |d| @ris_spawning_helpers.includes?(d) }
+      case @ris_scope_marks.last?
+      when :local
+        node.raise "`#{node.name}` spawns a task with captures into a group " \
+                   "it was handed, and this call is inside a `local_tape` " \
+                   "block, which ends and frees the captures before the " \
+                   "group joins: open the `group` inside the `local_tape` " \
+                   "block, or call `#{node.name}` outside the `local_tape` " \
+                   "block"
+      when nil
+        current_def.try { |helper| @ris_spawning_helpers << helper }
+      end
+    end
+
     # PROTOTYPE (ris, step B): a block that becomes a proc - `-> { }`, the
     # block `spawn` or a callback keeps - may run after the tape block it
     # was made in has ended, so it may not capture a tape value.
     @joined_task_blocks = Set(Def).new
     @joined_task_calls = Hash(Def, Call).new
 
+    # ris: the blocks a call's block is lexically inside in this def:
+    # :local for `local_tape`, :group for `group`.
+    @ris_scope_marks = [] of Symbol
+
+    private def ris_scope_mark(node : Call) : Symbol?
+      return nil if node.obj
+      case node.name
+      when "local_tape" then :local
+      when "group"      then :group
+      end
+    end
+
     def check_tape_captures(a_def : Def)
       # A lowered defer runs before its owning tape is released.
       return if a_def.iyi_defer?
       return unless a_def.closure?
       vars = a_def.vars
+      check_local_tape_spawn(a_def, vars)
       ClosuredVarsCollector.collect(a_def).each do |captured|
         next unless captured.is_a?(Var)
         meta = vars.try &.[captured.name]?
