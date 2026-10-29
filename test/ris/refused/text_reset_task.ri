@@ -1,0 +1,8 @@
+s = ""
+s << "old"
+old = s
+group do |g|
+  task = g.spawn { old }
+  s = ""
+  puts task.value
+end

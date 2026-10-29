@@ -1,0 +1,16 @@
+@[OnTape]
+class TextResetUnion
+  @text : String | Array(String) = ""
+  def append
+    @text << "old"
+    nil
+  end
+  def take
+    old = @text
+    @text = ""
+    old
+  end
+end
+holder = TextResetUnion.new
+holder.append
+puts holder.take

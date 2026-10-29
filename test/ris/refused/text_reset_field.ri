@@ -1,0 +1,10 @@
+@[OnTape]
+class TextResetHolder
+  getter value : String
+  def initialize(@value : String)
+  end
+end
+s = ""
+s << "old"
+kept = TextResetHolder.new(s)
+s = ""

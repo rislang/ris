@@ -1,0 +1,6 @@
+source = ""
+source << "old"
+text = source
+source = ""
+# The new binding still borrows source until its first append.
+text << "!"

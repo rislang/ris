@@ -39,7 +39,7 @@ class Iyi::TapeProgramChecker
             "leaf", "open", "close", "write_bytes", "append_bytes",
             "sort_in_place", "sort_in_place_by", "load", "concat",
             "write_bytes_at", "offset=", "advance", "reset", "terminate",
-            "scan", "skip", "scan_until", "skip_until"}
+            "scan", "skip", "scan_until", "skip_until", "__ris_text_reset"}
 
   @active = Set(UInt64).new
   @joining = Set({UInt64, UInt64}).new
@@ -112,9 +112,14 @@ class Iyi::TapeProgramChecker
 
   # The lowering copies both the prefix and appended bytes into the
   # companion field's construction-time owner, even for an unknown self.
+  # A same-field reset either copies there or returns that already-owned
+  # field while lazy; the preceding source assignment is checked normally.
   private def growing_text_rebind?(node : Assign, target : InstanceVar) : Bool
     call = node.value
-    return false unless call.is_a?(Call) && call.name == "append"
+    return false unless call.is_a?(Call)
+    same_field_reset = call.name == "__ris_text_reset" &&
+      call.args.first?.as?(InstanceVar).try(&.name) == target.name
+    return false unless call.name == "append" || same_field_reset
     slot = call.obj
     return false unless slot.is_a?(InstanceVar) &&
       slot.name == "@__ris_text_#{target.name.lchop('@')}"
@@ -373,6 +378,12 @@ class Iyi::TapeProgramChecker
         end
         origin = if node.name == "view" && target.owner.to_s == "String.class"
                    Origin::Program
+                 elsif node.name == "__ris_text_reset" && target.owner.to_s == "RisTextGrowth"
+                   input = args.first? || Origin::Unknown
+                   # A lazy slot can still return its original input.
+                   # Once reserved, reset copies into its captured owner.
+                   TapeChecker.possible_string?(node.type?) ?
+                     join(viewed(receiver), input) : input
                  elsif node.name == "append" && target.owner.to_s == "RisTextGrowth"
                    viewed(receiver)
                  elsif READ_VIEWS.includes?(node.name) && tape_receiver

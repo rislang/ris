@@ -489,17 +489,20 @@ module Iyi
     @ris_growing_locals = Set(String).new
     @ris_text_slots = {} of String => Var
     @ris_growing_fields = Set(String).new
+    @ris_text_reassigned = Set(String).new
 
     # Scan before normalization introduces temporaries and rebinding calls.
     class GrowingTextScan < Visitor
       getter locals = Set(String).new
       getter fields = Set(String).new
       getter assigned = Set(String).new
+      getter assignments = Hash(String, Int32).new(0)
       getter block_args = Set(String).new
 
       def visit(node : Assign)
         if (target = node.target).is_a?(Var)
           @assigned << target.name
+          @assignments[target.name] += 1
         end
         true
       end
@@ -507,6 +510,7 @@ module Iyi
       def visit(node : TypeDeclaration)
         if node.value && (target = node.var).is_a?(Var)
           @assigned << target.name
+          @assignments[target.name] += 1
         end
         true
       end
@@ -514,7 +518,10 @@ module Iyi
       def visit(node : MultiAssign)
         node.targets.each do |target|
           target = target.exp if target.is_a?(Splat)
-          @assigned << target.name if target.is_a?(Var)
+          if target.is_a?(Var)
+            @assigned << target.name
+            @assignments[target.name] += 1
+          end
         end
         true
       end
@@ -577,6 +584,7 @@ module Iyi
       scan = GrowingTextScan.new
       body.accept(scan)
       @ris_growing_locals = scan.locals
+      @ris_text_reassigned = scan.assignments.select { |_, n| n > 1 }.keys.to_set
       scan.locals.each do |name|
         slot = program.new_temp_var.at(body)
         slot.ris_text_slot = true
@@ -586,9 +594,11 @@ module Iyi
         params.includes?(name) ||
           (!scan.assigned.includes?(name) && !scan.block_args.includes?(name))
       end
-      lines = names.map do |name|
+      lines = scan.locals.select { |name| names.includes?(name) || @ris_text_reassigned.includes?(name) }.map do |name|
         slot = growing_slot(Var.new(name).at(body))
-        Assign.new(slot, growing_initializer(Var.new(name).at(body))).at(body).as(ASTNode)
+        initial = names.includes?(name) ?
+          growing_initializer(Var.new(name).at(body)) : NilLiteral.new.at(body)
+        Assign.new(slot, initial).at(body).as(ASTNode)
       end
       return body if lines.empty?
       Expressions.new(lines + [body]).at(body)
@@ -782,6 +792,7 @@ module Iyi
       node.body.accept(TapeTextLowering.new) if tape_def
       outer_growing = @ris_growing_locals
       outer_text_slots = @ris_text_slots
+      outer_reassigned = @ris_text_reassigned
       node.body = prepare_text_growth(node.body, params)
       @current_def = node
       outer_scope, outer_params = @bound_scope, @bound_params
@@ -795,6 +806,7 @@ module Iyi
       @current_def = nil
       @ris_growing_locals = outer_growing
       @ris_text_slots = outer_text_slots
+      @ris_text_reassigned = outer_reassigned
 
       # If the def has a block argument without a specification
       # and it doesn't use it, we remove it because it's useless
@@ -1022,8 +1034,14 @@ module Iyi
           declaration = TypeDeclaration.new(slot, type,
             Call.new(type.clone, "new").at(node)).at(node)
           declaration.ris_text_companion = true
+          # Keep the legacy helper ABI: a statement returning Nil. A
+          # reference result would give the old shrink analysis another
+          # receiver/result alias through its scope-result wrapper.
+          field = InstanceVar.new(name).at(node)
+          rewind = Assign.new(field.clone,
+            Call.new(slot.clone, "__ris_text_reset", field).at(node)).at(node)
           reset = Def.new("__ris_text_reset_#{name.lchop('@')}", [] of Arg,
-            Call.new(slot.clone, "reset").at(node)).at(node)
+            Expressions.new([rewind, NilLiteral.new.at(node)] of ASTNode)).at(node)
           [declaration, reset] of ASTNode
         end
         node.body = Expressions.new(declarations + [node.body]).at(node) unless declarations.empty?
@@ -1148,18 +1166,32 @@ module Iyi
       return nil unless program.tape_platform? && @macro_code == 0 &&
                         !TapeScopeRuntime.runtime?(at.location)
       if target.is_a?(Var) && @ris_growing_locals.includes?(target.name)
-        return Assign.new(growing_slot(target), growing_initializer(target)).at(at)
+        unless @ris_text_reassigned.includes?(target.name)
+          return Assign.new(growing_slot(target), growing_initializer(target)).at(at)
+        end
+        slot = growing_slot(target)
+        writer = Or.new(slot.clone, Assign.new(slot.clone,
+          Call.new(Path.global("RisTextGrowth"), "new").at(at)).at(at)).at(at)
+        reset = Assign.new(target.clone,
+          Call.new(writer, "__ris_text_reset", target.clone).at(at)).at(at)
+        # Non-String locals keep the old lowering and never acquire a
+        # companion merely because their << is an Array/Builder method.
+        return If.new(IsA.new(target.clone, Path.global("String")).at(at), reset).at(at)
       end
       return nil unless target.is_a?(InstanceVar) && @current_def
       if @ris_growing_fields.includes?(target.name)
-        return Call.new(growing_slot(target), "reset").at(at)
+        reset = Assign.new(target.clone,
+          Call.new(growing_slot(target), "__ris_text_reset",
+            target.clone).at(at)).at(at)
+        return reset
       end
       return nil unless program.ris_growing_field_names.includes?(target.name) &&
                         @current_def.try(&.name) != "initialize"
       method = "__ris_text_reset_#{target.name.lchop('@')}"
       receiver = Var.new("self").at(at)
-      If.new(RespondsTo.new(receiver.clone, method).at(at),
+      reset = If.new(RespondsTo.new(receiver.clone, method).at(at),
         Call.new(receiver, method).at(at)).at(at)
+      reset
     end
 
     def transform(node : MultiAssign)

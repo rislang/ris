@@ -1,0 +1,7 @@
+s = ""
+s << "old"
+old = s
+1.times do
+  s = ""
+  puts old
+end

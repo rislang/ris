@@ -9,7 +9,8 @@ class Iyi::TapeShrinkChecker
   record Value, roots : Array(UInt64), views : Array(View),
     procs : Array(ProcLiteral) = [] of ProcLiteral,
     unknown_proc : Bool = false
-  record Use, views : Array(View), node : ASTNode, guards : Guards
+  record Use, views : Array(View), node : ASTNode, guards : Guards,
+    holder : String = ""
   record Shrink, roots : Array(UInt64), at : Int32, node : Call, chain : String,
     guards : Guards, growth : Bool = false
   record Summary, seeds : Array(UInt64), shrinks : Hash(UInt64, String), result : Value,
@@ -82,6 +83,8 @@ class Iyi::TapeShrinkChecker
   @checking = false
   @unproved = [] of Call
   @retains = [] of UInt64
+  @text_roots = Set(UInt64).new
+  @text_copies = Set(UInt64).new
 
   # Slots live in the environment, so branch and loop joins include stores.
   private def root_birth(root : UInt64) : Int32
@@ -282,7 +285,7 @@ class Iyi::TapeShrinkChecker
   end
 
   private def check_store(root : UInt64, v : Value, node : ASTNode)
-    if @checking
+    if @checking && !@text_only
       destinations = root_scope(root)
       source_roots(v).each do |source|
         scope = source_scope(source)
@@ -319,8 +322,59 @@ class Iyi::TapeShrinkChecker
 
   private def shrink(roots : Array(UInt64), node : Call, chain : String,
                      growth = false)
+    return if @text_only && !chain.includes?("text reset")
     @shrinks << Shrink.new(roots, @uses.size, node, chain, @guards.dup,
       growth)
+  end
+
+  # Reset invalidates the bytes behind the companion, not the object
+  # holding it. The binding being replaced is the one permitted holder.
+  private def text_root?(root : UInt64) : Bool
+    return true if @text_roots.includes?(root)
+    if parent = @parents[root]?
+      parent[1].starts_with?("@__ris_text_") || text_root?(parent[0])
+    else
+      false
+    end
+  end
+
+  private def text_reset(roots : Array(UInt64), node : Call, env : Env,
+                         cause : String)
+    shrink(roots, node, cause)
+    env.vars.each do |name, v|
+      next if name == "self" || name.starts_with?("__temp_") ||
+              name.starts_with?("#") || name.starts_with?("@")
+      use(Value.new([] of UInt64,
+        v.views.select { |view| contains_root?(roots, view.root) }),
+        node, name)
+    end
+    env.slots.each do |slot, v|
+      # If-expression scope records are evaluation temporaries, not
+      # retained holders. Named allocations and field paths have types.
+      next unless @parents.has_key?(slot) || @root_types.has_key?(slot)
+      own = roots.any? do |root|
+        next true if contains_root?([root], slot)
+        parent = @parents[root]?
+        field = @parents[slot]?
+        parent && field && parent[0] == field[0] &&
+          parent[1] == "@__ris_text_#{field[1].lchop('@')}"
+      end
+      helper_input = if parent = @parents[slot]?
+                       node.name == "__ris_text_reset_#{parent[1].lchop('@')}"
+                     else
+                       false
+                     end
+      unless own && !helper_input
+        use(Value.new([] of UInt64,
+          v.views.select { |view| contains_root?(roots, view.root) }),
+          node, root_name(slot))
+      end
+    end
+    use(Value.new([] of UInt64,
+      @returns.views.select { |view| contains_root?(roots, view.root) }),
+      node, "returned value")
+    # A view made by the reset is born after the invalidation.
+    use(EMPTY, node)
   end
 
   private def compatible?(a : Guards, b : Guards) : Bool
@@ -371,17 +425,81 @@ class Iyi::TapeShrinkChecker
       input = inputs[i]? || EMPTY
       input.roots.empty? ? input.views.map(&.root) : input.roots
     elsif parent = @parents[root]?
-      translate(parent[0], summary, inputs, allocation).map { |r| field_root(r, parent[1]) }
+      translate(parent[0], summary, inputs, allocation).map do |base|
+        mapped = field_root(base, parent[1])
+        if @text_only && (type = @root_types[root]?)
+          @root_types[mapped] ||= type
+        end
+        mapped
+      end
     elsif @global_ids.includes?(root)
       [root]
     elsif allocation && summary.result.roots.includes?(root)
       [allocation]
+    elsif @text_only && allocation && @text_copies.includes?(root)
+      # A fresh copy stored inside a returned holder is independent too.
+      # Keep its identity instead of losing it at the call boundary and
+      # broadening the holder's next field read to every in-scope String.
+      copied = field_root(allocation, "#text_copy")
+      if type = @root_types[root]?
+        @root_types[copied] = type
+      end
+      [copied]
     else
       [] of UInt64
     end
   end
 
-  def initialize(@program : Program, @graph : TapeCallGraph)
+  # Do not solve a second provenance lattice for programs with no
+  # executable growing-String reset. Definitions alone do not count.
+  def self.text_resets?(graph : TapeCallGraph, root : ASTNode) : Bool
+    scan = TextResetScan.new
+    root.accept(scan)
+    graph.defs.each_value { |target| target.body.accept(scan) }
+    graph.program.const_initializers.each { |i| i.value.accept(scan) }
+    graph.program.class_var_initializers.each { |i| i.node.accept(scan) }
+    scan.found?
+  end
+
+  class TextResetScan < Visitor
+    getter? found = false
+
+    def visit(node : Call)
+      if node.name == "__ris_text_reset" &&
+         node.obj.try(&.type?.try(&.to_s)) == "RisTextGrowth" &&
+         TapeChecker.possible_string?(node.type?)
+        @found = true
+      end
+      node.expanded.try &.accept(self)
+      !@found
+    end
+
+    def visit(node : Def | Macro)
+      false
+    end
+
+    def visit(node : ASTNode)
+      !@found
+    end
+  end
+
+  @reset_summaries = Hash(UInt64, Summary).new
+
+  def initialize(@program : Program, @graph : TapeCallGraph,
+                 @text_only : Bool = false)
+  end
+
+  private def summary(target : Def) : Summary?
+    @text_only ? @reset_summaries[target.object_id]? :
+      @graph.effects[target.object_id]?.try(&.shrink)
+  end
+
+  private def save_summary(target : Def, value : Summary)
+    if @text_only
+      @reset_summaries[target.object_id] = value
+    else
+      @graph.effects[target.object_id].shrink = value
+    end
   end
 
   @solving : UInt64?
@@ -422,8 +540,7 @@ class Iyi::TapeShrinkChecker
     @graph.defs.each_value do |target|
       seeds = Array(UInt64).new(target.args.size + 1) { fresh }
       @parameter_roots.concat(seeds)
-      @graph.effects[target.object_id].shrink =
-        Summary.new(seeds, Hash(UInt64, String).new, EMPTY)
+      save_summary(target, Summary.new(seeds, Hash(UInt64, String).new, EMPTY))
     end
     callers = Hash(UInt64, Set(UInt64)).new
     @graph.defs.each_value do |target|
@@ -437,7 +554,7 @@ class Iyi::TapeShrinkChecker
       @graph.defs.each_value do |target|
         next unless dirty.delete(target.object_id)
         @solving = target.object_id
-        old = @graph.effects[target.object_id].shrink.not_nil!
+        old = summary(target).not_nil!
         @uses.clear
         @shrinks.clear
         @returns = EMPTY
@@ -471,16 +588,17 @@ class Iyi::TapeShrinkChecker
           callers[target.object_id]?.try { |ids| dirty.concat(ids) }
           @summary_callers[target.object_id]?.try { |ids| dirty.concat(ids) }
         end
-        @graph.effects[target.object_id].shrink = updated
+        save_summary(target, updated)
       end
       break unless changed
     end
     @solving = nil
+    return if @text_only
     # Project root paths conservatively onto their parameter. The wire
     # contract may overestimate a field effect, but never loses one.
     @graph.defs.each_value do |target|
       next if target.is_a?(External)
-      summary = @graph.effects[target.object_id].shrink.not_nil!
+      summary = summary(target).not_nil!
       effect = @graph.effects[target.object_id]
       flags = summary.seeds.map do |seed|
         bits = 0
@@ -516,7 +634,11 @@ class Iyi::TapeShrinkChecker
 
   def run(node : ASTNode)
     @graph.defs.each_value do |target|
-      check(target.body, seed_env(target, @graph.effects[target.object_id].shrink.not_nil!.seeds), target) unless TapeRules.unsafe?(@program, target)
+      # The generated helper consumes the field after its rebinding.
+      # Check its effect and input at that call site, where the new
+      # field value's provenance is available.
+      next if @text_only && target.name.starts_with?("__ris_text_reset_") && target.args.empty?
+      check(target.body, seed_env(target, summary(target).not_nil!.seeds), target) unless TapeRules.unsafe?(@program, target)
     end
     check(node)
     @program.const_initializers.each { |i| check(i.value) }
@@ -529,6 +651,19 @@ class Iyi::TapeShrinkChecker
     else
       @root_types[root]?.try(&.to_s) || "tape"
     end
+  end
+
+  private def root_type(root : UInt64) : Type?
+    if type = @root_types[root]?
+      return type
+    end
+    if parent = @parents[root]?
+      type = root_type(parent[0]).try(&.remove_typedef)
+      if type.is_a?(InstanceVarContainer)
+        return type.instance_vars[parent[1]]?.try(&.type?)
+      end
+    end
+    nil
   end
 
   private def contains_root?(roots : Array(UInt64), root : UInt64) : Bool
@@ -552,6 +687,19 @@ class Iyi::TapeShrinkChecker
     @root_births.clear
     live = (env.vars.values + env.slots.values).flat_map(&.roots).to_set
     @root_types.select! { |root, _| live.includes?(root) }
+    if @text_only && owner && (type = owner.owner?).is_a?(InstanceVarContainer)
+      # Checking a method starts with existing field contents. Seed the
+      # unknown old borrow on both branch paths; a definite store kills
+      # it, while a store on only one path cannot erase the other path.
+      @program.ris_growing_field_names.each do |name|
+        next unless TapeChecker.possible_string?(type.instance_vars[name]?.try(&.type?))
+        (env["self"]? || EMPTY).roots.each do |root|
+          slot = field_root(root, name)
+          companion = field_root(root, "@__ris_text_#{name.lchop('@')}")
+          env.slots[slot] = Value.new([] of UInt64, [View.new(companion, 0)])
+        end
+      end
+    end
     result = merge(value(body, env), @returns)
     if owner && !{"new", "initialize"}.includes?(owner.name)
       boundary = fresh
@@ -564,7 +712,7 @@ class Iyi::TapeShrinkChecker
         next unless shrink.roots.any? do |root|
           @pooled_roots.includes?(root) ||
             (parameter_root?(root) &&
-             possible_array?(@root_types[root]?))
+             possible_array?(@text_only ? root_type(root) : @root_types[root]?))
         end
       end
       @uses.each_with_index do |use, i|
@@ -575,13 +723,13 @@ class Iyi::TapeShrinkChecker
           shrink.node.raise "cannot #{action} with a live view " \
                             "of #{root_name(live.root)} while shrinking " \
                             "#{shrink.roots.map { |r| root_name(r) }.join(", ")}, " \
-                            "used at #{use.node.location} via #{shrink.chain}: copy the view first " \
+                            "used at #{use.node.location}#{use.holder.empty? ? "" : " " + use.holder} via #{shrink.chain}: copy the view first " \
                             "with copy_to(owner), finish using it before " \
                             "shrinking, or keep an index instead of a view"
         end
       end
     end
-    if call = @unproved.first?
+    if !@text_only && (call = @unproved.first?)
       call.raise "cannot prove opaque callback retain/escape effects; " \
                  "use a directly known callback inside the owning scope, " \
                  "or pass independently owned data instead of tape views"
@@ -720,8 +868,8 @@ class Iyi::TapeShrinkChecker
     result
   end
 
-  private def use(v : Value, node : ASTNode)
-    @uses << Use.new(v.views, node, @guards.dup)
+  private def use(v : Value, node : ASTNode, holder = "")
+    @uses << Use.new(v.views, node, @guards.dup, holder)
   end
 
   private def proc_type_uncached(type : Type?) : Bool
@@ -787,9 +935,30 @@ class Iyi::TapeShrinkChecker
                              end
       v.roots.each { |root| @root_types[root] ||= node.type }
       v = stored(v, env)
+      if @text_only && node.is_a?(InstanceVar) && TapeChecker.possible_string?(node.type?) &&
+         @program.ris_growing_field_names.includes?(node.name)
+        # A separately checked method may read an already-grown field.
+        # Until a store proves otherwise, it can borrow its companion.
+        borrowed = v.roots.reject { |r| env.slots.has_key?(r) }.compact_map do |root|
+          if parent = @parents[root]?
+            view(field_root(parent[0], "@__ris_text_#{node.name.lchop('@')}"))
+          end
+        end
+        v = Value.new(v.roots, (v.views + borrowed).uniq)
+      end
       use(v, node)
       v
     when Assign
+      # Legacy shrink analysis predates this compiler-only operation.
+      # The original assignment already binds the new text; its copying
+      # reset is checked exclusively by the private text analysis.
+      if !@text_only && (call = node.value).is_a?(Call) &&
+         ((call.name == "__ris_text_reset" &&
+           call.obj.try(&.type?.try(&.to_s)) == "RisTextGrowth") ||
+          (node.target.is_a?(InstanceVar) &&
+           call.name == "__ris_text_reset_#{node.target.as(InstanceVar).name.lchop('@')}"))
+        return EMPTY
+      end
       v = value(node.value, env)
       target = node.target
       if target.is_a?(InstanceVar)
@@ -830,6 +999,10 @@ class Iyi::TapeShrinkChecker
         @root_types[node.object_id] = node.type
         @root_births[node.object_id] = @uses.size
       end
+      if @text_only && node.name.in?("copy_to", "new", "dup") &&
+         TapeChecker.possible_string?(node.type?)
+        @text_copies << node.object_id
+      end
       receiver = node.obj.try { |obj| value(obj, env) } || env["self"]? || EMPTY
       args = node.args.map { |arg| value(arg, env) }
       named = Hash(String, Value).new
@@ -838,6 +1011,37 @@ class Iyi::TapeShrinkChecker
         args << v
       end
       node.block_arg.try { |arg| args << value(arg, env) }
+      # Scope reception preserves borrowed identities; fresh results may
+      # be copied, so forwarding the original is conservative. The global
+      # wrapper must not turn an implicit self into a result dependency.
+      if @text_only && node.global?
+        return args.last? || EMPTY if node.name == TapeScopeChecker::RESULT
+        return EMPTY if node.name.in?(TapeScopeChecker::MARK,
+          TapeScopeChecker::RESET)
+      end
+      # Growing text's companion is its stable reservation identity.
+      # Reset has the same invalidation rule as Array#clear. Call summaries
+      # carry this effect through methods and field accessors.
+      if node.obj.try(&.type?.try(&.to_s)) == "RisTextGrowth"
+        if !@text_only && node.name == "__ris_text_reset"
+          return args.first? || EMPTY
+        end
+      end
+      if @text_only && node.obj.try(&.type?.try(&.to_s)) == "RisTextGrowth"
+        @text_roots.concat(receiver.roots)
+        if node.name == "__ris_text_reset"
+          return args.first? || EMPTY unless TapeChecker.possible_string?(node.type?)
+          text_reset(receiver.roots, node, env, chain("text reset"))
+          args.each { |arg| use(arg, node) }
+          # With no writer yet, runtime returns the input unchanged.
+          # Keep that possible borrow as well as the reservation view.
+          return merge(args.first? || EMPTY, Value.new(receiver.roots,
+            receiver.roots.map { |root| view(root) }))
+        elsif node.name == "append"
+          return Value.new(receiver.roots,
+            receiver.roots.map { |root| view(root) })
+        end
+      end
       storage_receiver = node.obj.try { |obj| storage?(obj) } ||
                          @graph.targets(node).try &.any? { |target| storage_type?(target.owner) }
       if storage_receiver && {"<<", "push", "concat", "append", "write_bytes", "unshift"}.includes?(node.name)
@@ -889,12 +1093,13 @@ class Iyi::TapeShrinkChecker
       result_fields = [] of UInt64
       summarized = false
       incomplete_result = false
+      reset_roots = [] of UInt64
       targets = @graph.targets(node)
       if targets && !targets.empty?
         before_calls = env
         after_calls : Env? = nil
         targets.each do |target|
-          summary = @graph.effects[target.object_id]?.try(&.shrink)
+          summary = summary(target)
           call_env = summary && !summary.stores.empty? ? before_calls.dup : before_calls
           boundary = target.is_a?(External) || @graph.proc_call?(target) ||
                      (target.iyi_from_artifact? && !target.iyi_body_travelled?)
@@ -939,7 +1144,13 @@ class Iyi::TapeShrinkChecker
             end
             summary.shrinks.each do |root, chain|
               roots = translate(root, summary, actuals).flat_map { |r| aliases(r, env) }.uniq
-              shrink(roots, node, chain("#{node.name} -> #{chain}"))
+              if @text_only && chain.includes?("text reset")
+                reset_roots.concat(roots)
+                text_reset(roots, node, env,
+                  chain("#{node.name} -> #{chain}"))
+              else
+                shrink(roots, node, chain("#{node.name} -> #{chain}"))
+              end
             end
             summary.grows.each do |root, cause|
               roots = translate(root, summary, actuals).flat_map do |r|
@@ -951,8 +1162,23 @@ class Iyi::TapeShrinkChecker
             @retains.concat(retained)
             @unproved << node if @checking && !retained.empty?
             summary.stores.each do |root, contents|
-              store(translate(root, summary, actuals, node.object_id),
-                translated(contents, summary, actuals, node.object_id), call_env, node)
+              destinations = translate(root, summary, actuals, node.object_id)
+              incoming = translated(contents, summary, actuals, node.object_id)
+              # A summary can write on only one branch. It cannot prove
+              # that an older foreign text borrow was killed on every
+              # path. Keep those borrows until a direct store kills them.
+              # The reset's own current binding is the permitted holder.
+              destinations.each do |destination|
+                next unless @text_only
+                previous = stored(call_env.slots[destination]? || EMPTY, call_env)
+                kept = Value.new(previous.roots.select do |r|
+                  text_root?(r) && !contains_root?(reset_roots, r)
+                end, previous.views.select do |v|
+                  text_root?(v.root) && !contains_root?(reset_roots, v.root)
+                end)
+                incoming = merge(incoming, kept)
+              end
+              store(destinations, incoming, call_env, node)
             end
             # Only a field load needs read-back. Roots forwarded from an
             # argument already name its storage, even when that storage is
@@ -983,7 +1209,10 @@ class Iyi::TapeShrinkChecker
         end
       end
       # Arguments remain evaluated values until the call consumes them.
-      use(receiver, node)
+      consumed = @text_only ? Value.new(receiver.roots,
+        receiver.views.reject { |v| contains_root?(reset_roots, v.root) },
+        receiver.procs, receiver.unknown_proc) : receiver
+      use(consumed, node)
       args.each { |arg| use(arg, node) }
       derived = receiver
       args.each { |arg| derived = merge(derived, arg) }
@@ -1006,7 +1235,10 @@ class Iyi::TapeShrinkChecker
         @callback_chain.pop
         use(yielded, block)
         env.keys.each { |key| env[key] = merge(env[key], outer[key]? || EMPTY) }
-        env.slots.each_key { |key| env.slots[key] = merge(env.slots[key], outer.slots[key]? || EMPTY) }
+        (@text_only ? (env.slots.keys | outer.slots.keys) : env.slots.keys).each do |key|
+          env.slots[key] = merge(env.slots[key]? || EMPTY,
+            outer.slots[key]? || EMPTY)
+        end
       end
       inputs.each do |input|
         input.procs.each do |literal|
@@ -1039,7 +1271,13 @@ class Iyi::TapeShrinkChecker
       elsif {"copy_to", "dup", "to_heap", "new"}.includes?(node.name)
         if reference?(node)
           @root_scopes[node.object_id] = storage?(node) || {"String", "String::Span"}.includes?(type_name(node.type)) ? [] of UInt64 : @scopes.dup
-          Value.new([node.object_id], [] of View)
+          borrowed = if @text_only && node.name.in?("new", "dup") &&
+                        type_name(node.type) != "String"
+                       derived.views + derived.roots.map { |root| view(root) }
+                     else
+                       [] of View
+                     end
+          Value.new([node.object_id], borrowed.uniq)
         else
           EMPTY
         end

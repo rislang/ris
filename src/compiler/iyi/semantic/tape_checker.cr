@@ -8,6 +8,13 @@ class Iyi::TapeChecker
   def initialize(@program)
   end
 
+  def self.possible_string?(type : Type?) : Bool
+    return false unless type
+    type = type.remove_typedef
+    return type.union_types.any? { |part| possible_string?(part) } if type.is_a?(UnionType)
+    type.to_s == "String"
+  end
+
   # Application and std classes use checked tape storage. Runtime types
   # retain their allocation ABI unless explicitly marked @[OnTape].
   # Extensions do not change the storage of the original declaration.

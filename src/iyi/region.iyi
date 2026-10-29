@@ -345,6 +345,10 @@ class RisRegion
     @@text_copied_bytes &+= bytes
   end
 
+  def self.text_reset_copy(bytes : UInt64) : Nil
+    @@text_copied_bytes &+= bytes
+  end
+
   # Lazy text may first grow while a shorter-lived caller tape is active.
   # Link its state and payload directly to its construction-time owner.
   # Metadata occupies the first 40 bytes of the private reservation.

@@ -1,5 +1,13 @@
 
 @[OnTape]
+class GrowingTextEvent
+  getter data : String
+
+  def initialize(@data : String)
+  end
+end
+
+@[OnTape]
 class GrowingField
   property text : String = "odd"
 
@@ -10,6 +18,12 @@ class GrowingField
 
   def rebind(value : String)
     @text = value
+  end
+
+  def take_event(owner)
+    event = GrowingTextEvent.new(@text.copy_to(owner))
+    @text = ""
+    event
   end
 end
 
@@ -79,31 +93,23 @@ odd << "0"
 raise "odd lengths" unless odd == "1234567890"
 check_count(before, 7_u64)
 
-before = copies
-text = "old"
-view = text
-text << "!"
-old_growing = text
-10000.times { text << "x" }
-raise "literal view" unless view == "old"
-raise "growing view" unless old_growing == "old!"
-check_count(before, 3_u64)
+# Appending preserves existing prefix views until an explicit reset.
+snapshot_text = "old"
+snapshot_text << "!"
+early = snapshot_text
+10000.times { snapshot_text << "x" }
+raise "append view" unless early == "old!"
 
-before = copies
-text = "new"
-text << "!"
-text = ""
-text << "z"
-raise "rebind" unless text == "z" && old_growing == "old!"
-check_count(before, 3_u64)
-
-# Rebinding the exact current view also starts a fresh reservation.
+# Each reset rewinds the same reservation.
 before = reservations
-same = text
-text = same
-text << "!"
-raise "same view rebind" unless reservations == before + 1_u64
-raise "same view unchanged" unless same == "z"
+text = ""
+10000.times do
+  text = ""
+  text << "x"
+  raise "local reset" unless text == "x"
+end
+raise "local reset reservation" unless reservations == before + 1_u64
+puts "PASS: 10000 local resets: 1 reservation"
 
 before = copies
 typed : String = "typed"
@@ -111,51 +117,40 @@ typed << "!"
 raise "typed local" unless typed == "typed!"
 check_count(before, 5_u64)
 
-# Destructuring binds before initializing/resetting its companion slots.
 before = copies
-multi, spare = {"a", "b"}
-multi << "!"
-multi_view = multi
-multi, spare = {multi, spare}
-multi << "?"
-raise "multiple assignment" unless multi == "a!?" && multi_view == "a!"
-check_count(before, 3_u64)
-
-# Bang methods still rebind, so the next append copies the new view.
-before = copies
-bang = " a "
-bang << "b"
-bang_view = bang
-bang.strip!
-bang << "c"
-raise "bang rebind" unless bang == "a bc" && bang_view == " a b"
-check_count(before, 6_u64)
-
-before = copies
-field = GrowingField.new
+field_reservations = reservations
+field = GrowingField.new.copy_to(Program.tape)
 10000.times do
   padding = String.new("displace")
   field.append("x")
 end
 raise "field length" unless field.text.bytesize == 10003
 check_count(before, 3_u64)
-old_field = field.text
-field.rebind("reset")
-before = copies
-field.append("!")
-check_count(before, 5_u64)
-raise "field rebind" unless field.text == "reset!"
-raise "field view" unless old_field.bytesize == 10003
-
-# A generated setter must reset even when pointer and length match.
-same_field = GrowingField.new
-same_field.append("!")
-same_view = same_field.text
-same_field.text = same_view
+# Copies can leave in the same statement before the next reset.
+saved = field.text.copy_to(Program.tape)
+event = field.take_event(Program.tape)
 before = reservations
-same_field.append("?")
-raise "setter rebind" unless reservations == before + 1_u64
-raise "setter old view" unless same_view == "odd!"
+reset_copies = copies
+10000.times do
+  field.rebind("reset")
+  field.append("!")
+  raise "field reset" unless field.text == "reset!"
+end
+raise "field reset reservation" unless reservations == before
+raise "field total reservation" unless reservations == field_reservations + 1
+check_count(reset_copies, 50000_u64)
+puts "PASS: 10000 field resets: 1 reservation total"
+raise "copied field" unless saved.bytesize == 10003
+raise "copied event" unless event.data.bytesize == 10003
+
+# A generated property setter follows the same checked reset path.
+setter = GrowingField.new
+setter.append("!")
+before = reservations
+setter.text = ""
+setter.append("z")
+raise "setter reset" unless setter.text == "z"
+raise "setter reservation" unless reservations == before
 
 local_tape do
   nested = "nested"
@@ -194,13 +189,13 @@ raise "pool field" unless run[0].text == "oddppppp"
 check_count(before, 3_u64)
 
 # The lazy slot follows a deeply copied object's owner, not its caller.
-retained = field.copy_to(Program.tape)
+retained = GrowingField.new.copy_to(Program.tape)
 before = copies
 local_tape do
   retained.append("?")
 end
-raise "retained field" unless retained.text == "reset!?"
-check_count(before, 6_u64)
+raise "retained field" unless retained.text == "odd?"
+check_count(before, 3_u64)
 
 before = reservations
 never = "never appended"

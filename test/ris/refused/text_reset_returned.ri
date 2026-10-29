@@ -1,0 +1,16 @@
+@[OnTape]
+class TextResetReturn
+  @text : String = ""
+  def old
+    @text << "old"
+    @text
+  end
+  def take
+    old = @text
+    @text = ""
+    old
+  end
+end
+holder = TextResetReturn.new
+holder.old
+puts holder.take

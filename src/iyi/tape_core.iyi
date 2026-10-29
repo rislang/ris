@@ -964,16 +964,29 @@ struct RisTextGrowth
     owner.run { self.class.new }
   end
 
-  def reset : Nil
-    @writer = nil
+  def __ris_text_reset(text : String) : String
+    if writer = @writer
+      writer.clear
+      writer.append(text)
+      RisRegion.text_reset_copy(text.bytesize.to_u64)
+      writer.finish
+    else
+      text
+    end
+  end
+
+  def __ris_text_reset(text)
+    text
   end
 
   def append(text : String, value) : String
     writer = @writer
     if writer
       previous = writer.finish
-      writer = nil unless previous.to_unsafe.address == text.to_unsafe.address &&
-                          previous.bytesize == text.bytesize
+      unless previous.to_unsafe.address == text.to_unsafe.address &&
+             previous.bytesize == text.bytesize
+        raise "growing text lost its checked reset; copy_to(owner) first"
+      end
     end
     unless writer
       writer = String::Builder.__ris_text_home(@home, text.bytesize)

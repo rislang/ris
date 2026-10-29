@@ -104,12 +104,11 @@ first):
   the refusal.
 * Done: appended locals and fields grow (test/ris/text_grow.ri). Left
   from its review: a class with `@x << y` gets a RisTextGrowth slot
-  even when @x is an Array (type unknown at normalize); a field reset
-  takes a fresh reservation each time until the next item reuses it.
-* `s = ""` on a growing String reuses its reservation only when the
-  compiler proves no view of the old text is still live (stored in a
-  container, a field, another def, a task). Unsure: refuse, naming
-  `copy_to(owner)`. Gates: each escape kind refused, a mutation test.
+  even when @x is an Array (type unknown at normalize).
+* Done: a reset (`s = ""`, `@data = x`) reuses the reservation when
+  the shrink checker's text pass proves no old view is live, else it
+  refuses naming `copy_to(owner)` (test/ris/text_grow.ri, ten
+  test/ris/refused/text_reset_* cases with a mutation check).
 * `<<` on a String parameter is refused: it names `io : String::Builder`
   or returning a new String. The copying `s + x` fallback is refused in
   loops and on fields.
@@ -219,6 +218,9 @@ first):
 
 ## Known failure to recheck
 
+* samples/ris/web.ri does not build: std/http.iyi:2627
+  (`headers[host_name] = named`) is refused as a Hash shrink with a live
+  view, after about 7 minutes of checking (seen 2026-10-29 on the base).
 * check.sh never ends: log_metadata.ri, log_tape.ri and
   server_owners.ri hang (seen 2026-10-29 on the base too). Find the
   cause; meanwhile give check.sh a per-test timeout.

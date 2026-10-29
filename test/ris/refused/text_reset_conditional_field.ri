@@ -1,0 +1,23 @@
+@[OnTape]
+class ConditionalTextHolder
+  @kept : String = ""
+  def keep(text : String)
+    @kept = text
+    nil
+  end
+  def forget(flag : Bool)
+    @kept = "" if flag
+    nil
+  end
+  def check
+    raise "old view changed" unless @kept == "old"
+  end
+end
+source = ""
+source << "old"
+holder = ConditionalTextHolder.new
+holder.keep(source)
+holder.forget(false)
+source = ""
+source << "new"
+holder.check

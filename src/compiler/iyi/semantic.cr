@@ -94,6 +94,11 @@ class Iyi::Program
         Prof.span("tape: TapeRecursionChecker") { TapeRecursionChecker.new(self, tape_graph).run(tape_root) }
         Prof.span("tape: TapeLifetimeChecker") { tape_root.accept TapeLifetimeChecker.new(self, tape_graph) }
         Prof.span("tape: shrink run") { tape_shrink.run(tape_root) }
+        if TapeShrinkChecker.text_resets?(tape_graph, tape_root)
+          tape_text = TapeShrinkChecker.new(self, tape_graph, text_only: true)
+          Prof.span("tape: text reset solve") { tape_text.solve }
+          Prof.span("tape: text reset run") { tape_text.run(tape_root) }
+        end
         Prof.span("tape: TapePointerChecker") { TapePointerChecker.new(self, tape_graph).run(tape_root) }
         Prof.span("tape: TapeEscapeChecker") { TapeEscapeChecker.new(self).run(tape_root) }
         Prof.span("tape: TapeScopeChecker") { TapeScopeChecker.new(self, tape_graph).run(tape_root) }

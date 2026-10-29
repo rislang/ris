@@ -149,6 +149,14 @@ class Iyi::TapeOwnerChecker
         expanded.accept self
         return false
       end
+      # The compiler's reset only copies bytes into the companion's
+      # captured owner (or returns its input while still lazy). It cannot
+      # publish an initializing owner's field to another user def.
+      if node.name == "__ris_text_reset" &&
+         node.obj.try(&.type?.try(&.to_s)) == "RisTextGrowth" &&
+         @checker.graph.targets(node).try(&.all? { |d| TapeRules.runtime?(@checker.program, d.location) })
+        return true
+      end
       own = @checker.graph.targets(node).try &.all? { |d| d.owner == @owner }
       # A field's own methods (`@left << 1`) fill it in place; passing a
       # view on as an argument is what could publish the temporary.
