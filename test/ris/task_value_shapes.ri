@@ -1,0 +1,40 @@
+module test/ris/task_value_shapes
+
+# A task answers an @[OnTape] struct and nested containers; each is
+# copied into the group's result region, then onto the reader's tape,
+# and read after the task's tape is gone. Zero heap.
+@[OnTape]
+struct Card
+  getter name : String
+  getter marks : Array(Int32)
+  getter rows : Array(Array(String))
+
+  def initialize(@name : String, @marks : Array(Int32),
+                 @rows : Array(Array(String)))
+  end
+end
+
+group do |g|
+  c = g.spawn { Card.new("card#{7}", [1, 2, 3], [["a#{1}"], ["b", "c#{2}"]]) }
+  a = g.spawn { [["x#{1}", "y"], [] of String, ["z#{3}"]] }
+  h = g.spawn { {"k#{1}" => [1, 2], "m" => [] of Int32, "n" => [5]} }
+  card = c.value
+  if card.is_a?(Card)
+    puts card.name
+    puts card.marks.sum
+    puts card.rows[1][1]
+  end
+  rows = a.value
+  if rows.is_a?(Array(Array(String)))
+    puts rows.size
+    puts rows[0][0]
+    puts rows[1].size
+    puts rows[2][0]
+  end
+  map = h.value
+  if map.is_a?(Hash(String, Array(Int32)))
+    puts map["k1"].sum
+    puts map["m"].size
+    puts map["n"][0]
+  end
+end

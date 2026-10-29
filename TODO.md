@@ -179,9 +179,6 @@ first):
   closure_owner 1): a task spawned inside a nested `tape do` that ends
   before the task reads freed captures. Allocate it at the group's or
   the def's scope, or refuse the spawn there. std keeps its marks.
-* A task's tape value is copied into a group result region and onto the
-  reader's tape for String, Array, Hash, RisTree and tuples of them; @[OnTape]
-  structs and nested containers are still refused.
 * Error#message answers String, which a program cannot build without a
   heap: let it answer String (or write into a builder) across std.
 * Kernel threads and spawn_parallel without a collector: thread.iyi and

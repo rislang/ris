@@ -191,6 +191,13 @@ if [ "$?" -eq 0 ] && [ "$out" = $'<42>\n60\n7\nONE\n5\nslow\n<ok>\nris heap: 0 a
 else
   echo "FAILED   task_tape_result: $out"; status=1
 fi
+# A task answers an @[OnTape] struct and nested containers. Zero heap.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/task_value_shapes.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = $'card7\n6\nc2\n3\nx1\n0\nz3\n3\n0\n5\nris heap: 0 allocations, 0 bytes' ]; then
+  echo "runs     task_value_shapes (OnTape struct, nested containers, zero heap)"
+else
+  echo "FAILED   task_value_shapes: $out"; status=1
+fi
 
 # Everyday String/Array/Hash calls in a program stay on the tape.
 out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/core_api.ri 2>&1)
