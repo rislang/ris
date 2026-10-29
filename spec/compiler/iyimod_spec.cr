@@ -258,7 +258,7 @@ describe Iyi::IyiMod do
       File.write path, bytes
 
       expect_raises(Iyi::IyiMod::Error,
-        /format v59, this compiler writes v60; rebuild the module/) do
+        /format v59, this compiler writes v61; rebuild the module/) do
         Iyi::IyiMod.read(path)
       end
     end
@@ -366,20 +366,20 @@ describe Iyi::IyiMod do
     end
   end
 
-  it "round-trips checked tape parameter effects" do
+  it "round-trips checked tape parameter effects in an artifact" do
     checked = signature("borrow", ["bytes : Str"], "Str").copy_with(
-      tape_contract: "1;0;1;8,12")
+      tape_contract: "2;0;1;8,28")
     unknown = signature("opaque", ["bytes : Str"], "Nil")
     with_temporary_file do |path|
       Iyi::IyiMod.write sample_artifact(exports: [checked, unknown]), path
       read = Iyi::IyiMod.read(path).exports.functions
-      read[0].tape_contract.should eq "1;0;1;8,12"
+      read[0].tape_contract.should eq "2;0;1;8,28"
       effect = Iyi::TapeCallGraph::Contract.decode(read[0].tape_contract)
-      effect.parameters.should eq [8, 12]
+      effect.parameters.should eq [8, 28]
       effect.suspension.should be_true
       # A binding writer with no analyzed body must emit every effect.
       opaque = Iyi::TapeCallGraph::Contract.decode(read[1].tape_contract)
-      opaque.parameters.should eq [15, 15]
+      opaque.parameters.should eq [31, 31]
       opaque.allocation.should be_true
       opaque.suspension.should be_true
     end
@@ -3633,6 +3633,38 @@ describe Iyi::IyiMod do
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "true\ntrue\n7"
+    end
+  end
+
+  it "preserves receiver stores in artifact constructor contracts" do
+    with_tempdir("iyimod_string_constructor") do
+      modules = {"record.iyi" => <<-IYI}
+        module record
+        @[OnTape]
+        pub struct Record
+          getter text : String
+          def initialize(@text : String)
+          end
+        end
+        IYI
+      main = <<-IYI
+        module main
+        import record::{Record}
+        tape do
+          record = Record.new("artifact tape")
+          puts record.text
+        end
+        IYI
+      from_source, from_artifact = iyimod_round_trip(modules, main)
+      from_source.should eq "artifact tape\n"
+      from_artifact.should eq from_source
+
+      artifact = Iyi::IyiMod.read("mods/record.iyimod")
+      record = artifact.exports.types.find! { |type| type.name == "Record" }
+      constructor = record.methods.find! { |method| method.name == "initialize" }
+      checked = Iyi::TapeCallGraph::Contract.decode(constructor.tape_contract)
+      (checked.parameters[1] & Iyi::TapeCallGraph::Contract::STORE_SELF).should_not eq 0
+      (checked.parameters[1] & Iyi::TapeCallGraph::Contract::RETAIN).should eq 0
     end
   end
 

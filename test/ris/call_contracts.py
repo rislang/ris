@@ -107,7 +107,7 @@ end
 
     artifact = mods / "app/effects.iyimod"
     original = artifact.read_bytes()
-    artifact.write_bytes(without_contract(original, "1;0;0;0,1"))
+    artifact.write_bytes(without_contract(original, "2;0;0;0,1"))
     build(main, "--use-iyimod", mods,
           refused="imported def lacks a checked tape contract")
     print("refused  imported def without checked contract")

@@ -74,7 +74,8 @@ module Iyi::IyiMod
   # refused here as any other stale format is.
   # v59: signatures carry checked tape effects for bodyless calls.
   # v60: remove the obsolete library selector byte from the header.
-  FORMAT_VERSION = 60_u32
+  # v61: tape contracts distinguish receiver stores from opaque escapes.
+  FORMAT_VERSION = 61_u32
 
   FORMAT = IO::ByteFormat::LittleEndian
 

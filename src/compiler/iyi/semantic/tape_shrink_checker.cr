@@ -611,7 +611,18 @@ class Iyi::TapeShrinkChecker
           end
         end
         bits |= TapeCallGraph::Contract::RESULT if result_roots.any? { |r| relative_path(r, seed) }
-        bits |= TapeCallGraph::Contract::RETAIN if summary.retains.any? { |r| relative_path(r, seed) } || summary.stores.values.any? { |v| source_roots(v).any? { |r| relative_path(r, seed) } }
+        # Keep a receiver store distinct from an unbounded escape. The
+        # consumer can check the receiver's scope even without the body.
+        retained = summary.retains.any? { |r| relative_path(r, seed) }
+        summary.stores.each do |destination, contents|
+          next unless source_roots(contents).any? { |r| relative_path(r, seed) }
+          if relative_path(destination, summary.seeds[0])
+            bits |= TapeCallGraph::Contract::STORE_SELF
+          else
+            retained = true
+          end
+        end
+        bits |= TapeCallGraph::Contract::RETAIN if retained
         bits |= TapeCallGraph::Contract::SUSPEND if effect.suspension
         bits
       end
@@ -1126,6 +1137,10 @@ class Iyi::TapeShrinkChecker
                 if bits & TapeCallGraph::Contract::RETAIN != 0 && !roots.empty?
                   @retains.concat(roots)
                   @unproved << node if @checking
+                end
+                if bits & TapeCallGraph::Contract::STORE_SELF != 0
+                  destinations = receiver.roots.flat_map { |r| aliases(r, call_env) }.uniq
+                  store(destinations, input, call_env, node, replace: false)
                 end
                 if bits & TapeCallGraph::Contract::RESULT != 0
                   call_result = merge(call_result, input)

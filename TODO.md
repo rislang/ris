@@ -255,12 +255,14 @@ first):
   bench/metric/metric.iyi (Array of the tape type Planet).
 * x86_64-windows-msvc does not typecheck std/socket.iyi:572
   (connect_named: opaque callback effects); fix with the socket race.
-* A build from std artifacts refuses File::Info's String fields
-  (bench/std_websocket_exercise.sh, "does not run the same from its
-  artifacts"). Not lost annotations: @[OnTape] and @[Owner] round-trip
-  (test/ris/iyimod_tape.py). An artifact type whose constructor takes a
-  String hits an "opaque callback retain/escape" contract refusal that
-  the source build does not; find why the artifact loses that contract.
+* bench/std_websocket_exercise.sh's artifact comparison stops in the
+  source build: bench/std_websocket_exercise.iyi uses an `io` builder
+  that only appends and is read back. Migrate it to a String local, then
+  recheck the comparison. Constructor String fields now keep the receiver
+  store in their artifact contract (test/ris/iyimod_tape.py).
+* The artifact getter/defer case in spec/compiler/iyimod_spec.cr cannot
+  resolve `Pointer(RisArrayPool(String))` from boot/shelf's type ids
+  (seen 2026-10-29); recheck after the constructor contract fix.
 * bench/socket_exercise.sh ends "something above failed": several
   mutations are not caught and a unix-socket mutation fails with "the
   address is in use". Race checks pass; compare with 05b93f1e2.

@@ -5,11 +5,13 @@ class Iyi::TapeCallGraph
   # One entry for self followed by each argument. Unknown targets use the
   # top of this lattice; foreign calls borrow and retain nothing by default.
   class Contract
-    SHRINK  = 1
-    RETAIN  = 2
-    RESULT  = 4
-    SUSPEND = 8
-    ALL     = SHRINK | RETAIN | RESULT | SUSPEND
+    SHRINK     = 1
+    RETAIN     = 2
+    RESULT     = 4
+    SUSPEND    = 8
+    # The input is stored in the receiver, whose lifetime bounds the borrow.
+    STORE_SELF = 16
+    ALL        = SHRINK | RETAIN | RESULT | SUSPEND | STORE_SELF
     getter parameters : Array(Int32)
     getter allocation : Bool
     getter suspension : Bool
@@ -19,14 +21,14 @@ class Iyi::TapeCallGraph
 
     def self.decode(text : String) : Contract
       parts = text.split(';')
-      raise ArgumentError.new("invalid tape call contract") unless parts.size == 4 && parts[0] == "1" && {"0", "1"}.includes?(parts[1]) && {"0", "1"}.includes?(parts[2])
+      raise ArgumentError.new("invalid tape call contract") unless parts.size == 4 && parts[0] == "2" && {"0", "1"}.includes?(parts[1]) && {"0", "1"}.includes?(parts[2])
       flags = parts[3].split(',').map(&.to_i)
       raise ArgumentError.new("invalid tape parameter effects") unless flags.all? { |f| f >= 0 && f <= ALL }
       new(flags, parts[1] == "1", parts[2] == "1")
     end
 
     def encode : String
-      "1;#{allocation ? 1 : 0};#{suspension ? 1 : 0};#{parameters.join(',')}"
+      "2;#{allocation ? 1 : 0};#{suspension ? 1 : 0};#{parameters.join(',')}"
     end
 
     def join(other : Contract) : Contract
