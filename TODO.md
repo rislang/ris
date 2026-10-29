@@ -234,10 +234,13 @@ first):
 * samples/ris/web.ri does not build: std/http.iyi:2627
   (`headers[host_name] = named`) is refused as a Hash shrink with a live
   view, after about 7 minutes of checking (seen 2026-10-29 on the base).
-* Nine check.sh blocks hang and now fail at the 300 s job timeout:
-  http_continue, answer, the web sample, log_metadata (two),
-  log_tape, heap_allocator, server_owners, repeated joined groups.
-  Find each cause (seen 2026-10-29 on the base too).
+* No check.sh block hangs any more: the shrink checker settles and the
+  server programs check in 2-37 s (server_groups, answer and web 37 s;
+  profile the program checker next). They now stop at std refusals the
+  hang hid: http.iyi:6052 (`@failure = got` in the http2 writer's
+  flush, "cannot store request tape data on the program tape") and
+  log.iyi:362 (`initialize(@io : IO, ...)`, the same); and
+  http_continue.ri imports `Conn`, which std/http does not export.
 * Compiler specs (seed 71173, 2026-10-27): recheck macro/macro_methods,
   iyimod, compiler, and codegen/{proc,closure}_spec.cr; four failures and
   two errors preceded a signal 11 crash in the closure group, so no

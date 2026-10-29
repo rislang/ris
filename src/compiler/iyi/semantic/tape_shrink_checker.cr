@@ -96,13 +96,14 @@ class Iyi::TapeShrinkChecker
   end
 
   private def stored(v : Value, env : Env) : Value
-    result = v
+    return v if v.roots.empty? || env.slots.empty?
+    views = v.views.dup
     env.slots.each do |root, contents|
       if contains_root?(v.roots, root)
-        result = merge(result, Value.new([] of UInt64, contents.views))
+        views.concat(contents.views)
       end
     end
-    result
+    Value.new(v.roots, views.uniq, v.procs, v.unknown_proc)
   end
 
   private def read_slots(v : Value, env : Env, type : Type?,
@@ -217,19 +218,29 @@ class Iyi::TapeShrinkChecker
     copies = Hash(Array(String), Value).new
     carried = [] of View
     copied = [] of UInt64
-    v.roots.each do |source|
-      type = @root_types[source]?
-      next unless value_holder?(type)
+    holders = v.roots.select { |source|
+      value_holder?(@root_types[source]?)
+    }.to_set
+    unless holders.empty?
+      # Walk each slot's bounded parent path once. Scanning every slot
+      # for every possible source made broad loop joins quadratic.
       env.slots.each do |root, contents|
-        path = relative_path(root, source)
-        next unless path && !path.empty?
-        copies[path] = merge(copies[path]? || EMPTY, contents)
-        carried.concat(contents.views)
-        copied << source
+        ancestor = root
+        path = [] of String
+        while parent = @parents[ancestor]?
+          path.unshift(parent[1])
+          ancestor = parent[0]
+          next unless holders.includes?(ancestor)
+          copies[path.dup] = merge(copies[path]? || EMPTY, contents)
+          carried.concat(contents.views)
+          copied << ancestor
+        end
       end
     end
-    complete = stored(v, env)
-    roots.each { |root| check_store(root, complete, node) }
+    if @checking && !@text_only
+      complete = stored(v, env)
+      roots.each { |root| check_store(root, complete, node) }
+    end
     v = Value.new(v.roots - copied,
       (v.views - carried).uniq, v.procs, v.unknown_proc)
     # An array/builder handle aliases storage; it is not itself a live
@@ -241,7 +252,9 @@ class Iyi::TapeShrinkChecker
     end
     v = Value.new(v.roots, (v.views + borrowed.map { |r| view(r) }).uniq, v.procs, v.unknown_proc)
     roots.each do |root|
-      strong = replace && roots.size == 1
+      # A folded slot represents several concrete fields. Replacing one
+      # must preserve the borrows held by the others.
+      strong = replace && roots.size == 1 && !@folded_roots.includes?(root)
       if strong
         env.slots.reject! do |key, _|
           contains_root?([root], key)
@@ -251,7 +264,7 @@ class Iyi::TapeShrinkChecker
       copies.each do |path, contents|
         destination = root
         path.each { |name| destination = field_root(destination, name) }
-        env.slots[destination] = strong ? contents : merge(env.slots[destination]? || EMPTY, contents)
+        env.slots[destination] = strong && !@folded_roots.includes?(destination) ? contents : merge(env.slots[destination]? || EMPTY, contents)
       end
     end
   end
@@ -303,7 +316,10 @@ class Iyi::TapeShrinkChecker
       @root_scopes[target.object_id] = @scopes.dup
       env[binding] = Value.new([target.object_id], [] of View)
     end
-    declaration.roots.each { |root| check_store(root, stored(v, env), node) }
+    if @checking && !@text_only
+      complete = stored(v, env)
+      declaration.roots.each { |root| check_store(root, complete, node) }
+    end
     env[target.name] = v
   end
 
@@ -389,14 +405,30 @@ class Iyi::TapeShrinkChecker
     @next_root += 1
   end
 
+  # Field paths deeper than this fold onto their ancestor at this depth.
+  FIELD_DEPTH = 4
+
+  @folded_roots = Set(UInt64).new
+
   private def field_root(root : UInt64, name : String) : UInt64
     # Fold repeated fields onto their ancestor. Recursive calls can walk
     # arbitrarily deep containers; conflating these paths keeps the effect
-    # domain finite and conservatively aliases their storage.
+    # domain finite and conservatively aliases their storage. A deep path
+    # of distinct names (@frames.@conn.@state.@socket...) folds too, or
+    # each level makes new roots and a loop's state grows past use.
     ancestor = root
+    depth = 0
     while parent = @parents[ancestor]?
-      return ancestor if parent[1] == name && name != "[]"
+      if parent[1] == name && name != "[]"
+        @folded_roots << ancestor
+        return ancestor
+      end
       ancestor = parent[0]
+      depth += 1
+    end
+    if depth >= FIELD_DEPTH
+      @folded_roots << root
+      return root
     end
     @fields[{root, name}] ||= begin
       id = fresh
@@ -553,6 +585,7 @@ class Iyi::TapeShrinkChecker
       changed = false
       @graph.defs.each_value do |target|
         next unless dirty.delete(target.object_id)
+        @root_sets.clear
         @solving = target.object_id
         old = summary(target).not_nil!
         @uses.clear
@@ -677,16 +710,32 @@ class Iyi::TapeShrinkChecker
     nil
   end
 
+  # Root arrays are immutable values. Index large ones by identity, keeping
+  # the array alive alongside its index so an identity cannot be reused.
+  # Clear the cache at definition boundaries to bound its lifetime.
+  @root_sets = Hash(UInt64, Tuple(Array(UInt64), Set(UInt64))).new
+
   private def contains_root?(roots : Array(UInt64), root : UInt64) : Bool
-    return true if roots.includes?(root)
-    if parent = @parents[root]?
-      contains_root?(roots, parent[0])
+    if roots.size > 8
+      indexed = @root_sets[roots.object_id] ||= {roots, roots.to_set}
+      loop do
+        return true if indexed[1].includes?(root)
+        parent = @parents[root]?
+        return false unless parent
+        root = parent[0]
+      end
     else
-      false
+      loop do
+        return true if roots.includes?(root)
+        parent = @parents[root]?
+        return false unless parent
+        root = parent[0]
+      end
     end
   end
 
   private def check(body : ASTNode, env = Env.new, owner : Def? = nil)
+    @root_sets.clear
     @uses.clear
     @shrinks.clear
     @returns = EMPTY
@@ -855,7 +904,10 @@ class Iyi::TapeShrinkChecker
       round = head.dup
       value(cond, round) if cond
       value(body, round)
-      updated = loop_env(join_env(entry, round), start)
+      # Join with the last head, not the entry: a round that rebinds a
+      # variable must not drop what earlier rounds made live, or the
+      # state swings back and forth and never settles.
+      updated = loop_env(join_env(head, round), start)
       # Speculative rounds establish the environment, not event order.
       @uses.truncate(0, start)
       @shrinks.truncate(0, shrink_start)
@@ -973,6 +1025,10 @@ class Iyi::TapeShrinkChecker
       v = value(node.value, env)
       target = node.target
       if target.is_a?(InstanceVar)
+        # Scalar fields cannot hold storage or borrows. Exporting empty
+        # scalar slots made call summaries manufacture every combination
+        # of irrelevant field paths through recursive receiver graphs.
+        return v if target.type? && !reference?(target)
         roots = (env["self"]? || EMPTY).roots.map { |r| field_root(r, target.name).as(UInt64) }
         # Fresh growing fields are built into their own slot. A borrowed
         # handle instead keeps the identity of the storage it aliases.
@@ -1068,7 +1124,8 @@ class Iyi::TapeShrinkChecker
       end
       if storage_receiver && SHRINK.includes?(node.name)
         shrink(receiver.roots, node, chain(node.name))
-        if node.name == "clear" && receiver.roots.size == 1
+        if node.name == "clear" && receiver.roots.size == 1 &&
+           !@folded_roots.includes?(receiver.roots.first)
           env.slots.reject! do |key, _|
             contains_root?(receiver.roots, key)
           end

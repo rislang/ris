@@ -1,0 +1,66 @@
+# Distinct field names must fold without losing the stored borrow.
+
+@[OnTape]
+struct ShrinkLeaf
+  property text : String
+  property other : String
+
+  def initialize(@text, @other)
+  end
+end
+
+@[OnTape]
+struct ShrinkLayer0
+  getter closed : ShrinkLeaf
+
+  def initialize(@closed)
+  end
+end
+
+@[OnTape]
+struct ShrinkLayer1
+  getter tls : ShrinkLayer0
+
+  def initialize(@tls)
+  end
+end
+
+@[OnTape]
+struct ShrinkLayer2
+  getter socket : ShrinkLayer1
+
+  def initialize(@socket)
+  end
+end
+
+@[OnTape]
+struct ShrinkLayer3
+  getter state : ShrinkLayer2
+
+  def initialize(@state)
+  end
+end
+
+@[OnTape]
+struct ShrinkLayer4
+  getter conn : ShrinkLayer3
+
+  def initialize(@conn)
+  end
+end
+
+@[OnTape]
+struct ShrinkLayer5
+  getter frames : ShrinkLayer4
+
+  def initialize(@frames)
+  end
+end
+
+tape do
+  bytes = String::Builder.new
+  bytes << "abc"
+  holder = ShrinkLayer5.new(ShrinkLayer4.new(ShrinkLayer3.new(ShrinkLayer2.new(ShrinkLayer1.new(ShrinkLayer0.new(ShrinkLeaf.new(bytes.finish, "safe")))))))
+  bytes.clear
+  puts holder.frames.conn.state.socket.tls.closed.text
+end

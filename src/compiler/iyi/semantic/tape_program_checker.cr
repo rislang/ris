@@ -42,6 +42,7 @@ class Iyi::TapeProgramChecker
             "scan", "skip", "scan_until", "skip_until", "__ris_text_reset"}
 
   @active = Set(UInt64).new
+  @isolated = Set(UInt64).new
   @joining = Set({UInt64, UInt64}).new
   @globals = {} of UInt64 => Bool
   @program_context = false
@@ -454,7 +455,18 @@ class Iyi::TapeProgramChecker
         end
       end
     end
+    # Reuse completed library checks only for isolated inputs. No input
+    # may carry program storage (including immutable program strings),
+    # and no callback can supply a different lexical environment.
+    isolated = !@program_context && !binding && !user?(target) &&
+      ([receiver] + args).none? do |origin|
+        contains_program?(origin, definite: true)
+      end
+    if isolated && @isolated.includes?(target.object_id)
+      return Origin::Scalar
+    end
     return Origin::Unknown unless @active.add?(target.object_id)
+    before = isolated ? input_shape([receiver] + args) : nil
     previous_self, previous_return, previous_binding = @self_safe, @returned, @binding
     previous_tape = @self_tape
     @self_tape = target.owner?.try { |owner| TapeChecker.tape?(@program, owner) } || false
@@ -468,7 +480,32 @@ class Iyi::TapeProgramChecker
     @self_safe, @returned, @binding = previous_self, previous_return, previous_binding
     @self_tape = previous_tape
     @active.delete(target.object_id)
+    # A result or an input acquiring a program alias makes this call
+    # context-sensitive. Unknown results are not reusable either. Global
+    # mutations and thread use otherwise remain recorded from this check.
+    if isolated && !target.type?.try { |type| TapeChecker.tape_in(@program, type) } &&
+       result.kind == :scalar &&
+       before == input_shape([receiver] + args)
+      @isolated << target.object_id
+    end
     result
+  end
+
+  # A reused scalar check must not lose input aliases or field stores.
+  # Record identities, not just kinds: two request holders can later be
+  # given different program aliases by their caller.
+  private def input_shape(inputs : Array(Origin))
+    shape = Hash(UInt64, Tuple(Hash(String, UInt64), UInt64?)).new
+    pending = inputs.dup
+    while origin = pending.pop?
+      next if shape.has_key?(origin.object_id)
+      shape[origin.object_id] = {
+        origin.fields.transform_values(&.object_id), origin.element.try(&.object_id),
+      }
+      pending.concat(origin.fields.values)
+      origin.element.try { |element| pending << element }
+    end
+    shape
   end
 
   private def contains_program?(origin : Origin, seen = Set(UInt64).new,

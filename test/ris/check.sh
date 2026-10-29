@@ -424,7 +424,7 @@ for name in builder_clear builder_truncate builder_shift operand alias span \
 done
 # Roots survive joins and holders; an emptied holder releases its view.
 for name in holder nested_holder merged_view array_holder owner_holder \
-    case_view or_view read_back holder_alias inexact_holder; do
+    case_view or_view read_back holder_alias inexact_holder deep_fields; do
   expect "shrink_$name" 'cannot shrink tape storage with a live view'
 done
 for name in branch_escape store_join return_owner; do
