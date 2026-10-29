@@ -849,7 +849,7 @@ struct TapeBuffer
   @writer : String::Builder
 
   def initialize
-    @writer = String::Builder.new(64)
+    @writer = String::Builder.new
   end
 
   def size : Int32

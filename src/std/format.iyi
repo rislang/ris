@@ -378,7 +378,7 @@ module ::IyiFormat
     String.build do |w|
       negative = value < 0
       # Negative remainders allow the signed minimum without negating it.
-      digits = Array(UInt8).new(128)
+      digits = Array(UInt8).new
       radix = base.to_i64
       temp = value
       while temp != 0
@@ -401,7 +401,7 @@ module ::IyiFormat
     String.build do |w|
       negative = value < 0
       # Negative remainders allow the signed minimum without negating it.
-      digits = Array(UInt8).new(128)
+      digits = Array(UInt8).new
       radix = base.to_u64
       temp = value
       while temp != 0
@@ -424,7 +424,7 @@ module ::IyiFormat
     String.build do |w|
       negative = value < 0
       # Negative remainders allow the signed minimum without negating it.
-      digits = Array(UInt8).new(128)
+      digits = Array(UInt8).new
       radix = base.to_i128
       temp = value
       while temp != 0
@@ -447,7 +447,7 @@ module ::IyiFormat
     String.build do |w|
       negative = value < 0
       # Negative remainders allow the signed minimum without negating it.
-      digits = Array(UInt8).new(128)
+      digits = Array(UInt8).new
       radix = base.to_u128
       temp = value
       while temp != 0

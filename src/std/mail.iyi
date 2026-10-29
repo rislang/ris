@@ -470,7 +470,7 @@ struct MailText
       return MailText.extended(piece[1], true) if piece[0] == -1
     end
     sorted = list.sorted_by { |piece| piece[0] }
-    bytes = String::Builder.new(64)
+    bytes = String::Builder.new
     charset = "".as_tape
     expect = 0
     sorted.each do |piece|
@@ -863,10 +863,10 @@ struct MailText
                      io : String::Builder) : Nil
     p = data
     n = data.bytesize
-    line = String::Builder.new(128)
+    line = String::Builder.new
     i = 0
     while i < n
-      line = String::Builder.new(128)
+      line = String::Builder.new
       while i < n
         b = p[i]
         break if !binary && (b == 13_u8 || b == 10_u8)
@@ -971,7 +971,7 @@ struct MailText
   def self.base64_encode(data : String) : String
     result = ""
     tape do
-      w = String::Builder.new(128)
+      w = String::Builder.new
       base64_encode(data.as_tape, w)
       result = w.finish.to_heap
     end
@@ -984,7 +984,7 @@ struct MailText
   def self.base64_decode(text : String) : String
     result = ""
     tape do
-      w = String::Builder.new(128)
+      w = String::Builder.new
       base64_decode(text.as_tape, w)
       result = w.finish.to_heap
     end
@@ -1002,7 +1002,7 @@ struct MailText
   def self.qp_encode(data : String, binary : Bool) : String
     result = ""
     tape do
-      w = String::Builder.new(128)
+      w = String::Builder.new
       qp_encode(data.as_tape, binary, w)
       result = w.finish.to_heap
     end
@@ -1054,7 +1054,7 @@ struct MailText
   def self.qp_decode(text : String) : String
     result = ""
     tape do
-      w = String::Builder.new(128)
+      w = String::Builder.new
       qp_decode(text.as_tape, w)
       result = w.finish.to_heap
     end
@@ -1096,7 +1096,7 @@ struct MailText
   end
 
   def self.word(text : String, start : Int32, stop : Int32, q : Bool) : String
-    io = String::Builder.new(80)
+    io = String::Builder.new
     io << (q ? "=?utf-8?q?" : "=?utf-8?b?")
     if q
       p = text.to_unsafe
@@ -1401,7 +1401,7 @@ struct MailText
       return MailText.extended(piece[1], true) if piece[0] == -1
     end
     sorted = list.sorted_by { |piece| piece[0] }
-    bytes = String::Builder.new(64)
+    bytes = String::Builder.new
     charset = ""
     expect = 0
     sorted.each do |piece|
@@ -1690,7 +1690,7 @@ struct TapeMailScan
   # The quoted string at `"`, its quoted-pairs resolved.
   def quoted : String | MailError
     @at = @at + 1
-    io = String::Builder.new(32)
+    io = String::Builder.new
     while @at < @n
       b = @text[@at]
       if b == 34_u8
@@ -1823,7 +1823,7 @@ class MailScan
   # The quoted string at `"`, its quoted-pairs resolved.
   def quoted : String | MailError
     @at = @at + 1
-    io = String::Builder.new(32)
+    io = String::Builder.new
     while @at < @n
       b = @p[@at]
       if b == 34_u8
@@ -1999,7 +1999,7 @@ class MailAddresses
   # The display name *words* spell: one space where whitespace was, none
   # between two encoded-words, each decoded.
   def self.display(words : Array(MailWord)) : String
-    io = String::Builder.new(32)
+    io = String::Builder.new
     last_word = false
     words.each do |w|
       decoded = w.kind == MailWord::ATOM ? MailText.words_in(w.text, 0, w.text.bytesize) : nil
@@ -2020,7 +2020,7 @@ class MailAddresses
       words = read
     end
     return fail("an address has no local part") if words.empty?
-    local = String::Builder.new(32)
+    local = String::Builder.new
     want_word = true
     words.each do |w|
       if want_word
@@ -2044,7 +2044,7 @@ class MailAddresses
       return lit if lit.is_a?(MailError)
       return {local.to_s, lit}
     end
-    domain = String::Builder.new(32)
+    domain = String::Builder.new
     while true
       label = @scan.atom
       return fail("a domain has an empty label") if label.empty?
@@ -2073,7 +2073,7 @@ class MailFolder
   @content : Bool
 
   def initialize(name : String)
-    @io = String::Builder.new(128)
+    @io = String::Builder.new
     @io << name << ":"
     @col = name.bytesize + 1
     @content = false
@@ -2641,7 +2641,7 @@ pub struct Mail
       raise "mail: a message has no From" unless sender
       date = @date
       raise "mail: a message has no Date" unless date
-      head = String::Builder.new(1024)
+      head = String::Builder.new
       head << Mail.fold("Date", date)
       head << Message.addresses("From", [sender])
       head << Message.addresses("Reply-To", @reply_to) unless @reply_to.empty?
@@ -2752,12 +2752,12 @@ pub struct Mail
       end
       return ["filename=" + MailText.quoted(filename)] if simple
       chunks = [] of String
-      chunk = String::Builder.new(64)
+      chunk = String::Builder.new
       size = 0
       i = 0
       while i < n
         c = MailText.char_size(p, i, n)
-        piece = String::Builder.new(12)
+        piece = String::Builder.new
         k = i
         while k < i + c
           if MailText.attr_char?(p[k])
@@ -2770,7 +2770,7 @@ pub struct Mail
         text = piece.to_s
         if size + text.bytesize > (chunks.empty? ? 50 : 60) && size > 0
           chunks << chunk.to_s
-          chunk = String::Builder.new(64)
+          chunk = String::Builder.new
           size = 0
         end
         chunk << text
@@ -2798,7 +2798,7 @@ pub struct Mail
       while rendered.any? { |r| ("\r\n" + r).includes?("\r\n--" + mark) }
         mark = "iyi-" + SHA1.hexdigest(mark)[0, 32]
       end
-      body = String::Builder.new(1024)
+      body = String::Builder.new
       rendered.each_with_index do |r, i|
         body << (i == 0 ? "--" : "\r\n--") << mark << "\r\n" << r
       end
@@ -2838,7 +2838,7 @@ pub struct Mail
       p = source
       headers = Array({String, String}).new
       name = nil.as(String?)
-      value = String::Builder.new(64)
+      value = String::Builder.new
       body_at = stop
       line = 0
       i = start
@@ -2877,7 +2877,7 @@ pub struct Mail
             return MailError.new("line #{line} of a header section is not a field: #{shown.to_heap.inspect}")
           end
           name = field
-          value = String::Builder.new(64)
+          value = String::Builder.new
           value << source[colon + 1, e - colon - 1]
         end
         body_at = after
@@ -3139,7 +3139,7 @@ pub struct Mail
       p = source.to_unsafe
       headers = [] of {String, String}
       name = nil.as(String?)
-      value = String::Builder.new(64)
+      value = String::Builder.new
       body_at = stop
       line = 0
       i = start
@@ -3178,7 +3178,7 @@ pub struct Mail
             return MailError.new("line #{line} of a header section is not a field: #{shown.inspect}")
           end
           name = field
-          value = String::Builder.new(64)
+          value = String::Builder.new
           value.write(p + colon + 1, e - colon - 1)
         end
         body_at = after

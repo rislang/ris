@@ -129,7 +129,7 @@ pub struct BigInt
       sign = 1
       mag = val.to_u64
     end
-    limbs = Array(UInt64).new(2)
+    limbs = Array(UInt64).new
     limbs << (mag & 0xFFFFFFFF_u64)
     high = mag.unsafe_shr(32_u64)
     limbs << high if high > 0_u64
@@ -813,7 +813,7 @@ pub struct BigInt
     if c < 0
       return {BigInt.zero, self}
     elsif c == 0
-      arr = Array(UInt64).new(1)
+      arr = Array(UInt64).new
       arr << 1_u64
       return {BigInt.new(q_sign, arr), BigInt.zero}
     end
@@ -832,7 +832,7 @@ pub struct BigInt
         rem = cur.unsafe_mod(v0)
         i = i - 1
       end
-      r_limbs = Array(UInt64).new(1)
+      r_limbs = Array(UInt64).new
       r_limbs << rem if rem > 0_u64
       q = BigInt.new(q_sign, q_limbs)
       r = BigInt.new(r_sign, r_limbs)
@@ -1860,7 +1860,7 @@ impl Num for BigInt
   end
 
   def self.one : self
-    arr = Array(UInt64).new(1)
+    arr = Array(UInt64).new
     arr << 1_u64
     BigInt.new(1, arr)
   end

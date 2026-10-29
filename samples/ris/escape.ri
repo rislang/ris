@@ -19,7 +19,7 @@ sum = 0_i64
 i = 0
 while i < N
   tape do
-    w = String::Builder.new(64)
+    w = String::Builder.new
     HTML.escape(TEXTS[i % 3], w)
     sum += w.length
   end

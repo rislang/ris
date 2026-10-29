@@ -1088,7 +1088,7 @@ pub class Encoder
   def encode(headers : Array(HeaderField) | TapeHeaders,
              force_huffman : Bool? = nil) : String
     huff = force_huffman.nil? ? @use_huffman : force_huffman
-    buffer = String::Builder.new(128)
+    buffer = String::Builder.new
 
     if @pending_table_size_update
       # RFC 7541 4.2: if the max size changed more than once since the last

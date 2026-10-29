@@ -146,8 +146,8 @@ pub class EventParser
   def initialize(@last_event_id : String = "")
     @id_buffer = @last_event_id
     @type = ""
-    @data = String::Builder.new(64)
-    @line = String::Builder.new(64)
+    @data = String::Builder.new
+    @line = String::Builder.new
     @after_cr = false
     @first = true
     @retry = nil
@@ -194,7 +194,7 @@ pub class EventParser
         if @line.length > 0
           @line << line
           line = @line.finish
-          @line = String::Builder.new(64)
+          @line = String::Builder.new
         end
         i = i + 1
         if c == 13_u8
@@ -218,8 +218,8 @@ pub class EventParser
   # The end of the stream: a line or an event not yet ended is discarded,
   # not dispatched. The last event ID and the reconnection time stay.
   def finish : Nil
-    @line = String::Builder.new(64)
-    @data = String::Builder.new(64)
+    @line = String::Builder.new
+    @data = String::Builder.new
     @type = "".as_tape
     @after_cr = false
   end
@@ -271,7 +271,7 @@ pub class EventParser
     end
     data = @data.finish
     data = data[0, data.bytesize - 1] if !data.empty? && data[-1] == 10_u8
-    @data = String::Builder.new(64)
+    @data = String::Builder.new
     kind = @type.empty? ? "message".as_tape : @type
     event = Event.new(kind, data, @last_event_id)
     @type = "".as_tape

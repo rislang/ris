@@ -2044,7 +2044,7 @@ pub struct Time
               flag?(:darwin) || flag?(:win32)) %}
       text = ""
       tape do
-        w = String::Builder.new(32)
+        w = String::Builder.new
         to_rfc3339(fraction_digits, w)
         text = w.finish.to_heap
       end

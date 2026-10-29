@@ -546,7 +546,7 @@ abstract class Reader < IyiIO
   end
 
   def read_all : String
-    writer = String::Builder.new(256)
+    writer = String::Builder.new
     while byte = read_byte
       writer.push(byte)
     end
@@ -554,7 +554,7 @@ abstract class Reader < IyiIO
   end
 
   def read_line(chomp : Bool = false) : String?
-    writer = String::Builder.new(256)
+    writer = String::Builder.new
     while byte = read_byte
       writer.push(byte)
       break if byte == 10_u8
@@ -783,7 +783,7 @@ pub class Hexdump
   private def dump_bytes(bytes : String, count : Int32) : Nil
     raise "negative count: #{count}" if count < 0
     line = Array(UInt8).new(80, 0_u8)
-    writer = String::Builder.new(80)
+    writer = String::Builder.new
     hex = HEX
     offset = 0
     while offset < count

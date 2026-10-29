@@ -48,7 +48,7 @@ DAYS.each_with_index do |log, day|
     slow = hits.select { |h| h.ms > 500 }
     top = slow.sorted_by { |h| -h.ms }
 
-    report = String::Builder.new(256)
+    report = String::Builder.new
     report << "day " << day + 1 << ": " << hits.size << " hits, "
     report << errors << " errors, slow:"
     top.each { |h| report << " " << h.path << " (" << h.ms << " ms)" }
@@ -59,7 +59,7 @@ DAYS.each_with_index do |log, day|
   end
 end
 
-summary = String::Builder.new(128)
+summary = String::Builder.new
 summary << "slowest each day: "
 slowest.join(summary, ", ")
 puts summary

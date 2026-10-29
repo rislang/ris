@@ -525,7 +525,7 @@ pub class Node
   def to_xml : String
     result = ""
     tape do
-      w = String::Builder.new(256)
+      w = String::Builder.new
       to_xml(w)
       result = w.finish.to_heap
     end
@@ -539,7 +539,7 @@ pub class Node
   def inner_xml : String
     result = ""
     tape do
-      w = String::Builder.new(256)
+      w = String::Builder.new
       inner_xml(w)
       result = w.finish.to_heap
     end

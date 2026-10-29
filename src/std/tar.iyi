@@ -1071,7 +1071,7 @@ pub class TarWriter
   # *gzip* writes the archive through `Deflater` in the gzip envelope.
   def initialize(@io : IyiIO, gzip : Bool = false)
     @deflater = gzip ? Deflater.new(Envelope::Gzip) : nil
-    @held = String::Builder.new(1024)
+    @held = String::Builder.new
     @finished = false
     @at = 0_i64
   end
@@ -1136,7 +1136,7 @@ pub class TarWriter
     emit("\u0000" * (2 * TarBytes::BLOCK + tail.to_i32))
     if deflater = @deflater
       @io.write(deflater.compress(@held.to_s)) if @held.bytesize > 0
-      @held = String::Builder.new(16)
+      @held = String::Builder.new
       @io.write(deflater.finish)
     end
     @io.flush

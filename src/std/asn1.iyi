@@ -232,7 +232,7 @@ pub struct DerValue
   # still view the same bytes.
   def tape_children : Array(DerValue) | Asn1Error
     return Asn1Error.new("#{describe} is primitive and holds no values", @offset) unless @constructed
-    found = Array(DerValue).new(8)
+    found = Array(DerValue).new
     at = content_offset
     stop = end_offset
     while at < stop

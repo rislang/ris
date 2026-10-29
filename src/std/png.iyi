@@ -1140,7 +1140,7 @@ pub struct Png
     stream = d.compress(filtered) + d.finish
     io = String::Builder.new(stream.bytesize + 1024)
     SIGNATURE.each { |b| io.write_byte(b) }
-    head = String::Builder.new(13)
+    head = String::Builder.new
     PngBytes.put32(head, width.to_u32)
     PngBytes.put32(head, height.to_u32)
     head.write_byte(depth.to_u8)

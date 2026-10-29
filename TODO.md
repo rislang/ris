@@ -127,9 +127,9 @@ first):
   fix leaves alone what it cannot prove.
 * Refuse `String::Builder.new` and `String.build` outside src/iyi/,
   naming `s = ""` and `<<`; move std, tests and samples (about 300
-  sites). Until then, drop arbitrary capacities (`Builder.new(64)`):
-  on Linux they change nothing (no moves either way). The same step
-  drops the arbitrary Array capacities (`Array(T).new(64)`, ~20 in std).
+  sites). Arbitrary literal capacities are gone from src/std and
+  samples (`Builder.new(64)`, `Array(T).new(8)`); test/ and src/iyi/
+  keep theirs until this step.
 
 ## After Text: Tre becomes a std library type
 

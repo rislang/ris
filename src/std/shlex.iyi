@@ -90,7 +90,7 @@ pub struct Shlex
       elsif comments && c == 35_u8
         i = past_line(raw, n, i)
       else
-        word = String::Builder.new(32)
+        word = String::Builder.new
         quoted = false
         while i < n
           c = raw[i]

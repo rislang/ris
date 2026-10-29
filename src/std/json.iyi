@@ -2295,7 +2295,7 @@ pub struct Writer
   def initialize(@out : String::Builder, @slots : Pointer(Int32),
                  @indent : String?, @ascii_only : Bool)
     @keys = Array(Int32).new(2 * TAPE_KEYS)
-    @table = Array(UInt64).new(130)
+    @table = Array(UInt64).new
     @slots[0] = 0
     @slots[1] = 0
     @slots[2] = Builder::ROOT

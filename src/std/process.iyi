@@ -518,7 +518,7 @@ pub class ChildOutput
 
   # Everything the child writes from here to its end.
   def read_all : String | Cancelled
-    text = String::Builder.new(1024)
+    text = String::Builder.new
     text << @pending
     @pending = ""
     until @finished
@@ -1065,7 +1065,7 @@ class ProcessChild
 
     def start(command : String, path : String, args : Array(String), chdir : String?,
               input : Int32, output : Int32, error : Int32, environment : Array(String)?) : Nil | ProcessError
-      line = String::Builder.new(256)
+      line = String::Builder.new
       ProcessChild.quote(command, line)
       args.each do |arg|
         line << ' '
@@ -1262,7 +1262,7 @@ class ProcessChild
     end
 
     def read_all(output : ::Bool) : String | Cancelled
-      text = String::Builder.new(1024)
+      text = String::Builder.new
       buffer = Pointer(UInt8).malloc(65536_u64)
       while true
         got = read_into(output, buffer, 65536)
@@ -1739,7 +1739,7 @@ class ProcessChild
     end
 
     def read_all(output : ::Bool) : String | Cancelled
-      text = String::Builder.new(1024)
+      text = String::Builder.new
       buffer = Pointer(UInt8).malloc(65536_u64)
       while true
         got = read_into(output, buffer, 65536)

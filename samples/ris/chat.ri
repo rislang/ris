@@ -29,8 +29,8 @@ module Chat
 
   @[OnTape]
   struct Room
-    getter users = Array(User).new(3)
-    getter messages = Array(Message).new(3)
+    getter users = Array(User).new
+    getter messages = Array(Message).new
 
     def user(id : Int32) : User?
       users.find { |user| user.id == id }
@@ -83,7 +83,7 @@ module Chat
   def self.render_room(room : Room) : Nil
     count = room.messages.size
     newest = Array(Int32).new(count) { |i| count - 1 - i }
-    response = String::Builder.new(256)
+    response = String::Builder.new
     response << "200 "
     newest.each_with_index do |i, k|
       message = room.messages[i]

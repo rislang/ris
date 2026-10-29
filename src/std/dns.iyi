@@ -1082,7 +1082,7 @@ pub struct DnsMessage
     floor = at
     ends = -1
     wire = 0
-    text = String::Builder.new(32)
+    text = String::Builder.new
     while true
       return nil if position < 0 || position >= size
       length = packet[position].to_i32

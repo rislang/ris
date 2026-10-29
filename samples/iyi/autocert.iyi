@@ -35,7 +35,7 @@ def configuration : AutocertConfig
   if args.size < 5
     raise "DIRECTORY CACHE HOST EMAIL accept-terms [TLS_PORT HTTP_PORT]"
   end
-  hosts = Array(String).new(1)
+  hosts = Array(String).new
   hosts << args[2]
   config = AutocertConfig.new(args[0], args[1], hosts)
   config.email = args[3]

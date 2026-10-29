@@ -315,7 +315,7 @@ pub struct TOMLDateTime
   def to_s : String
     result = ""
     tape do
-      writer = String::Builder.new(32)
+      writer = String::Builder.new
       write(writer)
       result = writer.finish.to_heap
     end
@@ -1462,7 +1462,7 @@ struct TapeReader
   # The dotted name of the first `count` parts of `path` + `parts`.
   private def name(path : Array(String),
                    parts : Array(String) | KeySlice(String), count : Int32) : String
-    text = String::Builder.new(64)
+    text = String::Builder.new
     first = true
     path.each do |part|
       text << "." unless first
@@ -1987,7 +1987,7 @@ struct TapeReader
     return fail("#{token.to_heap} is not a number", start) unless j == stop
     self.pos = stop
     if float
-      text = String::Builder.new(64)
+      text = String::Builder.new
       k = start
       k = k + 1 if input[k] == 43_u8
       while k < stop
@@ -2214,7 +2214,7 @@ struct TapeReader
         end
         return input[start + 1, pos - start - 2]
       elsif b == 92_u8
-        writer = text || String::Builder.new(64)
+        writer = text || String::Builder.new
         writer << input[run, pos - run]
         escape(writer)!
         text = writer
@@ -2275,7 +2275,7 @@ struct TapeReader
     start = pos
     self.pos = pos + 3
     skip_first_break
-    text = String::Builder.new(64)
+    text = String::Builder.new
     while true
       if pos >= input_size
         return fail("a multi-line string that does not close", start)
@@ -2357,7 +2357,7 @@ struct TapeReader
     start = pos
     self.pos = pos + 3
     skip_first_break
-    text = String::Builder.new(64)
+    text = String::Builder.new
     while true
       if pos >= input_size
         return fail("a multi-line string that does not close", start)
@@ -2422,7 +2422,7 @@ class Writer
   def inline_text(value : Any) : String
     result = ""
     tape do
-      writer = String::Builder.new(64)
+      writer = String::Builder.new
       TapeWriter.new(writer).inline(value)
       result = writer.finish.to_heap
     end
@@ -2432,7 +2432,7 @@ class Writer
   def self.key_text(key : String) : String
     result = ""
     tape do
-      writer = String::Builder.new(32)
+      writer = String::Builder.new
       TapeWriter.new(writer).key(key)
       result = writer.finish.to_heap
     end
@@ -2442,7 +2442,7 @@ class Writer
   def self.quoted(text : String) : String
     result = ""
     tape do
-      writer = String::Builder.new(32)
+      writer = String::Builder.new
       TapeWriter.quoted(text.as_tape, writer)
       result = writer.finish.to_heap
     end
@@ -2452,7 +2452,7 @@ class Writer
   def self.float_text(value : Float64) : String
     result = ""
     tape do
-      writer = String::Builder.new(32)
+      writer = String::Builder.new
       TapeWriter.float_text(value, writer)
       result = writer.finish.to_heap
     end

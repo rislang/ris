@@ -275,7 +275,7 @@ pub abstract class Formatter
   # The line written onto a tape, then into *io* in one write.
   def format(entry : Entry | TapeEntry, io : IO) : Nil
     tape do
-      w = String::Builder.new(128)
+      w = String::Builder.new
       format(entry, w)
       w.push(10_u8)
       line = w.finish
@@ -303,7 +303,7 @@ pub class DefaultFormatter < Formatter
   def format(entry : Entry) : String
     line = ""
     tape do
-      w = String::Builder.new(128)
+      w = String::Builder.new
       format(entry, w)
       line = w.finish.to_heap
     end
@@ -316,7 +316,7 @@ pub class DefaultFormatter < Formatter
 
   def self.write(entry : Entry | TapeEntry, io : IO) : Nil
     tape do
-      writer = String::Builder.new(128)
+      writer = String::Builder.new
       write(entry, writer)
       writer << '\n'
       write_line(io, writer.finish)
@@ -427,7 +427,7 @@ pub class RisMemoryBackend < Backend
   getter entries : Array(RisLogEntry)
 
   def initialize(@owner : Program::TapeOwner)
-    @entries = Array(RisLogEntry).new(16)
+    @entries = Array(RisLogEntry).new
   end
 
   def write(entry : TapeEntry) : Nil

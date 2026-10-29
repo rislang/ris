@@ -24,7 +24,7 @@ BODY = %({"id":42,"name":"Mari","email":"mari@example.com"})
 def drain(socket : IyiSocket, want : Int64) : Int64
   got = 0_i64
   tape do
-    buffer = String::Builder.new(65536)
+    buffer = String::Builder.new
     while got < want
       buffer.clear
       n = socket.read(buffer, 65536).or_panic

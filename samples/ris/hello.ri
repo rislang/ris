@@ -27,7 +27,7 @@ def greet(order : Order, greeting : String::Builder) : Nil
 end
 
 total = 0_i64
-greeting = String::Builder.new(64)
+greeting = String::Builder.new
 tape do
   order = make_order(1_i64)
   total = order_total(order)

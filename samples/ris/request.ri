@@ -54,7 +54,7 @@ def handle(raw : String) : Nil
       puts "400 Bad Request"
       return
     end
-    body = String::Builder.new(128)
+    body = String::Builder.new
     status = route(head, body)
     puts "#{status} #{reason(status)} #{body.finish}"
   end

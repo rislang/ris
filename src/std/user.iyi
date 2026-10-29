@@ -468,7 +468,7 @@ struct UserFiles
       fd = __iyi_open_read(cpath.to_unsafe)
       return nil if fd < 0_i64
       defer __iyi_close(fd)
-      writer = String::Builder.new(16384)
+      writer = String::Builder.new
       loop do
         got = 0_i64
         writer.unsafe_append(16384) do |buffer|

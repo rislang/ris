@@ -1713,7 +1713,7 @@ pub struct Outgoing
     @state = Array(Int32).new(2) { |i| i == 0 ? 200 : 0 }
     none = "".as_tape
     @lines = Array(Field).new(LINES) { Field.new(none, none) }
-    @body = String::Builder.new(512)
+    @body = String::Builder.new
   end
 
   def status : Int32
@@ -1894,7 +1894,7 @@ pub struct Server
   def self.format_head(res : Outgoing, close : Bool) : String
     status = res.status
     raise "HTTP: not a status: #{status}" unless status >= 100 && status <= 999
-    w = String::Builder.new(256)
+    w = String::Builder.new
     w << "HTTP/1.1 "
     w.append_int(status)
     w << " "
@@ -2691,7 +2691,7 @@ pub struct Server
     raise "HTTP: not a status: #{response.status}" unless response.status >= 100 && response.status <= 999
     raise "HTTP: the reason contains a line break" if HTTP.has_break?(response.reason)
     raise "HTTP: the reason contains a control character" if HTTP.control?(response.reason)
-    text = String::Builder.new(256)
+    text = String::Builder.new
     text << "HTTP/1.1 "
     text.append_int(response.status)
     text << " "

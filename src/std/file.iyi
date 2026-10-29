@@ -748,7 +748,7 @@ class ::File
   end
 
   private def self.metadata_id(value : Int32 | UInt32) : String
-    writer = String::Builder.new(10)
+    writer = String::Builder.new
     (value.to_i64 & 0xffffffff_i64).to_u64.to_s(writer)
     writer.finish
   end

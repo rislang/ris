@@ -341,7 +341,7 @@ pub struct AutocertConfig
   property ca_roots_pem : String = "".as_tape
 
   def initialize(@directory_url : String, @cache_dir : String, @hosts : Array(String))
-    @challenges = Array(String).new(2)
+    @challenges = Array(String).new
     @challenges << "tls-alpn-01".as_tape << "http-01".as_tape
   end
 
