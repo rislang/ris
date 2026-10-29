@@ -97,11 +97,6 @@ greet(out)              # def greet(io : String::Builder): out grows
 In order, one gate each (RIS_TAPE_STATS: 0 moves, 0 copies after the
 first):
 
-* A local or field String that gets `<<` (or goes to a String::Builder
-  parameter) owns a growing reservation from its first append; the
-  literal or other start text is copied once. Reading it gives a String
-  view; growth never moves or changes bytes a view sees. Never appended:
-  no reservation.
 * A local `a = []` takes its type from the first `<<`, `push`, `concat`
   or whole assignment, which must come before any other use (Goose
   reference.md:850). A later append of another type is an error naming
@@ -110,6 +105,10 @@ first):
   V from the first `h[k] = v`; `Hash.new(0)` takes V from its default.
   Gates: inside a block, a mismatch, a read before the first store, a
   field, word counts with `Hash.new(0)`.
+* Done: appended locals and fields grow (test/ris/text_grow.ri). Left
+  from its review: a class with `@x << y` gets a RisTextGrowth slot
+  even when @x is an Array (type unknown at normalize); a field reset
+  takes a fresh reservation each time until the next item reuses it.
 * `s = ""` on a growing String reuses its reservation only when the
   compiler proves no view of the old text is still live (stored in a
   container, a field, another def, a task). Unsure: refuse, naming
@@ -216,6 +215,9 @@ first):
 
 ## Known failure to recheck
 
+* check.sh never ends: log_metadata.ri, log_tape.ri and
+  server_owners.ri hang (seen 2026-10-29 on the base too). Find the
+  cause; meanwhile give check.sh a per-test timeout.
 * Compiler specs (seed 71173, 2026-10-27): recheck macro/macro_methods,
   iyimod, compiler, and codegen/{proc,closure}_spec.cr; four failures and
   two errors preceded a signal 11 crash in the closure group, so no
