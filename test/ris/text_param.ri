@@ -1,0 +1,29 @@
+# Appending through parameters: an Array parameter is a handle, so the
+# caller sees appends; a String::Builder parameter writes the caller's
+# text. Only a String parameter refuses << (refused/text_param_append).
+def collect(into : Array(Int32), count : Int32)
+  count.times { |i| into << i }
+  nil
+end
+
+def greet(io : String::Builder, name : String)
+  io << "hello, " << name
+  nil
+end
+
+def shout(text : String) : String
+  text.upcase
+end
+
+tape do
+  ids = [] of Int32
+  collect(ids, 3)
+  raise "array parameter" unless ids.size == 3 && ids[2] == 2
+
+  io = String::Builder.new
+  greet(io, "Priit")
+  raise "builder parameter" unless io.finish == "hello, Priit"
+
+  raise "string parameter read" unless shout("ris") == "RIS"
+end
+puts "PASS: appends through parameters"

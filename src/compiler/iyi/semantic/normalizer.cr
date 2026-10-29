@@ -672,8 +672,14 @@ module Iyi
            !TapeScopeRuntime.runtime?(node.location)
           method = "__ris_append_field_owner"
         end
+        # A String parameter is a view of the caller's text: appending
+        # would grow a local copy the caller never sees.
+        parameter = node.name == "<<" && receiver.is_a?(Var) &&
+          ris_program_code?(node) &&
+          @current_def.try(&.args.any?(&.name.==(receiver.name)))
+        method = "__ris_append_parameter" if parameter
         temporary = program.new_temp_var.at(node)
-        growing = node.name == "<<" &&
+        growing = !parameter && node.name == "<<" &&
           ((receiver.is_a?(Var) && @ris_growing_locals.includes?(receiver.name)) ||
            (receiver.is_a?(InstanceVar) && @ris_growing_fields.includes?(receiver.name)))
         value = if growing

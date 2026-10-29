@@ -1010,6 +1010,13 @@ struct String::Builder
 end
 
 struct String
+  def __ris_append_parameter(value)
+    {% raise "a String parameter is a view of the caller's text; " +
+             "appending to it would change only a local copy.\n\n" +
+             "Take `io : String::Builder` to append to the caller's text, " +
+             "or return a new String" %}
+  end
+
   def __ris_append_field_owner(value)
     {% raise "growing text needs a concrete field owner;\n\n" +
              "declare the append method in the owning class or " +

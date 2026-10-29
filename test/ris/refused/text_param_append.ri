@@ -1,0 +1,8 @@
+# A String parameter is a view of the caller's text: << would grow a
+# local copy the caller never sees.
+def add_footer(text : String)
+  text << "\n-- sent with ris"
+  text
+end
+
+puts add_footer("Hello")

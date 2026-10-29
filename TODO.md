@@ -109,9 +109,15 @@ first):
   the shrink checker's text pass proves no old view is live, else it
   refuses naming `copy_to(owner)` (test/ris/text_grow.ri, ten
   test/ris/refused/text_reset_* cases with a mutation check).
-* `<<` on a String parameter is refused: it names `io : String::Builder`
-  or returning a new String. The copying `s + x` fallback is refused in
-  loops and on fields.
+* Done: `<<` on a String parameter in a program is refused, naming
+  `io : String::Builder` (test/ris/text_param.ri, refused/
+  text_param_append.ri). The copying `s + x` fallback no longer runs
+  for program locals and fields: every appended one grows (step 1).
+* A String local passed to a `String::Builder` parameter grows: `text =
+  ""; greet(text)` today fails ("expected String::Builder, not String").
+  Lower the argument to the local's growing slot, then rebind the local
+  to its text after the call. Gate: the greet example, a field, a
+  literal start, a mismatch (a String parameter passed on).
 * Crystal code to ris through `ris fix`: each common refusal carries a
   `suggested_edit` that fix applies. First `String.build` and
   `String::Builder.new` -> `s = ""` and `<<`, an `IO` text parameter ->
