@@ -1,0 +1,15 @@
+class Kept
+  getter name : String
+  def initialize
+    name = "alice"
+    @name = name
+  end
+end
+# The object and its text share the caller's tape. Callee and loop
+# scratch may reset without invalidating the field.
+kept = Kept.new
+100.times do |n|
+  scratch = "overwrite #{n}"
+end
+raise "field text changed" unless kept.name == "alice"
+puts "PASS: text_local_field survives"

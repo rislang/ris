@@ -7,8 +7,8 @@ def request(cache : RisByteCache, input : String)
   cache.store(input.strip.upcase)
 end
 
-request(CACHE, "  first request  ")
+tape { request(CACHE, "  first request  ") }
 puts String.build { |writer| CACHE.write_to(writer) }
-request(CACHE, "next")
+tape { request(CACHE, "next") }
 puts String.build { |writer| CACHE.write_to(writer) }
 CACHE.clear

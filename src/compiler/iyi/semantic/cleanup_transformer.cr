@@ -745,6 +745,15 @@ module Iyi
       return unless thread || owning
       block = node.block
       return unless block
+      # Inline blocks cross the same result boundary as kept blocks.
+      # Only capture inspection below needs a proc's definition.
+      if owning && !owner.metaclass? && (answer = node.type?)
+        if why = Iyi::Share.reason(answer)
+          node.raise "#{owning}##{target_def.name} answers `#{answer}`, " \
+                     "which is not Share: #{why}; " \
+                     "answer Share scalar data or use `lock`, which answers nil"
+        end
+      end
       fun_literal = block.fun_literal
       return unless fun_literal.is_a?(ProcLiteral)
       a_def = fun_literal.def
@@ -757,14 +766,6 @@ module Iyi
                     "the block #{name}##{target_def.name} runs behind the #{name}'s lock"
                   end
         consequence = "whatever the block can reach, the value behind the lock can reach, and the lock no longer guards it (SPEC.md III.4.4)"
-        # What the call answers has left the lock: a constructor answers
-        # the owning type itself, which is Share, and a method that answers
-        # the block's value must answer one that is.
-        if !owner.metaclass? && (answer = node.type?)
-          if why = Iyi::Share.reason(answer)
-            node.raise "#{name}##{target_def.name} answers `#{answer}`, which is not Share: #{why}; what a block behind the #{name}'s lock answers leaves the lock, and the lock no longer guards it. Answer a Share value - a count, a copy's numbers, a String - or use `lock`, which answers nil (SPEC.md III.4.4)"
-          end
-        end
         check_share_constants(a_def, subject, consequence)
         check_share_class_var_types(a_def, subject, consequence)
       elsif thread

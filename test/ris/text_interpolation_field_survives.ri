@@ -1,0 +1,14 @@
+class Kept
+  getter text : String
+  def initialize(n : Int32)
+    @text = "number #{n}"
+  end
+end
+# The object and its text share the caller's tape. Callee and loop
+# scratch may reset without invalidating the field.
+kept = Kept.new(1)
+100.times do |n|
+  scratch = "overwrite #{n}"
+end
+raise "field text changed" unless kept.text == "number 1"
+puts "PASS: text_interpolation_field survives"

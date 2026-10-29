@@ -9,9 +9,11 @@ Each job gets its own TMPDIR. A job that runs past RIS_CHECK_TIMEOUT
 seconds (default 300) is killed with its processes and reported
 FAILED, so one hung test cannot hold the suite.
 RIS_CHECK_SERIAL=1 bash test/ris/check.sh runs it in order.
+RIS_CHECK_MATCH selects blocks by regex and skips unrelated heap workloads.
 """
 import concurrent.futures
 import os
+import re
 from pathlib import Path
 import signal
 import subprocess
@@ -28,12 +30,14 @@ def split():
     # Drop the cd: jobs run in ROOT. The heap gate stays outside the pool.
     header = [line for line in lines[:end] if not line.startswith("cd ")]
     stop = lines.index(
-        "# Run heap workloads after the other gates to avoid compiler contention.")
+        "# Run heap workloads after the other gates to avoid compiler contention."
+    )
     # A block starts at a top-level comment, `out=$(`, `expect` or `for`
     # once every `if`/`for`/`while`/`case` and quote above it is closed.
     blocks, block, depth, quoted = [], [], 0, False
     for line in lines[end:stop]:
-        starts = line.startswith(("#", "out=$(", "expect ", "for "))
+        starts = line.startswith(
+            ("#", "out=$(", "result=$(", "expect ", "for "))
         if not line.strip():
             continue
         # A `for` right after `out=$(` reads that output: keep them together.
@@ -88,6 +92,14 @@ def heap(scratch):
 
 def main():
     header, blocks = split()
+    # Select checks without running unrelated workloads or the heap suite.
+    pattern = os.environ.get("RIS_CHECK_MATCH")
+    if pattern:
+        blocks = [block for block in blocks
+                  if re.search(pattern, "\n".join(block), re.MULTILINE)]
+        if not blocks:
+            print("FAIL: no ris checks match RIS_CHECK_MATCH")
+            return 1
     workers = int(os.environ.get("RIS_CHECK_JOBS", os.cpu_count() or 1))
     with tempfile.TemporaryDirectory(prefix="ris-check-") as scratch:
         with concurrent.futures.ThreadPoolExecutor(workers) as pool:
@@ -99,11 +111,13 @@ def main():
                 sys.stdout.write(out)
                 sys.stdout.flush()
                 status |= code != 0
-        code, out = heap(scratch)
-        sys.stdout.write(out)
-        sys.stdout.flush()
-        status |= code != 0
-    print("PASS: all ris checks" if status == 0 else "FAIL: ris checks")
+        if not pattern:
+            code, out = heap(scratch)
+            sys.stdout.write(out)
+            sys.stdout.flush()
+            status |= code != 0
+    label = "selected ris checks" if pattern else "all ris checks"
+    print(f"PASS: {label}" if status == 0 else f"FAIL: {label}")
     return status
 
 

@@ -573,12 +573,17 @@ for name in text_parameter text_array; do
   expect "$name" '.to_heap'
 done
 expect text_capture 'pass what the block needs as owned data (copy_to(owner))'
-expect text_local_field \
-  'name holds tape text; write the literal in place or keep it with .to_heap'
-expect text_literal_field '.copy_to(owner)'
-expect text_interpolation_field '.copy_to(owner)'
-expect text_interpolation_field \
-  'make it an @[OnTape] struct with a String field'
+# These old heap-boundary refusals are safe on the object's tape now.
+# Keep the original fixtures and check their text after scratch resets.
+for name in text_local_field text_literal_field text_interpolation_field; do
+  result=$("$RIS" run "test/ris/${name}_survives.ri" 2>&1)
+  if [ "$?" -eq 0 ] && [ "$result" = "PASS: $name survives" ]; then
+    echo "runs     $name (text survives)"
+  else
+    echo "FAILED   $name: $result"
+    status=1
+  fi
+done
 out=$("$RIS" run test/ris/text_default.ri 2>&1)
 if [ "$?" -eq 0 ] && grep -qF 'String' <<<"$out" &&
     grep -qF 'PASS: default text' <<<"$out"; then
@@ -612,7 +617,14 @@ expect yield_break_escape "cannot break a tape value out of its tape block"
 
 expect return_escape 'Copy the text with `.copy_to(owner)`'
 expect outer_var '`copy_to(owner)` copies a String, Array'
-expect owned_cache "to be String, not String"
+# The cache copies bytes into its owner's pool before request exit.
+result=$("$RIS" run samples/ris/owned_cache.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$result" = $'FIRST REQUEST\nNEXT' ]; then
+  echo "runs     owned_cache (text survives request tapes)"
+else
+  echo "FAILED   owned_cache: $result"
+  status=1
+fi
 
 expect local_outer "is a variable of the code around this local_tape block"
 expect local_mutate "cannot use outer tape value"

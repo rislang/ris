@@ -266,7 +266,11 @@ class Iyi::TapeProgramChecker
              else
                Origin::Unknown
              end
-           when Def, FunDef, ClassDef, ModuleDef, Macro
+           when ClassDef, ModuleDef
+             # Type bodies contain executable module initialization too.
+             # Only method and macro declarations are deferred code.
+             value(node.body, Env.new)
+           when Def, FunDef, Macro
              Origin::Program
            else
              node.accept Children.new(self, env, node)
