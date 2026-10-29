@@ -4,11 +4,14 @@
 
 module std/bit_array
 
+import std/int
+
 import std/slice::{Slice}
 
+@[OnTape]
 struct ::BitArray
   getter size : Int32
-  @bits : Pointer(UInt64)
+  @bits : Array(UInt64)
 
   # Rounded up without adding first: `(@size + 63) // 64` overflowed for
   # the sizes within 63 of the largest the constructor accepts.
@@ -27,7 +30,7 @@ struct ::BitArray
     @size = s64.to_i
     words = malloc_size
     fill_word = initial ? 0xffffffffffffffff_u64 : 0_u64
-    @bits = Pointer(UInt64).malloc(words.to_u64)
+    @bits = Array(UInt64).new(words, fill_word)
     i = 0
     while i < words
       @bits[i] = fill_word
@@ -314,7 +317,11 @@ struct ::BitArray
   end
 
   def to_slice : Std::Slice::Bytes
-    Std::Slice::Bytes.new(@bits.as(Pointer(UInt8)), bytesize)
+    bytes = Std::Slice::Bytes.new(bytesize)
+    bytesize.times do |i|
+      bytes[i] = (@bits[i // 8] >> ((i % 8) * 8)).unsafe_to_u8
+    end
+    bytes
   end
 
   def ==(other : BitArray) : Bool

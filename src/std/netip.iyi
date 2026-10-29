@@ -114,6 +114,7 @@ impl Error for NetipError
 end
 
 # An IPv4 or IPv6 address, an IPv6 one with its zone ("" for none).
+@[OnTape]
 pub struct IP
   # Two words, not one `UInt128`: a struct holding a `UInt128` wants 16-byte
   # alignment, which an array's buffer past a few pages does not get, and
@@ -445,6 +446,7 @@ end
 
 # An address and a length: a CIDR block (RFC 4632), with the address's
 # host bits as it was given them.
+@[OnTape]
 pub struct Prefix
   getter ip : IP
   getter length : Int32
@@ -814,11 +816,11 @@ struct NetipBits
     "203.0.113.0/24",     # TEST-NET-3
     "240.0.0.0/4",        # reserved
     "255.255.255.255/32", # limited broadcast
-  ])
+  ]).copy_to(Program.tape)
   GLOBAL_V4 = blocks([
     "192.0.0.9/32",  # Port Control Protocol anycast
     "192.0.0.10/32", # TURN anycast
-  ])
+  ]).copy_to(Program.tape)
 
   # `_IPv6Constants._private_networks` and its exceptions.
   NOT_GLOBAL_V6 = blocks([
@@ -833,7 +835,7 @@ struct NetipBits
     "3fff::/20",      # documentation (RFC 9637)
     "fc00::/7",       # unique local
     "fe80::/10",      # link local
-  ])
+  ]).copy_to(Program.tape)
   GLOBAL_V6 = blocks([
     "2001:1::1/128",   # Port Control Protocol anycast
     "2001:1::2/128",   # TURN anycast
@@ -841,13 +843,13 @@ struct NetipBits
     "2001:4:112::/48", # AS112-v6
     "2001:20::/28",    # ORCHIDv2
     "2001:30::/28",    # drone remote ID
-  ])
+  ]).copy_to(Program.tape)
 
   # `_IPv6Constants._reserved_networks`: RFC 4291's unassigned space.
   RESERVED_V6 = blocks([
     "::/8", "100::/8", "200::/7", "400::/6", "800::/5", "1000::/4", "4000::/3", "6000::/3",
     "8000::/3", "a000::/3", "c000::/3", "e000::/4", "f000::/5", "f800::/6", "fe00::/9",
-  ])
+  ]).copy_to(Program.tape)
 
   # The tables above as prefixes, read by the module's own reader: text
   # as the registries and Python write it, rather than bits by hand.

@@ -289,15 +289,19 @@ class Iyi::TapeProgramChecker
           result = value(block.body, env)
           @program_context = saved
         end
+      elsif runtime && node.name == TapeScopeChecker::RESULT
+        result = args[1]? || Origin::Unknown
       elsif runtime && node.name == "copy_to"
         mutation(node)
         result = node.args.first?.try(&.type?.try(&.to_s)) == "Program::TapeOwner" ? Origin::Program : Origin::Unknown
       elsif runtime && ((target.owner.to_s == "Program::TapeOwner" && node.name == "run") ||
             (target.owner.to_s == "RisRegion.class" &&
             (node.name.starts_with?("program_") || node.name == "release_program")))
-        unless TapeRules.runtime?(@program, node.location)
+        unless TapeRules.runtime?(@program, node.location) ||
+               TapeRules.std?(node.location)
           node.raise "Program.tape.run is private; use .copy_to(Program.tape)"
         end
+        result = Origin::Program
       elsif runtime
         threaded = @graph.threaded?(target)
         @has_threads = true if threaded
@@ -384,6 +388,7 @@ class Iyi::TapeProgramChecker
       # only through an input that is surely program storage.
       unless user?(target)
         if inputs.none? { |origin| contains_program?(origin, definite: true) } &&
+           !touches_program?(target) &&
            (!binding || binding.env.values.none? do |origin|
              contains_program?(origin, definite: true)
            end)

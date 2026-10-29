@@ -32,14 +32,6 @@ pub struct INI
   # declaration at line 1, column 8" at a `[section]` behind one, and the
   # first key of a file without a section kept it and never matched.
   def self.parse(string : String) : Hash(String, Hash(String, String))
-    result = Hash(String, Hash(String, String)).new
-    tape do
-      result = parse(string.as_tape).to_heap
-    end
-    result
-  end
-
-  def self.parse(string : String) : TapeINI
     text = string.starts_with?("\uFEFF") ? string[3..] : string
     parse_lines(text.split('\n'))
   end
@@ -48,9 +40,9 @@ pub struct INI
     parse(io.read_all)
   end
 
-  private def self.parse_lines(lines : Array(String)) : TapeINI
-    ini = TapeINI.new
-    current_section = TapeProperties.new
+  private def self.parse_lines(lines : Array(String)) : Hash(String, Hash(String, String))
+    ini = Hash(String, Hash(String, String)).new
+    current_section = Hash(String, String).new
     ini["".as_tape] = current_section
     lineno = 0
 
@@ -90,7 +82,7 @@ pub struct INI
         if existing = ini[name]?
           current_section = existing
         else
-          current_section = TapeProperties.new
+          current_section = Hash(String, String).new
           ini[name] = current_section
         end
       else
@@ -131,26 +123,11 @@ pub struct INI
     count + 1
   end
 
-  def self.build(ini : Hash(String, Hash(String, String)),
-                 space : Bool = false) : String
-    result = ""
-    tape do
-      view = TapeINI.new
-      ini.each do |section, properties|
-        fields = TapeProperties.new
-        properties.each { |key, value| fields[key.as_tape] = value.as_tape }
-        view[section.as_tape] = fields
-      end
-      result = build(view, space).to_heap
-    end
-    result
-  end
-
-  def self.build(ini : TapeINI, space : Bool = false) : String
+  def self.build(ini : Hash(String, Hash(String, String)), space : Bool = false) : String
     String.build { |w| build(ini, w, space) }
   end
 
-  def self.build(ini : TapeINI, writer : String::Builder,
+  def self.build(ini : Hash(String, Hash(String, String)), writer : String::Builder,
                  space : Bool = false) : Nil
     delim = space ? " = " : "="
     # Written verbatim, a value holding a line break wrote lines of its
@@ -158,17 +135,17 @@ pub struct INI
     # `admin` with a key `role`, and a padded value came back unpadded.
     ini.each do |section, properties|
       if why = unwritable_section(section)
-        raise "INI.build: section #{section.to_heap.inspect} " \
+        raise "INI.build: section #{section.inspect} " \
               "cannot be written: #{why}"
       end
       properties.each do |key, value|
         if why = unwritable_key(key)
-          raise "INI.build: key #{key.to_heap.inspect} in section " \
-                "#{section.to_heap.inspect} cannot be written: #{why}"
+          raise "INI.build: key #{key.inspect} in section " \
+                "#{section.inspect} cannot be written: #{why}"
         end
         if why = unwritable_value(value)
-          raise "INI.build: the value of #{key.to_heap.inspect} in " \
-                "section #{section.to_heap.inspect} cannot be written: #{why}"
+          raise "INI.build: the value of #{key.inspect} in " \
+                "section #{section.inspect} cannot be written: #{why}"
         end
       end
     end
@@ -275,133 +252,5 @@ pub struct INI
 
   private def self.line_break?(text : String) : Bool
     text.includes?('\n') || text.includes?('\r')
-  end
-end
-
-# Ordered fields on the caller's tape; names and values view the input.
-@[OnTape]
-pub struct TapeProperty
-  getter key : String
-  getter value : String
-
-  def initialize(@key : String, @value : String)
-  end
-end
-
-@[OnTape]
-pub struct TapeProperties
-  @entries : Array(TapeProperty)
-
-  def initialize
-    @entries = Array(TapeProperty).new
-  end
-
-  def []?(key : String | String) : String?
-    @entries.each do |field|
-      return field.value if field.key == key
-    end
-    nil
-  end
-
-  def [](key : String | String) : String
-    self[key]? || raise "INI: missing key"
-  end
-
-  def []=(key : String, value : String) : Nil
-    @entries.each_with_index do |field, i|
-      if field.key == key
-        @entries[i] = TapeProperty.new(key, value)
-        return
-      end
-    end
-    @entries << TapeProperty.new(key, value)
-  end
-
-  def size : Int32
-    @entries.size
-  end
-
-  def empty? : Bool
-    @entries.empty?
-  end
-
-  def has_key?(key : String | String) : Bool
-    !self[key]?.nil?
-  end
-
-  def each(& : String, String -> Nil) : Nil
-    @entries.each { |field| yield field.key, field.value }
-  end
-
-  def to_heap : Hash(String, String)
-    result = Hash(String, String).new
-    each { |key, value| result[key.to_heap] = value.to_heap }
-    result
-  end
-end
-
-# Ordered fields on the caller's tape; names and values view the input.
-@[OnTape]
-pub struct TapeSection
-  getter key : String
-  getter value : TapeProperties
-
-  def initialize(@key : String, @value : TapeProperties)
-  end
-end
-
-@[OnTape]
-pub struct TapeINI
-  @entries : Array(TapeSection)
-
-  def initialize
-    @entries = Array(TapeSection).new
-  end
-
-  def []?(key : String | String) : TapeProperties?
-    @entries.each do |field|
-      return field.value if field.key == key
-    end
-    nil
-  end
-
-  def [](key : String | String) : TapeProperties
-    self[key]? || raise "INI: missing key"
-  end
-
-  def []=(key : String, value : TapeProperties) : Nil
-    @entries.each_with_index do |field, i|
-      if field.key == key
-        @entries[i] = TapeSection.new(key, value)
-        return
-      end
-    end
-    @entries << TapeSection.new(key, value)
-  end
-
-  def size : Int32
-    @entries.size
-  end
-
-  def empty? : Bool
-    @entries.empty?
-  end
-
-  def has_key?(key : String | String) : Bool
-    !self[key]?.nil?
-  end
-
-  def each(& : String, TapeProperties -> Nil) : Nil
-    @entries.each { |field| yield field.key, field.value }
-  end
-
-  def delete(key : String) : Nil
-    @entries = @entries.reject { |field| field.key == key }
-  end
-
-  def to_heap : Hash(String, Hash(String, String))
-    result = Hash(String, Hash(String, String)).new
-    each { |key, value| result[key.to_heap] = value.to_heap }
-    result
   end
 end

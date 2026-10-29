@@ -384,7 +384,7 @@ pub class Random
     if generator = @@shared
       return generator
     end
-    generator = Random.new
+    generator = Random.new.copy_to(Program.tape)
     @@shared = generator
     generator
   end

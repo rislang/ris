@@ -201,6 +201,7 @@ end
 # What `OcspResponse#verify` answers: the status of the leaf, the
 # SingleResponse that gave it, and the certificate that signed - the
 # issuer, or a delegated responder.
+@[OnTape]
 pub struct OcspVerdict
   getter status : OcspCertStatus
   getter single : OcspSingleResponse
@@ -268,6 +269,7 @@ pub struct Ocsp
   end
 end
 
+@[OnTape]
 pub struct OcspResponse
   # The whole OCSPResponse as it was read, and the ResponseData the
   # signature is over.

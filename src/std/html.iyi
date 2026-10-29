@@ -34,7 +34,7 @@ pub struct HTML
 
   def self.escape(string : String) : String
     # Fast path: check if any character needs escaping
-    raw = string.to_unsafe
+    raw = string
     len = string.bytesize
     needs = false
     i = 0
@@ -683,7 +683,7 @@ pub struct HTML
   def self.unescape(string : String) : String
     return string unless string.includes?("&")
 
-    raw = string.to_unsafe
+    raw = string
     len = string.bytesize
     bytes = [] of UInt8
     ptr = 0
@@ -813,7 +813,7 @@ pub struct HTML
     end
 
     String.new(bytes.size) do |buf|
-      buf.copy_from(bytes.to_unsafe, bytes.size)
+      bytes.size.times { |i| buf[i] = bytes[i] }
     end
   end
 end

@@ -11,11 +11,11 @@ tape do
   w << "prefix:"
   INI.build(doc, w, true)
   exit 3 unless w.finish == "prefix:top = yes\n[s]\na = last\n\n"
-  exit 4 unless INI.parse(INI.build(doc)).to_heap == doc.to_heap
+  exit 4 unless INI.parse(INI.build(doc)) == doc
   spaced = INI.parse("x=\u00A0café\u3000\n")
   exit 7 unless spaced[""]["x"] == "café"
-  kept = doc.to_heap
+  kept = doc.copy_to(Program.tape)
 end
 exit 5 unless INI.parse(INI.build(kept)) == kept
 exit 6 unless INI.parse("").empty?
-puts "PASS: ini tape and heap APIs"
+puts "PASS: ini tape Hash and retained copy"

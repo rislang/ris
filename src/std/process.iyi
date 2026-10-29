@@ -822,10 +822,9 @@ class ProcessChild
   end
 
   # A NUL-terminated copy, for the platform's calls.
-  def self.c_text(text : String) : Pointer(UInt8)
-    copy = Pointer(UInt8).malloc((text.bytesize + 1).to_u64)
+  def self.c_text(text : String) : Array(UInt8)
+    copy = Array(UInt8).new(text.bytesize + 1, 0_u8)
     text.bytesize.times { |i| copy[i] = text[i] }
-    copy[text.bytesize] = 0_u8
     copy
   end
 
@@ -1518,8 +1517,9 @@ class ProcessChild
         ::LibC.close(fd)
       end
 
+      @[TapeUnsafe("Borrow NUL-terminated text at the OS boundary")]
       def self.executable_file?(path : String) : Int32
-        c = c_text(path)
+        c = c_text(path).to_unsafe
         return errno if LibC.access(c, 1) != 0 # X_OK
         buffer = Pointer(UInt64).malloc(32_u64)
         return errno if LibC.stat(c, buffer.as(Void*)) != 0
@@ -1528,9 +1528,10 @@ class ProcessChild
         mode == 0x8000 ? 0 : EACCES
       end
 
+      @[TapeUnsafe("Borrow NUL-terminated text at the OS boundary")]
       def self.directory?(path : String) : ::Bool
         buffer = Pointer(UInt64).malloc(32_u64)
-        return false if LibC.stat(c_text(path), buffer.as(Void*)) != 0
+        return false if LibC.stat(c_text(path).to_unsafe, buffer.as(Void*)) != 0
         Pointer(Int32).new(buffer.address + 4_u64).value & 0xF000 == 0x4000
       end
 
@@ -1644,16 +1645,18 @@ class ProcessChild
         Pointer(Int32).new(buffer.address + MODE_OFFSET).value & 0xF000
       end
 
+      @[TapeUnsafe("Borrow NUL-terminated text at the OS boundary")]
       def self.executable_file?(path : String) : Int32
-        c = c_text(path)
+        c = c_text(path).to_unsafe
         # X_OK.
         refused = __iyi_conc_syscall6(SYS_FACCESSAT, AT_FDCWD, c.address.to_i64, 1_i64, 0_i64, 0_i64, 0_i64)
         return (-refused).to_i32 if refused != 0_i64
         mode_of(c) == 0x8000 ? 0 : EACCES
       end
 
+      @[TapeUnsafe("Borrow NUL-terminated text at the OS boundary")]
       def self.directory?(path : String) : ::Bool
-        mode_of(c_text(path)) == 0x4000
+        mode_of(c_text(path).to_unsafe) == 0x4000
       end
 
       def self.current_directory : String
@@ -1666,9 +1669,10 @@ class ProcessChild
         String.new(length) { |target| target.copy_from(buffer, length) }
       end
 
+      @[TapeUnsafe("Borrow NUL-terminated text at the OS boundary")]
       def self.executable : String?
         buffer = Pointer(UInt8).malloc(4096_u64)
-        link = c_text("/proc/self/exe")
+        link = c_text("/proc/self/exe").to_unsafe
         got = __iyi_conc_syscall6(SYS_READLINKAT, AT_FDCWD, link.address.to_i64, buffer.address.to_i64, 4096_i64, 0_i64, 0_i64)
         return nil if got <= 0_i64 || got >= 4096_i64
         length = got.to_i32
@@ -1699,22 +1703,24 @@ class ProcessChild
     end
 
     # The child's `envp`: this program's own table, or the one `env:` made.
+    @[TapeUnsafe("Borrow NUL-terminated text at the OS boundary")]
     def self.envp(environment : Array(String)?) : Pointer(Pointer(UInt8))
       entries = environment
       return __iyi_environ unless entries
       table = Pointer(Pointer(UInt8)).malloc((entries.size + 1).to_u64)
-      entries.each_with_index { |entry, index| table[index] = c_text(entry) }
+      entries.each_with_index { |entry, index| table[index] = c_text(entry).to_unsafe }
       table[entries.size] = Pointer(UInt8).new(0_u64)
       table
     end
 
     # The child's `argv`: the name it was asked for, then the arguments.
+    @[TapeUnsafe("Borrow NUL-terminated text at the OS boundary")]
     def self.argv(command : String, args : Array(String)) : Pointer(Pointer(UInt8))
       list = Pointer(Pointer(UInt8)).malloc((args.size + 2).to_u64)
-      list[0] = c_text(command)
+      list[0] = c_text(command).to_unsafe
       index = 0
       while index < args.size
-        list[index + 1] = c_text(args[index])
+        list[index + 1] = c_text(args[index]).to_unsafe
         index = index + 1
       end
       list[args.size + 1] = Pointer(UInt8).new(0_u64)
@@ -1837,6 +1843,7 @@ class ProcessChild
         ours_reads ? {fds[0], fds[1]} : {fds[1], fds[0]}
       end
 
+      @[TapeUnsafe("Borrow NUL-terminated text at the OS boundary")]
       def start(command : String, path : String, args : Array(String), chdir : String?,
                 input : Int32, output : Int32, error : Int32, environment : Array(String)?) : Nil | ProcessError
         theirs = Pointer(Int32).malloc(3_u64)
@@ -1862,7 +1869,7 @@ class ProcessChild
             theirs[index] = made[1]
           when NULL_DEVICE
             # O_RDONLY for input, O_WRONLY for output; O_CLOEXEC.
-            theirs[index] = ::LibC.open(ProcessChild.c_text("/dev/null"), index == 0 ? 0x1000000 : 0x1000001)
+            theirs[index] = ::LibC.open(ProcessChild.c_text("/dev/null").to_unsafe, index == 0 ? 0x1000000 : 0x1000001)
           end
         end
 
@@ -1874,7 +1881,7 @@ class ProcessChild
           LibC.posix_spawn_file_actions_adddup2(actions.as(Void*), theirs[index], index) if theirs[index] >= 0
         end
         if directory = chdir
-          LibC.posix_spawn_file_actions_addchdir_np(actions.as(Void*), ProcessChild.c_text(directory))
+          LibC.posix_spawn_file_actions_addchdir_np(actions.as(Void*), ProcessChild.c_text(directory).to_unsafe)
         end
         # POSIX_SPAWN_SETSIGMASK with an empty mask: the child does not
         # inherit a signal this thread happens to hold.
@@ -1883,7 +1890,7 @@ class ProcessChild
         LibC.posix_spawnattr_setflags(attributes.as(Void*), 0x08)
         LibC.posix_spawnattr_setsigmask(attributes.as(Void*), mask.as(Void*))
         pid = 0
-        failed = LibC.posix_spawn(pointerof(pid), ProcessChild.c_text(path), actions.as(Void*), attributes.as(Void*),
+        failed = LibC.posix_spawn(pointerof(pid), ProcessChild.c_text(path).to_unsafe, actions.as(Void*), attributes.as(Void*),
           ProcessChild.argv(command, args), ProcessChild.envp(environment))
         LibC.posix_spawn_file_actions_destroy(actions.as(Void*))
         LibC.posix_spawnattr_destroy(attributes.as(Void*))
@@ -1961,6 +1968,7 @@ class ProcessChild
       # by `addinherit_np`), no signal held, and the directory a file
       # action, so a program that could not be started leaves this one
       # where it was.
+      @[TapeUnsafe("Borrow NUL-terminated text at the OS boundary")]
       def self.replace(command : String, path : String, args : Array(String), chdir : String?,
                        environment : Array(String)?) : ProcessError
         actions = Pointer(UInt64).malloc(1_u64)
@@ -1969,7 +1977,7 @@ class ProcessChild
         LibC.posix_spawnattr_init(attributes.as(Void*))
         3.times { |index| LibC.posix_spawn_file_actions_addinherit_np(actions.as(Void*), index) }
         if directory = chdir
-          LibC.posix_spawn_file_actions_addchdir_np(actions.as(Void*), ProcessChild.c_text(directory))
+          LibC.posix_spawn_file_actions_addchdir_np(actions.as(Void*), ProcessChild.c_text(directory).to_unsafe)
         end
         mask = Pointer(UInt64).malloc(1_u64)
         mask[0] = 0_u64
@@ -1977,7 +1985,7 @@ class ProcessChild
         LibC.posix_spawnattr_setflags(attributes.as(Void*), 0x40 | 0x08 | 0x4000)
         LibC.posix_spawnattr_setsigmask(attributes.as(Void*), mask.as(Void*))
         pid = 0
-        failed = LibC.posix_spawn(pointerof(pid), ProcessChild.c_text(path), actions.as(Void*), attributes.as(Void*),
+        failed = LibC.posix_spawn(pointerof(pid), ProcessChild.c_text(path).to_unsafe, actions.as(Void*), attributes.as(Void*),
           ProcessChild.argv(command, args), ProcessChild.envp(environment))
         LibC.posix_spawn_file_actions_destroy(actions.as(Void*))
         LibC.posix_spawnattr_destroy(attributes.as(Void*))
@@ -2008,6 +2016,7 @@ class ProcessChild
         ours_reads ? {fds[0], fds[1]} : {fds[1], fds[0]}
       end
 
+      @[TapeUnsafe("Borrow NUL-terminated text at the OS boundary")]
       def start(command : String, path : String, args : Array(String), chdir : String?,
                 input : Int32, output : Int32, error : Int32, environment : Array(String)?) : Nil | ProcessError
         # Everything the child will touch is made here, before the clone:
@@ -2035,7 +2044,7 @@ class ProcessChild
             end
             theirs[index] = made[1]
           when NULL_DEVICE
-            null = ProcessChild.c_text("/dev/null")
+            null = ProcessChild.c_text("/dev/null").to_unsafe
             # O_RDONLY for input, O_WRONLY for output; O_CLOEXEC, and moved
             # above 2 as a pipe's end is.
             flags = index == 0 ? 0x80000_i64 : 0x80001_i64
@@ -2057,12 +2066,12 @@ class ProcessChild
           close_all
           return ProcessError.new(command, report)
         end
-        target = ProcessChild.c_text(path)
+        target = ProcessChild.c_text(path).to_unsafe
         argv = ProcessChild.argv(command, args)
         envp = ProcessChild.envp(environment)
         directory = Pointer(UInt8).new(0_u64)
         if where = chdir
-          directory = ProcessChild.c_text(where)
+          directory = ProcessChild.c_text(where).to_unsafe
         end
         empty_mask = Pointer(UInt64).malloc(1_u64)
         empty_mask[0] = 0_u64
@@ -2250,20 +2259,21 @@ class ProcessChild
       # 5.11; before it they stay open), as a spawned child has them; and
       # the directory is entered first and left again if the program could
       # not be started.
+      @[TapeUnsafe("Borrow NUL-terminated text at the OS boundary")]
       def self.replace(command : String, path : String, args : Array(String), chdir : String?,
                        environment : Array(String)?) : ProcessError
-        target = ProcessChild.c_text(path)
+        target = ProcessChild.c_text(path).to_unsafe
         argv = ProcessChild.argv(command, args)
         envp = ProcessChild.envp(environment)
         back = ""
         if where = chdir
           back = current_directory
-          entered = __iyi_conc_syscall3(SYS_CHDIR, ProcessChild.c_text(where).address.to_i64, 0_i64, 0_i64)
+          entered = __iyi_conc_syscall3(SYS_CHDIR, ProcessChild.c_text(where).to_unsafe.address.to_i64, 0_i64, 0_i64)
           return ProcessError.new(command, (-entered).to_i32, where) if entered < 0_i64
         end
         __iyi_conc_syscall3(SYS_CLOSE_RANGE, 3_i64, 0xFFFFFFFF_i64, 4_i64)
         failed = __iyi_conc_syscall3(SYS_EXECVE, target.address.to_i64, argv.address.to_i64, envp.address.to_i64)
-        __iyi_conc_syscall3(SYS_CHDIR, ProcessChild.c_text(back).address.to_i64, 0_i64, 0_i64) if chdir
+        __iyi_conc_syscall3(SYS_CHDIR, ProcessChild.c_text(back).to_unsafe.address.to_i64, 0_i64, 0_i64) if chdir
         ProcessError.new(command, (-failed).to_i32)
       end
     {% end %}

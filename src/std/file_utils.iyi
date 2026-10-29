@@ -241,6 +241,7 @@ pub struct FileUtils
 
   # Whether the files *a* and *b* hold the same bytes, read a piece at a
   # time up to the first difference.
+  @[TapeUnsafe("Borrow NUL-terminated text at the OS boundary")]
   def self.compare_file(a : String | Path, b : String | Path) : Bool
     pa = a.to_s
     pb = b.to_s
@@ -251,13 +252,13 @@ pub struct FileUtils
     return true if ia.same_file?(ib)
     return false if ia.size != ib.size
     left = open_read(pa, "Cannot compare #{pa} with #{pb}")
-    right = __iyi_open_file(c_path(pb), true, false, false, false, false, 0)
+    right = __iyi_open_file(c_path(pb).to_unsafe, true, false, false, false, false, 0)
     if right < 0_i64
       __iyi_close(left)
       raise "Cannot compare #{pa} with #{pb}: #{pb} could not be opened"
     end
-    mine = Pointer(UInt8).malloc(PIECE.to_u64)
-    theirs = Pointer(UInt8).malloc(PIECE.to_u64)
+    mine = Array(UInt8).new(PIECE, 0_u8).to_unsafe
+    theirs = Array(UInt8).new(PIECE, 0_u8).to_unsafe
     same = true
     while same
       got = read_piece(left, mine)
@@ -321,14 +322,15 @@ pub struct FileUtils
   # The bytes of *from* into *to*, created or emptied, then *to* given
   # *mode*: a file that was there keeps its own mode through the open, and
   # one that was made got the umask's share of it.
+  @[TapeUnsafe("Borrow NUL-terminated text at the OS boundary")]
   private def self.copy_file(from : String, to : String, mode : Int32) : Nil
     source = open_read(from, "Cannot copy #{from} to #{to}")
-    sink = __iyi_open_file(c_path(to), false, true, true, true, false, mode)
+    sink = __iyi_open_file(c_path(to).to_unsafe, false, true, true, true, false, mode)
     if sink < 0_i64
       __iyi_close(source)
       raise "Cannot copy #{from} to #{to}: #{to} could not be opened for writing"
     end
-    buffer = Pointer(UInt8).malloc(PIECE.to_u64)
+    buffer = Array(UInt8).new(PIECE, 0_u8).to_unsafe
     while true
       got = read_piece(source, buffer)
       break if got == 0_i64
@@ -354,8 +356,9 @@ pub struct FileUtils
     File.chmod(to, mode)
   end
 
+  @[TapeUnsafe("Borrow NUL-terminated text at the OS boundary")]
   private def self.open_read(path : String, doing : String) : Int64
-    fd = __iyi_open_file(c_path(path), true, false, false, false, false, 0)
+    fd = __iyi_open_file(c_path(path).to_unsafe, true, false, false, false, false, 0)
     raise "#{doing}: #{path} could not be opened for reading" if fd < 0_i64
     fd
   end
@@ -409,7 +412,7 @@ pub struct FileUtils
   # resolves a path, and `rm_r("link/")` emptied it.
   private def self.bare(path : String) : String
     n = path.bytesize
-    bytes = path.to_unsafe
+    bytes = path
     while n > 1 && separator?(bytes[n - 1])
       break if {{ flag?(:win32) }} && bytes[n - 2] == 58_u8
       n = n - 1
@@ -425,12 +428,10 @@ pub struct FileUtils
     {% end %}
   end
 
-  private def self.c_path(path : String) : UInt8*
-    n = path.bytesize
-    raise "path contains a NUL byte" if path.byte_index("\u0000")
-    buffer = Pointer(UInt8).malloc((n + 1).to_u64)
-    buffer.copy_from(path.to_unsafe, n)
-    buffer[n] = 0_u8
-    buffer
+  private def self.c_path(path : String) : Array(UInt8)
+    raise "path contains a NUL byte" if path.includes?("\0")
+    bytes = Array(UInt8).new(path.bytesize + 1, 0_u8)
+    path.bytesize.times { |i| bytes[i] = path[i] }
+    bytes
   end
 end

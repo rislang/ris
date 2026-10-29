@@ -199,9 +199,10 @@ pub class Dir
     yield d
   end
 
+  @[TapeUnsafe("Borrow NUL-terminated text at the OS boundary")]
   private def open_dir(dir_path : String) : Void*
     {% if flag?(:darwin) || flag?(:linux) %}
-      p = LibC.opendir(Dir.c_str(dir_path))
+      p = LibC.opendir(Dir.c_str(dir_path).to_unsafe)
       if p.address == 0_u64
         raise "Cannot open directory: #{dir_path}"
       end
@@ -385,14 +386,15 @@ pub class Dir
     cd(path)
   end
 
+  @[TapeUnsafe("Borrow NUL-terminated text at the OS boundary")]
   def self.cd(path : String | Path) : String
     target = path.to_s
     {% if flag?(:darwin) || flag?(:linux) %}
-      if LibC.chdir(c_str(target)) != 0
+      if LibC.chdir(c_str(target).to_unsafe) != 0
         raise "Cannot change directory to: #{target}"
       end
     {% elsif flag?(:win32) %}
-      wide = __iyi_wide_path(c_str(target))
+      wide = __iyi_wide_path(c_str(target).to_unsafe)
       if wide.address == 0_u64 || LibKernel32.SetCurrentDirectoryW(wide) == 0
         code = LibKernel32.GetLastError
         # ERROR_FILENAME_EXCED_RANGE (206): the working directory holds
@@ -495,10 +497,11 @@ pub class Dir
     [] of String
   end
 
+  @[TapeUnsafe("Borrow NUL-terminated text at the OS boundary")]
   def self.exists?(path : String | Path) : Bool
     p = path.to_s
     {% if flag?(:darwin) || flag?(:linux) %}
-      dirp = LibC.opendir(c_str(p))
+      dirp = LibC.opendir(c_str(p).to_unsafe)
       if dirp.address != 0_u64
         LibC.closedir(dirp)
         true
@@ -511,7 +514,7 @@ pub class Dir
       # FILE_ATTRIBUTE_DIRECTORY. The helper is GetFileAttributesW with the
       # wide conversion in front of it, so a long or non-ASCII directory
       # answers here the same as a short ASCII one.
-      attrs = __iyi_path_attributes(c_str(p))
+      attrs = __iyi_path_attributes(c_str(p).to_unsafe)
       attrs != -1 && (attrs & 0x10) != 0
     {% else %}
       false
@@ -527,17 +530,18 @@ pub class Dir
     true
   end
 
+  @[TapeUnsafe("Borrow NUL-terminated text at the OS boundary")]
   def self.mkdir(path : String | Path, mode : Int32 = 0o777) : Nil
     p = path.to_s
     {% if flag?(:darwin) || flag?(:linux) %}
-      if LibC.mkdir(c_str(p), mode) != 0
+      if LibC.mkdir(c_str(p).to_unsafe, mode) != 0
         raise "Cannot create directory: #{p}"
       end
     {% elsif flag?(:win32) %}
       # With Windows' own sentence for why, as `File`'s refusals have it:
       # "Cannot create directory: db" said the same for a directory that
       # was there, a parent that was not and a name Windows forbids.
-      wide = __iyi_wide_path(c_str(p))
+      wide = __iyi_wide_path(c_str(p).to_unsafe)
       raise "Cannot create directory: #{p}: the path is not valid UTF-8" if wide.address == 0_u64
       if LibKernel32.CreateDirectoryW(wide, Pointer(Void).new(0_u64)) == 0
         raise "Cannot create directory: #{p}: #{File.win_error}"
@@ -545,6 +549,7 @@ pub class Dir
     {% end %}
   end
 
+  @[TapeUnsafe("Borrow NUL-terminated text at the OS boundary")]
   def self.mkdir_p(path : String | Path, mode : Int32 = 0o777) : Nil
     p_str = path.to_s
     return if exists?(p_str)
@@ -576,13 +581,13 @@ pub class Dir
       if !exists?(acc)
         # Try mkdir, ignore if already exists (e.g. root or race)
         {% if flag?(:darwin) || flag?(:linux) %}
-          LibC.mkdir(c_str(acc), mode)
+          LibC.mkdir(c_str(acc).to_unsafe, mode)
         {% elsif flag?(:win32) %}
           # Each segment is converted on its own, so the `\\?\` prefix goes on
           # exactly the ones long enough to need it: the whole path can be
           # past MAX_PATH while the first segments are not, and those are
           # created by their plain relative names.
-          acc_wide = __iyi_wide_path(c_str(acc))
+          acc_wide = __iyi_wide_path(c_str(acc).to_unsafe)
           if acc_wide.address != 0_u64 && LibKernel32.CreateDirectoryW(acc_wide, Pointer(Void).new(0_u64)) == 0
             refusal = ": #{File.win_error}" if refusal.empty?
           end
@@ -593,14 +598,15 @@ pub class Dir
     raise "Cannot create directory: #{p_str}#{refusal}" unless exists?(p_str)
   end
 
+  @[TapeUnsafe("Borrow NUL-terminated text at the OS boundary")]
   def self.delete(path : String | Path) : Nil
     p = path.to_s
     {% if flag?(:darwin) || flag?(:linux) %}
-      if LibC.rmdir(c_str(p)) != 0
+      if LibC.rmdir(c_str(p).to_unsafe) != 0
         raise "Cannot remove directory: #{p}"
       end
     {% elsif flag?(:win32) %}
-      wide = __iyi_wide_path(c_str(p))
+      wide = __iyi_wide_path(c_str(p).to_unsafe)
       raise "Cannot remove directory: #{p}: the path is not valid UTF-8" if wide.address == 0_u64
       unless remove_directory(wide)
         raise "Cannot remove directory: #{p}: #{File.win_error}"
@@ -608,12 +614,13 @@ pub class Dir
     {% end %}
   end
 
+  @[TapeUnsafe("Borrow NUL-terminated text at the OS boundary")]
   def self.delete?(path : String | Path) : Bool
     p = path.to_s
     {% if flag?(:darwin) || flag?(:linux) %}
-      LibC.rmdir(c_str(p)) == 0
+      LibC.rmdir(c_str(p).to_unsafe) == 0
     {% elsif flag?(:win32) %}
-      wide = __iyi_wide_path(c_str(p))
+      wide = __iyi_wide_path(c_str(p).to_unsafe)
       wide.address != 0_u64 && remove_directory(wide)
     {% else %}
       false
@@ -700,7 +707,7 @@ pub class Dir
     expanded = [] of String
     glob_expand(pattern, expanded)
     expanded.each do |one|
-      bytes = one.to_unsafe
+      bytes = one
       n = one.bytesize
       next if n == 0
       # The root: the separator a pattern starts with, and on Windows a
@@ -753,7 +760,7 @@ pub class Dir
   # and expanded again; a pattern with none is itself. A `\` escapes the
   # byte after it on posix; on Windows it is a separator.
   private def self.glob_expand(pattern : String, expanded : Array(String)) : Nil
-    bytes = pattern.to_unsafe
+    bytes = pattern
     n = pattern.bytesize
     depth = 0
     open = -1
@@ -786,14 +793,14 @@ pub class Dir
     expanded << pattern
   end
 
-  private def self.glob_bytes(bytes : UInt8*, from : Int32, count : Int32) : String
-    String.new(count) { |t| t.copy_from(bytes + from, count) }
+  private def self.glob_bytes(bytes : String, from : Int32, count : Int32) : String
+    bytes[from, count]
   end
 
   # Whether *path* ends in a separator, which only a root does: `/`, or on
   # Windows `C:\`, `\\` and `\\?\`. A root takes no second separator.
   private def self.glob_rooted?(path : String) : Bool
-    glob_sep?(path.to_unsafe[path.bytesize - 1])
+    glob_sep?(path[path.bytesize - 1])
   end
 
   private def self.glob_join(path : String?, name : String, sep : String) : String
@@ -902,18 +909,11 @@ pub class Dir
     {% end %}
   end
 
-  protected def self.c_str(str : String) : UInt8*
-    n = str.bytesize
-    ptr = str.to_unsafe
-    i = 0
-    while i < n
-      raise "path contains a NUL byte" if ptr[i] == 0_u8
-      i = i + 1
-    end
-    buf = Pointer(UInt8).malloc((n + 1).to_u64)
-    buf.copy_from(ptr, n)
-    buf[n] = 0_u8
-    buf
+  protected def self.c_str(str : String) : Array(UInt8)
+    raise "path contains a NUL byte" if str.includes?("\0")
+    bytes = Array(UInt8).new(str.bytesize + 1, 0_u8)
+    str.bytesize.times { |i| bytes[i] = str[i] }
+    bytes
   end
 
   {% if flag?(:win32) %}
@@ -925,12 +925,13 @@ pub class Dir
     # it produces is what a long directory needs here, and a `*` is no
     # business of its. A null pointer is the conversion having failed, which
     # the callers read as the directory not opening.
+    @[TapeUnsafe("Borrow NUL-terminated text at the OS boundary")]
     protected def self.find_pattern(dir_path : String) : UInt16*
       # An empty path names no directory, as POSIX `opendir("")` fails: it
       # became a pattern for the current drive's root, and
       # `Dir.children("")` listed `C:\` while `Dir.exists?("")` said false.
       return Pointer(UInt16).new(0_u64) if dir_path.empty?
-      wide = __iyi_wide_path(c_str(dir_path))
+      wide = __iyi_wide_path(c_str(dir_path).to_unsafe)
       return wide if wide.address == 0_u64
       length = 0
       while wide[length] != 0_u16

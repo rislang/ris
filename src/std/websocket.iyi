@@ -183,6 +183,7 @@ end
 
 # One whole message: its bytes, and whether it came as text (UTF-8,
 # checked) or binary.
+@[OnTape]
 pub struct Message
   getter data : String
 
@@ -224,11 +225,12 @@ end
 
 # One element of a `Sec-WebSocket-Extensions` list: the extension's name,
 # and its parameters in order, nil for one without a value.
+@[OnTape]
 struct Extension
   getter name : String
-  getter params : Array({String, String?})
+  getter params : Array::View({String, String?})
 
-  def initialize(@name : String, @params : Array({String, String?}))
+  def initialize(@name : String, @params : Array::View({String, String?}))
   end
 end
 
@@ -446,7 +448,7 @@ pub class WebSocket
         end
         params << {param, given}
       end
-      list << Extension.new(name, params)
+      list << Extension.new(name, params.view)
       # Past the comma.
       i = i + 1
     end
@@ -476,7 +478,7 @@ pub class WebSocket
   # once, the two `no_context_takeover`s without a value, the two
   # `max_window_bits` with 8 to 15 in decimal - and `client_max_window_bits`
   # without one in an offer, as a client says it can be held to one.
-  protected def self.deflate_terms(params : Array({String, String?}), answer : Bool) : DeflateTerms | String
+  protected def self.deflate_terms(params : Array::View({String, String?}), answer : Bool) : DeflateTerms | String
     server_reset = false
     client_reset = false
     server_bits = 0

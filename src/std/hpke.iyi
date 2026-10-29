@@ -430,6 +430,7 @@ pub struct HpkeSuite
 end
 
 # A KEM's public key, serialised as section 7.1.1 has it.
+@[OnTape]
 pub struct HpkePublicKey
   getter kem : HpkeKem
   # SerializePublicKey: 32 bytes for X25519, the uncompressed point for
@@ -456,6 +457,7 @@ pub struct HpkePublicKey
 end
 
 # A KEM's private key and the public key that goes with it.
+@[OnTape]
 pub struct HpkePrivateKey
   getter kem : HpkeKem
   getter public_key : HpkePublicKey
@@ -706,6 +708,7 @@ end
 # LabeledExtract and LabeledExpand (section 4) under one suite_id: the
 # KEM's, "KEM" and its code point, or the whole suite's, "HPKE" and its
 # three.
+@[OnTape]
 struct HpkeLabels
   VERSION = "HPKE-v1"
 

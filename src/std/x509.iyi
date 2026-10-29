@@ -223,15 +223,9 @@ pub class Certificate
     @raw.hash
   end
 
-  # The certificate *der* holds (RFC 5280 section 4.1).
-  # The lists of values the parse walks are on a tape of its own, dropped
-  # together when it ends; the certificate copies out what it keeps.
+  # The certificate and parsing temporaries use the caller's tape.
   def self.parse(der : Array(UInt8)) : Certificate | X509Error
-    parsed = X509Error.new("not read").as(Certificate | X509Error)
-    tape do
-      parsed = parse_on_tape(der)
-    end
-    parsed
+    parse_on_tape(der)
   end
 
   private def self.parse_on_tape(der : Array(UInt8)) : Certificate | X509Error
@@ -435,8 +429,9 @@ pub struct X509
     return X509Error.new(problem) if problem
     failures = [] of String
     checks = [0]
-    chain = grow([leaf], intermediates, roots, now, failures, purpose, checks)
-    return chain if chain
+    chain = Array(Certificate).new(MAX_CHAIN, leaf)
+    count = grow(chain, intermediates, roots, now, failures, purpose, checks, 1)
+    return chain[0, count].to_a if count > 0
     if checks[0] > MAX_SIGNATURE_CHECKS
       return X509Error.new("no chain from #{leaf.subject_name} within #{MAX_SIGNATURE_CHECKS} signature checks")
     end
@@ -543,45 +538,49 @@ pub struct X509
     "#{certificate.subject_name}'s RSA key is #{key.bits} bits, under the #{MIN_RSA_BITS} a chain is held to"
   end
 
-  # The chain grown from *chain* to a root, trying every issuer that
-  # matches, or nil; why each candidate failed goes to *failures*. Each
+  # The chain length on success, or zero, trying every matching issuer.
+  # The slots are caller-owned; candidate failures go to *failures*. Each
   # candidate weighed counts in *checks*, and past `MAX_SIGNATURE_CHECKS`
   # the search gives up.
   private def self.grow(chain : Array(Certificate), intermediates : Array::View(Certificate), roots : Array::View(Certificate),
-                        now : Time, failures : Array(String), purpose : X509Purpose, checks : Array(Int32)) : Array(Certificate)?
-    child = chain[chain.size - 1]
+                        now : Time, failures : Array(String), purpose : X509Purpose, checks : Array(Int32), depth : Int32) : Int32
+    child = chain[depth - 1]
     roots.each do |root|
       next unless root.subject == child.issuer
       checks[0] += 1
-      return nil if checks[0] > MAX_SIGNATURE_CHECKS
-      problem = issuer_error(child, root, chain, now, purpose)
+      return 0 if checks[0] > MAX_SIGNATURE_CHECKS
+      problem = issuer_error(child, root, chain[0, depth], now, purpose)
       if problem
         failures << problem
       else
-        return chain + [root]
+        chain[depth] = root
+        return depth + 1
       end
     end
-    return nil if chain.size + 1 >= MAX_CHAIN
+    return 0 if depth + 1 >= MAX_CHAIN
     intermediates.each do |candidate|
       next unless candidate.subject == child.issuer
-      next if chain.any? { |c| c.raw == candidate.raw }
+      seen = false
+      depth.times { |i| seen = true if chain[i].raw == candidate.raw }
+      next if seen
       checks[0] += 1
-      return nil if checks[0] > MAX_SIGNATURE_CHECKS
-      problem = issuer_error(child, candidate, chain, now, purpose)
+      return 0 if checks[0] > MAX_SIGNATURE_CHECKS
+      problem = issuer_error(child, candidate, chain[0, depth], now, purpose)
       if problem
         failures << problem
         next
       end
-      found = grow(chain + [candidate], intermediates, roots, now, failures, purpose, checks)
-      return found if found
-      return nil if checks[0] > MAX_SIGNATURE_CHECKS
+      chain[depth] = candidate
+      found = grow(chain, intermediates, roots, now, failures, purpose, checks, depth + 1)
+      return found if found > 0
+      return 0 if checks[0] > MAX_SIGNATURE_CHECKS
     end
-    nil
+    0
   end
 
   # Why *issuer* cannot be the next certificate above *child*, the last of
   # *chain*, or nil.
-  private def self.issuer_error(child : Certificate, issuer : Certificate, chain : Array(Certificate), now : Time, purpose : X509Purpose) : String?
+  private def self.issuer_error(child : Certificate, issuer : Certificate, chain : Array::View(Certificate), now : Time, purpose : X509Purpose) : String?
     name = issuer.subject_name
     return "#{name} is not valid at #{now}: from #{issuer.not_before} to #{issuer.not_after}" unless issuer.valid_at?(now)
     weak = weak_key(issuer)
@@ -1249,6 +1248,7 @@ end
 # The signature is the one X.509 carries: ECDSA's the DER of
 # Ecdsa-Sig-Value under SHA-256 on P-256 and SHA-384 on P-384, RSA's PKCS
 # #1 v1.5 under SHA-256, Ed25519's its 64 bytes.
+@[OnTape]
 pub struct SigningKey
   getter p256 : P256PrivateKey?
   getter p384 : P384PrivateKey?

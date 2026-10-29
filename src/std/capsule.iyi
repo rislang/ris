@@ -203,6 +203,7 @@ end
 # 2. HTTP Datagrams (RFC 9297 Section 2)
 # =============================================================================
 
+@[OnTape]
 pub struct HttpDatagram
   # The largest legal Quarter Stream ID (RFC 9297 Section 2.1): the largest
   # stream ID, 2^62 - 1, divided by four.
@@ -322,6 +323,7 @@ pub struct CapsuleType
   pub DRAIN_WEBTRANSPORT_SESSION = 0x78ae_u64
 end
 
+@[OnTape]
 pub struct Capsule
   @capsule_type : UInt64
   @value : Bytes
@@ -569,7 +571,7 @@ pub struct CapsuleProtocol
   # ignored, as RFC 9297 Section 3.4 requires of unknown ones; a value that
   # does not parse as an Item is as if the field were absent.
   def self.is_capsule_protocol_header?(value : String) : Bool
-    p = value.to_unsafe
+    p = value
     n = value.bytesize
     i = skip_spaces(p, 0, n)
     return false unless i + 2 <= n && p[i] == 63_u8 && p[i + 1] == 49_u8
@@ -589,7 +591,7 @@ pub struct CapsuleProtocol
     skip_spaces(p, i, n) == n
   end
 
-  private def self.skip_spaces(p : Pointer(UInt8), i : Int32, n : Int32) : Int32
+  private def self.skip_spaces(p : String, i : Int32, n : Int32) : Int32
     while i < n && p[i] == 32_u8
       i = i + 1
     end
@@ -621,7 +623,7 @@ pub struct CapsuleProtocol
 
   # Where the bare item (RFC 8941 Section 4.2.3) starting at *i* ends, or -1
   # when there is none there.
-  private def self.bare_item_end(p : Pointer(UInt8), i : Int32, n : Int32) : Int32
+  private def self.bare_item_end(p : String, i : Int32, n : Int32) : Int32
     return -1 if i >= n
     c = p[i]
     if c == 45_u8 || digit?(c)

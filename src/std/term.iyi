@@ -104,6 +104,8 @@
 
 module std/term
 
+import std/static_array::{StaticArray}
+
 {% unless (flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || flag?(:darwin) || flag?(:win32) %}
   {% raise "std/term reaches the terminal through Linux's ioctl, darwin's libSystem or Windows' console " \
            "calls, and this target has none of them." %}
@@ -357,14 +359,16 @@ pub struct Term
   private def self.with_mode(io : IO, change : Int32, operation : String, &block : -> T) : T | TermError forall T
     raise "Term: cannot #{operation} on a closed stream" if io.closed?
     fd = io.handle
-    saved = Pointer(UInt8).malloc(STATE.to_u64)
+    saved_bytes = StaticArray(UInt8, STATE).new
+    saved = saved_bytes.to_unsafe
     code = get_mode(fd, saved)
     {% if flag?(:win32) %}
       return TermError.new(operation, fd, code, false) if code != 0
     {% else %}
       return TermError.new(operation, fd, code, code != 25) if code != 0
     {% end %}
-    changed = Pointer(UInt8).malloc(STATE.to_u64)
+    changed_bytes = StaticArray(UInt8, STATE).new
+    changed = changed_bytes.to_unsafe
     changed.copy_from(saved, STATE)
     apply(changed, change)
     code = set_mode(fd, changed)

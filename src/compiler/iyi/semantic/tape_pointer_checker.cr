@@ -227,7 +227,8 @@ class Iyi::TapeFfiFlow
       next true if target.name.starts_with?("__sys") || io_write?(target)
       if TapeRules.runtime?(@checker.program, target.location) &&
          target.name.in?("__iyi_write", "__iyi_read", "__iyi_open_read",
-           "__iyi_open_write", "__iyi_openat", "__iyi_file_read",
+           "__iyi_open_write", "__iyi_open_file", "__iyi_openat",
+           "__iyi_file_read",
            "__iyi_file_write", "__iyi_getcwd", "__iyi_unlink")
         next true
       end

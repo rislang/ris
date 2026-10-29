@@ -133,9 +133,9 @@ pub struct Captures
     raise "no route capture #{name}"
   end
 
-  def to_heap : Hash(String, String)
+  def to_h : Hash(String, String)
     result = {} of String => String
-    @entries.each { |entry| result[entry.name.to_heap] = entry.value.to_heap }
+    @entries.each { |entry| result[entry.name] = entry.value }
     result
   end
 end
@@ -188,7 +188,7 @@ pub class Pattern
   # identifier or is used twice, a malformed percent escape.
   def self.parse(text : String) : Pattern | RouterError
     return refused(text, "it is empty") if text.empty?
-    p = text.to_unsafe
+    p = text
     n = text.bytesize
     # The method ends at the first space or tab; Go's reading, so a space
     # inside a path is a method that is not one.
@@ -219,7 +219,7 @@ pub class Pattern
     kinds = [] of Int32
     names = [] of String
     seen = [] of String
-    q = path.to_unsafe
+    q = path
     size = path.bytesize
     at = 0
     while at < size
@@ -270,7 +270,7 @@ pub class Pattern
 
   # A wildcard's name: an ASCII letter or `_`, then letters, digits, `_`.
   def self.identifier?(name : String) : Bool
-    p = name.to_unsafe
+    p = name
     i = 0
     while i < name.bytesize
       c = p[i]
@@ -339,37 +339,6 @@ pub class Pattern
       elsif kind == WILD
         return nil if piece.empty?
         found.add(@names[i].as_tape, piece)
-      else
-        return nil unless piece == @names[i]
-      end
-      i = i + 1
-      j = j + 1
-    end
-    j == pieces.size ? found : nil
-  end
-
-  # `match` on a path already cut into `pieces`.
-  def match_pieces(pieces : Array(String)) : Hash(String, String)?
-    found = {} of String => String
-    i = 0
-    j = 0
-    while i < @kinds.size
-      kind = @kinds[i]
-      if kind == MULTI
-        # The rest, slashes and all, nothing included - but not past the
-        # end: `/x/` does not match `/x`.
-        return nil if j >= pieces.size
-        name = @names[i]
-        found[name] = pieces[j, pieces.size - j].join("/") unless name.empty?
-        return found
-      end
-      return nil if j >= pieces.size
-      piece = pieces[j]
-      if kind == ENDS
-        return nil unless piece.empty? && j == pieces.size - 1
-      elsif kind == WILD
-        return nil if piece.empty?
-        found[@names[i]] = piece
       else
         return nil unless piece == @names[i]
       end
@@ -651,7 +620,7 @@ pub class Router
       if pattern.host == host && pattern.matches_method?(method) && (chosen < 0 || pattern.more_specific?(@patterns[chosen]))
         if got = pattern.match_pieces(pieces)
           chosen = i
-          values = got
+          values = got.to_h
         end
       end
       i = i + 1
@@ -715,7 +684,7 @@ pub class Router
   def self.host_of(value : String) : String
     if value.starts_with?("[")
       close = value.index(']')
-      return value unless close && close + 1 < value.bytesize && value.to_unsafe[close + 1] == 58_u8
+      return value unless close && close + 1 < value.bytesize && value[close + 1] == 58_u8
       return value[1, close - 1]
     end
     colon = value.index(':')

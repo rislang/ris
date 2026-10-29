@@ -136,12 +136,13 @@ pub struct AcmeError
   getter status : Int32
   # The identifier a subproblem is about (section 6.7.1), "" otherwise.
   getter identifier : String
-  getter subproblems : Array(AcmeError)
+  getter subproblems : Array::View(AcmeError)
 
   BAD_NONCE = "urn:ietf:params:acme:error:badNonce"
 
   def initialize(@detail : String, @problem_type : String = "", @status : Int32 = 0, @identifier : String = "",
-                 @subproblems : Array(AcmeError) = [] of AcmeError)
+                 subproblems : Array(AcmeError) = [] of AcmeError)
+    @subproblems = subproblems.view
   end
 
   # Whether this came from a problem document.
@@ -730,11 +731,11 @@ end
 # form JWA (RFC 7518) gives each algorithm.
 pub struct AcmeJws
   # *data* in base64url without padding (RFC 7515 section 2).
-  def self.b64u(data : String | Array(UInt8)) : String
-    text = data.is_a?(String) ? data : String.new(data.size) { |buf| buf.copy_from(data.to_unsafe, data.size) }
+  def self.b64u(data : String | Array::View(UInt8)) : String
+    text = data.is_a?(String) ? data : String.build(data.size) { |buf| data.each { |byte| buf.push(byte) } }
     encoded = Base64.urlsafe_encode(text)
     cut = encoded.bytesize
-    while cut > 0 && encoded.to_unsafe[cut - 1] == 61_u8
+    while cut > 0 && encoded[cut - 1] == 61_u8
       cut = cut - 1
     end
     encoded[0, cut]
@@ -779,7 +780,7 @@ pub struct AcmeJws
 
   # A big-endian number without its leading zero bytes, as JWA writes
   # one (RFC 7518 section 6.3.1).
-  def self.minimal(bytes : Array(UInt8)) : Array(UInt8)
+  def self.minimal(bytes : Array(UInt8)) : Array::View(UInt8)
     at = 0
     while at < bytes.size - 1 && bytes[at] == 0_u8
       at = at + 1

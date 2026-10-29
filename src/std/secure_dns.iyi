@@ -274,7 +274,9 @@ pub class DnsOverTls
       frame[index] = @pending[2 + index]
       index = index + 1
     end
-    @pending = @pending[2 + length, @pending.size - 2 - length]
+    rest = @pending.size - 2 - length
+    rest.times { |i| @pending[i] = @pending[2 + length + i] }
+    @pending.truncate(rest)
     frame
   end
 

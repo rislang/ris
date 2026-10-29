@@ -130,6 +130,7 @@ pub struct Colorize
     "".colorize
   end
 
+  @[OnTape]
   struct Object(T)
     @target : T
 

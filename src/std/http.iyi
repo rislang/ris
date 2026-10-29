@@ -211,7 +211,9 @@ end
 # is closed, and every read waits with the connection in *idle*, for
 # `serve` to end (`close_for_stop`) when the listener closes - one partway
 # through a request as much as one between requests.
+@[OnTape]
 struct IdleConns
+  @[OnTape]
   struct Head
     property first : Conn? = nil
   end
@@ -263,10 +265,12 @@ struct IdleConns
   end
 end
 
+@[OnTape]
 struct Conn
   ROOM = 16384
 
   # A stable handle: idle tracking and body readers share the same state.
+  @[OnTape]
   struct State
     property program_owned : Bool
     property idle_next : Conn? = nil
@@ -1661,6 +1665,7 @@ end
 # request line and headers, the body they promise, and whether the
 # client asked for the connection to close after. `consumed` is where it
 # ends in the text it was read from; `status` the answer an error gets.
+@[OnTape]
 struct ParsedRequest
   getter request : Request?
   getter error : String?
@@ -1674,6 +1679,7 @@ end
 
 # A request's head, read and checked: everything but the body, and how
 # the body is framed - `length` bytes, chunks, or none.
+@[OnTape]
 struct RequestHead
   getter method : String
   getter path : String
@@ -1746,12 +1752,14 @@ end
 
 # A startup failure is data, not a child Error which cancels its observer
 # before it can distinguish failed setup from a request panic.
+@[OnTape]
 struct RisHttpStartFailure
   getter error : SocketError
   def initialize(@error)
   end
 end
 
+@[OnTape]
 pub struct Server
   # `serve` on the tape: the block reads the request where it arrived and
   # writes its answer into *res*, on the request's tape, freed when the
@@ -3243,6 +3251,7 @@ end
 # port is 80 when none is written, as Go's (curl's is 1080). Only an
 # `http://` proxy is spoken: TLS to the proxy itself (`https://`) and
 # SOCKS are refused by name rather than spoken in the clear.
+@[OnTape]
 struct ProxyRoute
   getter host : String
   getter port : Int32

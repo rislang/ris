@@ -965,7 +965,7 @@ rm -f "$exe"
 heap_trap string_arguments
 
 # Generic std classes and crypto inputs use checked tape storage.
-for name in std_generic_tape curve_views mlkem_views shlex base32 \
+for name in std_generic_tape std_small_tape curve_views mlkem_views shlex base32 \
             semantic_version uuid; do
   out=$(RIS_HEAP_STATS=1 "$RIS" run "test/ris/$name.ri" 2>&1)
   if [ "$?" -eq 0 ] &&

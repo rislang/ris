@@ -87,6 +87,7 @@ import std/file::{File}
   end
 {% end %}
 
+@[OnTape]
 pub struct SystemRoots
   # The certificates, each once, in the order the store gave them.
   getter certificates : Array(Certificate)

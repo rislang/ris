@@ -133,9 +133,9 @@ end
 module NumberText
   # From q (10^-30) to Q (10^30), one per power of a thousand.
   SI_PREFIXES = ["q", "r", "y", "z", "a", "f", "p", "n", "µ", "m", "", "k",
-                 "M", "G", "T", "P", "E", "Z", "Y", "R", "Q"]
-  IEC_UNITS   = ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"]
-  JEDEC_UNITS = ["B", "KB", "MB", "GB", "TB", "PB", "EB"]
+                 "M", "G", "T", "P", "E", "Z", "Y", "R", "Q"].copy_to(Program.tape)
+  IEC_UNITS   = ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"].copy_to(Program.tape)
+  JEDEC_UNITS = ["B", "KB", "MB", "GB", "TB", "PB", "EB"].copy_to(Program.tape)
 
   def self.format(writer : String::Builder, value : ::Int,
                   separator : ::Char, delimiter : ::Char, places : Int32?, group : Int32,

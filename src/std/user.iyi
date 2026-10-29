@@ -120,6 +120,7 @@ import std/env::{ENV}
 
 # An account: what `/etc/passwd`, Directory Services or Windows hold for
 # one user.
+@[OnTape]
 pub struct User
   # The login name: `"root"`, `"ada"`.
   getter name : String
@@ -282,15 +283,17 @@ end
 # A group: its name, its id, and the accounts listed as its members. A
 # user whose *primary* group this is need not be listed, and usually is
 # not: `User#group_ids` is the question that counts both.
+@[OnTape]
 pub struct Group
   # The group's name: `"wheel"`.
   getter name : String
   # The group id: a decimal number on Linux and darwin.
   getter id : String
   # The names listed in the group, in the order they are listed.
-  getter members : Array(String)
+  getter members : Array::View(String)
 
-  def initialize(@name : String, @id : String, @members : Array(String))
+  def initialize(@name : String, @id : String, members : Array(String))
+    @members = members.view
   end
 
   # The group called *name*, or nil when there is none.
@@ -455,32 +458,29 @@ struct UserFiles
 
     # A whole file, or nil when it cannot be opened or read. Read until
     # the kernel answers 0, a read a signal interrupted asked again.
+    @[TapeUnsafe("Read account files into the caller's builder")]
     def self.read(path : String) : String?
-      fd = __iyi_open_read(path.to_unsafe)
-      return nil if fd < 0_i64
-      held = 0
-      capacity = 16384
-      buffer = Pointer(UInt8).malloc(capacity.to_u64)
-      while true
-        if held == capacity
-          grown = Pointer(UInt8).malloc((capacity * 2).to_u64)
-          grown.copy_from(buffer, held)
-          buffer = grown
-          capacity = capacity * 2
-        end
-        got = __iyi_file_read(fd, (buffer + held.to_i64).as(Void*), (capacity - held).to_u64)
-        if got > 0_i64
-          held = held + got.to_i32
-        elsif got == 0_i64
-          break
-        elsif got != -4_i64
-          __iyi_close(fd)
-          return nil
-        end
+      return nil if path.includes?("\0")
+      cpath = String.build(path.bytesize + 1) do |writer|
+        writer << path
+        writer.push(0_u8)
       end
-      __iyi_close(fd)
-      String.new(held) { |target| target.copy_from(buffer, held) }
+      fd = __iyi_open_read(cpath.to_unsafe)
+      return nil if fd < 0_i64
+      defer __iyi_close(fd)
+      writer = String::Builder.new(16384)
+      loop do
+        got = 0_i64
+        writer.unsafe_append(16384) do |buffer|
+          got = __iyi_file_read(fd, buffer.as(Void*), 16384_u64)
+          got > 0 ? got.to_i32 : 0
+        end
+        break if got == 0_i64
+        return nil if got < 0_i64 && got != -4_i64
+      end
+      writer.finish
     end
+
   {% else %}
     # The files are Linux's answer only; darwin and Windows are asked.
     def self.read(path : String) : String?

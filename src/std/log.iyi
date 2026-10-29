@@ -207,6 +207,10 @@ pub struct Metadata
     Metadata.new(writer.finish)
   end
 
+  def self.from_bytes(bytes : String) : Metadata
+    new(bytes)
+  end
+
   protected def initialize(@bytes : String)
   end
 
@@ -334,6 +338,7 @@ pub class DefaultFormatter < Formatter
   end
 end
 
+@[OnTape]
 pub abstract class Backend
   abstract def write(entry : Entry) : Nil
   abstract def close : Nil
@@ -343,6 +348,7 @@ pub abstract class Backend
   end
 end
 
+@[OnTape]
 pub class IOBackend < Backend
   def self.on_program(io : IO, formatter : Formatter? = nil) : IOBackend
     backend = RisRegion.program_object(IOBackend)
@@ -451,6 +457,7 @@ pub class RisMemoryBackend < Backend
   end
 end
 
+@[OnTape]
 pub class MemoryBackend < Backend
   property formatter : Formatter
   getter entries : Array(Entry)
@@ -493,6 +500,7 @@ end
 #
 # A thread needs the collector and a target with threads: under
 # `-Dgc_none` or `-Dgc_boehm`, or on another target, `new` refuses.
+@[OnTape]
 pub class AsyncBackend < Backend
   property formatter : Formatter
   @queue : Mutex(AsyncQueue)
@@ -555,6 +563,7 @@ pub class AsyncBackend < Backend
 end
 
 # The lines an `AsyncBackend` has queued, behind its Mutex.
+@[OnTape]
 class AsyncQueue
   @lines : Array(String)
   @closed : Bool
@@ -577,7 +586,7 @@ class AsyncQueue
   def take : {String, Bool}?
     return nil if @lines.empty? && !@closed
     text = @lines.join
-    @lines = [] of String
+    @lines.clear
     {text, @closed}
   end
 end
@@ -847,7 +856,7 @@ pub class Log
   end
 
   # Reconfigures the root in place, so loggers obtained earlier follow.
-  def self.setup(level : Severity = Severity::Info, backend : Backend = IOBackend.new(STDOUT)) : Logger
+  def self.setup(level : Severity = Severity::Info, backend : Backend = IOBackend.on_program(STDOUT)) : Logger
     r = root
     r.level = level
     r.backend = backend
@@ -857,7 +866,7 @@ pub class Log
   # `setup`, the level read from *variable* - a severity's name, any case
   # - or *default_level* when it is unset or empty. A name that is no
   # severity is refused, the severities named.
-  def self.setup_from_env(default_level : Severity = Severity::Info, backend : Backend = IOBackend.new(STDOUT), variable : String = "LOG_LEVEL") : Logger
+  def self.setup_from_env(default_level : Severity = Severity::Info, backend : Backend = IOBackend.on_program(STDOUT), variable : String = "LOG_LEVEL") : Logger
     level = default_level
     if name = Program.env(variable)
       unless name.strip.empty?
@@ -871,20 +880,9 @@ pub class Log
     root.for(source)
   end
 
-  # Every task's open contexts, by the task's fiber; how many are open, so
-  # a program that opens none never looks.
-  @[OnTape]
-  struct ContextSlot
-    getter id : UInt64
-    getter node : Metadata?
-
-    def initialize(@id : UInt64, @node : Metadata?)
-    end
-  end
-
-  # The lock protects the program-owned slots. Empty slots are reused;
-  # metadata bytes belong to the task whose open context installed them.
-  @@contexts : Array(ContextSlot) = Array(ContextSlot).new.copy_to(Program.tape)
+  # Encoded contexts live in pool runs; overwrite and delete reuse bytes.
+  @@contexts : Hash(UInt64, String) =
+    Hash(UInt64, String).new.copy_to(Program.tape)
   # Static cleanup releases this lock without a callback environment
   # capturing either the lock receiver or task-owned metadata.
   class ContextLock < Mutex(Int32)
@@ -912,7 +910,7 @@ pub class Log
   # panic or not.
   def self.with_context(**data, &block : -> R) : R forall R
     id = task_key
-    own = context_of(id)
+    own = context_of(id, true)
     node = context_node
     data.each do |key, value|
       node = Metadata.new(key.to_s.as_tape, LogField.text(value), node)
@@ -996,9 +994,8 @@ pub class Log
   end
 
   protected def self.context_locked(id : UInt64) : Metadata?
-    node = nil.as(Metadata?)
-    @@contexts.each { |slot| node = slot.node if slot.id == id }
-    node
+    bytes = @@contexts[id]?
+    bytes ? Metadata.from_bytes(bytes) : nil
   end
 
   private def self.store(id : UInt64, node : Metadata?) : Nil
@@ -1009,22 +1006,12 @@ pub class Log
   end
 
   protected def self.store_locked(id : UInt64, node : Metadata?) : Nil
-    index = -1
-    empty = -1
-    @@contexts.each_with_index do |slot, i|
-      index = i if slot.id == id
-      empty = i if slot.node.nil?
+    if node
+      @@contexts[id] = node.bytes
+    else
+      @@contexts.delete(id)
     end
-    if index >= 0
-      @@contexts[index] = ContextSlot.new(id, node)
-    elsif node
-      slot = ContextSlot.new(id, node)
-      if empty >= 0
-        @@contexts[empty] = slot
-      else
-        Program.tape.run { @@contexts << slot }
-      end
-    end
+    nil
   end
 
   private def self.restore(id : UInt64, own : Metadata?) : Nil

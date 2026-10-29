@@ -84,6 +84,7 @@ import std/asn1::{Der, DerValue, DerTag, Asn1Error}
 import std/ecdsa::{EcdsaPublicKey, EcdsaCurve, EcdsaHash, EcdsaError}
 
 # A P-384 private key, and the public key that goes with it.
+@[OnTape]
 pub struct P384PrivateKey
   getter public_key : EcdsaPublicKey
   # The public key's point, uncompressed: 0x04, then x and y, 48 bytes each.

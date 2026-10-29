@@ -1,0 +1,33 @@
+module test/ris/std_small_tape
+
+import std/bit_array
+import std/capsule::{VarInt, CapsuleProtocol}
+import std/colorize::{Colorize}
+import std/html::{HTML}
+import std/box::{Box}
+
+bits = BitArray.new(70)
+bits[0] = true
+bits[63] = true
+bits[69] = true
+copy = bits.dup
+bits[0] = false
+raise "bit copy aliases input" unless copy[0] && !bits[0]
+bytes = copy.to_slice
+raise "bit byte order" unless bytes.size == 9 && bytes[0] == 1_u8 &&
+  bytes[7] == 128_u8 && bytes[8] == 32_u8
+raise "html entities" unless HTML.unescape("caf&eacute; &amp; &#x1f600;") ==
+  "café & 😀"
+[0_u64, 63_u64, 64_u64, 16384_u64, 1073741824_u64].each do |value|
+  encoded = VarInt.encode(value)
+  decoded, count = VarInt.decode(encoded)
+  raise "varint round trip" unless decoded == value && count == encoded.size
+end
+raise "capsule header" unless
+  CapsuleProtocol.is_capsule_protocol_header?("?1; mode=token") &&
+  !CapsuleProtocol.is_capsule_protocol_header?("?1 trailing")
+Colorize.enabled = false
+raise "color text" unless "café".colorize.red.to_s == "café"
+box = Box(String).new("owned")
+raise "std class" unless box.object == "owned"
+puts "PASS: small std modules on tape"
