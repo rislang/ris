@@ -485,6 +485,13 @@ module Iyi
       !(file.includes?("/src/std/") || file.ends_with?(".iyimod"))
     end
 
+    # A body read back from a `.iyimod` was lowered when its module was
+    # built: lowering it again would take the lowering's own temporaries
+    # (`__temp_1 << item`) for growing text.
+    private def iyimod_code?(node : ASTNode) : Bool
+      !!node.location.try(&.original_filename).try(&.ends_with?(".iyimod"))
+    end
+
     @ris_growing_locals = Set(String).new
     @ris_text_slots = {} of String => Var
     @ris_growing_fields = Set(String).new
@@ -504,7 +511,7 @@ module Iyi
 
       def visit(node : Assign)
         if (field = node.target).is_a?(InstanceVar) &&
-           (node.value.is_a?(ArrayLiteral) || node.value.is_a?(HashLiteral))
+           GrowingTextScan.never_string_value?(node.value)
           @non_text_fields << field.name
         end
         if (target = node.target).is_a?(Var)
@@ -533,6 +540,18 @@ module Iyi
       # Fields declared as, or started from, a type that cannot be a String
       # (`@x : Array(T)`, `@x = [] of T`) need no text companion.
       getter non_text_fields = Set(String).new
+
+      # `[] of T`, `{} of K => V`, `Array(T).new`, `Set(T).new(8)`.
+      def self.never_string_value?(value : ASTNode) : Bool
+        case value
+        when ArrayLiteral, HashLiteral
+          true
+        when Call
+          value.name == "new" && !!(obj = value.obj) && never_string?(obj)
+        else
+          false
+        end
+      end
 
       def self.never_string?(type : ASTNode) : Bool
         case type
@@ -567,6 +586,17 @@ module Iyi
       end
 
       def visit(node : Call)
+        # `property items : Array(T)` declares `@items` through a macro.
+        if node.obj.nil? &&
+           node.name.in?("getter", "setter", "property", "getter?",
+             "property?", "getter!", "property!")
+          node.args.each do |arg|
+            if arg.is_a?(TypeDeclaration) && (var = arg.var).is_a?(Var) &&
+               GrowingTextScan.never_string?(arg.declared_type)
+              @non_text_fields << "@#{var.name}"
+            end
+          end
+        end
         if node.name == "<<" && node.args.size == 1
           case receiver = node.obj
           when Var
@@ -761,7 +791,8 @@ module Iyi
       @ris_growing_locals = Set(String).new
       @ris_text_slots = {} of String => Var
       return body unless program.tape_platform? && @macro_code == 0 &&
-                         !TapeScopeRuntime.runtime?(body.location)
+                         !TapeScopeRuntime.runtime?(body.location) &&
+                         !iyimod_code?(body)
       refuse_plain_builders(body)
       scan = GrowingTextScan.new
       body.accept(scan)
@@ -916,7 +947,7 @@ module Iyi
       end
       # String mutation spells a rebinding. Other receivers keep their
       # ordinary methods; the type test disappears after specialization.
-      if program.tape_platform? && @macro_code == 0 &&
+      if program.tape_platform? && @macro_code == 0 && !iyimod_code?(node) &&
          !@ris_string_mutations.includes?(node.object_id) &&
          ((node.name == "<<" && node.args.size == 1) ||
           node.name.in?("upcase!", "downcase!", "capitalize!", "strip!",
@@ -1297,7 +1328,7 @@ module Iyi
       outer_fields = @ris_growing_fields
       @ris_growing_fields = Set(String).new
       if program.tape_platform? && @macro_code == 0 &&
-         !TapeScopeRuntime.runtime?(node.location)
+         !TapeScopeRuntime.runtime?(node.location) && !iyimod_code?(node)
         scan = GrowingTextScan.new(methods: true)
         node.body.accept(scan)
         @ris_growing_fields = scan.fields - scan.non_text_fields
@@ -1316,6 +1347,8 @@ module Iyi
             Call.new(slot.clone, "__ris_text_reset", field).at(node)).at(node)
           reset = Def.new("__ris_text_reset_#{name.lchop('@')}", [] of Arg,
             Expressions.new([rewind, NilLiteral.new.at(node)] of ASTNode)).at(node)
+          # A pub class exports it: the artifact needs its return type.
+          reset.return_type = Path.global("Nil").at(node)
           [declaration, reset] of ASTNode
         end
         node.body = Expressions.new(declarations + [node.body]).at(node) unless declarations.empty?

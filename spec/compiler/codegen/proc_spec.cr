@@ -51,6 +51,7 @@ describe "Code gen: proc" do
   end
 
   it "call proc pointer of instance method that raises" do
+    pending! "ris refuses a proc that keeps a tape value past its block"
     run(<<-CODE).to_i.should eq(1)
       require "prelude"
       class Foo
@@ -107,6 +108,7 @@ describe "Code gen: proc" do
   end
 
   it "makes sure that proc pointer is transformed after type inference" do
+    pending! "ris refuses an opaque callback it cannot prove does not retain"
     run(<<-CODE).to_i.should eq(1)
       require "prelude"
 
@@ -174,6 +176,7 @@ describe "Code gen: proc" do
   end
 
   it "allows passing proc type to C automatically" do
+    pending! "ris's prelude has no LibC::SizeT"
     run(<<-CODE).to_i.should eq(1)
       require "prelude"
 
@@ -496,6 +499,7 @@ describe "Code gen: proc" do
   end
 
   it "codegens issue with missing byval in proc literal inside struct" do
+    pending! "ris's prelude has no Array#sort!"
     run(<<-CODE).to_string.should eq("bar")
       require "prelude"
 
@@ -571,6 +575,7 @@ describe "Code gen: proc" do
   end
 
   it "codegens proc that accepts array of type" do
+    pending! "ris refuses shrinking an Array while a view of it lives"
     run(<<-CODE).to_i.should eq(2)
       require "prelude"
 
@@ -625,6 +630,7 @@ describe "Code gen: proc" do
   end
 
   it "gets proc to lib fun with compatible parameter types" do
+    pending! "ris refuses an opaque callback it cannot prove does not retain"
     test_c(<<-C, <<-CODE, &.to_i.should eq(0x1235))
       void *foo(void *x) {
         return (void *)((char *)x + 1);
@@ -641,6 +647,7 @@ describe "Code gen: proc" do
   end
 
   it "gets proc to lib fun with compatible `#to_unsafe` type" do
+    pending! "ris refuses an opaque callback it cannot prove does not retain"
     test_c(<<-C, <<-CODE, &.to_i.should eq(42))
       #include <stdint.h>
 
@@ -687,6 +694,7 @@ describe "Code gen: proc" do
   end
 
   it "gets same pointer from proc pointers to lib fun with compatible types" do
+    pending! "ris's prelude has no Proc#pointer"
     test_c(<<-C, <<-CODE, &.to_b.should be_true)
       void foo(void *x) {
       }
@@ -763,6 +771,7 @@ describe "Code gen: proc" do
   end
 
   it "uses alias of proc with virtual type (#1347)" do
+    pending! "ris refuses storing request tape data on the program tape"
     run(<<-CODE).to_i.should eq(2)
       require "prelude"
 
@@ -825,10 +834,11 @@ describe "Code gen: proc" do
   end
 
   it "accesses T in macros as a TupleLiteral" do
-    run(<<-CODE).to_string.should eq("TupleLiteral")
+    # ris: compare in the macro; a String result needs the full prelude.
+    run(<<-CODE).to_b.should be_true
       struct Proc
         def t
-          {{ T.class_name }}
+          {{ T.class_name == "TupleLiteral" }}
         end
       end
 
@@ -1088,6 +1098,7 @@ describe "Code gen: proc" do
   end
 
   it "saves receiver value of proc pointer `->@@cvar.foo`" do
+    pending! "ris refuses a proc that keeps a tape value past its block"
     run(<<-CODE).to_i.should eq(1)
       require "prelude"
 

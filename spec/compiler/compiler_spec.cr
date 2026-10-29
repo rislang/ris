@@ -476,24 +476,30 @@ describe "Compiler" do
   # iyi: the concurrency runtime — SPEC.md III.4, Linux only. The bench gate
   # (`bench/concurrency_exercise.sh`) is the full property list; what earns a
   # place *here* is what `make compiler_spec` should catch without bash: the
-  # runtime compiles, interleaves, cancels, selects, and adds no undefined
+  # runtime compiles, interleaves, cancels, passes mail, and adds no undefined
   # symbol. Skipped where the runtime does not exist, by the same platform
   # test the prelude gates the `require` on.
   {% if flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64)) %}
     describe "concurrency" do
-      it "interleaves a group's tasks through a channel and joins" do
+      it "interleaves a group's tasks through RisBoard and joins" do
         with_tempdir("iyi-conc-pingpong") do
           File.write "ping.iyi", <<-'IYI'
-            ping = Channel(Int32).new(1)
-            pong = Channel(Int32).new(1)
-            order = ""
+            struct Ping
+            end
+            struct Pong
+            end
+            struct Mark
+              getter letter : Char
+              def initialize(@letter : Char)
+              end
+            end
             group do |g|
               g.spawn do
                 round = 0
                 while round < 2
-                  ping.receive
-                  order = order + "a"
-                  pong.send(1)
+                  RisBoard.take(Ping)
+                  RisBoard.post(Mark.new('a'))
+                  RisBoard.post(Pong.new)
                   round = round + 1
                 end
                 0
@@ -501,13 +507,18 @@ describe "Compiler" do
               g.spawn do
                 round = 0
                 while round < 2
-                  order = order + "b"
-                  ping.send(1)
-                  pong.receive
+                  RisBoard.post(Mark.new('b'))
+                  RisBoard.post(Ping.new)
+                  RisBoard.take(Pong)
                   round = round + 1
                 end
                 0
               end
+            end
+            order = ""
+            while (mark = RisBoard.poll(Mark)).is_a?(Tuple) && mark[1]
+              letter = mark[0]
+              order << letter.letter if letter.is_a?(Mark)
             end
             puts order
             IYI
@@ -519,7 +530,7 @@ describe "Compiler" do
         end
       end
 
-      it "cancels a blocked sibling when a task fails, and select picks the ready arm" do
+      it "cancels a blocked sibling when a task fails, and a timed take finds posted mail" do
         with_tempdir("iyi-conc-cancel-select") do
           File.write "cs.iyi", <<-'IYI'
             pub struct Boom
@@ -533,11 +544,16 @@ describe "Compiler" do
               end
             end
 
-            saw = ""
+            struct Saw
+              getter cancelled : Bool
+              def initialize(@cancelled : Bool)
+              end
+            end
+
             group do |g|
               g.spawn do
                 slept = sleep(10000)
-                saw = slept.is_a?(Cancelled) ? "cancelled" : "slept"
+                RisBoard.post(Saw.new(slept.is_a?(Cancelled)))
                 slept
               end
               g.spawn do
@@ -545,16 +561,24 @@ describe "Compiler" do
                 Boom.new
               end
             end
-            puts saw
+            saw = RisBoard.poll(Saw)
+            if saw.is_a?(Tuple) && (seen = saw[0]).is_a?(Saw)
+              puts seen.cancelled ? "cancelled" : "slept"
+            end
 
-            ready = Channel(Int32).new(1)
-            ready.send(5)
-            other = Channel(Int32).new(1)
-            select
-            when a = other.receive
-              puts "wrong arm"
-            when b = ready.receive
-              puts b.is_a?(Int32) ? b * 2 : -1
+            struct Ready
+              getter number : Int32
+              def initialize(@number : Int32)
+              end
+            end
+            struct Other
+            end
+            RisBoard.post(Ready.new(5))
+            miss = RisBoard.poll(Other)
+            puts "wrong message" if miss.is_a?(Tuple) && miss[1]
+            got = RisBoard.take(Ready, 10_i64)
+            if got.is_a?(Tuple) && (ready = got[0]).is_a?(Ready)
+              puts ready.number * 2
             end
             IYI
           source = Iyi::Compiler::Source.new(
@@ -569,14 +593,15 @@ describe "Compiler" do
         pending! "nm is unavailable" unless nm_available?
         with_tempdir("iyi-conc-floor") do
           File.write "floor.iyi", <<-'IYI'
-            done = Channel(Int32).new
+            struct Done
+            end
             group do |g|
               g.spawn do
-                done.send(1)
+                RisBoard.post(Done.new)
                 0
               end
               g.spawn do
-                value = done.receive
+                value = RisBoard.take(Done)
                 0
               end
             end

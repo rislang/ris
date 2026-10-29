@@ -591,6 +591,7 @@ describe "Code gen: closure" do
   end
 
   it "doesn't form a closure if invoking class method" do
+    pending! "ris's prelude has no Proc#closure?"
     run(<<-CODE).to_b.should be_false
       require "prelude"
 
@@ -608,6 +609,7 @@ describe "Code gen: closure" do
   end
 
   it "doesn't form a closure if invoking class method with self" do
+    pending! "ris's prelude has no Proc#closure?"
     run(<<-CODE).to_b.should be_false
       require "prelude"
 
@@ -699,9 +701,12 @@ describe "Code gen: closure" do
   end
 
   it "allows passing an external function along" do
+    # ris: Crystal's prelude is gone; the closure check needs only `raise`.
     codegen(<<-CODE)
-      require "prelude"
-
+      def raise(message) : NoReturn
+        while true
+        end
+      end
 
       lib LibA
         fun a(a : Void* -> Void*)

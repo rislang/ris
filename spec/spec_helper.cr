@@ -319,6 +319,8 @@ def run(code, filename : String? = nil, inject_primitives = true, debug = Iyi::D
   # the program and run it, printing the last
   # expression and using that to compare the result.
   if code.includes?(%(require "prelude"))
+    # ris: Crystal's prelude is gone; the example runs on ris's own.
+    code = code.sub(%(require "prelude"), "")
     ast = Parser.parse(code).as(Expressions)
     last = ast.expressions.last
     assign = Assign.new(Var.new("__tempvar"), last)
@@ -328,6 +330,7 @@ def run(code, filename : String? = nil, inject_primitives = true, debug = Iyi::D
     code = ast.to_s
 
     compiler = create_spec_compiler
+    compiler.prelude = "iyi/prelude"
     compiler.debug = debug
     compiler.flags.concat flags if flags
     apply_program_flags(compiler.flags)

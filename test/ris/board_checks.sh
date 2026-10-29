@@ -4,7 +4,7 @@ set -uo pipefail
 cd "$(dirname "$0")/../.."
 RIS=${RIS:-./bin/ris}
 status=0
-for gate in core copies waits parallel survival modules limits; do
+for gate in core copies waits parallel survival modules limits array_chain; do
   out=$(RIS_HEAP_STATS=1 "$RIS" run "test/ris/board_$gate.ri" 2>&1)
   if [ "$?" -eq 0 ] &&
       grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out" &&

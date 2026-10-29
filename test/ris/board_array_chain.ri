@@ -1,0 +1,44 @@
+# A field appended with a chain is an Array, not growing text: its text
+# companion must not reach the board (std/autocert's AutocertConfig).
+@[OnTape]
+struct BoardChained
+  getter name : String
+  property kinds : Array(String)
+
+  def initialize(@name : String)
+    @kinds = Array(String).new
+    @kinds << "tls-alpn-01" << "http-01"
+  end
+end
+
+sent = BoardChained.new("chain")
+puts RisBoard.post(sent)
+got = RisBoard.take(BoardChained)
+if got.is_a?(BoardChained)
+  puts got.name
+  puts got.kinds.join(",")
+end
+
+# A growing String field keeps its companion, which stays behind: the
+# taker gets the text and a fresh companion of its own.
+@[OnTape]
+struct BoardGrown
+  getter note : String
+
+  def initialize
+    @note = ""
+    @note << "grown" << "!"
+  end
+
+  def add(text : String) : Nil
+    @note << text
+  end
+end
+
+puts RisBoard.post(BoardGrown.new)
+grown = RisBoard.take(BoardGrown)
+if grown.is_a?(BoardGrown)
+  grown.add("?")
+  puts grown.note
+end
+puts "PASS: board array_chain"

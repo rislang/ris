@@ -268,8 +268,11 @@ private module RisBoardCodec(T)
       {% end %}
     {% elsif T.struct? && !T.annotation(Owner) && !T.name.starts_with?("Pointer(") && !T.name.starts_with?("Proc(") %}
       {% for field in T.instance_vars %}
+        # A String field's growth companion is local storage, never sent.
+        {% unless field.name.starts_with?("__ris_text_") %}
         RisBoardCodec({{field.type}}).check(
           Tuple(*P, NamedTuple({{field.name.id}}: {{field.type}})), Tuple(*A, T))
+        {% end %}
       {% end %}
     {% else %}
       {% raise "RisBoard refuses #{T} at #{P}; send String, Array bytes or a " +
@@ -314,8 +317,10 @@ private module RisBoardCodec(T)
       cursor.scalar(value)
     {% else %}
       {% for field in T.instance_vars %}
+        {% unless field.name.starts_with?("__ris_text_") %}
         RisBoardCodec({{field.type}}).write(
           pointerof(value.@{{field.name.id}}).value, cursor)
+        {% end %}
       {% end %}
     {% end %}
   end
@@ -362,8 +367,12 @@ private module RisBoardCodec(T)
     {% else %}
       made = uninitialized T
       {% for field in T.instance_vars %}
+        {% if field.name.starts_with?("__ris_text_") %}
+        pointerof(made.@{{field.name.id}}).value = RisTextGrowth.new
+        {% else %}
         pointerof(made.@{{field.name.id}}).value =
           RisBoardCodec({{field.type}}).read(cursor)
+        {% end %}
       {% end %}
       made
     {% end %}
