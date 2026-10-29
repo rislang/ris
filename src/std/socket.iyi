@@ -1049,6 +1049,15 @@ pub struct IyiSocket
     result
   end
 
+  # Up to *count* bytes into *buffer* from *at*, which must have room for
+  # them: recv writes there directly, nothing copied. A connection's own
+  # fixed buffer (std/tls's inbox) is read this way.
+  @[TapeUnsafe("recv writes into the checked range of the caller's Array")]
+  def read(buffer : Array(UInt8), at : Int32, count : Int32) : Int32 | Cancelled | SocketError
+    raise "read of #{count} bytes at #{at} past an Array of #{buffer.size}" if at < 0 || count < 0 || at + count > buffer.size
+    read(buffer.to_unsafe + at, count)
+  end
+
   def recv(max_bytes : Int32 = 4096) : String | Cancelled | SocketError
     read(max_bytes)
   end
@@ -1083,6 +1092,14 @@ pub struct IyiSocket
       written = written + n.to_i32
     end
     written
+  end
+
+  # *count* bytes of *buffer* from *at*, which must hold them: the OS reads
+  # them in place until the write completes.
+  @[TapeUnsafe("send reads the checked range of the caller's Array")]
+  def write(buffer : Array(UInt8), at : Int32, count : Int32) : Int32 | Cancelled | SocketError
+    raise "write of #{count} bytes at #{at} past an Array of #{buffer.size}" if at < 0 || count < 0 || at + count > buffer.size
+    write(buffer.to_unsafe + at, count)
   end
 
   # *first* then *second*, as one write: a head and its body, which written

@@ -136,15 +136,15 @@ first):
 
 ## std port (session state: tape_state.txt; group one, then group two)
 
-* Done: std/aead reads input with `[]` into the cipher's local blocks,
-  never a pointer to tape bytes; keys live in StaticArray fields, not
-  malloc (bench/std_aead_exercise.sh holds: vectors, python oracle,
-  refusals, mutations). Left: it runs ~100 MB/s, copying byte by byte
-  at the boundary; and the pointer `seal_at`/`open_at` migration
-  overloads, until tls's record layer is ported.
-* tls: the record layer seals malloc'd Pointer buffers (@outbox, record
-  copies) and reads 37 pointer sites; move them to Array(UInt8) and the
-  Array `seal_at`/`open_at`, then drop aead's pointer overloads.
+* Done: std/aead and the tls record layer hold no tape pointer and no
+  malloc. aead reads input with `[]` into its cipher's local blocks
+  (bench/std_aead_exercise.sh holds); tls keeps its inbox and outbox as
+  fixed Arrays that std/socket reads and writes in place, and seals
+  records through aead's Array `seal_at`/`open_at`. Left: aead runs
+  ~100 MB/s, copying byte by byte at the boundary; tls's
+  `read(Pointer, count)` stays, marked, for std/http's Conn buffer;
+  bench/std_tls_exercise waits on the 5.1 bench port (its server task
+  captures a tape config).
 * Then, as tape_state.txt orders them: log, autocert's nested Hash, sse,
   http, websocket, cookie, router; group two smallest first.
 

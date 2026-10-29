@@ -53,18 +53,24 @@ def check(cond : Bool, label : String) : Nil
 end
 
 def b(hex : String) : Array(UInt8)
-  p = hex.to_unsafe
   Array(UInt8).new(hex.bytesize // 2) do |i|
-    hi = p[i * 2].to_i32
-    lo = p[i * 2 + 1].to_i32
+    hi = hex[i * 2].to_i32
+    lo = hex[i * 2 + 1].to_i32
     hi = hi >= 97 ? hi - 87 : hi - 48
     lo = lo >= 97 ? lo - 87 : lo - 48
     (hi * 16 + lo).to_u8
   end
 end
 
-def text(bytes : Array(UInt8)) : String
-  String.new(bytes.size) { |buf| buf.copy_from(bytes.to_unsafe, bytes.size) }
+# A copy of *view*: where a std API keeps or takes an Array.
+def own(view : Array::View(UInt8)) : Array(UInt8)
+  Array(UInt8).new(view.size) { |i| view[i] }
+end
+
+def text(bytes : Array::View(UInt8)) : String
+  text = String::Builder.new
+  bytes.each { |byte| text.push(byte) }
+  text.finish
 end
 
 # Everything the server sends after *conn* has written "hello", or the
@@ -301,24 +307,24 @@ ECH_PUBLIC_KEY_PEM = "-----BEGIN PRIVATE KEY-----\n" \
 CRAFTED_SUITE = HpkeSuite.new(HpkeKem::X25519Sha256, HpkeKdf::HkdfSha256, HpkeAead::Aes128Gcm)
 
 def bytes_of(s : String) : Array(UInt8)
-  Array(UInt8).new(s.bytesize) { |i| s.to_unsafe[i] }
+  Array(UInt8).new(s.bytesize) { |i| s[i] }
 end
 
 def u16b(n : Int32) : Array(UInt8)
   [((n >> 8) & 0xFF).to_u8, (n & 0xFF).to_u8]
 end
 
-def ext(type : Int32, data : Array(UInt8)) : Array(UInt8)
+def ext(type : Int32, data : Array::View(UInt8)) : Array(UInt8)
   u16b(type) + u16b(data.size) + data
 end
 
 # A handshake message: its type, a 24-bit length, the body.
-def message(type : Int32, body : Array(UInt8)) : Array(UInt8)
+def message(type : Int32, body : Array::View(UInt8)) : Array(UInt8)
   [type.to_u8, ((body.size >> 16) & 0xFF).to_u8, ((body.size >> 8) & 0xFF).to_u8, (body.size & 0xFF).to_u8] + body
 end
 
 # The extensions of *m*, a ClientHello or a ServerHello, in their order.
-def extensions_of(m : Array(UInt8)) : Array({Int32, Array(UInt8)})
+def extensions_of(m : Array::View(UInt8)) : Array({Int32, Array(UInt8)})
   at = 38
   at = at + 1 + m[at].to_i32
   if m[0] == 1_u8
@@ -331,13 +337,13 @@ def extensions_of(m : Array(UInt8)) : Array({Int32, Array(UInt8)})
   found = [] of {Int32, Array(UInt8)}
   while at + 4 <= m.size
     size = (m[at + 2].to_i32 << 8) | m[at + 3].to_i32
-    found << {(m[at].to_i32 << 8) | m[at + 1].to_i32, m[at + 4, size]}
+    found << {(m[at].to_i32 << 8) | m[at + 1].to_i32, Array(UInt8).new(size) { |i| m[at + 4 + i] }}
     at = at + 4 + size
   end
   found
 end
 
-def extension_of(m : Array(UInt8), type : Int32) : Array(UInt8)?
+def extension_of(m : Array::View(UInt8), type : Int32) : Array(UInt8)?
   extensions_of(m).each { |e| return e[1] if e[0] == type }
   nil
 end
@@ -458,7 +464,7 @@ end
 
 # An encrypted_client_hello's payload size (RFC 9849 section 5): after its
 # type, suite, config_id and an X25519 enc.
-def payload_size(ech : Array(UInt8)) : Int32
+def payload_size(ech : Array::View(UInt8)) : Int32
   (ech[40].to_i32 << 8) | ech[41].to_i32
 end
 
@@ -468,7 +474,7 @@ end
 
 # A ClientHello's body: legacy version 1.2, *random*, *session*,
 # TLS_AES_128_GCM_SHA256 alone, null compression, *extensions*.
-def hello_body(random : Array(UInt8), session : Array(UInt8), extensions : Array(UInt8)) : Array(UInt8)
+def hello_body(random : Array::View(UInt8), session : Array::View(UInt8), extensions : Array::View(UInt8)) : Array(UInt8)
   [3_u8, 3_u8] + random + [session.size.to_u8] + session + u16b(2) + [0x13_u8, 0x01_u8, 1_u8, 0_u8] + u16b(extensions.size) + extensions
 end
 
@@ -499,7 +505,7 @@ end
 # An EncodedClientHelloInner (section 5.1): *random*, *session* (none, as
 # it should be), *extensions*, then zeros to a multiple of 32 bytes - or
 # *padding* in their place.
-def encoded_inner(random : Array(UInt8), extensions : Array(UInt8), padding : Array(UInt8)? = nil, session : Array(UInt8) = [] of UInt8) : Array(UInt8)
+def encoded_inner(random : Array::View(UInt8), extensions : Array::View(UInt8), padding : Array::View(UInt8)? = nil, session : Array(UInt8) = [] of UInt8) : Array(UInt8)
   body = hello_body(random, session, extensions)
   body + (padding || Array(UInt8).new(31 - ((body.size - 1) % 32), 0_u8))
 end
@@ -514,7 +520,7 @@ end
 # encrypted_client_hello of type outer - HKDF-SHA256 and AES-128-GCM,
 # *config_id*, *enc* - whose payload is *encoded* sealed by *sender*, this
 # message with the payload's bytes zero its associated data (section 5.2).
-def sealed_outer(sender : HpkeSender, config_id : Int32, enc : Array(UInt8), random : Array(UInt8), before : Array(UInt8), encoded : Array(UInt8)) : Array(UInt8)
+def sealed_outer(sender : HpkeSender, config_id : Int32, enc : Array::View(UInt8), random : Array::View(UInt8), before : Array::View(UInt8), encoded : Array::View(UInt8)) : Array(UInt8)
   size = encoded.size + 16
   head = [0_u8] + u16b(1) + u16b(1) + [config_id.to_u8] + u16b(enc.size) + enc
   blank = message(1, hello_body(random, [] of UInt8, before + ext(0xfe0d, head + u16b(size) + Array(UInt8).new(size, 0_u8))))
@@ -563,13 +569,13 @@ end
 # Section 7.2's accept_confirmation, or with *hrr* section 7.2.1's, as the
 # RFC writes it: HKDF-Expand-Label(HKDF-Extract(0, the inner random), its
 # label, the SHA-256 of *transcript*, 8).
-def ech_confirmation(inner_random : Array(UInt8), transcript : Array(UInt8), hrr : Bool) : Array(UInt8)
+def ech_confirmation(inner_random : Array::View(UInt8), transcript : Array::View(UInt8), hrr : Bool) : Array(UInt8)
   s = TlsKeySchedule.new(false)
   s.expand_label(s.extract(s.zeros, inner_random), hrr ? "hrr ech accept confirmation" : "ech accept confirmation", s.hash(transcript), 8)
 end
 
 # A ServerHello *m* with its random's last eight bytes zero.
-def random_zeroed(m : Array(UInt8)) : Array(UInt8)
+def random_zeroed(m : Array::View(UInt8)) : Array(UInt8)
   m[0, 30] + Array(UInt8).new(8, 0_u8) + m[38, m.size - 38]
 end
 
@@ -628,7 +634,7 @@ HRR_RANDOM = "cf21ad74e59a6111be1d8c021e65b891c2a211167abb8c5e079e09e2c8a8339c"
 # A ServerHello answering ClientHello *hello* - a HelloRetryRequest when
 # *random* is HRR_RANDOM's - its session id echoed, TLS_AES_128_GCM_SHA256
 # and *extensions*.
-def server_hello_to(hello : Array(UInt8), random : Array(UInt8), extensions : Array(UInt8)) : Array(UInt8)
+def server_hello_to(hello : Array::View(UInt8), random : Array::View(UInt8), extensions : Array::View(UInt8)) : Array(UInt8)
   session = hello[39, hello[38].to_i32]
   message(2, [3_u8, 3_u8] + random + [session.size.to_u8] + session + [0x13_u8, 0x01_u8, 0_u8] + u16b(extensions.size) + extensions)
 end
@@ -637,17 +643,17 @@ end
 # opened and rebuilt here from section 5.1's text: its encoding's
 # ech_outer_extensions replaced by the outer's extensions it names, and the
 # outer's session id put back.
-def opened_inner(outer : Array(UInt8), key : TlsEchKey) : Array(UInt8)
+def opened_inner(outer : Array::View(UInt8), key : TlsEchKey) : Array(UInt8)
   ech = extension_of(outer, 0xfe0d) || [] of UInt8
   enc = ech[8, (ech[6].to_i32 << 8) | ech[7].to_i32]
   at = 8 + enc.size
   payload = ech[at + 2, (ech[at].to_i32 << 8) | ech[at + 1].to_i32]
-  aad = outer[4, outer.size - 4]
+  aad = Array(UInt8).new(outer.size - 4) { |k| outer[4 + k] }
   i = 0
   until aad[i, payload.size] == payload
     i = i + 1
   end
-  aad.fill(0_u8, i, payload.size)
+  payload.size.times { |k| aad[i + k] = 0_u8 }
   suite = HpkeSuite.from_ids(key.config.kem_id, (ech[1].to_i32 << 8) | ech[2].to_i32, (ech[3].to_i32 << 8) | ech[4].to_i32).or_panic
   encoded = bytes_of(suite.open(key.private_key, enc, bytes_of("tls ech") + [0_u8] + key.config.raw, aad, payload).or_panic)
   at = 35 + encoded[34].to_i32
@@ -1120,7 +1126,7 @@ if args.size > 0 && args[0] == "ech-speed"
 end
 
 # What one connection to the server mode says it agreed, for a reply.
-def hex_of(bytes : Array(UInt8)) : String
+def hex_of(bytes : Array::View(UInt8)) : String
   bytes.map { |x| (x < 16_u8 ? "0" : "") + x.to_s(16) }.join("")
 end
 
@@ -1201,7 +1207,7 @@ if args.size > 0 && args[0] == "serve"
   # DIR/staple.der: an OCSP response stapled for a client that asks.
   if File.file?(args[1] + "/staple.der")
     held = File.read(args[1] + "/staple.der")
-    der = Array(UInt8).new(held.bytesize) { |i| held.to_unsafe[i] }
+    der = Array(UInt8).new(held.bytesize) { |i| held[i] }
     problem = (chosen = sourced) ? config.staple(der, chosen) : config.staple(der)
     if problem
       puts "staple refused: #{problem.message}"
@@ -1646,7 +1652,7 @@ loaded = TlsEchKey.from_bytes(config.raw, key.private_key.bytes)
 check loaded.is_a?(TlsEchKey) && loaded.config.raw == config.raw, "a key read back from its config and private key"
 check TlsEchKey.from_bytes(config.raw, TlsEchKey.generate("public.test").or_panic.private_key.bytes).is_a?(TlsError), "a private key that is not the config's refused"
 # The last: a config of another version whose length runs past the list.
-[b(""), b("0000"), b("0004fe0d0000"), list[0, list.size - 1], list + [0_u8], b("0005fe0e000500")].each_with_index do |bad, i|
+[b(""), b("0000"), b("0004fe0d0000"), own(list[0, list.size - 1]), list + [0_u8], b("0005fe0e000500")].each_with_index do |bad, i|
   got = TlsEchConfig.parse_list(bad)
   check got.is_a?(TlsError) && got.alert == 50_u8, "a malformed ECHConfigList (#{i}) is a decode_error"
 end

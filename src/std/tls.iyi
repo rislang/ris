@@ -610,7 +610,7 @@ pub class TlsKeySchedule
     @hash_size = @sha384 ? 48 : 32
   end
 
-  def hash(data : Array(UInt8)) : Array(UInt8)
+  def hash(data : Array::View(UInt8)) : Array(UInt8)
     @sha384 ? SHA384.hash_bytes(data) : SHA256.hash_bytes(data)
   end
 
@@ -618,20 +618,20 @@ pub class TlsKeySchedule
     @sha384 ? HKDF.extract(SHA384, salt, ikm) : HKDF.extract(SHA256, salt, ikm)
   end
 
-  def hmac(key : Array(UInt8), data : Array(UInt8)) : Array(UInt8)
+  def hmac(key : Array::View(UInt8), data : Array::View(UInt8)) : Array(UInt8)
     @sha384 ? HMAC.digest(SHA384, key, data) : HMAC.digest(SHA256, key, data)
   end
 
   # HKDF-Expand-Label: the label prefixed "tls13 ", and the context, in an
   # HkdfLabel.
-  def expand_label(secret : Array(UInt8), label : String, context : Array(UInt8), length : Int32) : Array(UInt8)
+  def expand_label(secret : Array::View(UInt8), label : String, context : Array::View(UInt8), length : Int32) : Array(UInt8)
     full = "tls13 " + label
     info = [(length >> 8).to_u8, (length & 0xFF).to_u8, full.bytesize.to_u8] + TlsBytes.of(full) + [context.size.to_u8] + context
     @sha384 ? HKDF.expand(SHA384, secret, info, length) : HKDF.expand(SHA256, secret, info, length)
   end
 
   # Derive-Secret over the messages so far.
-  def derive_secret(secret : Array(UInt8), label : String, transcript : Array(UInt8)) : Array(UInt8)
+  def derive_secret(secret : Array::View(UInt8), label : String, transcript : Array::View(UInt8)) : Array(UInt8)
     expand_label(secret, label, hash(transcript), @hash_size)
   end
 
@@ -645,54 +645,54 @@ pub class TlsKeySchedule
   end
 
   # The early secret of a resumption, from its PSK.
-  def early_secret(psk : Array(UInt8)) : Array(UInt8)
+  def early_secret(psk : Array::View(UInt8)) : Array(UInt8)
     extract(zeros, psk)
   end
 
   # The handshake secret over the key exchange's *shared* secret, and over
   # *psk* in a resumption.
-  def handshake_secret(shared : Array(UInt8), psk : Array(UInt8)? = nil) : Array(UInt8)
+  def handshake_secret(shared : Array::View(UInt8), psk : Array(UInt8)? = nil) : Array(UInt8)
     early = psk ? early_secret(psk) : early_secret
     extract(derive_secret(early, "derived", [] of UInt8), shared)
   end
 
-  def master_secret(handshake_secret : Array(UInt8)) : Array(UInt8)
+  def master_secret(handshake_secret : Array::View(UInt8)) : Array(UInt8)
     extract(derive_secret(handshake_secret, "derived", [] of UInt8), zeros)
   end
 
   # A PSK binder (section 4.2.11.2): a Finished keyed by the resumption's
   # binder key, over *transcript* - the messages before the ClientHello and
   # the ClientHello up to its binders.
-  def binder(psk : Array(UInt8), transcript : Array(UInt8)) : Array(UInt8)
+  def binder(psk : Array::View(UInt8), transcript : Array::View(UInt8)) : Array(UInt8)
     finished(derive_secret(early_secret(psk), "res binder", [] of UInt8), transcript)
   end
 
   # The PSK a NewSessionTicket's *nonce* makes of the resumption master
   # secret (section 4.6.1): one ticket's, and no other's.
-  def resumption_psk(secret : Array(UInt8), nonce : Array(UInt8)) : Array(UInt8)
+  def resumption_psk(secret : Array::View(UInt8), nonce : Array::View(UInt8)) : Array(UInt8)
     expand_label(secret, "resumption", nonce, @hash_size)
   end
 
   # The client's early traffic secret (section 7.1), over the ClientHello
   # alone: what 0-RTT data and EndOfEarlyData go under.
-  def early_traffic(psk : Array(UInt8), hello : Array(UInt8)) : Array(UInt8)
+  def early_traffic(psk : Array::View(UInt8), hello : Array::View(UInt8)) : Array(UInt8)
     derive_secret(early_secret(psk), "c e traffic", hello)
   end
 
   # A Finished message's verify_data under *secret* (section 4.4.4).
-  def finished(secret : Array(UInt8), transcript : Array(UInt8)) : Array(UInt8)
+  def finished(secret : Array::View(UInt8), transcript : Array::View(UInt8)) : Array(UInt8)
     hmac(expand_label(secret, "finished", [] of UInt8, @hash_size), hash(transcript))
   end
 
   # The next generation of a traffic secret (section 7.2).
-  def next_secret(secret : Array(UInt8)) : Array(UInt8)
+  def next_secret(secret : Array::View(UInt8)) : Array(UInt8)
     expand_label(secret, "traffic upd", [] of UInt8, @hash_size)
   end
 
   # TLS 1.2's PRF (RFC 5246 section 5): P_hash over this schedule's hash -
   # SHA-256, or SHA-384 for a suite that names it - keyed by *secret*, over
   # *label* and *seed*, *length* bytes of it.
-  def prf(secret : Array(UInt8), label : String, seed : Array(UInt8), length : Int32) : Array(UInt8)
+  def prf(secret : Array::View(UInt8), label : String, seed : Array::View(UInt8), length : Int32) : Array(UInt8)
     labelled = TlsBytes.of(label) + seed
     out = [] of UInt8
     a = labelled
@@ -758,48 +758,51 @@ pub class TlsRecordCipher
   # content type (TLS 1.3) and the tag.
   OVERHEAD = 17
 
-  # This record's nonce, from the IV and the sequence number, at *dst*.
-  private def nonce_at(dst : Pointer(UInt8)) : Nil
-    12.times { |i| dst[i] = @iv[i] }
-    8.times { |i| dst[11 - i] = dst[11 - i] ^ ((@sequence >> (8 * i)) & 0xFF_u64).to_u8 }
+  # This record's nonce and TLS 1.2's additional data, rewritten for each
+  # record in this cipher's own room: no record makes anything.
+  @nonce : Array(UInt8) = Array(UInt8).new(12, 0_u8)
+  @aad : Array(UInt8) = Array(UInt8).new(13, 0_u8)
+
+  # This record's nonce, from the IV and the sequence number.
+  private def set_nonce : Nil
+    12.times { |i| @nonce[i] = @iv[i] }
+    8.times { |i| @nonce[11 - i] = @nonce[11 - i] ^ ((@sequence >> (8 * i)) & 0xFF_u64).to_u8 }
   end
 
   # TLS 1.2's additional data: the sequence number, then *type*, the
-  # version and *length* (RFC 5246 section 6.2.3.3), at *dst*.
-  private def aad12_at(dst : Pointer(UInt8), type : UInt8, length : Int32) : Nil
-    8.times { |i| dst[i] = ((@sequence >> (8 * (7 - i))) & 0xFF_u64).to_u8 }
-    dst[8] = type
-    dst[9] = 3_u8
-    dst[10] = 3_u8
-    dst[11] = (length >> 8).to_u8
-    dst[12] = (length & 0xFF).to_u8
+  # version and *length* (RFC 5246 section 6.2.3.3).
+  private def set_aad12(type : UInt8, length : Int32) : Nil
+    8.times { |i| @aad[i] = ((@sequence >> (8 * (7 - i))) & 0xFF_u64).to_u8 }
+    @aad[8] = type
+    @aad[9] = 3_u8
+    @aad[10] = 3_u8
+    @aad[11] = (length >> 8).to_u8
+    @aad[12] = (length & 0xFF).to_u8
   end
 
-  private def seal_with(nonce : Pointer(UInt8), at : Pointer(UInt8), size : Int32, aad : Pointer(UInt8), aad_size : Int32) : Nil
+  private def seal_with(buffer : Array(UInt8), at : Int32, size : Int32, aad : Array::View(UInt8)) : Nil
     if gcm = @gcm
-      gcm.seal_at(nonce, at, size, aad, aad_size)
+      gcm.seal_at(@nonce, buffer, at, size, aad)
     elsif chacha = @chacha
-      chacha.seal_at(nonce, at, size, aad, aad_size)
+      chacha.seal_at(@nonce, buffer, at, size, aad)
     end
   end
 
-  private def open_with(nonce : Pointer(UInt8), at : Pointer(UInt8), total : Int32, aad : Pointer(UInt8), aad_size : Int32) : Int32 | AeadError
+  private def open_with(buffer : Array(UInt8), at : Int32, total : Int32, aad : Array::View(UInt8)) : Int32 | AeadError
     if gcm = @gcm
-      gcm.open_at(nonce, at, total, aad, aad_size)
+      gcm.open_at(@nonce, buffer, at, total, aad)
     elsif chacha = @chacha
-      chacha.open_at(nonce, at, total, aad, aad_size)
+      chacha.open_at(@nonce, buffer, at, total, aad)
     else
       AeadError.new("no cipher")
     end
   end
 
-  # The record that carries the *size* bytes of *type* at `buffer +
-  # prefix`, sealed in place in *buffer*, which has `OVERHEAD` bytes of
-  # room past them: the record's length. Nothing is made: a connection
-  # seals each record in one buffer of its own.
-  def seal_at(type : UInt8, buffer : Pointer(UInt8), size : Int32) : Int32
-    nonces = uninitialized StaticArray(UInt8, 12)
-    n = pointerof(nonces).as(Pointer(UInt8))
+  # The record that carries the *size* bytes of *type* at `prefix` in
+  # *buffer*, sealed in place, which has `OVERHEAD` bytes of room past
+  # them: the record's length. Nothing is made: a connection seals each
+  # record in one buffer of its own.
+  def seal_at(type : UInt8, buffer : Array(UInt8), size : Int32) : Int32
     if !@tls12
       buffer[5 + size] = type
       length = size + 1 + 16
@@ -808,23 +811,21 @@ pub class TlsRecordCipher
       buffer[2] = 3_u8
       buffer[3] = (length >> 8).to_u8
       buffer[4] = (length & 0xFF).to_u8
-      nonce_at(n)
-      seal_with(n, buffer + 5_i64, size + 1, buffer, 5)
+      set_nonce
+      seal_with(buffer, 5, size + 1, buffer[0, 5])
       @sequence = @sequence + 1
       return 5 + length
     end
-    extras = uninitialized StaticArray(UInt8, 13)
-    aad = pointerof(extras).as(Pointer(UInt8))
-    aad12_at(aad, type, size)
+    set_aad12(type, size)
     if @gcm
-      4.times { |i| n[i] = @iv[i] }
-      8.times { |i| n[4 + i] = aad[i] }
-      8.times { |i| buffer[5 + i] = aad[i] }
-      seal_with(n, buffer + 13_i64, size, aad, 13)
+      4.times { |i| @nonce[i] = @iv[i] }
+      8.times { |i| @nonce[4 + i] = @aad[i] }
+      8.times { |i| buffer[5 + i] = @aad[i] }
+      seal_with(buffer, 13, size, @aad[0, 13])
       body = 8 + size + 16
     else
-      nonce_at(n)
-      seal_with(n, buffer + 5_i64, size, aad, 13)
+      set_nonce
+      seal_with(buffer, 5, size, @aad[0, 13])
       body = size + 16
     end
     buffer[0] = type
@@ -836,43 +837,39 @@ pub class TlsRecordCipher
     5 + body
   end
 
-  # The protected record at *record*, its 5-byte header and *length*
-  # bytes of body, opened in place: its content type, and where its
-  # content now lies past *record* and how long it is.
-  def open_at(record : Pointer(UInt8), length : Int32) : {UInt8, Int32, Int32} | TlsError
-    nonces = uninitialized StaticArray(UInt8, 12)
-    n = pointerof(nonces).as(Pointer(UInt8))
+  # The protected record at *at* in *record*, its 5-byte header and
+  # *length* bytes of body, opened in place: its content type, and where
+  # its content now lies past *at* and how long it is.
+  def open_at(record : Array(UInt8), at : Int32, length : Int32) : {UInt8, Int32, Int32} | TlsError
     if !@tls12
-      nonce_at(n)
-      opened = open_with(n, record + 5_i64, length, record, 5)
+      set_nonce
+      opened = open_with(record, at + 5, length, record[at, 5])
       return TlsError.new("a record that does not decrypt", TlsAlert::BAD_RECORD_MAC) if opened.is_a?(AeadError)
       @sequence = @sequence + 1
       # Section 5.4, as `open` holds it.
       if opened > TlsRecords::MAX_PLAINTEXT + 1
         return TlsError.new("a record of #{opened} bytes of inner plaintext, past the 2^14 + 1 allowed", TlsAlert::RECORD_OVERFLOW)
       end
-      inner = record + 5_i64
-      at = opened - 1
-      while at >= 0 && inner[at] == 0_u8
-        at = at - 1
+      inner = at + 5
+      last = opened - 1
+      while last >= 0 && record[inner + last] == 0_u8
+        last = last - 1
       end
-      return TlsError.new("a record with no content type", TlsAlert::UNEXPECTED_MESSAGE) if at < 0
-      return {inner[at], 5, at}
+      return TlsError.new("a record with no content type", TlsAlert::UNEXPECTED_MESSAGE) if last < 0
+      return {record[inner + last], 5, last}
     end
-    type = record[0]
+    type = record[at]
     explicit = @gcm ? 8 : 0
     return TlsError.new("a protected record of #{length} bytes, short of its nonce and tag", TlsAlert::BAD_RECORD_MAC) if length < explicit + 16
     plain = length - explicit - 16
-    extras = uninitialized StaticArray(UInt8, 13)
-    aad = pointerof(extras).as(Pointer(UInt8))
-    aad12_at(aad, type, plain)
+    set_aad12(type, plain)
     if @gcm
-      4.times { |i| n[i] = @iv[i] }
-      8.times { |i| n[4 + i] = record[5 + i] }
+      4.times { |i| @nonce[i] = @iv[i] }
+      8.times { |i| @nonce[4 + i] = record[at + 5 + i] }
     else
-      nonce_at(n)
+      set_nonce
     end
-    opened = open_with(n, record + (5 + explicit).to_i64, length - explicit, aad, 13)
+    opened = open_with(record, at + 5 + explicit, length - explicit, @aad[0, 13])
     return TlsError.new("a record that does not decrypt", TlsAlert::BAD_RECORD_MAC) if opened.is_a?(AeadError)
     @sequence = @sequence + 1
     return TlsError.new("a record of #{plain} bytes, past the 2^14 allowed", TlsAlert::RECORD_OVERFLOW) if plain > TlsRecords::MAX_PLAINTEXT
@@ -883,22 +880,23 @@ pub class TlsRecordCipher
   # by `seal_at` in a buffer of its own.
   def seal(type : UInt8, content : Array::View(UInt8)) : Array(UInt8)
     at = prefix
-    buffer = Pointer(UInt8).malloc((at + content.size + OVERHEAD).to_u64)
+    buffer = Array(UInt8).new(at + content.size + OVERHEAD, 0_u8)
     content.each_with_index { |byte, i| buffer[at + i] = byte }
     length = seal_at(type, buffer, content.size)
-    TlsBytes.bytes(buffer, length)
+    buffer.truncate(length)
+    buffer
   end
 
   # The type and content of a protected record whose 5-byte header is
   # *header* and body *body*: opened by `open_at` in a copy.
-  def open(header : Array(UInt8), body : Array(UInt8)) : {UInt8, Array(UInt8)} | TlsError
-    record = Pointer(UInt8).malloc((5 + body.size).to_u64)
-    record.copy_from(header.to_unsafe, 5)
-    (record + 5_i64).copy_from(body.to_unsafe, body.size)
-    opened = open_at(record, body.size)
+  def open(header : Array::View(UInt8), body : Array::View(UInt8)) : {UInt8, Array(UInt8)} | TlsError
+    record = Array(UInt8).new(5 + body.size, 0_u8)
+    5.times { |i| record[i] = header[i] }
+    body.each_with_index { |byte, i| record[5 + i] = byte }
+    opened = open_at(record, 0, body.size)
     return opened if opened.is_a?(TlsError)
     type, offset, size = opened
-    {type, TlsBytes.bytes(record + offset.to_i64, size)}
+    {type, Array(UInt8).new(size) { |i| record[offset + i] }}
   end
 end
 
@@ -1009,7 +1007,7 @@ pub abstract class TlsConnection
   # comes, so a peer that sends a message a byte a record costs what it
   # sends, not its square. The inbox is two records' room, which the
   # socket reads into in place; it is made at the first read.
-  @inbox : Pointer(UInt8) = Pointer(UInt8).new(0_u64)
+  @inbox : Array(UInt8)? = nil
   @inbox_at : Int32 = 0
   @inbox_end : Int32 = 0
   @handshake : Array(UInt8) = [] of UInt8
@@ -1128,9 +1126,11 @@ pub abstract class TlsConnection
   def read(max : Int32 = 16384) : String | TlsError
     got = take(max)
     return got if got.is_a?(TlsError)
-    from, n = got
+    from, at, n = got
     return "" if n == 0
-    String.new(n) { |buf| buf.copy_from(from, n) }
+    text = String::Builder.new
+    n.times { |i| text.push(from[at + i]) }
+    text.finish
   end
 
   # Up to *max* bytes the peer sent, onto the end of *writer*, the
@@ -1139,22 +1139,33 @@ pub abstract class TlsConnection
   def read(writer : String::Builder, max : Int32 = 16384) : Int32 | TlsError
     got = take(max)
     return got if got.is_a?(TlsError)
-    from, n = got
-    writer.append(from, n) if n > 0
+    from, at, n = got
+    n.times { |i| writer.push(from[at + i]) }
     n
   end
 
   # Up to *count* bytes the peer sent into *buffer*, a connection's own
   # (std/http's `Conn`): as `read`, with no string made between.
+  # Migration: std/http's Conn still hands a malloc'd pointer.
+  @[PointerUnsafe("migration for std/http's malloc'd connection buffer")]
   def read(buffer : Pointer(UInt8), count : Int32) : Int32 | TlsError
     got = take(count)
     return got if got.is_a?(TlsError)
-    from, n = got
-    buffer.copy_from(from, n) if n > 0
+    from, at, n = got
+    n.times { |i| buffer[i] = from[at + i] }
     n
   end
 
-  private def take(max : Int32) : {Pointer(UInt8), Int32} | TlsError
+  # Up to *count* bytes the peer sent into *buffer* from *at*.
+  def read(buffer : Array(UInt8), at : Int32, count : Int32) : Int32 | TlsError
+    got = take(count)
+    return got if got.is_a?(TlsError)
+    from, start, n = got
+    n.times { |i| buffer[at + i] = from[start + i] }
+    n
+  end
+
+  private def take(max : Int32) : {Array(UInt8), Int32, Int32} | TlsError
     # "" is the peer's close: a read of nothing would look like one.
     raise "a TLS read of #{max} bytes: at least 1" if max < 1
     timeout = @socket.read_timeout_ms
@@ -1162,9 +1173,9 @@ pub abstract class TlsConnection
   end
 
   # *block* under a deadline *ms* from now (none when 0), cleared after.
-  protected def within(ms : Int32, &block : -> T) : T forall T
+  protected def within(ms : Int32, & : -> T) : T forall T
     @deadline_ns = ms > 0 ? Time.monotonic_nanoseconds.to_i64 + ms.to_i64 * 1000000_i64 : 0_i64
-    answer = block.call
+    answer = yield
     @deadline_ns = 0_i64
     answer
   end
@@ -1181,60 +1192,61 @@ pub abstract class TlsConnection
   # lies - in the inbox, where the record was opened, or in `@plain_kept`
   # for a record read the slow way - and how much is left. The inbox is
   # not filled again until it is taken.
-  @plain_at : Pointer(UInt8) = Pointer(UInt8).new(0_u64)
+  @plain_in : Array(UInt8) = [] of UInt8
+  @plain_at : Int32 = 0
   @plain_left : Int32 = 0
-  @plain_kept : Array(UInt8)? = nil
 
   # *content*, application data read the slow way, held for the reads.
   private def keep_plain(content : Array(UInt8)) : Nil
-    @plain_kept = content
-    @plain_at = content.to_unsafe
+    @plain_in = content
+    @plain_at = 0
     @plain_left = content.size
   end
 
-  # At most *max* of what is left, taken.
-  private def plain(max : Int32) : {Pointer(UInt8), Int32}
+  # At most *max* of what is left, taken: where it lies and how much.
+  private def plain(max : Int32) : {Array(UInt8), Int32, Int32}
     n = @plain_left < max ? @plain_left : max
     from = @plain_at
-    @plain_at = @plain_at + n.to_i64
+    @plain_at = @plain_at + n
     @plain_left = @plain_left - n
-    @plain_kept = nil if @plain_left == 0
-    {from, n}
+    {@plain_in, from, n}
   end
 
   # Where the next *max* bytes of application data lie, and how many: 0
   # once the peer's close_notify came. An application data record after
   # the handshake is opened in the inbox; anything else is read the slow
   # way, by `next_record`.
-  private def take_now(max : Int32) : {Pointer(UInt8), Int32} | TlsError
+  private def take_now(max : Int32) : {Array(UInt8), Int32, Int32} | TlsError
     return plain(max) if @plain_left > 0
-    return {@plain_at, 0} if @eof
+    return {@plain_in, 0, 0} if @eof
     return TlsError.new("the connection is closed") if closed?
     while true
       reader = @reader
       if reader && !@handshaking && @early_left == 0 && handshake_left == 0
         filled = fill(5)
         return read_failed(filled) if filled
-        if @inbox[@inbox_at] == TlsRecords::APPLICATION_DATA
-          return fail(TlsError.new("a record with version #{@inbox[@inbox_at + 1]}.#{@inbox[@inbox_at + 2]}", TlsAlert::DECODE_ERROR)) unless @inbox[@inbox_at + 1] == 3_u8
-          length = (@inbox[@inbox_at + 3].to_i32 << 8) | @inbox[@inbox_at + 4].to_i32
+        inbox = inbox_room
+        if inbox[@inbox_at] == TlsRecords::APPLICATION_DATA
+          return fail(TlsError.new("a record with version #{inbox[@inbox_at + 1]}.#{inbox[@inbox_at + 2]}", TlsAlert::DECODE_ERROR)) unless inbox[@inbox_at + 1] == 3_u8
+          length = (inbox[@inbox_at + 3].to_i32 << 8) | inbox[@inbox_at + 4].to_i32
           return fail(TlsError.new("a record of #{length} bytes, past the 2^14 + 256 allowed", TlsAlert::RECORD_OVERFLOW)) if length > TlsRecords::MAX_CIPHERTEXT
           filled = fill(5 + length)
           return read_failed(filled) if filled
-          record = @inbox + @inbox_at
+          record = @inbox_at
           @inbox_at = @inbox_at + 5 + length
-          opened = reader.open_at(record, length)
+          opened = reader.open_at(inbox, record, length)
           return fail(opened) if opened.is_a?(TlsError)
           type, offset, size = opened
           if type == TlsRecords::APPLICATION_DATA
             next if size == 0
-            @plain_at = record + offset.to_i64
+            @plain_in = inbox
+            @plain_at = record + offset
             @plain_left = size
             return plain(max)
           end
-          ended = other_record(type, TlsBytes.bytes(record + offset.to_i64, size))
+          ended = other_record(type, Array(UInt8).new(size) { |i| inbox[record + offset + i] })
           return ended if ended.is_a?(TlsError)
-          return {@plain_at, 0} if ended
+          return {@plain_in, 0, 0} if ended
           next
         end
       end
@@ -1250,7 +1262,7 @@ pub abstract class TlsConnection
       end
       ended = other_record(type, content)
       return ended if ended.is_a?(TlsError)
-      return {@plain_at, 0} if ended
+      return {@plain_in, 0, 0} if ended
     end
   end
 
@@ -1306,16 +1318,16 @@ pub abstract class TlsConnection
   # Sends *data*, in records of at most 2^14 bytes; answers its size.
   # Refused once `close_write` has sent this side's close_notify, and in
   # TLS 1.2 once the peer's has been read (see `other_record`).
-  def write(data : String | Array(UInt8)) : Int32 | TlsError
+  def write(data : Array(UInt8)) : Int32 | TlsError
     refused = write_refused
     return refused if refused
-    from, size = data.is_a?(String) ? {data.to_unsafe, data.bytesize} : {data.to_unsafe, data.size}
+    size = data.size
     at = 0
     while at < size
       n = size - at
       n = TlsRecords::MAX_PLAINTEXT if n > TlsRecords::MAX_PLAINTEXT
-      outbox = outbox_room
-      (outbox[0] + outbox[1].to_i64).copy_from(from + at.to_i64, n)
+      outbox, prefix = outbox_room
+      n.times { |i| outbox[prefix + i] = data[at + i] }
       sent = seal_out(n)
       return sent if sent
       at = at + n
@@ -1333,11 +1345,10 @@ pub abstract class TlsConnection
     while at < size
       n = size - at
       n = TlsRecords::MAX_PLAINTEXT if n > TlsRecords::MAX_PLAINTEXT
-      outbox = outbox_room
-      to = outbox[0] + outbox[1].to_i64
+      outbox, prefix = outbox_room
       i = 0
       while i < n
-        to[i] = data[at + i]
+        outbox[prefix + i] = data[at + i]
         i = i + 1
       end
       sent = seal_out(n)
@@ -1356,13 +1367,13 @@ pub abstract class TlsConnection
 
   # One record's room, made once per connection: its content goes at the
   # write keys' prefix past the start.
-  @outbox : Pointer(UInt8) = Pointer(UInt8).new(0_u64)
+  @outbox : Array(UInt8)? = nil
   OUTBOX_SIZE = 13 + TlsRecords::MAX_PLAINTEXT + TlsRecordCipher::OVERHEAD
 
-  private def outbox_room : {Pointer(UInt8), Int32}
-    @outbox = Pointer(UInt8).malloc(OUTBOX_SIZE.to_u64) if @outbox.address == 0_u64
+  private def outbox_room : {Array(UInt8), Int32}
+    outbox = @outbox || (@outbox = Array(UInt8).new(OUTBOX_SIZE, 0_u8))
     writer = @writer
-    {@outbox, writer ? writer.prefix : 5}
+    {outbox, writer ? writer.prefix : 5}
   end
 
   # The *size* bytes of application data in the outbox sealed and sent,
@@ -1373,20 +1384,21 @@ pub abstract class TlsConnection
     return fail(keyed) if keyed
     writer = @writer
     return fail(TlsError.new("no keys to write with")) unless writer
-    length = writer.seal_at(TlsRecords::APPLICATION_DATA, @outbox, size)
-    sent = put_at(@outbox, length)
+    outbox, _ = outbox_room
+    length = writer.seal_at(TlsRecords::APPLICATION_DATA, outbox, size)
+    sent = put_at(outbox, length)
     return fail(sent) if sent
     nil
   end
 
   # *count* bytes at *bytes* written, or held with the rest of a flight.
-  private def put_at(bytes : Pointer(UInt8), count : Int32) : TlsError?
+  private def put_at(bytes : Array(UInt8), count : Int32) : TlsError?
     if held = @held
       count.times { |i| held << bytes[i] }
       return nil
     end
     return TlsError.new("the socket under the connection is closed") if @socket.closed?
-    sent = @socket.write(bytes, count)
+    sent = @socket.write(bytes, 0, count)
     return TlsError.new("the write to #{@place} failed: #{sent.message}") if sent.is_a?(SocketError)
     return TlsError.new("the write to #{@place} was cancelled") unless sent.is_a?(Int32)
     nil
@@ -1949,13 +1961,14 @@ pub abstract class TlsConnection
   private def read_record : {Array(UInt8), Array(UInt8)} | TlsError
     filled = fill(5)
     return filled if filled
-    header = Array(UInt8).new(5) { |i| @inbox[@inbox_at + i] }
+    inbox = inbox_room
+    header = Array(UInt8).new(5) { |i| inbox[@inbox_at + i] }
     return TlsError.new("a record with version #{header[1]}.#{header[2]}", TlsAlert::DECODE_ERROR) unless header[1] == 3_u8
     length = (header[3].to_i32 << 8) | header[4].to_i32
     return TlsError.new("a record of #{length} bytes, past the 2^14 + 256 allowed", TlsAlert::RECORD_OVERFLOW) if length > TlsRecords::MAX_CIPHERTEXT
     filled = fill(5 + length)
     return filled if filled
-    body = TlsBytes.bytes(@inbox + (@inbox_at + 5), length)
+    body = Array(UInt8).new(length) { |i| inbox[@inbox_at + 5 + i] }
     @inbox_at = @inbox_at + 5 + length
     {header, body}
   end
@@ -1964,8 +1977,13 @@ pub abstract class TlsConnection
 
   # At least *size* bytes (a record's, at most) in the inbox past
   # `@inbox_at`.
+  # The inbox, made once at the first read; it never grows.
+  private def inbox_room : Array(UInt8)
+    @inbox || (@inbox = Array(UInt8).new(INBOX_SIZE, 0_u8))
+  end
+
   private def fill(size : Int32) : TlsError?
-    @inbox = Pointer(UInt8).malloc(INBOX_SIZE.to_u64) if @inbox.address == 0_u64
+    inbox = inbox_room
     while @inbox_end - @inbox_at < size
       # What is left moves to the front when the rest of a record would
       # not fit behind it; nothing left starts the inbox over.
@@ -1975,11 +1993,11 @@ pub abstract class TlsConnection
       elsif @inbox_at > 0 && INBOX_SIZE - @inbox_at < size
         # What is left is less than *size*, at most half the inbox, and
         # `@inbox_at` is past that half: the two do not overlap.
-        @inbox.copy_from(@inbox + @inbox_at, @inbox_end - @inbox_at)
+        (@inbox_end - @inbox_at).times { |i| inbox[i] = inbox[@inbox_at + i] }
         @inbox_end = @inbox_end - @inbox_at
         @inbox_at = 0
       end
-      got = read_socket(@inbox + @inbox_end, INBOX_SIZE - @inbox_end)
+      got = read_socket(inbox, @inbox_end, INBOX_SIZE - @inbox_end)
       return got if got.is_a?(TlsError)
       # A wait past the socket's timeout, or a cancelled one, takes nothing
       # from the stream: what came so far stays in the inbox, and a read
@@ -1994,14 +2012,14 @@ pub abstract class TlsConnection
 
   # One read of the socket into *buffer*, up to *count* bytes, its wait
   # cut to what is left of the deadline.
-  private def read_socket(buffer : Pointer(UInt8), count : Int32) : Int32 | Cancelled | SocketError | TlsError
-    return @socket.read(buffer, count) if @deadline_ns == 0_i64
+  private def read_socket(buffer : Array(UInt8), at : Int32, count : Int32) : Int32 | Cancelled | SocketError | TlsError
+    return @socket.read(buffer, at, count) if @deadline_ns == 0_i64
     left = (@deadline_ns - Time.monotonic_nanoseconds.to_i64) // 1000000_i64
     return TlsError.new("#{@place} took past the time given to #{@handshaking ? "the handshake" : "the read"}", timed_out: true) if left <= 0
     timeout = @socket.read_timeout_ms
     cut = timeout.nil? || timeout <= 0 || timeout > left
     @socket.read_timeout_ms = left.to_i32 if cut
-    got = @socket.read(buffer, count)
+    got = @socket.read(buffer, at, count)
     @socket.read_timeout_ms = timeout
     # A wait the deadline cut short ends at the deadline, not the socket's.
     if cut && got.is_a?(SocketError) && got.timed_out?
@@ -2080,7 +2098,7 @@ pub abstract class TlsConnection
   # close_notify from a `close` after the socket went, an alert, a
   # KeyUpdate, a released flight, all answer it as a `TlsError`.
   private def put(bytes : Array(UInt8)) : TlsError?
-    put_at(bytes.to_unsafe, bytes.size)
+    put_at(bytes, bytes.size)
   end
 end
 
@@ -6288,15 +6306,7 @@ end
 
 struct TlsBytes
   def self.of(text : String) : Array(UInt8)
-    bytes(text.to_unsafe, text.bytesize)
-  end
-
-  # The *count* bytes at *source*, copied once: a record's worth on every
-  # read, so not first filled with zeros.
-  def self.bytes(source : Pointer(UInt8), count : Int32) : Array(UInt8)
-    bytes = Array(UInt8).unsafe_build(count)
-    bytes.to_unsafe.copy_from(source, count)
-    bytes
+    Array(UInt8).new(text.bytesize) { |i| text[i] }
   end
 
   def self.text(bytes : Array::View(UInt8)) : String
@@ -6333,10 +6343,9 @@ struct TlsBytes
   end
 
   def self.from_hex(hex : String) : Array(UInt8)
-    p = hex.to_unsafe
     Array(UInt8).new(hex.bytesize // 2) do |i|
-      hi = p[i * 2].to_i32
-      lo = p[i * 2 + 1].to_i32
+      hi = hex[i * 2].to_i32
+      lo = hex[i * 2 + 1].to_i32
       ((hi >= 97 ? hi - 87 : hi - 48) * 16 + (lo >= 97 ? lo - 87 : lo - 48)).to_u8
     end
   end

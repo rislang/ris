@@ -247,23 +247,6 @@ pub class AesGcm
     size
   end
 
-  # Migration: tls's record layer still seals its own malloc'd buffers
-  # through pointers. Remove with the tls port (TODO "std port").
-  @[PointerUnsafe("migration for tls's malloc'd record buffers")]
-  def seal_at(nonce : Pointer(UInt8), buffer : Pointer(UInt8), size : Int32, aad : Pointer(UInt8), aad_size : Int32) : Nil
-    work = AeadBytes.from(buffer, size + 16)
-    seal_at(AeadBytes.from(nonce, 12), work, 0, size, AeadBytes.from(aad, aad_size))
-    AeadBytes.back(work, buffer, size + 16)
-  end
-
-  @[PointerUnsafe("migration for tls's malloc'd record buffers")]
-  def open_at(nonce : Pointer(UInt8), buffer : Pointer(UInt8), total : Int32, aad : Pointer(UInt8), aad_size : Int32) : Int32 | AeadError
-    work = AeadBytes.from(buffer, total)
-    opened = open_at(AeadBytes.from(nonce, 12), work, 0, total, AeadBytes.from(aad, aad_size))
-    AeadBytes.back(work, buffer, total) unless opened.is_a?(AeadError)
-    opened
-  end
-
   # The *size* bytes of *buffer* from *at*, XORed in place with the key
   # stream of the counter blocks from 2 on (§7.1: the first, 1, is the
   # tag's), four blocks to an AES call, which is what the bitsliced cipher
@@ -593,23 +576,6 @@ pub class ChaCha20Poly1305
     end
     stream_xor(state, buffer, at, size)
     size
-  end
-
-  # Migration: tls's record layer still seals its own malloc'd buffers
-  # through pointers. Remove with the tls port (TODO "std port").
-  @[PointerUnsafe("migration for tls's malloc'd record buffers")]
-  def seal_at(nonce : Pointer(UInt8), buffer : Pointer(UInt8), size : Int32, aad : Pointer(UInt8), aad_size : Int32) : Nil
-    work = AeadBytes.from(buffer, size + 16)
-    seal_at(AeadBytes.from(nonce, 12), work, 0, size, AeadBytes.from(aad, aad_size))
-    AeadBytes.back(work, buffer, size + 16)
-  end
-
-  @[PointerUnsafe("migration for tls's malloc'd record buffers")]
-  def open_at(nonce : Pointer(UInt8), buffer : Pointer(UInt8), total : Int32, aad : Pointer(UInt8), aad_size : Int32) : Int32 | AeadError
-    work = AeadBytes.from(buffer, total)
-    opened = open_at(AeadBytes.from(nonce, 12), work, 0, total, AeadBytes.from(aad, aad_size))
-    AeadBytes.back(work, buffer, total) unless opened.is_a?(AeadError)
-    opened
   end
 
   @[PointerUnsafe("the cipher core starts a local state")]
@@ -1652,21 +1618,6 @@ struct AeadBytes
     i = 0
     while i < count
       dst[i] = data[at + i]
-      i = i + 1
-    end
-  end
-
-  # Migration for tls: *count* bytes at a malloc'd pointer, as an Array.
-  @[PointerUnsafe("migration for tls's malloc'd record buffers")]
-  def self.from(src : Pointer(UInt8), count : Int32) : Array(UInt8)
-    Array(UInt8).new(count) { |i| src[i] }
-  end
-
-  @[PointerUnsafe("migration for tls's malloc'd record buffers")]
-  def self.back(buffer : Array(UInt8), dst : Pointer(UInt8), count : Int32) : Nil
-    i = 0
-    while i < count
-      dst[i] = buffer[i]
       i = i + 1
     end
   end
