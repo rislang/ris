@@ -106,8 +106,10 @@ first):
   or whole assignment, which must come before any other use (Goose
   reference.md:850). A later append of another type is an error naming
   `[] of T`, never a union; a field, parameter or a use before the
-  first append keeps today's error. Gates: inside a block, a mismatch,
-  a read before the first push, a field.
+  first append keeps today's error. Hash the same: `h = {}` takes K and
+  V from the first `h[k] = v`; `Hash.new(0)` takes V from its default.
+  Gates: inside a block, a mismatch, a read before the first store, a
+  field, word counts with `Hash.new(0)`.
 * `s = ""` on a growing String reuses its reservation only when the
   compiler proves no view of the old text is still live (stored in a
   container, a field, another def, a task). Unsure: refuse, naming
