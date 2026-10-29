@@ -1,0 +1,7 @@
+# @[PointerUnsafe] does not open a String: its pointer reads past its bytes.
+@[PointerUnsafe("reads the first byte in place")]
+def first(text : String) : UInt8
+  text.to_unsafe[0]
+end
+
+puts first("hi")

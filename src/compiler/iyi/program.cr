@@ -390,6 +390,11 @@ module Iyi
     # `forbid ffi, pointer_unsafe` (`Iyi::FfiBoundaryChecker`).
     property iyi_forbids : Array(String) = [] of String
 
+    # ris: the files marked `@[Ffi]`, by expanded path. In them a String's
+    # `to_unsafe` may be a direct argument of a `lib` fun call
+    # (`Iyi::TapePointerChecker`).
+    getter ffi_files = Set(String).new
+
     # The name the program's own modules live under: the manifest's last
     # segment (`Mod::ModFile.package_name`), or nil.
     def iyi_root_package_name : String?

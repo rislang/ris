@@ -114,12 +114,18 @@ end
 
 for name, message in [
     ("contract_opaque_proc", "cannot shrink tape storage with a live view"),
-    ("contract_spawn", "this block becomes a proc"),
     ("contract_opaque_retain", "cannot prove opaque callback retain/escape"),
     ("contract_mixed_proc", "cannot shrink tape storage with a live view"),
 ]:
     build(ROOT / "test/ris/refused" / (name + ".ri"), refused=message)
     print("refused  " + name)
+
+result = subprocess.run(
+    [str(RIS), "run", str(ROOT / "test/ris/contract_spawn.ri")],
+    text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+)
+assert result.returncode == 0 and result.stdout.strip() == "abc", result.stdout
+print("accepts  task reading a view in a group joined inside the tape")
 
 result = subprocess.run(
     [str(RIS), "run", str(ROOT / "test/ris/contract_suspend.ri")],

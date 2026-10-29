@@ -1,0 +1,15 @@
+# A library def's interpolated String builds on the caller's tape (TAPE_SPEC
+# 1.6): each `tape do` frees it, so a loop of them holds one, on no heap.
+module test/ris/interpolation_retained
+
+import test/ris/retained_interpolation::{RisRetainedInterpolation}
+
+total = 0
+100_000.times do |i|
+  tape do
+    text = RisRetainedInterpolation.retained(i)
+    raise "wrong text" unless i != 42 || text == "retained 42"
+    total += text.bytesize
+  end
+end
+puts "PASS: interpolation retained #{total}"

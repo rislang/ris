@@ -38,6 +38,7 @@ module Iyi::FfiBoundaryChecker
     # A file with no header carries the mark as its first statement.
     mark ||= first if first.is_a?(Annotation) && first.path.names == ["Ffi"]
     if mark
+      program.ffi_files << File.expand_path(filename)
       if forbids.includes?("ffi")
         mark.raise "@[Ffi] in a program whose manifest says `forbid ffi`.\n\n" \
                    "Call C from a package that allows it, or take the " \

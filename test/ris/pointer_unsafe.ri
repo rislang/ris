@@ -1,7 +1,8 @@
-# A def that takes a pointer and calls no C says why.
+# A def that takes a pointer and calls no C says why; a String it reads
+# through `byte_at`, which checks its bounds.
 @[PointerUnsafe("reads the first byte in place")]
 def first(text : String) : UInt8
-  text.to_unsafe[0]
+  text.byte_at(0)
 end
 
 puts first("hi")
