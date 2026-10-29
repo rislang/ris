@@ -168,9 +168,10 @@ first):
   an `IyiGroup.new` keeps each task's slot until it ends; parallel task
   fibers are not pooled; a spawned block's captured closure data still
   takes program storage per spawn.
-* std/uri: URI.parse of a String, then normalize.to_s, answers
-  "//@:80/a/c?q#f": the fields are lost (test/ris/uri_legacy.ri, out of
-  check.sh). Parsing a String works. Fix the String path or drop it.
+* samples/ris/logline.ri does not compile: IOBackend.on_program stores
+  the request-tape IO in a program object (std/log.iyi:362, "cannot
+  store request tape data on the program tape"). check.sh's heap gate
+  stops at it, so the other heap_budget.txt rows go unchecked.
 * std's target, as Goose does it (doc/reference/goose/docs/design/
   owning_dynamic_data.md): short-lived String/Array/Hash on the caller's
   tape; long-lived state (HPACK tables, autocert cache, log sinks) in

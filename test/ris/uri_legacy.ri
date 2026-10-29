@@ -2,7 +2,8 @@ module test/ris/uri_legacy
 import std/uri::{URI}
 
 text : String = "HTTP://u%3A:p%40@EX%aFAMPLE:80/a/./b/../c?q#f"
-uri = URI.parse(text)
+# URI.parse answers a ParsedURI; to_uri makes the URI class under test.
+uri = URI.parse(text).to_uri
 raise "parse" unless uri.user == "u:" && uri.password == "p@"
 raise "authority" unless uri.authority == "u%3A:p%40@EX%aFAMPLE:80"
 raise "normalize" unless uri.normalize.to_s == "http://u%3A:p%40@ex%AFample/a/c?q#f"

@@ -1112,7 +1112,14 @@ for name in http_head_tape params_write_tape uri_tape idna_tape; do
   fi
 done
 
-# uri_legacy: the String URI.parse path loses normalize fields (TODO.md).
+# The URI class (to_uri of a parse) keeps its fields through normalize.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/uri_legacy.ri 2>&1)
+if [ "$?" -eq 0 ] && grep -qxF 'URI: legacy wrappers' <<<"$out" &&
+    grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+  echo "runs     uri_legacy (URI class normalize, zero heap)"
+else
+  echo "FAILED   uri_legacy: $out"; status=1
+fi
 
 heap_trap http_head_legacy
 
