@@ -123,6 +123,15 @@ first):
   on Linux they change nothing (no moves either way). The same step
   drops the arbitrary Array capacities (`Array(T).new(64)`, ~20 in std).
 
+## After Text: Tre becomes a std library type
+
+* Tre is a core tape type (TAPE_SPEC 1.2, 1.4, 5.x, 7.2) used only by
+  std/json.iyi, with six compiler special cases beside Array. Move it to
+  src/std/tree.iyi as RisTree(T) over Array(Entry): Int32 links, stop
+  boundaries, an open node's -1, board copy of the stops. Drop the
+  compiler cases so Array's rules cover it; 7.2 lists String, Array and
+  Hash, with a changelog entry. Gates: json, board copy, an open node.
+
 ## Next
 
 * Escaping closures outside program and joined task owners: pooled
