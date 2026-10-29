@@ -105,7 +105,7 @@ def reads(source : String, msg : String) : Any
   parser = Parser.new(source)
   docs = parser.parse_all
   raise "ASSERTION FAILED: #{msg}: refused with #{parser.error.inspect}" if docs.nil?
-  docs.size == 0 ? Any.new(nil) : docs[0]
+  docs.size == 0 ? Any.new(nil) : docs[0].to_heap
 end
 
 puts "== scalars and collections"
@@ -403,7 +403,7 @@ deepest_seq = "[" * 100 + "]" * 100
 deepest_map = "{a: " * 100 + "1" + "}" * 100
 in_task = false
 group do |g|
-  g.spawn do
+  deep = g.spawn do
     [deepest_seq, deepest_map, chained].each do |deepest|
       one = YAML.parse(deepest)
       raise "ASSERTION FAILED: the deepest document does not equal itself in a task" unless one == YAML.parse(deepest)
@@ -411,9 +411,9 @@ group do |g|
       one.hash
       raise "ASSERTION FAILED: the deepest document does not dump back in a task" unless YAML.parse(YAML.dump(one)) == one
     end
-    in_task = true
-    0
+    true
   end
+  in_task = deep.value.or(false)
 end
 assert_true in_task, "the deepest document is parsed, compared, printed, hashed and dumped in a task"
 puts "  duplicate keys, quotes, tabs, flow, aliases, escapes, explicit keys, cycles,"

@@ -124,7 +124,7 @@ import std/file::{File}
         fd = __iyi_openat(name, 0x84000, 0)
       {% end %}
       return Pointer(Void).new(0_u64) if fd < 0_i64
-      stream = Pointer(UInt8).malloc((HEAD + BUFFER).to_u64)
+      stream = Pointer(UInt8).new(RisRegion.tape_bytes((HEAD + BUFFER).to_u64))
       words = stream.as(Int64*)
       words[0] = fd
       words[1] = 0_i64

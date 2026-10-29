@@ -334,34 +334,41 @@ def check(label : String, got : String, wanted : String, failures : Array(String
 end
 
 if mode.empty?
-  listeners = [RisExerciseServer.port, RisExerciseServer.port, RisExerciseServer.port, RisExerciseServer.port]
-  bases = listeners.map { |l| "https://localhost:#{l}/" }
-  origins = listeners.map { |l| "https://localhost:#{l}" }
-  roots = Certificate.from_pem(ROOT_PEM).or_panic
-  other = Certificate.from_pem(OTHER_ROOT_PEM).or_panic
-  failures = [] of String
+  # Task captures are Share values: four ports, and the client task
+  # builds its own bases, roots and failures and answers their count.
+  port0 = RisExerciseServer.port
+  port1 = RisExerciseServer.port
+  port2 = RisExerciseServer.port
+  port3 = RisExerciseServer.port
+  failed = 0
   group do |g|
     g.spawn do
-      RisExerciseServer.serve(listeners[0], 2, RisResume0Handler, max_connections: 1)
+      RisExerciseServer.serve(port0, 2, RisResume0Handler, max_connections: 1)
       0
     end
     RisExerciseServer.wait(RisResume0Handler)
     g.spawn do
-      RisExerciseServer.serve(listeners[1], 2, RisResume1Handler, max_connections: 1)
+      RisExerciseServer.serve(port1, 2, RisResume1Handler, max_connections: 1)
       0
     end
     RisExerciseServer.wait(RisResume1Handler)
     g.spawn do
-      RisExerciseServer.serve(listeners[2], 2, RisResume2Handler, max_connections: 1)
+      RisExerciseServer.serve(port2, 2, RisResume2Handler, max_connections: 1)
       0
     end
     RisExerciseServer.wait(RisResume2Handler)
     g.spawn do
-      RisExerciseServer.serve(listeners[3], 8, RisResume3Handler, max_connections: 1)
+      RisExerciseServer.serve(port3, 8, RisResume3Handler, max_connections: 1)
       0
     end
     RisExerciseServer.wait(RisResume3Handler)
-    g.spawn do
+    client_task = g.spawn do
+      ports = [port0, port1, port2, port3]
+      bases = ports.map { |l| "https://localhost:#{l}/" }
+      origins = ports.map { |l| "https://localhost:#{l}" }
+      roots = Certificate.from_pem(ROOT_PEM).or_panic
+      other = Certificate.from_pem(OTHER_ROOT_PEM).or_panic
+      failures = [] of String
       config = TlsConfig.new
       config.roots = roots
       config.alpn = ["http/1.1"]
@@ -438,10 +445,11 @@ if mode.empty?
         "HTTP: tls: no OCSP response was stapled to CN=localhost, and require_staple asks for one (bad_certificate_status_response), 2 made, 1 reused", failures)
       pooled.close
       bases.each { |base| HTTP.get(base + "stop") }
-      0
+      failures.size
     end
+    failed = client_task.value.or(1)
   end
-  exit 1 unless failures.empty?
+  exit 1 unless failed == 0
   puts "ALL CHECKS PASSED"
   exit 0
 end

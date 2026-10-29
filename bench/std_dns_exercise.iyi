@@ -672,8 +672,8 @@ def respond(server : UdpSocket, forger : UdpSocket, query : Bytes, host : String
     wrong[1] = wrong[1] ^ 1_u8
     add_record(wrong, QUESTION, DnsRecord::A, a_data(6, 6, 6, 6))
     server.send_to(bytes_of(wrong), host, peer_port)
-    other = answer_head(query, 0, 1)
-    other = other[0, 12]
+    whole = answer_head(query, 0, 1)
+    other = Array(UInt8).new(12) { |i| whole[i] }
     wire_name("other.test").each { |byte| other << byte }
     push16(other, 1)
     push16(other, 1)

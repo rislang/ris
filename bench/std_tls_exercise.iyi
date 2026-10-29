@@ -358,6 +358,17 @@ def holds?(haystack : Array(UInt8), needle : Array(UInt8)) : Bool
   false
 end
 
+# DIR's identity read from its files, with DIR/staple.der stapled to it
+# when there is one: what the server mode's `identity_source` answers.
+def sourced_identity(dir : String) : TlsIdentity
+  own = TlsIdentity.from_pem(File.read(dir + "/chain.pem"), File.read(dir + "/key.pem")).or_panic
+  if File.file?(dir + "/staple.der")
+    held = File.read(dir + "/staple.der")
+    own.staple(Array(UInt8).new(held.bytesize) { |i| held[i] })
+  end
+  own
+end
+
 # The server ECH is held to here: inner.test's identity, public.test's
 # beside it unless *public* is false, ALPN h2 and http/1.1, and *keys*.
 def ech_server(keys : Array(TlsEchKey), public : Bool = true) : TlsServerConfig
@@ -1077,29 +1088,44 @@ if args.size > 0 && args[0] == "ech-get"
   exit 0
 end
 
+# A key's ECH config list, from the server task to the client.
+@[OnTape]
+struct RisEchConfigs
+  getter bytes : Array(UInt8)
+
+  def initialize(@bytes)
+  end
+end
+
 # ech-speed COUNT: COUNT handshakes of this program's client with its
 # server over loopback, each kind by turns - without ECH (GREASE off), with
 # GREASE ECH, and with ECH taken - each timed from the client's connect to
 # its handshake's end, the server's work in that too, both ends on this
 # program's one thread; and each kind's median, in ms. Run by hand, built
 # with --release: the module's header quotes it.
+#
+# The server task owns its key and config; the client hears the key's
+# config list as a board message (TAPE_SPEC 5.1, 5.2).
 def ech_speed(count : Int32) : String
-  key = TlsEchKey.generate("public.test", 1).or_panic
-  server = ech_server([key])
-  server.tickets = 0
-  clients = [ech_client(nil), ech_client(nil), ech_client(TlsEchKey.config_list([key]))]
-  clients[0].ech_grease = false
   samples = [[] of Int64, [] of Int64, [] of Int64]
   listener = IyiSocket.listen("127.0.0.1", 0)
   port = listener.local_port
   group do |g|
     g.spawn do
+      key = TlsEchKey.generate("public.test", 1).or_panic
+      server = ech_server([key])
+      server.tickets = 0
+      raise "ech configs queue full" unless RisBoard.post(RisEchConfigs.new(TlsEchKey.config_list([key])))
       (count * 3).times do
         served = TlsServer.over(listener.accept.as(IyiSocket), server, 5000)
         served.abort unless served.is_a?(TlsError)
       end
       0
     end
+    heard = RisBoard.take(RisEchConfigs)
+    raise "ech configs cancelled" if heard.is_a?(Cancelled)
+    clients = [ech_client(nil), ech_client(nil), ech_client(heard.bytes)]
+    clients[0].ech_grease = false
     count.times do
       3.times do |k|
         started = __iyi_monotonic_ns
@@ -1202,7 +1228,9 @@ if args.size > 0 && args[0] == "serve"
   if File.file?(args[1] + "/sourced")
     own = TlsIdentity.from_pem(File.read(args[1] + "/chain.pem"), File.read(args[1] + "/key.pem")).or_panic
     sourced = own
-    config.identity_source = ->(name : String?, offered : Array(String)?, left : Int32?) { own.as(TlsIdentity | TlsError | Nil) }
+    # The source captures nothing (TAPE_SPEC 5.3): each ask builds the
+    # identity from the files, stapled as `own` is below.
+    config.identity_source = ->(name : String?, offered : Array(String)?, left : Int32?) { sourced_identity(Program.args[1]).as(TlsIdentity | TlsError | Nil) }
   end
   # DIR/staple.der: an OCSP response stapled for a client that asks.
   if File.file?(args[1] + "/staple.der")
@@ -1429,7 +1457,7 @@ check session.take("localhost", 443, TlsConfig.new, 10_i64).nil?, "a ticket is n
 binding_root = Certificate.parse(b(BINDING_ROOT)).or_panic
 binding_identity = TlsIdentity.from_der([b(BINDING_LEAF), b(BINDING_ROOT)], b(BINDING_SEED)).or_panic
 [
-  {"roots", ->(c : TlsConfig) { c.roots = [binding_root]; nil }},
+  {"roots", ->(c : TlsConfig) { c.roots = [Certificate.parse(b(BINDING_ROOT)).or_panic]; nil }},
   {"identity", ->(c : TlsConfig) { c.identity = TlsIdentity.from_der([b(BINDING_LEAF), b(BINDING_ROOT)], b(BINDING_SEED)).or_panic; nil }},
   {"now", ->(c : TlsConfig) { c.now = Time.utc(2030, 1, 1); nil }},
   {"min_version", ->(c : TlsConfig) { c.min_version = TlsVersion::TLS12; nil }},
@@ -1497,76 +1525,122 @@ puts "  A-labels, no final dot, ASCII as written, and what names no host refused
 
 puts "== a session's tickets, between this run's own client and server"
 
-# One connection to *listener* for *host* under *config* through
-# *session*, *early* sent with it, met by a `TlsServer` under *served*:
-# "client <what it came to>; server <what it came to>". The client writes
-# "hi" and reads to the end - the server's tickets with it - and the
-# server reads any early data, then "hi", and answers.
-def binding_round(listener : IyiSocket, served : TlsServerConfig, host : String, config : TlsConfig, session : TlsSession, early : String? = nil) : String
-  port = listener.local_port
-  ends = ["", ""]
-  group do |g|
-    server = g.spawn do
-      accepted = listener.accept
-      if accepted.is_a?(IyiSocket)
-        conn = TlsServer.over(accepted, served, 5000)
-        if conn.is_a?(TlsError)
-          accepted.close
-          conn.message
-        else
-          heard = ""
-          refused = nil.as(String?)
-          if conn.early_data?
-            while true
-              chunk = conn.read_early
-              if chunk.is_a?(TlsError)
-                refused = chunk.message
-                break
-              end
-              break if chunk.empty?
-              heard = heard + chunk
-            end
-          end
-          if why = refused
-            accepted.close
-            why
-          else
-            got = conn.read
-            conn.write("echo") unless got.is_a?(TlsError)
-            conn.close
-            "resumed=#{conn.resumed? ? "yes" : "no"} early=#{heard.bytesize}"
-          end
-        end
-      else
-        "no connection"
-      end
-    end
-    client = g.spawn do
-      socket = IyiSocket.connect("127.0.0.1", port)
-      if socket.is_a?(IyiSocket)
-        conn = TlsClient.over(socket, host, config, 5000, session, early)
-        if conn.is_a?(TlsError)
-          socket.close
-          conn.message
-        else
-          conn.write("hi")
-          drain(conn)
-          # Its close_notify ends the server's close: without it the server
-          # waited out `DRAIN_GAP_MS` and each round here took 1005-1008 ms.
-          conn.close
-          "resumed=#{conn.resumed? ? "yes" : "no"} early=#{conn.early_data}"
-        end
-      else
-        "no connection"
-      end
-    end
-    said = client.value
-    ends[0] = said.is_a?(String) ? said : "PANIC: #{said.message}"
-    heard = server.value
-    ends[1] = heard.is_a?(String) ? heard : "PANIC: #{heard.message}"
-    0
+# The binding rounds' server: one task owns the server configurations
+# and both listeners, so tickets it seals open on later rounds. It posts
+# its ports, then serves one connection per order (TAPE_SPEC 5.1, 5.2).
+@[OnTape]
+struct RisBindingPorts
+  getter first : Int32
+  getter second : Int32
+
+  def initialize(@first, @second)
   end
-  "client #{ends[0]}; server #{ends[1]}"
+end
+
+# One round for the server: which listener (-1 ends the task), and the
+# early-data server at *max_early* or the plain one.
+@[OnTape]
+struct RisBindingOrder
+  getter listener : Int32
+  getter eager : Bool
+  getter max_early : Int32
+
+  def initialize(@listener, @eager = false, @max_early = 0)
+  end
+end
+
+# What the server's end of a round came to.
+@[OnTape]
+struct RisBindingHeard
+  getter text : String
+
+  def initialize(@text)
+  end
+end
+
+def binding_server : Int32
+  served = TlsServerConfig.from_der([b(BINDING_LEAF), b(BINDING_ROOT)], b(BINDING_SEED)).or_panic
+  eager = TlsServerConfig.from_der([b(BINDING_LEAF), b(BINDING_ROOT)], b(BINDING_SEED)).or_panic
+  listeners = [IyiSocket.listen("127.0.0.1", 0), IyiSocket.listen("127.0.0.1", 0)]
+  raise "binding ports queue full" unless RisBoard.post(RisBindingPorts.new(listeners[0].local_port, listeners[1].local_port))
+  while true
+    order = RisBoard.take(RisBindingOrder)
+    break if order.is_a?(Cancelled) || order.listener < 0
+    eager.max_early_data = order.max_early if order.eager
+    heard = binding_serve(listeners[order.listener], order.eager ? eager : served)
+    raise "binding heard queue full" unless RisBoard.post(RisBindingHeard.new(heard))
+  end
+  listeners.each(&.close)
+  0
+end
+
+# One connection on *listener*, met under *served*: the server reads any
+# early data, then "hi", and answers.
+def binding_serve(listener : IyiSocket, served : TlsServerConfig) : String
+  accepted = listener.accept
+  if accepted.is_a?(IyiSocket)
+    conn = TlsServer.over(accepted, served, 5000)
+    if conn.is_a?(TlsError)
+      accepted.close
+      conn.message
+    else
+      heard = ""
+      refused = nil.as(String?)
+      if conn.early_data?
+        while true
+          chunk = conn.read_early
+          if chunk.is_a?(TlsError)
+            refused = chunk.message
+            break
+          end
+          break if chunk.empty?
+          heard = heard + chunk
+        end
+      end
+      if why = refused
+        accepted.close
+        why
+      else
+        got = conn.read
+        conn.write("echo") unless got.is_a?(TlsError)
+        conn.close
+        "resumed=#{conn.resumed? ? "yes" : "no"} early=#{heard.bytesize}"
+      end
+    end
+  else
+    "no connection"
+  end
+end
+
+# One connection to the server task's *listener* (0 or 1, on *port*) for
+# *host* under *config* through *session*, *early* sent with it: "client
+# <what it came to>; server <what it came to>". The client writes "hi"
+# and reads to the end - the server's tickets with it.
+def binding_round(port : Int32, listener : Int32, host : String, config : TlsConfig, session : TlsSession,
+                  early : String? = nil, eager : Bool = false, max_early : Int32 = 0) : String
+  raise "binding order queue full" unless RisBoard.post(RisBindingOrder.new(listener, eager, max_early))
+  said = begin
+    socket = IyiSocket.connect("127.0.0.1", port)
+    if socket.is_a?(IyiSocket)
+      conn = TlsClient.over(socket, host, config, 5000, session, early)
+      if conn.is_a?(TlsError)
+        socket.close
+        conn.message
+      else
+        conn.write("hi")
+        drain(conn)
+        # Its close_notify ends the server's close: without it the server
+        # waited out `DRAIN_GAP_MS` and each round here took 1005-1008 ms.
+        conn.close
+        "resumed=#{conn.resumed? ? "yes" : "no"} early=#{conn.early_data}"
+      end
+    else
+      "no connection"
+  end
+  end
+  heard = RisBoard.take(RisBindingHeard)
+  server_said = heard.is_a?(Cancelled) ? "cancelled" : heard.text
+  "client #{said}; server #{server_said}"
 end
 
 # The client's configuration: the binding root, at a time its leaf is good.
@@ -1591,50 +1665,51 @@ end
 
 FULL    = "client resumed=no early=Unused; server resumed=no early=0"
 RESUMED = "client resumed=yes early=Unused; server resumed=yes early=0"
-served = TlsServerConfig.from_der([b(BINDING_LEAF), b(BINDING_ROOT)], b(BINDING_SEED)).or_panic
-first_listener = IyiSocket.listen("127.0.0.1", 0)
-second_listener = IyiSocket.listen("127.0.0.1", 0)
-trusting = binding_config
-session = TlsSession.new
-check binding_round(first_listener, served, "fuzz.test", trusting, session) == FULL, "the first connection is a full handshake"
-# Both servers open the same tickets: a ticket offered to the second port
-# was taken there.
-check binding_round(second_listener, served, "fuzz.test", trusting, session) == FULL, "a ticket from one port is not offered to another"
-check binding_round(first_listener, served, "fuzz.test", trusting, session) == RESUMED, "a ticket is offered to the port it came from"
-check binding_round(first_listener, served, "fuzz.test", binding_config, session) == FULL, "a ticket from one configuration is not offered under another"
-# A resumed connection's tickets keep the time of the full handshake it
-# resumed: the newest held after it is one of them.
-chained = TlsSession.new
-binding_round(first_listener, served, "fuzz.test", trusting, chained)
-first_ticket = newest_held(chained, first_listener.local_port, trusting)
-chained.keep(first_ticket)
-sleep(20)
-check binding_round(first_listener, served, "fuzz.test", trusting, chained) == RESUMED, "a ticket kept by hand resumes"
-renewed = newest_held(chained, first_listener.local_port, trusting)
-check renewed.received_ms > first_ticket.received_ms && renewed.authenticated_ms == first_ticket.authenticated_ms,
-  "a ticket a resumed connection receives keeps its full handshake's time"
-# Early data on a ticket issued under 16 KiB: taken while the server's
-# limit is unchanged; once it has come down to 100 bytes, declined - the
-# client sends it again after the handshake - rather than taken and cut
-# off past the 100.
-eager = TlsServerConfig.from_der([b(BINDING_LEAF), b(BINDING_ROOT)], b(BINDING_SEED)).or_panic
-eager.max_early_data = 16384
-early_session = TlsSession.new
-check binding_round(first_listener, eager, "fuzz.test", trusting, early_session) == FULL, "the first connection to a server taking early data"
-check binding_round(first_listener, eager, "fuzz.test", trusting, early_session, "x" * 1000) == "client resumed=yes early=Accepted; server resumed=yes early=1000",
-  "early data within an unchanged limit is taken"
-eager.max_early_data = 100
-check binding_round(first_listener, eager, "fuzz.test", trusting, early_session, "x" * 1000) == "client resumed=yes early=Resent; server resumed=yes early=0",
-  "early data a ticket allows past a lowered limit is declined, and sent again"
-# A server_name of 254 bytes is refused before anything is sealed with it;
-# one of 253 is taken, and the client then refuses the certificate.
-long_name = "a" * 63 + "." + "b" * 63 + "." + "c" * 63 + "." + "d" * 62
-said_long = binding_round(first_listener, served, long_name, trusting, TlsSession.new)
-check said_long.includes?("server tls: a server_name of 254 bytes, past the 253 a host name has (decode_error)"), "a server_name past 253 bytes is refused"
-said_most = binding_round(first_listener, served, long_name[0, 253], trusting, TlsSession.new)
-check said_most.ends_with?("server tls: the client sent alert bad_certificate (42)"), "a server_name of 253 bytes is taken"
-first_listener.close
-second_listener.close
+group do |g|
+  g.spawn { binding_server }
+  ports = RisBoard.take(RisBindingPorts)
+  raise "binding ports cancelled" if ports.is_a?(Cancelled)
+  first_port = ports.first
+  second_port = ports.second
+  trusting = binding_config
+  session = TlsSession.new
+  check binding_round(first_port, 0, "fuzz.test", trusting, session) == FULL, "the first connection is a full handshake"
+  # Both servers open the same tickets: a ticket offered to the second port
+  # was taken there.
+  check binding_round(second_port, 1, "fuzz.test", trusting, session) == FULL, "a ticket from one port is not offered to another"
+  check binding_round(first_port, 0, "fuzz.test", trusting, session) == RESUMED, "a ticket is offered to the port it came from"
+  check binding_round(first_port, 0, "fuzz.test", binding_config, session) == FULL, "a ticket from one configuration is not offered under another"
+  # A resumed connection's tickets keep the time of the full handshake it
+  # resumed: the newest held after it is one of them.
+  chained = TlsSession.new
+  binding_round(first_port, 0, "fuzz.test", trusting, chained)
+  first_ticket = newest_held(chained, first_port, trusting)
+  chained.keep(first_ticket)
+  sleep(20)
+  check binding_round(first_port, 0, "fuzz.test", trusting, chained) == RESUMED, "a ticket kept by hand resumes"
+  renewed = newest_held(chained, first_port, trusting)
+  check renewed.received_ms > first_ticket.received_ms && renewed.authenticated_ms == first_ticket.authenticated_ms,
+    "a ticket a resumed connection receives keeps its full handshake's time"
+  # Early data on a ticket issued under 16 KiB: taken while the server's
+  # limit is unchanged; once it has come down to 100 bytes, declined - the
+  # client sends it again after the handshake - rather than taken and cut
+  # off past the 100.
+  early_session = TlsSession.new
+  check binding_round(first_port, 0, "fuzz.test", trusting, early_session, nil, true, 16384) == FULL, "the first connection to a server taking early data"
+  check binding_round(first_port, 0, "fuzz.test", trusting, early_session, "x" * 1000, true, 16384) == "client resumed=yes early=Accepted; server resumed=yes early=1000",
+    "early data within an unchanged limit is taken"
+  check binding_round(first_port, 0, "fuzz.test", trusting, early_session, "x" * 1000, true, 100) == "client resumed=yes early=Resent; server resumed=yes early=0",
+    "early data a ticket allows past a lowered limit is declined, and sent again"
+  # A server_name of 254 bytes is refused before anything is sealed with it;
+  # one of 253 is taken, and the client then refuses the certificate.
+  long_name = "a" * 63 + "." + "b" * 63 + "." + "c" * 63 + "." + "d" * 62
+  said_long = binding_round(first_port, 0, long_name, trusting, TlsSession.new)
+  check said_long.includes?("server tls: a server_name of 254 bytes, past the 253 a host name has (decode_error)"), "a server_name past 253 bytes is refused"
+  said_most = binding_round(first_port, 0, long_name[0, 253], trusting, TlsSession.new)
+  check said_most.ends_with?("server tls: the client sent alert bad_certificate (42)"), "a server_name of 253 bytes is taken"
+  raise "binding order queue full" unless RisBoard.post(RisBindingOrder.new(-1))
+  0
+end
 puts "  tickets held to their port and configuration, a resumption's to its full handshake's time, early data past a"
 puts "  lowered limit declined, and a server_name past 253 bytes refused"
 

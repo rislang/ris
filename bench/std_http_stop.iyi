@@ -275,19 +275,15 @@ def asked(tls : TlsClient) : String
 end
 
 if mode.empty?
-  roots = Certificate.from_pem(ROOT_PEM).or_panic
-  h1 = TlsConfig.new
-  h1.roots = roots
-  h1.alpn = ["http/1.1"]
-  h2 = TlsConfig.new
-  h2.roots = roots
-  h2.alpn = ["h2", "http/1.1"]
   tls = RisExerciseServer.port
   plain = RisExerciseServer.port
   secure_base = "https://localhost:#{tls}"
   plain_base = "http://127.0.0.1:#{plain}"
   said = [] of String
   failures = [] of String
+  # Task captures are Share values and text: the client task builds its
+  # own configs and failures, and answers the failures in one line.
+  failed = ""
   group do |g|
     g.spawn do
       RisExerciseServer.serve(tls, 0, RisStop1Handler)
@@ -299,7 +295,15 @@ if mode.empty?
       0
     end
     RisExerciseServer.wait(RisStop2Handler)
-    g.spawn do
+    client_task = g.spawn do
+      roots = Certificate.from_pem(ROOT_PEM).or_panic
+      h1 = TlsConfig.new
+      h1.roots = roots
+      h1.alpn = ["http/1.1"]
+      h2 = TlsConfig.new
+      h2.roots = roots
+      h2.alpn = ["h2", "http/1.1"]
+      seen = [] of String
       HTTP.tls_config = h1
       over_h1 = HTTPClient.new
       first = over_h1.get(secure_base + "/").or_panic
@@ -311,28 +315,30 @@ if mode.empty?
       h2c = HTTPClient.new(prior_knowledge: true)
       third = h2c.get(plain_base + "/").or_panic
       check("kept", "TLS #{first.body}, TLS #{second.body}, clear #{in_clear.get(plain_base + "/").or_panic.body}, clear #{third.body}",
-        "TLS HTTP/1.1, TLS HTTP/2, clear HTTP/1.1, clear HTTP/2", failures)
+        "TLS HTTP/1.1, TLS HTTP/2, clear HTTP/1.1, clear HTTP/2", seen)
       waiting = TlsClient.connect("localhost", tls, h1, 10000).or_panic
-      check("a std/tls client's request", asked(waiting), "HTTP/1.1 200 OK", failures)
+      check("a std/tls client's request", asked(waiting), "HTTP/1.1 200 OK", seen)
       HTTP.tls_config = h1
       upgraded = [HTTP.upgrade(secure_base + "/upgrade", "hold").or_panic, HTTP.upgrade(plain_base + "/upgrade", "hold").or_panic]
-      check("upgraded", upgraded.map { |u| u.response.status }.join(" and "), "101 and 101", failures)
+      check("upgraded", upgraded.map { |u| u.response.status }.join(" and "), "101 and 101", seen)
       HTTP.get(secure_base + "/stop").or_panic
       HTTP.get(plain_base + "/stop").or_panic
       RisExerciseServer.stopped(RisStop1Handler)
       RisExerciseServer.stopped(RisStop2Handler)
       ended = waiting.read
       check("the waiting std/tls client, on the stop", ended.is_a?(TlsError) ? ended.message : (ended.empty? ? "close_notify" : "#{ended.bytesize} bytes more"),
-        "close_notify", failures)
+        "close_notify", seen)
       waiting.close
       upgraded.each { |u| u.socket.close }
       over_h1.close
       over_h2.close
       in_clear.close
       h2c.close
-      0
+      seen.join("\n")
     end
+    failed = client_task.value.or("the client task panicked")
   end
+  failed.split("\n").each { |label| failures << label unless label.empty? }
   2.times do
     observation = RisBoard.take(RisStopObservation)
     raise "close result cancelled" if observation.is_a?(Cancelled)

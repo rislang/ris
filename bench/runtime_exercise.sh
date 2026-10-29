@@ -62,18 +62,13 @@ if ! ./exercise-release > answers-release.txt 2>&1; then
 fi
 grep -q 'runtime exercise: every property held' answers-release.txt || { cat answers-release.txt; exit 1; }
 
-# 3. Windows cross-compilation
-step "runtime exercise, cross-compilation to x86_64-windows-msvc"
-if ! "$IYI" build --cross-compile --target x86_64-windows-msvc "$REPO/bench/runtime_exercise.iyi" -o runtime-msvc.obj > msvc.log 2>&1; then
-  echo "cross-compile to msvc failed:"
+# 3. Windows cross-compilation: ris builds for Linux only (src/iyi/heap.iyi),
+# so a Windows target is refused with the sentence that says so.
+step "runtime exercise, a Windows target refused"
+if "$IYI" build --cross-compile --target x86_64-windows-msvc "$REPO/bench/runtime_exercise.iyi" -o runtime-msvc.obj > msvc.log 2>&1 ||
+   ! grep -q 'ris programs need Linux' msvc.log; then
+  echo "a Windows target was not refused for want of Linux:"
   cat msvc.log
-  exit 1
-fi
-
-step "runtime exercise, cross-compilation to x86_64-windows-gnu"
-if ! "$IYI" build --cross-compile --target x86_64-windows-gnu "$REPO/bench/runtime_exercise.iyi" -o runtime-gnu.o > gnu.log 2>&1; then
-  echo "cross-compile to gnu failed:"
-  cat gnu.log
   exit 1
 fi
 

@@ -26,7 +26,8 @@ def read_teb_tls_slot : UInt64
 end
 
 def log_msg(msg : String) : Nil
-  __iyi_write(1, msg.to_unsafe.as(Void*), msg.size.to_u64)
+  print msg
+  STDOUT.flush
 end
 
 # Task observations are copied onto the board, in publication order.
@@ -69,9 +70,9 @@ end
   end
 
   def make_pipe : Pointer(Int64)
-    raw_fds = Pointer(UInt8).malloc(8_u64).as(Pointer(Int32))
+    raw_fds = Pointer(UInt8).new(RisRegion.tape_bytes(8_u64)).as(Pointer(Int32))
     fail("pipe failed") if LibC.pipe(raw_fds) < 0
-    fds = Pointer(UInt8).malloc(16_u64).as(Pointer(Int64))
+    fds = Pointer(UInt8).new(RisRegion.tape_bytes(16_u64)).as(Pointer(Int64))
     fds[0] = raw_fds[0].to_i64
     fds[1] = raw_fds[1].to_i64
     fds
@@ -92,7 +93,7 @@ end
     fail("CreateNamedPipeA failed") if h_read.address &+ 1_u64 == 0_u64
     h_write = LibC.CreateFileA(pipe_name, 1073741824_i32, 0_i32, Pointer(Void).new(0_u64), 3_i32, 128_i32, Pointer(Void).new(0_u64))
     fail("CreateFileA for pipe failed") if h_write.address &+ 1_u64 == 0_u64
-    fds = Pointer(UInt8).malloc(16_u64).as(Pointer(Int64))
+    fds = Pointer(UInt8).new(RisRegion.tape_bytes(16_u64)).as(Pointer(Int64))
     fds[0] = h_read.address.to_i64
     fds[1] = h_write.address.to_i64
     fds
@@ -105,10 +106,10 @@ end
   {% end %}
 
   def make_pipe : Pointer(Int64)
-    raw_fds = Pointer(UInt8).malloc(8_u64).as(Pointer(Int32))
+    raw_fds = Pointer(UInt8).new(RisRegion.tape_bytes(8_u64)).as(Pointer(Int32))
     result = __iyi_conc_syscall3(EX_SYS_PIPE2, raw_fds.address.to_i64, 0_i64, 0_i64)
     fail("pipe2 failed") if result < 0
-    fds = Pointer(UInt8).malloc(16_u64).as(Pointer(Int64))
+    fds = Pointer(UInt8).new(RisRegion.tape_bytes(16_u64)).as(Pointer(Int64))
     fds[0] = raw_fds[0].to_i64
     fds[1] = raw_fds[1].to_i64
     fds
@@ -243,7 +244,7 @@ io_order = ""
 group do |g|
   g.spawn do
     note("parked,")
-    buffer = Pointer(UInt8).malloc(1_u64)
+    buffer = Pointer(UInt8).new(RisRegion.tape_bytes(1_u64))
     got = iyi_read(read_fd, buffer.as(Void*), 1_u64)
     case got
     in Int64
@@ -256,7 +257,7 @@ group do |g|
   g.spawn do
     sleep(40)
     note("wrote,")
-    byte = Pointer(UInt8).malloc(1_u64)
+    byte = Pointer(UInt8).new(RisRegion.tape_bytes(1_u64))
     byte.value = 7_u8
     __iyi_write(write_fd, byte.as(Void*), 1_u64)
     0
@@ -276,7 +277,7 @@ started = __iyi_monotonic_ns
 
 group do |g|
   g.spawn do
-    buf = Pointer(UInt8).malloc(1_u64)
+    buf = Pointer(UInt8).new(RisRegion.tape_bytes(1_u64))
     outcome = iyi_read(io_read_fd, buf.as(Void*), 1_u64)
     note(outcome.is_a?(Cancelled) ? "cancelled" : "read")
     outcome
@@ -406,9 +407,11 @@ end
 
 fail("captured it: a task answered #{captured_total(10)} for 10 and s11") unless captured_total(10) == 13
 fail("captured it: a task answered #{captured_total(11)} for s11 and 12") unless captured_total(11) == 15
+# A proc keeps no tape text (TAPE_SPEC 5.3): the String arm captures
+# its size.
 bump = case int_or_text(6)
        in Int32  then -> { it + 1 }
-       in String then -> { it.size }
+       in String then size = it.size; -> { size }
        end
 after = case int_or_text(7)
         in Int32  then it + 1
