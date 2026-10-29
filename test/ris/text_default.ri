@@ -22,6 +22,8 @@ case "key".to_heap
 when "key" then nil
 else raise "case comparison failed"
 end
+# The to_heap above copied "key" onto this tape; the loop starts here.
+before = IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)
 i = 0
 while i < 1_000_000
   format_size(i)

@@ -988,7 +988,9 @@ class Iyi::TapeShrinkChecker
     when ClassVar, Global
       global_value(node.var.object_id, node.type?)
     when Var, InstanceVar
-      return EMPTY unless reference?(node)
+      # A local proc keeps its known literal even when its type holds no
+      # tape storage (a `String::Builder` parameter, say).
+      return EMPTY unless reference?(node) || proc_type?(node.type?)
       v = env[node.name] ||= if node.is_a?(InstanceVar)
                                Value.new((env["self"]? || EMPTY).roots.map { |r| field_root(r, node.name).as(UInt64) }, [] of View)
                              elsif reference?(node)

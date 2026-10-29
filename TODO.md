@@ -241,11 +241,15 @@ first):
     panic copied its text through a scratch work queue; now one String.
     owner_construction_panic gates 302 scopes, 7 mappings: each panic's
     text is kept in a result region until the group ends.
-    query_scope still maps 9 (<= 8): a String#copy_to(RisPendingCopy)
-    in the Query lookup acquires a pending region, besides QUERIES on
-    Program.tape and 5 side reservations. Check std/uri's pending path.
-  * text_default.ri:31: a def whose Int32 result drops its interpolation
-    keeps tape over a million calls ("interpolation retained tape").
+    query_scope: fixed, 7 mappings. Query.decoded's String.build was a
+    def's fresh result, staged in a pending region and copied back;
+    Query.parse now makes each decoded string at its size in place.
+  * text_default: fixed in the test. The loop kept no tape; the
+    `"key".to_heap` before it copies onto the tape, so `before` is read
+    again after it.
+  * call_contracts: fixed. A proc literal's parameter took the slot of
+    an outer growing text local of the same name (normalizer); a local
+    proc of a non-tape type lost its literal (shrink checker).
   * index_view: fixed; tape_indexable's copying values_at(Array(Int32))
     overrode the view.
   * copy_rollback: fixed in the test. Array(String) copies bytes into its
@@ -267,7 +271,8 @@ first):
     a pool run with a live view of TapeEntry.@source"; heap and
     server_owners stop at log.iyi:362; answer, serve, server_groups,
     http_prefork at http.iyi:6052; samples/ris/request at :2627.
-* growing_owner refuses with the field rule, not the container one.
+* growing_owner: fixed; an owner held in an Array or RisTree (also a
+  SlicePool's @data) gets the container refusal.
 * samples/ris/web.ri does not build: std/http.iyi:2627
   (`headers[host_name] = named`) is refused as a Hash shrink with a live
   view, after about 7 minutes of checking (seen 2026-10-29 on the base).

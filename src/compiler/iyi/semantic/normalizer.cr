@@ -1077,6 +1077,21 @@ module Iyi
       end
     end
 
+    # A proc literal's parameters shadow the enclosing scope's growing
+    # text locals: `->(text : String) { puts text }` beside a local
+    # `text` must not lend the outer local's slot to the parameter.
+    def transform(node : ProcLiteral)
+      names = node.def.args.map(&.name)
+      outer_locals, outer_slots = @ris_growing_locals, @ris_text_slots
+      @ris_growing_locals = outer_locals - names.to_set
+      @ris_text_slots = outer_slots.reject { |name, _| names.includes?(name) }
+      begin
+        super
+      ensure
+        @ris_growing_locals, @ris_text_slots = outer_locals, outer_slots
+      end
+    end
+
     def transform(node : Def)
       if ris_program_code?(node) &&
          node.location.try(&.original_filename.try(&.ends_with?(".ri")))

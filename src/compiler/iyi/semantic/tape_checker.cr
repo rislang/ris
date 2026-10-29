@@ -187,6 +187,17 @@ class Iyi::TapeChecker
       type.instance_vars.each_value do |ivar|
         if field_type = ivar.type?
           if TapeOwnerChecker.owner_in(@program, field_type)
+            # An owner held in an Array or RisTree (its own storage, or
+            # a SlicePool's) is in a container, not in a field.
+            container = [type, field_type].find do |held|
+              held.is_a?(GenericClassInstanceType) &&
+                {"Array", "RisTree"}.includes?(held.generic_type.name)
+            end
+            if container
+              fail type, nil, "cannot store an owner in a container, " \
+                              "tuple or union: #{container}; borrow it: " \
+                              "pass the owner variable"
+            end
             fail type, ivar, "cannot store an owner in a field; " \
                              "borrow it: pass the owner variable"
           end
