@@ -18,7 +18,7 @@ module Iyi::HeapPolicy
     base = name.gsub(".class", "").gsub(":Module", "").split('(').first
     base.in?(%w(IyiHeap RisRegion IyiRoots IyiMark IyiRuntimeLock
       IyiFiber IyiScheduler IyiSchedulerState IyiStackGuard IyiDefers
-      IyiGroup IyiTask IyiWorkers
+      IyiGroup IyiTask IyiWorkers RisGroupSlot RisTaskSlot
       IyiDeferNode IyiOnce RisHeap))
   end
 

@@ -3212,6 +3212,7 @@ end
 fun __ris_program_environment(size : UInt64) : Void*
   address = 0_u64
   RisRegion.program_scope { address = RisRegion.tape_bytes(size) }
+  RisRegion.note_program(size)
   Pointer(Void).new(address)
 end
 

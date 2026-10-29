@@ -2118,8 +2118,38 @@ end
 class IyiDeferNode
   @proc : Proc(Nil)
   property next_node : IyiDefer?
+  # ris (TAPE_SPEC 6.1): a `defer`'s node, back in its thread's pool
+  # once it ran (`give`); a fiber's own tape guard is never pooled.
+  @pooled : Bool = false
+  @[ThreadLocal]
+  @@free : IyiDeferNode?
 
   def initialize(@proc : Proc(Nil))
+    @next_node = nil
+  end
+
+  def self.take(cleanup : Proc(Nil)) : IyiDeferNode
+    node = @@free
+    return IyiDeferNode.new(cleanup).mark_pooled unless node.is_a?(IyiDeferNode)
+    @@free = node.next_node.as?(IyiDeferNode)
+    node.reuse(cleanup)
+    node
+  end
+
+  def self.give(node) : Nil
+    return unless node.is_a?(IyiDeferNode) && node.@pooled
+    node.reuse(-> { })
+    node.next_node = @@free
+    @@free = node
+  end
+
+  protected def mark_pooled : IyiDeferNode
+    @pooled = true
+    self
+  end
+
+  protected def reuse(cleanup : Proc(Nil)) : Nil
+    @proc = cleanup
     @next_node = nil
   end
 

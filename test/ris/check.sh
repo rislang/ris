@@ -127,6 +127,19 @@ else
   echo "FAILED   task_wait: $out"; status=1
 fi
 
+# Task, fiber, group and defer slots are pooled: 100,000 tasks in rounds
+# take program storage in the first round only; stale handles refused.
+out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 "$RIS" run test/ris/task_reuse.ri 2>&1)
+if [ "$?" -eq 0 ] && grep -qxF 'PASS: task reuse' <<<"$out" &&
+    grep -qxF 'program storage after the first round: steady' <<<"$out" &&
+    grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out" &&
+    grep -q '^ris program storage: [0-9]* bytes taken$' <<<"$out"; then
+  echo "runs     task_reuse (100,000 tasks, steady program storage)"
+else
+  echo "FAILED   task_reuse: $(grep -v '^ris tape\|  at \|round panic' <<<"$out")"
+  status=1
+fi
+
 # Interpolated output and panic text from iyi library code stay on tape.
 out=$(
   probe=$(mktemp -d)

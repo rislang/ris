@@ -342,7 +342,10 @@ def __iyi_monotonic_ns : Int64
   {% elsif flag?(:darwin) %}
     LibC.clock_gettime_nsec_np(4).to_i64
   {% else %}
-    spec = Pointer(UInt64).malloc(2_u64)
+    # On the stack: a timed wait reads the clock, and a buffer taken
+    # from program storage per read was never given back.
+    storage = uninitialized UInt64[2]
+    spec = pointerof(storage).as(Pointer(UInt64))
     result = __iyi_conc_syscall3(IYI_SYS_CLOCK_GETTIME, 1_i64, spec.address.to_i64, 0_i64)
     raise "clock_gettime failed" if result < 0
     spec[0].to_i64 * 1000000000_i64 + spec[1].to_i64
@@ -420,6 +423,10 @@ class IyiFiber
   # reader copies it onto its own tape before keeping it.
   @panic_box : UInt64 = 0_u64
 
+  protected def clear_panic : Nil
+    @panic_box = 0_u64
+  end
+
   def panic_message : String
     return "" if @panic_box == 0_u64
     Pointer(String).new(@panic_box).value
@@ -427,7 +434,7 @@ class IyiFiber
 
   def panic_message=(text : String) : String
     group = @group
-    if group.is_a?(IyiGroup)
+    if group.is_a?(RisGroupSlot)
       holder = RisResultRegion.new(RisRegion.acquire(Tape::CAPACITY))
       keep_panic(text, holder)
       group.keep_result(holder.region)
@@ -453,7 +460,7 @@ class IyiFiber
   # The group that spawned this fiber, so a panic can tell it directly:
   # the trampoline's own notification lives after `block.call`, and a
   # panicking block never returns there.
-  property group : IyiGroup?
+  property group : RisGroupSlot?
 
   # The scheduler thread whose lists this fiber waits in and whose run
   # queue it is woken into (III.4.13). Set when it is spawned, or, for a
@@ -503,10 +510,10 @@ class IyiFiber
   property joiner : IyiFiber?
   property next_joiner : IyiFiber?
   property awaited : IyiFiber?
-  property joining : IyiGroup?
+  property joining : RisGroupSlot?
   # The innermost group this fiber has open, the rest through
-  # `IyiGroup#outer`: what a cancel of the fiber reaches (`cancel`).
-  property open_group : IyiGroup?
+  # `RisGroupSlot#outer`: what a cancel of the fiber reaches (`cancel`).
+  property open_group : RisGroupSlot?
   # Woken to report a deadlock on its own stack (`IyiScheduler.deadlock`).
   property deadlocked : Bool
   # PROTOTYPE (ris, step B): this fiber's tape while it is not running.
@@ -549,6 +556,59 @@ class IyiFiber
   # one nonce, and the losers go stale by arithmetic.
   property park_nonce : UInt64
 
+  # ris (TAPE_SPEC 6.1): a task's fiber is pooled on its thread's state.
+  # `generation` moves on each reuse, so a handle or a join that names an
+  # older task sees it done; `park_nonce` survives reuse, so a stale park
+  # node never matches the next task's park.
+  property generation : UInt64 = 0_u64
+  # The task this fiber runs (`RisTaskSlot#run`), in place of a closure.
+  property task_run : RisTaskSlot?
+  # Returned to the pool when reaped: set for a group's own-thread task.
+  property recycle : Bool = false
+  property next_free : IyiFiber?
+  # The innermost `group do` this fiber has open (`IyiGroup.scoped`).
+  property scoped_group : RisGroupSlot?
+
+  # A fiber from this thread's pool, or a new one.
+  def self.take : IyiFiber
+    st = IyiScheduler.state
+    fiber = st.free_fibers
+    return IyiFiber.new unless fiber.is_a?(IyiFiber)
+    st.free_fibers = fiber.next_free
+    generation = fiber.generation
+    nonce = fiber.park_nonce
+    # Its tape guard captures nothing and is kept for the next task.
+    cleanup = fiber.tape_cleanup
+    overlapped = fiber.wait_overlapped
+    index = 0
+    while index < 32
+      overlapped[index] = 0_u8
+      index = index + 1
+    end
+    fiber.initialize(overlapped)
+    # What `initialize` leaves to the field defaults of a fresh object.
+    fiber.unwinding = false
+    fiber.join_timed = false
+    fiber.clear_panic
+    fiber.generation = generation &+ 1
+    fiber.park_nonce = nonce
+    if cleanup
+      cleanup.next_node = nil
+      fiber.tape_cleanup = cleanup
+    end
+    fiber
+  end
+
+  # Back to this thread's pool. Its stack went back when it was reaped.
+  def self.give(fiber : IyiFiber) : Nil
+    st = IyiScheduler.state
+    fiber.task_run = nil
+    fiber.recycle = false
+    fiber.generation = fiber.generation &+ 1
+    fiber.next_free = st.free_fibers
+    st.free_fibers = fiber
+  end
+
   # 256 KiB of stack and one guard page under it, so running off the end
   # is a fault at a page rather than a quiet corruption of a neighbour's
   # chunk: every frame probes its pages top down (`iyi_probe_stack`).
@@ -587,7 +647,7 @@ class IyiFiber
     INITIAL_COMMIT = 16384_u64
   {% end %}
 
-  def initialize
+  def initialize(@wait_overlapped : Pointer(UInt8) = Pointer(UInt8).malloc(32_u64))
     @state = IyiFiberState::Runnable
     @cancelled = false
     @defers = nil
@@ -604,6 +664,9 @@ class IyiFiber
     @cancel_posted = false
     @sp = 0_u64
     @proc = nil
+    @task_run = nil
+    @recycle = false
+    @next_free = nil
     @next_run = nil
     @next_sleep = nil
     @sleep_child = nil
@@ -631,7 +694,6 @@ class IyiFiber
     @stack_top = 0_u64
     @wait_handle = Pointer(Void).new(0_u64)
     @io_direction = 0
-    @wait_overlapped = Pointer(UInt8).malloc(32_u64)
     @io_bytes_read = 0_i64
   end
 
@@ -842,6 +904,8 @@ end
 # means "not created yet" throughout, as before.
 class IyiSchedulerState
   property current : IyiFiber?
+  # Finished task fibers for this thread's next spawns (`IyiFiber.take`).
+  property free_fibers : IyiFiber?
   property run_head : IyiFiber?
   property run_tail : IyiFiber?
   property sleep_head : IyiFiber?
@@ -1094,7 +1158,7 @@ end
 
 class IyiScheduler
   # Set by `exit`: the process is ending, and a group's join owes it no
-  # wait (`IyiGroup#join`).
+  # wait (`RisGroupSlot#join`).
   @@exiting = false
 
   def self.exiting? : Bool
@@ -1400,6 +1464,9 @@ class IyiScheduler
     st.dying = nil
     fiber.release_stack
     unregister(fiber)
+    # A panicked task stays on its group's list for the join's re-raise;
+    # its group returns it (`RisGroupSlot#recycle`).
+    IyiFiber.give(fiber) if fiber.recycle && !fiber.panicked
   end
 
   # A thread's last act with the scheduler: its main fiber leaves the
@@ -1818,7 +1885,7 @@ class IyiScheduler
   end
 
   # How a spawned fiber's stack is made, installed by the first spawn
-  # (`IyiGroup#spawn`) and called through rather than named here: a
+  # (`RisGroupSlot#spawn`) and called through rather than named here: a
   # program that parks without spawning - a thread waiting on a lock -
   # switches too, and naming `prepare_stack` in the switch put the stack
   # mapping's `mprotect` into every such program, one more name on
@@ -1879,13 +1946,22 @@ class IyiScheduler
     # returned into the trampoline rather than into `switch_to`.
     reap_dying
     body = fiber.proc
+    task = fiber.task_run
     {% if (!flag?(:gc_none) || flag?(:linux)) && !flag?(:gc_boehm) %}
       # Each spawned body owns a tape, including its panic/exit cleanup.
       RisRegion.tape_scope(Tape::CAPACITY) do
-        body.call unless body.is_a?(Nil)
+        if task.is_a?(RisTaskSlot)
+          task.run
+        else
+          body.call unless body.is_a?(Nil)
+        end
       end
     {% else %}
-      body.call unless body.is_a?(Nil)
+      if task.is_a?(RisTaskSlot)
+        task.run
+      else
+        body.call unless body.is_a?(Nil)
+      end
     {% end %}
     # Done and its readers woken in one step under the scheduler's lock,
     # which every reader checks `Done` under: a reader on another thread
@@ -1893,7 +1969,7 @@ class IyiScheduler
     IyiSchedLock.lock
     fiber.state = IyiFiberState::Done
     g = fiber.group
-    if g.is_a?(IyiGroup)
+    if g.is_a?(RisGroupSlot)
       g.child_finished(false)
       g.drop_child(fiber)
     end
@@ -2301,9 +2377,9 @@ class IyiScheduler
   # The task may be on another thread (III.4.13), so its state is read and
   # the chain pushed under the scheduler's lock, the one its end is
   # written under.
-  def self.join(fiber : IyiFiber) : Nil
+  def self.join(fiber : IyiFiber, generation : UInt64) : Nil
     IyiSchedLock.lock
-    while fiber.state != IyiFiberState::Done
+    while fiber.generation == generation && fiber.state != IyiFiberState::Done
       me = current
       if me.cancelled && !fiber.cancelled
         IyiSchedLock.unlock
@@ -2323,14 +2399,15 @@ class IyiScheduler
   # A deadline belongs to this reader, never to the task being read.
   # Keep the join chain and timer until this reader resumes: completion
   # on another scheduler may wake it but cannot edit its sleep heap.
-  def self.join(fiber : IyiFiber, ms : Int32) : Nil | TimedOut | Cancelled
+  def self.join(fiber : IyiFiber, generation : UInt64,
+                ms : Int32) : Nil | TimedOut | Cancelled
     me = current
     IyiSchedLock.lock
     if me.cancelled
       IyiSchedLock.unlock
       return Cancelled.new
     end
-    if fiber.state == IyiFiberState::Done
+    if fiber.generation != generation || fiber.state == IyiFiberState::Done
       IyiSchedLock.unlock
       return nil
     end
@@ -2352,7 +2429,7 @@ class IyiScheduler
     me.join_timed = false
     leave_joiners(fiber, me) if me.awaited.is_a?(IyiFiber)
     cancelled = me.cancelled
-    done = fiber.state == IyiFiberState::Done
+    done = fiber.generation != generation || fiber.state == IyiFiberState::Done
     IyiSchedLock.unlock
     return Cancelled.new if cancelled
     return nil if done
@@ -2434,7 +2511,7 @@ class IyiScheduler
     # as they do. A task joining a group of its own was left to wait, and
     # its grandchild's 2-second sleep ran in full after the group failed.
     group = fiber.open_group
-    while group.is_a?(IyiGroup)
+    while group.is_a?(RisGroupSlot)
       group.cancel_children_locked
       group = group.outer
     end
@@ -2507,7 +2584,7 @@ class IyiScheduler
     task = root.awaited
     leave_joiners(task, root) if task.is_a?(IyiFiber)
     group = root.joining
-    group.forget_joiner if group.is_a?(IyiGroup)
+    group.forget_joiner if group.is_a?(RisGroupSlot)
     if root.object_id == current.object_id
       IyiSchedLock.unlock
       deadlock
@@ -2618,8 +2695,9 @@ class IyiScheduler
       # with errno EINTR (4) is a wakeup with no news, the same story
       # epoll's -EINTR tells below; anything else negative is real.
       timeout_ptr = Pointer(Void).new(0_u64)
+      storage = uninitialized UInt64[2]
       if timeout >= 0_i64
-        spec = Pointer(UInt64).malloc(2_u64)
+        spec = pointerof(storage).as(Pointer(UInt64))
         spec[0] = (timeout // 1000_i64).to_u64
         spec[1] = ((timeout % 1000_i64) * 1000000_i64).to_u64
         timeout_ptr = spec.as(Void*)
@@ -3085,17 +3163,18 @@ class IyiScheduler
     # panicking owner's, its tasks cancelled and their cleanups run.
     group = fiber.joining
     fiber.joining = nil
-    group.join(true) if group.is_a?(IyiGroup) && !again
+    group.join(true) if group.is_a?(RisGroupSlot) && !again
 
     while true
       node = fiber.defers
       break unless node
       fiber.defers = node.next_node
       node.run
+      IyiDeferNode.give(node)
     end
 
     body = fiber.proc
-    if body.is_a?(Nil)
+    if body.is_a?(Nil) && fiber.task_run.is_a?(Nil)
       RisHeap.report
       __iyi_flush_std
       __iyi_exit(1)
@@ -3104,7 +3183,7 @@ class IyiScheduler
     g = fiber.group
     IyiSchedLock.lock
     fiber.state = IyiFiberState::Done
-    g.child_panicked(fiber.cancelled) if g.is_a?(IyiGroup)
+    g.child_panicked(fiber.cancelled) if g.is_a?(RisGroupSlot)
     wake_joiners(fiber)
     IyiSchedLock.unlock
     state.dying = fiber
@@ -3126,10 +3205,11 @@ class IyiScheduler
       break unless node
       fiber.defers = node.next_node
       node.run
+      IyiDeferNode.give(node)
     end
     g = fiber.group
     IyiSchedLock.lock
-    if g.is_a?(IyiGroup)
+    if g.is_a?(RisGroupSlot)
       g.child_finished(false)
       g.drop_child(fiber)
     end
@@ -3585,7 +3665,7 @@ end
 # get to clean up.
 def __iyi_defer_push(cleanup : Proc(Nil)) : Nil
   fiber = IyiScheduler.current
-  node = IyiDeferNode.new(cleanup)
+  node = IyiDeferNode.take(cleanup)
   node.next_node = fiber.defers
   fiber.defers = node
 end
@@ -3596,6 +3676,7 @@ def __iyi_defer_pop_run : Nil
   return unless node
   fiber.defers = node.next_node
   node.run
+  IyiDeferNode.give(node)
 end
 
 # The tape guard occupies the same LIFO registry as ordinary defers, but
@@ -3738,23 +3819,89 @@ end
 # A handle is Share when its value is: other tasks wait on it and read
 # the value (TAPE_SPEC 5.2, completion broadcast).
 @[Share]
-class IyiTask(T)
-  @fiber : IyiFiber
-  @group : IyiGroup
+# ris (TAPE_SPEC 6.1): the runtime's record of one task, in a typed pool
+# per T. The group that spawned it returns it at its scope's end
+# (`RisGroupSlot#recycle`), and the next spawn of a T takes it back;
+# the generation, bumped on each return, refuses a handle kept past it.
+# One pool for every T: the slot keeps the block as its two words and a
+# per-T entry without a closure (`RisTaskCall(T).run`), so no slot is ever
+# reused as another type.
+class RisTaskSlot
+  getter fiber : IyiFiber
+  getter fiber_generation : UInt64 = 0_u64
+  getter group : RisGroupSlot
+  getter generation : UInt64 = 0_u64
+  property next_in_group : RisTaskSlot?
+  getter block_code : Void* = Pointer(Void).new(0_u64)
+  getter block_data : Void* = Pointer(Void).new(0_u64)
+  @entry : Proc(RisTaskSlot, Nil)?
   @box : UInt64 = 0_u64
+  @next_free : RisTaskSlot?
+  @@free : RisTaskSlot?
 
-  def initialize(@fiber : IyiFiber, @group : IyiGroup)
+  def initialize(@fiber : IyiFiber, @group : RisGroupSlot)
+  end
+
+  # A slot from the pool, or a new one when the pool is empty.
+  def self.take(fiber : IyiFiber, group : RisGroupSlot) : RisTaskSlot
+    IyiSchedLock.lock
+    slot = @@free
+    @@free = slot.@next_free if slot.is_a?(RisTaskSlot)
+    IyiSchedLock.unlock
+    if slot.is_a?(RisTaskSlot)
+      slot.reuse(fiber, group)
+    else
+      slot = RisTaskSlot.new(fiber, group)
+    end
+    slot
+  end
+
+  protected def reuse(fiber : IyiFiber, group : RisGroupSlot) : Nil
+    @fiber = fiber
+    @group = group
+    @box = 0_u64
+    @next_free = nil
+    @next_in_group = nil
+  end
+
+  def start(code : Void*, data : Void*,
+                      entry : Proc(RisTaskSlot, Nil)) : Nil
+    @block_code = code
+    @block_data = data
+    @entry = entry
+    @fiber_generation = @fiber.generation
+  end
+
+  # The task's body, on its own stack (`IyiScheduler.run_spawned_fiber`).
+  def run : Nil
+    entry = @entry
+    entry.call(self) if entry.is_a?(Proc(RisTaskSlot, Nil))
+  end
+
+  # Back to the pool at its group's end; a handle that still names it
+  # sees the generation move and is refused.
+  def recycle : Nil
+    @generation = @generation &+ 1
+    @entry = nil
+    @block_code = Pointer(Void).new(0_u64)
+    @block_data = Pointer(Void).new(0_u64)
+    @box = 0_u64
+    IyiSchedLock.lock
+    @next_free = @@free
+    @@free = self
+    IyiSchedLock.unlock
+  end
+
+  # The fiber, while it still runs this task: one done and reaped may
+  # run another task now, and then this task is done.
+  def live_fiber : IyiFiber?
+    @fiber.generation == @fiber_generation ? @fiber : nil
   end
 
   # ris: T holds tape values (String, Array, Hash, RisTree). The task's own
   # tape ends with it, so its value is copied into a result region the
   # group keeps until it ends, and each reader gets a copy on its tape.
-
-  def fiber : IyiFiber
-    @fiber
-  end
-
-  def finish(value : T) : Nil
+  def finish(value : T) : Nil forall T
     region = RisRegion.acquire(Tape::CAPACITY)
     holder = RisResultRegion.new(region)
     value = Tape.task_copy(value, holder)
@@ -3766,29 +3913,71 @@ class IyiTask(T)
     @group.keep_result(holder.region)
   end
 
+  def box : UInt64
+    @box
+  end
+end
+
+# The typed half of a task's start: the block rebuilt from its two words.
+struct RisTaskCall(T)
+  def self.run(slot : RisTaskSlot) : Nil
+    block = uninitialized Proc(T)
+    words = pointerof(block).as(Pointer(Void*))
+    words[0] = slot.block_code
+    words[1] = slot.block_data
+    value = block.call
+    slot.finish(value)
+    slot.group.finished(slot.fiber, value.is_a?(::Error))
+  end
+end
+
+# A task handle: its slot and the generation it was given, so a handle
+# kept past its group's end is refused instead of reading a reused slot.
+struct IyiTask(T)
+  @slot : RisTaskSlot
+  @generation : UInt64
+
+  def initialize(@slot : RisTaskSlot)
+    @generation = @slot.generation
+  end
+
+  private def slot : RisTaskSlot
+    return @slot if @slot.generation == @generation
+    raise "this task's group has ended; read its handle inside the group"
+  end
+
+  def fiber : IyiFiber
+    slot.fiber
+  end
+
   def done? : Bool
-    @fiber.state == IyiFiberState::Done
+    live = slot.live_fiber
+    return true unless live.is_a?(IyiFiber)
+    live.state == IyiFiberState::Done
   end
 
   # nil means Done (including panic/cancellation); read value separately.
   # Timing out or cancelling this reader never cancels the retained task.
   def wait(ms : Int32) : Nil | TimedOut | Cancelled
-    IyiScheduler.join(@fiber, ms)
+    task = slot
+    IyiScheduler.join(task.fiber, task.fiber_generation, ms)
   end
 
   def value : T | Panicked
-    IyiScheduler.join(@fiber)
+    task = slot
+    IyiScheduler.join(task.fiber, task.fiber_generation)
     # III.1.4, literal: reading the panicked task's value *catches* the
     # panic — it arrives as the error value it became at the boundary,
     # `case`/`!`/`.or` handle it like any failure, and the join stops
-    # owing a re-raise for it.
-    if @fiber.panicked
-      @fiber.panic_delivered = true
-      return Panicked.new(@fiber.panic_message)
+    # owing a re-raise for it. A panicked fiber stays out of the pool
+    # until its group ends, so a moved generation means no panic.
+    if (live = task.live_fiber) && live.panicked
+      live.panic_delivered = true
+      return Panicked.new(live.panic_message)
     end
-    return Panicked.new("a task stopped by its cancellation has no value") if (@box == 0_u64)
+    return Panicked.new("a task stopped by its cancellation has no value") if (task.box == 0_u64)
     # Deeply copy every result shape, including nested tape structs.
-    Tape.task_copy(Pointer(T).new(@box).value, RisCurrentTape.new)
+    Tape.task_copy(Pointer(T).new(task.box).value, RisCurrentTape.new)
   end
 end
 
@@ -3817,7 +4006,7 @@ struct RisCurrentTape
   end
 end
 
-class IyiGroup
+class RisGroupSlot
   MAX_LIVE = 2147483647
 
   def keep_result(region : UInt64) : Nil
@@ -3857,7 +4046,7 @@ class IyiGroup
   @first_child : IyiFiber?
   @joiner : IyiFiber?
   # The group its owner had open when this one opened (`open_group`).
-  getter outer : IyiGroup?
+  getter outer : RisGroupSlot?
   # The task that opened it, whose tasks these are: what a task inherits
   # from the one that started it - std/log's context - is found through it.
   getter owner : IyiFiber
@@ -3872,6 +4061,19 @@ class IyiGroup
   # 16-byte nodes {next node, region}, each node inside its region.
   @results : UInt64 = 0_u64
 
+  # ris (TAPE_SPEC 6.1): a `group do` slot goes back to the pool at its
+  # scope's end with its tasks' slots and fibers; the generation refuses
+  # an `IyiGroup` handle kept past it. One made by `IyiGroup.new` is never
+  # returned, because its handles may be read after its `join`.
+  getter generation : UInt64 = 0_u64
+  property scoped : Bool = false
+  # `group do`: whether its block left early, and the scope it is in.
+  property early : Bool = false
+  property outer_scoped : RisGroupSlot?
+  @tasks : RisTaskSlot?
+  @next_free : RisGroupSlot?
+  @@free : RisGroupSlot?
+
   def initialize
     @live = 0
     @first_failure = 0_u64
@@ -3880,11 +4082,77 @@ class IyiGroup
     @ended = false
     @cancelled = false
     @owner = IyiScheduler.current
-    # Under the scheduler's lock: a cancel from another thread walks the
-    # owner's open groups (`IyiScheduler.cancel`).
+    open
+  end
+
+  def self.take : RisGroupSlot
+    IyiSchedLock.lock
+    slot = @@free
+    @@free = slot.@next_free if slot.is_a?(RisGroupSlot)
+    IyiSchedLock.unlock
+    return RisGroupSlot.new unless slot.is_a?(RisGroupSlot)
+    slot.reuse
+    slot
+  end
+
+  protected def reuse : Nil
+    @live = 0
+    @first_failure = 0_u64
+    @first_child = nil
+    @joiner = nil
+    @ended = false
+    @cancelled = false
+    @results = 0_u64
+    @tasks = nil
+    @next_free = nil
+    @scoped = false
+    @early = false
+    @outer_scoped = nil
+    @owner = IyiScheduler.current
+    open
+  end
+
+  # Under the scheduler's lock: a cancel from another thread walks the
+  # owner's open groups (`IyiScheduler.cancel`).
+  private def open : Nil
     IyiSchedLock.lock
     @outer = @owner.open_group
     @owner.open_group = self
+    IyiSchedLock.unlock
+  end
+
+  # :nodoc: — a new task's slot, returned with this group at its end.
+  def track(task : RisTaskSlot) : Nil
+    task.next_in_group = @tasks
+    @tasks = task
+  end
+
+  # :nodoc: — the end of a `group do` scope, after its join: the task
+  # slots, the fibers still on the child list (panicked ones, which the
+  # reap kept for the join) and this slot go back to their pools.
+  def recycle : Nil
+    return unless @scoped && @ended
+    task = @tasks
+    @tasks = nil
+    while task.is_a?(RisTaskSlot)
+      following = task.next_in_group
+      task.next_in_group = nil
+      task.recycle
+      task = following
+    end
+    child = @first_child
+    @first_child = nil
+    while child.is_a?(IyiFiber)
+      following = child.next_child
+      child.next_child = nil
+      child.prev_child = nil
+      IyiFiber.give(child) if child.recycle
+      child = following
+    end
+    @generation = @generation &+ 1
+    IyiSchedLock.lock
+    @next_free = @@free
+    @@free = self
     IyiSchedLock.unlock
   end
 
@@ -3897,49 +4165,40 @@ class IyiGroup
   # spawner, for its whole life.
   def spawn(&block : -> T) : IyiTask(T) forall T
     IyiScheduler.make_stacks_with { |fresh| fresh.prepare_stack } unless IyiScheduler.makes_stacks?
-    fiber = IyiFiber.new
+    fiber = IyiFiber.take
     fiber.home = IyiScheduler.state
-    task = IyiTask(T).new(fiber, self)
-    runner = self
-    install(fiber) do
-      value = block.call
-      task.finish(value)
-      runner.finished(fiber, value.is_a?(::Error))
-    end
     adopt(fiber)
+    task = RisTaskSlot.take(fiber, self)
+    words = pointerof(block).as(Pointer(Void*))
+    task.start(words[0], words[1], ->(run : RisTaskSlot) { RisTaskCall(T).run(run) })
+    fiber.task_run = task
+    fiber.recycle = true
+    track(task)
     IyiScheduler.enqueue(fiber)
-    task
+    IyiTask(T).new(task)
   end
 
   {% if !flag?(:gc_none) && !flag?(:gc_boehm) %}
     # Start a task that may run on another core (SPEC.md III.4.13): it
     # waits in the pool until a worker is free, and the worker that starts
     # it keeps it to its end. Everything else is `spawn`'s - the scope, the
-    # cancel, the failure policy, the answer through `value`. What differs
-    # is what the compiler asks of the block: it may capture only `Share`
-    # values, as the block a thread runs may (III.4.4,
-    # `CleanupTransformer#check_share_boundary`).
+    # cancel, the failure policy, the answer through `value`. Its fiber is
+    # not pooled: a cancel may still be posted to it on another thread.
     def spawn_parallel(&block : -> T) : IyiTask(T) forall T
       IyiScheduler.make_stacks_with { |fresh| fresh.prepare_stack } unless IyiScheduler.makes_stacks?
       IyiWorkers.start
       fiber = IyiFiber.new
       fiber.parallel = true
-      task = IyiTask(T).new(fiber, self)
-      runner = self
-      install(fiber) do
-        value = block.call
-        task.finish(value)
-        runner.finished(fiber, value.is_a?(::Error))
-      end
+        task = RisTaskSlot.take(fiber, self)
+      words = pointerof(block).as(Pointer(Void*))
+      task.start(words[0], words[1], ->(run : RisTaskSlot) { RisTaskCall(T).run(run) })
+      fiber.task_run = task
       adopt(fiber)
+      track(task)
       IyiSchedLock.lock
       IyiWorkers.push(fiber)
       IyiSchedLock.unlock
-      task
-    end
-  {% else %}
-    def spawn_parallel(&block : -> T) : IyiTask(T) forall T
-      \{% raise "spawn_parallel needs threads, and a build under -Dgc_none or -Dgc_boehm has none: a thread would race the bump pointer, or be one Boehm never heard of (SPEC.md III.4.13)" %}
+      IyiTask(T).new(task)
     end
   {% end %}
 
@@ -3968,7 +4227,7 @@ class IyiGroup
       raise "the group has ended; create this work in a live outer group"
     end
     spawner = IyiScheduler.current
-    IyiGroup.check_count(@live)
+    RisGroupSlot.check_count(@live)
     fiber.cancelled = spawner.cancelled || @cancelled
     fiber.next_child = @first_child
     fiber.prev_child = nil
@@ -3977,13 +4236,6 @@ class IyiGroup
     @first_child = fiber
     fiber.group = self
     @live = @live + 1
-  end
-
-  # The one place a task body becomes a stored proc. A captured block is
-  # the language's own closure; a proc literal is not a thing an iyi file
-  # writes.
-  private def install(fiber : IyiFiber, &body : -> Nil) : Nil
-    fiber.proc = body
   end
 
   # :nodoc: — the runtime's own callback, on the task's stack.
@@ -4113,6 +4365,95 @@ class IyiGroup
   end
 end
 
+# A group handle: its slot and the generation it was given. A `group do`
+# slot is reused once its scope ends, and a handle kept past that is
+# refused rather than spawning into whichever group took the slot.
+struct IyiGroup
+  MAX_LIVE = RisGroupSlot::MAX_LIVE
+
+  def self.check_count(live : Int32) : Nil
+    RisGroupSlot.check_count(live)
+  end
+
+  @slot : RisGroupSlot
+  @generation : UInt64
+
+  def initialize
+    @slot = RisGroupSlot.take
+    @generation = @slot.generation
+  end
+
+  # :nodoc: — `group do`'s own group, on this task's stack of them and
+  # returned to the pool by `close_scoped`.
+  def self.scoped : IyiGroup
+    g = IyiGroup.new
+    slot = g.slot
+    slot.scoped = true
+    slot.early = true
+    me = IyiScheduler.current
+    slot.outer_scoped = me.scoped_group
+    me.scoped_group = slot
+    g
+  end
+
+  # :nodoc: — the block reached its end: the join waits, not cancels.
+  def reached_end : Nil
+    slot.early = false
+  end
+
+  # :nodoc: — `group do`'s deferred end: the innermost scoped group of
+  # this task joined, then back to its pool, on a panic's way out too.
+  def self.close_scoped : Nil
+    me = IyiScheduler.current
+    slot = me.scoped_group
+    return unless slot.is_a?(RisGroupSlot)
+    me.scoped_group = slot.outer_scoped
+    slot.outer_scoped = nil
+    defer slot.recycle
+    slot.join(slot.early)
+  end
+
+  protected def slot : RisGroupSlot
+    return @slot if @slot.generation == @generation
+    raise "the group has ended; create this work in a live outer group"
+  end
+
+  def spawn(&block : -> T) : IyiTask(T) forall T
+    slot.spawn(&block)
+  end
+
+  {% if !flag?(:gc_none) && !flag?(:gc_boehm) %}
+    def spawn_parallel(&block : -> T) : IyiTask(T) forall T
+      slot.spawn_parallel(&block)
+    end
+  {% else %}
+    def spawn_parallel(&block : -> T) : IyiTask(T) forall T
+      \{% raise "spawn_parallel needs threads, and a build under -Dgc_none or -Dgc_boehm has none: a thread would race the bump pointer, or be one Boehm never heard of (SPEC.md III.4.13)" %}
+    end
+  {% end %}
+
+  def join(early : Bool = false) : Nil
+    return unless @slot.generation == @generation
+    @slot.join(early)
+  end
+
+  def cancel_children : Nil
+    slot.cancel_children
+  end
+
+  def first_failure : UInt64
+    slot.first_failure
+  end
+
+  def owner : IyiFiber
+    slot.owner
+  end
+
+  def outer : RisGroupSlot?
+    slot.outer
+  end
+end
+
 # III.4.1: concurrency is introduced by a scope, never by a call. The
 # join is deferred, so no exit leaves a task running — not a `return`,
 # not an error leaving through `!` — and one before the block's end
@@ -4120,12 +4461,14 @@ end
 # how the typed form (III.4.9) gets a value out: the expansion appends
 # the extraction to the block, and the block stays a block, so nothing a
 # task assigned leaks into the enclosing scope.
+#
+# ris: the deferred close captures nothing, so it costs no closure: it
+# ends the innermost `group do` of this task (`IyiGroup.close_scoped`).
 def group(& : IyiGroup -> U) : U forall U
-  g = IyiGroup.new
-  early = true
-  defer g.join(early)
+  g = IyiGroup.scoped
+  defer IyiGroup.close_scoped
   answer = yield g
-  early = false
+  g.reached_end
   answer
 end
 

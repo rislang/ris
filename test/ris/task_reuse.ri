@@ -1,0 +1,51 @@
+# Task slots, fibers, groups and defer nodes come back to their pools
+# when a `group do` ends: 100,000 tasks in rounds take program storage
+# in the first round only, and a handle kept past its group is refused.
+# The blocks capture nothing: a captured scope's closure data is the
+# compiler's and is not pooled here.
+module test/ris/task_reuse
+
+kept = [] of IyiTask(Int32)
+groups = [] of IyiGroup
+first = 0_u64
+10.times do |round|
+  group do |outer|
+    group do |g|
+      9_000.times { g.spawn { 1 } }
+      # A timed wait, a cancel, a tape value and a panic each round.
+      sleeper = g.spawn { sleep 2; 0 }
+      raise "timed wait" unless sleeper.wait(1).is_a?(TimedOut)
+      g.cancel_children
+      text = g.spawn { "word " * 3 }
+      raise "tape value" unless text.value == "word word word "
+      raise "panic" unless g.spawn { raise "round panic" }.value.is_a?(Panicked)
+      sum = 0
+      group do |inner|
+        handles = [] of IyiTask(Int32)
+        997.times { handles << inner.spawn { 2 } }
+        handles.each { |handle| sum += handle.value.as(Int32) }
+      end
+      raise "inner sum" unless sum == 1994
+      kept << g.spawn { 7 } if round == 0
+      groups << g if round == 0
+    end
+    outer.spawn { 1 }
+  end
+  taken = RisRegion.storage_taken
+  first = taken if round == 0
+  raise "program storage grew in round #{round}" unless taken == first
+end
+puts "program storage after the first round: steady"
+
+# A stale handle: its slot went back with its group and is refused.
+group do |g|
+  stale = kept[0]
+  answer = g.spawn { stale.value }.value
+  raise "stale task read" unless answer.is_a?(Panicked) &&
+    answer.message.includes?("group has ended")
+  old = groups[0]
+  spawned = g.spawn { old.spawn { 1 }; 0 }.value
+  raise "stale group spawn" unless spawned.is_a?(Panicked) &&
+    spawned.message.includes?("group has ended")
+end
+puts "PASS: task reuse"

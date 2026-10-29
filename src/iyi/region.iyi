@@ -120,7 +120,22 @@ class RisRegion
     address = take(@@tape, size, clear, type_id)
     @@program_storage = @@tape
     @@tape = saved
+    note_program(size)
     address
+  end
+
+  # Bytes taken from program storage, which never frees: RIS_TAPE_STATS
+  # reports it, and a server's count must stop growing once warm.
+  @@program_taken : UInt64 = 0_u64
+
+  def self.note_program(size : UInt64) : Nil
+    IyiRuntimeLock.lock
+    @@program_taken = @@program_taken &+ size
+    IyiRuntimeLock.unlock
+  end
+
+  def self.storage_taken : UInt64
+    @@program_taken
   end
 
   # Codegen initializes ordinary defaults and records this concrete type,
@@ -602,7 +617,7 @@ class RisRegion
             (flag?(:darwin) && flag?(:aarch64)) ||
             (flag?(:win32) && flag?(:x86_64)) %}
       RisHeap.text("ris tape limits: live tasks per group ")
-      RisHeap.number(IyiGroup::MAX_LIVE.to_u64)
+      RisHeap.number(RisGroupSlot::MAX_LIVE.to_u64)
       RisHeap.text("\nris tape limits: fiber stack ")
       RisHeap.number(IyiFiber::STACK_BYTES)
       RisHeap.text(" bytes; main stack is OS-limited\n")
@@ -624,6 +639,9 @@ class RisRegion
     RisHeap.text(" side regions (")
     RisHeap.number(@@total_side_bytes)
     RisHeap.text(" transfer bytes copied)\n")
+    RisHeap.text("ris program storage: ")
+    RisHeap.number(storage_taken)
+    RisHeap.text(" bytes taken\n")
   end
 
   # Whether `RIS_TAPE_STATS` is set. On POSIX the environment follows
