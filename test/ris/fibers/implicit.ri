@@ -4,10 +4,9 @@ main_tape = RisRegion.tape
 handles = Array(IyiFiber).new(2)
 completed = 0
 group do |g|
-  tasks = Array(IyiTask(IyiFiber)).new(2)
+  tasks = Array(IyiTask(Int32)).new(2)
   2.times do |n|
     tasks << g.spawn do
-      fiber = IyiScheduler.current
       raise "fiber shares main tape" if RisRegion.tape == main_tape
       text = "fiber"
       items = Array(String).new(2)
@@ -17,13 +16,14 @@ group do |g|
       sleep(1)
       writer.append_int(n)
       raise "fiber tape corrupted" unless writer.finish == "fiber#{n}"
-      fiber
+      n
     end
   end
   tasks.each do |task|
-    fiber = task.value
-    next if fiber.is_a?(Panicked)
-    handles << fiber
+    result = task.value
+    next if result.is_a?(Panicked)
+    # Borrow the runtime handle; task results must not copy scheduler state.
+    handles << task.fiber
     completed += 1
   end
 end

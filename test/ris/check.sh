@@ -648,12 +648,14 @@ expect not_flat "Holder is not flat"
 expect check_free "\`first\` is @[CheckFree], and this \`[]\` checks"
 
 
+# Main scratch, program values and scheduler program storage each own a tape.
+# The third scope is scheduler storage, not one scope per temporary call.
 for name in implicit fibers/implicit implicit_loop; do
   out=$(RIS_TAPE_STATS=1 "$RIS" run "test/ris/$name.ri" 2>&1)
   code=$?
   if [ "$code" -eq 0 ] && grep -qF 'PASS:' <<<"$out" &&
       { [ "$name" != implicit_loop ] ||
-        grep -qF '2 scopes, 4 mappings made, 0 unmapped' <<<"$out"; }; then
+        grep -qF '3 scopes, 5 mappings made, 0 unmapped' <<<"$out"; }; then
     echo "runs     $name"
   else
     echo "FAILED   $name: $out"
