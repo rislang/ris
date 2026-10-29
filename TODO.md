@@ -227,9 +227,10 @@ first):
 * samples/ris/web.ri does not build: std/http.iyi:2627
   (`headers[host_name] = named`) is refused as a Hash shrink with a live
   view, after about 7 minutes of checking (seen 2026-10-29 on the base).
-* check.sh never ends: log_metadata.ri, log_tape.ri and
-  server_owners.ri hang (seen 2026-10-29 on the base too). Find the
-  cause; meanwhile give check.sh a per-test timeout.
+* Nine check.sh blocks hang and now fail at the 300 s job timeout:
+  http_continue, answer, the web sample, log_metadata (two),
+  log_tape, heap_allocator, server_owners, repeated joined groups.
+  Find each cause (seen 2026-10-29 on the base too).
 * Compiler specs (seed 71173, 2026-10-27): recheck macro/macro_methods,
   iyimod, compiler, and codegen/{proc,closure}_spec.cr; four failures and
   two errors preceded a signal 11 crash in the closure group, so no

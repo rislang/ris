@@ -5,12 +5,15 @@ check.sh stays the one list of checks. Its header (settings and the
 expect helper) runs before each block; the blocks are its top-level
 statements (see split), so a block must not read a variable
 another block set. heap_check.py runs after all parallel jobs finish.
-Each job gets its own TMPDIR.
+Each job gets its own TMPDIR. A job that runs past RIS_CHECK_TIMEOUT
+seconds (default 300) is killed with its processes and reported
+FAILED, so one hung test cannot hold the suite.
 RIS_CHECK_SERIAL=1 bash test/ris/check.sh runs it in order.
 """
 import concurrent.futures
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import tempfile
@@ -62,9 +65,18 @@ def run(header, block, scratch, index):
     script = tmp / "check.sh"
     script.write_text("\n".join(header + block + ['exit "$status"']) + "\n")
     env = dict(os.environ, TMPDIR=str(tmp), RIS_CHECK_SERIAL="1")
-    done = subprocess.run(["bash", str(script)], cwd=ROOT, env=env,
-                          capture_output=True, text=True)
-    return done.returncode, done.stdout + done.stderr
+    limit = int(os.environ.get("RIS_CHECK_TIMEOUT", "300"))
+    job = subprocess.Popen(["bash", str(script)], cwd=ROOT, env=env,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           text=True, start_new_session=True)
+    try:
+        out, _ = job.communicate(timeout=limit)
+        return job.returncode, out
+    except subprocess.TimeoutExpired:
+        os.killpg(job.pid, signal.SIGKILL)
+        out, _ = job.communicate()
+        first = next((line for line in block if line.strip()), "")
+        return 1, f"{out}FAILED   timeout after {limit}s: {first.strip()}\n"
 
 
 def heap(scratch):
