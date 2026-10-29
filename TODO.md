@@ -102,6 +102,12 @@ first):
   literal or other start text is copied once. Reading it gives a String
   view; growth never moves or changes bytes a view sees. Never appended:
   no reservation.
+* A local `a = []` takes its type from the first `<<`, `push`, `concat`
+  or whole assignment, which must come before any other use (Goose
+  reference.md:850). A later append of another type is an error naming
+  `[] of T`, never a union; a field, parameter or a use before the
+  first append keeps today's error. Gates: inside a block, a mismatch,
+  a read before the first push, a field.
 * `s = ""` on a growing String reuses its reservation only when the
   compiler proves no view of the old text is still live (stored in a
   container, a field, another def, a task). Unsure: refuse, naming
