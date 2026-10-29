@@ -51,6 +51,34 @@ expect() {
   fi
 }
 
+# Empty local collections fix their types at the first store.
+out=$("$RIS" run test/ris/array_infer.ri 2>&1)
+if [ "$?" -eq 0 ] &&
+    [ "$out" = 'PASS: first-store array and hash inference' ]; then
+  echo 'runs     array_infer'
+else
+  echo "FAILED   array_infer: $out"; status=1
+fi
+expect array_infer_mismatch '[] of T'
+expect array_infer_read '[] of ElementType'
+expect array_infer_none '[] of ElementType'
+expect array_infer_field '[] of ElementType'
+expect array_infer_default '[] of ElementType'
+expect array_infer_constant '[] of ElementType'
+expect hash_infer_key '{} of K => V'
+expect hash_infer_value '{} of K => V'
+expect hash_infer_field '{} of KeyType => ValueType'
+expect hash_infer_read '{} of KeyType => ValueType'
+expect hash_infer_none '{} of KeyType => ValueType'
+expect hash_infer_default_key '{} of K => V'
+expect hash_infer_default_value '{} of K => V'
+
+expect array_infer_branch_mismatch '[] of T'
+expect array_infer_concat_mismatch '[] of T'
+expect hash_infer_default_field '{} of KeyType => ValueType'
+expect hash_infer_default_read '{} of KeyType => ValueType'
+expect hash_infer_default_parameter '{} of KeyType => ValueType'
+
 # Workers consume in-band quits and fail bounded posts without spinning.
 out=$(RIS="$RIS" python3 test/ris/workers_check.py 2>&1)
 if [ "$?" -eq 0 ]; then

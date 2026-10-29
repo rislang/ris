@@ -145,3 +145,12 @@ back.
 * Generic macro reflection: preserve access to private types already bound
   as generic arguments when interpolation emits their canonical names.
   Keep unrelated private declarations behind the import/export wall.
+
+## First-store collection inference
+
+* Local empty arrays and hashes infer fixed types from their first store.
+  The normalizer checks source order; deferred semantic type slots keep
+  block parameters in scope. This is a ris language change to take to iyi.
+* `Hash.new(default)` infers its key from the first index and carries its
+  default in `RisDefaultHash`, a tape value around the inherited Hash.
+  The inherited `src/iyi/` files and `.iyi` literal parsing stay unchanged.

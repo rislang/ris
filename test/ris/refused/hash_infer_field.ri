@@ -1,0 +1,6 @@
+class Box
+  def initialize
+    @h = {}
+  end
+end
+Box.new

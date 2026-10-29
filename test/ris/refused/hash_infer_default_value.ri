@@ -1,0 +1,2 @@
+h = Hash.new(0)
+h[1] = true

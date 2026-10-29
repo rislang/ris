@@ -1,0 +1,3 @@
+counts = Hash.new(0)
+puts counts.size
+counts[1] += 1

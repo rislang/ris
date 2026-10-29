@@ -1,0 +1,87 @@
+struct InferRow
+  getter id : Int32
+
+  def initialize(@id : Int32)
+  end
+end
+
+def inferred_values
+  result = []
+  2.times { |i| result << i }
+  result
+end
+
+def default_at(counts, word)
+  counts[word]
+end
+
+tape do
+  a = []
+  a << 1
+  a.push(2)
+  a.concat([3, 4])
+  raise "plain" unless a.size == 4 && a[3] == 4
+
+  rows = []
+  [InferRow.new(11), InferRow.new(12)].each { |r| rows << r.id }
+  raise "each" unless rows[1] == 12
+
+  ticks = []
+  3.times { |i| ticks.push(i) }
+  raise "times" unless ticks[2] == 2
+
+  branch = []
+  if true
+    branch << 7
+  else
+    branch << 8
+  end
+  raise "branch" unless branch[0] == 7
+
+  groups = []
+  groups << [1, 2]
+  raise "nested" unless groups[0][1] == 2
+
+  assigned = []
+  assigned = [9]
+  raise "assignment" unless assigned[0] == 9
+
+  joined = []
+  joined.concat([5, 6])
+  raise "concat" unless joined[1] == 6
+
+  h = {}
+  [1, 2].each { |k| h[k] = k * 10 }
+  raise "hash" unless h[2] == 20
+  optional = {}
+  optional[1] ||= 10
+  optional[1] ||= 20
+  raise "or store" unless optional[1] == 10
+
+  merged = {}
+  merged.merge!({1 => 30})
+  raise "merge" unless merged[1] == 30
+
+  counts = Hash.new(0)
+  ["one", "two", "one"].each { |word| counts[word] += 1 }
+  raise "counts" unless counts["one"] == 2 && counts["two"] == 1
+  raise "default" unless counts["absent"] == 0
+  raise "passed default" unless default_at(counts, "missing") == 0
+  alias_counts = counts
+  raise "aliased default" unless alias_counts["missing"] == 0
+  raise "method scope" unless inferred_values[1] == 1
+
+  empty = []
+  0.times { |i| empty << i }
+  raise "zero iterations" unless empty.empty?
+
+  explicit = [] of Int32 | Bool
+  explicit << 1
+  explicit << true
+  raise "explicit union" unless explicit.size == 2
+
+  hash_assignment = {}
+  hash_assignment = {1 => 2}
+  raise "hash assignment" unless hash_assignment[1] == 2
+end
+puts "PASS: first-store array and hash inference"

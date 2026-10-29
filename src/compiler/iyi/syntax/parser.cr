@@ -1181,6 +1181,11 @@ module Iyi
 
             @wants_regex = false
             next_token
+            if name == "merge" && @token.type.op_bang? &&
+               ris_collection_syntax?
+              name = "merge!"
+              next_token
+            end
 
             space_consumed = false
             if @token.type.space?
@@ -3962,6 +3967,10 @@ module Iyi
       (yield pieces).at(start_location).at_end(end_location)
     end
 
+    private def ris_collection_syntax? : Bool
+      @token.location.original_filename.try(&.ends_with?(".ri")) || false
+    end
+
     def parse_empty_array_literal
       line = @line_number
       column = @token.column_number
@@ -3972,7 +3981,11 @@ module Iyi
         of = parse_bare_proc_type
         ArrayLiteral.new(of: of).at_end(of)
       else
-        raise "for empty arrays use '[] of ElementType'", line, column
+        if ris_collection_syntax?
+          ArrayLiteral.new
+        else
+          raise "for empty arrays use '[] of ElementType'", line, column
+        end
       end
     end
 
@@ -4019,7 +4032,7 @@ module Iyi
         next_token_skip_space_or_newline
         of = parse_bare_proc_type
         end_location = of.end_location
-      elsif exps.size == 0
+      elsif exps.size == 0 && !ris_collection_syntax?
         raise "for empty arrays use '[] of ElementType'", line, column
       end
 
@@ -4209,7 +4222,7 @@ module Iyi
           end_location = of_value.end_location
         end
 
-        if entries.empty? && !of
+        if entries.empty? && !of && !ris_collection_syntax?
           raise "for empty hashes use '{} of KeyType => ValueType'", line, column
         end
       end

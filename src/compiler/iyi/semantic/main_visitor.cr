@@ -902,6 +902,17 @@ module Iyi
     end
 
     def visit(node : Assign)
+      if info = node.ris_collection
+        values = if info[1] == "assign:hash"
+                   ["keys", "values"].map do |name|
+                     column = Call.new(node.value.clone, name).at(node)
+                     Call.new(column, "first").at(node).as(ASTNode)
+                   end
+                 else
+                   [Call.new(node.value.clone, "first").at(node)] of ASTNode
+                 end
+        ris_infer_store(node, values)
+      end
       type_assign node.target, node.value, node
 
       if @is_initialize && !@found_self_in_initialize_call
@@ -1545,6 +1556,14 @@ module Iyi
     end
 
     def visit(node : Call)
+      ris_infer_call(node)
+      if node.name == "__ris_collection_store" && node.ris_collection
+        expanded = NilLiteral.new.at(node)
+        expanded.accept(self)
+        node.expanded = expanded
+        node.bind_to(expanded)
+        return false
+      end
       prepare_call(node)
 
       if expand_macro(node)
@@ -3147,6 +3166,16 @@ module Iyi
     end
 
     def visit(node : TypeOf)
+      if info = node.ris_collection
+        id, kind = info
+        node.in_type_args = true
+        (@ris_collection_types[id] ||= [] of TypeOf) << node
+        unless node.expressions.empty?
+          node.expressions.each &.accept(self)
+          node.bind_to(node.expressions)
+        end
+        return false
+      end
       # A typeof shouldn't change the type of variables:
       # so we keep the ones before it and restore them at the end
       old_vars = @vars.dup
@@ -4164,3 +4193,5 @@ module Iyi
     end
   end
 end
+
+require "./ris_collection_typing"

@@ -1,0 +1,6 @@
+a = []
+if false
+  a << 1
+else
+  a << true
+end

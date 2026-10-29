@@ -37,6 +37,10 @@ end
 module Iyi
   # Base class for nodes in the grammar.
   abstract class ASTNode
+    # ris: lexical identity and store kind for first-store inference.
+    property ris_collection : Tuple(String, String)?
+    property ris_hash_default : Var?
+
     # The location where this node starts, or `nil`
     # if the location is not known.
     property location : Location?
@@ -82,6 +86,8 @@ module Iyi
       clone.location = location
       clone.end_location = end_location
       clone.doc = doc
+      clone.ris_collection = ris_collection
+      clone.ris_hash_default = ris_hash_default.try &.clone
       clone
     end
 

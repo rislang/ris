@@ -7,6 +7,13 @@ module Iyi
     getter ris_text_companions = {} of Type => Set(String)
 
     def normalize(node, inside_exp = false, current_def = nil, macro_code = false)
+      if node.is_a?(Call) || node.is_a?(Assign)
+        if !current_def && !macro_code &&
+           node.location.try(&.original_filename).try(&.ends_with?(".ri"))
+          return normalize(Expressions.new([node] of ASTNode).at(node),
+            inside_exp, current_def, macro_code)
+        end
+      end
       normalizer = Normalizer.new(self)
       normalizer.macro_code = 1 if macro_code
       normalizer.current_def = current_def
@@ -14,6 +21,8 @@ module Iyi
       # ris: the program's top level is a scope of its own (a def's body
       # is lowered with the def).
       unless current_def || macro_code || normalizer.macro_expansion || node.is_a?(Def)
+        normalizer.prepare_default_hash(node) if node.is_a?(Expressions)
+        normalizer.prepare_collection_inference(node)
         TapeTextLowering.lower_scope(node, [] of String, false)
         if node.is_a?(Expressions)
           prepared = normalizer.prepare_text_growth(Expressions.new(node.expressions).at(node))
@@ -589,6 +598,25 @@ module Iyi
     @ris_string_mutations = Set(UInt64).new
 
     def transform(node : Call)
+      if node.name == "new" && node.args.size == 1 &&
+         (obj = node.obj).is_a?(Path) && obj.names == ["Hash"] &&
+         ris_program_code?(node)
+        node.raise "infer Hash.new(default) only for a local; " \
+                   "use {} of KeyType => ValueType"
+      end
+      if node.name == "merge!" && (info = node.ris_collection)
+        probe = Call.new(nil, "__ris_collection_store",
+          node.args.map(&.clone)).at(node)
+        probe.ris_collection = info
+        key = program.new_temp_var.at(node)
+        value = program.new_temp_var.at(node)
+        store = Call.new(node.obj.not_nil!.clone, "[]=",
+          [key.clone, value.clone] of ASTNode).at(node)
+        store.ris_collection = {info[0], "[]="}
+        block = Block.new([key, value], store).at(node)
+        each = Call.new(node.args.first, "each", block: block).at(node)
+        return Expressions.new([probe, each, node.obj.not_nil!.clone] of ASTNode).at(node).transform(self)
+      end
       # Library panic and output messages use the caller's tape too.
       # Their values are consumed here, never retained as heap Strings.
       if @macro_code == 0 && program.tape_platform? &&
@@ -749,6 +777,7 @@ module Iyi
       tape_def = TapeTextLowering.tape_def?(node)
       params = node.args.map(&.name)
       node.block_arg.try { |arg| params << arg.name }
+      prepare_collection_inference(node.body)
       TapeTextLowering.lower_scope(node.body, params, tape_def)
       node.body.accept(TapeTextLowering.new) if tape_def
       outer_growing = @ris_growing_locals
@@ -1147,10 +1176,18 @@ module Iyi
 
     # Convert `a += b` to `a = a + b`
     def transform(node : OpAssign)
+      probe = nil
+      if info = node.ris_collection
+        target = node.target.as(Call)
+        args = target.args.map(&.clone)
+        args << (target.ris_hash_default.try(&.clone) || node.value.clone)
+        probe = Call.new(nil, "__ris_collection_store", args).at(node)
+        probe.ris_collection = info
+      end
       super
 
       target = node.target
-      if target.is_a?(Call)
+      result = if target.is_a?(Call)
         if target.name == "[]"
           transform_op_assign_index(node, target)
         else
@@ -1159,6 +1196,7 @@ module Iyi
       else
         transform_op_assign_simple(node, target)
       end
+      probe ? Expressions.new([probe, result] of ASTNode).at(node) : result
     end
 
     def transform_op_assign_call(node, target)
@@ -1274,6 +1312,7 @@ module Iyi
         args << node.value
         right = Call.new(tmp.clone, "[]=", args).at(node)
         right.name_location = node.name_location
+        right.ris_collection = node.ris_collection
 
         # (3) = (2) || (4)
         call = Or.new(call, right).at(node)
@@ -1290,12 +1329,17 @@ module Iyi
         args << node.value
         right = Call.new(tmp.clone, "[]=", args).at(node)
         right.name_location = node.name_location
+        right.ris_collection = node.ris_collection
 
         # (3) = (2) && (4)
         call = And.new(call, right).at(node)
       else
         # (2) = tmp[tmp1, tmp2, ...]
-        call = Call.new(tmp.clone, "[]", tmp_args).at(node)
+        call = if default = target.ris_hash_default
+                 Call.new(tmp.clone, "fetch", tmp_args + [default.clone.as(ASTNode)]).at(node)
+               else
+                 Call.new(tmp.clone, "[]", tmp_args).at(node)
+               end
         call.name_location = node.name_location
 
         # (3) = (2) + b
@@ -1308,6 +1352,7 @@ module Iyi
         args << call
         call = Call.new(tmp.clone, "[]=", args).at(node)
         call.name_location = node.name_location
+        call.ris_collection = node.ris_collection
       end
 
       # (1); (4)
@@ -1371,6 +1416,9 @@ module Iyi
     end
 
     def transform(node : ArrayLiteral)
+      if node.elements.empty? && !node.of && !node.name
+        node.raise "for empty arrays use '[] of ElementType'"
+      end
       return super if node.name
       node.elements.map! { |value| heap_literal(value) }
       node.of = node.of.try &.transform(self)
@@ -1383,6 +1431,9 @@ module Iyi
     end
 
     def transform(node : HashLiteral)
+      if node.entries.empty? && !node.of && !node.name
+        node.raise "for empty hashes use '{} of KeyType => ValueType'"
+      end
       return super if node.name
       node.entries.map! do |entry|
         HashLiteral::Entry.new(
@@ -1538,3 +1589,7 @@ module Iyi
     end
   end
 end
+
+require "./ris_collection_inference"
+
+require "./ris_default_hash"

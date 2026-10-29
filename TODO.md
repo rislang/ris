@@ -97,14 +97,11 @@ greet(out)              # def greet(io : String::Builder): out grows
 In order, one gate each (RIS_TAPE_STATS: 0 moves, 0 copies after the
 first):
 
-* A local `a = []` takes its type from the first `<<`, `push`, `concat`
-  or whole assignment, which must come before any other use (Goose
-  reference.md:850). A later append of another type is an error naming
-  `[] of T`, never a union; a field, parameter or a use before the
-  first append keeps today's error. Hash the same: `h = {}` takes K and
-  V from the first `h[k] = v`; `Hash.new(0)` takes V from its default.
-  Gates: inside a block, a mismatch, a read before the first store, a
-  field, word counts with `Hash.new(0)`.
+* Done: `a = []`, `h = {}` and `Hash.new(0)` infer from the first store
+  in .ri files (test/ris/array_infer.ri). Left: std (.iyi) still needs
+  `[] of T`; `Hash.new(0)` answers RisDefaultHash(K, V), which a
+  `Hash(K, V)` parameter does not take: make it a Hash, or name it in
+  the refusal.
 * Done: appended locals and fields grow (test/ris/text_grow.ri). Left
   from its review: a class with `@x << y` gets a RisTextGrowth slot
   even when @x is an Array (type unknown at normalize); a field reset

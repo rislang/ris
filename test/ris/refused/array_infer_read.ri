@@ -1,0 +1,3 @@
+a = []
+puts a.size
+a << 1
