@@ -1,4 +1,4 @@
-# String, Array, Hash and Tre: the final design
+# String, Array, Hash and RisTree: the final design
 
 ris has no heap and no GC. Its data types are Goose's (cited as Goose and a
 section of doc/reference/goose/docs/goose_spec.md, or stdlib.md), spelled
@@ -85,13 +85,13 @@ capacity, in place on its tape.
   `keys`, `values`, `map`, `select`, `reject`, `transform_values`, `to_a`,
   `size`, `clear`. A set is `Hash(K, Bool)`.
 
-## 5. Tre(T)
+## 5. RisTree(T)
 
 A tree in one array: nodes are `Array` elements, links are `Int32` indices
 (Goose §3.9, relative references; Appendix A.2). No pointers, so a tree
 copies as bytes and crosses tasks on the board.
 
-* Children and siblings are indices; a JSON or HTML document is a `Tre`
+* Children and siblings are indices; a JSON or HTML document is a `RisTree`
   of nodes whose text fields view the input (Goose stdlib json: keys and
   strings are slices of the text, escaped ones of a decoded buffer).
 * A tree that outlives a request lives in a `Pool` or on `Program.tape`.
@@ -115,7 +115,7 @@ Goose §5.4, `reusable` arrays:
 ## 7. Across tasks
 
 Goose §11.2: only flat values cross. A task's result and a `RisBoard`
-message are copied: a `String`, `Array`, `Hash` or `Tre` is packed and
+message are copied: a `String`, `Array`, `Hash` or `RisTree` is packed and
 rebuilt on the receiver's tape. A task may read what its spawner made
 before the group started; it cannot keep a view of it past the group.
 

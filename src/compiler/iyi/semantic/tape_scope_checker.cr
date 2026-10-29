@@ -139,7 +139,7 @@ class Iyi::TapeScopeChecker
     when NamedTupleInstanceType
       type.entries.all? { |entry| pending_type?(entry.type, seen.dup) }
     when GenericClassInstanceType
-      if {"Array", "Tre"}.includes?(type.generic_type.name)
+      if {"Array", "RisTree"}.includes?(type.generic_type.name)
         type.type_vars.values.all? do |var|
           var.is_a?(Var) && pending_type?(var.type?, seen.dup)
         end

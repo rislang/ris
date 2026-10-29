@@ -1,2 +1,2 @@
 alias GrowingUnion = Int32 | Tuple(String::Builder, Int32)
-tape { Tre(GrowingUnion).new }
+tape { RisTree(GrowingUnion).new }

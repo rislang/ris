@@ -284,7 +284,7 @@ class Iyi::TapeCallGraph
     return type.union_types.any? { |t| growing_type?(t) } if type.is_a?(UnionType)
     name = type.to_s
     name == "String::Builder" || name.starts_with?("Array(") ||
-      name.starts_with?("Tre(") || TapeOwnerChecker.owner?(@program, type)
+      name.starts_with?("RisTree(") || TapeOwnerChecker.owner?(@program, type)
   end
 
   def fresh?(node : ASTNode) : Bool

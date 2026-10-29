@@ -3,7 +3,7 @@
 # the compiler with the expected message, test/ris/allowed.ri must compile
 # and run, the fibers test must read back what each fiber wrote, a tape must
 # grow past its first mapping in whole 64 KiB grains and refuse an index out
-# of range, a Tre must step over subtrees, and the respond sample must
+# of range, a RisTree must step over subtrees, and the respond sample must
 # print its known checksum. Fatal size errors must allocate nothing.
 #
 #   bash test/ris/check.sh
@@ -107,7 +107,7 @@ expect board_pointer 'NamedTuple(value: Pointer(Int32))'
 expect board_class_limit 'send String, Array bytes or a value struct'
 expect board_class_post 'send String, Array bytes or a value struct'
 expect board_link 'use Array nodes with checked integer indices'
-expect board_recursive 'use Tre or Array nodes with checked integer indices'
+expect board_recursive 'use RisTree or Array nodes with checked integer indices'
 expect board_closure 'send String, Array bytes or a value struct'
 expect board_owner 'send String, Array bytes or a value struct'
 
@@ -625,7 +625,7 @@ expect std/tape_unsafe_no_pointer "hands no tape pointer to the OS"
 expect tape_pointer "\`unsafe_append\` outside a @[TapeUnsafe] def"
 expect std/tape_pointer_codec "the pointer \`unsafe_append\` yields reaches no"
 expect writer_grow      "private method 'grow' called for String::Builder"
-expect tree_entry       "private constant Tre::Entry(T) referenced"
+expect tree_entry       "private constant RisTree::Entry(T) referenced"
 expect array_grow       "private method 'grow' called for Array(T)"
 expect array_append     "append requires Array(UInt8)"
 expect heap_copy "\`to_s\` of a String outside a @[TapeToHeap] def copies"
@@ -755,7 +755,7 @@ out=$("$RIS" run test/ris/bounds.ri 2>&1)
 if grep -qF $'10 25 35 35' <<<"$out" && grep -qF "index 3 out of range for 3 elements" <<<"$out"; then echo "runs     bounds"; else echo "FAILED   bounds: $out"; status=1; fi
 
 out=$("$RIS" run test/ris/stream.ri 2>&1)
-if grep -qF '7 1,2,5,6 3,4 0 7' <<<"$out" && grep -qF "Tre#close: 2 is not open" <<<"$out"; then echo "runs     stream"; else echo "FAILED   stream: $out"; status=1; fi
+if grep -qF '7 1,2,5,6 3,4 0 7' <<<"$out" && grep -qF "RisTree#close: 2 is not open" <<<"$out"; then echo "runs     stream"; else echo "FAILED   stream: $out"; status=1; fi
 
 heap_trap owned
 

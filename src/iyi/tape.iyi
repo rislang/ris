@@ -3,7 +3,7 @@
 # Main and each spawned fiber own an implicit tape: values are bumped into
 # mappings, chained when full. The owning scope releases them together;
 # spare mappings keep bounded warm pages for the thread's next scope.
-# String, Array, Hash and Tre store their dynamic data on the active tape.
+# String, Array, Hash and RisTree store their dynamic data on the active tape.
 # Retained values are copied into an explicit longer-lived owner.
 #
 # What keeps a tape value from outliving its scope is the compiler: every
@@ -84,7 +84,7 @@ def local_tape(&) : Nil
   nil
 end
 
-# Internals of the tape types: `String`, `Array`, `Tre` and theirs.
+# Internals of the tape types: `String`, `Array`, `RisTree` and theirs.
 module Tape
   # An index out of range: raised out of line, so the `[]` inlined at
   # every read keeps only its compare and branch, not the building of
@@ -2045,7 +2045,7 @@ end
 # once, whole: measured faster than a heap tree, where a `Array` per node
 # is slower (measured in ris-bench).
 @[OnTape]
-struct Tre(T)
+struct RisTree(T)
   protected def __iyi_copy_slot(index : Int32) : Pointer(T)
     pointerof(slot(index).value.@value).as(Pointer(T))
   end
@@ -2128,7 +2128,7 @@ struct Tre(T)
   # since.
   def close(at : Int32) : Nil
     entry = slot(at)
-    raise "Tre#close: #{at} is not open" unless entry.value.stop == -1
+    raise "RisTree#close: #{at} is not open" unless entry.value.stop == -1
     entry.value = Entry(T).new(entry.value.value, size)
   end
 
@@ -2139,7 +2139,7 @@ struct Tre(T)
   # The index past *index*'s subtree: the next sibling, if any.
   def stop(index : Int32) : Int32
     stop = slot(index).value.stop
-    raise "Tre: #{index} is not closed" if stop == -1
+    raise "RisTree: #{index} is not closed" if stop == -1
     stop
   end
 
@@ -2185,7 +2185,7 @@ end
 
 # One entry of a `Tree`: the value and the index past its subtree.
 @[OnTape]
-private struct Tre::Entry(T)
+private struct RisTree::Entry(T)
   getter value : T
   getter stop : Int32
 
@@ -2634,7 +2634,7 @@ end
 
 def __iyi_scope_result(mark : RisScopeMark, value : T) : T forall T
   return value if mark.region == 0
-  {% if T == ::String || T == ::String::Builder || T.name.starts_with?("Array(") || T.name.starts_with?("Tre(") || T.annotation(::OnTape) || T < ::Tuple || T < ::NamedTuple || T.union? %}
+  {% if T == ::String || T == ::String::Builder || T.name.starts_with?("Array(") || T.name.starts_with?("RisTree(") || T.annotation(::OnTape) || T < ::Tuple || T < ::NamedTuple || T.union? %}
     head = 0_u64
     depth = 0
     memo = 0_u64

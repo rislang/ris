@@ -134,15 +134,6 @@ first):
   Extend both to src/std with the std port, then move its ~320 plain
   builders. test/ and src/iyi/ keep their literal capacities.
 
-## After Text: Tre becomes a std library type
-
-* Tre is a core tape type (TAPE_SPEC 1.2, 1.4, 5.x, 7.2) used only by
-  std/json.iyi, with six compiler special cases beside Array. Move it to
-  src/std/tree.iyi as RisTree(T) over Array(Entry): Int32 links, stop
-  boundaries, an open node's -1, board copy of the stops. Drop the
-  compiler cases so Array's rules cover it; 7.2 lists String, Array and
-  Hash, with a changelog entry. Gates: json, board copy, an open node.
-
 ## Next
 
 * Escaping closures outside program and joined task owners: pooled
@@ -175,7 +166,7 @@ first):
   before the task reads freed captures. Allocate it at the group's or
   the def's scope, or refuse the spawn there. std keeps its marks.
 * A task's tape value is copied into a group result region and onto the
-  reader's tape for String, Array, Hash, Tre and tuples of them; @[OnTape]
+  reader's tape for String, Array, Hash, RisTree and tuples of them; @[OnTape]
   structs and nested containers are still refused.
 * Error#message answers String, which a program cannot build without a
   heap: let it answer String (or write into a builder) across std.
@@ -218,7 +209,7 @@ first):
   outside Linux with address-space reservations and equivalent gates.
 * A tape hash map, laid out as Ruby's Hash (st_table): entries in an Array
   in insertion order, bins an Array(Int32) of indices into it, String keys as
-  views; links are indices, so it is Copyable and packed like Tre. Replace
+  views; links are indices, so it is Copyable and packed like RisTree. Replace
   the four linear-scan TapeMap copies in std/yaml.iyi, toml.iyi,
   xml.iyi and mail.iyi. Start from src/iyi/hash.iyi (the same compact
   layout on Pointers): swap them for Array; take Crystal's linear scan for

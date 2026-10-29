@@ -2738,7 +2738,7 @@ pub struct Node
 end
 
 # A document read by `JSON.parse(bytes : String)`: every value in one
-# `Tre` in document order, its strings spans of the input, all of it
+# `RisTree` in document order, its strings spans of the input, all of it
 # the caller's `tape`'s. A value is named by its index; the root's is
 # 0. A string with an escape is decoded when it is asked for.
 @[OnTape]
@@ -2753,10 +2753,10 @@ pub struct Document
     Object
   end
 
-  getter tree : Tre::View(Node)
+  getter tree : RisTree::View(Node)
   getter input : String
 
-  def initialize(@tree : Tre::View(Node), @input : String)
+  def initialize(@tree : RisTree::View(Node), @input : String)
   end
 
   def to_json : String
@@ -2914,13 +2914,13 @@ end
 pub struct DocumentParser
   @lexer : Lexer
   @input : String
-  @tree : Tre(Node)
+  @tree : RisTree(Node)
   @nesting : Int32
   @error : String?
 
   def initialize(@input : String)
     @lexer = Lexer.new(true)
-    @tree = Tre(Node).new(@input.bytesize // 16 + 8)
+    @tree = RisTree(Node).new(@input.bytesize // 16 + 8)
     @nesting = 0
     @error = nil
     @lexer.next_token(@input)

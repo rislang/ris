@@ -1,1 +1,1 @@
-tape { Tre(String::Builder).new }
+tape { RisTree(String::Builder).new }

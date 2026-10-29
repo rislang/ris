@@ -676,8 +676,8 @@ class Iyi::Call
     elsif type.is_a?(NamedTupleInstanceType)
       type.entries.each { |entry| check_tape_copy(entry.type, nested, task) }
     elsif type.is_a?(GenericClassInstanceType) &&
-          {"Array", "Tre", "Run", "List"}.includes?(type.generic_type.name) &&
-          (name.starts_with?("Array(") || name.starts_with?("Tre(") ||
+          {"Array", "RisTree", "Run", "List"}.includes?(type.generic_type.name) &&
+          (name.starts_with?("Array(") || name.starts_with?("RisTree(") ||
            name.starts_with?("SlicePool::"))
       type.type_vars.each_value do |var|
         check_tape_copy(var.as(Var).type, nested, task)

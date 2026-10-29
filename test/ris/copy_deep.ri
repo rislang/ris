@@ -1,6 +1,6 @@
 # Structural tree nesting is a flat stream; preserve every subtree stop.
 tape do
-  tree = Tre(String).new(100_001)
+  tree = RisTree(String).new(100_001)
   100_000.times { tree.open(String.new("branch")) }
   tree.leaf(String.new("leaf"))
   index = 100_000

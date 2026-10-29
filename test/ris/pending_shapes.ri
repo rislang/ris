@@ -26,10 +26,10 @@ def pending_array(input : String) : Array(String)
   made
 end
 
-def pending_tree : Tre(String)
+def pending_tree : RisTree(String)
   scratch = String::Builder.new(65_536)
   scratch.push(65_u8)
-  made = Tre(String).new(1)
+  made = RisTree(String).new(1)
   made.leaf(String.build(8) { |w| w.append("tree") })
   made
 end

@@ -858,19 +858,19 @@ struct Array(T)
   end
 end
 
-struct Tre(T)
-  def view : Tre::View(T)
-    Tre::View(T).new(self)
+struct RisTree(T)
+  def view : RisTree::View(T)
+    RisTree::View(T).new(self)
   end
 end
 
 # A read-only tree handle. It cannot add, close or remove nodes.
 @[OnTape]
-struct Tre::View(T)
-  @target : Tre(T)
+struct RisTree::View(T)
+  @target : RisTree(T)
   @count : Int32
 
-  def initialize(@target : Tre(T))
+  def initialize(@target : RisTree(T))
     @count = @target.size
   end
 

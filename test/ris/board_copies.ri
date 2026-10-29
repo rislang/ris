@@ -13,12 +13,12 @@ end
 struct BoardNested
   getter text : String
   getter items : Array(String)
-  getter tree : Tre(String)
+  getter tree : RisTree(String)
   getter color : BoardColor
   getter choice : String | Int64
   getter again : Array(String)
 
-  def initialize(@text : String, @items : Array(String), @tree : Tre(String),
+  def initialize(@text : String, @items : Array(String), @tree : RisTree(String),
                  @color : BoardColor, @choice : String | Int64,
                  @again : Array(String))
   end
@@ -26,7 +26,7 @@ end
 
 items = Array(String).new(20)
 items << "first" << "second"
-tree = Tre(String).new(20)
+tree = RisTree(String).new(20)
 root = tree.open("root")
 tree.leaf("leaf")
 tree.close(root)

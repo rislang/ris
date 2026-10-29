@@ -130,9 +130,9 @@ class Iyi::TapeChecker
     return false unless visiting.add?(type)
     if type.is_a?(GenericClassInstanceType)
       return false if type.to_s.starts_with?("Array::View(") ||
-                      type.to_s.starts_with?("Tre::View(") ||
+                      type.to_s.starts_with?("RisTree::View(") ||
                       type.to_s.starts_with?("SlicePool::Run(")
-      return true if {"Array", "Tre", "SlicePool"}.includes?(type.generic_type.name)
+      return true if {"Array", "RisTree", "SlicePool"}.includes?(type.generic_type.name)
     end
     return true if type.to_s == "String::Builder" ||
                    TapeOwnerChecker.owner?(@program, type)
@@ -155,7 +155,7 @@ class Iyi::TapeChecker
 
   def check_fields(type)
     if type.is_a?(GenericClassInstanceType) &&
-       {"Array", "Tre"}.includes?(type.generic_type.name)
+       {"Array", "RisTree"}.includes?(type.generic_type.name)
       type.type_vars.each_value do |var|
         # An owner element gets the owner checker's own, more exact refusal.
         if var.is_a?(Var) && (element = var.type?) &&

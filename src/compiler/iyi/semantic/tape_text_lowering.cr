@@ -10,7 +10,7 @@ class Iyi::TapeTextLowering < Iyi::Visitor
       (node.name == "tape" || node.name == "local_tape")
   end
 
-  TAPE_TYPES = {"String", "Array", "Tre"}
+  TAPE_TYPES = {"String", "Array", "RisTree"}
 
   # Whether a restriction names a tape type as a whole word. No regex:
   # the compiler built on the floor carries no pcre2.

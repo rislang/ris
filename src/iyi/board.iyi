@@ -240,7 +240,7 @@ private module RisBoardCodec(T)
   # The ancestor tuple makes rejection terminate even for recursive types.
   def self.check(path : P.class, ancestors : A.class) : Nil forall P, A
     {% if A.type_vars.includes?(T) %}
-      {% raise "RisBoard refuses self-containing type at #{P}; use Tre or " +
+      {% raise "RisBoard refuses self-containing type at #{P}; use RisTree or " +
         "Array nodes with checked integer indices" %}
     {% elsif T.name.starts_with?("Array::Link(") || T.name.includes?("::Link(") %}
       {% raise "RisBoard refuses user link field at #{P}; use Array nodes " +
@@ -252,7 +252,7 @@ private module RisBoardCodec(T)
       {% raise "RisBoard refuses resource at #{P}; open and use resources " +
         "in the receiving task" %}
     {% elsif T == String || T == Nil || T == Bool || T == Char || T == Symbol || T < Number || T < Enum %}
-    {% elsif T.name.starts_with?("Array(") || T.name.starts_with?("Tre(") %}
+    {% elsif T.name.starts_with?("Array(") || T.name.starts_with?("RisTree(") %}
       RisBoardCodec({{T.type_vars[0]}}).check(P, Tuple(*A, T))
     {% elsif T < Tuple %}
       {% for member in T.type_vars %}
@@ -286,7 +286,7 @@ private module RisBoardCodec(T)
     {% elsif T.name.starts_with?("Array(") %}
       cursor.scalar(value.size)
       value.each { |item| RisBoardCodec({{T.type_vars[0]}}).write(item, cursor) }
-    {% elsif T.name.starts_with?("Tre(") %}
+    {% elsif T.name.starts_with?("RisTree(") %}
       cursor.scalar(value.size)
       index = 0
       while index < value.size
@@ -333,7 +333,7 @@ private module RisBoardCodec(T)
     {% elsif T.name.starts_with?("Array(") %}
       count = cursor.read_scalar(Int32)
       T.new(count) { RisBoardCodec({{T.type_vars[0]}}).read(cursor) }
-    {% elsif T.name.starts_with?("Tre(") %}
+    {% elsif T.name.starts_with?("RisTree(") %}
       count = cursor.read_scalar(Int32)
       made = T.new(count)
       index = 0
@@ -370,7 +370,7 @@ private module RisBoardCodec(T)
   end
 end
 
-struct Tre(T)
+struct RisTree(T)
   def __ris_board_stop(index : Int32) : Int32
     slot(index).value.stop
   end

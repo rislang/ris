@@ -26,7 +26,7 @@ when 99
 when 100
   String::Builder.new(-1)
 when 101
-  Tre(Int32).new(-1)
+  RisTree(Int32).new(-1)
 when 102
   String::Builder.new.reserve(-1)
 when 103

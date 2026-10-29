@@ -21,7 +21,7 @@ class State
   @@log : Array(Int32) = Array(Int32).new(1)
   @@text : String = String.new("initial")
   @@saved : Saved? = nil
-  @@tree : Tre(String)? = nil
+  @@tree : RisTree(String)? = nil
 
   def self.request(n : Int32)
     local_tape do
@@ -29,7 +29,7 @@ class State
       @@text = scratch.copy_to(Program.tape)
       @@log << n
       @@saved = Saved.new(scratch, Array(String){scratch}).copy_to(Program.tape)
-      tree = Tre(String).new(1)
+      tree = RisTree(String).new(1)
       root = tree.open(scratch)
       tree.leaf(scratch)
       tree.close(root)

@@ -786,7 +786,7 @@ class Iyi::TapeShrinkChecker
   private def storage_type_uncached(type : Type?) : Bool
     name = type.try { |t| type_name(t.remove_typedef) } || ""
     name == "String::Builder" || name.starts_with?("Array(") ||
-      name.starts_with?("Hash(") || name.starts_with?("Tre(")
+      name.starts_with?("Hash(") || name.starts_with?("RisTree(")
   end
 
   private def reference?(node : ASTNode) : Bool

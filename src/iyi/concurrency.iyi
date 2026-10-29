@@ -3746,7 +3746,7 @@ class IyiTask(T)
   def initialize(@fiber : IyiFiber, @group : IyiGroup)
   end
 
-  # ris: T holds tape values (String, Array, Hash, Tre). The task's own
+  # ris: T holds tape values (String, Array, Hash, RisTree). The task's own
   # tape ends with it, so its value is copied into a result region the
   # group keeps until it ends, and each reader gets a copy on its tape.
 

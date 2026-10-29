@@ -4,6 +4,15 @@ Every change to TAPE_SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one.
 
+## 2026-10-29: Tre is RisTree
+
+* Changed: 1.2, 1.4, 1.7, 5.6, 7.2 name the tree type RisTree; its
+  layout and rules are unchanged.
+* Why: AGENTS.md names a type iyi does not have Ris*. Moving it to std
+  over Array was tried and refused: an Array field is a pool run that
+  may move as it grows (7.5), and the JSON parser reads a tree while it
+  grows; the tree's own reservation never moves, so it stays a core type.
+
 ## 2026-10-29: a builder that only appends is refused
 
 * Changed: 7.3. In a program, a String::Builder local or String.build

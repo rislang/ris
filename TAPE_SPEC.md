@@ -14,7 +14,8 @@ rule goes last in its section; a removed one leaves its number unused.
 * 1.1 Main and each fiber own an implicit tape. Scope exit restores scratch;
   retained results stay on their destination owner. Suspension retains live
   storage. Every exit, normal or unwinding, releases owned regions once.
-* 1.2 Tape types: String, Array(T), Tre(T), builders, scanners, views, @[OnTape]
+* 1.2 Tape types: String, Array(T), RisTree(T), builders, scanners, views,
+  @[OnTape]
   structs and class instances; all obey the root rules. Dispatch and union
   payloads never box.
 * 1.3 Classes stay: new allocates the instance on the active tape, checked
@@ -22,7 +23,7 @@ rule goes last in its section; a removed one leaves its number unused.
   and never move; finalize is refused (resources have explicit cleanup); class
   instances are not Share. Long-lived ones are built on their owner's tape
   (Program.tape) or copied there with copy_to.
-* 1.4 Array, Tre and builders are handles to shared state: assignment and
+* 1.4 Array, RisTree and builders are handles to shared state: assignment and
   arguments alias data, length and capacity, so growth through b shows through
   a; String and views alias their bytes. copy_to and checked boundary copies
   (4.1, 5.1-5.3, 5.6) copy; Goose's implicit value copies (§4.1) do not
@@ -34,13 +35,13 @@ rule goes last in its section; a removed one leaves its number unused.
 * 1.6 Text literals are static String views; interpolation builds a
   String on the active tape. Text parameters borrow, never copy.
 * 1.7 Build retained data on its destination (writers, in-place append), else
-  copy_to(owner) deep-copies String bytes, Array/Tre/@[OnTape] fields and class
-  instances, splitting all sharing and extending no borrows. It keeps concrete
-  types and inherited fields and runs no initialize or callbacks. Refuse
-  pointers, self-relative links and self-reaching class types (via collections,
-  unions or subclasses): build those on the destination with Array nodes and
-  indices. Publish only complete results; discard partial destination storage on
-  failure; deep chains never overflow the stack.
+  copy_to(owner) deep-copies String bytes, Array/RisTree/@[OnTape] fields and
+  class instances, splitting all sharing and extending no borrows. It keeps
+  concrete types and inherited fields and runs no initialize or callbacks.
+  Refuse pointers, self-relative links and self-reaching class types (via
+  collections, unions or subclasses): build those on the destination with Array
+  nodes and indices. Publish only complete results; discard partial destination
+  storage on failure; deep chains never overflow the stack.
 * 1.8 Program data initializes in iyi III.5's module order, once, never
   suspending or seeing incomplete values; stores obey owner provenance.
 ## 2. Owners and stable growth (Goose §1.3, design/root_structs.md: planned)
@@ -132,47 +133,44 @@ rule goes last in its section; a removed one leaves its number unused.
   has an owner and cleanup. Never unwind across foreign frames; foreign
   threads attach first.
   Safety exceptions are marks with reasons, never a global switch.
-* 5.6 ris uses grouped iyi fibers (5.1), not detached Goose threads; a
-  waiting take parks its fiber. At one consume commit, cancellation wins,
-  then data, then timeout, including poll and already-cancelled entry.
-  Cancelled consumes nothing; partial copies and claims roll back. Data
-  present at commit may win after a delayed deadline wake. Top-level
-  Cancelled keys are refused: wrap that data in a nominal message.
-  A message is Copyable: it has a finite, self-contained packed form (Goose
-  calls this flat). Copyable types are numeric scalars, Bool, Char, Symbol,
-  Nil, enums, String, Array(T) and Tre(T) of Copyable T, and value structs or
-  unions of these. String, Array and Tre are handles; the board packs their live
-  data, not pointers, so Copyable is not raw-byte safe (@[Tape::Flat]). The
-  compiler infers it, with no marker, at post, take, poll and limit after
-  specialization. A type that contains itself through fields, unions, Array or
-  Tre is refused: keep recursive data in a Tre or in a node array with checked
-  integer indices (2.2 still applies). User link fields (Array::Link and other
-  self-relative links) stay refused as in 1.7; only Tre's own stop boundaries
-  cross, kept relative to the copied entries, with an open container's -1 and
-  a stop equal to size preserved. A post packs counts, fixed fields, live
-  union tags and live elements into one owned image, recursively, with no
-  backing pointer and no spare capacity, sized with checked arithmetic before
-  publication; the source and its aliases stay unchanged meanwhile. Each
-  copied occurrence of a handle gets independent state, splitting sharing as
-  in 1.7; an empty value carries its count and still takes one place under the
-  limit. take unpacks fresh containers and bytes on the taker's tape, with
-  capacity equal to size. Copies keep concrete types and enum values and run
-  no user code. Count and packed-byte bounds per message are published;
-  exceeding one follows 4.2, not false. Board packing is private and is not
-  the to_bytes/from_bytes image. Owners, pointers, resources, closures and
-  classes are refused at every depth, with the safe form named. A post
+* 5.6 ris uses grouped iyi fibers (5.1), not detached Goose threads; a waiting
+  take parks its fiber. At one consume commit, cancellation wins, then data,
+  then timeout, including poll and already-cancelled entry. Cancelled consumes
+  nothing; partial copies and claims roll back. Data present at commit may win
+  after a delayed deadline wake. Top-level Cancelled keys are refused: wrap that
+  data in a nominal message. A message is Copyable: it has a finite,
+  self-contained packed form (Goose calls this flat). Copyable types are numeric
+  scalars, Bool, Char, Symbol, Nil, enums, String, Array(T) and RisTree(T) of
+  Copyable T, and value structs or unions of these. String, Array and RisTree
+  are handles; the board packs their live data, not pointers, so Copyable is not
+  raw-byte safe (@[Tape::Flat]). The compiler infers it, with no marker, at
+  post, take, poll and limit after specialization. A type that contains itself
+  through fields, unions, Array or RisTree is refused: keep recursive data in a
+  RisTree or in a node array with checked integer indices (2.2 still applies).
+  User link fields (Array::Link and other self-relative links) stay refused as
+  in 1.7; only RisTree's own stop boundaries cross, kept relative to the copied
+  entries, with an open container's -1 and a stop equal to size preserved. A
+  post packs counts, fixed fields, live union tags and live elements into one
+  owned image, recursively, with no backing pointer and no spare capacity, sized
+  with checked arithmetic before publication; the source and its aliases stay
+  unchanged meanwhile. Each copied occurrence of a handle gets independent
+  state, splitting sharing as in 1.7; an empty value carries its count and still
+  takes one place under the limit. take unpacks fresh containers and bytes on
+  the taker's tape, with capacity equal to size. Copies keep concrete types and
+  enum values and run no user code. Count and packed-byte bounds per message are
+  published; exceeding one follows 4.2, not false. Board packing is private and
+  is not the to_bytes/from_bytes image. Owners, pointers, resources, closures
+  and classes are refused at every depth, with the safe form named. A post
   publishes a complete copy or nothing; take copies out before removal. Claims
-  prevent duplicate delivery and keep FIFO through failure. No view into
-  runtime pools escapes. Private typed pools own message bytes without a
-  general heap. Exhaustion follows 4.2. At process end queued copies are
-  discarded
-  without user callbacks; task cleanup and fatal errors still follow 4.1/4.3.
-  A socket or pipe end never crosses tasks: no owns:, task.take, resource move
-  or exception. An HTTP server uses N tasks, each opening its own SO_REUSEPORT
-  listener on the same port and accepting and serving one connection at a
-  time; N limits connections, with no permits or semaphore. Pipe and socket
-  race IO stay in one task using OS facilities on the poller; board IO copies
-  data.
+  prevent duplicate delivery and keep FIFO through failure. No view into runtime
+  pools escapes. Private typed pools own message bytes without a general heap.
+  Exhaustion follows 4.2. At process end queued copies are discarded without
+  user callbacks; task cleanup and fatal errors still follow 4.1/4.3. A socket
+  or pipe end never crosses tasks: no owns:, task.take, resource move or
+  exception. An HTTP server uses N tasks, each opening its own SO_REUSEPORT
+  listener on the same port and accepting and serving one connection at a time;
+  N limits connections, with no permits or semaphore. Pipe and socket race IO
+  stay in one task using OS facilities on the poller; board IO copies data.
 ## 6. Pools, validation, tooling (Goose §5.4, §9.3-9.4)
 * 6.1 Pool(T)/SlicePool(T): typed slots/runs; free keeps values valid, stale
   views see typed replacements; generations only guard checked handles.
@@ -196,11 +194,11 @@ rule goes last in its section; a removed one leaves its number unused.
   static data, tapes, `Program.tape` and typed pools (Goose §1.2, §5.4).
   Programs build only for Linux x86_64 and aarch64; other targets fail at
   compile time. The compiler executable keeps its own GC.
-* 7.2 The data types are String, Array, Hash and Tre, on the tape. String
+* 7.2 The data types are String, Array, Hash and RisTree, on the tape. String
   is a read-only view of bytes; a literal views static bytes; building
   text (`+`, interpolation, `to_s`, `String.build`) writes on the current
   tape. Array is grow-only in its own reservation, never moving. Hash is
-  open addressing in place, in insertion order. Tre is a tree in one array
+  open addressing in place, in insertion order. RisTree is a tree in one array
   with index links.
 * 7.3 Ruby's and Crystal's syntax stays as written; the compiler places
   memory. A String local or field that gets `<<` reserves growing storage
