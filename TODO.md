@@ -194,7 +194,8 @@ first):
   allocator dependencies; keep the compiler's own GC choice separate.
 * Finish check.sh under the sole no-GC mode. Seven left: autocert
   lifecycle, hpack, http_continue, answer, http_prefork,
-  time_tape_offset (std String paths) and fibers/spares (memory).
+  time_tape_offset (std String paths) and side_spares (5 mappings
+  made where the gate expects 4; fails at a6015b397 too).
 * Autocert's program objects: pool them behind generation-checked
   handles, as pipe ends are (Std::Io::RisPipeEnd, pipe_reuse).
 * HTTP answer's slow request path still uses String-based read_head and
@@ -255,11 +256,10 @@ first):
   module's own code reads": runtime constants appear in the constant
   list. Determine whether the artifact or the expectation is wrong;
   make tape-independent fixes in iyi first, or record them in UPSTREAM.md.
-* bench/concurrency_exercise.sh passes its fiber and pipe steps (no pipe
-  leaks: strace shows every pipe2 closed; the 2,000 idle pipes need the
-  script's `ulimit -n 8192`) and stdin_park, then fails building the
-  blocking-stdin failure proof: its copied tape_text.iyi:781 says
-  `private def cycled`, "can't apply visibility modifier".
+* bench/concurrency_exercise.sh passes every step under `ulimit -n 8192`
+  (the 2,000 idle pipes need it). Its failure proofs copy the runtime to
+  <dir>/src/iyi/: the compiler knows runtime files by that path. Recheck
+  it after runtime changes; it is not in check.sh.
 * Typecheck failures that predate the Channel removal:
   bench/parallel_exercise.iyi:124 (a task value's Panicked arm) and
   bench/metric/metric.iyi (Array of the tape type Planet).

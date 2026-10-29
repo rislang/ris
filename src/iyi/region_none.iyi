@@ -1,6 +1,25 @@
 # Linux mmap tape support without collector roots or marking.
 {% if flag?(:gc_none) && flag?(:linux) %}
+  # Pages back to the kernel, the mapping kept (MADV_DONTNEED): a spare
+  # stays warm only up to KEEP_WARM. The range shrinks to whole pages.
   def __iyi_release_pages(address : UInt64, length : UInt64) : Nil
+    start = (address &+ 4095_u64) & 0xFFFFFFFFFFFFF000_u64
+    finish = (address &+ length) & 0xFFFFFFFFFFFFF000_u64
+    return if finish <= start
+    result = uninitialized Int64
+    {% if flag?(:x86_64) %}
+      asm("syscall" : "={rax}"(result)
+                    : "{rax}"(28_i64), "{rdi}"(start),
+                      "{rsi}"(finish &- start), "{rdx}"(4_i64)
+                    : "rcx", "r11", "memory"
+                    : "volatile")
+    {% else %}
+      asm("svc #0" : "={x0}"(result)
+                   : "{x8}"(233_i64), "{x0}"(start),
+                     "{x1}"(finish &- start), "{x2}"(4_i64)
+                   : "memory"
+                   : "volatile")
+    {% end %}
   end
   fun __iyi_munmap(address : UInt64, length : UInt64) : Nil
     result = uninitialized Int64

@@ -130,15 +130,17 @@ fi
 sed 's/^/  /' stdin.txt | grep -v 'every property held'
 
 step "failure proof: a stdin read that holds the thread is refused"
-mkdir -p blocking/iyi
-cp "$REPO"/src/iyi/*.iyi blocking/iyi/
+# Copies sit under a src/iyi/ path: the compiler knows runtime files by it
+# (a program file outside it is refused `private def` at the top level).
+mkdir -p blocking/src/iyi
+cp "$REPO"/src/iyi/*.iyi blocking/src/iyi/
 sed 's/^        outcome = iyi_read(0, buffer, count)$/        outcome = __iyi_read(0, buffer, count)/' \
-  "$REPO/src/iyi/io.iyi" > blocking/iyi/io.iyi
-if [ "$(diff "$REPO/src/iyi/io.iyi" blocking/iyi/io.iyi | grep -c '^>')" -lt 1 ]; then
+  "$REPO/src/iyi/io.iyi" > blocking/src/iyi/io.iyi
+if [ "$(diff "$REPO/src/iyi/io.iyi" blocking/src/iyi/io.iyi | grep -c '^>')" -lt 1 ]; then
   echo "the sed found no stdin read to make blocking"
   exit 1
 fi
-if ! IYI_PATH="$WORK/blocking${PSEP}$REPO/src" "$IYI" build "$REPO/bench/stdin_park.iyi" -o stdin_blocking > build-blocking.log 2>&1; then
+if ! IYI_PATH="$WORK/blocking/src${PSEP}$REPO/src" "$IYI" build "$REPO/bench/stdin_park.iyi" -o stdin_blocking > build-blocking.log 2>&1; then
   echo "the blocking copy failed to build:"
   tail -5 build-blocking.log
   exit 1
@@ -584,16 +586,16 @@ fi
 case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT)
     step "failure proof: a switch that drops xmm6-xmm15 is caught"
-    mkdir -p dropped/iyi
-    cp -R "$REPO/src/iyi/." dropped/iyi/
+    mkdir -p dropped/src/iyi
+    cp -R "$REPO/src/iyi/." dropped/src/iyi/
     awk '/^         movups [0-9]+\(%rsp\), %xmm[0-9]+$/ { found = found + 1; next } { print }
          END { if (found != 10) exit 3 }' \
-      "$REPO/src/iyi/concurrency.iyi" > dropped/iyi/concurrency.iyi
+      "$REPO/src/iyi/concurrency.iyi" > dropped/src/iyi/concurrency.iyi
     if [ $? -ne 0 ]; then
       echo "the ten restores this proof removes are not in the switch any more; update the proof"
       exit 1
     fi
-    if ! IYI_PATH="$WORK/dropped;$REPO/src" "$IYI" build --release "$REPO/bench/concurrency_exercise.iyi" \
+    if ! IYI_PATH="$WORK/dropped/src;$REPO/src" "$IYI" build --release "$REPO/bench/concurrency_exercise.iyi" \
          -o dropped-exercise > build-dropped.log 2>&1; then
       echo "the patched runtime did not build:"
       tail -5 build-dropped.log
@@ -614,19 +616,19 @@ esac
 
 # ── 6. Failure proof: a stack mapped at spawn is caught ─────────────────
 step "failure proof: a stack mapped when a task is spawned is caught"
-mkdir -p eager/iyi
-cp -R "$REPO/src/iyi/." eager/iyi/
+mkdir -p eager/src/iyi
+cp -R "$REPO/src/iyi/." eager/src/iyi/
 # The stack made at spawn again: a fiber that has one is not given another
 # at its first switch, so this alone puts every spawn back on a mapping.
 awk '/^    IyiScheduler.register\(fiber\)$/ { print "    fiber.prepare_stack"; found = found + 1 }
      { print }
      END { if (found != 1) exit 3 }' \
-  "$REPO/src/iyi/concurrency.iyi" > eager/iyi/concurrency.iyi
+  "$REPO/src/iyi/concurrency.iyi" > eager/src/iyi/concurrency.iyi
 if [ $? -ne 0 ]; then
   echo "the line this proof adds to is not where it was; update the proof"
   exit 1
 fi
-if ! IYI_PATH="$WORK/eager${PSEP}$REPO/src" "$IYI" build "$REPO/bench/concurrency_exercise.iyi" \
+if ! IYI_PATH="$WORK/eager/src${PSEP}$REPO/src" "$IYI" build "$REPO/bench/concurrency_exercise.iyi" \
      -o eager-exercise > build-eager.log 2>&1; then
   echo "the patched runtime did not build:"
   tail -5 build-eager.log
@@ -643,14 +645,14 @@ echo "  caught: $(grep -m1 'FAIL: burst' eager.txt)"
 # ── 7. Failure proofs: a walked sleep queue, and one out of order ────────
 sleep_proof() { # sleep_proof <label> <dir> <awk program> <phrase>
   step "failure proof: $1 is caught"
-  mkdir -p "$2/iyi"
-  cp -R "$REPO/src/iyi/." "$2/iyi/"
-  awk "$3" "$REPO/src/iyi/concurrency.iyi" > "$2/iyi/concurrency.iyi"
+  mkdir -p "$2/src/iyi"
+  cp -R "$REPO/src/iyi/." "$2/src/iyi/"
+  awk "$3" "$REPO/src/iyi/concurrency.iyi" > "$2/src/iyi/concurrency.iyi"
   if [ $? -ne 0 ]; then
     echo "the line this proof changes is not where it was; update the proof"
     exit 1
   fi
-  if ! IYI_PATH="$WORK/$2${PSEP}$REPO/src" "$IYI" build "$REPO/bench/concurrency_exercise.iyi" \
+  if ! IYI_PATH="$WORK/$2/src${PSEP}$REPO/src" "$IYI" build "$REPO/bench/concurrency_exercise.iyi" \
        -o "$2-exercise" > "build-$2.log" 2>&1; then
     echo "the patched runtime did not build:"
     tail -5 "build-$2.log"
