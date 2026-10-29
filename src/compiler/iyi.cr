@@ -47,8 +47,6 @@ module Iyi
         unsafe       list the @[Ffi], @[PointerUnsafe] and @[TapeUnsafe] marks
         fmt          format files in place; --check makes a change fail
         fix          apply the compiler's did-you-mean edits until clean
-        bind         put every shard under lib/ behind a .iyimod boundary
-        migrate      write a Crystal tree as iyi modules, namespace as path
         lsp          serve the language over stdio (editors, agents)
         mcp          serve the compiler's verbs as MCP tools over stdio
         daemon       hold the prelude analysed between builds
@@ -59,7 +57,6 @@ module Iyi
         help         print this text
 
     Switches worth knowing:
-        --crystal                build against Crystal's standard library
         --emit-iyimod DIR        write a .iyimod per imported module into DIR
         --use-iyimod DIR         compile imports from DIR's .iyimod files
         --no-codegen             analyse only, produce nothing
@@ -73,7 +70,7 @@ module Iyi
   VERSION = Iyi::Config.iyi_version
 
   DELEGATED = %w(init get build run mod env clear_cache tool daemon test
-    doc lsp vet check unsafe heap fix bind migrate mcp)
+    doc lsp vet check unsafe heap fix mcp)
 
   # The ones that belong to Crystal and are still in the binary underneath.
   # Named rather than swallowed, because "unknown command" would be a lie.

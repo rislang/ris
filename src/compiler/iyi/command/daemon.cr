@@ -320,15 +320,6 @@ class Iyi::Command
       File.delete?(path)
       server = UNIXServer.new(path)
 
-      # The whole point: pay for the prelude once, here, rather than in every
-      # build. Children adopt this and start from it.
-      # iyi: Crystal's prelude, under `iyi` too, and that is the right default
-      # rather than an oversight. `--crystal` sets `prelude = "prelude"`, which
-      # is what `Compiler.new` already has, so an `iyi build --crystal` hits
-      # this analysis on its first request — and that is the mode the daemon is
-      # for (SPEC.md IV.1d). An ordinary `.iyi` build wants `iyi/prelude`,
-      # misses, and warms it after the first build: 0.03 s, which is the whole
-      # reason the daemon is not for that mode.
       elapsed = Time.instant
       preanalysed = Compiler.new.preanalyse_prelude
       Compiler.preanalysed[preanalysed.key] = preanalysed

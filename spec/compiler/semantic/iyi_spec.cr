@@ -303,8 +303,6 @@ describe "Semantic: iyi" do
         CODE
     end
 
-    # The other library's `Nil` has no `size` either, so the size rule's
-    # `--crystal` note sent a nilable receiver nowhere useful.
     it "keeps the size rule's note off a nil" do
       exception = expect_raises(Iyi::TypeException) do
         semantic <<-CODE

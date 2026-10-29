@@ -1596,24 +1596,6 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
   def visit(node : Def)
     check_outside_exp node, "declare def"
 
-    # iyi: the body as it was *written*, for the bodies a boundary carries
-    # (SPEC.md IV.1g). Read here because this pass runs before anything expands
-    # it: by the time `tool bind` walks the types, `Route.new(...)` has become
-    # `_.initialize(...)` and an underscore is not a receiver anybody can write
-    # — the consumer said `can't read from _` about a body it was handed.
-    #
-    # Keyed on the location, which is what a `Def` and its declaration share.
-    # Recorded only while a boundary is being written.
-    if @program.compiler.try(&.emit_bind)
-      if location = node.location
-        # Keyed on the name as well as the place. A synthesised `new` carries
-        # the *location* of the `initialize` it was made from, so a key of one
-        # handed `new` the other's body — and `@block = ...` in a metaclass is
-        # `@instance_vars are not yet allowed in metaclasses`.
-        @program.iyi_def_bodies[Program.iyi_def_body_key(location, node.name)] ||= node.body.to_s
-      end
-    end
-
     annotations = read_annotations
 
     process_def_annotations(node, annotations) do |annotation_type, ann|
@@ -1923,45 +1905,6 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
     "#{name}(#{args.join(", ")})"
   end
 
-  # iyi: a `.iyi` file may *add* to a type of the other language and may not
-  # *replace* one of its methods (SPEC.md R-3).
-  #
-  # Adding is what a reopen is for: `class ::String; def blank?` gives the
-  # library's `String` a method the library does not have, and only code that
-  # can reach the module's surface can call it. Replacing is a different act.
-  # The definition that goes is one the *library's own code* calls, so the
-  # whole program gets the new one — and nothing at the two sites says so.
-  #
-  # `src/std/text.iyi` is how this was found. It writes `private def
-  # byte_slice(start, count)` as a helper of its own, which is a name iyi's
-  # prelude does not have and Crystal's `String` does. Built `--crystal`,
-  # `import std/text` replaced Crystal's public `byte_slice` with a private
-  # one, and the first program that touched `Path` — which is every program,
-  # through the exception handler's backtrace — stopped on `private method
-  # 'byte_slice' called for String`, pointing at a line in Crystal's own
-  # library that had not changed.
-  #
-  # The module's own language is not this rule's business: with iyi's prelude
-  # the type is a type of this language, written in `.iyi`, and reopening it is
-  # how the prelude is extended. What the test asks is where each definition
-  # was *written* — the same question `iyi tool bind` asks of a shard's
-  # members — because that is what says whose the type is.
-  #
-  # The prelude is the other half, and the half this fork's own library
-  # reached first. `import std/enum` that reopens `::Enum` and writes `to_s`
-  # again gets the prelude's every program: a two-member flags set printed
-  # `All`, and `Level.parse?("WARN")` answered nil, with nothing said at
-  # either definition. A prelude method is the answer every program already
-  # has, so replacing one from outside the prelude is the same defect as
-  # replacing the library's, and is refused in the same sentence.
-  #
-  # A macro is the same act and a wider one. `getter` is a declaration macro,
-  # so a module that reopens `::Object` and writes its own decides what every
-  # field declaration in the program means — including the ones in files that
-  # never heard of it, and including the ones the prelude wrote. It travels in
-  # an artifact too (IV.1, `macro_bodies`), so a consumer can inherit it from
-  # a module whose source it never reads. Asked here because `add_macro`
-  # answers the same question `add_def` does.
   private def iyi_refuse_override(node : Def | Macro, replaced : Def | Macro | Nil) : Nil
     return unless replaced
     return unless iyi_written_in?(node, ".iyi")
@@ -1994,8 +1937,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
     else
       return unless iyi_written_in?(replaced, ".cr")
       whose = "the library's"
-      instead = "Give it a name the library does not use, or build without " \
-                "`--crystal`, where the type is the prelude's"
+      instead = "Give it a name the library does not use"
     end
 
     at = replaced.location.try(&.expanded_location)

@@ -5,7 +5,7 @@ require "../support/tempfile"
 # The binaries by the names the build gives them: `crystal.exe` on Windows.
 # Without the suffix a process still starts - Windows adds it when it looks
 # a command up - but a spec that asks whether the file is there before it
-# runs anything was told no, and the bind pipeline never ran on Windows.
+# runs anything was told no, and those examples never ran on Windows.
 EXE_SUFFIX = {{ flag?(:win32) ? ".exe" : "" }}
 
 CRYSTAL_BIN = ENV.fetch("CRYSTAL_SPEC_COMPILER_BIN") { Path[Dir.current, ".build", "crystal#{EXE_SUFFIX}"].to_s }

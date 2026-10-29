@@ -183,8 +183,8 @@ echo
 echo "== proving the checks can fail, one broken method at a time"
 
 # A copy of the whole prelude with one method patched, on `IYI_PATH` ahead of
-# the tree's own. `--prelude` resolves `iyi/prelude` the way an import does, so
-# the copy is what the build reads.
+# the tree's own. The default prelude resolves `iyi/prelude` on that path,
+# so the copy is what the build reads.
 prove_fails() { # prove_fails <label> <dir> <phrase> <sed script>
   local label="$1" dir="$2" phrase="$3" script="$4"
   mkdir -p "$WORK/$dir/iyi"

@@ -378,24 +378,6 @@ class Iyi::CodeGenVisitor
     end
   end
 
-  # iyi: under iyi's prelude a float converts to an integer by truncating
-  # first, and what is refused is a truncation the type does not hold
-  # (std/int.iyi's rule), so the bounds are exclusive and one past the
-  # type's: `min - 1 < arg < max + 1`. The range was checked on the
-  # untruncated value, as the other library checks it - and as it still is
-  # under `--crystal`, whose library is that one - which made one name
-  # answer two ways here: `255.5.to_u8` and `(-0.5).to_u8` panicked while
-  # std/int's `255.5.to_u16` was 255 and `(-0.5).to_u16` 0.
-  #
-  # Both bounds have to be floats, and the comparison against each is
-  # chosen so that it says the same thing when the integer bound is not one.
-  # `min - 1` is -1 for an unsigned type and a float for a signed one whose
-  # `2^(bits-1)` needs fewer bits than the float's precision; past that it
-  # is not a float, and the first float above it is `min` itself. `max + 1`
-  # is a power of two and a float, but for a single against `UInt128`:
-  # 2^128 is past the single's largest finite value, so only the infinity
-  # is at or above it. The lower comparison is unordered so that NaN is
-  # refused too.
   private def iyi_truncation_out_of_range(target_type : IntegerType, arg_type : FloatType, arg)
     bits = target_type.bytes * 8
     precision = arg_type.kind.f32? ? 24 : 53
@@ -1505,21 +1487,6 @@ class Iyi::CodeGenVisitor
     node.value
   end
 
-  # The two MSVC exception globals a `raise` and a `rescue` name. Each is
-  # defined once, in the main module, and only declared in every other one:
-  # an initializer may name globals of its own module and no other, and one
-  # built here that named another module's `??_7type_info@@6B@` is what made
-  # LLVM's verifier refuse a Windows build of any program whose imported
-  # module raises — "Referencing global in another module!", on the default
-  # multi-module path, where `--single-module` was fine.
-  #
-  # And defined in the main module's *context*, which is not the one being
-  # emitted into when a module's unit asks first. That happens when `raise`
-  # is copied into a unit before `_main` has raised anything: `--iyi-keep
-  # String` copies it into String's, and the main module's `_TI1PEAX` was
-  # then typed in String's context, so every `_CxxThrowException` call in
-  # `_main` failed the verifier ("Call parameter type does not match
-  # function signature!") and the build ended on "you've found a bug".
   def void_ptr_type_descriptor(mod = @llvm_mod)
     void_ptr_type_descriptor_name = "\u{1}??_R0PEAX@8"
 
@@ -1621,13 +1588,6 @@ class Iyi::CodeGenVisitor
     end
   end
 
-  # A builder of its own, because nothing here is emitted: every operand is
-  # a constant and the builder only folds them. The main module's builder
-  # can have ended its block when a unit asks for these globals, and
-  # `IyiLLVMBuilder` answers anything asked after that with a nil value -
-  # an initializer field of the wrong type, which the verifier refused
-  # ("Global variable initializer type does not match global variable
-  # type!") for `_CT??_R0PEAX@88` and `_TI1PEAX` under `--iyi-keep String`.
   def sub_image_base(value, mod = @llvm_mod)
     image_base = external_constant(llvm_context.int8, "__ImageBase", mod)
 

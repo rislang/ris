@@ -25,18 +25,6 @@ require "./codegen"
 # the prelude did not allocate is memory corruption. Change both or
 # neither.
 class Iyi::Program
-  # iyi's object layout, against Crystal's: an object is its fields and
-  # nothing else, and its type id is the high half of the header word
-  # under the pointer, at `P-4`, which every allocator mode of iyi's
-  # prelude leaves there. Crystal's layout - the type id an `i32` at the
-  # object's front - stays for a `--crystal` program (its runtime is
-  # Crystal's, allocating through Boehm with nothing under the pointer)
-  # and for the compiler's own bootstrap, which is such a program. The
-  # ground truth is the prelude itself: a spec-built snippet carries the
-  # default `iyi_prelude?` without ever loading it, and is JIT-run inside
-  # the spec harness, whose allocator leaves no word under the pointer
-  # either. `IyiRuntimeLock` is the prelude's, under every mode and on
-  # every target.
   def iyi_object_layout? : Bool
     cached = @iyi_object_layout
     return cached unless cached.nil?
@@ -46,12 +34,6 @@ class Iyi::Program
   @iyi_object_layout : Bool?
 
   def iyi_gc_arena? : Bool
-    # Own-prelude builds only: a `--crystal` program allocates through
-    # Boehm, its types include the standard library's own lowerings, and
-    # both halves of this gate would be wrong there — the layout walk
-    # crashes on shapes the arena never allocates, and the id store would
-    # scribble into Boehm's heap. CI taught this line by turning every
-    # `--crystal` build red the first time the predicate forgot it.
     return false unless iyi_prelude?
     return false if has_flag?("gc_boehm") || has_flag?("gc_none")
     return false unless (has_flag?("linux") && (has_flag?("x86_64") || has_flag?("aarch64"))) ||

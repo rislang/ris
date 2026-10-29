@@ -56,8 +56,6 @@ class Iyi::Command
         clear_cache              clear the compiler cache
         check                    type-check only: no codegen, no binary; errors are the exit code
         fix                      apply the compiler's did-you-mean edits until the file is clean
-        bind                     put every shard under lib/ behind a boundary, as .iyimod files
-        migrate                  write a Crystal tree as iyi modules, the namespace as the path
         env                      print Crystal environment information
         eval                     eval code from args or standard input
         mod                      inspect a .iyimod module artifact
@@ -85,7 +83,6 @@ class Iyi::Command
       Usage: #{Command.program_name} tool [tool] [switches] [program file] [--] [arguments]
 
       Tool:
-          bind                     what a Crystal shard would cost as an iyi module
           context                  show context for given location
           dependencies             show file dependency tree
           expand                   show macro expansion for given location
@@ -190,15 +187,6 @@ class Iyi::Command
       # prefix.
       options.shift
       fix
-    when command == "bind"
-      # Exact: it writes artifacts and runs builds; not something to
-      # reach by prefix.
-      options.shift
-      bind
-    when command == "migrate"
-      # Exact: it writes a tree of files.
-      options.shift
-      migrate
     when command == "lsp"
       # Exact: a server is not something to reach by accident from `l`.
       options.shift
@@ -372,9 +360,6 @@ class Iyi::Command
     when "expand".starts_with?(tool)
       options.shift
       expand
-    when "bind" == tool
-      options.shift
-      tool_bind
     when "hierarchy".starts_with?(tool)
       options.shift
       hierarchy
@@ -445,21 +430,6 @@ class Iyi::Command
   protected def prelude_compiler_for_build : Compiler
     options.shift if options.first? == "build"
     create_compiler("build").compiler
-  end
-
-  # iyi: what it would take to put a Crystal shard behind an iyi boundary.
-  #
-  # `-e` names the shard's own namespace, borrowed from `hierarchy` because it
-  # is the same question — which types are this shard's — asked for a different
-  # reason. Not `top_level`, because a signature's return type is only known
-  # once the method has been instantiated, and that is the whole measurement.
-  private def tool_bind
-    config, result = compile_no_codegen "tool bind", hierarchy: true
-    @progress_tracker.stage("Tool (bind)") do
-      Iyi.print_bind result.program, config.hierarchy_exp, STDOUT,
-        artifact_dir: config.compiler.emit_bind,
-        bound_dir: config.compiler.use_iyimod
-    end
   end
 
   private def hierarchy
@@ -623,9 +593,6 @@ class Iyi::Command
     end
 
     unless status.exit_reason.normal?
-      # iyi: in iyi's own words when the program is iyi's. A `--crystal`
-      # program carries Crystal's runtime, which catches the fault itself
-      # and exits saying so; only a program under iyi's library dies here.
       if compiler.prelude == "iyi/prelude"
         STDERR.puts "#{Command.program_name}: #{Command.death_sentence(status)}"
       else
@@ -886,12 +853,14 @@ class Iyi::Command
         end
       end
 
-      opts.on("--prelude ", "Use given file as prelude") do |prelude|
-        # `--prelude ""` went looking for a file called nothing and answered
-        # with the other language's advice about shards. A name, or nothing.
-        abort! "--prelude takes a file name", :USAGE_ERROR if prelude.empty?
-        compiler.prelude = prelude
-        specified_prelude = true
+      if Command.program_name == "crystal"
+        opts.on("--prelude ", "Use given file as prelude") do |prelude|
+          # `--prelude ""` went looking for a file called nothing and answered
+          # with the other language's advice about shards. A name, or nothing.
+          abort! "--prelude takes a file name", :USAGE_ERROR if prelude.empty?
+          compiler.prelude = prelude
+          specified_prelude = true
+        end
       end
 
       # iyi: write a `.iyimod` per imported module into DIR (SPEC.md IV.1).
@@ -899,31 +868,6 @@ class Iyi::Command
       # Emitting from an ordinary build rather than from a "compile this module
       # alone" command, because compiling a module alone is the thing the
       # artifact is *for* and cannot precede it.
-      # iyi: which standard library this program has.
-      #
-      # `--prelude` is the mechanism and this is the question: a program built
-      # with it gets Crystal's library, so `require` reaches the ecosystem and
-      # means what it means in Crystal. The rules that make a module a module
-      # are untouched — they are the language's, and a prelude is a library.
-      opts.on("--crystal", "iyi: build against Crystal's standard\nlibrary, so `require` works") do
-        compiler.prelude = "prelude"
-        compiler.crystal_library = true
-        specified_prelude = true
-      end
-
-      opts.on("--iyi-keep NAMESPACE", "iyi: define rather than inline the methods\nunder NAMESPACE") do |root|
-        compiler.iyi_keep = root
-      end
-
-      # iyi: where `tool bind` writes what it generates.
-      #
-      # Its own switch rather than `--emit-iyimod`, because it is not that: it
-      # writes one artifact it built itself, for a shard, under Crystal's
-      # library — which is exactly the combination `--emit-iyimod` refuses.
-      opts.on("--emit-bind DIR", "iyi: where `tool bind` writes the boundary\nit generates") do |dir|
-        compiler.emit_bind = dir
-      end
-
       opts.on("--emit-iyimod DIR", "iyi: write a .iyimod per imported module\nthis build reads from source into DIR (a\npackage's is III.7 step 5's, and is not\none of these)") do |dir|
         # iyi: answered here rather than by `Dir.mkdir_p` half an hour into a
         # build. A path that names a file, or a directory nobody may write to,
@@ -1037,9 +981,6 @@ class Iyi::Command
       end
     end
 
-    if compiler.crystal_library?
-      abort! "ris programs need ris's runtime; drop --crystal", :USAGE_ERROR
-    end
     compiler.link_flags = link_flags.join(' ') unless link_flags.empty?
 
     filenames += opt_filenames.not_nil!
@@ -1064,8 +1005,8 @@ class Iyi::Command
     # iyi: an iyi program gets iyi's prelude (SPEC.md, "0.1.0", item 3).
     #
     # Decided by the entry file's extension, which is the only thing the
-    # compiler knows before it reads anything. `--prelude` still wins, and a
-    # `.cr` file is untouched — the two languages share this compiler and do
+    # compiler knows before it reads anything. Crystal developers may override
+    # it; a `.cr` file is untouched. The two languages share this compiler and do
     # not share a standard library.
     # The extension is the stored name's (`gather_sources`), compared as it
     # is stored. The case was folded here instead, so on Windows a file

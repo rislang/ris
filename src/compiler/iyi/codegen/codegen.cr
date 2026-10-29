@@ -545,29 +545,6 @@ module Iyi
       end
     end
 
-    # What the unit refers to, made to exist — and only that.
-    #
-    # *lazy* is the artifact's answer rather than this build's guess, and it has
-    # to be. A unit that reads a class variable with a live initialiser calls
-    # `~Owner::name:read`, a main-module function that initialises on first
-    # use; one reading a variable without an initialiser reads the global. Both
-    # are decided where the *producer* emitted the read, and neither side can
-    # work the other out: iyi's prelude has no `__crystal_once`, so nothing
-    # under it ever takes the lazy branch, and assuming it here dies on
-    # `BUG: __crystal_once is not defined`. Assuming the other leaves
-    # `~Exception::CallStack::skip:read` undefined in a `--crystal` build,
-    # which is what `bench/bind_roundtrip.sh` caught.
-    #
-    # Marked read before the read function is built, because that is what it
-    # *is*: something read it, in code this program links and did not compile.
-    # It also puts the consumer's own later pass on the same branch — a class
-    # variable it initialises for itself now does it through the flag rather
-    # than eagerly, so the initialiser still runs exactly once.
-    #
-    # Nothing here initialises. A variable whose declaration travelled has its
-    # initialiser in the consumer's own tree and runs on the ordinary path, and
-    # one of the library's runs where that library says. What is missing is
-    # only ever the global, and the function that reaches it.
     private def iyi_define_class_var(class_var : MetaTypeVar, lazy : Bool) : Nil
       # A thread-local one is not reached through its global but through a
       # `noinline` function that hands back the address, and that function is
@@ -1642,22 +1619,6 @@ module Iyi
     end
 
     def get_global(name, type, real_var, initial_value = nil)
-      # iyi: a program under iyi's prelude, on ELF, reads a thread-local
-      # straight off the thread pointer - one `%fs:`/`tpidr_el0` load,
-      # local-exec. The NoInline accessor below guards against LLVM hoisting
-      # a thread-local's address across a fiber switch that lands the fiber
-      # on another thread; an iyi fiber belongs to its scheduler thread and
-      # never moves (`src/iyi/concurrency.iyi`, the scheduler), so the
-      # address is a constant for the fiber's life and the guard priced four
-      # calls into every allocation.
-      #
-      # Mach-O keeps the accessor, and the reason is the platform's: there
-      # is no local-exec there, a thread-local's address comes from
-      # `_tlv_bootstrap` through a call whatever the model, and one accessor
-      # per read is what keeps that call from being made several times in an
-      # allocation - measured, the direct form cost darwin's binary trees
-      # six times its wall time. A `--crystal` program keeps it everywhere:
-      # its fibers are Crystal's, which may change threads.
       if real_var.thread_local? && !(@program.iyi_prelude? && @program.has_flag?("linux"))
         get_thread_local(name, type, real_var)
       else

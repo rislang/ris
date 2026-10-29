@@ -76,24 +76,6 @@ else
   say "note: release $version publishes no SHA256SUMS; the tarball was not verified"
 fi
 
-# What a previous install left, removed before this one is unpacked.
-#
-# `tar` overwrites the files it carries and knows nothing about the ones
-# it no longer carries, so an upgrade used to leave every file the
-# release had deleted lying in the prefix. That is not tidy-versus-untidy:
-# `share/iyi/crystal` is a *library*, `crystal/dwarf.cr` requires
-# `./dwarf/**`, and a file a release removed is still required by the
-# glob. One real case, found on a machine that had upgraded in place:
-# `crystal/dwarf/line_numbers.cr` from an older release stayed behind and
-# every `--crystal` build died with `undefined constant FORM`, naming a
-# file the person never wrote and cannot find in the repository.
-#
-# So each install writes down what it unpacked, and the next one removes
-# exactly that - no more, since `bin/` and `lib/` are shared with whatever
-# else lives under the prefix. An install from before this manifest
-# existed leaves no list, and for it the two directories iyi owns whole
-# are cleared instead, which is where the library that poisons a build
-# lives.
 manifest="$prefix/share/iyi/installed-files"
 if [ -f "$manifest" ]; then
   while IFS= read -r path; do

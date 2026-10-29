@@ -255,7 +255,7 @@ module Iyi
   IYI_ARRIVAL_CALL_HINTS = {
     "p"       => "`puts value.inspect` is the spelling here; `p` comes with `import std/kernel::{p}`.",
     "pp"      => "`puts value.inspect` is the spelling here; `pp` comes with `import std/kernel::{pp}`.",
-    "require" => "iyi has no `require`: a module is reached with `import`, and `--crystal` gives a program Crystal's library.",
+    "require" => "ris has no `require`: use `import std/NAME` for library modules.",
     "gets"    => "`stdin.gets` reads a line, a `String?` that is nil at the end; there is no bare `gets`.",
     "printf"  => "`printf`, `sprintf` and `String#%` come with `import std/format::{printf}`.",
     "sprintf" => "`printf`, `sprintf` and `String#%` come with `import std/format::{sprintf}`.",
@@ -316,10 +316,6 @@ module Iyi
     "decode_string" => "`Base64.decode` answers a String here - the other library's `decode_string` (`import std/base64`).",
     "toString"      => "`to_s` is the spelling here: `1.to_s`.",
     "parseInt"      => "`to_i` is the spelling here: `\"1\".to_i`, and it panics on what is not a number.",
-    # More of them, each of which drew the size rule and `iyi build
-    # --crystal`: the method is here under another name, and no other
-    # library is what the reader needs. `get`, `join` and `await` are
-    # read only where the receiver is a Hash or a task (`raise_undefined_method`).
     "len"         => "`size` is the spelling here: `xs.size`, `s.size`.",
     "to_string"   => "`to_s` is the spelling here: `1.to_s`.",
     "unwrap"      => "There is no `unwrap`: `.or_panic` takes the value out of a union with an error member, `.or(default)` gives the error an answer, and a nil is narrowed (`if x`) or given an answer (`x || default`).",
@@ -1069,21 +1065,6 @@ class Iyi::Call
     posix.includes?("/src/iyi/") || posix.starts_with?("src/iyi/")
   end
 
-  # iyi: the integer tower is one module's, made by macros over a table of
-  # types, so the trait walk below cannot see it: `std/int` gives `UInt32`
-  # its arithmetic, every integer `<<`, `>>`, `<=>` and the `to_u32`
-  # family. A port that reached for `1_u32 + x` was told the prelude is
-  # small by rule and concluded `UInt32` had no methods at all. The names
-  # are read off the module's text: a `def`, a `%w(...)` operator list, or
-  # a quoted conversion name.
-  #
-  # The floats are `std/float`'s the same way: `Float32`'s methods and what
-  # `Float64` still lacked, unary `-` among it. Without it `1.5_f32.to_f64`
-  # was sent to `--crystal` and `-x` on a `Float64` was "wrong number of
-  # arguments", neither naming the import. *size* is the arguments the call
-  # gave, for that second shape: the module must declare the name with
-  # none, or with some, to be the answer. A module the program already
-  # loaded is not: its methods are there, so the call is wrong otherwise.
   IYI_STD_NUMBER_MODULES = {
     "int"   => "the module that makes the whole integer tower usable",
     "float" => "the module that makes `Float32` a number and gives `Float64` what the prelude leaves out",
@@ -1147,19 +1128,6 @@ class Iyi::Call
     end
   end
 
-  # The `std/<module>` that would put `name` on this receiver, and how.
-  #
-  # "undefined method 'tally' for Array(Int32)" is true and useless when
-  # `import std/enumerable` is the whole answer: std implements
-  # `Enumerable` for the prelude's collections (R-3 lets the module that
-  # owns the trait say so), and the method the person asked for is one
-  # line away. The prelude-is-small note that used to be printed here
-  # sent them to `iyi doc` or to `--crystal` for something the library
-  # already has.
-  #
-  # Read off the search path the way an import is resolved, on the error
-  # path only, and by walking strings rather than a `Regex`: the
-  # compiler links no pcre2 (SPEC.md III.9).
   private def iyi_std_method_hint(program, name : String, owner) : String?
     bare = owner.instance_type.to_s.split('(').first
     return nil if bare.empty?
@@ -1299,12 +1267,6 @@ class Iyi::Call
     nil
   end
 
-  # iyi: `GC.collect` after `import std/gc`: the bare import keeps the
-  # module's names qualified (SPEC.md R-2b), so `GC` is the prelude's own
-  # `GC` - which has no `collect` - and the error went on to the prelude's
-  # size rule and `--crystal`, while the module the file imported exports a
-  # `GC` that has it. The same R-2b answer `iyi_out_of_reach_hint` gives a
-  # function, for a type the prelude also declares.
   private def iyi_shadowed_type_hint(def_name : String, owner, obj) : String?
     return nil unless owner.is_a?(MetaclassType) && obj.is_a?(Path) && obj.names.size == 1
     name = obj.names.first
@@ -1504,10 +1466,6 @@ class Iyi::Call
     end
   end
 
-  # iyi: a method missing on an error member of the receiver's union: the
-  # value was used as though it could not fail. `ch.receive + 1` was sent
-  # to the prelude's size rule and `iyi build --crystal`, and a `T | E` of
-  # the program's own had no hint at all.
   private def iyi_error_receiver_hint(obj : ASTNode, union : UnionType) : String
     errors, values = union.union_types.partition(&.error?)
     receiver = iyi_receiver_code(obj)
@@ -1686,12 +1644,7 @@ class Iyi::Call
         if reachable = iyi_std_method_hint(program, def_name, owner)
           msg << '\n' << reachable
         elsif !receiver_hinted
-          # Not for a nil or an error member: the other library's `Nil`
-          # has no `+` either, nor has any library `Cancelled#+`, and the
-          # receiver's other members are what the call was written for, so
-          # the note sent a nilable `x + 1` to `--crystal` under the hint
-          # that is the answer.
-          msg << '\n' << "iyi's prelude has no `#{def_name}` on #{owner}: it is small by rule - a method enters when a program in the repository needs it (SPEC.md III.1). `iyi doc #{bare}` lists what it has; `iyi build --crystal` gives a program Crystal's library instead (README.md, \"The library a program has\")."
+          msg << '\n' << "iyi's prelude has no `#{def_name}` on #{owner}: it is small by rule - a method enters when a program in the repository needs it (SPEC.md III.1). `iyi doc #{bare}` lists what it has."
         end
       end
 

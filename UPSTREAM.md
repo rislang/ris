@@ -8,6 +8,15 @@ back.
 
 ## To take to iyi
 
+* ris removed iyi's Crystal program compatibility mode, shard binding
+  commands and tree migration command, including their options, samples,
+  fixtures, specs and documentation. There is no transition path. Resolve
+  future iyi merge conflicts by deleting these features. Artifact format
+  v60 drops the old library selector byte and refuses older artifacts.
+  The default installer ships ris and its prelude, without the Crystal
+  command, installed manual pages or shell completions. Prelude overrides
+  belong only to the developer Crystal surface; ris and iyi reject them.
+
 * std/acme: optional task-owned HTTPClient for the directory and all
   signed exchanges. It lets independent sessions select TLS trust roots
   without changing HTTP.tls_config for other tasks. The caller closes

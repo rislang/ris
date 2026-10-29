@@ -254,24 +254,6 @@ def main():
          and run("check", "typos.iyi", cwd=work).returncode == 0,
          f"applied {[a['to'] for a in fixed.get('applied', [])]}")
 
-    # 4a'. An edit the language would refuse is not an edit. `!` is not
-    # part of a name in iyi (III.1.7), and the nearest name to `not_nil` in
-    # Crystal's library is `not_nil!` — so the suggester proposed it, the
-    # edit travelled in `check -f json` as `suggested_edit`, and `fix`
-    # applies those: the answer to an undefined method was a file that no
-    # longer parses. The message says what the library calls it and why no
-    # call here can spell it, and carries no edit.
-    write("unspellable.iyi", "x = [3, 1, 2]\nputs x.not_nil.to_s\n")
-    proc = run("check", "--crystal", "-f", "json", "unspellable.iyi", cwd=work)
-    answers = json.loads(proc.stderr)
-    first = answers[0] if answers else {}
-    step("a name iyi cannot write is explained rather than suggested",
-         proc.returncode != 0 and len(answers) == 1
-         and "suggested_edit" not in first
-         and "not_nil!" in first["message"]
-         and "cannot end a name in iyi" in first["message"]
-         and first.get("spec") == ["III.1.7"],
-         f"edit {first.get('suggested_edit')}, spec {first.get('spec')}")
 
     # 4a''. Advice an agent follows has to compile. For a nilable argument
     # to a trait parameter the message said "Write `impl Show for (Int32 |
@@ -344,7 +326,6 @@ def main():
          f"at {cause.get('line')}:{cause.get('column')}, expansion {cause.get('expansion')}")
 
     # 4a'''-nil. Under a nilable `x + 1` the error went on to say the
-    # prelude is small by rule and `iyi build --crystal` gives the other
     # library, whose `Nil` has no `+` either; the narrowing is the answer.
     write("advice_nil.iyi", "x = Program.args.size > 10 ? 1 : nil\nputs x + 1\n")
     said = run("check", "advice_nil.iyi", cwd=work).stderr
@@ -807,7 +788,6 @@ def main():
          f"warned {warned}, both {both}")
 
     # 5c. the loop is around a language that can do work now: a pure-iyi
-    # tool reads its args, its environment, and the disk — no --crystal
     write("nameplate.iyi", (
         "module nameplate\n\n"
         "pub def run() : Nil\n"

@@ -739,15 +739,9 @@ describe Iyi::Rx do
       end
     end
 
-    it "agrees on the boundary lookaround the bind tool needs" do
-      # iyi: src/compiler/iyi/tools/bind.cr renames a bound identifier only where
-      # it stands alone, which is a negative lookbehind and a negative lookahead
-      # around an escaped name. That pair is the reason this work exists, so the
-      # subjects are the shapes bind really meets. The second pattern is bind's
-      # own boundary rule exactly: `:` blocks a match before the name, because
-      # otherwise `Other::MyLib::Entry` reads as a `MyLib::` of its own, and does
-      # not block one after it, because `Entry::Foo` really does start with the
-      # name.
+    it "agrees on identifier boundary lookarounds" do
+      # An identifier matches only where it stands alone. The qualified
+      # pattern also blocks a namespace separator before the name.
       standalone = "(?<![A-Za-z0-9_])Entry(?![A-Za-z0-9_])"
       qualified = "(?<![A-Za-z0-9_:])Entry(?![A-Za-z0-9_])"
       subjects = [

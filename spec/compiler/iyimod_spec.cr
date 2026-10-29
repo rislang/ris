@@ -250,6 +250,20 @@ describe Iyi::IyiMod do
       end
     end
   end
+  it "refuses a v59 artifact with a rebuild instruction" do
+    with_temporary_file do |path|
+      Iyi::IyiMod.write sample_artifact, path
+      bytes = File.read(path).to_slice.dup
+      Iyi::IyiMod::FORMAT.encode(59_u32, bytes[8, 4])
+      File.write path, bytes
+
+      expect_raises(Iyi::IyiMod::Error,
+        /format v59, this compiler writes v60; rebuild the module/) do
+        Iyi::IyiMod.read(path)
+      end
+    end
+  end
+
   # The one a v42 artifact in a cache actually hits: the `Layouts` section
   # bumped the format to v43, and the rule above applies to the version this
   # tree wrote yesterday exactly as to one it never wrote.
@@ -2025,26 +2039,6 @@ describe Iyi::IyiMod do
     end
   end
 
-  # And what it does reach, which is the other half of the same rule. A
-  # constant in a type body is not runnable code the artifact drops: it is a
-  # declaration with a value, and it travels qualified — `Point::MAX = 10` —
-  # the way `iyi tool bind` has always carried a bound Crystal namespace's.
-  #
-  # Without that it was in the artifact nowhere at all: not in `Exports`,
-  # which carries types and signatures, and not in the initialiser, which
-  # stopped at the type's body. So the module read as one whose type body has
-  # to run and every consumer of it was refused — thirteen of `src/std`'s own
-  # modules, `std/math` over `PI`.
-  #
-  # The sources are deleted before the consuming build, so nothing here can
-  # pass by reading them, and the program is *run*: a constant that arrives
-  # declared and never initialised answers zero, which a compile would not
-  # catch.
-  #
-  # All three spellings, because they reach the consumer by different paths:
-  # `pub` is read by the consumer's own source, the private one only by a body
-  # this module compiled into the artifact's object code, and the nested one
-  # has a name that is two namespaces deep.
   it "carries the constants a type body declares" do
     with_tempdir("iyimod_type_constants") do
       Dir.mkdir_p "boot"
@@ -2710,27 +2704,6 @@ describe Iyi::IyiMod do
     end
   end
 
-  # A parameter written wider than the argument this build passed.
-  #
-  # The consumer keys a call on what the declaration says — that is the
-  # contract, and `Call#iyi_artifact_arg_types` widens every argument to it —
-  # so the object code has to have been keyed the same way. Inside an
-  # ordinary build it is not: codegen is demand-driven, `note = "hi"`
-  # compiles `note=<String>`, and the consumer asks the linker for
-  # `note=<(String | Nil)>`. It linked no further, with the artifact's own
-  # object file naming the line.
-  #
-  # `iyi bind` answers this with a keep file, a second build that names every
-  # declared signature. An `--emit-iyimod` build has no second build, so the
-  # body travels instead and the consumer compiles it at the types it asked
-  # for.
-  #
-  # Three shapes, because "wider" has three spellings: a union, a nilable
-  # (which is one), and an abstract number, where the declared type is `Int`
-  # and a value of it is held as `Int+`.
-  #
-  # Run with the source deleted, because a link is the whole of what fails
-  # here — the front end was always happy.
   it "carries the body of a method whose parameter is wider than its callers" do
     with_tempdir("iyimod_widened_parameters") do
       Dir.mkdir_p "boot"
@@ -4569,80 +4542,6 @@ describe Iyi::IyiMod do
     end
   end
 
-  # An artifact with every declaration and no machine code is not the same
-  # thing as one that legitimately has none: an `abstract class` with no
-  # subclass in its own shard carries no object code and is complete, while a
-  # boundary whose fill build died carries none and promises everything. Read as
-  # it stands the second is a hundred undefined symbols with the cause named
-  # nowhere.
-  it "refuses a boundary whose object-code step never finished" do
-    with_tempdir("iyimod_unfilled") do
-      Dir.mkdir_p "app"
-      File.write "app/counter.iyi", <<-IYI
-        module app/counter
-
-        pub def total : Int32
-          42
-        end
-        IYI
-      File.write "main.iyi", <<-IYI
-        module main
-
-        import app/counter
-
-        puts App::Counter.total
-        IYI
-
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
-
-      producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
-      producer.emit_iyimod = "mods"
-      producer.compile source, File.expand_path("from-source")
-
-      # Written back as the fill step would have left it had the build died:
-      # everything it declares, and no record of having finished.
-      path = File.join("mods", "app", "counter.iyimod")
-      artifact = Iyi::IyiMod.read(path, want_object_code: true)
-      artifact.filled.should be_true
-      artifact.filled = false
-      Iyi::IyiMod.write artifact, path
-
-      File.delete "app/counter.iyi"
-
-      consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
-      consumer.use_iyimod = "mods"
-      expect_raises(Iyi::TypeException, /was never filled: `iyi tool bind` wrote its declarations/) do
-        consumer.compile source, File.expand_path("from-artifact")
-      end
-    end
-  end
-
-  # The flag beside the name, because the consumer cannot work it out. A unit
-  # that reads a class variable with a live initialiser calls
-  # `~Owner::name:read`; one reading a variable without an initialiser reads the
-  # global. Assume the first and an iyi-prelude program dies on
-  # `BUG: __crystal_once is not defined`; assume the second and a `--crystal`
-  # build leaves `~Exception::CallStack::skip:read` undefined.
-  # Two of them share a *name* and differ only in their owner, and that is the
-  # case this list was once unable to hold: the bookkeeping behind it was keyed
-  # on the variable, `MetaTypeVar` is a `Var`, and a `Var`'s equality is its
-  # name. A class variable declared on a superclass is copied onto every
-  # subclass that reads one, so `bindata`'s `@@bit_fields` is six variables and
-  # was one key — the last write took the entry and the link ended on
-  # `~ASN1::BER::bit_fields:read`.
-  #
-  # `Requires` says what a consumer has to have compiled and this says what it
-  # has to have linked against, and the consumer cannot derive one from the
-  # other: it replays `require "yaml"`, so it *has* `lib LibYAML` and its
-  # `@[Link("yaml")]`, and drops the flag anyway — a flag is collected from the
-  # libs that build marked `used?`, and the call to `yaml_parser_parse` is in
-  # an object file it reads rather than compiles.
-  # A redefinition and the definition it replaced are two bodies under one
-  # signature, and `previous_def` is how the second reaches the first. `db`
-  # writes a macro that redefines `around_query_or_exec` that way, and keyed on
-  # the signature alone the second body took the first's place.
   it "tells a redefinition's body from the one it replaced" do
     signature = Iyi::IyiMod::Signature.new(
       name: "around_query_or_exec", receiver: "", parameters: ["args : Enumerable"],
@@ -6053,317 +5952,6 @@ describe Iyi::IyiMod do
         IYI
       from_source, from_artifact = iyimod_round_trip(modules, main)
       from_source.should eq "[8, 8]\n[\"s\", \"s\"]\n"
-      from_artifact.should eq from_source
-    end
-  end
-end
-
-# iyi: the ecosystem and R-1, together (SPEC.md Part V item 12d).
-#
-# `--crystal` gives a program Crystal's library; a `.iyimod` gives a consumer a
-# module it does not compile. Each was useful alone and refused together, and
-# what the refusal protected against turned out to be three concrete things
-# rather than one general one: the main module's helpers do not travel, the
-# consumer's numbering is its own, and a module's requires are not the
-# consumer's. All three have answers, so the combination is now supported and
-# these are what keeps it working.
-describe "a module compiled against Crystal's library" do
-  it "travels through a .iyimod and links, replaying its requires" do
-    with_tempdir("iyimod_crystal_library") do
-      Dir.mkdir_p "app"
-      # `uri` and not only `json`, because the requires are the point: the
-      # consumer requires neither, and `URI::Error.class:type_id` was the
-      # symbol that went undefined when they did not travel.
-      File.write "app/store.iyi", <<-IYI
-        module app/store
-
-        require "json"
-        require "uri"
-
-        pub def encode(name : String) : String
-          {"name" => name}.to_json
-        end
-
-        pub def slug(name : String) : String
-          URI.encode_path_segment(name)
-        end
-        IYI
-      File.write "main.iyi", <<-IYI
-        module main
-
-        import app/store::*
-
-        puts encode("iyi")
-        puts slug("a b")
-        IYI
-
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
-
-      producer = create_spec_compiler
-      producer.emit_iyimod = "mods"
-      producer.compile source, File.expand_path("from-source")
-      `./from-source`.chomp.should eq %({"name":"iyi"}\na%20b)
-
-      artifact = Iyi::IyiMod.read(File.join("mods", "app", "store.iyimod"))
-      artifact.crystal_library.should be_true
-      artifact.requires.should eq ["json", "uri"]
-
-      File.delete "app/store.iyi"
-
-      consumer = create_spec_compiler
-      consumer.use_iyimod = "mods"
-      consumer.compile source, File.expand_path("from-artifact")
-      `./from-artifact`.chomp.should eq %({"name":"iyi"}\na%20b)
-    end
-  end
-
-  # The thing a shared library has to be shared: one copy of its state. Both
-  # sides were compiled by the same compiler and mangle the same names, so the
-  # linker folds them — but "the link succeeded" would also be true of a
-  # program with two copies of a lazily initialised constant, and that program
-  # is wrong in a way nothing reports.
-  it "shares the library's state with the program that consumes it" do
-    with_tempdir("iyimod_crystal_state") do
-      Dir.mkdir_p "app"
-      File.write "app/ids.iyi", <<-IYI
-        module app/ids
-
-        require "json"
-
-        pub def stdout_id : UInt64
-          STDOUT.object_id
-        end
-
-        pub def program_name_id : UInt64
-          PROGRAM_NAME.object_id
-        end
-        IYI
-      File.write "main.iyi", <<-IYI
-        module main
-
-        import app/ids::*
-
-        puts stdout_id == STDOUT.object_id
-        puts program_name_id == PROGRAM_NAME.object_id
-        IYI
-
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
-
-      producer = create_spec_compiler
-      producer.emit_iyimod = "mods"
-      producer.compile source, File.expand_path("from-source")
-
-      File.delete "app/ids.iyi"
-
-      consumer = create_spec_compiler
-      consumer.use_iyimod = "mods"
-      consumer.compile source, File.expand_path("from-artifact")
-      `./from-artifact`.chomp.should eq "true\ntrue"
-    end
-  end
-
-  it "refuses to be imported by a program built against iyi's prelude" do
-    with_tempdir("iyimod_crystal_into_iyi") do
-      Dir.mkdir_p "app"
-      File.write "app/store.iyi", <<-IYI
-        module app/store
-
-        require "json"
-
-        pub def encode(name : String) : String
-          {"name" => name}.to_json
-        end
-        IYI
-      File.write "producer.iyi", <<-IYI
-        module main
-
-        import app/store::*
-
-        puts encode("iyi")
-        IYI
-
-      producer = create_spec_compiler
-      producer.emit_iyimod = "mods"
-      producer.compile Iyi::Compiler::Source.new(
-        File.expand_path("producer.iyi"), File.read("producer.iyi")),
-        File.expand_path("producer")
-
-      File.write "consumer.iyi", <<-IYI
-        module main
-
-        import app/store::*
-
-        puts 1
-        IYI
-
-      consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
-      consumer.use_iyimod = "mods"
-
-      expect_raises Iyi::CodeError, /built against Crystal's standard library/ do
-        consumer.compile Iyi::Compiler::Source.new(
-          File.expand_path("consumer.iyi"), File.read("consumer.iyi")),
-          File.expand_path("consumer")
-      end
-    end
-  end
-
-  it "refuses to import a module built against iyi's prelude" do
-    with_tempdir("iyimod_iyi_into_crystal") do
-      Dir.mkdir_p "app"
-      File.write "app/greet.iyi", <<-IYI
-        module app/greet
-
-        pub def hello(name : String) : String
-          "merhaba " + name
-        end
-        IYI
-      File.write "main.iyi", <<-IYI
-        module main
-
-        import app/greet::*
-
-        puts hello("iyi")
-        IYI
-
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
-
-      producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
-      producer.emit_iyimod = "mods"
-      producer.compile source, File.expand_path("producer")
-
-      consumer = create_spec_compiler
-      consumer.use_iyimod = "mods"
-
-      expect_raises Iyi::CodeError, /built against iyi's prelude/ do
-        consumer.compile source, File.expand_path("consumer")
-      end
-    end
-  end
-
-  # A generic method's body travels as source printed after the normalizer
-  # has expanded it, and `.or_panic` expands to an assignment and an `if` in
-  # one `Expressions`. Printed bare inside `twice(...)` the consumer read
-  # `twice(__temp = parse(text)` and stopped at "expecting token ')', not
-  # 'if'". The `!` beside it expands the same way, inside an array literal.
-  it "carries a body whose argument expanded to statements" do
-    with_tempdir("iyimod_expanded_argument") do
-      modules = {
-        "orp.iyi" => <<-IYI,
-          module orp
-
-          pub struct OrpError
-            getter text : String
-
-            def initialize(@text : String)
-            end
-          end
-
-          impl Error for OrpError
-            def message : String
-              @text
-            end
-          end
-
-          pub struct Orp
-            def self.parse(text : String) : Int32 | OrpError
-              text.empty? ? OrpError.new("empty") : text.size
-            end
-
-            def self.twice(value : Int32, type : T.class) : Int32 forall T
-              value * 2
-            end
-
-            def self.read(text : String, type : T.class) : Int32 forall T
-              twice(parse(text).or_panic, type)
-            end
-
-            def self.both(text : String, type : T.class) : Array(Int32) | OrpError forall T
-              [parse(text)!, twice(value: parse(text).or_panic, type: type)]
-            end
-          end
-          IYI
-      }
-      main = <<-IYI
-        module main
-
-        import orp::{Orp}
-
-        puts Orp.read("abc", Int32)
-        puts Orp.both("ab", Int32)
-        IYI
-
-      from_source, from_artifact = iyimod_round_trip(modules, main)
-      from_source.should eq "6\n[2, 4]\n"
-      from_artifact.should eq from_source
-    end
-  end
-
-  # Adding an overload orders it against the ones already there, and that
-  # resolves an alias one of them is restricted to on the spot. `std/toml`'s
-  # `Any` held `alias Type = ... | TOMLDateTime | ...` beside two
-  # `initialize`s, below `TOMLDateTime` in the source; the artifact declares
-  # types by name, so `Any` came first and the consumer said "undefined
-  # constant TOMLDateTime". The types an alias names are now declared before
-  # the type holding it, whether the alias names them bare or qualified.
-  it "declares the types an alias names before the alias" do
-    with_tempdir("iyimod_alias_order") do
-      modules = {
-        "al.iyi" => <<-IYI,
-          module al
-
-          pub struct Zed
-            getter n : Int32
-
-            def initialize(@n : Int32)
-            end
-          end
-
-          pub struct Any
-            alias Type = Int32 | Zed | Array(Any)
-
-            getter raw : Type
-
-            def initialize(@raw : Type)
-            end
-
-            def initialize(value : String)
-              @raw = value.size
-            end
-
-            def zed? : Bool
-              @raw.is_a?(Zed)
-            end
-          end
-
-          pub struct Box
-            alias Held = String | ::Al::Zed
-
-            getter held : Held
-
-            def initialize(@held : Held)
-            end
-
-            def initialize(value : Int32)
-              @held = value.to_s
-            end
-          end
-          IYI
-      }
-      main = <<-IYI
-        module main
-
-        import al::{Any, Box, Zed}
-
-        puts Any.new(Zed.new(3)).zed?
-        puts Any.new("abc").raw
-        puts Box.new(4).held
-        puts Box.new(Zed.new(5)).held.is_a?(Zed)
-        IYI
-
-      from_source, from_artifact = iyimod_round_trip(modules, main)
-      from_source.should eq "true\n3\n4\ntrue\n"
       from_artifact.should eq from_source
     end
   end

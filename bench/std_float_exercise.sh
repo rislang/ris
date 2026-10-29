@@ -135,9 +135,6 @@ refuses "a single // zero" f32_div0 "division by zero" '1.0_f32 // 0.0_f32'
 
 echo
 echo "== what a program without the import is told"
-# The error names the import: `-x` on a Float64 was "wrong number of
-# arguments for 'Float64#-' (given 0, expected 1)" and nothing more, and
-# `1.5_f32.to_f64` was sent to `iyi build --crystal`.
 told() { # told <label> <name> <phrase> <program>
   local label="$1" name="$2" phrase="$3" program="$4"
   printf '%s\n' "$program" > "$WORK/$name.iyi"

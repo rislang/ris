@@ -12,10 +12,10 @@ all: ##
 ##   $ make clean crystal
 ## Build the compiler in release mode
 ##   $ make crystal release=1
-## Build all assets for a package install (compiler and manpages)
-##   $ make build
-## Build and install crystal package
-##   $ make build && sudo make install
+## Build ris for a package install
+##   $ make ris
+## Build and install ris
+##   $ make ris && sudo make install
 ## Run tests
 ##   $ make test
 ## Run stdlib tests
@@ -346,10 +346,10 @@ crystal-daemon: $(O)/$(CRYSTAL_DAEMON_BIN) ## Build the single-threaded build da
 iyi-daemon: $(O)/$(IYI_DAEMON_BIN) ## iyi: build iyi's own single-threaded build daemon
 
 .PHONY: build
-build: ## Build all files for a package install (currently the compiler and manpages)
+build: ## Build ris for a package install
 # bake-format off: Mbake bug with Duplicate target rule https://github.com/EbodShojaei/bake/issues/106
 build: release := 1
-build: crystal manpages
+build: ris
 # bake-format on
 
 .PHONY: manpages
@@ -379,12 +379,12 @@ generate_data: ## Run generator scripts for Unicode, SSL config, ...
 	$(MAKE) -B -f scripts/generate_data.mk
 
 .PHONY: install
-install: ## Install the crystal compiler package at DESTDIR
-install: install_compiler install_man install_completions
+install: ## Install ris and its prelude at DESTDIR
+install: install_ris
 
 .PHONY: uninstall
-uninstall: ## Uninstall the Crystal compiler package from DESTDIR
-uninstall: uninstall_compiler uninstall_man uninstall_completions
+uninstall: ## Uninstall ris and its prelude from DESTDIR
+uninstall: uninstall_ris
 
 # iyi: the binary and its prelude, and nothing else — an iyi program requires
 # only the prelude and the prelude requires only itself, so what is installed
@@ -392,22 +392,10 @@ uninstall: uninstall_compiler uninstall_man uninstall_completions
 .PHONY: install_iyi
 install_iyi: ## iyi: install `iyi` and its prelude at DESTDIR
 install_iyi: $(O)/iyi$(EXE) $(O)/$(IYI_DAEMON_BIN)
-# The library is replaced, not merged into. `cp -R` writes the files it has
-# and leaves the ones a release deleted where they are, and this directory is
-# not a pile of files - `crystal/dwarf.cr` requires `./dwarf/**`, so one stale
-# file from an older install is still *required*, and a machine that upgraded
-# in place had every `--crystal` build die on a constant a deleted file
-# mentioned. Under `DESTDIR` (packaging, and the tarball rule above) the
-# directory is fresh and this does nothing; installing over yourself is where
-# it matters.
 	rm -rf "$(DESTDIR)$(DATADIR)/iyi"
 	$(INSTALL) -d -m 0755 "$(DESTDIR)$(BINDIR)/"
 	$(INSTALL) -m 0755 "$(O)/iyi$(EXE)" "$(DESTDIR)$(BINDIR)/iyi$(EXE)"
 
-# Beside `iyi`, because that is where `iyi daemon start` looks. Shipped rather
-# than left to be built: the daemon halves a `--crystal` build (SPEC.md IV.1d),
-# and a feature that needs `make` first is a feature nobody who downloaded a
-# tarball has.
 	$(INSTALL) -m 0755 "$(O)/$(IYI_DAEMON_BIN)" "$(DESTDIR)$(BINDIR)/$(IYI_DAEMON_BIN)"
 
 	$(INSTALL) -d -m 0755 "$(DESTDIR)$(DATADIR)/iyi/src"
@@ -419,39 +407,6 @@ install_iyi: $(O)/iyi$(EXE) $(O)/$(IYI_DAEMON_BIN)
 # so it resolved by accident, out of a library it is not part of. Here it is
 # on `IYI_PATH` under its own name.
 	cp -R -p $(if $(deref_symlinks),-L,-P) src/std "$(DESTDIR)$(DATADIR)/iyi/src/std"
-
-# iyi: the other library, because `--crystal` is not a developer's switch.
-#
-# A program built with it gets Crystal's standard library, and an install that
-# ships only iyi's own 1,040 KB answers `require "json"` with "can't find file",
-# which is the headline feature failing in the thing people download.
-#
-# `compiler/` was cut from this, on the grounds that a compiler carrying its own
-# source carries it twice. That was wrong, and the way it was wrong is the
-# lesson: **the standard library requires it.** `crystal/syntax_highlighter`
-# requires `compiler/crystal/syntax`, Crystal's exception page requires the
-# highlighter, and Kemal requires the exception page — so `require "kemal"`,
-# this README's headline example, could not be built from the tarball anybody
-# downloaded. Shipping a library means shipping what it requires, and deciding
-# otherwise from the outside is guessing. Crystal's own install copies all of
-# `src` for the same reason. `iyi/` stays out because it is already above.
-	$(INSTALL) -d -m 0755 "$(DESTDIR)$(DATADIR)/iyi/crystal"
-# `src/.` rather than `src/*/`: a glob's trailing slash means two different
-# things to the two cps — GNU copies the directory, BSD copies its *contents* —
-# so the darwin tarball shipped Crystal's library flattened into one directory
-# and `--crystal` could not find `crystal/system/time` out of it. `dir/.` is
-# the one spelling POSIX gives both cps the same meaning for; `iyi/` and
-# `std/` ride in and are removed below.
-	cp -R -p $(if $(deref_symlinks),-L,-P) src/. "$(DESTDIR)$(DATADIR)/iyi/crystal/"
-	rm -rf "$(DESTDIR)$(DATADIR)/iyi/crystal/iyi"
-# And `std/`, for the reason it is above under its own name: nothing in
-# Crystal's library requires `std/...`, the directory's 5,123 KB is a second
-# copy of a library that already shipped, and while it is there it answers
-# `import std/text` out of `share/iyi/crystal` — which is how the accident
-# looked before `src/std` was installed at all, and which would let that
-# line break again without a program noticing. `bench/tarball_std.sh`
-# proves the absence by moving the real one aside.
-	rm -rf "$(DESTDIR)$(DATADIR)/iyi/crystal/std"
 
 	$(INSTALL) -d -m 0755 "$(DESTDIR)$(DATADIR)/licenses/iyi/"
 	$(INSTALL) -m 644 LICENSE "$(DESTDIR)$(DATADIR)/licenses/iyi/LICENSE"
@@ -520,12 +475,6 @@ iyi-tarball: $(O)/iyi$(EXE) $(O)/$(IYI_DAEMON_BIN) check_iyi_is_release
 	$(INSTALL) -m 644 README.md "$(O)/iyi-package/share/iyi/README.md"
 	$(INSTALL) -m 644 SPEC.md "$(O)/iyi-package/share/iyi/SPEC.md"
 	cp -R -p samples/iyi "$(O)/iyi-package/share/iyi/samples"
-	cp -R -p samples/crystal "$(O)/iyi-package/share/iyi/samples/crystal"
-# A sample that depends on a shard leaves what it builds beside it, and the
-# copy above takes whatever is on disk. `samples/crystal/kemal` had 82 MB of
-# `mods/`, a fetched `lib/` and a linked binary sitting in it after one run —
-# none of it the sample, all of it in the tarball. Pruned by what it is rather
-# than by name, so the next sample of that shape is covered too.
 	find "$(O)/iyi-package/share/iyi/samples" \
 	     \( -name lib -o -name mods \) -type d -prune -exec rm -rf {} +
 	find "$(O)/iyi-package/share/iyi/samples" -type f -perm -u+x -delete
@@ -561,49 +510,6 @@ ris-tarball: iyi-tarball
 	cp -R -p samples/ris "$(O)/ris-package/share/ris/samples"
 	tar -czf "$(O)/$(RIS_PACKAGE).tar.gz" -C "$(O)/ris-package" .
 	@echo "wrote $(O)/$(RIS_PACKAGE).tar.gz"
-
-.PHONY: install_compiler
-install_compiler: $(O)/$(CRYSTAL_BIN)
-	$(INSTALL) -d -m 0755 "$(DESTDIR)$(BINDIR)/"
-	$(INSTALL) -m 0755 "$(O)/$(CRYSTAL_BIN)" "$(DESTDIR)$(BINDIR)/$(CRYSTAL_BIN)"
-
-	$(INSTALL) -d -m 0755 $(DESTDIR)$(DATADIR)/crystal
-	cp -R -p $(if $(deref_symlinks),-L,-P) src "$(DESTDIR)$(DATADIR)/crystal/src"
-	rm -rf "$(DESTDIR)$(DATADIR)/crystal/$(LLVM_EXT_OBJ)" # Don't install llvm_ext.o
-
-	$(INSTALL) -d -m 0755 "$(DESTDIR)$(DATADIR)/licenses/crystal/"
-	$(INSTALL) -m 644 LICENSE "$(DESTDIR)$(DATADIR)/licenses/crystal/LICENSE"
-
-.PHONY: uninstall_compiler
-uninstall_compiler:
-	rm -f "$(DESTDIR)$(BINDIR)/$(CRYSTAL_BIN)"
-
-	rm -rf "$(DESTDIR)$(DATADIR)/crystal/src"
-	rm -f "$(DESTDIR)$(DATADIR)/licenses/crystal/LICENSE"
-
-.PHONY: install_man
-install_man: $(manpages_gz)
-	$(INSTALL) -d -m 0755 "$(DESTDIR)$(MANDIR)/man1/"
-	$(INSTALL) -m 644 $^ "$(DESTDIR)$(MANDIR)/man1/"
-
-.PHONY: uninstall_man
-uninstall_man:
-	rm -f $(patsubst man/%,$(DESTDIR)$(MANDIR)/man1/%.gz,$(MAN1PAGES))
-
-.PHONY: install_completions
-install_completions:
-	$(INSTALL) -d -m 0755 "$(DESTDIR)$(DATADIR)/bash-completion/completions/"
-	$(INSTALL) -m 644 etc/completion.bash "$(DESTDIR)$(DATADIR)/bash-completion/completions/crystal"
-	$(INSTALL) -d -m 0755 "$(DESTDIR)$(DATADIR)/zsh/site-functions/"
-	$(INSTALL) -m 644 etc/completion.zsh "$(DESTDIR)$(DATADIR)/zsh/site-functions/_crystal"
-	$(INSTALL) -d -m 0755 "$(DESTDIR)$(DATADIR)/fish/vendor_completions.d/"
-	$(INSTALL) -m 644 etc/completion.fish "$(DESTDIR)$(DATADIR)/fish/vendor_completions.d/crystal.fish"
-
-.PHONY: uninstall_completions
-uninstall_completions:
-	rm -f "$(DESTDIR)$(DATADIR)/bash-completion/completions/crystal"
-	rm -f "$(DESTDIR)$(DATADIR)/zsh/site-functions/_crystal"
-	rm -f "$(DESTDIR)$(DATADIR)/fish/vendor_completions.d/crystal.fish"
 
 ifeq ($(WINDOWS),1)
 .PHONY: install_dlls

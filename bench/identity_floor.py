@@ -1,29 +1,5 @@
 #!/usr/bin/env python3
-"""Fails when Crystal's name stands in for iyi's own.
-
-iyi is a permanent fork. Crystal is the language it came from, not its
-identity, so the name is allowed only where it genuinely denotes Crystal: the
-standard library a `--crystal` program compiles against, the licence and
-provenance, the compatibility binary, and upstream's documentation kept beside
-ours. Everywhere else it is leakage, and leakage is what this refuses.
-
-    python3 bench/identity_floor.py            # check
-    python3 bench/identity_floor.py --list     # every unallowed occurrence
-
-Two layers, because either alone is fooled. PATHS catches a whole tree that
-should have been renamed. LINES catches a name inside a file that was otherwise
-cut over, which is the shape a skipped hunk leaves behind.
-
-A new match is not automatically wrong. It is a claim that this occurrence
-denotes Crystal rather than iyi, and the way to make that claim is to add it
-here, in the same commit, with the reason. What this refuses is the version
-where the name creeps back and nobody notices.
-
-This is written in Python rather than shell on purpose: the first draft used
-`grep -P`, the `grep` on the PATH inside a script has no `-P`, and every
-allowlist test errored and failed OPEN. A gate that cannot fail is worse than
-no gate, so the matching is done here where the semantics are exact.
-"""
+"""Check the project identity outside the retained Crystal toolchain."""
 
 from __future__ import annotations
 
@@ -36,11 +12,6 @@ REPO = Path(__file__).resolve().parent.parent
 
 # Trees and files that are Crystal's, not iyi's. Each carries its reason.
 ALLOWED_PATHS: list[tuple[str, str]] = [
-    # Crystal's standard library. A `--crystal` program compiles against it,
-    # and so does the compiler, which is a Crystal program (SPEC.md B.2).
-    # `src/std/` is iyi's own library and is not in this exemption: a std
-    # module that says "conforming to Crystal's X" is exactly what this gate
-    # exists to catch, and forty-five of them arrived that way once.
     (r"^src/(?!compiler/|iyi/|std/)", "Crystal's standard library"),
     (r"^spec/std/", "that library's own specs"),
     (r"^spec/primitives/", "that library's primitives specs"),
@@ -54,10 +25,6 @@ ALLOWED_PATHS: list[tuple[str, str]] = [
     (r"^scripts/", "generators that emit Crystal's stdlib tables"),
     # Drives the compatibility binary by the name a user types.
     (r"^spec/compiler-cli/", "compatibility binary's CLI specs"),
-    # `tool bind` runs under `crystal`, on Crystal source, against Crystal's
-    # library: it is how a shard is bound for an iyi consumer to import. The
-    # bench drives that binary and names it throughout.
-    (r"^bench/bind_speed\.py$", "a bench that drives the compatibility binary"),
     # crystal-metric's port: each note beside a changed line says what the
     # Crystal original does there, which is the other language by name.
     (r"^bench/metric/", "a port that compares itself with the Crystal program"),
@@ -67,7 +34,6 @@ ALLOWED_PATHS: list[tuple[str, str]] = [
     (r"^NOTICE\.md$", "Crystal's copyright"),
     # The compatibility binary, shipped so `.cr` sources still build.
     (r"^bin/crystal", "the compatibility binary"),
-    (r"^samples/crystal/", "programs that exist to use Crystal's library"),
     # Upstream's manual pages, artwork, and editor integration keyed on
     # Crystal's own type names.
     (r"^doc/man/crystal", "upstream's manual pages"),
@@ -106,7 +72,6 @@ ALLOWED_PATHS: list[tuple[str, str]] = [
 
 # Lines that name Crystal legitimately inside a file that is otherwise iyi's.
 ALLOWED_LINES: list[tuple[str, str]] = [
-    (r"--crystal", "the compatibility mode's own flag"),
     # `bench/std_dependency_floor.sh` fails when a standard library module
     # reaches an ancestor dependency, and the failure has to say where the
     # reachable bindings are. They are Crystal's, under src/openssl, src/yaml,
@@ -181,7 +146,6 @@ ALLOWED_LINES: list[tuple[str, str]] = [
     # The artifact header records which library a module was built against, and
     # an import across the two is refused by name in both directions. The field
     # is called what it means (SPEC.md IV.5).
-    (r"crystal_library", "the header field naming the other library"),
     # Crystal's daemon is its own binary with its own socket: `iyi` and
     # `crystal` are one compiler with two command surfaces, and each looks up a
     # server named after the binary that was typed.
@@ -196,27 +160,14 @@ ALLOWED_LINES: list[tuple[str, str]] = [
     # `crystal-metric`; iyi's port of it is measured against it by name.
     (r"\bcrystal-metric\b", "the name of the other language's benchmark suite"),
     (r"\bshared with Crystal", "the one-name rule (SPEC.md III.1.7a) naming the other language"),
-    # `iyi migrate` and `iyi bind` are about the other language by
-    # definition: a Crystal project, a Crystal file kept as Crystal, the
-    # tree's own output compared against what Crystal answered. Their
-    # gates say "Crystal" because that is the input.
-    # Word-bounded on purpose. Without the `\b` the alternation matched
-    # inside other words, so `this Crystal` was allowed by the `is` branch
-    # and `thin Crystal` by `in`: any sentence at all could be exempted by
-    # the letters that happened to precede the name. Found by planting a
-    # leak to check this gate could see one, which it could not.
     (r"\b(a|the|as|ordinary|becomes|is|in|not|One|A) Crystal", "a sentence about the other language"),
     (r"\bwhich is the lookup Crystal performs", "a sentence about the other language"),
     (r"\bevery Crystal bang|Crystal ignores", "a sentence about the other language's rule"),
     (r"\b(are|stay|stays|stayed|still) Crystal", "a sentence about files that keep being the other language"),
-    (r"crystal_shards", "the module a migrated tree keeps its shard requires in"),
     (r"crystal_shop|crystal\.(out|err)|CRYSTAL=|\$CRYSTAL\b", "the gate's own Crystal arm"),
     (r"struct Int32", "the fixture's reopening of a library type"),
     (r"\bstays Crystal", "where a reopening belongs (SPEC.md III.6)"),
     (r"Crystal::EventLoop", "a class inside Crystal's standard library"),
-    # Crystal's DWARF reader, arriving with the 1.22 merge: the spec exercises
-    # `Crystal::DWARF` directly, and that is the namespace the class is
-    # actually in, on the `--crystal` side this fork keeps whole.
     (r"Crystal::DWARF", "a namespace inside Crystal's standard library"),
     # A constant `openssl_ext` defines inside its own `lib`, named for the
     # language whose `IO` it bridges. A boundary that reopens a namespace the
@@ -264,7 +215,6 @@ ALLOWED_LINES: list[tuple[str, str]] = [
     (r"Crystal::(LLVM_VERSION|VERSION|DESCRIPTION|ABI)", "constants the bootstrap injects"),
     (r"Crystal\.format|\bmodule Crystal\b", "Crystal's own API, called or reopened"),
     (r"```crystal", "a fenced code block's language tag"),
-    (r"samples/crystal/", "programs that exist to use Crystal's library"),
     (r"src/crystal/", "a path inside Crystal's standard library"),
     (r"name: crystal\b", "the CI artifact holding that binary"),
     (r"sdogruyol/gcry|gcry", "Crystal's collector, cited as prior art"),
@@ -368,10 +318,7 @@ ALLOWED_LINES: list[tuple[str, str]] = [
     (r"Crystal (docker|is unable|compiler built with)", "the bootstrap toolchain and its diagnostics"),
     (r"Codegen \(crystal\)", "a progress label for the Crystal codegen stage"),
     (r"predefined types|C functions to Crystal procs", "Crystal's own type setup"),
-    # 0.2.0 ships Crystal's standard library inside the tarball so `--crystal`
-    # works in what people download. It installs under `share/iyi/crystal`,
-    # which names the library it holds.
-    (r"share/iyi/crystal|/iyi/crystal|samples/crystal", "where Crystal's library ships inside the tarball"),
+    (r"share/iyi/crystal|/iyi/crystal", "where Crystal's library ships inside the tarball"),
     (r"\$\(O\)/crystal", "the compatibility binary the build compares against"),
     (r'compiler/crystal/syntax', "the shim path Crystal's stdlib requires"),
     (r"Compatible with Crystal", "what the shard manifest says iyi is compatible with"),
@@ -379,17 +326,6 @@ ALLOWED_LINES: list[tuple[str, str]] = [
     # `bench/doc_numbers.py` holds the patterns that match the docs' own
     # sentences, so it quotes SPEC's "lines, Crystal, forked" verbatim.
     (r"lines, Crystal, forked", "a pattern matching SPEC's own sentence"),
-    # `tool bind` writes an artifact for a `--crystal` consumer, so two of the
-    # things it carries are Crystal's and are named for it. `crystal_types` is
-    # the set of names that consumer already has from Crystal's library, which
-    # is what decides whether a bound shard may name a type. `crystal_requires`
-    # is the `require`s a shard's source made that resolved into Crystal's
-    # library, replayed in the artifact because the consumer's prelude does not
-    # hold every file of it. Renaming either would claim a name iyi does not own.
-    # `crystal_private` is the other half of that question: the names Crystal's
-    # library declares `private`, which a bound shard may *hold* a value of and
-    # may not write down. Same table, same language, one predicate apart.
-    (r"crystal_types|crystal_requires|crystal_private", "what a --crystal consumer already has, carried by name"),
     (r"a \*Crystal\* source", "a sentence about the other language"),
 ]
 

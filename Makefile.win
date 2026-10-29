@@ -126,11 +126,11 @@ LLVM_EXT_DIR = src\llvm\ext
 LLVM_EXT_OBJ = $(LLVM_EXT_DIR)\llvm_ext.obj
 CXXFLAGS     += $(if $(static),$(if $(debug),/MTd /Od ,/MT ),$(if $(debug),/MDd /Od ,/MD ))
 
-prefix  ?= $(or $(ProgramW6432),$(ProgramFiles))\crystal
-BINDIR  ?= $(prefix)
+prefix  ?= $(or $(ProgramW6432),$(ProgramFiles))\ris
+BINDIR  ?= $(prefix)\bin
 LIBDIR  ?= $(prefix)\lib
 SRCDIR  ?= $(prefix)\src
-DATADIR ?= $(prefix)
+DATADIR ?= $(prefix)\share
 
 colorize = $(info $1)
 
@@ -230,15 +230,6 @@ iyi-zip: $(O)\iyi.exe check_iyi_is_release
 # it and answered that line with "can't find module".
 	$(call CPDIR,src\std,"$(IYI_PACKAGE_DIR)\share\iyi\src\std")
 
-# Crystal's library is not here, and the zip is honest about it rather than
-# large. `--crystal` gives a program Crystal's prelude, which links pcre2-8,
-# gc, iconv and the rest, and the only `.lib` files for those on a Windows
-# machine are the ones in the bootstrap package's `lib`: measured here,
-# `--crystal` builds and runs out of this checkout with
-# `CRYSTAL_LIBRARY_PATH` pointing at that directory and cannot find the
-# libraries without it. So a zip carrying the library and not those would
-# reach the linker and stop there. The Linux tarball can ship the library
-# because a Linux machine has the libraries.
 
 # A sample that builds leaves its binary beside it and a copy takes whatever
 # is on disk, which is how the Linux tarball once shipped 82 MB of a shard's
@@ -273,11 +264,11 @@ iyi-zip: $(O)\iyi.exe check_iyi_is_release
 	@echo wrote $(O)\$(IYI_PACKAGE).zip
 
 .PHONY: build
-build: ## Build all files for a package install (currently the compiler)
+build: ## Build ris for a package install
 
 # bake-format off: Mbake bug with Duplicate target rule https://github.com/EbodShojaei/bake/issues/106
 build: release := 1
-build: crystal
+build: iyi
 # bake-format on
 
 .PHONY: deps llvm_ext
@@ -292,33 +283,24 @@ format: ## Format sources
 generate_data: ## Run generator scripts for Unicode, SSL config, ...
 	$(MAKE) -B -f scripts/generate_data.mk
 
+# The installed command is ris; Crystal remains a build tool in this tree.
 .PHONY: install
-install: ## Install the crystal compiler package at prefix
-install: install_compiler
-
-.PHONY: install_compiler
-install_compiler: $(O)\crystal.exe
+install: ## Install ris and its prelude at prefix
+install: $(O)\iyi.exe
 	$(call MKDIR,"$(BINDIR)")
-	$(call INSTALL,"$(O)\crystal.exe","$(BINDIR)\crystal.exe")
-	$(call INSTALL,"$(O)\crystal.pdb","$(BINDIR)\crystal.pdb")
+	$(call INSTALL,"$(O)\iyi.exe","$(BINDIR)\ris.exe")
+	$(call MKDIR,"$(DATADIR)\iyi\src")
+	$(call INSTALLDIR,src\iyi,"$(DATADIR)\iyi\src\iyi")
+	$(call INSTALLDIR,src\std,"$(DATADIR)\iyi\src\std")
+	$(call MKDIR,"$(DATADIR)\licenses\iyi")
+	$(call INSTALL,LICENSE,"$(DATADIR)\licenses\iyi\LICENSE")
+	$(call INSTALL,NOTICE.md,"$(DATADIR)\licenses\iyi\NOTICE.md")
 
-	$(call MKDIR,"$(DATADIR)")
-	$(call INSTALLDIR,src,"$(DATADIR)\src")
-	$(call RM,"$(DATADIR)\$(LLVM_EXT_OBJ)")
-
-	$(call INSTALL,LICENSE,"$(DATADIR)\LICENSE.txt")
-
-.PHONY: uninstall ## Uninstall the Crystal compiler package from prefix
-uninstall: uninstall_compiler
-
-.PHONY: uninstall_compiler
-uninstall_compiler:
-	$(call RM,"$(DATADIR)\LICENSE.txt")
-
-	$(call RMDIR,"$(DATADIR)\src")
-
-	$(call RM,"$(BINDIR)\crystal.exe")
-	$(call RM,"$(BINDIR)\crystal.pdb")
+.PHONY: uninstall
+uninstall: ## Uninstall ris and its prelude from prefix
+	$(call RM,"$(BINDIR)\ris.exe")
+	$(call RMDIR,"$(DATADIR)\iyi")
+	$(call RMDIR,"$(DATADIR)\licenses\iyi")
 
 # iyi: the binary about to be packaged is an optimised one.
 #

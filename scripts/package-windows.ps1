@@ -42,9 +42,7 @@
         gigabyte-scale download under a licence this project does not hold.
         So the build tools are a prerequisite and `install.ps1` says so and
         checks for them.
-      * `--crystal`. The zip carries iyi's own prelude and `std` and neither
-        Crystal's library nor the import libraries its prelude links, so a
-        program built with `--crystal` out of this zip stops in the linker.
+
       * Anything about `iyi daemon`. The zip carries no `iyi-daemon.exe`:
         `make -f Makefile.win iyi-daemon` stops at `can't find file 'c/poll'`
         from `src/compiler/iyi/command/daemon.cr:4`, and the design behind

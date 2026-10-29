@@ -73,7 +73,8 @@ module Iyi::IyiMod
   # disagreed on every such call without a word, so a v57 artifact is
   # refused here as any other stale format is.
   # v59: signatures carry checked tape effects for bodyless calls.
-  FORMAT_VERSION = 59_u32
+  # v60: remove the obsolete library selector byte from the header.
+  FORMAT_VERSION = 60_u32
 
   FORMAT = IO::ByteFormat::LittleEndian
 
@@ -100,8 +101,6 @@ module Iyi::IyiMod
     # IV.1g.
     Constants = 10
 
-    # iyi: under `--crystal`, the library files this module required, in the
-    # order it required them. Same reason as `TypeIds` again — see IV.1g.
     Requires = 11
 
     # iyi: what the synthesised regex constants in `Constants` were made from.
@@ -121,38 +120,8 @@ module Iyi::IyiMod
     # to compile for itself is everything else — see IV.1g.
     Symbols = 15
 
-    # iyi: under `--crystal`, the shard's own *top-level* `def`s — the ones it
-    # writes outside any namespace of its own.
-    #
-    # Nothing else in this file is outside the module, and that is the point.
-    # A shard's boundary is rooted at a namespace, and kemal's `get`, `post`
-    # and `error` are written at Crystal's top level, on `Object`, where a
-    # boundary rooted at `Kemal` cannot reach them. They are the whole DSL, and
-    # `Kemal.run`'s own body calls one — `setup_404` calls `error`.
-    #
-    # They travel as declarations *and* bodies, because the DSL's blocks are
-    # written `-> _`: there is no symbol per method, only one per block a
-    # consumer writes, so the consumer compiles them. A separate section rather
-    # than a flag on `Exports`, because where a declaration goes is not a
-    # property of the declaration — the reader has to put these somewhere the
-    # module's own header does not reach.
     TopLevel = 16
 
-    # iyi: under `--crystal`, what the shard added to a type it does not own.
-    #
-    # Kemal reopens `HTTP::Server::Context` — the *library's* class — and gives
-    # it `@params` and the methods that read it. A boundary carries none of the
-    # library's types on purpose: the consumer replays the requires and has
-    # them, and declaring one a second time is how a build stops on `superclass
-    # mismatch`. So the addition had nowhere to go, and a consumer said
-    # `undefined method 'params' for HTTP::Server::Context` while the shard's
-    # own compiled code read a field that consumer had never allocated.
-    #
-    # What travels is what the shard *added*, decided by where each member is
-    # written — the same test that decides whether a reopened *namespace* is
-    # the library's. Written back as `class ::HTTP::Server::Context`, with
-    # bodies: these methods belong to a unit the boundary does not carry, being
-    # the library's type rather than the shard's.
     Reopened = 17
 
     # iyi: the `lib`s this module's object code calls into, by name.
@@ -171,24 +140,8 @@ module Iyi::IyiMod
     # the annotation. What was missing is only that somebody used it.
     Libs = 18
 
-    # iyi: under `--crystal`, the shard's own top-level `fun`s, as source. See
-    # `Artifact#top_level_funs`.
     TopLevelFuns = 19
 
-    # iyi: under `--crystal`, the files `iyi bind` read to write this
-    # boundary, each as `<md5> <path>`.
-    #
-    # A module compiled from source answers staleness with the digest of the
-    # one file at its module path (IV.3), and `tool bind` has no such file:
-    # `resolve_import("kemal/router")` finds nothing, so the whole content
-    # question was skipped and the artifact was read as current however long
-    # ago the checkout had changed. The files are what the digest is over, so
-    # they travel with it: any that is still on the machine is asked again,
-    # and one that is gone is not — a boundary travels without the checkout
-    # it was written from, and then the artifact is all there is.
-    #
-    # A file *added* to a shard that requires by glob moves no recorded
-    # digest and is not seen. What is recorded is what was read.
     Inputs = 20
 
     # iyi: the symbols this module's object code reads the value of, by name.
@@ -253,21 +206,6 @@ module Iyi::IyiMod
   # moment, never called by name, and `pub macro included` is a contradiction
   # in terms.
   MACRO_HOOKS = {"included", "extended", "inherited", "method_added", "finished"}
-
-  def self.exported_macro(source : String) : String
-    written = macro_line(source)
-    # An iyi module's macros are written `pub macro` and travel as their own
-    # text, so this is only about the other language's: `pub pub macro
-    # described(declaration)` is `can't apply \`pub\` to pub`, and
-    # `bench/samples_roundtrip.sh` said so on the derive sample.
-    return source if written.starts_with?("pub ")
-    return source unless written.starts_with?("macro ")
-
-    name = macro_name(source)
-    return source if name.empty? || MACRO_HOOKS.includes?(name)
-    doc = source.size - undocumented_macro(source).size
-    "#{source[0, doc]}pub #{source[doc..]}"
-  end
 
   # A macro as the artifact carries it: its source, with the doc comment
   # written above it as comment lines, which is where a reader of the
@@ -1230,50 +1168,8 @@ module Iyi::IyiMod
     # twice — and this says only what the shard put there.
     property reopened : Array(TypeDecl)
 
-    # Whether this module was compiled against Crystal's standard library
-    # rather than iyi's prelude — `--crystal`.
-    #
-    # Recorded rather than inferred from `requires`, because a module can be
-    # built with `--crystal` and require nothing, and it is still compiled
-    # against a different `String`. Two libraries define types of the same
-    # names with different layouts and different method symbols, so a program
-    # cannot hold one module of each: the link would succeed on the names that
-    # happen to agree and be wrong about the rest. Checked on import, beside
-    # the version, the target and the flags (IV.5).
-    property crystal_library : Bool
-
-    # Whether the step that puts object code in this artifact ran to the end.
-    #
-    # `crystal tool bind` writes the declarations and a second build fills them,
-    # and that second build compiles a *keep file* naming every method a
-    # consumer might call. A shard can hold code its own compilation never
-    # types — `openssl_ext` has a `LibCrypto` call whose argument is a pointer
-    # too deep — and asking for everything is what finds it. The build dies, and
-    # what is left on disk is an artifact with every declaration and no machine
-    # code at all.
-    #
-    # Indistinguishable, without this, from one that legitimately has none: an
-    # `abstract class` with no subclass in its own shard carries no object code
-    # and is complete. So the fill step says it finished, and a consumer of an
-    # unfinished boundary is refused rather than handed a hundred undefined
-    # symbols with no cause named.
-    #
-    # True by default, and that is not a convenience: only the two-step path
-    # can leave a boundary half-written, so only the step that starts it says
-    # so. An artifact anybody else builds — a spec's, a `--no-codegen` build's —
-    # is as finished as it was ever going to be.
     property filled : Bool
 
-    # Whether the build that wrote this artifact generated no code at all -
-    # `--emit-iyimod` on a `--no-codegen` build.
-    #
-    # Not `filled`: that says a step of `iyi tool bind` died, and this says
-    # nothing was ever going to put machine code here. Without it the two
-    # artifacts a consumer could not link looked like a complete one, and
-    # `iyi run --use-iyimod mods main.iyi` against a module written with
-    # `--no-codegen` ended in 19 `LNK2019: unresolved external symbol`
-    # lines about `Kit::Api`, naming the file nowhere. A front-end build
-    # reads it as it reads any other: its declarations are all it wants.
     property declarations_only : Bool
 
     # The package name the module's types live under, empty for a module of
@@ -1299,44 +1195,8 @@ module Iyi::IyiMod
     # finds it.
     property class_root : Bool
 
-    # Whether the module this artifact is of writes `extend self`.
-    #
-    # A `--crystal` boundary reopens a module of the other language, where a
-    # module is a mixin: a module function is written `def self.` and an
-    # instance method is not, and the header says nothing. iyi's own header
-    # *is* `extend self`, so a boundary read under it put the module into its
-    # own metaclass — `module Random` has `abstract def next_u` for its
-    # includers to answer, and its metaclass answered nothing: `abstract def
-    # Random#next_u() must be implemented by Random:Module`, on a program whose
-    # only line was `import random`.
-    #
-    # So the header no longer supplies it and this carries it instead, which is
-    # the honest place for it: whether a module extends itself is a fact about
-    # the module. `module Shard; extend self; def make(...)` is a module
-    # function on both sides of the boundary because of this line.
-    #
-    # True by default, because an artifact written by anything but `tool bind`
-    # is a module of iyi's own and iyi's module header is `extend self`. Only
-    # `tool bind` has a shard to ask, and it asks.
     property module_extends_self : Bool
 
-    # Under `--crystal`, the library files this module required, in the order
-    # it required them.
-    #
-    # A module compiled against Crystal's library is compiled against the types
-    # that library defines, and its object code refers to them by name — a type
-    # id, a constant, a method symbol. The consumer defines those names, and it
-    # can only define the ones its own program has. A module that required
-    # `uri` and a consumer that did not left `URI::Error.class:type_id`
-    # undefined at link time: a name from a library the consumer had never
-    # heard of, in an object file it did not compile.
-    #
-    # So the requires travel with the module and the consumer replays them,
-    # which makes the consumer's program a superset of the producer's. The
-    # *numbering* is still the consumer's — that is what `TypeIds` is for — so
-    # this adds types rather than importing anybody else's ids.
-    #
-    # Empty for a module built under iyi's own prelude, which has no `require`.
     property requires : Array(String)
 
     # IV.3's three hashes. See `Hashes`.
@@ -1346,9 +1206,6 @@ module Iyi::IyiMod
     # only be taken once they are in it.
     property hashes : Hashes
 
-    # IV.3's inputs for a boundary: `<md5> <path>` per file `tool bind` read.
-    # Empty for a module compiled from its own source, whose one file the
-    # source hash already answers for. See `Section::Inputs`.
     property inputs : Array(String)
 
     def initialize(@module_name, @source_path, @compiler_version, @target_triple,
@@ -1357,7 +1214,7 @@ module Iyi::IyiMod
                    @mono_bodies = {} of String => String, @initialiser = "",
                    @type_ids = [] of String, @hashes = Hashes.empty,
                    @constants = [] of String, @macro_bodies = [] of String,
-                   @requires = [] of String, @crystal_library = false,
+                   @requires = [] of String,
                    @class_root = false, @filled = true,
                    @module_extends_self = true,
                    @regexes = [] of RegexConst, @class_vars = [] of ClassVarRef,
@@ -1553,10 +1410,6 @@ module Iyi::IyiMod
     # check reads these where a module compiled from source reads the one file
     # at its module path. See `Section::Inputs`.
     inputs : Array(String) = [] of String,
-    # Which library the artifact was built under, so a refusal can name the
-    # verb that rebuilds it: `iyi bind` for a boundary, `--emit-iyimod` for a
-    # module of one's own.
-    crystal_library : Bool = false,
     # The package name its types live under (`Artifact#package_name`), so a
     # manifest that renames the package makes the artifact stale.
     package_name : String = ""
@@ -1595,7 +1448,7 @@ module Iyi::IyiMod
 
       Summary.new(header[:module_name], header[:source_path],
         header[:compiler_version], header[:target_triple], header[:flags],
-        hashes, imports, inputs, header[:crystal_library], header[:package_name])
+        hashes, imports, inputs, header[:package_name])
     end
   rescue ex : Error
     raise ex
@@ -1706,7 +1559,7 @@ module Iyi::IyiMod
       Artifact.new(header[:module_name], header[:source_path], header[:compiler_version],
         header[:target_triple], header[:flags], imports[:imports], imports[:usings], exports,
         object_code, header[:has_initialiser], mono_bodies, initialiser, type_ids,
-        hashes, constants, macro_bodies, requires, header[:crystal_library],
+        hashes, constants, macro_bodies, requires,
         header[:class_root], header[:filled], header[:module_extends_self],
         regexes, class_vars, match_types, symbols,
         top_level, top_level_funs, reopened, libs, layouts, inputs, symbol_literals,
@@ -1774,7 +1627,6 @@ module Iyi::IyiMod
       end
     end
 
-    io.puts "library       #{artifact.crystal_library ? "Crystal's standard library (--crystal)" : "iyi's prelude"}"
     io.puts "extend self   #{artifact.module_extends_self}" if artifact.module_extends_self
 
     unless artifact.requires.empty?
@@ -1937,33 +1789,6 @@ module Iyi::IyiMod
     io.puts "              module owns (SPEC.md IV.2, GC_DESIGN.md Stage 1)."
   end
 
-  # The artifact as the iyi declarations it was built from.
-  #
-  # This is the whole point of the file: `import` reads it and compiles against
-  # this text instead of opening the module's source (R-1). It is iyi source
-  # rather than an AST because the signatures already are source — the parser
-  # that read the module is the one that should read its declarations back, and
-  # a second grammar for this file would be a second thing to keep correct.
-  #
-  # Bodies are absent rather than empty. Every `def` here is a header, and a
-  # call against it is typed from its return annotation, which R-2 guarantees
-  # is written. That is also the boundary: this is enough to typecheck against
-  # and not enough to generate code from, which is why a build that reads
-  # artifacts is a front-end-only build until `ObjectCode` exists (IV.1a).
-  #
-  # Everything is `pub`, because everything in the file is: an unexported name
-  # never reached `Exports`, and R-2b needs it to stay unreachable rather than
-  # merely unmentioned.
-  # The shard's top-level `def`s, as their own text.
-  #
-  # Separate from `declarations` because there is nowhere in that file for
-  # them: it opens with `module <name>` and never closes it, which is what puts
-  # everything below into the module. These belong outside it — that is what
-  # "top-level" means and it is the whole of why they could not travel — so the
-  # reader parses this second text and accepts it where it stands.
-  #
-  # Empty for every module that has none, which is every iyi module: iyi has no
-  # top level to write a `def` at. This is a `--crystal` shard's shape.
   def self.top_level_declarations(artifact : Artifact, io : IO) : Nil
     # The `fun`s first, and with their bodies: this is the one text outside the
     # module, which is the only scope a `fun` can be declared in. See
@@ -2040,12 +1865,12 @@ module Iyi::IyiMod
     # First, because a macro has to be defined before the code that calls it is
     # read, and the bodies below are full of code that calls them.
     # Marked `pub` here only when they are a shard's, which arrive unmarked
-    # and are its surface (see `exported_macro`). An iyi module marked the
+    # and are its surface. An iyi module marked the
     # ones it exports, and the rest are its own: marked here, `macro inner`
     # was callable as `App::Lib.inner` through the artifact while the source
     # said `App::Lib does not export 'inner'`.
     artifact.macro_bodies.each do |source|
-      io << '\n' << (artifact.crystal_library ? exported_macro(source) : source) << '\n'
+      io << '\n' << source << '\n'
     end
 
     # Before the functions, because one of them reads it: `Backtracer.configure`
@@ -2984,7 +2809,7 @@ module Iyi::IyiMod
   end
 
   # Each macro the module wrote `pub`, as it is carried. A shard's arrive
-  # unmarked (see `exported_macro`), and their text is no caller's surface.
+  # unmarked, and their text is no caller's surface.
   def self.exported_macros(artifact : Artifact) : Array(String)
     artifact.macro_bodies.select { |source| macro_line(source).starts_with?("pub macro ") }
   end
@@ -2996,7 +2821,7 @@ module Iyi::IyiMod
   # says. A shard's initialiser is the other language's, which has no `pub`.
   def self.exported_constants(artifact : Artifact) : Array({String, String})
     constants = [] of {String, String}
-    return constants if artifact.initialiser.empty? || artifact.crystal_library
+    return constants if artifact.initialiser.empty?
     parser = Parser.new("module #{artifact.module_name}\n#{artifact.initialiser}")
     parser.filename = "#{artifact.module_name}.iyi"
     collect_exported_constants parser.parse, constants
@@ -3227,7 +3052,6 @@ module Iyi::IyiMod
     io.write_bytes artifact.flags.size.to_u32, FORMAT
     artifact.flags.each { |flag| write_string io, flag }
     io.write_byte(artifact.has_initialiser ? 1_u8 : 0_u8)
-    io.write_byte(artifact.crystal_library ? 1_u8 : 0_u8)
     io.write_byte(artifact.class_root ? 1_u8 : 0_u8)
     io.write_byte(artifact.filled ? 1_u8 : 0_u8)
     io.write_byte(artifact.module_extends_self ? 1_u8 : 0_u8)
@@ -3244,7 +3068,6 @@ module Iyi::IyiMod
     target_triple = read_string(io)
     flags = Array(String).new(io.read_bytes(UInt32, FORMAT)) { read_string(io) }
     has_initialiser = io.read_byte == 1_u8
-    crystal_library = io.read_byte == 1_u8
     class_root = io.read_byte == 1_u8
     filled = io.read_byte == 1_u8
     module_extends_self = io.read_byte == 1_u8
@@ -3254,7 +3077,7 @@ module Iyi::IyiMod
     package_name = io.pos < io.size ? read_string(io) : ""
     {module_name: module_name, source_path: source_path,
      compiler_version: compiler_version, target_triple: target_triple, flags: flags,
-     has_initialiser: has_initialiser, crystal_library: crystal_library,
+     has_initialiser: has_initialiser,
      class_root: class_root, filled: filled,
      module_extends_self: module_extends_self, declarations_only: declarations_only,
      package_name: package_name}

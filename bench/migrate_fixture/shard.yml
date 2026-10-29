@@ -1,6 +1,0 @@
-name: shop
-version: 0.1.0
-targets:
-  shop:
-    main: src/shop.cr
-crystal: ">= 1.0.0"

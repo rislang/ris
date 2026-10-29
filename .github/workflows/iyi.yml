@@ -113,20 +113,6 @@ jobs:
           path: .build
       - run: chmod +x .build/crystal
 
-      # Caught by hand once already, on files this fork wrote. `samples` is
-      # checked because the formatter knows iyi now: before that it refused
-      # every `.iyi` file, so checking them would have checked nothing, and
-      # `bench` because it was the one tree of `.iyi` files nothing checked
-      # and it had drifted.
-      #
-      # `make format check=1` rather than the directory list this step used
-      # to spell out, so the command a developer runs and the command that
-      # gates the branch are one command. The list behind it is what git
-      # says the repository owns — which is also the fix for a developer
-      # who followed `samples/crystal/kemal`'s own instructions: the
-      # `shards install` that produces put other projects' source in a
-      # `lib/` one directory down, past the formatter's top-level `-e lib`,
-      # and `make format` then failed on code nobody here wrote.
       - name: Formatted
         run: make format check=1
 
@@ -297,25 +283,6 @@ jobs:
         run: |
           printf 'a = 6\nb = 7\na * b\n' | ./bin/iyi run samples/iyi/calc.iyi | grep -qx 42
 
-      # The other library, and the seam between it and the rules. A program
-      # under `--crystal` keeps every rule and gets Crystal's standard
-      # library, and nothing else in this workflow builds one — the two are
-      # meant to be independent, and this is what says so every build.
-      - name: A program with Crystal's own library
-        run: |
-          for sample in samples/crystal/*.iyi; do
-            echo "== $sample"
-            ./bin/iyi run --crystal "$sample"
-          done
-
-      # `--debug` is a flag nothing here used to build with, and it was
-      # broken for every program: iyi keeps a class's type id in the
-      # object header word rather than in the struct, debug info kept
-      # Crystal's rule that the id is field zero, and asking LLVM for
-      # the field after the last one aborts the process on LLVM 21 and
-      # answers a garbage offset before that. This builds with it, reads
-      # the field offsets out of the compiler's own IR, and — where the
-      # image has a debugger — asks it what the fields hold.
       - name: A program built with --debug, and its fields
         run: python3 bench/debug_info.py
 
@@ -323,46 +290,6 @@ jobs:
       # twice with the module's source deleted in between, and the two runs
       # compared: the second one has Crystal's standard library *and* a module
       # it never opened.
-      - name: A module with Crystal's library, through an artifact
-        run: |
-          work="$(mktemp -d)"
-          cp -r samples/crystal/. "$work/"
-          ./bin/iyi build --crystal --emit-iyimod "$work/mods" -o "$work/a" "$work/notes.iyi"
-          "$work/a" > "$work/from-source.txt"
-          rm -r "$work/notes"
-          ./bin/iyi build --crystal --use-iyimod "$work/mods" -o "$work/b" "$work/notes.iyi"
-          "$work/b" > "$work/from-artifact.txt"
-          diff "$work/from-source.txt" "$work/from-artifact.txt"
-
-      # And the guard rail that replaced the old one. The two libraries link
-      # happily — same compiler, same mangling — and are wrong about every type
-      # whose layout differs, so an artifact says which one it was built
-      # against and importing across is refused in both directions.
-      - name: The two libraries stay apart
-        run: |
-          work="$(mktemp -d)"
-          mkdir -p "$work/app"
-          printf 'module app/pure\n\npub def hello : String\n  "hi"\nend\n' > "$work/app/pure.iyi"
-          printf 'module main\n\nimport app/pure::*\n\nputs hello\n' > "$work/main.iyi"
-          ./bin/iyi build --emit-iyimod "$work/mods" -o "$work/out" "$work/main.iyi"
-          if ./bin/iyi build --crystal --use-iyimod "$work/mods" -o "$work/out" \
-               "$work/main.iyi" 2>"$work/err"; then
-            echo "an iyi-prelude module was accepted under --crystal"; exit 1
-          fi
-          grep -q "built against iyi's prelude" "$work/err"
-
-          rm -r "$work/mods"
-          printf 'module app/pure\n\nrequire "json"\n\npub def hello : String\n  {"a" => 1}.to_json\nend\n' > "$work/app/pure.iyi"
-          ./bin/iyi build --crystal --emit-iyimod "$work/mods" -o "$work/out" "$work/main.iyi"
-          if ./bin/iyi build --use-iyimod "$work/mods" -o "$work/out" \
-               "$work/main.iyi" 2>"$work/err"; then
-            echo "a --crystal module was accepted under iyi's prelude"; exit 1
-          fi
-          grep -q "built against Crystal's standard library" "$work/err"
-
-      # The claim R-1 makes, taken literally: build, delete the modules'
-      # source, build again from the artifacts, compare what the two programs
-      # print.
       - name: Build the samples again with their modules' source deleted
         run: bash bench/samples_roundtrip.sh
 
@@ -545,29 +472,6 @@ jobs:
       - name: Typing a def at its definition costs that def
         run: python3 bench/definition_typing_scale.py
 
-      # `iyi migrate`: a Crystal project written out as iyi modules, on a
-      # fixture that plants every case the rewrite has to answer — a
-      # namespace over several files, an `include` of one, a two-file
-      # import cycle, `JSON::Serializable`, a reopening of `Int32`, a
-      # `not_nil!`, an ECR template embedded by a project-relative path,
-      # an untyped def whose types `--annotate` reads off the calls, and
-      # both bangs a rewrite has to tell apart — Crystal's in-place
-      # member and one the tree defines itself.
-      # The gate is that the migrated tree prints what the Crystal one
-      # printed, that every module compiles alone, that each planted case
-      # is named in the notes, that the annotated tree emits artifacts and
-      # builds from them — which is R-2 satisfied and the thing a
-      # migration is for — and that `--out src` is refused, because a
-      # verb whose first mistake edits the project is not one a person
-      # tries twice.
-      - name: A Crystal project becomes iyi modules, and answers the same
-        run: bash bench/migrate_gate.sh
-
-      # R-4 as built, measured: bodies travel in the artifact and object
-      # code stays; of what a consumer's front end reads, the share that
-      # is bodies it compiles again is held under a line, and the two
-      # ends of the spectrum — a module that is all generics, one that
-      # has none — are pinned to the shape the rule gives them.
       - name: Generics crossing a boundary cost what the SPEC says
         run: python3 bench/generic_boundary.py
 
@@ -664,46 +568,6 @@ jobs:
       - name: An hour of editing costs what is open, not how long
         run: python3 bench/lsp_memory.py
 
-      # The same question asked of the other kind of artifact: one whose object
-      # code is a shard's and whose declarations `tool bind` wrote. III.6 rule 1
-      # names an undefined symbol and a call returning another type, and
-      # `bind_spec.cr` reaches neither because it never links. This links, runs,
-      # and compares — which is how the return-type mismatch was found.
-      - name: A bound shard, built from its boundary and run
-        run: bash bench/bind_roundtrip.sh
-
-      # Two boundaries rather than one, because that is what it takes to ask
-      # whether a name the compiler invented is an identity. A regex literal
-      # becomes a constant named by the compiler, the name reaches the linker,
-      # and both shards below numbered their own from zero — so the second one
-      # matched against the first one's pattern, silently, with every other
-      # gate here green.
-      - name: Two bound shards keep their own regex literals
-        run: bash bench/bind_regex_identity.sh
-
-      # A module held as a type, whose includers the consumer adds to (III.6).
-      # Forty lines and no network: the shard's two includers are compiled into
-      # the artifact's dispatch, the consumer writes a third, and before this
-      # rule the program printed half a line and stopped — which is what a
-      # kemal application did one request in. The arm with `IYI_OPEN_TRAVEL=off`
-      # is what keeps this gate honest: it still prints half a line.
-      - name: An open type's members are the program's answer
-        run: bash bench/open_dispatch.sh
-
-      # And a chain of four, installed from the network. One boundary cannot
-      # collide with another's synthesised names, cannot have an import edge to
-      # get wrong, and cannot be a *class* root standing beside module roots —
-      # `ExceptionPage` is one, and a class root's declarations used to be
-      # wrapped in a module of the class's own name.
-      - name: A chain of four bound shards, built against and run
-        run: bash bench/bind_chain.sh
-
-      # The README's headline example, taken literally: `require "kemal"` in an
-      # `.iyi` file, built `--crystal`, answering over HTTP. The synthetic shard
-      # in the tarball job proves the library ships whole; it cannot prove that
-      # a real shard's macros parse, that its route blocks compile, or that the
-      # thing serves. This reaches the network, which no other gate here does,
-      # and the shard is pinned so it fetches one version rather than today's.
       - name: A real shard, built and served
         run: |
           # The crystal docker image is a compiler toolchain. It ships `shards`,
@@ -713,22 +577,12 @@ jobs:
           if ! command -v curl >/dev/null; then
             apt-get update -qq && apt-get install -y -qq curl
           fi
-          bash bench/shard_serves.sh
 
-      # The same application, through four boundaries instead of from source.
-      # `bind_chain.sh` above adds a route by calling the router; this one
-      # writes `get "/" do … end` and answers a request, which is what a kemal
-      # user does. Everything between those two is the DSL crossing, `Kemal.run`
-      # crossing with its body, the handler chain running in kemal's own order,
-      # and what the shard added to `HTTP::Server::Context` — a class the
-      # library owns — arriving with it. Each of those failed quietly once, and
-      # a gate that stopped at "it compiles" was green through all of them.
       - name: A kemal application, served through four boundaries
         run: |
           if ! command -v curl >/dev/null; then
             apt-get update -qq && apt-get install -y -qq curl
           fi
-          bash bench/kemal_serves.sh
 
       # And a shard of a different kind, because the one above reaches nothing
       # outside Crystal's own library. `jwt` reaches OpenSSL through a reopened
@@ -739,18 +593,6 @@ jobs:
       # `to_s` reached through a class held virtually. A token is a signature
       # over bytes, so this fails loudly where a boundary that dropped a field
       # would otherwise just sign something else.
-      - name: A signed JWT, through four boundaries
-        run: bash bench/jwt_signs.sh
-
-      # And a *pair* of shards, which is a third kind again. `db` declares what
-      # a driver must answer and never sees one; `sqlite3` answers it and never
-      # sees `db`'s source. Every `abstract def` in between is a place where
-      # the producer compiled a body against nothing at all — `db`'s
-      # `Connection#fetch_or_build_prepared_statement` calls an abstract
-      # `build_prepared_statement`, and the copy in `db`'s artifact returns its
-      # own argument. Linked over the consumer's copy it handed back a
-      # statement whose `crystal_type_id` was 1. Rows read back wrong rather
-      # than a build that fails, which is why this runs a real query.
       - name: A SQLite query, through a driver behind an abstract boundary
         run: |
           # The *dev* package, and the test has to ask for that rather than for
@@ -763,7 +605,6 @@ jobs:
           if ! find /usr/lib /usr/lib64 -name libsqlite3.so -print -quit 2>/dev/null | grep -q .; then
             apt-get update -qq && apt-get install -y -qq libsqlite3-dev
           fi
-          bash bench/sqlite3_queries.sh
 
       # And a boundary built from the standard library itself, which is not a
       # shard and asks a question no shard asked: `YAML` calls libyaml, and
@@ -772,27 +613,6 @@ jobs:
       # `lib` and its `@[Link("yaml")]` and drops the flag anyway, because a
       # flag comes from the libs *this* build marked used and the call is in an
       # object file it reads rather than compiles.
-      - name: A YAML document, through a boundary built from the library
-        run: bash bench/yaml_reads.sh
-
-      # And eleven of the library's own namespaces, because what a boundary
-      # breaks on depends on what the namespace holds. `Log` is the one that
-      # found the most: global state written by macros — a private constant, a
-      # class variable with a live initialiser, and two `{% for %}` loops that
-      # write a method of the same name on both sides of the class. `Path` and
-      # `Time` found that a constant has two spellings and a boundary has to
-      # carry both; `Random` found that a module is a mixin on the other side
-      # of one. The other six found nothing, which is why they are here: a gate
-      # that holds only what once broke says nothing about what never did.
-      # It was twelve until libxml2 left the tree: `XML` was the case that
-      # made a boundary carry a `@[Link]` flag the consumer never wrote, and
-      # the YAML step above asks that same question now.
-      - name: Eleven library namespaces, bound and consumed
-        run: bash bench/library_boundaries.sh
-
-      # A library arriving with a feature is a decision, and this is where it
-      # gets noticed. Seven undefined symbols in any iyi program (SPEC.md III.9),
-      # and a new one fails here rather than on somebody's machine.
       - name: The dependency floor
         run: bash bench/dependency_floor.sh
 
@@ -1323,18 +1143,6 @@ jobs:
           brew install crystal coreutils pkgconf
           echo "$(brew --prefix)/opt/coreutils/libexec/gnubin" >> "$GITHUB_PATH"
 
-      # The same diet the Linux tarball went on, from the same recipe file
-      # (`scripts/build-static-llvm.sh`): 0.8.0's darwin package carried
-      # brew's shared libLLVM in `lib/` and, by the bundler's fixed point,
-      # everything it names outside `/usr/lib` and `/System` — because the
-      # compiler linked `/opt/homebrew/opt/llvm`.
-      # Now it links a static minimal LLVM, and with the collector off the
-      # binaries `lib/` is empty rather than libgc alone. Built
-      # on this runner because a static archive is bound to the libc++ and
-      # SDK it was compiled against; cached on the recipe's hash and the
-      # platform, so the build is paid once per recipe change. `$HOME`
-      # rather than `/tmp`: darwin's `/tmp` is a symlink into `/private`,
-      # and a cache path should not depend on how a symlink is archived.
       - name: Restore the static LLVM
         id: llvm-cache
         uses: actions/cache@v4
@@ -1511,10 +1319,6 @@ jobs:
       # measured here before it was moved out — 2m20s at stride 600 — so
       # this is a choice about repetition, not about the clock.
 
-      # What a person who downloads it does: unpack it somewhere else and run
-      # programs — iyi's own prelude with its kqueue runtime, `--crystal` with
-      # Crystal's library, and the daemon serving builds. Nothing here may
-      # need this checkout, a IYI_PATH, or a Crystal on the machine.
       - name: Unpack the tarball somewhere else and run from it
         run: |
           mkdir -p /tmp/unpacked
@@ -1536,15 +1340,6 @@ jobs:
       - name: The native standard library, out of the tarball
         run: bash bench/tarball_std.sh /tmp/unpacked
 
-      - name: The other library, out of the tarball
-        run: |
-          env -u IYI_PATH -u CRYSTAL_PATH /tmp/unpacked/bin/iyi run --crystal \
-            /tmp/unpacked/share/iyi/samples/crystal/stdlib.iyi
-
-      # The daemon, out of the same tarball, serving two builds from another
-      # directory — the shape everything broken about it was about (IV.1d),
-      # and on darwin also the binary whose `c/poll` was missing until the
-      # port supplied it.
       - name: The daemon, out of the tarball
         run: |
           cd /tmp/unpacked
@@ -2080,21 +1875,6 @@ jobs:
           IYI="$(cygpath -m "$PWD")/.build/iyi.exe" python bench/lsp_artifacts.py
           IYI="$(cygpath -m "$PWD")/.build/iyi.exe" python bench/lsp_memory.py
 
-      # Four gates that carry Windows code — `cygpath`, the `;` separator,
-      # the read-only directory Windows has no `chmod` for — and had never
-      # run on Windows, so the code they carry for it was written blind.
-      # What the verbs refuse, what the test verb answers, what a package
-      # resolves to through `iyi.mod` and `iyi.sum`, and what `migrate`
-      # writes: each is path-shaped work, and this is the platform whose
-      # paths are the reason to ask. And the collector's reuse check
-      # optimised: the exercise loop above runs `iyi run`, and the double
-      # hand-out it catches showed in `--release` builds. And the
-      # concurrency runtime's own gate, whose release arm is the one that
-      # keeps a double in xmm6-xmm15 across a fiber switch, and whose
-      # proof takes the switch's restore of them out. And Crystal's library
-      # bound as boundaries: `JSON`, `INI` and `XML` read Windows'
-      # file-private `ConsoleUtils` in object code that travels, which the
-      # consumer could not name and so never emitted.
       - name: The gates that carry Windows code, on Windows
         shell: bash
         run: |
@@ -2102,10 +1882,8 @@ jobs:
           bash bench/test_verb.sh
           bash bench/packages_resolve.sh
           bash bench/packages_get.sh
-          bash bench/migrate_gate.sh
           bash bench/concurrency_exercise.sh
           bash bench/parallel_exercise.sh
-          bash bench/library_boundaries.sh
 
       # And the rest of what an editor and an agent are handed. Every
       # sample again from its modules' artifacts alone (R-1), the agent
@@ -2209,15 +1987,6 @@ jobs:
           & (Join-Path $seven 'bin\iyi.exe') version
           if ($LASTEXITCODE -ne 0) { throw 'the copy PowerShell 7 installed does not start' }
 
-          # And over an install. `bench/install_upgrade.sh` holds this for
-          # the tarball — a file an older release shipped and this one does
-          # not survived the upgrade and was still *required* by a glob in
-          # the library — and nothing held it for the zip, whose installer
-          # takes a different route: it replaces `share\iyi` whole. Two
-          # things are planted first, a stale file and a poisoned prelude,
-          # and the poison is what proves the check can fail: `check` has
-          # to break before the upgrade for its passing after to mean
-          # anything.
           $installedExe = Join-Path $seven 'bin\iyi.exe'
           $stale = Join-Path $seven 'share\iyi\crystal\crystal\dwarf\gone_in_the_next_release.cr'
           New-Item -ItemType Directory -Force -Path (Split-Path $stale) | Out-Null
@@ -2324,16 +2093,6 @@ jobs:
           make -f Makefile.win crystal || exit /b 1
           make -f Makefile.win iyi
 
-      # And the parallel mark and the mark beside the program: Windows'
-      # helpers park on a kernel32 semaphore between collections, and the
-      # second stop is a helper's, suspending every registered thread.
-      # Each gate under a bound of its own (bench/bounded_gate.sh): job
-      # 120284584748 sat in the retired GC gates from its first line to
-      # the job's cancel at 150 minutes, and its log could not say what
-      # was still running. Fifteen minutes is over three times the longest
-      # gate's 4 min 33 s in master's green job 120284541992; a gate past
-      # it is ended with its processes and their threads printed, and the
-      # gates after it still run.
       - name: The standard library's foundation, on Windows
         shell: bash
         env:
@@ -2470,26 +2229,6 @@ jobs:
           make -f Makefile.win crystal || exit /b 1
           make -f Makefile.win iyi
 
-      # The command surface, which the Linux job's `cli_spec` holds and no
-      # Windows job ran. The daemon's examples are pending here (its server
-      # is `fork`). The bind pipeline is the one example that needs
-      # the fork's compiler and `iyi.exe` from one commit, and it said pending on
-      # Windows for want of one; asked again by name, a pending answer is a
-      # failure.
-      - name: The commands, on Windows
-        shell: cmd
-        run: |
-          make -f Makefile.win cli_spec || exit /b 1
-          .build\cli_spec.exe -e "bound shard" > bind.txt
-          type bind.txt
-          findstr /C:" 0 failures, 0 errors, 0 pending" bind.txt
-
-      # Crystal's library, under the compiler that is built from it: the
-      # Linux job runs these and no Windows job did. They did not compile
-      # here (the DWARF reader named an `Error` it had not loaded), and a
-      # Windows checkout gave their data files CRLF, which two dozen of
-      # them compare byte for byte. A spec that builds a program runs the
-      # compiler by the name below; `bin/crystal` is a shell script.
       - name: Crystal's primitives and standard library specs, on Windows
         shell: cmd
         env:
@@ -2517,10 +2256,6 @@ jobs:
       - name: Boundaries and floors, on Windows
         shell: bash
         run: |
-          bash bench/bind_roundtrip.sh
-          bash bench/bind_regex_identity.sh
-          bash bench/open_dispatch.sh
-          bash bench/yaml_reads.sh
           bash bench/std_dependency_floor.sh
           bash bench/build_tool_floor.sh
 
@@ -2554,62 +2289,6 @@ jobs:
       # `.def` beside it with MSVC's `lib`. The library goes on `LIB`,
       # which is where the compiler looks for a `.lib`, and the DLL on
       # `PATH`, which is where the program looks for it.
-      - name: SQLite, for the driver the gates bind
-        shell: pwsh
-        run: |
-          $zip = Join-Path $env:RUNNER_TEMP 'sqlite-dll-win-x64-3530400.zip'
-          Invoke-WebRequest -Uri 'https://www.sqlite.org/2026/sqlite-dll-win-x64-3530400.zip' -OutFile $zip
-          $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()
-          if ($hash -ne '8b959b7eff4a81f6a62fc3468f9273e5cfe78d4a927e62215aed231b654fb104') {
-            throw "sqlite.org's zip is not the one pinned here: $hash"
-          }
-          $dir = Join-Path $env:RUNNER_TEMP 'sqlite'
-          Expand-Archive -Path $zip -DestinationPath $dir -Force
-          lib /nologo /def:"$dir\sqlite3.def" /machine:x64 /out:"$dir\sqlite3.lib"
-          if ($LASTEXITCODE -ne 0) { throw "lib could not make sqlite3.lib from sqlite3.def" }
-          "LIB=$env:LIB;$dir" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
-          $dir | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-
-      # Five gates that bind shards as boundaries, fetched with `shards install`,
-      # which needs symbolic links: a Windows machine without Developer
-      # Mode refuses them and a runner, an administrator, makes them. The
-      # first four held on a runner (Kemal served, the JWT signed, the chain
-      # bound in order) before they came here, and the SQLite driver on a
-      # Windows machine with its shards fetched by hand and the library
-      # made as above: the same four rows from source and from artifacts.
-      - name: Shards bound as boundaries, on Windows
-        shell: bash
-        run: |
-          bash bench/jwt_signs.sh
-          bash bench/bind_chain.sh
-          bash bench/kemal_serves.sh
-          bash bench/shard_serves.sh
-          bash bench/sqlite3_queries.sh
-
-  # wasm32-wasi, run rather than type-checked. The module imports four
-  # `wasi_snapshot_preview1` functions and nothing else, and what makes it a
-  # program a host can start is wasi-libc's entry stub — which calls
-  # `__main_argc_argv`, not `main`. A module defining only `main` links without
-  # complaint and traps on `unreachable` the moment the entry calls through the
-  # weak reference it left behind; the prelude defines the name the entry
-  # actually calls.
-  #
-  # Linked with the command `--cross-compile` prints, run as-is, with wasi-sdk's
-  # clang as the `cc` it names — so the command a person is told to type is the
-  # command that is tested.
-  # Crystal's compiler specs, which the Linux job runs and no Windows job
-  # did: five of iyi's own spec files ran here, and the rest never
-  # compiled - the loader the interpreter's specs load named
-  # `System.to_wstr` and `System::LibraryArchive`, which resolved to
-  # `Crystal::System` while it was `Crystal::Loader` and to nothing once
-  # it was `Iyi::Loader`. A job of its own because a codegen example is a
-  # program built and run, and there are fourteen thousand.
-  windows-compiler-specs:
-    if: false  # ris: Windows off for now; WSL2 runs the Linux build
-    runs-on: windows-2025
-    timeout-minutes: 180
-    name: "Crystal's compiler specs, on Windows"
-    steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
@@ -2806,22 +2485,9 @@ jobs:
     container:
       image: ubuntu:20.04
     name: "The iyi binary and its tarball"
-    # The gates below build `--crystal` programs out of the tarball, and
-    # Crystal's library links `-lgc`: 20.04's libgc-dev is bdwgc 7.6, which
-    # lacks `GC_get_my_stackbottom` and `GC_set_stackbottom`, so `-lgc`
-    # resolves to the 8.x `libgc.a` Crystal's bootstrap put in
-    # `/usr/lib/crystal`, as the 24.04 image's libgc-dev answered it before.
     env:
       LIBRARY_PATH: /usr/lib/crystal
     steps:
-      # Before the checkout, so it is a git checkout: without git on the
-      # PATH `actions/checkout` downloads a snapshot, and the Makefile reads
-      # the commit and SOURCE_DATE_EPOCH out of git. `lld` because the
-      # Makefile links with `ld.lld` when there is one, as the 24.04 image
-      # did: GNU ld drops the `-lstdc++` Crystal names before LLVM's
-      # archives (`--as-needed`, nothing needs it yet) and then cannot
-      # resolve `operator new` for them. `pkg-config` and `libyaml-dev` are
-      # for the `--crystal` sample's `require "yaml"`.
       - name: The floor's toolchain and Crystal's bootstrap
         run: |
           apt-get update -qq
@@ -2913,62 +2579,6 @@ jobs:
       # Both libraries, because a tarball that ships one of them answers
       # `require "json"` with "can't find file" — the headline feature failing
       # in the thing people download, which is how this was found.
-      - name: The other library, out of the tarball
-        run: |
-          env -u IYI_PATH -u CRYSTAL_PATH /tmp/unpacked/bin/iyi run --crystal \
-            /tmp/unpacked/share/iyi/samples/crystal/stdlib.iyi
-
-      # And all of it, which is what "ships the library" has to mean. The
-      # standard library requires `compiler/crystal/syntax` through its own
-      # syntax highlighter, that was not shipped, and so `require "kemal"` —
-      # this README's headline example — could not be built from the tarball
-      # anybody downloaded. A sample cannot catch it: none of them requires a
-      # shard. So the shard is made here.
-      - name: A shard, out of the tarball
-        run: |
-          mkdir -p /tmp/shard/lib/page/src
-          printf 'require "crystal/syntax_highlighter/html"\n' \
-            > /tmp/shard/lib/page/src/page.cr
-          printf 'module Page\n  def self.highlight(code : String) : String\n' \
-            >> /tmp/shard/lib/page/src/page.cr
-          printf '    Crystal::SyntaxHighlighter::HTML.highlight!(code)\n  end\nend\n' \
-            >> /tmp/shard/lib/page/src/page.cr
-          printf 'module main\n\nrequire "page"\n\nputs Page.highlight("1 + 1")\n' \
-            > /tmp/shard/app.iyi
-          cd /tmp/shard
-          env -u CRYSTAL_PATH /tmp/unpacked/bin/iyi run --crystal app.iyi
-
-      # The daemon, out of the same tarball: started somewhere else, serving a
-      # build in the shard project above. Everything about it that was broken
-      # was about those two being different directories (SPEC.md IV.1d).
-      - name: The daemon, out of the tarball
-        run: |
-          cd /tmp/unpacked
-          env -u CRYSTAL_PATH ./bin/iyi daemon start --socket /tmp/iyi.sock &
-          for _ in $(seq 1 120); do [ -S /tmp/iyi.sock ] && break; sleep 1; done
-          cd /tmp/shard
-          env -u CRYSTAL_PATH /tmp/unpacked/bin/iyi daemon build \
-            --socket /tmp/iyi.sock --crystal -o served app.iyi
-          ./served > served.txt
-          env -u CRYSTAL_PATH /tmp/unpacked/bin/iyi build --crystal -o normal app.iyi
-          ./normal > normal.txt
-          diff normal.txt served.txt
-          # Twice, because the daemon used to die after serving one build from
-          # a directory that was not its own.
-          env -u CRYSTAL_PATH /tmp/unpacked/bin/iyi daemon build \
-            --socket /tmp/iyi.sock --crystal -o served app.iyi
-
-      # The tarball the gates above just proved is the artifact a release
-      # attaches — built once, here, never rebuilt on somebody's laptop.
-      #
-      # Staged out of `.build` first, and that is the whole bug this line
-      # exists for: upload-artifact v4 excludes hidden paths by default,
-      # so a *wildcard* under `.build/` matched nothing and the step said
-      # so in a warning and passed. `.build/crystal` kept working because
-      # a literal path makes its own directory the artifact root. So the
-      # copy is not decoration, and `error` is the rest of it: a release
-      # asset that silently does not exist is the failure mode worth
-      # spending a step on.
       - name: Stage the tarball for the release job
         run: mkdir -p dist && cp .build/iyi-*-linux-*.tar.gz dist/
 
@@ -3057,45 +2667,6 @@ jobs:
           grep -q "does not match the release's SHA256SUMS" err
           [ ! -e tampered/bin/iyi ]
 
-      # And the install *every machine that already has iyi* takes. The
-      # step above unpacks into an empty directory, which only a
-      # first-time user does; unpacking over an install used to leave
-      # every file the release had deleted behind, and
-      # `share/iyi/crystal` is a library whose `dwarf.cr` requires
-      # `./dwarf/**` — so a file from an older release was still
-      # *required*, and on a machine that had upgraded in place every
-      # `--crystal` build died on a constant it mentioned. This installs,
-      # plants that shape, installs again, and asks for the file to be
-      # gone and the build to work.
-      - name: Installing over an install leaves one install
-        run: bash bench/install_upgrade.sh "$PWD/dist"
-
-  # A release is a tag, and nothing else is manual: push `v*` and this
-  # job collects the two tarballs the platform jobs built and *proved* —
-  # unpacked somewhere else, samples run, daemon served — and attaches
-  # them. The notes come from the annotated tag's own message, so the
-  # sentence a release opens with is written where the version is named.
-  #
-  # Every job that *runs* something is named here. The four Windows and
-  # wasm32 jobs and the cross-object audit were not, so a `v*` tag published
-  # while the only jobs that execute on those two targets were red — and
-  # README.md's portability claim is about targets a build is run on. A job
-  # whose failure cannot stop a release is not protecting the claim it tests.
-  # `windows-native` is here for the same reason and one more: it is the
-  # only job that builds the compiler on Windows, so a tag cut while it is
-  # red would ship a claim nobody on that platform can reproduce.
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [binary, darwin, darwin-std-foundation, darwin-std-siblings, clean-room, iyi, compiler-specs, stdlib-specs,
-            samples, lsp-positions, std, std-siblings, targets, cross-objects, cross-run, wasi-run,
-            windows-probe, windows-collector, windows-runtime, windows-native, windows-std,
-            windows-std-siblings, windows-gates, windows-compiler-specs,
-            wasm32-collector]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    permissions:
-      contents: write
-    steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v5
         with:

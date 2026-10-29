@@ -78,7 +78,7 @@ class Iyi::Command
   # which is the one sentence that is certainly wrong: the flag list is
   # how a harness discovers a verb, AI_FIRST.md §2b names `mod context
   # --budget N` as one of the loop's seven, and every other verb in this
-  # binary — `check`, `fix`, `test`, `run`, `build`, `doc`, `bind` —
+  # binary — `check`, `fix`, `test`, `run`, `build`, `doc` —
   # answers `--help` with its usage.
   private def mod_context_usage
     <<-USAGE

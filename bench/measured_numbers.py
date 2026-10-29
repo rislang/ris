@@ -75,29 +75,6 @@ def quoted(text: str, pattern: str, where: str, wrong: list[str]) -> list[str]:
     return hits
 
 
-def check_bind_speed(wrong: list[str], held: list[str]) -> None:
-    """SPEC.md quotes the generated shards' line counts; the generator writes them."""
-    bind = load("bench/bind_speed.py")
-    text = doc("SPEC.md")
-    published = quoted(text, r"\| ([\d,]+) lines \| [\d.]+ s \|", "SPEC.md", wrong)
-    if not published:
-        return
-    measured = []
-    with tempfile.TemporaryDirectory() as raw:
-        for types, methods in bind.SIZES:
-            directory = pathlib.Path(raw) / f"s{types}x{methods}"
-            directory.mkdir()
-            bind.write_shard(directory, types, methods)
-            measured.append(len((directory / "shard.cr").read_text().splitlines()))
-    want = [int(value.replace(",", "")) for value in published]
-    if want != measured:
-        wrong.append(
-            f"SPEC.md: the boundary table's shard sizes are {want}, "
-            f"bench/bind_speed.py writes {measured}"
-        )
-        return
-    held.append(f"bind_speed's three shards are {measured} lines, as SPEC.md says")
-
 
 def check_build_pair(wrong: list[str], held: list[str]) -> None:
     """README.iyi.md quotes the generated head-to-head pair's two line counts."""
@@ -153,26 +130,6 @@ def check_macro_sizes(wrong: list[str], held: list[str]) -> None:
     held.append(f"every macro-cost row SPEC.md publishes is a size the script sweeps ({sorted(published)})")
 
 
-def check_daemon_shape(wrong: list[str], held: list[str]) -> None:
-    """SPEC.md spells the daemon measurement's shape in words; the script holds the numbers."""
-    daemon = load("bench/daemon_full_build.py")
-    text = doc("SPEC.md")
-    words = {
-        "twelve": 12, "eight": 8, "twenty": 20, "thirty": 30,
-        "four": 4, "five": 5, "six": 6, "ten": 10,
-    }
-    modules = quoted(text, r"which builds (\w+) modules under `--crystal`", "SPEC.md", wrong)
-    pairs = quoted(text, r"with codegen and a link, (\w+) alternating pairs", "SPEC.md", wrong)
-    if not modules or not pairs:
-        return
-    if words.get(modules[0]) != daemon.MODULES or words.get(pairs[0]) != daemon.PAIRS:
-        wrong.append(
-            f"SPEC.md: the daemon measurement is described as {modules[0]} modules and "
-            f"{pairs[0]} pairs, bench/daemon_full_build.py runs {daemon.MODULES} and {daemon.PAIRS}"
-        )
-        return
-    held.append(f"the daemon measurement is {daemon.MODULES} modules and {daemon.PAIRS} pairs in both")
-
 
 def check_context_threshold(wrong: list[str], held: list[str]) -> None:
     """AI_FIRST.md states the line the context-pack gate holds; the gate holds a constant."""
@@ -198,10 +155,7 @@ UNCHECKABLE = [
     "the front-end and end-to-end seconds (bench/build_speed.py, needs a release compiler and go)",
     "the edit-loop table and its 1.8x (bench/incremental.py, needs a release compiler and go)",
     "the artifact-vs-source front end (bench/artifact_speed.py, needs a release compiler)",
-    "the boundary's percentages (bench/bind_speed.py, needs two release compilers)",
-    "the daemon's seconds and its 26% (bench/daemon_full_build.py, needs a release daemon)",
     "the macro tables' seconds (bench/macro_cost.py, needs a release compiler)",
-    "the runtime ratios (bench/runtime.py, needs release builds of both libraries)",
 ]
 
 
@@ -209,10 +163,8 @@ def main() -> int:
     wrong: list[str] = []
     held: list[str] = []
     for check in (
-        check_bind_speed,
         check_build_pair,
         check_macro_sizes,
-        check_daemon_shape,
         check_context_threshold,
     ):
         check(wrong, held)

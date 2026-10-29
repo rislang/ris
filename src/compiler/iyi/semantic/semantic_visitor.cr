@@ -58,27 +58,18 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
       # Crystal's `src/json.cr` and fails inside it; iyi's own is std's.
       if iyi_std_module?("std/#{filename}")
         node.raise "iyi has no `require`: iyi's own `#{filename}` is a module of its " \
-                   "standard library, reached with `import std/#{filename}` (SPEC.md R-1). " \
-                   "`--crystal` gives a program Crystal's library instead, and there " \
-                   "`require` means what it means in Crystal"
+                   "standard library, reached with `import std/#{filename}` (SPEC.md R-1)."
       end
       node.raise "iyi has no `require`. A module is reached with " \
                  "`import #{filename}`, and it is a path to a file rather than " \
                  "a library name (SPEC.md R-1). There is no standard library " \
                  "to require: the prelude is what a program gets, and README.md " \
-                 "says what is in it. `--crystal` gives a program Crystal's " \
-                 "library instead, and there `require` means what it means " \
-                 "in Crystal"
+                 "says what is in it; use `import std/NAME` for library modules"
     end
 
     # Remember that the program depends on this require
     @program.record_require(filename, relative_to)
 
-    # iyi: and remember it against the file that wrote it, so that a module
-    # compiled under `--crystal` can carry its requires to whoever consumes its
-    # artifact (SPEC.md IV.1g, `Requires`). A relative require is file
-    # inclusion inside this unit and travels with its source, so it is not one
-    # of these; a library name is.
     if relative_to && relative_to.ris_source? && !filename.starts_with?('.')
       list = (@program.iyi_module_requires[relative_to] ||= [] of String)
       list << filename unless list.includes?(filename)
@@ -94,46 +85,6 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
         if relative_to
           message += " relative to '#{relative_to}'"
         end
-      elsif node.iyi_prelude? && @program.iyi_prelude?
-        # iyi: the other language's advice, in iyi's mouth. A program under
-        # iyi's library has no shards and no `shard.yml` — `require` is
-        # refused for it a few lines above, and `import` is a different node
-        # that resolves elsewhere — so the file that reaches here is the
-        # prelude this compiler injected, and it is a file on the search
-        # path. `IYI_PATH=/nowhere iyi build x.iyi` answered "can't find
-        # file 'iyi/prelude'" and then asked whether the author had run
-        # `shards install`.
-        #
-        # Both halves of the condition, because each alone names the wrong
-        # language: the node flag marks every injected prelude require,
-        # Crystal's included, and the program flag is on for any `Program`
-        # that was never told which library it has — which is what made a
-        # `require` written in a `.cr` file answer with iyi's search path.
-        searched = @program.iyi_path.entries
-        notes << String.build do |note|
-          note << "This is a file on the search path, not a library name: "
-          note << "iyi's prelude and `std` ship beside the compiler. "
-          if searched.empty?
-            # `IYI_PATH=""` - `"$P"` with `P` unset - is a list with nothing
-            # in it, and "Searched, in order:" followed by nothing read as
-            # a sentence cut off.
-            note << "Nothing was searched: IYI_PATH is set and empty. "
-          else
-            note << "Searched, in order:\n"
-            searched.each { |entry| note << "  " << entry << '\n' }
-          end
-          note << "IYI_PATH sets that list, and unsetting it uses the one "
-          note << "this compiler was built with"
-        end
-      elsif node.iyi_prelude?
-        # iyi: the other half, the prelude `--crystal` injects, which is
-        # Crystal's library and not iyi's. The Windows zip does not carry
-        # it (Makefile.win says why), and `iyi run --crystal x.iyi` from an
-        # install answered with the `shards install` advice below.
-        notes << "This is the prelude `--crystal` gives a program: Crystal's standard library, " \
-                 "a directory on the search path that iyi's own library does not need. " \
-                 "The Windows zip does not include it; a checkout of iyi's source has it in `src`, " \
-                 "and IYI_PATH can name that directory"
       else
         notes << <<-NOTE
           If you're trying to require a shard:
@@ -143,19 +94,6 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
       end
 
       node.raise "#{message}\n\n#{notes.join("\n")}"
-    end
-
-    # iyi: and the same for a Crystal source, when a boundary is being written.
-    #
-    # A bound shard's units number types its own `require`s brought in —
-    # `Hash(String, HTTP::Cookie)` needs `require "http/cookie"` — and a
-    # consumer whose prelude is Crystal's still does not have every file of it.
-    # Kept with where it resolved, because that is what tells a shard's own
-    # dependency from Crystal's library, and only the second may travel: the
-    # first is another boundary's to carry.
-    if filenames && !filename.starts_with?('.') &&
-       @program.compiler.try(&.emit_bind) && relative_to.try(&.ends_with?(".cr"))
-      @program.iyi_crystal_requires[filename] ||= filenames.first
     end
 
     if filenames
@@ -299,26 +237,10 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     # then a hint to import `std/deque`, which mended nothing. That library
     # is written against the other prelude (the converse is refused below),
     # so it is refused at the line that reached it.
-    if artifact_path.nil? && package.nil? && @program.iyi_prelude? && iyi_crystal_library_source?(path, filename)
+    if artifact_path.nil? && package.nil? && @program.iyi_prelude? && iyi_host_library_source?(path, filename)
       own = iyi_std_module?("std/#{path}") ? "; iyi's own is `import std/#{path}`" : ""
       node.raise "`#{path}` here is Crystal's library (#{filename}), which builds " \
-                 "only under `--crystal`, against Crystal's prelude#{own}"
-    end
-
-    # iyi: iyi's own standard library, reached by a program built against
-    # Crystal's. `src/std` is written in iyi and against iyi's prelude, so
-    # a `--crystal` build importing it died on whichever internal name it
-    # reached first — `undefined constant IyiFloatText`, pointed at a line
-    # inside a file the author never opened, about a mixture nothing had
-    # named. An artifact of the same module is already refused with the
-    # sentence below (`check_artifact_matches`, `crystal_library`); this is
-    # that rule for the source it was built from.
-    if artifact_path.nil? && package.nil? && !@program.iyi_prelude? && iyi_std_source?(filename)
-      node.raise "\"#{path}\" is iyi's standard library, and this program is " \
-                 "built against Crystal's (`--crystal`). std is written in iyi " \
-                 "against iyi's prelude, which defines types of the same names " \
-                 "with different layouts, so a program cannot hold both — drop " \
-                 "`--crystal`, or reach Crystal's library the way Crystal does"
+                 "is unavailable to ris programs#{own}; use a ris module"
     end
 
     # A package module registers under its canonical path — the requirement's
@@ -594,7 +516,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
   # iyi: whether *filename*, which *path* resolved to, is a `.cr` file of
   # Crystal's library: one on an `IYI_PATH` entry that also holds iyi's
   # prelude, which is where the two libraries ship side by side.
-  private def iyi_crystal_library_source?(path : String, filename : String) : Bool
+  private def iyi_host_library_source?(path : String, filename : String) : Bool
     return false unless filename.ends_with?(".cr")
     @program.iyi_path.entries.any? do |entry|
       Iyi.native_path(File.join(entry, "#{path}.cr")) == filename &&
@@ -763,21 +685,12 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     # that does not write this artifact has been given a sentence it cannot
     # act on. Read defensively, because a damaged artifact is one of the
     # reasons to be here and its summary will not read twice.
-    bound =
-      begin
-        IyiMod.read_summary(candidate).crystal_library
-      rescue IyiMod::Error
-        false
-      end
-
     # iyi: both halves of the usual remedy compile the module from its source,
     # and with the source gone neither can. Told to pass --emit-iyimod, a
     # build that had passed it was being handed the sentence it had already
     # acted on.
     remedy =
-      if bound
-        "Rebuild the boundary with `iyi bind`."
-      elsif source.nil?
+      if source.nil?
         "\"#{path}\" has no source here to compile in its place, so " \
         "--emit-iyimod cannot rewrite it: put its source back, or rebuild " \
         "the artifact where its source is, with the artifacts it imports " \
@@ -853,23 +766,12 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
              "not \"#{module_path}\""
     end
 
-    # A boundary's source is a checkout, not a file at the module path, so the
-    # source hash below cannot answer for one: `resolve_import("kemal/router")`
-    # finds nothing and the whole content question was skipped. The files
-    # `iyi bind` read travel with what each hashed to, and every one still on
-    # the machine is asked again. One that is gone is not asked: a boundary
-    # travels without the checkout it was written from, and then the artifact
-    # is all there is — which is the same reading the missing-source case gets
-    # below.
-    #
-    # Above the hashes for the same reason the identity check is: these are
-    # the boundary's own answer and do not need them.
     summary.inputs.each do |entry|
       recorded, _, file = entry.partition(' ')
       next if recorded.empty? || file.empty?
       next unless File.file?(file)
       unless IyiMod.digest(File.read(file)) == recorded
-        return "#{Iyi.relative_filename(file)}, which `iyi bind` read to write it, has changed"
+        return "#{Iyi.relative_filename(file)}, recorded as an artifact input, has changed"
       end
     end
 
@@ -930,12 +832,6 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
       end
 
       dependency = IyiMod.read_summary(Iyi.native_path(File.join(dir, "#{edge.module_name}.iyimod")))
-      # An edge `tool bind` wrote records the name and nothing else: a
-      # boundary is written before there is anything to compare, and the two
-      # hashes it leaves empty are not a claim that the far end hashed to
-      # nothing. Comparing "" against a real digest would call every boundary
-      # stale the moment the one beside it grew hashes of its own, which is
-      # exactly what happened when they did.
       next if edge.interface.empty? && edge.implementation.empty?
 
       unless dependency.hashes.interface == edge.interface
@@ -1000,48 +896,6 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
         MESSAGE
     end
 
-    # iyi: both worlds are compiled by the same compiler, so an artifact from
-    # one links happily into the other — on the names that happen to agree.
-    # `String` is a different type in each, and neither the linker nor anything
-    # after it would say so. Said before the declarations are parsed, because a
-    # module built under `--crystal` replays its requires there, and `require`
-    # in a language that has none is the wrong error to report against a file
-    # the author cannot open.
-    if artifact.crystal_library != !@program.iyi_prelude?
-      built = artifact.crystal_library ? "Crystal's standard library" : "iyi's prelude"
-      here = @program.iyi_prelude? ? "iyi's prelude" : "Crystal's standard library"
-      fix = artifact.crystal_library ? "build this program with `--crystal` too" \
-                                        : "rebuild the module with `--crystal`"
-      node.raise "\"#{artifact.module_name}\" was built against #{built} and " \
-                 "this program is built against #{here}. The two define types " \
-                 "of the same names with different layouts, so a program " \
-                 "cannot hold one module of each — #{fix}"
-    end
-
-    # iyi: a boundary whose object-code step never finished (SPEC.md IV.1g).
-    #
-    # `crystal tool bind` writes the declarations and a second build fills them.
-    # That build compiles a keep file naming every method a consumer might call,
-    # and a shard can hold code its own compilation never types — so the build
-    # dies and leaves an artifact with every declaration and no machine code.
-    # Read as it stands it is a boundary that promises a hundred methods and
-    # defines none, and the linker says so a hundred times without naming the
-    # cause once.
-    # Only where this build links. A front-end-only build has nothing to link
-    # and nothing to miss — `spec/compiler/bind_spec.cr` reads declarations back
-    # on purpose and never gets as far as a symbol.
-    if !artifact.filled && @program.iyi_wants_object_code
-      # iyi: by the verbs' names. It said `crystal tool bind`, the other
-      # language's verb, and "the fill step", which no verb is.
-      node.raise "\"#{artifact.module_name}\" was never filled: `iyi tool bind` " \
-                 "wrote its declarations and the build that puts object code in " \
-                 "it did not finish. Every method it declares would be an " \
-                 "undefined symbol (SPEC.md IV.1g).\n\n" \
-                 "Run `iyi bind` again (or, for a boundary bound by hand, its fill " \
-                 "build) and read what it says — a shard can hold code its own " \
-                 "compilation never types, and a boundary asks for all of it."
-    end
-
     # iyi: an artifact from a build that generated no code (SPEC.md IV.1g),
     # where this build links. `build --no-codegen --emit-iyimod` writes the
     # declarations and nothing to link, and `iyi run --use-iyimod mods` on
@@ -1072,10 +926,6 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     # `serializable` - ended at that impl's `end`.
     iyi_declarations = Lexer.iyi_source?(artifact.source_path)
     parser.iyi = true if iyi_declarations
-    # Declarations say for themselves whether the module extends itself, so
-    # the header must not decide it here — a `--crystal` boundary reopens a
-    # module of the other language, where a module is a mixin. See the parser's
-    # module header and `Artifact#module_extends_self`.
     parser.iyi_module_extends_written = true
     # Under the package name it was written under, which its object code's
     # symbols already spell (`Artifact#package_name`): a module of a
@@ -1263,26 +1113,6 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
 
     location = Location.new(artifact_path, 1, 1)
     artifact.constants.each do |name|
-      # And remembered, because reading it here is not the whole of what the
-      # artifact needs. A constant read before it is initialised is reached
-      # through `~NAME:const_read`, a function in the main module that runs the
-      # initialiser once; one initialised before anything read it is a plain
-      # global. `initialize_const` chooses between them on `const.read?` at the
-      # moment initialisation is emitted, and the two builds do not agree: the
-      # producer's units read these, so it emitted the function; the consumer
-      # initialises them from its own program in its own order and emitted the
-      # global. The artifact's object code then asked for a function nobody
-      # wrote — `undefined symbol: ~Iterator::Stop::INSTANCE:const_read`,
-      # referenced from `Path`'s `PartIterator` unit, in a program whose own
-      # source names no iterator.
-      #
-      # Codegen defines the missing spelling from these nodes, once their
-      # `target_const` is resolved. Forcing the flag from here instead — a
-      # `pointerof`, which is what `needs_init_flag?` already answers to — was
-      # tried and is wrong twice over: it initialises nothing, so `kemal/dsl`'s
-      # `APP` came back empty with its routes unregistered, and where the read
-      # was kept beside it the changed order closed `STDERR` under
-      # `bench/bind_chain.sh`.
       read = Path.new(name.split("::"), global: true).at(location)
       nodes.expressions << read
       @program.iyi_artifact_constant_reads << read
@@ -1588,24 +1418,6 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     end
   end
 
-  # iyi: the module's initialiser as source text, for the artifact (IV.1g).
-  #
-  # The module's *own* top level, and the constants its types declare. The
-  # first is this file's body — `Expressions` and the `ModuleDef` the header
-  # desugars to, marked `iyi_unit`. The second is reached into deliberately:
-  # a constant in a type body is neither an export nor part of the module's
-  # own top level, so it was in the artifact nowhere at all, and a consumer
-  # was refused over `Math::PI`. It travels qualified — `Math::PI = 3.14` —
-  # which is how `Iyi::Bind.collect_constant_source` already carries a bound
-  # Crystal namespace's constants, and it works for the reason that one
-  # gives: a qualified assignment defines wherever the namespace exists, and
-  # the declarations this text is written after are what make it exist.
-  #
-  # Runnable code that is *not* a constant stays where it is, uncarried and
-  # refused: a class variable's initialiser belongs to the type, and
-  # `iyi_uncarried_initialiser?` still sees it.
-  #
-  # In text order, because that is the order III.5 gives a module's own code.
   private def iyi_initialiser_source(node : ASTNode) : String
     statements = [] of ASTNode
     iyi_collect_initialiser node, statements

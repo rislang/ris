@@ -37,52 +37,6 @@ private def semantic_iyi(entry : String, iyi_module_dir : String? = nil,
   program
 end
 
-# The same, for a program built `--crystal`: the prelude is the other
-# language's, so a type a `.iyi` file reopens is one the library owns.
-private def semantic_iyi_crystal(entry : String)
-  program = Iyi::Program.new
-  program.color = false
-  program.iyi_prelude = false
-  program.filename = File.expand_path(entry)
-
-  parser = program.new_parser(File.read(entry))
-  parser.filename = program.filename
-  node = program.normalize(parser.parse)
-  program.semantic node
-
-  program
-end
-
-private def artifact_signature(name : String, parameters = [] of String, return_type = "")
-  Iyi::IyiMod::Signature.new(name, "", parameters, "", return_type,
-    [] of String, false)
-end
-
-private def exports(functions = [] of Iyi::IyiMod::Signature,
-                    types = [] of Iyi::IyiMod::TypeDecl,
-                    impls = [] of Iyi::IyiMod::ImplRecord)
-  Iyi::IyiMod::Exports.new(functions, types, impls)
-end
-
-# Written by hand rather than by a compile, so that what a consumer is being
-# fed is on the page: these specs are about what reading one does.
-private def write_iyimod(dir : String, module_name : String,
-                         exports = exports,
-                         imports = [] of String,
-                         compiler_version = Iyi::IyiMod.compiler_version)
-  reference = Iyi::Program.new
-  artifact = Iyi::IyiMod::Artifact.new(
-    module_name: module_name,
-    source_path: "#{module_name}.iyi",
-    compiler_version: compiler_version,
-    target_triple: reference.codegen_target.to_s,
-    flags: reference.flags.to_a.sort!,
-    imports: imports.map { |name| Iyi::IyiMod::ImportEdge.new(name) },
-    exports: exports,
-  )
-  Iyi::IyiMod.write artifact, File.join(dir, "#{module_name}.iyimod")
-end
-
 describe "Semantic: iyi import" do
   # iyi: what the compiler says the first time somebody meets these rules.
   # Each of these used to answer with a fact about the compiler's internals —
@@ -1055,11 +1009,6 @@ describe "Semantic: iyi import" do
       end
     end
 
-    # `require` is refused in a `.iyi` file because there is nothing to
-    # require: the prelude is what a program gets. That reason stops being true
-    # when the prelude is Crystal's, and a program built `--crystal` has one.
-    # The rules are unaffected either way: they are the language's, and a
-    # prelude is a library.
     it "refuses `require` while iyi's own prelude is what a program has" do
       with_iyi_modules({
         "main.iyi" => <<-IYI,
@@ -1071,65 +1020,6 @@ describe "Semantic: iyi import" do
         expect_raises(Iyi::TypeException, /iyi has no `require`/) do
           semantic_iyi("main.iyi")
         end
-      end
-    end
-
-    # A reopen of the other language's type can add and cannot replace
-    # (SPEC.md R-3). `src/std/text.iyi` is what found it: a `private def
-    # byte_slice` of its own took Crystal's public one's place, and the first
-    # program that touched `Path` stopped on `private method 'byte_slice'
-    # called for String`, pointing at a line in the library that had not
-    # changed.
-    it "refuses a `.iyi` file that replaces a method of the other language" do
-      with_iyi_modules({
-        "lib.cr" => <<-CR,
-          class ::String
-            def shout : String
-              self
-            end
-          end
-          CR
-        "main.iyi" => <<-IYI,
-          module app/main
-
-          require "./lib.cr"
-
-          class ::String
-            def shout : String
-              self
-            end
-          end
-          IYI
-      }) do
-        expect_raises(Iyi::TypeException, /String#shout is the library's method, and this replaces it/) do
-          semantic_iyi_crystal("main.iyi")
-        end
-      end
-    end
-
-    # And the other half of the same sentence, which is what a reopen is for.
-    it "lets a `.iyi` file add a method to a type of the other language" do
-      with_iyi_modules({
-        "lib.cr" => <<-CR,
-          class ::String
-            def shout : String
-              self
-            end
-          end
-          CR
-        "main.iyi" => <<-IYI,
-          module app/main
-
-          require "./lib.cr"
-
-          class ::String
-            def whisper : String
-              self
-            end
-          end
-          IYI
-      }) do
-        semantic_iyi_crystal("main.iyi")
       end
     end
 

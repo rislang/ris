@@ -331,37 +331,6 @@ module Iyi
       Expressions.new(exps).at(node)
     end
 
-    # From, in a `.cr` program:
-    #
-    #     /regex/flags
-    #
-    # To declaring a constant with this value (if not already declared):
-    #
-    # ```
-    # Regex.new("regex", Regex::Options.new(flags))
-    # ```
-    #
-    # and then reading from that constant.
-    # That is, we cache regex literals to avoid recompiling them all of the time.
-    #
-    # Only do this for regex literals that don't contain interpolation.
-    # If there's an interpolation, expand to: Regex.new(interpolation, flags)
-    #
-    # iyi: refused where the program has no runtime `Regex`, which is iyi's
-    # own prelude (src/iyi/prelude.iyi) - the expansion below would hand the
-    # semantic pass a path into the empty `Regex` class the compiler
-    # pre-declares in Program and die with an "undefined method" far from the
-    # cause. The engine that exists there is the compiler's own, Iyi::Rx,
-    # RE2-shaped and compile-time only (SPEC.md III.10, Appendix B #17),
-    # reached through the macro methods.
-    #
-    # Under `--crystal` the library *is* Crystal's and `Regex` is in it: a
-    # `.iyi` file there already writes `Regex.new("a.c")`, `=~` and
-    # `String#match`, so refusing only the sugar for that call was a rule
-    # about a runtime that is present. It is the *program* that is asked
-    # now, not the file extension - which is what the message always said.
-    # Migrating a Crystal project is where it showed: `backtracer` parses a
-    # backtrace with four literals, and no rewrite of them is honest.
     def expand(node : RegexLiteral)
       # Both halves of the question, because either alone is wrong. A `.cr`
       # program is Crystal's and always had the literal; a `.iyi` one has it

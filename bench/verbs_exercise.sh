@@ -1,53 +1,3 @@
-#!/usr/bin/env bash
-# What the commands say when they refuse - SPEC.md III.1, and the identity
-# `bench/identity_floor.py` keeps.
-#
-#     bash bench/verbs_exercise.sh
-#
-# Every case here is a mistake a person makes at the command line, and the
-# claim is the same for all of them: the answer is a sentence naming what
-# was asked for, not a stack trace out of the compiler's own guts. Nine
-# defects this file was written for, each found by trying it:
-#
-#   * `iyi daemon start --socket <a path longer than the kernel takes>` died
-#     with "Path size exceeds the maximum size of 107 bytes (ArgumentError)"
-#     and a backtrace through `src/socket/address.cr` - a file the author
-#     never opened, about a socket they did ask for.
-#   * A `.iyi` file of unreadable bytes was reported as "not a valid Crystal
-#     source file", which names the other language for this one's file.
-#   * `-o nodir/prog` reached `ld.lld` and came back as "cannot open output
-#     file", from a program the author did not run, after a whole
-#     compilation had been paid for.
-#   * `iyi daemon start --socket <too long>` on a machine with no
-#     single-threaded server binary answered with a page about `make
-#     iyi-daemon`: the server was looked for before the path was read, so
-#     the refusal named the machine's missing binary rather than the
-#     argument the author had typed wrong.
-#   * `iyi doc` on a `.iyi` of unreadable bytes printed "Unhandled
-#     exception ... (InvalidByteSequenceError)", twelve frames of this
-#     compiler's own files, and an invitation to open an issue against the
-#     *other* language: the guard the entry file has had since the line
-#     above was written was never on the import path, and a `raise` inside
-#     a rescue clause carried every filesystem error past the handler too.
-#   * `iyi doc deep/inner/thing.iyi` printed `module thing` and an empty
-#     surface, exit 0, for a module that exports a documented function: the
-#     name came from the file's basename rather than from its header.
-#   * `iyi doc` on a module that does not compile answered `while importing
-#     "X"` - the wrapper, never the diagnostic inside it.
-#   * `iyi migrate` rewrote bytes that are not text as U+FFFD and reported
-#     `2 files -> 2 modules`, exit 0. A migration copies bytes.
-#   * `iyi migrate tree --out --check` created a directory named `--check`
-#     and exited 0; `mod dump FILE --json` printed prose and exited 0. A
-#     flag missing its value ate the next flag, and a flag after the path
-#     was dropped on the floor.
-#
-# So each case asserts three things: a non-zero exit, a phrase that names the
-# thing, and *no* trace - no "Unhandled exception", no "(SomeError)" tail, no
-# "from /.../src/" frame. The trace detector is proved against a recording of
-# the daemon crash at the end, because a check that cannot fail is not a
-# check.
-#
-# Exits non-zero if any case fails.
 
 set -u
 
@@ -614,11 +564,6 @@ elif [ ! -e "$WORK/runcache/ris-run-main-99998.tmp.exe" ]; then
 else
   echo "  an old runner's leftover is taken, a fresh one kept"
 fi
-# A path in another case, where the file system says it is the same
-# file. The root a header names was found by comparing strings, so `iyi
-# run HDR/APP/MAIN.IYI` found none, and the import beside the header was
-# "can't find module"; and an entry spelled `.IYI` was built against
-# Crystal's library, told of a `--crystal` it was never given.
 mkdir -p hdr/app
 printf 'module app/util\n\npub def answer : Int32\n  42\nend\n' > hdr/app/util.iyi
 printf 'module app/main\n\nimport app/util::{answer}\n\nputs answer\n' > hdr/app/main.iyi
@@ -1427,8 +1372,6 @@ refuses "an empty --emit-iyimod" "--emit-iyimod takes a directory" -- \
   "$IYI" build --emit-iyimod "" -o p good.iyi
 refuses "an empty --use-iyimod" "--use-iyimod takes a directory" -- \
   "$IYI" build --use-iyimod "" -o p good.iyi
-refuses "an empty --prelude" "--prelude takes a file name" -- \
-  "$IYI" build --prelude "" -o p good.iyi
 refuses "an empty --affected, checking" "--affected takes a changed file" -- \
   "$IYI" check --affected ""
 refuses "an empty --affected, testing" "--affected takes a changed file" -- \
@@ -1588,16 +1531,6 @@ else
   echo "  a missing prelude: said neither what was searched nor why"
   sed -n '1,8p' "$WORK/lost.txt"
   status=1
-fi
-# And `--crystal`'s prelude, which is the other library's: the Windows zip
-# does not carry it, and the answer was the `shards install` advice.
-env IYI_PATH="$WORK/nowhere" "$IYI" build --crystal -o lost good.iyi > "$WORK/lostcr.txt" 2>&1
-if grep -q 'shards install' "$WORK/lostcr.txt" || ! grep -q "The Windows zip does not include it" "$WORK/lostcr.txt"; then
-  echo "  a missing --crystal prelude: did not say whose library is missing"
-  sed -n '1,8p' "$WORK/lostcr.txt"
-  status=1
-else
-  echo "  a missing --crystal prelude: says it is the other library, which the Windows zip does not carry"
 fi
 # And the formatter, asked about a file that is not there. It printed
 # "file or directory does not exist" and exited 0, so a CI line that
@@ -1838,32 +1771,6 @@ else
 fi
 
 echo
-# The two libraries, mixed. `--crystal` gives a program Crystal's standard
-# library (SPEC.md item 12d) and `src/std` is written in iyi against iyi's
-# prelude, so importing one from the other cannot work — and what it
-# answered was `undefined constant IyiFloatText`, an internal name of a
-# prelude this build does not have, pointing into a file the author never
-# opened. An artifact of the same module has been refused by name since
-# IV.5; this is the source it is built from.
-printf 'import std/json\n\nputs 1\n' > std_in_crystal.iyi
-refuses "iyi's std in a build that asked for Crystal's" \
-  "is iyi's standard library" -- "$IYI" check --crystal std_in_crystal.iyi
-# And the two builds it must not touch: the same import without
-# `--crystal`, and a module of the author's own with `--crystal`.
-if "$IYI" check std_in_crystal.iyi > std_ok.log 2>&1; then
-  echo "  the same import without --crystal still compiles"
-else
-  echo "  a plain build of an std import was refused:"; head -3 std_ok.log; status=1
-fi
-mkdir -p mine
-printf 'module mine/util\n\npub def two : Int32\n  2\nend\n' > mine/util.iyi
-printf 'import mine/util::{two}\n\nputs two\n' > own_crystal.iyi
-if "$IYI" check --crystal own_crystal.iyi > own_crystal.log 2>&1; then
-  echo "  a module of the author's own is not std, and --crystal takes it"
-else
-  echo "  --crystal refused a module that is not std:"; head -3 own_crystal.log; status=1
-fi
-
 # An unmarked macro is the module's own through its artifact as from its
 # source: the declarations wrote it `pub macro`, so `App::Mac.inner` ran
 # and printed 1 where the source says "does not export 'inner'".
@@ -1877,15 +1784,6 @@ refuses "an unmarked macro, through its artifact" "does not export 'inner'" -- \
   "$IYI" build --use-iyimod "$WORK/mac/mods" -o "$WORK/mac/u" "$WORK/mac/inner.iyi"
 
 echo "== what the other verbs refuse, and what one of them prints"
-# `doc`, `migrate`, `bind` and the rest of `mod` were never in this file,
-# and every one of them failed the standard the verbs above hold to: `doc`
-# on bytes that are not text answered "Unhandled exception ...
-# (InvalidByteSequenceError)", a dozen frames of this compiler's own files
-# and an invitation to file an issue against the other language; `doc` on a
-# module below the search-path root printed an empty surface under a name
-# that does not exist, at exit 0; `migrate` rewrote bytes that are not text
-# as U+FFFD and said "2 files → 2 modules"; `--out --check` created a
-# directory named `--check`; and `mod dump FILE --json` printed prose.
 mkdir -p deep/inner
 printf 'module deep/inner/thing\n\n# A thing.\npub def thing_value : Int32\n  5\nend\n' \
   > deep/inner/thing.iyi
@@ -2022,66 +1920,8 @@ refuses "a second path after the module" "unexpected" -- \
 refuses "an unknown flag to the context pack" "unknown flag" -- \
   "$IYI" mod context --nonesuch user.iyi
 refuses "mod context on a directory" "is a directory" -- "$IYI" mod context adir.iyi
-refuses "a tree with bytes that are not text" "not a valid Crystal source file" -- \
-  "$IYI" migrate tree --out "$WORK/migrated"
-refuses "a flag where --out's directory goes" "--check is a flag" -- \
-  "$IYI" migrate tree --out --check
-refuses "a flag where --mods' directory goes" "--mods takes a directory" -- \
-  "$IYI" bind --mods --lib
-# A flag a verb does not have is refused by name. `bind --bogus` was a
-# shard, and the answer was "no lib/ here"; `migrate --bogus` was a tree
-# that was "no such directory"; `lsp --bogus extra` served a session.
-refuses "a flag bind does not have" "bind: unknown flag --bogus" -- "$IYI" bind --bogus
-refuses "a flag migrate does not have" "migrate: unknown flag --bogus" -- "$IYI" migrate --bogus
 refuses "a flag lsp does not have" "lsp: unknown flag --bogus" -- "$IYI" lsp --bogus extra
 refuses "an argument lsp does not take" "lsp takes no arguments, and 'extra' is one" -- "$IYI" lsp extra
-# A file where a directory goes is not a directory that is missing:
-# `--lib shard.yml` said "no shard.yml/ here; run `shards install`" and
-# `--mods shard.yml` died of mkdir's "File exists"; an empty shard name
-# said "no shard named  under lib/", the two spaces its whole answer.
-mkdir -p bindhere/lib/one/src
-printf 'name: one\n' > bindhere/lib/one/shard.yml
-printf 'module One\nend\n' > bindhere/lib/one/src/one.cr
-printf 'name: app\n' > bindhere/shard.yml
-refuses "a file where --lib's directory goes" "and bindhere/shard.yml is a file" -- \
-  "$IYI" bind --lib bindhere/shard.yml
-refuses "a file where --mods' directory goes" "and bindhere/shard.yml is a file" -- \
-  "$IYI" bind --lib bindhere/lib --mods bindhere/shard.yml
-refuses "an empty shard name" "the shard name is empty" -- \
-  "$IYI" bind --lib bindhere/lib --mods "$WORK/bindmods" ""
-# A directory that is there and will not take a file: `--mods` died of
-# the bind log's "Permission denied", `--out` of the first module's, and
-# `--out` naming a file of mkdir's "File exists". `$unwritable` is the
-# directory found above, since a mode bit does not bind as root.
-if [ -n "$unwritable" ]; then
-  case "$(uname -s)" in
-    MINGW* | MSYS* | CYGWIN* | Windows_NT)
-      MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL="*" icacls "$(cygpath -w "$WORK/readonly")" /deny "$USERNAME:(WD,AD)" > /dev/null ;;
-    *) chmod 500 "$WORK/readonly" ;;
-  esac
-  refuses "a --mods directory that will not take the files" "no permission to write there" -- \
-    "$IYI" bind --lib bindhere/lib --mods "$unwritable"
-  refuses "a --out directory that will not take the modules" "no permission to write there" -- \
-    "$IYI" migrate tree --out "$unwritable"
-  case "$(uname -s)" in
-    MINGW* | MSYS* | CYGWIN* | Windows_NT)
-      MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL="*" icacls "$(cygpath -w "$WORK/readonly")" /remove:d "$USERNAME" > /dev/null ;;
-    *) chmod 700 "$WORK/readonly" ;;
-  esac
-fi
-# As the author typed it, like `--lib` and `--mods` above: the expanded
-# path was a different string on Windows — 8.3 names long, separators
-# swapped — from the one on the command line.
-refuses "a file where --out's directory goes" "and bindhere/shard.yml is a file" -- \
-  "$IYI" migrate tree --out bindhere/shard.yml
-# The refusal `migrate` was asked for is the one it did not write: nothing
-# under `--out`, and no directory named after the flag.
-if [ -e "$WORK/migrated" ] || [ -e "$WORK/--check" ]; then
-  echo "  migrate wrote something while refusing"
-  status=1
-else
-  echo "  a refused migration left nothing behind"
-fi
 # A file the process cannot read. `chmod 000` does not bite as root, which
 # is what CI runs as, so the unreadable file here is the kernel's own:
 # `/proc/self/mem` refuses a read at offset 0 for everybody. It is this

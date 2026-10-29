@@ -27,13 +27,7 @@ compared byte for byte.
     gone, which is what a library ships as (III.7);
   * the mixed shape a project has: its own module source, its dependency an
     artifact;
-  * the same artifact-only workspace under `--crystal`, which is the arm
-    with the teeth. The daemon analyses *Crystal's* prelude, so that is the
-    mode where a build actually adopts one (IV.1d says as much: an iyi
-    build misses and warms nothing, because the analysis happens in a
-    forked child). Delete the line that re-applies `use_iyimod` to an
-    adopted program and this arm is the one that notices: the plain build
-    answers and both daemon builds fail.
+
 
 Two builds per arm through the daemon, because the first request is what
 warms a prelude and the second is what adopts one.
@@ -220,11 +214,7 @@ def main():
 
         for label, mid, switches in (
                 ("an artifact-only dependency", False, []),
-                ("a source module over an artifact", True, []),
-                # `--crystal` on both sides: an artifact carries which
-                # prelude it was built against, and a program cannot hold
-                # one module of each.
-                ("an artifact-only dependency under --crystal", False, ["--crystal"])):
+                ("a source module over an artifact", True, [])):
             where = os.path.join(work, label.replace(" ", "-"))
             entry, env, failure = artifact_workspace(where, mid, switches)
             if entry is None:

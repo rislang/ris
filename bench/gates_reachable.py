@@ -48,12 +48,6 @@ REFERENCE = re.compile(r"bench/([A-Za-z0-9_]+\.(?:sh|py))")
 # nothing for a job to pass or fail. Each says where its answer is used,
 # because "not a gate" is a claim and this is where it is written down.
 TOOLS = {
-    # `python3 bench/migrate_count.py <src dir>` counts the shapes a
-    # file-per-module language has to answer for in a Crystal tree. Its
-    # numbers on one 8,079-line application are read in SPEC.md III.6,
-    # "What a migration would need, measured"; the application is not in
-    # this repository, so there is no tree here to point it at.
-    "migrate_count.py",
     # `bash bench/http2_tape.sh [BASE]` compares std/http and std/hpack
     # before and after their move onto the tape; it measures, it does not
     # hold a line, and speed is measured for the whole project later.

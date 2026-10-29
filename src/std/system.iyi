@@ -72,8 +72,6 @@ module std/system
     fun sysctlbyname(name : UInt8*, old : Void*, old_size : UInt64*, new : Void*, new_size : UInt64) : Int32
   end
 {% elsif flag?(:win32) %}
-  # kernel32, which the prelude's `LibC` already links. `GetProcessAffinityMask`
-  # as src/iyi/thread.iyi binds it.
   lib LibC
     fun GetComputerNameExW(format : Int32, buffer : UInt16*, size : Int32*) : Int32
     fun GetSystemInfo(info : Void*) : Void

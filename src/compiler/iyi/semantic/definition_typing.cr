@@ -120,9 +120,6 @@ module Iyi::DefinitionTyping
       node.expressions << Nop.new if was_empty
     end
 
-    # The entry file plus everything it imported: exactly the code this
-    # build is responsible for. The prelude and `--crystal` sources never
-    # appear here.
     private def user_files : Set(String)
       files = Set(String).new
       if entry = @program.filename

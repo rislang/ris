@@ -96,15 +96,6 @@ struct Iyi::MathInterpreter
       node.raise("invalid constant value")
   end
 
-  # iyi: an operator folded at compile time answers what it answers at run
-  # time, so a constant, an enum value, a StaticArray size and a macro say
-  # the same as the line that computes it. The folding used the host's
-  # operators, which are the other library's: `X = -7 // 2` was -4 and
-  # `-7 % 2` was 1, where iyi's integers (number.iyi, std/int.iyi) truncate
-  # and take the dividend's sign: -3 and -1. That held for every constant,
-  # because codegen folds any integer constant it can. A source of the other
-  # language, or one built against the other library (`--crystal`), runs
-  # that library's operators and keeps its rules.
   def self.iyi_rules?(program : Program, location : Location?) : Bool
     program.iyi_prelude? && Lexer.iyi_source?(location.try(&.filename))
   end

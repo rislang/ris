@@ -150,8 +150,7 @@ module Iyi
   # answers nothing on Windows: `File.expand_path` and `Dir.current` both
   # spell a path with `\` there, the prefix never matched, and every verb that
   # chops a root off a path to print it short printed the absolute path
-  # instead — `migrate` said `C:\...\out\app.iyi` where it meant `app.iyi`,
-  # and copied an asset under a name still carrying its leading separator.
+  # instead of the relative path the caller needed.
   #
   # A path that is not under *base* answers nil rather than a `../..` climb,
   # because the callers print what they get: the short name when there is one

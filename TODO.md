@@ -112,13 +112,13 @@ first):
 * `<<` on a String parameter is refused: it names `io : String::Builder`
   or returning a new String. The copying `s + x` fallback is refused in
   loops and on fields.
-* Crystal code to ris through `ris fix` (migrate goes with Crystal
-  compat): each common refusal carries a `suggested_edit` that fix
-  applies. First `String.build` and `String::Builder.new` -> `s = ""`
-  and `<<`, an `IO` text parameter -> `String::Builder`, a new Array per
-  call -> `clear`, `Builder.new(64)`/`Array(T).new(64)` -> no capacity.
-  Gate per rule: a Crystal-style file that `ris fix` turns into one
-  that compiles, and fix leaves alone what it cannot prove.
+* Crystal code to ris through `ris fix`: each common refusal carries a
+  `suggested_edit` that fix applies. First `String.build` and
+  `String::Builder.new` -> `s = ""` and `<<`, an `IO` text parameter ->
+  `String::Builder`, a new Array per call -> `clear`,
+  `Builder.new(64)`/`Array(T).new(64)` -> no capacity. Gate per rule: a
+  Crystal-style file that `ris fix` turns into one that compiles, and
+  fix leaves alone what it cannot prove.
 * Refuse `String::Builder.new` and `String.build` outside src/iyi/,
   naming `s = ""` and `<<`; move std, tests and samples (about 300
   sites). Until then, drop arbitrary capacities (`Builder.new(64)`):

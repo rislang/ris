@@ -150,11 +150,6 @@ module Iyi
     # the prelude's `::Tuple` — a unit the file cannot name is not in
     # scope, and lexical lookup goes on outward.
     def iyi_walled_unit?(location : Location?, resolved : Type) : NamedType?
-      # iyi's law, not Crystal's: a `--crystal` build consumes bound
-      # shards whose signatures name each other's types transitively —
-      # that world keeps Crystal's rules, which is the mode's whole
-      # contract. The CI bind chain (kemal over backtracer) is the case
-      # that taught it.
       return unless iyi_prelude?
 
       base = resolved
@@ -529,27 +524,9 @@ module Iyi
     # unless `--emit-iyimod` asked for artifacts.
     getter iyi_exported_owners = Set(Type).new
 
-    # iyi: true when the owners above are a `--iyi-keep` namespace, the fill
-    # build `iyi bind` runs. A boundary's declarations write every parameter
-    # at the type the keep file instantiates it at, so a parameter the shard
-    # left untyped or wrote as a trait has one symbol and the producer
-    # defines it; an `--emit-iyimod` artifact writes the parameter as it was
-    # written, and the instantiations are the caller's
-    # (`IyiMod.untyped_parameter?`, `IyiMod.open_parameter?`).
-    property? iyi_fills_boundary = false
 
-    # iyi: true when this program was built against iyi's own prelude.
-    #
-    # `require` is refused in a `.iyi` file because there is no standard
-    # library to require — and that reason stops being true the moment the
-    # prelude is Crystal's. A program built `--crystal` has one, so a
-    # `.iyi` file in it may reach a shard the way a `.cr` file does. The rules
-    # that make a module a module are unaffected: they are the language's, and
-    # the prelude is a library.
     property? iyi_prelude = true
 
-    # iyi: true when building with `--crystal`, targeting Crystal's standard library and ABI.
-    property? crystal_library = false
 
     # ris: true when the prelude is iyi's, whose tape defines the scope
     # marks (`__iyi_scope_mark`) the normalizer wraps bodies in. Crystal's
@@ -566,19 +543,6 @@ module Iyi
         has_flag?("darwin") || has_flag?("win32") || has_flag?("wasm32")
     end
 
-    # iyi: true when this program's runtime symbols are `__iyi_*`.
-    #
-    # The prelude decides, because the prelude is what defines them: iyi's
-    # declares `__iyi_main`, `__iyi_raise` and the rest, Crystal's declares
-    # `__crystal_*`. A `.iyi` entry built against Crystal's library (the
-    # `.iyimod` specs do this without `--crystal`) has Crystal's runtime and
-    # must call it by Crystal's names; the entry's extension says nothing
-    # about which prelude was loaded, and deciding by it linked against
-    # symbols the prelude did not have. The ground truth is the prelude
-    # itself rather than the flag, as `iyi_object_layout?` reads it: a
-    # spec-built snippet carries the default `iyi_prelude?` and requires
-    # Crystal's prelude, or none. `IyiRuntimeLock` is iyi's prelude's, on
-    # every target and under every mode.
     def iyi_abi? : Bool
       iyi_prelude? && !types?.try(&.[]?("IyiRuntimeLock")).nil?
     end
@@ -635,14 +599,6 @@ module Iyi
       abi_name("type_id_to_class_name_map")
     end
 
-    # iyi: the directory the prelude was loaded from, once it has been.
-    #
-    # Every prelude file sits beside `prelude.iyi`, so this is what tells a
-    # def written in the prelude from a def written in a program or in an
-    # `src/std/` module — the question R-3 asks before it refuses a
-    # replacement (`TopLevelVisitor#iyi_refuse_override`). Nil under
-    # `--crystal`, where the library is the other language's and the `.cr`
-    # half of that rule answers instead.
     property iyi_prelude_dir : String? = nil
 
     # iyi: the types each object-code unit refers to a type id of, by unit name
@@ -770,40 +726,6 @@ module Iyi
     # give it a number. Filled only while writing artifacts.
     getter iyi_unit_symbol_literals = {} of String => Set(String)
 
-    # iyi: a def's body as it was written, by the location it was written at
-    # (SPEC.md IV.1g).
-    #
-    # A body that travels has to be *source*, and the node a `Def` holds stops
-    # being that as soon as anything instantiates it: `Route.new(method, path,
-    # &handler)` becomes `_.initialize(method, path, &handler)`, and an
-    # underscore is not a receiver anybody can write. Recorded in the top-level
-    # pass, which runs before any of that, and only while a boundary is being
-    # written.
-    getter iyi_def_bodies = {} of String => String
-
-    # iyi: the key one of those is stored under.
-    #
-    # The place and the name, which is what a `Def` and its declaration share —
-    # and for a macro-written one the place is not a place. A `Location` whose
-    # filename is a `VirtualFile` prints as `expanded macro: <name>`, with no
-    # file and no line in it, so every def a macro of that name wrote collapses
-    # to one key. `Log` has two `{% for %}` loops that write a `def info` each,
-    # one on the instance and one on the class, and the second took the first's
-    # body: the consumer read `Log#info` as `Top.info(…) { yield }`, which is
-    # `Log#info` calling itself — `recursive block expansion: blocks that yield
-    # are always inlined`.
-    #
-    # So a macro-written def is keyed on where the macro was *invoked*, which
-    # is a real file and line, plus where it sits inside the expansion. Both
-    # halves are needed: the first tells two macro calls apart and the second
-    # tells two defs inside one expansion apart.
-    def self.iyi_def_body_key(location : Location, name : String) : String
-      return "#{location}##{name}" if location.filename.is_a?(String)
-
-      site = location.expanded_location
-      "#{site}|#{location.line_number}:#{location.column_number}##{name}"
-    end
-
     # iyi: the symbols each unit's object code defines, by unit name (SPEC.md
     # IV.1g).
     #
@@ -836,15 +758,6 @@ module Iyi
     # Recorded only while writing artifacts.
     getter iyi_unit_libs = {} of String => Set(String)
 
-    # iyi: how deep `Call#instantiate` may recurse before it gives up, and how
-    # deep it is now.
-    #
-    # Nil for every ordinary build. `tool bind` sets one because it asks a
-    # question a shard's own compilation never asks — what does this method
-    # answer, called on nothing in particular — and for some methods the answer
-    # is that instantiating it does not terminate. A stack overflow is a signal
-    # rather than an exception, so the tool's own `rescue` cannot see one; a
-    # limit turns it into a refusal the tool already knows how to report.
     property iyi_instantiation_limit : Int32? = nil
     property iyi_instantiation_depth = 0
 
@@ -982,19 +895,8 @@ module Iyi
     # one.
     getter iyi_usings = {} of String => Array(String)
 
-    # iyi: under `--crystal`, the library files each `.iyi` file required, by
-    # absolute filename and in the order they were required (SPEC.md IV.1g,
-    # `Requires`).
-    #
-    # A module's object code refers to Crystal's types by name, and only the
-    # program that required the same library has those names to define. So they
-    # travel in the artifact and the consumer replays them.
     getter iyi_module_requires = {} of String => Array(String)
 
-    # iyi: the library-name requires a *Crystal* source made, with where each
-    # one resolved. `tool bind` needs them and the map above cannot hold them:
-    # it is keyed on `.iyi` files, and a shard has none.
-    getter iyi_crystal_requires = {} of String => String
 
     # iyi: the method bodies each file's module has to ship, by absolute
     # filename and then by `IyiMod.mono_body_key` (SPEC.md IV.2, `MonoBodies`).
@@ -1006,15 +908,6 @@ module Iyi
     # could have emitted. Everything else stays behind and arrives as machine
     # code in `ObjectCode`.
     getter iyi_mono_bodies = {} of String => Hash(String, String)
-
-    # iyi: the defs whose bodies travel because their machine code enumerates an
-    # open type's members, by the location each was written at (SPEC.md III.6).
-    #
-    # Filled by `Iyi::OpenTravel`, which marks the def itself as well. The
-    # location is here for the one reader that has no `Def` to ask: `iyi tool
-    # bind` decides what a Crystal shard's boundary carries from its own record
-    # of each method, and a location names one def in one build.
-    getter iyi_open_travel_defs = Set(String).new
 
     # iyi: the macros each file declares, as source text, by absolute filename
     # (SPEC.md IV.1, `MacroBodies`).
@@ -1439,16 +1332,6 @@ module Iyi
       types["Union"] = @union = GenericUnionType.new self, self, "Union", value, ["T"]
       types["Crystal"] = @crystal = NonGenericModuleType.new self, self, "Crystal"
 
-      # iyi: everything above, recorded rather than written down again.
-      #
-      # `tool bind` asks whether a program could name a type without requiring
-      # anything, and for these the answer is yes by construction: they are here
-      # before the first line of any prelude is read, iyi's included. It used to
-      # ask a literal list kept beside the tool, and that list was wrong in both
-      # directions — it claimed `Void`, `UInt32` and `Float64`, which iyi's
-      # prelude never declares, and omitted `Slice`, `Int` and `Tuple`, which
-      # are created right here. A list is a claim that everything not in it is
-      # somebody else's work, and nothing was enforcing the claim.
       @builtin_type_names = types.keys.to_set
 
       types["ARGC_UNSAFE"] = @argc = argc_unsafe = Const.new self, self, "ARGC_UNSAFE", Primitive.new("argc", int32)

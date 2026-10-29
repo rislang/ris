@@ -124,8 +124,6 @@ module Iyi
     # `require "prelude"` (or whatever name is set here) to
     # the source file to compile.
     property prelude = "prelude"
-    # iyi: true when building with `--crystal`, targeting Crystal's standard library and ABI.
-    property? crystal_library = false
 
     # iyi: directory to write a `.iyimod` per imported module into, or nil
     # (SPEC.md IV.1). Set by `--emit-iyimod`.
@@ -151,20 +149,7 @@ module Iyi
     # does not change what a build that already worked resolves.
     property iyi_header_root : String? = nil
 
-    # iyi: a namespace whose methods this build must define rather than inline.
-    #
-    # `--emit-iyimod` already says this about iyi modules, and the reason is the
-    # same one: a method whose body is a literal is inlined and emits no symbol,
-    # which is right for a whole-program build and wrong for one producing code
-    # somebody else will call by name. A Crystal shard bound by `tool bind` is
-    # that second thing and has no iyi modules to key on, so it says which
-    # namespace it is producing.
-    property iyi_keep : String? = nil
 
-    # iyi: where `tool bind` writes the boundary it generates (SPEC.md Part V
-    # item 12). Not `emit_iyimod`: that one writes this build's own modules and
-    # refuses to run under Crystal's library, which is where a shard is read.
-    property emit_bind : String? = nil
 
     # iyi: directory to read a `.iyimod` per imported module from, or nil
     # (SPEC.md IV.1). Set by `--use-iyimod`. An import that finds one there is
@@ -421,7 +406,6 @@ module Iyi
       program.color = color?
       program.stdout = stdout
       program.show_error_trace = show_error_trace?
-      program.crystal_library = crystal_library?
       yield program
 
       node = @progress_tracker.stage("Parse") do
@@ -442,12 +426,10 @@ module Iyi
       end
 
       prepared = prepare_iyimods program
-      keep_iyi_namespace program
 
       units = codegen program, node, sources, output_filename unless @no_codegen
 
       write_iyimods program, prepared, units
-      fill_bind_artifact program, units
 
       @progress_tracker.clear
       print_macro_run_stats(program)
@@ -518,7 +500,7 @@ module Iyi
 
     # Re-applied by the adopt path above. `new_program` is what would otherwise
     # have set them, and adoption skips it.
-    APPLIED_ON_ADOPT = %w(use_iyimod iyi_prefers_source no_codegen emit_iyimod warnings color stdout show_error_trace iyi_mod_table iyi_file_overrides iyi_project_root iyi_header_root crystal_library)
+    APPLIED_ON_ADOPT = %w(use_iyimod iyi_prefers_source no_codegen emit_iyimod warnings color stdout show_error_trace iyi_mod_table iyi_file_overrides iyi_project_root iyi_header_root)
     # Neither, and two of these are judgements rather than facts. `mcpu`,
     # `mattr` and `mcmodel` reach the target machine and the target machine
     # reaches codegen, not analysis — a prelude analysed for one `-mcpu` is the
@@ -527,7 +509,7 @@ module Iyi
     # which is visible now rather than merely true.
     OUTSIDE_PRELUDE_ANALYSIS = %w(
       cleanup cross_compile dependency_printer dump_ll emit_base_filename
-      emit_bind emit_targets frame_pointers iyi_direct_link iyi_keep
+      emit_targets frame_pointers iyi_direct_link
       iyi_link_driver_only link_flags mattr mcmodel mcpu n_threads no_cleanup
       program progress_tracker single_module stderr target_machine verbose
     )
@@ -614,12 +596,10 @@ module Iyi
       end
 
       prepared = prepare_iyimods program
-      keep_iyi_namespace program
 
       units = codegen program, node, source, output_filename unless @no_codegen
 
       write_iyimods program, prepared, units
-      fill_bind_artifact program, units
 
       @progress_tracker.clear
       print_macro_run_stats(program)
@@ -627,36 +607,6 @@ module Iyi
       Prof.report
 
       Result.new program, node
-    end
-
-    # iyi: describes a `.iyimod` per imported module (SPEC.md IV.1), when
-    # `--emit-iyimod` asked for it. Everything but the object code, which does
-    # not exist yet — see `write_iyimods`.
-    #
-    # Only imported modules. The entry file is a program rather than a
-    # dependency, and nothing can import it — III.5 rule 1 puts its initialiser
-    # last for the same reason.
-    #
-    # The file is named after the module path with `/` kept, so `app/greeter`
-    # lands at `DIR/app/greeter.iyimod` and the layout mirrors the source tree.
-    # IV.6 #6's segment rule is what makes that safe: two module paths cannot
-    # collide, so two modules cannot claim one artifact.
-    #
-    # Run before codegen, because collecting a module's surface is where R-2 is
-    # enforced — an exported signature missing a block annotation is refused
-    # here. Refusing it after a full codegen and link would make the compiler
-    # spend the whole build on a program it had already decided not to write.
-    # iyi: `--iyi-keep Kemal`, the same rule `prepare_iyimods` applies to a
-    # module it is writing, applied to a namespace named on the command line.
-    private def keep_iyi_namespace(program : Program) : Nil
-      return unless root = iyi_keep
-
-      type = program.types?.try &.[]?(root)
-      return unless type.is_a?(ModuleType)
-
-      program.iyi_fills_boundary = true
-      program.iyi_exported_owners << type
-      collect_iyi_owners type, program.iyi_exported_owners
     end
 
     private def prepare_iyimods(program : Program) : Array({String, IyiMod::Artifact})?
@@ -727,7 +677,6 @@ module Iyi
           macro_bodies: collect_iyi_macros(program, module_name),
           initialiser: program.iyi_module_initialiser_source[filename]? || "",
           requires: program.iyi_module_requires[filename]? || [] of String,
-          crystal_library: !program.iyi_prelude?,
           # Always, for a module of iyi's own: the header it was written under
           # desugars to `extend self`, and a consumer reading these
           # declarations back has to get the same module. The field is what
@@ -765,139 +714,6 @@ module Iyi
       end
 
       prepared
-    end
-
-    # iyi: the object code of a namespace `tool bind` wrote a boundary for.
-    #
-    # `tool bind` runs without codegen — it reads and counts, and the artifact it
-    # writes is declarations. The object code is this build's to add: the keep
-    # file it generated is what forces every exported method to be emitted, and
-    # compiling that file is where the units exist.
-    #
-    # Per unit rather than as one object, which is the whole point. A keep file
-    # compiled with `--emit obj` merges into a single object carrying the whole
-    # of Crystal's library with it, and a program can have that library once —
-    # link it into a consumer that has none and the shard's state never starts,
-    # link it into one that has it and every runtime global is defined twice. An
-    # ordinary build leaves one object per type, and the ones this namespace owns
-    # carry no runtime at all.
-    private def fill_bind_artifact(program : Program, units : Array(CompilationUnit)?) : Nil
-      return unless dir = emit_bind
-      return unless root = iyi_keep
-      return unless units
-
-      type = program.types?.try &.[]?(root)
-      return unless type.is_a?(ModuleType)
-
-      names = [type.to_s] of String
-      collect_iyi_unit_names type, names
-      names.sort!.uniq!
-
-      path = File.join(dir, "#{Iyi.iyi_module_name(root).gsub('/', '-')}.iyimod")
-      return unless File.file?(path)
-
-      artifact = IyiMod.read path
-      units_by_name = units.to_h { |unit| {unit.original_name, unit} }
-      artifact.object_code = collect_iyi_object_code(names, units_by_name)
-      artifact.type_ids = collect_iyi_type_ids(program, names)
-      artifact.constants = collect_iyi_constants(program, names)
-      artifact.regexes = collect_iyi_regexes(program, artifact.constants)
-      artifact.class_vars = collect_iyi_unit_class_vars(program, names)
-      artifact.match_types = collect_iyi_match_types(program, names)
-      artifact.symbol_literals = collect_iyi_symbol_literals(program, names)
-      artifact.symbols = collect_iyi_symbols(program, names)
-      artifact.libs = collect_iyi_libs(program, names)
-      artifact.layouts = collect_iyi_layouts(program, type)
-      # Reached only if the keep file compiled, which is the whole of what this
-      # says. A boundary whose fill died leaves every declaration on disk and no
-      # machine code, and that is not the same thing as having none.
-      artifact.filled = true
-
-      add_bind_boundary_imports artifact, dir, path
-      IyiMod.write artifact, path
-
-      carried = artifact.object_code.sum { |unit| unit.code.size }
-      stdout.puts "filled #{path}: #{artifact.object_code.size} units, " \
-                  "#{carried} bytes, #{artifact.type_ids.size} type ids, " \
-                  "#{artifact.constants.size} constants"
-    end
-
-    # iyi: a boundary this one *numbers* is a boundary this one depends on.
-    #
-    # A type id is the only place that dependency shows. `Kemal` names no
-    # `Radix` type in any declaration and its object code refers to
-    # `Array(Radix::Node(...))` — so a consumer that imported `kemal` had never
-    # heard of `radix` and could not name what `kemal` numbered.
-    #
-    # Read from the boundaries sitting beside this one rather than from what
-    # `tool bind` knew, because the two are different processes: `tool bind`
-    # writes the declarations and this build fills the object code, and only
-    # this one knows the type ids.
-    private def add_bind_boundary_imports(artifact : IyiMod::Artifact, dir : String,
-                                          own : String) : Nil
-      edges = artifact.imports.map(&.module_name).to_set
-      Dir.glob(Iyi.glob_root(dir).join("*.iyimod")).sort.each do |path|
-        next if File.expand_path(path) == File.expand_path(own)
-
-        begin
-          other = IyiMod.read path
-        rescue
-          next
-        end
-        next if edges.includes?(other.module_name)
-
-        # By whole name, as the *producer* writes it. This was a substring
-        # test over the bare declared names, and a bare name is a common word:
-        # `DB` declares `Any` and `Kemal` declares `Config`, so every artifact
-        # whose object code numbered a `JSON::Any` or a `Log::Configuration`
-        # picked up an edge to a shard it had never heard of. `jwt` came out
-        # importing eleven boundaries, nine of which it names nothing from,
-        # and a program that wanted `jwt` was handed `p_g` — whose own
-        # declarations it then could not satisfy, so nothing built at all.
-        declared = Set(String).new
-        prefix = other.class_root ? "" : other.module_name.split('/').map(&.camelcase).join("::")
-        other.exports.types.each { |declaration| collect_bind_declared declaration, prefix, declared }
-        next unless artifact.type_ids.any? { |id| type_id_names(id).any? { |name| declared.includes?(name) } }
-
-        # Not if it already points here. Every one of these boundaries was bound
-        # in a program that held all of them, so each one's units number the
-        # others' instantiations — `Radix`'s number `Result(Kemal::Route)`,
-        # which is Kemal's instantiation and not Radix's. Read as a dependency
-        # both ways it is a cycle, and an import graph is a DAG (R-1).
-        next if other.imports.any? { |edge| edge.module_name == artifact.module_name }
-
-        artifact.imports << IyiMod::ImportEdge.new(other.module_name)
-        edges << other.module_name
-      end
-    end
-
-    # Every name *declared_by* one boundary, qualified the way the program the
-    # fill build compiled spells it: a module root's declarations are written
-    # under the module (`bin_data` declares `BitField`, which that program
-    # calls `BinData::BitField`), a class root's are already absolute.
-    private def collect_bind_declared(declaration : IyiMod::TypeDecl, prefix : String,
-                                      into : Set(String)) : Nil
-      qualified = prefix.empty? ? declaration.name : "#{prefix}::#{declaration.name}"
-      into << qualified
-      declaration.types.each { |nested| collect_bind_declared nested, qualified, into }
-    end
-
-    # The type names inside one type id: `Hash::Entry(String,
-    # BinData::BitField)` names three. Every character that cannot be in a
-    # name ends one, and a leading `::` is not part of it.
-    private def type_id_names(id : String) : Array(String)
-      names = [] of String
-      from = -1
-      id.each_char_with_index do |char, index|
-        if char.ascii_alphanumeric? || char == '_' || char == ':'
-          from = index if from < 0
-        elsif from >= 0
-          names << id[from...index].lchop("::")
-          from = -1
-        end
-      end
-      names << id[from..].lchop("::") if from >= 0
-      names
     end
 
     # iyi: attaches each module's object code and writes the artifacts.
@@ -1287,43 +1103,6 @@ module Iyi
       end
     end
 
-    # iyi: the machine code for a module's own definitions, for `ObjectCode`
-    # (IV.1). Empty on a `--no-codegen` build, which generated none.
-    #
-    # Codegen already emits one LLVM module — and so one object file — per
-    # owner type, and the split is a partition: measured on the Kemal port, no
-    # symbol is defined by two of its 23 units. So a module's own code is a set
-    # of whole object files, identified by naming the types the module declares
-    # and taking the unit of each. A generic type contributes one unit per
-    # instantiation, and a module's own `pub def`s are owned by the module type
-    # itself, which is why that is in the set alongside the types under it.
-    #
-    # A module's bodies also instantiate *prelude* generics at its own types —
-    # `Array(Kemal::Router::Router::RouteDefinition)` — and that unit is named
-    # after `Array`, not after anything the module declares, so it is not here.
-    # It does not have to be: a callee the emitting module does not own is
-    # copied into the module's own unit with internal linkage, and a generic's
-    # instantiated methods are callees like any other. What the copy leaves
-    # behind is the type id it refers to, which is what `type_ids` carries.
-    #
-    # What is here is what the *consuming build* reached, not the module's
-    # whole surface. Codegen is demand-driven, so `app/greeter`'s artifact
-    # carries `polite` and not `title`, because `modules.iyi` calls one and not
-    # the other. That is `--emit-iyimod` living inside an ordinary build: a
-    # module compiled on its own would instantiate every exported def at the
-    # signature R-2 makes it write down, and it is exactly the command that
-    # cannot precede the artifact it produces.
-    #
-    # The sharp edge of that, because it links rather than refusing: a
-    # parameter whose declared type is *wider* than the argument this build
-    # passed is compiled at the argument's type, and the consumer - which
-    # reads the declaration and widens the call to it, `iyi_artifact_arg_types`
-    # - asks the linker for a symbol nobody emitted. Eight lines reproduce it:
-    # `pub class Crate` with `property? note : String | Nil` in one module and
-    # `crate.note = "hi"` in another emits `Crate#note=<String>` and links
-    # against `Crate#note=<(String | Nil)>`. What the keep file does for
-    # `iyi bind` - name every declared signature so the fill build compiles
-    # it - is what this needs and does not have.
     private def collect_iyi_object_code(unit_names : Array(String),
                                         units_by_name : Hash(String, CompilationUnit)?) : Array(IyiMod::ObjectUnit)
       code = [] of IyiMod::ObjectUnit
@@ -2036,9 +1815,6 @@ module Iyi
             visibility: declared.private? ? "private" : "",
             types: iyi_carried_types(program, filename, declared, path: container),
             macros: iyi_macros_on(declared),
-            # Read the way `Iyi::Bind` reads it: a module that extends itself
-            # is one whose metaclass has it as an ancestor, which is what
-            # makes `Helper.twice` and `Helper#twice` the same method.
             extends_self: declared.metaclass.ancestors.includes?(declared),
             includes: iyi_included_modules(declared),
             doc: declared.doc || "",
@@ -2084,20 +1860,6 @@ module Iyi
       declarations.sort_by! &.name
     end
 
-    # iyi: a `lib` the module declares, as the lines that declare it.
-    #
-    # A `fun` is not a symbol this artifact's object code answers for — the
-    # system linker resolves `opendir` against libc — but a consumer that
-    # compiles a body calling one needs the declaration to make the call
-    # with, which is the same reason `Iyi::Bind` carries them for a shard
-    # (`TypeDecl#funs`). The types nested inside travel with it: `std/file`
-    # writes `struct Stat` in its `lib`, and a field typed `LibC::Stat` is
-    # a name the consumer has to have.
-    #
-    # As text, for the reason `Iyi::Bind` writes them as text: a `fun` has
-    # a shape no `def` has, and it is rendered back inside the same `lib`
-    # in the same module, where each restriction means what it meant where
-    # it was written.
     private def iyi_lib_declaration(program : Program, filename : String,
                                     type : LibType, name : String,
                                     container : String) : IyiMod::TypeDecl
@@ -2147,12 +1909,6 @@ module Iyi
       )
     end
 
-    # iyi: one `fun` line, as the module wrote it.
-    #
-    # The restriction where the node still has one and the resolved type
-    # where it does not, which is the distinction `Iyi::Bind`'s renderer
-    # found: an `External`'s args come out of semantic typed and, for some
-    # of them, stripped.
     private def iyi_render_fun(a_def : External) : String
       String.build do |io|
         io << "fun " << a_def.name
@@ -2210,20 +1966,6 @@ module Iyi
       end
     end
 
-    # iyi: a type's kind, with `abstract` in front of it where it is one.
-    #
-    # The word is part of the declaration and not decoration: an `abstract
-    # def` is only allowed on an abstract type, so a class that lost the word
-    # arrived carrying a requirement it could not hold — `can't define
-    # abstract def on non-abstract class`, which is where `std/log` stopped.
-    # `Iyi::Bind` writes it into `kind` the same way, and
-    # `render_type_header` prints the string as it is.
-    #
-    # Less the word `generic`, which is the description and not the keyword:
-    # `render_type_header` takes it off the front, and behind `abstract` it
-    # stayed, so `pub abstract class GA(T)` came back as `pub abstract generic
-    # class GA(T)` — "pub abstract takes a class, a struct or a def" from the
-    # artifact reader, and the same line in `iyi doc` and `mod context`.
     private def iyi_type_kind(type : Type) : String
       abstract_type = type.responds_to?(:abstract?) && type.abstract?
       abstract_type ? "abstract #{type.type_desc.lchop("generic ")}" : type.type_desc
@@ -2287,26 +2029,6 @@ module Iyi
       type.as?(GenericType).try(&.type_vars) || [] of String
     end
 
-    # iyi: the modules a type includes, written back as the renderer's
-    # `include` lines.
-    #
-    # An edge like `superclass` and for the same reason: a consumer
-    # re-declares this type from what arrives, so an include that did not
-    # arrive is a set of methods the type no longer has. What it costs is
-    # not an error at the boundary but one at the callsite — `std/colorize`
-    # is a module whose whole surface is `class ::Object; include
-    # ObjectExtensions; end`, and a consumer reading it from its artifact
-    # was told `undefined method 'colorize' for String`.
-    #
-    # `parents` is the superclass and the includes together in resolution
-    # order, so the superclass comes off and what is left is what was
-    # written. A `GenericModuleInstanceType` — `Comparable(T)` — is an
-    # include as much as a plain module is and is not a `ModuleType`, which
-    # is the distinction `Iyi::Bind` learned the same way.
-    #
-    # Relative to the namespace where they are siblings, for the reason
-    # `iyi_superclass_name` is: `inheritance_order` places a declaration by
-    # matching these names against its siblings.
     private def iyi_included_modules(type : Type) : Array(String)
       names = [] of String
       return names unless type.responds_to?(:parents)
@@ -2331,25 +2053,6 @@ module Iyi
       names
     end
 
-    # iyi: the annotations written above *type* that only a macro reads, as
-    # the lines `render_type_declaration` writes back above it.
-    #
-    # A def using `{{@type}}` travels and is expanded again on the far side,
-    # so what it asks of `@type` has to arrive with the type.
-    # `bench/migrate_fixture`'s `Report#priced?` is `{{
-    # @type.annotation(Shop::Priced) ? true : false }}` over an
-    # `@[Shop::Priced] class Report`; the declaration arrived bare, and the
-    # program built from the artifacts printed `priced? false` where the
-    # source build printed `priced? true`.
-    #
-    # Not the compiler's own, which `Program` declares at the top: each does
-    # something besides being read, and the ones a declaration needs are
-    # written by their own rules (`@[Share]` in `iyi_type_declaration`,
-    # `@[Flags]` on an enum, `@[Link]` on a lib). Tape markers travel
-    # here because its lifetime contract also applies to carried types.
-    # The path is an edge, for
-    # `inheritance_order`: an annotation has to be declared above the type it
-    # is written over.
     private def iyi_read_annotations(type : Type) : Array(String)
       written = [] of String
       type.annotations.try &.each do |annotation_type, values|
@@ -2568,55 +2271,6 @@ module Iyi
       !!a_def.all_annotations.try &.any? { |ann| ann.path.names.last? == "Primitive" }
     end
 
-    # iyi: whether a consumer would ask for a symbol this build had no reason
-    # to emit (SPEC.md IV.1g).
-    #
-    # A consumer keys a call on what the *declaration* says, not on what it
-    # passes: `Call#iyi_artifact_arg_types` widens every argument to the
-    # parameter's written type, because that is the contract and because the
-    # producer's object code is supposed to have been keyed the same way.
-    # Inside an ordinary build it is not. Codegen is demand-driven, so a
-    # parameter written `Path | String` and called with a `String` is compiled
-    # as `cd<String>` and the consumer asks the linker for
-    # `cd<(Std::Path::Path | String)>` — a symbol nobody emitted. Five of the
-    # library's own modules linked no further: `std/dir`, `std/env`,
-    # `std/gc`, `std/big` and `std/capsule`, each on a union or on an
-    # abstract number's `Int+`.
-    #
-    # What `iyi bind` does about it is a keep file — a second build that names
-    # every declared signature — and an `--emit-iyimod` build has no second
-    # build to do it in. So the body travels instead, the way a block-taking
-    # def's already does: the consumer compiles it at the types it asked for,
-    # and there is no symbol to miss. The producer's own narrow instantiation
-    # stays in the object code for its own callers; the two have different
-    # names and do not collide. Where the parameter admits a type it does not
-    # name — a trait, a class with subclasses — that instantiation is private
-    # to the unit that called it instead (`IyiMod.open_parameter?`), because
-    # the type may be another module's and the module's own unit would then
-    # call into code nothing ties it to (issue #134).
-    #
-    # Three places the declaration can be wider than what this build
-    # compiled, and a symbol carries all three:
-    #
-    # * a **parameter**, which is where this started;
-    # * the **receiver**, because a method on a class something inherits from
-    #   is reached through the virtual type wherever a declaration names the
-    #   base — `@sink : Sink` holds a `Sink+` — and codegen puts those calls
-    #   in a unit of their own, `Sink+@Sink#take`. The producer emits the
-    #   ones its own program dispatched virtually and no others, so
-    #   `std/io`'s `Reader` has two subclasses and the link ended on
-    #   `Reader+@Std::Io::Reader#read_all`;
-    # * the **return**, because it is in the name too. A consumer types a
-    #   call from the declaration's return annotation and holds the answer as
-    #   its virtual type, so `def self.new_element(name : String) : Node`
-    #   was asked for as `new_element<String>:Std::Xml::Node+` where the
-    #   producer, whose body returns exactly a `Node`, wrote
-    #   `…:Std::Xml::Node`.
-    #
-    # Only where the two can disagree. A signature written in leaf types is
-    # the one every call to it has, so the ordinary method is untouched and
-    # keeps its body behind — which is the whole point of IV.2 and most of
-    # what an artifact saves.
     private def iyi_widened_parameters?(scope : Type, a_def : Def) : Bool
       owner = a_def.owner? || scope
 
@@ -3156,7 +2810,6 @@ module Iyi
       program.filename = sources.first.filename
       program.codegen_target = codegen_target
       program.target_machine = create_target_machine
-      program.crystal_library = crystal_library?
       program.flags << "release" if release?
       program.flags << "debug" unless debug.none?
       program.flags << "static" if static?
@@ -3837,11 +3490,6 @@ module Iyi
       # `Crystal::EventLoop::Polling` internals a demand-driven build never
       # reaches — and the units are written after the link, so a boundary that
       # had everything it needed got nothing.
-      if emit_bind && iyi_keep
-        @progress_tracker.clear
-        return units
-      end
-
       @progress_tracker.stage("Codegen (linking)") do
         Dir.cd(output_dir) do
           begin
