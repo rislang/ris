@@ -163,17 +163,12 @@ else
 fi
 
 # Interpolated output and panic text from iyi library code stay on tape.
-out=$(
-  probe=$(mktemp -d)
-  "$RIS" build -o "$probe/retained" \
-    test/ris/refused/interpolation_retained.ri 2>&1
-  code=$?
-  rm -rf "$probe"
-  exit "$code"
-)
-if [ "$?" -ne 0 ] &&
-    grep -qE 'use String.interpolate\(...\) on the current tape|retain it with `.copy_to' <<<"$out"; then
-  echo 'refused  interpolation_retained (names the String form)'
+# A library def's interpolated String lands on the caller's tape.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/interpolation_retained.ri 2>&1)
+if [ "$?" -eq 0 ] &&
+    grep -qE '^PASS: interpolation retained [0-9]+$' <<<"$out" &&
+    grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+  echo 'runs     interpolation_retained (on the caller tape, no heap)'
 else
   echo "FAILED   interpolation_retained: $out"; status=1
 fi
@@ -709,6 +704,8 @@ expect ffi_string_new   "Build it with \`String.build(capacity)"
 expect pointer_unsafe_reason "takes the reason the def needs a pointer"
 expect pointer_unsafe_stray  "@[PointerUnsafe] marks a def"
 expect pointer_unsafe_lib    "a \`lib\` block outside an @[Ffi] module"
+expect pointer_unsafe_to_unsafe "pass \`text.to_unsafe\` straight to the \`lib\` fun"
+expect ffi_to_unsafe_stored "pass \`text.to_unsafe\` straight to the \`lib\` fun"
 expect raw_pointer      "to_unsafe\` of a String outside a @[TapeUnsafe] def"
 expect raw_view         "String.new(pointer, size)\` outside a @[TapeUnsafe] def"
 expect std/tape_unsafe_codec "reaches no \`lib\` fun or system call"

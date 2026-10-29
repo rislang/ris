@@ -1,0 +1,11 @@
+# In an @[Ffi] module a String's pointer goes straight to the lib fun.
+@[Ffi]
+module test/ris/refused/ffi_to_unsafe_stored
+
+lib LibC4
+  fun strlen(s : UInt8*) : UInt64
+end
+
+text = "four".to_heap
+pointer = text.to_unsafe
+puts LibC4.strlen(pointer)

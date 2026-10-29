@@ -1,0 +1,11 @@
+# A group joined inside `tape do` may borrow its immutable text (TAPE_SPEC
+# 1.6): the task reads the view before the tape ends.
+module test/ris/contract_spawn
+
+tape do
+  view = ""
+  view << "abc"
+  group do |g|
+    g.spawn { puts view }
+  end
+end

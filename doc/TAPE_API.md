@@ -26,6 +26,8 @@ Text is bytes: `text[0]` is a UInt8. Strings have `split`, `index`,
 `starts_with?`, `to_i?`; arrays `map`, `select`, `each`, `join(writer)`.
 Retain with `copy_to(owner)`; `to_heap`, `to_s` and `@[TapeToHeap]` are
 migration heap sites. A def may return tape data to an open caller tape.
+A String's `to_unsafe` is refused, save as a `lib` fun's direct argument in
+an `@[Ffi]` module.
 
 ## Records: @[OnTape]
 

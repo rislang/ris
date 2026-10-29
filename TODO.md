@@ -263,13 +263,11 @@ first):
     flat.ri still fails: the shrink checker counts Array::Link as a view
     (tape_shrink_checker.cr:860), so push after next_link is refused.
     A link is an index and survives growth: drop it from that list.
-  * pointer_unsafe and ffi_marked: `to_unsafe` in an @[PointerUnsafe]
-    def or an @[Ffi] C call is refused as needing @[TapeUnsafe]; the
-    marks AGENTS.md names should satisfy the String pointer rule.
-  * Refusals tape-only retired, fixtures stale? interpolation_retained
-    now builds (returning "retained #{v}"); call_contracts'
-    contract_spawn (task capturing a view, group inside tape) builds.
-    Decide: drop the fixtures or restore the rules.
+  * pointer_unsafe and ffi_marked: done. An @[Ffi] module passes
+    `text.to_unsafe` straight to a lib fun; elsewhere it stays refused
+    (pointer_unsafe_to_unsafe, ffi_to_unsafe_stored).
+  * interpolation_retained and contract_spawn: done, now runs gates
+    (TAPE_SPEC 1.6); task_local_tape(_helper) cover the unsafe cases.
   * autocert lifecycle and wire: Array(Hash(String, Json::Any)) cannot
     hold growing values (SlicePool rule).
   * log_metadata, log_tape, samples/ris/orders: log.iyi:279 "cannot grow

@@ -11,6 +11,8 @@ class Iyi::TapePointerChecker
   getter program : Program
   @seen = Set(UInt64).new
   @defs = [] of Def
+  # The `to_unsafe` calls an @[Ffi] module passes straight to a `lib` fun.
+  @lib_arguments = Set(UInt64).new
 
   getter graph : TapeCallGraph
 
@@ -61,14 +63,30 @@ class Iyi::TapePointerChecker
       !!@graph.targets(node).try &.any? { |target| target.owner.to_s == "String::Builder" }
   end
 
+  # Whether *node* calls a `lib` fun from an @[Ffi] module: its String
+  # `to_unsafe` arguments go straight to C, the module's one pointer use.
+  def note_lib_call(node : Call) : Nil
+    return unless node.obj.try(&.type?).is_a?(LibType)
+    return unless file = node.location.try(&.filename)
+    return unless file.is_a?(String)
+    return unless @program.ffi_files.includes?(File.expand_path(file))
+    node.args.each do |arg|
+      if arg.is_a?(Call) && arg.name == "to_unsafe" &&
+         tape_string?(arg.obj.try(&.type?))
+        @lib_arguments << arg.object_id
+      end
+    end
+  end
+
   def refuse?(node : Call) : String?
     return nil if TapeRules.runtime?(@program, node.location)
+    return nil if @lib_arguments.includes?(node.object_id)
     if yields_pointer?(node)
       return "`#{node.name}` outside a @[TapeUnsafe] def: it yields a pointer into the tape, for a system call to write into.\n\nWrite tape text with a String::Builder's `<<`, `push` and `append`."
     end
     return nil unless pointer_of(node)
     unless view?(node)
-      return "`to_unsafe` of a #{node.obj.try(&.type?)} outside a @[TapeUnsafe] def: the pointer reads past its bytes as readily as within them, and after its scope the next scope's.\n\nRead it with `[]`, `[start, count]` or `each_byte`, which check their bounds."
+      return "`to_unsafe` of a #{node.obj.try(&.type?)} outside a @[TapeUnsafe] def: the pointer reads past its bytes as readily as within them, and after its scope the next scope's.\n\nRead it with `[]`, `[start, count]`, `byte_at` or `each_byte`, which check their bounds. To hand the bytes to C, pass `text.to_unsafe` straight to the `lib` fun, as its argument, in an @[Ffi] module."
     end
     "`String.new(pointer, size)` outside a @[TapeUnsafe] def: a view of any address, which the tape's checks do not see.\n\nCopy a String onto the tape with `String.new(text)`, view one with `String.view(text)`, or a part of a tape string with `[start, count]`."
   end
@@ -91,6 +109,7 @@ class Iyi::TapePointerChecker
         expanded.accept self
         return false
       end
+      @checker.note_lib_call(node)
       if reason = @checker.refuse?(node)
         node.raise reason
       end

@@ -52,6 +52,7 @@ It returns tape data on the caller's tape; the owning scope frees it all:
   `@[OnTape]` struct. Outside `std/` the compiler refuses a `String`'s
   `to_unsafe` and `String.new(pointer, size)`; a caller reads with `[]`,
   `[start, count]`, `each_byte`. Only the FFI or socket call takes a pointer.
+  In an `@[Ffi]` module `text.to_unsafe` may only be a `lib` fun's argument.
 * A `String` API beside it is migration only, built on the tape one; new
   code takes `String`. In `std/` a def handing a pointer to the OS is a small
   `@[TapeUnsafe]` with a reason. `src/iyi/` is exempt.
