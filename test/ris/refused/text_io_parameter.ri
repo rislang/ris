@@ -1,0 +1,4 @@
+# Uncalled program defs also migrate their text output parameter.
+def render(io : IO)
+  io << "hello"
+end

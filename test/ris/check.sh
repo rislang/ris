@@ -1233,6 +1233,7 @@ done
 # Text bindings reserve lazily and copy only their initial bytes.
 expect text_grow_owner 'declare the append method in the owning class'
 expect text_param_append 'Take `io : String::Builder`'
+expect text_io_parameter 'io : String::Builder'
 for kind in field parameter literal; do
   expect "text_lend_$kind" 'Pass a local String variable started from text'
 done
@@ -1241,6 +1242,20 @@ expect text_plain_build 'this String.build only appends: write `io = ""`'
 # ris fix applies the compiler's own edits: Crystal-style text becomes ris.
 out=$(f="${TMPDIR:-/tmp}/plain_builder.ri"; cp test/ris/fix/plain_builder.ri "$f" && "$RIS" fix "$f" >/dev/null 2>&1 && diff test/ris/fix/plain_builder.expected "$f" && "$RIS" run "$f" 2>&1)
 if [ "$out" = "hello, ris" ]; then echo "runs     fix plain_builder"; else echo "FAILED   fix plain_builder: $out"; status=1; fi
+for rule in plain_build plain_build_inline io_parameter; do
+  result=$(f="${TMPDIR:-/tmp}/fix_$rule.ri";
+    cp "test/ris/fix/$rule.ri" "$f" &&
+    "$RIS" fix "$f" >/dev/null 2>&1 &&
+    diff "test/ris/fix/$rule.expected" "$f" &&
+    "$RIS" fix "$f" >/dev/null 2>&1 &&
+    diff "test/ris/fix/$rule.expected" "$f" &&
+    "$RIS" run "$f" 2>&1)
+  if [ "$result" = "hello, ris" ]; then
+    echo "runs     fix $rule"
+  else
+    echo "FAILED   fix $rule: $result"; status=1
+  fi
+done
 out=$("$RIS" run test/ris/text_field_kinds.ri 2>&1)
 if grep -qF 'PASS: text companions only for text fields' <<<"$out"; then echo "runs     text_field_kinds"; else echo "FAILED   text_field_kinds: $out"; status=1; fi
 out=$("$RIS" run test/ris/text_builder_kept.ri 2>&1)

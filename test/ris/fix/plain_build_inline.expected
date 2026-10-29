@@ -1,0 +1,6 @@
+# A one-line body still separates its append from the resulting text.
+tape do
+  text = begin; io = ""; io << "hello, ris"
+  io
+  end; puts text
+end

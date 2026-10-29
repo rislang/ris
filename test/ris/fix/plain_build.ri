@@ -1,0 +1,9 @@
+# Crystal-style block building; fix keeps the expression's text value.
+tape do
+  text = String.build do |io|
+    # Keep this comment: café.
+    io << "hello, "
+    io << "ris"
+  end
+  puts text
+end

@@ -1,0 +1,4 @@
+# A one-line body still separates its append from the resulting text.
+tape do
+  text = String.build { |io| io << "hello, ris" }; puts text
+end

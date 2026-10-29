@@ -209,7 +209,7 @@ class Iyi::Command
       # before it counts: on line 1 of a marked file every edit landed one
       # character to the left, and `-5.abss` became `-5abss`, which does not
       # parse. The mark is a character of `line_text`, so it is stepped over.
-      chars = line_text.chars
+      chars = lines[(diag.line - 1)..].join('\n').chars
       at = diag.column - 1 + (diag.line == 1 && line_text.starts_with?('\uFEFF') ? 1 : 0)
       from = chars[at, diag.size].join
       if from == replacement
@@ -219,9 +219,10 @@ class Iyi::Command
         break
       end
 
-      # Spliced at the same `at`, past the mark the lexer drops.
-      lines[diag.line - 1] = chars[0, at].join + replacement +
-                             ((chars[at + diag.size..]? || [] of Char).join)
+      # Splice through the remaining source: a compiler span can cross
+      # lines, and the suffix (including its final newline) stays intact.
+      lines = lines[0, diag.line - 1] + [chars[0, at].join + replacement +
+                             ((chars[at + diag.size..]? || [] of Char).join)]
       File.write(path, lines.join('\n'))
       applied << {diag.line, diag.column, from, replacement}
     end

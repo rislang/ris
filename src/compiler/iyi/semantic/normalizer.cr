@@ -676,7 +676,8 @@ module Iyi
     end
 
     private def refuse_plain_builders(body : ASTNode) : Nil
-      return unless ris_program_code?(body)
+      return unless ris_program_code?(body) &&
+                    body.location.try(&.original_filename.try(&.ends_with?(".ri")))
       starts = BuilderStarts.new
       body.accept(starts)
       starts.locals.each do |name, call|
@@ -701,9 +702,41 @@ module Iyi
         uses = BuilderUses.new(name)
         call.block.not_nil!.body.accept(uses)
         next unless uses.simple?
-        call.raise "this String.build only appends: write `#{name} = \"\"`, " \
+        block = call.block.not_nil!
+        scope_uses = BuilderUses.new(name)
+        body.accept(scope_uses)
+        # A begin expression shares its surrounding locals. Do not edit a
+        # block argument that would overwrite another local of that name.
+        isolated = scope_uses.total == uses.total + 1
+        start = call.obj.not_nil!
+        suggestion = nil
+        size = nil
+        if isolated && (from = start.location) &&
+           (last = call.end_location) &&
+           (arg_start = block.args.first.location) &&
+           (file = from.original_filename) && File.file?(file)
+          source = program.iyi_file_override(file) || File.read(file)
+          lines = source.split('\n')
+          first_offset = lines[0, from.line_number - 1].sum { |line| line.size + 1 } + from.column_number - 1
+          last_offset = lines[0, last.line_number - 1].sum { |line| line.size + 1 } + last.column_number
+          arg_offset = lines[0, arg_start.line_number - 1].sum { |line| line.size + 1 } + arg_start.column_number - 1 + name.size
+          if pipe = source.index('|', arg_offset)
+            # Keep the body's comments and internal whitespace. Put the
+            # result on its own line, also for single-line brace blocks.
+            body_offset = pipe + 1
+            closing_size = source[last_offset - 3, 3] == "end" ? 3 : 1
+            body_end = last_offset - closing_size
+            indent = lines[last.line_number - 1][/\A[ \t]*/]
+            size = last_offset - first_offset
+            suggestion = "begin; #{name} = \"\";" +
+                         source[body_offset, body_end - body_offset].rstrip +
+                         "\n#{indent}#{name}\n#{indent}end"
+          end
+        end
+        start.raise "this String.build only appends: write `#{name} = \"\"`, " \
                    "append with `<<`, then use `#{name}`. A String local " \
-                   "grows in place and is lent to String::Builder parameters."
+                   "grows in place and is lent to String::Builder parameters.",
+          suggestion: suggestion, size: size
       end
     end
 
@@ -1014,6 +1047,16 @@ module Iyi
     end
 
     def transform(node : Def)
+      if ris_program_code?(node) &&
+         node.location.try(&.original_filename.try(&.ends_with?(".ri")))
+        node.args.each do |arg|
+          if (type = arg.restriction).is_a?(Path) && type.names == ["IO"]
+            type.raise "a text parameter takes `String::Builder`: write " \
+                       "`#{arg.name} : String::Builder` and append with `<<`.",
+              suggestion: "String::Builder", size: type.global? ? 4 : 2
+          end
+        end
+      end
       twin = TapeInPlace.twin(program, node)
       tape_def = TapeTextLowering.tape_def?(node)
       params = node.args.map(&.name)

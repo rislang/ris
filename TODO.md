@@ -119,9 +119,9 @@ first):
   refused/text_lend_*). std (.iyi) does not lend yet.
 * Crystal code to ris through `ris fix`: each common refusal carries a
   `suggested_edit` that fix applies. Done: a plain `String::Builder.new`
-  -> `""`, then its `x.finish` -> `x.to_s` (test/ris/fix/). Left:
-  String.build blocks (a multi-line edit), an `IO` text parameter ->
-  `String::Builder`, a new Array per call -> `clear`. Gate per rule: a
+  -> `""`, then its `x.finish` -> `x.to_s`, plain `String.build` blocks
+  (a multi-line edit), and an `IO` text parameter -> `String::Builder`
+  (test/ris/fix/). Left: a new Array per call -> `clear`. Gate per rule: a
   Crystal-style file that `ris fix` turns into one that compiles, and
   fix leaves alone what it cannot prove.
 * Done: in programs, a String::Builder local or String.build argument

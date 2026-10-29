@@ -160,6 +160,12 @@ back.
 * Local empty arrays and hashes infer fixed types from their first store.
   The normalizer checks source order; deferred semantic type slots keep
   block parameters in scope. This is a ris language change to take to iyi.
-* `Hash.new(default)` infers its key from the first index and carries its
-  default in `RisDefaultHash`, a tape value around the inherited Hash.
+* `Hash.new(default)` infers its key from the first index and answers a
+  Hash(K, V) that carries its default (src/iyi/hash_tape.iyi).
   The inherited `src/iyi/` files and `.iyi` literal parsing stay unchanged.
+
+## Suggested edits across lines
+
+* `fix` splices the compiler's character span across source lines, so a
+  suggested edit can replace an entire block while preserving later code.
+  The text migration refusals stay in ris.
