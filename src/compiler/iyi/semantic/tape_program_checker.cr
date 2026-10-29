@@ -171,7 +171,10 @@ class Iyi::TapeProgramChecker
            when Self
              @self_safe
            when InstanceVar
-             @self_safe.fields[node.name]? || viewed(@self_safe)
+             # A scalar self is an object off the tape: what its fields
+             # hold is not known to be program storage.
+             @self_safe.fields[node.name]? ||
+               (@self_safe.kind == :scalar ? Origin::Unknown : viewed(@self_safe))
            when ClassVar, Global, Path, StringLiteral
              Origin::Program
            when Assign
@@ -381,7 +384,17 @@ class Iyi::TapeProgramChecker
           end
           @program_context = saved
         end
+        # A runtime constructor that takes the program owner (`on_program`,
+        # or `owner: Program.tape`) builds its object there.
+        program_owned = (node.name == "on_program" &&
+                        target.owner.is_a?(MetaclassType)) ||
+                        node.args.each_with_index.any? do |arg, i|
+                          target.args[i]?.try(&.name) == "owner" &&
+                            arg.type?.try(&.to_s) == "Program::TapeOwner"
+                        end
         origin = if node.name == "view" && target.owner.to_s == "String.class"
+                   Origin::Program
+                 elsif program_owned
                    Origin::Program
                  elsif node.name == "__ris_text_reset" && target.owner.to_s == "RisTextGrowth"
                    input = args.first? || Origin::Unknown

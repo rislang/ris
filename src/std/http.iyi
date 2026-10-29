@@ -4179,7 +4179,7 @@ pub struct HTTP
     apart.each { |name, values| headers[name] = values.join(", ") }
     s = h2.stream(id)
     unlimited = 9223372036854775807_i64
-    empty = head || bodiless?(status) || (!s.nil? && s.ended && s.pieces.empty?)
+    empty = head || bodiless?(status) || (!s.nil? && s.ended && s.drained?)
     reader = empty ? BodyReader.new(nil, BodyReader::EMPTY, 0_i64, unlimited) : BodyReader.frames(h2, id, unlimited)
     decoded = false
     if asked && !reader.finished?
@@ -5460,6 +5460,9 @@ class H2Stream
   property fields : Array(Std::Hpack::HeaderField)? = nil
   # DATA arrived and not yet read, and the body's bytes so far.
   property pieces : Array(String) = [] of String
+  # The next piece to read, and its bytes already read.
+  property head : Int32 = 0
+  property taken : Int32 = 0
   property received : Int64 = 0_i64
   # A `content-length` the head gave, -1 for none.
   property declared : Int64 = -1_i64
@@ -5474,6 +5477,11 @@ class H2Stream
   property too_large : Bool = false
 
   def initialize(@id : Int32, @send_window : Int64, @recv_window : Int64)
+  end
+
+  # Every piece that arrived was read.
+  def drained? : Bool
+    @head >= @pieces.size
   end
 end
 
@@ -5696,7 +5704,10 @@ class H2Connection
     if s = @streams[id]?
       s.reset = code
       s.ended = true
-      s.pieces.clear
+      # Unread pieces are dropped by index, not cleared: a reader can
+      # still hold views of the ones it read.
+      s.head = s.pieces.size
+      s.taken = 0
     end
     # A server forgets the stream, unless its block is answering it and
     # finds out from the stream itself.
@@ -5764,7 +5775,10 @@ class H2Connection
     return refuse(id, PROTOCOL_ERROR) if s.declared >= 0_i64 && s.received > s.declared
     if @server && s.received > @limit
       s.too_large = true
-      s.pieces.clear
+      # Unread pieces are dropped by index, not cleared: a reader can
+      # still hold views of the ones it read.
+      s.head = s.pieces.size
+      s.taken = 0
     elsif body.bytesize > 0
       s.pieces << body.to_heap
     end
@@ -5930,7 +5944,10 @@ class H2Connection
     if s = @streams[id]?
       s.reset = H2Connection.read_u32(payload, 0)
       s.ended = true
-      s.pieces.clear
+      # Unread pieces are dropped by index, not cleared: a reader can
+      # still hold views of the ones it read.
+      s.head = s.pieces.size
+      s.taken = 0
     end
     true
   end
@@ -6049,7 +6066,11 @@ class H2Connection
     @pending_size = 0
     got = @conn.transport.write(whole)
     return true if got.is_a?(Int32)
-    @failure = got if @failure.nil?
+    # This connection outlives the request tape the error was made on:
+    # keep only its scalar code, never its request-tape strings.
+    if @failure.nil?
+      @failure = got.is_a?(Cancelled) ? Cancelled.new : SocketError.new("write", got.code)
+    end
     false
   end
 
@@ -6131,13 +6152,18 @@ class H2Connection
       s = @streams[id]?
       return HTTPError.new("HTTP/2: stream #{id} is gone") if s.nil?
       return HTTPError.new("body past #{@limit} bytes", 413) if s.too_large
-      if s.pieces.size > 0
-        piece = s.pieces[0]
-        if piece.bytesize > max
-          s.pieces[0] = piece[max, piece.bytesize - max]
-          piece = piece[0, max]
+      if s.head < s.pieces.size
+        # Read from indexes, never shifting or storing back: a caller can
+        # still hold views of the pieces read before.
+        piece = s.pieces[s.head]
+        left = piece.bytesize - s.taken
+        if left > max
+          piece = piece[s.taken, max]
+          s.taken = s.taken + max
         else
-          s.pieces.shift
+          piece = piece[s.taken, left]
+          s.taken = 0
+          s.head = s.head + 1
         end
         unless s.ended
           s.recv_window = s.recv_window + piece.bytesize.to_i64
@@ -6206,7 +6232,7 @@ class H2Connection
       path = target[0, mark]
       query = target[mark + 1, target.bytesize - mark - 1]
     end
-    reader = s.ended && s.pieces.empty? && !s.too_large ? BodyReader.new(nil, BodyReader::EMPTY, 0_i64, @limit) : BodyReader.frames(self, id, @limit)
+    reader = s.ended && s.drained? && !s.too_large ? BodyReader.new(nil, BodyReader::EMPTY, 0_i64, @limit) : BodyReader.frames(self, id, @limit)
     Request.new(method, path, query, headers, "HTTP/2", reader, remote)
   end
 

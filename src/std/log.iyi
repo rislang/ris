@@ -910,8 +910,9 @@ pub class Log
   # panic or not.
   def self.with_context(**data, &block : -> R) : R forall R
     id = task_key
-    own = context_of(id, true)
-    node = context_node
+    # Copies: the table's bytes for *id* are replaced under them below.
+    own = context_copy(id)
+    node = own || starter_context
     data.each do |key, value|
       node = Metadata.new(key.to_s.as_tape, LogField.text(value), node)
     end
@@ -993,6 +994,32 @@ pub class Log
     copy && node ? node.copy : node
   end
 
+  # A copy of the nearest starter's context, for a task without its own.
+  private def self.starter_context : Metadata?
+    {% if flag?(:wasm32) %}
+      nil
+    {% else %}
+      fiber = IyiScheduler.current
+      while group = fiber.group
+        fiber = group.owner
+        if node = context_copy(fiber.object_id)
+          return node
+        end
+      end
+      nil
+    {% end %}
+  end
+
+  # A copy of *id*'s context on the current tape, never a table view.
+  private def self.context_copy(id : UInt64) : Metadata?
+    while @@context_lock.enter.is_a?(Cancelled)
+    end
+    defer @@context_lock.leave
+    if bytes = @@contexts[id]?
+      Metadata.new(bytes.copy_to(RisCurrentTape.new))
+    end
+  end
+
   protected def self.context_locked(id : UInt64) : Metadata?
     bytes = @@contexts[id]?
     bytes ? Metadata.from_bytes(bytes) : nil
@@ -1007,7 +1034,7 @@ pub class Log
 
   protected def self.store_locked(id : UInt64, node : Metadata?) : Nil
     if node
-      @@contexts[id] = node.bytes
+      @@contexts[id] = node.bytes.copy_to(Program.tape)
     else
       @@contexts.delete(id)
     end

@@ -174,9 +174,7 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
     return false if node.ris_text_slot?
     return false if @program_vars.includes?(variable_key(node.name))
     if @local_tape && (type = node.type?) && TapeChecker.tape_in(@program, type) && type.remove_typedef.to_s != "String"
-      meta = @block.try(&.vars.try(&.[node.name]?)) || @owner.try(&.vars.try(&.[node.name]?))
-      context = meta.try &.context
-      unless context.is_a?(ASTNode) && @contexts.includes?(context)
+      unless scope_var?(node.name)
         node.raise "cannot use outer tape value `#{node.name}` inside local_tape:\n" \
                    "it could retain temporary storage; use copy_to(owner) before entering.\n" \
                    "Outer String values may be read."
@@ -225,13 +223,22 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
     if @scope && node.target.is_a?(Var) && !program_copy?(node.value) &&
        (type = node.value.type?) && TapeChecker.tape_in(@program, type)
       name = node.target.as(Var).name
-      meta = @block.try(&.vars.try(&.[name]?)) || @owner.try(&.vars.try(&.[name]?))
-      context = meta.try &.context
-      unless context.is_a?(ASTNode) && @contexts.includes?(context)
+      unless scope_var?(name)
         node.raise "`#{name}` is a variable of the code around this #{tape_scope_name}, and is assigned `#{type}` here: its storage ends with the scope, so the variable would outlive it" + ownership_hint(type)
       end
     end
     true
+  end
+
+  # Whether variable *name* belongs to code inside the current scope.
+  private def scope_var?(name : String) : Bool
+    meta = @block.try(&.vars.try(&.[name]?)) || @owner.try(&.vars.try(&.[name]?))
+    context = meta.try &.context
+    return true if context.is_a?(ASTNode) && @contexts.includes?(context)
+    # A block made into a proc (`spawn`) keeps its variables on the
+    # proc's def: one declared there is this block's own.
+    return false unless meta.nil? && (block = @block) && @contexts.includes?(block)
+    block.fun_literal.as?(ProcLiteral).try(&.def.vars.try(&.has_key?(name))) || false
   end
 
   private def variable_key(name : String) : Tuple(UInt64, String)

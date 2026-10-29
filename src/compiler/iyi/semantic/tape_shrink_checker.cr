@@ -1287,7 +1287,12 @@ class Iyi::TapeShrinkChecker
       use(consumed, node)
       args.each { |arg| use(arg, node) }
       derived = receiver
-      args.each { |arg| derived = merge(derived, arg) }
+      # A builder's `<<` copies its argument and answers the builder: the
+      # chained result views no argument storage.
+      copied = node.name == "<<" && !node.block &&
+               node.obj.try(&.type?).try { |t| type_name(t) } == "String::Builder" &&
+               type_name(node.type) == "String::Builder"
+      args.each { |arg| derived = merge(derived, arg) } unless copied
       if block = node.block
         outer = env.dup
         yielded_views = derived.views

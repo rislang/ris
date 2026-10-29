@@ -234,13 +234,16 @@ first):
 * samples/ris/web.ri does not build: std/http.iyi:2627
   (`headers[host_name] = named`) is refused as a Hash shrink with a live
   view, after about 7 minutes of checking (seen 2026-10-29 on the base).
-* No check.sh block hangs any more: the shrink checker settles and the
-  server programs check in 2-37 s (server_groups, answer and web 37 s;
-  profile the program checker next). They now stop at std refusals the
-  hang hid: http.iyi:6052 (`@failure = got` in the http2 writer's
-  flush, "cannot store request tape data on the program tape") and
-  log.iyi:362 (`initialize(@io : IO, ...)`, the same); and
-  http_continue.ri imports `Conn`, which std/http does not export.
+* The server programs (answer, server_groups, web, http_continue) now
+  all stop at one shrink refusal: tape_connection's `conn.fill`
+  (http.iyi:1806, h2_preface? at 2222 in http_continue) "shrinks"
+  Conn.@state.@deadline_what.@stream.@tls via TLS take_handshake's
+  `@handshake.clear` with a live view of the same root. FIELD_DEPTH 4
+  folds the TLS fields onto one root, and the SocketError stored in
+  `@state.value.failure` from a TLS read is taken as a view of it.
+  FIELD_DEPTH 6 removes the fold but checking exceeds 15 minutes. Fix:
+  a String built by interpolation or a fresh error views no receiver
+  storage, or fold by type, not depth. http_continue.sh exports Conn.
 * Compiler specs (run with LLVM_CONFIG set to LLVM 23; without it
   bin/crystal links the system LLVM 21): no signal 11 any more. Left:
   compiler_spec lines 484, 522, 568 use Channel and select (port to
