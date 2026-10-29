@@ -37,7 +37,7 @@ the std row. Update a row when its work starts or ends.
 | 5.1 holes: reached state, aliases     | large    | 4-8 h     | 200-400k  |
 | Autocert part B                       | medium   | 2-4 h     | 150-300k  |
 | Task-owned Conn buffer growth         | med-lrg  | 3-5 h     | 150-300k  |
-| .iyimod keeps @[OnTape]               | small    | 1-2 h     | 50-100k   |
+| Artifact String constructor contract  | small    | 1-2 h     | 50-100k   |
 | Compiler specs signal 11              | unknown  | 2 h-1 day | 100-300k  |
 | macOS arm64 (needs a Mac to test)     | medium   | 1-2 days  | 200-400k  |
 | Windows                               | large    | days      | 500k+     |
@@ -240,9 +240,12 @@ first):
   bench/metric/metric.iyi (Array of the tape type Planet).
 * x86_64-windows-msvc does not typecheck std/socket.iyi:572
   (connect_named: opaque callback effects); fix with the socket race.
-* .iyimod artifacts drop @[OnTape] on types: a build from std artifacts
-  refuses File::Info's String fields (bench/std_websocket_exercise.sh,
-  "does not run the same from its artifacts").
+* A build from std artifacts refuses File::Info's String fields
+  (bench/std_websocket_exercise.sh, "does not run the same from its
+  artifacts"). Not lost annotations: @[OnTape] and @[Owner] round-trip
+  (test/ris/iyimod_tape.py). An artifact type whose constructor takes a
+  String hits an "opaque callback retain/escape" contract refusal that
+  the source build does not; find why the artifact loses that contract.
 * bench/socket_exercise.sh ends "something above failed": several
   mutations are not caught and a unix-socket mutation fails with "the
   address is in use". Race checks pass; compare with 05b93f1e2.

@@ -365,6 +365,15 @@ if [[ "$out" == *FAILED* ]]; then
 fi
 printf '%s\n' "$out"
 
+# Tape type annotations survive module artifacts.
+result=$(python3 test/ris/iyimod_tape.py 2>&1)
+if [ "$?" -eq 0 ]; then
+  printf '%s\n' "$result"
+else
+  echo "FAILED   iyimod_tape: $result"
+  status=1
+fi
+
 # Checked boundaries: opaque callbacks, module contracts and suspension.
 out=$(python3 test/ris/call_contracts.py 2>&1)
 if [ "$?" -eq 0 ]; then
