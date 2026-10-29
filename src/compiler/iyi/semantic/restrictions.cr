@@ -1966,7 +1966,8 @@ module Iyi
       elsif literal.type.is_a?(NilableType)
         type.is_a?(UnionType) && StringAutocastType.view?(type)
       elsif literal.type == program.string
-        type.is_a?(NonGenericClassType) && type.name == "String"
+        (type.is_a?(NonGenericClassType) && type.name == "String") ||
+          StringAutocastType.lent_writer?(literal, type)
       else
         type == program.string
       end

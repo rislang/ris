@@ -498,11 +498,19 @@ module Iyi
       getter assigned = Set(String).new
       getter assignments = Hash(String, Int32).new(0)
       getter block_args = Set(String).new
+      # Locals started from text, and locals passed as call arguments:
+      # both together may meet a String::Builder parameter.
+      getter text_starts = Set(String).new
+      getter arguments = Set(String).new
 
       def visit(node : Assign)
         if (target = node.target).is_a?(Var)
           @assigned << target.name
           @assignments[target.name] += 1
+          if node.value.is_a?(StringLiteral) ||
+             node.value.is_a?(StringInterpolation)
+            @text_starts << target.name
+          end
         end
         true
       end
@@ -542,6 +550,8 @@ module Iyi
           when InstanceVar
             @fields << receiver.name
           end
+        elsif Normalizer.lending_call?(node)
+          node.args.each { |arg| @arguments << arg.name if arg.is_a?(Var) }
         end
         true
       end
@@ -584,17 +594,24 @@ module Iyi
       scan = GrowingTextScan.new
       body.accept(scan)
       @ris_growing_locals = scan.locals
+      # Lend only a local assigned once: a rebinding (`kept = x.copy_to(...)`
+      # in a tape block) must keep its own lowering and lifetime checks.
+      if ris_program_code?(body)
+        once = scan.assignments.select { |_, n| n == 1 }.keys.to_set
+        @ris_growing_locals |= (scan.text_starts & scan.arguments & once) -
+                               scan.block_args
+      end
       @ris_text_reassigned = scan.assignments.select { |_, n| n > 1 }.keys.to_set
-      scan.locals.each do |name|
+      @ris_growing_locals.each do |name|
         slot = program.new_temp_var.at(body)
         slot.ris_text_slot = true
         @ris_text_slots[name] = slot
       end
-      names = scan.locals.select do |name|
+      names = @ris_growing_locals.select do |name|
         params.includes?(name) ||
           (!scan.assigned.includes?(name) && !scan.block_args.includes?(name))
       end
-      lines = scan.locals.select { |name| names.includes?(name) || @ris_text_reassigned.includes?(name) }.map do |name|
+      lines = @ris_growing_locals.select { |name| names.includes?(name) || @ris_text_reassigned.includes?(name) }.map do |name|
         slot = growing_slot(Var.new(name).at(body))
         initial = names.includes?(name) ?
           growing_initializer(Var.new(name).at(body)) : NilLiteral.new.at(body)
@@ -606,6 +623,69 @@ module Iyi
 
     @ris_growing_rebounds = Set(UInt64).new
     @ris_string_mutations = Set(UInt64).new
+    @ris_text_arg_calls = Set(UInt64).new
+
+    # `s << "a" << "b"`: a String's << rebinds `s` and answers its new text,
+    # so the next link appends to `s` again. Any other receiver keeps the
+    # returned value (Int's shift chains, IO and Array answer self).
+    private def text_append_chain(node : Call) : ASTNode?
+      return nil unless program.tape_platform? && @macro_code == 0 &&
+                        ris_program_code?(node) &&
+                        node.name == "<<" && node.args.size == 1 &&
+                        !node.block && !node.block_arg &&
+                        (inner = node.obj).is_a?(Call)
+      root = inner
+      while root.is_a?(Call) && root.name == "<<" && root.args.size == 1 &&
+            !root.block && !root.block_arg
+        root = root.obj
+      end
+      return nil unless root.is_a?(Var) || root.is_a?(InstanceVar)
+      value = program.new_temp_var.at(node)
+      again = Call.new(root.clone, "<<", node.args.map(&.clone)).at(node)
+      other = Call.new(value.clone, "<<", node.args.map(&.clone)).at(node)
+      @ris_string_mutations << other.object_id
+      Expressions.new([
+        Assign.new(value, inner).at(node),
+        If.new(IsA.new(value.clone, Path.global("String").at(node)).at(node),
+          again, other).at(node),
+      ] of ASTNode).at(node)
+    end
+
+    # A named call that may take a growing local as a String::Builder.
+    # Operators and the lowering's own calls never do.
+    def self.lending_call?(node : Call) : Bool
+      name = node.name
+      !node.args.empty? && !name.starts_with?("__") &&
+        (name[0].ascii_letter? || name[0] == '_') &&
+        !name.ends_with?('=') && !node.block_arg
+    end
+
+    # `greet(text)`: mark each growing local argument with its slot, so a
+    # String::Builder parameter gets the local's writer (call.cr), and
+    # rebind the local to the writer's text after the call.
+    private def lend_text_arguments(node : Call) : ASTNode?
+      return nil unless program.tape_platform? && @macro_code == 0 &&
+                        ris_program_code?(node) &&
+                        Normalizer.lending_call?(node) &&
+                        @ris_text_arg_calls.add?(node.object_id)
+      lent = node.args.select do |arg|
+        arg.is_a?(Var) && @ris_text_slots.has_key?(arg.name)
+      end.map(&.as(Var))
+      return nil if lent.empty?
+      lent.each { |arg| arg.ris_text_arg = @ris_text_slots[arg.name].name }
+      result = program.new_temp_var.at(node)
+      lines = [Assign.new(result, node).at(node)] of ASTNode
+      lent.uniq(&.name).each do |arg|
+        local = Var.new(arg.name).at(arg)
+        back = Call.new(Path.global("RisTextGrowth"), "__ris_take_back",
+          [growing_slot(local), local.clone] of ASTNode).at(node)
+        rebind = Assign.new(local.clone, back).at(node)
+        @ris_growing_rebounds << rebind.object_id
+        lines << rebind
+      end
+      lines << result.clone
+      Expressions.new(lines).at(node)
+    end
 
     def transform(node : Call)
       if node.name == "new" && node.args.size == 1 &&
@@ -655,6 +735,12 @@ module Iyi
            obj.names == ["String"]
           node.obj = Path.global("String").at(obj)
         end
+      end
+      if lent = lend_text_arguments(node)
+        return lent.transform(self)
+      end
+      if chain = text_append_chain(node)
+        return chain.transform(self)
       end
       # String mutation spells a rebinding. Other receivers keep their
       # ordinary methods; the type test disappears after specialization.

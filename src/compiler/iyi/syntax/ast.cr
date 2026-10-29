@@ -858,6 +858,9 @@ module Iyi
     include SpecialVar
 
     property? ris_text_slot = false
+    # The growing slot of a String local passed as a call argument: a
+    # String::Builder parameter then gets that local's writer.
+    property ris_text_arg : String?
     property name : String
     property doc : String?
 
@@ -869,7 +872,10 @@ module Iyi
     end
 
     def clone_without_location
-      Var.new(@name).tap { |copy| copy.ris_text_slot = ris_text_slot? }
+      Var.new(@name).tap do |copy|
+        copy.ris_text_slot = ris_text_slot?
+        copy.ris_text_arg = ris_text_arg
+      end
     end
 
     def_equals_and_hash name

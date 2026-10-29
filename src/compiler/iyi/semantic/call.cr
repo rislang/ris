@@ -568,6 +568,20 @@ class Iyi::Call
     end
   end
 
+  # `greet(text)` into `def greet(io : String::Builder)`: pass the local's
+  # growing writer; the normalizer rebinds the local after the call.
+  private def lend_text_argument(value : Var) : ASTNode
+    value.remove_enclosing_call(self)
+    slot = Var.new(value.ris_text_arg.not_nil!).at(value)
+    writer = Or.new(slot, Assign.new(slot.clone,
+      Call.new(Path.global("RisTextGrowth").at(value), "new").at(value)).at(value)).at(value)
+    text = Var.new(value.name).at(value)
+    lend = Call.new(writer, "__ris_lend", text).at(value)
+    lend.accept(parent_visitor)
+    lend.set_enclosing_call(self)
+    lend
+  end
+
   private def borrow_string_argument(value : ASTNode) : ASTNode
     value.remove_enclosing_call(self)
     source_type = value.type
@@ -688,7 +702,11 @@ class Iyi::Call
     end
     if with_autocast
       args.each_with_index do |arg, index|
-        if arg.is_a?(Call) && arg.tape_literal? &&
+        if arg.is_a?(Var) && matches.any? { |match|
+             StringAutocastType.lent_writer?(arg, match.arg_types[index]?)
+           }
+          args[index] = lend_text_argument(arg)
+        elsif arg.is_a?(Call) && arg.tape_literal? &&
            matches.any? { |match| match.arg_types[index]? == program.string }
           args[index] = arg.args.first
         elsif StringAutocastType.borrowable?(arg.type) && matches.any? { |match|

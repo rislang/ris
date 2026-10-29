@@ -15,6 +15,17 @@ def shout(text : String) : String
   text.upcase
 end
 
+def wrap(io : String::Builder, name : String)
+  io << "["
+  greet(io, name)
+  io << "]"
+  nil
+end
+
+def growth_moves : UInt64
+  RisRegion.text_copied_bytes
+end
+
 tape do
   ids = [] of Int32
   collect(ids, 3)
@@ -25,5 +36,40 @@ tape do
   raise "builder parameter" unless io.finish == "hello, Priit"
 
   raise "string parameter read" unless shout("ris") == "RIS"
+
+  # A String local passed to a String::Builder parameter grows.
+  text = ""
+  greet(text, "Priit")
+  raise "lent local" unless text == "hello, Priit"
+
+  label = "a: "
+  greet(label, "x")
+  greet(label, "y")
+  raise "two calls" unless label == "a: hello, xhello, y"
+  label << "!"
+  raise "append after" unless label == "a: hello, xhello, y!"
+
+  nested = ""
+  wrap(nested, "z")
+  raise "passed on" unless nested == "[hello, z]"
+
+  # One copy of the start text per local, none per call or append.
+  before = growth_moves
+  many = "start "
+  1000.times { |i| greet(many, "n") }
+  raise "lent length" unless many.bytesize == 6 + 1000 * 8
+  raise "lent copies" unless growth_moves == before + 6
+
+  raise "still a String" unless shout(text) == "HELLO, PRIIT"
+
+  # A chain appends every link to the growing local.
+  chained = ""
+  chained << "a" << "b" << 1
+  raise "chain" unless chained == "ab1"
+  shift = 1
+  raise "int shift chain" unless (shift << 1 << 2) == 8
+  ints = [] of Int32
+  ints << 1 << 2
+  raise "array chain" unless ints.size == 2
 end
 puts "PASS: appends through parameters"

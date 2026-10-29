@@ -1,0 +1,16 @@
+# Only a local String variable started from text is lent to a
+# String::Builder parameter; a field is not.
+def greet(io : String::Builder, name : String)
+  io << "hello, " << name
+  nil
+end
+
+class Greeter
+  @text = ""
+
+  def run
+    greet(@text, "x")
+  end
+end
+
+Greeter.new.run

@@ -113,11 +113,11 @@ first):
   `io : String::Builder` (test/ris/text_param.ri, refused/
   text_param_append.ri). The copying `s + x` fallback no longer runs
   for program locals and fields: every appended one grows (step 1).
-* A String local passed to a `String::Builder` parameter grows: `text =
-  ""; greet(text)` today fails ("expected String::Builder, not String").
-  Lower the argument to the local's growing slot, then rebind the local
-  to its text after the call. Gate: the greet example, a field, a
-  literal start, a mismatch (a String parameter passed on).
+* Done: a String local started from text and assigned once is lent to a
+  `String::Builder` parameter (`text = ""; greet(text)`) and rebound to
+  its text after the call; `s << a << b` appends every link to `s`.
+  Others are refused naming that form (test/ris/text_param.ri,
+  refused/text_lend_*). std (.iyi) does not lend yet.
 * Crystal code to ris through `ris fix`: each common refusal carries a
   `suggested_edit` that fix applies. First `String.build` and
   `String::Builder.new` -> `s = ""` and `<<`, an `IO` text parameter ->

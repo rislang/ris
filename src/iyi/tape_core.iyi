@@ -997,6 +997,38 @@ struct RisTextGrowth
     writer.append_value(value)
     writer.finish
   end
+
+  # `greet(text)` with `def greet(io : String::Builder)`: the callee gets
+  # this local's writer, holding its text, and appends in place.
+  def __ris_lend(text : String) : String::Builder
+    if writer = @writer
+      previous = writer.finish
+      unless previous.to_unsafe.address == text.to_unsafe.address &&
+             previous.bytesize == text.bytesize
+        raise "growing text lost its checked reset; copy_to(owner) first"
+      end
+      return writer
+    end
+    writer = String::Builder.__ris_text_home(@home, text.bytesize)
+    writer.append(text)
+    RisRegion.text_initial_copy(text.bytesize.to_u64)
+    @writer = writer
+    writer
+  end
+
+  # After the call the local reads what its writer holds: the callee's
+  # appends, or its unchanged text when nothing was lent.
+  def self.__ris_take_back(slot : RisTextGrowth, text : String) : String
+    if writer = slot.@writer
+      writer.finish
+    else
+      text
+    end
+  end
+
+  def self.__ris_take_back(slot, text)
+    text
+  end
 end
 
 struct String::Builder

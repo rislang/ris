@@ -1215,6 +1215,9 @@ done
 # Text bindings reserve lazily and copy only their initial bytes.
 expect text_grow_owner 'declare the append method in the owning class'
 expect text_param_append 'Take `io : String::Builder`'
+for kind in field parameter literal; do
+  expect "text_lend_$kind" 'Pass a local String variable started from text'
+done
 out=$("$RIS" run test/ris/text_param.ri 2>&1)
 if grep -qF 'PASS: appends through parameters' <<<"$out"; then echo "runs     text_param"; else echo "FAILED   text_param: $out"; status=1; fi
 out=$(RIS_TAPE_STATS=1 "$RIS" run test/ris/text_grow.ri 2>&1)

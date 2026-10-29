@@ -1850,6 +1850,13 @@ module Iyi
       end
     end
 
+    # A growing String local (normalizer.cr lend_text_arguments) may meet
+    # a String::Builder parameter: the call passes the local's writer.
+    def self.lent_writer?(node : ASTNode, type : Type?) : Bool
+      node.is_a?(Var) && !node.ris_text_arg.nil? && !type.nil? &&
+        type.remove_typedef.to_s == "String::Builder"
+    end
+
     def remove_literal
       StringAutocastType.borrowable?(literal.type) ?
         (match || literal.type) : literal.type

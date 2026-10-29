@@ -727,6 +727,12 @@ class Iyi::Call
           str << "\nText is tape text; keep it with `.to_heap` "
           str << "when an API requires String."
         end
+        if actual_type.to_s == "String" &&
+           expected_types.any? { |t| t.to_s == "String::Builder" }
+          str << "\n\nPass a local String variable started from text "
+          str << "(`text = \"\"; #{def_name}(text)`): it grows and keeps "
+          str << "what the call appends. Or pass a String::Builder."
+        end
 
         if char_fix && arg.is_a?(CharLiteral)
           str.puts
