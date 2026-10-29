@@ -3956,6 +3956,19 @@ struct IyiTask(T)
     live.state == IyiFiberState::Done
   end
 
+  # The task's stop handle: cancels this one task and the groups it holds
+  # open, as its group's failure would, from any task of the group. The
+  # handle is Share (slot and generation), so a signal waiter stops a
+  # listener's task without reaching its socket: the accept answers
+  # Cancelled and the owning task closes it. A finished task is left.
+  def cancel : Nil
+    task = slot
+    IyiSchedLock.lock
+    live = task.live_fiber
+    IyiScheduler.cancel(live) if live.is_a?(IyiFiber)
+    IyiSchedLock.unlock
+  end
+
   # nil means Done (including panic/cancellation); read value separately.
   # Timing out or cancelling this reader never cancels the retained task.
   def wait(ms : Int32) : Nil | TimedOut | Cancelled

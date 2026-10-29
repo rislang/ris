@@ -767,6 +767,9 @@ module Iyi
           # A group joins before its caller's tape ends. Immutable text
           # can be borrowed; Share checks still forbid reassigned captures.
           next if @joined_task_blocks.includes?(a_def) && type == @program.string
+          # std's reviewed exceptions name the owner that joins the task
+          # before the captured value's tape ends.
+          next if @joined_task_blocks.includes?(a_def) && task_closure_unsafe_scope?
           if type.to_s.in?("Std::Socket::IyiSocket",
                "Std::Io::PipeReader", "Std::Io::PipeWriter") &&
              (call = @joined_task_calls[a_def]?) &&

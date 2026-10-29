@@ -40,10 +40,9 @@ def elapsed_ms(started : Int64) : Int64
 end
 
 def base_name(path : String) : String
-  bytes = path.to_unsafe
   index = path.bytesize - 1
   while index >= 0
-    break if bytes[index] == 47_u8 || bytes[index] == 92_u8
+    break if path[index] == 47_u8 || path[index] == 92_u8
     index = index - 1
   end
   path[index + 1, path.bytesize - index - 1]
@@ -275,12 +274,12 @@ def noticed_end(child : ChildProcess, what : String) : Nil
   end
 end
 
-done = false
 group do |g|
   g.spawn do
     # Long enough for the proof whose child sleeps twenty seconds out.
     slept = sleep(45000)
-    fail("a check did not finish within 45 seconds") unless slept.is_a?(Cancelled) || done
+    # The checks' end cancels it, so only a timeout reaches the failure.
+    fail("a check did not finish within 45 seconds") unless slept.is_a?(Cancelled)
     0
   end
 
@@ -372,16 +371,17 @@ group do |g|
         entries = entries + 1
       end
     end
-    doubled = Pointer(UInt8*).malloc((entries + 3).to_u64)
+    # On the program's tape, which outlives the table's use.
+    doubled = Array(UInt8*).new(entries + 3, Pointer(UInt8).new(0_u64))
+    texts = [] of Array(UInt8)
     entries.times { |i| doubled[i] = was[i] }
     ["IYI_PROCESS_TWICE=first", "IYI_PROCESS_TWICE=second"].each_with_index do |text, i|
-      entry = Pointer(UInt8).malloc((text.bytesize + 1).to_u64)
-      entry.copy_from(text.to_unsafe, text.bytesize)
-      entry[text.bytesize] = 0_u8
-      doubled[entries + i] = entry
+      entry = Array(UInt8).new(text.bytesize + 1, 0_u8)
+      text.bytesize.times { |at| entry[at] = text[at] }
+      texts << entry
+      doubled[entries + i] = entry.to_unsafe
     end
-    doubled[entries + 2] = Pointer(UInt8).new(0_u64)
-    __iyi_set_environ(doubled)
+    __iyi_set_environ(doubled.to_unsafe)
     gone = ran(Process.run(me, ["env", "IYI_PROCESS_TWICE"], env: {"IYI_PROCESS_TWICE" => nil}), "env: twice")
     fail("a name held twice and removed: the child read #{gone.stdout.inspect}") unless gone.stdout == "<unset>\n"
     ENV.delete("IYI_PROCESS_TWICE")
@@ -432,23 +432,24 @@ group do |g|
   # builds ticked three times in the 800 ms (the v0.19.0 tag's run, job
   # 119825970286), and a broken copy that should have hung later failed
   # here instead.
-  ticks = 0
-  ticks_at_end = -1
-  group do |h|
-    h.spawn do
+  ticks = Atomic(Int32).new(0)
+  ticks_at_end = group do |h|
+    sleeper = h.spawn do
       stdout.flush
       slept = ran(Process.run(me, ["sleep", "800"], capture: false), "sleep")
-      ticks_at_end = ticks
+      seen = ticks.get
       fail("the sleeping child answered #{slept.exit_code}") unless slept.success?
-      0
+      seen
     end
     h.spawn do
       10.times do
         sleep(50)
-        ticks = ticks + 1
+        ticks.add(1)
       end
       0
     end
+    seen = sleeper.value
+    seen.is_a?(Int32) ? seen : -1
   end
   fail("a sibling ticked #{ticks_at_end} times of 10 while the child ran") unless ticks_at_end >= 1
   puts "  a sibling ticked while the child slept"
@@ -457,15 +458,15 @@ group do |g|
   outcome = ""
   started = __iyi_monotonic_ns
   group do |h|
-    h.spawn do
+    runner = h.spawn do
       answer = Process.run(me, ["sleep", "20000"])
-      outcome = answer.is_a?(Cancelled) ? "cancelled" : "not cancelled"
       answer.is_a?(Cancelled) ? answer : 0
     end
     h.spawn do
       sleep(300)
       TaskFailed.new
     end
+    outcome = runner.value.is_a?(Cancelled) ? "cancelled" : "not cancelled"
   end
   waited = elapsed_ms(started)
   fail("the run answered #{outcome}") unless outcome == "cancelled"
@@ -627,24 +628,24 @@ group do |g|
       # this program's handler, which told this program's Signal.wait.
       killer = "while :; do for t in /proc/$PPID/task/*/children; do kids=; read -r kids < \"$t\"; " \
                "for k in $kids; do [ \"$k\" = $$ ] || kill -TERM \"$k\" 2>/dev/null; done; done; done"
-      heard_term = false
       spawned = 0
+      heard_term = false
       group do |h|
-        h.spawn do
+        waiter = h.spawn do
           got = Signal.wait(Signal::TERM)
-          heard_term = true unless got.is_a?(Cancelled)
-          0
+          got.is_a?(Cancelled) ? 0 : 1
         end
         h.spawn do
           Process.run("/bin/sh", ["-c", killer])
           0
         end
         sleep(100)
-        while spawned < 1000 && !heard_term
+        while spawned < 1000 && !waiter.done?
           Process.run("/bin/true")
           spawned = spawned + 1
         end
         h.cancel_children
+        heard_term = waiter.value == 1
       end
       fail("this program's Signal.wait heard a TERM sent to a child, after #{spawned} children") if heard_term
       puts "  #{spawned} children started under a stream of TERMs, and none reached this program"
@@ -694,18 +695,14 @@ group do |g|
   flooder = started_child(Process.spawn(me, ["flood", "1048576"], output: Redirect::Pipe, error: Redirect::Pipe), "flood")
   out_bytes = 0
   err_bytes = 0
-  group do |f|
-    f.spawn do
-      got = flooder.stderr.read_all
-      err_bytes = got.bytesize if got.is_a?(String)
-      0
-    end
-    got = flooder.stdout.read_all
-    out_bytes = got.bytesize if got.is_a?(String)
+  both = flooder.read_both
+  if both.is_a?(Tuple)
+    out_bytes = both[0].bytesize
+    err_bytes = both[1].bytesize
   end
   fail("the flood ended badly") unless waited(flooder.wait, "flood").success?
   fail("read #{out_bytes} of stdout and #{err_bytes} of stderr") unless out_bytes == 1048576 && err_bytes == 1048576
-  puts "  #{out_bytes} bytes of stdout and #{err_bytes} of stderr, read on two tasks while the child wrote both"
+  puts "  #{out_bytes} bytes of stdout and #{err_bytes} of stderr, read at once while the child wrote both"
 
   puts "== the null device, both ways"
   nulled = started_child(Process.spawn(me, ["stdin"], input: Redirect::Null, output: Redirect::Pipe), "stdin")
@@ -760,25 +757,28 @@ group do |g|
   {% end %}
 
   puts "== a cancelled read ends its child"
-  stuck = started_child(Process.spawn(me, ["sleep", "30000"], output: Redirect::Pipe), "sleep")
-  read_cancelled = false
-  group do |c|
-    c.spawn do
-      read_cancelled = stuck.stdout.read_all.is_a?(Cancelled)
-      0
+  # The reading task owns the child; it answers what the read and the
+  # child's end were: {cancelled, ended, signal, exit code}.
+  stuck_read = group do |c|
+    reader = c.spawn do
+      stuck = started_child(Process.spawn(me, ["sleep", "30000"], output: Redirect::Pipe), "sleep")
+      cancelled = stuck.stdout.read_all.is_a?(Cancelled)
+      ended = stuck.status
+      ended ? {cancelled, true, ended.signal, ended.exit_code} : {cancelled, false, 0, 0}
     end
     sleep(200)
-    c.cancel_children
+    reader.cancel
+    reader.value
   end
-  fail("the cancelled read did not answer Cancelled") unless read_cancelled
-  stuck_end = stuck.status
-  fail("the cancelled read's child was left running") unless stuck_end
+  fail("the cancelled read's task answered #{stuck_read}") unless stuck_read.is_a?(Tuple)
+  fail("the cancelled read did not answer Cancelled") unless stuck_read[0]
+  fail("the cancelled read's child was left running") unless stuck_read[1]
   # Ended by the cancellation, not by its own end thirty seconds on: a kill
   # is signal 9, and on Windows the exit code 1 the job is ended with.
   {% if flag?(:win32) %}
-    fail("the cancelled read's child ended with exit code #{stuck_end.exit_code}, not the kill's 1") unless stuck_end.exit_code == 1
+    fail("the cancelled read's child ended with exit code #{stuck_read[3]}, not the kill's 1") unless stuck_read[3] == 1
   {% else %}
-    fail("the cancelled read's child ended with signal #{stuck_end.signal}") unless stuck_end.signal == 9
+    fail("the cancelled read's child ended with signal #{stuck_read[2]}") unless stuck_read[2] == 9
   {% end %}
   puts "  the read answered Cancelled, with the child it read from ended and collected"
 
@@ -819,7 +819,6 @@ group do |g|
   {% end %}
   puts "  its output landed after this program's, its exit code and env: carried, and a refusal left it running"
 
-  done = true
   g.cancel_children
 end
 

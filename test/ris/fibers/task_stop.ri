@@ -1,0 +1,22 @@
+# A task's handle is its Share stop handle (TAPE_SPEC 5.1): a sibling
+# cancels one task without reaching what it owns, the task's wait answers
+# Cancelled and its own code ends it; the other tasks run on, and a
+# finished task's cancel does nothing.
+group do |g|
+  quick = g.spawn { 7 }
+  sleeper = g.spawn do
+    slept = sleep(60000)
+    slept.is_a?(Cancelled) ? 1 : 0
+  end
+  other = g.spawn do
+    sleep(50)
+    2
+  end
+  g.spawn do
+    sleep(10)
+    sleeper.cancel
+    quick.cancel
+    0
+  end
+  puts "stopped #{sleeper.value}, others #{other.value} #{quick.value}"
+end

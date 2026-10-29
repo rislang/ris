@@ -820,6 +820,8 @@ out=$("$RIS" run test/ris/fibers/many.ri 2>&1)
 if [ "$out" = "1000 tapes at once, sum 499500" ]; then echo "runs     fibers/many"; else echo "FAILED   fibers/many: $out"; status=1; fi
 
 
+out=$("$RIS" run test/ris/fibers/task_stop.ri 2>&1)
+if [ "$out" = "stopped 1, others 2 7" ]; then echo "runs     fibers/task_stop"; else echo "FAILED   fibers/task_stop: $out"; status=1; fi
 out=$("$RIS" run test/ris/fibers/spares.ri 2>&1)
 if [ "$out" = $'warm: 4096 KiB written again\n8388608\ntrimmed' ]; then echo "runs     fibers/spares"; else echo "FAILED   fibers/spares: $out"; status=1; fi
 
