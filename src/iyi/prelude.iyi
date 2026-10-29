@@ -86,7 +86,7 @@ class IyiRuntimeLock
     spins = 0_i64
     since = 0_u64
     until ((seen = word.value.get) & 1_u64) == 0_u64 && ((seen & 0xFFFE_u64) == 0_u64 || spins != 0) && (spins < 0 ? word.value.compare_and_set(seen, seen &- 1_u64)[1] : (IyiAtomic.rmw(:or, pointerof(@@word), 1_u64, :sequentially_consistent, false) & 1_u64) == 0_u64)
-      {% if !flag?(:gc_none) && !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64))) %}
+      {% if !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (!flag?(:gc_none) && ((flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64))))) %}
         IyiThread.park_if_requested
         spins, since = IyiThread.lock_turn(word, seen, spins, since)
       {% end %}
@@ -1992,7 +1992,7 @@ end
   def __iyi_hold_runtime_for_exit : Nil
     tries = 0
     while tries < 10_000_000 && !IyiRuntimeLock.try_lock
-      {% if flag?(:x86_64) && !flag?(:gc_none) && !flag?(:gc_boehm) %}
+      {% if flag?(:x86_64) && !flag?(:gc_boehm) %}
         IyiThread.park_if_requested
       {% end %}
       {% if flag?(:x86_64) %}
@@ -2033,7 +2033,7 @@ end
 # the same constant first wait on one another rather than initialise it
 # twice; the fiber holding the lock may re-enter, for an initialiser that
 # reads another constant not yet initialised. The lock is there only where
-# `thread.iyi` is: a `-Dgc_none` or `-Dgc_boehm` build has no `IyiThread`
+# `thread.iyi` is: a `-Dgc_boehm` build has no `IyiThread`
 # to pause with, and no second thread to hold it.
 fun __iyi_once(flag : Bool*, initializer : Void*) : Nil
   byte = flag.as(Pointer(UInt8))
@@ -2046,7 +2046,7 @@ class IyiOnce
   @@depth : Int32 = 0
 
   def self.run(flag : Pointer(UInt8), initializer : Void*) : Nil
-    {% if !flag?(:gc_none) && !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64))) %}
+    {% if !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (!flag?(:gc_none) && ((flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64))))) %}
       me = IyiScheduler.current.as(Void*).address
       if IyiAtomic.load(pointerof(@@holder), :acquire, false) != me
         until IyiAtomic.cmpxchg(pointerof(@@holder), 0_u64, me, :acquire, :monotonic)[1]
@@ -2062,7 +2062,7 @@ class IyiOnce
       pointerof(cell).as(Pointer(Proc(Nil))).value.call
       IyiAtomic.store(flag, 1_u8, :release, false)
     end
-    {% if !flag?(:gc_none) && !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64))) %}
+    {% if !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (!flag?(:gc_none) && ((flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64))))) %}
       @@depth = @@depth - 1
       IyiAtomic.store(pointerof(@@holder), 0_u64, :release, false) if @@depth == 0
     {% end %}

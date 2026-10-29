@@ -119,8 +119,8 @@ started = __iyi_monotonic_ns
 saw = ""
 group do |g|
   g.spawn do
-    buffer = Pointer(UInt8).malloc(64_u64)
-    got = iyi_read(0, buffer.as(Void*), 64_u64)
+    buffer = uninitialized StaticArray(UInt8, 64)
+    got = iyi_read(0, pointerof(buffer).as(Void*), 64_u64)
     note(got.is_a?(Cancelled) ? "cancelled" : "read #{got}")
     got
   end

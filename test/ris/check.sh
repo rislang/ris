@@ -1489,10 +1489,9 @@ for name in program_alias program_helper program_nested_alias \
 done
 expect program_local_init 'copy it with .copy_to(Program.tape)'
 expect program_copy_forged 'program initializer is private'
-# Without a collector there is no IyiThread yet (thread.iyi is gated on
-# the collector); these return when kernel threads do (TODO.md).
-expect program_threads 'undefined constant IyiThread'
-expect program_field_thread 'undefined constant IyiThread'
+expect program_threads 'program tape writes require a single kernel thread'
+expect program_field_thread \
+  'program tape writes require a single kernel thread'
 for name in program_tape program_growth; do
   out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 \
     "$RIS" run "test/ris/$name.ri" 2>&1)
@@ -1512,7 +1511,13 @@ else
   echo "FAILED   program growth mappings: $out"
   status=1
 fi
-# program_readers needs kernel threads; it returns with IyiThread.
+out=$("$RIS" run test/ris/program_readers.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = 'PASS: program tape readers' ]; then
+  echo "runs     program_readers (kernel threads)"
+else
+  echo "FAILED   program_readers: $out"
+  status=1
+fi
 out=$("$RIS" run test/ris/program_text.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = 'value 42' ]; then
   echo "runs     program text constant"

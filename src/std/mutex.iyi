@@ -183,13 +183,13 @@ pub class Mutex(T)
       while @changes.get == mine
         busy = Mutex.thread_busy?
         alone = true
-        {% if !flag?(:gc_none) && !flag?(:gc_boehm) %}
+        {% if !flag?(:gc_boehm) %}
           alone = IyiThread.program_threads <= 1_u64
         {% end %}
         if !busy && alone
           raise "Mutex#wait_for: deadlock: nothing is left to change the value - no other task on this thread, and no other thread"
         end
-        {% if !flag?(:gc_none) && !flag?(:gc_boehm) && flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64)) %}
+        {% if !flag?(:gc_boehm) && flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64)) %}
           if !busy && waits >= YIELDS
             # Counted before the count of releases is looked at again, so a
             # release that misses the sleeper has already moved the count,
@@ -230,7 +230,7 @@ pub class Mutex(T)
       while true
         return nil if take(me)
         elsewhere = @holder_thread.get != Mutex.thread_id
-        {% if !flag?(:gc_none) && !flag?(:gc_boehm) %}
+        {% if !flag?(:gc_boehm) %}
           if elsewhere && turns < SPINS && IyiThread.program_threads > 1_u64
             IyiThread.spin_pause
             turns = turns + 1
@@ -241,7 +241,7 @@ pub class Mutex(T)
         if !elsewhere && !busy && locked?
           raise "Mutex: deadlock: the task holding this lock is parked on this thread, and nothing left on this thread can wake it"
         end
-        {% if !flag?(:gc_none) && !flag?(:gc_boehm) && !flag?(:darwin) %}
+        {% if !flag?(:gc_boehm) && !flag?(:darwin) %}
           if elsewhere && !busy
             sleep_in_kernel
             @holder.set(me)
@@ -277,21 +277,21 @@ pub class Mutex(T)
     # that takes the lock next sees it.
     @changes.add(1_u64)
     before = @word.sub(1_u64)
-    {% if !flag?(:gc_none) && !flag?(:gc_boehm) && flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64)) %}
+    {% if !flag?(:gc_boehm) && flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64)) %}
       if before >= WAITER
         __iyi_conc_syscall6(IYI_SYS_FUTEX, pointerof(@word).address.to_i64, IYI_FUTEX_WAKE, 1_i64, 0_i64, 0_i64, 0_i64)
       end
       if @change_sleepers.get != 0_u64
         __iyi_conc_syscall6(IYI_SYS_FUTEX, pointerof(@changes).address.to_i64, IYI_FUTEX_WAKE, 0x7FFFFFFF_i64, 0_i64, 0_i64, 0_i64)
       end
-    {% elsif !flag?(:gc_none) && !flag?(:gc_boehm) && flag?(:win32) && flag?(:x86_64) %}
+    {% elsif !flag?(:gc_boehm) && flag?(:win32) && flag?(:x86_64) %}
       if before >= WAITER
         LibC.ReleaseSemaphore(Pointer(Void).new(@doorbell.get), 1_i32, Pointer(Int32).new(0_u64))
       end
     {% end %}
   end
 
-  {% if !flag?(:gc_none) && !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:win32) && flag?(:x86_64))) %}
+  {% if !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:win32) && flag?(:x86_64))) %}
     # The thread sleeps until a release, counted on the word's high half so
     # the release knows to ring. Taking the lock and uncounting are one
     # exchange, so no release can find a count that has already left.
@@ -318,7 +318,7 @@ pub class Mutex(T)
     end
   {% end %}
 
-  {% if !flag?(:gc_none) && !flag?(:gc_boehm) && flag?(:win32) && flag?(:x86_64) %}
+  {% if !flag?(:gc_boehm) && flag?(:win32) && flag?(:x86_64) %}
     # Made once, by whichever sleeper is first; one that loses the race
     # closes its own. Made before a sleeper counts itself, so a release
     # that sees the count finds the semaphore.

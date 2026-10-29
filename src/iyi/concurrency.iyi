@@ -1125,7 +1125,7 @@ class IyiSchedLock
         return
       end
       spins = spins &+ 1
-      {% if !flag?(:gc_none) && !flag?(:gc_boehm) %}
+      {% if !flag?(:gc_boehm) %}
         IyiThread.yield_cpu if spins & 127 == 0
       {% end %}
       {% if flag?(:x86_64) %}
@@ -1280,7 +1280,7 @@ class IyiScheduler
     fiber = state.current
     return fiber if fiber.is_a?(IyiFiber)
     main = IyiFiber.main
-    {% if !flag?(:gc_none) && !flag?(:gc_boehm) %}
+    {% if !flag?(:gc_boehm) %}
       top = IyiThread.current_stack_top
       {% if flag?(:win32) %}
         top = IyiRoots.stack_base if top == 0
@@ -3288,7 +3288,7 @@ class IyiWorkers
       asked = text.to_i?
       return asked if asked.is_a?(Int32) && asked > 0
     end
-    {% if !flag?(:gc_none) && !flag?(:gc_boehm) %}
+    {% if !flag?(:gc_boehm) %}
       cores = IyiThread.core_count
       return 256 if cores > 256_u64
       cores.to_i32
@@ -3302,7 +3302,7 @@ class IyiWorkers
   # and scan it as it stops and scans any thread (III.4.11).
   def self.start : Nil
     return if @@started > 0
-    {% if !flag?(:gc_none) && !flag?(:gc_boehm) %}
+    {% if !flag?(:gc_boehm) %}
       workers = resolved
       IyiSchedLock.lock
       if @@started > 0
@@ -4178,7 +4178,7 @@ class RisGroupSlot
     IyiTask(T).new(task)
   end
 
-  {% if !flag?(:gc_none) && !flag?(:gc_boehm) %}
+  {% if !flag?(:gc_boehm) %}
     # Start a task that may run on another core (SPEC.md III.4.13): it
     # waits in the pool until a worker is free, and the worker that starts
     # it keeps it to its end. Everything else is `spawn`'s - the scope, the
@@ -4422,13 +4422,13 @@ struct IyiGroup
     slot.spawn(&block)
   end
 
-  {% if !flag?(:gc_none) && !flag?(:gc_boehm) %}
+  {% if !flag?(:gc_boehm) %}
     def spawn_parallel(&block : -> T) : IyiTask(T) forall T
       slot.spawn_parallel(&block)
     end
   {% else %}
     def spawn_parallel(&block : -> T) : IyiTask(T) forall T
-      \{% raise "spawn_parallel needs threads, and a build under -Dgc_none or -Dgc_boehm has none: a thread would race the bump pointer, or be one Boehm never heard of (SPEC.md III.4.13)" %}
+      \{% raise "spawn_parallel needs threads, and a build under -Dgc_boehm has none: a thread would be one Boehm never heard of (SPEC.md III.4.13)" %}
     end
   {% end %}
 

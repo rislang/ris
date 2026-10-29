@@ -184,11 +184,9 @@ first):
   the def's scope, or refuse the spawn there. std keeps its marks.
 * Error#message answers String, which a program cannot build without a
   heap: let it answer String (or write into a builder) across std.
-* Kernel threads and spawn_parallel without a collector: thread.iyi and
-  the parallel pool are gated on !gc_none, so ris programs have no
-  IyiThread and run every task on one core. Split the stop-the-world
-  collector parts from the thread code; restore program_readers,
-  program_threads and program_field_thread (test/ris/check.sh).
+* Kernel threads without a collector on darwin arm64 and win32: Linux
+  has them (spawn_parallel uses every core); the others still need the
+  collector's stop to build thread.iyi.
 * Remove general allocator fallbacks from ris programs. Distinguish
   gc_none's allocator behavior from ris_no_gc's allocation trap; audit
   remaining std and runtime paths required by supported workloads.

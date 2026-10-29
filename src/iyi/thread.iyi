@@ -57,11 +57,12 @@
 # clears the tid word at exit and wakes its futex, which is the join.
 #
 # Linux x86_64 and aarch64 and darwin arm64, the concurrency targets, and
-# only with the collector: a thread under `-Dgc_none` would race the bump
-# pointer and one under `-Dgc_boehm` would be a thread Boehm never heard
-# of, so neither has one, and `IyiThread` is not a name there.
+# not under `-Dgc_boehm`: a thread there would be one Boehm never heard
+# of. Under `-Dgc_none` (Linux only) a thread keeps its own tape,
+# scheduler and pools; the stop, the signal handler and the root walk
+# exist only for the collector and are left out.
 
-{% if !flag?(:gc_none) && !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64))) %}
+{% if !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (!flag?(:gc_none) && ((flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64))))) %}
   # One line per thread, mapped, never heap: a signal handler and a
   # collector both read it, and neither may find it moved or freed.
   IYI_THREAD_LINE       = 512_u64
@@ -548,7 +549,9 @@
       {% if flag?(:win32) %}
         IyiHeap.write64(line + IYI_TL_CACHE, IyiHeap.cache_page)
       {% end %}
-      IyiHeap.write64(line + IYI_TL_TOP, IyiRoots.stack_base)
+      {% unless flag?(:gc_none) %}
+        IyiHeap.write64(line + IYI_TL_TOP, IyiRoots.stack_base)
+      {% end %}
       @@line = line
       link(line)
     end
@@ -561,7 +564,9 @@
 
     def self.start(proc : Proc(Nil)) : IyiThread
       register_current
-      install_handler
+      {% unless flag?(:gc_none) %}
+        install_handler
+      {% end %}
       # A second scheduler thread is coming: from here fibers on two
       # threads may wake each other, and the scheduler's lock is taken
       # (SPEC.md III.4.13). Said before the thread exists, so it never
@@ -738,7 +743,9 @@
       {% if flag?(:win32) %}
         IyiHeap.write64(line + IYI_TL_CACHE, 0_u64)
       {% end %}
-      IyiHeap.retire_cache
+      {% unless flag?(:gc_none) %}
+        IyiHeap.retire_cache
+      {% end %}
       unlink(line)
     end
 
@@ -779,9 +786,12 @@
     # that stopped the thread there freed it.
     @[NoInline]
     def self.park_if_requested : Nil
-      return unless IyiHeap.stop_requested?
-      IyiHeap.clear_request
-      stop_here
+      # Without a collector nothing asks a thread to stop.
+      {% unless flag?(:gc_none) %}
+        return unless IyiHeap.stop_requested?
+        IyiHeap.clear_request
+        stop_here
+      {% end %}
     end
 
     # ── The stop ────────────────────────────────────────────────────────
