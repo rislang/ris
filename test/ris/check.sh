@@ -232,6 +232,28 @@ else
   echo "FAILED   std_foundations: $out"; status=1
 fi
 
+# Bulk tape/local copies check spans and preserve indexed view order.
+result=$("$RIS" build test/ris/tape_local_copy.ri -o /tmp/ris-local-copy-$$ 2>&1)
+if [ "$?" -eq 0 ]; then
+  result=$(/tmp/ris-local-copy-$$ 2>&1)
+  if [ "$?" -eq 0 ] && [ "$result" = 'PASS: checked local copies' ]; then
+    echo 'runs     tape_local_copy'
+  else
+    echo "FAILED   tape_local_copy: $result"; status=1
+  fi
+  for kind in text array store view; do
+    result=$(/tmp/ris-local-copy-$$ "$kind" 2>&1)
+    if [ "$?" -ne 0 ] && grep -qF 'local copy out of range' <<<"$result"; then
+      echo "refused  tape_local_copy $kind range"
+    else
+      echo "FAILED   tape_local_copy $kind: $result"; status=1
+    fi
+  done
+  rm -f /tmp/ris-local-copy-$$
+else
+  echo "FAILED   tape_local_copy build: $result"; status=1
+fi
+
 # A pipe's writer waits while the pipe is full (930722c made it panic).
 out=$("$RIS" run test/ris/pipe_wait.ri 2>&1)
 if [ "$?" -eq 0 ] && grep -qxF 'PASS: pipe writer waits' <<<"$out"; then

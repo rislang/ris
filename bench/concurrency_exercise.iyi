@@ -13,7 +13,7 @@
 
 # ris: calls C (`lib LibC`), and a script builds copies outside bench/.
 @[Ffi]
-import std/gc::{GC}
+import std/static_array
 
 # Task observations are copied onto the board, in publication order.
 @[OnTape]
@@ -64,9 +64,9 @@ end
     fun pipe(fds : Int32*) : Int32
   end
 
-  def make_pipe : Pointer(Int32)
-    fds = Pointer(UInt8).malloc(8_u64).as(Pointer(Int32))
-    fail("pipe failed") if LibC.pipe(fds) < 0
+  def make_pipe : StaticArray(Int32, 2)
+    fds = StaticArray(Int32, 2).new(0)
+    fail("pipe failed") if LibC.pipe(pointerof(fds).as(Pointer(Int32))) < 0
     fds
   end
 {% elsif flag?(:win32) %}
@@ -77,13 +77,13 @@ end
                     disposition : Int32, flags : Int32, template : Void*) : Void*
   end
 
-  def make_pipe : Pointer(Int64)
+  def make_pipe : StaticArray(Int64, 2)
     pipe_name = "\\\\.\\pipe\\iyi_conc_pipe_#{__iyi_monotonic_ns}".to_unsafe
     h_read = LibC.CreateNamedPipeA(pipe_name, 0x40000001_i32, 0_i32, 1_i32, 4096_i32, 4096_i32, 0_i32, Pointer(Void).new(0_u64))
     fail("CreateNamedPipeA failed") if h_read.address &+ 1_u64 == 0_u64
     h_write = LibC.CreateFileA(pipe_name, 1073741824_i32, 0_i32, Pointer(Void).new(0_u64), 3_i32, 128_i32, Pointer(Void).new(0_u64))
     fail("CreateFileA for pipe failed") if h_write.address &+ 1_u64 == 0_u64
-    fds = Pointer(UInt8).malloc(16_u64).as(Pointer(Int64))
+    fds = StaticArray(Int64, 2).new(0_i64)
     fds[0] = h_read.address.to_i64
     fds[1] = h_write.address.to_i64
     fds
@@ -95,13 +95,23 @@ end
     EX_SYS_PIPE2 = 59_i64
   {% end %}
 
-  def make_pipe : Pointer(Int32)
-    fds = Pointer(UInt8).malloc(8_u64).as(Pointer(Int32))
-    result = __iyi_conc_syscall3(EX_SYS_PIPE2, fds.address.to_i64, 0_i64, 0_i64)
-    fail("pipe2 failed") if result < 0
+  def make_pipe : StaticArray(Int32, 2)
+    fds = StaticArray(Int32, 2).new(0)
+    result = __iyi_conc_syscall3(EX_SYS_PIPE2, pointerof(fds).address.to_i64, 0_i64, 0_i64)
+    fail("pipe2 failed (#{result})") if result < 0
     fds
   end
 {% end %}
+
+# A fixture write through bounded local storage.
+@[PointerUnsafe("writes the fixture local block to its pipe")]
+def write_fixture(fd, text : String) : Int64
+  local = uninitialized StaticArray(UInt8, 64)
+  raise "fixture write too large" if text.bytesize > 64
+  bytes = pointerof(local).as(Pointer(UInt8))
+  text.copy_to_local(0, bytes, text.bytesize)
+  __iyi_write(fd, bytes.as(Void*), text.bytesize.to_u64)
+end
 
 pub struct TaskFailed
   def initialize
@@ -172,7 +182,7 @@ puts "32000 sleepers woke in deadline order, #{steps // 32000} queue steps each"
 # crowd.
 {% if flag?(:linux) %}
   def round_trips(idle : Int32, rounds : Int32) : Int64
-    crowd = [] of Pointer(Int32)
+    crowd = [] of typeof(make_pipe)
     idle.times { crowd << make_pipe }
     ping = make_pipe
     pong = make_pipe
@@ -185,13 +195,15 @@ puts "32000 sleepers woke in deadline order, #{steps // 32000} queue steps each"
       crowd.each do |pipe|
         fd = pipe[0]
         g.spawn do
-          buffer = Pointer(UInt8).malloc(1_u64)
+          buffer_store = StaticArray(UInt8, 1).new(0_u8)
+          buffer = pointerof(buffer_store).as(Pointer(UInt8))
           iyi_read(fd, buffer.as(Void*), 1_u64)
           0
         end
       end
       g.spawn do
-        buffer = Pointer(UInt8).malloc(1_u64)
+        buffer_store = StaticArray(UInt8, 1).new(0_u8)
+        buffer = pointerof(buffer_store).as(Pointer(UInt8))
         rounds.times do
           iyi_read(ping_read, buffer.as(Void*), 1_u64)
           __iyi_write(pong_write, buffer.as(Void*), 1_u64)
@@ -199,7 +211,8 @@ puts "32000 sleepers woke in deadline order, #{steps // 32000} queue steps each"
         0
       end
       runner = g.spawn do
-        buffer = Pointer(UInt8).malloc(1_u64)
+        buffer_store = StaticArray(UInt8, 1).new(0_u8)
+        buffer = pointerof(buffer_store).as(Pointer(UInt8))
         buffer.value = 1_u8
         started = __iyi_monotonic_ns
         rounds.times do
@@ -211,7 +224,7 @@ puts "32000 sleepers woke in deadline order, #{steps // 32000} queue steps each"
       answer = runner.value
       took = answer.is_a?(Int64) ? answer : -1_i64
       crowd.each do |pipe|
-        __iyi_write(pipe[1], "x".to_unsafe.as(Void*), 1_u64)
+        write_fixture(pipe[1], "x")
       end
     end
     (crowd + [ping, pong]).each do |pipe|
@@ -357,7 +370,8 @@ io_order = ""
 group do |g|
   g.spawn do
     note("parked,")
-    buffer = Pointer(UInt8).malloc(1_u64)
+    buffer_store = StaticArray(UInt8, 1).new(0_u8)
+    buffer = pointerof(buffer_store).as(Pointer(UInt8))
     got = iyi_read(read_fd, buffer.as(Void*), 1_u64)
     case got
     in Int64
@@ -370,7 +384,8 @@ group do |g|
   g.spawn do
     sleep(40)
     note("wrote,")
-    byte = Pointer(UInt8).malloc(1_u64)
+    byte_store = StaticArray(UInt8, 1).new(0_u8)
+    byte = pointerof(byte_store).as(Pointer(UInt8))
     byte.value = 7_u8
     __iyi_write(write_fd, byte.as(Void*), 1_u64)
     0
@@ -391,26 +406,30 @@ puts "a read parked in the poller and a sleeping writer woke it"
 kept_fds = make_pipe
 kept_read = kept_fds[0]
 kept_write = kept_fds[1]
+# The buffer outlives the reader's fiber, so it lives out here.
+kept_store = StaticArray(UInt8, 4).new(0_u8)
+kept_at = pointerof(kept_store).address
 kept_result = group do |g|
   reader = g.spawn do
-    kept = Pointer(UInt8).malloc(4_u64)
+    kept = Pointer(UInt8).new(kept_at)
     got = iyi_read(kept_read, kept.as(Void*), 3_u64)
-    {got.is_a?(Cancelled) ? "cancelled" : "#{got} bytes", kept}
+    {got.is_a?(Cancelled) ? "cancelled" : "#{got} bytes", kept.address}
   end
   g.spawn do
     sleep(20)
-    __iyi_write(kept_write, "abc".to_unsafe.as(Void*), 3_u64)
+    write_fixture(kept_write, "abc")
     TaskFailed.new
   end
   reader.value.or_panic
 end
 # The task is done: its result hands the heap fixture back for inspection.
 kept_answer = kept_result[0]
-kept = kept_result[1]
+kept = Pointer(UInt8).new(kept_result[1])
 kept_at_answer = "#{kept[0]},#{kept[1]},#{kept[2]}"
 kept_left = 0_i64
 if wait_readable(kept_read.to_i32, 300) == true
-  rest = Pointer(UInt8).malloc(4_u64)
+  rest_store = StaticArray(UInt8, 4).new(0_u8)
+  rest = pointerof(rest_store).as(Pointer(UInt8))
   more = iyi_read(kept_read, rest.as(Void*), 3_u64)
   kept_left = more if more.is_a?(Int64)
 end
@@ -428,7 +447,7 @@ puts "a read cancelled after its bytes came kept them"
 # false, after 0 ms. A regular file on Linux answers before the arm too.
 stale_fds = make_pipe
 stale_quiet = wait_readable(stale_fds[0].to_i32, 50)
-__iyi_write(stale_fds[1], "abc".to_unsafe.as(Void*), 3_u64)
+write_fixture(stale_fds[1], "abc")
 stale_holding = wait_readable(stale_fds[0].to_i32, 300)
 fail("a wait on an empty pipe answered #{stale_quiet}, and then on one holding three bytes #{stale_holding}") unless stale_quiet == false && stale_holding == true
 puts "a wait after a timed-out one found the bytes waiting"
@@ -453,7 +472,8 @@ puts "a wait after a timed-out one found the bytes waiting"
   # The worker's half, a def so nothing of the program's is captured:
   # fifty one-byte reads the pipe already holds, then the late five.
   def handoff_reads(fd : Int64) : Nil
-    buffer = Pointer(UInt8).malloc(8_u64)
+    buffer_store = StaticArray(UInt8, 8).new(0_u8)
+    buffer = pointerof(buffer_store).as(Pointer(UInt8))
     ones = 0
     while ones < 50 && IyiScheduler.read_current(fd, buffer.as(Void*), 1_u64, 3000) == 1_i64
       ones = ones + 1
@@ -464,14 +484,15 @@ puts "a wait after a timed-out one found the bytes waiting"
   end
 
   handoff = make_pipe
-  handed = Pointer(UInt8).malloc(64_u64)
-  __iyi_write(handoff[1], "a".to_unsafe.as(Void*), 1_u64)
+  handed_store = StaticArray(UInt8, 64).new(0_u8)
+  handed = pointerof(handed_store).as(Pointer(UInt8))
+  write_fixture(handoff[1], "a")
   fail("the main thread's read of the pipe to hand over failed") unless iyi_read(handoff[0], handed.as(Void*), 1_u64) == 1_i64
-  __iyi_write(handoff[1], ("0123456789" * 5).to_unsafe.as(Void*), 50_u64)
+  write_fixture(handoff[1], "0123456789" * 5)
   handed_fd = handoff[0]
   receiver = IyiThread.start { handoff_reads(handed_fd) }
   sleep(200)
-  __iyi_write(handoff[1], "final".to_unsafe.as(Void*), 5_u64)
+  write_fixture(handoff[1], "final")
   waited = 0
   while Handoff.outcome.value.get == 0_u64 && waited < 500
     sleep(10)
@@ -950,15 +971,15 @@ def hold_doubles(v : Array(Float64), rounds : Int32, first : Bool) : Int32
   bad
 end
 
-mine = [1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 9.5, 10.5]
-theirs = [-1.25, -2.25, -3.25, -4.25, -5.25, -6.25, -7.25, -8.25, -9.25, -10.25]
 changed = 0
 group do |g|
   g.spawn do
+    mine = [1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 9.5, 10.5]
     number(hold_doubles(mine, 1000, true).to_i64)
     0
   end
   g.spawn do
+    theirs = [-1.25, -2.25, -3.25, -4.25, -5.25, -6.25, -7.25, -8.25, -9.25, -10.25]
     number(hold_doubles(theirs, 1000, false).to_i64)
     0
   end
@@ -1059,13 +1080,15 @@ busy_write = busy_fds[1]
 byte_after = -1_i64
 group do |g|
   g.spawn do
-    buffer = Pointer(UInt8).malloc(1_u64)
+    buffer_store = StaticArray(UInt8, 1).new(0_u8)
+    buffer = pointerof(buffer_store).as(Pointer(UInt8))
     iyi_read(busy_read, buffer.as(Void*), 1_u64)
     RisBoard.post(CByte.new(1))
     0
   end
   g.spawn do
-    byte = Pointer(UInt8).malloc(1_u64)
+    byte_store = StaticArray(UInt8, 1).new(0_u8)
+    byte = pointerof(byte_store).as(Pointer(UInt8))
     byte.value = 9_u8
     writing_started = __iyi_monotonic_ns
     __iyi_write(busy_write, byte.as(Void*), 1_u64)
@@ -1122,7 +1145,7 @@ fail("a block's own task handle read #{held} and the later value passed #{passed
   named = n
   fail("a proc read a block's own variable as #{-> { named + 1 }.call}, not 3") unless -> { named + 1 }.call == 3
 end
-named = "late"
+named = StaticArray(UInt8, 4).new
 fail("a proc read the later variable's size as #{-> { named.size }.call}, not 4") unless -> { named.size }.call == 4
 puts "a block's own captured variable and a later one of the same name keep a cell each"
 

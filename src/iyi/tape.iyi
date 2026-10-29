@@ -270,6 +270,14 @@ struct String
     @ptr[index]
   end
 
+  # Copy bytes into caller-owned local storage after one range check.
+  def copy_to_local(at : Int32, target : Pointer(UInt8), count : Int32) : Nil
+    if at < 0 || count < 0 || at > bytesize - count
+      raise "local copy out of range"
+    end
+    target.copy_from(@ptr + at, count)
+  end
+
   # One byte-range check, then one load where words are little-endian
   # and a load need not be aligned; elsewhere a copy into an aligned
   # local, its bytes turned around.
@@ -1323,6 +1331,25 @@ struct Array(T)
     (@state + 2_i64).value = capacity
   end
 
+  # Copy a checked span to or from caller-owned local storage. Tape
+  # addresses stay inside these primitives.
+  def copy_to_local(at : Int32, target : Pointer(T), count : Int32) : Nil
+    if at < 0 || count < 0 || at > size - count
+      raise "local copy out of range"
+    end
+    target.copy_from(Pointer(T).new(@state.value) + at, count)
+  end
+
+  def copy_from_local(at : Int32, source : Pointer(T), count : Int32) : Nil
+    {% unless T < Number %}
+      {% raise "local copies into an Array require numeric elements" %}
+    {% end %}
+    if at < 0 || count < 0 || at > size - count
+      raise "local copy out of range"
+    end
+    (Pointer(T).new(@state.value) + at).copy_from(source, count)
+  end
+
   # One byte-range check, then memcpy into an aligned local.
   def read_bytes_at(type : I.class, at : Int32) : I forall I
     {% unless I == UInt16 || I == UInt32 || I == UInt64 ||
@@ -1969,6 +1996,18 @@ struct Array::View(T)
     while i < size
       yield self[i]
       i += 1
+    end
+  end
+
+  # Contiguous views copy in bulk; indexed views preserve their order.
+  def copy_to_local(at : Int32, target : Pointer(T), count : Int32) : Nil
+    if at < 0 || count < 0 || at > size - count
+      raise "local copy out of range"
+    end
+    if @at
+      count.times { |i| target[i] = self[at + i] }
+    else
+      @target.copy_to_local(@offset + at, target, count)
     end
   end
 

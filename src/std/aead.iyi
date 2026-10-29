@@ -1612,58 +1612,58 @@ struct AeadBytes
   end
 
   # *count* bytes of *data* from *at* into a cipher's local block, read
-  # with `[]`, which checks their bounds.
+  # with one checked bulk copy.
   @[PointerUnsafe("writes a cipher's own local block")]
   def self.load(data : Input, at : Int32, dst : Pointer(UInt8), count : Int32) : Nil
-    i = 0
-    while i < count
-      dst[i] = data[at + i]
-      i = i + 1
-    end
+    data.copy_to_local(at, dst, count)
   end
 
   # *count* bytes of a local block into *buffer* from *at*.
   @[PointerUnsafe("reads a cipher's own local block")]
   def self.store(src : Pointer(UInt8), buffer : Array(UInt8), at : Int32, count : Int32) : Nil
-    i = 0
-    while i < count
-      buffer[at + i] = src[i]
-      i = i + 1
-    end
+    buffer.copy_from_local(at, src, count)
   end
 
   # *count* bytes of key stream XORed into *buffer* from *at*.
   @[PointerUnsafe("reads a cipher's own local key stream")]
   def self.xor_into(buffer : Array(UInt8), at : Int32, stream : Pointer(UInt8), count : Int32) : Nil
-    i = 0
-    while i < count
-      buffer[at + i] = buffer[at + i] ^ stream[i]
-      i = i + 1
+    local = uninitialized StaticArray(UInt8, 64)
+    bytes = pointerof(local).as(Pointer(UInt8))
+    done = 0
+    while done < count
+      take = (count - done) < 64 ? count - done : 64
+      buffer.copy_to_local(at + done, bytes, take)
+      i = 0
+      while i < take
+        bytes[i] = bytes[i] ^ stream[done + i]
+        i = i + 1
+      end
+      buffer.copy_from_local(at + done, bytes, take)
+      done = done + take
     end
   end
 
   # *data*'s bytes in a new Array of *room* bytes, zero past them: where
   # a seal writes its ciphertext and tag.
+  @[PointerUnsafe("copies through a local block, never a tape pointer")]
   def self.copy(data : Input, room : Int32) : Array(UInt8)
     buffer = Array(UInt8).new(room, 0_u8)
+    local = uninitialized StaticArray(UInt8, 1024)
+    bytes = pointerof(local).as(Pointer(UInt8))
     count = size(data)
-    i = 0
-    while i < count
-      buffer[i] = data[i]
-      i = i + 1
+    done = 0
+    while done < count
+      take = (count - done) < 1024 ? count - done : 1024
+      data.copy_to_local(done, bytes, take)
+      buffer.copy_from_local(done, bytes, take)
+      done = done + take
     end
     buffer
   end
 
   # *count* bytes of *buffer* from *at* as text on the caller's tape.
   def self.text(buffer : Array(UInt8), at : Int32, count : Int32) : String
-    text = String::Builder.new
-    i = 0
-    while i < count
-      text.push(buffer[at + i])
-      i = i + 1
-    end
-    text.finish
+    buffer.bytes[at, count]
   end
 
   @[PointerUnsafe("reads a cipher's own local block")]

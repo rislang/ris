@@ -137,11 +137,12 @@ first):
 ## std port (session state: tape_state.txt; group one, then group two)
 
 * Done: std/aead and the tls record layer hold no tape pointer and no
-  malloc. aead reads input with `[]` into its cipher's local blocks
+  malloc. aead uses checked bulk copies into its cipher's local blocks
   (bench/std_aead_exercise.sh holds); tls keeps its inbox and outbox as
   fixed Arrays that std/socket reads and writes in place, and seals
-  records through aead's Array `seal_at`/`open_at`. Left: aead runs
-  ~100 MB/s, copying byte by byte at the boundary; tls's
+  records through aead's Array `seal_at`/`open_at`. On this machine,
+  aead improved from 40/41/56 to 92/81/162 MB/s for AES-128-GCM,
+  AES-256-GCM and ChaCha20-Poly1305 (2026-10-29). Left: tls's
   `read(Pointer, count)` stays, marked, for std/http's Conn buffer;
   bench/std_tls_exercise waits on the 5.1 bench port (its server task
   captures a tape config).
@@ -245,8 +246,10 @@ first):
   module's own code reads": runtime constants appear in the constant
   list. Determine whether the artifact or the expectation is wrong;
   make tape-independent fixes in iyi first, or record them in UPSTREAM.md.
-* bench/concurrency_exercise.sh fails with "pipe2 failed" after its
-  32,000 sleepers test (seen 2026-10-27 before the group-end change).
+* bench/concurrency_exercise.sh passes its fiber and pipe steps (no pipe
+  leaks: strace shows every pipe2 closed; the 2,000 idle pipes need the
+  script's `ulimit -n 8192`), then fails at bench/stdin_park.iyi:164,
+  `undefined constant IyiThread`: kernel threads without a collector.
 * Typecheck failures that predate the Channel removal:
   bench/parallel_exercise.iyi:124 (a task value's Panicked arm) and
   bench/metric/metric.iyi (Array of the tape type Planet).
