@@ -506,10 +506,7 @@ class RisRegion
         previous = spare
         spare = following
       end
-      # MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, read/write on touch.
-      region = LibC.mmap(Pointer(Void).new(0_u64), length,
-        3, 0x4022, -1, 0_i64).address
-      RisHeap.mapping_failure(length) if region == 0xFFFFFFFFFFFFFFFF_u64
+      region = side_slice(length)
       if LibC.mprotect(Pointer(Void).new(region &+ usable), GRAIN, 0) != 0
         RisHeap.mapping_failure(length)
       end
@@ -518,6 +515,44 @@ class RisRegion
       IyiHeap.write64(region &+ OFF_LIMIT, region &+ DATA &+ capacity)
       IyiHeap.write64(region &+ OFF_MAP, length)
       register(region)
+      region
+    end
+  {% end %}
+
+  {% if flag?(:linux) %}
+    # A standard side reservation is carved from a shared arena instead
+    # of its own mmap, and is never unmapped: release keeps every one on
+    # the side spares. A scope that makes thousands of small arrays then
+    # costs one mprotect per slice it has never used, not an mmap,
+    # mprotect and munmap per array.
+    ARENA_SLICES = 512_u64
+    @[ThreadLocal]
+    @@arena_next : UInt64 = 0_u64
+    @[ThreadLocal]
+    @@arena_end : UInt64 = 0_u64
+
+    def self.arena_length : UInt64
+      size_add(mapping_length(side_capacity(1_u64)), GRAIN)
+    end
+
+    # MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, read/write on touch.
+    def self.side_slice(length : UInt64) : UInt64
+      unless length == arena_length
+        region = LibC.mmap(Pointer(Void).new(0_u64), length,
+          3, 0x4022, -1, 0_i64).address
+        RisHeap.mapping_failure(length) if region == 0xFFFFFFFFFFFFFFFF_u64
+        return region
+      end
+      if @@arena_next == @@arena_end
+        bytes = size_mul(length, ARENA_SLICES)
+        chunk = LibC.mmap(Pointer(Void).new(0_u64), bytes,
+          3, 0x4022, -1, 0_i64).address
+        RisHeap.mapping_failure(bytes) if chunk == 0xFFFFFFFFFFFFFFFF_u64
+        @@arena_next = chunk
+        @@arena_end = chunk &+ bytes
+      end
+      region = @@arena_next
+      @@arena_next = region &+ length
       region
     end
   {% end %}
@@ -565,7 +600,7 @@ class RisRegion
       # Reserved side mappings have a guard beyond OFF_LIMIT. Keep a
       # separate spare list so normal tape allocation cannot use it.
       if IyiHeap.read64(region &+ OFF_LIMIT) < region &+ length &&
-         @@side_spares < SPARES
+         (length == arena_length || @@side_spares < SPARES)
         if used > KEEP_WARM
           __iyi_release_pages(region &+ KEEP_WARM, used &- KEEP_WARM)
         end
