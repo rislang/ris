@@ -327,6 +327,46 @@ class RisRegion
     {% end %}
   end
 
+  @[ThreadLocal]
+  @@text_reservations : UInt64 = 0_u64
+  @[ThreadLocal]
+  @@text_copied_bytes : UInt64 = 0_u64
+
+  def self.text_reservations : UInt64
+    @@text_reservations
+  end
+
+  def self.text_copied_bytes : UInt64
+    @@text_copied_bytes
+  end
+
+  def self.text_initial_copy(bytes : UInt64) : Nil
+    @@text_reservations &+= 1_u64
+    @@text_copied_bytes &+= bytes
+  end
+
+  # Lazy text may first grow while a shorter-lived caller tape is active.
+  # Link its state and payload directly to its construction-time owner.
+  # Metadata occupies the first 40 bytes of the private reservation.
+  def self.text_state(home : UInt64, capacity : UInt64) : Pointer(UInt64)
+    no_tape if home == 0
+    reservation = side_capacity(1_u64)
+    reservation = capacity if capacity > reservation
+    own = acquire_side(size_add(reservation, 40_u64))
+    IyiHeap.write64(own &+ OFF_PARENT, IyiHeap.read64(home &+ OFF_SIDE))
+    IyiHeap.write64(home &+ OFF_SIDE, own)
+    state = Pointer(UInt64).new(own &+ DATA)
+    start = state.address &+ 40_u64
+    state.value = start
+    (state + 1_i64).value = size_add(start, capacity)
+    (state + 2_i64).value = start
+    (state + 3_i64).value = own
+    (state + 4_i64).value = 0_u64
+    IyiHeap.write64(own &+ OFF_CURSOR,
+      size_add(size_add(start, capacity), 7_u64) & 0xFFFFFFFFFFFFFFF8_u64)
+    state
+  end
+
   # Linux growing values own their reservation before publishing elements.
   # MAP_NORESERVE commits pages on touch; the final grain is PROT_NONE.
   # A raw, unpublished extent may acquire a reservation on first growth;

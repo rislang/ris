@@ -167,6 +167,9 @@ class Iyi::TypeDeclarationVisitor < Iyi::SemanticVisitor
     when Var
       declare_c_struct_or_union_field(node) if @in_c_struct_or_union
     when InstanceVar
+      if node.ris_text_companion?
+        (@program.ris_text_companions[current_type] ||= Set(String).new) << var.name
+      end
       declare_instance_var(node, var)
     when ClassVar
       declare_class_var(node, var, false)

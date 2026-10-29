@@ -110,6 +110,20 @@ class Iyi::TapeProgramChecker
                "copy it with .copy_to(Program.tape)"
   end
 
+  # The lowering copies both the prefix and appended bytes into the
+  # companion field's construction-time owner, even for an unknown self.
+  private def growing_text_rebind?(node : Assign, target : InstanceVar) : Bool
+    call = node.value
+    return false unless call.is_a?(Call) && call.name == "append"
+    slot = call.obj
+    return false unless slot.is_a?(InstanceVar) &&
+      slot.name == "@__ris_text_#{target.name.lchop('@')}"
+    @graph.targets(call).try(&.any? do |callee|
+      callee.owner.to_s == "RisTextGrowth" &&
+        TapeRules.runtime?(@program, callee.location)
+    end) == true
+  end
+
   private def mutation(node : ASTNode)
     @mutations << node unless @program_context
   end
@@ -169,11 +183,13 @@ class Iyi::TapeProgramChecker
                  mutation(node)
                end
              when InstanceVar
+               growing_text = growing_text_rebind?(node, target)
+               result = viewed(@self_safe) if growing_text
                @self_safe.fields[target.name] = @self_safe.fields[target.name]?.try do |old|
                  join(old, result)
                end || result
                if @self_tape && program_target?(@self_safe, node)
-                 refuse(node) if tape?(node.value) && !result.program?
+                 refuse(node) if tape?(node.value) && !result.program? && !growing_text
                  mutation(node)
                end
              end
@@ -319,6 +335,7 @@ class Iyi::TapeProgramChecker
         if tape_receiver && program_target?(receiver, node) && writes
           node.args.each_with_index do |arg, i|
             copies_bytes = target.owner.to_s == "String::Builder" ||
+                           target.owner.to_s == "RisTextGrowth" ||
                            (target.owner.to_s == "Array(UInt8)" && node.name == "append")
             if target.owner.is_a?(GenericClassInstanceType) &&
                target.owner.as(GenericClassInstanceType).generic_type.name == "Array"
@@ -356,6 +373,8 @@ class Iyi::TapeProgramChecker
         end
         origin = if node.name == "view" && target.owner.to_s == "String.class"
                    Origin::Program
+                 elsif node.name == "append" && target.owner.to_s == "RisTextGrowth"
+                   viewed(receiver)
                  elsif READ_VIEWS.includes?(node.name) && tape_receiver
                    receiver.element || viewed(receiver)
                  elsif {"<<", "concat"}.includes?(node.name) && tape_receiver

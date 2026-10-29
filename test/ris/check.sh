@@ -1178,6 +1178,18 @@ else
   echo "FAILED   unwind_failure: $out"; status=1
 fi
 
+# Text bindings reserve lazily and copy only their initial bytes.
+expect text_grow_owner 'declare the append method in the owning class'
+out=$(RIS_TAPE_STATS=1 "$RIS" run test/ris/text_grow.ri 2>&1)
+if [ "$?" -eq 0 ] &&
+    grep -qxF 'PASS: text grows in locals and fields' <<<"$out" &&
+    grep -qF "0 growth moves off the tape's end (0 bytes copied)" <<<"$out" &&
+    grep -qF '0 side regions (0 transfer bytes copied)' <<<"$out"; then
+  echo "runs     text_grow (lazy locals, fields, views, rebind, zero copies)"
+else
+  echo "FAILED   text_grow: $out"; status=1
+fi
+
 # Reserved side growth keeps addresses and uses bounded mappings.
 # Counts include the program storage mapping for standard streams.
 out=$(RIS_TAPE_STATS=1 "$RIS" run test/ris/stable_growth.ri 2>&1)

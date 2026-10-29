@@ -4,6 +4,15 @@ Every change to TAPE_SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one.
 
+## 2026-10-29: an appended String grows in its own reservation
+
+* Changed: 7.3. A String local or field that gets `<<` owns a growing
+  reservation from its first append (one copy of the start text);
+  before, `<<` extended in place only at the tape's cursor and otherwise
+  copied all of the text, so a field or a busy local grew in O(n^2).
+* Why: the user's decision. `s = ""` and `<<` replace String::Builder
+  in ordinary code (TODO "Text"); that is only sound if it never copies.
+
 ## 2026-10-28: String, Array, Hash and Tre are the tape types; section 7
 
 * Changed: section 7 replaces "Program targets and allocation". The tape

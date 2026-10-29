@@ -203,9 +203,13 @@ rule goes last in its section; a removed one leaves its number unused.
   open addressing in place, in insertion order. Tre is a tree in one array
   with index links.
 * 7.3 Ruby's and Crystal's syntax stays as written; the compiler places
-  memory. `s << x` on a String appends in place when `s` tops its tape,
-  else rebinds `s` to `s + x`; bang methods rebind. After `t = s; s << x`,
-  `t` keeps the old text: a String is immutable.
+  memory. A String local or field that gets `<<` reserves growing storage
+  at its first append, copying its current text once; later appends grow
+  in place and never move. A field's reservation belongs to its object's
+  owner. Reading it gives a String view: after `t = s; s << x`, `t` keeps
+  the old text, as a String is immutable. Rebinding starts a fresh
+  reservation at the next append; text never appended reserves nothing.
+  Bang methods rebind.
 * 7.4 Nested containers (`Array(Array(T))`, `Hash(K, Array(V))`) hold
   their inner arrays as runs of a SlicePool they own; `outer[i]` answers a
   handle to its run, so a change through it shows in the container. No

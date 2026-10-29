@@ -95,6 +95,28 @@ class Iyi::TapeChecker
     end
   end
 
+  # A syntactic << can specialize to an integer shift or a container.
+  # Only compiler-marked companions of String fields carry storage. A
+  # source declaration cannot opt out of the ordinary tape field check.
+  private def unused_text_companion?(type : Type, name : String) : Bool
+    return false unless type.is_a?(InstanceVarContainer)
+    declaration = type.is_a?(GenericClassInstanceType) ? type.generic_type : type
+    marked = @program.ris_text_companions[declaration]?.try(&.includes?(name))
+    if !marked && type.is_a?(ClassType) && (parent = type.superclass)
+      return unused_text_companion?(parent, name)
+    end
+    return false unless marked
+    source = "@" + name.lchop("@__ris_text_")
+    field = type.lookup_instance_var?(source).try(&.type?)
+    return false unless field
+    !string_field?(field)
+  end
+
+  private def string_field?(type : Type) : Bool
+    return type.union_types.any? { |t| string_field?(t) } if type.is_a?(UnionType)
+    type.to_s == "String"
+  end
+
   # Views and links are fixed values; growing storage is never an element.
   private def growing_in(type : Type, visiting = Set(Type).new) : Bool
     type = type.remove_alias.remove_typedef.remove_alias
@@ -117,6 +139,7 @@ class Iyi::TapeChecker
     end
     if type.struct? && type.is_a?(InstanceVarContainer)
       return type.instance_vars.each_value.any? do |field|
+        next false if unused_text_companion?(type, field.name)
         field.type?.try { |t| growing_in(t, visiting) } == true
       end
     end
@@ -184,6 +207,7 @@ class Iyi::TapeChecker
     return unless type.is_a?(InstanceVarContainer)
     return if type.is_a?(PrimitiveType) || type.is_a?(ProcInstanceType)
     type.instance_vars.each_value do |ivar|
+      next if unused_text_companion?(type, ivar.name)
       ivar_type = ivar.type?
       next unless ivar_type
       found = TapeChecker.tape_in(@program, ivar_type)

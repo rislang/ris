@@ -942,3 +942,64 @@ struct Array(T)
     @state == other.@state
   end
 end
+
+# Compiler companion for an appended binding. Creating a slot allocates
+# nothing. Its home is captured with the field's other initializers.
+@[OnTape]
+struct RisTextGrowth
+  @writer : String::Builder? = nil
+  @home : UInt64 = 0_u64
+
+  def initialize
+    @home = RisRegion.tape
+  end
+
+  # A copied object starts lazily in its destination owner. The String
+  # field is copied independently; it becomes this slot's first input.
+  def __iyi_copy_into(target : Pointer(self), work : RisCopyWork) : Nil
+    target.value = self.class.new
+  end
+
+  def __iyi_pending_copy(owner : RisPendingCopy) : self
+    owner.run { self.class.new }
+  end
+
+  def reset : Nil
+    @writer = nil
+  end
+
+  def append(text : String, value) : String
+    writer = @writer
+    if writer
+      previous = writer.finish
+      writer = nil unless previous.to_unsafe.address == text.to_unsafe.address &&
+                          previous.bytesize == text.bytesize
+    end
+    unless writer
+      writer = String::Builder.__ris_text_home(@home, text.bytesize)
+      writer.append(text)
+      RisRegion.text_initial_copy(text.bytesize.to_u64)
+      @writer = writer
+    end
+    writer.append_value(value)
+    writer.finish
+  end
+end
+
+struct String::Builder
+  # State and bytes share a side reservation linked directly to *home*.
+  # No allocation on a temporary caller tape can escape through a field.
+  def self.__ris_text_home(home : UInt64, capacity : Int32) : self
+    made = uninitialized self
+    pointerof(made.@state).value = RisRegion.text_state(home, capacity.to_u64)
+    made
+  end
+end
+
+struct String
+  def __ris_append_field_owner(value)
+    {% raise "growing text needs a concrete field owner;\n\n" +
+             "declare the append method in the owning class or " +
+             "an @[OnTape] struct" %}
+  end
+end

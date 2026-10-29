@@ -851,6 +851,7 @@ module Iyi
   class Var < ASTNode
     include SpecialVar
 
+    property? ris_text_slot = false
     property name : String
     property doc : String?
 
@@ -862,7 +863,7 @@ module Iyi
     end
 
     def clone_without_location
-      Var.new(@name)
+      Var.new(@name).tap { |copy| copy.ris_text_slot = ris_text_slot? }
     end
 
     def_equals_and_hash name
@@ -2786,6 +2787,7 @@ module Iyi
   end
 
   class TypeDeclaration < ASTNode
+    property? ris_text_companion = false
     property doc : String?
     property var : ASTNode
     property declared_type : ASTNode
@@ -2819,7 +2821,9 @@ module Iyi
     end
 
     def clone_without_location
-      TypeDeclaration.new(@var.clone, @declared_type.clone, @value.clone)
+      TypeDeclaration.new(@var.clone, @declared_type.clone, @value.clone).tap do |copy|
+        copy.ris_text_companion = ris_text_companion?
+      end
     end
 
     def_equals_and_hash @var, @declared_type, @value

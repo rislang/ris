@@ -3,6 +3,9 @@ require "../syntax/transformer"
 
 module Iyi
   class Program
+    getter ris_growing_field_names = Set(String).new
+    getter ris_text_companions = {} of Type => Set(String)
+
     def normalize(node, inside_exp = false, current_def = nil, macro_code = false)
       normalizer = Normalizer.new(self)
       normalizer.macro_code = 1 if macro_code
@@ -12,6 +15,12 @@ module Iyi
       # is lowered with the def).
       unless current_def || macro_code || normalizer.macro_expansion || node.is_a?(Def)
         TapeTextLowering.lower_scope(node, [] of String, false)
+        if node.is_a?(Expressions)
+          prepared = normalizer.prepare_text_growth(Expressions.new(node.expressions).at(node))
+          if prepared.is_a?(Expressions) && !prepared.same?(node)
+            node.expressions = prepared.expressions
+          end
+        end
         normalizer.bound_scope = node
       end
       node.transform(normalizer)
@@ -468,6 +477,115 @@ module Iyi
       !(file.includes?("/src/std/") || file.ends_with?(".iyimod"))
     end
 
+    @ris_growing_locals = Set(String).new
+    @ris_text_slots = {} of String => Var
+    @ris_growing_fields = Set(String).new
+
+    # Scan before normalization introduces temporaries and rebinding calls.
+    class GrowingTextScan < Visitor
+      getter locals = Set(String).new
+      getter fields = Set(String).new
+      getter assigned = Set(String).new
+      getter block_args = Set(String).new
+
+      def visit(node : Assign)
+        if (target = node.target).is_a?(Var)
+          @assigned << target.name
+        end
+        true
+      end
+
+      def visit(node : TypeDeclaration)
+        if node.value && (target = node.var).is_a?(Var)
+          @assigned << target.name
+        end
+        true
+      end
+
+      def visit(node : MultiAssign)
+        node.targets.each do |target|
+          target = target.exp if target.is_a?(Splat)
+          @assigned << target.name if target.is_a?(Var)
+        end
+        true
+      end
+
+      def visit(node : Block)
+        node.args.each { |arg| @block_args << arg.name }
+        true
+      end
+
+      def initialize(@methods = false)
+      end
+
+      def visit(node : Call)
+        if node.name == "<<" && node.args.size == 1
+          case receiver = node.obj
+          when Var
+            @locals << receiver.name
+          when InstanceVar
+            @fields << receiver.name
+          end
+        end
+        true
+      end
+
+      def visit(node : Def)
+        @methods
+      end
+
+      def visit(node : ClassDef | ModuleDef | Macro)
+        false
+      end
+
+      def visit(node : ASTNode)
+        true
+      end
+    end
+
+    private def growing_slot(receiver : ASTNode) : ASTNode
+      case receiver
+      when Var
+        @ris_text_slots[receiver.name].clone.at(receiver)
+      when InstanceVar
+        InstanceVar.new("@__ris_text_#{receiver.name.lchop('@')}").at(receiver)
+      else
+        raise "BUG: growing text needs a binding"
+      end
+    end
+
+    private def growing_initializer(receiver : ASTNode) : ASTNode
+      If.new(IsA.new(receiver.clone, Path.global("String")).at(receiver),
+        Call.new(Path.global("RisTextGrowth"), "new").at(receiver),
+        NilLiteral.new.at(receiver)).at(receiver)
+    end
+
+    def prepare_text_growth(body : ASTNode, params = [] of String) : ASTNode
+      @ris_growing_locals = Set(String).new
+      @ris_text_slots = {} of String => Var
+      return body unless program.tape_platform? && @macro_code == 0 &&
+                         !TapeScopeRuntime.runtime?(body.location)
+      scan = GrowingTextScan.new
+      body.accept(scan)
+      @ris_growing_locals = scan.locals
+      scan.locals.each do |name|
+        slot = program.new_temp_var.at(body)
+        slot.ris_text_slot = true
+        @ris_text_slots[name] = slot
+      end
+      names = scan.locals.select do |name|
+        params.includes?(name) ||
+          (!scan.assigned.includes?(name) && !scan.block_args.includes?(name))
+      end
+      lines = names.map do |name|
+        slot = growing_slot(Var.new(name).at(body))
+        Assign.new(slot, growing_initializer(Var.new(name).at(body))).at(body).as(ASTNode)
+      end
+      return body if lines.empty?
+      Expressions.new(lines + [body]).at(body)
+    end
+
+    @ris_growing_rebounds = Set(UInt64).new
     @ris_string_mutations = Set(UInt64).new
 
     def transform(node : Call)
@@ -511,11 +629,32 @@ module Iyi
          ((receiver = node.obj).is_a?(Var) || receiver.is_a?(InstanceVar))
         @ris_string_mutations << node.object_id
         method = node.name == "<<" ? "__ris_append" : node.name.rchop
+        if node.name == "<<" && receiver.is_a?(InstanceVar) &&
+           !@ris_growing_fields.includes?(receiver.name) &&
+           !TapeScopeRuntime.runtime?(node.location)
+          method = "__ris_append_field_owner"
+        end
         temporary = program.new_temp_var.at(node)
-        value = Call.new(temporary.clone, method,
-          node.args.map(&.clone)).at(node)
+        growing = node.name == "<<" &&
+          ((receiver.is_a?(Var) && @ris_growing_locals.includes?(receiver.name)) ||
+           (receiver.is_a?(InstanceVar) && @ris_growing_fields.includes?(receiver.name)))
+        value = if growing
+                  slot = growing_slot(receiver)
+                  writer = if receiver.is_a?(InstanceVar)
+                             slot
+                           else
+                             Or.new(slot.clone, Assign.new(slot.clone,
+                               Call.new(Path.global("RisTextGrowth"), "new").at(node)).at(node)).at(node)
+                           end
+                  Call.new(writer, "append",
+                    [temporary.clone] + node.args.map(&.clone)).at(node)
+                else
+                  Call.new(temporary.clone, method,
+                    node.args.map(&.clone)).at(node)
+                end
         value.named_args = node.named_args.try &.map(&.clone)
         rebound = Assign.new(receiver.clone, value).at(node)
+        @ris_growing_rebounds << rebound.object_id if growing
         node.obj = temporary.clone
         test = IsA.new(temporary.clone,
           Path.global("String").at(node)).at(node)
@@ -612,6 +751,9 @@ module Iyi
       node.block_arg.try { |arg| params << arg.name }
       TapeTextLowering.lower_scope(node.body, params, tape_def)
       node.body.accept(TapeTextLowering.new) if tape_def
+      outer_growing = @ris_growing_locals
+      outer_text_slots = @ris_text_slots
+      node.body = prepare_text_growth(node.body, params)
       @current_def = node
       outer_scope, outer_params = @bound_scope, @bound_params
       @bound_scope = @macro_code == 0 && !@macro_expansion ? node.body : nil
@@ -622,6 +764,8 @@ module Iyi
       node.args.each { |arg| arg.restriction = arg.restriction.try &.transform(self) }
       @bound_scope, @bound_params = outer_scope, outer_params
       @current_def = nil
+      @ris_growing_locals = outer_growing
+      @ris_text_slots = outer_text_slots
 
       # If the def has a block argument without a specification
       # and it doesn't use it, we remove it because it's useless
@@ -832,6 +976,29 @@ module Iyi
     end
 
     def transform(node : ClassDef)
+      outer_locals, outer_slots = @ris_growing_locals, @ris_text_slots
+      @ris_growing_locals = Set(String).new
+      @ris_text_slots = {} of String => Var
+      outer_fields = @ris_growing_fields
+      @ris_growing_fields = Set(String).new
+      if program.tape_platform? && @macro_code == 0 &&
+         !TapeScopeRuntime.runtime?(node.location)
+        scan = GrowingTextScan.new(methods: true)
+        node.body.accept(scan)
+        @ris_growing_fields = scan.fields
+        @ris_growing_fields.each { |name| program.ris_growing_field_names << name }
+        declarations = @ris_growing_fields.flat_map do |name|
+          slot = growing_slot(InstanceVar.new(name).at(node))
+          type = Path.global("RisTextGrowth").at(node)
+          declaration = TypeDeclaration.new(slot, type,
+            Call.new(type.clone, "new").at(node)).at(node)
+          declaration.ris_text_companion = true
+          reset = Def.new("__ris_text_reset_#{name.lchop('@')}", [] of Arg,
+            Call.new(slot.clone, "reset").at(node)).at(node)
+          [declaration, reset] of ASTNode
+        end
+        node.body = Expressions.new(declarations + [node.body]).at(node) unless declarations.empty?
+      end
       outer = @scanners
       @scanners = [] of String
       body = node.body
@@ -852,6 +1019,8 @@ module Iyi
       end
       node = super
       @scanners = outer
+      @ris_growing_fields = outer_fields
+      @ris_growing_locals, @ris_text_slots = outer_locals, outer_slots
       node
     end
 
@@ -860,10 +1029,14 @@ module Iyi
     end
 
     def transform(node : ModuleDef)
+      outer_locals, outer_slots = @ris_growing_locals, @ris_text_slots
+      @ris_growing_locals = Set(String).new
+      @ris_text_slots = {} of String => Var
       outer = @scanners
       @scanners = [] of String
       node = super
       @scanners = outer
+      @ris_growing_locals, @ris_text_slots = outer_locals, outer_slots
       node
     end
 
@@ -900,7 +1073,12 @@ module Iyi
          program_initializer?(node.var, node)
         node.value = program_initializer(value)
       end
-      node
+      if node.value && node.var.is_a?(Var) &&
+         (reset = text_reset(node.var, node))
+        Expressions.new([node, reset, node.var.clone] of ASTNode).at(node)
+      else
+        node
+      end
     end
 
     private def program_initializer?(target : ASTNode, node : ASTNode) : Bool
@@ -929,9 +1107,42 @@ module Iyi
       end
       if @dead_code
         node.value
+      elsif !@ris_growing_rebounds.includes?(node.object_id) &&
+            (reset = text_reset(node.target, node))
+        Expressions.new([node, reset, node.target.clone] of ASTNode).at(node)
       else
         node
       end
+    end
+
+    private def text_reset(target : ASTNode, at : ASTNode) : ASTNode?
+      return nil unless program.tape_platform? && @macro_code == 0 &&
+                        !TapeScopeRuntime.runtime?(at.location)
+      if target.is_a?(Var) && @ris_growing_locals.includes?(target.name)
+        return Assign.new(growing_slot(target), growing_initializer(target)).at(at)
+      end
+      return nil unless target.is_a?(InstanceVar) && @current_def
+      if @ris_growing_fields.includes?(target.name)
+        return Call.new(growing_slot(target), "reset").at(at)
+      end
+      return nil unless program.ris_growing_field_names.includes?(target.name) &&
+                        @current_def.try(&.name) != "initialize"
+      method = "__ris_text_reset_#{target.name.lchop('@')}"
+      receiver = Var.new("self").at(at)
+      If.new(RespondsTo.new(receiver.clone, method).at(at),
+        Call.new(receiver, method).at(at)).at(at)
+    end
+
+    def transform(node : MultiAssign)
+      node = super
+      resets = node.targets.compact_map do |target|
+        target = target.exp if target.is_a?(Splat)
+        text_reset(target, node)
+      end
+      return node if resets.empty?
+      result = program.new_temp_var.at(node)
+      Expressions.new([Assign.new(result.clone, node).at(node)] +
+        resets + [result.clone]).at(node)
     end
 
     # Convert `a += b` to `a = a + b`
@@ -1243,6 +1454,13 @@ module Iyi
     #      x + y + z
     #    end
     def transform(node : Block)
+      if program.tape_platform? && @macro_code == 0
+        slots = node.args.select { |arg| @ris_growing_locals.includes?(arg.name) }.map do |arg|
+          Assign.new(growing_slot(arg),
+            growing_initializer(arg)).at(arg).as(ASTNode)
+        end
+        node.body = Expressions.new(slots + [node.body]).at(node) unless slots.empty?
+      end
       node = super
       TapeScopeChecker.mark(program, node) if node.is_a?(Block) && @macro_code == 0
 

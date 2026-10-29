@@ -169,6 +169,9 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
   # local storage. Str is immutable and safe to borrow for reads.
   # Raw pointer access remains explicitly outside tape lifetime guarantees.
   def visit(node : Var)
+    # Only generated append/reset code reads this slot. It copies into
+    # its captured owner; the associated String still obeys scope checks.
+    return false if node.ris_text_slot?
     return false if @program_vars.includes?(variable_key(node.name))
     if @local_tape && (type = node.type?) && TapeChecker.tape_in(@program, type) && type.remove_typedef.to_s != "String"
       meta = @block.try(&.vars.try(&.[node.name]?)) || @owner.try(&.vars.try(&.[node.name]?))
@@ -200,6 +203,10 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
   end
 
   def visit(node : Assign)
+    if node.target.is_a?(Var) && node.target.as(Var).ris_text_slot?
+      node.value.accept self
+      return false
+    end
     if target = node.target.as?(Var)
       key = variable_key(target.name)
       if program_value?(node.value) && !@request_vars.includes?(key)

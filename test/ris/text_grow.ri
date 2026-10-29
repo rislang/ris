@@ -1,0 +1,209 @@
+
+@[OnTape]
+class GrowingField
+  property text : String = "odd"
+
+  def append(value : String)
+    @text << value
+    nil
+  end
+
+  def rebind(value : String)
+    @text = value
+  end
+end
+
+@[OnTape]
+class InferredGrowingField
+  getter text
+
+  def initialize(value : String)
+    @text = value
+  end
+
+  def append(value : String)
+    @text << value
+    nil
+  end
+end
+
+@[Owner]
+struct OwnedGrowingField
+  getter text : String = "owner"
+
+  def append(value : String)
+    @text << value
+    nil
+  end
+end
+
+def copies : UInt64
+  RisRegion.text_copied_bytes
+end
+
+def reservations : UInt64
+  RisRegion.text_reservations
+end
+
+def check_count(before : UInt64, bytes : UInt64)
+  raise "text copied after first append" unless copies == before + bytes
+end
+
+# Every round displaces the ordinary tape cursor. Growing text must not
+# copy its prefix, even at odd lengths or after another growing value.
+before = copies
+before_reservations = reservations
+s = ""
+10000.times do
+  padding = String.new("other tape writes")
+  s << "x"
+  raise "padding" unless padding.bytesize == 17
+end
+raise "local length" unless s.bytesize == 10000
+check_count(before, 0_u64)
+raise "local reservation" unless reservations == before_reservations + 1_u64
+
+before = copies
+literal = "abc"
+literal << "d"
+10000.times { literal << 'e' }
+raise "literal prefix" unless literal[0, 4] == "abcd"
+raise "literal length" unless literal.bytesize == 10004
+check_count(before, 3_u64)
+
+before = copies
+odd = String.new("1234567")
+odd << "8"
+odd << "9"
+odd << "0"
+raise "odd lengths" unless odd == "1234567890"
+check_count(before, 7_u64)
+
+before = copies
+text = "old"
+view = text
+text << "!"
+old_growing = text
+10000.times { text << "x" }
+raise "literal view" unless view == "old"
+raise "growing view" unless old_growing == "old!"
+check_count(before, 3_u64)
+
+before = copies
+text = "new"
+text << "!"
+text = ""
+text << "z"
+raise "rebind" unless text == "z" && old_growing == "old!"
+check_count(before, 3_u64)
+
+# Rebinding the exact current view also starts a fresh reservation.
+before = reservations
+same = text
+text = same
+text << "!"
+raise "same view rebind" unless reservations == before + 1_u64
+raise "same view unchanged" unless same == "z"
+
+before = copies
+typed : String = "typed"
+typed << "!"
+raise "typed local" unless typed == "typed!"
+check_count(before, 5_u64)
+
+# Destructuring binds before initializing/resetting its companion slots.
+before = copies
+multi, spare = {"a", "b"}
+multi << "!"
+multi_view = multi
+multi, spare = {multi, spare}
+multi << "?"
+raise "multiple assignment" unless multi == "a!?" && multi_view == "a!"
+check_count(before, 3_u64)
+
+# Bang methods still rebind, so the next append copies the new view.
+before = copies
+bang = " a "
+bang << "b"
+bang_view = bang
+bang.strip!
+bang << "c"
+raise "bang rebind" unless bang == "a bc" && bang_view == " a b"
+check_count(before, 6_u64)
+
+before = copies
+field = GrowingField.new
+10000.times do
+  padding = String.new("displace")
+  field.append("x")
+end
+raise "field length" unless field.text.bytesize == 10003
+check_count(before, 3_u64)
+old_field = field.text
+field.rebind("reset")
+before = copies
+field.append("!")
+check_count(before, 5_u64)
+raise "field rebind" unless field.text == "reset!"
+raise "field view" unless old_field.bytesize == 10003
+
+# A generated setter must reset even when pointer and length match.
+same_field = GrowingField.new
+same_field.append("!")
+same_view = same_field.text
+same_field.text = same_view
+before = reservations
+same_field.append("?")
+raise "setter rebind" unless reservations == before + 1_u64
+raise "setter old view" unless same_view == "odd!"
+
+local_tape do
+  nested = "nested"
+  nested << "!"
+  raise "nested tape local" unless nested == "nested!"
+end
+
+# Other << methods retain their ordinary meaning.
+struct TextGrowBits
+  @bits : Int32 = 1
+
+  def shift : Int32
+    @bits << 1
+  end
+end
+raise "integer shift" unless TextGrowBits.new.shift == 2
+
+before = copies
+inferred = InferredGrowingField.new(String.new("seed"))
+3.times { inferred.append("!") }
+raise "inferred field" unless inferred.text == "seed!!!"
+check_count(before, 4_u64)
+
+before = copies
+owned = OwnedGrowingField.new
+5.times { owned.append("!") }
+raise "owner field" unless owned.text == "owner!!!!!"
+check_count(before, 5_u64)
+
+# Pool handles keep object fields on the same owner as other tape data.
+pool = SlicePool(GrowingField).new
+run = pool.alloc_slice(1, GrowingField.new)
+before = copies
+5.times { run[0].append("p") }
+raise "pool field" unless run[0].text == "oddppppp"
+check_count(before, 3_u64)
+
+# The lazy slot follows a deeply copied object's owner, not its caller.
+retained = field.copy_to(Program.tape)
+before = copies
+local_tape do
+  retained.append("?")
+end
+raise "retained field" unless retained.text == "reset!?"
+check_count(before, 6_u64)
+
+before = reservations
+never = "never appended"
+raise "never text" unless never.bytesize == 14
+raise "never reservation" unless reservations == before
+puts "PASS: text grows in locals and fields"

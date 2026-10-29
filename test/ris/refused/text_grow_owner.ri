@@ -1,0 +1,13 @@
+module IndirectTextOwner
+  def append
+    @text << "x"
+  end
+end
+
+@[OnTape]
+class TextOwner
+  include IndirectTextOwner
+  @text : String = ""
+end
+
+TextOwner.new.append
