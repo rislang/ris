@@ -600,6 +600,19 @@ class ProcessChild
     @errors : Int32 = -1
   {% end %}
 
+  # *count* cleared items of *width* bytes on the caller's tape: the
+  # buffers and tables a call hands the OS end with the caller's scope.
+  def self.tape_cleared(count : UInt64, width : Int32) : UInt64
+    bytes = count * width.to_u64
+    start = RisRegion.tape_bytes(bytes)
+    at = 0_u64
+    while at < bytes
+      Pointer(UInt64).new(start + at).value = 0_u64
+      at = at + 8_u64
+    end
+    start
+  end
+
   def initialize
   end
 
@@ -685,7 +698,7 @@ class ProcessChild
   # Up to *max* bytes the child wrote to its output (or errors), parking
   # until there are some; nil at the end, when this side's end is closed.
   def read_some(output : ::Bool, max : Int32) : String? | Cancelled
-    buffer = Pointer(UInt8).malloc(max.to_u64)
+    buffer = Pointer(UInt8).new(RisRegion.tape_bytes(max.to_u64))
     got = read_into(output, buffer, max)
     return abandon if got.is_a?(Cancelled)
     if got <= 0_i64
@@ -1552,7 +1565,7 @@ class ProcessChild
       def self.executable_file?(path : String) : Int32
         c = c_text(path).to_unsafe
         return errno if LibC.access(c, 1) != 0 # X_OK
-        buffer = Pointer(UInt64).malloc(32_u64)
+        buffer = Pointer(UInt64).new(ProcessChild.tape_cleared(32_u64, sizeof(UInt64)))
         return errno if LibC.stat(c, buffer.as(Void*)) != 0
         # st_mode is the low half of the word at byte 4.
         mode = Pointer(Int32).new(buffer.address + 4_u64).value & 0xF000
@@ -1561,24 +1574,18 @@ class ProcessChild
 
       @[TapeUnsafe("Borrow NUL-terminated text at the OS boundary")]
       def self.directory?(path : String) : ::Bool
-        buffer = Pointer(UInt64).malloc(32_u64)
+        buffer = Pointer(UInt64).new(ProcessChild.tape_cleared(32_u64, sizeof(UInt64)))
         return false if LibC.stat(c_text(path).to_unsafe, buffer.as(Void*)) != 0
         Pointer(Int32).new(buffer.address + 4_u64).value & 0xF000 == 0x4000
       end
 
       def self.current_directory : String
-        buffer = Pointer(UInt8).malloc(4096_u64)
-        return "." if ::LibC.getcwd(buffer, 4096_u64).address == 0_u64
-        length = 0
-        while buffer[length] != 0_u8
-          length = length + 1
-        end
-        String.new(length) { |target| target.copy_from(buffer, length) }
+        Program.cwd || "."
       end
 
       def self.executable : String?
         size = 4096_u32
-        buffer = Pointer(UInt8).malloc(4096_u64)
+        buffer = Pointer(UInt8).new(RisRegion.tape_bytes(4096_u64))
         return nil if LibC._NSGetExecutablePath(buffer, pointerof(size)) != 0
         length = 0
         while buffer[length] != 0_u8
@@ -1652,7 +1659,7 @@ class ProcessChild
       # taken off the thread before the mask comes back. The program's own
       # SIGPIPE, from its own stdout, is untouched.
       def self.sys_write(fd : Int32, buffer : Pointer(UInt8), count : Int32) : Int64
-        masks = Pointer(UInt64).malloc(4_u64)
+        masks = Pointer(UInt64).new(ProcessChild.tape_cleared(4_u64, sizeof(UInt64)))
         masks[0] = 1_u64.unsafe_shl(12_u64) # SIGPIPE, 13
         masks[1] = 0_u64
         masks[2] = 0_u64 # a timeout of nothing: seconds, nanoseconds
@@ -1671,7 +1678,7 @@ class ProcessChild
       end
 
       def self.mode_of(path : Pointer(UInt8)) : Int32
-        buffer = Pointer(UInt64).malloc(32_u64)
+        buffer = Pointer(UInt64).new(ProcessChild.tape_cleared(32_u64, sizeof(UInt64)))
         return -1 if __iyi_conc_syscall6(SYS_NEWFSTATAT, AT_FDCWD, path.address.to_i64, buffer.address.to_i64, 0_i64, 0_i64, 0_i64) != 0_i64
         Pointer(Int32).new(buffer.address + MODE_OFFSET).value & 0xF000
       end
@@ -1691,18 +1698,12 @@ class ProcessChild
       end
 
       def self.current_directory : String
-        buffer = Pointer(UInt8).malloc(4096_u64)
-        return "." if __iyi_conc_syscall3(SYS_GETCWD, buffer.address.to_i64, 4096_i64, 0_i64) < 0_i64
-        length = 0
-        while buffer[length] != 0_u8
-          length = length + 1
-        end
-        String.new(length) { |target| target.copy_from(buffer, length) }
+        Program.cwd || "."
       end
 
       @[TapeUnsafe("Borrow NUL-terminated text at the OS boundary")]
       def self.executable : String?
-        buffer = Pointer(UInt8).malloc(4096_u64)
+        buffer = Pointer(UInt8).new(RisRegion.tape_bytes(4096_u64))
         link = c_text("/proc/self/exe").to_unsafe
         got = __iyi_conc_syscall6(SYS_READLINKAT, AT_FDCWD, link.address.to_i64, buffer.address.to_i64, 4096_i64, 0_i64, 0_i64)
         return nil if got <= 0_i64 || got >= 4096_i64
@@ -1747,7 +1748,7 @@ class ProcessChild
 
     def read_all(output : ::Bool) : String | Cancelled
       text = String::Builder.new
-      buffer = Pointer(UInt8).malloc(65536_u64)
+      buffer = Pointer(UInt8).new(RisRegion.tape_bytes(65536_u64))
       while true
         got = read_into(output, buffer, 65536)
         return got if got.is_a?(Cancelled)
@@ -1841,7 +1842,7 @@ class ProcessChild
       # makes one; this side's end also O_NONBLOCK, so it parks, and a write
       # on it answers EPIPE rather than raising SIGPIPE (F_SETNOSIGPIPE).
       def self.pipe(ours_reads : ::Bool) : {Int32, Int32}?
-        fds = Pointer(Int32).malloc(2_u64)
+        fds = Pointer(Int32).new(ProcessChild.tape_cleared(2_u64, sizeof(Int32)))
         return nil if LibC.pipe(fds) != 0
         2.times { |index| LibC.fcntl(fds[index], 2, 1) } # F_SETFD FD_CLOEXEC
         ours = ours_reads ? fds[0] : fds[1]
@@ -1853,7 +1854,7 @@ class ProcessChild
       @[TapeUnsafe("Borrow NUL-terminated text at the OS boundary")]
       def start(command : String, path : String, args : Array(String), chdir : String?,
                 input : Int32, output : Int32, error : Int32, environment : Array(String)?) : Nil | ProcessError
-        theirs = Pointer(Int32).malloc(3_u64)
+        theirs = Pointer(Int32).new(ProcessChild.tape_cleared(3_u64, sizeof(Int32)))
         3.times { |index| theirs[index] = -1 }
         modes = {input, output, error}
         3.times do |index|
@@ -1880,8 +1881,8 @@ class ProcessChild
           end
         end
 
-        actions = Pointer(UInt64).malloc(1_u64)
-        attributes = Pointer(UInt64).malloc(1_u64)
+        actions = Pointer(UInt64).new(ProcessChild.tape_cleared(1_u64, sizeof(UInt64)))
+        attributes = Pointer(UInt64).new(ProcessChild.tape_cleared(1_u64, sizeof(UInt64)))
         LibC.posix_spawn_file_actions_init(actions.as(Void*))
         LibC.posix_spawnattr_init(attributes.as(Void*))
         3.times do |index|
@@ -1892,14 +1893,14 @@ class ProcessChild
         end
         # POSIX_SPAWN_SETSIGMASK with an empty mask: the child does not
         # inherit a signal this thread happens to hold.
-        mask = Pointer(UInt64).malloc(1_u64)
+        mask = Pointer(UInt64).new(ProcessChild.tape_cleared(1_u64, sizeof(UInt64)))
         mask[0] = 0_u64
         LibC.posix_spawnattr_setflags(attributes.as(Void*), 0x08)
         LibC.posix_spawnattr_setsigmask(attributes.as(Void*), mask.as(Void*))
         pid = 0
         # The child's `argv`, built here so its text reaches the call: the
         # name it was asked for, then the arguments.
-        argv = Pointer(Pointer(UInt8)).malloc((args.size + 2).to_u64)
+        argv = Pointer(Pointer(UInt8)).new(ProcessChild.tape_cleared((args.size + 2).to_u64, sizeof(Pointer(UInt8))))
         argv[0] = ProcessChild.c_text(command).to_unsafe
         arg = 0
         while arg < args.size
@@ -1911,7 +1912,7 @@ class ProcessChild
         # program's own table, or the one `env:` made.
         envp = __iyi_environ
         if entries = environment
-          envp = Pointer(Pointer(UInt8)).malloc((entries.size + 1).to_u64)
+          envp = Pointer(Pointer(UInt8)).new(ProcessChild.tape_cleared((entries.size + 1).to_u64, sizeof(Pointer(UInt8))))
           entry = 0
           while entry < entries.size
             envp[entry] = ProcessChild.c_text(entries[entry]).to_unsafe
@@ -2000,15 +2001,15 @@ class ProcessChild
       @[TapeUnsafe("Borrow NUL-terminated text at the OS boundary")]
       def self.replace(command : String, path : String, args : Array(String), chdir : String?,
                        environment : Array(String)?) : ProcessError
-        actions = Pointer(UInt64).malloc(1_u64)
-        attributes = Pointer(UInt64).malloc(1_u64)
+        actions = Pointer(UInt64).new(ProcessChild.tape_cleared(1_u64, sizeof(UInt64)))
+        attributes = Pointer(UInt64).new(ProcessChild.tape_cleared(1_u64, sizeof(UInt64)))
         LibC.posix_spawn_file_actions_init(actions.as(Void*))
         LibC.posix_spawnattr_init(attributes.as(Void*))
         3.times { |index| LibC.posix_spawn_file_actions_addinherit_np(actions.as(Void*), index) }
         if directory = chdir
           LibC.posix_spawn_file_actions_addchdir_np(actions.as(Void*), ProcessChild.c_text(directory).to_unsafe)
         end
-        mask = Pointer(UInt64).malloc(1_u64)
+        mask = Pointer(UInt64).new(ProcessChild.tape_cleared(1_u64, sizeof(UInt64)))
         mask[0] = 0_u64
         # POSIX_SPAWN_SETEXEC | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_CLOEXEC_DEFAULT.
         LibC.posix_spawnattr_setflags(attributes.as(Void*), 0x40 | 0x08 | 0x4000)
@@ -2016,7 +2017,7 @@ class ProcessChild
         pid = 0
         # The child's `argv`, built here so its text reaches the call: the
         # name it was asked for, then the arguments.
-        argv = Pointer(Pointer(UInt8)).malloc((args.size + 2).to_u64)
+        argv = Pointer(Pointer(UInt8)).new(ProcessChild.tape_cleared((args.size + 2).to_u64, sizeof(Pointer(UInt8))))
         argv[0] = ProcessChild.c_text(command).to_unsafe
         arg = 0
         while arg < args.size
@@ -2028,7 +2029,7 @@ class ProcessChild
         # program's own table, or the one `env:` made.
         envp = __iyi_environ
         if entries = environment
-          envp = Pointer(Pointer(UInt8)).malloc((entries.size + 1).to_u64)
+          envp = Pointer(Pointer(UInt8)).new(ProcessChild.tape_cleared((entries.size + 1).to_u64, sizeof(Pointer(UInt8))))
           entry = 0
           while entry < entries.size
             envp[entry] = ProcessChild.c_text(entries[entry]).to_unsafe
@@ -2050,7 +2051,7 @@ class ProcessChild
       # is its errno: answered as EACCES, a program out of descriptors
       # (EMFILE) was told "permission denied".
       def self.pipe(ours_reads : ::Bool) : {Int32, Int32} | Int32
-        fds = Pointer(Int32).malloc(2_u64)
+        fds = Pointer(Int32).new(ProcessChild.tape_cleared(2_u64, sizeof(Int32)))
         made = __iyi_conc_syscall3(SYS_PIPE2, fds.address.to_i64, 0x80000_i64, 0_i64)
         return (-made).to_i32 if made < 0_i64
         2.times do |index|
@@ -2074,7 +2075,7 @@ class ProcessChild
         # between the clone and the `execve` the child is a copy of one
         # thread of this program, and it makes system calls and nothing
         # else - no allocation, no lock another thread might have held.
-        theirs = Pointer(Int32).malloc(3_u64)
+        theirs = Pointer(Int32).new(ProcessChild.tape_cleared(3_u64, sizeof(Int32)))
         3.times { |index| theirs[index] = -1 }
         modes = {input, output, error}
         3.times do |index|
@@ -2119,7 +2120,7 @@ class ProcessChild
         end
         target = ProcessChild.c_text(path).to_unsafe
         # The child's `argv`, built here so its text reaches the call.
-        argv = Pointer(Pointer(UInt8)).malloc((args.size + 2).to_u64)
+        argv = Pointer(Pointer(UInt8)).new(ProcessChild.tape_cleared((args.size + 2).to_u64, sizeof(Pointer(UInt8))))
         argv[0] = ProcessChild.c_text(command).to_unsafe
         arg = 0
         while arg < args.size
@@ -2131,7 +2132,7 @@ class ProcessChild
         # program's own table, or the one `env:` made.
         envp = __iyi_environ
         if entries = environment
-          envp = Pointer(Pointer(UInt8)).malloc((entries.size + 1).to_u64)
+          envp = Pointer(Pointer(UInt8)).new(ProcessChild.tape_cleared((entries.size + 1).to_u64, sizeof(Pointer(UInt8))))
           entry = 0
           while entry < entries.size
             envp[entry] = ProcessChild.c_text(entries[entry]).to_unsafe
@@ -2143,18 +2144,18 @@ class ProcessChild
         if where = chdir
           directory = ProcessChild.c_text(where).to_unsafe
         end
-        empty_mask = Pointer(UInt64).malloc(1_u64)
+        empty_mask = Pointer(UInt64).new(ProcessChild.tape_cleared(1_u64, sizeof(UInt64)))
         empty_mask[0] = 0_u64
-        said = Pointer(Int32).malloc(2_u64)
+        said = Pointer(Int32).new(ProcessChild.tape_cleared(2_u64, sizeof(Int32)))
         # Two `struct sigaction`s for the child: one it reads a handler
         # into, and SIG_DFL.
-        actions = Pointer(UInt64).malloc(8_u64)
+        actions = Pointer(UInt64).new(ProcessChild.tape_cleared(8_u64, sizeof(UInt64)))
         8.times { |slot| actions[slot] = 0_u64 }
         # Every signal held on this thread across the clone, the old mask
         # kept beside: the child is born with them held and lets them in
         # only once it has put this program's handlers back to the
         # defaults (see `become`).
-        held = Pointer(UInt64).malloc(2_u64)
+        held = Pointer(UInt64).new(ProcessChild.tape_cleared(2_u64, sizeof(UInt64)))
         held[0] = 0xFFFFFFFFFFFFFFFF_u64
         held[1] = 0_u64
         __iyi_conc_syscall6(SYS_RT_SIGPROCMASK, 0_i64, held.address.to_i64, (held + 1).address.to_i64, 8_i64, 0_i64, 0_i64)
@@ -2174,7 +2175,7 @@ class ProcessChild
         end
         @pid = pid.to_i32
 
-        heard = Pointer(Int32).malloc(2_u64)
+        heard = Pointer(Int32).new(ProcessChild.tape_cleared(2_u64, sizeof(Int32)))
         got = 0_i64
         while true
           got = ProcessChild.sys_read(report[0], heard.as(Pointer(UInt8)), 8)
@@ -2268,7 +2269,7 @@ class ProcessChild
           reap
           return nil
         end
-        status = Pointer(Int32).malloc(1_u64)
+        status = Pointer(Int32).new(ProcessChild.tape_cleared(1_u64, sizeof(Int32)))
         pause = 1
         while true
           # WNOHANG: 0 while the child runs, its pid once it has ended.
@@ -2300,7 +2301,7 @@ class ProcessChild
       end
 
       def reap : Nil
-        status = Pointer(Int32).malloc(1_u64)
+        status = Pointer(Int32).new(ProcessChild.tape_cleared(1_u64, sizeof(Int32)))
         while __iyi_conc_syscall6(SYS_WAIT4, @pid.to_i64, status.address.to_i64, 0_i64, 0_i64, 0_i64, 0_i64) == -(EINTR.to_i64)
         end
         record_end(status[0])
@@ -2309,7 +2310,7 @@ class ProcessChild
       # Whether the child has ended, asked with WNOHANG; collected if so.
       def poll_end : ::Bool
         return true if @ended
-        status = Pointer(Int32).malloc(1_u64)
+        status = Pointer(Int32).new(ProcessChild.tape_cleared(1_u64, sizeof(Int32)))
         answered = __iyi_conc_syscall6(SYS_WAIT4, @pid.to_i64, status.address.to_i64, WNOHANG, 0_i64, 0_i64, 0_i64)
         return false unless answered == @pid.to_i64
         record_end(status[0])
@@ -2334,7 +2335,7 @@ class ProcessChild
                        environment : Array(String)?) : ProcessError
         target = ProcessChild.c_text(path).to_unsafe
         # The child's `argv`, built here so its text reaches the call.
-        argv = Pointer(Pointer(UInt8)).malloc((args.size + 2).to_u64)
+        argv = Pointer(Pointer(UInt8)).new(ProcessChild.tape_cleared((args.size + 2).to_u64, sizeof(Pointer(UInt8))))
         argv[0] = ProcessChild.c_text(command).to_unsafe
         arg = 0
         while arg < args.size
@@ -2346,7 +2347,7 @@ class ProcessChild
         # program's own table, or the one `env:` made.
         envp = __iyi_environ
         if entries = environment
-          envp = Pointer(Pointer(UInt8)).malloc((entries.size + 1).to_u64)
+          envp = Pointer(Pointer(UInt8)).new(ProcessChild.tape_cleared((entries.size + 1).to_u64, sizeof(Pointer(UInt8))))
           entry = 0
           while entry < entries.size
             envp[entry] = ProcessChild.c_text(entries[entry]).to_unsafe

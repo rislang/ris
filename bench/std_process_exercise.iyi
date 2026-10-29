@@ -372,16 +372,16 @@ group do |g|
       end
     end
     # On the program's tape, which outlives the table's use.
-    doubled = Array(UInt8*).new(entries + 3, Pointer(UInt8).new(0_u64))
-    texts = [] of Array(UInt8)
+    doubled = Pointer(UInt8*).new(RisRegion.tape_bytes(((entries + 3) * 8).to_u64))
     entries.times { |i| doubled[i] = was[i] }
     ["IYI_PROCESS_TWICE=first", "IYI_PROCESS_TWICE=second"].each_with_index do |text, i|
-      entry = Array(UInt8).new(text.bytesize + 1, 0_u8)
+      entry = Pointer(UInt8).new(RisRegion.tape_bytes((text.bytesize + 1).to_u64))
       text.bytesize.times { |at| entry[at] = text[at] }
-      texts << entry
-      doubled[entries + i] = entry.to_unsafe
+      entry[text.bytesize] = 0_u8
+      doubled[entries + i] = entry
     end
-    __iyi_set_environ(doubled.to_unsafe)
+    doubled[entries + 2] = Pointer(UInt8).new(0_u64)
+    __iyi_set_environ(doubled)
     gone = ran(Process.run(me, ["env", "IYI_PROCESS_TWICE"], env: {"IYI_PROCESS_TWICE" => nil}), "env: twice")
     fail("a name held twice and removed: the child read #{gone.stdout.inspect}") unless gone.stdout == "<unset>\n"
     ENV.delete("IYI_PROCESS_TWICE")

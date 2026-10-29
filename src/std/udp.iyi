@@ -139,12 +139,13 @@ pub class UdpSocket
   # held, reserved (Windows' excluded ranges answer "access denied"), or
   # the address not this machine's - so a program can pick another. An
   # error's `message` is the sentence `bind` raises.
+  @[TapeUnsafe("Hand the sockaddr bytes to the OS")]
   def self.bind?(host : String, port : Int32) : UdpSocket | SocketError
     addr, addrlen, family = make_sockaddr(host, port)
     fd = __sys_socket(family)
     return SocketError.new("create UDP socket", IyiSocket.__sys_code(fd.to_i64)) if fd < 0
 
-    bound = __sys_bind(fd, addr, addrlen)
+    bound = __sys_bind(fd, addr.to_unsafe, addrlen)
     if bound < 0
       # Read before the close, which may leave its own errno.
       code = IyiSocket.__sys_code(bound.to_i64)
@@ -179,12 +180,13 @@ pub class UdpSocket
   end
 
   # Sends a raw buffer to a destination host and port.
+  @[TapeUnsafe("Hand the sockaddr bytes to the OS")]
   def send_to(buffer : Pointer(UInt8), count : Int32, host : String, port : Int32) : Int32
     check_open
     raise "negative count: #{count}" if count < 0
     addr, addrlen, _ = UdpSocket.make_sockaddr(host, port)
     while true
-      res = UdpSocket.__sys_sendto(@fd, buffer, count.to_u64, 0, addr, addrlen)
+      res = UdpSocket.__sys_sendto(@fd, buffer, count.to_u64, 0, addr.to_unsafe, addrlen)
       return res.to_i32 if res >= 0_i64
       # The report a refused earlier datagram left, taken by this call
       # and gone after it: see `__is_refused`. The datagram is sent again.
@@ -314,10 +316,11 @@ pub class UdpSocket
   # --- Connected Socket Helpers ---
 
   # Connects the UDP socket to a remote host and port (sets default peer).
+  @[TapeUnsafe("Hand the sockaddr bytes to the OS")]
   def connect(host : String, port : Int32) : Nil
     check_open
     addr, addrlen, _ = UdpSocket.make_sockaddr(host, port)
-    res = UdpSocket.__sys_connect(@fd, addr, addrlen)
+    res = UdpSocket.__sys_connect(@fd, addr.to_unsafe, addrlen)
     raise "cannot connect UDP socket to #{IyiSocket.endpoint(host, port)}: #{UdpSocket.refusal(res.to_i64, false)}" if res < 0
   end
 
@@ -442,7 +445,7 @@ pub class UdpSocket
 
   # --- Address Parsing and Formatting ---
 
-  def self.make_sockaddr(host : String, port : Int32) : Tuple(Pointer(UInt8), SockLen, Int32)
+  def self.make_sockaddr(host : String, port : Int32) : Tuple(String, SockLen, Int32)
     raise "port #{port} is not a port: 0 to 65535" if port < 0 || port > 65535
     # An IPv6 literal in its brackets too, as `IyiSocket.connect` reads
     # one: `"[::1]"` was "'[' is not a hex digit".

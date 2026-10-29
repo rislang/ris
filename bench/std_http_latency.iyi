@@ -221,8 +221,9 @@ end
 
 # COUNT GETs of *url*, timed: each on a new connection, or with *idle*
 # all on the one the first made.
-def gets(url : String, count : Int32, idle : Int32 = 0) : Array(Int64)
-  client = HTTPClient.new(idle: idle, timeout_ms: 10000)
+# *tls*: the client's own roots, built in the task that asks.
+def gets(url : String, count : Int32, idle : Int32 = 0, tls : TlsConfig? = nil) : Array(Int64)
+  client = HTTPClient.new(idle: idle, timeout_ms: 10000, tls: tls)
   client.get(url).or_panic
   samples = [] of Int64
   count.times do
@@ -296,8 +297,11 @@ args = Program.args
 mode = args.size > 0 ? args[0] : ""
 
 if mode == "self" || mode == "once"
-  config = client_config(args[3])
-  HTTP.tls_config = config
+  # Task captures are Share values or text: each task builds its own
+  # config from the paths.
+  chain = args[1]
+  key = args[2]
+  ca = args[3]
   count = mode == "self" ? args[4].to_i : 0
   plain = RisExerciseServer.port
   tls = RisExerciseServer.port
@@ -308,22 +312,22 @@ if mode == "self" || mode == "once"
     end
     RisExerciseServer.wait(RisLatency1Handler)
     g.spawn do
-      RisExerciseServer.serve(tls, {args[1].as_tape, args[2].as_tape}, RisLatency2Handler)
+      RisExerciseServer.serve(tls, {chain.as_tape, key.as_tape}, RisLatency2Handler)
       0
     end
     RisExerciseServer.wait(RisLatency2Handler)
     g.spawn do
       if mode == "once"
-        HTTP.get("https://localhost:#{tls}/").or_panic
+        HTTPClient.new(tls: client_config(ca)).get("https://localhost:#{tls}/").or_panic
       else
         report("plain http://, std/http at both ends, a GET on a new connection", gets("http://127.0.0.1:#{plain}/", count))
         report("plain http://, a kept connection, an answer the server streams", gets("http://127.0.0.1:#{plain}/stream", count, 1))
-        report("https://, std/http at both ends, a GET on a new connection", gets("https://localhost:#{tls}/", count))
-        report("https://, a kept connection, an answer the server streams", gets("https://localhost:#{tls}/stream", count, 1))
-        report("https://, Nagle on at the client, its handshake and a GET", nagle_gets(tls, config, count))
+        report("https://, std/http at both ends, a GET on a new connection", gets("https://localhost:#{tls}/", count, 0, client_config(ca)))
+        report("https://, a kept connection, an answer the server streams", gets("https://localhost:#{tls}/stream", count, 1, client_config(ca)))
+        report("https://, Nagle on at the client, its handshake and a GET", nagle_gets(tls, client_config(ca), count))
       end
       HTTP.get("http://127.0.0.1:#{plain}/stop")
-      HTTP.get("https://localhost:#{tls}/stop")
+      HTTPClient.new(tls: client_config(ca)).get("https://localhost:#{tls}/stop")
       0
     end
   end
@@ -333,10 +337,9 @@ end
 if mode == "s_server"
   port = args[1].to_i
   config = client_config(args[2])
-  HTTP.tls_config = config
-  count = args[3].to_i
-  report("https:// to s_server, a GET on a new connection", gets("https://localhost:#{port}/", count))
-  report("https:// to s_server, Nagle on at the client, its handshake and a GET", nagle_gets(port, config, count))
+  rounds = args[3].to_i
+  report("https:// to s_server, a GET on a new connection", gets("https://localhost:#{port}/", rounds, 0, config))
+  report("https:// to s_server, Nagle on at the client, its handshake and a GET", nagle_gets(port, config, rounds))
   exit 0
 end
 
@@ -357,28 +360,28 @@ unless mode.empty?
   puts "usage: std_http_latency [self | s_server | serve | once] ..."
   exit 2
 end
-listener = IyiSocket.listen("127.0.0.1", 0)
-client = IyiSocket.connect("127.0.0.1", listener.local_port).or_panic
-accepted = listener.accept.or_panic
+probe = IyiSocket.listen("127.0.0.1", 0)
+client = IyiSocket.connect("127.0.0.1", probe.local_port).or_panic
+accepted = probe.accept.or_panic
 raise "nodelay: the connected socket has Nagle on (TCP_NODELAY reads 0)" unless client.nodelay?
 raise "nodelay: the accepted socket has Nagle on (TCP_NODELAY reads 0)" unless accepted.nodelay?
 client.nodelay = false
 raise "nodelay: TCP_NODELAY still set after nodelay = false" if client.nodelay?
 client.close
 accepted.close
-listener.close
-listener = RisExerciseServer.port
+probe.close
+served = RisExerciseServer.port
 puts "nodelay: TCP_NODELAY set on the connected and the accepted socket, and cleared by nodelay = false"
 streamed = [] of Int64
 group do |g|
   g.spawn do
-    RisExerciseServer.serve(listener, 0, RisLatency4Handler)
+    RisExerciseServer.serve(served, 0, RisLatency4Handler)
     0
   end
   RisExerciseServer.wait(RisLatency4Handler)
   g.spawn do
-    measured = gets("http://127.0.0.1:#{listener}/stream", 30, 1)
-    HTTP.get("http://127.0.0.1:#{listener}/stop")
+    measured = gets("http://127.0.0.1:#{served}/stream", 30, 1)
+    HTTP.get("http://127.0.0.1:#{served}/stop")
     raise "latency queue full" unless RisBoard.post(RisLatencyResult.new(Array(Int64).new(measured.size) { |i| measured[i] }))
     0
   end

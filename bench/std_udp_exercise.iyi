@@ -143,18 +143,18 @@ late.close
 asker.send("nobody")
 sleep(50)
 parked_heard = ""
+# The task captures ports alone; the receive parks here.
+asker_port = asker.local_port
+refused_port = gone_port
 group do |g|
   g.spawn do
-    parked_heard = asker.receive_datagram.or_panic.text
-    0
-  end
-  g.spawn do
     sleep(20)
-    again = UdpSocket.bind("127.0.0.1", gone_port)
-    again.send_to("reply", "127.0.0.1", asker.local_port)
+    again = UdpSocket.bind("127.0.0.1", refused_port)
+    again.send_to("reply", "127.0.0.1", asker_port)
     again.close
     0
   end
+  parked_heard = asker.receive_datagram.or_panic.text
 end
 assert_str "reply", parked_heard, "a parked receive passes over a refusal and hears the reply"
 asker.close

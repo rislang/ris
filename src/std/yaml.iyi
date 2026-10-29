@@ -240,33 +240,15 @@ pub struct Any
     h[key]?
   end
 
-  # A borrowed probe hashes like Any's String case without allocating Any.
-  @[OnTape]
-  struct TextKey
-    getter text : String
-
-    def initialize(@text : String)
-    end
-
-    def hash : Int32
-      text.hash
-    end
-  end
-
-  def ==(key : TextKey) : Bool
-    kind == KIND_STRING && @raw.as(String) == key.text
-  end
-
   def [](key : String | String) : Any
     h = as_h
-    probe = TextKey.new(key.as_tape)
-    h[probe]? || raise "no such key #{key.inspect}"
+    h[Any.new(key)]? || raise "no such key #{key.inspect}"
   end
 
   def []?(key : String | String) : Any?
     h = as_h?
     return nil unless h
-    h[TextKey.new(key.as_tape)]?
+    h[Any.new(key)]?
   end
 
   # An Int32 indexes a sequence and reaches an integer key of a mapping:
@@ -2962,15 +2944,13 @@ pub class Parser
     @error
   end
 
-  def parse_all : Array(Any)?
-    result = nil.as(Array(Any)?)
-    tape do
-      parser = TapeParser.new(@text.as_tape)
-      docs = parser.parse_all
-      @error = parser.error
-      result = docs.to_heap if docs
-    end
-    result
+  # On the caller's tape, as `TapeParser#parse_all` answers: an
+  # Array(Any) is refused, its documents growing values.
+  def parse_all : Array(TapeValue)?
+    parser = TapeParser.new(@text.as_tape)
+    docs = parser.parse_all
+    @error = parser.error
+    docs
   end
 end
 

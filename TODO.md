@@ -57,17 +57,24 @@ part B.
 * Port the benches to 5.1 task captures. Done: std_signal (exercise
   passes; a listener stops by its task handle's `cancel`, the Share stop
   handle), std_process's captures (ChildProcess#read_both, task values,
-  Atomic). concurrency and stdin_park typecheck. First refusals left:
-  - captures: runtime (`-> { it.size }` on a tape String), http_latency
-    (args), http_resume (listeners), http_stop (TlsConfig), tls
-    (TlsServerConfig), mutex (a tape Mutex in a joined task: needs a rule
-    for Share(owns) tape types), sse (std/sse.iyi:546 parser),
-    websocket (std/websocket.iyi:380 chosen).
-  - not captures: std/process and std_term need no-GC buffers
-    (Pointer.malloc in current_directory, executable); std_process's
-    doubled-environ check needs raw pointers; socket, file, http, json
-    import std/gc; dns, udp: make_sockaddr returns String; yaml:
-    parse_all's TapeValue arm; server_load: IyiMark undefined.
+  Atomic). concurrency and stdin_park typecheck. std_term and runtime
+  pass; std/process's buffers and tables are on the caller's tape, ENV's
+  on program storage. std_process passes but for one mutation proof:
+  `handlers` (child keeps this program's TERM handler) is not caught.
+  http_latency/resume/stop captures are ported (per-task configs, task
+  values, HTTPClient `tls:`). First refusals left:
+  - captures: tls (ech_pair, crafted, faked, captured pass caller
+    TlsServerConfig/TlsConfig into a server task: needs a Copyable or
+    Share config, or one server task per section as binding_server),
+    udp:274 (UdpSocket shared by a receive task and the caller), dns:951
+    (server task and client share `log`, sockets), mutex (a tape Mutex
+    in a joined task: needs a rule for Share(owns) tape types), sse
+    (std/sse.iyi:546 parser), websocket (std/websocket.iyi:380 chosen).
+  - not captures: http_latency, http_resume, http_stop stop at
+    std/http.iyi:6052 (`@failure = got`, program-tape store); socket,
+    file, http, json import std/gc; yaml: Array(Any) refused (growing
+    values): retire Any for TapeValue; server_load: IyiMark (collector
+    gone; the bench proves collections, drop or rewrite it).
 * 5.1 left: receivers and state reached through called methods (only the
   block's own captures are checked), aliases of a handed-off value.
 * Port socket race to one task with multiple in-flight OS connects and

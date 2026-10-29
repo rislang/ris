@@ -131,7 +131,7 @@ for phrase in "arguments came back as they went" \
               "three lines answered one at a time while the child ran" \
               "the child's Process.pid is the handle's pid" \
               "the wait closed the child's input and the child ended" \
-              "read on two tasks while the child wrote both" \
+              "read at once while the child wrote both" \
               "read nothing from it, and wrote 256 KiB of each stream into it" \
               "a grandchild wrote into its parent's own stdout, in order" \
               "refused, ChildInputClosed: the child had ended" \
@@ -233,8 +233,8 @@ echo "== proving the checks can fail when the module is broken"
 patched() {
   local name="$1"
   shift
-  mkdir -p "$WORK/$name-std/std"
-  "$PY" - "$REPO/src/std/process.iyi" "$WORK/$name-std/std/process.iyi" "$@" <<'PY'
+  mkdir -p "$WORK/$name-std/src/std"
+  "$PY" - "$REPO/src/std/process.iyi" "$WORK/$name-std/src/std/process.iyi" "$@" <<'PY'
 import sys
 src = open(sys.argv[1], encoding="utf-8").read()
 pairs = sys.argv[3:]
@@ -255,7 +255,7 @@ prove() {
     status=1
     return
   fi
-  build "$name" "$WORK/$name-std${PSEP}$IYI_PATH" || return
+  build "$name" "$WORK/$name-std/src${PSEP}$IYI_PATH" || return
   "$WORK/$name" >"$WORK/$name.out" 2>&1
   local code=$?
   if [ "$code" -eq 0 ]; then
@@ -278,7 +278,24 @@ else
       "(slashes * 2 + 1).times { into << '\\\\' }" "slashes.times { into << '\\\\' }"
   else
     prove oneargument "every argument the first one" "the child heard" \
-      "list[index + 1] = c_text(args[index])" "list[index + 1] = c_text(args[0])"
+      "report)
+        end
+        target = ProcessChild.c_text(path).to_unsafe
+        # The child's \`argv\`, built here so its text reaches the call.
+        argv = Pointer(Pointer(UInt8)).new(ProcessChild.tape_cleared((args.size + 2).to_u64, sizeof(Pointer(UInt8))))
+        argv[0] = ProcessChild.c_text(command).to_unsafe
+        arg = 0
+        while arg < args.size
+          argv[arg + 1] = ProcessChild.c_text(args[arg])" \
+      "report)
+        end
+        target = ProcessChild.c_text(path).to_unsafe
+        # The child's \`argv\`, built here so its text reaches the call.
+        argv = Pointer(Pointer(UInt8)).new(ProcessChild.tape_cleared((args.size + 2).to_u64, sizeof(Pointer(UInt8))))
+        argv[0] = ProcessChild.c_text(command).to_unsafe
+        arg = 0
+        while arg < args.size
+          argv[arg + 1] = ProcessChild.c_text(args[0])"
   fi
 
   prove sequential "stderr read after stdout's end" "did not finish within" \
@@ -309,7 +326,7 @@ else
            "pidfd = __iyi_conc_syscall3(SYS_PIDFD_OPEN, @pid.to_i64, 0_i64, 0_i64)" "pidfd = -1_i64"; then
         echo "  the patch for nopidfd did not apply"
         status=1
-      elif build nopidfd "$WORK/nopidfd-std${PSEP}$IYI_PATH"; then
+      elif build nopidfd "$WORK/nopidfd-std/src${PSEP}$IYI_PATH"; then
         if "$WORK/nopidfd" >"$WORK/nopidfd.out" 2>&1 && grep -q "ALL CHECKS PASSED" "$WORK/nopidfd.out"; then
           echo "  without a pidfd, as on a kernel before 5.3, every check holds: the end is polled"
         else
@@ -368,7 +385,7 @@ else
         "        __iyi_conc_syscall3(SYS_CLOSE_RANGE, 3_i64, 0xFFFFFFFF_i64, 4_i64)
         failed = __iyi_conc_syscall3(SYS_EXECVE" "        failed = __iyi_conc_syscall3(SYS_EXECVE"
       prove execstayed "an exec that does not go back to its directory" "an exec the system could not run answered" \
-        "        __iyi_conc_syscall3(SYS_CHDIR, ProcessChild.c_text(back).address.to_i64, 0_i64, 0_i64) if chdir" ""
+        "        __iyi_conc_syscall3(SYS_CHDIR, ProcessChild.c_text(back).to_unsafe.address.to_i64, 0_i64, 0_i64) if chdir" ""
       ;;
   esac
   if [ "$PLATFORM" != windows ]; then
@@ -396,7 +413,7 @@ else
       status=1
       return
     fi
-    build "$name" "$WORK/$name-std${PSEP}$IYI_PATH" || return
+    build "$name" "$WORK/$name-std/src${PSEP}$IYI_PATH" || return
     "$PY" -c 'import os, signal, sys; signal.signal(signal.SIGPIPE, signal.SIG_DFL); os.execv(sys.argv[1], sys.argv[1:])' \
       "$WORK/$name" >"$WORK/$name.out" 2>&1
     local code=$?
