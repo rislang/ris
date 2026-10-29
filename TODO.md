@@ -241,10 +241,17 @@ first):
   flush, "cannot store request tape data on the program tape") and
   log.iyi:362 (`initialize(@io : IO, ...)`, the same); and
   http_continue.ri imports `Conn`, which std/http does not export.
-* Compiler specs (seed 71173, 2026-10-27): recheck macro/macro_methods,
-  iyimod, compiler, and codegen/{proc,closure}_spec.cr; four failures and
-  two errors preceded a signal 11 crash in the closure group, so no
-  failure summary was printed.
+* Compiler specs (run with LLVM_CONFIG set to LLVM 23; without it
+  bin/crystal links the system LLVM 21): no signal 11 any more. Left:
+  compiler_spec lines 484, 522, 568 use Channel and select (port to
+  RisBoard or mark pending; the build error exits the process, so no
+  summary); proc (16 of 19 errors) and closure (5) `require "prelude"`,
+  Crystal's, which ris does not offer (switch the helper to ris's
+  prelude or mark pending); macro_methods: 7 stale heap-String
+  expectations, 2 has_inner_pointers?, 2 read_file examples whose String
+  has no fields (also codegen/class_var_spec.cr:292); iyimod: 3
+  failures, 19 errors (IyiThread x2, Str::Builder, `<<` for
+  RisTextGrowth from an artifact, App::Stack#push).
 * Reproduce spec/compiler/iyimod_spec.cr's "carries the constants a
   module's own code reads": runtime constants appear in the constant
   list. Determine whether the artifact or the expectation is wrong;

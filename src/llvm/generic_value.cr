@@ -31,8 +31,16 @@ class LLVM::GenericValue
     LibLLVM.generic_value_to_float(@context.double, self)
   end
 
+  # A String result the evaluator copied out of the module: ris's String
+  # is a {pointer, size} struct, not a pointer `to_pointer` could cast.
+  setter string : String?
+  setter string_error : String?
+
   def to_string : String
-    to_pointer.as(String)
+    if error = @string_error
+      raise error
+    end
+    @string || to_pointer.as(String)
   end
 
   def to_pointer : Void*

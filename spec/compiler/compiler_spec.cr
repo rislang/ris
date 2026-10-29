@@ -65,7 +65,7 @@ describe "Compiler" do
 
   it "compiles a file" do
     with_temp_executable "compiler_spec_output" do |path|
-      Iyi::Command.run ["build"].concat(program_flags_options).concat([compiler_datapath("compiler_sample"), "-o", path])
+      Iyi::Command.run ["build"].concat(program_flags_options).concat([compiler_datapath("compiler_sample.ri"), "-o", path])
 
       File.exists?(path).should be_true
 
@@ -92,7 +92,7 @@ describe "Compiler" do
     File.delete?(probe)
 
     with_temp_executable "compiler_spec_output" do |path|
-      Iyi::Command.run ["build"].concat(program_flags_options).concat([compiler_datapath("compiler_sample"), "-o", path])
+      Iyi::Command.run ["build"].concat(program_flags_options).concat([compiler_datapath("compiler_sample.ri"), "-o", path])
 
       File.exists?(probe).should be_true
       {% if flag?(:msvc) %}
@@ -114,7 +114,7 @@ describe "Compiler" do
   # and the program above having run is what says the link it built works.
   it "builds the link itself rather than asking the driver every time" do
     with_temp_executable "compiler_spec_output" do |path|
-      Iyi::Command.run ["build"].concat(program_flags_options).concat([compiler_datapath("compiler_sample"), "-o", path])
+      Iyi::Command.run ["build"].concat(program_flags_options).concat([compiler_datapath("compiler_sample.ri"), "-o", path])
       Process.capture(path).should eq("Hello!")
 
       # One file per set of link flags. Absent on a platform where this is not
@@ -175,7 +175,7 @@ describe "Compiler" do
   it "runs subcommand in preference to a filename " do
     Dir.cd compiler_datapath do
       with_temp_executable "compiler_spec_output" do |path|
-        Iyi::Command.run ["build"].concat(program_flags_options).concat(["compiler_sample", "-o", path])
+        Iyi::Command.run ["build"].concat(program_flags_options).concat(["compiler_sample.ri", "-o", path])
 
         File.exists?(path).should be_true
 

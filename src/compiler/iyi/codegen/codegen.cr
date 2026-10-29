@@ -48,13 +48,31 @@ module Iyi
       main_return_type = main.type.return_type
       main_return_type = llvm_context.void if node.type.nil_type?
 
+      # ris: String is a struct {ptr, bytesize}, which MCJIT cannot return
+      # through a GenericValue: the wrapper stores it in a global and
+      # `to_string` reads the bytes from there.
+      string_result = node.type? == string
+      string_global = nil
+      string_fields = 0
+      if string_result
+        string_fields = main_return_type.struct_element_types.size
+        string_global = llvm_mod.globals.add(main_return_type, "__evaluate_string")
+        string_global.initializer = main_return_type.null
+        main_return_type = llvm_context.void
+      end
+
       wrapper_type = LLVM::Type.function([] of LLVM::Type, main_return_type)
       wrapper = llvm_mod.functions.add("__evaluate_wrapper", wrapper_type) do |func|
         func.basic_blocks.append "entry" do |builder|
           argc = llvm_context.int32.const_int(0)
           argv = llvm_context.void_pointer.pointer.null
           ret = builder.call(main.type, main.func, [argc, argv])
-          (node.type.void? || node.type.nil_type?) ? builder.ret : builder.ret(ret)
+          if string_global
+            builder.store ret, string_global
+            builder.ret
+          else
+            (node.type.void? || node.type.nil_type?) ? builder.ret : builder.ret(ret)
+          end
         end
       end
 
@@ -67,7 +85,18 @@ module Iyi
       # about to read. The block form only ever looked safe because disposing
       # never happened (`JITCompiler#dispose`).
       jit = LLVM::JITCompiler.new(llvm_mod)
-      jit.run_function wrapper, [] of LLVM::GenericValue, llvm_context
+      value = jit.run_function wrapper, [] of LLVM::GenericValue, llvm_context
+      if string_global
+        if string_fields == 2
+          view = jit.get_pointer_to_global(string_global).as({UInt8*, Int32}*).value
+          value.string = String.new(view[0], view[1])
+        else
+          # Without the tape prelude String has no fields: no bytes to read.
+          value.string_error = "String result has no fields: the program " \
+                               "did not load String's {ptr, bytesize}"
+        end
+      end
+      value
     end
 
     def run(code, return_type : T.class, filename : String? = nil, debug = Debug::Default) forall T
@@ -2560,7 +2589,8 @@ module Iyi
         closure_ptr = if !self_closured && closure_vars.all?(&.iyi_defer_only?)
                         alloca closure_type
                       elsif current_context.closure_owner != 0
-                        ris_environment_malloc(closure_type, current_context.closure_owner)
+                        ris_environment_malloc(closure_type, current_context.closure_owner,
+                          atomic: !closure_has_inner_pointers)
                       else
                         closure_has_inner_pointers ? malloc(closure_type, source) : malloc_atomic(closure_type, source)
                       end
@@ -2820,9 +2850,9 @@ module Iyi
     # A defer borrows its frame until cleanup. Explicit runtime marks cover
     # group callbacks joined before their owning task ends. Other closures
     # retain the ordinary allocator.
-    def ris_environment_malloc(type, owner)
+    def ris_environment_malloc(type, owner, atomic = false)
       unless @program.tape_scopes? && @program.tape_platform?
-        return malloc(type)
+        return atomic ? malloc_atomic(type) : malloc(type)
       end
       name = owner == 2 ? "__ris_program_environment" : "__ris_task_environment"
       environment_fun = fetch_typed_fun(@main_mod, name) do
