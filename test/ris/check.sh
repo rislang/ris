@@ -377,6 +377,7 @@ if [[ "$out" == *FAILED* ]]; then status=1; fi
 printf '%s\n' "$out"
 
 expect slice_pool_links 'realloc_slice refuses self-relative links'
+expect nested_links 'a nested Array cannot hold self-relative links'
 # Nested arrays are pooled handles, including hash values.
 for name in nested_containers long_lived_containers static_array_copy \
     big_tape mime path std_text_tape; do
@@ -570,7 +571,9 @@ if [ "$?" -eq 0 ] &&
     grep -qF 'PASS: owner construction panic cleanup' <<<"$out" &&
     [ "$(grep -cF 'iyi: panic: expected owner construction panic' <<<"$out")" -eq 100 ] &&
     ! grep -qF 'half-built owner became observable' <<<"$out" &&
-    grep -qF '202 scopes, 6 mappings made, 0 unmapped' <<<"$out"; then
+    # Per task: its tape, local_tape, and the result region that keeps
+    # the panic text until the group ends (one mapping, reused).
+    grep -qF '302 scopes, 7 mappings made, 0 unmapped' <<<"$out"; then
   echo "runs     owner_construction_panic (bounded scope cleanup)"
 else
   echo "FAILED   owner_construction_panic: $out"
@@ -728,7 +731,7 @@ for name in implicit fibers/implicit implicit_loop; do
   code=$?
   if [ "$code" -eq 0 ] && grep -qF 'PASS:' <<<"$out" &&
       { [ "$name" != implicit_loop ] ||
-        grep -qF '3 scopes, 5 mappings made, 0 unmapped' <<<"$out"; }; then
+        grep -qF '2 scopes, 4 mappings made, 0 unmapped' <<<"$out"; }; then
     echo "runs     $name"
   else
     echo "FAILED   $name: $out"

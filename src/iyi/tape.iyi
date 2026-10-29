@@ -1273,6 +1273,8 @@ struct Array(T)
   end
 
   def __pool_copy(pool : Pointer(RisArrayPool(T))) : self
+    # A pooled run moves when it grows; links must not move (6.2).
+    Tape.check_slice_relocation(T, Array)
     run = if empty?
       SlicePool::Run(T).new(pool.value.data.@data, 0, 0)
     else
@@ -1311,7 +1313,7 @@ struct Array(T)
     old = SlicePool::Run(T).new(pool.value.data.@data,
       (@state + 6_i64).value.to_i32, (@state + 2_i64).value.to_i32)
     capacity = Tape.grown((@state + 2_i64).value).to_i32
-    run = pool.value.data.realloc_slice(old, capacity, fill)
+    run = pool.value.data.__relocate_slice(old, capacity, fill)
     @state.value = run.@state.value + run.offset.to_u64 * sizeof(T).to_u64
     (@state + 2_i64).value = capacity.to_u64
     (@state + 6_i64).value = run.offset.to_u64
@@ -3390,6 +3392,12 @@ struct SlicePool(T)
 
   def realloc_slice(s : Run(T), n : Int32 | Int64, fill : T) : Run(T)
     Tape.check_slice_relocation(T, Tuple())
+    __relocate_slice(s, n, fill)
+  end
+
+  # Array's own growth: it checks links where a run joins a pool
+  # (`Array#__pool_copy`), as a top-level Array never grows through here.
+  def __relocate_slice(s : Run(T), n : Int32 | Int64, fill : T) : Run(T)
     count = checked(n)
     validate(s)
     return alloc_slice(count, fill) if s.size == 0
