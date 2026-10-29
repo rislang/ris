@@ -446,8 +446,9 @@ class IyiFiber
   end
 
   private def keep_panic(text : String, owner) : Nil
-    kept = Tape.owner_copy(text, owner)
+    # One String needs no copy work queue, so no scratch mapping either.
     owner.run do
+      kept = String.new(text)
       address = RisRegion.tape_bytes(sizeof(String).to_u64)
       Pointer(String).new(address).value = kept
       @panic_box = address

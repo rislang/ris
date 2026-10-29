@@ -140,15 +140,7 @@ struct Array(T)
     end
     result
   end
-  def values_at(indexes : Array(Int32)) : Array(T)
-    result = Array(T).new(indexes.size)
-    i = 0
-    while i < indexes.size
-      result << self[indexes[i]]
-      i = i + 1
-    end
-    result
-  end
+  # `values_at(indexes : Array(Int32))` is a checked view (tape.iyi).
   def dig(index : Int32) : T
     self[index]
   end

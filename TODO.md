@@ -236,21 +236,26 @@ first):
 
 * check.sh triage (2026-10-29, two full runs on minitest agree; all
   deterministic, none load or temp-path races; fail at 5a375faec too):
-  * Tape stats one higher than gated: side_warm 10003 scopes, 6 mappings
-    (gate 10002, 5); side_spares 5 (4); pending_result 7 (6);
-    stable_growth 6 (5); stable_components 7 (6); query_scope 9 (<= 8);
-    owner_construction_panic 303 scopes, 9 mappings (202, 6): one more
-    scope per panic. Find the extra mapping/scope before moving gates.
+  * Tape stats: fixed. Stdio buffers went to Program.tape (program_scope),
+    a mapping of their own; now program storage (storage_scope). A task
+    panic copied its text through a scratch work queue; now one String.
+    owner_construction_panic gates 302 scopes, 7 mappings: each panic's
+    text is kept in a result region until the group ends.
+    query_scope still maps 9 (<= 8): a String#copy_to(RisPendingCopy)
+    in the Query lookup acquires a pending region, besides QUERIES on
+    Program.tape and 5 side reservations. Check std/uri's pending path.
   * text_default.ri:31: a def whose Int32 result drops its interpolation
     keeps tape over a million calls ("interpolation retained tape").
-  * index_view: `dist.values_at(adj)` is no view: index(3) is nil and
-    writes through it miss dist (prints "last names , ... dist -1").
-  * copy_rollback.ri:55: the String#__iyi_copy_into override is not
-    called by Array(String)#copy_to, so the forced copy failure never
-    panics ("missing copy panic").
-  * slice_pool.ri:148 and flat.ri:17: alloc_slice/next_link instantiate
-    realloc_slice, whose relocation check refuses Array::Link
-    (tape.iyi:3392) though no user code relocates.
+  * index_view: fixed; tape_indexable's copying values_at(Array(Int32))
+    overrode the view.
+  * copy_rollback: fixed in the test. Array(String) copies bytes into its
+    own string pool, never through String#__iyi_copy_into; 1.7 promises
+    the rollback, not the hook. A struct leaf now injects the failure.
+  * slice_pool: fixed. Array growth uses __relocate_slice; links are
+    refused where a run joins a pool (nested Array, test nested_links).
+    flat.ri still fails: the shrink checker counts Array::Link as a view
+    (tape_shrink_checker.cr:860), so push after next_link is refused.
+    A link is an index and survives growth: drop it from that list.
   * pointer_unsafe and ffi_marked: `to_unsafe` in an @[PointerUnsafe]
     def or an @[Ffi] C call is refused as needing @[TapeUnsafe]; the
     marks AGENTS.md names should satisfy the String pointer rule.

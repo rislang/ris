@@ -1,0 +1,14 @@
+# A nested Array's run moves when it grows: links in it are refused.
+@[Tape::Flat]
+struct LinkedNode
+  property next : Array::Link(LinkedNode, UInt16)
+
+  def initialize
+    @next = Array::Link(LinkedNode, UInt16).none
+  end
+end
+
+tape do
+  rows = [] of Array(LinkedNode)
+  rows << [LinkedNode.new]
+end

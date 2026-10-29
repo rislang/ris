@@ -116,12 +116,30 @@ class RisRegion
                          type_id : UInt64 = 0_u64) : UInt64
     saved = @@tape
     @@program_storage = acquire(CAPACITY) if @@program_storage == 0
+    old = @@program_storage
     @@tape = @@program_storage
     address = take(@@tape, size, clear, type_id)
     @@program_storage = @@tape
-    @@tape = saved
+    # Inside storage_scope the saved tape is program storage itself.
+    @@tape = saved == old ? @@program_storage : saved
     note_program(size)
     address
+  end
+
+  # Runs the block with program storage as the tape, for runtime objects
+  # that live until exit (the standard streams' buffers): no mapping of
+  # its own, unlike `program_scope`. It never frees, so keep it small.
+  def self.storage_scope(&)
+    saved = @@tape
+    @@program_storage = acquire(CAPACITY) if @@program_storage == 0
+    @@tape = @@program_storage
+    defer storage_restore(saved)
+    yield
+  end
+
+  def self.storage_restore(saved : UInt64) : Nil
+    @@program_storage = @@tape
+    @@tape = saved
   end
 
   # Bytes taken from program storage, which never frees: RIS_TAPE_STATS
