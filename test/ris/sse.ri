@@ -1,6 +1,6 @@
 module test/sse_tape
 
-import std/sse::{SSE, EventParser, TapeEventParser}
+import std/sse::{SSE, EventParser}
 
 kept = "".to_heap
 tape do
@@ -15,14 +15,14 @@ tape do
   prefixed = String.build { |w| w << "prefix:" << encoded }
   exit 12 unless writer.finish == prefixed
   exit 13 unless SSE.comment("a\r\nb\r") == ": a\n: b\n:\n"
-  parser = TapeEventParser.new
+  parser = EventParser.new
   count = 0
   parser.feed("\uFEFFid: 7\r") { |_| exit 1 }
   parser.feed("\ndata: café\r\ndata: next\r\n\r") do |event|
     count += 1
     exit 2 unless event.event == "message" && event.id == "7"
     exit 3 unless event.data == "café\nnext"
-    kept = event.to_heap.data
+    kept = event.data.copy_to(Program.tape)
   end
   exit 4 unless count == 1 && parser.dispatched == 1_i64
   parser.feed("\nretry: 999999999999\n\n") { |_| exit 5 }
@@ -40,4 +40,4 @@ end
 exit 10 unless count == 1
 exit 14 unless SSE.encode("hi") == "data: hi\n\n"
 exit 15 unless SSE.comment("hi") == ": hi\n"
-puts "PASS: sse tape and heap APIs"
+puts "PASS: sse caller tape and explicit retained copy"

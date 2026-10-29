@@ -649,13 +649,6 @@ pub class Router
 
   # *path* - rooted - with `.` and empty segments dropped and `..` taking
   # the one before it off, its trailing slash kept: Go's `cleanPath`.
-  def self.clean(path : String) : String
-    result = ""
-    tape do
-      result = clean(path.as_tape).to_heap
-    end
-    result
-  end
 
   def self.clean(path : String) : String
     String.build { |w| clean(path, w) }

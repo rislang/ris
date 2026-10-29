@@ -499,6 +499,7 @@ class Iyi::TapeProgramChecker
     end
 
     def visit(node : Call)
+      return false if @found
       if expanded = node.expanded
         expanded.accept self
         return false
@@ -515,6 +516,7 @@ class Iyi::TapeProgramChecker
         @found = true
       end
       @graph.targets(node).try &.each do |target|
+        break if @found
         next if @graph.opaque?(target)
         target.body.accept(self) if @seen.add?(target.object_id)
       end
@@ -533,7 +535,7 @@ class Iyi::TapeProgramChecker
     end
 
     def visit(node : ASTNode)
-      true
+      !@found
     end
   end
 
@@ -556,6 +558,7 @@ class Iyi::TapeProgramChecker
     end
 
     def visit(node : Call)
+      return false if @found
       if expanded = node.expanded
         expanded.accept self
         return false
@@ -566,6 +569,7 @@ class Iyi::TapeProgramChecker
         @found = true
       end
       @graph.targets(node).try &.each do |target|
+        break if @found
         next if @graph.opaque?(target)
         target.body.accept(self) if @seen.add?(target.object_id)
       end
@@ -584,7 +588,7 @@ class Iyi::TapeProgramChecker
     end
 
     def visit(node : ASTNode)
-      true
+      !@found
     end
   end
 

@@ -112,6 +112,7 @@ end
 # One dispatched event: its type (`message` unless the stream named one
 # with `event:`), its data, and the last event ID as it stood when it was
 # dispatched, which an event without an `id:` field inherits.
+@[OnTape]
 pub struct Event
   getter event : String
   getter data : String
@@ -128,201 +129,61 @@ end
 # stream does. `last_event_id` is the source's last event ID string,
 # set at each blank line; `retry` the reconnection time the stream set,
 # nil until it sets one; `dispatched` the events yielded so far.
+@[OnTape]
 pub class EventParser
-  MAX_RETRY = 2147483647
   getter last_event_id : String
   getter retry : Int32?
   getter dispatched : Int64
-  @id_buffer : String
-  @type : String
-  @data : String
-  @line : String
-  @after_cr : Bool
-  @first : Bool
+  getter id_buffer : String
+  getter type : String
+  getter data : String::Builder
+  getter line : String::Builder
+  getter after_cr : Bool
+  getter first : Bool
+
+  MAX_RETRY = 2147483647
 
   def initialize(@last_event_id : String = "")
     @id_buffer = @last_event_id
     @type = ""
-    @data = ""
-    @line = ""
+    @data = String::Builder.new(64)
+    @line = String::Builder.new(64)
     @after_cr = false
     @first = true
     @retry = nil
     @dispatched = 0_i64
   end
 
-  def feed(text : String | String, & : Event -> Nil) : Nil
-    tape do
-      parser = TapeEventParser.new(@last_event_id.as_tape)
-      parser.restore(@id_buffer.as_tape, @type.as_tape,
-        @data.as_tape, @line.as_tape, @after_cr, @first,
-        @retry, @dispatched)
-      parser.feed(text.as_tape) do |event|
-        copy_state(parser)
-        yield event.to_heap
-      end
-      copy_state(parser)
-    end
-  end
-
-  private def copy_state(parser : TapeEventParser) : Nil
-    @last_event_id = parser.last_event_id.to_heap
-    @id_buffer = parser.id_buffer.to_heap
-    @type = parser.type.to_heap
-    @data = parser.data_buffer.to_heap
-    @line = parser.line_buffer.to_heap
-    @after_cr = parser.after_cr
-    @first = parser.first
-    @retry = parser.retry
-    @dispatched = parser.dispatched
-  end
-
-  def finish : Nil
-    @line = ""
-    @data = ""
-    @type = ""
-    @after_cr = false
-  end
-end
-
-@[OnTape]
-pub struct TapeEvent
-  getter event : String
-  getter data : String
-  getter id : String
-
-  def initialize(@event : String, @data : String,
-                 @id : String)
-  end
-
-  def to_heap : Event
-    Event.new(@event.to_heap, @data.to_heap, @id.to_heap)
-  end
-end
-
-@[OnTape]
-pub struct TapeEventParser
-  @last_event_id : Pointer(String)
-
-  def last_event_id : String
-    @last_event_id.value
-  end
-
-  @retry : Pointer(Int32?)
-
-  def retry : Int32?
-    @retry.value
-  end
-
-  @dispatched : Pointer(Int64)
-
-  def dispatched : Int64
-    @dispatched.value
-  end
-
-  @id_buffer : Pointer(String)
-
-  def id_buffer : String
-    @id_buffer.value
-  end
-
-  @type : Pointer(String)
-
-  def type : String
-    @type.value
-  end
-
-  @data : Pointer(String::Builder)
-
-  def data : String::Builder
-    @data.value
-  end
-
-  @line : Pointer(String::Builder)
-
-  def line : String::Builder
-    @line.value
-  end
-
-  @after_cr : Pointer(Bool)
-
-  def after_cr : Bool
-    @after_cr.value
-  end
-
-  @first : Pointer(Bool)
-
-  def first : Bool
-    @first.value
-  end
-
-  # The largest reconnection time kept, in milliseconds: what `sleep`
-  # takes.
-  MAX_RETRY = 2147483647
-
-  # A parser for a stream whose last event ID is *last_event_id* so far:
-  # a reconnection's, which carries the one before it (see the module's
-  # header for why).
-  def initialize(last_event_id : String = "".as_tape)
-    @last_event_id = Pointer(String).new(
-      RisRegion.tape_bytes(sizeof(String).to_u64))
-    @retry = Pointer(Int32?).new(
-      RisRegion.tape_bytes(sizeof(Int32?).to_u64))
-    @dispatched = Pointer(Int64).new(
-      RisRegion.tape_bytes(sizeof(Int64).to_u64))
-    @id_buffer = Pointer(String).new(
-      RisRegion.tape_bytes(sizeof(String).to_u64))
-    @type = Pointer(String).new(
-      RisRegion.tape_bytes(sizeof(String).to_u64))
-    @data = Pointer(String::Builder).new(
-      RisRegion.tape_bytes(sizeof(String::Builder).to_u64))
-    @line = Pointer(String::Builder).new(
-      RisRegion.tape_bytes(sizeof(String::Builder).to_u64))
-    @after_cr = Pointer(Bool).new(
-      RisRegion.tape_bytes(sizeof(Bool).to_u64))
-    @first = Pointer(Bool).new(
-      RisRegion.tape_bytes(sizeof(Bool).to_u64))
-    @last_event_id.value = last_event_id
-    @id_buffer.value = @last_event_id.value
-    @type.value = "".as_tape
-    @data.value = String::Builder.new(64)
-    @line.value = String::Builder.new(64)
-    @after_cr.value = false
-    @first.value = true
-    @retry.value = nil
-    @dispatched.value = 0_i64
-  end
-
   def data_buffer : String
-    @data.value.finish
+    @data.finish
   end
 
   def line_buffer : String
-    @line.value.finish
+    @line.finish
   end
 
   def restore(id : String, type : String,
               data : String, line : String,
               after_cr : Bool, first : Bool, retry : Int32?,
               dispatched : Int64) : Nil
-    @id_buffer.value = id
-    @type.value = type
-    @data.value << data
-    @line.value << line
-    @after_cr.value = after_cr
-    @first.value = first
-    @retry.value = retry
-    @dispatched.value = dispatched
+    @id_buffer = id
+    @type = type
+    @data << data
+    @line << line
+    @after_cr = after_cr
+    @first = first
+    @retry = retry
+    @dispatched = dispatched
   end
 
-  def feed(text : String, & : TapeEvent -> Nil) : Nil
+  def feed(text : String, & : Event -> Nil) : Nil
     p = text
     n = text.bytesize
     i = 0
     # A CR that ended the last piece was a line's end already; an LF that
     # starts this one is the rest of that CRLF, not a blank line.
-    if @after_cr.value && n > 0
-      @after_cr.value = false
+    if @after_cr && n > 0
+      @after_cr = false
       i = 1 if p[0] == 10_u8
     end
     start = i
@@ -330,17 +191,17 @@ pub struct TapeEventParser
       c = p[i]
       if c == 10_u8 || c == 13_u8
         line = text[start, i - start]
-        if @line.value.length > 0
-          @line.value << line
-          line = @line.value.finish
-          @line.value = String::Builder.new(64)
+        if @line.length > 0
+          @line << line
+          line = @line.finish
+          @line = String::Builder.new(64)
         end
         i = i + 1
         if c == 13_u8
           if i < n
             i = i + 1 if p[i] == 10_u8
           else
-            @after_cr.value = true
+            @after_cr = true
           end
         end
         start = i
@@ -351,23 +212,23 @@ pub struct TapeEventParser
         i = i + 1
       end
     end
-    @line.value << text[start, n - start] if start < n
+    @line << text[start, n - start] if start < n
   end
 
   # The end of the stream: a line or an event not yet ended is discarded,
   # not dispatched. The last event ID and the reconnection time stay.
   def finish : Nil
-    @line.value = String::Builder.new(64)
-    @data.value = String::Builder.new(64)
-    @type.value = "".as_tape
-    @after_cr.value = false
+    @line = String::Builder.new(64)
+    @data = String::Builder.new(64)
+    @type = "".as_tape
+    @after_cr = false
   end
 
   # One line, its end taken off: the event it dispatches, if it does.
-  private def take(bytes : String) : TapeEvent?
+  private def take(bytes : String) : Event?
     line = SSE.clean(bytes)
-    if @first.value
-      @first.value = false
+    if @first
+      @first = false
       # The decoder's one BOM (the Encoding Standard's UTF-8 decode); a
       # second is the first character of the line.
       if line.bytesize >= 3 && line[0] == 0xEF_u8 &&
@@ -387,14 +248,14 @@ pub struct TapeEventParser
       end
     end
     if field == "event"
-      @type.value = value
+      @type = value
     elsif field == "data"
-      @data.value << value << '\n'
+      @data << value << '\n'
     elsif field == "id"
-      @id_buffer.value = value unless value.includes?('\0')
+      @id_buffer = value unless value.includes?('\0')
     elsif field == "retry"
-      if ms = TapeEventParser.digits(value)
-        @retry.value = ms
+      if ms = EventParser.digits(value)
+        @retry = ms
       end
     end
     nil
@@ -402,19 +263,19 @@ pub struct TapeEventParser
 
   # A blank line: the last event ID is the buffer's whether or not an
   # event goes, and an event goes when it has data.
-  private def dispatch : TapeEvent?
-    @last_event_id.value = @id_buffer.value
-    if @data.value.length == 0
-      @type.value = "".as_tape
+  private def dispatch : Event?
+    @last_event_id = @id_buffer
+    if @data.length == 0
+      @type = "".as_tape
       return nil
     end
-    data = @data.value.finish
+    data = @data.finish
     data = data[0, data.bytesize - 1] if !data.empty? && data[-1] == 10_u8
-    @data.value = String::Builder.new(64)
-    kind = @type.value.empty? ? "message".as_tape : @type.value
-    event = TapeEvent.new(kind, data, @last_event_id.value)
-    @type.value = "".as_tape
-    @dispatched.value = @dispatched.value + 1_i64
+    @data = String::Builder.new(64)
+    kind = @type.empty? ? "message".as_tape : @type
+    event = Event.new(kind, data, @last_event_id)
+    @type = "".as_tape
+    @dispatched = @dispatched + 1_i64
     event
   end
 
@@ -476,16 +337,6 @@ pub class EventWriter
 end
 
 pub struct SSE
-  def self.encode(data : String, event : String? = nil,
-                  id : String? = nil, retry : Int32? = nil) : String
-    result = ""
-    tape do
-      kind = event ? event.as_tape : nil
-      mark = id ? id.as_tape : nil
-      result = encode(data.as_tape, kind, mark, retry).to_heap
-    end
-    result
-  end
 
   def self.encode(data : String, event : String? = nil,
                   id : String? = nil,
@@ -526,13 +377,6 @@ pub struct SSE
     writer << '\n'
   end
 
-  def self.comment(text : String = "") : String
-    result = ""
-    tape do
-      result = comment(text.as_tape).to_heap
-    end
-    result
-  end
 
   def self.comment(text : String) : String
     String.build { |w| comment(text, w) }

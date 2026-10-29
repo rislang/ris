@@ -553,7 +553,7 @@ pub class WebSocket
   # which is 22 characters of the alphabet and `==`.
   protected def self.key?(key : String) : Bool
     return false unless key.bytesize == 24
-    p = key.to_unsafe
+    p = key
     return false unless p[22] == 61_u8 && p[23] == 61_u8
     i = 0
     while i < 22
@@ -569,8 +569,10 @@ pub class WebSocket
   # The `Sec-WebSocket-Accept` that answers *key* (§4.2.2): the base64 of
   # the SHA-1 of the key and the GUID.
   def self.accept(key : String) : String
-    hash = SHA1.new.update(key).update(GUID).final
-    Base64.encode(String.new(20) { |dst| dst.copy_from(hash.to_unsafe, 20) })
+    hash = String.build(20) do |writer|
+      SHA1.new.update(key).update(GUID).final(writer)
+    end
+    Base64.encode(hash)
   end
 
   # The client's half: the handshake to a `ws://` URL, and the connection
@@ -779,14 +781,6 @@ pub class WebSocket
 
   # One complete FIN frame. A key masks client frames; nil is a server
   # frame. Compression, when negotiated, precedes this encoding step.
-  def self.frame(data : String, opcode : Int32 = OP_TEXT,
-                 key : UInt32? = nil, compressed : Bool = false) : String
-    result = ""
-    tape do
-      result = frame(data.as_tape, opcode, key, compressed).to_heap
-    end
-    result
-  end
 
   def self.frame(data : String, opcode : Int32 = OP_TEXT,
                  key : UInt32? = nil,

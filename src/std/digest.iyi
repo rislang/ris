@@ -161,6 +161,12 @@ pub abstract class Digest
     bytes
   end
 
+  # Append the digest bytes to the caller's output buffer.
+  def final(writer : String::Builder) : Nil
+    bytes = final
+    bytes.each { |byte| writer.push(byte) }
+  end
+
   def hexfinal : String
     DigestUtil.hex(final, digest_size)
   end

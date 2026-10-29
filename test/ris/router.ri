@@ -9,10 +9,10 @@ tape do
   w << "prefix:"
   Router.clean(path, w)
   exit 1 unless w.finish == "prefix:/a/c/"
-  kept = Router.clean(path).to_heap
+  kept = Router.clean(path).copy_to(Program.tape)
   exit 2 unless Router.clean("/../../") == "/"
   exit 3 unless Router.clean("café/../ok") == "/ok"
 end
 exit 4 unless kept == "/a/c/"
 exit 5 unless Router.clean("/a//b/../c/./") == kept
-puts "PASS: router tape and heap APIs"
+puts "PASS: router caller tape and explicit retained copy"

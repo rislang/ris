@@ -25,13 +25,6 @@ PAIRS_URL = Base64.pairs_of(
 ).copy_to(Program.tape)
 
 pub struct Base64
-  def self.encode(data : String) : String
-    result = ""
-    tape do
-      result = encode(data.as_tape).to_heap
-    end
-    result
-  end
 
   def self.encode(data : String) : String
     encode_with(data, plus_slash, PAIRS_STD, true)
@@ -42,13 +35,6 @@ pub struct Base64
     writer << encode(data)
   end
 
-  def self.urlsafe_encode(data : String) : String
-    result = ""
-    tape do
-      result = urlsafe_encode(data.as_tape).to_heap
-    end
-    result
-  end
 
   def self.urlsafe_encode(data : String) : String
     encode_with(data, minus_underscore, PAIRS_URL, true)
@@ -59,13 +45,6 @@ pub struct Base64
     writer << urlsafe_encode(data)
   end
 
-  def self.decode(text : String) : String
-    result = ""
-    tape do
-      result = decode(text.as_tape).to_heap
-    end
-    result
-  end
 
   # Room for every byte the text can hold, sized up front.
   def self.decode(text : String) : String

@@ -520,20 +520,20 @@ prove_broken "the data's last LF kept" "the introduction's three messages" \
   '    data = data[0, data.bytesize - 1] if !data.empty? && data[-1] == 10_u8
 ' ''
 prove_broken "an id with a NUL taken" "an id with a NUL is ignored" \
-  "@id_buffer.value = value unless value.includes?('\\0')" '@id_buffer.value = value'
+  "@id_buffer = value unless value.includes?('\\0')" '@id_buffer = value'
 prove_broken "the last event ID set at the id field" "the last event ID is set at the blank line" \
-  "@id_buffer.value = value unless value.includes?('\\0')" "@last_event_id.value = @id_buffer.value = value unless value.includes?('\\0')"
+  "@id_buffer = value unless value.includes?('\\0')" "@last_event_id = @id_buffer = value unless value.includes?('\\0')"
 prove_broken "an empty retry read as 0" "retry: digits alone" \
   '    return nil if text.bytesize == 0
     p = text
 ' '    p = text
 '
 prove_broken "the event type carried to the next event" "the type does not carry over" \
-  '    event = TapeEvent.new(kind, data, @last_event_id.value)
-    @type.value = "".as_tape' '    event = TapeEvent.new(kind, data, @last_event_id.value)'
+  '    event = Event.new(kind, data, @last_event_id)
+    @type = "".as_tape' '    event = Event.new(kind, data, @last_event_id)'
 prove_broken "a blank line without data dispatching" "the four blocks" \
-  '    if @data.value.length == 0
-      @type.value = "".as_tape
+  '    if @data.length == 0
+      @type = "".as_tape
       return nil
     end
 ' ''

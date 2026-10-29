@@ -74,23 +74,32 @@ class Iyi::Program
     end
 
     @progress_tracker.stage("Semantic (tape check)") do
+      # Definition probes check types with fabricated inputs, not storage.
+      # Only executable callers supply lifetimes to the tape analyses.
+      tape_root = if result.is_a?(Expressions)
+                    Expressions.new(result.expressions.reject do |exp|
+                      exp.is_a?(If) && exp.iyi_definition_probe?
+                    end)
+                  else
+                    result
+                  end
       Prof.span("tape check") do
-        Prof.span("tape: IntegerTextDivisionChecker") { IntegerTextDivisionChecker.new(self).run(result) }
+        Prof.span("tape: IntegerTextDivisionChecker") { IntegerTextDivisionChecker.new(self).run(tape_root) }
         Prof.span("tape: TapeChecker") { TapeChecker.new(self).run }
-        tape_graph = Prof.span("tape: call graph") { TapeCallGraph.new(self, result) }
-        Prof.span("tape: TapeOwnerChecker") { TapeOwnerChecker.new(self, tape_graph).run(result) }
-        Prof.span("tape: TapeProgramChecker") { TapeProgramChecker.new(self, tape_graph).run(result) }
+        tape_graph = Prof.span("tape: call graph") { TapeCallGraph.new(self, tape_root) }
+        Prof.span("tape: TapeOwnerChecker") { TapeOwnerChecker.new(self, tape_graph).run(tape_root) }
+        Prof.span("tape: TapeProgramChecker") { TapeProgramChecker.new(self, tape_graph).run(tape_root) }
         tape_shrink = TapeShrinkChecker.new(self, tape_graph)
         Prof.span("tape: shrink solve") { tape_shrink.solve }
-        Prof.span("tape: TapeRecursionChecker") { TapeRecursionChecker.new(self, tape_graph).run(result) }
-        Prof.span("tape: TapeLifetimeChecker") { result.accept TapeLifetimeChecker.new(self, tape_graph) }
-        Prof.span("tape: shrink run") { tape_shrink.run(result) }
-        Prof.span("tape: TapePointerChecker") { TapePointerChecker.new(self, tape_graph).run(result) }
-        Prof.span("tape: TapeEscapeChecker") { TapeEscapeChecker.new(self).run(result) }
-        Prof.span("tape: TapeScopeChecker") { TapeScopeChecker.new(self, tape_graph).run(result) }
-        Prof.span("tape: TapeCheckFreeChecker") { TapeCheckFreeChecker.new(self).run(result) }
-        Prof.span("tape: TapeRefillChecker") { TapeRefillChecker.new(self).run(result) }
-        Prof.span("tape: TapeScannerHint") { TapeScannerHint.new(self).run(result) }
+        Prof.span("tape: TapeRecursionChecker") { TapeRecursionChecker.new(self, tape_graph).run(tape_root) }
+        Prof.span("tape: TapeLifetimeChecker") { tape_root.accept TapeLifetimeChecker.new(self, tape_graph) }
+        Prof.span("tape: shrink run") { tape_shrink.run(tape_root) }
+        Prof.span("tape: TapePointerChecker") { TapePointerChecker.new(self, tape_graph).run(tape_root) }
+        Prof.span("tape: TapeEscapeChecker") { TapeEscapeChecker.new(self).run(tape_root) }
+        Prof.span("tape: TapeScopeChecker") { TapeScopeChecker.new(self, tape_graph).run(tape_root) }
+        Prof.span("tape: TapeCheckFreeChecker") { TapeCheckFreeChecker.new(self).run(tape_root) }
+        Prof.span("tape: TapeRefillChecker") { TapeRefillChecker.new(self).run(tape_root) }
+        Prof.span("tape: TapeScannerHint") { TapeScannerHint.new(self).run(tape_root) }
       end
     end
 
