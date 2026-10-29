@@ -140,6 +140,18 @@ else
   status=1
 fi
 
+# Pipe ends are pooled: 5,000 pipes in rounds take program storage in
+# the first round only; a handle kept past its close is refused.
+out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 "$RIS" run test/ris/pipe_reuse.ri 2>&1)
+if [ "$?" -eq 0 ] && grep -qxF 'PASS: pipe reuse' <<<"$out" &&
+    grep -qxF 'program storage after the first round: steady' <<<"$out" &&
+    grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+  echo "runs     pipe_reuse (5,000 pipes, steady program storage)"
+else
+  echo "FAILED   pipe_reuse: $(grep -v '^ris tape\|  at ' <<<"$out")"
+  status=1
+fi
+
 # Interpolated output and panic text from iyi library code stay on tape.
 out=$(
   probe=$(mktemp -d)

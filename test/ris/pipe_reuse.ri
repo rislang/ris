@@ -1,0 +1,54 @@
+# A closed pipe's ends go back to their pool: 10 rounds of 500 pipes
+# take program storage in the first round only, and a handle kept past
+# its close is refused instead of reading the pipe that reuses its end.
+module test/ris/pipe_reuse
+
+import std/io
+
+first = 0_u64
+10.times do |round|
+  readers = [] of Std::Io::PipeReader
+  writers = [] of Std::Io::PipeWriter
+  500.times do
+    reader, writer = IyiIO.pipe
+    readers << reader
+    writers << writer
+  end
+  writers.each_with_index { |writer, i| writer.write("pipe #{i}") }
+  writers.each(&.close)
+  readers.each_with_index do |reader, i|
+    raise "pipe #{i} read" unless reader.read_str(64) == "pipe #{i}"
+    raise "pipe #{i} end" unless reader.read_str(64).empty?
+  end
+  readers.each(&.close)
+  taken = RisRegion.storage_taken
+  first = taken if round == 0
+  raise "program storage grew in round #{round}" unless taken == first
+end
+puts "program storage after the first round: steady"
+
+# A stale handle: its end went back to the pool and serves a new pipe.
+old_in, old_out = IyiIO.pipe
+old_out.close
+old_in.close
+new_in, new_out = IyiIO.pipe
+new_out.write("fresh")
+new_out.flush
+raise "closed? after close" unless old_in.closed? && old_out.closed?
+old_in.close
+refused = group do |g|
+  g.spawn { old_in.read_str(16); 0 }.value
+end
+raise "stale read: #{refused.inspect}" unless refused.is_a?(Panicked) &&
+  refused.message.includes?("pipe end is closed")
+refused = group do |g|
+  g.spawn { old_out.write("x"); 0 }.value
+end
+raise "stale write: #{refused.inspect}" unless refused.is_a?(Panicked) &&
+  refused.message.includes?("pipe end is closed")
+# The tape way: bytes appended to the caller's builder.
+text = String.build(16) { |w| new_in.read_str(16, w) }
+raise "fresh: #{text}" unless text == "fresh"
+new_out.close
+new_in.close
+puts "PASS: pipe reuse"

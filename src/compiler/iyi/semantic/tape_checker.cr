@@ -153,6 +153,17 @@ class Iyi::TapeChecker
     false
   end
 
+  # ris: a runtime class (src/iyi/, so not itself a tape type) may hold
+  # one of the runtime's own streams (`IyiIO`), which a pool keeps in
+  # program storage: `RisPipeSlot` holds a pooled pipe end. Any other
+  # tape type, or any class outside the runtime, is still refused.
+  private def runtime_stream_slot?(type, found : Type) : Bool
+    return false if type.struct? || TapeChecker.class_instance?(@program, type)
+    base = found.remove_typedef
+    base = base.base_type if base.is_a?(VirtualType)
+    base.is_a?(ClassType) && base.full_name == "IyiIO"
+  end
+
   def check_fields(type)
     if type.is_a?(GenericClassInstanceType) &&
        {"Array", "RisTree"}.includes?(type.generic_type.name)
@@ -219,6 +230,7 @@ class Iyi::TapeChecker
       next unless ivar_type
       found = TapeChecker.tape_in(@program, ivar_type)
       next unless found
+      next if runtime_stream_slot?(type, found)
       where = type.struct? ? "a struct without @[OnTape]" : "a class"
       fail type, ivar, <<-MSG
         #{type}'s field `#{ivar.name} : #{ivar_type}` holds the tape type #{found}

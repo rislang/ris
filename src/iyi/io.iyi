@@ -152,26 +152,45 @@ class IyiIO
     writer.finish
   end
 
-  # Up to *count* bytes as tape text: what is buffered, then one fill of
-  # the buffer when it is empty. Empty at the end of the stream.
+  # Up to *count* bytes as text on the caller's tape: what is buffered,
+  # then one fill of the buffer when it is empty. Empty at the end.
   def read_str(count : Int32) : String
+    String.build(count < @read_capacity ? (count < 1 ? 1 : count) : @read_capacity) do |w|
+      read_str(count, w)
+    end
+  end
+
+  # The same bytes appended to the caller's *into*, read straight from
+  # the buffer with no text built between; answers how many (0 at the end).
+  def read_str(count : Int32, into : String::Builder) : Int32
     raise "cannot read from closed IO" if @closed
-    return String.new("") if count <= 0
+    return 0 if count <= 0
     if @read_pos >= @read_limit
-      return String.new("") if @eof
-      return String.new("") if fill_buffer <= 0
+      return 0 if @eof
+      return 0 if fill_buffer <= 0
     end
     avail = @read_limit - @read_pos
     take = avail < count ? avail : count
     from = @read_buffer + @read_pos
     @read_pos = @read_pos + take
-    String.build(take) do |w|
-      i = 0
-      while i < take
-        w.push(from[i])
-        i = i + 1
-      end
+    i = 0
+    while i < take
+      into.push(from[i])
+      i = i + 1
     end
+    take
+  end
+
+  # ris: a pooled stream (`Std::Io::RisPipeEnd`) taken again for a new
+  # descriptor keeps its buffers and starts over.
+  protected def reopen(fd : Int64, sync : Bool) : Nil
+    @fd = fd
+    @sync = sync
+    @closed = false
+    @eof = false
+    @read_pos = 0
+    @read_limit = 0
+    @write_pos = 0
   end
 
   # What is buffered, then the rest straight into the growing result, as
@@ -467,4 +486,50 @@ end
 
 def read_input : String
   stdin.read_all
+end
+
+# ris (TAPE_SPEC 6.1): the pool of pipe ends (`Std::Io::RisPipeEnd`). A
+# slot and its end are program storage taken once; a closed end comes
+# back here and its generation moves, so a handle kept past the close
+# (`Std::Io::PipeReader`, `PipeWriter`) is refused, not handed the next
+# pipe that reuses it.
+class RisPipeSlot
+  getter io : IyiIO
+  getter generation : UInt64 = 0_u64
+  @next_free : RisPipeSlot?
+  @@free : RisPipeSlot?
+
+  def initialize(@io : IyiIO)
+  end
+
+  def self.on_program(io : IyiIO) : RisPipeSlot
+    slot = RisRegion.program_object(RisPipeSlot)
+    slot.initialize(io)
+    slot
+  end
+
+  # A closed end's slot, or nil when the pool is empty.
+  def self.take : RisPipeSlot?
+    IyiSchedLock.lock
+    slot = @@free
+    if slot.is_a?(RisPipeSlot)
+      @@free = slot.@next_free
+      slot.unlink
+    end
+    IyiSchedLock.unlock
+    slot
+  end
+
+  protected def unlink : Nil
+    @next_free = nil
+  end
+
+  # Back to the pool once its end is closed.
+  def recycle : Nil
+    @generation = @generation &+ 1
+    IyiSchedLock.lock
+    @next_free = @@free
+    @@free = self
+    IyiSchedLock.unlock
+  end
 end

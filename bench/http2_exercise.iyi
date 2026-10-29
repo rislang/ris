@@ -241,7 +241,7 @@ def answer(req : Request) : Response
       at = at + take
     end
     writer.close
-    Response.new(200, reader)
+    Response.new(200, reader.io)
   when "/text"
     r = Response.new(200, "hello, compressible world. " * 400)
     r.headers["Content-Type"] = "text/plain"

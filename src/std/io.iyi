@@ -101,7 +101,16 @@ class ::IyiIO
 
   # Everything left in `source` (at most `limit` bytes) written to
   # `target`, which is flushed; answers the number of bytes moved.
-  def self.copy(source : IyiIO, target : IyiIO, limit : Int32? = nil) : Int64
+  # A pipe end's handle is copied through its checked `io`.
+  def self.copy(source : Std::Io::PipeReader | IyiIO,
+                target : Std::Io::PipeWriter | IyiIO,
+                limit : Int32? = nil) : Int64
+    from = source.is_a?(IyiIO) ? source : source.io
+    to = target.is_a?(IyiIO) ? target : target.io
+    copy_io(from, to, limit)
+  end
+
+  def self.copy_io(source : IyiIO, target : IyiIO, limit : Int32? = nil) : Int64
     raise "negative limit: #{limit}" if limit && limit < 0
     total = 0_i64
     while true
@@ -142,10 +151,11 @@ class ::IyiIO
   def self.pipe : {Std::Io::PipeReader, Std::Io::PipeWriter}
     {% if flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64)) || flag?(:darwin) %}
       fds = Std::Io::PipeSys.make
-      # Program objects, as the standard streams are: a pipe end may be
-      # handed to a task, so it is not on the caller's tape. 56 bytes each
-      # stay until the program ends.
-      {Std::Io::PipeReader.on_program(fds[0]), Std::Io::PipeWriter.on_program(fds[1])}
+      # Handles over pooled ends: a pipe end may be handed to a task, so
+      # it is not on the caller's tape; a closed end goes back to the pool
+      # and a handle kept past its close is refused.
+      {Std::Io::PipeReader.new(Std::Io::RisPipeEnd.take(fds[0], false)),
+       Std::Io::PipeWriter.new(Std::Io::RisPipeEnd.take(fds[1], true))}
     {% else %}
       raise "IyiIO.pipe is only on Linux and macOS"
       {Std::Io::PipeReader.new, Std::Io::PipeWriter.new}
@@ -228,60 +238,61 @@ end
     {% end %}
   end
 
-  # The reading end of `IyiIO.pipe`.
-  pub class PipeReader < IyiIO
-  # A joined task transfers the same resource reference, never a new fd.
-  def __iyi_copy_into(target : Pointer(self), work : RisCopyWork) : Nil
-    target.value = self
-  end
+  # ris (TAPE_SPEC 6): one end of an OS pipe, a pooled slot. Its object
+  # and buffers are program storage taken once; closed, it goes back to
+  # the pool and its generation moves, so a handle kept past the close
+  # (`PipeReader`, `PipeWriter`) is refused instead of reading the next
+  # pipe that reuses it.
+  pub class RisPipeEnd < IyiIO
+    @writer : Bool = false
 
-    def self.on_program(fd : Int32) : PipeReader
-      io = RisRegion.program_object(PipeReader)
-      io.initialize(fd)
-      io
+    # A pooled slot (`RisPipeSlot`) holding a closed end, or a new end
+    # and slot in program storage.
+    def self.take(fd : Int32, writer : Bool) : RisPipeSlot
+      slot = RisPipeSlot.take
+      if slot.is_a?(RisPipeSlot)
+        slot.io.as(RisPipeEnd).start(fd, writer)
+        return slot
+      end
+      io = RisRegion.program_object(RisPipeEnd)
+      RisRegion.program_scope { io.initialize(fd, writer) }
+      io.start(fd, writer)
+      RisPipeSlot.on_program(io)
     end
 
-    def initialize(fd : Int32)
-      super(fd.to_i64, 4096, false)
+    def initialize(fd : Int32, writer : Bool)
+      super(fd.to_i64, 4096, writer)
+    end
+
+    protected def start(fd : Int32, writer : Bool) : Nil
+      reopen(fd.to_i64, writer)
+      @writer = writer
+    end
+
+    # Closes the descriptor even when the last flush fails; the flush's
+    # error still reaches the caller.
+    def close_always : Nil
+      defer { close_fd }
+      close
+    end
+
+    private def close_fd : Nil
+      return if closed?
+      wake_closed(fd)
+      __iyi_close(handle)
     end
 
     # A cancelled wait is withdrawn (-2), not the end: the next read waits
     # again.
     private def low_level_read(target_fd : Int64, buffer : Void*, count : UInt64) : Int64
+      raise "a pipe's writer is not read from" if @writer && count >= 0_u64
       got = iyi_read(target_fd.to_i32, buffer, count)
       got.is_a?(Cancelled) ? -2_i64 : got
     end
 
+    # A write returns when all of it is in the pipe.
     private def low_level_write(target_fd : Int64, buffer : Void*, count : UInt64) : Int64
-      raise "a pipe's reader is not written to" if count >= 0_u64
-      -1_i64
-    end
-
-    private def low_level_close(target_fd : Int64) : Nil
-      wake_closed(target_fd.to_i32)
-      __iyi_close(target_fd)
-    end
-  end
-
-  # The writing end of `IyiIO.pipe`: a write returns when all of it is in
-  # the pipe.
-  pub class PipeWriter < IyiIO
-  # A joined task transfers the same resource reference, never a new fd.
-  def __iyi_copy_into(target : Pointer(self), work : RisCopyWork) : Nil
-    target.value = self
-  end
-
-    def self.on_program(fd : Int32) : PipeWriter
-      io = RisRegion.program_object(PipeWriter)
-      io.initialize(fd)
-      io
-    end
-
-    def initialize(fd : Int32)
-      super(fd.to_i64, 4096, true)
-    end
-
-    private def low_level_write(target_fd : Int64, buffer : Void*, count : UInt64) : Int64
+      raise "a pipe's reader is not written to" unless @writer
       fd = target_fd.to_i32
       bytes = buffer.as(Pointer(UInt8))
       size = count.to_i64.to_i32
@@ -301,14 +312,140 @@ end
       count.to_i64
     end
 
-    private def low_level_read(target_fd : Int64, buffer : Void*, count : UInt64) : Int64
-      raise "a pipe's writer is not read from" if count >= 0_u64
-      -1_i64
-    end
-
     private def low_level_close(target_fd : Int64) : Nil
       wake_closed(target_fd.to_i32)
       __iyi_close(target_fd)
+    end
+  end
+
+  # The reading end of `IyiIO.pipe`: a handle over a pooled end.
+  @[OnTape]
+  pub struct PipeReader
+    @end : RisPipeSlot
+    @generation : UInt64
+
+    def initialize(@end : RisPipeSlot)
+      @generation = @end.generation
+    end
+
+    # A joined task transfers the same handle, never a new fd.
+    def __iyi_copy_into(target : Pointer(self), work : RisCopyWork) : Nil
+      target.value = self
+    end
+
+    # The end as an `IyiIO`, for code that takes one (`IyiIO.copy`, a
+    # response body); refused once this handle's end is closed.
+    def io : IyiIO
+      return @end.io if @end.generation == @generation
+      raise "this pipe end is closed; its handle is not used after close"
+    end
+
+    def closed? : Bool
+      @end.generation != @generation
+    end
+
+    # Closing twice is nothing: the end may already serve another pipe.
+    def close : Nil
+      return if closed?
+      defer { @end.recycle }
+      @end.io.as(RisPipeEnd).close_always
+    end
+
+    def fd : Int32
+      io.fd
+    end
+
+    def eof? : Bool
+      io.eof?
+    end
+
+    def read_failed? : Bool
+      io.read_failed?
+    end
+
+    def read_byte : UInt8?
+      io.read_byte
+    end
+
+    def read_bytes(count : Int32) : String
+      io.read_bytes(count)
+    end
+
+    def read_str(count : Int32) : String
+      io.read_str(count)
+    end
+
+    def read_str(count : Int32, into : String::Builder) : Int32
+      io.read_str(count, into)
+    end
+
+    def read_line(chomp : Bool = false) : String?
+      io.read_line(chomp)
+    end
+
+    def each_line(chomp : Bool = false, &block : String -> Nil) : Nil
+      while line = io.read_line(chomp)
+        yield line
+      end
+    end
+  end
+
+  # The writing end of `IyiIO.pipe`: a handle over a pooled end; a write
+  # returns when all of it is in the pipe.
+  @[OnTape]
+  pub struct PipeWriter
+    @end : RisPipeSlot
+    @generation : UInt64
+
+    def initialize(@end : RisPipeSlot)
+      @generation = @end.generation
+    end
+
+    # A joined task transfers the same handle, never a new fd.
+    def __iyi_copy_into(target : Pointer(self), work : RisCopyWork) : Nil
+      target.value = self
+    end
+
+    # The end as an `IyiIO`; refused once this handle's end is closed.
+    def io : IyiIO
+      return @end.io if @end.generation == @generation
+      raise "this pipe end is closed; its handle is not used after close"
+    end
+
+    def closed? : Bool
+      @end.generation != @generation
+    end
+
+    # Closing twice is nothing: the end may already serve another pipe.
+    def close : Nil
+      return if closed?
+      defer { @end.recycle }
+      @end.io.as(RisPipeEnd).close_always
+    end
+
+    def fd : Int32
+      io.fd
+    end
+
+    def write(text : String) : Nil
+      io.write(text)
+    end
+
+    def print(value) : Nil
+      io.print(value)
+    end
+
+    def puts(value) : Nil
+      io.puts(value)
+    end
+
+    def <<(value) : self
+      io.print(value)
+      self
+    end
+
+    def flush : Nil
+      io.flush
     end
   end
 {% else %}

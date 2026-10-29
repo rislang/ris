@@ -195,9 +195,8 @@ first):
 * Finish check.sh under the sole no-GC mode. Seven left: autocert
   lifecycle, hpack, http_continue, answer, http_prefork,
   time_tape_offset (std String paths) and fibers/spares (memory).
-* Pipe ends are program objects (56 bytes each, kept until exit) and
-  IyiIO#read_str answers tape text. Replace with generation-checked
-  typed pool handles so a closed pipe's end is reused; autocert next.
+* Autocert's program objects: pool them behind generation-checked
+  handles, as pipe ends are (Std::Io::RisPipeEnd, pipe_reuse).
 * HTTP answer's slow request path still uses String-based read_head and
   body readers. Migrate those before claiming chunked/Expect/HTTP/1.0
   answer parity without a heap. Recheck prefork, TLS and samples/ris/web.
@@ -258,8 +257,9 @@ first):
   make tape-independent fixes in iyi first, or record them in UPSTREAM.md.
 * bench/concurrency_exercise.sh passes its fiber and pipe steps (no pipe
   leaks: strace shows every pipe2 closed; the 2,000 idle pipes need the
-  script's `ulimit -n 8192`), then fails at bench/stdin_park.iyi:164,
-  `undefined constant IyiThread`: kernel threads without a collector.
+  script's `ulimit -n 8192`) and stdin_park, then fails building the
+  blocking-stdin failure proof: its copied tape_text.iyi:781 says
+  `private def cycled`, "can't apply visibility modifier".
 * Typecheck failures that predate the Channel removal:
   bench/parallel_exercise.iyi:124 (a task value's Panicked arm) and
   bench/metric/metric.iyi (Array of the tape type Planet).
