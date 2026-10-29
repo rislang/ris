@@ -54,13 +54,20 @@ part B.
 * Give a task-owned Conn an owner-level buffer growth path: growth in a
   nested tape block ends with the block, so TLS/HTTP/2 connections stay
   program-owned (one buffer per connection never freed) until then.
-* Port the benches to 5.1 task captures: the compiler now refuses a local
-  task's non-Share capture unless handed off. First refusals in
-  collect_trigger, concurrency, runtime, server_load, socket, stdin_park,
-  and std_ dns, file, http, http_latency, http_resume, http_stop, json,
-  mutex, process, signal, sse, term, tls, udp, websocket, yaml. Shared
-  locals become task values or board messages; a listener stopped from
-  another task needs a Share stop handle (design it, do not mark it).
+* Port the benches to 5.1 task captures. Done: std_signal (exercise
+  passes; a listener stops by its task handle's `cancel`, the Share stop
+  handle), std_process's captures (ChildProcess#read_both, task values,
+  Atomic). concurrency and stdin_park typecheck. First refusals left:
+  - captures: runtime (`-> { it.size }` on a tape String), http_latency
+    (args), http_resume (listeners), http_stop (TlsConfig), tls
+    (TlsServerConfig), mutex (a tape Mutex in a joined task: needs a rule
+    for Share(owns) tape types), sse (std/sse.iyi:546 parser),
+    websocket (std/websocket.iyi:380 chosen).
+  - not captures: std/process and std_term need no-GC buffers
+    (Pointer.malloc in current_directory, executable); std_process's
+    doubled-environ check needs raw pointers; socket, file, http, json
+    import std/gc; dns, udp: make_sockaddr returns String; yaml:
+    parse_all's TapeValue arm; server_load: IyiMark undefined.
 * 5.1 left: receivers and state reached through called methods (only the
   block's own captures are checked), aliases of a handed-off value.
 * Port socket race to one task with multiple in-flight OS connects and

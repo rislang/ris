@@ -388,6 +388,37 @@ pub class ChildProcess
     @stderr || raise "ChildProcess#stderr: process #{pid}'s errors were not asked for as Redirect::Pipe"
   end
 
+  # Reads the child's output and its errors, both asked for as
+  # `Redirect::Pipe`, to their ends at once: the errors on a task this
+  # call joins, as a child filling one pipe while this program waits on
+  # the other would wait forever. Answers {output, errors}.
+  @[TaskClosureUnsafe("read_both joins the errors' reader before it returns")]
+  def read_both : Tuple(String, String) | Cancelled
+    output = stdout
+    errors = stderr
+    out = ""
+    err = ""
+    cancelled = false
+    group do |g|
+      task = g.spawn { errors.read_all }
+      got = output.read_all
+      if got.is_a?(String)
+        out = got
+      else
+        cancelled = true
+        g.cancel_children
+      end
+      heard = task.value
+      if heard.is_a?(String)
+        err = heard
+      else
+        cancelled = true
+      end
+    end
+    return Cancelled.new if cancelled
+    {out, err}
+  end
+
   # Parks until the child has ended and answers how; at once if it had.
   # Its input, if a pipe, is closed first: a child reading to the end of
   # its input would otherwise wait for this program while this program
@@ -1702,30 +1733,6 @@ class ProcessChild
       ProcessError.new(command, refused == 0 ? ENOENT : refused)
     end
 
-    # The child's `envp`: this program's own table, or the one `env:` made.
-    @[TapeUnsafe("Borrow NUL-terminated text at the OS boundary")]
-    def self.envp(environment : Array(String)?) : Pointer(Pointer(UInt8))
-      entries = environment
-      return __iyi_environ unless entries
-      table = Pointer(Pointer(UInt8)).malloc((entries.size + 1).to_u64)
-      entries.each_with_index { |entry, index| table[index] = c_text(entry).to_unsafe }
-      table[entries.size] = Pointer(UInt8).new(0_u64)
-      table
-    end
-
-    # The child's `argv`: the name it was asked for, then the arguments.
-    @[TapeUnsafe("Borrow NUL-terminated text at the OS boundary")]
-    def self.argv(command : String, args : Array(String)) : Pointer(Pointer(UInt8))
-      list = Pointer(Pointer(UInt8)).malloc((args.size + 2).to_u64)
-      list[0] = c_text(command).to_unsafe
-      index = 0
-      while index < args.size
-        list[index + 1] = c_text(args[index]).to_unsafe
-        index = index + 1
-      end
-      list[args.size + 1] = Pointer(UInt8).new(0_u64)
-      list
-    end
 
     # The end of a child's run, as `wait4` and `waitpid` report it.
     private def record_end(status : Int32) : Nil
@@ -1890,8 +1897,30 @@ class ProcessChild
         LibC.posix_spawnattr_setflags(attributes.as(Void*), 0x08)
         LibC.posix_spawnattr_setsigmask(attributes.as(Void*), mask.as(Void*))
         pid = 0
+        # The child's `argv`, built here so its text reaches the call: the
+        # name it was asked for, then the arguments.
+        argv = Pointer(Pointer(UInt8)).malloc((args.size + 2).to_u64)
+        argv[0] = ProcessChild.c_text(command).to_unsafe
+        arg = 0
+        while arg < args.size
+          argv[arg + 1] = ProcessChild.c_text(args[arg]).to_unsafe
+          arg = arg + 1
+        end
+        argv[args.size + 1] = Pointer(UInt8).new(0_u64)
+        # The child's `envp`, built here so its text reaches the call: this
+        # program's own table, or the one `env:` made.
+        envp = __iyi_environ
+        if entries = environment
+          envp = Pointer(Pointer(UInt8)).malloc((entries.size + 1).to_u64)
+          entry = 0
+          while entry < entries.size
+            envp[entry] = ProcessChild.c_text(entries[entry]).to_unsafe
+            entry = entry + 1
+          end
+          envp[entries.size] = Pointer(UInt8).new(0_u64)
+        end
         failed = LibC.posix_spawn(pointerof(pid), ProcessChild.c_text(path).to_unsafe, actions.as(Void*), attributes.as(Void*),
-          ProcessChild.argv(command, args), ProcessChild.envp(environment))
+          argv, envp)
         LibC.posix_spawn_file_actions_destroy(actions.as(Void*))
         LibC.posix_spawnattr_destroy(attributes.as(Void*))
         3.times { |index| ProcessChild.sys_close(theirs[index]) if theirs[index] >= 0 }
@@ -1985,8 +2014,30 @@ class ProcessChild
         LibC.posix_spawnattr_setflags(attributes.as(Void*), 0x40 | 0x08 | 0x4000)
         LibC.posix_spawnattr_setsigmask(attributes.as(Void*), mask.as(Void*))
         pid = 0
+        # The child's `argv`, built here so its text reaches the call: the
+        # name it was asked for, then the arguments.
+        argv = Pointer(Pointer(UInt8)).malloc((args.size + 2).to_u64)
+        argv[0] = ProcessChild.c_text(command).to_unsafe
+        arg = 0
+        while arg < args.size
+          argv[arg + 1] = ProcessChild.c_text(args[arg]).to_unsafe
+          arg = arg + 1
+        end
+        argv[args.size + 1] = Pointer(UInt8).new(0_u64)
+        # The child's `envp`, built here so its text reaches the call: this
+        # program's own table, or the one `env:` made.
+        envp = __iyi_environ
+        if entries = environment
+          envp = Pointer(Pointer(UInt8)).malloc((entries.size + 1).to_u64)
+          entry = 0
+          while entry < entries.size
+            envp[entry] = ProcessChild.c_text(entries[entry]).to_unsafe
+            entry = entry + 1
+          end
+          envp[entries.size] = Pointer(UInt8).new(0_u64)
+        end
         failed = LibC.posix_spawn(pointerof(pid), ProcessChild.c_text(path).to_unsafe, actions.as(Void*), attributes.as(Void*),
-          ProcessChild.argv(command, args), ProcessChild.envp(environment))
+          argv, envp)
         LibC.posix_spawn_file_actions_destroy(actions.as(Void*))
         LibC.posix_spawnattr_destroy(attributes.as(Void*))
         ProcessError.new(command, failed)
@@ -2067,8 +2118,27 @@ class ProcessChild
           return ProcessError.new(command, report)
         end
         target = ProcessChild.c_text(path).to_unsafe
-        argv = ProcessChild.argv(command, args)
-        envp = ProcessChild.envp(environment)
+        # The child's `argv`, built here so its text reaches the call.
+        argv = Pointer(Pointer(UInt8)).malloc((args.size + 2).to_u64)
+        argv[0] = ProcessChild.c_text(command).to_unsafe
+        arg = 0
+        while arg < args.size
+          argv[arg + 1] = ProcessChild.c_text(args[arg]).to_unsafe
+          arg = arg + 1
+        end
+        argv[args.size + 1] = Pointer(UInt8).new(0_u64)
+        # The child's `envp`, built here so its text reaches the call: this
+        # program's own table, or the one `env:` made.
+        envp = __iyi_environ
+        if entries = environment
+          envp = Pointer(Pointer(UInt8)).malloc((entries.size + 1).to_u64)
+          entry = 0
+          while entry < entries.size
+            envp[entry] = ProcessChild.c_text(entries[entry]).to_unsafe
+            entry = entry + 1
+          end
+          envp[entries.size] = Pointer(UInt8).new(0_u64)
+        end
         directory = Pointer(UInt8).new(0_u64)
         if where = chdir
           directory = ProcessChild.c_text(where).to_unsafe
@@ -2263,8 +2333,27 @@ class ProcessChild
       def self.replace(command : String, path : String, args : Array(String), chdir : String?,
                        environment : Array(String)?) : ProcessError
         target = ProcessChild.c_text(path).to_unsafe
-        argv = ProcessChild.argv(command, args)
-        envp = ProcessChild.envp(environment)
+        # The child's `argv`, built here so its text reaches the call.
+        argv = Pointer(Pointer(UInt8)).malloc((args.size + 2).to_u64)
+        argv[0] = ProcessChild.c_text(command).to_unsafe
+        arg = 0
+        while arg < args.size
+          argv[arg + 1] = ProcessChild.c_text(args[arg]).to_unsafe
+          arg = arg + 1
+        end
+        argv[args.size + 1] = Pointer(UInt8).new(0_u64)
+        # The child's `envp`, built here so its text reaches the call: this
+        # program's own table, or the one `env:` made.
+        envp = __iyi_environ
+        if entries = environment
+          envp = Pointer(Pointer(UInt8)).malloc((entries.size + 1).to_u64)
+          entry = 0
+          while entry < entries.size
+            envp[entry] = ProcessChild.c_text(entries[entry]).to_unsafe
+            entry = entry + 1
+          end
+          envp[entries.size] = Pointer(UInt8).new(0_u64)
+        end
         back = ""
         if where = chdir
           back = current_directory
