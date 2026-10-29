@@ -58,7 +58,7 @@ class IyiIO
   def self.on_program(fd : Int64, buffer_size : Int32 = 4096,
                       sync : Bool = false) : IyiIO
     io = RisRegion.program_object(IyiIO)
-    RisRegion.program_scope { io.initialize(fd, buffer_size, sync) }
+    RisRegion.storage_scope { io.initialize(fd, buffer_size, sync) }
     io
   end
 

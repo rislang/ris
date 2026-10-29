@@ -1,13 +1,21 @@
 # Fault injection after a real leaf copy: the public copy_to must discard
 # both the completed leaf and the rest of the partially built destination.
-struct String
+# The leaf is a struct, not String: Array(String) copies its bytes into its
+# own string pool and never calls String#__iyi_copy_into.
+@[OnTape]
+struct FailLeaf
+  getter text : String
+
+  def initialize(@text : String)
+  end
+
   @[PointerUnsafe("inject a panic after a real copy job")]
   def __iyi_copy_into(target : Pointer(self), work : RisCopyWork) : Nil
-    previous_def
-    if self == "fail-owner"
+    target.value = self.class.new(String.new(@text))
+    if @text == "fail-owner"
       RisRegion.tape_bytes(RisRegion::CAPACITY + 1_u64)
       raise "forced owner copy failure"
-    elsif self == "fail-scratch"
+    elsif @text == "fail-scratch"
       work.scratch do
         RisRegion.tape_bytes(RisRegion::CAPACITY + 1_u64)
         raise "forced scratch copy failure"
@@ -48,7 +56,7 @@ kept = "retained".copy_to(Program.tape)
       saved = RisRegion.tape
       defer check_caller_tape(saved)
       tape do
-        source = Array(String){String.new("first"), String.new(failure)}
+        source = Array(FailLeaf){FailLeaf.new("first"), FailLeaf.new(failure)}
         source.copy_to(Program.tape)
       end
     end

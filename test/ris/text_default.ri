@@ -7,9 +7,10 @@ end
 
 literal_cursor = IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)
 literal = "static"
-heap_literal = "static".to_heap
 raise "literal used tape storage" unless literal_cursor ==
   IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)
+# to_heap copies onto the current tape: a marked migration site.
+heap_literal = "static".to_heap
 raise "static retention type" unless heap_literal.is_a?(String)
 puts typeof("static")
 raise "literal allocated" unless "static".is_a?(String)

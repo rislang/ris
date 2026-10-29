@@ -114,6 +114,16 @@ expect board_owner 'send String, Array bytes or a value struct'
 # Tasks capture Share values, or take a value handed off (TAPE_SPEC 5.1).
 expect task_capture_mutable 'build tape values inside the spawn'
 expect task_capture_assigned 'a mutable borrow across tasks'
+expect task_local_tape 'open the `group` inside the `local_tape` block'
+expect task_local_tape_helper 'call `via` outside the `local_tape` block'
+
+# A task's captures outlive a local_tape when the group is inside it.
+out=$("$RIS" run test/ris/task_local_tape.ri 2>&1)
+if [ "$?" -eq 0 ] && grep -qxF 'PASS: task local_tape' <<<"$out"; then
+  echo "runs     task_local_tape (group inside, spawn outside)"
+else
+  echo "FAILED   task_local_tape: $out"; status=1
+fi
 expect task_handoff_reused 'the task owns it now'
 expect select_gone 'ris has no select'
 expect channel_gone 'undefined constant Channel'
@@ -367,6 +377,7 @@ if [[ "$out" == *FAILED* ]]; then status=1; fi
 printf '%s\n' "$out"
 
 expect slice_pool_links 'realloc_slice refuses self-relative links'
+expect nested_links 'a nested Array cannot hold self-relative links'
 # Nested arrays are pooled handles, including hash values.
 for name in nested_containers long_lived_containers static_array_copy \
     big_tape mime path std_text_tape; do
@@ -560,7 +571,9 @@ if [ "$?" -eq 0 ] &&
     grep -qF 'PASS: owner construction panic cleanup' <<<"$out" &&
     [ "$(grep -cF 'iyi: panic: expected owner construction panic' <<<"$out")" -eq 100 ] &&
     ! grep -qF 'half-built owner became observable' <<<"$out" &&
-    grep -qF '202 scopes, 6 mappings made, 0 unmapped' <<<"$out"; then
+    # Per task: its tape, local_tape, and the result region that keeps
+    # the panic text until the group ends (one mapping, reused).
+    grep -qF '302 scopes, 7 mappings made, 0 unmapped' <<<"$out"; then
   echo "runs     owner_construction_panic (bounded scope cleanup)"
 else
   echo "FAILED   owner_construction_panic: $out"
@@ -718,7 +731,7 @@ for name in implicit fibers/implicit implicit_loop; do
   code=$?
   if [ "$code" -eq 0 ] && grep -qF 'PASS:' <<<"$out" &&
       { [ "$name" != implicit_loop ] ||
-        grep -qF '3 scopes, 5 mappings made, 0 unmapped' <<<"$out"; }; then
+        grep -qF '2 scopes, 4 mappings made, 0 unmapped' <<<"$out"; }; then
     echo "runs     $name"
   else
     echo "FAILED   $name: $out"
@@ -810,6 +823,8 @@ out=$("$RIS" run test/ris/fibers/many.ri 2>&1)
 if [ "$out" = "1000 tapes at once, sum 499500" ]; then echo "runs     fibers/many"; else echo "FAILED   fibers/many: $out"; status=1; fi
 
 
+out=$("$RIS" run test/ris/fibers/task_stop.ri 2>&1)
+if [ "$out" = "stopped 1, others 2 7" ]; then echo "runs     fibers/task_stop"; else echo "FAILED   fibers/task_stop: $out"; status=1; fi
 out=$("$RIS" run test/ris/fibers/spares.ri 2>&1)
 if [ "$out" = $'warm: 4096 KiB written again\n8388608\ntrimmed' ]; then echo "runs     fibers/spares"; else echo "FAILED   fibers/spares: $out"; status=1; fi
 
@@ -1102,7 +1117,14 @@ for name in http_head_tape params_write_tape uri_tape idna_tape; do
   fi
 done
 
-# uri_legacy: the String URI.parse path loses normalize fields (TODO.md).
+# The URI class (to_uri of a parse) keeps its fields through normalize.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/uri_legacy.ri 2>&1)
+if [ "$?" -eq 0 ] && grep -qxF 'URI: legacy wrappers' <<<"$out" &&
+    grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+  echo "runs     uri_legacy (URI class normalize, zero heap)"
+else
+  echo "FAILED   uri_legacy: $out"; status=1
+fi
 
 heap_trap http_head_legacy
 
@@ -1473,16 +1495,17 @@ fi
 # (TODO.md, Goose-style std).
 out=$("$RIS" heap --user test/ris/heap_fields.ri 2>&1)
 if [ "$?" -eq 0 ] && ! grep -qE '^class: [1-9]' <<<"$out" &&
-    grep -qF 'array: 1' <<<"$out"; then
-  echo "census   heap_fields (instance initializer reached)"
+    grep -qxF 'array: 0' <<<"$out"; then
+  echo "census   heap_fields (initializer's Array is on the tape)"
 else
   echo "FAILED   heap_fields: $out"
   status=1
 fi
 out=$("$RIS" heap --user test/ris/heap_kinds.ri 2>&1)
 if [ "$?" -eq 0 ] && ! grep -qE '^class: [1-9]' <<<"$out" &&
-    grep -qF 'string: 1' <<<"$out" && grep -qF 'array: 1' <<<"$out" &&
-    grep -qF 'hash: 2' <<<"$out" && grep -qF 'closure: 1' <<<"$out"; then
+    grep -qxF 'string: 0' <<<"$out" && grep -qxF 'array: 0' <<<"$out" &&
+    grep -qxF 'hash: 0' <<<"$out" && grep -qxF 'closure: 1' <<<"$out"; then
+  # String, Array and Hash are tape types: only the closure counts.
   echo "census   heap_kinds (unused def omitted)"
 else
   echo "FAILED   heap_kinds: $out"

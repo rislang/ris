@@ -7,6 +7,7 @@ samples/ris/escape.ri 0 0 tape
 samples/ris/hello.ri 0 0 default
 samples/ris/logline.ri 0 0 default
 samples/ris/orders.ri 0 0 default
+samples/ris/owned_cache.ri 0 0 default
 samples/ris/query.ri 0 0 tape
 samples/ris/report.ri 0 0 default
 samples/ris/request.ri 0 0 default

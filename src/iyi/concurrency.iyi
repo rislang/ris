@@ -446,8 +446,9 @@ class IyiFiber
   end
 
   private def keep_panic(text : String, owner) : Nil
-    kept = Tape.owner_copy(text, owner)
+    # One String needs no copy work queue, so no scratch mapping either.
     owner.run do
+      kept = String.new(text)
       address = RisRegion.tape_bytes(sizeof(String).to_u64)
       Pointer(String).new(address).value = kept
       @panic_box = address
@@ -3954,6 +3955,19 @@ struct IyiTask(T)
     live = slot.live_fiber
     return true unless live.is_a?(IyiFiber)
     live.state == IyiFiberState::Done
+  end
+
+  # The task's stop handle: cancels this one task and the groups it holds
+  # open, as its group's failure would, from any task of the group. The
+  # handle is Share (slot and generation), so a signal waiter stops a
+  # listener's task without reaching its socket: the accept answers
+  # Cancelled and the owning task closes it. A finished task is left.
+  def cancel : Nil
+    task = slot
+    IyiSchedLock.lock
+    live = task.live_fiber
+    IyiScheduler.cancel(live) if live.is_a?(IyiFiber)
+    IyiSchedLock.unlock
   end
 
   # nil means Done (including panic/cancellation); read value separately.

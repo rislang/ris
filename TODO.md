@@ -54,13 +54,20 @@ part B.
 * Give a task-owned Conn an owner-level buffer growth path: growth in a
   nested tape block ends with the block, so TLS/HTTP/2 connections stay
   program-owned (one buffer per connection never freed) until then.
-* Port the benches to 5.1 task captures: the compiler now refuses a local
-  task's non-Share capture unless handed off. First refusals in
-  collect_trigger, concurrency, runtime, server_load, socket, stdin_park,
-  and std_ dns, file, http, http_latency, http_resume, http_stop, json,
-  mutex, process, signal, sse, term, tls, udp, websocket, yaml. Shared
-  locals become task values or board messages; a listener stopped from
-  another task needs a Share stop handle (design it, do not mark it).
+* Port the benches to 5.1 task captures. Done: std_signal (exercise
+  passes; a listener stops by its task handle's `cancel`, the Share stop
+  handle), std_process's captures (ChildProcess#read_both, task values,
+  Atomic). concurrency and stdin_park typecheck. First refusals left:
+  - captures: runtime (`-> { it.size }` on a tape String), http_latency
+    (args), http_resume (listeners), http_stop (TlsConfig), tls
+    (TlsServerConfig), mutex (a tape Mutex in a joined task: needs a rule
+    for Share(owns) tape types), sse (std/sse.iyi:546 parser),
+    websocket (std/websocket.iyi:380 chosen).
+  - not captures: std/process and std_term need no-GC buffers
+    (Pointer.malloc in current_directory, executable); std_process's
+    doubled-environ check needs raw pointers; socket, file, http, json
+    import std/gc; dns, udp: make_sockaddr returns String; yaml:
+    parse_all's TapeValue arm; server_load: IyiMark undefined.
 * 5.1 left: receivers and state reached through called methods (only the
   block's own captures are checked), aliases of a handed-off value.
 * Port socket race to one task with multiple in-flight OS connects and
@@ -168,9 +175,10 @@ first):
   an `IyiGroup.new` keeps each task's slot until it ends; parallel task
   fibers are not pooled; a spawned block's captured closure data still
   takes program storage per spawn.
-* std/uri: URI.parse of a String, then normalize.to_s, answers
-  "//@:80/a/c?q#f": the fields are lost (test/ris/uri_legacy.ri, out of
-  check.sh). Parsing a String works. Fix the String path or drop it.
+* samples/ris/logline.ri does not compile: IOBackend.on_program stores
+  the request-tape IO in a program object (std/log.iyi:362, "cannot
+  store request tape data on the program tape"). check.sh's heap gate
+  stops at it, so the other heap_budget.txt rows go unchecked.
 * std's target, as Goose does it (doc/reference/goose/docs/design/
   owning_dynamic_data.md): short-lived String/Array/Hash on the caller's
   tape; long-lived state (HPACK tables, autocert cache, log sinks) in
@@ -179,9 +187,12 @@ first):
   never frees, so a long-running server leaks (RIS_HEAP_STATS=1 shows
   it). Remove the bump allocator and restore the trap when std is moved.
 * A program def's closure environment is on its current tape (codegen
-  closure_owner 1): a task spawned inside a nested `tape do` that ends
-  before the task reads freed captures. Allocate it at the group's or
-  the def's scope, or refuse the spawn there. std keeps its marks.
+  closure_owner 1). A spawn with captures inside a `local_tape` block
+  into a group opened outside it is refused (task_local_tape); a nested
+  `tape do` shares the outer tape; a call inside a `local_tape` to a def
+  that (transitively) spawns with captures into a group it was handed is
+  refused (task_local_tape_helper). Left: a spawn reached through a
+  proc call, which the check cannot follow. std keeps its marks.
 * Error#message answers String, which a program cannot build without a
   heap: let it answer String (or write into a builder) across std.
 * Kernel threads without a collector on darwin arm64 and win32: Linux
@@ -230,6 +241,41 @@ first):
 
 ## Known failure to recheck
 
+* check.sh triage (2026-10-29, two full runs on minitest agree; all
+  deterministic, none load or temp-path races; fail at 5a375faec too):
+  * Tape stats: fixed. Stdio buffers went to Program.tape (program_scope),
+    a mapping of their own; now program storage (storage_scope). A task
+    panic copied its text through a scratch work queue; now one String.
+    owner_construction_panic gates 302 scopes, 7 mappings: each panic's
+    text is kept in a result region until the group ends.
+    query_scope still maps 9 (<= 8): a String#copy_to(RisPendingCopy)
+    in the Query lookup acquires a pending region, besides QUERIES on
+    Program.tape and 5 side reservations. Check std/uri's pending path.
+  * text_default.ri:31: a def whose Int32 result drops its interpolation
+    keeps tape over a million calls ("interpolation retained tape").
+  * index_view: fixed; tape_indexable's copying values_at(Array(Int32))
+    overrode the view.
+  * copy_rollback: fixed in the test. Array(String) copies bytes into its
+    own string pool, never through String#__iyi_copy_into; 1.7 promises
+    the rollback, not the hook. A struct leaf now injects the failure.
+  * slice_pool: fixed. Array growth uses __relocate_slice; links are
+    refused where a run joins a pool (nested Array, test nested_links).
+    flat.ri still fails: the shrink checker counts Array::Link as a view
+    (tape_shrink_checker.cr:860), so push after next_link is refused.
+    A link is an index and survives growth: drop it from that list.
+  * pointer_unsafe and ffi_marked: `to_unsafe` in an @[PointerUnsafe]
+    def or an @[Ffi] C call is refused as needing @[TapeUnsafe]; the
+    marks AGENTS.md names should satisfy the String pointer rule.
+  * Refusals tape-only retired, fixtures stale? interpolation_retained
+    now builds (returning "retained #{v}"); call_contracts'
+    contract_spawn (task capturing a view, group inside tape) builds.
+    Decide: drop the fixtures or restore the rules.
+  * autocert lifecycle and wire: Array(Hash(String, Json::Any)) cannot
+    hold growing values (SlicePool rule).
+  * log_metadata, log_tape, samples/ris/orders: log.iyi:279 "cannot grow
+    a pool run with a live view of TapeEntry.@source"; heap and
+    server_owners stop at log.iyi:362; answer, serve, server_groups,
+    http_prefork at http.iyi:6052; samples/ris/request at :2627.
 * growing_owner refuses with the field rule, not the container one.
 * samples/ris/web.ri does not build: std/http.iyi:2627
   (`headers[host_name] = named`) is refused as a Hash shrink with a live

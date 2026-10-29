@@ -617,24 +617,28 @@ class Iyi::Call
     view
   end
 
-  private def check_slice_relocation(type : Type,
+  private def check_slice_relocation(type : Type, nested = false,
                                      seen = Set(Type).new) : Nil
     return unless seen.add?(type)
     if type.to_s.starts_with?("Array::Link(")
+      if nested
+        raise "a nested Array cannot hold self-relative links: its run " \
+              "moves when it grows; keep linked nodes in a top-level Array"
+      end
       raise "SlicePool.realloc_slice refuses self-relative links; " \
             "use alloc_slice and free_slice without relocation"
     end
     case type
     when UnionType
-      type.union_types.each { |part| check_slice_relocation(part, seen) }
+      type.union_types.each { |part| check_slice_relocation(part, nested, seen) }
     when TupleInstanceType
-      type.tuple_types.each { |part| check_slice_relocation(part, seen) }
+      type.tuple_types.each { |part| check_slice_relocation(part, nested, seen) }
     when NamedTupleInstanceType
-      type.entries.each { |entry| check_slice_relocation(entry.type, seen) }
+      type.entries.each { |entry| check_slice_relocation(entry.type, nested, seen) }
     else
       if type.is_a?(InstanceVarContainer)
         type.instance_vars.each_value do |field|
-          field.type?.try { |part| check_slice_relocation(part, seen) }
+          field.type?.try { |part| check_slice_relocation(part, nested, seen) }
         end
       end
     end
@@ -698,7 +702,8 @@ class Iyi::Call
       check_tape_copy(args.first.type.instance_type, Set(Type).new, task)
     end
     if name == "check_slice_relocation" && owner.to_s == "Tape:Module"
-      check_slice_relocation(args.first.type.instance_type)
+      nested = args[1]?.try(&.type.instance_type.to_s.starts_with?("Array"))
+      check_slice_relocation(args.first.type.instance_type, nested || false)
     end
     if with_autocast
       args.each_with_index do |arg, index|

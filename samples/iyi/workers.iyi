@@ -82,6 +82,7 @@ end
 # Group end joins every worker; it does not close or drain the board.
 
 # 2. Two fetches at once, and the pair or the first error.
+@[OnTape]
 struct Timeout
   def initialize(@what : String)
   end
