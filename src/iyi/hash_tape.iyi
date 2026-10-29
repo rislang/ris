@@ -16,6 +16,9 @@ struct Hash(K, V)
   # [0] is the live count. Every column is an Array, shared by copies of the
   # struct, so a Hash passed to a method is the same map.
   @head : Array(Int32)
+  # Ruby's `Hash.new(0)`: what a missing key reads. Nil for most maps, so
+  # they reserve nothing for it; it travels with the map to any method.
+  @default : Array(V)? = nil
 
   def initialize(capacity : Int32 = 8)
     capacity = 8 if capacity < 8
@@ -60,9 +63,24 @@ struct Hash(K, V)
     value
   end
 
+  # A map whose missing keys read *default* (`counts = Hash.new(0)`).
+  def self.with_default(default : V) : self
+    map = new
+    map.__ris_default = Array(V).new(1, default)
+    map
+  end
+
+  protected def __ris_default=(@default : Array(V)?)
+  end
+
   def [](key : K) : V
     index = find(key)
-    raise "Hash: missing key #{key}" if index < 0
+    if index < 0
+      if default = @default
+        return default[0]
+      end
+      raise "Hash: missing key #{key}"
+    end
     @values[index]
   end
 

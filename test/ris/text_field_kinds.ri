@@ -1,0 +1,40 @@
+# Only a field that can hold a String gets a text companion: an Array
+# field appended in a method costs no extra bytes.
+@[OnTape]
+class Plain
+  @items : Array(Int32) = [] of Int32
+end
+
+@[OnTape]
+class Appended
+  @items : Array(Int32) = [] of Int32
+
+  def add(value : Int32)
+    @items << value
+    nil
+  end
+
+  def size
+    @items.size
+  end
+end
+
+@[OnTape]
+class Literal
+  @items = [] of Int32
+
+  def add(value : Int32)
+    @items << value
+    nil
+  end
+end
+
+raise "typed Array field" unless instance_sizeof(Appended) == instance_sizeof(Plain)
+raise "literal Array field" unless instance_sizeof(Literal) == instance_sizeof(Plain)
+tape do
+  a = Appended.new
+  a.add(1)
+  a.add(2)
+  raise "appends" unless a.size == 2
+end
+puts "PASS: text companions only for text fields"

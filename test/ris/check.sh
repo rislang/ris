@@ -1220,6 +1220,11 @@ for kind in field parameter literal; do
 done
 expect text_plain_builder 'only appends and is read back: write `text = ""`'
 expect text_plain_build 'this String.build only appends: write `io = ""`'
+# ris fix applies the compiler's own edits: Crystal-style text becomes ris.
+out=$(f="${TMPDIR:-/tmp}/plain_builder.ri"; cp test/ris/fix/plain_builder.ri "$f" && "$RIS" fix "$f" >/dev/null 2>&1 && diff test/ris/fix/plain_builder.expected "$f" && "$RIS" run "$f" 2>&1)
+if [ "$out" = "hello, ris" ]; then echo "runs     fix plain_builder"; else echo "FAILED   fix plain_builder: $out"; status=1; fi
+out=$("$RIS" run test/ris/text_field_kinds.ri 2>&1)
+if grep -qF 'PASS: text companions only for text fields' <<<"$out"; then echo "runs     text_field_kinds"; else echo "FAILED   text_field_kinds: $out"; status=1; fi
 out=$("$RIS" run test/ris/text_builder_kept.ri 2>&1)
 if grep -qF 'PASS: builders that do more than append' <<<"$out"; then echo "runs     text_builder_kept"; else echo "FAILED   text_builder_kept: $out"; status=1; fi
 out=$("$RIS" run test/ris/text_param.ri 2>&1)

@@ -21,7 +21,6 @@ module Iyi
       # ris: the program's top level is a scope of its own (a def's body
       # is lowered with the def).
       unless current_def || macro_code || normalizer.macro_expansion || node.is_a?(Def)
-        normalizer.prepare_default_hash(node) if node.is_a?(Expressions)
         normalizer.prepare_collection_inference(node)
         TapeTextLowering.lower_scope(node, [] of String, false)
         if node.is_a?(Expressions)
@@ -504,6 +503,10 @@ module Iyi
       getter arguments = Set(String).new
 
       def visit(node : Assign)
+        if (field = node.target).is_a?(InstanceVar) &&
+           (node.value.is_a?(ArrayLiteral) || node.value.is_a?(HashLiteral))
+          @non_text_fields << field.name
+        end
         if (target = node.target).is_a?(Var)
           @assigned << target.name
           @assignments[target.name] += 1
@@ -520,7 +523,28 @@ module Iyi
           @assigned << target.name
           @assignments[target.name] += 1
         end
+        if (field = node.var).is_a?(InstanceVar) &&
+           GrowingTextScan.never_string?(node.declared_type)
+          @non_text_fields << field.name
+        end
         true
+      end
+
+      # Fields declared as, or started from, a type that cannot be a String
+      # (`@x : Array(T)`, `@x = [] of T`) need no text companion.
+      getter non_text_fields = Set(String).new
+
+      def self.never_string?(type : ASTNode) : Bool
+        case type
+        when Generic
+          true
+        when Path
+          type.names != ["String"]
+        when Union
+          type.types.all? { |part| never_string?(part) }
+        else
+          false
+        end
       end
 
       def visit(node : MultiAssign)
@@ -659,11 +683,19 @@ module Iyi
         uses = BuilderUses.new(name)
         body.accept(uses)
         next unless uses.simple?
-        call.raise "`#{name}` only appends and is read back: write " \
+        # The edit replaces the whole `String::Builder.new(...)`, which
+        # starts at its path; the call's own location is the method name.
+        start = call.obj.not_nil!
+        size = nil
+        if (from = start.location) && (to = call.end_location) &&
+           from.line_number == to.line_number
+          size = to.column_number - from.column_number + 1
+        end
+        start.raise "`#{name}` only appends and is read back: write " \
                    "`#{name} = \"\"`, append with `<<` and read `#{name}` " \
                    "itself (not `#{name}.finish`). A String local grows in " \
                    "place and is lent to String::Builder parameters.",
-          suggestion: "\"\""
+          suggestion: "\"\"", size: size
       end
       starts.blocks.each do |name, call|
         uses = BuilderUses.new(name)
@@ -1225,7 +1257,7 @@ module Iyi
          !TapeScopeRuntime.runtime?(node.location)
         scan = GrowingTextScan.new(methods: true)
         node.body.accept(scan)
-        @ris_growing_fields = scan.fields
+        @ris_growing_fields = scan.fields - scan.non_text_fields
         @ris_growing_fields.each { |name| program.ris_growing_field_names << name }
         declarations = @ris_growing_fields.flat_map do |name|
           slot = growing_slot(InstanceVar.new(name).at(node))
@@ -1823,4 +1855,3 @@ end
 
 require "./ris_collection_inference"
 
-require "./ris_default_hash"

@@ -1,0 +1,6 @@
+# Crystal-style text building; `ris fix` turns it into ris.
+tape do
+  text = ""
+  text << "hello, " << "ris"
+  puts text.to_s
+end

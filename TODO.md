@@ -98,13 +98,12 @@ In order, one gate each (RIS_TAPE_STATS: 0 moves, 0 copies after the
 first):
 
 * Done: `a = []`, `h = {}` and `Hash.new(0)` infer from the first store
-  in .ri files (test/ris/array_infer.ri). Left: std (.iyi) still needs
-  `[] of T`; `Hash.new(0)` answers RisDefaultHash(K, V), which a
-  `Hash(K, V)` parameter does not take: make it a Hash, or name it in
-  the refusal.
-* Done: appended locals and fields grow (test/ris/text_grow.ri). Left
-  from its review: a class with `@x << y` gets a RisTextGrowth slot
-  even when @x is an Array (type unknown at normalize).
+  in .ri files (test/ris/array_infer.ri); `Hash.new(0)` is a Hash(K, V)
+  carrying its default, so a `Hash(K, V)` parameter takes it. std
+  (.iyi) still needs `[] of T`.
+* Done: appended locals and fields grow (test/ris/text_grow.ri); a
+  field declared or started as a non-String type (`@x : Array(T)`,
+  `@x = [] of T`) gets no text companion (text_field_kinds.ri).
 * Done: a reset (`s = ""`, `@data = x`) reuses the reservation when
   the shrink checker's text pass proves no old view is live, else it
   refuses naming `copy_to(owner)` (test/ris/text_grow.ri, ten
@@ -120,11 +119,11 @@ first):
   refused/text_lend_*). std (.iyi) does not lend yet.
 * Crystal code to ris through `ris fix`: each common refusal carries a
   `suggested_edit` that fix applies. Done: a plain `String::Builder.new`
-  -> `""`. Left: its `x.finish` -> `x` (a second edit), String.build
-  blocks, an `IO` text parameter -> `String::Builder`, a new Array per
-  call -> `clear`. Gate per rule: a Crystal-style file that `ris fix`
-  turns into one that compiles, and fix leaves alone what it cannot
-  prove.
+  -> `""`, then its `x.finish` -> `x.to_s` (test/ris/fix/). Left:
+  String.build blocks (a multi-line edit), an `IO` text parameter ->
+  `String::Builder`, a new Array per call -> `clear`. Gate per rule: a
+  Crystal-style file that `ris fix` turns into one that compiles, and
+  fix leaves alone what it cannot prove.
 * Done: in programs, a String::Builder local or String.build argument
   that only appends (`<<`) and is read back (`finish`, `to_s`) is
   refused, naming `text = ""` (test/ris/refused/text_plain_build*.ri,

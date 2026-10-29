@@ -1611,6 +1611,14 @@ class Iyi::Call
         suggested_edit = participle
       end
 
+      # ris: a builder became `text = ""`; the text is the String itself.
+      if !similar_name && def_name == "finish" && owner.to_s == "String" &&
+         obj.is_a?(Var)
+        msg << '\n' << "`#{obj.name}` is the text itself: read `#{obj.name}`, " \
+                       "or `#{obj.name}.to_s`"
+        suggested_edit = "to_s"
+      end
+
       # iyi: the name is usually not missing, it is out of reach.
       if hint = iyi_out_of_reach_hint(def_name, obj)
         msg << '\n' << hint

@@ -15,6 +15,10 @@ def default_at(counts, word)
   counts[word]
 end
 
+def typed_default(counts : Hash(String, Int32), word : String) : Int32
+  counts[word]
+end
+
 tape do
   a = []
   a << 1
@@ -69,6 +73,8 @@ tape do
   raise "passed default" unless default_at(counts, "missing") == 0
   alias_counts = counts
   raise "aliased default" unless alias_counts["missing"] == 0
+  raise "Hash parameter" unless typed_default(counts, "one") == 2
+  raise "Hash parameter default" unless typed_default(counts, "none") == 0
   raise "method scope" unless inferred_values[1] == 1
 
   empty = []

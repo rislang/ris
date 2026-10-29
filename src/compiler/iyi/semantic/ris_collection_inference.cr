@@ -72,11 +72,11 @@ module Iyi
             value.args.first.accept(self)
             of_value = deferred(slot, 1)
             of_value.expressions << default.clone
-            generic = Generic.new(Path.global("RisDefaultHash"),
+            generic = Generic.new(Path.global("Hash"),
               [deferred(slot, 0), of_value] of ASTNode).at(value)
             node.value = Expressions.new([
               Assign.new(default, value.args.first).at(value),
-              Call.new(generic, "new", default.clone).at(value),
+              Call.new(generic, "with_default", default.clone).at(value),
             ] of ASTNode).at(value)
           end
           return false
