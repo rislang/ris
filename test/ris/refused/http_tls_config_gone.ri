@@ -1,0 +1,6 @@
+module test/ris/refused/http_tls_config_gone
+# A task's TlsConfig is passed to its own client, not set process-wide.
+import std/http::{HTTP}
+import std/tls::{TlsConfig}
+config = TlsConfig.new
+HTTP.tls_config = config

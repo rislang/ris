@@ -296,15 +296,10 @@ pub struct OcspResponse
                  @signature_parameters : DerValue?, @signature : Array(UInt8), @certificates : Array(Certificate))
   end
 
-  # The OCSPResponse *der* holds (RFC 6960 section 4.2.1).
-  # The lists of values the parse walks are on a tape of its own, dropped
-  # together when it ends; the response copies out what it keeps.
+  # The OCSPResponse *der* holds (RFC 6960 section 4.2.1). The parse
+  # and the lists of values it walks are on the caller's tape.
   def self.parse(der : Array(UInt8)) : OcspResponse | OcspError
-    parsed = OcspError.new("not read").as(OcspResponse | OcspError)
-    tape do
-      parsed = parse_on_tape(der)
-    end
-    parsed
+    parse_on_tape(der)
   end
 
   private def self.parse_on_tape(der : Array(UInt8)) : OcspResponse | OcspError

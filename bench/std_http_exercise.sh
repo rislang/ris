@@ -1162,19 +1162,19 @@ echo "== TLS resumption: an HTTPClient's tickets (bench/std_http_resume.iyi)"
 # so a ticket one origin sent, offered to another, would resume there;
 # and s_server -msg prints every ClientHello it read, whose extensions
 # say whether it carried a ticket (pre_shared_key, 41) or asked to send
-# early data (early_data, 42). After `HTTP.tls_config`'s roots are
+# early data (early_data, 42). After the client's `tls:` roots are
 # assigned again - the same root, in an array of its own - the next
 # connection is a full handshake that offers no ticket, and under roots
 # that do not reach the server it is refused, where a ticket would have
 # skipped the check; the same for a client made with a TLS configuration
-# of its own (`tls:`), whose roots are assigned while `HTTP.tls_config`
+# of its own, whose roots are assigned while another client's config
 # stays. The limits: four tickets an origin by default of the
 # eight a server sends, two when asked, room for two origins at two each,
 # and none when none are kept. No early data: s_server's tickets allow
 # 16 KiB of it (-max_early_data), but no ClientHello asks. Then
 # copies of the module with the sessions kept under the origin alone (the
-# configuration ignored), under `HTTP.tls_config` where the client has a
-# configuration of its own, a ticket offered to any origin, no session
+# configuration ignored), under the default `HTTP.tls_config` where the
+# client has a configuration of its own, a ticket offered to any origin, no session
 # handed to the handshake, early data sent, and each origin's limit and
 # the total left out, each caught at the line that names it. The iyi
 # server's half is the program run with no arguments, as CI runs every

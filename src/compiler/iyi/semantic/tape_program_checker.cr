@@ -42,9 +42,10 @@ class Iyi::TapeProgramChecker
             "scan", "skip", "scan_until", "skip_until", "__ris_text_reset"}
 
   @active = Set(UInt64).new
-  @isolated = Set(UInt64).new
+  @isolated = {} of UInt64 => Symbol
   @joining = Set({UInt64, UInt64}).new
   @globals = {} of UInt64 => Bool
+  @settled = {} of Tuple(UInt64, String, Bool) => Symbol
   @program_context = false
   @self_safe : Origin = Origin::Unknown
   @self_tape = false
@@ -475,10 +476,23 @@ class Iyi::TapeProgramChecker
       ([receiver] + args).none? do |origin|
         contains_program?(origin, definite: true)
       end
-    if isolated && @isolated.includes?(target.object_id)
-      return Origin::Scalar
+    if isolated && (kind = @isolated[target.object_id]?)
+      return kind == :scalar ? Origin::Scalar : Origin.new(kind)
+    end
+    # With no block, a walk reads only the callee, the context and its
+    # inputs' structure: kinds, fields, elements and which of them are one
+    # origin (`signature`). A later call whose inputs have the same
+    # structure would make the same stores and find the same refusals,
+    # raised on the first walk. Its result is reused only when it is a
+    # shared origin or a fresh empty one, and only when the walk left the
+    # inputs as they were, so nothing it stored is lost.
+    inputs = [receiver] + args
+    key = {target.object_id, binding ? "" : signature(inputs), @program_context}
+    if !binding && (kind = @settled[key]?)
+      return reused(kind)
     end
     return Origin::Unknown unless @active.add?(target.object_id)
+    walked = binding ? nil : input_shape(inputs)
     before = isolated ? input_shape([receiver] + args) : nil
     previous_self, previous_return, previous_binding = @self_safe, @returned, @binding
     previous_tape = @self_tape
@@ -496,12 +510,83 @@ class Iyi::TapeProgramChecker
     # A result or an input acquiring a program alias makes this call
     # context-sensitive. Unknown results are not reusable either. Global
     # mutations and thread use otherwise remain recorded from this check.
-    if isolated && !target.type?.try { |type| TapeChecker.tape_in(@program, type) } &&
-       result.kind == :scalar &&
-       before == input_shape([receiver] + args)
-      @isolated << target.object_id
+    if isolated && before == input_shape([receiver] + args)
+      if !target.type?.try { |type| TapeChecker.tape_in(@program, type) } &&
+         result.kind == :scalar
+        @isolated[target.object_id] = :scalar
+      elsif fresh?(result, before.not_nil!)
+        # Reuse a fresh, empty request result: it cannot depend on the
+        # caller's tape state. The inputs held no program storage and are
+        # unchanged, no block or program context was seen, and the result
+        # is no input nor reached from one. Had the callee kept it in a
+        # program root, that store was refused on this walk. A later call
+        # makes another such value; refusals were raised once.
+        @isolated[target.object_id] = result.kind
+      end
+    end
+    if walked && walked == input_shape(inputs)
+      if shared?(result)
+        @settled[key] = result.kind
+      elsif fresh?(result, walked)
+        @settled[key] = result.kind == :request ? :fresh_request : :fresh_local
+      end
     end
     result
+  end
+
+  private def shared?(origin : Origin) : Bool
+    origin.same?(Origin::Unknown) || origin.same?(Origin::Scalar) ||
+      origin.same?(Origin::Program)
+  end
+
+  private def reused(kind : Symbol) : Origin
+    case kind
+    when :unknown       then Origin::Unknown
+    when :scalar        then Origin::Scalar
+    when :program       then Origin::Program
+    when :fresh_request then Origin.new(:request)
+    else                     Origin.new(:local)
+    end
+  end
+
+  # The inputs' structure with identities numbered in the order met, the
+  # shared origins by name: equal for inputs a walk cannot tell apart.
+  private def signature(inputs : Array(Origin)) : String
+    seen = {} of UInt64 => Int32
+    String.build do |io|
+      inputs.each { |origin| sign(origin, seen, io); io << ';' }
+    end
+  end
+
+  private def sign(origin : Origin, seen, io) : Nil
+    if shared?(origin)
+      io << origin.kind
+      return if origin.fields.empty? && origin.element.nil?
+    end
+    if number = seen[origin.object_id]?
+      io << '#' << number
+      return
+    end
+    seen[origin.object_id] = seen.size
+    io << origin.kind << '{'
+    origin.fields.keys.sort.each do |name|
+      io << name << ':'
+      sign(origin.fields[name], seen, io)
+      io << ','
+    end
+    if element = origin.element
+      io << '['
+      sign(element, seen, io)
+      io << ']'
+    end
+    io << '}'
+  end
+
+  # Whether *result* is a new, empty request value: not one of the origins
+  # *shape* (the inputs and all they reach) records.
+  private def fresh?(result : Origin, shape) : Bool
+    result.request? && result.fields.empty? && result.element.nil? &&
+      !shape.has_key?(result.object_id)
   end
 
   # A reused scalar check must not lose input aliases or field stores.

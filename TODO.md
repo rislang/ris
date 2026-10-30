@@ -70,9 +70,15 @@ part B.
     (server task and client share `log`, sockets), mutex (bench
     deleted with Mutex, 2026-10-29), sse
     (std/sse.iyi:546 parser), websocket (std/websocket.iyi:380 chosen).
-  - not captures: http_latency, http_resume, http_stop stop at
-    std/http.iyi:6052 (`@failure = got`, program-tape store); socket,
-    file, http, json import std/gc; yaml: Array(Any) refused (growing
+  - not captures: http_latency, http_resume, http_stop check in 64-79 s
+    (the program checker reuses walks by input structure); they stop at
+    the shrink refusal http_continue has (http.iyi:2218 serve_h1 ->
+    answered? -> held block). HTTP.tls_config= is gone (refused, naming
+    HTTPClient.new(tls:)); websocket, acme, http2_exercise and
+    std_http_exercise.sh's inline programs still call it. TlsConfig
+    reads the system roots per handshake: make Certificate copyable to
+    Program.tape to keep them once again.
+    socket, file, http, json import std/gc; yaml: Array(Any) refused (growing
     values): retire Any for TapeValue; server_load: IyiMark (collector
     gone; the bench proves collections, drop or rewrite it).
 * 5.1 left: receivers and state reached through called methods (only the

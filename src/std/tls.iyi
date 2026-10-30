@@ -520,8 +520,8 @@ end
 # What a connection is checked against and offers.
 pub class TlsConfig
   # The roots a server's chain must reach; the system's when nil, read
-  # once for the whole process and kept, since reading them is most of a
-  # handshake's own cost.
+  # at each handshake (`trusted_roots`), which is most of its cost: set
+  # them once to skip that.
   property roots : Array(Certificate)? = nil
   # Protocols offered by ALPN (RFC 7301), most wanted first: `["h2",
   # "http/1.1"]`. None offered when empty.
@@ -567,6 +567,15 @@ pub class TlsConfig
   def initialize
   end
 
+  # The default configuration, made on the program tape: *alpn* must be
+  # there too (`copy_to(Program.tape)`).
+  def self.on_program(alpn : Array(String)) : TlsConfig
+    config = RisRegion.program_object(TlsConfig)
+    config.initialize
+    config.alpn = alpn
+    config
+  end
+
   # A new configuration holding what this one holds - the same roots and
   # identity objects, a copy of `alpn` - for a part to be changed in it
   # and not here: std/http's client makes the configuration an HTTPS
@@ -586,16 +595,14 @@ pub class TlsConfig
     made
   end
 
-  @@system : Array(Certificate)? = nil
-
+  # The system's roots are read on the caller's tape at each call: a
+  # Certificate cannot yet be copied to the program tape, and one kept
+  # there from a task's tape would outlive it. Set `roots` to read once.
   def trusted_roots : Array(Certificate) | TlsError
     held = @roots
     return held if held
-    kept = @@system
-    return kept if kept
     store = SystemRoots.load
     return TlsError.new(store.message) if store.is_a?(X509Error)
-    @@system = store.certificates
     store.certificates
   end
 end

@@ -304,11 +304,9 @@ if mode.empty?
       h2.roots = roots
       h2.alpn = ["h2", "http/1.1"]
       seen = [] of String
-      HTTP.tls_config = h1
-      over_h1 = HTTPClient.new
+      over_h1 = HTTPClient.new(tls: h1)
       first = over_h1.get(secure_base + "/").or_panic
-      HTTP.tls_config = h2
-      over_h2 = HTTPClient.new
+      over_h2 = HTTPClient.new(tls: h2)
       second = over_h2.get(secure_base + "/").or_panic
       in_clear = HTTPClient.new
       in_clear.get(plain_base + "/").or_panic
@@ -318,10 +316,9 @@ if mode.empty?
         "TLS HTTP/1.1, TLS HTTP/2, clear HTTP/1.1, clear HTTP/2", seen)
       waiting = TlsClient.connect("localhost", tls, h1, 10000).or_panic
       check("a std/tls client's request", asked(waiting), "HTTP/1.1 200 OK", seen)
-      HTTP.tls_config = h1
-      upgraded = [HTTP.upgrade(secure_base + "/upgrade", "hold").or_panic, HTTP.upgrade(plain_base + "/upgrade", "hold").or_panic]
+      upgraded = [HTTP.upgrade(secure_base + "/upgrade", "hold", client: over_h1).or_panic, HTTP.upgrade(plain_base + "/upgrade", "hold").or_panic]
       check("upgraded", upgraded.map { |u| u.response.status }.join(" and "), "101 and 101", seen)
-      HTTP.get(secure_base + "/stop").or_panic
+      over_h1.get(secure_base + "/stop").or_panic
       HTTP.get(plain_base + "/stop").or_panic
       RisExerciseServer.stopped(RisStop1Handler)
       RisExerciseServer.stopped(RisStop2Handler)

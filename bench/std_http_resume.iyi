@@ -372,9 +372,8 @@ if mode.empty?
       config = TlsConfig.new
       config.roots = roots
       config.alpn = ["http/1.1"]
-      HTTP.tls_config = config
       # A new connection for every request: none is kept to be reused.
-      client = HTTPClient.new(idle: 0)
+      client = HTTPClient.new(idle: 0, tls: config)
       first = client.get(bases[0])
       second = client.get(bases[0])
       resumed = second.is_a?(Response) && second.tls_resumed?
@@ -396,10 +395,10 @@ if mode.empty?
         "HTTP: tls: the server's certificate is not trusted: x509: no certificate here issued CN=iyi bench root, the issuer of CN=localhost (bad_certificate)", failures)
       config.roots = roots
       # A client with a TLS configuration of its own (`tls:`): its tickets
-      # are kept under that one, so roots assigned in `HTTP.tls_config`
-      # leave them be, and roots assigned there in place make the next
-      # connection a full handshake, refused under roots that do not reach
-      # the server, while `HTTP.tls_config` is unchanged.
+      # are kept under that one, so roots assigned in another client's
+      # configuration leave them be, and roots assigned in its own make the
+      # next connection a full handshake, refused under roots that do not
+      # reach the server.
       mine = TlsConfig.new
       mine.roots = roots
       mine.alpn = ["http/1.1"]
@@ -410,12 +409,12 @@ if mode.empty?
       still = said(own.get(bases[0]))
       config.roots = roots
       mine.roots = other
-      check("own tls", "#{before} then #{again}, then #{still} after HTTP.tls_config's roots, then under other roots: #{said(own.get(bases[0]))}",
-        "resumed=no then resumed=yes, then resumed=yes after HTTP.tls_config's roots, then under other roots: HTTP: tls: the server's certificate is not trusted: x509: no certificate here issued CN=iyi bench root, the issuer of CN=localhost (bad_certificate)", failures)
+      check("own tls", "#{before} then #{again}, then #{still} after another config's roots, then under other roots: #{said(own.get(bases[0]))}",
+        "resumed=no then resumed=yes, then resumed=yes after another config's roots, then under other roots: HTTP: tls: the server's certificate is not trusted: x509: no certificate here issued CN=iyi bench root, the issuer of CN=localhost (bad_certificate)", failures)
       # A server that sends eight tickets a handshake.
-      plenty = HTTPClient.new(idle: 0)
+      plenty = HTTPClient.new(idle: 0, tls: config)
       plenty.get(bases[3])
-      few = HTTPClient.new(idle: 0, origin_tickets: 2, tickets: 4)
+      few = HTTPClient.new(idle: 0, origin_tickets: 2, tickets: 4, tls: config)
       few.get(bases[3])
       check("an origin's tickets", "#{plenty.tickets_held(origins[3])} of 8 by default, #{few.tickets_held(origins[3])} of 8 when 2 are asked for",
         "4 of 8 by default, 2 of 8 when 2 are asked for", failures)
@@ -427,11 +426,11 @@ if mode.empty?
       dropped = few.tickets_held(origins[3]) + few.tickets_held(origins[0])
       check("tickets in all", "#{held} held over four origins, #{dropped} of the two oldest, then #{said(few.get(bases[0]))} at the oldest and #{said(few.get(bases[2]))} at the newest",
         "4 held over four origins, 0 of the two oldest, then resumed=no at the oldest and resumed=yes at the newest", failures)
-      none = HTTPClient.new(idle: 0, tickets: 0)
+      none = HTTPClient.new(idle: 0, tickets: 0, tls: config)
       check("none kept", "#{said(none.get(bases[0]))} then #{said(none.get(bases[0]))}, #{none.tickets_held} held", "resumed=no then resumed=no, 0 held", failures)
       # A kept connection still carries the next request, and says the
       # handshake it was made by.
-      pooled = HTTPClient.new
+      pooled = HTTPClient.new(tls: config)
       pooled.get(bases[2])
       kept = pooled.get(bases[2])
       check("kept", "#{said(kept)}, #{pooled.connections_made} made, #{pooled.connections_reused} reused", "resumed=no, 1 made, 1 reused", failures)
@@ -444,7 +443,7 @@ if mode.empty?
       check("staple", "#{unstapled}, #{pooled.connections_made} made, #{pooled.connections_reused} reused",
         "HTTP: tls: no OCSP response was stapled to CN=localhost, and require_staple asks for one (bad_certificate_status_response), 2 made, 1 reused", failures)
       pooled.close
-      bases.each { |base| HTTP.get(base + "stop") }
+      bases.each { |base| client.get(base + "stop") }
       failures.size
     end
     failed = client_task.value.or(1)
@@ -458,11 +457,10 @@ if mode == "s_server"
   config = TlsConfig.new
   config.roots = Certificate.from_pem(File.read(args[2])).or_panic
   config.alpn = ["http/1.1"]
-  HTTP.tls_config = config
   base = "https://localhost:#{args[1]}/"
   # Ten seconds a read: a broken copy that confuses s_server fails rather
   # than waits.
-  client = HTTPClient.new(idle: 0, timeout_ms: 10000)
+  client = HTTPClient.new(idle: 0, timeout_ms: 10000, tls: config)
   first = client.get(base)
   second = client.get(base)
   resumed = second.is_a?(Response) && second.tls_resumed?
@@ -484,7 +482,6 @@ if mode == "speed"
   config = TlsConfig.new
   config.roots = Certificate.from_pem(File.read(args[2])).or_panic
   config.alpn = ["http/1.1"]
-  HTTP.tls_config = config
   count = args[3].to_i
   # The handshake alone, as the client makes it: std/tls's, with the
   # session an `HTTPClient` would hand it or none.
@@ -499,8 +496,8 @@ if mode == "speed"
   end
   puts "the handshake, #{count} each: full #{median(full_shakes)}, resumed #{median(resumed_shakes)}"
   # And a GET on a new connection, the handshake and all.
-  full = HTTPClient.new(idle: 0, tickets: 0)
-  resuming = HTTPClient.new(idle: 0)
+  full = HTTPClient.new(idle: 0, tickets: 0, tls: config)
+  resuming = HTTPClient.new(idle: 0, tls: config)
   # The first of each warms the code and, for the second, takes tickets.
   full.get(base).or_panic
   resuming.get(base).or_panic

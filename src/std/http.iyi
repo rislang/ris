@@ -3298,22 +3298,26 @@ pub struct HTTP
   # What an `https://` request is checked against and offers: the
   # system's roots, and ALPN's `http/1.1`, unless a program sets its own -
   # roots of its own for a server it runs, say.
-  # This setting is process-wide. A task with independent trust uses
-  # HTTPClient.new(tls: local_config) and passes that client to requests.
-  # Autocert flights use this form; server workers build AutocertView
-  # from their copied AutocertConfig, then expose view.tls_config.
+  # It is made once, on the program tape, and read only. A task with its
+  # own trust uses HTTPClient.new(tls: local_config) and passes that
+  # client to requests. Autocert flights use this form; server workers
+  # build AutocertView from their copied AutocertConfig, then expose
+  # view.tls_config.
   def self.tls_config : TlsConfig
     if held = @@tls
       return held
     end
-    config = TlsConfig.new
-    config.alpn = ["http/1.1"]
+    config = TlsConfig.on_program(["http/1.1"].copy_to(Program.tape))
     @@tls = config
     config
   end
 
-  def self.tls_config=(config : TlsConfig) : TlsConfig
-    @@tls = config
+  # A task's configuration would outlive its tape here, and every other
+  # task would share it: an HTTPClient carries its own.
+  macro tls_config=(config)
+    {% raise "HTTP.tls_config= is gone: a task's TlsConfig cannot be " \
+             "process-wide; pass it to HTTPClient.new(tls: config) and " \
+             "send requests through that client" %}
   end
 
   # The request as it goes on the wire, whole. `Host`, `Connection` and
@@ -3540,12 +3544,13 @@ pub struct HTTP
   # handshake handed to a forward proxy in absolute form reaches the
   # server, at best, as a plain GET: the gate's proxy, which drops
   # `Connection`, leaves std/websocket's server a request it answers 400.
-  def self.upgrade(url : String, protocol : String, headers : Hash(String, String) = {} of String => String, timeout_ms : Int32 = 0, proxy : String? = nil) : Upgraded | Cancelled | SocketError | HTTPError
+  # A *client* sends it under its own `tls:` configuration.
+  def self.upgrade(url : String, protocol : String, headers : Hash(String, String) = {} of String => String, timeout_ms : Int32 = 0, proxy : String? = nil, client : HTTPClient? = nil) : Upgraded | Cancelled | SocketError | HTTPError
     route = ProxyRoute.of(proxy)
     return route if route.is_a?(HTTPError)
     sent = headers.dup
     sent["Upgrade"] = protocol
-    exchange = exchange("GET", url, sent, "", nil, false, "Upgrade", nil, timeout_ms, route)
+    exchange = exchange("GET", url, sent, "", nil, false, "Upgrade", client, timeout_ms, route)
     return exchange unless exchange.is_a?(Exchange)
     response = exchange.response
     if response.status != 101
@@ -5519,7 +5524,12 @@ class H2Connection
   HEADER_LIST = 1048576
 
   getter conn : Conn
-  getter failure : HTTPError | Cancelled | SocketError | Nil
+  # The first failure, kept as scalars and bytes this connection owns: it
+  # outlives the request tape it happened on. `failure` builds the error
+  # on the caller's tape.
+  @fault : Int32
+  @fault_code : Int32
+  @fault_why : Array(UInt8)
   @server : Bool
   @streams : Hash(Int32, H2Stream)
   @send_window : Int64
@@ -5582,7 +5592,38 @@ class H2Connection
     @ready = [] of Int32
     @goaway = -1
     @settled = false
-    @failure = nil
+    @fault = FAULT_NONE
+    @fault_code = 0
+    @fault_why = [] of UInt8
+  end
+
+  FAULT_NONE      = 0
+  FAULT_CANCELLED = 1
+  FAULT_WRITE     = 2
+  FAULT_CONN      = 3
+  FAULT_HTTP      = 4
+
+  # The first failure, made on the caller's tape; nil while there is none.
+  def failure : HTTPError | Cancelled | SocketError | Nil
+    case @fault
+    when FAULT_CANCELLED then Cancelled.new
+    when FAULT_WRITE     then SocketError.new("write", @fault_code)
+    when FAULT_CONN      then @conn.failure
+    when FAULT_HTTP
+      why = String.build(@fault_why.size) do |w|
+        @fault_why.each { |b| w.push(b) }
+      end
+      HTTPError.new(why)
+    else
+      nil
+    end
+  end
+
+  # Keeps *why* as this connection's failure: its bytes are copied.
+  private def fail_with(why : String) : Nil
+    @fault_why.clear
+    why.each_byte { |b| @fault_why << b }
+    @fault = FAULT_HTTP
   end
 
   # This end's first frames: the client's preface, then SETTINGS - push
@@ -5603,7 +5644,7 @@ class H2Connection
   # Whether a new request may go on this connection: it has not failed,
   # the server has not said it is going away, and stream numbers remain.
   def usable? : Bool
-    @failure.nil? && @goaway < 0 && @next_id < 2147483000 && !@conn.ended?
+    @fault == FAULT_NONE && @goaway < 0 && @next_id < 2147483000 && !@conn.ended?
   end
 
   # Whether the last request's stream was refused unprocessed (§8.7):
@@ -5628,7 +5669,7 @@ class H2Connection
   end
 
   private def read_frame_on_tape : Bool
-    return false unless @failure.nil?
+    return false unless @fault == FAULT_NONE
     return false unless flush
     return ended unless @conn.need(9)
     length = (@conn.peek(0).to_i32 << 16) | (@conn.peek(1).to_i32 << 8) | @conn.peek(2).to_i32
@@ -5664,21 +5705,21 @@ class H2Connection
 
   # The peer closed, or the read failed.
   private def ended : Bool
-    if fault = @conn.failure
-      @failure = fault
+    if @conn.failure
+      @fault = FAULT_CONN
     elsif @conn.available > 0 || @block_stream != 0
-      @failure = HTTPError.new("HTTP/2: the connection ended inside a frame")
+      fail_with("HTTP/2: the connection ended inside a frame")
     end
     false
   end
 
   # A connection error (§5.4.1): GOAWAY with its code and why, and no more.
   private def fail(code : Int32, why : String) : Bool
-    if @failure.nil?
+    if @fault == FAULT_NONE
       write_frame(GOAWAY, 0, 0, H2Connection.u32(@highest) + H2Connection.u32(code) + why)
       flush
     end
-    @failure = HTTPError.new("HTTP/2: #{why} (#{H2Connection.error_name(code)})")
+    fail_with("HTTP/2: #{why} (#{H2Connection.error_name(code)})")
     false
   end
 
@@ -6021,7 +6062,7 @@ class H2Connection
   # One frame, in one write.
   def write_frame(type : Int32, flags : Int32, id : Int32,
                   payload : String) : Bool
-    return false unless @failure.nil? || (type == GOAWAY && @failure.is_a?(HTTPError))
+    return false unless @fault == FAULT_NONE || (type == GOAWAY && @fault == FAULT_HTTP)
     n = payload.bytesize
     head = String.new(9) do |b|
       b[0] = ((n >> 16) & 0xFF).to_u8
@@ -6043,7 +6084,7 @@ class H2Connection
 
   # What has been written, sent in one write.
   def flush : Bool
-    return @failure.nil? if @pending.empty?
+    return @fault == FAULT_NONE if @pending.empty?
     whole = @pending.size == 1 ? @pending[0] : @pending.join("")
     # Written before the clear: `whole` may be the first element.
     got = @conn.transport.write(whole)
@@ -6052,8 +6093,13 @@ class H2Connection
     return true if got.is_a?(Int32)
     # This connection outlives the request tape the error was made on:
     # keep only its scalar code, never its request-tape strings.
-    if @failure.nil?
-      @failure = got.is_a?(Cancelled) ? Cancelled.new : SocketError.new("write", got.code)
+    if @fault == FAULT_NONE
+      if got.is_a?(Cancelled)
+        @fault = FAULT_CANCELLED
+      else
+        @fault = FAULT_WRITE
+        @fault_code = got.code
+      end
     end
     false
   end
@@ -6105,7 +6151,7 @@ class H2Connection
     return false if s.nil?
     at = 0
     while at < text.bytesize
-      return false if s.reset >= 0 || !@failure.nil?
+      return false if s.reset >= 0 || @fault != FAULT_NONE
       room = text.bytesize - at
       room = @peer_frame if room > @peer_frame
       room = @send_window.to_i32 if @send_window < room.to_i64
@@ -6160,7 +6206,7 @@ class H2Connection
       end
       return "" if s.ended
       unless read_frame
-        if fault = @failure
+        if fault = failure
           return fault
         end
         return HTTPError.new("HTTP/2: the connection ended inside a body")
@@ -6233,11 +6279,11 @@ class H2Connection
   private def answer_on_tape(id : Int32, response : Response,
                              req : Request, compress : Bool) : Bool
     s = @streams[id]?
-    return @failure.nil? if s.nil? || s.reset >= 0
+    return @fault == FAULT_NONE if s.nil? || s.reset >= 0
     # 101 has no meaning here (§8.6): the client is told to use HTTP/1.1.
     if response.takeover
       refuse(id, HTTP_1_1_REQUIRED)
-      return @failure.nil?
+      return @fault == FAULT_NONE
     end
     head = HTTP.same_name?(req.method, "HEAD")
     bodiless = HTTP.bodiless?(response.status)
@@ -6256,7 +6302,7 @@ class H2Connection
       shown = gzip ? Server.coded(response, "gzip") : response
       fields = H2Connection.answer_fields_on_tape(shown, length, head)
       return false unless send_headers(id, fields, head || bodiless)
-      return @failure.nil? if head || bodiless
+      return @fault == FAULT_NONE if head || bodiless
       sink = H2Out.new(self, id)
       writer = gzip ? HTTP.gzip_writer(sink, false) : BodyWriter.new(sink, false)
       while true
@@ -6271,7 +6317,7 @@ class H2Connection
       shown = gzip ? Server.coded(response, "gzip") : response
       fields = H2Connection.answer_fields_on_tape(shown, nil, head)
       return false unless send_headers(id, fields, head || bodiless)
-      return @failure.nil? if head || bodiless
+      return @fault == FAULT_NONE if head || bodiless
       sink = H2Out.new(self, id)
       writer = gzip ? HTTP.gzip_writer(sink, false) : BodyWriter.new(sink, false)
       block.call(writer)
@@ -6284,15 +6330,15 @@ class H2Connection
     length = bodiless ? nil : body.bytesize.to_i64
     fields = H2Connection.answer_fields_on_tape(response, length, head)
     return false unless send_headers(id, fields, empty)
-    return @failure.nil? if empty
+    return @fault == FAULT_NONE if empty
     send_data(id, body, true)
-    @failure.nil?
+    @fault == FAULT_NONE
   end
 
   private def finish_answer(s : H2Stream) : Bool
-    return @failure.nil? if s.reset >= 0
+    return @fault == FAULT_NONE if s.reset >= 0
     send_data(s.id, "", true) unless s.sent_end
-    @failure.nil?
+    @fault == FAULT_NONE
   end
 
   # A stream the server is done with: a request body still coming is
@@ -6300,7 +6346,7 @@ class H2Connection
   # stream forgotten.
   def done(id : Int32) : Nil
     if s = @streams[id]?
-      if !s.ended && s.reset < 0 && @failure.nil?
+      if !s.ended && s.reset < 0 && @fault == FAULT_NONE
         reset_lately(id)
         write_frame(RST_STREAM, 0, id, H2Connection.u32(NO_ERROR))
       end
@@ -6320,7 +6366,7 @@ class H2Connection
 
   # GOAWAY: no new stream, the last one this end answered named.
   def goaway(code : Int32 = NO_ERROR) : Nil
-    return unless @failure.nil?
+    return unless @fault == FAULT_NONE
     write_frame(GOAWAY, 0, 0, H2Connection.u32(@highest) + H2Connection.u32(code))
     flush
   end
@@ -6364,7 +6410,7 @@ class H2Connection
       end
     end
     unless sending
-      if fault = @failure
+      if fault = failure
         return fault
       end
       if s.reset >= 0
@@ -6390,7 +6436,7 @@ class H2Connection
         return HTTPError.new("HTTP/2: the server reset the request (#{H2Connection.error_name(s.reset)})")
       end
       unless read_frame
-        if fault = @failure
+        if fault = failure
           return fault
         end
         return HTTPError.new("HTTP/2: the connection ended before an answer")
@@ -6402,7 +6448,7 @@ class H2Connection
   # cancelled, and the stream forgotten.
   def forget(id : Int32) : Nil
     if s = @streams[id]?
-      if !s.ended && s.reset < 0 && @failure.nil?
+      if !s.ended && s.reset < 0 && @fault == FAULT_NONE
         reset_lately(id)
         write_frame(RST_STREAM, 0, id, H2Connection.u32(CANCEL))
       end
