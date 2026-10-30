@@ -1,0 +1,21 @@
+# A proc handed an object whose method clears its builder may shrink it:
+# the view of the builder's bytes is refused across the call.
+class Bag
+  getter bytes : String::Builder
+
+  def initialize(@bytes : String::Builder)
+  end
+
+  def drop : Nil
+    @bytes.clear
+  end
+end
+
+def invoke(callback : Proc(Bag, Nil), bag : Bag)
+  view = bag.bytes.finish
+  callback.call(bag)
+  puts view
+end
+
+callback = ->(bag : Bag) { bag.drop; nil }
+tape { invoke(callback, Bag.new(String::Builder.new)) }

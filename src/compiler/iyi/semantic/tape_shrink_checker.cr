@@ -604,6 +604,118 @@ class Iyi::TapeShrinkChecker
   end
 
   @solving : UInt64?
+  @owned_defs : Hash(Type, Array(Def))? = nil
+
+  # An unknown proc can shrink a value it is handed only through that
+  # value's own methods, or those of what it reaches: its fields (which a
+  # getter or a returned value hands out). So a proc argument shrinks
+  # only when one of those methods' summaries shrinks or grows anything.
+  # Storage (Array, Hash, Builder, RisTree), pointers, procs, modules,
+  # abstract and virtual types, and anything unknown keep the full effect.
+  # A summary read while solving makes this def solved again on change.
+  private def type_may_shrink?(type : Type?, seen = Set(Type).new) : Bool
+    return true unless type
+    type = type.remove_typedef
+    if type.is_a?(UnionType)
+      return type.union_types.any? { |member| type_may_shrink?(member, seen) }
+    end
+    return false if type.is_a?(NilType) || type.is_a?(BoolType) ||
+                    type.is_a?(CharType) || type.is_a?(IntegerType) ||
+                    type.is_a?(FloatType) || type.is_a?(SymbolType) ||
+                    type.is_a?(EnumType)
+    name = type_name(type)
+    return false if name == "String"
+    return true if storage_type?(type) || name.starts_with?("Pointer(") ||
+                   name.starts_with?("Slice(") || name.includes?("View(") ||
+                   name == "String::Span" || name.starts_with?("Array::Link(")
+    return true if type.is_a?(ProcInstanceType) || type.is_a?(VirtualType) ||
+                   type.is_a?(VirtualMetaclassType) || type.abstract? ||
+                   type.module? || !type.is_a?(InstanceVarContainer)
+    return false unless seen.add?(type)
+    # Object, Reference, Value and Struct give every type the same generic
+    # methods (identity, hashing, inspection, dup): none frees storage.
+    owners = ([type] + type.ancestors).reject do |owner|
+      {"Object", "Reference", "Value", "Struct"}.includes?(type_name(owner))
+    end
+    owners.each do |owner|
+      # A runtime body is opaque: no summary says what it shrinks.
+      owner.defs.try &.each_value do |items|
+        return true if items.any? { |item| TapeRules.runtime?(@program, item.def.location) }
+      end
+      owned_defs[owner]?.try &.each do |method|
+        if caller = @solving
+          (@summary_callers[method.object_id] ||= Set(UInt64).new) << caller
+        end
+        found = summary(method)
+        return true if found.nil? || !found.shrinks.empty? || !found.grows.empty?
+      end
+    end
+    type.instance_vars.each_value do |ivar|
+      return true if type_may_shrink?(ivar.type?, seen)
+    end
+    if type.is_a?(GenericClassInstanceType) || type.is_a?(GenericInstanceType)
+      type.type_vars.each_value do |var|
+        return true if var.is_a?(Var) && type_may_shrink?(var.type?, seen)
+      end
+    end
+    false
+  end
+
+  # What a proc's *index*th parameter is declared as; nil when unknown.
+  private def proc_argument_type(target : Def, index : Int32) : Type?
+    target.args[index]?.try(&.type?) ||
+      target.owner?.as?(ProcInstanceType).try(&.arg_types[index]?)
+  end
+
+  # A handed object's field, bounded by depth as `field_root` is but not
+  # folded onto an ancestor of the same name: a socket's `@state` is not
+  # the connection's.
+  private def handed_field(root : UInt64, name : String) : UInt64
+    depth = 0
+    ancestor = root
+    while parent = @parents[ancestor]?
+      ancestor = parent[0]
+      depth += 1
+    end
+    return root if depth >= FIELD_DEPTH
+    @fields[{root, name}] ||= begin
+      id = fresh
+      @parents[id] = {root, name}
+      id
+    end
+  end
+
+  # The fields of an object type (every member of a union one) that may
+  # shrink; nil when the type is not plainly an object with fields.
+  private def shrinking_fields(type : Type) : Array(String)?
+    type = type.remove_typedef
+    members = type.is_a?(UnionType) ? type.union_types : [type]
+    names = [] of String
+    members.each do |member|
+      member = member.remove_typedef
+      next if member.is_a?(NilType)
+      return nil unless member.is_a?(InstanceVarContainer) && !member.is_a?(VirtualType)
+      return nil if storage_type?(member) || member.abstract? || member.module?
+      name = type_name(member)
+      return nil if name == "String" || name.starts_with?("Pointer(") ||
+                    name.starts_with?("Slice(") || name.includes?("View(")
+      member.instance_vars.each do |ivar_name, ivar|
+        names << ivar_name if type_may_shrink?(ivar.type?)
+      end
+    end
+    names.uniq
+  end
+
+  private def owned_defs : Hash(Type, Array(Def))
+    @owned_defs ||= begin
+      map = Hash(Type, Array(Def)).new
+      @graph.defs.each_value do |method|
+        owner = method.owner?
+        (map[owner] ||= [] of Def) << method if owner
+      end
+      map
+    end
+  end
   @summary_callers = Hash(UInt64, Set(UInt64)).new
 
   # Calls in lexical callbacks execute in the enclosing environment too.
@@ -1279,7 +1391,17 @@ class Iyi::TapeShrinkChecker
                 input = actuals[i]? || EMPTY
                 roots = source_roots(input).flat_map { |r| aliases(r, env) }.uniq
                 if bits & TapeCallGraph::Contract::SHRINK != 0
-                  shrink(roots, node, chain("#{node.name} (opaque contract)"))
+                  handed = @graph.proc_call?(target) && i > 0 ? proc_argument_type(target, i - 1) : nil
+                  if handed.nil?
+                    shrink(roots, node, chain("#{node.name} (opaque contract)"))
+                  elsif type_may_shrink?(handed)
+                    # An object is not storage: its methods shrink what its
+                    # fields own, so a reference to it stays valid.
+                    if fields = shrinking_fields(handed)
+                      roots = roots.flat_map { |r| fields.map { |f| handed_field(r, f) } }.uniq
+                    end
+                    shrink(roots, node, chain("#{node.name} (opaque contract)"))
+                  end
                 end
                 if bits & TapeCallGraph::Contract::RETAIN != 0 && !roots.empty?
                   @retains.concat(roots)
