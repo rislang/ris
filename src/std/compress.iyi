@@ -81,45 +81,46 @@ end
 
 # A growing byte buffer: the compressed side of writing.
 class ByteBuffer
-  @size : Int32
-  @data : Pointer(UInt8)
-  @cap : Int32
+  # An Array on the tape, its room reserved up front: growth never moves
+  # it (TAPE_SPEC), so `reserve` only names how much is wanted.
+  @data : Array(UInt8)
 
   def initialize(cap : Int32 = 1024)
-    @cap = cap < 64 ? 64 : cap
-    @data = Pointer(UInt8).malloc(@cap.to_u64)
-    @size = 0
+    @data = Array(UInt8).new(cap < 64 ? 64 : cap)
   end
 
   def push(b : UInt8) : Nil
-    reserve(1) if @size == @cap
-    @data[@size] = b
-    @size = @size + 1
+    @data << b
   end
 
-  def append(src : Pointer(UInt8), n : Int32) : Nil
-    reserve(n)
-    (@data + @size.to_i64).copy_from(src, n)
-    @size = @size + n
+  # *n* bytes of *src* from *at*.
+  def append(src : String, at : Int32, n : Int32) : Nil
+    k = 0
+    while k < n
+      @data << src.byte_at(at + k)
+      k = k + 1
+    end
+  end
+
+  # *n* bytes of *src* from *at*.
+  def append(src : Array(UInt8), at : Int32, n : Int32) : Nil
+    k = 0
+    while k < n
+      @data << src[at + k]
+      k = k + 1
+    end
   end
 
   def to_s : String
-    n = @size
-    src = @data
-    String.new(n) { |dst| dst.copy_from(src, n) }
+    Inflate.text(@data, 0, @data.size)
   end
 
   # Forgets what was written and keeps the room, for the next piece.
   def clear : Nil
-    @size = 0
+    @data.clear
   end
 
   def reserve(n : Int32) : Nil
-    return if @size + n <= @cap
-    new_cap = @cap * 2
-    new_cap = @size + n if new_cap < @size + n
-    @data = @data.realloc(new_cap.to_u64)
-    @cap = new_cap
   end
 end
 
@@ -168,10 +169,10 @@ class BitWriter
     @bytes.reserve(bits // 8 + 8)
   end
 
-  # *n* bytes as they are, after `align`.
-  def raw(src : Pointer(UInt8), n : Int32) : Nil
+  # *n* bytes of *src* from *at* as they are, after `align`.
+  def raw(src : Array(UInt8), at : Int32, n : Int32) : Nil
     drain
-    @bytes.append(src, n)
+    @bytes.append(src, at, n)
   end
 
   # The whole bytes so far, the buffer emptied for the next piece; the
@@ -197,13 +198,13 @@ end
 # canonical code needs, and a table of the short codes. `Inflate#decode`
 # reads a symbol with them.
 class Huffman
-  getter count : Pointer(Int32)
-  getter symbol : Pointer(Int32)
+  getter count : Array(Int32)
+  getter symbol : Array(Int32)
   # Every code of `FAST` bits or fewer, by the next `FAST` bits of the
   # stream in the order they arrive: the symbol shifted up by four over
   # the code's length, or 0 where the code is longer. `decode` looked
   # every code up a bit at a time, which was most of inflating.
-  getter fast : Pointer(Int32)
+  getter fast : Array(Int32)
   # What the lengths leave of the 2^15 bit patterns: 0 for a complete
   # code, 2^15 for no codes at all, below 0 for lengths that claim more
   # patterns than there are.
@@ -215,18 +216,14 @@ class Huffman
 
   # The lengths are at most 15 by construction: the code-length code's
   # are three bits, and the symbols it decodes to are 0 to 15.
-  def initialize(lengths : Pointer(Int32), n : Int32)
-    @count = Pointer(Int32).malloc(16_u64)
-    @symbol = Pointer(Int32).malloc(n.to_u64 + 1_u64)
-    @fast = Pointer(Int32).malloc((1_u64 << FAST))
-    len = 0
-    while len < 16
-      @count[len] = 0
-      len = len + 1
-    end
+  # *n* lengths of *lengths* from *at*.
+  def initialize(lengths : Array(Int32), n : Int32, at : Int32 = 0)
+    @count = Array(Int32).new(16, 0)
+    @symbol = Array(Int32).new(n + 1, 0)
+    @fast = Array(Int32).new(1 << FAST, 0)
     i = 0
     while i < n
-      @count[lengths[i]] = @count[lengths[i]] + 1
+      @count[lengths[at + i]] = @count[lengths[at + i]] + 1
       i = i + 1
     end
     # Over-subscribed lengths make an ambiguous code, which the caller
@@ -243,8 +240,7 @@ class Huffman
     end
     @left = left
     return if left < 0
-    offs = Pointer(Int32).malloc(16_u64)
-    offs[1] = 0
+    offs = Array(Int32).new(16, 0)
     len = 1
     while len < 15
       offs[len + 1] = offs[len] + @count[len]
@@ -252,9 +248,10 @@ class Huffman
     end
     i = 0
     while i < n
-      if lengths[i] != 0
-        @symbol[offs[lengths[i]]] = i
-        offs[lengths[i]] = offs[lengths[i]] + 1
+      length = lengths[at + i]
+      if length != 0
+        @symbol[offs[length]] = i
+        offs[length] = offs[length] + 1
       end
       i = i + 1
     end
@@ -305,11 +302,12 @@ end
 
 # The length and distance alphabets (RFC 1951 §3.2.5): base values and
 # the count of extra bits after each code.
+@[OnTape]
 struct Tables
-  getter lbase : Pointer(Int32)
-  getter lext : Pointer(Int32)
-  getter dbase : Pointer(Int32)
-  getter dext : Pointer(Int32)
+  getter lbase : Array(Int32)
+  getter lext : Array(Int32)
+  getter dbase : Array(Int32)
+  getter dext : Array(Int32)
 
   def initialize
     @lbase = fill([3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258])
@@ -318,14 +316,8 @@ struct Tables
     @dext = fill([0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13])
   end
 
-  private def fill(values : Array(Int32)) : Pointer(Int32)
-    p = Pointer(Int32).malloc(values.size.to_u64)
-    i = 0
-    while i < values.size
-      p[i] = values[i]
-      i = i + 1
-    end
-    p
+  private def fill(values : Array(Int32)) : Array(Int32)
+    values
   end
 end
 
@@ -382,15 +374,16 @@ class Inflate
 
   @envelope : Envelope
   @source : Proc(String | Nil) | Nil
-  # The piece in hand, held so the bytes `@in` points into stay alive.
+  # The piece in hand, read by index.
   @input : String
-  @in : Pointer(UInt8)
   @in_pos : Int32
   @in_end : Int32
   @bits : UInt64
   @count : Int32
   @exhausted : Bool
-  @buf : Pointer(UInt8)
+  # The output, an Array of @cap bytes on the tape; growing appends to
+  # it in place.
+  @buf : Array(UInt8)
   @cap : Int32
   @pos : Int32
   # Where `read` has taken the buffer up to, where the checksum has, and
@@ -411,11 +404,10 @@ class Inflate
   @fixed_dist : Huffman
   @lit : Huffman
   @dist : Huffman
-  @lengths : Pointer(Int32)
+  @lengths : Array(Int32)
   @check : UInt32
   @size : UInt32
   @hcrc : UInt32
-  @scratch : Pointer(UInt8)
   @failed : Bool
   @error : CompressError
 
@@ -423,7 +415,6 @@ class Inflate
   # input there is, and the output grows from *capacity*.
   def initialize(@envelope : Envelope, @source : Proc(String | Nil) | Nil, data : String, start : Int32, capacity : Int32)
     @input = data
-    @in = data.to_unsafe
     @in_pos = start
     @in_end = data.bytesize
     @bits = 0_u64
@@ -432,7 +423,7 @@ class Inflate
     @grow = @source.nil?
     @pieces = false
     @cap = capacity < MATCH + 64 ? MATCH + 64 : capacity
-    @buf = Pointer(UInt8).malloc(@cap.to_u64)
+    @buf = Array(UInt8).new(@cap, 0_u8)
     @pos = 0
     @given = 0
     @summed = 0
@@ -441,7 +432,7 @@ class Inflate
     @final = false
     @stored = 0
     @t = Tables.new
-    lengths = Pointer(Int32).malloc(320_u64)
+    lengths = Array(Int32).new(320, 0)
     s = 0
     while s < 288
       lengths[s] = s < 144 ? 8 : (s < 256 ? 9 : (s < 280 ? 7 : 8))
@@ -460,7 +451,6 @@ class Inflate
     @check = @envelope == Envelope::Zlib ? 1_u32 : 0_u32
     @size = 0_u32
     @hcrc = 0_u32
-    @scratch = Pointer(UInt8).malloc(1_u64)
     @failed = false
     @error = CompressError.new("")
   end
@@ -488,9 +478,12 @@ class Inflate
 
   # Every byte written, for the whole-string form.
   def output : String
-    n = @pos
-    src = @buf
-    String.new(n) { |dst| dst.copy_from(src, n) }
+    Inflate.text(@buf, 0, @pos)
+  end
+
+  # *n* bytes of *src* from *at* as a String.
+  def self.text(src : Array(UInt8), at : Int32, n : Int32) : String
+    String.build(n) { |w| n.times { |i| w.push(src[at + i]) } }
   end
 
   # How far into the input the stream went: the whole bytes loaded ahead
@@ -508,9 +501,9 @@ class Inflate
     return @error if @failed
     n = @pos - @given
     n = max if n > max
-    src = @buf + @given.to_i64
+    at = @given
     @given = @given + n
-    String.new(n) { |dst| dst.copy_from(src, n) }
+    Inflate.text(@buf, at, n)
   end
 
   def finished? : Bool
@@ -522,14 +515,11 @@ class Inflate
     held = @count // 8
     rest = @in_end - @in_pos
     bits = @bits
-    src = @in + @in_pos.to_i64
-    String.new(held + rest) do |dst|
-      i = 0
-      while i < held
-        dst[i] = (bits.unsafe_shr(i * 8) & 255_u64).to_u8
-        i = i + 1
-      end
-      (dst + held.to_i64).copy_from(src, rest)
+    input = @input
+    from = @in_pos
+    String.build(held + rest) do |w|
+      held.times { |i| w.push((bits.unsafe_shr(i * 8) & 255_u64).to_u8) }
+      rest.times { |k| w.push(input.byte_at(from + k)) }
     end
   end
 
@@ -575,7 +565,6 @@ class Inflate
     # The last piece ended between blocks with nothing loaded ahead, so
     # there is nothing of it to keep.
     @input = data
-    @in = data.to_unsafe
     @in_pos = 0
     @in_end = data.bytesize
     # Room for four times the piece to begin with, a megabyte at most:
@@ -592,7 +581,7 @@ class Inflate
         fail("DEFLATE: the piece decodes to more than #{limit} bytes")
         return nil
       end
-      out.append(@buf + @given.to_i64, n)
+      out.append(@buf, @given, n)
       @given = @given + n
       total = total + n
     end
@@ -621,15 +610,15 @@ class Inflate
     end
     rest = @in_end - @in_pos
     if rest > 0
-      src = @in + @in_pos.to_i64
+      input = @input
+      from = @in_pos
       piece = chunk
-      chunk = String.new(rest + piece.bytesize) do |dst|
-        dst.copy_from(src, rest)
-        (dst + rest.to_i64).copy_from(piece.to_unsafe, piece.bytesize)
+      chunk = String.build(rest + piece.bytesize) do |w|
+        rest.times { |k| w.push(input.byte_at(from + k)) }
+        w << piece
       end
     end
     @input = chunk
-    @in = chunk.to_unsafe
     @in_pos = 0
     @in_end = chunk.bytesize
     true
@@ -638,7 +627,7 @@ class Inflate
   # As many bytes of the piece in hand as the accumulator holds.
   private def load : Nil
     while @count <= 56 && @in_pos < @in_end
-      @bits = @bits | @in[@in_pos].to_u64.unsafe_shl(@count)
+      @bits = @bits | @input.byte_at(@in_pos).to_u64.unsafe_shl(@count)
       @in_pos = @in_pos + 1
       @count = @count + 8
     end
@@ -650,7 +639,7 @@ class Inflate
       if @in_pos >= @in_end
         return false unless more
       end
-      @bits = @bits | @in[@in_pos].to_u64.unsafe_shl(@count)
+      @bits = @bits | @input.byte_at(@in_pos).to_u64.unsafe_shl(@count)
       @in_pos = @in_pos + 1
       @count = @count + 8
     end
@@ -689,7 +678,7 @@ class Inflate
     if @in_pos >= @in_end
       return -1 unless more
     end
-    b = @in[@in_pos].to_i32
+    b = @input.byte_at(@in_pos).to_i32
     @in_pos = @in_pos + 1
     b
   end
@@ -698,8 +687,7 @@ class Inflate
   private def header_byte : Int32
     b = byte
     if b >= 0
-      @scratch[0] = b.to_u8
-      @hcrc = CRC32.update_byte(@hcrc, @scratch[0])
+      @hcrc = CRC32.update_byte(@hcrc, b.to_u8)
     end
     b
   end
@@ -716,7 +704,7 @@ class Inflate
   private def peek_byte(k : Int32) : Int32
     held = @count // 8
     return (@bits.unsafe_shr(k * 8) & 255_u64).to_i32 if k < held
-    @in[@in_pos + k - held].to_i32
+    @input.byte_at(@in_pos + k - held).to_i32
   end
 
   # One symbol: by the table when the code is short and its bits are in
@@ -763,7 +751,9 @@ class Inflate
     if @grow
       cap = @cap * 2
       cap = @pos + MATCH if cap < @pos + MATCH
-      @buf = @buf.realloc(cap.to_u64)
+      while @buf.size < cap
+        @buf << 0_u8
+      end
       @cap = cap
       return
     end
@@ -774,14 +764,10 @@ class Inflate
     # Forward, a word at a time: the bytes move toward the front, so each
     # word is read before anything writes over it.
     n = @pos - keep
-    src = @buf + keep.to_i64
+    buf = @buf
     i = 0
-    while i + 8 <= n
-      (@buf + i.to_i64).as(Pointer(UInt64)).value = (src + i.to_i64).as(Pointer(UInt64)).value
-      i = i + 8
-    end
     while i < n
-      @buf[i] = src[i]
+      buf[i] = buf[keep + i]
       i = i + 1
     end
     @pos = @pos - keep
@@ -810,20 +796,15 @@ class Inflate
   end
 
   # *length* bytes from *distance* back, which may overlap what it writes.
-  # Eight at a time where the source is eight or more behind, so no word
-  # reads what the same copy has not written yet.
+  # A byte at a time from the first, so an overlapping copy repeats what
+  # it has just written.
   private def copy_back(distance : Int32, length : Int32) : Nil
-    dst = @buf + @pos.to_i64
-    src = dst + (0 - distance).to_i64
+    buf = @buf
+    to = @pos
+    from = @pos - distance
     i = 0
-    if distance >= 8
-      while i + 8 <= length
-        (dst + i.to_i64).as(Pointer(UInt64)).value = (src + i.to_i64).as(Pointer(UInt64)).value
-        i = i + 8
-      end
-    end
     while i < length
-      dst[i] = src[i]
+      buf[to + i] = buf[from + i]
       i = i + 1
     end
     @pos = @pos + length
@@ -992,7 +973,7 @@ class Inflate
     lit = Huffman.new(lengths, nlen)
     return fail("DEFLATE: the code lengths are over-subscribed") if lit.over?
     return fail("DEFLATE: the literal/length code is incomplete") if lit.incomplete?(true)
-    dist = Huffman.new(lengths + nlen.to_i64, ndist)
+    dist = Huffman.new(lengths, ndist, nlen)
     return fail("DEFLATE: the code lengths are over-subscribed") if dist.over?
     return fail("DEFLATE: the distance code is incomplete") if dist.incomplete?(true)
     @lit = lit
@@ -1025,7 +1006,13 @@ class Inflate
       n = @cap - @pos if n > @cap - @pos
       n = @in_end - @in_pos if n > @in_end - @in_pos
       n = want - pending if n > want - pending
-      (@buf + @pos.to_i64).copy_from(@in + @in_pos.to_i64, n)
+      buf = @buf
+      input = @input
+      k = 0
+      while k < n
+        buf[@pos + k] = input.byte_at(@in_pos + k)
+        k = k + 1
+      end
       @pos = @pos + n
       @in_pos = @in_pos + n
       @stored = @stored - n
@@ -1257,16 +1244,11 @@ pub class Deflater
     check = @check
     size = @size
     if @envelope == Envelope::Zlib
-      head + body + String.new(4) do |dst|
-        dst[0] = check.unsafe_shr(24).to_u8
-        dst[1] = (check.unsafe_shr(16) & 0xff_u32).to_u8
-        dst[2] = (check.unsafe_shr(8) & 0xff_u32).to_u8
-        dst[3] = (check & 0xff_u32).to_u8
-      end
+      head + body + String.build(4) { |w| Wire.put_be(w, check) }
     elsif @envelope == Envelope::Gzip
-      head + body + String.new(8) do |dst|
-        Wire.put_le(dst, check)
-        Wire.put_le(dst + 4_i64, size)
+      head + body + String.build(8) do |w|
+        Wire.put_le(w, check)
+        Wire.put_le(w, size)
       end
     else
       head + body
@@ -1278,12 +1260,12 @@ pub class Deflater
     @started = true
     level = @level
     if @envelope == Envelope::Zlib
-      String.new(2) do |dst|
-        dst[0] = 0x78_u8
-        dst[1] = Wire.zlib_flg(level)
+      String.build(2) do |w|
+        w.push(0x78_u8)
+        w.push(Wire.zlib_flg(level))
       end
     elsif @envelope == Envelope::Gzip
-      String.new(10) { |dst| Wire.gzip_header(dst, Wire.xfl(level)) }
+      String.build(10) { |w| Wire.gzip_header(w, Wire.xfl(level)) }
     else
       ""
     end
@@ -1307,35 +1289,35 @@ end
 # 7 is reached by ordinary input - four blocks wanted 8 bits over
 # CHANGELOG.md, source, JSON and 10 MB of the repository at ten levels.
 class Tree
-  getter len : Pointer(Int32)
-  getter code : Pointer(Int32)
+  getter len : Array(Int32)
+  getter code : Array(Int32)
   @n : Int32
-  @sym : Pointer(Int32)
-  @weight : Pointer(Int32)
-  @parent : Pointer(Int32)
-  @depth : Pointer(Int32)
-  @count : Pointer(Int32)
-  @next : Pointer(Int32)
+  @sym : Array(Int32)
+  @weight : Array(Int32)
+  @parent : Array(Int32)
+  @depth : Array(Int32)
+  @count : Array(Int32)
+  @next : Array(Int32)
 
   # Room for 32 rows of lengths and 32 symbols at least, past what any
   # tree here holds, so a limit or an alphabet set wrong reads wrong
   # values rather than someone else's memory.
   def initialize(@n : Int32)
-    room = (@n < 32 ? 32 : @n).to_u64
-    @len = Pointer(Int32).malloc(room)
-    @code = Pointer(Int32).malloc(room)
-    @sym = Pointer(Int32).malloc(room)
-    @weight = Pointer(Int32).malloc(room * 2_u64)
-    @parent = Pointer(Int32).malloc(room * 2_u64)
-    @depth = Pointer(Int32).malloc(room * 2_u64)
-    @count = Pointer(Int32).malloc(33_u64)
-    @next = Pointer(Int32).malloc(33_u64)
+    room = @n < 32 ? 32 : @n
+    @len = Array(Int32).new(room, 0)
+    @code = Array(Int32).new(room, 0)
+    @sym = Array(Int32).new(room, 0)
+    @weight = Array(Int32).new(room * 2, 0)
+    @parent = Array(Int32).new(room * 2, 0)
+    @depth = Array(Int32).new(room * 2, 0)
+    @count = Array(Int32).new(33, 0)
+    @next = Array(Int32).new(33, 0)
   end
 
   # Lengths of at most *limit* bits for the counts in *freq*, and their
   # codes. A code of fewer than two symbols is given a second, as zlib
   # gives it one: a complete code is one every decoder reads.
-  def build(freq : Pointer(Int32), limit : Int32) : Nil
+  def build(freq : Array(Int32), limit : Int32) : Nil
     n = @n
     sym = @sym
     weight = @weight
@@ -1525,9 +1507,9 @@ end
 # with 2^9 instead).
 #
 # Positions are counted over the whole stream from `WSIZE`, so 0 is an
-# empty chain, and `@p` is the base they index: the caller's string for
-# a whole one, `@win` for a stream, which holds the last 32 KiB coded,
-# the block not yet written, and the piece in hand. Every gigabyte the
+# empty chain, and `@win` holds them from `@wbase`: the whole string for
+# a whole one, and for a stream the last 32 KiB coded, the block not yet
+# written, and the piece in hand. Every gigabyte the
 # positions are moved down by a multiple of the window (`rebase`), which
 # keeps them in an `Int32` and each one's `prev` slot where it was.
 class Encoder
@@ -1568,13 +1550,10 @@ class Encoder
   @lazy : Int32
   @nice : Int32
   @chain : Int32
-  # The string being compressed whole, held so the bytes `@p` points into
-  # stay alive.
-  @input : String
-  @win : Pointer(UInt8)
+  # The window, an Array on the tape whose index 0 is position @wbase.
+  @win : Array(UInt8)
   @wcap : Int32
   @wbase : Int32
-  @p : Pointer(UInt8)
   @first : Int32
   @strstart : Int32
   @end : Int32
@@ -1585,26 +1564,26 @@ class Encoder
   @match_length : Int32
   @match_start : Int32
   @match_available : Bool
-  @head : Pointer(Int32)
-  @prev : Pointer(Int32)
+  @head : Array(Int32)
+  @prev : Array(Int32)
   @psize : Int32
   # A literal as itself, a match as its distance shifted over its length
   # less three.
-  @syms : Pointer(Int32)
+  @syms : Array(Int32)
   @nsyms : Int32
-  @lfreq : Pointer(Int32)
-  @dfreq : Pointer(Int32)
-  @blfreq : Pointer(Int32)
+  @lfreq : Array(Int32)
+  @dfreq : Array(Int32)
+  @blfreq : Array(Int32)
   @lit : Tree
   @dist : Tree
   @bl : Tree
   @fixed_lit : Tree
   @fixed_dist : Tree
-  @lengths : Pointer(Int32)
-  @rle : Pointer(Int32)
+  @lengths : Array(Int32)
+  @rle : Array(Int32)
   @nrle : Int32
-  @len_code : Pointer(Int32)
-  @dist_code : Pointer(Int32)
+  @len_code : Array(Int32)
+  @dist_code : Array(Int32)
   @t : Tables
   @out : BitWriter
 
@@ -1619,11 +1598,10 @@ class Encoder
     @lazy = LAZY[level]
     @nice = NICE[level]
     @chain = CHAIN[level]
-    @input = ""
-    @win = Pointer(UInt8).malloc(8_u64)
+    # Sized up front: the whole string, or a stream's two windows.
+    @win = Array(UInt8).new(hint >= 0 ? hint : 2 * WSIZE)
     @wcap = 0
     @wbase = WSIZE
-    @p = @win + (0 - WSIZE).to_i64
     @first = WSIZE
     @strstart = WSIZE
     @end = WSIZE
@@ -1633,13 +1611,13 @@ class Encoder
     @match_start = 0
     @match_available = false
     @psize = level == 0 ? 1 : (hint >= 0 && hint < WSIZE ? hint + 1 : WSIZE)
-    @head = Pointer(Int32).malloc(level == 0 ? 1_u64 : 32768_u64)
-    @prev = Pointer(Int32).malloc(@psize.to_u64)
-    @syms = Pointer(Int32).malloc(SYMBOLS.to_u64)
+    @head = Array(Int32).new(level == 0 ? 1 : 32768, 0)
+    @prev = Array(Int32).new(@psize, 0)
+    @syms = Array(Int32).new(SYMBOLS, 0)
     @nsyms = 0
-    @lfreq = Pointer(Int32).malloc(288_u64)
-    @dfreq = Pointer(Int32).malloc(32_u64)
-    @blfreq = Pointer(Int32).malloc(32_u64)
+    @lfreq = Array(Int32).new(288, 0)
+    @dfreq = Array(Int32).new(32, 0)
+    @blfreq = Array(Int32).new(32, 0)
     @lit = Tree.new(286)
     @dist = Tree.new(30)
     @bl = Tree.new(19)
@@ -1657,15 +1635,15 @@ class Encoder
       s = s + 1
     end
     @fixed_dist.assign_codes
-    @lengths = Pointer(Int32).malloc(320_u64)
-    @rle = Pointer(Int32).malloc(320_u64)
+    @lengths = Array(Int32).new(320, 0)
+    @rle = Array(Int32).new(320, 0)
     @nrle = 0
     @t = Tables.new
     t = @t
     # zlib's _length_code and _dist_code: a match's length less three to
     # its code, and a distance less one to its code, by the distance
     # itself below 256 and by its bits over 7 above.
-    @len_code = Pointer(Int32).malloc(256_u64)
+    @len_code = Array(Int32).new(256, 0)
     code = 0
     while code < 28
       k = 0
@@ -1677,7 +1655,7 @@ class Encoder
     end
     # 258 has a code of its own, though 227's extra bits could say it.
     @len_code[255] = 28
-    @dist_code = Pointer(Int32).malloc(512_u64)
+    @dist_code = Array(Int32).new(512, 0)
     code = 0
     while code < 16
       k = 0
@@ -1703,20 +1681,9 @@ class Encoder
     Encoder.new(level, data.bytesize).over(data)
   end
 
+  # The string is copied into the window, which was sized for it.
   def over(data : String) : String
-    @input = data
-    @p = data.to_unsafe + (0 - WSIZE).to_i64
-    n = data.bytesize
-    done = 0
-    while true
-      take = n - done
-      take = SEGMENT if take > SEGMENT
-      rebase if @end > REBASE
-      @end = @end + take
-      done = done + take
-      run(done == n ? FINISH : NONE)
-      break if done == n
-    end
+    stream(data, FINISH)
     @out.take
   end
 
@@ -1753,31 +1720,37 @@ class Encoder
       from = @block_start if @block_start < from
       from = @wbase if from < @wbase
       keep = @end - from
-      kept = @win + (from - @wbase).to_i64
+      kept = from - @wbase
       cap = keep + n
       cap = 2 * WSIZE if cap < 2 * WSIZE
-      if cap > @wcap
-        win = Pointer(UInt8).malloc(cap.to_u64 + 8_u64)
-        win.copy_from(kept, keep)
-        @win = win
-        @wcap = cap
-      else
-        # Toward the front, a byte at a time from the first: each byte is
-        # read before anything writes over it.
-        @win.copy_from(kept, keep)
+      win = @win
+      # The same Array grows in place; it never moves.
+      while win.size < cap
+        win << 0_u8
+      end
+      @wcap = cap if cap > @wcap
+      # Toward the front, a byte at a time from the first: each byte is
+      # read before anything writes over it.
+      i = 0
+      while i < keep
+        win[i] = win[kept + i]
+        i = i + 1
       end
       @wbase = from
       have = keep
     end
-    # The bytes are read through the String, not a pointer to them.
-    dst = @win + have.to_i64
+    win = @win
     k = 0
-    data.byte_slice(at, n).each_byte do |b|
-      dst[k] = b
+    while k < n
+      win[have + k] = data.byte_at(at + k)
       k = k + 1
     end
     @end = @end + n
-    @p = @win + (0 - @wbase).to_i64
+  end
+
+  # The byte at position *pos*.
+  private def byte(pos : Int32) : UInt8
+    @win[pos - @wbase]
   end
 
   # Every position down by a multiple of the window, so each keeps its
@@ -1792,13 +1765,12 @@ class Encoder
     @strstart = @strstart - delta
     @end = @end - delta
     @block_start = @block_start - delta
-    @wbase = @wbase - delta if @wcap > 0
+    @wbase = @wbase - delta
     @first = @first > delta ? @first - delta : 0
     @match_start = @match_start > delta ? @match_start - delta : 0
-    @p = @p + delta.to_i64
   end
 
-  private def shift(table : Pointer(Int32), n : Int32, delta : Int32) : Nil
+  private def shift(table : Array(Int32), n : Int32, delta : Int32) : Nil
     i = 0
     while i < n
       v = table[i]
@@ -1827,7 +1799,7 @@ class Encoder
     return if flush == NONE
     if @match_available
       @match_available = false
-      flush_block(false, @strstart) if tally_lit(@p[@strstart - 1])
+      flush_block(false, @strstart) if tally_lit(byte(@strstart - 1))
     end
     seen = @strstart - @first
     @insert = seen < 2 ? seen : 2
@@ -1846,8 +1818,9 @@ class Encoder
   # Enters the three bytes at *s* into their chain; the chain's previous
   # head, 0 for none.
   private def insert(s : Int32) : Int32
-    p = @p
-    h = ((p[s].to_i32 << 10) ^ (p[s + 1].to_i32 << 5) ^ p[s + 2].to_i32) & HMASK
+    win = @win
+    at = s - @wbase
+    h = ((win[at].to_i32 << 10) ^ (win[at + 1].to_i32 << 5) ^ win[at + 2].to_i32) & HMASK
     old = @head[h]
     @prev[s & WMASK] = old
     @head[h] = s
@@ -1894,7 +1867,7 @@ class Encoder
         end
         s = s + ml
       else
-        full = tally_lit(@p[s])
+        full = tally_lit(byte(s))
         s = s + 1
       end
       flush_block(false, s) if full
@@ -1935,7 +1908,7 @@ class Encoder
         @match_length = MIN_MATCH - 1
         flush_block(false, s) if full
       elsif @match_available
-        full = tally_lit(@p[s - 1])
+        full = tally_lit(byte(s - 1))
         flush_block(false, s) if full
         s = s + 1
         @match_length = ml
@@ -1953,7 +1926,8 @@ class Encoder
   # past the best so far agrees, words compared eight bytes at a time.
   # The length, and `@match_start` where it was found.
   private def longest(cur_match : Int32, s : Int32, prev_length : Int32, lookahead : Int32) : Int32
-    p = @p
+    win = @win
+    base = @wbase
     prev = @prev
     chain = @chain
     chain = chain >> 2 if prev_length >= @good
@@ -1965,28 +1939,23 @@ class Encoder
     # The farthest a match may start; at the window, its `prev` slot is
     # *s*'s own by now, so a chain that reaches it ends there.
     limit = s - @reach
-    scan = p + s.to_i64
-    end1 = scan[best - 1]
-    end0 = scan[best]
+    scan = s - base
+    end1 = win[scan + best - 1]
+    end0 = win[scan + best]
     cur = cur_match
     while true
-      m = p + cur.to_i64
-      if m[best] == end0 && m[best - 1] == end1 && m[0] == scan[0] && m[1] == scan[1]
+      m = cur - base
+      if win[m + best] == end0 && win[m + best - 1] == end1 && win[m] == win[scan] && win[m + 1] == win[scan + 1]
         len = 2
-        while len + 8 <= maxlen
-          x = (m + len.to_i64).as(Pointer(UInt64)).value ^ (scan + len.to_i64).as(Pointer(UInt64)).value
-          break if x != 0_u64
-          len = len + 8
-        end
-        while len < maxlen && m[len] == scan[len]
+        while len < maxlen && win[m + len] == win[scan + len]
           len = len + 1
         end
         if len > best
           @match_start = cur
           best = len
           break if len >= nice
-          end1 = scan[best - 1]
-          end0 = scan[best]
+          end1 = win[scan + best - 1]
+          end0 = win[scan + best]
         end
       end
       break if cur == limit
@@ -2221,7 +2190,7 @@ class Encoder
       w.align
       w.put(k, 16)
       w.put(k ^ 0xffff, 16)
-      w.raw(@p + at.to_i64, k)
+      w.raw(@win, at - @wbase, k)
       at = at + k
       left = left - k
       break if left == 0
@@ -2297,15 +2266,11 @@ pub struct Zlib
     body = Deflate.compress(data, level)
     sum = Adler32.checksum(data)
     flg = Wire.zlib_flg(level)
-    String.new(body.bytesize + 6) do |dst|
-      dst[0] = 0x78_u8
-      dst[1] = flg
-      (dst + 2_i64).copy_from(body.to_unsafe, body.bytesize)
-      n = body.bytesize + 2
-      dst[n] = (sum >> 24).to_u8
-      dst[n + 1] = ((sum >> 16) & 0xff_u32).to_u8
-      dst[n + 2] = ((sum >> 8) & 0xff_u32).to_u8
-      dst[n + 3] = (sum & 0xff_u32).to_u8
+    String.build(body.bytesize + 6) do |w|
+      w.push(0x78_u8)
+      w.push(flg)
+      w << body
+      Wire.put_be(w, sum)
     end
   end
 
@@ -2315,12 +2280,8 @@ pub struct Zlib
 
   def self.hex(w : UInt32) : String
     digits = "0123456789abcdef"
-    String.new(8) do |buf|
-      i = 0
-      while i < 8
-        buf[i] = digits.to_unsafe[((w >> ((7 - i) * 4)) & 0xf_u32).to_i32]
-        i = i + 1
-      end
+    String.build(8) do |buf|
+      8.times { |i| buf.push(digits.byte_at(((w >> ((7 - i) * 4)) & 0xf_u32).to_i32)) }
     end
   end
 end
@@ -2334,12 +2295,11 @@ pub struct Gzip
     crc = CRC32.checksum(data)
     size = data.bytesize.to_u32
     xfl = Wire.xfl(level)
-    String.new(body.bytesize + 18) do |dst|
-      Wire.gzip_header(dst, xfl)
-      (dst + 10_i64).copy_from(body.to_unsafe, body.bytesize)
-      n = body.bytesize + 10
-      Wire.put_le(dst + n.to_i64, crc)
-      Wire.put_le(dst + (n + 4).to_i64, size)
+    String.build(body.bytesize + 18) do |w|
+      Wire.gzip_header(w, xfl)
+      w << body
+      Wire.put_le(w, crc)
+      Wire.put_le(w, size)
     end
   end
 
@@ -2355,7 +2315,7 @@ pub struct Gzip
   # to read where Python's gzip took 0.15.
   def self.decompress(data : String) : String
     expected = -1_i64
-    expected = Wire.get_le(data.to_unsafe + (data.bytesize - 4).to_i64).to_i64 if data.bytesize >= 18
+    expected = Wire.get_le(data, data.bytesize - 4).to_i64 if data.bytesize >= 18
     Inflate.whole(Envelope::Gzip, data, 0, Wire.capacity(data.bytesize, expected)).output
   end
 end
@@ -2364,17 +2324,13 @@ end
 struct Wire
   # The ten-byte gzip header with nothing optional set, an mtime of zero
   # and an unknown OS.
-  def self.gzip_header(dst : Pointer(UInt8), xfl : UInt8) : Nil
-    dst[0] = 0x1f_u8
-    dst[1] = 0x8b_u8
-    dst[2] = 8_u8
-    i = 3
-    while i < 8
-      dst[i] = 0_u8
-      i = i + 1
-    end
-    dst[8] = xfl
-    dst[9] = 0xff_u8
+  def self.gzip_header(w : String::Builder, xfl : UInt8) : Nil
+    w.push(0x1f_u8)
+    w.push(0x8b_u8)
+    w.push(8_u8)
+    5.times { w.push(0_u8) }
+    w.push(xfl)
+    w.push(0xff_u8)
   end
 
   # zlib's FLG for a level (RFC 1950 FLEVEL: 0 fastest, 1 fast, 2 the
@@ -2390,15 +2346,24 @@ struct Wire
     level == 9 ? 2_u8 : (level < 2 ? 4_u8 : 0_u8)
   end
 
-  def self.put_le(dst : Pointer(UInt8), w : UInt32) : Nil
-    dst[0] = (w & 0xff_u32).to_u8
-    dst[1] = ((w >> 8) & 0xff_u32).to_u8
-    dst[2] = ((w >> 16) & 0xff_u32).to_u8
-    dst[3] = (w >> 24).to_u8
+  def self.put_le(dst : String::Builder, w : UInt32) : Nil
+    dst.push((w & 0xff_u32).to_u8)
+    dst.push(((w >> 8) & 0xff_u32).to_u8)
+    dst.push(((w >> 16) & 0xff_u32).to_u8)
+    dst.push((w >> 24).to_u8)
   end
 
-  def self.get_le(p : Pointer(UInt8)) : UInt32
-    p[0].to_u32 | (p[1].to_u32 << 8) | (p[2].to_u32 << 16) | (p[3].to_u32 << 24)
+  def self.put_be(dst : String::Builder, w : UInt32) : Nil
+    dst.push((w >> 24).to_u8)
+    dst.push(((w >> 16) & 0xff_u32).to_u8)
+    dst.push(((w >> 8) & 0xff_u32).to_u8)
+    dst.push((w & 0xff_u32).to_u8)
+  end
+
+  # The four bytes of *data* from *at*, little-endian.
+  def self.get_le(data : String, at : Int32) : UInt32
+    data.byte_at(at).to_u32 | (data.byte_at(at + 1).to_u32 << 8) |
+      (data.byte_at(at + 2).to_u32 << 16) | (data.byte_at(at + 3).to_u32 << 24)
   end
 
   # The first size of a whole-string decoder's output: *expected* and a

@@ -75,9 +75,8 @@ part B.
     (serve's `handle`) and sse.iyi:513 (`Response.stream`'s block):
     opaque callback effects, for the narrower opaque proc contract;
     sse.iyi:543 (Hash shrink while copying headers per reconnect);
-    std/compress's Deflater/Inflater windows and tables are malloc'd
-    pointers (compress.iyi:1760 refused, 426 `to_unsafe`): move them to
-    Arrays on the tape.
+    std/compress is on tape Arrays (no Pointer); std_compress's bench
+    stops at `Inflater.new { feed.next }` (an opaque source proc).
   - not captures: http_latency, http_resume, http_stop check in 64-79 s
     (the program checker reuses walks by input structure); they stop at
     the shrink refusal http_continue has (below). HTTP.tls_config= is

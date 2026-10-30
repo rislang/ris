@@ -41,9 +41,9 @@ class Feed
     return nil if @at >= @stream.bytesize
     n = @piece
     n = @stream.bytesize - @at if n > @stream.bytesize - @at
-    src = @stream.to_unsafe + @at.to_i64
+    from = @at
     @at = @at + n
-    String.new(n) { |dst| dst.copy_from(src, n) }
+    @stream.byte_slice(from, n)
   end
 end
 
@@ -105,8 +105,14 @@ def every_feed(envelope : Envelope, stream : String, plain : String, label : Str
 end
 
 def piece_of(s : String, from : Int32, n : Int32) : String
-  src = s.to_unsafe + from.to_i64
-  String.new(n) { |dst| dst.copy_from(src, n) }
+  s.byte_slice(from, n)
+end
+
+# *s* with its byte at *at* xor *mask*.
+def flip(s : String, at : Int32, mask : UInt8) : String
+  String.build(s.bytesize) do |w|
+    s.bytesize.times { |i| w.push(i == at ? s.byte_at(i) ^ mask : s.byte_at(i)) }
+  end
 end
 
 def bytes(values : Array(Int32)) : String
@@ -181,7 +187,7 @@ class Bits
     v = 0
     i = 0
     while i < n
-      byte = @s.to_unsafe[@pos >> 3].to_i32
+      byte = @s.byte_at(@pos >> 3).to_i32
       v = v | (((byte >> (@pos & 7)) & 1) << i)
       @pos = @pos + 1
       i = i + 1
@@ -227,7 +233,7 @@ def declared_lengths(stream : String) : {Array(Int32), Array(Int32)}?
   hdist = b.take(5) + 1
   hclen = b.take(4) + 4
   order = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]
-  cl = Array.new(19, 0)
+  cl = Array(Int32).new(19, 0)
   i = 0
   while i < hclen
     cl[order[i]] = b.take(3)
@@ -244,7 +250,7 @@ def declared_lengths(stream : String) : {Array(Int32), Array(Int32)}?
       times.times { lengths << value }
     end
   end
-  {lengths[0, hlit], lengths[hlit, hdist]}
+  {Array(Int32).new(hlit) { |k| lengths[k] }, Array(Int32).new(hdist) { |k| lengths[hlit + k] }}
 end
 
 # Whether lengths make a complete prefix code: their 2^-length sum to one.
@@ -291,7 +297,7 @@ def fibonacci_pieces : {String, String}
     copies << piece_of(noise, at, l)
     stop = at + l
     at = stop + 1
-    while noise.to_unsafe[at] == noise.to_unsafe[stop]
+    while noise.byte_at(at) == noise.byte_at(stop)
       at = at + 1
     end
   end
@@ -362,10 +368,10 @@ level_corpora.each do |pair|
     assert_true Deflate.decompress(raw) == data, "#{pair[0]} at level #{level}, raw"
     z = Zlib.compress(data, level)
     assert_true Zlib.decompress(z) == data && z.bytesize == raw.bytesize + 6, "#{pair[0]} at level #{level}, zlib"
-    assert_true z.to_unsafe[1] == flg[level].to_u8, "zlib's FLG at level #{level} is #{flg[level]}"
+    assert_true z.byte_at(1) == flg[level].to_u8, "zlib's FLG at level #{level} is #{flg[level]}"
     g = Gzip.compress(data, level)
     assert_true Gzip.decompress(g) == data && g.bytesize == raw.bytesize + 18, "#{pair[0]} at level #{level}, gzip"
-    assert_true g.to_unsafe[8] == xfl[level].to_u8, "gzip's XFL at level #{level} is #{xfl[level]}"
+    assert_true g.byte_at(8) == xfl[level].to_u8, "gzip's XFL at level #{level} is #{xfl[level]}"
     sizes << raw.bytesize
   end
   blocks = data.bytesize == 0 ? 1 : (data.bytesize + 65534) // 65535
@@ -386,7 +392,7 @@ puts "  repetitive text and json, the same size at every level as when pinned"
 puts "\n== block types"
 # Each block is written as whichever of stored, fixed and dynamic costs
 # the fewest bits: the first block's BTYPE says which was chosen.
-btype = ->(s : String) { (s.to_unsafe[0].to_i32 >> 1) & 3 }
+btype = ->(s : String) { (s.byte_at(0).to_i32 >> 1) & 3 }
 assert_true btype.call(Deflate.compress("abc")) == 1, "three letters are a fixed block: a dynamic one's header alone costs more"
 assert_true btype.call(Deflate.compress(text)) == 2, "text is a dynamic block"
 assert_true btype.call(Deflate.compress(random)) == 0, "noise is a stored block"
@@ -473,12 +479,12 @@ two_members = bytes([0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff,
                      0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x4b, 0x4e, 0x01, 0x00, 0xda, 0x8f, 0xd6, 0x45, 0x02, 0x00, 0x00, 0x00])
 assert_true Gzip.decompress(two_members) == "abcd", "two gzip members read as one (#{Gzip.decompress(two_members).inspect})"
 z = Zlib.compress("abc")
-assert_true z.bytesize == 11 && z.to_unsafe[0] == 0x78_u8 && z.to_unsafe[1] == 0x9c_u8, "the zlib header is 78 9c"
-assert_true z.to_unsafe[7] == 0x02_u8 && z.to_unsafe[8] == 0x4d_u8 && z.to_unsafe[9] == 0x01_u8 && z.to_unsafe[10] == 0x27_u8, "the Adler-32 of abc is 024d0127, big-endian"
+assert_true z.bytesize == 11 && z.byte_at(0) == 0x78_u8 && z.byte_at(1) == 0x9c_u8, "the zlib header is 78 9c"
+assert_true z.byte_at(7) == 0x02_u8 && z.byte_at(8) == 0x4d_u8 && z.byte_at(9) == 0x01_u8 && z.byte_at(10) == 0x27_u8, "the Adler-32 of abc is 024d0127, big-endian"
 g = Gzip.compress("abc")
-assert_true g.bytesize == 23 && g.to_unsafe[0] == 0x1f_u8 && g.to_unsafe[1] == 0x8b_u8 && g.to_unsafe[2] == 8_u8, "the gzip header"
-assert_true g.to_unsafe[15] == 0xc2_u8 && g.to_unsafe[16] == 0x41_u8 && g.to_unsafe[17] == 0x24_u8 && g.to_unsafe[18] == 0x35_u8, "the CRC-32 of abc is 352441c2, little-endian"
-assert_true g.to_unsafe[19] == 3_u8 && g.to_unsafe[20] == 0_u8 && g.to_unsafe[22] == 0_u8, "the length of abc"
+assert_true g.bytesize == 23 && g.byte_at(0) == 0x1f_u8 && g.byte_at(1) == 0x8b_u8 && g.byte_at(2) == 8_u8, "the gzip header"
+assert_true g.byte_at(15) == 0xc2_u8 && g.byte_at(16) == 0x41_u8 && g.byte_at(17) == 0x24_u8 && g.byte_at(18) == 0x35_u8, "the CRC-32 of abc is 352441c2, little-endian"
+assert_true g.byte_at(19) == 3_u8 && g.byte_at(20) == 0_u8 && g.byte_at(22) == 0_u8, "the length of abc"
 puts "  empty, stored, and the two envelopes byte for byte"
 # A gzip file is a series of members, which is what `cat a.gz b.gz`
 # makes: every member is read, zero padding after the last is taken as
@@ -498,11 +504,11 @@ many = Gzip.compress("x\n") * 1000 + one
 best_one = 0_i64
 best_many = 0_i64
 3.times do |k|
-  t0 = IyiMark.now_ns
+  t0 = __iyi_monotonic_ns
   inflated_one = Gzip.decompress(one)
-  t1 = IyiMark.now_ns
+  t1 = __iyi_monotonic_ns
   joined_many = Gzip.decompress(many)
-  t2 = IyiMark.now_ns
+  t2 = __iyi_monotonic_ns
   assert_true inflated_one == zeros && joined_many == "x\n" * 1000 + zeros, "8 MB of zeros, alone and behind a thousand members"
   best_one = (t1 - t0).to_i64 if k == 0 || (t1 - t0).to_i64 < best_one
   best_many = (t2 - t1).to_i64 if k == 0 || (t2 - t1).to_i64 < best_many
@@ -590,10 +596,7 @@ sample = "the quick brown fox jumps over the lazy dog, the lazy dog sleeps\n" * 
     from = envelope == Envelope::Zlib ? 2 : 10
     at = from
     while at < whole.bytesize
-      flipped = String.new(whole.bytesize) do |dst|
-        dst.copy_from(whole.to_unsafe, whole.bytesize)
-        dst[at] = dst[at] ^ 0x55_u8
-      end
+      flipped = flip(whole, at, 0x55_u8)
       got = stream_through(envelope, flipped, 5, 65536)
       assert_true got.is_a?(CompressError), "#{envelope} with byte #{at} flipped read back"
       at = at + 1
@@ -602,19 +605,10 @@ sample = "the quick brown fox jumps over the lazy dog, the lazy dog sleeps\n" * 
 end
 puts "  every prefix of a stream in each envelope ends early, and every byte flipped in zlib and gzip is refused"
 sample_gzip = Gzip.compress(sample)
-bad_crc = String.new(sample_gzip.bytesize) do |dst|
-  dst.copy_from(sample_gzip.to_unsafe, sample_gzip.bytesize)
-  dst[sample_gzip.bytesize - 8] = dst[sample_gzip.bytesize - 8] ^ 1_u8
-end
-bad_len = String.new(sample_gzip.bytesize) do |dst|
-  dst.copy_from(sample_gzip.to_unsafe, sample_gzip.bytesize)
-  dst[sample_gzip.bytesize - 4] = dst[sample_gzip.bytesize - 4] ^ 1_u8
-end
+bad_crc = flip(sample_gzip, sample_gzip.bytesize - 8, 1_u8)
+bad_len = flip(sample_gzip, sample_gzip.bytesize - 4, 1_u8)
 sample_zlib = Zlib.compress(sample)
-bad_adler = String.new(sample_zlib.bytesize) do |dst|
-  dst.copy_from(sample_zlib.to_unsafe, sample_zlib.bytesize)
-  dst[sample_zlib.bytesize - 1] = dst[sample_zlib.bytesize - 1] ^ 1_u8
-end
+bad_adler = flip(sample_zlib, sample_zlib.bytesize - 1, 1_u8)
 # FHCRC: the header's own CRC-16, right and wrong.
 hcrc_head = bytes([0x1f, 0x8b, 8, 2, 0, 0, 0, 0, 0, 0xff])
 hcrc = CRC32.checksum(hcrc_head) & 0xffff_u32
@@ -874,9 +868,9 @@ if args.size > 0
     sizes = [] of Int32
     speeds = [] of String
     10.times do |level|
-      t0 = IyiMark.now_ns
+      t0 = __iyi_monotonic_ns
       raw = Deflate.compress(plain, level)
-      t1 = IyiMark.now_ns
+      t1 = __iyi_monotonic_ns
       assert_true Deflate.decompress(raw) == plain, "#{name} at level #{level} reads back"
       File.write("#{dir}/#{name}.#{level}.iyi.raw", raw)
       if name != "l_big" || level == 6
