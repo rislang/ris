@@ -373,7 +373,6 @@ class Inflate
   ORDER = StaticArray[16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]
 
   @envelope : Envelope
-  @source : Proc(String | Nil) | Nil
   # The stream more pieces come from, for `Inflater.new(envelope, io)`.
   @io : IyiIO? = nil
   # The piece in hand, read by index.
@@ -413,16 +412,17 @@ class Inflate
   @failed : Bool
   @error : CompressError
 
-  # *source* nil is the whole-string form: *data* from *start* is all the
-  # input there is, and the output grows from *capacity*.
-  def initialize(@envelope : Envelope, @source : Proc(String | Nil) | Nil, data : String, start : Int32, capacity : Int32)
+  # The whole-string form until `over_io` or `by_pieces`: *data* from
+  # *start* is all the input there is, and the output grows from
+  # *capacity*.
+  def initialize(@envelope : Envelope, data : String, start : Int32, capacity : Int32)
     @input = data
     @in_pos = start
     @in_end = data.bytesize
     @bits = 0_u64
     @count = 0
     @exhausted = false
-    @grow = @source.nil?
+    @grow = true
     @pieces = false
     @cap = capacity < MATCH + 64 ? MATCH + 64 : capacity
     @buf = Array(UInt8).new(@cap, 0_u8)
@@ -460,7 +460,7 @@ class Inflate
   # The whole-string form: every byte of the stream, or a panic with the
   # sentence `Inflater` would answer.
   def self.whole(envelope : Envelope, data : String, start : Int32, capacity : Int32) : Inflate
-    core = new(envelope, nil, data, start, capacity)
+    core = new(envelope, data, start, capacity)
     core.run(2147483647)
     raise core.error.message if core.failed?
     core
@@ -612,9 +612,8 @@ class Inflate
   # or false when there is none.
   private def more : Bool
     return false if @exhausted
-    source = @source
     io = @io
-    chunk = source ? source.call : (io ? io.read_bytes(65536) : nil)
+    chunk = io ? io.read_bytes(65536) : nil
     unless chunk && chunk.bytesize > 0
       @exhausted = true
       return false
@@ -1119,7 +1118,7 @@ end
 # stays at the 32 KiB window and what is waiting to be read.
 #
 # ```
-# body = Inflater.new(Envelope::Gzip) { socket_read }
+# body = Inflater.new(Envelope::Gzip, socket)
 # while (piece = body.read(65536)!) != ""
 #   ...
 # end
@@ -1133,29 +1132,21 @@ end
 pub class Inflater
   @core : Inflate
 
-  # *source* answers the next bytes of the compressed stream, nil (or "")
-  # when there are no more. It is called only when the decoder has no
-  # bytes in hand for what it must read next, so it is never asked for
-  # anything past the end of the stream - except that a gzip stream ends
-  # only where no member follows, which takes a look at the next two
-  # bytes.
-  def initialize(envelope : Envelope, &source : -> String?)
-    @core = Inflate.new(envelope, source, "", 0, Inflate::STREAM)
-  end
-
   # A raw stream decoded by `inflate`, a piece at a time.
   def self.flushed : Inflater
-    core = Inflate.new(Envelope::Raw, nil, "", 0, Inflate::STREAM)
+    core = Inflate.new(Envelope::Raw, "", 0, Inflate::STREAM)
     core.by_pieces
     new(core)
   end
 
   # A stream read from *io* after *head*, 64 KiB a read, until *io*
   # answers "" (nil: *head* is all of it), with the output bounded by
-  # what is read: the block form's source without a block, so it suits
-  # a stream on the caller's tape.
+  # what is read. *io* is asked only when the decoder has no bytes in
+  # hand for what it must read next, so it is never asked for anything
+  # past the end of the stream - except that a gzip stream ends only
+  # where no member follows, which takes a look at the next two bytes.
   def self.new(envelope : Envelope, io : IyiIO?, head : String = "") : Inflater
-    core = Inflate.new(envelope, nil, head, 0, Inflate::STREAM)
+    core = Inflate.new(envelope, head, 0, Inflate::STREAM)
     core.over_io(io)
     new(core)
   end

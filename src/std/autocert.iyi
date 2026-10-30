@@ -249,7 +249,7 @@ struct AutocertFiles
     image = RisTaskConfig.new(path.as_tape)
     defer image.close
     group do |g|
-      task = g.spawn { File.read(image.read(String).to_heap) }
+      task = g.spawn { File.read(image.read(String)) }
       got = task.value
       if got.is_a?(Panicked)
         # A concurrent success may retire an error/challenge entry after
@@ -272,11 +272,11 @@ struct AutocertFiles
     group do |g|
       task = g.spawn do
         folder, target, bytes = image.read(Tuple(String, String, String))
-        Dir.mkdir_p(folder.to_heap, 0o700) unless Dir.exists?(folder.to_heap)
+        Dir.mkdir_p(folder, 0o700) unless Dir.exists?(folder)
         temporary = "#{target}.#{AutocertPem.hex(Random::Secure.random_bytes(8))}.tmp"
         defer File.delete(temporary) if File.exists?(temporary)
-        File.open(temporary, "w", perm: 0o600) { |io| io.write(bytes.to_heap) }
-        File.rename(temporary, target.to_heap)
+        File.open(temporary, "w", perm: 0o600) { |io| io.write(bytes) }
+        File.rename(temporary, target)
         0
       end
       got = task.value
@@ -293,7 +293,7 @@ struct AutocertFiles
     error = nil.as(AutocertError?)
     group do |g|
       task = g.spawn do
-        input = image.read(String).to_heap
+        input = image.read(String)
         File.delete(input) if File.exists?(input)
         0
       end
@@ -346,7 +346,7 @@ pub struct AutocertConfig
   end
 
   def allows?(name : String) : Bool
-    @hosts.any? { |host| AutocertView.normalize(host.to_heap) == name }
+    @hosts.any? { |host| AutocertView.normalize(host) == name }
   end
 end
 
@@ -380,7 +380,7 @@ pub class AutocertView
   @placeholder : TlsIdentity? = nil
 
   def initialize(@config : AutocertConfig)
-    @cache = AutocertDirCache.new(@config.cache_dir.to_heap)
+    @cache = AutocertDirCache.new(@config.cache_dir)
   end
 
   def self.normalize(host : String) : String
@@ -517,7 +517,7 @@ pub class AutocertView
   # `roots`, or the system's.
   private def trust : Array(Certificate) | AutocertError
     unless @config.roots_pem.empty?
-      given = Certificate.from_pem(@config.roots_pem.to_heap)
+      given = Certificate.from_pem(@config.roots_pem)
       return AutocertError.new(given.message) if given.is_a?(X509Error)
       return given
     end
@@ -625,14 +625,14 @@ pub class AutocertIssuer < AutocertView
     trust = TlsConfig.new
     trust.alpn = ["http/1.1"]
     unless @config.ca_roots_pem.empty?
-      roots = Certificate.from_pem(@config.ca_roots_pem.to_heap)
+      roots = Certificate.from_pem(@config.ca_roots_pem)
       return AutocertError.new(roots.message) if roots.is_a?(X509Error)
       trust.roots = roots
 
     end
     transport = HTTPClient.new(idle: 0, tls: trust)
     @transport = transport
-    session = AcmeClient.new(@config.directory_url.to_heap, key, http: transport)
+    session = AcmeClient.new(@config.directory_url, key, http: transport)
     return AutocertError.new("the CA's directory: #{session.message}") if session.is_a?(AcmeError)
     session.wait_ms = @config.wait_ms
     contact = @config.email.empty? ? [] of String : ["mailto:#{@config.email}"]
@@ -653,7 +653,7 @@ pub class AutocertIssuer < AutocertView
     @config.challenges.each do |kind|
       placed = acme.new_order([name])
       return AutocertError.new("the order for #{name}: #{placed.message}") if placed.is_a?(AcmeError)
-      proved = prove(acme, placed, name, kind.to_heap)
+      proved = prove(acme, placed, name, kind)
       return finish_order(acme, placed, name) unless proved
       failures << "#{kind}: #{proved.message}"
     end
@@ -733,7 +733,7 @@ pub struct Autocert
     renewals = 0
     images = {} of String => RisTaskConfig
     config.hosts.each do |host|
-      name = AutocertView.normalize(host.to_heap)
+      name = AutocertView.normalize(host)
       if certificate = view.read(name, AutocertPem.now_ms)
         held[name] = certificate
       end
@@ -849,7 +849,7 @@ pub struct Autocert
       outcome = group do |own|
         flight = own.spawn do
           settings, flight_name, delay = image.read(Tuple(AutocertConfig, String, Int64))
-          F.new(settings).issue(flight_name.to_heap)
+          F.new(settings).issue(flight_name)
         end
         got = flight.value
         if got.is_a?(Panicked)
@@ -868,7 +868,7 @@ pub struct Autocert
   # Writes *detail* as the flight's failure, kept until its retry time.
   private def self.record_failure(image : RisTaskConfig, detail : String) : Int32
     settings, flight_name, delay = image.read(Tuple(AutocertConfig, String, Int64))
-    worker_cache = AutocertDirCache.new(settings.cache_dir.to_heap)
+    worker_cache = AutocertDirCache.new(settings.cache_dir)
     written = worker_cache.put("#{flight_name}.error",
       "#{AutocertPem.now_ms + delay}\n#{detail}")
     raise written.message if written

@@ -1,8 +1,19 @@
 module test/toml_tape
 
-import std/toml::{TOML, TOMLError}
+import std/toml::{TOML, TOMLError, TapeAny, toml_serializable}
 
-kept = "".to_heap
+# std/toml on the caller's tape: documents read into TapeAny, written
+# back, read again and compared; derive toml_serializable; no heap.
+
+@[OnTape]
+pub struct Server
+  getter host : String
+  getter port : Int32
+  getter tags : Array(String)
+  getter ratio : Float64?
+  derive toml_serializable
+end
+
 tape do
   parsed = TOML.parse("title = 'café'\n[db]\nports = [80, 443]\n")
   exit 1 if parsed.is_a?(TOMLError)
@@ -10,23 +21,27 @@ tape do
   exit 3 unless parsed["db"]["ports"][1].as_i == 443_i64
   exit 21 unless parsed["db"]["ports"][-1].as_i == 443
   copied = parsed.copy_to(Program.tape)
-  exit 20 unless copied.to_heap == parsed.to_heap
+  exit 20 unless copied == parsed
   writer = String::Builder.new(1)
   writer << "prefix:"
   TOML.dump(parsed, writer)
   encoded = TOML.dump(parsed)
+  puts encoded.inspect
   expected = String.build { |w| w << "prefix:" << encoded }
   exit 6 unless writer.finish == expected
   again = TOML.parse(encoded)
   exit 7 if again.is_a?(TOMLError)
-  exit 8 unless again.to_heap == parsed.to_heap
+  exit 8 unless again == parsed
   values = TOML.parse("x = 1.25\ny = 1979-05-27T07:32:00Z")
   exit 9 if values.is_a?(TOMLError)
   exit 10 unless values["x"].as_f == 1.25
+  puts values["y"].as_datetime.unix_seconds
   dates = TOML.parse(TOML.dump(values))
   exit 11 if dates.is_a?(TOMLError)
-  exit 12 unless dates.to_heap == values.to_heap
-  exit 13 unless TOML.parse("x=1\nx=2").is_a?(TOMLError)
+  exit 12 unless dates == values
+  bad = TOML.parse("x=1\nx=2")
+  exit 13 unless bad.is_a?(TOMLError)
+  puts bad.message
   corpus = Array(String){
     "x = \"line\\nquote\\\"\"",
     "x = \"\"\"\nmultiline\ntext\"\"\"",
@@ -41,16 +56,18 @@ tape do
   corpus.each do |text|
     value = TOML.parse(text)
     exit 15 if value.is_a?(TOMLError)
-    roundtrip = TOML.parse(TOML.dump(value))
+    dumped = TOML.dump(value)
+    puts dumped.inspect
+    roundtrip = TOML.parse(dumped)
     exit 16 if roundtrip.is_a?(TOMLError)
-    exit 17 unless roundtrip.to_heap == value.to_heap
+    exit 17 unless roundtrip == value
+    exit 22 unless roundtrip.hash == value.hash
   end
   exit 18 unless parsed["title"].size == 4
   exit 19 unless parsed.dig("db", "ports", 1).as_i == 443_i64
-  kept = parsed["title"].as_s.to_heap
+  puts parsed["db"].inspect
+  server = Server.from_toml("host = \"h\"\nport = 8080\ntags = [\"a\", \"b\"]\n")
+  puts "#{server.host} #{server.port} #{server.tags.join(",")} #{server.ratio.nil?}"
+  print server.to_toml
 end
-parsed = TOML.parse("title = 'café'".to_heap)
-exit 4 if parsed.is_a?(TOMLError)
-exit 14 unless TOML.parse(TOML.dump(parsed)) == parsed
-exit 5 unless parsed["title"].as_s == kept
-puts "PASS: toml tape and heap APIs"
+puts "PASS: toml tape"

@@ -1,0 +1,61 @@
+module test/http_coding
+
+import std/socket::{IyiSocket}
+import std/http::{Server, Request, Response, HTTP}
+import std/compress::{Gzip, Zlib, Deflate}
+import std/zstd::{Zstd}
+
+# A client reads a coded answer over loopback: gzip, deflate in zlib's
+# envelope and bare, and zstd, each decoded as it arrives through the
+# body's io Reader; then a body that does not decode.
+
+struct Listening
+end
+
+struct Coded
+  def initialize(config : Int32)
+  end
+
+  def listening(port : Int32) : Nil
+    RisBoard.post(Listening.new)
+  end
+
+  def call(req : Request) : Response
+    text = "coded body, line after line. " * 3000
+    path = req.path
+    body = if path == "/gzip"
+             Gzip.compress(text)
+           elsif path == "/zlib" || path == "/bare"
+             path == "/zlib" ? Zlib.compress(text) : Deflate.compress(text)
+           elsif path == "/zstd"
+             Zstd.compress(text)
+           else
+             "not gzip at all"
+           end
+    name = path == "/gzip" || path == "/bad" ? "gzip" : (path == "/zstd" ? "zstd" : "deflate")
+    Response.new(200, body, {"Content-Encoding" => name})
+  end
+end
+
+probe = IyiSocket.listen(0)
+port = probe.local_port
+probe.close
+group do |g|
+  g.spawn do
+    Server.serve("127.0.0.1", port, 0, Coded, max_connections: 8)
+    0
+  end
+  RisBoard.take(Listening).or_panic
+  tape do
+    ["/gzip", "/zlib", "/bare", "/zstd", "/bad"].each do |path|
+      got = HTTP.get("http://127.0.0.1:#{port}#{path}")
+      if got.is_a?(Response)
+        body = got.body
+        puts "#{path} #{got.status} #{body.bytesize} #{body[0, 29]} #{got.header("Content-Encoding").nil?}"
+      else
+        puts "#{path} #{got.message.includes?("gzip: not a gzip stream")}"
+      end
+    end
+  end
+  g.cancel_children
+end

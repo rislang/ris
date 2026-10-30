@@ -164,6 +164,8 @@ import std/compress::{Inflater, Deflater, Envelope, Gzip, CompressError}
 # HTTP's third content coding (RFC 9659), read as it arrives and written
 # for a whole answer.
 import std/zstd::{ZstdReader, ZstdError, Zstd}
+# The decoders read a coded body through an io Reader (`BodyFeed`).
+import std/io::{Reader}
 import std/digest::{SHA1}
 # A proxy's `Proxy-Authorization: Basic`.
 import std/base64::{Base64}
@@ -850,6 +852,24 @@ end
 #
 # A body has a limit: past it a read answers an `HTTPError` with status
 # 413. The server's is `Server::MAX_BODY`; a client's is none.
+# A coded body's bytes as an io Reader for its decoder, `Inflater` or
+# `ZstdReader`: each `read_bytes` answers the body's next piece as the
+# framing delivers it, "" at its end.
+class BodyFeed < Reader
+  def initialize(@body : BodyReader)
+    super()
+  end
+
+  def read_bytes(count : Int32) : String
+    @body.feed_piece || ""
+  end
+
+  # The decoders read with `read_bytes` only.
+  def read_byte : UInt8?
+    nil
+  end
+end
+
 pub class BodyReader
   EMPTY   = 0
   LENGTH  = 1
@@ -882,7 +902,6 @@ pub class BodyReader
   # bytes read to tell deflate's two forms apart.
   @inflater : Inflater?
   @coding : Envelope?
-  @first : String?
   @zstd : ZstdReader? = nil
 
   def initialize(@conn : Conn?, @kind : Int32, length : Int64, @limit : Int64, @text : String = "", continue_pending : Bool = false)
@@ -895,7 +914,6 @@ pub class BodyReader
     @continue_pending = continue_pending
     @inflater = nil
     @coding = nil
-    @first = nil
   end
 
   # A body that is a string already in hand.
@@ -950,7 +968,7 @@ pub class BodyReader
   # given the memory (a window outside 1 KiB to 512 MiB is a panic), and a
   # body that does not decode is an `HTTPError` naming the coding and why.
   def decode_zstd(max_window : Int32 = Zstd::WINDOW_LIMIT) : Nil
-    @zstd = ZstdReader.new(max_window) { feed }
+    @zstd = ZstdReader.new(BodyFeed.new(self), max_window)
   end
 
   # The next piece of the body, at most *max* bytes; "" when it is done.
@@ -997,8 +1015,8 @@ pub class BodyReader
 
   private def start_inflater(coding : Envelope) : Cancelled | SocketError | HTTPError | Nil
     envelope = coding
+    first = ""
     if coding == Envelope::Zlib
-      first = ""
       while first.bytesize < 2
         got = raw(65536)
         return got unless got.is_a?(String)
@@ -1007,20 +1025,15 @@ pub class BodyReader
       end
       zlib = first.bytesize >= 2 && (first.byte_at(0) & 15_u8) == 8_u8 && ((first.byte_at(0).to_i32 << 8) | first.byte_at(1).to_i32) % 31 == 0
       envelope = Envelope::Raw unless zlib
-      @first = first
     end
-    @inflater = Inflater.new(envelope) { feed }
+    @inflater = Inflater.new(envelope, BodyFeed.new(self), first)
     nil
   end
 
-  # The inflater's source: the bytes read to sniff the envelope, then the
-  # framing's, nil at its end or when it fails - the failure is kept, and
-  # answered in place of the inflater's "ends early".
-  private def feed : String?
-    if first = @first
-      @first = nil
-      return first if first.bytesize > 0
-    end
+  # The decoder's next piece (`BodyFeed`): the framing's bytes, nil at
+  # its end or when it fails - the failure is kept, and answered in place
+  # of the decoder's "ends early".
+  def feed_piece : String?
     got = raw(65536)
     unless got.is_a?(String)
       @fault = got
@@ -2637,16 +2650,16 @@ pub struct Server
     in ParsedHead
       request_head_view(head)
     in HeadError
-      HTTPError.new(head.message.to_heap, head.status)
+      HTTPError.new(head.message, head.status)
     in Nil
       HTTPError.new("incomplete request")
     end
   end
 
   private def self.request_head_view(head : ParsedHead) : RequestHead | HTTPError
-    method = head.method.to_heap
-    target = head.target.to_heap
-    version = head.version.to_heap
+    method = head.method
+    target = head.target
+    version = head.version
     headers = {} of String => String
     # The absolute form (RFC 9112 §3.2.2), which a server must accept,
     # names the path after the authority: `http://h/x?q` is path `/x` and
@@ -5998,7 +6011,7 @@ class H2Connection
       decoded[i]
     end
     if declared = H2Connection.field(decoded, "content-length")
-      n = HTTP.content_length(declared.to_heap)
+      n = HTTP.content_length(declared)
       return refuse(id, PROTOCOL_ERROR) unless n
       s.declared = n
     end
@@ -6613,7 +6626,7 @@ class H2Connection
     valid_name = HTTP.token?(name)
     return "the field name #{name.inspect}" unless valid_name
     if connection_specific?(name)
-      shown = name.is_a?(String) ? name : name.to_heap
+      shown = name
       return "the connection-specific field #{shown}"
     end
     return "te other than trailers" if name == "te" && f.value != "trailers"

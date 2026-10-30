@@ -533,10 +533,89 @@ if [[ "$out" == *FAILED* ]]; then
 fi
 printf '%s\n' "$out"
 
-heap_trap yaml
+# std/yaml on the caller tape: TapeValue read, dumped, read back; no heap.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/yaml.ri 2>&1)
+want='name: café
+list:
+  - 1
+  - true
+  - null
+  - 0.125
+quoted: "a\nb"
+- - 1
+  - - 2
+  - 3
+- - 4
+  - - 5
+    - 6
+[[1, [2], 3], [4, [5, 6]]]
+{"name" => "café", "list" => [1, true, nil, 0.125], "quoted" => "a\nb"}
+2
+a: 1
+- x
+- k: v
+p 3 a,b true
+name: p
+x: 3
+tags:
+  - a
+  - b
+scale: null
+PASS: yaml tape
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     yaml (read, dump and derive on the tape, no heap)'
+else
+  echo "FAILED   yaml: $out"; status=1
+fi
 
-heap_trap toml
+# std/toml on the caller tape: TapeAny read, dumped, read back; no heap.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/toml.ri 2>&1)
+want='"title = \"café\"\n\n[db]\nports = [80, 443]\n"
+296638320
+the key x is defined twice at line 2, column 1
+"x = \"line\\nquote\\\"\"\n"
+"x = \"multiline\\ntext\"\n"
+"[x]\na = 1\nb = [\"a\", true]\n\n[y]\nz = 2\n"
+"[[a]]\nx = 1\n\n[[a]]\nx = 2\n\n[a.b]\ny = 3\n"
+"x = -9223372036854775808\ny = 9223372036854775807\n"
+"a = nan\nb = -inf\nc = inf\nd = -0.0\n"
+"a = 1979-05-27\nb = 07:32:00.123\nc = 1979-05-27T07:32:00\n"
+"x = 0.1\n"
+"[root]\ntail = 5\n\n[root.a]\nafter = 4\n\n[root.a.nested]\nb = [1, [2], 3]\n"
+{ ports = [80, 443] }
+h 8080 a,b true
+host = "h"
+port = 8080
+tags = ["a", "b"]
+PASS: toml tape
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     toml (read, dump and derive on the tape, no heap)'
+else
+  echo "FAILED   toml: $out"; status=1
+fi
 
+# std/xml on the caller tape: XmlTree node array read, built, copied; no heap.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/xml.ri 2>&1)
+want='<?xml version="1.0" encoding="UTF-8"?>
+<root xmlns:p="urn:x" a="&amp;"><p:child>café &lt;<![CDATA[raw]]></p:child><!--ok--><item n="1"/><item n="2"><item n="3"/></item></root>
+p:child child urn:x
+1,2,3
+root
+4
+true
+<?xml version="1.0" encoding="UTF-8"?>
+<list kind="c&quot;d" size="1"><entry id="e1">x &amp; y</entry><!--end--></list>
+a < A
+true
+PASS: xml tape
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     xml (node array read, built, written, copied; no heap)'
+else
+  echo "FAILED   xml: $out"; status=1
+fi
 out=$("$RIS" run test/ris/time_tape_offset.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = 'PASS: time tape offsets' ]; then
   echo "runs     time_tape_offset"
@@ -997,6 +1076,19 @@ if [ "$out" = "$want" ]; then
   echo 'runs     websocket_handshake (connect and upgrade, no heap)'
 else
   echo "FAILED   websocket_handshake: $out"; status=1
+fi
+# std/http client: coded answers decoded through BodyFeed, an io Reader.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/http_coding.ri 2>&1)
+want='/gzip 200 87000 coded body, line after line.  true
+/zlib 200 87000 coded body, line after line.  true
+/bare 200 87000 coded body, line after line.  true
+/zstd 200 87000 coded body, line after line.  true
+/bad true
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     http_coding (gzip, deflate and zstd answers decoded through an io Reader)'
+else
+  echo "FAILED   http_coding: $out"; status=1
 fi
 # std/udp on the caller tape: datagrams received into String room or an
 # Array, connected sends, a 60000-byte datagram; no heap.

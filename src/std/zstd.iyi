@@ -240,7 +240,6 @@ class Decoder
   OF = 1
   ML = 2
 
-  @source : Proc(String | Nil) | Nil
   # The stream more pieces come from, for `ZstdReader.new(io)`.
   @io : IyiIO? = nil
   @input : String
@@ -292,15 +291,15 @@ class Decoder
   @failed : Bool
   @error : ZstdError
 
-  # *source* nil is the whole-string form: *data* is all the input there
+  # The whole-string form until `over_io`: *data* is all the input there
   # is, and the output grows rather than slides.
-  def initialize(@source : Proc(String | Nil) | Nil, data : String, @limit : Int32)
+  def initialize(data : String, @limit : Int32)
     raise "zstd: a window limit of #{@limit} bytes is outside 1 KiB to 512 MiB" if @limit < 1024 || @limit > 536870912
     @input = data
     @in_pos = 0
     @in_end = data.bytesize
     @exhausted = false
-    @grow = @source.nil?
+    @grow = true
     @cap = 65536
     @buf = Array(UInt8).new(@cap, 0_u8)
     @pos = 0
@@ -426,9 +425,8 @@ class Decoder
   # or false when there is none.
   private def more : Bool
     return false if @exhausted
-    source = @source
     io = @io
-    chunk = source ? source.call : (io ? io.read_bytes(65536) : nil)
+    chunk = io ? io.read_bytes(65536) : nil
     unless chunk && chunk.bytesize > 0
       @exhausted = true
       return false
@@ -1297,7 +1295,7 @@ end
 # stays at the frame's window, twice over at most, and a block.
 #
 # ```
-# body = ZstdReader.new { socket_read }
+# body = ZstdReader.new(socket)
 # while (piece = body.read(65536)!) != ""
 #   ...
 # end
@@ -1305,19 +1303,12 @@ end
 pub class ZstdReader
   @core : Decoder
 
-  # *source* answers the next bytes of the compressed stream, nil (or "")
-  # when there are no more. *max_window* is the largest window a frame
-  # may ask for; a frame that asks for more is refused rather than given
-  # the memory. A limit outside 1 KiB to 512 MiB is a panic.
-  def initialize(max_window : Int32 = Zstd::WINDOW_LIMIT, &source : -> String?)
-    @core = Decoder.new(source, "", max_window)
-  end
-
   # The stream read from *io* after *head*, 64 KiB a read, until *io*
-  # answers "": the block form's source without a block, so it suits a
-  # stream on the caller's tape.
+  # answers "". *max_window* is the largest window a frame may ask for;
+  # a frame that asks for more is refused rather than given the memory.
+  # A limit outside 1 KiB to 512 MiB is a panic.
   def initialize(io : IyiIO?, max_window : Int32 = Zstd::WINDOW_LIMIT, head : String = "")
-    @core = Decoder.new(nil, head, max_window)
+    @core = Decoder.new(head, max_window)
     @core.over_io(io)
   end
 
@@ -1356,7 +1347,7 @@ pub struct Zstd
   # it. Bytes after the last frame that do not begin another are refused,
   # as is a stream with no frame at all.
   def self.decompress(data : String, max_window : Int32 = WINDOW_LIMIT) : String | ZstdError
-    core = Decoder.new(nil, data, max_window)
+    core = Decoder.new(data, max_window)
     core.run
     return core.error if core.failed?
     rest = core.leftover.bytesize

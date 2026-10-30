@@ -16,6 +16,7 @@ module bench/std_zstd_exercise
 
 import std/int
 
+import std/io::{Reader}
 import std/zstd::{Zstd, ZstdReader, ZstdError}
 import std/digest::{XXH64, CRC32}
 import std/file::{File}
@@ -119,10 +120,11 @@ end
 
 # A source that gives *stream* in pieces whose sizes cycle through
 # *pieces*, and counts the calls.
-class Feed
+class Feed < Reader
   getter calls : Int32
 
   def initialize(@stream : String, @pieces : Array(Int32))
+    super()
     @at = 0
     @calls = 0
   end
@@ -140,6 +142,15 @@ class Feed
     piece = piece_of(@stream, @at, n)
     @at = @at + n
     piece
+  end
+
+  # The decoder reads 64 KiB at a time; each read is the next piece.
+  def read_bytes(count : Int32) : String
+    self.next || ""
+  end
+
+  def read_byte : UInt8?
+    nil
   end
 end
 
@@ -171,7 +182,7 @@ end
 
 def through(stream : String, pieces : Array(Int32), reads : Array(Int32), window : Int32 = Zstd::WINDOW_LIMIT) : String | ZstdError
   feed = Feed.new(stream, pieces)
-  drain(ZstdReader.new(window) { feed.next }, reads)
+  drain(ZstdReader.new(feed, window), reads)
 end
 
 # The stream read whole, and through pieces of every size from one byte
@@ -365,7 +376,7 @@ puts "  runs, repetition, noise, a 600 KB back-reference, one past the window, a
 
 puts "\n== streaming"
 feed = Feed.new(hello_sum + "trailing", [3])
-z = ZstdReader.new { feed.next }
+z = ZstdReader.new(feed)
 assert_true z.leftover == "", "nothing is left over before the end"
 got = drain(z, [2])
 assert_true got == "hello", "a frame read two bytes at a time"
@@ -378,7 +389,7 @@ junk = Zstd.decompress(hello_raw + "junk")
 assert_true junk.is_a?(ZstdError) && junk.as(ZstdError).message == "zstd: 4 bytes after the last frame are not a frame", "bytes after the last frame, whole: #{junk.inspect}"
 two = Zstd.compress(long_text)
 feed = Feed.new(two, [65536])
-z = ZstdReader.new { feed.next }
+z = ZstdReader.new(feed)
 first = z.read(1048576)
 assert_true first.is_a?(String) && first.as(String).bytesize == 131072, "a read of 1 MiB answers one block"
 assert_true feed.calls <= 3, "and asks the source only for what that block needs (#{feed.calls} calls)"
@@ -445,10 +456,7 @@ if args.size > 0
     base = GC.stats.bytes_kept_by_last_sweep
     most = 0_u64
     io = File.open(path)
-    z = ZstdReader.new do
-      piece = io.read_bytes(65536)
-      piece.bytesize == 0 ? nil : piece
-    end
+    z = ZstdReader.new(io)
     crc = 0_u32
     total = 0_i64
     reads = 0
@@ -475,7 +483,7 @@ if args.size > 0
     3.times do |k|
       t0 = IyiMark.now_ns
       feed = Feed.new(data, [65536])
-      z = ZstdReader.new { feed.next }
+      z = ZstdReader.new(feed)
       n = 0_i64
       while true
         piece = z.read(131072)

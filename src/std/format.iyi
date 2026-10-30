@@ -1056,7 +1056,7 @@ private def format_list(format_string : String, args,
     # A verb is ASCII; past it is a character of several bytes, named whole
     # - its lead byte read as a character of its own was `%Ã` for `%é`.
     if format_ptr[index] >= 0x80_u8
-      format_string[index, format_bytesize - index].to_heap.each_char do |char|
+      format_string[index, format_bytesize - index].each_char do |char|
         raise "unknown format specifier '%#{char}'"
       end
     end

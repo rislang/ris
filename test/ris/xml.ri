@@ -1,10 +1,15 @@
 module test/xml_tape
 
-import std/xml::{parse, parse?, escape}
+import std/xml::{parse, parse?, escape, unescape?, TapeNode}
+
+# std/xml on the caller's tape: a document read into one node array, its
+# names, attributes, namespaces and text, written back and read again,
+# built from nothing, copied to the program tape; no heap.
 
 tape do
   text = "<root xmlns:p=\"urn:x\" a=\"&amp;\"><p:child>café &lt;" \
-    "<![CDATA[raw]]></p:child><!--ok--></root>"
+    "<![CDATA[raw]]></p:child><!--ok--><item n=\"1\"/><item n=\"2\">" \
+    "<item n=\"3\"/></item></root>"
   doc = parse(text)
   exit 1 unless doc.root.name == "root"
   exit 2 unless doc.root["a"] == "&"
@@ -13,12 +18,35 @@ tape do
   w << "prefix:"
   doc.to_xml(w)
   rendered = doc.to_xml
-  exit 4 unless parse(rendered).root.text == doc.root.text
+  puts rendered
+  again = parse(rendered)
+  exit 4 unless again.to_xml == rendered
   exit 5 unless w.finish.starts_with?("prefix:<?xml")
   exit 6 unless parse?("<bad>").nil?
   exit 7 unless escape("<&\r") == "&lt;&amp;&#13;"
-  heap = doc.to_heap
-  exit 8 unless heap.root.name == "root"
+  child = doc.root.first_element_child
+  exit 8 if child.nil?
+  puts "#{child.name} #{child.local_name} #{child.namespace_uri}"
+  puts doc.root.find_all("item").map { |n| n["n"] }.join(",")
+  found = doc.root.find("item")
+  exit 9 if found.nil?
+  up = found.parent
+  puts up ? up.name : "-"
+  puts doc.root.children.size
+  copied = doc.copy_to(Program.tape)
+  puts copied.to_xml == rendered
+
+  built = TapeNode.document
+  top = built.add_element("list")
+  top.set_attribute("kind", "a<b")
+  entry = top.add_element("entry")
+  entry.add_text("x & y")
+  top.set_attribute("size", "1")
+  entry.set_attribute("id", "e1")
+  top.set_attribute("kind", "c\"d")
+  top.append(built.new_comment("end"))
+  puts built.to_xml
+  puts unescape?("a &lt; &#x41;") || "-"
+  puts unescape?("bad &x;").nil?
 end
-exit 9 unless parse("<a>heap</a>".to_heap).root.text == "heap"
-puts "PASS: xml tape and heap APIs"
+puts "PASS: xml tape"

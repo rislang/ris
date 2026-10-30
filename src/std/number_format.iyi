@@ -61,14 +61,10 @@ struct ::Number
   def format(separator : ::Char = '.', delimiter : ::Char = ',',
              decimal_places : Int32? = nil, *, group : Int32 = 3,
              only_significant : ::Bool = false) : ::String
-    result = ""
-    tape do
-      result = String.build do |writer|
-        Std::NumberFormat::NumberText.format(writer, self, separator,
-          delimiter, decimal_places, group, only_significant)
-      end.to_heap
+    String.build do |writer|
+      Std::NumberFormat::NumberText.format(writer, self, separator,
+        delimiter, decimal_places, group, only_significant)
     end
-    result
   end
 
   def format(writer : String::Builder,
@@ -85,14 +81,10 @@ struct ::Number
   def humanize(precision : Int32 = 3, separator : ::Char = '.',
                delimiter : ::Char = ',', *, significant : ::Bool = true,
                unit_separator : ::String = "") : ::String
-    result = ""
-    tape do
-      result = String.build do |writer|
-        Std::NumberFormat::NumberText.humanize(writer, self, precision,
-          separator, delimiter, significant, unit_separator)
-      end.to_heap
+    String.build do |writer|
+      Std::NumberFormat::NumberText.humanize(writer, self, precision,
+        separator, delimiter, significant, unit_separator)
     end
-    result
   end
 
   def humanize(writer : String::Builder,
@@ -110,14 +102,10 @@ struct ::Int
   def humanize_bytes(precision : Int32 = 3, separator : ::Char = '.', *,
                      significant : ::Bool = true, unit_separator : ::String = "",
                      format : Std::NumberFormat::BinaryPrefixFormat = Std::NumberFormat::BinaryPrefixFormat::IEC) : ::String
-    result = ""
-    tape do
-      result = String.build do |writer|
-        Std::NumberFormat::NumberText.humanize_bytes(writer, self, precision,
-          separator, significant, unit_separator, format)
-      end.to_heap
+    String.build do |writer|
+      Std::NumberFormat::NumberText.humanize_bytes(writer, self, precision,
+        separator, significant, unit_separator, format)
     end
-    result
   end
 
   def humanize_bytes(writer : String::Builder,

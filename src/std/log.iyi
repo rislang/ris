@@ -1,6 +1,6 @@
 # Levelled logging with named sources.
 #
-# `Log.info "started"` writes an `Entry` — source, severity, message and
+# `Log.info "started"` writes a `TapeEntry` — source, severity, message and
 # the UTC instant it was made — through the root logger's backend.
 # `Log.for("db.pool")` answers the logger for that source: a child of
 # `db`, which is a child of the root, and the same object every time the
@@ -17,7 +17,7 @@
 # Backends: `IOBackend` writes each entry to an IO through a `Formatter`
 # (`DefaultFormatter`: `2024-02-29T15:30:45.123456Z INFO - source: message`,
 # and `... INFO - message` at the root, the source and its `: ` left
-# off); `MemoryBackend` keeps the entries for a test to read back. A
+# off); `RisMemoryBackend` keeps the entries for a test to read back. A
 # `Backend` of your own is a class with `write(entry)` and `close`.
 #
 # Logging is synchronous: the entry is written before the call returns,
@@ -109,39 +109,6 @@ pub enum Severity
   end
 end
 
-@[OnTape]
-pub struct Entry
-  getter source : String
-  getter severity : Severity
-  getter message : String
-  getter timestamp : Time
-  # The task's context, the logger's bound data and the call's own, in
-  # that order, a later key's value over an earlier's.
-  @data : Array::View(LogField)
-
-  def data : Hash(String, String)
-    fields = Hash(String, String).new(@data.size)
-    each_data { |key, value| fields[key] = value }
-    fields
-  end
-
-  def initialize(@source : String, @severity : Severity, @message : String, @timestamp : Time = Time.utc, data : Hash(String, String) = {} of String => String)
-    @data = data.map { |key, value| LogField.new(key, value) }.view
-  end
-
-  def each_data(& : String, String -> Nil) : Nil
-    @data.each { |field| yield field.key, field.value }
-  end
-
-  def tape_data : Array(LogField)
-    fields = Array(LogField).new(@data.size)
-    each_data do |key, value|
-      fields << LogField.new(key.as_tape, value.as_tape)
-    end
-    fields
-  end
-end
-
 # A synchronous entry borrows its text and metadata on the caller's tape.
 @[OnTape]
 pub struct TapeEntry
@@ -160,13 +127,6 @@ pub struct TapeEntry
 
   def tape_data : Array(LogField)
     @data
-  end
-
-  # A retaining backend explicitly takes ownership of an old-style entry.
-  def to_heap : Entry
-    data = {} of String => String
-    each_data { |key, value| data[key.to_heap] = value.to_heap }
-    Entry.new(@source.to_heap, @severity, @message.to_heap, @timestamp, data)
   end
 end
 
@@ -254,7 +214,7 @@ pub struct Metadata
   end
 
   def merge_into(into : Hash(String, String)) : Nil
-    each { |key, value| into[key.to_heap] = value.to_heap }
+    each { |key, value| into[key] = value }
   end
 
   def append_into(fields : Array(LogField)) : Nil
@@ -269,10 +229,16 @@ pub struct Metadata
 end
 
 pub abstract class Formatter
-  abstract def format(entry : Entry) : String
+  # The line, without its line break, written into the caller's *writer*.
+  abstract def format(entry : TapeEntry, writer : String::Builder) : Nil
+
+  # The line on the caller's tape.
+  def format(entry : TapeEntry) : String
+    String.build { |writer| format(entry, writer) }
+  end
 
   # The line written onto a tape, then into *io* in one write.
-  def format(entry : Entry | TapeEntry, io : IO) : Nil
+  def format(entry : TapeEntry, io : IO) : Nil
     tape do
       w = String::Builder.new
       format(entry, w)
@@ -288,32 +254,14 @@ pub abstract class Formatter
     io.write(line.to_unsafe, line.bytesize)
   end
 
-  # The line written into the caller's *writer*: `format(entry)` unless a
-  # formatter writes it there itself.
-  def format(entry : Entry, writer : String::Builder) : Nil
-    writer << format(entry)
-  end
-  def format(entry : TapeEntry, writer : String::Builder) : Nil
-    writer << format(entry.to_heap)
-  end
 end
 
 pub class DefaultFormatter < Formatter
-  def format(entry : Entry) : String
-    line = ""
-    tape do
-      w = String::Builder.new
-      format(entry, w)
-      line = w.finish.to_heap
-    end
-    line
-  end
-
-  def format(entry : Entry | TapeEntry, writer : String::Builder) : Nil
+  def format(entry : TapeEntry, writer : String::Builder) : Nil
     DefaultFormatter.write(entry, writer)
   end
 
-  def self.write(entry : Entry | TapeEntry, io : IO) : Nil
+  def self.write(entry : TapeEntry, io : IO) : Nil
     tape do
       writer = String::Builder.new
       write(entry, writer)
@@ -329,7 +277,7 @@ pub class DefaultFormatter < Formatter
   end
 
   # Also usable without constructing a formatter or backend.
-  def self.write(entry : Entry | TapeEntry, writer : String::Builder) : Nil
+  def self.write(entry : TapeEntry, writer : String::Builder) : Nil
     entry.timestamp.to_rfc3339(6, writer)
     fields = entry.tape_data
     LogText.write(entry.source.as_tape, entry.severity.label.as_tape,
@@ -339,12 +287,8 @@ end
 
 @[OnTape]
 pub abstract class Backend
-  abstract def write(entry : Entry) : Nil
+  abstract def write(entry : TapeEntry) : Nil
   abstract def close : Nil
-
-  def write(entry : TapeEntry) : Nil
-    write(entry.to_heap)
-  end
 end
 
 @[OnTape]
@@ -369,7 +313,7 @@ pub class IOBackend < Backend
     @formatter = formatter
   end
 
-  def write(entry : Entry | TapeEntry) : Nil
+  def write(entry : TapeEntry) : Nil
     if formatter = @formatter
       formatter.format(entry, @io)
     else
@@ -433,11 +377,6 @@ pub class RisMemoryBackend < Backend
     @entries << RisLogEntry.new(entry).copy_to(@owner)
   end
 
-  def write(entry : Entry) : Nil
-    write(TapeEntry.new(entry.source.as_tape, entry.severity,
-      entry.message.as_tape, entry.timestamp, entry.tape_data))
-  end
-
   def output : Array(String)
     lines = Array(String).new(@entries.size)
     @entries.each do |entry|
@@ -453,32 +392,6 @@ pub class RisMemoryBackend < Backend
   end
 
   def close : Nil
-  end
-end
-
-@[OnTape]
-pub class MemoryBackend < Backend
-  property formatter : Formatter
-  getter entries : Array(Entry)
-
-  def initialize(@formatter : Formatter = DefaultFormatter.new)
-    @entries = [] of Entry
-  end
-
-  def write(entry : Entry) : Nil
-    @entries << entry
-  end
-
-  def close : Nil
-  end
-
-  # The entries as the formatter would have written them.
-  def output : Array(String)
-    @entries.map { |e| @formatter.format(e) }
-  end
-
-  def clear : Nil
-    @entries.clear
   end
 end
 
@@ -542,10 +455,14 @@ pub class AsyncBackend < Backend
     block.call(backend)
   end
 
-  def write(entry : Entry) : Nil
+  def write(entry : TapeEntry) : Nil
     raise "AsyncBackend: an entry written after close" if @closed
-    line = @formatter.format(entry) + "\n"
-    @queue.push(line)
+    tape do
+      writer = String::Builder.new
+      @formatter.format(entry, writer)
+      writer.push(10_u8)
+      @queue.push(writer.finish)
+    end
   end
 
   def close : Nil
@@ -576,10 +493,11 @@ class AsyncQueue
     @closed = false
   end
 
+  # The line is copied to the heap the writer thread reads it from.
   def push(line : String) : Nil
     enter
     defer leave
-    @lines << line
+    @lines << line.to_heap
   end
 
   def close : Nil

@@ -17,6 +17,7 @@ import std/tuple
 
 import std/int
 
+import std/io::{Reader}
 import std/compress::{Deflate, Zlib, Gzip, Inflater, Deflater, Envelope, CompressError}
 import std/digest::{CRC32}
 import std/random::{Random}
@@ -27,11 +28,12 @@ end
 
 # A source that gives *stream* *piece* bytes at a time and counts what it
 # has been asked for, so a check can say how far the decoder pulled.
-class Feed
+class Feed < Reader
   getter calls : Int32
   getter at : Int32
 
   def initialize(@stream : String, @piece : Int32)
+    super()
     @at = 0
     @calls = 0
   end
@@ -44,6 +46,15 @@ class Feed
     from = @at
     @at = @at + n
     @stream.byte_slice(from, n)
+  end
+
+  # The decoders read 64 KiB at a time; each read is the next piece.
+  def read_bytes(count : Int32) : String
+    self.next || ""
+  end
+
+  def read_byte : UInt8?
+    nil
   end
 end
 
@@ -68,7 +79,7 @@ end
 
 def stream_through(envelope : Envelope, stream : String, piece : Int32, max : Int32) : String | CompressError
   feed = Feed.new(stream, piece)
-  z = Inflater.new(envelope) { feed.next }
+  z = Inflater.new(envelope, feed)
   drain(z, max)
 end
 
@@ -557,7 +568,7 @@ puts "  matches from 32 KiB back, across the window's slides, read a byte and 10
 # the stream has all been fed.
 long_gzip = Gzip.compress(text)
 feed = Feed.new(long_gzip, 1)
-early = Inflater.new(Envelope::Gzip) { feed.next }
+early = Inflater.new(Envelope::Gzip, feed)
 first = early.read
 case first
 when CompressError
@@ -639,7 +650,7 @@ every_feed(Envelope::Gzip, good_hcrc, "abc", "a gzip header with its CRC-16")
 end
 # And once refused, refused for good: the same error to every read after.
 feed = Feed.new(bad_crc, 64)
-broken = Inflater.new(Envelope::Gzip) { feed.next }
+broken = Inflater.new(Envelope::Gzip, feed)
 said = drain(broken, 65536)
 again = broken.read
 assert_true said.is_a?(CompressError) && again.is_a?(CompressError) && again.message == said.message, "a second read after the error answers it again"
@@ -663,7 +674,7 @@ tail = "HTTP/1.1 200 OK\r\n"
   all = stream + tail
   {1, 7, 1000, all.bytesize}.each do |piece|
     feed = Feed.new(all, piece)
-    z = Inflater.new(envelope) { feed.next }
+    z = Inflater.new(envelope, feed)
     got = drain(z, 65536)
     assert_true got == plain, "#{envelope} followed by more, #{piece} bytes a piece"
     assert_true z.leftover == piece_of(all, stream.bytesize, feed.at - stream.bytesize), "#{envelope}, #{piece} bytes a piece: what is left over is what was fed past the stream (#{z.leftover.inspect})"
@@ -677,7 +688,7 @@ end
 # a byte at a time: as far as it took to see that no member follows.
 { {"\x1f", "\x1f"}, {"\x1fx", "\x1fx"}, {"\0\0\0\0", "\0"} }.each do |pair|
   feed = Feed.new(Gzip.compress("ab") + pair[0], 1)
-  z = Inflater.new(Envelope::Gzip) { feed.next }
+  z = Inflater.new(Envelope::Gzip, feed)
   assert_true drain(z, 65536) == "ab" && z.leftover == pair[1], "a gzip stream followed by #{pair[0].inspect} leaves #{pair[1].inspect} over (#{z.leftover.inspect})"
 end
 puts "  members read as one stream, and what follows a stream is left over, the source asked for nothing more than it took to see the end"
@@ -715,7 +726,7 @@ deflated = [] of String
     so_far = so_far + piece
     next if so_far.bytesize == 0
     feed = Feed.new(written, written.bytesize)
-    z = Inflater.new(envelope) { feed.next }
+    z = Inflater.new(envelope, feed)
     assert_true read_exactly(z, so_far.bytesize, "#{envelope} after #{so_far.bytesize} bytes") == so_far, "#{envelope}: what was written decodes to all #{so_far.bytesize} bytes given"
     assert_true feed.calls == 1, "#{envelope}: and the decoder asked for nothing more (#{feed.calls} calls)"
   end
@@ -744,10 +755,11 @@ puts "  3,000 bytes of noise given twice: #{kept_first.bytesize} bytes, then #{k
 
 # A source of the pieces written so far, for one Inflater that reads the
 # stream as it is written; asked for more than there is, it says so.
-class Pending
+class Pending < Reader
   getter starved : Int32
 
   def initialize
+    super()
     @pieces = [] of String
     @starved = 0
   end
@@ -763,6 +775,15 @@ class Pending
     end
     @pieces.shift
   end
+
+  # The decoders read 64 KiB at a time; each read is the next piece.
+  def read_bytes(count : Int32) : String
+    self.next || ""
+  end
+
+  def read_byte : UInt8?
+    nil
+  end
 end
 
 # Pieces of random sizes, some empty, at levels 0, 1, 6 and 9 in every
@@ -776,7 +797,7 @@ in_pieces = [] of {String, String, String}
     rng = Random.new((level * 3 + envelope.value + 1).to_u64)
     d = Deflater.new(envelope, level)
     pending = Pending.new
-    z = Inflater.new(envelope) { pending.next }
+    z = Inflater.new(envelope, pending)
     written = String::Builder.new
     index = String::Builder.new
     at = 0

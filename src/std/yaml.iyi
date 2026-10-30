@@ -70,359 +70,55 @@
 # JSON; `YAML.to_yaml`, `YAML.from_yaml`, `YAML.to_any` and
 # `YAML.read_value` are what it writes with.
 #
-# `Any` holds a document: `raw` is the union, `as_x`/`as_x?` are the
+# `TapeValue` holds a document: `raw` is the union, `as_x`/`as_x?` are the
 # pairs, `[]`/`[]?`/`dig`/`dig?` walk it, `==` is structural and `hash`
 # agrees with it.
 #
-# The type tests on `Any#raw` are ordered with the reference types first.
+# The type tests on `TapeValue#raw` are ordered with the reference types first.
 # A chain that tests `Nil` and `Bool` before `Array`/`Hash` over this union
 # sends an array down the hash arm today (a compiler defect being fixed);
-# every dispatch here goes through `Any#kind`, which is written in the
+# every dispatch here goes through `TapeValue#kind`, which is written in the
 # order that works, and nothing else in the file tests the union.
 
 module std/yaml
 
 import std/text
 
-# The value a document holds.
-pub struct Any
-  alias Type = Nil | Bool | Int64 | Float64 | String | Array(Any) | Hash(Any, Any)
-
-  KIND_NIL    = 0
-  KIND_BOOL   = 1
-  KIND_INT    = 2
-  KIND_FLOAT  = 3
-  KIND_STRING = 4
-  KIND_ARRAY  = 5
-  KIND_HASH   = 6
-
-  getter raw : Type
-
-  def initialize(@raw : Type)
-  end
-
-  def initialize(value : Int32)
-    @raw = value.to_i64
-  end
-
-  # Which member of the union `raw` is, as one of the KIND_ constants.
-  # Reference types are tested first on purpose (see the header).
-  def kind : Int32
-    r = @raw
-    if r.is_a?(Array(Any))
-      KIND_ARRAY
-    elsif r.is_a?(Hash(Any, Any))
-      KIND_HASH
-    elsif r.is_a?(String)
-      KIND_STRING
-    elsif r.is_a?(Int64)
-      KIND_INT
-    elsif r.is_a?(Float64)
-      KIND_FLOAT
-    elsif r.is_a?(Bool)
-      KIND_BOOL
-    else
-      KIND_NIL
-    end
-  end
-
-  # The name of the kind, for the sentences below.
-  def kind_name : String
-    k = kind
-    if k == KIND_ARRAY
-      "a sequence"
-    elsif k == KIND_HASH
-      "a mapping"
-    elsif k == KIND_STRING
-      "a string"
-    elsif k == KIND_INT
-      "an integer"
-    elsif k == KIND_FLOAT
-      "a float"
-    elsif k == KIND_BOOL
-      "a boolean"
-    else
-      "null"
-    end
-  end
-
-  def null? : Bool
-    kind == KIND_NIL
-  end
-
-  def as_nil : Nil
-    raise "expected null, not #{kind_name}" unless null?
-    nil
-  end
-
-  def as_nil? : Nil
-    nil
-  end
-
-  def as_bool : Bool
-    raise "expected a boolean, not #{kind_name}" unless kind == KIND_BOOL
-    @raw.as(Bool)
-  end
-
-  def as_bool? : Bool?
-    kind == KIND_BOOL ? @raw.as(Bool) : nil
-  end
-
-  def as_i : Int64
-    raise "expected an integer, not #{kind_name}" unless kind == KIND_INT
-    @raw.as(Int64)
-  end
-
-  def as_i? : Int64?
-    kind == KIND_INT ? @raw.as(Int64) : nil
-  end
-
-  # A float, or an integer widened to one.
-  def as_f : Float64
-    k = kind
-    return @raw.as(Float64) if k == KIND_FLOAT
-    return @raw.as(Int64).to_f64 if k == KIND_INT
-    raise "expected a float, not #{kind_name}"
-  end
-
-  def as_f? : Float64?
-    k = kind
-    return @raw.as(Float64) if k == KIND_FLOAT
-    return @raw.as(Int64).to_f64 if k == KIND_INT
-    nil
-  end
-
-  def as_s : String
-    raise "expected a string, not #{kind_name}" unless kind == KIND_STRING
-    @raw.as(String)
-  end
-
-  def as_s? : String?
-    kind == KIND_STRING ? @raw.as(String) : nil
-  end
-
-  def as_a : Array(Any)
-    raise "expected a sequence, not #{kind_name}" unless kind == KIND_ARRAY
-    @raw.as(Array(Any))
-  end
-
-  def as_a? : Array(Any)?
-    kind == KIND_ARRAY ? @raw.as(Array(Any)) : nil
-  end
-
-  def as_h : Hash(Any, Any)
-    raise "expected a mapping, not #{kind_name}" unless kind == KIND_HASH
-    @raw.as(Hash(Any, Any))
-  end
-
-  def as_h? : Hash(Any, Any)?
-    kind == KIND_HASH ? @raw.as(Hash(Any, Any)) : nil
-  end
-
-  # Elements of a sequence, pairs of a mapping, characters of a string.
-  def size : Int32
-    k = kind
-    return @raw.as(Array(Any)).size if k == KIND_ARRAY
-    return @raw.as(Hash(Any, Any)).size if k == KIND_HASH
-    return @raw.as(String).size if k == KIND_STRING
-    raise "size of #{kind_name}"
-  end
-
-  def [](key : Any) : Any
-    h = as_h
-    raise "no such key #{key.inspect}" unless h.has_key?(key)
-    h[key]
-  end
-
-  def []?(key : Any) : Any?
-    h = as_h?
-    return nil if h.nil?
-    h[key]?
-  end
-
-  def [](key : String | String) : Any
-    h = as_h
-    h[Any.new(key)]? || raise "no such key #{key.inspect}"
-  end
-
-  def []?(key : String | String) : Any?
-    h = as_h?
-    return nil unless h
-    h[Any.new(key)]?
-  end
-
-  # An Int32 indexes a sequence and reaches an integer key of a mapping:
-  # `1: one` has the `Int64` key 1, and `doc[1]` panicked "expected a
-  # sequence, not a mapping" while `[]?` and `dig?` answered nil.
-  def [](index : Int32) : Any
-    return self[Any.new(index)] if kind == KIND_HASH
-    as_a[index]
-  end
-
-  def []?(index : Int32) : Any?
-    return self[Any.new(index)]? if kind == KIND_HASH
-    a = as_a?
-    return nil if a.nil?
-    a[index]?
-  end
-
-  def dig?(key : String | String | Int32) : Any?
-    step?(key)
-  end
-
-  def dig?(key : String | String | Int32, *rest : String | String | Int32) : Any?
-    v = step?(key)
-    return nil if v.nil?
-    v.dig?(*rest)
-  end
-
-  def dig(key : String | String | Int32) : Any
-    step(key)
-  end
-
-  def dig(key : String | String | Int32, *rest : String | String | Int32) : Any
-    step(key).dig(*rest)
-  end
-
-  private def step?(key : String | String | Int32) : Any?
-    if key.is_a?(String)
-      self[key]?
-    else
-      self[key]?
-    end
-  end
-
-  private def step(key : String | String | Int32) : Any
-    if key.is_a?(String)
-      self[key]
-    else
-      self[key]
-    end
-  end
-
-  # Structural: same kind, same value; a mapping equals a mapping with the
-  # same pairs in any order. `1` and `1.0` are different values.
-  def ==(other : Any) : Bool
-    k = kind
-    return false unless k == other.kind
-    if k == KIND_ARRAY
-      @raw.as(Array(Any)) == other.raw.as(Array(Any))
-    elsif k == KIND_HASH
-      a = @raw.as(Hash(Any, Any))
-      b = other.raw.as(Hash(Any, Any))
-      return false unless a.size == b.size
-      a.each do |key, value|
-        found = b[key]?
-        return false if found.nil?
-        return false unless found == value
-      end
-      true
-    elsif k == KIND_STRING
-      @raw.as(String) == other.raw.as(String)
-    elsif k == KIND_INT
-      @raw.as(Int64) == other.raw.as(Int64)
-    elsif k == KIND_FLOAT
-      @raw.as(Float64) == other.raw.as(Float64)
-    elsif k == KIND_BOOL
-      @raw.as(Bool) == other.raw.as(Bool)
-    else
-      true
-    end
-  end
-
-  def !=(other : Any) : Bool
-    !(self == other)
-  end
-
-  # Agrees with `==`: the same kind and value hash the same, a mapping's
-  # hash does not depend on its order, and `0.0`/`-0.0` share one. A
-  # sequence mixes its items as an `Array` does, a mapping sums one mixed
-  # tuple hash per pair, and an integer hashes as an `Int64`. `31 * h +
-  # item`, a sum of `31 * key + value` and the integer's own low bits
-  # gave a 150 by 150 grid of `[i, j]` 4,769 hashes and of `{x: i, y: j}`
-  # 299, `{a: 1, b: 2}` the hash of `{a: 2, b: 1}` and -1 that of 0, and
-  # 40,000 such mappings took 987 ms to insert as keys; they take 19 ms.
-  def hash : Int32
-    k = kind
-    if k == KIND_ARRAY
-      @raw.as(Array(Any)).hash
-    elsif k == KIND_HASH
-      pairs = @raw.as(Hash(Any, Any))
-      value = 0
-      pairs.each { |key, item| value = value &+ {key, item}.hash }
-      {value, pairs.size}.hash
-    elsif k == KIND_STRING
-      @raw.as(String).hash
-    elsif k == KIND_INT
-      @raw.as(Int64).hash
-    elsif k == KIND_FLOAT
-      f = @raw.as(Float64)
-      return 3 if f == 0.0
-      bits = IyiFloatText.bits_of(f)
-      ((bits ^ bits.unsafe_shr(32_u64)) & 0x7FFFFFFF_u64).to_i32
-    elsif k == KIND_BOOL
-      @raw.as(Bool) ? 1 : 2
-    else
-      0
-    end
-  end
-
-  # A string as itself, a number or boolean as written, nil as nothing,
-  # a collection the way the prelude prints an array or a hash.
-  def to_s : String
-    k = kind
-    if k == KIND_STRING
-      @raw.as(String)
-    elsif k == KIND_NIL
-      ""
-    else
-      inspect
-    end
-  end
-
-  def inspect : String
-    k = kind
-    if k == KIND_ARRAY
-      parts = [] of String
-      @raw.as(Array(Any)).each { |item| parts << item.inspect }
-      "[" + parts.join(", ") + "]"
-    elsif k == KIND_HASH
-      parts = [] of String
-      @raw.as(Hash(Any, Any)).each { |key, item| parts << key.inspect + " => " + item.inspect }
-      "{" + parts.join(", ") + "}"
-    elsif k == KIND_STRING
-      @raw.as(String).inspect
-    elsif k == KIND_INT
-      @raw.as(Int64).to_s
-    elsif k == KIND_FLOAT
-      @raw.as(Float64).to_s
-    elsif k == KIND_BOOL
-      @raw.as(Bool) ? "true" : "false"
-    else
-      "nil"
-    end
-  end
-end
-
 @[OnTape]
-struct TapeMap(K, V)
-  @keys : Array(K)
-  @values : Array(V)
+pub struct TapeMap(K, V)
+  @keys : SlicePool::List(K)
+  @values : SlicePool::List(V)
+  # Entries before `@base` are forgotten: a parser's anchors end with
+  # their document, while the values of nodes read may still view them.
+  @base : Int32
 
   def initialize
-    @keys = Array(K).new
-    @values = Array(V).new
+    @keys = SlicePool::List(K).new(SlicePool(K?).new)
+    @values = SlicePool::List(V).new(SlicePool(V?).new)
+    @base = 0
   end
 
   def size : Int32
-    @keys.size
+    @keys.size - @base
+  end
+
+  # Forgets every entry and keeps the storage, which views may share.
+  def forget : Nil
+    @base = @keys.size
+  end
+
+  private def index(key : K) : Int32
+    i = @base
+    while i < @keys.size
+      return i if @keys[i] == key
+      i += 1
+    end
+    -1
   end
 
   def []?(key : K) : V?
-    @keys.each_with_index do |item, i|
-      return @values[i] if item == key
-    end
-    nil
+    i = index(key)
+    i < 0 ? nil : @values[i]
   end
 
   def [](key : K) : V
@@ -430,16 +126,14 @@ struct TapeMap(K, V)
   end
 
   def has_key?(key : K) : Bool
-    @keys.each { |item| return true if item == key }
-    false
+    index(key) >= 0
   end
 
   def []=(key : K, value : V) : Nil
-    @keys.each_with_index do |item, i|
-      if item == key
-        @values[i] = value
-        return
-      end
+    i = index(key)
+    if i >= 0
+      @values[i] = value
+      return
     end
     @keys << key
     @values << value
@@ -448,15 +142,21 @@ struct TapeMap(K, V)
   def freeze(pool : SlicePool(TapeValue)) : TapeMapping
     keys = pool.alloc_slice(size)
     values = pool.alloc_slice(size)
-    @keys.each_with_index do |key, i|
-      keys[i] = key
-      values[i] = @values[i]
+    i = @base
+    while i < @keys.size
+      keys[i - @base] = @keys[i]
+      values[i - @base] = @values[i]
+      i += 1
     end
     TapeMapping.new(keys, values)
   end
 
   def each(& : K, V -> _) : Nil
-    @keys.each_with_index { |key, i| yield key, @values[i] }
+    i = @base
+    while i < @keys.size
+      yield @keys[i], @values[i]
+      i += 1
+    end
   end
 end
 
@@ -760,69 +460,84 @@ pub struct TapeValue
     self[TapeValue.new(key)]?
   end
 
-  def self.view(value : Any) : TapeValue
-    scratch = TapeViewScratch.new
-    view(value, scratch)
-  end
-
-  private def self.view(value : Any, scratch : TapeViewScratch) : TapeValue
-    k = value.kind
-    if k == Any::KIND_ARRAY
-      mark = scratch.used
-      value.as_a.each { |item| scratch.push(view(item, scratch)) }
-      items = scratch.pool.alloc_slice(scratch.used - mark)
-      index = mark
-      while index < scratch.used
-        items[index - mark] = scratch.items[index]
-        index = index + 1
-      end
-      scratch.used = mark
-      TapeValue.new(items)
-    elsif k == Any::KIND_HASH
-      pairs = TapeMap(TapeValue, TapeValue).new
-      value.as_h.each { |key, item| pairs[view(key, scratch)] = view(item, scratch) }
-      TapeValue.new(pairs.freeze(scratch.pool))
-    elsif k == Any::KIND_STRING
-      TapeValue.new(value.as_s.as_tape)
-    elsif k == Any::KIND_INT
-      TapeValue.new(value.as_i)
-    elsif k == Any::KIND_FLOAT
-      TapeValue.new(value.as_f)
-    elsif k == Any::KIND_BOOL
-      TapeValue.new(value.as_bool)
-    else
-      TapeValue.new(nil)
-    end
-  end
-
-  def to_heap : Any
+  # Agrees with `==`: the same kind and value hash the same, a mapping's
+  # hash does not depend on its order, and `0.0`/`-0.0` share one.
+  def hash : Int32
     k = kind
     if k == KIND_ARRAY
-      items = [] of Any
-      as_a.each { |item| items << item.to_heap }
-      Any.new(items)
+      value = 0
+      as_a.each { |item| value = value &* 31 &+ item.hash }
+      {value, as_a.size}.hash
     elsif k == KIND_HASH
-      pairs = Hash(Any, Any).new
-      as_h.each { |key, item| pairs[key.to_heap] = item.to_heap }
-      Any.new(pairs)
+      pairs = as_h
+      value = 0
+      pairs.each { |key, item| value = value &+ {key.hash, item.hash}.hash }
+      {value, pairs.size}.hash
     elsif k == KIND_STRING
-      Any.new(as_s.to_heap)
+      @raw.as(String).hash
     elsif k == KIND_INT
-      Any.new(as_i)
+      @raw.as(Int64).hash
     elsif k == KIND_FLOAT
-      Any.new(as_f)
+      f = @raw.as(Float64)
+      return 3 if f == 0.0
+      bits = IyiFloatText.bits_of(f)
+      ((bits ^ bits.unsafe_shr(32_u64)) & 0x7FFFFFFF_u64).to_i32
     elsif k == KIND_BOOL
-      Any.new(as_bool)
+      @raw.as(Bool) ? 1 : 2
     else
-      Any.new(nil)
+      0
     end
   end
 
-  # As `Any#inspect` writes it: a refusal names a duplicate key by this,
-  # and the struct's own inspect named the type, not the key.
-  @[TapeToHeap]
+  # A string as itself, a number or boolean as written, nil as nothing,
+  # a collection the way the prelude prints an array or a hash.
+  def to_s : String
+    k = kind
+    if k == KIND_STRING
+      @raw.as(String)
+    elsif k == KIND_NIL
+      ""
+    else
+      inspect
+    end
+  end
+
+  # A refusal names a duplicate key by this.
   def inspect : String
-    to_heap.inspect
+    String.build { |writer| inspect(writer) }
+  end
+
+  def inspect(writer : String::Builder) : Nil
+    k = kind
+    if k == KIND_ARRAY
+      writer << "["
+      as_a.each_with_index do |item, i|
+        writer << ", " if i > 0
+        item.inspect(writer)
+      end
+      writer << "]"
+    elsif k == KIND_HASH
+      writer << "{"
+      first = true
+      as_h.each do |key, item|
+        writer << ", " unless first
+        first = false
+        key.inspect(writer)
+        writer << " => "
+        item.inspect(writer)
+      end
+      writer << "}"
+    elsif k == KIND_STRING
+      writer << @raw.as(String).inspect
+    elsif k == KIND_INT
+      writer << @raw.as(Int64)
+    elsif k == KIND_FLOAT
+      writer << @raw.as(Float64)
+    elsif k == KIND_BOOL
+      writer << (@raw.as(Bool) ? "true" : "false")
+    else
+      writer << "nil"
+    end
   end
 end
 
@@ -1128,9 +843,9 @@ struct TapeParser
       return nil if @error
       # Every node leaves `@line` on the first line after it, so the next
       # document starts here or on a later blank-free line.
-      @anchors = TapeMap(String, TapeValue).new
-      @anchor_sizes = TapeMap(String, Int64).new
-      @anchor_depths = TapeMap(String, Int32).new
+      @anchors.forget
+      @anchor_sizes.forget
+      @anchor_depths.forget
       docs << node
       implicit_allowed = false
       skip_blank_lines
@@ -1204,11 +919,11 @@ struct TapeParser
       fail("encoding 'UTF-16' is not supported: the input is read as UTF-8", 0)
     elsif control >= 0
       digits = "0123456789ABCDEF"
-      name = String.new(4) do |t|
-        t[0] = digits.to_unsafe[(point >> 12) & 15]
-        t[1] = digits.to_unsafe[(point >> 8) & 15]
-        t[2] = digits.to_unsafe[(point >> 4) & 15]
-        t[3] = digits.to_unsafe[point & 15]
+      name = String.build do |t|
+        t.push(digits.byte_at((point >> 12) & 15))
+        t.push(digits.byte_at((point >> 8) & 15))
+        t.push(digits.byte_at((point >> 4) & 15))
+        t.push(digits.byte_at(point & 15))
       end
       what = point >= 0xFFFE ? "noncharacter" : "control character"
       fail("#{what} U+#{name} is not allowed", control)
@@ -2834,17 +2549,14 @@ struct TapeEmitter
   # where telling it from `1_000` would be a second number reader. `y` and
   # `n` are booleans in the 1.1 type repository though PyYAML reads them
   # as strings, so they are quoted too.
-  WORDS_1_1 = ["y", "Y", "n", "N", "yes", "Yes", "YES", "no", "No", "NO",
-               "on", "On", "ON", "off", "Off", "OFF", "="]
 
   private def other_in_1_1?(text : String, bytes : String,
                             size : Int32) : Bool
-    # `==` each, as a `case` asks `String#===` of a String: false.
-    w = 0
-    while w < WORDS_1_1.size
-      return true if text == WORDS_1_1[w]
-      w += 1
-    end
+    # `==` each, as a `case` asks `String#===` of a String: false. A
+    # constant Array of literals would be request tape data in a constant.
+    return true if text == "y" || text == "Y" || text == "n" || text == "N" || text == "yes" || text == "Yes" ||
+                   text == "YES" || text == "no" || text == "No" || text == "NO" || text == "on" || text == "On" ||
+                   text == "ON" || text == "off" || text == "Off" || text == "OFF" || text == "="
     i = bytes[0] == 43_u8 || bytes[0] == 45_u8 ? 1 : 0
     i < size && bytes[i] >= 48_u8 && bytes[i] <= 57_u8
   end
@@ -2928,37 +2640,14 @@ struct TapeEmitter
   end
 end
 
-# A type that can write itself as an `TapeValue`. `YAML.to_yaml` and
+# A type that can write itself as a `TapeValue`. `YAML.to_yaml` and
 # `YAML.to_any` accept any value whose type implements it, as a `derive
 # yaml_serializable` type does.
-# Compatibility parser for callers retaining the result on the heap.
-pub class Parser
-  @text : String
-  @error : String?
-
-  def initialize(@text : String)
-    @error = nil
-  end
-
-  def error : String?
-    @error
-  end
-
-  # On the caller's tape, as `TapeParser#parse_all` answers: an
-  # Array(Any) is refused, its documents growing values.
-  def parse_all : Array(TapeValue)?
-    parser = TapeParser.new(@text.as_tape)
-    docs = parser.parse_all
-    @error = parser.error
-    docs
-  end
-end
-
-# A type that can write itself as an `Any`. `YAML.to_yaml` and
+# A type that can write itself as a `TapeValue`. `YAML.to_yaml` and
 # `YAML.to_any` accept any value whose type implements it, as a `derive
 # yaml_serializable` type does.
 pub trait ToYAML
-  abstract def to_yaml_any : Any
+  abstract def to_yaml_any : TapeValue
 end
 
 # `derive yaml_serializable`, in a struct or class whose fields are written
@@ -2978,7 +2667,7 @@ end
 # It is std/json's `derive serializable` over YAML, field for field: a
 # value is read and written as `YAML.read_value` and `YAML.to_any` read and
 # write its type (the built-in scalars, an `Array` or `Hash` of them, an
-# `Any`, another serializable type, each of them or nil), and `to_yaml`
+# `TapeValue`, another serializable type, each of them or nil), and `to_yaml`
 # writes through `YAML.dump`, so a string that would read as something
 # else is quoted. A key the type has no field for is passed over; a field
 # with no key keeps its default when it is written with one, as does a
@@ -2996,12 +2685,12 @@ end
 # `to_yaml_any` and `initialize(yaml)`).
 pub macro yaml_serializable(declaration)
   impl ::Std::Yaml::ToYAML for {{ declaration[:name].id }}
-    def to_yaml_any : ::Std::Yaml::Any
-      yaml_pairs = Hash(::Std::Yaml::Any, ::Std::Yaml::Any).new
+    def to_yaml_any : ::Std::Yaml::TapeValue
+      yaml_pairs = ::Std::Yaml::TapeMap(::Std::Yaml::TapeValue, ::Std::Yaml::TapeValue).new
       {% for field in declaration[:fields] %}
-        yaml_pairs[::Std::Yaml::Any.new({{ field[:name][1..] }})] = ::Std::Yaml::YAML.to_any({{ field[:name].id }})
+        yaml_pairs[::Std::Yaml::TapeValue.new({{ field[:name][1..] }})] = ::Std::Yaml::YAML.to_any({{ field[:name].id }})
       {% end %}
-      ::Std::Yaml::Any.new(yaml_pairs)
+      ::Std::Yaml::TapeValue.new(yaml_pairs.freeze(SlicePool(::Std::Yaml::TapeValue).new))
     end
   end
 
@@ -3013,15 +2702,15 @@ pub macro yaml_serializable(declaration)
     ::Std::Yaml::YAML.from_yaml(text, self)
   end
 
-  def initialize(yaml : ::Std::Yaml::Any)
+  def initialize(yaml : ::Std::Yaml::TapeValue)
     yaml_pairs = yaml.as_h? || raise "expected a mapping for #{ {{ declaration[:name] }} }, not #{yaml.kind_name}"
     # A key that is not there is nil from `[]?`; a key holding null is an
-    # `Any` that is `null?`. Each field's type is asked of the field
+    # `TapeValue` that is `null?`. Each field's type is asked of the field
     # (`typeof`), as std/json's derive asks it, and whether it has a
     # default is asked of the type when this method is compiled, since the
     # declaration carries names and types only.
     {% for field in declaration[:fields] %}
-      yaml_found_{{ field[:name][1..].id }} = yaml_pairs[::Std::Yaml::Any.new({{ field[:name][1..] }})]?
+      yaml_found_{{ field[:name][1..].id }} = yaml_pairs[::Std::Yaml::TapeValue.new({{ field[:name][1..] }})]?
       \{% if @type.instance_vars.any? { |ivar| ivar.name.stringify == {{ field[:name][1..] }} && ivar.has_default_value? } %}
         {% if field[:type].nilable? %}
           unless yaml_found_{{ field[:name][1..].id }}.nil?
@@ -3075,59 +2764,13 @@ pub struct YAML
     String.build { |w| dump(value, w) }
   end
 
-  # The first document of `text`, or nil when the stream is not YAML this
-  # module reads (the whole stream is checked, not just the first
-  # document). An empty stream is a null document.
-  def self.parse?(text : String) : Any?
-    result = nil.as(Any?)
-    tape do
-      value = parse?(text.as_tape)
-      result = value.to_heap if value
-    end
-    result
-  end
-
-  def self.parse(text : String) : Any
-    result = Any.new(nil)
-    tape do
-      result = parse(text.as_tape).to_heap
-    end
-    result
-  end
-
-  def self.parse_all?(text : String) : Array(Any)?
-    result = nil.as(Array(Any)?)
-    tape do
-      value = parse_all?(text.as_tape)
-      result = value.to_heap if value
-    end
-    result
-  end
-
-  def self.parse_all(text : String) : Array(Any)
-    result = [] of Any
-    tape do
-      result = parse_all(text.as_tape).to_heap
-    end
-    result
-  end
-
-  # Block YAML for `value`, ending in a line break.
-  def self.dump(value : Any) : String
-    result = ""
-    tape do
-      result = dump(TapeValue.view(value)).to_heap
-    end
-    result
-  end
-
   # Block YAML for any value `to_any` knows, written as `dump` writes it.
   def self.to_yaml(obj : T) : String forall T
     dump(to_any(obj))
   end
 
   # The document `text` holds, read into `type`: `Nil`, `Bool`, `Int32`,
-  # `Int64`, `UInt8`, `UInt64`, `Float64`, `String`, `Any`, a type with
+  # `Int64`, `UInt8`, `UInt64`, `Float64`, `String`, `TapeValue`, a type with
   # `derive yaml_serializable`, one of those or `nil`, or an `Array` or a
   # `Hash` of those. Text that is not YAML panics as `parse` does; a value
   # of another kind, or an integer outside the type, is refused.
@@ -3135,124 +2778,129 @@ pub struct YAML
     read_value(parse(text), type)
   end
 
-  # The `Any` a value is written as: the value or `nil`, the way
+  # The `TapeValue` a value is written as: the value or `nil`, the way
   # `JSON.to_json` takes it. A nil is taken out here, before the rest
   # dispatches, for the reason std/json's `write_or_null` gives: handed to
   # `write_value` whole, `Int32 | Nil` matches the `ToYAML` overload as
   # one type and does not build.
-  def self.to_any(val : T) : Any forall T
+  def self.to_any(val : T) : TapeValue forall T
     if val.nil?
-      Any.new(nil)
+      TapeValue.new(nil)
     else
       write_value(val)
     end
   end
 
-  def self.write_value(val : Nil) : Any
-    Any.new(nil)
+  def self.write_value(val : Nil) : TapeValue
+    TapeValue.new(nil)
   end
 
-  def self.write_value(val : Bool) : Any
-    Any.new(val)
+  def self.write_value(val : Bool) : TapeValue
+    TapeValue.new(val)
   end
 
-  def self.write_value(val : Int32) : Any
-    Any.new(val.to_i64)
+  def self.write_value(val : Int32) : TapeValue
+    TapeValue.new(val.to_i64)
   end
 
-  def self.write_value(val : Int64) : Any
-    Any.new(val)
+  def self.write_value(val : Int64) : TapeValue
+    TapeValue.new(val)
   end
 
-  def self.write_value(val : UInt8) : Any
-    Any.new(val.to_i64)
+  def self.write_value(val : UInt8) : TapeValue
+    TapeValue.new(val.to_i64)
   end
 
   # A YAML integer is read as an `Int64`, and one past it as a float, so a
   # `UInt64` above 9223372036854775807 would read back as a different
   # number: it is refused rather than written.
-  def self.write_value(val : UInt64) : Any
+  def self.write_value(val : UInt64) : TapeValue
     raise "the UInt64 #{val} is past 9223372036854775807, the largest integer YAML reads back" if val > 9223372036854775807_u64
-    Any.new(val.to_i64)
+    TapeValue.new(val.to_i64)
   end
 
-  def self.write_value(val : Float64) : Any
-    Any.new(val)
+  def self.write_value(val : Float64) : TapeValue
+    TapeValue.new(val)
   end
 
-  def self.write_value(val : String) : Any
-    Any.new(val)
+  def self.write_value(val : String) : TapeValue
+    TapeValue.new(val)
   end
 
-  def self.write_value(val : Any) : Any
+  def self.write_value(val : TapeValue) : TapeValue
     val
   end
 
-  def self.write_value(val : Array(T)) : Any forall T
-    Any.new(val.map { |item| to_any(item) })
+  def self.write_value(val : Array(T)) : TapeValue forall T
+    items = SlicePool(TapeValue).new(val.size).alloc_slice(val.size)
+    val.each_with_index { |item, at| items[at] = to_any(item) }
+    TapeValue.new(items)
   end
 
   # A key of any type `to_any` writes as a scalar: YAML keys are typed,
   # so `Hash(Int32, String)` is written with integer keys and reads back
   # as itself. A collection key is refused by `dump`.
-  def self.write_value(val : Hash(K, V)) : Any forall K, V
-    pairs = Hash(Any, Any).new
+  def self.write_value(val : Hash(K, V)) : TapeValue forall K, V
+    pairs = TapeMap(TapeValue, TapeValue).new
     val.each { |key, item| pairs[to_any(key)] = to_any(item) }
-    Any.new(pairs)
+    TapeValue.new(pairs.freeze(SlicePool(TapeValue).new))
   end
 
-  def self.write_value(val : T) : Any forall T : ToYAML
+  def self.write_value(val : T) : TapeValue forall T : ToYAML
     val.to_yaml_any
   end
 
-  def self.read_value(value : Any, type : Nil.class) : Nil
+  def self.read_value(value : TapeValue, type : Nil.class) : Nil
     value.as_nil
   end
 
-  def self.read_value(value : Any, type : Bool.class) : Bool
+  def self.read_value(value : TapeValue, type : Bool.class) : Bool
     value.as_bool
   end
 
-  def self.read_value(value : Any, type : Int32.class) : Int32
+  def self.read_value(value : TapeValue, type : Int32.class) : Int32
     v = value.as_i
     raise "integer #{v} out of Int32 range" if v < -2147483648_i64 || v > 2147483647_i64
     v.to_i32
   end
 
-  def self.read_value(value : Any, type : Int64.class) : Int64
+  def self.read_value(value : TapeValue, type : Int64.class) : Int64
     value.as_i
   end
 
-  def self.read_value(value : Any, type : UInt8.class) : UInt8
+  def self.read_value(value : TapeValue, type : UInt8.class) : UInt8
     v = value.as_i
     raise "integer #{v} out of UInt8 range" if v < 0_i64 || v > 255_i64
     v.to_u8
   end
 
-  def self.read_value(value : Any, type : UInt64.class) : UInt64
+  def self.read_value(value : TapeValue, type : UInt64.class) : UInt64
     v = value.as_i
     raise "integer #{v} out of UInt64 range" if v < 0_i64
     v.to_u64
   end
 
   # A float, or an integer widened to one: `y: 2` is the Float64 2.0.
-  def self.read_value(value : Any, type : Float64.class) : Float64
+  def self.read_value(value : TapeValue, type : Float64.class) : Float64
     value.as_f
   end
 
-  def self.read_value(value : Any, type : String.class) : String
+  def self.read_value(value : TapeValue, type : String.class) : String
     value.as_s
   end
 
-  def self.read_value(value : Any, type : Any.class) : Any
+  def self.read_value(value : TapeValue, type : TapeValue.class) : TapeValue
     value
   end
 
-  def self.read_value(value : Any, type : Array(T).class) : Array(T) forall T
-    value.as_a.map { |item| read_value(item, T) }
+  def self.read_value(value : TapeValue, type : Array(T).class) : Array(T) forall T
+    items = value.as_a
+    list = Array(T).new(items.size)
+    items.each { |item| list << read_value(item, T) }
+    list
   end
 
-  def self.read_value(value : Any, type : Hash(K, V).class) : Hash(K, V) forall K, V
+  def self.read_value(value : TapeValue, type : Hash(K, V).class) : Hash(K, V) forall K, V
     h = Hash(K, V).new
     value.as_h.each { |key, item| h[read_value(key, K)] = read_value(item, V) }
     h
@@ -3261,7 +2909,7 @@ pub struct YAML
   # A type that reads itself, the `initialize(yaml)` a `derive
   # yaml_serializable` wrote; a type that admits nil reads null as the nil
   # and anything else as the other type, as std/json's `read_value` does.
-  def self.read_value(value : Any, type : T.class) : T forall T
+  def self.read_value(value : TapeValue, type : T.class) : T forall T
     {% if T.nilable? %}
       value.null? ? nil : read_value(value, typeof(nil.as(T) || raise("")))
     {% else %}

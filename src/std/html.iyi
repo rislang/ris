@@ -48,14 +48,10 @@ pub struct HTML
     end
     return string unless needs
 
-    # Escaped on a tape, then copied out once.
-    escaped = ""
-    tape do
-      w = String::Builder.new(len + 16)
-      w.append_html_escaped(string)
-      escaped = w.finish.to_heap
-    end
-    escaped
+    # Escaped onto the caller's tape.
+    w = String::Builder.new(len + 16)
+    w.append_html_escaped(string)
+    w.finish
   end
 
   # Escape borrowed text on the caller's tape.

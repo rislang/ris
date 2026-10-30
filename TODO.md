@@ -28,7 +28,9 @@ the std row. Update a row when its work starts or ends.
 
 | Work                                  | Size     | Time      | Tokens    |
 |---------------------------------------|----------|-----------|-----------|
-| std heap: 101 mallocs, 9 not compiling | large    | 2-3 days  | 300k-800k |
+| std heap: 47 mallocs, 22 to_heap      | medium   | 1-2 days  | 200k-500k |
+| std/xml XPath on XmlTree (dropped)    | medium   | 4-8 h     | 200-400k  |
+| std/dns heap DnsMessage beside tape   | medium   | 3-5 h     | 150-300k  |
 | Text: `s = ""` + `<<`, no Builder.new | medium   | 6-10 h    | 300-500k  |
 | Kernel threads without a collector    | large    | 1-2 days  | 300-500k  |
 | Task value: @[OnTape] and nested      | medium   | 2-4 h     | 100-200k  |
@@ -238,24 +240,33 @@ first):
   Unmarked runtime and std declarations still use the migration allocation
   ABI; selected std classes opt in with @[OnTape].
 * Complete the Pool/SlicePool surface beyond the validated paths in use.
-* std heap left (2026-10-30 audit): 47 Pointer.malloc/realloc sites,
-  120 to_heap copies. Ports in compress style (tape Arrays): deque 4,
+* std heap left (2026-10-30 audit, fourth pass): 47 Pointer.malloc/
+  realloc sites, 22 to_heap copies (dns 8, socket 3, autocert 3, eiy 2,
+  http 2, format 1, websocket 1, file 1, log 1: AsyncBackend's queue).
+  Ports in compress style (tape Arrays): deque 4,
   string_pool 4, password 4. Done, each with a test/ris/<module>.ri gate
   (exact output, 0 heap): websocket, regex, udp, csv, ini (RisIni), otp,
   netip, debug; mail (TapePart views a MailTree node array; the heap
   Part is gone), smtp (loopback session), png, bzip2, xz, tar, zip
   (codecs checked against Python's zlib, bz2, lzma, tarfile, zipfile).
   OS buffers left are win32 or sized: file 8, user 6, process 5,
-  system 4, dir/path/socket 2 each. to_heap stores into plain classes:
-  time 25, autocert 17, toml 13, xml 12, yaml 11.
-  Not compiling under ris (gc by design):
-  * toml, yaml, xml: the heap Any (Array(Any), Hash(String, Any)) beside
-    the tape one; drop it or make it a node array (1-2 days).
-* Streaming decoders read an IyiIO now (XzReader, Bzip2Reader:
-  block form gone; Inflater, ZstdReader: IO form added). The block
-  forms left (Inflater, ZstdReader) are refused under ris when the block
-  captures tape data: move std/http's body feed to an IyiIO (a Reader)
-  and drop them. zip's ZipFeed and the benches' Feed are io Readers.
+  system 4, dir/path/socket 2 each. Done (fourth pass): toml (TapeAny
+  only, derive on it), yaml (TapeValue only, derive on it), xml (XmlTree
+  node array, TapeNode a view; copy_to works), gates with Python's
+  tomllib, PyYAML and xml.etree; log (TapeEntry only: Entry and
+  MemoryBackend gone, Formatter writes into a Builder), json, time
+  (TimeParseError @[OnTape]), html, number_format, autocert 17 -> 3.
+  * std/xml: XPath only worked on the heap Node and went with it; port
+    it onto XmlTree (its classes need @[OnTape] records). id() needs
+    the DTD's ID attributes, which the parser no longer keeps.
+  * std/dns: the heap DnsMessage/DnsRecord beside DnsTapeMessage (91
+    uses in dns, secure_dns, socket).
+  * std/http: H2's @pending queue (payload.to_heap) needs a
+    connection-owned buffer.
+* Streaming decoders read an IyiIO only: the block forms of Inflater
+  and ZstdReader are gone; std/http's coded body is BodyFeed, an io
+  Reader (gate test/ris/http_coding.ri). The benches' Feed and Pending
+  are io Readers.
 * bench/std_{mail,xz,bzip2}_exercise use the new APIs but still do not
   build under ris (to_unsafe, String.new pointers, std/gc).
 * bench/std_ini_exercise still uses INI's old Hash(String, Hash) API.

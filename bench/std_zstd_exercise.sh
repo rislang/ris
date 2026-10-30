@@ -476,11 +476,11 @@ refuses() { # refuses <label> <name> <phrase> <expression>
 # Corrupt input is a value the exercise checks; what panics is the
 # caller's own mistake.
 refuses "a read of no bytes" read_zero "ZstdReader: read wants at least one byte, not 0" \
-  '(ZstdReader.new { nil }.read(0); "")'
+  '(ZstdReader.new(nil).read(0); "")'
 refuses "a window limit under 1 KiB" small_limit "zstd: a window limit of 512 bytes is outside 1 KiB to 512 MiB" \
   'Zstd.decompress("", 512).to_s'
 refuses "a window limit past 512 MiB" big_limit "zstd: a window limit of 1073741824 bytes is outside 1 KiB to 512 MiB" \
-  '(ZstdReader.new(1073741824) { nil }; "")'
+  '(ZstdReader.new(nil, 1073741824); "")'
 
 echo
 echo "== proving the checks can fail when the module is broken"

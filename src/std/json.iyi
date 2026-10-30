@@ -84,15 +84,14 @@ class StringBuffer
     end
   end
 
-  # String migration results own their bytes across buffer reuse.
-  @[TapeToHeap]
+  # The bytes so far, on the caller's tape: a copy, as the buffer is
+  # cleared and refilled.
   def to_s : String
-    @writer.finish.to_heap
+    String.build(size) { |w| w << @writer.finish }
   end
 
-  @[TapeToHeap]
   def slice_from(start : Int32) : String
-    @writer.finish[start, size - start].to_heap
+    String.build(size - start) { |w| w << @writer.finish[start, size - start] }
   end
 end
 
@@ -877,7 +876,7 @@ struct Lexer
   # The input's bytes from *start* as a String, in either mode.
   private def slice(input : String, start : Int32, size : Int32) : String
     return @input[start, size] unless @spans
-    input[start, size].to_heap
+    input[start, size]
   end
 
   # A token borrows the input instead of caching copies of short text.
@@ -2892,7 +2891,7 @@ pub struct Document
         key = @input[node.key_at, node.key_size]
         if (node.flags & Node::ESCAPED_KEY) == 0
           found = child if key == name
-        elsif JSON.decoded_s(key) == name
+        elsif JSON.decoded(key, true) == name
           found = child
         end
       end
@@ -3105,7 +3104,7 @@ pub struct DocumentParser
 
   # The key at *at* decoded into a String.
   private def key_s(at : Int32, size : Int32, flags : Int32) : String
-    JSON.decoded_s(text(at, size), (flags & Node::ESCAPED_KEY) != 0)
+    JSON.decoded(text(at, size), (flags & Node::ESCAPED_KEY) != 0)
   end
 
   # Whether the object opened at *at* already has a field with this key.
@@ -3205,13 +3204,7 @@ pub struct JSON
     end
   end
 
-  # The same decoded into a String.
-  def self.decoded_s(text : String, escaped : Bool = true) : String
-    return text.to_heap unless escaped
-    buffer = StringBuffer.new(text.bytesize)
-    each_decoded_byte(text) { |b| buffer.append(b) }
-    buffer.to_s
-  end
+
 
   # Each byte of a string's text whose escapes the lexer has checked,
   # decoded: `\uXXXX` (a surrogate pair into one code point) as UTF-8.

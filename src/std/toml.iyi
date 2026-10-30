@@ -1,5 +1,5 @@
 # TOML 1.0.0 (https://toml.io/en/v1.0.0), read and written in iyi alone:
-# a reader that answers a document as an `Any` or a `TOMLError` saying
+# a reader that answers a document as an `TapeAny` or a `TOMLError` saying
 # what is wrong and where, a writer whose text reads back to the value it
 # was given, and `derive toml_serializable`.
 #
@@ -83,7 +83,7 @@
 #     tables alike, so `==`, `dump` and `hash` over any value this reader
 #     answers stay within a task's stack.
 #
-# `TOML.parse(text)` answers `Any | TOMLError`; `TOML.parse?(text)` answers
+# `TOML.parse(text)` answers `TapeAny | TOMLError`; `TOML.parse?(text)` answers
 # nil where `parse` answers the error, as `JSON.parse?` and `YAML.parse?`
 # do. Neither panics on anything a document says. `TOML.parse(text).or_panic`
 # panics with the sentence, and `TOML.from_toml` panics as
@@ -102,17 +102,17 @@
 #
 # `derive toml_serializable` makes a type read and write itself as a
 # table, a key per field, as std/yaml's `derive yaml_serializable` does:
-# `to_toml`, `self.from_toml(text)`, `initialize(toml : Any)` and the
+# `to_toml`, `self.from_toml(text)`, `initialize(toml : TapeAny)` and the
 # `ToTOML` trait's `to_toml_any`. TOML has no null: a nil field is left
 # out when written and a missing key reads as nil where the field admits
 # it; a nil anywhere else (inside an array, as a hash value) cannot be
 # written and is refused by name.
 #
-# `Any` holds a value: `raw` is the union, `as_x`/`as_x?` are the pairs,
+# `TapeAny` holds a value: `raw` is the union, `as_x`/`as_x?` are the pairs,
 # `[]`/`[]?`/`dig`/`dig?` walk it, `==` is structural (two NaNs are equal,
 # a document that says `nan` twice says the same thing) and `hash` agrees
 # with it. As in std/yaml, every test of the union goes through
-# `Any#kind`, which tests the reference types first.
+# `TapeAny#kind`, which tests the reference types first.
 
 module std/toml
 
@@ -248,11 +248,7 @@ pub struct TOMLDateTime
 
   # `value` in decimal with zeros in front to `width` digits.
   def self.pad(value : Int32, width : Int32) : String
-    result = ""
-    tape do
-      result = padded(value, width).to_heap
-    end
-    result
+    padded(value, width)
   end
 
   protected def self.padded(value : Int32, width : Int32) : String
@@ -313,13 +309,7 @@ pub struct TOMLDateTime
   # date and time, `Z` for a zero offset, the fraction with its trailing
   # zeros dropped and left out when it is zero.
   def to_s : String
-    result = ""
-    tape do
-      writer = String::Builder.new
-      write(writer)
-      result = writer.finish.to_heap
-    end
-    result
+    String.build { |writer| write(writer) }
   end
 
   def write(text : String::Builder) : Nil
@@ -376,306 +366,7 @@ pub struct TOMLDateTime
 end
 
 # The value a document holds. A document is a table: `TOML.parse` answers
-# an `Any` whose `raw` is a `Hash(String, Any)`.
-pub struct Any
-  KIND_BOOL     = 0
-  KIND_INT      = 1
-  KIND_FLOAT    = 2
-  KIND_STRING   = 3
-  KIND_DATETIME = 4
-  KIND_ARRAY    = 5
-  KIND_TABLE    = 6
-
-  alias Type = Bool | Int64 | Float64 | String | TOMLDateTime | Array(Any) |
-               Hash(String, Any)
-
-  getter raw : Type
-
-  def initialize(@raw : Type)
-  end
-
-  def initialize(value : Int32)
-    @raw = value.to_i64
-  end
-
-  # Which member of the union `raw` is, as one of the KIND_ constants.
-  # Reference types are tested first, for the reason std/yaml's header
-  # gives.
-  def kind : Int32
-    r = @raw
-    if r.is_a?(Array(Any))
-      KIND_ARRAY
-    elsif r.is_a?(Hash(String, Any))
-      KIND_TABLE
-    elsif r.is_a?(String)
-      KIND_STRING
-    elsif r.is_a?(TOMLDateTime)
-      KIND_DATETIME
-    elsif r.is_a?(Int64)
-      KIND_INT
-    elsif r.is_a?(Float64)
-      KIND_FLOAT
-    else
-      KIND_BOOL
-    end
-  end
-
-  # The name of the kind, for the sentences below.
-  def kind_name : String
-    k = kind
-    if k == KIND_ARRAY
-      "an array"
-    elsif k == KIND_TABLE
-      "a table"
-    elsif k == KIND_STRING
-      "a string"
-    elsif k == KIND_DATETIME
-      @raw.as(TOMLDateTime).kind_name
-    elsif k == KIND_INT
-      "an integer"
-    elsif k == KIND_FLOAT
-      "a float"
-    else
-      "a boolean"
-    end
-  end
-
-  def as_bool : Bool
-    raise "expected a boolean, not #{kind_name}" unless kind == KIND_BOOL
-    @raw.as(Bool)
-  end
-
-  def as_bool? : Bool?
-    kind == KIND_BOOL ? @raw.as(Bool) : nil
-  end
-
-  def as_i : Int64
-    raise "expected an integer, not #{kind_name}" unless kind == KIND_INT
-    @raw.as(Int64)
-  end
-
-  def as_i? : Int64?
-    kind == KIND_INT ? @raw.as(Int64) : nil
-  end
-
-  # A float, or an integer widened to one.
-  def as_f : Float64
-    k = kind
-    return @raw.as(Float64) if k == KIND_FLOAT
-    return @raw.as(Int64).to_f64 if k == KIND_INT
-    raise "expected a float, not #{kind_name}"
-  end
-
-  def as_f? : Float64?
-    k = kind
-    return @raw.as(Float64) if k == KIND_FLOAT
-    return @raw.as(Int64).to_f64 if k == KIND_INT
-    nil
-  end
-
-  def as_s : String
-    raise "expected a string, not #{kind_name}" unless kind == KIND_STRING
-    @raw.as(String)
-  end
-
-  def as_s? : String?
-    kind == KIND_STRING ? @raw.as(String) : nil
-  end
-
-  def as_datetime : TOMLDateTime
-    unless kind == KIND_DATETIME
-      raise "expected a date or time, not #{kind_name}"
-    end
-    @raw.as(TOMLDateTime)
-  end
-
-  def as_datetime? : TOMLDateTime?
-    kind == KIND_DATETIME ? @raw.as(TOMLDateTime) : nil
-  end
-
-  def as_a : Array(Any)
-    raise "expected an array, not #{kind_name}" unless kind == KIND_ARRAY
-    @raw.as(Array(Any))
-  end
-
-  def as_a? : Array(Any)?
-    kind == KIND_ARRAY ? @raw.as(Array(Any)) : nil
-  end
-
-  def as_h : Hash(String, Any)
-    raise "expected a table, not #{kind_name}" unless kind == KIND_TABLE
-    @raw.as(Hash(String, Any))
-  end
-
-  def as_h? : Hash(String, Any)?
-    kind == KIND_TABLE ? @raw.as(Hash(String, Any)) : nil
-  end
-
-  # Items of an array, keys of a table, characters of a string.
-  def size : Int32
-    k = kind
-    return @raw.as(Array(Any)).size if k == KIND_ARRAY
-    return @raw.as(Hash(String, Any)).size if k == KIND_TABLE
-    return @raw.as(String).size if k == KIND_STRING
-    raise "#{kind_name} has no size"
-  end
-
-  def [](key : String | String) : Any
-    h = as_h
-    found = h[key]?
-    raise "no such key #{key.inspect}" if found.nil?
-    found
-  end
-
-  def []?(key : String | String) : Any?
-    h = as_h?
-    return nil if h.nil?
-    h[key]?
-  end
-
-  def [](index : Int32) : Any
-    as_a[index]
-  end
-
-  def []?(index : Int32) : Any?
-    a = as_a?
-    return nil if a.nil?
-    a[index]?
-  end
-
-  def dig?(key : String | String | Int32) : Any?
-    step?(key)
-  end
-
-  def dig?(key : String | String | Int32, *rest : String | String | Int32) : Any?
-    v = step?(key)
-    return nil if v.nil?
-    v.dig?(*rest)
-  end
-
-  def dig(key : String | String | Int32) : Any
-    step(key)
-  end
-
-  def dig(key : String | String | Int32, *rest : String | String | Int32) : Any
-    step(key).dig(*rest)
-  end
-
-  private def step?(key : String | String | Int32) : Any?
-    if key.is_a?(String)
-      self[key]?
-    else
-      self[key]?
-    end
-  end
-
-  private def step(key : String | String | Int32) : Any
-    if key.is_a?(String)
-      self[key]
-    else
-      self[key]
-    end
-  end
-
-  # Structural: same kind, same value; a table equals a table with the
-  # same pairs in any order. `1` and `1.0` are different values, two NaNs
-  # the same one, and `0.0` equals `-0.0` as the doubles do. Arrays and
-  # tables are compared in methods of their own and scalars in a third,
-  # so the frames a deep value recurses through stay small: with all of
-  # it here, comparing two arrays nested 100 deep overflowed a task's
-  # stack in a plain build.
-  def ==(other : Any) : Bool
-    k = kind
-    return false unless k == other.kind
-    return same_items?(other) if k == KIND_ARRAY
-    return same_pairs?(other) if k == KIND_TABLE
-    same_scalar?(other, k)
-  end
-
-  private def same_items?(other : Any) : Bool
-    a = @raw.as(Array(Any))
-    b = other.raw.as(Array(Any))
-    return false unless a.size == b.size
-    i = 0
-    while i < a.size
-      return false unless a[i] == b[i]
-      i = i + 1
-    end
-    true
-  end
-
-  private def same_pairs?(other : Any) : Bool
-    a = @raw.as(Hash(String, Any))
-    b = other.raw.as(Hash(String, Any))
-    return false unless a.size == b.size
-    a.each do |key, value|
-      found = b[key]?
-      return false if found.nil?
-      return false unless found == value
-    end
-    true
-  end
-
-  private def same_scalar?(other : Any, k : Int32) : Bool
-    if k == KIND_STRING
-      @raw.as(String) == other.raw.as(String)
-    elsif k == KIND_DATETIME
-      @raw.as(TOMLDateTime) == other.raw.as(TOMLDateTime)
-    elsif k == KIND_INT
-      @raw.as(Int64) == other.raw.as(Int64)
-    elsif k == KIND_FLOAT
-      x = @raw.as(Float64)
-      y = other.raw.as(Float64)
-      x == y || (x != x && y != y)
-    else
-      @raw.as(Bool) == other.raw.as(Bool)
-    end
-  end
-
-  def !=(other : Any) : Bool
-    !(self == other)
-  end
-
-  # Agrees with `==`: a table's hash does not depend on its order, `0.0`
-  # and `-0.0` share one and so do all NaNs. Mixed as std/yaml's `Any`
-  # mixes, for the spread that file measured.
-  def hash : Int32
-    k = kind
-    if k == KIND_ARRAY
-      @raw.as(Array(Any)).hash
-    elsif k == KIND_TABLE
-      pairs = @raw.as(Hash(String, Any))
-      value = 0
-      pairs.each { |key, item| value = value &+ {key, item}.hash }
-      {value, pairs.size}.hash
-    elsif k == KIND_STRING
-      @raw.as(String).hash
-    elsif k == KIND_DATETIME
-      @raw.as(TOMLDateTime).hash
-    elsif k == KIND_INT
-      @raw.as(Int64).hash
-    elsif k == KIND_FLOAT
-      f = @raw.as(Float64)
-      return 3 if f == 0.0
-      return 5 if f != f
-      bits = IyiFloatText.bits_of(f)
-      ((bits ^ bits.unsafe_shr(32_u64)) & 0x7FFFFFFF_u64).to_i32
-    else
-      @raw.as(Bool) ? 1 : 2
-    end
-  end
-
-  # A string as itself, anything else as `inspect` writes it.
-  def to_s : String
-    kind == KIND_STRING ? @raw.as(String) : inspect
-  end
-
-  # A value as TOML writes it inline: strings quoted and escaped, floats
-  # as `dump` spells them, tables as inline tables.
-  def inspect : String
-    Writer.new.inline_text(self)
-  end
-end
+# an `TapeAny` whose `raw` is a `Hash(String, Any)`.
 
 # One key of a table while the reader builds it: a value written in the
 # text (a scalar, an array or an inline table, all closed to headers and
@@ -946,21 +637,106 @@ pub struct TapeAny
     end
   end
 
-  def to_heap : Any
-    raw = @raw
-    if raw.is_a?(String)
-      Any.new(raw.to_heap)
-    elsif raw.is_a?(SlicePool::Run(TapeAny))
-      items = [] of Any
-      raw.each { |item| items << item.to_heap }
-      Any.new(items)
-    elsif raw.is_a?(TapeMap(TapeAny))
-      pairs = Hash(String, Any).new
-      raw.each { |key, value| pairs[key.to_heap] = value.to_heap }
-      Any.new(pairs)
-    else
-      Any.new(raw)
+  # Structural: same kind, same value; a table equals a table with the
+  # same pairs in any order. `1` and `1.0` are different values, two NaNs
+  # the same one, and `0.0` equals `-0.0` as the doubles do. Arrays and
+  # tables are compared in methods of their own and scalars in a third,
+  # so the frames a deep value recurses through stay small: with all of
+  # it here, comparing two arrays nested 100 deep overflowed a task's
+  # stack in a plain build.
+  def ==(other : TapeAny) : Bool
+    k = kind
+    return false unless k == other.kind
+    return same_items?(other) if k == KIND_ARRAY
+    return same_pairs?(other) if k == KIND_TABLE
+    same_scalar?(other, k)
+  end
+
+  private def same_items?(other : TapeAny) : Bool
+    a = @raw.as(SlicePool::Run(TapeAny))
+    b = other.raw.as(SlicePool::Run(TapeAny))
+    return false unless a.size == b.size
+    i = 0
+    while i < a.size
+      return false unless a[i] == b[i]
+      i = i + 1
     end
+    true
+  end
+
+  private def same_pairs?(other : TapeAny) : Bool
+    a = @raw.as(TapeMap(TapeAny))
+    b = other.raw.as(TapeMap(TapeAny))
+    return false unless a.size == b.size
+    a.each do |key, value|
+      found = b[key]?
+      return false if found.nil?
+      return false unless found == value
+    end
+    true
+  end
+
+  private def same_scalar?(other : TapeAny, k : Int32) : Bool
+    if k == KIND_STRING
+      @raw.as(String) == other.raw.as(String)
+    elsif k == KIND_DATETIME
+      @raw.as(TOMLDateTime) == other.raw.as(TOMLDateTime)
+    elsif k == KIND_INT
+      @raw.as(Int64) == other.raw.as(Int64)
+    elsif k == KIND_FLOAT
+      x = @raw.as(Float64)
+      y = other.raw.as(Float64)
+      x == y || (x != x && y != y)
+    else
+      @raw.as(Bool) == other.raw.as(Bool)
+    end
+  end
+
+  def !=(other : TapeAny) : Bool
+    !(self == other)
+  end
+
+  # Agrees with `==`: a table's hash does not depend on its order, `0.0`
+  # and `-0.0` share one and so do all NaNs. Mixed as std/yaml's `TapeAny`
+  # mixes, for the spread that file measured.
+  def hash : Int32
+    k = kind
+    if k == KIND_ARRAY
+      items = @raw.as(SlicePool::Run(TapeAny))
+      value = items.size
+      items.each { |item| value = value &* 31 &+ item.hash }
+      value
+    elsif k == KIND_TABLE
+      pairs = @raw.as(TapeMap(TapeAny))
+      value = 0
+      pairs.each { |key, item| value = value &+ {key, item}.hash }
+      {value, pairs.size}.hash
+    elsif k == KIND_STRING
+      @raw.as(String).hash
+    elsif k == KIND_DATETIME
+      @raw.as(TOMLDateTime).hash
+    elsif k == KIND_INT
+      @raw.as(Int64).hash
+    elsif k == KIND_FLOAT
+      f = @raw.as(Float64)
+      return 3 if f == 0.0
+      return 5 if f != f
+      bits = IyiFloatText.bits_of(f)
+      ((bits ^ bits.unsafe_shr(32_u64)) & 0x7FFFFFFF_u64).to_i32
+    else
+      @raw.as(Bool) ? 1 : 2
+    end
+  end
+
+  # A string as itself, anything else as `inspect` writes it.
+  def to_s : String
+    kind == KIND_STRING ? @raw.as(String) : inspect
+  end
+
+  # A value as TOML writes it inline: strings quoted and escaped, floats
+  # as `dump` spells them, tables as inline tables.
+  def inspect : String
+    String.build { |writer| TapeWriter.new(writer).inline(self) }
   end
 end
 
@@ -2409,57 +2185,6 @@ struct TapeReader
   end
 end
 
-# Writes a table as TOML the reader reads back.
-class Writer
-  def document(value : Any) : String
-    result = ""
-    tape do
-      result = TOML.dump_tape(value).to_heap
-    end
-    result
-  end
-
-  def inline_text(value : Any) : String
-    result = ""
-    tape do
-      writer = String::Builder.new
-      TapeWriter.new(writer).inline(value)
-      result = writer.finish.to_heap
-    end
-    result
-  end
-
-  def self.key_text(key : String) : String
-    result = ""
-    tape do
-      writer = String::Builder.new
-      TapeWriter.new(writer).key(key)
-      result = writer.finish.to_heap
-    end
-    result
-  end
-
-  def self.quoted(text : String) : String
-    result = ""
-    tape do
-      writer = String::Builder.new
-      TapeWriter.quoted(text.as_tape, writer)
-      result = writer.finish.to_heap
-    end
-    result
-  end
-
-  def self.float_text(value : Float64) : String
-    result = ""
-    tape do
-      writer = String::Builder.new
-      TapeWriter.float_text(value, writer)
-      result = writer.finish.to_heap
-    end
-    result
-  end
-end
-
 @[OnTape]
 struct TapeWriter
   @out : String::Builder
@@ -2469,8 +2194,8 @@ struct TapeWriter
     @start = @out.length
   end
 
-  def document(value : Any | TapeAny) : Nil
-    unless value.kind == Any::KIND_TABLE
+  def document(value : TapeAny) : Nil
+    unless value.kind == TapeAny::KIND_TABLE
       raise "TOML.dump: a document is a table, not #{value.kind_name}"
     end
     section(value.as_h, Array(String).new)
@@ -2479,7 +2204,7 @@ struct TapeWriter
   # A key bare where the bare set allows, else a basic string.
   def key(key : String | String) : Nil
     return TapeWriter.quoted(view(key), @out) if key.empty?
-    bytes = key.is_a?(String) ? key.to_unsafe : key
+    bytes = key
     i = 0
     while i < key.bytesize
       b = bytes[i]
@@ -2523,8 +2248,8 @@ struct TapeWriter
         else
           output << "\\u00"
           digits = "0123456789ABCDEF"
-          output.push(digits.to_unsafe[b.to_i32 // 16])
-          output.push(digits.to_unsafe[b.to_i32 % 16])
+          output.push(digits.byte_at(b.to_i32 // 16))
+          output.push(digits.byte_at(b.to_i32 % 16))
         end
         run = i + 1
       end
@@ -2552,12 +2277,12 @@ struct TapeWriter
 
   # An array written as `[[...]]` entries: one with items, every one a
   # table.
-  private def table_array?(value : Any | TapeAny) : Bool
-    return false unless value.kind == Any::KIND_ARRAY
+  private def table_array?(value : TapeAny) : Bool
+    return false unless value.kind == TapeAny::KIND_ARRAY
     items = value.as_a
     return false if items.empty?
     items.each do |item|
-      return false unless item.kind == Any::KIND_TABLE
+      return false unless item.kind == TapeAny::KIND_TABLE
     end
     true
   end
@@ -2579,17 +2304,17 @@ struct TapeWriter
 
   # A table's own pairs, then its sub-tables and arrays of tables, each
   # under its header.
-  private def section(pairs : Hash(String, Any) | TapeMap(TapeAny),
+  private def section(pairs : TapeMap(TapeAny),
                       path : Array(String)) : Nil
     pairs.each do |key, value|
-      next if value.kind == Any::KIND_TABLE || table_array?(value)
+      next if value.kind == TapeAny::KIND_TABLE || table_array?(value)
       self.key(key)
       @out << " = "
       inline(value)
       @out << "\n"
     end
     pairs.each do |key, value|
-      if value.kind == Any::KIND_TABLE
+      if value.kind == TapeAny::KIND_TABLE
         path << view(key)
         @out << "\n" if @out.length > @start
         @out << '['
@@ -2611,9 +2336,9 @@ struct TapeWriter
     end
   end
 
-  def inline(value : Any | TapeAny) : Nil
+  def inline(value : TapeAny) : Nil
     k = value.kind
-    if k == Any::KIND_ARRAY
+    if k == TapeAny::KIND_ARRAY
       @out << "["
       first = true
       value.as_a.each do |item|
@@ -2622,7 +2347,7 @@ struct TapeWriter
         first = false
       end
       @out << "]"
-    elsif k == Any::KIND_TABLE
+    elsif k == TapeAny::KIND_TABLE
       pairs = value.as_h
       if pairs.empty?
         @out << "{}"
@@ -2638,13 +2363,13 @@ struct TapeWriter
         first = false
       end
       @out << " }"
-    elsif k == Any::KIND_STRING
+    elsif k == TapeAny::KIND_STRING
       TapeWriter.quoted(view(value.as_s), @out)
-    elsif k == Any::KIND_DATETIME
+    elsif k == TapeAny::KIND_DATETIME
       value.as_datetime.write(@out)
-    elsif k == Any::KIND_INT
+    elsif k == TapeAny::KIND_INT
       @out << value.as_i
-    elsif k == Any::KIND_FLOAT
+    elsif k == TapeAny::KIND_FLOAT
       TapeWriter.float_text(value.as_f, @out)
     else
       @out << (value.as_bool ? "true" : "false")
@@ -2656,7 +2381,7 @@ end
 # types: a value whose type implements it, as a `derive
 # toml_serializable` type does.
 pub trait ToTOML
-  abstract def to_toml_any : Any
+  abstract def to_toml_any : TapeAny
 end
 
 # `derive toml_serializable`, in a struct or class whose fields are written
@@ -2675,7 +2400,7 @@ end
 # It is std/yaml's `derive yaml_serializable` over TOML, field for field:
 # a value is read and written as `TOML.read_value` and `TOML.to_any` take
 # its type (Bool, Int32, Int64, UInt8, UInt64, Float64, String,
-# `TOMLDateTime`, `Any`, an `Array` or a `Hash(String, _)` of them,
+# `TOMLDateTime`, `TapeAny`, an `Array` or a `Hash(String, _)` of them,
 # another derived type, each of them or nil). TOML has no null, so a nil
 # field is not written, and a missing key is read as YAML's derive reads
 # one: a field with a default keeps it, a nilable field holds nil, and any
@@ -2683,17 +2408,17 @@ end
 # over. A type that is several writes `derive serializable,
 # yaml_serializable, toml_serializable`: what this one generates shares no
 # method with theirs (`to_toml`, `from_toml`, `to_toml_any` and
-# `initialize(toml : Any)` of this module's `Any`).
+# `initialize(toml : TapeAny)` of this module's `TapeAny`).
 pub macro toml_serializable(declaration)
   impl ::Std::Toml::ToTOML for {{ declaration[:name].id }}
-    def to_toml_any : ::Std::Toml::Any
-      toml_pairs = Hash(String, ::Std::Toml::Any).new
+    def to_toml_any : ::Std::Toml::TapeAny
+      toml_pairs = ::Std::Toml::TapeMap(::Std::Toml::TapeAny).new
       {% for field in declaration[:fields] %}
         unless {{ field[:name].id }}.nil?
           toml_pairs[{{ field[:name][1..] }}] = ::Std::Toml::TOML.to_any({{ field[:name].id }})
         end
       {% end %}
-      ::Std::Toml::Any.new(toml_pairs)
+      ::Std::Toml::TapeAny.new(toml_pairs)
     end
   end
 
@@ -2705,7 +2430,7 @@ pub macro toml_serializable(declaration)
     ::Std::Toml::TOML.from_toml(text, self)
   end
 
-  def initialize(toml : ::Std::Toml::Any)
+  def initialize(toml : ::Std::Toml::TapeAny)
     toml_pairs = toml.as_h? || raise "expected a table for #{ {{ declaration[:name] }} }, not #{toml.kind_name}"
     # As std/yaml's derive: each field's type is asked of the field
     # (`typeof`), and whether it has a default is asked of the type when
@@ -2734,23 +2459,8 @@ end
 
 pub struct TOML
   # The document `text` holds, a table, or what is wrong with it.
-  def self.parse(text : String) : Any | TOMLError
-    result = nil.as(Any?)
-    tape do
-      parsed = parse(text.as_tape)
-      return parsed if parsed.is_a?(TOMLError)
-      result = parsed.to_heap
-    end
-    result || raise "TOML parser returned no document"
-  end
-
   def self.parse(text : String) : TapeAny | TOMLError
     TapeReader.new(text).document
-  end
-
-  def self.parse?(text : String) : Any?
-    parsed = parse(text)
-    parsed.is_a?(TOMLError) ? nil : parsed
   end
 
   def self.parse?(text : String) : TapeAny?
@@ -2759,23 +2469,11 @@ pub struct TOML
   end
 
   # TOML for a table, ending in a line break unless the table is empty.
-  def self.dump(value : Any) : String
-    result = ""
-    tape do
-      result = dump_tape(value).to_heap
-    end
-    result
-  end
-
   def self.dump(value : TapeAny) : String
-    dump_tape(value)
-  end
-
-  def self.dump_tape(value : Any | TapeAny) : String
     String.build { |writer| dump(value, writer) }
   end
 
-  def self.dump(value : Any | TapeAny,
+  def self.dump(value : TapeAny,
                 writer : String::Builder) : Nil
     TapeWriter.new(writer).document(value)
   end
@@ -2786,7 +2484,7 @@ pub struct TOML
   end
 
   # The document `text` holds, read into `type`: `Bool`, `Int32`, `Int64`,
-  # `UInt8`, `UInt64`, `Float64`, `String`, `TOMLDateTime`, `Any`, a type
+  # `UInt8`, `UInt64`, `Float64`, `String`, `TOMLDateTime`, `TapeAny`, a type
   # with `derive toml_serializable`, one of those or nil, or an `Array` or a
   # `Hash(String, _)` of those. Text that is not TOML panics with the
   # `TOMLError`'s sentence; a value of another kind, or an integer outside
@@ -2795,11 +2493,11 @@ pub struct TOML
     read_value(parse(text).or_panic, type)
   end
 
-  # The `Any` a value is written as. TOML has no null: a nil is refused
+  # The `TapeAny` a value is written as. TOML has no null: a nil is refused
   # here, named, and a derived type leaves a nil field out before it gets
   # this far. Taken out before the rest dispatches, for the reason
   # std/json's `write_or_null` gives.
-  def self.to_any(val : T) : Any forall T
+  def self.to_any(val : T) : TapeAny forall T
     if val.nil?
       raise "TOML has no null, so a nil cannot be written"
     else
@@ -2807,67 +2505,69 @@ pub struct TOML
     end
   end
 
-  def self.write_value(val : Bool) : Any
-    Any.new(val)
+  def self.write_value(val : Bool) : TapeAny
+    TapeAny.new(val)
   end
 
-  def self.write_value(val : Int32) : Any
-    Any.new(val.to_i64)
+  def self.write_value(val : Int32) : TapeAny
+    TapeAny.new(val.to_i64)
   end
 
-  def self.write_value(val : Int64) : Any
-    Any.new(val)
+  def self.write_value(val : Int64) : TapeAny
+    TapeAny.new(val)
   end
 
-  def self.write_value(val : UInt8) : Any
-    Any.new(val.to_i64)
+  def self.write_value(val : UInt8) : TapeAny
+    TapeAny.new(val.to_i64)
   end
 
   # A TOML integer is an `Int64`: a `UInt64` past it cannot be written.
-  def self.write_value(val : UInt64) : Any
+  def self.write_value(val : UInt64) : TapeAny
     if val > 9223372036854775807_u64
       raise "the UInt64 #{val} is past 9223372036854775807, the largest " \
             "TOML integer"
     end
-    Any.new(val.to_i64)
+    TapeAny.new(val.to_i64)
   end
 
-  def self.write_value(val : Float64) : Any
-    Any.new(val)
+  def self.write_value(val : Float64) : TapeAny
+    TapeAny.new(val)
   end
 
-  def self.write_value(val : String) : Any
-    Any.new(val)
+  def self.write_value(val : String) : TapeAny
+    TapeAny.new(val)
   end
 
-  def self.write_value(val : TOMLDateTime) : Any
-    Any.new(val)
+  def self.write_value(val : TOMLDateTime) : TapeAny
+    TapeAny.new(val)
   end
 
-  def self.write_value(val : Any) : Any
+  def self.write_value(val : TapeAny) : TapeAny
     val
   end
 
-  def self.write_value(val : Array(T)) : Any forall T
-    Any.new(val.map { |item| to_any(item) })
+  def self.write_value(val : Array(T)) : TapeAny forall T
+    items = SlicePool(TapeAny).new(val.size).alloc_slice(val.size)
+    val.each_with_index { |item, at| items[at] = to_any(item) }
+    TapeAny.new(items)
   end
 
   # TOML keys are strings, so a hash is written when its keys are.
-  def self.write_value(val : Hash(String, V)) : Any forall V
-    pairs = Hash(String, Any).new
+  def self.write_value(val : Hash(String, V)) : TapeAny forall V
+    pairs = TapeMap(TapeAny).new
     val.each { |key, item| pairs[key] = to_any(item) }
-    Any.new(pairs)
+    TapeAny.new(pairs)
   end
 
-  def self.write_value(val : T) : Any forall T : ToTOML
+  def self.write_value(val : T) : TapeAny forall T : ToTOML
     val.to_toml_any
   end
 
-  def self.read_value(value : Any, type : Bool.class) : Bool
+  def self.read_value(value : TapeAny, type : Bool.class) : Bool
     value.as_bool
   end
 
-  def self.read_value(value : Any, type : Int32.class) : Int32
+  def self.read_value(value : TapeAny, type : Int32.class) : Int32
     v = value.as_i
     if v < -2147483648_i64 || v > 2147483647_i64
       raise "integer #{v} out of Int32 range"
@@ -2875,44 +2575,47 @@ pub struct TOML
     v.to_i32
   end
 
-  def self.read_value(value : Any, type : Int64.class) : Int64
+  def self.read_value(value : TapeAny, type : Int64.class) : Int64
     value.as_i
   end
 
-  def self.read_value(value : Any, type : UInt8.class) : UInt8
+  def self.read_value(value : TapeAny, type : UInt8.class) : UInt8
     v = value.as_i
     raise "integer #{v} out of UInt8 range" if v < 0_i64 || v > 255_i64
     v.to_u8
   end
 
-  def self.read_value(value : Any, type : UInt64.class) : UInt64
+  def self.read_value(value : TapeAny, type : UInt64.class) : UInt64
     v = value.as_i
     raise "integer #{v} out of UInt64 range" if v < 0_i64
     v.to_u64
   end
 
   # A float, or an integer widened to one: `y = 2` is the Float64 2.0.
-  def self.read_value(value : Any, type : Float64.class) : Float64
+  def self.read_value(value : TapeAny, type : Float64.class) : Float64
     value.as_f
   end
 
-  def self.read_value(value : Any, type : String.class) : String
+  def self.read_value(value : TapeAny, type : String.class) : String
     value.as_s
   end
 
-  def self.read_value(value : Any, type : TOMLDateTime.class) : TOMLDateTime
+  def self.read_value(value : TapeAny, type : TOMLDateTime.class) : TOMLDateTime
     value.as_datetime
   end
 
-  def self.read_value(value : Any, type : Any.class) : Any
+  def self.read_value(value : TapeAny, type : TapeAny.class) : TapeAny
     value
   end
 
-  def self.read_value(value : Any, type : Array(T).class) : Array(T) forall T
-    value.as_a.map { |item| read_value(item, T) }
+  def self.read_value(value : TapeAny, type : Array(T).class) : Array(T) forall T
+    items = value.as_a
+    list = Array(T).new(items.size)
+    items.each { |item| list << read_value(item, T) }
+    list
   end
 
-  def self.read_value(value : Any, type : Hash(String,
+  def self.read_value(value : TapeAny, type : Hash(String,
                                                V).class) : Hash(String, V) forall V
     h = Hash(String, V).new
     value.as_h.each { |key, item| h[key] = read_value(item, V) }
@@ -2922,7 +2625,7 @@ pub struct TOML
   # A type that reads itself, the `initialize(toml)` a `derive
   # toml_serializable` wrote; a type that admits nil reads as the other
   # type, since a value that is there is never null.
-  def self.read_value(value : Any, type : T.class) : T forall T
+  def self.read_value(value : TapeAny, type : T.class) : T forall T
     {% if T.nilable? %}
       read_value(value, typeof(nil.as(T) || raise("")))
     {% else %}

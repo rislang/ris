@@ -437,7 +437,7 @@ refuses "a Deflater finished twice" deflater_twice "Deflater: finish was called 
 refuses "a Deflater written after its finish" deflater_after "Deflater: compress after finish" \
   '(d = Deflater.new(Envelope::Zlib); d.finish; d.compress("more"))'
 refuses "a read of no bytes" read_zero "Inflater: read wants at least one byte, not 0" \
-  '(Inflater.new(Envelope::Raw) { nil }.read(0); "")'
+  '(Inflater.new(Envelope::Raw, nil).read(0); "")'
 refuses "a level past 9" level_high "Deflate: level 10 is not 0 to 9" \
   'Gzip.compress("x", 10)'
 refuses "a Deflater at level -1" level_low "Deflate: level -1 is not 0 to 9" \
