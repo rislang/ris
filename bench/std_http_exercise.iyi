@@ -464,14 +464,15 @@ class RisHttp12Handler
       RisExerciseServer.stop(RisHttpFactory)
       Response.new(200, "bye")
     elsif req.header("Upgrade") == "echo"
-      Response.upgrade({"Upgrade" => "echo", "Connection" => "Upgrade"}) do |sock, _|
-        got = sock.read(100)
-        sock.write("echo:" + got) if got.is_a?(String)
-        nil
-      end
+      Response.upgrade({"Upgrade" => "echo", "Connection" => "Upgrade"})
     else
       Response.new(200, "ok")
     end
+  end
+
+  def take_over(sock : IyiSocket | TlsStream, leftover : String, response : Response) : Nil
+    got = sock.read(100)
+    sock.write("echo:" + got) if got.is_a?(String)
   end
 end
 
@@ -502,19 +503,20 @@ class RisHttp14Handler
       RisExerciseServer.stop(RisHttpFactory)
       Response.new(200, "bye")
     elsif req.header("Upgrade") == "echo"
-      Response.upgrade({"Upgrade" => "echo", "Connection" => "Upgrade"}) do |sock, leftover|
-        said = leftover
-        while said.bytesize < 4
-          got = sock.read(100)
-          break unless got.is_a?(String) && got.bytesize > 0
-          said = said + got
-        end
-        sock.write("echo:" + said) if said.bytesize >= 4
-        nil
-      end
+      Response.upgrade({"Upgrade" => "echo", "Connection" => "Upgrade"})
     else
       Response.new(426, "upgrade to echo\n", {"Upgrade" => "echo"})
     end
+  end
+
+  def take_over(sock : IyiSocket | TlsStream, leftover : String, response : Response) : Nil
+    said = leftover
+    while said.bytesize < 4
+      got = sock.read(100)
+      break unless got.is_a?(String) && got.bytesize > 0
+      said = said + got
+    end
+    sock.write("echo:" + said) if said.bytesize >= 4
   end
 end
 
@@ -591,7 +593,7 @@ class RisHttpOtherFactory
   end
 end
 
-import std/http::{HTTP, HTTPClient, Response, Request, Server, HTTPError, MultipartBuilder, Part}
+import std/http::{HTTP, HTTPClient, Response, Request, Server, HTTPError, MultipartBuilder, Part, TlsStream}
 import std/socket::{IyiSocket, SocketError}
 import std/gc::{GC}
 import std/compress::{Gzip, Zlib, Deflate}

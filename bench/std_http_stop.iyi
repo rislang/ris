@@ -145,6 +145,11 @@ class RisStop1Handler
     RisExerciseServer.stop(RisStop1Handler) if req.path == "/stop"
     answer(req)
   end
+
+  # After the 101 of /upgrade: hold the connection until the client goes.
+  def take_over(socket : IyiSocket | TlsStream, leftover : String, response : Response) : Nil
+    hold_until_closed(socket)
+  end
 end
 
 class RisStop2Handler
@@ -158,6 +163,11 @@ class RisStop2Handler
   def call(req) : Response
     RisExerciseServer.stop(RisStop2Handler) if req.path == "/stop"
     answer(req)
+  end
+
+  # After the 101 of /upgrade: hold the connection until the client goes.
+  def take_over(socket : IyiSocket | TlsStream, leftover : String, response : Response) : Nil
+    hold_until_closed(socket)
   end
 end
 
@@ -242,7 +252,7 @@ end
 
 def answer(req : Request) : Response
   if req.path == "/upgrade"
-    return Response.upgrade({"Upgrade" => "hold", "Connection" => "Upgrade"}) { |socket, _| hold_until_closed(socket) }
+    return Response.upgrade({"Upgrade" => "hold", "Connection" => "Upgrade"})
   end
   Response.new(200, req.version)
 end

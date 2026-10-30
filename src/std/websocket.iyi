@@ -1,12 +1,14 @@
 # WebSocket (RFC 6455) over std/http: the server's handshake, the
 # client's, and the frames after them, written in iyi.
 #
-# **The server.** Inside `Server.serve`'s block, `WebSocket.upgrade(req)
-# { |ws| ... }` answers the request. A request that is a version 13
+# **The server.** A handler's `call` answers with `WebSocket.upgrade(req)`;
+# after its 101 the server calls the handler's `take_over(socket,
+# leftover, response)`, which runs `WebSocket.serve(socket, leftover,
+# response) { |ws| ... }`. A request that is a version 13
 # handshake - a GET over HTTP/1.1 whose `Upgrade` names `websocket`, whose
 # `Connection` holds `upgrade`, and whose `Sec-WebSocket-Key` is 16 bytes
 # in base64 - is answered 101 with the key's `Sec-WebSocket-Accept`, and
-# the block runs with the connection. Any other request is answered 400
+# `serve`'s block runs with the connection. Any other request is answered 400
 # with why, and a handshake of another version 426 with
 # `Sec-WebSocket-Version: 13` (RFC 6455 §4.2.2, §4.4). With `protocols`
 # the server names the first of its own list the client offered in
@@ -330,14 +332,14 @@ pub class WebSocket
     @inflater = nil
   end
 
-  # The server's half of the handshake, answering *req*: a 101 whose
-  # block is handed the connection, or the 400 or 426 that says why the
-  # request is not a handshake this server takes. *protocols* are the
-  # subprotocols the server speaks, in its order of preference. With
-  # *deflate* the first permessage-deflate offer this end can keep is
-  # accepted, and messages are compressed at *deflate_level*.
-  def self.upgrade(req : Request, protocols : Array(String) = [] of String, max_message : Int32 = MAX_MESSAGE, deflate : Bool = true, deflate_level : Int32 = 1, &handler : WebSocket -> Nil) : Response
-    raise "WebSocket: a deflate level is 0 to 9, not #{deflate_level}" if deflate_level < 0 || deflate_level > 9
+  # The server's half of the handshake, answering *req*: a 101, after
+  # which the server calls the handler's `take_over(socket, leftover,
+  # response)`, which runs the connection with `WebSocket.serve`; or the
+  # 400 or 426 that says why the request is not a handshake this server
+  # takes. *protocols* are the subprotocols the server speaks, in its
+  # order of preference. With *deflate* the first permessage-deflate
+  # offer this end can keep is accepted.
+  def self.upgrade(req : Request, protocols : Array(String) = [] of String, deflate : Bool = true) : Response
     protocols.each do |name|
       raise "WebSocket: protocol #{name.inspect} is not a token" unless HTTP.token?(name)
     end
@@ -352,19 +354,19 @@ pub class WebSocket
         chosen = name if chosen.nil? && names.includes?(name)
       end
     end
-    agreed = nil.as(PerMessageDeflate?)
+    agreed = false
     answer = ""
     if deflate && (extensions = req.header("Sec-WebSocket-Extensions"))
       list = WebSocket.extensions(extensions)
       return Response.new(400, "Sec-WebSocket-Extensions is not a list of extensions: #{list}\n") if list.is_a?(String)
       list.each do |offer|
-        next unless agreed.nil? && HTTP.same_name?(offer.name, "permessage-deflate")
+        next unless !agreed && HTTP.same_name?(offer.name, "permessage-deflate")
         # An offer this end cannot keep is declined (RFC 7692 §7), and
         # the next one is looked at.
         terms = WebSocket.deflate_terms(offer.params, false)
         next if terms.is_a?(String)
         bits = terms.server_max_window_bits
-        agreed = PerMessageDeflate.new(terms.server_no_context_takeover, terms.client_no_context_takeover, bits > 0 ? bits : 15, 15, deflate_level)
+        agreed = true
         answer = "permessage-deflate"
         answer = answer + "; server_no_context_takeover" if terms.server_no_context_takeover
         answer = answer + "; client_no_context_takeover" if terms.client_no_context_takeover
@@ -376,14 +378,39 @@ pub class WebSocket
       headers["Sec-WebSocket-Protocol"] = name
     end
     headers["Sec-WebSocket-Extensions"] = answer unless answer.empty?
-    # The chosen protocol is read back from the 101, not captured: the
-    # block outlives this handler's tape (TAPE_SPEC 5.1).
-    Response.upgrade(headers) do |socket, leftover, sent|
-      ws = WebSocket.new(socket, leftover, false, sent.header("Sec-WebSocket-Protocol"), max_message, agreed)
-      handler.call(ws)
-      ws.close unless ws.closed?
-      nil
+    Response.upgrade(headers)
+  end
+
+  # The old form kept its block in the response, where no check follows
+  # what it keeps of the connection.
+  def self.upgrade(req : Request, protocols : Array(String) = [] of String, max_message : Int32 = MAX_MESSAGE, deflate : Bool = true, deflate_level : Int32 = 1, &handler : WebSocket -> Nil) : Response
+    {% raise "WebSocket.upgrade takes no block: return WebSocket.upgrade(req)\n" +
+      "from the handler's call, and in its take_over(socket, leftover,\n" +
+      "response) run WebSocket.serve(socket, leftover, response) { |ws| ... }." %}
+  end
+
+  # The connection after `upgrade`'s 101, as a WebSocket handed to the
+  # block, closed when it returns. The protocol and the permessage-deflate
+  # terms are read back from *response*; messages past *max_message*
+  # bytes are refused, and compressed at *deflate_level*.
+  def self.serve(socket : IyiSocket | TlsStream, leftover : String, response : Response, max_message : Int32 = MAX_MESSAGE, deflate_level : Int32 = 1, & : WebSocket -> Nil) : Nil
+    raise "WebSocket: a deflate level is 0 to 9, not #{deflate_level}" if deflate_level < 0 || deflate_level > 9
+    agreed = nil.as(PerMessageDeflate?)
+    if said = response.header("Sec-WebSocket-Extensions")
+      list = WebSocket.extensions(said)
+      if list.is_a?(Array)
+        list.each do |offer|
+          next unless agreed.nil? && HTTP.same_name?(offer.name, "permessage-deflate")
+          terms = WebSocket.deflate_terms(offer.params, false)
+          next if terms.is_a?(String)
+          bits = terms.server_max_window_bits
+          agreed = PerMessageDeflate.new(terms.server_no_context_takeover, terms.client_no_context_takeover, bits > 0 ? bits : 15, 15, deflate_level)
+        end
+      end
     end
+    ws = WebSocket.new(socket, leftover, false, response.header("Sec-WebSocket-Protocol"), max_message, agreed)
+    yield ws
+    ws.close unless ws.closed?
   end
 
   # *value* as a list of extensions (RFC 6455 §9.1): each a token, with

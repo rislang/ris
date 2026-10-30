@@ -2777,7 +2777,7 @@ PY
 cat > "$WORK/proxy_origin.iyi" <<'IYI'
 module main
 
-import std/http::{HTTP, Server, Response, Request}
+import std/http::{HTTP, Server, Response, Request, TlsStream}
 import std/websocket::{WebSocket, Message}
 import std/socket::{IyiSocket}
 import std/tls::{TlsServerConfig}
@@ -2789,14 +2789,20 @@ def told(req : Request) : Response
 end
 
 # A WebSocket that says what its handshake carried, echoes one message,
-# and waits for the client's close.
+# and waits for the client's close. What it says rides on the 101: the
+# connection runs after the request's tape.
 def talked(req : Request) : Response
-  WebSocket.upgrade(req) do |ws|
-    ws.send("#{req.version} host=#{req.header("Host")} proxy-auth=#{req.header("Proxy-Authorization") || "-"}")
+  answer = WebSocket.upgrade(req)
+  answer.headers["X-Said"] = "#{req.version} host=#{req.header("Host")} proxy-auth=#{req.header("Proxy-Authorization") || "-"}"
+  answer
+end
+
+def talk(socket : IyiSocket | TlsStream, leftover : String, response : Response) : Nil
+  WebSocket.serve(socket, leftover, response) do |ws|
+    ws.send(response.header("X-Said") || "")
     got = ws.receive
     ws.send("echo " + got.data) if got.is_a?(Message)
     ws.receive
-    nil
   end
 end
 
@@ -2811,6 +2817,9 @@ class PlainOrigin
   end
   def call(req : Request) : Response
     told(req)
+  end
+  def take_over(socket : IyiSocket | TlsStream, leftover : String, response : Response) : Nil
+    talk(socket, leftover, response)
   end
 end
 

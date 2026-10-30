@@ -45,10 +45,11 @@
 # copied out and closed (with its length when the block gave a
 # `Content-Length`, chunked otherwise); a `Response.stream { |w| ... }`
 # whose block writes as it goes; or a `Response.upgrade`, after whose 101
-# the connection belongs to the block (std/websocket's). With `compress:
-# true` an answer whose type is worth compressing goes `zstd` or `gzip`
-# to a client that accepts one: zstd for a whole body when the client's
-# `q` for it is at least its `q` for gzip, gzip for a stream
+# the connection belongs to the handler's `take_over` (std/websocket's).
+# With `compress: true` an answer whose type is worth compressing goes
+# `zstd` or `gzip` to a client that accepts one: zstd for a whole body
+# when the client's `q` for it is at least its `q` for gzip, gzip for a
+# stream
 # (`Server.coding_for`). Beside it: std/router routes requests by
 # pattern as Go's ServeMux does, std/fileserver answers them from a
 # directory, std/sse streams events, and std/websocket takes a
@@ -1442,9 +1443,9 @@ end
 # `Response.new(200, io)`, a stream the server copies out and closes, with
 # the caller's `Content-Length` when it gives one and chunked otherwise;
 # `Response.stream(200) { |w| w.write("...") }`, whose block writes as it
-# goes; `Response.upgrade(headers) { |socket, leftover| ... }`, a 101 after
-# which the connection is the block's. `add_header` writes a field on a
-# line of its own, as each `Set-Cookie` must be.
+# goes; `Response.upgrade(headers)`, a 101 after which the connection is
+# the handler's `take_over(socket, leftover, response)`. `add_header`
+# writes a field on a line of its own, as each `Set-Cookie` must be.
 #
 # What a client is handed: the status, reason and headers, and the body -
 # `body` whole, or `body_io` as it arrives inside `HTTP.open`'s block.
@@ -1458,7 +1459,7 @@ pub class Response
   @body : String
   @source : IyiIO?
   @writer : Proc(BodyWriter, Nil)?
-  @takeover : Proc(IyiSocket | TlsStream, String, Response, Nil)?
+  @upgrading : Bool = false
   @reader : BodyReader?
   @url : String?
   @decoded : Bool
@@ -1467,7 +1468,6 @@ pub class Response
   def initialize(@status : Int32, @reason : String, @headers : Hash(String, String), @body : String, @apart : Hash(String, Array(String))? = nil)
     @source = nil
     @writer = nil
-    @takeover = nil
     @reader = nil
     @url = nil
     @decoded = false
@@ -1479,7 +1479,6 @@ pub class Response
     @body = ""
     @source = nil
     @writer = nil
-    @takeover = nil
     @reader = reader
     @url = url
   end
@@ -1491,7 +1490,6 @@ pub class Response
     @apart = nil
     @source = nil
     @writer = nil
-    @takeover = nil
     @reader = nil
     @url = nil
     @decoded = false
@@ -1505,7 +1503,6 @@ pub class Response
     @apart = nil
     @source = source
     @writer = nil
-    @takeover = nil
     @reader = nil
     @url = nil
     @decoded = false
@@ -1519,24 +1516,31 @@ pub class Response
   end
 
   # A 101 Switching Protocols with *headers* (`Upgrade` and the
-  # protocol's own), after which the connection is the block's: it is
-  # handed the connection - the socket, or under `serve(tls:)` the
-  # `TlsStream` over it - the bytes the client sent after its request,
-  # and this 101, whose headers the block reads rather than capturing
-  # the handler's tape values (TAPE_SPEC 5.1). The connection closes
-  # when it returns.
-  def self.upgrade(headers : Hash(String, String), &takeover : (IyiSocket | TlsStream, String, Response) -> Nil) : Response
+  # protocol's own), after which the connection is the handler's: the
+  # server calls its `take_over(socket, leftover, response)` with the
+  # connection - the socket, or under TLS the `TlsStream` over it - the
+  # bytes the client sent after its request, and this 101. It runs in
+  # the connection's own scope, a call the tape checks follow; the
+  # connection closes when it returns.
+  def self.upgrade(headers : Hash(String, String)) : Response
     response = Response.new(101, "", headers)
-    response.takeover = takeover
+    response.upgrading = true
     response
+  end
+
+  # A block kept in the response would run where no check can follow
+  # what it keeps of the connection.
+  def self.upgrade(headers : Hash(String, String), &takeover : (IyiSocket | TlsStream, String, Response) -> Nil) : Response
+    {% raise "Response.upgrade takes no block: return Response.upgrade(headers)\n" +
+      "and give the handler take_over(socket, leftover, response),\n" +
+      "which the server calls with the connection after the 101." %}
   end
 
   protected def writer=(writer : Proc(BodyWriter, Nil)) : Proc(BodyWriter, Nil)
     @writer = writer
   end
 
-  protected def takeover=(takeover : Proc(IyiSocket | TlsStream, String, Response, Nil)) : Proc(IyiSocket | TlsStream, String, Response, Nil)
-    @takeover = takeover
+  protected def upgrading=(@upgrading : Bool) : Bool
   end
 
   def source : IyiIO?
@@ -1547,8 +1551,10 @@ pub class Response
     @writer
   end
 
-  def takeover : Proc(IyiSocket | TlsStream, String, Response, Nil)?
-    @takeover
+  # Whether this is `Response.upgrade`'s 101: the handler's
+  # `take_over` gets the connection after it.
+  def upgrading? : Bool
+    @upgrading
   end
 
   # The URL the answer came from, after any redirects; nil for one a
@@ -2030,8 +2036,9 @@ pub struct Server
   # handshake fails is closed, the client told why by an alert. Inside
   # it a connection that opens with HTTP/2's preface - as a client whose
   # ALPN chose `h2` does, when `tls_config.alpn` offers it - is served HTTP/2,
-  # and any other HTTP/1.1. A `Response.upgrade` block over TLS is handed
-  # the `TlsStream`, so a WebSocket is `wss://`.
+  # and any other HTTP/1.1. After a `Response.upgrade` over TLS the
+  # handler's `take_over` is handed the `TlsStream`: a WebSocket is
+  # `wss://`.
   #
   # N task-owned listeners, each serving one complete connection at a
   # time. There is no unlimited mode: max_connections must be positive.
@@ -2287,8 +2294,8 @@ pub struct Server
           response = handler.call(req)
           # Writing the answer waits as the client reads it, a pause at a time.
           conn.no_deadline
-          if takeover = response.takeover
-            taken_over(conn, response, takeover)
+          if response.upgrading?
+            taken_over(conn, response, handler)
             return false
           end
           going = answered?(conn, response, req, head.close, compress)
@@ -2425,15 +2432,18 @@ pub struct Server
   # `close` closes the connection after it, as Go's server and Python's
   # do: the line was dropped, `keep-alive` written in its place, and the
   # next request served on a connection the block had ended.
-  # A takeover: the 101 head, then the connection is the block's. The
+  # A takeover: the 101 head, then the connection is the handler's. The
   # caller returns at once after it: the protocol after it reads on and
   # may refill the buffer the request's views sit in.
-  private def self.taken_over(conn : Conn, response : Response, takeover) : Nil
+  private def self.taken_over(conn : Conn, response : Response, handler) : Nil
+    unless handler.responds_to?(:take_over)
+      raise "HTTP: Response.upgrade's 101 needs the handler's take_over(socket, leftover, response)"
+    end
     socket = conn.transport
     return unless socket.write(format_head(response, false, false, nil, false, true)).is_a?(Int32)
     leftover = conn.leftover.copy_to(RisCurrentTape.new)
     conn.unlimited
-    conn.held { takeover.call(socket, leftover, response) }
+    conn.held { handler.take_over(socket, leftover, response) }
   end
 
   private def self.answered?(conn : Conn, response : Response, req : Request, close : Bool, compress : Bool) : Bool
@@ -2540,18 +2550,18 @@ pub struct Server
   # the plain body's, and goes.
   protected def self.coded(response : Response, coding : String) : Response
     headers = {} of String => String
+    # `Vary` gains Accept-Encoding as it is copied: no key of this table
+    # is held while the table grows.
     response.headers.each do |name, value|
-      headers[name] = value unless HTTP.same_name?(name, "Content-Length")
+      next if HTTP.same_name?(name, "Content-Length")
+      if HTTP.same_name?(name, "Vary") && !HTTP.has_token?(value, "Accept-Encoding")
+        headers[name] = value + ", Accept-Encoding"
+      else
+        headers[name] = value
+      end
     end
     headers["Content-Encoding"] = coding
-    vary = response.header("Vary")
-    if vary.nil?
-      headers["Vary"] = "Accept-Encoding"
-    elsif !HTTP.has_token?(vary, "Accept-Encoding")
-      named = "Vary"
-      headers.each { |name, _| named = name if HTTP.same_name?(name, "Vary") }
-      headers[named] = vary + ", Accept-Encoding"
-    end
+    headers["Vary"] = "Accept-Encoding" if response.header("Vary").nil?
     coded = Response.new(response.status, response.reason, headers, response.body, response.apart)
     coded
   end
@@ -6311,7 +6321,7 @@ class H2Connection
     s = @streams[id]?
     return @fault == FAULT_NONE if s.nil? || s.reset >= 0
     # 101 has no meaning here (§8.6): the client is told to use HTTP/1.1.
-    if response.takeover
+    if response.upgrading?
       refuse(id, HTTP_1_1_REQUIRED)
       return @fault == FAULT_NONE
     end

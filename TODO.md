@@ -308,16 +308,16 @@ first):
   flush clears after the write. They now stop at the to_unsafe rule
   in std (38e98018d): compress.iyi:426 keeps `data.to_unsafe` in a
   field (http.iyi's reads moved to byte_at).
-* http_continue and the http benches stop at http.iyi:2225 serve_h1:
-  "cannot prove opaque callback retain/escape" for Response#takeover,
-  an unknown proc handed the socket, the leftover String and the
-  Response: a String it is handed may be kept. Done: shrink and retain
-  of an unknown proc's argument follow its type's methods and what they
-  hand out; a field folds only onto the same owner type's field; a
-  top-level call takes no self; String `+` views neither side; H2
-  finish_answer looks its stream up by id; BodyWriter hands out a copy
-  of its fault. Left: a takeover the checker can see (a known callback,
-  or a handler method), or data the proc may keep (program-owned).
+* http_continue and the http benches stop at tls.iyi:5257: "cannot
+  prove opaque callback retain/escape" for TlsServerConfig's
+  identity_source (autocert's AutocertView), an unknown proc handed
+  the server name. It wants what the takeover got: a source the checker
+  can follow (a type with a method, as handlers are). Done: the takeover
+  is the handler's take_over(socket, leftover, response), called after
+  Response.upgrade(headers)'s 101; a block passed to Response.upgrade or
+  WebSocket.upgrade is refused, naming the new form; WebSocket.serve
+  runs the connection; Server.coded adds Accept-Encoding to Vary as it
+  copies; the source is handed a copy of the ALPN offer.
 * Compiler specs (run with LLVM_CONFIG set to LLVM 23; without it
   bin/crystal links the system LLVM 21): no signal 11 any more. Left:
   compiler_spec lines 484, 522, 568 use Channel and select (port to

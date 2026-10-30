@@ -149,11 +149,20 @@ class RisWs1Handler
   end
 
   def call(req) : Response
-    WebSocket.upgrade(req, ["chat", "superchat"]) { |ws| echo(ws, RisWs1Handler) }
+    WebSocket.upgrade(req, ["chat", "superchat"])
+  end
+
+  def take_over(socket : IyiSocket | TlsStream, leftover : String, response : Response) : Nil
+    WebSocket.serve(socket, leftover, response) { |ws| echo(ws, RisWs1Handler) }
   end
 end
 
 class RisWs2Handler
+  # Which upgrade `call` answered, for `take_over` to run (a worker
+  # serves one connection at a time): 1 /small, 2 /bye, 3 /greet, else
+  # the chat echo.
+  @route : Int32 = 0
+
   def initialize(config)
   end
 
@@ -162,27 +171,36 @@ class RisWs2Handler
   end
 
   def call(req) : Response
+    @route = 0
     if req.path == "/plain"
       Response.new(200, "plain")
-    elsif req.path == "/small"
-      WebSocket.upgrade(req, max_message: 1000) { |ws| echo(ws, RisWs2Handler) }
-    elsif req.path == "/bye"
-      WebSocket.upgrade(req) { |ws| ws.close(4001, "server done") }
-    elsif req.path == "/greet"
-      WebSocket.upgrade(req) do |ws|
+    elsif req.path == "/nodeflate"
+      @route = 4
+      WebSocket.upgrade(req, deflate: false)
+    elsif req.path == "/small" || req.path == "/bye" || req.path == "/greet"
+      @route = req.path == "/small" ? 1 : req.path == "/bye" ? 2 : 3
+      WebSocket.upgrade(req)
+    else
+      # The request is read here: the connection outlives its tape
+      # (TAPE_SPEC 5.1).
+      raise "header queue full" unless RisBoard.post(RisWsHeader.new((req.header("X-Test") || "-").as_tape))
+      WebSocket.upgrade(req, ["chat", "superchat"])
+    end
+  end
+
+  def take_over(socket : IyiSocket | TlsStream, leftover : String, response : Response) : Nil
+    case @route
+    when 1
+      WebSocket.serve(socket, leftover, response, max_message: 1000) { |ws| echo(ws, RisWs2Handler) }
+    when 2
+      WebSocket.serve(socket, leftover, response) { |ws| ws.close(4001, "server done") }
+    when 3
+      WebSocket.serve(socket, leftover, response) do |ws|
         ws.send("first")
         echo(ws, RisWs2Handler)
       end
-    elsif req.path == "/nodeflate"
-      WebSocket.upgrade(req, deflate: false) do |ws|
-        raise "deflate queue full" unless RisBoard.post(RisWsAgreed.new(((d = ws.deflate) ? terms(d) : "none").as_tape))
-        echo(ws, RisWs2Handler)
-      end
     else
-      # The request is read here: the upgrade's block outlives its tape
-      # (TAPE_SPEC 5.1).
-      raise "header queue full" unless RisBoard.post(RisWsHeader.new((req.header("X-Test") || "-").as_tape))
-      WebSocket.upgrade(req, ["chat", "superchat"]) do |ws|
+      WebSocket.serve(socket, leftover, response) do |ws|
         raise "deflate queue full" unless RisBoard.post(RisWsAgreed.new(((d = ws.deflate) ? terms(d) : "none").as_tape))
         echo(ws, RisWs2Handler)
       end
@@ -200,9 +218,11 @@ class RisWs3Handler
 
   def call(req) : Response
     raise "origin queue full" unless RisBoard.post(RisWsOrigin.new("#{req.path} proxy-auth=#{req.header("Proxy-Authorization") || "-"}".as_tape))
-    WebSocket.upgrade(req) do |ws|
-      echo(ws, RisWs3Handler)
-    end
+    WebSocket.upgrade(req)
+  end
+
+  def take_over(socket : IyiSocket | TlsStream, leftover : String, response : Response) : Nil
+    WebSocket.serve(socket, leftover, response) { |ws| echo(ws, RisWs3Handler) }
   end
 end
 
@@ -210,7 +230,7 @@ import std/int
 
 import std/websocket::{WebSocket, WebSocketError, Message, PerMessageDeflate}
 import std/compress::{Deflater, Inflater, Envelope}
-import std/http::{HTTP, HTTPClient, Request, Response, Server, HTTPError}
+import std/http::{HTTP, HTTPClient, Request, Response, Server, HTTPError, TlsStream}
 import std/socket::{IyiSocket, SocketError}
 import std/tls::{TlsConfig, TlsServerConfig}
 import std/x509::{Certificate}
@@ -647,7 +667,7 @@ end
 
 # The status, the body and the headers named of `upgrade`'s answer.
 def upgraded(req : Request, protocols : Array(String) = [] of String) : String
-  r = WebSocket.upgrade(req, protocols) { |ws| ws.close }
+  r = WebSocket.upgrade(req, protocols)
   text = "#{r.status} #{r.body.inspect}"
   ["Upgrade", "Connection", "Sec-WebSocket-Accept", "Sec-WebSocket-Protocol", "Sec-WebSocket-Version", "Sec-WebSocket-Extensions"].each do |name|
     if v = r.header(name)
@@ -660,7 +680,7 @@ end
 # The permessage-deflate `upgrade` accepts of *offer*: the 101's
 # extension, "declined", or a refusal's status and body.
 def extension_answer(offer : String, deflate : Bool = true) : String
-  r = WebSocket.upgrade(handshake({"Sec-WebSocket-Extensions" => offer}), deflate: deflate) { |ws| ws.close }
+  r = WebSocket.upgrade(handshake({"Sec-WebSocket-Extensions" => offer}), deflate: deflate)
   return "#{r.status} #{r.body.inspect}" unless r.status == 101
   r.header("Sec-WebSocket-Extensions") || "declined"
 end
@@ -1373,7 +1393,7 @@ def section_program_refused : Nil
   assert_str "refused: WebSocket: a max_window_bits is 8 to 15, not 16", answer { PerMessageDeflate.new(server_max_window_bits: 16); "made" }, "a window of 2^16"
   assert_str "refused: WebSocket: a deflate level is 0 to 9, not 10", answer { PerMessageDeflate.new(level: 10); "made" }, "a deflate level of 10"
   assert_str "refused: WebSocket: a deflate level is 0 to 9, not -1", answer { WebSocket.connect("ws://127.0.0.1:1/", deflate_level: -1); "sent" }, "connect at level -1"
-  assert_str "refused: WebSocket: a deflate level is 0 to 9, not 10", answer { WebSocket.upgrade(handshake, deflate_level: 10) { |w| w.close }; "answered" }, "upgrade at level 10"
+  assert_str "refused: WebSocket: a deflate level is 0 to 9, not 10", answer { WebSocket.serve(IyiSocket.listen("127.0.0.1", 0), "", WebSocket.upgrade(handshake), deflate_level: 10) { |w| w.close }; "answered" }, "serve at level 10"
   assert_str "refused: Inflater: read on a flushed stream; inflate decodes its pieces", answer { Inflater.flushed.read; "read" }, "a flushed stream read as a whole one"
   puts "  text that is not UTF-8, a long ping, close 1005, a long reason, the handshake's own header, a bad protocol, a window of 2^16, deflate levels of -1 and 10"
   nil

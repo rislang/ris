@@ -1,0 +1,5 @@
+module test/ris/refused/http_upgrade_block
+# A takeover kept as a block in the response: refused, naming the
+# handler's take_over.
+import std/http::{Response}
+answer = Response.upgrade({"Upgrade" => "x"}) { |_socket, _left, _sent| nil }

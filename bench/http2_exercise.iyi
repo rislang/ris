@@ -157,11 +157,15 @@ class RisH2Handler
       answer(req)
     end
   end
+
+  # An upgrade's connection ends at once: the 101 is what is checked.
+  def take_over(socket : IyiSocket | TlsStream, leftover : String, response : Response) : Nil
+  end
 end
 
 import std/text
 
-import std/http::{HTTP, HTTPClient, Response, Request, Server, HTTPError, Upgraded}
+import std/http::{HTTP, HTTPClient, Response, Request, Server, HTTPError, Upgraded, TlsStream}
 import std/socket::{IyiSocket, SocketError}
 import std/io
 import std/tls::{TlsConfig, TlsIdentity, TlsServerConfig}
@@ -263,12 +267,12 @@ def answer(req : Request) : Response
     r.headers["Location"] = "/echo?from=redirect"
     r
   when "/upgrade"
-    Response.upgrade({"Upgrade" => "x"}) { |_socket, _left| nil }
+    Response.upgrade({"Upgrade" => "x"})
   when "/whoami"
     Response.new(200, req.peer_certificates.empty? ? "peer=-" : "peer=#{req.peer_certificates[0].subject_name} #{req.version}")
   when "/whoami-upgrade"
     peer = req.peer_certificates.empty? ? "-" : req.peer_certificates[0].subject_name
-    Response.upgrade({"Upgrade" => "x", "X-Peer" => peer}) { |_socket, _left| nil }
+    Response.upgrade({"Upgrade" => "x", "X-Peer" => peer})
   when "/empty"
     Response.new(204, "")
   else
