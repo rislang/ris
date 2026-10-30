@@ -307,11 +307,11 @@ breaks "the server's name not verified" noname "a server whose certificate does 
   'tls = TlsClient.over(socket, @name, @config, timeout_ms, @session)' \
   'tls = TlsClient.over(socket, @address, @config, timeout_ms, @session)'
 breaks "the length prefix dropped" noprefix "the encrypted resolver asks over TLS" secure_dns.iyi \
-  '      framed << (query.size >> 8).to_u8
-      framed << (query.size & 255).to_u8
+  '      framed << (query.bytesize >> 8).to_u8
+      framed << (query.bytesize & 255).to_u8
 ' ''
 breaks "the dns parameter sent with its padding" padded "the dns parameter is base64url without padding" secure_dns.iyi \
-  '    while size > 0 && text.to_unsafe[size - 1] == 61_u8
+  '    while size > 0 && text.byte_at(size - 1) == 61_u8
       size = size - 1
     end
 ' ''
@@ -329,7 +329,7 @@ breaks "the plaintext servers asked unasked" silentplain "a dead upstream, no fa
 breaks "TC taken over a stream" tcstream "TC over a stream is refused" socket.iyi \
   'return DnsTapeMessage.malformed("the answer is truncated (TC), which an answer over a stream never is").about(name, label) if message.truncated?' ''
 breaks "bytes past the message taken" pastend "a frame longer than its message" socket.iyi \
-  'return DnsTapeMessage.malformed("oversized: #{bytes.size - ends} bytes past the end of the message").about(name, label) if ends < bytes.size' ''
+  'return DnsTapeMessage.malformed("oversized: #{bytes.bytesize - ends} bytes past the end of the message").about(name, label) if ends < bytes.bytesize' ''
 breaks "a connection per exchange" noreuse "every query over one TLS connection" secure_dns.iyi \
   '    if kept = live
       got = over(kept, queries, timeout_ms, true)
@@ -347,10 +347,14 @@ breaks "a DoH query with a random ID" doh_id "a POST's query has the ID 0" secur
   '  def zero_id? : Bool
     true' '  def zero_id? : Bool
     false'
-breaks "an HTTPClient's own TLS configuration ignored" clienttls "over HTTPS from a server without h2" http.iyi \
-  'under = keeping.tls || under' ''
-breaks "an HTTPClient's own resolver ignored" clientresolver "a URL's host pinned to an address" http.iyi \
-  'through = keeping.resolver' ''
+# std/http.iyi holds a runtime-only mark, so a patched copy of it does
+# not build: the DoH client is made without its configuration instead.
+breaks "a DoH client without its TLS configuration" clienttls "over HTTPS from a server without h2" secure_dns.iyi \
+  '@client = HTTPClient.new(idle: 1, tls: tls)' '@client = HTTPClient.new(idle: 1)'
+breaks "a DoH upstream's address ignored" clientaddress "a URL's host pinned to an address" secure_dns.iyi \
+  '      return at
+' '      return "127.0.0.2"
+'
 breaks "queries sent unpadded" unpadded "every DoT query is padded" socket.iyi \
   'queries << DnsTapeMessage.query(id, name, type, DnsTapeMessage::PADDING_BLOCK)' \
   'queries << DnsTapeMessage.query(id, name, type)'

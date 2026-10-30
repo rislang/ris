@@ -95,6 +95,24 @@ expect hash_infer_default_field '{} of KeyType => ValueType'
 expect hash_infer_default_read '{} of KeyType => ValueType'
 expect hash_infer_default_parameter '{} of KeyType => ValueType'
 
+# An Array(T)? beside a borrowed Array::View argument takes the whole
+# union; a view never reaches an Array parameter (it crashed codegen).
+out=$("$RIS" run test/ris/borrowed_nilable_array.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = $'2\n3\n2' ]; then
+  echo 'runs     borrowed_nilable_array'
+else
+  echo "FAILED   borrowed_nilable_array: $out"; status=1
+fi
+expect view_into_array 'An Array::View(T) is not an Array(T)'
+
+# Array::View#index answers the place in the view, not in the Array.
+out=$("$RIS" run test/ris/view_index.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = $'1\ntrue\ntrue\n1\ntrue\n2' ]; then
+  echo 'runs     view_index'
+else
+  echo "FAILED   view_index: $out"; status=1
+fi
+
 # Workers consume in-band quits and fail bounded posts without spinning.
 out=$(RIS="$RIS" python3 test/ris/workers_check.py 2>&1)
 if [ "$?" -eq 0 ]; then
@@ -1484,6 +1502,36 @@ if [ "$out" = "$want" ]; then
   echo 'runs     dns (messages and a loopback resolver on the tape, no heap)'
 else
   echo "FAILED   dns: $out"; status=1
+fi
+# std/secure_dns over loopback: DoT, then DoH by POST and GET, against
+# bench/std_secure_dns_server.py; the upstreams connect by address, so no
+# exchange calls back into the resolver (TAPE_SPEC 3.5).
+if python3 -c 'import ssl; from cryptography import x509' 2>/dev/null; then
+  srv=$(mktemp -d)
+  python3 bench/std_secure_dns_server.py "$srv" >"$srv/log" 2>&1 &
+  srv_pid=$!
+  for _ in $(seq 200); do [ -f "$srv/ready" ] && break; sleep 0.1; done
+  out=$(RIS_HEAP_STATS=1 timeout 300 "$RIS" run test/ris/secure_dns.ri -- \
+    "$srv" 2>&1)
+  kill "$srv_pid" 2>/dev/null; wait "$srv_pid" 2>/dev/null
+  rm -rf "$srv"
+  want='a.zone.test 192.0.2.1
+dual.zone.test 192.0.2.2 2001:db8::2
+dot connections 1
+a.zone.test 192.0.2.1
+six.zone.test 2001:db8::6
+post connections 1 reused 3
+dual.zone.test 192.0.2.2 2001:db8::2
+missing.zone.test failed: not found true
+alias.zone.test 192.0.2.1
+ris heap: 0 allocations, 0 bytes'
+  if [ "$out" = "$want" ]; then
+    echo 'runs     secure_dns (DoT and DoH on loopback, no heap)'
+  else
+    echo "FAILED   secure_dns: $out"; status=1
+  fi
+else
+  echo 'skipped  secure_dns (no python3 cryptography)'
 fi
 # std/regex on the caller tape: groups, alternation, counts, anchors,
 # classes, no match and a long text, with nothing on the heap.

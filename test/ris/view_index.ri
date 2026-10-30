@@ -1,0 +1,16 @@
+module test/view_index
+
+# Array::View#index answers the place in the view, as Array#index does in
+# the array: it answered the backing Array's place of element k, and on a
+# View(Int32) that call took the place of `index(value)`.
+a = [10, 20, 30, 40, 50]
+v = a[2, 3]
+puts v.index(40)
+puts v.index(10).nil?
+puts v.index(2).nil?
+picked = a.values_at([4, 0, 3])
+puts picked.index(10)
+puts picked.index(30).nil?
+words = ["a", "b", "c", "d"]
+w = words[1, 3]
+puts w.index("d")

@@ -1,4 +1,4 @@
-# Exercises `std/log`: MemoryBackend records Log.info.
+# Exercises `std/log`: RisMemoryBackend records Log.info.
 #
 # Run via:
 #     ./bin/iyi run bench/std_log_exercise.iyi
@@ -13,7 +13,8 @@ def assert_str(expected : String, actual : String, msg : String) : Nil
   raise "ASSERTION FAILED: #{msg}\n  expected #{expected.inspect}\n  got      #{actual.inspect}" unless expected == actual
 end
 
-import std/log::{Log, MemoryBackend, Severity, DefaultFormatter, Entry, AsyncBackend, Formatter}
+import std/log::{Log, Logger, RisMemoryBackend, RisLogEntry, Severity, DefaultFormatter, TapeEntry, AsyncBackend, Formatter}
+import std/log_text::{LogField}
 import std/env::{ENV}
 import std/time::{Time}
 import std/file::{File}
@@ -21,32 +22,32 @@ import std/dir::{Dir}
 
 # The message alone, so a file of them reads back exactly.
 class MessageOnly < Formatter
-  def format(entry : Entry) : String
-    entry.message
+  def format(entry : TapeEntry, writer : String::Builder) : Nil
+    writer << entry.message
   end
 end
 
 # An entry's data as `key=value` pairs in order.
-def pairs(entry : Entry) : String
+def pairs(entry : RisLogEntry) : String
   found = [] of String
-  entry.data.each { |key, value| found << "#{key}=#{value}" }
+  entry.data.each { |field| found << "#{field.key}=#{field.value}" }
   found.join(",")
 end
 
 # The last entry *backend* holds with *message*.
-def entry_for(backend : MemoryBackend, message : String) : Entry
+def entry_for(backend : RisMemoryBackend, message : String) : RisLogEntry
   found = backend.entries.select { |e| e.message == message }
   raise "ASSERTION FAILED: no entry says #{message}" if found.empty?
   found.last
 end
 
 puts "== info"
-mem = MemoryBackend.new
+mem = RisMemoryBackend.on_program
 Log.setup(Severity::Info, mem)
 Log.info "hello"
 assert_true mem.entries.size == 1, "one entry"
 assert_str "hello", mem.entries[0].message, "message"
-puts "  MemoryBackend saw the info line"
+puts "  RisMemoryBackend saw the info line"
 
 puts "\n== child"
 child = Log.for("db.pool")
@@ -67,7 +68,7 @@ puts "  Log.for keeps leading, doubled and trailing dots in the source"
 puts "\n== none"
 # None silences: a logger set to it wrote an entry logged at None, and a
 # logger at any level wrote one. And the root's line keeps its " - ".
-quiet = MemoryBackend.new
+quiet = RisMemoryBackend.on_program
 Log.setup(Severity::None, quiet)
 hushed = Log.for("hushed")
 hushed.log(Severity::None, "hush")
@@ -75,12 +76,12 @@ hushed.fatal "hush"
 Log.setup(Severity::Trace, quiet)
 hushed.log(Severity::None, "hush")
 assert_true quiet.entries.empty?, "nothing is written at None, nor to a logger set to it (#{quiet.entries.size} were)"
-root_line = DefaultFormatter.new.format(Entry.new("", Severity::Info, "up"))
+root_line = DefaultFormatter.new.format(TapeEntry.new("", Severity::Info, "up", Time.utc, [] of LogField))
 assert_true root_line.ends_with?(" INFO - up"), "the root's line: #{root_line}"
 puts "  None writes nothing"
 
 puts "\n== data and context"
-notes = MemoryBackend.new
+notes = RisMemoryBackend.on_program
 Log.setup(Severity::Info, notes)
 db = Log.for("db").bind(pool: "main", shard: 2)
 db.info("query", rows: 3)
@@ -134,7 +135,7 @@ group do |g|
   end
 end
 assert_str "", pairs(entry_for(notes, "a sibling")), "a context stays out of the tasks beside it"
-line = DefaultFormatter.new.format(Entry.new("db", Severity::Info, "q", Time.utc, {"pool" => "main", "note" => "two words", "eq" => "a=b", "empty" => ""}))
+line = DefaultFormatter.new.format(TapeEntry.new("db", Severity::Info, "q", Time.utc, [LogField.new("pool", "main"), LogField.new("note", "two words"), LogField.new("eq", "a=b"), LogField.new("empty", "")]))
 assert_true line.ends_with?(" INFO - db: q -- pool=main note=\"two words\" eq=\"a=b\" empty=\"\""), "a value with a space, a quote or = in it, or none, quoted: #{line}"
 puts "  a bound logger's data, the call's, a context in its block and in the tasks it starts, and none beside it"
 
@@ -146,7 +147,14 @@ assert_true Log.setup_from_env(Severity::Warn, notes).level == Severity::Warn, "
 ENV.delete("LOG_LEVEL")
 assert_true Log.setup_from_env(backend: notes).level == Severity::Info, "no LOG_LEVEL leaves the default"
 ENV["LOG_LEVEL"] = "loud"
-assert_panics("Log.setup_from_env: LOG_LEVEL=loud is no severity") { Log.setup_from_env(backend: notes) }
+refused = ""
+group do |g|
+  attempt = g.spawn { Log.setup_from_env(backend: RisMemoryBackend.on_program); 0 }
+  outcome = attempt.value
+  refused = outcome.message.to_s if outcome.is_a?(Panicked)
+  0
+end
+assert_true refused.includes?("Log.setup_from_env: LOG_LEVEL=loud is no severity"), "LOG_LEVEL=loud refused: #{refused}"
 ENV.delete("LOG_LEVEL")
 puts "  a severity's name in any case, the default when unset or empty, and a refusal naming the severities"
 
@@ -154,8 +162,10 @@ puts "\n== written by a task of its own"
 async_path = Dir.tempdir + "/std_log_exercise_async.log"
 async_file = File.open(async_path, "w")
 AsyncBackend.open(async_file, MessageOnly.new) do |backend|
-  Log.setup(Severity::Info, backend)
-  1000.times { |i| Log.info("line #{i}") }
+  # A logger of the block's own: the root, the program's, keeps no
+  # backend that ends with the block.
+  writer = Logger.new("", Severity::Info, backend)
+  1000.times { |i| writer.info("line #{i}") }
 end
 async_file.close
 written = File.read(async_path)
@@ -163,15 +173,30 @@ expected = String.build { |io| 1000.times { |i| io << "line " << i << "\n" } }
 assert_true written == expected, "every entry, in order, written by the thread: #{written.size} bytes of #{expected.size}"
 late_file = File.open(async_path, "w")
 AsyncBackend.open(late_file, MessageOnly.new) do |late|
-  late.write(Entry.new("", Severity::Info, "one"))
+  late.write(TapeEntry.new("", Severity::Info, "one", Time.utc, [] of LogField))
   late.close
   late.close
-  assert_panics("AsyncBackend: an entry written after close") { late.write(Entry.new("", Severity::Info, "two")) }
 end
 late_file.close
+# The write after close panics inside a task of its own, which opens the
+# backend itself: a block handed to a task takes no tape value from here.
+after = ""
+group do |g|
+  attempt = g.spawn do
+    AsyncBackend.open(File.open("/dev/null", "w"), MessageOnly.new) do |late|
+      late.close
+      late.write(TapeEntry.new("", Severity::Info, "two", Time.utc, [] of LogField))
+    end
+    0
+  end
+  outcome = attempt.value
+  after = outcome.message.to_s if outcome.is_a?(Panicked)
+  0
+end
+assert_true after.includes?("AsyncBackend: an entry written after close"), "a write after close refused: #{after}"
 assert_true File.read(async_path) == "one\n", "close drained the queue, and a second close did nothing"
 File.delete(async_path)
-Log.setup(Severity::Info, MemoryBackend.new)
+Log.setup(Severity::Info, RisMemoryBackend.on_program)
 puts "  a thousand entries in order from a writer task, drained by close, and a write after it refused"
 
 puts "\nALL CHECKS PASSED"

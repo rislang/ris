@@ -72,10 +72,16 @@
 #
 # The server's own name: `DnsOverHttps` with an address connects there and
 # checks the certificate for the URL's host; without one, a host that is a
-# name is found by the system's resolver - the one question asked in the
-# clear, about the DoH server itself, whose answer cannot impersonate it
-# because TLS checks the certificate either way. A URL with an address for
-# its host asks nothing.
+# name is found once, when the upstream is made, by the system's resolver
+# (`Resolver.system`, plaintext) - the one question asked in the clear,
+# about the DoH server itself, whose answer cannot impersonate it because
+# TLS checks the certificate either way. A lookup that fails is every
+# exchange's answer. A URL with an address for its host asks nothing.
+# Each request goes by `HTTP.open_at` to that address, so no exchange
+# looks anything up: a resolver asking this upstream is never asked by
+# it in turn (TAPE_SPEC 3.5: a lookup inside the exchange would be a call
+# cycle carrying the resolver's growing answers). Both transports connect
+# by `IyiSocket.connect_address` for the same reason.
 
 module std/secure_dns
 
@@ -175,7 +181,7 @@ pub class DnsOverTls
 
   private def open(timeout_ms : Int32) : TlsClient | DnsError | Cancelled
     close
-    socket = IyiSocket.connect(@address, @port, timeout_ms)
+    socket = IyiSocket.connect_address(@address, @port, timeout_ms)
     return socket if socket.is_a?(Cancelled)
     return failed(socket.timed_out?, socket.reason) if socket.is_a?(SocketError)
     socket.read_timeout_ms = timeout_ms
@@ -316,6 +322,9 @@ pub class DnsOverHttps
   getter method : String
 
   @client : HTTPClient
+  # Where the URL's host is, given or found when this was made, or why it
+  # could not be found.
+  @at : String | DnsError
 
   # *url* is `https://`: an `http://` upstream would be plaintext with
   # extra steps, and is refused. *address*, when given, is where the URL's
@@ -335,13 +344,24 @@ pub class DnsOverHttps
       tls = TlsConfig.new
       tls.alpn = ["h2", "http/1.1"]
     end
-    pinned = nil.as(Resolver?)
+    @at = DnsOverHttps.bootstrap(@url, host, address)
+    @client = HTTPClient.new(idle: 1, tls: tls)
+  end
+
+  # *address* when given, *host* when it is one, and otherwise *host*'s
+  # first address by `Resolver.system`, asked here, outside any exchange.
+  def self.bootstrap(url : String, host : String, address : String?) : String | DnsError
     if at = address
       read = at.includes?(":") ? IyiSocket.read_ipv6(at) : IyiSocket.read_ipv4(at)
       raise "DNS over HTTPS: #{at.inspect} is not an address: #{read}" if read.is_a?(String)
-      pinned = Resolver.new([] of String, hosts: "#{at} #{host}\n")
+      return at
     end
-    @client = HTTPClient.new(idle: 1, tls: tls, resolver: pinned)
+    return host unless IyiSocket.read_ipv4(host).is_a?(String) && IyiSocket.read_ipv6(host).is_a?(String)
+    found = Resolver.system.resolve(host)
+    return DnsError.new(DnsError::UNREACHABLE, host, "#{url} over HTTPS", "the lookup was cancelled") if found.is_a?(Cancelled)
+    return found if found.is_a?(DnsError)
+    return DnsError.new(DnsError::NOT_FOUND, host) if found.empty?
+    found[0].to_s
   end
 
   def label : String
@@ -398,7 +418,9 @@ pub class DnsOverHttps
       headers["Content-Type"] = MEDIA
     end
     where = label
-    got = HTTP.open(@method, target, headers, body, redirects: 0, decompress: false, client: @client, timeout_ms: timeout_ms) { |response| DnsOverHttps.answer(response, where) }
+    at = @at
+    return at if at.is_a?(DnsError)
+    got = HTTP.open_at(at, @method, target, headers, body, decompress: false, client: @client, timeout_ms: timeout_ms) { |response| DnsOverHttps.answer(response, where) }
     case got
     in String, DnsError, Cancelled
       got

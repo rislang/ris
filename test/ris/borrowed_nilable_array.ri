@@ -1,0 +1,49 @@
+module test/borrowed_nilable_array
+
+# An `Array(T)?` argument beside one an Array::View parameter borrows: the
+# call takes the whole union. It matched the Nil alone, and codegen passed
+# the union to a def instantiated for Nil ("Load operand must be a
+# pointer"); std/tls's handshake_secret with an always-nil PSK hit it.
+
+class Ticket
+  getter psk : Array(UInt8)
+
+  def initialize(@psk : Array(UInt8))
+  end
+end
+
+class Schedule
+  def early(psk : Array::View(UInt8)) : Array(UInt8)
+    out = [] of UInt8
+    psk.each { |b| out << b }
+    out
+  end
+
+  def early : Array(UInt8)
+    [0_u8]
+  end
+
+  def handshake(shared : Array::View(UInt8), psk : Array(UInt8)? = nil) : Array(UInt8)
+    e = psk ? early(psk) : early
+    e << shared.size.to_u8
+    e
+  end
+end
+
+def run(s : Schedule, secret : Array(UInt8), offered : Ticket?, id : Int32) : Int32
+  psk = nil.as(Array(UInt8)?)
+  if id >= 0
+    return -1 unless offered
+    psk = offered.psk
+  end
+  s.handshake(secret, psk).size
+end
+
+def never(s : Schedule, secret : Array(UInt8)) : Int32
+  psk = nil
+  s.handshake(secret, psk).size
+end
+
+puts run(Schedule.new, [1_u8, 2_u8], nil, -1)
+puts run(Schedule.new, [1_u8, 2_u8], Ticket.new([5_u8, 6_u8]), 0)
+puts never(Schedule.new, [1_u8])

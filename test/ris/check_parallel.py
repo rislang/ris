@@ -5,9 +5,10 @@ check.sh stays the one list of checks. Its header (settings and the
 expect helper) runs before each block; the blocks are its top-level
 statements (see split), so a block must not read a variable
 another block set. heap_check.py runs after all parallel jobs finish.
-Each job gets its own TMPDIR. A job that runs past RIS_CHECK_TIMEOUT
-seconds (default 300) is killed with its processes and reported
-FAILED, so one hung test cannot hold the suite.
+Each job gets its own TMPDIR and compiler cache (IYI_CACHE_DIR). A job
+that runs past RIS_CHECK_TIMEOUT seconds (default 300) is killed with
+its processes and reported FAILED, so one hung test cannot hold the
+suite.
 RIS_CHECK_SERIAL=1 bash test/ris/check.sh runs it in order.
 RIS_CHECK_MATCH selects blocks by regex and skips unrelated heap workloads.
 """
@@ -68,7 +69,10 @@ def run(header, block, scratch, index):
     tmp.mkdir()
     script = tmp / "check.sh"
     script.write_text("\n".join(header + block + ['exit "$status"']) + "\n")
-    env = dict(os.environ, TMPDIR=str(tmp), RIS_CHECK_SERIAL="1")
+    # A compiler cache of its own: two jobs building one .ri (variants of
+    # a gate) shared ~/.cache/iyi/<path> and raced on its object files.
+    env = dict(os.environ, TMPDIR=str(tmp), RIS_CHECK_SERIAL="1",
+               IYI_CACHE_DIR=str(tmp / "cache"))
     limit = int(os.environ.get("RIS_CHECK_TIMEOUT", "300"))
     job = subprocess.Popen(["bash", str(script)], cwd=ROOT, env=env,
                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,

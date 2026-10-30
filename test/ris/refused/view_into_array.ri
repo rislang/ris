@@ -1,0 +1,16 @@
+module test/refused/view_into_array
+
+# A local that may hold an Array or a view of one reaches no Array
+# parameter: it was instantiated for Nil and crashed codegen.
+def take(x : Array(UInt8)?) : Int32
+  x ? x.size : -1
+end
+
+def pick(a : Array(UInt8), n : Int32) : Int32
+  v = a[1, 2]
+  c = n == 2 ? [] of UInt8 : nil
+  c = v if n == 1
+  take(c)
+end
+
+puts pick([1_u8, 2_u8, 3_u8], 1)

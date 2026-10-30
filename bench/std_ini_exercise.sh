@@ -100,10 +100,10 @@ else
   "$PY" - <<PY
 from pathlib import Path
 src = Path("$REPO/src/std/ini.iyi").read_text()
-old = 'current_section[key] = value'
+old = 'ini[current, key] = value'
 if old not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/ini.iyi").write_text(src.replace(old, 'current_section[key] = key', 1))
+Path("$WORK/patched/std/ini.iyi").write_text(src.replace(old, 'ini[current, key] = key', 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the patch did not apply"
@@ -158,7 +158,7 @@ PY
     echo "  $label: caught"
   fi
 }
-broken "only space and tab skipped again" 'while offset < len && (raw[offset] == 32_u8 || (raw[offset] >= 9_u8 && raw[offset] <= 13_u8))' 'while offset < len && (raw[offset] == 32_u8 || raw[offset] == 9_u8)' "expected declaration at line 1, column 5"
+broken "only space and tab skipped again" 'while offset < len && (raw.byte_at(offset) == 32_u8 || (raw.byte_at(offset) >= 9_u8 && raw.byte_at(offset) <= 13_u8))' 'while offset < len && (raw.byte_at(offset) == 32_u8 || raw.byte_at(offset) == 9_u8)' "expected declaration at line 1, column 5"
 broken "a key opening with U+FEFF written again" 'if key.starts_with?("\uFEFF")' 'if false' "ASSERTION FAILED: a key opening with U+FEFF is refused"
 
 echo

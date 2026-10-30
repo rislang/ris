@@ -32,7 +32,6 @@ import std/tls::{TlsConfig, TlsEchKey, TlsError, TlsIdentity, TlsIdentitySource,
 import std/dns::{DnsError, DnsTapeMessage, DnsTapeRecord}
 import std/udp::{UdpSocket}
 import std/x509::{Certificate}
-import std/slice::{Bytes}
 
 # bench/std_tls_exercise.iyi's ECH test PKI: a root, inner.test's leaf and
 # public.test's, Ed25519, valid from 2025 to 9999. The keys guard nothing
@@ -90,7 +89,7 @@ def replaced(text : String, from : String, to : String) : String
       buf << to
       at = at + from.bytesize
     else
-      buf.write_byte(text.to_unsafe[at])
+      buf.write_byte(text.byte_at(at))
       at = at + 1
     end
   end
@@ -105,7 +104,7 @@ def wire_name(name : String) : Array(UInt8)
     buf << label.bytesize.to_u8
     index = 0
     while index < label.bytesize
-      buf << label.to_unsafe[index]
+      buf << label.byte_at(index)
       index = index + 1
     end
   end
@@ -144,7 +143,7 @@ def alpn_param(ids : Array(String)) : {Int32, Array(UInt8)}
     value << id.bytesize.to_u8
     index = 0
     while index < id.bytesize
-      value << id.to_unsafe[index]
+      value << id.byte_at(index)
       index = index + 1
     end
   end
@@ -169,7 +168,7 @@ class Zone
   # The answer to *query*: its header and question, and the records -
   # nothing past them, though an encrypted resolver's query carries an
   # OPT record. Nil for one that does not read.
-  def answer(query : Bytes) : Bytes?
+  def answer(query : String) : String?
     parsed = DnsTapeMessage.parse(query)
     return nil unless parsed.is_a?(DnsTapeMessage)
     question = DnsTapeMessage.read_name(query, 12)
@@ -209,9 +208,7 @@ class Zone
       push16(buf, data.size)
       data.each { |byte| buf << byte }
     end
-    bytes = Bytes.new(buf.size)
-    buf.each_with_index { |byte, at| bytes[at] = byte }
-    bytes
+    String.build(buf.size) { |writer| buf.each { |byte| writer.push(byte) } }
   end
 end
 
@@ -229,8 +226,8 @@ class LocalUpstream
     false
   end
 
-  def exchange(queries : Array(Bytes), timeout_ms : Int32) : Array(Bytes) | DnsError | Cancelled
-    queries.map { |query| @zone.answer(query) || Bytes.new(0) }
+  def exchange(queries : Array(String), timeout_ms : Int32) : Array(String) | DnsError | Cancelled
+    queries.map { |query| @zone.answer(query) || "" }
   end
 
   def close : Nil

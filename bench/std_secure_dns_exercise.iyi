@@ -22,7 +22,6 @@ import std/secure_dns::{DnsOverHttps, DnsOverTls}
 import std/tls::{TlsConfig}
 import std/x509::{Certificate}
 import std/file::{File}
-import std/slice::{Bytes}
 
 def check(cond : Bool, msg : String) : Nil
   raise "ASSERTION FAILED: #{msg}" unless cond
@@ -147,53 +146,58 @@ end
 # RFC 7830 and RFC 8467 4.1 have a client pad it; nil when it is. The
 # length wanted is found by counting up in blocks, not by the module's
 # arithmetic.
-def padding_fault(query : Bytes, chars : Int32) : String?
+def padding_fault(query : String, chars : Int32) : String?
   opt = 12 + chars + 2 + 4
   wanted = 128
   while wanted < opt + 15
     wanted = wanted + 128
   end
-  return "#{query.size} bytes, not a multiple of 128" unless query.size % 128 == 0
-  return "#{query.size} bytes, not #{wanted}, the first multiple of 128 to hold #{opt + 15}" unless query.size == wanted
+  return "#{query.bytesize} bytes, not a multiple of 128" unless query.bytesize % 128 == 0
+  return "#{query.bytesize} bytes, not #{wanted}, the first multiple of 128 to hold #{opt + 15}" unless query.bytesize == wanted
   return "ARCOUNT #{query[10]} #{query[11]}, not one record" unless query[10] == 0_u8 && query[11] == 1_u8
   return "an OPT record not owned by the root" unless query[opt] == 0_u8
   return "a record of type #{query[opt + 1]} #{query[opt + 2]}, not OPT (41)" unless query[opt + 1] == 0_u8 && query[opt + 2] == 41_u8
   payload = (query[opt + 3].to_i32 << 8) | query[opt + 4].to_i32
-  return "a payload size of #{payload}, below the #{query.size} bytes sent (RFC 7830 4)" if payload < 512 || payload < query.size
+  return "a payload size of #{payload}, below the #{query.bytesize} bytes sent (RFC 7830 4)" if payload < 512 || payload < query.bytesize
   index = opt + 5
   while index < opt + 9
     return "byte #{index} of the TTL is #{query[index]}: RCODE, version and flags are 0" unless query[index] == 0_u8
     index = index + 1
   end
   data = (query[opt + 9].to_i32 << 8) | query[opt + 10].to_i32
-  return "OPT data of #{data} bytes where #{query.size - opt - 11} follow" unless data == query.size - opt - 11
+  return "OPT data of #{data} bytes where #{query.bytesize - opt - 11} follow" unless data == query.bytesize - opt - 11
   code = (query[opt + 11].to_i32 << 8) | query[opt + 12].to_i32
   return "option #{code}, not Padding (12)" unless code == 12
   length = (query[opt + 13].to_i32 << 8) | query[opt + 14].to_i32
-  return "a Padding option of #{length} bytes where #{query.size - opt - 15} follow" unless length == query.size - opt - 15
+  return "a Padding option of #{length} bytes where #{query.bytesize - opt - 15} follow" unless length == query.bytesize - opt - 15
   index = opt + 15
-  while index < query.size
+  while index < query.bytesize
     return "padding byte #{index} is #{query[index]}, not 0 (RFC 7830 3)" unless query[index] == 0_u8
     index = index + 1
   end
-  return "it ends at #{DnsTapeMessage.ends_at(query)}" unless DnsTapeMessage.ends_at(query) == query.size
+  return "it ends at #{DnsTapeMessage.ends_at(query)}" unless DnsTapeMessage.ends_at(query) == query.bytesize
   nil
+end
+
+# *bytes* as the String a message is.
+def wire(bytes : Array(UInt8)) : String
+  String.build(bytes.size) { |writer| bytes.each { |byte| writer.push(byte) } }
 end
 
 # --- The wire, with no network ---
 
-strings = DnsTapeRecord.character_strings(Bytes.new(8) { |i| [5_u8, 104_u8, 101_u8, 108_u8, 108_u8, 111_u8, 1_u8, 33_u8][i] })
+strings = DnsTapeRecord.character_strings(wire([5_u8, 104_u8, 101_u8, 108_u8, 108_u8, 111_u8, 1_u8, 33_u8]))
 check strings == ["hello", "!"], "a TXT record's character-strings: #{strings.inspect}"
-check DnsTapeRecord.character_strings(Bytes.new(3) { |i| [5_u8, 104_u8, 101_u8][i] }).nil?, "a character-string running past the data is refused"
+check DnsTapeRecord.character_strings(wire([5_u8, 104_u8, 101_u8])).nil?, "a character-string running past the data is refused"
 query = DnsTapeMessage.query(0_u16, "a.zone.test", DnsTapeRecord::A)
 check query[11] == 0_u8, "a query for the clear has no OPT record (RFC 7830 6)"
-check DnsTapeMessage.ends_at(query) == query.size, "a query ends where its question does: #{DnsTapeMessage.ends_at(query)} of #{query.size}"
-longer = Bytes.new(query.size + 3) { |i| i < query.size ? query[i] : 0_u8 }
-check DnsTapeMessage.ends_at(longer) == query.size, "bytes after a message are not the message's: #{DnsTapeMessage.ends_at(longer)}"
-check DnsTapeMessage.ends_at(query[0, query.size - 1]) == -1, "a question cut short runs past the bytes"
+check DnsTapeMessage.ends_at(query) == query.bytesize, "a query ends where its question does: #{DnsTapeMessage.ends_at(query)} of #{query.bytesize}"
+longer = query + wire([0_u8, 0_u8, 0_u8])
+check DnsTapeMessage.ends_at(longer) == query.bytesize, "bytes after a message are not the message's: #{DnsTapeMessage.ends_at(longer)}"
+check DnsTapeMessage.ends_at(query[0, query.bytesize - 1]) == -1, "a question cut short runs past the bytes"
 # The oracle is Python's base64.urlsafe_b64encode of the same 29 bytes,
 # "AAABAAABAAAAAAAAAWEEem9uZQR0ZXN0AAABAAE=", without its "=".
-parameter = DnsOverHttps.base64url(String.new(query.size) { |into| into.copy_from(query.to_unsafe, query.size) })
+parameter = DnsOverHttps.base64url(query)
 same "AAABAAABAAAAAAAAAWEEem9uZQR0ZXN0AAABAAE", parameter, "the dns parameter is base64url without padding (RFC 8484 4.1)"
 puts "wire: ok"
 
@@ -310,12 +314,12 @@ puts "dot_padding: ok"
 # NXDOMAIN with the zone's SOA in its authority section, which every
 # `answers` above read through already (nx.zone.test).
 exchanged = dot.exchange([DnsTapeMessage.query(0x4242_u16, "a.zone.test", DnsTapeRecord::A, DnsTapeMessage::PADDING_BLOCK)], 3000)
-raise "ASSERTION FAILED: a padded query over TLS: #{exchanged.is_a?(DnsError) ? exchanged.message : "cancelled"}" unless exchanged.is_a?(Array(Bytes))
+raise "ASSERTION FAILED: a padded query over TLS: #{exchanged.is_a?(DnsError) ? exchanged.message : "cancelled"}" unless exchanged.is_a?(Array(String))
 opt_answer = exchanged[0]
-check opt_answer[11] == 1_u8 && opt_answer.size % 468 == 0, "the server answers with an OPT record and pads to 468: #{opt_answer.size} bytes, ARCOUNT #{opt_answer[11]}"
+check opt_answer[11] == 1_u8 && opt_answer.bytesize % 468 == 0, "the server answers with an OPT record and pads to 468: #{opt_answer.bytesize} bytes, ARCOUNT #{opt_answer[11]}"
 parsed = DnsTapeMessage.parse(opt_answer)
 check parsed.is_a?(DnsTapeMessage) && parsed.rcode == DnsTapeMessage::RCODE_NOERROR && parsed.answers.size == 1, "an answer with an OPT record parses: #{parsed.is_a?(DnsError) ? parsed.message : parsed.rcode}"
-check DnsTapeMessage.ends_at(opt_answer) == opt_answer.size, "and ends where its OPT record does: #{DnsTapeMessage.ends_at(opt_answer)} of #{opt_answer.size}"
+check DnsTapeMessage.ends_at(opt_answer) == opt_answer.bytesize, "and ends where its OPT record does: #{DnsTapeMessage.ends_at(opt_answer)} of #{opt_answer.bytesize}"
 badvers = error_of(over_tls.resolve("badvers.zone.test"), "an answer of BADVERS")
 check badvers.refused? && badvers.message.includes?("BADVERS"), "the OPT record's extended RCODE is read: BADVERS (16) is not NOERROR: #{badvers.message}"
 puts "edns_answers: ok"

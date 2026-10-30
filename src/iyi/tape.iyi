@@ -1968,7 +1968,20 @@ struct Array::View(T)
     @count
   end
 
-  def index(k : Int32) : Int32
+  # Where *value* first is in this view, or nil: a place in the view, as
+  # `Array#index` answers one in the array.
+  def index(value : T) : Int32?
+    i = 0
+    while i < size
+      return i if self[i] == value
+      i += 1
+    end
+    nil
+  end
+
+  # The place in the backing Array of the view's element *k*. It was
+  # `index(k)`, which on a View(Int32) took the place of `index(value)`.
+  protected def target_index(k : Int32) : Int32
     Tape.out_of_range(k, size, "elements") if k < 0 || k >= size
     if at = @at
       at[k]
@@ -1978,11 +1991,11 @@ struct Array::View(T)
   end
 
   def [](k : Int32) : T
-    @target.unchecked(index(k))
+    @target.unchecked(target_index(k))
   end
 
   def []=(k : Int32, value : T) : T
-    @target.unchecked_store(index(k), value)
+    @target.unchecked_store(target_index(k), value)
   end
 
   def __loop_fetch(k : Int32) : T

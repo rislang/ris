@@ -10,7 +10,6 @@
 module bench/std_netip_exercise
 
 import std/netip::{IP, Prefix, PrefixSet, NetipError}
-import std/gc::{GC}
 import std/int
 
 def check(cond : Bool, msg : String) : Nil
@@ -263,24 +262,19 @@ check Prefix.parse("10.1.2.3/8", mask: true).as(Prefix).masked == prefix("10.0.0
 check PrefixSet.new.empty? && PrefixSet.new.collapsed.empty? && PrefixSet.new.lookup(ip("::")).nil?, "an empty set holds nothing"
 
 puts "== allocation"
-# The questions an allowlist asks of every packet build nothing on the heap.
-{% unless flag?(:gc_none) || flag?(:gc_boehm) %}
-  probe4 = ip("10.1.2.3")
-  probe6 = ip("2001:db8::1")
-  GC.disable
-  before = GC.stats.bytes_since_collection
-  hits = 0
-  10000.times do
-    hits = hits + 1 if set.lookup(probe4)
-    hits = hits + 1 if set.contains?(probe6)
-    hits = hits + 1 if probe4.global? || probe6.global? || probe4.private?
-    hits = hits + 1 if ten.contains?(probe4)
-  end
-  used = GC.stats.bytes_since_collection - before
-  GC.enable
-  check hits == 40000, "every probe answered"
-  check used == 0_u64, "lookup, contains? and the predicates allocate nothing (#{used} bytes over 40,000 calls)"
-  puts "  40,000 lookups, containments and classifications: #{used} bytes"
-{% end %}
+# The questions an allowlist asks of every packet build nothing on the
+# heap: a ris program has none, and bench/std_netip_exercise.sh runs this
+# with RIS_HEAP_STATS=1 to hold the whole run to 0 allocations.
+probe4 = ip("10.1.2.3")
+probe6 = ip("2001:db8::1")
+hits = 0
+10000.times do
+  hits = hits + 1 if set.lookup(probe4)
+  hits = hits + 1 if set.contains?(probe6)
+  hits = hits + 1 if probe4.global? || probe6.global? || probe4.private?
+  hits = hits + 1 if ten.contains?(probe4)
+end
+check hits == 40000, "every probe answered"
+puts "  40,000 lookups, containments and classifications"
 
 puts "\nALL CHECKS PASSED"

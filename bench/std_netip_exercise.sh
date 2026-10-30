@@ -60,11 +60,18 @@ build_and_run() {
     status=1
     return 1
   fi
-  "$WORK/$name" >"$WORK/$name.out" 2>&1
+  RIS_HEAP_STATS=1 "$WORK/$name" >"$WORK/$name.out" 2>&1
   local exit_code=$?
   sed 's/^/  /' "$WORK/$name.out"
   if [ "$exit_code" -ne 0 ]; then
     echo "$label: exited $exit_code"
+    status=1
+    return 1
+  fi
+  # Nothing on the heap in the whole run (a ris compiler prints the count).
+  if grep -q '^ris heap:' "$WORK/$name.out" &&
+      ! grep -qx 'ris heap: 0 allocations, 0 bytes' "$WORK/$name.out"; then
+    echo "$label: the run used the heap"
     status=1
     return 1
   fi
@@ -520,43 +527,53 @@ def describe(p : Prefix) : String
    p.supernet.to_s, flag(p.masked == p)].join("|")
 end
 
-while line = STDIN.gets(chomp: true)
-  fields = line.split('\t')
-  case fields[0]
-  when "A"
-    a = IP.parse(fields[1])
-    four = flag(IP.parse_v4(fields[1]).is_a?(IP))
-    six = flag(IP.parse_v6(fields[1]).is_a?(IP))
-    puts a.is_a?(NetipError) ? "refused #{four}#{six}" : "#{describe(a)}|#{four}#{six}"
-  when "P", "M"
-    p = Prefix.parse(fields[1], mask: fields[0] == "M")
-    puts p.is_a?(NetipError) ? "refused" : describe(p)
-  when "C"
-    puts flag(prefix_of(fields[1]).contains?(ip_of(fields[2])))
-  when "O"
-    a = prefix_of(fields[1])
-    b = prefix_of(fields[2])
-    puts flag(a.overlaps?(b)) + flag(a.contains?(b)) + flag(a.subnet_of?(b)) + flag(b.overlaps?(a)) + ((a <=> b) + 1).to_s
-  when "S"
-    puts prefix_of(fields[1]).subnets(fields[2].to_i).map { |s| s.to_s }.join(" ")
-  when "U"
-    puts prefix_of(fields[1]).supernet(fields[2].to_i)
-  when "X"
-    puts prefix_of(fields[1]).subnet(fields[2].to_i, u128_of(fields[3]))
-  when "R"
-    puts list(fields[1]).map { |text| ip_of(text) }.sorted.map { |a| a.to_s }.join(",")
-  when "T"
-    set = PrefixSet.new
-    list(fields[1]).each { |text| set.add(Prefix.parse(text, mask: true).or_panic) }
-    probes = list(fields[2])
-    answer = [set.size.to_s, lookups(set, probes), set.prefixes.map { |p| p.to_s }.join(","), set.collapsed.map { |p| p.to_s }.join(",")]
-    list(fields[3]).each { |text| set.delete(Prefix.parse(text, mask: true).or_panic) }
-    answer << set.size.to_s
-    answer << lookups(set, probes)
-    answer << set.collapsed.map { |p| p.to_s }.join(",")
-    puts answer.join("|")
-  else
-    puts "unknown #{fields[0]}"
+# A tape a line: each answer's text is dropped before the next line, so
+# the corpus never grows one tape past its mapping.
+done = false
+until done
+  tape do
+    line = STDIN.gets(chomp: true)
+    if line.nil?
+      done = true
+    else
+      fields = line.split('\t')
+      case fields[0]
+      when "A"
+        a = IP.parse(fields[1])
+        four = flag(IP.parse_v4(fields[1]).is_a?(IP))
+        six = flag(IP.parse_v6(fields[1]).is_a?(IP))
+        puts a.is_a?(NetipError) ? "refused #{four}#{six}" : "#{describe(a)}|#{four}#{six}"
+      when "P", "M"
+        p = Prefix.parse(fields[1], mask: fields[0] == "M")
+        puts p.is_a?(NetipError) ? "refused" : describe(p)
+      when "C"
+        puts flag(prefix_of(fields[1]).contains?(ip_of(fields[2])))
+      when "O"
+        a = prefix_of(fields[1])
+        b = prefix_of(fields[2])
+        puts flag(a.overlaps?(b)) + flag(a.contains?(b)) + flag(a.subnet_of?(b)) + flag(b.overlaps?(a)) + ((a <=> b) + 1).to_s
+      when "S"
+        puts prefix_of(fields[1]).subnets(fields[2].to_i).map { |s| s.to_s }.join(" ")
+      when "U"
+        puts prefix_of(fields[1]).supernet(fields[2].to_i)
+      when "X"
+        puts prefix_of(fields[1]).subnet(fields[2].to_i, u128_of(fields[3]))
+      when "R"
+        puts list(fields[1]).map { |text| ip_of(text) }.sorted.map { |a| a.to_s }.join(",")
+      when "T"
+        set = PrefixSet.new
+        list(fields[1]).each { |text| set.add(Prefix.parse(text, mask: true).or_panic) }
+        probes = list(fields[2])
+        answer = [set.size.to_s, lookups(set, probes), set.prefixes.map { |p| p.to_s }.join(","), set.collapsed.map { |p| p.to_s }.join(",")]
+        list(fields[3]).each { |text| set.delete(Prefix.parse(text, mask: true).or_panic) }
+        answer << set.size.to_s
+        answer << lookups(set, probes)
+        answer << set.collapsed.map { |p| p.to_s }.join(",")
+        puts answer.join("|")
+      else
+        puts "unknown #{fields[0]}"
+      end
+    end
   end
 end
 IYI
@@ -839,7 +856,7 @@ PY
   fi
 }
 prove_broken "an octet with a leading zero read as decimal" "a leading zero in an octet is refused" \
-  'if count > 1 && raw[start] == 48_u8' 'if false'
+  'if count > 1 && raw.byte_at(start) == 48_u8' 'if false'
 prove_broken "an octet of 256" "an octet past 255 is refused" \
   'if number > 255' 'if number > 256'
 prove_broken "no limit of 45 characters" "more than 45 characters" \

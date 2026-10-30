@@ -658,15 +658,9 @@ pub class TlsKeySchedule
 
   # The handshake secret over the key exchange's *shared* secret, and over
   # *psk* in a resumption.
-  # Without a PSK, and with one: two defs rather than a nilable
-  # parameter, which a caller whose PSK is always nil handed to codegen
-  # as a bare Nil (LLVM: "Load operand must be a pointer").
-  def handshake_secret(shared : Array::View(UInt8)) : Array(UInt8)
-    extract(derive_secret(early_secret, "derived", [] of UInt8), shared)
-  end
-
-  def handshake_secret(shared : Array::View(UInt8), psk : Array(UInt8)) : Array(UInt8)
-    extract(derive_secret(early_secret(psk), "derived", [] of UInt8), shared)
+  def handshake_secret(shared : Array::View(UInt8), psk : Array(UInt8)? = nil) : Array(UInt8)
+    early = psk ? early_secret(psk) : early_secret
+    extract(derive_secret(early, "derived", [] of UInt8), shared)
   end
 
   def master_secret(handshake_secret : Array::View(UInt8)) : Array(UInt8)
@@ -2470,7 +2464,7 @@ pub class TlsClient < TlsConnection
       return TlsError.new("the server's X25519 share gives no secret", TlsAlert::ILLEGAL_PARAMETER) if shared.is_a?(CurveError)
       secret = TlsBytes.of(shared)
     end
-    handshake_secret = psk ? @schedule.handshake_secret(secret, psk) : @schedule.handshake_secret(secret)
+    handshake_secret = @schedule.handshake_secret(secret, psk)
     client_secret = @schedule.derive_secret(handshake_secret, "c hs traffic", @transcript)
     server_secret = @schedule.derive_secret(handshake_secret, "s hs traffic", @transcript)
     @reader = TlsRecordCipher.new(@suite, @schedule, server_secret)
@@ -3403,8 +3397,8 @@ end
 # `min_version`, `require_staple` or `ech_configs` on it in place. Objects
 # are told apart by `object_id`, and the references are held, so an
 # address freed and handed to a new configuration is never taken for the
-# old one. Certificates added to the same roots array in place are not
-# seen: such an array is still the same object. `ech_configs` is held to
+# old one. The roots are held to their certificates, each the same
+# object in the same order. `ech_configs` is held to
 # its bytes, kept as they were: a connection made in the clear is not
 # handed a request made under a configuration that asks for ECH, nor its
 # ticket offered inside one, and a ticket that came inside one is not
@@ -3435,12 +3429,26 @@ pub class TlsMadeUnder
     return false unless @config.object_id == config.object_id
     roots = config.roots
     held = @roots
-    return false unless held.nil? ? roots.nil? : (!roots.nil? && held.same_storage?(roots))
+    return false unless held.nil? ? roots.nil? : (!roots.nil? && TlsMadeUnder.same_roots?(held, roots))
     identity = config.identity
     mine = @identity
     return false unless mine.nil? ? identity.nil? : (!identity.nil? && mine.object_id == identity.object_id)
     return false unless @ech_configs == config.ech_configs
     @now == config.now && @min_version == config.min_version && @require_staple == config.require_staple
+  end
+
+  # The same certificates in the same order, each the same object. A
+  # field's Array is a copy on the tape (TAPE_SPEC), so the arrays' own
+  # storage told a configuration's roots apart from themselves, and no
+  # connection or ticket was ever used again.
+  def self.same_roots?(held : Array(Certificate), roots : Array(Certificate)) : Bool
+    return false unless held.size == roots.size
+    at = 0
+    while at < held.size
+      return false unless held[at].object_id == roots[at].object_id
+      at = at + 1
+    end
+    true
   end
 end
 
@@ -4805,7 +4813,7 @@ pub class TlsServer < TlsConnection
     return sent if sent
     @transcript = @transcript + reply
 
-    handshake_secret = psk ? @schedule.handshake_secret(secret, psk) : @schedule.handshake_secret(secret)
+    handshake_secret = @schedule.handshake_secret(secret, psk)
     client_secret = @schedule.derive_secret(handshake_secret, "c hs traffic", @transcript)
     server_secret = @schedule.derive_secret(handshake_secret, "s hs traffic", @transcript)
     @writer = TlsRecordCipher.new(@suite, @schedule, server_secret)

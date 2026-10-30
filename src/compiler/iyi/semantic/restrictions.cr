@@ -1871,7 +1871,11 @@ module Iyi
 
     def restrict(other : Generic, context)
       if view = array_view_type
-        if result = view.restrict(other, context)
+        # The whole borrowed type must pass: `(Array(T) | View(T) | Nil)`
+        # against `Array(T)?` restricted to Nil alone, and the call was
+        # instantiated for Nil while codegen passed the union.
+        result = view.restrict(other, context)
+        if result && view.implements?(result)
           add_match(result)
           return result
         end
@@ -1899,7 +1903,11 @@ module Iyi
 
     def restrict(other : Arg, context)
       if view = array_view_type
-        if result = view.restrict(other, context)
+        # The whole borrowed type must pass: `(Array(T) | View(T) | Nil)`
+        # against `Array(T)?` restricted to Nil alone, and the call was
+        # instantiated for Nil while codegen passed the union.
+        result = view.restrict(other, context)
+        if result && view.implements?(result)
           add_match(result)
           return result
         end

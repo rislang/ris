@@ -369,8 +369,16 @@ end
 pub class RisMemoryBackend < Backend
   getter entries : Array(RisLogEntry)
 
+  # One on the program's tape, keeping its entries there: what the root
+  # logger can hold (`Log.setup`), as `IOBackend.on_program` is.
+  def self.on_program : RisMemoryBackend
+    backend = RisRegion.program_object(RisMemoryBackend)
+    backend.initialize(Program.tape)
+    backend
+  end
+
   def initialize(@owner : Program::TapeOwner)
-    @entries = Array(RisLogEntry).new
+    @entries = Array(RisLogEntry).new.copy_to(@owner)
   end
 
   def write(entry : TapeEntry) : Nil
@@ -518,7 +526,11 @@ pub class Logger
   @level : Severity?
   @backend : Backend?
   @parent : Logger?
-  @children : Array(Logger)?
+  # The children, newest first, each linked to the next: a list rather
+  # than an Array, so a child handed out is no view of a store that grows
+  # when its own children are made.
+  @first_child : Logger?
+  @sibling : Logger?
   # What `bind` gave this logger, on every entry it and its children write.
   @bound : Metadata?
 
@@ -526,7 +538,8 @@ pub class Logger
     @level = level
     @backend = backend
     @parent = parent
-    @children = nil
+    @first_child = nil
+    @sibling = nil
     @bound = bound
     if bound && parent
       if older = parent.bound_node
@@ -599,23 +612,27 @@ pub class Logger
   end
 
   protected def get_or_create_child(name : String) : Logger
-    children = @children
-    if children
-      suffix = @parent.nil? && @source.empty? ? name : "#{@source}.#{name}"
-      children.each { |child| return child if child.source == suffix }
-    end
-
     # Only the root drops the dot: a child named "" under it has an empty
     # source too, and `Log.for(".a")` answered "a", the source of another
     # logger.
     child_source = @parent.nil? && @source.empty? ? name : "#{@source}.#{name}"
-    child = Logger.new(child_source, nil, nil, self)
-    unless children
-      children = Array(Logger).new
-      @children = children
+    child = @first_child
+    while child
+      return child if child.source == child_source
+      child = child.sibling
     end
-    children << child
-    child
+    made = Logger.new(child_source, nil, nil, self)
+    made.sibling = @first_child
+    @first_child = made
+    made
+  end
+
+  protected def sibling : Logger?
+    @sibling
+  end
+
+  protected def sibling=(next_one : Logger?) : Nil
+    @sibling = next_one
   end
 
   # None is a level and not a severity: an entry logged at None was

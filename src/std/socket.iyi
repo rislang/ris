@@ -575,9 +575,23 @@ pub struct IyiSocket
     if named?(host)
       return connect_named(host, port, Resolver.system, timeout_ms)
     end
-    return race(host, port, loopback, timeout_ms) if localhost?(host)
-    addr, family = sockaddr(host, port)
-    connect_to(addr, family, endpoint(host, port), timeout_ms)
+    connect_address(host, port, timeout_ms)
+  end
+
+  # The same to an address, IPv4 or IPv6 (bare or in brackets), or
+  # `localhost`: nothing is looked up, so a caller that a lookup could
+  # reach again - std/secure_dns's upstreams, which a resolver asks -
+  # connects by this one. A name is the program's mistake, and refused.
+  def self.connect_address(
+    address : String,
+    port : Int32,
+    timeout_ms : Int32 = -1,
+  ) : IyiSocket | Cancelled | SocketError
+    raise "negative timeout: #{timeout_ms}" if timeout_ms < -1
+    raise "#{address.inspect} is a name, not an address: connect(host, port) looks it up" if named?(address)
+    return race(address, port, loopback, timeout_ms) if localhost?(address)
+    addr, family = sockaddr(address, port)
+    connect_to(addr, family, endpoint(address, port), timeout_ms)
   end
 
   # The same, with a host name resolved by *resolver*: name servers, a

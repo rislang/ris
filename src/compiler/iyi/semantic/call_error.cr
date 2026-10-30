@@ -496,9 +496,22 @@ class Iyi::Call
           end
         end
       end
+
+      # ris: an Array::View is a borrow, never an Array: a value that may
+      # be either reaches no Array parameter, and copying is the caller's.
+      if arg_types.any? { |type| iyi_view_beside_array?(type) }
+        msg << "\nAn Array::View(T) is not an Array(T): copy it with `.to_a`\n" \
+               "where it is assigned, or take `Array::View(T)` in the parameter."
+      end
     end
 
     raise message, owner_trace
+  end
+
+  private def iyi_view_beside_array?(type : Type) : Bool
+    type = type.remove_literal
+    return false unless type.is_a?(UnionType)
+    type.union_types.any? { |part| part.to_s.starts_with?("Array::View(") }
   end
 
   private def check_block_mismatch(call_errors, owner, def_name)

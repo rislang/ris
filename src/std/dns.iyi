@@ -397,14 +397,8 @@ pub struct SvcbRecord
 
   # The value of *key*, or nil when the record does not carry it.
   def value(key : Int32) : String?
-    # A loop, not `@keys.index`: on a View(Int32) that names the
-    # element's place in the backing Array, not where *key* is.
-    at = 0
-    while at < @keys.size
-      return @values[at] if @keys[at] == key
-      at = at + 1
-    end
-    nil
+    at = @keys.index(key)
+    at ? @values[at] : nil
   end
 
   # The alpn-ids of `alpn` (section 7.1), in their order; none without it.

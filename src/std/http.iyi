@@ -2994,7 +2994,8 @@ end
 # spare the next, and the records may move a connection to another host
 # and port, which is the program's to ask for.
 pub class HTTPClient
-  @idle : Hash(String, Array(Conn))
+  # The kept connections, a key's together: a few origins, scanned.
+  @idle : Array(KeptConns)
   @limit : Int32
   @timeout_ms : Int32
   @made : Int32
@@ -3035,7 +3036,7 @@ pub class HTTPClient
     raise "HTTP: a timeout of #{@timeout_ms} ms" if @timeout_ms < 0
     raise "HTTP: a client keeps 0 to #{TlsSession::MAX_TICKETS} tickets an origin, not #{@origin_tickets}" if @origin_tickets < 0 || @origin_tickets > TlsSession::MAX_TICKETS
     raise "HTTP: a client keeps 0 or more tickets, not #{@tickets}" if @tickets < 0
-    @idle = {} of String => Array(Conn)
+    @idle = [] of KeptConns
     @limit = idle
     @made = 0
     @reused = 0
@@ -3102,10 +3103,10 @@ pub class HTTPClient
   # Every idle connection closed. The client may be used after; it opens
   # new ones.
   def close : Nil
-    @idle.each do |_, conns|
-      conns.each { |conn| conn.close }
+    @idle.each do |kept|
+      kept.conns.each { |conn| conn.close }
+      kept.conns.clear
     end
-    @idle = {} of String => Array(Conn)
   end
 
   # A kept connection to *key*, nil when none waits. An HTTP/2 connection
@@ -3116,7 +3117,9 @@ pub class HTTPClient
   # against one set of roots carried requests after `HTTP.tls_config=`
   # named others that would have refused it.
   protected def take(key : String, tls : TlsConfig? = nil) : Conn?
-    if waiting = @idle[key]?
+    at = kept_at(key)
+    if at >= 0
+      waiting = @idle[at].conns
       while conn = waiting.pop?
         h2 = conn.h2
         if h2 && !h2.usable?
@@ -3171,14 +3174,27 @@ pub class HTTPClient
   end
 
   protected def give_back(key : String, conn : Conn) : Nil
-    unless @idle.has_key?(key)
-      @idle[key] = [] of Conn
+    at = kept_at(key)
+    if at < 0
+      @idle << KeptConns.new(key)
+      at = @idle.size - 1
     end
-    if @idle[key].size >= @limit
+    conns = @idle[at].conns
+    if conns.size >= @limit
       conn.close
       return
     end
-    @idle[key] << conn
+    conns << conn
+  end
+
+  # Where *key*'s connections are in `@idle`, -1 when nowhere.
+  private def kept_at(key : String) : Int32
+    at = 0
+    while at < @idle.size
+      return at if @idle[at].key == key
+      at = at + 1
+    end
+    -1
   end
 
   # The most configurations HTTPS records make an origin hold - a
@@ -3286,6 +3302,15 @@ pub struct HttpsEndpoint
   end
 end
 
+# The connections an `HTTPClient` keeps idle under one key.
+class KeptConns
+  getter key : String
+  getter conns : Array(Conn) = [] of Conn
+
+  def initialize(@key : String)
+  end
+end
+
 # The tickets an `HTTPClient` keeps for one origin, and the configuration
 # they were taken under.
 class HeldSession
@@ -3354,6 +3379,54 @@ struct ProxyRoute
   def self.of(proxy : String?) : ProxyRoute | HTTPError | Nil
     return nil unless proxy
     parse(proxy)
+  end
+end
+
+# How `HTTP.exchange` makes a connection: a host looked up by the
+# client's resolver, or `Resolver.system`, and by HTTPS records when the
+# client asks for them.
+struct ByName
+  def key_suffix : String
+    ""
+  end
+
+  def records? : Bool
+    true
+  end
+
+  def connect(client : HTTPClient?, host : String, port : Int32, wait : Int32) : IyiSocket | Cancelled | SocketError
+    through = nil.as(Resolver?)
+    through = client.resolver if client
+    return IyiSocket.connect(host, port, through, wait) if through
+    IyiSocket.connect(host, port, wait)
+  end
+
+  def by_records(client : HTTPClient, origin : String, host : String, port : Int32, base : TlsConfig, timeout_ms : Int32) : Tuple(IyiSocket, TlsClient, TlsConfig) | Cancelled | SocketError | HTTPError | Nil
+    HTTP.by_records(client, origin, host, port, base, client.resolver, timeout_ms)
+  end
+end
+
+# A connection to one address whatever the host (`HTTP.open_at`): no
+# lookup and no records, and its connections kept under the address.
+@[OnTape]
+struct AtAddress
+  def initialize(@address : String)
+  end
+
+  def key_suffix : String
+    " at " + @address
+  end
+
+  def records? : Bool
+    false
+  end
+
+  def connect(client : HTTPClient?, host : String, port : Int32, wait : Int32) : IyiSocket | Cancelled | SocketError
+    IyiSocket.connect_address(@address, port, wait)
+  end
+
+  def by_records(client : HTTPClient, origin : String, host : String, port : Int32, base : TlsConfig, timeout_ms : Int32) : Tuple(IyiSocket, TlsClient, TlsConfig) | Cancelled | SocketError | HTTPError | Nil
+    nil
   end
 end
 
@@ -3561,13 +3634,38 @@ pub struct HTTP
     raise "HTTP: a timeout of #{timeout_ms} ms" if timeout_ms < 0
     route = ProxyRoute.of(proxy)
     return route if route.is_a?(HTTPError)
+    open_by(ByName.new, method, url, headers, body, redirects, jar, decompress, client, timeout_ms, route) { |response| yield response }
+  end
+
+  # `open` to *address*, an IPv4 or IPv6 address, for the URL's host:
+  # nothing is looked up, no HTTPS records are asked for and no proxy is
+  # taken, so a caller that a lookup could reach again - std/secure_dns's
+  # `DnsOverHttps`, which a `Resolver` asks - is not reached by its own
+  # request. The certificate is checked for the URL's host, as `open`'s
+  # is. A redirect is the block's answer, not followed: its target is
+  # not at *address*. *client*'s connections made here are kept apart
+  # from those made by name. A name for *address* is refused.
+  def self.open_at(address : String, method : String, url : String, headers : Hash(String, String) = {} of String => String, body : String | IyiIO = "", decompress : Bool = true, client : HTTPClient? = nil, timeout_ms : Int32 = 0, &block : Response -> R) : R | Cancelled | SocketError | HTTPError forall R
+    raise "HTTP: a timeout of #{timeout_ms} ms" if timeout_ms < 0
+    bare = address
+    size = address.bytesize
+    bare = address[1, size - 2] if size >= 2 && address[0] == 91_u8 && address[size - 1] == 93_u8
+    read = bare.includes?(":") ? IyiSocket.read_ipv6(bare) : IyiSocket.read_ipv4(bare)
+    raise "HTTP: #{address.inspect} is not an address: #{read}; open looks a name up" if read.is_a?(String)
+    open_by(AtAddress.new(address), method, url, headers, body, 0, nil, decompress, client, timeout_ms, nil) { |response| yield response }
+  end
+
+  # `open`'s redirect loop over connections *dialer* makes: by name
+  # (`ByName`) or at an address (`AtAddress`). Each kind is its own
+  # specialization, so one at an address calls no `Resolver`.
+  private def self.open_by(dialer : D, method : String, url : String, headers : Hash(String, String), body : String | IyiIO, redirects : Int32, jar : CookieStore?, decompress : Bool, client : HTTPClient?, timeout_ms : Int32, route : ProxyRoute?, &block : Response -> R) : R | Cancelled | SocketError | HTTPError forall D, R
     current = url
     verb = method
     sent = headers
     payload = body
     hops = 0
     while true
-      exchange = exchange(verb, current, sent, payload, jar, decompress, nil, client, timeout_ms, route)
+      exchange = exchange(dialer, verb, current, sent, payload, jar, decompress, nil, client, timeout_ms, route)
       return exchange unless exchange.is_a?(Exchange)
       response = exchange.response
       location = response.header("Location")
@@ -3618,7 +3716,7 @@ pub struct HTTP
     return route if route.is_a?(HTTPError)
     sent = headers.dup
     sent["Upgrade"] = protocol
-    exchange = exchange("GET", url, sent, "", nil, false, "Upgrade", client, timeout_ms, route)
+    exchange = exchange(ByName.new, "GET", url, sent, "", nil, false, "Upgrade", client, timeout_ms, route)
     return exchange unless exchange.is_a?(Exchange)
     response = exchange.response
     if response.status != 101
@@ -3672,7 +3770,7 @@ pub struct HTTP
   # still to come. *upgrade* is `Upgrade` for `HTTP.upgrade`; otherwise
   # the request says `close`, or `keep-alive` for a client. With *route*
   # the connection is the proxy's, and for `https://` a tunnel through it.
-  private def self.exchange(method : String, url : String, headers : Hash(String, String), body : String | IyiIO, jar : CookieStore?, decompress : Bool, upgrade : String?, client : HTTPClient?, timeout_ms : Int32, route : ProxyRoute?) : Exchange | Cancelled | SocketError | HTTPError
+  private def self.exchange(dialer : D, method : String, url : String, headers : Hash(String, String), body : String | IyiIO, jar : CookieStore?, decompress : Bool, upgrade : String?, client : HTTPClient?, timeout_ms : Int32, route : ProxyRoute?) : Exchange | Cancelled | SocketError | HTTPError forall D
     uri = URI.parse?(url)
     return HTTPError.new("not a URL: #{url.inspect}") unless uri
     scheme = uri.scheme
@@ -3713,6 +3811,7 @@ pub struct HTTP
     key = (secure ? "https://" : "http://") + host.downcase + ":" + port.to_s
     # What a TLS ticket is kept for: the origin, whichever proxy is between.
     origin = key
+    key = key + dialer.key_suffix
     dial_host = host
     dial_port = port
     target = path
@@ -3749,16 +3848,14 @@ pub struct HTTP
     refused_before = false
     # The client's own TLS configuration and resolver, when it has them.
     under = tls_config
-    through = nil.as(Resolver?)
     if keeping = client
       under = keeping.tls || under
-      through = keeping.resolver
     end
     # A client that asks connects to an `https://` origin by its HTTPS
     # records, and takes a kept connection only when it was made under the
     # configuration its last connection by them was
     # (`HTTPClient#https_current`): one made before it asked is not.
-    recorded = secure && route.nil? && upgrade.nil? && !client.nil? && client.use_https_records
+    recorded = dialer.records? && secure && route.nil? && upgrade.nil? && !client.nil? && client.use_https_records
     while true
       conn = nil.as(Conn?)
       if (keeping = client) && !upgrade
@@ -3774,7 +3871,7 @@ pub struct HTTP
         wait = timeout_ms > 0 ? timeout_ms : -1
         made = nil.as(Tuple(IyiSocket, TlsClient, TlsConfig)?)
         if recorded && (keeping = client)
-          found = by_records(keeping, origin, host, port, under, through, timeout_ms)
+          found = dialer.by_records(keeping, origin, host, port, under, timeout_ms)
           return found if found.is_a?(Cancelled) || found.is_a?(SocketError) || found.is_a?(HTTPError)
           made = found
         end
@@ -3785,7 +3882,7 @@ pub struct HTTP
           conn.made_under = TlsMadeUnder.new(config)
           speaks_h2 = tls.alpn_protocol == "h2"
         else
-          socket = (through ? IyiSocket.connect(dial_host, dial_port, through, wait) : IyiSocket.connect(dial_host, dial_port, wait))!
+          socket = dialer.connect(client, dial_host, dial_port, wait)!
           client.made if client
           if tunneled && (via = route)
             unopened = tunnel(socket, via, named + ":" + port.to_s, tunnel_credential, timeout_ms, secure)
@@ -3894,7 +3991,8 @@ pub struct HTTP
   # endpoint to take, or every one they give failed to connect and the
   # origin may be connected to as without them; the origin's kept
   # connections are then taken under *base* again.
-  private def self.by_records(client : HTTPClient, origin : String, host : String, port : Int32, base : TlsConfig, through : Resolver?, timeout_ms : Int32) : Tuple(IyiSocket, TlsClient, TlsConfig) | Cancelled | SocketError | HTTPError | Nil
+  # Not private: `ByName#by_records` calls it.
+  def self.by_records(client : HTTPClient, origin : String, host : String, port : Int32, base : TlsConfig, through : Resolver?, timeout_ms : Int32) : Tuple(IyiSocket, TlsClient, TlsConfig) | Cancelled | SocketError | HTTPError | Nil
     made = connect_by_records(client, origin, host, port, base, through, timeout_ms)
     client.https_config(origin, base, base.ech_configs, base.alpn) if made.nil?
     made

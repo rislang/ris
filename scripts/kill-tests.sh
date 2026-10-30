@@ -12,19 +12,30 @@ set -u
 root=$(cd "$(dirname "$0")/.." && pwd -P)
 me=$(id -u)
 
+# The parent of PID. /proc/PID/stat's second field is the command name in
+# parentheses and may hold spaces ("(Web Content)"), so the fields are
+# counted after its closing parenthesis: state, then the parent.
+ppid() {
+  local stat
+  stat=$(cat "/proc/$1/stat" 2>/dev/null) || return 1
+  stat=${stat##*) }
+  set -- $stat
+  echo "$2"
+}
+
 # This script and its callers stay alive.
 declare -A keep
 p=$$
 while [ "$p" -gt 1 ]; do
   keep[$p]=1
-  p=$(awk '{print $4}' "/proc/$p/stat" 2>/dev/null) || break
+  p=$(ppid "$p") || break
 done
 
 # owned PID: true when an ancestor other than ours is a live run.
 owned() {
   local p=$1 cmd
   while [ "$p" -gt 1 ]; do
-    p=$(awk '{print $4}' "/proc/$p/stat" 2>/dev/null) || return 1
+    p=$(ppid "$p") || return 1
     [ -n "${keep[$p]:-}" ] && return 1
     cmd=$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null)
     case $cmd in

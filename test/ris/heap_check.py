@@ -19,12 +19,16 @@ RECORD = "--record" in sys.argv
 GATES = concurrent.futures.ThreadPoolExecutor(os.cpu_count() or 1)
 
 
-def command(args, *, stats=False):
+def command(args, *, stats=False, cache=None):
     env = os.environ.copy()
     env.pop("RIS_HEAP_STATS", None)
     env.pop("RIS_TAPE_STATS", None)
     if stats:
         env["RIS_HEAP_STATS"] = "1"
+    # Builds of one source at once (a sample and its gate) each take a
+    # cache of their own: a shared ~/.cache/iyi/<path> raced.
+    if cache:
+        env["IYI_CACHE_DIR"] = cache
     # A release build of a large sample takes minutes on a few cores while
     # every sample builds at once; a hung compiler still fails.
     return subprocess.run([RIS, *args], capture_output=True, text=True,
@@ -114,7 +118,7 @@ def run_workload(binary, args, mode, *, stats=False):
 
 def run_gate(source, binary, args, mode):
     built = command(["build", "--release", "-o", binary,
-                     source])
+                     source], cache=binary + ".cache")
     if built.returncode:
         return built, b""
     return run_workload(binary, args, mode)
@@ -173,7 +177,8 @@ def main():
         gate = GATES.submit(run_gate, source,
                             str(Path(scratch) / f"gate-{index}"), args, mode)
         binary = str(Path(scratch) / f"sample-{index}")
-        result = command(["build", "--release", "-o", binary, source])
+        result = command(["build", "--release", "-o", binary, source],
+                         cache=binary + ".cache")
         if result.returncode:
             raise RuntimeError(result.stdout + result.stderr)
         run, response = run_workload(binary, args, mode, stats=True)

@@ -26,22 +26,22 @@ only mode; program literals, to_s, prints, closures and task values are
 on the tape, with the core String/Array/Hash API. Before testing ris programs:
 the std row. Update a row when its work starts or ends.
 
-| Work                                  | Size     | Time      | Tokens    |
-|---------------------------------------|----------|-----------|-----------|
-| std non-Linux branches: 34 mallocs   | medium   | 4-8 h     | 200-400k  |
-| secure_dns: DoH resolver call cycle   | medium   | 2-4 h     | 100-200k  |
-| Text: `s = ""` + `<<`, no Builder.new | medium   | 6-10 h    | 300-500k  |
-| Kernel threads without a collector    | large    | 1-2 days  | 300-500k  |
-| Task value: @[OnTape] and nested      | medium   | 2-4 h     | 100-200k  |
-| Closure env inside a nested tape do   | medium   | 2-4 h     | 100-200k  |
-| 5.1 std_* bench ports: verify no GC   | medium   | 2-4 h     | 150-300k  |
-| 5.1 holes: reached state, aliases     | large    | 4-8 h     | 200-400k  |
-| Autocert part B                       | medium   | 2-4 h     | 150-300k  |
-| Task-owned Conn buffer growth         | med-lrg  | 3-5 h     | 150-300k  |
-| Artifact String constructor contract  | small    | 1-2 h     | 50-100k   |
-| Compiler specs: the rest of the suite | large    | 1-3 days  | 300k-1M   |
-| macOS arm64 (needs a Mac to test)     | medium   | 1-2 days  | 200-400k  |
-| Windows                               | large    | days      | 500k+     |
+| Work                                 | Size    | Time     | Tokens   |
+|--------------------------------------|---------|----------|----------|
+| std non-Linux branches: 34 mallocs   | medium  | 4-8 h    | 200-400k |
+| Text: `s = ""` + `<<`, no Builder.new| medium  | 6-10 h   | 300-500k |
+| Kernel threads without a collector   | large   | 1-2 days | 300-500k |
+| Task value: @[OnTape] and nested     | medium  | 2-4 h    | 100-200k |
+| Closure env inside a nested tape do  | medium  | 2-4 h    | 100-200k |
+| Bench ports left: 20 benches         | large   | 1-2 days | 400-800k |
+| 5.1 holes: reached state, aliases    | large   | 4-8 h    | 200-400k |
+| Autocert part B                      | medium  | 2-4 h    | 150-300k |
+| Task-owned Conn buffer growth        | med-lrg | 3-5 h    | 150-300k |
+| Artifact String constructor contract | small   | 1-2 h    | 50-100k  |
+| iyimod: lowered text growth on self  | small   | 1-2 h    | 50-100k  |
+| Compiler specs: the rest of the suite| large   | 1-3 days | 300k-1M  |
+| macOS arm64 (needs a Mac to test)    | medium  | 1-2 days | 200-400k |
+| Windows                              | large   | days     | 500k+    |
 
 ## Messages: RisBoard (TAPE_SPEC 5.2, 5.6; doc/MESSAGES.md)
 
@@ -255,25 +255,24 @@ first):
   (heap wrappers gone), log AsyncBackend (a writer task fed through
   RisBoard, `open` only), websocket and H2 (copy_to(RisCurrentTape)),
   autocert, socket marks; xml XPath as RisXPath (gate xpath).
-  * std/secure_dns types but does not compile under ris: DnsOverHttps's
-    HTTPClient reaches Resolver#resolve, a cycle with growing results
-    (TAPE_SPEC 3.5). Needs an HTTPClient that connects to a fixed
-    address without a Resolver, or scratch passed through the cycle.
-  * Array::View(Int32)#index(k) is the element's place in the backing
-    Array, not where k is: SvcbRecord#value was wrong through it.
-    Rename the internal method (tape.iyi) so it cannot be mistaken.
-  * bench/std_{dns,secure_dns}_exercise and std_http_https_records still
-    use Bytes for messages; std_deque's mutation checks and std_log's
-    caught_at patterns are stale.
+  * bench/std_dns_exercise still uses Bytes and a server task sharing
+    sockets with the caller; std_http_https_records is on Strings but
+    its UDP zone server task captures the caller's socket (5.1).
 * Streaming decoders read an IyiIO only: the block forms of Inflater
   and ZstdReader are gone; std/http's coded body is BodyFeed, an io
   Reader (gate test/ris/http_coding.ri). The benches' Feed and Pending
   are io Readers.
-* bench/std_{mail,xz,bzip2}_exercise use the new APIs but still do not
-  build under ris (to_unsafe, String.new pointers, std/gc).
-* bench/std_ini_exercise still uses INI's old Hash(String, Hash) API.
-  std_udp_exercise uses udp's String API now, but stops at a task capture
-  (line 274), as before.
+* Bench ports left (2026-10-30; deque, ini, log, secure_dns pass under
+  ris, netip but for its artifact build): mail (String#to_unsafe),
+  toml (TOML::Any), yaml (YAML::Any, Parser), xml (Document, Node:
+  XmlTree now), udp:274 and tls:445 (task captures), http2_exercise
+  (HTTP.tls_config=), zstd, bzip2 and the other std/gc importers
+  (format, socket, big, csv, std, file, file_utils, fuzz, http, io,
+  json, png): replace GC.stats with RIS_HEAP_STATS=1 on the run, as
+  std_netip_exercise.sh does.
+* `--emit-iyimod` then `--use-iyimod` fails: std/int.iyimod holds a
+  lowered text growth that assigns `self` ("can't change the value of
+  self"); bench/std_netip_exercise.sh's artifact step shows it.
 * Sweep remaining std modules (collections, IO, errors); heap paths that
   block the default no-GC switch belong in the section above.
 * Add 128-bit formatting, IDNA and URI resolution.
@@ -368,8 +367,7 @@ first):
   TlsIdentitySource (a trait: identity_for(server_name, alpn,
   left_ms)); AutocertView implements it; a proc is refused, naming the
   trait. x509, rsa, p256 and ecdsa are off to_unsafe and malloc
-  (p256's and ecdsa's base tables on Program.tape); handshake_secret
-  split in two (an always-nil PSK reached codegen as a bare Nil).
+  (p256's and ecdsa's base tables on Program.tape).
   std_tls_exercise now stops at its own line 585, https_records at a
   proc over a UdpSocket (366), autocert_exercise at the Array(Hash)
   refusal. Done before: the takeover
