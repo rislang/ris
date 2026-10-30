@@ -146,6 +146,7 @@ expect channel_gone 'undefined constant Channel'
 expect mutex_gone 'ris has no std/mutex'
 expect http_tls_config_gone 'HTTPClient.new(tls: config)'
 expect http_upgrade_block 'take_over(socket, leftover, response)'
+expect http_parse_head_text 'Server.parse_head(bytes, 0, true)'
 
 # Timed joins broadcast completion without cancelling the retained task.
 out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/task_wait.ri 2>&1)

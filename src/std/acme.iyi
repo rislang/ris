@@ -17,7 +17,7 @@
 #       acme.respond(challenge).or_panic
 #       acme.wait_authorization(url).or_panic
 #     end
-#     order = acme.finalize(order, SigningKey.p256).or_panic  # the CSR, then
+#     order = acme.finalize_order(order, SigningKey.p256).or_panic  # the CSR, then
 # polled
 #     pem = acme.certificate(order).or_panic                  # the chain, leaf
 # first
@@ -166,6 +166,7 @@ impl Error for AcmeError
 end
 
 # The directory's URLs (section 7.1.1).
+@[OnTape]
 pub struct AcmeDirectory
   getter new_nonce : String
   getter new_account : String
@@ -206,6 +207,7 @@ end
 # A challenge (section 8): its type (`http-01`, `dns-01`, `tls-alpn-01`),
 # where to answer it, its token, and its status, with the problem that
 # made it invalid.
+@[OnTape]
 pub struct AcmeChallenge
   getter kind : String
   getter url : String
@@ -231,6 +233,7 @@ end
 
 # An authorization (section 7.1.4): the identifier, its status, and the
 # challenges by which it can be proved.
+@[OnTape]
 pub struct AcmeAuthorization
   getter url : String
   getter identifier : String
@@ -249,7 +252,7 @@ pub struct AcmeAuthorization
       identifier = AcmeJson.text(fields, "value") || ""
     end
     challenges = [] of AcmeChallenge
-    AcmeJson.objects(object, "challenges").each { |c| challenges << AcmeChallenge.from(c)! }
+    AcmeJson.each_object(object, "challenges") { |c| challenges << AcmeChallenge.from(c)! }
     wildcard = AcmeJson.flag(object, "wildcard")
     AcmeAuthorization.new(url, identifier, status, wildcard, challenges)
   end
@@ -264,6 +267,7 @@ end
 
 # An order (section 7.1.3): its URL, status, names, the authorizations to
 # prove, where to finalize it, and, once it is valid, its certificate.
+@[OnTape]
 pub struct AcmeOrder
   getter url : String
   getter status : String
@@ -281,7 +285,8 @@ pub struct AcmeOrder
     status = AcmeJson.text(object, "status")
     finalize = AcmeJson.text(object, "finalize")
     return AcmeError.new("the order #{url} has no status or finalize URL") unless status && finalize
-    names = AcmeJson.objects(object, "identifiers").map { |id| AcmeJson.text(id, "value") || "" }
+    names = [] of String
+    AcmeJson.each_object(object, "identifiers") { |id| names << (AcmeJson.text(id, "value") || "") }
     problem = nil
     if (error = object["error"]?) && (fields = error.as_h?)
       problem = AcmeJson.problem(fields, 0)
@@ -491,7 +496,7 @@ pub class AcmeClient
   # *key* signs (section 7.4): polled until its authorizations make it
   # ready, finalized, and polled until it is valid, with the certificate's
   # URL; or the error that made it invalid.
-  def finalize(order : AcmeOrder, key : SigningKey) : AcmeOrder | AcmeError
+  def finalize_order(order : AcmeOrder, key : SigningKey) : AcmeOrder | AcmeError
     current = order
     if current.status == "pending"
       current = AcmeOrder.from(order.url, poll(order.url, post(order.url, nil)!, ["pending"], "the order #{order.url}")!)!
@@ -630,6 +635,7 @@ pub class AcmeClient
 end
 
 # An answer: its status, the headers ACME reads, and its body.
+@[OnTape]
 struct AcmeResponse
   getter status : Int32
   getter nonce : String?
@@ -677,10 +683,10 @@ struct AcmeJson
   # Whether *text* is one or more ASCII digits and nothing else.
   def self.digits?(text : String) : Bool
     return false if text.empty?
-    p = text.to_unsafe
     i = 0
     while i < text.bytesize
-      return false unless p[i] >= 48_u8 && p[i] <= 57_u8
+      byte = text.byte_at(i)
+      return false unless byte >= 48_u8 && byte <= 57_u8
       i = i + 1
     end
     true
@@ -697,15 +703,15 @@ struct AcmeJson
     out
   end
 
-  def self.objects(object : Hash(String, Any), key : String) : Array(Hash(String, Any))
-    out = [] of Hash(String, Any)
+  # Yields each object of the array at *key*, in place: no Array of
+  # Hash is built (a Hash grows, so an Array cannot hold it).
+  def self.each_object(object : Hash(String, Any), key : String, &) : Nil
     if (value = object[key]?) && (list = value.as_a?)
       list.each do |item|
         fields = item.as_h?
-        out << fields if fields
+        yield fields if fields
       end
     end
-    out
   end
 
   # A problem document's fields as an error (RFC 7807, section 6.7).
@@ -716,7 +722,8 @@ struct AcmeJson
     if (id = object["identifier"]?) && (fields = id.as_h?)
       identifier = text(fields, "value") || ""
     end
-    subproblems = objects(object, "subproblems").map { |sub| problem(sub, status) }
+    subproblems = [] of AcmeError
+    each_object(object, "subproblems") { |sub| subproblems << problem(sub, status) }
     AcmeError.new(detail, kind, status, identifier, subproblems)
   end
 
@@ -838,7 +845,7 @@ pub struct AcmeJws
   end
 
   def self.bytes(text : String) : Array(UInt8)
-    Array(UInt8).new(text.bytesize) { |i| text.to_unsafe[i] }
+    Array(UInt8).new(text.bytesize) { |i| text.byte_at(i) }
   end
 end
 

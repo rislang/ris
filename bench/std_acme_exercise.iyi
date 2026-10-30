@@ -1006,7 +1006,7 @@ def scripted(script : RisAcmeView, certificate_pem : String) : Nil
   check valid.is_a?(AcmeAuthorization) && valid.status == "valid", "the authorization is valid once polled: #{valid}"
 
   domain = SigningKey.p256
-  done = client.finalize(order, domain)
+  done = client.finalize_order(order, domain)
   counters(script, "finalize")
   check script.csr_verified, "the finalize CSR's signature verifies under its own key"
   check script.csr_names == ["a.example"], "the finalize CSR asks for the order's names"
@@ -1193,7 +1193,7 @@ def obtain(acme : AcmeClient, domain : String, kind : String, domain_key : Signi
     valid = acme.wait_authorization(url)
     check valid.is_a?(AcmeAuthorization), "#{kind}: Pebble validated #{domain}: #{valid}"
   end
-  done = acme.finalize(order, domain_key)
+  done = acme.finalize_order(order, domain_key)
   check done.is_a?(AcmeOrder), "#{kind}: the order for #{domain} finalized with a #{domain_key.kind} key: #{done}"
   pem = acme.certificate(done.as(AcmeOrder))
   check pem.is_a?(String), "#{kind}: the chain for #{domain} downloaded: #{pem}"

@@ -963,7 +963,7 @@ def run_http1(input : Array(UInt8)) : String
   else
     verdict = "more"
   end
-  Server.parse_head(t)
+  Server.parse_head(t, 0, true)
   HTTP.parse_response_head(t)
   lines = HTTP.split_crlf(t)
   HTTP.status_line(lines[0]) unless lines.empty?

@@ -1,0 +1,6 @@
+module test/ris/refused/http_parse_head_text
+# The one-argument parse_head answered a RequestHead, so a caller's
+# is_a?(ParsedHead) always failed: refused, naming the tape form.
+import std/http::{Server, ParsedHead}
+head = Server.parse_head("GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+puts head.is_a?(ParsedHead)

@@ -35,7 +35,7 @@ import std/http::{Server, ParsedHead}  # supports tape memory
 import std/json::{JSON}                # supports tape memory
 import github.com/domify/slim::{Slim}  # supports tape memory
 bytes = "GET /hello HTTP/1.1\r\nHost: localhost\r\n\r\n"
-req = Server.parse_head(bytes) # its fields are views into the bytes
+req = Server.parse_head(bytes, 0, true) # fields view the bytes
 if req.is_a?(ParsedHead)
   body = Str.build do |writer| # JSON written on the tape
     writer.json { |json| json.object { json.field "path", req.target } }

@@ -172,7 +172,7 @@ first):
   `read(Pointer, count)` stays, marked, for std/http's Conn buffer;
   bench/std_tls_exercise waits on the 5.1 bench port (its server task
   captures a tape config).
-* Then, as tape_state.txt orders them: log, autocert's nested Hash, sse,
+* Then, as tape_state.txt orders them: log, sse,
   http, websocket, cookie, router; group two smallest first.
 
 ## Next
@@ -221,10 +221,6 @@ first):
   remaining std and runtime paths required by supported workloads.
 * Audit final program binaries for collector linkage and forbidden heap
   allocator dependencies; keep the compiler's own GC choice separate.
-* Finish check.sh under the sole no-GC mode. Seven left: autocert
-  lifecycle, hpack, http_continue, answer, http_prefork,
-  time_tape_offset (std String paths) and side_spares (5 mappings
-  made where the gate expects 4; fails at a6015b397 too).
 * Autocert's program objects: pool them behind generation-checked
   handles, as pipe ends are (Std::Io::RisPipeEnd, pipe_reuse).
 * HTTP answer's slow request path still uses String-based read_head and
@@ -293,8 +289,12 @@ first):
     (pointer_unsafe_to_unsafe, ffi_to_unsafe_stored).
   * interpolation_retained and contract_spawn: done, now runs gates
     (TAPE_SPEC 1.6); task_local_tape(_helper) cover the unsafe cases.
-  * autocert lifecycle and wire: Array(Hash(String, Json::Any)) cannot
-    hold growing values (SlicePool rule).
+  * autocert lifecycle and wire: fixed. AcmeJson.each_object yields
+    each object in place (no Array of Hash); ACME answers are @[OnTape];
+    AcmeClient#finalize is finalize_order (a class may not finalize).
+    The manager reads certificates with AutocertView#read, not load,
+    and keeps no view of its Hashes across a grow or delete; a flight
+    writes its failure inside its group, while the message lives.
   * log_metadata, log_tape: pass again (log.iyi:279 no longer stops
     them). samples/ris/orders and request: fixed; they called the
     one-argument Server.parse_head, which answers RequestHead, and
@@ -320,7 +320,10 @@ first):
   of an outer String, no call storing what it made into an outer
   object) gets its scope mark, so each request's scratch is freed.
   The fast path called the one-argument parse_head and never ran; it
-  takes parse_head(bytes, 0, false) now. server_groups makes 48
+  takes parse_head(bytes, 0, false) now. The one-argument
+  Server.parse_head is refused, naming parse_head(bytes, 0, true)
+  (refused/http_parse_head_text); the server's own RequestHead reader
+  is the private request_head. server_groups makes 48
   mappings, bounded (50 at 9x the requests); its gate is 64 (was 29,
   set before every Array took a side reservation). A copy into an
   Array's own pool, or copy_to into

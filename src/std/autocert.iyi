@@ -493,6 +493,16 @@ pub class AutocertView
     read
   end
 
+  # The cached certificate for *name* if current at *now_ms*, read anew
+  # and not kept in this view: the manager keeps its own.
+  def read(name : String, now_ms : Int64) : AutocertHeld?
+    text = @cache.get(name)
+    return nil unless text.is_a?(String)
+    got = held_of(name, text)
+    return nil if got.is_a?(AutocertError) || !got.current?(now_ms)
+    got
+  end
+
   def held_of(name : String, text : String) : AutocertHeld | AutocertError
     identity = TlsIdentity.from_pem(text, text)
     return AutocertError.new("the certificate for #{name}: #{identity.message}") if identity.is_a?(TlsError)
@@ -662,7 +672,7 @@ pub class AutocertIssuer < AutocertView
   # to be for *name* and the key, and put in the cache with the key.
   private def finish_order(acme : AcmeClient, placed : AcmeOrder, name : String) : AutocertHeld | AutocertError
     key = AutocertPem.new_key
-    done = acme.finalize(placed, SigningKey.new(key.key))
+    done = acme.finalize_order(placed, SigningKey.new(key.key))
     return AutocertError.new("the order for #{name}: #{done.message}") if done.is_a?(AcmeError)
     chain = acme.certificate(done)
     return AutocertError.new("the certificate for #{name}: #{chain.message}") if chain.is_a?(AcmeError)
@@ -724,7 +734,7 @@ pub struct Autocert
     images = {} of String => RisTaskConfig
     config.hosts.each do |host|
       name = AutocertView.normalize(host.to_heap)
-      if certificate = view.load(name, AutocertPem.now_ms)
+      if certificate = view.read(name, AutocertPem.now_ms)
         held[name] = certificate
       end
     end
@@ -732,16 +742,24 @@ pub struct Autocert
     group do |g|
       loop do
         now = AutocertPem.now_ms
-        flights.keys.each do |name|
-          task = flights[name]
-          next unless task.done?
-          got = task.value
+        loop do
+          # One finished flight per pass, found before delete shrinks
+          # flights: no view into it lives across the delete.
+          finished = nil.as(String?)
+          flights.each do |key, task|
+            if task.done?
+              finished = key.to_heap
+              break
+            end
+          end
+          break unless name = finished
+          got = flights[name].value
           flights.delete(name)
           if completed_image = images.delete(name)
             completed_image.close
           end
           if got == 0
-            if certificate = view.load(name, now)
+            if certificate = view.read(name, now)
               if held.has_key?(name)
                 renewals += 1
               else
@@ -764,8 +782,8 @@ pub struct Autocert
             if got.is_a?(Panicked)
               view.remember(name, AutocertError.new(got.message), until_ms)
             end
-            if certificate = held[name]?
-              certificate.renew_at_ms = until_ms
+            if kept = held[name]?
+              kept.renew_at_ms = until_ms
             end
           end
         end
@@ -777,12 +795,13 @@ pub struct Autocert
         held.each do |name, certificate|
           next if flights.has_key?(name)
           if certificate.renew_at_ms <= now
-            due = name.as_tape
+            # A copy: held may grow before the order is read.
+            due = name.to_heap
             break
           end
           wake_at = certificate.renew_at_ms if certificate.renew_at_ms < wake_at
         end
-        message = due ? AutocertOrder.new(due) : nil
+        message = (d = due) ? AutocertOrder.new(d.as_tape) : nil
         unless message
           taken = RisBoard.take(AutocertOrder, wake_at - now)
           return nil if taken.is_a?(Cancelled)
@@ -794,11 +813,13 @@ pub struct Autocert
         next unless config.allows?(name)
         next if flights.has_key?(name)
         next if view.cached_failure(name, now)
-        current = held[name]? || view.load(name, now)
-        if current
-          held[name] = current
-          next if current.renew_at_ms > now
+        unless held.has_key?(name)
+          if fresh = view.read(name, now)
+            held[name] = fresh
+          end
         end
+        # No view of held is kept: the next pass may grow it.
+        next if held.has_key?(name) && held[name].renew_at_ms > now
         # Prepare one key before concurrent sessions can register it.
         unless view.cache.get(AutocertView::ACCOUNT_KEY)
           error = view.cache.put(AutocertView::ACCOUNT_KEY,
@@ -823,38 +844,42 @@ pub struct Autocert
     image = RisTaskConfig.new({config, name, retry_delay})
     task = g.spawn do
       # A flight panic belongs to this inner group, never its siblings.
+      # The failure is written inside the group: a flight's error or
+      # panic message lives on its tape, which ends with the group.
       outcome = group do |own|
         flight = own.spawn do
           settings, flight_name, delay = image.read(Tuple(AutocertConfig, String, Int64))
           F.new(settings).issue(flight_name.to_heap)
         end
-        flight.value
+        got = flight.value
+        if got.is_a?(Panicked)
+          record_failure(image, got.message)
+        elsif got.is_a?(AutocertError)
+          record_failure(image, got.detail)
+        else
+          0
+        end
       end
-      settings, flight_name, delay = image.read(Tuple(AutocertConfig, String, Int64))
-      flight_error = if outcome.is_a?(Panicked)
-        AutocertError.new(outcome.message)
-      elsif outcome.is_a?(AutocertError)
-        outcome
-      else
-        nil
-      end
-      if flight_error
-        worker_cache = AutocertDirCache.new(settings.cache_dir.to_heap)
-        written = worker_cache.put("#{flight_name.to_heap}.error",
-          "#{AutocertPem.now_ms + delay}\n#{flight_error.detail}")
-        raise written.message if written
-        1
-      else
-        0
-      end
+      outcome.is_a?(Panicked) ? record_failure(image, "the flight panicked") : outcome
     end
     {task, image}
+  end
+
+  # Writes *detail* as the flight's failure, kept until its retry time.
+  private def self.record_failure(image : RisTaskConfig, detail : String) : Int32
+    settings, flight_name, delay = image.read(Tuple(AutocertConfig, String, Int64))
+    worker_cache = AutocertDirCache.new(settings.cache_dir.to_heap)
+    written = worker_cache.put("#{flight_name.to_heap}.error",
+      "#{AutocertPem.now_ms + delay}\n#{detail}")
+    raise written.message if written
+    1
   end
 
 end
 
 # A P-256 key made here, and the 32 bytes it is, which std/p256 keeps to
 # itself and the cache needs.
+@[OnTape]
 struct AutocertKey
   getter key : P256PrivateKey
   getter bytes : Array(UInt8)
@@ -896,7 +921,7 @@ struct AutocertPem
   end
 
   def self.pem(label : String, der : Array(UInt8)) : String
-    body = Base64.encode(String.new(der.size) { |buf| buf.copy_from(der.to_unsafe, der.size) })
+    body = Base64.encode(String.build(der.size) { |buf| der.each { |byte| buf.push(byte) } })
     lines = [] of String
     at = 0
     while at < body.bytesize

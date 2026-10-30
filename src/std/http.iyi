@@ -1839,7 +1839,7 @@ pub struct Server
         refuse(client, got)
         return
       end
-      head = parse_head(got)
+      head = request_head(got)
       if head.is_a?(HTTPError)
         refuse(client, head)
         return
@@ -2259,7 +2259,7 @@ pub struct Server
         refuse(conn.transport, got)
         return true
       in String
-        parsed = parse_head(got)
+        parsed = request_head(got)
         if parsed.is_a?(HTTPError)
           refuse(conn.transport, parsed)
           return true
@@ -2591,7 +2591,7 @@ pub struct Server
       return ParsedRequest.new(nil, "request headers past #{MAX_HEAD} bytes", true, 0, 431) if text.bytesize - from > MAX_HEAD
       return ParsedRequest.new(nil, nil, false, 0)
     end
-    parsed = parse_head(text[from, split_at - from])
+    parsed = request_head(text[from, split_at - from])
     return ParsedRequest.new(nil, parsed.reason, true, 0, parsed.status) if parsed.is_a?(HTTPError)
     head = parsed
     body_start = split_at + 4
@@ -2613,10 +2613,18 @@ pub struct Server
     ParsedRequest.new(Request.new(head.method, head.path, head.query, head.headers, text[body_start, length]), nil, head.close, body_start + length)
   end
 
+  # The one-argument form answered a RequestHead, never a ParsedHead: a
+  # caller testing is_a?(ParsedHead) compiled and always failed.
+  def self.parse_head(text : String)
+    {% raise "Server.parse_head(text) is gone: call\n" +
+      "Server.parse_head(bytes, 0, true), which answers\n" +
+      "ParsedHead | HeadError | Nil, its fields views into bytes." %}
+  end
+
   # A request's head - the text before its blank line - read and checked,
-  # or why it is not one.
+  # or why it is not one, as the server's handlers take it.
   # On the caller's tape: what it answers is made here (TAPE_SPEC 3.2).
-  def self.parse_head(text : String) : RequestHead | HTTPError
+  private def self.request_head(text : String) : RequestHead | HTTPError
     case head = parse_head(text.as_tape, 0, true)
     in ParsedHead
       request_head_view(head)
