@@ -1728,7 +1728,7 @@ class Encoder
       take = n - done
       take = SEGMENT if take > SEGMENT
       rebase if @end > REBASE
-      append(data.to_unsafe + done.to_i64, take)
+      append(data, done, take)
       done = done + take
       run(done == n ? flush : NONE)
       break if done == n
@@ -1745,7 +1745,7 @@ class Encoder
   # next position, or the block back to its start - is moved to the
   # front, and the window grows only when that and the piece outgrow it,
   # so small pieces cost a move of 32 KiB once every 32 KiB of them.
-  private def append(src : Pointer(UInt8), n : Int32) : Nil
+  private def append(data : String, at : Int32, n : Int32) : Nil
     return if n == 0
     have = @end - @wbase
     if have + n > @wcap
@@ -1769,7 +1769,13 @@ class Encoder
       @wbase = from
       have = keep
     end
-    (@win + have.to_i64).copy_from(src, n)
+    # The bytes are read through the String, not a pointer to them.
+    dst = @win + have.to_i64
+    k = 0
+    data.byte_slice(at, n).each_byte do |b|
+      dst[k] = b
+      k = k + 1
+    end
     @end = @end + n
     @p = @win + (0 - @wbase).to_i64
   end

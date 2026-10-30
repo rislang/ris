@@ -150,7 +150,7 @@ module std/websocket
 
 import std/int
 
-import std/http::{HTTP, Request, Response, Upgraded, HTTPError, TlsStream}
+import std/http::{HTTP, HTTPClient, Request, Response, Upgraded, HTTPError, TlsStream}
 import std/socket::{IyiSocket, SocketError}
 import std/digest::{SHA1}
 import std/base64::{Base64}
@@ -376,8 +376,10 @@ pub class WebSocket
       headers["Sec-WebSocket-Protocol"] = name
     end
     headers["Sec-WebSocket-Extensions"] = answer unless answer.empty?
-    Response.upgrade(headers) do |socket, leftover|
-      ws = WebSocket.new(socket, leftover, false, chosen, max_message, agreed)
+    # The chosen protocol is read back from the 101, not captured: the
+    # block outlives this handler's tape (TAPE_SPEC 5.1).
+    Response.upgrade(headers) do |socket, leftover, sent|
+      ws = WebSocket.new(socket, leftover, false, sent.header("Sec-WebSocket-Protocol"), max_message, agreed)
       handler.call(ws)
       ws.close unless ws.closed?
       nil
@@ -583,8 +585,9 @@ pub class WebSocket
   # environment's is `HTTPProxy.from_env` of the URL with `http` for `ws`
   # and `https` for `wss`, the schemes whose variables it reads. With
   # *deflate* permessage-deflate is offered, and messages are compressed
-  # at *deflate_level*.
-  def self.connect(url : String, headers : Hash(String, String) = {} of String => String, protocols : Array(String) = [] of String, max_message : Int32 = MAX_MESSAGE, proxy : String? = nil, deflate : Bool = true, deflate_level : Int32 = 1) : WebSocket | Cancelled | SocketError | HTTPError | WebSocketError
+  # at *deflate_level*. *client* is `HTTP.upgrade`'s: its `tls:` config
+  # for `wss://`.
+  def self.connect(url : String, headers : Hash(String, String) = {} of String => String, protocols : Array(String) = [] of String, max_message : Int32 = MAX_MESSAGE, proxy : String? = nil, deflate : Bool = true, deflate_level : Int32 = 1, client : HTTPClient? = nil) : WebSocket | Cancelled | SocketError | HTTPError | WebSocketError
     raise "WebSocket: a deflate level is 0 to 9, not #{deflate_level}" if deflate_level < 0 || deflate_level > 9
     headers.each do |name, _|
       ["Upgrade", "Connection", "Sec-WebSocket-Key", "Sec-WebSocket-Version", "Sec-WebSocket-Protocol", "Sec-WebSocket-Extensions"].each do |own|
@@ -610,7 +613,7 @@ pub class WebSocket
     # `client_max_window_bits` says the server may hold this end to a
     # smaller window, which the compressor keeps to.
     sent["Sec-WebSocket-Extensions"] = "permessage-deflate; client_max_window_bits" if deflate
-    up = HTTP.upgrade(target, "websocket", sent, proxy: proxy)!
+    up = HTTP.upgrade(target, "websocket", sent, proxy: proxy, client: client)!
     agreed = WebSocket.agreed(up, key, protocols)
     if agreed.is_a?(WebSocketError)
       up.socket.close
@@ -844,23 +847,22 @@ pub class WebSocket
       @writing = false
       raise "WebSocket: a message of #{n} bytes and its frame's head are past the 2147483647 bytes a string holds"
     end
-    wrote = 0.as(Int32 | Cancelled | SocketError)
-    tape do
-      key = nil.as(UInt32?)
-      if @client
-        random = Array(UInt8).new(4, 0_u8)
-        Random::Secure.random_bytes(random)
-        key = random[0].to_u32 | (random[1].to_u32 << 8) |
-          (random[2].to_u32 << 16) | (random[3].to_u32 << 24)
-      end
-      frame = WebSocket.frame(payload.as_tape, opcode, key, compressed)
-      socket = @socket
-      wrote = if socket.is_a?(TlsStream)
-                socket.write(frame.to_heap)
-              else
-                socket.write(frame, "".as_tape)
-              end
+    # No tape block of its own: the frame is built on the caller's
+    # tape, and `wrote` is read after it.
+    key = nil.as(UInt32?)
+    if @client
+      random = Array(UInt8).new(4, 0_u8)
+      Random::Secure.random_bytes(random)
+      key = random[0].to_u32 | (random[1].to_u32 << 8) |
+        (random[2].to_u32 << 16) | (random[3].to_u32 << 24)
     end
+    frame = WebSocket.frame(payload.as_tape, opcode, key, compressed)
+    socket = @socket
+    wrote = if socket.is_a?(TlsStream)
+              socket.write(frame.to_heap)
+            else
+              socket.write(frame, "".as_tape)
+            end
     @writing = false
     return wrote unless wrote.is_a?(Int32)
     nil

@@ -1452,7 +1452,7 @@ pub class Response
   @body : String
   @source : IyiIO?
   @writer : Proc(BodyWriter, Nil)?
-  @takeover : Proc(IyiSocket | TlsStream, String, Nil)?
+  @takeover : Proc(IyiSocket | TlsStream, String, Response, Nil)?
   @reader : BodyReader?
   @url : String?
   @decoded : Bool
@@ -1515,9 +1515,11 @@ pub class Response
   # A 101 Switching Protocols with *headers* (`Upgrade` and the
   # protocol's own), after which the connection is the block's: it is
   # handed the connection - the socket, or under `serve(tls:)` the
-  # `TlsStream` over it - and the bytes the client sent after its request,
-  # and the connection closes when it returns.
-  def self.upgrade(headers : Hash(String, String), &takeover : (IyiSocket | TlsStream, String) -> Nil) : Response
+  # `TlsStream` over it - the bytes the client sent after its request,
+  # and this 101, whose headers the block reads rather than capturing
+  # the handler's tape values (TAPE_SPEC 5.1). The connection closes
+  # when it returns.
+  def self.upgrade(headers : Hash(String, String), &takeover : (IyiSocket | TlsStream, String, Response) -> Nil) : Response
     response = Response.new(101, "", headers)
     response.takeover = takeover
     response
@@ -1527,7 +1529,7 @@ pub class Response
     @writer = writer
   end
 
-  protected def takeover=(takeover : Proc(IyiSocket | TlsStream, String, Nil)) : Proc(IyiSocket | TlsStream, String, Nil)
+  protected def takeover=(takeover : Proc(IyiSocket | TlsStream, String, Response, Nil)) : Proc(IyiSocket | TlsStream, String, Response, Nil)
     @takeover = takeover
   end
 
@@ -1539,7 +1541,7 @@ pub class Response
     @writer
   end
 
-  def takeover : Proc(IyiSocket | TlsStream, String, Nil)?
+  def takeover : Proc(IyiSocket | TlsStream, String, Response, Nil)?
     @takeover
   end
 
@@ -2425,7 +2427,7 @@ pub struct Server
     return unless socket.write(format_head(response, false, false, nil, false, true)).is_a?(Int32)
     leftover = conn.leftover.copy_to(RisCurrentTape.new)
     conn.unlimited
-    conn.held { takeover.call(socket, leftover) }
+    conn.held { takeover.call(socket, leftover, response) }
   end
 
   private def self.answered?(conn : Conn, response : Response, req : Request, close : Bool, compress : Bool) : Bool
@@ -3545,8 +3547,15 @@ pub struct HTTP
         hops = hops + 1
         next
       end
-      return handed(exchange, block)
+      # The block is yielded, not kept: a caller's tape values stay in
+      # its scope (TAPE_SPEC 5.1).
+      return handed(exchange) { |response| yield response }
     end
+  end
+
+  private def self.handed(exchange : Exchange, & : Response -> R) : R forall R
+    defer exchange.close
+    yield exchange.response
   end
 
   # The 101 an upgrade to *protocol* is answered with, and the connection,
@@ -3577,11 +3586,6 @@ pub struct HTTP
     # The protocol after it waits as it likes.
     exchange.conn.unlimited
     Upgraded.new(response, exchange.conn.transport, exchange.conn.leftover)
-  end
-
-  private def self.handed(exchange : Exchange, block : Proc(Response, R)) : R forall R
-    defer exchange.close
-    block.call(exchange.response)
   end
 
   # *location* read against *current*: a redirect's target, or why it is
@@ -6164,11 +6168,12 @@ class H2Connection
   # *text* on stream *id* as the windows allow, frames read while they are
   # shut. False when the stream or the connection ends first.
   def send_data(id : Int32, text : String, end_stream : Bool) : Bool
-    s = @streams[id]?
-    return false if s.nil?
     at = 0
     while at < text.bytesize
-      return false if s.reset >= 0 || @fault != FAULT_NONE
+      # Looked up by id on each turn: a frame read below may drop the
+      # stream from @streams, so no view of it is kept across one.
+      s = @streams[id]?
+      return false if s.nil? || s.reset >= 0 || @fault != FAULT_NONE
       room = text.bytesize - at
       room = @peer_frame if room > @peer_frame
       room = @send_window.to_i32 if @send_window < room.to_i64
@@ -6184,6 +6189,8 @@ class H2Connection
       at = at + room
       s.sent_end = true if last
     end
+    s = @streams[id]?
+    return false if s.nil?
     if end_stream && !s.sent_end
       return false if s.reset >= 0
       return false unless write_frame(DATA, END_STREAM, id, "")

@@ -213,42 +213,57 @@ end
 EVENT_HEAD   = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n"
 CHUNKED_HEAD = "HTTP/1.1 200 OK\r\nContent-Type: Text/Event-Stream; charset=utf-8\r\nTransfer-Encoding: chunked\r\n\r\n"
 
+# Between two answers of `scripted`: a byte none of them holds.
+SCRIPT_SEPARATOR = "\u001E"
+
 # A server that answers each connection with the next of *answers*,
 # exactly as written, then closes it: a stream dropped where the test
 # wants it. Answers the request heads it read and the milliseconds
 # between one connection and the next (0 for the first).
-def scripted(answers : Array(String), &client : String -> Nil) : {Array(String), Array(Int64)}
+def scripted(answers : Array(String), & : String -> Nil) : {Array(String), Array(Int64)}
   l = IyiSocket.listen("127.0.0.1", 0)
-  base = "http://127.0.0.1:#{l.local_port}/stream"
-  heads = [] of String
-  gaps = [] of Int64
-  group do |g|
-    g.spawn do
+  port = l.local_port
+  base = "http://127.0.0.1:#{port}/stream"
+  # The server task owns the listener, handed off, reads the answers from
+  # one read-only String (an Array is never shared) and answers what it
+  # read as its value (TAPE_SPEC 5.1). A connection that sends nothing
+  # stops it: the client's end is known only here.
+  script = answers.join(SCRIPT_SEPARATOR)
+  got = group do |g|
+    server = g.spawn do
+      heads = [] of String
+      gaps = [] of Int64
       last = 0_i64
-      answers.each do |answer|
+      script.split(SCRIPT_SEPARATOR).each do |answer|
         s = l.accept
         break unless s.is_a?(IyiSocket)
         now = __iyi_monotonic_ns
-        gaps << (last == 0_i64 ? 0_i64 : (now - last) // 1000000_i64)
-        last = now
         head = ""
         while !head.ends_with?("\r\n\r\n")
-          got = s.read(1)
-          break unless got.is_a?(String) && got.bytesize > 0
-          head = head + got
+          piece = s.read(1)
+          break unless piece.is_a?(String) && piece.bytesize > 0
+          head = head + piece
         end
+        if head.empty?
+          s.close
+          break
+        end
+        gaps << (last == 0_i64 ? 0_i64 : (now - last) // 1000000_i64)
+        last = now
         heads << head
         s.write(answer)
         s.close
       end
       l.close unless l.closed?
-      0
+      {heads, gaps}
     end
-    client.call(base)
-    l.close unless l.closed?
-    0
+    yield base
+    stop = IyiSocket.connect("127.0.0.1", port)
+    stop.close if stop.is_a?(IyiSocket)
+    server.value
   end
-  {heads, gaps}
+  return got if got.is_a?(Tuple)
+  raise "scripted: the server task ended with #{got.inspect}"
 end
 
 def header_in(head : String, name : String) : String?

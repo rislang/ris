@@ -538,12 +538,14 @@ pub struct SSE
     delay = retry
     misses = 0
     while true
-      sent = headers.dup
+      # Built anew each turn, not a dup: no storage shared with *headers*.
+      sent = Hash(String, String).new
+      headers.each { |name, value| sent[name] = value }
       sent["Accept"] = "text/event-stream"
       sent["Cache-Control"] = "no-cache" unless cached
       sent["Last-Event-ID"] = last if last.bytesize > 0 && !HTTP.control?(last)
       parser = EventParser.new(last)
-      outcome = HTTP.open("GET", url, sent) { |response| SSE.follow(response, parser, block) }
+      outcome = HTTP.open("GET", url, sent) { |response| SSE.follow(response, parser) { |event| yield event } }
       last = parser.last_event_id
       if ms = parser.retry
         delay = ms
@@ -570,7 +572,7 @@ pub struct SSE
 
   # One connection's answer read: true when the block stopped, false when
   # the stream ended, or why it could not be read.
-  protected def self.follow(response : Response, parser : EventParser, block : Proc(Event, Bool)) : Bool | SSEError | Cancelled | SocketError | HTTPError
+  protected def self.follow(response : Response, parser : EventParser, & : Event -> Bool) : Bool | SSEError | Cancelled | SocketError | HTTPError
     status = response.status
     return SSEError.new("the server answered #{status}, not 200", status) unless status == 200
     type = response.header("Content-Type")
@@ -586,7 +588,7 @@ pub struct SSE
         return false
       end
       parser.feed(got) do |event|
-        return true unless block.call(event)
+        return true unless yield event
       end
     end
   end

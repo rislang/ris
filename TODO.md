@@ -68,14 +68,21 @@ part B.
     Share config, or one server task per section as binding_server),
     udp:274 (UdpSocket shared by a receive task and the caller), dns:951
     (server task and client share `log`, sockets), mutex (bench
-    deleted with Mutex, 2026-10-29), sse
-    (std/sse.iyi:546 parser), websocket (std/websocket.iyi:380 chosen).
+    deleted with Mutex, 2026-10-29). sse and websocket captures are
+    ported: HTTP.open and SSE.open yield their block, an upgrade's
+    takeover reads its 101, one task owns a WebSocket (the two-sender
+    tests are gone: 5.1 refuses sharing one). Left: http.iyi:2154
+    (serve's `handle`) and sse.iyi:513 (`Response.stream`'s block):
+    opaque callback effects, for the narrower opaque proc contract;
+    sse.iyi:543 (Hash shrink while copying headers per reconnect);
+    std/compress's Deflater/Inflater windows and tables are malloc'd
+    pointers (compress.iyi:1760 refused, 426 `to_unsafe`): move them to
+    Arrays on the tape.
   - not captures: http_latency, http_resume, http_stop check in 64-79 s
     (the program checker reuses walks by input structure); they stop at
     the shrink refusal http_continue has (below). HTTP.tls_config= is
-    gone (refused, naming HTTPClient.new(tls:)); websocket, acme,
-    http2_exercise and std_http_exercise.sh's inline programs still
-    call it. TlsConfig
+    gone (refused, naming HTTPClient.new(tls:)); acme, http2_exercise
+    and std_http_exercise.sh's inline programs still call it. TlsConfig
     reads the system roots per handshake: make Certificate copyable to
     Program.tape to keep them once again.
     socket, file, http, json import std/gc; yaml: Array(Any) refused (growing
