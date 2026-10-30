@@ -116,6 +116,7 @@ for name, message in [
     ("contract_opaque_proc", "cannot shrink tape storage with a live view"),
     ("contract_opaque_retain", "cannot prove opaque callback retain/escape"),
     ("contract_mixed_proc", "cannot shrink tape storage with a live view"),
+    ("contract_proc_object_shrink", "cannot shrink tape storage with a live view"),
 ]:
     build(ROOT / "test/ris/refused" / (name + ".ri"), refused=message)
     print("refused  " + name)
@@ -140,6 +141,13 @@ result = subprocess.run(
 )
 assert result.returncode == 0 and result.stdout.strip() == "3", result.stdout
 print("accepts  directly known callback with tape argument")
+
+# Its view of the object's text passes the shrink check; what the proc
+# may retain is still unproved, a separate contract.
+out = build(ROOT / "test/ris/contract_proc_object_kept.ri",
+            refused="cannot prove opaque callback retain/escape")
+assert "cannot shrink" not in out, out
+print("accepts  opaque callback's shrink, handed an object that shrinks nothing")
 
 # Runtime proc dispatch must not make ordinary tape construction suspend.
 # An opaque callback's handle is not itself a borrowed tape argument.

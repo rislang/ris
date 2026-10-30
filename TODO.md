@@ -309,16 +309,16 @@ first):
   in std (38e98018d): compress.iyi:426 keeps `data.to_unsafe` in a
   field (http.iyi's reads moved to byte_at).
 * http_continue and the http benches stop at http.iyi:2217 serve_h1:
-  "live view of Conn.@state.@stream.@host ... taken_over -> held block
-  -> call (opaque contract)". A takeover proc gets ALL on its socket, so
-  it may shrink the TlsStream's @host; `conn`, an argument of serve_h1,
-  holds that view after the call. Done: serve_h1 reads `Connection:
-  close` and the peer's certificates before a takeover and returns
-  right after it. Tried: not counting a reference to a shrunk object as
-  a live view - it let the text_reset gates' refusals through (their
-  RisTextGrowth slot is such an object). Left: a narrower contract for
-  a proc's arguments (only what their types' methods can shrink), or a
-  takeover that hands over a socket conn does not hold.
+  "live view of Conn.@state.@deadline_what while shrinking
+  Conn.@state ... taken_over -> held block -> call (opaque contract)".
+  Done: an unknown proc's argument shrinks only when its type's methods
+  (or its fields' types') can; an object then shrinks its fields, not
+  itself (gates contract_proc_object_shrink/_kept). Left: `socket =
+  conn.transport` also aliases the Conn root, so IyiSocket's `@state`
+  field lands on Conn.@state; and field_root folds a same-named field
+  of another type onto it. Fix the alias of a struct read through a
+  pointer (`@state.value.socket`), or fold only one type's own field.
+  The proc's RETAIN contract is still ALL (the _kept gate shows it).
 * Compiler specs (run with LLVM_CONFIG set to LLVM 23; without it
   bin/crystal links the system LLVM 21): no signal 11 any more. Left:
   compiler_spec lines 484, 522, 568 use Channel and select (port to
