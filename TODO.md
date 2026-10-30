@@ -246,6 +246,10 @@ first):
 * Sweep remaining std modules (collections, IO, errors); heap paths that
   block the default no-GC switch belong in the section above.
 * Add 128-bit formatting, IDNA and URI resolution.
+* Leave the scope mark off a def, loop or block that puts nothing on the
+  tape (`ror32`, a loop of arithmetic): its check runs each call and round.
+  Draft, not built or measured: branch idea/pure-scope-marks (0ae15fb23,
+  tape_scope_checker.cr). Do it when speed is measured again.
 * Extend RIS_TAPE_STATS with owner paths and pool waste.
 * Stable growth on every supported tape target: replace moving backends
   outside Linux with address-space reservations and equivalent gates.
