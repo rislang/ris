@@ -1,0 +1,33 @@
+module test/ris/task_value_nested
+
+# A task answers @[OnTape] structs nested in a struct, an Array, a Hash
+# and a Tuple; each is read after the task's tape is gone. Zero heap.
+@[OnTape]
+struct Inner
+  getter tag : String
+  def initialize(@tag : String)
+  end
+end
+
+@[OnTape]
+struct Outer
+  getter inner : Inner
+  getter list : Array(Inner)
+  def initialize(@inner : Inner, @list : Array(Inner))
+  end
+end
+
+group do |g|
+  o = g.spawn { Outer.new(Inner.new("i#{1}"), [Inner.new("a#{2}"), Inner.new("b")]) }
+  l = g.spawn { [Inner.new("x#{3}")] }
+  h = g.spawn { {"k#{4}" => Inner.new("v#{5}")} }
+  t = g.spawn { {"t#{6}", [7]} }
+  v = o.value
+  puts v.inner.tag, v.list[0].tag, v.list.size if v.is_a?(Outer)
+  w = l.value
+  puts w[0].tag if w.is_a?(Array(Inner))
+  m = h.value
+  puts m["k4"].tag if m.is_a?(Hash(String, Inner))
+  x = t.value
+  puts x[0], x[1][0] if x.is_a?(Tuple(String, Array(Int32)))
+end

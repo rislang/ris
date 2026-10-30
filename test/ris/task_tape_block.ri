@@ -1,0 +1,20 @@
+module test/ris/task_tape_block
+
+# Tasks and `tape` blocks: a group opened inside the block joins before
+# it ends, and a capture set before the block lives on the outer tape.
+tape do
+  before = "b#{1}"
+  group do |g|
+    tape do
+      junk = "j#{2}"
+      g.spawn { sleep 0; puts before }
+      puts junk
+    end
+  end
+  tape do
+    word = "w#{3}"
+    group do |g|
+      g.spawn { sleep 0; puts word }
+    end
+  end
+end

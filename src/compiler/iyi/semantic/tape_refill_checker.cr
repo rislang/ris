@@ -42,7 +42,19 @@ class Iyi::TapeRefillChecker
     return unless value.is_a?(Call) && value.name == "new"
     return unless tape_array?(value.type?)
     return if reads.any? { |read| read.name == target.name && before?(read, node) }
-    node.raise "`#{target.name}` is given a new Array in `#{a_def.name}`, not in `initialize`: the one it held stays on the tape until the tape block ends, one for every call.\n\nEmpty it with `#{target.name}.clear` and fill it again, which keeps its room. When the old one is still wanted, hand it on first in this def (`list << #{target.name}`, `old = #{target.name}`, `return #{target.name}`) and the new one is allowed."
+    # `ris fix` writes the `clear` when the new Array starts empty and the
+    # whole assignment sits on one line; any other form is left alone.
+    suggestion = nil
+    size = nil
+    if value.args.size <= 1 && value.named_args.nil? && value.block.nil? &&
+       (value.args.empty? || value.args.first.type?.try(&.to_s.starts_with?("Int"))) &&
+       (from = target.location) && (to = value.end_location) &&
+       from.line_number == to.line_number
+      suggestion = "#{target.name}.clear"
+      size = to.column_number - from.column_number + 1
+    end
+    node.raise "`#{target.name}` is given a new Array in `#{a_def.name}`, not in `initialize`: the one it held stays on the tape until the tape block ends, one for every call.\n\nEmpty it with `#{target.name}.clear` and fill it again, which keeps its room. When the old one is still wanted, hand it on first in this def (`list << #{target.name}`, `old = #{target.name}`, `return #{target.name}`) and the new one is allowed.",
+      suggestion: suggestion, size: size
   end
 
   private def tape_array?(type : Type?) : Bool

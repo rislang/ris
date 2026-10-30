@@ -933,6 +933,11 @@ module Iyi
     # indistinguishable from any other ancestor.
     getter iyi_impls = {} of String => Array(IyiMod::ImplRecord)
 
+    # ris: each impl record's method defs, in its `methods` order. The
+    # record's signatures are taken before any tape contract exists; the
+    # artifact writer reads each def's checked contract from here.
+    getter iyi_impl_defs = {} of String => Array(Array(Def))
+
     # iyi: the type a module path denotes — `"app/greeter"` to `App::Greeter`,
     # and a module of the program's own package under the package's name
     # (`iyi_module_packages`), as its header was parsed.

@@ -600,12 +600,14 @@ module Iyi
         if node.name == "<<" && node.args.size == 1
           case receiver = node.obj
           when Var
-            @locals << receiver.name
+            # `self << n` is Int's shift (or a builder's append): self is
+            # never rebound, so it has no growing text.
+            @locals << receiver.name unless receiver.name == "self"
           when InstanceVar
             @fields << receiver.name
           end
         elsif Normalizer.lending_call?(node)
-          node.args.each { |arg| @arguments << arg.name if arg.is_a?(Var) }
+          node.args.each { |arg| @arguments << arg.name if arg.is_a?(Var) && arg.name != "self" }
         end
         true
       end
@@ -842,7 +844,7 @@ module Iyi
             !root.block && !root.block_arg
         root = root.obj
       end
-      return nil unless root.is_a?(Var) || root.is_a?(InstanceVar)
+      return nil unless (root.is_a?(Var) && root.name != "self") || root.is_a?(InstanceVar)
       value = program.new_temp_var.at(node)
       again = Call.new(root.clone, "<<", node.args.map(&.clone)).at(node)
       other = Call.new(value.clone, "<<", node.args.map(&.clone)).at(node)
@@ -953,7 +955,9 @@ module Iyi
           node.name.in?("upcase!", "downcase!", "capitalize!", "strip!",
             "lstrip!", "rstrip!", "chomp!", "reverse!", "gsub!", "sub!")) &&
          !node.block && !node.block_arg &&
-         ((receiver = node.obj).is_a?(Var) || receiver.is_a?(InstanceVar))
+         ((receiver = node.obj).is_a?(Var) || receiver.is_a?(InstanceVar)) &&
+         # `self << n` is Int's shift: self is never rebound.
+         !(receiver.is_a?(Var) && receiver.name == "self")
         @ris_string_mutations << node.object_id
         method = node.name == "<<" ? "__ris_append" : node.name.rchop
         if node.name == "<<" && receiver.is_a?(InstanceVar) &&

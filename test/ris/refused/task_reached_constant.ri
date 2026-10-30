@@ -1,0 +1,8 @@
+# A task reaches a constant's Array through a call and grows it (5.1).
+TOTAL = [] of Int32
+def add(n) : Nil
+  TOTAL << n
+end
+group do |g|
+  2.times { g.spawn { add(1) } }
+end

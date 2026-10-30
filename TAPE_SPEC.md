@@ -95,7 +95,10 @@ rule goes last in its section; a removed one leaves its number unused.
   freeze. Resources are opened, used and closed by the same task (5.6).
   A local task may take one value handed off: spawned once in its group
   block, never read or assigned by the spawner after the spawn; the task
-  then owns it (an accepted socket, a pipe end). Task handles are Share.
+  then owns it (an accepted socket, a pipe end), and no second local names
+  it. Task handles are Share. The block and the program methods it calls
+  change no class variable or constant; a local task may set a scalar
+  class variable (it runs on its spawner's thread), a thread may not.
 * 5.2 RisBoard copies Goose's typed-queue transport (§11.2), not its thread,
   global-copy or abort model. Main and tasks use one process-wide queue per
   canonical specialized type across modules: aliases share a key, generic

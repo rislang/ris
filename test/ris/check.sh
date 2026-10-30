@@ -158,6 +158,22 @@ if [ "$?" -eq 0 ] && grep -qxF 'PASS: task local_tape' <<<"$out"; then
 else
   echo "FAILED   task_local_tape: $out"; status=1
 fi
+expect task_tape_block_capture 'this task captures `word`, set inside a `tape` block'
+out=$("$RIS" run test/ris/task_tape_block.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = $'j2\nb1\nw3' ]; then
+  echo "runs     task_tape_block (group inside, capture set before)"
+else
+  echo "FAILED   task_tape_block: $out"; status=1
+fi
+expect task_handoff_alias '`other = server` keeps a second name for the value handed to the task'
+expect task_reached_class_var 'changes `@@total` through `add`, which the task calls'
+expect task_reached_constant 'changes `TOTAL` through `add`, which the task calls'
+out=$("$RIS" run test/ris/task_reached_state.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = '16' ]; then
+  echo "runs     task_reached_state (reads and own data through calls)"
+else
+  echo "FAILED   task_reached_state: $out"; status=1
+fi
 expect task_handoff_reused 'the task owns it now'
 expect select_gone 'ris has no select'
 expect channel_gone 'undefined constant Channel'
@@ -265,6 +281,13 @@ if [ "$?" -eq 0 ] && [ "$out" = $'card7\n6\nc2\n3\nx1\n0\nz3\n3\n0\n5\nris heap:
   echo "runs     task_value_shapes (OnTape struct, nested containers, zero heap)"
 else
   echo "FAILED   task_value_shapes: $out"; status=1
+fi
+
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/task_value_nested.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = $'i1\na2\n2\nx3\nv5\nt6\n7\nris heap: 0 allocations, 0 bytes' ]; then
+  echo "runs     task_value_nested (struct in struct, Array/Hash/Tuple of structs)"
+else
+  echo "FAILED   task_value_nested: $out"; status=1
 fi
 
 # Everyday String/Array/Hash calls in a program stay on the tape.
@@ -1784,6 +1807,14 @@ expect log_metadata_escape 'is a variable of the code around this tape block'
 # outside it, here and through a server handler's field.
 expect tape_block_store_call 'cannot store data made in this tape block'
 expect tape_block_handler_store 'cannot store data made in this tape block'
+# The refusal points at the handler's own store, naming std's call.
+out=$("$RIS" build --no-codegen test/ris/refused/tape_block_handler_store.ri 2>&1)
+if grep -qF 'tape_block_handler_store.ri:13:5' <<<"$out" &&
+   grep -qF 'This store runs inside the tape block of the call at' <<<"$out"; then
+  echo "refused  tape_block_handler_store (at the handler's line)"
+else
+  echo "FAILED   tape_block_handler_store line: $out"; status=1
+fi
 # What a tape block may still do; its scratch is freed when it ends.
 out=$(RIS_TAPE_STATS=1 "$RIS" run test/ris/tape_block_reset.ri 2>&1)
 code=$?
@@ -1968,7 +1999,7 @@ expect text_plain_build 'this String.build only appends: write `io = ""`'
 # ris fix applies the compiler's own edits: Crystal-style text becomes ris.
 out=$(f="${TMPDIR:-/tmp}/plain_builder.ri"; cp test/ris/fix/plain_builder.ri "$f" && "$RIS" fix "$f" >/dev/null 2>&1 && diff test/ris/fix/plain_builder.expected "$f" && "$RIS" run "$f" 2>&1)
 if [ "$out" = "hello, ris" ]; then echo "runs     fix plain_builder"; else echo "FAILED   fix plain_builder: $out"; status=1; fi
-for rule in plain_build plain_build_inline io_parameter; do
+for rule in plain_build plain_build_inline io_parameter array_refill; do
   result=$(f="${TMPDIR:-/tmp}/fix_$rule.ri";
     cp "test/ris/fix/$rule.ri" "$f" &&
     "$RIS" fix "$f" >/dev/null 2>&1 &&
@@ -1982,6 +2013,11 @@ for rule in plain_build plain_build_inline io_parameter; do
     echo "FAILED   fix $rule: $result"; status=1
   fi
 done
+# fix leaves alone a refill it cannot prove: a new Array that is not empty.
+kept=$(f="${TMPDIR:-/tmp}/fix_array_refill_kept.ri";
+  cp test/ris/fix/array_refill_kept.ri "$f" &&
+  { "$RIS" fix "$f" >/dev/null 2>&1; diff -q test/ris/fix/array_refill_kept.ri "$f"; })
+if [ "$?" -eq 0 ]; then echo "runs     fix array_refill_kept"; else echo "FAILED   fix array_refill_kept: $kept"; status=1; fi
 out=$("$RIS" run test/ris/text_field_kinds.ri 2>&1)
 if grep -qF 'PASS: text companions only for text fields' <<<"$out"; then echo "runs     text_field_kinds"; else echo "FAILED   text_field_kinds: $out"; status=1; fi
 out=$("$RIS" run test/ris/text_builder_kept.ri 2>&1)

@@ -1,0 +1,8 @@
+# A second name for a socket handed to a task reaches it later (5.1).
+import std/socket::{IyiSocket}
+server = IyiSocket.listen(0)
+other = server
+group do |g|
+  g.spawn { server.close }
+  puts other.local_port
+end

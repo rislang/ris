@@ -1,0 +1,10 @@
+# A task reaches a class variable through a call and writes it (5.1).
+class Tally
+  @@total = [] of Int32
+  def self.add(n) : Nil
+    @@total << n
+  end
+end
+group do |g|
+  2.times { g.spawn { Tally.add(1) } }
+end

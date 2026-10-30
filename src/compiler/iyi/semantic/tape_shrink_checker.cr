@@ -97,6 +97,10 @@ class Iyi::TapeShrinkChecker
   # block. TapeScopeChecker resets only a walked block not tainted.
   getter walked_tape_blocks = Set(UInt64).new
   getter tainted_tape_blocks = Set(UInt64).new
+  # Per solved def, the node that wrote each stored root; while a call
+  # applies a callee's stores, the callee's site for the current root.
+  @store_sites = Hash(UInt64, Hash(UInt64, ASTNode)).new
+  @store_site : ASTNode? = nil
   @checking = false
   @unproved = [] of Call
   @retains = [] of UInt64
@@ -229,6 +233,12 @@ class Iyi::TapeShrinkChecker
         [root]
       end
     end.uniq
+    # Where a def's store is written, for the refusal at its callers: the
+    # store itself, or the deeper one a call here carries.
+    if solving = @solving
+      sites = @store_sites[solving] ||= Hash(UInt64, ASTNode).new
+      roots.each { |root| sites[root] ||= @store_site || node }
+    end
     # Copy a by-value holder's slots, rather than baking its aggregate
     # roots into the parent. This lets an emptied nested field forget its
     # roots without changing a separate copy of the holder.
@@ -324,11 +334,22 @@ class Iyi::TapeShrinkChecker
                      "copy it with copy_to(owner) before storing it"
         end
         if (block = tape_of(source)) && outside?(root, block)
-          node.raise "cannot store data made in this tape block where it " \
-                     "outlives the block (TAPE_SPEC 3.2): its storage ends " \
-                     "with the block.\nCopy it with .copy_to(owner) onto the " \
-                     "destination's owner, or build it on the destination " \
-                     "(write into its String::Builder)"
+          message = "cannot store data made in this tape block where it " \
+                    "outlives the block (TAPE_SPEC 3.2): its storage ends " \
+                    "with the block.\nCopy it with .copy_to(owner) onto the " \
+                    "destination's owner, or build it on the destination " \
+                    "(write into its String::Builder)"
+          # The store is in a method this call reaches (a handler's
+          # `call`): point at that line, and name the call that reaches it.
+          site = @store_site
+          if site && site.location && !site.same?(node) &&
+             (call_at = node.location)
+            site.raise "#{message}\nThis store runs inside the tape block " \
+                       "of the call at " \
+                       "#{call_at.original_filename.try { |f| File.expand_path(f) }}:" \
+                       "#{call_at.line_number}"
+          end
+          node.raise message
         end
       end
     end
@@ -1536,7 +1557,11 @@ class Iyi::TapeShrinkChecker
                 # do decides (`handed_effect`); an object's effect is on
                 # its fields, so a reference to it stays valid.
                 handed = @graph.proc_call?(target) && i > 0 ? proc_argument_type(target, i - 1) : nil
-                if bits & TapeCallGraph::Contract::SHRINK != 0
+                # A constructor's receiver is the value `new` just made:
+                # no view of it exists yet for the constructor's own field
+                # growth to move (an imported `initialize` filling Arrays).
+                constructing = i == 0 && target.name == "initialize" && !handed
+                if bits & TapeCallGraph::Contract::SHRINK != 0 && !constructing
                   if found = handed ? handed_effect(handed, false) : WHOLE
                     shrunk = found == WHOLE ? roots : roots.flat_map { |r| found.map { |f| handed_field(r, f) } }.uniq
                     shrink(shrunk, node, chain("#{node.name} (opaque contract)"))
@@ -1620,7 +1645,12 @@ class Iyi::TapeShrinkChecker
                 end)
                 incoming = merge(incoming, kept)
               end
-              store(destinations, incoming, call_env, node)
+              @store_site = @store_sites[target.object_id]?.try &.[root]?
+              begin
+                store(destinations, incoming, call_env, node)
+              ensure
+                @store_site = nil
+              end
             end
             # Only a field load needs read-back. Roots forwarded from an
             # argument already name its storage, even when that storage is

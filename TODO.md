@@ -29,16 +29,12 @@ the std row. Update a row when its work starts or ends.
 | Work                                 | Size    | Time     | Tokens   |
 |--------------------------------------|---------|----------|----------|
 | std non-Linux branches: 34 mallocs   | medium  | 4-8 h    | 200-400k |
-| Text: `s = ""` + `<<`, no Builder.new| medium  | 6-10 h   | 300-500k |
+| Text: std's ~320 plain builders     | medium  | 4-8 h    | 200-400k |
 | Kernel threads without a collector   | large   | 1-2 days | 300-500k |
-| Task value: @[OnTape] and nested     | medium  | 2-4 h    | 100-200k |
-| Closure env inside a nested tape do  | medium  | 2-4 h    | 100-200k |
 | Bench ports left: 20 benches         | large   | 1-2 days | 400-800k |
-| 5.1 holes: reached state, aliases    | large   | 4-8 h    | 200-400k |
+| 5.1: state reached through procs     | medium  | 2-4 h    | 100-200k |
 | Autocert part B                      | medium  | 2-4 h    | 150-300k |
 | Task-owned Conn buffer growth        | med-lrg | 3-5 h    | 150-300k |
-| Artifact String constructor contract | small   | 1-2 h    | 50-100k  |
-| iyimod: lowered text growth on self  | small   | 1-2 h    | 50-100k  |
 | Compiler specs: the rest of the suite| large   | 1-3 days | 300k-1M  |
 | macOS arm64 (needs a Mac to test)    | medium  | 1-2 days | 200-400k |
 | Windows                              | large   | days     | 500k+    |
@@ -88,8 +84,11 @@ part B.
     socket, file, http, json import std/gc; yaml: Array(Any) refused (growing
     values): retire Any for TapeValue; server_load: IyiMark (collector
     gone; the bench proves collections, drop or rewrite it).
-* 5.1 left: receivers and state reached through called methods (only the
-  block's own captures are checked), aliases of a handed-off value.
+* 5.1 left: state reached through a proc the task calls (the walk
+  follows defs, not procs), and a handed-off value passed to a call
+  that keeps it before the spawn. Done: class variables and constants
+  changed through called defs, `other = server` aliases (refused/
+  task_reached_*, task_handoff_alias).
 * Port socket race to one task with multiple in-flight OS connects and
   poller interests, next-launch/deadline timers and Windows completion
   records. It no longer uses Channel/select: the caller polls its attempt
@@ -148,7 +147,8 @@ first):
   `suggested_edit` that fix applies. Done: a plain `String::Builder.new`
   -> `""`, then its `x.finish` -> `x.to_s`, plain `String.build` blocks
   (a multi-line edit), and an `IO` text parameter -> `String::Builder`
-  (test/ris/fix/). Left: a new Array per call -> `clear`. Gate per rule: a
+  (test/ris/fix/), a new empty Array per call -> `@x.clear`
+  (fix/array_refill; a filled one is left alone). Gate per rule: a
   Crystal-style file that `ris fix` turns into one that compiles, and
   fix leaves alone what it cannot prove.
 * Done: in programs, a String::Builder local or String.build argument
@@ -212,6 +212,8 @@ first):
   that (transitively) spawns with captures into a group it was handed is
   refused (task_local_tape_helper). Left: a spawn reached through a
   proc call, which the check cannot follow. std keeps its marks.
+  A task spawned in a `tape` block into a group opened outside it may
+  not capture a local the block sets (refused/task_tape_block_capture).
 * Error#message answers String, which a program cannot build without a
   heap: let it answer String (or write into a builder) across std.
 * Kernel threads without a collector on darwin arm64 and win32: Linux
@@ -263,16 +265,13 @@ first):
   Reader (gate test/ris/http_coding.ri). The benches' Feed and Pending
   are io Readers.
 * Bench ports left (2026-10-30; deque, ini, log, secure_dns pass under
-  ris, netip but for its artifact build): mail (String#to_unsafe),
+  ris, netip's artifact build too): mail (String#to_unsafe),
   toml (TOML::Any), yaml (YAML::Any, Parser), xml (Document, Node:
   XmlTree now), udp:274 and tls:445 (task captures), http2_exercise
   (HTTP.tls_config=), zstd, bzip2 and the other std/gc importers
   (format, socket, big, csv, std, file, file_utils, fuzz, http, io,
   json, png): replace GC.stats with RIS_HEAP_STATS=1 on the run, as
   std_netip_exercise.sh does.
-* `--emit-iyimod` then `--use-iyimod` fails: std/int.iyimod holds a
-  lowered text growth that assigns `self` ("can't change the value of
-  self"); bench/std_netip_exercise.sh's artifact step shows it.
 * Sweep remaining std modules (collections, IO, errors); heap paths that
   block the default no-GC switch belong in the section above.
 * Add 128-bit formatting, IDNA and URI resolution.

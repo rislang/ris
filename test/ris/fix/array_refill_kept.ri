@@ -1,0 +1,27 @@
+# A refill with content: `clear` would differ, so `ris fix` leaves it.
+@[OnTape]
+struct Queue
+  @items : Array(Int32)
+  @next : Int32
+
+  def initialize
+    @items = Array(Int32).new
+    @next = 0
+  end
+
+  def take : Int32
+    while @next >= @items.size
+      @items = Array(Int32).new(3, 0) if @next > 0
+      @next = 0
+      @items << 1
+    end
+    @next = @next + 1
+    @items[@next - 1]
+  end
+end
+
+tape do
+  queue = Queue.new
+  3.times { queue.take }
+  puts "hello, ris"
+end

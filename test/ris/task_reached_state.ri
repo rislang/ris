@@ -1,0 +1,26 @@
+module test/ris/task_reached_state
+
+# A task's called methods may read program state and change what the
+# task made itself; only a write to shared program state is refused.
+LIMITS = [3, 4]
+
+class Tally
+  @@base = 10
+
+  def self.base : Int32
+    @@base
+  end
+end
+
+def total(list : Array(Int32)) : Int32
+  list << Tally.base
+  sum = 0
+  list.each { |n| sum += n }
+  sum + LIMITS[0]
+end
+
+group do |g|
+  t = g.spawn { total([1, 2]) }
+  v = t.value
+  puts v if v.is_a?(Int32)
+end

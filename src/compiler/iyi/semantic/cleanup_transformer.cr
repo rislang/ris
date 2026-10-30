@@ -524,9 +524,15 @@ module Iyi
         # TODO: if the block isn't used in any of the target defs we could
         # avoid transforming it, because it probably isn't typed **at all**
         scope_mark = ris_scope_mark(node)
-        @ris_scope_marks << scope_mark if scope_mark
+        if scope_mark
+          @ris_scope_marks << scope_mark
+          @ris_scope_names << (scope_mark == :tape ? AssignedNames.collect(node_block.body) : nil)
+        end
         node.block = node_block.transform(self)
-        @ris_scope_marks.pop if scope_mark
+        if scope_mark
+          @ris_scope_marks.pop
+          @ris_scope_names.pop
+        end
       end
 
       if node_block_arg = node.block_arg
@@ -639,9 +645,12 @@ module Iyi
               @current_def = target_def
               @def_nest_count += 1
               saved_marks = @ris_scope_marks
+              saved_names = @ris_scope_names
               @ris_scope_marks = [] of Symbol
+              @ris_scope_names = [] of Set(String)?
               target_def.body = target_def.body.transform(self)
               @ris_scope_marks = saved_marks
+              @ris_scope_names = saved_names
               @def_nest_count -= 1
               @current_def = current_def
             end
@@ -690,7 +699,8 @@ module Iyi
     private def check_local_tape_spawn(a_def : Def, vars) : Nil
       return unless @joined_task_blocks.includes?(a_def)
       return unless @program.has_flag?("ris_no_gc")
-      mark = @ris_scope_marks.last?
+      check_tape_block_spawn(a_def, vars)
+      mark = @ris_scope_marks.reject(:tape).last?
       return if mark == :group
       ClosuredVarsCollector.collect(a_def).each do |captured|
         next unless captured.is_a?(Var)
@@ -710,6 +720,71 @@ module Iyi
       end
     end
 
+    # ris: TAPE_SPEC 3.2 for a task's captures. A value made in an
+    # explicit `tape` block ends with it; a task spawned there into a group
+    # opened outside it may run after, so it may not capture a local the
+    # block assigns. A group opened inside the block joins before it ends.
+    private def check_tape_block_spawn(a_def : Def, vars) : Nil
+      inside = [] of Set(String)
+      @ris_scope_marks.each_with_index.to_a.reverse_each do |(mark, index)|
+        break if mark == :group
+        if mark == :tape && (names = @ris_scope_names[index]?)
+          inside << names
+        end
+      end
+      return if inside.empty? || task_closure_unsafe_scope?
+      ClosuredVarsCollector.collect(a_def).each do |captured|
+        next unless captured.is_a?(Var)
+        meta = vars.try &.[captured.name]?
+        next unless meta
+        next if meta.belongs_to?(a_def)
+        next unless inside.any? &.includes?(captured.name)
+        captured.raise "this task captures `#{captured.name}`, set inside " \
+                       "a `tape` block that ends and frees it before the " \
+                       "task's group joins: open the `group` inside the " \
+                       "`tape` block, or set `#{captured.name}` before the " \
+                       "`tape` block (copy_to(owner) for its tape value)"
+      end
+    end
+
+    # The local names a `tape` block's body assigns, its nested blocks
+    # included: what the block makes may be bound to any of them.
+    class AssignedNames < Visitor
+      getter names = Set(String).new
+
+      def self.collect(node : ASTNode) : Set(String)
+        visitor = new
+        node.accept visitor
+        visitor.names
+      end
+
+      def visit(node : Assign)
+        target = node.target
+        @names << target.name if target.is_a?(Var)
+        true
+      end
+
+      def visit(node : MultiAssign)
+        node.targets.each { |t| @names << t.name if t.is_a?(Var) }
+        true
+      end
+
+      def visit(node : OpAssign)
+        target = node.target
+        @names << target.name if target.is_a?(Var)
+        true
+      end
+
+      def visit(node : Block)
+        node.args.each { |arg| @names << arg.name }
+        true
+      end
+
+      def visit(node : ASTNode)
+        true
+      end
+    end
+
     # ris: defs that spawn a task with captures into a group they did not
     # open. Called inside a `local_tape` with no `group` opened between,
     # the task could read captures the local tape freed.
@@ -719,7 +794,7 @@ module Iyi
                                              current_def) : Nil
       return unless @program.has_flag?("ris_no_gc")
       return unless target_defs.any? { |d| @ris_spawning_helpers.includes?(d) }
-      case @ris_scope_marks.last?
+      case @ris_scope_marks.reject(:tape).last?
       when :local
         node.raise "`#{node.name}` spawns a task with captures into a group " \
                    "it was handed, and this call is inside a `local_tape` " \
@@ -741,12 +816,14 @@ module Iyi
     # ris: the blocks a call's block is lexically inside in this def:
     # :local for `local_tape`, :group for `group`.
     @ris_scope_marks = [] of Symbol
+    @ris_scope_names = [] of Set(String)?
 
     private def ris_scope_mark(node : Call) : Symbol?
       return nil if node.obj
       case node.name
       when "local_tape" then :local
       when "group"      then :group
+      when "tape"       then :tape
       end
     end
 
@@ -844,6 +921,7 @@ module Iyi
         consequence = thread.consequence
         check_thread_constants_share(a_def, thread)
         check_thread_class_vars_share(a_def, thread)
+        check_reached_state_writes(a_def, thread)
       end
       return unless a_def.closure?
 
@@ -960,6 +1038,10 @@ module Iyi
       walk = CaptureAssignments.new(@program, meta, start, vars)
       body.try &.accept(walk)
       return false unless walk.found_start?
+      if copy = walk.aliases.first?
+        name = copy.target.to_s == captured.name ? copy.value.to_s : copy.target.to_s
+        copy.raise "`#{copy.target} = #{copy.value}` keeps a second name for the value handed to the task spawned at line #{start.location.try(&.line_number)}: the task owns it (TAPE_SPEC 5.1), so `#{name}` would reach it while the task runs. Use `#{captured.name}` alone, or open another resource for `#{name}`"
+      end
       if use = walk.uses.first?
         use.raise "`#{captured.name}` is read here, after it was handed to the task spawned at line #{start.location.try(&.line_number)}: the task owns it now (TAPE_SPEC 5.1). Use it only inside the task, or hand the task a copy"
       end
@@ -1064,6 +1146,105 @@ module Iyi
       end
     end
 
+    # ris: TAPE_SPEC 5.1 checks reached program state transitively. A
+    # method the task calls, or one that method calls, may write a class
+    # variable or change a constant's value: a cell the task and its
+    # spawner (or two tasks) share although the block's text names
+    # neither. std's and the runtime's methods keep their own rules.
+    def check_reached_state_writes(a_def : Def, boundary : ShareBoundary) : Nil
+      walk = ReachedStateWrites.new(@program, boundary == LOCAL_BOUNDARY)
+      a_def.body.accept walk
+      return unless found = walk.found
+      node, state, via = found
+      where = via ? "through `#{via.name}`, which the task calls" : "in the task's block"
+      node.raise "#{boundary.subject} changes `#{state}` #{where}: program " \
+                 "state a task reaches has no writer after its initializer " \
+                 "(TAPE_SPEC 5.1). Keep the state in one task and send " \
+                 "changes through RisBoard (post/take), answer it from the " \
+                 "task's `value`, or keep it in an `Atomic`"
+    end
+
+    class ReachedStateWrites < Visitor
+      MUTATORS = {"<<", "[]=", "push", "pop", "shift", "unshift", "clear",
+                  "delete", "delete_at", "concat", "insert", "fill",
+                  "replace", "update", "put", "add", "truncate"}
+      getter found : {ASTNode, String, Def?}?
+      @seen = Set(UInt64).new
+      @via : Def? = nil
+
+      # A local task runs on its spawner's thread: only a container's
+      # change (not Share) races there. Across threads every write does,
+      # except tape state, which TapeProgramChecker refuses on its own.
+      def initialize(@program : Program, @local : Bool)
+      end
+
+      def visit(node : Assign | OpAssign)
+        target = node.target
+        if target.is_a?(ClassVar) && !thread_local?(target) &&
+           counted?(target.var?.try(&.type?))
+          note(node, target.name)
+        end
+        true
+      end
+
+      # A method called on Share state (an Atomic's `add`) is its own
+      # synchronization; an assignment across threads is not.
+      private def counted?(type : Type?, call = false) : Bool
+        return false unless type
+        return false if !@local && Iyi::TapeChecker.tape_in(@program, type)
+        return true unless @local || call
+        !!Iyi::Share.reason(type)
+      end
+
+      def visit(node : Call)
+        return false if @found
+        if (obj = node.obj) && mutator?(node.name)
+          if obj.is_a?(ClassVar) && !thread_local?(obj) &&
+             counted?(obj.var?.try(&.type?), call: true)
+            note(node, obj.name)
+          elsif obj.is_a?(Path) && obj.target_const && counted?(obj.type?, call: true)
+            note(node, obj.to_s)
+          end
+        end
+        if expanded = node.expanded
+          expanded.accept self
+          return false
+        end
+        node.target_defs.try &.each do |target|
+          next if target.is_a?(External)
+          location = target.location
+          next if TapeRules.runtime?(@program, location) || TapeRules.std?(location)
+          next if target.annotation(@program.tape_unsafe_annotation)
+          next unless @seen.add?(target.object_id)
+          saved = @via
+          @via ||= target
+          target.body.accept self
+          @via = saved
+        end
+        true
+      end
+
+      def visit(node : Def | Macro)
+        false
+      end
+
+      def visit(node : ASTNode)
+        !@found
+      end
+
+      private def mutator?(name : String) : Bool
+        MUTATORS.includes?(name) || name.ends_with?('!')
+      end
+
+      private def thread_local?(node : ClassVar) : Bool
+        !!node.var?.try(&.thread_local?)
+      end
+
+      private def note(node : ASTNode, state : String) : Nil
+        @found ||= {node, state, @via}
+      end
+    end
+
     # Every constant a body names, once each, with its value's type.
     class NamedConstants < Visitor
       getter paths = [] of {Path, Type}
@@ -1159,6 +1340,7 @@ module Iyi
       getter assigns = [] of {ASTNode, Array(ASTNode), Bool}
       getter start_regions = [] of ASTNode
       getter uses = [] of Var
+      getter aliases = [] of Assign
       getter? found_start = false
 
       def initialize(@program : Program, @meta : MetaVar, @start : Call?, vars : MetaVars?)
@@ -1244,6 +1426,16 @@ module Iyi
 
       def end_visit(node : Assign)
         note(node, node.target)
+        # ris: a second name for the value (`other = server`) lets the
+        # spawner reach it after the task took it.
+        value = node.value
+        target = node.target
+        if !@found_start && value.is_a?(Var) && target.is_a?(Var) &&
+           target.name != value.name &&
+           (@scopes.last.try(&.[value.name]?).same?(@meta) ||
+            @scopes.last.try(&.[target.name]?).same?(@meta))
+          @aliases << node
+        end
       end
 
       def end_visit(node : TypeDeclaration)

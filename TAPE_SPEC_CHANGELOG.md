@@ -4,6 +4,18 @@ Every change to TAPE_SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one.
 
+## 2026-10-30: 5.1 reached state and handed-off aliases
+
+* Changed: 5.1 says a handed-off value has no second local name, and
+  that a task's block and the program methods it calls change no class
+  variable or constant; a local task may still set a scalar class
+  variable. The compiler refuses both, naming RisBoard, the task's
+  `value` or an `Atomic`.
+* Why: only the block's own captures were checked: a task growing a
+  constant's Array through a helper, or `other = server` before handing
+  `server` to a task, compiled. A scalar store by a local task is not a
+  race (one thread) and std's group lifecycle gate relies on one.
+
 ## 2026-10-29: Mutex is gone
 
 * Changed: 5.2 says ris has no Mutex beside Channel and select.

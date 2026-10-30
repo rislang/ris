@@ -820,6 +820,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
     container = IyiMod.mono_body_container(trait_type.to_s, target_type.to_s)
 
     impl_methods = [] of IyiMod::Signature
+    impl_defs = [] of Def
     trait_label = (trait_args = node.trait_args) ? "#{trait_type.to_s(generic_args: false)}(#{trait_args.join(", ")})" : trait_type.to_s
     impl_label = "impl #{trait_label} for #{target_type}"
     iyi_impl_body_defs(node) do |a_def|
@@ -827,6 +828,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
       @iyi_impl_defs[a_def] = {node, impl_label}
       signature = IyiMod.signature(a_def)
       impl_methods << signature
+      impl_defs << a_def
 
       # And one more way the machine code ends up somewhere the consumer
       # will not look for it: a signature written wider than what the body
@@ -853,6 +855,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
     end
 
     if file = @iyi_importing.last?
+      (@program.iyi_impl_defs[file] ||= [] of Array(Def)) << impl_defs
       (@program.iyi_impls[file] ||= [] of IyiMod::ImplRecord) << IyiMod::ImplRecord.new(
         trait_name: trait_type.to_s,
         type_name: target_type.to_s,

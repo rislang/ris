@@ -1,0 +1,10 @@
+# A task spawned in a `tape` block into a group opened outside it may run
+# after the block ends; its capture made in the block would be freed.
+tape do
+  group do |g|
+    tape do
+      word = "w#{42}"
+      g.spawn { sleep 0; puts word }
+    end
+  end
+end

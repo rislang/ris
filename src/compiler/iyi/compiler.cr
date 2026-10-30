@@ -857,6 +857,18 @@ module Iyi
       end
 
       impls = program.iyi_impls[filename]? || [] of IyiMod::ImplRecord
+      # An impl method's contract was not known when its signature was
+      # taken: carry the one the tape checker proved for its def.
+      if impl_defs = program.iyi_impl_defs[filename]?
+        impls = impls.map_with_index do |record, index|
+          defs = impl_defs[index]?
+          next record unless defs
+          record.copy_with(methods: record.methods.map_with_index { |sig, i|
+            contract = defs[i]?.try(&.ris_call_contract)
+            contract ? sig.copy_with(tape_contract: contract) : sig
+          })
+        end
+      end
 
       # The module's own class variables — the ones owned by the module unit
       # rather than by a type inside it. They belong to no `TypeDecl`, because
