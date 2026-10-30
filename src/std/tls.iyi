@@ -658,9 +658,15 @@ pub class TlsKeySchedule
 
   # The handshake secret over the key exchange's *shared* secret, and over
   # *psk* in a resumption.
-  def handshake_secret(shared : Array::View(UInt8), psk : Array(UInt8)? = nil) : Array(UInt8)
-    early = psk ? early_secret(psk) : early_secret
-    extract(derive_secret(early, "derived", [] of UInt8), shared)
+  # Without a PSK, and with one: two defs rather than a nilable
+  # parameter, which a caller whose PSK is always nil handed to codegen
+  # as a bare Nil (LLVM: "Load operand must be a pointer").
+  def handshake_secret(shared : Array::View(UInt8)) : Array(UInt8)
+    extract(derive_secret(early_secret, "derived", [] of UInt8), shared)
+  end
+
+  def handshake_secret(shared : Array::View(UInt8), psk : Array(UInt8)) : Array(UInt8)
+    extract(derive_secret(early_secret(psk), "derived", [] of UInt8), shared)
   end
 
   def master_secret(handshake_secret : Array::View(UInt8)) : Array(UInt8)
@@ -2464,7 +2470,7 @@ pub class TlsClient < TlsConnection
       return TlsError.new("the server's X25519 share gives no secret", TlsAlert::ILLEGAL_PARAMETER) if shared.is_a?(CurveError)
       secret = TlsBytes.of(shared)
     end
-    handshake_secret = @schedule.handshake_secret(secret, psk)
+    handshake_secret = psk ? @schedule.handshake_secret(secret, psk) : @schedule.handshake_secret(secret)
     client_secret = @schedule.derive_secret(handshake_secret, "c hs traffic", @transcript)
     server_secret = @schedule.derive_secret(handshake_secret, "s hs traffic", @transcript)
     @reader = TlsRecordCipher.new(@suite, @schedule, server_secret)
@@ -3824,6 +3830,12 @@ end
 # What a server presents and asks: its identity, the protocols it speaks
 # by ALPN, the oldest version it speaks, and - for mutual TLS - the roots
 # a client's certificate must chain to.
+# What a server config's `identity_source` is: its `identity_for` is
+# asked for the identity a client is shown (see `identity_source`).
+pub trait TlsIdentitySource
+  abstract def identity_for(server_name : String?, alpn : Array(String)?, left_ms : Int32?) : TlsIdentity | TlsError | Nil
+end
+
 pub class TlsServerConfig
   getter identity : TlsIdentity
   # Protocols this server speaks by ALPN (RFC 7301), most wanted first; a
@@ -3858,7 +3870,17 @@ pub class TlsServerConfig
   # deadline cuts only the reads after it: a source that may wait - for a
   # CA, say - keeps its waits within the time it is given, or holds the
   # connection past the deadline. Not asked when nil.
-  property identity_source : Proc(String?, Array(String)?, Int32?, TlsIdentity | TlsError | Nil)? = nil
+  # The source is a `TlsIdentitySource`, whose `identity_for` the
+  # checker follows: a proc's effects it cannot see.
+  property identity_source : TlsIdentitySource? = nil
+
+  def identity_source=(source : Proc) : Nil
+    {% raise "TlsServerConfig#identity_source= takes no proc.\n" +
+      "Give it a value whose type has\n" +
+      "`impl TlsIdentitySource for T` and\n" +
+      "`def identity_for(server_name : String?, alpn : Array(String)?,\n" +
+      "  left_ms : Int32?) : TlsIdentity | TlsError | Nil`." %}
+  end
   # The oldest version this server speaks: TLS 1.3 by default, and then a
   # client that does not offer it is refused (protocol_version); `TLS12`
   # answers a client that offers 1.2 and not 1.3 in 1.2, held to what the
@@ -4783,7 +4805,7 @@ pub class TlsServer < TlsConnection
     return sent if sent
     @transcript = @transcript + reply
 
-    handshake_secret = @schedule.handshake_secret(secret, psk)
+    handshake_secret = psk ? @schedule.handshake_secret(secret, psk) : @schedule.handshake_secret(secret)
     client_secret = @schedule.derive_secret(handshake_secret, "c hs traffic", @transcript)
     server_secret = @schedule.derive_secret(handshake_secret, "s hs traffic", @transcript)
     @writer = TlsRecordCipher.new(@suite, @schedule, server_secret)
@@ -5254,7 +5276,7 @@ pub class TlsServer < TlsConnection
         # A copy of the offer: the source is code this end cannot see,
         # and may change the array it is handed.
         offered = alpn
-        given = source.call(server_name, offered ? offered.dup : nil, left_ms)
+        given = source.identity_for(server_name, offered ? offered.dup : nil, left_ms)
         return given if given.is_a?(TlsError)
         chosen = given.scheme_for(schemes) ? given : nil if given
       end
@@ -5619,7 +5641,7 @@ pub class TlsServer < TlsConnection
   # `identity` if it can; or why the client is refused.
   private def identity12(offer : TlsOffer12, schemes : Array(Int32)) : TlsIdentity | TlsError
     if source = @config.identity_source
-      given = source.call(offer.server_name, offer.alpn, left_ms)
+      given = source.identity_for(offer.server_name, offer.alpn, left_ms)
       return given if given.is_a?(TlsError)
       if given
         refused = refusal12(given, offer, schemes)

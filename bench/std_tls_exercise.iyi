@@ -37,7 +37,7 @@
 #                       what was agreed, then close_notify;
 #   config CHAIN KEY    TlsServerConfig.from_pem's answer.
 
-import std/tls::{TlsClient, TlsConfig, TlsEarlyData, TlsEchConfig, TlsEchKey, TlsError, TlsHeldTicket, TlsIdentity, TlsKeySchedule, TlsMadeUnder, TlsRecordCipher, TlsReplayGuard, TlsServer, TlsServerConfig, TlsSession, TlsTicket, TlsTicketKeys, TlsVersion}
+import std/tls::{TlsClient, TlsConfig, TlsEarlyData, TlsEchConfig, TlsEchKey, TlsError, TlsHeldTicket, TlsIdentity, TlsIdentitySource, TlsKeySchedule, TlsMadeUnder, TlsRecordCipher, TlsReplayGuard, TlsServer, TlsServerConfig, TlsSession, TlsTicket, TlsTicketKeys, TlsVersion}
 import std/x509::{Certificate}
 import std/time::{Time}
 import std/socket::{IyiSocket, SocketError}
@@ -360,6 +360,18 @@ end
 
 # DIR's identity read from its files, with DIR/staple.der stapled to it
 # when there is one: what the server mode's `identity_source` answers.
+# What DIR/sourced asks for: the identity read from DIR each time.
+struct FileSource
+  def initialize(@dir : String)
+  end
+end
+
+impl TlsIdentitySource for FileSource
+  def identity_for(server_name : String?, alpn : Array(String)?, left_ms : Int32?) : TlsIdentity | TlsError | Nil
+    sourced_identity(@dir)
+  end
+end
+
 def sourced_identity(dir : String) : TlsIdentity
   own = TlsIdentity.from_pem(File.read(dir + "/chain.pem"), File.read(dir + "/key.pem")).or_panic
   if File.file?(dir + "/staple.der")
@@ -1228,9 +1240,9 @@ if args.size > 0 && args[0] == "serve"
   if File.file?(args[1] + "/sourced")
     own = TlsIdentity.from_pem(File.read(args[1] + "/chain.pem"), File.read(args[1] + "/key.pem")).or_panic
     sourced = own
-    # The source captures nothing (TAPE_SPEC 5.3): each ask builds the
-    # identity from the files, stapled as `own` is below.
-    config.identity_source = ->(name : String?, offered : Array(String)?, left : Int32?) { sourced_identity(Program.args[1]).as(TlsIdentity | TlsError | Nil) }
+    # Each ask builds the identity from the files, stapled as `own` is
+    # below.
+    config.identity_source = FileSource.new(Program.args[1])
   end
   # DIR/staple.der: an OCSP response stapled for a client that asks.
   if File.file?(args[1] + "/staple.der")

@@ -233,28 +233,40 @@ end
 class EcdsaPlane
   @k : Int32
   @size : Int32
-  @m : Pointer(UInt64)
+  # Every number the plane works on lies in @w, k words at an offset:
+  # t (k + 2 words), the 16 scratch slots, m, r2, `check`'s point and
+  # Z^2, and `combine`'s three points, laid out once by `initialize`.
+  @w : Array(UInt64)
+  @m : Int32
   @inv : UInt64
-  @r2 : Pointer(UInt64)
-  @t : Pointer(UInt64)
-  @s : Pointer(UInt64)
+  @r2 : Int32
+  @t : Int32
+  @s : Int32
+  @point : Int32
+  @zz : Int32
+  @points : Int32
   @group : EcdsaGroup
 
   def initialize(@group : EcdsaGroup)
     @size = @group.size
     @k = (@size + 7) // 8
     k = @k
-    @t = Pointer(UInt64).malloc((k + 2).to_u64)
-    @s = Pointer(UInt64).malloc((16 * k).to_u64)
-    @m = Pointer(UInt64).malloc(k.to_u64)
-    @r2 = Pointer(UInt64).malloc(k.to_u64)
+    @t = 0
+    @s = k + 2
+    @m = 17 * k + 2
+    @r2 = 18 * k + 2
+    @point = 19 * k + 2
+    @zz = 22 * k + 2
+    @points = 24 * k + 2
+    @w = Array(UInt64).new(33 * k + 2, 0_u64)
     p = @group.p
     words(p, @m)
     words((BigInt.one << (128 * k)) % p, @r2)
     # -1/m mod 2^64 by Newton's iteration: an odd m is its own inverse to
     # three bits, and each step doubles the bits that are right.
-    x = @m[0]
-    5.times { x = x &* (2_u64 &- @m[0] &* x) }
+    m0 = @w[@m]
+    x = m0
+    5.times { x = x &* (2_u64 &- m0 &* x) }
     @inv = 0_u64 &- x
   end
 
@@ -265,12 +277,12 @@ class EcdsaPlane
   # products where an inversion would take a few hundred.
   def check(u1 : BigInt, u2 : BigInt, qx : BigInt, qy : BigInt, r : BigInt) : Bool
     k = @k
-    point = Pointer(UInt64).malloc((3 * k).to_u64)
+    point = @point
     return false unless combine(u1, u2, qx, qy, point)
-    return false if zero?(point + (2 * k).to_i64)
-    zz = Pointer(UInt64).malloc((2 * k).to_u64)
-    want = zz + k.to_i64
-    mul(point + (2 * k).to_i64, point + (2 * k).to_i64, zz)
+    return false if zero?(point + (2 * k))
+    zz = @zz
+    want = zz + k
+    mul(point + (2 * k), point + (2 * k), zz)
     enter(r, want)
     mul(want, zz, want)
     return true if same?(want, point)
@@ -284,19 +296,19 @@ class EcdsaPlane
   # u1·G + u2·Q into *acc*, both scalars' bits read together from the
   # top: one doubling a bit, and one addition of G, Q or G + Q where
   # either is set. False for a scalar too wide to read.
-  private def combine(u1 : BigInt, u2 : BigInt, qx : BigInt, qy : BigInt, acc : Pointer(UInt64)) : Bool
+  private def combine(u1 : BigInt, u2 : BigInt, qx : BigInt, qy : BigInt, acc : Int32) : Bool
     k = @k
     a = u1.to_bytes(@size)
     c = u2.to_bytes(@size)
     return false unless a && c
-    points = Pointer(UInt64).malloc((9 * k).to_u64)
+    points = @points
     g = points
-    q = points + (3 * k).to_i64
-    both = points + (6 * k).to_i64
+    q = points + (3 * k)
+    both = points + (6 * k)
     affine(@group.gx, @group.gy, g)
     affine(qx, qy, q)
     add_points(g, q, both)
-    clear(acc + (2 * k).to_i64)
+    clear(acc + (2 * k))
     i = 0
     while i < @size
       bit = 7
@@ -319,17 +331,17 @@ class EcdsaPlane
   end
 
   # dbl-2001-b, for a = -3, from *p* into *r*, which may be *p*.
-  private def double(p : Pointer(UInt64), r : Pointer(UInt64)) : Nil
+  private def double(p : Int32, r : Int32) : Nil
     k = @k
     x = p
-    y = p + k.to_i64
-    z = p + (2 * k).to_i64
+    y = p + k
+    z = p + (2 * k)
     if zero?(z)
       copy(p, r, 3 * k)
       return
     end
     if zero?(y)
-      clear(r + (2 * k).to_i64)
+      clear(r + (2 * k))
       return
     end
     delta = slot(0)
@@ -369,21 +381,21 @@ class EcdsaPlane
     add(gamma, gamma, gamma)
     sub(delta, gamma, delta)
     copy(v, r, k)
-    copy(delta, r + k.to_i64, k)
-    copy(u, r + (2 * k).to_i64, k)
+    copy(delta, r + k, k)
+    copy(u, r + (2 * k), k)
   end
 
   # add-1998-cmo-2 from *p* and *q* into *r*, which may be *p*, with the
   # cases it cannot take by name: the identity on either side, and equal
   # x, which is the same point (a doubling) or its negative (the identity).
-  private def add_points(p : Pointer(UInt64), q : Pointer(UInt64), r : Pointer(UInt64), affine : Bool = false) : Nil
+  private def add_points(p : Int32, q : Int32, r : Int32, affine : Bool = false) : Nil
     k = @k
     x1 = p
-    y1 = p + k.to_i64
-    z1 = p + (2 * k).to_i64
+    y1 = p + k
+    z1 = p + (2 * k)
     x2 = q
-    y2 = q + k.to_i64
-    z2 = q + (2 * k).to_i64
+    y2 = q + k
+    z2 = q + (2 * k)
     if zero?(z1)
       copy(q, r, 3 * k)
       return
@@ -421,7 +433,7 @@ class EcdsaPlane
     sub(u2, u1, h)
     sub(s2, s1, rr)
     if zero?(h)
-      zero?(rr) ? double(p, r) : clear(r + (2 * k).to_i64)
+      zero?(rr) ? double(p, r) : clear(r + (2 * k))
       return
     end
     hh = z1z1
@@ -447,26 +459,26 @@ class EcdsaPlane
     mul(s1, hhh, hh)
     sub(u1, hh, u1)
     copy(x3, r, k)
-    copy(u1, r + k.to_i64, k)
-    copy(z3, r + (2 * k).to_i64, k)
+    copy(u1, r + k, k)
+    copy(z3, r + (2 * k), k)
   end
 
   # The affine point (*x*, *y*) at *dst*, Z = 1.
-  private def affine(x : BigInt, y : BigInt, dst : Pointer(UInt64)) : Nil
+  private def affine(x : BigInt, y : BigInt, dst : Int32) : Nil
     k = @k
     enter(x, dst)
-    enter(y, dst + k.to_i64)
-    enter(BigInt.one, dst + (2 * k).to_i64)
+    enter(y, dst + k)
+    enter(BigInt.one, dst + (2 * k))
   end
 
   # *x*, below p, into Montgomery form at *dst*: its words times R^2 / R.
-  private def enter(x : BigInt, dst : Pointer(UInt64)) : Nil
+  private def enter(x : BigInt, dst : Int32) : Nil
     words(x, dst)
     mul(dst, @r2, dst)
   end
 
   # *x*, below 2^(64 k), as k little-endian words at *dst*.
-  private def words(x : BigInt, dst : Pointer(UInt64)) : Nil
+  private def words(x : BigInt, dst : Int32) : Nil
     k = @k
     bytes = x.to_bytes(8 * k)
     raise "ecdsa: #{x} does not fit #{k} words" unless bytes
@@ -478,58 +490,59 @@ class EcdsaPlane
         w = w.unsafe_shl(8) | bytes[8 * (k - 1 - i) + j].to_u64
         j = j + 1
       end
-      dst[i] = w
+      @w[dst + i] = w
       i = i + 1
     end
   end
 
-  private def slot(i : Int32) : Pointer(UInt64)
-    @s + (i * @k).to_i64
+  private def slot(i : Int32) : Int32
+    @s + i * @k
   end
 
   # r = a b / R mod p, by CIOS: k rounds of a times one word of b, each
   # followed by one word's reduction; r may be a or b, being written once
   # both have been read.
-  private def mul(a : Pointer(UInt64), b : Pointer(UInt64), r : Pointer(UInt64)) : Nil
+  private def mul(a : Int32, b : Int32, r : Int32) : Nil
     k = @k
+    words = @w
     m = @m
     t = @t
     inv = @inv
     j = 0
     while j < k + 2
-      t[j] = 0_u64
+      words[t + j] = 0_u64
       j = j + 1
     end
     i = 0
     while i < k
-      bi = b[i].to_u128
+      bi = words[b + i].to_u128
       c = 0_u128
       j = 0
       while j < k
-        w = a[j].to_u128 &* bi &+ t[j].to_u128 &+ c
-        t[j] = w.unsafe_to_u64
+        w = words[a + j].to_u128 &* bi &+ words[t + j].to_u128 &+ c
+        words[t + j] = w.unsafe_to_u64
         c = w.unsafe_shr(64)
         j = j + 1
       end
-      w = t[k].to_u128 &+ c
-      t[k] = w.unsafe_to_u64
-      t[k + 1] = w.unsafe_shr(64).unsafe_to_u64
-      q = (t[0] &* inv).to_u128
-      c = (q &* m[0].to_u128 &+ t[0].to_u128).unsafe_shr(64)
+      w = words[t + k].to_u128 &+ c
+      words[t + k] = w.unsafe_to_u64
+      words[t + k + 1] = w.unsafe_shr(64).unsafe_to_u64
+      q = (words[t + 0] &* inv).to_u128
+      c = (q &* words[m + 0].to_u128 &+ words[t + 0].to_u128).unsafe_shr(64)
       j = 1
       while j < k
-        w = q &* m[j].to_u128 &+ t[j].to_u128 &+ c
-        t[j - 1] = w.unsafe_to_u64
+        w = q &* words[m + j].to_u128 &+ words[t + j].to_u128 &+ c
+        words[t + j - 1] = w.unsafe_to_u64
         c = w.unsafe_shr(64)
         j = j + 1
       end
-      w = t[k].to_u128 &+ c
-      t[k - 1] = w.unsafe_to_u64
-      t[k] = t[k + 1] &+ w.unsafe_shr(64).unsafe_to_u64
+      w = words[t + k].to_u128 &+ c
+      words[t + k - 1] = w.unsafe_to_u64
+      words[t + k] = words[t + k + 1] &+ w.unsafe_shr(64).unsafe_to_u64
       i = i + 1
     end
     # t is below 2p: p taken off when t[k] carried or t is not below p.
-    if t[k] != 0_u64 || !below?(t, m)
+    if words[t + k] != 0_u64 || !below?(t, m)
       sub_words(t, m, r)
     else
       copy(t, r, k)
@@ -537,13 +550,13 @@ class EcdsaPlane
   end
 
   # (a + b) mod p.
-  private def add(a : Pointer(UInt64), b : Pointer(UInt64), r : Pointer(UInt64)) : Nil
+  private def add(a : Int32, b : Int32, r : Int32) : Nil
     k = @k
     c = 0_u128
     i = 0
     while i < k
-      w = a[i].to_u128 &+ b[i].to_u128 &+ c
-      r[i] = w.unsafe_to_u64
+      w = @w[a + i].to_u128 &+ @w[b + i].to_u128 &+ c
+      @w[r + i] = w.unsafe_to_u64
       c = w.unsafe_shr(64)
       i = i + 1
     end
@@ -551,26 +564,26 @@ class EcdsaPlane
   end
 
   # (a - b) mod p.
-  private def sub(a : Pointer(UInt64), b : Pointer(UInt64), r : Pointer(UInt64)) : Nil
+  private def sub(a : Int32, b : Int32, r : Int32) : Nil
     return unless sub_words(a, b, r)
     k = @k
     c = 0_u128
     i = 0
     while i < k
-      w = r[i].to_u128 &+ @m[i].to_u128 &+ c
-      r[i] = w.unsafe_to_u64
+      w = @w[r + i].to_u128 &+ @w[@m + i].to_u128 &+ c
+      @w[r + i] = w.unsafe_to_u64
       c = w.unsafe_shr(64)
       i = i + 1
     end
   end
 
   # r = a - b over k words; whether it borrowed.
-  private def sub_words(a : Pointer(UInt64), b : Pointer(UInt64), r : Pointer(UInt64)) : Bool
+  private def sub_words(a : Int32, b : Int32, r : Int32) : Bool
     borrow = 0_u128
     i = 0
     while i < @k
-      w = a[i].to_u128 &- b[i].to_u128 &- borrow
-      r[i] = w.unsafe_to_u64
+      w = @w[a + i].to_u128 &- @w[b + i].to_u128 &- borrow
+      @w[r + i] = w.unsafe_to_u64
       borrow = w.unsafe_shr(127)
       i = i + 1
     end
@@ -578,43 +591,45 @@ class EcdsaPlane
   end
 
   # Whether a < b, from the top word down.
-  private def below?(a : Pointer(UInt64), b : Pointer(UInt64)) : Bool
+  private def below?(a : Int32, b : Int32) : Bool
     i = @k - 1
     while i >= 0
-      return a[i] < b[i] if a[i] != b[i]
+      return @w[a + i] < @w[b + i] if @w[a + i] != @w[b + i]
       i = i - 1
     end
     false
   end
 
-  private def same?(a : Pointer(UInt64), b : Pointer(UInt64)) : Bool
+  private def same?(a : Int32, b : Int32) : Bool
     i = 0
     while i < @k
-      return false unless a[i] == b[i]
+      return false unless @w[a + i] == @w[b + i]
       i = i + 1
     end
     true
   end
 
-  private def zero?(a : Pointer(UInt64)) : Bool
+  private def zero?(a : Int32) : Bool
     i = 0
     while i < @k
-      return false unless a[i] == 0_u64
+      return false unless @w[a + i] == 0_u64
       i = i + 1
     end
     true
   end
 
-  private def clear(a : Pointer(UInt64)) : Nil
+  private def clear(a : Int32) : Nil
     i = 0
     while i < @k
-      a[i] = 0_u64
+      @w[a + i] = 0_u64
       i = i + 1
     end
   end
 
-  private def copy(src : Pointer(UInt64), dst : Pointer(UInt64), count : Int32) : Nil
-    dst.copy_from(src, count) unless src == dst
+  private def copy(src : Int32, dst : Int32, count : Int32) : Nil
+    return if src == dst
+    w = @w
+    count.times { |i| w[dst + i] = w[src + i] }
   end
 end
 
@@ -635,7 +650,7 @@ struct EcdsaP256
   Q_WIDTH = 5
   G_WIDTH = 7
 
-  @@g_table = Pointer(EcdsaP256Num).new(0_u64)
+  @@g_table = Array(EcdsaP256Num).new.copy_to(Program.tape)
 
   # Whether u1·G + u2·Q is a point whose x is r modulo n, as
   # `EcdsaPlane#check` answers it.
@@ -660,10 +675,10 @@ struct EcdsaP256
   end
 
   # Q, 3Q, ... 15Q for the key (*qx*, *qy*), Jacobian.
-  private def self.odd_multiples(qx : BigInt, qy : BigInt) : Pointer(EcdsaP256Point)
+  private def self.odd_multiples(qx : BigInt, qy : BigInt) : Array(EcdsaP256Point)
     q = EcdsaP256Point.new(EcdsaP256Num.enter(qx), EcdsaP256Num.enter(qy), EcdsaP256Num.one)
     twice = q.double
-    odd = Pointer(EcdsaP256Point).malloc(8_u64)
+    odd = Array(EcdsaP256Point).new(8, q)
     odd[0] = q
     i = 1
     while i < 8
@@ -676,7 +691,7 @@ struct EcdsaP256
   # The sum the two scalars' digits name: a doubling a digit, and an
   # addition of Q's multiple in *odd* and G's in *table* where a digit
   # is not zero.
-  private def self.sum(g_digits : Array(Int32), q_digits : Array(Int32), odd : Pointer(EcdsaP256Point), table : Pointer(EcdsaP256Num)) : EcdsaP256Point
+  private def self.sum(g_digits : Array(Int32), q_digits : Array(Int32), odd : Array(EcdsaP256Point), table : Array(EcdsaP256Num)) : EcdsaP256Point
     acc = EcdsaP256Point.identity
     i = g_digits.size - 1
     while i > 0 && g_digits[i] == 0 && q_digits[i] == 0
@@ -706,12 +721,12 @@ struct EcdsaP256
   # is wanted: a doubling, 31 additions and their Z inverted together by
   # Montgomery's trick. Two threads that reach it first both work it out
   # and store the same table.
-  def self.g_table(group : EcdsaGroup) : Pointer(EcdsaP256Num)
-    return @@g_table if @@g_table.address != 0_u64
+  def self.g_table(group : EcdsaGroup) : Array(EcdsaP256Num)
+    return @@g_table if @@g_table.empty? == false
     count = 1 << (G_WIDTH - 2)
     g = EcdsaP256Point.new(EcdsaP256Num.enter(group.gx), EcdsaP256Num.enter(group.gy), EcdsaP256Num.one)
     twice = g.double
-    points = Pointer(EcdsaP256Point).malloc(count.to_u64)
+    points = Array(EcdsaP256Point).new(count, g)
     points[0] = g
     i = 1
     while i < count
@@ -721,7 +736,7 @@ struct EcdsaP256
     # The running products of the Z, one inversion, and each Z's inverse
     # unwound from it. None is zero: no odd multiple of G under 64 is the
     # identity.
-    before = Pointer(EcdsaP256Num).malloc(count.to_u64)
+    before = Array(EcdsaP256Num).new(count, EcdsaP256Num.one)
     run = EcdsaP256Num.one
     i = 0
     while i < count
@@ -730,7 +745,7 @@ struct EcdsaP256
       i = i + 1
     end
     inverse = EcdsaP256Num.invert(run)
-    table = Pointer(EcdsaP256Num).malloc((2 * count).to_u64)
+    table = Array(EcdsaP256Num).new(2 * count, EcdsaP256Num.one)
     i = count - 1
     while i >= 0
       zi = EcdsaP256Num.mul(inverse, before[i])
@@ -740,8 +755,9 @@ struct EcdsaP256
       table[2 * i + 1] = EcdsaP256Num.mul(points[i].y, EcdsaP256Num.mul(zz, zi))
       i = i - 1
     end
-    @@g_table = table
-    table
+    kept = table.copy_to(Program.tape)
+    @@g_table = kept
+    kept
   end
 end
 
@@ -1114,7 +1130,7 @@ end
 struct EcdsaBytes
   def self.of(message : Array(UInt8) | String) : Array(UInt8)
     return message if message.is_a?(Array(UInt8))
-    Array(UInt8).new(message.bytesize) { |i| message.to_unsafe[i] }
+    Array(UInt8).new(message.bytesize) { |i| message.byte_at(i) }
   end
 
   # One helper a type, as std/rsa has: an Asn1Error read as a key's

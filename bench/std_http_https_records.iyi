@@ -28,7 +28,7 @@ import std/indexable
 
 import std/http::{HTTPClient, HTTPError, Response}
 import std/socket::{DnsUpstream, IyiSocket, Resolver, SocketError}
-import std/tls::{TlsConfig, TlsEchKey, TlsError, TlsIdentity, TlsServer, TlsServerConfig}
+import std/tls::{TlsConfig, TlsEchKey, TlsError, TlsIdentity, TlsIdentitySource, TlsServer, TlsServerConfig}
 import std/dns::{DnsError, DnsMessage, DnsRecord}
 import std/udp::{UdpSocket}
 import std/x509::{Certificate}
@@ -249,6 +249,14 @@ class Seen
   property connections = 0
 end
 
+# The source notes the ALPN offer and leaves the choice to the config.
+impl TlsIdentitySource for Seen
+  def identity_for(server_name : String?, alpn : Array(String)?, left_ms : Int32?) : TlsIdentity | TlsError | Nil
+    @offered = alpn ? alpn.join(",") : "-"
+    nil
+  end
+end
+
 # One connection to the TLS server listening as *id*: the handshake under
 # the next of *seen*'s plans, or *config*, then each request answered with
 # what the server saw, until the client closes.
@@ -307,10 +315,7 @@ def server_config(keys : Array(TlsEchKey), offered : Seen) : TlsServerConfig
   config.add_identity(TlsIdentity.from_pem(PUBLIC_CERT_PEM + ROOT_PEM, PUBLIC_KEY_PEM).or_panic)
   config.alpn = ["http/1.1"]
   config.ech_keys = keys
-  config.identity_source = ->(name : String?, protocols : Array(String)?, left : Int32?) {
-    offered.offered = protocols ? protocols.join(",") : "-"
-    nil.as(TlsIdentity | TlsError | Nil)
-  }
+  config.identity_source = offered
   config
 end
 

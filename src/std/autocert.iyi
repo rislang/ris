@@ -158,7 +158,7 @@ import std/p256::{P256PrivateKey}
 import std/ecdsa::{EcdsaError}
 import std/file::{File}
 import std/dir::{Dir}
-import std/tls::{TlsClient, TlsConfig, TlsServerConfig, TlsIdentity, TlsError, TlsAlert}
+import std/tls::{TlsClient, TlsConfig, TlsServerConfig, TlsIdentity, TlsIdentitySource, TlsError, TlsAlert}
 import std/http::{HTTPClient, Request, Response}
 import std/random::{Random}
 import std/base64::{Base64}
@@ -398,7 +398,7 @@ pub class AutocertView
     protocols = alpn.dup
     protocols << AcmeTlsAlpn01::PROTOCOL unless protocols.includes?(AcmeTlsAlpn01::PROTOCOL)
     config.alpn = protocols
-    config.identity_source = ->(name : String?, offered : Array(String)?, left : Int32?) { identity_for(name, offered, left).as(TlsIdentity | TlsError | Nil) }
+    config.identity_source = self
     config
   end
 
@@ -913,4 +913,7 @@ struct AutocertPem
   def self.now_ms : Int64
     Time.utc.to_unix_ms
   end
+end
+
+impl TlsIdentitySource for AutocertView
 end

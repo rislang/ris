@@ -311,15 +311,29 @@ first):
   `return` bounds its shrinks; an If with one leaving branch guards
   what follows; Host replaced while filling the table (:2627); H2
   flush clears after the write. The to_unsafe rule's stops in
-  compress.iyi and zstd.iyi are gone. Left: server_groups makes a
-  mapping per request (21003 for 20000, gate <= 29, 0 unmapped); serve
-  and logline end in "mapping failed: 134348800" (a 128 MiB side
-  reservation each, never reused); http_prefork stops at tls.iyi:5257.
-* http_prefork and the http benches stop at tls.iyi:5257: "cannot
-  prove opaque callback retain/escape" for TlsServerConfig's
-  identity_source (autocert's AutocertView), an unknown proc handed
-  the server name. It wants what the takeover got: a source the checker
-  can follow (a type with a method, as handlers are). Done: the takeover
+  compress.iyi and zstd.iyi are gone; http_prefork passes. Left:
+  server_groups makes a mapping per request (21003 for 20000, gate
+  <= 29); serve and logline end in "mapping failed: 134348800". Cause:
+  Server's tape_connection answers each request in a nested `tape`
+  block, which shares the connection task's tape, so nothing is freed
+  until the connection ends; each request's Arrays take a 128 MiB side
+  reservation (growing_state) chained to that tape. The scope mark that
+  would reset it stays off: the block passes outer tape values (client,
+  answerer, conn.tape_copy) to calls, and TapeScopeChecker cannot prove
+  they keep nothing. Forcing it is unsound today: an @[OnTape] handler
+  may store req.path in its field (compiles), and a store into an
+  outer object through a call inside a `tape` block is not refused
+  (TAPE_SPEC 3.2 gap). Needs a decision: refuse such stores (then the
+  mark can be on), or give each request a scope that copies out.
+* tls.iyi:5257: done. TlsServerConfig#identity_source is a
+  TlsIdentitySource (a trait: identity_for(server_name, alpn,
+  left_ms)); AutocertView implements it; a proc is refused, naming the
+  trait. x509, rsa, p256 and ecdsa are off to_unsafe and malloc
+  (p256's and ecdsa's base tables on Program.tape); handshake_secret
+  split in two (an always-nil PSK reached codegen as a bare Nil).
+  std_tls_exercise now stops at its own line 585, https_records at a
+  proc over a UdpSocket (366), autocert_exercise at the Array(Hash)
+  refusal. Done before: the takeover
   is the handler's take_over(socket, leftover, response), called after
   Response.upgrade(headers)'s 101; a block passed to Response.upgrade or
   WebSocket.upgrade is refused, naming the new form; WebSocket.serve

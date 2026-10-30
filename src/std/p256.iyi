@@ -99,7 +99,7 @@ pub struct P256PrivateKey
   # The key whose d is *bytes*, 32 big-endian, or why it is not one: not
   # 32 bytes, or not in [1, n - 1].
   def self.from_bytes(bytes : String | Array(UInt8)) : P256PrivateKey | EcdsaError
-    raw = bytes.is_a?(String) ? Array(UInt8).new(bytes.bytesize) { |i| bytes.to_unsafe[i] } : bytes
+    raw = bytes.is_a?(String) ? Array(UInt8).new(bytes.bytesize) { |i| bytes.byte_at(i) } : bytes
     return EcdsaError.new("a P-256 private key is 32 bytes, not #{raw.size}") unless raw.size == 32
     d = P256Num.from_bytes(raw, 0)
     unless P256Num.below?(d, P256Num.n) && !d.zero?
@@ -182,7 +182,7 @@ pub struct P256PrivateKey
   # SEQUENCE { r INTEGER, s INTEGER }, as X.509 and TLS 1.3 carry it. The
   # nonce is RFC 6979's, so the same key and message sign alike.
   def sign(hash : EcdsaHash, message : String | Array(UInt8)) : Array(UInt8)
-    bytes = message.is_a?(String) ? Array(UInt8).new(message.bytesize) { |i| message.to_unsafe[i] } : message
+    bytes = message.is_a?(String) ? Array(UInt8).new(message.bytesize) { |i| message.byte_at(i) } : message
     r, s = sign_digest(hash, hash.digest(bytes))
     P256Der.signature(r.to_bytes, s.to_bytes)
   end
@@ -790,14 +790,14 @@ end
 struct P256BaseTable
   ENTRIES = 257
 
-  @@table = Pointer(P256Num).new(0_u64)
+  @@table = Array(P256Num).new.copy_to(Program.tape)
   # 0, read by `pick` through an atomic load (see there).
   @@opaque = Atomic(UInt64).new(0_u64)
 
-  def self.get : Pointer(P256Num)
-    return @@table if @@table.address != 0_u64
+  def self.get : Array(P256Num)
+    return @@table if @@table.empty? == false
     f = P256Modulus.field
-    points = Pointer(P256Point).malloc(ENTRIES.to_u64)
+    points = Array(P256Point).new(ENTRIES, P256Point.base)
     p = P256Point.base
     row = 0
     while row < 32
@@ -816,7 +816,7 @@ struct P256BaseTable
     # Montgomery's trick: the running products of the Z, one inversion of
     # the last, and each inverse unwound from it. No Z is zero: none of
     # these points is the identity, the one point whose Z is.
-    before = Pointer(P256Num).malloc(ENTRIES.to_u64)
+    before = Array(P256Num).new(ENTRIES, P256Num.zero)
     run = f.one
     i = 0
     while i < ENTRIES
@@ -825,7 +825,7 @@ struct P256BaseTable
       i = i + 1
     end
     inverse = P256Modulus.field_inverse(run)
-    table = Pointer(P256Num).malloc((ENTRIES * 2).to_u64)
+    table = Array(P256Num).new(ENTRIES * 2, P256Num.zero)
     i = ENTRIES - 1
     while i >= 0
       point = points[i]
@@ -835,8 +835,9 @@ struct P256BaseTable
       table[2 * i + 1] = f.mul(point.y, zi)
       i = i - 1
     end
-    @@table = table
-    table
+    kept = table.copy_to(Program.tape)
+    @@table = kept
+    kept
   end
 
   # Row *row*'s entry for the signed digit *digit* (-8 to 8, in two's
@@ -848,19 +849,19 @@ struct P256BaseTable
   # jump each (`xor`, `dec`, `js`), a branch on the nonce's digits, and
   # bench/ct_timing.sh put P-256 signing at |t| = 16 to 24 over 100,000
   # signatures, fixed message against random.
-  def self.pick(table : Pointer(P256Num), row : Int32, digit : UInt64) : P256Point
+  def self.pick(table : Array(P256Num), row : Int32, digit : UInt64) : P256Point
     f = P256Modulus.field
     zero = @@opaque.get
     negative = digit.unsafe_shr(63) ^ zero
     index = (digit ^ (0_u64 &- negative)) &+ negative
     x = P256Num.zero
     y = P256Num.zero
-    base = table + (row * 16).to_i64
+    base = row * 16
     j = 1
     while j <= 8
       bit = ((j.to_u64 ^ index) &- 1_u64).unsafe_shr(63) ^ zero
-      x = P256Num.choose(bit, base[2 * j - 2], x)
-      y = P256Num.choose(bit, base[2 * j - 1], y)
+      x = P256Num.choose(bit, table[base + 2 * j - 2], x)
+      y = P256Num.choose(bit, table[base + 2 * j - 1], y)
       j = j + 1
     end
     y = P256Num.choose(negative, f.sub(P256Num.zero, y), y)
@@ -869,7 +870,7 @@ struct P256BaseTable
   end
 
   # [2^256]G when *carry* is 1, the identity when it is 0, by masks.
-  def self.top(table : Pointer(P256Num), carry : UInt64) : P256Point
+  def self.top(table : Array(P256Num), carry : UInt64) : P256Point
     f = P256Modulus.field
     P256Point.new(P256Num.choose(carry, table[512], P256Num.zero), P256Num.choose(carry, table[513], f.one),
       P256Num.choose(carry, f.one, P256Num.zero))
