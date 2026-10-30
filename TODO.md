@@ -72,10 +72,10 @@ part B.
     (std/sse.iyi:546 parser), websocket (std/websocket.iyi:380 chosen).
   - not captures: http_latency, http_resume, http_stop check in 64-79 s
     (the program checker reuses walks by input structure); they stop at
-    the shrink refusal http_continue has (http.iyi:2218 serve_h1 ->
-    answered? -> held block). HTTP.tls_config= is gone (refused, naming
-    HTTPClient.new(tls:)); websocket, acme, http2_exercise and
-    std_http_exercise.sh's inline programs still call it. TlsConfig
+    the shrink refusal http_continue has (below). HTTP.tls_config= is
+    gone (refused, naming HTTPClient.new(tls:)); websocket, acme,
+    http2_exercise and std_http_exercise.sh's inline programs still
+    call it. TlsConfig
     reads the system roots per handshake: make Certificate copyable to
     Program.tape to keep them once again.
     socket, file, http, json import std/gc; yaml: Array(Any) refused (growing
@@ -301,9 +301,17 @@ first):
   flush clears after the write. They now stop at the to_unsafe rule
   in std (38e98018d): compress.iyi:426 keeps `data.to_unsafe` in a
   field (http.iyi's reads moved to byte_at).
-* http_continue.sh stops in 11 s at http.iyi:2218 serve_h1: "live
-  view of Conn.@state.@stream ... held block -> call (opaque
-  contract)".
+* http_continue and the http benches stop at http.iyi:2217 serve_h1:
+  "live view of Conn.@state.@stream.@host ... taken_over -> held block
+  -> call (opaque contract)". A takeover proc gets ALL on its socket, so
+  it may shrink the TlsStream's @host; `conn`, an argument of serve_h1,
+  holds that view after the call. Done: serve_h1 reads `Connection:
+  close` and the peer's certificates before a takeover and returns
+  right after it. Tried: not counting a reference to a shrunk object as
+  a live view - it let the text_reset gates' refusals through (their
+  RisTextGrowth slot is such an object). Left: a narrower contract for
+  a proc's arguments (only what their types' methods can shrink), or a
+  takeover that hands over a socket conn does not hold.
 * Compiler specs (run with LLVM_CONFIG set to LLVM 23; without it
   bin/crystal links the system LLVM 21): no signal 11 any more. Left:
   compiler_spec lines 484, 522, 568 use Channel and select (port to

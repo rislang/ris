@@ -2210,18 +2210,24 @@ pub struct Server
     conn = Conn.new(client, listener, idle, stream)
     conn.gap = timeout_ms if timeout_ms > 0
     remote = client.remote_address
-    peer = stream ? stream.peer_certificates : [] of Certificate
     started = Time.monotonic_nanoseconds.to_i64
     conn.deadline_at(until_head(started, timeout_ms, until_whole(started, request_timeout_ms)))
     preface = h2_preface?(conn)
     conn.no_deadline
-    wrote_last = preface ? serve_h2(conn, handler, stream_bodies, compress, remote, peer, timeout_ms, request_timeout_ms) : serve_h1(conn, handler, stream_bodies, compress, remote, peer, timeout_ms, request_timeout_ms)
+    wrote_last = preface ? serve_h2(conn, handler, stream_bodies, compress, remote, peer_of(stream), timeout_ms, request_timeout_ms) : serve_h1(conn, handler, stream_bodies, compress, remote, timeout_ms, request_timeout_ms)
     wrote_last ? conn.close : conn.close_now
   end
 
   # HTTP/1.1's requests on *conn*, one after another: whether this side
   # wrote last - an answer or a refusal - when they end.
-  private def self.serve_h1(conn : Conn, handler, stream_bodies : Bool, compress : Bool, remote : String?, peer : Array(Certificate), timeout_ms : Int32, request_timeout_ms : Int32) : Bool
+  # The client's certificates, read anew for each request: a view of the
+  # TLS connection held across a takeover, whose protocol reads on, could
+  # outlive what it views.
+  private def self.peer_of(stream : TlsStream?) : Array(Certificate)
+    stream ? stream.peer_certificates : [] of Certificate
+  end
+
+  private def self.serve_h1(conn : Conn, handler, stream_bodies : Bool, compress : Bool, remote : String?, timeout_ms : Int32, request_timeout_ms : Int32) : Bool
     while true
       started = Time.monotonic_nanoseconds.to_i64
       whole = until_whole(started, request_timeout_ms)
@@ -2264,12 +2270,19 @@ pub struct Server
           end
         end
         req.tls_resumed = conn.resumed?
-        req.peer_certificates = peer
+        req.peer_certificates = peer_of(conn.transport.as?(TlsStream))
         going = false
+        # Read before answering: a takeover's protocol reads on, and may
+        # refill the buffer the head's views sit in.
+        last = said_close?(head, req)
         tape do
           response = handler.call(req)
           # Writing the answer waits as the client reads it, a pause at a time.
           conn.no_deadline
+          if takeover = response.takeover
+            taken_over(conn, response, takeover)
+            return false
+          end
           going = answered?(conn, response, req, head.close, compress)
         end
         unless going
@@ -2279,7 +2292,7 @@ pub struct Server
           # for nothing - as nginx's lingering_close waits only where more
           # may come. Any other close, the server's own choice, may meet a
           # client still sending.
-          return !(said_close?(head, req) && reader.finished? && conn.available == 0)
+          return !(last && reader.finished? && conn.available == 0)
         end
         next if reader.finished?
         conn.deadline_at(whole, "read a request") if whole > 0_i64
@@ -2404,6 +2417,17 @@ pub struct Server
   # `close` closes the connection after it, as Go's server and Python's
   # do: the line was dropped, `keep-alive` written in its place, and the
   # next request served on a connection the block had ended.
+  # A takeover: the 101 head, then the connection is the block's. The
+  # caller returns at once after it: the protocol after it reads on and
+  # may refill the buffer the request's views sit in.
+  private def self.taken_over(conn : Conn, response : Response, takeover) : Nil
+    socket = conn.transport
+    return unless socket.write(format_head(response, false, false, nil, false, true)).is_a?(Int32)
+    leftover = conn.leftover.copy_to(RisCurrentTape.new)
+    conn.unlimited
+    conn.held { takeover.call(socket, leftover) }
+  end
+
   private def self.answered?(conn : Conn, response : Response, req : Request, close : Bool, compress : Bool) : Bool
     closing = close
     if said = response.header("Connection")
@@ -2411,13 +2435,6 @@ pub struct Server
     end
     socket = conn.transport
     head = HTTP.same_name?(req.method, "HEAD")
-    if takeover = response.takeover
-      return false unless socket.write(format_head(response, false, false, nil, false, true)).is_a?(Int32)
-      leftover = conn.leftover
-      conn.unlimited
-      conn.held { takeover.call(socket, leftover) }
-      return false
-    end
     coding = compress ? Server.coding_for(req, response) : nil
     if source = response.source
       defer source.close
