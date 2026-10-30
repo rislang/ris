@@ -238,21 +238,26 @@ first):
   Unmarked runtime and std declarations still use the migration allocation
   ABI; selected std classes opt in with @[OnTape].
 * Complete the Pool/SlicePool surface beyond the validated paths in use.
-* std heap left (2026-10-30 audit): 101 Pointer.malloc/realloc sites,
-  130 to_heap copies. Ports in compress style (tape Arrays): bzip2 33,
-  xz 16, png 5, deque 4, string_pool 4, password 4. Done: websocket
-  reader, handshake and regex; udp, csv, ini (RisIni), otp, netip and
-  debug compile and run, each with a test/ris/<module>.ri gate, 0 heap.
+* std heap left (2026-10-30 audit): 47 Pointer.malloc/realloc sites,
+  120 to_heap copies. Ports in compress style (tape Arrays): deque 4,
+  string_pool 4, password 4. Done, each with a test/ris/<module>.ri gate
+  (exact output, 0 heap): websocket, regex, udp, csv, ini (RisIni), otp,
+  netip, debug; mail (TapePart views a MailTree node array; the heap
+  Part is gone), smtp (loopback session), png, bzip2, xz, tar, zip
+  (codecs checked against Python's zlib, bz2, lzma, tarfile, zipfile).
   OS buffers left are win32 or sized: file 8, user 6, process 5,
   system 4, dir/path/socket 2 each. to_heap stores into plain classes:
   time 25, autocert 17, toml 13, xml 12, yaml 11.
   Not compiling under ris (gc by design):
   * toml, yaml, xml: the heap Any (Array(Any), Hash(String, Any)) beside
     the tape one; drop it or make it a node array (1-2 days).
-  * mail, smtp: TapePart holds Array(TapePart) and Arrays (growing values
-    in an Array): make it a node array with index ranges (2-4 h).
-  * png: Pointer decoder/encoder and CRC32 of a Pointer (0.5-1 day).
-  * xz (and zip, tar, which import it): Pointer LZMA2 decoder (1 day).
+* Streaming decoders read an IyiIO now (XzReader, Bzip2Reader:
+  block form gone; Inflater, ZstdReader: IO form added). The block
+  forms left (Inflater, ZstdReader) are refused under ris when the block
+  captures tape data: move std/http's body feed to an IyiIO (a Reader)
+  and drop them. zip's ZipFeed and the benches' Feed are io Readers.
+* bench/std_{mail,xz,bzip2}_exercise use the new APIs but still do not
+  build under ris (to_unsafe, String.new pointers, std/gc).
 * bench/std_ini_exercise still uses INI's old Hash(String, Hash) API.
   std_udp_exercise uses udp's String API now, but stops at a task capture
   (line 274), as before.

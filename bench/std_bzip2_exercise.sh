@@ -284,7 +284,7 @@ refuses() { # refuses <label> <name> <phrase> <expression>
 refuses "a level of 0" level0 "Bzip2.compress: level must be 1 to 9, not 0" 'Bzip2.compress("abc", 0)'
 refuses "a level of 10" level10 "Bzip2.compress: level must be 1 to 9, not 10" 'Bzip2.compress("abc", 10)'
 refuses "a read of no bytes" read_zero "Bzip2Reader: read wants at least one byte, not 0" \
-  'Bzip2Reader.new { nil }.read(0)'
+  'Bzip2Reader.new(nil).read(0)'
 
 echo
 echo "== proving the checks can fail when the module is broken"

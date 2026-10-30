@@ -1,0 +1,67 @@
+module test/zip_tape
+
+import std/zip::{ZipReader, ZipWriter, ZipEntry, ZipError, ZipMethod}
+import std/io::{Memory}
+import std/time::{Time}
+import std/digest::{CRC32}
+import std/base64::{Base64}
+
+# std/zip on the caller's tape: an archive Python's zipfile wrote, every
+# entry read whole and streamed through its method's decoder - stored,
+# deflate, bzip2, LZMA, Zstandard - with Python's CRC-32s; an archive
+# written here and read back; a damaged one refused. No heap.
+
+def hex(v : UInt32) : String
+  v.to_s(16).rjust(8, '0')
+end
+
+def list(data : String) : Nil
+  zip = ZipReader.open(data)
+  if zip.is_a?(ZipError)
+    puts zip.message
+    return
+  end
+  puts "#{zip.entries.size} #{zip.comment.inspect}"
+  zip.entries.each do |e|
+    got = zip.read(e)
+    if got.is_a?(ZipError)
+      puts "  #{e.name} #{got.message}"
+      next
+    end
+    stream = zip.open(e)
+    if stream.is_a?(ZipError)
+      puts "  #{e.name} #{stream.message}"
+      next
+    end
+    sum = 0_u32
+    while true
+      piece = stream.read(1000)
+      if piece.is_a?(ZipError)
+        puts "  #{piece.message}"
+        break
+      end
+      break if piece.empty?
+      sum = CRC32.update(sum, piece, piece.bytesize)
+    end
+    puts "  #{e.name} #{e.method} #{e.size} #{hex(CRC32.checksum(got))} #{hex(sum)}"
+  end
+end
+
+tape do
+  python = Base64.decode("UEsDBBQAAAAAAAU5plg55N8qigwAAIoMAAAKAAAAc3RvcmVkLnR4dHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgemlwIG9uIHRoZSB0YXBlIHppcCBvbiB0aGUgdGFwZSB6aXAgb24gdGhlIHRhcGUgc3RvcmVkLnR4dFBLAwQUAAAACAAFOaZY5rXTiTMAAACLDAAACwAAAGRlZmxhdGUudHh07cexCQAgDEXBVTKBOwWMKIim+IU4vVPYvevujrS9TD1MnmGXc84555xzzj+9RpuuKDp6UEsDBC4AAAAMAAU5plhbDj6FVgAAAIkMAAAJAAAAYnppcDIudHh0QlpoOTFBWSZTWbDlijwABkOZgEABEAAyYcRQIABwQAAApUmp6hp6amvwiwIuxFioWs7EWuuxFioWRFyIvBFoReRFsRdBFvnzNQsc/i7kinChIWHLFHhQSwMEPwACAA4ABTmmWHBdKFk+AAAAiAwAAAgAAABsem1hLnR4dAkEBQBdAACAAAA9GkpiKcdBDhGp0Ut9SaA2uwmPVhp0Z5lTXMMsPsI74UL9gHU6onQaavTEDjiqZ//+7qkAUEsDBD8AAABdAAU5plgs/F2aKAAAAIgMAAAIAAAAenN0ZC50eHQotS/9AFj9AAC4emlwIG9uIHRoZSB0YXBlIHN0ZC50eHQBANw4/lwCUEsDBBQAAAgIAAU5plgAAAAAAgAAAAAAAAANAAAAZGlyL2NhZsOpLnR4dAMAUEsBAhQDFAAAAAAABTmmWDnk3yqKDAAAigwAAAoAAAAAAAAAAAAAAIABAAAAAHN0b3JlZC50eHRQSwECFAMUAAAACAAFOaZY5rXTiTMAAACLDAAACwAAAAAAAAAAAAAAgAGyDAAAZGVmbGF0ZS50eHRQSwECLgMuAAAADAAFOaZYWw4+hVYAAACJDAAACQAAAAAAAAAAAAAAgAEODQAAYnppcDIudHh0UEsBAj8DPwACAA4ABTmmWHBdKFk+AAAAiAwAAAgAAAAAAAAAAAAAAIABiw0AAGx6bWEudHh0UEsBAj8DPwAAAF0ABTmmWCz8XZooAAAAiAwAAAgAAAAAAAAAAAAAAIAB7w0AAHpzdGQudHh0UEsBAhQDFAAACAgABTmmWAAAAAACAAAAAAAAAA0AAAAAAAAAAAAAAIABPQ4AAGRpci9jYWbDqS50eHRQSwUGAAAAAAYABgBPAQAAag4AAAkAYSBjb21tZW50")
+  list(python)
+  sink = Memory.new
+  w = ZipWriter.new(sink)
+  when_ = Time.unix(1700000000_i64)
+  w.add("a.txt", "alpha " * 300, modified: when_)
+  w.add("b.bin", "", method: ZipMethod::Stored, modified: when_)
+  w.add("c.bz2", "beta " * 300, method: ZipMethod::Bzip2, modified: when_)
+  w.add("d.zst", "delta " * 300, method: ZipMethod::Zstandard, modified: when_)
+  w.add("dir/e\u00e9.txt", "gamma", modified: when_)
+  w.finish("made here")
+  written = sink.to_s
+  puts "written #{written.bytesize}"
+  list(written)
+  broken = String.build { |b| b << python[0, 200] << "Z" << python[201, python.bytesize - 201] }
+  list(broken)
+end

@@ -655,7 +655,7 @@ end
 # A reader built on `read_byte` alone; `Sized` and `Delimited` supply the
 # byte and refuse writes.
 @[OnTape]
-abstract class Reader < IyiIO
+pub abstract class Reader < IyiIO
   def initialize
     super(-1_i64, 16, false)
   end

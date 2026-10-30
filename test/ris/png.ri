@@ -1,0 +1,81 @@
+module test/png_tape
+
+import std/png::{Png, Image, Layout, PngError}
+import std/digest::{CRC32}
+import std/base64::{Base64}
+
+# std/png on the caller's tape: files Python wrote (every color type,
+# bit depths 1 to 16, Adam7, all five filters, split IDAT, tRNS, tEXt and
+# a skipped chunk) decoded to RGBA whose CRC-32 Python computed; images
+# encoded and read back; and what a reader refuses. No heap.
+
+def hex(v : UInt32) : String
+  v.to_s(16).rjust(8, '0')
+end
+
+tape do
+  files = [
+    {"gray1", "iVBORw0KGgoAAAANSUhEUgAAAAUAAAADAQAAAABzTfhVAAAADHRFWHRDb21tZW50AGNhZukkreX+AAAAAmJLR0QAAd2KE6QAAAAOSURBVHjaYwhg/MEUAQAE3gGkr59EvQAAAABJRU5ErkJggg=="},
+    {"gray2_il", "iVBORw0KGgoAAAANSUhEUgAAAAkAAAAEAgAAAAFE02IlAAAAAnRSTlMAApidrBQAAAAMdEVYdENvbW1lbnQAY2Fm6SSt5f4AAAACYktHRAAB3YoTpAAAABxJREFUeNpjCGBwYPjAcPcAgxKjEsOqVQ1A8h4APscGOJPiu+0AAAAASUVORK5CYII="},
+    {"gray16", "iVBORw0KGgoAAAANSUhEUgAAAAQAAAAEEAAAAADcCh3hAAAADHRFWHRDb21tZW50AGNhZukkreX+AAAAAmJLR0QAAd2KE6QAAAAqSURBVHjaY2B+zsLGosriwsj8g1GBAQiZGAUZhBiEGUSYmcQYpBikGaQBU24De3joSZkAAAAASUVORK5CYII="},
+    {"rgb8_il", "iVBORw0KGgoAAAANSUhEUgAAAAcAAAAFCAIAAAFx/1EZAAAADHRFWHRDb21tZW50AGNhZukkreX+AAAAAmJLR0QAAd2KE6QAAAAKSURBVHjaY2DlEWZo7OiOPurqAAAACklEQVRn8AwIv3rnMYOzlXXenwAAAApJREFUV+D+Y2cZ+6fN7UQ+tDwAAAAKSURBVOnpYVDXM80sKF+4dAK6AAAACklEQVS9aefbL78ZVLSNurGxvQAAAApJREFUkjILFixfx+jhH/AX3/gAAAAKSURBVOYEBkwqKioaGhq8Ip5qAAAACklEQVQ6OjoMYrIqZrYu9QWrEgAAAApJREFUYbEpZbUt0+Yu2WCczpcAAAAKSURBVLb3yLW7Txgt7N2PjyK+AAAACElEQVSUMAAA1qsnnBiPexAAAAAASUVORK5CYII="},
+    {"rgb16_trns", "iVBORw0KGgoAAAANSUhEUgAAAAMAAAADEAIAAACJ2v6rAAAABnRSTlMAfgCFAIwrtE9fAAAADHRFWHRDb21tZW50AGNhZukkreX+AAAAAmJLR0QAAd2KE6QAAAAuSURBVHjaY2DwZQhhiGbIYShmqGLoZpjEMJORIY4hFSiggIBMDIJgKASGwiAIAPpKBqCG1CcXAAAAAElFTkSuQmCC"},
+    {"pal4", "iVBORw0KGgoAAAANSUhEUgAAAAYAAAAEBAMAAABfKlNwAAAAJFBMVEUAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyAhIiPpn+jGAAAAA3RSTlMAgBDcQkzxAAAADHRFWHRDb21tZW50AGNhZukkreX+AAAAAmJLR0QAAd2KE6QAAAAYSURBVHjaY9D0TmQsdmlhmrbmHLP/gVYAJv0Fu0i7sM4AAAAASUVORK5CYII="},
+    {"ga8", "iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAQAAAA3fa6RAAAADHRFWHRDb21tZW50AGNhZukkreX+AAAAAmJLR0QAAd2KE6QAAAAUSURBVHjaY+AU0NB392OUUlQAAgAMSAHCtPD+jgAAAABJRU5ErkJggg=="},
+    {"rgba16_il", "iVBORw0KGgoAAAANSUhEUgAAAAUAAAAFEAYAAAGq+MowAAAADHRFWHRDb21tZW50AGNhZukkreX+AAAAAmJLR0QAAd2KE6QAAAB4SURBVHjabcuhCsJgGIXh94Nj20WMsfDjRRjM3pFtbbAg2ATDYGFgGKyZNGnStHuxjcm+H4vjKS8HjthTUHIQH0ZbWSJuPHgxWOXElTtP3rKdE2caLvRsnUXiRE1Lx8aJ3Flwv4HgRMVxvqVLLCIV2T+Lvh1Yz7IJv7cfr4duAV4AAAAASUVORK5CYII="},
+  ]
+  files.each do |pair|
+    got = Png.decode(Base64.decode(pair[1]))
+    if got.is_a?(PngError)
+      puts "#{pair[0]} #{got.message}"
+    else
+      img = got.image
+      puts "#{pair[0]} #{img.width}x#{img.height} #{Image.layout_name(img.layout)} #{img.depth} #{got.interlaced} #{hex(CRC32.checksum(img.to_rgba8))} #{got.texts[0].keyword}=#{got.texts[0].text} #{got.skipped.join(",")}"
+    end
+  end
+
+  w = 13
+  h = 9
+  rgb = String.build { |b| (w * h * 3).times { |i| b.push(((i * 37 + i // 7) % 251).to_u8) } }
+  wide = String.build { |b| (w * h * 8).times { |i| b.push(((i * 91) % 256).to_u8) } }
+  gray = String.build { |b| (w * h).times { |i| b.push((i * 2).to_u8) } }
+  indices = String.build { |b| (w * h).times { |i| b.push((i % 5).to_u8) } }
+  palette = [{255, 0, 0, 255}, {0, 255, 0, 128}, {0, 0, 255, 255}, {9, 9, 9, 0}, {1, 2, 3, 255}]
+  made = [
+    Png.encode(Image.new(w, h, Layout::RGB, 8, rgb)),
+    Png.encode(Image.new(w, h, Layout::RGBA, 16, wide), interlace: true, texts: [{"Title", "hä"}, {"Note", "中"}]),
+    Png.encode(Image.new(w, h, Layout::Gray, 8, gray, [6])),
+    Png.encode_indexed(w, h, indices, palette, interlace: true),
+  ]
+  made.each do |file|
+    back = Png.decode(file)
+    if back.is_a?(PngError)
+      puts back.message
+    else
+      texts = back.texts.map { |t| "#{t.chunk}:#{t.keyword}=#{t.text}" }.join(" ")
+      puts "#{file.bytesize} #{hex(CRC32.checksum(file))} #{back.color_type} #{back.bit_depth} #{hex(CRC32.checksum(back.image.to_rgba8))} #{texts}"
+    end
+  end
+  back = Png.decode(made[0])
+  puts back.image.samples == rgb unless back.is_a?(PngError)
+  back = Png.decode(made[1])
+  puts back.image.samples == wide unless back.is_a?(PngError)
+  back = Png.decode(made[1])
+  puts back.image.sample(12, 8, 3) unless back.is_a?(PngError)
+
+  good = made[0]
+  bad_crc = String.build { |b| b << good[0, 20] << "X" << good[21, good.bytesize - 21] }
+  bad = [
+    "GIF89a",
+    good[0, 30],
+    bad_crc,
+    good[0, 33],
+    Png.decode(made[0]).is_a?(PngError) ? "" : good[0, 8] + good[33, good.bytesize - 33],
+  ]
+  bad.each do |file|
+    got = Png.decode(file)
+    puts got.is_a?(PngError) ? got.message : "decoded"
+  end
+  small = Png.decode(good, max_pixels: 100_i64)
+  puts small.message if small.is_a?(PngError)
+end

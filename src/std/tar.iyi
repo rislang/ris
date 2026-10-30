@@ -167,17 +167,17 @@ struct TarBytes
   MAX_SPECIAL = 1048576_i64
 
   # The bytes of *p* from *at*, up to *len* or the first NUL.
-  def self.cstr(p : Pointer(UInt8), at : Int32, len : Int32) : String
+  def self.cstr(p : String, at : Int32, len : Int32) : String
     n = 0
     while n < len && p[at + n] != 0_u8
       n = n + 1
     end
-    String.new(n) { |dst| dst.copy_from(p + at, n) }
+    p[at, n]
   end
 
   # The first NUL of *s*, or its end.
   def self.cut_nul(s : String) : String
-    p = s.to_unsafe
+    p = s
     i = 0
     while i < s.bytesize
       return s[0, i] if p[i] == 0_u8
@@ -190,7 +190,7 @@ struct TarBytes
   # GNU's base-256 when the first byte's high bit is set (bit 6 of it set
   # is a negative number, two's complement, as Go reads it). Nil when it
   # is neither, or past what an Int64 holds.
-  def self.number(p : Pointer(UInt8), at : Int32, len : Int32) : Int64?
+  def self.number(p : String, at : Int32, len : Int32) : Int64?
     if p[at] & 0x80_u8 != 0_u8
       inv = p[at] & 0x40_u8 != 0_u8 ? 0xff_u8 : 0_u8
       x = 0_u64
@@ -230,7 +230,7 @@ struct TarBytes
 
   # Unsigned and signed sums of a header's bytes, its checksum field
   # counted as eight spaces.
-  def self.sums(p : Pointer(UInt8)) : {Int64, Int64}
+  def self.sums(p : String | Array(UInt8)) : {Int64, Int64}
     u = 0_i64
     s = 0_i64
     i = 0
@@ -243,7 +243,7 @@ struct TarBytes
     {u, s}
   end
 
-  def self.zero?(p : Pointer(UInt8)) : Bool
+  def self.zero?(p : String) : Bool
     i = 0
     while i < BLOCK
       return false unless p[i] == 0_u8
@@ -253,7 +253,7 @@ struct TarBytes
   end
 
   def self.ascii?(s : String) : Bool
-    p = s.to_unsafe
+    p = s
     i = 0
     while i < s.bytesize
       return false if p[i] >= 0x80_u8
@@ -265,7 +265,7 @@ struct TarBytes
   # A decimal pax number: digits, nothing else.
   def self.decimal(s : String) : Int64?
     return nil if s.empty? || s.bytesize > 18
-    p = s.to_unsafe
+    p = s
     v = 0_i64
     i = 0
     while i < s.bytesize
@@ -288,7 +288,7 @@ struct TarBytes
     secs = decimal(whole)
     return nil unless secs
     nanos = 0
-    fp = frac.to_unsafe
+    fp = frac
     i = 0
     while i < frac.bytesize
       return nil if fp[i] < 48_u8 || fp[i] > 57_u8
@@ -324,7 +324,7 @@ struct TarBytes
     end
   end
 
-  def self.put_octal(dst : Pointer(UInt8), at : Int32, width : Int32, v : Int64) : Nil
+  def self.put_octal(dst : Array(UInt8), at : Int32, width : Int32, v : Int64) : Nil
     digits = v.to_s(8)
     pad = width - 1 - digits.bytesize
     i = 0
@@ -332,12 +332,16 @@ struct TarBytes
       dst[at + i] = 48_u8
       i = i + 1
     end
-    (dst + at + pad).copy_from(digits.to_unsafe, digits.bytesize)
+    put_str(dst, at + pad, digits)
     dst[at + width - 1] = 0_u8
   end
 
-  def self.put_str(dst : Pointer(UInt8), at : Int32, s : String) : Nil
-    (dst + at).copy_from(s.to_unsafe, s.bytesize)
+  def self.put_str(dst : Array(UInt8), at : Int32, s : String) : Nil
+    i = 0
+    while i < s.bytesize
+      dst[at + i] = s.byte_at(i)
+      i = i + 1
+    end
   end
 
   # The longest front of *s* that fits *n* bytes and does not cut a
@@ -345,27 +349,10 @@ struct TarBytes
   def self.fit(s : String, n : Int32) : String
     return s if s.bytesize <= n
     cut = n
-    while cut > 0 && s.to_unsafe[cut] & 0xc0_u8 == 0x80_u8
+    while cut > 0 && s.byte_at(cut) & 0xc0_u8 == 0x80_u8
       cut = cut - 1
     end
     s[0, cut]
-  end
-end
-
-# The archive's bytes before the gzip question is answered: the first
-# block, then the stream.
-class TarFeed
-  def initialize(@io : IyiIO, @first : String)
-  end
-
-  def next : String?
-    unless @first.empty?
-      got = @first
-      @first = ""
-      return got
-    end
-    piece = @io.read_bytes(65536)
-    piece.empty? ? nil : piece
   end
 end
 
@@ -585,7 +572,7 @@ pub class TarReader
   def self.windows_absolute?(path : String) : Bool
     return true if path.starts_with?("\\")
     return false if path.bytesize < 3
-    p = path.to_unsafe
+    p = path
     letter = (p[0] | 0x20_u8) >= 97_u8 && (p[0] | 0x20_u8) <= 122_u8
     letter && p[1] == 58_u8 && (p[2] == 47_u8 || p[2] == 92_u8)
   end
@@ -812,17 +799,14 @@ pub class TarReader
   private def start : Nil
     @started = true
     first = @io.read_bytes(TarBytes::BLOCK)
-    p = first.to_unsafe
+    p = first
     if first.bytesize >= 2 && p[0] == 0x1f_u8 && p[1] == 0x8b_u8
       @gzip = true
-      feed = TarFeed.new(@io, first)
-      @inflater = Inflater.new(Envelope::Gzip) { feed.next }
+      @inflater = Inflater.new(Envelope::Gzip, @io, first)
     elsif first.bytesize >= 4 && p[0] == 0x42_u8 && p[1] == 0x5a_u8 && p[2] == 0x68_u8 && p[3] >= 0x31_u8 && p[3] <= 0x39_u8
-      feed = TarFeed.new(@io, first)
-      @bzip2 = Bzip2Reader.new { feed.next }
+      @bzip2 = Bzip2Reader.new(@io, first)
     elsif first.bytesize >= 6 && p[0] == 0xfd_u8 && p[1] == 0x37_u8 && p[2] == 0x7a_u8 && p[3] == 0x58_u8 && p[4] == 0x5a_u8 && p[5] == 0_u8
-      feed = TarFeed.new(@io, first)
-      @xz = XzReader.new { feed.next }
+      @xz = XzReader.new(@io, head: first)
     else
       @pending = first
     end
@@ -866,7 +850,7 @@ pub class TarReader
     while true
       at = @offset
       block = take(TarBytes::BLOCK)!
-      p = block.to_unsafe
+      p = block
       if block.empty? || (block.bytesize == TarBytes::BLOCK && TarBytes.zero?(p))
         if what = extended
           return TarError.new("tar: the archive ends after the #{what} at offset #{@offset - TarBytes::BLOCK}, with no entry for it")
@@ -921,7 +905,7 @@ pub class TarReader
     nil
   end
 
-  private def field(p : Pointer(UInt8), at : Int32, len : Int32, label : String, header_at : Int64) : Int64 | TarError
+  private def field(p : String, at : Int32, len : Int32, label : String, header_at : Int64) : Int64 | TarError
     v = TarBytes.number(p, at, len)
     return TarError.new("tar: the header at offset #{header_at} has a #{label} field that is not a number: #{TarBytes.cstr(p, at, len).inspect}") unless v
     v
@@ -931,7 +915,7 @@ pub class TarReader
   # takes the key away; an entry's keeps it, empty, which stands for the
   # header's own field.
   def self.records(data : String, at : Int64, into : Hash(String, String), global : Bool) : Nil | TarError
-    p = data.to_unsafe
+    p = data
     n = data.bytesize
     i = 0
     while i < n
@@ -962,7 +946,7 @@ pub class TarReader
     nil
   end
 
-  private def entry(p : Pointer(UInt8), at : Int64, flag : UInt8, size : Int64, pad : Int64, local : Hash(String, String),
+  private def entry(p : String, at : Int64, flag : UInt8, size : Int64, pad : Int64, local : Hash(String, String),
                     long_name : String?, long_link : String?) : TarEntry | TarError
     magic = TarBytes.cstr(p, 257, 6)
     posix = magic == "ustar" && p[263] == 48_u8 && p[264] == 48_u8
@@ -1161,7 +1145,7 @@ pub class TarWriter
     n = name.bytesize
     return {"", name} if n <= 100
     cut = n - 1 < 155 ? n - 1 : 155
-    while cut > 0 && name.to_unsafe[cut] != 47_u8
+    while cut > 0 && name.byte_at(cut) != 47_u8
       cut = cut - 1
     end
     return nil if cut <= 0 || n - cut - 1 > 100 || n - cut - 1 == 0
@@ -1239,12 +1223,8 @@ pub class TarWriter
 
   private def block(name : String, linkname : String, flag : UInt8, size : Int64, mode : Int32, mtime : Int64, uid : Int64, gid : Int64,
                     uname : String, gname : String, prefix : String) : String
-    String.new(TarBytes::BLOCK) do |dst|
-      i = 0
-      while i < TarBytes::BLOCK
-        dst[i] = 0_u8
-        i = i + 1
-      end
+    dst = Array(UInt8).new(TarBytes::BLOCK, 0_u8)
+    begin
       TarBytes.put_str(dst, 0, name)
       TarBytes.put_octal(dst, 100, 8, mode.to_i64)
       TarBytes.put_octal(dst, 108, 8, uid)
@@ -1265,6 +1245,7 @@ pub class TarWriter
       TarBytes.put_octal(dst, 148, 7, sum)
       dst[155] = 32_u8
     end
+    String.build(TarBytes::BLOCK) { |w| dst.each { |b| w.push(b) } }
   end
 
   private def pad(size : Int64) : Nil

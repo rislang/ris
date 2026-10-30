@@ -1,0 +1,68 @@
+module test/tar_tape
+
+import std/tar::{TarReader, TarWriter, TarEntry, TarError}
+import std/compress::{Gzip}
+import std/io::{Memory}
+import std/time::{Time}
+import std/digest::{CRC32}
+import std/base64::{Base64}
+
+# std/tar on the caller's tape: archives Python's tarfile wrote (pax and
+# GNU, plain - shipped gzipped and unpacked here - and through gzip,
+# bzip2 and xz) listed with each entry's data CRC-32; an archive written
+# here, plain and gzipped, read back; a bad checksum refused. No heap.
+
+def hex(v : UInt32) : String
+  v.to_s(16).rjust(8, '0')
+end
+
+def list(data : String) : Nil
+  reader = TarReader.new(Memory.new(data))
+  while true
+    entry = reader.next_entry
+    if entry.is_a?(TarError)
+      puts entry.message
+      return
+    end
+    return unless entry
+    body = entry.read_all
+    if body.is_a?(TarError)
+      puts body.message
+      return
+    end
+    link = entry.linkname.empty? ? "-" : entry.linkname
+    puts "  #{entry.type_name} #{entry.name} #{entry.size} #{hex(CRC32.checksum(body))} #{link} #{entry.mode.to_s(8)} #{entry.uname}"
+  end
+end
+
+tape do
+  archives = [
+    {"plain", "H4sIAAAAAAAC/0vJLNJnoDEwAAJzU1MwDQToNJhtaGJqZGJubmACFjczNTNlUDBloAMoLS5JLAJayTAyQQow/jNSc3Ly9UoqSmgY/2YmJjjj38TUBDX+DQ1MjE0YFAxG45/mABz3CsAg4BplEWINx/jX09fTdwhIrPBITUxJLaJd/seS7+H538jQCKUuAOZ/I0MDBoWK0fxPc2BobKFQkFiSYQuqCHLy89J18xJzU3XpywLVPVwMo2CA6n9aRzGB+t/Q3BSt/WdsYAzK/6P1P+1BxSgYBaNg2IPB3P4zMMJs/xmYj7b/6NL+gzb/khPTDq/US8rMG22HjSgAjHd7ULTTevwP0f4zx2j/maCP/xkaAJuAdG7/JebljcgEwMjEzMLKxs7BycXNw8vHLyAoJCwiKiYuISklLSMrJ6+gqKSsoqqmrqGppa2jq6dvYGhkbGJqZm5haWVtY2tn7+Do5Ozi6ubu4enl7ePr5x8QGBQcEhoWHhEZFR0TGxefkJiUnJKalp6RmZWdk5uXX1BYVFxSWlZeUVlVXVNbV9/Q2NTc0trW3tHZ1d3T29c/YeKkyVOmTps+Y+as2XPmzpu/YOGixUuWLlu+YuWq1WvWrlu/YeOmzVu2btu+Y+eu3Xv27tt/4OChw0eOHjt+4uSp02fOnjt/4eKly1euXrt+4+at23fu3rv/4OGjx0+ePnv+4uWr12/evnv/4eOnz1++fvv+4+ev33/+/vs/6v8R7v8RDnIy87LpMf+Db/wfY/7H0NDIHNj+M6LH5MQIb/+l5haUVA62+DcwNzA1Gx3/GQWjYBSMglEwCkbBKBgFo4DaAAAJMaRjACgAAA=="},
+    {"gnu", "H4sIAAAAAAAC/0vJLNJnoDEwAAJzU1MwDQToNJhtaGJqZGJubmACFjczNTJlUDBloAMoLS5JLFJQYBihIAUY/xmpOTn5eiUVJTSMfzMTE5zxb2Jqghr/hgbG5iYMCgaj8U9zAI57BWAQcI2yCLGGY/zr6evpO/jk56X7ZOZl0zD/Y8n38PxvZGCIUhcAawtzEzMGBZ/R/E+X8j8HGP26eYm5qbr0ZdGwyhkFgyj+CdT/huamaO0/YwMjoNBo/U8HUDEKRsEoGPYAV/5PTkw7vFIvKTOPxv1/RPlvjlH+m6D3/w0NTExM6Vz+J+bljcgKgJGJmYWVjZ2Dk4ubh5ePX0BQSFhEVExcQlJKWkZWTl5BUUlZRVVNXUNTS1tHV0/fwNDI2MTUzNzC0sraxtbO3sHRydnF1c3dw9PL28fXzz8gMCg4JDQsPCIyKjomNi4+ITEpOSU1LT0jMys7Jzcvv6CwqLiktKy8orKquqa2rr6hsam5pbWtvaOzq7unt69/wsRJk6dMnTZ9xsxZs+fMnTd/wcJFi5csXbZ8xcpVq9esXbd+w8ZNm7ds3bZ9x85du/fs3bf/wMFDh48cPXb8xMlTp8+cPXf+wsVLl69cvXb9xs1bt+/cvXf/wcNHj588ffb8xctXr9+8fff+w8dPn798/fb9x89fv//8/fd/1P8j3P8jHOTQrttP9PgfxvivITCRmTMoGNFjcHKEt/9TcwtKKgdb/BuYGxiajfb/RsEoGAWjYBSMglEwCkbBKBgFo2AUjAJqAQBrcsB+ACgAAA=="},
+    {"gz", "H4sIAI6P5GoC/0vJLNJnoDEwAAJzU1MwDQToNJhtaGJqZGJubmACFjczNTNlUDBloAMoLS5JLAJayTAyQQow/jNSc3Ly9UoqSmgY/2YmJjjj38TUBDX+DQ1MjE0YFAxG45/mABz3CsAg4BplEWINx/jX09fTdwhIrPBITUxJLaJd/seS7+H538jQCKUuAOZ/I0MDBoWK0fxPc2BobKFQkFiSYQuqCHLy89J18xJzU3XpywLVPVwMo2CA6n9aRzGB+t/Q3BSt/WdsYAzK/6P1P+1BxSgYBaNg2IPB3P4zMMJs/xmYj7b/6NL+gzb/khPTDq/US8rMG22HjSgAjHd7ULTTevwP0f4zx2j/maCP/xkaAJuAdG7/JebljcgEwMjEzMLKxs7BycXNw8vHLyAoJCwiKiYuISklLSMrJ6+gqKSsoqqmrqGppa2jq6dvYGhkbGJqZm5haWVtY2tn7+Do5Ozi6ubu4enl7ePr5x8QGBQcEhoWHhEZFR0TGxefkJiUnJKalp6RmZWdk5uXX1BYVFxSWlZeUVlVXVNbV9/Q2NTc0trW3tHZ1d3T29c/YeKkyVOmTps+Y+as2XPmzpu/YOGixUuWLlu+YuWq1WvWrlu/YeOmzVu2btu+Y+eu3Xv27tt/4OChw0eOHjt+4uSp02fOnjt/4eKly1euXrt+4+at23fu3rv/4OGjx0+ePnv+4uWr12/evnv/4eOnz1++fvv+4+ev33/+/vs/6v8R7v8RDnIy87LpMf+Db/wfY/7H0NDIHNj+M6LH5MQIb/+l5haUVA62+DcwNzA1Gx3/GQWjYBSMglEwCkbBKBgFo4DaAAAJMaRjACgAAA=="},
+    {"bz2", "QlpoOTFBWSZTWbGQBOkAAiX/////////////////////////////////////////////wAK8AAQDv/VVBNGIyaaA0yGmjEaGg00DIaYjQNMJhDAhoNMgMQwQaNqGQNB6jQaZNMA0AATTCNM0g0BoDQAGTRhGQNCTAATAAEwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASYACYAAmAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAipJk1PSZU0b1MFHkmj0g0bUeoPEmmnimym1APSaANANNNMQ2iPRHpPSaAAAAAAAAAAAAAAAAAAAAAPm3ovzN4F9aYBjsYH9VUKicM4hOE/6kAsUAGIhbx3ELmaKLCLIU4QkiI5wNwQZ5PhWkGBCfFEswBUwEfyqmMQq2BMwKxhWsErmg6O0q6q0hnItW17YOHdJcQ6U6W2LiWt0x010509xTqDqLi2ydSdTbNojjzPCsRqzq7aNq2zjHWHGusuOdabduG+RM4Kenh7puTYutqyOyyCwCsC0W812ES4+AgV63KxAgZa1ymYzJLlSCDQgBTYiadRvBjhHeQI4okhBj/S7lGEUkchd3c5wowpyNOVjqZyT5BjhryRDNPZRqJJaUywmjnMdJIRwZIshEMVTJNKNQx0JXFt65F2RyTnTZnO7Q4lrjaXana3bHJu2u3O3uTNwdxdydzco7o5V3V0UyzYm7MLJhZuXcw5lj3dtXeGdvLAtm2c03zm2Rc464X5boltlxQz5WF+3R91nnmgyFK6t9BLgomKMBtgAliJqbCmKWzTM0iy2petBwpg0U35qcFw2EADPsoAXohRgQ0ZEnMk00J4pkRSKfhmUUZ7sJPY7BmJRQqE0DS38DJONa8CiK1BE4hqbFs4BXtB0LMTEbgthRA4BgEcHQvAvBPBu9IUQm+N+cAhiHOCcI4ZxDikQcY45yDkiI5RyyJOYc05xzyKOgRZGHRI06RHEeSBIkkSZKEqIyWEkwISZJomycJ0nifKAoSiKM6ZSHUKUpinKg6p1ipOuVRVjykFcrDsHZO0dsrTuHdO8d88BqvCIyuPEeM8h5TzHnK89B6T1HrPYe09x7z4HxPkfMsDYWJYn0LIV/qIj7FmWhaidbFqJaA+5uD8FuXB+T9H7LsgC+H8EJ/S5P8f8XckU4UJCxkATpA="},
+    {"xz", "/Td6WFoAAATm1rRGAgAhARYAAAB0L+Wj4Cf/Ag9dADIaSqciBJSzSsi80f5CS2Mz1B2L3104j/JQC4F0VudqBdtUBlwrO4HeLhVW7RcbNfgMGX3iEGclhZWxtd9MzrUv84KXJmH7OTINoEzj1Trm2iQQFyG3Z4q6z9G3zD6PPR408J3fdohwa3G/HS2t1AeS6r7kfGXd41UJAs5HXCIlO9M14fbEXa7K6J79vBSAHPmR3LCS8QlTgvOVtXPrVJrCqBw5/mSwml/mOvKPqYbhmo+uIYKFEMu/JzjgvTiVxPYX3mcq8IgJra4VHPVlMEd9HCXXtP4/XDP9I8KoFHIU19XAJIt5QvbnVuj/6q2HuOqyBVTX83D40OezdEzQ4zuFgWVCNJIAK299qF3txMbyZRbMhCsgvAcsV8ZYSvhOKqK3Yk2nRdGpJaUPwnFTXLTLJEivRxlkxSPW2CAZK0aHqFJsDLJ57+o/vtSWz5qqHdAAVDjidzM4eFbyk7mB070kP6AoZ6H96sliTjCapohyVm0ygImwO0lLAFIWMBd+iCAT5IYcsUd+tOP2FrLQ6C8b1Bku6IRTf1hgaGvDxxyrna6WAQrsKe5XfsgCbm/4XGfKuqhL0OPoWXtX25YFOkLDj7L1Jk4TigQM3pS9Unik90kut2dcGxiQQ6QAvTX3/RSu73vbCuobmnIQnOypNP/DIZQ2DXVZRhwC8b7FjKvn3Ff9hSeagykun3Xx8o4AAAAAxfMU9YLCzAABqwSAUAAAuwvrxLHEZ/sCAAAAAARZWg=="},
+  ]
+  archives.each do |pair|
+    data = Base64.decode(pair[1])
+    data = Gzip.decompress(data) if pair[0] == "plain" || pair[0] == "gnu"
+    puts pair[0]
+    list(data)
+  end
+  [false, true].each do |gzip|
+    sink = Memory.new
+    w = TarWriter.new(sink, gzip: gzip)
+    when_ = Time.unix(1700000000_i64)
+    w.add_directory("d/", mtime: when_)
+    w.add("d/a.txt", "alpha\n" * 100, mtime: when_)
+    w.add("d/" + "n" * 150, "long", mtime: when_)
+    w.add_symlink("s", "d/a.txt", mtime: when_)
+    w.finish
+    bytes = sink.to_s
+    puts "written #{gzip} #{bytes.bytesize} #{hex(CRC32.checksum(bytes))}"
+    list(bytes)
+  end
+  plain = Gzip.decompress(Base64.decode(archives[0][1]))
+  broken = String.build { |b| b << plain[0, 100] << "Z" << plain[101, plain.bytesize - 101] }
+  list(broken)
+end

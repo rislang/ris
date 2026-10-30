@@ -374,6 +374,8 @@ class Inflate
 
   @envelope : Envelope
   @source : Proc(String | Nil) | Nil
+  # The stream more pieces come from, for `Inflater.new(envelope, io)`.
+  @io : IyiIO? = nil
   # The piece in hand, read by index.
   @input : String
   @in_pos : Int32
@@ -557,6 +559,14 @@ class Inflate
     @pieces
   end
 
+  # The decoder `Inflater.new(envelope, io)` makes: pieces from *io*,
+  # the buffer sliding as a stream's does.
+  def over_io(io : IyiIO?) : Nil
+    @io = io
+    @grow = false
+    @exhausted = io.nil?
+  end
+
   # *data*, the next piece, decoded to its end, which must fall between
   # blocks; nil once more than *limit* bytes have come out of it, which
   # fails the stream.
@@ -603,7 +613,8 @@ class Inflate
   private def more : Bool
     return false if @exhausted
     source = @source
-    chunk = source ? source.call : nil
+    io = @io
+    chunk = source ? source.call : (io ? io.read_bytes(65536) : nil)
     unless chunk && chunk.bytesize > 0
       @exhausted = true
       return false
@@ -1136,6 +1147,16 @@ pub class Inflater
   def self.flushed : Inflater
     core = Inflate.new(Envelope::Raw, nil, "", 0, Inflate::STREAM)
     core.by_pieces
+    new(core)
+  end
+
+  # A stream read from *io* after *head*, 64 KiB a read, until *io*
+  # answers "" (nil: *head* is all of it), with the output bounded by
+  # what is read: the block form's source without a block, so it suits
+  # a stream on the caller's tape.
+  def self.new(envelope : Envelope, io : IyiIO?, head : String = "") : Inflater
+    core = Inflate.new(envelope, nil, head, 0, Inflate::STREAM)
+    core.over_io(io)
     new(core)
   end
 

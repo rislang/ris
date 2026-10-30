@@ -11,7 +11,7 @@
 # then left half-read when a piece of the stream runs out.
 #
 # `XzReader` reads a stream a piece at a time: the compressed bytes come
-# from a block, the decompressed ones go out through `read`, as
+# from an IyiIO, the decompressed ones go out through `read`, as
 # std/compress's `Inflater` does for DEFLATE. `Xz.decompress` is the same
 # reader run over one string. A stream that is not what it says - a
 # check, an index, a header CRC that does not match, a size the data does
@@ -73,6 +73,7 @@ module std/xz
 
 import std/int
 import std/digest::{CRC32, CRC64, SHA256}
+import std/static_array::{StaticArray}
 
 # What `XzReader#read` and `Xz.decompress` answer for a stream they cannot
 # read: one that is corrupt, whose check or index or sizes do not match,
@@ -169,12 +170,13 @@ class XzCore
 
   @format : XzFormat
   @dict_limit : Int64
-  @source : Proc(String | Nil)
+  # The stream the pieces come from; nil when *data* was all of it.
+  @io : IyiIO?
   # The source's piece being copied in, and how far.
   @piece : String
   @piece_pos : Int32
   @exhausted : Bool
-  @buf : Pointer(UInt8)
+  @buf : Array(UInt8)
   @in_pos : Int32
   @in_end : Int32
   # Where in the whole input `@buf[0]` is.
@@ -185,10 +187,10 @@ class XzCore
   # Set when a step stops for input it would have to wait for while
   # there are bytes to hand out.
   @waiting : Bool
-  @scratch : Pointer(UInt8)
+  @scratch : Array(UInt8)
 
   # The dictionary ring.
-  @dict : Pointer(UInt8)
+  @dict : Array(UInt8)
   @dcap : Int32
   @dsize : Int32
   @dpos : Int32
@@ -196,7 +198,7 @@ class XzCore
   @pending : Int32
 
   # The LZMA decoder.
-  @probs : Pointer(UInt16)
+  @probs : Array(UInt16)
   @probs_cap : Int32
   @lc : Int32
   @lp : Int32
@@ -242,25 +244,25 @@ class XzCore
 
   # The filters before LZMA2, in the order they are undone.
   @nfilters : Int32
-  @fkind : Pointer(Int32)
-  @fdist : Pointer(Int32)
-  @fhist : Pointer(UInt8)
-  @fhpos : Pointer(Int32)
-  @fx86pos : Pointer(UInt32)
-  @fx86mask : Pointer(UInt32)
+  @fkind : Array(Int32)
+  @fdist : Array(Int32)
+  @fhist : Array(UInt8)
+  @fhpos : Array(Int32)
+  @fx86pos : Array(UInt32)
+  @fx86mask : Array(UInt32)
   # Where each filter's bytes not yet filtered start in the stage.
-  @fu : Pointer(Int32)
-  @stage : Pointer(UInt8)
+  @fu : Array(Int32)
+  @stage : Array(UInt8)
   @stage_cap : Int32
   @sbeg : Int32
   @slen : Int32
   @ready : Int32
 
-  def initialize(@format : XzFormat, @dict_limit : Int64, @source : Proc(String | Nil))
-    @piece = ""
+  def initialize(@format : XzFormat, @dict_limit : Int64, @io : IyiIO?, data : String)
+    @piece = data
     @piece_pos = 0
     @exhausted = false
-    @buf = Pointer(UInt8).malloc((IN_CAP + SLACK).to_u64)
+    @buf = Array(UInt8).new(IN_CAP + SLACK, 0_u8)
     @in_pos = 0
     @in_end = 0
     @in_base = 0_i64
@@ -268,14 +270,14 @@ class XzCore
     @failed = false
     @error = XzError.new("")
     @waiting = false
-    @scratch = Pointer(UInt8).malloc(64_u64)
-    @dict = Pointer(UInt8).malloc(1_u64)
+    @scratch = Array(UInt8).new(64, 0_u8)
+    @dict = Array(UInt8).new
     @dcap = 0
     @dsize = DICT_MIN
     @dpos = 0
     @written = 0_i64
     @pending = 0
-    @probs = Pointer(UInt16).malloc(1_u64)
+    @probs = Array(UInt16).new
     @probs_cap = 0
     @lc = 0
     @lp = 0
@@ -312,14 +314,14 @@ class XzCore
     @sum_uncomp = 0_i64
     @records = 0_u64
     @nfilters = 0
-    @fkind = Pointer(Int32).malloc(4_u64)
-    @fdist = Pointer(Int32).malloc(4_u64)
-    @fhist = Pointer(UInt8).malloc(1024_u64)
-    @fhpos = Pointer(Int32).malloc(4_u64)
-    @fx86pos = Pointer(UInt32).malloc(4_u64)
-    @fx86mask = Pointer(UInt32).malloc(4_u64)
-    @fu = Pointer(Int32).malloc(4_u64)
-    @stage = Pointer(UInt8).malloc(1_u64)
+    @fkind = Array(Int32).new(4, 0)
+    @fdist = Array(Int32).new(4, 0)
+    @fhist = Array(UInt8).new(1024, 0_u8)
+    @fhpos = Array(Int32).new(4, 0)
+    @fx86pos = Array(UInt32).new(4, 0_u32)
+    @fx86mask = Array(UInt32).new(4, 0_u32)
+    @fu = Array(Int32).new(4, 0)
+    @stage = Array(UInt8).new
     @stage_cap = 0
     @sbeg = 0
     @slen = 0
@@ -361,8 +363,8 @@ class XzCore
     while !@failed
       if @ready > @sbeg
         n = @ready - @sbeg
-        account(@stage + @sbeg.to_i64, n)
-        sink.write(@stage + @sbeg.to_i64, n)
+        account(@stage, @sbeg, n)
+        XzCore.emit(sink, @stage, @sbeg, n)
         @sbeg = @ready
         next
       end
@@ -373,12 +375,12 @@ class XzCore
         start = @dpos - @pending
         start = start + @dcap if start < 0
         first = @pending < @dcap - start ? @pending : @dcap - start
-        account(@dict + start.to_i64, first)
-        sink.write(@dict + start.to_i64, first)
+        account(@dict, start, first)
+        XzCore.emit(sink, @dict, start, first)
         rest = @pending - first
         if rest > 0
-          account(@dict, rest)
-          sink.write(@dict, rest)
+          account(@dict, 0, rest)
+          XzCore.emit(sink, @dict, 0, rest)
         end
         @pending = 0
         next
@@ -395,14 +397,21 @@ class XzCore
     start = @dpos - @pending
     start = start + @dcap if start < 0
     first = n < @dcap - start ? n : @dcap - start
-    src = @dict + start.to_i64
-    ring = @dict
     @pending = @pending - n
-    account(src, first)
-    account(ring, n - first) if n > first
-    String.new(n) do |dst|
-      dst.copy_from(src, first)
-      (dst + first.to_i64).copy_from(ring, n - first) if n > first
+    account(@dict, start, first)
+    account(@dict, 0, n - first) if n > first
+    String.build(n) do |dst|
+      XzCore.emit(dst, @dict, start, first)
+      XzCore.emit(dst, @dict, 0, n - first) if n > first
+    end
+  end
+
+  # *n* bytes of *src* from *at* onto *sink*.
+  def self.emit(sink : String::Builder, src : Array(UInt8), at : Int32, n : Int32) : Nil
+    i = 0
+    while i < n
+      sink.push(src[at + i])
+      i = i + 1
     end
   end
 
@@ -410,20 +419,20 @@ class XzCore
   private def take_ready(max : Int32) : String
     n = @ready - @sbeg
     n = max if n > max
-    src = @stage + @sbeg.to_i64
+    at = @sbeg
     @sbeg = @sbeg + n
-    account(src, n)
-    String.new(n) { |dst| dst.copy_from(src, n) }
+    account(@stage, at, n)
+    String.build(n) { |dst| XzCore.emit(dst, @stage, at, n) }
   end
 
   # The block's check and size over bytes handed out.
-  private def account(p : Pointer(UInt8), n : Int32) : Nil
+  private def account(src : Array(UInt8), at : Int32, n : Int32) : Nil
     return if n == 0
     @block_out = @block_out + n.to_i64
     case @check_id
-    when  1 then @crc32 = CRC32.update(@crc32, p, n)
-    when  4 then @crc64 = CRC64.update(@crc64, p, n)
-    when 10 then @sha.update(p, n)
+    when  1 then @crc32 = CRC32.update(@crc32, src[at, n], n)
+    when  4 then @crc64 = CRC64.update(@crc64, src[at, n], n)
+    when 10 then @sha.update(src[at, n], n)
     end
   end
 
@@ -435,7 +444,11 @@ class XzCore
   private def pump(final : Bool) : Nil
     if @sbeg > 0
       live = @slen - @sbeg
-      @stage.copy_from(@stage + @sbeg.to_i64, live)
+      i = 0
+      while i < live
+        @stage[i] = @stage[@sbeg + i]
+        i = i + 1
+      end
       k = 0
       while k < @nfilters
         @fu[k] = @fu[k] - @sbeg
@@ -447,15 +460,25 @@ class XzCore
     end
     if @slen + @pending > @stage_cap
       cap = @slen + @pending + 64
-      @stage = @stage.realloc(cap.to_u64)
+      while @stage.size < cap
+        @stage << 0_u8
+      end
       @stage_cap = cap
     end
     if @pending > 0
       start = @dpos - @pending
       start = start + @dcap if start < 0
       first = @pending < @dcap - start ? @pending : @dcap - start
-      (@stage + @slen.to_i64).copy_from(@dict + start.to_i64, first)
-      (@stage + (@slen + first).to_i64).copy_from(@dict, @pending - first) if @pending > first
+      i = 0
+      while i < first
+        @stage[@slen + i] = @dict[start + i]
+        i = i + 1
+      end
+      i = 0
+      while i < @pending - first
+        @stage[@slen + first + i] = @dict[i]
+        i = i + 1
+      end
       @slen = @slen + @pending
       @pending = 0
     end
@@ -463,7 +486,7 @@ class XzCore
     k = 0
     while k < @nfilters
       start = @fu[k]
-      done = filter(k, @stage + start.to_i64, limit - start)
+      done = filter(k, start, limit - start)
       done = limit - start if final
       @fu[k] = start + done
       limit = start + done
@@ -474,26 +497,26 @@ class XzCore
 
   # Filter *k* undone over *n* bytes at *p*, in place: how many of them
   # it has decided.
-  private def filter(k : Int32, p : Pointer(UInt8), n : Int32) : Int32
+  private def filter(k : Int32, at : Int32, n : Int32) : Int32
     if @fkind[k] == FILTER_DELTA
-      delta(k, p, n)
+      delta(k, at, n)
       n
     else
-      x86(k, p, n)
+      x86(k, at, n)
     end
   end
 
   # liblzma's `delta_decode`: each byte plus the byte *distance* before
   # it, from a history of 256 that runs downward.
-  private def delta(k : Int32, p : Pointer(UInt8), n : Int32) : Nil
-    hist = @fhist + (k * 256).to_i64
+  private def delta(k : Int32, at : Int32, n : Int32) : Nil
+    hist = k * 256
     distance = @fdist[k]
     pos = @fhpos[k]
     i = 0
     while i < n
-      b = p[i] &+ hist[(distance + pos) & 255]
-      p[i] = b
-      hist[pos & 255] = b
+      b = @stage[at + i] &+ @fhist[hist + ((distance + pos) & 255)]
+      @stage[at + i] = b
+      @fhist[hist + (pos & 255)] = b
       pos = (pos - 1) & 255
       i = i + 1
     end
@@ -506,7 +529,7 @@ class XzCore
   # made relative again here. Whether a byte that looks like E8 is one
   # depends on the three before it (`prev_mask`), and the last four
   # bytes cannot be decided until what follows them arrives.
-  private def x86(k : Int32, p : Pointer(UInt8), n : Int32) : Int32
+  private def x86(k : Int32, at : Int32, n : Int32) : Int32
     return 0 if n <= 4
     size = n - 4
     prev_pos = -1
@@ -514,7 +537,7 @@ class XzCore
     pos = @fx86pos[k]
     i = 0
     while i < size
-      if (p[i] & 0xfe_u8) != 0xe8_u8
+      if (@stage[at + i] & 0xfe_u8) != 0xe8_u8
         i = i + 1
         next
       end
@@ -524,7 +547,7 @@ class XzCore
       else
         prev_mask = (prev_mask.unsafe_shl(gap - 1)) & 7_u32
         if prev_mask != 0_u32
-          b = p[i + 4 - X86_BIT_NUM[prev_mask.to_i32]]
+          b = @stage[at + i + 4 - X86_BIT_NUM[prev_mask.to_i32]]
           if !X86_ALLOWED[prev_mask.to_i32] || b == 0_u8 || b == 0xff_u8
             prev_pos = i
             prev_mask = prev_mask.unsafe_shl(1) | 1_u32
@@ -534,9 +557,9 @@ class XzCore
         end
       end
       prev_pos = i
-      top = p[i + 4]
+      top = @stage[at + i + 4]
       if top == 0_u8 || top == 0xff_u8
-        src = p[i + 1].to_u32 | p[i + 2].to_u32.unsafe_shl(8) | p[i + 3].to_u32.unsafe_shl(16) | top.to_u32.unsafe_shl(24)
+        src = @stage[at + i + 1].to_u32 | @stage[at + i + 2].to_u32.unsafe_shl(8) | @stage[at + i + 3].to_u32.unsafe_shl(16) | top.to_u32.unsafe_shl(24)
         dest = 0_u32
         while true
           dest = src &- (pos &+ i.to_u32 &+ 5_u32)
@@ -548,10 +571,10 @@ class XzCore
         end
         dest = dest & 0x01ffffff_u32
         dest = dest | (0_u32 &- (dest & 0x01000000_u32))
-        p[i + 1] = (dest & 255_u32).to_u8
-        p[i + 2] = (dest.unsafe_shr(8) & 255_u32).to_u8
-        p[i + 3] = (dest.unsafe_shr(16) & 255_u32).to_u8
-        p[i + 4] = dest.unsafe_shr(24).to_u8
+        @stage[at + i + 1] = (dest & 255_u32).to_u8
+        @stage[at + i + 2] = (dest.unsafe_shr(8) & 255_u32).to_u8
+        @stage[at + i + 3] = (dest.unsafe_shr(16) & 255_u32).to_u8
+        @stage[at + i + 4] = dest.unsafe_shr(24).to_u8
         i = i + 5
       else
         prev_mask = prev_mask.unsafe_shl(1) | 1_u32
@@ -564,8 +587,8 @@ class XzCore
     i
   end
 
-  X86_ALLOWED = [true, true, true, false, true, false, false, false]
-  X86_BIT_NUM = [0, 1, 2, 2, 3, 3, 3, 3]
+  X86_ALLOWED = StaticArray[true, true, true, false, true, false, false, false]
+  X86_BIT_NUM = StaticArray[0, 1, 2, 2, 3, 3, 3, 3]
 
   # Steps until *want* bytes wait in the ring, the stream has ended, or
   # it has failed; or there are bytes to hand out and going on would call
@@ -606,7 +629,8 @@ class XzCore
   private def fill : Bool
     if @piece_pos >= @piece.bytesize
       return false if @exhausted
-      got = @source.call
+      io = @io
+      got = io ? io.read_bytes(65536) : nil
       if got.nil? || got.empty?
         @exhausted = true
         return false
@@ -616,14 +640,22 @@ class XzCore
     end
     if @in_pos > 0
       rest = @in_end - @in_pos
-      @buf.copy_from(@buf + @in_pos.to_i64, rest)
+      i = 0
+      while i < rest
+        @buf[i] = @buf[@in_pos + i]
+        i = i + 1
+      end
       @in_base = @in_base + @in_pos.to_i64
       @in_end = rest
       @in_pos = 0
     end
     n = @piece.bytesize - @piece_pos
     n = IN_CAP - @in_end if n > IN_CAP - @in_end
-    (@buf + @in_end.to_i64).copy_from(@piece.to_unsafe + @piece_pos.to_i64, n)
+    i = 0
+    while i < n
+      @buf[@in_end + i] = @piece.byte_at(@piece_pos + i)
+      i = i + 1
+    end
     @piece_pos = @piece_pos + n
     @in_end = @in_end + n
     i = 0
@@ -661,12 +693,13 @@ class XzCore
     @in_base + @in_pos.to_i64
   end
 
-  private def le32(p : Pointer(UInt8)) : UInt32
-    p[0].to_u32 | p[1].to_u32.unsafe_shl(8) | p[2].to_u32.unsafe_shl(16) | p[3].to_u32.unsafe_shl(24)
+  # The little-endian words at @buf[*p*].
+  private def le32(p : Int32) : UInt32
+    @buf[p].to_u32 | @buf[p + 1].to_u32.unsafe_shl(8) | @buf[p + 2].to_u32.unsafe_shl(16) | @buf[p + 3].to_u32.unsafe_shl(24)
   end
 
-  private def le64(p : Pointer(UInt8)) : UInt64
-    le32(p).to_u64 | le32(p + 4_i64).to_u64.unsafe_shl(32)
+  private def le64(p : Int32) : UInt64
+    le32(p).to_u64 | le32(p + 4).to_u64.unsafe_shl(32)
   end
 
   # A size as people say it: "64 MiB", "12 KiB", "1000 bytes".
@@ -678,10 +711,10 @@ class XzCore
 
   def self.hex(v : UInt64, digits : Int32) : String
     chars = "0123456789abcdef"
-    String.new(digits) do |dst|
+    String.build(digits) do |dst|
       i = 0
       while i < digits
-        dst[i] = chars.to_unsafe[(v.unsafe_shr((digits - 1 - i) * 4) & 15_u64).to_i32]
+        dst.push(chars.byte_at((v.unsafe_shr((digits - 1 - i) * 4) & 15_u64).to_i32))
         i = i + 1
       end
     end
@@ -695,7 +728,9 @@ class XzCore
     @dsize = size < DICT_MIN.to_i64 ? DICT_MIN : size.to_i32
     if @dcap == 0
       @dcap = @dsize < FIRST_RING ? @dsize : FIRST_RING
-      @dict = Pointer(UInt8).malloc(@dcap.to_u64)
+      while @dict.size < @dcap
+        @dict << 0_u8
+      end
       @dpos = 0
     end
     @written = 0_i64
@@ -707,7 +742,9 @@ class XzCore
     if @dcap < @dsize
       cap = @dcap.to_i64 * 2_i64
       cap = @dsize.to_i64 if cap > @dsize.to_i64
-      @dict = @dict.realloc(cap.to_u64)
+      while @dict.size < cap
+        @dict << 0_u8
+      end
       @dcap = cap.to_i32
     else
       @dpos = 0
@@ -723,13 +760,17 @@ class XzCore
   end
 
   # *n* bytes from *src* (the input), as an uncompressed chunk has them.
-  private def put_bytes(src : Pointer(UInt8), n : Int32) : Nil
+  private def put_bytes(src : Int32, n : Int32) : Nil
     done = 0
     while done < n
       wrap if @dpos == @dcap
       k = n - done
       k = @dcap - @dpos if k > @dcap - @dpos
-      (@dict + @dpos.to_i64).copy_from(src + done.to_i64, k)
+      i = 0
+      while i < k
+        @dict[@dpos + i] = @buf[src + done + i]
+        i = i + 1
+      end
       @dpos = @dpos + k
       done = done + k
     end
@@ -756,18 +797,9 @@ class XzCore
       k = left
       k = @dcap - @dpos if k > @dcap - @dpos
       k = @dcap - src if k > @dcap - src
-      dst = @dict + @dpos.to_i64
-      from = @dict + src.to_i64
       i = 0
-      gap = @dpos - src
-      if gap >= 8 || gap < 0
-        while i + 8 <= k
-          (dst + i.to_i64).as(Pointer(UInt64)).value = (from + i.to_i64).as(Pointer(UInt64)).value
-          i = i + 8
-        end
-      end
       while i < k
-        dst[i] = from[i]
+        @dict[@dpos + i] = @dict[src + i]
         i = i + 1
       end
       @dpos = @dpos + k
@@ -871,7 +903,9 @@ class XzCore
     @pb = props // 45
     count = LITERAL + (0x300 << (@lc + @lp))
     if count > @probs_cap
-      @probs = Pointer(UInt16).malloc(count.to_u64)
+      while @probs.size < count
+        @probs << 0_u16
+      end
       @probs_cap = count
     end
   end
@@ -1087,13 +1121,13 @@ class XzCore
   # and their CRC32.
   private def stream_head : Nil
     return fail("xz: the stream is shorter than its header") unless ahead?(12)
-    h = @buf + @in_pos.to_i64
-    unless h[0] == 0xfd_u8 && h[1] == 0x37_u8 && h[2] == 0x7a_u8 && h[3] == 0x58_u8 && h[4] == 0x5a_u8 && h[5] == 0_u8
+    h = @in_pos
+    unless @buf[h + 0] == 0xfd_u8 && @buf[h + 1] == 0x37_u8 && @buf[h + 2] == 0x7a_u8 && @buf[h + 3] == 0x58_u8 && @buf[h + 4] == 0x5a_u8 && @buf[h + 5] == 0_u8
       return fail("xz: not an xz stream (the magic bytes are not FD 37 7A 58 5A 00)")
     end
-    return fail("xz: the stream header's CRC32 does not match") unless CRC32.update(0_u32, h + 6_i64, 2) == le32(h + 8_i64)
-    return fail("xz: the stream flags have reserved bits set") unless h[6] == 0_u8 && (h[7] & 0xf0_u8) == 0_u8
-    id = h[7].to_i32
+    return fail("xz: the stream header's CRC32 does not match") unless CRC32.update(0_u32, @buf[h + 6, 2], 2) == le32(h + 8)
+    return fail("xz: the stream flags have reserved bits set") unless @buf[h + 6] == 0_u8 && (@buf[h + 7] & 0xf0_u8) == 0_u8
+    id = @buf[h + 7].to_i32
     unless id == 0 || id == 1 || id == 4 || id == 10
       return fail("xz: check type #{id} is not one this reader verifies (none, CRC32, CRC64 or SHA-256)")
     end
@@ -1113,13 +1147,13 @@ class XzCore
   # not; `@vat` is where it ended.
   @vat = 0
 
-  private def vli(p : Pointer(UInt8), i : Int32, stop : Int32) : Int64
+  private def vli(p : Int32, i : Int32, stop : Int32) : Int64
     v = 0_i64
     k = 0
     j = i
     while true
       return -1_i64 if j >= stop || k >= 9
-      b = p[j]
+      b = @buf[p + j]
       j = j + 1
       v = v | (b & 0x7f_u8).to_i64.unsafe_shl(k * 7)
       if (b & 0x80_u8) == 0_u8
@@ -1142,9 +1176,9 @@ class XzCore
     end
     size = (first + 1) * 4
     return fail("xz: the stream ends inside a block header") unless ahead?(size)
-    h = @buf + @in_pos.to_i64
-    return fail("xz: a block header's CRC32 does not match") unless CRC32.update(0_u32, h, size - 4) == le32(h + (size - 4).to_i64)
-    flags = h[1].to_i32
+    h = @in_pos
+    return fail("xz: a block header's CRC32 does not match") unless CRC32.update(0_u32, @buf[h, size - 4], size - 4) == le32(h + size - 4)
+    flags = @buf[h + 1].to_i32
     return fail("xz: a block header has reserved flags set") unless (flags & 0x3c) == 0
     stop = size - 4
     i = 2
@@ -1179,14 +1213,14 @@ class XzCore
       return fail("xz: a block header's filter properties are not a number") if psize < 0_i64
       i = @vat
       return fail("xz: a filter's properties run past its block header") if psize > (stop - i).to_i64
-      props = h + i.to_i64
+      props = h + i
       plen = psize.to_i32
       i = i + plen
       last = k == count - 1
       if id == 0x21_i64
         return fail("xz: LZMA2 is not the last filter") unless last
         return fail("xz: LZMA2's properties are not one byte") unless plen == 1
-        d = props[0].to_i32
+        d = @buf[props].to_i32
         return fail("xz: LZMA2's dictionary property has reserved bits set") unless (d & 0xc0) == 0
         return fail("xz: LZMA2's dictionary property is past 40") if d > 40
         dict = d == 40 ? 0xffffffff_i64 : (2_i64 | (d & 1).to_i64).unsafe_shl(d // 2 + 11)
@@ -1196,7 +1230,7 @@ class XzCore
         return fail("xz: the delta filter's properties are not one byte") unless plen == 1
         slot = count - 2 - k
         @fkind[slot] = FILTER_DELTA
-        @fdist[slot] = props[0].to_i32 + 1
+        @fdist[slot] = @buf[props].to_i32 + 1
         @fhpos[slot] = 0
         z = 0
         while z < 256
@@ -1217,7 +1251,7 @@ class XzCore
       k = k + 1
     end
     while i < stop
-      return fail("xz: a block header's padding is not zero") unless h[i] == 0_u8
+      return fail("xz: a block header's padding is not zero") unless @buf[h + i] == 0_u8
       i = i + 1
     end
     if dict > @dict_limit
@@ -1278,8 +1312,8 @@ class XzCore
     end
     if c >= 0x80
       return fail("xz: the stream ends inside a block") unless ahead?(c >= 0xc0 ? 6 : 5)
-      h = @buf + @in_pos.to_i64
-      return unless within(c >= 0xc0 ? 6 : 5, (h[3].to_i32 << 8) + h[4].to_i32 + 1, ((c & 0x1f) << 16) + (h[1].to_i32 << 8) + h[2].to_i32 + 1)
+      h = @in_pos
+      return unless within(c >= 0xc0 ? 6 : 5, (@buf[h + 3].to_i32 << 8) + @buf[h + 4].to_i32 + 1, ((c & 0x1f) << 16) + (@buf[h + 1].to_i32 << 8) + @buf[h + 2].to_i32 + 1)
     elsif c <= 2
       return fail("xz: the stream ends inside a block") unless ahead?(3)
       size = (@buf[@in_pos + 1].to_i32 << 8) + @buf[@in_pos + 2].to_i32 + 1
@@ -1288,11 +1322,11 @@ class XzCore
     if c >= 0x80
       head = c >= 0xc0 ? 6 : 5
       return fail("xz: the stream ends inside a block") unless ahead?(head)
-      h = @buf + @in_pos.to_i64
-      unpacked = ((c & 0x1f) << 16) + (h[1].to_i32 << 8) + h[2].to_i32 + 1
-      packed = (h[3].to_i32 << 8) + h[4].to_i32 + 1
+      h = @in_pos
+      unpacked = ((c & 0x1f) << 16) + (@buf[h + 1].to_i32 << 8) + @buf[h + 2].to_i32 + 1
+      packed = (@buf[h + 3].to_i32 << 8) + @buf[h + 4].to_i32 + 1
       if c >= 0xc0
-        props = h[5].to_i32
+        props = @buf[h + 5].to_i32
         return fail("LZMA2: a properties byte past 224") if props > 224
         return fail("LZMA2: lc + lp is past 4") if props % 9 + (props // 9) % 5 > 4
         lzma_props(props)
@@ -1350,7 +1384,7 @@ class XzCore
       n = @copy_left
       n = @in_end - @in_pos if n > @in_end - @in_pos
       n = want - @pending if n > want - @pending
-      put_bytes(@buf + @in_pos.to_i64, n)
+      put_bytes(@in_pos, n)
       @in_pos = @in_pos + n
       @copy_left = @copy_left - n
     end
@@ -1375,7 +1409,7 @@ class XzCore
       return fail("xz: a block's padding is not zero") unless @buf[@in_pos + i] == 0_u8
       i = i + 1
     end
-    c = @buf + (@in_pos + pad).to_i64
+    c = @in_pos + pad
     case @check_id
     when 1
       want = le32(c)
@@ -1387,7 +1421,7 @@ class XzCore
       digest = @sha.final
       i = 0
       while i < 32
-        return fail("xz: a block's SHA-256 does not match") unless digest[i] == c[i]
+        return fail("xz: a block's SHA-256 does not match") unless digest[i] == @buf[c + i]
         i = i + 1
       end
     end
@@ -1418,7 +1452,7 @@ class XzCore
       p[8 + i] = (uncomp.unsafe_shr(i * 8) & 255_i64).to_u8
       i = i + 1
     end
-    @records = CRC64.update(@records, p, 16)
+    @records = CRC64.update(@records, p[0, 16], 16)
   end
 
   # A variable-length integer read from the stream, each byte into the
@@ -1429,8 +1463,7 @@ class XzCore
   private def index_byte : Int32
     b = byte
     if b >= 0
-      @scratch[32] = b.to_u8
-      @icrc = CRC32.update(@icrc, @scratch + 32_i64, 1)
+      @icrc = CRC32.update_byte(@icrc, b.to_u8)
       @isize = @isize + 1_i64
     end
     b
@@ -1487,7 +1520,7 @@ class XzCore
         p[8 + i] = (uncomp.unsafe_shr(i * 8) & 255_i64).to_u8
         i = i + 1
       end
-      records = CRC64.update(records, p, 16)
+      records = CRC64.update(records, p[0, 16], 16)
       n = n + 1_i64
     end
     unless sum_unpadded == @sum_unpadded && sum_uncomp == @sum_uncomp && records == @records
@@ -1500,15 +1533,15 @@ class XzCore
     end
     want = @icrc
     return fail("xz: the stream ends inside its index") unless ahead?(4)
-    return fail("xz: the index's CRC32 does not match") unless le32(@buf + @in_pos.to_i64) == want
+    return fail("xz: the index's CRC32 does not match") unless le32(@in_pos) == want
     @in_pos = @in_pos + 4
     index_size = @isize + 4_i64
     return fail("xz: the stream ends inside its footer") unless ahead?(12)
-    f = @buf + @in_pos.to_i64
-    return fail("xz: the stream footer's CRC32 does not match") unless CRC32.update(0_u32, f + 4_i64, 6) == le32(f)
-    return fail("xz: the stream footer's magic bytes are not YZ") unless f[10] == 0x59_u8 && f[11] == 0x5a_u8
-    return fail("xz: the stream footer's flags do not match its header") unless f[8] == 0_u8 && f[9].to_i32 == @stream_flags
-    backward = (le32(f + 4_i64).to_i64 + 1_i64) * 4_i64
+    f = @in_pos
+    return fail("xz: the stream footer's CRC32 does not match") unless CRC32.update(0_u32, @buf[f + 4, 6], 6) == le32(f)
+    return fail("xz: the stream footer's magic bytes are not YZ") unless @buf[f + 10] == 0x59_u8 && @buf[f + 11] == 0x5a_u8
+    return fail("xz: the stream footer's flags do not match its header") unless @buf[f + 8] == 0_u8 && @buf[f + 9].to_i32 == @stream_flags
+    backward = (le32(f + 4).to_i64 + 1_i64) * 4_i64
     return fail("xz: the stream footer's index size does not match the index") unless backward == index_size
     @in_pos = @in_pos + 12
     @state = PADDING
@@ -1543,11 +1576,11 @@ class XzCore
   # uncompressed size, all ones for "unknown, ended by a marker".
   private def alone_head : Nil
     return fail("lzma: the stream is shorter than its 13-byte header") unless ahead?(13)
-    h = @buf + @in_pos.to_i64
-    props = h[0].to_i32
+    h = @in_pos
+    props = @buf[h + 0].to_i32
     return fail("lzma: the properties byte is past 224 (#{props})") if props > 224
-    dict = le32(h + 1_i64).to_i64
-    size = le64(h + 5_i64)
+    dict = le32(h + 1).to_i64
+    size = le64(h + 5)
     if dict > @dict_limit
       return fail("lzma: the dictionary is #{XzCore.size_name(dict)}, past the limit of #{XzCore.size_name(@dict_limit)}")
     end
@@ -1576,7 +1609,7 @@ end
 # stays at the stream's dictionary and what is waiting to be read.
 #
 # ```
-# xz = XzReader.new { file.read_bytes(65536) }
+# xz = XzReader.new(file)
 # while (piece = xz.read(65536)!) != ""
 #   ...
 # end
@@ -1591,17 +1624,17 @@ pub class XzReader
 
   @core : XzCore
 
-  # *source* answers the next bytes of the compressed stream, nil (or "")
-  # when there are no more. *dict_limit* is the largest dictionary a
-  # stream may name, 4 KiB to 1.5 GiB; a stream that names more is an
-  # `XzError` before anything is allocated for it. A .xz file is read to
-  # the end of its source - streams and the padding between them - so the
-  # source is asked until it says there is no more.
-  def initialize(format : XzFormat = XzFormat::Xz, dict_limit : Int64 = DICT_LIMIT, &source : -> String?)
+  # *io* gives the compressed stream after *head*, 64 KiB a read, until
+  # it answers "". *dict_limit* is the largest dictionary a stream may
+  # name, 4 KiB to 1.5 GiB; a stream that names more is an `XzError`
+  # before anything is allocated for it. A .xz file is read to the end of
+  # its source - streams and the padding between them - so *io* is read
+  # until it has no more.
+  def initialize(io : IyiIO?, format : XzFormat = XzFormat::Xz, dict_limit : Int64 = DICT_LIMIT, head : String = "")
     unless dict_limit >= 4096_i64 && dict_limit <= DICT_MAX
       raise "XzReader: a dictionary limit is 4 KiB to 1.5 GiB, not #{dict_limit} bytes"
     end
-    @core = XzCore.new(format, dict_limit, source)
+    @core = XzCore.new(format, dict_limit, io, head)
   end
 
   # Up to *max* decompressed bytes; "" once the stream has ended and
@@ -1635,15 +1668,7 @@ pub struct Xz
   # The bytes *data* decompresses to - every stream of a .xz file, or the
   # one of a .lzma file - or the `XzError` `XzReader` would answer.
   def self.decompress(data : String, format : XzFormat = XzFormat::Xz, dict_limit : Int64 = XzReader::DICT_LIMIT) : String | XzError
-    given = false
-    reader = XzReader.new(format, dict_limit) do
-      if given
-        nil
-      else
-        given = true
-        data
-      end
-    end
+    reader = XzReader.new(nil, format, dict_limit, data)
     core = reader.core
     sink = String::Builder.new(data.bytesize < 67108864 ? data.bytesize * 4 + 64 : 268435456)
     core.drain(sink)

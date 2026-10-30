@@ -62,7 +62,7 @@ def bytes(list : Array(Int32)) : String
   end
 end
 
-def parsed(text : String) : Mail::Part
+def parsed(text : String) : Mail::TapePart
   got = Mail.parse(text)
   raise "ASSERTION FAILED: #{text[0, text.bytesize > 60 ? 60 : text.bytesize].inspect} did not parse: #{got.message}" if got.is_a?(MailError)
   got
@@ -74,14 +74,14 @@ def refused(text : String) : String
   "parsed"
 end
 
-def text_of(part : Mail::Part?) : String
+def text_of(part : Mail::TapePart?) : String
   raise "ASSERTION FAILED: no such part" unless part
   got = part.text
   raise "ASSERTION FAILED: #{got.message}" if got.is_a?(MailError)
   got
 end
 
-def body_of(part : Mail::Part) : String
+def body_of(part : Mail::TapePart) : String
   got = part.body
   raise "ASSERTION FAILED: #{got.message}" if got.is_a?(MailError)
   got

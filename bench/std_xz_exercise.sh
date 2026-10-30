@@ -429,11 +429,11 @@ refuses() { # refuses <label> <name> <phrase> <expression>
   printf '  %s: exits %s at "%s"\n' "$label" "$code" "$phrase"
 }
 refuses "a read of no bytes" read_zero "XzReader: read wants at least one byte, not 0" \
-  '(XzReader.new { nil }.read(0); "")'
+  '(XzReader.new(nil).read(0); "")'
 refuses "a dictionary limit under 4 KiB" limit_low "XzReader: a dictionary limit is 4 KiB to 1.5 GiB, not 100 bytes" \
-  '(XzReader.new(XzFormat::Xz, 100_i64) { nil }; "")'
+  '(XzReader.new(nil, XzFormat::Xz, 100_i64); "")'
 refuses "a dictionary limit past 1.5 GiB" limit_high "XzReader: a dictionary limit is 4 KiB to 1.5 GiB, not 4294967296 bytes" \
-  '(XzReader.new(XzFormat::Lzma, 4294967296_i64) { nil }; "")'
+  '(XzReader.new(nil, XzFormat::Lzma, 4294967296_i64); "")'
 refuses "nothing at all, or_panic" empty "xz: the stream is shorter than its header" \
   'Xz.decompress("").or_panic'
 refuses "a .lzma properties byte past 224, or_panic" props "lzma: the properties byte is past 224 (225)" \

@@ -79,6 +79,8 @@
 
 module std/bzip2
 
+import std/static_array::{StaticArray}
+
 import std/int
 
 # What `Bzip2Reader#read` and `Bzip2.decompress` answer for a stream they
@@ -104,11 +106,12 @@ end
 
 # The CRC-32 bzip2 uses: polynomial 0x04c11db7 fed most significant bit
 # first, which is not the reflected CRC-32 of zlib and `std/digest`.
+@[OnTape]
 struct Bzip2Crc
-  getter table : Pointer(UInt32)
+  getter table : Array(UInt32)
 
   def initialize
-    @table = Pointer(UInt32).malloc(256_u64)
+    @table = Array(UInt32).new(256, 0_u32)
     i = 0
     while i < 256
       c = i.to_u32 << 24
@@ -124,10 +127,10 @@ struct Bzip2Crc
 
   def self.hex(w : UInt32) : String
     digits = "0123456789abcdef"
-    String.new(8) do |buf|
+    String.build(8) do |buf|
       i = 0
       while i < 8
-        buf[i] = digits.to_unsafe[((w >> (28 - i * 4)) & 15_u32).to_i32]
+        buf.push(digits.byte_at(((w >> (28 - i * 4)) & 15_u32).to_i32))
         i = i + 1
       end
     end
@@ -143,21 +146,21 @@ class Bzip2Table
   MAX_LEN  =  20
   MAX_SYMS = 258
 
-  getter count : Pointer(Int32)
-  getter first : Pointer(Int32)
-  getter offs : Pointer(Int32)
-  getter perm : Pointer(Int32)
+  getter count : Array(Int32)
+  getter first : Array(Int32)
+  getter offs : Array(Int32)
+  getter perm : Array(Int32)
   # (symbol << 5) | length for a code of `FAST` bits or fewer, by the
   # code's bits followed by any bits at all; 0 where the code is longer.
-  getter fast : Pointer(Int32)
+  getter fast : Array(Int32)
   getter max_len : Int32
 
   def initialize
-    @count = Pointer(Int32).malloc((MAX_LEN + 1).to_u64)
-    @first = Pointer(Int32).malloc((MAX_LEN + 1).to_u64)
-    @offs = Pointer(Int32).malloc((MAX_LEN + 1).to_u64)
-    @perm = Pointer(Int32).malloc(MAX_SYMS.to_u64)
-    @fast = Pointer(Int32).malloc((1 << FAST).to_u64)
+    @count = Array(Int32).new(MAX_LEN + 1, 0)
+    @first = Array(Int32).new(MAX_LEN + 1, 0)
+    @offs = Array(Int32).new(MAX_LEN + 1, 0)
+    @perm = Array(Int32).new(MAX_SYMS, 0)
+    @fast = Array(Int32).new(1 << FAST, 0)
     @max_len = 0
   end
 
@@ -165,7 +168,7 @@ class Bzip2Table
   # would make the code ambiguous; libbzip2 builds such a table without
   # looking, and decodes noise its CRC then refuses. An incomplete code
   # is let through: a pattern no code has is refused when it is read.
-  def build(lengths : Pointer(Int32), alpha : Int32) : Bool
+  def build(lengths : Array(Int32), base : Int32, alpha : Int32) : Bool
     len = 0
     while len <= MAX_LEN
       @count[len] = 0
@@ -174,8 +177,8 @@ class Bzip2Table
     @max_len = 0
     i = 0
     while i < alpha
-      @count[lengths[i]] = @count[lengths[i]] + 1
-      @max_len = lengths[i] if lengths[i] > @max_len
+      @count[lengths[base + i]] = @count[lengths[base + i]] + 1
+      @max_len = lengths[base + i] if lengths[base + i] > @max_len
       i = i + 1
     end
     left = 1
@@ -201,7 +204,7 @@ class Bzip2Table
       slot = slot + 1
     end
     # Symbols in canonical order: by length, then by symbol.
-    next_code = Pointer(Int32).malloc((MAX_LEN + 1).to_u64)
+    next_code = Array(Int32).new(MAX_LEN + 1, 0)
     len = 1
     while len <= MAX_LEN
       next_code[len] = @offs[len]
@@ -209,7 +212,7 @@ class Bzip2Table
     end
     i = 0
     while i < alpha
-      len = lengths[i]
+      len = lengths[base + i]
       at = next_code[len]
       @perm[at] = i
       next_code[len] = at + 1
@@ -263,10 +266,10 @@ class Bzip2Decode
   # and its end, with slack; it reads more than this and keeps this many.
   MAX_SELECTORS = 18002
 
-  @source : Proc(String | Nil) | Nil
-  # The piece in hand, held so the bytes `@in` points into stay alive.
+  # The stream more pieces come from; nil when *data* was all of it.
+  @io : IyiIO?
+  # The piece in hand.
   @input : String
-  @in : Pointer(UInt8)
   @in_pos : Int32
   @in_end : Int32
   @bits : UInt64
@@ -275,18 +278,18 @@ class Bzip2Decode
   @state : Int32
   @failed : Bool
   @error : Bzip2Error
-  @crc_table : Pointer(UInt32)
+  @crc_table : Array(UInt32)
   # The block size the stream declared, in bytes, and the links the
   # inverse BWT walks, sized for the largest block seen.
   @limit : Int32
-  @tt : Pointer(UInt32)
+  @tt : Array(UInt32)
   @tt_size : Int32
   @tables : Array(Bzip2Table)
-  @lengths : Pointer(Int32)
-  @selectors : Pointer(UInt8)
-  @seq_to_unseq : Pointer(UInt8)
-  @mtf : Pointer(UInt8)
-  @cftab : Pointer(Int32)
+  @lengths : Array(Int32)
+  @selectors : Array(UInt8)
+  @seq_to_unseq : Array(UInt8)
+  @mtf : Array(UInt8)
+  @cftab : Array(Int32)
   # The block being given out: links left, where the walk is, the run
   # state of the first run-length code, and the CRC so far.
   @nblock : Int32
@@ -302,9 +305,8 @@ class Bzip2Decode
 
   # *source* nil is the whole-string form: *data* is all the input there
   # is.
-  def initialize(@source : Proc(String | Nil) | Nil, data : String)
+  def initialize(@io : IyiIO?, data : String)
     @input = data
-    @in = data.to_unsafe
     @in_pos = 0
     @in_end = data.bytesize
     @bits = 0_u64
@@ -315,15 +317,15 @@ class Bzip2Decode
     @error = Bzip2Error.new("")
     @crc_table = Bzip2Crc.new.table
     @limit = 0
-    @tt = Pointer(UInt32).malloc(1_u64)
+    @tt = Array(UInt32).new
     @tt_size = 0
-    @tables = [] of Bzip2Table
+    @tables = Array(Bzip2Table).new(6)
     6.times { @tables << Bzip2Table.new }
-    @lengths = Pointer(Int32).malloc((6 * Bzip2Table::MAX_SYMS).to_u64)
-    @selectors = Pointer(UInt8).malloc(MAX_SELECTORS.to_u64)
-    @seq_to_unseq = Pointer(UInt8).malloc(256_u64)
-    @mtf = Pointer(UInt8).malloc(256_u64)
-    @cftab = Pointer(Int32).malloc(257_u64)
+    @lengths = Array(Int32).new(6 * Bzip2Table::MAX_SYMS, 0)
+    @selectors = Array(UInt8).new(MAX_SELECTORS, 0_u8)
+    @seq_to_unseq = Array(UInt8).new(256, 0_u8)
+    @mtf = Array(UInt8).new(256, 0_u8)
+    @cftab = Array(Int32).new(257, 0)
     @nblock = 0
     @used = 0
     @t_pos = 0_u32
@@ -368,7 +370,7 @@ class Bzip2Decode
   # byte checks its CRC, folds it into the stream's, and moves on to the
   # next block header, so an answer below *room* means the block ended
   # (or failed).
-  def emit(dst : Pointer(UInt8), room : Int32) : Int32
+  def emit(dst : String::Builder, room : Int32) : Int32
     return 0 if @failed || @state != OUTPUT
     table = @crc_table
     tt = @tt
@@ -382,7 +384,7 @@ class Bzip2Decode
     n = 0
     while n < room
       if repeat > 0
-        dst[n] = last
+        dst.push(last)
         crc = (crc << 8) ^ table[((crc >> 24) ^ last.to_u32).to_i32]
         n = n + 1
         repeat = repeat - 1
@@ -404,7 +406,7 @@ class Bzip2Decode
           last = b
           same = 1
         end
-        dst[n] = b
+        dst.push(b)
         crc = (crc << 8) ^ table[((crc >> 24) ^ b.to_u32).to_i32]
         n = n + 1
       end
@@ -434,14 +436,15 @@ class Bzip2Decode
     rest = @in_end - @in_pos
     bits = @bits
     count = @count
-    src = @in + @in_pos.to_i64
-    String.new(held + rest) do |dst|
+    input = @input
+    from = @in_pos
+    String.build(held + rest) do |dst|
       i = 0
       while i < held
-        dst[i] = (bits.unsafe_shr(count - 8 * (i + 1)) & 255_u64).to_u8
+        dst.push((bits.unsafe_shr(count - 8 * (i + 1)) & 255_u64).to_u8)
         i = i + 1
       end
-      (dst + held.to_i64).copy_from(src, rest)
+      rest.times { |k| dst.push(input.byte_at(from + k)) }
     end
   end
 
@@ -455,23 +458,23 @@ class Bzip2Decode
   # or false when there is none.
   private def more : Bool
     return false if @exhausted
-    source = @source
-    chunk = source ? source.call : nil
+    io = @io
+    chunk = io ? io.read_bytes(65536) : nil
     unless chunk && chunk.bytesize > 0
       @exhausted = true
       return false
     end
     rest = @in_end - @in_pos
     if rest > 0
-      src = @in + @in_pos.to_i64
+      input = @input
+      from = @in_pos
       piece = chunk
-      chunk = String.new(rest + piece.bytesize) do |dst|
-        dst.copy_from(src, rest)
-        (dst + rest.to_i64).copy_from(piece.to_unsafe, piece.bytesize)
+      chunk = String.build(rest + piece.bytesize) do |dst|
+        rest.times { |k| dst.push(input.byte_at(from + k)) }
+        dst << piece
       end
     end
     @input = chunk
-    @in = chunk.to_unsafe
     @in_pos = 0
     @in_end = chunk.bytesize
     true
@@ -480,7 +483,7 @@ class Bzip2Decode
   # As many bytes of the piece in hand as the accumulator holds.
   private def load : Nil
     while @count <= 56 && @in_pos < @in_end
-      @bits = @bits.unsafe_shl(8) | @in[@in_pos].to_u64
+      @bits = @bits.unsafe_shl(8) | @input.byte_at(@in_pos).to_u64
       @in_pos = @in_pos + 1
       @count = @count + 8
     end
@@ -525,7 +528,9 @@ class Bzip2Decode
     return fail("bzip2: the block size is byte #{digit}, not a digit 1 to 9") unless digit >= 0x31 && digit <= 0x39
     @limit = (digit - 0x30) * 100000
     if @tt_size < @limit
-      @tt = Pointer(UInt32).malloc(@limit.to_u64)
+      while @tt.size < @limit
+        @tt << 0_u32
+      end
       @tt_size = @limit
     end
     @combined = 0_u32
@@ -605,8 +610,7 @@ class Bzip2Decode
     return fail("bzip2: block #{@blocks} has no selectors") if nsel < 1
     # Each selector is its table's place in a move-to-front list, in
     # unary.
-    pos_room = uninitialized UInt8[6]
-    pos = pointerof(pos_room).as(Pointer(UInt8))
+    pos = StaticArray(UInt8, 6).new(0_u8)
     i = 0
     while i < groups
       pos[i] = i.to_u8
@@ -639,7 +643,7 @@ class Bzip2Decode
     # walk up (10) or down (11) from the last, ended by a 0.
     t = 0
     while t < groups
-      lengths = @lengths + (t * Bzip2Table::MAX_SYMS).to_i64
+      base = t * Bzip2Table::MAX_SYMS
       curr = take(5).to_i32
       return if @failed
       i = 0
@@ -653,10 +657,10 @@ class Bzip2Decode
           return if @failed
           curr = step == 0_i64 ? curr + 1 : curr - 1
         end
-        lengths[i] = curr
+        @lengths[base + i] = curr
         i = i + 1
       end
-      return fail("bzip2: a Huffman table of block #{@blocks} is over-subscribed") unless @tables[t].build(lengths, alpha)
+      return fail("bzip2: a Huffman table of block #{@blocks} is over-subscribed") unless @tables[t].build(@lengths, base, alpha)
       t = t + 1
     end
 
@@ -802,16 +806,14 @@ pub class Bzip2Reader
   CHUNK = 65536
 
   @core : Bzip2Decode
-  @scratch : Pointer(UInt8)
 
-  # *source* answers the next bytes of the compressed stream, nil (or "")
-  # when there are no more. It is called only when the decoder has no
-  # bytes in hand for what it must read next, so it is never asked for
-  # anything past a stream's end - except that the input ends only where
-  # no stream follows, which takes a look at the next four bytes.
-  def initialize(&source : -> String?)
-    @core = Bzip2Decode.new(source, "")
-    @scratch = Pointer(UInt8).malloc(CHUNK.to_u64)
+  # *io* gives the compressed stream after *head*, 64 KiB a read, until
+  # it answers "". It is read only when the decoder has no bytes in hand
+  # for what it must read next, so it is never asked for anything past a
+  # stream's end - except that the input ends only where no stream
+  # follows, which takes a look at the next four bytes.
+  def initialize(io : IyiIO?, head : String = "")
+    @core = Bzip2Decode.new(io, head)
   end
 
   # Up to *max* decompressed bytes, 64 KiB at most; "" once every stream
@@ -829,16 +831,16 @@ pub class Bzip2Reader
     core = @core
     want = max > CHUNK ? CHUNK : max
     n = 0
+    sink = String::Builder.new(want)
     while n < want
       core.advance unless core.output?
       return core.error if core.failed?
       break if core.done?
-      n = n + core.emit(@scratch + n.to_i64, want - n)
+      n = n + core.emit(sink, want - n)
       return core.error if core.failed?
       break if n > 0 && !core.output?
     end
-    src = @scratch
-    String.new(n) { |dst| dst.copy_from(src, n) }
+    sink.finish
   end
 
   # Bytes the source gave beyond the last stream, for a caller that frames
@@ -884,26 +886,21 @@ pub struct Bzip2
     core = Bzip2Decode.new(nil, data)
     cap = data.bytesize * 4 + 1024
     cap = 1 << 26 if cap > 1 << 26
-    buf = Pointer(UInt8).malloc(cap.to_u64)
-    pos = 0
+    sink = String::Builder.new(cap)
     while true
       core.advance unless core.output?
       return core.error if core.failed?
       break if core.done?
-      if pos == cap
-        cap = cap > 1 << 29 ? cap + (1 << 29) : cap * 2
-        buf = buf.realloc(cap.to_u64)
-      end
-      pos = pos + core.emit(buf + pos.to_i64, cap - pos)
+      core.emit(sink, 1 << 30)
       return core.error if core.failed?
     end
-    String.new(pos) { |dst| dst.copy_from(buf, pos) }
+    sink.finish
   end
 end
 
 # Bits onto the stream, most significant first.
 class Bzip2BitSink
-  @data : Pointer(UInt8)
+  @data : Array(UInt8)
   @size : Int32
   @cap : Int32
   @buf : UInt64
@@ -911,7 +908,7 @@ class Bzip2BitSink
 
   def initialize(cap : Int32)
     @cap = cap < 64 ? 64 : cap
-    @data = Pointer(UInt8).malloc(@cap.to_u64)
+    @data = Array(UInt8).new(@cap)
     @size = 0
     @buf = 0_u64
     @cnt = 0
@@ -922,11 +919,7 @@ class Bzip2BitSink
     @buf = @buf.unsafe_shl(n) | value.to_u64
     @cnt = @cnt + n
     while @cnt >= 8
-      if @size == @cap
-        @cap = @cap * 2
-        @data = @data.realloc(@cap.to_u64)
-      end
-      @data[@size] = (@buf.unsafe_shr(@cnt - 8) & 255_u64).to_u8
+      @data << (@buf.unsafe_shr(@cnt - 8) & 255_u64).to_u8
       @size = @size + 1
       @cnt = @cnt - 8
     end
@@ -937,7 +930,7 @@ class Bzip2BitSink
     put(0, 8 - @cnt) if @cnt > 0
     n = @size
     src = @data
-    String.new(n) { |dst| dst.copy_from(src, n) }
+    String.build(n) { |dst| n.times { |i| dst.push(src[i]) } }
   end
 end
 
@@ -957,29 +950,29 @@ class Bzip2Encode
   # The most a block takes before a run is added: libbzip2's nblockMAX,
   # which leaves room for the five bytes a run can add past it.
   @max : Int32
-  @block : Pointer(UInt8)
+  @block : Array(UInt8)
   @nblock : Int32
-  @crc_table : Pointer(UInt32)
-  @sa : Pointer(Int32)
-  @rank : Pointer(Int32)
-  @tmp : Pointer(Int32)
-  @cnt : Pointer(Int32)
-  @mtfv : Pointer(Int32)
+  @crc_table : Array(UInt32)
+  @sa : Array(Int32)
+  @rank : Array(Int32)
+  @tmp : Array(Int32)
+  @cnt : Array(Int32)
+  @mtfv : Array(Int32)
 
   def initialize(@level : Int32, size : Int32)
     @max = @level * 100000 - 19
     # A small input needs no full block's buffers.
     room = size + size // 4 + 64
     room = @max + 5 if room > @max + 5
-    @block = Pointer(UInt8).malloc(room.to_u64)
+    @block = Array(UInt8).new(room, 0_u8)
     @nblock = 0
     @crc = 0_u32
     @crc_table = Bzip2Crc.new.table
-    @sa = Pointer(Int32).malloc(room.to_u64)
-    @rank = Pointer(Int32).malloc(room.to_u64)
-    @tmp = Pointer(Int32).malloc(room.to_u64)
-    @cnt = Pointer(Int32).malloc((room < 256 ? 256 : room).to_u64)
-    @mtfv = Pointer(Int32).malloc((room + 1).to_u64)
+    @sa = Array(Int32).new(room, 0)
+    @rank = Array(Int32).new(room, 0)
+    @tmp = Array(Int32).new(room, 0)
+    @cnt = Array(Int32).new(room < 256 ? 256 : room, 0)
+    @mtfv = Array(Int32).new(room + 1, 0)
   end
 
   # *data* from *pos* through the first run-length code into the block
@@ -987,7 +980,7 @@ class Bzip2Encode
   # a count of the rest. The block's CRC is over the bytes taken; the
   # answer is where the next block starts.
   def fill(data : String, pos : Int32) : Int32
-    p = data.to_unsafe
+    p = data
     n = data.bytesize
     table = @crc_table
     crc = 0xffffffff_u32
@@ -1134,8 +1127,7 @@ class Bzip2Encode
     end
 
     # The bytes the block uses, numbered in order.
-    used_room = uninitialized Bool[256]
-    used = pointerof(used_room).as(Pointer(Bool))
+    used = StaticArray(Bool, 256).new(false)
     i = 0
     while i < 256
       used[i] = false
@@ -1146,8 +1138,7 @@ class Bzip2Encode
       used[block[i].to_i32] = true
       i = i + 1
     end
-    unseq_to_seq_room = uninitialized Int32[256]
-    unseq_to_seq = pointerof(unseq_to_seq_room).as(Pointer(Int32))
+    unseq_to_seq = StaticArray(Int32, 256).new(0)
     in_use = 0
     i = 0
     while i < 256
@@ -1161,14 +1152,13 @@ class Bzip2Encode
     eob = in_use + 1
 
     # The last column through move-to-front, zero runs as RUNA and RUNB.
-    freq = Pointer(Int32).malloc(MAX_ALPHA.to_u64)
+    freq = Array(Int32).new(MAX_ALPHA, 0)
     i = 0
     while i < MAX_ALPHA
       freq[i] = 0
       i = i + 1
     end
-    yy_room = uninitialized Int32[256]
-    yy = pointerof(yy_room).as(Pointer(Int32))
+    yy = StaticArray(Int32, 256).new(0)
     i = 0
     while i < in_use
       yy[i] = i
@@ -1214,7 +1204,7 @@ class Bzip2Encode
     # How many tables, and their first lengths: the symbols split by
     # frequency into as many ranges, each table cheap on its own range.
     groups = nmtf < 200 ? 2 : (nmtf < 600 ? 3 : (nmtf < 1200 ? 4 : (nmtf < 2400 ? 5 : 6)))
-    len = Pointer(Int32).malloc((6 * MAX_ALPHA).to_u64)
+    len = Array(Int32).new(6 * MAX_ALPHA, 0)
     part = groups
     rem = nmtf
     gs = 0
@@ -1243,10 +1233,9 @@ class Bzip2Encode
     # Each group of 50 to the table that codes it in fewest bits, and the
     # tables made again from the groups they were given, four times.
     nsel = (nmtf + GROUP - 1) // GROUP
-    selectors = Pointer(Int32).malloc(nsel.to_u64)
-    rfreq = Pointer(Int32).malloc((6 * MAX_ALPHA).to_u64)
-    cost_room = uninitialized Int32[6]
-    cost = pointerof(cost_room).as(Pointer(Int32))
+    selectors = Array(Int32).new(nsel, 0)
+    rfreq = Array(Int32).new(6 * MAX_ALPHA, 0)
+    cost = StaticArray(Int32, 6).new(0)
     iter = 0
     while iter < ITERS
       i = 0
@@ -1292,14 +1281,14 @@ class Bzip2Encode
       end
       t = 0
       while t < groups
-        Bzip2Encode.code_lengths(rfreq + (t * MAX_ALPHA).to_i64, alpha, len + (t * MAX_ALPHA).to_i64)
+        Bzip2Encode.code_lengths(rfreq, t * MAX_ALPHA, alpha, len, t * MAX_ALPHA)
         t = t + 1
       end
       iter = iter + 1
     end
 
     # The canonical codes for the lengths.
-    code = Pointer(Int32).malloc((6 * MAX_ALPHA).to_u64)
+    code = Array(Int32).new(6 * MAX_ALPHA, 0)
     t = 0
     while t < groups
       vec = 0
@@ -1356,8 +1345,7 @@ class Bzip2Encode
     # The tables and the selectors, move-to-front and in unary.
     sink.put(groups, 3)
     sink.put(nsel, 15)
-    pos_room = uninitialized Int32[6]
-    pos = pointerof(pos_room).as(Pointer(Int32))
+    pos = StaticArray(Int32, 6).new(0)
     i = 0
     while i < groups
       pos[i] = i
@@ -1427,7 +1415,7 @@ class Bzip2Encode
 
   # A run of *z* zeros as bijective base 2, least significant digit
   # first: RUNA a 1, RUNB a 2.
-  private def put_run(z : Int32, wr : Int32, freq : Pointer(Int32)) : Int32
+  private def put_run(z : Int32, wr : Int32, freq : Array(Int32)) : Int32
     mtfv = @mtfv
     z = z - 1
     while true
@@ -1447,13 +1435,13 @@ class Bzip2Encode
   # weights the shallower tree merges first and the code stays flat; and
   # while a length is too long every frequency is halved and the tree
   # built again. Two at a time by a scan - at most 258 leaves.
-  def self.code_lengths(freq : Pointer(Int32), alpha : Int32, lengths : Pointer(Int32)) : Nil
-    weight = Pointer(Int64).malloc((2 * MAX_ALPHA).to_u64)
-    parent = Pointer(Int32).malloc((2 * MAX_ALPHA).to_u64)
-    alive = Pointer(Bool).malloc((2 * MAX_ALPHA).to_u64)
+  def self.code_lengths(freq : Array(Int32), fbase : Int32, alpha : Int32, lengths : Array(Int32), lbase : Int32) : Nil
+    weight = Array(Int64).new(2 * MAX_ALPHA, 0_i64)
+    parent = Array(Int32).new(2 * MAX_ALPHA, 0)
+    alive = Array(Bool).new(2 * MAX_ALPHA, false)
     i = 0
     while i < alpha
-      f = freq[i] == 0 ? 1_i64 : freq[i].to_i64
+      f = freq[fbase + i] == 0 ? 1_i64 : freq[fbase + i].to_i64
       weight[i] = f << 8
       i = i + 1
     end
@@ -1504,7 +1492,7 @@ class Bzip2Encode
           k = parent[k]
           depth = depth + 1
         end
-        lengths[i] = depth
+        lengths[lbase + i] = depth
         too_long = true if depth > MAX_CODE
         i = i + 1
       end

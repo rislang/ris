@@ -1110,6 +1110,253 @@ if [ "$out" = "$want" ]; then
 else
   echo "FAILED   csv: $out"; status=1
 fi
+# std/smtp on the caller tape: dot-stuffing and a loopback session
+# (EHLO, AUTH, DATA, a refused RCPT, QUIT); no heap.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/smtp.ri 2>&1)
+want='"prefix:..one\r\n...two\r\nthree\r\nlast\r\n.\r\n"
+".\r\n"
+> EHLO client.test
+greeting 220 test ESMTP
+size 100000 tls false
+SMTP: AUTH without TLS is refused: the password would cross the network in the clear (set cleartext_auth to send it so)
+> AUTH PLAIN AHUAcA==
+true
+> MAIL FROM:<a@x.test> SIZE=194
+> RCPT TO:<b@y.test>
+> RCPT TO:<c@z.test>
+> DATA
+  | Date: Thu, 01 Jan 1970 00:00:00 +0000
+  | From: a@x.test
+  | To: b@y.test
+  | Subject: hi
+  | MIME-Version: 1.0
+  | Content-Type: text/plain; charset="utf-8"
+  | Content-Transfer-Encoding: 7bit
+  | 
+  | ..dot
+  | end
+true
+> MAIL FROM:<a@x.test> SIZE=6
+> RCPT TO:<no@y.test>
+> RSET
+SMTP: RCPT TO:<no@y.test> was refused: 550 no such user
+> QUIT
+true
+true
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     smtp (loopback session on the tape, no heap)'
+else
+  echo "FAILED   smtp: $out"; status=1
+fi
+# std/mail on the caller tape: a message built and read back as a node
+# array, addresses, dates, RFC 2231, encodings and errors; no heap.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/mail.ri 2>&1)
+want='1020
+ann@example.org,"bo b"@example.net
+multipart/mixed
+Grüße aus Köln
+ann@example.org
+Jörg Müller|jorg@example.com
+bo b|Bob <"bo b"@example.net>
+2
+  multipart/mixed 2 7bit
+  multipart/alternative 2 7bit
+  text/plain 0 7bit
+  text/html 0 7bit
+  text/plain 0 base64
+"Hallo Ann,\nbis bald.\n"
+utf-8
+bericht.txt attachment "line one\nline two\n"
+8
+message/rfc822 inner é
+iso-8859-1 ab café café au lait
+mail: the header section begins with a folded line
+mail: line 1 of a header section is not a field: "bad line"
+mail: a multipart/mixed part names no boundary
+mail: a multipart/mixed body holds no line --q
+mail: a multipart/mixed body ends before its closing line --q--
+mail: the Content-Transfer-Encoding "x-uu" is not one std/mail reads
+Wed, 31 Dec 1969 18:30:00 -0530
+1057049557 120
+1057071120 -240
+"Subject: a very long subject line that has to be folded somewhere near the\r\n seventy-eighth column\r\n"
+André Pirard
+Ed Jones <c@a.test> | joe@where.test | x y <z@q.test>
+mail: "two@a.test, three@b.test" holds 2 addresses, not one
+"caf=C3=A9 =3D ok\r\n"
+"café = ok\r\n"
+"Y2Fmw6k=\r\n"
+"prefix:Y2Fmw6kKbGluZSAJDQoAPQ==\r\n"
+true
+abc
+true
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     mail (build and parse on the tape, no heap)'
+else
+  echo "FAILED   mail: $out"; status=1
+fi
+# std/png on the caller tape: Python-written files of every color type and
+# depth decoded (RGBA CRC-32s from Python), encode round trips, refusals.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/png.ri 2>&1)
+want='gray1 5x3 Gray 8 false 708e44d6 Comment=café bKGD
+gray2_il 9x4 Gray 8 true 9780d096 Comment=café bKGD
+gray16 4x4 Gray 16 false cd9a10fb Comment=café bKGD
+rgb8_il 7x5 RGB 8 true 5a6c058b Comment=café bKGD
+rgb16_trns 3x3 RGB 16 false d009b1b6 Comment=café bKGD
+pal4 6x4 RGBA 8 false a44fbcbf Comment=café bKGD
+ga8 3x2 GrayAlpha 8 false 0d9c74a6 Comment=café bKGD
+rgba16_il 5x5 RGBA 16 true 0c6d4180 Comment=café bKGD
+189 f6eaaf53 2 8 2718de15 
+463 8eb00c4f 6 16 18776ee2 tEXt:Title=hä iTXt:Note=中
+97 b865ba3b 0 8 87426669 
+174 68f33a33 3 4 9c0fbb60 
+true
+true
+605
+png: not a PNG file: the 8-byte signature is not there
+png: the IHDR chunk at offset 8 is cut short: it holds 13 bytes and the file has 10 after its header
+png: the IHDR chunk at offset 8 fails its CRC-32: it says 0x6618313d, its bytes make 0xaf92d253
+png: the file ends after 33 bytes, without an IEND chunk
+png: the first chunk is IDAT; IHDR comes first
+png: the image is 13x9, 117 pixels, past the limit of 100
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     png (decode and encode on the tape, no heap)'
+else
+  echo "FAILED   png: $out"; status=1
+fi
+# std/xz on the caller tape: Python lzma streams (checks, stored chunks,
+# filters, .lzma, two streams) decoded whole and over an IO; refusals.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/xz.ri 2>&1)
+want='crc64 5000 73131431 5000 73131431 2 true
+crc32 5000 ef9a60e6 5000 ef9a60e6 2 true
+sha256 5000 5e264c78 5000 5e264c78 2 true
+none 5000 2ea5ffac 5000 2ea5ffac 2 true
+stored 1500 f868003f 1500 f868003f 1 true
+big 150000 3311c8f0 150000 3311c8f0 38 true
+two 12 4ccb1bb3 12 4ccb1bb3 2 true
+alone 4000 2cc2717c 4000 2cc2717c 2 true
+delta 2048 9f5edd58 2048 9f5edd58 1 true
+x86 1150 85d335ae 1150 85d335ae 1 true
+magic xz: not an xz stream (the magic bytes are not FD 37 7A 58 5A 00)
+cut xz: the stream ends inside its index
+check xz: the index'\''s CRC32 does not match
+trail xz: what follows the stream is neither padding nor another stream
+pad xz: the stream padding is not a multiple of four bytes
+xz: the block'\''s dictionary is 64 MiB, past the limit of 4 KiB
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     xz (decode whole and streamed on the tape, no heap)'
+else
+  echo "FAILED   xz: $out"; status=1
+fi
+# std/bzip2 on the caller tape: Python bz2 streams decoded whole and over
+# an IO, text compressed and read back, refusals; no heap.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/bzip2.ri 2>&1)
+want='l9 20000 471ad837 20000 471ad837 1 true
+l1 250000 05e5edb5 250000 05e5edb5 9 true
+random 800 38a5b19b 800 38a5b19b 1 true
+two 12 4ccb1bb3 12 4ccb1bb3 2 true
+one 1 e8b7be43 1 e8b7be43 1 true
+1 104 2397efb5 true
+9 104 8eea7bcb true
+0
+magic bzip2: not a bzip2 stream
+cut bzip2: the stream ends inside a block
+crc bzip2: block 2 starts with neither a block'\''s magic nor the end of the stream
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     bzip2 (decode and encode on the tape, no heap)'
+else
+  echo "FAILED   bzip2: $out"; status=1
+fi
+# std/tar on the caller tape: Python tarfile archives (pax, GNU, gzip,
+# bzip2, xz) listed with data CRC-32s, written and read back; no heap.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/tar.ri 2>&1)
+want='plain
+  directory dir/ 0 00000000 - 755 
+  regular file dir/hello.txt 300 25afb1de - 644 
+  regular file dir/long-name-long-name-long-name-long-name-long-name-long-name-long-name-long-name-long-name-long-name-long-name-long-name-.txt 1000 3b41c9e6 - 644 
+  regular file café.bin 768 b0c0df2a - 644 ann
+  symbolic link link 0 00000000 dir/hello.txt 644 
+  regular file empty 0 00000000 - 644 
+gnu
+  directory dir/ 0 00000000 - 755 
+  regular file dir/hello.txt 300 25afb1de - 644 
+  regular file dir/long-name-long-name-long-name-long-name-long-name-long-name-long-name-long-name-long-name-long-name-long-name-long-name-.txt 1000 3b41c9e6 - 644 
+  regular file café.bin 768 b0c0df2a - 644 ann
+  symbolic link link 0 00000000 dir/hello.txt 644 
+  regular file empty 0 00000000 - 644 
+gz
+  directory dir/ 0 00000000 - 755 
+  regular file dir/hello.txt 300 25afb1de - 644 
+  regular file dir/long-name-long-name-long-name-long-name-long-name-long-name-long-name-long-name-long-name-long-name-long-name-long-name-.txt 1000 3b41c9e6 - 644 
+  regular file café.bin 768 b0c0df2a - 644 ann
+  symbolic link link 0 00000000 dir/hello.txt 644 
+  regular file empty 0 00000000 - 644 
+bz2
+  directory dir/ 0 00000000 - 755 
+  regular file dir/hello.txt 300 25afb1de - 644 
+  regular file dir/long-name-long-name-long-name-long-name-long-name-long-name-long-name-long-name-long-name-long-name-long-name-long-name-.txt 1000 3b41c9e6 - 644 
+  regular file café.bin 768 b0c0df2a - 644 ann
+  symbolic link link 0 00000000 dir/hello.txt 644 
+  regular file empty 0 00000000 - 644 
+xz
+  directory dir/ 0 00000000 - 755 
+  regular file dir/hello.txt 300 25afb1de - 644 
+  regular file dir/long-name-long-name-long-name-long-name-long-name-long-name-long-name-long-name-long-name-long-name-long-name-long-name-.txt 1000 3b41c9e6 - 644 
+  regular file café.bin 768 b0c0df2a - 644 ann
+  symbolic link link 0 00000000 dir/hello.txt 644 
+  regular file empty 0 00000000 - 644 
+written false 10240 aac3f822
+  directory d/ 0 00000000 - 755 
+  regular file d/a.txt 600 984ca6bf - 644 
+  regular file d/nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn 4 3b97a968 - 644 
+  symbolic link s 0 00000000 d/a.txt 777 
+written true 257 153ffa60
+  directory d/ 0 00000000 - 755 
+  regular file d/a.txt 600 984ca6bf - 644 
+  regular file d/nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn 4 3b97a968 - 644 
+  symbolic link s 0 00000000 d/a.txt 777 
+tar: the header at offset 0 says checksum 3445, and its bytes sum to 3487: it is corrupt, or not a tar header
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     tar (read and write on the tape, no heap)'
+else
+  echo "FAILED   tar: $out"; status=1
+fi
+# std/zip on the caller tape: a Python zipfile archive (stored, deflate,
+# bzip2, LZMA, Zstandard) read whole and streamed; written, read back.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/zip.ri 2>&1)
+want='6 "a comment"
+  stored.txt 0 3210 2adfe439 2adfe439
+  deflate.txt 8 3211 89d3b5e6 89d3b5e6
+  bzip2.txt 12 3209 853e0e5b 853e0e5b
+  lzma.txt 14 3208 59285d70 59285d70
+  zstd.txt 93 3208 9a5dfc2c 9a5dfc2c
+  dir/café.txt 8 0 00000000 00000000
+written 582
+5 "made here"
+  a.txt 8 1800 81f70778 81f70778
+  b.bin 0 0 00000000 00000000
+  c.bz2 12 1500 d5e2fd11 d5e2fd11
+  d.zst 93 1800 f75c6d45 f75c6d45
+  dir/eé.txt 8 5 c443d071 c443d071
+6 "a comment"
+  stored.txt zip: "stored.txt"'\''s CRC-32 is 38536260, and the central directory says 2adfe439
+  deflate.txt 8 3211 89d3b5e6 89d3b5e6
+  bzip2.txt 12 3209 853e0e5b 853e0e5b
+  lzma.txt 14 3208 59285d70 59285d70
+  zstd.txt 93 3208 9a5dfc2c 9a5dfc2c
+  dir/café.txt 8 0 00000000 00000000
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     zip (read and write on the tape, no heap)'
+else
+  echo "FAILED   zip: $out"; status=1
+fi
 # std/regex on the caller tape: groups, alternation, counts, anchors,
 # classes, no match and a long text, with nothing on the heap.
 out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/regex.ri 2>&1)

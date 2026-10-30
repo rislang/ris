@@ -128,6 +128,7 @@ end
 
 # One reply: its code and its lines' text, the code and separator taken
 # off each.
+@[OnTape]
 pub struct SmtpReply
   getter code : Int32
   getter lines : Array(String)
@@ -195,7 +196,7 @@ pub class SmtpClient
   end
 
   def self.unsafe?(text : String) : Bool
-    p = text.to_unsafe
+    p = text
     i = 0
     while i < text.bytesize
       return true if p[i] == 13_u8 || p[i] == 10_u8 || p[i] == 0_u8
@@ -397,7 +398,7 @@ pub class SmtpClient
   end
 
   def self.ascii?(text : String) : Bool
-    p = text.to_unsafe
+    p = text
     i = 0
     while i < text.bytesize
       return false if p[i] >= 128_u8
@@ -409,14 +410,6 @@ pub class SmtpClient
   # *data* as DATA sends it (section 4.5.2): line breaks CRLF, a dot
   # doubled at a line's start, a CRLF at the end if it had none, and the
   # lone dot after.
-  def self.stuffed(data : String) : String
-    result = ""
-    tape do
-      result = stuffed(data.as_tape).to_heap
-    end
-    result
-  end
-
   def self.stuffed(data : String) : String
     String.build { |w| stuffed(data, w) }
   end
@@ -500,7 +493,7 @@ pub class SmtpClient
     while true
       line = read_line
       return line if line.is_a?(SmtpError)
-      p = line.to_unsafe
+      p = line
       ok = line.bytesize >= 3 && p[0] >= 50_u8 && p[0] <= 53_u8 && SmtpClient.digit?(p[1]) && SmtpClient.digit?(p[2])
       ok = false if ok && line.bytesize > 3 && p[3] != 32_u8 && p[3] != 45_u8
       return fail("the server's reply line #{line[0, line.bytesize > 40 ? 40 : line.bytesize].inspect} is not a reply") unless ok

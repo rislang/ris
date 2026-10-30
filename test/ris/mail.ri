@@ -1,22 +1,98 @@
 module test/mail_tape
 
-import std/mail::{Mail}
+import std/mail::{Mail, MailError}
 
-kept = ""
+# std/mail on the caller's tape: a message built with text, HTML and an
+# attachment, read back into its node tree, addresses, dates, encodings
+# and the errors a reader gives; nothing on the heap.
+
 tape do
+  msg = Mail::Message.new
+  msg.from = Mail::Address.new("jorg@example.com", "Jörg Müller")
+  msg.to << Mail::Address.new("ann@example.org")
+  msg.cc << Mail::Address.new("\"bo b\"@example.net", "Bob")
+  msg.subject = "Grüße aus Köln"
+  msg.date = Mail.date(1792224000_i64, 120)
+  msg.message_id = "<20261017.1@example.com>"
+  msg.text = "Hallo Ann,\nbis bald.\n"
+  msg.html = "<p>Hallo Ann,</p>"
+  msg.attach("bericht.txt", "line one\nline two\n")
+  wire = msg.to_s
+  puts wire.bytesize
+  puts msg.recipients.join(",")
+
+  part = Mail.parse(wire)
+  if part.is_a?(MailError)
+    puts part.message
+  else
+    puts part.media_type
+    puts part.subject || "-"
+    puts part.header_values("To").join(";")
+    from = part.addresses("From")
+    puts from.is_a?(MailError) ? from.message : "#{from[0].name}|#{from[0].address}"
+    cc = part.addresses("cc")
+    puts cc.is_a?(MailError) ? cc.message : "#{cc[0].local}|#{cc[0]}"
+    puts part.parts.size
+    part.walk { |p| puts "  #{p.media_type} #{p.parts.size} #{p.transfer_encoding}" }
+    if plain = part.find("text/plain")
+      text = plain.text
+      puts text.is_a?(MailError) ? text.message : text.inspect
+      puts plain.charset
+    end
+    part.attachments.each do |a|
+      body = a.body
+      puts "#{a.filename} #{a.disposition} #{body.is_a?(MailError) ? body.message : body.inspect}"
+    end
+    kept = part.headers.copy_to(Program.tape)
+    puts kept.size
+  end
+
+  digest = "Content-Type: multipart/digest; boundary=\"d\"\r\n\r\npre\r\n--d\r\n\r\nSubject: =?utf-8?q?inner_=C3=A9?=\r\n\r\nbody\r\n--d--\r\nepi\r\n"
+  got = Mail.parse(digest)
+  unless got.is_a?(MailError)
+    inner = got.parts[0]
+    puts "#{inner.media_type} #{inner.parts[0].subject}"
+  end
+  got = Mail.parse("Content-Type: text/plain; charset=iso-8859-1; name*=iso-8859-1''caf%E9; title*0=\"a\"; title*1=\"b\"\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\ncaf=E9 =\r\nau lait")
+  unless got.is_a?(MailError)
+    puts "#{got.charset} #{got.param("title")} #{got.filename} #{got.text}"
+  end
+
+  [" folded: x\r\n\r\n", "bad line\r\n\r\n",
+   "Content-Type: multipart/mixed\r\n\r\n",
+   "Content-Type: multipart/mixed; boundary=q\r\n\r\nno parts\r\n",
+   "Content-Type: multipart/mixed; boundary=q\r\n\r\n--q\r\n\r\nopen\r\n",
+   "Content-Transfer-Encoding: x-uu\r\n\r\nzz"].each do |text|
+    bad = Mail.parse(text)
+    if bad.is_a?(MailError)
+      puts bad.message
+    else
+      body = bad.body
+      puts body.is_a?(MailError) ? body.message : body
+    end
+  end
+
+  puts Mail.date(0_i64, -330)
+  when_ = Mail.parse_date("Tue, 1 Jul 2003 10:52:37 +0200")
+  puts when_.is_a?(MailError) ? when_.message : "#{when_[0]} #{when_[1]}"
+  when_ = Mail.parse_date("1 Jul 03 10:52 EDT")
+  puts when_.is_a?(MailError) ? when_.message : "#{when_[0]} #{when_[1]}"
+  puts Mail.fold("Subject", "a very long subject line that has to be folded somewhere near the seventy-eighth column").inspect
+  puts Mail.decode_words("=?ISO-8859-1?Q?Andr=E9?= Pirard")
+  list = Mail::Address.parse_list("A Group:Ed Jones <c@a.test>,joe@where.test;, \"x y\" <z@q.test>")
+  puts list.is_a?(MailError) ? list.message : list.map(&.to_s).join(" | ")
+  bad = Mail::Address.parse("two@a.test, three@b.test")
+  puts bad.message if bad.is_a?(MailError)
+  qp = Mail.encode_quoted_printable("café = ok\n")
+  puts qp.inspect
+  puts Mail.decode_quoted_printable(qp).inspect
+  puts Mail.encode_base64("café").inspect
   data = "café\nline \t\r\n\x00="
   w = String::Builder.new(1)
   w << "prefix:"
   Mail.encode_base64(data, w)
-  exit 1 unless w.finish.starts_with?("prefix:")
-  encoded = Mail.encode_base64(data)
-  exit 2 unless Mail.decode_base64(encoded) == data
-  exit 3 unless Mail.decode_base64("Y!W Jj=ignored") == "abc"
-  qp = Mail.encode_quoted_printable(data, true)
-  exit 4 unless Mail.decode_quoted_printable(qp) == data
-  kept = encoded.to_heap
+  puts w.finish.inspect
+  puts Mail.decode_base64(Mail.encode_base64(data)) == data
+  puts Mail.decode_base64("Y!W Jj=ignored")
+  puts Mail.decode_quoted_printable(Mail.encode_quoted_printable(data, true)) == data
 end
-exit 5 unless Mail.encode_base64("café\nline \t\r\n\x00=") == kept
-exit 6 unless Mail.decode_base64(kept) == "café\nline \t\r\n\x00="
-exit 7 unless Mail.decode_quoted_printable("a=3Db=\r\nc \t\r\n") == "a=bc\r\n"
-puts "PASS: mail tape and heap APIs"

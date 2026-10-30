@@ -241,6 +241,8 @@ class Decoder
   ML = 2
 
   @source : Proc(String | Nil) | Nil
+  # The stream more pieces come from, for `ZstdReader.new(io)`.
+  @io : IyiIO? = nil
   @input : String
   @in_pos : Int32
   @in_end : Int32
@@ -413,12 +415,20 @@ class Decoder
     @error = ZstdError.new(message)
   end
 
+  # Pieces from *io*, the buffer sliding as a stream's does.
+  def over_io(io : IyiIO?) : Nil
+    @io = io
+    @grow = false
+    @exhausted = io.nil?
+  end
+
   # The next piece from the source, kept after what is left of this one,
   # or false when there is none.
   private def more : Bool
     return false if @exhausted
     source = @source
-    chunk = source ? source.call : nil
+    io = @io
+    chunk = source ? source.call : (io ? io.read_bytes(65536) : nil)
     unless chunk && chunk.bytesize > 0
       @exhausted = true
       return false
@@ -1301,6 +1311,14 @@ pub class ZstdReader
   # the memory. A limit outside 1 KiB to 512 MiB is a panic.
   def initialize(max_window : Int32 = Zstd::WINDOW_LIMIT, &source : -> String?)
     @core = Decoder.new(source, "", max_window)
+  end
+
+  # The stream read from *io* after *head*, 64 KiB a read, until *io*
+  # answers "": the block form's source without a block, so it suits a
+  # stream on the caller's tape.
+  def initialize(io : IyiIO?, max_window : Int32 = Zstd::WINDOW_LIMIT, head : String = "")
+    @core = Decoder.new(nil, head, max_window)
+    @core.over_io(io)
   end
 
   # Up to *max* decompressed bytes; "" once the last frame has ended and

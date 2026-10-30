@@ -1,18 +1,100 @@
 module test/smtp_tape
 
-import std/smtp::{SmtpClient}
+import std/socket::{IyiSocket}
+import std/smtp::{SmtpClient, SmtpSecurity, SmtpError, SmtpAuth}
+import std/mail::{Mail}
 
-kept = ""
+# std/smtp on the caller's tape: dot-stuffing into a writer, then a real
+# loopback session against a scripted server - EHLO's extensions, AUTH
+# PLAIN in the clear when asked, a message sent, a refused recipient, QUIT.
+
+struct Ready
+end
+
+# A scripted server: answers each command line and prints what it got.
+def serve(server : IyiSocket) : Nil
+  conn = server.accept
+  server.close
+  return unless conn.is_a?(IyiSocket)
+  conn.write("220 test ESMTP\r\n")
+  held = ""
+  data = false
+  while true
+    got = conn.read(4096)
+    break unless got.is_a?(String)
+    break if got.empty?
+    held = held + got
+    while nl = held.index('\n')
+      line = held[0, nl - 1]
+      held = held[nl + 1, held.bytesize - nl - 1]
+      if data
+        if line == "."
+          data = false
+          conn.write("250 queued\r\n")
+        else
+          puts "  | #{line}"
+        end
+        next
+      end
+      puts "> #{line}"
+      if line.starts_with?("EHLO")
+        conn.write("250-test\r\n250-SIZE 100000\r\n250-8BITMIME\r\n250 AUTH LOGIN PLAIN\r\n")
+      elsif line.starts_with?("RCPT TO:<no@")
+        conn.write("550 no such user\r\n")
+      elsif line == "DATA"
+        data = true
+        conn.write("354 go on\r\n")
+      elsif line == "QUIT"
+        conn.write("221 bye\r\n")
+        conn.close
+        return
+      elsif line.starts_with?("AUTH")
+        conn.write("235 ok\r\n")
+      else
+        conn.write("250 ok\r\n")
+      end
+    end
+  end
+  conn.close
+end
+
 tape do
-  data = ".one\n..two\rthree\r\nlast"
-  expected = "..one\r\n...two\r\nthree\r\nlast\r\n.\r\n"
   w = String::Builder.new(1)
   w << "prefix:"
-  SmtpClient.stuffed(data, w)
-  exit 1 unless w.finish == "prefix:" + expected
-  kept = SmtpClient.stuffed(data).to_heap
-  exit 2 unless kept == expected
-  exit 3 unless SmtpClient.stuffed("") == ".\r\n"
+  SmtpClient.stuffed(".one\n..two\rthree\r\nlast", w)
+  puts w.finish.inspect
+  puts SmtpClient.stuffed("").inspect
 end
-exit 4 unless SmtpClient.stuffed(".one\n..two\rthree\r\nlast") == kept
-puts "PASS: smtp tape and heap APIs"
+
+server = IyiSocket.listen("127.0.0.1", 0)
+port = server.local_port
+group do |g|
+  g.spawn do
+    serve(server)
+    0
+  end
+  tape do
+    client = SmtpClient.connect("127.0.0.1", port, SmtpSecurity::Cleartext, helo: "client.test")
+    if client.is_a?(SmtpError)
+      puts client.message
+    else
+      puts "greeting #{client.greeting.code} #{client.greeting.text}"
+      puts "size #{client.extensions["SIZE"]?} tls #{client.tls?}"
+      puts (client.auth("u", "p") || SmtpError.new("none")).message
+      client.cleartext_auth = true
+      puts client.auth("u", "p").nil?
+      msg = Mail::Message.new
+      msg.from = Mail::Address.new("a@x.test")
+      msg.to << Mail::Address.new("b@y.test")
+      msg.bcc << Mail::Address.new("c@z.test")
+      msg.subject = "hi"
+      msg.date = Mail.date(0_i64)
+      msg.text = ".dot\nend"
+      puts client.send(msg).nil?
+      refused = client.send("a@x.test", ["no@y.test"], "x")
+      puts refused.message if refused
+      puts client.quit.nil?
+      puts client.closed?
+    end
+  end
+end

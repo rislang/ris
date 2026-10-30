@@ -18,6 +18,7 @@ module bench/std_xz_exercise
 
 import std/xz::{Xz, XzReader, XzFormat, XzError}
 import std/digest::{CRC32}
+import std/io::{Reader}
 
 def assert_true(cond : Bool, msg : String) : Nil
   raise "ASSERTION FAILED: #{msg}" unless cond
@@ -40,13 +41,24 @@ end
 
 # A source that gives *stream* in pieces whose sizes go round *sizes*,
 # and counts what it has been asked for.
-class Feed
+# The stream in pieces of *sizes*, in turn, as XzReader reads its IO.
+class Feed < Reader
   getter calls : Int32
   getter at : Int32
 
   def initialize(@stream : String, @sizes : Array(Int32))
+    super()
     @at = 0
     @calls = 0
+  end
+
+  def read_byte : UInt8?
+    piece = self.next
+    piece ? piece.byte_at(0) : nil
+  end
+
+  def read_bytes(count : Int32) : String
+    self.next || ""
   end
 
   def next : String?
@@ -84,7 +96,7 @@ end
 
 def stream_through(format : XzFormat, stream : String, pieces : Array(Int32), reads : Array(Int32), limit : Int64 = XzReader::DICT_LIMIT) : String | XzError
   feed = Feed.new(stream, pieces)
-  z = XzReader.new(format, limit) { feed.next }
+  z = XzReader.new(feed, format, limit)
   drain(z, reads)
 end
 
@@ -234,7 +246,7 @@ puts "  each fed a byte, seven bytes, one to seven bytes and whole, read 64 KiB 
 # stream has all been fed.
 kilobyte = unhex("fd377a585a000004e6d6b446020021011c00000010cf58cce00425006c5d00180e8025f1c081ecdf746677c8df88c4ae51f9d172dd97404c541bbec8d08cca3bc6ffccc88a625d8cf640d31a7abc5edca6f41994a3cf3588a407aba4979b0da81a73f89547354c0583a8fe21202b023b24f1efc014f3ecdcf2431e00391095ba8110c2aefe23dd703717230060406e1d0515599d00018801a6080000b97cc56ab1c467fb020000000004595a")
 feed = Feed.new(kilobyte, [1])
-early = XzReader.new { feed.next }
+early = XzReader.new(feed)
 first = early.read
 case first
 when XzError
@@ -304,7 +316,7 @@ puts "  every prefix of four streams ends early, and every byte of three changed
 crc_bad = bad.find { |b| b[0] == "bad-1-check-crc64.xz" }
 if crc_bad
   feed = Feed.new(unhex(crc_bad[2]), [64])
-  broken = XzReader.new { feed.next }
+  broken = XzReader.new(feed)
   said = drain(broken, [65536])
   again = broken.read
   assert_true said.is_a?(XzError) && again.is_a?(XzError) && again.message == said.message, "a second read after the error answers it again"
@@ -370,7 +382,7 @@ if args.size > 0
   big = File.read("#{dir}/big.xz")
   want_crc = File.read("#{dir}/big.crc").strip
   feed = Feed.new(big, [65536])
-  reader = XzReader.new { feed.next }
+  reader = XzReader.new(feed)
   total = 0_i64
   crc = 0_u32
   reads = 0

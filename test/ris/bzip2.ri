@@ -1,0 +1,65 @@
+module test/bzip2_tape
+
+import std/bzip2::{Bzip2, Bzip2Reader, Bzip2Error}
+import std/io::{Memory}
+import std/digest::{CRC32}
+import std/base64::{Base64}
+
+# std/bzip2 on the caller's tape: streams Python's bz2 wrote (levels 1
+# and 9, 250 KB past one block, random bytes, two streams) decoded whole
+# and through Bzip2Reader over an IO, sizes and CRC-32s Python's; text
+# compressed and read back; what a reader refuses. No heap.
+
+def hex(v : UInt32) : String
+  v.to_s(16).rjust(8, '0')
+end
+
+tape do
+  good = [
+    {"l9", "QlpoOTFBWSZTWdNlttAAA9zRoMIAQCA6LNwQBAAACEAB0AOBTJiZBkYNMCqgYgFMmJkGRgUqKeiTyh6n6oLuA4EDuA4evsfV+SimgpPaswqKn03cazNAxYmFrCG30dKrjGRqR46qo9TG6IQZQSDFYgoTYmw+rY2LmwEwWtubqyFhGgp2jptMuxBXO6SnaERByFHWxJE2VNbRzPB5SYKCEEGJBqSk4C2m9gYNJNGk7nS5ZbIazKJidnMGpA9txgLGocCmsEyWgk2MhKYivbBYRJm7dW7S8IRciZRkTlNSo7oZoLKGaUcsnSKwwWG6XYYbAhtodBqYcEcpiICutCLuM85wxrOueGsbiuFR1VD8iNKjShug8iPIjcR3RNqG1R3Q/cVXzRNUGaJ1RMKjuK6UMIr+ivSVkSv8XckU4UJDTZbbQA=="},
+    {"l1", "QlpoMTFBWSZTWcpjhZIAACvRgMIAQCA6LNwQAAhgDZ98+EqoBCokUKkBQgiVAEqBQqqlYBTTIxMTEKaZGJiYhTTIxMTEInmhVUaDIw1PamKqjQZGE1URJsjSfpGRLjBKlmioXPX/ebzjGt9/G3X9tuwRYmKpMrLe3rzRhXlGtnY82qjmyrVbbPOqM1m6IcO5N+ju06W1lMNauRPkM5tIXC0EaxAV9unPp0q24ckI1ZaD2SWSb3XuXHEQ0qlCdwYd5Ru8sobcx+ZJyuy0hzcCeZee7RyrbXmchvNcjAnFNVetVyhzT5HcBFYBNDTU5NdoTK11sjNWysfCId0pUyccr3bK7lMVSWtZRY2CbkpbdwNkkVnOdeJHmqToIV6XLiqR80CjV4XZqK3QMu7qdOpE5ana9B6um0F2ax0vRRSKBgkWLtIS9bOpnLRx6dU9q5yzO3RVVFEbGeHF06xwr61dZMPrMvIJhLCWUNETNnXnKlfXNoSNLJrVVl2CQMuqc3n0NZOSvEb7co8NO8nVzpd1s2LiNCouTTJuRRejgzzC8uY4ExKrLHYN7EvZ7Y0ZbygiiqXp5by9uOqu6V0ZGPU1li4hzJRPt2Q92jW69bykSM72jB9Jb225KtcGJZG5lxzN1XlcDu6Op3MQXNOnMnR2GBrFumcjETlNh6abelnufjaa4Gph9Ob0sWRaq0/SlOGGQda93bLdtpXycsTyIq67tts9N3Tk12T0TUU40Qc4VVTdFY+G2CUmj2HHUdMFLLcIuy6exFk4iriTxXs13Tq/XrnNKKpkXO5K83SnElHLC5PirQj0vLn0ulR2RKhDvrEna46oYYVj2UrqUdQcdZxuDqpxSwkZsVybVm1ylu1JUzlVlYSMmYuRTWJ3pet6y9xkTn2Q+VIVg+BWGHTjlxO45EC8W9oPPMlIhIW7cyta8uziajVhkHttRvkuzkZAt687JQwauJPVwRndq0QnhnPRQ2ZEeFfN9dJKjXBeevHEfWbGXMd6zSZVsoVkSsaCivRGRH5Jpqra4UkMc1dHeNnrew9FQnXPt0nNOvYNJGyq8KSohySBqJ5uNoZL24emvFcwhkduSaNx0vLSWuYUWy83qyWXtqi2st16w2Y2rwt6h01tw0YOsNws1mN8gt3ZPig1a1a0oWkWzzcNZ4rEFoTarXXkt1K4qIxaweRxO8Ah9M85HUZZ7mRaRPqFvbtFvEDo5w4qgC+l6J6T1cj6xTtBk29tLr2nOJTrpOjw2WEAkclPHJXqorOHUzRsozhFvQdWMUdi607VyEctktZ56qextXXK1bi4G8uB9U47OV1q3BuskXUb7C6E23EUlDtE70eycEtL1CpZnYOkT3SEvr1VNF4YNjW16XFk1O3YpMjNJzXc3WyxgjI9S117xqotpURdeicfO2snMFw1WcVNxO8Ik6Oxi41IcORbbRl7BUrlm+rq4Y7Wc4uHNukyiRychnneZA4V61AiJW6aLSJ1sjRPW7Bulcb6nEEqbM1gJYmYSDj8Z7iOZZ+g+TZderd6JpzV4ycVZrA6xtNPZx2zJ8t3FJw6xD0ZO6ZSyTUHuTb0da2i6J2C59qpyukcHnjSl9hHej3a3w30Sqmq5ZYT4tU1G4avpNjnDxHdVSVLzpRPWrxElFyNSyFb7pEtOZSzy16S2KON5XKWKdTtFNJdRARsKkuQVW8aIbpmZzZx219FoIR1rbVRILDVdp5ql6c30e6u5UTqiPVWMOogMcImJY724XAuVUbvLFF2ScU1l5bWBFUqG5XHsSw9a8sohXoXcCJfYqvV8q3m0G7TmDJHXeutQrLtssnLFLo/M5KaqMm5c+Wo6MyA4fFK6zi6yGuXEumtOd2RqFmXEletpcuSWm1HBTa4GFblyO20cbJaph9YK6sJMk+mtnKsJBD6Gc1k2abt6wchHVC9kOLh5NKclqndLc8FIFw46jLXouWa6Cl66WTky6YkxR7p2Jy8u2Q9mXlMxrpHS2g9eHSSokTOekwrLOdSldy5KasSA0DZGWzGp7s0+MLN67IuBSG6PV87peHxky7Q7ZoK3B5vCHFlrHFHhpzdLJs0HIj6vU5nE1tmA2mjsS12rZNWrNHtGXnqOSrQTAOmxxOWnGRcy7To0qKUXHbtN2qF2Vlvm8aO7mIVchvXhVbq7NJuKR7rCNyPkbjbiEDbHIzmF1w0wa4kHJ0Bilh2movI5zIBLuUm2zWmSjqi08asVOdZeF1ppebvDLn0Ww55QSNXMIzUzHAUjZTpIk/W7DsR2mhyIrdQir4Dou0rhmzc2mWtSzhW9C7zXNzJTY5dFNSTrMNRjVjluQmw0i6VDsNMo7HWVHrp3MSfKdeWhNt44zE7ynKuy5KJbsScTr4W3RWZczDtr4QrR1xySPNqW4UHrm5CRD7KW2WIAo2Pcs97bqCynWW8LtOPNRWbo/K3FsrflkjK0SjnDI2qJvuu4vU5l5UkRmu8XVE2heVUcDmmthUvSY6t6Xh46KWI6eWW5vDlGymy2RbsxV8onG7uco2mEpyLRivKKq9YNXGykzeKbk9LbzJnU4KoWCWTsotlV21sZ0LrynaBg3RPnEP1Rl2GrLBLVmXSdsq+MlkPKLETh0lUzp2cOBYR22ivaFdYqwQHPWYWaX+UhZlIuSEWhQvEpFvSRdhC0KFoULsULoEWikXcpF6CF6BFsELIIuARYlIuVIXFJFiUhfVIWykLNKQvwu5IpwoSGUxwskA="},
+    {"random", "QlpoOTFBWSZTWbcNDx4AAFR///////v/7/3/3///9/9/7//////////9//f//////v//wAI7ddbmcdsgNBpoTAJgTBkCMABoA9U0xomBojA0mAAABGNEYCZNMAaATARoxoEwTQY0AnoBMNA1PQA0ZNEAjTJk2o0yMmjCZMAmATRgCNMIxNMT9T1JgmAEbU00xNGAAmm1GExNPUximJ4RH6mmQjNGRPR6nqnoNI0xk1HqZNGjBoCAAAAANAAAGgBoAAABoAAAaAAAAAAAA0AAAAAAAAAGgAADQAQAAAAAAAAyDQAAAAAAAAAAAAAAAABoAAAAAAAANAAAGgDTRJ6a3donYDJMKkgGFAYrGJtSA+1CPM7uQCq/BpNoP8/gQqlfMILNDwBDr1JTCxcVEBgxr0QD4ZA4y57FyjLadAydkunV+IPozUQSx2QmUqSMsCYK52VoupyiPONGNoJlwPZ4+CbmCBG8yJcwqhb9JD39yNopwAoSH5pBASBWEHA/pEBgQ1hVRqYcIpllCBfeSsTQhdZBElLW+AQDUzVBXGX5t2p51DiGEkoOtgX1BP8fJuvh3URgf+wOKILEd6giLKZG8jccrxBDUgxJJMoU/f8mT6dUBwAsVBLA+uCivmD+tHU8D/ejxBH1wYIxPNeCK8g9AcFs2LgqZ90sey7EJvRBIvrKBy+wObDY9i55YWMtVuYvW538z6f/ki35cbCqnADIkwCIwIMyWXhhwVW5yZkH6mRsFPdw+voArM9/ZI977/H/sxgpCNN84YLT3YOPKij9WG3Ub5jcBOBhO+oE00X/Q+rzAK3AQtcatX+LwTDVATIRwmDN3rVFvBBUsvKOUIp4hy6syRR7JEygWCIHL3NY5tzzMEIppUGVby3QVxKHvuveMWi7g4kMfg3EAg9UYk6hW1JWBwvV5Ks1nybg1fk4BquunY3vTQk8Ud4zNe2nybWMec2F7ha7fwCEebkBSeMoKuV1FS2G4K++dC/Q6bMdwnFCkMJ/rKx3aNoSOKTXEAydOXFKV3QmbAK/6q5YV/8a7tVmaTYWSzeBvO4o4NSYhK57d3pLJpK8BAA0l2Xm0iLGfA8TtmdH9RLucUp3/6ol3Ztl4O0mBuZFarVAn18RDLHH9oTmbWtVJOgDqDVZ8OOKSwzJIheHOSwhMqZZegb4w2qf4xAv9cc8FvuHUpIILRB4vojwAKPYbzlpEuiLi+Ne7Ct98q8YnyIbQ0yFBq8UTkZ2kHCNkaHxSYQbzyGHK0tPysN7MVsRIAI7krJR3QQC/OOnhQQ+opVUeGw7zKY3dLoYsZNZXpg+Z3ijpFlo6zzuTpJklUpoTsEnh4VQ1AkiTIshzWiXE/DzvP1kD6FPeFCpzo94u5IpwoSFuGh48A=="},
+    {"two", "QlpoOTFBWSZTWaRjnbsAAACRgEAAASAcACAAIYAMAycu4u5IpwoSFIxzt2BCWmg5MUFZJlNZJooCNAAAAoGADgGIACAAIhhoMAcCmF3JFOFCQJooCNA="},
+    {"one", "QlpoOTFBWSZTWRmTm2sAAAABACAAIAAhGEaC7kinChIDMnNtYA=="},
+  ]
+  good.each do |pair|
+    data = Base64.decode(pair[1])
+    got = Bzip2.decompress(data)
+    if got.is_a?(Bzip2Error)
+      puts "#{pair[0]} #{got.message}"
+    else
+      reader = Bzip2Reader.new(Memory.new(data))
+      pieces = 0
+      sum = 0_u32
+      size = 0
+      while true
+        piece = reader.read(30000)
+        if piece.is_a?(Bzip2Error)
+          puts piece.message
+          break
+        end
+        break if piece.empty?
+        pieces = pieces + 1
+        size = size + piece.bytesize
+        sum = CRC32.update(sum, piece, piece.bytesize)
+      end
+      puts "#{pair[0]} #{got.bytesize} #{hex(CRC32.checksum(got))} #{size} #{hex(sum)} #{pieces} #{reader.finished?}"
+    end
+  end
+  text = String.build { |w| 3000.times { |i| w << "line " << (i * 7 % 13) << "\n" } }
+  [1, 9].each do |level|
+    packed = Bzip2.compress(text, level)
+    back = Bzip2.decompress(packed)
+    puts "#{level} #{packed.bytesize} #{hex(CRC32.checksum(packed))} #{back.is_a?(String) && back == text}"
+  end
+  puts Bzip2.decompress(Bzip2.compress("")).or("x").bytesize
+  bad = [
+    {"magic", "Qlp4OTFBWSZTWdNlttAAA9zRoMIAQCA6LNwQBAAACEAB0AOBTJiZBkYNMCqgYgFMmJkGRgUqKeiTyh6n6oLuA4EDuA4evsfV+SimgpPaswqKn03cazNAxYmFrCG30dKrjGRqR46qo9TG6IQZQSDFYgoTYmw+rY2LmwEwWtubqyFhGgp2jptMuxBXO6SnaERByFHWxJE2VNbRzPB5SYKCEEGJBqSk4C2m9gYNJNGk7nS5ZbIazKJidnMGpA9txgLGocCmsEyWgk2MhKYivbBYRJm7dW7S8IRciZRkTlNSo7oZoLKGaUcsnSKwwWG6XYYbAhtodBqYcEcpiICutCLuM85wxrOueGsbiuFR1VD8iNKjShug8iPIjcR3RNqG1R3Q/cVXzRNUGaJ1RMKjuK6UMIr+ivSVkSv8XckU4UJDTZbbQA=="},
+    {"cut", "QlpoOTFBWSZTWdNlttAAA9zRoMIAQCA6LNwQBAAACEAB0AOBTJiZBkYNMCqgYgFMmJkGRgUqKeiTyh6n6oLuA4EDuA4evsfV+SimgpPaswqKn03cazNAxYmFrCG30dKrjGRqR46qo9TG6IQZQSDFYgoTYmw+rY2LmwEwWtubqyFhGgp2jptMuxBXO6SnaERByFHWxJE2VNbRzPB5SYKCEEGJBqSk4C2m9gYNJNGk7nS5ZbIazKJidnMGpA9txgLGocCmsEyWgk2MhKYivbBYRJm7dW7S8IRciZRkTlNSo7oZoLKGaUcsnSKwwWG6XYYbAhtodBqYcEcpiICutCLuM85wxrOueGsbiuFR1VD8iNKjShug8iPIjcR3RNqG1R3Q/cVXzQ=="},
+    {"crc", "QlpoOTFBWSZTWdNlttAAA9zRoMIAQCA6LNwQBAAACEAB0AOBTJiZBkYNMCqgYgFMmJkGRgUqKeiTyh6n6oLuA4EDuA4evsfV+SimgpPaswqKn03cazNAxYmFrCG30dKrjGRqR46qo9TG6IQZQSDFYgoTYmw+rY2LmwEwWtubqyFhGgp2jptMuxBXO6SnaERByFHWxJE2VNbRzPB5SYKCEEGJBqSk4C2m9gYNJNGk7nS5ZbIazKJidnMGpA9txgLGocCmsEyWgk2MhKYivbBYRJm7dW7S8IRciZRkTlNSo7oZoLKGaUcsnSKwwWG6XYYbAhtodBqYcEcpiICutCLuM85wxrOueGsbiuFR1VD8iNKjShug8iPIjcR3RNqG1R3Q/cVXzRNUGaJ1RMKjuK6UMIr+ivSVkSv8XckU4b1DTZbbQA=="},
+  ]
+  bad.each do |pair|
+    got = Bzip2.decompress(Base64.decode(pair[1]))
+    puts "#{pair[0]} #{got.is_a?(Bzip2Error) ? got.message : got.bytesize}"
+  end
+end

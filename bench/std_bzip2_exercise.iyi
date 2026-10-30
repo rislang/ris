@@ -18,6 +18,7 @@ module bench/std_bzip2_exercise
 import std/tuple
 
 import std/bzip2::{Bzip2, Bzip2Reader, Bzip2Error}
+import std/io::{Reader}
 import std/digest::{CRC32}
 import std/random::{Random}
 import std/file::{File}
@@ -29,13 +30,24 @@ end
 
 # A source that gives *stream* a piece at a time - the sizes in *sizes*,
 # round and round - and counts what it has been asked for.
-class Feed
+# The stream in pieces of *sizes*, in turn, as Bzip2Reader reads its IO.
+class Feed < Reader
   getter calls : Int32
   getter at : Int32
 
   def initialize(@stream : String, @sizes : Array(Int32))
+    super()
     @at = 0
     @calls = 0
+  end
+
+  def read_byte : UInt8?
+    piece = self.next
+    piece ? piece.byte_at(0) : nil
+  end
+
+  def read_bytes(count : Int32) : String
+    self.next || ""
   end
 
   # What the source has not given yet.
@@ -76,7 +88,7 @@ end
 
 def stream_through(stream : String, sizes : Array(Int32), max : Int32) : String | Bzip2Error
   feed = Feed.new(stream, sizes)
-  r = Bzip2Reader.new { feed.next }
+  r = Bzip2Reader.new(feed)
   drain(r, max)
 end
 
@@ -122,7 +134,7 @@ def refused(stream : String, phrase : String, label : String) : Nil
   end
   [[1, 2, 3, 4, 5, 6, 7], [4096]].each do |sizes|
     feed = Feed.new(stream, sizes)
-    r = Bzip2Reader.new { feed.next }
+    r = Bzip2Reader.new(feed)
     again = drain(r, 65536)
     case again
     when Bzip2Error
@@ -450,7 +462,7 @@ puts "\n== streaming"
 plain = text(800)
 stream = Bzip2.compress(plain)
 feed = Feed.new(stream, [stream.bytesize])
-r = Bzip2Reader.new { feed.next }
+r = Bzip2Reader.new(feed)
 assert_true !r.finished?, "a reader is not finished before it has read"
 first_read = r.read(100)
 assert_true first_read.is_a?(String) && first_read == plain[0, 100], "the first read answered the first 100 bytes"
@@ -459,7 +471,7 @@ assert_true rest.is_a?(String) && first_read.is_a?(String) && first_read + rest 
 assert_true r.leftover == "", "nothing is left over of a stream fed exactly"
 ["trailing junk", "BZ", "BZh", "BZh0 not a stream", "\0\0\0\0"].each do |junk|
   feed = Feed.new(stream + junk, [3, 5])
-  r = Bzip2Reader.new { feed.next }
+  r = Bzip2Reader.new(feed)
   got = drain(r, 65536)
   assert_true got.is_a?(String) && got == plain, "a stream with #{junk.inspect} after it reads"
   assert_true r.leftover + feed.rest == junk, "what is left over is what was fed past the stream: #{r.leftover.inspect} and #{feed.rest.inspect} not given, not #{junk.inspect}"
@@ -474,7 +486,7 @@ end
 # Reads cap at 64 KiB, and one that has bytes when a block ends answers
 # them rather than reading the next block.
 two = Bzip2.compress(edge, 1)
-r = Bzip2Reader.new { s = two; two = ""; s }
+r = Bzip2Reader.new(nil, two)
 sizes = [] of Int32
 while true
   piece = r.read(1000000)
@@ -608,7 +620,7 @@ if args.size > 0
   # the bytes are the ones Python compressed, by size and CRC-32.
   expect = File.read("#{dir}/big.expect").strip.split(' ')
   io = File.open("#{dir}/big.bz2")
-  r = Bzip2Reader.new { io.read_bytes(65536) }
+  r = Bzip2Reader.new(io)
   GC.collect
   base = GC.stats.bytes_kept_by_last_sweep
   most = 0_u64
