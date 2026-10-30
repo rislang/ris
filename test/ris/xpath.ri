@@ -1,0 +1,41 @@
+module test/xpath
+
+import std/xml::{parse, RisXPath, TapeNode}
+
+# XPath on the tape node array: absolute and relative paths, //, *, . and
+# .., positions per parent, attribute predicates, text() and @attr, and
+# what it refuses. Selections agree with xml.etree (Python 3) where it
+# reads the path; a chained [@k][2] counts per parent, as XPath 1.0 has it.
+
+def show(nodes : Array(TapeNode)) : String
+  nodes.map { |n| n.node_type.element? ? "#{n.name}#{n["n"]? ? "=" + n["n"] : ""}" : n.content }.join(" ")
+end
+
+tape do
+  doc = parse("<root a=\"1\"><item n=\"1\">one</item><item n=\"2\" k=\"x\">two<item n=\"3\">three</item></item>" \
+              "<group><item n=\"4\" k=\"x\"/><b>bee</b></group></root>")
+  puts show(doc.xpath("/root/item"))
+  puts show(doc.xpath("//item"))
+  puts show(doc.xpath("//item[1]"))
+  puts show(doc.xpath("/root/item[last()]"))
+  puts show(doc.xpath("//item[@k='x']"))
+  puts show(doc.xpath("//item[@k][1]"))
+  puts doc.xpath("//item[@k][2]").size
+  puts show(doc.xpath("/root/*"))
+  puts show(doc.xpath("//item[@n=\"3\"]/.."))
+  puts show(doc.xpath("/root/group/b/text()"))
+  puts doc.xpath_values("//item/@n").join(",")
+  puts doc.xpath_values("/root/item[2]").join(",")
+  puts doc.xpath_values("/root/@a").join(",")
+  root = doc.root
+  puts show(root.xpath("item/item"))
+  puts show(root.xpath("./group//item"))
+  puts show(root.xpath("//b"))
+  first = doc.xpath_first("//group")
+  puts first ? first.name : "-"
+  puts doc.xpath("//nothing").size
+  ["", "/root/", "//item[0]", "/child::a", "a + b", "//item[@k=x]", "@n/x", "//a[1"].each do |bad|
+    read = RisXPath.parse(bad)
+    puts read.is_a?(String) ? read : "read #{bad}"
+  end
+end

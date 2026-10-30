@@ -75,7 +75,7 @@ fi
 
 echo
 echo "== every log section reported"
-for phrase in "== info" "== child" "== empty segments" "== data and context" "== the level from LOG_LEVEL" "== written by a thread of its own"; do
+for phrase in "== info" "== child" "== empty segments" "== data and context" "== the level from LOG_LEVEL" "== written by a task of its own"; do
   if ! grep -q "$phrase" "$WORK/log-plain.out" 2>/dev/null; then
     echo "  missing section: $phrase"
     status=1

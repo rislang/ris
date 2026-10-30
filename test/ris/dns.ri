@@ -1,0 +1,194 @@
+module test/dns
+
+import std/dns::{DnsTapeMessage, DnsTapeRecord, DnsError, SvcbRecord, DnsName}
+import std/socket::{IyiSocket, Resolver, IPAddress}
+import std/udp::{UdpSocket}
+
+# std/dns on the caller's tape: queries and answers checked against wire
+# bytes made by Python (struct, by hand), compression pointers and a loop
+# of them, TXT strings, an HTTPS record, then a resolver over loopback -
+# CNAMEs over UDP, and a truncated answer asked again over TCP.
+
+def unhex(text : String) : String
+  String.build(text.bytesize // 2) do |writer|
+    at = 0
+    while at < text.bytesize
+      writer.push((digit(text.byte_at(at)) * 16 + digit(text.byte_at(at + 1))).to_u8)
+      at = at + 2
+    end
+  end
+end
+
+def digit(byte : UInt8) : Int32
+  byte <= 57_u8 ? byte.to_i32 - 48 : byte.to_i32 - 87
+end
+
+def hex(bytes : String) : String
+  text = ""
+  bytes.each_byte do |byte|
+    text << "0123456789abcdef"[byte.to_i32 >> 4, 1]
+    text << "0123456789abcdef"[byte.to_i32 & 15, 1]
+  end
+  text
+end
+
+def dotted(data : String) : String
+  "#{data.byte_at(0)}.#{data.byte_at(1)}.#{data.byte_at(2)}.#{data.byte_at(3)}"
+end
+
+# The answer to *query* (a plain one: header and question only) with
+# *count* records after it and *flags*.
+def answer(query : String, flags : Int32, count : Int32, records : String) : String
+  String.build(query.bytesize + records.bytesize) do |w|
+    w.push(query.byte_at(0))
+    w.push(query.byte_at(1))
+    w.push((flags >> 8).to_u8)
+    w.push((flags & 255).to_u8)
+    w.push(0_u8)
+    w.push(1_u8)
+    w.push(0_u8)
+    w.push(count.to_u8)
+    4.times { w.push(0_u8) }
+    at = 12
+    while at < query.bytesize
+      w.push(query.byte_at(at))
+      at = at + 1
+    end
+    records.each_byte { |byte| w.push(byte) }
+  end
+end
+
+# CNAME web.<the question's domain> at the question's name, then one
+# address record of *type* at the target: the target's owner a pointer
+# to the CNAME's data, which is itself a label and a pointer.
+def chain(query : String, type : Int32) : String
+  target = query.bytesize + 12
+  String.build(64) do |w|
+    unhex("c00c0005000100000e10000603776562c010").each_byte { |b| w.push(b) }
+    w.push(0xC0_u8)
+    w.push(target.to_u8)
+    w.push(0_u8)
+    w.push(type.to_u8)
+    unhex("000100000e10").each_byte { |b| w.push(b) }
+    if type == DnsTapeRecord::A
+      unhex("0004c6336407").each_byte { |b| w.push(b) }
+    else
+      unhex("001020010db8000000000000000000000053").each_byte { |b| w.push(b) }
+    end
+  end
+end
+
+struct UdpReady
+  getter ok : Bool
+
+  def initialize(@ok : Bool)
+  end
+end
+
+def serve_udp(port : Int32) : Nil
+  server = UdpSocket.bind("127.0.0.1", port)
+  RisBoard.post(UdpReady.new(true))
+  4.times do
+    got = server.receive_datagram
+    return unless got.is_a?(Std::Udp::Datagram)
+    query = got.data
+    type = query.byte_at(query.bytesize - 3).to_i32
+    name = DnsTapeMessage.read_name(query, 12)
+    asked = name ? name[0] : "?"
+    puts "udp #{asked} #{type}"
+    reply = if asked == "big.example.test" && type == DnsTapeRecord::A
+              answer(query, 0x8380, 0, "")
+            elsif asked == "big.example.test"
+              answer(query, 0x8180, 0, "")
+            else
+              answer(query, 0x8180, 2, chain(query, type))
+            end
+    server.send_to(reply, got.host, got.port)
+  end
+  server.close
+end
+
+def serve_tcp(server : IyiSocket) : Nil
+  conn = server.accept
+  server.close
+  return unless conn.is_a?(IyiSocket)
+  held = ""
+  while held.bytesize < 2 || held.bytesize < 2 + ((held.byte_at(0).to_i32 << 8) | held.byte_at(1).to_i32)
+    got = conn.read(4096)
+    break unless got.is_a?(String)
+    break if got.empty?
+    held = held + got
+  end
+  query = held[2, held.bytesize - 2]
+  name = DnsTapeMessage.read_name(query, 12)
+  puts "tcp #{name ? name[0] : "?"} #{query.byte_at(query.bytesize - 3)}"
+  records = unhex("c00c000100010000003c0004c0000263")
+  reply = answer(query, 0x8180, 1, records)
+  conn.write(String.build(reply.bytesize + 2) { |w|
+    w.push((reply.bytesize >> 8).to_u8)
+    w.push((reply.bytesize & 255).to_u8)
+    reply.each_byte { |b| w.push(b) }
+  })
+  conn.close
+end
+
+tape do
+  puts hex(DnsTapeMessage.query(0x1234_u16, "example.com", DnsTapeRecord::A)) ==
+    "123401000001000000000000076578616d706c6503636f6d0000010001"
+  padded = DnsTapeMessage.query(0xBEEF_u16, "www.example.com.", DnsTapeRecord::HTTPS, DnsTapeMessage::PADDING_BLOCK)
+  puts "#{padded.bytesize} #{hex(padded[0, 48])}"
+  puts DnsTapeMessage.id_of(padded)
+
+  a1 = unhex("12348180000100040000000103777777076578616d706c6503636f6d0000010001c00c000500010000012c00110363646e076578616d706c65036e657400c02d000100010000003c0004c0000207c02d000100010000003c0004c0000208c00c001000010000001e000d0568656c6c6f0620776f726c6400002904d0010000000000")
+  m = DnsTapeMessage.parse(a1)
+  if m.is_a?(DnsTapeMessage)
+    puts "#{m.id} #{m.response?} #{m.question_name} #{m.question_type} rcode #{m.rcode} #{m.answers.size} ends #{DnsTapeMessage.ends_at(a1) == a1.bytesize}"
+    puts m.answers?(0x1234_u16, "WWW.example.com.", DnsTapeRecord::A)
+    puts m.answers?(0x1235_u16, "www.example.com", DnsTapeRecord::A)
+    m.answers.each { |r| puts "  #{r.name} #{r.type} #{r.ttl} #{r.data.bytesize} #{r.target}" }
+    got = m.addresses("www.example.com", DnsTapeRecord::A)
+    if got.is_a?(Tuple(Array(String), String, Int32))
+      puts "#{got[0].map { |d| dotted(d) }.join(",")} at #{got[1]} after #{got[2]}"
+    end
+    txt = m.answers[3]
+    puts (DnsTapeRecord.character_strings(txt.data) || ["?"]).join("|")
+  end
+  loop = DnsTapeMessage.parse(unhex("00018180000100000000000003777777c01000010001"))
+  puts loop.is_a?(DnsError) ? "#{loop.malformed?} #{loop.reason}" : "read a loop"
+  short = DnsTapeMessage.parse(unhex("1234"))
+  puts short.is_a?(DnsError) ? short.reason : "read"
+
+  s1 = unhex("000100000100060268320268330003000220fb00040004c0000201000500060004010203040006001020010db8000000000000000000000001")
+  svcb = SvcbRecord.parse(s1, "svc.example")
+  if svcb.is_a?(SvcbRecord)
+    puts svcb.to_s
+    puts "#{svcb.endpoint} #{svcb.port} #{svcb.alpn.join(",")} #{(svcb.ech || "").bytesize}"
+  else
+    puts svcb.reason
+  end
+  bad = SvcbRecord.parse(unhex("0001000003000100"))
+  puts bad.is_a?(DnsError) ? bad.reason : "read"
+  puts DnsName.candidates("db", ["corp.test", "test."], 1).join(" ")
+  puts DnsName.candidates("a.b.", ["corp.test"], 5).join(" ")
+end
+
+tcp = IyiSocket.listen("127.0.0.1", 0)
+port = tcp.local_port
+group do |g|
+  g.spawn do
+    serve_udp(port)
+    0
+  end
+  g.spawn do
+    serve_tcp(tcp)
+    0
+  end
+  RisBoard.take(UdpReady)
+  tape do
+    resolver = Resolver.new(["127.0.0.1:#{port}"], timeout_ms: 2000, attempts: 1)
+    www = resolver.resolve("www.example.test")
+    puts www.is_a?(Array(IPAddress)) ? www.map(&.to_s).join(" ") : "failed"
+    big = resolver.resolve("big.example.test")
+    puts big.is_a?(Array(IPAddress)) ? big.map(&.to_s).join(" ") : "failed"
+  end
+end

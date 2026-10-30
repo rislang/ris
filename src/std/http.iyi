@@ -3986,7 +3986,7 @@ pub struct HTTP
       next unless DnsName.valid?(host)
       ech = nil.as(Array(UInt8)?)
       if list = record.ech
-        bytes = Array(UInt8).new(list.size) { |index| list[index] }
+        bytes = Array(UInt8).new(list.bytesize) { |index| list.byte_at(index) }
         configs = TlsEchConfig.read_list(bytes)
         ech = bytes if configs.is_a?(Array(TlsEchConfig)) && configs.any? { |config| !config.hpke_suite.nil? }
       end
@@ -5882,7 +5882,7 @@ class H2Connection
       s.head = s.pieces.size
       s.taken = 0
     elsif body.bytesize > 0
-      s.pieces << body.to_heap
+      s.pieces << body.copy_to(RisCurrentTape.new)
     end
     if flags & END_STREAM != 0
       s.ended = true
@@ -6155,7 +6155,7 @@ class H2Connection
       nil
     end
     @pending << head
-    @pending << payload.to_heap if n > 0
+    @pending << payload.copy_to(RisCurrentTape.new) if n > 0
     @pending_size = @pending_size + 9 + n
     @pending_size >= PENDING ? flush : true
   end

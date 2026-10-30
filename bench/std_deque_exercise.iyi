@@ -4,8 +4,9 @@
 #
 # Two parts. The first asserts, on deques a person can read, the ends, the
 # indices, the wraparound, growth while wrapped, rotation, insertion and
-# deletion on both sides of the middle, the trait surface, and that a
-# vacated slot is zeroed. The second drives 3,000 operations chosen by a
+# deletion on both sides of the middle and the trait surface (a vacated
+# slot is no longer zeroed: there is no collector to hide it from). The
+# second drives 3,000 operations chosen by a
 # fixed linear congruential generator and prints the deque after each
 # hundred; the gate script diffs those lines against python3 driving its
 # `collections.deque` with the same choices.
@@ -160,19 +161,6 @@ assert_equal("usable after clear", t.to_s, "Deque{1}")
 w = Deque(Int32).new([1, 2, 3])
 w.concat(w)
 assert_equal("concat onto itself", w.to_s, "Deque{1, 2, 3, 1, 2, 3}")
-
-puts "deque: vacated slots"
-# `unsafe_fetch` reads past the size without checking, which is the one
-# way to see the slot: after a pop or shift it reads as zero, not as the
-# element that was there.
-v = Deque(Int32).new([5, 6, 7])
-v.pop
-assert_equal("pop zeroes its slot", v.unsafe_fetch(2).to_s, "0")
-v.shift
-assert_equal("shift zeroes its slot", v.unsafe_fetch(-1).to_s, "0")
-v.push(8).push(9)
-v.delete_at(1)
-assert_equal("delete_at zeroes the vacated slot", v.to_s + " " + v.unsafe_fetch(2).to_s, "Deque{6, 9} 0")
 
 # ---- 2. Churn against python3 -----------------------------------------------
 #

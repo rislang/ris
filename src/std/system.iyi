@@ -219,11 +219,16 @@ pub struct System
     # it fits; a kernel built for more CPUs than 1,024 is real (SGI UV,
     # NR_CPUS=8192 in distribution configs). On success the answer is the
     # bytes the kernel wrote, and only those are counted.
+    @[TapeUnsafe("hands the mask Array's words to sched_getaffinity")]
     private def self.affinity_count : Int32
       bytes = 128
+      # One tape Array, grown in place: growth never moves it.
+      mask = [] of UInt64
       while bytes <= 1048576
-        mask = Pointer(UInt64).malloc(bytes.to_u64 // 8_u64)
-        got = sys(SYS_SCHED_GETAFFINITY, 0_i64, bytes.to_i64, mask.address.to_i64)
+        while mask.size < bytes // 8
+          mask << 0_u64
+        end
+        got = sys(SYS_SCHED_GETAFFINITY, 0_i64, bytes.to_i64, mask.to_unsafe.address.to_i64)
         if got > 0_i64
           # The kernel writes whole longs.
           count = 0
@@ -272,46 +277,48 @@ pub struct System
     private def self.auxv_page_size : Int32
       text = read_small("/proc/self/auxv")
       return 0 if text.nil?
-      words = text.to_unsafe.as(UInt64*)
       pairs = text.bytesize // 16
       index = 0
       while index < pairs
-        tag = words[index * 2]
+        tag = word(text, index * 16)
         return 0 if tag == 0_u64
-        return words[index * 2 + 1].to_i32 if tag == AT_PAGESZ
+        return word(text, index * 16 + 8).to_i32 if tag == AT_PAGESZ
         index = index + 1
       end
       0
     end
 
+    # The native-order 64-bit word at *at* in *text*: little-endian on
+    # both of ris's targets.
+    private def self.word(text : String, at : Int32) : UInt64
+      value = 0_u64
+      8.times { |k| value = value | text.byte_at(at + k).to_u64.unsafe_shl((8 * k).to_u64) }
+      value
+    end
+
     # A whole small file from /proc or /sys, or nil when it cannot be
     # opened or read. Those files report a size of 0 to `stat` and are read
     # until the kernel answers 0; a read a signal interrupted is asked again.
+    @[TapeUnsafe("passes the path and the builder's room to the kernel")]
     private def self.read_small(path : String) : String?
       fd = __iyi_open_read(path.to_unsafe)
       return nil if fd < 0_i64
-      held = 0
-      capacity = 4096
-      buffer = Pointer(UInt8).malloc(capacity.to_u64)
+      text = String::Builder.new(4096)
       while true
-        if held == capacity
-          grown = Pointer(UInt8).malloc((capacity * 2).to_u64)
-          grown.copy_from(buffer, held)
-          buffer = grown
-          capacity = capacity * 2
+        got = 0_i64
+        text.unsafe_append(4096) do |room|
+          got = __iyi_file_read(fd, room.as(Void*), 4096_u64)
+          got > 0_i64 ? got.to_i32 : 0
         end
-        got = __iyi_file_read(fd, (buffer + held.to_i64).as(Void*), (capacity - held).to_u64)
-        if got > 0_i64
-          held = held + got.to_i32
-        elsif got == 0_i64
+        if got == 0_i64
           break
-        elsif got != -4_i64
+        elsif got < 0_i64 && got != -4_i64
           __iyi_close(fd)
           return nil
         end
       end
       __iyi_close(fd)
-      String.new(held) { |target| target.copy_from(buffer, held) }
+      text.finish
     end
   {% elsif flag?(:darwin) %}
     # A 32-bit integer sysctl by name, or 0 when the name is not there.

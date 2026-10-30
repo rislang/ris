@@ -1,0 +1,13 @@
+module test/sysinfo
+
+import std/system::{System}
+
+# std/system on the tape: the CPU count from the affinity mask (a tape
+# Array the kernel fills), /proc and /sys read into a builder.
+
+tape do
+  cpus = System.cpu_count
+  puts cpus
+  puts System.page_size
+  puts System.hostname.empty?
+end

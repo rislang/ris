@@ -1,0 +1,19 @@
+module test/interned
+
+import std/string_pool::{StringPool}
+
+# std/string_pool on the tape: one copy per text, the same one asked for
+# again from other bytes, and a rehash that keeps them all.
+
+tape do
+  pool = StringPool.new(2)
+  a = pool.get("alpha")
+  joined = "al" + "pha"
+  b = pool.get(joined)
+  puts "#{a} #{b} #{pool.size} #{pool.capacity}"
+  puts pool.get?("beta").nil?
+  100.times { |i| pool.get("word#{i % 40}") }
+  puts "#{pool.size} #{pool.capacity} #{pool.get?("word7")} #{pool.get?("word40").nil?}"
+  puts pool.get("") == ""
+  puts pool.size
+end

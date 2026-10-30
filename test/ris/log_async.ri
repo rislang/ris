@@ -1,0 +1,21 @@
+module test/log_async
+
+import std/log::{Log, Severity, AsyncBackend, Formatter, TapeEntry}
+
+# std/log's AsyncBackend: lines posted to a writer task in a group around
+# the block, written in order; close drains, and a second one does
+# nothing.
+
+class MessageOnly < Formatter
+  def format(entry : TapeEntry, writer : String::Builder) : Nil
+    writer << entry.message
+  end
+end
+
+AsyncBackend.open(STDOUT, MessageOnly.new) do |backend|
+  Log.setup(Severity::Info, backend)
+  200.times { |i| Log.info("line #{i}") if i % 50 == 0 }
+  Log.debug("hidden")
+  backend.close
+end
+puts "after"

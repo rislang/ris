@@ -57,8 +57,8 @@
 #
 # Padding: TLS hides a query's bytes and not its length, and a query's
 # length is the name's plus a constant, so the resolver pads every query
-# it gives an upstream (`DnsMessage.query` with
-# `DnsMessage::PADDING_BLOCK`): an EDNS(0) OPT record with a Padding
+# it gives an upstream (`DnsTapeMessage.query` with
+# `DnsTapeMessage::PADDING_BLOCK`): an EDNS(0) OPT record with a Padding
 # option of zero bytes (RFC 7830) brings each one to a multiple of 128
 # octets, RFC 8467 4.1's policy for a client. A query is 33 bytes and its
 # name's characters before padding, so a name of up to 95 characters goes
@@ -83,13 +83,12 @@ import std/indexable
 
 import std/text
 
-import std/dns::{DnsError, DnsMessage, DnsName}
+import std/dns::{DnsError, DnsTapeMessage, DnsName}
 import std/socket::{DnsUpstream, IPv4Address, IPv6Address, IyiSocket, Resolver, SocketError}
 import std/tls::{TlsClient, TlsConfig, TlsError, TlsSession}
 import std/http::{HTTP, HTTPClient, HTTPError, Response}
 import std/uri::{URI}
 import std/base64::{Base64}
-import std/slice::{Bytes}
 
 # DNS over TLS to one server: see the module's header.
 pub class DnsOverTls
@@ -139,8 +138,8 @@ pub class DnsOverTls
     false
   end
 
-  def exchange(queries : Array(Bytes), timeout_ms : Int32) : Array(Bytes) | DnsError | Cancelled
-    got = nil.as(Array(Bytes) | DnsError | Cancelled | Nil)
+  def exchange(queries : Array(String), timeout_ms : Int32) : Array(String) | DnsError | Cancelled
+    got = nil.as(Array(String) | DnsError | Cancelled | Nil)
     if kept = live
       got = over(kept, queries, timeout_ms, true)
     end
@@ -151,7 +150,7 @@ pub class DnsOverTls
       got = over(fresh, queries, timeout_ms, false)
     end
     return lost("the connection ended before an answer") if got.nil?
-    @used_ms = Resolver.now_ms if got.is_a?(Array(Bytes))
+    @used_ms = Resolver.now_ms if got.is_a?(Array(String))
     got
   end
 
@@ -197,18 +196,14 @@ pub class DnsOverTls
   # for each, matched by ID. Nil when *reused* and the connection turned
   # out closed before a byte of an answer: the caller asks again on a new
   # one. Every failure closes the connection.
-  private def over(tls : TlsClient, queries : Array(Bytes), timeout_ms : Int32, reused : Bool) : Array(Bytes) | DnsError | Cancelled | Nil
+  private def over(tls : TlsClient, queries : Array(String), timeout_ms : Int32, reused : Bool) : Array(String) | DnsError | Cancelled | Nil
     framed = [] of UInt8
     ids = [] of Int32
     queries.each do |query|
-      framed << (query.size >> 8).to_u8
-      framed << (query.size & 255).to_u8
-      index = 0
-      while index < query.size
-        framed << query[index]
-        index = index + 1
-      end
-      ids << DnsMessage.id_of(query)
+      framed << (query.bytesize >> 8).to_u8
+      framed << (query.bytesize & 255).to_u8
+      query.each_byte { |byte| framed << byte }
+      ids << DnsTapeMessage.id_of(query)
     end
     wrote = tls.write(framed)
     if wrote.is_a?(TlsError)
@@ -217,7 +212,7 @@ pub class DnsOverTls
       return nil if reused && !wrote.timed_out?
       return failed(wrote.timed_out?, wrote.message)
     end
-    answers = [] of Bytes?
+    answers = [] of String?
     queries.each { answers << nil }
     left = queries.size
     while left > 0
@@ -227,11 +222,11 @@ pub class DnsOverTls
         return nil if reused && left == queries.size
         return lost("the connection ended with #{left} of #{queries.size} answers to come")
       end
-      unless frame.is_a?(Bytes)
+      unless frame.is_a?(String)
         close
         return frame
       end
-      id = DnsMessage.id_of(frame)
+      id = DnsTapeMessage.id_of(frame)
       slot = -1
       index = 0
       while index < answers.size
@@ -248,15 +243,15 @@ pub class DnsOverTls
       answers[slot] = frame
       left = left - 1
     end
-    whole = [] of Bytes
-    answers.each { |answer| whole << answer.as(Bytes) }
+    whole = [] of String
+    answers.each { |answer| whole << answer.as(String) }
     whole
   end
 
   # The next message: its two bytes of length, then that many. Nil when
   # the connection ended cleanly between messages with nothing of the next
   # one read; a truncated answer when it ended inside one.
-  private def read_frame(tls : TlsClient) : Bytes | DnsError | Cancelled | Nil
+  private def read_frame(tls : TlsClient) : String | DnsError | Cancelled | Nil
     while @pending.size < 2
       more = fill(tls)
       return more unless more.is_a?(Bool)
@@ -268,11 +263,8 @@ pub class DnsOverTls
       return more unless more.is_a?(Bool)
       return truncated(@pending.size - 2, length) unless more
     end
-    frame = Bytes.new(length)
-    index = 0
-    while index < length
-      frame[index] = @pending[2 + index]
-      index = index + 1
+    frame = String.build(length > 0 ? length : 1) do |writer|
+      length.times { |index| writer.push(@pending[2 + index]) }
     end
     rest = @pending.size - 2 - length
     rest.times { |i| @pending[i] = @pending[2 + length + i] }
@@ -290,12 +282,7 @@ pub class DnsOverTls
       return false
     end
     return false if chunk.empty?
-    raw = chunk.to_unsafe
-    index = 0
-    while index < chunk.bytesize
-      @pending << raw[index]
-      index = index + 1
-    end
+    chunk.each_byte { |byte| @pending << byte }
     true
   end
 
@@ -375,11 +362,11 @@ pub class DnsOverHttps
     @client.connections_reused
   end
 
-  def exchange(queries : Array(Bytes), timeout_ms : Int32) : Array(Bytes) | DnsError | Cancelled
-    answers = [] of Bytes
+  def exchange(queries : Array(String), timeout_ms : Int32) : Array(String) | DnsError | Cancelled
+    answers = [] of String
     queries.each do |query|
       one = ask(query, timeout_ms)
-      return one unless one.is_a?(Bytes)
+      return one unless one.is_a?(String)
       answers << one
     end
     answers
@@ -394,14 +381,14 @@ pub class DnsOverHttps
   def self.base64url(message : String) : String
     text = Base64.urlsafe_encode(message)
     size = text.bytesize
-    while size > 0 && text.to_unsafe[size - 1] == 61_u8
+    while size > 0 && text.byte_at(size - 1) == 61_u8
       size = size - 1
     end
     text[0, size]
   end
 
-  private def ask(query : Bytes, timeout_ms : Int32) : Bytes | DnsError | Cancelled
-    body = String.new(query.size) { |into| into.copy_from(query.to_unsafe, query.size) }
+  private def ask(query : String, timeout_ms : Int32) : String | DnsError | Cancelled
+    body = query
     headers = {"Accept" => MEDIA}
     target = @url
     if @method == "GET"
@@ -413,7 +400,7 @@ pub class DnsOverHttps
     where = label
     got = HTTP.open(@method, target, headers, body, redirects: 0, decompress: false, client: @client, timeout_ms: timeout_ms) { |response| DnsOverHttps.answer(response, where) }
     case got
-    in Bytes, DnsError, Cancelled
+    in String, DnsError, Cancelled
       got
     in SocketError
       return DnsError.new(DnsError::TIMED_OUT, "", where) if got.timed_out?
@@ -428,7 +415,7 @@ pub class DnsOverHttps
   # `MAX_ANSWER` bytes. RFC 8484 4.2.1 calls any 2xx a success, but no
   # other 2xx carries an answer to a query: 204 has no body and 206 a part
   # of one.
-  def self.answer(response : Response, label : String) : Bytes | DnsError | Cancelled
+  def self.answer(response : Response, label : String) : String | DnsError | Cancelled
     return DnsError.new(DnsError::REFUSED, "", label, "HTTP #{response.status} #{response.reason}") unless response.status == 200
     said = response.header("Content-Type") || ""
     media = said.split(';')[0].strip.downcase
@@ -441,9 +428,7 @@ pub class DnsOverHttps
     return body if body.is_a?(Cancelled)
     return oversized(label) if body.is_a?(HTTPError) && body.status == 413
     return DnsError.new(DnsError::UNREACHABLE, "", label, body.message) if body.is_a?(HTTPError) || body.is_a?(SocketError)
-    message = Bytes.new(body.bytesize)
-    message.to_unsafe.copy_from(body.to_unsafe, body.bytesize)
-    message
+    body
   end
 
   private def self.oversized(label : String) : DnsError

@@ -329,7 +329,7 @@ else
     'same_name && question_type == type && question_class' \
     'question_type == type && question_class'
   breaks "a truncated answer taken as it came" notcp "a truncated answer is asked again over TCP" socket.iyi \
-    'return ask_tcp(server, query, id, name, type) if answer.is_a?(DnsMessage) && answer.truncated?' \
+    'return ask_tcp(server, query, id, name, type) if answer.is_a?(DnsTapeMessage) && answer.truncated?' \
     ''
   # The ID is checked twice - before the bytes are parsed, and again by
   # `answers?` - so the proof takes out both.
@@ -346,8 +346,8 @@ else
     '(@extended_rcode << 4) | (@flags & 15)' \
     '@flags & 15'
   breaks "a CNAME not followed" nocname "a CNAME chain in one answer" dns.iyi \
-    'next_name = record.target if record.type == DnsRecord::CNAME && next_name.empty?' \
-    'next_name = "" if record.type == DnsRecord::CNAME'
+    'next_name = record.target if record.type == DnsTapeRecord::CNAME && next_name.empty?' \
+    'next_name = "" if record.type == DnsTapeRecord::CNAME'
   breaks "one attempt where two were asked for" noretry "the second attempt is answered" socket.iyi \
     'while attempt < @attempts' \
     'while attempt < 1'
@@ -361,7 +361,7 @@ else
     'return nil unless pointer < floor' \
     'return nil unless pointer < size'
   breaks "a CNAME chain without a bound" cnamebound HANG dns.iyi \
-    'return DnsMessage.malformed("a chain of more than #{budget} CNAMEs, or a loop of them") if links > budget' \
+    'return DnsTapeMessage.malformed("a chain of more than #{budget} CNAMEs, or a loop of them") if links > budget' \
     ''
   breaks "a name read as an address, as it was" noname 'cannot resolve address: "web.test"' socket.iyi \
     '!localhost?(host) && DnsName.valid?(host)' \
@@ -371,13 +371,13 @@ else
   # (`Resolver#https_records`). The chain the bound ends never ends, so
   # without it the lookup asks until it is killed.
   breaks "SvcParamKeys taken out of order" svcborder "keys out of order are refused" dns.iyi \
-    'return DnsMessage.malformed("SvcParamKey #{key_name(key)} after #{key_name(last)}: the keys are not in increasing order") if key < last' \
+    'return DnsTapeMessage.malformed("SvcParamKey #{key_name(key)} after #{key_name(last)}: the keys are not in increasing order") if key < last' \
     ''
   breaks "a SvcParamKey taken twice" svcbtwice "a key twice is refused" dns.iyi \
-    'return DnsMessage.malformed("SvcParamKey #{key_name(key)} twice") if key == last' \
+    'return DnsTapeMessage.malformed("SvcParamKey #{key_name(key)} twice") if key == last' \
     ''
   breaks "mandatory keys not held to the record" svcbmandatory "a mandatory key the record does not carry is refused" dns.iyi \
-    'return DnsMessage.malformed("mandatory lists #{key_name(listed)}, which the record does not carry") unless keys.includes?(listed)' \
+    'return DnsTapeMessage.malformed("mandatory lists #{key_name(listed)}, which the record does not carry") unless keys.includes?(listed)' \
     ''
   breaks "an AliasMode chain without a bound" aliasbound HANG socket.iyi \
     'if aliases > SvcbAnswer::MAX_ALIASES' \

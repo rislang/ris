@@ -21,7 +21,7 @@ module bench/std_dns_exercise
 
 import std/indexable
 
-import std/dns::{DnsError, DnsMessage, DnsName, DnsRecord, HostsFile, ResolvConf, SvcbAnswer, SvcbRecord}
+import std/dns::{DnsError, DnsTapeMessage, DnsName, DnsTapeRecord, HostsFile, ResolvConf, SvcbAnswer, SvcbRecord}
 import std/socket::{IPAddress, IPv4Address, IPv6Address, IyiSocket, Resolver, SocketError}
 import std/udp::{UdpSocket}
 import std/slice::{Bytes}
@@ -151,7 +151,7 @@ def edns_answer(query : Bytes, rcode : Int32, extended : Int32, opts : Int32, ow
   buf = answer_head(query, rcode, 1)
   buf[9] = 1_u8
   buf[11] = opts.to_u8
-  add_record(buf, QUESTION, DnsRecord::AAAA, aaaa_data(1))
+  add_record(buf, QUESTION, DnsTapeRecord::AAAA, aaaa_data(1))
   add_record(buf, wire_name("Test"), 6, soa_data)
   index = 0
   while index < opts
@@ -238,7 +238,7 @@ def update_records(packet : Bytes) : Array(Tuple(String, Bytes))?
   at = 12
   index = 0
   while index < zones
-    read = DnsMessage.read_name(packet, at)
+    read = DnsTapeMessage.read_name(packet, at)
     return nil if read.nil?
     at = read[1] + 4
     index = index + 1
@@ -246,14 +246,14 @@ def update_records(packet : Bytes) : Array(Tuple(String, Bytes))?
   found = [] of Tuple(String, Bytes)
   index = 0
   while index < prerequisites + updates
-    read = DnsMessage.read_name(packet, at)
+    read = DnsTapeMessage.read_name(packet, at)
     return nil if read.nil?
     owner, at = read
     return nil if at + 10 > packet.size
     type = (raw[at].to_i32 << 8) | raw[at + 1].to_i32
     length = (raw[at + 8].to_i32 << 8) | raw[at + 9].to_i32
     return nil if at + 10 + length > packet.size
-    if index >= prerequisites && type == DnsRecord::HTTPS
+    if index >= prerequisites && type == DnsTapeRecord::HTTPS
       data = Bytes.new(length)
       data.to_unsafe.copy_from(raw + at + 10, length)
       found << {owner.downcase, data}
@@ -290,7 +290,7 @@ def serve_zone(dir : String) : Nil
       end
       File.write("#{dir}/seen", seen.join("\n") + "\n")
       # NOERROR, the header and the zone section as they came.
-      zone_ends = DnsMessage.read_name(packet, 12)
+      zone_ends = DnsTapeMessage.read_name(packet, 12)
       next if zone_ends.nil?
       reply = Bytes.new(zone_ends[1] + 4)
       reply.to_unsafe.copy_from(packet.to_unsafe, reply.size)
@@ -304,7 +304,7 @@ def serve_zone(dir : String) : Nil
       server.send_to(reply, host, peer)
       next
     end
-    asked = DnsMessage.read_name(packet, 12)
+    asked = DnsTapeMessage.read_name(packet, 12)
     next if asked.nil?
     name, ends = asked
     name = name.downcase
@@ -320,7 +320,7 @@ def serve_zone(dir : String) : Nil
     buf = answer_head(bytes_of(question), name == "stop.test" ? 3 : 0, records.size)
     buf[10] = 0_u8
     buf[11] = 0_u8
-    records.each { |record| add_record(buf, QUESTION, DnsRecord::HTTPS, Array(UInt8).new(record[1].size) { |at| record[1][at] }) }
+    records.each { |record| add_record(buf, QUESTION, DnsTapeRecord::HTTPS, Array(UInt8).new(record[1].size) { |at| record[1][at] }) }
     server.send_to(bytes_of(buf), host, peer)
     break if name == "stop.test"
   end
@@ -334,7 +334,7 @@ end
 
 # --- The wire format, with no network ---
 
-query = DnsMessage.query(0xBEEF_u16, "a.Test.", DnsRecord::AAAA)
+query = DnsTapeMessage.query(0xBEEF_u16, "a.Test.", DnsTapeRecord::AAAA)
 expected = [0xBE, 0xEF, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 97, 4, 84, 101, 115, 116, 0, 0, 28, 0, 1]
 same expected.size.to_s, query.size.to_s, "query size"
 index = 0
@@ -342,9 +342,9 @@ while index < expected.size
   check query[index] == expected[index].to_u8, "query byte #{index}: #{query[index]} where #{expected[index]}"
   index = index + 1
 end
-parsed = DnsMessage.parse(query)
-check parsed.is_a?(DnsMessage), "a query parses"
-check !parsed.as(DnsMessage).response?, "a query is not a response"
+parsed = DnsTapeMessage.parse(query)
+check parsed.is_a?(DnsTapeMessage), "a query parses"
+check !parsed.as(DnsTapeMessage).response?, "a query is not a response"
 puts "query_bytes: ok"
 
 # Names with compression: a name at 12, a second pointing into it, a
@@ -355,23 +355,23 @@ packet << 3_u8; packet << 119_u8; packet << 119_u8; packet << 119_u8 # 26: "www"
 packet << 0xC0_u8; packet << 12_u8                                   # -> example.test
 packet << 1_u8; packet << 120_u8                                     # 32: "x"
 packet << 0xC0_u8; packet << 26_u8                                   # -> www.example.test
-read = DnsMessage.read_name(bytes_of(packet), 32)
+read = DnsTapeMessage.read_name(bytes_of(packet), 32)
 check !read.nil?, "a chain of backward pointers reads"
 same "x.www.example.test", read.as(Tuple(String, Int32))[0], "decompressed name"
 same "36", read.as(Tuple(String, Int32))[1].to_s, "the name ends after its first pointer"
 
 itself = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xC0, 12] of UInt8
-check DnsMessage.read_name(bytes_of(itself), 12).nil?, "a pointer to itself is refused"
+check DnsTapeMessage.read_name(bytes_of(itself), 12).nil?, "a pointer to itself is refused"
 pair = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 97, 0xC0, 16, 1, 98, 0xC0, 12] of UInt8
-check DnsMessage.read_name(bytes_of(pair), 16).nil?, "two names pointing at each other are refused"
+check DnsTapeMessage.read_name(bytes_of(pair), 16).nil?, "two names pointing at each other are refused"
 forward = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xC0, 16, 0, 0, 1, 97, 0] of UInt8
-check DnsMessage.read_name(bytes_of(forward), 12).nil?, "a forward pointer is refused"
+check DnsTapeMessage.read_name(bytes_of(forward), 12).nil?, "a forward pointer is refused"
 past = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xC0, 0xFF] of UInt8
-check DnsMessage.read_name(bytes_of(past), 12).nil?, "a pointer past the end is refused"
+check DnsTapeMessage.read_name(bytes_of(past), 12).nil?, "a pointer past the end is refused"
 short = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 97, 98] of UInt8
-check DnsMessage.read_name(bytes_of(short), 12).nil?, "a label past the end is refused"
+check DnsTapeMessage.read_name(bytes_of(short), 12).nil?, "a label past the end is refused"
 dotted = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 97, 46, 98, 0] of UInt8
-check DnsMessage.read_name(bytes_of(dotted), 12).nil?, "a label holding a dot is refused"
+check DnsTapeMessage.read_name(bytes_of(dotted), 12).nil?, "a label holding a dot is refused"
 puts "compression: ok"
 
 check DnsName.valid?("example.com"), "a host name"
@@ -399,7 +399,7 @@ puts "codec: ok"
 # 6.1.2 and RFC 7830 3 - the 24 bytes above with ARCOUNT 1, then the OPT
 # record (root, type 41, payload 1232, TTL 0, 93 bytes of data) holding
 # Padding (12) of 89 zero bytes, 128 in all (RFC 8467 4.1).
-padded = DnsMessage.query(0xBEEF_u16, "a.Test.", DnsRecord::AAAA, DnsMessage::PADDING_BLOCK)
+padded = DnsTapeMessage.query(0xBEEF_u16, "a.Test.", DnsTapeRecord::AAAA, DnsTapeMessage::PADDING_BLOCK)
 same "128", padded.size.to_s, "a padded query's size"
 expected = [0xBE, 0xEF, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 97, 4, 84, 101, 115, 116, 0, 0, 28, 0, 1,
             0, 0, 41, 0x04, 0xD0, 0, 0, 0, 0, 0, 93, 0, 12, 0, 89]
@@ -409,23 +409,23 @@ while index < padded.size
   check padded[index] == wanted.to_u8, "padded query byte #{index}: #{padded[index]} where #{wanted}"
   index = index + 1
 end
-check DnsMessage.ends_at(padded) == 128, "a padded query ends where its padding does"
+check DnsTapeMessage.ends_at(padded) == 128, "a padded query ends where its padding does"
 # Answers as a server that speaks EDNS(0) writes them.
-answered = DnsMessage.parse(edns_answer(query, 0, 0, 1, [0_u8]))
-check answered.is_a?(DnsMessage) && answered.rcode == 0 && answered.answers.size == 1, "an answer with an SOA and an OPT record reads: #{answered.is_a?(DnsError) ? answered.message : answered.rcode}"
-badvers = DnsMessage.parse(edns_answer(query, 0, 1, 1, [0_u8]))
-check badvers.is_a?(DnsMessage) && badvers.rcode == DnsMessage::RCODE_BADVERS, "the OPT record's extended RCODE over the header's: BADVERS (16), not NOERROR: #{badvers.is_a?(DnsError) ? badvers.message : badvers.rcode}"
-if badvers.is_a?(DnsMessage)
+answered = DnsTapeMessage.parse(edns_answer(query, 0, 0, 1, [0_u8]))
+check answered.is_a?(DnsTapeMessage) && answered.rcode == 0 && answered.answers.size == 1, "an answer with an SOA and an OPT record reads: #{answered.is_a?(DnsError) ? answered.message : answered.rcode}"
+badvers = DnsTapeMessage.parse(edns_answer(query, 0, 1, 1, [0_u8]))
+check badvers.is_a?(DnsTapeMessage) && badvers.rcode == DnsTapeMessage::RCODE_BADVERS, "the OPT record's extended RCODE over the header's: BADVERS (16), not NOERROR: #{badvers.is_a?(DnsError) ? badvers.message : badvers.rcode}"
+if badvers.is_a?(DnsTapeMessage)
   said = Resolver.read_rcode(badvers, "a.test", "here")
   check said.is_a?(DnsError) && said.refused? && said.detail == "BADVERS", "BADVERS is the server's refusal, named"
 end
-twice = DnsMessage.parse(edns_answer(query, 0, 0, 2, [0_u8]))
+twice = DnsTapeMessage.parse(edns_answer(query, 0, 0, 2, [0_u8]))
 check twice.is_a?(DnsError) && twice.malformed?, "two OPT records are refused (RFC 6891 6.1.1)"
-owned = DnsMessage.parse(edns_answer(query, 0, 0, 1, wire_name("Test")))
+owned = DnsTapeMessage.parse(edns_answer(query, 0, 0, 1, wire_name("Test")))
 check owned.is_a?(DnsError) && owned.malformed?, "an OPT record owned by a name, not the root, is refused (RFC 6891 6.1.2)"
 claimed = edns_answer(query, 0, 0, 1, [0_u8])
 claimed[11] = 2_u8
-short_of = DnsMessage.parse(claimed)
+short_of = DnsTapeMessage.parse(claimed)
 check short_of.is_a?(DnsError) && short_of.malformed?, "an additional section shorter than its count is refused"
 puts "edns: ok"
 
@@ -561,37 +561,37 @@ def https_answer(query : Bytes, name : String) : Array(UInt8)
   if name.starts_with?("chain") && name.ends_with?(".test")
     link = name[5, name.bytesize - 10].to_i
     buf = answer_head(query, 0, 1)
-    add_record(buf, QUESTION, DnsRecord::HTTPS, svcb_data(0, "chain#{link + 1}.test"))
+    add_record(buf, QUESTION, DnsTapeRecord::HTTPS, svcb_data(0, "chain#{link + 1}.test"))
     return buf
   end
   case name
   when "svc.test"
     buf = answer_head(query, 0, 3)
-    add_record(buf, QUESTION, DnsRecord::HTTPS, svcb_data(3, ".", "#{ported} 1f43"))
-    add_record(buf, QUESTION, DnsRecord::HTTPS, svcb_data(1, ".", "#{ported} 1f41"))
-    add_record(buf, QUESTION, DnsRecord::HTTPS, svcb_data(2, ".", "#{ported} 1f42"))
+    add_record(buf, QUESTION, DnsTapeRecord::HTTPS, svcb_data(3, ".", "#{ported} 1f43"))
+    add_record(buf, QUESTION, DnsTapeRecord::HTTPS, svcb_data(1, ".", "#{ported} 1f41"))
+    add_record(buf, QUESTION, DnsTapeRecord::HTTPS, svcb_data(2, ".", "#{ported} 1f42"))
   when "apex.test", "hop.test", "far.test", "gone.test", "bare.test"
     target = {"apex.test" => "svc.test", "hop.test" => "apex.test", "far.test" => "hop.test", "gone.test" => ".", "bare.test" => "a.test"}[name]
     buf = answer_head(query, 0, 1)
-    add_record(buf, QUESTION, DnsRecord::HTTPS, svcb_data(0, target))
+    add_record(buf, QUESTION, DnsTapeRecord::HTTPS, svcb_data(0, target))
   when "mixed.test"
     buf = answer_head(query, 0, 2)
-    add_record(buf, QUESTION, DnsRecord::HTTPS, svcb_data(1, ".", "#{ported} 0001"))
-    add_record(buf, QUESTION, DnsRecord::HTTPS, svcb_data(0, "svc.test"))
+    add_record(buf, QUESTION, DnsTapeRecord::HTTPS, svcb_data(1, ".", "#{ported} 0001"))
+    add_record(buf, QUESTION, DnsTapeRecord::HTTPS, svcb_data(0, "svc.test"))
   when "_8443._https.web.test"
     buf = answer_head(query, 0, 1)
-    add_record(buf, QUESTION, DnsRecord::HTTPS, svcb_data(1, ".", "0001 0003 026832"))
+    add_record(buf, QUESTION, DnsTapeRecord::HTTPS, svcb_data(1, ".", "0001 0003 026832"))
   when "cn.test"
     # cn.test CNAME svc2.test, and svc2.test's record: its target "." is
     # svc2.test, the owner, not the name asked.
     buf = answer_head(query, 0, 2)
     alias_at = buf.size + 12
-    add_record(buf, QUESTION, DnsRecord::CNAME, wire_name("svc2.test"))
-    add_record(buf, [0xC0_u8, alias_at.to_u8], DnsRecord::HTTPS, svcb_data(1, ".", "#{ported} 24c3"))
+    add_record(buf, QUESTION, DnsTapeRecord::CNAME, wire_name("svc2.test"))
+    add_record(buf, [0xC0_u8, alias_at.to_u8], DnsTapeRecord::HTTPS, svcb_data(1, ".", "#{ported} 24c3"))
   when "bad.test"
     buf = answer_head(query, 0, 2)
-    add_record(buf, QUESTION, DnsRecord::HTTPS, svcb_data(1, ".", "#{ported} 01bb"))
-    add_record(buf, QUESTION, DnsRecord::HTTPS, svcb_data(2, ".", "0003 0002 01bb 0001 0003 026832"))
+    add_record(buf, QUESTION, DnsTapeRecord::HTTPS, svcb_data(1, ".", "#{ported} 01bb"))
+    add_record(buf, QUESTION, DnsTapeRecord::HTTPS, svcb_data(2, ".", "0003 0002 01bb 0001 0003 026832"))
   when "nx.test"
     buf = answer_head(query, 3, 0)
   else
@@ -602,27 +602,27 @@ end
 
 # The answer to one query, by name: what each section below asks about.
 def respond(server : UdpSocket, forger : UdpSocket, query : Bytes, host : String, peer_port : Int32, log : Array(String), slow_seen : Int32) : Int32
-  parsed = DnsMessage.parse(query)
-  return slow_seen unless parsed.is_a?(DnsMessage)
+  parsed = DnsTapeMessage.parse(query)
+  return slow_seen unless parsed.is_a?(DnsTapeMessage)
   name = parsed.question_name.downcase
   type = parsed.question_type
-  log << "#{name}/#{type == DnsRecord::A ? "A" : (type == DnsRecord::AAAA ? "AAAA" : "HTTPS")}"
-  if type == DnsRecord::HTTPS
+  log << "#{name}/#{type == DnsTapeRecord::A ? "A" : (type == DnsTapeRecord::AAAA ? "AAAA" : "HTTPS")}"
+  if type == DnsTapeRecord::HTTPS
     server.send_to(bytes_of(https_answer(query, name)), host, peer_port)
     return slow_seen
   end
   buf = [] of UInt8
-  if type == DnsRecord::AAAA
+  if type == DnsTapeRecord::AAAA
     case name
     when "a.test", "alias.test", "dangling.test"
       buf = answer_head(query, 0, 1)
-      add_record(buf, QUESTION, DnsRecord::AAAA, aaaa_data(1))
+      add_record(buf, QUESTION, DnsTapeRecord::AAAA, aaaa_data(1))
     when "nx.test", "db.corp.test"
       buf = answer_head(query, 3, 0)
     when "multi.test"
       buf = answer_head(query, 0, 1)
       v6 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1] of UInt8
-      add_record(buf, QUESTION, DnsRecord::AAAA, v6)
+      add_record(buf, QUESTION, DnsTapeRecord::AAAA, v6)
     when "silent.test"
       return slow_seen
     else
@@ -634,31 +634,31 @@ def respond(server : UdpSocket, forger : UdpSocket, query : Bytes, host : String
   case name
   when "a.test", "db.test"
     buf = answer_head(query, 0, 1)
-    add_record(buf, QUESTION, DnsRecord::A, name == "a.test" ? a_data(192, 0, 2, 1) : a_data(192, 0, 2, 10))
+    add_record(buf, QUESTION, DnsTapeRecord::A, name == "a.test" ? a_data(192, 0, 2, 1) : a_data(192, 0, 2, 10))
   when "web.test"
     buf = answer_head(query, 0, 1)
-    add_record(buf, QUESTION, DnsRecord::A, a_data(127, 0, 0, 1))
+    add_record(buf, QUESTION, DnsTapeRecord::A, a_data(127, 0, 0, 1))
   when "multi.test"
     # Raced, ::1 goes first and holds nothing on the port asked; 127.0.0.1
     # does.
     buf = answer_head(query, 0, 1)
-    add_record(buf, QUESTION, DnsRecord::A, a_data(127, 0, 0, 1))
+    add_record(buf, QUESTION, DnsTapeRecord::A, a_data(127, 0, 0, 1))
   when "alias.test"
     # alias.test CNAME mid.test, mid.test CNAME a.test, a.test A: the
     # second and third owners are pointers into the record before.
     buf = answer_head(query, 0, 3)
     first_target = buf.size + 12
-    add_record(buf, QUESTION, DnsRecord::CNAME, wire_name("mid.test"))
+    add_record(buf, QUESTION, DnsTapeRecord::CNAME, wire_name("mid.test"))
     second_target = buf.size + 12
-    add_record(buf, [0xC0_u8, first_target.to_u8], DnsRecord::CNAME, wire_name("a.test"))
-    add_record(buf, [0xC0_u8, second_target.to_u8], DnsRecord::A, a_data(192, 0, 2, 1))
+    add_record(buf, [0xC0_u8, first_target.to_u8], DnsTapeRecord::CNAME, wire_name("a.test"))
+    add_record(buf, [0xC0_u8, second_target.to_u8], DnsTapeRecord::A, a_data(192, 0, 2, 1))
   when "dangling.test"
     buf = answer_head(query, 0, 1)
-    add_record(buf, QUESTION, DnsRecord::CNAME, wire_name("a.test"))
+    add_record(buf, QUESTION, DnsTapeRecord::CNAME, wire_name("a.test"))
   when "loop.test"
     buf = answer_head(query, 0, 2)
-    add_record(buf, QUESTION, DnsRecord::CNAME, wire_name("other.test"))
-    add_record(buf, wire_name("other.test"), DnsRecord::CNAME, wire_name("loop.test"))
+    add_record(buf, QUESTION, DnsTapeRecord::CNAME, wire_name("other.test"))
+    add_record(buf, wire_name("other.test"), DnsTapeRecord::CNAME, wire_name("loop.test"))
   when "nx.test", "db.corp.test"
     buf = answer_head(query, 3, 0)
   when "fail.test"
@@ -670,36 +670,36 @@ def respond(server : UdpSocket, forger : UdpSocket, query : Bytes, host : String
     # the answer: only the last is the resolver's.
     wrong = answer_head(query, 0, 1)
     wrong[1] = wrong[1] ^ 1_u8
-    add_record(wrong, QUESTION, DnsRecord::A, a_data(6, 6, 6, 6))
+    add_record(wrong, QUESTION, DnsTapeRecord::A, a_data(6, 6, 6, 6))
     server.send_to(bytes_of(wrong), host, peer_port)
     whole = answer_head(query, 0, 1)
     other = Array(UInt8).new(12) { |i| whole[i] }
     wire_name("other.test").each { |byte| other << byte }
     push16(other, 1)
     push16(other, 1)
-    add_record(other, QUESTION, DnsRecord::A, a_data(6, 6, 6, 7))
+    add_record(other, QUESTION, DnsTapeRecord::A, a_data(6, 6, 6, 7))
     server.send_to(bytes_of(other), host, peer_port)
     buf = answer_head(query, 0, 1)
-    add_record(buf, QUESTION, DnsRecord::A, a_data(192, 0, 2, 7))
+    add_record(buf, QUESTION, DnsTapeRecord::A, a_data(192, 0, 2, 7))
   when "forged.test"
     # A perfect answer from the wrong port, sent first: the socket is
     # connected to the server, so the kernel never hands it over.
     fake = answer_head(query, 0, 1)
-    add_record(fake, QUESTION, DnsRecord::A, a_data(6, 6, 6, 8))
+    add_record(fake, QUESTION, DnsTapeRecord::A, a_data(6, 6, 6, 8))
     forger.send_to(bytes_of(fake), host, peer_port)
     buf = answer_head(query, 0, 1)
-    add_record(buf, QUESTION, DnsRecord::A, a_data(192, 0, 2, 8))
+    add_record(buf, QUESTION, DnsTapeRecord::A, a_data(192, 0, 2, 8))
   when "big.test"
     buf = answer_head(query, 0, 0, true)
   when "ptrloop.test"
     buf = answer_head(query, 0, 1)
     at = buf.size
-    add_record(buf, [0xC0_u8, at.to_u8], DnsRecord::A, a_data(6, 6, 6, 9))
+    add_record(buf, [0xC0_u8, at.to_u8], DnsTapeRecord::A, a_data(6, 6, 6, 9))
   when "slow.test"
     slow_seen = slow_seen + 1
     return slow_seen if slow_seen == 1
     buf = answer_head(query, 0, 1)
-    add_record(buf, QUESTION, DnsRecord::A, a_data(192, 0, 2, 11))
+    add_record(buf, QUESTION, DnsTapeRecord::A, a_data(192, 0, 2, 11))
   when "silent.test"
     return slow_seen
   else
@@ -729,7 +729,7 @@ def respond_tcp(conn : IyiSocket) : Nil
   buf = answer_head(query, 0, 40)
   index = 0
   while index < 40
-    add_record(buf, QUESTION, DnsRecord::A, a_data(192, 0, 3, index + 1))
+    add_record(buf, QUESTION, DnsTapeRecord::A, a_data(192, 0, 3, index + 1))
     index = index + 1
   end
   framed = [] of UInt8

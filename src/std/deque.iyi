@@ -34,7 +34,9 @@ import std/indexable::{Indexable, IndexableMutable}
 import std/enumerable::{Enumerable}
 
 pub class Deque(T)
-  @buffer : Pointer(T)
+  # The ring: slot i of `capacity`. It fills as slots are first stored,
+  # so its size is at most `capacity`, and grows in place.
+  @buffer : Array(T?)
   @capacity : Int32
   @size : Int32
   @start : Int32
@@ -44,7 +46,7 @@ pub class Deque(T)
     @start = 0
     @size = 0
     @capacity = 0
-    @buffer = Pointer(T).new(0_u64)
+    @buffer = [] of T?
   end
 
   # An empty deque with room for initial_capacity elements before it grows.
@@ -53,7 +55,7 @@ pub class Deque(T)
     @start = 0
     @size = 0
     @capacity = initial_capacity
-    @buffer = initial_capacity == 0 ? Pointer(T).new(0_u64) : Pointer(T).malloc(initial_capacity.to_u64)
+    @buffer = Array(T?).new(initial_capacity)
   end
 
   # size copies of value.
@@ -62,12 +64,7 @@ pub class Deque(T)
     @start = 0
     @size = size
     @capacity = size
-    @buffer = size == 0 ? Pointer(T).new(0_u64) : Pointer(T).malloc(size.to_u64)
-    i = 0
-    while i < size
-      @buffer[i] = value
-      i = i + 1
-    end
+    @buffer = Array(T?).new(size, value)
   end
 
   # size elements, each what the block answers for its index.
@@ -101,20 +98,20 @@ pub class Deque(T)
   # The element at a logical index, no bounds check; `Indexable#[]` does
   # the checking.
   def unsafe_fetch(index : Int32) : T
-    @buffer[slot_of(index)]
+    @buffer[slot_of(index)].as(T)
   end
 
   def []=(index : Int32, value : T) : T
     asked = index
     index = @size + index if index < 0
     raise "index #{asked} out of range for #{@size} elements" if index < 0 || index >= @size
-    @buffer[slot_of(index)] = value
+    store(slot_of(index), value)
   end
 
   # Appends value; answers the deque.
   def push(value : T) : Deque(T)
     ensure_capacity_for(1)
-    @buffer[slot_of(@size)] = value
+    store(slot_of(@size), value)
     @size = @size + 1
     self
   end
@@ -128,8 +125,7 @@ pub class Deque(T)
     raise "pop of an empty deque" if @size == 0
     @size = @size - 1
     slot = slot_of(@size)
-    value = @buffer[slot]
-    clear_slot(slot)
+    value = @buffer[slot].as(T)
     value
   end
 
@@ -153,7 +149,7 @@ pub class Deque(T)
     ensure_capacity_for(1)
     @start = @start - 1
     @start = @start + @capacity if @start < 0
-    @buffer[@start] = value
+    store(@start, value)
     @size = @size + 1
     self
   end
@@ -161,8 +157,7 @@ pub class Deque(T)
   # Removes and answers the first element.
   def shift : T
     raise "shift of an empty deque" if @size == 0
-    value = @buffer[@start]
-    clear_slot(@start)
+    value = @buffer[@start].as(T)
     @size = @size - 1
     @start = @start + 1
     @start = @start - @capacity if @start >= @capacity
@@ -237,7 +232,7 @@ pub class Deque(T)
       loop do
         src = dst - 1
         src = src + @capacity if src < 0
-        @buffer[dst] = @buffer[src]
+        move(dst, src)
         break if src == rindex
         dst = src
       end
@@ -251,13 +246,13 @@ pub class Deque(T)
       loop do
         src = dst + 1
         src = src - @capacity if src >= @capacity
-        @buffer[dst] = @buffer[src]
+        move(dst, src)
         break if src == rindex
         dst = src
       end
     end
 
-    @buffer[rindex] = value
+    store(rindex, value)
     @size = @size + 1
     self
   end
@@ -272,7 +267,7 @@ pub class Deque(T)
     return pop if index == @size - 1
 
     rindex = slot_of(index)
-    value = @buffer[rindex]
+    value = @buffer[rindex].as(T)
 
     if index > @size // 2
       # Elements after index move one slot left; the last slot is vacated.
@@ -281,11 +276,10 @@ pub class Deque(T)
       loop do
         src = dst + 1
         src = src - @capacity if src >= @capacity
-        @buffer[dst] = @buffer[src]
+        move(dst, src)
         break if src == finish
         dst = src
       end
-      clear_slot(finish)
     else
       # Elements before index move one slot right; the first slot is vacated.
       dst = rindex
@@ -295,11 +289,10 @@ pub class Deque(T)
       loop do
         src = dst - 1
         src = src + @capacity if src < 0
-        @buffer[dst] = @buffer[src]
+        move(dst, src)
         break if src == finish
         dst = src
       end
-      clear_slot(finish)
     end
 
     @size = @size - 1
@@ -383,15 +376,22 @@ pub class Deque(T)
     slot
   end
 
-  # Zeroes a slot the deque no longer holds, so a reference that was there
-  # is no longer reachable through this buffer.
-  private def clear_slot(slot : Int32) : Nil
-    bytes = Pointer(UInt8).new(@buffer.address + slot.to_u64 * sizeof(T).to_u64)
-    i = 0
-    while i < sizeof(T)
-      bytes[i] = 0_u8
-      i = i + 1
+  # *value* into ring slot *slot*, filling the slots before it first.
+  private def store(slot : Int32, value : T) : T
+    while @buffer.size <= slot
+      @buffer << nil
     end
+    @buffer[slot] = value
+  end
+
+  # The element in slot *src* moved to slot *dst*, whose old element is
+  # no longer held: a swap, so no element is read out as a view of the
+  # ring while the ring is written.
+  private def move(dst : Int32, src : Int32) : Nil
+    while @buffer.size <= dst
+      @buffer << nil
+    end
+    @buffer.swap(dst, src)
   end
 
   private def ensure_capacity_for(count : Int32) : Nil
@@ -408,12 +408,7 @@ pub class Deque(T)
   private def resize_to(new_cap : Int32) : Nil
     old_cap = @capacity
     @capacity = new_cap
-    if old_cap == 0
-      @buffer = Pointer(T).malloc(new_cap.to_u64)
-      return
-    end
-
-    @buffer = @buffer.realloc(new_cap.to_u64)
+    return if old_cap == 0
     finish = @start + @size
     return if finish <= old_cap
 
@@ -423,8 +418,7 @@ pub class Deque(T)
       # The wrapped tail follows the head at old_cap.
       i = 0
       while i < wrapped_count
-        @buffer[old_cap + i] = @buffer[i]
-        clear_slot(i)
+        move(old_cap + i, i)
         i = i + 1
       end
     else
@@ -432,8 +426,7 @@ pub class Deque(T)
       new_start = new_cap - head_count
       i = 0
       while i < head_count
-        @buffer[new_start + i] = @buffer[@start + i]
-        clear_slot(@start + i)
+        move(new_start + i, @start + i)
         i = i + 1
       end
       @start = new_start
@@ -449,7 +442,7 @@ impl IndexableMutable for Deque(T) forall T
   type Elem = T
 
   def unsafe_put(index : Int32, value : T) : T
-    @buffer[slot_of(index)] = value
+    store(slot_of(index), value)
   end
 end
 

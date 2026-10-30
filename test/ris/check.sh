@@ -1449,6 +1449,42 @@ if [ "$out" = "$want" ]; then
 else
   echo "FAILED   zip: $out"; status=1
 fi
+# std/dns on the caller tape: wire bytes made by Python, compression
+# pointers and a loop of them, an HTTPS record, a loopback resolver over
+# UDP and, for a truncated answer, TCP.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/dns.ri 2>&1)
+want='true
+128 beef0100000100000000000103777777076578616d706c6503636f6d000041000100002904d0000000000054000c0050
+48879
+4660 true www.example.com 1 rcode 16 4 ends true
+true
+false
+  www.example.com 5 300 17 cdn.example.net
+  cdn.example.net 1 60 4 
+  cdn.example.net 1 60 4 
+  www.example.com 16 30 13 
+192.0.2.7,192.0.2.8 at cdn.example.net after 1
+hello| world
+true the answer was malformed: the question'\''s name
+the answer was malformed: 2 bytes, shorter than a header
+1 . alpn="h2,h3" port=8443 ipv4hint=192.0.2.1 ech=AAQBAgME ipv6hint=2001:db8::1
+svc.example 8443 h2,h3 6
+the answer was malformed: SvcParamKey port: 1 bytes, where a port is 2
+db.corp.test db.test db
+a.b
+udp www.example.test 1
+udp www.example.test 28
+198.51.100.7 2001:db8::53
+udp big.example.test 1
+tcp big.example.test 1
+udp big.example.test 28
+192.0.2.99
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     dns (messages and a loopback resolver on the tape, no heap)'
+else
+  echo "FAILED   dns: $out"; status=1
+fi
 # std/regex on the caller tape: groups, alternation, counts, anchors,
 # classes, no match and a long text, with nothing on the heap.
 out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/regex.ri 2>&1)
@@ -2125,6 +2161,146 @@ if [ "$?" -eq 0 ] && [ "$out" = 'value 42' ]; then
 else
   echo "FAILED   program text constant: $out"
   status=1
+fi
+
+# std/password: scrypt RFC 7914 vectors, an OpenBSD bcrypt vector.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/password.ri 2>&1)
+want='77d6576238657b203b19ca42c18a0497f16b4844e3074ae8dfdffa3fede21442fcd0069ded0948f8326a753a0fc81f17e8d3e0fb2e0d3628cf35e20c38d18906
+fdbabe1c9d3472007856e7190d01e9fe7c6ad7cbc8237830e77376634b3731622eaf30d92e22a3886ff109279d9830dac727afb94a83ee6d8360cbdfa2cc0640
+true
+false
+60 $2b$04$ true
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     password (scrypt and bcrypt on the tape, no heap)'
+else
+  echo "FAILED   password: $out"; status=1
+fi
+
+# std/string_pool: interning on the tape and a rehash.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/string_pool.ri 2>&1)
+want='alpha alpha 1 8
+true
+41 64 word7 true
+true
+42
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     string_pool (interned strings on the tape, no heap)'
+else
+  echo "FAILED   string_pool: $out"; status=1
+fi
+
+# std/deque: a ring in a tape Array, growth while wrapped, rotation.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/deque.ri 2>&1)
+want='Deque{1, 2, 3, 4} 4
+Deque{3, 4, 5, 6} 4
+Deque{3, 4, 5, 6, 7} 8
+Deque{-1, 0, 1, 2, 3, 4, 5, 6, 7} 16
+Deque{2, 3, 4, 5, 6, 7, -1, 0, 1}
+6 Deque{2, 3, 100, 4, 5, 7, -1, 0, 1}
+1 2 7 3 0
+s9 s0 10 16
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     deque (ring buffer on the tape, no heap)'
+else
+  echo "FAILED   deque: $out"; status=1
+fi
+
+# std/slice: Slice#dup on the caller tape.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/slice_dup.ri 2>&1)
+want='10 99 4 30
+true 7
+0
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     slice_dup (Slice#dup on the tape, no heap)'
+else
+  echo "FAILED   slice_dup: $out"; status=1
+fi
+
+# std/system: the affinity mask read into a tape Array (three CPUs under
+# taskset), /proc/self/auxv and /sys read into a builder.
+out=$(RIS_HEAP_STATS=1 taskset -c 0-2 "$RIS" run test/ris/system.ri 2>&1)
+want='3
+4096
+false
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     system (affinity and /proc on the tape, no heap)'
+else
+  echo "FAILED   system: $out"; status=1
+fi
+
+# std/format: sprintf only on the tape (the heap overloads gone).
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/format.ri 2>&1)
+want='PASS: format on the tape
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     format (sprintf on the tape, no heap)'
+else
+  echo "FAILED   format: $out"; status=1
+fi
+
+# std/eiy: templates compiled on the caller tape (heap wrappers gone).
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/eiy.ri 2>&1)
+want='PASS: eiy on the tape
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     eiy (templates on the tape, no heap)'
+else
+  echo "FAILED   eiy: $out"; status=1
+fi
+
+# std/log: AsyncBackend posts lines to a writer task (RisBoard).
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/log_async.ri 2>&1)
+want='line 0
+line 50
+line 100
+line 150
+after
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     log_async (writer task on the board, no heap)'
+else
+  echo "FAILED   log_async: $out"; status=1
+fi
+
+# std/xml XPath (RisXPath) on the XmlTree node array, checked against
+# xml.etree.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/xpath.ri 2>&1)
+want='item=1 item=2
+item=1 item=2 item=3 item=4
+item=1 item=3 item=4
+item=2
+item=2 item=4
+item=2 item=4
+0
+item=1 item=2 group
+item=2
+bee
+1,2,3,4
+twothree
+1
+item=3
+item=4
+b
+group
+0
+XPath: an empty path
+XPath: "/root/" ends after a '\''/'\'', where a step goes
+XPath: position 0 at 7: positions start at 1
+XPath: "child::a" at 1 names an axis, which is not read: use a step, // or ..
+XPath: "a + b" at 0 is not a name (axes and functions are not read)
+XPath: the predicate [@k=x] at 6 is not read: [n], [last()], [@a] or [@a='\''v'\'']
+XPath: @n must be the last step
+XPath: a '\''['\'' at 3 with no '\'']'\''
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     xpath (XPath on the node array, no heap)'
+else
+  echo "FAILED   xpath: $out"; status=1
 fi
 
 # Run heap workloads after the other gates to avoid compiler contention.

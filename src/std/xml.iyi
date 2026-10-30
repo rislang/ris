@@ -11,7 +11,9 @@
 # searched (`find`, `find_all`), built (`TapeNode.document`, `add_element`,
 # `add_text`, `new_comment` and its kin with `append`, `set_attribute`)
 # and written back out (`to_xml`). `copy_to(owner)` copies a whole tree.
-# XPath, which only the heap tree had, is not ported yet. `escape`,
+# `xpath`, `xpath_first` and `xpath_values` search it with an XPath 1.0
+# subset (`RisXPath`): paths, `//`, `*`, `.`, `..`, [n], [last()],
+# [@a='v'], text() and @attr. `escape`,
 # `escape_attribute` and `unescape` are the character-reference rules on
 # their own.
 #
@@ -2614,4 +2616,303 @@ def digit_value(b : UInt8, hex : Bool) : Int32
   return (b - 65_u8).to_i32 + 10 if b >= 65_u8 && b <= 70_u8
   return (b - 97_u8).to_i32 + 10 if b >= 97_u8 && b <= 102_u8
   -1
+end
+
+# One location step of a `RisXPath`: the child axis (or, after `//`, the
+# children of the context and of every node under it), a test, and its
+# predicates, `first` to `first + count` in the path's predicate array.
+@[OnTape]
+struct RisXPathStep
+  # The tests: an element by name, any element (`*`), the context itself
+  # (`.`), its parent (`..`), its text nodes (`text()`), an attribute.
+  NAME   = 0
+  ANY    = 1
+  SELF   = 2
+  PARENT = 3
+  TEXT   = 4
+  ATTR   = 5
+
+  getter test : Int32
+  getter name : String
+  getter deep : Bool
+  getter first : Int32
+  getter count : Int32
+
+  def initialize(@test : Int32, @name : String, @deep : Bool, @first : Int32, @count : Int32)
+  end
+end
+
+# A predicate: a position (`[2]`, `[last()]` as -1), or an attribute's
+# presence (`[@id]`) or value (`[@id='x']`).
+@[OnTape]
+struct RisXPathPredicate
+  getter position : Int32
+  getter attribute : String
+  getter value : String
+  getter compare : Bool
+
+  def initialize(@position : Int32, @attribute : String, @value : String, @compare : Bool)
+  end
+end
+
+# The XPath 1.0 subset a document is searched with, read on the caller's
+# tape: absolute (`/a/b`) and relative paths, `//` for any depth, `*`,
+# `.`, `..`, predicates by position (`[1]`, `[last()]`) and by attribute
+# (`[@id]`, `[@id='x']`, either quote), several per step, and a last step
+# of `text()` or `@name` (`@*`) for strings. A position counts among the
+# matches of one parent, as XPath's child axis does. Anything else - other
+# axes, functions, operators - is refused by `parse` with where it stops.
+#
+#     doc.xpath("//item[@n='2']/item")       # nodes
+#     doc.xpath_values("/root/item[1]/@n")   # strings
+@[OnTape]
+pub struct RisXPath
+  getter absolute : Bool
+  getter steps : Array(RisXPathStep)
+  getter predicates : Array(RisXPathPredicate)
+
+  def initialize(@absolute : Bool, @steps : Array(RisXPathStep), @predicates : Array(RisXPathPredicate))
+  end
+
+  # *path* read, or why not.
+  def self.parse(path : String) : RisXPath | String
+    size = path.bytesize
+    return "XPath: an empty path" if size == 0
+    steps = [] of RisXPathStep
+    predicates = [] of RisXPathPredicate
+    at = 0
+    absolute = path.byte_at(0) == 47_u8
+    deep = false
+    if absolute
+      if size > 1 && path.byte_at(1) == 47_u8
+        deep = true
+        at = 2
+      else
+        at = 1
+      end
+      return RisXPath.new(true, steps, predicates) if at == size && !deep
+    end
+    while true
+      return "XPath: #{path.inspect} ends after a '/', where a step goes" if at >= size
+      start = at
+      while at < size && !step_end?(path.byte_at(at))
+        at = at + 1
+      end
+      word = path[start, at - start]
+      test = RisXPathStep::NAME
+      name = word
+      if word == "."
+        test = RisXPathStep::SELF
+      elsif word == ".."
+        test = RisXPathStep::PARENT
+      elsif word == "*"
+        test = RisXPathStep::ANY
+      elsif word == "text()"
+        test = RisXPathStep::TEXT
+      elsif word.starts_with?("@")
+        test = RisXPathStep::ATTR
+        name = word[1, word.bytesize - 1]
+        return "XPath: an attribute step with no name at #{start}" if name.empty?
+      elsif word.empty? || !(name_char?(word.byte_at(0)) && word.byte_at(0) != 45_u8 && !(word.byte_at(0) >= 48_u8 && word.byte_at(0) <= 57_u8))
+        return "XPath: #{path.inspect} has #{at < size ? path[at, 1].inspect : "nothing"} at #{at}, where a step goes: a name, *, ., .., text() or @name"
+      else
+        return "XPath: #{word.inspect} at #{start} names an axis, which is not read: use a step, // or .." if word.includes?("::")
+        index = 0
+        while index < word.bytesize
+          return "XPath: #{word.inspect} at #{start} is not a name (axes and functions are not read)" unless name_char?(word.byte_at(index))
+          index = index + 1
+        end
+      end
+      first = predicates.size
+      while at < size && path.byte_at(at) == 91_u8 # [
+        read = predicate(path, at + 1)
+        return read if read.is_a?(String)
+        predicate_read, at = read
+        predicates << predicate_read
+      end
+      steps << RisXPathStep.new(test, name, deep, first, predicates.size - first)
+      return RisXPath.new(absolute, steps, predicates) if at == size
+      unless path.byte_at(at) == 47_u8
+        return "XPath: #{path.inspect} has #{path[at, 1].inspect} at #{at}, where a '/' or the end goes"
+      end
+      if test == RisXPathStep::TEXT || test == RisXPathStep::ATTR
+        return "XPath: #{word} must be the last step"
+      end
+      deep = at + 1 < size && path.byte_at(at + 1) == 47_u8
+      at = at + (deep ? 2 : 1)
+    end
+  end
+
+  private def self.step_end?(byte : UInt8) : ::Bool
+    byte == 47_u8 || byte == 91_u8
+  end
+
+  private def self.name_char?(byte : UInt8) : ::Bool
+    (byte >= 97_u8 && byte <= 122_u8) || (byte >= 65_u8 && byte <= 90_u8) ||
+      (byte >= 48_u8 && byte <= 57_u8) || byte == 95_u8 || byte == 45_u8 ||
+      byte == 46_u8 || byte == 58_u8 || byte >= 128_u8
+  end
+
+  # The predicate whose text starts at *at*, past its '[', and where the
+  # path goes on after its ']'.
+  private def self.predicate(path : String, at : Int32) : Tuple(RisXPathPredicate, Int32) | String
+    close = path.index(']', at)
+    return "XPath: a '[' at #{at - 1} with no ']'" if close.nil?
+    text = path[at, close - at]
+    if text == "last()"
+      return {RisXPathPredicate.new(-1, "", "", false), close + 1}
+    end
+    number = text.to_i?
+    if number
+      return "XPath: position #{number} at #{at}: positions start at 1" if number < 1
+      return {RisXPathPredicate.new(number, "", "", false), close + 1}
+    end
+    if text.starts_with?("@")
+      equals = text.index('=')
+      if equals.nil?
+        return {RisXPathPredicate.new(0, text[1, text.bytesize - 1], "", false), close + 1}
+      end
+      name = text[1, equals - 1]
+      quoted = text[equals + 1, text.bytesize - equals - 1]
+      q = quoted.bytesize >= 2 ? quoted.byte_at(0) : 0_u8
+      if (q == 39_u8 || q == 34_u8) && quoted.byte_at(quoted.bytesize - 1) == q && !name.empty?
+        return {RisXPathPredicate.new(0, name, quoted[1, quoted.bytesize - 2], true), close + 1}
+      end
+    end
+    "XPath: the predicate [#{text}] at #{at - 1} is not read: [n], [last()], [@a] or [@a='v']"
+  end
+
+  # The nodes the path selects from *context*, in document order, each
+  # once. A path ending in text() answers the text nodes; one ending in
+  # an attribute answers the elements that have it.
+  def nodes(context : TapeNode) : Array(TapeNode)
+    current = [] of TapeNode
+    current << (@absolute ? context.tree.document : context)
+    @steps.each do |step|
+      found = [] of TapeNode
+      current.each do |node|
+        if step.deep
+          deep_step(node, step, found)
+        else
+          one_step(node, step, found)
+        end
+      end
+      current = found
+    end
+    current
+  end
+
+  # The strings the path selects: an attribute's values, text() nodes'
+  # text, or each selected node's whole text.
+  def values(context : TapeNode) : Array(String)
+    texts = [] of String
+    last = @steps.empty? ? nil : @steps[@steps.size - 1]
+    nodes(context).each do |node|
+      if last && last.test == RisXPathStep::ATTR
+        if last.name == "*"
+          node.each_attribute { |attr| texts << attr.value }
+        elsif value = node[last.name]?
+          texts << value
+        end
+      else
+        texts << node.text
+      end
+    end
+    texts
+  end
+
+  # The step from *node* and from every element under it.
+  private def deep_step(node : TapeNode, step : RisXPathStep, found : Array(TapeNode)) : Nil
+    one_step(node, step, found)
+    node.each_child do |child|
+      deep_step(child, step, found) if child.node_type.element?
+    end
+  end
+
+  # The step from *node*: its matches, the predicates applied in turn.
+  private def one_step(node : TapeNode, step : RisXPathStep, found : Array(TapeNode)) : Nil
+    case step.test
+    when RisXPathStep::SELF
+      add(found, node) if keep?(step, node, 1, 1)
+      return
+    when RisXPathStep::PARENT
+      if up = node.parent
+        add(found, up) if keep?(step, up, 1, 1)
+      end
+      return
+    when RisXPathStep::ATTR
+      if step.name == "*" ? node.attributes.size > 0 : node.has_attribute?(step.name)
+        add(found, node)
+      end
+      return
+    end
+    matched = [] of TapeNode
+    node.each_child { |child| matched << child if match?(step, child) }
+    index = 0
+    while index < step.count
+      predicate = @predicates[step.first + index]
+      kept = [] of TapeNode
+      matched.each_with_index do |child, place|
+        kept << child if holds?(predicate, child, place + 1, matched.size)
+      end
+      matched = kept
+      index = index + 1
+    end
+    matched.each { |child| add(found, child) }
+  end
+
+  private def match?(step : RisXPathStep, child : TapeNode) : ::Bool
+    kind = child.node_type
+    case step.test
+    when RisXPathStep::TEXT then kind.text? || kind.cdata?
+    when RisXPathStep::ANY  then kind.element?
+    else                         kind.element? && child.name == step.name
+    end
+  end
+
+  private def keep?(step : RisXPathStep, node : TapeNode, place : Int32, size : Int32) : ::Bool
+    index = 0
+    while index < step.count
+      return false unless holds?(@predicates[step.first + index], node, place, size)
+      index = index + 1
+    end
+    true
+  end
+
+  private def holds?(predicate : RisXPathPredicate, node : TapeNode, place : Int32, size : Int32) : ::Bool
+    return place == size if predicate.position == -1
+    return place == predicate.position if predicate.position > 0
+    value = node.node_type.element? ? node[predicate.attribute]? : nil
+    return false if value.nil?
+    !predicate.compare || value == predicate.value
+  end
+
+  private def add(found : Array(TapeNode), node : TapeNode) : Nil
+    found.each { |had| return if had == node }
+    found << node
+  end
+end
+
+pub struct TapeNode
+  # The nodes *path* (`RisXPath`) selects from this one; panics with the
+  # reason when the path is not one it reads.
+  def xpath(path : String) : Array(TapeNode)
+    read = RisXPath.parse(path)
+    raise read if read.is_a?(String)
+    read.nodes(self)
+  end
+
+  # The first node *path* selects, or nil.
+  def xpath_first(path : String) : TapeNode?
+    found = xpath(path)
+    found.empty? ? nil : found[0]
+  end
+
+  # The strings *path* selects: attribute values for `@name`, text for
+  # `text()` or any other last step.
+  def xpath_values(path : String) : Array(String)
+    read = RisXPath.parse(path)
+    raise read if read.is_a?(String)
+    read.values(self)
+  end
 end

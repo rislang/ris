@@ -884,7 +884,7 @@ pub class WebSocket
     frame = WebSocket.frame(payload.as_tape, opcode, key, compressed)
     socket = @socket
     wrote = if socket.is_a?(TlsStream)
-              socket.write(frame.to_heap)
+              socket.write(frame)
             else
               socket.write(frame, "".as_tape)
             end

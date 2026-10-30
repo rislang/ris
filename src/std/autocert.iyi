@@ -748,7 +748,7 @@ pub struct Autocert
           finished = nil.as(String?)
           flights.each do |key, task|
             if task.done?
-              finished = key.to_heap
+              finished = key.copy_to(RisCurrentTape.new)
               break
             end
           end
@@ -796,7 +796,7 @@ pub struct Autocert
           next if flights.has_key?(name)
           if certificate.renew_at_ms <= now
             # A copy: held may grow before the order is read.
-            due = name.to_heap
+            due = name.copy_to(RisCurrentTape.new)
             break
           end
           wake_at = certificate.renew_at_ms if certificate.renew_at_ms < wake_at
@@ -809,7 +809,7 @@ pub struct Autocert
         end
         next unless message
         return nil if message.control == AutocertControl::Stop
-        name = message.name.to_heap
+        name = message.name.copy_to(RisCurrentTape.new)
         next unless config.allows?(name)
         next if flights.has_key?(name)
         next if view.cached_failure(name, now)

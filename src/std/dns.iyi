@@ -26,13 +26,13 @@
 # *earlier* occurrence: each pointer must point before the place the
 # previous one led to, so a loop - a pointer to itself, or two pointing at
 # each other - and a pointer past the end are refused as malformed rather
-# than followed. A CNAME chain is followed at most `DnsMessage::MAX_CNAMES`
+# than followed. A CNAME chain is followed at most `DnsTapeMessage::MAX_CNAMES`
 # links, which ends a loop of aliases the same way.
 #
 # EDNS(0) (RFC 6891) is spoken only as far as privacy needs it. A query
 # for an encrypted transport carries an OPT record holding nothing but a
 # Padding option (RFC 7830), so its length says less about the name (see
-# `DnsMessage.query`); a plaintext query carries none, because RFC 7830 6
+# `DnsTapeMessage.query`); a plaintext query carries none, because RFC 7830 6
 # forbids padding in the clear and an OPT record there would ask for
 # answers past 512 bytes, which this resolver has no use for: it asks
 # again over TCP. An answer's OPT record is read for the upper bits of its
@@ -59,7 +59,6 @@ import std/static_array::{StaticArray}
 
 import std/int
 
-import std/slice::{Bytes, Slice}
 import std/base64::{Base64}
 
 # Why a name was not resolved. One type with a question per answer, as
@@ -241,32 +240,49 @@ pub struct DnsName
   # domain; one with fewer is tried under each search domain first and as
   # it is last. A candidate longer than a name can be is left out.
   def self.candidates(name : String, search : Array(String), ndots : Int32) : Array(String)
-    size = name.bytesize
-    return [relative(name)] if size > 1 && name[size - 1] == 46_u8
-    dots = 0
+    answer = [] of String
     index = 0
-    while index < size
-      dots = dots + 1 if name[index] == 46_u8
+    while got = candidate(name, search, ndots, index)
+      answer << got unless got.empty?
       index = index + 1
     end
-    under = [] of String
-    search.each do |domain|
-      suffix = relative(domain)
-      next if suffix.empty? || suffix == "."
-      joined = "#{name}.#{suffix}"
-      under << joined if joined.bytesize <= MAX_LENGTH
-    end
-    answer = [] of String
-    answer << name if dots >= ndots
-    under.each { |candidate| answer << candidate }
-    answer << name if dots < ndots
     answer
+  end
+
+  # Place *index* of `candidates`, made on its own: empty for a place left
+  # out, nil past the last. A lookup steps through them so, with no Array
+  # of them live across the queries it makes.
+  def self.candidate(name : String, search : Array(String), ndots : Int32, index : Int32) : String?
+    size = name.bytesize
+    if size > 1 && name[size - 1] == 46_u8
+      return index == 0 ? relative(name) : nil
+    end
+    return nil if index > search.size + 1
+    dots = 0
+    at = 0
+    while at < size
+      dots = dots + 1 if name[at] == 46_u8
+      at = at + 1
+    end
+    first = dots >= ndots
+    if index == 0
+      return first ? name : ""
+    end
+    if index == search.size + 1
+      return first ? "" : name
+    end
+    suffix = relative(search[index - 1])
+    return "" if suffix.empty? || suffix == "."
+    joined = "#{name}.#{suffix}"
+    joined.bytesize <= MAX_LENGTH ? joined : ""
   end
 end
 
-# One resource record from an answer section.
+# One resource record from an answer section, as `DnsTapeMessage.parse`
+# reads it onto the caller's tape: its name spelled out there, its data a
+# view of the message.
 @[OnTape]
-pub struct DnsRecord
+pub struct DnsTapeRecord
   A     =  1
   CNAME =  5
   TXT   = 16
@@ -286,25 +302,25 @@ pub struct DnsRecord
   getter ttl : UInt32
   # The record's data as it came: four bytes for an A record, sixteen for
   # an AAAA, the encoded name for a CNAME.
-  getter data : Bytes
+  getter data : String
   # A CNAME's target, read with compression; empty for any other type.
   getter target : String
 
-  def initialize(@name : String, @type : Int32, @record_class : Int32, @ttl : UInt32, @data : Bytes, @target : String)
+  def initialize(@name : String, @type : Int32, @record_class : Int32, @ttl : UInt32, @data : String, @target : String)
   end
 
   # The character-strings of a TXT record's data (RFC 1035 3.3.14), each
-  # a length byte and that many bytes; nil when the last one runs past the
-  # data. A record holds one or more, and `Resolver#txt` joins them, as
-  # SPF (RFC 7208 3.3) and DKIM read a record of several.
-  def self.character_strings(data : Bytes) : Array(String)?
+  # a length byte and that many bytes, views of *data*; nil when the last
+  # one runs past the data. A record holds one or more, and
+  # `Resolver#txt` joins them, as SPF (RFC 7208 3.3) and DKIM read a
+  # record of several.
+  def self.character_strings(data : String) : Array(String)?
     found = [] of String
-    raw = data.to_unsafe
     at = 0
-    while at < data.size
-      length = raw[at].to_i32
-      return nil if at + 1 + length > data.size
-      found << String.new(length) { |into| into.copy_from(raw + at + 1, length) }
+    while at < data.bytesize
+      length = data.byte_at(at).to_i32
+      return nil if at + 1 + length > data.bytesize
+      found << data[at + 1, length]
       at = at + 1 + length
     end
     found
@@ -326,7 +342,7 @@ end
 # section 2.2 has a client refuse - a param cut short by the end of the
 # data, keys out of strictly increasing order, a key twice - a target
 # that is compressed (it must not be, section 2.2) or holds a label with
-# a dot in it (see `DnsMessage.read_name`), and a value of a key it
+# a dot in it (see `DnsTapeMessage.read_name`), and a value of a key it
 # reads that is not of its key's form (sections 7.1 to 7.4, and RFC 9848
 # 3's ech): mandatory a list of keys in increasing order that does not
 # list itself, alpn one or more ids of 1 to 255 bytes filling the value,
@@ -336,6 +352,8 @@ end
 # mandatory lists that it does not carry, no-default-alpn without alpn.
 # Section 2.2 then has the whole RRset refused, which `Resolver` does.
 # A key past ech is kept as its bytes, whatever they are.
+#
+# The values are views of the record's data, on the caller's tape.
 #
 # `to_s` is the record's data in presentation format as dig 9.20 prints it,
 # for reading the record while debugging: bench/std_dns_exercise.sh holds
@@ -361,9 +379,9 @@ pub struct SvcbRecord
   # The keys in their order, which is increasing, and each one's value as
   # it came.
   getter keys : Array::View(Int32)
-  getter values : Array::View(Bytes)
+  getter values : Array::View(String)
 
-  def initialize(@owner : String, @priority : Int32, @target : String, @keys : Array::View(Int32), @values : Array::View(Bytes))
+  def initialize(@owner : String, @priority : Int32, @target : String, @keys : Array::View(Int32), @values : Array::View(String))
   end
 
   # AliasMode: the service is at the target's records of the same type.
@@ -378,20 +396,25 @@ pub struct SvcbRecord
   end
 
   # The value of *key*, or nil when the record does not carry it.
-  def value(key : Int32) : Bytes?
-    index = @keys.index(key)
-    index ? @values[index] : nil
+  def value(key : Int32) : String?
+    # A loop, not `@keys.index`: on a View(Int32) that names the
+    # element's place in the backing Array, not where *key* is.
+    at = 0
+    while at < @keys.size
+      return @values[at] if @keys[at] == key
+      at = at + 1
+    end
+    nil
   end
 
   # The alpn-ids of `alpn` (section 7.1), in their order; none without it.
   def alpn : Array(String)
     ids = [] of String
     if data = value(ALPN)
-      raw = data.to_unsafe
       at = 0
-      while at < data.size
-        length = raw[at].to_i32
-        ids << String.new(length) { |into| into.copy_from(raw + at + 1, length) }
+      while at < data.bytesize
+        length = data.byte_at(at).to_i32
+        ids << data[at + 1, length]
         at = at + 1 + length
       end
     end
@@ -408,12 +431,12 @@ pub struct SvcbRecord
   # origin's own.
   def port : Int32?
     data = value(PORT)
-    data ? (data[0].to_i32 << 8) | data[1].to_i32 : nil
+    data ? (data.byte_at(0).to_i32 << 8) | data.byte_at(1).to_i32 : nil
   end
 
   # The ECHConfigList of `ech` (RFC 9848 3), length prefix and all, as
   # std/tls's `TlsConfig#ech_configs` takes it; nil without it.
-  def ech : Bytes?
+  def ech : String?
     value(ECH)
   end
 
@@ -422,8 +445,8 @@ pub struct SvcbRecord
     listed = [] of Int32
     if data = value(MANDATORY)
       at = 0
-      while at < data.size
-        listed << ((data[at].to_i32 << 8) | data[at + 1].to_i32)
+      while at < data.bytesize
+        listed << ((data.byte_at(at).to_i32 << 8) | data.byte_at(at + 1).to_i32)
         at = at + 2
       end
     end
@@ -432,38 +455,37 @@ pub struct SvcbRecord
 
   # The addresses of `ipv4hint` and `ipv6hint` (section 7.3), four bytes
   # and sixteen each, as they came.
-  def ipv4hint : Array(Bytes)
+  def ipv4hint : Array(String)
     SvcbRecord.split(value(IPV4HINT), 4)
   end
 
-  def ipv6hint : Array(Bytes)
+  def ipv6hint : Array(String)
     SvcbRecord.split(value(IPV6HINT), 16)
   end
 
   # The record in *data*, found at *owner*; or why it is malformed (see
   # the struct).
-  def self.parse(data : Bytes, owner : String = "") : SvcbRecord | DnsError
-    size = data.size
-    raw = data.to_unsafe
-    return DnsMessage.malformed("a service binding of #{size} bytes, shorter than a priority and a target") if size < 3
-    priority = (raw[0].to_i32 << 8) | raw[1].to_i32
+  def self.parse(data : String, owner : String = "") : SvcbRecord | DnsError
+    size = data.bytesize
+    return DnsTapeMessage.malformed("a service binding of #{size} bytes, shorter than a priority and a target") if size < 3
+    priority = (data.byte_at(0).to_i32 << 8) | data.byte_at(1).to_i32
     # The target, uncompressed: length-prefixed labels to the root's zero.
     text = String::Builder.new
     at = 2
     wire = 0
     while true
-      return DnsMessage.malformed("a service binding's target runs past its data") if at >= size
-      length = raw[at].to_i32
+      return DnsTapeMessage.malformed("a service binding's target runs past its data") if at >= size
+      length = data.byte_at(at).to_i32
       break if length == 0
-      return DnsMessage.malformed("a service binding's target is compressed, which RFC 9460 2.2 forbids") if length & 0xC0 != 0
-      return DnsMessage.malformed("a service binding's target runs past its data") if at + 1 + length > size
+      return DnsTapeMessage.malformed("a service binding's target is compressed, which RFC 9460 2.2 forbids") if length & 0xC0 != 0
+      return DnsTapeMessage.malformed("a service binding's target runs past its data") if at + 1 + length > size
       wire = wire + 1 + length
-      return DnsMessage.malformed("a service binding's target is longer than 255 bytes") if wire > 254
+      return DnsTapeMessage.malformed("a service binding's target is longer than 255 bytes") if wire > 254
       text << '.' if text.bytesize > 0
       index = 0
       while index < length
-        byte = raw[at + 1 + index]
-        return DnsMessage.malformed("a service binding's target has a label with a dot in it") if byte == 46_u8
+        byte = data.byte_at(at + 1 + index)
+        return DnsTapeMessage.malformed("a service binding's target has a label with a dot in it") if byte == 46_u8
         text.write_byte(byte)
         index = index + 1
       end
@@ -472,44 +494,43 @@ pub struct SvcbRecord
     at = at + 1
     target = text.bytesize == 0 ? "." : text.to_s
     keys = [] of Int32
-    values = [] of Bytes
+    values = [] of String
     while at < size
-      return DnsMessage.malformed("a SvcParam cut short: #{size - at} bytes where its key and length take 4") if at + 4 > size
-      key = (raw[at].to_i32 << 8) | raw[at + 1].to_i32
-      length = (raw[at + 2].to_i32 << 8) | raw[at + 3].to_i32
+      return DnsTapeMessage.malformed("a SvcParam cut short: #{size - at} bytes where its key and length take 4") if at + 4 > size
+      key = (data.byte_at(at).to_i32 << 8) | data.byte_at(at + 1).to_i32
+      length = (data.byte_at(at + 2).to_i32 << 8) | data.byte_at(at + 3).to_i32
       unless keys.empty?
         last = keys[keys.size - 1]
-        return DnsMessage.malformed("SvcParamKey #{key_name(key)} twice") if key == last
-        return DnsMessage.malformed("SvcParamKey #{key_name(key)} after #{key_name(last)}: the keys are not in increasing order") if key < last
+        return DnsTapeMessage.malformed("SvcParamKey #{key_name(key)} twice") if key == last
+        return DnsTapeMessage.malformed("SvcParamKey #{key_name(key)} after #{key_name(last)}: the keys are not in increasing order") if key < last
       end
-      return DnsMessage.malformed("SvcParamKey #{key_name(key)}'s value of #{length} bytes runs past the record") if at + 4 + length > size
-      value = Bytes.new(length)
-      value.to_unsafe.copy_from(raw + at + 4, length)
+      return DnsTapeMessage.malformed("SvcParamKey #{key_name(key)}'s value of #{length} bytes runs past the record") if at + 4 + length > size
+      value = data[at + 4, length]
       why = fault(key, value)
-      return DnsMessage.malformed("SvcParamKey #{key_name(key)}: #{why}") if why
+      return DnsTapeMessage.malformed("SvcParamKey #{key_name(key)}: #{why}") if why
       keys << key
       values << value
       at = at + 4 + length
     end
     record = SvcbRecord.new(owner, priority, target, keys, values)
     record.mandatory.each do |listed|
-      return DnsMessage.malformed("mandatory lists #{key_name(listed)}, which the record does not carry") unless keys.includes?(listed)
+      return DnsTapeMessage.malformed("mandatory lists #{key_name(listed)}, which the record does not carry") unless keys.includes?(listed)
     end
-    return DnsMessage.malformed("no-default-alpn without alpn") if keys.includes?(NO_DEFAULT_ALPN) && !keys.includes?(ALPN)
+    return DnsTapeMessage.malformed("no-default-alpn without alpn") if keys.includes?(NO_DEFAULT_ALPN) && !keys.includes?(ALPN)
     record
   end
 
   # Why *value* is not of *key*'s form, or nil when it is (or the key is
   # not one this module reads).
-  private def self.fault(key : Int32, value : Bytes) : String?
-    size = value.size
+  private def self.fault(key : Int32, value : String) : String?
+    size = value.bytesize
     case key
     when MANDATORY
       return "#{size} bytes, where it lists one key or more of two bytes each" if size == 0 || size % 2 != 0
       at = 0
       last = -1
       while at < size
-        listed = (value[at].to_i32 << 8) | value[at + 1].to_i32
+        listed = (value.byte_at(at).to_i32 << 8) | value.byte_at(at + 1).to_i32
         return "it lists itself" if listed == MANDATORY
         return "#{key_name(listed)} after #{key_name(last)}: the keys are not in increasing order" if listed <= last
         last = listed
@@ -519,7 +540,7 @@ pub struct SvcbRecord
       return "empty, where it holds one id or more" if size == 0
       at = 0
       while at < size
-        length = value[at].to_i32
+        length = value.byte_at(at).to_i32
         return "an empty id" if length == 0
         return "an id of #{length} bytes runs past the value" if at + 1 + length > size
         at = at + 1 + length
@@ -534,7 +555,7 @@ pub struct SvcbRecord
       return "#{size} bytes, where it holds one address or more of 16 each" if size == 0 || size % 16 != 0
     when ECH
       return "#{size} bytes, where an ECHConfigList is a length and 4 bytes at least" if size < 6
-      said = (value[0].to_i32 << 8) | value[1].to_i32
+      said = (value.byte_at(0).to_i32 << 8) | value.byte_at(1).to_i32
       return "an ECHConfigList whose length says #{said} bytes and is followed by #{size - 2}" unless said == size - 2
     end
     nil
@@ -546,15 +567,13 @@ pub struct SvcbRecord
     key >= 0 && key < NAMES.size ? NAMES[key] : "key#{key}"
   end
 
-  # *data* in pieces of *width* bytes; none for nil.
-  def self.split(data : Bytes?, width : Int32) : Array(Bytes)
-    pieces = [] of Bytes
+  # *data* in views of *width* bytes; none for nil.
+  def self.split(data : String?, width : Int32) : Array(String)
+    pieces = [] of String
     if whole = data
       at = 0
-      while at + width <= whole.size
-        piece = Bytes.new(width)
-        piece.to_unsafe.copy_from(whole.to_unsafe + at, width)
-        pieces << piece
+      while at + width <= whole.bytesize
+        pieces << whole[at, width]
         at = at + width
       end
     end
@@ -591,7 +610,7 @@ pub struct SvcbRecord
           text << ',' if place > 0
           at = 0
           while at < id.bytesize
-            SvcbRecord.write_alpn_byte(text, id[at])
+            SvcbRecord.write_alpn_byte(text, id.byte_at(at))
             at = at + 1
           end
         end
@@ -600,15 +619,15 @@ pub struct SvcbRecord
       when PORT
         text << '=' << port.to_s
       when IPV4HINT
-        text << '=' << ipv4hint.map { |address| "#{address[0]}.#{address[1]}.#{address[2]}.#{address[3]}" }.join(",")
+        text << '=' << ipv4hint.map { |address| "#{address.byte_at(0)}.#{address.byte_at(1)}.#{address.byte_at(2)}.#{address.byte_at(3)}" }.join(",")
       when ECH
-        text << '=' << Base64.encode(String.new(value.size) { |into| into.copy_from(value.to_unsafe, value.size) })
+        text << '=' << Base64.encode(value)
       when IPV6HINT
         text << '=' << ipv6hint.map { |address| SvcbRecord.ipv6_text(address) }.join(",")
       else
         unless value.empty?
           text << "=\""
-          value.each { |byte| SvcbRecord.write_quoted_byte(text, byte) }
+          value.each_byte { |byte| SvcbRecord.write_quoted_byte(text, byte) }
           text << '"'
         end
       end
@@ -676,7 +695,7 @@ pub struct SvcbRecord
   # groups are zero, or five zero and then ffff, ending in its last four
   # bytes dotted - `::1.2.3.4`, `::ffff:192.0.2.1` - though not `::` and
   # `::1`, whose run of zeros is longer.
-  def self.ipv6_text(address : Bytes) : String
+  def self.ipv6_text(address : String) : String
     words = Array(Int32).new(8) { |index| (address[index * 2].to_i32 << 8) | address[index * 2 + 1].to_i32 }
     best = -1
     best_length = 0
@@ -746,9 +765,12 @@ pub struct SvcbAnswer
   end
 end
 
-# A query, and the reading of an answer to one.
+# A query, and the reading of an answer to one, where it lies on the
+# caller's tape: names are spelled out onto it, compression undone, and
+# each record's data is a view of the message. A caller that keeps an
+# answer past its tape copies it with `copy_to(owner)`.
 @[OnTape]
-pub struct DnsMessage
+pub struct DnsTapeMessage
   # The aliases one lookup follows, in one answer and across the queries a
   # dangling chain needs: glibc and musl both stop well short of this, and
   # a longer chain is a loop or an attack.
@@ -789,12 +811,13 @@ pub struct DnsMessage
   getter question_name : String
   getter question_type : Int32
   getter question_class : Int32
-  getter answers : Array::View(DnsRecord)
+  getter answers : Array::View(DnsTapeRecord)
+  # The upper eight bits of the RCODE, from the answer's OPT record (RFC
+  # 6891 6.1.3); 0 without one.
+  getter extended_rcode : Int32
 
-  # *extended_rcode* is the upper eight bits of the RCODE, from the
-  # answer's OPT record (RFC 6891 6.1.3); 0 without one.
   def initialize(@id : UInt16, @flags : Int32, @question_name : String, @question_type : Int32,
-                 @question_class : Int32, @answers : Array::View(DnsRecord), @extended_rcode : Int32 = 0)
+                 @question_class : Int32, @answers : Array::View(DnsTapeRecord), @extended_rcode : Int32 = 0)
   end
 
   def response? : ::Bool
@@ -819,8 +842,8 @@ pub struct DnsMessage
   end
 
   # The query for *name*'s records of *type*, class IN, with recursion
-  # desired: a 12-byte header and one question. *name* is a host name
-  # (`DnsName.valid?`); a trailing dot is dropped.
+  # desired: a 12-byte header and one question, on the caller's tape.
+  # *name* is a host name (`DnsName.valid?`); a trailing dot is dropped.
   #
   # A *block* above 0 pads it (RFC 7830): an OPT record follows the
   # question - the root for its name, `EDNS_PAYLOAD` for its class,
@@ -831,7 +854,7 @@ pub struct DnsMessage
   # it over TCP (RFC 8467 3), so a question pads to the same length over
   # TLS as over HTTPS. With no *block* there is no OPT record: that is the
   # query that goes out in the clear, where RFC 7830 6 forbids padding.
-  def self.query(id : UInt16, name : String, type : Int32, block : Int32 = 0) : Bytes
+  def self.query(id : UInt16, name : String, type : Int32, block : Int32 = 0) : String
     relative = DnsName.relative(name)
     question = 12 + relative.bytesize + 2 + 4
     size = question
@@ -839,62 +862,63 @@ pub struct DnsMessage
       size = question + PADDING_OVERHEAD
       size = size + (block - size % block) % block
     end
-    packet = Bytes.new(size)
-    raw = packet.to_unsafe
-    index = 0
-    while index < size
-      raw[index] = 0_u8
-      index = index + 1
-    end
-    raw[0] = (id >> 8).to_u8
-    raw[1] = (id & 255_u16).to_u8
-    raw[2] = 1_u8 # RD
-    raw[5] = 1_u8 # QDCOUNT
-    at = 12
-    text = relative
-    start = 0
-    index = 0
-    while index <= relative.bytesize
-      if index == relative.bytesize || text[index] == 46_u8
-        length = index - start
-        raw[at] = length.to_u8
-        length.times { |i| raw[at + 1 + i] = text[start + i] }
-        at = at + 1 + length
-        start = index + 1
+    String.build(size) do |raw|
+      raw.push((id >> 8).to_u8)
+      raw.push((id & 255_u16).to_u8)
+      raw.push(1_u8) # RD
+      raw.push(0_u8)
+      raw.push(0_u8)
+      raw.push(1_u8) # QDCOUNT
+      raw.push(0_u8)
+      raw.push(0_u8)
+      raw.push(0_u8)
+      raw.push(0_u8)
+      raw.push(0_u8)
+      raw.push(block > 0 ? 1_u8 : 0_u8) # ARCOUNT: the OPT record
+      start = 0
+      index = 0
+      while index <= relative.bytesize
+        if index == relative.bytesize || relative.byte_at(index) == 46_u8
+          length = index - start
+          raw.push(length.to_u8)
+          length.times { |i| raw.push(relative.byte_at(start + i)) }
+          start = index + 1
+        end
+        index = index + 1
       end
-      index = index + 1
+      raw.push(0_u8)
+      raw.push((type >> 8).to_u8)
+      raw.push((type & 255).to_u8)
+      raw.push(0_u8)
+      raw.push(DnsTapeRecord::IN.to_u8)
+      if block > 0
+        # The OPT record: name (the root), type, class, TTL (RCODE,
+        # version and flags, all 0), length, then the option's code and
+        # length and its zero bytes.
+        data = size - question - 11
+        padding = data - 4
+        raw.push(0_u8)
+        raw.push((DnsTapeRecord::OPT >> 8).to_u8)
+        raw.push((DnsTapeRecord::OPT & 255).to_u8)
+        raw.push((EDNS_PAYLOAD >> 8).to_u8)
+        raw.push((EDNS_PAYLOAD & 255).to_u8)
+        4.times { raw.push(0_u8) }
+        raw.push((data >> 8).to_u8)
+        raw.push((data & 255).to_u8)
+        raw.push((OPTION_PADDING >> 8).to_u8)
+        raw.push((OPTION_PADDING & 255).to_u8)
+        raw.push((padding >> 8).to_u8)
+        raw.push((padding & 255).to_u8)
+        padding.times { raw.push(0_u8) }
+      end
     end
-    raw[at] = 0_u8
-    raw[at + 1] = (type >> 8).to_u8
-    raw[at + 2] = (type & 255).to_u8
-    raw[at + 3] = 0_u8
-    raw[at + 4] = DnsRecord::IN.to_u8
-    if block > 0
-      # The OPT record at *question*: name, type, class, TTL, length, then
-      # the option's code and length. Every byte not set here stays 0: the
-      # name (the root), the TTL's RCODE, version and flags, the padding.
-      raw[11] = 1_u8 # ARCOUNT
-      data = size - question - 11
-      padding = data - 4
-      raw[question + 1] = (DnsRecord::OPT >> 8).to_u8
-      raw[question + 2] = (DnsRecord::OPT & 255).to_u8
-      raw[question + 3] = (EDNS_PAYLOAD >> 8).to_u8
-      raw[question + 4] = (EDNS_PAYLOAD & 255).to_u8
-      raw[question + 9] = (data >> 8).to_u8
-      raw[question + 10] = (data & 255).to_u8
-      raw[question + 11] = (OPTION_PADDING >> 8).to_u8
-      raw[question + 12] = (OPTION_PADDING & 255).to_u8
-      raw[question + 13] = (padding >> 8).to_u8
-      raw[question + 14] = (padding & 255).to_u8
-    end
-    packet
   end
 
-  # The ID in a datagram's first two bytes, or -1 when it is too short to
+  # The ID in a message's first two bytes, or -1 when it is too short to
   # be a message: what the resolver reads before it reads anything else.
-  def self.id_of(packet : Bytes) : Int32
-    return -1 if packet.size < 12
-    (packet[0].to_i32 << 8) | packet[1].to_i32
+  def self.id_of(packet : String) : Int32
+    return -1 if packet.bytesize < 12
+    (packet.byte_at(0).to_i32 << 8) | packet.byte_at(1).to_i32
   end
 
   # Where the message at the start of *packet* ends: past its header, its
@@ -903,12 +927,11 @@ pub struct DnsMessage
   # stream the frame is the message, so an answer whose frame holds bytes
   # past this point is refused as oversized there (`Resolver`'s encrypted
   # upstreams); a datagram is not held to it.
-  def self.ends_at(packet : Bytes) : Int32
-    size = packet.size
+  def self.ends_at(packet : String) : Int32
+    size = packet.bytesize
     return -1 if size < 12
-    raw = packet.to_unsafe
-    questions = u16(raw, 4)
-    records = u16(raw, 6) + u16(raw, 8) + u16(raw, 10)
+    questions = u16(packet, 4)
+    records = u16(packet, 6) + u16(packet, 8) + u16(packet, 10)
     at = 12
     index = 0
     while index < questions + records
@@ -919,7 +942,7 @@ pub struct DnsMessage
         at = at + 4
       else
         return -1 if at + 10 > size
-        at = at + 10 + u16(raw, at + 8)
+        at = at + 10 + u16(packet, at + 8)
       end
       return -1 if at > size
       index = index + 1
@@ -927,22 +950,18 @@ pub struct DnsMessage
     at
   end
 
-  # The message in *packet*: its header, its one question, and - unless it
-  # is truncated - its answer section, and the RCODE's upper bits from the
-  # OPT record in its additional section. The authority and additional
-  # sections are walked to find that record, so their records must fit
-  # the bytes too; one OPT record at most (RFC 6891 6.1.1), owned by the
-  # root. Anything that does not fit the bytes is `DnsError` with
-  # `malformed?`, never a read past them.
-  # *packet* read where it lies, on the caller's tape: names are spelled
-  # out onto it, compression undone, and each record's data is a view of
-  # *packet*. A lookup reads its answers so and keeps only what it takes
-  # (`DnsTapeMessage#to_heap`).
+  # The message in *packet*, read where it lies: its header, its one
+  # question, and - unless it is truncated - its answer section, and the
+  # RCODE's upper bits from the OPT record in its additional section. The
+  # authority and additional sections are walked to find that record, so
+  # their records must fit the bytes too; one OPT record at most (RFC 6891
+  # 6.1.1), owned by the root. Anything that does not fit the bytes is
+  # `DnsError` with `malformed?`, never a read past them.
   def self.parse(packet : String) : DnsTapeMessage | DnsError
     size = packet.bytesize
     return malformed("#{size} bytes, shorter than a header") if size < 12
-    id = ((packet[0].to_u16 << 8) | packet[1].to_u16)
-    flags = (packet[2].to_i32 << 8) | packet[3].to_i32
+    id = ((packet.byte_at(0).to_u16 << 8) | packet.byte_at(1).to_u16)
+    flags = (packet.byte_at(2).to_i32 << 8) | packet.byte_at(3).to_i32
     questions = u16(packet, 4)
     count = u16(packet, 6)
     return malformed("#{questions} questions; a query has one") if questions > 1
@@ -970,15 +989,16 @@ pub struct DnsMessage
         return malformed("answer #{index + 1} runs past the message") if at + 10 > size
         type = u16(packet, at)
         klass = u16(packet, at + 2)
-        ttl = (packet[at + 4].to_u32 << 24) | (packet[at + 5].to_u32 << 16) | (packet[at + 6].to_u32 << 8) | packet[at + 7].to_u32
+        ttl = (packet.byte_at(at + 4).to_u32 << 24) | (packet.byte_at(at + 5).to_u32 << 16) |
+              (packet.byte_at(at + 6).to_u32 << 8) | packet.byte_at(at + 7).to_u32
         length = u16(packet, at + 8)
         at = at + 10
         return malformed("answer #{index + 1}'s data runs past the message") if at + length > size
         target = String.new("")
-        if klass == DnsRecord::IN
-          return malformed("an A record of #{length} bytes") if type == DnsRecord::A && length != 4
-          return malformed("an AAAA record of #{length} bytes") if type == DnsRecord::AAAA && length != 16
-          if type == DnsRecord::CNAME
+        if klass == DnsTapeRecord::IN
+          return malformed("an A record of #{length} bytes") if type == DnsTapeRecord::A && length != 4
+          return malformed("an AAAA record of #{length} bytes") if type == DnsTapeRecord::AAAA && length != 16
+          if type == DnsTapeRecord::CNAME
             # Read where it sits in the message, not out of its data: its
             # compression pointers are offsets into the whole message. It
             # must end inside its own data.
@@ -1006,11 +1026,11 @@ pub struct DnsMessage
         return malformed("record #{count + index + 1}'s name") if read.nil?
         owner, at = read
         return malformed("record #{count + index + 1} runs past the message") if at + 10 > size
-        if index >= authority && u16(packet, at) == DnsRecord::OPT
+        if index >= authority && u16(packet, at) == DnsTapeRecord::OPT
           return malformed("a second OPT record") if seen_opt
           return malformed("an OPT record owned by #{owner}, not the root") unless owner.empty?
           seen_opt = true
-          extended_rcode = packet[at + 4].to_i32
+          extended_rcode = packet.byte_at(at + 4).to_i32
         end
         at = at + 10 + u16(packet, at + 8)
         return malformed("record #{count + index + 1}'s data runs past the message") if at > size
@@ -1020,52 +1040,37 @@ pub struct DnsMessage
     DnsTapeMessage.new(id, flags, question_name, question_type, question_class, answers, extended_rcode)
   end
 
-  # Read on the caller's tape; no nested owner or escaping temporary.
-  def self.parse(packet : Bytes) : DnsMessage | DnsError
-    bytes = String.build(packet.size) do |writer|
-      packet.size.times { |i| writer.push(packet[i]) }
-    end
-    read = parse(bytes)
-    read.is_a?(DnsError) ? read : read.to_heap
-  end
-
   # Whether this is the answer to query *id* for *name* and *type*: a
   # response, a standard query's, with the ID, and repeating the question.
   # A refusal of the query (SERVFAIL, REFUSED, FORMERR, NOTIMP) may come
   # without the question, as some servers send it; an answer that says
   # anything about the name - NOERROR or NXDOMAIN - must carry it.
   def answers?(id : UInt16, name : String, type : Int32) : ::Bool
-    DnsMessage.answer_to?(@id, @flags, rcode, @question_type == 0 && @question_name.empty?,
-      DnsName.same?(@question_name, name), @question_type, @question_class, id, type)
+    return false unless response? && opcode == 0 && @id == id
+    return rcode != RCODE_NOERROR && rcode != RCODE_NXDOMAIN if @question_type == 0 && @question_name.empty?
+    DnsName.same?(@question_name, name) && @question_type == type && @question_class == DnsTapeRecord::IN
   end
 
-  # `answers?` for a message on the heap or the tape, its parts given.
-  def self.answer_to?(message_id : UInt16, flags : Int32, rcode : Int32, asked_none : ::Bool, same_name : ::Bool,
-                      question_type : Int32, question_class : Int32, id : UInt16, type : Int32) : ::Bool
-    return false unless flags & 0x8000 != 0 && (flags >> 11) & 15 == 0 && message_id == id
-    return rcode != RCODE_NOERROR && rcode != RCODE_NXDOMAIN if asked_none
-    same_name && question_type == type && question_class == DnsRecord::IN
-  end
-
-  # The addresses of *type* this answer gives *name*, following CNAMEs:
-  # the records for the end of the chain, the name the chain ended at, and
-  # how many links it took. No addresses and a different name is a chain
-  # that left this answer before it ended, which the resolver asks about
-  # next. A chain of more than *budget* links is malformed.
-  def addresses(name : String, type : Int32, budget : Int32 = MAX_CNAMES) : Tuple(Array(Bytes), String, Int32) | DnsError
+  # The data of the records of *type* this answer gives *name*, following
+  # CNAMEs: views of the message for the end of the chain, the name the
+  # chain ended at, and how many links it took. No records and a
+  # different name is a chain that left this answer before it ended,
+  # which the resolver asks about next. A chain of more than *budget*
+  # links is malformed.
+  def addresses(name : String, type : Int32, budget : Int32 = MAX_CNAMES) : Tuple(Array(String), String, Int32) | DnsError
     target = name
     links = 0
     while true
-      found = [] of Bytes
+      found = [] of String
       next_name = ""
       @answers.each do |record|
-        next unless record.record_class == DnsRecord::IN && DnsName.same?(record.name, target)
+        next unless record.record_class == DnsTapeRecord::IN && DnsName.same?(record.name, target)
         found << record.data if record.type == type
-        next_name = record.target if record.type == DnsRecord::CNAME && next_name.empty?
+        next_name = record.target if record.type == DnsTapeRecord::CNAME && next_name.empty?
       end
       return {found, target, links} unless found.empty? && !next_name.empty?
       links = links + 1
-      return DnsMessage.malformed("a chain of more than #{budget} CNAMEs, or a loop of them") if links > budget
+      return DnsTapeMessage.malformed("a chain of more than #{budget} CNAMEs, or a loop of them") if links > budget
       target = next_name
     end
   end
@@ -1085,7 +1090,7 @@ pub struct DnsMessage
     text = String::Builder.new
     while true
       return nil if position < 0 || position >= size
-      length = packet[position].to_i32
+      length = packet.byte_at(position).to_i32
       if length == 0
         ends = position + 1 if ends < 0
         break
@@ -1098,7 +1103,7 @@ pub struct DnsMessage
         text.push(46_u8) if text.length > 0
         index = 0
         while index < length
-          byte = packet[position + 1 + index]
+          byte = packet.byte_at(position + 1 + index)
           return nil if byte == 46_u8
           text.push(byte)
           index = index + 1
@@ -1106,7 +1111,7 @@ pub struct DnsMessage
         position = position + 1 + length
       when 0xC0
         return nil if position + 1 >= size
-        pointer = ((length & 0x3F) << 8) | packet[position + 1].to_i32
+        pointer = ((length & 0x3F) << 8) | packet.byte_at(position + 1).to_i32
         ends = position + 2 if ends < 0
         return nil unless pointer < floor
         floor = pointer
@@ -1120,100 +1125,12 @@ pub struct DnsMessage
     {text.finish, ends}
   end
 
-  # Decode on the caller's tape, as for a String message.
-  def self.read_name(packet : Bytes, at : Int32) : Tuple(String, Int32)?
-    bytes = String.build(packet.size) do |writer|
-      packet.each { |byte| writer.push(byte) }
-    end
-    read_name(bytes, at)
-  end
-
   def self.malformed(why : String) : DnsError
     DnsError.new(DnsError::MALFORMED, "", "", why)
   end
 
-  private def self.u16(raw : Pointer(UInt8), at : Int32) : Int32
-    (raw[at].to_i32 << 8) | raw[at + 1].to_i32
-  end
-
   private def self.u16(bytes : String, at : Int32) : Int32
-    (bytes[at].to_i32 << 8) | bytes[at + 1].to_i32
-  end
-end
-
-# A record as `DnsMessage.parse` reads it onto the tape: its name spelled
-# out there, its data a view of the message.
-@[OnTape]
-pub struct DnsTapeRecord
-  getter name : String
-  getter type : Int32
-  getter record_class : Int32
-  getter ttl : UInt32
-  getter data : String
-  getter target : String
-
-  def initialize(@name : String, @type : Int32, @record_class : Int32, @ttl : UInt32, @data : String, @target : String)
-  end
-
-  def to_heap : DnsRecord
-    DnsRecord.new(@name.to_heap, @type, @record_class, @ttl, DnsTapeMessage.bytes(@data), @target.to_heap)
-  end
-end
-
-# A message read where it lies on the tape (`DnsMessage.parse`): what a
-# lookup asks of an answer before it keeps one, and `to_heap` for the one
-# it keeps.
-@[OnTape]
-pub struct DnsTapeMessage
-  getter id : UInt16
-  getter flags : Int32
-  getter question_name : String
-  getter question_type : Int32
-  getter question_class : Int32
-  getter answers : Array::View(DnsTapeRecord)
-  getter extended_rcode : Int32
-
-  def initialize(@id : UInt16, @flags : Int32, @question_name : String, @question_type : Int32,
-                 @question_class : Int32, @answers : Array::View(DnsTapeRecord), @extended_rcode : Int32)
-  end
-
-  def response? : ::Bool
-    @flags & 0x8000 != 0
-  end
-
-  def opcode : Int32
-    (@flags >> 11) & 15
-  end
-
-  def truncated? : ::Bool
-    @flags & 0x0200 != 0
-  end
-
-  def rcode : Int32
-    (@extended_rcode << 4) | (@flags & 15)
-  end
-
-  # `DnsMessage#answers?`, asked before the answer is copied off.
-  def answers?(id : UInt16, name : String, type : Int32) : ::Bool
-    DnsMessage.answer_to?(@id, @flags, rcode, @question_type == 0 && @question_name.empty?,
-      DnsName.same?(@question_name, name), @question_type, @question_class, id, type)
-  end
-
-  def to_heap : DnsMessage
-    records = Array(DnsRecord).new(@answers.size)
-    @answers.each { |record| records << record.to_heap }
-    DnsMessage.new(@id, @flags, @question_name.to_heap, @question_type, @question_class, records, @extended_rcode)
-  end
-
-  # *data*'s bytes copied to the heap.
-  def self.bytes(data : String) : Bytes
-    copy = Bytes.new(data.bytesize)
-    index = 0
-    while index < data.bytesize
-      copy[index] = data[index]
-      index = index + 1
-    end
-    copy
+    (bytes.byte_at(at).to_i32 << 8) | bytes.byte_at(at + 1).to_i32
   end
 end
 

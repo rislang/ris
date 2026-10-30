@@ -28,9 +28,8 @@ the std row. Update a row when its work starts or ends.
 
 | Work                                  | Size     | Time      | Tokens    |
 |---------------------------------------|----------|-----------|-----------|
-| std heap: 47 mallocs, 22 to_heap      | medium   | 1-2 days  | 200k-500k |
-| std/xml XPath on XmlTree (dropped)    | medium   | 4-8 h     | 200-400k  |
-| std/dns heap DnsMessage beside tape   | medium   | 3-5 h     | 150-300k  |
+| std non-Linux branches: 34 mallocs   | medium   | 4-8 h     | 200-400k  |
+| secure_dns: DoH resolver call cycle   | medium   | 2-4 h     | 100-200k  |
 | Text: `s = ""` + `<<`, no Builder.new | medium   | 6-10 h    | 300-500k  |
 | Kernel threads without a collector    | large    | 1-2 days  | 300-500k  |
 | Task value: @[OnTape] and nested      | medium   | 2-4 h     | 100-200k  |
@@ -240,29 +239,32 @@ first):
   Unmarked runtime and std declarations still use the migration allocation
   ABI; selected std classes opt in with @[OnTape].
 * Complete the Pool/SlicePool surface beyond the validated paths in use.
-* std heap left (2026-10-30 audit, fourth pass): 47 Pointer.malloc/
-  realloc sites, 22 to_heap copies (dns 8, socket 3, autocert 3, eiy 2,
-  http 2, format 1, websocket 1, file 1, log 1: AsyncBackend's queue).
-  Ports in compress style (tape Arrays): deque 4,
-  string_pool 4, password 4. Done, each with a test/ris/<module>.ri gate
-  (exact output, 0 heap): websocket, regex, udp, csv, ini (RisIni), otp,
-  netip, debug; mail (TapePart views a MailTree node array; the heap
-  Part is gone), smtp (loopback session), png, bzip2, xz, tar, zip
-  (codecs checked against Python's zlib, bz2, lzma, tarfile, zipfile).
-  OS buffers left are win32 or sized: file 8, user 6, process 5,
-  system 4, dir/path/socket 2 each. Done (fourth pass): toml (TapeAny
-  only, derive on it), yaml (TapeValue only, derive on it), xml (XmlTree
-  node array, TapeNode a view; copy_to works), gates with Python's
-  tomllib, PyYAML and xml.etree; log (TapeEntry only: Entry and
-  MemoryBackend gone, Formatter writes into a Builder), json, time
-  (TimeParseError @[OnTape]), html, number_format, autocert 17 -> 3.
-  * std/xml: XPath only worked on the heap Node and went with it; port
-    it onto XmlTree (its classes need @[OnTape] records). id() needs
-    the DTD's ID attributes, which the parser no longer keeps.
-  * std/dns: the heap DnsMessage/DnsRecord beside DnsTapeMessage (91
-    uses in dns, secure_dns, socket).
-  * std/http: H2's @pending queue (payload.to_heap) needs a
-    connection-owned buffer.
+* std heap left (2026-10-30, fifth pass): to_heap 0; 34 malloc sites,
+  all in win32 or darwin branches, which TAPE_SPEC 7.1 never builds
+  (file 8, user 6, process 7, socket 2, dir 2, path 2, system 1: hostname
+  on win32). Drop those branches or port them when a non-Linux target is
+  back; gc is refused by design. Done, each with a test/ris/<module>.ri
+  gate (exact output, 0 heap): websocket, regex, udp, csv, ini (RisIni),
+  otp, netip, debug; mail, smtp, png, bzip2, xz, tar, zip; toml, yaml,
+  xml (XmlTree), log, json, time, html, number_format. Fifth pass:
+  dns (DnsTapeMessage/DnsTapeRecord only, Strings, no Bytes; loopback
+  UDP and TCP resolver gate, wire bytes from Python), password (scrypt
+  in one tape Array, bcrypt off pointers; RFC 7914 and OpenBSD
+  vectors), string_pool, deque (ring of T? in a tape Array), slice dup,
+  system (affinity mask Array, /proc into a builder), format and eiy
+  (heap wrappers gone), log AsyncBackend (a writer task fed through
+  RisBoard, `open` only), websocket and H2 (copy_to(RisCurrentTape)),
+  autocert, socket marks; xml XPath as RisXPath (gate xpath).
+  * std/secure_dns types but does not compile under ris: DnsOverHttps's
+    HTTPClient reaches Resolver#resolve, a cycle with growing results
+    (TAPE_SPEC 3.5). Needs an HTTPClient that connects to a fixed
+    address without a Resolver, or scratch passed through the cycle.
+  * Array::View(Int32)#index(k) is the element's place in the backing
+    Array, not where k is: SvcbRecord#value was wrong through it.
+    Rename the internal method (tape.iyi) so it cannot be mistaken.
+  * bench/std_{dns,secure_dns}_exercise and std_http_https_records still
+    use Bytes for messages; std_deque's mutation checks and std_log's
+    caught_at patterns are stale.
 * Streaming decoders read an IyiIO only: the block forms of Inflater
   and ZstdReader are gone; std/http's coded body is BodyFeed, an io
   Reader (gate test/ris/http_coding.ri). The benches' Feed and Pending

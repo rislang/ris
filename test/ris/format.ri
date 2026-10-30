@@ -2,7 +2,6 @@ module test/format_tape
 
 import std/format::{sprintf}
 
-kept = ""
 tape do
   fmt = "%s|%+08d|%#x|%.2f|%.3e|%.4g|%%"
   args = {"café", -42, 255, 0.125, 1.25, 0.000125}
@@ -13,7 +12,6 @@ tape do
   expected = "café|-0000042|0xff|0.12|1.250e+00|0.000125|%"
   exit 1 unless rendered == expected
   exit 2 unless w.finish == "prefix:" + expected
-  kept = rendered.to_heap
   exit 3 unless sprintf("%5.1s", "éx") == "    é"
   exit 4 unless sprintf("%d", -9223372036854775808_i64) ==
     "-9223372036854775808"
@@ -21,7 +19,8 @@ tape do
     "99999999999999991611392"
   exit 6 unless sprintf("%u", 18446744073709551615_u64) ==
     "18446744073709551615"
+  exit 7 unless sprintf("%s|%+08d|%#x|%.2f|%.3e|%.4g|%%",
+    "café", -42, 255, 0.125, 1.25, 0.000125) == rendered
+  exit 8 unless sprintf("%s, %s", ["A", "B"]) == "A, B"
 end
-exit 7 unless sprintf("%s|%+08d|%#x|%.2f|%.3e|%.4g|%%",
-  "café", -42, 255, 0.125, 1.25, 0.000125) == kept
-puts "PASS: format tape and heap APIs"
+puts "PASS: format on the tape"

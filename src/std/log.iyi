@@ -395,64 +395,63 @@ pub class RisMemoryBackend < Backend
   end
 end
 
-# Entries written by a thread of their own, so a call that logs does not
+# Entries written by a task of their own, so a call that logs does not
 # wait for the write: the entry is formatted where it is logged and
-# queued, and a writer thread writes what has queued up since its last
-# write, in order, in one write, to *io*'s descriptor.
+# posted to the writer task (a RisBoard message, copied), which writes
+# each to *io*'s descriptor in order.
 #
 #     AsyncBackend.open do |backend|   # closed, and drained, at the end
 #       Log.setup(Severity::Info, backend)
 #       ...
 #     end
 #
-# `close` waits for every queued entry to be written and the thread to
-# end; an entry written after it is refused. Entries queued when a program
-# ends without `close` are lost, which the block form rules out. The
-# backend is the thread that made it's, as every object not Share is.
-#
-# A thread needs the collector and a target with threads: under
-# `-Dgc_none` or `-Dgc_boehm`, or on another target, `new` refuses.
+# The writer task lives in a group around the block (TAPE_SPEC 5.1): the
+# backend is only had through `open`, and `close`, at the block's end or
+# earlier, waits for every queued entry to be written; an entry written
+# after it is refused. The board is one queue per message type, so one
+# AsyncBackend is open at a time.
 @[OnTape]
 pub class AsyncBackend < Backend
   property formatter : Formatter
-  @queue : AsyncQueue
   @closed : Bool
-  {% if !flag?(:gc_none) && !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64))) %}
-    @writer : IyiThread? = nil
-  {% end %}
 
-  def initialize(io : IO = STDOUT, @formatter : Formatter = DefaultFormatter.new)
-    @queue = AsyncQueue.new
+  protected def initialize(@formatter : Formatter)
     @closed = false
-    handle = io.handle
-    raise "AsyncBackend: the IO has no descriptor to write to" if handle < 0_i64
-    {% if !flag?(:gc_none) && !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64))) %}
-      queue = @queue
-      @writer = IyiThread.start do
-        out = IyiIO.new(handle)
-        while true
-          batch = queue.take
-          unless batch
-            # Nothing queued: look again in a millisecond.
-            IyiScheduler.sleep_current(1)
-            next
-          end
-          out.write(batch[0])
-          out.flush
-          break if batch[1]
-        end
-        nil
-      end
-    {% else %}
-      raise "AsyncBackend: this build has no threads to write with (the collector's threads, on Linux, darwin arm64 and Windows x86_64)"
-    {% end %}
   end
 
   # A backend for the block, closed and drained when the block ends.
   def self.open(io : IO = STDOUT, formatter : Formatter = DefaultFormatter.new, &block : AsyncBackend -> R) : R forall R
-    backend = new(io, formatter)
+    handle = io.handle
+    raise "AsyncBackend: the IO has no descriptor to write to" if handle < 0_i64
+    backend = new(formatter)
+    result = nil.as(R?)
+    group do |g|
+      g.spawn do
+        AsyncBackend.drain(handle)
+        0
+      end
+      result = AsyncBackend.run(backend, block)
+    end
+    result.as(R)
+  end
+
+  protected def self.run(backend : AsyncBackend, block : AsyncBackend -> R) : R forall R
     defer backend.close
     block.call(backend)
+  end
+
+  # The writer task: each line as it comes, until the last.
+  protected def self.drain(handle : Int64) : Nil
+    out = IyiIO.new(handle)
+    while true
+      got = RisBoard.take(AsyncLogLine)
+      break if got.is_a?(Cancelled)
+      unless got.text.empty?
+        out.write(got.text)
+        out.flush
+      end
+      break if got.last
+    end
   end
 
   def write(entry : TapeEntry) : Nil
@@ -461,69 +460,27 @@ pub class AsyncBackend < Backend
       writer = String::Builder.new
       @formatter.format(entry, writer)
       writer.push(10_u8)
-      @queue.push(writer.finish)
+      RisBoard.post(AsyncLogLine.new(writer.finish, false))
     end
   end
 
+  # Every entry written before it reaches the descriptor; the writer
+  # task ends. A second close does nothing.
   def close : Nil
     return if @closed
     @closed = true
-    @queue.close
-    {% if !flag?(:gc_none) && !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64))) %}
-      if writer = @writer
-        writer.join
-      end
-    {% end %}
+    RisBoard.post(AsyncLogLine.new("", true))
   end
 end
 
-# The lines an `AsyncBackend` has queued. An `Atomic` word guards them:
-# each method holds it for a few steps and never waits inside, and only
-# these methods reach the lines, so the queue may cross to the writer.
+# One formatted line for an `AsyncBackend`'s writer task, or the last
+# message, which ends it.
 @[OnTape]
-@[Share(owns: true)]
-class AsyncQueue
-  @word : Atomic(Int32)
-  @lines : Array(String)
-  @closed : Bool
+struct AsyncLogLine
+  getter text : String
+  getter last : Bool
 
-  def initialize
-    @word = Atomic(Int32).new(0)
-    @lines = [] of String
-    @closed = false
-  end
-
-  # The line is copied to the heap the writer thread reads it from.
-  def push(line : String) : Nil
-    enter
-    defer leave
-    @lines << line.to_heap
-  end
-
-  def close : Nil
-    enter
-    defer leave
-    @closed = true
-  end
-
-  # Every line queued, as one string, and whether the queue is closed:
-  # nil while it is empty and open, which the writer waits through.
-  def take : {String, Bool}?
-    enter
-    defer leave
-    return nil if @lines.empty? && !@closed
-    text = @lines.join
-    @lines.clear
-    {text, @closed}
-  end
-
-  private def enter : Nil
-    while !@word.compare_and_set(0, 1)[1]
-    end
-  end
-
-  private def leave : Nil
-    @word.set(0)
+  def initialize(@text : String, @last : Bool)
   end
 end
 

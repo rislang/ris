@@ -1,0 +1,29 @@
+module test/ring
+
+import std/deque::{Deque}
+
+# std/deque on a tape Array ring: both ends, growth while wrapped (the
+# shorter run moved), rotation, insert and delete in the middle.
+
+tape do
+  w = Deque(Int32).new(4)
+  w.push(1).push(2).push(3).push(4)
+  puts "#{w} #{w.capacity}"
+  w.shift
+  w.shift
+  w.push(5).push(6)
+  puts "#{w} #{w.capacity}"
+  w.push(7)
+  puts "#{w} #{w.capacity}"
+  w.unshift(2).unshift(1).unshift(0)
+  w.unshift(-1)
+  puts "#{w} #{w.capacity}"
+  w.rotate_in_place(3)
+  puts w
+  w.insert(2, 100)
+  puts "#{w.delete_at(5)} #{w}"
+  puts "#{w.pop} #{w.shift} #{w.size} #{w[0]} #{w[-1]}"
+  s = Deque(String).new
+  10.times { |i| s.unshift("s#{i}") }
+  puts "#{s.first} #{s.last} #{s.size} #{s.capacity}"
+end

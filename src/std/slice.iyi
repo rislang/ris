@@ -380,7 +380,7 @@ pub struct Slice(T)
   # takes this slice's read-only flag: `copy_from` into a read-only copy
   # refused, so a read-only slice could not be duplicated at all.
   def dup : Slice(T)
-    ptr = @size == 0 ? Pointer(T).new(0_u64) : Pointer(T).malloc(@size.to_u64)
+    ptr = Pointer(T).new(RisRegion.tape_bytes(@size.to_u64 * sizeof(T).to_u64))
     ptr.copy_from(@pointer, @size) if @size > 0
     Slice(T).new(ptr, @size, read_only: @read_only)
   end

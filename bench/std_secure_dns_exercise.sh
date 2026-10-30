@@ -327,9 +327,9 @@ breaks "the plaintext servers asked unasked" silentplain "a dead upstream, no fa
 # A TC answer's records are not read (std/dns), so taken over a stream it
 # reads as a name without the address: refused, but not as truncated.
 breaks "TC taken over a stream" tcstream "TC over a stream is refused" socket.iyi \
-  'return DnsMessage.malformed("the answer is truncated (TC), which an answer over a stream never is").about(name, label) if message.truncated?' ''
+  'return DnsTapeMessage.malformed("the answer is truncated (TC), which an answer over a stream never is").about(name, label) if message.truncated?' ''
 breaks "bytes past the message taken" pastend "a frame longer than its message" socket.iyi \
-  'return DnsMessage.malformed("oversized: #{bytes.size - ends} bytes past the end of the message").about(name, label) if ends < bytes.size' ''
+  'return DnsTapeMessage.malformed("oversized: #{bytes.size - ends} bytes past the end of the message").about(name, label) if ends < bytes.size' ''
 breaks "a connection per exchange" noreuse "every query over one TLS connection" secure_dns.iyi \
   '    if kept = live
       got = over(kept, queries, timeout_ms, true)
@@ -352,8 +352,8 @@ breaks "an HTTPClient's own TLS configuration ignored" clienttls "over HTTPS fro
 breaks "an HTTPClient's own resolver ignored" clientresolver "a URL's host pinned to an address" http.iyi \
   'through = keeping.resolver' ''
 breaks "queries sent unpadded" unpadded "every DoT query is padded" socket.iyi \
-  'queries << DnsMessage.query(id, name, type, DnsMessage::PADDING_BLOCK)' \
-  'queries << DnsMessage.query(id, name, type)'
+  'queries << DnsTapeMessage.query(id, name, type, DnsTapeMessage::PADDING_BLOCK)' \
+  'queries << DnsTapeMessage.query(id, name, type)'
 breaks "the padding not brought to a block" unblocked "not a multiple of 128" dns.iyi \
   '      size = size + (block - size % block) % block
 ' ''
@@ -362,10 +362,10 @@ breaks "the padding not brought to a block" unblocked "not a multiple of 128" dn
 # as SVCB records when it came over an upstream.
 breaks "HTTPS records asked in the clear despite upstreams" httpsclear "dot: a ServiceMode HTTPS record" socket.iyi \
   'return plaintext(name, type) if @upstreams.empty?' \
-  'return plaintext(name, type) if @upstreams.empty? || type == DnsRecord::HTTPS'
+  'return plaintext(name, type) if @upstreams.empty? || type == DnsTapeRecord::HTTPS'
 breaks "HTTPS records not parsed when they came over an upstream" httpsparse "dot: a ServiceMode HTTPS record" socket.iyi \
   'record = SvcbRecord.parse(data, owner)' \
-  'record = @upstreams.empty? ? SvcbRecord.parse(data, owner) : DnsMessage.malformed("an HTTPS record over an upstream, not read")'
+  'record = @upstreams.empty? ? SvcbRecord.parse(data, owner) : DnsTapeMessage.malformed("an HTTPS record over an upstream, not read")'
 
 echo
 if [ "$status" -eq 0 ]; then

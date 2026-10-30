@@ -2,7 +2,6 @@ module test/eiy_tape
 
 import std/eiy::{Eiy}
 
-kept = ""
 tape do
   text = "héllo <%= name %>\n  <%- if ok -%>\nend<% end %>"
   w = String::Builder.new(1)
@@ -11,13 +10,12 @@ tape do
   code = Eiy.process_string(text)
   exit 1 unless w.finish == String.build { |o| o << "prefix:" << code }
   exit 2 unless code.starts_with?("__io__.print(\"héllo \")")
-  kept = code.to_heap
   exit 3 unless Eiy.process_string?("<%= bad").nil?
   lexer = Eiy::TapeLexer.new("abc<%=x%>")
   exit 4 unless lexer.next_token.value == "abc"
   exit 5 unless lexer.next_token.value == "x"
+  exit 6 unless Eiy.process_string(
+    "héllo <%= name %>\n  <%- if ok -%>\nend<% end %>") == code
+  exit 7 unless Eiy.process_string?("<% bad").nil?
 end
-exit 6 unless Eiy.process_string(
-  "héllo <%= name %>\n  <%- if ok -%>\nend<% end %>") == kept
-exit 7 unless Eiy.process_string?("<% bad").nil?
-puts "PASS: eiy tape and heap APIs"
+puts "PASS: eiy on the tape"

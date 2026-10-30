@@ -520,25 +520,8 @@ pub struct Eiy
 
   # The iyi source that prints the template *string* to *io_name*, or nil
   # for a tag that is never closed.
-  def self.process_string?(string : String, filename : String = "",
-                           io_name : String = DefaultIoName) : String?
-    result = nil.as(String?)
-    tape do
-      code = process_string?(string.as_tape, filename, io_name)
-      result = code.to_heap if code
-    end
-    result
-  end
-
-  def self.process_string(string : String, filename : String = "",
-                          io_name : String = DefaultIoName) : String
-    result = ""
-    tape do
-      result = process_string(string.as_tape, filename, io_name).to_heap
-    end
-    result
-  end
-
+  # The iyi source that prints the template *string* to *io_name*, on the
+  # caller's tape, or nil for a tag that is never closed.
   def self.process_string?(string : String, filename : String = "",
                            io_name : String = DefaultIoName) : String?
     w = String::Builder.new(string.bytesize)

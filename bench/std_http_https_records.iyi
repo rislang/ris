@@ -29,7 +29,7 @@ import std/indexable
 import std/http::{HTTPClient, HTTPError, Response}
 import std/socket::{DnsUpstream, IyiSocket, Resolver, SocketError}
 import std/tls::{TlsConfig, TlsEchKey, TlsError, TlsIdentity, TlsIdentitySource, TlsServer, TlsServerConfig}
-import std/dns::{DnsError, DnsMessage, DnsRecord}
+import std/dns::{DnsError, DnsTapeMessage, DnsTapeRecord}
 import std/udp::{UdpSocket}
 import std/x509::{Certificate}
 import std/slice::{Bytes}
@@ -170,19 +170,19 @@ class Zone
   # nothing past them, though an encrypted resolver's query carries an
   # OPT record. Nil for one that does not read.
   def answer(query : Bytes) : Bytes?
-    parsed = DnsMessage.parse(query)
-    return nil unless parsed.is_a?(DnsMessage)
-    question = DnsMessage.read_name(query, 12)
+    parsed = DnsTapeMessage.parse(query)
+    return nil unless parsed.is_a?(DnsTapeMessage)
+    question = DnsTapeMessage.read_name(query, 12)
     return nil if question.nil?
     name = parsed.question_name.downcase
     type = parsed.question_type
-    @asked << "#{name}/#{type == DnsRecord::A ? "A" : (type == DnsRecord::AAAA ? "AAAA" : (type == DnsRecord::HTTPS ? "HTTPS" : type.to_s))}"
+    @asked << "#{name}/#{type == DnsTapeRecord::A ? "A" : (type == DnsTapeRecord::AAAA ? "AAAA" : (type == DnsTapeRecord::HTTPS ? "HTTPS" : type.to_s))}"
     records = [] of Array(UInt8)
     rcode = 0
-    if type == DnsRecord::HTTPS
+    if type == DnsTapeRecord::HTTPS
       rcode = 2 if @failing.includes?(name)
       records = @https[name]? || records
-    elsif type == DnsRecord::A && @addressed.includes?(name)
+    elsif type == DnsTapeRecord::A && @addressed.includes?(name)
       records = [[127_u8, 0_u8, 0_u8, 1_u8]]
     end
     records = [] of Array(UInt8) unless rcode == 0

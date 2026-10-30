@@ -6,7 +6,7 @@
 # Proves:
 #   * Both ends, indices, wraparound, growth while wrapped (both runs), rotation
 #     both ways, insertion and deletion on both sides of the middle, the
-#     Indexable/IndexableMutable/Enumerable surface, and zeroed vacated slots.
+#     Indexable/IndexableMutable/Enumerable surface.
 #   * 3,000 generated operations, the deque printed every hundred and diffed
 #     against python3 driving `collections.deque` with the same choices.
 #   * What is refused: pop/shift/first/last of an empty deque, an index past
@@ -123,13 +123,13 @@ build_and_run "std_deque" exercise-deque "$REPO/bench/std_deque_exercise.iyi"
 
 echo
 echo "== every deque section reported"
-for check in "deque: ends" "deque: indices" "deque: wraparound and growth" "deque: rotation" "deque: insert and delete" "deque: traits and copies" "deque: vacated slots" "deque: churn vs python3" "all deque checks passed"; do
+for check in "deque: ends" "deque: indices" "deque: wraparound and growth" "deque: rotation" "deque: insert and delete" "deque: traits and copies" "deque: churn vs python3" "all deque checks passed"; do
   if ! grep -q "$check" "$WORK/exercise-deque.out" 2>/dev/null; then
     echo "  MISSING: $check"
     status=1
   fi
 done
-[ "$status" -eq 0 ] && echo "  ends, indices, wraparound, rotation, insert/delete, traits, vacated slots and the churn all reported"
+[ "$status" -eq 0 ] && echo "  ends, indices, wraparound, rotation, insert/delete, traits and the churn all reported"
 
 echo
 echo "== the churn against python3, 3,000 operations"

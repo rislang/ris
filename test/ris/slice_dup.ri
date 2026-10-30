@@ -1,0 +1,16 @@
+module test/slice_dup
+
+import std/slice::{Slice}
+
+# Slice#dup copies onto the caller's tape: the copy is its own, read-only
+# kept, and an empty slice copies too.
+
+tape do
+  a = Slice(Int32).new(4) { |i| i * 10 }
+  b = a.dup
+  b[1] = 99
+  puts "#{a[1]} #{b[1]} #{b.size} #{b[3]}"
+  c = Slice(UInt8).new(3, 7_u8, read_only: true).dup
+  puts "#{c.read_only?} #{c[2]}"
+  puts Slice(Int32).new(0).dup.size
+end

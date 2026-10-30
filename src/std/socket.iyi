@@ -83,9 +83,8 @@ module std/socket
 
 import std/int
 
-import std/dns::{DnsError, DnsMessage, DnsName, DnsRecord, DnsTapeMessage, HostsFile, ResolvConf, SvcbAnswer, SvcbRecord}
+import std/dns::{DnsError, DnsName, DnsTapeMessage, DnsTapeRecord, HostsFile, ResolvConf, SvcbAnswer, SvcbRecord}
 import std/random::{Random}
-import std/slice::{Bytes, Slice}
 
 # What a resolver answers and is built from, under the names a program
 # that connects by name already imports from here.
@@ -125,6 +124,19 @@ pub struct IPv6Address
     while index < 8
       high = high.unsafe_shl(8_u64) | bytes[index].to_u64
       low = low.unsafe_shl(8_u64) | bytes[index + 8].to_u64
+      index = index + 1
+    end
+    IPv6Address.new(high, low)
+  end
+
+  # The sixteen bytes of *bytes*, network order.
+  def self.new(bytes : String) : IPv6Address
+    high = 0_u64
+    low = 0_u64
+    index = 0
+    while index < 8
+      high = high.unsafe_shl(8_u64) | bytes.byte_at(index).to_u64
+      low = low.unsafe_shl(8_u64) | bytes.byte_at(index + 8).to_u64
       index = index + 1
     end
     IPv6Address.new(high, low)
@@ -906,8 +918,6 @@ pub struct IyiSocket
     connect_to(addr.to_unsafe, family, peer, ms)
   end
 
-  # SocketError still retains its operation text on the heap.
-  @[TapeToHeap]
   def self.connect_to(addr : Pointer(UInt8), family : Int32, peer : String, ms : Int32 = -1) : IyiSocket | Cancelled | SocketError
     fd = __sys_socket(family)
     return SocketError.new("create a socket", __sys_code(fd.to_i64)) if fd < 0
@@ -1286,7 +1296,6 @@ pub struct IyiSocket
     IyiSocket.new(fd, family, task_owned: task_owned)
   end
 
-  @[TapeToHeap]
   def self.listen(host : String, port : Int32, backlog : Int32 = 128,
                   reuse_port : Bool = false) : IyiSocket
     result = listen_result(host, port, backlog, reuse_port)
@@ -3176,7 +3185,7 @@ pub trait DnsUpstream
   # wait on the server. An answer is matched to its query by the
   # transport - by ID over one connection, by request over HTTP - and the
   # resolver then reads it as it reads a datagram.
-  abstract def exchange(queries : Array(Bytes), timeout_ms : Int32) : Array(Bytes) | DnsError | Cancelled
+  abstract def exchange(queries : Array(String), timeout_ms : Int32) : Array(String) | DnsError | Cancelled
   # Its connections closed; the next exchange opens new ones.
   abstract def close : Nil
 end
@@ -3449,12 +3458,13 @@ pub class Resolver
     listed = from_hosts(host)
     return listed unless listed.empty?
 
-    candidates = DnsName.candidates(host, @search, @ndots)
     nodata = nil.as(DnsError?)
     missing = nil.as(DnsError?)
     index = 0
-    while index < candidates.size
-      got = lookup(candidates[index])
+    while candidate = DnsName.candidate(host, @search, @ndots, index)
+      index = index + 1
+      next if candidate.empty?
+      got = lookup(candidate)
       return got if got.is_a?(Cancelled)
       return got if got.is_a?(Array(IPAddress))
       return got.about(host, got.server) unless got.not_found? || got.no_address?
@@ -3463,7 +3473,6 @@ pub class Resolver
       else
         missing = got if missing.nil?
       end
-      index = index + 1
     end
     # The name exists somewhere the search led, without an address: that
     # is the truer answer than "does not exist".
@@ -3496,18 +3505,18 @@ pub class Resolver
   # upstreams both questions go in one exchange - pipelined, over TLS -
   # and the AAAA answer is read as if it had been asked second.
   private def lookup(name : String) : Array(IPAddress) | DnsError | Cancelled
-    early = nil.as(Array(Tuple(DnsMessage, String) | DnsError)?)
+    early = nil.as(Array(Tuple(DnsTapeMessage, String) | DnsError)?)
     unless @upstreams.empty?
-      asked = ask_upstreams(name, [DnsRecord::A, DnsRecord::AAAA])
+      asked = ask_upstreams(name, [DnsTapeRecord::A, DnsTapeRecord::AAAA])
       return asked if asked.is_a?(Cancelled)
       early = asked
     end
-    four = addresses(name, DnsRecord::A, early ? early[0] : nil)
+    four = addresses(name, DnsTapeRecord::A, early ? early[0] : nil)
     return four if four.is_a?(Cancelled)
     if four.is_a?(DnsError)
       return four unless four.no_address?
     end
-    six = addresses(name, DnsRecord::AAAA, early ? early[1] : nil)
+    six = addresses(name, DnsTapeRecord::AAAA, early ? early[1] : nil)
     return six if six.is_a?(Cancelled)
     found = four.is_a?(Array(IPAddress)) ? four : [] of IPAddress
     if six.is_a?(DnsError)
@@ -3519,35 +3528,35 @@ pub class Resolver
     four.is_a?(DnsError) ? four : DnsError.new(DnsError::NO_ADDRESS, name)
   end
 
-  private def addresses(name : String, type : Int32, first : Tuple(DnsMessage, String) | DnsError | Nil) : Array(IPAddress) | DnsError | Cancelled
+  private def addresses(name : String, type : Int32, first : Tuple(DnsTapeMessage, String) | DnsError | Nil) : Array(IPAddress) | DnsError | Cancelled
     got = records(name, type, first)
-    return got unless got.is_a?(Tuple(Array(Bytes), String, String))
+    return got unless got.is_a?(Tuple(Array(String), String, String))
     addresses = [] of IPAddress
     got[0].each do |data|
-      if data.size == 4
-        addresses << IPv4Address.new(data[0], data[1], data[2], data[3])
+      if data.bytesize == 4
+        addresses << IPv4Address.new(data.byte_at(0), data.byte_at(1), data.byte_at(2), data.byte_at(3))
       else
-        addresses << IPv6Address.new(data.to_unsafe)
+        addresses << IPv6Address.new(data)
       end
     end
     addresses
   end
 
   # The TXT records of *name*, each one's character-strings joined
-  # (`DnsRecord.character_strings`), in the order the answer gave them,
+  # (`DnsTapeRecord.character_strings`), in the order the answer gave them,
   # CNAMEs followed as `resolve` follows them. The name is asked as
   # written - no hosts file, no search list - since a TXT name
   # (`_acme-challenge.example.com`, a domain's SPF) is written in full.
   def txt(name : String) : Array(String) | DnsError | Cancelled
     why = DnsName.why(name)
     return DnsError.new(DnsError::INVALID_NAME, name, "", why) if why.is_a?(String)
-    got = records(DnsName.relative(name), DnsRecord::TXT, nil)
-    return got unless got.is_a?(Tuple(Array(Bytes), String, String))
+    got = records(DnsName.relative(name), DnsTapeRecord::TXT, nil)
+    return got unless got.is_a?(Tuple(Array(String), String, String))
     found, _, label = got
     texts = [] of String
     found.each do |data|
-      strings = DnsRecord.character_strings(data)
-      return DnsMessage.malformed("a TXT record's strings run past its data").about(name, label) if strings.nil?
+      strings = DnsTapeRecord.character_strings(data)
+      return DnsTapeMessage.malformed("a TXT record's strings run past its data").about(name, label) if strings.nil?
       texts << strings.join
     end
     texts
@@ -3582,7 +3591,7 @@ pub class Resolver
     name = asked
     aliases = 0
     while true
-      got = records(name, DnsRecord::HTTPS, nil)
+      got = records(name, DnsTapeRecord::HTTPS, nil)
       return got if got.is_a?(Cancelled)
       if got.is_a?(DnsError)
         # An alias whose target holds no HTTPS records: resolution ends
@@ -3603,7 +3612,7 @@ pub class Resolver
       end
       aliases = aliases + 1
       if aliases > SvcbAnswer::MAX_ALIASES
-        return DnsMessage.malformed("a chain of more than #{SvcbAnswer::MAX_ALIASES} AliasMode records, or a loop of them").about(host, label)
+        return DnsTapeMessage.malformed("a chain of more than #{SvcbAnswer::MAX_ALIASES} AliasMode records, or a loop of them").about(host, label)
       end
       chosen = aliased[aliased.size == 1 ? 0 : Random::Secure.rand(aliased.size)]
       return SvcbAnswer.new(".", aliases, [] of SvcbRecord) if chosen.target == "."
@@ -3638,17 +3647,17 @@ pub class Resolver
 
   # *name*'s records of *type*, following CNAMEs - within an answer, and
   # by asking again when a chain leaves one - at most
-  # `DnsMessage::MAX_CNAMES` links in all; with the name they were found
+  # `DnsTapeMessage::MAX_CNAMES` links in all; with the name they were found
   # at, where the chain ended, and the label of the server that answered.
   # *first* is the answer to the first question when it has been asked
   # already.
-  private def records(name : String, type : Int32, first : Tuple(DnsMessage, String) | DnsError | Nil) : Tuple(Array(Bytes), String, String) | DnsError | Cancelled
+  private def records(name : String, type : Int32, first : Tuple(DnsTapeMessage, String) | DnsError | Nil) : Tuple(Array(String), String, String) | DnsError | Cancelled
     target = name
-    budget = DnsMessage::MAX_CNAMES
+    budget = DnsTapeMessage::MAX_CNAMES
     answered = first
     while true
       answered = exchange(target, type) if answered.nil?
-      return answered unless answered.is_a?(Tuple(DnsMessage, String))
+      return answered unless answered.is_a?(Tuple(DnsTapeMessage, String))
       message, label = answered
       answered = nil
       read = message.addresses(target, type, budget)
@@ -3657,7 +3666,7 @@ pub class Resolver
       return {found, ends, label} unless found.empty?
       return DnsError.new(DnsError::NO_ADDRESS, name, label, Resolver.missing(type)) if links == 0
       budget = budget - links
-      return DnsMessage.malformed("a chain of more than #{DnsMessage::MAX_CNAMES} CNAMEs").about(name, label) if budget <= 0
+      return DnsTapeMessage.malformed("a chain of more than #{DnsTapeMessage::MAX_CNAMES} CNAMEs").about(name, label) if budget <= 0
       target = ends
     end
   end
@@ -3666,15 +3675,15 @@ pub class Resolver
   # the types asked other than as addresses.
   def self.missing(type : Int32) : String
     case type
-    when DnsRecord::TXT   then "no TXT record"
-    when DnsRecord::HTTPS then "no HTTPS record"
+    when DnsTapeRecord::TXT   then "no TXT record"
+    when DnsTapeRecord::HTTPS then "no HTTPS record"
     else                       ""
     end
   end
 
   # The answer to one question, from the upstreams when there are any and
   # from the plaintext servers otherwise.
-  private def exchange(name : String, type : Int32) : Tuple(DnsMessage, String) | DnsError | Cancelled
+  private def exchange(name : String, type : Int32) : Tuple(DnsTapeMessage, String) | DnsError | Cancelled
     return plaintext(name, type) if @upstreams.empty?
     asked = ask_upstreams(name, [type])
     return asked if asked.is_a?(Cancelled)
@@ -3684,7 +3693,7 @@ pub class Resolver
   # The answer to one question over plaintext: each server in turn, the
   # round repeated `attempts` times, until one answers NOERROR or
   # NXDOMAIN. The failure answered otherwise is the last server's.
-  protected def plaintext(name : String, type : Int32) : Tuple(DnsMessage, String) | DnsError | Cancelled
+  protected def plaintext(name : String, type : Int32) : Tuple(DnsTapeMessage, String) | DnsError | Cancelled
     return DnsError.new(DnsError::UNREACHABLE, name, "", "no name server is configured") if @servers.empty?
     failure = nil.as(DnsError?)
     attempt = 0
@@ -3700,7 +3709,7 @@ pub class Resolver
           next
         end
         read = Resolver.read_rcode(got, name, server.label)
-        return read if read.is_a?(Tuple(DnsMessage, String)) || read.not_found?
+        return read if read.is_a?(Tuple(DnsTapeMessage, String)) || read.not_found?
         failure = read
       end
       attempt = attempt + 1
@@ -3710,13 +3719,13 @@ pub class Resolver
 
   # What an answer's RCODE makes of it: the message for NOERROR, and the
   # failure it says otherwise.
-  def self.read_rcode(message : DnsMessage, name : String, label : String) : Tuple(DnsMessage, String) | DnsError
+  def self.read_rcode(message : DnsTapeMessage, name : String, label : String) : Tuple(DnsTapeMessage, String) | DnsError
     case message.rcode
-    when DnsMessage::RCODE_NOERROR
+    when DnsTapeMessage::RCODE_NOERROR
       {message, label}
-    when DnsMessage::RCODE_NXDOMAIN
+    when DnsTapeMessage::RCODE_NXDOMAIN
       DnsError.new(DnsError::NOT_FOUND, name, label)
-    when DnsMessage::RCODE_SERVFAIL
+    when DnsTapeMessage::RCODE_SERVFAIL
       DnsError.new(DnsError::SERVER_FAILURE, name, label)
     else
       DnsError.new(DnsError::REFUSED, name, label, Resolver.rcode_name(message.rcode))
@@ -3729,9 +3738,9 @@ pub class Resolver
   # - SERVFAIL included - is the last one's word when none does better.
   # When no upstream could be asked, the plaintext servers are asked
   # instead only when `plaintext_fallback` says so (see the class).
-  private def ask_upstreams(name : String, types : Array(Int32)) : Array(Tuple(DnsMessage, String) | DnsError) | Cancelled
+  private def ask_upstreams(name : String, types : Array(Int32)) : Array(Tuple(DnsTapeMessage, String) | DnsError) | Cancelled
     failure = nil.as(DnsError?)
-    spoken = nil.as(Array(Tuple(DnsMessage, String) | DnsError)?)
+    spoken = nil.as(Array(Tuple(DnsTapeMessage, String) | DnsError)?)
     attempt = 0
     while attempt < @attempts
       index = 0
@@ -3744,7 +3753,7 @@ pub class Resolver
           failure = got
           next
         end
-        return got if got.all? { |one| one.is_a?(Tuple(DnsMessage, String)) || one.not_found? }
+        return got if got.all? { |one| one.is_a?(Tuple(DnsTapeMessage, String)) || one.not_found? }
         spoken = got
       end
       attempt = attempt + 1
@@ -3753,7 +3762,7 @@ pub class Resolver
       return said
     end
     lost = failure || DnsError.new(DnsError::TIMED_OUT, name)
-    answers = [] of Tuple(DnsMessage, String) | DnsError
+    answers = [] of Tuple(DnsTapeMessage, String) | DnsError
     types.each do |type|
       if @plaintext_fallback && !@servers.empty?
         asked = plaintext(name, type)
@@ -3768,7 +3777,7 @@ pub class Resolver
 
   # One exchange with one upstream: a query per type, each with its own
   # ID from `Random::Secure` (or 0, `zero_id?`), each padded to a multiple
-  # of `DnsMessage::PADDING_BLOCK` (RFC 8467 4.1) because every upstream
+  # of `DnsTapeMessage::PADDING_BLOCK` (RFC 8467 4.1) because every upstream
   # is an encrypted transport, whose ciphertext would otherwise show the
   # name's length; and each answer held to what a stream's answer must be
   # - the ID and the question, no TC (a stream has room for any answer),
@@ -3777,10 +3786,10 @@ pub class Resolver
   # answers FORMERR to it, as RFC 6891 6.2.2 lets a client do: the retry
   # would send the very length the padding hides, so the FORMERR is the
   # answer, as any other refusal is.
-  private def ask_upstream(upstream : DnsUpstream, name : String, types : Array(Int32)) : Array(Tuple(DnsMessage, String) | DnsError) | DnsError | Cancelled
+  private def ask_upstream(upstream : DnsUpstream, name : String, types : Array(Int32)) : Array(Tuple(DnsTapeMessage, String) | DnsError) | DnsError | Cancelled
     label = upstream.label
     ids = [] of UInt16
-    queries = [] of Bytes
+    queries = [] of String
     types.each do |type|
       id = 0_u16
       unless upstream.zero_id?
@@ -3792,13 +3801,13 @@ pub class Resolver
         end
       end
       ids << id
-      queries << DnsMessage.query(id, name, type, DnsMessage::PADDING_BLOCK)
+      queries << DnsTapeMessage.query(id, name, type, DnsTapeMessage::PADDING_BLOCK)
     end
     got = upstream.exchange(queries, @timeout_ms)
     return got if got.is_a?(Cancelled)
     return got.about(name, label) if got.is_a?(DnsError)
-    return DnsMessage.malformed("#{got.size} answers to #{queries.size} queries").about(name, label) unless got.size == queries.size
-    answers = [] of Tuple(DnsMessage, String) | DnsError
+    return DnsTapeMessage.malformed("#{got.size} answers to #{queries.size} queries").about(name, label) unless got.size == queries.size
+    answers = [] of Tuple(DnsTapeMessage, String) | DnsError
     index = 0
     while index < got.size
       answers << Resolver.read_streamed(got[index], ids[index], name, types[index], label)
@@ -3808,23 +3817,23 @@ pub class Resolver
   end
 
   # An answer that came over a stream, read: see `ask_upstream`.
-  def self.read_streamed(bytes : Bytes, id : UInt16, name : String, type : Int32, label : String) : Tuple(DnsMessage, String) | DnsError
-    message = DnsMessage.parse(bytes)
+  def self.read_streamed(bytes : String, id : UInt16, name : String, type : Int32, label : String) : Tuple(DnsTapeMessage, String) | DnsError
+    message = DnsTapeMessage.parse(bytes)
     return message.about(name, label) if message.is_a?(DnsError)
-    return DnsMessage.malformed("the answer is not to the question asked").about(name, label) unless message.answers?(id, name, type)
-    return DnsMessage.malformed("the answer is truncated (TC), which an answer over a stream never is").about(name, label) if message.truncated?
-    ends = DnsMessage.ends_at(bytes)
-    return DnsMessage.malformed("its records run past the message").about(name, label) if ends < 0
-    return DnsMessage.malformed("oversized: #{bytes.size - ends} bytes past the end of the message").about(name, label) if ends < bytes.size
+    return DnsTapeMessage.malformed("the answer is not to the question asked").about(name, label) unless message.answers?(id, name, type)
+    return DnsTapeMessage.malformed("the answer is truncated (TC), which an answer over a stream never is").about(name, label) if message.truncated?
+    ends = DnsTapeMessage.ends_at(bytes)
+    return DnsTapeMessage.malformed("its records run past the message").about(name, label) if ends < 0
+    return DnsTapeMessage.malformed("oversized: #{bytes.bytesize - ends} bytes past the end of the message").about(name, label) if ends < bytes.bytesize
     read_rcode(message, name, label)
   end
 
   def self.rcode_name(rcode : Int32) : String
     case rcode
-    when DnsMessage::RCODE_FORMERR then "FORMERR"
-    when DnsMessage::RCODE_NOTIMP  then "NOTIMP"
-    when DnsMessage::RCODE_REFUSED then "REFUSED"
-    when DnsMessage::RCODE_BADVERS then "BADVERS"
+    when DnsTapeMessage::RCODE_FORMERR then "FORMERR"
+    when DnsTapeMessage::RCODE_NOTIMP  then "NOTIMP"
+    when DnsTapeMessage::RCODE_REFUSED then "REFUSED"
+    when DnsTapeMessage::RCODE_BADVERS then "BADVERS"
     else                                "RCODE #{rcode}"
     end
   end
@@ -3834,21 +3843,21 @@ pub class Resolver
   # deferred close captured the descriptor in a closure the wasm32 code
   # generator could not lay out ("GEP into unsized type", measured), and
   # the one place to close is as plain.
-  private def ask(server : NameServer, name : String, type : Int32) : DnsMessage | DnsError | Cancelled
+  private def ask(server : NameServer, name : String, type : Int32) : DnsTapeMessage | DnsError | Cancelled
     id = (Random::Secure.next_u & 0xFFFF_u32).to_u16
-    query = DnsMessage.query(id, name, type)
+    query = DnsTapeMessage.query(id, name, type)
     fd = IyiSocket.__sys_dgram_socket(server.family)
     return failed(name, server, SocketError.new("create a socket", IyiSocket.__sys_code(fd.to_i64))) if fd < 0
     answer = ask_on(fd, server, query, id, name, type)
     IyiSocket.__sys_close(fd)
-    return ask_tcp(server, query, id, name, type) if answer.is_a?(DnsMessage) && answer.truncated?
+    return ask_tcp(server, query, id, name, type) if answer.is_a?(DnsTapeMessage) && answer.truncated?
     answer
   end
 
-  private def ask_on(fd : Int32, server : NameServer, query : Bytes, id : UInt16, name : String, type : Int32) : DnsMessage | DnsError | Cancelled
+  private def ask_on(fd : Int32, server : NameServer, query : String, id : UInt16, name : String, type : Int32) : DnsTapeMessage | DnsError | Cancelled
     connected = IyiSocket.__sys_dgram_connect(fd, server.address, server.family)
     return failed(name, server, SocketError.new("connect", IyiSocket.__sys_code(connected.to_i64))) if connected < 0
-    sent = IyiSocket.__sys_dgram_send(fd, query.to_unsafe, query.size.to_u64)
+    sent = Resolver.send(fd, query)
     return failed(name, server, SocketError.new("send", IyiSocket.__sys_code(sent))) if sent < 0_i64
     unread = nil.as(DnsError?)
     label = server.label
@@ -3861,7 +3870,7 @@ pub class Resolver
       return ready if ready.is_a?(Cancelled)
       next unless ready
       # The decoded answer and its bytes belong to the caller's tape.
-      got = nil.as(DnsMessage | DnsError | SocketError | Nil)
+      got = nil.as(DnsTapeMessage | DnsError | SocketError | Nil)
       datagram.clear
       count = Resolver.receive(fd, datagram)
       if count < 0_i64
@@ -3870,22 +3879,28 @@ pub class Resolver
         got = decoded_answer(datagram.finish.dup, id, name, type, label)
       end
       return failed(name, server, got) if got.is_a?(SocketError)
-      return got if got.is_a?(DnsMessage)
+      return got if got.is_a?(DnsTapeMessage)
       unread = got if got.is_a?(DnsError)
     end
     unread || DnsError.new(DnsError::TIMED_OUT, name, label)
   end
 
   private def decoded_answer(packet : String, id : UInt16, name : String,
-                             type : Int32, server : String) : DnsMessage | DnsError | Nil
+                             type : Int32, server : String) : DnsTapeMessage | DnsError | Nil
     return nil unless packet.bytesize >= 2 &&
       ((packet[0].to_i32 << 8) | packet[1].to_i32) == id.to_i32
-    message = DnsMessage.parse(packet)
+    message = DnsTapeMessage.parse(packet)
     if message.is_a?(DnsError)
       DnsError.new(message.kind, name, server, message.detail.dup)
     elsif message.answers?(id, name, type)
-      message.to_heap
+      message
     end
+  end
+
+  # *query* sent on the connected datagram socket *fd*.
+  @[TapeUnsafe("hands the query's tape bytes to send")]
+  def self.send(fd : Int32, query : String) : Int64
+    IyiSocket.__sys_dgram_send(fd, query.to_unsafe, query.bytesize.to_u64)
   end
 
   # The largest datagram an answer can be.
@@ -3906,7 +3921,7 @@ pub class Resolver
   # The same query over TCP, to the same server and port, for an answer
   # too large for a datagram: two bytes of length before the message,
   # each way (RFC 1035 4.2.2), every wait bounded by `timeout_ms`.
-  private def ask_tcp(server : NameServer, query : Bytes, id : UInt16, name : String, type : Int32) : DnsMessage | DnsError | Cancelled
+  private def ask_tcp(server : NameServer, query : String, id : UInt16, name : String, type : Int32) : DnsTapeMessage | DnsError | Cancelled
     peer = IyiSocket.connect_to(server.address, server.family, "#{server.label} over TCP", @timeout_ms)
     return peer if peer.is_a?(Cancelled)
     return failed(name, server, peer) if peer.is_a?(SocketError)
@@ -3915,39 +3930,40 @@ pub class Resolver
     answer
   end
 
-  private def ask_tcp_on(peer : IyiSocket, server : NameServer, query : Bytes, id : UInt16, name : String, type : Int32) : DnsMessage | DnsError | Cancelled
+  private def ask_tcp_on(peer : IyiSocket, server : NameServer, query : String, id : UInt16, name : String, type : Int32) : DnsTapeMessage | DnsError | Cancelled
     peer.read_timeout_ms = @timeout_ms
     peer.write_timeout_ms = @timeout_ms
-    framed = Bytes.new(query.size + 2)
-    framed[0] = (query.size >> 8).to_u8
-    framed[1] = (query.size & 255).to_u8
-    (framed.to_unsafe + 2).copy_from(query.to_unsafe, query.size)
-    wrote = peer.write(framed.to_unsafe, framed.size)
+    framed = String.build(query.bytesize + 2) do |writer|
+      writer.push((query.bytesize >> 8).to_u8)
+      writer.push((query.bytesize & 255).to_u8)
+      query.each_byte { |byte| writer.push(byte) }
+    end
+    wrote = peer.write(framed)
     return wrote if wrote.is_a?(Cancelled)
     return failed(name, server, wrote) if wrote.is_a?(SocketError)
     head = read_fully(peer, 2, name, server)
-    return head unless head.is_a?(Bytes)
-    body = read_fully(peer, (head[0].to_i32 << 8) | head[1].to_i32, name, server)
-    return body unless body.is_a?(Bytes)
-    message = DnsMessage.parse(body)
+    return head unless head.is_a?(String)
+    body = read_fully(peer, (head.byte_at(0).to_i32 << 8) | head.byte_at(1).to_i32, name, server)
+    return body unless body.is_a?(String)
+    message = DnsTapeMessage.parse(body)
     return message.about(name, server.label) if message.is_a?(DnsError)
     unless message.answers?(id, name, type)
-      return DnsMessage.malformed("the answer over TCP is not to the question asked").about(name, server.label)
+      return DnsTapeMessage.malformed("the answer over TCP is not to the question asked").about(name, server.label)
     end
     message
   end
 
-  private def read_fully(peer : IyiSocket, count : Int32, name : String, server : NameServer) : Bytes | DnsError | Cancelled
-    into = Bytes.new(count)
+  private def read_fully(peer : IyiSocket, count : Int32, name : String, server : NameServer) : String | DnsError | Cancelled
+    into = String::Builder.new(count > 0 ? count : 1)
     got = 0
     while got < count
-      read = peer.read(into.to_unsafe + got, count - got)
+      read = peer.read(into, count - got)
       return read if read.is_a?(Cancelled)
       return failed(name, server, read) if read.is_a?(SocketError)
-      return DnsMessage.malformed("the answer over TCP ended after #{got} of #{count} bytes").about(name, server.label) if read == 0
+      return DnsTapeMessage.malformed("the answer over TCP ended after #{got} of #{count} bytes").about(name, server.label) if read == 0
       got = got + read
     end
-    into
+    into.finish
   end
 
   # A transport's failure as the resolver's: out of time, or unreachable
