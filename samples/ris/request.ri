@@ -49,7 +49,7 @@ end
 
 def handle(raw : String) : Nil
   tape do
-    head = Server.parse_head(raw)
+    head = Server.parse_head(raw, 0, true)
     unless head.is_a?(ParsedHead)
       puts "400 Bad Request"
       return

@@ -194,10 +194,10 @@ first):
   an `IyiGroup.new` keeps each task's slot until it ends; parallel task
   fibers are not pooled; a spawned block's captured closure data still
   takes program storage per spawn.
-* samples/ris/logline.ri does not compile: IOBackend.on_program stores
-  the request-tape IO in a program object (std/log.iyi:362, "cannot
-  store request tape data on the program tape"). check.sh's heap gate
-  stops at it, so the other heap_budget.txt rows go unchecked.
+* samples/ris/logline.ri compiles now but ends in "mapping failed:
+  134348800 bytes" (the per-request mapping under Server programs).
+  check.sh's heap gate stops at it, so the other heap_budget.txt rows
+  go unchecked.
 * std's target, as Goose does it (doc/reference/goose/docs/design/
   owning_dynamic_data.md): short-lived String/Array/Hash on the caller's
   tape; long-lived state (HPACK tables, autocert cache, log sinks) in
@@ -296,10 +296,12 @@ first):
     (TAPE_SPEC 1.6); task_local_tape(_helper) cover the unsafe cases.
   * autocert lifecycle and wire: Array(Hash(String, Json::Any)) cannot
     hold growing values (SlicePool rule).
-  * log_metadata, log_tape, samples/ris/orders: log.iyi:279 "cannot grow
-    a pool run with a live view of TapeEntry.@source"; heap and
-    server_owners stop at log.iyi:362; answer, serve, server_groups,
-    http_prefork at http.iyi:6052; samples/ris/request at :2627.
+  * log_metadata, log_tape: pass again (log.iyi:279 no longer stops
+    them). samples/ris/orders and request: fixed; they called the
+    one-argument Server.parse_head, which answers RequestHead, and
+    JSON.parse; now parse_head(bytes, 0, true) and JSON.document.
+  * answer, server_owners, http_continue: pass. std/zstd is on tape
+    Arrays (no Pointer, malloc or to_unsafe), as std/compress is.
 * growing_owner: fixed; an owner held in an Array or RisTree (also a
   SlicePool's @data) gets the container refusal.
 * Server programs (answer, server_groups, web, server_owners, serve,
@@ -308,10 +310,12 @@ first):
   String) is dropped, not folded (conn.fill); a branch ending in
   `return` bounds its shrinks; an If with one leaving branch guards
   what follows; Host replaced while filling the table (:2627); H2
-  flush clears after the write. They now stop at the to_unsafe rule
-  in std (38e98018d): compress.iyi:426 keeps `data.to_unsafe` in a
-  field (http.iyi's reads moved to byte_at).
-* http_continue and the http benches stop at tls.iyi:5257: "cannot
+  flush clears after the write. The to_unsafe rule's stops in
+  compress.iyi and zstd.iyi are gone. Left: server_groups makes a
+  mapping per request (21003 for 20000, gate <= 29, 0 unmapped); serve
+  and logline end in "mapping failed: 134348800" (a 128 MiB side
+  reservation each, never reused); http_prefork stops at tls.iyi:5257.
+* http_prefork and the http benches stop at tls.iyi:5257: "cannot
   prove opaque callback retain/escape" for TlsServerConfig's
   identity_source (autocert's AutocertView), an unknown proc handed
   the server name. It wants what the takeover got: a source the checker

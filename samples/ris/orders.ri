@@ -1,7 +1,7 @@
 # orders: a JSON API's request path, all of it on one tape per request.
 #
 #   ./bin/ris build --release -o orders samples/ris/orders.ri
-#   ./orders        # tape: parse_head, JSON.parse, w.json on the tape
+#   ./orders        # tape: parse_head, JSON.document, w.json on the tape
 #
 # Each of 200,000 requests is a `POST /orders` whose body names a user and
 # 1..8 line items. The handler reads the head, reads the body as JSON,
@@ -55,11 +55,11 @@ end
 
 # The request in *bytes*, answered on the caller's tape; the answer's hash.
 def answer(bytes : String) : UInt64
-  head = Server.parse_head(bytes)
+  head = Server.parse_head(bytes, 0, true)
   return 0_u64 unless head.is_a?(ParsedHead)
   size = head.content_length
   return 0_u64 unless size
-  doc = JSON.parse(bytes[head.body_start, size.to_i32])
+  doc = JSON.document(bytes[head.body_start, size.to_i32])
   w = String::Builder.new
   w.json do |json|
     total = 0_i64

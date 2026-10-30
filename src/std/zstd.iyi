@@ -86,10 +86,10 @@ end
 # The baselines and extra-bit counts of the three sequence codes (RFC 8878
 # §3.1.1.3.2.1.1), and the predefined distributions (§3.1.1.3.2.2).
 class Codes
-  getter ll_base : Pointer(Int32)
-  getter ll_bits : Pointer(Int32)
-  getter ml_base : Pointer(Int32)
-  getter ml_bits : Pointer(Int32)
+  getter ll_base : Array(Int32)
+  getter ll_bits : Array(Int32)
+  getter ml_base : Array(Int32)
+  getter ml_bits : Array(Int32)
 
   LL_NORM = StaticArray[4, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 2, 1, 1, 1, 1, 1, -1, -1, -1, -1]
   ML_NORM = StaticArray[1, 4, 3, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
@@ -109,8 +109,8 @@ class Codes
                            10, 11, 12, 13, 14, 15, 16])
   end
 
-  def self.fill(values) : Pointer(Int32)
-    p = Pointer(Int32).malloc(values.size.to_u64)
+  def self.fill(values) : Array(Int32)
+    p = Array(Int32).new(values.size, 0)
     i = 0
     while i < values.size
       p[i] = values[i]
@@ -149,24 +149,24 @@ end
 # to add to it.
 class FseTable
   getter log : Int32
-  getter symbol : Pointer(UInt8)
-  getter bits : Pointer(UInt8)
-  getter base : Pointer(Int32)
-  @next : Pointer(Int32)
+  getter symbol : Array(UInt8)
+  getter bits : Array(UInt8)
+  getter base : Array(Int32)
+  @next : Array(Int32)
 
   def initialize
     @log = 0
-    @symbol = Pointer(UInt8).malloc(512_u64)
-    @bits = Pointer(UInt8).malloc(512_u64)
-    @base = Pointer(Int32).malloc(512_u64)
-    @next = Pointer(Int32).malloc(256_u64)
+    @symbol = Array(UInt8).new(512, 0_u8)
+    @bits = Array(UInt8).new(512, 0_u8)
+    @base = Array(Int32).new(512, 0)
+    @next = Array(Int32).new(256, 0)
   end
 
   # From a normalized distribution whose probabilities fill the table:
   # the "less than one" symbols (-1) take the top cells, one each; the
   # rest are spread with the step the format fixes, so both ends of the
   # stream lay the table out the same.
-  def build(norm : Pointer(Int32), nsym : Int32, log : Int32) : Nil
+  def build(norm : Array(Int32), nsym : Int32, log : Int32) : Nil
     @log = log
     size = 1 << log
     high = size - 1
@@ -242,13 +242,12 @@ class Decoder
 
   @source : Proc(String | Nil) | Nil
   @input : String
-  @in : Pointer(UInt8)
   @in_pos : Int32
   @in_end : Int32
   @exhausted : Bool
   @grow : Bool
   @limit : Int32
-  @buf : Pointer(UInt8)
+  @buf : Array(UInt8)
   @cap : Int32
   @pos : Int32
   @given : Int32
@@ -267,11 +266,11 @@ class Decoder
   @block_start : Int32
   @skip : Int64
   @hash : XXH64
-  @block : Pointer(UInt8)
-  @lits : Pointer(UInt8)
-  @weights : Pointer(UInt8)
-  @norm : Pointer(Int32)
-  @huf : Pointer(Int32)
+  @block : Array(UInt8)
+  @lits : Array(UInt8)
+  @weights : Array(UInt8)
+  @norm : Array(Int32)
+  @huf : Array(Int32)
   @huf_bits : Int32
   @wfse : FseTable
   @codes : Codes
@@ -283,7 +282,8 @@ class Decoder
   @rep1 : Int64
   @rep2 : Int64
   @rep3 : Int64
-  @rb : Pointer(UInt8)
+  @rb : Array(UInt8)
+  @rb_at : Int32
   @rpos : Int32
   @nc_log : Int32
   @nc_syms : Int32
@@ -295,13 +295,12 @@ class Decoder
   def initialize(@source : Proc(String | Nil) | Nil, data : String, @limit : Int32)
     raise "zstd: a window limit of #{@limit} bytes is outside 1 KiB to 512 MiB" if @limit < 1024 || @limit > 536870912
     @input = data
-    @in = data.to_unsafe
     @in_pos = 0
     @in_end = data.bytesize
     @exhausted = false
     @grow = @source.nil?
     @cap = 65536
-    @buf = Pointer(UInt8).malloc(@cap.to_u64)
+    @buf = Array(UInt8).new(@cap, 0_u8)
     @pos = 0
     @given = 0
     @origin = 0
@@ -320,11 +319,11 @@ class Decoder
     @skip = 0_i64
     @hash = XXH64.new
     # A block and the eight bytes past it a word load may touch.
-    @block = Pointer(UInt8).malloc((BLOCK_MAX + 16).to_u64)
-    @lits = Pointer(UInt8).malloc((BLOCK_MAX + 16).to_u64)
-    @weights = Pointer(UInt8).malloc(256_u64)
-    @norm = Pointer(Int32).malloc(256_u64)
-    @huf = Pointer(Int32).malloc(2048_u64)
+    @block = Array(UInt8).new((BLOCK_MAX + 16), 0_u8)
+    @lits = Array(UInt8).new((BLOCK_MAX + 16), 0_u8)
+    @weights = Array(UInt8).new(256, 0_u8)
+    @norm = Array(Int32).new(256, 0)
+    @huf = Array(Int32).new(2048, 0)
     @huf_bits = 0
     @wfse = FseTable.new
     @codes = Codes.new
@@ -337,6 +336,7 @@ class Decoder
     @rep2 = 4_i64
     @rep3 = 8_i64
     @rb = @block
+    @rb_at = 0
     @rpos = 0
     @nc_log = 0
     @nc_syms = 0
@@ -360,9 +360,7 @@ class Decoder
 
   # Every byte written, for the whole-string form.
   def output : String
-    n = @pos
-    src = @buf
-    String.new(n) { |dst| Decoder.copy(dst, src, n) }
+    Decoder.text(@buf, 0, @pos)
   end
 
   def read(max : Int32) : String | ZstdError
@@ -372,9 +370,9 @@ class Decoder
     return @error if @failed
     n = @pos - @given
     n = max if n > max
-    src = @buf + @given.to_i64
+    from = @given
     @given = @given + n
-    String.new(n) { |dst| Decoder.copy(dst, src, n) }
+    Decoder.text(@buf, from, n)
   end
 
   def finished? : Bool
@@ -384,8 +382,11 @@ class Decoder
   def leftover : String
     return "" unless @state == DONE
     n = @in_end - @in_pos
-    src = @in + @in_pos.to_i64
-    String.new(n) { |dst| dst.copy_from(src, n) }
+    input = @input
+    from = @in_pos
+    String.build(n) do |w|
+      n.times { |k| w.push(input.byte_at(from + k)) }
+    end
   end
 
   # Steps until there is something to read, the stream has ended, or it
@@ -424,18 +425,25 @@ class Decoder
     end
     rest = @in_end - @in_pos
     if rest > 0
-      src = @in + @in_pos.to_i64
+      input = @input
+      from = @in_pos
       piece = chunk
-      chunk = String.new(rest + piece.bytesize) do |dst|
-        dst.copy_from(src, rest)
-        (dst + rest.to_i64).copy_from(piece.to_unsafe, piece.bytesize)
+      chunk = String.build(rest + piece.bytesize) do |w|
+        rest.times { |k| w.push(input.byte_at(from + k)) }
+        w << piece
       end
     end
     @input = chunk
-    @in = chunk.to_unsafe
     @in_pos = 0
     @in_end = chunk.bytesize
     true
+  end
+
+  # *n* bytes of the piece in hand, from `@in_pos` on, into *dst* at *at*.
+  private def take(dst : Array(UInt8), at : Int32, n : Int32) : Nil
+    input = @input
+    from = @in_pos
+    n.times { |k| dst[at + k] = input.byte_at(from + k) }
   end
 
   # Whether *n* unread input bytes are in hand or can be had.
@@ -451,7 +459,7 @@ class Decoder
     v = 0_u64
     i = n - 1
     while i >= 0
-      v = v.unsafe_shl(8) | @in[@in_pos + k + i].to_u64
+      v = v.unsafe_shl(8) | @input.byte_at(@in_pos + k + i).to_u64
       i = i - 1
     end
     v
@@ -486,7 +494,7 @@ class Decoder
   # descriptor says.
   private def header : Nil
     return fail("zstd: the stream ends inside a frame header") unless ahead?(1)
-    fhd = @in[@in_pos].to_i32
+    fhd = @input.byte_at(@in_pos).to_i32
     fcs_flag = fhd >> 6
     single = (fhd & 0x20) != 0
     return fail("zstd: the frame header's reserved bit is set") if (fhd & 0x08) != 0
@@ -497,7 +505,7 @@ class Decoder
     k = 1
     window = 0_u64
     unless single
-      wd = @in[@in_pos + 1].to_i32
+      wd = @input.byte_at(@in_pos + 1).to_i32
       base = 1_u64.unsafe_shl(10 + (wd >> 3))
       window = base + base.unsafe_shr(3) * (wd & 7).to_u64
       k = 2
@@ -531,8 +539,7 @@ class Decoder
     if @grow && @sized && @content_size < 1073741824_u64 && @content_size <= (@in_end - @in_pos).to_u64 * 32768_u64
       want = @pos.to_i64 + @content_size.to_i64 + 64_i64
       if want > @cap.to_i64
-        @buf = @buf.realloc(want.to_u64)
-        @cap = want.to_i32
+        grow_to(want.to_i32)
       end
     end
     @state = BLOCK_HEAD
@@ -569,7 +576,7 @@ class Decoder
       end
       n = @left
       n = @in_end - @in_pos if n > @in_end - @in_pos
-      Decoder.copy(@buf + @pos.to_i64, @in + @in_pos.to_i64, n)
+      take(@buf, @pos, n)
       @pos = @pos + n
       @in_pos = @in_pos + n
       @left = @left - n
@@ -579,12 +586,13 @@ class Decoder
 
   private def rle : Nil
     return fail("zstd: the stream ends inside a block") unless ahead?(1)
-    b = @in[@in_pos]
+    b = @input.byte_at(@in_pos)
     @in_pos = @in_pos + 1
-    dst = @buf + @pos.to_i64
+    buf = @buf
+    at = @pos
     i = 0
     while i < @left
-      dst[i] = b
+      buf[at + i] = b
       i = i + 1
     end
     @pos = @pos + @left
@@ -600,7 +608,7 @@ class Decoder
       end
       n = @left - @fill
       n = @in_end - @in_pos if n > @in_end - @in_pos
-      Decoder.copy(@block + @fill.to_i64, @in + @in_pos.to_i64, n)
+      take(@block, @fill, n)
       @fill = @fill + n
       @in_pos = @in_pos + n
     end
@@ -655,7 +663,7 @@ class Decoder
     String.new(8) do |buf|
       i = 0
       while i < 8
-        buf[i] = digits.to_unsafe[(v.unsafe_shr((7 - i) * 4) & 15_u64).to_i32]
+        buf[i] = digits.byte_at((v.unsafe_shr((7 - i) * 4) & 15_u64).to_i32)
         i = i + 1
       end
     end
@@ -676,7 +684,7 @@ class Decoder
       keep = @origin if keep < @origin
       if keep > 0 && (keep >= @window || @cap >= bound)
         n = @pos - keep
-        Decoder.copy(@buf, @buf + keep.to_i64, n)
+        Decoder.copy(@buf, 0, @buf, keep, n)
         @pos = n
         @given = @given - keep
         @origin = @origin - keep
@@ -687,7 +695,15 @@ class Decoder
     cap = @cap * 2
     cap = bound if !@grow && cap > bound
     cap = @pos + need if cap < @pos + need
-    @buf = @buf.realloc(cap.to_u64)
+    grow_to(cap)
+  end
+
+  # The output buffer at *cap* bytes, grown in place on the tape.
+  private def grow_to(cap : Int32) : Nil
+    buf = @buf
+    while buf.size < cap
+      buf << 0_u8
+    end
     @cap = cap
   end
 
@@ -700,20 +716,21 @@ class Decoder
     p = @rpos - n
     @rpos = p
     if p >= 0
-      return ((@rb + (p >> 3).to_i64).as(Pointer(UInt64)).value.unsafe_shr(p & 7) & (1_u64.unsafe_shl(n) - 1_u64)).to_i32
+      return (Decoder.load64(@rb, @rb_at + (p >> 3)).unsafe_shr(p & 7) & (1_u64.unsafe_shl(n) - 1_u64)).to_i32
     end
     have = p + n
     return 0 if have <= 0
-    ((@rb.as(Pointer(UInt64)).value & (1_u64.unsafe_shl(have) - 1_u64)).unsafe_shl(n - have)).to_i32
+    ((Decoder.load64(@rb, @rb_at) & (1_u64.unsafe_shl(have) - 1_u64)).unsafe_shl(n - have)).to_i32
   end
 
   # A bitstream of *size* bytes at *src*: its last byte's highest set bit
   # marks where it starts.
-  private def rstart(src : Pointer(UInt8), size : Int32) : Bool
+  private def rstart(src : Array(UInt8), at : Int32, size : Int32) : Bool
     return false if size < 1
-    last = src[size - 1].to_i32
+    last = src[at + size - 1].to_i32
     return false if last == 0
     @rb = src
+    @rb_at = at
     @rpos = (size - 1) * 8 + Codes.highbit(last)
     true
   end
@@ -755,10 +772,12 @@ class Decoder
     return fail("zstd: a literals section runs past its block") if head > size
     return fail("zstd: a block's literals are past its maximum of #{@block_max} bytes") if regen > @block_max
     lits = @lits
+    lits_at = 0
     lit_end = 0
     if kind == 0
       return fail("zstd: a literals section runs past its block") if head + regen > size
-      lits = src + head.to_i64
+      lits = src
+      lits_at = head
       lit_end = head + regen
     elsif kind == 1
       return fail("zstd: a literals section runs past its block") if head + 1 > size
@@ -773,17 +792,17 @@ class Decoder
       return fail("zstd: a literals section runs past its block") if head + comp > size
       p = head
       if kind == 2
-        used = huffman_table(src + p.to_i64, comp)
+        used = huffman_table(src, p, comp)
         return if used < 0
         p = p + used
       elsif @huf_bits == 0
         return fail("zstd: a treeless literals block with no Huffman table before it")
       end
       streams = head + comp - p
-      return unless huffman_literals(src + p.to_i64, streams, regen, format != 0)
+      return unless huffman_literals(src, p, streams, regen, format != 0)
       lit_end = head + comp
     end
-    sequences(lit_end, size, lits, regen)
+    sequences(lit_end, size, lits, lits_at, regen)
   end
 
   # Up to four bytes of the block from *k*, little-endian; past the block
@@ -800,12 +819,12 @@ class Decoder
 
   # The Huffman tree description (§4.2.1): weights written directly, four
   # bits each, or FSE-compressed; answers the bytes it took, or -1.
-  private def huffman_table(src : Pointer(UInt8), avail : Int32) : Int32
+  private def huffman_table(src : Array(UInt8), at : Int32, avail : Int32) : Int32
     if avail < 1
       fail("zstd: a Huffman table runs past its literals")
       return -1
     end
-    hb = src[0].to_i32
+    hb = src[at].to_i32
     n = 0
     used = 0
     if hb >= 128
@@ -817,7 +836,7 @@ class Decoder
       end
       i = 0
       while i < n
-        b = src[1 + i // 2].to_i32
+        b = src[at + 1 + i // 2].to_i32
         @weights[i] = ((i & 1) == 0 ? b >> 4 : b & 15).to_u8
         i = i + 1
       end
@@ -827,7 +846,7 @@ class Decoder
         fail("zstd: a Huffman table runs past its literals")
         return -1
       end
-      n = fse_weights(src + 1_i64, hb)
+      n = fse_weights(src, at + 1, hb)
       return -1 if n < 0
     end
     return -1 unless huffman_build(n)
@@ -837,12 +856,12 @@ class Decoder
   # The weights' FSE stream (§4.2.1.2): two states over one table, taking
   # turns, until a state update reads past the start of the stream; then
   # the other state's symbol is the last.
-  private def fse_weights(src : Pointer(UInt8), avail : Int32) : Int32
-    used = ncount(src, avail, 255, 6)
+  private def fse_weights(src : Array(UInt8), at : Int32, avail : Int32) : Int32
+    used = ncount(src, at, avail, 255, 6)
     return -1 if used < 0
     t = @wfse
     t.build(@norm, @nc_syms, @nc_log)
-    unless rstart(src + used.to_i64, avail - used)
+    unless rstart(src, at + used, avail - used)
       fail("zstd: a Huffman table's weights have no bitstream")
       return -1
     end
@@ -938,17 +957,17 @@ class Decoder
 
   # The Huffman-coded literals: one stream, or four after a jump table of
   # their sizes, each a quarter of the literals (the last what is left).
-  private def huffman_literals(src : Pointer(UInt8), size : Int32, regen : Int32, four : Bool) : Bool
+  private def huffman_literals(src : Array(UInt8), at : Int32, size : Int32, regen : Int32, four : Bool) : Bool
     unless four
-      return huffman_stream(src, size, @lits, regen)
+      return huffman_stream(src, at, size, 0, regen)
     end
     if size < 10
       fail("zstd: four Huffman streams without room for their jump table")
       return false
     end
-    s1 = src[0].to_i32 | (src[1].to_i32 << 8)
-    s2 = src[2].to_i32 | (src[3].to_i32 << 8)
-    s3 = src[4].to_i32 | (src[5].to_i32 << 8)
+    s1 = src[at].to_i32 | (src[at + 1].to_i32 << 8)
+    s2 = src[at + 2].to_i32 | (src[at + 3].to_i32 << 8)
+    s3 = src[at + 4].to_i32 | (src[at + 5].to_i32 << 8)
     s4 = size - 6 - s1 - s2 - s3
     seg = (regen + 3) // 4
     last = regen - seg * 3
@@ -956,20 +975,21 @@ class Decoder
       fail("zstd: a Huffman jump table that does not fit its streams")
       return false
     end
-    p = src + 6_i64
-    return false unless huffman_stream(p, s1, @lits, seg)
-    p = p + s1.to_i64
-    return false unless huffman_stream(p, s2, @lits + seg.to_i64, seg)
-    p = p + s2.to_i64
-    return false unless huffman_stream(p, s3, @lits + (seg * 2).to_i64, seg)
-    p = p + s3.to_i64
-    huffman_stream(p, s4, @lits + (seg * 3).to_i64, last)
+    p = at + 6
+    return false unless huffman_stream(src, p, s1, 0, seg)
+    p = p + s1
+    return false unless huffman_stream(src, p, s2, seg, seg)
+    p = p + s2
+    return false unless huffman_stream(src, p, s3, seg * 2, seg)
+    p = p + s3
+    huffman_stream(src, p, s4, seg * 3, last)
   end
 
   # One stream: *n* symbols, each found by the next table-width bits, and
   # the stream must end where the last one does.
-  private def huffman_stream(src : Pointer(UInt8), size : Int32, dst : Pointer(UInt8), n : Int32) : Bool
-    unless rstart(src, size)
+  private def huffman_stream(src : Array(UInt8), at : Int32, size : Int32, dst_at : Int32, n : Int32) : Bool
+    dst = @lits
+    unless rstart(src, at, size)
       fail("zstd: a Huffman stream has no end mark")
       return false
     end
@@ -982,12 +1002,12 @@ class Decoder
       p = rpos - bits
       v = 0
       if p >= 0
-        v = ((src + (p >> 3).to_i64).as(Pointer(UInt64)).value.unsafe_shr(p & 7) & mask).to_i32
+        v = (Decoder.load64(src, at + (p >> 3)).unsafe_shr(p & 7) & mask).to_i32
       elsif rpos > 0
-        v = ((src.as(Pointer(UInt64)).value & (1_u64.unsafe_shl(rpos) - 1_u64)).unsafe_shl(bits - rpos)).to_i32
+        v = ((Decoder.load64(src, at) & (1_u64.unsafe_shl(rpos) - 1_u64)).unsafe_shl(bits - rpos)).to_i32
       end
       e = table[v]
-      dst[i] = (e & 255).to_u8
+      dst[dst_at + i] = (e & 255).to_u8
       rpos = rpos - (e >> 8)
       i = i + 1
     end
@@ -1002,7 +1022,7 @@ class Decoder
   # each symbol's probability in as few bits as what is left allows, a
   # zero followed by two-bit counts of more zeros. Answers the bytes it
   # took, or -1.
-  private def ncount(src : Pointer(UInt8), avail : Int32, max_sym : Int32, max_log : Int32) : Int32
+  private def ncount(src : Array(UInt8), at : Int32, avail : Int32, max_sym : Int32, max_log : Int32) : Int32
     if avail < 1
       fail("zstd: an FSE table runs past its section")
       return -1
@@ -1013,7 +1033,7 @@ class Decoder
       i = i + 1
     end
     off = 4
-    log = fpeek(src, avail, 0, 4) + 5
+    log = fpeek(src, at, avail, 0, 4) + 5
     if log > max_log
       fail("zstd: an FSE table's accuracy log of #{log} is past #{max_log}")
       return -1
@@ -1026,7 +1046,7 @@ class Decoder
     while remaining > 1
       if zero
         while true
-          r = fpeek(src, avail, off, 2)
+          r = fpeek(src, at, avail, off, 2)
           off = off + 2
           sym = sym + r
           break unless r == 3
@@ -1037,7 +1057,7 @@ class Decoder
         return -1
       end
       max = 2 * threshold - 1 - remaining
-      v = fpeek(src, avail, off, nb)
+      v = fpeek(src, at, avail, off, nb)
       count = 0
       if (v & (threshold - 1)) < max
         count = v & (threshold - 1)
@@ -1073,19 +1093,19 @@ class Decoder
 
   # *n* bits (up to 16) at bit *off* of a forward little-endian stream of
   # *avail* bytes; past its end, zeros.
-  private def fpeek(src : Pointer(UInt8), avail : Int32, off : Int32, n : Int32) : Int32
+  private def fpeek(src : Array(UInt8), from : Int32, avail : Int32, off : Int32, n : Int32) : Int32
     at = off >> 3
     acc = 0_u64
     k = 0
     while k < 4 && at + k < avail
-      acc = acc | src[at + k].to_u64.unsafe_shl(k * 8)
+      acc = acc | src[from + at + k].to_u64.unsafe_shl(k * 8)
       k = k + 1
     end
     (acc.unsafe_shr(off & 7) & (1_u64.unsafe_shl(n) - 1_u64)).to_i32
   end
 
   # The sequences section (§3.1.1.3.2) and their execution (§3.1.1.4).
-  private def sequences(at : Int32, size : Int32, lits : Pointer(UInt8), nlits : Int32) : Nil
+  private def sequences(at : Int32, size : Int32, lits : Array(UInt8), lits_at : Int32, nlits : Int32) : Nil
     src = @block
     return fail("zstd: a block ends before its sequences section") if at >= size
     p = at
@@ -1106,7 +1126,7 @@ class Decoder
     if nseq == 0
       return fail("zstd: bytes after a block's sequences section") if p != size
       return fail("zstd: a block decodes to more than its maximum of #{@block_max} bytes") if nlits > @block_max
-      Decoder.copy(@buf + @pos.to_i64, lits, nlits)
+      Decoder.copy(@buf, @pos, lits, lits_at, nlits)
       @pos = @pos + nlits
       return
     end
@@ -1118,8 +1138,8 @@ class Decoder
     p = table(OF, (modes >> 4) & 3, p, size, 31, 8) if p >= 0
     p = table(ML, (modes >> 2) & 3, p, size, 52, 9) if p >= 0
     return if p < 0
-    return fail("zstd: a block's sequences have no bitstream") unless rstart(src + p.to_i64, size - p)
-    execute(nseq, lits, nlits)
+    return fail("zstd: a block's sequences have no bitstream") unless rstart(src, p, size - p)
+    execute(nseq, lits, lits_at, nlits)
   end
 
   # One symbol type's table, by its mode: predefined, one symbol (RLE),
@@ -1142,7 +1162,7 @@ class Decoder
       @cur[kind] = @rles[kind]
       p = p + 1
     elsif mode == 2
-      used = ncount(@block + p.to_i64, size - p, max_sym, max_log)
+      used = ncount(@block, p, size - p, max_sym, max_log)
       return -1 if used < 0
       @custom[kind].build(@norm, @nc_syms, @nc_log)
       @cur[kind] = @custom[kind]
@@ -1157,7 +1177,7 @@ class Decoder
     p
   end
 
-  private def execute(nseq : Int32, lits : Pointer(UInt8), nlits : Int32) : Nil
+  private def execute(nseq : Int32, lits : Array(UInt8), lits_at : Int32, nlits : Int32) : Nil
     llt = @cur[LL]
     oft = @cur[OF]
     mlt = @cur[ML]
@@ -1205,7 +1225,7 @@ class Decoder
       end
       return fail("zstd: a sequence asks for more literals than its block has") if ll > nlits - lit
       return fail("zstd: a block decodes to more than its maximum of #{@block_max} bytes") if ll.to_i64 + ml.to_i64 > (limit - @pos).to_i64
-      Decoder.copy(@buf + @pos.to_i64, lits + lit.to_i64, ll)
+      Decoder.copy(@buf, @pos, lits, lits_at + lit, ll)
       @pos = @pos + ll
       lit = lit + ll
       return fail("zstd: an offset of #{offset} reaches past the window of #{@window} bytes") if offset > @window.to_i64
@@ -1216,7 +1236,7 @@ class Decoder
     return fail("zstd: the sequences do not end where their bitstream does") unless @rpos == 0
     rest = nlits - lit
     return fail("zstd: a block decodes to more than its maximum of #{@block_max} bytes") if rest > limit - @pos
-    Decoder.copy(@buf + @pos.to_i64, lits + lit.to_i64, rest)
+    Decoder.copy(@buf, @pos, lits, lits_at + lit, rest)
     @pos = @pos + rest
   end
 
@@ -1224,40 +1244,41 @@ class Decoder
   # a word at a time from the nearest whole number of periods that is a
   # word or more back, after the bytes that make that much history.
   private def copy_back(distance : Int32, length : Int32) : Nil
-    dst = @buf + @pos.to_i64
+    buf = @buf
+    at = @pos
     i = 0
-    d = distance
-    if d < 8
-      d = d * ((7 + d) // d)
-      while i < d - distance && i < length
-        dst[i] = dst[i - distance]
-        i = i + 1
-      end
-    end
-    src = dst + (0 - d).to_i64
-    while i + 8 <= length
-      (dst + i.to_i64).as(Pointer(UInt64)).value = (src + i.to_i64).as(Pointer(UInt64)).value
-      i = i + 8
-    end
     while i < length
-      dst[i] = dst[i - distance]
+      buf[at + i] = buf[at + i - distance]
       i = i + 1
     end
     @pos = @pos + length
   end
 
-  # *n* bytes forward a word at a time: for regions apart, or a source a
-  # word or more ahead of the destination (the slide).
-  def self.copy(dst : Pointer(UInt8), src : Pointer(UInt8), n : Int32) : Nil
+  # *n* bytes of *src* from *from* into *dst* at *at*, forward: for
+  # regions apart, or a source ahead of the destination (the slide).
+  def self.copy(dst : Array(UInt8), at : Int32, src : Array(UInt8), from : Int32, n : Int32) : Nil
     i = 0
-    while i + 8 <= n
-      (dst + i.to_i64).as(Pointer(UInt64)).value = (src + i.to_i64).as(Pointer(UInt64)).value
-      i = i + 8
-    end
     while i < n
-      dst[i] = src[i]
+      dst[at + i] = src[from + i]
       i = i + 1
     end
+  end
+
+  # *n* bytes of *src* from *at* as a String.
+  def self.text(src : Array(UInt8), at : Int32, n : Int32) : String
+    String.build(n) { |w| n.times { |i| w.push(src[at + i]) } }
+  end
+
+  # Eight bytes of *src* from *at*, little-endian; past its end, zeros.
+  def self.load64(src : Array(UInt8), at : Int32) : UInt64
+    v = 0_u64
+    k = 7
+    while k >= 0
+      i = at + k
+      v = v.unsafe_shl(8) | (i < src.size ? src[i].to_u64 : 0_u64)
+      k = k - 1
+    end
+    v
   end
 end
 
@@ -1334,7 +1355,7 @@ end
 
 # A growing byte buffer, and bits onto it least significant first.
 class Sink
-  @data : Pointer(UInt8)
+  @data : Array(UInt8)
   @size : Int32
   @cap : Int32
   @acc : UInt64
@@ -1342,7 +1363,7 @@ class Sink
 
   def initialize(cap : Int32)
     @cap = cap < 64 ? 64 : cap
-    @data = Pointer(UInt8).malloc(@cap.to_u64)
+    @data = Array(UInt8).new(@cap, 0_u8)
     @size = 0
     @acc = 0_u64
     @cnt = 0
@@ -1366,14 +1387,30 @@ class Sink
     end
   end
 
-  def append(src : Pointer(UInt8), n : Int32) : Nil
+  # *n* bytes of *src* from *from*.
+  def append(src : Array(UInt8), from : Int32, n : Int32) : Nil
     reserve(n)
-    Decoder.copy(@data + @size.to_i64, src, n)
+    Decoder.copy(@data, @size, src, from, n)
     @size = @size + n
   end
 
-  def at(i : Int32) : Pointer(UInt8)
-    @data + i.to_i64
+  # *n* bytes of *src* from *from*.
+  def append(src : String, from : Int32, n : Int32) : Nil
+    reserve(n)
+    data = @data
+    at = @size
+    n.times { |k| data[at + k] = src.byte_at(from + k) }
+    @size = @size + n
+  end
+
+  # The byte at *i*, written over.
+  def set(i : Int32, b : UInt8) : Nil
+    @data[i] = b
+  end
+
+  # *n* bytes from *from* to *at*, forward: *from* is at or past *at*.
+  def move(at : Int32, from : Int32, n : Int32) : Nil
+    Decoder.copy(@data, at, @data, from, n)
   end
 
   def truncate(n : Int32) : Nil
@@ -1403,16 +1440,17 @@ class Sink
   end
 
   def to_s : String
-    n = @size
-    src = @data
-    String.new(n) { |dst| dst.copy_from(src, n) }
+    Decoder.text(@data, 0, @size)
   end
 
   private def reserve(n : Int32) : Nil
     return if @size + n <= @cap
     cap = @cap * 2
     cap = @size + n if cap < @size + n
-    @data = @data.realloc(cap.to_u64)
+    data = @data
+    while data.size < cap
+      data << 0_u8
+    end
     @cap = cap
   end
 end
@@ -1421,18 +1459,18 @@ end
 # leaves to, and per symbol how many bits a state gives up to reach them.
 class FseEncoder
   getter log : Int32
-  @states : Pointer(Int32)
-  @delta_bits : Pointer(Int32)
-  @delta_find : Pointer(Int32)
+  @states : Array(Int32)
+  @delta_bits : Array(Int32)
+  @delta_find : Array(Int32)
 
-  def initialize(norm : Pointer(Int32), nsym : Int32, log : Int32)
+  def initialize(norm : Array(Int32), nsym : Int32, log : Int32)
     @log = log
     size = 1 << log
-    @states = Pointer(Int32).malloc(size.to_u64)
-    @delta_bits = Pointer(Int32).malloc(nsym.to_u64)
-    @delta_find = Pointer(Int32).malloc(nsym.to_u64)
-    symbol = Pointer(Int32).malloc(size.to_u64)
-    cumul = Pointer(Int32).malloc((nsym + 1).to_u64)
+    @states = Array(Int32).new(size, 0)
+    @delta_bits = Array(Int32).new(nsym, 0)
+    @delta_find = Array(Int32).new(nsym, 0)
+    symbol = Array(Int32).new(size, 0)
+    cumul = Array(Int32).new((nsym + 1), 0)
     high = size - 1
     cumul[0] = 0
     s = 0
@@ -1504,7 +1542,7 @@ class FseEncoder
   # *nsym* symbols, which total *total*: each in proportion, rounded, at
   # least 1 for a symbol that occurs; what the rounding leaves over or
   # short is given to or taken from the largest.
-  def self.normalize(count : Pointer(Int32), nsym : Int32, total : Int32, log : Int32, norm : Pointer(Int32)) : Nil
+  def self.normalize(count : Array(Int32), nsym : Int32, total : Int32, log : Int32, norm : Array(Int32)) : Nil
     size = 1 << log
     sum = 0
     s = 0
@@ -1541,7 +1579,7 @@ class FseEncoder
   # FSE_writeNCount): the accuracy log less 5 in four bits, then each
   # probability plus one in as few bits as what is left allows, a zero
   # followed by two-bit counts of the zeros after it.
-  def self.describe(sink : Sink, norm : Pointer(Int32), nsym : Int32, log : Int32) : Nil
+  def self.describe(sink : Sink, norm : Array(Int32), nsym : Int32, log : Int32) : Nil
     sink.bits((log - 5).to_i64, 4)
     remaining = (1 << log) + 1
     threshold = 1 << log
@@ -1591,74 +1629,72 @@ class Encoder
   MATCH = 6
 
   @data : String
-  @src : Pointer(UInt8)
   @n : Int32
   @sink : Sink
   @codes : Codes
   @pre : Array(FseEncoder)
   @tables : Array(FseEncoder)
-  @llc : Pointer(Int32)
-  @mlc : Pointer(Int32)
-  @ofc : Pointer(Int32)
-  @hist : Pointer(Int32)
-  @norm : Pointer(Int32)
-  @head : Pointer(Int32)
-  @seq_ll : Pointer(Int32)
-  @seq_ml : Pointer(Int32)
-  @seq_ov : Pointer(Int32)
+  @llc : Array(Int32)
+  @mlc : Array(Int32)
+  @ofc : Array(Int32)
+  @hist : Array(Int32)
+  @norm : Array(Int32)
+  @head : Array(Int32)
+  @seq_ll : Array(Int32)
+  @seq_ml : Array(Int32)
+  @seq_ov : Array(Int32)
   @nseq : Int32
-  @lit : Pointer(UInt8)
+  @lit : Array(UInt8)
   @nlit : Int32
   @rep1 : Int32
   @rep2 : Int32
   @rep3 : Int32
-  @freq : Pointer(Int32)
-  @order : Pointer(Int32)
-  @node : Pointer(Int32)
-  @parent : Pointer(Int32)
-  @depth : Pointer(Int32)
-  @count : Pointer(Int32)
-  @len : Pointer(Int32)
-  @weight : Pointer(Int32)
-  @code : Pointer(Int32)
+  @freq : Array(Int32)
+  @order : Array(Int32)
+  @node : Array(Int32)
+  @parent : Array(Int32)
+  @depth : Array(Int32)
+  @count : Array(Int32)
+  @len : Array(Int32)
+  @weight : Array(Int32)
+  @code : Array(Int32)
 
   def initialize(@data : String)
-    @src = @data.to_unsafe
     @n = @data.bytesize
     @sink = Sink.new(@n // 2 + 64)
     @codes = Codes.new
     @pre = [FseEncoder.new(Codes.fill(Codes::LL_NORM), 36, 6), FseEncoder.new(Codes.fill(Codes::OF_NORM), 29, 5),
             FseEncoder.new(Codes.fill(Codes::ML_NORM), 53, 6)]
     @tables = [@pre[0], @pre[1], @pre[2]]
-    @llc = Pointer(Int32).malloc((BLOCK_MAX // 4 + 1).to_u64)
-    @mlc = Pointer(Int32).malloc((BLOCK_MAX // 4 + 1).to_u64)
-    @ofc = Pointer(Int32).malloc((BLOCK_MAX // 4 + 1).to_u64)
-    @hist = Pointer(Int32).malloc(64_u64)
-    @norm = Pointer(Int32).malloc(64_u64)
-    @head = Pointer(Int32).malloc((1 << HASH_LOG).to_u64)
+    @llc = Array(Int32).new((BLOCK_MAX // 4 + 1), 0)
+    @mlc = Array(Int32).new((BLOCK_MAX // 4 + 1), 0)
+    @ofc = Array(Int32).new((BLOCK_MAX // 4 + 1), 0)
+    @hist = Array(Int32).new(64, 0)
+    @norm = Array(Int32).new(64, 0)
+    @head = Array(Int32).new((1 << HASH_LOG), 0)
     i = 0
     while i < 1 << HASH_LOG
       @head[i] = -1
       i = i + 1
     end
-    @seq_ll = Pointer(Int32).malloc((BLOCK_MAX // 4 + 1).to_u64)
-    @seq_ml = Pointer(Int32).malloc((BLOCK_MAX // 4 + 1).to_u64)
-    @seq_ov = Pointer(Int32).malloc((BLOCK_MAX // 4 + 1).to_u64)
+    @seq_ll = Array(Int32).new((BLOCK_MAX // 4 + 1), 0)
+    @seq_ml = Array(Int32).new((BLOCK_MAX // 4 + 1), 0)
+    @seq_ov = Array(Int32).new((BLOCK_MAX // 4 + 1), 0)
     @nseq = 0
-    @lit = Pointer(UInt8).malloc(BLOCK_MAX.to_u64)
+    @lit = Array(UInt8).new(BLOCK_MAX, 0_u8)
     @nlit = 0
     @rep1 = 1
     @rep2 = 4
     @rep3 = 8
-    @freq = Pointer(Int32).malloc(256_u64)
-    @order = Pointer(Int32).malloc(256_u64)
-    @node = Pointer(Int32).malloc(512_u64)
-    @parent = Pointer(Int32).malloc(512_u64)
-    @depth = Pointer(Int32).malloc(512_u64)
-    @count = Pointer(Int32).malloc(64_u64)
-    @len = Pointer(Int32).malloc(256_u64)
-    @weight = Pointer(Int32).malloc(256_u64)
-    @code = Pointer(Int32).malloc(256_u64)
+    @freq = Array(Int32).new(256, 0)
+    @order = Array(Int32).new(256, 0)
+    @node = Array(Int32).new(512, 0)
+    @parent = Array(Int32).new(512, 0)
+    @depth = Array(Int32).new(512, 0)
+    @count = Array(Int32).new(64, 0)
+    @len = Array(Int32).new(256, 0)
+    @weight = Array(Int32).new(256, 0)
+    @code = Array(Int32).new(256, 0)
   end
 
   # The frame: the header with the content size and a checksum flag, the
@@ -1701,14 +1737,14 @@ class Encoder
   private def block(at : Int32, size : Int32, last : Bool) : Nil
     s = @sink
     flag = last ? 1 : 0
-    p = @src + at.to_i64
+    d = @data
     same = 1
-    while same < size && p[same] == p[0]
+    while same < size && d.byte_at(at + same) == d.byte_at(at)
       same = same + 1
     end
     if same == size && size > 3
       s.le(((size << 3) | 2 | flag).to_u64, 3)
-      s.push(p[0].to_i32)
+      s.push(d.byte_at(at).to_i32)
       return
     end
     reps = {@rep1, @rep2, @rep3}
@@ -1722,17 +1758,19 @@ class Encoder
       s.truncate(mark)
       @rep1, @rep2, @rep3 = reps
       s.le(((size << 3) | flag).to_u64, 3)
-      s.append(p, size)
+      s.append(d, at, size)
       return
     end
     head = (csize << 3) | 4 | flag
-    s.at(mark).value = (head & 255).to_u8
-    s.at(mark + 1).value = ((head >> 8) & 255).to_u8
-    s.at(mark + 2).value = (head >> 16).to_u8
+    s.set(mark, (head & 255).to_u8)
+    s.set(mark + 1, ((head >> 8) & 255).to_u8)
+    s.set(mark + 2, (head >> 16).to_u8)
   end
 
   private def load32(i : Int32) : UInt32
-    (@src + i.to_i64).as(Pointer(UInt32)).value
+    d = @data
+    d.byte_at(i).to_u32 | d.byte_at(i + 1).to_u32.unsafe_shl(8) |
+      d.byte_at(i + 2).to_u32.unsafe_shl(16) | d.byte_at(i + 3).to_u32.unsafe_shl(24)
   end
 
   private def hash(i : Int32) : Int32
@@ -1764,11 +1802,11 @@ class Encoder
         next
       end
       len = 4
-      while i + len < stop && @src[i + len] == @src[i + len - offset]
+      while i + len < stop && @data.byte_at(i + len) == @data.byte_at(i + len - offset)
         len = len + 1
       end
       back = 0
-      while i - back > anchor && i - back - offset > 0 && @src[i - back - 1] == @src[i - back - 1 - offset]
+      while i - back > anchor && i - back - offset > 0 && @data.byte_at(i - back - 1) == @data.byte_at(i - back - 1 - offset)
         back = back + 1
       end
       if len + back < MATCH && offset != @rep1
@@ -1781,8 +1819,16 @@ class Encoder
       @head[hash(i - 2)] = i - 2 if i - 2 >= at && i + 2 <= @n
     end
     rest = stop - anchor
-    Decoder.copy(@lit + @nlit.to_i64, @src + anchor.to_i64, rest)
+    take(anchor, rest)
     @nlit = @nlit + rest
+  end
+
+  # *n* bytes of the input from *from* onto the literals.
+  private def take(from : Int32, n : Int32) : Nil
+    lit = @lit
+    data = @data
+    at = @nlit
+    n.times { |k| lit[at + k] = data.byte_at(from + k) }
   end
 
   # One sequence: the literals since *anchor*, then *len* bytes from
@@ -1791,7 +1837,7 @@ class Encoder
   # decoder will move it.
   private def emit(anchor : Int32, i : Int32, offset : Int32, len : Int32) : Nil
     ll = i - anchor
-    Decoder.copy(@lit + @nlit.to_i64, @src + anchor.to_i64, ll)
+    take(anchor, ll)
     @nlit = @nlit + ll
     ov = offset + 3
     if offset == @rep1 && ll > 0
@@ -1824,7 +1870,7 @@ class Encoder
       s.push(@lit[0].to_i32)
     else
       size_header(0, n)
-      s.append(@lit, n)
+      s.append(@lit, 0, n)
     end
   end
 
@@ -1906,8 +1952,8 @@ class Encoder
         before = s.size
         stream(seg * k, seg)
         size = s.size - before
-        s.at(table + k * 2).value = (size & 255).to_u8
-        s.at(table + k * 2 + 1).value = (size >> 8).to_u8
+        s.set(table + k * 2, (size & 255).to_u8)
+        s.set(table + k * 2 + 1, (size >> 8).to_u8)
         k = k + 1
       end
       stream(seg * 3, n - seg * 3)
@@ -1931,10 +1977,10 @@ class Encoder
     v = 2_u64 | (sf.to_u64 << 2) | (n.to_u64 << 4) | (comp.to_u64 << shift)
     i = 0
     while i < head
-      s.at(start + i).value = (v.unsafe_shr(i * 8) & 255_u64).to_u8
+      s.set(start + i, (v.unsafe_shr(i * 8) & 255_u64).to_u8)
       i = i + 1
     end
-    Decoder.copy(s.at(start + head), s.at(start + 5), comp)
+    s.move(start + head, start + 5, comp)
     s.truncate(start + head + comp)
     true
   end
@@ -2090,7 +2136,7 @@ class Encoder
     llm = table(0, @llc, n, 35, 9)
     ofm = table(1, @ofc, n, 31, 8)
     mlm = table(2, @mlc, n, 52, 9)
-    s.at(at).value = ((llm << 6) | (ofm << 4) | (mlm << 2)).to_u8
+    s.set(at, ((llm << 6) | (ofm << 4) | (mlm << 2)).to_u8)
     llt = @tables[0]
     oft = @tables[1]
     mlt = @tables[2]
@@ -2117,7 +2163,7 @@ class Encoder
   # throughout is RLE; under 32 sequences the predefined table, whose
   # description costs nothing; else a table of the block's own counts,
   # described here.
-  private def table(kind : Int32, codes : Pointer(Int32), n : Int32, max_sym : Int32, max_log : Int32) : Int32
+  private def table(kind : Int32, codes : Array(Int32), n : Int32, max_sym : Int32, max_log : Int32) : Int32
     hist = @hist
     k = 0
     while k <= max_sym
@@ -2222,7 +2268,7 @@ class Encoder
       s.close_bits
       size = s.size - at - 1
       if size < 128 && 1 + size < direct
-        s.at(at).value = size.to_u8
+        s.set(at, size.to_u8)
         return true
       end
       s.truncate(at)
