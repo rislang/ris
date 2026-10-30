@@ -272,3 +272,29 @@ raise "challenge retired" unless view.identity_for("localhost",
 raise "host policy" unless view.identity_for("evil.example",
   nil).is_a?(TlsError)
 puts "PASS: autocert cached TLS/HTTP challenges and task-local TLS config"
+
+# Reuse: views, caches and held certificates are task-tape values, not
+# program objects. Rounds of eight serving tasks, each with its own view
+# loading and reading the cached certificate, take no program storage
+# after the first round and nothing on the heap.
+first_taken = 0_u64
+10.times do |round|
+  group do |workers|
+    tasks = Array(IyiTask(Bool)).new(8)
+    8.times do
+      RisBoard.post(ReaderConfig.new(config))
+      tasks << workers.spawn do
+        worker = AutocertView.new(reader_settings.config)
+        got = worker.identity_for("localhost", nil)
+        again = worker.identity_for("localhost", nil)
+        read = worker.read("localhost", Time.utc.to_unix_ms)
+        got.is_a?(TlsIdentity) && again.is_a?(TlsIdentity) && !read.nil?
+      end
+    end
+    tasks.each { |task| raise "reuse round #{round}" unless task.value == true }
+  end
+  taken = RisRegion.storage_taken
+  first_taken = taken if round == 0
+  raise "program storage grew in reuse round #{round}" unless taken == first_taken
+end
+puts "PASS: autocert reuse, 80 views, steady program storage"

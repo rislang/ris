@@ -30,11 +30,12 @@ the std row. Update a row when its work starts or ends.
 |--------------------------------------|---------|----------|----------|
 | std non-Linux branches: 34 mallocs   | medium  | 4-8 h    | 200-400k |
 | Text: std's ~320 plain builders     | medium  | 4-8 h    | 200-400k |
-| Kernel threads without a collector   | large   | 1-2 days | 300-500k |
+| Kernel threads: darwin arm64, win32  | large   | 1-2 days | 300-500k |
 | Bench ports left: 20 benches         | large   | 1-2 days | 400-800k |
 | 5.1: state reached through procs     | medium  | 2-4 h    | 100-200k |
-| Autocert part B                      | medium  | 2-4 h    | 150-300k |
-| Task-owned Conn buffer growth        | med-lrg | 3-5 h    | 150-300k |
+| Autocert part B: exercise and Pebble | medium  | 2-4 h    | 150-300k |
+| HTTP/1 keep-alive per-request scope  | medium  | 2-4 h    | 100-200k |
+| Socket race: darwin kqueue, Windows  | medium  | 3-5 h    | 150-300k |
 | Compiler specs: the rest of the suite| large   | 1-3 days | 300k-1M  |
 | macOS arm64 (needs a Mac to test)    | medium  | 1-2 days | 200-400k |
 | Windows                              | large   | days     | 500k+    |
@@ -45,12 +46,16 @@ All work in this checkout, one full check per item; Codex is out of
 usage until 2026-11-02. Pipe is an OS pipe on Linux and macOS (refused
 elsewhere). Done: HTTP/2 1 MiB POST, websocket bare copy, autocert part
 A, OS pipe, socket race without Channel, 5.1 local task captures,
-Channel and select removed. Next in order: bench ports, then autocert
-part B.
+Channel and select removed, task-owned Conn growth, Linux socket race
+on one task. Next in order: bench ports, then autocert part B.
 
-* Give a task-owned Conn an owner-level buffer growth path: growth in a
-  nested tape block ends with the block, so TLS/HTTP/2 connections stay
-  program-owned (one buffer per connection never freed) until then.
+* serve_h1's requests on one keep-alive connection pile up on the
+  connection's tape (about 20 side reservations a request, released when
+  the connection ends): its loop's scope mark stays off because
+  `conn.deadline_at(.., "what")` and `read_head` store into the outer
+  Conn (TapeShrinkChecker taint_store). Store the deadline's reason as a
+  flag, prove the failure store, then reset per request; gate with
+  test/ris/http_conn_growth.ri's mapping count flat in requests.
 * Port the benches to 5.1 task captures. Done: std_signal (exercise
   passes; a listener stops by its task handle's `cancel`, the Share stop
   handle), std_process's captures (ChildProcess#read_both, task values,
@@ -89,12 +94,9 @@ part B.
   that keeps it before the spawn. Done: class variables and constants
   changed through called defs, `other = server` aliases (refused/
   task_reached_*, task_handoff_alias).
-* Port socket race to one task with multiple in-flight OS connects and
-  poller interests, next-launch/deadline timers and Windows completion
-  records. It no longer uses Channel/select: the caller polls its attempt
-  tasks (2 ms slices), and the attempts still write a shared outcome
-  array. Gate: staggered attempts, early failure/winner, timeout/cancel,
-  all losing sockets closed and existing race tests on supported targets.
+* Socket race on darwin (kqueue, as Linux's epoll in `race_polled`) and
+  Windows (completion records): they still race attempt tasks the caller
+  polls in 2 ms slices. Linux is one task (gate test/ris/socket_race.ri).
 * Port autocert to one manager with copied board orders and cached results.
   Part A implements Copyable config, task-local views, tagged stop,
   independent cache-poll deadlines, failure broadcast and expiry, renewal
@@ -104,7 +106,9 @@ part B.
   Part B remains: finish bench/std_autocert_exercise.iyi and its driver,
   including real TLS deadline/parallel-server cases, Pebble, restarts and
   mutation checks. Preserve the policy probe's copied board observations;
-  its Counter is no longer captured by the listener task.
+  its Counter is no longer captured by the listener task. Views, caches
+  and held certificates are task-tape values, no program objects: the
+  reuse round in test/ris/autocert.ri keeps program storage steady.
 
 ## Text: `s = ""` and `<<`, no Builder.new (user decision 2026-10-29)
 
@@ -217,15 +221,16 @@ first):
 * Error#message answers String, which a program cannot build without a
   heap: let it answer String (or write into a builder) across std.
 * Kernel threads without a collector on darwin arm64 and win32: Linux
-  has them (spawn_parallel uses every core); the others still need the
-  collector's stop to build thread.iyi.
+  has them (spawn_parallel uses every core; gates program_readers,
+  program_threads, bench/concurrency_exercise.sh); the others still need
+  the collector's stop to build thread.iyi. Not testable on minitest.
+  bench/parallel_exercise.iyi is compiled out under gc_none: port it
+  (Share counters, RisBoard for its channel step, no collector step).
 * Remove general allocator fallbacks from ris programs. Distinguish
   gc_none's allocator behavior from ris_no_gc's allocation trap; audit
   remaining std and runtime paths required by supported workloads.
 * Audit final program binaries for collector linkage and forbidden heap
   allocator dependencies; keep the compiler's own GC choice separate.
-* Autocert's program objects: pool them behind generation-checked
-  handles, as pipe ends are (Std::Io::RisPipeEnd, pipe_reuse).
 * HTTP answer's slow request path still uses String-based read_head and
   body readers. Migrate those before claiming chunked/Expect/HTTP/1.0
   answer parity without a heap. Recheck prefork, TLS and samples/ris/web.

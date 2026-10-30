@@ -1,0 +1,92 @@
+# Linux's connect race: one task with every attempt's connect in flight
+# on one epoll of its own (std/socket `race_polled`). A name's addresses
+# from a hosts-file resolver; `hole` is a listener whose backlog is full,
+# so a connect to it waits until given up on. Staggered starts, an early
+# failure, the deadline, a cancel, and every losing socket closed.
+module test/ris/socket_race
+
+import std/socket::{IyiSocket, SocketError, Resolver}
+import std/dir::{Dir}
+import std/udp::{UdpSocket}
+
+def descriptors : Int32
+  Dir.children("/proc/self/fd").size
+end
+
+def check(ok : Bool, what : String) : Nil
+  raise "FAILED: #{what}" unless ok
+end
+
+def resolver(has_six : Bool) : Resolver
+  hole = has_six ? "::1" : "127.0.0.2"
+  Resolver.new([] of String, hosts: "#{hole} slow.he.test\n127.0.0.1 slow.he.test\n" \
+                                    "127.0.0.1 gone.he.test\n#{hole} gone.he.test\n" \
+                                    "#{hole} hang.he.test\n#{hole} hang.he.test\n#{hole} hang.he.test\n")
+end
+
+probe = UdpSocket.bind?("::1", 0)
+has_six = probe.is_a?(UdpSocket)
+probe.close if probe.is_a?(UdpSocket)
+hole = has_six ? "::1" : "127.0.0.2"
+he = resolver(has_six)
+
+nobody = IyiSocket.listen("127.0.0.1", 0)
+gone_port = nobody.local_port
+nobody.close
+refused = IyiSocket.connect("gone.he.test", gone_port, he, 10000)
+check refused.is_a?(SocketError) && refused.refused? &&
+  refused.message.count("connection refused") == 2, "every address refused: #{refused.inspect}"
+puts "refused: ok"
+
+live = IyiSocket.listen("127.0.0.1", 0)
+port = live.local_port
+full = IyiSocket.listen(hole, port, 1)
+stuffed = [] of IyiSocket
+while stuffed.size < 300
+  filler = IyiSocket.connect(hole, port, timeout_ms: 300)
+  break unless filler.is_a?(IyiSocket)
+  stuffed << filler
+end
+check stuffed.size < 300, "the hole drops SYNs"
+
+before = descriptors
+10.times do
+  began = Resolver.now_ms
+  raced = IyiSocket.connect("slow.he.test", port, he, 5000)
+  took = Resolver.now_ms - began
+  check raced.is_a?(IyiSocket) && raced.remote_address == "127.0.0.1",
+    "the second address wins"
+  check took >= 240 && took < 1500, "staggered by the attempt delay: #{took} ms"
+  accepted = live.accept
+  accepted.close if accepted.is_a?(IyiSocket)
+  raced.close if raced.is_a?(IyiSocket)
+end
+check descriptors == before, "losing sockets closed: #{before} then #{descriptors}"
+puts "staggered: ok (10 races, the losers' sockets closed)"
+
+began = Resolver.now_ms
+late = IyiSocket.connect("hang.he.test", port, he, 600)
+took = Resolver.now_ms - began
+check late.is_a?(SocketError) && late.timed_out? &&
+  late.message.includes?("timed out after 600 ms"), "deadline: #{late.inspect}"
+check took >= 590 && took < 1500, "deadline kept: #{took} ms"
+check descriptors == before, "timed-out sockets closed"
+puts "deadline: ok"
+
+result = group do |g|
+  task = g.spawn do
+    got = IyiSocket.connect("hang.he.test", port, resolver(has_six), 10000)
+    got.is_a?(Cancelled) ? 1 : 0
+  end
+  sleep 600
+  g.cancel_children
+  task.value
+end
+check result == 1, "cancelled race answers Cancelled: #{result.inspect}"
+check descriptors == before, "cancelled race's sockets closed"
+puts "cancel: ok"
+
+stuffed.each(&.close)
+full.close
+live.close
+puts "PASS: socket race"

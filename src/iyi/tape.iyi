@@ -1160,7 +1160,9 @@ struct Array(T)
 
   @state : Pointer(UInt64)
 
-  def initialize(capacity : Int32 | Int64 = 4,
+  # *storage* is named only: positional, `Array(T?).new(3, nil)` took
+  # nil for it and made an empty array of room 3, not three nils.
+  def initialize(capacity : Int32 | Int64 = 4, *,
                  storage : RisPoolStorage? = nil)
     bytes = Tape.storage(capacity, sizeof(T).to_u64)
     @state = RisRegion.growing_state(bytes, sizeof(T).to_u64, 8_u64)
@@ -3253,7 +3255,7 @@ struct SlicePool(T)
   @free : Array(String::Span)
 
   def initialize(capacity : Int32 | Int64 = 4)
-    @data = Array(T).new(capacity, RisPoolStorage.new)
+    @data = Array(T).new(capacity, storage: RisPoolStorage.new)
     @free = Array(String::Span).new
   end
 
@@ -3440,7 +3442,7 @@ struct SlicePool(T)
     end
     # Save typed values before freeing: the destination can overlap them.
     check_relocation(s, count)
-    saved = Array(T).new(s.size, RisPoolStorage.new)
+    saved = Array(T).new(s.size, storage: RisPoolStorage.new)
     s.each { |value| saved << value }
     free_slice(s)
     made = alloc_slice(count, fill)

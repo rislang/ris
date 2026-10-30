@@ -238,7 +238,9 @@ fi
 # Autocert broadcasts cache results with independent waiter deadlines.
 out=$(RIS="$RIS" python3 test/ris/autocert_checks.py 2>&1)
 if [ "$?" -eq 0 ] &&
-    grep -qF 'PASS: autocert cancellation' <<<"$out"; then
+    grep -qF 'PASS: autocert cancellation' <<<"$out" &&
+    grep -qF 'PASS: autocert reuse' <<<"$out" &&
+    grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
   printf '%s\n' "$out"
 else
   echo "FAILED   autocert lifecycle: $out"; status=1
@@ -1130,6 +1132,41 @@ if [ "$out" = "$want" ]; then
   echo 'runs     http_coding (gzip, deflate and zstd answers decoded through an io Reader)'
 else
   echo "FAILED   http_coding: $out"; status=1
+fi
+# A task-owned Conn's buffer grows in its own reservation of the
+# connection's tape, in place: heads up to 900 KB and 1 MB bodies on one
+# keep-alive connection take no program storage per growth (2 MB before).
+out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 timeout 120 "$RIS" run \
+  test/ris/http_conn_growth.ri 2>&1)
+taken=$(printf '%s\n' "$out" | sed -n 's/^ris program storage: \([0-9]*\) .*/\1/p')
+lines=$(printf '%s\n' "$out" | grep -v '^ris ')
+want='100000 true
+900000 true
+300000 true
+1000 true
+600000 true'
+if [ "$lines" = "$want" ] && [ -n "$taken" ] && [ "$taken" -lt 65536 ] &&
+   printf '%s\n' "$out" | grep -qx 'ris heap: 0 allocations, 0 bytes'; then
+  echo "runs     http_conn_growth (keep-alive growth in place, $taken B program)"
+else
+  echo "FAILED   http_conn_growth: $out"; status=1
+fi
+out=$(RIS="$RIS" timeout 200 bash test/ris/http2_conn_growth.sh 2>&1)
+case "$out" in
+  "ok "*) echo "runs     http2_conn_growth (1 MiB h2c POSTs, ${out#ok } B program)";;
+  skipped) echo 'skipped  http2_conn_growth (no curl with HTTP/2)';;
+  *) echo "FAILED   http2_conn_growth: $out"; status=1;;
+esac
+# Linux's connect race: one task, every attempt in flight on its own
+# epoll; staggered starts, refusals, deadline, cancel, losers closed.
+if [ "$(uname -s)" = Linux ]; then
+  out=$(RIS_HEAP_STATS=1 timeout 120 "$RIS" run test/ris/socket_race.ri 2>&1)
+  if grep -qxF 'PASS: socket race' <<<"$out" &&
+      grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+    echo 'runs     socket_race (one task, epoll of attempts, losers closed)'
+  else
+    echo "FAILED   socket_race: $out"; status=1
+  fi
 fi
 # std/udp on the caller tape: datagrams received into String room or an
 # Array, connected sends, a 60000-byte datagram; no heap.

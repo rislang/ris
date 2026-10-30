@@ -61,7 +61,8 @@ with tempfile.TemporaryDirectory(prefix="ris-autocert-") as directory:
         for name, pem in zip(("first", "second"), entries):
             (child / f"{name}.pem").write_bytes(pem)
     result = subprocess.run([str(binary), str(root)],
-                            text=True, capture_output=True, timeout=120)
+                            text=True, capture_output=True, timeout=120,
+                            env={**os.environ, "RIS_HEAP_STATS": "1"})
     print(result.stdout, end="")
     print(result.stderr, end="")
     raise SystemExit(result.returncode)

@@ -1,0 +1,83 @@
+# One keep-alive connection carries requests with large heads and bodies
+# and large answers: the connection's task-owned buffer grows in its own
+# reservation, in place, inside each request's tape block, on no heap.
+module test/ris/http_conn_growth
+
+import std/socket::{IyiSocket}
+import std/http::{Server, Request, Response}
+
+struct Listening
+end
+
+struct Big
+  def initialize(config : Int32)
+  end
+
+  def listening(port : Int32) : Nil
+    RisBoard.post(Listening.new)
+  end
+
+  def call(req : Request) : Response
+    head = req.header("X-Big")
+    size = head ? head.bytesize : 0
+    body = req.body
+    answer = ""
+    answer << size << " " << body.bytesize << " "
+    answer << "y" * (body.bytesize // 2)
+    Response.new(200, answer)
+  end
+end
+
+# Reads one answer whose body is Content-Length long: the client waits
+# for each, so nothing follows it.
+def answer(socket : IyiSocket) : String
+  got = ""
+  while true
+    at = got.index("\r\n\r\n")
+    if at
+      head = got[0, at]
+      marker = "Content-Length: "
+      from = (head.index(marker) || 0) + marker.bytesize
+      upto = head.index("\r\n", from) || head.bytesize
+      length = head[from, upto - from].to_i
+      while got.bytesize < at + 4 + length
+        piece = socket.read(65536).or_panic
+        raise "closed early" if piece.empty?
+        got = got + piece
+      end
+      raise "bytes past the answer" if got.bytesize > at + 4 + length
+      return got[at + 4, length]
+    end
+    piece = socket.read(65536).or_panic
+    raise "closed early" if piece.empty?
+    got = got + piece
+  end
+end
+
+probe = IyiSocket.listen(0)
+port = probe.local_port
+probe.close
+group do |g|
+  g.spawn do
+    Server.serve("127.0.0.1", port, 0, Big, max_connections: 4)
+    0
+  end
+  RisBoard.take(Listening).or_panic
+  socket = IyiSocket.connect("127.0.0.1", port).or_panic
+  [100000, 900000, 300000, 1000, 600000].each_with_index do |size, i|
+    tape do
+      body = "x" * (size + i)
+      request = ""
+      request << "POST /big HTTP/1.1\r\nHost: test\r\nX-Big: " << "h" * size
+      request << "\r\nContent-Length: " << body.bytesize << "\r\n\r\n" << body
+      socket.write(request)
+      text = answer(socket)
+      words = text.split(" ", 3)
+      ok = words[0].to_i == size && words[1].to_i == size + i &&
+           words[2].bytesize == (size + i) // 2
+      puts "#{size} #{ok}"
+    end
+  end
+  socket.close
+  g.cancel_children
+end

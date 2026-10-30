@@ -1,0 +1,38 @@
+# An h2c server for http2_conn_growth.sh: each answer names the body's
+# size and the sum of its bytes, so a body read from a buffer grown and
+# freed inside a frame's tape block would show.
+module test/ris/http2_conn_growth
+
+import std/http::{Server, Request, Response}
+import std/signal::{Signal}
+
+struct Sum
+  def initialize(config : Int32)
+  end
+
+  def listening(port : Int32) : Nil
+    puts "READY"
+  end
+
+  def call(req : Request) : Response
+    body = req.body
+    sum = 0_i64
+    body.each_byte { |b| sum += b.to_i64 }
+    answer = ""
+    answer << req.version << " " << body.bytesize << " " << sum
+    Response.new(200, answer)
+  end
+end
+
+port = Program.arguments[0].to_i
+group do |g|
+  g.spawn do
+    Server.serve("127.0.0.1", port, 0, Sum, max_connections: 1)
+    0
+  end
+  g.spawn do
+    Signal.wait(Signal::TERM)
+    g.cancel_children
+    0
+  end
+end

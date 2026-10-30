@@ -304,12 +304,21 @@ struct Conn
     # What an `https://` connection's handshake was made under, for a
     # client to tell whether it may carry a request made under another.
     property made_under : TlsMadeUnder? = nil
+    # A task-owned buffer's own reservation (`RisRegion.growing_state`),
+    # linked to the tape the connection was made on: growth stays in it,
+    # in place, whatever tape block is running when it grows. 0 for a
+    # program-owned buffer and on targets without reservations.
+    property reservation : UInt64 = 0_u64
 
     def initialize(@socket : IyiSocket, @listener : IyiSocket? = nil, @idle : IdleConns? = nil, @stream : TlsStream? = nil, @program_owned : Bool = true)
       @capacity = ROOM
-      address = @program_owned ? RisRegion.program_bytes(@capacity.to_u64) :
-        RisRegion.tape_bytes(@capacity.to_u64)
-      @data = Pointer(UInt8).new(address)
+      if @program_owned
+        @data = Pointer(UInt8).new(RisRegion.program_bytes(@capacity.to_u64))
+      else
+        state = RisRegion.growing_state(@capacity.to_u64 + 40_u64, 1_u64)
+        @data = Pointer(UInt8).new(state.value)
+        @reservation = (state + 3_i64).value
+      end
       @start = 0
       @stop = 0
       @searched = 0
@@ -556,10 +565,26 @@ struct Conn
     end
   end
 
+  # A task-owned buffer grows in place in its reservation, which belongs
+  # to the tape the connection was made on, so growth inside a nested
+  # tape block (a request's, an HTTP/2 frame's) outlives that block and
+  # ends with the connection's tape. Past the reservation it is an error.
   private def grow_buffer(old : Pointer(UInt8)) : Nil
     bytes = @state.value.capacity.to_u64
-    address = @state.value.program_owned ? RisRegion.program_bytes(bytes) :
-      RisRegion.tape_bytes(bytes)
+    if (own = @state.value.reservation) != 0
+      limit = IyiHeap.read64(own &+ RisRegion::OFF_LIMIT)
+      if old.address &+ bytes > limit
+        @state.value.capacity = @state.value.capacity // 2
+        raise "HTTP connection buffer past its #{limit &- old.address} bytes"
+      end
+      top = (old.address &+ bytes &+ 7_u64) & 0xFFFFFFFFFFFFFFF8_u64
+      IyiHeap.write64(own &+ RisRegion::OFF_CURSOR, top) \
+        if top > IyiHeap.read64(own &+ RisRegion::OFF_CURSOR)
+      return
+    end
+    # Program-owned, or a target without reservations (non-Linux): the
+    # grown buffer is program storage, never freed (TODO.md).
+    address = RisRegion.program_bytes(bytes)
     @state.value.data = Pointer(UInt8).new(address)
     @state.value.data.copy_from(old, @state.value.stop)
   end
@@ -2244,9 +2269,9 @@ pub struct Server
   end
 
   private def self.serve_connection(client : IyiSocket, stream : TlsStream?, handler, listener : IyiSocket?, idle : IdleConns?, stream_bodies : Bool, compress : Bool, timeout_ms : Int32, request_timeout_ms : Int32) : Nil
-    # Program-owned: HTTP/2 grows the buffer inside a frame's tape block,
-    # and a task-owned buffer grown there ends with that block.
-    conn = Conn.new(client, listener, idle, stream)
+    # Task-owned: its buffer grows in a reservation of this connection's
+    # tape, even inside a request's or an HTTP/2 frame's tape block.
+    conn = Conn.new(client, listener, idle, stream, task_owned: true)
     conn.gap = timeout_ms if timeout_ms > 0
     remote = client.remote_address
     started = Time.monotonic_nanoseconds.to_i64

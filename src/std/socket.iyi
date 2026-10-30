@@ -725,6 +725,9 @@ pub struct IyiSocket
     private def self.race(host : String, port : Int32, addresses : Array(IPAddress), timeout_ms : Int32) : IyiSocket | Cancelled | SocketError
       raise "port #{port} is not a port: 0 to 65535" if port < 0 || port > 65535
       return attempt(host, port, addresses[0], timeout_ms) if addresses.size == 1
+      {% if flag?(:linux) %}
+        return race_polled(host, port, addresses, timeout_ms)
+      {% end %}
       count = addresses.size
       outcomes = Array(IyiSocket | Cancelled | SocketError | Nil).new(count, nil)
       tasks = Array(IyiTask(Attempt)).new(count)
@@ -796,6 +799,175 @@ pub struct IyiSocket
       return Cancelled.new if cancelled
       every_address_failed(host, port, addresses, outcomes, started, out_of_time ? timeout_ms : -1)
     end
+
+    {% if flag?(:linux) %}
+      # Linux's race: the caller alone, with every attempt's connect in
+      # flight at once on a nonblocking socket of its own. The sockets are
+      # the interests of an epoll instance of the race's, and the caller
+      # parks on that instance's descriptor, readable when any handshake
+      # has ended, for no longer than the next attempt's start or the
+      # deadline: one task, no attempt tasks, no shared outcome array.
+      # Whatever way the race ends - a winner, every address failed, the
+      # time out, the caller cancelled or a panic - every socket but the
+      # winner's is closed here, and the instance with them. Nothing in
+      # the loop raises: a failed launch or watch is an attempt's error.
+      private def self.race_polled(host : String, port : Int32, addresses : Array(IPAddress), timeout_ms : Int32) : IyiSocket | Cancelled | SocketError
+        count = addresses.size
+        outcomes = Array(IyiSocket | Cancelled | SocketError | Nil).new(count, nil)
+        flying = Array(Int32).new(count, -1)
+        poll = __iyi_conc_syscall6(IYI_SYS_EPOLL_CREATE1, 0x80000_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64).to_i32
+        return SocketError.new("create a connect race's epoll", __sys_code(poll.to_i64)) if poll < 0
+        winner = -1
+        deadline = timeout_ms < 0 ? -1_i64 : Resolver.now_ms + timeout_ms.to_i64
+        started = 0
+        running = 0
+        next_at = 0_i64
+        cancelled = false
+        out_of_time = false
+        while true
+          now = Resolver.now_ms
+          if deadline >= 0_i64 && now >= deadline
+            out_of_time = true
+            break
+          end
+          if started < count && now >= next_at
+            index = started
+            started = started + 1
+            next_at = now + ATTEMPT_DELAY_MS.to_i64
+            launched = launch(host, port, addresses[index], poll, index)
+            if launched.is_a?(Int32)
+              flying[index] = launched
+              running = running + 1
+            elsif launched.is_a?(IyiSocket)
+              outcomes[index] = launched
+              winner = index
+              break
+            else
+              outcomes[index] = launched
+              # A failure starts the next attempt now, not when it was due.
+              next_at = 0_i64
+            end
+            next
+          end
+          # Every address started, and every attempt failed.
+          break if running == 0 && started == count
+          wake = started < count ? next_at : -1_i64
+          wake = deadline if deadline >= 0_i64 && (wake < 0_i64 || deadline < wake)
+          ms = wake < 0_i64 ? -1 : (wake - now).to_i32
+          waited = wait_readable(poll, ms < 0 ? -1 : ms)
+          if waited.is_a?(Cancelled)
+            cancelled = true
+            break
+          end
+          ended = handshakes_ended(host, port, addresses, poll, flying, outcomes)
+          running = running - ended
+          index = 0
+          while index < count
+            if outcomes[index].is_a?(IyiSocket)
+              winner = index
+              break
+            end
+            index = index + 1
+          end
+          break if winner >= 0
+          next_at = 0_i64 if ended > 0
+        end
+        if winner >= 0
+          won = outcomes[winner]
+          # Taken out: the cleanup closes every other socket.
+          outcomes[winner] = nil
+          race_cleanup(poll, flying, outcomes)
+          return won if won.is_a?(IyiSocket)
+        end
+        race_cleanup(poll, flying, outcomes)
+        return Cancelled.new if cancelled
+        every_address_failed(host, port, addresses, outcomes, started, out_of_time ? timeout_ms : -1)
+      end
+
+      # One attempt's connect begun: its socket's descriptor, in flight and
+      # an interest of *poll* under *index*, or how it ended at once.
+      @[TapeUnsafe("connect(2) reads the packed address during the call")]
+      private def self.launch(host : String, port : Int32, address : IPAddress, poll : Int32, index : Int32) : Int32 | IyiSocket | SocketError
+        peer = "#{endpoint(host, port)} (#{address})"
+        family = address.is_a?(IPv4Address) ? AF_INET : AF_INET6
+        addr = address.is_a?(IPv4Address) ? make_sockaddr_in(address, port) :
+          make_sockaddr_in6(address.as(IPv6Address), port)
+        fd = __sys_socket(family)
+        return SocketError.new("create a socket", __sys_code(fd.to_i64)) if fd < 0
+        __sys_no_sigpipe(fd)
+        __send_at_once(fd, family)
+        __sys_set_nonblock(fd)
+        res = __sys_connect(fd, addr.to_unsafe, family, -1)
+        return IyiSocket.new(fd, family) if res == 0
+        unless __sys_in_progress?(res)
+          code = __sys_code(res.to_i64)
+          __sys_close(fd)
+          return SocketError.new("connect to #{peer}", code)
+        end
+        # EPOLLOUT (4); EPOLLERR and EPOLLHUP come unasked. The data is
+        # the attempt's index.
+        storage = uninitialized UInt64[2]
+        event = pointerof(storage).as(Pointer(UInt8))
+        event.as(Pointer(UInt32)).value = 4_u32
+        Pointer(UInt64).new(event.address + IYI_POLL_DATA_OFFSET).value = index.to_u64
+        added = __iyi_conc_syscall6(IYI_SYS_EPOLL_CTL, poll.to_i64, 1_i64, fd.to_i64, event.address.to_i64, 0_i64, 0_i64)
+        if added < 0
+          __sys_close(fd)
+          return SocketError.new("watch the connect to #{peer}", __sys_code(added))
+        end
+        fd
+      end
+
+      # The handshakes *poll* says have ended, each taken off it with its
+      # outcome in *outcomes*: a connected socket, or the failure SO_ERROR
+      # names, its socket closed. How many ended.
+      private def self.handshakes_ended(host : String, port : Int32, addresses : Array(IPAddress), poll : Int32, flying : Array(Int32), outcomes : Array(IyiSocket | Cancelled | SocketError | Nil)) : Int32
+        # Sixteen events of at most 16 bytes (12, packed, on x86_64).
+        storage = uninitialized UInt64[32]
+        events = pointerof(storage).as(Pointer(UInt8))
+        stride = IYI_POLL_DATA_OFFSET == 4_u64 ? 12 : 16
+        got = __iyi_conc_syscall6(IYI_SYS_EPOLL_PWAIT, poll.to_i64, events.address.to_i64, 16_i64, 0_i64, 0_i64, 8_i64)
+        return 0 if got <= 0
+        ended = 0
+        at = 0
+        while at < got
+          entry = events + at * stride
+          index = Pointer(UInt64).new(entry.address + IYI_POLL_DATA_OFFSET).value.to_i32
+          at = at + 1
+          next if index < 0 || index >= flying.size
+          fd = flying[index]
+          next if fd < 0
+          flying[index] = -1
+          ended = ended + 1
+          __iyi_conc_syscall6(IYI_SYS_EPOLL_CTL, poll.to_i64, 2_i64, fd.to_i64, 0_i64, 0_i64, 0_i64)
+          address = addresses[index]
+          family = address.is_a?(IPv4Address) ? AF_INET : AF_INET6
+          if (code = __sys_sock_error(fd)) == 0
+            outcomes[index] = IyiSocket.new(fd, family)
+          else
+            __sys_close(fd)
+            outcomes[index] = SocketError.new("connect to #{endpoint(host, port)} (#{address})", code)
+          end
+        end
+        ended
+      end
+
+      # Every socket of the race but the winner's (taken out of
+      # *outcomes*) closed: those still in flight, and any other that
+      # connected in the same round.
+      private def self.race_cleanup(poll : Int32, flying : Array(Int32), outcomes : Array(IyiSocket | Cancelled | SocketError | Nil)) : Nil
+        index = 0
+        while index < flying.size
+          fd = flying[index]
+          __sys_close(fd) if fd >= 0
+          flying[index] = -1
+          outcome = outcomes[index]
+          outcome.close if outcome.is_a?(IyiSocket)
+          index = index + 1
+        end
+        __sys_close(poll)
+      end
+    {% end %}
 
     # What one attempt answers, wrapped: a `SocketError` answered bare is
     # a failure under the group's policy (SPEC.md III.4.3), and it would
