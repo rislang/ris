@@ -180,6 +180,7 @@ end
 # A key URI: what an authenticator app needs to make the codes a server
 # will check. `counter` is nil for TOTP and the next counter for HOTP;
 # `period` is TOTP's step and 30, unused, for HOTP.
+@[OnTape]
 pub struct OTPAuth
   getter secret : Array(UInt8)
   getter account : String
@@ -216,6 +217,8 @@ pub struct OTPAuth
   end
 
   def to_s : String
+    secret = @secret
+    bytes = String.build(secret.size) { |w| secret.each { |b| w.push(b) } }
     String.build do |io|
       io << (hotp? ? "otpauth://hotp/" : "otpauth://totp/")
       if @issuer.bytesize > 0
@@ -223,7 +226,7 @@ pub struct OTPAuth
         io << ":"
       end
       OTPText.escape(io, @account)
-      io << "?secret=" << Base32.encode(@secret, padding: false)
+      io << "?secret=" << Base32.encode(bytes, padding: false)
       if @issuer.bytesize > 0
         io << "&issuer="
         OTPText.escape(io, @issuer)
@@ -242,7 +245,6 @@ pub struct OTPAuth
   end
 
   def self.parse(uri : String) : OTPAuth | OTPError
-    src = uri.to_unsafe
     n = uri.bytesize
     return OTPError.new("otpauth: the URI does not begin with otpauth://") unless n >= 10 && OTPText.slice(uri, 0, 10).downcase == "otpauth://"
     slash = OTPText.find(uri, 47_u8, 10, n)
@@ -256,7 +258,7 @@ pub struct OTPAuth
     colon = OTPText.find(label, 58_u8, 0, label.bytesize)
     label_issuer = colon < 0 ? "" : OTPText.slice(label, 0, colon)
     account = colon < 0 ? label : OTPText.slice(label, colon + 1, label.bytesize)
-    while account.bytesize > 0 && account.to_unsafe[0] == 32_u8
+    while account.bytesize > 0 && account.byte_at(0) == 32_u8
       account = OTPText.slice(account, 1, account.bytesize)
     end
     return OTPError.new("otpauth: the label names no account") if account.bytesize == 0
@@ -344,7 +346,8 @@ pub struct OTPAuth
       return c if c.is_a?(OTPError)
       counter = c
     end
-    OTPAuth.new(secret, account, issuer, algorithm, digits, period, counter)
+    key = Array(UInt8).new(secret.bytesize) { |k| secret.byte_at(k) }
+    OTPAuth.new(key, account, issuer, algorithm, digits, period, counter)
   end
 end
 
@@ -355,10 +358,10 @@ struct OTPText
 
   # The first *byte* in *text* from *from* up to *stop*, or -1.
   def self.find(text : String, byte : UInt8, from : Int32, stop : Int32) : Int32
-    src = text.to_unsafe
+    src = text
     i = from
     while i < stop
-      return i if src[i] == byte
+      return i if src.byte_at(i) == byte
       i = i + 1
     end
     -1
@@ -366,39 +369,38 @@ struct OTPText
 
   # The bytes of *text* from *start* up to *stop*.
   def self.slice(text : String, start : Int32, stop : Int32) : String
-    src = text.to_unsafe + start.to_i64
-    String.new(stop - start) { |dst| dst.copy_from(src, stop - start) }
+    text[start, stop - start]
   end
 
   # Every byte but RFC 3986's unreserved ones as `%XX`, upper case.
   def self.escape(io : String::Builder, text : String) : Nil
-    hex = "0123456789ABCDEF".to_unsafe
-    src = text.to_unsafe
+    hex = "0123456789ABCDEF"
+    src = text
     i = 0
     while i < text.bytesize
-      b = src[i]
+      b = src.byte_at(i)
       if (b >= 65_u8 && b <= 90_u8) || (b >= 97_u8 && b <= 122_u8) || (b >= 48_u8 && b <= 57_u8) || b == 45_u8 || b == 46_u8 || b == 95_u8 || b == 126_u8
         io.write_byte(b)
       else
         io.write_byte(37_u8)
-        io.write_byte(hex[b.to_i32 >> 4])
-        io.write_byte(hex[b.to_i32 & 15])
+        io.write_byte(hex.byte_at(b.to_i32 >> 4))
+        io.write_byte(hex.byte_at(b.to_i32 & 15))
       end
       i = i + 1
     end
   end
 
   def self.unescape(text : String, plus : Bool, what : String) : String | OTPError
-    src = text.to_unsafe
+    src = text
     n = text.bytesize
     buffer = Array(UInt8).new(n, 0_u8)
     o = 0
     i = 0
     while i < n
-      b = src[i]
+      b = src.byte_at(i)
       if b == 37_u8
-        hi = i + 2 < n ? hex_value(src[i + 1]) : -1
-        lo = i + 2 < n ? hex_value(src[i + 2]) : -1
+        hi = i + 2 < n ? hex_value(src.byte_at(i + 1)) : -1
+        lo = i + 2 < n ? hex_value(src.byte_at(i + 2)) : -1
         if hi < 0 || lo < 0
           return OTPError.new("otpauth: the % at byte #{i} of #{what} is not followed by two hexadecimal digits")
         end
@@ -410,17 +412,17 @@ struct OTPText
       end
       o = o + 1
     end
-    String.new(o) { |dst| dst.copy_from(buffer.to_unsafe, o) }
+    String.build(o) { |w| o.times { |k| w.push(buffer[k]) } }
   end
 
   # A decimal number of ASCII digits, at most *max*.
   def self.number(text : String, what : String, max : Int64) : Int64 | OTPError
-    src = text.to_unsafe
+    src = text
     return OTPError.new("otpauth: #{what} is empty") if text.bytesize == 0
     value = 0_i64
     i = 0
     while i < text.bytesize
-      d = src[i].to_i32 - 48
+      d = src.byte_at(i).to_i32 - 48
       return OTPError.new("otpauth: #{what} is #{text.inspect}, not a number") if d < 0 || d > 9
       if value > (max - d.to_i64) // 10_i64
         return OTPError.new("otpauth: #{what} is #{text}, past #{max}")

@@ -1,0 +1,42 @@
+module test/netip
+
+import std/netip::{IP, Prefix, PrefixSet, NetipError}
+
+# std/netip on the caller's tape: IPv4 and IPv6 text read and written,
+# an IPv4 tail, a zone, refusals, prefixes, subnets and a PrefixSet.
+
+def show(text : String) : Nil
+  got = IP.parse(text)
+  if got.is_a?(IP)
+    puts "#{text} -> #{got} private=#{got.private?} loopback=#{got.loopback?}"
+  else
+    puts "#{text} -> #{got.message}"
+  end
+end
+
+tape do
+  show("192.168.1.20")
+  show("::1")
+  show("2001:db8:0:0:0:0:2:1")
+  show("::ffff:10.0.0.1")
+  show("fe80::1%eth0")
+  show("1.2.3")
+  show("01.2.3.4")
+  show("1::2::3")
+  net = Prefix.parse("10.1.0.0/16")
+  if net.is_a?(Prefix)
+    inside = IP.parse("10.1.200.3")
+    puts "#{net} contains #{inside.is_a?(IP) && net.contains?(inside)}"
+    puts net.subnets(18).map(&.to_s).join(" ")
+  end
+  loose = Prefix.parse("10.1.2.3/8")
+  puts loose.message if loose.is_a?(NetipError)
+  six = Prefix.parse("2001:db8::/32")
+  set = PrefixSet.new
+  set.add(six) if six.is_a?(Prefix)
+  set.add(net) if net.is_a?(Prefix)
+  probe = IP.parse("2001:db8:5::9")
+  if probe.is_a?(IP)
+    puts "#{set.size} #{set.contains?(probe)} #{set.lookup(probe)}"
+  end
+end

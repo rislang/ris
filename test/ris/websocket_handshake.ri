@@ -1,0 +1,83 @@
+module test/websocket_handshake
+
+import std/socket::{IyiSocket}
+import std/http::{Server, Request, Response}
+import std/websocket::{WebSocket, Message, WebSocketError}
+
+# A real loopback handshake: WebSocket.connect offers permessage-deflate,
+# the server's upgrade parses the offer and answers it, both ends agree,
+# and a compressed message goes there and back. Then a raw offer with a
+# quoted parameter and an extension the server passes over.
+
+struct Listening
+end
+
+struct Echo
+  def initialize(config : Int32)
+  end
+
+  def listening(port : Int32) : Nil
+    RisBoard.post(Listening.new)
+  end
+
+  def call(req : Request) : Response
+    WebSocket.upgrade(req, ["chat"])
+  end
+
+  def take_over(socket, leftover : String, response : Response) : Nil
+    WebSocket.serve(socket, leftover, response) do |ws|
+      got = ws.receive
+      ws.send("echo #{got.data}") if got.is_a?(Message)
+    end
+  end
+end
+
+# A raw handshake offering *extensions*: the answer's status and the
+# Sec-WebSocket- fields, or the body that says why it was refused.
+def offer(port : Int32, extensions : String) : Nil
+  raw = IyiSocket.connect("127.0.0.1", port).or_panic
+  raw.write("GET / HTTP/1.1\r\nHost: h\r\nUpgrade: websocket\r\n" +
+    "Connection: Upgrade\r\nSec-WebSocket-Version: 13\r\n" +
+    "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
+    "Sec-WebSocket-Extensions: #{extensions}\r\n\r\n").or_panic
+  head = raw.read(1024).or_panic
+  head.split("\r\n").each do |line|
+    puts line if line.starts_with?("HTTP/") ||
+      line.starts_with?("Sec-")
+  end
+  raw.close
+end
+
+probe = IyiSocket.listen(0)
+port = probe.local_port
+probe.close
+group do |g|
+  g.spawn do
+    Server.serve("127.0.0.1", port, 0, Echo, max_connections: 3)
+    0
+  end
+  RisBoard.take(Listening).or_panic
+  tape do
+    ws = WebSocket.connect("ws://127.0.0.1:#{port}/", protocols: ["chat"])
+    if ws.is_a?(WebSocket)
+      terms = ws.deflate
+      puts "protocol #{ws.protocol}"
+      if terms
+        puts "deflate #{terms.server_no_context_takeover} #{terms.client_no_context_takeover}"
+      else
+        puts "no deflate"
+      end
+      ws.send("hello " * 50)
+      got = ws.receive
+      puts got.data.bytesize if got.is_a?(Message)
+      puts got.data[0, 16] if got.is_a?(Message)
+      ws.close
+    else
+      puts "failed #{ws}"
+    end
+    offer(port, "x-foo; a=\"b\\c\", , permessage-deflate;" +
+      " server_no_context_takeover; client_max_window_bits")
+    offer(port, "x-foo; a=\"b\\\"c\", permessage-deflate")
+  end
+  g.cancel_children
+end

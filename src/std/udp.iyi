@@ -23,11 +23,8 @@
 
 module std/udp
 
-pub import std/slice
-import std/slice::{Bytes, Slice}
 import std/socket::{IPv4Address, IPv6Address, IyiSocket, SocketError}
 
-pub alias Bytes = Std::Slice::Bytes
 # The address types, their parsers and the `sockaddr_in`/`sockaddr_in6`
 # writers are `std/socket`'s; this module had copies, and the copies had
 # drifted: its IPv6 parser read no dotted tail and its printer compressed
@@ -35,20 +32,23 @@ pub alias Bytes = Std::Slice::Bytes
 pub alias IPv4Address = Std::Socket::IPv4Address
 pub alias IPv6Address = Std::Socket::IPv6Address
 
-# An incoming datagram with payload bytes and remote peer origin.
+# An incoming datagram: its payload bytes, on the receiver's tape, and
+# the peer it came from. A caller that keeps one past its tape copies it
+# to an owner with `copy_to`.
+@[OnTape]
 pub struct Datagram
-  getter data : Bytes
+  getter data : String
   getter host : String
   getter port : Int32
 
-  def initialize(@data : Bytes, @host : String, @port : Int32)
+  def initialize(@data : String, @host : String, @port : Int32)
   end
 
-  def to_tuple : Tuple(Bytes, String, Int32)
+  def to_tuple : Tuple(String, String, Int32)
     {@data, @host, @port}
   end
 
-  def [](i : Int32) : Bytes | String | Int32
+  def [](i : Int32) : String | Int32
     if i == 0
       @data
     elsif i == 1
@@ -60,15 +60,13 @@ pub struct Datagram
     end
   end
 
-  # Decodes payload bytes as a String.
+  # The payload as text: the same bytes, nothing copied.
   def text : String
-    String.new(@data.size) do |target|
-      target.copy_from(@data.to_unsafe, @data.size)
-    end
+    @data
   end
 
   def to_s : String
-    text
+    @data
   end
 end
 
@@ -170,13 +168,15 @@ pub class UdpSocket
   # --- Sending Datagrams ---
 
   # Sends bytes to a destination host and port.
-  def send_to(bytes : Bytes, host : String, port : Int32) : Int32
+  @[TapeUnsafe("sendto reads the Array's bytes until it returns")]
+  def send_to(bytes : Array(UInt8), host : String, port : Int32) : Int32
     send_to(bytes.to_unsafe, bytes.size, host, port)
   end
 
   # Sends string contents as a datagram to a destination host and port.
+  @[TapeUnsafe("sendto reads the String's bytes until it returns")]
   def send_to(str : String, host : String, port : Int32) : Int32
-    send_to(Bytes.new(str.to_unsafe, str.bytesize), host, port)
+    send_to(str.to_unsafe, str.bytesize, host, port)
   end
 
   # Sends a raw buffer to a destination host and port.
@@ -251,56 +251,68 @@ pub class UdpSocket
     end
   end
 
-  # Receives a datagram into a newly allocated Bytes slice up to max_bytes.
-  # Answers {payload, peer_host, peer_port}, parking until one arrives.
-  def receive_from(max_bytes : Int32 = 65536) : Tuple(Bytes, String, Int32) | Cancelled
+  # Receives a datagram of up to *max_bytes* onto the caller's tape: recv
+  # writes straight into a String's room, nothing copied. Answers
+  # {payload, peer_host, peer_port}, parking until one arrives.
+  @[TapeUnsafe("recvfrom writes into the Builder's reserved room")]
+  def receive_from(max_bytes : Int32 = 65536) : Tuple(String, String, Int32) | Cancelled
     check_open
     raise "negative count: #{max_bytes}" if max_bytes < 0
-    buffer = Pointer(UInt8).malloc(max_bytes.to_u64)
     addr_room = uninitialized UInt8[28]
     addr = pointerof(addr_room).as(Pointer(UInt8))
-    count = receive_into(buffer, max_bytes, addr)
-    return count if count.is_a?(Cancelled)
-    bytes = Bytes.new(count)
-    bytes.to_unsafe.copy_from(buffer, count)
+    writer = String::Builder.new(max_bytes)
+    cancelled = false
+    writer.unsafe_append(max_bytes) do |room|
+      count = receive_into(room, max_bytes, addr)
+      cancelled = count.is_a?(Cancelled)
+      count.is_a?(Int32) ? count : 0
+    end
+    return Cancelled.new if cancelled
     host, port = UdpSocket.format_address(addr)
-    {bytes, host, port}
+    {writer.finish, host, port}
   end
 
-  # Receives a datagram into a caller-supplied Bytes buffer.
-  # Answers {subslice_of_received_bytes, peer_host, peer_port}.
-  def receive_from(buffer : Bytes) : Tuple(Bytes, String, Int32) | Cancelled
+  # Receives a datagram into *buffer*, the caller's Array, from its start.
+  # Answers {byte count, peer_host, peer_port}.
+  @[TapeUnsafe("recvfrom writes into the Array's own size")]
+  def receive_from(buffer : Array(UInt8)) : Tuple(Int32, String, Int32) | Cancelled
     check_open
     addr_room = uninitialized UInt8[28]
     addr = pointerof(addr_room).as(Pointer(UInt8))
     count = receive_into(buffer.to_unsafe, buffer.size, addr)
     return count if count.is_a?(Cancelled)
     host, port = UdpSocket.format_address(addr)
-    {buffer[0, count], host, port}
+    {count, host, port}
   end
 
   # What is queued now, or nil. Never parks.
-  def receive_from?(max_bytes : Int32 = 65536) : Tuple(Bytes, String, Int32)?
+  @[TapeUnsafe("recvfrom writes into the Builder's reserved room")]
+  def receive_from?(max_bytes : Int32 = 65536) : Tuple(String, String, Int32)?
     raise "negative count: #{max_bytes}" if max_bytes < 0
-    buffer = Pointer(UInt8).malloc(max_bytes.to_u64)
+    check_open
     addr_room = uninitialized UInt8[28]
     addr = pointerof(addr_room).as(Pointer(UInt8))
-    count = receive_now(buffer, max_bytes, addr)
-    return nil if count.nil?
-    bytes = Bytes.new(count)
-    bytes.to_unsafe.copy_from(buffer, count)
+    writer = String::Builder.new(max_bytes)
+    none = false
+    writer.unsafe_append(max_bytes) do |room|
+      count = receive_now(room, max_bytes, addr)
+      none = count.nil?
+      count || 0
+    end
+    return nil if none
     host, port = UdpSocket.format_address(addr)
-    {bytes, host, port}
+    {writer.finish, host, port}
   end
 
-  # Into a buffer: what is queued now, or nil. Never parks.
-  def receive_from?(buffer : Bytes) : Tuple(Bytes, String, Int32)?
+  # Into *buffer*: what is queued now, or nil. Never parks.
+  @[TapeUnsafe("recvfrom writes into the Array's own size")]
+  def receive_from?(buffer : Array(UInt8)) : Tuple(Int32, String, Int32)?
     addr_room = uninitialized UInt8[28]
     addr = pointerof(addr_room).as(Pointer(UInt8))
     count = receive_now(buffer.to_unsafe, buffer.size, addr)
     return nil if count.nil?
     host, port = UdpSocket.format_address(addr)
-    {buffer[0, count], host, port}
+    {count, host, port}
   end
 
   # Receives a Datagram struct containing data, host, and port.
@@ -329,30 +341,36 @@ pub class UdpSocket
   end
 
   # Sends bytes to the connected peer.
-  def send(bytes : Bytes) : Int32
+  @[TapeUnsafe("send reads the Array's bytes until it returns")]
+  def send(bytes : Array(UInt8)) : Int32
+    send(bytes.to_unsafe, bytes.size)
+  end
+
+  # Sends string to the connected peer.
+  @[TapeUnsafe("send reads the String's bytes until it returns")]
+  def send(str : String) : Int32
+    send(str.to_unsafe, str.bytesize)
+  end
+
+  private def send(buffer : Pointer(UInt8), count : Int32) : Int32
     check_open
-    res = UdpSocket.__sys_send(@fd, bytes.to_unsafe, bytes.size.to_u64)
+    res = UdpSocket.__sys_send(@fd, buffer, count.to_u64)
     # An earlier datagram's refusal, reported here instead of this send,
     # which did not go out: the report is gone once read, so it goes again.
-    res = UdpSocket.__sys_send(@fd, bytes.to_unsafe, bytes.size.to_u64) if UdpSocket.__is_refused(res)
+    res = UdpSocket.__sys_send(@fd, buffer, count.to_u64) if UdpSocket.__is_refused(res)
     raise "cannot send on UDP socket: #{UdpSocket.refusal(res, true)}" if res < 0_i64
     res.to_i32
   end
 
-  # Sends string to the connected peer.
-  def send(str : String) : Int32
-    send(Bytes.new(str.to_unsafe, str.bytesize))
-  end
-
   # Receives payload bytes from the connected peer, parking until some arrive.
-  def receive(max_bytes : Int32 = 65536) : Bytes | Cancelled
+  def receive(max_bytes : Int32 = 65536) : String | Cancelled
     res = receive_from(max_bytes)
     return res if res.is_a?(Cancelled)
     res[0]
   end
 
   # Payload bytes queued now from the connected peer, or nil.
-  def receive?(max_bytes : Int32 = 65536) : Bytes?
+  def receive?(max_bytes : Int32 = 65536) : String?
     res = receive_from?(max_bytes)
     return nil if res.nil?
     res[0]

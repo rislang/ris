@@ -1,0 +1,20 @@
+module test/debug
+
+import std/debug
+
+# std/debug under ris: a panic's backtrace is walked through .eh_frame and
+# named from /proc/self/exe's .symtab and .debug_line.
+
+def inner_fails(n : Int32) : Int32
+  raise "deliberate #{n}" if n > 2
+  n + 1
+end
+
+def outer_calls(n : Int32) : Int32
+  inner_fails(n) * 2
+end
+
+tape do
+  puts outer_calls(1)
+  puts outer_calls(3)
+end

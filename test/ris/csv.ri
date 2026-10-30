@@ -1,28 +1,48 @@
-module test/csv_tape
+module test/csv
 
-import std/csv::{CSV}
+import std/csv::{CSV, CSVReader, CSVWriter, CSVRow, CSVError}
+import std/io::{Memory}
 
-kept = [] of Array(String)
+# std/csv on the caller's tape: parse and build round-trip, a reader over
+# a String with a header and over a stream, a writer, and an error.
+
 tape do
-  rows = CSV.parse("id,name\r\n1,\"café,\"\"yes\"\"\"\n\"\"\n\n")
-  exit 1 unless rows.size == 4
-  exit 2 unless rows[1][1] == "café,\"yes\""
-  exit 3 unless rows[2].size == 1 && rows[2][0].empty?
-  exit 4 unless rows[3].empty?
-  w = String::Builder.new(1)
-  w << "prefix:"
-  CSV.build(rows, w)
-  exit 5 unless w.finish.starts_with?("prefix:id,name\n")
-  output = w.finish
-  encoded = CSV.build(rows)
-  expected = String.build { |io| io << "prefix:" << encoded }
-  exit 10 unless output == expected
-  bom = CSV.parse("\"\uFEFFid\"")
-  exit 11 unless CSV.build(bom) == "\"\uFEFFid\""
-  exit 6 unless CSV.parse(CSV.build(rows)).to_heap == rows.to_heap
-  exit 7 unless CSV.parse("\uFEFFa,b")[0][0] == "a"
-  kept = rows.to_heap
+  text = "id,name,says\r\n1,Ada,\"hi, \"\"there\"\"\"\n2,Bob,\"two\nlines\"\n"
+  rows = CSV.parse(text)
+  puts rows.size
+  rows.each { |row| puts row.join("|") }
+  back = CSV.build(rows)
+  puts CSV.parse(back) == rows
+  puts back.bytesize
+
+  reader = CSVReader.new(text, headers: true)
+  reader.each do |row|
+    puts "#{row.line} #{row["name"]}=#{row["says"].bytesize}"
+  end
+
+  stream = CSVReader.new(Memory.new("a; b ;c\n x ;\"y\"\n"), separator: ';', strip: true)
+  while got = stream.next_row
+    break if got.is_a?(CSVError)
+    puts got.join("/")
+  end
+
+  bad = CSVReader.new("a,b\n\"open,c\n")
+  bad.next_row
+  failed = bad.next_row
+  puts failed.message if failed.is_a?(CSVError)
+
+  sink = Memory.new
+  writer = CSVWriter.new(sink, line_end: "\r\n")
+  writer.row(["name", " pad", "say \"x\""])
+  writer.row([""])
+  puts sink.to_s.inspect
+  puts writer.rows
+
+  edges = CSV.parse("id\r\n\"\"\n\n")
+  puts "#{edges.size} #{edges[1].size} #{edges[1][0].empty?} #{edges[2].empty?}"
+  puts CSV.build(CSV.parse("\"\uFEFFid\"")) == "\"\uFEFFid\""
+  puts CSV.parse("\uFEFFa,b")[0][0]
+  puts CSV.parse("").empty?
+  kept = rows.copy_to(Program.tape)
+  puts kept[1][2]
 end
-exit 8 unless CSV.parse(CSV.build(kept)) == kept
-exit 9 unless CSV.parse("").empty?
-puts "PASS: csv tape and heap APIs"

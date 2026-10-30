@@ -28,7 +28,7 @@ the std row. Update a row when its work starts or ends.
 
 | Work                                  | Size     | Time      | Tokens    |
 |---------------------------------------|----------|-----------|-----------|
-| std heap: 119 mallocs, 13 non-compiling | large    | 2-3 days  | 300k-800k |
+| std heap: 101 mallocs, 9 not compiling | large    | 2-3 days  | 300k-800k |
 | Text: `s = ""` + `<<`, no Builder.new | medium   | 6-10 h    | 300-500k  |
 | Kernel threads without a collector    | large    | 1-2 days  | 300-500k  |
 | Task value: @[OnTape] and nested      | medium   | 2-4 h     | 100-200k  |
@@ -238,15 +238,24 @@ first):
   Unmarked runtime and std declarations still use the migration allocation
   ABI; selected std classes opt in with @[OnTape].
 * Complete the Pool/SlicePool surface beyond the validated paths in use.
-* std heap left (2026-10-30 audit): 102 Pointer.malloc/realloc sites,
-  133 to_heap copies. Ports in compress style (tape Arrays): bzip2 33,
-  xz 16, png 5, deque 4, string_pool 4, csv 3, password 4. Done:
-  websocket reader and regex (gates websocket_reader, regex*). OS
-  buffers left are win32 or sized: file 8, user 6,
-  process 5, system 4, dir/path/socket/udp 2 each. to_heap stores into
-  plain classes: time 25, autocert 17, toml 13, xml 12, yaml 11.
-  Not compiling under ris: csv ini toml yaml xml
-  udp mail smtp png zip tar xz netip otp debug (gc by design).
+* std heap left (2026-10-30 audit): 101 Pointer.malloc/realloc sites,
+  130 to_heap copies. Ports in compress style (tape Arrays): bzip2 33,
+  xz 16, png 5, deque 4, string_pool 4, password 4. Done: websocket
+  reader, handshake and regex; udp, csv, ini (RisIni), otp, netip and
+  debug compile and run, each with a test/ris/<module>.ri gate, 0 heap.
+  OS buffers left are win32 or sized: file 8, user 6, process 5,
+  system 4, dir/path/socket 2 each. to_heap stores into plain classes:
+  time 25, autocert 17, toml 13, xml 12, yaml 11.
+  Not compiling under ris (gc by design):
+  * toml, yaml, xml: the heap Any (Array(Any), Hash(String, Any)) beside
+    the tape one; drop it or make it a node array (1-2 days).
+  * mail, smtp: TapePart holds Array(TapePart) and Arrays (growing values
+    in an Array): make it a node array with index ranges (2-4 h).
+  * png: Pointer decoder/encoder and CRC32 of a Pointer (0.5-1 day).
+  * xz (and zip, tar, which import it): Pointer LZMA2 decoder (1 day).
+* bench/std_ini_exercise still uses INI's old Hash(String, Hash) API.
+  std_udp_exercise uses udp's String API now, but stops at a task capture
+  (line 274), as before.
 * Sweep remaining std modules (collections, IO, errors); heap paths that
   block the default no-GC switch belong in the section above.
 * Add 128-bit formatting, IDNA and URI resolution.

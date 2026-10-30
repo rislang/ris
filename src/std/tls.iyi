@@ -2940,7 +2940,7 @@ pub class TlsClient < TlsConnection
           return TlsError.new("an encrypted_client_hello in a #{retry ? "HelloRetryRequest" : "ServerHello"}, which was not offered there", TlsAlert::UNSUPPORTED_EXTENSION)
         end
         return TlsError.new("a HelloRetryRequest's encrypted_client_hello of #{data.size} bytes, not 8", TlsAlert::DECODE_ERROR) unless data.size == 8
-        confirmation = data
+        confirmation = data.to_a
       else
         return TlsError.new("extension #{type} in a ServerHello, which was not offered", TlsAlert::UNSUPPORTED_EXTENSION)
       end

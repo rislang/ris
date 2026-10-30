@@ -1,0 +1,24 @@
+module test/otp
+
+import std/otp::{HOTP, TOTP, OTPAuth, OTPAlgorithm, OTPError}
+
+# std/otp on the caller's tape: RFC 4226 and RFC 6238 test vectors, a key
+# URI built and parsed back, and a refused URI.
+
+tape do
+  key = Array(UInt8).new(20) { |i| (48 + (i + 1) % 10).to_u8 }
+  puts (0..3).map { |c| HOTP.code(key, c.to_i64) }.join(",")
+  puts TOTP.code(key, 59_i64, digits: 8)
+  puts TOTP.code(key, 1111111109_i64, digits: 8)
+  puts TOTP.verify(key, "07081804", 1111111109_i64 + 30, digits: 8)
+  puts TOTP.verify(key, "07081804", 1111111109_i64 + 90, digits: 8)
+  auth = OTPAuth.totp(key, "ada@example.com", "Ex Co", OTPAlgorithm::SHA256, 8, 60)
+  uri = auth.to_s
+  puts uri
+  back = OTPAuth.parse(uri)
+  if back.is_a?(OTPAuth)
+    puts "#{back.account} #{back.issuer} #{back.digits} #{back.period} #{back.secret == key}"
+  end
+  bad = OTPAuth.parse("otpauth://totp/x?digits=6")
+  puts bad.message if bad.is_a?(OTPError)
+end

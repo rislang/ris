@@ -887,10 +887,10 @@ struct NetipBits
 
   # The byte offset of *byte* in *text* from *from*, or -1.
   def self.find(text : String, byte : UInt8, from : Int32) : Int32
-    raw = text.to_unsafe
+    raw = text
     index = from
     while index < text.bytesize
-      return index if raw[index] == byte
+      return index if raw.byte_at(index) == byte
       index = index + 1
     end
     -1
@@ -912,7 +912,7 @@ struct NetipBits
   # three of them, no leading zero, at most 255. The answer is the 32
   # bits, or why not.
   def self.read_v4(text : String) : UInt128 | String
-    raw = text.to_unsafe
+    raw = text
     size = text.bytesize
     return "an empty string is not an address" if size == 0
     value = 0_u128
@@ -920,7 +920,7 @@ struct NetipBits
     at = 0
     while true
       start = at
-      while at < size && raw[at] != 46_u8
+      while at < size && raw.byte_at(at) != 46_u8
         at = at + 1
       end
       octets = octets + 1
@@ -931,12 +931,12 @@ struct NetipBits
       number = 0
       index = start
       while index < at
-        return "the octet #{octet.inspect} is not decimal digits" unless raw[index] >= 48_u8 && raw[index] <= 57_u8
-        number = number * 10 + (raw[index] - 48_u8).to_i32 if index - start < 4
+        return "the octet #{octet.inspect} is not decimal digits" unless raw.byte_at(index) >= 48_u8 && raw.byte_at(index) <= 57_u8
+        number = number * 10 + (raw.byte_at(index) - 48_u8).to_i32 if index - start < 4
         index = index + 1
       end
       return "the octet #{octet.inspect} has more than three digits" if count > 3
-      return "the octet #{octet.inspect} has a leading zero, which some readers take for octal" if count > 1 && raw[start] == 48_u8
+      return "the octet #{octet.inspect} has a leading zero, which some readers take for octal" if count > 1 && raw.byte_at(start) == 48_u8
       return "the octet #{octet} is past 255" if number > 255
       value = (value << 8) | number.to_u128
       break if at == size
@@ -957,9 +957,13 @@ struct NetipBits
     if find(tail, 46_u8, 0) >= 0
       four = read_v4(tail)
       return "the IPv4 tail #{tail.inspect}: #{four}" if four.is_a?(String)
-      parts.pop
-      parts << ((four >> 16) & 0xFFFF_u128).to_i32.to_s(16)
-      parts << (four & 0xFFFF_u128).to_i32.to_s(16)
+      # The groups without the tail and with its two hextets: popping the
+      # tail would shrink storage that the caller's text is viewed by.
+      groups = Array(String).new(parts.size + 1)
+      (parts.size - 1).times { |k| groups << parts[k] }
+      groups << ((four >> 16) & 0xFFFF_u128).to_i32.to_s(16)
+      groups << (four & 0xFFFF_u128).to_i32.to_s(16)
+      parts = groups
     end
     return "more than eight colons" if parts.size > 9
     skip = -1
@@ -1015,11 +1019,11 @@ struct NetipBits
   # One group: one to four hex digits.
   def self.read_hextet(text : String) : UInt128 | String
     return "an empty group" if text.empty?
-    raw = text.to_unsafe
+    raw = text
     value = 0_u128
     index = 0
     while index < text.bytesize
-      byte = raw[index]
+      byte = raw.byte_at(index)
       digit = if byte >= 48_u8 && byte <= 57_u8
                 byte - 48_u8
               elsif byte >= 97_u8 && byte <= 102_u8
@@ -1042,13 +1046,13 @@ struct NetipBits
   # ones), the two ambiguous masks read as netmasks. -1 when it is none.
   def self.read_length(text : String, v6 : ::Bool) : Int32
     bits = v6 ? 128 : 32
-    raw = text.to_unsafe
+    raw = text
     digits = text.bytesize > 0
     number = 0
     index = 0
     while index < text.bytesize
-      if raw[index] >= 48_u8 && raw[index] <= 57_u8
-        number = number * 10 + (raw[index] - 48_u8).to_i32 if number <= bits
+      if raw.byte_at(index) >= 48_u8 && raw.byte_at(index) <= 57_u8
+        number = number * 10 + (raw.byte_at(index) - 48_u8).to_i32 if number <= bits
       else
         digits = false
       end

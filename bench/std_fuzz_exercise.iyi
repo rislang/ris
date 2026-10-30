@@ -967,7 +967,7 @@ def run_http1(input : Array(UInt8)) : String
   HTTP.parse_response_head(t)
   lines = HTTP.split_crlf(t)
   HTTP.status_line(lines[0]) unless lines.empty?
-  HTTP.parse_fields(lines, unfold: true, apart: {} of String => Array(String))
+  HTTP.fields_apart(lines, unfold: true)
   lines.each do |line|
     HTTP.content_length(line)
     HTTP.hex(line)

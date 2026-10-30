@@ -47,28 +47,6 @@
 module std/csv
 
 pub struct CSV
-  def self.parse(text : String) : Array(Array(String))
-    result = [] of Array(String)
-    tape do
-      result = parse(text.as_tape).to_heap
-    end
-    result
-  end
-
-  def self.build(rows : Array(Array(String))) : String
-    result = ""
-    tape do
-      views = Array(Array(String)).new
-      rows.each do |row|
-        fields = Array(String).new
-        row.each { |field| fields << field.as_tape }
-        views << fields
-      end
-      result = build(views).to_heap
-    end
-    result
-  end
-
   def self.build(rows : Array(Array(String)),
                  writer : String::Builder) : Nil
     write_rows(rows, writer)
@@ -243,7 +221,7 @@ pub struct CSV
     b = text[at]
     len = b < 0x80_u8 ? 1 : (b < 0xE0_u8 ? 2 : (b < 0xF0_u8 ? 3 : 4))
     len = text.bytesize - at if len > text.bytesize - at
-    text[at, len].to_heap
+    text[at, len]
   end
 
   private def self.escape(field : String,
@@ -282,6 +260,7 @@ end
 
 # What is wrong with a document, and where: *line* and *column* count from
 # 1, the column in characters.
+@[OnTape]
 pub struct CSVError
   getter message : String
   getter line : Int32
@@ -391,10 +370,8 @@ pub class CSVReader
   CHUNK = 65536
 
   @io : IyiIO | Nil = nil
-  # The text read from: the whole document, or the stream's current chunk,
-  # held so its bytes stay alive while *buf* points into them.
+  # The text read from: the whole document, or the stream's current chunk.
   @text : String = ""
-  @buf : Pointer(UInt8)
   @pos : Int32 = 0
   @limit : Int32 = 0
   @ended : Bool = true
@@ -413,22 +390,20 @@ pub class CSVReader
   @column : Int32 = 1
   @row_line : Int32 = 1
   @prev_cr : Bool = false
-  @field : Pointer(UInt8)
-  @fcap : Int32 = 0
+  # The field being read, refilled with `clear` for each one.
+  @field : Array(UInt8)
   @flen : Int32 = 0
 
   def initialize(text : String, separator : Char = ',', quote : Char = '"', headers : Bool = false, strip : Bool = false, same_size : Bool = false)
     CSVBytes.check("CSVReader", separator, quote)
     @text = text
-    @buf = text.to_unsafe
     @limit = text.bytesize
     @sep = separator.ord.to_u8
     @quote = quote.ord.to_u8
     @has_headers = headers
     @strip = strip
     @same_size = same_size
-    @fcap = 256
-    @field = Pointer(UInt8).malloc(256_u64)
+    @field = Array(UInt8).new(256)
   end
 
   # Reads *io* as far as each row needs, CHUNK bytes at a time; it is not
@@ -437,14 +412,12 @@ pub class CSVReader
     CSVBytes.check("CSVReader", separator, quote)
     @io = io
     @ended = false
-    @buf = @text.to_unsafe
     @sep = separator.ord.to_u8
     @quote = quote.ord.to_u8
     @has_headers = headers
     @strip = strip
     @same_size = same_size
-    @fcap = 256
-    @field = Pointer(UInt8).malloc(256_u64)
+    @field = Array(UInt8).new(256)
   end
 
   # The header row, read now if no row has been. Only for a reader made
@@ -536,6 +509,7 @@ pub class CSVReader
     state = START
     touched = false
     @flen = 0
+    @field.clear
     @row_line = @line
     quote_line = 0
     quote_column = 0
@@ -543,19 +517,19 @@ pub class CSVReader
       if @pos >= @limit
         break unless refill
       end
-      b = @buf[@pos]
+      b = @text.byte_at(@pos)
       if state == BARE || state == QUOTED
         # A run of ordinary bytes is copied at once: byte by byte, a field
         # was a call and a bounds check per byte.
         if b != @quote && b != 10_u8 && b != 13_u8 && (state == QUOTED || b != @sep)
           run = @pos
           while run < @limit
-            c = @buf[run]
+            c = @text.byte_at(run)
             break if c == @quote || c == 10_u8 || c == 13_u8 || (state == BARE && c == @sep)
             @column = @column + 1 if (c & 0xC0_u8) != 0x80_u8
             run = run + 1
           end
-          return too_long unless append(@buf + @pos, run - @pos)
+          return too_long unless append(@pos, run - @pos)
           @pos = run
           @prev_cr = false
           next
@@ -565,7 +539,7 @@ pub class CSVReader
             state = CLOSED
           else
             # A line break inside quotes is the field's.
-            return too_long unless append(@buf + @pos, 1)
+            return too_long unless append(@pos, 1)
           end
         elsif b == @sep
           fields << take_field(true)
@@ -597,7 +571,7 @@ pub class CSVReader
         elsif space?(b)
           touched = true
         else
-          return too_long unless append(@buf + @pos, 1)
+          return too_long unless append(@pos, 1)
           state = BARE
           touched = true
         end
@@ -609,7 +583,7 @@ pub class CSVReader
         step(b)
         return fields
       elsif state == CLOSED && b == @quote
-        return too_long unless append(@buf + @pos, 1)
+        return too_long unless append(@pos, 1)
         state = QUOTED
       elsif space?(b)
         state = AFTER
@@ -673,25 +647,22 @@ pub class CSVReader
     end
     @flen = 0
     field = @field
-    String.new(n) { |dst| dst.copy_from(field, n) }
+    got = String.build(n) { |w| n.times { |k| w.push(field[k]) } }
+    @field.clear
+    got
   end
 
   # *count* bytes onto the field, false when that would make it longer than
   # a string holds. The buffer doubles, in Int64: in Int32, past 1 GiB the
   # doubling overflowed.
-  private def append(from : Pointer(UInt8), count : Int32) : Bool
+  private def append(from : Int32, count : Int32) : Bool
     want = @flen.to_i64 + count.to_i64
     return false if want > 2147483647_i64
-    if want > @fcap.to_i64
-      cap = @fcap.to_i64
-      while cap < want
-        cap = cap * 2
-      end
-      cap = 2147483647_i64 if cap > 2147483647_i64
-      @field = @field.realloc(cap.to_u64)
-      @fcap = cap.to_i32
+    k = 0
+    while k < count
+      @field << @text.byte_at(from + k)
+      k = k + 1
     end
-    (@field + @flen).copy_from(from, count)
     @flen = want.to_i32
     true
   end
@@ -702,11 +673,10 @@ pub class CSVReader
 
   # The character at *pos*, for an error to name, as much of it as is read.
   private def char_here : String
-    b = @buf[@pos]
+    b = @text.byte_at(@pos)
     len = b < 0x80_u8 ? 1 : (b < 0xE0_u8 ? 2 : (b < 0xF0_u8 ? 3 : 4))
     len = @limit - @pos if len > @limit - @pos
-    from = @buf + @pos
-    "'" + String.new(len) { |dst| dst.copy_from(from, len) } + "'"
+    "'" + @text[@pos, len] + "'"
   end
 
   # The next chunk of the stream, false at its end or when its read failed.
@@ -723,7 +693,6 @@ pub class CSVReader
       return false
     end
     @text = more
-    @buf = more.to_unsafe
     @pos = 0
     @limit = more.bytesize
     true
@@ -741,16 +710,15 @@ pub class CSVReader
           @ended = true
         else
           @text = @text + more
-          @buf = @text.to_unsafe
           @limit = @text.bytesize
         end
       end
     end
-    p = @buf
-    if @limit >= 2 && ((p[0] == 0xFF_u8 && p[1] == 0xFE_u8) || (p[0] == 0xFE_u8 && p[1] == 0xFF_u8))
+    p = @text
+    if @limit >= 2 && ((p.byte_at(0) == 0xFF_u8 && p.byte_at(1) == 0xFE_u8) || (p.byte_at(0) == 0xFE_u8 && p.byte_at(1) == 0xFF_u8))
       return CSVError.new("csv: the document is UTF-16, by its byte order mark, and is read as UTF-8", 1, 1)
     end
-    @pos = 3 if @limit >= 3 && p[0] == 0xEF_u8 && p[1] == 0xBB_u8 && p[2] == 0xBF_u8
+    @pos = 3 if @limit >= 3 && p.byte_at(0) == 0xEF_u8 && p.byte_at(1) == 0xBB_u8 && p.byte_at(2) == 0xBF_u8
     nil
   end
 end
@@ -814,12 +782,13 @@ pub class CSVWriter
   private def needs_quotes?(f : String) : Bool
     n = f.bytesize
     return false if n == 0
-    p = f.to_unsafe
     # Spaces at either end would be lost to a `strip: true` reader.
-    return true if p[0] == 32_u8 || p[0] == 9_u8 || p[n - 1] == 32_u8 || p[n - 1] == 9_u8
+    first = f.byte_at(0)
+    last = f.byte_at(n - 1)
+    return true if first == 32_u8 || first == 9_u8 || last == 32_u8 || last == 9_u8
     i = 0
     while i < n
-      b = p[i]
+      b = f.byte_at(i)
       return true if b == @sep || b == @quote || b == 10_u8 || b == 13_u8
       i = i + 1
     end
@@ -830,24 +799,22 @@ pub class CSVWriter
   # whole.
   private def write_quoted(f : String) : Nil
     put(@quote)
-    p = f.to_unsafe
     n = f.bytesize
     from = 0
     i = 0
     while i < n
-      if p[i] == @quote
-        @io.write(p + from, i + 1 - from)
+      if f.byte_at(i) == @quote
+        @io.write(f[from, i + 1 - from])
         put(@quote)
         from = i + 1
       end
       i = i + 1
     end
-    @io.write(p + from, n - from)
+    @io.write(f[from, n - from])
     put(@quote)
   end
 
   private def put(b : UInt8) : Nil
-    one = b
-    @io.write(pointerof(one), 1)
+    @io.write(String.build(1) { |w| w.push(b) })
   end
 end

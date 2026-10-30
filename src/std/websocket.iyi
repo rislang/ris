@@ -416,58 +416,57 @@ pub class WebSocket
   # parameters after `;`, a parameter's value a token or a quoted string
   # that is one once unescaped. Why it is not one, otherwise.
   protected def self.extensions(value : String) : Array(Extension) | String
-    p = value.to_unsafe
     n = value.bytesize
     k = 0
     while k < n
-      return "a byte that is not text" if p[k] >= 127_u8 || (p[k] < 32_u8 && p[k] != 9_u8)
+      return "a byte that is not text" if value.byte_at(k) >= 127_u8 || (value.byte_at(k) < 32_u8 && value.byte_at(k) != 9_u8)
       k = k + 1
     end
     list = [] of Extension
     i = 0
     while true
-      i = WebSocket.blanks(p, n, i)
+      i = WebSocket.blanks(value, n, i)
       break if i >= n
-      if p[i] == 44_u8
+      if value.byte_at(i) == 44_u8
         # An empty element of the list (RFC 9110 §5.6.1).
         i = i + 1
         next
       end
-      stop = WebSocket.word(p, n, i)
+      stop = WebSocket.word(value, n, i)
       name = value[i, stop - i]
       return "an extension's name #{name.inspect} is not a token" unless HTTP.token?(name)
       i = stop
       params = [] of {String, String?}
       while true
-        i = WebSocket.blanks(p, n, i)
-        break if i >= n || p[i] == 44_u8
-        return "#{value[i, 1].inspect} after #{name}, where a ; or a , goes" unless p[i] == 59_u8
-        i = WebSocket.blanks(p, n, i + 1)
-        stop = WebSocket.word(p, n, i)
+        i = WebSocket.blanks(value, n, i)
+        break if i >= n || value.byte_at(i) == 44_u8
+        return "#{value[i, 1].inspect} after #{name}, where a ; or a , goes" unless value.byte_at(i) == 59_u8
+        i = WebSocket.blanks(value, n, i + 1)
+        stop = WebSocket.word(value, n, i)
         param = value[i, stop - i]
         return "a parameter of #{name}, #{param.inspect}, is not a token" unless HTTP.token?(param)
-        i = WebSocket.blanks(p, n, stop)
+        i = WebSocket.blanks(value, n, stop)
         given = nil.as(String?)
-        if i < n && p[i] == 61_u8
-          i = WebSocket.blanks(p, n, i + 1)
+        if i < n && value.byte_at(i) == 61_u8
+          i = WebSocket.blanks(value, n, i + 1)
           text = ""
-          if i < n && p[i] == 34_u8
+          if i < n && value.byte_at(i) == 34_u8
             # A quoted string, its backslashes taken off (RFC 9110 §5.6.4).
             i = i + 1
             closed = false
             while i < n
-              if p[i] == 34_u8
+              if value.byte_at(i) == 34_u8
                 closed = true
                 i = i + 1
                 break
               end
-              i = i + 1 if p[i] == 92_u8 && i + 1 < n
+              i = i + 1 if value.byte_at(i) == 92_u8 && i + 1 < n
               text = text + value[i, 1]
               i = i + 1
             end
             return "the quoted value of #{param} is not closed" unless closed
           else
-            stop = WebSocket.word(p, n, i)
+            stop = WebSocket.word(value, n, i)
             text = value[i, stop - i]
             i = stop
           end
@@ -484,17 +483,17 @@ pub class WebSocket
   end
 
   # Past the spaces and tabs from *i*.
-  protected def self.blanks(p : Pointer(UInt8), n : Int32, i : Int32) : Int32
-    while i < n && (p[i] == 32_u8 || p[i] == 9_u8)
+  protected def self.blanks(p : String, n : Int32, i : Int32) : Int32
+    while i < n && (p.byte_at(i) == 32_u8 || p.byte_at(i) == 9_u8)
       i = i + 1
     end
     i
   end
 
   # The end of the word from *i*: up to a blank or one of `,;="`.
-  protected def self.word(p : Pointer(UInt8), n : Int32, i : Int32) : Int32
+  protected def self.word(p : String, n : Int32, i : Int32) : Int32
     while i < n
-      c = p[i]
+      c = p.byte_at(i)
       break if c == 32_u8 || c == 9_u8 || c == 44_u8 || c == 59_u8 || c == 61_u8 || c == 34_u8
       i = i + 1
     end

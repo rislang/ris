@@ -69,6 +69,7 @@ module std/debug
 {% end %}
 
 struct DwarfResolver
+  @[TapeUnsafe("write(2) reads the text's bytes until it returns")]
   private def self.say(text : String) : Nil
     written = 0_i64
     total = text.bytesize.to_i64
@@ -416,7 +417,7 @@ struct DwarfResolver
       ext = ".pdb"
       j = 0
       while j < 5
-        text[(cut + j) * 2] = j < 4 ? ext.to_unsafe[j] : 0_u8
+        text[(cut + j) * 2] = j < 4 ? ext.byte_at(j) : 0_u8
         text[(cut + j) * 2 + 1] = 0_u8
         j = j + 1
       end
@@ -473,7 +474,7 @@ struct DwarfResolver
       magic = "Microsoft C/C++ MSF 7.00\r\n"
       i = 0
       while i < magic.bytesize
-        return false if u8_at(buf, size, i.to_i64) != magic.to_unsafe[i].to_i32
+        return false if u8_at(buf, size, i.to_i64) != magic.byte_at(i).to_i32
         i = i + 1
       end
       return false if u8_at(buf, size, 26_i64) != 26 || u8_at(buf, size, 27_i64) != 68 ||
@@ -584,6 +585,7 @@ struct DwarfResolver
     # directory it was linked in, so the exe's own path with `.pdb` is tried
     # after it. Neither being there is not an error — a released zip ships
     # no PDB — and a panic then prints the addresses it captured.
+    @[TapeUnsafe("the wide-path call reads the path's bytes until it returns")]
     def self.pdb_open(base : Pointer(UInt8), image_size : Int64, cv : Int64) : ::Bool
       path = pdb_path_at(base, image_size, cv)
       unless path.empty?
@@ -767,7 +769,7 @@ struct DwarfResolver
     def self.name_is?(buf : Pointer(UInt8), size : Int64, off : Int64, want : String) : ::Bool
       i = 0
       while i < want.bytesize
-        return false if u8_at(buf, size, off + i.to_i64) != want.to_unsafe[i].to_i32
+        return false if u8_at(buf, size, off + i.to_i64) != want.byte_at(i).to_i32
         i = i + 1
       end
       u8_at(buf, size, off + want.bytesize.to_i64) == 0
@@ -1493,6 +1495,7 @@ struct DwarfResolver
 
     # `/proc/self/exe` mapped whole, its size into *size_out*; 0 when it
     # cannot be.
+    @[TapeUnsafe("open(2) reads the path's bytes until it returns")]
     def self.map_self(size_out : Pointer(UInt64)) : UInt64
       fd = __iyi_open_read("/proc/self/exe".to_unsafe)
       return 0_u64 if fd < 0_i64
@@ -1509,7 +1512,7 @@ struct DwarfResolver
       at = Pointer(UInt8).new(base &+ offset)
       index = 0
       while index < want.bytesize
-        return false if (at + index).value != want.to_unsafe[index]
+        return false if (at + index).value != want.byte_at(index)
         index = index + 1
       end
       (at + index).value == 0_u8

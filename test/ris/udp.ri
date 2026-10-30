@@ -1,0 +1,39 @@
+module test/udp
+
+import std/udp::{UdpSocket, Datagram}
+
+# std/udp on the caller's tape: a datagram there and back over loopback,
+# a connected pair, a caller's Array buffer, a receive that does not wait,
+# and a large datagram - all without the heap.
+
+tape do
+  server = UdpSocket.bind("127.0.0.1", 0)
+  client = UdpSocket.bind("127.0.0.1", 0)
+  puts client.receive_from?.nil?
+  client.send_to("ping loopback", "127.0.0.1", server.local_port)
+  dg = server.receive_datagram.or_panic
+  puts "#{dg.text} #{dg.data.bytesize} #{dg.host} #{dg.port == client.local_port}"
+  server.send_to("pong", dg.host, dg.port)
+  got = client.receive_from.or_panic
+  puts "#{got[0]} #{got[1]}"
+
+  buffer = Array(UInt8).new(8, 0_u8)
+  client.send_to("123456789abc", "127.0.0.1", server.local_port)
+  count, host, _ = server.receive_from(buffer).or_panic
+  puts "#{count} #{buffer[0]} #{buffer[7]} #{host}"
+
+  client.connect("127.0.0.1", server.local_port)
+  bytes = [104_u8, 105_u8]
+  client.send(bytes)
+  puts server.receive.or_panic
+  puts server.receive?.nil?
+
+  big = String.build { |w| 60000.times { |i| w.push((i % 251).to_u8) } }
+  client.send(big)
+  large = server.receive_datagram.or_panic
+  puts "#{large.data.bytesize} #{large.data.byte_at(250)} #{large.data.byte_at(59999)}"
+
+  server.close
+  client.close
+  puts server.closed?
+end

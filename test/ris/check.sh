@@ -980,6 +980,136 @@ if [ "$out" = "$want" ]; then
 else
   echo "FAILED   websocket_reader: $out"; status=1
 fi
+# A real loopback handshake: connect offers permessage-deflate, upgrade
+# parses the offer; then raw offers with a quoted parameter.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/websocket_handshake.ri 2>&1)
+want='protocol chat
+deflate false false
+305
+echo hello hello
+HTTP/1.1 101 Switching Protocols
+Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=
+Sec-WebSocket-Extensions: permessage-deflate; server_no_context_takeover
+HTTP/1.1 400 Bad Request
+Sec-WebSocket-Extensions is not a list of extensions: the value of a, "b\"c", is not a token
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     websocket_handshake (connect and upgrade, no heap)'
+else
+  echo "FAILED   websocket_handshake: $out"; status=1
+fi
+# std/udp on the caller tape: datagrams received into String room or an
+# Array, connected sends, a 60000-byte datagram; no heap.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/udp.ri 2>&1)
+want='true
+ping loopback 13 127.0.0.1 true
+pong 127.0.0.1
+8 49 56 127.0.0.1
+hi
+true
+60000 250 10
+true
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     udp (datagrams on the tape, no heap)'
+else
+  echo "FAILED   udp: $out"; status=1
+fi
+# std/ini on the caller tape as a RisIni: BOM, CRLF, repeated section
+# and key, Unicode blanks, build round-trip, a retained copy; no heap.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/ini.ri 2>&1)
+want=',s,t
+yes last v=w 3
+true
+"prefix:top = yes\n[s]\na = last\n\n[t]\nk = v=w\n\n"
+true
+café
+true
+true
+v=w
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     ini (RisIni on the tape, no heap)'
+else
+  echo "FAILED   ini: $out"; status=1
+fi
+# std/otp on the caller tape: RFC 4226 and 6238 vectors, a key URI
+# built and parsed back, a refused URI; no heap.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/otp.ri 2>&1)
+want='755224,287082,359152,969429
+94287082
+07081804
+true
+false
+otpauth://totp/Ex%20Co:ada%40example.com?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&issuer=Ex%20Co&algorithm=SHA256&digits=8&period=60
+ada@example.com Ex Co 8 60 true
+otpauth: no secret parameter
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     otp (HOTP, TOTP and key URIs on the tape, no heap)'
+else
+  echo "FAILED   otp: $out"; status=1
+fi
+# std/netip on the caller tape: IPv4/IPv6 text, an IPv4 tail, a zone,
+# refusals, prefixes, subnets and a PrefixSet; no heap.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/netip.ri 2>&1)
+want='192.168.1.20 -> 192.168.1.20 private=true loopback=false
+::1 -> ::1 private=false loopback=true
+2001:db8:0:0:0:0:2:1 -> 2001:db8::2:1 private=false loopback=false
+::ffff:10.0.0.1 -> ::ffff:10.0.0.1 private=true loopback=false
+fe80::1%eth0 -> fe80::1%eth0 private=false loopback=false
+1.2.3 -> netip: "1.2.3" is not an IPv4 address: 3 octets, not four
+01.2.3.4 -> netip: "01.2.3.4" is not an IPv4 address: the octet "01" has a leading zero, which some readers take for octal
+1::2::3 -> netip: "1::2::3" is not an IPv6 address: more than one '\''::'\''
+10.1.0.0/16 contains true
+10.1.0.0/18 10.1.64.0/18 10.1.128.0/18 10.1.192.0/18
+netip: "10.1.2.3/8" is not a prefix: host bits are set past /8; Prefix.parse(text, mask: true) clears them
+2 true 2001:db8::/32
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     netip (addresses and prefixes on the tape, no heap)'
+else
+  echo "FAILED   netip: $out"; status=1
+fi
+# std/debug under ris: a panic's frames walked and named from the binary.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/debug.ri 2>&1); code=$?
+if [ "$code" -ne 0 ] && grep -qxF 4 <<<"$out" &&
+    grep -qF 'panic: deliberate 3' <<<"$out" &&
+    grep -qE '^0 +inner_fails at .*test/ris/debug.ri:9:3$' <<<"$out" &&
+    grep -qE '^1 +outer_calls at .*test/ris/debug.ri:14:3$' <<<"$out" &&
+    grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+  echo 'runs     debug (backtrace named, no heap)'
+else
+  echo "FAILED   debug: $out"; status=1
+fi
+# std/csv on the caller tape: parse/build round-trip, readers over a
+# String and a stream, a writer, an error, edge rows; no heap.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/csv.ri 2>&1)
+want='3
+id|name|says
+1|Ada|hi, "there"
+2|Bob|two
+lines
+true
+52
+2 Ada=11
+3 Bob=9
+a/b/c
+x/y
+csv: unterminated quoted field, opened at line 2, column 1
+"name,\" pad\",\"say \"\"x\"\"\"\r\n\"\"\r\n"
+2
+3 1 true true
+true
+a
+true
+hi, "there"
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     csv (parse, read and write on the tape, no heap)'
+else
+  echo "FAILED   csv: $out"; status=1
+fi
 # std/regex on the caller tape: groups, alternation, counts, anchors,
 # classes, no match and a long text, with nothing on the heap.
 out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/regex.ri 2>&1)

@@ -3158,13 +3158,14 @@ pub class HTTPClient
   end
 
   protected def give_back(key : String, conn : Conn) : Nil
-    waiting = @idle[key]? || [] of Conn
-    if waiting.size >= @limit
+    unless @idle.has_key?(key)
+      @idle[key] = [] of Conn
+    end
+    if @idle[key].size >= @limit
       conn.close
       return
     end
-    waiting << conn
-    @idle[key] = waiting
+    @idle[key] << conn
   end
 
   # The most configurations HTTPS records make an origin hold - a
@@ -3474,13 +3475,9 @@ pub struct HTTP
     line = status_line(lines[0])
     return line if line.is_a?(HTTPError)
     status, reason = line
-    lines_of = {} of String => Array(String)
-    headers = case fields = parse_fields(lines, unfold: true, apart: lines_of)
-              in String
-                return HTTPError.new(fields)
-              in Hash(String, String)
-                fields
-              end
+    fields = fields_apart(lines, unfold: true)
+    return HTTPError.new(fields) if fields.is_a?(String)
+    headers, lines_of = fields
     {status, reason, headers, lines_of.empty? ? nil : lines_of}
   end
 
@@ -4220,16 +4217,19 @@ pub struct HTTP
     status = 0
     headers = {} of String => String
     apart = {} of String => Array(String)
+    # A repeated name's first value is found again in *fields*: a view of
+    # the Hash's String would not outlive its next store.
     fields.each do |f|
       if f.name == ":status"
         status = f.value.to_i
         next
       end
-      if had = headers[f.name]?
-        if values = apart[f.name]?
-          values << f.value
+      if headers.has_key?(f.name)
+        if apart.has_key?(f.name)
+          apart[f.name] << f.value
         else
-          apart[f.name] = [had, f.value]
+          had = fields.find { |g| g.name == f.name }
+          apart[f.name] = [had ? had.value : "", f.value]
         end
       else
         headers[f.name] = f.value
@@ -4542,16 +4542,23 @@ pub struct HTTP
   # "header without a colon: \" b\"". A server may refuse one, and this
   # one does.
   #
-  # *apart*, when given, is handed each repeated field's values by the
-  # name in the answer, a line each, before they are joined.
-  def self.parse_fields(lines : Array(String), unfold : Bool = false, apart : Hash(String, Array(String))? = nil) : Hash(String, String) | String
+  def self.parse_fields(lines : Array(String), unfold : Bool = false) : Hash(String, String) | String
+    got = fields_apart(lines, unfold)
+    return got if got.is_a?(String)
+    got[0]
+  end
+
+  # `parse_fields`, and each repeated field's values by the name in the
+  # answer, a line each, before they were joined. The second Hash is made
+  # here: one handed in and grown would move under its caller's view.
+  def self.fields_apart(lines : Array(String), unfold : Bool = false) : {Hash(String, String), Hash(String, Array(String))} | String
     lines = unfolded(lines) if unfold
     headers = {} of String => String
     # The name as it was first spelled, by its lowercase, and the values
     # after the first, joined once at the end: joining line by line copied
     # the value so far per line.
-    spelled = {} of String => String
-    more = apart || {} of String => Array(String)
+    spelled = {} of String => Int32
+    more = {} of String => Array(String)
     i = 1
     while i < lines.size
       line = lines[i]
@@ -4566,21 +4573,26 @@ pub struct HTTP
         return "header #{name} contains a control character"
       end
       key = name.downcase
-      if first = spelled[key]?
-        if values = more[first]?
-          values << value
+      if at = spelled[key]?
+        # The line where the name was first spelled: an index, as a view
+        # of the Hash's String would not outlive its next store.
+        was = lines[at]
+        split = was.index(':') || 0
+        first = was[0, split]
+        if more.has_key?(first)
+          more[first] << value
         else
-          more[first] = [headers[first], value]
+          more[first] = [trim(was[split + 1, was.bytesize - split - 1]), value]
         end
       else
-        spelled[key] = name
+        spelled[key] = i - 1
         headers[name] = value
       end
     end
     more.each do |name, values|
       headers[name] = values.join(", ")
     end
-    headers
+    {headers, more}
   end
 
   # *lines* with each field's folded lines joined onto it, one space for

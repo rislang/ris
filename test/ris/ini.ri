@@ -1,21 +1,26 @@
 module test/ini_tape
 
-import std/ini::{INI}
+import std/ini::{INI, RisIni}
 
-kept = Hash(String, Hash(String, String)).new
+# std/ini on the caller's tape: a byte order mark, CRLF, a repeated
+# section and key, Unicode blanks, build round-trip, refusals, and a copy
+# kept past the tape.
+
+kept = RisIni.new
 tape do
-  doc = INI.parse("\uFEFFtop=yes\r\n[s]\na = café\n[s]\na=last\n")
-  exit 1 unless doc[""]["top"] == "yes"
-  exit 2 unless doc["s"]["a"] == "last"
+  doc = INI.parse("﻿top=yes\r\n[s]\na = café\n; note\n[t]\nk=v=w\n[s]\na=last\n")
+  puts doc.sections.join(",")
+  puts "#{doc["", "top"]} #{doc["s", "a"]} #{doc["t", "k"]} #{doc.size}"
+  puts doc["s", "b"]?.nil?
   w = String::Builder.new(1)
   w << "prefix:"
   INI.build(doc, w, true)
-  exit 3 unless w.finish == "prefix:top = yes\n[s]\na = last\n\n"
-  exit 4 unless INI.parse(INI.build(doc)) == doc
-  spaced = INI.parse("x=\u00A0café\u3000\n")
-  exit 7 unless spaced[""]["x"] == "café"
+  puts w.finish.inspect
+  puts INI.parse(INI.build(doc)) == doc
+  spaced = INI.parse("x= café　\n")
+  puts spaced["", "x"]
   kept = doc.copy_to(Program.tape)
 end
-exit 5 unless INI.parse(INI.build(kept)) == kept
-exit 6 unless INI.parse("").empty?
-puts "PASS: ini tape Hash and retained copy"
+puts INI.parse(INI.build(kept)) == kept
+puts INI.parse("").empty?
+puts kept["t", "k"]

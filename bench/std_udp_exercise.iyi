@@ -17,7 +17,7 @@ def assert_int(expected : Int32, actual : Int32, msg : String) : Nil
   raise "ASSERTION FAILED: #{msg}\n  expected #{expected}\n  got      #{actual}" unless expected == actual
 end
 
-import std/udp::{UdpSocket, Datagram, IPv4Address, Bytes}
+import std/udp::{UdpSocket, Datagram, IPv4Address}
 import std/socket::{IyiSocket, SocketError}
 
 puts "== address parsing"
@@ -59,7 +59,7 @@ assert_str "ping loopback", dg.text, "received datagram text"
 assert_str "127.0.0.1", dg.host, "sender host is 127.0.0.1"
 client_port = dg.port
 assert_true client_port > 0, "sender port is non-zero"
-assert_int 13, dg.data.size, "datagram byte size"
+assert_int 13, dg.data.bytesize, "datagram byte size"
 assert_str "ping loopback", dg.to_s, "datagram to_s matches text"
 
 server.send_to("pong reply", dg.host, client_port)
@@ -69,9 +69,9 @@ assert_str "127.0.0.1", reply_dg.host, "reply sender host"
 assert_int server_port, reply_dg.port, "reply sender port matches server port"
 
 client.send_to("slice payload", "127.0.0.1", server_port)
-buf = Bytes.new(32)
-slice, r_host, r_port = server.receive_from(buf).or_panic
-assert_int 13, slice.size, "caller buffer received slice size"
+buf = Array(UInt8).new(32, 0_u8)
+got, r_host, r_port = server.receive_from(buf).or_panic
+assert_int 13, got, "caller buffer received slice size"
 assert_str "127.0.0.1", r_host, "caller buffer received sender host"
 assert_int client_port, r_port, "caller buffer received sender port"
 
@@ -113,7 +113,7 @@ c2.connect("127.0.0.1", cp1)
 
 c1.send("connected datagram")
 c2_recv = c2.receive.or_panic
-assert_int 18, c2_recv.size, "connected receive byte size"
+assert_int 18, c2_recv.bytesize, "connected receive byte size"
 c1.close
 c2.close
 puts "  connect, send, and receive"
@@ -166,15 +166,15 @@ server.receive_buffer_size = 131072
 client.send_buffer_size = 131072
 client.receive_buffer_size = 131072
 
-max_payload = Bytes.new(65507)
+max_payload = Array(UInt8).new(65507, 0_u8)
 max_payload[0] = 0xAA_u8
 max_payload[32768] = 0x55_u8
 max_payload[65506] = 0xFF_u8
 
 client.send_to(max_payload, "127.0.0.1", server_port)
 big_dg = server.receive_datagram(65536).or_panic
-assert_int 65507, big_dg.data.size, "received max payload size"
-assert_true big_dg.data[0] == 0xAA_u8 && big_dg.data[32768] == 0x55_u8 && big_dg.data[65506] == 0xFF_u8, "payload contents intact"
+assert_int 65507, big_dg.data.bytesize, "received max payload size"
+assert_true big_dg.data.byte_at(0) == 0xAA_u8 && big_dg.data.byte_at(32768) == 0x55_u8 && big_dg.data.byte_at(65506) == 0xFF_u8, "payload contents intact"
 puts "  65,507-byte datagram sent and received intact"
 
 puts "\n== a datagram larger than the buffer the reader offered"
@@ -187,11 +187,11 @@ puts "\n== a datagram larger than the buffer the reader offered"
 client.send_to("0123456789", "127.0.0.1", server_port)
 assert_true server.poll_read(1000), "a datagram to truncate is queued"
 short_now = server.receive?(4)
-assert_true !short_now.nil? && short_now.size == 4, "an immediate read answers the bytes that fit"
+assert_true !short_now.nil? && short_now.bytesize == 4, "an immediate read answers the bytes that fit"
 
 client.send_to("0123456789", "127.0.0.1", server_port)
 short_parked = server.receive(4).or_panic
-assert_int 4, short_parked.size, "a parked read answers the bytes that fit"
+assert_int 4, short_parked.bytesize, "a parked read answers the bytes that fit"
 puts "  a ten-byte datagram read with a four-byte buffer answers four bytes"
 
 puts "\n== nothing queued: the ? variants answer nil, and a bounded wait ends"

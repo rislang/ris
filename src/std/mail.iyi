@@ -1301,9 +1301,9 @@ struct MailText
 
   # --- MIME parameters (RFC 2045 section 5.1, RFC 2231) ---
 
-  # A Content-Type's `type/subtype` in lower case, and its parameters;
-  # nil when it is not one.
-  def self.content_type(value : String) : {String, Hash(String, String)}?
+  # The heap Part's form: a Content-Type's `type/subtype` in lower case,
+  # and its parameters; nil when it is not one.
+  def self.heap_content_type(value : String) : {String, Hash(String, String)}?
     scan = MailScan.new(value)
     return nil if scan.skip_cfws
     major = scan.token
@@ -1316,7 +1316,7 @@ struct MailText
   end
 
   # A Content-Disposition's kind in lower case, and its parameters.
-  def self.disposition(value : String) : {String, Hash(String, String)}?
+  def self.heap_disposition(value : String) : {String, Hash(String, String)}?
     scan = MailScan.new(value)
     return nil if scan.skip_cfws
     kind = scan.token
@@ -1348,10 +1348,10 @@ struct MailText
         raw << {name, scan.bare_value}
       end
     end
-    MailText.assemble(raw)
+    MailText.heap_assemble(raw)
   end
 
-  def self.assemble(raw : Array({String, String})) : Hash(String, String)
+  def self.heap_assemble(raw : Array({String, String})) : Hash(String, String)
     result = {} of String => String
     plain = {} of String => String
     pieces = {} of String => Array({Int32, String, Bool})
@@ -3190,7 +3190,7 @@ pub struct Mail
       media = default_type
       params = {} of String => String
       if type = Part.first(headers, "content-type")
-        parsed = MailText.content_type(type)
+        parsed = MailText.heap_content_type(type)
         if parsed
           media = parsed[0]
           params = parsed[1]
@@ -3352,14 +3352,14 @@ pub struct Mail
     def disposition : String?
       raw = raw_header("Content-Disposition")
       return nil unless raw
-      parsed = MailText.disposition(raw)
+      parsed = MailText.heap_disposition(raw)
       parsed ? parsed[0] : nil
     end
 
     # The file name of Content-Disposition, or else Content-Type's `name`.
     def filename : String?
       if raw = raw_header("Content-Disposition")
-        parsed = MailText.disposition(raw)
+        parsed = MailText.heap_disposition(raw)
         if parsed
           name = parsed[1]["filename"]?
           return name if name
