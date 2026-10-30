@@ -1,0 +1,19 @@
+# A String's `+` is a new String: storing it back in the Hash it was
+# read from leaves no view of that Hash live.
+struct Joiner
+  def self.join(h : Hash(String, String), n : String, v : String) : Nil
+    if had = h[n]?
+      h[n] = had + ", " + v
+    else
+      h[n] = v
+    end
+  end
+end
+
+def exercise(fields : Array(String))
+  headers = {} of String => String
+  fields.each { |f| Joiner.join(headers, f, f) }
+  puts headers.size
+end
+
+tape { exercise(["a", "b", "a"]) }

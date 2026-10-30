@@ -1,0 +1,34 @@
+# Two types' fields of one name are two fields: clearing the inner box's
+# builder leaves a view of the outer box's builder valid.
+class Inner
+  getter bytes : String::Builder
+
+  def initialize(@bytes : String::Builder)
+  end
+end
+
+class Middle
+  getter bytes : String::Builder
+  getter box : Inner
+
+  def initialize(@bytes : String::Builder, @box : Inner)
+  end
+end
+
+class Outer
+  getter box : Middle
+
+  def initialize(@box : Middle)
+  end
+end
+
+def exercise(outer : Outer) : Nil
+  outer.box.bytes << "kept"
+  view = outer.box.bytes.finish
+  outer.box.box.bytes.clear
+  puts view
+end
+
+tape do
+  exercise(Outer.new(Middle.new(String::Builder.new, Inner.new(String::Builder.new))))
+end

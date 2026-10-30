@@ -1,0 +1,24 @@
+# A proc handed an object whose method passes its text on to an unknown
+# callback may keep that text: the call is refused.
+class Relay
+  getter text : String
+
+  def initialize(@text : String, @sink : Proc(String, Nil))
+  end
+
+  def pass : Nil
+    @sink.call(@text)
+  end
+end
+
+def invoke(callback : Proc(Relay, Nil), relay : Relay)
+  callback.call(relay)
+end
+
+sink = ->(text : String) { puts text }
+callback = ->(relay : Relay) { relay.pass; nil }
+tape do
+  text = ""
+  text << "abc"
+  invoke(callback, Relay.new(text, sink))
+end

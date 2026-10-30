@@ -1257,52 +1257,58 @@ pub class BodyWriter
   end
 
   def write(text : String) : Nil | Cancelled | SocketError
-    if fault = @fault
-      return fault
-    end
+    return fault_now unless @fault.nil?
     raise "BodyWriter: a write after the body's end" if @done
     return nil if text.bytesize == 0
     @written = @written + text.bytesize.to_i64
     if deflater = @deflater
-      return put(deflater.compress(text))
+      put(deflater.compress(text))
+    else
+      put(text)
     end
-    put(text)
+    fault_now
+  end
+
+  # The kept failure, copied onto the caller's tape: what a block is
+  # handed stays its own, not a view of this writer.
+  private def fault_now : Nil | Cancelled | SocketError
+    case fault = @fault
+    in Nil       then nil
+    in Cancelled then Cancelled.new
+    in SocketError
+      fault.copy_to(RisCurrentTape.new)
+    end
   end
 
   # The end of the body: the gzip trailer, and the last chunk with the
   # blank line after it. Once; the server's call after a block that
   # finished its own body writes nothing.
   def finish : Nil | Cancelled | SocketError
-    if fault = @fault
-      return fault
-    end
+    return fault_now unless @fault.nil?
     return nil if @done
     @done = true
     if deflater = @deflater
       put(deflater.finish)
     end
     send("0\r\n\r\n") if @chunked && @fault.nil?
-    @fault
+    fault_now
   end
 
   # One chunk in one write when it is small - a write each for the size,
   # the bytes and the CRLF cost three system calls a chunk - and the bytes
   # apart when it is large, rather than copied to join them.
-  private def put(text : String) : Nil | Cancelled | SocketError
-    return nil if text.bytesize == 0
+  private def put(text : String) : Bool
+    return true if text.bytesize == 0
     if @chunked
       size = HTTP.hex_text(text.bytesize.to_i64)
       if text.bytesize <= 16384
         send(size + "\r\n" + text + "\r\n")
       else
-        return @fault unless send(size + "\r\n")
-        return @fault unless send(text)
-        send("\r\n")
+        send(size + "\r\n") && send(text) && send("\r\n")
       end
     else
       send(text)
     end
-    @fault
   end
 
   private def send(text : String) : Bool
@@ -6335,7 +6341,7 @@ class H2Connection
         break unless writer.write(piece).nil?
       end
       writer.finish
-      return finish_answer(s)
+      return finish_answer(id)
     end
     if block = response.writer
       shown = gzip ? Server.coded(response, "gzip") : response
@@ -6346,7 +6352,7 @@ class H2Connection
       writer = gzip ? HTTP.gzip_writer(sink, false) : BodyWriter.new(sink, false)
       block.call(writer)
       writer.finish
-      return finish_answer(s)
+      return finish_answer(id)
     end
     response = Server.compressed(response, coding) if coding && response.body.bytesize >= Server::COMPRESS_FROM
     body = response.body
@@ -6359,9 +6365,13 @@ class H2Connection
     @fault == FAULT_NONE
   end
 
-  private def finish_answer(s : H2Stream) : Bool
-    return @fault == FAULT_NONE if s.reset >= 0
-    send_data(s.id, "", true) unless s.sent_end
+  # Looked up by id: the body's frames, read while it was sent, may have
+  # dropped the stream from @streams.
+  private def finish_answer(id : Int32) : Bool
+    s = @streams[id]?
+    # A stream reset and forgotten meanwhile needs no end.
+    return @fault == FAULT_NONE if s.nil? || s.reset >= 0
+    send_data(id, "", true) unless s.sent_end
     @fault == FAULT_NONE
   end
 

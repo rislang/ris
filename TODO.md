@@ -308,17 +308,16 @@ first):
   flush clears after the write. They now stop at the to_unsafe rule
   in std (38e98018d): compress.iyi:426 keeps `data.to_unsafe` in a
   field (http.iyi's reads moved to byte_at).
-* http_continue and the http benches stop at http.iyi:2217 serve_h1:
-  "live view of Conn.@state.@deadline_what while shrinking
-  Conn.@state ... taken_over -> held block -> call (opaque contract)".
-  Done: an unknown proc's argument shrinks only when its type's methods
-  (or its fields' types') can; an object then shrinks its fields, not
-  itself (gates contract_proc_object_shrink/_kept). Left: `socket =
-  conn.transport` also aliases the Conn root, so IyiSocket's `@state`
-  field lands on Conn.@state; and field_root folds a same-named field
-  of another type onto it. Fix the alias of a struct read through a
-  pointer (`@state.value.socket`), or fold only one type's own field.
-  The proc's RETAIN contract is still ALL (the _kept gate shows it).
+* http_continue and the http benches stop at http.iyi:2225 serve_h1:
+  "cannot prove opaque callback retain/escape" for Response#takeover,
+  an unknown proc handed the socket, the leftover String and the
+  Response: a String it is handed may be kept. Done: shrink and retain
+  of an unknown proc's argument follow its type's methods and what they
+  hand out; a field folds only onto the same owner type's field; a
+  top-level call takes no self; String `+` views neither side; H2
+  finish_answer looks its stream up by id; BodyWriter hands out a copy
+  of its fault. Left: a takeover the checker can see (a known callback,
+  or a handler method), or data the proc may keep (program-owned).
 * Compiler specs (run with LLVM_CONFIG set to LLVM 23; without it
   bin/crystal links the system LLVM 21): no signal 11 any more. Left:
   compiler_spec lines 484, 522, 568 use Channel and select (port to

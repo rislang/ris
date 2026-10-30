@@ -51,6 +51,22 @@ expect() {
   fi
 }
 
+# Two types' fields of one name stay two fields in the shrink checker.
+out=$("$RIS" run test/ris/field_fold_owner.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = 'kept' ]; then
+  echo 'runs     field_fold_owner'
+else
+  echo "FAILED   field_fold_owner: $out"; status=1
+fi
+
+# A String's `+` stored back in the Hash it read leaves no view live.
+out=$("$RIS" run test/ris/hash_join_copy.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = '2' ]; then
+  echo 'runs     hash_join_copy'
+else
+  echo "FAILED   hash_join_copy: $out"; status=1
+fi
+
 # Empty local collections fix their types at the first store.
 out=$("$RIS" run test/ris/array_infer.ri 2>&1)
 if [ "$?" -eq 0 ] &&

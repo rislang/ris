@@ -436,8 +436,14 @@ class Iyi::TapeShrinkChecker
     # each level makes new roots and a loop's state grows past use.
     ancestor = root
     depth = 0
+    base = nil
     while parent = @parents[ancestor]?
-      if parent[1] == name && name != "[]"
+      # A same-named field is the same one only on the same owner type: a
+      # socket's @state inside a connection's @state is another field.
+      # Unknown types fold, which conflates and so stays sound; depth bounds
+      # the rest.
+      if parent[1] == name && name != "[]" &&
+         same_owner?(parent[0], base ||= field_type(root))
         @folded_roots << ancestor
         return ancestor
       end
@@ -465,6 +471,12 @@ class Iyi::TapeShrinkChecker
   end
 
   # root_type, seeing through pointers and unions on the way down.
+  private def same_owner?(other : UInt64, base : Type?) : Bool
+    type = field_type(other)
+    return true unless base && type
+    type.remove_typedef == base.remove_typedef
+  end
+
   private def field_type(root : UInt64) : Type?
     if type = @root_types[root]?
       return type
@@ -606,59 +618,86 @@ class Iyi::TapeShrinkChecker
   @solving : UInt64?
   @owned_defs : Hash(Type, Array(Def))? = nil
 
-  # An unknown proc can shrink a value it is handed only through that
-  # value's own methods, or those of what it reaches: its fields (which a
-  # getter or a returned value hands out). So a proc argument shrinks
-  # only when one of those methods' summaries shrinks or grows anything.
-  # Storage (Array, Hash, Builder, RisTree), pointers, procs, modules,
-  # abstract and virtual types, and anything unknown keep the full effect.
-  # A summary read while solving makes this def solved again on change.
-  private def type_may_shrink?(type : Type?, seen = Set(Type).new) : Bool
-    return true unless type
+  WHOLE = ["*"]
+
+  # What an unknown proc can do to a value it is handed: only what that
+  # value's own methods do, or the methods of what they hand out (a
+  # getter's field, a returned value). It cannot touch a private field
+  # but through a method, so a method's summary says which fields it
+  # shrinks (*retain* false) or retains (*retain* true). Nil: nothing;
+  # WHOLE: the whole value; else those fields. Storage (Array, Hash,
+  # Builder, RisTree), pointers, procs, modules, abstract and virtual
+  # types, runtime methods and anything unknown are WHOLE. A summary read
+  # while solving makes this def solved again when it changes.
+  private def handed_effect(type : Type?, retain : Bool,
+                            seen = Set(Type).new) : Array(String)?
+    return WHOLE unless type
     type = type.remove_typedef
     if type.is_a?(UnionType)
-      return type.union_types.any? { |member| type_may_shrink?(member, seen) }
+      names = [] of String
+      type.union_types.each do |member|
+        found = handed_effect(member, retain, seen)
+        return WHOLE if found == WHOLE
+        names.concat(found) if found
+      end
+      return names.empty? ? nil : names.uniq
     end
-    return false if type.is_a?(NilType) || type.is_a?(BoolType) ||
-                    type.is_a?(CharType) || type.is_a?(IntegerType) ||
-                    type.is_a?(FloatType) || type.is_a?(SymbolType) ||
-                    type.is_a?(EnumType)
+    return nil if type.is_a?(NilType) || type.is_a?(BoolType) ||
+                  type.is_a?(CharType) || type.is_a?(IntegerType) ||
+                  type.is_a?(FloatType) || type.is_a?(SymbolType) ||
+                  type.is_a?(EnumType)
     name = type_name(type)
-    return false if name == "String"
-    return true if storage_type?(type) || name.starts_with?("Pointer(") ||
-                   name.starts_with?("Slice(") || name.includes?("View(") ||
-                   name == "String::Span" || name.starts_with?("Array::Link(")
-    return true if type.is_a?(ProcInstanceType) || type.is_a?(VirtualType) ||
-                   type.is_a?(VirtualMetaclassType) || type.abstract? ||
-                   type.module? || !type.is_a?(InstanceVarContainer)
-    return false unless seen.add?(type)
+    # A String is immutable, but a proc may keep it.
+    return (retain ? WHOLE : nil) if name == "String"
+    return WHOLE if storage_type?(type) || name.starts_with?("Pointer(") ||
+                    name.starts_with?("Slice(") || name.includes?("View(") ||
+                    name == "String::Span" || name.starts_with?("Array::Link(")
+    return WHOLE if type.is_a?(ProcInstanceType) || type.is_a?(VirtualType) ||
+                    type.is_a?(VirtualMetaclassType) || type.abstract? ||
+                    type.module? || !type.is_a?(InstanceVarContainer)
+    # A type with no fields holds no storage to shrink or keep.
+    return nil if type.instance_vars.empty? && !type.is_a?(GenericClassInstanceType)
+    # A type met again is being decided further up.
+    return nil unless seen.add?(type)
+    names = [] of String
     # Object, Reference, Value and Struct give every type the same generic
-    # methods (identity, hashing, inspection, dup): none frees storage.
+    # methods (identity, hashing, inspection, dup): none frees or keeps
+    # storage.
     owners = ([type] + type.ancestors).reject do |owner|
       {"Object", "Reference", "Value", "Struct"}.includes?(type_name(owner))
     end
     owners.each do |owner|
-      # A runtime body is opaque: no summary says what it shrinks.
+      # A runtime body is opaque: no summary says what it does.
       owner.defs.try &.each_value do |items|
-        return true if items.any? { |item| TapeRules.runtime?(@program, item.def.location) }
+        return WHOLE if items.any? { |item| TapeRules.runtime?(@program, item.def.location) }
       end
       owned_defs[owner]?.try &.each do |method|
+        # A constructor runs on a new value, never on one handed over.
+        next if method.name == "initialize"
         if caller = @solving
           (@summary_callers[method.object_id] ||= Set(UInt64).new) << caller
         end
         found = summary(method)
-        return true if found.nil? || !found.shrinks.empty? || !found.grows.empty?
+        return WHOLE unless found
+        roots = retain ? found.retains : found.shrinks.keys + found.grows.keys
+        roots.each do |root|
+          # Another parameter's effect belongs to that value.
+          path = relative_path(root, found.seeds[0])
+          next unless path
+          return WHOLE if path.empty?
+          names << path[0]
+        end
+        # What a method hands out of the value (its result views a field)
+        # is open to the proc as well.
+        if handed_effect(method.type?, retain, seen)
+          (found.result.roots + found.result.views.map(&.root)).each do |root|
+            path = relative_path(root, found.seeds[0])
+            names << path[0] if path && !path.empty?
+          end
+        end
       end
     end
-    type.instance_vars.each_value do |ivar|
-      return true if type_may_shrink?(ivar.type?, seen)
-    end
-    if type.is_a?(GenericClassInstanceType) || type.is_a?(GenericInstanceType)
-      type.type_vars.each_value do |var|
-        return true if var.is_a?(Var) && type_may_shrink?(var.type?, seen)
-      end
-    end
-    false
+    names.empty? ? nil : names.uniq
   end
 
   # What a proc's *index*th parameter is declared as; nil when unknown.
@@ -683,27 +722,6 @@ class Iyi::TapeShrinkChecker
       @parents[id] = {root, name}
       id
     end
-  end
-
-  # The fields of an object type (every member of a union one) that may
-  # shrink; nil when the type is not plainly an object with fields.
-  private def shrinking_fields(type : Type) : Array(String)?
-    type = type.remove_typedef
-    members = type.is_a?(UnionType) ? type.union_types : [type]
-    names = [] of String
-    members.each do |member|
-      member = member.remove_typedef
-      next if member.is_a?(NilType)
-      return nil unless member.is_a?(InstanceVarContainer) && !member.is_a?(VirtualType)
-      return nil if storage_type?(member) || member.abstract? || member.module?
-      name = type_name(member)
-      return nil if name == "String" || name.starts_with?("Pointer(") ||
-                    name.starts_with?("Slice(") || name.includes?("View(")
-      member.instance_vars.each do |ivar_name, ivar|
-        names << ivar_name if type_may_shrink?(ivar.type?)
-      end
-    end
-    names.uniq
   end
 
   private def owned_defs : Hash(Type, Array(Def))
@@ -1272,7 +1290,13 @@ class Iyi::TapeShrinkChecker
          TapeChecker.possible_string?(node.type?)
         @text_copies << node.object_id
       end
-      receiver = node.obj.try { |obj| value(obj, env) } || env["self"]? || EMPTY
+      # A call to a top-level def (`::f`, or one the Program owns) takes no
+      # self: the caller's self is no input of it.
+      top_level = node.global? || (@graph.targets(node).try do |found|
+        !found.empty? && found.all? { |t| t.owner?.is_a?(Program) }
+      end || false)
+      receiver = node.obj.try { |obj| value(obj, env) } ||
+                 (top_level ? EMPTY : env["self"]?) || EMPTY
       args = node.args.map { |arg| value(arg, env) }
       named = Hash(String, Value).new
       node.named_args.try &.each do |arg|
@@ -1390,22 +1414,22 @@ class Iyi::TapeShrinkChecker
                 next unless borrowed
                 input = actuals[i]? || EMPTY
                 roots = source_roots(input).flat_map { |r| aliases(r, env) }.uniq
+                # An unknown proc's argument: what its type's methods can
+                # do decides (`handed_effect`); an object's effect is on
+                # its fields, so a reference to it stays valid.
+                handed = @graph.proc_call?(target) && i > 0 ? proc_argument_type(target, i - 1) : nil
                 if bits & TapeCallGraph::Contract::SHRINK != 0
-                  handed = @graph.proc_call?(target) && i > 0 ? proc_argument_type(target, i - 1) : nil
-                  if handed.nil?
-                    shrink(roots, node, chain("#{node.name} (opaque contract)"))
-                  elsif type_may_shrink?(handed)
-                    # An object is not storage: its methods shrink what its
-                    # fields own, so a reference to it stays valid.
-                    if fields = shrinking_fields(handed)
-                      roots = roots.flat_map { |r| fields.map { |f| handed_field(r, f) } }.uniq
-                    end
-                    shrink(roots, node, chain("#{node.name} (opaque contract)"))
+                  if found = handed ? handed_effect(handed, false) : WHOLE
+                    shrunk = found == WHOLE ? roots : roots.flat_map { |r| found.map { |f| handed_field(r, f) } }.uniq
+                    shrink(shrunk, node, chain("#{node.name} (opaque contract)"))
                   end
                 end
                 if bits & TapeCallGraph::Contract::RETAIN != 0 && !roots.empty?
-                  @retains.concat(roots)
-                  @unproved << node if @checking
+                  if found = handed ? handed_effect(handed, true) : WHOLE
+                    kept = found == WHOLE ? roots : roots.flat_map { |r| found.map { |f| handed_field(r, f) } }.uniq
+                    @retains.concat(kept)
+                    @unproved << node if @checking
+                  end
                 end
                 if bits & TapeCallGraph::Contract::STORE_SELF != 0
                   destinations = receiver.roots.flat_map { |r| aliases(r, call_env) }.uniq
@@ -1504,6 +1528,11 @@ class Iyi::TapeShrinkChecker
       copied = node.name == "<<" && !node.block &&
                node.obj.try(&.type?).try { |t| type_name(t) } == "String::Builder" &&
                type_name(node.type) == "String::Builder"
+      # String's `+` copies both sides into a new String: it views neither.
+      concatenated = node.name == "+" && !node.block && node.args.size == 1 &&
+                     node.obj.try(&.type?).try { |t| type_name(t) } == "String" &&
+                     node.args[0].type?.try { |t| type_name(t) } == "String" &&
+                     type_name(node.type) == "String"
       args.each { |arg| derived = merge(derived, arg) } unless copied
       if block = node.block
         outer = env.dup
@@ -1557,7 +1586,7 @@ class Iyi::TapeShrinkChecker
         # allocating constructors, it must retain that storage's lifetime.
         Value.new([] of UInt64,
           (derived.views + derived.roots.map { |root| view(root) }).uniq)
-      elsif {"copy_to", "dup", "to_heap", "new"}.includes?(node.name)
+      elsif {"copy_to", "dup", "to_heap", "new"}.includes?(node.name) || concatenated
         if reference?(node)
           @root_scopes[node.object_id] = storage?(node) || {"String", "String::Span"}.includes?(type_name(node.type)) ? [] of UInt64 : @scopes.dup
           borrowed = if @text_only && node.name.in?("new", "dup") &&

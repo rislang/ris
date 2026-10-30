@@ -1,11 +1,13 @@
-# A proc handed an object none of whose methods shrink anything: a view
-# of its text stays valid across the call (the shrink check passes; the
-# proc's retain contract is still unproved and refuses it).
+# A proc handed an object whose methods neither shrink nor keep storage
+# (no getter hands out its text): the call needs no proof.
 class Label
-  getter name : String
   getter uses : Int32 = 0
 
   def initialize(@name : String)
+  end
+
+  def size : Int32
+    @name.bytesize
   end
 
   def use : Nil
@@ -14,10 +16,13 @@ class Label
 end
 
 def invoke(callback : Proc(Label, Nil), label : Label)
-  view = label.name
   callback.call(label)
-  puts "#{view} #{label.uses}"
+  puts "#{label.size} #{label.uses}"
 end
 
 callback = ->(label : Label) { label.use; nil }
-tape { invoke(callback, Label.new("tag")) }
+tape do
+  name = ""
+  name << "tag"
+  invoke(callback, Label.new(name))
+end
