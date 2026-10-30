@@ -238,13 +238,14 @@ first):
   Unmarked runtime and std declarations still use the migration allocation
   ABI; selected std classes opt in with @[OnTape].
 * Complete the Pool/SlicePool surface beyond the validated paths in use.
-* std heap left (2026-10-30 audit): 119 Pointer.malloc/realloc sites,
+* std heap left (2026-10-30 audit): 102 Pointer.malloc/realloc sites,
   133 to_heap copies. Ports in compress style (tape Arrays): bzip2 33,
-  xz 16, regex 12, png 5, websocket reader 5, deque 4, string_pool 4,
-  csv 3, password 4. OS buffers left are win32 or sized: file 8, user 6,
+  xz 16, png 5, deque 4, string_pool 4, csv 3, password 4. Done:
+  websocket reader and regex (gates websocket_reader, regex*). OS
+  buffers left are win32 or sized: file 8, user 6,
   process 5, system 4, dir/path/socket/udp 2 each. to_heap stores into
   plain classes: time 25, autocert 17, toml 13, xml 12, yaml 11.
-  Not compiling under ris: csv ini toml yaml xml regex string_scanner
+  Not compiling under ris: csv ini toml yaml xml
   udp mail smtp png zip tar xz netip otp debug (gc by design).
 * Sweep remaining std modules (collections, IO, errors); heap paths that
   block the default no-GC switch belong in the section above.

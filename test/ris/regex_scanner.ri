@@ -1,0 +1,23 @@
+module test/regex_scanner
+
+import std/regex::{Regex}
+import std/string_scanner::{StringScanner}
+
+# std/string_scanner reads tokens with std/regex's match_at; no heap.
+tape do
+  s = StringScanner.new("let x = 42;")
+  word = Regex.compile("[a-z]+")
+  space = Regex.compile("\\s*")
+  toks = [] of String
+  while !s.eos?
+    s.skip(space)
+    if t = s.scan(word)
+      toks << "w:#{t}"
+    elsif t = s.scan(Regex.compile("(?<n>\\d+)"))
+      toks << "n:#{t}:#{s["n"]}"
+    elsif t = s.scan(1)
+      toks << "p:#{t}"
+    end
+  end
+  puts toks.join(" ")
+end

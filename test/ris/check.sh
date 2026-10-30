@@ -953,6 +953,69 @@ rm -rf "$loops"
 
 out=$("$RIS" run test/ris/loop_words.ri 2>&1)
 if grep -qF '8101531983959975010 true false false' <<<"$out" && grep -qF "little-endian field out of range" <<<"$out"; then echo "runs     loop_words"; else echo "FAILED   loop_words: $out"; status=1; fi
+# std/websocket's frames on the caller tape, and its reader over a socket:
+# masked, fragmented, ping, a message past the read buffer, close; no heap.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/websocket.ri 2>&1)
+if [ "$?" -eq 0 ] &&
+    grep -qxF 'PASS: websocket caller tape and explicit retained copy' \
+      <<<"$out" &&
+    grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+  echo 'runs     websocket (frames on the caller tape, no heap)'
+else
+  echo "FAILED   websocket: $out"; status=1
+fi
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/websocket_reader.ri 2>&1)
+want='text hello
+binary 3 bytes, last 255
+text fragmented
+text 50000 abc..zab
+binary 50000 abc..zab
+closed
+closed
+code 1000 bye
+answer 11 138 5
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     websocket_reader (frames read on the tape, no heap)'
+else
+  echo "FAILED   websocket_reader: $out"; status=1
+fi
+# std/regex on the caller tape: groups, alternation, counts, anchors,
+# classes, no match and a long text, with nothing on the heap.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/regex.ri 2>&1)
+want='bbbc
+2026-10-30 2026 10 30 3-13
+dog,cat,bird
+a
+xababy
+oo,ooo,ooo
+true
+false
+word
+ff,0,1A,C0DE
+CD,12
+a|b|c
+HeLLo
+none
+1-2
+40000-40008
+40001
+a#b#c#
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     regex (Pike VM on tape Arrays, no heap)'
+else
+  echo "FAILED   regex: $out"; status=1
+fi
+# std/string_scanner reads tokens through std/regex.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/regex_scanner.ri 2>&1)
+want='w:let w:x p:= n:42:42 p:;
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     regex_scanner (StringScanner over Regex, no heap)'
+else
+  echo "FAILED   regex_scanner: $out"; status=1
+fi
 out=$("$RIS" run test/ris/scanner_cursor.ri 2>&1)
 if [ "$out" = '6 5 -1 12 208' ]; then echo "runs     scanner_cursor"; else echo "FAILED   scanner_cursor: $out"; status=1; fi
 out=$("$RIS" run test/ris/loop_size_twice.ri 2>&1)

@@ -69,20 +69,22 @@ import std/unicode::{Unicode}
 # leftmost start, and since every run is as long, the span is the same
 # whichever of them it was.
 class RxRuns
-  @tables : Pointer(UInt8)
+  # One 256-byte table per atom, the atoms in a row; the bytes some run
+  # starts with. Arrays on the tape, sized from the pattern up front.
+  @tables : Array(UInt8)
   @starts : Array(Int32)
   @lengths : Array(Int32)
-  @first : Pointer(UInt8)
+  @first : Array(UInt8)
   # The automaton, when the shape allows it: a mask of atoms per byte, the
   # runs' first atoms, their last atoms, and the common length; zero length
   # when it does not.
-  @masks : Pointer(UInt64)
+  @masks : Array(UInt64)
   @heads : UInt64
   @tails : UInt64
   @width : Int32
 
-  def initialize(@tables : Pointer(UInt8), @starts : Array(Int32), @lengths : Array(Int32), @first : Pointer(UInt8))
-    @masks = Pointer(UInt64).new(0_u64)
+  def initialize(@tables : Array(UInt8), @starts : Array(Int32), @lengths : Array(Int32), @first : Array(UInt8))
+    @masks = [] of UInt64
     @heads = 0_u64
     @tails = 0_u64
     @width = 0
@@ -90,14 +92,14 @@ class RxRuns
     return if @lengths.any? { |length| length != width }
     atoms = width * @lengths.size
     return if atoms > 64
-    masks = Pointer(UInt64).malloc(256_u64)
+    256.times { @masks << 0_u64 }
     atom = 0
     while atom < atoms
-      table = @tables + (atom * 256).to_i64
+      table = atom * 256
       bit = 1_u64.unsafe_shl(atom.to_u64)
       byte = 0
       while byte < 256
-        masks[byte] = masks[byte] | bit if table[byte] != 0_u8
+        @masks[byte] = @masks[byte] | bit if @tables[table + byte] != 0_u8
         byte = byte + 1
       end
       atom = atom + 1
@@ -108,7 +110,6 @@ class RxRuns
       @tails = @tails | 1_u64.unsafe_shl((a * width + width - 1).to_u64)
       a = a + 1
     end
-    @masks = masks
     @width = width
   end
 
@@ -116,10 +117,10 @@ class RxRuns
   def self.parse(pattern : String) : RxRuns?
     n = pattern.bytesize
     return nil if n == 0
-    p = pattern.to_unsafe
-    atoms_bound = n
-    tables = Pointer(UInt8).malloc((atoms_bound * 256).to_u64)
-    first = Pointer(UInt8).malloc(256_u64)
+    p = pattern
+    # An atom takes at least one byte of the pattern.
+    tables = Array(UInt8).new(n * 256, 0_u8)
+    first = Array(UInt8).new(256, 0_u8)
     starts = [] of Int32
     lengths = [] of Int32
     i = 0
@@ -128,8 +129,7 @@ class RxRuns
       start = atoms
       while i < n && p[i] != 124_u8
         b = p[i]
-        at = tables + (atoms * 256).to_i64
-        clear(at)
+        at = atoms * 256
         if b == 91_u8
           i = i + 1
           return nil if i < n && p[i] == 94_u8
@@ -145,12 +145,12 @@ class RxRuns
               return nil if high >= 128_u8
               x = c.to_i32
               while x <= high.to_i32
-                at[x] = 1_u8
+                tables[at + x] = 1_u8
                 x = x + 1
               end
               i = i + 3
             else
-              at[c.to_i32] = 1_u8
+              tables[at + c.to_i32] = 1_u8
               i = i + 1
             end
           end
@@ -160,13 +160,13 @@ class RxRuns
           return nil if i + 1 >= n
           c = p[i + 1]
           return nil if (c >= 48_u8 && c <= 57_u8) || (c >= 65_u8 && c <= 90_u8) || (c >= 97_u8 && c <= 122_u8) || c >= 128_u8
-          at[c.to_i32] = 1_u8
+          tables[at + c.to_i32] = 1_u8
           i = i + 2
         elsif b == 94_u8 || b == 36_u8 || b == 63_u8 || b == 42_u8 || b == 43_u8 || b == 46_u8 ||
               b == 40_u8 || b == 41_u8 || b == 123_u8 || b == 125_u8 || b == 93_u8
           return nil
         else
-          at[b.to_i32] = 1_u8
+          tables[at + b.to_i32] = 1_u8
           i = i + 1
         end
         atoms = atoms + 1
@@ -174,10 +174,10 @@ class RxRuns
       return nil if atoms == start
       starts << start * 256
       lengths << atoms - start
-      head = tables + (start * 256).to_i64
+      head = start * 256
       k = 0
       while k < 256
-        first[k] = 1_u8 if head[k] != 0_u8
+        first[k] = 1_u8 if tables[head + k] != 0_u8
         k = k + 1
       end
       break if i >= n
@@ -187,23 +187,15 @@ class RxRuns
     new(tables, starts, lengths, first)
   end
 
-  private def self.clear(table : Pointer(UInt8)) : Nil
-    k = 0
-    while k < 256
-      table[k] = 0_u8
-      k = k + 1
-    end
-  end
-
-  # Whether run *a* matches *src* at *i*, the text being *n* bytes.
-  private def run_at?(src : Pointer(UInt8), n : Int32, i : Int32, a : Int32) : Bool
-    length = @lengths.to_unsafe[a]
-    return false if i + length > n
-    table = @tables + @starts.to_unsafe[a].to_i64
+  # Whether run *a* matches *src* at *i*.
+  private def run_at?(src : String, i : Int32, a : Int32) : Bool
+    length = @lengths[a]
+    return false if i + length > src.bytesize
+    table = @starts[a]
     j = 0
     while j < length
-      return false if table[src[i + j].to_i32] == 0_u8
-      table = table + 256_i64
+      return false if @tables[table + src.byte_at(i + j).to_i32] == 0_u8
+      table = table + 256
       j = j + 1
     end
     true
@@ -213,15 +205,13 @@ class RxRuns
   def search(text : String, from : Int32) : {Int32, Int32}?
     return shift_and(text, from) if @width > 0
     n = text.bytesize
-    src = text.to_unsafe
-    first = @first
     alts = @starts.size
     i = from
     while i < n
-      if first[src[i].to_i32] != 0_u8
+      if @first[text.byte_at(i).to_i32] != 0_u8
         a = 0
         while a < alts
-          return {i, i + @lengths.to_unsafe[a]} if run_at?(src, n, i, a)
+          return {i, i + @lengths[a]} if run_at?(text, i, a)
           a = a + 1
         end
       end
@@ -232,14 +222,12 @@ class RxRuns
 
   private def shift_and(text : String, from : Int32) : {Int32, Int32}?
     n = text.bytesize
-    src = text.to_unsafe
-    masks = @masks
     heads = @heads
     tails = @tails
     state = 0_u64
     i = from
     while i < n
-      state = (state.unsafe_shl(1_u64) | heads) & masks[src[i].to_i32]
+      state = (state.unsafe_shl(1_u64) | heads) & @masks[text.byte_at(i).to_i32]
       return {i - @width + 1, i + 1} if state & tails != 0_u64
       i = i + 1
     end
@@ -250,13 +238,14 @@ class RxRuns
   def whole?(text : String) : Bool
     a = 0
     while a < @starts.size
-      return true if @lengths[a] == text.bytesize && run_at?(text.to_unsafe, text.bytesize, 0, a)
+      return true if @lengths[a] == text.bytesize && run_at?(text, 0, a)
       a = a + 1
     end
     false
   end
 end
 
+@[OnTape]
 pub struct Regex
   # The flags a whole pattern is compiled with, combined with `|`. The
   # numbers are the other library's, which is what lets a literal's flags
@@ -456,7 +445,7 @@ pub struct Regex
     # `String#sub` and `gsub` are given. A group that took no part is
     # empty; a name the pattern does not have panics.
     def expand(replacement : String) : String
-      src = replacement.to_unsafe
+      src = replacement
       n = replacement.bytesize
       String.build(n) do |io|
         i = 0
@@ -547,10 +536,10 @@ pub struct Regex
     String.build(text.bytesize) do |io|
       i = 0
       while i < text.bytesize
-        b = text.to_unsafe[i]
+        b = text.byte_at(i)
         j = 0
         while j < special.bytesize
-          if b == special.to_unsafe[j]
+          if b == special.byte_at(j)
             io.write_byte(92_u8)
             break
           end
@@ -660,10 +649,10 @@ pub struct Regex
       io << "/"
       i = 0
       while i < @source.bytesize
-        b = @source.to_unsafe[i]
+        b = @source.byte_at(i)
         if b == 92_u8 && i + 1 < @source.bytesize
           io.write_byte(b)
-          io.write_byte(@source.to_unsafe[i + 1])
+          io.write_byte(@source.byte_at(i + 1))
           i = i + 2
           next
         end
@@ -690,10 +679,10 @@ pub struct Regex
     operators = "\\^$.|?*+()[]{}"
     i = 0
     while i < pattern.bytesize
-      b = pattern.to_unsafe[i]
+      b = pattern.byte_at(i)
       j = 0
       while j < operators.bytesize
-        return nil if b == operators.to_unsafe[j]
+        return nil if b == operators.byte_at(j)
         j = j + 1
       end
       i = i + 1
@@ -823,11 +812,11 @@ pub struct Regex
     last = 0
     String.build(text.bytesize) do |io|
       each_span(text) do |a, b|
-        io.write(text.to_unsafe + last, a - last)
+        io << text[last, a - last]
         io << yield text[a, b - a]
         last = b
       end
-      io.write(text.to_unsafe + last, text.bytesize - last)
+      io << text[last, text.bytesize - last]
     end
   end
 
@@ -980,13 +969,13 @@ class RxNfa
 
   def class_has?(id : Int32, cp : Int32) : Bool
     if cp < 64
-      return @low.to_unsafe[id].unsafe_shr(cp.to_u64) & 1_u64 != 0_u64
+      return @low[id].unsafe_shr(cp.to_u64) & 1_u64 != 0_u64
     end
     if cp < 128
-      return @high.to_unsafe[id].unsafe_shr((cp - 64).to_u64) & 1_u64 != 0_u64
+      return @high[id].unsafe_shr((cp - 64).to_u64) & 1_u64 != 0_u64
     end
-    ranges = @ranges.to_unsafe[id]
-    data = ranges.to_unsafe
+    ranges = @ranges[id]
+    data = ranges
     low = 0
     high = ranges.size // 2
     while low < high
@@ -1047,55 +1036,54 @@ end
 # character, so every thread moves by the same one to four bytes.
 class RxRun
   @nfa : RxNfa
-  @src : Pointer(UInt8)
+  @src : String
   @n : Int32
   # Capture positions a thread carries: two per group the caller asked
   # for, and only those - a search that wants the span alone carries two
   # and passes over the other groups' saves.
   @slots : Int32
-  @cur_state : Pointer(Int32)
-  @cur_caps : Pointer(Int32)
+  # The two thread lists side by side in one Array each, states and
+  # their capture positions: list `@cur` (0 or 1) is the current one,
+  # the other the next. Arrays on the tape, sized up front from the
+  # machine's states.
+  @state : Array(Int32)
+  @caps : Array(Int32)
+  @cur : Int32
   @cur_size : Int32
-  @nxt_state : Pointer(Int32)
-  @nxt_caps : Pointer(Int32)
   @nxt_size : Int32
-  @seen : Pointer(Int32)
+  @states : Int32
+  @seen : Array(Int32)
   @gen : Int32
   # The closure's own stack of the states it has still to visit, and the
   # capture positions to put back when it unwinds past a save.
-  @todo : Pointer(Int32)
-  @undo : Pointer(Int32)
+  @todo : Array(Int32)
+  @undo : Array(Int32)
   # The positions of the thread the closure is following.
-  @work : Pointer(Int32)
+  @work : Array(Int32)
   # The positions of the best match so far.
-  @best : Pointer(Int32)
+  @best : Array(Int32)
   # How many bytes the character `decode` read last took.
   @width : Int32
 
   def initialize(@nfa : RxNfa, text : String, @slots : Int32)
-    @src = text.to_unsafe
+    @src = text
     @n = text.bytesize
-    count = @nfa.count.to_u64 + 1_u64
-    @cur_state = Pointer(Int32).malloc(count)
-    @cur_caps = Pointer(Int32).malloc(count * @slots.to_u64)
+    count = @nfa.count + 1
+    @states = count
+    @state = Array(Int32).new(count * 2, 0)
+    @caps = Array(Int32).new(count * 2 * @slots, 0)
+    @cur = 0
     @cur_size = 0
-    @nxt_state = Pointer(Int32).malloc(count)
-    @nxt_caps = Pointer(Int32).malloc(count * @slots.to_u64)
     @nxt_size = 0
-    @seen = Pointer(Int32).malloc(count)
-    i = 0
-    while i < @nfa.count
-      @seen[i] = 0
-      i = i + 1
-    end
+    @seen = Array(Int32).new(count, 0)
     @gen = 0
     # A closure takes each state once and pushes at most two entries for
     # it - its two outs, or a save's out and the position to put back - so
     # twice the states bound its stack.
-    @todo = Pointer(Int32).malloc(count * 2_u64)
-    @undo = Pointer(Int32).malloc(count * 2_u64)
-    @work = Pointer(Int32).malloc(@slots.to_u64)
-    @best = Pointer(Int32).malloc(@slots.to_u64)
+    @todo = Array(Int32).new(count * 2, 0)
+    @undo = Array(Int32).new(count * 2, 0)
+    @work = Array(Int32).new(@slots, 0)
+    @best = Array(Int32).new(@slots, 0)
     @width = 1
   end
 
@@ -1136,11 +1124,11 @@ class RxRun
       end
       i = 0
       while i < @cur_size
-        s = @cur_state[i]
+        s = @state[@cur * @states + i]
         k = @nfa.kind[s]
-        caps = @cur_caps + (i * @slots).to_i64
+        caps = (@cur * @states + i) * @slots
         if k == RxNfa::MATCH
-          if whole ? pos == @n : !(pos == forbid && caps[0] == forbid)
+          if whole ? pos == @n : !(pos == forbid && @caps[caps] == forbid)
             keep(caps, pos)
             matched = true
             break
@@ -1156,7 +1144,7 @@ class RxRun
                  k == RxNfa::ANY
                end
           if ok
-            @work.copy_from(caps, @slots)
+            @slots.times { |j| @work[j] = @caps[caps + j] }
             add(true, @nfa.out1[s], pos + width)
           end
         end
@@ -1169,20 +1157,16 @@ class RxRun
         add(true, @nfa.start, pos)
       end
       break if @nxt_size == 0 && (whole || anchored || matched)
-      tmp_state = @cur_state
-      @cur_state = @nxt_state
-      @nxt_state = tmp_state
-      tmp_caps = @cur_caps
-      @cur_caps = @nxt_caps
-      @nxt_caps = tmp_caps
+      @cur = 1 - @cur
       @cur_size = @nxt_size
     end
     matched
   end
 
-  # The match a thread with *caps* reached at *pos*.
-  private def keep(caps : Pointer(Int32), pos : Int32) : Nil
-    @best.copy_from(caps, @slots)
+  # The match a thread with its positions at *caps* in `@caps` reached
+  # at *pos*.
+  private def keep(caps : Int32, pos : Int32) : Nil
+    @slots.times { |j| @best[j] = @caps[caps + j] }
     @best[1] = pos
   end
 
@@ -1201,7 +1185,7 @@ class RxRun
   # without its continuations, an overlong form, a surrogate, past
   # U+10FFFF - is one U+FFFD one byte long.
   private def decode(pos : Int32) : Int32
-    lead = @src[pos].to_i32
+    lead = @src.byte_at(pos).to_i32
     @width = 1
     return lead if lead < 0x80
     width = lead < 0xC2 || lead > 0xF4 ? 1 : lead < 0xE0 ? 2 : lead < 0xF0 ? 3 : 4
@@ -1210,7 +1194,7 @@ class RxRun
     k = 1
     while k < width
       return 0xFFFD unless pos + k < @n
-      byte = @src[pos + k].to_i32
+      byte = @src.byte_at(pos + k).to_i32
       return 0xFFFD unless (byte & 0xC0) == 0x80
       point = (point << 6) | (byte & 0x3F)
       k = k + 1
@@ -1270,30 +1254,33 @@ class RxRun
                 elsif k == RxNfa::NOT_WORD_BOUNDARY
                   !boundary?(pos)
                 elsif k == RxNfa::LINE_START
-                  pos == 0 || @src[pos - 1] == 10_u8
+                  pos == 0 || @src.byte_at(pos - 1) == 10_u8
                 else
-                  pos == @n || @src[pos] == 10_u8
+                  pos == @n || @src.byte_at(pos) == 10_u8
                 end
         if holds
           todo[top] = @nfa.out1[t]
           top = top + 1
         end
-      elsif nxt
-        @nxt_state[@nxt_size] = t
-        (@nxt_caps + (@nxt_size * @slots).to_i64).copy_from(work, @slots)
-        @nxt_size = @nxt_size + 1
       else
-        @cur_state[@cur_size] = t
-        (@cur_caps + (@cur_size * @slots).to_i64).copy_from(work, @slots)
-        @cur_size = @cur_size + 1
+        side = nxt ? 1 - @cur : @cur
+        at = side * @states + (nxt ? @nxt_size : @cur_size)
+        @state[at] = t
+        base = at * @slots
+        @slots.times { |j| @caps[base + j] = work[j] }
+        if nxt
+          @nxt_size = @nxt_size + 1
+        else
+          @cur_size = @cur_size + 1
+        end
       end
     end
   end
 
   # Between an ASCII word character and anything else, as RE2's `\b` is.
   private def boundary?(pos : Int32) : Bool
-    before = pos > 0 && RxCompiler.word?(@src[pos - 1])
-    after = pos < @n && RxCompiler.word?(@src[pos])
+    before = pos > 0 && RxCompiler.word?(@src.byte_at(pos - 1))
+    after = pos < @n && RxCompiler.word?(@src.byte_at(pos))
     before != after
   end
 end
@@ -1411,7 +1398,6 @@ class RxCompiler
   # parsed, the same text with each `\Q..\E` written out as escapes.
   @shown : String
   @pat : String
-  @src : Pointer(UInt8)
   @n : Int32
   @i : Int32
   @nfa : RxNfa
@@ -1441,7 +1427,6 @@ class RxCompiler
   def initialize(pattern : String, options : Regex::Options)
     @shown = pattern
     @pat = RxCompiler.unquote(pattern)
-    @src = @pat.to_unsafe
     @n = @pat.bytesize
     @i = 0
     @nfa = RxNfa.new
@@ -1466,7 +1451,7 @@ class RxCompiler
   # does not drop the quoted spaces. A `\Q` with no `\E` runs to the end.
   def self.unquote(pattern : String) : String
     return pattern unless pattern.includes?("\\Q")
-    src = pattern.to_unsafe
+    src = pattern
     n = pattern.bytesize
     String.build(n * 2) do |io|
       i = 0
@@ -1841,7 +1826,7 @@ class RxCompiler
         name = @pat[start, @i - start]
         @i = @i + 1
       elsif m == 82_u8 || m == 40_u8 || m == 38_u8 || RxCompiler.digit?(m) ||
-            ((m == 43_u8 || m == 45_u8) && @i + 1 < @n && RxCompiler.digit?(@src[@i + 1]))
+            ((m == 43_u8 || m == 45_u8) && @i + 1 < @n && RxCompiler.digit?(byte(@i + 1)))
         # (?R (?( (?&n (?1 (?+1 (?-1: the last four were "inline flags".
         raise "regex: recursion is refused in /#{@shown}/"
       elsif m == 62_u8 # (?>
@@ -1939,7 +1924,7 @@ class RxCompiler
     if b >= 49_u8 && b <= 57_u8
       raise "regex: backreferences are refused in /#{@shown}/"
     elsif (b == 107_u8 || b == 103_u8) && @i + 1 < @n &&
-          (@src[@i + 1] == 60_u8 || @src[@i + 1] == 123_u8 || @src[@i + 1] == 39_u8 || (b == 103_u8 && (@src[@i + 1] == 45_u8 || RxCompiler.digit?(@src[@i + 1]))))
+          (byte(@i + 1) == 60_u8 || byte(@i + 1) == 123_u8 || byte(@i + 1) == 39_u8 || (b == 103_u8 && (byte(@i + 1) == 45_u8 || RxCompiler.digit?(byte(@i + 1)))))
       # \k<n> \k{n} \k'n' \g<1> \g{1} \g1 \g-1, which were "unknown escape".
       raise "regex: backreferences are refused in /#{@shown}/"
     elsif b == 98_u8 # \b
@@ -2004,12 +1989,12 @@ class RxCompiler
     negated = false
     if peek == 123_u8 # {
       close = @i + 1
-      while close < @n && @src[close] != 125_u8
+      while close < @n && byte(close) != 125_u8
         close = close + 1
       end
       raise "regex: \\p{ has no } in /#{@shown}/" if close >= @n
       from = @i + 1
-      if from < close && @src[from] == 94_u8 # ^
+      if from < close && byte(from) == 94_u8 # ^
         negated = true
         from = from + 1
       end
@@ -2108,13 +2093,13 @@ class RxCompiler
     while @i < @n && (peek != 93_u8 || first)
       first = false
       lo = class_atom(set)
-      if lo >= 0 && @i + 1 < @n && peek == 45_u8 && @src[@i + 1] != 93_u8
+      if lo >= 0 && @i + 1 < @n && peek == 45_u8 && byte(@i + 1) != 93_u8
         @i = @i + 1
         hi = class_atom(set)
         raise "regex: a class cannot end a range in /#{@shown}/" if hi < 0
         raise "regex: range out of order in /#{@shown}/" if hi < lo
         set.add(lo, hi)
-      elsif lo < 0 && @i + 1 < @n && peek == 45_u8 && @src[@i + 1] != 93_u8
+      elsif lo < 0 && @i + 1 < @n && peek == 45_u8 && byte(@i + 1) != 93_u8
         raise "regex: a class cannot start a range in /#{@shown}/"
       elsif lo >= 0
         set.add(lo, lo)
@@ -2154,13 +2139,13 @@ class RxCompiler
   # "[[:digit:]]x 5", where RE2 finds "5". As in RE2, a `[:` with no `:]`
   # after it is the character `[`, and a name RE2 does not have is refused.
   private def posix_class(set : RxSet) : Bool
-    return false unless @i + 1 < @n && peek == 91_u8 && @src[@i + 1] == 58_u8
+    return false unless @i + 1 < @n && peek == 91_u8 && byte(@i + 1) == 58_u8
     close = @i + 2
-    while close + 1 < @n && !(@src[close] == 58_u8 && @src[close + 1] == 93_u8)
+    while close + 1 < @n && !(byte(close) == 58_u8 && byte(close + 1) == 93_u8)
       close = close + 1
     end
     return false if close + 1 >= @n
-    neg = @src[@i + 2] == 94_u8
+    neg = byte(@i + 2) == 94_u8
     from = neg ? @i + 3 : @i + 2
     name = @pat[from, close - from]
     if RxCompiler.posix?(name, 0_u8).nil?
@@ -2187,7 +2172,7 @@ class RxCompiler
     point = width == 1 ? lead : lead & (0x7F >> width)
     k = 1
     while k < width
-      point = (point << 6) | (@src[@i + k].to_i32 & 0x3F)
+      point = (point << 6) | (byte(@i + k).to_i32 & 0x3F)
       k = k + 1
     end
     @i = @i + width
@@ -2237,7 +2222,13 @@ class RxCompiler
   end
 
   private def peek : UInt8
-    @src[@i]
+    byte(@i)
+  end
+
+  # The pattern's byte at *k*; 0 past its end, where the parser's
+  # lookahead reads.
+  private def byte(k : Int32) : UInt8
+    k < @n ? @pat.byte_at(k) : 0_u8
   end
 
   private def patch_outs(frag : {Int32, Array(Int32)}, target : Int32) : Nil
@@ -2284,9 +2275,9 @@ struct ::String
     head = match.byte_begin(0)
     tail = match.byte_end(0)
     String.build(bytesize) do |io|
-      io.write(to_unsafe, head)
+      io << self[0, head]
       io << yield match[0], match
-      io.write(to_unsafe + tail, bytesize - tail)
+      io << self[tail, bytesize - tail]
     end
   end
 
@@ -2300,11 +2291,11 @@ struct ::String
     String.build(bytesize) do |io|
       pattern.each_match(self) do |match|
         head = match.byte_begin(0)
-        io.write(to_unsafe + last, head - last)
+        io << self[last, head - last]
         io << yield match[0], match
         last = match.byte_end(0)
       end
-      io.write(to_unsafe + last, bytesize - last)
+      io << self[last, bytesize - last]
     end
   end
 

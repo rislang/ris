@@ -262,11 +262,9 @@ pub class StringScanner
   private def here(pattern : String) : Bool
     n = pattern.bytesize
     return forget if @offset + n > @string.bytesize
-    src = @string.to_unsafe + @offset
-    want = pattern.to_unsafe
     i = 0
     while i < n
-      return forget if src[i] != want[i]
+      return forget if @string.byte_at(@offset + i) != pattern.byte_at(i)
       i = i + 1
     end
     remember(@offset, @offset + n, nil)
@@ -324,15 +322,15 @@ pub class StringScanner
   # reads it: a byte that begins no well-formed character is one U+FFFD
   # one byte long.
   private def width_at(at : Int32) : Int32
-    p = @string.to_unsafe
-    lead = p[at].to_i32
+    p = @string
+    lead = p.byte_at(at).to_i32
     return 1 if lead < 0xC2 || lead > 0xF4
     width = lead < 0xE0 ? 2 : lead < 0xF0 ? 3 : 4
     point = lead & (0x7F >> width)
     k = 1
     while k < width
       return 1 unless at + k < @string.bytesize
-      byte = p[at + k].to_i32
+      byte = p.byte_at(at + k).to_i32
       return 1 unless (byte & 0xC0) == 0x80
       point = (point << 6) | (byte & 0x3F)
       k = k + 1
@@ -347,10 +345,10 @@ pub class StringScanner
   # character long enough to cover it.
   private def boundary?(at : Int32) : Bool
     return true if at <= 0 || at >= @string.bytesize
-    p = @string.to_unsafe
+    p = @string
     k = 0
     while k <= 3 && at - k >= 0
-      b = p[at - k]
+      b = p.byte_at(at - k)
       return k == 0 || width_at(at - k) <= k if b < 0x80_u8 || b >= 0xC0_u8
       k = k + 1
     end

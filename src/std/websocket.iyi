@@ -286,15 +286,16 @@ pub class WebSocket
   @socket : IyiSocket | TlsStream
   @client : Bool
   @max_message : Int32
-  @in : Pointer(UInt8)
+  # The read buffer, its room taken up front on the tape: the bytes from
+  # @in_start to @in_stop are read and not yet taken.
+  @in : Array(UInt8)
   @in_room : Int32
   @in_start : Int32
   @in_stop : Int32
   # The fragments of a message so far: its bytes, how many, and its
-  # opcode (OP_TEXT or OP_BINARY; 0 between messages).
-  @parts : Pointer(UInt8)
-  @parts_room : Int32
-  @parts_size : Int32
+  # opcode (OP_TEXT or OP_BINARY; 0 between messages). The Array is on
+  # the tape and refilled with `clear` for each message.
+  @parts : Array(UInt8)
   @parts_op : Int32
   # The UTF-8 check's state between a text message's fragments.
   @utf8 : Int32
@@ -314,13 +315,11 @@ pub class WebSocket
   def initialize(@socket : IyiSocket | TlsStream, leftover : String, @client : Bool, @protocol : String? = nil, @max_message : Int32 = MAX_MESSAGE, @deflate : PerMessageDeflate? = nil)
     raise "WebSocket: max_message is a count of bytes, not #{@max_message}" if @max_message < 0
     @in_room = leftover.bytesize > ROOM ? leftover.bytesize : ROOM
-    @in = Pointer(UInt8).malloc(@in_room.to_u64)
-    @in.copy_from(leftover.to_unsafe, leftover.bytesize)
+    @in = Array(UInt8).new(@in_room, 0_u8)
+    leftover.bytesize.times { |i| @in[i] = leftover.byte_at(i) }
     @in_start = 0
     @in_stop = leftover.bytesize
-    @parts = Pointer(UInt8).malloc(16_u64)
-    @parts_room = 0
-    @parts_size = 0
+    @parts = Array(UInt8).new(16)
     @parts_op = 0
     @parts_compressed = false
     @utf8 = 0
@@ -716,7 +715,7 @@ pub class WebSocket
 
   # *text* as one text message. It must be UTF-8.
   def send(text : String) : Nil | Cancelled | SocketError | WebSocketError
-    raise "WebSocket: send's text is not UTF-8; send_binary sends bytes" unless WebSocket.utf8_scan(text.to_unsafe, text.bytesize, 0) == 0
+    raise "WebSocket: send's text is not UTF-8; send_binary sends bytes" unless WebSocket.utf8_scan(text, 0, text.bytesize, 0) == 0
     write_frame(OP_TEXT, text)
   end
 
@@ -762,7 +761,7 @@ pub class WebSocket
   def close(code : Int32 = 1000, reason : String = "") : Nil | Cancelled | SocketError | WebSocketError
     raise "WebSocket: close code #{code} is not one an endpoint sends: 1000-1003, 1007-1014 or 3000-4999" unless WebSocket.close_code?(code)
     raise "WebSocket: a close reason is at most 123 bytes, not #{reason.bytesize}" if reason.bytesize > 123
-    raise "WebSocket: the close reason is not UTF-8" unless WebSocket.utf8_scan(reason.to_unsafe, reason.bytesize, 0) == 0
+    raise "WebSocket: the close reason is not UTF-8" unless WebSocket.utf8_scan(reason, 0, reason.bytesize, 0) == 0
     return nil if @socket.closed?
     unless @sent_close
       @sent_close = true
@@ -802,10 +801,10 @@ pub class WebSocket
   end
 
   protected def self.close_payload(code : Int32, reason : String) : String
-    String.new(2 + reason.bytesize) do |dst|
-      dst[0] = (code >> 8).to_u8
-      dst[1] = (code & 255).to_u8
-      (dst + 2).copy_from(reason.to_unsafe, reason.bytesize)
+    String.build(2 + reason.bytesize) do |w|
+      w.push((code >> 8).to_u8)
+      w.push((code & 255).to_u8)
+      w << reason
     end
   end
 
@@ -904,7 +903,7 @@ pub class WebSocket
     terms = @deflate
     # The empty message: the empty stored block's three bits, padded
     # (§7.2.3.6).
-    return String.new(1) { |dst| dst[0] = 0_u8 } if terms.nil? || data.bytesize == 0
+    return String.build(1) { |w| w.push(0_u8) } if terms.nil? || data.bytesize == 0
     fresh = @client ? terms.client_no_context_takeover : terms.server_no_context_takeover
     deflater = @deflater
     if deflater.nil? || fresh
@@ -914,11 +913,10 @@ pub class WebSocket
     pieces = [] of String
     size = 0
     at = 0
-    src = data.to_unsafe
     while at < data.bytesize
       k = data.bytesize - at
       k = DEFLATE_SLICE if k > DEFLATE_SLICE
-      slice = k == data.bytesize ? data : String.new(k) { |dst| dst.copy_from(src + at, k) }
+      slice = k == data.bytesize ? data : data[at, k]
       piece = deflater.compress(slice)
       pieces << piece
       size = size + piece.bytesize
@@ -926,42 +924,40 @@ pub class WebSocket
     end
     # Every piece ends in 00 00 ff ff; the last one's is left off.
     size = size - 4
-    String.new(size) do |dst|
+    String.build(size) do |w|
       done = 0
       pieces.each do |piece|
         k = piece.bytesize
         k = size - done if k > size - done
-        (dst + done).copy_from(piece.to_unsafe, k)
+        w << piece[0, k]
         done = done + k
       end
     end
   end
 
-  # *count* bytes at *p* XORed with *key*'s four bytes in turn, from the
-  # first (§5.3): eight bytes a time, then one.
-  protected def self.mask(p : Pointer(UInt8), count : Int32, key : UInt32) : Nil
+  # *count* bytes of *bytes* from *at* XORed with *key*'s four bytes in
+  # turn, from its lowest (§5.3).
+  protected def self.mask(bytes : Array(UInt8), at : Int32, count : Int32, key : UInt32) : Nil
     return if key == 0_u32
-    # The key's bytes twice over, in memory order either way round.
-    word = key.to_u64 | key.to_u64.unsafe_shl(32)
     i = 0
-    while i + 8 <= count
-      (p + i).as(UInt64*).value = (p + i).as(UInt64*).value ^ word
-      i = i + 8
-    end
-    k32 = key
-    k = pointerof(k32).as(UInt8*)
     while i < count
-      p[i] = p[i] ^ k[i & 3]
+      bytes[at + i] = bytes[at + i] ^ ((key >> ((i & 3) * 8)) & 255_u32).to_u8
       i = i + 1
     end
   end
 
-  # The UTF-8 check's state after the *count* bytes at *p*, from *state*:
+  # *count* bytes of *bytes* from *at* as a String on the caller's tape.
+  protected def self.text(bytes : Array(UInt8), at : Int32, count : Int32) : String
+    String.build(count) { |w| count.times { |i| w.push(bytes[at + i]) } }
+  end
+
+  # The UTF-8 check's state after the *count* bytes of *src* (a String
+  # or an Array(UInt8)) from *at*, from *state*:
   # 0 between characters; the continuation bytes still owed and the range
   # the next must fall in (§3 of RFC 3629: no overlong forms, no
   # surrogates, nothing past U+10FFFF) packed into one number otherwise;
   # -1 once a byte is wrong. A text message is whole when it ends at 0.
-  protected def self.utf8_scan(p : Pointer(UInt8), count : Int32, state : Int32) : Int32
+  protected def self.utf8_scan(src, at : Int32, count : Int32, state : Int32) : Int32
     return -1 if state < 0
     need = state & 255
     low = (state >> 8) & 255
@@ -969,12 +965,7 @@ pub class WebSocket
     i = 0
     while i < count
       if need == 0
-        # Eight ASCII bytes a time between characters.
-        while i + 8 <= count && ((p + i).as(UInt64*).value & 0x8080808080808080_u64) == 0_u64
-          i = i + 8
-        end
-        break if i >= count
-        b = p[i].to_i32
+        b = src[at + i].to_i32
         i = i + 1
         if b < 0x80
           next
@@ -1010,7 +1001,7 @@ pub class WebSocket
           return -1
         end
       else
-        b = p[i].to_i32
+        b = src[at + i].to_i32
         i = i + 1
         return -1 if b < low || b > high
         need = need - 1
@@ -1052,21 +1043,27 @@ pub class WebSocket
     extra = short == 126 ? 2 : (short == 127 ? 8 : 0)
     head = 2 + extra + (masked ? 4 : 0)
     want(head)!
-    p = @in + @in_start
+    at = @in_start
     length = short.to_u64
     if short == 126
-      length = (p[2].to_u64 << 8) | p[3].to_u64
+      length = (@in[at + 2].to_u64 << 8) | @in[at + 3].to_u64
     elsif short == 127
-      return fail(1002, "a 64-bit length with its high bit set") if (p[2] & 128_u8) != 0_u8
+      return fail(1002, "a 64-bit length with its high bit set") if (@in[at + 2] & 128_u8) != 0_u8
       length = 0_u64
       j = 2
       while j < 10
-        length = length.unsafe_shl(8) | p[j].to_u64
+        length = length.unsafe_shl(8) | @in[at + j].to_u64
         j = j + 1
       end
     end
-    key = masked ? (p + (head - 4)).as(UInt32*).value : 0_u32
-    @in_start = @in_start + head
+    # The key's bytes in the order they came, the first lowest.
+    key = 0_u32
+    if masked
+      k = at + head - 4
+      key = @in[k].to_u32 | (@in[k + 1].to_u32 << 8) |
+        (@in[k + 2].to_u32 << 16) | (@in[k + 3].to_u32 << 24)
+    end
+    @in_start = at + head
     return control_frame(opcode, length.to_i32, key) if control
     if opcode == OP_CONTINUATION
       return fail(1002, "a continuation frame with no message to continue") if @parts_op == 0
@@ -1076,48 +1073,41 @@ pub class WebSocket
     end
     kind = opcode == OP_CONTINUATION ? @parts_op : opcode
     compressed = opcode == OP_CONTINUATION ? @parts_compressed : rsv1
-    total = @parts_size.to_u64 + length
+    total = @parts.size.to_u64 + length
     # Refused on the length the frame declares, before a byte of it is
     # read or anything is made to hold it. A compressed message's bytes
     # are held to the limit as they come, and again as they inflate.
     return fail(1009, "a message past the #{@max_message} bytes this end takes") if total > @max_message.to_u64
     n = length.to_i32
     if opcode != OP_CONTINUATION && fin
-      # A message in one frame, read straight into the string it is.
-      failed = nil.as(Cancelled | SocketError | WebSocketError | Nil)
-      data = String.new(n) { |dst| failed = take_into(dst, n, key) }
-      if fault = failed
-        return fault
-      end
+      # A message in one frame: its bytes through the fragments' room,
+      # which is empty between messages, into the string it is.
+      take_into(n, key)!
+      data = WebSocket.text(@parts, 0, n)
+      @parts.clear
       if compressed
         got = inflated(data)
         return got if got.is_a?(WebSocketError)
         data = got
       end
-      if kind == OP_TEXT && WebSocket.utf8_scan(data.to_unsafe, data.bytesize, 0) != 0
+      if kind == OP_TEXT && WebSocket.utf8_scan(data, 0, data.bytesize, 0) != 0
         return fail(1007, "a text message that is not UTF-8")
       end
       return Message.new(data, kind == OP_BINARY)
     end
-    make_room(total.to_i32)
-    take_into(@parts + @parts_size, n, key)!
+    from = @parts.size
+    take_into(n, key)!
     # A compressed message's text is checked once it is inflated.
     if kind == OP_TEXT && !compressed
-      @utf8 = WebSocket.utf8_scan(@parts + @parts_size, n, @utf8)
+      @utf8 = WebSocket.utf8_scan(@parts, from, n, @utf8)
       return fail(1007, "a text message that is not UTF-8") if @utf8 < 0
     end
-    @parts_size = total.to_i32
     @parts_op = kind
     @parts_compressed = compressed
     return true unless fin
     return fail(1007, "a text message that ends inside a character") if kind == OP_TEXT && @utf8 != 0
-    size = @parts_size
-    parts = @parts
-    data = String.new(size) { |dst| dst.copy_from(parts, size) }
-    # The room a large message took is not kept past it.
-    @parts = Pointer(UInt8).malloc(16_u64)
-    @parts_room = 0
-    @parts_size = 0
+    data = WebSocket.text(@parts, 0, @parts.size)
+    @parts.clear
     @parts_op = 0
     @parts_compressed = false
     @utf8 = 0
@@ -1125,7 +1115,7 @@ pub class WebSocket
       got = inflated(data)
       return got if got.is_a?(WebSocketError)
       data = got
-      return fail(1007, "a text message that is not UTF-8") if kind == OP_TEXT && WebSocket.utf8_scan(data.to_unsafe, data.bytesize, 0) != 0
+      return fail(1007, "a text message that is not UTF-8") if kind == OP_TEXT && WebSocket.utf8_scan(data, 0, data.bytesize, 0) != 0
     end
     Message.new(data, kind == OP_BINARY)
   end
@@ -1146,12 +1136,12 @@ pub class WebSocket
       inflater = Inflater.flushed
       @inflater = inflater
     end
-    tailed = String.new(wire.bytesize + 4) do |dst|
-      dst.copy_from(wire.to_unsafe, wire.bytesize)
-      dst[wire.bytesize] = 0_u8
-      dst[wire.bytesize + 1] = 0_u8
-      dst[wire.bytesize + 2] = 255_u8
-      dst[wire.bytesize + 3] = 255_u8
+    tailed = String.build(wire.bytesize + 4) do |w|
+      w << wire
+      w.push(0_u8)
+      w.push(0_u8)
+      w.push(255_u8)
+      w.push(255_u8)
     end
     got = inflater.inflate(tailed, @max_message)
     case got
@@ -1164,27 +1154,13 @@ pub class WebSocket
     end
   end
 
-  # Room in the fragments for *total* bytes, which is within the limit.
-  private def make_room(total : Int32) : Nil
-    return if total <= @parts_room
-    room = @parts_room.to_i64 * 2
-    room = total.to_i64 if room < total.to_i64
-    room = @max_message.to_i64 if room > @max_message.to_i64
-    if @parts_room == 0
-      @parts = Pointer(UInt8).malloc(room.to_u64)
-    else
-      @parts = @parts.realloc(room.to_u64)
-    end
-    @parts_room = room.to_i32
-  end
-
   # A ping, pong or close of *count* bytes, which are 125 at most.
   private def control_frame(opcode : Int32, count : Int32, key : UInt32) : Bool | Cancelled | SocketError | WebSocketError
     want(count)!
-    start = @in + @in_start
-    payload = String.new(count) { |dst| dst.copy_from(start, count) }
-    @in_start = @in_start + count
-    WebSocket.mask(payload.to_unsafe, count, key)
+    at = @in_start
+    WebSocket.mask(@in, at, count, key)
+    payload = WebSocket.text(@in, at, count)
+    @in_start = at + count
     if opcode == OP_PING
       write_frame(OP_PONG, payload)! unless @sent_close
       return true
@@ -1194,10 +1170,10 @@ pub class WebSocket
     reason = ""
     return fail(1002, "a close frame of one byte; a code is two") if count == 1
     if count >= 2
-      code = (payload.to_unsafe[0].to_i32 << 8) | payload.to_unsafe[1].to_i32
+      code = (payload.byte_at(0).to_i32 << 8) | payload.byte_at(1).to_i32
       return fail(1002, "close code #{code} is not one a peer sends") unless WebSocket.close_code?(code)
       reason = payload[2, count - 2]
-      return fail(1007, "a close reason that is not UTF-8") unless WebSocket.utf8_scan(reason.to_unsafe, reason.bytesize, 0) == 0
+      return fail(1007, "a close reason that is not UTF-8") unless WebSocket.utf8_scan(reason, 0, reason.bytesize, 0) == 0
     end
     @close_code = code
     @close_reason = reason
@@ -1229,7 +1205,7 @@ pub class WebSocket
     @socket.read_timeout_ms = ms
     drained = 0
     while drained < 1048576
-      got = @socket.read(@in, @in_room)
+      got = @socket.read(@in, 0, @in_room)
       return unless got.is_a?(Int32) && got > 0
       drained = drained + got
     end
@@ -1264,45 +1240,38 @@ pub class WebSocket
       if @in_start > 0
         # Down, front to back: no byte is written before it is read.
         held = @in_stop - @in_start
-        @in.copy_from(@in + @in_start, held)
+        held.times { |i| @in[i] = @in[@in_start + i] }
         @in_start = 0
         @in_stop = held
       end
-      got = @socket.read(@in + @in_stop, @in_room - @in_stop)!
+      got = @socket.read(@in, @in_stop, @in_room - @in_stop)!
       return ended if got == 0
       @in_stop = @in_stop + got
     end
     nil
   end
 
-  # *count* bytes of payload into *dst*, unmasked with *key*: what the
-  # buffer holds, then straight from the socket, a buffer at a time while
-  # what is left is smaller than one.
-  private def take_into(dst : Pointer(UInt8), count : Int32, key : UInt32) : Nil | Cancelled | SocketError | WebSocketError
-    have = @in_stop - @in_start
-    have = count if have > count
-    dst.copy_from(@in + @in_start, have)
-    @in_start = @in_start + have
-    done = have
+  # *count* bytes of payload onto the end of the fragments, unmasked
+  # with *key*: what the read buffer holds, then a buffer at a time.
+  private def take_into(count : Int32, key : UInt32) : Nil | Cancelled | SocketError | WebSocketError
+    from = @parts.size
+    done = 0
     while done < count
-      left = count - done
-      if left >= @in_room
-        got = @socket.read(dst + done, left)!
-        return ended if got == 0
-        done = done + got
-      else
+      if @in_start == @in_stop
         @in_start = 0
         @in_stop = 0
-        got = @socket.read(@in, @in_room)!
+        got = @socket.read(@in, 0, @in_room)!
         return ended if got == 0
         @in_stop = got
-        piece = got < left ? got : left
-        (dst + done).copy_from(@in, piece)
-        @in_start = piece
-        done = done + piece
       end
+      have = @in_stop - @in_start
+      have = count - done if have > count - done
+      start = @in_start
+      have.times { |i| @parts << @in[start + i] }
+      @in_start = start + have
+      done = done + have
     end
-    WebSocket.mask(dst, count, key)
+    WebSocket.mask(@parts, from, count, key)
     nil
   end
 

@@ -759,6 +759,14 @@ pub class TlsStream
     got
   end
 
+  # Up to *count* bytes into *buffer* from *at*, as `IyiSocket#read`'s
+  # Array form: 0 once the peer closed with close_notify.
+  def read(buffer : Array(UInt8), at : Int32, count : Int32) : Int32 | Cancelled | SocketError
+    got = @tls.read(buffer, at, count)
+    return failed_read(got) if got.is_a?(TlsError)
+    got
+  end
+
   # Up to *max_bytes* as a string: "" once the peer closed with
   # close_notify. `IyiSocket#read`'s form, for a block an upgrade hands
   # either.

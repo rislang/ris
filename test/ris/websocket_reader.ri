@@ -1,0 +1,67 @@
+module test/websocket_reader
+
+import std/websocket::{WebSocket, Message, WebSocketError}
+import std/socket::{IyiSocket, SocketError}
+
+# A server's reader over a real socket: masked client frames, a message in
+# three fragments with a ping between them, a large message past the read
+# buffer, and the close handshake. The first frames come as the handshake's
+# leftover, the rest through the socket.
+
+def unfinished(frame : String) : String
+  String.build do |w|
+    w.push(frame.byte_at(0) & 127_u8)
+    w << frame[1, frame.bytesize - 1]
+  end
+end
+
+def show(got) : Nil
+  case got
+  in Message
+    if got.binary? && got.data.bytesize < 40
+      puts "binary #{got.data.bytesize} bytes, last #{got.data.byte_at(got.data.bytesize - 1)}"
+    elsif got.data.bytesize > 40
+      puts "#{got.binary? ? "binary" : "text"} #{got.data.bytesize} #{got.data[0, 3]}..#{got.data[got.data.bytesize - 3, 3]}"
+    else
+      puts "#{got.binary? ? "binary" : "text"} #{got.data}"
+    end
+  in Nil
+    puts "closed"
+  in Cancelled
+    puts "cancelled"
+  in SocketError
+    puts "socket error"
+  in WebSocketError
+    puts "error #{got.code} #{got.reason}"
+  end
+end
+
+tape do
+  server = IyiSocket.listen("127.0.0.1", 0)
+  peer = IyiSocket.connect("127.0.0.1", server.local_port)
+  peer = peer.as(IyiSocket)
+  conn = server.accept.as(IyiSocket)
+  key = 0x9a3c51e7_u32
+  leftover = String.build do |w|
+    WebSocket.frame("hello", w, key: key)
+    WebSocket.frame("\x00\x01\xff", w, WebSocket::OP_BINARY, key)
+    w << unfinished(WebSocket.frame("frag", key: key))
+  end
+  ws = WebSocket.new(conn, leftover, false)
+  peer.write(WebSocket.frame("ping!", WebSocket::OP_PING, key))
+  peer.write(unfinished(WebSocket.frame("men", WebSocket::OP_CONTINUATION, key)))
+  peer.write(WebSocket.frame("ted", WebSocket::OP_CONTINUATION, key))
+  big = String.build { |w| 50000.times { |i| w.push((97 + i % 26).to_u8) } }
+  peer.write(WebSocket.frame(big, key: key))
+  half = big[0, 30000]
+  peer.write(unfinished(WebSocket.frame(half, WebSocket::OP_BINARY, key)))
+  peer.write(WebSocket.frame(big[30000, 20000], WebSocket::OP_CONTINUATION, key))
+  peer.write(WebSocket.frame("\x03\xe8bye", WebSocket::OP_CLOSE, key))
+  6.times { show(ws.receive) }
+  show(ws.receive)
+  puts "code #{ws.close_code} #{ws.close_reason}"
+  pong = peer.read(64)
+  if pong.is_a?(String)
+    puts "answer #{pong.bytesize} #{pong.byte_at(0)} #{pong.byte_at(1)}"
+  end
+end

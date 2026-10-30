@@ -1,0 +1,41 @@
+module test/regex_tape
+
+import std/regex::{Regex}
+
+# std/regex on the caller's tape: matches, groups, alternation,
+# repetition, anchors, classes, no match and a long input; no heap.
+
+def span(m) : String
+  if m
+    "#{m.byte_begin}-#{m.byte_end}"
+  else
+    "none"
+  end
+end
+
+tape do
+  puts Regex.compile("b+c").find("aabbbcd") || "none"
+  date = Regex.compile("(\\d{4})-(\\d\\d)-(?<day>\\d\\d)")
+  if m = date.match("on 2026-10-30.")
+    puts "#{m[0]} #{m[1]} #{m[2]} #{m["day"]} #{span(m)}"
+  end
+  puts Regex.compile("cat|dog|bird").scan("a dog, a cat, a bird").join(",")
+  puts Regex.compile("a|ab").find("ab") || "none"
+  puts Regex.compile("x(ab)*?y").find("--xababy--") || "none"
+  puts Regex.compile("o{2,3}").scan("o oo ooo oooo").join(",")
+  puts Regex.compile("^abc$").match?("abc")
+  puts Regex.compile("^abc$").match?("abcd")
+  puts Regex.compile("\\bend\\b").find("bend end ending") ? "word" : "none"
+  puts Regex.compile("[A-Fa-f0-9]+").scan("ff 0x1A zz C0DE").join(",")
+  puts Regex.compile("[^a-z ]+").scan("ab CD ef 12").join(",")
+  puts Regex.compile("\\s+").split("a  b\tc").join("|")
+  puts Regex.compile("hello", Regex::Options::IGNORE_CASE).find("Say HeLLo") || "none"
+  puts Regex.compile("q[0-9]").find("no digits here") || "none"
+  puts span(Regex.compile("(z)?y").match("xy"))
+  long = String.build { |w| 20000.times { w << "ab" }; w << "needle42" }
+  puts span(Regex.compile("needle(\\d+)").match(long))
+  if hay = Regex.compile("(a|b)*n").find(long)
+    puts hay.bytesize
+  end
+  puts Regex.compile("\\d+").replace("a1b22c333", "#")
+end
