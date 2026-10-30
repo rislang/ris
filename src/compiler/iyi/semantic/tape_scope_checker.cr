@@ -78,7 +78,18 @@ class Iyi::TapeScopeChecker
 
   getter graph : TapeCallGraph
 
-  def initialize(@program : Program, @graph : TapeCallGraph)
+  # The explicit `tape` blocks TapeShrinkChecker walked and could prove:
+  # it refuses storing their data anywhere that outlives them (TAPE_SPEC
+  # 3.2) and saw no call grow or opaquely keep outer storage in them.
+  @proved = Set(UInt64).new
+
+  def initialize(@program : Program, @graph : TapeCallGraph,
+                 walked = Set(UInt64).new, tainted = Set(UInt64).new)
+    @proved = walked - tainted
+  end
+
+  def proved?(block : Block) : Bool
+    @proved.includes?(block.object_id)
   end
 
   @seen = Set(UInt64).new
@@ -196,8 +207,9 @@ class Iyi::TapeScopeChecker
 
   # Whether *body*, inside *scope*, keeps nothing it puts on the tape.
   def safe?(body : ASTNode, value_type : Type?, scope : ASTNode, owner_tape : Bool,
-            params : Array(String), block_args : Array(String)) : Bool
-    return false if owner_tape
+            params : Array(String), block_args : Array(String),
+            proved = false) : Bool
+    return false if owner_tape && !proved
     return false if tape?(value_type)
     outside = Hash(String, Int32).new(0)
     scope.accept(Counter.new(outside))
@@ -221,7 +233,7 @@ class Iyi::TapeScopeChecker
       end
       statement.accept(Counter.new(Hash(String, Int32).new(0)).tap { |c| c.names = seen })
     end
-    scan = Scan.new(self, inner)
+    scan = Scan.new(self, inner, proved)
     body.accept(scan)
     scan.safe
   end
@@ -259,10 +271,15 @@ class Iyi::TapeScopeChecker
   class Scan < Visitor
     getter safe = true
 
-    def initialize(@checker : TapeScopeChecker, @inner : Set(String))
+    # *proved*: an explicit `tape` block whose calls TapeShrinkChecker
+    # proved keep and grow nothing from outside it, so an outer tape value
+    # may be read or handed to a call.
+    def initialize(@checker : TapeScopeChecker, @inner : Set(String),
+                   @proved = false)
     end
 
     def outer_tape?(node : ASTNode) : Bool
+      return false if @proved
       node.is_a?(Var) && !@inner.includes?(node.name) && @checker.tape?(node.type?) &&
         !@checker.tape_string?(node.type?)
     end
@@ -281,6 +298,16 @@ class Iyi::TapeScopeChecker
 
     def visit(node : Assign)
       target = node.target
+      # A lent growing local rebound to its own text after the call
+      # (Normalizer#lend_text_arguments) stays the value it was.
+      # In a proved block, TapeShrinkChecker refuses a local from outside
+      # being bound to the block's data (TAPE_SPEC 3.2), and
+      # TapeLifetimeChecker keeps its text locals in it: any local may be
+      # assigned.
+      if @proved && target.is_a?(Var)
+        node.value.accept(self)
+        return false
+      end
       if target.is_a?(Var)
         @safe = false if !@inner.includes?(target.name) && @checker.tape?(node.value.type?)
       elsif @checker.tape?(node.value.type?)
@@ -374,11 +401,13 @@ class Iyi::TapeScopeChecker
     end
 
     def visit(node : Block)
-      check(node.body, node.body.type?, node.args.map(&.name))
+      check(node.body, node.body.type?, node.args.map(&.name),
+        @checker.proved?(node))
       true
     end
 
-    private def check(body : ASTNode, value_type : Type?, block_args : Array(String)) : Nil
+    private def check(body : ASTNode, value_type : Type?, block_args : Array(String),
+                      proved = false) : Nil
       parts = TapeScopeChecker.parts(body)
       return unless parts
       flag, inner = parts
@@ -388,7 +417,7 @@ class Iyi::TapeScopeChecker
         flag.value = false
         return
       end
-      @checker.decide(body, flag, @checker.safe?(inner, value_type, @scope, @owner_tape, @params, block_args))
+      @checker.decide(body, flag, @checker.safe?(inner, value_type, @scope, @owner_tape, @params, block_args, proved))
     end
 
     def visit(node : Def)

@@ -1,0 +1,24 @@
+# A handler keeps a request's path in its own field: the request is made
+# in the server's per-request tape block, which ends with the request.
+import std/http::{Server, Incoming, Outgoing}
+
+@[OnTape]
+struct Handler
+  @path : String = ""
+
+  def initialize(config : Int32)
+  end
+
+  def call(req : Incoming, res : Outgoing) : Nil
+    @path = req.path
+    res.body.append("x")
+  end
+end
+
+group do |g|
+  g.spawn do
+    Server.answer("127.0.0.1", 18099, 0, Handler, max_connections: 1)
+    0
+  end
+  g.cancel_children
+end

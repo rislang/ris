@@ -85,6 +85,18 @@ class Iyi::TapeShrinkChecker
   @root_types = Hash(UInt64, Type).new
   @root_scopes = Hash(UInt64, Array(UInt64)).new
   @scopes = [] of UInt64
+  # TAPE_SPEC 3.2: the explicit `tape` blocks around the walk, innermost
+  # last, and for each fresh root the innermost one it was made in. Its
+  # storage ends with that block, so it may not be stored where the
+  # destination was declared outside it.
+  @tape_blocks = [] of UInt64
+  @root_tapes = Hash(UInt64, UInt64).new
+  @root_tape_sets = Hash(UInt64, Array(UInt64)).new
+  # Explicit `tape` blocks walked, and those whose scratch could not be
+  # proved private: a call grew or opaquely kept storage made outside the
+  # block. TapeScopeChecker resets only a walked block not tainted.
+  getter walked_tape_blocks = Set(UInt64).new
+  getter tainted_tape_blocks = Set(UInt64).new
   @checking = false
   @unproved = [] of Call
   @retains = [] of UInt64
@@ -311,7 +323,104 @@ class Iyi::TapeShrinkChecker
           node.raise "cannot store a view beyond its owner scope; " \
                      "copy it with copy_to(owner) before storing it"
         end
+        if (block = tape_of(source)) && outside?(root, block)
+          node.raise "cannot store data made in this tape block where it " \
+                     "outlives the block (TAPE_SPEC 3.2): its storage ends " \
+                     "with the block.\nCopy it with .copy_to(owner) onto the " \
+                     "destination's owner, or build it on the destination " \
+                     "(write into its String::Builder)"
+        end
       end
+    end
+  end
+
+  # The innermost explicit `tape` block *root* was made in, if any.
+  private def tape_of(root : UInt64) : UInt64?
+    declaration = root
+    while true
+      if block = @root_tapes[declaration]?
+        return block
+      end
+      parent = @parents[declaration]?
+      return nil unless parent
+      declaration = parent[0]
+    end
+  end
+
+  # Text built inside a `tape` block - an interpolation, or a call that
+  # allocates and answers a String viewing none of its inputs - is that
+  # block's storage, as an allocated Array is.
+  private def tape_text(node : ASTNode, result : Value) : Value
+    return result if @tape_blocks.empty? || !@checking
+    return result unless result.roots.empty? && result.views.empty?
+    return result unless node.type?.try { |t| type_name(t.remove_typedef) } == "String"
+    made = node.is_a?(StringInterpolation) ||
+           (node.is_a?(Call) && !node.expanded && @graph.allocates?(node))
+    return result unless made
+    @root_scopes[node.object_id] = @scopes.dup
+    @root_types[node.object_id] = node.type
+    @root_births[node.object_id] = @uses.size
+    note_fresh(node.object_id)
+    Value.new([node.object_id], result.views, result.procs, result.unknown_proc)
+  end
+
+  # A String made outside an enclosing tape block whose lazy text first
+  # grows in it takes its reservation on its home tape after the block's
+  # mark: that block keeps its tape. An Array, Hash, RisTree or builder
+  # reserves its space when it is made, so its growth takes none.
+  # Only the text pass sees lazy text: it runs this through `text_reset`,
+  # which call summaries reach too.
+  private def taint_growth(roots : Array(UInt64)) : Nil
+    return unless @checking
+    @tape_blocks.each do |block|
+      if roots.empty? || roots.any? { |r| !within?(r, block) }
+        @tainted_tape_blocks << block
+      end
+    end
+  end
+
+  private def taint_store(roots : Array(UInt64)) : Nil
+    return unless @checking && !@text_only
+    @tape_blocks.each do |block|
+      @tainted_tape_blocks << block if roots.any? { |r| outside?(r, block) }
+    end
+  end
+
+  private def note_fresh(root : UInt64) : Nil
+    if block = @tape_blocks.last?
+      @root_tapes[root] = block
+      @root_tape_sets[root] = @tape_blocks.dup
+    end
+  end
+
+  # Whether *root* is known to live outside the tape block *block*: a
+  # binding or allocation from before it, a parameter, `self` or program
+  # data. A callee's own new holder, which reaches here without any of
+  # these, is made during the call and so inside the block.
+  private def outside?(root : UInt64, block : UInt64) : Bool
+    return false if within?(root, block)
+    declaration = root
+    while true
+      return true if @root_scopes.has_key?(declaration) ||
+                     @parameter_roots.includes?(declaration) ||
+                     @global_ids.includes?(declaration)
+      parent = @parents[declaration]?
+      return false unless parent
+      declaration = parent[0]
+    end
+  end
+
+  # Whether *root* was declared or made inside the tape block *block*.
+  private def within?(root : UInt64, block : UInt64) : Bool
+    return true if root_scope(root).includes?(block)
+    declaration = root
+    while true
+      if blocks = @root_tape_sets[declaration]?
+        return blocks.includes?(block)
+      end
+      parent = @parents[declaration]?
+      return false unless parent
+      declaration = parent[0]
     end
   end
 
@@ -361,6 +470,7 @@ class Iyi::TapeShrinkChecker
 
   private def text_reset(roots : Array(UInt64), node : Call, env : Env,
                          cause : String)
+    taint_growth(roots)
     shrink(roots, node, cause)
     env.vars.each do |name, v|
       next if name == "self" || name.starts_with?("__temp_") ||
@@ -944,6 +1054,9 @@ class Iyi::TapeShrinkChecker
     @scopes << owner.object_id if owner
     @root_scopes.clear
     @root_births.clear
+    @tape_blocks.clear
+    @root_tapes.clear
+    @root_tape_sets.clear
     live = (env.vars.values + env.slots.values).flat_map(&.roots).to_set
     @root_types.select! { |root, _| live.includes?(root) }
     if @text_only && owner && (type = owner.owner?).is_a?(InstanceVarContainer)
@@ -1144,6 +1257,7 @@ class Iyi::TapeShrinkChecker
 
   def value(node : ASTNode, env : Env) : Value
     result = evaluate(node, env)
+    result = tape_text(node, result)
     if node.is_a?(Call) && link_type?(node.type?) && !result.views.empty?
       result = Value.new(result.roots,
         result.views.map(&.copy_with(index: true)), result.procs,
@@ -1252,7 +1366,9 @@ class Iyi::TapeShrinkChecker
         roots = (env["self"]? || EMPTY).roots.map { |r| field_root(r, target.name).as(UInt64) }
         # Fresh growing fields are built into their own slot. A borrowed
         # handle instead keeps the identity of the storage it aliases.
-        contents = storage?(node.value) && @graph.fresh?(node.value) ? EMPTY : v
+        fresh_field = storage?(node.value) && @graph.fresh?(node.value)
+        contents = fresh_field ? EMPTY : v
+        taint_store(roots) if fresh_field
         store(roots, contents, env, node)
       elsif target.is_a?(Var)
         if target.name.starts_with?("__")
@@ -1285,6 +1401,7 @@ class Iyi::TapeShrinkChecker
         @root_scopes[node.object_id] = storage?(node) || {"String", "String::Span"}.includes?(type_name(node.type)) ? [] of UInt64 : @scopes.dup
         @root_types[node.object_id] = node.type
         @root_births[node.object_id] = @uses.size
+        note_fresh(node.object_id)
       end
       if @text_only && node.name.in?("copy_to", "new", "dup") &&
          TapeChecker.possible_string?(node.type?)
@@ -1331,6 +1448,7 @@ class Iyi::TapeShrinkChecker
           return merge(args.first? || EMPTY, Value.new(receiver.roots,
             receiver.roots.map { |root| view(root) }))
         elsif node.name == "append"
+          taint_growth(receiver.roots)
           return Value.new(receiver.roots,
             receiver.roots.map { |root| view(root) })
         end
@@ -1469,8 +1587,24 @@ class Iyi::TapeShrinkChecker
             retained = summary.retains.flat_map { |r| translate(r, summary, actuals) }
             @retains.concat(retained)
             @unproved << node if @checking && !retained.empty?
+            # What the callee makes and answers is this call's allocation,
+            # made here: inside any tape block around the call.
+            # (Only a growing or text result: a callee that copies onto
+            # another owner, `copy_to(Program.tape)`, answers no such thing.)
+            if !@tape_blocks.empty? && (@graph.fresh?(node) ||
+               (node.type?.try { |t| type_name(t.remove_typedef) } == "String" &&
+                @graph.allocates?(node)))
+              @root_scopes[node.object_id] ||= @scopes.dup
+              note_fresh(node.object_id) unless @root_tapes.has_key?(node.object_id)
+            end
             summary.stores.each do |root, contents|
               destinations = translate(root, summary, actuals, node.object_id)
+              # A store whose contents do not reach this call - an object or
+              # storage the callee made, which is on the running tape - put
+              # into an object from outside a tape block: the block's
+              # scratch is not proved private. (A copy into an Array's own
+              # pool shows no contents either; it keeps the block's tape.)
+              taint_store(destinations) if contents.roots.empty? && contents.views.empty?
               incoming = translated(contents, summary, actuals, node.object_id)
               # A summary can write on only one branch. It cannot prove
               # that an older foreign text borrow was killed on every
@@ -1545,7 +1679,17 @@ class Iyi::TapeShrinkChecker
         @callback_chain << "#{node.name} block"
         @scopes << block.object_id
         if {"tape", "local_tape"}.includes?(node.name)
+          explicit = node.name == "tape" && !node.obj
+          proof = @unproved.size
+          if explicit
+            @tape_blocks << block.object_id
+            @walked_tape_blocks << block.object_id if @checking && !@text_only
+          end
           value(block.body, outer)
+          if explicit
+            @tape_blocks.pop
+            @tainted_tape_blocks << block.object_id if @checking && @unproved.size > proof
+          end
         else
           loop_value(block.body, outer)
         end
@@ -1589,6 +1733,8 @@ class Iyi::TapeShrinkChecker
       elsif {"copy_to", "dup", "to_heap", "new"}.includes?(node.name) || concatenated
         if reference?(node)
           @root_scopes[node.object_id] = storage?(node) || {"String", "String::Span"}.includes?(type_name(node.type)) ? [] of UInt64 : @scopes.dup
+          # copy_to and to_heap put the copy on its owner, not here.
+          note_fresh(node.object_id) unless {"copy_to", "to_heap"}.includes?(node.name)
           borrowed = if @text_only && node.name.in?("new", "dup") &&
                         type_name(node.type) != "String"
                        derived.views + derived.roots.map { |root| view(root) }

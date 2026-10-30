@@ -1,0 +1,38 @@
+# What a tape block may do with what is around it, now that its storage
+# ends with it: read outer values, grow an outer Array, and copy text out
+# with copy_to. A round that only reads and grows frees its scratch when
+# its block ends; one that hands a copy to an outer object's method keeps
+# the block's tape (the checker cannot tell that copy from the method's
+# own scratch), and is still allowed.
+class Keep
+  getter names : Array(String)
+
+  def initialize
+    @names = Array(String).new
+  end
+
+  def keep(name : String) : Nil
+    @names << name.copy_to(Program.tape)
+  end
+end
+
+counts = Array(Int32).new
+1000.times do |i|
+  tape do
+    name = "n#{i}"
+    scratch = Array(Int32).new
+    scratch << name.bytesize
+    counts << scratch[0]
+    nil
+  end
+end
+keep = Keep.new
+4.times do |i|
+  tape do
+    keep.keep("k#{i}")
+    nil
+  end
+end
+total = 0
+counts.each { |c| total += c }
+puts "#{keep.names.size} #{keep.names[3]} #{total}"

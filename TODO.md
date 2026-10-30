@@ -194,10 +194,9 @@ first):
   an `IyiGroup.new` keeps each task's slot until it ends; parallel task
   fibers are not pooled; a spawned block's captured closure data still
   takes program storage per spawn.
-* samples/ris/logline.ri compiles now but ends in "mapping failed:
-  134348800 bytes" (the per-request mapping under Server programs).
-  check.sh's heap gate stops at it, so the other heap_budget.txt rows
-  go unchecked.
+* samples/ris/logline.ri runs (18 mappings for 1,000,000 lines):
+  EntryWriter's tape block is proved and reset per line. The heap gate
+  checks every heap_budget.txt row again.
 * std's target, as Goose does it (doc/reference/goose/docs/design/
   owning_dynamic_data.md): short-lived String/Array/Hash on the caller's
   tape; long-lived state (HPACK tables, autocert cache, log sinks) in
@@ -311,20 +310,21 @@ first):
   `return` bounds its shrinks; an If with one leaving branch guards
   what follows; Host replaced while filling the table (:2627); H2
   flush clears after the write. The to_unsafe rule's stops in
-  compress.iyi and zstd.iyi are gone; http_prefork passes. Left:
-  server_groups makes a mapping per request (21003 for 20000, gate
-  <= 29); serve and logline end in "mapping failed: 134348800". Cause:
-  Server's tape_connection answers each request in a nested `tape`
-  block, which shares the connection task's tape, so nothing is freed
-  until the connection ends; each request's Arrays take a 128 MiB side
-  reservation (growing_state) chained to that tape. The scope mark that
-  would reset it stays off: the block passes outer tape values (client,
-  answerer, conn.tape_copy) to calls, and TapeScopeChecker cannot prove
-  they keep nothing. Forcing it is unsound today: an @[OnTape] handler
-  may store req.path in its field (compiles), and a store into an
-  outer object through a call inside a `tape` block is not refused
-  (TAPE_SPEC 3.2 gap). Needs a decision: refuse such stores (then the
-  mark can be on), or give each request a scope that copies out.
+  compress.iyi and zstd.iyi are gone; http_prefork, serve,
+  logline and the heap gate pass. TAPE_SPEC 3.2 is a compiler
+  rule now (TapeShrinkChecker): data made in an explicit `tape` block,
+  stored where it outlives it (a local, field or object from outside,
+  also through calls), is refused naming copy_to; tests refused/
+  tape_block_store_call, tape_block_handler_store, tape_block_reset.
+  A block TapeShrinkChecker proves (no opaque keep, no lazy text growth
+  of an outer String, no call storing what it made into an outer
+  object) gets its scope mark, so each request's scratch is freed.
+  The fast path called the one-argument parse_head and never ran; it
+  takes parse_head(bytes, 0, false) now. Left: server_groups makes 48
+  mappings, bounded (50 at 9x the requests), against a gate of 29 set
+  before every Array took a side reservation: about 38 Arrays are live
+  at once at startup. A copy into an Array's own pool, or copy_to into
+  an outer object's method, keeps the block's tape (shows no contents).
 * tls.iyi:5257: done. TlsServerConfig#identity_source is a
   TlsIdentitySource (a trait: identity_for(server_name, alpn,
   left_ms)); AutocertView implements it; a proc is refused, naming the

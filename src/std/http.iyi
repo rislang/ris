@@ -1876,7 +1876,10 @@ pub struct Server
   private def self.answered_in_place(client : IyiSocket, answerer, bytes : String) : Int32 | Bool | Nil
     result = nil.as(Int32 | Bool | Nil)
     tape do
-      head = parse_head(bytes)
+      # The three-argument form: the one-argument parse_head answers a
+      # RequestHead, never a ParsedHead, and sent every request the slow
+      # way.
+      head = parse_head(bytes, 0, false)
       return -1 if head.nil?
       if head.is_a?(ParsedHead) && !head.http10? && head.field("Transfer-Encoding").nil? && head.field("Expect").nil? &&
          HTTP.absolute_form(head.target).nil? &&
@@ -2612,19 +2615,16 @@ pub struct Server
 
   # A request's head - the text before its blank line - read and checked,
   # or why it is not one.
+  # On the caller's tape: what it answers is made here (TAPE_SPEC 3.2).
   def self.parse_head(text : String) : RequestHead | HTTPError
-    result = nil.as(RequestHead | HTTPError | Nil)
-    tape do
-      case head = parse_head(text.as_tape, 0, true)
-      in ParsedHead
-        result = request_head_view(head)
-      in HeadError
-        result = HTTPError.new(head.message.to_heap, head.status)
-      in Nil
-        result = HTTPError.new("incomplete request")
-      end
+    case head = parse_head(text.as_tape, 0, true)
+    in ParsedHead
+      request_head_view(head)
+    in HeadError
+      HTTPError.new(head.message.to_heap, head.status)
+    in Nil
+      HTTPError.new("incomplete request")
     end
-    result || HTTPError.new("incomplete request")
   end
 
   private def self.request_head_view(head : ParsedHead) : RequestHead | HTTPError

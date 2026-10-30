@@ -1,0 +1,28 @@
+# Text made in a tape block, kept by a method of an object from outside
+# it: the object outlives the block's storage (TAPE_SPEC 3.2).
+class Box
+  @last : String
+
+  def initialize
+    @last = ""
+  end
+
+  def keep(s : String) : Nil
+    @last = s
+  end
+
+  def last : String
+    @last
+  end
+end
+
+def run(b : Box, n : Int32) : Nil
+  tape do
+    t = "x#{n}y"
+    b.keep(t)
+  end
+end
+
+b = Box.new
+run(b, 5)
+puts b.last

@@ -1163,6 +1163,21 @@ else
   echo "FAILED   log_metadata: $out"; status=1
 fi
 expect log_metadata_escape 'is a variable of the code around this tape block'
+# TAPE_SPEC 3.2: a tape block's data kept by a call into an object from
+# outside it, here and through a server handler's field.
+expect tape_block_store_call 'cannot store data made in this tape block'
+expect tape_block_handler_store 'cannot store data made in this tape block'
+# What a tape block may still do; its scratch is freed when it ends.
+out=$(RIS_TAPE_STATS=1 "$RIS" run test/ris/tape_block_reset.ri 2>&1)
+code=$?
+mappings=$(sed -n \
+  's/^ris tape:.*scopes, \([0-9]*\) mappings made.*/\1/p' <<<"$out")
+if [ "$code" -eq 0 ] && grep -qxF '4 k3 3890' <<<"$out" &&
+    [ -n "$mappings" ] && [ "$mappings" -le 16 ]; then
+  echo "runs     tape_block_reset (block scratch freed)"
+else
+  echo "FAILED   tape_block_reset: $out"; status=1
+fi
 out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/log_metadata.ri 2>&1)
 if [ "$?" -eq 0 ] &&
     grep -qF 'PASS: metadata, binding and nested contexts on tape' <<<"$out"; then
