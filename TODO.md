@@ -320,10 +320,10 @@ first):
   of an outer String, no call storing what it made into an outer
   object) gets its scope mark, so each request's scratch is freed.
   The fast path called the one-argument parse_head and never ran; it
-  takes parse_head(bytes, 0, false) now. Left: server_groups makes 48
-  mappings, bounded (50 at 9x the requests), against a gate of 29 set
-  before every Array took a side reservation: about 38 Arrays are live
-  at once at startup. A copy into an Array's own pool, or copy_to into
+  takes parse_head(bytes, 0, false) now. server_groups makes 48
+  mappings, bounded (50 at 9x the requests); its gate is 64 (was 29,
+  set before every Array took a side reservation). A copy into an
+  Array's own pool, or copy_to into
   an outer object's method, keeps the block's tape (shows no contents).
 * tls.iyi:5257: done. TlsServerConfig#identity_source is a
   TlsIdentitySource (a trait: identity_for(server_name, alpn,
