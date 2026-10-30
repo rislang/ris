@@ -1001,23 +1001,21 @@ describe "Code gen: proc" do
       CODE
   end
 
+  # ris: raise is a panic, not an exception to rescue, so the closure check
+  # ends the program (exit status 1).
   it "raises if returning closure from top-level fun (#14691)" do
-    run(<<-CODE).to_b.should be_true
-      require "prelude"
+    expect_raises(Process::ExitError) do
+      run(<<-CODE)
+        require "prelude"
 
-      @[Raises]
-      fun foo(x : Int32) : -> Int32
-        -> { x }
-      end
+        @[Raises]
+        fun foo(x : Int32) : -> Int32
+          -> { x }
+        end
 
-      begin
         foo(1)
-      rescue
-        true
-      else
-        false
-      end
-      CODE
+        CODE
+    end
   end
 
   it "closures var on ->var.call (#8584)" do

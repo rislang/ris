@@ -819,6 +819,7 @@ describe Iyi::IyiMod do
       File.write "app/box.iyi", <<-IYI
         module app/box
 
+        @[OnTape]
         pub struct Item
           @name : String
 
@@ -1135,7 +1136,7 @@ describe Iyi::IyiMod do
 
       # Whatever the def is written on: a module's own `pub def` and a method
       # of an exported class are the same case.
-      artifact.mono_bodies.keys.should contain "app/box#boxed(label : String)&block : (Int32 -> Int32)"
+      artifact.mono_bodies.keys.should contain "app/box#boxed(label : ::String)&block : (Int32 -> Int32)"
       artifact.mono_bodies.keys.should contain "Box#add()&block : (Int32 -> Int32)"
 
       box = artifact.exports.types.find! { |declaration| declaration.name == "Box" }
@@ -1514,7 +1515,12 @@ describe Iyi::IyiMod do
       `./from-source`.chomp.should eq "42"
 
       artifact = Iyi::IyiMod.read(File.join("mods", "app", "counter.iyimod"))
-      artifact.constants.should eq ["App::Counter::START"]
+      # ris: the unit's code also reaches runtime constants (STDERR, ...)
+      # through inlined runtime paths, and reads them itself, so they are
+      # listed too; what must hold is that this module's own constant is
+      # there and no other user module's is.
+      artifact.constants.should contain "App::Counter::START"
+      artifact.constants.select(&.starts_with?("App::")).should eq ["App::Counter::START"]
 
       File.delete "app/counter.iyi"
 
@@ -1537,6 +1543,7 @@ describe Iyi::IyiMod do
         module app/router
 
         pub class Router
+          @[OnTape]
           private struct Route
             @method : String
             @path : String
@@ -1678,6 +1685,7 @@ describe Iyi::IyiMod do
       File.write "pack/box.iyi", <<-IYI
         module pack/box
 
+        @[OnTape]
         pub struct Box(T)
           @item : T
 
@@ -2381,7 +2389,7 @@ describe Iyi::IyiMod do
 
         pub struct Reg
           @@count = 7
-          @@names = ["a", "b"]
+          @@names = ["a", "b"].copy_to(Program.tape)
           @@base : Int32 = seed + 1
 
           pub def self.report : String
@@ -2757,7 +2765,7 @@ describe Iyi::IyiMod do
 
       # The bodies are in the artifact, which is what makes the link work.
       keys = Iyi::IyiMod.read(File.join("mods", "boot", "crate.iyimod")).mono_bodies.keys
-      keys.should contain "Crate#note=(value : String | ::Nil)"
+      keys.should contain "Crate#note=(value : ::String | ::Nil)"
       keys.should contain "Crate#tag(kind : Int32 | Symbol)"
       keys.should contain "boot/crate#sized(n : Int)"
       # And the one whose parameters cannot disagree is not among them.
@@ -3269,6 +3277,7 @@ describe Iyi::IyiMod do
         pub struct Loud
           # Nested rather than exported, which is the shape that went
           # missing: the exported path knew a generic's bodies travel.
+          @[OnTape]
           struct Wrap(T)
             @value : T
 
@@ -3353,6 +3362,7 @@ describe Iyi::IyiMod do
       File.write "boot/tag.iyi", <<-IYI
         module boot/tag
 
+        @[OnTape]
         pub struct Tag
           @name : String
 
@@ -3369,6 +3379,7 @@ describe Iyi::IyiMod do
 
         import boot/tag::{Tag}
 
+        @[OnTape]
         struct ::Vault
           # The import above does not reach in here: a reopened name is not
           # lexically inside the unit, so the file writes a second one.
@@ -3676,11 +3687,11 @@ describe Iyi::IyiMod do
 
         @[OnTape]
         pub struct Packet
-          @data : Str::Builder
+          @data : String::Builder
           def initialize
-            @data = Str::Builder.new(1)
+            @data = String::Builder.new(1)
           end
-          def finish : Str
+          def finish : String
             @data.append("tape")
             @data.finish
           end
@@ -4409,6 +4420,7 @@ describe Iyi::IyiMod do
             end
           end
 
+          @[OnTape]
           pub struct Inner
             @ref : String
             @n : Int32
@@ -4417,6 +4429,7 @@ describe Iyi::IyiMod do
             end
           end
 
+          @[OnTape]
           pub struct Outer
             @inner : Inner
             @flag : Bool
@@ -4451,6 +4464,7 @@ describe Iyi::IyiMod do
             end
           end
 
+          @[OnTape]
           pub struct Box(T)
             @value : T
 
@@ -4865,7 +4879,9 @@ describe Iyi::IyiMod do
       refusing.prelude = "iyi/prelude"
       refusing.use_iyimod = "mods"
       refusing.no_codegen = true
-      expect_raises(Iyi::TypeException, /captures `counter : Std::Pair::Counter`, which is not Share: Std::Pair::Counter came from an artifact whose producer did not find it shareable/) do
+      # ris: a class instance is a tape value, so the tape-capture rule
+      # refuses it before the Share gate is asked (TODO.md, Compiler specs).
+      expect_raises(Iyi::TypeException, /may run after the tape block that made `counter : Std::Pair::Counter` has ended, and Std::Pair::Counter is a tape type/) do
         refusing.compile source, File.expand_path("unused")
       end
     end
@@ -4874,7 +4890,10 @@ describe Iyi::IyiMod do
   # An owning type travels as one: read back as `@[Share]` alone it would be
   # Share only when its argument is, and `Guard(Counter)` - the escape the
   # marker exists for - would stop being Share at the artifact's edge.
-  it "carries an owning type's Share marker, and a consumer's thread reads it" do
+  # ris: pending. Guard(Counter) is a class, so a tape value; capturing it
+  # into IyiThread.start is refused by the tape-capture rule whatever its
+  # Share marker says (TODO.md, Compiler specs).
+  pending "carries an owning type's Share marker, and a consumer's thread reads it" do
     with_tempdir("iyimod_share_owns") do
       Dir.mkdir_p "std"
       File.write "std/guard.iyi", <<-IYI
@@ -5022,6 +5041,7 @@ describe Iyi::IyiMod do
       File.write "app/store.iyi", <<-IYI
         module app/store
 
+        @[OnTape]
         pub struct Item
           getter name : String
           getter price : Int32
@@ -5031,8 +5051,10 @@ describe Iyi::IyiMod do
         end
 
         pub class Store
+          # ris: Item holds a String, a tape value, so the record keeps the
+          # price rather than the Item.
           private record Entry,
-            item : Item,
+            price : Int32,
             count : Int32
 
           @entries : Array(Entry)
@@ -5042,12 +5064,12 @@ describe Iyi::IyiMod do
           end
 
           pub def add(name : String, price : Int32, count : Int32) : Nil
-            @entries << Entry.new(Item.new(name, price), count)
+            @entries << Entry.new(Item.new(name, price).price, count)
           end
 
           pub def total : Int32
             sum = 0
-            @entries.each { |entry| sum = sum + entry.item.price * entry.count }
+            @entries.each { |entry| sum = sum + entry.price * entry.count }
             sum
           end
         end

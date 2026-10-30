@@ -1470,8 +1470,15 @@ module Iyi
         node.value = value.args.first
       end
 
-      if program_initializer?(node.target, node) &&
-         !node.value.simple_literal?
+      # ris: an artifact's text carries a constant already lowered to
+      # `::__ris_program_init do ... end`; read back from a .iyimod it is the
+      # compiler's own initializer, not a call a user wrote.
+      if (value = node.value).is_a?(Call) && value.name == "__ris_program_init" &&
+         value.global? && value.block &&
+         node.location.try(&.filename).as?(String).try(&.ends_with?(".iyimod"))
+        value.program_initializer = true
+      elsif program_initializer?(node.target, node) &&
+            !node.value.simple_literal?
         node.value = program_initializer(node.value)
       end
       if @dead_code

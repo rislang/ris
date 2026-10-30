@@ -1014,6 +1014,9 @@ module Iyi
           usings: iyi_type_usings(program, type, filename),
           types: [] of IyiMod::TypeDecl,
           macros: macros,
+          # ris: a type declared here under a foreign name keeps its tape
+          # marker; without it the consumer refuses its String field.
+          annotations: declared_here ? iyi_read_annotations(type) : [] of String,
         )
       end
       declarations.sort_by! &.name

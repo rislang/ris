@@ -38,7 +38,7 @@ the std row. Update a row when its work starts or ends.
 | Autocert part B                       | medium   | 2-4 h     | 150-300k  |
 | Task-owned Conn buffer growth         | med-lrg  | 3-5 h     | 150-300k  |
 | Artifact String constructor contract  | small    | 1-2 h     | 50-100k   |
-| Compiler specs signal 11              | unknown  | 2 h-1 day | 100-300k  |
+| Compiler specs: the rest of the suite | large    | 1-3 days  | 300k-1M   |
 | macOS arm64 (needs a Mac to test)     | medium   | 1-2 days  | 200-400k  |
 | Windows                               | large    | days      | 500k+     |
 
@@ -340,20 +340,22 @@ first):
   runs the connection; Server.coded adds Accept-Encoding to Vary as it
   copies; the source is handed a copy of the ALPN offer.
 * Compiler specs (run with LLVM_CONFIG set to LLVM 23; without it
-  bin/crystal links the system LLVM 21): no signal 11 any more. Left:
-  compiler_spec lines 484, 522, 568 use Channel and select (port to
-  RisBoard or mark pending; the build error exits the process, so no
-  summary); proc (16 of 19 errors) and closure (5) `require "prelude"`,
-  Crystal's, which ris does not offer (switch the helper to ris's
-  prelude or mark pending); macro_methods: 7 stale heap-String
-  expectations, 2 has_inner_pointers?, 2 read_file examples whose String
-  has no fields (also codegen/class_var_spec.cr:292); iyimod: 3
-  failures, 19 errors (IyiThread x2, Str::Builder, `<<` for
-  RisTextGrowth from an artifact, App::Stack#push).
-* Reproduce spec/compiler/iyimod_spec.cr's "carries the constants a
-  module's own code reads": runtime constants appear in the constant
-  list. Determine whether the artifact or the expectation is wrong;
-  make tape-independent fixes in iyi first, or record them in UPSTREAM.md.
+  bin/crystal links the system LLVM 21). Green (2026-10-30):
+  compiler_spec, iyimod, proc, closure, macro_methods. Fixed then: the
+  closure check's raise needs an alloca block (String is a struct); an
+  artifact numbering a file-private runtime type (RisArrayPool) resolves
+  it from the runtime files; a foreign-name type keeps @[OnTape]; a
+  constant read back already lowered to `__ris_program_init` is the
+  compiler's. iyimod "carries the constants": the artifact is right, its
+  code reads runtime constants (STDERR, ARGC_UNSAFE, ...) too.
+  Pending: iyimod "carries an owning type's Share marker": a class is a
+  tape value, so the tape-capture rule refuses Guard(Counter) before the
+  Share gate; the artifact Share refusal has no spec that reaches it.
+  Left, across the suite (one file per process, 8 at a time): 58
+  failures, 427 errors in 93 files; def, if, special_vars, iyi_import,
+  tools/init and loader/msvc print no summary. Main causes: "General
+  allocation is unavailable" (79), Crystal's "prelude" requires (78), a
+  String result read without the prelude (40), missing exception types.
 * bench/concurrency_exercise.sh passes every step under `ulimit -n 8192`
   (the 2,000 idle pipes need it). Its failure proofs copy the runtime to
   <dir>/src/iyi/: the compiler knows runtime files by that path. Recheck

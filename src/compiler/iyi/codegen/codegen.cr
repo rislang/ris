@@ -2288,7 +2288,9 @@ module Iyi
 
     def create_check_proc_is_not_closure_fun(fun_name)
       in_main do
-        define_main_function(fun_name, [llvm_typer.proc_type], llvm_context.void_pointer) do |func|
+        # ris: needs_alloca, because the raise message is a String struct
+        # passed through a temporary of this function's own.
+        define_main_function(fun_name, [llvm_typer.proc_type], llvm_context.void_pointer, needs_alloca: true) do |func|
           set_internal_fun_debug_location(func, fun_name)
 
           param = func.params.first

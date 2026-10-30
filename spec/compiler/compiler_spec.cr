@@ -198,7 +198,8 @@ describe "Compiler" do
   # compiler's own answer to "which libraries does this program need", and it is
   # the same answer on every platform. The output comparison is the other half:
   # a build that dropped the collector and no longer ran is not a fix.
-  it "needs no collector by default, and links one for -Dgc_boehm" do
+  # ris: Boehm is refused (src/iyi/heap.iyi), so -Dgc_boehm must fail to build.
+  it "needs no collector by default, and refuses -Dgc_boehm" do
     with_tempdir("iyi-gc-default-link") do
       File.write "allocating.iyi", IYI_ALLOCATING_PROGRAM
       source = Iyi::Compiler::Source.new(
@@ -209,11 +210,12 @@ describe "Compiler" do
 
       collected = iyi_compiler
       collected.flags << "gc_boehm"
-      linked_libraries(collected.compile(source, File.expand_path("collected")))
-        .should contain "gc"
+      expect_raises(Iyi::CodeError, /ris programs cannot link Boehm/) do
+        collected.compile(source, File.expand_path("collected"))
+      end
 
       Process.capture(File.expand_path("uncollected"))
-        .should eq Process.capture(File.expand_path("collected"))
+        .should eq "gc-none-flag\n3\n"
     end
   end
 
@@ -287,7 +289,9 @@ describe "Compiler" do
         # darwin branch makes, asked in the only direction Linux can answer.
         symbols.should_not contain "malloc"
         symbols.should_not contain "realloc"
-        symbols.should_not contain "mmap"
+        # ris: the tape maps its own address space through libc's mmap
+        # (src/iyi/region.iyi), so mmap is among the undefined here too.
+        symbols.should contain "mmap"
       {% end %}
     end
   end
@@ -358,11 +362,12 @@ describe "Compiler" do
       with_tempdir("iyi-char-to-s") do
         # Quoted, so the interpolation below reaches iyi instead of being
         # expanded by the spec's own compiler.
+        # ris: String#[] answers the byte (UInt8); `unsafe_chr` makes the Char.
         File.write "char.iyi", <<-'IYI'
           s = "hello"
-          puts s[1]
-          puts s[1].inspect
-          puts "x#{s[4]}y"
+          puts s[1].unsafe_chr
+          puts s[1].unsafe_chr.inspect
+          puts "x#{s[4].unsafe_chr}y"
           IYI
         source = Iyi::Compiler::Source.new(
           File.expand_path("char.iyi"), File.read("char.iyi"))
@@ -392,7 +397,7 @@ describe "Compiler" do
           puts a[-4]?.inspect
 
           s = "hello"
-          puts s[-1]
+          puts s[-1].unsafe_chr
           puts s[-2, 2]
 
           puts 255.to_s(16)
@@ -629,6 +634,9 @@ describe "Compiler" do
           # LLVM 23's linker writes `_PROCEDURE_LINKAGE_TABLE_` as a local
           # marker, not a dynamic import (UPSTREAM.md).
           template << "PROCEDURE_LINKAGE_TABLE_"
+          # ris: the tape reserves its address space through libc's mmap and
+          # guards it with mprotect (src/iyi/region.iyi).
+          template.concat ["mmap", "mprotect"]
           (symbols - template).should be_empty
         end
       end

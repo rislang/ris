@@ -983,7 +983,7 @@ module Iyi
           # that walk does not reach an enum, which gets its id from the first
           # code that asks. Nothing in this program asks for
           # `Regex::MatchOptions`, so codegen numbers these itself.
-          iyi_artifact_numbered_types << lookup_type(type_node, include_private: true)
+          iyi_artifact_numbered_types << iyi_artifact_lookup_type(type_node)
         end
       rescue CodeError
         # A name this build cannot resolve. The module's own types travel with
@@ -1021,6 +1021,24 @@ module Iyi
             MESSAGE
         end
       end
+    end
+
+    # ris: a type an artifact numbers, by its printed name. The runtime keeps
+    # some of its types file-private (`private struct RisArrayPool(T)` in
+    # src/iyi/tape.iyi), so a name the program root cannot reach is looked up
+    # from each runtime file as well: an artifact's `Array(String)` numbers
+    # `Pointer(RisArrayPool(String))`.
+    private def iyi_artifact_lookup_type(type_node : ASTNode) : Type
+      lookup_type(type_node, include_private: true)
+    rescue ex : CodeError
+      file_modules.each do |filename, file_module|
+        next unless filename.includes?("src/iyi/")
+        begin
+          return file_module.lookup_type(type_node, include_private: true)
+        rescue CodeError
+        end
+      end
+      raise ex
     end
 
     # iyi: one match type, from the name its symbol carries.

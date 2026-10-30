@@ -289,7 +289,11 @@ describe "Codegen: class var" do
   end
 
   it "codegens class var with nilable reference type" do
+    # ris: String is the prelude's struct; without it the JIT has no fields
+    # to read a String result from, so this runs on ris's prelude.
     run(<<-CODE).to_string.should eq("hello")
+      require "prelude"
+
       class Foo
         @@foo : String? = nil
 
