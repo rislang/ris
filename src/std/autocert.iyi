@@ -273,7 +273,7 @@ struct AutocertFiles
       task = g.spawn do
         folder, target, bytes = image.read(Tuple(String, String, String))
         Dir.mkdir_p(folder.to_heap, 0o700) unless Dir.exists?(folder.to_heap)
-        temporary = "#{target.to_heap}.#{AutocertPem.hex(Random::Secure.random_bytes(8))}.tmp"
+        temporary = "#{target}.#{AutocertPem.hex(Random::Secure.random_bytes(8))}.tmp"
         defer File.delete(temporary) if File.exists?(temporary)
         File.open(temporary, "w", perm: 0o600) { |io| io.write(bytes.to_heap) }
         File.rename(temporary, target.to_heap)
@@ -635,7 +635,7 @@ pub class AutocertIssuer < AutocertView
     session = AcmeClient.new(@config.directory_url.to_heap, key, http: transport)
     return AutocertError.new("the CA's directory: #{session.message}") if session.is_a?(AcmeError)
     session.wait_ms = @config.wait_ms
-    contact = @config.email.empty? ? [] of String : ["mailto:#{@config.email.to_heap}"]
+    contact = @config.email.empty? ? [] of String : ["mailto:#{@config.email}"]
     account = session.register(contact, terms_agreed: @config.accept_terms)
     return AutocertError.new("the account: #{account.message}") if account.is_a?(AcmeError)
     @client = session
@@ -655,7 +655,7 @@ pub class AutocertIssuer < AutocertView
       return AutocertError.new("the order for #{name}: #{placed.message}") if placed.is_a?(AcmeError)
       proved = prove(acme, placed, name, kind.to_heap)
       return finish_order(acme, placed, name) unless proved
-      failures << "#{kind.to_heap}: #{proved.message}"
+      failures << "#{kind}: #{proved.message}"
     end
     AutocertError.new("no certificate for #{name}: #{failures.empty? ? "no challenges to offer" : failures.join("; ")}")
   end
@@ -869,7 +869,7 @@ pub struct Autocert
   private def self.record_failure(image : RisTaskConfig, detail : String) : Int32
     settings, flight_name, delay = image.read(Tuple(AutocertConfig, String, Int64))
     worker_cache = AutocertDirCache.new(settings.cache_dir.to_heap)
-    written = worker_cache.put("#{flight_name.to_heap}.error",
+    written = worker_cache.put("#{flight_name}.error",
       "#{AutocertPem.now_ms + delay}\n#{detail}")
     raise written.message if written
     1

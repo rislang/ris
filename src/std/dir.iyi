@@ -437,7 +437,8 @@ pub class Dir
       # directory a standard user may not write to, and the platform
       # keeps the question. The call always ends its answer with a
       # separator, which no other branch here does.
-      wide = Pointer(UInt16).malloc(4096_u64)
+      wide_room = uninitialized UInt16[4096]
+      wide = pointerof(wide_room).as(Pointer(UInt16))
       chars = LibKernel32.GetTempPathW(4096, wide)
       return "C:\\Windows\\Temp" if chars <= 0 || chars > 4096
       size = __iyi_utf8_size_from_wide(wide)

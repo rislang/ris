@@ -88,14 +88,16 @@ pub struct System
     {% if flag?(:linux) %}
       # struct utsname is six fields of 65 bytes, `nodename` the second;
       # the kernel NUL-terminates every one.
-      buffer = Pointer(UInt8).malloc(390_u64)
+      buffer_room = uninitialized UInt8[390]
+      buffer = pointerof(buffer_room).as(Pointer(UInt8))
       got = sys(SYS_UNAME, buffer.address.to_i64, 0_i64, 0_i64)
       raise "System.hostname: uname answered #{got}" if got != 0_i64
       c_text(buffer + 65_i64, 65)
     {% elsif flag?(:darwin) %}
       # MAXHOSTNAMELEN is 256, terminator included; a name that long is
       # truncated without one, so the last byte is kept a zero.
-      buffer = Pointer(UInt8).malloc(257_u64)
+      buffer_room = uninitialized UInt8[257]
+      buffer = pointerof(buffer_room).as(Pointer(UInt8))
       if LibC.gethostname(buffer, 256_u64) != 0
         raise "System.hostname: gethostname refused a 256-byte buffer"
       end
@@ -165,7 +167,8 @@ pub struct System
     {% else %}
       # SYSTEM_INFO is 48 bytes on x86_64; dwPageSize is the DWORD at 4,
       # read as the Int32 it is for any page size Windows has.
-      info = Pointer(Int32).malloc(12_u64)
+      info_room = uninitialized Int32[12]
+      info = pointerof(info_room).as(Pointer(Int32))
       LibC.GetSystemInfo(info.as(Void*))
       @@page_size = info[1]
     {% end %}

@@ -1008,7 +1008,7 @@ pub struct DnsMessage
         return malformed("record #{count + index + 1} runs past the message") if at + 10 > size
         if index >= authority && u16(packet, at) == DnsRecord::OPT
           return malformed("a second OPT record") if seen_opt
-          return malformed("an OPT record owned by #{owner.to_heap}, not the root") unless owner.empty?
+          return malformed("an OPT record owned by #{owner}, not the root") unless owner.empty?
           seen_opt = true
           extended_rcode = packet[at + 4].to_i32
         end

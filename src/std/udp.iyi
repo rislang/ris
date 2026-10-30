@@ -257,7 +257,8 @@ pub class UdpSocket
     check_open
     raise "negative count: #{max_bytes}" if max_bytes < 0
     buffer = Pointer(UInt8).malloc(max_bytes.to_u64)
-    addr = Pointer(UInt8).malloc(28_u64)
+    addr_room = uninitialized UInt8[28]
+    addr = pointerof(addr_room).as(Pointer(UInt8))
     count = receive_into(buffer, max_bytes, addr)
     return count if count.is_a?(Cancelled)
     bytes = Bytes.new(count)
@@ -270,7 +271,8 @@ pub class UdpSocket
   # Answers {subslice_of_received_bytes, peer_host, peer_port}.
   def receive_from(buffer : Bytes) : Tuple(Bytes, String, Int32) | Cancelled
     check_open
-    addr = Pointer(UInt8).malloc(28_u64)
+    addr_room = uninitialized UInt8[28]
+    addr = pointerof(addr_room).as(Pointer(UInt8))
     count = receive_into(buffer.to_unsafe, buffer.size, addr)
     return count if count.is_a?(Cancelled)
     host, port = UdpSocket.format_address(addr)
@@ -281,7 +283,8 @@ pub class UdpSocket
   def receive_from?(max_bytes : Int32 = 65536) : Tuple(Bytes, String, Int32)?
     raise "negative count: #{max_bytes}" if max_bytes < 0
     buffer = Pointer(UInt8).malloc(max_bytes.to_u64)
-    addr = Pointer(UInt8).malloc(28_u64)
+    addr_room = uninitialized UInt8[28]
+    addr = pointerof(addr_room).as(Pointer(UInt8))
     count = receive_now(buffer, max_bytes, addr)
     return nil if count.nil?
     bytes = Bytes.new(count)
@@ -292,7 +295,8 @@ pub class UdpSocket
 
   # Into a buffer: what is queued now, or nil. Never parks.
   def receive_from?(buffer : Bytes) : Tuple(Bytes, String, Int32)?
-    addr = Pointer(UInt8).malloc(28_u64)
+    addr_room = uninitialized UInt8[28]
+    addr = pointerof(addr_room).as(Pointer(UInt8))
     count = receive_now(buffer.to_unsafe, buffer.size, addr)
     return nil if count.nil?
     host, port = UdpSocket.format_address(addr)
@@ -359,7 +363,8 @@ pub class UdpSocket
   # Reads back the locally bound port assigned by the OS.
   def local_port : Int32
     check_open
-    addr = Pointer(UInt8).malloc(28_u64)
+    addr_room = uninitialized UInt8[28]
+    addr = pointerof(addr_room).as(Pointer(UInt8))
     len = 28_u32
     res = UdpSocket.__sys_getsockname(@fd, addr, pointerof(len))
     return 0 if res < 0 && UdpSocket.__unbound_now?
@@ -371,7 +376,8 @@ pub class UdpSocket
   # Reads back the locally bound IP address.
   def local_address : String
     check_open
-    addr = Pointer(UInt8).malloc(28_u64)
+    addr_room = uninitialized UInt8[28]
+    addr = pointerof(addr_room).as(Pointer(UInt8))
     len = 28_u32
     res = UdpSocket.__sys_getsockname(@fd, addr, pointerof(len))
     # Unbound, the family's any-address, as POSIX answers it and as
@@ -571,7 +577,8 @@ pub class UdpSocket
       kq = LibC.kqueue
       return false if kq < 0
 
-      change = Pointer(UInt8).malloc(32_u64)
+      change_room = uninitialized UInt8[32]
+      change = pointerof(change_room).as(Pointer(UInt8))
       i = 0; while i < 32
         change[i] = 0_u8; i = i + 1
       end
@@ -589,14 +596,16 @@ pub class UdpSocket
         return false
       end
 
-      event = Pointer(UInt8).malloc(32_u64)
+      event_room = uninitialized UInt8[32]
+      event = pointerof(event_room).as(Pointer(UInt8))
       i = 0; while i < 32
         event[i] = 0_u8; i = i + 1
       end
 
       sec = (timeout_ms // 1000).to_i64
       nsec = ((timeout_ms % 1000) * 1_000_000).to_i64
-      ts = Pointer(UInt8).malloc(16_u64)
+      ts_room = uninitialized UInt8[16]
+      ts = pointerof(ts_room).as(Pointer(UInt8))
       ts.as(Pointer(Int64)).value = sec
       Pointer(Int64).new(ts.address + 8_u64).value = nsec
 
@@ -762,7 +771,8 @@ pub class UdpSocket
       epfd = __sys3(SYS_EPOLL_CREATE1, 0_i64, 0_i64, 0_i64)
       return false if epfd < 0_i64
 
-      event = Pointer(UInt8).malloc(16_u64)
+      event_room = uninitialized UInt8[16]
+      event = pointerof(event_room).as(Pointer(UInt8))
       i = 0; while i < 16; event[i] = 0_u8; i = i + 1; end
       # EPOLLIN is 1
       event.as(Pointer(UInt32)).value = 1_u32
@@ -774,7 +784,8 @@ pub class UdpSocket
         return false
       end
 
-      events = Pointer(UInt8).malloc(16_u64)
+      events_room = uninitialized UInt8[16]
+      events = pointerof(events_room).as(Pointer(UInt8))
       count = __sys6(SYS_EPOLL_PWAIT, epfd, events.address.to_i64, 1_i64, timeout_ms.to_i64, 0_i64, 8_i64)
       __iyi_close(epfd)
       count > 0_i64

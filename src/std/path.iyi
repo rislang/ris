@@ -222,7 +222,8 @@ pub struct Path
         length = length + 1
       end
       upper = Pointer(UInt16).malloc((length + 1).to_u64)
-      invariant = Pointer(UInt16).malloc(1_u64)
+      invariant_room = uninitialized UInt16[1]
+      invariant = pointerof(invariant_room).as(Pointer(UInt16))
       invariant[0] = 0_u16
       nothing = Pointer(Void).new(0_u64)
       if LibKernel32.LCMapStringEx(invariant, 0x200, wide, length, upper,
@@ -252,7 +253,8 @@ pub struct Path
         length = length + 1
       end
       upper = Pointer(UInt16).malloc((length + 1).to_u64)
-      invariant = Pointer(UInt16).malloc(1_u64)
+      invariant_room = uninitialized UInt16[1]
+      invariant = pointerof(invariant_room).as(Pointer(UInt16))
       invariant[0] = 0_u16
       nothing = Pointer(Void).new(0_u64)
       if LibKernel32.LCMapStringEx(invariant, 0x200, wide, length, upper,

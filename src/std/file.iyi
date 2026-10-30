@@ -378,7 +378,8 @@ import std/path::{Path}
       if sec == 0_i64
         sys(SYS_UTIMENSAT, AT_FDCWD, path.address.to_i64, 0_i64, 0_i64).to_i32
       else
-        ts = Pointer(Int64).malloc(4_u64)
+        ts_room = uninitialized Int64[4]
+        ts = pointerof(ts_room).as(Pointer(Int64))
         ts[0] = sec
         ts[1] = 0_i64
         ts[2] = sec
@@ -857,7 +858,8 @@ class ::File
         # about `pagefile.sys`. Its directory entry carries the same
         # fields, in the same order, for its first 36 bytes.
         return nil unless refused == 32
-        entry = Pointer(UInt8).malloc(592_u64) # WIN32_FIND_DATAW
+        entry_room = uninitialized UInt8[592]
+        entry = pointerof(entry_room).as(Pointer(UInt8))
         found = Std::File::LibKernel32.FindFirstFileW(wpath, entry.as(Void*))
         return nil if found.address == 0xFFFFFFFFFFFFFFFF_u64
         Std::File::LibKernel32.FindClose(found)
@@ -893,7 +895,8 @@ class ::File
           ino = (by_handle.nFileIndexHigh.to_u64 << 32) | by_handle.nFileIndexLow.to_u64
           # FileAttributeTagInfo (9): the attributes, then the tag.
           if !follow_symlinks && (attrs & 0x400_u32) != 0_u32
-            tag_info = Pointer(UInt32).malloc(2_u64)
+            tag_info_room = uninitialized UInt32[2]
+            tag_info = pointerof(tag_info_room).as(Pointer(UInt32))
             if Std::File::LibKernel32.GetFileInformationByHandleEx(handle, 9, tag_info.as(Void*), 8_u32) != 0
               tag = tag_info[1]
             end
@@ -913,7 +916,8 @@ class ::File
       link = false
       if (attrs & 0x400_u32) != 0_u32 && !(follow_symlinks && opened)
         if !opened
-          entry = Pointer(UInt8).malloc(592_u64) # WIN32_FIND_DATAW
+          entry_room = uninitialized UInt8[592]
+          entry = pointerof(entry_room).as(Pointer(UInt8))
           found = Std::File::LibKernel32.FindFirstFileW(wpath, entry.as(Void*))
           if found.address != 0xFFFFFFFFFFFFFFFF_u64
             Std::File::LibKernel32.FindClose(found)
@@ -1129,7 +1133,8 @@ class ::File
     {% elsif flag?(:darwin) %}
       times = Pointer(Void).new(0_u64)
       if time != 0_i64
-        tv = Pointer(Int64).malloc(4_u64)
+        tv_room = uninitialized Int64[4]
+        tv = pointerof(tv_room).as(Pointer(Int64))
         tv[0] = time
         tv[1] = 0_i64
         tv[2] = time
@@ -1389,7 +1394,8 @@ class ::File
   def self.readlink(path : String | Path) : String
     p = path.to_s
     {% if flag?(:darwin) || flag?(:linux) %}
-      buf = Pointer(UInt8).malloc(4096_u64)
+      buf_room = uninitialized UInt8[4096]
+      buf = pointerof(buf_room).as(Pointer(UInt8))
       res = Std::File::LibC.readlink(sys_path(p).to_unsafe, buf, 4096_u64)
       if res <= 0_i64
         raise "Cannot readlink: #{p}"
@@ -1413,7 +1419,8 @@ class ::File
       handle = Std::File::LibKernel32.CreateFileW(wide, 0, 0x7, Pointer(Void).new(0_u64),
         3, 0x2200000, Pointer(Void).new(0_u64))
       raise "Cannot readlink: #{p}: #{win_error}" if handle.address &+ 1_u64 == 0_u64
-      buffer = Pointer(UInt8).malloc(16384_u64)
+      buffer_room = uninitialized UInt8[16384]
+      buffer = pointerof(buffer_room).as(Pointer(UInt8))
       returned = 0
       ok = Std::File::LibKernel32.DeviceIoControl(handle, 0x900A8, Pointer(Void).new(0_u64), 0,
         buffer.as(Void*), 16384, pointerof(returned),
@@ -1998,7 +2005,8 @@ class ::File
         # Windows' own answer, as `Dir.tempdir` asks it. This alone kept the
         # literal: with TMPDIR, TEMP and TMP unset, the file was made in
         # `C:\Windows\Temp` while `Dir.tempdir` answered `C:\Users\dogru`.
-        wide = Pointer(UInt16).malloc(4096_u64)
+        wide_room = uninitialized UInt16[4096]
+        wide = pointerof(wide_room).as(Pointer(UInt16))
         chars = Std::File::LibKernel32.GetTempPathW(4096, wide)
         size = chars > 0 && chars <= 4096 ? __iyi_utf8_size_from_wide(wide) : 0
         tmpdir = size > 1 ? String.new(size - 1) { |t| __iyi_utf8_bytes_from_wide(wide, t, size) } : "C:\\Windows\\Temp"

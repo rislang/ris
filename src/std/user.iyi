@@ -498,7 +498,8 @@ struct UserFiles
     def self.darwin_user(name : String?, uid : UInt32) : User?
       size = 4096
       while size <= 1048576
-        record = Pointer(UInt8).malloc(72_u64)
+        record_room = uninitialized UInt8[72]
+        record = pointerof(record_room).as(Pointer(UInt8))
         buffer = Pointer(UInt8).malloc(size.to_u64)
         result = Pointer(Void).new(0_u64)
         code = name ? LibC.getpwnam_r(name.to_unsafe, record.as(Void*), buffer, size.to_u64, pointerof(result)) : LibC.getpwuid_r(uid, record.as(Void*), buffer, size.to_u64, pointerof(result))
@@ -523,7 +524,8 @@ struct UserFiles
     def self.darwin_group(name : String?, gid : UInt32) : Group?
       size = 4096
       while size <= 1048576
-        record = Pointer(UInt8).malloc(32_u64)
+        record_room = uninitialized UInt8[32]
+        record = pointerof(record_room).as(Pointer(UInt8))
         buffer = Pointer(UInt8).malloc(size.to_u64)
         result = Pointer(Void).new(0_u64)
         code = name ? LibC.getgrnam_r(name.to_unsafe, record.as(Void*), buffer, size.to_u64, pointerof(result)) : LibC.getgrgid_r(gid, record.as(Void*), buffer, size.to_u64, pointerof(result))

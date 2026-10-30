@@ -639,7 +639,7 @@ pub struct TapeValue
 
   def [](key : TapeValue) : TapeValue
     h = as_h
-    raise "no such key #{key.to_heap.inspect}" unless h.has_key?(key)
+    raise "no such key #{key.inspect}" unless h.has_key?(key)
     h[key]
   end
 
@@ -1485,7 +1485,7 @@ struct TapeParser
         finish = tag_end(pos, @ends[@line])
         tag = tag_text(pos, finish)
         unless tag.nil? || known_tag?(tag)
-          fail("unknown tag #{tag.to_heap}", pos)
+          fail("unknown tag #{tag}", pos)
         end
         return TapeValue.new(nil) if @error
         pos = skip_blank(finish)
@@ -1709,7 +1709,7 @@ struct TapeParser
         break if @error
         finish = tag_end(text_pos, @ends[@line])
         tag = tag_text(text_pos, finish)
-        fail("unknown tag #{tag.to_heap}", text_pos) unless known_tag?(tag)
+        fail("unknown tag #{tag}", text_pos) unless known_tag?(tag)
         text_pos = skip_blank(finish)
       end
       break if @error
@@ -1857,7 +1857,7 @@ struct TapeParser
       return value
     end
     unless k == TapeValue::KIND_STRING
-      fail("#{tag.to_heap} on #{value.kind_name}", pos)
+      fail("#{tag} on #{value.kind_name}", pos)
       return value
     end
     text = value.as_s
@@ -1866,17 +1866,17 @@ struct TapeParser
     rk = resolved.kind
     if tag == "!!int"
       return resolved if rk == TapeValue::KIND_INT
-      fail("not an integer: #{text.to_heap.inspect}", pos)
+      fail("not an integer: #{text.inspect}", pos)
     elsif tag == "!!float"
       return resolved if rk == TapeValue::KIND_FLOAT
       return TapeValue.new(resolved.as_i.to_f64) if rk == TapeValue::KIND_INT
-      fail("not a float: #{text.to_heap.inspect}", pos)
+      fail("not a float: #{text.inspect}", pos)
     elsif tag == "!!bool"
       return resolved if rk == TapeValue::KIND_BOOL
-      fail("not a boolean: #{text.to_heap.inspect}", pos)
+      fail("not a boolean: #{text.inspect}", pos)
     else
       return resolved if rk == TapeValue::KIND_NIL
-      fail("not null: #{text.to_heap.inspect}", pos)
+      fail("not null: #{text.inspect}", pos)
     end
     value
   end
@@ -2132,7 +2132,7 @@ struct TapeParser
     end
     if point >= 0xD800 && point <= 0xDFFF
       written = @bytes[at, 2 + digits]
-      fail("surrogate code point #{written.to_heap} in escape", at)
+      fail("surrogate code point #{written} in escape", at)
       return at + 2
     end
     @buffer.codepoint(point)
@@ -2516,7 +2516,7 @@ struct TapeParser
         finish = tag_end(pos, @ends[@line])
         tag = tag_text(pos, finish)
         unless tag.nil? || known_tag?(tag)
-          fail("unknown tag #{tag.to_heap}", pos)
+          fail("unknown tag #{tag}", pos)
         end
         return TapeValue.new(nil) if @error
         pos = skip_flow_space(finish)
@@ -2649,12 +2649,12 @@ struct TapeParser
       return TapeValue.new(nil)
     end
     if @open_anchors.includes?(name)
-      fail("cyclic alias *#{name.to_heap}", pos)
+      fail("cyclic alias *#{name}", pos)
       return TapeValue.new(nil)
     end
     found = @anchors[name]?
     if found.nil?
-      fail("unknown anchor *#{name.to_heap}", pos)
+      fail("unknown anchor *#{name}", pos)
       return TapeValue.new(nil)
     end
     deepest = @depth + @anchor_depths[name]

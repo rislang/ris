@@ -1916,7 +1916,8 @@ pub struct IyiSocket
     # long as it takes: the blocking wait a program without the runtime
     # does. 0 when the time ran out.
     def self.__sys_poll(fd : Int32, events : Int32, ms : Int32) : Int32
-      pfd = Pointer(UInt8).malloc(8_u64)
+      pfd_room = uninitialized UInt8[8]
+      pfd = pointerof(pfd_room).as(Pointer(UInt8))
       pfd.as(Pointer(Int32)).value = fd
       pfd[4] = events.to_u8
       pfd[5] = 0_u8
@@ -2187,15 +2188,17 @@ pub struct IyiSocket
     # `ppoll` on one descriptor for *ms* milliseconds - a timespec, or none
     # for -1 - and no signal mask. 0 when the time ran out.
     def self.__sys_poll(fd : Int32, events : Int32, ms : Int32) : Int32
-      pfd = Pointer(UInt8).malloc(8_u64)
+      pfd_room = uninitialized UInt8[8]
+      pfd = pointerof(pfd_room).as(Pointer(UInt8))
       pfd.as(Pointer(Int32)).value = fd
       pfd[4] = events.to_u8
       pfd[5] = 0_u8
       pfd[6] = 0_u8
       pfd[7] = 0_u8
       spec = 0_i64
+      timespec_room = uninitialized Int64[2]
+      timespec = pointerof(timespec_room).as(Pointer(Int64))
       if ms >= 0
-        timespec = Pointer(Int64).malloc(2_u64)
         timespec[0] = (ms // 1000).to_i64
         timespec[1] = (ms % 1000).to_i64 * 1000000_i64
         spec = timespec.address.to_i64
@@ -2422,7 +2425,8 @@ pub struct IyiSocket
       return if @@winsock
       # A WSADATA is 408 bytes here and none of its fields is read; only
       # whether the call answered 0 matters.
-      data = Pointer(UInt8).malloc(512_u64)
+      data_room = uninitialized UInt8[512]
+      data = pointerof(data_room).as(Pointer(UInt8))
       raise "cannot start Winsock" if LibWs2_32.WSAStartup(0x0202_u16, data.as(Void*)) != 0
       @@winsock = true
     end
@@ -2802,7 +2806,8 @@ pub struct IyiSocket
     # socket that will use it. Fetched where it is used rather than cached:
     # it is one call, and both callers are about to do a TCP handshake.
     def self.__sys_extension(s : UInt64, low : UInt64, high : UInt64) : Pointer(UInt64)
-      guid = Pointer(UInt64).malloc(2_u64)
+      guid_room = uninitialized UInt64[2]
+      guid = pointerof(guid_room).as(Pointer(UInt64))
       guid[0] = low
       guid[1] = high
       # Two words, because that is what a Proc is: the function, and the
@@ -2959,7 +2964,8 @@ pub struct IyiSocket
     private def self.__sys_interface_servers(root : Void*, path : String, servers : Array(String), dhcp : ::Bool) : Nil
       interfaces = __sys_reg_open(root, path)
       return unless interfaces.is_a?(Pointer(Void))
-      name = Pointer(UInt16).malloc(256_u64)
+      name_room = uninitialized UInt16[256]
+      name = pointerof(name_room).as(Pointer(UInt16))
       index = 0_u32
       while true
         size = 256_u32

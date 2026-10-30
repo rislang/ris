@@ -1279,7 +1279,7 @@ struct TapeReader
       return "the control character U+#{b.to_s(16).upcase.rjust(4, '0')}"
     end
     return "'#{b.unsafe_chr}'" if b < 128_u8
-    "'#{input[at, sequence_size(b)].to_heap}'"
+    "'#{input[at, sequence_size(b)]}'"
   end
 
   private def sequence_size(b : UInt8) : Int32
@@ -1483,16 +1483,16 @@ struct TapeReader
   private def closed(slot : TapeSlot, what : String) : String
     value = slot.value
     if value.kind == TapeAny::KIND_TABLE
-      return "the inline table #{what.to_heap} is closed: no header or " \
+      return "the inline table #{what} is closed: no header or " \
              "dotted key " \
              "adds to it"
     end
     if value.kind == TapeAny::KIND_ARRAY
-      return "the array #{what.to_heap} was written as a value, which no " \
+      return "the array #{what} was written as a value, which no " \
              "header or " \
              "dotted key adds to"
     end
-    "#{what.to_heap} is #{value.kind_name}, not a table"
+    "#{what} is #{value.kind_name}, not a table"
   end
 
   # Parse into reusable scratch before descending into a value. Its slices
@@ -1559,7 +1559,7 @@ struct TapeReader
         if child.nil?
           what = name(path, parts, i + 1)
           if slot.kind == TapeSlot::TABLES
-            return fail("#{what.to_heap} is an array of tables, which " \
+            return fail("#{what} is an array of tables, which " \
                         "dotted keys " \
                         "do not add to", starts[i])
           end
@@ -1567,8 +1567,8 @@ struct TapeReader
         end
         if child.explicit
           return fail("dotted keys add to the table " \
-                      "#{name(path, parts, i + 1).to_heap}, which a " \
-                      "[#{name(path, parts, i + 1).to_heap}] header declared",
+                      "#{name(path, parts, i + 1)}, which a " \
+                      "[#{name(path, parts, i + 1)}] header declared",
             starts[i])
         end
         child.dotted = true
@@ -1578,7 +1578,7 @@ struct TapeReader
     end
     last = parts[parts.size - 1]
     unless t.slots[last]?.nil?
-      return fail("the key #{name(path, parts, parts.size).to_heap} is " \
+      return fail("the key #{name(path, parts, parts.size)} is " \
                   "defined " \
                   "twice", starts[parts.size - 1])
     end
@@ -1642,8 +1642,8 @@ struct TapeReader
           target = TapeTable.new(t.depth + 1, true, false, @slot_pool)
           list << target
         elsif slot.kind == TapeSlot::TABLE
-          return fail("[[#{whole.to_heap}]] names the table " \
-                      "#{whole.to_heap}, not an array " \
+          return fail("[[#{whole}]] names the table " \
+                      "#{whole}, not an array " \
                       "of tables", starts[parts.size - 1])
         else
           return fail(closed(slot, whole), starts[parts.size - 1])
@@ -1657,17 +1657,17 @@ struct TapeReader
         child = slot.table
         if child.nil?
           if slot.kind == TapeSlot::TABLES
-            return fail("[#{whole.to_heap}] names an array of tables, which " \
-                        "[[#{whole.to_heap}]] adds to", starts[parts.size - 1])
+            return fail("[#{whole}] names an array of tables, which " \
+                        "[[#{whole}]] adds to", starts[parts.size - 1])
           end
           return fail(closed(slot, whole), starts[parts.size - 1])
         end
         if child.explicit
-          return fail("the table [#{whole.to_heap}] is declared twice",
+          return fail("the table [#{whole}] is declared twice",
             starts[parts.size - 1])
         end
         if child.dotted
-          return fail("[#{whole.to_heap}] declares a table dotted keys made",
+          return fail("[#{whole}] declares a table dotted keys made",
             starts[parts.size - 1])
         end
         child.explicit = true
@@ -1707,7 +1707,7 @@ struct TapeReader
   private def no_equals(path : Array(String),
                         parts : Array(String) | KeySlice(String)) : TOMLError
     fail("#{found(pos)} after the key " \
-         "#{name(path, parts, parts.size).to_heap}, " \
+         "#{name(path, parts, parts.size)}, " \
          "where '=' should be", pos)
   end
 
@@ -1935,13 +1935,13 @@ struct TapeReader
        input[i + 1] == 111_u8 || input[i + 1] == 98_u8)
       radix = input[i + 1] == 120_u8 ? 16 : (input[i + 1] == 111_u8 ? 8 : 2)
       if signed
-        return fail("a sign before #{token.to_heap}, which only a decimal " \
+        return fail("a sign before #{token}, which only a decimal " \
                     "number " \
                     "may have", start)
       end
       finish = digit_run(i + 2, stop, radix)
       unless finish == stop
-        return fail("#{token.to_heap} is not a number", start)
+        return fail("#{token} is not a number", start)
       end
       value = 0_u64
       j = i + 2
@@ -1949,7 +1949,7 @@ struct TapeReader
         d = radix_digit(input[j], radix)
         if d >= 0
           if value > (9223372036854775807_u64 - d.to_u64) // radix.to_u64
-            return fail("#{token.to_heap} is past 9223372036854775807, the " \
+            return fail("#{token} is past 9223372036854775807, the " \
                         "largest " \
                         "TOML integer", start)
           end
@@ -1961,9 +1961,9 @@ struct TapeReader
       return TapeAny.new(value.to_i64)
     end
     whole = digit_run(i, stop, 10)
-    return fail("#{token.to_heap} is not a number", start) if whole < 0
+    return fail("#{token} is not a number", start) if whole < 0
     if input[i] == 48_u8 && whole > i + 1
-      return fail("#{token.to_heap} has a leading zero, which only 0 may",
+      return fail("#{token} has a leading zero, which only 0 may",
         start)
     end
     j = whole
@@ -1971,7 +1971,7 @@ struct TapeReader
     if j < stop && input[j] == 46_u8
       j = digit_run(j + 1, stop, 10)
       if j < 0
-        return fail("#{token.to_heap} needs a digit after its '.'", start)
+        return fail("#{token} needs a digit after its '.'", start)
       end
       float = true
     end
@@ -1980,11 +1980,11 @@ struct TapeReader
       j = j + 1 if j < stop && (input[j] == 43_u8 || input[j] == 45_u8)
       j = digit_run(j, stop, 10)
       if j < 0
-        return fail("#{token.to_heap} needs digits in its exponent", start)
+        return fail("#{token} needs digits in its exponent", start)
       end
       float = true
     end
-    return fail("#{token.to_heap} is not a number", start) unless j == stop
+    return fail("#{token} is not a number", start) unless j == stop
     self.pos = stop
     if float
       text = String::Builder.new
@@ -2004,7 +2004,7 @@ struct TapeReader
       unless b == 95_u8
         d = (b - 48_u8).to_u64
         if value > (limit - d) // 10_u64
-          return fail("#{token.to_heap} is outside -9223372036854775808 to " \
+          return fail("#{token} is outside -9223372036854775808 to " \
                       "9223372036854775807, the TOML integers", start)
         end
         value = value * 10_u64 + d
@@ -2183,7 +2183,7 @@ struct TapeReader
       end
       if (point >= 0xD800 && point <= 0xDFFF) || point > 0x10FFFF
         shown = input[pos + 2, count]
-        return fail("\\#{e.unsafe_chr}#{shown.to_heap} is not a Unicode " \
+        return fail("\\#{e.unsafe_chr}#{shown} is not a Unicode " \
                     "scalar value", pos)
       end
       write_codepoint(text, point.to_i32)

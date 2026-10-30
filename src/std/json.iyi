@@ -2975,7 +2975,7 @@ pub struct DocumentParser
     when TokenKind::EOF         then "end of input"
     when TokenKind::String      then "string"
     when TokenKind::Int, TokenKind::Float
-      "number #{text(token.raw_start, token.raw_size).to_heap}"
+      "number #{text(token.raw_start, token.raw_size)}"
     else "value"
     end
   end

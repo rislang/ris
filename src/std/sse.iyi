@@ -352,14 +352,14 @@ pub struct SSE
       utf8(kind, "an event type")
       if breaks?(kind)
         raise "SSE: an event type cannot hold a line break: " \
-              "#{kind.to_heap.inspect}"
+              "#{kind.inspect}"
       end
     end
     if mark = id
       utf8(mark, "an id")
       if breaks?(mark) || mark.includes?('\0')
         raise "SSE: an id cannot hold a line break or a NUL: " \
-              "#{mark.to_heap.inspect}"
+              "#{mark.inspect}"
       end
     end
     if ms = retry
@@ -401,7 +401,7 @@ pub struct SSE
     while at < text.bytesize
       width = sequence_at(text, text.bytesize, at)
       if width < 0
-        raise "SSE: #{what} is not UTF-8: #{text.to_heap.inspect}"
+        raise "SSE: #{what} is not UTF-8: #{text.inspect}"
       end
       at += width
     end

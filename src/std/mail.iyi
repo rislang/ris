@@ -201,7 +201,7 @@ struct MailText
   # *data*, in *name*'s charset, as UTF-8.
   def self.decode(data : String, name : String) : String | MailError
     kind = MailText.charset(name)
-    return MailError.new("the charset #{name.to_heap.inspect} is not one std/mail reads (UTF-8, US-ASCII, ISO-8859-1, ISO-8859-15, windows-1252)") unless kind
+    return MailError.new("the charset #{name.inspect} is not one std/mail reads (UTF-8, US-ASCII, ISO-8859-1, ISO-8859-15, windows-1252)") unless kind
     p = data
     n = data.bytesize
     if kind == "utf-8"
@@ -1625,7 +1625,7 @@ struct TapeMailScan
       elsif b == 40_u8
         depth = 0
         while true
-          return MailError.new("a comment is not closed in #{@text.to_heap.inspect}") if @at >= @n
+          return MailError.new("a comment is not closed in #{@text.inspect}") if @at >= @n
           c = @text[@at]
           if c == 92_u8
             @at = @at + 1
@@ -1705,7 +1705,7 @@ struct TapeMailScan
       end
       @at = @at + 1
     end
-    MailError.new("a quoted string is not closed in #{@text.to_heap.inspect}")
+    MailError.new("a quoted string is not closed in #{@text.inspect}")
   end
 
   # A domain literal at `[`, brackets kept.
@@ -1724,7 +1724,7 @@ struct TapeMailScan
       end
       @at = @at + 1
     end
-    MailError.new("a domain literal is not closed in #{@text.to_heap.inspect}")
+    MailError.new("a domain literal is not closed in #{@text.inspect}")
   end
 end
 
@@ -2874,7 +2874,7 @@ pub struct Mail
           unless colon < e && MailText.field_name?(field)
             shown = MailText.cut(source, i, e)
             shown = String.build { |w| w << shown[0, 60] << "..." } if shown.bytesize > 64
-            return MailError.new("line #{line} of a header section is not a field: #{shown.to_heap.inspect}")
+            return MailError.new("line #{line} of a header section is not a field: #{shown.inspect}")
           end
           name = field
           value = String::Builder.new
@@ -2901,7 +2901,7 @@ pub struct Mail
       if media.starts_with?("multipart/")
         boundary = params["boundary".as_tape]?
         unless boundary && !boundary.empty?
-          return MailError.new("a #{media.to_heap} part names no boundary")
+          return MailError.new("a #{media} part names no boundary")
         end
         ranges = TapePart.split(source, body_at, stop, boundary, media)
         return ranges if ranges.is_a?(MailError)
@@ -2981,7 +2981,7 @@ pub struct Mail
             return ranges if closing && open_at >= 0
             if closing
               return MailError.new(
-                "a #{media.to_heap} body closes before its first part")
+                "a #{media} body closes before its first part")
             end
             open_at = j < stop ? j + 1 : stop
           end
@@ -2990,10 +2990,10 @@ pub struct Mail
       end
       if open_at < 0
         return MailError.new(
-          "a #{media.to_heap} body holds no line --#{boundary.to_heap}")
+          "a #{media} body holds no line --#{boundary}")
       end
-      MailError.new("a #{media.to_heap} body ends before its closing " \
-                    "line --#{boundary.to_heap}--")
+      MailError.new("a #{media} body ends before its closing " \
+                    "line --#{boundary}--")
     end
 
     protected def self.prefix?(a : Pointer(UInt8), b : Pointer(UInt8), size : Int32) : Bool

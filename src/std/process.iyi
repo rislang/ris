@@ -1192,7 +1192,8 @@ class ProcessChild
       end
 
       # STARTUPINFOEXW: 104 bytes of STARTUPINFOW and the list after them.
-      info = Pointer(UInt64).malloc(14_u64)
+      info_room = uninitialized UInt64[14]
+      info = pointerof(info_room).as(Pointer(UInt64))
       14.times { |index| info[index] = 0_u64 }
       info[0] = 112_u64
       # dwFlags, STARTF_USESTDHANDLES, is the DWORD at byte 60.
@@ -1201,7 +1202,8 @@ class ProcessChild
       info[11] = theirs[1].address
       info[12] = theirs[2].address
       info[13] = attributes.address
-      answer = Pointer(UInt64).malloc(3_u64)
+      answer_room = uninitialized UInt64[3]
+      answer = pointerof(answer_room).as(Pointer(UInt64))
       # bInheritHandles, EXTENDED_STARTUPINFO_PRESENT, and CREATE_SUSPENDED
       # until the child is in its job, breakaway and all (below). The
       # environment is this process's own block, which `ENV[]=` writes,
@@ -1245,7 +1247,8 @@ class ProcessChild
       # `Process.run` alone.
       job = LibKernel32.CreateJobObjectW(Pointer(Void).new(0_u64), Pointer(UInt16).new(0_u64))
       if job.address != 0_u64
-        limits = Pointer(UInt64).malloc(18_u64)
+        limits_room = uninitialized UInt64[18]
+        limits = pointerof(limits_room).as(Pointer(UInt64))
         18.times { |index| limits[index] = 0_u64 }
         limits[2] = 0x800_u64
         LibKernel32.SetInformationJobObject(job, 9, limits.as(Void*), 144)
@@ -1463,7 +1466,8 @@ class ProcessChild
       # No handle: a cancellation's `CancelIoEx` has no operation to stop.
       fiber.wait_handle = Pointer(Void).new(0_u64)
       fiber.io_bytes_read = 0_i64
-      words = Pointer(UInt64).malloc(2_u64)
+      words_room = uninitialized UInt64[2]
+      words = pointerof(words_room).as(Pointer(UInt64))
       words[0] = IyiScheduler.pollfd.to_u64
       words[1] = ov.address
       proc = ->(context : Void*, fired : UInt8) { ProcessChild.ended(context) }

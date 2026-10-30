@@ -67,7 +67,7 @@ pub struct Params
     if val
       val
     else
-      raise "missing parameter key: #{key.to_heap}"
+      raise "missing parameter key: #{key}"
     end
   end
 

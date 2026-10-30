@@ -1740,7 +1740,7 @@ pub struct Outgoing
     value = value.as_tape
     Server.check_line(name, value)
     if HTTP.same_name?(name, "Content-Length") || HTTP.same_name?(name, "Connection") || HTTP.same_name?(name, "Transfer-Encoding")
-      raise "HTTP: #{name.to_heap} is the server's own line"
+      raise "HTTP: #{name} is the server's own line"
     end
     count = @state[1]
     raise "HTTP: more than #{LINES} header lines" if count == LINES
@@ -1967,12 +1967,12 @@ pub struct Server
     i = 0
     while i < value.bytesize
       if p[i] == 13_u8 || p[i] == 10_u8
-        raise "HTTP: header #{name.to_heap} contains a line break"
+        raise "HTTP: header #{name} contains a line break"
       end
       i = i + 1
     end
     if HTTP.control?(p, value.bytesize)
-      raise "HTTP: header #{name.to_heap} contains a control character"
+      raise "HTTP: header #{name} contains a control character"
     end
   end
 
@@ -4555,7 +4555,7 @@ pub struct HTTP
       return "not a header name: #{name.inspect}" unless token?(name)
       value = trim(line[colon + 1, line.bytesize - colon - 1])
       if control?(value)
-        return "header #{name.to_heap} contains a control character"
+        return "header #{name} contains a control character"
       end
       key = name.downcase
       if first = spelled[key]?
@@ -6544,7 +6544,7 @@ class H2Connection
           return ":authority twice" if authority
           authority = true
         else
-          return "the pseudo-header #{name.is_a?(String) ? name : name.to_heap}"
+          return "the pseudo-header #{name.is_a?(String) ? name : name}"
         end
       else
         regular = true

@@ -605,7 +605,8 @@ class Bzip2Decode
     return fail("bzip2: block #{@blocks} has no selectors") if nsel < 1
     # Each selector is its table's place in a move-to-front list, in
     # unary.
-    pos = Pointer(UInt8).malloc(6_u64)
+    pos_room = uninitialized UInt8[6]
+    pos = pointerof(pos_room).as(Pointer(UInt8))
     i = 0
     while i < groups
       pos[i] = i.to_u8
@@ -1133,7 +1134,8 @@ class Bzip2Encode
     end
 
     # The bytes the block uses, numbered in order.
-    used = Pointer(Bool).malloc(256_u64)
+    used_room = uninitialized Bool[256]
+    used = pointerof(used_room).as(Pointer(Bool))
     i = 0
     while i < 256
       used[i] = false
@@ -1144,7 +1146,8 @@ class Bzip2Encode
       used[block[i].to_i32] = true
       i = i + 1
     end
-    unseq_to_seq = Pointer(Int32).malloc(256_u64)
+    unseq_to_seq_room = uninitialized Int32[256]
+    unseq_to_seq = pointerof(unseq_to_seq_room).as(Pointer(Int32))
     in_use = 0
     i = 0
     while i < 256
@@ -1164,7 +1167,8 @@ class Bzip2Encode
       freq[i] = 0
       i = i + 1
     end
-    yy = Pointer(Int32).malloc(256_u64)
+    yy_room = uninitialized Int32[256]
+    yy = pointerof(yy_room).as(Pointer(Int32))
     i = 0
     while i < in_use
       yy[i] = i
@@ -1241,7 +1245,8 @@ class Bzip2Encode
     nsel = (nmtf + GROUP - 1) // GROUP
     selectors = Pointer(Int32).malloc(nsel.to_u64)
     rfreq = Pointer(Int32).malloc((6 * MAX_ALPHA).to_u64)
-    cost = Pointer(Int32).malloc(6_u64)
+    cost_room = uninitialized Int32[6]
+    cost = pointerof(cost_room).as(Pointer(Int32))
     iter = 0
     while iter < ITERS
       i = 0
@@ -1351,7 +1356,8 @@ class Bzip2Encode
     # The tables and the selectors, move-to-front and in unary.
     sink.put(groups, 3)
     sink.put(nsel, 15)
-    pos = Pointer(Int32).malloc(6_u64)
+    pos_room = uninitialized Int32[6]
+    pos = pointerof(pos_room).as(Pointer(Int32))
     i = 0
     while i < groups
       pos[i] = i
