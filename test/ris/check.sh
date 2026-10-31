@@ -1840,7 +1840,7 @@ heap_trap string_arguments
 
 # Generic std classes and crypto inputs use checked tape storage.
 for name in std_generic_tape std_small_tape curve_views mlkem_views shlex base32 \
-            semantic_version uuid; do
+            semantic_version uuid const_int_width; do
   out=$(RIS_HEAP_STATS=1 "$RIS" run "test/ris/$name.ri" 2>&1)
   if [ "$?" -eq 0 ] &&
       grep -qE 'PASS:|ALL CHECKS PASSED' <<<"$out" &&

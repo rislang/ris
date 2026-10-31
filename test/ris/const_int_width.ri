@@ -1,0 +1,13 @@
+# A narrow constant converted at compile time keeps only its own bits:
+# `(-1).unsafe_to_u32 == 4294967295_u32` folded to false and
+# `(-2_i8).unsafe_to_u8.to_u16` to 65534 (LLVM kept the high bits).
+import std/int
+
+exit 1 unless (-1).unsafe_to_u32 == 4294967295_u32
+exit 2 unless 4294967295_u32 == (-1).unsafe_to_u32
+exit 3 unless (-1).unsafe_to_u32.to_u64 == 4294967295_u64
+exit 4 unless (-2_i8).unsafe_to_u8.to_u16 == 254_u16
+exit 5 unless (-1_i16).unsafe_to_u16.to_u32 == 65535_u32
+exit 6 unless (-2).unsafe_to_u32.unsafe_to_u64 == 4294967294_u64
+exit 7 unless (-1).unsafe_to_u8 == 255_u8
+puts "PASS: narrow constants keep their own bits"

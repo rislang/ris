@@ -54,12 +54,15 @@ for flags in "" "--release"; do
 done
 
 # $1 label, $2 directory, $3 the phrase the failing check prints, $4 awk
-# program over float.iyi.
+# program over float.iyi and tape.iyi's parser copy.
 prove_fails() {
   local label="$1" dir="$2" phrase="$3" script="$4"
   mkdir -p "$WORK/$dir/iyi"
   cp -R "$REPO/src/iyi/." "$WORK/$dir/iyi/"
   awk "$script" "$REPO/src/iyi/float.iyi" > "$WORK/$dir/iyi/float.iyi"
+  # tape.iyi carries String#to_f's copy of the parser, which a program
+  # reads: it is broken the same way (the printer is float.iyi's alone).
+  awk "$script" "$REPO/src/iyi/tape.iyi" > "$WORK/$dir/iyi/tape.iyi"
   if cmp -s "$WORK/$dir/iyi/float.iyi" "$REPO/src/iyi/float.iyi"; then
     echo "  $label: the awk found nothing to change"; status=1; return
   fi

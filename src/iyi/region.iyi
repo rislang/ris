@@ -477,10 +477,42 @@ class RisRegion
   end
 
   {% if flag?(:linux) %}
-    lib LibC
-      fun mmap(addr : Void*, len : UInt64, prot : Int32, flags : Int32,
-               fd : Int32, offset : Int64) : Void*
-      fun mprotect(addr : Void*, len : UInt64, prot : Int32) : Int32
+    # Raw syscalls, as the prelude's `__iyi_mmap`: a Linux program names
+    # no libc symbol for its tape (bench/floor_base.sh). Each answers
+    # what libc's would: an address or all ones, 0 or -1.
+    def self.sys_mmap(length : UInt64, flags : Int64) : UInt64
+      result = uninitialized Int64
+      {% if flag?(:x86_64) %}
+        asm("syscall" : "={rax}"(result)
+                      : "{rax}"(9_i64), "{rdi}"(0_i64), "{rsi}"(length), "{rdx}"(3_i64),
+                        "{r10}"(flags), "{r8}"(-1_i64), "{r9}"(0_i64)
+                      : "rcx", "r11", "memory"
+                      : "volatile")
+      {% else %}
+        asm("svc #0" : "={x0}"(result)
+                     : "{x8}"(222_i64), "{x0}"(0_i64), "{x1}"(length), "{x2}"(3_i64),
+                       "{x3}"(flags), "{x4}"(-1_i64), "{x5}"(0_i64)
+                     : "memory"
+                     : "volatile")
+      {% end %}
+      return 0xFFFFFFFFFFFFFFFF_u64 if result < 0 && result >= -4095
+      result.unsafe_to_u64
+    end
+
+    def self.sys_mprotect(address : UInt64, length : UInt64, prot : Int64) : Int32
+      result = uninitialized Int64
+      {% if flag?(:x86_64) %}
+        asm("syscall" : "={rax}"(result)
+                      : "{rax}"(10_i64), "{rdi}"(address), "{rsi}"(length), "{rdx}"(prot)
+                      : "rcx", "r11", "memory"
+                      : "volatile")
+      {% else %}
+        asm("svc #0" : "={x0}"(result)
+                     : "{x8}"(226_i64), "{x0}"(address), "{x1}"(length), "{x2}"(prot)
+                     : "memory"
+                     : "volatile")
+      {% end %}
+      result < 0 ? -1 : 0
     end
 
     def self.acquire_side(capacity : UInt64) : UInt64
@@ -507,7 +539,7 @@ class RisRegion
         spare = following
       end
       region = side_slice(length)
-      if LibC.mprotect(Pointer(Void).new(region &+ usable), GRAIN, 0) != 0
+      if sys_mprotect(region &+ usable, GRAIN, 0_i64) != 0
         RisHeap.mapping_failure(length)
       end
       @@mapped = @@mapped &+ 1_u64
@@ -538,15 +570,13 @@ class RisRegion
     # MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, read/write on touch.
     def self.side_slice(length : UInt64) : UInt64
       unless length == arena_length
-        region = LibC.mmap(Pointer(Void).new(0_u64), length,
-          3, 0x4022, -1, 0_i64).address
+        region = sys_mmap(length, 0x4022_i64)
         RisHeap.mapping_failure(length) if region == 0xFFFFFFFFFFFFFFFF_u64
         return region
       end
       if @@arena_next == @@arena_end
         bytes = size_mul(length, ARENA_SLICES)
-        chunk = LibC.mmap(Pointer(Void).new(0_u64), bytes,
-          3, 0x4022, -1, 0_i64).address
+        chunk = sys_mmap(bytes, 0x4022_i64)
         RisHeap.mapping_failure(bytes) if chunk == 0xFFFFFFFFFFFFFFFF_u64
         @@arena_next = chunk
         @@arena_end = chunk &+ bytes

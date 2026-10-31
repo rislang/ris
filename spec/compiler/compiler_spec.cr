@@ -289,9 +289,10 @@ describe "Compiler" do
         # darwin branch makes, asked in the only direction Linux can answer.
         symbols.should_not contain "malloc"
         symbols.should_not contain "realloc"
-        # ris: the tape maps its own address space through libc's mmap
-        # (src/iyi/region.iyi), so mmap is among the undefined here too.
-        symbols.should contain "mmap"
+        # ris: the tape maps its own address space with raw syscalls
+        # (src/iyi/region.iyi), so a plain build names no libc mmap.
+        symbols.should_not contain "mmap"
+        symbols.should_not contain "mprotect"
       {% end %}
     end
   end

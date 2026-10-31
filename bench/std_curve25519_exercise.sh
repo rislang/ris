@@ -124,31 +124,26 @@ import std/int
 
 def b(hex : String) : String
   return "" if hex == "-"
-  p = hex.to_unsafe
-  String.new(hex.bytesize // 2) do |buf|
+  String.from_bytes(hex.bytesize // 2) do |bytes|
     i = 0
-    while i < hex.bytesize // 2
-      hi = p[i * 2].to_i32
-      lo = p[i * 2 + 1].to_i32
+    while i < bytes.size
+      hi = hex[i * 2].to_i32
+      lo = hex[i * 2 + 1].to_i32
       hi = hi >= 97 ? hi - 87 : hi - 48
       lo = lo >= 97 ? lo - 87 : lo - 48
-      buf[i] = (hi * 16 + lo).to_u8
+      bytes[i] = (hi * 16 + lo).to_u8
       i = i + 1
     end
   end
 end
 
 def hex(s : String) : String
-  digits = "0123456789abcdef".to_unsafe
-  String.new(s.bytesize * 2) do |buf|
-    p = s.to_unsafe
-    i = 0
-    while i < s.bytesize
-      buf[i * 2] = digits[p[i] >> 4]
-      buf[i * 2 + 1] = digits[p[i] & 15_u8]
-      i = i + 1
-    end
+  digits = "0123456789abcdef"
+  out = ""
+  s.each_byte do |x|
+    out << digits[(x >> 4).to_i32].unsafe_chr << digits[(x & 15_u8).to_i32].unsafe_chr
   end
+  out
 end
 
 while line = STDIN.gets(chomp: true)
@@ -400,9 +395,9 @@ import std/curve25519::{X25519, Ed25519}
 def best_of(& : -> Nil) : Int64
   best = 0_i64
   5.times do |k|
-    t0 = IyiMark.now_ns
+    t0 = __iyi_monotonic_ns
     200.times { yield }
-    took = (IyiMark.now_ns - t0).to_i64
+    took = (__iyi_monotonic_ns - t0).to_i64
     best = took if k == 0 || took < best
   end
   best // 200_000
@@ -556,9 +551,9 @@ prove_broken "a group order one off" "rfc 8032 test 1: the signature" \
 prove_broken "a challenge hashed without the public key" "rfc 8032 test 1: the signature" \
   'challenge = SHA512.new.update(sig, 32).update(pp, 32).update(mp, mn).final' 'challenge = SHA512.new.update(sig, 32).update(mp, mn).final'
 prove_broken "a verify that takes S of L or more" "a signature with S + L is refused" \
-  '    return false unless CurveScalar.canonical?(sp + 32)' '    true'
+  '    return false unless CurveScalar.canonical?(CurveBytes.tail(sp, 32))' '    true'
 prove_broken "a decoding that takes y of p or more" "a public key with y = p + 1 is refused" \
-  '    y.to_bytes(ap)' '    ap.copy_from(src, 32)
+  '    y.to_bytes(ap)' '    32.times { |k| ap[k] = src[k] }
     ap[31] = ap[31] & 127_u8'
 prove_broken "a decoding that takes x = 0 with the sign bit set" "a public key of x = 0 with the sign bit set is refused" \
   '    return nil if sign == 1_u8 && x.zero?

@@ -104,22 +104,20 @@ import std/file::{File}
 
 def hex(field : String) : String
   digits = "0123456789abcdef"
-  p = field.to_unsafe
-  String.build do |io|
-    io << 'x'
-    i = 0
-    while i < field.bytesize
-      io << digits[(p[i] >> 4).to_i32]
-      io << digits[(p[i] & 15_u8).to_i32]
-      i = i + 1
-    end
+  io = "x"
+  i = 0
+  while i < field.bytesize
+    io << digits[(field[i] >> 4).to_i32].unsafe_chr
+    io << digits[(field[i] & 15_u8).to_i32].unsafe_chr
+    i = i + 1
   end
+  io
 end
 
 def unhex(word : String) : String
   n = (word.bytesize - 1) // 2
-  p = word.to_unsafe
-  String.new(n) do |dst|
+  p = word
+  String.from_bytes(n) do |dst|
     i = 0
     while i < n
       hi = p[1 + 2 * i]
@@ -131,7 +129,7 @@ def unhex(word : String) : String
 end
 
 def char_of(name : String) : Char
-  name == "tab" ? '\t' : name[0]
+  name == "tab" ? '\t' : name[0].unsafe_chr
 end
 
 args = Program.args
@@ -414,18 +412,18 @@ broken "the LF of a CRLF read as a blank row" 'if b == 10_u8 && @prev_cr && fiel
 broken "a bare field's run carried past the separator" '(state == BARE && c == @sep)' 'false' "ASSERTION FAILED: a separator ends a bare field"
 broken "the column counted in bytes" '@column = @column + 1 if (c & 0xC0_u8) != 0x80_u8' '@column = @column + 1' "ASSERTION FAILED: the column in characters, not bytes"
 broken "a CRLF inside quotes counted twice" '@line = @line + 1 unless @prev_cr' '@line = @line + 1' "ASSERTION FAILED: lines inside quotes are counted, a CRLF once"
-broken "a quote in a bare field kept by the reader" 'return fail(CSVError.new("csv: unexpected quote at line #{@line}, column #{@column}", @line, @column))' 'return too_long unless append(@buf + @pos, 1)' "ASSERTION FAILED: a quote inside an unquoted field is an error value"
+broken "a quote in a bare field kept by the reader" 'return fail(CSVError.new("csv: unexpected quote at line #{@line}, column #{@column}", @line, @column))' 'return too_long unless append(@pos, 1)' "ASSERTION FAILED: a quote inside an unquoted field is an error value"
 broken "an unclosed quote read as a field" $'if state == QUOTED\n      return fail' $'if false\n      return fail' "ASSERTION FAILED: a quote still open at the end"
-broken "a UTF-16 document read as UTF-8" 'if @limit >= 2 && ((p[0] == 0xFF_u8' 'if false && ((p[0] == 0xFF_u8' "ASSERTION FAILED: a UTF-16 document is an error"
+broken "a UTF-16 document read as UTF-8" 'if @limit >= 2 && ((p.byte_at(0) == 0xFF_u8' 'if false && ((p.byte_at(0) == 0xFF_u8' "ASSERTION FAILED: a UTF-16 document is an error"
 broken "same_size not held" 'elsif got.size != @width' 'elsif false' "ASSERTION FAILED: same_size refuses a short row"
 broken "the reader goes on after an error" $'if failed = @failed\n      return failed\n    end\n    return nil if @done\n    unless @begun' $'return nil if @done\n    unless @begun' "ASSERTION FAILED: after an error the reader answers it again"
 broken "strip keeps trailing spaces" 'while n > 0 && space?(@field[n - 1])' 'while false && n > 0' "ASSERTION FAILED: strip drops trailing spaces"
 broken "blank lines under a header made rows" 'next if got.empty? && @has_headers' 'next if false' "ASSERTION FAILED: rows by header name, blank lines passed over"
 broken "a repeated header name answering its first column" '@index[head[i]] = i' '@index[head[i]] = i unless @index.has_key?(head[i])' "ASSERTION FAILED: a repeated header name answers its last column"
 broken "the writer leaving a separator bare" 'return true if b == @sep || b == @quote' 'return true if b == @quote' "ASSERTION FAILED: a field holding the separator or a line break is quoted"
-broken "the writer leaving a quote single" $'@io.write(p + from, i + 1 - from)\n        put(@quote)' '@io.write(p + from, i + 1 - from)' "ASSERTION FAILED: a quote is doubled inside quotes"
+broken "the writer leaving a quote single" $'@io.write(f[from, i + 1 - from])\n        put(@quote)' '@io.write(f[from, i + 1 - from])' "ASSERTION FAILED: a quote is doubled inside quotes"
 broken "the writer leaving a lone empty field bare" 'if @quote_all || lone || marked || needs_quotes?(f)' 'if @quote_all || marked || needs_quotes?(f)' "ASSERTION FAILED: the writer quotes a row of one empty field"
-broken "the writer leaving end spaces bare" 'return true if p[0] == 32_u8 || p[0] == 9_u8 || p[n - 1] == 32_u8 || p[n - 1] == 9_u8' '' "ASSERTION FAILED: a field with spaces at its ends is quoted"
+broken "the writer leaving end spaces bare" 'return true if first == 32_u8 || first == 9_u8 || last == 32_u8 || last == 9_u8' '' "ASSERTION FAILED: a field with spaces at its ends is quoted"
 broken "the writer leaving a leading U+FEFF bare" "marked = @rows == 0 && i == 0 && f.starts_with?('\\uFEFF')" 'marked = false' "ASSERTION FAILED: the writer quotes only the first field for its U+FEFF"
 broken "the whole stream held in memory" $'    more = io.read_bytes(CHUNK)\n    if more.bytesize == 0\n      @ended = true\n      if' $'    more = io.read_all\n    if more.bytesize == 0\n      @ended = true\n      if' "bytes alive, under 1 MiB"
 

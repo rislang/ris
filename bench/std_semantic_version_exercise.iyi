@@ -45,6 +45,7 @@ puts "\n== prerelease identifiers"
 # alphanumeric, which the number -1 (and `-0`, printed `0`) was not.
 assert_str "1.0.0--0", SemanticVersion.parse("1.0.0--0").to_s, "a signed identifier is alphanumeric, and prints as written"
 assert_true SemanticVersion.parse("1.0.0-1") < SemanticVersion.parse("1.0.0--1"), "numeric 1 before alphanumeric -1"
+assert_true SemanticVersion.parse("1.0.0-10") < SemanticVersion.parse("1.0.0--1"), "a signed identifier is alphanumeric, after a number as wide"
 # A number past Int32 is still a number: by value, and before letters.
 assert_true SemanticVersion.parse("1.0.0-99999999999") < SemanticVersion.parse("1.0.0-100000000000"), "numbers past Int32 order by value"
 assert_true SemanticVersion.parse("1.0.0-99999999999") < SemanticVersion.parse("1.0.0-0a"), "a number past Int32 before an alphanumeric"

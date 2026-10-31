@@ -146,7 +146,14 @@ struct LLVM::Type
 
   def const_int(value) : Value
     if !value.is_a?(Int128) && !value.is_a?(UInt128) && int_width != 128
-      Value.new LibLLVM.const_int(self, value, 0)
+      # The bits past the type's width are cleared: LLVM 23 keeps them
+      # in the constant (`-2_i8` passed as 0xFF..FE), and folding a zext
+      # of it then gave `i16 -2`, `(-1).unsafe_to_u32 == 4294967295_u32`
+      # false.
+      bits = value.to_u64!
+      width = int_width
+      bits &= (1_u64 << width) &- 1 if width < 64
+      Value.new LibLLVM.const_int(self, bits, 0)
     else
       encoded_value = UInt64[value & UInt64::MAX, (value >> 64) & UInt64::MAX]
       Value.new LibLLVM.const_int_of_arbitrary_precision(self, encoded_value.size, encoded_value)

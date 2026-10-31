@@ -112,13 +112,13 @@ when "other-algorithm"
 when "short-buffer"
   d.final(Array(UInt8).new(31, 0_u8))
 when "negative-count"
-  d.update("abc".to_unsafe, -1)
+  d.update("abc", -1)
 when "crc-negative-count"
-  CRC32.update(0_u32, "abc".to_unsafe, -1)
+  CRC32.update(0_u32, "abc", -1)
 when "crc64-negative-count"
-  CRC64.update(0_u64, "abc".to_unsafe, -1)
+  CRC64.update(0_u64, "abc", -1)
 when "adler-negative-count"
-  Adler32.update(1_u32, "abc".to_unsafe, -1)
+  Adler32.update(1_u32, "abc", -1)
 when "sha3-other-algorithm"
   SHA3_256.new.copy_from(SHA256.new)
 when "shake-update-after-read"
@@ -126,11 +126,11 @@ when "shake-update-after-read"
   x.read(1)
   x.update("more")
 when "shake-negative-count"
-  SHAKE128.new.update("abc".to_unsafe, -1)
+  SHAKE128.new.update("abc", -1)
 when "shake-negative-read"
   SHAKE128.new.read(-1)
 when "xxh64-negative-count"
-  XXH64.new.update("abc".to_unsafe, -1)
+  XXH64.new.update("abc", -1)
 end
 puts "accepted"
 IYI
@@ -202,15 +202,15 @@ def shake_hex(x : Shake, rng : Mix) : String
   while all.size < total
     all.concat(x.read(piece(rng, total - all.size)))
   end
-  digits = "0123456789abcdef".to_unsafe
-  String.new(total * 2) do |buf|
-    i = 0
-    while i < total
-      buf[i * 2] = digits[all[i].to_i32 >> 4]
-      buf[i * 2 + 1] = digits[all[i].to_i32 & 15]
-      i = i + 1
-    end
+  digits = "0123456789abcdef"
+  w = ""
+  i = 0
+  while i < total
+    w << digits[all[i].to_i32 >> 4].unsafe_chr
+    w << digits[all[i].to_i32 & 15].unsafe_chr
+    i = i + 1
   end
+  w
 end
 
 rng = Mix.new(20261015_u64)
@@ -230,9 +230,9 @@ while k < 3000
   while at < data.size
     n = piece(rng, data.size - at)
     if d
-      d.update(data.to_unsafe + at.to_i64, n)
+      d.update(data[at, n])
     else
-      x.update(data.to_unsafe + at.to_i64, n)
+      x.update(data[at, n])
     end
     at = at + n
   end
@@ -242,13 +242,13 @@ end
 
 big = Array(UInt8).new(4 << 20) { |i| (i & 255).to_u8 }
 squeezed = Array(UInt8).new(4 << 20, 0_u8)
-t0 = IyiMark.now_ns
+t0 = __iyi_monotonic_ns
 SHA3_256.hash_bytes(big)
-t1 = IyiMark.now_ns
+t1 = __iyi_monotonic_ns
 SHAKE128.new.read(squeezed)
-t2 = IyiMark.now_ns
+t2 = __iyi_monotonic_ns
 SHA256.hash_bytes(big)
-t3 = IyiMark.now_ns
+t3 = __iyi_monotonic_ns
 STDERR.puts "  iyi --release, 4 MB: SHA3-256 #{(t1 - t0) // 1000000} ms, SHAKE128 read #{(t2 - t1) // 1000000} ms, SHA-256 #{(t3 - t2) // 1000000} ms"
 IYI
 if [ -z "$PY" ]; then
@@ -343,24 +343,20 @@ class Mix
 end
 
 rng = Mix.new(20261017_u64)
-digits = "0123456789abcdef".to_unsafe
+digits = "0123456789abcdef"
 3000.times do
   size = rng.below(700)
-  data = String.new(size) do |buf|
-    i = 0
-    while i < size
-      buf[i] = (rng.draw & 255_u64).to_u8
-      i = i + 1
-    end
-  end
+  data = Array(UInt8).new(size) { (rng.draw & 255_u64).to_u8 }
   crc = 0_u64
   at = 0
   while at < size
     n = rng.below((size - at < 300 ? size - at : 300) + 1)
-    crc = CRC64.update(crc, data.to_unsafe + at.to_i64, n)
+    crc = CRC64.update(crc, data[at, n], n)
     at = at + n
   end
-  puts String.new(16) { |buf| 16.times { |k| buf[k] = digits[(crc.unsafe_shr(60 - 4 * k) & 15_u64).to_i32] } }
+  hex = ""
+  16.times { |k| hex << digits[(crc.unsafe_shr(60 - 4 * k) & 15_u64).to_i32].unsafe_chr }
+  puts hex
 end
 IYI
 if [ -z "$PY" ]; then
@@ -444,25 +440,21 @@ class Mix
 end
 
 rng = Mix.new(20261017_u64)
-digits = "0123456789abcdef".to_unsafe
+digits = "0123456789abcdef"
 3000.times do
   size = rng.below(700)
-  data = String.new(size) do |buf|
-    i = 0
-    while i < size
-      buf[i] = (rng.draw & 255_u64).to_u8
-      i = i + 1
-    end
-  end
+  data = Array(UInt8).new(size) { (rng.draw & 255_u64).to_u8 }
   h = XXH64.new
   at = 0
   while at < size
     n = rng.below((size - at < 300 ? size - at : 300) + 1)
-    h.update(data.to_unsafe + at.to_i64, n)
+    h.update(data[at, n], n)
     at = at + n
   end
   sum = h.digest
-  puts String.new(16) { |buf| 16.times { |k| buf[k] = digits[(sum.unsafe_shr(60 - 4 * k) & 15_u64).to_i32] } }
+  hex = ""
+  16.times { |k| hex << digits[(sum.unsafe_shr(60 - 4 * k) & 15_u64).to_i32].unsafe_chr }
+  puts hex
 end
 IYI
 if [ -z "$PY" ] || ! "$PY" -c 'import compression.zstd' >/dev/null 2>&1; then

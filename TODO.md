@@ -30,7 +30,7 @@ the std row. Update a row when its work starts or ends.
 |--------------------------------------|---------|----------|----------|
 | std non-Linux branches: 34 mallocs   | medium  | 4-8 h    | 200-400k |
 | Kernel threads: darwin arm64, win32  | large   | 1-2 days | 300-500k |
-| Bench ports left: ~85 of 129 fail    | large   | 2-4 days | 800k-2M  |
+| Bench ports left: ~75 of 129 fail    | large   | 2-4 days | 800k-2M  |
 | Autocert part B: exercise and Pebble | medium  | 2-4 h    | 150-300k |
 | Socket race: darwin kqueue, Windows  | medium  | 3-5 h    | 150-300k |
 | Compiler specs: the rest of the suite| large   | 1-3 days | 300k-1M  |
@@ -57,9 +57,31 @@ on one task. Next in order: bench ports, then autocert part B.
   patched prelude/std copy under IYI_PATH counts as runtime/std;
   String.from_bytes(size) { |bytes| } for programs; GC.stats checks
   read the tape cursor (RisRegion.tape_bytes). Left, by cause:
-  - stale mutation patches: semantic_version, path, random, digest,
-    password, mlkem, csv, float_text, io, format (uncaught proofs).
-  - build: pointer helpers (std_io, slice, png, zstd, dns, hpack),
+  - Done 2026-10-31: stale proofs of semantic_version, path, random,
+    digest, password, mlkem, float_text, io, format, bzip2, curve25519
+    are current; all but bzip2 hold. std_io builds (pointer-free hex,
+    ByteFormat into a Memory). Pending: format's two-word cost proof
+    (bignum words are side Arrays, tape_bytes reads 0 both ways: needs
+    a side-reservation count); float.iyi's parser has a copy in
+    tape.iyi (float_text patches both: merge them). io's count-sized
+    builder proof is gone (a builder reserves, commits what it writes).
+  - csv (50 MB), xz, tar: `mapping failed`: a top-level loop that makes
+    Arrays each row keeps them (4 mappings a CSV row; 2 VMAs each) to
+    the program's end; past ~500k rows max_map_count (1M) is spent.
+    A loop `tape do` frees only when proven to store nothing it made
+    into outer objects (the keep-alive precedent): CSVReader's refill
+    assigns `@text = more`. Readers keep a refilled field (`clear`,
+    `<<`) or scalars, as Conn does; then the benches scope each row.
+  - bzip2 "reaches nothing": std/static_array > slice > indexable
+    imports std/random for `sample` (an iyi file): move sample to
+    std/random or the check to the binary's symbols (UPSTREAM).
+  - Done: region.iyi named libc mmap/mprotect on Linux; raw syscalls
+    now, Linux floor is the C start files again (std_io floor).
+  - Done: `(-1).unsafe_to_u32 == 4294967295_u32` was false: LLVM 23
+    kept bits past a narrow constant's width (`-2_i8` as 0xFF..FE) and
+    folded zext of it to `i16 -2`. LLVM::Type#const_int masks them
+    (test/ris/const_int_width.ri).
+  - build: pointer helpers (slice, png, zstd, dns, hpack),
     Array of growing values (set, otp, idna, hpke, x509, ct_timing),
     task captures (atomic, option_parser, regex, router, smtp, udp,
     string_scanner, file, file_utils, json, tls, websocket), removed
@@ -67,8 +89,6 @@ on one task. Next in order: bench ports, then autocert part B.
     wasm32 collector steps), General allocation (number_format,
     reference_storage, env, thread_floor), misc (uuid, tuple, user,
     uri, named_tuple, mime, text, ecdsa, iterator, indexable, eiy).
-  - std_int: `(-1).unsafe_to_u32 == 4294967295_u32` folds to false
-    (assigned to a local it is true): a compiler bug to find.
   - base64's timing ratio fails under load.
 * Port the benches to 5.1 task captures. Done: std_signal (exercise
   passes; a listener stops by its task handle's `cancel`, the Share stop

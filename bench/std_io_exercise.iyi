@@ -47,11 +47,11 @@ def assert_int(expected : Int64, actual : Int64, msg : String) : Nil
   end
 end
 
-def hex_of(bytes : Pointer(UInt8), count : Int32) : String
-  digits = "0123456789abcdef".to_unsafe
+def hex_of(bytes : String) : String
+  digits = "0123456789abcdef"
   hexed = ""
   i = 0
-  while i < count
+  while i < bytes.bytesize
     hexed << digits[(bytes[i].to_i32 >> 4) & 0x0f, 1]
     hexed << digits[bytes[i].to_i32 & 0x0f, 1]
     i = i + 1
@@ -221,15 +221,18 @@ puts "  read_byte, read_char, read_line, lines, each_line and IyiIO.copy verifie
 # ---------------------------------------------------------------------------
 
 puts "\n== byte format"
-buffer = Pointer(UInt8).malloc(8_u64)
 
 int32s = [0, 1, -1, 2, -2, 127, -128, 255, 256, 2147483647, -2147483648, 305419896, -1234567891]
 int32s.each do |v|
-  ByteFormat::LittleEndian.encode(v, buffer)
-  puts "  LE Int32 #{v} #{hex_of(buffer, 4)}"
+  written = Memory.new
+  ByteFormat::LittleEndian.encode(v, written)
+  buffer = written.to_s
+  puts "  LE Int32 #{v} #{hex_of(buffer)}"
   assert_int(v.to_i64, ByteFormat::LittleEndian.decode_int32(buffer).to_i64, "LE Int32 round trip of #{v}")
-  ByteFormat::BigEndian.encode(v, buffer)
-  puts "  BE Int32 #{v} #{hex_of(buffer, 4)}"
+  written = Memory.new
+  ByteFormat::BigEndian.encode(v, written)
+  buffer = written.to_s
+  puts "  BE Int32 #{v} #{hex_of(buffer)}"
   assert_int(v.to_i64, ByteFormat::BigEndian.decode_int32(buffer).to_i64, "BE Int32 round trip of #{v}")
 
   io = Memory.new
@@ -243,11 +246,15 @@ end
 
 int64s = [0_i64, 1_i64, -1_i64, 2_i64, -2_i64, 2147483648_i64, -2147483649_i64, 9223372036854775807_i64, -9223372036854775808_i64, 81985529216486895_i64, -81985529216486895_i64]
 int64s.each do |v|
-  ByteFormat::LittleEndian.encode(v, buffer)
-  puts "  LE Int64 #{v} #{hex_of(buffer, 8)}"
+  written = Memory.new
+  ByteFormat::LittleEndian.encode(v, written)
+  buffer = written.to_s
+  puts "  LE Int64 #{v} #{hex_of(buffer)}"
   assert_int(v, ByteFormat::LittleEndian.decode_int64(buffer), "LE Int64 round trip of #{v}")
-  ByteFormat::BigEndian.encode(v, buffer)
-  puts "  BE Int64 #{v} #{hex_of(buffer, 8)}"
+  written = Memory.new
+  ByteFormat::BigEndian.encode(v, written)
+  buffer = written.to_s
+  puts "  BE Int64 #{v} #{hex_of(buffer)}"
   assert_int(v, ByteFormat::BigEndian.decode_int64(buffer), "BE Int64 round trip of #{v}")
 
   io = Memory.new
@@ -260,11 +267,15 @@ end
 
 uint64s = [0_u64, 1_u64, 255_u64, 256_u64, 4294967295_u64, 4294967296_u64, 9223372036854775807_u64, 9223372036854775808_u64, 18446744073709551615_u64, 81985529216486895_u64]
 uint64s.each do |v|
-  ByteFormat::LittleEndian.encode(v, buffer)
-  puts "  LE UInt64 #{v} #{hex_of(buffer, 8)}"
+  written = Memory.new
+  ByteFormat::LittleEndian.encode(v, written)
+  buffer = written.to_s
+  puts "  LE UInt64 #{v} #{hex_of(buffer)}"
   assert_true(v == ByteFormat::LittleEndian.decode_uint64(buffer), "LE UInt64 round trip of #{v}")
-  ByteFormat::BigEndian.encode(v, buffer)
-  puts "  BE UInt64 #{v} #{hex_of(buffer, 8)}"
+  written = Memory.new
+  ByteFormat::BigEndian.encode(v, written)
+  buffer = written.to_s
+  puts "  BE UInt64 #{v} #{hex_of(buffer)}"
   assert_true(v == ByteFormat::BigEndian.decode_uint64(buffer), "BE UInt64 round trip of #{v}")
 
   io = Memory.new
@@ -277,11 +288,15 @@ end
 
 uint8s = [0_u8, 1_u8, 127_u8, 128_u8, 254_u8, 255_u8]
 uint8s.each do |v|
-  ByteFormat::LittleEndian.encode(v, buffer)
-  puts "  LE UInt8 #{v} #{hex_of(buffer, 1)}"
+  written = Memory.new
+  ByteFormat::LittleEndian.encode(v, written)
+  buffer = written.to_s
+  puts "  LE UInt8 #{v} #{hex_of(buffer)}"
   assert_true(v == ByteFormat::LittleEndian.decode_uint8(buffer), "LE UInt8 round trip of #{v}")
-  ByteFormat::BigEndian.encode(v, buffer)
-  puts "  BE UInt8 #{v} #{hex_of(buffer, 1)}"
+  written = Memory.new
+  ByteFormat::BigEndian.encode(v, written)
+  buffer = written.to_s
+  puts "  BE UInt8 #{v} #{hex_of(buffer)}"
   assert_true(v == ByteFormat::BigEndian.decode_uint8(buffer), "BE UInt8 round trip of #{v}")
 
   io = Memory.new
@@ -294,10 +309,14 @@ end
 
 # The bytes of one value in both orders are each other's reverse, and the
 # aliases name the formats they stand for.
-ByteFormat::SystemEndian.encode(305419896, buffer)
-system_hex = hex_of(buffer, 4)
-ByteFormat::NetworkEndian.encode(305419896, buffer)
-network_hex = hex_of(buffer, 4)
+written = Memory.new
+ByteFormat::SystemEndian.encode(305419896, written)
+buffer = written.to_s
+system_hex = hex_of(buffer)
+written = Memory.new
+ByteFormat::NetworkEndian.encode(305419896, written)
+buffer = written.to_s
+network_hex = hex_of(buffer)
 assert_str("12345678", network_hex, "NetworkEndian is big-endian")
 assert_true(system_hex == "78563412" || system_hex == "12345678", "SystemEndian is one of the two")
 puts "  SystemEndian #{system_hex} NetworkEndian #{network_hex}"
@@ -363,7 +382,7 @@ assert_int(6_i64, sized.remaining.to_i64, "remaining starts at the limit")
 assert_str("héllo", sized.read_all, "Sized stops at the byte limit, inside no character")
 assert_int(0_i64, sized.remaining.to_i64, "remaining reaches zero")
 assert_true(sized.eof?, "a spent Sized is at eof")
-assert_true(sized.read_byte.nil?, "and answers nil")
+assert_true(sized.read_byte.nil?, "a spent Sized answers nil")
 assert_str(" wörld\nsecond\n", sized_source.read_all, "the inner stream continues")
 puts "  sized: héllo"
 
@@ -413,13 +432,14 @@ assert_str(expected_short, dumped.to_s, "a short line pads the hex columns")
 print dumped.to_s
 
 dumped = Memory.new
-bytes = Pointer(UInt8).malloc(40_u64)
-i = 0
-while i < 40
-  bytes[i] = ((i * 7 + 30) % 256).to_u8
-  i = i + 1
+bytes = String.from_bytes(40) do |raw|
+  i = 0
+  while i < 40
+    raw[i] = ((i * 7 + 30) % 256).to_u8
+    i = i + 1
+  end
 end
-Hexdump.new(dumped).dump(bytes, 40)
+Hexdump.new(dumped).dump(bytes)
 lines = dumped.to_s.lines
 assert_int(3_i64, lines.size.to_i64, "forty bytes are three lines")
 assert_str("00000000  1e 25 2c 33 3a 41 48 4f  56 5d 64 6b 72 79 80 87  |.%,3:AHOV]dkry..|", lines[0], "a full line")
@@ -526,9 +546,13 @@ end
 assert_int(170_000_i64, copied.bytesize.to_i64, "a copy through a pipe arrives whole")
 assert_true(copied.ends_with?("abc" + "z" * 20_000), "and in order")
 # The reader gone, the next write refused, as a pipe's is.
-gone_in, gone_out = IyiIO.pipe
-gone_in.close
-assert_panics("a write to a pipe whose reader is closed") { gone_out.puts "nobody" }
+# The pipe is made in the task that catches the panic: its ends are tape
+# values, and a task does not capture the caller's.
+assert_panics("a write to a pipe whose reader is closed") do
+  gone_in, gone_out = IyiIO.pipe
+  gone_in.close
+  gone_out.puts "nobody"
+end
 puts "  a pipe's writer waits for room, its reader for a write, a close ends it, and a write past a closed reader is refused"
 
 puts "\nALL CHECKS PASSED"

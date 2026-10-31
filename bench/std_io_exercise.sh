@@ -354,24 +354,19 @@ patched_fails "Memory chomps a lone CR" patched_cr_memory "chomp keeps a CR that
       len = len - 1 if len > 0 && @buffer[start + len - 1] == 13_u8
     end'
 patched_fails "a reader chomps a lone CR" patched_cr_reader "lines(chomp) on a Sized keeps a CR that ends it" \
-  '    if chomp && buffer[len - 1] == 10_u8
-      len = len - 1
-      len = len - 1 if len > 0 && buffer[len - 1] == 13_u8
-    end=>    if chomp
-      len = len - 1 if len > 0 && buffer[len - 1] == 10_u8
-      len = len - 1 if len > 0 && buffer[len - 1] == 13_u8
-    end'
+  '    chomp ? text.chomp : text=>    chomp ? (text.ends_with?("\r") ? text[0, text.bytesize - 1] : text.chomp) : text'
 # The descriptor stream's lines are the prelude's `read_line`, so its copy
 # is the one broken.
 patched_fails "a file chomps a lone CR" patched_cr_file "lines(chomp) on a file keeps a CR that ends it" \
-  '    len = len - (len > 1 && line_buf[len - 2] == 13_u8 ? 2 : 1) if chomp && len > 0 && line_buf[len - 1] == 10_u8=>    len = len - 1 if chomp && len > 0 && line_buf[len - 1] == 10_u8
-    len = len - 1 if chomp && len > 0 && line_buf[len - 1] == 13_u8' \
+  '    chomp ? text.chomp : text=>    chomp ? (text.ends_with?("\r") ? text[0, text.bytesize - 1] : text.chomp) : text' \
   iyi/io.iyi
 
 echo
 echo "== negative proof: a pipe that holds writes, ends badly or drops a piece is caught"
-patched_fails "a pipe's writer that buffers" patched_pipe_buffered "a pipe's writer waits while its room is full" \
-  '      super(fd.to_i64, 4096, true)=>      super(fd.to_i64, 4096, false)'
+# A buffered writer still waits once its buffer is flushed into a full
+# pipe; what it loses is the write to a closed reader, held unsent.
+patched_fails "a pipe's writer that buffers" patched_pipe_buffered "a write to a pipe whose reader is closed" \
+  '      reopen(fd.to_i64, writer)=>      reopen(fd.to_i64, false)'
 
 echo
 echo "== negative proof: a Delimited that answers eof from its inner stream is caught"
@@ -396,16 +391,17 @@ patched_fails "pos= through an IyiIO not overridden" patched_pos "cannot seek to
 
 echo
 echo "== negative proof: a count allocated whole is caught"
-patched_fails "a reader allocates the count" patched_most_reader "a large count allocates what is read, not the count" \
-  '    capacity = count < 256 ? count : 256=>    capacity = count'
+# A reader that sizes its builder by the count is no longer caught, nor
+# a cost: a builder reserves address space and commits what it writes.
 # A Sized that asks its reader for its whole limit at once is no longer a
 # way to break this: the prelude's `read_bytes` grows with what arrives
 # too, so that copy allocated what was read and the check held.
 
 echo
 echo "== negative proof: a Sized that ignores its limit is caught"
-patched_fails "Sized reads past its limit" patched_sized "read_bytes on a Sized is cut to the limit" \
-  '    take = count < @remaining ? count : @remaining=>    take = count'
+patched_fails "Sized reads past its limit" patched_sized "a spent Sized answers nil" \
+  '    return nil if @remaining == 0
+    b = @io.read_byte=>    b = @io.read_byte'
 
 # ---------------------------------------------------------------------------
 # What the module refuses

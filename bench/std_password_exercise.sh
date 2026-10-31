@@ -93,7 +93,7 @@ fi
 # The oracles below write an iyi program of their cases, run it, and read
 # what it printed against Python's answers.
 B_HELPER='def b(hex : String) : Array(UInt8)
-  p = hex.to_unsafe
+  p = hex
   Array(UInt8).new(hex.bytesize // 2) do |i|
     hi = p[i * 2].to_i32
     lo = p[i * 2 + 1].to_i32
@@ -107,7 +107,7 @@ def hex(bytes : Array(UInt8)) : String
   digits = "0123456789abcdef"
   text = ""
   bytes.each do |x|
-    text = text + digits[x.to_i32 >> 4].to_s + digits[x.to_i32 & 15].to_s
+    text << digits[x.to_i32 >> 4].unsafe_chr << digits[x.to_i32 & 15].unsafe_chr
   end
   text
 end
@@ -242,9 +242,9 @@ import std/password::{Bcrypt}
 
 best = 0_i64
 3.times do |k|
-  t0 = IyiMark.now_ns
+  t0 = __iyi_monotonic_ns
   stored = Bcrypt.hash("correct horse battery staple", 10)
-  t1 = IyiMark.now_ns
+  t1 = __iyi_monotonic_ns
   raise "cost 10 did not verify" unless Bcrypt.verify("correct horse battery staple", stored)
   best = (t1 - t0).to_i64 if k == 0 || (t1 - t0).to_i64 < best
 end

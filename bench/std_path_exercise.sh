@@ -199,7 +199,7 @@ if [ -n "$PY" ]; then
     'return "".as_tape if trimmed_end <= anchor_end' '# no anchor test' \
     'a UNC share has no extension'
   caught_at "a drive-relative rest cut by characters" \
-    'name[own.bytesize, name.bytesize - own.bytesize]' 'name[own.bytesize, name.to_heap.size - own.bytesize]' \
+    'name[own.bytesize, name.bytesize - own.bytesize]' 'name[own.bytesize, name.chars.size - own.bytesize]' \
     'a non-ASCII name on another drive expands whole'
   caught_at "any name ending in : joined like a drive" \
     'bare = drive_end == 2 && anchor_end == 2 && @name.bytesize == 2' 'bare = !posix? && @name.bytesize > 0 && @name[-1] == 58_u8' \

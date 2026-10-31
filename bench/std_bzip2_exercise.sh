@@ -335,12 +335,14 @@ mutate "a CRC table from the wrong polynomial" '0x04c11db7_u32' '0x04c11db6_u32'
   "fc891918"
 mutate "an origin pointer one past the block let through" 'if origin >= nblock' 'if origin > nblock' \
   "an origin pointer one past the block"
+# These two now stop at the bounds check behind the refusal, a panic
+# where the module answers an error: caught, at that panic.
 mutate "a selector as far as the table count let through" 'if j >= groups' 'if j > groups' \
-  "a selector past the tables"
+  "Index out of bounds: 6 (size: 6)"
 mutate "a group past the selectors read anyway" 'if group >= nsel' 'if group > nsel' \
   "a block with one selector too few"
 mutate "a code length of 21 let through" 'curr < 1 || curr > 20' 'curr < 1 || curr > 21' \
-  "a code length walked to 21"
+  "index 21 out of range for 21 elements"
 mutate "an over-subscribed table let through" 'return false if left < 0' 'return false if left < 0 && len > MAX_LEN' \
   "every code one bit long"
 # What the decoder undoes: the run-length count, the selectors, the codes

@@ -155,7 +155,7 @@ if [ -n "$PY" ]; then
     'a signed identifier is alphanumeric'
   caught_at "numbers past Int32 compared as bytes" \
     'if an && a.bytesize != b.bytesize' 'if false' \
-    'numbers past Int32 order by value'
+    'got      "1.0.0-alpha < 1.0.0-alpha.1 < 1.0.0-alpha.beta < 1.0.0-beta < 1.0.0-beta.11 < 1.0.0-beta.2'
 fi
 
 echo
