@@ -1,7 +1,0 @@
-module test/ris/refused/local_break
-tape do
-  escaped = local_tape do
-    break String.build { |w| w.append("inner") }
-  end
-  puts escaped.to_s
-end

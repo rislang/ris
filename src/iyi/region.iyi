@@ -63,6 +63,10 @@ class RisRegion
   @@side_bytes : UInt64 = 0_u64
   @[ThreadLocal]
   @@grown : UInt64 = 0_u64
+  @[ThreadLocal]
+  @@results : UInt64 = 0_u64
+  @[ThreadLocal]
+  @@result_bytes : UInt64 = 0_u64
   @@total_scopes : UInt64 = 0_u64
   @@total_mapped : UInt64 = 0_u64
   @@total_unmapped : UInt64 = 0_u64
@@ -71,6 +75,15 @@ class RisRegion
   @@total_sides : UInt64 = 0_u64
   @@total_side_bytes : UInt64 = 0_u64
   @@total_grown : UInt64 = 0_u64
+  @@total_results : UInt64 = 0_u64
+  @@total_result_bytes : UInt64 = 0_u64
+
+  # A def's fresh result moved down to its caller's boundary (SPEC 1.5,
+  # 6.6): counted for RIS_TAPE_STATS.
+  def self.result_moved(bytes : UInt64) : Nil
+    @@results = @@results &+ 1_u64
+    @@result_bytes = @@result_bytes &+ bytes
+  end
 
   # The running fiber's tape, or 0: `IyiScheduler.switch_to` swaps it
   # with the fiber's own slot.
@@ -206,16 +219,6 @@ class RisRegion
     return yield if @@tape != 0
     @@tape = acquire(capacity)
     defer ::__iyi_tape_release
-    yield
-  end
-
-  # Unlike tape_scope, this always owns a separate chain of mappings.
-  # Ordinary defer captures the saved tape and also runs on nonlocal exits
-  # and panic; the single cached tape guard belongs to the outer scope.
-  def self.tape_local(capacity : UInt64, &)
-    saved = @@tape
-    @@tape = acquire(capacity)
-    defer restore_tape(saved)
     yield
   end
 
@@ -385,13 +388,30 @@ class RisRegion
   # Lazy text may first grow while a shorter-lived caller tape is active.
   # Link its state and payload directly to its construction-time owner.
   # Metadata occupies the first 40 bytes of the private reservation.
-  def self.text_state(home : UInt64, capacity : UInt64) : Pointer(UInt64)
+  # *after* is the home's newest side region when the text's slot was
+  # made (0: none): the reservation is linked just behind it, as if taken
+  # then, so a scope begun since then does not release it at its end.
+  def self.text_state(home : UInt64, capacity : UInt64,
+                      after : UInt64 = 0_u64) : Pointer(UInt64)
     no_tape if home == 0
     reservation = side_capacity(1_u64)
     reservation = capacity if capacity > reservation
     own = acquire_side(size_add(reservation, 40_u64))
-    IyiHeap.write64(own &+ OFF_PARENT, IyiHeap.read64(home &+ OFF_SIDE))
-    IyiHeap.write64(home &+ OFF_SIDE, own)
+    if after != 0
+      IyiHeap.write64(own &+ OFF_PARENT, IyiHeap.read64(after &+ OFF_PARENT))
+      IyiHeap.write64(after &+ OFF_PARENT, own)
+    else
+      IyiHeap.write64(own &+ OFF_PARENT, 0_u64)
+      tail = IyiHeap.read64(home &+ OFF_SIDE)
+      if tail == 0
+        IyiHeap.write64(home &+ OFF_SIDE, own)
+      else
+        while (following = IyiHeap.read64(tail &+ OFF_PARENT)) != 0
+          tail = following
+        end
+        IyiHeap.write64(tail &+ OFF_PARENT, own)
+      end
+    end
     state = Pointer(UInt64).new(own &+ DATA)
     start = state.address &+ 40_u64
     state.value = start
@@ -665,7 +685,11 @@ class RisRegion
     @@total_sides = @@total_sides &+ @@sides
     @@total_side_bytes = @@total_side_bytes &+ @@side_bytes
     @@total_grown = @@total_grown &+ @@grown
+    @@total_results = @@total_results &+ @@results
+    @@total_result_bytes = @@total_result_bytes &+ @@result_bytes
     IyiRuntimeLock.unlock
+    @@results = 0_u64
+    @@result_bytes = 0_u64
     @@scopes = 0_u64
     @@mapped = 0_u64
     @@unmapped = 0_u64
@@ -722,6 +746,11 @@ class RisRegion
     RisHeap.text(" side regions (")
     RisHeap.number(@@total_side_bytes)
     RisHeap.text(" transfer bytes copied)\n")
+    RisHeap.text("ris tape results: ")
+    RisHeap.number(@@total_results)
+    RisHeap.text(" moved down (")
+    RisHeap.number(@@total_result_bytes)
+    RisHeap.text(" bytes)\n")
     RisHeap.text("ris program storage: ")
     RisHeap.number(storage_taken)
     RisHeap.text(" bytes taken\n")

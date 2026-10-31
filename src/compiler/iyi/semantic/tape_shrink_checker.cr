@@ -85,18 +85,21 @@ class Iyi::TapeShrinkChecker
   @root_types = Hash(UInt64, Type).new
   @root_scopes = Hash(UInt64, Array(UInt64)).new
   @scopes = [] of UInt64
-  # SPEC 3.2: the explicit `tape` blocks around the walk, innermost
-  # last, and for each fresh root the innermost one it was made in. Its
-  # storage ends with that block, so it may not be stored where the
-  # destination was declared outside it.
+  # SPEC 1.1, 3.2: the scopes around the walk that free their scratch
+  # when they end - explicit `tape` blocks, marked defs, loop rounds and
+  # blocks - innermost last, and for each fresh root the innermost one it
+  # was made in. Its storage ends with that scope, so it may not be
+  # stored where the destination was declared outside it.
   @tape_blocks = [] of UInt64
+  @tape_kinds = Hash(UInt64, String).new
+  # A marked def's result or a block's value being checked: it leaves its
+  # scope through RESULT, not by a store.
+  @leaving : UInt64? = nil
+  # Locals bound in a loop round to data made in it: read after the loop,
+  # they would view freed scratch.
+  @dead = Hash(String, ASTNode).new
   @root_tapes = Hash(UInt64, UInt64).new
   @root_tape_sets = Hash(UInt64, Array(UInt64)).new
-  # Explicit `tape` blocks walked, and those whose scratch could not be
-  # proved private: a call grew or opaquely kept storage made outside the
-  # block. TapeScopeChecker resets only a walked block not tainted.
-  getter walked_tape_blocks = Set(UInt64).new
-  getter tainted_tape_blocks = Set(UInt64).new
   # Per solved def, the node that wrote each stored root; while a call
   # applies a callee's stores, the callee's site for the current root.
   @store_sites = Hash(UInt64, Hash(UInt64, ASTNode)).new
@@ -333,12 +336,8 @@ class Iyi::TapeShrinkChecker
           node.raise "cannot store a view beyond its owner scope; " \
                      "copy it with copy_to(owner) before storing it"
         end
-        if (block = tape_of(source)) && outside?(root, block)
-          message = "cannot store data made in this tape block where it " \
-                    "outlives the block (SPEC 3.2): its storage ends " \
-                    "with the block.\nCopy it with .copy_to(owner) onto the " \
-                    "destination's owner, or build it on the destination " \
-                    "(write into its String::Builder)"
+        if (block = tape_of(source)) && block != @leaving && outside?(root, block)
+          message = scope_message(block)
           # The store is in a method this call reaches (a handler's
           # `call`): point at that line, and name the call that reaches it.
           site = @store_site
@@ -385,26 +384,33 @@ class Iyi::TapeShrinkChecker
     Value.new([node.object_id], result.views, result.procs, result.unknown_proc)
   end
 
-  # A String made outside an enclosing tape block whose lazy text first
-  # grows in it takes its reservation on its home tape after the block's
-  # mark: that block keeps its tape. An Array, Hash, RisTree or builder
-  # reserves its space when it is made, so its growth takes none.
-  # Only the text pass sees lazy text: it runs this through `text_reset`,
-  # which call summaries reach too.
-  private def taint_growth(roots : Array(UInt64)) : Nil
-    return unless @checking
-    @tape_blocks.each do |block|
-      if roots.empty? || roots.any? { |r| !within?(r, block) }
-        @tainted_tape_blocks << block
-      end
+  # What a store of data made in *block* says, by the kind of scope.
+  private def scope_message(block : UInt64) : String
+    kind = @tape_kinds[block]? || "tape block"
+    if kind == "tape block"
+      "cannot store data made in this tape block where it " \
+      "outlives the block (SPEC 3.2): its storage ends " \
+      "with the block.\nCopy it with .copy_to(owner) onto the " \
+      "destination's owner, or build it on the destination " \
+      "(write into its String::Builder)"
+    else
+      "cannot store data made in this #{kind} where it outlives the " \
+      "#{kind} (SPEC 1.1, 3.6): every def, loop round and block frees " \
+      "its scratch when it ends.\nCopy it with .copy_to(owner) onto the " \
+      "destination's owner, write it into a parameter (a " \
+      "String::Builder or Array the caller owns), clear and refill a " \
+      "value made before, or read the value before the loop"
     end
   end
 
-  private def taint_store(roots : Array(UInt64)) : Nil
+  # Storage a constructor or an unmarked call makes, put into *roots*:
+  # it is on the innermost scope's scratch, so a destination from outside
+  # that scope would keep a view of it past its end (SPEC 3.6).
+  private def refuse_fresh_store(roots : Array(UInt64), node : ASTNode) : Nil
     return unless @checking && !@text_only
-    @tape_blocks.each do |block|
-      @tainted_tape_blocks << block if roots.any? { |r| outside?(r, block) }
-    end
+    return unless block = @tape_blocks.last?
+    return unless roots.any? { |r| outside?(r, block) }
+    node.raise scope_message(block)
   end
 
   private def note_fresh(root : UInt64) : Nil
@@ -446,6 +452,7 @@ class Iyi::TapeShrinkChecker
   end
 
   private def bind(target : Var, v : Value, env : Env, node : ASTNode)
+    @dead.delete(target.name)
     binding = "#binding:#{target.name}"
     declaration = env[binding]? || begin
       @root_scopes[target.object_id] = @scopes.dup
@@ -491,7 +498,6 @@ class Iyi::TapeShrinkChecker
 
   private def text_reset(roots : Array(UInt64), node : Call, env : Env,
                          cause : String)
-    taint_growth(roots)
     shrink(roots, node, cause)
     env.vars.each do |name, v|
       next if name == "self" || name.starts_with?("__temp_") ||
@@ -1078,6 +1084,15 @@ class Iyi::TapeShrinkChecker
     @tape_blocks.clear
     @root_tapes.clear
     @root_tape_sets.clear
+    @dead.clear
+    @leaving = nil
+    # A marked def frees its scratch when it ends (SPEC 1.1).
+    marked = owner && !{"new", "initialize"}.includes?(owner.name) &&
+             !TapeScopeChecker.parts(owner.body).nil?
+    if owner && marked
+      @tape_blocks << owner.object_id
+      @tape_kinds[owner.object_id] = "def"
+    end
     live = (env.vars.values + env.slots.values).flat_map(&.roots).to_set
     @root_types.select! { |root, _| live.includes?(root) }
     if @text_only && owner && (type = owner.owner?).is_a?(InstanceVarContainer)
@@ -1095,9 +1110,14 @@ class Iyi::TapeShrinkChecker
     end
     result = merge(value(body, env), @returns)
     if owner && !{"new", "initialize"}.includes?(owner.name)
+      if marked
+        check_leaving(owner.object_id, result, env, owner.type?, owner)
+        @leaving = owner.object_id
+      end
       boundary = fresh
       @root_scopes[boundary] = [] of UInt64
       check_store(boundary, stored(result, env), body)
+      @leaving = nil
     end
     @checking = false
     @shrinks.each do |shrink|
@@ -1227,8 +1247,14 @@ class Iyi::TapeShrinkChecker
   end
 
   private def loop_value(body : ASTNode, env : Env,
-                         cond : ASTNode? = nil) : Value
+                         cond : ASTNode? = nil, kind = "loop round") : Value
     @scopes << body.object_id
+    # A marked body frees its scratch at its end (SPEC 1.1).
+    scoped = !TapeScopeChecker.parts(body).nil?
+    if scoped
+      @tape_blocks << body.object_id
+      @tape_kinds[body.object_id] = kind
+    end
     start = @uses.size
     shrink_start = @shrinks.size
     returns = @returns
@@ -1262,7 +1288,77 @@ class Iyi::TapeShrinkChecker
     joined.vars.each { |key, v| env[key] = v }
     joined.slots.each { |key, v| env.slots[key] = v }
     @scopes.pop
+    if scoped
+      @tape_blocks.pop
+      # A local first bound in the round to the round's data is gone
+      # with the round: reading it after the loop is refused.
+      if kind == "loop round" && @checking && !@text_only
+        joined.vars.each do |key, v|
+          next if key.starts_with?("#") || key.starts_with?("__")
+          declaration = joined["#binding:#{key}"]?
+          next unless declaration
+          next unless declaration.roots.any? { |r| root_scope(r).includes?(body.object_id) }
+          if source_roots(v).any? { |r| (blocks = root_tapes_of(r)) && blocks.includes?(body.object_id) }
+            @dead[key] = body
+          end
+        end
+      end
+    end
     result
+  end
+
+  # The scopes *root* was made in, outermost first.
+  private def root_tapes_of(root : UInt64) : Array(UInt64)?
+    declaration = root
+    while true
+      if blocks = @root_tape_sets[declaration]?
+        return blocks
+      end
+      parent = @parents[declaration]?
+      return nil unless parent
+      declaration = parent[0]
+    end
+  end
+
+  # A def's result or a block's value leaves *scope* through RESULT: a
+  # String or Array made there moves down to the caller's boundary; any
+  # other value made there would have to be copied out, which is refused
+  # (SPEC 1.9). What it views from outside is checked as a store.
+  private def check_leaving(scope : UInt64, v : Value, env : Env,
+                            type : Type?, node : ASTNode) : Nil
+    return unless @checking && !@text_only
+    complete = stored(v, env)
+    flat = flat_result?(type)
+    sources = flat ? complete.views.map(&.root).reject { |r| complete.roots.includes?(r) } : source_roots(complete)
+    # A String's views are its own bytes, which move with it.
+    sources = [] of UInt64 if type.try { |t| type_name(t.remove_typedef) } == "String"
+    sources.each do |source|
+      blocks = root_tapes_of(source)
+      next unless blocks && blocks.includes?(scope)
+      what = node.is_a?(Def) ? "def `#{node.name}`" : "block"
+      node.raise "cannot return a value made in this #{what}'s scratch: " \
+                 "it would have to be copied out (SPEC 1.9).\nEnd the def " \
+                 "with the call alone, append to a String or Array " \
+                 "parameter, grow a local in place and return it, or " \
+                 "write copy_to(owner)"
+    end
+  end
+
+  # A String, or an Array whose elements hold no tape storage made with
+  # it: what moves down in one memmove. Non-tape values hold no roots.
+  private def flat_result?(type : Type?) : Bool
+    return true unless type
+    type = type.remove_typedef
+    if type.is_a?(UnionType)
+      return type.union_types.all? { |t| flat_result?(t) }
+    end
+    return true unless TapeChecker.tape_in(@program, type)
+    name = type_name(type)
+    name == "String" || name.starts_with?("Array(")
+  end
+
+  private def summary_marked?(target : Def) : Bool
+    !TapeScopeChecker.parts(target.body).nil?
   end
 
   private def use(v : Value, node : ASTNode, holder = "")
@@ -1341,6 +1437,12 @@ class Iyi::TapeShrinkChecker
     when ClassVar, Global
       global_value(node.var.object_id, node.type?)
     when Var, InstanceVar
+      if node.is_a?(Var) && (loop_body = @dead[node.name]?) && @checking && !@text_only
+        node.raise "cannot read `#{node.name}` after the loop: its value was " \
+                   "made in a loop round, which frees it at its end (SPEC " \
+                   "1.1).\nRead the value before the loop ends, or copy it " \
+                   "with copy_to(owner)"
+      end
       # A local proc keeps its known literal even when its type holds no
       # tape storage (a `String::Builder` parameter, say).
       return EMPTY unless reference?(node) || proc_type?(node.type?)
@@ -1389,7 +1491,7 @@ class Iyi::TapeShrinkChecker
         # handle instead keeps the identity of the storage it aliases.
         fresh_field = storage?(node.value) && @graph.fresh?(node.value)
         contents = fresh_field ? EMPTY : v
-        taint_store(roots) if fresh_field
+        refuse_fresh_store(roots, node) if fresh_field
         store(roots, contents, env, node)
       elsif target.is_a?(Var)
         if target.name.starts_with?("__")
@@ -1448,7 +1550,7 @@ class Iyi::TapeShrinkChecker
       if @text_only && node.global?
         return args.last? || EMPTY if node.name == TapeScopeChecker::RESULT
         return EMPTY if node.name.in?(TapeScopeChecker::MARK,
-          TapeScopeChecker::RESET)
+          TapeScopeChecker::RESET, TapeScopeChecker::RESULT_AT)
       end
       # Growing text's companion is its stable reservation identity.
       # Reset has the same invalidation rule as Array#clear. Call summaries
@@ -1469,7 +1571,6 @@ class Iyi::TapeShrinkChecker
           return merge(args.first? || EMPTY, Value.new(receiver.roots,
             receiver.roots.map { |root| view(root) }))
         elsif node.name == "append"
-          taint_growth(receiver.roots)
           return Value.new(receiver.roots,
             receiver.roots.map { |root| view(root) })
         end
@@ -1629,7 +1730,7 @@ class Iyi::TapeShrinkChecker
               # into an object from outside a tape block: the block's
               # scratch is not proved private. (A copy into an Array's own
               # pool shows no contents either; it keeps the block's tape.)
-              taint_store(destinations) if contents.roots.empty? && contents.views.empty?
+              refuse_fresh_store(destinations, node) if contents.roots.empty? && contents.views.empty? && !summary_marked?(target)
               incoming = translated(contents, summary, actuals, node.object_id)
               # A summary can write on only one branch. It cannot prove
               # that an older foreign text borrow was killed on every
@@ -1708,20 +1809,18 @@ class Iyi::TapeShrinkChecker
         block.args.each { |arg| outer[arg.name] = reference?(arg) ? yielded : EMPTY }
         @callback_chain << "#{node.name} block"
         @scopes << block.object_id
-        if {"tape", "local_tape"}.includes?(node.name)
+        if node.name == "tape"
           explicit = node.name == "tape" && !node.obj
-          proof = @unproved.size
           if explicit
             @tape_blocks << block.object_id
-            @walked_tape_blocks << block.object_id if @checking && !@text_only
+            @tape_kinds[block.object_id] = "tape block"
           end
-          value(block.body, outer)
-          if explicit
-            @tape_blocks.pop
-            @tainted_tape_blocks << block.object_id if @checking && @unproved.size > proof
-          end
+          block_value = value(block.body, outer)
+          check_leaving(block.object_id, block_value, outer, block.body.type?, block) if explicit
+          @tape_blocks.pop if explicit
         else
-          loop_value(block.body, outer)
+          block_value = loop_value(block.body, outer, kind: "block")
+          check_leaving(block.body.object_id, block_value, outer, block.body.type?, block)
         end
         @scopes.pop
         @callback_chain.pop

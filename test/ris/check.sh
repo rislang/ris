@@ -157,16 +157,6 @@ expect board_owner 'send String, Array bytes or a value struct'
 # Tasks capture Share values, or take a value handed off (SPEC 5.1).
 expect task_capture_mutable 'build tape values inside the spawn'
 expect task_capture_assigned 'a mutable borrow across tasks'
-expect task_local_tape 'open the `group` inside the `local_tape` block'
-expect task_local_tape_helper 'call `via` outside the `local_tape` block'
-
-# A task's captures outlive a local_tape when the group is inside it.
-out=$("$RIS" run test/ris/task_local_tape.ri 2>&1)
-if [ "$?" -eq 0 ] && grep -qxF 'PASS: task local_tape' <<<"$out"; then
-  echo "runs     task_local_tape (group inside, spawn outside)"
-else
-  echo "FAILED   task_local_tape: $out"; status=1
-fi
 expect task_tape_block_capture 'this task captures `word`, set inside a `tape` block'
 out=$("$RIS" run test/ris/task_tape_block.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = $'j2\nb1\nw3' ]; then
@@ -857,12 +847,6 @@ else
   status=1
 fi
 
-expect local_outer "is a variable of the code around this local_tape block"
-expect local_mutate "cannot use outer tape value"
-expect local_self 'cannot use outer tape value `self`'
-expect local_return "cannot return a tape value"
-expect local_break "cannot break a tape value"
-expect local_yield_break "cannot break a tape value"
 expect ffi_pointerof    "\`pointerof\` outside an @[Ffi] module"
 expect ffi_pointer      "\`Pointer\` outside an @[Ffi] module"
 expect ffi_to_unsafe    "Read a byte with \`s.byte_at(i)\`"
@@ -1764,14 +1748,16 @@ else
   echo "FAILED   scope_result_read: $out"; status=1
 fi
 
-# Retain 10,000 small results without retaining 64 KiB per-call scratch.
+# 10,000 fresh results each move down once, not staged and copied back;
+# 64 KiB of per-call scratch is freed; borrowed input stays a view.
 out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 "$RIS" run \
   test/ris/pending_result.ri 2>&1)
 if [ "$?" = 0 ] &&
    grep -qF 'PASS: pending results and borrowed views' <<<"$out" &&
    grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out" &&
-   grep -qF '2 scopes, 6 mappings made, 0 unmapped, 0 tapes grown' <<<"$out"; then
-  echo "runs     pending_result (bounded scratch, borrowed input stays a view)"
+   grep -qF 'ris tape results: 10000 moved down' <<<"$out" &&
+   grep -qF '2 scopes, 5 mappings made, 0 unmapped, 0 tapes grown' <<<"$out"; then
+  echo "runs     pending_result (results moved down, borrowed stay views)"
 else
   echo "FAILED   pending_result: $out"; status=1
 fi

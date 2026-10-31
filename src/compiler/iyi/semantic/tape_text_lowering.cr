@@ -6,8 +6,7 @@ class Iyi::TapeTextLowering < Iyi::Visitor
   SINKS = {"puts", "print", "raise"}
 
   def self.tape_block?(node : Call) : Bool
-    node.obj.nil? && !node.block.nil? &&
-      (node.name == "tape" || node.name == "local_tape")
+    node.obj.nil? && !node.block.nil? && node.name == "tape"
   end
 
   TAPE_TYPES = {"String", "Array", "RisTree"}

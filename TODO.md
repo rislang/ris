@@ -16,26 +16,6 @@ How to work (fewer tokens, faster to the goal):
 
 Breakage between steps is fine; no transition stages.
 
-1. Gates first (they fail until step 2): the a.first loop and the fwd
-   loop below, 1,000,000 rounds, RSS and mapping count flat; the
-   File.read wrapper with no result copied (RIS_TAPE_STATS).
-2. One compiler change:
-   * TapeScopeChecker.mark puts the mark on always; safe? and decide go.
-   * TapeShrinkChecker's store check (today only for a proved `tape do`)
-     runs in every def, loop round and block; what it cannot prove is
-     refused with its safe form (copy_to(owner), a parameter to write
-     into, clear and refill, read the value before the loop). Unknown is
-     refused, never allowed: a freed scope must not leave a live view.
-   * A call is a read by its type, not by a READS list: one that returns
-     no tape value, or a view, reads. Otherwise `a.first` is refused.
-   * local_tape, its codegen and its tests (task_local_tape,
-     task_local_tape_helper) are removed.
-   * __iyi_scope_result's staged copy goes: a one-call body hands the
-     destination on (no mark on that def); a flat fresh result (String,
-     Array of non-tape elements) ending a def after other work moves down
-     to the caller's boundary with one memmove; any other implicit
-     result copy is refused (SPEC 1.9). RIS_TAPE_STATS counts results
-     moved down (SPEC 6.6). pending_result.ri checks moves, not copies.
 3. std: `ris build --no-codegen test/ris/std_text_plain.ri` compiles
    every module; group the errors by message and fix each group in one
    pass. csv, xz and tar then free each row (CSVReader's refill assigns
@@ -62,6 +42,10 @@ Measured on the old rules (1,000,000 rounds in one `tape do`):
 
 ## Language and runtime
 
+* RisScopeMove keeps a def's scratch when its fresh result does not fit
+  on the marked mapping or its Array payload is on a mapping the scope
+  grew onto; a loop's `break` with a value and a block's `break` skip
+  their scope's reset. Free those too (SPEC 1.1).
 * Escaping closures outside program and joined task owners: pooled
   environments, including captured receivers; release them with their
   owner, check capture lifetimes and refuse unsupported escapes safely.

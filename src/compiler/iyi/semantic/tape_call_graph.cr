@@ -177,7 +177,7 @@ class Iyi::TapeCallGraph
     getter allocation = false
     getter suspension = false
     TAKES = {"tape_bytes", "growing_state", "text_state", "tape_resize", "take", "grow_onto",
-             "tape_scope", "tape_local", "tape="}
+             "tape_scope", "tape="}
 
     def initialize(@graph : TapeCallGraph)
     end
@@ -189,7 +189,8 @@ class Iyi::TapeCallGraph
       end
       return false if node.type?.try(&.no_return?)
       return false if node.name == TapeScopeChecker::MARK ||
-                      node.name == TapeScopeChecker::RESET
+                      node.name == TapeScopeChecker::RESET ||
+                      node.name == TapeScopeChecker::RESULT_AT
       if node.name == TapeScopeChecker::RESULT
         # The wrapper allocates only compiler-managed result storage, but
         # an explicit return still evaluates its original expression here.

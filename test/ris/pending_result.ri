@@ -3,7 +3,7 @@ def pending_address(text : String) : UInt64
   IyiHeap.read64(pointerof(text).address)
 end
 
-# Retained results must not retain a helper's scratch allocations.
+# A result moves down; the helper's 64 KiB scratch is freed.
 def pending_number(n : Int32) : String
   big = String::Builder.new(65_536)
   big.push(65_u8)
@@ -17,18 +17,14 @@ def pending_borrow(text : String, early : Bool) : String
   text[2, 2]
 end
 
+# Each fresh result moves down to its caller's boundary, once (SPEC 1.5):
+# 10,000 results, read in the round that made them.
 tape do
-  kept = Array(String).new(10_000)
   source = String.new("abcdef")
   i = 0
   while i < 10_000
-    kept << pending_number(i)
-    i += 1
-  end
-  i = 0
-  while i < kept.size
     expected = String.build(16) { |w| w.append_int(i) }
-    raise "wrong pending result" unless kept[i] == expected
+    raise "wrong pending result" unless pending_number(i) == expected
     i += 1
   end
   early = pending_borrow(source, true)

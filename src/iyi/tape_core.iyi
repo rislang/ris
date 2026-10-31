@@ -591,16 +591,6 @@ struct StaticArray(T, N)
     end
   end
 
-  def __iyi_pending_copy(owner : RisPendingCopy) : self
-    made = self
-    i = 0
-    while i < N
-      slots = pointerof(made).as(Pointer(T))
-      slots[i] = Tape.copy_value(slots[i], owner)
-      i += 1
-    end
-    made
-  end
 end
 
 struct Array(T)
@@ -949,19 +939,20 @@ end
 struct RisTextGrowth
   @writer : String::Builder? = nil
   @home : UInt64 = 0_u64
+  # The home's newest side region when this slot was made: a reservation
+  # first taken later, in a shorter scope, is linked behind it, so that
+  # scope's end does not release it (SPEC 1.1).
+  @side : UInt64 = 0_u64
 
   def initialize
     @home = RisRegion.tape
+    @side = @home == 0 ? 0_u64 : IyiHeap.read64(@home &+ RisRegion::OFF_SIDE)
   end
 
   # A copied object starts lazily in its destination owner. The String
   # field is copied independently; it becomes this slot's first input.
   def __iyi_copy_into(target : Pointer(self), work : RisCopyWork) : Nil
     target.value = self.class.new
-  end
-
-  def __iyi_pending_copy(owner : RisPendingCopy) : self
-    owner.run { self.class.new }
   end
 
   def __ris_text_reset(text : String) : String
@@ -989,7 +980,7 @@ struct RisTextGrowth
       end
     end
     unless writer
-      writer = String::Builder.__ris_text_home(@home, text.bytesize)
+      writer = String::Builder.__ris_text_home(@home, @side, text.bytesize)
       writer.append(text)
       RisRegion.text_initial_copy(text.bytesize.to_u64)
       @writer = writer
@@ -1009,7 +1000,7 @@ struct RisTextGrowth
       end
       return writer
     end
-    writer = String::Builder.__ris_text_home(@home, text.bytesize)
+    writer = String::Builder.__ris_text_home(@home, @side, text.bytesize)
     writer.append(text)
     RisRegion.text_initial_copy(text.bytesize.to_u64)
     @writer = writer
@@ -1034,9 +1025,9 @@ end
 struct String::Builder
   # State and bytes share a side reservation linked directly to *home*.
   # No allocation on a temporary caller tape can escape through a field.
-  def self.__ris_text_home(home : UInt64, capacity : Int32) : self
+  def self.__ris_text_home(home : UInt64, after : UInt64, capacity : Int32) : self
     made = uninitialized self
-    pointerof(made.@state).value = RisRegion.text_state(home, capacity.to_u64)
+    pointerof(made.@state).value = RisRegion.text_state(home, capacity.to_u64, after)
     made
   end
 end

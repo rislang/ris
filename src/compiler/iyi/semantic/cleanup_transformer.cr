@@ -660,7 +660,6 @@ module Iyi
           # where the call happens also raises.
           current_def.raises = true if current_def && target_def.raises?
         end
-        check_local_tape_helper_call(node, target_defs, current_def)
 
         if node.target_defs.not_nil!.empty?
           exps = [] of ASTNode
@@ -691,33 +690,6 @@ module Iyi
       end
 
       node
-    end
-
-    # ris: a closure environment is on the tape current where its scope
-    # starts. A task spawned inside a `local_tape` into a group opened
-    # outside it can outlive that tape, so its captures would be freed.
-    private def check_local_tape_spawn(a_def : Def, vars) : Nil
-      return unless @joined_task_blocks.includes?(a_def)
-      return unless @program.has_flag?("ris_no_gc")
-      check_tape_block_spawn(a_def, vars)
-      mark = @ris_scope_marks.reject(:tape).last?
-      return if mark == :group
-      ClosuredVarsCollector.collect(a_def).each do |captured|
-        next unless captured.is_a?(Var)
-        meta = vars.try &.[captured.name]?
-        next unless meta
-        next if meta.belongs_to?(a_def)
-        unless mark
-          # The group was handed in: the caller decides if this is safe.
-          @current_def.try { |helper| @ris_spawning_helpers << helper }
-          return
-        end
-        captured.raise "this task captures `#{captured.name}` inside a " \
-                       "`local_tape` block, which ends and frees the " \
-                       "captures before the task's group joins: open the " \
-                       "`group` inside the `local_tape` block, or spawn " \
-                       "outside the `local_tape` block"
-      end
     end
 
     # ris: SPEC 3.2 for a task's captures. A value made in an
@@ -785,28 +757,6 @@ module Iyi
       end
     end
 
-    # ris: defs that spawn a task with captures into a group they did not
-    # open. Called inside a `local_tape` with no `group` opened between,
-    # the task could read captures the local tape freed.
-    @ris_spawning_helpers = Set(Def).new
-
-    private def check_local_tape_helper_call(node : Call, target_defs,
-                                             current_def) : Nil
-      return unless @program.has_flag?("ris_no_gc")
-      return unless target_defs.any? { |d| @ris_spawning_helpers.includes?(d) }
-      case @ris_scope_marks.reject(:tape).last?
-      when :local
-        node.raise "`#{node.name}` spawns a task with captures into a group " \
-                   "it was handed, and this call is inside a `local_tape` " \
-                   "block, which ends and frees the captures before the " \
-                   "group joins: open the `group` inside the `local_tape` " \
-                   "block, or call `#{node.name}` outside the `local_tape` " \
-                   "block"
-      when nil
-        current_def.try { |helper| @ris_spawning_helpers << helper }
-      end
-    end
-
     # PROTOTYPE (ris, step B): a block that becomes a proc - `-> { }`, the
     # block `spawn` or a callback keeps - may run after the tape block it
     # was made in has ended, so it may not capture a tape value.
@@ -814,14 +764,13 @@ module Iyi
     @joined_task_calls = Hash(Def, Call).new
 
     # ris: the blocks a call's block is lexically inside in this def:
-    # :local for `local_tape`, :group for `group`.
+    # :group for `group`, :tape for `tape`.
     @ris_scope_marks = [] of Symbol
     @ris_scope_names = [] of Set(String)?
 
     private def ris_scope_mark(node : Call) : Symbol?
       return nil if node.obj
       case node.name
-      when "local_tape" then :local
       when "group"      then :group
       when "tape"       then :tape
       end
@@ -832,7 +781,9 @@ module Iyi
       return if a_def.iyi_defer?
       return unless a_def.closure?
       vars = a_def.vars
-      check_local_tape_spawn(a_def, vars)
+      if @joined_task_blocks.includes?(a_def) && @program.has_flag?("ris_no_gc")
+        check_tape_block_spawn(a_def, vars)
+      end
       ClosuredVarsCollector.collect(a_def).each do |captured|
         next unless captured.is_a?(Var)
         meta = vars.try &.[captured.name]?

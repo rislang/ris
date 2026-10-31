@@ -75,15 +75,6 @@ def tape(&) : Nil
   nil
 end
 
-# A tape of its own, even inside a `tape` block, freed when the block
-# ends: for work whose temporaries should not stay on the outer tape
-# until it ends. Copy what is kept before leaving. Outer `String`s
-# may be read; other outer tape values become owned data first.
-def local_tape(&) : Nil
-  RisRegion.tape_local(Tape::CAPACITY) { yield }
-  nil
-end
-
 # Internals of the tape types: `String`, `Array`, `RisTree` and theirs.
 module Tape
   # An index out of range: raised out of line, so the `[]` inlined at
@@ -116,11 +107,6 @@ module Tape
 
   def self.copy_value(value, owner)
     value.copy_to(owner)
-  end
-
-  # Implicit result placement never invokes a user-defined copy callback.
-  def self.copy_value(value, owner : RisPendingCopy)
-    value.__iyi_pending_copy(owner)
   end
 
   # Validate the public shape, not the pointers backing tape containers.
@@ -197,19 +183,8 @@ struct String
     end
   end
 
-  def __iyi_pending_copy(owner : RisPendingCopy) : self
-    copy_to(owner)
-  end
-
   def copy_to(owner) : self
     Tape.owner_copy(self, owner)
-  end
-
-  def copy_to(owner : RisPendingCopy) : self
-    if owner.is_a?(RisPendingCopy)
-      return self unless owner.contains?(@ptr.address)
-    end
-    owner.run { String.new(self) }
   end
 
   def +(other : String) : String
@@ -629,30 +604,8 @@ struct String::Builder
     (@state + 4_i64).value = RisRegion.program_active? ? 1_u64 : 0_u64
   end
 
-  def __iyi_pending_copy(owner : RisPendingCopy) : self
-    copy_to(owner)
-  end
-
   def copy_to(owner) : self
     Tape.owner_copy(self, owner)
-  end
-
-  def copy_to(owner : RisPendingCopy) : self
-    if owner.is_a?(RisPendingCopy)
-      return self unless owner.contains?(@state.address)
-      cached = owner.lookup(@state.address)
-      if cached != 0
-        made = self
-        pointerof(made.@state).value = Pointer(UInt64).new(cached)
-        return made
-      end
-    end
-    owner.run do
-      made = self.class.new(length)
-      owner.remember(@state.address, made.@state.address) if owner.is_a?(RisPendingCopy)
-      made.append(finish)
-      made
-    end
   end
 
   @[AlwaysInline]
@@ -1874,30 +1827,8 @@ struct Array(T)
     Array::View(T).new(self, indexes)
   end
 
-  def __iyi_pending_copy(owner : RisPendingCopy) : self
-    copy_to(owner)
-  end
-
   def copy_to(owner) : self
     Tape.owner_copy(self, owner)
-  end
-
-  def copy_to(owner : RisPendingCopy) : self
-    if owner.is_a?(RisPendingCopy)
-      return self unless owner.contains?(@state.address)
-      cached = owner.lookup(@state.address)
-      if cached != 0
-        made = self
-        pointerof(made.@state).value = Pointer(UInt64).new(cached)
-        return made
-      end
-    end
-    owner.run do
-      made = self.class.new(size)
-      owner.remember(@state.address, made.@state.address) if owner.is_a?(RisPendingCopy)
-      each { |value| made << Tape.copy_value(value, owner) }
-      made
-    end
   end
 
   # For `IndexView`, whose indexes are known in range.
@@ -2153,35 +2084,8 @@ struct RisTree(T)
     ((@state + 1_i64).value & 0x7fffffff_u64).unsafe_to_i32
   end
 
-  def __iyi_pending_copy(owner : RisPendingCopy) : self
-    copy_to(owner)
-  end
-
   def copy_to(owner) : self
     Tape.owner_copy(self, owner)
-  end
-
-  def copy_to(owner : RisPendingCopy) : self
-    if owner.is_a?(RisPendingCopy)
-      return self unless owner.contains?(@state.address)
-      cached = owner.lookup(@state.address)
-      if cached != 0
-        made = self
-        pointerof(made.@state).value = Pointer(UInt64).new(cached)
-        return made
-      end
-    end
-    owner.run do
-      made = self.class.new(size)
-      owner.remember(@state.address, made.@state.address) if owner.is_a?(RisPendingCopy)
-      index = 0
-      while index < size
-        entry = slot(index).value
-        made.put(Tape.copy_value(entry.value, owner), entry.stop)
-        index += 1
-      end
-      made
-    end
   end
 
   # A value with no children; its index.
@@ -2363,15 +2267,6 @@ struct Struct
     {% end %}
   end
 
-  def __iyi_pending_copy(owner : RisPendingCopy) : self
-    made = self
-    {% for field in @type.instance_vars %}
-      pointerof(made.@{{field.name.id}}).value =
-        Tape.copy_value(@{{field.name.id}}, owner)
-    {% end %}
-    made
-  end
-
   def copy_to(owner)
     Tape.owner_copy(self, owner)
   end
@@ -2383,14 +2278,6 @@ struct Tuple
     {% for type, i in T %}
       slot = target.as(Pointer(UInt8)) + offsetof(self, {{i}})
       work.push(self[{{i}}], slot.as(Pointer({{type}})))
-    {% end %}
-  end
-
-  def __iyi_pending_copy(owner : RisPendingCopy)
-    {% begin %}
-      { {% for type, i in T %}
-          Tape.copy_value(self[{{i}}], owner),
-        {% end %} }
     {% end %}
   end
 
@@ -2413,14 +2300,6 @@ struct NamedTuple
       offset = offsetof(Tuple({% for k in T.keys %}{{T[k]}}, {% end %}), {{i}})
       slot = target.as(Pointer(UInt8)) + offset
       work.push(self[{{key.symbolize}}], slot.as(Pointer({{type}})))
-    {% end %}
-  end
-
-  def __iyi_pending_copy(owner : RisPendingCopy)
-    {% begin %}
-      { {% for key, type in T %}
-          {{key.id}}: Tape.copy_value(self[{{key.symbolize}}], owner),
-        {% end %} }
     {% end %}
   end
 
@@ -2449,10 +2328,6 @@ class Object
     {% end %}
   end
 
-  def __iyi_pending_copy(owner : RisPendingCopy)
-    self
-  end
-
   def copy_to(owner)
     Tape.owner_copy(self, owner)
   end
@@ -2476,6 +2351,7 @@ end
 # overlaps where it goes, past the writer's cursor.
 lib LibTapeCopy
   fun memcpy = "llvm.memcpy.p0.p0.i64"(destination : Pointer(UInt8), source : Pointer(UInt8), count : UInt64, volatile : Bool) : Nil
+  fun memmove = "llvm.memmove.p0.p0.i64"(destination : Pointer(UInt8), source : Pointer(UInt8), count : UInt64, volatile : Bool) : Nil
 end
 
 # Outside the prelude, scopes begin with `__iyi_scope_mark(false)`.
@@ -2552,84 +2428,6 @@ def __iyi_scope_release(mark : RisScopeMark) : Nil
   IyiHeap.write64(region &+ RisRegion::OFF_CURSOR, mark.cursor)
 end
 
-# A pending result is staged outside the rollback, then copied onto the
-# caller's restored mark. Only fresh backing storage is copied: borrowed
-# handles and byte views keep their original addresses. The two copies buy
-# a simple bounded scratch lifetime without overwriting unread result data.
-struct RisPendingCopy
-  def initialize(@head : Pointer(UInt64), @depth : Pointer(Int32),
-                 @source : RisScopeMark, @source_head : UInt64,
-                 @memo : Pointer(UInt64), @back : Bool, @saved : Pointer(UInt64))
-  end
-
-  def contains?(address : UInt64) : Bool
-    region = @source_head
-    while region != 0
-      low = region == @source.region ? @source.cursor : region &+ RisRegion::DATA
-      return true if address >= low &&
-        address < IyiHeap.read64(region &+ RisRegion::OFF_CURSOR)
-      side = IyiHeap.read64(region &+ RisRegion::OFF_SIDE)
-      stop = region == @source.region ? @source.side : 0_u64
-      while side != stop && side != 0
-        return true if address >= side &+ RisRegion::DATA &&
-          address < IyiHeap.read64(side &+ RisRegion::OFF_CURSOR)
-        side = IyiHeap.read64(side &+ RisRegion::OFF_PARENT)
-      end
-      break if region == @source.region
-      region = IyiHeap.read64(region &+ RisRegion::OFF_PARENT)
-    end
-    false
-  end
-
-  def run(&)
-    return yield if @back || @depth.value > 0
-    @head.value = RisRegion.acquire(RisRegion::CAPACITY) if @head.value == 0
-    @saved.value = RisRegion.tape
-    RisRegion.tape = @head.value
-    @depth.value = 1
-    value = yield
-    restore(@saved.value)
-    value
-  end
-
-  # Mutable result handles keep their internal sharing across both copies.
-  # The relocation list lives on staging storage, including on copy-back;
-  # no bookkeeping is retained on the caller's tape.
-  def lookup(source : UInt64) : UInt64
-    entry = @memo.value
-    while entry != 0
-      return IyiHeap.read64(entry &+ 8_u64) if IyiHeap.read64(entry) == source
-      entry = IyiHeap.read64(entry &+ 16_u64)
-    end
-    0_u64
-  end
-
-  def remember(source : UInt64, destination : UInt64) : Nil
-    saved = RisRegion.tape
-    if @back
-      @saved.value = saved
-      @depth.value = 1
-      RisRegion.tape = @head.value
-    end
-    entry = RisRegion.tape_bytes(24_u64)
-    IyiHeap.write64(entry, source)
-    IyiHeap.write64(entry &+ 8_u64, destination)
-    IyiHeap.write64(entry &+ 16_u64, @memo.value)
-    @memo.value = entry
-    if @back
-      @head.value = RisRegion.tape
-      RisRegion.tape = saved
-      @depth.value = 0
-    end
-  end
-
-  def restore(saved : UInt64) : Nil
-    @head.value = RisRegion.tape
-    @depth.value = 0
-    RisRegion.tape = saved
-  end
-end
-
 def __iyi_pending_drop(head : Pointer(UInt64)) : Nil
   region = head.value
   head.value = 0_u64
@@ -2703,38 +2501,124 @@ def __iyi_pending_pop(guard : Pointer(RisPendingGuard)) : Nil
   {% end %}
 end
 
+# A def's result where its scope ends (SPEC 1.5, 1.9). The scratch is
+# released either way. A String or Array made in it moves down to the
+# caller's boundary first: its bytes, or an Array's state block, with one
+# memmove; an Array's payload reservation is handed to the caller's side
+# chain. Any other tape result views storage from before the mark: the
+# compiler refuses one that would have to be copied out of the scratch.
 def __iyi_scope_result(mark : RisScopeMark, value : T) : T forall T
   return value if mark.region == 0
-  {% if T == ::String || T == ::String::Builder || T.name.starts_with?("Array(") || T.name.starts_with?("RisTree(") || T.annotation(::OnTape) || T < ::Tuple || T < ::NamedTuple || T.union? %}
-    head = 0_u64
-    depth = 0
-    memo = 0_u64
-    saved = RisRegion.tape
-    guard = RisPendingGuard.new(pointerof(head), pointerof(depth), pointerof(saved))
-    __iyi_pending_guard(pointerof(guard))
-    staged = Tape.copy_value(value, RisPendingCopy.new(
-      pointerof(head), pointerof(depth), mark, RisRegion.tape,
-      pointerof(memo), false, pointerof(saved)))
-    __iyi_scope_reset(mark)
-    result = if head == 0
-      staged
-    else
-      first = head
-      while (parent = IyiHeap.read64(first &+ RisRegion::OFF_PARENT)) != 0
-        first = parent
-      end
-      source = RisScopeMark.new(first, first &+ RisRegion::DATA, 0_u64)
-      memo = 0_u64
-      Tape.copy_value(staged, RisPendingCopy.new(
-        pointerof(head), pointerof(depth), source, head, pointerof(memo),
-        true, pointerof(saved)))
-    end
-    __iyi_pending_pop(pointerof(guard))
-    result
+  {% if T == ::String %}
+    RisScopeMove.text(mark, value)
+  {% elsif T.name.starts_with?("Array(") %}
+    RisScopeMove.array(mark, value)
   {% else %}
     __iyi_scope_reset(mark)
     value
   {% end %}
+end
+
+# A block's value, in its slot: as `__iyi_scope_result`.
+def __iyi_scope_result_at(mark : RisScopeMark, slot : Pointer(T)) : Nil forall T
+  slot.value = __iyi_scope_result(mark, slot.value)
+end
+
+module RisScopeMove
+  # Whether *address* is in the scratch made since *mark*: the marked
+  # mapping past its cursor, a mapping it grew onto, or a side region
+  # linked since.
+  def self.scratch?(mark : RisScopeMark, address : UInt64) : Bool
+    region = mark.region
+    running = RisRegion.tape
+    while running != 0
+      low = running == region ? mark.cursor : running &+ RisRegion::DATA
+      return true if address >= low &&
+                     address < IyiHeap.read64(running &+ RisRegion::OFF_CURSOR)
+      side = IyiHeap.read64(running &+ RisRegion::OFF_SIDE)
+      stop = running == region ? mark.side : 0_u64
+      while side != stop && side != 0
+        return true if address >= side &+ RisRegion::DATA &&
+                       address < IyiHeap.read64(side &+ RisRegion::OFF_CURSOR)
+        side = IyiHeap.read64(side &+ RisRegion::OFF_PARENT)
+      end
+      break if running == region
+      running = IyiHeap.read64(running &+ RisRegion::OFF_PARENT)
+    end
+    false
+  end
+
+  # Room for *size* bytes at the mark, on the marked mapping.
+  def self.room?(mark : RisScopeMark, size : UInt64) : Bool
+    mark.cursor &+ size <= IyiHeap.read64(mark.region &+ RisRegion::OFF_LIMIT)
+  end
+
+  def self.boundary(mark : RisScopeMark, size : UInt64) : RisScopeMark
+    keep = (mark.cursor &+ size &+ 7_u64) & 0xFFFFFFFFFFFFFFF8_u64
+    RisScopeMark.new(mark.region, keep, mark.side)
+  end
+
+  def self.text(mark : RisScopeMark, value : String) : String
+    bytes = value.to_unsafe.address
+    size = value.bytesize.to_u64
+    unless scratch?(mark, bytes)
+      __iyi_scope_reset(mark)
+      return value
+    end
+    # A result that does not fit where the scope began keeps its scratch.
+    return value unless room?(mark, size)
+    LibTapeCopy.memmove(Pointer(UInt8).new(mark.cursor),
+      Pointer(UInt8).new(bytes), size, false)
+    __iyi_scope_reset(boundary(mark, size))
+    RisRegion.result_moved(size)
+    String.new(Pointer(UInt8).new(mark.cursor), value.bytesize)
+  end
+
+  def self.array(mark : RisScopeMark, value : T) : T forall T
+    state = value.@state.address
+    unless scratch?(mark, state)
+      __iyi_scope_reset(mark)
+      return value
+    end
+    return value unless room?(mark, 64_u64)
+    # The payload's reservation leaves the scratch's side chain, so the
+    # reset keeps it, and joins the caller's.
+    region = mark.region
+    own = IyiHeap.read64(state &+ 24_u64)
+    taken = false
+    if own != 0 && RisRegion.tape == region
+      previous = 0_u64
+      side = IyiHeap.read64(region &+ RisRegion::OFF_SIDE)
+      while side != mark.side && side != 0
+        if side == own
+          following = IyiHeap.read64(side &+ RisRegion::OFF_PARENT)
+          if previous == 0
+            IyiHeap.write64(region &+ RisRegion::OFF_SIDE, following)
+          else
+            IyiHeap.write64(previous &+ RisRegion::OFF_PARENT, following)
+          end
+          taken = true
+          break
+        end
+        previous = side
+        side = IyiHeap.read64(side &+ RisRegion::OFF_PARENT)
+      end
+    end
+    # A payload on a mapping the scope grew onto stays with its scratch.
+    return value if own != 0 && !taken
+    LibTapeCopy.memmove(Pointer(UInt8).new(mark.cursor),
+      Pointer(UInt8).new(state), 64_u64, false)
+    __iyi_scope_reset(boundary(mark, 64_u64))
+    if taken
+      IyiHeap.write64(own &+ RisRegion::OFF_PARENT,
+        IyiHeap.read64(region &+ RisRegion::OFF_SIDE))
+      IyiHeap.write64(region &+ RisRegion::OFF_SIDE, own)
+    end
+    RisRegion.result_moved(64_u64)
+    made = value
+    pointerof(made.@state).value = Pointer(UInt64).new(mark.cursor)
+    made
+  end
 end
 
 # Numeric text is read directly from tape bytes, as heap text is.
@@ -3494,14 +3378,6 @@ struct SlicePool(T)
       end
     end
 
-    def __iyi_pending_copy(owner : RisPendingCopy) : self
-      return self unless owner.contains?(@state.address)
-      owner.run do
-        made = Array(T).new(@size) { |i| Tape.copy_value(self[i], owner) }
-        self.class.new(made, 0, @size)
-      end
-    end
-
     def [](index : Int32) : T
       check(index)
       Pointer(T).new(@state.value + (@offset + index).to_u64 *
@@ -3595,22 +3471,6 @@ struct SlicePool::List(T)
       i -= 1
       work.push(self[i].as(T?), Pointer(T?).new(made.@state.value.run.@state.value +
         (made.@state.value.run.offset + i).to_u64 * sizeof(T?).to_u64))
-    end
-  end
-
-  def __iyi_pending_copy(owner : RisPendingCopy) : self
-    return self unless owner.contains?(@state.address)
-    cached = owner.lookup(@state.address)
-    if cached != 0
-      made = self
-      pointerof(made.@state).value = Pointer(State(T)).new(cached)
-      return made
-    end
-    owner.run do
-      made = self.class.new(SlicePool(T?).new(size))
-      owner.remember(@state.address, made.@state.address)
-      each { |item| made << Tape.copy_value(item, owner) }
-      made
     end
   end
 

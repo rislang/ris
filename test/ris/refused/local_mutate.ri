@@ -1,8 +1,0 @@
-module test/ris/refused/local_mutate
-tape do
-  outer = Array(String).new
-  local_tape do
-    text = String.build { |w| w.append("inner") }
-    outer.push(text)
-  end
-end

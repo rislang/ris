@@ -23,7 +23,6 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
     end
   end
 
-  @local_tape = false
   @scope : Block? = nil
   @owner : Def? = nil
   @block : Block? = nil
@@ -59,23 +58,14 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
     end
 
     if tape_scope?(node)
-      local_tape = node.name == "local_tape"
-      if (local_tape || !@scope) && (type = node.type?) && TapeChecker.tape_in(@program, type)
-        node.raise "cannot break a tape value out of its #{local_tape ? "local_tape block" : "tape block"}: its storage ends with the block" + ownership_hint(type)
+      if !@scope && (type = node.type?) && TapeChecker.tape_in(@program, type)
+        node.raise "cannot break a tape value out of its tape block: its storage ends with the block" + ownership_hint(type)
       end
       if block = node.block
-        previous_scope, previous_local_tape = @scope, @local_tape
-        previous_contexts = @contexts
-        if local_tape
-          @contexts = Set(ASTNode).new.compare_by_identity
-          @scope = block
-          @local_tape = true
-        else
-          @scope ||= block
-        end
-        visit_block(block, @owner, @yield_context, !local_tape && !previous_scope.nil?)
-        @scope, @local_tape = previous_scope, previous_local_tape
-        @contexts = previous_contexts
+        previous_scope = @scope
+        @scope ||= block
+        visit_block(block, @owner, @yield_context, !previous_scope.nil?)
+        @scope = previous_scope
       end
       return false
     end
@@ -116,7 +106,7 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
 
   # Keep the proposed repair valid for both text and tape-bearing DTOs.
   private def tape_scope_name : String
-    @local_tape ? "local_tape block" : "tape block"
+    "tape block"
   end
 
   private def ownership_hint(type : Type) : String
@@ -127,13 +117,10 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
     end
   end
 
-  # The prelude's top-level `tape { }`, or `local_tape { }`; not another
-  # method of either name.
+  # The prelude's top-level `tape { }`; not another method of that name.
   private def tape_scope?(node : Call) : Bool
     return false unless node.block
     if node.name == "tape" && node.obj.nil?
-      @graph.targets(node).try &.any?(&.owner.is_a?(Program)) || false
-    elsif node.name == "local_tape" && node.obj.nil?
       @graph.targets(node).try &.any?(&.owner.is_a?(Program)) || false
     else
       false
@@ -173,21 +160,10 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
     # its captured owner; the associated String still obeys scope checks.
     return false if node.ris_text_slot?
     return false if @program_vars.includes?(variable_key(node.name))
-    if @local_tape && (type = node.type?) && TapeChecker.tape_in(@program, type) && type.remove_typedef.to_s != "String"
-      unless scope_var?(node.name)
-        node.raise "cannot use outer tape value `#{node.name}` inside local_tape:\n" \
-                   "it could retain temporary storage; use copy_to(owner) before entering.\n" \
-                   "Outer String values may be read."
-      end
-    end
     false
   end
 
   private def check_outer_self(node : ASTNode)
-    if @local_tape && (owner = @owner) && !@contexts.includes?(owner) && TapeChecker.tape?(@program, owner.owner) && owner.owner.to_s != "String"
-      node.raise "cannot use outer tape value `self` inside local_tape:\n" \
-                 "use copy_to(owner) before entering"
-    end
   end
 
   def visit(node : Self)
@@ -320,13 +296,12 @@ class Iyi::TapeLifetimeChecker < Iyi::Visitor
     key = VisitKey.new(node.def, nil, nil)
     if @visited.add?(key)
       previous_scope, previous_owner, previous_block, previous_yield = @scope, @owner, @block, @yield_context
-      previous_contexts, previous_local_tape = @contexts, @local_tape
+      previous_contexts = @contexts
       @contexts = Set(ASTNode).new.compare_by_identity
-      @local_tape = false
       @scope, @owner, @block, @yield_context = nil, node.def, nil, nil
       node.def.body.accept self
       @scope, @owner, @block, @yield_context = previous_scope, previous_owner, previous_block, previous_yield
-      @contexts, @local_tape = previous_contexts, previous_local_tape
+      @contexts = previous_contexts
     end
     false
   end
