@@ -18,8 +18,32 @@ Breakage between steps is fine; no transition stages.
 
 3. std: csv, xz and tar free each row (CSVReader's refill assigns
    `@text = more` today, which keeps a row's Arrays to the program's end).
+   Started: CSV.parse yields each row, CSVReader refills `@row`/`@bytes`
+   with clear. Blocked by the shrink checker: growing a self Array field
+   (`@head <<` in load_header) with any live view of it is refused as a
+   pool run (`possible_array?` on a parameter root), though a plain
+   Array grows in place (SPEC 2.2).
 4. samples and tests: RIS_CHECK_MATCH per group, then one full check.sh.
+   `RIS_SCOPE_ERRORS=all ris build --no-codegen x.ri` lists every scope
+   refusal. Over test/ris and samples, 585 sites (2026-10-31): 293
+   "cannot return a value made in this def" (mostly `X | SomeError`
+   whose error struct holds an interpolated message: read into a flat
+   String or bits first, then wrap them in a one-call def, as
+   std/netip does), 125 loop-round stores, 73 def stores, 72 block
+   stores, 21 block values. By file: mail 55, x509 47, asn1 34,
+   regex 31, tls 27, socket 27, toml 25, bzip2 22, big 19, ...
+   Tests still calling `local_tape` move to `tape`.
 5. benches: build each, group the refusals by message, fix per group.
+
+Checker holes found on the way (unknown must be refused, SPEC 3.6):
+
+* A value a marked def yields to its caller's block may be its scratch,
+  but the block sees it as a view of the call's inputs, so it may store
+  it outward (CSV.parse's row before this change): mark yielded values
+  as the yielding scope's.
+* Call summaries model text a callee builds from its inputs
+  (interpolation, inspect) as a view of them; tape_text now adds a
+  fresh root for an allocating String call not known to answer a view.
 
 Measured on the old rules (1,000,000 rounds in one `tape do`):
 
@@ -91,6 +115,11 @@ After the Now steps; their refusals replace most of the old bench list.
 
 ## Known failures
 
+* check.sh (2026-10-31, 79bd829d2): 143 FAILED, 387 pass. Every scope
+  frees now; std, samples and tests that keep scratch past a scope or
+  return a non-flat value made in a def are refused until steps 3-5
+  migrate them (loop_shrink, http_*, samples/ris/*, yaml, toml, xml,
+  regex, tls-based ones, heap_check among them).
 * check.sh (2026-10-31): samples/ris/web prints `000` (no answer);
   http_answer_scope panics `cannot create a socket: error 24` (EMFILE),
   also run alone and already at d056d2aa2.
