@@ -16,13 +16,6 @@ How to work (fewer tokens, faster to the goal):
 
 Breakage between steps is fine; no transition stages.
 
-3. std: csv, xz and tar free each row (CSVReader's refill assigns
-   `@text = more` today, which keeps a row's Arrays to the program's end).
-   Started: CSV.parse yields each row, CSVReader refills `@row`/`@bytes`
-   with clear. Blocked by the shrink checker: growing a self Array field
-   (`@head <<` in load_header) with any live view of it is refused as a
-   pool run (`possible_array?` on a parameter root), though a plain
-   Array grows in place (SPEC 2.2).
 4. samples and tests: RIS_CHECK_MATCH per group, then one full check.sh.
    `RIS_SCOPE_ERRORS=all ris build --no-codegen x.ri` lists every scope
    refusal. Over test/ris and samples, 585 sites (2026-10-31): 293
@@ -37,6 +30,15 @@ Breakage between steps is fine; no transition stages.
 
 Checker holes found on the way (unknown must be refused, SPEC 3.6):
 
+* Field paths fold at FIELD_DEPTH (now 6, was 4): a deeper path through
+  a reader's own fields (entry.@reader.@inflater.@core.@chunk) conflates
+  a refill with views of its siblings. Fold by type, not depth.
+* A String local's `<<` is lowered to `__ris_append` unless the local is
+  growing; that result views the argument, so a block appending to an
+  outer String is refused. Lend the local to a builder parameter.
+* A one-call def's value moves down only when it is one fresh flat
+  value: a tuple or two locals do not. Bzip2.decompress tags its String
+  (a 0 or 1 byte first) to answer bytes or an error in one value.
 * A value a marked def yields to its caller's block may be its scratch,
   but the block sees it as a view of the call's inputs, so it may store
   it outward (CSV.parse's row before this change): mark yielded values

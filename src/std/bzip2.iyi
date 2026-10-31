@@ -270,6 +270,14 @@ class Bzip2Decode
   @io : IyiIO?
   # The piece in hand.
   @input : String
+  # Once pieces come from @io, the input is @chunk's bytes, refilled in
+  # place and read through input_text, so no field views what is cleared;
+  # @carry holds the bytes not yet read across a refill.
+  @streamed : Bool = false
+  @chunk : String::Builder = String::Builder.new(1)
+  @carry : Array(UInt8) = Array(UInt8).new
+  # The error's sentence, the decoder's own: it fails once.
+  @message : String::Builder = String::Builder.new(128)
   @in_pos : Int32
   @in_end : Int32
   @bits : UInt64
@@ -320,7 +328,13 @@ class Bzip2Decode
     @tt = Array(UInt32).new
     @tt_size = 0
     @tables = Array(Bzip2Table).new(6)
-    6.times { @tables << Bzip2Table.new }
+    # Each table made here, in the decoder's own scratch, not a block's.
+    @tables << Bzip2Table.new
+    @tables << Bzip2Table.new
+    @tables << Bzip2Table.new
+    @tables << Bzip2Table.new
+    @tables << Bzip2Table.new
+    @tables << Bzip2Table.new
     @lengths = Array(Int32).new(6 * Bzip2Table::MAX_SYMS, 0)
     @selectors = Array(UInt8).new(MAX_SELECTORS, 0_u8)
     @seq_to_unseq = Array(UInt8).new(256, 0_u8)
@@ -436,7 +450,7 @@ class Bzip2Decode
     rest = @in_end - @in_pos
     bits = @bits
     count = @count
-    input = @input
+    input = input_text
     from = @in_pos
     String.build(held + rest) do |dst|
       i = 0
@@ -451,7 +465,9 @@ class Bzip2Decode
   private def fail(message : String) : Nil
     return if @failed
     @failed = true
-    @error = Bzip2Error.new(message)
+    @message.append(message)
+    @error = Bzip2Error.new(@message.finish)
+    nil
   end
 
   # The next piece from the source, kept after what is left of this one,
@@ -459,31 +475,37 @@ class Bzip2Decode
   private def more : Bool
     return false if @exhausted
     io = @io
-    chunk = io ? io.read_bytes(65536) : nil
-    unless chunk && chunk.bytesize > 0
+    unless io
       @exhausted = true
       return false
     end
     rest = @in_end - @in_pos
-    if rest > 0
-      input = @input
-      from = @in_pos
-      piece = chunk
-      chunk = String.build(rest + piece.bytesize) do |dst|
-        rest.times { |k| dst.push(input.byte_at(from + k)) }
-        dst << piece
-      end
-    end
-    @input = chunk
+    @carry.clear
+    input = input_text
+    from = @in_pos
+    rest.times { |k| @carry << input.byte_at(from + k) }
+    @streamed = true
+    @chunk.clear
+    @carry.each { |b| @chunk.push(b) }
+    got = io.read_str(65536, @chunk)
     @in_pos = 0
-    @in_end = chunk.bytesize
+    @in_end = rest + got
+    if got == 0
+      @exhausted = true
+      return false
+    end
     true
+  end
+
+  # The piece in hand: the caller's *data*, or the chunk read from @io.
+  private def input_text : String
+    @streamed ? @chunk.finish : @input
   end
 
   # As many bytes of the piece in hand as the accumulator holds.
   private def load : Nil
     while @count <= 56 && @in_pos < @in_end
-      @bits = @bits.unsafe_shl(8) | @input.byte_at(@in_pos).to_u64
+      @bits = @bits.unsafe_shl(8) | input_text.byte_at(@in_pos).to_u64
       @in_pos = @in_pos + 1
       @count = @count + 8
     end
@@ -827,20 +849,36 @@ pub class Bzip2Reader
   # over them; the read that gives its last byte checks it, and answers
   # the error instead of those bytes. A *max* below 1 is a panic.
   def read(max : Int32 = 65536) : String | Bzip2Error
+    answer(read_text(max))
+  end
+
+  # The bytes read into a flat String, which moves down (SPEC 1.5); the
+  # answer only wraps it. "" where the stream failed.
+  private def read_text(max : Int32) : String
     raise "Bzip2Reader: read wants at least one byte, not #{max}" if max < 1
+    sink = ""
+    pump(sink, max > CHUNK ? CHUNK : max)
+    sink
+  end
+
+  private def answer(text : String) : String | Bzip2Error
+    return @core.error if @core.failed?
+    text
+  end
+
+  # Up to *want* bytes into *sink*; none past a failure.
+  private def pump(sink : String::Builder, want : Int32) : Nil
     core = @core
-    want = max > CHUNK ? CHUNK : max
     n = 0
-    sink = String::Builder.new(want)
     while n < want
       core.advance unless core.output?
-      return core.error if core.failed?
+      return if core.failed?
       break if core.done?
       n = n + core.emit(sink, want - n)
-      return core.error if core.failed?
+      return if core.failed?
       break if n > 0 && !core.output?
     end
-    sink.finish
+    nil
   end
 
   # Bytes the source gave beyond the last stream, for a caller that frames
@@ -883,18 +921,36 @@ pub struct Bzip2
   # them is. Bytes after the last stream that do not start another are
   # ignored, as bzip2(1) ignores them.
   def self.decompress(data : String) : String | Bzip2Error
+    answer(tagged(data))
+  end
+
+  # The bytes after a 0 byte, or the error's sentence after a 1: one
+  # flat String, which moves down to the caller (SPEC 1.5).
+  def self.tagged(data : String) : String
     core = Bzip2Decode.new(nil, data)
-    cap = data.bytesize * 4 + 1024
-    cap = 1 << 26 if cap > 1 << 26
-    sink = String::Builder.new(cap)
+    sink = ""
+    sink << 0_u8.unsafe_chr
+    return "\u0001#{core.error.message}" unless drain(core, sink)
+    sink
+  end
+
+  # Every byte *core* decodes into *sink*; false where it fails.
+  def self.drain(core : Bzip2Decode, sink : String::Builder) : Bool
     while true
       core.advance unless core.output?
-      return core.error if core.failed?
-      break if core.done?
+      return false if core.failed?
+      return true if core.done?
       core.emit(sink, 1 << 30)
-      return core.error if core.failed?
+      return false if core.failed?
     end
-    sink.finish
+    true
+  end
+
+  # What `tagged` read, as the answer: a view of it.
+  def self.answer(tagged : String) : String | Bzip2Error
+    text = tagged[1, tagged.bytesize - 1]
+    return Bzip2Error.new(text) if tagged.byte_at(0) == 1_u8
+    text
   end
 end
 

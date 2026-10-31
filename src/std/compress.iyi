@@ -221,6 +221,25 @@ class Huffman
     @count = Array(Int32).new(16, 0)
     @symbol = Array(Int32).new(n + 1, 0)
     @fast = Array(Int32).new(1 << FAST, 0)
+    @left = 0
+    build(lengths, n, at)
+  end
+
+  # Room for *n* symbols, built later with `build`: a decoder rebuilds
+  # one table per dynamic block in place rather than making a new one.
+  def initialize(n : Int32)
+    @count = Array(Int32).new(16, 0)
+    @symbol = Array(Int32).new(n + 1, 0)
+    @fast = Array(Int32).new(1 << FAST, 0)
+    @left = 0
+  end
+
+  # The table for *n* lengths of *lengths* from *at*, over what it held;
+  # *n* is at most the size it was made for.
+  def build(lengths : Array(Int32), n : Int32, at : Int32 = 0) : Nil
+    @count.fill(0)
+    @symbol.fill(0)
+    @fast.fill(0)
     i = 0
     while i < n
       @count[lengths[at + i]] = @count[lengths[at + i]] + 1
@@ -283,6 +302,7 @@ class Huffman
       code = code << 1
       len = len + 1
     end
+    nil
   end
 
   def over? : Bool
@@ -377,6 +397,12 @@ class Inflate
   @io : IyiIO? = nil
   # The piece in hand, read by index.
   @input : String
+  # Once pieces come from @io, the input is @chunk's bytes, refilled in
+  # place and read through input_text, so no field views what is cleared;
+  # @carry holds the bytes not yet read across a refill.
+  @streamed : Bool = false
+  @chunk : String::Builder = String::Builder.new(1)
+  @carry : Array(UInt8) = Array(UInt8).new
   @in_pos : Int32
   @in_end : Int32
   @bits : UInt64
@@ -405,12 +431,16 @@ class Inflate
   @fixed_dist : Huffman
   @lit : Huffman
   @dist : Huffman
+  # A dynamic block's tables, rebuilt in place per block.
+  @dyn_lit : Huffman = Huffman.new(288)
+  @dyn_dist : Huffman = Huffman.new(32)
   @lengths : Array(Int32)
   @check : UInt32
   @size : UInt32
   @hcrc : UInt32
   @failed : Bool
   @error : CompressError
+  @message : String::Builder
 
   # The whole-string form until `over_io` or `by_pieces`: *data* from
   # *start* is all the input there is, and the output grows from
@@ -455,15 +485,18 @@ class Inflate
     @hcrc = 0_u32
     @failed = false
     @error = CompressError.new("")
+    @message = String::Builder.new(128)
   end
 
-  # The whole-string form: every byte of the stream, or a panic with the
-  # sentence `Inflater` would answer.
-  def self.whole(envelope : Envelope, data : String, start : Int32, capacity : Int32) : Inflate
+  # The whole-string form: every byte of the stream into *into*, or a
+  # panic with the sentence `Inflater` would answer; how far into *data*
+  # the stream went. The decoder is this call's scratch.
+  def self.whole(envelope : Envelope, data : String, start : Int32, capacity : Int32, into : String::Builder) : Int32
     core = new(envelope, data, start, capacity)
     core.run(2147483647)
     raise core.error.message if core.failed?
-    core
+    core.output(into)
+    core.used
   end
 
   def failed? : Bool
@@ -479,8 +512,12 @@ class Inflate
   end
 
   # Every byte written, for the whole-string form.
-  def output : String
-    Inflate.text(@buf, 0, @pos)
+  def output(into : String::Builder) : Nil
+    i = 0
+    while i < @pos
+      into.push(@buf[i])
+      i = i + 1
+    end
   end
 
   # *n* bytes of *src* from *at* as a String.
@@ -494,13 +531,24 @@ class Inflate
     @in_pos - @count // 8
   end
 
+  # The bytes are read into a flat String, which moves down (SPEC 1.5);
+  # the answer only wraps it.
   def read(max : Int32) : String | CompressError
-    raise "Inflater: read wants at least one byte, not #{max}" if max < 1
+    answer(read_text(max))
+  end
+
+  private def answer(text : String) : String | CompressError
     return @error if @failed
+    text
+  end
+
+  private def read_text(max : Int32) : String
+    raise "Inflater: read wants at least one byte, not #{max}" if max < 1
+    return "" if @failed
     want = max
     want = STREAM - WINDOW - MATCH if want > STREAM - WINDOW - MATCH
     run(want) if @pos - @given < want
-    return @error if @failed
+    return "" if @failed
     n = @pos - @given
     n = max if n > max
     at = @given
@@ -517,7 +565,7 @@ class Inflate
     held = @count // 8
     rest = @in_end - @in_pos
     bits = @bits
-    input = @input
+    input = input_text
     from = @in_pos
     String.build(held + rest) do |w|
       held.times { |i| w.push((bits.unsafe_shr(i * 8) & 255_u64).to_u8) }
@@ -575,6 +623,7 @@ class Inflate
     # The last piece ended between blocks with nothing loaded ahead, so
     # there is nothing of it to keep.
     @input = data
+    @streamed = false
     @in_pos = 0
     @in_end = data.bytesize
     # Room for four times the piece to begin with, a megabyte at most:
@@ -605,7 +654,11 @@ class Inflate
   private def fail(message : String) : Nil
     return if @failed
     @failed = true
-    @error = CompressError.new(message)
+    # The message is the decoder's, in its own builder, not the caller's
+    # scratch. A decoder fails once: the builder is never cleared.
+    @message.append(message)
+    @error = CompressError.new(@message.finish)
+    nil
   end
 
   # The next piece from the source, kept after what is left of this one,
@@ -613,31 +666,37 @@ class Inflate
   private def more : Bool
     return false if @exhausted
     io = @io
-    chunk = io ? io.read_bytes(65536) : nil
-    unless chunk && chunk.bytesize > 0
+    unless io
       @exhausted = true
       return false
     end
     rest = @in_end - @in_pos
-    if rest > 0
-      input = @input
-      from = @in_pos
-      piece = chunk
-      chunk = String.build(rest + piece.bytesize) do |w|
-        rest.times { |k| w.push(input.byte_at(from + k)) }
-        w << piece
-      end
-    end
-    @input = chunk
+    @carry.clear
+    input = input_text
+    from = @in_pos
+    rest.times { |k| @carry << input.byte_at(from + k) }
+    @streamed = true
+    @chunk.clear
+    @carry.each { |b| @chunk.push(b) }
+    got = io.read_str(65536, @chunk)
     @in_pos = 0
-    @in_end = chunk.bytesize
+    @in_end = rest + got
+    if got == 0
+      @exhausted = true
+      return false
+    end
     true
+  end
+
+  # The piece in hand: the caller's *data*, or the chunk read from @io.
+  private def input_text : String
+    @streamed ? @chunk.finish : @input
   end
 
   # As many bytes of the piece in hand as the accumulator holds.
   private def load : Nil
     while @count <= 56 && @in_pos < @in_end
-      @bits = @bits | @input.byte_at(@in_pos).to_u64.unsafe_shl(@count)
+      @bits = @bits | input_text.byte_at(@in_pos).to_u64.unsafe_shl(@count)
       @in_pos = @in_pos + 1
       @count = @count + 8
     end
@@ -649,7 +708,7 @@ class Inflate
       if @in_pos >= @in_end
         return false unless more
       end
-      @bits = @bits | @input.byte_at(@in_pos).to_u64.unsafe_shl(@count)
+      @bits = @bits | input_text.byte_at(@in_pos).to_u64.unsafe_shl(@count)
       @in_pos = @in_pos + 1
       @count = @count + 8
     end
@@ -688,7 +747,7 @@ class Inflate
     if @in_pos >= @in_end
       return -1 unless more
     end
-    b = @input.byte_at(@in_pos).to_i32
+    b = input_text.byte_at(@in_pos).to_i32
     @in_pos = @in_pos + 1
     b
   end
@@ -714,7 +773,7 @@ class Inflate
   private def peek_byte(k : Int32) : Int32
     held = @count // 8
     return (@bits.unsafe_shr(k * 8) & 255_u64).to_i32 if k < held
-    @input.byte_at(@in_pos + k - held).to_i32
+    input_text.byte_at(@in_pos + k - held).to_i32
   end
 
   # One symbol: by the table when the code is short and its bits are in
@@ -980,10 +1039,12 @@ class Inflate
       end
     end
     return fail("DEFLATE: the block has no end-of-block code") if lengths[256] == 0
-    lit = Huffman.new(lengths, nlen)
+    lit = @dyn_lit
+    lit.build(lengths, nlen)
     return fail("DEFLATE: the code lengths are over-subscribed") if lit.over?
     return fail("DEFLATE: the literal/length code is incomplete") if lit.incomplete?(true)
-    dist = Huffman.new(lengths, ndist, nlen)
+    dist = @dyn_dist
+    dist.build(lengths, ndist, nlen)
     return fail("DEFLATE: the code lengths are over-subscribed") if dist.over?
     return fail("DEFLATE: the distance code is incomplete") if dist.incomplete?(true)
     @lit = lit
@@ -1017,7 +1078,7 @@ class Inflate
       n = @in_end - @in_pos if n > @in_end - @in_pos
       n = want - pending if n > want - pending
       buf = @buf
-      input = @input
+      input = input_text
       k = 0
       while k < n
         buf[@pos + k] = input.byte_at(@in_pos + k)
@@ -2252,8 +2313,8 @@ pub struct Deflate
   end
 
   def self.decompress(data : String) : String
-    sink, used = inflate(data, 0)
-    sink
+    capacity = Wire.capacity(data.bytesize, -1_i64)
+    String.build(capacity) { |w| Inflate.whole(Envelope::Raw, data, 0, capacity, w) }
   end
 
   # The bytes, and how many of the stream's bytes they took: an envelope
@@ -2264,9 +2325,11 @@ pub struct Deflate
   # the default, is no idea, and the guess is three times the stream's
   # bytes. Held to what the stream could expand to, so a length that lies
   # is not an allocation it asked for.
-  def self.inflate(data : String, start : Int32, expected : Int64 = -1_i64) : {String, Int32}
-    core = Inflate.whole(Envelope::Raw, data, start, Wire.capacity(data.bytesize - start, expected))
-    {core.output, core.used}
+  #
+  # The bytes go into *into*; the answer is how far into *data* the
+  # stream went.
+  def self.inflate(data : String, start : Int32, into : String::Builder, expected : Int64 = -1_i64) : Int32
+    Inflate.whole(Envelope::Raw, data, start, Wire.capacity(data.bytesize - start, expected), into)
   end
 end
 
@@ -2287,7 +2350,8 @@ pub struct Zlib
   end
 
   def self.decompress(data : String) : String
-    Inflate.whole(Envelope::Zlib, data, 0, Wire.capacity(data.bytesize, -1_i64)).output
+    capacity = Wire.capacity(data.bytesize, -1_i64)
+    String.build(capacity) { |w| Inflate.whole(Envelope::Zlib, data, 0, capacity, w) }
   end
 
   def self.hex(w : UInt32) : String
@@ -2328,7 +2392,8 @@ pub struct Gzip
   def self.decompress(data : String) : String
     expected = -1_i64
     expected = Wire.get_le(data, data.bytesize - 4).to_i64 if data.bytesize >= 18
-    Inflate.whole(Envelope::Gzip, data, 0, Wire.capacity(data.bytesize, expected)).output
+    capacity = Wire.capacity(data.bytesize, expected)
+    String.build(capacity) { |w| Inflate.whole(Envelope::Gzip, data, 0, capacity, w) }
   end
 end
 

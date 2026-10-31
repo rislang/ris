@@ -388,9 +388,31 @@ pub class TarEntry
   @reader : TarReader
   @index : Int32
 
-  def initialize(@reader : TarReader, @index : Int32, @name : String, @linkname : String, @size : Int64, @mode : Int32,
-                 @uid : Int64, @gid : Int64, @uname : String, @gname : String, @mtime : Time, @typeflag : UInt8,
-                 @devmajor : Int64, @devminor : Int64, @pax : Hash(String, String), @format : TarFormat, @offset : Int64)
+  # The reader's one entry, refilled by each `next_entry`: what it holds
+  # views the reader's storage, which the next entry reuses.
+  def initialize(@reader : TarReader, @pax : Hash(String, String))
+    @index = 0
+    @name = ""
+    @linkname = ""
+    @size = 0_i64
+    @mode = 0
+    @uid = 0_i64
+    @gid = 0_i64
+    @uname = ""
+    @gname = ""
+    @mtime = Time.unix(0_i64)
+    @typeflag = 0_u8
+    @devmajor = 0_i64
+    @devminor = 0_i64
+    @format = TarFormat::V7
+    @offset = 0_i64
+    @type = TarType::Other
+  end
+
+  # The next header's fields over this entry's.
+  def refill(@index : Int32, @name : String, @linkname : String, @size : Int64, @mode : Int32,
+             @uid : Int64, @gid : Int64, @uname : String, @gname : String, @mtime : Time, @typeflag : UInt8,
+             @devmajor : Int64, @devminor : Int64, @format : TarFormat, @offset : Int64) : Nil
     @type = case @typeflag
             when 0_u8
               @name.ends_with?("/") ? TarType::Directory : TarType::Regular
@@ -404,6 +426,7 @@ pub class TarEntry
             when 55_u8 then TarType::Contiguous
             else            TarType::Other
             end
+    nil
   end
 
   def index : Int32
@@ -471,7 +494,9 @@ pub class TarReader
   @bzip2 : Bzip2Reader | Nil
   @xz : XzReader | Nil
   @pending : String
-  @started : Bool
+  # The first block, which picks the decoder; read by `new`, so the
+  # decoder is the reader's own.
+  @first : String::Builder
   @gzip : Bool
   @offset : Int64
   @left : Int64
@@ -479,16 +504,35 @@ pub class TarReader
   @index : Int32
   @current : TarEntry | Nil
   @ended : Bool
-  @failed : TarError | Nil
+  # Whether an error was answered: every call after answers it again,
+  # the last sentence in @error_text (@error_at, @error_size).
+  @failed : Bool
+  @error_at : Int32
+  @error_size : Int32
+  @gather_failed : Bool = false
   @global : Hash(String, String)
+  # An entry's text, cleared by each `next_entry`: its names and pax
+  # records are views of @names, its records in @local and @pax, the
+  # header it came from in @header. Global records keep theirs in
+  # @global_text for the whole archive.
+  @names : String::Builder
+  @global_text : String::Builder
+  @header : String::Builder
+  @local : Hash(String, String)
+  @pax : Hash(String, String)
+  @entry : TarEntry | Nil
+  # What is wrong, the sentences of every TarError this reader answers;
+  # only grows, so an error kept (the reader's own @failed) stays.
+  @error_text : String::Builder
 
-  # The archive *io* holds from where it is, plain or gzip.
+  # The archive *io* holds from where it is, plain or compressed: its
+  # first block is read here, to pick the decoder.
   def initialize(@io : IyiIO)
     @inflater = nil
     @bzip2 = nil
     @xz = nil
     @pending = ""
-    @started = false
+    @first = String::Builder.new(TarBytes::BLOCK)
     @gzip = false
     @offset = 0_i64
     @left = 0_i64
@@ -496,8 +540,35 @@ pub class TarReader
     @index = 0
     @current = nil
     @ended = false
-    @failed = nil
+    @failed = false
+    @error_at = 0
+    @error_size = 0
     @global = {} of String => String
+    @names = String::Builder.new(1024)
+    @global_text = String::Builder.new(64)
+    @header = String::Builder.new(TarBytes::BLOCK)
+    @local = {} of String => String
+    @pax = {} of String => String
+    @entry = nil
+    @error_text = String::Builder.new(128)
+    @entry = TarEntry.new(self, @pax)
+    # The first block says whether the stream is gzip (1f 8b), bzip2
+    # ("BZh" and a block-size digit) or xz (FD 37 7A 58 5A 00).
+    while @first.bytesize < TarBytes::BLOCK
+      break if @io.read_str(TarBytes::BLOCK - @first.bytesize, @first) == 0
+    end
+    first = @first.finish
+    p = first
+    if first.bytesize >= 2 && p[0] == 0x1f_u8 && p[1] == 0x8b_u8
+      @gzip = true
+      @inflater = Inflater.new(Envelope::Gzip, @io, first)
+    elsif first.bytesize >= 4 && p[0] == 0x42_u8 && p[1] == 0x5a_u8 && p[2] == 0x68_u8 && p[3] >= 0x31_u8 && p[3] <= 0x39_u8
+      @bzip2 = Bzip2Reader.new(@io, first)
+    elsif first.bytesize >= 6 && p[0] == 0xfd_u8 && p[1] == 0x37_u8 && p[2] == 0x7a_u8 && p[3] == 0x58_u8 && p[4] == 0x5a_u8 && p[5] == 0_u8
+      @xz = XzReader.new(@io, head: first)
+    else
+      @pending = first
+    end
   end
 
   # Whether the stream is gzip; known once the first entry is asked for.
@@ -517,13 +588,13 @@ pub class TarReader
 
   # The next entry, its header read and checked; nil at the end. The
   # data of the entry before, as much as was not read, is read past.
+  # The reader has one entry, refilled here: its names and pax records
+  # view the reader's storage until the next call, as a CSV row does.
   def next_entry : TarEntry | Nil | TarError
-    if failed = @failed
-      return failed
-    end
+    return failure if @failed
     return nil if @ended
     got = advance
-    @failed = got if got.is_a?(TarError)
+    @failed = true if got.is_a?(TarError)
     got
   end
 
@@ -593,30 +664,30 @@ pub class TarReader
       e = next_entry!
       break unless e
       reason = TarReader.unsafe_name(e.name, windows)
-      return TarError.new("tar: #{e.name.inspect} would be extracted outside the directory (tar slip): #{reason}") if reason
+      return error("tar: #{e.name.inspect} would be extracted outside the directory (tar slip): #{reason}") if reason
       parts = TarReader.parts(e.name)
       if parts.empty?
         next if e.directory?
-        return TarError.new("tar: #{e.name.inspect} names the directory itself, and is a #{e.type_name}")
+        return error("tar: #{e.name.inspect} names the directory itself, and is a #{e.type_name}")
       end
       unless e.file? || e.directory? || e.symlink? || e.hardlink?
-        return TarError.new("tar: #{e.name.inspect} is a #{e.type_name}, which extract does not make")
+        return error("tar: #{e.name.inspect} is a #{e.type_name}, which extract does not make")
       end
       if e.symlink?
         why = TarReader.unsafe_link(e.name, e.linkname, windows)
-        return TarError.new("tar: the symbolic link #{e.name.inspect} points at #{e.linkname.inspect}, outside the directory (tar slip): #{why}") if why
+        return error("tar: the symbolic link #{e.name.inspect} points at #{e.linkname.inspect}, outside the directory (tar slip): #{why}") if why
       end
       target = ""
       if e.hardlink?
         why = TarReader.unsafe_name(e.linkname, windows)
-        return TarError.new("tar: the hard link #{e.name.inspect} names #{e.linkname.inspect}, outside the directory (tar slip): #{why}") if why
+        return error("tar: the hard link #{e.name.inspect} names #{e.linkname.inspect}, outside the directory (tar slip): #{why}") if why
         tparts = TarReader.parts(e.linkname)
-        return TarError.new("tar: the hard link #{e.name.inspect} names the directory itself") if tparts.empty?
+        return error("tar: the hard link #{e.name.inspect} names the directory itself") if tparts.empty?
         through(dir, tparts, e.linkname)!
         target = dir + "/" + tparts.join("/")
         tinfo = File.info?(target, follow_symlinks: false)
         unless tinfo && tinfo.file?
-          return TarError.new("tar: the hard link #{e.name.inspect} names #{e.linkname.inspect}, which is not a regular file extracted before it")
+          return error("tar: the hard link #{e.name.inspect} names #{e.linkname.inspect}, which is not a regular file extracted before it")
         end
       end
       through(dir, parts, e.name)!
@@ -626,7 +697,7 @@ pub class TarReader
       there = File.info?(path, follow_symlinks: false)
       if there
         if there.directory? && !there.symlink?
-          return TarError.new("tar: #{e.name.inspect} is a directory on disk, and a #{e.type_name} in the archive") unless e.directory?
+          return error("tar: #{e.name.inspect} is a directory on disk, and a #{e.type_name} in the archive") unless e.directory?
         else
           File.delete(path)
           there = nil
@@ -683,9 +754,9 @@ pub class TarReader
       info = File.info?(path, follow_symlinks: false)
       if info
         if info.symlink?
-          return TarError.new("tar: #{name.inspect} would be written through the symbolic link #{parts[0, i + 1].join("/").inspect} (tar slip)")
+          return error("tar: #{name.inspect} would be written through the symbolic link #{parts[0, i + 1].join("/").inspect} (tar slip)")
         end
-        return TarError.new("tar: #{name.inspect} needs #{parts[0, i + 1].join("/").inspect} to be a directory, and it is not one") unless info.directory?
+        return error("tar: #{name.inspect} needs #{parts[0, i + 1].join("/").inspect} to be a directory, and it is not one") unless info.directory?
       end
       i = i + 1
     end
@@ -696,20 +767,17 @@ pub class TarReader
   def entry_read(entry : TarEntry, max : Int32) : String | TarError
     raise "TarEntry: read wants at least one byte, not #{max}" if max < 1
     check_current(entry)
-    if failed = @failed
-      return failed
-    end
+    return failure if @failed
     return "" if @left == 0_i64
     n = @left < max.to_i64 ? @left.to_i32 : max
     got = take(n)
     if got.is_a?(TarError)
-      @failed = got
+      @failed = true
       return got
     end
     if got.bytesize < n
-      fault = TarError.new("tar: the archive ends inside #{entry.name.inspect}'s data, #{entry.data_size - @left + got.bytesize.to_i64} of #{entry.data_size} bytes in")
-      @failed = fault
-      return fault
+      @failed = true
+      return error("tar: the archive ends inside #{entry.name.inspect}'s data, #{entry.data_size - @left + got.bytesize.to_i64} of #{entry.data_size} bytes in")
     end
     @left = @left - n.to_i64
     got
@@ -717,17 +785,35 @@ pub class TarReader
 
   # For `TarEntry#read_all`.
   def entry_read_all(entry : TarEntry) : String | TarError
+    taken(read_all_text(entry))
+  end
+
+  # The rest of the data as a flat String, which moves down (SPEC 1.5);
+  # a failure sets @gather_failed, its error recorded.
+  private def read_all_text(entry : TarEntry) : String
     check_current(entry)
+    @gather_failed = false
     if @left > 2147483647_i64
-      return TarError.new("tar: #{entry.name.inspect} holds #{@left} bytes, more than a string holds; read it with read")
+      error("tar: #{entry.name.inspect} holds #{@left} bytes, more than a string holds; read it with read")
+      @gather_failed = true
+      return ""
     end
-    out = ""
+    sink = ""
+    read_rest(entry, sink)
+    sink
+  end
+
+  private def read_rest(entry : TarEntry, sink : String::Builder) : Nil
     while true
-      piece = entry_read(entry, 65536)!
+      piece = entry_read(entry, 65536)
+      if piece.is_a?(TarError)
+        @gather_failed = true
+        return
+      end
       break if piece.empty?
-      out << piece
+      sink << piece
     end
-    out
+    nil
   end
 
   private def check_current(entry : TarEntry) : Nil
@@ -739,39 +825,57 @@ pub class TarReader
 
   # Up to *n* bytes of the archive, fewer only where it ends.
   private def take(n : Int32) : String | TarError
-    start unless @started
-    got = if @inflater || @bzip2 || @xz
-            first = ""
-            out = nil.as(String::Builder | Nil)
-            while true
-              have = (out ? out.bytesize : first.bytesize)
-              break if have >= n
-              piece = decoded(n - have)!
-              break if piece.empty?
-              if b = out
-                b << piece
-              elsif first.empty?
-                first = piece
-              else
-                b = String::Builder.new(n)
-                b << first << piece
-                out = b
-              end
-            end
-            out ? out.to_s : first
-          elsif @pending.empty?
-            @io.read_bytes(n)
-          elsif @pending.bytesize >= n
-            head = @pending[0, n]
-            @pending = @pending[n, @pending.bytesize - n]
-            head
-          else
-            head = @pending
-            @pending = ""
-            head + @io.read_bytes(n - head.bytesize)
-          end
-    @offset = @offset + got.bytesize.to_i64
-    got
+    taken(take_text(n))
+  end
+
+  # The bytes as a flat String, which moves down (SPEC 1.5); a decoder's
+  # failure sets @gather_failed.
+  private def take_text(n : Int32) : String
+    @gather_failed = false
+    sink = ""
+    if @inflater || @bzip2 || @xz
+      pump(sink, n)
+    else
+      plain(sink, n)
+    end
+    @offset = @offset + sink.bytesize.to_i64
+    sink
+  end
+
+  private def taken(text : String) : String | TarError
+    return failure if @gather_failed
+    text
+  end
+
+  # Up to *n* bytes of a plain archive into *sink*: what the first block
+  # read ahead, then the stream.
+  private def plain(sink : String::Builder, n : Int32) : Nil
+    if @pending.bytesize >= n
+      sink << @pending[0, n]
+      @pending = @pending[n, @pending.bytesize - n]
+      return
+    end
+    sink << @pending
+    @pending = ""
+    while sink.bytesize < n
+      break if @io.read_str(n - sink.bytesize, sink) == 0
+    end
+    nil
+  end
+
+  # Up to *n* decoded bytes into *sink*; a failure sets @gather_failed,
+  # its error recorded.
+  private def pump(sink : String::Builder, n : Int32) : Nil
+    while sink.bytesize < n
+      piece = decoded(n - sink.bytesize)
+      if piece.is_a?(TarError)
+        @gather_failed = true
+        return
+      end
+      break if piece.empty?
+      sink << piece
+    end
+    nil
   end
 
   # Up to *n* bytes from the decompressor the stream is read through; ""
@@ -779,38 +883,21 @@ pub class TarReader
   private def decoded(n : Int32) : String | TarError
     if inflater = @inflater
       piece = inflater.read(n)
-      return TarError.new("tar: the gzip stream is corrupt: #{piece.message}") if piece.is_a?(CompressError)
+      return error("tar: the gzip stream is corrupt: #{piece.message}") if piece.is_a?(CompressError)
       piece
     elsif bzip2 = @bzip2
       piece = bzip2.read(n)
-      return TarError.new("tar: the bzip2 stream is corrupt: #{piece.message}") if piece.is_a?(Bzip2Error)
+      return error("tar: the bzip2 stream is corrupt: #{piece.message}") if piece.is_a?(Bzip2Error)
       piece
     elsif xz = @xz
       piece = xz.read(n)
-      return TarError.new("tar: the xz stream is corrupt: #{piece.message}") if piece.is_a?(XzError)
+      return error("tar: the xz stream is corrupt: #{piece.message}") if piece.is_a?(XzError)
       piece
     else
       ""
     end
   end
 
-  # The first block, which says whether the stream is gzip (1f 8b),
-  # bzip2 ("BZh" and a block-size digit) or xz (FD 37 7A 58 5A 00).
-  private def start : Nil
-    @started = true
-    first = @io.read_bytes(TarBytes::BLOCK)
-    p = first
-    if first.bytesize >= 2 && p[0] == 0x1f_u8 && p[1] == 0x8b_u8
-      @gzip = true
-      @inflater = Inflater.new(Envelope::Gzip, @io, first)
-    elsif first.bytesize >= 4 && p[0] == 0x42_u8 && p[1] == 0x5a_u8 && p[2] == 0x68_u8 && p[3] >= 0x31_u8 && p[3] <= 0x39_u8
-      @bzip2 = Bzip2Reader.new(@io, first)
-    elsif first.bytesize >= 6 && p[0] == 0xfd_u8 && p[1] == 0x37_u8 && p[2] == 0x7a_u8 && p[3] == 0x58_u8 && p[4] == 0x5a_u8 && p[5] == 0_u8
-      @xz = XzReader.new(@io, head: first)
-    else
-      @pending = first
-    end
-  end
 
   # *count* bytes read past, or the archive ending inside them.
   private def skip(count : Int64, what : String) : Nil | TarError
@@ -818,7 +905,7 @@ pub class TarReader
     while left > 0_i64
       n = left < 65536_i64 ? left.to_i32 : 65536
       got = take(n)!
-      return TarError.new("tar: the archive ends inside #{what}") if got.bytesize < n
+      return error("tar: the archive ends inside #{what}") if got.bytesize < n
       left = left - n.to_i64
     end
     nil
@@ -843,34 +930,37 @@ pub class TarReader
       @pad = 0_i64
       @current = nil
     end
-    local = {} of String => String
-    long_name = nil.as(String | Nil)
-    long_link = nil.as(String | Nil)
-    extended = nil.as(String | Nil)
+    @names.clear
+    @local.clear
+    has_name = false
+    has_link = false
+    long_name = ""
+    long_link = ""
+    extended = ""
     while true
       at = @offset
       block = take(TarBytes::BLOCK)!
       p = block
       if block.empty? || (block.bytesize == TarBytes::BLOCK && TarBytes.zero?(p))
-        if what = extended
-          return TarError.new("tar: the archive ends after the #{what} at offset #{@offset - TarBytes::BLOCK}, with no entry for it")
+        unless extended.empty?
+          return error("tar: the archive ends after the #{extended} at offset #{@offset - TarBytes::BLOCK}, with no entry for it")
         end
         drain!
         @ended = true
         return nil
       end
-      return TarError.new("tar: the archive ends inside the header at offset #{at}, #{block.bytesize} of 512 bytes in") if block.bytesize < TarBytes::BLOCK
+      return error("tar: the archive ends inside the header at offset #{at}, #{block.bytesize} of 512 bytes in") if block.bytesize < TarBytes::BLOCK
       stored = TarBytes.number(p, 148, 8)
       unless stored
-        return TarError.new("tar: the block at offset #{at} is not a tar header: its checksum field holds #{TarBytes.cstr(p, 148, 8).inspect}")
+        return error("tar: the block at offset #{at} is not a tar header: its checksum field holds #{TarBytes.cstr(p, 148, 8).inspect}")
       end
       unsigned, signed = TarBytes.sums(p)
       unless stored == unsigned || stored == signed
-        return TarError.new("tar: the header at offset #{at} says checksum #{stored}, and its bytes sum to #{unsigned}: it is corrupt, or not a tar header")
+        return error("tar: the header at offset #{at} says checksum #{stored}, and its bytes sum to #{unsigned}: it is corrupt, or not a tar header")
       end
       flag = p[156]
       size = field(p, 124, 12, "size", at)!
-      return TarError.new("tar: the header at offset #{at} has a negative size, #{size}") if size < 0_i64
+      return error("tar: the header at offset #{at} has a negative size, #{size}") if size < 0_i64
       pad = (TarBytes::BLOCK.to_i64 - size % TarBytes::BLOCK.to_i64) % TarBytes::BLOCK.to_i64
       if flag == 120_u8 || flag == 103_u8 || flag == 76_u8 || flag == 75_u8
         what = case flag
@@ -880,41 +970,71 @@ pub class TarReader
                else             "GNU long link name"
                end
         if size > TarBytes::MAX_SPECIAL
-          return TarError.new("tar: the #{what} at offset #{at} is #{size} bytes, past the #{TarBytes::MAX_SPECIAL} this reader holds")
+          return error("tar: the #{what} at offset #{at} is #{size} bytes, past the #{TarBytes::MAX_SPECIAL} this reader holds")
         end
         data = take(size.to_i32)!
-        return TarError.new("tar: the archive ends inside the #{what} at offset #{at}") if data.bytesize.to_i64 < size
+        return error("tar: the archive ends inside the #{what} at offset #{at}") if data.bytesize.to_i64 < size
         skip(pad, "the #{what} at offset #{at}")!
         case flag
         when 120_u8
-          TarReader.records(data, at, local, false)!
+          records(data, at, @local, @names, false)!
           extended = what
         when 103_u8
-          TarReader.records(data, at, @global, true)!
+          records(data, at, @global, @global_text, true)!
         when 76_u8
-          long_name = TarBytes.cut_nul(data)
+          long_name = keep(TarBytes.cut_nul(data))
+          has_name = true
           extended = what
         else
-          long_link = TarBytes.cut_nul(data)
+          long_link = keep(TarBytes.cut_nul(data))
+          has_link = true
           extended = what
         end
         next
       end
-      return entry(p, at, flag, size, pad, local, long_name, long_link)
+      # The header outlives this round: the entry reads its fields.
+      @header.clear
+      @header << block
+      return entry(@header.finish, at, flag, size, pad, has_name ? long_name : nil, has_link ? long_link : nil)
     end
     nil
   end
 
+  # A TarError whose message is *text* copied into the reader's own.
+  private def error(text : String) : TarError
+    @error_at = @error_text.bytesize
+    @error_size = text.bytesize
+    TarError.new(TarReader.keep(@error_text, text))
+  end
+
+  # The error answered last, again.
+  private def failure : TarError
+    TarError.new(@error_text.finish[@error_at, @error_size])
+  end
+
+  # *text* copied into the entry's text; a view of the copy.
+  private def keep(text : String) : String
+    TarReader.keep(@names, text)
+  end
+
+  # *text* copied into *into*; a view of the copy, which stays as *into*
+  # grows in place.
+  def self.keep(into : String::Builder, text : String) : String
+    start = into.bytesize
+    into << text
+    into.finish[start, text.bytesize]
+  end
+
   private def field(p : String, at : Int32, len : Int32, label : String, header_at : Int64) : Int64 | TarError
     v = TarBytes.number(p, at, len)
-    return TarError.new("tar: the header at offset #{header_at} has a #{label} field that is not a number: #{TarBytes.cstr(p, at, len).inspect}") unless v
+    return error("tar: the header at offset #{header_at} has a #{label} field that is not a number: #{TarBytes.cstr(p, at, len).inspect}") unless v
     v
   end
 
   # A pax header's records into *into*. A global record with no value
   # takes the key away; an entry's keeps it, empty, which stands for the
   # header's own field.
-  def self.records(data : String, at : Int64, into : Hash(String, String), global : Bool) : Nil | TarError
+  def records(data : String, at : Int64, into : Hash(String, String), text : String::Builder, global : Bool) : Nil | TarError
     p = data
     n = data.bytesize
     i = 0
@@ -927,26 +1047,26 @@ pub class TarReader
         j = j + 1
       end
       if j == i || j >= n || p[j] != 32_u8 || len <= j - i + 1 || len > n - i || p[i + len - 1] != 10_u8
-        return TarError.new("tar: the pax header at offset #{at} holds a record that is not one, at byte #{i} of its data")
+        return error("tar: the pax header at offset #{at} holds a record that is not one, at byte #{i} of its data")
       end
       record = data[j + 1, i + len - 1 - (j + 1)]
       eq = record.index('=')
       unless eq && eq > 0
-        return TarError.new("tar: the pax header at offset #{at} holds a record with no key=value, at byte #{i} of its data")
+        return error("tar: the pax header at offset #{at} holds a record with no key=value, at byte #{i} of its data")
       end
       key = record[0, eq]
       value = record[eq + 1, record.bytesize - eq - 1]
       if global && value.empty?
         into.delete(key)
       else
-        into[key] = value
+        into[TarReader.keep(text, key)] = TarReader.keep(text, value)
       end
       i = i + len
     end
     nil
   end
 
-  private def entry(p : String, at : Int64, flag : UInt8, size : Int64, pad : Int64, local : Hash(String, String),
+  private def entry(p : String, at : Int64, flag : UInt8, size : Int64, pad : Int64,
                     long_name : String?, long_link : String?) : TarEntry | TarError
     magic = TarBytes.cstr(p, 257, 6)
     posix = magic == "ustar" && p[263] == 48_u8 && p[264] == 48_u8
@@ -955,7 +1075,11 @@ pub class TarReader
     name = TarBytes.cstr(p, 0, 100)
     if posix
       prefix = TarBytes.cstr(p, 345, 155)
-      name = prefix + "/" + name unless prefix.empty?
+      unless prefix.empty?
+        start = @names.bytesize
+        @names << prefix << "/" << name
+        name = @names.finish[start, @names.bytesize - start]
+      end
     end
     linkname = TarBytes.cstr(p, 157, 100)
     mode = field(p, 100, 8, "mode", at)!
@@ -977,9 +1101,10 @@ pub class TarReader
     if l = long_link
       linkname = l
     end
-    pax = {} of String => String
+    pax = @pax
+    pax.clear
     @global.each { |k, v| pax[k] = v }
-    local.each do |k, v|
+    @local.each do |k, v|
       if v.empty?
         pax.delete(k)
       else
@@ -996,7 +1121,7 @@ pub class TarReader
       when "gname"    then gname = v
       when "size", "uid", "gid"
         num = TarBytes.decimal(v)
-        return TarError.new("tar: #{label} has a #{k} that is not a number: #{v.inspect}") unless num
+        return error("tar: #{label} has a #{k} that is not a number: #{v.inspect}") unless num
         if k == "size"
           size = num
           pad = (TarBytes::BLOCK.to_i64 - size % TarBytes::BLOCK.to_i64) % TarBytes::BLOCK.to_i64
@@ -1007,20 +1132,22 @@ pub class TarReader
         end
       when "mtime"
         t = TarBytes.pax_time(v)
-        return TarError.new("tar: #{label} has an mtime that is not a time: #{v.inspect}") unless t
+        return error("tar: #{label} has an mtime that is not a time: #{v.inspect}") unless t
         secs = t[0]
         nanos = t[1]
       end
     end
     if mode < 0_i64 || mode > 2147483647_i64
-      return TarError.new("tar: the header at offset #{at} has a mode past 32 bits, #{mode}")
+      return error("tar: the header at offset #{at} has a mode past 32 bits, #{mode}")
     end
     if secs < Time::MIN_SECONDS || secs > Time::MAX_SECONDS - 1_i64
-      return TarError.new("tar: the header at offset #{at} has an mtime of #{secs} seconds, past the years a Time holds")
+      return error("tar: the header at offset #{at} has an mtime of #{secs} seconds, past the years a Time holds")
     end
     @index = @index + 1
-    e = TarEntry.new(self, @index, name, linkname, size, mode.to_i32, uid, gid, uname, gname, Time.unix(secs, nanos), flag,
-      devmajor, devminor, pax, format, at)
+    e = @entry
+    raise "TarReader: no entry" unless e
+    e.refill(@index, name, linkname, size, mode.to_i32, uid, gid, uname, gname, Time.unix(secs, nanos), flag,
+      devmajor, devminor, format, at)
     @current = e
     @left = e.data_size
     @pad = @left == 0_i64 ? 0_i64 : pad
@@ -1055,7 +1182,7 @@ pub class TarWriter
   # *gzip* writes the archive through `Deflater` in the gzip envelope.
   def initialize(@io : IyiIO, gzip : Bool = false)
     @deflater = gzip ? Deflater.new(Envelope::Gzip) : nil
-    @held = String::Builder.new
+    @held = String::Builder.new(131072 + 65536)
     @finished = false
     @at = 0_i64
   end
@@ -1119,8 +1246,8 @@ pub class TarWriter
     tail = (TarBytes::RECORD.to_i64 - total % TarBytes::RECORD.to_i64) % TarBytes::RECORD.to_i64
     emit("\u0000" * (2 * TarBytes::BLOCK + tail.to_i32))
     if deflater = @deflater
-      @io.write(deflater.compress(@held.to_s)) if @held.bytesize > 0
-      @held = String::Builder.new
+      @io.write(deflater.compress(@held.finish)) if @held.bytesize > 0
+      @held.clear
       @io.write(deflater.finish)
     end
     @io.flush
@@ -1200,9 +1327,8 @@ pub class TarWriter
       gname_field = TarBytes.fit(gname, 32)
     end
     unless records.empty?
-      body = ""
-      records.each { |r| body << TarWriter.record(r[0], r[1]) }
-      data = body
+      data = ""
+      TarWriter.records(records, data)
       emit(block("././@PaxHeader", "", 120_u8, data.bytesize.to_i64, 0o644, 0_i64, 0_i64, 0_i64, "", "", ""))
       emit(data)
       pad(data.bytesize.to_i64)
@@ -1211,6 +1337,12 @@ pub class TarWriter
   end
 
   # One pax record: its length counts its own digits.
+  # Each of *records* as a pax record onto *into*.
+  def self.records(records : Array({String, String}), into : String::Builder) : Nil
+    records.each { |r| into << TarWriter.record(r[0], r[1]) }
+    nil
+  end
+
   def self.record(key : String, value : String) : String
     rest = key.bytesize + value.bytesize + 3
     digits = 1
@@ -1261,8 +1393,9 @@ pub class TarWriter
     if deflater = @deflater
       @held << bytes
       if @held.bytesize >= 131072
-        @io.write(deflater.compress(@held.to_s))
-        @held = String::Builder.new(131072 + 65536)
+        @io.write(deflater.compress(@held.finish))
+        # Refilled in place: the bytes were all compressed out.
+        @held.clear
       end
     else
       @io.write(bytes)

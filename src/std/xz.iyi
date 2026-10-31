@@ -172,8 +172,11 @@ class XzCore
   @dict_limit : Int64
   # The stream the pieces come from; nil when *data* was all of it.
   @io : IyiIO?
-  # The source's piece being copied in, and how far.
+  # The whole input when it came as *data*, and how far it is copied in;
+  # once the stream refills @chunk, the piece is @chunk's bytes, read
+  # through a local view so no field keeps a view of what is refilled.
   @piece : String
+  @streamed : Bool
   @piece_pos : Int32
   @exhausted : Bool
   @buf : Array(UInt8)
@@ -184,6 +187,8 @@ class XzCore
   @state : Int32
   @failed : Bool
   @error : XzError
+  @chunk : String::Builder
+  @message : String::Builder
   # Set when a step stops for input it would have to wait for while
   # there are bytes to hand out.
   @waiting : Bool
@@ -229,6 +234,7 @@ class XzCore
   @crc32 : UInt32
   @crc64 : UInt64
   @sha : SHA256
+  @digest : Array(UInt8)
   @header_size : Int32
   @data_start : Int64
   @data_end : Int64
@@ -260,6 +266,7 @@ class XzCore
 
   def initialize(@format : XzFormat, @dict_limit : Int64, @io : IyiIO?, data : String)
     @piece = data
+    @streamed = false
     @piece_pos = 0
     @exhausted = false
     @buf = Array(UInt8).new(IN_CAP + SLACK, 0_u8)
@@ -269,6 +276,8 @@ class XzCore
     @state = @format == XzFormat::Xz ? STREAM_HEAD : ALONE_HEAD
     @failed = false
     @error = XzError.new("")
+    @chunk = String::Builder.new(1)
+    @message = String::Builder.new(128)
     @waiting = false
     @scratch = Array(UInt8).new(64, 0_u8)
     @dict = Array(UInt8).new
@@ -302,6 +311,7 @@ class XzCore
     @crc32 = 0_u32
     @crc64 = 0_u64
     @sha = SHA256.new
+    @digest = Array(UInt8).new(32, 0_u8)
     @header_size = 0
     @data_start = 0_i64
     @data_end = 0_i64
@@ -340,21 +350,48 @@ class XzCore
     @state == DONE && @pending == 0 && @slen == @sbeg && !@failed
   end
 
-  # Up to *max* bytes, "" at the end; see `XzReader#read`.
+  # Up to *max* bytes, "" at the end; see `XzReader#read`. The bytes are
+  # read into a flat String, which moves down (SPEC 1.5); the answer only
+  # wraps it.
   def read(max : Int32) : String | XzError
+    answer(read_text(max))
+  end
+
+  private def answer(text : String) : String | XzError
+    return @error if text.empty? && @failed
+    text
+  end
+
+  private def read_text(max : Int32) : String
     raise "XzReader: read wants at least one byte, not #{max}" if max < 1
-    return @error if @failed
+    return "" if @failed
     want = max < @dsize ? max : @dsize
-    while true
-      return take_ready(max) if @ready > @sbeg
-      run(want) if @pending < want
-      return @error if @failed
-      return take(max) if @nfilters == 0 && @slen == @sbeg
-      pump(@state == BLOCK_END)
-      return take_ready(max) if @ready > @sbeg
-      return "" if @state == DONE && @pending == 0
+    # The steps pick what to answer; the answer is made last.
+    step = read_step(want)
+    return "" if step == FAILED || step == ENDED
+    n = step == READY ? @ready - @sbeg : @pending
+    n = max if n > max
+    String.build(n) do |dst|
+      step == READY ? take_ready(dst, max) : take(dst, max)
     end
-    ""
+  end
+
+  READY = 0
+  FAILED = 1
+  TAKE = 2
+  ENDED = 3
+
+  private def read_step(want : Int32) : Int32
+    while true
+      return READY if @ready > @sbeg
+      run(want) if @pending < want
+      return FAILED if @failed
+      return TAKE if @nfilters == 0 && @slen == @sbeg
+      pump(@state == BLOCK_END)
+      return READY if @ready > @sbeg
+      return ENDED if @state == DONE && @pending == 0
+    end
+    ENDED
   end
 
   # Every byte there is, into *sink*: `Xz.decompress`, without a string
@@ -391,19 +428,17 @@ class XzCore
   end
 
   # The oldest *max* bytes of the ring not yet read.
-  private def take(max : Int32) : String
+  private def take(dst : String::Builder, max : Int32) : Nil
     n = @pending < max ? @pending : max
-    return "" if n == 0
+    return if n == 0
     start = @dpos - @pending
     start = start + @dcap if start < 0
     first = n < @dcap - start ? n : @dcap - start
     @pending = @pending - n
     account(@dict, start, first)
     account(@dict, 0, n - first) if n > first
-    String.build(n) do |dst|
-      XzCore.emit(dst, @dict, start, first)
-      XzCore.emit(dst, @dict, 0, n - first) if n > first
-    end
+    XzCore.emit(dst, @dict, start, first)
+    XzCore.emit(dst, @dict, 0, n - first) if n > first
   end
 
   # *n* bytes of *src* from *at* onto *sink*.
@@ -416,13 +451,13 @@ class XzCore
   end
 
   # Up to *max* of the filtered bytes waiting in the stage.
-  private def take_ready(max : Int32) : String
+  private def take_ready(dst : String::Builder, max : Int32) : Nil
     n = @ready - @sbeg
     n = max if n > max
     at = @sbeg
     @sbeg = @sbeg + n
     account(@stage, at, n)
-    String.build(n) { |dst| XzCore.emit(dst, @stage, at, n) }
+    XzCore.emit(dst, @stage, at, n)
   end
 
   # The block's check and size over bytes handed out.
@@ -434,6 +469,7 @@ class XzCore
     when  4 then @crc64 = CRC64.update(@crc64, src[at, n], n)
     when 10 then @sha.update(src[at, n], n)
     end
+    nil
   end
 
   # What waits in the ring into the stage, after what the filters held
@@ -621,23 +657,31 @@ class XzCore
   private def fail(message : String) : Nil
     return if @failed
     @failed = true
-    @error = XzError.new(message)
+    # The message is the reader's, in its own builder, not the caller's
+    # scratch. A reader fails once: the builder is never cleared.
+    @message.append(message)
+    @error = XzError.new(@message.finish)
+    nil
   end
 
   # More of the source's bytes after the ones in hand, or false when it
   # has none.
   private def fill : Bool
-    if @piece_pos >= @piece.bytesize
+    if @piece_pos >= piece_size
       return false if @exhausted
       io = @io
-      got = io ? io.read_bytes(65536) : nil
-      if got.nil? || got.empty?
+      # The chunk is refilled in place: its bytes were all copied out.
+      @piece = ""
+      @streamed = true
+      @chunk.clear
+      got = io ? io.read_str(65536, @chunk) : 0
+      if got == 0
         @exhausted = true
         return false
       end
-      @piece = got
       @piece_pos = 0
     end
+    piece = @streamed ? @chunk.finish : @piece
     if @in_pos > 0
       rest = @in_end - @in_pos
       i = 0
@@ -649,11 +693,11 @@ class XzCore
       @in_end = rest
       @in_pos = 0
     end
-    n = @piece.bytesize - @piece_pos
+    n = piece.bytesize - @piece_pos
     n = IN_CAP - @in_end if n > IN_CAP - @in_end
     i = 0
     while i < n
-      @buf[@in_end + i] = @piece.byte_at(@piece_pos + i)
+      @buf[@in_end + i] = piece.byte_at(@piece_pos + i)
       i = i + 1
     end
     @piece_pos = @piece_pos + n
@@ -668,7 +712,12 @@ class XzCore
 
   # Whether getting more input would mean calling the source.
   private def dry? : Bool
-    @piece_pos >= @piece.bytesize && !@exhausted
+    @piece_pos >= piece_size && !@exhausted
+  end
+
+  # How many bytes the piece being copied in has.
+  private def piece_size : Int32
+    @streamed ? @chunk.bytesize : @piece.bytesize
   end
 
   # Whether *n* bytes are in hand, after taking what the source has.
@@ -1418,7 +1467,8 @@ class XzCore
       want = le64(c)
       return fail("xz: a block's CRC64 does not match (#{XzCore.hex(@crc64, 16)}, stream says #{XzCore.hex(want, 16)})") unless want == @crc64
     when 10
-      digest = @sha.final
+      digest = @digest
+      @sha.final(digest)
       i = 0
       while i < 32
         return fail("xz: a block's SHA-256 does not match") unless digest[i] == @buf[c + i]

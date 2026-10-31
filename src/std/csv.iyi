@@ -1,6 +1,8 @@
 # CSV, RFC 4180, written in iyi.
 #
-# `CSV.parse` reads a document into rows of fields. A field may be
+# `CSV.parse` reads a document a row of fields at a time, each row
+# yielded and then freed: its fields view the text, or one builder
+# refilled for each row, and are valid in the block only. A field may be
 # quoted; a quote inside a quoted field is doubled. The separator is
 # a comma. Lines end at LF, CRLF or a lone CR, and a blank line is a row
 # of no fields, as in the other library. `CSV.build` writes the same
@@ -52,13 +54,14 @@ pub struct CSV
     write_rows(rows, writer)
   end
 
-  def self.parse(text : String) : Array(Array(String))
-    rows = Array(Array(String)).new
+  def self.parse(text : String, & : Array(String) -> Nil) : Nil
     row = Array(String).new
     n = text.bytesize
     src = text
     i = 0
+    # Quoted fields' bytes, at most the text's.
     field = String::Builder.new(n + 1)
+    fstart = 0
     flen = 0
     quoted = false
     # The field opened with a quote: `""` is a field even with no bytes in
@@ -106,8 +109,8 @@ pub struct CSV
           # field `a"b`, a guess at what an unpaired quote meant.
           refuse(text, i, "unexpected quote")
         elsif b == 44_u8 # comma
-          row << field_value(text, start, field, flen, opened)
-          field.truncate(0)
+          row << field_value(text, start, field, fstart, flen, opened)
+          fstart = field.length
           flen = 0
           opened = false
           i = i + 1
@@ -117,13 +120,15 @@ pub struct CSV
           # dropped, joining the text either side of it into one field.
           # A blank line is a row of no fields there, not of one empty one.
           if row.size > 0 || flen > 0 || opened
-            row << field_value(text, start, field, flen, opened)
+            row << field_value(text, start, field, fstart, flen, opened)
           end
-          field.truncate(0)
           flen = 0
           opened = false
-          rows << row
-          row = Array(String).new
+          yield row
+          row.clear
+          # The builder holds at most the text's bytes, reserved up front:
+          # it is not cleared, only the row is.
+          fstart = field.length
           i = i + 1
           i = i + 1 if b == 13_u8 && i < n && src[i] == 10_u8
           start = i
@@ -136,10 +141,10 @@ pub struct CSV
     end
     raise "unterminated quoted field" if quoted
     if flen > 0 || row.size > 0 || opened
-      row << field_value(text, start, field, flen, opened)
-      rows << row
+      row << field_value(text, start, field, fstart, flen, opened)
+      yield row
     end
-    rows
+    nil
   end
 
   # Into one builder: adding each field to the text so far copied that
@@ -180,16 +185,15 @@ pub struct CSV
     # was read back as nothing: `[["a"], []]` came back `[["a"]]`, and
     # `[[]]` came back `[]`. Its line is ended.
     io << '\n' if rows.size > 0 && rows[rows.size - 1].empty?
+    nil
   end
 
+  # A quoted field views the row's builder from *from*; a bare one, the
+  # text.
   private def self.field_value(text : String, start : Int32,
-                               field : String::Builder, size : Int32,
-                               quoted : Bool) : String
-    quoted ? take(field.finish, size) : text[start, size]
-  end
-
-  private def self.take(field : String, flen : Int32) : String
-    field[0, flen].dup
+                               field : String::Builder, from : Int32,
+                               size : Int32, quoted : Bool) : String
+    quoted ? field.finish[from, size] : text[start, size]
   end
 
   # The line and column of the byte at *at*, both counted from 1 and the
@@ -391,6 +395,16 @@ pub class CSVReader
   # The field being read, refilled with `clear` for each one.
   @field : Array(UInt8)
   @flen : Int32 = 0
+  @read_failed : Bool = false
+  # Each row is freed by the next (SPEC 1.1): its fields view `@bytes`,
+  # both refilled with `clear`. The header keeps its own copy, the
+  # stream's chunk and an error's message theirs.
+  @row : Array(String)
+  @bytes : String::Builder
+  @head : Array(String)
+  @head_bytes : String::Builder
+  @chunk : String::Builder
+  @message : String::Builder
 
   def initialize(text : String, separator : Char = ',', quote : Char = '"', headers : Bool = false, strip : Bool = false, same_size : Bool = false)
     CSVBytes.check("CSVReader", separator, quote)
@@ -402,6 +416,12 @@ pub class CSVReader
     @strip = strip
     @same_size = same_size
     @field = Array(UInt8).new(256)
+    @row = Array(String).new(16)
+    @bytes = String::Builder.new(256)
+    @head = Array(String).new(16)
+    @head_bytes = String::Builder.new(256)
+    @chunk = String::Builder.new(1)
+    @message = String::Builder.new(128)
   end
 
   # Reads *io* as far as each row needs, CHUNK bytes at a time; it is not
@@ -416,6 +436,12 @@ pub class CSVReader
     @strip = strip
     @same_size = same_size
     @field = Array(UInt8).new(256)
+    @row = Array(String).new(16)
+    @bytes = String::Builder.new(256)
+    @head = Array(String).new(16)
+    @head_bytes = String::Builder.new(256)
+    @chunk = String::Builder.new(CHUNK)
+    @message = String::Builder.new(128)
   end
 
   # The header row, read now if no row has been. Only for a reader made
@@ -425,7 +451,7 @@ pub class CSVReader
     if bad = load_header
       return bad
     end
-    @header || [] of String
+    @head
   end
 
   # The next row's fields, nil past the last, or what is wrong with the
@@ -437,6 +463,11 @@ pub class CSVReader
         return bad
       end
     end
+    read_row
+  end
+
+  # A row past the header, which is read already.
+  private def read_row : Array(String) | CSVError | Nil
     while true
       got = read_fields
       return got unless got.is_a?(Array(String))
@@ -446,7 +477,7 @@ pub class CSVReader
           @width = got.size
         elsif got.size != @width
           first = @has_headers ? "the header" : "the first row"
-          return fail(CSVError.new("csv: the row at line #{@row_line} has #{got.size} fields, and #{first} has #{@width}", @row_line, 1))
+          return fail("csv: the row at line #{@row_line} has #{got.size} fields, and #{first} has #{@width}", @row_line, 1)
         end
       end
       return got
@@ -457,16 +488,21 @@ pub class CSVReader
   def next : CSVRow | CSVError | Nil
     got = next_row
     return got unless got.is_a?(Array(String))
-    CSVRow.new(got, @header || [] of String, @index, @row_line)
+    CSVRow.new(got, @head, @index, @row_line)
   end
 
   # Each row left, in order; the error that stopped them, if one did.
   def each(& : CSVRow -> Nil) : Nil | CSVError
+    if @has_headers
+      if bad = load_header
+        return bad
+      end
+    end
     while true
-      got = self.next
+      got = read_row
       return got if got.is_a?(CSVError)
       return nil unless got
-      yield got
+      yield CSVRow.new(got, @head, @index, @row_line)
     end
   end
 
@@ -474,18 +510,31 @@ pub class CSVReader
     return nil unless @header.nil?
     got = read_fields
     return got if got.is_a?(CSVError)
-    head = got || [] of String
-    @header = head
+    # The header outlives the rows: copied into its own builder.
+    if got
+      i = 0
+      while i < got.size
+        from = @head_bytes.length
+        @head_bytes.append(got[i])
+        @head << @head_bytes.finish[from, got[i].bytesize]
+        i = i + 1
+      end
+    end
+    @header = @head
     i = 0
-    while i < head.size
-      @index[head[i]] = i
+    while i < @head.size
+      @index[@head[i]] = i
       i = i + 1
     end
-    @width = head.size if @same_size
+    @width = @head.size if @same_size
     nil
   end
 
-  private def fail(error : CSVError) : CSVError
+  # The reader's one error, its message in the reader's own builder.
+  private def fail(text : String, line : Int32, column : Int32) : CSVError
+    @message.clear
+    @message.append(text)
+    error = CSVError.new(@message.finish, line, column)
     @failed = error
     @done = true
     error
@@ -500,10 +549,12 @@ pub class CSVReader
     unless @begun
       @begun = true
       if bad = begin_marks
-        return fail(bad)
+        return fail(bad, 1, 1)
       end
     end
-    fields = [] of String
+    fields = @row
+    fields.clear
+    @bytes.clear
     state = START
     touched = false
     @flen = 0
@@ -515,14 +566,14 @@ pub class CSVReader
       if @pos >= @limit
         break unless refill
       end
-      b = @text.byte_at(@pos)
+      b = at(@pos)
       if state == BARE || state == QUOTED
         # A run of ordinary bytes is copied at once: byte by byte, a field
         # was a call and a bounds check per byte.
         if b != @quote && b != 10_u8 && b != 13_u8 && (state == QUOTED || b != @sep)
           run = @pos
           while run < @limit
-            c = @text.byte_at(run)
+            c = at(run)
             break if c == @quote || c == 10_u8 || c == 13_u8 || (state == BARE && c == @sep)
             @column = @column + 1 if (c & 0xC0_u8) != 0x80_u8
             run = run + 1
@@ -545,7 +596,7 @@ pub class CSVReader
         elsif b == @quote
           # `a"b` was a guess at what an unpaired quote meant; RFC 4180
           # has no such field.
-          return fail(CSVError.new("csv: unexpected quote at line #{@line}, column #{@column}", @line, @column))
+          return fail("csv: unexpected quote at line #{@line}, column #{@column}", @line, @column)
         else
           fields << take_field(true)
           step(b)
@@ -587,16 +638,17 @@ pub class CSVReader
         state = AFTER
       else
         # `"a"b` was the field `ab`.
-        return fail(CSVError.new("csv: expecting #{@sep.unsafe_chr.inspect}, newline or end, not #{char_here} at line #{@line}, column #{@column}", @line, @column))
+        return fail("csv: expecting #{@sep.unsafe_chr.inspect}, newline or end, not #{char_here} at line #{@line}, column #{@column}", @line, @column)
       end
       step(b)
     end
+    return read_failed if @read_failed
     if failed = @failed
       return failed
     end
     @done = true
     if state == QUOTED
-      return fail(CSVError.new("csv: unterminated quoted field, opened at line #{quote_line}, column #{quote_column}", quote_line, quote_column))
+      return fail("csv: unterminated quoted field, opened at line #{quote_line}, column #{quote_column}", quote_line, quote_column)
     end
     if state == START
       return nil if fields.empty? && !touched
@@ -644,10 +696,14 @@ pub class CSVReader
       end
     end
     @flen = 0
-    field = @field
-    got = String.build(n) { |w| n.times { |k| w.push(field[k]) } }
+    from = @bytes.length
+    k = 0
+    while k < n
+      @bytes.push(@field[k])
+      k = k + 1
+    end
     @field.clear
-    got
+    @bytes.finish[from, n]
   end
 
   # *count* bytes onto the field, false when that would make it longer than
@@ -665,8 +721,33 @@ pub class CSVReader
     true
   end
 
+  private def read_failed : CSVError
+    @read_failed = false
+    @message.clear
+    @message << "csv: the stream's read failed at line " << @line
+    @message << ", column " << @column
+    error = CSVError.new(@message.finish, @line, @column)
+    @failed = error
+    @done = true
+    error
+  end
+
+  # Written straight into the reader's builder: the refusal is the
+  # reader's, not this def's scratch.
   private def too_long : CSVError
-    fail(CSVError.new("csv: the field at line #{@line}, column #{@column} is past the 2147483647 bytes a string holds", @line, @column))
+    @message.clear
+    @message << "csv: the field at line " << @line << ", column " << @column
+    @message << " is past the 2147483647 bytes a string holds"
+    error = CSVError.new(@message.finish, @line, @column)
+    @failed = error
+    @done = true
+    error
+  end
+
+  # The byte at *pos* of the text or chunk in hand: read in its own def,
+  # so no view of a chunk lives across the refill that clears it.
+  private def at(pos : Int32) : UInt8
+    @text.byte_at(pos)
   end
 
   # The character at *pos*, for an error to name, as much of it as is read.
@@ -682,17 +763,20 @@ pub class CSVReader
     return false if @ended
     io = @io
     return false unless io
-    more = io.read_bytes(CHUNK)
-    if more.bytesize == 0
+    # The chunk is refilled in place; nothing reads the last one now.
+    @text = ""
+    @chunk.clear
+    got = io.read_str(CHUNK, @chunk)
+    if got == 0
       @ended = true
-      if io.read_failed?
-        fail(CSVError.new("csv: the stream's read failed at line #{@line}, column #{@column}", @line, @column))
-      end
+      # The refusal is made after the row's loop: made here, it would
+      # clear the message a view may still read.
+      @read_failed = io.read_failed?
       return false
     end
-    @text = more
+    @text = @chunk.finish
     @pos = 0
-    @limit = more.bytesize
+    @limit = got
     true
   end
 
@@ -700,21 +784,20 @@ pub class CSVReader
   # file, is read past; a UTF-16 one (Windows PowerShell 5.1's `Out-File`)
   # is an error, its fields would read with a NUL between their letters.
   # A stream is read until three bytes are in hand, or it ends.
-  private def begin_marks : CSVError | Nil
+  private def begin_marks : String | Nil
     if io = @io
       while @limit < 3 && !@ended
-        more = io.read_bytes(CHUNK)
-        if more.bytesize == 0
+        if io.read_str(CHUNK, @chunk) == 0
           @ended = true
         else
-          @text = @text + more
+          @text = @chunk.finish
           @limit = @text.bytesize
         end
       end
     end
     p = @text
     if @limit >= 2 && ((p.byte_at(0) == 0xFF_u8 && p.byte_at(1) == 0xFE_u8) || (p.byte_at(0) == 0xFE_u8 && p.byte_at(1) == 0xFF_u8))
-      return CSVError.new("csv: the document is UTF-16, by its byte order mark, and is read as UTF-8", 1, 1)
+      return "csv: the document is UTF-16, by its byte order mark, and is read as UTF-8"
     end
     @pos = 3 if @limit >= 3 && p.byte_at(0) == 0xEF_u8 && p.byte_at(1) == 0xBB_u8 && p.byte_at(2) == 0xBF_u8
     nil

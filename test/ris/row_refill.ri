@@ -28,3 +28,11 @@ class RowReader
 end
 r = RowReader.new
 r.each { |row| puts row[0] }
+# The same reader driven by its caller: each round's row is gone at the
+# next call, which clears and refills it.
+def drive(reader : RowReader) : Nil
+  while got = reader.next_row
+    puts got[0]
+  end
+end
+drive(RowReader.new)

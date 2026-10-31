@@ -1,0 +1,17 @@
+# A def returns an Array of Arrays it grew: the inner rows live in the
+# outer one's pool, made in its scratch, so the scratch stays with the
+# caller (SPEC 1.5) and nothing it holds is freed under it.
+def rows_of(text : String) : Array(Array(String))
+  rows = [] of Array(String)
+  row = [] of String
+  row << text[0, 2]
+  row << text[3, 4]
+  rows << row.copy_to(Program.tape)
+  rows
+end
+tape do
+  rows = rows_of("id,name\n1,Ada\n")
+  puts rows.size
+  puts rows[0][0].inspect
+  puts rows[0][1].inspect
+end

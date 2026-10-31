@@ -593,7 +593,7 @@ class Iyi::TapeShrinkChecker
   end
 
   # Field paths deeper than this fold onto their ancestor at this depth.
-  FIELD_DEPTH = 4
+  FIELD_DEPTH = 6
 
   @folded_roots = Set(UInt64).new
 
@@ -1073,7 +1073,7 @@ class Iyi::TapeShrinkChecker
       return type
     end
     if parent = @parents[root]?
-      type = root_type(parent[0]).try(&.remove_typedef)
+      type = one_class(root_type(parent[0]))
       if type.is_a?(InstanceVarContainer)
         return type.instance_vars[parent[1]]?.try(&.type?)
       end
@@ -1159,7 +1159,7 @@ class Iyi::TapeShrinkChecker
       if shrink.growth
         next unless shrink.roots.any? do |root|
           @pooled_roots.includes?(root) ||
-            (parameter_root?(root) &&
+            (parameter_root?(root) && !class_field_root?(root) &&
              possible_array?(@text_only ? root_type(root) : @root_types[root]?))
         end
       end
@@ -1508,6 +1508,72 @@ class Iyi::TapeShrinkChecker
     type.to_s.starts_with?("Array(")
   end
 
+  # A class instance's Array field is its own component, never a pool run:
+  # it grows in place in its own reservation (SPEC 2.2).
+  private def class_field_root?(root : UInt64) : Bool
+    return false unless parent = @parents[root]?
+    return false unless parent[1].starts_with?('@')
+    type = root_type(parent[0]).try(&.remove_typedef)
+    type.is_a?(NonGenericClassType) && !type.struct?
+  end
+
+  # *type* without its typedef, and a field that may be nil (a reader's
+  # decoder) as its one class.
+  private def one_class(type : Type?) : Type?
+    type = type.try(&.remove_typedef)
+    if type.is_a?(NilableType)
+      type.not_nil_type.remove_typedef
+    elsif type.is_a?(UnionType)
+      others = type.union_types.reject(&.nil_type?)
+      others.size == 1 ? others.first.remove_typedef : type
+    else
+      type
+    end
+  end
+
+  # A callee summary root's type, from the target's owner or parameter
+  # down its fields: a caller's path may fold deeper fields onto an
+  # ancestor, so the callee's own path says what the field is.
+  private def summary_root_type(root : UInt64, summary : Summary, target : Def) : Type?
+    if i = summary.seeds.index(root)
+      return target.owner? if i == 0
+      return target.args[i - 1]?.try(&.type?)
+    end
+    return nil unless parent = @parents[root]?
+    type = one_class(summary_root_type(parent[0], summary, target))
+    return nil unless type.is_a?(InstanceVarContainer)
+    type.instance_vars[parent[1]]?.try(&.type?)
+  end
+
+  # Whether *type*, a class instance's field (the root's parent a class),
+  # is an Array of scalars or a struct holding no storage of its own.
+  private def flat_field_type?(type : Type?, root : UInt64) : Bool
+    return false unless type
+    return false unless parent = @parents[root]?
+    return false unless parent[1].starts_with?('@')
+    type = type.remove_typedef
+    return true if type.is_a?(NonGenericClassType) && type.struct? &&
+                   !storage_type?(type)
+    return false unless type.is_a?(GenericClassInstanceType)
+    return false unless type_name(type).starts_with?("Array(")
+    element = type.type_vars["T"]?.try { |v| v.as?(Var).try(&.type?) }
+    !element.nil? && !reference_type?(element) && !storage_type?(element)
+  end
+
+  # A class instance's Array of scalars (a byte stage) or struct value:
+  # growing or writing it stores no storage of the scope that runs the
+  # call. A struct's reference fields have slots of their own.
+  private def flat_array_field?(root : UInt64) : Bool
+    return false unless class_field_root?(root)
+    type = root_type(root).try(&.remove_typedef)
+    return true if type.is_a?(NonGenericClassType) && type.struct? &&
+                   !storage_type?(type)
+    return false unless type.is_a?(GenericClassInstanceType)
+    return false unless type_name(type).starts_with?("Array(")
+    element = type.type_vars["T"]?.try { |v| v.as?(Var).try(&.type?) }
+    !element.nil? && !reference_type?(element) && !storage_type?(element)
+  end
+
   private def parameter_root?(root : UInt64) : Bool
     return true if @parameter_roots.includes?(root)
     @parents[root]?.try { |parent| parameter_root?(parent[0]) } || false
@@ -1675,6 +1741,12 @@ class Iyi::TapeShrinkChecker
         if !@text_only && node.name == "__ris_text_reset"
           return args.first? || EMPTY
         end
+        # Growing text appends a copy of its argument's bytes: the result
+        # views the text grown (its first argument), never the argument.
+        if !@text_only && node.name == "append"
+          args.each { |arg| use(arg, node) }
+          return args.first? || EMPTY
+        end
       end
       if @text_only && node.obj.try(&.type?.try(&.to_s)) == "RisTextGrowth"
         @text_roots.concat(receiver.roots)
@@ -1714,7 +1786,13 @@ class Iyi::TapeShrinkChecker
         end
       end
       if storage_receiver && {"<<", "push", "[]=", "__loop_store", "unchecked_store"}.includes?(node.name)
-        if element = args.last?
+        # A scalar element (a byte into an Array(UInt8)) holds no storage:
+        # it is no store a summary should carry.
+        # A builder's (or a String grown in place's) `<<` copies the
+        # text's bytes: it keeps no view of it.
+        builder_copy = node.name == "<<" &&
+                       node.obj.try(&.type?).try { |t| {"String::Builder", "String"}.includes?(type_name(t)) }
+        if (element = args.last?) && !builder_copy && node.args.last?.try { |arg| reference?(arg) } != false
           store(receiver.roots.map { |r| field_root(r, "[]").as(UInt64) }, element, env, node, false)
         end
       end
@@ -1745,6 +1823,14 @@ class Iyi::TapeShrinkChecker
       incomplete_result = false
       reset_roots = [] of UInt64
       targets = @graph.targets(node)
+      # What the receiver's fields held before the call: a callee that
+      # clears and refills them drops these from the caller's slots.
+      held_before = [] of View
+      if !@text_only && !receiver.roots.empty? && targets && !targets.empty?
+        env.slots.each do |key, contents|
+          held_before.concat(contents.views) if contains_root?(receiver.roots, key)
+        end
+      end
       if targets && !targets.empty?
         before_calls = env
         after_calls : Env? = nil
@@ -1852,7 +1938,7 @@ class Iyi::TapeShrinkChecker
               # into an object from outside a tape block: the block's
               # scratch is not proved private. (A copy into an Array's own
               # pool shows no contents either; it keeps the block's tape.)
-              refuse_fresh_store(destinations, node) if contents.roots.empty? && contents.views.empty? && !summary_marked?(target)
+              refuse_fresh_store(destinations, node) if contents.roots.empty? && contents.views.empty? && !summary_marked?(target) && !destinations.all? { |d| flat_array_field?(d) } && !flat_field_type?(summary_root_type(root, summary, target), root)
               incoming = translated(contents, summary, actuals, node.object_id)
               # A marked callee's own scratch cannot reach its stores: it
               # refused that itself. What it made and stored is not this
@@ -1919,7 +2005,7 @@ class Iyi::TapeShrinkChecker
       # its own shrinks (a reader refilling its row): a summarized call
       # consumes the receiver, not the views its slots carry.
       if summarized && !@text_only && !receiver.roots.empty?
-        held = env.slots.compact_map { |key, contents| contents.views if contains_root?(receiver.roots, key) }.flatten
+        held = env.slots.compact_map { |key, contents| contents.views if contains_root?(receiver.roots, key) }.flatten + held_before
         unless held.empty?
           consumed = Value.new(consumed.roots, consumed.views - held,
             consumed.procs, consumed.unknown_proc)
@@ -1930,9 +2016,10 @@ class Iyi::TapeShrinkChecker
       derived = receiver
       # A builder's `<<` copies its argument and answers the builder: the
       # chained result views no argument storage.
+      # A String grown in place copies the same way.
       copied = node.name == "<<" && !node.block &&
-               node.obj.try(&.type?).try { |t| type_name(t) } == "String::Builder" &&
-               type_name(node.type) == "String::Builder"
+               node.obj.try(&.type?).try { |t| {"String::Builder", "String"}.includes?(type_name(t)) } &&
+               {"String::Builder", "String"}.includes?(type_name(node.type))
       # String's `+` copies both sides into a new String: it views neither.
       concatenated = node.name == "+" && !node.block && node.args.size == 1 &&
                      node.obj.try(&.type?).try { |t| type_name(t) } == "String" &&

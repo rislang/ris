@@ -5,14 +5,21 @@ import std/io::{Memory}
 
 # std/csv on the caller's tape: parse and build round-trip, a reader over
 # a String with a header and over a stream, a writer, and an error.
+# CSV.parse yields each row, freed after it: rows kept are copied.
+
+def rows_of(text : String) : Array(Array(String))
+  rows = [] of Array(String)
+  CSV.parse(text) { |row| rows << row.copy_to(Program.tape) }
+  rows
+end
 
 tape do
   text = "id,name,says\r\n1,Ada,\"hi, \"\"there\"\"\"\n2,Bob,\"two\nlines\"\n"
-  rows = CSV.parse(text)
+  rows = rows_of(text)
   puts rows.size
   rows.each { |row| puts row.join("|") }
   back = CSV.build(rows)
-  puts CSV.parse(back) == rows
+  puts rows_of(back) == rows
   puts back.bytesize
 
   reader = CSVReader.new(text, headers: true)
@@ -38,11 +45,11 @@ tape do
   puts sink.to_s.inspect
   puts writer.rows
 
-  edges = CSV.parse("id\r\n\"\"\n\n")
+  edges = rows_of("id\r\n\"\"\n\n")
   puts "#{edges.size} #{edges[1].size} #{edges[1][0].empty?} #{edges[2].empty?}"
-  puts CSV.build(CSV.parse("\"\uFEFFid\"")) == "\"\uFEFFid\""
-  puts CSV.parse("\uFEFFa,b")[0][0]
-  puts CSV.parse("").empty?
+  puts CSV.build(rows_of("\"\uFEFFid\"")) == "\"\uFEFFid\""
+  puts rows_of("\uFEFFa,b")[0][0]
+  puts rows_of("").empty?
   kept = rows.copy_to(Program.tape)
   puts kept[1][2]
 end

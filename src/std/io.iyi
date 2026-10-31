@@ -600,6 +600,21 @@ pub class Memory < IyiIO
     String.build(take) { |writer| take.times { |i| writer.push(@buffer[start + i]) } }
   end
 
+  # Up to *count* bytes into the caller's builder; how many, 0 at the end.
+  def read_str(count : Int32, into : String::Builder) : Int32
+    raise "cannot read from closed IO" if @shut
+    return 0 if count <= 0
+    avail = @bytesize - @pos
+    take = count < avail ? count : avail
+    i = 0
+    while i < take
+      into.push(@buffer[@pos + i])
+      i = i + 1
+    end
+    @pos = @pos + take
+    take
+  end
+
   def read_all : String
     read_bytes(@bytesize - @pos)
   end

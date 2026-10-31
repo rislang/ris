@@ -1738,11 +1738,19 @@ else
   echo "FAILED   scope_frees: $out"; status=1
 fi
 
+# A def's Array of Arrays keeps the scratch its rows' pool is in.
+out=$("$RIS" run test/ris/scope_nested_result.ri 2>&1)
+if [ "$out" = $'1\n"id"\n"name"' ]; then
+  echo "runs     scope_nested_result"
+else
+  echo "FAILED   scope_nested_result: $out"; status=1
+fi
+
 # A reader refilling its row with clear, read a row per round; a row
 # kept past the next call is refused.
 expect row_refill_held 'cannot shrink tape storage with a live view of Test::Ris::Refused::RowRefillHeld::RowReader.@b'
 out=$("$RIS" run test/ris/row_refill.ri 2>&1)
-if [ "$out" = $'1\n2\n3' ]; then
+if [ "$out" = $'1\n2\n3\n1\n2\n3' ]; then
   echo "runs     row_refill (a row refilled per call, no new storage)"
 else
   echo "FAILED   row_refill: $out"; status=1

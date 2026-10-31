@@ -2591,6 +2591,10 @@ module RisScopeMove
       return value
     end
     return value unless room?(mark, 64_u64)
+    # Nested elements live in the array's own pool: one made in the scratch
+    # keeps the scratch, which the caller's scope frees.
+    pool = IyiHeap.read64(state &+ 56_u64)
+    return value if pool != 0 && scratch?(mark, pool)
     # The payload's reservation leaves the scratch's side chain, so the
     # reset keeps it, and joins the caller's.
     region = mark.region
