@@ -1744,6 +1744,26 @@ if [ "$out" = $'round 99999\nwhile frees: true\nblock wrote 200000\nblock frees:
 out=$("$RIS" run test/ris/scope_keep.ri 2>&1)
 if [ "$out" = "50000 50000 9" ]; then echo "runs     scope_keep"; else echo "FAILED   scope_keep: $out"; status=1; fi
 
+# Every def, loop round and block frees (SPEC 1.1): 1,000,000 rounds
+# reading `a.first`, in a loop and a def's loop, and calling a def that
+# makes a fresh String, keep resident memory and mappings flat.
+out=$(timeout 300 "$RIS" run test/ris/scope_frees.ri 2>&1)
+if [ "$?" = 0 ] && [ "$(grep -c '^PASS: ' <<<"$out")" = 3 ]; then
+  echo "runs     scope_frees (1,000,000 rounds, flat RSS and mappings)"
+else
+  echo "FAILED   scope_frees: $out"; status=1
+fi
+
+# A one-call def hands its caller's destination on (SPEC 1.5, 1.9):
+# File.read's result is neither copied nor moved down.
+out=$(RIS_TAPE_STATS=1 "$RIS" run test/ris/scope_result_read.ri 2>&1)
+if [ "$?" = 0 ] && grep -qxF 'true' <<<"$out" &&
+   grep -qF 'ris tape results: 0 moved down (0 bytes)' <<<"$out"; then
+  echo "runs     scope_result_read (File.read wrapper, no result copy)"
+else
+  echo "FAILED   scope_result_read: $out"; status=1
+fi
+
 # Retain 10,000 small results without retaining 64 KiB per-call scratch.
 out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 "$RIS" run \
   test/ris/pending_result.ri 2>&1)

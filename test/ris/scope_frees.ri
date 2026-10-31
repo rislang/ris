@@ -1,0 +1,81 @@
+# Every def, loop round and block frees its scratch when it ends (SPEC
+# 1.1): 1,000,000 rounds that each read an outer Array with `first` and
+# build text, in a loop, in a def's loop and through a def that makes a
+# fresh String, keep resident memory and the mapping count flat.
+
+def scope_resident : Int64
+  text = File.read("/proc/self/statm")
+  at = 0
+  while text[at] != 32_u8
+    at += 1
+  end
+  at += 1
+  pages = 0_i64
+  while text[at] != 32_u8
+    pages = pages * 10 + (text[at] - 48_u8).to_i64
+    at += 1
+  end
+  pages * 4096
+end
+
+def scope_mappings : Int32
+  text = File.read("/proc/self/maps")
+  count = 0
+  text.each_byte { |b| count += 1 if b == 10_u8 }
+  count
+end
+
+# PASS when the rounds left resident memory within 4 MiB and the mapping
+# count as it was.
+def scope_flat(name : String, rss : Int64, maps : Int32) : Nil
+  grown = scope_resident - rss
+  more = scope_mappings - maps
+  if grown < 4_194_304 && more <= 0
+    puts "PASS: #{name}"
+  else
+    puts "FAIL: #{name}: resident grew #{grown // 1024} KiB, #{more} mappings"
+  end
+end
+
+def first_rounds(a : Array(Int32), n : Int32) : Int32
+  i = 0
+  sum = 0
+  while i < n
+    t = a.first * 100
+    s = "#{t} #{i}"
+    sum += s.bytesize
+    i += 1
+  end
+  sum
+end
+
+def fwd(s : String) : String
+  s + "x"
+end
+
+a = [1, 2, 3]
+first_rounds(a, 10_000)
+rss = scope_resident
+maps = scope_mappings
+first_rounds(a, 1_000_000)
+scope_flat("a.first in a def's loop", rss, maps)
+
+rss = scope_resident
+maps = scope_mappings
+i = 0
+while i < 1_000_000
+  t = a.first * 100
+  s = "#{t} #{i}"
+  i += 1
+end
+scope_flat("a.first in a loop", rss, maps)
+
+rss = scope_resident
+maps = scope_mappings
+i = 0
+n = 0
+while i < 1_000_000
+  n += fwd("abc").bytesize
+  i += 1
+end
+scope_flat("fwd in a loop", rss, maps)

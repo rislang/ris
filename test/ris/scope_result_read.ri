@@ -1,0 +1,10 @@
+# A def whose body is one call hands its caller's destination on (SPEC
+# 1.5, 1.9): File.read's text is built where the caller keeps it, with no
+# staged copy and nothing moved down (RIS_TAPE_STATS).
+
+def slurp(path : String) : String
+  File.read(path)
+end
+
+text = slurp("./.build/iyi")
+puts text.bytesize > 1_000_000
