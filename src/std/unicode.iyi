@@ -3614,9 +3614,9 @@ pub struct Unicode
   private def self.from_codepoints(points : Array(Int32)) : String
     total = 0
     points.each { |cp| total = total + utf8_width(cp) }
-    String.build(total) do |buffer|
-      points.each { |cp| buffer << cp.unsafe_chr }
-    end
+    buffer = ""
+    points.each { |cp| buffer << cp.unsafe_chr }
+    buffer
   end
 
   # ---------------------------------------------------------------------

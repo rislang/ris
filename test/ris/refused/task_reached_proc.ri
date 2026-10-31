@@ -1,0 +1,13 @@
+# A task calls a proc a method made, and the proc writes a class variable
+# (5.1).
+class Tally
+  @@total = [] of Int32
+
+  def self.adder : Proc(Int32, Nil)
+    ->(n : Int32) { @@total << n; nil }
+  end
+end
+
+group do |g|
+  2.times { g.spawn { Tally.adder.call(1) } }
+end

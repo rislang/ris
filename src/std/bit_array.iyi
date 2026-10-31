@@ -356,7 +356,7 @@ struct ::BitArray
   # Into one builder: a string grown by a character per bit copied it per
   # bit, and 200,000 bits took 46 s to print.
   def to_s : String
-    res = String::Builder.new(@size + 10)
+    res = ""
     res << "BitArray["
     i = 0
     while i < @size
@@ -364,7 +364,7 @@ struct ::BitArray
       i += 1
     end
     res << "]"
-    res.to_s
+    res
   end
 
   def inspect(io : IyiIO) : Nil

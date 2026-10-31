@@ -15,7 +15,9 @@ pub struct LogField
   end
 
   def self.text(value) : String
-    String.build(65) { |w| w << value }
+    w = ""
+    w << value
+    w
   end
 
   def self.set(fields : Array(LogField), key : String, value : String) : Nil

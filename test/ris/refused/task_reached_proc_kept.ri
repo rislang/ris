@@ -1,0 +1,23 @@
+# A proc the spawner kept in program state, run by the task, writes a
+# class variable through a call (5.1).
+class Hooks
+  @@hooks = [] of Proc(Int32, Nil)
+  @@seen = [] of Int32
+
+  def self.on(&block : Int32 -> Nil) : Nil
+    @@hooks << block
+  end
+
+  def self.fire(n : Int32) : Nil
+    @@hooks.each { |hook| hook.call(n) }
+  end
+
+  def self.note(n : Int32) : Nil
+    @@seen << n
+  end
+end
+
+Hooks.on { |n| Hooks.note(n) }
+group do |g|
+  2.times { g.spawn { Hooks.fire(1) } }
+end

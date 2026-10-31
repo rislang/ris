@@ -189,9 +189,7 @@ pub struct CSV
   end
 
   private def self.take(field : String, flen : Int32) : String
-    String.build(flen) do |w|
-      w << field[0, flen]
-    end
+    field[0, flen].dup
   end
 
   # The line and column of the byte at *at*, both counted from 1 and the

@@ -87,11 +87,11 @@ class StringBuffer
   # The bytes so far, on the caller's tape: a copy, as the buffer is
   # cleared and refilled.
   def to_s : String
-    String.build(size) { |w| w << @writer.finish }
+    @writer.finish.dup
   end
 
   def slice_from(start : Int32) : String
-    String.build(size - start) { |w| w << @writer.finish[start, size - start] }
+    @writer.finish[start, size - start].dup
   end
 end
 
@@ -3525,43 +3525,43 @@ pub struct JSON
   # a word after a small letter or a digit, or before one.
   private def self.underscore(name : String) : String
     bytes = name
-    String.build do |text|
-      index = 0
-      while index < name.bytesize
-        byte = bytes[index]
-        if byte >= 65_u8 && byte <= 90_u8
-          if index > 0
-            before = bytes[index - 1]
-            after_small = index + 1 < name.bytesize && bytes[index + 1] >= 97_u8 && bytes[index + 1] <= 122_u8
-            small_before = (before >= 97_u8 && before <= 122_u8) || (before >= 48_u8 && before <= 57_u8)
-            capital_before = before >= 65_u8 && before <= 90_u8
-            text << '_' if small_before || (capital_before && after_small)
-          end
-          text << (byte + 32_u8).unsafe_chr
-        else
-          text << byte.unsafe_chr
+    text = ""
+    index = 0
+    while index < name.bytesize
+      byte = bytes[index]
+      if byte >= 65_u8 && byte <= 90_u8
+        if index > 0
+          before = bytes[index - 1]
+          after_small = index + 1 < name.bytesize && bytes[index + 1] >= 97_u8 && bytes[index + 1] <= 122_u8
+          small_before = (before >= 97_u8 && before <= 122_u8) || (before >= 48_u8 && before <= 57_u8)
+          capital_before = before >= 65_u8 && before <= 90_u8
+          text << '_' if small_before || (capital_before && after_small)
         end
-        index = index + 1
+        text << (byte + 32_u8).unsafe_chr
+      else
+        text << byte.unsafe_chr
       end
+      index = index + 1
     end
+    text
   end
 
   # A member's name as it is matched: small letters, no underscores, so
   # `"dark_red"`, `"DarkRed"` and `"DARK_RED"` are one name.
   private def self.enum_key(name : String) : String
     bytes = name
-    String.build do |text|
-      index = 0
-      while index < name.bytesize
-        byte = bytes[index]
-        if byte >= 65_u8 && byte <= 90_u8
-          text << (byte + 32_u8).unsafe_chr
-        elsif byte != 95_u8
-          text << byte.unsafe_chr
-        end
-        index = index + 1
+    text = ""
+    index = 0
+    while index < name.bytesize
+      byte = bytes[index]
+      if byte >= 65_u8 && byte <= 90_u8
+        text << (byte + 32_u8).unsafe_chr
+      elsif byte != 95_u8
+        text << byte.unsafe_chr
       end
+      index = index + 1
     end
+    text
   end
 
   # A member by its name, or by its number; a `@[Flags]` enum from the

@@ -1,0 +1,71 @@
+# One keep-alive connection carries many small requests: each request's
+# head, parse and answer are freed when it ends, so the connection's
+# tape does not grow with the number of requests.
+module test/ris/http_keepalive_scope
+
+import std/socket::{IyiSocket}
+import std/http::{Server, Request, Response}
+
+struct Listening
+end
+
+struct Echo
+  def initialize(config : Int32)
+  end
+
+  def listening(port : Int32) : Nil
+    RisBoard.post(Listening.new)
+  end
+
+  def call(req : Request) : Response
+    answer = ""
+    answer << req.path << " " << req.body.bytesize
+    Response.new(200, answer)
+  end
+end
+
+# Reads one answer whose body is Content-Length long: the client waits
+# for each, so nothing follows it.
+def answer(socket : IyiSocket) : String
+  got = ""
+  while true
+    at = got.index("\r\n\r\n")
+    if at
+      head = got[0, at]
+      marker = "Content-Length: "
+      from = (head.index(marker) || 0) + marker.bytesize
+      upto = head.index("\r\n", from) || head.bytesize
+      length = head[from, upto - from].to_i
+      return got[at + 4, length] if got.bytesize >= at + 4 + length
+    end
+    piece = socket.read(65536).or_panic
+    raise "closed early" if piece.empty?
+    got = got + piece
+  end
+end
+
+count = (Program.args[0]? || "20000").to_i
+probe = IyiSocket.listen(0)
+port = probe.local_port
+probe.close
+group do |g|
+  g.spawn do
+    Server.serve("127.0.0.1", port, 0, Echo, max_connections: 4)
+    0
+  end
+  RisBoard.take(Listening).or_panic
+  socket = IyiSocket.connect("127.0.0.1", port).or_panic
+  ok = 0
+  count.times do |i|
+    tape do
+      request = ""
+      request << "POST /r" << i << " HTTP/1.1\r\nHost: test\r\nX-A: aaaa\r\n"
+      request << "Content-Length: 5\r\n\r\nhello"
+      socket.write(request)
+      ok += 1 if answer(socket) == "/r#{i} 5"
+    end
+  end
+  puts "#{count} #{ok == count}"
+  socket.close
+  g.cancel_children
+end

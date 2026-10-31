@@ -216,9 +216,12 @@ end
 # through a request as much as one between requests.
 @[OnTape]
 struct IdleConns
+  # Connections are linked by their state's address, a scalar: marking a
+  # connection idle inside a request's tape block stores nothing the block
+  # made, so the block's scratch is freed when the request ends.
   @[OnTape]
   struct Head
-    property first : Conn? = nil
+    property first : UInt64 = 0_u64
   end
 
   @head : Pointer(Head)
@@ -230,21 +233,22 @@ struct IdleConns
 
   def []=(id : UInt64, conn : Conn) : Nil
     conn.idle_next = @head.value.first
-    @head.value.first = conn
+    @head.value.first = conn.state_address
   end
 
   def delete(id : UInt64) : Nil
-    previous = nil.as(Conn?)
+    previous = 0_u64
     current = @head.value.first
-    while current
-      following = current.idle_next
-      if current.socket.object_id == id
-        if previous
-          previous.idle_next = following
+    while current != 0_u64
+      conn = Conn.new(current)
+      following = conn.idle_next
+      if conn.socket.object_id == id
+        if previous != 0_u64
+          Conn.new(previous).idle_next = following
         else
           @head.value.first = following
         end
-        current.idle_next = nil
+        conn.idle_next = 0_u64
         return
       end
       previous = current
@@ -254,9 +258,10 @@ struct IdleConns
 
   def each_value(& : Conn ->) : Nil
     current = @head.value.first
-    while current
-      following = current.idle_next
-      yield current
+    while current != 0_u64
+      conn = Conn.new(current)
+      following = conn.idle_next
+      yield conn
       current = following
     end
   end
@@ -276,9 +281,12 @@ struct Conn
   @[OnTape]
   struct State
     property program_owned : Bool
-    property idle_next : Conn? = nil
+    # The next idle connection's state address (IdleConns), 0 for none.
+    property idle_next : UInt64 = 0_u64
     property socket : IyiSocket
-    property data : Pointer(UInt8)
+    # The buffer's address, a scalar: a program-owned buffer that grows
+    # inside a request's tape block stores no pointer the block made.
+    property data_at : UInt64
     property capacity : Int32
     property start : Int32
     property stop : Int32
@@ -294,7 +302,10 @@ struct Conn
     # When what is being read must have arrived by (monotonic ns, 0 for no
     # such time) and what it is, and how long one read may wait otherwise.
     property deadline : Int64 = 0_i64
-    property deadline_what : String = "read a request's head"
+    # Whether the deadline is the whole request's rather than its head's:
+    # a flag, not text, so setting it per request stores nothing a
+    # request's tape block made into the connection.
+    property deadline_whole : Bool = false
     property gap : Int32? = nil
     # A client's `https://` connection: TLS over the socket, which every
     # read and write then goes through. The socket's timeouts are TLS's too.
@@ -313,10 +324,10 @@ struct Conn
     def initialize(@socket : IyiSocket, @listener : IyiSocket? = nil, @idle : IdleConns? = nil, @stream : TlsStream? = nil, @program_owned : Bool = true)
       @capacity = ROOM
       if @program_owned
-        @data = Pointer(UInt8).new(RisRegion.program_bytes(@capacity.to_u64))
+        @data_at = RisRegion.program_bytes(@capacity.to_u64)
       else
         state = RisRegion.growing_state(@capacity.to_u64 + 40_u64, 1_u64)
-        @data = Pointer(UInt8).new(state.value)
+        @data_at = state.value
         @reservation = (state + 3_i64).value
       end
       @start = 0
@@ -342,6 +353,11 @@ struct Conn
     end
   end
 
+  # The buffer, where its address says.
+  private def data_bytes : Pointer(UInt8)
+    Pointer(UInt8).new(@state.value.data_at)
+  end
+
   def h2 : H2Connection?
     @state.value.h2
   end
@@ -358,11 +374,21 @@ struct Conn
     @state.value.made_under = value
   end
 
-  def idle_next : Conn?
+  # The connection whose state is at *address* (`state_address`), as the
+  # idle list links them.
+  def initialize(address : UInt64)
+    @state = Pointer(State).new(address)
+  end
+
+  def state_address : UInt64
+    @state.address
+  end
+
+  def idle_next : UInt64
     @state.value.idle_next
   end
 
-  def idle_next=(value : Conn?)
+  def idle_next=(value : UInt64)
     @state.value.idle_next = value
   end
 
@@ -424,12 +450,12 @@ struct Conn
   # the next fill, and a view of it would be too.
   def tape_copy(at : Int32 = 0, count : Int32 = available - at) : String
     raise "bytes #{at}, #{count} past the #{available} that arrived" if at < 0 || count < 0 || at > available - count
-    String.build(count) { |w| w.append(@state.value.data + (@state.value.start + at).to_i64, count) }
+    String.build(count) { |w| w.append(data_bytes + (@state.value.start + at).to_i64, count) }
   end
 
   # The byte *at* bytes past what has been taken, which must have arrived.
   def peek(at : Int32) : UInt8
-    @state.value.data[@state.value.start + at]
+    data_bytes[@state.value.start + at]
   end
 
   def consume(count : Int32) : Nil
@@ -441,7 +467,7 @@ struct Conn
   def take(max : Int32) : String
     count = available < max ? available : max
     piece = String.new(count) do |buf|
-      buf.copy_from(@state.value.data + @state.value.start.to_i64, count)
+      buf.copy_from(data_bytes + @state.value.start.to_i64, count)
     end
     consume(count)
     piece
@@ -465,7 +491,7 @@ struct Conn
     if @state.value.deadline > 0_i64
       left = (@state.value.deadline - Time.monotonic_nanoseconds.to_i64) // 1000000_i64
       if left <= 0_i64
-        @state.value.failure = SocketError.timed_out(@state.value.deadline_what)
+        @state.value.failure = SocketError.timed_out(@state.value.deadline_whole ? "read a request" : "read a request's head")
         return false
       end
       # The pause a read may take still holds inside the deadline.
@@ -478,7 +504,7 @@ struct Conn
       idle[@state.value.socket.object_id] = self
     end
     stream = @state.value.stream
-    got = stream ? stream.read(@state.value.data + @state.value.stop.to_i64, @state.value.capacity - @state.value.stop) : @state.value.socket.read(@state.value.data + @state.value.stop.to_i64, @state.value.capacity - @state.value.stop)
+    got = stream ? stream.read(data_bytes + @state.value.stop.to_i64, @state.value.capacity - @state.value.stop) : @state.value.socket.read(data_bytes + @state.value.stop.to_i64, @state.value.capacity - @state.value.stop)
     if idle = @state.value.idle
       idle.delete(@state.value.socket.object_id)
     end
@@ -515,11 +541,12 @@ struct Conn
     deadline_at(ms > 0 ? Time.monotonic_nanoseconds.to_i64 + ms.to_i64 * 1000000_i64 : 0_i64)
   end
 
-  # The same, by the monotonic clock's nanoseconds (0: no limit); *what*
-  # is what the timed-out read says it was doing.
-  def deadline_at(ns : Int64, what : String = "read a request's head") : Nil
+  # The same, by the monotonic clock's nanoseconds (0: no limit); *whole*
+  # when it is the whole request's, which a timed-out read then names
+  # ("read a request"), else its head's ("read a request's head").
+  def deadline_at(ns : Int64, whole : Bool = false) : Nil
     @state.value.deadline = ns
-    @state.value.deadline_what = what
+    @state.value.deadline_whole = whole
   end
 
   def no_deadline : Nil
@@ -552,7 +579,7 @@ struct Conn
     elsif @state.value.capacity - @state.value.stop < ROOM // 4 && @state.value.start > 0
       held = @state.value.stop - @state.value.start
       # Down, front to back: no byte is written before it is read.
-      @state.value.data.copy_from(@state.value.data + @state.value.start.to_i64, held)
+      data_bytes.copy_from(data_bytes + @state.value.start.to_i64, held)
       @state.value.searched = @state.value.searched - @state.value.start
       @state.value.searched = 0 if @state.value.searched < 0
       @state.value.stop = held
@@ -560,7 +587,7 @@ struct Conn
     end
     if @state.value.capacity - @state.value.stop < ROOM // 4
       @state.value.capacity = @state.value.capacity * 2
-      old = @state.value.data
+      old = data_bytes
       grow_buffer(old)
     end
   end
@@ -585,8 +612,8 @@ struct Conn
     # Program-owned, or a target without reservations (non-Linux): the
     # grown buffer is program storage, never freed (TODO.md).
     address = RisRegion.program_bytes(bytes)
-    @state.value.data = Pointer(UInt8).new(address)
-    @state.value.data.copy_from(old, @state.value.stop)
+    @state.value.data_at = address
+    data_bytes.copy_from(old, @state.value.stop)
   end
 
   # A head: what comes before the next blank line, taken with it. Empty
@@ -609,9 +636,9 @@ struct Conn
       from = @state.value.start if from < @state.value.start
       at = from
       while at + 3 < @state.value.stop
-        if @state.value.data[at] == 13_u8 && @state.value.data[at + 1] == 10_u8 && @state.value.data[at + 2] == 13_u8 && @state.value.data[at + 3] == 10_u8
+        if data_bytes[at] == 13_u8 && data_bytes[at + 1] == 10_u8 && data_bytes[at + 2] == 13_u8 && data_bytes[at + 3] == 10_u8
           head = String.new(at - @state.value.start) do |buf|
-            buf.copy_from(@state.value.data + @state.value.start.to_i64, at - @state.value.start)
+            buf.copy_from(data_bytes + @state.value.start.to_i64, at - @state.value.start)
           end
           consume(at + 4 - @state.value.start)
           return head
@@ -635,9 +662,9 @@ struct Conn
     while true
       at = @state.value.start + searched
       while at + 1 < @state.value.stop
-        if @state.value.data[at] == 13_u8 && @state.value.data[at + 1] == 10_u8
+        if data_bytes[at] == 13_u8 && data_bytes[at + 1] == 10_u8
           line = String.new(at - @state.value.start) do |buf|
-            buf.copy_from(@state.value.data + @state.value.start.to_i64, at - @state.value.start)
+            buf.copy_from(data_bytes + @state.value.start.to_i64, at - @state.value.start)
           end
           consume(at + 2 - @state.value.start)
           return line
@@ -746,7 +773,7 @@ struct Conn
       wait = (until_ns - Time.monotonic_nanoseconds.to_i64) // 1000000_i64
       break if wait <= 0
       socket.read_timeout_ms = wait < LINGER_GAP_MS ? wait.to_i32 : LINGER_GAP_MS
-      got = socket.read(@state.value.data, @state.value.capacity)
+      got = socket.read(data_bytes, @state.value.capacity)
       break unless got.is_a?(Int32) && got > 0
       left = left - got
     end
@@ -2178,10 +2205,9 @@ pub struct Server
   end
 
   private def self.listen_failed(fault : SocketError) : NoReturn
-    message = String.build(128) do |text|
-      text << "HTTP requires task-owned SO_REUSEPORT listeners: "
-      text << fault.operation << " (OS code " << fault.code << ")"
-    end
+    message = ""
+    message << "HTTP requires task-owned SO_REUSEPORT listeners: "
+    message << fault.operation << " (OS code " << fault.code << ")"
     raise message
   end
 
@@ -2293,76 +2319,82 @@ pub struct Server
 
   private def self.serve_h1(conn : Conn, handler, stream_bodies : Bool, compress : Bool, remote : String?, timeout_ms : Int32, request_timeout_ms : Int32) : Bool
     while true
-      started = Time.monotonic_nanoseconds.to_i64
-      whole = until_whole(started, request_timeout_ms)
-      conn.deadline_at(until_head(started, timeout_ms, whole))
-      got = conn.read_head(MAX_HEAD, "request", true)
-      conn.no_deadline
-      case got
-      in Nil
-        return false
-      in HTTPError
-        refuse(conn.transport, got)
-        return true
-      in String
-        parsed = request_head(got)
-        if parsed.is_a?(HTTPError)
-          refuse(conn.transport, parsed)
-          return true
-        end
-        head = parsed
-        # The body, read here or by the block, is the request's too.
-        conn.deadline_at(whole, "read a request") if whole > 0_i64
-        reader = body_reader(conn, head)
-        req = Request.new(head.method, head.path, head.query, head.headers, head.version, reader, remote)
-        unless stream_bodies
-          body = reader.read_all(MAX_BODY.to_i64)
-          conn.no_deadline
-          case body
-          in String
-            req = Request.new(head.method, head.path, head.query, head.headers, body, head.version, remote)
-          in HTTPError
-            # A client that went is not answered; one that sent a body that
-            # is not one is told why.
-            return false if conn.ended?
-            refuse(conn.transport, body)
-            return true
-          in Cancelled
-            return false
-          in SocketError
-            return false
-          end
-        end
-        req.tls_resumed = conn.resumed?
-        req.peer_certificates = peer_of(conn.transport.as?(TlsStream))
-        going = false
-        # Read before answering: a takeover's protocol reads on, and may
-        # refill the buffer the head's views sit in.
-        last = said_close?(head, req)
-        tape do
-          response = handler.call(req)
-          # Writing the answer waits as the client reads it, a pause at a time.
-          conn.no_deadline
-          if response.upgrading?
-            taken_over(conn, response, handler)
-            return false
-          end
-          going = answered?(conn, response, req, head.close, compress)
-        end
-        unless going
-          # A client that said `close` sends no further request (RFC 9112
-          # section 9.6): its request read whole and nothing after it,
-          # nothing of the client's is left to come, and the close waits
-          # for nothing - as nginx's lingering_close waits only where more
-          # may come. Any other close, the server's own choice, may meet a
-          # client still sending.
-          return !(last && reader.finished? && conn.available == 0)
-        end
-        next if reader.finished?
-        conn.deadline_at(whole, "read a request") if whole > 0_i64
-        drained = reader.drain(MAX_DRAIN.to_i64)
+      # One request's head, parse and answer are its own scratch,
+      # freed when it ends: the connection's tape stays flat however
+      # many requests a keep-alive connection carries.
+      tape do
+        started = Time.monotonic_nanoseconds.to_i64
+        whole = until_whole(started, request_timeout_ms)
+        conn.deadline_at(until_head(started, timeout_ms, whole))
+        got = conn.read_head(MAX_HEAD, "request", true)
         conn.no_deadline
-        return true unless drained
+        case got
+        in Nil
+          return false
+        in HTTPError
+          refuse(conn.transport, got)
+          return true
+        in String
+          parsed = request_head(got)
+          if parsed.is_a?(HTTPError)
+            refuse(conn.transport, parsed)
+            return true
+          end
+          head = parsed
+          # The body, read here or by the block, is the request's too.
+          conn.deadline_at(whole, true) if whole > 0_i64
+          reader = body_reader(conn, head)
+          req = Request.new(head.method, head.path, head.query, head.headers, head.version, reader, remote)
+          unless stream_bodies
+            body = reader.read_all(MAX_BODY.to_i64)
+            conn.no_deadline
+            case body
+            in String
+              req = Request.new(head.method, head.path, head.query, head.headers, body, head.version, remote)
+            in HTTPError
+              # A client that went is not answered; one that sent a body that
+              # is not one is told why.
+              return false if conn.ended?
+              refuse(conn.transport, body)
+              return true
+            in Cancelled
+              return false
+            in SocketError
+              return false
+            end
+          end
+          req.tls_resumed = conn.resumed?
+          req.peer_certificates = peer_of(conn.transport.as?(TlsStream))
+          going = false
+          # Read before answering: a takeover's protocol reads on, and may
+          # refill the buffer the head's views sit in.
+          last = said_close?(head, req)
+          tape do
+            response = handler.call(req)
+            # Writing the answer waits as the client reads it, a pause at a time.
+            conn.no_deadline
+            if response.upgrading?
+              taken_over(conn, response, handler)
+              return false
+            end
+            going = answered?(conn, response, req, head.close, compress)
+          end
+          unless going
+            # A client that said `close` sends no further request (RFC 9112
+            # section 9.6): its request read whole and nothing after it,
+            # nothing of the client's is left to come, and the close waits
+            # for nothing - as nginx's lingering_close waits only where more
+            # may come. Any other close, the server's own choice, may meet a
+            # client still sending.
+            return !(last && reader.finished? && conn.available == 0)
+          end
+          unless reader.finished?
+            conn.deadline_at(whole, true) if whole > 0_i64
+            drained = reader.drain(MAX_DRAIN.to_i64)
+            conn.no_deadline
+            return true unless drained
+          end
+        end
       end
     end
   end
@@ -2428,7 +2460,7 @@ pub struct Server
         h2.done(id)
         return true
       end
-      conn.deadline_at(whole, "read a request") if whole > 0_i64
+      conn.deadline_at(whole, true) if whole > 0_i64
       unless stream_bodies
         body = req.body_io.read_all(MAX_BODY.to_i64)
         conn.no_deadline
@@ -3502,7 +3534,7 @@ pub struct HTTP
     raise "HTTP: not a method: #{method.inspect}" unless token?(method)
     raise "HTTP: not a request path: #{path.inspect}" if path.bytesize == 0 || has_space_or_control?(path)
     raise "HTTP: not a host: #{host.inspect}" if host.bytesize == 0 || has_space_or_control?(host)
-    req = String::Builder.new
+    req = ""
     req << method << " " << ascii_target(path) << " HTTP/1.1\r\nHost: " << host << "\r\nConnection: " << connection << "\r\n"
     headers.each do |name, value|
       raise "HTTP: not a header name: #{name.inspect}" unless token?(name)
@@ -3526,7 +3558,7 @@ pub struct HTTP
       req << "Content-Length: " << sent << "\r\n"
     end
     req << "\r\n"
-    req.to_s
+    req
   end
 
   # The response as it came off the wire, whole. `head` says the request
@@ -4128,7 +4160,7 @@ pub struct HTTP
   # and so are bytes sent after a 2xx, before this end's TLS (*secure*)
   # or request has begun. Nil once the tunnel is open.
   private def self.tunnel(socket : IyiSocket, via : ProxyRoute, authority : String, credential : String?, timeout_ms : Int32, secure : Bool) : Cancelled | SocketError | HTTPError | Nil
-    ask = String::Builder.new
+    ask = ""
     ask << "CONNECT " << authority << " HTTP/1.1\r\nHost: " << authority << "\r\n"
     if credential
       raise "HTTP: header Proxy-Authorization contains a line break" if has_break?(credential)
@@ -4136,7 +4168,7 @@ pub struct HTTP
       ask << "Proxy-Authorization: " << credential << "\r\n"
     end
     ask << "\r\n"
-    wrote = socket.write(ask.to_s)
+    wrote = socket.write(ask)
     return wrote unless wrote.is_a?(Int32)
     conn = Conn.new(socket)
     conn.gap = timeout_ms if timeout_ms > 0
@@ -4741,13 +4773,13 @@ pub struct HTTP
       line = lines[i]
       i = i + 1
       if i > 1 && i < lines.size && folded?(lines[i])
-        joined = String::Builder.new
+        joined = ""
         joined << trim(line)
         while i < lines.size && folded?(lines[i])
           joined << ' ' << trim(lines[i])
           i = i + 1
         end
-        line = joined.to_s
+        line = joined
       end
       out << line
     end
@@ -5487,7 +5519,7 @@ pub class Part
 
   # The rest of the part as one string, refused past *limit* bytes.
   def read_all(limit : Int64 = 2147483647_i64) : String | Cancelled | SocketError | HTTPError
-    text = String::Builder.new
+    text = ""
     total = 0_i64
     while true
       got = read(65536)
@@ -5497,7 +5529,7 @@ pub class Part
       return HTTPError.new("a multipart part past #{limit} bytes", 413) if total > limit
       text << got
     end
-    text.to_s
+    text
   end
 
   private def disposition(key : String) : String?
@@ -5566,7 +5598,7 @@ pub class MultipartBuilder
   # The body, closing boundary and all.
   def finish : String
     mark = boundary
-    text = String::Builder.new
+    text = ""
     @parts.each do |part|
       text << "--" << mark << "\r\n"
       text << "Content-Disposition: form-data; name=\"" << MultipartBuilder.quoted(part[0]) << "\""
@@ -5580,7 +5612,7 @@ pub class MultipartBuilder
       text << "\r\n" << part[3] << "\r\n"
     end
     text << "--" << mark << "--\r\n"
-    text.to_s
+    text
   end
 
   private def add(name : String, filename : String?, type : String?, data : String) : self
@@ -5604,7 +5636,7 @@ pub class MultipartBuilder
   # percent-encoded (the WHATWG form encoding), so no field can end the
   # parameter or the line early.
   protected def self.quoted(text : String) : String
-    built = String::Builder.new
+    built = ""
     text.each_char do |c|
       if c == '"'
         built << "%22"
@@ -5616,7 +5648,7 @@ pub class MultipartBuilder
         built << c
       end
     end
-    built.to_s
+    built
   end
 end
 

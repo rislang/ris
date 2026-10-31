@@ -115,16 +115,16 @@ pub struct ParsedHead
       k = k + 1
     end
     return @fields[index].value if lines == 1
-    String.build(total) do |writer|
-      writer << @fields[index].value
-      k = index + 1
-      while k < @fields.size
-        if same_field?(@fields[k].name, name)
-          writer << ", " << @fields[k].value
-        end
-        k += 1
+    writer = ""
+    writer << @fields[index].value
+    k = index + 1
+    while k < @fields.size
+      if same_field?(@fields[k].name, name)
+        writer << ", " << @fields[k].value
       end
+      k += 1
     end
+    writer
   end
 
   # Whether a field before *index* has the name of the one at *index*.
@@ -227,7 +227,11 @@ pub struct HeadParser
     end
     split_at = n if complete && split_at < 0
     if split_at < 0
-      return HeadError.new(String.build(64) { |w| w << "request headers past " << MAX_HEAD << " bytes" }, 431) if n - from > MAX_HEAD
+      if n - from > MAX_HEAD
+        too_long = ""
+        too_long << "request headers past " << MAX_HEAD << " bytes"
+        return HeadError.new(too_long, 431)
+      end
       return nil
     end
     return HeadError.new("empty request") if split_at == from
@@ -282,8 +286,9 @@ pub struct HeadParser
       name = bytes[at, colon - at]
       value = bytes[first, last - first]
       if HeadParser.control?(value)
-        return HeadError.new(
-          String.build(name.bytesize + 40) { |w| w << "header " << name << " contains a control character" })
+        control = ""
+        control << "header " << name << " contains a control character"
+        return HeadError.new(control)
       end
       # Host (RFC 9112 §3.2): an HTTP/1.1 request names one, no request
       # names two, and what it names is a host; a server answers 400
@@ -297,7 +302,11 @@ pub struct HeadParser
       fields.push(Field.new(name, value))
       at = stop + 2
     end
-    return HeadError.new(String.build(32) { |w| w << "Host on " << hosts << " lines" }) if hosts > 1
+    if hosts > 1
+      many_hosts = ""
+      many_hosts << "Host on " << hosts << " lines"
+      return HeadError.new(many_hosts)
+    end
     if hosts == 0 && version == "HTTP/1.1"
       return HeadError.new("an HTTP/1.1 request without Host")
     end

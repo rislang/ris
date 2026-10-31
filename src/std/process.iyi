@@ -549,7 +549,7 @@ pub class ChildOutput
 
   # Everything the child writes from here to its end.
   def read_all : String | Cancelled
-    text = String::Builder.new
+    text = ""
     text << @pending
     @pending = ""
     until @finished
@@ -561,7 +561,7 @@ pub class ChildOutput
         @finished = true
       end
     end
-    text.to_s
+    text
   end
 end
 

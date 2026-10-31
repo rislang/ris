@@ -3367,8 +3367,8 @@ mutate "a client that keeps a connection the answer closed" 'keep = got.starts_w
 mutate "a client that holds a connection for whatever was left unread" 'client && @keep && !@conn.ended? && @reader.drain(65536_i64)' 'client && @keep && !@conn.ended? && @reader.drain(9223372036854775807_i64)'
 mutate "a GET not sent again when its kept connection was closed" 'retry = body.is_a?(String) && (head ||' 'retry = false && (head ||'
 mutate "a POST sent again when its kept connection was closed" 'retry = body.is_a?(String) && (head || same_name?(method, "GET") || same_name?(method, "PUT") || same_name?(method, "DELETE") || same_name?(method, "OPTIONS") || same_name?(method, "TRACE"))' 'retry = body.is_a?(String)'
-mutate "a head given as long as each read is short" '      conn.deadline_at(until_head(started, timeout_ms, whole))
-      got = conn.read_head(' '      got = conn.read_head('
+mutate "a head given as long as each read is short" '        conn.deadline_at(until_head(started, timeout_ms, whole))
+        got = conn.read_head(' '        got = conn.read_head('
 mutate "an upgraded connection held to the server's timeout" '      conn.unlimited
 ' ''
 mutate "a client that waits for an answer as long as it takes" '        conn.gap = timeout_ms if timeout_ms > 0
@@ -3805,11 +3805,11 @@ guard_breaks() { # guard_breaks <label> <name> <old> <new> <case> <phrase>
   fi
 }
 guard_breaks "a request's body bounded per read alone" guard_body \
-  '        conn.deadline_at(whole, "read a request") if whole > 0_i64
-        reader = body_reader(conn, head)' '        reader = body_reader(conn, head)' \
+  '          conn.deadline_at(whole, true) if whole > 0_i64
+          reader = body_reader(conn, head)' '          reader = body_reader(conn, head)' \
   body "a body a byte at a time"
 guard_breaks "an HTTP/2 body bounded per read alone" guard_h2 \
-  '      conn.deadline_at(whole, "read a request") if whole > 0_i64
+  '      conn.deadline_at(whole, true) if whole > 0_i64
       unless stream_bodies' '      unless stream_bodies' \
   h2 "an HTTP/2 body a frame of a byte at a time"
 guard_breaks "connections served past the cap" guard_cap \

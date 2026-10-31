@@ -721,13 +721,13 @@ pub class TarReader
     if @left > 2147483647_i64
       return TarError.new("tar: #{entry.name.inspect} holds #{@left} bytes, more than a string holds; read it with read")
     end
-    out = String::Builder.new(@left.to_i32 + 1)
+    out = ""
     while true
       piece = entry_read(entry, 65536)!
       break if piece.empty?
       out << piece
     end
-    out.to_s
+    out
   end
 
   private def check_current(entry : TarEntry) : Nil
@@ -1200,9 +1200,9 @@ pub class TarWriter
       gname_field = TarBytes.fit(gname, 32)
     end
     unless records.empty?
-      body = String::Builder.new
+      body = ""
       records.each { |r| body << TarWriter.record(r[0], r[1]) }
-      data = body.to_s
+      data = body
       emit(block("././@PaxHeader", "", 120_u8, data.bytesize.to_i64, 0o644, 0_i64, 0_i64, 0_i64, "", "", ""))
       emit(data)
       pad(data.bytesize.to_i64)

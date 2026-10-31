@@ -449,16 +449,16 @@ struct ::StaticArray(T, N)
   # text once per element, and 10,000 elements took 1.4 s where `to_a.to_s`
   # of the same took 1 ms.
   def to_s : String
-    String.build do |io|
-      io << "StaticArray["
-      i = 0
-      while i < N
-        io << ", " if i > 0
-        io << to_unsafe[i].inspect
-        i += 1
-      end
-      io << "]"
+    io = ""
+    io << "StaticArray["
+    i = 0
+    while i < N
+      io << ", " if i > 0
+      io << to_unsafe[i].inspect
+      i += 1
     end
+    io << "]"
+    io
   end
 
   def inspect(io : IO) : Nil

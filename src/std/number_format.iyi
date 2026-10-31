@@ -443,13 +443,15 @@ module NumberText
   end
 
   private def self.cat(*parts) : String
-    String.build do |writer|
-      parts.each { |part| writer << part }
-    end
+    writer = ""
+    parts.each { |part| writer << part }
+    writer
   end
 
   private def self.zeros(count : Int32) : String
-    String.build { |writer| count.times { writer << '0' } }
+    writer = ""
+    count.times { writer << '0' }
+    writer
   end
 
   private def self.number(value : UInt64) : String
@@ -474,7 +476,9 @@ module NumberText
   end
 
   private def self.number(value : Float64) : String
-    String.build { |writer| writer << value }
+    writer = ""
+    writer << value
+    writer
   end
 
   private def self.number(value : Float32) : String
@@ -645,16 +649,16 @@ module NumberText
     while quotient.size > 0
       chunks << quotient.div_small(1000000000_u64)
     end
-    String.build do |writer|
-      at = chunks.size - 1
-      while at >= 0
-        digits = number(chunks[at])
-        if at < chunks.size - 1
-          (9 - digits.bytesize).times { writer << '0' }
-        end
-        writer << digits
-        at -= 1
+    writer = ""
+    at = chunks.size - 1
+    while at >= 0
+      digits = number(chunks[at])
+      if at < chunks.size - 1
+        (9 - digits.bytesize).times { writer << '0' }
       end
+      writer << digits
+      at -= 1
     end
+    writer
   end
 end

@@ -707,9 +707,18 @@ module Iyi
       end
     end
 
+    # Program code (.ri) and std's own: both write text as `s = ""` and
+    # `<<`. test/ and the runtime (src/iyi/) keep their builders.
+    private def ris_text_code?(node : ASTNode) : Bool
+      return true if ris_program_code?(node)
+      return false unless program.iyi_prelude?
+      file = node.location.try(&.original_filename.try(&.gsub('\\', '/'))) || ""
+      file.includes?("/src/std/") && file.ends_with?(".iyi")
+    end
+
     private def refuse_plain_builders(body : ASTNode) : Nil
-      return unless ris_program_code?(body) &&
-                    body.location.try(&.original_filename.try(&.ends_with?(".ri")))
+      return unless ris_text_code?(body) &&
+                    body.location.try(&.original_filename.try { |f| f.ends_with?(".ri") || f.ends_with?(".iyi") })
       starts = BuilderStarts.new
       body.accept(starts)
       starts.locals.each do |name, call|
@@ -801,7 +810,7 @@ module Iyi
       @ris_growing_locals = scan.locals
       # Lend only a local assigned once: a rebinding (`kept = x.copy_to(...)`
       # in a tape block) must keep its own lowering and lifetime checks.
-      if ris_program_code?(body)
+      if ris_text_code?(body)
         once = scan.assignments.select { |_, n| n == 1 }.keys.to_set
         @ris_growing_locals |= (scan.text_starts & scan.arguments & once) -
                                scan.block_args
@@ -835,7 +844,7 @@ module Iyi
     # returned value (Int's shift chains, IO and Array answer self).
     private def text_append_chain(node : Call) : ASTNode?
       return nil unless program.tape_platform? && @macro_code == 0 &&
-                        ris_program_code?(node) &&
+                        ris_text_code?(node) &&
                         node.name == "<<" && node.args.size == 1 &&
                         !node.block && !node.block_arg &&
                         (inner = node.obj).is_a?(Call)
@@ -870,7 +879,7 @@ module Iyi
     # rebind the local to the writer's text after the call.
     private def lend_text_arguments(node : Call) : ASTNode?
       return nil unless program.tape_platform? && @macro_code == 0 &&
-                        ris_program_code?(node) &&
+                        ris_text_code?(node) &&
                         Normalizer.lending_call?(node) &&
                         @ris_text_arg_calls.add?(node.object_id)
       lent = node.args.select do |arg|

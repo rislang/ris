@@ -132,16 +132,15 @@ pub struct SystemRoots
         return collected.answer(bundle) unless collected.empty?
       end
       DIRECTORIES.each { |dir| collected.read_directory(dir) }
-      where = String.build do |io|
-        BUNDLES.each_with_index do |bundle, i|
-          io << ", " if i > 0
-          io << bundle
-        end
-        io << ", "
-        DIRECTORIES.each_with_index do |directory, i|
-          io << " and " if i > 0
-          io << directory
-        end
+      where = ""
+      BUNDLES.each_with_index do |bundle, i|
+        where << ", " if i > 0
+        where << bundle
+      end
+      where << ", "
+      DIRECTORIES.each_with_index do |directory, i|
+        where << " and " if i > 0
+        where << directory
       end
       collected.answer(where)
     {% end %}
@@ -211,12 +210,12 @@ class SystemRootsCollector
 
   # A certificate's identity: its DER, as text a Hash can key.
   def self.key(der : Array(UInt8)) : String
-    String.build do |io|
-      der.each do |b|
-        io << "0123456789abcdef"[b.to_i32 >> 4]
-        io << "0123456789abcdef"[b.to_i32 & 15]
-      end
+    io = ""
+    der.each do |b|
+      io << "0123456789abcdef"[b.to_i32 >> 4]
+      io << "0123456789abcdef"[b.to_i32 & 15]
     end
+    io
   end
 end
 

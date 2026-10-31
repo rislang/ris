@@ -1042,6 +1042,10 @@ module Iyi
         name = copy.target.to_s == captured.name ? copy.value.to_s : copy.target.to_s
         copy.raise "`#{copy.target} = #{copy.value}` keeps a second name for the value handed to the task spawned at line #{start.location.try(&.line_number)}: the task owns it (TAPE_SPEC 5.1), so `#{name}` would reach it while the task runs. Use `#{captured.name}` alone, or open another resource for `#{name}`"
       end
+      walk.passed.each do |call, index|
+        next unless via = KeptArgument.new(@program).keeps?(call, index)
+        call.raise "`#{call}` may keep `#{captured.name}` (through `#{via}`) before it is handed to the task spawned at line #{start.location.try(&.line_number)}: the task owns it (TAPE_SPEC 5.1), so what the call kept would reach it while the task runs. Make the call inside the task, or give the call another resource of its own"
+      end
       if use = walk.uses.first?
         use.raise "`#{captured.name}` is read here, after it was handed to the task spawned at line #{start.location.try(&.line_number)}: the task owns it now (TAPE_SPEC 5.1). Use it only inside the task, or hand the task a copy"
       end
@@ -1152,16 +1156,94 @@ module Iyi
     # spawner (or two tasks) share although the block's text names
     # neither. std's and the runtime's methods keep their own rules.
     def check_reached_state_writes(a_def : Def, boundary : ShareBoundary) : Nil
-      walk = ReachedStateWrites.new(@program, boundary == LOCAL_BOUNDARY)
+      walk = ReachedStateWrites.new(@program, boundary == LOCAL_BOUNDARY,
+        ->{ all_proc_literals })
       a_def.body.accept walk
       return unless found = walk.found
       node, state, via = found
-      where = via ? "through `#{via.name}`, which the task calls" : "in the task's block"
+      where = if via && via.name == "->"
+                "in a proc the task calls (made at line #{via.location.try(&.line_number)})"
+              elsif via
+                "through `#{via.name}`, which the task calls"
+              else
+                "in the task's block"
+              end
       node.raise "#{boundary.subject} changes `#{state}` #{where}: program " \
                  "state a task reaches has no writer after its initializer " \
                  "(TAPE_SPEC 5.1). Keep the state in one task and send " \
                  "changes through RisBoard (post/take), answer it from the " \
                  "task's `value`, or keep it in an `Atomic`"
+    end
+
+    @all_proc_literals : Array(ProcLiteral)?
+
+    # Every proc the program makes, in its top level and its typed defs: a
+    # proc a task calls may have been made anywhere and kept in program
+    # state (a class variable of handlers), so a call of one is taken to
+    # run each proc of its type.
+    private def all_proc_literals : Array(ProcLiteral)
+      @all_proc_literals ||= begin
+        found = [] of ProcLiteral
+        collector = ProcLiteralCollector.new(found)
+        @top_level.try &.accept collector
+        seen = Set(UInt64).new
+        collect_proc_literals(@program, collector, seen)
+        @program.file_modules.each_value do |file_module|
+          collect_proc_literals(file_module, collector, seen)
+        end
+        found
+      end
+    end
+
+    private def collect_proc_literals(type : Type, collector : ProcLiteralCollector,
+                                      seen : Set(UInt64)) : Nil
+      return unless seen.add?(type.object_id)
+      if type.is_a?(NamedType) || type.is_a?(Program) || type.is_a?(FileModule)
+        type.types?.try &.each_value { |inner| collect_proc_literals(inner, collector, seen) }
+      end
+      if type.is_a?(GenericType)
+        type.each_instantiated_type { |instance| collect_proc_literals(instance, collector, seen) }
+      end
+      collect_proc_literals(type.metaclass, collector, seen) if type.metaclass != type
+      if type.is_a?(DefInstanceContainer)
+        type.def_instances.each_value do |typed_def|
+          next if TapeRules.runtime?(@program, typed_def.location) || TapeRules.std?(typed_def.location)
+          typed_def.body.accept collector
+        end
+      end
+    end
+
+    class ProcLiteralCollector < Visitor
+      @seen = Set(UInt64).new
+
+      def initialize(@found : Array(ProcLiteral))
+      end
+
+      def visit(node : ProcLiteral)
+        @found << node if @seen.add?(node.object_id)
+        node.def.body.accept self
+        false
+      end
+
+      def visit(node : Block)
+        if (literal = node.fun_literal).is_a?(ProcLiteral)
+          @found << literal if @seen.add?(literal.object_id)
+        end
+        true
+      end
+
+      def visit(node : Call)
+        node.expanded.try &.accept self
+        true
+      end
+
+      def visit(node : Def | Macro)
+        false
+      end
+
+      def visit(node : ASTNode)
+        true
+      end
     end
 
     class ReachedStateWrites < Visitor
@@ -1175,7 +1257,21 @@ module Iyi
       # A local task runs on its spawner's thread: only a container's
       # change (not Share) races there. Across threads every write does,
       # except tape state, which TapeProgramChecker refuses on its own.
-      def initialize(@program : Program, @local : Bool)
+      def initialize(@program : Program, @local : Bool,
+                     @procs : Proc(Array(ProcLiteral)))
+      end
+
+      # A proc made in what the task reaches runs when it is called: its
+      # body is walked as a called def's is.
+      def visit(node : ProcLiteral)
+        return false if @found
+        walk_proc(node)
+        false
+      end
+
+      private def walk_proc(literal : ProcLiteral) : Nil
+        return unless @seen.add?(literal.object_id)
+        literal.def.body.accept self
       end
 
       def visit(node : Assign | OpAssign)
@@ -1209,6 +1305,20 @@ module Iyi
         if expanded = node.expanded
           expanded.accept self
           return false
+        end
+        # `handler.call(x)`: the proc may have been made anywhere, kept in
+        # program state and fetched here; each proc of its type may run.
+        if node.name == "call" && (obj = node.obj) &&
+           (type = obj.type?) && type.remove_typedef.is_a?(ProcInstanceType)
+          wanted = type.remove_typedef
+          @procs.call.each do |literal|
+            next unless literal.type?.try(&.remove_typedef) == wanted
+            saved = @via
+            @via ||= literal.def
+            walk_proc(literal)
+            @via = saved
+            break if @found
+          end
         end
         node.target_defs.try &.each do |target|
           next if target.is_a?(External)
@@ -1336,6 +1446,126 @@ module Iyi
     # starts the thread. A name is the variable only where the innermost
     # scope's table says so: a block's own variable of the same name is
     # another cell.
+    # ris: whether a call keeps its argument at *index* (TAPE_SPEC 5.1): a
+    # program method that stores it in a field, a class variable or a
+    # collection, returns it, or hands it to a call that keeps it. std's
+    # and the runtime's methods are not read: one given the value keeps
+    # it unless it only prints or compares it.
+    class KeptArgument
+      PASSING = {"puts", "print", "p", "pp", "inspect", "to_s", "==", "!=",
+                 "same?", "hash", "object_id", "raise"}
+
+      @seen = Set(Tuple(UInt64, Int32)).new
+
+      def initialize(@program : Program)
+      end
+
+      # The method through which it is kept, or nil.
+      def keeps?(call : Call, index : Int32) : String?
+        targets = call.target_defs
+        return nil if PASSING.includes?(call.name) && call.obj.nil?
+        return call.name unless targets
+        targets.each do |target|
+          next if target.is_a?(External) && !target.body
+          if TapeRules.runtime?(@program, target.location) || TapeRules.std?(target.location)
+            return target.name unless PASSING.includes?(target.name)
+            next
+          end
+          next unless @seen.add?({target.object_id, index})
+          arg = target.args[index]?
+          return target.name unless arg && !target.splat_index
+          walk = KeptParameter.new(self, arg.name)
+          target.body.accept walk
+          return walk.via || target.name if walk.kept || last_is?(target.body, walk.names)
+        end
+        nil
+      end
+
+      private def last_is?(body : ASTNode, names : Set(String)) : Bool
+        last = body.is_a?(Expressions) ? body.expressions.last? : body
+        last.is_a?(Var) && names.includes?(last.name)
+      end
+    end
+
+    class KeptParameter < Visitor
+      getter names : Set(String)
+      getter kept = false
+      getter via : String? = nil
+
+      def initialize(@outer : KeptArgument, name : String)
+        @names = Set{name}
+      end
+
+      def visit(node : Assign)
+        value = node.value
+        target = node.target
+        if value.is_a?(Var) && @names.includes?(value.name)
+          if target.is_a?(Var)
+            @names << target.name
+          else
+            @kept = true
+          end
+        end
+        true
+      end
+
+      def visit(node : Return)
+        exp = node.exp
+        @kept = true if exp.is_a?(Var) && @names.includes?(exp.name)
+        true
+      end
+
+      def visit(node : ArrayLiteral | TupleLiteral | HashLiteral | NamedTupleLiteral)
+        @kept = true if mentions?(node)
+        true
+      end
+
+      def visit(node : Call)
+        return false if @kept
+        if expanded = node.expanded
+          expanded.accept self
+          return false
+        end
+        node.args.each_with_index do |arg, i|
+          next unless arg.is_a?(Var) && @names.includes?(arg.name)
+          if via = @outer.keeps?(node, i)
+            @kept = true
+            @via = via
+          end
+        end
+        true
+      end
+
+      def visit(node : Def | Macro)
+        false
+      end
+
+      def visit(node : ASTNode)
+        !@kept
+      end
+
+      private def mentions?(node : ASTNode) : Bool
+        found = false
+        names = @names
+        node.accept(MentionScan.new(names) { found = true })
+        found
+      end
+    end
+
+    class MentionScan < Visitor
+      def initialize(@names : Set(String), &@hit : ->)
+      end
+
+      def visit(node : Var)
+        @hit.call if @names.includes?(node.name)
+        false
+      end
+
+      def visit(node : ASTNode)
+        true
+      end
+    end
+
     class CaptureAssignments < Visitor
       getter assigns = [] of {ASTNode, Array(ASTNode), Bool}
       getter start_regions = [] of ASTNode
@@ -1348,6 +1578,11 @@ module Iyi
         @scopes = [vars] of MetaVars?
       end
 
+      # ris: calls given the variable before the spawn, with its place
+      # among their arguments: one that keeps it (`Holder.new(server)`)
+      # leaves a second way to it.
+      getter passed = [] of {Call, Int32}
+
       def visit(node : Call)
         if node.same?(@start)
           @found_start = true
@@ -1357,6 +1592,13 @@ module Iyi
         if expanded = node.expanded
           expanded.accept self
           return false
+        end
+        unless @found_start
+          node.args.each_with_index do |arg, i|
+            if arg.is_a?(Var) && @scopes.last.try(&.[arg.name]?).same?(@meta)
+              @passed << {node, i}
+            end
+          end
         end
         true
       end

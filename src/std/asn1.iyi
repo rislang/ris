@@ -386,14 +386,14 @@ pub struct DerValue
     # is 0, 1 or 2 and only under 2 is Y below 40.
     first = parts[0]
     head = first < 40 ? "0.#{first}" : (first < 80 ? "1.#{first - 40}" : "2.#{first - 80}")
-    String.build do |io|
-      io << head
-      i = 1
-      while i < parts.size
-        io << '.' << parts[i]
-        i = i + 1
-      end
+    io = ""
+    io << head
+    i = 1
+    while i < parts.size
+      io << '.' << parts[i]
+      i = i + 1
     end
+    io
   end
 
   # A BIT STRING whose bits fill whole bytes: a key, a signature.
@@ -453,13 +453,13 @@ pub struct DerValue
       return Asn1Error.new("a VisibleString holding 0x#{@data[bad].to_s(16)}", bad) if bad >= 0
       ascii_text
     when DerTag::TELETEX_STRING
-      String.build do |io|
-        i = content_offset
-        while i < end_offset
-          io << @data[i].to_i32.chr
-          i = i + 1
-        end
+      io = ""
+      i = content_offset
+      while i < end_offset
+        io << @data[i].to_i32.chr
+        i = i + 1
       end
+      io
     when DerTag::BMP_STRING
       return Asn1Error.new("a BMPString of an odd #{@content_size} bytes", @offset) if @content_size.odd?
       wide(2)
@@ -629,17 +629,16 @@ pub struct DerValue
   # below, and `chr` panicked on it (`1c04ffffffff`, found by
   # bench/std_fuzz_exercise.sh).
   private def wide(width : Int32) : String | Asn1Error
-    built = String.build do |io|
-      i = content_offset
-      while i < end_offset
-        code = 0_i64
-        width.times { |k| code = (code << 8) | @data[i + k].to_i64 }
-        if (code >= 0xD800 && code <= 0xDFFF) || code > 0x10FFFF
-          return Asn1Error.new("a #{width == 2 ? "BMPString" : "UniversalString"} holding U+#{code.to_s(16)}, which is no character", i)
-        end
-        io << code.to_i32.chr
-        i = i + width
+    built = ""
+    i = content_offset
+    while i < end_offset
+      code = 0_i64
+      width.times { |k| code = (code << 8) | @data[i + k].to_i64 }
+      if (code >= 0xD800 && code <= 0xDFFF) || code > 0x10FFFF
+        return Asn1Error.new("a #{width == 2 ? "BMPString" : "UniversalString"} holding U+#{code.to_s(16)}, which is no character", i)
       end
+      built << code.to_i32.chr
+      i = i + width
     end
     built
   end

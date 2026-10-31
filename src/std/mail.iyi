@@ -254,7 +254,7 @@ struct MailText
     return text unless MailText.contains?(text, "=?")
     p = text
     n = text.bytesize
-    io = String::Builder.new(n)
+    io = ""
     i = 0
     after_word = false
     while i < n
@@ -282,13 +282,13 @@ struct MailText
         i = k
       end
     end
-    io.finish
+    io
   end
 
   # The encoded-words that are the whole of `text[start, stop)`, decoded,
   # or nil when it is anything else.
   def self.words_in(text : String, start : Int32, stop : Int32) : String?
-    io = String::Builder.new(stop - start)
+    io = ""
     at = start
     while at < stop
       one = MailText.word_at(text, at, stop)
@@ -296,7 +296,7 @@ struct MailText
       io << one[0]
       at = one[1]
     end
-    at == start ? nil : io.finish
+    at == start ? nil : io
   end
 
   def self.word_at(text : String, at : Int32, stop : Int32) : {String, Int32}?
@@ -382,7 +382,9 @@ struct MailText
     return nil if scan.skip_cfws
     minor = scan.token
     return nil if minor.empty?
-    {String.build { |w| w << MailText.lower(major) << "/" << MailText.lower(minor) }, MailText.params(scan)}
+    essence = ""
+    essence << MailText.lower(major) << "/" << MailText.lower(minor)
+    {essence, MailText.params(scan)}
   end
 
   # A Content-Disposition's kind in lower case, and its parameters.
@@ -476,7 +478,7 @@ struct MailText
       return MailText.extended(piece[1], true) if piece[0] == -1
     end
     sorted = list.sorted_by { |piece| piece[0] }
-    bytes = String::Builder.new
+    bytes = ""
     charset = "".as_tape
     expect = 0
     sorted.each do |piece|
@@ -499,7 +501,7 @@ struct MailText
       end
     end
     return nil if expect == 0
-    MailText.in_charset(bytes.finish, charset)
+    MailText.in_charset(bytes, charset)
   end
 
   # `charset'language'%XX...`, or with *prefixed* false just the
@@ -1415,7 +1417,7 @@ class MailAddresses
   # The display name *words* spell: one space where whitespace was, none
   # between two encoded-words, each decoded.
   def self.display(words : Array(MailWord)) : String
-    io = String::Builder.new
+    io = ""
     last_word = false
     words.each do |w|
       decoded = w.kind == MailWord::ATOM ? MailText.words_in(w.text, 0, w.text.bytesize) : nil
@@ -1423,7 +1425,7 @@ class MailAddresses
       io << (decoded || w.text)
       last_word = !decoded.nil?
     end
-    io.to_s
+    io
   end
 
   # `local@domain` at the cursor, or after the local part *phrase_words*
@@ -1436,7 +1438,7 @@ class MailAddresses
       words = read
     end
     return fail("an address has no local part") if words.empty?
-    local = String::Builder.new
+    local = ""
     want_word = true
     words.each do |w|
       if want_word
@@ -1458,9 +1460,9 @@ class MailAddresses
     if @scan.peek == 91_u8
       lit = @scan.literal
       return lit if lit.is_a?(MailError)
-      return {local.to_s, lit}
+      return {local, lit}
     end
-    domain = String::Builder.new
+    domain = ""
     while true
       label = @scan.atom
       return fail("a domain has an empty label") if label.empty?
@@ -1476,7 +1478,7 @@ class MailAddresses
         break
       end
     end
-    {local.to_s, domain.to_s}
+    {local, domain}
   end
 end
 
@@ -2054,7 +2056,7 @@ pub struct Mail
       raise "mail: a message has no From" unless sender
       date = @date
       raise "mail: a message has no Date" unless date
-      head = String::Builder.new
+      head = ""
       head << Mail.fold("Date", date)
       head << Message.addresses("From", [sender])
       head << Message.addresses("Reply-To", @reply_to) unless @reply_to.empty?
@@ -2070,7 +2072,7 @@ pub struct Mail
       head << "MIME-Version: 1.0\r\n"
       entity = content
       head << entity.head << "\r\n" << entity.body
-      head.to_s
+      head
     end
 
     protected def self.addresses(name : String, list : Array(Address)) : String
@@ -2211,13 +2213,13 @@ pub struct Mail
       while rendered.any? { |r| ("\r\n" + r).includes?("\r\n--" + mark) }
         mark = "iyi-" + SHA1.hexdigest(mark)[0, 32]
       end
-      body = String::Builder.new
+      body = ""
       rendered.each_with_index do |r, i|
         body << (i == 0 ? "--" : "\r\n--") << mark << "\r\n" << r
       end
       body << "\r\n--" << mark << "--\r\n"
       head = "Content-Type: multipart/#{subtype};\r\n boundary=\"#{mark}\"\r\n"
-      MailEntity.new(head, body.to_s)
+      MailEntity.new(head, body)
     end
   end
 
@@ -2321,7 +2323,11 @@ pub struct Mail
           field = MailText.cut(source, i, stem)
           unless colon < e && MailText.field_name?(field)
             shown = MailText.cut(source, i, e)
-            shown = String.build { |w| w << shown[0, 60] << "..." } if shown.bytesize > 64
+            if shown.bytesize > 64
+              cut = ""
+              cut << shown[0, 60] << "..."
+              shown = cut
+            end
             return MailError.new("line #{line} of a header section is not a field: #{shown.inspect}")
           end
           name = field
@@ -2454,7 +2460,8 @@ pub struct Mail
     # preamble and the epilogue are passed over.
     protected def self.split(source : String, start : Int32, stop : Int32, boundary : String, media : String) : Array({Int32, Int32}) | MailError
       p = source
-      mark = String.build { |w| w << "--" << boundary }
+      mark = ""
+      mark << "--" << boundary
       size = mark.bytesize
       ranges = Array({Int32, Int32}).new
       open_at = -1

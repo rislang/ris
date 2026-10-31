@@ -760,10 +760,9 @@ class ::File
       res
     else
       if path.is_a?(String)
-        message = String.build(16 + path.bytesize) do |writer|
-          writer << "File not found: "
-          writer << path
-        end
+        message = ""
+        message << "File not found: "
+        message << path
         raise message
       else
         raise "File not found: #{path.to_s}"

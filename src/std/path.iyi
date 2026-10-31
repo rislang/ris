@@ -574,11 +574,10 @@ pub struct Path
     end
     drive_end, anchor_end = anchor_indices
     bare = drive_end == 2 && anchor_end == 2 && @name.bytesize == 2
-    joined = String.build do |writer|
-      writer << @name
-      writer << separator unless ends_with_separator? || bare
-      writer << part
-    end
+    joined = ""
+    joined << @name
+    joined << separator unless ends_with_separator? || bare
+    joined << part
     Path.new(joined, @kind)
   end
 
@@ -686,22 +685,21 @@ pub struct Path
       return nil if bases[index] == ".."
       index += 1
     end
-    text = String.build do |writer|
-      count = 0
-      while bi < bases.size
-        writer << separator if count > 0
-        writer << ".."
-        count += 1
-        bi += 1
-      end
-      while ti < targets.size
-        writer << separator if count > 0
-        writer << targets[ti]
-        count += 1
-        ti += 1
-      end
-      writer << '.' if count == 0
+    text = ""
+    count = 0
+    while bi < bases.size
+      text << separator if count > 0
+      text << ".."
+      count += 1
+      bi += 1
     end
+    while ti < targets.size
+      text << separator if count > 0
+      text << targets[ti]
+      count += 1
+      ti += 1
+    end
+    text << '.' if count == 0
     Path.new(text, @kind)
   end
 
@@ -729,9 +727,9 @@ pub struct Path
       name = if name == "~"
                directory.as_tape
              else
-               String.build do |writer|
-                 writer << directory << name[1, name.bytesize - 1]
-               end
+               expanded = ""
+               expanded << directory << name[1, name.bytesize - 1]
+               expanded
              end
     end
     path = Path.new(name, @kind)
@@ -755,11 +753,10 @@ pub struct Path
       own = path.drive
       other = origin.drive
       if own && path.root.nil? && !(other && same?(other, own))
-        text = String.build do |writer|
-          writer << own << separator
-          writer << name[own.bytesize, name.bytesize - own.bytesize]
-        end
-        return Path.new(text, @kind).normalize
+        on_drive = ""
+        on_drive << own << separator
+        on_drive << name[own.bytesize, name.bytesize - own.bytesize]
+        return Path.new(on_drive, @kind).normalize
       end
     end
     origin.join(path).normalize

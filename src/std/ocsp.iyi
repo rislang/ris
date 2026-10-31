@@ -572,12 +572,12 @@ struct OcspAsn1
   end
 
   def self.hex(bytes : Array(UInt8)) : String
-    String.build do |io|
-      bytes.each do |b|
-        io << "0123456789abcdef"[b.to_i32 >> 4]
-        io << "0123456789abcdef"[b.to_i32 & 15]
-      end
+    io = ""
+    bytes.each do |b|
+      io << "0123456789abcdef"[b.to_i32 >> 4]
+      io << "0123456789abcdef"[b.to_i32 & 15]
     end
+    io
   end
 
   # A Name's DER as a sentence names it, or its bytes when it is not one.

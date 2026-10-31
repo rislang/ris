@@ -504,13 +504,13 @@ pub class ZipReader
       return ZipError.new("zip: #{entry.name.inspect} holds #{entry.size} bytes, more than a string holds; read it with open")
     end
     stream = open(entry)!
-    out = String::Builder.new(entry.size.to_i32 + 1)
+    out = ""
     while true
       piece = stream.read(65536)!
       break if piece.empty?
       out << piece
     end
-    out.to_s
+    out
   end
 
   # Every entry written under *dir*, directories made as needed, files

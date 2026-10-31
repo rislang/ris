@@ -586,7 +586,7 @@ struct TapeBuffer
   end
 
   def finish : String
-    String.build { |w| w << @writer.finish }
+    @writer.finish.dup
   end
 end
 
@@ -1545,10 +1545,9 @@ struct TapeParser
     text = @bytes[pos, finish - pos]
     prefix = "!<tag:yaml.org,2002:"
     if text.starts_with?(prefix) && (text.bytesize > 0 && text[text.bytesize - 1] == 62_u8) && text.bytesize > prefix.bytesize + 1
-      short = String.build do |w|
-        w << "!!" << text[prefix.bytesize,
-          text.bytesize - prefix.bytesize - 1]
-      end
+      short = ""
+      short << "!!" << text[prefix.bytesize,
+        text.bytesize - prefix.bytesize - 1]
       return short if known_tag?(short)
     end
     text

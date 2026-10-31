@@ -195,7 +195,9 @@ pub struct MIME
     return result unless essence
     TABLE.each do |entry|
       if essence == entry[1]
-        result << String.build { |w| w << "." << entry[0] }
+        extension = ""
+        extension << "." << entry[0]
+        result << extension
       end
     end
     result.sort_in_place { |a, b| compare(a, b) }
@@ -240,9 +242,9 @@ pub struct MIME
               ends_with?(essence, "+json") || ends_with?(essence, "+xml") ||
               essence == "application/json" || essence == "application/javascript" || essence == "application/xml"
     return media_type unless textual
-    String.build do |w|
-      w << media_type << "; charset=utf-8"
-    end
+    w = ""
+    w << media_type << "; charset=utf-8"
+    w
   end
 
   # RFC 9110 §8.3.1: `type/subtype` followed by `; name=value` parameters,

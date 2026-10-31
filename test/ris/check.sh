@@ -174,7 +174,23 @@ if [ "$?" -eq 0 ] && [ "$out" = '16' ]; then
 else
   echo "FAILED   task_reached_state: $out"; status=1
 fi
+# std's text, too, is `s = ""` and `<<`: every std module compiles under
+# the plain-builder refusal.
+if out=$("$RIS" build --no-codegen test/ris/std_text_plain.ri 2>&1); then
+  echo "runs     std_text_plain (no plain builder in std)"
+else
+  echo "FAILED   std_text_plain: $out"; status=1
+fi
 expect task_handoff_reused 'the task owns it now'
+expect task_handoff_kept '`Holder.new(server)` may keep `server` (through `initialize`)'
+expect task_reached_proc 'changes `@@total` in a proc the task calls (made at line 7)'
+expect task_reached_proc_kept 'changes `@@seen` through `fire`, which the task calls'
+out=$("$RIS" run test/ris/task_reached_proc.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = $'15\n2\ntrue' ]; then
+  echo "runs     task_reached_proc (procs read state, change own data; read-only call before a hand-off)"
+else
+  echo "FAILED   task_reached_proc: $out"; status=1
+fi
 expect select_gone 'ris has no select'
 expect channel_gone 'undefined constant Channel'
 expect mutex_gone 'ris has no std/mutex'
@@ -1151,6 +1167,26 @@ if [ "$lines" = "$want" ] && [ -n "$taken" ] && [ "$taken" -lt 65536 ] &&
 else
   echo "FAILED   http_conn_growth: $out"; status=1
 fi
+# Many requests on one keep-alive connection: each request's head, parse
+# and answer are freed when it ends (serve_h1's per-request tape block),
+# so the connection's mappings are the same for 200 requests as for 5000.
+exe=$(mktemp)
+if out=$("$RIS" build test/ris/http_keepalive_scope.ri -o "$exe" 2>&1); then
+  few=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 timeout 120 "$exe" 200 2>&1)
+  many=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 timeout 300 "$exe" 5000 2>&1)
+  maps() { printf '%s\n' "$1" | sed -n 's/^ris tape: .* \([0-9]*\) mappings made.*/\1/p'; }
+  if printf '%s\n' "$few" | grep -qx '200 true' &&
+     printf '%s\n' "$many" | grep -qx '5000 true' &&
+     printf '%s\n' "$many" | grep -qx 'ris heap: 0 allocations, 0 bytes' &&
+     [ -n "$(maps "$few")" ] && [ "$(maps "$few")" = "$(maps "$many")" ]; then
+    echo "runs     http_keepalive_scope ($(maps "$many") mappings for 200 and 5000 requests)"
+  else
+    echo "FAILED   http_keepalive_scope: $few / $many"; status=1
+  fi
+else
+  echo "FAILED   http_keepalive_scope: $out"; status=1
+fi
+rm -f "$exe"
 out=$(RIS="$RIS" timeout 200 bash test/ris/http2_conn_growth.sh 2>&1)
 case "$out" in
   "ok "*) echo "runs     http2_conn_growth (1 MiB h2c POSTs, ${out#ok } B program)";;

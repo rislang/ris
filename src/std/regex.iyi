@@ -415,28 +415,28 @@ pub struct Regex
 
     # `Regex::MatchData("ab" 1:"a" name:"b")`, as the other library writes it.
     def inspect : String
-      String.build do |io|
-        io << "Regex::MatchData("
-        n = 0
-        while n < size
-          if n > 0
-            io << " "
-            if name = @regex.group_name(n)
-              io << name
-            else
-              io << n
-            end
-            io << ":"
-          end
-          if text = self[n]?
-            io << text.inspect
+      io = ""
+      io << "Regex::MatchData("
+      n = 0
+      while n < size
+        if n > 0
+          io << " "
+          if name = @regex.group_name(n)
+            io << name
           else
-            io << "nil"
+            io << n
           end
-          n = n + 1
+          io << ":"
         end
-        io << ")"
+        if text = self[n]?
+          io << text.inspect
+        else
+          io << "nil"
+        end
+        n = n + 1
       end
+      io << ")"
+      io
     end
 
     # *replacement* with its references filled from this match: `\0` to
@@ -628,18 +628,16 @@ pub struct Regex
   # The pattern with its flags inside it, `(?i-msx:a+)`, which compiles to
   # a pattern that matches as this one does: what `union` joins.
   def to_s : String
-    on = String.build do |io|
-      io << "i" if @options.includes?(Options::IGNORE_CASE)
-      io << "m" if @options.includes?(Options::MULTILINE_ONLY)
-      io << "s" if @options.includes?(Options::DOTALL)
-      io << "x" if @options.includes?(Options::EXTENDED)
-    end
-    off = String.build do |io|
-      io << "i" unless @options.includes?(Options::IGNORE_CASE)
-      io << "m" unless @options.includes?(Options::MULTILINE_ONLY)
-      io << "s" unless @options.includes?(Options::DOTALL)
-      io << "x" unless @options.includes?(Options::EXTENDED)
-    end
+    on = ""
+    on << "i" if @options.includes?(Options::IGNORE_CASE)
+    on << "m" if @options.includes?(Options::MULTILINE_ONLY)
+    on << "s" if @options.includes?(Options::DOTALL)
+    on << "x" if @options.includes?(Options::EXTENDED)
+    off = ""
+    off << "i" unless @options.includes?(Options::IGNORE_CASE)
+    off << "m" unless @options.includes?(Options::MULTILINE_ONLY)
+    off << "s" unless @options.includes?(Options::DOTALL)
+    off << "x" unless @options.includes?(Options::EXTENDED)
     "(?#{on}-#{off}:#{@source})"
   end
 
@@ -810,14 +808,14 @@ pub struct Regex
   # replacement cannot say.
   def replace(text : String, & : String -> String) : String
     last = 0
-    String.build(text.bytesize) do |io|
-      each_span(text) do |a, b|
-        io << text[last, a - last]
-        io << yield text[a, b - a]
-        last = b
-      end
-      io << text[last, text.bytesize - last]
+    io = ""
+    each_span(text) do |a, b|
+      io << text[last, a - last]
+      io << yield text[a, b - a]
+      last = b
     end
+    io << text[last, text.bytesize - last]
+    io
   end
 
   # Every non-overlapping match with its groups, leftmost first, as `scan`
@@ -2274,11 +2272,11 @@ struct ::String
     return self unless match
     head = match.byte_begin(0)
     tail = match.byte_end(0)
-    String.build(bytesize) do |io|
-      io << self[0, head]
-      io << yield match[0], match
-      io << self[tail, bytesize - tail]
-    end
+    io = ""
+    io << self[0, head]
+    io << yield match[0], match
+    io << self[tail, bytesize - tail]
+    io
   end
 
   def gsub(pattern : Std::Regex::Regex, replacement : String) : String
@@ -2288,15 +2286,15 @@ struct ::String
 
   def gsub(pattern : Std::Regex::Regex, & : String, Std::Regex::Regex::MatchData -> String) : String
     last = 0
-    String.build(bytesize) do |io|
-      pattern.each_match(self) do |match|
-        head = match.byte_begin(0)
-        io << self[last, head - last]
-        io << yield match[0], match
-        last = match.byte_end(0)
-      end
-      io << self[last, bytesize - last]
+    io = ""
+    pattern.each_match(self) do |match|
+      head = match.byte_begin(0)
+      io << self[last, head - last]
+      io << yield match[0], match
+      last = match.byte_end(0)
     end
+    io << self[last, bytesize - last]
+    io
   end
 
   # Each match replaced by its entry in *table*; a match the table has no

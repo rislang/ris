@@ -252,11 +252,12 @@ pub struct TOMLDateTime
   end
 
   protected def self.padded(value : Int32, width : Int32) : String
-    digits = String.build { |writer| writer << value }
-    String.build do |writer|
-      (width - digits.bytesize).times { writer << '0' }
-      writer << digits
-    end
+    digits = ""
+    digits << value
+    padded = ""
+    (width - digits.bytesize).times { padded << '0' }
+    padded << digits
+    padded
   end
 
   def offset? : Bool

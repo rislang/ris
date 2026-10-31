@@ -321,13 +321,12 @@ pub class Pattern
         # end: `/x/` does not match `/x`.
         return nil if j >= pieces.size
         name = @names[i]
-        value = String.build do |w|
-          k = j
-          while k < pieces.size
-            w << "/" if k > j
-            w << pieces[k]
-            k += 1
-          end
+        value = ""
+        k = j
+        while k < pieces.size
+          value << "/" if k > j
+          value << pieces[k]
+          k += 1
         end
         found.add(name.as_tape, value) unless name.empty?
         return found

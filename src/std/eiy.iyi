@@ -481,9 +481,9 @@ pub struct Eiy
         tail = @string[start_pos, end_pos - start_pos]
         close_tag = suppress_trailing ? "-%>" : "%>"
         @token.type = Token::Type::String
-        @token.value = String.build do |w|
-          w << head << tail << close_tag
-        end
+        w = ""
+        w << head << tail << close_tag
+        @token.value = w
       elsif is_output
         @token.type = Token::Type::Output
         @token.value = @string[start_pos, end_pos - start_pos]

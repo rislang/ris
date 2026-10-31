@@ -923,15 +923,15 @@ pub class WebSocket
     end
     # Every piece ends in 00 00 ff ff; the last one's is left off.
     size = size - 4
-    String.build(size) do |w|
-      done = 0
-      pieces.each do |piece|
-        k = piece.bytesize
-        k = size - done if k > size - done
-        w << piece[0, k]
-        done = done + k
-      end
+    joined = ""
+    done = 0
+    pieces.each do |piece|
+      k = piece.bytesize
+      k = size - done if k > size - done
+      joined << piece[0, k]
+      done = done + k
     end
+    joined
   end
 
   # *count* bytes of *bytes* from *at* XORed with *key*'s four bytes in

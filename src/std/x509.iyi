@@ -991,7 +991,9 @@ struct X509Names
   # no host: a dNSName is IA5String.
   def self.ascii(bytes : Array(UInt8)) : String
     return "\u{FFFD}" if bytes.any? { |b| b >= 0x80_u8 }
-    String.build { |io| bytes.each { |b| io << b.to_i32.chr } }
+    io = ""
+    bytes.each { |b| io << b.to_i32.chr }
+    io
   end
 
   # *host*, lowercase and in ASCII, against one dNSName.

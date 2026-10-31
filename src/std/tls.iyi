@@ -6408,12 +6408,12 @@ struct TlsBytes
   end
 
   def self.hex(bytes : Array::View(UInt8)) : String
-    String.build do |io|
-      bytes.each do |b|
-        io << "0123456789abcdef"[b.to_i32 >> 4]
-        io << "0123456789abcdef"[b.to_i32 & 15]
-      end
+    io = ""
+    bytes.each do |b|
+      io << "0123456789abcdef"[b.to_i32 >> 4]
+      io << "0123456789abcdef"[b.to_i32 & 15]
     end
+    io
   end
 
   # An IP address is not a server name (RFC 6066 section 3).

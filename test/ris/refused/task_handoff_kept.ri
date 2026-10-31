@@ -1,0 +1,17 @@
+# A value passed before the spawn to a call that keeps it reaches it while
+# the task owns it (5.1).
+import std/socket::{IyiSocket}
+
+class Holder
+  getter socket : IyiSocket
+
+  def initialize(@socket : IyiSocket)
+  end
+end
+
+server = IyiSocket.listen(0)
+holder = Holder.new(server)
+group do |g|
+  g.spawn { server.close }
+  puts holder.socket.local_port
+end

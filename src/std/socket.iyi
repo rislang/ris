@@ -417,8 +417,6 @@ pub struct IyiSocket
     # Per-wait bounds; nil waits without a deadline.
     property read_timeout_ms : Int32? = nil
     property write_timeout_ms : Int32? = nil
-    # A read's deferred error must survive copies of the handle.
-    property pending_error : SocketError? = nil
     property io : Std::Socket::SocketIO? = nil
 
     def initialize(@fd : Int32, @family : Int32)
@@ -1076,13 +1074,13 @@ pub struct IyiSocket
   # brackets, as a URL writes it. Bare, `::1:57456` was an address with
   # no port, and `ff02::1:80` another address altogether.
   def self.endpoint(host : String, port : Int32) : String
-    String.build(host.bytesize + 16) do |writer|
-      brackets = host.includes?(":") && !host.starts_with?("[")
-      writer << '[' if brackets
-      writer << host
-      writer << ']' if brackets
-      writer << ':' << port
-    end
+    writer = ""
+    brackets = host.includes?(":") && !host.starts_with?("[")
+    writer << '[' if brackets
+    writer << host
+    writer << ']' if brackets
+    writer << ':' << port
+    writer
   end
 
   # The stream socket listening at *path*.
@@ -1181,10 +1179,6 @@ pub struct IyiSocket
     # neither the count nor the call; the enumerable's sentence for it.
     raise "negative count: #{max_bytes}" if max_bytes < 0
     raise "socket is closed" if @state.value.fd < 0
-    if (kept = @state.value.pending_error).is_a?(SocketError)
-      @state.value.pending_error = nil
-      return kept
-    end
     while true
       got = read_ready(max_bytes)
       return got unless got.nil?
@@ -1216,10 +1210,6 @@ pub struct IyiSocket
   def read(buffer : Pointer(UInt8), count : Int32) : Int32 | Cancelled | SocketError
     raise "negative count: #{count}" if count < 0
     raise "socket is closed" if @state.value.fd < 0
-    if (kept = @state.value.pending_error).is_a?(SocketError)
-      @state.value.pending_error = nil
-      return kept
-    end
     while true
       n = IyiSocket.__sys_recv(@state.value.fd, buffer, count.to_u64)
       return n.to_i32 if n >= 0_i64
@@ -1560,9 +1550,11 @@ pub struct IyiSocket
         wake_closed(fd)
       {% end %}
       IyiSocket.__sys_close(fd)
+      # Kept, not cleared: the descriptor's -1 above makes this run once,
+      # and a store of nil here was a store a caller's tape block could
+      # not tell from one of storage it made.
       path = @state.value.path
       if path.is_a?(String)
-        @state.value.path = nil
         __iyi_unlink(IyiSocket.c_path(path).to_unsafe)
       end
     end

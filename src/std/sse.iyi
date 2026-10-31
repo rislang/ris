@@ -436,7 +436,7 @@ pub struct SSE
       at += length
     end
     return bytes if at == bytes.bytesize
-    writer = String::Builder.new(bytes.bytesize)
+    writer = ""
     writer << bytes[0, at]
     while at < bytes.bytesize
       length = sequence_at(bytes, bytes.bytesize, at)
@@ -448,7 +448,7 @@ pub struct SSE
         at += length
       end
     end
-    writer.finish
+    writer
   end
 
   private def self.sequence_at(bytes : String,

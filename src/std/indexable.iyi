@@ -377,14 +377,14 @@ pub trait Indexable
   # text so far copied that text once per element, and 20,000 elements
   # took 1.8 s where the same array's `join` took 1 ms.
   def join(separator : String = "") : String
-    String.build do |io|
-      i = 0
-      while i < size
-        io << separator if i > 0
-        io << unsafe_fetch(i).to_s
-        i = i + 1
-      end
+    io = ""
+    i = 0
+    while i < size
+      io << separator if i > 0
+      io << unsafe_fetch(i).to_s
+      i = i + 1
     end
+    io
   end
 
   # Copies elements into a newly allocated Array with pre-allocated capacity.

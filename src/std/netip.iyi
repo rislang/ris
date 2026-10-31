@@ -379,13 +379,12 @@ pub struct IP
   # Python writes it); IPv4 as `to_s` writes it.
   def exploded : String
     return NetipBits.dotted(to_u128) unless @v6
-    text = String.build do |io|
-      index = 0
-      while index < 8
-        io << ':' if index > 0
-        io << NetipBits.hextet(to_u128, index).to_s(16).rjust(4, '0')
-        index = index + 1
-      end
+    text = ""
+    index = 0
+    while index < 8
+      text << ':' if index > 0
+      text << NetipBits.hextet(to_u128, index).to_s(16).rjust(4, '0')
+      index = index + 1
     end
     text = text[0, 30] + NetipBits.dotted(to_u128 & 0xFFFFFFFF_u128) if (to_u128 >> 32) == 0xFFFF_u128
     @zone.empty? ? text : text + "%" + @zone
@@ -394,25 +393,25 @@ pub struct IP
   # The name a PTR record for this address is under: `4.3.2.1.in-addr.arpa`,
   # or thirty-two nibbles and `ip6.arpa`.
   def reverse_pointer : String
-    String.build do |io|
-      if @v6
-        index = 0
-        while index < 32
-          io << ((to_u128 >> (index * 4)) & 15_u128).to_i32.to_s(16)
-          io << '.'
-          index = index + 1
-        end
-        io << "ip6.arpa"
-      else
-        index = 0
-        while index < 4
-          io << ((to_u128 >> (index * 8)) & 255_u128).to_i32
-          io << '.'
-          index = index + 1
-        end
-        io << "in-addr.arpa"
+    io = ""
+    if @v6
+      index = 0
+      while index < 32
+        io << ((to_u128 >> (index * 4)) & 15_u128).to_i32.to_s(16)
+        io << '.'
+        index = index + 1
       end
+      io << "ip6.arpa"
+    else
+      index = 0
+      while index < 4
+        io << ((to_u128 >> (index * 8)) & 255_u128).to_i32
+        io << '.'
+        index = index + 1
+      end
+      io << "in-addr.arpa"
     end
+    io
   end
 
   # --- comparison ---
@@ -1104,18 +1103,18 @@ struct NetipBits
       end
       index = index + 1
     end
-    String.build do |io|
-      index = 0
-      while index < 8
-        if index == best
-          io << "::"
-          index = index + best_size
-          next
-        end
-        io << ':' if index > 0 && index != best + best_size
-        io << hextet(value, index).to_s(16)
-        index = index + 1
+    io = ""
+    index = 0
+    while index < 8
+      if index == best
+        io << "::"
+        index = index + best_size
+        next
       end
+      io << ':' if index > 0 && index != best + best_size
+      io << hextet(value, index).to_s(16)
+      index = index + 1
     end
+    io
   end
 end

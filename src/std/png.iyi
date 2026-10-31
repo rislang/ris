@@ -1053,9 +1053,8 @@ pub struct Png
     raw = Array(UInt8).new(want)
     total = 0
     idats.each { |piece| total = total + piece[1] }
-    stream = String.build(total) do |w|
-      idats.each { |piece| w << data[piece[0], piece[1]] }
-    end
+    stream = ""
+    idats.each { |piece| stream << data[piece[0], piece[1]] }
     inf = Inflater.new(Envelope::Zlib, nil, stream)
     while true
       piece = inf.read(65536)

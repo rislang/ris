@@ -254,9 +254,9 @@ pub struct Punycode
       output[index.to_i32] = n
       index = index + 1_i64
     end
-    String.build(size + 8) do |io|
-      output.each { |point| io << point.to_i32.unsafe_chr }
-    end
+    io = ""
+    output.each { |point| io << point.to_i32.unsafe_chr }
+    io
   end
 
   # Section 6.1.

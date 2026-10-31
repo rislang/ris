@@ -297,14 +297,14 @@ pub trait Enumerable
   # Into one builder: adding each element to the text so far copied that
   # text once per element, and a `List` of 100,000 took nine seconds.
   def join(separator : String = "") : String
-    String.build do |io|
-      first = true
-      each do |e|
-        io << separator unless first
-        io << e.to_s
-        first = false
-      end
+    io = ""
+    first = true
+    each do |e|
+      io << separator unless first
+      io << e.to_s
+      first = false
     end
+    io
   end
 
   # ---- needing something of the element type -------------------------------

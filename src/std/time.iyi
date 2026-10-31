@@ -2680,16 +2680,16 @@ pub struct Time
     # or always (2), the way Crystal's `Zone#format` writes an offset.
     def self.offset_text(offset : Int32, colon : Bool, seconds : Int32) : String
       magnitude = offset < 0 ? -offset : offset
-      String.build(9) do |io|
-        io << (offset < 0 ? '-' : '+')
-        io << Time.pad2(magnitude // 3600)
+      io = ""
+      io << (offset < 0 ? '-' : '+')
+      io << Time.pad2(magnitude // 3600)
+      io << ':' if colon
+      io << Time.pad2((magnitude % 3600) // 60)
+      if seconds == 2 || (seconds == 1 && magnitude % 60 != 0)
         io << ':' if colon
-        io << Time.pad2((magnitude % 3600) // 60)
-        if seconds == 2 || (seconds == 1 && magnitude % 60 != 0)
-          io << ':' if colon
-          io << Time.pad2(magnitude % 60)
-        end
+        io << Time.pad2(magnitude % 60)
       end
+      io
     end
 
     # Reads a text by a pattern or by one of the named grammars. Every step

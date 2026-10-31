@@ -4,6 +4,18 @@ Every change to TAPE_SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one.
 
+## 2026-10-31: 5.1 procs a task calls and calls that keep a hand-off
+
+* Changed: 5.1 says the procs a task calls change no class variable or
+  constant, as its methods do: a proc made in what the task reaches, and
+  for `p.call` every proc of p's type the program makes, is walked. A
+  value handed to a task may not be passed before the spawn to a call
+  that may keep it (`Holder.new(server)`); a call that only reads it
+  (`port_of(server)`) stays legal.
+* Why: the walk followed defs, not procs: a proc from a method, or one
+  kept in a class variable of handlers, could write shared state from a
+  task. A kept argument was a second name the alias check missed.
+
 ## 2026-10-30: 5.1 reached state and handed-off aliases
 
 * Changed: 5.1 says a handed-off value has no second local name, and

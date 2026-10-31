@@ -1,0 +1,40 @@
+module test/ris/task_reached_proc
+
+# Procs a task calls may read program state and change what the task
+# made; a handed-off value may be given before the spawn to a call that
+# only reads it.
+import std/socket::{IyiSocket}
+
+class Tally
+  @@base = 10
+
+  def self.base : Int32
+    @@base
+  end
+
+  def self.adder : Proc(Int32, Int32)
+    ->(n : Int32) { n + @@base }
+  end
+end
+
+def port_of(socket : IyiSocket) : Int32
+  socket.local_port
+end
+
+server = IyiSocket.listen(0)
+known = port_of(server) > 0
+group do |g|
+  t = g.spawn { Tally.adder.call(5) }
+  own = g.spawn do
+    count = 0
+    bump = ->(n : Int32) { count += n; nil }
+    bump.call(2)
+    count
+  end
+  g.spawn { server.close }
+  v = t.value
+  puts v if v.is_a?(Int32)
+  c = own.value
+  puts c if c.is_a?(Int32)
+end
+puts known

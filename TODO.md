@@ -29,12 +29,10 @@ the std row. Update a row when its work starts or ends.
 | Work                                 | Size    | Time     | Tokens   |
 |--------------------------------------|---------|----------|----------|
 | std non-Linux branches: 34 mallocs   | medium  | 4-8 h    | 200-400k |
-| Text: std's ~320 plain builders     | medium  | 4-8 h    | 200-400k |
+| std's other serve loop (in place)    | small   | 1-2 h    | 50-100k  |
 | Kernel threads: darwin arm64, win32  | large   | 1-2 days | 300-500k |
 | Bench ports left: 20 benches         | large   | 1-2 days | 400-800k |
-| 5.1: state reached through procs     | medium  | 2-4 h    | 100-200k |
 | Autocert part B: exercise and Pebble | medium  | 2-4 h    | 150-300k |
-| HTTP/1 keep-alive per-request scope  | medium  | 2-4 h    | 100-200k |
 | Socket race: darwin kqueue, Windows  | medium  | 3-5 h    | 150-300k |
 | Compiler specs: the rest of the suite| large   | 1-3 days | 300k-1M  |
 | macOS arm64 (needs a Mac to test)    | medium  | 1-2 days | 200-400k |
@@ -49,13 +47,15 @@ A, OS pipe, socket race without Channel, 5.1 local task captures,
 Channel and select removed, task-owned Conn growth, Linux socket race
 on one task. Next in order: bench ports, then autocert part B.
 
-* serve_h1's requests on one keep-alive connection pile up on the
-  connection's tape (about 20 side reservations a request, released when
-  the connection ends): its loop's scope mark stays off because
-  `conn.deadline_at(.., "what")` and `read_head` store into the outer
-  Conn (TapeShrinkChecker taint_store). Store the deadline's reason as a
-  flag, prove the failure store, then reset per request; gate with
-  test/ris/http_conn_growth.ri's mapping count flat in requests.
+* Done 2026-10-31: serve_h1 runs each request in a `tape` block whose
+  scratch is freed: Conn keeps its deadline's reason as a flag, its
+  buffer as an address, IdleConns links states by address; IyiSocket
+  lost its never-set pending_error and keeps its path at close.
+  test/ris/http_keepalive_scope.ri: 67 mappings for 200 and 5000
+  requests, 0 heap. Left: Server's other loop (`conn.deadline_in(60000)`,
+  answered_in_place) has no per-request block; bench/socket_exercise.sh's
+  "reset dropped after a full chunk" mutation names pending_error, which
+  nothing set before this change either.
 * Port the benches to 5.1 task captures. Done: std_signal (exercise
   passes; a listener stops by its task handle's `cancel`, the Share stop
   handle), std_process's captures (ChildProcess#read_both, task values,
@@ -89,11 +89,13 @@ on one task. Next in order: bench ports, then autocert part B.
     socket, file, http, json import std/gc; yaml: Array(Any) refused (growing
     values): retire Any for TapeValue; server_load: IyiMark (collector
     gone; the bench proves collections, drop or rewrite it).
-* 5.1 left: state reached through a proc the task calls (the walk
-  follows defs, not procs), and a handed-off value passed to a call
-  that keeps it before the spawn. Done: class variables and constants
-  changed through called defs, `other = server` aliases (refused/
-  task_reached_*, task_handoff_alias).
+* Done 2026-10-31, 5.1: procs a task calls (a proc made in what it
+  reaches; for `p.call` every program proc of p's type) are walked for
+  class variable and constant writes, and a handed-off value passed
+  before the spawn to a call that may keep it is refused (refused/
+  task_reached_proc*, task_handoff_kept; task_reached_proc.ri allowed).
+  A std callee is taken to keep what it is given unless it only prints
+  or compares it.
 * Socket race on darwin (kqueue, as Linux's epoll in `race_polled`) and
   Windows (completion records): they still race attempt tasks the caller
   polls in 2 ms slices. Linux is one task (gate test/ris/socket_race.ri).
@@ -146,7 +148,7 @@ first):
   `String::Builder` parameter (`text = ""; greet(text)`) and rebound to
   its text after the call; `s << a << b` appends every link to `s`.
   Others are refused naming that form (test/ris/text_param.ri,
-  refused/text_lend_*). std (.iyi) does not lend yet.
+  refused/text_lend_*). std (.iyi) lends too (2026-10-31).
 * Crystal code to ris through `ris fix`: each common refusal carries a
   `suggested_edit` that fix applies. Done: a plain `String::Builder.new`
   -> `""`, then its `x.finish` -> `x.to_s`, plain `String.build` blocks
@@ -161,9 +163,13 @@ first):
   text_builder_kept.ri). A builder with byte methods, passed to a call
   or unused stays legal: an overload on String (`join(separator)`)
   would take the text silently. 19 test and sample files moved.
-* std (.iyi) builders: lend and the refusal apply to .ri programs only.
-  Extend both to src/std with the std port, then move its ~320 plain
-  builders. test/ and src/iyi/ keep their literal capacities.
+* Done 2026-10-31: src/std's builders. Lend, `s << a << b` and the
+  plain-builder refusal apply to src/std/*.iyi too; of its 86 plain
+  ones (the refusal's rule; ~320 counted every builder) 82 are `s = ""`
+  and `<<`, 4 single copies `view.dup` (test/ris/std_text_plain.ri
+  compiles every std module under the refusal). Macro branches for
+  other targets (`{% if flag?(:darwin) %}`) are not seen on Linux.
+  test/ and src/iyi/ keep their literal capacities.
 
 ## std port (session state: tape_state.txt; group one, then group two)
 

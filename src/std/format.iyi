@@ -337,9 +337,13 @@ module ::IyiFormat
     text = text_view(value)
     case value
     when Char
-      text = String.build { |w| w << value }
+      char_text = ""
+      char_text << value
+      text = char_text
     when Int32, Int64, UInt64
-      text = String.build { |w| w << code_point(value) }
+      point_text = ""
+      point_text << code_point(value)
+      text = point_text
     end
     text = " ".as_tape if text.empty?
     tape_string_arg(text, minus, width, 1)
@@ -649,33 +653,31 @@ module ::IyiFormat
     scientific = exp_text(val.abs, prec - 1, uppercase, hash)
     marker = scientific.index(uppercase ? 'E' : 'e') || scientific.bytesize
     exp = scientific[marker + 1, scientific.bytesize - marker - 1].to_i
-    text = String.build do |w|
-      if exp < -4 || exp >= prec
-        mantissa = scientific[0, marker]
-        w << (hash ? mantissa : trim_tape(mantissa))
-        w << scientific[marker, scientific.bytesize - marker]
-      else
-        sig = String.build do |o|
-          o << scientific[0, 1]
-          o << scientific[2, marker - 2] if marker > 2
-        end
-        fixed = String.build do |o|
-          if exp >= 0
-            if exp + 1 < prec
-              o << sig[0, exp + 1] << "."
-              o << sig[exp + 1, prec - 1 - exp]
-            else
-              o << sig
-            end
+    text = ""
+    if exp < -4 || exp >= prec
+      mantissa = scientific[0, marker]
+      text << (hash ? mantissa : trim_tape(mantissa))
+      text << scientific[marker, scientific.bytesize - marker]
+    else
+      sig = ""
+      sig << scientific[0, 1]
+      sig << scientific[2, marker - 2] if marker > 2
+      fixed = String.build do |o|
+        if exp >= 0
+          if exp + 1 < prec
+            o << sig[0, exp + 1] << "."
+            o << sig[exp + 1, prec - 1 - exp]
           else
-            o << "0."
-            repeat(o, 48_u8, -exp - 1)
             o << sig
           end
+        else
+          o << "0."
+          repeat(o, 48_u8, -exp - 1)
+          o << sig
         end
-        w << (hash ? fixed : trim_tape(fixed))
-        w << "." if hash && !fixed.index('.')
       end
+      text << (hash ? fixed : trim_tape(fixed))
+      text << "." if hash && !fixed.index('.')
     end
     float_field(val, text, minus, plus, space, zero, width)
   end

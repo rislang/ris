@@ -1886,7 +1886,8 @@ struct TapeParser
           return elem
         end
         attr = TapeAttribute.new(raw_names[i], raw_values[i], ns.uri)
-        key = String.build { |w| w << ns.uri << "\n" << attr.local_name }
+        key = ""
+        key << ns.uri << "\n" << attr.local_name
         first = expanded[key]?
         if !first.nil?
           fail_at(raw_lines[i], raw_cols[i], "attribute " \
@@ -2116,7 +2117,9 @@ struct TapeParser
                                    "not an XML character")
         return "".as_tape
       end
-      return String.build { |w| w << cp.unsafe_chr }
+      w = ""
+      w << cp.unsafe_chr
+      return w
     end
     # `&a]b;` and `&0;` are no references: kept as written in an entity's
     # value, they were accepted wherever that entity went unused.
@@ -2239,7 +2242,9 @@ struct TapeParser
                                "value of entity '#{name}' is not an XML character")
             return
           end
-          text << String.build { |w| w << cp.unsafe_chr }
+          char_text = ""
+          char_text << cp.unsafe_chr
+          text << char_text
         else
           expand_entity(ref, line, col, depth + 1, in_attribute, text)
           return if failed?
@@ -2529,7 +2534,7 @@ def unescape_or_error(text : String) : Tuple(String, String)
   return {text, ""} unless text.includes?("&")
   ptr = text
   len = text.bytesize
-  parts = String::Builder.new(len)
+  parts = ""
   run_start = 0
   line = 1
   col = 1
@@ -2581,7 +2586,7 @@ def unescape_or_error(text : String) : Tuple(String, String)
     end
   end
   parts << text[run_start, len - run_start]
-  {parts.finish, ""}
+  {parts, ""}
 end
 
 # A byte that cannot be part of a reference, so a reference reaching one

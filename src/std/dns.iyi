@@ -708,7 +708,7 @@ pub struct SvcbRecord
       index = index + 1
     end
     best = -1 if best_length < 2
-    text = String::Builder.new
+    text = ""
     index = 0
     while index < 8
       if best >= 0 && index >= best && index < best + best_length
@@ -719,13 +719,13 @@ pub struct SvcbRecord
       text << ':' if index != 0
       if index == 6 && best == 0 && (best_length == 6 || (best_length == 5 && words[5] == 0xFFFF))
         text << "#{address[12]}.#{address[13]}.#{address[14]}.#{address[15]}"
-        return text.to_s
+        return text
       end
       text << words[index].to_s(16)
       index = index + 1
     end
     text << ':' if best >= 0 && best + best_length == 8
-    text.to_s
+    text
   end
 end
 
