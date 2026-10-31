@@ -1,5 +1,18 @@
 # ris TODO
 
+How to work (fewer tokens, faster to the goal):
+
+* Demand first: take the largest heap site in an existing workload.
+  For an uncovered language guarantee, add a small representative gate.
+* One change, one relevant gate: check the promised behavior, including
+  error paths the census cannot see. Zero counted allocations alone do
+  not prove runtime exemptions or repeated use are heap-free.
+* Replace, don't wrap: when a String API has a tape twin, grep the repo
+  for callers. Few: move them and delete the String API in one commit.
+* TODO holds open work only, one item per task; completed work lives in
+  git log. Remove an item when its guarantee passes its gate.
+* Linux x86_64 and aarch64 only (SPEC 7.1): no work for other targets.
+
 ## Now: every scope frees (SPEC 1.1, 1.5, 1.9, 3.2, 3.5, 3.6; 2026-10-31)
 
 Today a def's, loop's or block's scratch is freed only when
