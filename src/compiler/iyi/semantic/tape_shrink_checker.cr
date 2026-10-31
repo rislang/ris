@@ -512,6 +512,9 @@ class Iyi::TapeShrinkChecker
     return if @text_only && !chain.includes?("text reset")
     @shrinks << Shrink.new(roots, @uses.size, node, chain, @guards.dup,
       growth)
+    # What is made after it - a callee's refill of what it cleared - is
+    # born after it.
+    @uses << Use.new([] of View, node, @guards.dup)
   end
 
   # Reset invalidates the bytes behind the companion, not the object
@@ -1815,6 +1818,12 @@ class Iyi::TapeShrinkChecker
                   chain("#{node.name} -> #{chain}"))
               else
                 shrink(roots, node, chain("#{node.name} -> #{chain}"))
+                # A callee that clears a field empties it: what the caller
+                # knew it held is gone, as after a direct `clear`.
+                if !@text_only && chain.ends_with?("clear") && roots.size == 1 &&
+                   !@folded_roots.includes?(roots.first)
+                  call_env.slots.reject! { |key, _| contains_root?(roots, key) }
+                end
               end
             end
             summary.grows.each do |root, cause|
@@ -1898,6 +1907,16 @@ class Iyi::TapeShrinkChecker
       consumed = @text_only ? Value.new(receiver.roots,
         receiver.views.reject { |v| contains_root?(reset_roots, v.root) },
         receiver.procs, receiver.unknown_proc) : receiver
+      # What the receiver's fields hold is the callee's to order against
+      # its own shrinks (a reader refilling its row): a summarized call
+      # consumes the receiver, not the views its slots carry.
+      if summarized && !@text_only && !receiver.roots.empty?
+        held = env.slots.compact_map { |key, contents| contents.views if contains_root?(receiver.roots, key) }.flatten
+        unless held.empty?
+          consumed = Value.new(consumed.roots, consumed.views - held,
+            consumed.procs, consumed.unknown_proc)
+        end
+      end
       use(consumed, node)
       args.each { |arg| use(arg, node) }
       derived = receiver

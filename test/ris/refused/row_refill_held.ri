@@ -1,0 +1,33 @@
+module test/ris/refused/row_refill_held
+# A row kept past the next call, which clears it (SPEC 3.3).
+class RowReader
+  @b : String::Builder
+  @row : Array(String)
+  @n = 0
+  def initialize
+    @b = String::Builder.new(64)
+    @row = Array(String).new(4)
+  end
+  def next_row : Array(String)?
+    @n += 1
+    return nil if @n > 3
+    @row.clear
+    @b.clear
+    @b.append_int(@n)
+    @row << @b.finish
+    @row
+  end
+  def each(&)
+    while true
+      got = next_row
+      return unless got
+      yield got
+    end
+  end
+end
+r = RowReader.new
+a = r.next_row
+b = r.next_row
+if a && b
+  puts a[0]
+end

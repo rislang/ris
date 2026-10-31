@@ -1,0 +1,30 @@
+# A reader refills one row per call (SPEC 1.1, 3.3): it clears its row
+# and the builder the row views, then fills them again. The caller reads
+# each row before the next call; nothing is made per row outside them.
+class RowReader
+  @b : String::Builder
+  @row : Array(String)
+  @n = 0
+  def initialize
+    @b = String::Builder.new(64)
+    @row = Array(String).new(4)
+  end
+  def next_row : Array(String)?
+    @n += 1
+    return nil if @n > 3
+    @row.clear
+    @b.clear
+    @b.append_int(@n)
+    @row << @b.finish
+    @row
+  end
+  def each(&)
+    while true
+      got = next_row
+      return unless got
+      yield got
+    end
+  end
+end
+r = RowReader.new
+r.each { |row| puts row[0] }
