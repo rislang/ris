@@ -129,7 +129,7 @@ module Iyi
     end
 
     # iyi: `defer` — cleanup that runs however the scope is left
-    # (SPEC.md III.1.4).
+    # (iyi SPEC III.1.4).
     #
     # From:
     #
@@ -270,7 +270,7 @@ module Iyi
       ExceptionHandler.new(Nop.new, ensure: node.exp.transform(self)).at(node).tap(&.iyi_defer=(true))
     end
 
-    # iyi: the typed group — SPEC.md III.4.9.
+    # iyi: the typed group — iyi SPEC III.4.9.
     #
     # From:
     #
@@ -421,7 +421,7 @@ module Iyi
 
     # The statement's own spawn, when the statement is exactly a direct one:
     # `g.spawn { }` bare, or assigned to a variable or an underscore. A
-    # parallel task (`g.spawn_parallel { }`, SPEC.md III.4.13) is a task of
+    # parallel task (`g.spawn_parallel { }`, iyi SPEC III.4.13) is a task of
     # the group like any other, and takes its slot the same way.
     private def iyi_direct_spawn(statement : ASTNode, group_name : String) : Call?
       target = statement.is_a?(Assign) ? statement.value : statement
@@ -1196,7 +1196,7 @@ module Iyi
     #     else
     #       bar
     #     end
-    # iyi: `read(path)!` — propagate an error member (SPEC.md III.1.2).
+    # iyi: `read(path)!` — propagate an error member (iyi SPEC III.1.2).
     #
     # From:
     #
@@ -1255,7 +1255,7 @@ module Iyi
     # group reads its values before the join when its answer is propagated.
     @propagated_group : Call?
 
-    # iyi: `read_port().or(8080)` and `read_port().or_panic` (SPEC.md III.1.3).
+    # iyi: `read_port().or(8080)` and `read_port().or_panic` (iyi SPEC III.1.3).
     #
     # From:
     #

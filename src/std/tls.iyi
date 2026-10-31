@@ -42,7 +42,7 @@
 # (illegal_parameter) at either end, as is an X25519 half of small order;
 # the server refuses an encapsulation key that fails FIPS 203's modulus
 # check. The client sends the hybrid's share by default, beside X25519's,
-# one X25519 key in both, as OpenSSL 3.5, Chrome and Firefox do (SPEC.md's
+# one X25519 key in both, as OpenSSL 3.5, Chrome and Firefox do (iyi SPEC's
 # decision #18 says why): the ClientHello grows by 1,222 bytes, from 197
 # to 1,419 as OpenSSL 3.5's s_server read it for localhost, and the client
 # spends an ML-KEM key pair and a decapsulation (std/mlkem's header has
@@ -3438,7 +3438,7 @@ pub class TlsMadeUnder
   end
 
   # The same certificates in the same order, each the same object. A
-  # field's Array is a copy on the tape (TAPE_SPEC), so the arrays' own
+  # field's Array is a copy on the tape (SPEC), so the arrays' own
   # storage told a configuration's roots apart from themselves, and no
   # connection or ticket was ever used again.
   def self.same_roots?(held : Array(Certificate), roots : Array(Certificate)) : Bool

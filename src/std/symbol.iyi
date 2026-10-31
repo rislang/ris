@@ -50,7 +50,7 @@ struct ::Symbol
   end
 
   # True when *string* cannot be written as an unquoted symbol literal.
-  # Identifiers may end in `?` or `!` (SPEC.md III.1.7 exempts symbol
+  # Identifiers may end in `?` or `!` (iyi SPEC III.1.7 exempts symbol
   # literals from the identifier bang ban). Operators in the list below
   # are also unquoted.
   def self.needs_quotes?(string : String) : ::Bool

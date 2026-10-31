@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Drives bench/thread_floor.iyi: what a kernel thread, and a stop-the-world
-# over kernel threads, cost the dependency floor (SPEC.md III.9) — measured
+# over kernel threads, cost the dependency floor (iyi SPEC III.9) — measured
 # before the design that needs them (GC_DESIGN.md Stages 4, 7, 8, 9;
-# SPEC.md III.4.7's `Share`) is written.
+# iyi SPEC III.4.7's `Share`) is written.
 #
 #     bash bench/thread_floor.sh
 #

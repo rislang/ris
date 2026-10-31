@@ -1,7 +1,7 @@
 require "crystal/digest/md5"
 require "./config"
 
-# iyi: `.iyimod`, the module artifact — SPEC.md Part IV.
+# iyi: `.iyimod`, the module artifact — iyi SPEC Part IV.
 #
 # The contract: to compile module B which imports A, the compiler reads A's
 # `.iyimod` and never opens A's source. Everything R-1 rests on is this file,
@@ -48,7 +48,7 @@ module Iyi::IyiMod
   # v49: a match type is named the way its `~match<...>` symbol is, which for
   # a union of virtual types is not the way it prints.
   # v50: a nested module says whether it writes `extend self`, so a body that
-  # travels can call it the way the shard does (SPEC.md III.6).
+  # travels can call it the way the shard does (iyi SPEC III.6).
   # v51: a boundary records the files it was written from, each with what it
   # hashed to, because a bound shard's source is a checkout rather than one
   # file at a module path — and without them a consumer read the artifact as
@@ -477,7 +477,7 @@ module Iyi::IyiMod
   #
   # Not `pub enum`, which the parser refuses: `pub` takes a def, a class, a
   # struct and a trait and nothing else. There is no `enum` in the prelude or
-  # in any sample, so nothing has asked (SPEC.md IV.2).
+  # in any sample, so nothing has asked (iyi SPEC IV.2).
   #
   # *visibility* is what was written, and it is what keeps R-2b true on the far
   # side: a type carried without `pub` is declared by the consumer and reachable
@@ -656,7 +656,7 @@ module Iyi::IyiMod
     # iyi: the doc comment above the declaration, verbatim — see
     # `Signature#doc`.
     doc : String = "",
-    # iyi: whether this module writes `extend self` (SPEC.md IV.2).
+    # iyi: whether this module writes `extend self` (iyi SPEC IV.2).
     #
     # `Artifact#module_extends_self` says it of the module a boundary is *of*.
     # A shard nests them: `module Backtrace::Parser; extend self; def parse` is
@@ -839,7 +839,7 @@ module Iyi::IyiMod
     code : Bytes
   # GC_DESIGN.md Stage 1: the pointer map of one type, so a collector reads
   # an object's shape out of the artifact instead of discovering it at run
-  # time. Heap-layout precision is the one REQUIREMENT SPEC.md II.5 makes of
+  # time. Heap-layout precision is the one REQUIREMENT iyi SPEC II.5 makes of
   # the collector design, and this record is where it is kept.
   #
   # *type_id* is the design's key, and it carries the producing build's
@@ -1175,7 +1175,7 @@ module Iyi::IyiMod
 
     # The package name the module's types live under, empty for a module of
     # no package: `iyi_web` for `codec.iyi` of `github.com/x/iyi-web`, whose
-    # types are `IyiWeb::Codec` in every build (SPEC.md III.7). The header
+    # types are `IyiWeb::Codec` in every build (iyi SPEC III.7). The header
     # below writes `module codec`, and the reader puts it under this name,
     # which the object code's symbols already spell.
     property package_name : String
@@ -1787,7 +1787,7 @@ module Iyi::IyiMod
     io.puts "              bodies a consumer has to compile for itself, the"
     io.puts "              object code of this module's own non-generic"
     io.puts "              types, and the pointer maps of the types this"
-    io.puts "              module owns (SPEC.md IV.2, GC_DESIGN.md Stage 1)."
+    io.puts "              module owns (iyi SPEC IV.2, GC_DESIGN.md Stage 1)."
   end
 
   def self.top_level_declarations(artifact : Artifact, io : IO) : Nil
@@ -2139,7 +2139,7 @@ module Iyi::IyiMod
     end
   end
 
-  # iyi: R-2 reaches the block parameter (SPEC.md IV.2).
+  # iyi: R-2 reaches the block parameter (iyi SPEC IV.2).
   #
   # An exported `def` that takes a block has to say what the block is. R-2 asks
   # for full parameter and return types so that a consumer never infers
@@ -2156,7 +2156,7 @@ module Iyi::IyiMod
   # Counted before it was ruled: one exported signature in the samples, Kemal's
   # `Router#namespace`, out of about eighty. That one uses `with sub_router
   # yield` — it changes what `self` means inside the block — which is the case
-  # no annotation can express yet either. See SPEC.md IV.2.
+  # no annotation can express yet either. See iyi SPEC IV.2.
   private def self.check_block_annotated(a_def : Def) : Nil
     return unless a_def.block_arity || a_def.block_arg
     return if a_def.block_arg.try(&.restriction)
@@ -2290,7 +2290,7 @@ module Iyi::IyiMod
   end
 
   # iyi: whether a def is instantiated per call site, so its machine code is
-  # the caller's and its body has to travel (SPEC.md IV.1g): it takes a block
+  # the caller's and its body has to travel (iyi SPEC IV.1g): it takes a block
   # (`&block : …` or a bare `yield`), which is inlined into it, or it has
   # `forall` parameters, which the caller binds. A forall def was neither, so
   # its body stayed behind: `count(x : T) : Int32 forall T` called as

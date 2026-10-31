@@ -238,7 +238,7 @@ end
     {% end %}
   end
 
-  # ris (TAPE_SPEC 6): one end of an OS pipe, a pooled slot. Its object
+  # ris (SPEC 6): one end of an OS pipe, a pooled slot. Its object
   # and buffers are program storage taken once; closed, it goes back to
   # the pool and its generation moves, so a handle kept past the close
   # (`PipeReader`, `PipeWriter`) is refused instead of reading the next

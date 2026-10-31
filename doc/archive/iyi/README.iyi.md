@@ -90,7 +90,7 @@ again. Take that rule away and the line you just changed costs **9x less**.
 `bench/incremental.py` refuses to start the clock until all three programs
 print the same total.
 
-The design is in [SPEC.md](../../../SPEC.md), which records what was measured, what was
+The design is in [SPEC.md](SPEC.md), which records what was measured, what was
 thrown away and why. Every number in this README names the command that prints
 it.
 
@@ -870,7 +870,7 @@ not the library.
 
 | | |
 |---|---|
-| [SPEC.md](../../../SPEC.md) | the design, and the record of what measurement settled |
+| [SPEC.md](SPEC.md) | the design, and the record of what measurement settled |
 | [`samples/iyi`](../../../samples/iyi) | twenty-seven programs: nineteen documenting a part of it, seven being a first hour, and `calc`, a language |
 | [`samples/crystal/kemal`](../../../samples/crystal/kemal) | a kemal application, from `shard.yml`: built from source and across four `.iyimod` boundaries |
 | [`src/iyi`](../../../src/iyi) | iyi's own library, 22,608 lines. `--crystal` swaps it for Crystal's |

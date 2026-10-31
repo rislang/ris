@@ -1,5 +1,5 @@
 
-# iyi's concurrency runtime — SPEC.md III.4, built in the order III.4.8
+# iyi's concurrency runtime — iyi SPEC III.4, built in the order III.4.8
 # settled: a scheduler, cancellable blocking primitives, then `group`;
 # messages between tasks are RisBoard's (board.iyi). Every scheduler thread runs fibers of its own, and what makes
 # that concurrency rather than sequence is the poller — a fiber that would
@@ -20,7 +20,7 @@
 #   wait_readable(fd)         # Nil | Cancelled — the poller, made visible
 #   wait_writable(fd)         # Nil | Cancelled — the other direction
 #   iyi_read(fd, buf, n)      # Int64 | Cancelled — a read that parks, not blocks
-#   RisBoard.post(v) / take(T) # messages between tasks (TAPE_SPEC 5.2)
+#   RisBoard.post(v) / take(T) # messages between tasks (SPEC 5.2)
 #   IyiWorkers.count = n      # the pool's size, before its first task
 #
 # Cancellation (III.4.2) belongs to the group: a task whose value is an
@@ -40,7 +40,7 @@
 #
 # Linux and darwin arm64, through each platform's own doorway: raw
 # syscalls on Linux, libSystem on darwin, because Apple documents raw
-# syscalls as explicitly not a stable ABI there (SPEC.md III.9). Either
+# syscalls as explicitly not a stable ABI there (iyi SPEC III.9). Either
 # way the dependency floor named pthreads as the cost that must not be
 # paid, and a fiber is exactly the thing that makes it unnecessary. The
 # remaining platforms lose nothing they had: a program that names `group`
@@ -418,7 +418,7 @@ class IyiFiber
   # ris: one non-capturing cleanup, reused by sequential outer tape scopes.
   property tape_cleanup : IyiDeferNode?
   property panicked : Bool
-  # ris (TAPE_SPEC 4.1): the message lives in a result region the group
+  # ris (SPEC 4.1): the message lives in a result region the group
   # keeps, as a task value does (IyiTask#finish); 0 means none. A
   # reader copies it onto its own tape before keeping it.
   @panic_box : UInt64 = 0_u64
@@ -557,7 +557,7 @@ class IyiFiber
   # one nonce, and the losers go stale by arithmetic.
   property park_nonce : UInt64
 
-  # ris (TAPE_SPEC 6.1): a task's fiber is pooled on its thread's state.
+  # ris (SPEC 6.1): a task's fiber is pooled on its thread's state.
   # `generation` moves on each reuse, so a handle or a join that names an
   # older task sees it done; `park_nonce` survives reuse, so a stale park
   # node never matches the next task's park.
@@ -950,7 +950,7 @@ class IyiSchedulerState
   property dying : IyiFiber?
   property stack_pool : UInt64
 
-  # What other threads hand this one (SPEC.md III.4.13), behind the
+  # What other threads hand this one (iyi SPEC III.4.13), behind the
   # scheduler's lock: the fibers they woke, already `Runnable`, and the
   # fibers of this thread they cancelled, for this thread to take out of
   # its own sleep heap or poller. `mail` says either holds something, and
@@ -1089,7 +1089,7 @@ class IyiSchedulerState
   end
 end
 
-# The scheduler's lock (SPEC.md III.4.13): board waits, groups, the joiner
+# The scheduler's lock (iyi SPEC III.4.13): board waits, groups, the joiner
 # chains, every thread's inbox and the pool's queues are behind it once a
 # second scheduler thread exists, and before that it is a load and a
 # branch. One lock for all of them, not one per queue: a cancel walks
@@ -1627,7 +1627,7 @@ class IyiScheduler
   end
 
   # A fiber parked on a peer - a board take, a join - made runnable by whoever
-  # ends its wait, on whatever thread that is (SPEC.md III.4.13). A run
+  # ends its wait, on whatever thread that is (iyi SPEC III.4.13). A run
   # queue is its own thread's alone, so a fiber woken from another thread
   # goes into its home's inbox, and that thread is rung if it waits in its
   # poller. Under the scheduler's lock, which every peer wait is behind.
@@ -3729,7 +3729,7 @@ end
 # deferred runs first, innermost first, as a panic's cleanups do; then the
 # process ends and every other task with it, their cleanups not run -
 # Go's `os.Exit` and Crystal's `exit` alike. A failure a person should
-# read about is a panic (`raise`, SPEC.md III.1.4); this is the other
+# read about is a panic (`raise`, iyi SPEC III.1.4); this is the other
 # kind of ending, a program that has answered and says so in its status,
 # as `diff` and `grep` do with 1. Before this a program reached for the
 # runtime's own `__iyi_exit`, which skipped the cleanups too.
@@ -3823,9 +3823,9 @@ end
 # already applied its policy by then; reading the value is optional).
 # Any number of fibers may read it, before the task ends or after.
 # A handle is Share when its value is: other tasks wait on it and read
-# the value (TAPE_SPEC 5.2, completion broadcast).
+# the value (SPEC 5.2, completion broadcast).
 @[Share]
-# ris (TAPE_SPEC 6.1): the runtime's record of one task, in a typed pool
+# ris (SPEC 6.1): the runtime's record of one task, in a typed pool
 # per T. The group that spawned it returns it at its scope's end
 # (`RisGroupSlot#recycle`), and the next spawn of a T takes it back;
 # the generation, bumped on each return, refuses a handle kept past it.
@@ -4080,7 +4080,7 @@ class RisGroupSlot
   # 16-byte nodes {next node, region}, each node inside its region.
   @results : UInt64 = 0_u64
 
-  # ris (TAPE_SPEC 6.1): a `group do` slot goes back to the pool at its
+  # ris (SPEC 6.1): a `group do` slot goes back to the pool at its
   # scope's end with its tasks' slots and fibers; the generation refuses
   # an `IyiGroup` handle kept past it. One made by `IyiGroup.new` is never
   # returned, because its handles may be read after its `join`.
@@ -4198,7 +4198,7 @@ class RisGroupSlot
   end
 
   {% if !flag?(:gc_boehm) %}
-    # Start a task that may run on another core (SPEC.md III.4.13): it
+    # Start a task that may run on another core (iyi SPEC III.4.13): it
     # waits in the pool until a worker is free, and the worker that starts
     # it keeps it to its end. Everything else is `spawn`'s - the scope, the
     # cancel, the failure policy, the answer through `value`. Its fiber is
@@ -4447,7 +4447,7 @@ struct IyiGroup
     end
   {% else %}
     def spawn_parallel(&block : -> T) : IyiTask(T) forall T
-      \{% raise "spawn_parallel needs threads, and a build under -Dgc_boehm has none: a thread would be one Boehm never heard of (SPEC.md III.4.13)" %}
+      \{% raise "spawn_parallel needs threads, and a build under -Dgc_boehm has none: a thread would be one Boehm never heard of (iyi SPEC III.4.13)" %}
     end
   {% end %}
 

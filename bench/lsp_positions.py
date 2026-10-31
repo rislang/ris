@@ -23,7 +23,7 @@ diagnostics, and the process exits 0 on `shutdown`.
 
 **One server per module, and the memory is the server's problem now.**
 `iyi lsp` is the same binary as the compiler and carries no collector
-(SPEC.md III.9, `-Dgc_none`), so a process that compiles module after module
+(iyi SPEC III.9, `-Dgc_none`), so a process that compiles module after module
 never gives a byte back: this sweep against one long-lived *single-process*
 server was killed by the kernel at 19 GB, and that is the honest upper bound
 of an allocator that never frees rather than a leak. The answer was to make

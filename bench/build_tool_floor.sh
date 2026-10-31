@@ -4,7 +4,7 @@
 #   crystal, llvm-config, c++, cc, git (build time)
 #   cc, dsymutil, pkg-config, git, ldd, wasmtime (compiler runtime)
 #
-# A program iyi builds links only the platform libc (SPEC.md III.9, III.10).
+# A program iyi builds links only the platform libc (iyi SPEC III.9, III.10).
 # The compiler binary links four libraries (libLLVM, libc++, libgc, libSystem).
 # `bench/dependency_floor.sh` gates the library and symbol dependencies.
 #
@@ -217,11 +217,11 @@ report() {
 
 report "build tools" \
   "$(unexpected "$ALLOWED_BUILD_TOOLS" "$found_build_tools")" \
-  "Each build tool must be recorded in ALLOWED_BUILD_TOOLS with its reason (SPEC.md III.9, III.10)."
+  "Each build tool must be recorded in ALLOWED_BUILD_TOOLS with its reason (iyi SPEC III.9, III.10)."
 
 report "runtime tools" \
   "$(unexpected "$ALLOWED_RUNTIME_TOOLS" "$found_runtime_tools")" \
-  "Each runtime tool must be recorded in ALLOWED_RUNTIME_TOOLS with its reason (SPEC.md III.9, III.10)."
+  "Each runtime tool must be recorded in ALLOWED_RUNTIME_TOOLS with its reason (iyi SPEC III.9, III.10)."
 
 report "auxiliary tools" \
   "$(unexpected "$ALLOWED_AUX_TOOLS" "$found_aux_tools")" \

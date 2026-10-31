@@ -3,7 +3,7 @@ require "./spec_helper"
 # The build daemon analyses the prelude once and forks a child per build. What
 # has to hold is that a build served this way is indistinguishable from a normal
 # one: same exit status, same diagnostics, same binary behaviour, with `stdout`
-# and `stderr` still separate. Speed is measured elsewhere (SPEC.md IV.1d) —
+# and `stderr` still separate. Speed is measured elsewhere (iyi SPEC IV.1d) —
 # these specs are about not being subtly wrong.
 #
 # The server needs a single-threaded compiler, because only the forking thread

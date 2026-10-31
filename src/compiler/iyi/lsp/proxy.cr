@@ -1,6 +1,6 @@
 # iyi: the language server the editor talks to, which does not compile.
 #
-# `iyi` carries no collector (SPEC.md III.9): a compiler front end
+# `iyi` carries no collector (iyi SPEC III.9): a compiler front end
 # allocates for one program, answers, and lets the process exit hand the
 # memory back. That is the right trade for a verb and the wrong one for a
 # server, and the difference was measured, not guessed: forty edits and

@@ -154,7 +154,7 @@ pub trait Iterator
     SkipWhileIterator(self, Elem).new(self, func)
   end
 
-  # Bounded, as `Enumerable#zip` is (SPEC.md II.6 finding 6). Unbounded, a
+  # Bounded, as `Enumerable#zip` is (iyi SPEC II.6 finding 6). Unbounded, a
   # zip with an array was refused from inside this file, "undefined
   # constant O::Elem" at the line below, and a chain with one from
   # `ChainIterator#next`; with `forall O : Iterator` the refusal names the

@@ -356,7 +356,7 @@ module Iyi
       @types_to_modules = {} of Type => ModuleInfo
 
       # iyi: the unit a callee should be copied into while emitting code that
-      # will travel in a `.iyimod` (SPEC.md IV.1g). Nil in every build that is
+      # will travel in a `.iyimod` (iyi SPEC IV.1g). Nil in every build that is
       # not writing artifacts, which is every build that is not making a
       # library out of a module.
       @iyi_closure_host = nil.as(ModuleInfo?)
@@ -484,7 +484,7 @@ module Iyi
     end
 
     # iyi: emits the class variables an imported artifact's object code refers
-    # to (SPEC.md IV.2).
+    # to (iyi SPEC IV.2).
     #
     # A class variable is a global defined in the main module, and a main
     # module never travels. Codegen is demand-driven, so the consumer emits the
@@ -631,7 +631,7 @@ module Iyi
     # to it, which a single module (`--release`) does with every type id,
     # constant, class variable and runtime `fun`.
     #
-    # Not when an artifact's object code links in beside it (SPEC.md IV.1g).
+    # Not when an artifact's object code links in beside it (iyi SPEC IV.1g).
     # That code is the units of a build with many modules, and a unit reaches
     # all of these by name in the main module: `x + 1` calls
     # `__iyi_raise_overflow`, a class's `new` reads `X:type_id` and
@@ -793,7 +793,7 @@ module Iyi
       else
         # iyi: DUMP holds a pattern a person typed, and Iyi::Rx refuses what
         # it does not implement rather than matching it with other semantics
-        # (SPEC.md III.10). Refusal is one line naming the pattern and the
+        # (iyi SPEC III.10). Refusal is one line naming the pattern and the
         # reason, never a backtrace from inside the engine.
         begin
           dump_llvm_regex = Rx::Pattern.compile(env_dump)
@@ -1099,7 +1099,7 @@ module Iyi
         node.def.set_type node.return_type
       end
 
-      # iyi: into the unit that is travelling, when one is (SPEC.md IV.1g).
+      # iyi: into the unit that is travelling, when one is (iyi SPEC IV.1g).
       #
       # A proc literal is otherwise emitted into `_main`, and the unit that
       # creates one refers to it from there — which is fine for a program and
@@ -1711,7 +1711,7 @@ module Iyi
     # Making a function that just returns the pointer doesn't work: LLVM inlines it.
     #
     # iyi: separated from the call above so that a consumer can *define* it
-    # without making one (SPEC.md IV.2). A unit that reads a thread-local class
+    # without making one (iyi SPEC IV.2). A unit that reads a thread-local class
     # variable calls this function, and the function lives in the main module —
     # which does not travel. `Regex::PCRE2::@@current_jit_stack` is the case:
     # the accessor around it was copied into the unit, the global was defined by
@@ -2352,7 +2352,7 @@ module Iyi
       @catch_pad = nil
 
       # iyi: code emitted into `_main` is not part of any module's artifact,
-      # so its callees route to their own units (SPEC.md IV.1g). Leaving a
+      # so its callees route to their own units (iyi SPEC IV.1g). Leaving a
       # closure host open across this switch copied a callee into a module's
       # unit with internal linkage while the caller stayed in `_main`: a
       # regex literal in a module put `~$Regex:<hash>:const_init` in `_main`
@@ -2495,7 +2495,7 @@ module Iyi
                                 # ris: no collector, so a def's closure
                                 # environment is on its current tape, which
                                 # outlives every proc the tape rules let it
-                                # make (TAPE_SPEC 5.3).
+                                # make (SPEC 5.3).
                                 1
                               else
                                 0

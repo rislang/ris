@@ -6,7 +6,7 @@ class Iyi::CodeGenVisitor
   @iyi_symbol_loads = {} of LLVM::Value => String
 
   # iyi: a symbol's value, read the way `type_id_impl` reads a type id
-  # (SPEC.md IV.1g).
+  # (iyi SPEC IV.1g).
   #
   # A symbol is its index in this program's table, and the index is the
   # program's: a build numbers its symbols in the order it meets them. An

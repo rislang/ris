@@ -1,4 +1,4 @@
-# Numbers — SPEC.md, "0.1.0", item 3.
+# Numbers — iyi SPEC, "0.1.0", item 3.
 #
 # Arithmetic is not here: `primitives.cr` defines `+`, `-`, `*`, the
 # comparisons and the conversions as `@[Primitive]`s the compiler emits

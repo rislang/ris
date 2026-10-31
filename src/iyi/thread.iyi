@@ -17,9 +17,9 @@
 #
 # What a thread is not, said here rather than found: it is not a task. No
 # group owns it and nothing cancels it. What crosses threads is what
-# `Share` (SPEC.md III.4.4) lets the block capture: `Atomic(T)`,
+# `Share` (iyi SPEC III.4.4) lets the block capture: `Atomic(T)`,
 # immutable values, RisBoard messages
-# (TAPE_SPEC 5.2), and memory the program keeps straight
+# (SPEC 5.2), and memory the program keeps straight
 # itself. A thread gets a scheduler state when it starts and a heap cache
 # on first touch, so it may spawn fibers and it allocates without a lock;
 # the world it shares is the centre behind the runtime's one lock, the
@@ -569,7 +569,7 @@
       {% end %}
       # A second scheduler thread is coming: from here fibers on two
       # threads may wake each other, and the scheduler's lock is taken
-      # (SPEC.md III.4.13). Said before the thread exists, so it never
+      # (iyi SPEC III.4.13). Said before the thread exists, so it never
       # runs a fiber the lock does not cover.
       IyiScheduler.expect_thread
       line = new_line

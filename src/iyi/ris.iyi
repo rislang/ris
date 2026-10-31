@@ -1,4 +1,4 @@
 # ris's additions to iyi's prelude that every target carries, tape or not.
-# Like tape.iyi, outside the library SPEC.md I.4's ceiling counts: the
+# Like tape.iyi, outside the library iyi SPEC I.4's ceiling counts: the
 # ceiling is iyi's (bench/doc_numbers.py).
 

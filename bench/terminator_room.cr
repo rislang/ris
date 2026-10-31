@@ -69,5 +69,5 @@ bad.each do |kind, lengths|
   puts "NO ROOM #{kind}: #{lengths.size} lengths, first #{lengths.first(6).join(", ")}"
 end
 puts "A string whose terminator is outside its allocation corrupts whatever is"
-puts "allocated next. See src/string/builder.cr and SPEC.md III.9."
+puts "allocated next. See src/string/builder.cr and iyi SPEC III.9."
 exit 1

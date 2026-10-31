@@ -2,7 +2,7 @@
 # person: the module's own identity and the *minimums* it asks for. Fact —
 # what actually arrived — is `iyi.sum`'s job and step 2's.
 #
-# The shape is Go's, because the design is (SPEC.md III.7): line-oriented,
+# The shape is Go's, because the design is (iyi SPEC III.7): line-oriented,
 # two directives, nothing clever enough to have a bad day.
 #
 #     module github.com/user/app
@@ -199,7 +199,7 @@ module Iyi::Mod
 
     # The repository a module path lives in, and the major version the
     # path names: `example.com/lib/v2` is `{"example.com/lib", 2}`, and a
-    # path without a `vN` last segment names none. Go's rule, and SPEC.md
+    # path without a `vN` last segment names none. Go's rule, and iyi SPEC
     # III.7's: a major version past 1 is a different module, spelled by a
     # suffix, in the same repository, so v1 and v2 can both be required.
     # The name a package's modules live under: its path's last segment, a

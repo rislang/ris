@@ -9,7 +9,7 @@ name: ris
 # What was here before spent minutes on macOS, Windows, MinGW and wasm runs
 # that nobody read and that no failure here would have been acted on; the
 # darwin job below is not that — it runs the same gates a Linux push answers
-# for, natively, because darwin arm64 is a run target now (SPEC.md III.4.8).
+# for, natively, because darwin arm64 is a run target now (iyi SPEC III.4.8).
 # CI that cannot fail for a reason somebody acts
 # on is not a test, it is weather.
 #
@@ -142,7 +142,7 @@ jobs:
             spec/compiler/iyi_derive_spec.cr \
             spec/compiler/compiler_spec.cr
 
-      # The command surface and the build daemon, which is iyi's own (SPEC.md
+      # The command surface and the build daemon, which is iyi's own (iyi SPEC
       # IV.1d) and which nothing else here runs. It caught two things the day
       # it was added: a spec still asking for a command this fork removed, and
       # `mod` refusing the prefixes every other command accepts.
@@ -286,7 +286,7 @@ jobs:
       - name: A program built with --debug, and its fields
         run: python3 bench/debug_info.py
 
-      # The ecosystem and R-1 in one build (SPEC.md Part V item 12d). Built
+      # The ecosystem and R-1 in one build (iyi SPEC Part V item 12d). Built
       # twice with the module's source deleted in between, and the two runs
       # compared: the second one has Crystal's standard library *and* a module
       # it never opened.
@@ -461,7 +461,7 @@ jobs:
           bash bench/windows_exercise.sh
 
       # The rebuild loop, held: cheap on both arms, and the artifact
-      # read inside its band — the corrected prediction is in SPEC.md.
+      # read inside its band — the corrected prediction is in iyi SPEC.
       - name: The edit-rebuild loop stays cheap
         run: python3 bench/rebuild_speed.py
 
@@ -496,7 +496,7 @@ jobs:
       - name: The test verb tells its four verdicts apart
         run: bash bench/test_verb.sh
 
-      # SPEC.md III.8 #2: the language server. One scripted session is a
+      # iyi SPEC III.8 #2: the language server. One scripted session is a
       # person's first five minutes plus the agent's first question, and
       # every capability the release claims is a step: diagnostics with
       # SPEC sections as data, hover, definition, the outline, the
@@ -1100,7 +1100,7 @@ jobs:
             grep -qE "^2 +[^ ]*alpha[^ ]* at .*std_debug_cross\.iyi:24:" cross/debug-aarch64.txt &&
             echo "aarch64: std/debug named every frame"; } || exit 1
 
-  # darwin arm64 is a run target now (SPEC.md III.4.8): the concurrency
+  # darwin arm64 is a run target now (iyi SPEC III.4.8): the concurrency
   # runtime's kqueue arm, the panic registry and every sample run natively on
   # the machine most developers sit in front of. The compiler is built here
   # rather than downloaded, because the artifact above is a Linux binary and
@@ -2387,7 +2387,7 @@ jobs:
           cat got.txt
           cmp cross/expected.txt got.txt && echo "wasm32-wasi: same output"
 
-      # SPEC.md III.12, the sandbox story: an honest program computes
+      # iyi SPEC III.12, the sandbox story: an honest program computes
       # through the boundary; a theft of /etc/passwd dies named and
       # empty-handed under a default wasmtime, which preopens nothing; and
       # the refusal is the prelude's own sentence. These were its three
@@ -2397,7 +2397,7 @@ jobs:
       # wasmtime.
       #
       # The concurrency probe follows it for the same reason: it is the
-      # measurement behind SPEC.md III.4's "no concurrency on wasm32-wasi",
+      # measurement behind iyi SPEC III.4's "no concurrency on wasm32-wasi",
       # and it had never run anywhere either — long enough for its first
       # step to go stale on an answer that is true on arm64 and false here.
       - name: The sandbox story and the concurrency wall, driven

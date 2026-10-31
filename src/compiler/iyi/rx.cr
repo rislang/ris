@@ -3,7 +3,7 @@
 # The compiler used to reach matching through Crystal's `Regex`, which links
 # libpcre2-8. pcre2 sits on Crystal's required-libraries list and iyi means to
 # need nothing on it, so matching is owned here. The guarantee recorded in
-# SPEC.md III.10 and Appendix B decision 17 is RE2's: linear time always, no
+# iyi SPEC III.10 and Appendix B decision 17 is RE2's: linear time always, no
 # construct whose cost can grow with the subject.
 #
 # That guarantee is about cost, not about power, and the two were confused here
@@ -860,7 +860,7 @@ module Iyi::Rx
       # runs one: it answers "does L reach this position" for every position of
       # the subject at once and never learns where L's groups fell. The only way
       # to answer that is a sub-VM at every position, which is the linear-time
-      # guarantee gone (SPEC.md III.10), so it is refused rather than quietly
+      # guarantee gone (iyi SPEC III.10), so it is refused rather than quietly
       # dropped. `(?:...)` inside a lookaround is unaffected.
       if @look_depth > 0
         error "a capturing group inside a lookaround assertion is not supported", open
@@ -1038,7 +1038,7 @@ module Iyi::Rx
       when 'H'.ord then @pos += 1; builtin_class Builtin::Horizontal, true
       when 0x31..0x39
         # A backreference is the one construct that makes matching superlinear.
-        # SPEC.md III.10 trades it away; saying so is better than approximating.
+        # iyi SPEC III.10 trades it away; saying so is better than approximating.
         error "backreferences are not supported"
       when 'p'.ord
         @pos += 1
@@ -1524,7 +1524,7 @@ module Iyi::Rx
     # counter once per position and the earlier round already holds the ones the
     # body needs. Compiling the body's empty path once more, after the loop, puts
     # the round back without a second thread at any counter, so captures agree
-    # while the machine stays linear (SPEC.md III.10).
+    # while the machine stays linear (iyi SPEC III.10).
     private def empty_tail_round(n : RepeatNode)
       split = emit Inst::Kind::Split
       if n.lazy?
@@ -1900,7 +1900,7 @@ module Iyi::Rx
   # Cost is one state set stepped per character per assertion, O(states) each,
   # so an assertion is O(1) amortised per input character. Running a sub-VM at
   # every start position, which is how a backtracking engine does this, is the
-  # construction that would cost the linear-time guarantee (SPEC.md III.10).
+  # construction that would cost the linear-time guarantee (iyi SPEC III.10).
   # ---------------------------------------------------------------------------
 
   # One compiled assertion. `backward?` is the direction its automaton runs, not

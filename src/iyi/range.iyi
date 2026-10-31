@@ -1,4 +1,4 @@
-# Ranges — SPEC.md, "0.1.0", item 3.
+# Ranges — iyi SPEC, "0.1.0", item 3.
 #
 # The compiler expands a range literal to `Range.new(from, to, exclusive)`
 # (literal_expander.cr) and predefines the type to refer to it; with no

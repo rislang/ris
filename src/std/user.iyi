@@ -385,7 +385,7 @@ struct UserFiles
   # the type its body has: a body that is only a panic is NoReturn, and a
   # build from std/user's artifact, which names the call by the declared
   # type, looked for code the artifact's own build had named otherwise
-  # (`User#group_ids` on Windows; SPEC.md IV.1g).
+  # (`User#group_ids` on Windows; iyi SPEC IV.1g).
 
   PASSWD = "/etc/passwd"
   GROUP  = "/etc/group"

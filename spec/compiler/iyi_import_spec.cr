@@ -1,7 +1,7 @@
 require "../spec_helper"
 require "./spec_helper"
 
-# iyi: `import`, which resolves against files on disk — SPEC.md R-1.
+# iyi: `import`, which resolves against files on disk — iyi SPEC R-1.
 #
 # `spec/compiler/semantic/iyi_spec.cr` covers everything that needs only a
 # module to exist and declares it inline. What is left is what only real files
@@ -247,7 +247,7 @@ describe "Semantic: iyi import" do
     end
   end
 
-  # `protected` is the same case as `private` (SPEC.md IV): a name a module's
+  # `protected` is the same case as `private` (iyi SPEC IV): a name a module's
   # own code may call and a consumer may not write. Two modules under one root
   # share the root and nothing else, and the namespace climb that decides
   # `protected` went past the unit to the root, so `app/main` called
@@ -305,7 +305,7 @@ describe "Semantic: iyi import" do
     end
   end
 
-  describe "the import wall and a generic's own type variables (SPEC.md R-1)" do
+  describe "the import wall and a generic's own type variables (iyi SPEC R-1)" do
     # The wall asks a *file* whether it imported a name it wrote. A generic's
     # methods are re-resolved against the instance, so `T` in `holder.iyi`
     # comes back as whatever the program chose — and the wall took that for a
@@ -589,7 +589,7 @@ describe "Semantic: iyi import" do
     end
   end
 
-  describe "the import wall and lexical lookup (SPEC.md R-1)" do
+  describe "the import wall and lexical lookup (iyi SPEC R-1)" do
     # `module lib/tuple` declares `Lib::Tuple`. Looking `Tuple` up from
     # `Lib::Pair` walks to `Lib` first, where it found the sibling unit —
     # and the wall then refused a name `pair.iyi` never meant. A unit the
@@ -657,7 +657,7 @@ describe "Semantic: iyi import" do
     end
   end
 
-  describe "from a .iyimod (SPEC.md IV.1)" do
+  describe "from a .iyimod (iyi SPEC IV.1)" do
     # R-1's contract, stated as a test: the source is not opened. Not opened
     # rather than not preferred — there is no `app/dep.iyi` on disk at all.
     it "compiles a module that has no source" do
@@ -1400,7 +1400,7 @@ describe "Iyi::UsingRewrite" do
   end
 end
 
-# iyi: a package's modules have one name in every build (SPEC.md III.7, #132).
+# iyi: a package's modules have one name in every build (iyi SPEC III.7, #132).
 # A package's modules live under its name in a consumer's build; they were at
 # the root in the package's own, so a `pub macro` that names one absolutely -
 # it expands in the caller's file - had no spelling that built in both. Each

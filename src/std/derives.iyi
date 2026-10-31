@@ -1,4 +1,4 @@
-# Derives, as a library module (SPEC.md R-5, II.4).
+# Derives, as a library module (iyi SPEC R-5, II.4).
 #
 # A derive is an exported macro that takes one argument: the declaration it is
 # attached to. It reads that declaration's name and its fields, each field with

@@ -155,7 +155,7 @@ try {
         'share\iyi\samples\hello.iyi',
         'share\iyi\samples\std_text.iyi',
         'share\iyi\README.md',
-        'share\iyi\SPEC.md',
+        'share\iyi\iyi SPEC',
         'share\licenses\iyi\LICENSE',
         'share\licenses\iyi\NOTICE.md'
     )

@@ -487,7 +487,7 @@ struct Iyi::TypeDeclarationProcessor
     # keeps it to itself, none of its methods — so there is no `initialize`
     # here to assign them in. Assumed to assign everything, like a macro def
     # and on the same grounds: the build that wrote the artifact already
-    # checked the real one (SPEC.md IV.1g).
+    # checked the real one (iyi SPEC IV.1g).
     return false if owner.is_a?(Type) && owner.iyi_from_artifact?
 
     non_nilable_vars = @non_nilable_instance_vars[owner]?
@@ -548,7 +548,7 @@ struct Iyi::TypeDeclarationProcessor
         # iyi: an `initialize` read from a `.iyimod` is a header — there is no
         # body for it to assign in, and the build that wrote the artifact
         # already checked that the real one assigns everything. Treated like a
-        # macro def below, and for the same reason (SPEC.md IV.1g).
+        # macro def below, and for the same reason (iyi SPEC IV.1g).
         next if info.def.iyi_from_artifact?
 
         unless info.def.calls_super? || info.def.calls_previous_def? || info.def.calls_initialize? || info.def.macro_def?
@@ -703,7 +703,7 @@ struct Iyi::TypeDeclarationProcessor
         # iyi: a type read from a `.iyimod` has no `initialize` here to assign
         # its fields in — the module keeps its own, and what travels is the
         # declaration. The build that wrote the artifact checked the real one
-        # (SPEC.md IV.1g). `nilable_instance_var?` says the same thing for the
+        # (iyi SPEC IV.1g). `nilable_instance_var?` says the same thing for the
         # branch below it; this covers the one where the field's type does not
         # include `Nil`, which is where a bound shard's `@context` landed the
         # moment its class arrived with a superclass to inherit an `initialize`

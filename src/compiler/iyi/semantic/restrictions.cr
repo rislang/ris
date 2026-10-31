@@ -963,7 +963,7 @@ module Iyi
       name = other.names.first
       if other.names.size == 1 && !other.global? && name.size <= 2 && name[0].ascii_uppercase? && name[1..].each_char.all?(&.ascii_number?)
         other.raise "undefined constant #{other}\n`#{name}` names no type here: a method's own type parameter is introduced " \
-                    "by `forall` after the return type, `def f(x : #{name}) : #{name} forall #{name}` (SPEC.md II.7)"
+                    "by `forall` after the return type, `def f(x : #{name}) : #{name} forall #{name}` (iyi SPEC II.7)"
       end
       other.raise_undefined_constant(context.defining_type)
     end

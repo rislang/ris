@@ -71,7 +71,7 @@ puts App::Formal.title
 #   unqualified `title` is an error, and it is reported at the `title`, not at
 #   the import. Widening it alone is not an error at all: two modules
 #   exporting the same name is not by itself a mistake, so nothing is wrong
-#   until a name is written that could mean either (SPEC.md II.3).
+#   until a name is written that could mean either (iyi SPEC II.3).
 #
 # * Adding `def title` here makes even that legal again. A local definition
 #   beats an imported one, silently, which is what keeps a library from
@@ -90,14 +90,14 @@ puts App::Formal.title
 #   It has to be unreachable, not merely absent from an import's names:
 #   `.iyimod` carries a module's exports and nothing else, so if another
 #   module could call an unmarked name, that metadata would not be enough to
-#   compile against (SPEC.md IV.2).
+#   compile against (iyi SPEC IV.2).
 #
 # * `import app/v_1`, or any path segment that is not `[a-z][a-z0-9]*` with
 #   single `_` between groups. A module declared `app/greeter` is reached as
 #   `App::Greeter`, and the two notations are kept in step by making the
 #   mapping reversible: the name splits back into a path at every upper-case
 #   letter. `camelcase` drops an underscore before a digit, so `v_1` and `v1`
-#   would both be `V1` — two paths naming one module (SPEC.md IV.6 #6).
+#   would both be `V1` — two paths naming one module (iyi SPEC IV.6 #6).
 #
 # ---------------------------------------------------------------------------
 # Compiling this file without `app/greeter.iyi`
@@ -120,5 +120,5 @@ puts App::Formal.title
 #
 # * No object code here: the first build was `--no-codegen`, so its artifacts
 #   carry what another module may call and not how it is done, and the third
-#   build typechecks against them; one that links is refused by name (SPEC.md
+#   build typechecks against them; one that links is refused by name (iyi SPEC
 #   IV.1f). `--emit-iyimod` without `--no-codegen` carries the code too.

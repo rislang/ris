@@ -117,7 +117,7 @@ def measured() -> dict[str, int]:
         "prelude": wc(sorted((REPO / "src/iyi").glob("*.iyi"))),
         "prelude_library": prelude_library_lines(),
         # The platform floor the rule above excludes, and the library with it
-        # still in: both are stated in SPEC.md beside the figure itself, so
+        # still in: both are stated in iyi SPEC beside the figure itself, so
         # that what the ceiling does not count is as visible as what it does.
         "platform_floor": platform_floor_lines(),
         "library_with_floor": library_with_floor_lines(),
@@ -144,7 +144,7 @@ def measured() -> dict[str, int]:
     }
 
 
-# The number iyi's own library is held under (SPEC.md I.4). It was the other
+# The number iyi's own library is held under (iyi SPEC I.4). It was the other
 # language's 0.1.0 core library - 3,551 lines of core files plus 183 of fibers
 # over pthreads - until the 0.18 collections and assertions took the library
 # past it and the owner raised it to 4,650 rather than move them behind an
@@ -154,7 +154,7 @@ CEILING = 4_650
 
 
 def prelude_library_lines() -> int:
-    """The figure SPEC.md holds to the 4,650-line ceiling: the library
+    """The figure iyi SPEC holds to the 4,650-line ceiling: the library
     without any platform's floor.
 
     Everything under `src/iyi/` except two things. First, what Crystal's
@@ -163,7 +163,7 @@ def prelude_library_lines() -> int:
     scheduler and kernel thread (pthreads and libevent, beyond the 183 lines
     the ceiling already carries for fibers), and the float printer and parser
     (libc's printf and strtod). Second, every platform's floor
-    (`platform_floor_lines`), which is the rule SPEC.md I.4 settled after
+    (`platform_floor_lines`), which is the rule iyi SPEC I.4 settled after
     Windows: 0.1.0's own floor was libc and was not in its 3,734 either, so
     counting iyi's kernel32, syscall and libSystem arms compared a library
     that carries its floor against one that did not.
@@ -187,7 +187,7 @@ def library_files() -> list[list[str]]:
     `tape.iyi`, `ris.iyi` and the block of prelude.iyi that requires the
     tape. The tape is
     ris's addition beside iyi's collector, where Goose's model is the
-    measure, and SPEC.md I.4's ceiling is iyi's, set before there was one."""
+    measure, and iyi SPEC I.4's ceiling is iyi's, set before there was one."""
     outside = {"concurrency.iyi", "thread.iyi", "float.iyi", "tape.iyi", "ris.iyi"}
     files = []
     for path in sorted((REPO / "src/iyi").glob("*.iyi")):
@@ -226,7 +226,7 @@ def platform_floor_lines(only: str | None = None) -> int:
     the same reason. Measured over exactly what `prelude_library_lines`
     counts, so the two subtract.
 
-    SPEC.md I.4 held the library to 3,734 lines and records that Windows
+    iyi SPEC I.4 held the library to 3,734 lines and records that Windows
     breached it. This is the number that says what closing the breach by
     rule rather than by rewrite would cost, and it is measured rather than
     counted by hand: the two figures the breach was first written with
@@ -301,7 +301,7 @@ def targets() -> int:
 def iyimod_format() -> int:
     """The `.iyimod` format version the compiler writes.
 
-    SPEC.md quotes it as a current fact about the artifact, and it said v19
+    iyi SPEC quotes it as a current fact about the artifact, and it said v19
     while the compiler wrote v51 — thirty-three bumps, none of which anyone
     thought to carry into the sentence. Read out of the constant, like every
     other number here.
@@ -320,7 +320,7 @@ def iyimod_format() -> int:
 # iyi's own documents, which ris keeps as they are (AGENTS.md): their
 # numbers are iyi's at the fork and its merges, not ris's tree, so a claim
 # in one of them is listed and not held. ris's own documents state no size.
-IYI_DOCUMENTS = {"SPEC.md", "CHANGELOG.md", "README.iyi.md"}
+IYI_DOCUMENTS = {"iyi SPEC", "CHANGELOG.md", "README.iyi.md"}
 
 # Each entry: the measured key, the pattern that quotes it as current, the file,
 # and how many times that pattern is expected to appear there. The count is
@@ -331,31 +331,31 @@ CLAIMS: list[tuple[str, str, str, int]] = [
     ("prelude", r"iyi's own library is ([\d,]+) lines", "README.iyi.md", 2),
     ("prelude", r"iyi's own library, ([\d,]+) lines", "README.iyi.md", 1),
     ("prelude", r"standard library instead of ([\d,]+)", "README.iyi.md", 1),
-    ("prelude", r"iyi's own prelude \| ([\d,]+) lines", "SPEC.md", 1),
-    ("prelude_library", r"of which ([\d,]+) are the library held to the", "SPEC.md", 1),
-    ("platform_floor", r"the platform floor measures \*\*([\d,]+) lines\*\*", "SPEC.md", 1),
-    ("platform_floor", r"floor of ([\d,]+) lines", "SPEC.md", 1),
-    ("library_with_floor", r"([\d,]+) with every platform's floor", "SPEC.md", 1),
-    ("library_with_floor", r"pening `src/iyi/` counts ([\d,]+)", "SPEC.md", 1),
-    ("prelude_library", r"of which the library is ([\d,]+)", "SPEC.md", 1),
-    ("prelude_library", r"the library:\n\*\*([\d,]+) lines\*\* of the", "SPEC.md", 1),
-    ("prelude", r"still true of iyi's own ([\d,]+) lines", "SPEC.md", 1),
-    ("prelude", r"Done: ([\d,]+) lines", "SPEC.md", 1),
-    ("prelude", r"\| ([\d,]+)-line own prelude", "SPEC.md", 1),
-    ("prelude", r"against iyi's own ([\d,]+)-line prelude", "SPEC.md", 1),
+    ("prelude", r"iyi's own prelude \| ([\d,]+) lines", "iyi SPEC", 1),
+    ("prelude_library", r"of which ([\d,]+) are the library held to the", "iyi SPEC", 1),
+    ("platform_floor", r"the platform floor measures \*\*([\d,]+) lines\*\*", "iyi SPEC", 1),
+    ("platform_floor", r"floor of ([\d,]+) lines", "iyi SPEC", 1),
+    ("library_with_floor", r"([\d,]+) with every platform's floor", "iyi SPEC", 1),
+    ("library_with_floor", r"pening `src/iyi/` counts ([\d,]+)", "iyi SPEC", 1),
+    ("prelude_library", r"of which the library is ([\d,]+)", "iyi SPEC", 1),
+    ("prelude_library", r"the library:\n\*\*([\d,]+) lines\*\* of the", "iyi SPEC", 1),
+    ("prelude", r"still true of iyi's own ([\d,]+) lines", "iyi SPEC", 1),
+    ("prelude", r"Done: ([\d,]+) lines", "iyi SPEC", 1),
+    ("prelude", r"\| ([\d,]+)-line own prelude", "iyi SPEC", 1),
+    ("prelude", r"against iyi's own ([\d,]+)-line prelude", "iyi SPEC", 1),
     ("prelude", r"against iyi's own ([\d,]+)-line library", "CHANGELOG.md", 1),
     ("prelude", r"against iyi's own ([\d,]+)-line", "samples/iyi/calc.iyi", 1),
-    ("std", r"own prelude \+ ([\d,]+) in std", "SPEC.md", 1),
-    ("compiler", r"\| ([\d,]+) lines, Crystal, forked", "SPEC.md", 1),
+    ("std", r"own prelude \+ ([\d,]+) in std", "iyi SPEC", 1),
+    ("compiler", r"\| ([\d,]+) lines, Crystal, forked", "iyi SPEC", 1),
     # The other place the compiler's size is stated as current, and the reason
     # one file disagreed with itself by 25,747 lines: the row above covers the
     # comparison table, this one the release's own numbers table, and only the
     # first of them existed.
-    ("compiler", r"\| ([\d,]+) lines, none of it written in iyi", "SPEC.md", 1),
-    ("spec_iyi", r"\| ([\d,]+) for iyi \|", "SPEC.md", 1),
+    ("compiler", r"\| ([\d,]+) lines, none of it written in iyi", "iyi SPEC", 1),
+    ("spec_iyi", r"\| ([\d,]+) for iyi \|", "iyi SPEC", 1),
     # The artifact format, which drifted furthest of anything here: the
     # sentence said v19 while the compiler wrote v51.
-    ("iyimod_format", r"`\.iyimod` v([\d,]+), checksum per section", "SPEC.md", 1),
+    ("iyimod_format", r"`\.iyimod` v([\d,]+), checksum per section", "iyi SPEC", 1),
     ("prelude_kb", r"library is ([\d,]+) KB on disk", "README.iyi.md", 1),
     ("prelude_kb", r"iyi's own ([\d,]+) KB prelude", "README.iyi.md", 1),
     ("std_kb", r"the ([\d,]+) KB of `src/std`", "README.iyi.md", 1),
@@ -366,25 +366,25 @@ CLAIMS: list[tuple[str, str, str, int]] = [
     ("bang_names", r"standard library has \*\*([\d,]+) such names\*\*", "README.iyi.md", 1),
     ("generated", r"edit one module in a ([\d,]+)-line project", "README.iyi.md", 1),
     ("generated", r"on the same ([\d,]+) lines", "README.iyi.md", 1),
-    # The same generated project, quoted seven more times in SPEC.md — the
+    # The same generated project, quoted seven more times in iyi SPEC — the
     # numbers table at the top of it included — and every one of the seven said
     # 7,208 while the generator emitted 7,207. The two rows above name
     # README.md, so the correction landed there and nowhere else. The file that
     # states a number most often is the one that most needs a pattern.
-    ("generated", r"rebuild \(30 modules, ([\d,]+) lines\)", "SPEC.md", 1),
+    ("generated", r"rebuild \(30 modules, ([\d,]+) lines\)", "iyi SPEC", 1),
     # Two sites, and the second wraps between "300" and "types", which is why
     # this matches whitespace rather than a space.
-    ("generated", r"300\s+types, ([\d,]+) lines", "SPEC.md", 2),
-    ("generated", r"30 modules and ([\d,]+) lines", "SPEC.md", 1),
-    ("generated", r"it pays it on a ([\d,]+)-line project", "SPEC.md", 1),
-    ("generated", r"one module edited in a ([\d,]+)-line project", "SPEC.md", 1),
-    ("generated", r"30-module, ([\d,]+)-line project", "SPEC.md", 1),
+    ("generated", r"300\s+types, ([\d,]+) lines", "iyi SPEC", 2),
+    ("generated", r"30 modules and ([\d,]+) lines", "iyi SPEC", 1),
+    ("generated", r"it pays it on a ([\d,]+)-line project", "iyi SPEC", 1),
+    ("generated", r"one module edited in a ([\d,]+)-line project", "iyi SPEC", 1),
+    ("generated", r"30-module, ([\d,]+)-line project", "iyi SPEC", 1),
     # The same project again as one row of the size sweep, which is where the
     # figure was right while the seven sentences above it were wrong.
-    ("generated", r"30 modules of 10 types, ([\d,]+) lines", "SPEC.md", 1),
+    ("generated", r"30 modules of 10 types, ([\d,]+) lines", "iyi SPEC", 1),
     ("targets", r"compiles for \*\*(\w+) targets\*\*", "README.iyi.md", 1),
-    ("targets", r"for (\w+) targets and was tested on one", "SPEC.md", 1),
-    ("targets", r"Four of the (\w+) now", "SPEC.md", 1),
+    ("targets", r"for (\w+) targets and was tested on one", "iyi SPEC", 1),
+    ("targets", r"Four of the (\w+) now", "iyi SPEC", 1),
     # The count of sample programs was quoted as a word and drifted by three
     # before anything noticed, because the digit patterns above cannot see a
     # spelled-out number.
@@ -392,12 +392,12 @@ CLAIMS: list[tuple[str, str, str, int]] = [
     # hyphenated, and `\w+` silently stopped matching the sentence at
     # "twenty-three" rather than reporting the count had moved.
     ("samples", r"\| ([\w-]+) programs:", "README.iyi.md", 1),
-    # The same count in SPEC.md's numbers table, where it said 9 — the number
+    # The same count in iyi SPEC's numbers table, where it said 9 — the number
     # of samples there were when the row was written.
-    ("samples", r"\| samples \| ([\d,]+) programs,", "SPEC.md", 1),
+    ("samples", r"\| samples \| ([\d,]+) programs,", "iyi SPEC", 1),
     # And the other half of that row, which is a count of the roundtrip's list
     # rather than of the directory, and had drifted the same way.
-    ("samples_roundtrip", r"of which ([\d,]+) rebuild from artifacts", "SPEC.md", 1),
+    ("samples_roundtrip", r"of which ([\d,]+) rebuild from artifacts", "iyi SPEC", 1),
 ]
 
 # The prose spells small numbers as words and should keep doing so, so the
@@ -467,7 +467,7 @@ def main() -> int:
                 )
 
     # The ceiling itself, which was prose and a habit until Windows walked
-    # 508 lines over it and nothing failed. SPEC.md I.4 holds the library -
+    # 508 lines over it and nothing failed. iyi SPEC I.4 holds the library -
     # the figure above, every platform's floor excluded - to the lines that
     # core carried, and the rule is that a method entering
     # the library moves another out first. That is a number, so it is a
@@ -475,7 +475,7 @@ def main() -> int:
     if truth["prelude_library"] > CEILING:
         wrong.append(
             f"the library is {truth['prelude_library']:,} lines, {truth['prelude_library'] - CEILING:,} "
-            f"over the {CEILING:,} ceiling (SPEC.md I.4). What enters the library moves something "
+            f"over the {CEILING:,} ceiling (iyi SPEC I.4). What enters the library moves something "
             f"out of it first, or moves to `src/std/`, which this figure does not count"
         )
 

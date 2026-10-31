@@ -293,7 +293,7 @@ case "$(uname -s)" in
     echo "  SIGPIPE on a gone peer: Linux's MSG_NOSIGNAL, proved there" ;;
 esac
 
-# A socket has one task owner under TAPE_SPEC 5.1. The compile refusal
+# A socket has one task owner under SPEC 5.1. The compile refusal
 # above replaces the old two-waiter mutation proof: that program cannot
 # be expressed with a safe socket API until it supports split endpoints.
 echo "  one waiter per fd: shared socket refused at compile time"

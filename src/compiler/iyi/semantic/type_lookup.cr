@@ -45,7 +45,7 @@ class Iyi::Type
   # iyi: *include_private* reaches a type its namespace keeps to itself, which
   # is how a module's unexported types are written down (R-2b). Nothing a user
   # writes may name one; the compiler restoring a module's own instantiation
-  # from its `.iyimod` is not a user (SPEC.md IV.1g).
+  # from its `.iyimod` is not a user (iyi SPEC IV.1g).
   def lookup_type(node : ASTNode, self_type = self.instance_type, allow_typeof = true, free_vars : Hash(String, TypeVar)? = nil, find_root_generic_type_parameters = true, include_private = false) : Type
     TypeLookup.new(self, self_type, true, allow_typeof, free_vars, find_root_generic_type_parameters, include_private: include_private).lookup(node).not_nil!
   end
@@ -125,7 +125,7 @@ class Iyi::Type
       end
     end
 
-    # iyi: whether this path is one of the *scope's* type variables (SPEC.md
+    # iyi: whether this path is one of the *scope's* type variables (iyi SPEC
     # R-1).
     #
     # A generic's methods are re-resolved against the instance: `struct
@@ -214,7 +214,7 @@ class Iyi::Type
         type = type.remove_alias_if_simple if @remove_alias
       end
 
-      # iyi: the import wall, on qualified names (SPEC.md R-1). The
+      # iyi: the import wall, on qualified names (iyi SPEC R-1). The
       # scope half was enforced first and this is the other half: a
       # type that lives in an *imported unit* may only be named by a
       # file that imported that unit — directly, or through a chain of
@@ -228,7 +228,7 @@ class Iyi::Type
       type
     end
 
-    # iyi: `trait Sorted : Bag` with a default `def smallest : Elem` (SPEC.md
+    # iyi: `trait Sorted : Bag` with a default `def smallest : Elem` (iyi SPEC
     # II.6 §3a). A supertrait is a requirement and not an inclusion, so
     # `Bag`'s associated type is not among `Sorted`'s names, and the default
     # was "undefined constant Elem" though its body could call `Bag`'s

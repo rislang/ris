@@ -12,7 +12,7 @@
 #
 # What it cost to write is recorded where it landed. `String#[]`, `String#[](start,
 # count)`, `String#to_i` and `read_input` are in the prelude because this file
-# asked for them, which is the rule the prelude grows by (SPEC.md "0.1.0",
+# asked for them, which is the rule the prelude grows by (iyi SPEC "0.1.0",
 # item 3). Nothing else was missing.
 module samples/calc
 
@@ -59,7 +59,7 @@ pub def run(source : String) : Bool
       end
     else
       # `value` is an error member of the union, and every one of them answers
-      # `message` because they implement `Error` (SPEC.md III.1).
+      # `message` because they implement `Error` (iyi SPEC III.1).
       stderr.puts "error: #{value.message}"
       answered = false
     end

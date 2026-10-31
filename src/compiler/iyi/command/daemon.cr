@@ -20,7 +20,7 @@ require "socket"
 # A build daemon: analyse the prelude once, then fork a child per build so each
 # build starts from a `Program` that already has it.
 #
-# The measurements behind this are in SPEC.md IV.1a/IV.1b. The prelude is ~87% of
+# The measurements behind this are in iyi SPEC IV.1a/IV.1b. The prelude is ~87% of
 # a small build's front end, and a fork restores it in about a millisecond, which
 # is a floor no serialised artifact can beat. So the daemon is not a substitute
 # for `.iyimod` — it cannot cross machines or sessions, and it is not the basis

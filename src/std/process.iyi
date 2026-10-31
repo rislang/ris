@@ -89,7 +89,7 @@ module std/process
 
 {% unless (flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64)) %}
   {% raise "std/process parks a fiber until a child ends, and this target has no runtime to park it in " \
-           "(SPEC.md III.4): Linux, darwin arm64 and Windows x86_64 have one." %}
+           "(iyi SPEC III.4): Linux, darwin arm64 and Windows x86_64 have one." %}
 {% end %}
 
 {% if flag?(:darwin) %}
@@ -579,7 +579,7 @@ class ProcessChild
   NULL_DEVICE = 2
 
   # Typed where they are declared: an assignment written in a type body is
-  # code an artifact does not carry (SPEC.md IV.1g), a declaration is not.
+  # code an artifact does not carry (iyi SPEC IV.1g), a declaration is not.
   @exit_code : Int32 = 0
   @signal : Int32 = 0
   @ended : ::Bool = false

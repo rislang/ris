@@ -65,7 +65,7 @@ import std/file::{File}
   # the byte offset of 44 it had.
   WIN32_FIND_DATAW_BYTES = 4 + 24 + 16 + 260 * 2 + 14 * 2
 {% else %}
-  # Linux: the kernel's own calls (SPEC.md III.9), in libc's shape so the
+  # Linux: the kernel's own calls (iyi SPEC III.9), in libc's shape so the
   # callers below read the same. A directory stream is a descriptor and
   # a buffer of `linux_dirent64` records from `getdents64`, which is the
   # record libc's `readdir` hands back: the name sits at byte 19 either way.

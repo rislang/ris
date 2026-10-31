@@ -396,7 +396,7 @@ class Iyi::Command
     end
   end
 
-  # iyi: `iyi vet` — SPEC.md III.8 #3's row, closed the way the table
+  # iyi: `iyi vet` — iyi SPEC III.8 #3's row, closed the way the table
   # said: "a verb, not new analysis". The analysis is `tool
   # unreachable`; the verb is go vet's contract — findings are the exit
   # code, so CI can hold the line with no flag to remember.
@@ -863,7 +863,7 @@ class Iyi::Command
         end
       end
 
-      # iyi: write a `.iyimod` per imported module into DIR (SPEC.md IV.1).
+      # iyi: write a `.iyimod` per imported module into DIR (iyi SPEC IV.1).
       #
       # Emitting from an ordinary build rather than from a "compile this module
       # alone" command, because compiling a module alone is the thing the
@@ -887,7 +887,7 @@ class Iyi::Command
         compiler.emit_iyimod = dir
       end
 
-      # iyi: read imported modules from DIR's `.iyimod` files (SPEC.md IV.1).
+      # iyi: read imported modules from DIR's `.iyimod` files (iyi SPEC IV.1).
       #
       # No longer implies `--no-codegen`: an artifact carries its module's own
       # object code, the defs it declares are emitted as external declarations,
@@ -897,7 +897,7 @@ class Iyi::Command
       # useful than refusing to try.
       # And the line says "first", because the workspace's own `mods` is
       # read without being asked for — after its sources, for a module whose
-      # file is not there (`Compiler.workspace_artifacts`, SPEC.md IV.1f).
+      # file is not there (`Compiler.workspace_artifacts`, iyi SPEC IV.1f).
       # A reader who has seen a build use an artifact it was never told
       # about is owed the difference between the two.
       opts.on("--use-iyimod DIR", "iyi: compile imported modules from DIR's\n.iyimod files first; `mods` beside the\nproject root is read for a module with\nno source either way") do |dir|
@@ -1002,7 +1002,7 @@ class Iyi::Command
     end
     sources.concat gather_sources(filenames)
 
-    # iyi: an iyi program gets iyi's prelude (SPEC.md, "0.1.0", item 3).
+    # iyi: an iyi program gets iyi's prelude (iyi SPEC, "0.1.0", item 3).
     #
     # Decided by the entry file's extension, which is the only thing the
     # compiler knows before it reads anything. Crystal developers may override

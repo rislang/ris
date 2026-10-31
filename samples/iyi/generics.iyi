@@ -1,4 +1,4 @@
-# Implementing a trait for a generic type — SPEC.md II.7.
+# Implementing a trait for a generic type — iyi SPEC II.7.
 #
 #   ./bin/iyi run samples/iyi/generics.iyi
 
@@ -62,7 +62,7 @@ shown = [Box.new(1), Box.new("two"), Pair.new(3, "four")] of Show
 shown.each { |s| puts s.show }
 
 # ---------------------------------------------------------------------------
-# Associated types — SPEC.md II.6
+# Associated types — iyi SPEC II.6
 # ---------------------------------------------------------------------------
 #
 # `type Elem` declares a type the *impl* answers, not one the caller picks. A
@@ -113,7 +113,7 @@ puts Names.new.pair.join(", ")
 puts Counts.new.pair.sum
 
 # ---------------------------------------------------------------------------
-# Bounds and requirements — SPEC.md II.6
+# Bounds and requirements — iyi SPEC II.6
 # ---------------------------------------------------------------------------
 #
 # About a quarter of `Enumerable` is valid only for some element types: `max`

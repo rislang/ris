@@ -51,7 +51,7 @@ module Iyi
       capacity = node.elements.count { |elem| !elem.is_a?(Splat) }
 
       # ris: a program's array literal is a tape Ary; std and the runtime
-      # keep Array until their migration (TAPE_SPEC 1.x, no GC).
+      # keep Array until their migration (SPEC 1.x, no GC).
       if ris_program_literal?(node) && !node.elements.any?(Splat)
         return expand_tape_array(node, type_var, elem_temp_vars, elem_temp_var_count, capacity)
       end
@@ -347,7 +347,7 @@ module Iyi
         string = node_value.value
 
         # iyi: named after the literal rather than after the order it was met
-        # in (SPEC.md IV.1g). The name reaches a linker — a unit that reads this
+        # in (iyi SPEC IV.1g). The name reaches a linker — a unit that reads this
         # constant refers to `~$Regex:<name>:const_read` — and encounter order
         # is not an identity a second program shares. A `.iyimod` whose object
         # code said `$Regex:0` linked against a consumer's own first regex
@@ -385,7 +385,7 @@ module Iyi
     # iyi: a regex literal in an iyi program is `Regex.compile` from
     # `std/regex`, iyi's own linear-time engine, cached the way the other
     # library's literal is: one constant per pattern and flags, named for
-    # them (SPEC.md IV.1g), so a literal in a loop compiles once. It was
+    # them (iyi SPEC IV.1g), so a literal in a loop compiles once. It was
     # refused while iyi's library had no runtime `Regex`, and after
     # `std/regex` arrived a program still had to spell every pattern as a
     # string for `Regex.compile`.
@@ -613,7 +613,7 @@ module Iyi
     #       3
     #     end
     # iyi: `it` — the value a `case` is matching, named inside every branch
-    # (SPEC.md III.1.1).
+    # (iyi SPEC III.1.1).
     #
     # From:
     #
@@ -733,7 +733,7 @@ module Iyi
       final_if = nil
       temp_var = temp_vars.try(&.first)
 
-      # iyi: the subject `it` names inside every branch (SPEC.md III.1.1). Only
+      # iyi: the subject `it` names inside every branch (iyi SPEC III.1.1). Only
       # where there is exactly one, which is what the parser already gated on.
       it_subject = temp_vars.try { |vars| vars.first if vars.size == 1 }
 
@@ -886,10 +886,10 @@ module Iyi
     #       ...
     #
     def expand(node : Select)
-      # ris: no Channel, so no select (TAPE_SPEC 5.2).
+      # ris: no Channel, so no select (SPEC 5.2).
       if @program.iyi_prelude?
         node.raise "ris has no select: wait for one message with RisBoard.take(T, ms), " \
-                   "or for a task with task.wait(ms) (TAPE_SPEC 5.2, doc/MESSAGES.md)"
+                   "or for a task with task.wait(ms) (SPEC 5.2, doc/MESSAGES.md)"
       end
       index_name = @program.new_temp_var_name
       value_name = @program.new_temp_var_name

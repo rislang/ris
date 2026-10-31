@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """What reading a module from its `.iyimod` costs, against reading its source.
 
-SPEC.md IV.1a asked this before the artifact existed and answered it with the
+iyi SPEC IV.1a asked this before the artifact existed and answered it with the
 fork probe, which is a ceiling rather than a measurement of the thing. This is
 the thing: the same program, built from four modules' source and then from four
 modules' artifacts with every one of those sources deleted.
@@ -130,7 +130,7 @@ def main():
     print("  so it cannot fall back to what it is replacing. An artifact is")
     print("  declarations in text: the consumer parses them and runs the")
     print("  top-level pass over them, which is what it did to the source.")
-    print("  See SPEC.md IV.1a.")
+    print("  See iyi SPEC IV.1a.")
     print()
     return 0
 

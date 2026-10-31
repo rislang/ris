@@ -132,7 +132,7 @@ module Iyi
 
     # iyi: which language the source is written in is the one thing the lexer
     # cannot read out of the source, so it comes off the name — `!` is not
-    # part of a name in a `.iyi` file (SPEC.md III.1.7) and is part of one in
+    # part of a name in a `.iyi` file (iyi SPEC III.1.7) and is part of one in
     # a `.cr` file.
     #
     # A macro expansion's name is a `VirtualFile`, which is no extension at
@@ -1294,7 +1294,7 @@ module Iyi
     end
 
     def check_ident_or_keyword(keyword : Keyword, start)
-      # iyi: `!` is not part of a name (SPEC.md III.1.7), and that includes
+      # iyi: `!` is not part of a name (iyi SPEC III.1.7), and that includes
       # the name being a keyword's: `end!` is the keyword and then the
       # propagation operator, or `group do ... end!` cannot close its block.
       if ident_part_or_end?(peek_next_char) && !(@iyi && peek_next_char == '!')
@@ -1311,7 +1311,7 @@ module Iyi
         next_char
       end
       if current_char.in?('?', '!') && peek_next_char != '='
-        # iyi: `!` is not part of a name (SPEC.md III.1.7). It is left for the
+        # iyi: `!` is not part of a name (iyi SPEC III.1.7). It is left for the
         # parser, which reads it as the propagation operator after an
         # expression and refuses it after a `def` name.
         next_char unless @iyi && current_char == '!'

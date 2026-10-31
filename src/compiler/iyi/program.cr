@@ -80,7 +80,7 @@ module Iyi
     getter requires = Set(String).new
 
     # iyi: the imported modules of the program, in the order their initialisers
-    # must run (SPEC.md III.5 rule 1).
+    # must run (iyi SPEC III.5 rule 1).
     #
     # `import` fills this rather than expanding the module where it was
     # written, so a module's top-level code is held apart from the site that
@@ -89,7 +89,7 @@ module Iyi
     property iyi_module_inits = [] of ASTNode
 
     # iyi: the files whose module has runnable code the artifact **cannot**
-    # carry, by absolute filename (SPEC.md III.5, IV.1g).
+    # carry, by absolute filename (iyi SPEC III.5, IV.1g).
     #
     # A module's own top level travels (see `iyi_module_initialiser_source`).
     # A class variable's initialiser does not: it belongs to the type rather
@@ -99,7 +99,7 @@ module Iyi
     getter iyi_module_initialisers = Set(String).new
 
     # iyi: each module's own top-level code as source text, by absolute
-    # filename (SPEC.md III.5, IV.1g).
+    # filename (iyi SPEC III.5, IV.1g).
     #
     # `iyi_module_inits` holds the nodes and is emptied into the tree by the
     # top-level pass; this survives it, because an artifact is written later
@@ -109,7 +109,7 @@ module Iyi
     # any other module's, because that order is over modules and not over text.
     getter iyi_module_initialiser_source = {} of String => String
 
-    # iyi: which modules each file imports, by absolute filename (SPEC.md
+    # iyi: which modules each file imports, by absolute filename (iyi SPEC
     # III.5 rule 2). `iyi_module_inits` is one order the DAG allows; these are
     # the edges, which is what makes every *other* order it allows computable.
     getter iyi_module_imports = {} of String => Array(String)
@@ -128,7 +128,7 @@ module Iyi
 
     @iyi_reach_cache = {} of String => Set(String)
 
-    # The import wall for a qualified name (SPEC.md R-1): `resolved`
+    # The import wall for a qualified name (iyi SPEC R-1): `resolved`
     # lives in an imported unit ⇒ the file that wrote `node` must reach
     # that unit — its own imports, then onward only through `pub import`
     # edges. Anchored at the node, which is the line to fix.
@@ -139,7 +139,7 @@ module Iyi
       node.raise "`#{unit}` is not imported here — it is in the program " \
                  "only because some other file imported it. Add an import " \
                  "in this file, or have a module this file imports " \
-                 "re-export it with `pub import` (SPEC.md R-1)"
+                 "re-export it with `pub import` (iyi SPEC R-1)"
     end
 
     # The wall as a question: the unit `resolved` lives in, when the file
@@ -205,7 +205,7 @@ module Iyi
     end
 
     # The import wall for a method a module adds to a type it did not
-    # declare - `std/int`'s `UInt8#>>` on the prelude's `UInt8` (SPEC.md
+    # declare - `std/int`'s `UInt8#>>` on the prelude's `UInt8` (iyi SPEC
     # R-1). Such a method comes with its module's import, so the file that
     # calls it must reach that module, as it must to name a type. Without
     # this a module that forgot `import std/int` compiled whenever the
@@ -260,7 +260,7 @@ module Iyi
       path = iyi_module_paths[def_file]? || def_file
       call.raise "`#{a_def.name}` on #{a_def.owner} comes from `#{path}`, which is " \
                  "not imported here — it is in the program only because some " \
-                 "other file imported it. Add `import #{path}` in this file (SPEC.md R-1)"
+                 "other file imported it. Add `import #{path}` in this file (iyi SPEC R-1)"
     end
 
     # A module that redefines a method the type already has - `std/float`'s
@@ -311,11 +311,11 @@ module Iyi
     # iyi: the module path each imported file was named by, e.g.
     # `/…/app/greeter.iyi => "app/greeter"`. The edges above are keyed on
     # filenames because that is what load-once is keyed on; a `.iyimod` names
-    # modules, so it needs the way back (SPEC.md IV.1).
+    # modules, so it needs the way back (iyi SPEC IV.1).
     getter iyi_module_paths = {} of String => String
 
     # iyi: the same, for a module that arrived as an artifact — keyed by the
-    # `.iyimod`'s own path (SPEC.md IV.1).
+    # `.iyimod`'s own path (iyi SPEC IV.1).
     #
     # Two hashes rather than one because they answer different questions.
     # `iyi_module_paths` is the set `--emit-iyimod` writes from, and a module
@@ -342,7 +342,7 @@ module Iyi
     # producer's tree is present and an honest error when it is not.
     getter iyi_artifact_source_paths = {} of String => String
 
-    # iyi: true only while a `derive`'s macro is expanding (SPEC.md R-5, II.4).
+    # iyi: true only while a `derive`'s macro is expanding (iyi SPEC R-5, II.4).
     # A derive reads the declaration it is attached to, and the types that
     # declaration names. The macro questions that answer with the whole program
     # instead are refused while this is set, because their answers are not facts
@@ -350,7 +350,7 @@ module Iyi
     property? expanding_derive : Bool = false
 
     # iyi: where to look for a `.iyimod` before falling back to a module's
-    # source, or nil (SPEC.md IV.1). Set by `--use-iyimod`.
+    # source, or nil (iyi SPEC IV.1). Set by `--use-iyimod`.
     property iyi_module_dir : String? = nil
 
     # iyi: whether a module's *source* wins over its artifact where both
@@ -373,7 +373,7 @@ module Iyi
 
     # iyi: the manifest's answer — `{module path prefix, checkout dir}`,
     # longest prefix first, filled from `iyi.mod` by `Mod::Installer` before
-    # semantic runs (SPEC.md III.7). Empty when the program has no manifest,
+    # semantic runs (iyi SPEC III.7). Empty when the program has no manifest,
     # which is every program until it writes one.
     property iyi_mod_table = [] of {String, String}
 
@@ -483,7 +483,7 @@ module Iyi
     property iyi_header_root : String? = nil
 
     # iyi: whether this build is writing artifacts as well as reading them
-    # (SPEC.md IV.3). Set by the compiler from `--emit-iyimod`.
+    # (iyi SPEC IV.3). Set by the compiler from `--emit-iyimod`.
     #
     # It decides what a *stale* artifact means. A build that only reads them
     # asked to be compiled against artifacts, so one that no longer describes
@@ -494,7 +494,7 @@ module Iyi
     # point.
     property iyi_rewrites_artifacts : Bool = false
 
-    # iyi: what each module read from a `.iyimod` hashed to (SPEC.md IV.3), by
+    # iyi: what each module read from a `.iyimod` hashed to (iyi SPEC IV.3), by
     # module path.
     #
     # Kept because an artifact this build *writes* records, for each module it
@@ -503,7 +503,7 @@ module Iyi
     getter iyi_artifact_hashes = {} of String => IyiMod::Hashes
 
     # iyi: why a module's artifact is not the module any more, or nil if it
-    # still is (SPEC.md IV.3). Memoised, because the answer for one module is
+    # still is (iyi SPEC IV.3). Memoised, because the answer for one module is
     # part of the answer for everything that imports it.
     getter iyi_artifact_staleness = {} of String => String?
 
@@ -515,12 +515,12 @@ module Iyi
     property iyi_wants_object_code : Bool = false
 
     # iyi: the object files each imported artifact carried, by module path
-    # (SPEC.md IV.1g). What the linker is given in place of the code this build
+    # (iyi SPEC IV.1g). What the linker is given in place of the code this build
     # did not generate, because it never saw the bodies.
     getter iyi_artifact_objects = {} of String => Array(IyiMod::ObjectUnit)
 
     # iyi: types whose methods must be emitted as real functions because their
-    # module's `.iyimod` is being written (SPEC.md IV.1g).
+    # module's `.iyimod` is being written (iyi SPEC IV.1g).
     #
     # Codegen inlines a method whose body is a literal and emits no symbol for
     # it. That is right for a whole-program build and wrong for a module that
@@ -607,7 +607,7 @@ module Iyi
     property iyi_prelude_dir : String? = nil
 
     # iyi: the types each object-code unit refers to a type id of, by unit name
-    # (SPEC.md IV.1g).
+    # (iyi SPEC IV.1g).
     #
     # A type id is an external reference — the number is the program's, not the
     # module's — so a unit that travels in an artifact leaves `Array(Item):
@@ -619,7 +619,7 @@ module Iyi
     # artifacts.
     getter iyi_unit_type_ids = {} of String => Set(Type)
 
-    # iyi: the constants each object-code unit reads, by unit name (SPEC.md
+    # iyi: the constants each object-code unit reads, by unit name (iyi SPEC
     # IV.1g).
     #
     # A constant is initialised only if something *read* it — `codegen_assign`
@@ -633,7 +633,7 @@ module Iyi
     getter iyi_unit_constants = {} of String => Set(Const)
 
     # iyi: the class variables each unit's object code refers to, by unit name
-    # (SPEC.md IV.2).
+    # (iyi SPEC IV.2).
     #
     # `iyi_unit_constants` above, asked of a global that nobody wrote a name
     # for. A class variable's global is defined in the *main module*, which is
@@ -668,7 +668,7 @@ module Iyi
     getter iyi_unit_class_vars = {} of String => Hash(String, Bool)
 
     # iyi: the types an imported artifact's object code refers to a type id of,
-    # resolved (SPEC.md IV.1g).
+    # resolved (iyi SPEC IV.1g).
     #
     # The consumer defines an id for every type it has *numbered*, and numbering
     # comes from walking `Object`'s subclasses — which reaches a class and does
@@ -690,7 +690,7 @@ module Iyi
     getter iyi_artifact_phantom_types = Set(String).new
 
     # iyi: one name an imported artifact's object code refers to, waiting for
-    # every import to be in before it is resolved (SPEC.md IV.1g).
+    # every import to be in before it is resolved (iyi SPEC IV.1g).
     #
     # A type id is a *program-wide* question and was asked per import, which is
     # a stricter order than the thing it is asking about. `pg` declares `PG`
@@ -712,7 +712,7 @@ module Iyi
     getter iyi_artifact_refs = [] of IyiArtifactRef
 
     # iyi: the types each unit's object code asks `~match<T>` about, by unit
-    # name (SPEC.md IV.1g).
+    # name (iyi SPEC IV.1g).
     #
     # `iyi_unit_type_ids`' question asked of a *match*. A match against a union
     # or a virtual type is a comparison against a range of the program's own
@@ -725,13 +725,13 @@ module Iyi
     getter iyi_unit_match_types = {} of String => Set(Type)
 
     # iyi: the symbols each object-code unit reads the value of, by unit name
-    # (SPEC.md IV.1g). `iyi_unit_type_ids`' question asked of a symbol: the
+    # (iyi SPEC IV.1g). `iyi_unit_type_ids`' question asked of a symbol: the
     # numbering is the program's, so a unit reads the value from a global the
     # consuming program defines, and the consumer has to know the name to
     # give it a number. Filled only while writing artifacts.
     getter iyi_unit_symbol_literals = {} of String => Set(String)
 
-    # iyi: the symbols each unit's object code defines, by unit name (SPEC.md
+    # iyi: the symbols each unit's object code defines, by unit name (iyi SPEC
     # IV.1g).
     #
     # An artifact defines more than it declares and less than its types
@@ -750,7 +750,7 @@ module Iyi
     # Recorded only while writing artifacts.
     getter iyi_unit_symbols = {} of String => Set(String)
 
-    # iyi: the `lib`s a unit calls into, by name (SPEC.md IV.1g, `Libs`).
+    # iyi: the `lib`s a unit calls into, by name (iyi SPEC IV.1g, `Libs`).
     #
     # Which C libraries a boundary's object code needs is the other half of
     # what `Requires` answers, and nothing was answering it. `link_annotations`
@@ -780,7 +780,7 @@ module Iyi
     getter iyi_artifact_symbols = Set(String).new
 
     # iyi: the types an imported artifact's object code asks `~match<T>` about,
-    # resolved (SPEC.md IV.1g).
+    # resolved (iyi SPEC IV.1g).
     #
     # The consumer's half. A virtual type it could have enumerated from its own
     # classes; a union it could not — `(Char | Iyi::Keyword | String | Nil)` is
@@ -794,12 +794,12 @@ module Iyi
     getter iyi_artifact_match_types = {} of String => Type
 
     # iyi: the reads appended for an artifact's `Constants`, kept so codegen
-    # can define the `~NAME:const_read` its object code calls (SPEC.md IV.1g).
+    # can define the `~NAME:const_read` its object code calls (iyi SPEC IV.1g).
     # See `read_iyi_artifact_constants`.
     getter iyi_artifact_constant_reads = [] of Path
 
     # iyi: the class variables an imported artifact's object code refers to, as
-    # `Owner::@@name` (SPEC.md IV.2).
+    # `Owner::@@name` (iyi SPEC IV.2).
     #
     # The consumer's half of `iyi_unit_class_vars`. Names rather than the
     # variables themselves, because at the point an artifact is read the
@@ -808,7 +808,7 @@ module Iyi
     # codegen resolves them, which is also where they are needed.
     getter iyi_artifact_class_vars = {} of String => Bool
 
-    # iyi: what a synthesised regex constant was made from, by name (SPEC.md
+    # iyi: what a synthesised regex constant was made from, by name (iyi SPEC
     # IV.1g).
     #
     # A regex literal becomes a program-level constant, and the name it gets is
@@ -889,7 +889,7 @@ module Iyi
     end
 
     # iyi: the imports' names each file's module unit writes, by absolute
-    # filename and as written (SPEC.md II.3).
+    # filename and as written (iyi SPEC II.3).
     #
     # In the artifact because a signature is stored as the annotation the
     # author wrote, and an annotation is written in a context: `pub def
@@ -904,7 +904,7 @@ module Iyi
 
 
     # iyi: the method bodies each file's module has to ship, by absolute
-    # filename and then by `IyiMod.mono_body_key` (SPEC.md IV.2, `MonoBodies`).
+    # filename and then by `IyiMod.mono_body_key` (iyi SPEC IV.2, `MonoBodies`).
     #
     # A body travels when the consumer is the one that has to compile it: a
     # method of a generic type, which exists once per instantiation and the
@@ -915,7 +915,7 @@ module Iyi
     getter iyi_mono_bodies = {} of String => Hash(String, String)
 
     # iyi: the macros each file declares, as source text, by absolute filename
-    # (SPEC.md IV.1, `MacroBodies`).
+    # (iyi SPEC IV.1, `MacroBodies`).
     #
     # A macro is not code that runs, so nothing about it can arrive as machine
     # code — and a body that travels may call one. `run` takes a block, so the
@@ -925,7 +925,7 @@ module Iyi
     getter iyi_macro_bodies = {} of String => Array(String)
 
     # iyi: the `(Trait, Type)` pairs each file provides, by absolute filename
-    # (SPEC.md IV.2, "Impl records").
+    # (iyi SPEC IV.2, "Impl records").
     #
     # Collected as they are declared rather than recovered afterwards, because
     # an impl leaves no record of its own: it works by making the target type
@@ -956,7 +956,7 @@ module Iyi
     end
 
     # iyi: every name an imported artifact's object code refers to, resolved
-    # (SPEC.md IV.1g).
+    # (iyi SPEC IV.1g).
     #
     # Once, after the top-level pass has read every import, because that is the
     # scope of the question: a type id is resolved from a definition in *this
@@ -1007,7 +1007,7 @@ module Iyi
 
             Its object code calls a function that compares a value's type id
             against that type, and the comparison is built from this program's
-            own numbering - so this program has to have the type (SPEC.md
+            own numbering - so this program has to have the type (iyi SPEC
             IV.1g).
 
             Build the module from source, or import the module that declares it.
@@ -1020,7 +1020,7 @@ module Iyi
             definition in this program - so this program has to have the type.
             This module's own types travel with its artifact, so the one it
             cannot name belongs to a module this program did not import
-            (SPEC.md IV.1g).
+            (iyi SPEC IV.1g).
 
             Build the module from source, or import the module that declares it.
             MESSAGE
@@ -1394,7 +1394,7 @@ module Iyi
       types["Deprecated"] = @deprecated_annotation = AnnotationType.new self, self, "Deprecated"
       types["Experimental"] = @experimental_annotation = AnnotationType.new self, self, "Experimental"
       types["TargetFeature"] = @target_feature_annotation = AnnotationType.new self, self, "TargetFeature"
-      # iyi: `@[Share]` on a struct or class is the trust half of SPEC.md
+      # iyi: `@[Share]` on a struct or class is the trust half of iyi SPEC
       # III.4.4's marker — the type is shareable whenever its type arguments
       # are, whatever its fields do — for the short list that owns what it
       # holds: `Atomic(T)` in the prelude, `List(T)` in the samples. The
@@ -1433,7 +1433,7 @@ module Iyi
       # pointers without calling C (`Iyi::FfiBoundaryChecker`).
       types["PointerUnsafe"] = AnnotationType.new self, self, "PointerUnsafe"
 
-      # iyi: the marker that makes a union member an error member (SPEC.md
+      # iyi: the marker that makes a union member an error member (iyi SPEC
       # III.1.1). Created here rather than declared in the prelude because the
       # compiler has to recognise this exact trait — `!`, `.or` and `.or_panic`
       # all ask whether a member implements it — and a name the prelude happened

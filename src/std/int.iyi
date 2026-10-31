@@ -184,7 +184,7 @@ end
         # separator on every Windows path) and not in its arithmetic one,
         # so the comparisons for a pair it already declares are skipped
         # here and the arithmetic below is not. Redefining a prelude
-        # method is refused by name (SPEC.md R-3), which is how the split
+        # method is refused by name (iyi SPEC R-3), which is how the split
         # announced itself.
         {% unless prelude_comparables.includes?(from[0]) && prelude_comparables.includes?(other[0]) %}
           {% for op in %w(== != < <= > >=) %}
@@ -331,7 +331,7 @@ end
       {% if conv[1] == "Int128" || conv[1] == "UInt128" %}
         # Not the instruction: a double to a 128-bit integer is a call
         # into compiler-rt (`__fixdfti`) on aarch64, which the floor
-        # (SPEC.md III.9) does not link. The mantissa and exponent are
+        # (iyi SPEC III.9) does not link. The mantissa and exponent are
         # read off the bits and shifted into place instead; the caller
         # has already refused what does not fit.
         def unsafe_{{ conv[0].id }} : {{ conv[1].id }}

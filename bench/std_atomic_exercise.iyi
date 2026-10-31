@@ -202,7 +202,7 @@ puts "== release publishes, acquire sees"
 # with a release store; the reader spins on an acquire load of the flag,
 # and the payload it then reads is whole. Fifty handoffs, each a block call
 # of its own: every captured local, that call's `box` and `handoff`, is
-# assigned once (SPEC.md III.4.4). A `while` reusing one `box` and one
+# assigned once (iyi SPEC III.4.4). A `while` reusing one `box` and one
 # counter for every round no longer compiles.
 50.times do |handoff|
   box = Shared.new

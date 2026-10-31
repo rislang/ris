@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The sandbox story, measured — SPEC.md III.12, AI_FIRST.md §2 #8.
+# The sandbox story, measured — iyi SPEC III.12, AI_FIRST.md §2 #8.
 #
 #     WASI_SDK=~/.local/opt/wasi-sdk WASMTIME=~/.wasmtime/bin/wasmtime \
 #       bash bench/sandbox_story.sh

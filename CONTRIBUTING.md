@@ -1,7 +1,7 @@
 # Contributing to ris
 
 ris is iyi plus Goose's tape memory. Read [AGENTS.md](AGENTS.md) first,
-then [LEARN.md](LEARN.md) and [TAPE_SPEC.md](TAPE_SPEC.md). Every ris program
+then [LEARN.md](LEARN.md) and [SPEC.md](SPEC.md). Every ris program
 runs without a collector on Linux x86_64 or aarch64. Heap allocation
 traps; use tape values and copy_to for retained data. The compiler is
 still built with Crystal.
@@ -64,8 +64,9 @@ broader suites. Check formatting of changed Crystal files with
 
 ## Inherited references
 
-[SPEC.md](SPEC.md) describes inherited language and compiler rules; it is
-not the authority for ris's tape memory model. Historical iyi documents
+[iyi's SPEC](doc/archive/iyi/SPEC.md) describes inherited language and
+compiler rules; [SPEC.md](SPEC.md) is ris's and wins where they differ.
+Historical iyi documents
 are in [doc/archive/iyi/](doc/archive/iyi/), and Crystal's README is in
 [doc/archive/crystal/](doc/archive/crystal/). Their plans and release notes
 record the upstream projects, not ris's current roadmap.

@@ -1,4 +1,4 @@
-# Exercises the concurrency runtime: SPEC.md III.4, built in III.4.8's order.
+# Exercises the concurrency runtime: iyi SPEC III.4, built in III.4.8's order.
 #
 # Every check here is a property III.4 states, asserted rather than printed:
 # a wrong answer is exit 1 with the property named. The one property a
@@ -124,7 +124,7 @@ impl Error for TaskFailed
   end
 end
 
-# Messages between the tasks below, on the board (TAPE_SPEC 5.2): one
+# Messages between the tasks below, on the board (SPEC 5.2): one
 # process-wide queue per type.
 record CPing, n : Int32
 record CPong, n : Int32

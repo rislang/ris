@@ -13,7 +13,7 @@ describe "Normalize: regex literal" do
     # iyi: the name is the literal's, not the order it was met in. It reaches a
     # linker — a unit reading this constant refers to `~<name>:const_read` —
     # and a boundary carrying `$Regex:0` was read by a consumer that had
-    # numbered its own literals from zero too (SPEC.md IV.1g).
+    # numbered its own literals from zero too (iyi SPEC IV.1g).
     it "expands to a const named after the literal" do
       assert_expand Parser.parse(%q(/foo/)) do |to_nodes, program|
         to_nodes.to_s.should eq Program.regex_const_name("foo", Iyi::RegexOptions::None)
@@ -66,7 +66,7 @@ describe "Normalize: regex literal" do
   # iyi: a `.iyi` program's literal is `std/regex`'s `Regex.compile`, and
   # iyi's prelude has no other runtime Regex: without the import the expander
   # says so at the literal rather than emitting `::Regex.new` into a program
-  # whose Regex is the empty class the compiler pre-declares (SPEC.md III.10,
+  # whose Regex is the empty class the compiler pre-declares (iyi SPEC III.10,
   # Appendix B #17).
   describe "in an .iyi file" do
     it "names the import it is missing" do

@@ -226,7 +226,7 @@ def scripted(answers : Array(String), & : String -> Nil) : {Array(String), Array
   base = "http://127.0.0.1:#{port}/stream"
   # The server task owns the listener, handed off, reads the answers from
   # one read-only String (an Array is never shared) and answers what it
-  # read as its value (TAPE_SPEC 5.1). A connection that sends nothing
+  # read as its value (SPEC 5.1). A connection that sends nothing
   # stops it: the client's end is known only here.
   script = answers.join(SCRIPT_SEPARATOR)
   got = group do |g|

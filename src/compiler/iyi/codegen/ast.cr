@@ -61,7 +61,7 @@ module Iyi
         end
 
         # iyi: a body that travels is compiled twice, and the two are not the
-        # same function (SPEC.md IV.1g).
+        # same function (iyi SPEC IV.1g).
         #
         # The producer compiles it against declarations. Where the body calls
         # an `abstract def`, the producer's world may hold nothing that
@@ -89,7 +89,7 @@ module Iyi
     end
 
     # iyi: the return type a symbol is made of, for a def read from a `.iyimod`
-    # (SPEC.md IV.1g).
+    # (iyi SPEC IV.1g).
     #
     # A declaration may not name a virtual type — `Foo+` is how one *prints*
     # and not a name anybody can write, which is why `infer_return`

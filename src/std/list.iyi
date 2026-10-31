@@ -1,4 +1,4 @@
-# `List`, the shareable immutable sequence — SPEC.md III.4.7.
+# `List`, the shareable immutable sequence — iyi SPEC III.4.7.
 #
 #   ./bin/crystal run samples/iyi/immutable.iyi
 #

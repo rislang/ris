@@ -1,4 +1,4 @@
-# The macros a declaration cannot be written without — SPEC.md, "0.1.0",
+# The macros a declaration cannot be written without — iyi SPEC, "0.1.0",
 # item 3.
 #
 # `getter` is here because every sample declares a field with it, and a field

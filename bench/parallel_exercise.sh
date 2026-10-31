@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Drives bench/parallel_exercise.iyi: tasks across cores (SPEC.md III.4.13).
+# Drives bench/parallel_exercise.iyi: tasks across cores (iyi SPEC III.4.13).
 #
 #     bash bench/parallel_exercise.sh
 #

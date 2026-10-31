@@ -145,7 +145,7 @@ ALLOWED_LINES: list[tuple[str, str]] = [
     (r"\binherited from Crystal", "provenance of an inherited semantic"),
     # The artifact header records which library a module was built against, and
     # an import across the two is refused by name in both directions. The field
-    # is called what it means (SPEC.md IV.5).
+    # is called what it means (iyi SPEC IV.5).
     # Crystal's daemon is its own binary with its own socket: `iyi` and
     # `crystal` are one compiler with two command surfaces, and each looks up a
     # server named after the binary that was typed.
@@ -159,14 +159,14 @@ ALLOWED_LINES: list[tuple[str, str]] = [
     # kostya's benchmark suite for the other language is a repository named
     # `crystal-metric`; iyi's port of it is measured against it by name.
     (r"\bcrystal-metric\b", "the name of the other language's benchmark suite"),
-    (r"\bshared with Crystal", "the one-name rule (SPEC.md III.1.7a) naming the other language"),
+    (r"\bshared with Crystal", "the one-name rule (iyi SPEC III.1.7a) naming the other language"),
     (r"\b(a|the|as|ordinary|becomes|is|in|not|One|A) Crystal", "a sentence about the other language"),
     (r"\bwhich is the lookup Crystal performs", "a sentence about the other language"),
     (r"\bevery Crystal bang|Crystal ignores", "a sentence about the other language's rule"),
     (r"\b(are|stay|stays|stayed|still) Crystal", "a sentence about files that keep being the other language"),
     (r"crystal_shop|crystal\.(out|err)|CRYSTAL=|\$CRYSTAL\b", "the gate's own Crystal arm"),
     (r"struct Int32", "the fixture's reopening of a library type"),
-    (r"\bstays Crystal", "where a reopening belongs (SPEC.md III.6)"),
+    (r"\bstays Crystal", "where a reopening belongs (iyi SPEC III.6)"),
     (r"Crystal::EventLoop", "a class inside Crystal's standard library"),
     (r"Crystal::DWARF", "a namespace inside Crystal's standard library"),
     # A constant `openssl_ext` defines inside its own `lib`, named for the
@@ -286,7 +286,7 @@ ALLOWED_LINES: list[tuple[str, str]] = [
     (r'`CRYSTAL_LIBRARY_PATH`|CRYSTAL_LIBRARY_PATH="\$EMPTY"',
      "the search path the build's own compiler reads, where iyi's adds instead of replacing"),
     # The Windows job installs the other language's own package, because the
-    # compiler is still a Crystal program (SPEC.md B.2) and Windows has no
+    # compiler is still a Crystal program (iyi SPEC B.2) and Windows has no
     # second way to bootstrap it: upstream's action, the version it is asked
     # for, and the search path that package's `crystal env` answers with,
     # handed to the job's environment so `make -f Makefile.win` can read it.

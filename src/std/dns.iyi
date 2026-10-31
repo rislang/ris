@@ -5,7 +5,7 @@
 # A name is turned into an address by libc's getaddrinfo everywhere else,
 # and on Linux that is libc.so, the NSS modules it loads by name at run
 # time (libnss_files, libnss_dns, and whatever else /etc/nsswitch.conf
-# lists) and libresolv's state. That is the dependency floor SPEC.md III.9
+# lists) and libresolv's state. That is the dependency floor iyi SPEC III.9
 # keeps a program off, and the reason `std/socket` read numeric addresses
 # and `localhost` only. A stub resolver is small: it asks the name servers
 # the machine is configured with, over UDP and then TCP, and reads what

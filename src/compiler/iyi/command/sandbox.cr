@@ -1,6 +1,6 @@
 # iyi: `iyi run --sandbox` — the cheapest container for generated code.
 #
-# SPEC.md III.12 measured this and the bench proved it: a program
+# iyi SPEC III.12 measured this and the bench proved it: a program
 # compiled for wasm32-wasi cannot open a file, a socket, or a clock the
 # runtime did not hand it, and a default wasmtime hands it nothing. The
 # theft dies with "File is not available on wasm32-wasi", by name. Until

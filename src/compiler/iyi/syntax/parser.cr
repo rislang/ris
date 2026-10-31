@@ -57,7 +57,7 @@ module Iyi
       # calling a method named `type`.
       @inside_trait_or_impl = false
       # iyi: depth of `defer` bodies being parsed, which is where `!` is
-      # refused (SPEC.md III.1.4, Appendix B #7).
+      # refused (iyi SPEC III.1.4, Appendix B #7).
       @inside_defer = 0
       @wants_doc = false
       @doc_enabled = false
@@ -301,13 +301,13 @@ module Iyi
         unless first.is_a?(ModuleHeader)
           raise "the `module` header comes first in a file: `module #{node.path.join('/')}` " \
                 "goes above every `import` and declaration, with only comments " \
-                "before it (SPEC.md R-1, IV.6)",
+                "before it (iyi SPEC R-1, IV.6)",
             location.try(&.line_number) || 1, location.try(&.column_number) || 1
         end
         raise "a file declares one module, and this one already declares " \
               "`#{first.path.join('/')}`. " \
               "A module is a compilation unit and its path is its file's path " \
-              "(SPEC.md R-1, IV.6), so `#{node.path.join('/')}` belongs in " \
+              "(iyi SPEC R-1, IV.6), so `#{node.path.join('/')}` belongs in " \
               "`#{node.path.join('/')}.iyi`",
           location.try(&.line_number) || 1, location.try(&.column_number) || 1
       end
@@ -321,7 +321,7 @@ module Iyi
         location = nested.location
         written = nested.path.join('/')
         raise "`module #{written}` is a module header, and a header is the first statement " \
-              "of its file, outside every `begin`, `if`, `class` and `def` (SPEC.md R-1). " \
+              "of its file, outside every `begin`, `if`, `class` and `def` (iyi SPEC R-1). " \
               "A module inside a type is named by a constant: `module #{nested.path.map(&.camelcase).join("::")}`",
           location.try(&.line_number) || 1, location.try(&.column_number) || 1
       end
@@ -866,7 +866,7 @@ module Iyi
     end
 
     # iyi: `x = g()?` - Rust's propagation, which is postfix `!` here
-    # (SPEC.md III.1.2). The `?` opened a ternary, and the report came where
+    # (iyi SPEC III.1.2). The `?` opened a ternary, and the report came where
     # the ternary failed: "can't use variable name 'x' inside assignment" on
     # the next line, or "expecting token ':', not 'puts'" two lines down. A
     # ternary's `?` is followed by its true branch; an attached `?` with
@@ -884,7 +884,7 @@ module Iyi
       return unless nothing_follows
       text = subject.to_s
       attached = text.includes?('\n') || text.size > 60 ? "`f(x)!`" : "`#{text}!`"
-      refusal = SyntaxException.new("`?` starts a ternary here (`a ? b : c`); an error propagates with an attached `!`: #{attached} (SPEC.md III.1.2)",
+      refusal = SyntaxException.new("`?` starts a ternary here (`a ? b : c`); an error propagates with an attached `!`: #{attached} (iyi SPEC III.1.2)",
         location.line_number, location.column_number, @filename, 1)
       refusal.suggestion = "!"
       ::raise refusal
@@ -1108,7 +1108,7 @@ module Iyi
 
               A `defer` runs while the scope is already being left, and may be
               carrying an error of its own. Handle the failure here — `.or_panic`
-              or ignore it — see SPEC.md III.1.4.
+              or ignore it — see iyi SPEC III.1.4.
               MSG
           end
           check_void_value atomic, location
@@ -1366,7 +1366,7 @@ module Iyi
       IsA.new(atomic, type).at_end(end_location)
     end
 
-    # iyi: `defer f.close` (SPEC.md III.1.4).
+    # iyi: `defer f.close` (iyi SPEC III.1.4).
     #
     # Recognised by name, so `defer` is a reserved word in an iyi program and
     # only there — a Crystal file keeps it as an ordinary identifier.
@@ -1389,7 +1389,7 @@ module Iyi
       Defer.new(exp).at(location).at_end(exp)
     end
 
-    # iyi: `.or(default)` and `.or_panic` (SPEC.md III.1.3).
+    # iyi: `.or(default)` and `.or_panic` (iyi SPEC III.1.3).
     #
     # Recognised by name here, which is what "compiler-known" costs: `or` and
     # `or_panic` are reserved in an iyi program. Gated on `iyi?`, so a Crystal
@@ -1407,7 +1407,7 @@ module Iyi
           next_token_skip_space_or_newline
           unless @token.type.op_rparen?
             raise "`.or_panic` takes no argument: it panics with the error's own `message`; " \
-                  "for a default use `.or(value)` (SPEC.md III.1.3)", @token
+                  "for a default use `.or(value)` (iyi SPEC III.1.3)", @token
           end
           end_location = token_end_location
           next_token
@@ -1565,11 +1565,11 @@ module Iyi
       when .global?
         # iyi: the other library's advice, "use @@class_variables instead",
         # sent a program's shared count to a class variable, which the
-        # thread gate refuses once a thread names it (SPEC.md III.4.5). It
+        # thread gate refuses once a thread names it (iyi SPEC III.4.5). It
         # was said one column past the name.
         raise "iyi has no global variables: pass the value to what needs it, make one that never changes " \
               "a constant (`LIMIT = 10`), and keep a count threads share in an `Atomic(Int32)` or send values " \
-              "over a `Channel` (SPEC.md III.4.5)", @token
+              "over a `Channel` (iyi SPEC III.4.5)", @token
       when .op_dollar_tilde?, .op_dollar_question?
         location = @token.location
         var = Var.new(@token.to_s).at(location)
@@ -1921,8 +1921,8 @@ module Iyi
     # iyi: the Rust wrappers, and what is written in their place.
     IYI_RUST_WRAPPERS = {
       "Some" => "a value that may be nil is `T?`, and is the value itself - `Some(x)` is `x`, and `None` is `nil`",
-      "Ok"   => "a value is returned as it is - `Ok(x)` is `x` - and the return type names the errors beside it, `Int32 | ParseError` (SPEC.md III.1)",
-      "Err"  => "an error is a value of a type that implements `Error`, returned as it is: `return ParseError.new(\"bad\")`, with `impl Error for ParseError` (SPEC.md III.1)",
+      "Ok"   => "a value is returned as it is - `Ok(x)` is `x` - and the return type names the errors beside it, `Int32 | ParseError` (iyi SPEC III.1)",
+      "Err"  => "an error is a value of a type that implements `Error`, returned as it is: `return ParseError.new(\"bad\")`, with `impl Error for ParseError` (iyi SPEC III.1)",
     }
 
     def parse_custom_literal(type)
@@ -2354,7 +2354,7 @@ module Iyi
         end
         impls = (traits.empty? ? ["Trait"] : traits).map { |each_trait| "`impl #{each_trait} for #{name}`" }
         raise "a type implements a trait after its declaration, not in its header: #{impls.join(" and ")}, " \
-              "each holding that trait's methods (SPEC.md R-3)", location
+              "each holding that trait's methods (iyi SPEC R-3)", location
       end
 
       superclass = nil
@@ -2484,7 +2484,7 @@ module Iyi
           end
         end
         raise "module path segment '#{written}' has a `-`: a segment is lower-case snake_case, " \
-              "`#{written.tr("-", "_")}`, and the file is named the same (SPEC.md IV.6 #6)", @token
+              "`#{written.tr("-", "_")}`, and the file is named the same (iyi SPEC IV.6 #6)", @token
       end
       check_module_path_segment(segment)
     end
@@ -2498,7 +2498,7 @@ module Iyi
     end
 
     # iyi: a module path segment is `[a-z][a-z0-9]*` with single `_` between
-    # groups (SPEC.md IV.6 #6).
+    # groups (iyi SPEC IV.6 #6).
     #
     # A module is declared `app/greeter` and reached `App::Greeter`, and the
     # two notations are kept in step by making the mapping between them
@@ -2534,7 +2534,7 @@ module Iyi
           path and the type name have to determine each other: every segment \
           is a lower-case letter followed by letters and digits, with single \
           `_` between groups. Otherwise two paths can name one module — `v_1` \
-          and `v1` would both be `V1`. See SPEC.md IV.6 #6.
+          and `v1` would both be `V1`. See iyi SPEC IV.6 #6.
           MSG
       end
 
@@ -2554,7 +2554,7 @@ module Iyi
       header
     end
 
-    # iyi: `import std/json`, and `import github.com/user/lib/http` (SPEC.md
+    # iyi: `import std/json`, and `import github.com/user/lib/http` (iyi SPEC
     # III.7): a package path's host-shaped segments carry `.` and `-`, which
     # IV.6 #6's grammar refuses because those segments never become a type
     # name — the in-package path does that, and it is checked where the
@@ -2563,7 +2563,7 @@ module Iyi
     #
     # `::{a, b}` after the path brings those names into scope as well, and
     # `::*` every name the module exports: one keyword for a module and its
-    # names, where there were two (SPEC.md R-2b). The names are taken as
+    # names, where there were two (iyi SPEC R-2b). The names are taken as
     # written and matched as written, so the list may hold both method
     # names and type names - to the consumer they are just names.
     def parse_import
@@ -2593,7 +2593,7 @@ module Iyi
       if @token.value == Keyword::AS
         raise "an import is not renamed: after `import #{path.join('/')}` its names are reached as " \
               "`#{path.map(&.camelcase).join("::")}::name`, and `import #{path.join('/')}::{name}` " \
-              "brings one in unqualified (SPEC.md R-2b)", @token
+              "brings one in unqualified (iyi SPEC R-2b)", @token
       end
       node = ImportDecl.new(path, names, name_locations, glob)
       node.at(location)
@@ -2725,7 +2725,7 @@ module Iyi
         written = path.join('/')
         now = names ? "import #{written}::{#{names.join(", ")}}" : "import #{written}::*"
         message = "`using` is gone: one keyword loads a module and names what it brings into scope, " \
-                  "so this line is `#{now}` (SPEC.md R-2b). `iyi fix .` rewrites every `using` in a project, " \
+                  "so this line is `#{now}` (iyi SPEC R-2b). `iyi fix .` rewrites every `using` in a project, " \
                   "folding an `import` of the same module into it"
         # The edit, where the directive is one line: its span, replaced by the
         # line that replaces it - what `check -f json` and a quick fix apply.
@@ -2805,7 +2805,7 @@ module Iyi
           if decl.scopes?
             written = decl.path.join('/')
             raise "`pub import` re-exports #{written} whole, and names brought into scope are this " \
-                  "module's own - they never pass to its importers (SPEC.md R-1, R-2b). Write " \
+                  "module's own - they never pass to its importers (iyi SPEC R-1, R-2b). Write " \
                   "`pub import #{written}` to hand the module on, and `import #{written}::" \
                   "#{decl.glob? ? "*" : "{#{decl.names.try(&.join(", "))}}"}` beside it for the names this module uses",
               pub_location.line_number, pub_location.column_number
@@ -2885,7 +2885,7 @@ module Iyi
           if @token.type.ident? && @token.value.to_s.in?("const", "val", "final", "let", "var")
             raise "there is no `#{@token}`: a constant is `LIMIT = ...`, " \
                   "uppercase is what makes it one, and `pub LIMIT = ...` " \
-                  "is how a module exports it (SPEC.md R-2)",
+                  "is how a module exports it (iyi SPEC R-2)",
               @token.line_number, @token.column_number
           end
           # And the word Rust writes here, which is the language this fork
@@ -2906,7 +2906,7 @@ module Iyi
       node
     end
 
-    # iyi: `type Elem` in a trait, `type Elem = String` in an impl (SPEC.md II.6).
+    # iyi: `type Elem` in a trait, `type Elem = String` in an impl (iyi SPEC II.6).
     def parse_assoc_type
       doc = @token.doc
       next_token_skip_space_or_newline
@@ -2938,7 +2938,7 @@ module Iyi
       body
     end
 
-    # iyi: the associated types a trait declares (SPEC.md II.6).
+    # iyi: the associated types a trait declares (iyi SPEC II.6).
     #
     # Collected here rather than found while visiting, because the trait's type
     # is created before its body is visited and these are part of what it is.
@@ -2957,7 +2957,7 @@ module Iyi
       names
     end
 
-    # iyi: the answers an impl gives (SPEC.md II.6).
+    # iyi: the answers an impl gives (iyi SPEC II.6).
     private def collect_impl_assoc_types(body) : Hash(String, ASTNode)?
       types = nil
       each_assoc_type_decl(body) do |decl, location|
@@ -2995,7 +2995,7 @@ module Iyi
       decl.name_location || decl.location || @token.location
     end
 
-    # iyi: `trait Greet ... end` (SPEC.md R-3, II.6)
+    # iyi: `trait Greet ... end` (iyi SPEC R-3, II.6)
     def parse_trait_def(exported = false)
       @type_nest += 1
 
@@ -3019,7 +3019,7 @@ module Iyi
       skip_space
 
       # iyi: `trait Ord : Eq, Show` — the traits an implementer must already
-      # implement (SPEC.md II.6). `:` reads as "bounded by" here exactly as it
+      # implement (iyi SPEC II.6). `:` reads as "bounded by" here exactly as it
       # does in `forall T : Show` and `where Elem : Cmp`.
       supertraits = nil
       if @token.type.op_colon?
@@ -3058,8 +3058,8 @@ module Iyi
     end
 
     # iyi: `impl Greet for User ... end`, `impl Greet for Box(T) forall T`,
-    # `impl Show for Box(T) forall T : Show` (SPEC.md II.7),
-    # `impl Into(String) for User` (SPEC.md II.6)
+    # `impl Show for Box(T) forall T : Show` (iyi SPEC II.7),
+    # `impl Into(String) for User` (iyi SPEC II.6)
     def parse_impl_def
       @type_nest += 1
 
@@ -3117,7 +3117,7 @@ module Iyi
       end
       if iyi? && !@token.keyword?(:for) && (@token.type.newline? || @token.type.op_semicolon? || @token.type.eof?)
         raise "`impl #{trait_node}` has no trait: a type's own methods are written inside its declaration, " \
-              "`struct #{trait_node}` ... `end`, and `impl` is only `impl Trait for #{trait_node}` (SPEC.md R-3)", location
+              "`struct #{trait_node}` ... `end`, and `impl` is only `impl Trait for #{trait_node}` (iyi SPEC R-3)", location
       end
 
       check_ident :for
@@ -3218,7 +3218,7 @@ module Iyi
         str << '(' << bodiless.args.join(", ") << ')' unless bodiless.args.empty?
         str << " : " << bodiless.return_type if bodiless.return_type
       end
-      fix = what == "trait" ? "A method a trait requires has no body and says so: `abstract #{signature}` (SPEC.md II.6)." : "A method in an impl has a body, and its own `end`."
+      fix = what == "trait" ? "A method a trait requires has no body and says so: `abstract #{signature}` (iyi SPEC II.6)." : "A method in an impl has a body, and its own `end`."
       raise "`#{signature}` has no `end` of its own: it took the #{what}'s `end`, so the #{what} is still open at the end of the file. #{fix}", bodiless.location || @token.location
     end
 
@@ -3262,7 +3262,7 @@ module Iyi
       if iyi? && @token.type.eof? && @iyi_open.size == 1 && @iyi_module_headers.nil?
         raise "`module #{name}` opens a namespace that needs an `end`, and none is written; " \
               "a file's module header is its lower-case path, `module #{name.names.join('/', &.underscore)}`, " \
-              "with no `end`, and `#{name}` is how importers name it (SPEC.md R-1)", name_location
+              "with no `end`, and `#{name}` is how importers name it (iyi SPEC R-1)", name_location
       end
       check_ident :end
       iyi_closed
@@ -3599,7 +3599,7 @@ module Iyi
         result = Call.new("`", result).at(result)
       when .regex?
         # iyi: no compile-time pattern check. It was `Regex.error?`, which is
-        # pcre2, and pcre2 is off the compiler (SPEC.md III.10, Appendix B
+        # pcre2, and pcre2 is off the compiler (iyi SPEC III.10, Appendix B
         # #22), so the compiler can no longer promise pcre2's semantics and
         # stops pretending to check them. A macro pattern is compiled by
         # Iyi::Rx when the macro runs and refused there by name; a `.cr`
@@ -4325,7 +4325,7 @@ module Iyi
       end
 
       # iyi: `it` names the value being matched inside every branch
-      # (SPEC.md III.1.1). It has to be declared before the bodies are parsed,
+      # (iyi SPEC III.1.1). It has to be declared before the bodies are parsed,
       # because that is where an identifier is decided to be a variable rather
       # than a call. A tuple subject has no single value to name, so it is left
       # out rather than given one of its elements.
@@ -5433,19 +5433,19 @@ module Iyi
       if is_abstract
         ::raise SyntaxException.new("`where` can't bound a requirement: every impl answers an `abstract def`, whatever its " \
                                     "associated types are, so `where #{name} : #{bound}` would withhold nothing. `where` goes " \
-                                    "on a default method, which the types that don't meet it go without (SPEC.md II.6)",
+                                    "on a default method, which the types that don't meet it go without (iyi SPEC II.6)",
           location.line_number, location.column_number, @filename, 5)
       end
       return unless @type_nest == 0
       refusal = SyntaxException.new("`where` bounds an associated type of the trait a method is written in; " \
                                     "a method's own type parameter is introduced by `forall`, which takes the " \
-                                    "same bounds: `forall #{name} : #{bound}` (SPEC.md II.6, II.7)",
+                                    "same bounds: `forall #{name} : #{bound}` (iyi SPEC II.6, II.7)",
         location.line_number, location.column_number, @filename, 5)
       refusal.suggestion = "forall" unless free_vars
       ::raise refusal
     end
 
-    # iyi: `def max : Elem where Elem : Comparable` (SPEC.md II.6).
+    # iyi: `def max : Elem where Elem : Comparable` (iyi SPEC II.6).
     #
     # `forall` introduces a name and may bound it; `where` bounds a name that
     # is already in scope — an associated type of the enclosing trait. Keeping
@@ -5476,7 +5476,7 @@ module Iyi
     # iyi: `def area : Float64` with no body, inside a trait, and the next
     # `def` under it.
     #
-    # A requirement in a trait is spelled `abstract def` (SPEC.md II.6); a
+    # A requirement in a trait is spelled `abstract def` (iyi SPEC II.6); a
     # plain `def` opens a body, so the second `def` is read as nested and
     # the report is "can't define def inside def", which is true of the
     # parse and false of the mistake. Somebody arriving from a language
@@ -5488,12 +5488,12 @@ module Iyi
         can't define def inside def: the `def` above it has no `end`
 
         A method a trait requires of its implementers has no body and says
-        so - `abstract def name : Type` (SPEC.md II.6). A `def` with a body
+        so - `abstract def name : Type` (iyi SPEC II.6). A `def` with a body
         ends with `end`.
         MSG
     end
 
-    # iyi: `def sort!` (SPEC.md III.1.7, decision A).
+    # iyi: `def sort!` (iyi SPEC III.1.7, decision A).
     #
     # `!` is no longer part of a name, so by here it has been left as its own
     # token. After a `def` name there is nothing to propagate, and the author
@@ -5512,7 +5512,7 @@ module Iyi
         MSG
     end
 
-    # iyi: `def or` (SPEC.md III.1.3). `.or` and `.or_panic` are recognised
+    # iyi: `def or` (iyi SPEC III.1.3). `.or` and `.or_panic` are recognised
     # at the call site by name, so a method of either name can never be
     # called: `def or` compiled, and `A.new.or(5)` was then refused as a
     # recovery with "no member of App::Main::A implements `Error`".
@@ -5526,13 +5526,13 @@ module Iyi
       if @token.value == "group" && !iyi_prelude_file?
         raise "`group` is a reserved name in iyi: `group do ... end` is the task " \
               "group the compiler knows by name, so a method called `group` would " \
-              "be lowered as one (SPEC.md III.4.9)", @token
+              "be lowered as one (iyi SPEC III.4.9)", @token
       end
       return unless @token.value.in?("or", "or_panic")
 
       raise "`#{@token.value}` is a reserved name in iyi: `.#{@token.value}` is the " \
             "error recovery the compiler knows by name, so a method called " \
-            "`#{@token.value}` could never be called (SPEC.md III.1.3)", @token
+            "`#{@token.value}` could never be called (iyi SPEC III.1.3)", @token
     end
 
     # iyi: a file of the prelude: one beside the `prelude.iyi` of an `iyi/`
@@ -5570,7 +5570,7 @@ module Iyi
       raise <<-MSG, @token
         `#{call.name}!` is not a method here: `!` propagates an error, and takes no #{taken}
 
-        `!` can't be part of a name in iyi (SPEC.md III.1.7a), so the pair
+        `!` can't be part of a name in iyi (iyi SPEC III.1.7a), so the pair
         Crystal spells `#{call.name}` and `#{call.name}!` is spelled after the
         participle for the copy and with `_in_place` for the one that changes
         its receiver — `sorted`, `sort_in_place`, `sorted_by`, `sort_in_place_by`.
@@ -5583,8 +5583,8 @@ module Iyi
       "print"     => "`print x` writes without the line break, and a string interpolates where `{}` did: `print \"x is \#{x}\"`",
       "eprintln"  => "`stderr.puts x` writes a line to standard error, and a string interpolates where `{}` did: `\"x is \#{x}\"`",
       "format"    => "a string interpolates where `{}` did: `\"x is \#{x}\"`",
-      "panic"     => "`raise \"why\"` panics (SPEC.md III.1.4)",
-      "todo"      => "`raise \"not yet\"` panics (SPEC.md III.1.4)",
+      "panic"     => "`raise \"why\"` panics (iyi SPEC III.1.4)",
+      "todo"      => "`raise \"not yet\"` panics (iyi SPEC III.1.4)",
       "vec"       => "an array is its literal, `[1, 2, 3]`, and an empty one says its type, `[] of Int32`",
       "assert"    => "`assert x == 1, \"why\"` panics when the condition is false",
       "assert_eq" => "`assert_eq a, b, \"why\"` panics showing both values when they differ",
@@ -5598,7 +5598,7 @@ module Iyi
 
     # iyi: a detached `!` with nothing after it on its line: `v = g(x) !`.
     # It read as propagation after a `)` and as the negation of the next
-    # line otherwise. Only an attached `!` propagates (SPEC.md III.1.2), and
+    # line otherwise. Only an attached `!` propagates (iyi SPEC III.1.2), and
     # a detached one that negates nothing is the attached form misspelt.
     private def iyi_check_detached_bang(subject : ASTNode?) : Nil
       return unless iyi? && iyi_space_before_bang?
@@ -5616,11 +5616,11 @@ module Iyi
         a `!` with a space before it doesn't propagate: write it attached, #{attached}
 
         Only an attached `!` propagates an error, so that `f !x` keeps meaning
-        `f(!x)`, and this one has nothing after it to negate (SPEC.md III.1.2).
+        `f(!x)`, and this one has nothing after it to negate (iyi SPEC III.1.2).
         MSG
     end
 
-    # iyi: `macro method_missing` (SPEC.md III.3).
+    # iyi: `macro method_missing` (iyi SPEC III.3).
     #
     # It requires an open method set, and R-3 closes that by construction: a
     # type's methods are its own module's declarations plus its impls, all
@@ -5640,7 +5640,7 @@ module Iyi
         It needs a method set that is open to names nobody declared, and R-3
         closes that: a type's methods are what its module declares plus its
         impls. Use compile-time `responds_to?`, which is what Crystal code
-        reaches for anyway — see SPEC.md III.3.
+        reaches for anyway — see iyi SPEC III.3.
         MSG
     end
 
@@ -5657,7 +5657,7 @@ module Iyi
     end
 
     # Returns the free variable names and, for iyi, the trait each one is
-    # bounded by — `forall B : IntoBody` (SPEC.md II.7 rule 3). A bound is a
+    # bounded by — `forall B : IntoBody` (iyi SPEC II.7 rule 3). A bound is a
     # trait path and nothing else: there is no separate constraint language,
     # so what you can bound by is what you can implement.
     def parse_def_free_vars : {Array(String), Hash(String, ASTNode)?}
@@ -6172,7 +6172,7 @@ module Iyi
       message = "a body is not braced: `#{keyword} #{cond}` ends its line, the body follows on the next, and `end` closes it"
       if cond.is_a?(Call) && cond.name == "!=" && cond.args.first?.is_a?(NilLiteral) && cond.obj.to_s.starts_with?("err")
         message += ". An error is a value of the union a call returns, not a second result to test: " \
-                   "`g(x)!` propagates it, and `case` handles it (SPEC.md III.1.2)"
+                   "`g(x)!` propagates it, and `case` handles it (iyi SPEC III.1.2)"
       end
       raise message, @token
     end
@@ -6318,7 +6318,7 @@ module Iyi
            (assignment = args.try(&.first?)).is_a?(Assign) && (constant = assignment.target).is_a?(Path)
           raise "there is no `#{name}`: a constant is `#{constant} = ...`, " \
                 "uppercase is what makes it one, and `pub #{constant} = ...` " \
-                "is how a module exports it (SPEC.md R-2)", name_location
+                "is how a module exports it (iyi SPEC R-2)", name_location
         end
 
         # iyi: `fn main() {` and `func main() {`, the first line of a Rust
@@ -6335,7 +6335,7 @@ module Iyi
           end
           if name == "package" && inner.args.empty? && !inner.has_parentheses? && !inner.block
             raise "there is no `package`: a file's identity is its `module` header " \
-                  "(`module app/#{inner.name}`, SPEC.md R-1), and a program's entry file needs none", name_location
+                  "(`module app/#{inner.name}`, iyi SPEC R-1), and a program's entry file needs none", name_location
           end
         end
 
@@ -6345,7 +6345,7 @@ module Iyi
         # return-type mismatch on a top-level `def area`.
         if iyi? && !is_var && !has_parentheses && name.in?("interface", "protocol") && args && args.size == 1 && (required = args.first).is_a?(Path)
           raise "there is no `#{name}`: a set of required methods is a `trait` (`trait #{required}` with " \
-                "`abstract def name : Type` lines), implemented by `impl #{required} for T` (SPEC.md II.6)", name_location
+                "`abstract def name : Type` lines), implemented by `impl #{required} for T` (iyi SPEC II.6)", name_location
         end
 
         # iyi: `export def f` and `async def f`: a call whose argument is a
@@ -6354,10 +6354,10 @@ module Iyi
         if iyi? && !is_var && !has_parentheses && args && args.size == 1 && args.first.is_a?(Def)
           case name
           when "export"
-            raise "there is no `export`: `pub def f : Int32` marks a def as part of the module's surface (SPEC.md R-2)", name_location
+            raise "there is no `export`: `pub def f : Int32` marks a def as part of the module's surface (iyi SPEC R-2)", name_location
           when "async"
             raise "there is no `async`: concurrency is a group - `group do |g|`, a line `t = g.spawn { fetch }`, then `end` - " \
-                  "and `t.value` waits for a task's answer (SPEC.md III.4)", name_location
+                  "and `t.value` waits for a task's answer (iyi SPEC III.4)", name_location
           end
         end
       else
@@ -6399,7 +6399,7 @@ module Iyi
           call = Call.new(name, (args || [] of ASTNode), block, block_arg, named_args, global)
           call.name_location = name_location
           call.has_parentheses = has_parentheses
-          # iyi: `group do ... end` is compiler-known (SPEC.md III.4.9) —
+          # iyi: `group do ... end` is compiler-known (iyi SPEC III.4.9) —
           # the typed expansion needs to know this is *the* group, not a
           # method sharing the name; recognising it here is what makes
           # `group` a reserved name in an iyi file, and only there.

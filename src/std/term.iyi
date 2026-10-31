@@ -33,7 +33,7 @@
 # the same way. The mode the terminal had before is saved and written back
 # by a `defer`, so it is restored when the block returns, when a `!` in it
 # returns early and when it panics — the panic path runs pending defers
-# before the task dies (SPEC.md III.1.4), which is what Crystal's
+# before the task dies (iyi SPEC III.1.4), which is what Crystal's
 # `begin/ensure` around the same calls gives `IO#raw`. A stream that is
 # not a terminal is a `TermError` and the block does not run: standard
 # input redirected from a file is a condition a program meets, not a

@@ -14,7 +14,7 @@ of the three moves together:
 front end moves and startup does not, the gate is measuring a machine it
 cannot see, and it says NOT MET where it means UNDECIDED.
 
-The fingerprint is here because every timing README.md and SPEC.md publish is
+The fingerprint is here because every timing README.md and iyi SPEC publish is
 quoted with a machine attached, and no script in `bench/` emitted one: the
 machine was typed in by hand, and two of the published sets name two different
 machines. What a reader needs in order to re-take one of those figures is what

@@ -3,7 +3,7 @@
 This is a fork of [Crystal](https://github.com/crystal-lang/crystal), and it is
 pre-release. If your issue is with Crystal the language, it belongs in Crystal's
 tracker, not here; what belongs here is anything about the rules in
-[SPEC.md](../../../SPEC.md), the `.iyimod` artifact, or the compiler's behaviour on a
+[SPEC.md](SPEC.md), the `.iyimod` artifact, or the compiler's behaviour on a
 `.iyi` file.
 
 ## Building it

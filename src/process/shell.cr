@@ -50,7 +50,7 @@ class Process
 
   # iyi: the `matches? %r([^a-zA-Z0-9%+,\-./:=@_])` that `quote_posix` used,
   # byte by byte, so that quoting one linker argument stops pulling PCRE2 into
-  # every binary that shells out (SPEC.md III.10, Appendix B #22). Bytes rather
+  # every binary that shells out (iyi SPEC III.10, Appendix B #22). Bytes rather
   # than chars because the safe set is ASCII: every byte of a multi-byte
   # character is >= 0x80 and unsafe on its own terms, the same verdict the
   # regex reached, and this way nothing is decoded and no intermediate string

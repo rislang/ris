@@ -808,7 +808,7 @@ module Iyi
     end
 
     # A `defer` a macro writes covers the rest of the scope the macro
-    # stands in, as the same line written there does (SPEC.md III.1.4).
+    # stands in, as the same line written there does (iyi SPEC III.1.4).
     # The normalizer leaves it standing in the expansion
     # (`Normalizer#macro_expansion`); here the rest of the list moves into
     # the expansion, the expansion takes the macro's place, and the defers
@@ -1189,7 +1189,7 @@ module Iyi
         node.raise <<-MSG
           `yield` can't run in a `defer`
 
-          A panic runs what was deferred from a proc the cleanup is registered as (SPEC.md III.1.4), and a proc has no block to yield to. Capture the block (`&block`) and write `defer block.call`.
+          A panic runs what was deferred from a proc the cleanup is registered as (iyi SPEC III.1.4), and a proc has no block to yield to. Capture the block (`&block`) and write `defer block.call`.
           MSG
       end
 
@@ -2085,7 +2085,7 @@ module Iyi
           node.raise <<-MSG
             `!` can't propagate out of a module's initialisation
 
-            A module's top-level expressions run when the module is initialised, and there is nothing there to return to. If it can fail it is not initialisation, it is work — put it in a function the program calls when it is ready to handle the failure. See SPEC.md III.5.
+            A module's top-level expressions run when the module is initialised, and there is nothing there to return to. If it can fail it is not initialisation, it is work — put it in a function the program calls when it is ready to handle the failure. See iyi SPEC III.5.
             MSG
         end
         node.raise "can't return from top level"
@@ -2099,7 +2099,7 @@ module Iyi
           node.raise <<-MSG
             `!` can't propagate out of a block that runs as a proc
 
-            `!` in a block returns from the method the block is written in (SPEC.md III.1.2), and this block is captured: it is kept and called later, maybe by a task, after that method may have returned. Answer the error as the block's value, `next` it, and read it where the value arrives, through `task.value` or the typed group; or handle it here.
+            `!` in a block returns from the method the block is written in (iyi SPEC III.1.2), and this block is captured: it is kept and called later, maybe by a task, after that method may have returned. Answer the error as the block's value, `next` it, and read it where the value arrives, through `task.value` or the typed group; or handle it here.
             MSG
         end
         node.raise "can't return from captured block, use next"
@@ -2126,7 +2126,7 @@ module Iyi
     # `!` there dropped the error, and either a `!` or a `return` left every
     # field it had not reached yet unassigned: `C.new("x")` with `@v =
     # parse(s)!` answered a `C` whose `v` read 0 and whose `name.size` was a
-    # memory fault (SPEC.md III.1.2 has the error go to the caller, and here
+    # memory fault (iyi SPEC III.1.2 has the error go to the caller, and here
     # there is none). A `return` after every field is set is still an early
     # exit, and `std/regex`'s `RxRuns` keeps one.
     private def iyi_check_initialize_exit(node : Return)
@@ -2135,7 +2135,7 @@ module Iyi
         node.raise <<-MSG
           `!` can't propagate out of `initialize`
 
-          `new` answers the object whatever `initialize` returns, so the #{error} would be dropped and the object built with the fields not assigned yet left uninitialized. Decide before building: write a constructor `def self.build(...) : #{scope} | #{error}` that propagates with `!` and then calls `new` with values that cannot fail — see SPEC.md III.1.2.
+          `new` answers the object whatever `initialize` returns, so the #{error} would be dropped and the object built with the fields not assigned yet left uninitialized. Decide before building: write a constructor `def self.build(...) : #{scope} | #{error}` that propagates with `!` and then calls `new` with values that cannot fail — see iyi SPEC III.1.2.
           MSG
       end
 
@@ -2153,7 +2153,7 @@ module Iyi
       node.raise <<-MSG
         `return` can't leave `initialize` before #{unassigned.join(", ")} #{unassigned.size == 1 ? "is" : "are"} assigned
 
-        `new` answers the object whatever `initialize` returns, so the object would be built with #{unassigned.size == 1 ? "that field" : "those fields"} uninitialized. Assign #{unassigned.size == 1 ? "it" : "them"} first, or decide before building with a constructor `def self.build(...) : #{scope} | E` that calls `new` only once it can — see SPEC.md III.1.2.
+        `new` answers the object whatever `initialize` returns, so the object would be built with #{unassigned.size == 1 ? "that field" : "those fields"} uninitialized. Assign #{unassigned.size == 1 ? "it" : "them"} first, or decide before building with a constructor `def self.build(...) : #{scope} | E` that calls `new` only once it can — see iyi SPEC III.1.2.
         MSG
     end
 
@@ -2174,7 +2174,7 @@ module Iyi
     end
 
     # iyi: `expr!`, `.or` and `.or_panic` all expand to an `is_a?(::Error)`, and
-    # this is where their operand is judged (SPEC.md III.1.1, III.1.3). Both
+    # this is where their operand is judged (iyi SPEC III.1.1, III.1.3). Both
     # degenerate cases are rejected rather than given a surprising meaning —
     # without this, any of the three on a type with no error member compiles and
     # silently does nothing, which is the opposite of what anyone writes it for.
@@ -2190,7 +2190,7 @@ module Iyi
       if construct == "end!"
         if errors.empty?
           node.raise "`end!` has no error to propagate: this group answers its block's last expression, #{type}, and no member of it implements `Error`. " \
-                     "Only a block that ends in a `spawn` answers its tasks' tuple and their errors — see SPEC.md III.4.9"
+                     "Only a block that ends in a `spawn` answers its tasks' tuple and their errors — see iyi SPEC III.4.9"
         end
         construct = "!"
       end
@@ -2198,7 +2198,7 @@ module Iyi
       if errors.empty?
         verb = construct == "!" ? "propagate" : "recover"
         section = construct == "!" ? "III.1" : "III.1.3"
-        message = "`#{construct}` has no error to #{verb}: no member of #{type} implements `Error`. `#{construct}` is for a union with an error member — see SPEC.md #{section}"
+        message = "`#{construct}` has no error to #{verb}: no member of #{type} implements `Error`. `#{construct}` is for a union with an error member — see iyi SPEC #{section}"
         # `xs.uniq!`, `s.upcase!`: the other library's in-place spelling of
         # a method whose plain name is here, so the `!` reached this rule
         # and the naming rule `sort!` and `map!` are told was never said.
@@ -2206,7 +2206,7 @@ module Iyi
           name, receiver = bang
           in_place = "#{name}_in_place"
           instead = type.has_def?(in_place) ? "call `#{receiver}.#{in_place}`, which changes it" : "reassign the copy, `#{receiver} = #{receiver}.#{name}`"
-          message += "\n`#{name}!` is the other library's in-place spelling, and `!` cannot end a name here (SPEC.md III.1.7a): #{instead}"
+          message += "\n`#{name}!` is the other library's in-place spelling, and `!` cannot end a name here (iyi SPEC III.1.7a): #{instead}"
         end
         node.raise message
       end
@@ -2234,7 +2234,7 @@ module Iyi
                        "`#{enclosing.name}`, and `#{enclosing.name}` returns " \
                        "#{declared}, which has no error member. Give it one " \
                        "(`#{declared} | #{errors.first}`), or handle the error here " \
-                       "with `case` — see SPEC.md III.1"
+                       "with `case` — see iyi SPEC III.1"
           end
 
           # iyi: and somewhere for *this* error. One the signature does not
@@ -2249,7 +2249,7 @@ module Iyi
                        "#{declared}, which does not include #{missing.size == 1 ? "it" : "them"}. " \
                        "There is no implicit conversion: add #{missing.size == 1 ? "it" : "them"} " \
                        "to the signature (an alias keeps a long one short), or handle " \
-                       "the error here with `case` — see SPEC.md III.1.2 and III.1.6"
+                       "the error here with `case` — see iyi SPEC III.1.2 and III.1.6"
           end
         end
       end
@@ -2257,11 +2257,11 @@ module Iyi
       if values.empty?
         case construct
         when "!"
-          node.raise "`!` can never produce a value: every member of #{type} implements `Error`. A function that never succeeds returns `NoReturn` — see SPEC.md III.1.1"
+          node.raise "`!` can never produce a value: every member of #{type} implements `Error`. A function that never succeeds returns `NoReturn` — see iyi SPEC III.1.1"
         when ".or"
-          node.raise "`.or` can only ever return its default: every member of #{type} implements `Error`. A function that never succeeds returns `NoReturn` — see SPEC.md III.1.3"
+          node.raise "`.or` can only ever return its default: every member of #{type} implements `Error`. A function that never succeeds returns `NoReturn` — see iyi SPEC III.1.3"
         else
-          node.raise "`.or_panic` can never produce a value: every member of #{type} implements `Error`. A function that never succeeds returns `NoReturn` — see SPEC.md III.1.3"
+          node.raise "`.or_panic` can never produce a value: every member of #{type} implements `Error`. A function that never succeeds returns `NoReturn` — see iyi SPEC III.1.3"
         end
       end
     end
@@ -2845,7 +2845,7 @@ module Iyi
       node.raise <<-MSG
         `#{keyword}` can't leave a `defer`
 
-        A `defer` runs while its scope is already being left — by a return, by `!`, by a panic — so its cleanup has no answer of its own to give and nowhere to jump to. Let it run to its end, and answer from the scope. See SPEC.md III.1.4.
+        A `defer` runs while its scope is already being left — by a return, by `!`, by a panic — so its cleanup has no answer of its own to give and nowhere to jump to. Let it run to its end, and answer from the scope. See iyi SPEC III.1.4.
         MSG
     end
 
@@ -3391,7 +3391,7 @@ module Iyi
       # iyi: a `rescue` that never runs, and an `ensure` a panic skips.
       # `begin ... rescue ... end` compiled, and the program died of the
       # panic with `caught` never printed: an error is a value the caller
-      # handles (SPEC.md III.1), and a panic unwinds by registry to a task
+      # handles (iyi SPEC III.1), and a panic unwinds by registry to a task
       # boundary (III.1.4), through no `rescue` on the way. `ensure` ran on
       # the ordinary exit and not on the panic, which is the half of
       # cleanup that matters; `defer` runs on both. Refused in an iyi file
@@ -3404,11 +3404,11 @@ module Iyi
       # body does, and `def foo ... rescue` was reported at `raise "x"`.
       if @program.iyi_prelude? && !node.iyi_defer? && node.location.try(&.original_filename.try(&.ris_source?))
         if node.rescues || node.else
-          (node.rescues.try(&.first) || node).raise "iyi has no exceptions to rescue: an error is a value the caller handles (SPEC.md III.1), " \
+          (node.rescues.try(&.first) || node).raise "iyi has no exceptions to rescue: an error is a value the caller handles (iyi SPEC III.1), " \
                                                     "and a panic is caught at a task boundary (III.1.4), never here - this `rescue` would not run. " \
                                                     "Return the error, or read the task's `value`"
         elsif node.ensure && (at = node.ensure_location || node.location)
-          ::raise TypeException.new("iyi has no `ensure`: a panic unwinds by registry and skips it (SPEC.md III.1.4). " \
+          ::raise TypeException.new("iyi has no `ensure`: a panic unwinds by registry and skips it (iyi SPEC III.1.4). " \
                                     "Write `defer`, which runs on return, on `!` and on a panic",
             at.line_number, at.column_number, at.filename, "ensure".size)
         end

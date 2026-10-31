@@ -111,7 +111,7 @@ class Iyi::CodeGenVisitor
         call_arg = llvm_nil if arg.type.nil_type?
         # iyi: a `.iyimod` declaration is one symbol, so the semantic pass keys
         # its call on the parameter as *declared* rather than on what this call
-        # site passes (SPEC.md III.6). That makes the parameter the wider of the
+        # site passes (iyi SPEC III.6). That makes the parameter the wider of the
         # two, and widening is `upcast` — `downcast` is for the other direction
         # and says `BUG: trying to downcast IO+ <- IO::FileDescriptor` when
         # handed this one. It is the same conversion `.as(IO)` performs by hand
@@ -554,7 +554,7 @@ class Iyi::CodeGenVisitor
     # would replace a call to the module's code with nothing at all, which is
     # the one way this design can be wrong quietly rather than loudly: the
     # program links and computes the wrong answer. The body is not simple, it
-    # is elsewhere (SPEC.md IV.1g).
+    # is elsewhere (iyi SPEC IV.1g).
     return false if target_def.iyi_from_artifact?
 
     unless @program.iyi_exported_owners.empty?

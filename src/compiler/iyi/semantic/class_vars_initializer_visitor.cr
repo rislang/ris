@@ -68,7 +68,7 @@ module Iyi
         end
 
         # iyi: the value as it was *written*, before anything below expands it
-        # (SPEC.md IV.2). A class variable's value has to run on the far side of
+        # (iyi SPEC IV.2). A class variable's value has to run on the far side of
         # an artifact, so it travels as source — and by the time one is written
         # `CleanupTransformer` has replaced this node with what the literal
         # expanded to. `@@nums = [1, 2, 3]` reached the format as five

@@ -79,7 +79,7 @@
 # exchange's answer. A URL with an address for its host asks nothing.
 # Each request goes by `HTTP.open_at` to that address, so no exchange
 # looks anything up: a resolver asking this upstream is never asked by
-# it in turn (TAPE_SPEC 3.5: a lookup inside the exchange would be a call
+# it in turn (SPEC 3.5: a lookup inside the exchange would be a call
 # cycle carrying the resolver's growing answers). Both transports connect
 # by `IyiSocket.connect_address` for the same reason.
 

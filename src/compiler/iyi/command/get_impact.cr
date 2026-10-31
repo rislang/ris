@@ -1,5 +1,5 @@
 # iyi: what a `get` that moved a requirement changed in what this project
-# uses (SPEC.md III.7).
+# uses (iyi SPEC III.7).
 #
 #     what the move changes in what this project uses:
 #       example.com/liba v0.1.0 -> v0.2.0

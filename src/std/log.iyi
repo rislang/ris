@@ -413,7 +413,7 @@ end
 #       ...
 #     end
 #
-# The writer task lives in a group around the block (TAPE_SPEC 5.1): the
+# The writer task lives in a group around the block (SPEC 5.1): the
 # backend is only had through `open`, and `close`, at the block's end or
 # earlier, waits for every queued entry to be written; an entry written
 # after it is refused. The board is one queue per message type, so one

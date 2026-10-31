@@ -285,7 +285,7 @@ panics_with "a zip with a shorter collection" zip_shorter "index 3 out of range 
 echo
 echo "== the library is iyi all the way down"
 # Three modules reach the platform themselves. Two were written before the
-# rule: `socket` (raw syscalls on Linux, libSystem on darwin, SPEC.md III.9)
+# rule: `socket` (raw syscalls on Linux, libSystem on darwin, iyi SPEC III.9)
 # and `time` (the clocks). `math` may name the three LLVM hardware intrinsics
 # `llvm.sqrt`, `llvm.copysign` and `llvm.fma` (the instruction, not libm).
 #
@@ -354,7 +354,7 @@ echo "== the library is iyi all the way down"
 # too, against the libraries the platform supplies.
 PLATFORM_LIBS='LibC|LibSystem|LibKernel32|LibWasi|LibLLVMMath|LibAdvapi32|LibWs2_32|LibCrypt32|LibSecurity|LibCoreFoundation'
 # The `@[Link]`s an exempt module may carry: the DLLs Windows itself ships,
-# named in SPEC.md III.10's inventory. `std/random` is here for `advapi32` —
+# named in iyi SPEC III.10's inventory. `std/random` is here for `advapi32` —
 # the OS entropy `Random::Secure` reads is `RtlGenRandom`, and Windows has
 # no kernel32 name for it — and `std/socket` for it too, the registry its
 # resolver reads the name servers from, and `std/user` for the account name

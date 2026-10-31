@@ -1,7 +1,7 @@
 # iyi: `crystal mod dump FILE` — read a `.iyimod` back as text.
 #
 # Under the eventual `iyi` binary this reads `iyi mod dump`, which is the
-# spelling SPEC.md IV.1 uses. It is required rather than optional there, and the
+# spelling iyi SPEC IV.1 uses. It is required rather than optional there, and the
 # reason is worth keeping in view: an opaque cache format is one nobody can
 # debug, and a build cache that cannot be inspected is a build cache that gets
 # distrusted and disabled.
@@ -66,7 +66,7 @@ class Iyi::Command
                                  the interface hash they are keyed by
 
     A .iyimod is a module's compiled interface: what another module reads
-    instead of this one's source (SPEC.md Part IV). Produced by
+    instead of this one's source (iyi SPEC Part IV). Produced by
     `#{Command.program_name} build --emit-iyimod DIR`.
     USAGE
   end
@@ -201,7 +201,7 @@ class Iyi::Command
   #
   # The question every consumer of a module asks and nobody could ask the
   # artifact: a change that leaves the interface alone cannot make a consumer
-  # recompile, and one that does not is the only kind that can (SPEC.md IV.3).
+  # recompile, and one that does not is the only kind that can (iyi SPEC IV.3).
   # The three hashes already answer it — they are in `dump` — and what was
   # missing was a command that compares two files and says which of the three
   # moved.

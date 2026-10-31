@@ -1,6 +1,6 @@
 # Arbitrary precision numbers: BigInt, BigDecimal, BigRational and BigFloat.
 #
-# Everything here is iyi all the way down: no GMP, no libc, no `lib` (SPEC.md
+# Everything here is iyi all the way down: no GMP, no libc, no `lib` (iyi SPEC
 # III.9, III.10). The module refuses what it cannot answer with a sentence and
 # exits 1: division and modulo by zero, a negative exponent, a base outside
 # 2..36, a digit the base does not have, a value that does not fit the integer

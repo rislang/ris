@@ -36,7 +36,7 @@ class Iyi::Def
 
     retain_body = block_arity || splat_index || double_splat || assigns_special_var? || macro_def? || args.any? { |arg| arg.default_value && arg.restriction }
 
-    # iyi: a def read from a `.iyimod` has no body to retain (SPEC.md IV.1).
+    # iyi: a def read from a `.iyimod` has no body to retain (iyi SPEC IV.1).
     #
     # It is a header: the machine code is in the artifact and the call reaches
     # it by symbol. Retaining the body copies `Nop` and drops the call on the

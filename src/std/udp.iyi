@@ -5,7 +5,7 @@
 # Address resolution:
 # getaddrinfo is the standard route in libc, but on Linux it pulls in libc.so,
 # dynamic NSS modules (libnss_dns, libnss_files), and resolver state, which destroys
-# the zero-undefined-symbol dependency floor (SPEC.md III.9).
+# the zero-undefined-symbol dependency floor (iyi SPEC III.9).
 # By parsing numeric IPv4 dotted-decimal and IPv6 strings (and mapping "localhost" to
 # 127.0.0.1) in pure iyi arithmetic without libc, Linux programs retain raw syscall
 # purity (zero undefined symbols) and Darwin programs only link standard socket symbols
@@ -13,7 +13,7 @@
 #
 # Concurrency: every receive is `MSG_DONTWAIT`, and when nothing is queued
 # the calling task parks on the descriptor the way `std/socket` does
-# (SPEC.md III.4.2) - under the runtime on the poller, without one on a
+# (iyi SPEC III.4.2) - under the runtime on the poller, without one on a
 # `poll`. So `receive_from` answers `T | Cancelled`: `!` passes a cancelled
 # task through, `.or_panic` refuses it at the top level, and a socket
 # closed by another task under a parked receive answers it too. The `?`

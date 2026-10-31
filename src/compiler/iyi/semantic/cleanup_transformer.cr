@@ -720,7 +720,7 @@ module Iyi
       end
     end
 
-    # ris: TAPE_SPEC 3.2 for a task's captures. A value made in an
+    # ris: SPEC 3.2 for a task's captures. A value made in an
     # explicit `tape` block ends with it; a task spawned there into a group
     # opened outside it may run after, so it may not capture a local the
     # block assigns. A group opened inside the block joins before it ends.
@@ -865,7 +865,7 @@ module Iyi
     end
 
     # iyi: a block that crosses a `Share` boundary may capture only `Share`
-    # values (SPEC.md III.4.4). Three blocks cross one. `IyiThread.start { }`'s
+    # values (iyi SPEC III.4.4). Three blocks cross one. `IyiThread.start { }`'s
     # runs on another thread (III.4.11), and `IyiGroup#spawn_parallel { }`'s
     # may (III.4.13): a parallel task is started by whichever pool worker is
     # free, so it is held to exactly what a thread's block is. And the block
@@ -913,7 +913,7 @@ module Iyi
                   else
                     "the block #{name}##{target_def.name} runs behind the #{name}'s lock"
                   end
-        consequence = "whatever the block can reach, the value behind the lock can reach, and the lock no longer guards it (SPEC.md III.4.4)"
+        consequence = "whatever the block can reach, the value behind the lock can reach, and the lock no longer guards it (iyi SPEC III.4.4)"
         check_share_constants(a_def, subject, consequence)
         check_share_class_var_types(a_def, subject, consequence)
       elsif thread
@@ -1008,12 +1008,12 @@ module Iyi
     # iyi: who the two parties to a shared cell are, in the sentences the
     # thread check and the parallel task's check refuse one with.
     record ShareBoundary, subject : String, local_owner : String, pair : String, again : String, after : String,
-      consequence : String = "(SPEC.md III.4.4)",
-      race : String = "a data race (SPEC.md III.4.4)",
+      consequence : String = "(iyi SPEC III.4.4)",
+      race : String = "a data race (iyi SPEC III.4.4)",
       cure : String = "keep the value in an `Atomic`, or in one owner task that the others send RisBoard messages to"
 
     # ris: a local task runs on its spawner's thread, but it is still a
-    # task of its own (TAPE_SPEC 5.1): it captures only Share values,
+    # task of its own (SPEC 5.1): it captures only Share values,
     # never a mutable borrow of its spawner's state or a resource.
     LOCAL_BOUNDARY = ShareBoundary.new(
       subject: "the block spawn runs as another task",
@@ -1021,12 +1021,12 @@ module Iyi
       pair: "the task and the code that spawned it",
       again: "spawns the task again",
       after: "the task was spawned",
-      consequence: "a task captures only Share values or a copy it makes itself; pass a Copyable value through RisBoard (post/take), or open the resource inside the task (TAPE_SPEC 5.1)",
-      race: "a mutable borrow across tasks (TAPE_SPEC 5.1)",
+      consequence: "a task captures only Share values or a copy it makes itself; pass a Copyable value through RisBoard (post/take), or open the resource inside the task (SPEC 5.1)",
+      race: "a mutable borrow across tasks (SPEC 5.1)",
       cure: "send the value through RisBoard (post/take), or answer it from the task's `value`")
 
     # ris: a value the spawner hands to a local task and never reads again
-    # is the task's alone, as a resource opened in it would be (TAPE_SPEC
+    # is the task's alone, as a resource opened in it would be (SPEC
     # 5.1): `g.spawn { serve(client) }` with no later `client`. Spawned in a
     # loop or a block that runs again, the cell is the next one's too.
     private def handed_off?(start : Call, captured : Var, meta : MetaVar) : Bool
@@ -1040,14 +1040,14 @@ module Iyi
       return false unless walk.found_start?
       if copy = walk.aliases.first?
         name = copy.target.to_s == captured.name ? copy.value.to_s : copy.target.to_s
-        copy.raise "`#{copy.target} = #{copy.value}` keeps a second name for the value handed to the task spawned at line #{start.location.try(&.line_number)}: the task owns it (TAPE_SPEC 5.1), so `#{name}` would reach it while the task runs. Use `#{captured.name}` alone, or open another resource for `#{name}`"
+        copy.raise "`#{copy.target} = #{copy.value}` keeps a second name for the value handed to the task spawned at line #{start.location.try(&.line_number)}: the task owns it (SPEC 5.1), so `#{name}` would reach it while the task runs. Use `#{captured.name}` alone, or open another resource for `#{name}`"
       end
       walk.passed.each do |call, index|
         next unless via = KeptArgument.new(@program).keeps?(call, index)
-        call.raise "`#{call}` may keep `#{captured.name}` (through `#{via}`) before it is handed to the task spawned at line #{start.location.try(&.line_number)}: the task owns it (TAPE_SPEC 5.1), so what the call kept would reach it while the task runs. Make the call inside the task, or give the call another resource of its own"
+        call.raise "`#{call}` may keep `#{captured.name}` (through `#{via}`) before it is handed to the task spawned at line #{start.location.try(&.line_number)}: the task owns it (SPEC 5.1), so what the call kept would reach it while the task runs. Make the call inside the task, or give the call another resource of its own"
       end
       if use = walk.uses.first?
-        use.raise "`#{captured.name}` is read here, after it was handed to the task spawned at line #{start.location.try(&.line_number)}: the task owns it now (TAPE_SPEC 5.1). Use it only inside the task, or hand the task a copy"
+        use.raise "`#{captured.name}` is read here, after it was handed to the task spawned at line #{start.location.try(&.line_number)}: the task owns it now (SPEC 5.1). Use it only inside the task, or hand the task a copy"
       end
       # Only `group do |g|` runs its block once; any other block or loop
       # may spawn again with the same cell.
@@ -1134,7 +1134,7 @@ module Iyi
     # so it is no variable the closure lists, and a block reading only
     # constants is no closure at all: `COUNTS = [0]` with `COUNTS[0] += 1`
     # run a million times in the block and a million by its starter
-    # compiled and printed 1061337 (SPEC.md III.4.5). Each constant the
+    # compiled and printed 1061337 (iyi SPEC III.4.5). Each constant the
     # block, its inlined blocks and its procs name is asked what a captured
     # variable is. One that a method the block calls reads is reached
     # through the call, and is not seen here.
@@ -1145,12 +1145,12 @@ module Iyi
         # Program roots are frozen by TapeProgramChecker in threaded code.
         next if TapeChecker.tape_in(@program, type)
         if why = Iyi::Share.reason(type)
-          path.raise "#{boundary.subject} names the constant `#{path} : #{type}`, which is not Share: #{why} (SPEC.md III.4.5)"
+          path.raise "#{boundary.subject} names the constant `#{path} : #{type}`, which is not Share: #{why} (iyi SPEC III.4.5)"
         end
       end
     end
 
-    # ris: TAPE_SPEC 5.1 checks reached program state transitively. A
+    # ris: SPEC 5.1 checks reached program state transitively. A
     # method the task calls, or one that method calls, may write a class
     # variable or change a constant's value: a cell the task and its
     # spawner (or two tasks) share although the block's text names
@@ -1170,7 +1170,7 @@ module Iyi
               end
       node.raise "#{boundary.subject} changes `#{state}` #{where}: program " \
                  "state a task reaches has no writer after its initializer " \
-                 "(TAPE_SPEC 5.1). Keep the state in one task and send " \
+                 "(SPEC 5.1). Keep the state in one task and send " \
                  "changes through RisBoard (post/take), answer it from the " \
                  "task's `value`, or keep it in an `Atomic`"
     end
@@ -1372,7 +1372,7 @@ module Iyi
       end
     end
 
-    # iyi: a class variable is module-level state as a constant is (SPEC.md
+    # iyi: a class variable is module-level state as a constant is (iyi SPEC
     # III.4.5), named in the block's own text with nothing the closure
     # lists: a class method whose thread block and starter each ran
     # `@@count += 1` two million times compiled, and printed 2548908 and
@@ -1384,7 +1384,7 @@ module Iyi
     def check_thread_class_vars_share(a_def : Def, boundary : ShareBoundary) : Nil
       named = NamedClassVars.new
       a_def.body.accept named
-      advice = "so every thread that reaches it shares one mutable cell: a data race (SPEC.md III.4.5). Keep the value in an `Atomic`, or in one owner task that the others send RisBoard messages to"
+      advice = "so every thread that reaches it shares one mutable cell: a data race (iyi SPEC III.4.5). Keep the value in an `Atomic`, or in one owner task that the others send RisBoard messages to"
       named.vars.each do |class_var, var|
         next if var.thread_local?
         next if var.type?.try { |type| TapeChecker.tape_in(@program, type) }
@@ -1405,7 +1405,7 @@ module Iyi
         type = var.type?
         next unless type
         if why = Iyi::Share.reason(type)
-          class_var.raise "#{boundary.subject} names the class variable `#{class_var.name} : #{type}`, which is not Share: #{why} (SPEC.md III.4.5)"
+          class_var.raise "#{boundary.subject} names the class variable `#{class_var.name} : #{type}`, which is not Share: #{why} (iyi SPEC III.4.5)"
         end
       end
     end
@@ -1446,7 +1446,7 @@ module Iyi
     # starts the thread. A name is the variable only where the innermost
     # scope's table says so: a block's own variable of the same name is
     # another cell.
-    # ris: whether a call keeps its argument at *index* (TAPE_SPEC 5.1): a
+    # ris: whether a call keeps its argument at *index* (SPEC 5.1): a
     # program method that stores it in a field, a class variable or a
     # collection, returns it, or hands it to a call that keeps it. std's
     # and the runtime's methods are not read: one given the value keeps

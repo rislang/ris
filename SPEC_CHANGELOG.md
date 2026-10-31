@@ -1,8 +1,19 @@
-# TAPE_SPEC.md changelog
+# SPEC.md changelog
 
-Every change to TAPE_SPEC.md gets an entry here in the same commit: date,
+Every change to SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
-one.
+one. Entries before 2026-10-31 name the file by its old name, TAPE_SPEC.md.
+
+## 2026-10-31: TAPE_SPEC.md is ris's SPEC.md
+
+* Was: TAPE_SPEC.md held the tape rules beside iyi's SPEC.md, which
+  stayed at the root as the language reference.
+* Now: TAPE_SPEC.md is SPEC.md, ris's specification; rule numbers are
+  unchanged and are cited as SPEC 1.5. iyi's draft is archived in
+  doc/archive/iyi/SPEC.md and cited in code as "iyi SPEC III.4".
+* Why: the tape rules became the rules every ris program follows (every
+  scope frees, results built in the caller's destination); they are the
+  language's specification, not a side document to iyi's.
 
 ## 2026-10-31: every scope frees; refusal replaces silent keeping
 

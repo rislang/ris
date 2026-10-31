@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The editor, in a workspace whose dependency is an artifact and nothing else.
 
-A library arrives as `.iyimod` files (SPEC.md III.7), and a program built
+A library arrives as `.iyimod` files (iyi SPEC III.7), and a program built
 with `--use-iyimod` compiles against them with the module's source deleted —
 that is R-1's whole claim and `bench/samples_roundtrip.sh` gates it for the
 build. The *editor* was not asked. It compiled imports from source alone, so
@@ -10,7 +10,7 @@ the same workspace opened with
     can't find module 'app/base'. A module's path is its file's path …
 
 on the import line, hover and definition empty, about a module the build
-compiles fine against. SPEC.md IV says the server's inner loop *is* what
+compiles fine against. iyi SPEC IV says the server's inner loop *is* what
 `--use-iyimod` already does; this asserts that it does it.
 
 The comparison is the one that matters: the same program, the same

@@ -1,7 +1,7 @@
 require "./spec_helper"
 
 # iyi: `iyi daemon start` hands the server over to a binary named after the
-# binary that was typed — `iyi-daemon`, not `crystal-daemon` (SPEC.md IV.1d).
+# binary that was typed — `iyi-daemon`, not `crystal-daemon` (iyi SPEC IV.1d).
 #
 # Worth pinning, because getting it wrong is quiet rather than loud. The two
 # binaries are the same compiler and report the same `Crystal::Config`, so the

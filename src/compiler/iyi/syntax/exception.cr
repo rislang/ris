@@ -12,7 +12,7 @@ module Iyi
   def self.iyi_spec_references(message : String) : Array(String)?
     refs = [] of String
     reader = Char::Reader.new(message)
-    marker = "SPEC.md"
+    marker = "iyi SPEC"
 
     while (start = message.byte_index(marker, reader.pos))
       reader.pos = start + marker.size

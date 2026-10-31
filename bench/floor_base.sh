@@ -1,5 +1,5 @@
 # What every program iyi builds leaves undefined, per platform — the part of
-# the dependency floor (SPEC.md III.9) that is the prelude's and the
+# the dependency floor (iyi SPEC III.9) that is the prelude's and the
 # runtime's rather than any one module's. Sourced, not copied: the gates
 # that audit a program's floor each start from this and add what their own
 # program asks for beyond it.
@@ -46,7 +46,7 @@ FLOOR_BASE_LINUX+=" memcpy"
 # What a program may link: the platform libc, and on darwin the two
 # frameworks the trusted roots are kept behind - Security for the anchors
 # and trust settings, CoreFoundation for the arrays and data they come in -
-# which `std/system_roots` alone reaches (SPEC.md III.10). Both ship with
+# which `std/system_roots` alone reaches (iyi SPEC III.10). Both ship with
 # every macOS, as libSystem does.
 FLOOR_LIBS_PROGRAM="libSystem libc.so ld-linux libgcc_s Security CoreFoundation"
 
@@ -56,7 +56,7 @@ FLOOR_LIBS_PROGRAM="libSystem libc.so ld-linux libgcc_s Security CoreFoundation"
 # copy of the reader's lookup, which is the copying this file ended for
 # darwin's list.
 #   kernel32.dll      the process interface, which is what libc is on the
-#                     other two (SPEC.md III.10's inventory)
+#                     other two (iyi SPEC III.10's inventory)
 #   vcruntime140.dll  the MSVC runtime every binary the MSVC linker writes
 #                     carries, whatever it was written from
 #   ucrtbase.dll      the UCRT itself, for a link that names it directly
@@ -70,13 +70,13 @@ FLOOR_LIBS_PROGRAM="libSystem libc.so ld-linux libgcc_s Security CoreFoundation"
 #   advapi32.dll      `RtlGenRandom`, the OS entropy `std/random` reads;
 #                     the registry `std/socket` reads the name servers
 #                     from; the account name and token SIDs `std/user`
-#                     answers `User.current` with (SPEC.md III.10)
+#                     answers `User.current` with (iyi SPEC III.10)
 #   ws2_32.dll        Winsock, the platform's network interface, reached by
 #                     `std/socket` and `std/udp` and nothing else
-#                     (SPEC.md III.10)
+#                     (iyi SPEC III.10)
 #   crypt32.dll       the certificate stores, the trusted roots
 #                     `std/system_roots` reads and nothing else
-#                     (SPEC.md III.10)
+#                     (iyi SPEC III.10)
 FLOOR_DLLS_RUNTIME="kernel32.dll vcruntime140.dll ucrtbase.dll api-ms-win-crt-"
 FLOOR_DLLS_PROGRAM="$FLOOR_DLLS_RUNTIME advapi32.dll ws2_32.dll crypt32.dll"
 

@@ -1,6 +1,6 @@
 # iyi: `iyi get PATH[@VERSION]...` and `iyi get -u` - a requirement added,
 # moved, or brought up to date, without writing the line by hand
-# (SPEC.md III.7).
+# (iyi SPEC III.7).
 #
 #     iyi get example.com/someone/lib          # the latest release
 #     iyi get example.com/someone/lib@v1.2.0   # that version, up or down

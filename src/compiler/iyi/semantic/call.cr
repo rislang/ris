@@ -257,7 +257,7 @@ class Iyi::Call
 
     including_types = owner.including_types
     if including_types
-      # iyi: this is the open set, and the mark is what says so (SPEC.md III.6).
+      # iyi: this is the open set, and the mark is what says so (iyi SPEC III.6).
       #
       # Every other receiver a call can have is a type the program already
       # holds. This one is a *question* — which types include this module, or
@@ -315,7 +315,7 @@ class Iyi::Call
     #
     #   1. the scope's own functions, so a type nested in a module can call
     #      the module's helpers unqualified;
-    #   2. the modules whose names that scope imported (SPEC.md II.3).
+    #   2. the modules whose names that scope imported (iyi SPEC II.3).
     #
     # That order is II.3's rule that a local definition beats a used one, and
     # the outward walk is what makes a nearer scope win over a farther one.
@@ -539,7 +539,7 @@ class Iyi::Call
   # instantiated under, or nil if none of them provides it.
   #
   # Two used modules providing the same name is an error here, at the call,
-  # and only for the name actually called — SPEC.md II.3. The mirror of
+  # and only for the name actually called — iyi SPEC II.3. The mirror of
   # `Type#lookup_using_path_item`, which does the same for type names.
   private def lookup_using_matches(used : Array(UsingModule), def_name, signature, search_in_parents, with_autocast)
     found = nil
@@ -802,7 +802,7 @@ class Iyi::Call
           check_return_type(typed_def, typed_def_return_type, match, match_owner)
         end
 
-        # iyi: a def read from a `.iyimod` has no body to visit (SPEC.md IV.1).
+        # iyi: a def read from a `.iyimod` has no body to visit (iyi SPEC IV.1).
         #
         # Its type is the return annotation `check_return_type` just resolved,
         # which R-2 guarantees is there — a constructor being the one case that
@@ -1012,7 +1012,7 @@ class Iyi::Call
     typed_def.freeze_type = return_type
     typed_def.type = return_type if return_type.no_return? || return_type.nil_type?
     # iyi: and a signature with an error member is the def's type, not just a
-    # bound on it (SPEC.md III.1.8, IV.2). The other library types a call from
+    # bound on it (iyi SPEC III.1.8, IV.2). The other library types a call from
     # the body and only checks it against the annotation, so `def f : Int32 |
     # IOErr` whose body answers `1` typed `f` as `Int32`: `f()!` was refused as
     # having "no error to propagate", a `case` with no `IOErr` branch
@@ -1726,7 +1726,7 @@ class Iyi::Call
     raise "can't infer block return type, try to cast the block body with `as`: `{ value.as(Int32) }` writes down the type the block returns, which nothing else here says"
   end
 
-  # iyi: `def add_route(&block : Ctx -> B) forall B : IntoBody` (SPEC.md II.7
+  # iyi: `def add_route(&block : Ctx -> B) forall B : IntoBody` (iyi SPEC II.7
   # rule 3, II.8).
   #
   # A bound on a *method*'s free variable is not the conditional-impl problem
@@ -1748,7 +1748,7 @@ class Iyi::Call
       trait_type = lookup_node_type(match.context, bound_node)
 
       unless trait_type.trait?
-        bound_node.raise "can't bound #{name} by #{trait_type}, it's a #{trait_type.type_desc}. A bound is a trait, and nothing else — see SPEC.md II.7"
+        bound_node.raise "can't bound #{name} by #{trait_type}, it's a #{trait_type.type_desc}. A bound is a trait, and nothing else — see iyi SPEC II.7"
       end
 
       unless bound_type.implements?(trait_type)
@@ -1757,7 +1757,7 @@ class Iyi::Call
     end
   end
 
-  # iyi: `def max : Elem where Elem : Comparable` (SPEC.md II.6).
+  # iyi: `def max : Elem where Elem : Comparable` (iyi SPEC II.6).
   #
   # Unlike a `forall` bound, the bounded name is not one this method
   # introduced: it is an associated type of the trait the method is written in,
@@ -1773,7 +1773,7 @@ class Iyi::Call
       trait_type = lookup_node_type(match.context, bound_node)
 
       unless trait_type.trait?
-        bound_node.raise "can't bound #{name} by #{trait_type}, it's a #{trait_type.type_desc}. A bound is a trait, and nothing else — see SPEC.md II.7"
+        bound_node.raise "can't bound #{name} by #{trait_type}, it's a #{trait_type.type_desc}. A bound is a trait, and nothing else — see iyi SPEC II.7"
       end
 
       unless bound_type.implements?(trait_type)
@@ -1872,7 +1872,7 @@ class Iyi::Call
     typed_def.owner = owner
     typed_def.original_owner = untyped_def.owner
     # iyi: and the def as it was *written*, which is a different question from
-    # the type that wrote it (SPEC.md III.6). An artifact decides what travels
+    # the type that wrote it (iyi SPEC III.6). An artifact decides what travels
     # by looking at a type's own `defs`, while everything about machine code is
     # a fact about this clone; `Iyi::OpenTravel` needs both ends of that.
     # `original_untyped_def`, not `untyped_def`: a default-argument expansion is

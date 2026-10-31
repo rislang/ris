@@ -1,5 +1,5 @@
 # iyi: `iyi mod reach` - what every package this project builds touches
-# outside the language, one line each (SPEC.md III.7, `Mod::Reach`).
+# outside the language, one line each (iyi SPEC III.7, `Mod::Reach`).
 #
 #     example.com/someone/web v0.1.0: std/socket, std/time; File
 #     example.com/someone/zip v1.2.0: links z; C LibZ.deflate, LibZ.inflate

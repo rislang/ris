@@ -85,7 +85,7 @@ class Iyi::TapeShrinkChecker
   @root_types = Hash(UInt64, Type).new
   @root_scopes = Hash(UInt64, Array(UInt64)).new
   @scopes = [] of UInt64
-  # TAPE_SPEC 3.2: the explicit `tape` blocks around the walk, innermost
+  # SPEC 3.2: the explicit `tape` blocks around the walk, innermost
   # last, and for each fresh root the innermost one it was made in. Its
   # storage ends with that block, so it may not be stored where the
   # destination was declared outside it.
@@ -335,7 +335,7 @@ class Iyi::TapeShrinkChecker
         end
         if (block = tape_of(source)) && outside?(root, block)
           message = "cannot store data made in this tape block where it " \
-                    "outlives the block (TAPE_SPEC 3.2): its storage ends " \
+                    "outlives the block (SPEC 3.2): its storage ends " \
                     "with the block.\nCopy it with .copy_to(owner) onto the " \
                     "destination's owner, or build it on the destination " \
                     "(write into its String::Builder)"

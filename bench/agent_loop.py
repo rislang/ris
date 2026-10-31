@@ -257,7 +257,7 @@ def main():
 
     # 4a''. Advice an agent follows has to compile. For a nilable argument
     # to a trait parameter the message said "Write `impl Show for (Int32 |
-    # Nil)`", which is refused as a union impl (SPEC.md II.1).
+    # Nil)`", which is refused as a union impl (iyi SPEC II.1).
     write("advice.iyi", (
         "trait Show\n  abstract def show : String\nend\n\n"
         "impl Show for Int32\n  def show : String\n    \"i\"\n  end\nend\n\n"
@@ -266,7 +266,7 @@ def main():
     ))
     said = run("check", "advice.iyi", cwd=work).stderr
     step("a nilable argument to a trait is told to narrow, not to write a union impl",
-         "`Nil` does not (SPEC.md II.1). v can be nil here: narrow it first (`if v`)" in said
+         "`Nil` does not (iyi SPEC II.1). v can be nil here: narrow it first (`if v`)" in said
          and "impl Show for (Int32 | Nil)" not in said, "")
     os.remove(os.path.join(work, "advice.iyi"))  # later steps walk the directory
 

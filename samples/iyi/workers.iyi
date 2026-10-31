@@ -1,4 +1,4 @@
-# A worker pool and a typed pair of tasks (SPEC.md III.4).
+# A worker pool and a typed pair of tasks (iyi SPEC III.4).
 #
 #   ./bin/ris run samples/iyi/workers.iyi
 module samples/workers

@@ -1117,7 +1117,7 @@ end
 # with --release: the module's header quotes it.
 #
 # The server task owns its key and config; the client hears the key's
-# config list as a board message (TAPE_SPEC 5.1, 5.2).
+# config list as a board message (SPEC 5.1, 5.2).
 def ech_speed(count : Int32) : String
   samples = [[] of Int64, [] of Int64, [] of Int64]
   listener = IyiSocket.listen("127.0.0.1", 0)
@@ -1539,7 +1539,7 @@ puts "== a session's tickets, between this run's own client and server"
 
 # The binding rounds' server: one task owns the server configurations
 # and both listeners, so tickets it seals open on later rounds. It posts
-# its ports, then serves one connection per order (TAPE_SPEC 5.1, 5.2).
+# its ports, then serves one connection per order (SPEC 5.1, 5.2).
 @[OnTape]
 struct RisBindingPorts
   getter first : Int32

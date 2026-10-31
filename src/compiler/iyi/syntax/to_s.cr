@@ -794,7 +794,7 @@ module Iyi
     # iyi: a node printed where the parser reads an expression — an argument,
     # a literal's element, a condition, an assigned value — rather than a
     # statement. The text is source a later build parses again: a travelling
-    # body crosses an `.iyimod` as `Def#body.to_s` (SPEC.md IV.1g), printed
+    # body crosses an `.iyimod` as `Def#body.to_s` (iyi SPEC IV.1g), printed
     # after the normalizer has expanded it. `twice(parse(text).or_panic, t)`
     # crossed as `twice(__temp_6 = parse(text)` and an `if` on the next line,
     # because `.or_panic` expands to an assignment and an `if` held in one
@@ -862,7 +862,7 @@ module Iyi
 
     def visit(node : Assign)
       # iyi: a module's top level travels as source, so `pub` on a constant has
-      # to be in the text (R-2, SPEC.md IV.2).
+      # to be in the text (R-2, iyi SPEC IV.2).
       target = node.target
       @str << "pub " if target.is_a?(Path) && target.exported?
       node.target.accept self
@@ -1008,7 +1008,7 @@ module Iyi
 
     def visit(node : Macro)
       # iyi: a macro travels in an artifact as this text, so what marks it
-      # exported has to be in the text (R-2b, SPEC.md IV.4).
+      # exported has to be in the text (R-2b, iyi SPEC IV.4).
       @str << "pub " if node.exported?
       @str << "macro "
       @str << node.name.to_s
@@ -1415,7 +1415,7 @@ module Iyi
 
     # iyi: was `Regex.append_source`, the AST printer's last reference to the
     # stdlib Regex. Escaping a pattern back into a literal is two rules, so
-    # they live here rather than keeping this file tied to `regex.cr` (SPEC.md
+    # they live here rather than keeping this file tied to `regex.cr` (iyi SPEC
     # III.10): a backslash stays with the character it escapes, and the
     # delimiter is escaped.
     private def append_regex_source(source : String, io)

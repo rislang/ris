@@ -10,7 +10,7 @@ thing about a buffer the lexer cannot read out of the source, so every
 `.iyi` file was colored by the other language's rules. There `foo!` is
 one name, so the propagation operator was swallowed into the name
 before it, and `end!` was a name too — which cost a block's `end` its
-keyword color. In iyi `!` is never part of a name (SPEC.md III.1.7),
+keyword color. In iyi `!` is never part of a name (iyi SPEC III.1.7),
 so a wordy token carrying one is that mistake. A wordy token must
 start and end on word boundaries; 8,000+ tokens across the samples say
 so on every push, so the world's best highlighting cannot quietly

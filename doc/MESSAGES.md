@@ -1,6 +1,6 @@
 # Messages between tasks: RisBoard
 
-The rules are TAPE_SPEC 5.1-5.3 and 5.6. RisBoard copies the typed-queue
+The rules are SPEC 5.1-5.3 and 5.6. RisBoard copies the typed-queue
 transport in doc/reference/goose/docs/goose_spec.md §11.2, not Goose's
 thread, global-copy or abort model. Main and all tasks use one board.
 
@@ -40,7 +40,7 @@ A queued Nil is {nil, true}, so test the Bool, not value.nil?. Top-level
 Cancelled keys are refused: wrap that value in a nominal message.
 
 limit sets a message-count bound, initially unlimited. n <= 0 follows
-TAPE_SPEC 4.2. Lowering retains mail; posts fail while count >= n.
+SPEC 4.2. Lowering retains mail; posts fail while count >= n.
 Admission and limit changes are linearized; unpublished copies do not
 count. Physical exhaustion is 4.2, not false. FIFO is publication order
 per type, a ris clarification; taker fairness and cross-type order are
@@ -83,7 +83,7 @@ The core has these physical bounds, independent of limit(T, n):
   lengths and Tre stop metadata occupy bytes but add no occurrences.
 
 An empty message still occupies one queue place and one image slot.
-Exceeding a physical bound follows TAPE_SPEC 4.2, rather than returning
+Exceeding a physical bound follows SPEC 4.2, rather than returning
 false. Byte slabs are reused; images above the slab classes use private
 mappings released after consumption. Total mapping capacity is subject to
 OS exhaustion. A take's destination remains subject to the tape limits.

@@ -1,4 +1,4 @@
-# A group joined inside `tape do` may borrow its immutable text (TAPE_SPEC
+# A group joined inside `tape do` may borrow its immutable text (SPEC
 # 1.6): the task reads the view before the tape ends.
 module test/ris/contract_spawn
 

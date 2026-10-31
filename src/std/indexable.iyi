@@ -20,7 +20,7 @@
 #   * Serialization and conversions: `join`, `to_a`, `hash`
 #   * Default iteration: `def each`, which an `impl Enumerable` beside this
 #     one answers with — implementing `Indexable` does not make a type
-#     `Enumerable` by itself. SPEC.md II.6 prescribes the pair: `impl
+#     `Enumerable` by itself. iyi SPEC II.6 prescribes the pair: `impl
 #     Indexable for T`, then `impl Enumerable for T` answering only `type
 #     Elem`. `Array` and `Slice` both say both.
 #
@@ -51,7 +51,7 @@ pub trait Indexable
   # Default iteration yielding elements sequentially from 0 up to size - 1.
   # It answers `Enumerable`'s requirement for a type that also says `impl
   # Enumerable`, which is one more line than the ergonomics claim implies
-  # (SPEC.md II.6) — the claim that this trait supplied it was false, and
+  # (iyi SPEC II.6) — the claim that this trait supplied it was false, and
   # `Array` went without `zip`, `take` and the rest until the line existed.
   def each(& : Elem -> Nil) : Nil
     i = 0

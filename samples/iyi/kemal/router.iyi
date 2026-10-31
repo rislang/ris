@@ -118,7 +118,7 @@ pub class Router
   # thing about this port that reads worse than what it ports, so the reason is
   # here rather than in a commit message.
   #
-  # R-2 asks an exported `def` to say what its block is (SPEC.md IV.2): the
+  # R-2 asks an exported `def` to say what its block is (iyi SPEC IV.2): the
   # body stays in this module, so a consumer reading only the signature has no
   # `yield` left to infer from. `& : Router -> Nil` says it. `with sub_router
   # yield` cannot be said at all — what makes it a DSL is that the block's
@@ -127,7 +127,7 @@ pub class Router
   # So this is the rule costing something visible, and it is being paid rather
   # than avoided: a `namespace` that keeps `with` would have to stay unexported,
   # which is a worse trade for a DSL than one extra `|r|`. Giving `with … yield`
-  # a notation is open (SPEC.md IV.2); until it has one, this is what an
+  # a notation is open (iyi SPEC IV.2); until it has one, this is what an
   # exported block-taking method looks like.
   pub def namespace(path : String, & : Router -> Nil) : Nil
     sub_router = Router.new

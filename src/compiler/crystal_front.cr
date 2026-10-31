@@ -10,7 +10,7 @@
 #
 # It is deliberately not a second `Iyi::Command`: the driver is thirty
 # lines because everything else in a build — object files, a linker, a cache —
-# belongs to the half that is missing. See `crystal/llvm_shim.cr` and SPEC.md
+# belongs to the half that is missing. See `crystal/llvm_shim.cr` and iyi SPEC
 # 0.1.0.
 
 {% raise "crystal_front.cr is the front end without LLVM: build it with -Dwithout_llvm" unless flag?(:without_llvm) %}

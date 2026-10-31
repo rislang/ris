@@ -6,7 +6,7 @@
 # A record type, a list of them, and the questions a list gets asked: which
 # ones, how many, the largest, each with its number, and the same list by
 # name. Like `basics`, this documents no rule. It is here because the prelude
-# grows only when a program in this repository needs something (SPEC.md 0.1.0
+# grows only when a program in this repository needs something (iyi SPEC 0.1.0
 # item 3), and these are the calls the second program makes that the first
 # did not.
 module samples/inventory

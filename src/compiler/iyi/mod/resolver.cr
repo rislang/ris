@@ -1,4 +1,4 @@
-# iyi: minimal version selection — SPEC.md III.7's whole algorithm, quoted:
+# iyi: minimal version selection — iyi SPEC III.7's whole algorithm, quoted:
 # "for each module in the graph, take the highest of the minimum versions
 # anything asked for." No solver, no lockfile to fight over in a merge, and
 # adding a dependency cannot silently upgrade an unrelated one.

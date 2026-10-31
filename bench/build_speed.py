@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build speed — the number SPEC.md's 0.1.0 section exists to produce.
+"""Build speed — the number iyi SPEC's 0.1.0 section exists to produce.
 
     python3 bench/build_speed.py
 
@@ -34,7 +34,7 @@ Limits, stated because they bound the result
 
 * **The compiler is timed as a binary**, not through `bin/crystal`. See the
   comment on `CRYSTAL` below for why, and subtract nothing: the earlier runs
-  recorded in SPEC.md were timed through the wrapper and carry its 30 ms.
+  recorded in iyi SPEC were timed through the wrapper and carry its 30 ms.
 * **The compiler has to be a release build, and this says so.** The compiler is
   itself a Crystal program, and a debug build of it is **1.5x** slower here —
   measured by alternating the two binaries so the machine's state cancels, 7
@@ -112,7 +112,7 @@ WRAPPER = ROOT / "bin" / "iyi"
 # initialisers is not in it. Timed rather than argued about.
 FRONT = ROOT / ".build" / "crystal-front"
 
-# SPEC.md 0.1.0, "Done is a number": IV.1a already ran a front end that never
+# iyi SPEC 0.1.0, "Done is a number": IV.1a already ran a front end that never
 # walks the prelude at 0.049 s and emitted an object with an identical symbol
 # table. The target is to make that configuration the ordinary one.
 FRONT_END_TARGET = 0.05
@@ -162,7 +162,7 @@ GATE_RUNS = 15
 # plainly, 0.026 s built with a `NEEDED` entry on libLLVM and no call to it.
 # So it is the library's own load-time initialisers, paid by every process that
 # links it whether or not it generates code — `clang --version` pays the same
-# 0.023 s. See SPEC.md 0.1.0.
+# 0.023 s. See iyi SPEC 0.1.0.
 #
 # Re-record `STARTUP_BASELINE` when the machine changes **or the binary does**,
 # from the figure this prints. It is a property of a machine and a binary, not
@@ -380,7 +380,7 @@ def same_program(iyi_source, go_source, out_dir):
     # build, or the two printed different things, and either way there is
     # nothing here worth a number. None is "there is no Go on this machine",
     # which withholds the comparison and nothing else — iyi's own figures at
-    # this size are the ones SPEC.md's scale question is about, and refusing to
+    # this size are the ones iyi SPEC's scale question is about, and refusing to
     # print them because a second toolchain is absent is how a machine without
     # Go came to report nothing at all about the size that matters.
     if not run([str(CRYSTAL), "build", "-o", str(iyi_binary), str(iyi_source)],
@@ -471,7 +471,7 @@ def main():
             front_only = best(GATE_RUNS, lambda: run([str(FRONT), str(hello_iyi)], env=CRYSTAL_ENV), warmup=2)
 
         # Where the warm build actually goes, and what a different linker does
-        # about it. Both are measured here rather than described in SPEC.md,
+        # about it. Both are measured here rather than described in iyi SPEC,
         # for the reason the Go column is.
         # The pair that has user code in it. Written into the temp directory
         # rather than the repository, because ten thousand generated lines in
@@ -562,7 +562,7 @@ def main():
 
     fastest, slowest = front_hello
 
-    print(f"  front-end target (SPEC.md 0.1.0): {FRONT_END_TARGET:.3f} s")
+    print(f"  front-end target (iyi SPEC 0.1.0): {FRONT_END_TARGET:.3f} s")
     print(f"  measured:                         {fastest:.3f} s")
     print(f"  slowest of the {GATE_RUNS}:                {slowest:.3f} s")
     # Said out loud, because it is most of the figure above and none of it is
@@ -617,7 +617,7 @@ def main():
     print("  the figure above is mostly a process that links LLVM before doing")
     print("  no codegen, and the analysis under it is the top-level pass over a")
     print("  prelude read from source on every build. The later passes are")
-    print("  measured and are not it — see SPEC.md 0.1.0 item 2.")
+    print("  measured and are not it — see iyi SPEC 0.1.0 item 2.")
     print()
     return 1
 

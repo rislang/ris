@@ -1,4 +1,4 @@
-# What every value can do — SPEC.md, "0.1.0", item 3. Small on purpose:
+# What every value can do — iyi SPEC, "0.1.0", item 3. Small on purpose:
 # `to_s` returns a `String` rather than taking an `IO`, which would bring
 # buffering, encodings and a class hierarchy for the sake of `puts`.
 class Object

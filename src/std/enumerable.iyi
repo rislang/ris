@@ -1,4 +1,4 @@
-# `Enumerable` — SPEC.md II.6.
+# `Enumerable` — iyi SPEC II.6.
 #
 # The load-bearing abstraction of a collections library: 71 method names
 # written against a single `abstract def each`, shared by every type that
@@ -123,7 +123,7 @@ pub trait Enumerable
   # case", and applying the wrong half of it here made one name mean two
   # things inside this library: `Enumerable#index` raised while
   # `Indexable#index` and `Array#index` answered nil, which is the shape
-  # SPEC.md III.1.7a exists to keep out.
+  # iyi SPEC III.1.7a exists to keep out.
   #
   # The direction matters too. A caller who wants the panic writes what the
   # prelude writes — `list.find { … } || raise "no element matched"` — one
@@ -161,7 +161,7 @@ pub trait Enumerable
   # ---- transforming --------------------------------------------------------
   #
   # `U` belongs to the method, not to the trait: `map` is one method that works
-  # for every result type, not one trait per result type (SPEC.md II.6).
+  # for every result type, not one trait per result type (iyi SPEC II.6).
 
   def map(& : Elem -> U) : Array(U) forall U
     result = [] of U
@@ -282,7 +282,7 @@ pub trait Enumerable
   # The element first and the memo second, as the other library yields them.
   # It was the reverse, so `[[1], [2]].each_with_object([] of Int32) { |x,
   # acc| acc.concat(x) }` compiled under both and answered `[]` here: the
-  # element was the one mutated (SPEC.md III.1.7a's worst shape).
+  # element was the one mutated (iyi SPEC III.1.7a's worst shape).
   def each_with_object(obj : U, & : Elem, U -> Nil) : U forall U
     each { |e| yield e, obj }
     obj
@@ -290,7 +290,7 @@ pub trait Enumerable
 
   # The separator defaults to nothing, the way `Array#join` (src/iyi/array.iyi)
   # and `Indexable#join` already default it: one name means one thing
-  # (SPEC.md III.1.7a), and `slice.join` has to compile
+  # (iyi SPEC III.1.7a), and `slice.join` has to compile
   # where `array.join` does. A mandatory separator made the arity of one name
   # depend on which tower the receiver came from.
   #
@@ -621,7 +621,7 @@ pub trait Enumerable
   end
 
   def zip(other : O) : Array(Tuple(Elem, O::Elem)) forall O : Enumerable
-    # SPEC.md II.6 finding 6: a
+    # iyi SPEC II.6 finding 6: a
     # `zip(*others : Indexable | Iterable | Iterator)` is duck typing left over
     # from having no traits. One bound replaces the union, and `O::Elem` names
     # what the other collection yields without the caller stating it.
@@ -803,7 +803,7 @@ end
 # The prelude's `Array` is an `Enumerable`, which it was not: `Indexable`
 # has `impl Indexable for Array(T)` and that trait's header claimed its
 # `each` "satisfies Enumerable's abstract def each requirement" — it does
-# not, and SPEC.md II.6 says so, prescribing the second impl that answers
+# not, and iyi SPEC II.6 says so, prescribing the second impl that answers
 # only `type Elem`. Without this line `slice.zip(array)` did not compile
 # ("Array(Int32) does not implement Enumerable, required by `O` in `zip`"),
 # which is the most ordinary thing a caller could ask of two sequences, and

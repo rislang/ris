@@ -1,4 +1,4 @@
-# The prelude's `Enum` surface, exercised — SPEC.md IV.2.
+# The prelude's `Enum` surface, exercised — iyi SPEC IV.2.
 #
 #   bash bench/enum_exercise.sh
 #

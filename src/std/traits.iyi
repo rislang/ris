@@ -10,7 +10,7 @@
 # forwarded to `Object#hash` — the type's id, one slot for every value of
 # the type — so `1_i16.hash == 31337_i16.hash` was true, and
 # `1.5.hash == 31337.5.hash` with it. A trait may not promise what the
-# module implementing it has not loaded (SPEC.md II.8).
+# module implementing it has not loaded (iyi SPEC II.8).
 #
 # Each named, though `std/float` imports `std/int` itself: an integer's hash
 # is not a thing to reach through a float, and a rule that holds only while

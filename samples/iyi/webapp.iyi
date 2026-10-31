@@ -1,5 +1,5 @@
 # The Sinatra feel, kept — but written by the consumer rather than injected by
-# the library. This is the whole argument of SPEC.md II.3 in one file.
+# the library. This is the whole argument of iyi SPEC II.3 in one file.
 module samples/webapp
 
 import kemal/dsl::*

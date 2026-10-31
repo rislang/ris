@@ -15,7 +15,7 @@ require "spec/cli"
 class Iyi::Command
   # iyi: the two fixed patterns `crystal spec` matched arguments with. They
   # were regex literals, which is pcre2 on the compiler's link line, so they
-  # compile once through Iyi::Rx instead (SPEC.md III.10, Appendix B #22).
+  # compile once through Iyi::Rx instead (iyi SPEC III.10, Appendix B #22).
   private SPEC_FILE     = Rx::Pattern.compile("\\.cr(\\:\\d+)?\\Z")
   private SPEC_LOCATION = Rx::Pattern.compile("\\A(.+?)\\:(\\d+)\\Z")
 

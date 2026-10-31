@@ -3,7 +3,7 @@ module Iyi
     getter last : ASTNode
 
     # iyi: reached by `TypeNode.refuse_in_derive`, which has to know whether the
-    # expansion it is inside is a derive (SPEC.md II.4): one running now, or a
+    # expansion it is inside is a derive (iyi SPEC II.4): one running now, or a
     # macro inside a def a derive generated (`iyi_derive_def?`).
     getter program : Program
     property free_vars : Hash(String, TypeVar)?
@@ -97,7 +97,7 @@ module Iyi
 
     # iyi: the REPL asks this so a later line can treat a name as a Var
     # rather than a Call. Crystal's parser has no session, so `x` in
-    # `x * 7` is a method call unless we rewrite it (SPEC.md III.11).
+    # `x * 7` is a method call unless we rewrite it (iyi SPEC III.11).
     def var?(name : String) : Bool
       @vars.has_key?(name)
     end

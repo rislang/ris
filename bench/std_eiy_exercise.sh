@@ -362,7 +362,7 @@ if [ -x "$WORK/exercise-eiy" ]; then
     echo "  std/eiy asks the machine for something new:"
     echo "$extra_syms" | sed 's/^/    /'
     echo "  Each is a dependency being taken on. If that is the decision, record it"
-    echo "  here and in the commit (SPEC.md III.9)."
+    echo "  here and in the commit (iyi SPEC III.9)."
     status=1
   fi
 

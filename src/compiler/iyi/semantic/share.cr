@@ -1,4 +1,4 @@
-# iyi: SPEC.md III.4.4's `Share` — the marker that says a value may be
+# iyi: iyi SPEC III.4.4's `Share` — the marker that says a value may be
 # reached from two threads. Decided structurally, per type, the way
 # `bench/share_count.cr` counted it before it was built: a type is
 # shareable if none of its fields is mutable and every field's type is

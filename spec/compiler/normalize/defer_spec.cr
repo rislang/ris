@@ -1,6 +1,6 @@
 require "../../spec_helper"
 
-# iyi: `defer` — cleanup that runs however the scope is left (SPEC.md III.1.4).
+# iyi: `defer` — cleanup that runs however the scope is left (iyi SPEC III.1.4).
 #
 # What it does on every exit — inline on an ordinary one, through the
 # registry (the proc whose def is marked `iyi_defer`) on a panic, innermost

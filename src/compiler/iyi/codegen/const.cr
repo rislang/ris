@@ -272,7 +272,7 @@ class Iyi::CodeGenVisitor
     const.read = true
 
     # iyi: which unit read it, so an artifact carrying that unit can say so
-    # (SPEC.md IV.1g). A constant is initialised only where something read it,
+    # (iyi SPEC IV.1g). A constant is initialised only where something read it,
     # and on the far side of an artifact the only reader is machine code the
     # consumer did not compile. Recorded only while writing artifacts.
     unless @program.iyi_exported_owners.empty?
@@ -299,7 +299,7 @@ class Iyi::CodeGenVisitor
     call func
   end
 
-  # iyi: the `~NAME:const_read` an artifact's object code calls (SPEC.md IV.1g).
+  # iyi: the `~NAME:const_read` an artifact's object code calls (iyi SPEC IV.1g).
   #
   # A constant has two spellings and `initialize_const` picks one on
   # `const.read?`: read before it is initialised, it is reached through a

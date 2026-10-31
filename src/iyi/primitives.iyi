@@ -1,4 +1,4 @@
-# What the compiler emits instructions for — SPEC.md, "0.1.0", item 3.
+# What the compiler emits instructions for — iyi SPEC, "0.1.0", item 3.
 #
 # A `@[Primitive]` method has no body on purpose: the annotation names an
 # instruction the code generator writes at the call site. So this file is not
@@ -248,12 +248,12 @@ end
   {% for num in nums %}
     struct {{ num.id }}
       # The checked form raises on overflow — which in this prelude is a panic,
-      # since `__crystal_raise_overflow` prints and exits (SPEC.md III.1.4).
+      # since `__crystal_raise_overflow` prints and exits (iyi SPEC III.1.4).
       #
       # The unchecked form is the conversion without the check, and a float
       # past the range saturates (NaN is 0), alike in every build. It is
       # spelled the way `unsafe_chr` below is: `unsafe_to_u8`. Crystal spells
-      # it `to_u8!`, which is not a name in iyi (SPEC.md III.1.7) — those
+      # it `to_u8!`, which is not a name in iyi (iyi SPEC III.1.7) — those
       # declarations were accepted only because a macro expansion was
       # reparsed by the other language's rules, and no iyi source could call
       # one: `x.to_u8!` is `x.to_u8` with its error propagated. The callers
@@ -284,7 +284,7 @@ end
   # The comparison cross is the one `UInt16` joins, and only it: the
   # conversions above stay at five, because `std/int` declares the whole
   # tower's conversions and a prelude that also declared `UInt16#to_i32`
-  # would be redefining one of them (SPEC.md R-3, which is how this split
+  # would be redefining one of them (iyi SPEC R-3, which is how this split
   # announced itself).
   #
   # A wide character against a double is left out for the same reason and

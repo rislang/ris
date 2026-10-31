@@ -31,7 +31,7 @@ ris is iyi plus Goose's tape memory. These rules are for every agent.
   to a longer-lived owner with `copy_to` (e.g. `Program.tape`); no heap.
 * Speed measurement is off for now: Goose has proven tape fast; the goal is
   tape everywhere. Whole-project speed tests come later, not per change.
-* Rules for tape values: [TAPE_SPEC.md](TAPE_SPEC.md). Other languages
+* The rules: [SPEC.md](SPEC.md), ris's specification. Other languages
   are in [ris-bench](https://github.com/rislang/ris-bench), which keeps a
   copy of `samples/ris/respond.ri`: change both in one go.
 
@@ -81,10 +81,10 @@ on one tape.
   gave way to RisBoard and Atomic). The rest keep their Iyi* names for
   merges.
 * Keep inherited documents in doc/archive/iyi/ and doc/archive/crystal/;
-  SPEC.md stays at the root as an inherited language reference.
-  ris's own docs include CONTRIBUTING.md; TAPE_SPEC.md rules tape memory.
-* Change TAPE_SPEC.md only with a dated entry and its reason in
-  [TAPE_SPEC_CHANGELOG.md](TAPE_SPEC_CHANGELOG.md), in the same commit.
+  iyi's draft spec is doc/archive/iyi/SPEC.md, cited as "iyi SPEC".
+  SPEC.md is ris's specification; ris's own docs include CONTRIBUTING.md.
+* Change SPEC.md only with a dated entry and its reason in
+  [SPEC_CHANGELOG.md](SPEC_CHANGELOG.md), in the same commit.
 * Cite doc/reference/iyi/ for unchanged iyi rules, doc/reference/goose/
   for Goose designs, doc/reference/koja/ for messages between tasks.
   Record only ris differences; check snapshot versions.

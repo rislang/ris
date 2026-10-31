@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Panics — SPEC.md III.1.4, made literal. Each step is one sentence the
+# Panics — iyi SPEC III.1.4, made literal. Each step is one sentence the
 # section now states in the present tense: a panic prints at the site of
 # the bug - the message, then the program's file and line - and unwinds
 # by registry, pending defers run innermost-first, a

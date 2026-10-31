@@ -167,7 +167,7 @@ module Iyi::Lsp
       # module the build compiles against. R-1's own reading of the server
       # is that its inner loop is what `--use-iyimod` already does: one
       # module, type-checked against declarations, with the rest of the
-      # program absent (SPEC.md IV).
+      # program absent (iyi SPEC IV).
       #
       # `mods` beside the project root, which is the name every example in
       # the tree writes — the README's, the SPEC's, each bench's. Read only
@@ -303,7 +303,7 @@ module Iyi::Lsp
     # else. A package's path is dotted — `example.test/user/liba` — so the
     # run stopped at the first `.`, and the file it names is not under the
     # workspace at all: it is a checkout in the cache, which `iyi.mod`,
-    # `iyi.sum` and the fetcher decide between them (SPEC.md III.7). So
+    # `iyi.sum` and the fetcher decide between them (iyi SPEC III.7). So
     # every import of a dependency was a link that went nowhere, in an
     # editor where the same click works on a sibling module.
     #

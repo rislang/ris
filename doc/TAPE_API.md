@@ -1,7 +1,7 @@
 # Tape API
 
 Every tape type, each with a short example. Start with LEARN.md; exact
-signatures are in `src/iyi/tape.iyi`, the rules in TAPE_SPEC.md.
+signatures are in `src/iyi/tape.iyi`, the rules in SPEC.md.
 
 ## Tape, text, arrays, copy_to
 

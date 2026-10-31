@@ -2467,7 +2467,7 @@ module Iyi
     assert_syntax_error "macro foo(x : Int32); end"
 
     # iyi: pcre2 is off the compiler, so the parser no longer validates a
-    # pattern it cannot promise semantics for (SPEC.md III.10). An invalid
+    # pattern it cannot promise semantics for (iyi SPEC III.10). An invalid
     # pattern now fails where it is used: the macro engine refuses it by name,
     # a `.cr` program's own Regex raises at startup, a `.iyi` literal is
     # refused by the expander.
@@ -3173,9 +3173,9 @@ module Iyi
         "%|"  => "a[b]c".string,
         "\""  => "a[b]c".string,
         "%r[" => "Unterminated regular expression", # ref #5403
-        "%r{" => regex("a[b\\]c"),                  # iyi: no parse-time pattern check, so the unterminated class is the engine's to refuse (SPEC.md III.10)
-        "%r|" => regex("a[b\\]c"),                  # iyi: no parse-time pattern check, so the unterminated class is the engine's to refuse (SPEC.md III.10)
-        "/"   => regex("a[b\\]c"),                  # iyi: no parse-time pattern check, so the unterminated class is the engine's to refuse (SPEC.md III.10)
+        "%r{" => regex("a[b\\]c"),                  # iyi: no parse-time pattern check, so the unterminated class is the engine's to refuse (iyi SPEC III.10)
+        "%r|" => regex("a[b\\]c"),                  # iyi: no parse-time pattern check, so the unterminated class is the engine's to refuse (iyi SPEC III.10)
+        "/"   => regex("a[b\\]c"),                  # iyi: no parse-time pattern check, so the unterminated class is the engine's to refuse (iyi SPEC III.10)
         "%x[" => "Unterminated command literal",    # ref #5403
         "%x{" => command("a[b]c".string),
         "%x|" => command("a[b]c".string),
@@ -4318,7 +4318,7 @@ end").as(ClassDef)
       end
 
       # iyi: a module path segment has to survive the round trip to the type
-      # name it is reached by, `app/greeter` <-> `App::Greeter` (SPEC.md IV.6
+      # name it is reached by, `app/greeter` <-> `App::Greeter` (iyi SPEC IV.6
       # #6). `camelcase` makes an upper-case letter only where a group starts,
       # so requiring every group to start with a letter is what makes the name
       # splittable back into a path.
@@ -4391,7 +4391,7 @@ end").as(ClassDef)
       # iyi: being abstract and being reachable are different questions — one
       # says the type cannot be instantiated, the other says who may name it —
       # and a boundary needs both at once: a bound `abstract class` is a type a
-      # consumer subclasses and therefore has to be able to write (SPEC.md
+      # consumer subclasses and therefore has to be able to write (iyi SPEC
       # IV.2).
       it "parses a pub abstract class" do
         node = parse("pub abstract class Sheet
@@ -4435,7 +4435,7 @@ end").as(ClassDef)
         node.type_vars.should be_nil
       end
 
-      # iyi: `trait Ord : Eq` — a trait requiring another trait (SPEC.md II.6).
+      # iyi: `trait Ord : Eq` — a trait requiring another trait (iyi SPEC II.6).
       it "parses a supertrait" do
         node = parse("trait Ord : Eq\nend").as(TraitDef)
         node.supertraits.should eq([Path.new(["Eq"])] of ASTNode)
@@ -4470,7 +4470,7 @@ end").as(ClassDef)
 
       assert_syntax_error "trait Ord :\nend", "expecting token 'CONST'"
 
-      # iyi: `type Elem` — an associated type (SPEC.md II.6).
+      # iyi: `type Elem` — an associated type (iyi SPEC II.6).
       it "parses an associated type declared by a trait" do
         node = parse("trait Container\ntype Elem\nend").as(TraitDef)
         node.assoc_types.should eq(["Elem"])
@@ -4587,7 +4587,7 @@ end").as(ClassDef)
       assert_syntax_error "def f(x : T) forall T :\nend", "expecting token 'CONST'"
 
       # iyi: `where Elem : Comparable` — a bound on a name the method did not
-      # introduce (SPEC.md II.6).
+      # introduce (iyi SPEC II.6).
       it "parses a where bound" do
         node = parse("def max : Elem where Elem : Comparable\nend").as(Def)
         node.where_bounds.should eq({"Elem" => Path.new(["Comparable"])} of String => ASTNode)
@@ -4824,7 +4824,7 @@ end").as(ClassDef)
       end
 
       # iyi: `expr!` — the propagation operator the name was freed for
-      # (SPEC.md III.1.2). At a call site `!` is now the operator, which is the
+      # (iyi SPEC III.1.2). At a call site `!` is now the operator, which is the
       # whole reason it was taken out of names.
       it "reads `!` after a call as propagation" do
         node = parse("a.sort!", filename: "x.iyi").as(Propagate)
@@ -4884,7 +4884,7 @@ end").as(ClassDef)
         parse("a.empty?", filename: "x.iyi").as(Call).name.should eq("empty?")
       end
 
-      # iyi: `.or(default)` and `.or_panic` (SPEC.md III.1.3). Recognised by
+      # iyi: `.or(default)` and `.or_panic` (iyi SPEC III.1.3). Recognised by
       # name rather than dispatched, because by II.1 an ordinary call on
       # `Int32 | ConfigError` would demand the method from *both* members.
       it "reads `.or` as recovery" do
@@ -4933,7 +4933,7 @@ end").as(ClassDef)
         parse("read(path).or_panic", filename: "x.iyi").to_s.should eq("read(path).or_panic")
       end
 
-      # iyi: `method_missing` is gone (SPEC.md III.3). It needs a method set
+      # iyi: `method_missing` is gone (iyi SPEC III.3). It needs a method set
       # open to names nobody declared, and R-3 closes that by construction.
       it "rejects `macro method_missing`" do
         expect_raises(SyntaxException, "`method_missing` doesn't exist in iyi") do
@@ -4956,7 +4956,7 @@ end").as(ClassDef)
         parse("macro method_missing(call)\n  0\nend", filename: "x.cr").as(Macro).name.should eq("method_missing")
       end
 
-      # iyi: `defer` (SPEC.md III.1.4). Recognised by name, so it is reserved in
+      # iyi: `defer` (iyi SPEC III.1.4). Recognised by name, so it is reserved in
       # an iyi program and only there.
       it "reads `defer`" do
         node = parse("defer f.close", filename: "x.iyi").as(Defer)
@@ -4997,7 +4997,7 @@ end").as(ClassDef)
         parse("defer f.close", filename: "x.cr").as(Call).name.should eq("defer")
       end
 
-      # iyi: `it` in a `case` branch (SPEC.md III.1.1). The parser is what has to
+      # iyi: `it` in a `case` branch (iyi SPEC III.1.1). The parser is what has to
       # know, because this is where an identifier is decided to be a variable
       # rather than a call.
       it "reads `it` in a case branch as a variable" do

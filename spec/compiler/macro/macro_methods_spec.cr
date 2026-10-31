@@ -629,7 +629,7 @@ module Iyi
       end
 
       # iyi: macro regexes run on Iyi::Rx, RE2-shaped, and pcre2 is off the
-      # compiler (SPEC.md III.10, Appendix B #22). Lookaround and named groups
+      # compiler (iyi SPEC III.10, Appendix B #22). Lookaround and named groups
       # used to fail the compile here, on the reading that RE2's linear time cost
       # them. It does not: both are regular, and the engine answers them now, so
       # these cases run rather than refuse. What still fails the compile is the

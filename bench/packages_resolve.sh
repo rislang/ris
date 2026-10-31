@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Drives SPEC.md III.7 step 1: `iyi.mod`, minimal version selection, and a
+# Drives iyi SPEC III.7 step 1: `iyi.mod`, minimal version selection, and a
 # git fetcher — source only, no registry, no network. The registry-shaped
 # half of III.7 (artifacts, signatures, the index) is later steps and is
 # not exercised here.

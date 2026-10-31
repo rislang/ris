@@ -776,7 +776,7 @@ module Iyi
   # iyi: the flags a regex literal carries, owned by the compiler. This was the
   # stdlib's `Regex::CompileOptions`, which tied the AST to `regex.cr`, the file
   # that links pcre2; the bit values stay pcre2's so a `.cr` program still reads
-  # the same `Regex::Options` number it always did (SPEC.md III.10, Appendix B
+  # the same `Regex::Options` number it always did (iyi SPEC III.10, Appendix B
   # #22). MULTILINE keeps Crystal's meaning, PCRE2's MULTILINE and DOTALL
   # together, which is why it is 6 and not 2.
   @[Flags]
@@ -975,14 +975,14 @@ module Iyi
     property? args_in_brackets = false
     property? has_parentheses = false
     # iyi: a bare `group do ... end` in a `.iyi` file, recognised by name
-    # the way `.or` and `.or_panic` are (SPEC.md III.1.3, III.4.9), so the
+    # the way `.or` and `.or_panic` are (iyi SPEC III.1.3, III.4.9), so the
     # normalizer can expand the typed form without guessing from the name
     # of a call a Crystal file is free to mean differently.
     property? iyi_group = false
 
     # iyi: written with an attached `!`, which propagates here and is the
     # other library's mutating spelling, so `a.sort!` is asked of `sort`
-    # and the undefined-method hint names `sort_in_place` (SPEC.md III.1.7a).
+    # and the undefined-method hint names `sort_in_place` (iyi SPEC III.1.7a).
     property? iyi_banged = false
 
     # iyi: where the `//` this receiverless call stands to the right of
@@ -993,7 +993,7 @@ module Iyi
     property iyi_after_floor_div : Location?
 
     # iyi: this call's answer came out of an *open* set — a module's including
-    # types, or a generic's instantiations (SPEC.md III.6).
+    # types, or a generic's instantiations (iyi SPEC III.6).
     #
     # The machine code under it is one type-id test per member of that set,
     # and the set is the whole program's: anybody may include a module. So the
@@ -1581,7 +1581,7 @@ module Iyi
   class Def < ASTNode
     property free_vars : Array(String)?
     # iyi: `def f(x : T) forall T : Show` — the trait each free variable is
-    # bounded by, if any (SPEC.md II.7 rule 3).
+    # bounded by, if any (iyi SPEC II.7 rule 3).
     #
     # Unlike a bound on an *impl*'s parameter, this one makes nothing
     # conditional: the method exists either way, and the bound is a check
@@ -1589,7 +1589,7 @@ module Iyi
     property free_var_bounds : Hash(String, ASTNode)?
     # iyi: `def max : Elem where Elem : Comparable` — a bound on a name the
     # method did not introduce, which is how a trait says a default method is
-    # only valid for some answers to its associated types (SPEC.md II.6).
+    # only valid for some answers to its associated types (iyi SPEC II.6).
     property where_bounds : Hash(String, ASTNode)?
     property receiver : ASTNode?
     property name : String
@@ -1608,7 +1608,7 @@ module Iyi
     # iyi: `pub def` — exported, so it appears in `.iyimod` (R-2).
     property? exported = false
 
-    # iyi: written in an `impl` body (SPEC.md IV.2).
+    # iyi: written in an `impl` body (iyi SPEC IV.2).
     #
     # An impl defines its methods on the target type, so by the time anything
     # looks at them they are the target's like any other. This is the only
@@ -1616,7 +1616,7 @@ module Iyi
     # for Int32` puts a method on a type its module does not export.
     property? iyi_from_impl = false
 
-    # iyi: read from a `.iyimod` rather than from source (SPEC.md IV.1).
+    # iyi: read from a `.iyimod` rather than from source (iyi SPEC IV.1).
     #
     # There is no body under this signature and there is not meant to be one:
     # the artifact carries what another module may call, not how it is done. A
@@ -1625,7 +1625,7 @@ module Iyi
     # is why one that reads artifacts cannot yet generate code.
     property? iyi_from_artifact = false
 
-    # iyi: read from a `.iyimod` *with* its body, from `MonoBodies` (SPEC.md
+    # iyi: read from a `.iyimod` *with* its body, from `MonoBodies` (iyi SPEC
     # IV.1g).
     #
     # The opposite of the flag above, and the reason both are needed: a def
@@ -1635,7 +1635,7 @@ module Iyi
     # longer enough to say whose machine code this is.
     property? iyi_body_travelled = false
 
-    # iyi: written by the compiler rather than by the module (SPEC.md IV.2).
+    # iyi: written by the compiler rather than by the module (iyi SPEC IV.2).
     #
     # An `enum` gets a question method per member wherever it is declared, so
     # a consumer that read one out of an artifact would be handed a second
@@ -1646,7 +1646,7 @@ module Iyi
     # place that knows is the one that writes them.
     property? iyi_compiler_made = false
 
-    # iyi: the *written* def this one was instantiated from (SPEC.md III.6).
+    # iyi: the *written* def this one was instantiated from (iyi SPEC III.6).
     #
     # A typed def is a clone of it, and the clone is what holds the body every
     # question about machine code is asked of — while the artifact writers hold
@@ -1658,7 +1658,7 @@ module Iyi
     property ris_call_contract : String?
 
     # iyi: this def's machine code enumerates the members of an open type, or
-    # it calls something whose does (SPEC.md III.6).
+    # it calls something whose does (iyi SPEC III.6).
     #
     # Set after semantic analysis by `Iyi::OpenTravel`, read where an artifact
     # decides what travels. Such a body has to: the producer's object code
@@ -1673,7 +1673,7 @@ module Iyi
     # `next` or `break` leaving it is refused as leaving the `defer`.
     property? iyi_defer = false
 
-    # iyi: generated by a `derive` (SPEC.md II.4). A macro inside the body
+    # iyi: generated by a `derive` (iyi SPEC II.4). A macro inside the body
     # expands when the def is typed, long after the derive has returned, and
     # the program-wide questions a derive may not ask are refused there too.
     property? iyi_from_derive = false
@@ -1768,7 +1768,7 @@ module Iyi
     property splat_index : Int32?
     property doc : String?
     property visibility = Visibility::Public
-    # iyi: `pub macro` — a macro a consumer may run (R-2, SPEC.md IV.4).
+    # iyi: `pub macro` — a macro a consumer may run (R-2, iyi SPEC IV.4).
     #
     # What it exports is a name and an arity rather than types: a macro takes
     # syntax and returns syntax, and there is no type to write down. Every
@@ -1950,11 +1950,11 @@ module Iyi
     # `".or_panic"` — so that the semantic phase can judge the operand and name
     # it in the message. An `is_a?` the author wrote is nobody's business and
     # leaves this nil; one a compiler-known construct wrote has rules
-    # (SPEC.md III.1.1).
+    # (iyi SPEC III.1.1).
     property error_construct : String? = nil
     # iyi: for `xs.uniq!`, the method's name and its receiver's source -
     # a `!` attached to a method call, which is the other library's in-place
-    # spelling when the call answers no error (SPEC.md III.1.7a).
+    # spelling when the call answers no error (iyi SPEC III.1.7a).
     property iyi_bang_call : {String, String}? = nil
 
     def initialize(@obj, @const, @nil_check = false)
@@ -2078,7 +2078,7 @@ module Iyi
     property else : ASTNode?
     property? exhaustive : Bool
     # iyi: whether `it` names the value being matched inside every branch
-    # (SPEC.md III.1.1). Decided by the parser, because the bodies have to be
+    # (iyi SPEC III.1.1). Decided by the parser, because the bodies have to be
     # parsed knowing `it` is a variable rather than a call; the expander is what
     # assigns it.
     property? binds_it = false
@@ -2180,7 +2180,7 @@ module Iyi
     # reaches a consumer by being written back out.
     property? exported = false
 
-    # iyi: written by a `.iyimod`'s renderer rather than by an author (SPEC.md
+    # iyi: written by a `.iyimod`'s renderer rather than by an author (iyi SPEC
     # IV.1g).
     #
     # Such a path may name a type the module keeps to itself — a field of a
@@ -2306,7 +2306,7 @@ module Iyi
   # iyi: `trait Greet ... end`
   #
   # A named set of required methods, associated types and default methods.
-  # Replaces Crystal's mixin modules; see SPEC.md R-3 and II.6.
+  # Replaces Crystal's mixin modules; see iyi SPEC R-3 and II.6.
   class TraitDef < ASTNode
     property name : Path
     property body : ASTNode
@@ -2346,7 +2346,7 @@ module Iyi
   end
 
   # iyi: `read(path)!` — propagate an error member out of the enclosing method
-  # (SPEC.md III.1.2).
+  # (iyi SPEC III.1.2).
   #
   # If the value is a non-error member of its union, the expression evaluates to
   # it; if it is an error member, it is returned from the enclosing method. Kept
@@ -2371,7 +2371,7 @@ module Iyi
   end
 
   # iyi: `defer f.close` — cleanup that runs however the scope is left
-  # (SPEC.md III.1.4).
+  # (iyi SPEC III.1.4).
   #
   # `begin`/`ensure` stopped covering cleanup once errors became values returned
   # early, because the interesting exit is now an ordinary `return` in the
@@ -2398,7 +2398,7 @@ module Iyi
   end
 
   # iyi: `read_port().or(8080)` and `read_port().or_panic` — take the value out
-  # of an error union without writing a `case` (SPEC.md III.1.3).
+  # of an error union without writing a `case` (iyi SPEC III.1.3).
   #
   # These cannot be ordinary methods, which is why they are a node. By II.1 an
   # ordinary call on `Int32 | ConfigError` would require *both* members to
@@ -2430,7 +2430,7 @@ module Iyi
     def_equals_and_hash @exp, @default
   end
 
-  # iyi: `type Elem` in a trait, `type Elem = String` in an impl (SPEC.md II.6).
+  # iyi: `type Elem` in a trait, `type Elem = String` in an impl (iyi SPEC II.6).
   #
   # An associated type is an *output* of the impl, not an input the caller
   # picks: a collection iterates one way, so `arr.map` must not have to say
@@ -2469,11 +2469,11 @@ module Iyi
   # iyi: `impl Greet for User ... end`, `impl Greet for Box(T) forall T`
   #
   # Coherence (R-3): must live in the module defining the trait or the type.
-  # SPEC.md IV.4 shows the import DAG makes duplicate impls unrepresentable.
+  # iyi SPEC IV.4 shows the import DAG makes duplicate impls unrepresentable.
   class ImplDef < ASTNode
     property trait : Path
     # `impl Into(String) for User` — the arguments a parameterised trait is
-    # implemented at (SPEC.md II.6). Kept beside the path rather than folded
+    # implemented at (iyi SPEC II.6). Kept beside the path rather than folded
     # into a `Generic` node, because the checks that follow — coherence and
     # the required-method check — need the trait's own type, not an
     # instantiation of it.
@@ -2483,7 +2483,7 @@ module Iyi
     property target : ASTNode
     property body : ASTNode
     # The names introduced by `forall`. They are the impl's own, bound
-    # positionally to the target's parameters — see SPEC.md II.7.
+    # positionally to the target's parameters — see iyi SPEC II.7.
     property type_vars : Array(String)?
     # `forall T : Show` — the trait each parameter is bounded by, if any.
     property type_var_bounds : Hash(String, ASTNode)?
@@ -2540,7 +2540,7 @@ module Iyi
   end
 
   # iyi: `import std/json`, `import std/json::{parse, Any}`, `import
-  # std/json::*` (SPEC.md R-2b, II.3). The module is loaded by all three;
+  # std/json::*` (iyi SPEC R-2b, II.3). The module is loaded by all three;
   # the second brings the names it lists into unqualified scope and the
   # third every name the module exports. The parser adds a `UsingDecl`
   # beside an import that names anything, and that node is what scope is
@@ -2550,7 +2550,7 @@ module Iyi
 
     # iyi: `pub import x` — the import is re-exported: whoever imports
     # *this* module may reach `x` as if they had imported it themselves.
-    # The facade rule (SPEC.md R-1): a module's public surface may
+    # The facade rule (iyi SPEC R-1): a module's public surface may
     # include its dependencies, but only by saying so.
     property exported = false
 
@@ -2582,7 +2582,7 @@ module Iyi
   # the parser beside the import (`Parser#iyi_scope_imported_names`) -
   # there is no `using` keyword; it is the one name the source has no
   # spelling for. Brings exported names into unqualified scope where it
-  # stands. Written by the consumer, never by the library; see SPEC.md
+  # stands. Written by the consumer, never by the library; see iyi SPEC
   # II.3.
   class UsingDecl < ASTNode
     property path : Array(String)
@@ -3137,7 +3137,7 @@ module Iyi
   class Return < ControlExpression
     # iyi: set on the `return` that `expr!` expands into, so that a propagation
     # with nowhere to return to can be reported as the rule it breaks rather
-    # than as a stray `return` (SPEC.md III.5).
+    # than as a stray `return` (iyi SPEC III.5).
     property? from_propagate = false
 
     def clone_without_location

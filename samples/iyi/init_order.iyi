@@ -1,4 +1,4 @@
-# Module initialisation order: SPEC.md III.5.
+# Module initialisation order: iyi SPEC III.5.
 #
 #   ./bin/iyi run samples/iyi/init_order.iyi
 #
@@ -66,4 +66,4 @@ puts "5. #{Boot::Registry.greeting}"
 # * A module's initialiser as something an artifact could store. The compiler
 #   holds the modules' *nodes* apart from their import sites, which is what
 #   rules 1 and 2 needed, but `.iyimod` needs the step after: a callable
-#   initialiser in the module's own object code (SPEC.md Part IV).
+#   initialiser in the module's own object code (iyi SPEC Part IV).

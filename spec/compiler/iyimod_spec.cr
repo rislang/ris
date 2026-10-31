@@ -1,7 +1,7 @@
 require "../spec_helper"
 require "./spec_helper"
 
-# iyi: the `.iyimod` container — SPEC.md IV.1.
+# iyi: the `.iyimod` container — iyi SPEC IV.1.
 #
 # The contract these guard is that an artifact is either understood exactly or
 # refused. A build cache whose worst case is "read something plausible and
@@ -194,7 +194,7 @@ describe Iyi::IyiMod do
   end
 
   # A package's own build names its modules under the package's name, and
-  # `module app/greeter` alone does not say so (SPEC.md III.7, #132).
+  # `module app/greeter` alone does not say so (iyi SPEC III.7, #132).
   it "round-trips the package name the module's types live under" do
     with_temporary_file do |path|
       artifact = sample_artifact
@@ -1076,7 +1076,7 @@ describe Iyi::IyiMod do
   # into it, so its machine code belongs to whoever wrote the block. The
   # producer emits none — it would be a duplicate for a block it happened to
   # write and missing for every block it did not — and the body travels instead,
-  # for the reason a generic's method and a trait's default do (SPEC.md IV.1g).
+  # for the reason a generic's method and a trait's default do (iyi SPEC IV.1g).
   it "carries the body of a method that takes a block" do
     with_tempdir("iyimod_block_bodies") do
       Dir.mkdir_p "app"
@@ -4786,7 +4786,7 @@ describe Iyi::IyiMod do
     end
   end
 
-  # SPEC.md III.4.4: the `Share` marker travels with the declaration. A
+  # iyi SPEC III.4.4: the `Share` marker travels with the declaration. A
   # producer writes `@[Share]` above every type it found shareable, and a
   # consumer reads that — never recomputing, because the bodies that said
   # no method assigns a field are not in the artifact — and gates the block

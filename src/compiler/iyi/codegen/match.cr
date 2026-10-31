@@ -56,7 +56,7 @@ class Iyi::CodeGenVisitor
     match_fun_name = "~match<#{type.llvm_name}>"
 
     # iyi: which unit asks about it, so an artifact carrying that unit can say
-    # so (SPEC.md IV.1g). The function is the main module's and the main module
+    # so (iyi SPEC IV.1g). The function is the main module's and the main module
     # does not travel, so the consumer defines it — and for a *union* it cannot
     # work out which ones to define. A virtual type is enumerable from the
     # program's own classes, which is what `iyi_define_all_match_funs` does; a
@@ -74,7 +74,7 @@ class Iyi::CodeGenVisitor
   end
 
   # iyi: defines `~match<T>` for every type an artifact's object code might ask
-  # about, for the reason `iyi_define_all_type_ids` exists (SPEC.md IV.1g).
+  # about, for the reason `iyi_define_all_type_ids` exists (iyi SPEC IV.1g).
   #
   # A unit that travels can call one of these — `~match<IO+>` is the one a
   # module using Crystal's library produced — and the function lives in the

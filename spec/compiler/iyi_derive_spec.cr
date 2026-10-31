@@ -23,7 +23,7 @@ private def semantic_iyi(entry : String)
   program
 end
 
-# iyi: `derive` (SPEC.md R-5, II.4). A derive runs once, in the module that
+# iyi: `derive` (iyi SPEC R-5, II.4). A derive runs once, in the module that
 # declares the type. What it generates belongs to that module and travels in its
 # `.iyimod` like any other declaration, so a consumer calls the derived method
 # without running the macro and without the producer's source.

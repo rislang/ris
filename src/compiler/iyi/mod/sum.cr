@@ -52,7 +52,7 @@ module Iyi::Mod
             "#{key} is not what it was: #{sum_path} says #{expected}, " \
             "the checkout hashes to #{actual}. Something between the tag " \
             "and this machine changed; that is the one thing this file " \
-            "exists to notice (SPEC.md III.7)")
+            "exists to notice (iyi SPEC III.7)")
         end
         known[key] = actual
         added = true

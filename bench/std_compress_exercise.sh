@@ -111,7 +111,7 @@ parts = [python["py_repeat"][:30000], python["py_random"][:20000], b"the last me
 open(os.path.join(out, "py_members.bin"), "wb").write(b"".join(parts))
 open(os.path.join(out, "py_members.gz"), "wb").write(gzip.compress(parts[0], 9) + gzip.compress(parts[1], 1) + gzip.compress(parts[2]))
 # What iyi writes at every level, for zlib to read and to size against
-# its own: prose (SPEC.md), source code, JSON, noise, repetition, nothing,
+# its own: prose (iyi SPEC), source code, JSON, noise, repetition, nothing,
 # one byte, and 10 MB of the repository's text - the std modules, the
 # compiler's sources and the documents, in name order.
 import glob, json
@@ -127,7 +127,7 @@ tree = sorted(glob.glob(os.path.join(repo, "src/std/*.iyi"))) + sorted(glob.glob
 big = b"".join(open(p, "rb").read() for p in tree)
 big = (big * (10_000_000 // len(big) + 1))[:10_000_000]
 levels = {
-    "l_text": read("SPEC.md"),
+    "l_text": read("iyi SPEC"),
     "l_source": read("src/std/json.iyi") + read("src/std/http.iyi"),
     "l_json": json.dumps(records, indent=1).encode(),
     "l_random": bytes(lrng.getrandbits(8) for _ in range(200000)),

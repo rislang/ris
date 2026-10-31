@@ -1,5 +1,5 @@
 # iyi: `iyi mod tidy` - `iyi.mod` and `iyi.sum` made to say what the
-# project's source asks for, and nothing else (SPEC.md III.7).
+# project's source asks for, and nothing else (iyi SPEC III.7).
 #
 # The source is every `.iyi` file under the manifest's directory - tests
 # included, since a test's imports are requirements too - except hidden

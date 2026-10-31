@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Drives bench/runtime_exercise.iyi: the concurrency runtime gate for
-# Windows x86_64, Linux, and Darwin (SPEC.md III.4).
+# Windows x86_64, Linux, and Darwin (iyi SPEC III.4).
 #
 #     bash bench/runtime_exercise.sh
 #

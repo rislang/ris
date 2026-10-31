@@ -488,7 +488,7 @@ def read_input : String
   stdin.read_all
 end
 
-# ris (TAPE_SPEC 6.1): the pool of pipe ends (`Std::Io::RisPipeEnd`). A
+# ris (SPEC 6.1): the pool of pipe ends (`Std::Io::RisPipeEnd`). A
 # slot and its end are program storage taken once; a closed end comes
 # back here and its generation moves, so a handle kept past the close
 # (`Std::Io::PipeReader`, `PipeWriter`) is refused, not handed the next

@@ -1,11 +1,11 @@
-# iyi: `iyi lsp` — serve the language over stdio (SPEC.md III.8 #2).
+# iyi: `iyi lsp` — serve the language over stdio (iyi SPEC III.8 #2).
 #
 # Two processes, one verb. `iyi lsp` is the proxy the editor talks to: it
 # speaks the protocol, keeps the open buffers, and runs `iyi lsp
 # --worker` — this same binary, today's server — to do the compiling. The
 # worker is replaced when the wire goes quiet, so the memory a
 # collector-free front end never gives back goes back to the kernel the
-# way `iyi build`'s does, by exiting (SPEC.md III.9, `lsp/proxy.cr`).
+# way `iyi build`'s does, by exiting (iyi SPEC III.9, `lsp/proxy.cr`).
 #
 # No flags for the person: the protocol negotiates everything a flag
 # would say, and a server that is configured outside the protocol is a

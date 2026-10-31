@@ -224,7 +224,7 @@ describe "Semantic: iyi" do
         CODE
     end
 
-    # A union impl is refused (SPEC.md II.1), so the advice for a nilable
+    # A union impl is refused (iyi SPEC II.1), so the advice for a nilable
     # argument was "Write `impl Show for (Int32 | Nil)`", which the next
     # build refused.
     it "names the narrowing, not a union impl, for a nilable argument to a trait" do
@@ -252,13 +252,13 @@ describe "Semantic: iyi" do
         v = make(true)
         f(v)
         CODE
-      assert_error code, "a union implements a trait when every member does, and `Nil` does not (SPEC.md II.1). v can be nil here: narrow it first (`if v`)"
+      assert_error code, "a union implements a trait when every member does, and `Nil` does not (iyi SPEC II.1). v can be nil here: narrow it first (`if v`)"
       exception = expect_raises(Iyi::TypeException) { semantic code }
       exception.to_s.should_not contain("impl Show for (Int32 | Nil)")
     end
 
     it "names each member that lacks the trait" do
-      assert_error <<-CODE, "and `Char` and `String` do not (SPEC.md II.1). A union's impl is not writable; write `impl Show for Char` and `impl Show for String`"
+      assert_error <<-CODE, "and `Char` and `String` do not (iyi SPEC II.1). A union's impl is not writable; write `impl Show for Char` and `impl Show for String`"
         trait Show
           abstract def show : String
         end
@@ -373,7 +373,7 @@ describe "Semantic: iyi" do
           v.size
           CODE
       end
-      exception.to_s.should contain("`v` can be `E` here, an error (SPEC.md III.1): give it an answer (`v.or(default)`), tell them apart (`case v` with `in A` and `in E`), or propagate it from a def that returns it (`v!`)")
+      exception.to_s.should contain("`v` can be `E` here, an error (iyi SPEC III.1): give it an answer (`v.or(default)`), tell them apart (`case v` with `in A` and `in E`), or propagate it from a def that returns it (`v!`)")
       exception.to_s.should_not contain("small by rule")
     end
 
@@ -388,7 +388,7 @@ describe "Semantic: iyi" do
     end
 
     it "names the in-place spelling of a method whose plain name is here" do
-      assert_error "class A\n  def uniq\n    self\n  end\nend\na = A.new\na.uniq!", "`uniq!` is the other library's in-place spelling, and `!` cannot end a name here (SPEC.md III.1.7a): reassign the copy, `a = a.uniq`", filename: "x.iyi"
+      assert_error "class A\n  def uniq\n    self\n  end\nend\na = A.new\na.uniq!", "`uniq!` is the other library's in-place spelling, and `!` cannot end a name here (iyi SPEC III.1.7a): reassign the copy, `a = a.uniq`", filename: "x.iyi"
     end
 
     it "says a setter in initialize is not the field" do
@@ -630,7 +630,7 @@ describe "Semantic: iyi" do
     end
   end
 
-  describe "import name conflicts (SPEC.md II.3)" do
+  describe "import name conflicts (iyi SPEC II.3)" do
     it "reports an ambiguous function at the point of use" do
       assert_error <<-CODE, "'title' is ambiguous here"
         module App
@@ -854,7 +854,7 @@ describe "Semantic: iyi" do
     end
   end
 
-  describe "traits are their own type (SPEC.md R-3)" do
+  describe "traits are their own type (iyi SPEC R-3)" do
     it "refuses to reopen a struct as a trait" do
       assert_error <<-CODE, "Foo is not a trait, it's a struct"
         module App
@@ -1548,7 +1548,7 @@ describe "Semantic: iyi" do
     end
 
     # And two impls of one parameterised trait, whose methods take the same
-    # arguments: the second silently won (SPEC.md II.6).
+    # arguments: the second silently won (iyi SPEC II.6).
     it "refuses two impls of a parameterised trait answering one method" do
       assert_error <<-CODE, "App::Conv::User#into is what impl App::Conv::Into(String) for App::Conv::User answers"
         module App
@@ -1692,7 +1692,7 @@ describe "Semantic: iyi" do
     end
   end
 
-  describe "generic impls (SPEC.md II.7)" do
+  describe "generic impls (iyi SPEC II.7)" do
     it "implements a trait for every instantiation of a generic type" do
       assert_type(<<-CODE) { int32 }
         trait Showable
@@ -2004,7 +2004,7 @@ describe "Semantic: iyi" do
   # a bound on an impl's parameter: the method exists either way, so there is
   # one check where the variable binds and nothing to defer. The impl form
   # stays unimplemented — see the `describe` above.
-  describe "trait bounds on a method (SPEC.md II.7)" do
+  describe "trait bounds on a method (iyi SPEC II.7)" do
     it "accepts a call whose bound type implements the trait" do
       assert_type(<<-CODE) { int32 }
         module App
@@ -2186,7 +2186,7 @@ describe "Semantic: iyi" do
     end
   end
 
-  # iyi: `trait Ord : Eq` — a trait requiring another trait (SPEC.md II.6).
+  # iyi: `trait Ord : Eq` — a trait requiring another trait (iyi SPEC II.6).
   # A requirement, not an inclusion, so a type still acquires `Eq` only by
   # having an `impl Eq for` it — which is what keeps R-3 the only route in.
   describe "supertraits" do
@@ -2413,7 +2413,7 @@ describe "Semantic: iyi" do
     end
   end
 
-  # iyi: `type Elem` — an associated type (SPEC.md II.6). It is an output of the
+  # iyi: `type Elem` — an associated type (iyi SPEC II.6). It is an output of the
   # impl, not an input the caller picks, which is why a trait that declares one
   # can be implemented only once for a type.
   describe "associated types" do
@@ -2868,7 +2868,7 @@ describe "Semantic: iyi" do
     end
   end
 
-  # iyi: errors are ordinary union members (SPEC.md III.1). `Error` is the
+  # iyi: errors are ordinary union members (iyi SPEC III.1). `Error` is the
   # compiler's own marker trait: what makes a member an error member is that
   # its type implements it, which needs no new syntax and no new type machinery.
   describe "errors" do
@@ -2942,7 +2942,7 @@ describe "Semantic: iyi" do
     end
 
     it "types a call from its declared error union, not from its body" do
-      # SPEC.md III.1.8, IV.2: the signature is the contract. Typed from the
+      # iyi SPEC III.1.8, IV.2: the signature is the contract. Typed from the
       # body, `never` was `Int32` and `never!` was refused as having "no error
       # to propagate", while a build reading `never` from its `.iyimod` typed
       # it `Int32 | IOError`.
@@ -3229,7 +3229,7 @@ describe "Semantic: iyi" do
         CODE
     end
 
-    # iyi: a module's initialisation may not fail (SPEC.md III.5). Already
+    # iyi: a module's initialisation may not fail (iyi SPEC III.5). Already
     # rejected before this, but through Crystal's rule about `return` — which
     # is what the expansion happens to be made of, and explains nothing.
     it "refuses to propagate out of a module's initialisation" do
@@ -3262,7 +3262,7 @@ describe "Semantic: iyi" do
       assert_error "return", "can't return from top level", filename: "x.iyi"
     end
 
-    # iyi: `defer` (SPEC.md III.1.4). The shape of the expansion is specced in
+    # iyi: `defer` (iyi SPEC III.1.4). The shape of the expansion is specced in
     # `spec/compiler/normalize/defer_spec.cr`; what matters here is that it
     # leaves the scope's type alone — the cleanup is a registered proc plus
     # an `ensure`, and neither contributes to a value. The harness has no
@@ -3333,7 +3333,7 @@ describe "Semantic: iyi" do
         CODE
     end
 
-    # iyi: `it` in a `case` branch (SPEC.md III.1.1). An assignment, not new
+    # iyi: `it` in a `case` branch (iyi SPEC III.1.1). An assignment, not new
     # machinery, so it picks up the narrowing the branch already did.
     it "binds `it` to the value a case is matching, narrowed per branch" do
       # `length` takes a `String`, so this only compiles if `it` is the narrowed
@@ -4098,7 +4098,7 @@ describe "Semantic: iyi" do
   end
 
   # iyi: `abstract def self.zero : self` — a trait requiring a class-level
-  # method (SPEC.md II.6). Needed for an identity: `Enumerable#sum` has no
+  # method (iyi SPEC II.6). Needed for an identity: `Enumerable#sum` has no
   # element to ask when the collection is empty.
   describe "class-level requirements" do
     it "lets a default method reach the requirement through an associated type" do
@@ -4204,7 +4204,7 @@ describe "Semantic: iyi" do
     end
   end
 
-  # iyi: `impl Into(String) for User` — a trait with parameters (SPEC.md II.6).
+  # iyi: `impl Into(String) for User` — a trait with parameters (iyi SPEC II.6).
   # Parameters are the form to reach for where several impls for one type are
   # the point; associated types are the form for a single answer per type.
   describe "parameterised traits" do
@@ -4387,7 +4387,7 @@ describe "Semantic: iyi" do
     end
   end
 
-  # SPEC.md III.4.9: what qualifies for the typed group is a parameter used
+  # iyi SPEC III.4.9: what qualifies for the typed group is a parameter used
   # as the receiver of direct spawns and nowhere else, and a block of the
   # same parameter name is a scope of its own. A task opening `group do
   # |g|` inside `group do |g|` made the outer group answer its last
@@ -4411,7 +4411,7 @@ describe "Semantic: iyi" do
     end
   end
 
-  # SPEC.md III.4.4: `Share`, gating the block `IyiThread.start` runs on
+  # iyi SPEC III.4.4: `Share`, gating the block `IyiThread.start` runs on
   # another thread (III.4.11). The stub stands in for the prelude's thread:
   # the compiler knows the call by its owner's name and the block's shape.
   describe "Share" do
@@ -4449,7 +4449,7 @@ describe "Semantic: iyi" do
     end
 
     it "refuses a constant the block names whose type is not shareable" do
-      assert_error(stub + <<-CODE, "names the constant `TALLY : Tally`, which is not Share: Tally's field @total is assigned in `bump` (SPEC.md III.4.5)", filename: "x.iyi")
+      assert_error(stub + <<-CODE, "names the constant `TALLY : Tally`, which is not Share: Tally's field @total is assigned in `bump` (iyi SPEC III.4.5)", filename: "x.iyi")
         class Tally
           def initialize
             @total = 0
@@ -4471,7 +4471,7 @@ describe "Semantic: iyi" do
     end
 
     it "refuses a class variable the block names that a method writes after its initializer" do
-      assert_error(stub + <<-CODE, "names the class variable `@@total`, which is written after its initializer (in `bump`), so every thread that reaches it shares one mutable cell: a data race (SPEC.md III.4.5)", filename: "x.iyi")
+      assert_error(stub + <<-CODE, "names the class variable `@@total`, which is written after its initializer (in `bump`), so every thread that reaches it shares one mutable cell: a data race (iyi SPEC III.4.5)", filename: "x.iyi")
         class Tally
           @@total = 0
           @@limit = 3
@@ -4495,7 +4495,7 @@ describe "Semantic: iyi" do
     end
 
     it "refuses a captured value whose type has a setter" do
-      assert_error(stub + <<-CODE, "the block IyiThread.start runs on another thread captures `counter : Counter`, which is not Share: Counter's field @count is given a setter `count=` (SPEC.md III.4.4)", filename: "x.iyi")
+      assert_error(stub + <<-CODE, "the block IyiThread.start runs on another thread captures `counter : Counter`, which is not Share: Counter's field @count is given a setter `count=` (iyi SPEC III.4.4)", filename: "x.iyi")
         class Counter
           def initialize
             @count = 0
@@ -4515,7 +4515,7 @@ describe "Semantic: iyi" do
     end
 
     it "refuses a captured value whose type assigns a field outside initialize" do
-      assert_error(stub + <<-CODE, "which is not Share: Tally's field @total is assigned in `bump` (SPEC.md III.4.4)", filename: "x.iyi")
+      assert_error(stub + <<-CODE, "which is not Share: Tally's field @total is assigned in `bump` (iyi SPEC III.4.4)", filename: "x.iyi")
         class Tally
           def initialize
             @total = 0
@@ -4539,7 +4539,7 @@ describe "Semantic: iyi" do
     end
 
     it "refuses a captured value whose field a method takes the address of" do
-      assert_error(stub + <<-CODE, "captures `counter : Counter`, which is not Share: Counter's field @n is given out by `pointerof` in `slot` (SPEC.md III.4.4)", filename: "x.iyi")
+      assert_error(stub + <<-CODE, "captures `counter : Counter`, which is not Share: Counter's field @n is given out by `pointerof` in `slot` (iyi SPEC III.4.4)", filename: "x.iyi")
         class Counter
           def initialize(@n : Int32)
           end
@@ -4751,7 +4751,7 @@ describe "Semantic: iyi" do
     end
 
     it "refuses a captured self whose type is not shareable" do
-      assert_error(stub + <<-CODE, "captures `self : Worker`, which is not Share: Worker's field @done is assigned in `finish` (SPEC.md III.4.4)", filename: "x.iyi")
+      assert_error(stub + <<-CODE, "captures `self : Worker`, which is not Share: Worker's field @done is assigned in `finish` (iyi SPEC III.4.4)", filename: "x.iyi")
         class Worker
           def initialize
             @done = false
@@ -4774,7 +4774,7 @@ describe "Semantic: iyi" do
     end
 
     it "refuses a self reached by a receiverless call whose type is not shareable" do
-      assert_error(stub + <<-CODE, "captures `self : Worker`, which is not Share: Worker's field @done is assigned in `finish` (SPEC.md III.4.4)", filename: "x.iyi")
+      assert_error(stub + <<-CODE, "captures `self : Worker`, which is not Share: Worker's field @done is assigned in `finish` (iyi SPEC III.4.4)", filename: "x.iyi")
         class Worker
           def initialize
             @done = false
@@ -4832,7 +4832,7 @@ describe "Semantic: iyi" do
         CODE
     end
 
-    # SPEC.md III.4.13: a parallel task's block may run on another core,
+    # iyi SPEC III.4.13: a parallel task's block may run on another core,
     # and is held to what a thread's block is. The stub stands in for the
     # prelude's group, known by its owner's name as the thread is.
     describe "the block spawn_parallel runs" do
@@ -4872,7 +4872,7 @@ describe "Semantic: iyi" do
       end
 
       it "refuses a captured value that is not shareable, by name" do
-        assert_error(group_stub + <<-CODE, "the block spawn_parallel runs on another thread captures `counter : Counter`, which is not Share: Counter's field @count is given a setter `count=` (SPEC.md III.4.4)", filename: "x.iyi")
+        assert_error(group_stub + <<-CODE, "the block spawn_parallel runs on another thread captures `counter : Counter`, which is not Share: Counter's field @count is given a setter `count=` (iyi SPEC III.4.4)", filename: "x.iyi")
           class Counter
             def initialize
               @count = 0
@@ -4914,7 +4914,7 @@ describe "Semantic: iyi" do
       end
 
       it "refuses a constant the block names whose type is not shareable" do
-        assert_error(group_stub + <<-CODE, "the block spawn_parallel runs on another thread names the constant `TALLY : Tally`, which is not Share: Tally's field @total is assigned in `bump` (SPEC.md III.4.5)", filename: "x.iyi")
+        assert_error(group_stub + <<-CODE, "the block spawn_parallel runs on another thread names the constant `TALLY : Tally`, which is not Share: Tally's field @total is assigned in `bump` (iyi SPEC III.4.5)", filename: "x.iyi")
           class Tally
             def initialize
               @total = 0

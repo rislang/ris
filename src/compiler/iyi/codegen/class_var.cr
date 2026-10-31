@@ -12,7 +12,7 @@ class Iyi::CodeGenVisitor
   # `%fs:`/`tpidr_el0` load. The general-dynamic default gets relaxed to
   # the same instructions by the linker, but leaves `__tls_get_addr`
   # undefined in the dynamic symbol table — a name on the link line the
-  # dependency floor (SPEC.md III.9) counts, for a call that is never
+  # dependency floor (iyi SPEC III.9) counts, for a call that is never
   # made. bench/thread_floor.sh is where the difference is measured.
   #
   # Windows is the exception, and it is not a tuning choice. COFF has no
@@ -216,7 +216,7 @@ class Iyi::CodeGenVisitor
       # iyi: a read through a virtual owner goes through a main-module
       # function that dispatches on the receiver's type id, and the main
       # module never travels, so the consumer is told: `Owner+::@@name`, the
-      # `+` being what the function is named for (SPEC.md IV.2).
+      # `+` being what the function is named for (iyi SPEC IV.2).
       iyi_record_unit_virtual_class_var class_var, "#{owner.base_type}+"
       return read_virtual_class_var_ptr(class_var, owner)
     when VirtualMetaclassType
@@ -256,7 +256,7 @@ class Iyi::CodeGenVisitor
     unit[name] = lazy || unit[name]? || false
   end
 
-  # iyi: which unit reads a class variable through a virtual owner (SPEC.md
+  # iyi: which unit reads a class variable through a virtual owner (iyi SPEC
   # IV.2), the third of the ways `IyiMod::ClassVarRef` records: the owner
   # spelled with its `+` (and `.class` for a class method's read), which is
   # what the consumer defines `~Owner+::name:read` for. `std/digest`'s
@@ -276,7 +276,7 @@ class Iyi::CodeGenVisitor
   end
 
   # iyi: `Owner::@@name`, which is what tells one class variable from another
-  # (SPEC.md IV.2).
+  # (iyi SPEC IV.2).
   #
   # The owner devirtualised, because `ASN1::BER+` is how a virtual type prints
   # and the name a consumer looks a variable up by is the class's.

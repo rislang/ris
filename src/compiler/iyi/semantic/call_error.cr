@@ -29,9 +29,9 @@ module Iyi
   # would, from inside too, and there the bare name (*bare*) reaches it.
   def self.iyi_not_exported(unit : Type, name : String, bare : String, scope : Type?) : String
     if scope && iyi_inside?(scope, unit)
-      "#{unit} does not export #{name}, and a qualified name reaches only what a module exports, from inside it too: write `#{bare}` here, or mark it `pub` — see SPEC.md R-2"
+      "#{unit} does not export #{name}, and a qualified name reaches only what a module exports, from inside it too: write `#{bare}` here, or mark it `pub` — see iyi SPEC R-2"
     else
-      "#{unit} does not export #{name}. Only what a module marks `pub` is reachable from outside it — see SPEC.md R-2"
+      "#{unit} does not export #{name}. Only what a module marks `pub` is reachable from outside it — see iyi SPEC R-2"
     end
   end
 
@@ -52,7 +52,7 @@ class Iyi::Path
     private_const = type.lookup_path(self, include_private: true)
     if private_const
       # iyi: a type an iyi module left unmarked is closed by `pub` rather than
-      # by Crystal's `private`, so say which word is missing (SPEC.md R-2).
+      # by Crystal's `private`, so say which word is missing (iyi SPEC R-2).
       namespace = private_const.is_a?(Type) ? private_const.namespace : nil
       if namespace && namespace.iyi_unit?
         self.raise(Iyi.iyi_not_exported(namespace, private_const.to_s, names.last, type))
@@ -70,13 +70,13 @@ class Iyi::Path
     if moved = iyi_package_module_name(type.program, names.first)
       lead = global? ? "::" : ""
       self.raise("undefined constant #{self}\n`#{lead}#{names.first}` is `#{lead}#{moved}`: a package's modules live under " \
-                 "the package's name, so two packages' modules of one name are two modules (SPEC.md III.7). " \
+                 "the package's name, so two packages' modules of one name are two modules (iyi SPEC III.7). " \
                  "Did you mean '#{lead}#{moved}'?", suggestion: "#{lead}#{moved}", size: lead.size + names.first.size)
     end
 
     # iyi: the name is usually not missing, it is out of reach - a type a
     # module this program loaded declares, and this file has not written
-    # `import X::{...}` for (SPEC.md R-2b), or one its module never marked `pub`
+    # `import X::{...}` for (iyi SPEC R-2b), or one its module never marked `pub`
     # (R-2). The same two answers `iyi_out_of_reach_hint` gives a call.
     if names.size == 1 && (hint = iyi_type_out_of_reach_hint(type.program, names.first))
       self.raise("undefined constant #{self}\n#{hint}")
@@ -122,7 +122,7 @@ class Iyi::Path
     written = names.map(&.underscore).join('/')
     roots = [program.iyi_project_root || program.filename.try { |entry| File.dirname(entry) }, program.iyi_header_root]
     return nil unless (roots.compact + program.iyi_path.entries).any? { |root| File.file?(File.join(root, "#{written}.iyi")) }
-    "`#{self}` is module `#{written}`, which this file has not imported: `import #{written}` (SPEC.md R-2b)"
+    "`#{self}` is module `#{written}`, which this file has not imported: `import #{written}` (iyi SPEC R-2b)"
   end
 
   # The qualified name of the one package module called *name*, when it
@@ -154,14 +154,14 @@ class Iyi::Path
       return "`#{name}` is exported by #{written.map { |path| "`#{path}`" }.join(" and ")}, " \
              "and this file has not brought it into scope. Import it by name, " \
              "`import #{written.first}::{#{name}}`, or write it as `#{exporting.first}::#{name}` " \
-             "(SPEC.md R-2b)"
+             "(iyi SPEC R-2b)"
     end
 
     unless hiding.empty?
       written = hiding.first.to_s.split("::").map(&.underscore).join('/')
       return "`#{written}` declares `#{name}` and does not mark it `pub`, " \
              "so it is the module's own and no other module can reach it " \
-             "(SPEC.md R-2)"
+             "(iyi SPEC R-2)"
     end
 
     nil
@@ -171,7 +171,7 @@ class Iyi::Path
   # enum|alias NAME` at the top level, with the two lines that bring it in.
   # Read off the search path the way an import is resolved, and only on
   # the error path. A string walk rather than a `Regex`: the compiler
-  # links no pcre2 (SPEC.md III.9), and one regex here was enough to make
+  # links no pcre2 (iyi SPEC III.9), and one regex here was enough to make
   # it. Public for the impl refusal too: `Enumerable` is a module the
   # compiler declares, so `impl Enumerable for Nums` without the import
   # finds that module instead of an undefined constant.
@@ -245,11 +245,11 @@ module Iyi
     "BTreeMap"  => "`Hash(K, V)` is the name here: `{\"a\" => 1}` is a `Hash(String, Int32)`.",
     "Boolean"   => "`Bool` is the name here.",
     "String"       => "`String` is the name here.",
-    "Result"    => "There is no `Result`: an error is a member of the return type's union, `Int32 | ParseError`, with `impl Error for ParseError` (SPEC.md III.1).",
+    "Result"    => "There is no `Result`: an error is a member of the return type's union, `Int32 | ParseError`, with `impl Error for ParseError` (iyi SPEC III.1).",
     "Option"    => "There is no `Option`: a value that may be nil is `T?`, `Int32?`.",
-    "Mutex"     => "There is no `Mutex`: an `Atomic(Int32)` keeps a shared count (SPEC.md III.4.10), and one owner task keeps shared state that the others send RisBoard messages to.",
-    "Thread"    => "A kernel thread is `IyiThread.start { ... }` (SPEC.md III.4.11); a task is `g.spawn { ... }` inside `group do |g| ... end`.",
-    "WaitGroup" => "A `group do |g| ... end` waits for every task it started (SPEC.md III.4.9).",
+    "Mutex"     => "There is no `Mutex`: an `Atomic(Int32)` keeps a shared count (iyi SPEC III.4.10), and one owner task keeps shared state that the others send RisBoard messages to.",
+    "Thread"    => "A kernel thread is `IyiThread.start { ... }` (iyi SPEC III.4.11); a task is `g.spawn { ... }` inside `group do |g| ... end`.",
+    "WaitGroup" => "A `group do |g| ... end` waits for every task it started (iyi SPEC III.4.9).",
   }
 
   IYI_ARRIVAL_CALL_HINTS = {
@@ -260,7 +260,7 @@ module Iyi
     "printf"  => "`printf`, `sprintf` and `String#%` come with `import std/format::{printf}`.",
     "sprintf" => "`printf`, `sprintf` and `String#%` come with `import std/format::{sprintf}`.",
     "rand"    => "There is no `rand` in the prelude: `Random.new.rand(n)` comes with `import std/random::{Random}`.",
-    "spawn"   => "`spawn` is a group's: `group do |g| g.spawn { ... } end` (SPEC.md III.4). A task has a boundary, and the group is it.",
+    "spawn"   => "`spawn` is a group's: `group do |g| g.spawn { ... } end` (iyi SPEC III.4). A task has a boundary, and the group is it.",
     "let"     => "There is no `let`: a variable is `x = 1`, and its type is the value's.",
     "var"     => "There is no `var`: a variable is `x = 1`, and its type is the value's.",
     # `const x = 5`, the line TypeScript writes most, was "undefined method
@@ -280,8 +280,8 @@ module Iyi
     "null"    => "`nil` is the spelling here, and it is a type: a value that may be nil is `T?`.",
     # The words that open a failure, a container or a loop somewhere else.
     "new"   => "There is no `new` keyword: the type answers it — `Array(Int32).new`, `Point.new(1)`.",
-    "throw" => "`raise \"why\"` is the spelling here, and it panics rather than unwinding to a handler (SPEC.md III.1.4).",
-    "catch" => "iyi has no exceptions to catch: an error is a value the caller handles, and `!` propagates it (SPEC.md III.1, III.1.7a).",
+    "throw" => "`raise \"why\"` is the spelling here, and it panics rather than unwinding to a handler (iyi SPEC III.1.4).",
+    "catch" => "iyi has no exceptions to catch: an error is a value the caller handles, and `!` propagates it (iyi SPEC III.1, III.1.7a).",
     "range" => "A range is written `(0...3)` — `...` excludes the end, `..` includes it — and `(0...3).each do |i| ... end` iterates it.",
     "echo"  => "`puts` is the spelling here; it ends the line.",
     # A call in this table is one with no receiver, so the method table's
@@ -289,15 +289,15 @@ module Iyi
     "parseInt" => "`.to_i` is the spelling here: `\"3\".to_i`, and it panics on what is not a number.",
     # JavaScript's, Python's and Rust's concurrency words. Each was
     # "undefined method" with nothing after it.
-    "await" => "There is no `await`: a task started with `t = g.spawn { fetch }` inside `group do |g|` ... `end` answers with `t.value`, which waits for it (SPEC.md III.4).",
-    "async" => "There is no `async`: concurrency is a group, `group do |g|` ... `end`, and each `g.spawn { ... }` in it is a task (SPEC.md III.4).",
+    "await" => "There is no `await`: a task started with `t = g.spawn { fetch }` inside `group do |g|` ... `end` answers with `t.value`, which waits for it (iyi SPEC III.4).",
+    "async" => "There is no `async`: concurrency is a group, `group do |g|` ... `end`, and each `g.spawn { ... }` in it is a task (iyi SPEC III.4).",
   }
 
   # A method called on a receiver in Crystal's spelling, and
   # what the prelude has instead; `/` only where the receiver is an
   # integer.
   IYI_ARRIVAL_METHOD_HINTS = {
-    "not_nil"     => "There is no `not_nil!`: `!` propagates an error here (SPEC.md III.1.7a). Narrow the nil first (`if x`) or give it an answer (`x || default`).",
+    "not_nil"     => "There is no `not_nil!`: `!` propagates an error here (iyi SPEC III.1.7a). Narrow the nil first (`if x`) or give it an answer (`x || default`).",
     "try"         => "There is no `try`: narrow the nil first (`if x = a[0]?`) or give it an answer (`x || default`).",
     "/"           => "Integer division is `//` here (`7 // 2` is 3); `/` is the floats' and answers a `Float64` only for them.",
     "%"           => "`%` on a String is a format string, and it comes with `import std/format` (`printf`, `sprintf` and `String#%`).",
@@ -330,8 +330,8 @@ module Iyi
     "clone"       => "`dup` is the copy here: `ys = xs.dup`.",
     "iter"        => "There is no `iter`: a collection takes the block itself, `xs.map { |x| x * 2 }`.",
     "get"         => "`h[key]?` is the lookup here: it answers nil for a missing key, and `h[key]` panics on one.",
-    "join"        => "`t.value` waits for a task and answers what its block did (SPEC.md III.4).",
-    "await"       => "`t.value` waits for a task and answers what its block did (SPEC.md III.4); there is no `await`.",
+    "join"        => "`t.value` waits for a task and answers what its block did (iyi SPEC III.4).",
+    "await"       => "`t.value` waits for a task and answers what its block did (iyi SPEC III.4); there is no `await`.",
     # `Array#sum` asks the element type for its zero, because an empty
     # array has no element to ask. A type that is not a number has none,
     # and the sentence a person is missing is what to use instead.
@@ -534,7 +534,7 @@ class Iyi::Call
       unless owner.lookup_defs(paired).empty?
         error_message += "\n\n`#{paired}` is the block form: this library " \
                          "spells \"the same question, answered per element\" " \
-                         "with `_by` rather than with an overload (SPEC.md III.1.7a)"
+                         "with `_by` rather than with an overload (iyi SPEC III.1.7a)"
       end
     end
 
@@ -773,7 +773,7 @@ class Iyi::Call
             str << "`#{actual}` does not implement `#{wanted}`. Write "
             str << "`impl #{wanted} for #{actual}` in the module that declares "
             str << "`#{wanted}` or in the one that declares `#{actual}` — R-3 "
-            str << "allows those two and no others (SPEC.md IV.4)"
+            str << "allows those two and no others (iyi SPEC IV.4)"
           end
         end
 
@@ -800,7 +800,7 @@ class Iyi::Call
   end
 
   # iyi: a union implements a trait when every member does, and an impl for
-  # the union itself is refused (SPEC.md II.1), so the advice names the
+  # the union itself is refused (iyi SPEC II.1), so the advice names the
   # members. It used to be "Write `impl Show for (Int32 | Nil)`", which the
   # next build answered with "can't implement a trait for (Int32 | Nil),
   # it's a union". A nil is the usual missing member, and there the answer
@@ -809,13 +809,13 @@ class Iyi::Call
     lacking = actual.union_types.map(&.devirtualize).reject(&.implements?(wanted)).uniq!
     str << "`#{actual}` does not implement `#{wanted}`: a union implements a trait when every member does"
     if lacking.empty?
-      str << " (SPEC.md II.1)"
+      str << " (iyi SPEC II.1)"
       return
     end
     str << ", and "
     to_sentence(str, lacking.map { |type| "`#{type}`" }, " and ")
     str << (lacking.size == 1 ? " does not" : " do not")
-    str << " (SPEC.md II.1). "
+    str << " (iyi SPEC II.1). "
     if lacking.size == 1 && lacking.first.nil_type?
       value = arg.is_a?(Var) ? arg.name : nil
       if value
@@ -828,7 +828,7 @@ class Iyi::Call
       str << "A union's impl is not writable; write "
       to_sentence(str, lacking.map { |type| "`impl #{wanted} for #{type}`" }, " and ")
       str << ", each in the module that declares `#{wanted}` or in the one that declares the member — R-3 "
-      str << "allows those two and no others (SPEC.md IV.4)"
+      str << "allows those two and no others (iyi SPEC IV.4)"
     end
   end
 
@@ -1165,7 +1165,7 @@ class Iyi::Call
         if implemented = iyi_std_trait_with_method(text, name, bare)
           return "`#{written}` implements `#{implemented}` for #{bare} and that is where " \
                  "`#{name}` is: `import #{written}` puts it on this receiver " \
-                 "(SPEC.md R-3)."
+                 "(iyi SPEC R-3)."
         end
         reopening << written if iyi_std_reopen_with_method?(text, name, bare) && !reopening.includes?(written)
       end
@@ -1273,14 +1273,14 @@ class Iyi::Call
       return "`#{def_name}` is exported by #{written.map { |path| "`#{path}`" }.join(" and ")}, " \
              "and this file has not brought it into scope. Import it by name, " \
              "`import #{written.first}::{#{def_name}}`, or call it as `#{qualified}` " \
-             "(SPEC.md R-2b)"
+             "(iyi SPEC R-2b)"
     end
 
     unless hiding.empty?
       written = iyi_written_path(hiding.first)
       return "`#{written}` declares `#{def_name}` and does not mark it `pub`, " \
              "so it is the module's own and no other module can reach it " \
-             "(SPEC.md R-2)"
+             "(iyi SPEC R-2)"
     end
 
     nil
@@ -1300,7 +1300,7 @@ class Iyi::Call
     "`#{name}` here is the prelude's, and #{written.map { |path| "`#{path}`" }.join(" and ")} " \
     "exports a `#{name}` that has `#{def_name}`, which this file has not brought into scope. " \
     "Import it by name, `import #{written.first}::{#{name}}`, or write it as " \
-    "`#{exporting.first}::#{name}` (SPEC.md R-2b)"
+    "`#{exporting.first}::#{name}` (iyi SPEC R-2b)"
   end
 
   # iyi: `class String` in `module app/main` declares `App::Main::String`, a
@@ -1341,7 +1341,7 @@ class Iyi::Call
     add = if top
             "A method is added to `#{shown}` with `#{shadow.type_desc} #{shown}`"
           else
-            "Another module's type is closed (SPEC.md R-3): a method for it is a `def` taking one, " \
+            "Another module's type is closed (iyi SPEC R-3): a method for it is a `def` taking one, " \
             "or a trait of this module's with `impl Trait for #{type.name}`"
           end
     "`#{shadow}` is a new type, declared at #{::Path[file].basename}:#{location.line_number}, that shadows " \
@@ -1465,7 +1465,7 @@ class Iyi::Call
     String.build do |str|
       case def_name
       when "try"     then str << "There is no `try`. "
-      when "not_nil" then str << "There is no `not_nil!`: `!` propagates an error here (SPEC.md III.1.7a). "
+      when "not_nil" then str << "There is no `not_nil!`: `!` propagates an error here (iyi SPEC III.1.7a). "
       end
       receiver = iyi_receiver_code(obj)
       if obj.is_a?(Var)
@@ -1491,7 +1491,7 @@ class Iyi::Call
     String.build do |str|
       str << (receiver ? "`#{receiver}`" : "The receiver") << " can be "
       to_sentence(str, errors.map { |type| "`#{type}`" }, " or ")
-      str << " here, " << (errors.size == 1 ? "an error" : "errors") << " (SPEC.md III.1): "
+      str << " here, " << (errors.size == 1 ? "an error" : "errors") << " (iyi SPEC III.1): "
       if receiver && !values.empty?
         bound = obj.is_a?(Var) || obj.is_a?(InstanceVar) ? receiver : "value = #{receiver}"
         str << "give " << (errors.size == 1 ? "it" : "them") << " an answer (`" << receiver << ".or(default)`), tell them apart (`case " << bound << "` with `in "
@@ -1570,7 +1570,7 @@ class Iyi::Call
         # iyi: a nilable receiver is the commonest shape this error takes,
         # and the sentence above names the type without saying what to
         # do; the two idioms are one line each. An error member is the
-        # same shape with three (SPEC.md III.1).
+        # same shape with three (iyi SPEC III.1).
         if owner.is_a?(NilType)
           msg << '\n' << iyi_nil_receiver_hint(obj, def_name)
           receiver_hinted = true
@@ -1596,20 +1596,20 @@ class Iyi::Call
           msg << "If you declared '#{def_name}' in a suffix if, declare it in a regular if for this to work. If the variable was declared in a macro it's not visible outside it."
         elsif similar_name.size > 1 && similar_name.ends_with?('!')
           # iyi: a name this language cannot write. `!` is not part of a name
-          # here (SPEC.md III.1.7), so the nearest thing to `not_nil` in
+          # here (iyi SPEC III.1.7), so the nearest thing to `not_nil` in
           # Crystal's library — or to `sort` in a bound shard's — is a name no
           # call in a `.iyi` file can spell. Suggesting it was worse than
           # saying nothing: the edit travels in `check -f json` as
           # `suggested_edit`, and `iyi fix` applies those, so the answer to an
           # undefined method was a file that no longer parses.
-          msg << "'#{similar_name}' is what that library calls it, and `!` cannot end a name in iyi (SPEC.md III.1.7): no call written here can spell it. Reach it through a Crystal-side method whose name this language can write."
+          msg << "'#{similar_name}' is what that library calls it, and `!` cannot end a name in iyi (iyi SPEC III.1.7): no call written here can spell it. Reach it through a Crystal-side method whose name this language can write."
         else
           msg << "Did you mean '#{similar_name}'?"
           suggested_edit = similar_name unless floor_div
         end
       end
 
-      # iyi: the participle is there and the plain verb is not (SPEC.md
+      # iyi: the participle is there and the plain verb is not (iyi SPEC
       # III.1.7a).
       #
       # `!` cannot end a name here, so the pair Crystal spells `sort` and
@@ -1618,7 +1618,7 @@ class Iyi::Call
       # and teaches nothing. The suggestion machinery above will not reach it —
       # `sort` to `sorted` is two edits — so the rule says it instead.
       if !similar_name && (participle = in_place || iyi_participle_for(def_name, owner))
-        msg << '\n' << "'#{participle}' is what this library calls it: `!` cannot end a name here, so the copy takes the participle and the one that changes the receiver says so (SPEC.md III.1.7a)"
+        msg << '\n' << "'#{participle}' is what this library calls it: `!` cannot end a name here, so the copy takes the participle and the one that changes the receiver says so (iyi SPEC III.1.7a)"
         # The participle *is* the name to type here — as much an edit as
         # a Levenshtein hit, and the reason the rule exists.
         suggested_edit = participle
@@ -1671,7 +1671,7 @@ class Iyi::Call
         if reachable = iyi_std_method_hint(program, def_name, owner)
           msg << '\n' << reachable
         elsif !receiver_hinted
-          msg << '\n' << "iyi's prelude has no `#{def_name}` on #{owner}: it is small by rule - a method enters when a program in the repository needs it (SPEC.md III.1). `iyi doc #{bare}` lists what it has."
+          msg << '\n' << "iyi's prelude has no `#{def_name}` on #{owner}: it is small by rule - a method enters when a program in the repository needs it (iyi SPEC III.1). `iyi doc #{bare}` lists what it has."
         end
       end
 
@@ -2006,7 +2006,7 @@ class Iyi::Call
         # own site asking, not a caller outside the wall. It reaches a
         # module's unmarked function and a type's `private def` the way the
         # module's own code does, which is what typing the body at its
-        # definition means (SPEC.md R-2c).
+        # definition means (iyi SPEC R-2c).
         return if iyi_synthetic?
 
         if name == "initialize" && parent_visitor.call.try(&.name) == "new"

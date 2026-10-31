@@ -1,6 +1,6 @@
 # ris TODO
 
-Rules: TAPE_SPEC.md. Goal: no GC or general heap, including the runtime.
+Rules: SPEC.md. Goal: no GC or general heap, including the runtime.
 Measure: test/ris/heap_budget.txt, semantic gates and binary link audits.
 
 How to work (fewer tokens, faster to the goal):
@@ -37,7 +37,7 @@ the std row. Update a row when its work starts or ends.
 | macOS arm64 (needs a Mac to test)    | medium  | 1-2 days | 200-400k |
 | Windows                              | large   | days     | 500k+    |
 
-## Messages: RisBoard (TAPE_SPEC 5.2, 5.6; doc/MESSAGES.md)
+## Messages: RisBoard (SPEC 5.2, 5.6; doc/MESSAGES.md)
 
 All work in this checkout, one full check per item; Codex is out of
 usage until 2026-11-02. Pipe is an OS pipe on Linux and macOS (refused
@@ -150,7 +150,7 @@ on one task. Next in order: bench ports, then autocert part B.
 
 One text type and one way to append; the compiler decides where text
 grows. `String::Builder` stays only as a parameter type ("append to the
-caller's text"). Change TAPE_SPEC 7.3 in the step that implements it.
+caller's text"). Change SPEC 7.3 in the step that implements it.
 
 ```crystal
 out = "Viga: "          # a view of the literal, no cost
@@ -222,7 +222,7 @@ first):
 
 ## Next
 
-* TAPE_SPEC 1.1, 1.5, 1.9, 3.2, 3.6 (2026-10-31): every scope frees.
+* SPEC 1.1, 1.5, 1.9, 3.2, 3.6 (2026-10-31): every scope frees.
   Steps, each with its gate: (1) count today's scopes whose mark stays
   off though they allocate, in std, samples and the goose-evaluations
   ports; (2) mark always on, TapeShrinkChecker's store check in every
@@ -236,7 +236,7 @@ first):
 * Escaping closures outside program and joined task owners: pooled
   environments, including captured receivers; release them with their
   owner, check capture lifetimes and refuse unsupported escapes safely.
-* Finish typed pool validation (TAPE_SPEC 6.1-6.4): audit remaining bounds,
+* Finish typed pool validation (SPEC 6.1-6.4): audit remaining bounds,
   overflow, membership, stale views, reset lifetimes and external images.
   Borrowed Run constructors now retain Array shrink lifetimes; gates cover
   constructor bounds and foreign Array storage as well as pool storage.
@@ -298,7 +298,7 @@ first):
   ABI; selected std classes opt in with @[OnTape].
 * Complete the Pool/SlicePool surface beyond the validated paths in use.
 * std heap left (2026-10-30, fifth pass): to_heap 0; 34 malloc sites,
-  all in win32 or darwin branches, which TAPE_SPEC 7.1 never builds
+  all in win32 or darwin branches, which SPEC 7.1 never builds
   (file 8, user 6, process 7, socket 2, dir 2, path 2, system 1: hostname
   on win32). Drop those branches or port them when a non-Linux target is
   back; gc is refused by design. Done, each with a test/ris/<module>.ri
@@ -378,7 +378,7 @@ first):
     `text.to_unsafe` straight to a lib fun; elsewhere it stays refused
     (pointer_unsafe_to_unsafe, ffi_to_unsafe_stored).
   * interpolation_retained and contract_spawn: done, now runs gates
-    (TAPE_SPEC 1.6); task_local_tape(_helper) cover the unsafe cases.
+    (SPEC 1.6); task_local_tape(_helper) cover the unsafe cases.
   * autocert lifecycle and wire: fixed. AcmeJson.each_object yields
     each object in place (no Array of Hash); ACME answers are @[OnTape];
     AcmeClient#finalize is finalize_order (a class may not finalize).
@@ -401,7 +401,7 @@ first):
   what follows; Host replaced while filling the table (:2627); H2
   flush clears after the write. The to_unsafe rule's stops in
   compress.iyi and zstd.iyi are gone; http_prefork, serve,
-  logline and the heap gate pass. TAPE_SPEC 3.2 is a compiler
+  logline and the heap gate pass. SPEC 3.2 is a compiler
   rule now (TapeShrinkChecker): data made in an explicit `tape` block,
   stored where it outlives it (a local, field or object from outside,
   also through calls), is refused naming copy_to; tests refused/

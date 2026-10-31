@@ -10,7 +10,7 @@ import std/x509::{Certificate}
 # on loopback (its directory the first argument): a resolver asking DNS
 # over TLS, then DNS over HTTPS by POST and GET. Each upstream connects
 # by address and looks nothing up, so no exchange calls back into the
-# resolver that asks it (TAPE_SPEC 3.5).
+# resolver that asks it (SPEC 3.5).
 
 dir = Program.arguments[0]
 roots = Certificate.from_pem(File.read("#{dir}/ca.pem").as_tape)

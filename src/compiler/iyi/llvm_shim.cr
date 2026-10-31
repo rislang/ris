@@ -10,7 +10,7 @@
 # `crystal build --no-codegen` is exactly a process that never calls it. So a
 # front end that does not link it starts in 0.004 s like any other Crystal
 # program, and the figure the 0.1.0 target is set on becomes mostly analysis
-# rather than mostly a code generator coming up (SPEC.md 0.1.0, IV.1d).
+# rather than mostly a code generator coming up (iyi SPEC 0.1.0, IV.1d).
 #
 # Required in place of `llvm` under `-Dwithout_llvm`, and nowhere else. What it
 # has to cover is small, which is the finding that made the split worth trying:

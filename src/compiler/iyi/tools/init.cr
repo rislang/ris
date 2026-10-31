@@ -211,7 +211,7 @@ module Iyi
       # iyi: was `gsub(/[-_]([^a-z])/i, "\\1")`, a regex literal, which is
       # pcre2 back on the compiler's link line. The pattern is fixed, so it
       # compiles once through Iyi::Rx, whose replacement keeps `\1` group
-      # references (SPEC.md III.10).
+      # references (iyi SPEC III.10).
       NAME_SEPARATOR = Rx::Pattern.compile("[-_]([^a-z])", ignore_case: true)
 
       def self.module_name(name)

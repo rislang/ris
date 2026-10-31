@@ -1,5 +1,5 @@
 # iyi: `iyi fix`'s rewrite of `using`, the keyword one `import` replaced
-# (SPEC.md R-2b).
+# (iyi SPEC R-2b).
 #
 #     using app/greeter              ->  import app/greeter::*
 #     using app/greeter::{polite}    ->  import app/greeter::{polite}

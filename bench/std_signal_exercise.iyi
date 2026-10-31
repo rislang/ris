@@ -112,7 +112,7 @@ def watchdog(done : -> Bool) : Nil | Cancelled | TimedOut
 end
 
 # A waiter's answer as text: a task answers it from its `value`, as a
-# task shares no local with its spawner (TAPE_SPEC 5.1).
+# task shares no local with its spawner (SPEC 5.1).
 def waited_text(answer) : String
   answer.is_a?(Signal) ? answer.to_s : "cancelled"
 end
@@ -230,7 +230,7 @@ puts "  two arrivals nobody waited for are one"
 puts "== a graceful stop: the signal stops the listener's task, the group joins"
 # The listener's task owns the socket; the signal's waiter holds only its
 # task handle, the Share stop handle, and cancels it: the accept answers
-# Cancelled and the owner closes the listener (TAPE_SPEC 5.1).
+# Cancelled and the owner closes the listener (SPEC 5.1).
 server = IyiSocket.listen("127.0.0.1", 0)
 port = server.local_port
 answered = ""

@@ -108,7 +108,7 @@ Goose §5.4, `reusable` arrays:
   that lives long (a TLS session, a cache entry, a header table) is a run
   of a `SlicePool(UInt8)`.
 * A pool is owned by a program value or a task, never shared mutably
-  across tasks (TAPE_SPEC 5.1).
+  across tasks (SPEC 5.1).
 * Examples: an HPACK table is a `Pool` of entries and a `SlicePool(UInt8)`
   of their bytes; an autocert cache is a `Hash` from name to a pool index.
 

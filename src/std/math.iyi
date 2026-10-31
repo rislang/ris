@@ -9,7 +9,7 @@ import std/static_array::{StaticArray}
 
 # The hardware instructions this module names. A fused multiply-add is
 # among them on aarch64 only: `llvm.fma.f64` is one instruction there and
-# a call into libm on the x86-64 baseline, and the floor (SPEC.md III.9)
+# a call into libm on the x86-64 baseline, and the floor (iyi SPEC III.9)
 # links no libm, so `fma` asks the prelude's `IyiRounding` for x86-64's
 # instruction where the processor has it and takes musl's exact software
 # arm where it has not.

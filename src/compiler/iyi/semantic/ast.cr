@@ -564,7 +564,7 @@ module Iyi
     property initializer : ClassVarInitializer?
 
     # iyi: the initial value as it was *written*, for `TypeDecl#class_vars`
-    # (SPEC.md IV.2).
+    # (iyi SPEC IV.2).
     #
     # A class variable's value has to run on the far side of an artifact, so it
     # travels as source — and the node above is not that source by the time an
@@ -580,7 +580,7 @@ module Iyi
 
     # iyi: the first write to a class variable the typer met outside its
     # initializer - an assignment, or a `pointerof` that can write it - and
-    # the def it is in, for the thread gate (SPEC.md III.4.5). A class
+    # the def it is in, for the thread gate (iyi SPEC III.4.5). A class
     # variable only its initializer writes is a value; one written again is
     # a cell every thread that names it shares. Code nothing calls is never
     # typed, and never runs, so it writes nothing here.

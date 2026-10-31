@@ -3,7 +3,7 @@
 module boot/registry
 
 # This statement belongs to `boot/registry`'s initialiser, and `boot/registry`
-# initialises after every module it imports (SPEC.md III.5 rule 1). So
+# initialises after every module it imports (iyi SPEC III.5 rule 1). So
 # `boot/config`'s line is already printed by the time this one runs, even
 # though the `import` that names it is written below.
 #

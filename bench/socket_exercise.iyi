@@ -322,7 +322,7 @@ duplex_server.close
 puts "duplex: ok"
 
 # 5. A read parks rather than blocks, and a cancelled task's read answers
-#    `Cancelled` (SPEC.md III.4.2). Three tasks on one thread: a reader
+#    `Cancelled` (iyi SPEC III.4.2). Three tasks on one thread: a reader
 #    parked on a connection nobody writes to, a sibling that answers an
 #    error and so cancels the group, and the group owner accepting. If the
 #    read blocked the thread, the sibling could never run and the group
@@ -648,7 +648,7 @@ puts "timeout: ok"
 
 # A cancelled reader closes its own connection in cleanup. The peer gets
 # the answer sent before cancellation, then EOF. Closing the socket from
-# a sibling while its owner reads would violate TAPE_SPEC 5.1.
+# a sibling while its owner reads would violate SPEC 5.1.
 c_server = IyiSocket.listen("127.0.0.1", 0)
 c_port = c_server.local_port
 group do |g|

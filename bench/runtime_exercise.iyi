@@ -1,4 +1,4 @@
-# Exercises SPEC.md III.4 concurrency runtime on Windows x86_64, Linux, and Darwin.
+# Exercises iyi SPEC III.4 concurrency runtime on Windows x86_64, Linux, and Darwin.
 #
 # Properties asserted:
 # 1. Genuine task interleaving across board messages in a group (ping-pong order).
@@ -127,7 +127,7 @@ impl Error for TaskFailed
   end
 end
 
-# Messages between the tasks below, on the board (TAPE_SPEC 5.2).
+# Messages between the tasks below, on the board (SPEC 5.2).
 record RPing, n : Int32
 record RPong, n : Int32
 record RDrain, n : Int32
@@ -407,7 +407,7 @@ end
 
 fail("captured it: a task answered #{captured_total(10)} for 10 and s11") unless captured_total(10) == 13
 fail("captured it: a task answered #{captured_total(11)} for s11 and 12") unless captured_total(11) == 15
-# A proc keeps no tape text (TAPE_SPEC 5.3): the String arm captures
+# A proc keeps no tape text (SPEC 5.3): the String arm captures
 # its size.
 bump = case int_or_text(6)
        in Int32  then -> { it + 1 }

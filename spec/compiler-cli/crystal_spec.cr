@@ -51,7 +51,7 @@ describe "`crystal`" do
     end
 
     # iyi: `docs` was the other prefix tested here, and the documentation
-    # generator is gone (SPEC.md V.11). `mod` is this fork's own command and
+    # generator is gone (iyi SPEC V.11). `mod` is this fork's own command and
     # takes its place.
     it "accepts command prefix for mod" do
       Process.capture_result(crystal, "mo", "--help")

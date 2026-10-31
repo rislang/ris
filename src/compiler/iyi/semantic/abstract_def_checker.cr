@@ -432,7 +432,7 @@ class Iyi::AbstractDefChecker
     end
   end
 
-  # iyi: `abstract def ident(x : U) : U forall U` (SPEC.md II.6 §2).
+  # iyi: `abstract def ident(x : U) : U forall U` (iyi SPEC II.6 §2).
   #
   # A requirement's own type parameter belongs to the method, not to the
   # trait, so its return type looked up in the trait found no `U`: every such

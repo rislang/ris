@@ -103,7 +103,7 @@ else
   echo "  a setter with no written return, through its artifact:"; sed -n '1,3p' "$WORK/setter.log"; status=1
 fi
 # A def whose return names an error member answers that declared error
-# union, from source as through its artifact (SPEC.md III.1.8, IV.2), even
+# union, from source as through its artifact (iyi SPEC III.1.8, IV.2), even
 # when its body never fails. From source `never_fails` was typed from its
 # body, `Int32`: `never_fails()!` was refused with "`!` has no error to
 # propagate", and a program without the `!` built from source and failed
@@ -386,7 +386,7 @@ refuses "a ! whose error the signature does not list" 'wrongerr.iyi:31:3' -- "$I
 refuses "a ! whose error the signature does not list" 'which does not include it' -- "$IYI" check wrongerr.iyi
 # A detached `!` after a call: `v = g(-1) !` propagated, because the
 # argument list swallows the space after its `)`. Only `g(-1)!` does
-# (SPEC.md III.1.2); `f !x` is still `f(!x)`.
+# (iyi SPEC III.1.2); `f !x` is still `f(!x)`.
 printf 'module detached\n\ndef g(x : Int32) : Int32\n  x\nend\n\nv = g(-1) !\nputs v\n' > detached.iyi
 refuses "a detached ! after a call" 'write it attached, `g(-1)!`' -- \
   "$IYI" check detached.iyi
@@ -800,7 +800,7 @@ refuses "a method named or" '`or` is a reserved name in iyi' -- "$IYI" check ord
 printf 'module orpanicdef\n\nclass A\n  def self.or_panic : Int32\n    1\n  end\nend\n' > orpanicdef.iyi
 refuses "a class method named or_panic" '`or_panic` is a reserved name in iyi' -- \
   "$IYI" check orpanicdef.iyi
-# `group do ... end` is the task group by name (SPEC.md III.4.9), so a
+# `group do ... end` is the task group by name (iyi SPEC III.4.9), so a
 # class's own `def group` compiled and its call was lowered as a group:
 # "undefined method 'join' for Spawner". The def is refused now.
 printf 'module groupdef\n\nclass Pool\n  def group(& : Int32 -> Int32) : Int32\n    yield 1\n  end\nend\n' > groupdef.iyi
@@ -1620,7 +1620,7 @@ puts value
 IYI
 refuses "a macro that declares a name ending in !" "part of a name in iyi" -- \
   "$IYI" build -o "$WORK/macro_name" "$WORK/macro_name.iyi"
-# A derive may read its declaration only (SPEC.md II.4). Its `macro
+# A derive may read its declaration only (iyi SPEC II.4). Its `macro
 # finished` ran after it, and an escaped `all_subclasses` in one answered
 # `A,B` beside a `B` declared below the derived struct; its `run` ran the
 # script and the method answered what the script printed.

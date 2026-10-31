@@ -79,7 +79,7 @@ class Iyi::TapeScopeChecker
   getter graph : TapeCallGraph
 
   # The explicit `tape` blocks TapeShrinkChecker walked and could prove:
-  # it refuses storing their data anywhere that outlives them (TAPE_SPEC
+  # it refuses storing their data anywhere that outlives them (SPEC
   # 3.2) and saw no call grow or opaquely keep outer storage in them.
   @proved = Set(UInt64).new
 
@@ -301,7 +301,7 @@ class Iyi::TapeScopeChecker
       # A lent growing local rebound to its own text after the call
       # (Normalizer#lend_text_arguments) stays the value it was.
       # In a proved block, TapeShrinkChecker refuses a local from outside
-      # being bound to the block's data (TAPE_SPEC 3.2), and
+      # being bound to the block's data (SPEC 3.2), and
       # TapeLifetimeChecker keeps its text locals in it: any local may be
       # assigned.
       if @proved && target.is_a?(Var)

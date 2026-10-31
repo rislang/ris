@@ -152,7 +152,7 @@ class Iyi::Loader
   # iyi: an API set contract name, which Windows itself resolves, so the loader
   # must not hunt a file for it. Compiled once through Iyi::Rx, the
   # compiler's own engine, so this file is not one of the reasons pcre2 stays
-  # on the link line (SPEC.md III.10).
+  # on the link line (iyi SPEC III.10).
   private API_SET_DLL = Rx::Pattern.compile("^(?:api-|ext-)[a-zA-Z0-9-]*l\\d+-\\d+-\\d+\\.dll$")
 
   private def api_set?(dll)

@@ -58,11 +58,11 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
       # Crystal's `src/json.cr` and fails inside it; iyi's own is std's.
       if iyi_std_module?("std/#{filename}")
         node.raise "iyi has no `require`: iyi's own `#{filename}` is a module of its " \
-                   "standard library, reached with `import std/#{filename}` (SPEC.md R-1)."
+                   "standard library, reached with `import std/#{filename}` (iyi SPEC R-1)."
       end
       node.raise "iyi has no `require`. A module is reached with " \
                  "`import #{filename}`, and it is a path to a file rather than " \
-                 "a library name (SPEC.md R-1). There is no standard library " \
+                 "a library name (iyi SPEC R-1). There is no standard library " \
                  "to require: the prelude is what a program gets, and README.md " \
                  "says what is in it; use `import std/NAME` for library modules"
     end
@@ -142,11 +142,11 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
   end
 
   def visit(node : ImportDecl)
-    # ris: Mutex went as Channel and select did (TAPE_SPEC_CHANGELOG.md).
+    # ris: Mutex went as Channel and select did (SPEC_CHANGELOG.md).
     if node.path.join('/') == "std/mutex"
       node.raise "ris has no std/mutex: keep a shared count in an `Atomic` " \
                  "(`Atomic(Int32)`), and keep shared state in one owner task " \
-                 "that the others send RisBoard messages to (TAPE_SPEC 5.2)"
+                 "that the others send RisBoard messages to (SPEC 5.2)"
     end
 
     if expanded = node.expanded
@@ -165,7 +165,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     relative_to = location.try &.original_filename
 
 
-    # iyi: a package import (SPEC.md III.7). The manifest's prefix table is
+    # iyi: a package import (iyi SPEC III.7). The manifest's prefix table is
     # asked first — longest prefix first, so `/v2` is a different module —
     # and a hit resolves inside that requirement's checkout. A dotted path
     # that no requirement covers is refused as what it is, because "can't
@@ -185,13 +185,13 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
         inside = ", or the package the module is inside (#{above}) - `iyi mod tidy` finds which"
       end
       node.raise "no requirement covers '#{path}'. A dotted path is a " \
-                 "package (SPEC.md III.7); the file that declares one is " \
+                 "package (iyi SPEC III.7); the file that declares one is " \
                  "`iyi.mod`, at the root the entry's `module` header names or beside " \
                  "the entry, as `require #{repositories.first} v1.2.3`#{inside}" \
                  "#{iyi_header_root_hint}"
     end
 
-    # iyi: the artifact, if there is one (SPEC.md IV.1). This is R-1's contract
+    # iyi: the artifact, if there is one (iyi SPEC IV.1). This is R-1's contract
     # arriving: a module that has a `.iyimod` is compiled against it, and its
     # source is not opened — not read, not parsed, not analysed. The source
     # need not even be there.
@@ -335,7 +335,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
   end
 
   # iyi: the manifest's answer for *path* — `{filename, prefix, inner,
-  # checkout}` — or nil when no requirement covers it (SPEC.md III.7).
+  # checkout}` — or nil when no requirement covers it (iyi SPEC III.7).
   #
   # Two kinds of hit. A path with a requirement's prefix resolves inside
   # that requirement's checkout, the prefix stripped: the in-package path
@@ -574,7 +574,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     filename ? File.dirname(filename) : nil
   end
 
-  # iyi: refuses an import cycle (R-1, SPEC.md III.5 rule 1).
+  # iyi: refuses an import cycle (R-1, iyi SPEC III.5 rule 1).
   #
   # A cycle used to compile. It was refused only where a module needed one of
   # the other's names at *declaration* time — the second module of the pair is
@@ -605,9 +605,9 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
           #{chain.join(" -> ")}
 
       `import` forms a DAG (R-1). A cycle has no initialisation order — a \
-      module initialises after every module it imports (SPEC.md III.5 rule 1), \
+      module initialises after every module it imports (iyi SPEC III.5 rule 1), \
       and here each would have to go after the other — and it is what makes at \
-      most one module able to define any given impl (SPEC.md IV.4). Move what \
+      most one module able to define any given impl (iyi SPEC IV.4). Move what \
       the modules in the cycle share into a module they both import.
       MSG
   end
@@ -664,7 +664,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     end
   end
 
-  # iyi: where `import a/b` would find `a/b.iyimod` (SPEC.md IV.1).
+  # iyi: where `import a/b` would find `a/b.iyimod` (iyi SPEC IV.1).
   #
   # Nowhere at all unless `--use-iyimod` named a directory, so an ordinary
   # build is the one that was there before this existed.
@@ -715,12 +715,12 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
 
       An artifact is read only while it still describes its module, or a build
       would compile against a surface nobody has and link code nobody wrote
-      (SPEC.md IV.3). #{remedy}
+      (iyi SPEC IV.3). #{remedy}
       MESSAGE
   end
 
   # iyi: why *module_path*'s artifact is no longer the module, or nil if it
-  # still is (SPEC.md IV.3).
+  # still is (iyi SPEC IV.3).
   #
   # Two questions, and the second is the one that makes this a graph. Does the
   # artifact still describe the source it was written from — which is what the
@@ -754,7 +754,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
         return ex.message.to_s
       end
 
-    # iyi: the file is not this module's artifact at all (SPEC.md IV.6). A
+    # iyi: the file is not this module's artifact at all (iyi SPEC IV.6). A
     # module's path is its file's path, so the name in the header and the path
     # the file was found at are the same fact written twice, and this reader
     # had never compared them. Copy `m1/b.iyimod` onto `m1/a.iyimod` and the
@@ -797,7 +797,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     # every boundary this compiler wrote. A boundary's answer is its inputs,
     # taken above.
     if summary.inputs.empty? && (source = resolve_import(module_path))
-      # iyi: a module path is a file path (SPEC.md R-1), so the same name can
+      # iyi: a module path is a file path (iyi SPEC R-1), so the same name can
       # come to mean a different file — delete a program's own `std/text.iyi`
       # and `import std/text` reaches the library's module of that path. The
       # artifact is then not stale, it is about a file nobody asked for, and
@@ -853,7 +853,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     nil
   end
 
-  # iyi: compiles an imported module from its `.iyimod` (SPEC.md IV.1).
+  # iyi: compiles an imported module from its `.iyimod` (iyi SPEC IV.1).
   #
   # The artifact is read, rendered back to the declarations it was built from,
   # and those are parsed and analysed in place of the module's source. What
@@ -895,7 +895,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     if artifact.has_initialiser && @program.iyi_wants_object_code
       node.raise <<-MESSAGE
         "#{artifact.module_name}" has code inside a type body that has to run,
-        and a .iyimod carries a module's own top level and no more (SPEC.md
+        and a .iyimod carries a module's own top level and no more (iyi SPEC
         III.5, IV.1g).
 
         A program built against this artifact would link and run with that part
@@ -904,7 +904,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
         MESSAGE
     end
 
-    # iyi: an artifact from a build that generated no code (SPEC.md IV.1g),
+    # iyi: an artifact from a build that generated no code (iyi SPEC IV.1g),
     # where this build links. `build --no-codegen --emit-iyimod` writes the
     # declarations and nothing to link, and `iyi run --use-iyimod mods` on
     # one ended in 19 `LNK2019: unresolved external symbol` lines and
@@ -1042,7 +1042,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
   end
 
   # iyi: creates the types the artifact's object code refers to a type id of,
-  # so that this program numbers them (SPEC.md IV.1g).
+  # so that this program numbers them (iyi SPEC IV.1g).
   #
   # A type id is an external reference — the module's unit refers to
   # `Array(Item):type_id` and the linker resolves it from a definition in this
@@ -1067,7 +1067,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
   end
 
   # iyi: resolves the types an artifact's object code asks `~match<T>` about,
-  # so codegen can define those functions (SPEC.md IV.1g).
+  # so codegen can define those functions (iyi SPEC IV.1g).
   #
   # `number_iyi_artifact_types`' walk, for a match rather than for an id. The
   # consumer builds the function with its own numbering, which is the whole
@@ -1088,7 +1088,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
   end
 
   # iyi: reads the constants the artifact's object code reads, on its behalf
-  # (SPEC.md IV.1g).
+  # (iyi SPEC IV.1g).
   #
   # A constant is typed and initialised where it is *read* — `visit(Path)` types
   # its value the first time, and `codegen_assign` initialises it only if
@@ -1128,7 +1128,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
   end
 
   # iyi: builds the synthesised regex constants the artifact's object code
-  # reads, under the names it reads them by (SPEC.md IV.1g).
+  # reads, under the names it reads them by (iyi SPEC IV.1g).
   #
   # Every other name in `Constants` resolves without help: Crystal's own belong
   # to the library this program compiles, and the module's own arrive in the
@@ -1186,7 +1186,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
   end
 
   # iyi: marks the types an artifact declares, so codegen declares their
-  # methods rather than defining them (SPEC.md IV.1g).
+  # methods rather than defining them (iyi SPEC IV.1g).
   #
   # Marked whether or not the object code was read, because the mark answers a
   # front-end question too: a type carried without `pub` arrives with fields
@@ -1240,7 +1240,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
                                      artifact_path : String) : Nil
     expected = IyiMod.compiler_version
     unless artifact.compiler_version == expected
-      node.raise "#{artifact_path} was written by iyi #{artifact.compiler_version}, this is #{expected}. Artifacts are read by the release that wrote them: same version, same target, same flags. A .iyimod is rejected and rebuilt, never migrated (SPEC.md IV.5) — rebuild it with --emit-iyimod"
+      node.raise "#{artifact_path} was written by iyi #{artifact.compiler_version}, this is #{expected}. Artifacts are read by the release that wrote them: same version, same target, same flags. A .iyimod is rejected and rebuilt, never migrated (iyi SPEC IV.5) — rebuild it with --emit-iyimod"
     end
 
     target = @program.codegen_target.to_s
@@ -1326,7 +1326,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
   # that links and silently omits the module's setup, which is the worst
   # outcome available here; answering "yes" wrongly gives a refusal that says
   # why. A `.iyimod` carries declarations only, so this is what a codegen build
-  # reading one has to be told (SPEC.md IV.1g).
+  # reading one has to be told (iyi SPEC IV.1g).
   # A type's body is walked rather than taken as a declaration, and that is
   # where the first version of this was wrong. `Parser#apply_module_header`
   # wraps a whole module file in a `ModuleDef` for `A::B`, so treating a
@@ -1465,7 +1465,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     when VisibilityModifier
       # Whole, not unwrapped. The modifier here is Crystal's `private` — `pub`
       # is a flag on the declaration rather than a wrapper, and it does not take
-      # a constant at all (SPEC.md IV.2) — and a `private CONST = compute` is
+      # a constant at all (iyi SPEC IV.2) — and a `private CONST = compute` is
       # still the module's own code to run. Dropping the modifier on the way
       # through would carry the value and change what it is.
       statements << node if iyi_initialiser?(node.exp)

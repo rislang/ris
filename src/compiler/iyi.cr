@@ -9,7 +9,7 @@
 # The commands left out are left out on purpose. `init` and `spec` belong to a
 # language with a package layout and a spec runner, and iyi has neither. The
 # playground and the documentation generator are not here at all: they went the
-# way the interpreter went, for the reason SPEC.md V.11 gives — and so, now,
+# way the interpreter went, for the reason iyi SPEC V.11 gives — and so, now,
 # has the `repl` slice that briefly reopened that call: a session on the macro
 # evaluator answered iyi code with the other language's library, so `"ab" * -3`
 # came back "Negative argument" where the compiler says "negative count: -3".
@@ -64,7 +64,7 @@ module Iyi
     USAGE
 
   # What the binary calls itself, read from `src/IYI_VERSION` — the same file
-  # the artifact's compatibility check reads (SPEC.md IV.5) and the same one
+  # the artifact's compatibility check reads (iyi SPEC IV.5) and the same one
   # the Makefile names the tarball after. One number, so a released binary, the
   # artifacts it writes and the file it arrived in cannot disagree.
   VERSION = Iyi::Config.iyi_version
@@ -99,7 +99,7 @@ module Iyi
   def self.other_language_verb_sentence(verb : String) : String
     instead =
       case verb
-      when "spec" then "a test is a `*_test.iyi` program that exits 0 when it passes, and `iyi test` runs them (SPEC.md III.8)"
+      when "spec" then "a test is a `*_test.iyi` program that exits 0 when it passes, and `iyi test` runs them (iyi SPEC III.8)"
       when "eval" then "write the line to a file and `iyi run` it; there is no evaluator to hand a string to"
       else             "nothing here stands in for it"
       end

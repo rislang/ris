@@ -234,7 +234,7 @@ if [ -n "$dep_hits" ]; then
   echo "$dep_hits"
   echo
   echo "A module iyi ships may link the platform libc and nothing else, the same"
-  echo "floor a program gets (SPEC.md III.10). The vendored Crystal bindings under"
+  echo "floor a program gets (iyi SPEC III.10). The vendored Crystal bindings under"
   echo "src/openssl, src/yaml, src/xml, src/compress, src/digest, src/crypto and"
   echo "src/big are reachable by import; one of them just became reachable."
   status=1

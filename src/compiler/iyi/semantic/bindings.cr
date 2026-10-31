@@ -184,7 +184,7 @@ module Iyi
         unless extra.empty?
           message += "\n#{extra.join(" and ")} #{extra.size == 1 ? "is" : "are"} not in the declared type"
           if extra.any? { |member| member.to_s == "Panicked" }
-            message += ". `Panicked` is what a task answers when it panics (SPEC.md III.1.4): a def that returns a typed group lists it"
+            message += ". `Panicked` is what a task answers when it panics (iyi SPEC III.1.4): a def that returns a typed group lists it"
           end
         end
         (self.return_type || self).raise message, inner, Iyi::FrozenTypeException

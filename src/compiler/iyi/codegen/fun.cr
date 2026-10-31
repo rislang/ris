@@ -25,7 +25,7 @@ class Iyi::CodeGenVisitor
     # iyi: a method that takes a block is instantiated with the caller's block
     # inlined into it, and a `forall` method at the caller's types, so its
     # machine code belongs to whoever wrote the call and not to the module
-    # that declared the method (SPEC.md IV.1g).
+    # that declared the method (iyi SPEC IV.1g).
     #
     # Emitted here, private to this unit, and so absent from the artifact —
     # which is what the consumer needs, because it makes its own from the body
@@ -46,7 +46,7 @@ class Iyi::CodeGenVisitor
     # iyi: while emitting code for a module whose `.iyimod` is being written, a
     # callee that module does not own is *copied* into the module's own unit
     # with internal linkage, rather than left as a reference to a unit the
-    # artifact does not carry (SPEC.md IV.1g).
+    # artifact does not carry (iyi SPEC IV.1g).
     #
     # `String::interpolation<String, String, String>` is the case: it lives in
     # the prelude's `String` unit, and the consumer's own `String` unit holds
@@ -102,7 +102,7 @@ class Iyi::CodeGenVisitor
     (@program.iyi_unit_libs[@llvm_mod.name] ||= Set(String).new) << owner.to_s
   end
 
-  # iyi: the receiver a def read from a `.iyimod` is keyed on (SPEC.md IV.1g).
+  # iyi: the receiver a def read from a `.iyimod` is keyed on (iyi SPEC IV.1g).
   #
   # The type that *defines* the method, not the one it was called through. A
   # method is instantiated per receiver in an ordinary build, so calling an
@@ -174,7 +174,7 @@ class Iyi::CodeGenVisitor
     target_def.raise "#{module_name}'s artifact declares `#{Call.def_full_name(owner, target_def)}`, " \
                      "and its object code has no symbol for it: the build that wrote the artifact " \
                      "never reached it. An artifact carries the machine code its producing build " \
-                     "compiled (SPEC.md IV.1g). Write #{module_name}'s artifact again from a build " \
+                     "compiled (iyi SPEC IV.1g). Write #{module_name}'s artifact again from a build " \
                      "that calls it, or build against #{module_name}'s source"
   end
 
@@ -274,7 +274,7 @@ class Iyi::CodeGenVisitor
 
       args = codegen_fun_signature(mangled_name, target_def, self_type, is_fun_literal, is_closure)
 
-      # iyi: a def read from a `.iyimod` is declared, not defined (SPEC.md
+      # iyi: a def read from a `.iyimod` is declared, not defined (iyi SPEC
       # IV.1g). Its machine code is in the artifact's `ObjectCode` and reaches
       # the program through the linker, so what this build emits is the
       # signature and nothing under it — the same shape a `lib` function takes,
@@ -297,7 +297,7 @@ class Iyi::CodeGenVisitor
       # the artifact's own type — while `Box(Int32).new(42)` is owned by an
       # instance and was never marked. Both are this build's to compile.
       # iyi: an artifact says which symbols its units define, so this is a
-      # lookup rather than a rule (SPEC.md IV.1g). Everything the old rule got
+      # lookup rather than a rule (iyi SPEC IV.1g). Everything the old rule got
       # right it still gets right — a def read from a `.iyimod` whose type is
       # the artifact's is in the list — and the two it got wrong it no longer
       # guesses at.
@@ -306,7 +306,7 @@ class Iyi::CodeGenVisitor
 
       # iyi: and a header no artifact defines a symbol for is a call the link
       # cannot answer. An artifact carries the machine code its producing
-      # build reached (SPEC.md IV.1g), so a method that build never called is
+      # build reached (iyi SPEC IV.1g), so a method that build never called is
       # declared in it and compiled nowhere — and left to the linker the
       # program ended on `LNK2019 unresolved external symbol` and a mangled
       # `.2A.Kit.3A..3A.Lib.40.Kit.3A..3A.Lib.3A..3A.fb_public.3C.Int32.3E.`,
@@ -330,7 +330,7 @@ class Iyi::CodeGenVisitor
         context.fun.linkage = LLVM::Linkage::External
       end
 
-      # iyi: what this unit *defines*, so the artifact can say so (SPEC.md
+      # iyi: what this unit *defines*, so the artifact can say so (iyi SPEC
       # IV.1g). A consumer compiles what the artifact does not define, and
       # every rule that tried to work that out from the shape of the def was
       # wrong somewhere: an artifact defines more than it declares — its own
@@ -345,7 +345,7 @@ class Iyi::CodeGenVisitor
       end
 
       # iyi: and the `lib` a unit calls into, so the artifact can say which C
-      # libraries its object code needs (SPEC.md IV.1g, `Libs`).
+      # libraries its object code needs (iyi SPEC IV.1g, `Libs`).
       #
       # `link_annotations` walks the program for a `LibType` that is `used?`,
       # and used is a question about *this* build's own code: the call is in

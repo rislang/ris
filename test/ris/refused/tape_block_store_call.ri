@@ -1,5 +1,5 @@
 # Text made in a tape block, kept by a method of an object from outside
-# it: the object outlives the block's storage (TAPE_SPEC 3.2).
+# it: the object outlives the block's storage (SPEC 3.2).
 class Box
   @last : String
 

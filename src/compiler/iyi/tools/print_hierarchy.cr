@@ -32,7 +32,7 @@ module Iyi
 
     # iyi: `tool hierarchy -e` takes a pattern from a person, and Iyi::Rx
     # refuses what it does not implement rather than matching it with other
-    # semantics (SPEC.md III.10). Refusal is one line naming the pattern and the
+    # semantics (iyi SPEC III.10). Refusal is one line naming the pattern and the
     # reason, never a backtrace from inside the engine.
     private def compile_exp(exp)
       Rx::Pattern.compile(exp)

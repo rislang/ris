@@ -1,4 +1,4 @@
-# What `Share` would cost — the count SPEC.md III.4.7 asks for before III.4.4 is
+# What `Share` would cost — the count iyi SPEC III.4.7 asks for before III.4.4 is
 # built.
 #
 #     ./bin/crystal run bench/share_count.cr -- samples/iyi src/compiler/iyi

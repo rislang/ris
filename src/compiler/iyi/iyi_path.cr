@@ -178,7 +178,7 @@ module Iyi
       # iyi: a `require` may name an iyi file, and it wins over a `.cr` of the
       # same name — the precedence `import` already uses, for the same reason.
       # `--prelude` resolves through here, and 0.1.0's prelude is written in
-      # iyi (SPEC.md, "0.1.0", item 3).
+      # iyi (iyi SPEC, "0.1.0", item 3).
       unless relative_filename.ends_with?(".cr")
         # ris: a module of the language is `name.ri`; `name.iyi` is one
         # carried over from iyi, the prelude's among them.

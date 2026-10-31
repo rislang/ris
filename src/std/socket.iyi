@@ -9,7 +9,7 @@
 # Address resolution:
 # getaddrinfo is the standard route in libc, but on Linux it pulls in libc.so,
 # dynamic NSS modules (libnss_dns, libnss_files), and resolver state, which destroys
-# the zero-undefined-symbol dependency floor (SPEC.md III.9).
+# the zero-undefined-symbol dependency floor (iyi SPEC III.9).
 # So an address is parsed in pure iyi arithmetic ("localhost" is
 # 127.0.0.1 and ::1, raced as a name's addresses are), and a host name
 # is iyi's own stub resolver's (`Resolver`, below): the hosts file first,
@@ -30,7 +30,7 @@
 # 8305): see `connect`.
 #
 # Concurrency:
-# On the targets that have the runtime (SPEC.md III.4), every socket is
+# On the targets that have the runtime (iyi SPEC III.4), every socket is
 # non-blocking and `connect`, `accept`, `read` and `write` park the calling
 # fiber on the poller when the kernel has nothing yet, so a server is a
 # fiber per connection and a slow peer stalls one fiber, not the thread.
@@ -77,7 +77,7 @@
 # and never called it - so every program paid 459 lines of it for the
 # programs that do. That is the same argument that put `text` and `time`
 # here, applied to the file that broke the library ceiling with them
-# (SPEC.md III.9).
+# (iyi SPEC III.9).
 
 module std/socket
 
@@ -149,7 +149,7 @@ pub struct IPv6Address
   end
 
   # The 16-bit group *index*, 0 to 7. Not `group`: that name is the task
-  # group's in iyi (SPEC.md III.4.9).
+  # group's in iyi (iyi SPEC III.4.9).
   def hextet(index : Int32) : Int32
     (self[index * 2].to_i32 << 8) | self[index * 2 + 1].to_i32
   end
@@ -713,7 +713,7 @@ pub struct IyiSocket
     # own socket (`connect_to`); one that connected after the winner, in
     # the same turn of the scheduler, is closed here, once the group has
     # ended and no task can still write its answer. A cancelled caller
-    # cancels the group's tasks too (SPEC.md III.4.2), and answers
+    # cancels the group's tasks too (iyi SPEC III.4.2), and answers
     # `Cancelled` once they have ended.
     #
     # What the tasks cost: a connect, accept and close over the loopback
@@ -968,13 +968,13 @@ pub struct IyiSocket
     {% end %}
 
     # What one attempt answers, wrapped: a `SocketError` answered bare is
-    # a failure under the group's policy (SPEC.md III.4.3), and it would
+    # a failure under the group's policy (iyi SPEC III.4.3), and it would
     # cancel the attempts still racing.
     @[OnTape]
     private record Attempt, outcome : IyiSocket | Cancelled | SocketError
 
     # One attempt, a task of the race's group. It captures only copied
-    # Share values (TAPE_SPEC 5.1); the caller reads its answer from the
+    # Share values (SPEC 5.1); the caller reads its answer from the
     # task's value.
     private def self.start_attempt(g : IyiGroup, host : String, port : Int32, address : IPAddress) : IyiTask(Attempt)
       g.spawn do
@@ -2456,7 +2456,7 @@ pub struct IyiSocket
     # not, the operation itself is the wait: `accept` posts `AcceptEx` and a
     # send with no room posts `WSASend`, both parked on the same completion
     # port through `IyiScheduler.arm_overlapped_current` and
-    # `park_overlapped_current` (SPEC.md III.4.8). A listening socket answers
+    # `park_overlapped_current` (iyi SPEC III.4.8). A listening socket answers
     # the zero-byte read in 32 us with a failure, so an accept that waited
     # that way would spin without ever rescheduling, and the sleep it would
     # otherwise fall back to costs 15.6 ms a round on Windows' default timer
@@ -2520,7 +2520,7 @@ pub struct IyiSocket
     # Where Windows keeps the name servers it was configured with. The
     # call for them is `GetAdaptersAddresses` or `DnsQueryConfig`, and they
     # are iphlpapi's and dnsapi's: two DLLs no iyi program links, which
-    # SPEC.md III.10 would have to justify. The same configuration is in
+    # iyi SPEC III.10 would have to justify. The same configuration is in
     # the registry, under the TCP/IP service's parameters - the keys
     # `ipconfig /all` and the DHCP client write - and the registry is
     # advapi32's, which a program already links for `RtlGenRandom`

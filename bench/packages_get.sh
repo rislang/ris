@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# `iyi get`: a requirement added, moved, or brought up to date (SPEC.md
+# `iyi get`: a requirement added, moved, or brought up to date (iyi SPEC
 # III.7), against a mirror of bare repositories so the network is not a
 # dependency of the gate.
 #

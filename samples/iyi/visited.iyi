@@ -10,7 +10,7 @@
 # says whether the element was new, which is the one bit a walk needs,
 # and the set prints in the order things went in, so the path reads back
 # as a path. Like the six programs before it, this documents no rule: it
-# is here because the prelude grows only when a program asks (SPEC.md
+# is here because the prelude grows only when a program asks (iyi SPEC
 # 0.1.0 item 3), and the seventh program asks for a set.
 module samples/visited
 

@@ -6,7 +6,7 @@
 
 A daemon is a process other processes depend on, and the whole reason to run
 one is that it holds an analysed prelude nobody else has to pay for
-(SPEC.md IV.1d). Killing it is therefore not a small failure: it is everyone's
+(iyi SPEC IV.1d). Killing it is therefore not a small failure: it is everyone's
 failure, and the next build after it pays the second back.
 
 Every case below used to kill it. `daemon_accept` read the request frame with

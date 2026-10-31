@@ -79,7 +79,7 @@ module Iyi
         json.field "message", @message
         json.field "severity", "warning" if warning?
         # iyi: the SPEC sections the message cites, as data (AI_FIRST.md §2
-        # item 3). The house style writes "see SPEC.md III.1" into the
+        # item 3). The house style writes "see iyi SPEC III.1" into the
         # prose; a machine acting on the error gets the reference without
         # parsing prose it did not write.
         if (message = @message) && (refs = Iyi.iyi_spec_references(message))

@@ -2,7 +2,7 @@
 """An editing session's memory is bounded by what is open, not by how
 long it has been open.
 
-`iyi` carries no collector (SPEC.md III.9), which is the right bargain
+`iyi` carries no collector (iyi SPEC III.9), which is the right bargain
 for a verb that compiles one program and exits and the wrong one for a
 process an editor keeps for a day. Measured on this laptop before the
 split: forty edits and hovers on a 327-line module took one server from

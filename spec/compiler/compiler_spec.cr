@@ -80,7 +80,7 @@ describe "Compiler" do
   # a millisecond on an ordinary Linux box, and 0.062 s per search under WSL,
   # where `PATH` carries the Windows directories. Twice a build, that was a
   # third of a warm build spent looking for linkers nobody had installed
-  # (SPEC.md 0.1.0 item 2). This is the file that keeps the answer.
+  # (iyi SPEC 0.1.0 item 2). This is the file that keeps the answer.
   it "remembers which linker it found rather than searching PATH per build" do
     # The msvc link searches no `PATH`: its linker is the one the Visual C++
     # installation names, and what is remembered is where that is - `vswhere`
@@ -108,7 +108,7 @@ describe "Compiler" do
   #
   # `cc` does not link — it computes a command and runs `collect2`, which runs
   # `ld`. Measured here: 0.129 s through the driver against 0.014 s running the
-  # same command directly, which is most of what a warm build costs (SPEC.md
+  # same command directly, which is most of what a warm build costs (iyi SPEC
   # 0.1.0 item 2). The compiler asks the driver once, keeps the answer as a
   # template, and runs `ld` itself. This is the file that holds the template,
   # and the program above having run is what says the link it built works.
@@ -264,7 +264,7 @@ describe "Compiler" do
   # (`nm -u` on the cross-compiled fixture is empty), and what a linked Linux
   # binary leaves undefined belongs to the crt objects in the link template
   # rather than to the prelude. Holding the whole empty allowlist is the floor
-  # gate's job (SPEC.md III.9); this example asserts the allocator family
+  # gate's job (iyi SPEC III.9); this example asserts the allocator family
   # because that is the trade this branch made.
   it "resolves no GC_ symbol in a plain build" do
     pending! "nm is not available" unless nm_available?
@@ -479,7 +479,7 @@ describe "Compiler" do
     end
   end
 
-  # iyi: the concurrency runtime — SPEC.md III.4, Linux only. The bench gate
+  # iyi: the concurrency runtime — iyi SPEC III.4, Linux only. The bench gate
   # (`bench/concurrency_exercise.sh`) is the full property list; what earns a
   # place *here* is what `make compiler_spec` should catch without bash: the
   # runtime compiles, interleaves, cancels, passes mail, and adds no undefined

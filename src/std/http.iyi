@@ -2705,7 +2705,7 @@ pub struct Server
 
   # A request's head - the text before its blank line - read and checked,
   # or why it is not one, as the server's handlers take it.
-  # On the caller's tape: what it answers is made here (TAPE_SPEC 3.2).
+  # On the caller's tape: what it answers is made here (SPEC 3.2).
   private def self.request_head(text : String) : RequestHead | HTTPError
     case head = parse_head(text.as_tape, 0, true)
     in ParsedHead
@@ -3749,7 +3749,7 @@ pub struct HTTP
         next
       end
       # The block is yielded, not kept: a caller's tape values stay in
-      # its scope (TAPE_SPEC 5.1).
+      # its scope (SPEC 5.1).
       return handed(exchange) { |response| yield response }
     end
   end

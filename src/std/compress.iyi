@@ -1,6 +1,6 @@
 # DEFLATE (RFC 1951), and the two envelopes it travels in: zlib (RFC
 # 1950) and gzip (RFC 1952). Written in iyi; no zlib is linked, which is
-# what SPEC.md III.10 asks for ("own it. DEFLATE is a known quantity and
+# what iyi SPEC III.10 asks for ("own it. DEFLATE is a known quantity and
 # arrives with HTTP").
 #
 # `Deflate.compress` is a DEFLATE compressor of zlib's shape at zlib's
@@ -82,7 +82,7 @@ end
 # A growing byte buffer: the compressed side of writing.
 class ByteBuffer
   # An Array on the tape, its room reserved up front: growth never moves
-  # it (TAPE_SPEC), so `reserve` only names how much is wanted.
+  # it (SPEC), so `reserve` only names how much is wanted.
   @data : Array(UInt8)
 
   def initialize(cap : Int32 = 1024)

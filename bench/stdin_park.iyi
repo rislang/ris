@@ -1,4 +1,4 @@
-# A fiber reading standard input parks: SPEC.md III.4.8 named that call as
+# A fiber reading standard input parks: iyi SPEC III.4.8 named that call as
 # the one that had to stop being a blocking syscall. bench/concurrency_exercise.sh
 # feeds this a pipe - a line a second after the program has started, and
 # one two seconds later, twice - and asks four things of it:

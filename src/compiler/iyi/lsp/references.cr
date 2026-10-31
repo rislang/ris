@@ -246,7 +246,7 @@ module Iyi::Lsp
     # The file of a module in this compile that brings an adopted def in
     # unqualified, by name or with `::*`, and already has *name* where the
     # renamed import would land: a def of its own, or another import's.
-    # Its own beats the import (SPEC.md II.3 rule 2), so the rename would
+    # Its own beats the import (iyi SPEC II.3 rule 2), so the rename would
     # rebind that module's calls to its own def with nothing to say so -
     # `puts shout("a")` printing "a!" where it printed "A" - and a second
     # import of *name* makes every call ambiguous. Nil when no module here

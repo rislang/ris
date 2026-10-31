@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Proves why wasm32-wasi has no concurrency runtime (SPEC.md III.4).
+# Proves why wasm32-wasi has no concurrency runtime (iyi SPEC III.4).
 #
 # Tests each candidate mechanism against the toolchain and wasmtime 48:
 #   1. Native stack-switching proposal in wasmtime  (measured, see below)
@@ -264,7 +264,7 @@ EOF
 "$IYI" build --cross-compile --target wasm32-wasi -o "$WORK/group_refusal" "$WORK/group_refusal.iyi" > "$WORK/group_build.log" 2>&1
 ec=$?
 if [ $ec -ne 0 ] && grep -q "group is not available on wasm32-wasi: WebAssembly cannot switch stacks" "$WORK/group_build.log"; then
-  pass "compiler refuses group on wasm32-wasi with explicit reason naming SPEC.md III.4"
+  pass "compiler refuses group on wasm32-wasi with explicit reason naming iyi SPEC III.4"
 else
   fail "expected compiler to refuse group on wasm32-wasi with explicit message"
 fi

@@ -171,7 +171,7 @@ end
 # a nil one out, or reads and writes it through a converter (see
 # `JSON::Field`). It is what the other library's `include
 # JSON::Serializable` writes, and the derive runs once, in the type's own
-# module (SPEC.md II.4), so a consumer calls the methods without the macro.
+# module (iyi SPEC II.4), so a consumer calls the methods without the macro.
 #
 # Each field's options are read off the type when its methods are compiled,
 # in one `begin` so what a field's annotation says is known to every line
@@ -3506,7 +3506,7 @@ pub struct JSON
   end
 
   # The enum's own type as a free variable, which a bound cannot give: an
-  # `Enum` is a struct, and a bound is a trait (SPEC.md II.7).
+  # `Enum` is a struct, and a bound is a trait (iyi SPEC II.7).
   private def self.write_enum(val, type : T.class, b : Builder) : Nil forall T
     {% if T.annotation(Flags) %}
       b.array do
@@ -3738,7 +3738,7 @@ pub struct JSON
   #
   # A member is reached by narrowing the union, not by writing its name
   # out: a name is looked up from here, where a type of a module this one
-  # does not import is refused (SPEC.md R-1) and a program's private type
+  # does not import is refused (iyi SPEC R-1) and a program's private type
   # is not found.
   private def self.read_union(pull : PullParser, type : T.class) : T forall T
     {% begin %}
@@ -3835,7 +3835,7 @@ end
 # The members are not told apart by name. `Union`'s `T` named in a macro
 # was tried first, and a name is looked up from where it is written: from
 # this module, `Std::Time::Time` was refused as not imported here
-# (SPEC.md R-1), and a program's private type was an undefined constant.
+# (iyi SPEC R-1), and a program's private type was an undefined constant.
 class ::Object
   def __json_write(json : ::Std::Json::Builder) : Nil
     ::Std::Json::JSON.write_value(self, json)

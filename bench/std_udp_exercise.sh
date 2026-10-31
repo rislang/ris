@@ -288,7 +288,7 @@ puts UdpSocket.client.send_to("x", "255.255.255.255", 9)
 IYI
 
 echo
-echo "== a receive parks rather than blocking the thread (SPEC.md III.4.2)"
+echo "== a receive parks rather than blocking the thread (iyi SPEC III.4.2)"
 # Two tasks on one thread: one parked in `receive_datagram` on a socket
 # nobody has written to, the other sleeps and then sends. A receive that
 # blocked the worker would never let the sender run, and the program would

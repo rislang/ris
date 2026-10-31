@@ -40,7 +40,7 @@ module Iyi
     #
     # A build that links an artifact's object code has to define the type-id
     # globals that code refers to, and cannot learn from an object file which
-    # ones those are — so it defines them all (SPEC.md IV.1g). The numbering is
+    # ones those are — so it defines them all (iyi SPEC IV.1g). The numbering is
     # the *program's*, which is why the artifact carries a reference and never
     # a value: two programs number their types differently.
     def each_type(&)

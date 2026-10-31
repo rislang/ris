@@ -7,7 +7,7 @@
 # the small set a list of numbers gets asked for: reversed, unique, paired
 # with another, one taken out. Like `basics`, `inventory` and `config`, this
 # documents no rule; it is here because the prelude grows only when a
-# program in this repository needs something (SPEC.md 0.1.0 item 3).
+# program in this repository needs something (iyi SPEC 0.1.0 item 3).
 module samples/grid
 
 n = 4

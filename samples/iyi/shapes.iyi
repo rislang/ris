@@ -9,7 +9,7 @@
 # a sum over a block, a number parsed that may fail, a power, a shift, a loop
 # that ends on a `break`. Like `basics`, `inventory`, `config` and `grid`,
 # it documents no rule; the prelude grows only when a program in this
-# repository needs something (SPEC.md 0.1.0 item 3).
+# repository needs something (iyi SPEC 0.1.0 item 3).
 module samples/shapes
 
 trait Shape

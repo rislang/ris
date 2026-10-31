@@ -102,7 +102,7 @@ def check_build_pair(wrong: list[str], held: list[str]) -> None:
 
 
 def check_macro_sizes(wrong: list[str], held: list[str]) -> None:
-    """Every N in SPEC.md's macro tables must be a size `macro_cost.py` sweeps."""
+    """Every N in iyi SPEC's macro tables must be a size `macro_cost.py` sweeps."""
     source = (REPO / "bench/macro_cost.py").read_text()
     swept = {
         int(n)
@@ -112,22 +112,22 @@ def check_macro_sizes(wrong: list[str], held: list[str]) -> None:
     if not swept:
         wrong.append("bench/macro_cost.py: no `compare(..., (sizes))` call found; this check is blind")
         return
-    text = doc("SPEC.md")
+    text = doc("iyi SPEC")
     published = {
         int(row)
         for row in re.findall(r"^\| (\d+) \| [\d.]+ s \| [\d.]+ s \| [\d.]+", text, re.M)
     }
     if not published:
-        wrong.append("SPEC.md: the macro-cost tables' rows no longer match /| N | s | s | ratio/")
+        wrong.append("iyi SPEC: the macro-cost tables' rows no longer match /| N | s | s | ratio/")
         return
     orphans = sorted(published - swept)
     if orphans:
         wrong.append(
-            f"SPEC.md: the macro tables publish N={orphans}, which bench/macro_cost.py "
+            f"iyi SPEC: the macro tables publish N={orphans}, which bench/macro_cost.py "
             f"does not sweep (it sweeps {sorted(swept)}) — a row nobody can re-measure"
         )
         return
-    held.append(f"every macro-cost row SPEC.md publishes is a size the script sweeps ({sorted(published)})")
+    held.append(f"every macro-cost row iyi SPEC publishes is a size the script sweeps ({sorted(published)})")
 
 
 

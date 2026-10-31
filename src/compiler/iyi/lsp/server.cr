@@ -1,4 +1,4 @@
-# iyi: `iyi lsp` — the language server SPEC.md III.8 #2 said R-1 makes
+# iyi: `iyi lsp` — the language server iyi SPEC III.8 #2 said R-1 makes
 # nearly free, built as exactly that.
 #
 # A language server for an open-class language keeps an incremental model
@@ -2776,7 +2776,7 @@ module Iyi::Lsp
     end
 
     # The path comes along because the lexer reads the language off the
-    # extension: `!` is not part of a name in a `.iyi` file (SPEC.md
+    # extension: `!` is not part of a name in a `.iyi` file (iyi SPEC
     # III.1.7) and is part of one in a `.cr` file. Without it the scanner
     # lexed every buffer by the other language's rules, so `risky!` was
     # coloured as one name — the propagation operator swallowed into it —

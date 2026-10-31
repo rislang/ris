@@ -186,7 +186,7 @@ class Iyi::Program
     {node, processor}
   end
 
-  # iyi: puts the imported modules' initialisers into the tree (SPEC.md III.5).
+  # iyi: puts the imported modules' initialisers into the tree (iyi SPEC III.5).
   #
   # `import` collects them instead of expanding them where it was written, so
   # this is where the compiler chooses when they run. The list is already in
@@ -225,7 +225,7 @@ class Iyi::Program
     node.is_a?(Expressions) ? node : Expressions.new(expressions)
   end
 
-  # iyi: reorders independent modules (SPEC.md III.5 rule 2).
+  # iyi: reorders independent modules (iyi SPEC III.5 rule 2).
   #
   # Rule 2 says the relative order of two modules that do not import each other
   # is *unobservable*, not merely unspecified — a module can only name what it

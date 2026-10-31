@@ -1,6 +1,6 @@
 # iyi: `iyi mod release [VERSION]` - what the next release of this package
 # has to be called, from what its exported surface did since the last one
-# (SPEC.md III.7).
+# (iyi SPEC III.7).
 #
 #     $ iyi mod release v1.3.0
 #     compared with v1.2.0: 4 modules, 1 thing gone, 2 new

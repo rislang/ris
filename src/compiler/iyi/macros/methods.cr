@@ -899,7 +899,7 @@ module Iyi
             elsif arg.is_a?(RegexLiteral)
               # iyi: the engine's own split, whose empty-match and capture
               # interleave rules were written to agree with the stdlib's
-              # (SPEC.md III.10).
+              # (iyi SPEC III.10).
               Rx.split(@value, regex_value(arg))
             else
               splitter =
@@ -1009,7 +1009,7 @@ module Iyi
 
     # iyi: a macro pattern compiles on the compiler's own engine, never the
     # stdlib Regex, which is what kept pcre2 on the compiler's link line
-    # (SPEC.md III.10, Appendix B #22). Only /i crosses to it: the engine
+    # (iyi SPEC III.10, Appendix B #22). Only /i crosses to it: the engine
     # folds ASCII case and nothing else, while /m and /x change what anchors,
     # `.` and whitespace mean, so a flag the engine cannot honour is refused
     # by name rather than silently dropped. A construct outside the supported
@@ -2480,7 +2480,7 @@ module Iyi
     end
 
     # iyi: a derive is handed the type a field was written as, so that it can
-    # ask what that type implements (SPEC.md II.4). These three answer with the
+    # ask what that type implements (iyi SPEC II.4). These three answer with the
     # whole program instead of with a declaration: what subclasses or includes a
     # type is not a fact the type's own module can carry, so a derive that read
     # one would generate different code depending on what else was compiled, and
@@ -2495,7 +2495,7 @@ module Iyi
       raise Iyi::TypeException.new(
         "`#{method}` is not available to a derive: it #{what}, " \
         "and a derive may only read the declaration it is attached to " \
-        "and what that declaration's types implement — see SPEC.md II.4")
+        "and what that declaration's types implement — see iyi SPEC II.4")
     end
 
     def self.subclasses(type)
@@ -2881,7 +2881,7 @@ module Iyi
           raise "#{unexported.namespace} does not export #{unexported}, and a " \
                 "macro of another module is asking it for `#{method}`. Only " \
                 "what a module marks `pub` is reachable from outside it — see " \
-                "SPEC.md R-2"
+                "iyi SPEC R-2"
         end
 
         super

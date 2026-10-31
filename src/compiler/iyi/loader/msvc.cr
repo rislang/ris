@@ -202,7 +202,7 @@ class Iyi::Loader
   # Returns whether *dll* names an API set according to:
   # https://learn.microsoft.com/en-us/windows/win32/apiindex/windows-apisets#api-set-contract-names
   # iyi: compiled once through Iyi::Rx, the compiler's own engine, so this
-  # file is not one of the reasons pcre2 stays on the link line (SPEC.md
+  # file is not one of the reasons pcre2 stays on the link line (iyi SPEC
   # III.10).
   private API_SET_DLL = Rx::Pattern.compile("^(?:api-|ext-)[a-zA-Z0-9-]*l\\d+-\\d+-\\d+\\.dll$")
 

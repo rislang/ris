@@ -1,7 +1,7 @@
 require "../spec_helper"
 require "../../src/compiler/iyi/mod/resolver"
 
-# iyi: the manifest and the resolver — SPEC.md III.7 step 1. The fetch is a
+# iyi: the manifest and the resolver — iyi SPEC III.7 step 1. The fetch is a
 # seam, so everything here runs from tables; the gate
 # (`bench/packages_resolve.sh`) is where git and the mirror get exercised.
 

@@ -78,7 +78,7 @@ class Iyi::CodeGenVisitor
     type_id(type)
   end
 
-  # iyi: defines a type-id global for every type in the program (SPEC.md IV.1g).
+  # iyi: defines a type-id global for every type in the program (iyi SPEC IV.1g).
   #
   # An artifact's object code refers to type ids by name, and this build has no
   # way to see which names an object file needs. Emitted on demand, they exist
@@ -93,7 +93,7 @@ class Iyi::CodeGenVisitor
     # its id from the first code that asks for one, and a consumer whose own
     # code never mentions `Regex::MatchOptions` never asks. The artifact says
     # which ones its object code refers to; this is where they are given a
-    # number to define (SPEC.md IV.1g).
+    # number to define (iyi SPEC IV.1g).
     @program.iyi_artifact_numbered_types.each do |type|
       next if type.is_a?(VirtualType) || type.is_a?(VirtualMetaclassType)
       @program.llvm_id.type_id(type)
@@ -184,7 +184,7 @@ class Iyi::CodeGenVisitor
         global.global_constant = true
 
         # iyi: which unit wanted it, so an artifact carrying that unit can say
-        # so (SPEC.md IV.1g). This is the reference the linker resolves from
+        # so (iyi SPEC IV.1g). This is the reference the linker resolves from
         # somebody else's `_main`, and the somebody else has to have the type
         # before it can number it. Recorded only while writing artifacts —
         # every other build defines what it refers to by construction.

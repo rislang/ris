@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""What macros cost at compile time — the measurement behind SPEC.md II.10.
+"""What macros cost at compile time — the measurement behind iyi SPEC II.10.
 
     python3 bench/macro_cost.py
 

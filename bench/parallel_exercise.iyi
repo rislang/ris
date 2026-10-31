@@ -1,4 +1,4 @@
-# Tasks across cores, exercised: SPEC.md III.4.13, built.
+# Tasks across cores, exercised: iyi SPEC III.4.13, built.
 #
 #   ./bin/iyi run bench/parallel_exercise.iyi                  # every property
 #   ./bin/iyi run bench/parallel_exercise.iyi wake cancel      # some of them
@@ -54,7 +54,7 @@
   end
 
   # Counts the tasks share, each an atomic: `Share` by its fields, so a
-  # parallel block may capture one (SPEC.md III.4.4).
+  # parallel block may capture one (iyi SPEC III.4.4).
   struct Tally
     @count : Atomic(Int64)
     @sum : Atomic(Int64)
@@ -160,7 +160,7 @@
   # queue before the other workers wake, which an optimised build on a
   # runner once did, all 16 on one worker. Waited for 10 s at most, and
   # named if it never comes; one worker running all of them still fails.
-  # Messages between the tasks below, on the board (TAPE_SPEC 5.2): one
+  # Messages between the tasks below, on the board (SPEC 5.2): one
   # process-wide queue per type, taken once each.
   record Ping, n : Int32
   record FanItem, producer : Int32, index : Int32
@@ -270,7 +270,7 @@
       producers = 6
       per = 20000
       expected = Array(Int32).new(producers, 0)
-      # The board holds a bounded count (TAPE_SPEC 5.2): a post never
+      # The board holds a bounded count (SPEC 5.2): a post never
       # waits for room, so a sender ahead of the taker tries again.
       RisBoard.limit(FanItem, 4096_i64)
       group do |g|

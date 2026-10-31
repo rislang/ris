@@ -178,7 +178,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
         if superclass.same?(@program.types["Exception"]?) && @program.iyi_prelude? && Lexer.iyi_source?(node.location.try(&.filename))
           node_superclass.raise "iyi has no exception hierarchy: an error is a type of its own, `struct #{node.name}` " \
                                 "with a `def message : String` and `impl Error for #{node.name}`, returned as a member " \
-                                "of the result's union, `Int32 | #{node.name}` (SPEC.md III.1)"
+                                "of the result's union, `Int32 | #{node.name}` (iyi SPEC III.1)"
         end
       else
         message = "#{superclass} is not a class, it's a #{superclass.type_desc}"
@@ -187,7 +187,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
         # what Greet is.
         if superclass.trait?
           message += ". A type implements a trait after its declaration: `impl #{superclass} for #{node.name}`, " \
-                     "holding the trait's methods (SPEC.md R-3)"
+                     "holding the trait's methods (iyi SPEC R-3)"
         end
         node_superclass.raise message
       end
@@ -231,7 +231,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
 
     process_annotations(annotations) do |annotation_type, ann|
       if annotation_type == @program.share_annotation
-        # iyi: trust, not a check (SPEC.md III.4.4). Any struct or class,
+        # iyi: trust, not a check (iyi SPEC III.4.4). Any struct or class,
         # generic or not; the generic's instances inherit the trust and are
         # then shareable when their arguments are. `owns: true` is the
         # synchronised type that owns its contents: shareable whatever its
@@ -314,7 +314,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
   end
 
   # iyi: the scope half of `import app/greeter::*` and
-  # `import app/greeter::{polite}` (SPEC.md II.3)
+  # `import app/greeter::{polite}` (iyi SPEC II.3)
   #
   # Brings a module's exported names into unqualified scope — written by the
   # consumer, not performed by the library. This is only a record: the two
@@ -362,15 +362,15 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
           if header && header != written
             node.raise "`#{written}` is imported, but #{Iyi.relative_filename(file)} declares `module #{header}`: " \
                        "change that line to `module #{written}`, or move the file to `#{header}.iyi` and import " \
-                       "that path (SPEC.md R-1)"
+                       "that path (iyi SPEC R-1)"
           end
           node.raise "`#{written}` is imported, but #{Iyi.relative_filename(file)} " \
                      "has no `module #{written}` header, and an import's names are " \
                      "the `pub` ones under it: write `module #{written}` at its top " \
-                     "(SPEC.md R-1)"
+                     "(iyi SPEC R-1)"
         end
         node.raise "`#{written}` is not imported here: its names come with the " \
-                   "import that loads it, `import #{written}::{name}` (SPEC.md R-1, R-2b)"
+                   "import that loads it, `import #{written}::{name}` (iyi SPEC R-1, R-2b)"
       else
         node.raise "can't find module '#{written}'. A module's path is its " \
                    "file's path, so this one is `#{written}.iyi`"
@@ -385,7 +385,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
     # bring into scope — its methods are reached through the receiver's impl,
     # which II.3 rule 1 keeps entirely out of an import's names.
     if used_type.trait?
-      node.raise "can't import names from #{used_type}, it's a trait. Trait methods are resolved from the receiver's type, never from an import's names — see SPEC.md II.3"
+      node.raise "can't import names from #{used_type}, it's a trait. Trait methods are resolved from the receiver's type, never from an import's names — see iyi SPEC II.3"
     end
 
     unless used_type.is_a?(ModuleType) && used_type.module?
@@ -412,7 +412,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
                    "reach — it is in the program only because some other " \
                    "file imported it. Import it from this file, or have " \
                    "a module this file imports re-export it with " \
-                   "`pub import #{written}` (SPEC.md R-1, R-2b)"
+                   "`pub import #{written}` (iyi SPEC R-1, R-2b)"
       end
     end
 
@@ -431,7 +431,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
         # is declared".
         declared, absent = unexported.partition { |name| used_type.defs.try(&.has_key?(name)) || used_type.metaclass.macros.try(&.has_key?(name)) || used_type.types?.try(&.has_key?(name)) }
         if absent.empty?
-          node.raise "#{used_type} does not export #{declared.map { |name| "`#{name}`" }.join(", ")}. an import brings in only what a module marks `pub` — add `pub` to the declaration if it is meant to be part of the module's surface (SPEC.md R-2b)"
+          node.raise "#{used_type} does not export #{declared.map { |name| "`#{name}`" }.join(", ")}. an import brings in only what a module marks `pub` — add `pub` to the declaration if it is meant to be part of the module's surface (iyi SPEC R-2b)"
         else
           # iyi: the name the module declares at the *root*. `std/set` is
           # `module std/set` and `class ::Set(T)` inside it: the `::` puts
@@ -451,7 +451,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
                        "`#{written}`, not as #{rooted.size == 1 ? "a name" : "names"} of it: " \
                        "`import #{written}` is enough to write #{rooted.map { |name| "`#{name}`" }.join(", ")}, " \
                        "and `import #{written}::{#{rooted.join(", ")}}` asks the module for " \
-                       "#{rooted.size == 1 ? "a name it does not have" : "names it does not have"} (SPEC.md R-2b)"
+                       "#{rooted.size == 1 ? "a name it does not have" : "names it does not have"} (iyi SPEC R-2b)"
           end
 
           hint = ""
@@ -478,7 +478,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
       end
     end
 
-    # iyi: the directive as written, for the artifact (SPEC.md IV.2). Only the
+    # iyi: the directive as written, for the artifact (iyi SPEC IV.2). Only the
     # module unit's own, because only its own reach the signatures the artifact
     # carries — one written inside a nested type resolves names there and
     # nowhere a consumer will look.
@@ -645,7 +645,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
   # Only an iyi compilation unit has one. What it marks is the whole of what
   # another module may reach, because `.iyimod` carries the exports and nothing
   # else: a name left unmarked has to be unreachable, or the metadata would not
-  # be enough to compile against (SPEC.md IV.2).
+  # be enough to compile against (iyi SPEC IV.2).
   private def record_export(scope, name : String, exported : Bool)
     return unless exported
 
@@ -669,7 +669,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
     !!(mod && mod.iyi_unit?)
   end
 
-  # iyi: `trait Ord : Eq` (SPEC.md II.6), and `trait Ord(T) : Cmp(T)`, whose
+  # iyi: `trait Ord : Eq` (iyi SPEC II.6), and `trait Ord(T) : Cmp(T)`, whose
   # supertrait names the trait's own parameter: looked up where the trait is
   # declared, that `T` is the parameter, and each impl reads it at its own
   # arguments (`check_impl_supertraits`).
@@ -763,7 +763,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
 
     # Checked before `is_a?(ModuleType)`, which a trait would satisfy.
     if target_type.trait?
-      node.target.raise "can't implement #{trait_type} for #{target_type}, it's a trait. A trait is implemented for a type, and a trait is not one — to give every implementer of #{target_type} a default #{trait_type}, iyi has no blanket impls (SPEC.md II.7)"
+      node.target.raise "can't implement #{trait_type} for #{target_type}, it's a trait. A trait is implemented for a type, and a trait is not one — to give every implementer of #{target_type} a default #{trait_type}, iyi has no blanket impls (iyi SPEC II.7)"
     end
 
     # And a module that is not a trait, for the same reason a written
@@ -774,7 +774,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
     # `impl Show for Y` beside it was accepted too, where a second impl is
     # refused everywhere else.
     if target_type.module?
-      node.target.raise "can't implement #{trait_type} for #{target_type}, it's a module. A trait is implemented for a type, and a module is not one: every type that includes #{target_type} would get #{trait_type} with no impl of its own for R-3 to check, which is the `include` hole II.8 refuses — implement #{trait_type} for each type instead (SPEC.md II.8)"
+      node.target.raise "can't implement #{trait_type} for #{target_type}, it's a module. A trait is implemented for a type, and a module is not one: every type that includes #{target_type} would get #{trait_type} with no impl of its own for R-3 to check, which is the `include` hole II.8 refuses — implement #{trait_type} for each type instead (iyi SPEC II.8)"
     end
 
     unless target_type.is_a?(ModuleType)
@@ -783,7 +783,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
 
     check_impl_coherence node, trait_type, target_type
 
-    # iyi: one row of the artifact's impl records (SPEC.md IV.2). Recorded
+    # iyi: one row of the artifact's impl records (iyi SPEC IV.2). Recorded
     # against the file that declares it, which R-3 guarantees is the trait's
     # module or the type's — so a consumer holding both files holds every impl
     # that can exist for the pair.
@@ -796,7 +796,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
     # about them says where they came from. `impl Cmp for Int32` is why that
     # matters — the target is a prelude type this module does not export, so
     # recording them against it would lose them.
-    # iyi: whether this impl's bodies travel (`MonoBodies`, SPEC.md IV.1g).
+    # iyi: whether this impl's bodies travel (`MonoBodies`, iyi SPEC IV.1g).
     #
     # An impl defines methods *on its target*, so they are emitted into the
     # target's unit — and the artifact carries a unit only for a non-generic
@@ -939,7 +939,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
   end
 
   # iyi: `impl Into(String) for User` — the arguments a parameterised trait is
-  # implemented at (SPEC.md II.6).
+  # implemented at (iyi SPEC II.6).
   #
   # Checked here rather than left to the include below, whose error says
   # "including" and names no impl. The arity check is worth doing eagerly for
@@ -976,7 +976,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
   end
 
   # iyi: `type Elem = String` in an impl — the answer to an associated type the
-  # trait declared (SPEC.md II.6). Returns the answers in declaration order,
+  # trait declared (iyi SPEC II.6). Returns the answers in declaration order,
   # which is the order they are appended to the trait's type vars.
   private def check_impl_assoc_types(node : ImplDef, trait_type, target_type) : Array(ASTNode)?
     declared = trait_type.is_a?(GenericTraitType) ? trait_type.assoc_types : [] of String
@@ -1005,7 +1005,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
   end
 
   # iyi: `trait Ord : Eq` — an impl of `Ord` needs an impl of `Eq` for the same
-  # type to exist already (SPEC.md II.6).
+  # type to exist already (iyi SPEC II.6).
   #
   # Checked at the impl, like the required methods are, and for the same
   # reason: it needs this node and the trait's declaration, never a global
@@ -1032,11 +1032,11 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
     missing = required.reject { |supertrait| target_type.implements?(supertrait) }
     return if missing.empty?
 
-    node.raise "impl #{label} for #{target_type} needs #{missing.size == 1 ? "an impl" : "impls"} of #{missing.map { |supertrait| iyi_trait_label(supertrait) }.join(", ")} for #{target_type} first: #{label} requires its implementers to implement #{missing.size == 1 ? "it" : "them"} — see SPEC.md II.6"
+    node.raise "impl #{label} for #{target_type} needs #{missing.size == 1 ? "an impl" : "impls"} of #{missing.map { |supertrait| iyi_trait_label(supertrait) }.join(", ")} for #{target_type} first: #{label} requires its implementers to implement #{missing.size == 1 ? "it" : "them"} — see iyi SPEC II.6"
   end
 
   # iyi: a trait whose only type vars are associated ones can be implemented at
-  # most once for a type (SPEC.md II.6).
+  # most once for a type (iyi SPEC II.6).
   #
   # This is the whole difference between an associated type and a parameter. If
   # a second impl could answer `Elem` differently, `arr.map` would be ambiguous
@@ -1052,7 +1052,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
   private def check_single_impl(node : ImplDef, trait_type, target_type)
     if trait_type.is_a?(TraitType)
       if target_type.parents.try &.any?(&.same?(trait_type))
-        node.raise "#{target_type} already implements #{trait_type}: a trait is implemented once for a type, and a second impl would replace the first one's methods — see SPEC.md II.6"
+        node.raise "#{target_type} already implements #{trait_type}: a trait is implemented once for a type, and a second impl would replace the first one's methods — see iyi SPEC II.6"
       end
       return
     end
@@ -1064,11 +1064,11 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
                     ancestor.is_a?(GenericModuleInstanceType) && ancestor.generic_type == trait_type
                   end
 
-    node.raise "#{target_type} already implements #{trait_type}, and a trait with associated types can be implemented only once for a type: #{trait_type.assoc_types.join(", ")} #{trait_type.assoc_types.size == 1 ? "is an output" : "are outputs"} of the impl, so a second answer would make a call on #{target_type} ambiguous — see SPEC.md II.6"
+    node.raise "#{target_type} already implements #{trait_type}, and a trait with associated types can be implemented only once for a type: #{trait_type.assoc_types.join(", ")} #{trait_type.assoc_types.size == 1 ? "is an output" : "are outputs"} of the impl, so a second answer would make a call on #{target_type} ambiguous — see iyi SPEC II.6"
   end
 
   # iyi: `impl Greet for Box(T)` and `impl Greet for Box(Int32)`, both without
-  # `forall` (SPEC.md II.7). Neither is legal, and each is wrong in its own
+  # `forall` (iyi SPEC II.7). Neither is legal, and each is wrong in its own
   # way, so each gets its own error.
   private def check_generic_impl_without_forall(node : ImplDef)
     target = node.target
@@ -1089,7 +1089,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
     end
 
     # Everything resolved, so this asks to implement the trait for one
-    # instantiation only. See SPEC.md II.7 for why iyi has no specialisation.
+    # instantiation only. See iyi SPEC II.7 for why iyi has no specialisation.
     node.target.raise "can't implement #{node.trait} for #{target} alone: iyi has no specialised impls, so a trait is implemented for #{target.name} once, for every instantiation. Write `#{iyi_generic_impl_spelling(node, target)}`"
   end
 
@@ -1108,7 +1108,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
     "impl #{node.trait} for #{target.name}(#{params.join(", ")}) forall #{base.type_vars.join(", ")}"
   end
 
-  # iyi: resolves the target of `impl Greet for Box(T) forall T` (SPEC.md II.7).
+  # iyi: resolves the target of `impl Greet for Box(T) forall T` (iyi SPEC II.7).
   #
   # `forall` is required, and this is the reason: without it, whether `T` in
   # `Box(T)` is a new parameter or a type already in scope would depend on
@@ -1154,7 +1154,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
 
     # Every argument must be one of the `forall` names, each used once. A
     # concrete argument — `impl Show for Box(Int32)` — is refused rather than
-    # treated as specialisation: see SPEC.md II.7.
+    # treated as specialisation: see iyi SPEC II.7.
     #
     # A splat parameter is bound the way it was declared, `Tuple(*T)` for
     # `struct Tuple(*T)`; `Tuple(T)` binds it too, as it always did. Only the
@@ -1232,7 +1232,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
   # iyi: R-3's orphan rule — an `impl` must live in the module that defines
   # the trait or the module that defines the type.
   #
-  # SPEC.md IV.4 shows what the restriction buys: with it in force, no two
+  # iyi SPEC IV.4 shows what the restriction buys: with it in force, no two
   # modules can define the same impl, because each would have to name a
   # declaration of the other and so import it, and R-1's import graph is a
   # DAG. That is what removes the need for a global coherence pass — and it is
@@ -1277,10 +1277,10 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
     places << "the module that defines the type (#{target_module})" unless target_module.is_a?(Program)
 
     if places.empty?
-      node.raise "can't implement #{trait_type} for #{target_type} in #{current_type}: neither belongs to a module, so there is no module this impl could be at home in. Every module that can name both is free to write it, and they would disagree with no error and no complaint at link time. This is R-3, the orphan rule — see SPEC.md IV.4"
+      node.raise "can't implement #{trait_type} for #{target_type} in #{current_type}: neither belongs to a module, so there is no module this impl could be at home in. Every module that can name both is free to write it, and they would disagree with no error and no complaint at link time. This is R-3, the orphan rule — see iyi SPEC IV.4"
     end
 
-    node.raise "can't implement #{trait_type} for #{target_type} in #{current_type}: an impl must live in #{places.join(" or ")}. This is R-3, the orphan rule, and it is what lets coherence be checked without a global pass — see SPEC.md IV.4"
+    node.raise "can't implement #{trait_type} for #{target_type} in #{current_type}: an impl must live in #{places.join(" or ")}. This is R-3, the orphan rule, and it is what lets coherence be checked without a global pass — see iyi SPEC IV.4"
   end
 
   # iyi: an impl inside a type of the program's own entry file when that
@@ -1315,7 +1315,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
   end
 
   # iyi: `abstract def` in a trait is a requirement the impl has to satisfy
-  # (SPEC.md II.6), and this is what makes it one.
+  # (iyi SPEC II.6), and this is what makes it one.
   #
   # Crystal's own abstract-def check would eventually complain, but it reports
   # at the point the type is first *used* and names the type — saying nothing
@@ -1649,7 +1649,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
       end
       if target_type.metaclass?
         # iyi: a trait may require a class-level method —
-        # `abstract def self.zero : self` (SPEC.md II.6). Without it a trait
+        # `abstract def self.zero : self` (iyi SPEC II.6). Without it a trait
         # cannot express an identity, so `sum` and `product` have to be given
         # one by every caller. Everywhere else the rejection stands: an
         # abstract def on a metaclass has nobody it could oblige, because only
@@ -1714,7 +1714,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
   end
 
   # iyi: an impl's method that takes the place of one another impl wrote
-  # (SPEC.md II.6). A type has one method of a name and parameters, so the
+  # (iyi SPEC II.6). A type has one method of a name and parameters, so the
   # impl written second answers for both traits, and nothing at either
   # site says so.
   #
@@ -1799,7 +1799,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
 
   # Whether two traits a type implements are layered, one written against
   # the other, so that where their methods meet one is meant to stand for
-  # both: one requires the other (`trait Ord : Comparable`, SPEC.md II.6
+  # both: one requires the other (`trait Ord : Comparable`, iyi SPEC II.6
   # §3a), or a default of one is another method the other requires, which
   # is how `Indexable`'s `each` answers `Enumerable`'s (II.6, "a trait cannot
   # include a trait"). Not the method *name* they meet on: `Named`'s default
@@ -1851,7 +1851,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
              "traits that require the same method can't both be " \
              "implemented for one type: rename one trait's method, or " \
              "implement one of them for a type that wraps " \
-             "#{owner} (SPEC.md II.6)"
+             "#{owner} (iyi SPEC II.6)"
   end
 
   # The non-abstract def among *candidates*, defined in *owner*, that takes
@@ -1959,7 +1959,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
                "declare — #{example} — and may not redefine one it has: the " \
                "definition that goes is one other code calls, so every " \
                "program built with it gets this one instead. #{instead} " \
-               "(SPEC.md R-3)"
+               "(iyi SPEC R-3)"
   end
 
   # Whether *node* was written in one of the prelude's own files.
@@ -2597,7 +2597,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
   end
 
   def visit(node : Call)
-    # iyi: `derive equality` inside a type body (SPEC.md R-5, II.4). The macro
+    # iyi: `derive equality` inside a type body (iyi SPEC R-5, II.4). The macro
     # runs once here, in the module that declares the type, and what it
     # generates belongs to this module like any other declaration.
     if node.name == "derive" && node.obj.nil? && !@derive_owners.empty?
@@ -2632,7 +2632,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
       call.scope = current_type.metaclass
 
       # Marked while the macro runs, so the program-wide type questions can be
-      # refused for the length of the expansion (SPEC.md II.4).
+      # refused for the length of the expansion (iyi SPEC II.4).
       expanded =
         begin
           @program.expanding_derive = true
@@ -2687,7 +2687,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
   #
   # Handing over the `ClassDef` itself, live or cloned, is what this replaces.
   # That declaration contains the `derive` node, so the walk that follows a
-  # macro's inputs had a cycle to chase and never finished (SPEC.md II.4).
+  # macro's inputs had a cycle to chase and never finished (iyi SPEC II.4).
   private def describe_derive_target(owner : ClassDef, derive : Call) : ASTNode
     fields = [] of ASTNode
     body = owner.body
@@ -2745,7 +2745,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
   # The type a field was written as, resolved to the type it names. This is the
   # fact that lets a derive ask whether a field's type implements a trait, which
   # is the question a `JSON` derive has to answer about an imported `Customer`
-  # (SPEC.md II.4).
+  # (iyi SPEC II.4).
   #
   # Read from the annotation rather than from the instance variable: an instance
   # variable's type is settled by `TypeDeclarationVisitor`, a later pass, and
@@ -2825,7 +2825,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
   # `include` or `extend`, and including a trait is what R-3 removes: a type
   # acquires a trait by having an impl, which the orphan rule can check.
   # iyi: the target's own type parameters, so an impl's `include` can name them
-  # (SPEC.md II.6 × II.7). Nil for a non-generic target, which is every impl
+  # (iyi SPEC II.6 × II.7). Nil for a non-generic target, which is every impl
   # that has nothing to bind.
   private def impl_target_free_vars(target_type) : Hash(String, TypeVar)?
     return nil unless target_type.is_a?(GenericType)
@@ -2846,7 +2846,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
     # trait is a trait mistake, not a missing-type-arguments one.
     if type.trait? && !from_impl
       directive = kind.extended? ? "extend" : "include"
-      node_name.raise "can't #{directive} #{type}, it's a trait. A type implements a trait by having an `impl #{type} for #{current_type.instance_type}`, which is what lets the orphan rule check it — see SPEC.md R-3"
+      node_name.raise "can't #{directive} #{type}, it's a trait. A type implements a trait by having an `impl #{type} for #{current_type.instance_type}`, which is what lets the orphan rule check it — see iyi SPEC R-3"
     end
 
     case type

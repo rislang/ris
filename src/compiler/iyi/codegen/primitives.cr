@@ -1566,7 +1566,7 @@ class Iyi::CodeGenVisitor
   end
 
   # iyi: both of the above, defined whether this build's own code asked or
-  # not, for an artifact's object code (SPEC.md IV.1g). They are made when
+  # not, for an artifact's object code (iyi SPEC IV.1g). They are made when
   # first asked for, and an artifact's unit asked in the build that wrote it:
   # a `defer` or a `group` is a catch pad over `void*`, which names
   # `??_R0PEAX@8` in the main module. A consumer with no `defer`, `rescue`

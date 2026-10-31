@@ -1,4 +1,4 @@
-# Errors are ordinary union members — SPEC.md III.1.
+# Errors are ordinary union members — iyi SPEC III.1.
 #
 #   ./bin/iyi run samples/iyi/errors.iyi
 #

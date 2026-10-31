@@ -166,7 +166,7 @@ import std/path::{Path}
   end
 {% else %}
   # Linux: the kernel's own calls, as `socket` and the prelude make them
-  # (SPEC.md III.9: an own-prelude object asks libc for nothing). The
+  # (iyi SPEC III.9: an own-prelude object asks libc for nothing). The
   # shape is libc's, so the callers above read the same; a failure comes
   # back as the negative errno the kernel answers, which every caller
   # here reads as "not zero". `realpath` is a walk over `readlinkat` and
@@ -1102,7 +1102,7 @@ class ::File
   # The darwin branch passed a null `times` to `utimes`, which is the
   # kernel's spelling of "now" — so `touch(path, 1)` set the clock's time
   # there and the epoch second on Linux, one name with two behaviours
-  # decided by the platform (SPEC.md III.1.7a). It writes the pair now, in
+  # decided by the platform (iyi SPEC III.1.7a). It writes the pair now, in
   # the same shape the Linux branch writes its `timespec`s: `timeval` is an
   # `Int64` second and an `Int32` microsecond padded to eight, so four
   # `Int64` slots are the two structures and the odd slots are the

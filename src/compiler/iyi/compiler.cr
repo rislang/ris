@@ -126,7 +126,7 @@ module Iyi
     property prelude = "prelude"
 
     # iyi: directory to write a `.iyimod` per imported module into, or nil
-    # (SPEC.md IV.1). Set by `--emit-iyimod`.
+    # (iyi SPEC IV.1). Set by `--emit-iyimod`.
     property emit_iyimod : String? = nil
 
     # iyi: a prepared requirement table (III.7), for a caller that resolved
@@ -152,7 +152,7 @@ module Iyi
 
 
     # iyi: directory to read a `.iyimod` per imported module from, or nil
-    # (SPEC.md IV.1). Set by `--use-iyimod`. An import that finds one there is
+    # (iyi SPEC IV.1). Set by `--use-iyimod`. An import that finds one there is
     # compiled against it and never opens the module's source, which is R-1's
     # contract and the reason the file exists.
     property use_iyimod : String? = nil
@@ -340,7 +340,7 @@ module Iyi
     end
 
     # Compiles against an already-analysed prelude. This is the same split the
-    # fork probe measures (SPEC.md IV.1a): the top-level pass runs over the user
+    # fork probe measures (iyi SPEC IV.1a): the top-level pass runs over the user
     # file only, and every pass after it runs over both trees, because they walk
     # the prelude for reasons caching its analysis does not remove.
     private def compile_with_preanalysed_prelude(pre : Preanalysed, sources : Array(Source),
@@ -486,7 +486,7 @@ module Iyi
     # switch added since had to be checked against it by hand, silently, with
     # nothing enforcing the check — and `--use-iyimod` is what happened when
     # somebody did not: accepted, ignored, and the build compiled every module
-    # from source without a word (SPEC.md IV.1d).
+    # from source without a word (iyi SPEC IV.1d).
     #
     # So the claim is written down and `prelude_cache_key` refuses to compile
     # while any switch is missing from it. Three answers, and a new property has
@@ -526,7 +526,7 @@ module Iyi
                      "preanalysed prelude. A daemon serves builds from a key that claims " +
                      "everything not in it does not matter, so say which this is: add it to " +
                      "IN_PRELUDE_KEY, APPLIED_ON_ADOPT or OUTSIDE_PRELUDE_ANALYSIS in " +
-                     "compiler.cr (SPEC.md IV.1d)." %}
+                     "compiler.cr (iyi SPEC IV.1d)." %}
           {% end %}
         {% end %}
       {% end %}
@@ -568,7 +568,7 @@ module Iyi
       #
       # What it priced: adoption returns essentially the whole prelude analysis,
       # for a program requiring a shard as much as for one that does not, and
-      # the fork costs 0.2 to 0.3 s of it (SPEC.md IV.1d). A measurement tool
+      # the fork costs 0.2 to 0.3 s of it (iyi SPEC IV.1d). A measurement tool
       # rather than a mode — it analyses the prelude in the foreground, so it is
       # always slower overall than an ordinary build.
       if ENV["IYI_WARM"]? && !Compiler.preanalysed.has_key?(prelude_cache_key)
@@ -624,7 +624,7 @@ module Iyi
         end
       end
 
-      # iyi: and which of their bodies answer for an open set (SPEC.md III.6).
+      # iyi: and which of their bodies answer for an open set (iyi SPEC III.6).
       #
       # Here, because this is where the owners are known and before the surface
       # below is collected: a body whose machine code enumerates a module's
@@ -1046,7 +1046,7 @@ module Iyi
     end
 
     # iyi: the imports' names written inside *type*'s own body, as the
-    # file wrote them (SPEC.md R-2b).
+    # file wrote them (iyi SPEC R-2b).
     #
     # For a type reopened under a foreign name, which is the one place they
     # have to travel: the unit's own imports do not reach inside `class
@@ -1146,7 +1146,7 @@ module Iyi
     end
 
     # iyi: the types the module's object code refers to a type id of, by name,
-    # for `TypeIds` (SPEC.md IV.1g).
+    # for `TypeIds` (iyi SPEC IV.1g).
     #
     # A type id is resolved by the linker from a definition in the consuming
     # program's `_main`, which is what lets one build's object file be linked
@@ -1197,7 +1197,7 @@ module Iyi
     end
 
     # iyi: the constants the module's object code reads, by name, for
-    # `Constants` (SPEC.md IV.1g).
+    # `Constants` (iyi SPEC IV.1g).
     #
     # A constant is initialised where something reads it — `codegen_assign`
     # asks `const.used?` — and the reader on the far side of an artifact is
@@ -1212,7 +1212,7 @@ module Iyi
       names.to_a.sort!
     end
 
-    # iyi: the symbols the module's object code defines, for `Symbols` (SPEC.md
+    # iyi: the symbols the module's object code defines, for `Symbols` (iyi SPEC
     # IV.1g).
     #
     # What a consumer needs in order to know what it has to compile for itself,
@@ -1228,7 +1228,7 @@ module Iyi
     end
 
     # iyi: the symbols the module's object code reads the value of, by name,
-    # for `SymbolLiterals` (SPEC.md IV.1g). `collect_iyi_type_ids`' question
+    # for `SymbolLiterals` (iyi SPEC IV.1g). `collect_iyi_type_ids`' question
     # asked of a symbol, and sorted for the same reason.
     private def collect_iyi_symbol_literals(program : Program,
                                             unit_names : Array(String)) : Array(String)
@@ -1240,7 +1240,7 @@ module Iyi
     end
 
     # iyi: the `lib`s the module's object code calls into, by name, for `Libs`
-    # (SPEC.md IV.1g).
+    # (iyi SPEC IV.1g).
     #
     # `Requires` says what the consumer has to have compiled and this says what
     # it has to have linked against. The consumer cannot work the second out
@@ -1258,7 +1258,7 @@ module Iyi
     end
 
     # iyi: the types the module's object code asks `~match<T>` about, by name,
-    # for `MatchTypes` (SPEC.md IV.1g).
+    # for `MatchTypes` (iyi SPEC IV.1g).
     #
     # `collect_iyi_type_ids`' question asked of a match. The consumer defines
     # these with its own numbering, exactly as it defines the type ids, and for
@@ -1285,7 +1285,7 @@ module Iyi
     end
 
     # iyi: the class variables the module's object code refers to, as
-    # `Owner::@@name`, for `ClassVars` (SPEC.md IV.2).
+    # `Owner::@@name`, for `ClassVars` (iyi SPEC IV.2).
     #
     # `collect_iyi_constants`' question asked of a global. A class variable's
     # global lives in the main module and a main module does not travel, so a
@@ -1314,7 +1314,7 @@ module Iyi
     end
 
     # iyi: what a consumer needs to *build* the synthesised regex constants in
-    # `Constants`, for `Regexes` (SPEC.md IV.1g).
+    # `Constants`, for `Regexes` (iyi SPEC IV.1g).
     #
     # Every other name in that list is one the consumer's own program already
     # has: its own library's `Int::DIGITS_BASE62`, or a constant this module
@@ -1508,7 +1508,7 @@ module Iyi
       end
 
       # iyi: an `enum` travels as its members and the integer they are
-      # numbered on (SPEC.md IV.2). See `iyi_enum_declaration`.
+      # numbered on (iyi SPEC IV.2). See `iyi_enum_declaration`.
       if type.is_a?(EnumType)
         return iyi_enum_declaration(program, filename, type, name, "pub", name)
       end
@@ -1544,7 +1544,7 @@ module Iyi
         assoc_types = [] of String
       end
 
-      # iyi: the `Share` marker travels with the declaration (SPEC.md
+      # iyi: the `Share` marker travels with the declaration (iyi SPEC
       # III.4.4): a type this build found shareable is exported wearing
       # `@[Share]`, and a consumer trusts that rather than recomputing
       # something it cannot — the bodies that said no field is assigned
@@ -1601,7 +1601,7 @@ module Iyi
       )
     end
 
-    # iyi: one `enum`, exported or carried (SPEC.md IV.2).
+    # iyi: one `enum`, exported or carried (iyi SPEC IV.2).
     #
     # Its *members* are the whole of what a consumer needs, and they travel
     # with their numbers rather than being renumbered: the module's own object
@@ -1715,7 +1715,7 @@ module Iyi
     end
 
     # iyi: the types declared under *type* that a consumer needs to have rather
-    # than to call, for `Exports` (SPEC.md IV.1g). *carried* is the names
+    # than to call, for `Exports` (iyi SPEC IV.1g). *carried* is the names
     # already travelling as part of the module's surface.
     #
     # A module's own machine code refers to them. `Array(Secret):type_id` is
@@ -2135,7 +2135,7 @@ module Iyi
           # A block-taking or `forall` def travels whatever type it is on: it
           # is instantiated with the caller's block inside it, or at the
           # caller's types, so the consumer is what compiles it — the same
-          # reason a generic's method and a trait's default travel (SPEC.md
+          # reason a generic's method and a trait's default travel (iyi SPEC
           # IV.1g).
           #
           # And a def whose machine code enumerates an open type's members, or
@@ -2257,7 +2257,7 @@ module Iyi
             signatures << signature
             # The same reasons the exported side travels for: a block-taking
             # or `forall` body is the caller's, one whose code answers for
-            # an open set is the program's (SPEC.md III.6), and one whose
+            # an open set is the program's (iyi SPEC III.6), and one whose
             # parameter is written wider than its callers has no symbol the
             # consumer can ask for. A header for any of them would promise a
             # symbol nobody emitted — `std/io` writes
@@ -2368,7 +2368,7 @@ module Iyi
     # survives to this point — which makes it worth checking that what comes
     # out still parses, and `spec/compiler/iyimod_spec.cr` does.
     # iyi: the macros a module declares, as source text, for `MacroBodies`
-    # (SPEC.md IV.1).
+    # (iyi SPEC IV.1).
     #
     # A macro is not a declaration a consumer may reach — `pub` does not take
     # one — and it is not code that could arrive as machine code either. It
@@ -2526,7 +2526,7 @@ module Iyi
       IyiMod.absolute_type(text, iyi_parameter_names(owner))
     end
 
-    # iyi: a type's own class variables, for `TypeDecl#class_vars` (SPEC.md
+    # iyi: a type's own class variables, for `TypeDecl#class_vars` (iyi SPEC
     # IV.2).
     #
     # A class variable is a *global*. The methods that read one travel as this
@@ -2640,7 +2640,7 @@ module Iyi
     #   It does not work on real code, and the reason is structural rather than
     #   incidental: analysing the prelude *through `main`* and then declaring new
     #   types into it re-enters machinery that assumes declaration precedes
-    #   typing. Subclassing a prelude type is enough to trip it — see SPEC.md
+    #   typing. Subclassing a prelude type is enough to trip it — see iyi SPEC
     #   IV.1e. Part IV's artifact carries types and signatures, not typed method
     #   bodies, so this model measures more than `.iyimod` restores. Treat its
     #   numbers as a ceiling on a configuration that does not work.
@@ -3445,7 +3445,7 @@ module Iyi
 
     # iyi: linker flags may run `` `command` ``. Compiled once here, not per
     # call, and through Iyi::Rx, the compiler's own engine, so this file is
-    # not one of the reasons pcre2 stays on the link line (SPEC.md III.10).
+    # not one of the reasons pcre2 stays on the link line (iyi SPEC III.10).
     private BACKTICK_SUBCOMMAND = Rx::Pattern.compile("`(.*?)`")
 
     private def expand_lib_flags(lib_flags)
@@ -3525,7 +3525,7 @@ module Iyi
 
     # iyi: unpacks the object files imported artifacts carried, into the same
     # directory the build's own units go to, and returns their names for the
-    # link (SPEC.md IV.1g).
+    # link (iyi SPEC IV.1g).
     #
     # Written out rather than handed to the linker from memory because a linker
     # takes paths. They are named after the module and the unit so that two

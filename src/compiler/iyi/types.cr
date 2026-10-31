@@ -8,7 +8,7 @@ module Iyi
     # Returns the program where this type belongs.
     getter program
 
-    # iyi: declared by a `.iyimod` rather than by this build's source (SPEC.md
+    # iyi: declared by a `.iyimod` rather than by this build's source (iyi SPEC
     # IV.1g).
     #
     # Set on the types an artifact exports, and false for everything else —
@@ -24,14 +24,14 @@ module Iyi
     # duplicate symbol.
     property? iyi_from_artifact = false
 
-    # iyi: `@[Share]` was on the declaration (SPEC.md III.4.4). Trusted to be
+    # iyi: `@[Share]` was on the declaration (iyi SPEC III.4.4). Trusted to be
     # shareable whenever its type arguments are, whatever its fields do; an
     # imported type carries this from its artifact, which is the only way a
     # consumer learns a type's shareability — `Iyi::Share` never recomputes
     # for a type whose bodies it cannot see.
     property? iyi_share_trusted = false
 
-    # iyi: `@[Share(owns: true)]` (SPEC.md III.4.4): the synchronised type
+    # iyi: `@[Share(owns: true)]` (iyi SPEC III.4.4): the synchronised type
     # that owns its contents, shareable whatever its type arguments are,
     # because nothing reaches what it holds except a block it runs - and
     # every such block is checked where it is written (`CleanupTransformer
@@ -72,7 +72,7 @@ module Iyi
     end
 
     # iyi: whether this type is an *error member* when it appears in a union —
-    # that is, whether it implements the `Error` marker trait (SPEC.md III.1.1).
+    # that is, whether it implements the `Error` marker trait (iyi SPEC III.1.1).
     #
     # `Nil` does not implement it, which is III.1.5: absence and failure stay
     # distinct, and `T?` is not an error union.
@@ -296,7 +296,7 @@ module Iyi
       false
     end
 
-    # iyi: true for a type declared with `trait Greet ... end` (SPEC.md R-3).
+    # iyi: true for a type declared with `trait Greet ... end` (iyi SPEC R-3).
     #
     # A trait *is* a module structurally — it carries required and default
     # methods, it is what an implementing type includes, and a value can be
@@ -1047,7 +1047,7 @@ module Iyi
     end
   end
 
-  # iyi: one import's scope half in effect somewhere (SPEC.md II.3) — the module
+  # iyi: one import's scope half in effect somewhere (iyi SPEC II.3) — the module
   # it names, plus the names taken from it when the selective form
   # (`import app/greeter::{polite}`) was written. A nil `names` is the whole
   # form: every name the module exports.
@@ -1071,7 +1071,7 @@ module Iyi
     getter hooks : Array(Hook)?
     getter(parents) { [] of Type }
 
-    # iyi: modules brought into unqualified scope here by an import (SPEC.md II.3).
+    # iyi: modules brought into unqualified scope here by an import (iyi SPEC II.3).
     #
     # Kept out of `parents` on purpose. `include` is the obvious shortcut and
     # is wrong in four ways at once: it does not reach types nested inside
@@ -1316,7 +1316,7 @@ module Iyi
       getter meta_vars : MetaVars
 
       # iyi: the value as it was *written*, for `IyiMod::TypeDecl#fields`
-      # (SPEC.md IV.2).
+      # (iyi SPEC IV.2).
       #
       # The third thing to need this, after a constant's initialiser and a
       # class variable's, and for the third time the same reason: a default has
@@ -1447,7 +1447,7 @@ module Iyi
     end
   end
 
-  # iyi: `trait Greet ... end` (SPEC.md R-3, II.6).
+  # iyi: `trait Greet ... end` (iyi SPEC R-3, II.6).
   #
   # A subclass rather than a sibling of `ModuleType`, because everything a
   # trait has to do at the type level is what a module already does: a value
@@ -1456,7 +1456,7 @@ module Iyi
   # Rebuilding that would mean reimplementing restriction matching, union
   # dispatch and codegen for no gain — see `Type#trait?`.
   # iyi: `trait Ord : Eq` — the traits an implementer must already implement
-  # (SPEC.md II.6).
+  # (iyi SPEC II.6).
   #
   # Held as a requirement rather than as an include: including `Eq` would make
   # every implementer of `Ord` satisfy `implements?(Eq)` without an
@@ -2256,7 +2256,7 @@ module Iyi
   end
 
   # iyi: `trait Into(T) ... end` — a trait with parameters, and/or
-  # `type Elem` — a trait with associated types (SPEC.md II.6).
+  # `type Elem` — a trait with associated types (iyi SPEC II.6).
   #
   # Both are carried as type vars, because what a trait's own signatures and
   # default bodies need from them is identical and Crystal already resolves a
@@ -3758,7 +3758,7 @@ module Iyi
     # Was this const's value cleaned up by CleanupTransformer yet?
     property? cleaned_up = false
 
-    # iyi: the value as it was *written*, for `Artifact#initialiser` (SPEC.md
+    # iyi: the value as it was *written*, for `Artifact#initialiser` (iyi SPEC
     # IV.2), and recorded for the same reason a class variable's is: a
     # constant's value has to run on the far side of an artifact, so it travels
     # as source, and the node above stops being that source. `CleanupTransformer`

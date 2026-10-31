@@ -1,4 +1,4 @@
-# What an `enum` can do — SPEC.md, "0.1.0", item 3.
+# What an `enum` can do — iyi SPEC, "0.1.0", item 3.
 #
 # The compiler gives an enum exactly two methods: `value`, the integer the
 # member was numbered with, and `new`, which wraps one (`EnumType#initialize`).
@@ -30,7 +30,7 @@ struct Enum
   # An order, because a level is a threshold: `level >= Level::Info` is the
   # first thing a program writes after a `case`. Four operators rather than a
   # `Comparable` include — the prelude has no such module, and a trait would be
-  # `std/traits`' to carry (SPEC.md II.6).
+  # `std/traits`' to carry (iyi SPEC II.6).
   def <(other : self) : Bool
     value < other.value
   end

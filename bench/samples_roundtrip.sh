@@ -629,7 +629,7 @@ IYI
 travel supertrait true
 
 # And a method the build writing the artifact never called, which the
-# artifact declares and has no machine code for (SPEC.md IV.1g). It is
+# artifact declares and has no machine code for (iyi SPEC IV.1g). It is
 # refused naming the module; it was a link error naming a mangled symbol,
 # `.2A.Kit.3A..3A.Lib.40.Kit.3A..3A.Lib.3A..3A.fb_public.3C.Int32.3E.`.
 cat > "$TRAVEL/unreached/kit/lib.iyi" <<'IYI'
@@ -658,7 +658,7 @@ else
 fi
 
 # And a `forall` def, which is the caller's to compile like a block-taking
-# one (SPEC.md IV.1g), with its bounds the caller's to check (II.6 §3,
+# one (iyi SPEC IV.1g), with its bounds the caller's to check (II.6 §3,
 # II.7 rule 3). The artifact is written by a program that calls `wrap` at
 # its own `Meters`, and read by one that calls everything at types the
 # producer never used. The forall bodies stayed behind and their
@@ -791,7 +791,7 @@ else
 fi
 
 # And a def with an untyped parameter, which is a `forall` nobody named:
-# its instantiations are the caller's (SPEC.md IV.1g, issue #134). The
+# its instantiations are the caller's (iyi SPEC IV.1g, issue #134). The
 # layout is the issue's: `lib/thing` derives `serializable` and imports a
 # package, so it has no artifact to be read from and every build compiles
 # it from source, while `std/json` beside it is read from its artifact.

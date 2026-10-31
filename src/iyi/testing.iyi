@@ -83,7 +83,7 @@ def assert_includes(collection, item, message : String = "", file : String = __F
   __iyi_assert_fail("assert_includes", message, "  collection: " + collection.inspect + "\n     missing: " + item.inspect, file, line)
 end
 
-# An error is a member of a union (SPEC.md III.1.1), so a test of the
+# An error is a member of a union (iyi SPEC III.1.1), so a test of the
 # failure path asks which member the block answered. The error is given
 # back, narrowed, for the test to read its message; anything else - a
 # value, or an error of another type - is the evidence.
@@ -170,7 +170,7 @@ end
   # method body is raised whether anything calls it or not, and refused
   # every program for this target.
   macro assert_panics(*args, **kwargs, &block)
-    \{% raise "assert_panics needs a task to catch the panic in, and this target has no concurrency runtime (SPEC.md III.4): a panic here ends the program" %}
+    \{% raise "assert_panics needs a task to catch the panic in, and this target has no concurrency runtime (iyi SPEC III.4): a panic here ends the program" %}
   end
 
   # The case runs in the program itself: a failing assertion ends the

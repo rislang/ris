@@ -1,7 +1,7 @@
 # iyi: a package's reach - what its own source touches outside the
 # language: the standard-library modules that call C which it reaches,
 # `File` from the prelude, and the C it declares itself, `@[Link]`
-# libraries and `lib` functions (SPEC.md III.7).
+# libraries and `lib` functions (iyi SPEC III.7).
 #
 # A std module counts when it, or a std module it imports, declares a C
 # function or calls one of the runtime's `__iyi_` hooks - `std/env` reads

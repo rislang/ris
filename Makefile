@@ -101,7 +101,7 @@ override COMPILER_FLAGS += -Dwithout_openssl -Dwithout_zlib -Dwithout_iconv$(if 
 # inside one long-lived process, and with no collector that process was
 # `Killed` on CI, `Error 137`, which is the honest upper bound on an allocator
 # that never frees rather than a bug. So the harness keeps bdw-gc and the
-# binaries do not, which is the same split SPEC.md III.9 draws between the
+# binaries do not, which is the same split iyi SPEC III.9 draws between the
 # compiler and the programs it builds.
 #
 # ris: the binaries keep bdw-gc by default; `gc_none=1` takes it off. Without
@@ -505,7 +505,7 @@ ris-tarball: iyi-tarball
 	cp -R -p "$(O)/iyi-package" "$(O)/ris-package"
 	ln -sf iyi$(EXE) "$(O)/ris-package/bin/ris$(EXE)"
 	$(INSTALL) -d -m 0755 "$(O)/ris-package/share/ris"
-	$(INSTALL) -m 644 README.md LEARN.md TAPE_SPEC.md LICENSE NOTICE.md \
+	$(INSTALL) -m 644 README.md LEARN.md SPEC.md LICENSE NOTICE.md \
 	  "$(O)/ris-package/share/ris/"
 	cp -R -p samples/ris "$(O)/ris-package/share/ris/samples"
 	tar -czf "$(O)/$(RIS_PACKAGE).tar.gz" -C "$(O)/ris-package" .
@@ -577,7 +577,7 @@ $(O)/$(IYI_DAEMON_BIN): $(DEPS) $(SOURCES)
 
 # iyi: the front end on its own. Linking libLLVM costs 26 ms of load-time
 # initialisers whether or not anything generates code, and `--no-codegen` never
-# calls it — so this links none and starts in 6 ms rather than 39 (SPEC.md
+# calls it — so this links none and starts in 6 ms rather than 39 (iyi SPEC
 # 0.1.0, src/compiler/iyi/llvm_shim.cr).
 #
 # The host triple and the LLVM version are baked in from the compiler that has

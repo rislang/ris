@@ -11,7 +11,7 @@
 # goes to the end of the table, which is what a table of arrivals means.
 # Like `basics`, `inventory`, `config`, `grid` and `shapes`, this documents
 # no rule: it is here because the prelude grows only when a program asks
-# (SPEC.md 0.1.0 item 3), and forgetting is what the sixth program does.
+# (iyi SPEC 0.1.0 item 3), and forgetting is what the sixth program does.
 module samples/sessions
 
 struct Session

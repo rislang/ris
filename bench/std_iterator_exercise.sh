@@ -133,7 +133,7 @@ fi
 echo
 echo "== zip and chain take an iterator, and say so at the call"
 # `zip` and `chain` are bounded `forall O : Iterator`, as `Enumerable#zip`
-# is (SPEC.md II.6 finding 6). Unbounded, a zip with an array was refused
+# is (iyi SPEC II.6 finding 6). Unbounded, a zip with an array was refused
 # from inside std/iterator.iyi, "undefined constant O::Elem" and "Did you
 # mean 'IO'?", and a chain with one, or with another element type, from
 # `ChainIterator#next`. The refusal names the caller's line, `O` and the

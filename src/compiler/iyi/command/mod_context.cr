@@ -444,7 +444,7 @@ class Iyi::Command
   end
 
   # The file an import names and the module name it means, whether or not
-  # the file is there. A module's path is its file's path (SPEC.md R-1), so
+  # the file is there. A module's path is its file's path (iyi SPEC R-1), so
   # `import app/lib` names `app/lib.iyi` after the file is deleted exactly
   # as it did before — which is what lets `check --affected app/lib.iyi`
   # find the importers a deletion breaks.

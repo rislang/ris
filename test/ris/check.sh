@@ -154,7 +154,7 @@ expect board_recursive 'use RisTree or Array nodes with checked integer indices'
 expect board_closure 'send String, Array bytes or a value struct'
 expect board_owner 'send String, Array bytes or a value struct'
 
-# Tasks capture Share values, or take a value handed off (TAPE_SPEC 5.1).
+# Tasks capture Share values, or take a value handed off (SPEC 5.1).
 expect task_capture_mutable 'build tape values inside the spawn'
 expect task_capture_assigned 'a mutable borrow across tasks'
 expect task_local_tape 'open the `group` inside the `local_tape` block'
@@ -1629,7 +1629,7 @@ else
 fi
 # std/secure_dns over loopback: DoT, then DoH by POST and GET, against
 # bench/std_secure_dns_server.py; the upstreams connect by address, so no
-# exchange calls back into the resolver (TAPE_SPEC 3.5).
+# exchange calls back into the resolver (SPEC 3.5).
 if python3 -c 'import ssl; from cryptography import x509' 2>/dev/null; then
   srv=$(mktemp -d)
   python3 bench/std_secure_dns_server.py "$srv" >"$srv/log" 2>&1 &
@@ -1904,7 +1904,7 @@ else
   echo "FAILED   log_metadata: $out"; status=1
 fi
 expect log_metadata_escape 'is a variable of the code around this tape block'
-# TAPE_SPEC 3.2: a tape block's data kept by a call into an object from
+# SPEC 3.2: a tape block's data kept by a call into an object from
 # outside it, here and through a server handler's field.
 expect tape_block_store_call 'cannot store data made in this tape block'
 expect tape_block_handler_store 'cannot store data made in this tape block'

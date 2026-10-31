@@ -1,4 +1,4 @@
-# A library def's interpolated String builds on the caller's tape (TAPE_SPEC
+# A library def's interpolated String builds on the caller's tape (SPEC
 # 1.6): each `tape do` frees it, so a loop of them holds one, on no heap.
 module test/ris/interpolation_retained
 

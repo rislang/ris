@@ -4,7 +4,7 @@
 `hello` is the only pair in this bench that needs no argument about being a
 pair — one line, one `puts`. It is also the pair that says nothing about what
 happens when there is user code, and `webapp.iyi` costing the same as `hello`
-is the measurement that made that worth fixing (SPEC.md 0.1.0 item 5).
+is the measurement that made that worth fixing (iyi SPEC 0.1.0 item 5).
 
 Writing a second pair by hand invites the question this bench exists to avoid:
 whether the two programs are really the same program. So neither is written by

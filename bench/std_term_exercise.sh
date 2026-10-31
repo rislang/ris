@@ -537,7 +537,7 @@ echo
 echo "== no C library on Linux"
 # The module reaches the terminal by `ioctl` system calls there, as the
 # prelude's `__iyi_isatty` does; a libc termios call in the binary would be
-# a new link-time dependency (SPEC.md III.9).
+# a new link-time dependency (iyi SPEC III.9).
 if [ "$(uname -s)" = Linux ] && command -v nm >/dev/null 2>&1 && [ -x "$WORK/term-plain" ]; then
   if nm -u "$WORK/term-plain" | grep -E ' (ioctl|tcgetattr|tcsetattr|isatty|cfmakeraw)(@|$)'; then
     echo "  the exercise binds a libc terminal call"

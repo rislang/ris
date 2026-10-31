@@ -108,7 +108,7 @@ module Iyi
     # precedence than ancestors and the enclosing namespace.
     #
     # iyi: a type found here that lives in a module this file has not
-    # imported is not in scope (SPEC.md R-1) — a sibling unit `Std::Tuple`
+    # imported is not in scope (iyi SPEC R-1) — a sibling unit `Std::Tuple`
     # reached by walking up from `Std::Enumerable` must not hide the
     # prelude's `::Tuple`. The walk goes on outward; the walled match is
     # kept only as the last answer, so that a name nothing else resolves
@@ -161,7 +161,7 @@ module Iyi
         return match if match
       end
 
-      # iyi: then the modules whose names this scope imports (SPEC.md
+      # iyi: then the modules whose names this scope imports (iyi SPEC
       # II.3). Placed after our own types and our parents, because a local
       # definition beats a used one; and before the namespace, so that an
       # imported name shadows an enclosing scope the way a nested type does.
@@ -189,7 +189,7 @@ module Iyi
     #
     # Two used modules exporting the same name is not an error where the
     # imports are written; it is an error here, at the point of use, and
-    # only for the name actually used. That is SPEC.md II.3's rule, and it is
+    # only for the name actually used. That is iyi SPEC II.3's rule, and it is
     # the reason this cannot be an `include`: ancestor order would silently
     # pick one.
     private def lookup_using_path_item(used : Array(UsingModule), name : String, location) : Type?
@@ -238,7 +238,7 @@ module Iyi
 
     # iyi: *name* at the root, where a module of the program's own package
     # was before the package's own build named it as a consumer's does
-    # (`iyi_root_package`, SPEC.md III.7): `Codec` of `codec.iyi` in
+    # (`iyi_root_package`, iyi SPEC III.7): `Codec` of `codec.iyi` in
     # `iyi-web` is `IyiWeb::Codec` in both builds now. The old spelling
     # compiled, in this build only, so it still resolves - here, at the
     # root, where a lookup that would have found it then arrives - and
@@ -270,7 +270,7 @@ module Iyi
       written = "#{lead}#{path.names.join("::")}"
       named = "#{lead}#{prefix}::#{path.names.join("::")}"
       message = "`#{written}` is `#{named}`: the package's own modules live under its name in its own " \
-                "build, as they do in a consumer's (SPEC.md III.7). The old spelling still resolves here " \
+                "build, as they do in a consumer's (iyi SPEC III.7). The old spelling still resolves here " \
                 "and nowhere else - a build that requires this package has no `#{lead}#{first}` - so write `#{named}`"
       if (file = location.filename).is_a?(VirtualFile) && (defined = file.macro.location)
         message += ". It is written in macro `#{file.macro.name}`, defined at " \

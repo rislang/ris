@@ -1,4 +1,4 @@
-# iyi: differential spec for the owned regex engine (SPEC.md III.10, Appendix B
+# iyi: differential spec for the owned regex engine (iyi SPEC III.10, Appendix B
 # decision 17). A regex engine can pass a page of hand written expectations and
 # still be wrong, so the core of this file asserts almost nothing by hand: it
 # compares the engine against a second one. The spec binary still links pcre2
@@ -992,7 +992,7 @@ describe Iyi::Rx do
 
   describe "refused syntax" do
     it "raises SyntaxError for every construct outside the supported set" do
-      # iyi: SPEC.md III.10 takes Go's trade, and the line it draws is regular
+      # iyi: iyi SPEC III.10 takes Go's trade, and the line it draws is regular
       # languages. A backreference, a recursion, a subroutine call and a
       # conditional are not regular, so no simulation answers them and no amount
       # of care makes them linear. An atomic group and a possessive quantifier
@@ -1061,7 +1061,7 @@ describe Iyi::Rx do
           ex.position.should be <= source.size
           next
         end
-        fail("iyi's Rx accepted #{label} (#{source.inspect}); the contract refuses it (SPEC.md III.10)")
+        fail("iyi's Rx accepted #{label} (#{source.inspect}); the contract refuses it (iyi SPEC III.10)")
       end
     end
 

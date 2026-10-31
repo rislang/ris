@@ -88,7 +88,7 @@ class Iyi::Command
 
   # `String`, `Array`, `Hash::Entry`: a capital, then letters, digits,
   # underscores and `::`. Spelled out rather than a regex, which would put
-  # libpcre on the compiler's floor (SPEC.md III.9).
+  # libpcre on the compiler's floor (iyi SPEC III.9).
   private def prelude_type_name?(name : String) : Bool
     return false unless name[0]?.try(&.ascii_uppercase?)
     name.each_char.all? { |char| char.ascii_alphanumeric? || char == '_' || char == ':' }
@@ -378,7 +378,7 @@ class Iyi::Command
     extension = filename.ends_with?(".ri") ? ".ri" : ".iyi"
     unless Iyi.same_file?(File.join(module_root, "#{module_name}#{extension}"), filename)
       abort! "#{filename} declares `module #{module_name}`, and a module's path " \
-             "is its file's path (SPEC.md R-1, IV.6): a module by that name is " \
+             "is its file's path (iyi SPEC R-1, IV.6): a module by that name is " \
              "read from #{module_name}#{extension}", :USAGE_ERROR
     end
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Drives `iyi lsp` through one scripted editing session and asserts on
-every answer. This is the gate for SPEC.md III.8 #2: each claim the
+every answer. This is the gate for iyi SPEC III.8 #2: each claim the
 release makes about the server is a step here, and a step that fails
 names itself and exits 1.
 

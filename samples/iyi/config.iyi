@@ -5,10 +5,10 @@
 #
 # Text comes apart into lines, a line into its two halves around a `=`, and
 # each half loses its whitespace; a line that does not parse is an error
-# value carrying where it was (SPEC.md III.1), not a printed message. Like
+# value carrying where it was (iyi SPEC III.1), not a printed message. Like
 # `basics` and `inventory`, this documents no rule: it is here because the
 # prelude grows only when a program in this repository needs something
-# (SPEC.md 0.1.0 item 3), and cutting text is what the third program does.
+# (iyi SPEC 0.1.0 item 3), and cutting text is what the third program does.
 module samples/config
 
 struct ParseError

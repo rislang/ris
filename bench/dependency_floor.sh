@@ -5,7 +5,7 @@
 # pcre2, gmp, iconv, openssl, libxml2, libyaml, zlib, LLVM and libffi. A program
 # iyi builds must reach none of them, and the compiler must reach only the ones
 # named below with a reason beside each. This checks it rather than asserting it
-# (SPEC.md III.9, III.10).
+# (iyi SPEC III.9, III.10).
 #
 #     bash bench/dependency_floor.sh
 #
@@ -82,7 +82,7 @@ COMPILER="$REPO/.build/iyi"
 # `unlink` joined with File.delete. Darwin binds libSystem again; Linux issues
 # `unlinkat`, so its undefined list and the files object remain empty.
 # `kqueue`, `kevent`, `clock_gettime_nsec_np` and `__error` joined when the
-# concurrency runtime (SPEC.md III.4.8) reached darwin arm64: the panic path
+# concurrency runtime (iyi SPEC III.4.8) reached darwin arm64: the panic path
 # runs through the scheduler, so every darwin program carries the poller and
 # its clock, all of it libSystem for the same reason `write` is. Linux keeps
 # raw syscalls, so its list and the per-target objects are unchanged.
@@ -235,7 +235,7 @@ ALLOWED_LIBS_PROGRAM="$FLOOR_LIBS_PROGRAM"
 # bench/floor_base.sh.
 ALLOWED_DLLS_PROGRAM="$FLOOR_DLLS_PROGRAM"
 
-# What the compiler may link, each with a reason recorded in SPEC.md.
+# What the compiler may link, each with a reason recorded in iyi SPEC.
 #   LLVM       the back end (B.2, Part V.9)
 #   c++        conditional, and on two independent reasons, the same two the
 #              Makefile gates NEEDS_CXX_RUNTIME on. llvm_ext.cc shims operand
@@ -283,7 +283,7 @@ fi
 
 # What the compiler may import on Windows: the three a program may, plus the
 # back end and what LLVM's own Windows support reaches through.
-#   llvm-c.dll    the back end (SPEC.md III.9, Part V.9)
+#   llvm-c.dll    the back end (iyi SPEC III.9, Part V.9)
 #   dbghelp.dll   LLVM's symboliser and the crash handler it installs
 #   ntdll.dll     LLVM's stack walk, which is `RtlCaptureStackBackTrace`
 #   ole32.dll     LLVM's path code asking the shell for a known folder
@@ -312,7 +312,7 @@ ALLOWED_DLLS_COMPILER="$ALLOWED_DLLS_PROGRAM llvm-c.dll dbghelp.dll ntdll.dll ol
 # Ancestor libraries forbidden for ALL binaries (programs and compiler alike):
 ANCESTOR_FORBIDDEN_ALL="libevent:libevent compiler-rt:libclang_rt compiler-rt:compiler_rt pcre2:libpcre gmp:libgmp gmp:mpir iconv:libiconv openssl:libssl openssl:libcrypto libxml2:libxml2 libyaml:libyaml zlib:libz\\. libffi:libffi"
 
-# Ancestor libraries permitted for the compiler only (with a recorded reason in SPEC.md III.9),
+# Ancestor libraries permitted for the compiler only (with a recorded reason in iyi SPEC III.9),
 # but strictly forbidden for any program iyi builds:
 ANCESTOR_COMPILER_ONLY="bdw-gc:libgc LLVM:libLLVM"
 
@@ -420,7 +420,7 @@ imports_audit() { # imports_audit <program> <binary>
     echo "THE FLOOR MOVED: $program imports $dll"
   done
   echo "A program iyi builds may import the process interface, OS entropy, Winsock,
-the certificate stores and the MSVC runtime, each with a reason in SPEC.md
+the certificate stores and the MSVC runtime, each with a reason in iyi SPEC
 III.10. Another DLL is a dependency being taken on, and it needs a reason
 there before a line here."
   status=1
@@ -609,7 +609,7 @@ while IFS= read -r annotation; do
     # advapi32, which ships with every Windows the way kernel32 does, and
     # `std/random` calls it; `std/socket` reads the registry there for the
     # name servers Windows was configured with, which the platform's own
-    # resolver API would have taken iphlpapi or dnsapi to ask (SPEC.md
+    # resolver API would have taken iphlpapi or dnsapi to ask (iyi SPEC
     # III.10's inventory says so); `std/user` asks it for the account name
     # (`GetUserNameW`) and the process token's SIDs, which are advapi32's
     # alone, and leaves netapi32's account database and userenv's profile
@@ -618,14 +618,14 @@ while IFS= read -r annotation; do
     # Windows' sockets are Winsock's: `ws2_32` is the platform's network
     # interface the way kernel32 is its process interface, it ships with
     # every Windows, and `std/socket` and `std/udp` are its only callers
-    # (SPEC.md III.10's inventory says so). The completion port's
+    # (iyi SPEC III.10's inventory says so). The completion port's
     # `AcceptEx` and `ConnectEx` are mswsock's exports reached through
     # `WSAIoctl`, so they add no second annotation.
     '@[Link("ws2_32")]') ;;
     # The trusted roots are each platform's own, kept where only its own
     # interface reaches: crypt32's stores on Windows, Security.framework's
     # anchors and trust settings on darwin with CoreFoundation's containers
-    # around them. `std/system_roots` is their only caller (SPEC.md
+    # around them. `std/system_roots` is their only caller (iyi SPEC
     # III.10's inventory says so); Linux's are a file.
     '@[Link("crypt32")]') ;;
     '@[Link(framework: "Security")]') ;;
@@ -633,7 +633,7 @@ while IFS= read -r annotation; do
     *)
       echo "  THE FLOOR MOVED: the library declares $annotation"
       echo "  A library iyi ships links the platform libc and, opt-in, a"
-      echo "  collector. Another annotation needs a reason in SPEC.md III.10"
+      echo "  collector. Another annotation needs a reason in iyi SPEC III.10"
       echo "  before it needs a line here."
       status=1
       ;;
@@ -658,7 +658,7 @@ if [ -n "$allowed_symbols" ]; then
   report "a program's undefined symbols" \
     "$(unexpected "$allowed_symbols" "$(echo $prog_syms)")" \
     "Each is something the machine must supply. If that is the decision, add it to
-ALLOWED_SYMBOLS_* in this script and say why in the commit (SPEC.md III.9)."
+ALLOWED_SYMBOLS_* in this script and say why in the commit (iyi SPEC III.9)."
 else
   # Windows' floor is the DLL list above, and this run has no symbol
   # allowlist to hold the names against, so it says what it read instead of
@@ -673,12 +673,12 @@ fi
 if [ -z "$DUMPBIN" ]; then
   report "a program's libraries" \
     "$(unexpected "$allowed_libs_program" "$(echo $prog_libs)")" \
-    "A program iyi builds may link the platform libc and nothing else (SPEC.md III.10)."
+    "A program iyi builds may link the platform libc and nothing else (iyi SPEC III.10)."
 fi
 
 report "the compiler's libraries" \
   "$(unexpected "$allowed_libs_compiler" "$(echo $compiler_libs)")" \
-  "The compiler's list is short and every entry has a reason in SPEC.md III.9 or
+  "The compiler's list is short and every entry has a reason in iyi SPEC III.9 or
 III.10. A new one needs a reason there before it needs a line here."
 
 # The denylist is separate from the allowlists on purpose: an allowlist typo

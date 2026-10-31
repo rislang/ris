@@ -10,7 +10,7 @@ tape do
   first = RisRegion.tape
   ok = whole(first)
   # Many values, not one growing one: a growing value takes a region of
-  # its own (TAPE_SPEC.md), and these fill the tape past its mapping.
+  # its own (SPEC.md), and these fill the tape past its mapping.
   chunk = "a" * (1024 * 1024)
   pieces = Array(String).new(71) { |_| String.new(chunk) }
   grown = RisRegion.tape

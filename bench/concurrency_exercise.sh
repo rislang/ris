@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Drives bench/concurrency_exercise.iyi: the concurrency runtime's gate
-# (SPEC.md III.4, built in III.4.8's order).
+# (iyi SPEC III.4, built in III.4.8's order).
 #
 #     bash bench/concurrency_exercise.sh
 #

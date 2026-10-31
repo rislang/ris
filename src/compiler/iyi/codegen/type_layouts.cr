@@ -4,7 +4,7 @@
 # The collector this feeds never discovers an object's shape at run time: the
 # compiler knows which words in an object are pointers, and this is where that
 # knowledge is written down. Heap-layout precision is the one REQUIREMENT
-# SPEC.md II.5 makes, and it is cheap precisely because the table is computed
+# iyi SPEC II.5 makes, and it is cheap precisely because the table is computed
 # here, beside the typer that lowered the type.
 #
 # Every byte offset is LLVM's data layout answering about the emitted struct,

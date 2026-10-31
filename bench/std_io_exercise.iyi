@@ -488,7 +488,7 @@ puts "  MultiWriter puts, <<, write_byte, print, flush, close and use as an IyiI
 # ---------------------------------------------------------------------------
 
 puts "\n== a pipe between tasks"
-# Events cross tasks on the board (TAPE_SPEC 5.1): 1 "written", 100
+# Events cross tasks on the board (SPEC 5.1): 1 "written", 100
 # "reading", then the byte count and 0 for a clean end.
 record PipeEvent, code : Int32
 

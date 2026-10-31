@@ -15,7 +15,7 @@ Three columns, because two of the comparisons matter and they are different
 questions. **Go** is the language that does this well and the one to stand next
 to. **Crystal** is the language this is a fork of, compiled here by the same
 binary: it has no unit of compilation smaller than the program, because a class
-is open until the last line of the last file, and that is the thing SPEC.md's
+is open until the last line of the last file, and that is the thing iyi SPEC's
 rules exist to make untrue.
 
 What is measured, for each language:
@@ -30,7 +30,7 @@ What is measured, for each language:
 
 The iyi rebuild is `--use-iyimod DIR --emit-iyimod DIR`: read every module's
 artifact, compile the ones whose source moved, write their artifacts back.
-That is what SPEC.md IV.3 calls the incremental loop, and this is the first
+That is what iyi SPEC IV.3 calls the incremental loop, and this is the first
 thing in this repository to put a number on it.
 
 Run it after `make crystal release=1`; a debug compiler is about 1.5x and only
@@ -172,7 +172,7 @@ class Crystal:
     This is the comparison the fork is actually about. Crystal has no unit of
     compilation smaller than the program: every build reads every file and
     analyses all of it, because a class is open until the last line of the last
-    file. The rules in SPEC.md exist to make that untrue, and this column is
+    file. The rules in iyi SPEC exist to make that untrue, and this column is
     what they are worth.
     """
 
@@ -418,7 +418,7 @@ def main():
 
     # No daemon column. It was measured — one module edited, 0.18–0.28 s built
     # normally against 0.20–0.24 s through it — and it buys nothing now that
-    # the prelude it existed to hold is 1,053 lines (SPEC.md IV.1d).
+    # the prelude it existed to hold is 1,053 lines (iyi SPEC IV.1d).
 
     # One program, or nothing here means anything.
     for lang in languages:

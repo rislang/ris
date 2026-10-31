@@ -3,7 +3,7 @@
 `git clone https://github.com/rislang/ris`, then:
 1. `README.md`: what ris is, and the tape example.
 2. This file: the rules that differ from Ruby and Crystal.
-3. `TAPE_SPEC.md`: where tape values go; `doc/TAPE_API.md`: examples.
+3. `SPEC.md`: ris's specification; `doc/TAPE_API.md`: examples.
 4. `samples/ris/report.ri`: tape written by hand; `samples/ris/hello.ri`
    and `shop/order.ri`: a program and a module it imports. `test/ris/*.ri`
    are small cases; `test/ris/refused/` is what the compiler rejects.

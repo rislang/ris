@@ -6,7 +6,7 @@
 # clock. Two meanings for one name, decided by whether the argument was
 # written `2` or `2.0` — a thousandfold apart — and the second one burned a
 # core for the whole wait and starved every other fiber on the thread with
-# it (SPEC.md III.1.7a, III.4). The prelude's is the `sleep` there is, and
+# it (iyi SPEC III.1.7a, III.4). The prelude's is the `sleep` there is, and
 # it says so itself: `sleep 2.0` is refused with "`sleep` takes
 # milliseconds, an `Int32`".
 

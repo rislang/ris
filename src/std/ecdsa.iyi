@@ -637,7 +637,7 @@ end
 # own reduction (q = t0, p's words being what they are) in place of the
 # general one: the arithmetic std/p256 signs with, written again here
 # because std/p256 imports this module and an import cycle is refused
-# (SPEC.md R-1). The values are public, so the point formulas branch as
+# (iyi SPEC R-1). The values are public, so the point formulas branch as
 # they like. Both scalars are written in width-w non-adjacent form, odd
 # digits under 2^(w - 1) in size with at least w - 1 zeros after each:
 # u2 at width 5 against Q, 3Q ... 15Q, made for each signature in

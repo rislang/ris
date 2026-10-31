@@ -7,7 +7,7 @@ The inherited starting count was 79.
 
 | Module | Status | Failures | Gate / remaining issue |
 |---|---|---:|---|
-| socket | blocked | 74 | DNS SvcbRecord needs compiler TAPE_SPEC 7.4 |
+| socket | blocked | 74 | DNS SvcbRecord needs compiler SPEC 7.4 |
 | io | done | 73 | std_io_tape and pipe_wait; zero heap |
 | http_head | done | 72 | http_head_tape; zero heap |
 | http | partly | 72 | TLS reaches std/big's old String class extension |
