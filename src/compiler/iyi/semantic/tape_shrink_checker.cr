@@ -1854,6 +1854,14 @@ class Iyi::TapeShrinkChecker
               # pool shows no contents either; it keeps the block's tape.)
               refuse_fresh_store(destinations, node) if contents.roots.empty? && contents.views.empty? && !summary_marked?(target)
               incoming = translated(contents, summary, actuals, node.object_id)
+              # A marked callee's own scratch cannot reach its stores: it
+              # refused that itself. What it made and stored is not this
+              # scope's.
+              if !@text_only && summary_marked?(target)
+                incoming = Value.new(incoming.roots.reject { |r| r == node.object_id },
+                  incoming.views.reject { |v| v.root == node.object_id },
+                  incoming.procs, incoming.unknown_proc)
+              end
               # A summary can write on only one branch. It cannot prove
               # that an older foreign text borrow was killed on every
               # path. Keep those borrows until a direct store kills them.

@@ -88,23 +88,21 @@ class Iyi::TapeScopeChecker
   end
 
   # The pieces of a marked body: the flag and the body as written.
-  # A block's is two: the mark, and RESULT given the body.
+  # A body that never ends (NoReturn) keeps only the first two: typing
+  # drops what follows it, and every exit is a `return` through RESULT.
   def self.parts(node : ASTNode) : {BoolLiteral, ASTNode}?
     return nil unless node.is_a?(Expressions)
     size = node.expressions.size
-    return nil unless size == 4 || size == 2
+    return nil unless size >= 2
     first, second = node.expressions[0], node.expressions[1]
     return nil unless first.is_a?(Assign)
     call = first.value
     return nil unless call.is_a?(Call) && call.name == MARK
     flag = call.args.first?
     return nil unless flag.is_a?(BoolLiteral)
-    if size == 2
-      return nil unless second.is_a?(Call) && second.name == RESULT && second.args.size == 2
-      return {flag, second.args[1]}
-    end
-    return nil unless second.is_a?(Assign)
-    {flag, second.value}
+    return {flag, second.value} if second.is_a?(Assign) && size <= 4
+    # Typing may inline a NoReturn body in place of its assignment.
+    {flag, Expressions.new(node.expressions[1..]).at(node)}
   end
 
   getter graph : TapeCallGraph
