@@ -3,8 +3,8 @@ class State
   @@padding = String.new("after the array")
   def self.request
     raise "padding" unless @@padding == "after the array"
-    local_tape do
-      local_tape do
+    tape do
+      tape do
         scratch = String.new("request scratch")
         raise "scratch" unless scratch.bytesize == 15
       end

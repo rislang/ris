@@ -1,5 +1,5 @@
-# Goose's every scope freeing: a loop round or block that keeps nothing
-# frees what it put on the tape; one that keeps something does not.
+# Goose's every scope freeing: a loop round or block frees what it put
+# on the tape (SPEC 1.1); what it keeps it copies onto the owner.
 def used : UInt64
   IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)
 end
@@ -27,10 +27,10 @@ tape do
   before = used
   j = 0
   while j < 3
-    kept.push(String.build { |w| w.append_int(j) })
+    kept.push(String.build { |w| w.append_int(j) }.copy_to(Program.tape))
     j += 1
   end
-  puts "kept stays: #{used != before} #{kept[2] == "2"}"
+  puts "kept copied: #{used == before} #{kept[2] == "2"}"
 
   sink = String::Builder.new(4)
   [1, 2, 3].each { |k| sink.append_int(k) }

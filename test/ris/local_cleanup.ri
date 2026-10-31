@@ -18,11 +18,11 @@ def fail_local : Int32
   tape do
     outer = RisRegion.tape
     defer note(3, RisRegion.tape == outer)
-    local_tape do
-      local_tape = RisRegion.tape
-      defer note(2, RisRegion.tape == local_tape)
-      local_tape do
-        defer note(1, RisRegion.tape != local_tape)
+    tape do
+      shared = RisRegion.tape
+      defer note(2, RisRegion.tape == shared)
+      tape do
+        defer note(1, RisRegion.tape == shared)
         raise "expected local panic"
       end
     end
@@ -34,7 +34,7 @@ def interleave(tag : UInt8) : Nil
   tape do
     outer = String.build { |w| w.push(tag) }
     saved = RisRegion.tape
-    local_tape do
+    tape do
       text = String.build { |w| w.append(outer) }
       current = RisRegion.tape
       sleep(1)

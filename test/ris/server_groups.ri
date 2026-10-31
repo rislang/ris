@@ -69,7 +69,7 @@ end
 
 # Each group owns its task records, copied config and connection buffers.
 GROUPS.times do
-  local_tape do
+  tape do
     response = Outgoing.new
     response.header("Content-Type", "application/json")
     response.body << BODY

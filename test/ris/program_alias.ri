@@ -5,7 +5,7 @@ class State
   end
 end
 alias_of_global = State.log
-local_tape do
-  alias_of_global << String.new("request")
+tape do
+  alias_of_global << String.new("request").copy_to(Program.tape)
 end
 raise "retained alias lost" unless State.log[0] == "request"

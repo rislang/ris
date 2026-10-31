@@ -3,7 +3,7 @@ module test/ris/static_array_copy
 import std/static_array
 
 saved = StaticArray(String, 3).new("unused")
-local_tape do
+tape do
   source = StaticArray(String, 3).new do |i|
     "slot-" + i.to_s
   end

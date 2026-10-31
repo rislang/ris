@@ -61,18 +61,18 @@ def resident_kb : Int64
   0_i64
 end
 
-# Each round in its own local_tape: on the program's tape (a nested tape
-# shares it) a round's task array would never be released, and the next
-# round's array would take a text's spare side reservation.
-local_tape { round }
+# Each round in its own block, which frees its scratch when it ends
+# (SPEC 1.1): a round's task array is released before the next round's
+# array is made.
+tape { round }
 before = minor_faults
 total = 0_i64
-local_tape { total = round }
+tape { total = round }
 faults = minor_faults - before
 puts faults < 128 ? "warm: #{total // 1024} KiB written again" : "COLD: #{faults} faults for #{total // 1024} KiB"
 
 before_kb = resident_kb
-local_tape do
+tape do
   big = String.build(8 * 1024 * 1024) do |w|
     n = 0
     while n < 8 * 1024 * 1024

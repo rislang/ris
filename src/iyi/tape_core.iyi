@@ -580,6 +580,19 @@ struct SlicePool::Run(T)
 end
 
 struct StaticArray(T, N)
+  # Creates a new StaticArray filled by invoking the block for each index.
+  # In the runtime, so the loop keeps each element the block makes on the
+  # caller's tape, as Array.new's does (a std loop round frees its own).
+  def self.new(& : Int32 -> T) : self
+    array = uninitialized self
+    i = 0
+    while i < N
+      pointerof(array.@buffer)[i] = yield i
+      i += 1
+    end
+    array
+  end
+
   def __iyi_copy_into(target : Pointer(self), work : RisCopyWork) : Nil
     target.value = self
     i = 0

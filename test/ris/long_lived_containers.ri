@@ -5,10 +5,11 @@ ROWS = Array(Array(Int32)).new
 TABLE = Hash(String, Array(String)).new
 
 def store
-  local_tape do
-    CACHE << "request-" + 7.to_s
-    ROWS << [1, 2]
-    TABLE["key-" + 1.to_s] = ["value-" + 2.to_s]
+  tape do
+    CACHE << ("request-" + 7.to_s).copy_to(Program.tape)
+    ROWS << [1, 2].copy_to(Program.tape)
+    TABLE[("key-" + 1.to_s).copy_to(Program.tape)] = ["value-" + 2.to_s].copy_to(Program.tape)
+    nil
   end
 end
 
@@ -17,11 +18,12 @@ raise "retained text lost" unless CACHE[0] == "request-7"
 raise "retained row lost" unless ROWS[0][1] == 2
 raise "retained hash lost" unless TABLE["key-1"][0] == "value-2"
 1000.times do |i|
-  local_tape do
-    CACHE[0] = "replacement-" + i.to_s
-    ROWS[0] = [i]
-    TABLE["key-1"] = [i.to_s]
+  tape do
+    CACHE[0] = ("replacement-" + i.to_s).copy_to(Program.tape)
+    ROWS[0] = [i].copy_to(Program.tape)
+    TABLE["key-1"] = [i.to_s].copy_to(Program.tape)
     raise "replacement lost" unless ROWS[0][0] == i
+    nil
   end
 end
 raise "retained replacement lost" unless CACHE[0] == "replacement-999"
@@ -42,8 +44,9 @@ class Registry
 end
 
 REGISTRY = Registry.new
-local_tape do
-  REGISTRY.texts << "field-" + 3.to_s
+tape do
+  REGISTRY.texts << ("field-" + 3.to_s).copy_to(Program.tape)
+  nil
 end
 raise "program field lost" unless REGISTRY.texts[0] == "field-3"
 REGISTRY.texts.clear

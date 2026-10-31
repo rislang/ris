@@ -29,4 +29,4 @@ class Cache
 end
 
 cache = Cache.new
-local_tape { cache.keep(make) }
+tape { cache.keep(make) }

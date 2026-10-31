@@ -20,16 +20,8 @@ struct ::StaticArray(T, N)
     N
   end
 
-  # Creates a new StaticArray filled by invoking the block for each index.
-  def self.new(& : Int32 -> T) : self
-    array = uninitialized self
-    i = 0
-    while i < N
-      array.to_unsafe[i] = yield i
-      i += 1
-    end
-    array
-  end
+  # `StaticArray.new { |i| }` is the runtime's (src/iyi/tape_core.iyi):
+  # its loop keeps each element the block makes, as Array.new's does.
 
   # Creates a new StaticArray filled with the given value.
   def self.new(value : T) : self

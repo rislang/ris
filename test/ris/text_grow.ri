@@ -21,7 +21,8 @@ class GrowingField
   end
 
   def take_event(owner)
-    event = GrowingTextEvent.new(@text.copy_to(owner))
+    # The event and its text are copied onto *owner* together.
+    event = GrowingTextEvent.new(@text).copy_to(owner)
     @text = ""
     event
   end
@@ -152,7 +153,7 @@ setter.append("z")
 raise "setter reset" unless setter.text == "z"
 raise "setter reservation" unless reservations == before
 
-local_tape do
+tape do
   nested = "nested"
   nested << "!"
   raise "nested tape local" unless nested == "nested!"
@@ -191,7 +192,7 @@ check_count(before, 3_u64)
 # The lazy slot follows a deeply copied object's owner, not its caller.
 retained = GrowingField.new.copy_to(Program.tape)
 before = copies
-local_tape do
+tape do
   retained.append("?")
 end
 raise "retained field" unless retained.text == "odd?"

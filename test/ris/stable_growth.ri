@@ -8,7 +8,7 @@ end
 
 @[PointerUnsafe("check saved element pointers after growth")]
 def check_growth
-  local_tape do
+  tape do
     a = Array(Int32).new(1)
     b = Array(Int32).new(1)
     padding = String.new("force both arrays off the tape end")

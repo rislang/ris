@@ -380,6 +380,10 @@ class Iyi::TapeShrinkChecker
     # A call that allocates and answers text made its bytes, though its
     # summary may show only the inputs it read (interpolation, inspect):
     # unless it is known to answer a view, the text is fresh too.
+    # A copy is on its owner (copy_to(Program.tape)), not this block.
+    return result if node.is_a?(Call) && {"copy_to", "to_heap"}.includes?(node.name)
+    # Growing text answers the text grown, in its own reservation.
+    return result if node.is_a?(Call) && node.obj.try(&.type?.try(&.to_s)) == "RisTextGrowth"
     viewing = !(result.roots.empty? && result.views.empty?)
     return result if viewing && node.is_a?(Call) &&
                      (VIEWS.includes?(node.name) || TEXT_VIEWS.includes?(node.name))
@@ -1359,6 +1363,9 @@ class Iyi::TapeShrinkChecker
   # String or Array made there moves down to the caller's boundary; any
   # other value made there would have to be copied out, which is refused
   # (SPEC 1.9). What it views from outside is checked as a store.
+  # Roots a copy_to or to_heap made: they are on their owner.
+  @copied_roots = Set(UInt64).new
+
   private def check_leaving(scope : UInt64, v : Value, env : Env,
                             type : Type?, node : ASTNode) : Nil
     return unless @checking && !@text_only
@@ -1377,7 +1384,11 @@ class Iyi::TapeShrinkChecker
         # Unknown is refused: what a non-flat value holds must come from
         # a parameter, `self` or program data.
         next if from_caller?(source)
+        # A block's value made before the block (the def's builder that
+        # its block appends to) is older than the block's scratch.
+        next if !node.is_a?(Def) && blocks && !blocks.includes?(scope)
       end
+      next if @copied_roots.includes?(source)
       what = node.is_a?(Def) ? "def `#{node.name}`" : "block"
       refuse node, "cannot return a value made in this #{what}'s scratch: " \
                  "it would have to be copied out (SPEC 1.9).\nEnd the def " \
@@ -1435,6 +1446,13 @@ class Iyi::TapeShrinkChecker
   end
 
   @handed = Set(UInt64).new
+
+  # An @[OnTape] struct: a value whose fields may hold tape storage.
+  private def tape_struct?(type : Type) : Bool
+    type = type.remove_typedef
+    type.struct? && !type.is_a?(UnionType) && type_name(type) != "String" &&
+      !!TapeChecker.tape_in(@program, type)
+  end
 
   private def struct_value?(root : UInt64) : Bool
     return false if @handed.includes?(root)
@@ -1925,8 +1943,10 @@ class Iyi::TapeShrinkChecker
             # made here: inside any tape block around the call.
             # (Only a growing or text result: a callee that copies onto
             # another owner, `copy_to(Program.tape)`, answers no such thing.)
-            if !@tape_blocks.empty? && (@graph.fresh?(node) ||
-               (node.type?.try { |t| type_name(t.remove_typedef) } == "String" &&
+            # A tape struct (an @[OnTape] answer) holding what the callee
+            # allocated is made here the same way.
+            if !@tape_blocks.empty? && !{"copy_to", "to_heap"}.includes?(node.name) && (@graph.fresh?(node) ||
+               (node.type?.try { |t| type_name(t.remove_typedef) == "String" || tape_struct?(t) } &&
                 @graph.allocates?(node)))
               @root_scopes[node.object_id] ||= @scopes.dup
               note_fresh(node.object_id) unless @root_tapes.has_key?(node.object_id)
@@ -2047,7 +2067,9 @@ class Iyi::TapeShrinkChecker
           @tape_blocks.pop if explicit
         else
           block_value = loop_value(block.body, outer, kind: "block")
-          check_leaving(block.body.object_id, block_value, outer, block.body.type?, block)
+          # A program constant's initializer runs on the program's tape:
+          # its value is the constant's, made on its owner.
+          check_leaving(block.body.object_id, block_value, outer, block.body.type?, block) unless node.program_initializer?
         end
         @scopes.pop
         @callback_chain.pop
@@ -2091,6 +2113,7 @@ class Iyi::TapeShrinkChecker
           @root_scopes[node.object_id] = storage?(node) || {"String", "String::Span"}.includes?(type_name(node.type)) ? [] of UInt64 : @scopes.dup
           # copy_to and to_heap put the copy on its owner, not here.
           note_fresh(node.object_id) unless {"copy_to", "to_heap"}.includes?(node.name)
+          @copied_roots << node.object_id if {"copy_to", "to_heap"}.includes?(node.name)
           # A struct `new` holds what its arguments give it: a value it
           # returns carries their storage (SPEC 1.9).
           holder = node.name == "new" && struct_value?(node.object_id)

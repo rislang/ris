@@ -3,7 +3,7 @@ module test/ris/stable_components
 
 @[PointerUnsafe("test builder and tree views before their first growth")]
 def check_components
-  local_tape do
+  tape do
     writer = String::Builder.new(1)
     tree = RisTree(Int32).new(1)
     writer.push(65_u8)

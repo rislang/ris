@@ -8,7 +8,7 @@ def first_value(fields : Array(LogField), value : String) : Bool
 end
 
 100.times do
-  local_tape do
+  tape do
     log = Logger.new("metadata", Severity::None)
     fields = Array(LogField).new(8)
     first = Metadata.new("id", "old", nil)

@@ -34,7 +34,7 @@ class RetainedClassCopy
   @@value : TextHolder? = nil
 
   def self.make
-    local_tape do
+    tape do
       text = ""
       text << "retained"
       holder = TextHolder.new(text, Array(String){text})

@@ -24,7 +24,7 @@ class State
   @@tree : RisTree(String)? = nil
 
   def self.request(n : Int32)
-    local_tape do
+    tape do
       scratch = String.new("request #{n}")
       @@text = scratch.copy_to(Program.tape)
       @@log << n

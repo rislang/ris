@@ -7,7 +7,7 @@ def check(ok : Bool) : Nil
 end
 
 def early : Int32
-  local_tape do
+  tape do
     text = String.build { |w| w.append("early") }
     return text.bytesize
   end
@@ -23,7 +23,7 @@ tape do
   cursor = IyiHeap.read64(saved)
   first = 0_u64
   20.times do
-    local_tape do
+    tape do
       current = RisRegion.tape
       check(current != saved)
       first = current if first == 0_u64
@@ -37,16 +37,16 @@ tape do
     check(IyiHeap.read64(saved) == cursor)
     check(outer == "outer")
   end
-  local_tape do
+  tape do
     current = RisRegion.tape
-    local_tape do
+    tape do
       check(RisRegion.tape != current)
       inner = String.build { |w| w.append("inner") }
       check(inner == "inner")
     end
     check(RisRegion.tape == current)
   end
-  local_tape do
+  tape do
     first_mapping = RisRegion.tape
     # Force the local tape to grow onto a second mapping without touching
     # 64 MiB of pages (the mapping is rounded up to a whole 64 KiB grain).

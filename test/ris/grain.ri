@@ -1,6 +1,6 @@
 # Every tape mapping is a whole number of 64 KiB, the largest page or
 # allocation grain ris runs on, and its limit is the mapping's end: the
-# first one, one grown past it and an independent local_tape's.
+# first one and one grown past it, which a nested tape block shares.
 def whole(region : UInt64) : Bool
   length = IyiHeap.read64(region &+ 24_u64)
   length % 65536_u64 == 0_u64 && IyiHeap.read64(region &+ 8_u64) == region &+ length
@@ -15,6 +15,6 @@ tape do
   pieces = Array(String).new(71) { |_| String.new(chunk) }
   grown = RisRegion.tape
   ok &&= grown != first && whole(grown) && pieces.size == 71
-  local_tape { ok &&= RisRegion.tape != grown && whole(RisRegion.tape) }
+  tape { ok &&= RisRegion.tape == grown && whole(RisRegion.tape) }
   puts ok ? "PASS: tape mappings are whole 64 KiB grains" : "FAILED"
 end

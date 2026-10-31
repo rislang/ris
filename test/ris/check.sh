@@ -723,9 +723,10 @@ if [ "$?" -eq 0 ] &&
     grep -qF 'PASS: owner construction panic cleanup' <<<"$out" &&
     [ "$(grep -cF 'iyi: panic: expected owner construction panic' <<<"$out")" -eq 100 ] &&
     ! grep -qF 'half-built owner became observable' <<<"$out" &&
-    # Per task: its tape, local_tape, and the result region that keeps
-    # the panic text until the group ends (one mapping, reused).
-    grep -qF '302 scopes, 7 mappings made, 0 unmapped' <<<"$out"; then
+    # Per task: its tape and the result region that keeps the panic
+    # text until the group ends (one mapping, reused); a nested tape
+    # block shares the task's tape.
+    grep -qF '202 scopes, 6 mappings made, 0 unmapped' <<<"$out"; then
   echo "runs     owner_construction_panic (bounded scope cleanup)"
 else
   echo "FAILED   owner_construction_panic: $out"
@@ -1688,7 +1689,7 @@ if [ "$out" = $'2 1 2\n3 2 3\n4 3 4\nxxxxend' ]; then echo "runs     clear"; els
 out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 "$RIS" run \
   test/ris/side_warm.ri 2>&1)
 if [ "$?" -eq 0 ] &&
-    grep -qF '10002 scopes, 5 mappings made, 0 unmapped' <<<"$out" &&
+    grep -qF '2 scopes, 4 mappings made, 0 unmapped' <<<"$out" &&
     grep -qF '0 growth moves' <<<"$out" &&
     grep -qF '0 side regions (0 transfer bytes copied)' <<<"$out" &&
     grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
@@ -1724,7 +1725,7 @@ fi
 out=$("$RIS" run test/ris/side.ri 2>&1)
 if [ "$out" = $'round 0: intact\nround 1: intact\nround 2: intact' ]; then echo "runs     side"; else echo "FAILED   side: $out"; status=1; fi
 out=$("$RIS" run test/ris/scope_free.ri 2>&1)
-if [ "$out" = $'round 99999\nwhile frees: true\nblock wrote 200000\nblock frees: true\nkept stays: true true\n123\ndef frees: true 5\nresult stays: true 42' ]; then echo "runs     scope_free"; else echo "FAILED   scope_free: $out"; status=1; fi
+if [ "$out" = $'round 99999\nwhile frees: true\nblock wrote 200000\nblock frees: true\nkept copied: true true\n123\ndef frees: true 5\nresult stays: true 42' ]; then echo "runs     scope_free"; else echo "FAILED   scope_free: $out"; status=1; fi
 out=$("$RIS" run test/ris/scope_keep.ri 2>&1)
 if [ "$out" = "50000 50000 9" ]; then echo "runs     scope_keep"; else echo "FAILED   scope_keep: $out"; status=1; fi
 
@@ -2165,7 +2166,7 @@ out=$(RIS_TAPE_STATS=1 "$RIS" run test/ris/stable_growth.ri 2>&1)
 if [ "$?" -eq 0 ] &&
     grep -qF 'PASS: stable interleaved growth' <<<"$out" &&
     grep -qF '0 growth moves' <<<"$out" &&
-    grep -qF '5 mappings made' <<<"$out" &&
+    grep -qF '4 mappings made' <<<"$out" &&
     grep -qF '0 side regions (0 transfer bytes copied)' <<<"$out"; then
   echo "runs     stable_growth (no GC, bounded mappings)"
 else
@@ -2175,7 +2176,7 @@ out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 "$RIS" run \
   test/ris/stable_components.ri 2>&1)
 if [ "$?" -eq 0 ] &&
     grep -qF 'PASS: builder and tree stable before first growth' <<<"$out" &&
-    grep -qF '6 mappings made, 0 unmapped' <<<"$out" &&
+    grep -qF '5 mappings made, 0 unmapped' <<<"$out" &&
     grep -qF '0 growth moves' <<<"$out" &&
     grep -qF '0 side regions (0 transfer bytes copied)' <<<"$out" &&
     grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then

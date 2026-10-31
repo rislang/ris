@@ -34,7 +34,7 @@ exit 16 unless "abc".byte_index("", 4).nil?
 defaults = Hash(String, Int32).new do |table, key|
   table[key] = key.bytesize
 end
-local_tape do
+tape do
   missing = "key #{7}"
   exit 17 unless defaults[missing] == 5
 end

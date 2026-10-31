@@ -4,12 +4,12 @@ import std/idna::{IDNA, IdnaError, Punycode, PunycodeError}
 import std/unicode::{Unicode}
 
 # The decoded tables must survive the first caller's scratch scope.
-local_tape do
+tape do
   raise "letter table" unless Unicode.letter?('A')
   raise "category table" unless Unicode.general_category('A') == "Lu"
   raise "case orbit" unless Unicode.case_orbit('k').size == 3
 end
-local_tape do
+tape do
   raise "retained letter table" unless Unicode.letter?('\u{17001}')
   raise "retained category table" unless Unicode.general_category('A') == "Lu"
   raise "retained case orbit" unless Unicode.case_orbit('k').size == 3
