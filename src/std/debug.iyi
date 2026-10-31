@@ -144,6 +144,9 @@ struct DwarfResolver
       # 3 table starts one byte earlier, and reading it from 16 took its
       # first file name for a directory and named every frame `??`.
       cursor = cu_cursor + (version >= 4 ? 16_i64 : 15_i64) + (opcode_base - 1).to_i64
+      # The unit's names are views of one builder, made with the unit:
+      # each inner round frees its own scratch, not the names.
+      text = String::Builder.new(4096)
       dirs = [] of String
       dirs << ""
       while cursor.value != 0_u8
@@ -151,8 +154,9 @@ struct DwarfResolver
         while (cursor + d_len).value != 0_u8
           d_len = d_len + 1
         end
-        d_name = String.new(d_len) { |dst| dst.copy_from(cursor, d_len) }
-        dirs << d_name
+        from = text.length
+        text.append(cursor, d_len)
+        dirs << text.finish[from, d_len]
         cursor = cursor + d_len.to_i64 + 1_i64
       end
       cursor = cursor + 1_i64
@@ -165,7 +169,9 @@ struct DwarfResolver
         while (cursor + f_len).value != 0_u8
           f_len = f_len + 1
         end
-        f_name = String.new(f_len) { |dst| dst.copy_from(cursor, f_len) }
+        from = text.length
+        text.append(cursor, f_len)
+        f_name = text.finish[from, f_len]
         cursor = cursor + f_len.to_i64 + 1_i64
         dir_idx = read_uleb128(pointerof(cursor)).to_i32
         read_uleb128(pointerof(cursor))
@@ -1581,6 +1587,21 @@ struct DwarfResolver
       String.new(length.to_i32) { |dst| dst.copy_from(start, length.to_i32) }
     end
 
+    # As file_string, appended to *text*: a view of it.
+    def self.file_name(text : String::Builder, base : UInt64, size : UInt64, at : UInt64, limit : UInt64) : String
+      limit = size if limit > size
+      return "" if at >= limit
+      start = Pointer(UInt8).new(base &+ at)
+      most = (limit - at).unsafe_to_i64
+      length = 0_i64
+      while length < most && (start + length).value != 0_u8
+        length = length + 1_i64
+      end
+      from = text.length
+      text.append(start, length.to_i32)
+      text.finish[from, length.to_i32]
+    end
+
     # The function *address* lies in, by `.symtab`; "" for none. What a
     # program stripped of its debug information still answers, in the
     # linker's spelling: an older GNU ld cuts a name at its `@`.
@@ -1680,7 +1701,8 @@ struct DwarfResolver
     # for every frame. A version 2 to 4 unit is read; others are passed
     # over, and so is a function DWARF gives no name or no single range.
     def self.subprogram_names(base : UInt64, size : UInt64, table : Pointer(UInt64),
-                              addresses : Array(UInt64), names : Array(String)) : Nil
+                              addresses : Array(UInt64), names : Array(String),
+                              text : String::Builder) : Nil
       unit = table[6]
       info_end = table[6] &+ table[7]
       while unit &+ 11_u64 <= info_end
@@ -1692,7 +1714,7 @@ struct DwarfResolver
         if version >= 2_u64 && version <= 4_u64
           abbrevs = table[8] &+ field(base, size, unit &+ 6_u64, 4_u64)
           address_size = field(base, size, unit &+ 10_u64, 1_u64)
-          unit_names(base, size, table, unit &+ 11_u64, unit_end, abbrevs, address_size, version, addresses, names)
+          unit_names(base, size, table, unit &+ 11_u64, unit_end, abbrevs, address_size, version, addresses, names, text)
         end
         unit = unit_end
       end
@@ -1700,7 +1722,8 @@ struct DwarfResolver
 
     def self.unit_names(base : UInt64, size : UInt64, table : Pointer(UInt64), start : UInt64, unit_end : UInt64,
                         abbrevs : UInt64, address_size : UInt64, version : UInt64,
-                        addresses : Array(UInt64), names : Array(String)) : Nil
+                        addresses : Array(UInt64), names : Array(String),
+                        text : String::Builder) : Nil
       # The unit's abbreviations: each code's tag, and where its attribute
       # and form pairs begin.
       codes = [] of UInt64
@@ -1762,7 +1785,7 @@ struct DwarfResolver
           finish = high_is_offset ? low &+ high : high
           addresses.each_with_index do |address, i|
             if names[i].empty? && address >= low && address < finish
-              names[i] = file_string(base, size, name_at, size)
+              names[i] = file_name(text, base, size, name_at, size)
             end
           end
         end
@@ -1940,7 +1963,9 @@ struct DwarfResolver
       # The name DWARF gives a function, as Windows' PDB gives it: the
       # linker leaves it whole, where an older GNU ld cut `.symtab`'s at
       # its `@` and named every method of a type for the type alone.
-      subprogram_names(base, size, table, addresses, names) if base != 0_u64 && table[7] != 0_u64
+      # The names found are views of this builder, which outlives them.
+      text = String::Builder.new(4096)
+      subprogram_names(base, size, table, addresses, names, text) if base != 0_u64 && table[7] != 0_u64
       i = 0
       while i < count
         raw_pc = (frames + i).value.address

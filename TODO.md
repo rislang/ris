@@ -16,9 +16,7 @@ How to work (fewer tokens, faster to the goal):
 
 Breakage between steps is fine; no transition stages.
 
-3. std: `ris build --no-codegen test/ris/std_text_plain.ri` compiles
-   every module; group the errors by message and fix each group in one
-   pass. csv, xz and tar then free each row (CSVReader's refill assigns
+3. std: csv, xz and tar free each row (CSVReader's refill assigns
    `@text = more` today, which keeps a row's Arrays to the program's end).
 4. samples and tests: RIS_CHECK_MATCH per group, then one full check.sh.
 5. benches: build each, group the refusals by message, fix per group.

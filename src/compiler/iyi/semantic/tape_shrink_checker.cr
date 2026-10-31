@@ -62,6 +62,10 @@ class Iyi::TapeShrinkChecker
   VIEWS = {"finish", "span", "slice", "view", "slice_from", "[]", "[]?", "first", "first?",
            "last", "last?", "fetch", "values_at", "to_unsafe", "to_slice",
            "iterator", "each", "each_with_index", "each_byte", "each_line"}
+  # String methods that answer a view of their receiver's bytes.
+  TEXT_VIEWS = {"strip", "lstrip", "rstrip", "chomp", "lchop", "rchop",
+                "byte_slice", "rpartition", "partition", "split", "lines",
+                "as_tape", "view", "to_s", "itself", "not_nil!", "as"}
   @global_roots = Hash(UInt64, UInt64).new
   @global_ids = Set(UInt64).new
   @pooled_roots = Set(UInt64).new
@@ -336,7 +340,7 @@ class Iyi::TapeShrinkChecker
           node.raise "cannot store a view beyond its owner scope; " \
                      "copy it with copy_to(owner) before storing it"
         end
-        if (block = tape_of(source)) && block != @leaving && outside?(root, block)
+        if (block = tape_of(source)) && !leaving?(source) && outside?(root, block)
           message = scope_message(block)
           # The store is in a method this call reaches (a handler's
           # `call`): point at that line, and name the call that reaches it.
@@ -348,7 +352,7 @@ class Iyi::TapeShrinkChecker
                        "#{call_at.original_filename.try { |f| File.expand_path(f) }}:" \
                        "#{call_at.line_number}"
           end
-          node.raise message
+          refuse(node, message)
         end
       end
     end
@@ -372,8 +376,20 @@ class Iyi::TapeShrinkChecker
   # block's storage, as an allocated Array is.
   private def tape_text(node : ASTNode, result : Value) : Value
     return result if @tape_blocks.empty? || !@checking
-    return result unless result.roots.empty? && result.views.empty?
     return result unless node.type?.try { |t| type_name(t.remove_typedef) } == "String"
+    # A call that allocates and answers text made its bytes, though its
+    # summary may show only the inputs it read (interpolation, inspect):
+    # unless it is known to answer a view, the text is fresh too.
+    viewing = !(result.roots.empty? && result.views.empty?)
+    return result if viewing && node.is_a?(Call) &&
+                     (VIEWS.includes?(node.name) || TEXT_VIEWS.includes?(node.name))
+    return result if viewing && !node.is_a?(Call)
+    # A view of a builder's or an Array's storage is what it says.
+    if viewing && (result.roots + result.views.map(&.root)).all? { |r|
+         storage_type?(root_type(r)) && type_name(root_type(r).not_nil!.remove_typedef) != "String"
+       }
+      return result
+    end
     made = node.is_a?(StringInterpolation) ||
            (node.is_a?(Call) && !node.expanded && @graph.allocates?(node))
     return result unless made
@@ -382,6 +398,18 @@ class Iyi::TapeShrinkChecker
     @root_births[node.object_id] = @uses.size
     note_fresh(node.object_id)
     Value.new([node.object_id], result.views, result.procs, result.unknown_proc)
+  end
+
+  # A scope refusal (SPEC 3.6). With RIS_SCOPE_ERRORS=all every one is
+  # listed on standard error, one line each, and the first is raised when
+  # the walk ends: a migration sees them all at once, and still fails.
+  @first_refusal : {ASTNode, String}? = nil
+
+  def refuse(node : ASTNode, message : String) : Nil
+    node.raise message unless ENV["RIS_SCOPE_ERRORS"]? == "all"
+    loc = node.location
+    STDERR.puts "refused #{loc.try(&.original_filename)}:#{loc.try(&.line_number)}: #{message.lines.first}"
+    @first_refusal ||= {node, message}
   end
 
   # What a store of data made in *block* says, by the kind of scope.
@@ -410,7 +438,7 @@ class Iyi::TapeShrinkChecker
     return unless @checking && !@text_only
     return unless block = @tape_blocks.last?
     return unless roots.any? { |r| outside?(r, block) }
-    node.raise scope_message(block)
+    refuse(node, scope_message(block))
   end
 
   private def note_fresh(root : UInt64) : Nil
@@ -458,7 +486,8 @@ class Iyi::TapeShrinkChecker
       @root_scopes[target.object_id] = @scopes.dup
       env[binding] = Value.new([target.object_id], [] of View)
     end
-    if @checking && !@text_only
+    if @checking && !@text_only &&
+       !target.type?.try(&.remove_typedef.is_a?(PointerInstanceType))
       complete = stored(v, env)
       declaration.roots.each { |root| check_store(root, complete, node) }
     end
@@ -1023,6 +1052,9 @@ class Iyi::TapeShrinkChecker
     check(node)
     @program.const_initializers.each { |i| check(i.value) }
     @program.class_var_initializers.each { |i| check(i.node) }
+    if first = @first_refusal
+      first[0].raise first[1]
+    end
   end
 
   private def root_name(root : UInt64) : String
@@ -1329,14 +1361,22 @@ class Iyi::TapeShrinkChecker
     return unless @checking && !@text_only
     complete = stored(v, env)
     flat = flat_result?(type)
-    sources = flat ? complete.views.map(&.root).reject { |r| complete.roots.includes?(r) } : source_roots(complete)
+    # A struct value is returned by value: what it holds is in its
+    # slots' views. A class instance or storage handle is on the tape.
+    sources = flat ? complete.views.map(&.root).reject { |r| complete.roots.includes?(r) } : source_roots(complete).reject { |r| struct_value?(r) }
     # A String's views are its own bytes, which move with it.
-    sources = [] of UInt64 if type.try { |t| type_name(t.remove_typedef) } == "String"
+    sources = [] of UInt64 if text_result?(type)
     sources.each do |source|
       blocks = root_tapes_of(source)
-      next unless blocks && blocks.includes?(scope)
+      if flat
+        next unless blocks && blocks.includes?(scope)
+      else
+        # Unknown is refused: what a non-flat value holds must come from
+        # a parameter, `self` or program data.
+        next if from_caller?(source)
+      end
       what = node.is_a?(Def) ? "def `#{node.name}`" : "block"
-      node.raise "cannot return a value made in this #{what}'s scratch: " \
+      refuse node, "cannot return a value made in this #{what}'s scratch: " \
                  "it would have to be copied out (SPEC 1.9).\nEnd the def " \
                  "with the call alone, append to a String or Array " \
                  "parameter, grow a local in place and return it, or " \
@@ -1357,6 +1397,72 @@ class Iyi::TapeShrinkChecker
     name == "String" || name.starts_with?("Array(")
   end
 
+  # Whether *root* is storage the caller handed in or program data.
+  private def from_caller?(root : UInt64) : Bool
+    declaration = root
+    while true
+      return true if @parameter_roots.includes?(declaration) ||
+                     @global_ids.includes?(declaration)
+      parent = @parents[declaration]?
+      return false unless parent
+      declaration = parent[0]
+    end
+  end
+
+  # A one-call def builds its value in this scope (SPEC 1.5): a non-flat
+  # value it answers with no storage its summary can name is taken as
+  # made here, so it cannot leave unchecked (unknown is refused).
+  private def handed_on(node : ASTNode, result : Value) : Value
+    return result unless @checking && !@text_only && !@tape_blocks.empty?
+    return result unless node.is_a?(Call) && result.roots.empty? && result.views.empty?
+    type = node.type?
+    return result unless type && TapeChecker.tape_in(@program, type) && !flat_result?(type)
+    targets = @graph.targets(node)
+    return result unless targets && targets.any? do |t|
+      !t.is_a?(External) && !t.name.in?("new", "initialize") &&
+        TapeScopeChecker.parts(t.body).nil? && TapeScopeChecker.one_call?(t.body) &&
+        !TapeRules.runtime?(@program, t.location)
+    end
+    @root_scopes[node.object_id] = @scopes.dup
+    @root_types[node.object_id] = type
+    @root_births[node.object_id] = @uses.size
+    note_fresh(node.object_id)
+    @handed << node.object_id
+    Value.new([node.object_id], [] of View)
+  end
+
+  @handed = Set(UInt64).new
+
+  private def struct_value?(root : UInt64) : Bool
+    return false if @handed.includes?(root)
+    return false unless type = @root_types[root]?
+    type = type.remove_typedef
+    type.struct? && !storage_type?(type) && type_name(type) != "String" &&
+      !type.is_a?(UnionType)
+  end
+
+  private def foreign_view?(node : Call) : Bool
+    node.name == "new" && node.args.size == 2 && !node.block &&
+      node.type?.try { |t| type_name(t.remove_typedef) } == "String" &&
+      node.args[0].type?.try(&.remove_typedef.is_a?(PointerInstanceType)) || false
+  end
+
+  # A String, or a union whose only tape member is String.
+  private def text_result?(type : Type?) : Bool
+    return false unless type
+    type = type.remove_typedef
+    members = type.is_a?(UnionType) ? type.union_types : [type]
+    tape = members.select { |t| TapeChecker.tape_in(@program, t) }
+    !tape.empty? && tape.all? { |t| type_name(t.remove_typedef) == "String" }
+  end
+
+  # Whether *source* leaves with the def's result being checked: made in
+  # the def, or a scope inside it, which RESULT frees and moves past.
+  private def leaving?(source : UInt64) : Bool
+    return false unless scope = @leaving
+    (root_tapes_of(source) || [] of UInt64).includes?(scope)
+  end
+
   private def summary_marked?(target : Def) : Bool
     !TapeScopeChecker.parts(target.body).nil?
   end
@@ -1375,6 +1481,7 @@ class Iyi::TapeShrinkChecker
   def value(node : ASTNode, env : Env) : Value
     result = evaluate(node, env)
     result = tape_text(node, result)
+    result = handed_on(node, result)
     if node.is_a?(Call) && link_type?(node.type?) && !result.views.empty?
       result = Value.new(result.roots,
         result.views.map(&.copy_with(index: true)), result.procs,
@@ -1438,7 +1545,7 @@ class Iyi::TapeShrinkChecker
       global_value(node.var.object_id, node.type?)
     when Var, InstanceVar
       if node.is_a?(Var) && (loop_body = @dead[node.name]?) && @checking && !@text_only
-        node.raise "cannot read `#{node.name}` after the loop: its value was " \
+        refuse node, "cannot read `#{node.name}` after the loop: its value was " \
                    "made in a loop round, which frees it at its end (SPEC " \
                    "1.1).\nRead the value before the loop ends, or copy it " \
                    "with copy_to(owner)"
@@ -1518,6 +1625,12 @@ class Iyi::TapeShrinkChecker
       return value(node.expanded.not_nil!, env) if node.expanded
       # Specialized-out branches retain syntax without executable targets.
       return EMPTY unless node.type?
+      # `String.new(pointer, size)` views bytes it does not own (std's
+      # mapped files, FFI buffers): it makes nothing on the tape.
+      if foreign_view?(node)
+        node.args.each { |arg| value(arg, env) }
+        return EMPTY
+      end
       if node.name == "new"
         # Ordinary tape allocations use the caller's tape. A named Owner
         # has its own lexical storage, including each of its field paths.
@@ -1864,9 +1977,14 @@ class Iyi::TapeShrinkChecker
           @root_scopes[node.object_id] = storage?(node) || {"String", "String::Span"}.includes?(type_name(node.type)) ? [] of UInt64 : @scopes.dup
           # copy_to and to_heap put the copy on its owner, not here.
           note_fresh(node.object_id) unless {"copy_to", "to_heap"}.includes?(node.name)
+          # A struct `new` holds what its arguments give it: a value it
+          # returns carries their storage (SPEC 1.9).
+          holder = node.name == "new" && struct_value?(node.object_id)
           borrowed = if @text_only && node.name.in?("new", "dup") &&
                         type_name(node.type) != "String"
                        derived.views + derived.roots.map { |root| view(root) }
+                     elsif holder
+                       args.flat_map { |a| a.views + a.roots.reject { |r| struct_value?(r) }.map { |root| view(root) } }
                      else
                        [] of View
                      end

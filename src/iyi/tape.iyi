@@ -2513,6 +2513,16 @@ def __iyi_scope_result(mark : RisScopeMark, value : T) : T forall T
     RisScopeMove.text(mark, value)
   {% elsif T.name.starts_with?("Array(") %}
     RisScopeMove.array(mark, value)
+  {% elsif T.union? && T.union_types.any? { |t| t == ::String || t.name.starts_with?("Array(") } %}
+    {% for t in T.union_types %}
+      {% if t == ::String %}
+        return RisScopeMove.text(mark, value) if value.is_a?(::String)
+      {% elsif t.name.starts_with?("Array(") %}
+        return RisScopeMove.array(mark, value) if value.is_a?({{t}})
+      {% end %}
+    {% end %}
+    __iyi_scope_reset(mark)
+    value
   {% else %}
     __iyi_scope_reset(mark)
     value

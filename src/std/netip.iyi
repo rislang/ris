@@ -160,39 +160,33 @@ pub struct IP
   # IPv4, else IPv6. Text with a colon can only be IPv6 and text without
   # one only IPv4, so the refusal is the one family's that applies.
   def self.parse(text : String) : IP | NetipError
-    return parse_v6(text) if NetipBits.find(text, 58_u8, 0) >= 0
-    parse_v4(text)
+    v6_answer(text, NetipBits.ip_read(text))
   end
 
-  # Dotted decimal, four octets, Python's `IPv4Address`.
+  # Dotted decimal, four octets, Python's `IPv4Address`. The text is
+  # read into bits or the refusal's message, which moves down to the
+  # caller (SPEC 1.5); the answer only wraps it.
   def self.parse_v4(text : String) : IP | NetipError
-    return NetipError.new("netip: an empty string is not an address") if text.empty?
-    if NetipBits.find(text, 47_u8, 0) >= 0
-      return NetipError.new("netip: #{text.inspect} is not an address: it holds a '/', which a prefix has and Prefix.parse reads")
-    end
-    read = NetipBits.read_v4(text)
-    return NetipError.new("netip: #{text.inspect} is not an IPv4 address: #{read}") if read.is_a?(String)
+    v4_answer(NetipBits.v4_read(text))
+  end
+
+  def self.v4_answer(read : UInt128 | String) : IP | NetipError
+    return NetipError.new(read) if read.is_a?(String)
     new(value: read, v6: false, zone: "")
   end
 
   # RFC 4291 text with an optional `%zone`, Python's `IPv6Address`.
   def self.parse_v6(text : String) : IP | NetipError
-    return NetipError.new("netip: an empty string is not an address") if text.empty?
-    if NetipBits.find(text, 47_u8, 0) >= 0
-      return NetipError.new("netip: #{text.inspect} is not an address: it holds a '/', which a prefix has and Prefix.parse reads")
-    end
-    address = text
-    zone = ""
-    percent = NetipBits.find(text, 37_u8, 0)
-    if percent >= 0
-      address = text[0, percent]
-      zone = text[percent + 1, text.bytesize - percent - 1]
-      why = NetipBits.zone_refused(zone)
-      return NetipError.new("netip: #{text.inspect} is not an IPv6 address: #{why}") if why
-    end
-    read = NetipBits.read_v6(address)
-    return NetipError.new("netip: #{text.inspect} is not an IPv6 address: #{read}") if read.is_a?(String)
-    new(value: read, v6: true, zone: zone)
+    v6_answer(text, NetipBits.v6_read(text))
+  end
+
+  # IPv6 if *text* has a colon; the zone is a view of *text*.
+  def self.v6_answer(text : String, read : UInt128 | String) : IP | NetipError
+    return NetipError.new(read) if read.is_a?(String)
+    v6 = NetipBits.find(text, 58_u8, 0) >= 0
+    percent = v6 ? NetipBits.find(text, 37_u8, 0) : -1
+    zone = percent >= 0 ? text[percent + 1, text.bytesize - percent - 1] : ""
+    new(value: read, v6: v6, zone: zone)
   end
 
   def v4? : ::Bool
@@ -464,29 +458,21 @@ pub struct Prefix
     raise "Prefix: #{@ip} has a zone, and a prefix has none" if @ip.zone
   end
 
-  # Python's `ip_network(text, strict: !mask)`, a zone refused.
+  # Python's `ip_network(text, strict: !mask)`, a zone refused. The
+  # text is read into the length or the refusal's message first.
   def self.parse(text : String, mask : ::Bool = false) : Prefix | NetipError
+    answer(text, NetipBits.prefix_read(text, mask), mask)
+  end
+
+  # *read* is the length, the text already checked.
+  def self.answer(text : String, read : Int32 | String, mask : ::Bool) : Prefix | NetipError
+    return NetipError.new(read) if read.is_a?(String)
     slash = NetipBits.find(text, 47_u8, 0)
     address = slash < 0 ? text : text[0, slash]
-    tail = slash < 0 ? nil : text[slash + 1, text.bytesize - slash - 1]
-    if slash >= 0 && NetipBits.find(text, 47_u8, slash + 1) >= 0
-      return NetipError.new("netip: #{text.inspect} is not a prefix: it has more than one '/'")
-    end
-    ip = IP.parse(address)
-    return NetipError.new("netip: #{text.inspect} is not a prefix: #{NetipBits.reason(ip.message)}") if ip.is_a?(NetipError)
-    if ip.zone
-      return NetipError.new("netip: #{text.inspect} is not a prefix: the address has a zone, and a prefix has none")
-    end
-    length = tail ? NetipBits.read_length(tail, ip.v6?) : ip.bit_length
-    if length < 0
-      return NetipError.new("netip: #{text.inspect} is not a prefix: #{tail.inspect} is not a length from 0 to #{ip.bit_length}#{ip.v6? ? "" : ", a netmask or a hostmask"}")
-    end
-    clear = ip.to_u128 & NetipBits.netmask(ip.v6?, length)
-    if clear != ip.to_u128
-      return NetipError.new("netip: #{text.inspect} is not a prefix: host bits are set past /#{length}; Prefix.parse(text, mask: true) clears them") unless mask
-      return ip.prefix(length)
-    end
-    Prefix.new(ip, length)
+    bits = NetipBits.address_bits(address)
+    v6 = NetipBits.find(address, 58_u8, 0) >= 0
+    clear = bits & NetipBits.netmask(v6, read)
+    Prefix.new(IP.new(value: mask ? clear : bits, v6: v6, zone: ""), read)
   end
 
   def v4? : ::Bool
@@ -900,6 +886,72 @@ struct NetipBits
       index = index + 1
     end
     -1
+  end
+
+  # The bits of an IPv4 address, or the message refusing *text*.
+  def self.v4_read(text : String) : UInt128 | String
+    return "netip: an empty string is not an address" if text.empty?
+    if find(text, 47_u8, 0) >= 0
+      return "netip: #{text.inspect} is not an address: it holds a '/', which a prefix has and Prefix.parse reads"
+    end
+    read = read_v4(text)
+    return "netip: #{text.inspect} is not an IPv4 address: #{read}" if read.is_a?(String)
+    read
+  end
+
+  # The bits of an IPv6 address, or the message refusing *text*.
+  def self.v6_read(text : String) : UInt128 | String
+    return "netip: an empty string is not an address" if text.empty?
+    if find(text, 47_u8, 0) >= 0
+      return "netip: #{text.inspect} is not an address: it holds a '/', which a prefix has and Prefix.parse reads"
+    end
+    address = text
+    percent = find(text, 37_u8, 0)
+    if percent >= 0
+      address = text[0, percent]
+      zone = text[percent + 1, text.bytesize - percent - 1]
+      why = zone_refused(zone)
+      return "netip: #{text.inspect} is not an IPv6 address: #{why}" if why
+    end
+    read = read_v6(address)
+    return "netip: #{text.inspect} is not an IPv6 address: #{read}" if read.is_a?(String)
+    read
+  end
+
+  # Either family, as IP.parse reads it.
+  def self.ip_read(text : String) : UInt128 | String
+    find(text, 58_u8, 0) >= 0 ? v6_read(text) : v4_read(text)
+  end
+
+  # An address already read once: its bits.
+  def self.address_bits(text : String) : UInt128
+    read = find(text, 58_u8, 0) >= 0 ? v6_read(text) : v4_read(text)
+    read.is_a?(String) ? 0_u128 : read
+  end
+
+  # The prefix length of *text*, or the message refusing it.
+  def self.prefix_read(text : String, mask : ::Bool) : Int32 | String
+    slash = find(text, 47_u8, 0)
+    address = slash < 0 ? text : text[0, slash]
+    tail = slash < 0 ? nil : text[slash + 1, text.bytesize - slash - 1]
+    if slash >= 0 && find(text, 47_u8, slash + 1) >= 0
+      return "netip: #{text.inspect} is not a prefix: it has more than one '/'"
+    end
+    v6 = find(address, 58_u8, 0) >= 0
+    read = v6 ? v6_read(address) : v4_read(address)
+    return "netip: #{text.inspect} is not a prefix: #{reason(read)}" if read.is_a?(String)
+    if find(address, 37_u8, 0) >= 0
+      return "netip: #{text.inspect} is not a prefix: the address has a zone, and a prefix has none"
+    end
+    bit_length = v6 ? 128 : 32
+    length = tail ? read_length(tail, v6) : bit_length
+    if length < 0
+      return "netip: #{text.inspect} is not a prefix: #{tail.inspect} is not a length from 0 to #{bit_length}#{v6 ? "" : ", a netmask or a hostmask"}"
+    end
+    if read & netmask(v6, length) != read && !mask
+      return "netip: #{text.inspect} is not a prefix: host bits are set past /#{length}; Prefix.parse(text, mask: true) clears them"
+    end
+    length
   end
 
   # A refusal's sentence without its `netip: ` head, to be part of another.
