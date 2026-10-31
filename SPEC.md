@@ -84,8 +84,11 @@ section; a removed one leaves its number unused.
   allocation, roots, shrink, suspension, without annotations (Goose §10).
   Unknown targets and iyimod need checked contracts. Unproved: safe form and
   chain.
-* 3.5 Recursion (Goose §7.8): no owner, growing local or parameter, temporary or
-  pending result is live at a call into a cycle (callbacks too): pass scratch.
+* 3.5 Recursion (Goose §7.8): no owner, growing local or parameter,
+  temporary, or result under construction outside its caller's
+  destination is live at a call into a cycle (callbacks too): pass
+  scratch. A call that is a return's whole value builds in the caller's
+  destination (1.5) and is allowed.
 * 3.6 A scope the compiler cannot prove keeps nothing past its end is a
   compile error at the store or call that keeps it, naming the safe form
   (copy_to(owner), a parameter to write into, clear and refill, read the

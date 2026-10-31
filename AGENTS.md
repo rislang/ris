@@ -43,7 +43,8 @@ It returns tape data on the caller's tape; the owning scope frees it all:
 * Write into the caller's `String::Builder`, or return a `String` or an
   `@[OnTape]` struct viewing the input bytes rather than copying them.
 * Temporaries go on the caller's tape: a nested `tape` block shares it at
-  no cost. No `local_tape` per call; it costs more than small work saves.
+  no cost. Every def, loop round and block frees its own temporaries when
+  it ends (SPEC 1.1); there is no `local_tape`.
 * The caller decides what outlives its tape: `copy_to(owner)` on a `String`,
   `Array` or `@[OnTape]` struct. `to_heap`, `to_s` to a `String` and
   `@[TapeToHeap]` are migration paths, each a marked heap site to remove.

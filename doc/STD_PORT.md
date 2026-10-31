@@ -11,7 +11,8 @@ Take String directly. Slice with [start, count] or byte_slice to answer a
 view. split answers an Array of views. Never copy text just to accept it.
 Write formatting and streaming results into the caller's String::Builder.
 String.build and collection transforms use the caller's tape. A nested
-tape block shares that tape; do not open a local_tape for each small call.
+tape block shares that tape. Every def, loop round and block frees its own
+temporaries (SPEC 1.1), so a library needs no separate scratch.
 A view stays valid only while its source owner lives.
 
 Use clear to refill growing fields. Reserve capacity from input sizes.

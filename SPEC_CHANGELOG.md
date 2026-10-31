@@ -4,6 +4,15 @@ Every change to SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one. Entries before 2026-10-31 name the file by its old name, TAPE_SPEC.md.
 
+## 2026-10-31: 3.5 names a result under construction, not a pending one
+
+* Was: 3.5 refused a pending result live at a call into a cycle.
+* Now: it refuses a result under construction outside its caller's
+  destination; a call that is a return's whole value is allowed.
+* Why: 1.5 and 1.9 removed the pending (staged) result; Goose §7.8
+  likewise allows a call whose result is the return's whole value,
+  built in the caller's destination.
+
 ## 2026-10-31: TAPE_SPEC.md is ris's SPEC.md
 
 * Was: TAPE_SPEC.md held the tape rules beside iyi's SPEC.md, which

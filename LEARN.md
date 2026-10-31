@@ -55,8 +55,9 @@ end
   a `Str` reads as a String does (`[a..]`, `split`, `index`,
   `to_i`), a `Str::Builder` takes `<<`, `Ary(T)` and
   `@[OnTape]` structs hold the rest, and `to_heap` copies what must
-  outlive the tape. `tape` shares it; `local_tape` owns a separate tape.
-  A def, loop round or block keeping nothing frees its temporaries.
+  outlive the tape. A nested `tape` shares it. Every def, loop round and
+  block frees its temporaries when it ends; keeping one past its end is
+  a compile error naming the safe form (SPEC 1.1, 3.6).
   Ordinary objects (`String`, `Array`, classes) still use the GC.
 
 Byte pools: `read_bytes_at(UInt32, at)`, `write_bytes_at(at, v)`, append

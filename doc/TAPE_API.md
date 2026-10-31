@@ -7,7 +7,8 @@ signatures are in `src/iyi/tape.iyi`, the rules in SPEC.md.
 
 `tape do … end` holds a request, a parse or a batch; the owning block frees
 all at its end, early exits and panics included. A nested `tape` shares it;
-`local_tape` has its own storage. Allocating with no tape open ends the run.
+every def, loop round and block inside frees its own temporaries when it
+ends (SPEC 1.1). Allocating with no tape open ends the run.
 
 ```crystal
 tape do

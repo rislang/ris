@@ -48,8 +48,9 @@ end
 Literals default to Str; heap places use static String without copying.
 Interpolation and other tape text need `.to_heap` for heap storage.
 Other objects use iyi's GC. Tape values go to a file or socket uncopied;
-`tape` blocks share it; `local_tape` owns its own. The compiler refuses values
-outliving it; `text.to_heap` copies what must. [SPEC.md](SPEC.md).
+`tape` blocks share it, and every def, loop round and block frees its own
+temporaries. The compiler refuses values outliving their scope;
+`text.to_heap` copies what must. [SPEC.md](SPEC.md).
 
 ## How fast: [ris-bench](https://github.com/rislang/ris-bench)
 | `respond.ri`, 1.6M DTOs | ris | Goose | C++ | Rust | Go | Ruby² |
