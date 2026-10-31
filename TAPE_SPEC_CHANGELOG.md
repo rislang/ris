@@ -4,6 +4,24 @@ Every change to TAPE_SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one.
 
+## 2026-10-31: every scope frees; refusal replaces silent keeping
+
+* Was: a def's, loop's or block's scratch was freed only when a
+  heuristic proved nothing escaped; otherwise it stayed until the
+  enclosing scope ended. A def's result was staged and copied back
+  twice. local_tape gave a block separate scratch.
+* Now: every scope frees its scratch when it ends (1.1). What would
+  keep scratch past its end is a compile error naming the safe form
+  (3.2, 3.6). A result is built in the caller's destination or moved
+  down once (1.5); an implicit result copy is refused (1.9).
+  local_tape is removed: every scope has its own scratch.
+* Why: an unproved scope kept its scratch silently. One million rounds
+  of a loop reading a.first kept 2.1 GB; turning one def's mark off
+  turned its caller loop's freeing off and ran out of address space.
+  A wrapper def around File.read copied a 21 MB result twice. Goose
+  frees every scope and refuses what it cannot place (§1.3, §7.8); an
+  agent follows an error, not a silent leak.
+
 ## 2026-10-31: 5.1 procs a task calls and calls that keep a hand-off
 
 * Changed: 5.1 says the procs a task calls change no class variable or

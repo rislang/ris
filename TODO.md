@@ -222,6 +222,17 @@ first):
 
 ## Next
 
+* TAPE_SPEC 1.1, 1.5, 1.9, 3.2, 3.6 (2026-10-31): every scope frees.
+  Steps, each with its gate: (1) count today's scopes whose mark stays
+  off though they allocate, in std, samples and the goose-evaluations
+  ports; (2) mark always on, TapeShrinkChecker's store check in every
+  scope, an unproved keep refused with its safe form; fix what std and
+  samples then refuse; (3) a one-call def hands its destination on and a
+  flat result moves down once (draft: the tail-call patch, which turned
+  a caller loop's mark off when applied alone); (4) remove local_tape and
+  its tests; (5) a loop gate whose mapping count and RSS stay flat in
+  rounds, and RIS_TAPE_STATS results moved down.
+
 * Escaping closures outside program and joined task owners: pooled
   environments, including captured receivers; release them with their
   owner, check capture lifetimes and refuse unsupported escapes safely.

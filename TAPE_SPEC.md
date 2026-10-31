@@ -11,9 +11,11 @@ is the target contract; what the code does not meet yet is in TODO.md.
 Cite a rule by its number (TAPE_SPEC 2.3). Numbers never change: a new
 rule goes last in its section; a removed one leaves its number unused.
 ## 1. Storage and lifetimes
-* 1.1 Main and each fiber own an implicit tape. Scope exit restores scratch;
-  retained results stay on their destination owner. Suspension retains live
-  storage. Every exit, normal or unwinding, releases owned regions once.
+* 1.1 Main and each fiber own an implicit tape. Every def, loop round and
+  block frees its scratch when it ends, always: no proof decides it and no
+  scope keeps scratch past its end (Goose §1.3). Retained results stay on
+  their destination owner. Suspension retains live storage. Every exit,
+  normal or unwinding, releases owned regions once.
 * 1.2 Tape types: String, Array(T), RisTree(T), builders, scanners, views,
   @[OnTape]
   structs and class instances; all obey the root rules. Dispatch and union
@@ -28,10 +30,12 @@ rule goes last in its section; a removed one leaves its number unused.
   a; String and views alias their bytes. copy_to and checked boundary copies
   (4.1, 5.1-5.3, 5.6) copy; Goose's implicit value copies (§4.1) do not
   apply. String is read-only.
-* 1.5 Libraries borrow caller input and build results on the caller's owner;
-  nested tape blocks share it. A pending result's region is outside callee
-  scratch and its rollback (Goose §10.3). local_tape owns separate scratch;
-  nothing rooted there escapes or mutates outer tape containers.
+* 1.5 A def builds its tape result in its caller's destination (Goose §7,
+  C.3): a body that is one call hands the destination on; a local grown in
+  place is returned where it is; a fresh flat value (String, Array of
+  non-tape elements) that ends a def after other work moves down to the
+  caller's boundary in one move (Goose implementation §9.3). Libraries
+  borrow caller input; nested tape blocks share the tape.
 * 1.6 Text literals are static String views; interpolation builds a
   String on the active tape. Text parameters borrow, never copy.
 * 1.7 Build retained data on its destination (writers, in-place append), else
@@ -44,6 +48,11 @@ rule goes last in its section; a removed one leaves its number unused.
   storage on failure; deep chains never overflow the stack.
 * 1.8 Program data initializes in iyi III.5's module order, once, never
   suspending or seeing incomplete values; stores obey owner provenance.
+* 1.9 No result is staged and copied back implicitly. A result that would
+  have to leave a def's scratch by copy (it links into that scratch) is
+  refused, naming the forms that replace it: end the def with the call
+  alone, append to a String or Array parameter, grow a local in place and
+  return it, or write copy_to(owner). A copy is always written.
 ## 2. Owners and stable growth (Goose §1.3, design/root_structs.md: planned)
 * 2.1 @[Owner] requires a named lexical/program declaration, built in place.
   Arguments borrow; results may borrow an existing owner, never a local. Refuse
@@ -63,6 +72,8 @@ rule goes last in its section; a removed one leaves its number unused.
 * 3.2 Every source root outlives every possible destination; inexact stores
   check each read-back candidate, caller storage behind parameters included.
   Branch-local and temporary storage cannot escape; loops see earlier rounds.
+  This holds in every scope, not only a tape block: a def, a loop round
+  and a block are checked as a tape block is.
 * 3.3 Refuse shrink/clear/replacement with live views or holders, across calls,
   aliases and earlier operands (Goose §5.1-5.2). Grow-shrink views stay local.
 * 3.4 Check every call target after specialization (generics, dispatch): its
@@ -71,6 +82,11 @@ rule goes last in its section; a removed one leaves its number unused.
   chain.
 * 3.5 Recursion (Goose §7.8): no owner, growing local or parameter, temporary or
   pending result is live at a call into a cycle (callbacks too): pass scratch.
+* 3.6 A scope the compiler cannot prove keeps nothing past its end is a
+  compile error at the store or call that keeps it, naming the safe form
+  (copy_to(owner), a parameter to write into, clear and refill, read the
+  value before the loop); never a scope that silently keeps its scratch.
+  Goose refuses what it cannot place the same way (§7.8).
 ## 4. Failure, cleanup and exit (iyi III.1, III.1.4; Goose §7.9, §9.3)
 * 4.1 Errors, panics, defer and exit are iyi's: defer runs innermost first on
   normal scope exit, panic unwind and exit (the calling task's only), on current
@@ -190,7 +206,8 @@ rule goes last in its section; a removed one leaves its number unused.
   published; invalid input yields none, never part. This is safety, not
   integrity: a checksum is the caller's (Goose §9.4).
 * 6.5 Pool free never closes a resource: resources have explicit cleanup.
-* 6.6 RIS_TAPE_STATS: owner paths, regions, committed peaks, pool waste, copies.
+* 6.6 RIS_TAPE_STATS: owner paths, regions, committed peaks, pool waste,
+  copies, and results moved down to a caller's boundary.
   check.sh tests exit, panic, cancel, exhaustion.
 
 ## 7. Types, memory and Ruby syntax (doc/TAPE_TYPES.md; Goose §1.2, §3.7)
