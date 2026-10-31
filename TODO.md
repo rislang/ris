@@ -2,11 +2,10 @@
 
 How to work (fewer tokens, faster to the goal):
 
-* Demand first: take the largest heap site in an existing workload.
+* Demand first: take the largest gap to SPEC in an existing workload.
   For an uncovered language guarantee, add a small representative gate.
 * One change, one relevant gate: check the promised behavior, including
-  error paths the census cannot see. Zero counted allocations alone do
-  not prove runtime exemptions or repeated use are heap-free.
+  error paths.
 * Replace, don't wrap: when a String API has a tape twin, grep the repo
   for callers. Few: move them and delete the String API in one commit.
 * TODO holds open work only, one item per task; completed work lives in
@@ -76,21 +75,13 @@ Steps, each with its gate:
   closure data takes program storage per spawn.
 * std's long-lived state (HPACK tables, autocert cache, log sinks) into
   typed Pool/SlicePool with explicit free and index links (Goose
-  doc/reference/goose/docs/design/owning_dynamic_data.md). Until then
-  the no-GC malloc is a bump allocator with the trap off: std never
-  frees there (RIS_HEAP_STATS=1 shows it). Then remove the bump
-  allocator and restore the trap.
-* Error#message answers String, which a program cannot build without a
-  heap: let it write into a builder across std.
-* Remove general allocator fallbacks and obsolete collector paths from
-  ris programs; audit final binaries for collector linkage and heap
-  allocator dependencies (the compiler keeps its own GC).
+  doc/reference/goose/docs/design/owning_dynamic_data.md).
 * Stats: RIS_TAPE_STATS owner paths and pool waste (SPEC 6.6).
 * A tape hash map laid out as Ruby's Hash (st_table): entries in an
   Array in insertion order, bins an Array(Int32) of indices, String keys
   as views; Copyable like RisTree. Replace the linear-scan TapeMap copies
   in std/yaml, toml, xml and mail. Gate: O(1) lookup on a large map,
-  insertion order, zero heap.
+  insertion order.
 
 ## std and benches
 
@@ -108,18 +99,17 @@ Steps, each with its gate:
   TlsConfig reads the system roots per handshake: make Certificate
   copyable to Program.tape to keep them once.
 * HTTP answer's slow request path still uses String-based read_head and
-  body readers; migrate before claiming chunked/Expect/HTTP/1.0 parity
-  without a heap. Recheck prefork, TLS and samples/ris/web.
+  body readers; migrate before claiming chunked/Expect/HTTP/1.0 parity.
+  Recheck prefork, TLS and samples/ris/web.
 * Bench ports left: mail (String#to_unsafe), toml/yaml (Any: retire for
   TapeValue), xml (Document, Node: XmlTree now), zstd, bzip2 (imports
-  std/random through static_array > slice > indexable: move `sample`),
-  and the std/gc importers (format, socket, big, csv, std, file,
-  file_utils, fuzz, http, io, json, png): replace GC.stats with
-  RIS_HEAP_STATS=1 on the run, as std_netip_exercise.sh does.
-  server_load proves collections: drop or rewrite it. Builds still stop
-  on pointer helpers (slice, png, zstd, dns, hpack), Arrays of growing
-  values (set, otp, idna, hpke, x509, ct_timing) and General allocation
-  (number_format, reference_storage, env, thread_floor).
+  std/random through static_array > slice > indexable: move `sample`).
+  Benches that import std/gc (format, socket, big, csv, std, file,
+  file_utils, fuzz, http, io, json, png) and server_load drop it.
+  Builds still stop on pointer helpers (slice, png, zstd, dns, hpack),
+  Arrays of growing values (set, otp, idna, hpke, x509, ct_timing) and
+  General allocation (number_format, reference_storage, env,
+  thread_floor).
 * format's two-word cost proof needs a side-reservation count (bignum
   words are side Arrays); float.iyi's parser has a copy in tape.iyi:
   merge them.
