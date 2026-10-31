@@ -2917,7 +2917,7 @@ module Iyi
     def visit_allocate(node)
       if node.name == "program_allocate"
         filename = call.try(&.location).try(&.expanded_location).try(&.filename).to_s
-        unless filename.includes?("/src/iyi/") || filename.includes?("/src/std/")
+        unless TapeScopeRuntime.library_file?(filename)
           node.raise "allocate_on_program is runtime-only; use an initialized on_program constructor"
         end
       end

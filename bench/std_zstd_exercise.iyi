@@ -20,7 +20,6 @@ import std/io::{Reader}
 import std/zstd::{Zstd, ZstdReader, ZstdError}
 import std/digest::{XXH64, CRC32}
 import std/file::{File}
-import std/gc::{GC}
 import std/random::{Random}
 
 def assert_true(cond : Bool, msg : String) : Nil
@@ -28,11 +27,11 @@ def assert_true(cond : Bool, msg : String) : Nil
 end
 
 def unhex(s : String) : String
-  p = s.to_unsafe
-  String.new(s.bytesize // 2) do |dst|
+  p = s
+  String.from_bytes(s.bytesize // 2) do |dst|
     i = 0
     while i < s.bytesize // 2
-      dst[i] = ((nibble(p[i * 2]) << 4) | nibble(p[i * 2 + 1])).to_u8
+      dst[i] = ((nibble(p.byte_at(i * 2)) << 4) | nibble(p.byte_at(i * 2 + 1))).to_u8
       i = i + 1
     end
   end
@@ -44,17 +43,17 @@ end
 
 def hex32(v : UInt32) : String
   digits = "0123456789abcdef"
-  String.new(8) do |buf|
+  String.from_bytes(8) do |buf|
     i = 0
     while i < 8
-      buf[i] = digits.to_unsafe[((v >> ((7 - i) * 4)) & 15_u32).to_i32]
+      buf[i] = digits.byte_at(((v >> ((7 - i) * 4)) & 15_u32).to_i32)
       i = i + 1
     end
   end
 end
 
 def bytes(values : Array(Int32)) : String
-  String.new(values.size) do |dst|
+  String.from_bytes(values.size) do |dst|
     i = 0
     while i < values.size
       dst[i] = values[i].to_u8
@@ -65,20 +64,19 @@ end
 
 # *s* with byte *at* set to *value*.
 def patched(s : String, at : Int32, value : Int32) : String
-  src = s.to_unsafe
-  String.new(s.bytesize) do |dst|
-    dst.copy_from(src, s.bytesize)
+  src = s
+  String.from_bytes(s.bytesize) do |dst|
+    (s.bytesize).times { |k_| dst[k_] = src.byte_at(k_) }
     dst[at] = value.to_u8
   end
 end
 
 def piece_of(s : String, from : Int32, n : Int32) : String
-  src = s.to_unsafe + from.to_i64
-  String.new(n) { |dst| dst.copy_from(src, n) }
+  s[from, n]
 end
 
 def run_of(byte : Int32, n : Int32) : String
-  String.new(n) do |dst|
+  String.from_bytes(n) do |dst|
     i = 0
     while i < n
       dst[i] = byte.to_u8
@@ -89,7 +87,7 @@ end
 
 def random_bytes(n : Int32, seed : UInt64) : String
   rng = Random.new(seed)
-  String.new(n) do |dst|
+  String.from_bytes(n) do |dst|
     i = 0
     while i < n
       dst[i] = (rng.next_u & 0xff_u32).to_u8
@@ -99,7 +97,7 @@ def random_bytes(n : Int32, seed : UInt64) : String
 end
 
 def every_byte(times : Int32) : String
-  String.new(256 * times) do |dst|
+  String.from_bytes(256 * times) do |dst|
     i = 0
     while i < 256 * times
       dst[i] = (i & 0xff).to_u8
@@ -109,7 +107,7 @@ def every_byte(times : Int32) : String
 end
 
 def lines(n : Int32) : String
-  b = String::Builder.new
+  b = ""
   i = 0
   while i < n
     b << "line " << i << ": the quick brown fox jumps over the lazy dog " << i % 7 << "\n"
@@ -157,7 +155,7 @@ end
 # Every byte a reader gives, the reads' sizes cycling through *reads*, or
 # the error it answers instead.
 def drain(z : ZstdReader, reads : Array(Int32)) : String | ZstdError
-  all = String::Builder.new
+  all = ""
   k = 0
   while true
     max = reads[k % reads.size]
@@ -322,8 +320,8 @@ skewed = String::Builder.new
 fib.each_with_index { |count, sym| skewed << run_of(65 + sym, count) }
 shuffled = skewed.to_s
 rng = Random.new(5_u64)
-deck = String.new(shuffled.bytesize) do |dst|
-  dst.copy_from(shuffled.to_unsafe, shuffled.bytesize)
+deck = String.from_bytes(shuffled.bytesize) do |dst|
+  (shuffled.bytesize).times { |k_| dst[k_] = shuffled.byte_at(k_) }
   i = shuffled.bytesize - 1
   while i > 0
     j = (rng.next_u % (i + 1).to_u32).to_i32
@@ -349,10 +347,10 @@ assert_true near < alone + 100, "a 3,000-byte repeat from 600 KB back costs unde
 past = random_bytes(1100000, 9_u64)
 beyond = Zstd.compress(far + past + far).bytesize - Zstd.compress(far + past).bytesize
 assert_true beyond > 2900, "the same repeat from past the 1 MiB window costs its bytes (#{beyond})"
-small = Zstd.compress(text).to_unsafe
-assert_true (small[4] & 0x20_u8) != 0_u8, "content within the window is a single segment"
-wide = Zstd.compress(long_text).to_unsafe
-assert_true wide[4] == 0x84_u8 && wide[5] == 0x50_u8, "content past it names a 1 MiB window, a four-byte size and a checksum"
+small = Zstd.compress(text)
+assert_true (small.byte_at(4) & 0x20_u8) != 0_u8, "content within the window is a single segment"
+wide = Zstd.compress(long_text)
+assert_true wide.byte_at(4) == 0x84_u8 && wide.byte_at(5) == 0x50_u8, "content past it names a 1 MiB window, a four-byte size and a checksum"
 # A block the sequences do not shrink goes out raw, and a raw block moves
 # no offsets in the decoder; nor may it in the encoder. Noise with one
 # six-byte repeat 100 bytes back - found, then thrown away with its
@@ -360,8 +358,8 @@ assert_true wide[4] == 0x84_u8 && wide[5] == 0x50_u8, "content past it names a 1
 # 100 back: a repeat code there would name an offset the decoder never
 # saw.
 noisy = random_bytes(131072, 21_u64)
-planted = String.new(131072) do |dst|
-  dst.copy_from(noisy.to_unsafe, 131072)
+planted = String.from_bytes(131072) do |dst|
+  (131072).times { |k_| dst[k_] = noisy.byte_at(k_) }
   i = 0
   while i < 6
     dst[150 + i] = dst[50 + i]
@@ -413,7 +411,7 @@ refused unhex("28b52ffd20101d0000a17800"), "literals are past its maximum of 16 
 refused unhex("502a4d180a000000616263"), "ends inside a skippable frame", "a skippable frame cut short"
 refused patched(lines20_19, 93, 0x1f), "accuracy log of 20 is past 9", "an FSE table description with too fine an accuracy"
 refused patched(direct_19, 14, 0x44), "Huffman weights that do not complete a code", "Huffman weights that leave the code incomplete"
-refused patched(lines150_19, lines150_19.bytesize - 1, lines150_19.to_unsafe[lines150_19.bytesize - 1].to_i32 ^ 1), "content checksum does not match", "a checksum one bit off"
+refused patched(lines150_19, lines150_19.bytesize - 1, lines150_19.byte_at(lines150_19.bytesize - 1).to_i32 ^ 1), "content checksum does not match", "a checksum one bit off"
 refused patched(hello_sum, 10, 0x78), "content checksum does not match (", "content one byte off"
 cut = 0
 while cut < lines150_19.bytesize
@@ -452,8 +450,7 @@ if args.size > 0
     window = e[4].to_i
     # Read once with a collection every 4 MiB, measuring what stays
     # alive; then again without, timed.
-    GC.collect
-    base = GC.stats.bytes_kept_by_last_sweep
+    base = RisRegion.tape_bytes(1_u64)
     most = 0_u64
     io = File.open(path)
     z = ZstdReader.new(io)
@@ -464,12 +461,11 @@ if args.size > 0
       piece = z.read(65536)
       raise "ASSERTION FAILED: #{e[1]}: refused with #{piece.message.inspect}" if piece.is_a?(ZstdError)
       break if piece.bytesize == 0
-      crc = CRC32.update(crc, piece.to_unsafe, piece.bytesize)
+      crc = CRC32.update(crc, piece, piece.bytesize)
       total = total + piece.bytesize.to_i64
       reads = reads + 1
       if reads % 64 == 0
-        GC.collect
-        kept = GC.stats.bytes_kept_by_last_sweep
+        kept = RisRegion.tape_bytes(1_u64)
         most = kept - base if kept > base && kept - base > most
       end
     end
@@ -481,7 +477,7 @@ if args.size > 0
     data = File.read(path)
     best = 0_i64
     3.times do |k|
-      t0 = IyiMark.now_ns
+      t0 = __iyi_monotonic_ns
       feed = Feed.new(data, [65536])
       z = ZstdReader.new(feed)
       n = 0_i64
@@ -491,7 +487,7 @@ if args.size > 0
         break if piece.bytesize == 0
         n = n + piece.bytesize.to_i64
       end
-      t1 = IyiMark.now_ns
+      t1 = __iyi_monotonic_ns
       best = (t1 - t0).to_i64 if k == 0 || (t1 - t0).to_i64 < best
     end
     puts "  #{total >> 20} MiB through ZstdReader took #{best // 1000000} ms"
@@ -503,9 +499,9 @@ if args.size > 0
   entries.each do |e|
     next unless e[0] == "write"
     plain = File.read(dir + "/" + e[1])
-    t0 = IyiMark.now_ns
+    t0 = __iyi_monotonic_ns
     stream = Zstd.compress(plain)
-    t1 = IyiMark.now_ns
+    t1 = __iyi_monotonic_ns
     best = (t1 - t0).to_i64 if e[1] == "text.bin"
     back = Zstd.decompress(stream)
     assert_true back.is_a?(String) && back.as(String) == plain, "#{e[1]}: what iyi wrote reads back"

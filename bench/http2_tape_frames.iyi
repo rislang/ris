@@ -11,11 +11,10 @@ h2 = H2Connection.new(conn, true)
 h2.bench_settled
 payload = "x" * 1000
 frame = "\x00\x03\xe8\x2a\x00\x00\x00\x00\x00" + payload
-IyiMark.auto = false
 conn.bench_seed(frame, 0)
 h2.read_frame
 sum = 0_i64
-before = IyiMark.allocated_since
+before = RisRegion.tape_bytes(1_u64)
 started = Time.monotonic_nanoseconds
 20000.times do
   conn.bench_seed(frame, 0)
@@ -23,5 +22,5 @@ started = Time.monotonic_nanoseconds
   sum = sum + payload.bytesize
 end
 elapsed = Time.monotonic_nanoseconds - started
-allocated = IyiMark.allocated_since - before
+allocated = RisRegion.tape_bytes(1_u64) - before
 puts "frames ns=#{elapsed} bytes=#{allocated} sum=#{sum}"

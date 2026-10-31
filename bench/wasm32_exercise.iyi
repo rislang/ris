@@ -201,7 +201,7 @@ def check_stack_survival : Nil
     k = k + 1
   end
 
-  IyiMark.collect
+  IyiTask.collect
 
   sr = p_stack.value
   if sr.value != 3333

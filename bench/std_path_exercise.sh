@@ -208,7 +208,7 @@ if [ -n "$PY" ]; then
   # first one a join that drops the drive reaches.
   caught_at "a root joined onto a drive path answered by itself" \
     'if own && their.nil?
-        return TapePath.new(concat(own, part), @kind)
+        return Path.new(concat(own, part), @kind)
       end' '# a half anchor taken whole' \
     'expands onto the base'
 fi

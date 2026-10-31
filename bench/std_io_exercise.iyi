@@ -28,7 +28,6 @@ module bench/std_io_exercise
 
 import std/io::{Memory, Sized, Delimited, MultiWriter, Hexdump, ByteFormat}
 import std/file
-import std/gc::{GC}
 
 def assert_true(cond : Bool, msg : String) : Nil
   if !cond
@@ -50,14 +49,14 @@ end
 
 def hex_of(bytes : Pointer(UInt8), count : Int32) : String
   digits = "0123456789abcdef".to_unsafe
-  hexed = Pointer(UInt8).malloc((count * 2).to_u64)
+  hexed = ""
   i = 0
   while i < count
-    hexed[i * 2] = digits[(bytes[i].to_i32 >> 4) & 0x0f]
-    hexed[i * 2 + 1] = digits[bytes[i].to_i32 & 0x0f]
+    hexed << digits[(bytes[i].to_i32 >> 4) & 0x0f, 1]
+    hexed << digits[bytes[i].to_i32 & 0x0f, 1]
     i = i + 1
   end
-  String.new(count * 2) { |t| t.copy_from(hexed, count * 2) }
+  hexed
 end
 
 # ---------------------------------------------------------------------------
@@ -384,14 +383,12 @@ assert_true(carriage.lines(true) == ["x\r", "y\r"], "lines(chomp) on a Sized kee
 most_path = sandbox + "/std_io_exercise_most_#{args.size}.txt"
 File.write(most_path, "ef")
 most_file = File.open(most_path)
-GC.disable
-most_before = GC.stats.bytes_since_collection
+most_before = RisRegion.tape_bytes(1_u64)
 wide = Sized.new(Delimited.new(Memory.new("ab-"), "-"), 100_000_000)
 wide_got = wide.read_all
 direct_got = Delimited.new(Memory.new("cd-"), "-").read_bytes(100_000_000)
 file_got = Sized.new(most_file, 100_000_000).read_all
-most_after = GC.stats.bytes_since_collection
-GC.enable
+most_after = RisRegion.tape_bytes(1_u64)
 most_file.close
 File.delete(most_path)
 assert_str("ab", wide_got, "a Sized under a large limit reads what there is")

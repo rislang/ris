@@ -61,7 +61,7 @@ end
 # Every byte an Inflater gives, *max* at most a read, or the error it
 # answers instead.
 def drain(z : Inflater, max : Int32) : String | CompressError
-  all = String::Builder.new
+  all = ""
   while true
     piece = z.read(max)
     case piece
@@ -127,7 +127,7 @@ def flip(s : String, at : Int32, mask : UInt8) : String
 end
 
 def bytes(values : Array(Int32)) : String
-  String.new(values.size) do |dst|
+  String.from_bytes(values.size) do |dst|
     i = 0
     while i < values.size
       dst[i] = values[i].to_u8
@@ -137,7 +137,7 @@ def bytes(values : Array(Int32)) : String
 end
 
 def run_of(byte : Int32, n : Int32) : String
-  String.new(n) do |dst|
+  String.from_bytes(n) do |dst|
     i = 0
     while i < n
       dst[i] = byte.to_u8
@@ -148,7 +148,7 @@ end
 
 def random_bytes(n : Int32, seed : UInt64) : String
   rng = Random.new(seed)
-  String.new(n) do |dst|
+  String.from_bytes(n) do |dst|
     i = 0
     while i < n
       dst[i] = (rng.next_u & 0xff_u32).to_u8
@@ -158,7 +158,7 @@ def random_bytes(n : Int32, seed : UInt64) : String
 end
 
 def every_byte(times : Int32) : String
-  String.new(256 * times) do |dst|
+  String.from_bytes(256 * times) do |dst|
     i = 0
     while i < 256 * times
       dst[i] = (i & 0xff).to_u8
@@ -172,7 +172,7 @@ end
 def json_records(n : Int32, seed : UInt64) : String
   rng = Random.new(seed)
   tags = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta"]
-  b = String::Builder.new
+  b = ""
   b << "[\n"
   i = 0
   while i < n
@@ -302,7 +302,7 @@ def fibonacci_pieces : {String, String}
     lens[j] = t
     i = i - 1
   end
-  copies = String::Builder.new
+  copies = ""
   at = 0
   lens.each do |l|
     copies << piece_of(noise, at, l)
@@ -698,7 +698,7 @@ puts "\n== deflater"
 # Pieces written as they come, each a sync flush: what has been written
 # decodes to every byte given so far without another byte of stream.
 def read_exactly(z : Inflater, n : Int32, label : String) : String
-  all = String::Builder.new
+  all = ""
   got = 0
   while got < n
     piece = z.read(n - got)

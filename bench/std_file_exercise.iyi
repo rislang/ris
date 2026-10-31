@@ -27,7 +27,6 @@ end
 
 import std/file::{File}
 import std/dir::{Dir}
-import std/gc::{GC}
 # For TMPDIR, TEMP and TMP unset around `File.tempfile`'s GetTempPathW.
 import std/env::{ENV}
 
@@ -98,16 +97,14 @@ assert_true count == 2, "each_line visited 2 lines"
 # three times.
 big_path = sandbox + "/std_file_each_line_big.txt"
 File.write(big_path, ("0123456789abcdefghijklmnopqrstuvwxyz" * 3 + "\r\n") * 18000)
-GC.disable
-walk_before = GC.stats.bytes_since_collection
+walk_before = RisRegion.tape_bytes(1_u64)
 walked = 0
 walked_bytes = 0
 File.each_line(big_path) do |l|
   walked = walked + 1
   walked_bytes = walked_bytes + l.bytesize
 end
-walk_after = GC.stats.bytes_since_collection
-GC.enable
+walk_after = RisRegion.tape_bytes(1_u64)
 assert_true walked == 18000 && walked_bytes == 18000 * 108, "each_line gave 18000 lines of 108 bytes, without their \\r\\n"
 file_bytes = File.size(big_path).to_u64
 assert_true walk_after - walk_before < file_bytes * 3_u64 // 2_u64, "each_line streams: #{walk_after - walk_before} bytes allocated for a #{file_bytes}-byte file"

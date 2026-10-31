@@ -99,10 +99,10 @@ else
   mkdir -p "$WORK/patched_amp/std"
   "$PY" - <<PY
 src = open("$REPO/src/std/html.iyi").read()
-old = 'w.append_html_escaped(string)'
+old = 'writer.append_html_escaped(string)'
 if old not in src:
     raise SystemExit("patch site missing")
-open("$WORK/patched_amp/std/html.iyi", "w").write(src.replace(old, 'w.append(string)', 1))
+open("$WORK/patched_amp/std/html.iyi", "w").write(src.replace(old, 'writer.append(string)', 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the patch did not apply"
@@ -117,22 +117,25 @@ fi
 
 echo
 echo "== proving the checks can fail when the module is broken"
-mutate() { # mutate <label> <old> <new> <phrase>
-  local label="$1" old="$2" new="$3" phrase="$4"
+mutate() { # mutate <label> <old> <new> <phrase> [file under src/]
+  local label="$1" old="$2" new="$3" phrase="$4" file="${5:-std/html.iyi}"
   if [ -z "$PY" ]; then
     echo "  $label: skipped, no working python3 to make the broken copy with"
     return 0
   fi
   rm -rf "$WORK/patched"
   mkdir -p "$WORK/patched/std"
+  # A prelude file is patched in a copy of the whole prelude, which the
+  # search path then finds before the checkout's.
+  case "$file" in iyi/*) cp -R "$REPO/src/iyi" "$WORK/patched/iyi" ;; esac
   OLD="$old" NEW="$new" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/html.iyi").read_text()
+src = Path("$REPO/src/$file").read_text()
 old = os.environ["OLD"]
 if old not in src:
     raise SystemExit("patch site missing: " + old)
-Path("$WORK/patched/std/html.iyi").write_text(src.replace(old, os.environ["NEW"], 1))
+Path("$WORK/patched/$file").write_text(src.replace(old, os.environ["NEW"], 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  $label: the patch did not apply"
@@ -151,7 +154,7 @@ PY
 mutate "only the whole alphanumeric run looked up" \
   '              n = n - 1 if cp < 0' '              n = 1 if cp < 0' 'the longest name that is an entity'
 mutate "escape to an IO drops the bytes after the last reference" \
-  '    io.write(raw + run_start, len - run_start) if len > run_start' '    nil' 'escape to an IO'
+  '    append(bytes + start, size - start) if size > start' '    nil' 'nothing to escape' iyi/tape.iyi
 mutate "every name read without its ;" \
   'if cp >= 0 && !legacy_name?(cp) &&' 'if cp >= 0 && false &&' 'only a legacy name goes without its'
 

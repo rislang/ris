@@ -173,9 +173,9 @@ Measure.unsafe_construct(pointerof(mz2), 1.5, 0.0 * -1.0)
 assert_true mz1 == mz2, "0.0 and -0.0 fields compare equal"
 assert_i32 mz1.hash, mz2.hash, "0.0 and -0.0 fields hash alike"
 tg1 = uninitialized ReferenceStorage(Tagged)
-Tagged.unsafe_construct(pointerof(tg1), String.new(2) { |buf| buf[0] = 104_u8; buf[1] = 105_u8 })
+Tagged.unsafe_construct(pointerof(tg1), String.from_bytes(2) { |buf| buf[0] = 104_u8; buf[1] = 105_u8 })
 tg2 = uninitialized ReferenceStorage(Tagged)
-Tagged.unsafe_construct(pointerof(tg2), String.new(2) { |buf| buf[0] = 104_u8; buf[1] = 105_u8 })
+Tagged.unsafe_construct(pointerof(tg2), String.from_bytes(2) { |buf| buf[0] = 104_u8; buf[1] = 105_u8 })
 assert_true tg1 == tg2, "String? fields with equal contents compare equal"
 assert_i32 tg1.hash, tg2.hash, "String? fields with equal contents hash alike"
 keyed = {mz1 => 1}
@@ -188,14 +188,14 @@ u2 = uninitialized ReferenceStorage(Box)
 uninit_eq = u1 == u2
 assert_true uninit_eq || (uninit_eq == false), "uninitialized ref-field compare returns a bool"
 b1 = uninitialized ReferenceStorage(Box)
-Box.unsafe_construct(pointerof(b1), String.new(4) do |buf|
+Box.unsafe_construct(pointerof(b1), String.from_bytes(4) do |buf|
   buf[0] = 115_u8
   buf[1] = 97_u8
   buf[2] = 109_u8
   buf[3] = 101_u8
 end)
 b2 = uninitialized ReferenceStorage(Box)
-Box.unsafe_construct(pointerof(b2), String.new(4) do |buf|
+Box.unsafe_construct(pointerof(b2), String.from_bytes(4) do |buf|
   buf[0] = 115_u8
   buf[1] = 97_u8
   buf[2] = 109_u8

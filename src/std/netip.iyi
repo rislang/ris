@@ -379,15 +379,22 @@ pub struct IP
   # Python writes it); IPv4 as `to_s` writes it.
   def exploded : String
     return NetipBits.dotted(to_u128) unless @v6
+    # An IPv4-mapped address ends in its dotted quad, written in place of
+    # the last two hextets rather than over a copy of them.
+    mapped = (to_u128 >> 32) == 0xFFFF_u128
     text = ""
     index = 0
     while index < 8
       text << ':' if index > 0
+      if mapped && index == 6
+        text << NetipBits.dotted(to_u128 & 0xFFFFFFFF_u128)
+        break
+      end
       text << NetipBits.hextet(to_u128, index).to_s(16).rjust(4, '0')
       index = index + 1
     end
-    text = text[0, 30] + NetipBits.dotted(to_u128 & 0xFFFFFFFF_u128) if (to_u128 >> 32) == 0xFFFF_u128
-    @zone.empty? ? text : text + "%" + @zone
+    text << "%" << @zone unless @zone.empty?
+    text
   end
 
   # The name a PTR record for this address is under: `4.3.2.1.in-addr.arpa`,

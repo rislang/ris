@@ -27,13 +27,13 @@ end
 
 def hex(text : String) : String
   digits = "0123456789abcdef"
-  io = String::Builder.new(text.bytesize * 2 + 1)
+  io = ""
   io << "x"
-  p = text.to_unsafe
+  p = text
   i = 0
   while i < text.bytesize
-    io << digits[p[i].to_i32 >> 4]
-    io << digits[p[i].to_i32 & 15]
+    io << digits[p.byte_at(i).to_i32 >> 4, 1]
+    io << digits[p.byte_at(i).to_i32 & 15, 1]
     i = i + 1
   end
   io.to_s
@@ -41,13 +41,13 @@ end
 
 # The bytes `x` and hex digits stand for.
 def unhex(text : String) : String
-  p = text.to_unsafe
+  p = text
   n = (text.bytesize - 1) // 2
-  String.new(n) do |dst|
+  String.from_bytes(n) do |dst|
     i = 0
     while i < n
-      hi = p[1 + i * 2].to_i32
-      lo = p[2 + i * 2].to_i32
+      hi = p.byte_at(1 + i * 2).to_i32
+      lo = p.byte_at(2 + i * 2).to_i32
       hi = hi >= 97 ? hi - 87 : hi - 48
       lo = lo >= 97 ? lo - 87 : lo - 48
       dst[i] = (hi * 16 + lo).to_u8
@@ -57,7 +57,7 @@ def unhex(text : String) : String
 end
 
 def bytes(list : Array(Int32)) : String
-  String.new(list.size) do |p|
+  String.from_bytes(list.size) do |p|
     list.each_with_index { |b, i| p[i] = b.to_u8 }
   end
 end
@@ -100,13 +100,13 @@ def widest(text : String) : Int32
 end
 
 def lone_breaks?(text : String) : Bool
-  p = text.to_unsafe
+  p = text
   i = 0
   while i < text.bytesize
-    if p[i] == 10_u8
-      return true unless i > 0 && p[i - 1] == 13_u8
-    elsif p[i] == 13_u8
-      return true unless i + 1 < text.bytesize && p[i + 1] == 10_u8
+    if p.byte_at(i) == 10_u8
+      return true unless i > 0 && p.byte_at(i - 1) == 13_u8
+    elsif p.byte_at(i) == 13_u8
+      return true unless i + 1 < text.bytesize && p.byte_at(i + 1) == 10_u8
     end
     i = i + 1
   end
@@ -114,10 +114,10 @@ def lone_breaks?(text : String) : Bool
 end
 
 def ascii?(text : String) : Bool
-  p = text.to_unsafe
+  p = text
   i = 0
   while i < text.bytesize
-    return false if p[i] >= 128_u8
+    return false if p.byte_at(i) >= 128_u8
     i = i + 1
   end
   true
@@ -272,7 +272,7 @@ encoded.split("\r\n").each do |line|
   assert_true !cut_escape?(line), "no escape is cut by a soft break: #{line.inspect}"
 end
 assert_str escapes, Mail.decode_quoted_printable(encoded), "an escape is never cut by a soft break"
-all = String.new(256) { |p| 256.times { |i| p[i] = i.to_u8 } }
+all = String.from_bytes(256) { |p| 256.times { |i| p[i] = i.to_u8 } }
 assert_str all, Mail.decode_quoted_printable(Mail.encode_quoted_printable(all, binary: true)), "every byte comes back in binary"
 assert_str "a=zz =4 b", Mail.decode_quoted_printable("a=zz =4 b"), "an = that starts no escape is itself"
 assert_str "Jj", Mail.decode_quoted_printable("=4a=6A"), "escapes are read in either case"

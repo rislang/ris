@@ -558,12 +558,12 @@ struct ::Array(T)
   # `shuffle!`, so a seeded generator puts the elements where it would.
   def shuffle_in_place(random : Std::Random::Random? = nil) : Array(T)
     rng = random || Std::Random::Random.new
-    i = @size - 1
+    i = size - 1
     while i > 0
       j = rng.rand(i + 1)
-      tmp = @buffer[i]
-      @buffer[i] = @buffer[j]
-      @buffer[j] = tmp
+      tmp = self[i]
+      self[i] = self[j]
+      self[j] = tmp
       i = i - 1
     end
     self
@@ -576,7 +576,7 @@ struct ::Array(T)
   def sample(random : Std::Random::Random? = nil) : T
     raise "sample of an empty array" if empty?
     rng = random || Std::Random::Random.new
-    self[rng.rand(@size)]
+    self[rng.rand(size)]
   end
 
   # *n* distinct elements. One is `sample` in a list; more are a reservoir
@@ -592,12 +592,12 @@ struct ::Array(T)
       return picked
     end
     i = 0
-    while i < @size
+    while i < size
       if i < n
-        picked << @buffer[i]
+        picked << self[i]
       else
         j = rng.rand(i + 1)
-        picked[j] = @buffer[i] if j < n
+        picked[j] = self[i] if j < n
       end
       i = i + 1
     end

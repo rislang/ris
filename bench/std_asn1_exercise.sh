@@ -353,10 +353,10 @@ prove_broken "an overlong UTF-8 lead taken" "an overlong form refused" \
 # In Int32 a UniversalString's code with its top bit set was negative,
 # under the U+10FFFF bound, and `chr` panicked on it.
 prove_broken "a UniversalString's code read in Int32" "out of char range" \
-  '        code = 0_i64
-        width.times { |k| code = (code << 8) | @data[i + k].to_i64 }' \
-  '        code = 0
-        width.times { |k| code = (code << 8) | @data[i + k].to_i32 }'
+  '      code = 0_i64
+      width.times { |k| code = (code << 8) | @data[i + k].to_i64 }' \
+  '      code = 0
+      width.times { |k| code = (code << 8) | @data[i + k].to_i32 }'
 prove_broken "the walk without its depth bound" "a value 65 deep refused" \
   '      return Asn1Error.new("a value nested deeper than #{MAX_DEPTH}", current.offset) if depth > MAX_DEPTH' ''
 prove_broken "the first two arcs split at 39" "sha256WithRSAEncryption" \

@@ -35,8 +35,8 @@ def hex(bytes : String) : String
   out = String::Builder.new
   i = 0
   while i < bytes.bytesize
-    out.push(digits[bytes[i].to_i32 >> 4])
-    out.push(digits[bytes[i].to_i32 & 15])
+    out.push(digits[bytes[i].to_i32 >> 4, 1])
+    out.push(digits[bytes[i].to_i32 & 15, 1])
     i = i + 1
   end
   out.finish

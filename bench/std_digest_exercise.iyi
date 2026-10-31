@@ -210,7 +210,7 @@ def adler_in_pieces(s : String, cut : Int32) : UInt32
   Adler32.update(Adler32.update(1_u32, s, cut), s[cut, s.bytesize - cut], s.bytesize - cut)
 end
 
-mixed = String.new(300) do |dst|
+mixed = String.from_bytes(300) do |dst|
   i = 0
   while i < 300
     dst[i] = ((i * 37 + 11) & 0xff).to_u8
@@ -276,13 +276,13 @@ puts "  CRC-64 of the check value, of nothing, and in pieces, cut anywhere"
   best_adler = 0_i64
   seen = 0_u32
   3.times do |k|
-    t0 = IyiMark.now_ns
+    t0 = __iyi_monotonic_ns
     seen = seen ^ byte_sum(sample)
-    t1 = IyiMark.now_ns
+    t1 = __iyi_monotonic_ns
     seen = seen ^ CRC32.checksum(sample)
-    t2 = IyiMark.now_ns
+    t2 = __iyi_monotonic_ns
     seen = seen ^ Adler32.checksum(sample)
-    t3 = IyiMark.now_ns
+    t3 = __iyi_monotonic_ns
     best_sum = (t1 - t0).to_i64 if k == 0 || (t1 - t0).to_i64 < best_sum
     best_crc = (t2 - t1).to_i64 if k == 0 || (t2 - t1).to_i64 < best_crc
     best_adler = (t3 - t2).to_i64 if k == 0 || (t3 - t2).to_i64 < best_adler

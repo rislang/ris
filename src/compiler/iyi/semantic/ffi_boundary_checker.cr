@@ -117,7 +117,9 @@ module Iyi::FfiBoundaryChecker
         "`String.new(capacity) { |pointer| … }` outside an @[Ffi] module " \
         "or @[PointerUnsafe] def: " \
         "it yields a raw pointer.\n\n" \
-        "Build it with `String.build(capacity) { |io| io.write_byte(b) }`."
+        "Build it with `String.build(capacity) { |io| io.write_byte(b) }`, " \
+        "or set bytes by index with `String.from_bytes(size) { |bytes| " \
+        "bytes[i] = b }`."
       end
     end
   end

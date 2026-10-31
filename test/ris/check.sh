@@ -51,6 +51,15 @@ expect() {
   fi
 }
 
+# The first parallel spawn, made in a block iteration's tape scope, lists
+# the workers in program storage, not in that scope.
+out=$("$RIS" run test/ris/parallel_first_spawn_scope.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = '63' ]; then
+  echo 'runs     parallel_first_spawn_scope'
+else
+  echo "FAILED   parallel_first_spawn_scope: $out"; status=1
+fi
+
 # Two types' fields of one name stay two fields in the shrink checker.
 out=$("$RIS" run test/ris/field_fold_owner.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = 'kept' ]; then
@@ -1185,6 +1194,25 @@ if out=$("$RIS" build test/ris/http_keepalive_scope.ri -o "$exe" 2>&1); then
   fi
 else
   echo "FAILED   http_keepalive_scope: $out"; status=1
+fi
+rm -f "$exe"
+# The same for Server.answer's loop (tape_connection): plain requests
+# answered in place and chunked ones read the slow way, alternating.
+exe=$(mktemp)
+if out=$("$RIS" build test/ris/http_answer_scope.ri -o "$exe" 2>&1); then
+  few=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 timeout 120 "$exe" 200 2>&1)
+  many=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 timeout 300 "$exe" 5000 2>&1)
+  maps() { printf '%s\n' "$1" | sed -n 's/^ris tape: .* \([0-9]*\) mappings made.*/\1/p'; }
+  if printf '%s\n' "$few" | grep -qx '200 true' &&
+     printf '%s\n' "$many" | grep -qx '5000 true' &&
+     printf '%s\n' "$many" | grep -qx 'ris heap: 0 allocations, 0 bytes' &&
+     [ -n "$(maps "$few")" ] && [ "$(maps "$few")" = "$(maps "$many")" ]; then
+    echo "runs     http_answer_scope ($(maps "$many") mappings for 200 and 5000 requests)"
+  else
+    echo "FAILED   http_answer_scope: $few / $many"; status=1
+  fi
+else
+  echo "FAILED   http_answer_scope: $out"; status=1
 fi
 rm -f "$exe"
 out=$(RIS="$RIS" timeout 200 bash test/ris/http2_conn_growth.sh 2>&1)

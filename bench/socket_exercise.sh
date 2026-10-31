@@ -201,17 +201,21 @@ prove_fails() {
 
 # 1. Broken payload reception
 prove_fails "message payload mismatch" badpayload "message_exchange:" \
-  '{ sub(/target\.copy_from\(pointerof\(small\)\.as\(UInt8\*\), count\)/, "target[0] = 63_u8"); print }'
+  '{ sub(/^      received > 0_i64 \? received\.to_i32 : 0$/, "      room[0] = 63_u8 if received > 0_i64; received > 0_i64 ? received.to_i32 : 0"); print }'
 
 # 2. Broken short read (clamping buffer size below 16 bytes alters chunk size)
 prove_fails "short read size mismatch" badshort "short_read:" \
-  '{ sub(/first = max_bytes < 4096 \? max_bytes : 4096/, "if max_bytes < 16; max_bytes = 1; end; first = max_bytes < 4096 ? max_bytes : 4096"); print }'
+  '{ sub(/^        max_bytes\.to_u64\)$/, "        (max_bytes < 16 ? 1 : max_bytes).to_u64)"); print }'
 # 3. Broken closed peer detection (does not answer empty string on EOF)
 prove_fails "closed peer EOF missed" badoff "closed_peer:" \
-  '{ sub(/return "" if count == 0$/, "return \"eof_missed\" if count == 0"); print }'
-# 4. A small read that takes the whole room it was given from the heap
-prove_fails "a socket read that takes all it may read from the heap" heapread "small_read:" \
-  '{ sub(/if count < first \|\| max_bytes == first$/, "if false"); print }'
+  '{ sub(/^      return got unless got\.nil\?$/, "      return (got.is_a?(String) \\&\\& got.empty? ? \"eof_missed\" : got) unless got.nil?"); print }'
+# 4. A small read that keeps the whole room it was given on the tape
+prove_fails "a socket read that keeps all it may read" heapread "small_read:" \
+  '/private def read_ready/ { inside = 1 }
+   inside && /^    writer\.finish$/ {
+     print "    RisRegion.tape_bytes(max_bytes.to_u64)"; inside = 0
+   }
+   { print }'
 
 # The peer's name asked of this end: `getsockname` for `getpeername`.
 prove_fails "the peer's address read from this end" peername "remote_port:" \
@@ -233,7 +237,7 @@ prove_fails "a gone peer is a panic" panicwrite "cannot write to socket" \
 # 5b. `localhost` raced ::1 first, as a name with a route to ::1 is: the
 #     refusal names the two the other way round.
 prove_fails "localhost raced ::1 first" localhostorder "localhost_race:" \
-  '{ sub(/return race\(host.to_heap, port, loopback, timeout_ms\) if localhost\?\(host\)/, "return race(host.to_heap, port, loopback.reversed, timeout_ms) if localhost?(host)"); print }'
+  '{ sub(/return race\(address, port, loopback, timeout_ms\) if localhost\?\(address\)/, "return race(address, port, loopback.reverse, timeout_ms) if localhost?(address)"); print }'
 # 5c. The attempt delay an hour: ::1 starts only once 127.0.0.1 has been
 #     refused, which Windows takes 2 s to do. Elsewhere the refusal is at
 #     once and the delay is never waited; std_dns_exercise.sh proves it
@@ -337,7 +341,11 @@ prove_fails "an IPv6 socket made as IPv4" badfamily "cannot bind socket to \[::1
 # 9. A unix listener whose close leaves its file: the path cannot be bound
 #    again.
 prove_fails "a unix listener's file left behind" unixleft "cannot bind socket to .*the address is in use" \
-  '{ sub(/__iyi_unlink\(IyiSocket.c_path\(path\)\)/, "IyiSocket.c_path(path)"); print }'
+  '/^  def close : Nil$/ { inside = 1 }
+   inside && /^      if path\.is_a\?\(String\)$/ {
+     sub(/if path/, "if false \\&\\& path"); inside = 0
+   }
+   { print }'
 # A unix socket that says it is not one, which std/tls would then ask the
 # port of.
 prove_fails "a unix socket taken for TCP" unixtcp "unix?: the unix ends say false" \
@@ -350,23 +358,6 @@ prove_fails "a read timeout not kept" untimed "timeout: the read answered" \
 # 4. Broken local port (answers 0 instead of assigned ephemeral port)
 prove_fails "local port returns 0" badport "local_port failed:" \
   '{ sub(/\(high << 8\) \| low/, "0"); print }'
-
-# Put the receive buffer in the frame that waits. Merely forcing an inline
-# no longer does that reliably: LLVM can split the two calls' stack slots.
-prove_fails "a read whose buffer waits with it" inlined_read "retain: a reader parked" \
-  '/^  private def read_ready/ {
-     sub(/String \| SocketError \| Nil/, "String | SocketError | Cancelled | Nil")
-   }
-   { print }
-   /^    n = IyiSocket.__sys_recv.*pointerof\(small\)/ {
-     print "    while n < 0_i64 && IyiSocket.__sys_would_block?(n)"
-     print "      waited = IyiSocket.await_readable(@state.value.fd, IyiSocket.bound(@state.value.read_timeout_ms))"
-     print "      return waited if waited.is_a?(Cancelled)"
-     print "      return Cancelled.new if @state.value.fd < 0"
-     print "      return SocketError.timed_out(\"read from socket\") unless waited"
-     print "      n = IyiSocket.__sys_recv(@state.value.fd, pointerof(small).as(UInt8*), first.to_u64)"
-     print "    end"
-   }' --release
 
 # A socket's stream made anew at each `to_io`: the second line, already in
 # the first stream's read-ahead, is never read, and the read times out.
@@ -383,7 +374,7 @@ prove_fails "a refused socket read taken for the end" quiet_end "stream: a timed
 case "$(uname -s)" in
   Linux)
     prove_fails "a reset dropped after a full chunk" reset_dropped "reset_after_chunk:" \
-      '{ sub(/^    @state\.value\.pending_error = SocketError.new\("read from socket".*$/, ""); print }'
+      '{ sub(/^      return nil if IyiSocket\.__sys_would_block\?\(received\)$/, "      return nil if IyiSocket.__sys_would_block?(received); return writer.finish"); print }'
     # 13. A half-close that ends nothing: the peer waits for an end that
     #     never comes. And one that ends both halves: the answer sent
     #     after it is lost. Each patches the Linux arm, so it is measured

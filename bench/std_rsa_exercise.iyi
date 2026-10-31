@@ -37,10 +37,10 @@ def check(cond : Bool, label : String) : Nil
 end
 
 def b(hex : String) : Array(UInt8)
-  p = hex.to_unsafe
+  p = hex
   Array(UInt8).new(hex.bytesize // 2) do |i|
-    hi = p[i * 2].to_i32
-    lo = p[i * 2 + 1].to_i32
+    hi = p.byte_at(i * 2).to_i32
+    lo = p.byte_at(i * 2 + 1).to_i32
     hi = hi >= 97 ? hi - 87 : hi - 48
     lo = lo >= 97 ? lo - 87 : lo - 48
     (hi * 16 + lo).to_u8
@@ -75,7 +75,7 @@ def hex(bytes : Array(UInt8)) : String
 end
 
 def text(bytes : Array(UInt8)) : String
-  String.new(bytes.size) { |buf| buf.copy_from(bytes.to_unsafe, bytes.size) }
+  String.from_bytes(bytes.size) { |buf| (bytes.size).times { |k_| buf[k_] = bytes[k_] } }
 end
 
 def pem(label : String, der : Array(UInt8)) : String
@@ -108,7 +108,7 @@ end
 
 def read_file(path : String) : Array(UInt8)
   data = File.read(path)
-  Array(UInt8).new(data.bytesize) { |i| data.to_unsafe[i] }
+  Array(UInt8).new(data.bytesize) { |i| data.byte_at(i) }
 end
 
 # The hash a certificate's signature algorithm names, with its scheme and

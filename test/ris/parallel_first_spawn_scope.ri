@@ -1,0 +1,22 @@
+# The first parallel spawn starts the workers and lists them. It ran in
+# a block iteration's tape scope here, which freed the list at the
+# iteration's end while every worker still read it: the next iteration's
+# closure landed on it and the second spawn crashed. The list is program
+# storage now.
+module test/ris/parallel_first_spawn_scope
+
+IyiWorkers.count = 2
+
+def run : Int32
+  sum = 0
+  group do |g|
+    [10, 20, 30].each do |p|
+      t = g.spawn_parallel { p + 1 }
+      got = t.value
+      sum += got if got.is_a?(Int32)
+    end
+  end
+  sum
+end
+
+puts run

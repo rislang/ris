@@ -182,6 +182,21 @@ struct String
     new(bytes, size)
   end
 
+  # *size* bytes that the block sets by index in a zeroed `Array(UInt8)`,
+  # in any order, as text on the caller's tape: a program's way to make
+  # bytes that `String.new(size) { |pointer| }` makes in std.
+  def self.from_bytes(size : Int32, & : Array(UInt8) -> _) : String
+    bytes = Array(UInt8).new(size, 0_u8)
+    yield bytes
+    new(size) do |text|
+      index = 0
+      while index < size
+        text[index] = bytes[index]
+        index = index + 1
+      end
+    end
+  end
+
   def __iyi_pending_copy(owner : RisPendingCopy) : self
     copy_to(owner)
   end

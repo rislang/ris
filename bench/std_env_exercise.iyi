@@ -228,7 +228,7 @@ puts "\n== a name the environment holds twice"
   count.times { |i| twice[i] = was[i] }
   ["#{K3}=first", "#{K3}=second"].each_with_index do |text, i|
     entry = Pointer(UInt8).malloc((text.bytesize + 1).to_u64)
-    entry.copy_from(text.to_unsafe, text.bytesize)
+    (text.bytesize).times { |k_| entry[k_] = text.byte_at(k_) }
     entry[text.bytesize] = 0_u8
     twice[count + i] = entry
   end

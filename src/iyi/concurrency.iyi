@@ -3311,7 +3311,12 @@ class IyiWorkers
         return
       end
       @@started = workers
-      @@workers = Array(IyiSchedulerState).new(workers)
+      # The list lives as long as the process: program storage, not the
+      # tape of whatever scope made the first parallel spawn, which frees
+      # it at that scope's end while every worker still reads it.
+      RisRegion.program_scope do
+        @@workers = Array(IyiSchedulerState).new(workers)
+      end
       IyiSchedLock.unlock
       index = 0
       while index < workers

@@ -268,18 +268,18 @@ def server_end : WebSocket
 end
 
 def bytes(list : Array(Int32)) : String
-  String.new(list.size) do |p|
+  String.from_bytes(list.size) do |p|
     list.each_with_index { |b, i| p[i] = b.to_u8 }
   end
 end
 
 # The bytes of *text* in hex, a space between them.
 def hex(text : String) : String
-  p = text.to_unsafe
+  p = text
   parts = [] of String
   i = 0
   while i < text.bytesize
-    h = p[i].to_i32.to_s(16)
+    h = p.byte_at(i).to_i32.to_s(16)
     parts << (h.bytesize == 1 ? "0" + h : h)
     i = i + 1
   end
@@ -288,7 +288,7 @@ end
 
 # *n* bytes that are not all the same: byte i is i * 7 + 3, mod 256.
 def pattern(n : Int32) : String
-  String.new(n) do |p|
+  String.from_bytes(n) do |p|
     i = 0
     while i < n
       p[i] = ((i * 7 + 3) & 255).to_u8
@@ -301,7 +301,7 @@ end
 # generator's high bytes from *seed*.
 def noise(n : Int32, seed : Int32) : String
   x = seed.to_u32 &* 2654435761_u32 &+ 1_u32
-  String.new(n) do |p|
+  String.from_bytes(n) do |p|
     i = 0
     while i < n
       x = x &* 1103515245_u32 &+ 12345_u32
@@ -320,7 +320,7 @@ end
 # DEFLATE ending in a sync flush, its last four bytes left off.
 def deflated(data : String, level : Int32 = 6) : String
   z = Deflater.new(Envelope::Raw, level).compress(data)
-  String.new(z.bytesize - 4) { |dst| dst.copy_from(z.to_unsafe, z.bytesize - 4) }
+  String.from_bytes(z.bytesize - 4) { |dst| (z.bytesize - 4).times { |k_| dst[k_] = z.byte_at(k_) } }
 end
 
 # The terms a connection agreed, as one word each.
@@ -356,11 +356,11 @@ def frame(op : Int32, payload : String, fin : Bool = true, mask : Array(Int32)? 
   body = payload
   if m = mask
     head.concat(m)
-    src = payload.to_unsafe
-    body = String.new(payload.bytesize) do |p|
+    src = payload
+    body = String.from_bytes(payload.bytesize) do |p|
       i = 0
       while i < payload.bytesize
-        p[i] = src[i] ^ m[i & 3].to_u8
+        p[i] = src.byte_at(i) ^ m[i & 3].to_u8
         i = i + 1
       end
     end
@@ -394,7 +394,7 @@ struct RawFrame
   # The code a close frame carries; 0 for none.
   def code : Int32
     return 0 if @payload.bytesize < 2
-    (@payload.to_unsafe[0].to_i32 << 8) | @payload.to_unsafe[1].to_i32
+    (@payload.byte_at(0).to_i32 << 8) | @payload.byte_at(1).to_i32
   end
 
   def reason : String
@@ -425,7 +425,7 @@ class Raw
   # *n* bytes, or nil when they did not come, and `@failure` says why.
   def read_exact?(n : Int32) : String?
     if @buf.bytesize < n
-      io = String::Builder.new(n)
+      io = ""
       io << @buf
       have = @buf.bytesize
       failed = ""
@@ -477,18 +477,18 @@ class Raw
   def next_frame? : RawFrame?
     head = read_exact?(2)
     return nil unless head
-    b0 = head.to_unsafe[0].to_i32
-    b1 = head.to_unsafe[1].to_i32
+    b0 = head.byte_at(0).to_i32
+    b1 = head.byte_at(1).to_i32
     n = (b1 & 127).to_i64
     if n == 126_i64
       ext = read_exact?(2)
       return nil unless ext
-      n = ((ext.to_unsafe[0].to_i32 << 8) | ext.to_unsafe[1].to_i32).to_i64
+      n = ((ext.byte_at(0).to_i32 << 8) | ext.byte_at(1).to_i32).to_i64
     elsif n == 127_i64
       ext = read_exact?(8)
       return nil unless ext
       n = 0_i64
-      8.times { |i| n = (n << 8) | ext.to_unsafe[i].to_i64 }
+      8.times { |i| n = (n << 8) | ext.byte_at(i).to_i64 }
     end
     key = ""
     if (b1 & 128) != 0
@@ -499,13 +499,13 @@ class Raw
     payload = read_exact?(n.to_i32)
     return nil unless payload
     if key.bytesize == 4
-      k = key.to_unsafe
-      src = payload.to_unsafe
+      k = key
+      src = payload
       size = payload.bytesize
-      payload = String.new(size) do |p|
+      payload = String.from_bytes(size) do |p|
         i = 0
         while i < size
-          p[i] = src[i] ^ k[i & 3]
+          p[i] = src.byte_at(i) ^ k[i & 3]
           i = i + 1
         end
       end
@@ -1273,7 +1273,7 @@ def section_handshakes : Nil
   assert_str "1007 WebSocket: a text message that is not UTF-8 | close 1007", server_fault(frame(1, bytes([0x00, 0x01, 0x00, 0xfe, 0xff, 0xc3]), fin: false, rsv: 0x40) + frame(0, bytes([0x00])), deflate: agreed), "compressed fragments that inflate to an unfinished é"
   # A deflate bomb: 32 MiB of zeros compressed at level 1, within a limit
   # of 1 MiB as it arrives and past it as it inflates, and refused there.
-  zeros = String.new(33554432) do |p|
+  zeros = String.from_bytes(33554432) do |p|
     i = 0
     while i < 33554432
       p[i] = 0_u8
@@ -1387,7 +1387,7 @@ def section_program_refused : Nil
   assert_str "refused: WebSocket: send's text is not UTF-8; send_binary sends bytes", answer { server_end.send(bytes([0xff])); "sent" }, "text that is not UTF-8"
   assert_str "refused: WebSocket: a ping carries at most 125 bytes, not 126", answer { server_end.ping(pattern(126)); "sent" }, "a long ping"
   assert_str "refused: WebSocket: close code 1005 is not one an endpoint sends: 1000-1003, 1007-1014 or 3000-4999", answer { server_end.close(1005); "sent" }, "close 1005"
-  assert_str "refused: WebSocket: a close reason is at most 123 bytes, not 124", answer { server_end.close(1000, String.new(124) { |p| 124.times { |i| p[i] = 120_u8 } }); "sent" }, "a long reason"
+  assert_str "refused: WebSocket: a close reason is at most 123 bytes, not 124", answer { server_end.close(1000, String.from_bytes(124) { |p| 124.times { |i| p[i] = 120_u8 } }); "sent" }, "a long reason"
   assert_str "refused: WebSocket: sec-websocket-key is the handshake's own header", answer { WebSocket.connect("ws://127.0.0.1:1/", {"sec-websocket-key" => "x"}); "sent" }, "a caller's key, in any case"
   assert_str "refused: WebSocket: protocol \"a b\" is not a token", answer { WebSocket.connect("ws://127.0.0.1:1/", protocols: ["a b"]); "sent" }, "a protocol that is not a token"
   assert_str "refused: WebSocket: a max_window_bits is 8 to 15, not 16", answer { PerMessageDeflate.new(server_max_window_bits: 16); "made" }, "a window of 2^16"

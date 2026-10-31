@@ -17,11 +17,16 @@ end
 
 # What a decode answered, as one string: the bytes as text, or the
 # error's sentence after "error: ".
+# A decode answers its bytes as text now; the error alike.
+def said(answer : String | Base32Error) : String
+  answer.is_a?(Base32Error) ? "error: " + answer.message : answer
+end
+
 def said(answer : Array(UInt8) | Base32Error) : String
   if answer.is_a?(Base32Error)
     "error: " + answer.message
   else
-    String.new(answer.size) { |p| p.copy_from(answer.to_unsafe, answer.size) }
+    String.from_bytes(answer.size) { |p| (answer.size).times { |k_| p[k_] = answer[k_] } }
   end
 end
 
@@ -57,7 +62,7 @@ assert_str "AAAQEAYEAUDAOCAJBIFQYDIOB4IBCEQTCQKRMFYYDENBWHA5DYPSAIJCEMSCKJRHFAUS
 assert_str "000G40O40K30E209185GO38E1S8124GJ2GAHC5OO34D1M70T3OFI08924CI2A9H750KIKAPC5KN2UC1H68PJ8D9M6SS3IEHR7GUJSFQ085146H258P3KGIAA9D64QJIFA18L4KQKALB5EM2PB9DLONAUBTG62OJ3CHIMCPR8D5L6MR3DDPNN0SBIEDQ7ATJNF1SNKURSFLV7V041GA1O91C6GU48J2KBHI6OT3SGI699754LIQBPH6CQJEE9R7KVK2GQ58T4KMJAFA59LALQPBDELUOB3CLJMIQRDDTON6TBNF5TNQVS1GE2OF2CBHM7P34SLIUCPN7CVK6HQB9T9LEMQVCDJMMRRJETTNV0S7HE7P75SRJUHQFATFMERRNFU3OV5SVKUNRFFU7PVBTVPVFUVS======", Base32Hex.encode(every_byte), "every byte value, base32hex"
 41.times do |len|
   piece = every_byte[200 - len, len]
-  text = String.new(len) { |p| p.copy_from(piece.to_unsafe, len) }
+  text = String.from_bytes(len) { |p| (len).times { |k_| p[k_] = piece[k_] } }
   assert_str text, said(Base32.decode(Base32.encode(piece))), "a round trip of #{len} bytes"
   assert_str text, said(Base32.decode(Base32.encode(piece, padding: false))), "a round trip of #{len} bytes unpadded"
   assert_str text, said(Base32.decode(Base32.encode(piece).downcase)), "a round trip of #{len} bytes in lower case"

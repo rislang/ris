@@ -149,18 +149,18 @@ import std/http::{HTTP, HTTPError, Request, Response, Server}
 import std/socket::{IyiSocket, SocketError}
 
 def bytes(list : Array(Int32)) : String
-  String.new(list.size) do |p|
+  String.from_bytes(list.size) do |p|
     list.each_with_index { |b, i| p[i] = b.to_u8 }
   end
 end
 
 # The bytes of *text* in hex, two digits each.
 def hex(text : String) : String
-  p = text.to_unsafe
-  out_text = String::Builder.new
+  p = text
+  out_text = ""
   i = 0
   while i < text.bytesize
-    h = p[i].to_i32.to_s(16)
+    h = p.byte_at(i).to_i32.to_s(16)
     out_text << (h.bytesize == 1 ? "0" + h : h)
     i = i + 1
   end
@@ -168,11 +168,11 @@ def hex(text : String) : String
 end
 
 def unhex(text : String) : String
-  p = text.to_unsafe
-  String.new(text.bytesize // 2) do |buf|
+  p = text
+  String.from_bytes(text.bytesize // 2) do |buf|
     i = 0
     while i < text.bytesize // 2
-      buf[i] = (nibble(p[2 * i]) * 16 + nibble(p[2 * i + 1])).to_u8
+      buf[i] = (nibble(p.byte_at(2 * i)) * 16 + nibble(p.byte_at(2 * i + 1))).to_u8
       i = i + 1
     end
   end

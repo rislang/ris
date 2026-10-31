@@ -30,7 +30,6 @@ end
 import std/csv::{CSV, CSVReader, CSVWriter, CSVError, CSVRow}
 import std/io::{Memory}
 import std/file::{File}
-import std/gc::{GC}
 
 # Every row a reader gives, or the error's message, as one string.
 def read_all(r : CSVReader) : String
@@ -265,8 +264,7 @@ end
 sink.close
 size = File.size(big)
 assert_true size > 50_000_000_i64, "the file is past 50 MB (#{size} bytes)"
-GC.collect
-base = GC.stats.bytes_kept_by_last_sweep
+base = RisRegion.tape_bytes(1_u64)
 most = 0_u64
 input = File.open(big)
 reader = CSVReader.new(input)
@@ -277,18 +275,15 @@ while got = reader.next_row.or_panic
   count = count + 1
   checksum = checksum + got[0].to_i.to_i64 + got[1].bytesize.to_i64
   if count % 50_000 == 0
-    GC.collect
-    kept = GC.stats.bytes_kept_by_last_sweep
+    kept = RisRegion.tape_bytes(1_u64)
     most = kept - base if kept > base && kept - base > most
   end
   # Rows read with the collector held back, well into the file: what a
   # row costs, the window and the field buffer long since allocated.
   if count == 100_000
-    GC.disable
-    per_row_before = GC.stats.bytes_since_collection
+    per_row_before = RisRegion.tape_bytes(1_u64)
   elsif count == 110_000
-    per_row = (GC.stats.bytes_since_collection - per_row_before) // 10_000_u64
-    GC.enable
+    per_row = (RisRegion.tape_bytes(1_u64) - per_row_before) // 10_000_u64
     assert_true per_row < 1024_u64, "a row of six fields allocates #{per_row} bytes, under 1 KiB"
   end
 end

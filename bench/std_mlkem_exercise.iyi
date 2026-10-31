@@ -32,10 +32,10 @@ def check(cond : Bool, label : String) : Nil
 end
 
 def b(hex : String) : Array(UInt8)
-  p = hex.to_unsafe
+  p = hex
   Array(UInt8).new(hex.bytesize // 2) do |i|
-    hi = p[i * 2].to_i32 | 32
-    lo = p[i * 2 + 1].to_i32 | 32
+    hi = p.byte_at(i * 2).to_i32 | 32
+    lo = p.byte_at(i * 2 + 1).to_i32 | 32
     hi = hi >= 97 ? hi - 87 : hi - 48
     lo = lo >= 97 ? lo - 87 : lo - 48
     (hi * 16 + lo).to_u8
@@ -43,12 +43,12 @@ def b(hex : String) : Array(UInt8)
 end
 
 def hex(bytes : Array(UInt8)) : String
-  digits = "0123456789abcdef".to_unsafe
-  String.new(bytes.size * 2) do |buf|
+  digits = "0123456789abcdef"
+  String.from_bytes(bytes.size * 2) do |buf|
     i = 0
     while i < bytes.size
-      buf[i * 2] = digits[bytes[i] >> 4]
-      buf[i * 2 + 1] = digits[bytes[i] & 15_u8]
+      buf[i * 2] = digits.byte_at(bytes[i] >> 4)
+      buf[i * 2 + 1] = digits.byte_at(bytes[i] & 15_u8)
       i = i + 1
     end
   end
@@ -82,9 +82,9 @@ KAT_EK_TOO_LARGE   = "026dbca9319a20dcbd8aa0ae721344710493091c20de43273a821043b0
 def best_of(& : -> _) : Int64
   fastest = 0_i64
   5.times do |k|
-    t0 = IyiMark.now_ns
+    t0 = __iyi_monotonic_ns
     200.times { yield }
-    took = (IyiMark.now_ns - t0).to_i64
+    took = (__iyi_monotonic_ns - t0).to_i64
     fastest = took if k == 0 || took < fastest
   end
   fastest // 200_000
@@ -143,11 +143,11 @@ if args.size > 0 && args[0] == "cost"
   good_times = [] of Int64
   bad_times = [] of Int64
   2000.times do
-    t0 = IyiMark.now_ns
+    t0 = __iyi_monotonic_ns
     key.decapsulate(sent[0])
-    t1 = IyiMark.now_ns
+    t1 = __iyi_monotonic_ns
     key.decapsulate(bad)
-    t2 = IyiMark.now_ns
+    t2 = __iyi_monotonic_ns
     good_times << (t1 - t0).to_i64
     bad_times << (t2 - t1).to_i64
   end

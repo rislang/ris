@@ -53,7 +53,7 @@ def wire_name(name : String) : Array(UInt8)
     buf << label.bytesize.to_u8
     index = 0
     while index < label.bytesize
-      buf << label.to_unsafe[index]
+      buf << label.byte_at(index)
       index = index + 1
     end
   end
@@ -181,10 +181,10 @@ end
 # appendix D's vectors as the RFC prints them.
 def hex_bytes(text : String) : Bytes
   digits = [] of Int32
-  raw = text.to_unsafe
+  raw = text
   index = 0
   while index < text.bytesize
-    byte = raw[index] | 32_u8
+    byte = raw.byte_at(index) | 32_u8
     if byte >= 48_u8 && byte <= 57_u8
       digits << byte.to_i32 - 48
     elsif byte >= 97_u8 && byte <= 102_u8
@@ -231,10 +231,10 @@ end
 # prerequisites passed over, and from its update section each record of
 # type HTTPS's owner and data; nil when it does not read.
 def update_records(packet : Bytes) : Array(Tuple(String, Bytes))?
-  raw = packet.to_unsafe
-  zones = (raw[4].to_i32 << 8) | raw[5].to_i32
-  prerequisites = (raw[6].to_i32 << 8) | raw[7].to_i32
-  updates = (raw[8].to_i32 << 8) | raw[9].to_i32
+  raw = packet
+  zones = (raw.byte_at(4).to_i32 << 8) | raw.byte_at(5).to_i32
+  prerequisites = (raw.byte_at(6).to_i32 << 8) | raw.byte_at(7).to_i32
+  updates = (raw.byte_at(8).to_i32 << 8) | raw.byte_at(9).to_i32
   at = 12
   index = 0
   while index < zones
@@ -250,8 +250,8 @@ def update_records(packet : Bytes) : Array(Tuple(String, Bytes))?
     return nil if read.nil?
     owner, at = read
     return nil if at + 10 > packet.size
-    type = (raw[at].to_i32 << 8) | raw[at + 1].to_i32
-    length = (raw[at + 8].to_i32 << 8) | raw[at + 9].to_i32
+    type = (raw.byte_at(at).to_i32 << 8) | raw.byte_at(at + 1).to_i32
+    length = (raw.byte_at(at + 8).to_i32 << 8) | raw.byte_at(at + 9).to_i32
     return nil if at + 10 + length > packet.size
     if index >= prerequisites && type == DnsTapeRecord::HTTPS
       data = Bytes.new(length)
@@ -293,7 +293,7 @@ def serve_zone(dir : String) : Nil
       zone_ends = DnsTapeMessage.read_name(packet, 12)
       next if zone_ends.nil?
       reply = Bytes.new(zone_ends[1] + 4)
-      reply.to_unsafe.copy_from(packet.to_unsafe, reply.size)
+      reply.(reply.size).times { |k_| to_unsafe[k_] = packet.byte_at(k_) }
       reply[2] = reply[2] | 0x80_u8
       reply[3] = 0_u8
       index = 6

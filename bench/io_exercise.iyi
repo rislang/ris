@@ -95,11 +95,9 @@ puts "eof: ok"
 {% if !flag?(:gc_none) && !flag?(:gc_boehm) %}
   File.write(path, sample_text)
   io_most = File.open(path, "r", 4096)
-  IyiMark.auto = false
-  most_before = IyiMark.allocated_since
+  most_before = RisRegion.tape_bytes(1_u64)
   most = io_most.read_bytes(100_000_000)
-  most_bytes = IyiMark.allocated_since - most_before
-  IyiMark.auto = true
+  most_bytes = RisRegion.tape_bytes(1_u64) - most_before
   io_most.close
   raise "read_bytes: a count of 100000000 read #{most.bytesize} bytes, not the 36 there are" unless most == sample_text
   raise "read_bytes: a count of 100000000 allocated #{most_bytes} bytes to read 36" if most_bytes > 1_000_000_u64

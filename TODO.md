@@ -29,9 +29,8 @@ the std row. Update a row when its work starts or ends.
 | Work                                 | Size    | Time     | Tokens   |
 |--------------------------------------|---------|----------|----------|
 | std non-Linux branches: 34 mallocs   | medium  | 4-8 h    | 200-400k |
-| std's other serve loop (in place)    | small   | 1-2 h    | 50-100k  |
 | Kernel threads: darwin arm64, win32  | large   | 1-2 days | 300-500k |
-| Bench ports left: 20 benches         | large   | 1-2 days | 400-800k |
+| Bench ports left: ~85 of 129 fail    | large   | 2-4 days | 800k-2M  |
 | Autocert part B: exercise and Pebble | medium  | 2-4 h    | 150-300k |
 | Socket race: darwin kqueue, Windows  | medium  | 3-5 h    | 150-300k |
 | Compiler specs: the rest of the suite| large   | 1-3 days | 300k-1M  |
@@ -47,15 +46,30 @@ A, OS pipe, socket race without Channel, 5.1 local task captures,
 Channel and select removed, task-owned Conn growth, Linux socket race
 on one task. Next in order: bench ports, then autocert part B.
 
-* Done 2026-10-31: serve_h1 runs each request in a `tape` block whose
-  scratch is freed: Conn keeps its deadline's reason as a flag, its
-  buffer as an address, IdleConns links states by address; IyiSocket
-  lost its never-set pending_error and keeps its path at close.
-  test/ris/http_keepalive_scope.ri: 67 mappings for 200 and 5000
-  requests, 0 heap. Left: Server's other loop (`conn.deadline_in(60000)`,
-  answered_in_place) has no per-request block; bench/socket_exercise.sh's
-  "reset dropped after a full chunk" mutation names pending_error, which
-  nothing set before this change either.
+* Done 2026-10-31: both HTTP/1 serve loops run each request in a freed
+  `tape` block (http_keepalive_scope.ri, http_answer_scope.ri: flat
+  mappings for 200 and 5000 requests). Bench sweep 2026-10-31 (all 129
+  .sh with an .iyi): ~44 pass. Done: socket, parallel (plain; --release
+  crashed ~45% after the panics step under load, not reproduced idle),
+  enum, float, html, levenshtein, symbol, static_array, unicode, crypto,
+  asn1, string_pool. Fixed on the way: IyiWorkers' list lived on the
+  first parallel spawner's tape (parallel_first_spawn_scope.ri); a
+  patched prelude/std copy under IYI_PATH counts as runtime/std;
+  String.from_bytes(size) { |bytes| } for programs; GC.stats checks
+  read the tape cursor (RisRegion.tape_bytes). Left, by cause:
+  - stale mutation patches: semantic_version, path, random, digest,
+    password, mlkem, csv, float_text, io, format (uncaught proofs).
+  - build: pointer helpers (std_io, slice, png, zstd, dns, hpack),
+    Array of growing values (set, otp, idna, hpke, x509, ct_timing),
+    task captures (atomic, option_parser, regex, router, smtp, udp,
+    string_scanner, file, file_utils, json, tls, websocket), removed
+    APIs (toml/yaml Any, xml Document, http2 IyiMark, server_load and
+    wasm32 collector steps), General allocation (number_format,
+    reference_storage, env, thread_floor), misc (uuid, tuple, user,
+    uri, named_tuple, mime, text, ecdsa, iterator, indexable, eiy).
+  - std_int: `(-1).unsafe_to_u32 == 4294967295_u32` folds to false
+    (assigned to a local it is true): a compiler bug to find.
+  - base64's timing ratio fails under load.
 * Port the benches to 5.1 task captures. Done: std_signal (exercise
   passes; a listener stops by its task handle's `cancel`, the Share stop
   handle), std_process's captures (ChildProcess#read_both, task values,

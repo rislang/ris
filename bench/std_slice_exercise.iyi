@@ -137,7 +137,7 @@ def main : Nil
   puts "copy_to ptr: #{ptr_dst[0]} #{ptr_dst[1]} #{ptr_dst[2]}"
 
   dst3 = Slice(Int32).new(3, 0)
-  dst3.copy_from(ptr_dst, 3)
+  (3).times { |k_| dst3[k_] = ptr_dst.byte_at(k_) }
   puts "copy_from ptr: #{dst3.to_s}"
 
   # Overlapping moves

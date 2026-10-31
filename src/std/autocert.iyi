@@ -592,10 +592,16 @@ end
 pub class AutocertIssuer < AutocertView
   @client : AcmeClient? = nil
   @transport : HTTPClient? = nil
+  # Each challenge's failure, refilled per order: an order's protocol calls
+  # may reach `issue` again, so no growing local lives across them.
+  @failures = [] of String
+  # The one name an order is for, refilled per order as `@failures` is.
+  @names = [] of String
 
   def issue(name : String) : AutocertError?
     defer close_transport
-    made = order(name)
+    @failures.clear
+    made = order(name, @failures)
     made.is_a?(AutocertError) ? made : nil
   end
 
@@ -646,12 +652,13 @@ pub class AutocertIssuer < AutocertView
   # cache: an order proved by each of `challenges` in turn - a fresh order
   # for the next only when the last one's authorization failed - and
   # finalized.
-  private def order(name : String) : AutocertHeld | AutocertError
+  private def order(name : String, failures : Array(String)) : AutocertHeld | AutocertError
     acme = client
     return acme if acme.is_a?(AutocertError)
-    failures = [] of String
     @config.challenges.each do |kind|
-      placed = acme.new_order([name])
+      @names.clear
+      @names << name
+      placed = acme.new_order(@names)
       return AutocertError.new("the order for #{name}: #{placed.message}") if placed.is_a?(AcmeError)
       proved = prove(acme, placed, name, kind)
       return finish_order(acme, placed, name) unless proved

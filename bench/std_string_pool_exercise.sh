@@ -100,10 +100,10 @@ else
   "$PY" - <<PY
 from pathlib import Path
 src = Path("$REPO/src/std/string_pool.iyi").read_text()
-old = '@size += 1'
+old = '  def size : Int32\n    @values.size'
 if old not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/string_pool.iyi").write_text(src.replace(old, '# @size += 1', 1))
+Path("$WORK/patched/std/string_pool.iyi").write_text(src.replace(old, '  def size : Int32\n    @values.empty? ? 0 : @values.size - 1', 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the patch did not apply"

@@ -14,17 +14,17 @@ fields = [HeaderField.new(":method", "GET"),
           HeaderField.new("x-request", "a fairly long request field", true)]
 encoder = Encoder.new
 wire = encoder.encode(fields)
-wire_text = String.new(wire.size) do |p|
-  p.copy_from(wire.to_unsafe, wire.size)
+wire_text = String.from_bytes(wire.size) do |p|
+  (wire.size).times { |k_| p[k_] = wire.byte_at(k_) }
 end
 huffman = Huffman.encode("a fairly long request field")
-IyiMark.auto = false
+IyiTask.auto = false
 # Warm the static tables and tape spare before recording allocation.
 Huffman.decode(huffman)
 encoder.encode(fields)
 ["encode", "huffman", "decode"].each do |part|
   decoder = Decoder.new
-  before = IyiMark.allocated_since
+  before = RisRegion.tape_bytes(1_u64)
   started = Time.monotonic_nanoseconds
   sum = 0_i64
   N.times do
@@ -52,6 +52,6 @@ encoder.encode(fields)
     end
   end
   elapsed = Time.monotonic_nanoseconds - started
-  allocated = IyiMark.allocated_since - before
+  allocated = RisRegion.tape_bytes(1_u64) - before
   puts "#{part} ns=#{elapsed} bytes=#{allocated} sum=#{sum}"
 end

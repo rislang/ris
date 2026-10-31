@@ -438,12 +438,41 @@ end
 # its raw pointers keep a body's tape (`Scan#pointer?`), and it keeps no
 # pointer into a tape in a heap object.
 module Iyi::TapeScopeRuntime
+  # The loaded prelude's directory, "/"-terminated: a test's patched copy
+  # of `src/iyi/` (bench/*.sh mutation proofs) is the runtime as much as
+  # the original, so the rules that exempt the runtime exempt it too.
+  class_property prelude_dir : String? = nil
+  @@expanded = {} of String => String
+
   def self.runtime?(location : Location?) : Bool
     file = location.try(&.original_filename)
     return true unless file
     file = file.gsub('\\', '/')
-    crystal?(location) || file.includes?("/src/iyi/") || file.includes?("/src/compiler/")
+    return true if crystal?(location) || file.includes?("/src/iyi/") || file.includes?("/src/compiler/")
+    return false unless dir = prelude_dir
+    return true if file.starts_with?(dir)
+    return false if file.starts_with?('/')
+    @@expanded[file] ||= File.expand_path(file).gsub('\\', '/')
+    @@expanded[file].starts_with?(dir)
   end
+
+  # A file of the runtime or std, where a checkout or a search-path entry
+  # keeps them: `src/iyi/`, `src/std/`, or `iyi/` and `std/` under an
+  # `IYI_PATH` entry, as a bench's patched copy of either is.
+  def self.library_file?(filename : String) : Bool
+    filename = filename.gsub('\\', '/')
+    return true if filename.includes?("/src/iyi/") || filename.includes?("/src/std/")
+    @@library_roots ||= IyiPath.default_paths.compact_map do |entry|
+      next if entry.empty? || entry == "lib"
+      File.expand_path(entry).gsub('\\', '/').rstrip('/') + "/"
+    end
+    full = filename.starts_with?('/') ? filename : File.expand_path(filename).gsub('\\', '/')
+    @@library_roots.not_nil!.any? do |root|
+      full.starts_with?(root + "iyi/") || full.starts_with?(root + "std/")
+    end
+  end
+
+  @@library_roots : Array(String)? = nil
 
   # The prelude where it was loaded from, which a test may copy out of
   # `src/iyi/` to change it.
@@ -470,6 +499,7 @@ module Iyi::TapePointerCheckerLibrary
     return true unless file
     file = file.gsub('\\', '/')
     file.includes?("/std/") || file.includes?("/src/iyi/") ||
-      file.includes?("/src/compiler/") || file.ends_with?(".cr")
+      file.includes?("/src/compiler/") || file.ends_with?(".cr") ||
+      TapeScopeRuntime.runtime?(location)
   end
 end

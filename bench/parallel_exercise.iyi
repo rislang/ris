@@ -12,9 +12,8 @@
 # on the board exactly once and in each sender's order; a cancel
 # reaches a task asleep or parked on a board take on another thread, and a
 # task still waiting in the pool starts cancelled; a panic stops at the
-# task's boundary on whatever thread it ran; collections stop workers
-# with live lists on their fibers' stacks and free nothing of them; and
-# the typed group answers a tuple of parallel tasks.
+# task's boundary on whatever thread it ran; and the typed group answers
+# a tuple of parallel tasks. ris has no collector, so no collector step.
 #
 # Every step runs under a watchdog: a task on the main thread that sleeps
 # and fails the run by name if the step has not finished, so a wake that
@@ -25,8 +24,8 @@
 # one worker and at several and holds the ratio to a floor, and runs
 # broken copies of the runtime to prove each step above can fail.
 
-{% if !flag?(:gc_none) && !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64))) %}
-  def fail(message : String) : Nil
+{% if ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64))) %}
+  def fail(message : String) : NoReturn
     print "FAIL: #{message}\n"
     __iyi_exit(1)
   end
@@ -56,7 +55,7 @@
 
   # Counts the tasks share, each an atomic: `Share` by its fields, so a
   # parallel block may capture one (SPEC.md III.4.4).
-  class Tally
+  struct Tally
     @count : Atomic(Int64)
     @sum : Atomic(Int64)
 
@@ -83,7 +82,7 @@
   # `-Dparallel_plain_add` the add is a load and a store: tasks that run
   # at the same instant on two cores lose each other's adds, which no
   # schedule of one thread can do - nothing parks between the two.
-  class Racer
+  struct Racer
     @hits : Atomic(Int64)
 
     def initialize
@@ -100,15 +99,6 @@
 
     def hits : Int64
       @hits.get
-    end
-  end
-
-  # A node a list is built of, for the collector's step.
-  class Node
-    getter value : Int64
-    getter next_node : Node?
-
-    def initialize(@value : Int64, @next_node : Node?)
     end
   end
 
@@ -280,12 +270,17 @@
       producers = 6
       per = 20000
       expected = Array(Int32).new(producers, 0)
+      # The board holds a bounded count (TAPE_SPEC 5.2): a post never
+      # waits for room, so a sender ahead of the taker tries again.
+      RisBoard.limit(FanItem, 4096_i64)
       group do |g|
         producers.times do |p|
           g.spawn_parallel do
             i = 0
             while i < per
-              fail("channels: a fan-in post was refused") unless RisBoard.post(FanItem.new(p, i))
+              until RisBoard.post(FanItem.new(p, i))
+                IyiThread.spin_pause
+              end
               i = i + 1
             end
             0
@@ -473,46 +468,6 @@
     end
   end
 
-  # Collections stop the workers: tasks build lists that live only on
-  # their fibers' stacks while every worker allocates, and every node is
-  # still there by checksum.
-  def collector(watch : Int32) : Nil
-    watched("collector", watch) do
-      stops = IyiThread.stops
-      group do |g|
-        handles = [] of IyiTask(Int64)
-        8.times do |t|
-          task = g.spawn_parallel do
-            head = nil.as(Node?)
-            want = 0_i64
-            i = 0_i64
-            while i < 150000_i64
-              value = i &* (t.to_i64 + 3_i64)
-              head = Node.new(value, head)
-              want = want &+ value
-              i = i + 1_i64
-            end
-            sleep(1)
-            have = 0_i64
-            node = head
-            while node.is_a?(Node)
-              have = have &+ node.value
-              node = node.next_node
-            end
-            have == want ? 0_i64 : want - have
-          end
-          handles << task
-        end
-        handles.each_with_index do |handle, t|
-          lost = handle.value
-          fail("collector: task #{t}'s list lost #{lost} by checksum") unless lost == 0_i64
-        end
-      end
-      fail("collector: no collection stopped a thread while 8 parallel tasks allocated") if IyiThread.stops == stops
-      puts "collector: 8 parallel tasks kept lists of 150000 nodes through #{IyiThread.stops - stops} stops"
-    end
-  end
-
   # The typed group (III.4.9) answers parallel tasks' tuple.
   def typed : Tuple(Int32, String) | Panicked
     group do |g|
@@ -529,7 +484,7 @@
     end
   end
 
-  STEPS = ["placement", "exactly_once", "race", "channels", "cancel", "panics", "steal", "collector", "typed"]
+  STEPS = ["placement", "exactly_once", "race", "channels", "cancel", "panics", "steal", "typed"]
 
   arguments = Program.args
   if arguments.size == 4 && arguments[0] == "speed"
@@ -556,7 +511,6 @@
       when "cancel"       then cancel(watch)
       when "panics"       then panics(watch)
       when "steal"        then steal(watch)
-      when "collector"    then collector(watch)
       when "typed"        then typed_step(watch)
       end
     end

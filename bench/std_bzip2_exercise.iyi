@@ -22,7 +22,6 @@ import std/io::{Reader}
 import std/digest::{CRC32}
 import std/random::{Random}
 import std/file::{File}
-import std/gc::{GC}
 
 def assert_true(cond : Bool, msg : String) : Nil
   raise "ASSERTION FAILED: #{msg}" unless cond
@@ -53,8 +52,7 @@ class Feed < Reader
   # What the source has not given yet.
   def rest : String
     n = @stream.bytesize - @at
-    src = @stream.to_unsafe + @at.to_i64
-    String.new(n) { |dst| dst.copy_from(src, n) }
+    @stream[@at, n]
   end
 
   def next : String?
@@ -62,15 +60,15 @@ class Feed < Reader
     return nil if @at >= @stream.bytesize
     n = @sizes[(@calls - 1) % @sizes.size]
     n = @stream.bytesize - @at if n > @stream.bytesize - @at
-    src = @stream.to_unsafe + @at.to_i64
+    piece = @stream[@at, n]
     @at = @at + n
-    String.new(n) { |dst| dst.copy_from(src, n) }
+    piece
   end
 end
 
 # Every byte a reader gives, *max* at most a read, or its error.
 def drain(r : Bzip2Reader, max : Int32) : String | Bzip2Error
-  all = String::Builder.new
+  all = ""
   while true
     piece = r.read(max)
     case piece
@@ -150,7 +148,7 @@ def refused(stream : String, phrase : String, label : String) : Nil
 end
 
 def bytes(values : Array(Int32)) : String
-  String.new(values.size) do |dst|
+  String.from_bytes(values.size) do |dst|
     i = 0
     while i < values.size
       dst[i] = values[i].to_u8
@@ -160,7 +158,7 @@ def bytes(values : Array(Int32)) : String
 end
 
 def run_of(byte : Int32, n : Int32) : String
-  String.new(n) do |dst|
+  String.from_bytes(n) do |dst|
     i = 0
     while i < n
       dst[i] = byte.to_u8
@@ -171,7 +169,7 @@ end
 
 def random_bytes(n : Int32, seed : UInt64) : String
   rng = Random.new(seed)
-  String.new(n) do |dst|
+  String.from_bytes(n) do |dst|
     i = 0
     while i < n
       dst[i] = (rng.next_u & 0xff_u32).to_u8
@@ -183,7 +181,7 @@ end
 # Runs of every length around the code's edges - 1 to 6, 250 to 260, 510
 # to 520 - of bytes that change each run.
 def runs : String
-  b = String::Builder.new
+  b = ""
   lengths = [1, 2, 3, 4, 5, 6, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 510, 511, 512, 513, 514, 515, 516, 517, 518, 519, 520]
   k = 0
   3.times do
@@ -196,7 +194,7 @@ def runs : String
 end
 
 def text(lines : Int32) : String
-  b = String::Builder.new
+  b = ""
   i = 0
   while i < lines
     b << "line " << i.to_s << ": the quick brown fox jumps over the lazy dog " << (i % 7).to_s << "\n"
@@ -212,7 +210,7 @@ def rle1_size(s : String) : Int32
   i = 0
   while i < s.bytesize
     r = 1
-    while r < 255 && i + r < s.bytesize && s.to_unsafe[i + r] == s.to_unsafe[i]
+    while r < 255 && i + r < s.bytesize && s.byte_at(i + r) == s.byte_at(i)
       r = r + 1
     end
     n = n + (r < 4 ? r : 5)
@@ -223,11 +221,11 @@ end
 
 def hex(s : String) : String
   digits = "0123456789abcdef"
-  b = String::Builder.new
+  b = ""
   i = 0
   while i < s.bytesize
-    v = s.to_unsafe[i].to_i32
-    b << digits[v >> 4] << digits[v & 15]
+    v = s.byte_at(i).to_i32
+    b << digits[v >> 4, 1] << digits[v & 15, 1]
     i = i + 1
   end
   b.to_s
@@ -241,7 +239,7 @@ class Bits
     @bits = [] of Int32
     i = 0
     while i < s.bytesize
-      v = s.to_unsafe[i].to_i32
+      v = s.byte_at(i).to_i32
       k = 7
       while k >= 0
         @bits << ((v >> k) & 1)
@@ -297,7 +295,7 @@ class Bits
   def to_s : String
     n = (@bits.size + 7) // 8
     bits = @bits
-    String.new(n) do |dst|
+    String.from_bytes(n) do |dst|
       i = 0
       while i < n
         v = 0
@@ -621,8 +619,7 @@ if args.size > 0
   expect = File.read("#{dir}/big.expect").strip.split(' ')
   io = File.open("#{dir}/big.bz2")
   r = Bzip2Reader.new(io)
-  GC.collect
-  base = GC.stats.bytes_kept_by_last_sweep
+  base = RisRegion.tape_bytes(1_u64)
   most = 0_u64
   total = 0_i64
   crc = 0_u32
@@ -634,12 +631,11 @@ if args.size > 0
     when Bzip2Error then raise "ASSERTION FAILED: 64 MiB: #{piece.message}"
     else
       break if piece.bytesize == 0
-      crc = CRC32.update(crc, piece.to_unsafe, piece.bytesize)
+      crc = CRC32.update(crc, piece, piece.bytesize)
       total = total + piece.bytesize
       reads = reads + 1
       if reads % 64 == 0
-        GC.collect
-        kept = GC.stats.bytes_kept_by_last_sweep
+        kept = RisRegion.tape_bytes(1_u64)
         most = kept - base if kept > base && kept - base > most
       end
     end

@@ -176,12 +176,12 @@ PY
 # RFC 4231's cases 6 and 7 have one.
 prove_broken "a long key cut to a block" "case 6" \
   '    if count > block
-      @inner.update(bytes, count)
+      @inner.update(bytes)
       @inner.final(pad)
       @inner.reset
     else
-      pad.to_unsafe.copy_from(bytes, count)
-' '    pad.to_unsafe.copy_from(bytes, count > block ? block : count)
+      count.times { |i| pad[i] = bytes[i] }
+' '    (count > block ? block : count).times { |i| pad[i] = bytes[i] }
     if false
 '
 prove_broken "HMAC's two pads the same" "hmac-md5 case 1" \
@@ -189,7 +189,7 @@ prove_broken "HMAC's two pads the same" "hmac-md5 case 1" \
 # Each block after the first starts from the one before it: case 1's 42
 # bytes are two blocks, and its second half is where that shows.
 prove_broken "HKDF blocks that do not chain" "case 1 okm" \
-  '      mac.update(block.to_unsafe, size) if n > 1
+  '      mac.update(block) if n > 1
 ' ''
 prove_broken "PBKDF2 keeping the last round alone" "4096 iterations" \
   '          t[i] = t[i] ^ u[i]' '          t[i] = u[i]'

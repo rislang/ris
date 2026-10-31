@@ -10,7 +10,6 @@
 {% if flag?(:gc_none) || flag?(:gc_boehm) %}
   puts "windows: collector not enabled (-Dgc_none or -Dgc_boehm)"
 {% else %}
-  IyiMark.auto = false
 
   class Box
     property value : Int64 = 0_i64

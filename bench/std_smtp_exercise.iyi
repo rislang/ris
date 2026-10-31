@@ -29,12 +29,12 @@ end
 
 def hex(text : String) : String
   digits = "0123456789abcdef"
-  io = String::Builder.new(text.bytesize * 2 + 1)
-  p = text.to_unsafe
+  io = ""
+  p = text
   i = 0
   while i < text.bytesize
-    io << digits[p[i].to_i32 >> 4]
-    io << digits[p[i].to_i32 & 15]
+    io << digits[p.byte_at(i).to_i32 >> 4, 1]
+    io << digits[p.byte_at(i).to_i32 & 15, 1]
     i = i + 1
   end
   io.to_s
@@ -100,7 +100,7 @@ class Scripted
         @socket.write(step[1])
       end
       if step[0] == "DATA" && step[1].starts_with?("354")
-        io = String::Builder.new(256)
+        io = ""
         while true
           got = line
           return unless got

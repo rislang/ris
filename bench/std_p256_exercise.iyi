@@ -20,10 +20,10 @@ def check(cond : Bool, label : String) : Nil
 end
 
 def b(hex : String) : Array(UInt8)
-  p = hex.downcase.to_unsafe
+  p = hex.downcase
   Array(UInt8).new(hex.bytesize // 2) do |i|
-    hi = p[i * 2].to_i32
-    lo = p[i * 2 + 1].to_i32
+    hi = p.byte_at(i * 2).to_i32
+    lo = p.byte_at(i * 2 + 1).to_i32
     hi = hi >= 97 ? hi - 87 : hi - 48
     lo = lo >= 97 ? lo - 87 : lo - 48
     (hi * 16 + lo).to_u8
@@ -31,7 +31,9 @@ def b(hex : String) : Array(UInt8)
 end
 
 def hex(bytes : Array(UInt8)) : String
-  String.build { |io| bytes.each { |x| io << "0123456789abcdef"[x.to_i32 >> 4] << "0123456789abcdef"[x.to_i32 & 15] } }
+  begin; io = ""; bytes.each { |x| io << "0123456789abcdef"[x.to_i32 >> 4] << "0123456789abcdef"[x.to_i32 & 15] }
+  io
+  end
 end
 
 def hash_named(name : String) : EcdsaHash
@@ -74,7 +76,7 @@ end
 if args.size > 0 && args[0] == "keys"
   File.read(args[1] + "/list").lines.each do |name|
     text = File.read(args[1] + "/" + name)
-    der = Array(UInt8).new(text.bytesize) { |i| text.to_unsafe[i] }
+    der = Array(UInt8).new(text.bytesize) { |i| text.byte_at(i) }
     key = name.ends_with?(".p8") ? P256PrivateKey.from_pkcs8(der) : P256PrivateKey.from_sec1(der)
     if key.is_a?(EcdsaError)
       puts "#{name} refused: #{key.message}"

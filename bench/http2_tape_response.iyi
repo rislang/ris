@@ -10,14 +10,13 @@ response.headers["Content-Type"] = "text/plain"
 response.headers["X-Request"] = "  a fairly long response field  "
 response.headers["Cache-Control"] = "no-cache"
 encoder = Encoder.new
-IyiMark.auto = false
 sum = 0_i64
 # Warm static tables and tape mapping outside the measured interval.
 tape do
   fields = Std::Http::H2Connection.answer_fields(response, 11_i64, false)
   encoder.encode(fields)
 end
-before = IyiMark.allocated_since
+before = RisRegion.tape_bytes(1_u64)
 started = Time.monotonic_nanoseconds
 20000.times do
   tape do
@@ -34,5 +33,5 @@ started = Time.monotonic_nanoseconds
   end
 end
 elapsed = Time.monotonic_nanoseconds - started
-allocated = IyiMark.allocated_since - before
+allocated = RisRegion.tape_bytes(1_u64) - before
 puts "response ns=#{elapsed} bytes=#{allocated} sum=#{sum}"

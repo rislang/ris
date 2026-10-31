@@ -761,6 +761,19 @@ pub class Dir
   # and expanded again; a pattern with none is itself. A `\` escapes the
   # byte after it on posix; on Windows it is a separator.
   private def self.glob_expand(pattern : String, expanded : Array(String)) : Nil
+    # A stack, not recursion: a branch's own braces wait their turn, last
+    # pushed first, so the patterns come out in the order they are written.
+    pending = [pattern]
+    while current = pending.pop?
+      glob_expand_one(current, expanded, pending)
+    end
+  end
+
+  # One step of `glob_expand`: *pattern*'s first top-level brace group
+  # put back on *pending* a branch at a time, or *pattern* itself, with
+  # none, onto *expanded*.
+  private def self.glob_expand_one(pattern : String, expanded : Array(String),
+                                   pending : Array(String)) : Nil
     bytes = pattern
     n = pattern.bytesize
     depth = 0
@@ -785,7 +798,7 @@ pub class Dir
           branches << glob_bytes(bytes, from + 1, at - from - 1)
           front = glob_bytes(bytes, 0, open)
           back = glob_bytes(bytes, at + 1, n - at - 1)
-          branches.each { |branch| glob_expand(front + branch + back, expanded) }
+          branches.reverse_each { |branch| pending << front + branch + back }
           return
         end
       end

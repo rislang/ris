@@ -52,24 +52,24 @@ def hex_value(c : UInt8) : Int32
 end
 
 def unhex(text : String) : String
-  raw = text.to_unsafe
-  String.new(text.bytesize // 2) do |p|
+  raw = text
+  String.from_bytes(text.bytesize // 2) do |p|
     i = 0
     while i < text.bytesize // 2
-      p[i] = (hex_value(raw[2 * i]) * 16 + hex_value(raw[2 * i + 1])).to_u8
+      p[i] = (hex_value(raw.byte_at(2 * i)) * 16 + hex_value(raw.byte_at(2 * i + 1))).to_u8
       i += 1
     end
   end
 end
 
 def hex(text : String) : String
-  digits = "0123456789abcdef".to_unsafe
-  raw = text.to_unsafe
+  digits = "0123456789abcdef"
+  raw = text
   String.build(text.bytesize * 2) do |io|
     i = 0
     while i < text.bytesize
-      io.write_byte(digits[(raw[i] >> 4).to_i32])
-      io.write_byte(digits[(raw[i] & 15_u8).to_i32])
+      io.write_byte(digits[(raw.byte_at(i) >> 4).to_i32, 1])
+      io.write_byte(digits[(raw.byte_at(i) & 15_u8).to_i32, 1])
       i += 1
     end
   end

@@ -179,7 +179,7 @@ PY
   fi
 fi
 
-# Mutation 4: a method the prelude does not have, instead of bytesize == size
+# Mutation 4: a method the prelude does not have, instead of ascii?
 if [ -z "$PY" ]; then
   echo "  skipped: no working python3, so the broken copy could not be made"
 else
@@ -187,9 +187,9 @@ else
   "$PY" - <<PY
 from pathlib import Path
 src = Path("$REPO/src/std/levenshtein.iyi").read_text()
-old = 'if string1.bytesize == string1.size && string2.bytesize == string2.size'
+old = 'if ascii?(string1) && ascii?(string2)'
 if old not in src:
-    raise SystemExit("patch site missing: bytesize == size")
+    raise SystemExit("patch site missing: ascii?")
 Path("$WORK/patched4/std/levenshtein.iyi").write_text(src.replace(old, 'if string1.single_byte_optimizable? && string2.single_byte_optimizable?', 1))
 PY
   if [ $? -ne 0 ]; then

@@ -241,7 +241,7 @@ struct Base32Codec
       "'" + b.unsafe_chr.to_s + "'"
     else
       digits = "0123456789ABCDEF"
-      "0x" + digits[b.to_i32 >> 4].to_s + digits[b.to_i32 & 15].to_s
+      "0x" + digits[b.to_i32 >> 4, 1] + digits[b.to_i32 & 15, 1]
     end
   end
 

@@ -741,7 +741,7 @@ def tzif_block(sink : Array(UInt8), times : Array(Int64), indexes : Array(UInt8)
 end
 
 def tzif_text(sink : Array(UInt8), text : String) : Nil
-  text.bytesize.times { |i| sink << text.to_unsafe[i] }
+  text.bytesize.times { |i| sink << text.byte_at(i) }
 end
 
 def tzif_bytes(version : UInt8, times : Array(Int64), indexes : Array(UInt8), types : Array({Int64, UInt8, UInt8}), chars : String, footer : String) : String
@@ -760,7 +760,7 @@ def tzif_bytes(version : UInt8, times : Array(Int64), indexes : Array(UInt8), ty
     tzif_text(bytes, footer)
     bytes << 10_u8
   end
-  String.new(bytes.size) { |buf| buf.copy_from(bytes.to_unsafe, bytes.size) }
+  String.from_bytes(bytes.size) { |buf| (bytes.size).times { |k_| buf[k_] = bytes[k_] } }
 end
 
 def location(result : Location | LocationError, msg : String) : Location
@@ -816,9 +816,9 @@ puts "  a TZif file's transitions, its footer's rule in both hemispheres, and ve
 good = tzif_bytes(50_u8, [-2429830408_i64], [1_u8], cet_types, "LMT\u0000CET\u0000CEST\u0000", "CET-1CEST,M3.5.0,M10.5.0/3")
 # Byte-exact copies: the fixture is binary, and a String index counts
 # characters.
-cut = String.new(good.bytesize - 40) { |buf| buf.copy_from(good.to_unsafe, good.bytesize - 40) }
-unmarked = String.new(good.bytesize) do |buf|
-  buf.copy_from(good.to_unsafe, good.bytesize)
+cut = String.from_bytes(good.bytesize - 40) { |buf| (good.bytesize - 40).times { |k_| buf[k_] = good.byte_at(k_) } }
+unmarked = String.from_bytes(good.bytesize) do |buf|
+  (good.bytesize).times { |k_| buf[k_] = good.byte_at(k_) }
   buf[0] = 88_u8
 end
 location_refused(Location.read_zoneinfo("x", "TZif"), "shorter than its header", "four bytes")
@@ -826,7 +826,7 @@ location_refused(Location.read_zoneinfo("x", unmarked), "does not begin with TZi
 location_refused(Location.read_zoneinfo("x", cut), "data block runs to byte", "a file cut short")
 # A header that counts two billion transitions is refused before anything
 # is allocated or added up.
-bomb = String.new(44) do |buf|
+bomb = String.from_bytes(44) do |buf|
   44.times { |i| buf[i] = 0_u8 }
   buf[0] = 84_u8
   buf[1] = 90_u8
@@ -904,7 +904,7 @@ end
 # after a WCHAR[32] name.
 def windows_part(bytes : Array(UInt8), name : String, date : {Int32, Int32, Int32, Int32, Int32}) : Nil
   32.times do |i|
-    windows_le(bytes, i < name.bytesize ? name.to_unsafe[i].to_i64 : 0_i64, 2)
+    windows_le(bytes, i < name.bytesize ? name.byte_at(i).to_i64 : 0_i64, 2)
   end
   windows_le(bytes, date[0].to_i64, 2)
   windows_le(bytes, date[1].to_i64, 2)
@@ -921,7 +921,7 @@ def windows_zone(bias : Int64, standard : String, std_date : {Int32, Int32, Int3
   windows_le(bytes, std_bias, 4)
   windows_part(bytes, daylight, dst_date)
   windows_le(bytes, dst_bias, 4)
-  String.new(bytes.size) { |buf| buf.copy_from(bytes.to_unsafe, bytes.size) }
+  String.from_bytes(bytes.size) { |buf| (bytes.size).times { |k_| buf[k_] = bytes[k_] } }
 end
 
 none = {0, 0, 0, 0, 0}

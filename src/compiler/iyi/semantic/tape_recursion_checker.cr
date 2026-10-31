@@ -16,6 +16,16 @@ class Iyi::TapeRecursionChecker
     @graph.cycle?(owner, call)
   end
 
+  # The cycle *call* closes, by def names, at most eight shown.
+  def cycle_text(owner : Def, call : Call) : String
+    path = @graph.cycle_path(owner, call).map do |d|
+      d.owner.try { |o| "#{o}##{d.name}" } || d.name
+    end
+    return "" if path.empty?
+    path = path.first(4) + ["..."] + path.last(3) if path.size > 8
+    " (the call reaches #{owner.name} again: #{path.join(" -> ")})"
+  end
+
   def growing?(node : ASTNode) : Bool
     @graph.growing?(node)
   end
@@ -52,7 +62,7 @@ class Iyi::TapeRecursionChecker
         end.try(&.name)
         if live || pending
           detail = live ? "local `#{live}`" : "temporary or pending result"
-          call.raise "cannot recurse with growing tape #{detail} live across the call: " \
+          call.raise "cannot recurse with growing tape #{detail} live across the call#{@checker.cycle_text(@owner, call)}: " \
                      "pass scratch owned outside the cycle (an Array, String::Builder or owner parameter), " \
                      "or end the local's use before the call"
         end

@@ -25,11 +25,11 @@ def assert_true(cond : Bool, msg : String) : Nil
 end
 
 def unhex(s : String) : String
-  digits = s.to_unsafe
-  String.new(s.bytesize // 2) do |dst|
+  digits = s
+  String.from_bytes(s.bytesize // 2) do |dst|
     i = 0
     while i < s.bytesize // 2
-      dst[i] = (nibble(digits[2 * i]) * 16 + nibble(digits[2 * i + 1])).to_u8
+      dst[i] = (nibble(digits.byte_at(2 * i)) * 16 + nibble(digits.byte_at(2 * i + 1))).to_u8
       i = i + 1
     end
   end
@@ -66,16 +66,16 @@ class Feed < Reader
     @calls = @calls + 1
     return nil if @at >= @stream.bytesize
     n = @stream.bytesize - @at if n > @stream.bytesize - @at
-    src = @stream.to_unsafe + @at.to_i64
+    piece = @stream[@at, n]
     @at = @at + n
-    String.new(n) { |dst| dst.copy_from(src, n) }
+    piece
   end
 end
 
 # Every byte a reader gives, reads of a size that goes round *reads*, or
 # the error it answers instead.
 def drain(z : XzReader, reads : Array(Int32)) : String | XzError
-  all = String::Builder.new
+  all = ""
   k = 0
   while true
     max = reads[k % reads.size]
@@ -146,15 +146,14 @@ def every_feed(format : XzFormat, stream : String, plain : String, label : Strin
 end
 
 def flip(s : String, at : Int32, mask : UInt8) : String
-  String.new(s.bytesize) do |dst|
-    dst.copy_from(s.to_unsafe, s.bytesize)
+  String.from_bytes(s.bytesize) do |dst|
+    (s.bytesize).times { |k_| dst[k_] = s.byte_at(k_) }
     dst[at] = dst[at] ^ mask
   end
 end
 
 def piece_of(s : String, from : Int32, n : Int32) : String
-  src = s.to_unsafe + from.to_i64
-  String.new(n) { |dst| dst.copy_from(src, n) }
+  s[from, n]
 end
 
 hello = "Hello\nWorld!\n"
@@ -395,7 +394,7 @@ if args.size > 0
     else
       break if piece.empty?
       total = total + piece.bytesize.to_i64
-      crc = CRC32.update(crc, piece.to_unsafe, piece.bytesize)
+      crc = CRC32.update(crc, piece, piece.bytesize)
     end
     reads = reads + 1
   end

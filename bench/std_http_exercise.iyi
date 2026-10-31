@@ -595,7 +595,6 @@ end
 
 import std/http::{HTTP, HTTPClient, Response, Request, Server, HTTPError, MultipartBuilder, Part, TlsStream}
 import std/socket::{IyiSocket, SocketError}
-import std/gc::{GC}
 import std/compress::{Gzip, Zlib, Deflate}
 import std/zstd::{Zstd}
 import std/file::{File}
@@ -661,10 +660,10 @@ end
 
 # The request line: what comes before the first CRLF.
 def first_line(req : String) : String
-  p = req.to_unsafe
+  p = req
   i = 0
   while i + 1 < req.bytesize
-    return req[0, i] if p[i] == 13_u8 && p[i + 1] == 10_u8
+    return req[0, i] if p.byte_at(i) == 13_u8 && p.byte_at(i + 1) == 10_u8
     i = i + 1
   end
   req
@@ -707,7 +706,9 @@ def server_reads(text : String) : String
   answer do
     parsed = Server.parse_request(text)
     if req = parsed.request
-      heads = String.build { |io| req.headers.each { |k, v| io << k << "=" << v << ";" } }
+      heads = begin; io = ""; req.headers.each { |k, v| io << k << "=" << v << ";" }
+      io
+      end
       "#{req.method} #{req.path} ?#{req.query || "-"} #{heads} #{req.body.inspect} #{parsed.close ? "close" : "keep"}"
     elsif why = parsed.error
       "#{parsed.status} #{why}"
@@ -721,7 +722,9 @@ end
 def client_reads(text : String) : String
   answer do
     r = HTTP.parse_response(text)
-    heads = String.build { |io| r.headers.each { |k, v| io << k << "=" << v << ";" } }
+    heads = begin; io = ""; r.headers.each { |k, v| io << k << "=" << v << ";" }
+    io
+    end
     "#{r.status} #{r.reason} #{heads} #{r.body.inspect}"
   end
 end
@@ -955,7 +958,7 @@ puts "\n== over a socket"
 # is shared.
 listener = IyiSocket.listen(0)
 port = listener.local_port
-fd = listener.to_unsafe
+fd = listener
 server = IyiThread.start do
   tape do
     l = IyiSocket.new(fd)
@@ -1021,7 +1024,7 @@ puts "  get, post, head, put, delete: five verbs, five connections, and what the
 # whole answer the server resets after is `bench/std_http_exercise.sh`'s.)
 whole = IyiSocket.listen("127.0.0.1", 0)
 whole_port = whole.local_port
-whole_fd = whole.to_unsafe
+whole_fd = whole
 whole_server = IyiThread.start do
   tape do
     l = IyiSocket.new(whole_fd)
@@ -1050,7 +1053,7 @@ puts "  an answer is read to its length or its last chunk, under 1.5 s from a se
 # was `Host: ::1:<port>`, which no server can split into host and port.
 v6 = IyiSocket.listen("::1", 0)
 v6_port = v6.local_port
-v6_fd = v6.to_unsafe
+v6_fd = v6
 v6_server = IyiThread.start do
   tape do
     l = IyiSocket.new(v6_fd)
@@ -1072,7 +1075,7 @@ puts "  an IPv6 literal's Host line keeps its brackets, under a scheme in capita
 # under one with a length: the client keeps the head it parsed for both.
 cookie_listener = IyiSocket.listen("127.0.0.1", 0)
 cookie_port = cookie_listener.local_port
-cookie_fd = cookie_listener.to_unsafe
+cookie_fd = cookie_listener
 cookie_server = IyiThread.start do
   tape do
     l = IyiSocket.new(cookie_fd)
@@ -1101,7 +1104,7 @@ puts "  two Set-Cookie lines arrive apart under a chunked body and a length"
 # counts the 64 KB pieces that went.
 endless = IyiSocket.listen("127.0.0.1", 0)
 endless_port = endless.local_port
-endless_fd = endless.to_unsafe
+endless_fd = endless
 endless_sent = Atomic(Int32).new(0)
 endless_server = IyiThread.start do
   tape do
@@ -1287,8 +1290,7 @@ group do |g|
     lean.write(ask).or_panic
     answer_size = read_response(lean).bytesize
     scratch = Pointer(UInt8).malloc(4096_u64)
-    GC.disable
-    lean_before = GC.stats.bytes_since_collection
+    lean_before = RisRegion.tape_bytes(1_u64)
     200.times do
       lean.write(ask).or_panic
       got = 0
@@ -1296,8 +1298,7 @@ group do |g|
         got = got + lean.read(scratch, 4096).or_panic.as(Int32)
       end
     end
-    lean_bytes = (GC.stats.bytes_since_collection - lean_before) // 200_u64
-    GC.enable
+    lean_bytes = (RisRegion.tape_bytes(1_u64) - lean_before) // 200_u64
     lean.close
     assert_true lean_bytes < 8192_u64, "a kept-alive request allocates #{lean_bytes} bytes, under 8 KB"
     # Requests written together are parsed where they lie in what has
@@ -1305,15 +1306,13 @@ group do |g|
     # copied twice per request - 34 KB a request, on average, here.
     piped = IyiSocket.connect("127.0.0.1", sport).or_panic
     batch = ask * 1000
-    GC.disable
-    piped_before = GC.stats.bytes_since_collection
+    piped_before = RisRegion.tape_bytes(1_u64)
     piped.write(batch).or_panic
     piped_got = 0
     while piped_got < answer_size * 1000
       piped_got = piped_got + piped.read(scratch, 4096).or_panic.as(Int32)
     end
-    piped_bytes = (GC.stats.bytes_since_collection - piped_before) // 1000_u64
-    GC.enable
+    piped_bytes = (RisRegion.tape_bytes(1_u64) - piped_before) // 1000_u64
     piped.close
     assert_true piped_bytes < 8192_u64, "a request among a thousand written at once allocates #{piped_bytes} bytes, under 8 KB"
     # A head that comes a piece at a time is searched as it arrives and
@@ -1323,16 +1322,14 @@ group do |g|
     pad = "X-Pad: " + "p" * 1017 + "\r\n"
     slow.write("GET /nothing HTTP/1.1\r\nHost: x\r\n").or_panic
     sleep(5)
-    GC.disable
-    slow_before = GC.stats.bytes_since_collection
+    slow_before = RisRegion.tape_bytes(1_u64)
     256.times do
       slow.write(pad).or_panic
       sleep(1)
     end
     slow.write("\r\n").or_panic
     slow_answer = read_response(slow)
-    slow_bytes = GC.stats.bytes_since_collection - slow_before
-    GC.enable
+    slow_bytes = RisRegion.tape_bytes(1_u64) - slow_before
     slow.close
     assert_true slow_answer.starts_with?("HTTP/1.1 204 "), "a head in 256 pieces is answered: #{slow_answer.inspect}"
     assert_true slow_bytes < 8388608_u64, "a 256 KB head in 1 KB pieces costs the server #{slow_bytes} bytes, under 8 MB"
@@ -1342,12 +1339,10 @@ group do |g|
     big = IyiSocket.connect("127.0.0.1", sport).or_panic
     big.write("POST /size HTTP/1.1\r\nHost: x\r\nContent-Length: 67108864\r\n\r\nx").or_panic
     sleep(20)
-    GC.disable
-    big_before = GC.stats.bytes_since_collection
+    big_before = RisRegion.tape_bytes(1_u64)
     big.write("y").or_panic
     sleep(20)
-    big_bytes = GC.stats.bytes_since_collection - big_before
-    GC.enable
+    big_bytes = RisRegion.tape_bytes(1_u64) - big_before
     big.close
     assert_true big_bytes < 1048576_u64, "a head that declares 64 MB and sends two bytes costs the server #{big_bytes} bytes, under 1 MB"
     # A client that asks to be told before it sends its body is told:
@@ -1626,7 +1621,7 @@ puts "\n== content codings"
 # the window *descriptor* asks for, and "hello" in one raw block.
 def zstd_hello(descriptor : Int32) : String
   head = [0x28, 0xb5, 0x2f, 0xfd, 0x00, descriptor, 0x29, 0x00, 0x00]
-  framed = String.new(head.size) do |dst|
+  framed = String.from_bytes(head.size) do |dst|
     head.each_with_index { |b, i| dst[i] = b.to_u8 }
     nil
   end
@@ -2162,7 +2157,7 @@ end
 # and curl.
 proxy_l = IyiSocket.listen("127.0.0.1", 0)
 proxy_port = proxy_l.local_port
-proxy_fd = proxy_l.to_unsafe
+proxy_fd = proxy_l
 proxy_server = IyiThread.start do
   tape do
     l = IyiSocket.new(proxy_fd)

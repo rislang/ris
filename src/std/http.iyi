@@ -1883,59 +1883,63 @@ pub struct Server
     conn = Conn.new(client, listener, idle, task_owned: true)
     conn.gap = 60000
     while true
-      conn.deadline_in(60000)
-      return unless conn.available > 0 || conn.fill
-      result = nil.as(Int32 | Bool | Nil)
-      loop do
-        tape do
-          result = answered_in_place(client, answerer, conn.tape_copy)
-        end
-        break unless result == -1
-        # A read boundary is not a request boundary. Keep partial bytes
-        # in the connection's task-owned buffer and keep the deadline.
-        return unless conn.fill
-      end
-      conn.no_deadline
-      case result
-      in Int32
-        conn.consume(result)
-        next
-      in Bool
-        return
-      in Nil
-      end
-      conn.deadline_in(60000)
-      got = conn.read_head(MAX_HEAD, "request", true)
-      conn.no_deadline
-      return if got.nil?
-      if got.is_a?(HTTPError)
-        refuse(client, got)
-        return
-      end
-      head = request_head(got)
-      if head.is_a?(HTTPError)
-        refuse(client, head)
-        return
-      end
-      reader = body_reader(conn, head)
-      body = reader.read_all(MAX_BODY.to_i64)
-      unless body.is_a?(String)
-        refuse(client, body) if body.is_a?(HTTPError)
-        return
-      end
       going = false
+      # One request's head, parse and answer are its own scratch, freed
+      # when it ends, as in serve_h1: the connection's tape stays flat.
       tape do
-        fields = Array(Field).new(head.headers.size)
-        head.headers.each do |name, value|
-          fields.push(Field.new(name.as_tape,
-            value.as_tape))
+        conn.deadline_in(60000)
+        return unless conn.available > 0 || conn.fill
+        result = nil.as(Int32 | Bool | Nil)
+        loop do
+          tape do
+            result = answered_in_place(client, answerer, conn.tape_copy)
+          end
+          break unless result == -1
+          # A read boundary is not a request boundary. Keep partial bytes
+          # in the connection's task-owned buffer and keep the deadline.
+          return unless conn.fill
         end
-        query = head.query
-        req = Incoming.new(head.method.as_tape,
-          head.path.as_tape,
-          query ? query.as_tape : nil,
-          fields, body.as_tape)
-        going = answered_on_tape?(client, answerer, req, head.close)
+        conn.no_deadline
+        case result
+        in Int32
+          conn.consume(result)
+          going = true
+        in Bool
+          return
+        in Nil
+          conn.deadline_in(60000)
+          got = conn.read_head(MAX_HEAD, "request", true)
+          conn.no_deadline
+          return if got.nil?
+          if got.is_a?(HTTPError)
+            refuse(client, got)
+            return
+          end
+          head = request_head(got)
+          if head.is_a?(HTTPError)
+            refuse(client, head)
+            return
+          end
+          reader = body_reader(conn, head)
+          body = reader.read_all(MAX_BODY.to_i64)
+          unless body.is_a?(String)
+            refuse(client, body) if body.is_a?(HTTPError)
+            return
+          end
+          tape do
+            fields = Array(Field).new(head.headers.size)
+            head.headers.each do |name, value|
+              fields.push(Field.new(name.as_tape,
+                value.as_tape))
+            end
+            query = head.query
+            req = Incoming.new(head.method.as_tape,
+              head.path.as_tape,
+              query ? query.as_tape : nil,
+              fields, body.as_tape)
+            going = answered_on_tape?(client, answerer, req, head.close)
+          end
+        end
       end
       return unless going
     end

@@ -16,7 +16,6 @@
 
 # 1. Field width: values narrower than width pad to the minimum width.
 import std/format::{sprintf, printf}
-import std/gc::{GC}
 import std/int
 import std/float
 
@@ -109,13 +108,11 @@ raise "format: precision float tie to even past nineteen places failed" if p10b 
 # A value and places that two words hold are formatted in them: through
 # the bignum, `%.2f` built three of them a call and took 400 ns, three
 # times Go's. The bytes, not the time, are the check: 590 a call then.
-{% unless flag?(:gc_none) || flag?(:gc_boehm) %}
-  GC.disable
-  quick_before = GC.stats.bytes_since_collection
+{% if true %}
+  quick_before = RisRegion.tape_bytes(1_u64)
   quick_total = 0
   1000.times { |i| quick_total = quick_total + sprintf("%.2f", i * 0.37).bytesize }
-  quick_bytes = (GC.stats.bytes_since_collection - quick_before) // 1000_u64
-  GC.enable
+  quick_bytes = (RisRegion.tape_bytes(1_u64) - quick_before) // 1000_u64
   raise "format: a %.2f costs #{quick_bytes} bytes, past 200 (#{quick_total})" if quick_bytes > 200_u64
 {% end %}
 
@@ -155,17 +152,15 @@ raise "format: precision string left-aligned failed" if p13 != "cin   "
 # check.
 p18 = sprintf("[%.3s|%.2s|%4.1s]", "héllo", "😀😀😀", "éa")
 raise "format: precision string of several bytes failed: #{p18}" if p18 != "[hél|😀😀|   é]"
-{% unless flag?(:gc_none) || flag?(:gc_boehm) %}
+{% if true %}
   long_text = "x" * 10000
   percents = "%%" * 5000
-  GC.disable
-  cut_before = GC.stats.bytes_since_collection
+  cut_before = RisRegion.tape_bytes(1_u64)
   cut = sprintf("%.5000s", long_text)
-  cut_bytes = GC.stats.bytes_since_collection - cut_before
-  percents_before = GC.stats.bytes_since_collection
+  cut_bytes = RisRegion.tape_bytes(1_u64) - cut_before
+  percents_before = RisRegion.tape_bytes(1_u64)
   percents_out = sprintf(percents)
-  percents_bytes = GC.stats.bytes_since_collection - percents_before
-  GC.enable
+  percents_bytes = RisRegion.tape_bytes(1_u64) - percents_before
   raise "format: a %.5000s costs #{cut_bytes} bytes, past 1000000" if cut_bytes > 1000000_u64 || cut.bytesize != 5000
   raise "format: %% five thousand times costs #{percents_bytes} bytes, past 1000000" if percents_bytes > 1000000_u64 || percents_out.bytesize != 5000
   puts "    precision: %.5000s and %% five thousand times allocate under 1000000 bytes"

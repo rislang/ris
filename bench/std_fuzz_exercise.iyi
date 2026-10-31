@@ -78,7 +78,6 @@ import std/text
 import std/int
 
 import std/random::{Random}
-import std/gc::{GC}
 import std/asn1::{Der, DerValue, DerClass, Asn1Error}
 import std/x509::{Certificate, X509, X509Error, X509Purpose}
 import std/tls::{TlsClient, TlsConfig, TlsError, TlsIdentity, TlsKeySchedule, TlsRecordCipher, TlsServer, TlsServerConfig, TlsVersion}
@@ -103,10 +102,10 @@ def check(cond : Bool, label : String) : Nil
 end
 
 def unhex(hex : String) : Array(UInt8)
-  p = hex.to_unsafe
+  p = hex
   Array(UInt8).new(hex.bytesize // 2) do |i|
-    hi = p[i * 2].to_i32
-    lo = p[i * 2 + 1].to_i32
+    hi = p.byte_at(i * 2).to_i32
+    lo = p.byte_at(i * 2 + 1).to_i32
     hi = hi >= 97 ? hi - 87 : hi - 48
     lo = lo >= 97 ? lo - 87 : lo - 48
     (hi * 16 + lo).to_u8
@@ -116,12 +115,12 @@ end
 HEX_DIGITS = "0123456789abcdef"
 
 def hex(bytes : Array(UInt8)) : String
-  digits = HEX_DIGITS.to_unsafe
-  String.new(bytes.size * 2) do |buf|
+  digits = HEX_DIGITS
+  String.from_bytes(bytes.size * 2) do |buf|
     i = 0
     while i < bytes.size
-      buf[i * 2] = digits[bytes[i].to_i32 >> 4]
-      buf[i * 2 + 1] = digits[bytes[i].to_i32 & 15]
+      buf[i * 2] = digits.byte_at(bytes[i].to_i32 >> 4)
+      buf[i * 2 + 1] = digits.byte_at(bytes[i].to_i32 & 15)
       i = i + 1
     end
     nil
@@ -129,12 +128,12 @@ def hex(bytes : Array(UInt8)) : String
 end
 
 def text(bytes : Array(UInt8)) : String
-  String.new(bytes.size) { |buf| buf.copy_from(bytes.to_unsafe, bytes.size) }
+  String.from_bytes(bytes.size) { |buf| (bytes.size).times { |k_| buf[k_] = bytes[k_] } }
 end
 
 def bytes_of(s : String) : Array(UInt8)
-  p = s.to_unsafe
-  Array(UInt8).new(s.bytesize) { |i| p[i] }
+  p = s
+  Array(UInt8).new(s.bytesize) { |i| p.byte_at(i) }
 end
 
 def u16(v : Int32) : Array(UInt8)
@@ -191,8 +190,9 @@ def kind_of(message : String) : String
   cut = line.index('\n')
   line = line[0, cut] if cut
   line = line[0, 160] if line.bytesize > 160
-  String.build do |io|
+  begin; io = "";
     line.each_char { |c| io << (c >= '0' && c <= '9' ? '#' : c) }
+  io
   end
 end
 
@@ -612,19 +612,20 @@ def mutate_pem(data : Array(UInt8), corpus : Array(Array(UInt8)), words : Array(
   der = bytes_of(Base64.decode(b64))
   changed = m.chance(3) ? m.mutate(der, corpus, DER_WORDS) : mutate_der(der, corpus, m)
   encoded = Base64.encode(text(changed))
-  lines = String.build do |io|
+  lines = begin; io = "";
     i = 0
     while i < encoded.bytesize
       io << encoded[i, 64] << "\n"
       i = i + 64
     end
+  io
   end
   bytes_of(t[0, body_at] + lines + t[end_at, t.bytesize - end_at])
 end
 
 def pem_of(label : String, der : Array(UInt8)) : String
   encoded = Base64.encode(text(der))
-  String.build do |io|
+  begin; io = "";
     io << "-----BEGIN " << label << "-----\n"
     i = 0
     while i < encoded.bytesize
@@ -632,6 +633,7 @@ def pem_of(label : String, der : Array(UInt8)) : String
       i = i + 64
     end
     io << "-----END " << label << "-----\n"
+  io
   end
 end
 
@@ -669,12 +671,13 @@ HOSTS = ["fuzz.test", "FUZZ.TEST", "fuzz.test.", "a.pss.fuzz.test", "pss.fuzz.te
          "[2001:db8::7]", "2001:db8::7", "bücher.fuzz.test", "bücher.fuzz.test.", "xn--bcher-kva.fuzz.test", "", ".", "*.fuzz.test", "[]"]
 
 def pem_seeds : Array(Array(UInt8))
-  bundle = String.build do |io|
+  bundle = begin; io = "";
     io << "Some prose a bundle carries.\n"
     CERT_SEEDS.each_with_index do |der, i|
       io << "# certificate " << i << "\n"
       io << pem_of("CERTIFICATE", der)
     end
+  io
   end
   one = pem_of("CERTIFICATE", unhex(FUZZ_LEAF))
   keyed = one + text(unhex(KEY_SEEDS[0][1]))
@@ -1021,7 +1024,7 @@ end
 # square, 1.6 GB and three seconds for 26 KB of small blocks.
 def hpack_decoded(input : Array(UInt8)) : String
   decoder = Decoder.new
-  String.build do |io|
+  begin; io = "";
     hpack_blocks(input).each do |block|
       got = decoder.decode(slice_of(block))
       if got.is_a?(HpackError)
@@ -1036,6 +1039,7 @@ def hpack_decoded(input : Array(UInt8)) : String
       end
       io << "]"
     end
+  io
   end
 end
 
@@ -2192,8 +2196,9 @@ def h1_client_seeds : Array(Array(UInt8))
   gz = Gzip.compress("hello, hello, hello, a body that compresses")
   zs = Zstd.compress("hello, hello, hello, a body that compresses")
   df = Zlib.compress("hello, hello, hello, a body that compresses")
-  chunked = String.build do |io|
+  chunked = begin; io = "";
     io << gz.bytesize.to_s(16) << "\r\n" << gz << "\r\n0\r\nX-Trailer: t\r\n\r\n"
+  io
   end
   [
     "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 5\r\nSet-Cookie: a=1\r\nSet-Cookie: b=2\r\n\r\nhello",
@@ -2363,8 +2368,7 @@ end
 def attempt(target : String, input : Array(UInt8)) : Outcome
   verdict = ""
   finding = false
-  GC.disable
-  before = GC.stats.bytes_since_collection
+  before = RisRegion.tape_bytes(1_u64)
   started = __iyi_monotonic_ns
   group do |g|
     task = g.spawn { run_target(target, input) }
@@ -2377,8 +2381,7 @@ def attempt(target : String, input : Array(UInt8)) : Outcome
     0
   end
   ms = (__iyi_monotonic_ns - started) // 1000000_i64
-  after = GC.stats.bytes_since_collection
-  GC.enable
+  after = RisRegion.tape_bytes(1_u64)
   finding = verdict.starts_with?("PANIC: ") || verdict.starts_with?("PROPERTY: ")
   Outcome.new(verdict, finding, ms, after >= before ? after - before : 0_u64)
 end

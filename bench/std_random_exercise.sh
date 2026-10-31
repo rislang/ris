@@ -283,7 +283,7 @@ proofs = {
     "static": ("    i = N - 1\n", "    i = N - 2\n", ""),
     "any": ("new(seed.to_u64, sequence.to_u64)", "new(seed.to_u64, 0_u64)", ""),
     "secure": ("    return if count == 0\n", "    return\n", "10,000 secure draws hold only"),
-    "bulk": ("    Secure.fill(buffer.to_unsafe, buffer.size)\n", "    buffer.size\n", "secure 128-bit tokens repeat"),
+    "bulk": ("    Secure.__sys_fill(buffer.to_unsafe, buffer.size)\n", "    buffer.size\n", "secure 128-bit tokens repeat"),
     "bias32": ("return result32.unsafe_mod(bound).to_u64 if result32 < limit32 || limit32 == 0_u32",
                "return result32.unsafe_mod(bound).to_u64", "rand(3 * 2^30) is unbiased"),
     "bias64": ("return result.unsafe_mod(n) if result < limit || limit == 0_u64",

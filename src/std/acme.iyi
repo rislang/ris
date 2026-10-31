@@ -715,15 +715,23 @@ struct AcmeJson
   end
 
   # A problem document's fields as an error (RFC 7807, section 6.7).
+  # Its subproblems (RFC 8555 section 6.7.1) are read one level deep, as
+  # the RFC defines them: a subproblem's own `subproblems` is not read,
+  # so no growing list lives across a recursive call.
   def self.problem(object : Hash(String, Any), status : Int32) : AcmeError
+    subproblems = [] of AcmeError
+    each_object(object, "subproblems") { |sub| subproblems << problem_leaf(sub, status, [] of AcmeError) }
+    problem_leaf(object, status, subproblems)
+  end
+
+  private def self.problem_leaf(object : Hash(String, Any), status : Int32,
+                                subproblems : Array(AcmeError)) : AcmeError
     kind = text(object, "type") || "about:blank"
     detail = text(object, "detail") || "(no detail)"
     identifier = ""
     if (id = object["identifier"]?) && (fields = id.as_h?)
       identifier = text(fields, "value") || ""
     end
-    subproblems = [] of AcmeError
-    each_object(object, "subproblems") { |sub| subproblems << problem(sub, status) }
     AcmeError.new(detail, kind, status, identifier, subproblems)
   end
 

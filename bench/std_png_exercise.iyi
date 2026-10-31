@@ -24,7 +24,6 @@ import std/int
 import std/png::{Png, PngFile, PngError, PngText, Image, Layout}
 import std/compress::{Zlib}
 import std/digest::{CRC32}
-import std/gc::{GC}
 
 def assert_true(cond : Bool, msg : String) : Nil
   raise "ASSERTION FAILED: #{msg}" unless cond
@@ -37,11 +36,11 @@ end
 # Where two byte strings first differ, for a message: -1 if they do not.
 def first_difference(a : String, b : String) : Int32
   n = a.bytesize < b.bytesize ? a.bytesize : b.bytesize
-  pa = a.to_unsafe
-  pb = b.to_unsafe
+  pa = a
+  pb = b
   i = 0
   while i < n
-    return i if pa[i] != pb[i]
+    return i if pa[i] != pb.byte_at(i)
     i = i + 1
   end
   a.bytesize == b.bytesize ? -1 : n
@@ -53,7 +52,7 @@ def assert_bytes(expected : String, actual : String, msg : String) : Nil
   if at >= expected.bytesize || at >= actual.bytesize
     raise "ASSERTION FAILED: #{msg}: #{actual.bytesize} bytes where #{expected.bytesize} were expected"
   end
-  raise "ASSERTION FAILED: #{msg}: byte #{at} is #{actual.to_unsafe[at]}, not #{expected.to_unsafe[at]}"
+  raise "ASSERTION FAILED: #{msg}: byte #{at} is #{actual.byte_at(at)}, not #{expected.byte_at(at)}"
 end
 
 def decoded(data : String, label : String) : PngFile
@@ -91,7 +90,7 @@ def picture(w : Int32, h : Int32, layout : Layout, depth : Int32, seed : UInt32)
   rng = Lcg.new(seed)
   ch = channels_of(layout)
   bytes = depth // 8
-  samples = String.new(w * h * ch * bytes) do |dst|
+  samples = String.from_bytes(w * h * ch * bytes) do |dst|
     at = 0
     y = 0
     while y < h
@@ -122,12 +121,12 @@ end
 # The chunks of a PNG file, by name and data, in order.
 def chunks(data : String) : Array({String, String})
   list = [] of {String, String}
-  p = data.to_unsafe
+  p = data
   at = 8
   while at + 12 <= data.bytesize
-    len = (p[at].to_i32 << 24) | (p[at + 1].to_i32 << 16) | (p[at + 2].to_i32 << 8) | p[at + 3].to_i32
-    name = String.new(4) { |d| d.copy_from(p + (at + 4).to_i64, 4) }
-    body = String.new(len) { |d| d.copy_from(p + (at + 8).to_i64, len) }
+    len = (p.byte_at(at).to_i32 << 24) | (p.byte_at(at + 1).to_i32 << 16) | (p.byte_at(at + 2).to_i32 << 8) | p.byte_at(at + 3).to_i32
+    name = data[at + 4, 4]
+    body = data[at + 8, len]
     list << {name, body}
     at = at + 12 + len
   end
@@ -140,7 +139,7 @@ def chunk(name : String, data : String) : String
 end
 
 def be32(v : UInt32) : String
-  String.new(4) do |d|
+  String.from_bytes(4) do |d|
     d[0] = (v >> 24).to_u8
     d[1] = ((v >> 16) & 255_u32).to_u8
     d[2] = ((v >> 8) & 255_u32).to_u8
@@ -148,7 +147,7 @@ def be32(v : UInt32) : String
   end
 end
 
-SIG = String.new(8) do |d|
+SIG = String.from_bytes(8) do |d|
   d[0] = 137_u8
   d[1] = 80_u8
   d[2] = 78_u8
@@ -160,7 +159,7 @@ SIG = String.new(8) do |d|
 end
 
 def ihdr(w : Int32, h : Int32, depth : Int32, ctype : Int32, interlace : Int32) : String
-  chunk("IHDR", be32(w.to_u32) + be32(h.to_u32) + String.new(5) { |d|
+  chunk("IHDR", be32(w.to_u32) + be32(h.to_u32) + String.from_bytes(5) { |d|
     d[0] = depth.to_u8
     d[1] = ctype.to_u8
     d[2] = 0_u8
@@ -170,7 +169,7 @@ def ihdr(w : Int32, h : Int32, depth : Int32, ctype : Int32, interlace : Int32) 
 end
 
 def bytes_of(values : Array(Int32)) : String
-  String.new(values.size) do |d|
+  String.from_bytes(values.size) do |d|
     i = 0
     while i < values.size
       d[i] = values[i].to_u8
@@ -182,11 +181,9 @@ end
 # The bytes one call allocates, with the collector held back so that the
 # word the trigger reads counts every one of them.
 def bytes_for(& : -> _) : UInt64
-  GC.disable
-  before = GC.stats.bytes_since_collection
+  before = RisRegion.tape_bytes(1_u64)
   yield
-  after = GC.stats.bytes_since_collection
-  GC.enable
+  after = RisRegion.tape_bytes(1_u64)
   after - before
 end
 
@@ -210,8 +207,8 @@ def heuristic_holds(png : String, image : Image, label : String) : Array(Int32)
   bpp = image.channels * image.depth // 8
   n = image.width * bpp
   assert_true raw.bytesize == image.height * (n + 1), "#{label}: the image data is #{raw.bytesize} bytes, not #{image.height * (n + 1)}"
-  src = image.samples.to_unsafe
-  rp = raw.to_unsafe
+  src = image.samples
+  rp = raw
   chosen = [] of Int32
   y = 0
   while y < image.height
@@ -219,7 +216,7 @@ def heuristic_holds(png : String, image : Image, label : String) : Array(Int32)
     outs = [] of String
     f = 0
     while f < 5
-      outs << String.new(n) do |d|
+      outs << String.from_bytes(n) do |d|
         i = 0
         while i < n
           cur = src[y * n + i].to_i32
@@ -248,9 +245,9 @@ def heuristic_holds(png : String, image : Image, label : String) : Array(Int32)
       best = f if sums[f] < sums[best]
       f = f + 1
     end
-    got = rp[y * (n + 1)].to_i32
+    got = rp.byte_at(y * (n + 1)).to_i32
     assert_true got == best, "the filter heuristic: #{label} row #{y} carries filter #{got} (sum #{got <= 4 ? sums[got] : -1}), where the least sum is filter #{best}'s, #{sums[best]} (sums #{sums})"
-    row = String.new(n) { |d| d.copy_from(rp + (y * (n + 1) + 1).to_i64, n) }
+    row = String.from_bytes(n) { |d| d.copy_from(rp + (y * (n + 1) + 1).to_i64, n) }
     assert_bytes outs[best], row, "the filter heuristic: #{label} row #{y} is filtered as filter #{best} filters it"
     chosen << got
     y = y + 1
@@ -261,14 +258,14 @@ end
 # Filter *f* over one row given the row above (both unfiltered), from
 # section 9.2, written here apart from the module's.
 def own_filter(f : Int32, row : String, prev : String, bpp : Int32) : String
-  r = row.to_unsafe
-  p = prev.to_unsafe
-  String.new(row.bytesize) do |d|
+  r = row
+  p = prev
+  String.from_bytes(row.bytesize) do |d|
     i = 0
     while i < row.bytesize
       a = i >= bpp ? r[i - bpp].to_i32 : 0
-      b = p[i].to_i32
-      c = i >= bpp ? p[i - bpp].to_i32 : 0
+      b = p.byte_at(i).to_i32
+      c = i >= bpp ? p.byte_at(i - bpp).to_i32 : 0
       pred = f == 0 ? 0 : f == 1 ? a : f == 2 ? b : f == 3 ? (a + b) // 2 : paeth(a, b, c)
       d[i] = ((r[i].to_i32 - pred) & 255).to_u8
       i = i + 1
@@ -430,7 +427,7 @@ png = own_png(7, 3, 4, 0, false, gray4, chunk("tRNS", bytes_of([0, key4]))) { |r
 rgba = decoded(png, "a 4-bit gray tRNS").image.to_rgba8
 21.times do |i|
   want = gray4[i][0] == key4 ? 0 : 255
-  assert_true rgba.to_unsafe[i * 4 + 3].to_i32 == want, "tRNS: a 4-bit gray pixel #{i} of value #{gray4[i][0]} has alpha #{want} for the key #{key4}"
+  assert_true rgba.byte_at(i * 4 + 3).to_i32 == want, "tRNS: a 4-bit gray pixel #{i} of value #{gray4[i][0]} has alpha #{want} for the key #{key4}"
 end
 pal2 = own_pixels(6, 4, 1, 2, 9_u32)
 png = own_png(6, 4, 2, 3, true, pal2, chunk("PLTE", bytes_of([10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120])) + chunk("tRNS", bytes_of([0, 128]))) { |r| 0 }
@@ -467,7 +464,7 @@ puts "  gray, gray+alpha, RGB, RGBA at 8 and 16 bits, plain and Adam7, 1x1 to 33
   [false, true].each do |interlace|
     w = 13
     h = 11
-    idx = String.new(w * h) { |d| (w * h).times { |i| d[i] = (rng.byte.to_i32 % entries).to_u8 } }
+    idx = String.from_bytes(w * h) { |d| (w * h).times { |i| d[i] = (rng.byte.to_i32 % entries).to_u8 } }
     png = Png.encode_indexed(w, h, idx, pal, interlace: interlace)
     f = decoded(png, "palette of #{entries}")
     want_depth = entries <= 2 ? 1 : entries <= 4 ? 2 : entries <= 16 ? 4 : 8
@@ -475,9 +472,9 @@ puts "  gray, gray+alpha, RGB, RGBA at 8 and 16 bits, plain and Adam7, 1x1 to 33
     alpha = pal.any? { |e| e[3] != 255 }
     assert_true f.image.layout == (alpha ? Layout::RGBA : Layout::RGB), "a palette of #{entries} reads back as RGB(A)"
     ch = alpha ? 4 : 3
-    want = String.new(w * h * ch) do |d|
+    want = String.from_bytes(w * h * ch) do |d|
       (w * h).times do |i|
-        e = pal[idx.to_unsafe[i].to_i32]
+        e = pal[idx.byte_at(i).to_i32]
         d[i * ch] = e[0].to_u8
         d[i * ch + 1] = e[1].to_u8
         d[i * ch + 2] = e[2].to_u8
@@ -490,7 +487,7 @@ puts "  gray, gray+alpha, RGB, RGBA at 8 and 16 bits, plain and Adam7, 1x1 to 33
     unless interlace
       rows = Zlib.decompress(raw)
       stride = rows.bytesize // h
-      h.times { |y| assert_true rows.to_unsafe[y * stride] == 0_u8, "a palette image's rows are not filtered (row #{y})" }
+      h.times { |y| assert_true rows.byte_at(y * stride) == 0_u8, "a palette image's rows are not filtered (row #{y})" }
     end
   end
 end
@@ -524,7 +521,7 @@ fg = picture(50, 40, Layout::Gray, 8, 11_u32)
 heuristic_holds(Png.encode(fg), fg, "a 50x40 gray picture").each { |c| kinds[c] = kinds[c] + 1 }
 # A ramp across the row is Sub's; the same row again is Up's (its sum is
 # 0, and Paeth's equal 0 after it does not displace it).
-ramp = String.new(32 * 2) { |d| 64.times { |i| d[i] = ((i % 32) * 8).to_u8 } }
+ramp = String.from_bytes(32 * 2) { |d| 64.times { |i| d[i] = ((i % 32) * 8).to_u8 } }
 ramp_img = Image.new(32, 2, Layout::Gray, 8, ramp)
 assert_true heuristic_holds(Png.encode(ramp_img), ramp_img, "a ramp twice") == [1, 2], "the filter heuristic: a ramp is Sub's, the same row again Up's"
 assert_true kinds.all? { |k| k > 0 }, "the filter heuristic chose every filter somewhere: #{kinds}"
@@ -538,19 +535,19 @@ cs.each { |c| idat = idat + c[1] if c[0] == "IDAT" }
 head = SIG + ihdr(8, 8, 8, 0, 0)
 tail = chunk("IEND", "")
 refused("GIF89a" + good, "the 8-byte signature is not there", "not a PNG file")
-flipped = good.to_unsafe
-bad_crc = String.new(good.bytesize) { |d| d.copy_from(flipped, good.bytesize); d[20] = d[20] ^ 1_u8 }
+flipped = good
+bad_crc = String.from_bytes(good.bytesize) { |d| (good.bytesize).times { |k_| d[k_] = flipped.byte_at(k_) }; d[20] = d[20] ^ 1_u8 }
 refused(bad_crc, "fails its CRC-32", "a corrupted IHDR fails its CRC-32")
-bad_idat = String.new(good.bytesize) { |d| d.copy_from(flipped, good.bytesize); d[45] = d[45] ^ 0x40_u8 }
+bad_idat = String.from_bytes(good.bytesize) { |d| (good.bytesize).times { |k_| d[k_] = flipped.byte_at(k_) }; d[45] = d[45] ^ 0x40_u8 }
 refused(bad_idat, "IDAT chunk at offset 33 fails its CRC-32", "a corrupted IDAT fails its CRC-32")
 refused(SIG + chunk("IDAT", idat) + tail, "the first chunk is IDAT; IHDR comes first", "a file without IHDR")
 refused(head + chunk("IDAT", idat[0, idat.bytesize // 2]) + tail, "the image data's zlib stream", "an IDAT cut short")
 refused(head + chunk("IDAT", idat[0, idat.bytesize - 6]) + tail, "the image data's zlib stream", "an IDAT without its last bytes")
 raw = Zlib.decompress(idat)
-bad_filter = String.new(raw.bytesize) { |d| d.copy_from(raw.to_unsafe, raw.bytesize); d[9 * 2] = 5_u8 }
+bad_filter = String.from_bytes(raw.bytesize) { |d| (raw.bytesize).times { |k_| d[k_] = raw.byte_at(k_) }; d[9 * 2] = 5_u8 }
 refused(head + chunk("IDAT", Zlib.compress(bad_filter)) + tail, "row 2 has filter type 5; there are five, 0 to 4", "a filter type past 4")
 pal = chunk("PLTE", bytes_of([0, 0, 0, 255, 255, 255]))
-pal_data = chunk("IDAT", Zlib.compress(String.new(16) { |d| 16.times { |i| d[i] = i % 2 == 0 ? 0_u8 : 0x55_u8 } }))
+pal_data = chunk("IDAT", Zlib.compress(String.from_bytes(16) { |d| 16.times { |i| d[i] = i % 2 == 0 ? 0_u8 : 0x55_u8 } }))
 refused(SIG + ihdr(8, 8, 1, 3, 0) + pal_data + pal + tail, "IDAT comes before PLTE in a palette image", "IDAT before PLTE")
 assert_true Png.decode(SIG + ihdr(8, 8, 1, 3, 0) + pal + pal_data + tail).is_a?(PngFile), "the same palette image, PLTE first, decodes"
 refused(SIG + ihdr(8, 8, 1, 3, 0) + chunk("IDAT", Zlib.compress("\u0000" * 16)) + tail, "IDAT comes before PLTE", "a palette image without PLTE")
@@ -659,7 +656,7 @@ if gate
       rng = Lcg.new((entries * 7).to_u32)
       pal = [] of {Int32, Int32, Int32, Int32}
       entries.times { |i| pal << {rng.byte.to_i32, rng.byte.to_i32, rng.byte.to_i32, i == 1 ? 0 : 255} }
-      idx = String.new(29 * 19) { |d| (29 * 19).times { |i| d[i] = (rng.byte.to_i32 % entries).to_u8 } }
+      idx = String.from_bytes(29 * 19) { |d| (29 * 19).times { |i| d[i] = (rng.byte.to_i32 % entries).to_u8 } }
       name = "out-P#{entries}#{interlace ? "-i" : ""}"
       png = Png.encode_indexed(29, 19, idx, pal, interlace: interlace)
       File.write(work + "/" + name + ".png", png)

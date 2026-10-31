@@ -1617,6 +1617,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     # program file is read.
     if node.iyi_prelude? && @program.iyi_prelude_dir.nil?
       @program.iyi_prelude_dir = File.dirname(filename)
+      TapeScopeRuntime.prelude_dir = File.expand_path(File.dirname(filename)).gsub('\\', '/').rstrip('/') + "/"
     end
 
     # These spans are additive: a require is parsed and normalized before any
@@ -2129,7 +2130,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
       # A .iyimod artifact of std or the runtime was checked when emitted.
       artifact = filename.ends_with?(".iyimod") &&
                  (filename.includes?("/std/") || filename.includes?("/iyi/"))
-      unless filename.includes?("/src/std/") || filename.includes?("/src/iyi/") || artifact
+      unless TapeScopeRuntime.library_file?(filename) || artifact
         ann.raise "TaskClosureUnsafe is runtime-only; keep the ordinary closure"
       end
     when @program.experimental_annotation

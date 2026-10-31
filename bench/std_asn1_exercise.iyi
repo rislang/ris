@@ -20,10 +20,10 @@ end
 
 def b(hex : String) : Array(UInt8)
   clean = hex.split(' ').join("")
-  p = clean.to_unsafe
+  p = clean
   Array(UInt8).new(clean.bytesize // 2) do |i|
-    hi = p[i * 2].to_i32
-    lo = p[i * 2 + 1].to_i32
+    hi = p.byte_at(i * 2).to_i32
+    lo = p.byte_at(i * 2 + 1).to_i32
     hi = hi >= 97 ? hi - 87 : hi - 48
     lo = lo >= 97 ? lo - 87 : lo - 48
     (hi * 16 + lo).to_u8
@@ -32,15 +32,16 @@ end
 
 def hex(bytes : Array(UInt8)) : String
   digits = "0123456789abcdef"
-  String.build do |io|
+  begin; io = "";
     bytes.each do |x|
-      io << digits[x.to_i32 >> 4] << digits[x.to_i32 & 15]
+      io << digits[x.to_i32 >> 4, 1] << digits[x.to_i32 & 15, 1]
     end
+  io
   end
 end
 
 def ascii(text : String) : String
-  hex(Array(UInt8).new(text.bytesize) { |i| text.to_unsafe[i] })
+  hex(Array(UInt8).new(text.bytesize) { |i| text.byte_at(i) })
 end
 
 # A value read from *hex*, which must be one.
@@ -90,7 +91,7 @@ end
 
 def read_file(path : String) : Array(UInt8)
   data = File.read(path)
-  Array(UInt8).new(data.bytesize) { |i| data.to_unsafe[i] }
+  Array(UInt8).new(data.bytesize) { |i| data.byte_at(i) }
 end
 
 def tag_line(v : DerValue) : String

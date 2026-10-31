@@ -164,9 +164,9 @@ def measure(target : String, samples : Int32, pem : String?) : {Float64, Int32}
   chacha = ChaCha20Poly1305.new(aead_key)
   sealed_text = target == "chacha" ? chacha.seal(nonce, draw.bytes(64)) : gcm.seal(nonce, draw.bytes(64))
   # The tag is the last 16 bytes: one copy wrong in its first, one in its last.
-  wrong_first = Array(UInt8).new(sealed_text.bytesize) { |i| sealed_text.to_unsafe[i] }
+  wrong_first = Array(UInt8).new(sealed_text.bytesize) { |i| sealed_text.byte_at(i) }
   wrong_first[wrong_first.size - 16] = wrong_first[wrong_first.size - 16] ^ 0x80_u8
-  wrong_last = Array(UInt8).new(sealed_text.bytesize) { |i| sealed_text.to_unsafe[i] }
+  wrong_last = Array(UInt8).new(sealed_text.bytesize) { |i| sealed_text.byte_at(i) }
   wrong_last[wrong_last.size - 1] = wrong_last[wrong_last.size - 1] ^ 0x80_u8
   times = Array(Int64).new(samples, 0_i64)
   classes = Array(Int32).new(samples, 0)

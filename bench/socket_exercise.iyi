@@ -12,7 +12,6 @@
 
 import std/socket::{IyiSocket, SocketError, IPv6Address}
 import std/env::{ENV}
-import std/gc::{GC}
 
 # Task observations are copied onto the board, in publication order.
 @[OnTape]
@@ -98,20 +97,20 @@ raise "short_read: chunk 3 content mismatch" if c3 != "CDEF"
 puts "short_read: ok"
 
 # A small read asked for with room for much more costs what arrived: a
-# heap buffer of the whole 64 KB per read was garbage the size of the
-# room for every answer - a server reading 64 KB at a time made 64 KB of
-# it per 30-byte request. std/http's buffer of its own measured it there
-# until the server stopped asking the socket for strings.
-GC.disable
-lean_before = GC.stats.bytes_since_collection
-100.times do
-  client.write("thirty bytes of one request..\n")
-  got = conn.read(65536).or_panic
-  raise "small_read: #{got.bytesize} bytes, not 30" unless got.bytesize == 30
+# buffer of the whole 64 KB per read was the size of the room for every
+# answer - a server reading 64 KB at a time made 64 KB of it per 30-byte
+# request. The tape's cursor before and after 100 reads measures it.
+lean_bytes = 0_u64
+tape do
+  lean_before = RisRegion.tape_bytes(1_u64)
+  100.times do
+    client.write("thirty bytes of one request..\n")
+    got = conn.read(65536).or_panic
+    raise "small_read: #{got.bytesize} bytes, not 30" unless got.bytesize == 30
+  end
+  lean_bytes = (RisRegion.tape_bytes(1_u64) - lean_before) // 100_u64
 end
-lean_bytes = (GC.stats.bytes_since_collection - lean_before) // 100_u64
-GC.enable
-raise "small_read: a 30-byte read with room for 64 KB allocated #{lean_bytes} bytes" unless lean_bytes < 1024_u64
+raise "small_read: a 30-byte read with room for 64 KB took #{lean_bytes} tape bytes" unless lean_bytes < 1024_u64
 puts "small_read: ok"
 
 # Each end names the other as the other names itself.
@@ -464,7 +463,7 @@ unix_separator = "/"
   unix_separator = "\\"
 {% end %}
 unix_dir = unix_dir[0, unix_dir.bytesize - 1] if unix_dir.ends_with?(unix_separator)
-unix_path = "#{unix_dir}#{unix_separator}iyi-socket-#{__iyi_monotonic_ns}.sock"
+unix_path = "#{unix_dir}#{unix_separator}iyi-socket-#{__iyi_monotonic_ns}.sock".copy_to(Program.tape)
 unix = IyiSocket.listen_unix(unix_path)
 raise "unix: the listener is at #{unix.local_address.inspect}" unless unix.local_address == unix_path
 unix_client = IyiSocket.connect_unix(unix_path).or_panic
@@ -617,83 +616,8 @@ b_conn.close
 b_server.close
 puts "timeout: ok"
 
-# 11. A reader parked on a socket keeps nothing of what it last read. The
-# bytes land in a 4 KB buffer on the stack, and while that buffer's frame
-# was the one that waited, every parked connection held its last read
-# where the collector scans: a read of eight bytes that spelled an
-# object's address kept the object alive. The address is sent hidden
-# behind a key, and computed and checked in frames of their own, so only
-# the reader's stack could hold it bare.
-#
-# Repeat the address across 256 bytes: a stack probe or a temporary may
-# overwrite a word before the next read parks, but must not hide the bug.
-VICTIM_KEY = 0x5A5A5A5A5A5A5A5A_u64
-
-@[NoInline]
-def victim_address : UInt64
-  # This fixture tests the inherited collector, so use its heap explicitly.
-  # An ordinary class now lives on tape and is invisible to base_of.
-  address = IyiHeap.alloc(80_u64).address
-  raise "retain: fixture is not on the collector heap" if IyiRoots.base_of(address) == 0_u64
-  address ^ VICTIM_KEY
-end
-
-@[NoInline]
-def victim_bytes(word : UInt64) : String
-  String.new(256) do |buffer|
-    256.times { |i| buffer[i] = ((word ^ VICTIM_KEY).unsafe_shr((8 * (i % 8)).to_u64) & 0xFF_u64).to_u8 }
-  end
-end
-
-# The key the check unhides the address with is read from memory after the
-# collection, so an optimised build cannot have the bare address ready in
-# a register the collection spills and scans.
-class VictimKey
-  @@key = VICTIM_KEY
-
-  def self.key : UInt64
-    @@key
-  end
-end
-
-@[NoInline]
-def victim_collected?(word : UInt64) : Bool
-  IyiMark.collect
-  IyiRoots.base_of(word ^ VictimKey.key) == 0_u64
-end
-
-# Both calls use one frame layout, even if LLVM inlines IyiSocket#read.
-@[NoInline]
-def retain_read(reader : IyiSocket) : String
-  reader.read(512).or_panic
-end
-
-k_server = IyiSocket.listen(0)
-k_port = k_server.local_port
-group do |g|
-  g.spawn do
-    writer = IyiSocket.connect("127.0.0.1", k_port).or_panic
-    hidden = victim_address
-    writer.write(victim_bytes(hidden)).or_panic
-    sleep(50)
-    number(victim_collected?(hidden) ? 0_i64 : 1_i64)
-    writer.write("x").or_panic
-    writer.close
-    0
-  end
-  g.spawn do
-    reader = k_server.accept.or_panic
-    got = retain_read(reader)
-    raise "retain: the reader got #{got.bytesize} bytes, not the 256 sent" unless got.bytesize == 256
-    retain_read(reader)
-    reader.close
-    k_server.close
-    0
-  end
-end
-k_kept = read_number != 0
-raise "retain: a reader parked on its next read kept alive the object its last read's bytes pointed at" if k_kept
-puts "retain: ok"
+# 11. (retain) tested the collector's stack scan, gone with the
+# collector: a ris program has no collector to keep anything alive.
 
 # A backlog is the number of connections the kernel holds for a listener
 # nobody has accepted from yet. Windows' own question: darwin's kernel

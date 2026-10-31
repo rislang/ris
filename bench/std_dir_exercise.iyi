@@ -22,9 +22,9 @@ end
 # one platform's spelling.
 def slashed(path : String) : String
   n = path.bytesize
-  bytes = path.to_unsafe
-  String.new(n) do |target|
-    target.copy_from(bytes, n)
+  bytes = path
+  String.from_bytes(n) do |target|
+    (n).times { |k_| target[k_] = bytes.byte_at(k_) }
     i = 0
     while i < n
       target[i] = 47_u8 if target[i] == 92_u8
@@ -37,9 +37,9 @@ end
 # byte.
 def backslashed(path : String) : String
   n = path.bytesize
-  bytes = path.to_unsafe
-  String.new(n) do |target|
-    target.copy_from(bytes, n)
+  bytes = path
+  String.from_bytes(n) do |target|
+    (n).times { |k_| target[k_] = bytes.byte_at(k_) }
     i = 0
     while i < n
       target[i] = 92_u8 if target[i] == 47_u8
@@ -71,7 +71,7 @@ def filled(fill : Array(String), byte : UInt8) : Int32
     same = true
     i = 0
     while i < text.bytesize
-      same = false if text.to_unsafe[i] != byte
+      same = false if text.byte_at(i) != byte
       i = i + 1
     end
     intact = intact + 1 if same
@@ -504,7 +504,7 @@ puts "  deletion outcomes for empty and non-empty paths"
     lone_length = lone_length + 1
   end
   lone_name = Pointer(UInt16).malloc((lone_length + 9).to_u64)
-  lone_name.copy_from(lone_wide, lone_length)
+  (lone_length).times { |k_| lone_name[k_] = lone_wide.byte_at(k_) }
   tail = [92_u16, 120_u16, 0xD800_u16, 121_u16, 46_u16, 116_u16, 120_u16, 116_u16, 0_u16] # \x?y.txt
   tail.each_with_index { |unit, index| lone_name[lone_length + index] = unit }
   lone_handle = LibWideName.CreateFileW(lone_name, 0x40000000, 0, Pointer(Void).new(0_u64), 1, 0x80, Pointer(Void).new(0_u64))

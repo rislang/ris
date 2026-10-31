@@ -1,0 +1,77 @@
+# Many requests on one keep-alive connection to `Server.answer`: each
+# request's head, parse and answer are freed when it ends, the plain ones
+# answered in place and the chunked ones read the slow way, so the
+# connection's mappings are the same for 200 requests as for 5000.
+module test/ris/http_answer_scope
+
+import std/socket::{IyiSocket}
+import std/http::{Server, Incoming, Outgoing}
+
+struct Ready
+end
+
+struct Handler
+  def initialize(config : Int32)
+  end
+
+  def listening(port : Int32) : Nil
+    RisBoard.post(Ready.new)
+  end
+
+  def call(req : Incoming, res : Outgoing) : Nil
+    w = res.body
+    w.append(req.path)
+    w.append(" ")
+    w.append(req.body)
+  end
+end
+
+# Reads one answer whose body is Content-Length long.
+def answer(socket : IyiSocket) : String
+  got = ""
+  while true
+    at = got.index("\r\n\r\n")
+    if at
+      head = got[0, at]
+      marker = "Content-Length: "
+      from = (head.index(marker) || 0) + marker.bytesize
+      upto = head.index("\r\n", from) || head.bytesize
+      length = head[from, upto - from].to_i
+      return got[at + 4, length] if got.bytesize >= at + 4 + length
+    end
+    piece = socket.read(65536).or_panic
+    raise "closed early" if piece.empty?
+    got = got + piece
+  end
+end
+
+count = (Program.args[0]? || "200").to_i
+probe = IyiSocket.listen(0)
+port = probe.local_port
+probe.close
+group do |g|
+  g.spawn do
+    Server.answer("127.0.0.1", port, 0, Handler)
+    0
+  end
+  RisBoard.take(Ready).or_panic
+  socket = IyiSocket.connect("127.0.0.1", port).or_panic
+  ok = 0
+  count.times do |i|
+    tape do
+      request = ""
+      if i.even?
+        request << "POST /r" << i << " HTTP/1.1\r\nHost: t\r\n"
+        request << "Content-Length: 5\r\n\r\nhello"
+      else
+        request << "POST /r" << i << " HTTP/1.1\r\nHost: t\r\n"
+        request << "Transfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n"
+      end
+      socket.write(request)
+      ok += 1 if answer(socket) == "/r#{i} hello"
+    end
+  end
+  puts "#{count} #{ok == count}"
+  socket.close
+  g.cancel_children
+end

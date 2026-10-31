@@ -19,11 +19,11 @@ import std/regex::{Regex}
 # empty piece, which is what a one-element list reads as.
 def fields(line : String, sep : UInt8) : Array(String)
   out = [] of String
-  p = line.to_unsafe
+  p = line
   start = 0
   i = 0
   while i < line.bytesize
-    if p[i] == sep
+    if p.byte_at(i) == sep
       out << line[start, i - start]
       start = i + 1
     end
@@ -35,11 +35,11 @@ end
 
 # A newline travels through the fixture as byte 29, one record per line.
 def unescape(s : String) : String
-  p = s.to_unsafe
-  String.new(s.bytesize) do |dst|
+  p = s
+  String.from_bytes(s.bytesize) do |dst|
     i = 0
     while i < s.bytesize
-      dst[i] = p[i] == 29_u8 ? 10_u8 : p[i]
+      dst[i] = p.byte_at(i) == 29_u8 ? 10_u8 : p.byte_at(i)
       i = i + 1
     end
   end
@@ -152,13 +152,14 @@ puts "  a million bytes, four patterns, one pass each; (a|a)*b over 30,000 a's"
 puts "\n== a long alternation, in a task and on the main stack"
 
 def words(n : Int32) : String
-  String.build do |io|
+  begin; io = "";
     i = 0
     while i < n
       io << "|" if i > 0
       io << "w" << i
       i = i + 1
     end
+  io
   end
 end
 
@@ -184,9 +185,9 @@ if args.size > 0
   lines = [] of String
   start = 0
   i = 0
-  p = text.to_unsafe
+  p = text
   while i < text.bytesize
-    if p[i] == 10_u8
+    if p.byte_at(i) == 10_u8
       lines << text[start, i - start]
       start = i + 1
     end
@@ -243,9 +244,9 @@ if args.size > 1
   cases = 0
   start = 0
   i = 0
-  p = text.to_unsafe
+  p = text
   while i < text.bytesize
-    if p[i] == 10_u8
+    if p.byte_at(i) == 10_u8
       f = fields(text[start, i - start], 30_u8)
       start = i + 1
       if f.size == 7
@@ -348,7 +349,7 @@ puts "  backreferences, recursion and comments, each by name"
 puts "\n== POSIX classes"
 
 def bytes(lo : Int32, hi : Int32) : String
-  String.new(hi - lo + 1) do |dst|
+  String.from_bytes(hi - lo + 1) do |dst|
     c = lo
     while c <= hi
       dst[c - lo] = c.to_u8
@@ -537,7 +538,7 @@ assert_true Regex.compile("\\w").find("é").nil? && Regex.compile("\\d").find("�
 assert_true Regex.compile("\\s").find("\u00A0").nil?, "and so is \\s"
 assert_str "café", Regex.compile("\\bcafé").find("a café") || "", "\\b before an ASCII word"
 assert_str "é", Regex.compile("é\\b").find("éa") || "", "é is no word character, so a boundary lies between it and a"
-invalid = String.new(3) { |p| p[0] = 97_u8; p[1] = 0xFF_u8; p[2] = 98_u8 }
+invalid = String.from_bytes(3) { |p| p[0] = 97_u8; p[1] = 0xFF_u8; p[2] = 98_u8 }
 assert_true Regex.compile("a.b").match?(invalid), "a byte that begins no character is one character"
 assert_true Regex.compile("a\u{FFFD}b").match?(invalid), "and it is U+FFFD, as each_char reads it"
 assert_str "a.b*", Regex.compile("\\Qa.b*\\E").find("xa.b*y") || "", "\\Q..\\E is the text itself"
@@ -547,7 +548,7 @@ unknown_class = refusal("\\p{Klingon}")
 assert_true unknown_class.includes?("regex: unknown Unicode class 'Klingon'"), "a class the UCD does not name is refused, not #{unknown_class.inspect}"
 byte_class = refusal("a\\Cb")
 assert_true byte_class.includes?("regex: \\C is refused"), "\\C, one byte, is refused, not #{byte_class.inspect}"
-bad_pattern = String.new(1) { |p| p[0] = 0xFF_u8 }
+bad_pattern = String.from_bytes(1) { |p| p[0] = 0xFF_u8 }
 assert_true panic_of { Regex.compile(bad_pattern) }.includes?("is not valid UTF-8"), "a pattern that is not UTF-8 is refused"
 puts "  code points, classes past ASCII, \\p categories and scripts, ASCII \\w \\d \\s \\b, \\Q..\\E"
 

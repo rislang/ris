@@ -470,7 +470,7 @@ prove_broken "an inverse NTT without 128^-1" "acvp encapsulation 26: the ciphert
 prove_broken "a CBD with eta 3" "acvp keyGen 26: the encapsulation key" \
   '  ETA = 2' '  ETA = 3'
 prove_broken "a key generation without its k byte in G (FIPS 203's ipd)" "acvp keyGen 26: the encapsulation key" \
-  'g = SHA3_512.new.update(sp, 32).update(pointerof(k), 1).final' 'g = SHA3_512.new.update(sp, 32).final'
+  'g = SHA3_512.new.update(sp, 32).update([k]).final' 'g = SHA3_512.new.update(sp, 32).final'
 prove_broken "A sampled from rho || i || j" "acvp keyGen 26: the encapsulation key" \
   '    ip[0] = j
     ip[1] = i' '    ip[0] = i

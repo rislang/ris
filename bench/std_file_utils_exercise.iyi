@@ -14,7 +14,6 @@ module bench/std_file_utils_exercise
 import std/file_utils::{FileUtils}
 import std/file::{File}
 import std/dir::{Dir}
-import std/gc::{GC}
 
 def assert_true(cond : Bool, msg : String) : Nil
   raise "ASSERTION FAILED: #{msg}" unless cond
@@ -60,7 +59,7 @@ def write_pattern(path : String, size : Int32, seed : Int32) : Nil
     done = 0
     while done < size
       n = size - done < piece ? size - done : piece
-      text = String.new(n) do |p|
+      text = String.from_bytes(n) do |p|
         i = 0
         while i < n
           p[i] = (((done + i) * 7 + seed) % 251).to_u8
@@ -136,19 +135,14 @@ puts "\n== a 64 MiB copy in pieces"
 big = sandbox + "/big.bin"
 size = 64 * 1048576
 write_pattern(big, size, 3)
-GC.collect
-GC.disable
-before = GC.stats.bytes_since_collection
+before = RisRegion.tape_bytes(1_u64)
 FileUtils.cp(big, sandbox + "/big_copy.bin")
-copy_bytes = GC.stats.bytes_since_collection - before
-GC.enable
+copy_bytes = RisRegion.tape_bytes(1_u64) - before
 assert_true File.size(sandbox + "/big_copy.bin") == size.to_i64, "the copy is 64 MiB"
 assert_true copy_bytes < 262144_u64, "a 64 MiB copy allocates #{copy_bytes} bytes, under 256 KiB"
-GC.disable
-before = GC.stats.bytes_since_collection
+before = RisRegion.tape_bytes(1_u64)
 same = FileUtils.compare_file(big, sandbox + "/big_copy.bin")
-compare_bytes = GC.stats.bytes_since_collection - before
-GC.enable
+compare_bytes = RisRegion.tape_bytes(1_u64) - before
 assert_true same, "compare_file: a 64 MiB copy is equal to its source"
 assert_true compare_bytes < 262144_u64, "comparing 64 MiB allocates #{compare_bytes} bytes, under 256 KiB"
 puts "  64 MiB copied with #{copy_bytes // 1024} KiB allocated, compared with #{compare_bytes // 1024} KiB"

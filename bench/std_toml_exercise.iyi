@@ -29,12 +29,12 @@ end
 HEX_DIGITS = "0123456789abcdef"
 
 def hex(text : String) : String
-  out = String::Builder.new(text.bytesize * 2 + 1)
-  p = text.to_unsafe
+  out = ""
+  p = text
   i = 0
   while i < text.bytesize
-    b = p[i].to_i32
-    out << HEX_DIGITS[b >> 4] << HEX_DIGITS[b & 15]
+    b = p.byte_at(i).to_i32
+    out << HEX_DIGITS[b >> 4, 1] << HEX_DIGITS[b & 15, 1]
     i = i + 1
   end
   out.to_s
@@ -42,7 +42,7 @@ end
 
 # A JSON string: `"` and `\` escaped, controls as \u00XX, the rest raw.
 def json_string(text : String) : String
-  out = String::Builder.new
+  out = ""
   out << "\""
   text.each_char do |c|
     code = c.ord
@@ -51,7 +51,7 @@ def json_string(text : String) : String
     elsif c == '\\'
       out << "\\\\"
     elsif code < 32
-      out << "\\u00" << HEX_DIGITS[code >> 4] << HEX_DIGITS[code & 15]
+      out << "\\u00" << HEX_DIGITS[code >> 4, 1] << HEX_DIGITS[code & 15, 1]
     else
       out << c
     end
@@ -220,7 +220,7 @@ WORDS = ["a", "b", "site", "fruit", "x", "1234", "bare-key", "under_score", "A",
 
 def gen_string(rng : Rng) : String
   n = rng.below(9)
-  out = String::Builder.new
+  out = ""
   n.times { out << (rng.chance(2) ? rng.pick(TRICKY) : rng.pick(PLAIN)) }
   out.to_s
 end
@@ -334,7 +334,7 @@ class Scribe
   end
 
   def comment_text : String
-    out = String::Builder.new
+    out = ""
     out << "#"
     @rng.below(6).times { out << @rng.pick(["a", " ", "\t", "#", "\"", "'", "é", "😀", "=", "[", "\\"]) }
     out.to_s
@@ -404,7 +404,7 @@ class Scribe
   end
 
   def basic(text : String) : String
-    out = String::Builder.new
+    out = ""
     out << "\""
     text.each_char { |c| out << basic_char(c) }
     out << "\""
@@ -419,7 +419,7 @@ class Scribe
   # a quote escaped whenever two raw ones came before it, and line-ending
   # backslashes dropped in where the next thing written is not blank.
   def multiline_basic(text : String) : String
-    out = String::Builder.new
+    out = ""
     out << "\"\"\""
     first = true
     raw_quotes = 0
@@ -476,7 +476,7 @@ class Scribe
   end
 
   def multiline_literal(text : String) : String
-    out = String::Builder.new
+    out = ""
     out << "'''"
     out << "\n" if text.starts_with?('\n') || @rng.chance(3)
     text.each_char do |c|
@@ -505,7 +505,7 @@ class Scribe
   end
 
   def key_path(parts : Array(String)) : String
-    out = String::Builder.new
+    out = ""
     parts.each_with_index do |part, i|
       if i > 0
         out << (@rng.chance(4) ? blanks : "") << "." << (@rng.chance(4) ? blanks : "")
@@ -517,7 +517,7 @@ class Scribe
 
   # `_` between two digits, now and then.
   def underscored(digits : String) : String
-    out = String::Builder.new
+    out = ""
     last_digit = false
     digits.each_char do |c|
       out << "_" if last_digit && @rng.chance(5)
@@ -548,7 +548,7 @@ class Scribe
     return @rng.pick(["inf", "+inf"]) if f > 1.7976931348623157e308
     return "-inf" if f < -1.7976931348623157e308
     text = f.to_s
-    out = String::Builder.new
+    out = ""
     out << "+" if !text.starts_with?('-') && @rng.chance(4)
     upper = @rng.chance(2)
     last_digit = false
@@ -562,7 +562,7 @@ class Scribe
   end
 
   def datetime_text(d : TOMLDateTime) : String
-    out = String::Builder.new
+    out = ""
     unless d.local_time?
       out << d.year.to_s.rjust(4, '0') << "-" << d.month.to_s.rjust(2, '0') << "-" << d.day.to_s.rjust(2, '0')
     end
@@ -596,7 +596,7 @@ class Scribe
 
   # Between two array items: blanks, and line breaks and comments.
   def array_space : String
-    out = String::Builder.new
+    out = ""
     out << blanks if @rng.chance(2)
     while @rng.chance(4)
       out << comment_text if @rng.chance(2)

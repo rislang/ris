@@ -276,6 +276,33 @@ class Iyi::TapeCallGraph
     end) || false
   end
 
+  # The defs a *call* in *owner* passes through to reach *owner* again,
+  # shortest first, for the refusal to name: `a -> b -> owner`.
+  def cycle_path(owner : Def, call : Call) : Array(Def)
+    targets(call).try &.each do |target|
+      return [owner] if target.same?(owner)
+      previous = {target.object_id => 0_u64}
+      queue = [target.object_id]
+      until queue.empty?
+        id = queue.shift
+        if id == owner.object_id
+          path = [] of Def
+          while id != 0_u64
+            @defs[id]?.try { |d| path.unshift(d) }
+            id = previous[id]
+          end
+          return path
+        end
+        @edges[id]?.try &.each do |to|
+          next if previous.has_key?(to)
+          previous[to] = id
+          queue << to
+        end
+      end
+    end
+    [] of Def
+  end
+
   def growing?(node : ASTNode) : Bool
     growing_type?(node.type?)
   end
@@ -371,10 +398,15 @@ class Iyi::TapeCallGraph
         expanded.accept self
         return false
       end
-      @checker.targets(node).try &.each do |target|
-        @checker.edge(@owner, target)
-        # A yielding callee executes the lexical callback on its call path.
-        node.block.try &.body.accept Graph.new(@checker, target)
+      targets = @checker.targets(node)
+      targets.try &.each { |target| @checker.edge(@owner, target) }
+      # A yielding callee executes the lexical callback on its call path,
+      # which starts at this caller: its calls are the caller's edges.
+      # Hung on the callee, one specialization every block shares (each
+      # `g.spawn { }` of an Int32 task is one `spawn`), they joined every
+      # caller to every other block's calls, a cycle that was not one.
+      if targets && !targets.empty?
+        node.block.try &.body.accept Graph.new(@checker, @owner)
       end
       true
     end

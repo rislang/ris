@@ -631,7 +631,7 @@ prove_broken "a SHAKE read that forgets to permute between blocks" "shake128 of 
 prove_broken "an XXH64 lane started from the wrong prime" "xxh64 of one stripe" \
   '    @v2 = @seed &+ P2' '    @v2 = @seed &+ P1'
 prove_broken "an XXH64 update that drops the stripe in progress" "xxh64 in pieces" \
-  '      (@stripe + @fill.to_i64).copy_from(data, take)
+  '      take.times { |j| @stripe[@fill + j] = data[j] }
 ' ''
 prove_broken "an XXH64 tail byte mixed with the wrong prime" "xxh64 of 'a'" \
   '      h = XXH64.rotl(h, 11) &* P1' '      h = XXH64.rotl(h, 11) &* P2'

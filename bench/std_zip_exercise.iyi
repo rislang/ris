@@ -48,7 +48,7 @@ end
 
 # Every byte of a stream read *max* at a time.
 def drain(r : ZipEntryReader, max : Int32, label : String) : String
-  all = String::Builder.new
+  all = ""
   while true
     piece = r.read(max)
     raise "ASSERTION FAILED: #{label}: refused with #{piece.message.inspect}" if piece.is_a?(ZipError)
@@ -79,19 +79,19 @@ def refused(data : String, phrase : String, label : String, limit : Int64 = ZipR
 end
 
 def le16(s : String, at : Int32) : Int32
-  p = s.to_unsafe
-  p[at].to_i32 | (p[at + 1].to_i32 << 8)
+  p = s
+  p.byte_at(at).to_i32 | (p.byte_at(at + 1).to_i32 << 8)
 end
 
 def le32(s : String, at : Int32) : Int64
-  p = s.to_unsafe
-  p[at].to_i64 | (p[at + 1].to_i64 << 8) | (p[at + 2].to_i64 << 16) | (p[at + 3].to_i64 << 24)
+  p = s
+  p.byte_at(at).to_i64 | (p.byte_at(at + 1).to_i64 << 8) | (p.byte_at(at + 2).to_i64 << 16) | (p.byte_at(at + 3).to_i64 << 24)
 end
 
 # *s* with the bytes at *at* replaced by *values*.
 def patched(s : String, at : Int32, values : Array(Int32)) : String
-  String.new(s.bytesize) do |dst|
-    dst.copy_from(s.to_unsafe, s.bytesize)
+  String.from_bytes(s.bytesize) do |dst|
+    (s.bytesize).times { |k_| dst[k_] = s.byte_at(k_) }
     i = 0
     while i < values.size
       dst[at + i] = values[i].to_u8
@@ -110,7 +110,7 @@ end
 
 # Every *from* in *s* replaced by *to*, which is as long.
 def replaced(s : String, from : String, to : String) : String
-  out = String::Builder.new(s.bytesize)
+  out = ""
   at = 0
   while true
     hit = s.byte_index(from, at)
@@ -146,24 +146,24 @@ end
 def ascii?(s : String) : Bool
   i = 0
   while i < s.bytesize
-    return false if s.to_unsafe[i] >= 0x80_u8
+    return false if s.byte_at(i) >= 0x80_u8
     i = i + 1
   end
   true
 end
 
 def byte(v : Int32) : String
-  String.new(1) { |dst| dst[0] = v.to_u8 }
+  String.from_bytes(1) { |dst| dst[0] = v.to_u8 }
 end
 
 def hex(s : String) : String
   digits = "0123456789abcdef"
-  String.new(s.bytesize * 2) do |dst|
+  String.from_bytes(s.bytesize * 2) do |dst|
     i = 0
     while i < s.bytesize
-      b = s.to_unsafe[i].to_i32
-      dst[i * 2] = digits.to_unsafe[b >> 4]
-      dst[i * 2 + 1] = digits.to_unsafe[b & 15]
+      b = s.byte_at(i).to_i32
+      dst[i * 2] = digits.byte_at(b >> 4)
+      dst[i * 2 + 1] = digits.byte_at(b & 15)
       i = i + 1
     end
   end
@@ -175,7 +175,7 @@ end
 
 def bytes_of(n : Int32, seed : Int32) : String
   rng = Random.new(seed.to_u64)
-  String.new(n) do |dst|
+  String.from_bytes(n) do |dst|
     i = 0
     while i < n
       dst[i] = rng.rand(256).to_u8
@@ -197,7 +197,7 @@ end
 
 # An archive's entries as the `.expect` lines Python writes for its own.
 def expect_lines(zip : ZipReader, contents : Hash(String, String) | Nil) : String
-  out = String::Builder.new
+  out = ""
   out << "comment\t" << hex(zip.comment) << '\n'
   zip.entries.each do |e|
     crc = e.crc32
@@ -516,7 +516,7 @@ end
 
 # *s* with the byte at *at* changed.
 def flipped_at(s : String, at : Int32) : String
-  patched(s, at, [s.to_unsafe[at].to_i32 ^ 0x55])
+  patched(s, at, [s.byte_at(at).to_i32 ^ 0x55])
 end
 
 def method_archive(method : ZipMethod, entries : Array({String, String}), t : Time, zip64 : Bool) : String

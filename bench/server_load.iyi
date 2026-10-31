@@ -186,7 +186,7 @@ tops.each do |top|
   distinct << top unless distinct.includes?(top) || top == 0_u64
 end
 
-puts "collections " + IyiMark.collections.to_s
+puts "collections " + IyiTask.collections.to_s
 puts "answers " + tops.size.to_s + ", failures " + bad.to_s
 puts "stacks " + distinct.size.to_s
 

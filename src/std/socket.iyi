@@ -1910,7 +1910,7 @@ pub struct IyiSocket
   def self.make_sockaddr_un(path : String) : String
     size = path.bytesize
     raise "a unix socket path is empty" if size == 0
-    raise "a unix socket path exceeds 107 bytes" if size >= 108
+    raise "a unix socket path is #{size} bytes, and the platform's limit is 107" if size >= 108
     String.build(112) do |writer|
       writer.push(AF_UNIX.to_u8)
       writer.push(0_u8)

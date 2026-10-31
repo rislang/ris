@@ -25,7 +25,6 @@
 module bench/std_json_exercise
 
 import std/json::{JSON, Any, Parser, PullParser, Builder, ToJSON, serializable}
-import std/gc::{GC}
 
 def assert_true(cond : Bool, msg : String) : Nil
   raise "ASSERTION FAILED: #{msg}" unless cond
@@ -256,14 +255,13 @@ assert_text "0.1 -0.0 1.0e+22 1.0e+23 5.0e-324 0.30000000000000004 1234567890123
 # a repeated key in, each key and each number a substring of the input,
 # 288 bytes an object, and crystal-metric's JsonParsePull ran at one and a
 # half times Crystal's time.
-{% unless flag?(:gc_none) || flag?(:gc_boehm) %}
+{% if true %}
   walked = String.build do |io|
     io << "["
     10000.times { |i| io << (i > 0 ? "," : "") << "{\"x\":" << i << ".25,\"y\":-" << i << ".5e-3,\"name\":\"n\",\"ok\":true}" }
     io << "]"
   end
-  GC.disable
-  walk_before = GC.stats.bytes_since_collection
+  walk_before = RisRegion.tape_bytes(1_u64)
   walk_total = 0.0
   walker = PullParser.new(walked)
   walker.read_array do
@@ -275,8 +273,7 @@ assert_text "0.1 -0.0 1.0e+22 1.0e+23 5.0e-324 0.30000000000000004 1234567890123
       end
     end
   end
-  walk_bytes = (GC.stats.bytes_since_collection - walk_before) // 10000_u64
-  GC.enable
+  walk_bytes = (RisRegion.tape_bytes(1_u64) - walk_before) // 10000_u64
   assert_true walk_bytes < 8_u64, "walking an object allocates #{walk_bytes} bytes, where it allocates nothing (#{walk_total})"
   puts "  ten thousand objects walked without an allocation for them"
 {% end %}

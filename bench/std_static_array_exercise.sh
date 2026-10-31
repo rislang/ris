@@ -177,16 +177,16 @@ PY
 # The text grown by `+` a piece at a time again, as `to_s` was written: the
 # bound beside `to_a.to_s` catches it.
 prove_fails "to_s grown by + again" broken_to_s "ASSERTION FAILED: to_s: 10,000 elements took" \
-  '    String.build do |io|
-      io << "StaticArray["
-      i = 0
-      while i < N
-        io << ", " if i > 0
-        io << to_unsafe[i].inspect
-        i += 1
-      end
-      io << "]"
-    end' '    res = "StaticArray["
+  '    io = ""
+    io << "StaticArray["
+    i = 0
+    while i < N
+      io << ", " if i > 0
+      io << to_unsafe[i].inspect
+      i += 1
+    end
+    io << "]"
+    io' '    res = "StaticArray["
     i = 0
     while i < N
       res = res + ", " if i > 0

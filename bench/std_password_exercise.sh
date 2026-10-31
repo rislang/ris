@@ -363,8 +363,8 @@ PY
 prove_broken "a wrong Blowfish S-box word" "bcrypt vector \"\" at cost 06" \
   '0xd1310ba6_u32' '0xd1310ba7_u32'
 prove_broken "a bcrypt that never uses its salt" "a hash given another salt does not verify" \
-  '    st = Pointer(UInt32).malloc(1042_u64)' '    4.times { |z| salted[z] = 0_u32 }
-    st = Pointer(UInt32).malloc(1042_u64)'
+  '    st = pointerof(st_room).as(Pointer(UInt32))' '    4.times { |z| salted[z] = 0_u32 }
+    st = pointerof(st_room).as(Pointer(UInt32))'
 prove_broken "a bcrypt that ignores its cost" "a hash relabelled with another cost does not verify" \
   'rounds = 1_i64.unsafe_shl(cost)' 'rounds = 16_i64'
 prove_broken "Salsa20 at six rounds rather than eight" "rfc 7914 case 1" \
@@ -372,7 +372,7 @@ prove_broken "Salsa20 at six rounds rather than eight" "rfc 7914 case 1" \
 # With r = 1 the two halves are one block each and either order is the
 # same, so case 1 passes and case 2, r = 8, is where it shows.
 prove_broken "BlockMix writing its blocks in order, not even then odd" "rfc 7914 case 2" \
-  '      to = (i & 1) == 0 ? half : r + half' '      to = i'
+  '      to = dst + ((i & 1) == 0 ? half : r + half) * 16' '      to = dst + i * 16'
 
 echo
 if [ "$status" -eq 0 ]; then
