@@ -43,16 +43,16 @@ Fix a checker hole below only when a cluster hits it.
    refill a field instead of a new value (TLS records, key updates); a
    struct or Tuple of texts and plain values moves down whole.
    Left, by cluster:
-   * HTTP client and websocket (http_coding, websocket_reader,
-     websocket_handshake, http_prefork's TLS half): `TlsClient.over` and
+   * HTTP client and websocket (http_coding, websocket_handshake,
+     http_prefork's TLS half): `TlsClient.over` and
      `connect`, `TlsEchOffer`, `WebSocket.connect` and the ACME/TLS
      factories return owners made in a def (SPEC 2.1): make the caller
      declare them (`x = T.new`, then a method that fills it, as
      `TlsServer#accept` does) and keep a client's pooled connections in
-     an owner built where the pool lives. WebSocket makes its Deflater
-     and Inflater lazily and keeps a close reason viewing a frame: build
-     them in `initialize`, reset them in place, copy the reason into a
-     builder of its own. TLS server identities need the big cluster.
+     an owner built where the pool lives. ECH also reaches HPKE and
+     P-256/P-384 key factories returning scratch; migrate those holders
+     before the TLS client gate. TLS server identities need the big
+     cluster.
    * socket_pair, socket_pieces, socket_race, smtp, mail: connect's
      attempt list (socket.iyi 248, 1066), ResolvConf parsing (dns.iyi
      1340s), `Resolver.system` made in a def.

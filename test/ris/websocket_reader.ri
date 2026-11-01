@@ -1,6 +1,6 @@
 module test/websocket_reader
 
-import std/websocket::{WebSocket, Message, WebSocketError}
+import std/websocket::{WebSocket, Message, WebSocketError, PerMessageDeflate}
 import std/socket::{IyiSocket, SocketError}
 
 # A server's reader over a real socket: masked client frames, a message in
@@ -63,5 +63,32 @@ tape do
   pong = peer.read(64)
   if pong.is_a?(String)
     puts "answer #{pong.bytesize} #{pong.byte_at(0)} #{pong.byte_at(1)}"
+  end
+end
+
+# Reuse both codecs with and without context takeover, across messages
+# larger than a compression slice. Assertions keep the gate's wire output.
+[false, true].each do |fresh|
+  [0, 1, 6].each do |level|
+    listener = IyiSocket.listen("127.0.0.1", 0)
+    peer = IyiSocket.connect("127.0.0.1", listener.local_port).or_panic
+    socket = listener.accept.or_panic
+    terms = PerMessageDeflate.new(fresh, fresh, 15, 15, level)
+    sender = WebSocket.new(peer, "", true, deflate: terms)
+    reader = WebSocket.new(socket, "", false, deflate: terms)
+    text = "a recurring message with a window. " * 8000
+    3.times do
+      sender.send(text).or_panic
+      got = reader.receive
+      raise "compressed round trip" unless got.is_a?(Message) &&
+        got.data == text
+      reader.send("answer answer answer").or_panic
+      answer = sender.receive
+      raise "compressed answer" unless answer.is_a?(Message) &&
+        answer.data == "answer answer answer"
+    end
+    peer.close
+    socket.close
+    listener.close
   end
 end

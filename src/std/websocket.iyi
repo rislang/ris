@@ -301,13 +301,12 @@ pub class WebSocket
   @utf8 : Int32
   @sent_close : Bool
   @close_code : Int32?
-  @close_reason : String
+  @close_reason : String::Builder
   @writing : Bool
-  # This end's compressor, made for the first compressed message and
-  # made again for each one when its window is not to carry over; the
-  # peer's decoder the same way.
-  @deflater : Deflater?
-  @inflater : Inflater?
+  # Codecs belong to the connection. Reset their windows in place when
+  # no_context_takeover was agreed.
+  @deflater : Deflater
+  @inflater : Inflater
   # Whether the message being reassembled came compressed (RSV1 on its
   # first frame): its fragments are then compressed bytes.
   @parts_compressed : Bool
@@ -325,10 +324,14 @@ pub class WebSocket
     @utf8 = 0
     @sent_close = false
     @close_code = nil
-    @close_reason = ""
+    @close_reason = String::Builder.new(123)
     @writing = false
-    @deflater = nil
-    @inflater = nil
+    terms = @deflate
+    deflater = Deflater.new(Envelope::Raw, terms ? terms.level : 1,
+      terms ? (@client ? terms.client_max_window_bits : terms.server_max_window_bits) : 15)
+    @deflater = deflater
+    inflater = Inflater.new
+    @inflater = inflater
   end
 
   # The server's half of the handshake, answering *req*: a 101, after
@@ -709,7 +712,7 @@ pub class WebSocket
 
   # The reason the peer's close carried; "" for none.
   def close_reason : String
-    @close_reason
+    @close_reason.finish
   end
 
   # *text* as one text message. It must be UTF-8.
@@ -905,33 +908,20 @@ pub class WebSocket
     return String.build(1) { |w| w.push(0_u8) } if terms.nil? || data.bytesize == 0
     fresh = @client ? terms.client_no_context_takeover : terms.server_no_context_takeover
     deflater = @deflater
-    if deflater.nil? || fresh
-      deflater = Deflater.new(Envelope::Raw, terms.level, @client ? terms.client_max_window_bits : terms.server_max_window_bits)
-      @deflater = deflater
-    end
-    pieces = [] of String
-    size = 0
+    deflater.reset if fresh
+    joined = ""
     at = 0
     while at < data.bytesize
       k = data.bytesize - at
       k = DEFLATE_SLICE if k > DEFLATE_SLICE
       slice = k == data.bytesize ? data : data[at, k]
       piece = deflater.compress(slice)
-      pieces << piece
-      size = size + piece.bytesize
+      joined << piece
       at = at + k
     end
-    # Every piece ends in 00 00 ff ff; the last one's is left off.
-    size = size - 4
-    joined = ""
-    done = 0
-    pieces.each do |piece|
-      k = piece.bytesize
-      k = size - done if k > size - done
-      joined << piece[0, k]
-      done = done + k
-    end
-    joined
+    # Leave off the final sync flush's last four bytes (RFC 7692).
+    bytes = joined
+    bytes[0, bytes.bytesize - 4]
   end
 
   # *count* bytes of *bytes* from *at* XORed with *key*'s four bytes in
@@ -1131,10 +1121,7 @@ pub class WebSocket
     return "" if terms.nil? || wire.bytesize == 0
     fresh = @client ? terms.server_no_context_takeover : terms.client_no_context_takeover
     inflater = @inflater
-    if inflater.nil? || fresh
-      inflater = Inflater.flushed
-      @inflater = inflater
-    end
+    inflater.reset if fresh
     tailed = String.build(wire.bytesize + 4) do |w|
       w << wire
       w.push(0_u8)
@@ -1175,7 +1162,8 @@ pub class WebSocket
       return fail(1007, "a close reason that is not UTF-8") unless WebSocket.utf8_scan(reason, 0, reason.bytesize, 0) == 0
     end
     @close_code = code
-    @close_reason = reason
+    @close_reason.clear
+    @close_reason << reason
     unless @sent_close
       # Its code echoed (§5.5.1), and nothing more.
       @sent_close = true

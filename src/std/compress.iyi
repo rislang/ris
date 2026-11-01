@@ -185,6 +185,12 @@ class BitWriter
     s
   end
 
+  def reset : Nil
+    @bytes.clear
+    @acc = 0_u64
+    @cnt = 0
+  end
+
   private def drain : Nil
     while @cnt >= 8
       @bytes.push((@acc & 255_u64).to_u8)
@@ -604,6 +610,29 @@ class Inflate
     @exhausted = true
   end
 
+  def reset_pieces : Nil
+    @chunk.clear
+    @carry.clear
+    @input = ""
+    @in_pos = 0
+    @in_end = 0
+    @bits = 0_u64
+    @count = 0
+    @pos = 0
+    @given = 0
+    @summed = 0
+    @origin = 0
+    @state = BLOCK
+    @final = false
+    @stored = 0
+    @failed = false
+    @error = CompressError.new("")
+    @message.clear
+    @lit = @fixed_lit
+    @dist = @fixed_dist
+    by_pieces
+  end
+
   def pieces? : Bool
     @pieces
   end
@@ -632,8 +661,9 @@ class Inflate
     return @error if @failed
     # The last piece ended between blocks with nothing loaded ahead, so
     # there is nothing of it to keep.
-    @input = data
-    @streamed = false
+    @chunk.clear
+    @chunk << data
+    @streamed = true
     @in_pos = 0
     @in_end = data.bytesize
     # Room for four times the piece to begin with, a megabyte at most:
@@ -1226,9 +1256,19 @@ pub class Inflater
 
   # A raw stream decoded by `inflate`, a piece at a time.
   def self.flushed : Inflater
+    new
+  end
+
+  def initialize
     core = Inflate.new(Envelope::Raw, "", 0, Inflate::STREAM)
     core.by_pieces
-    new(core)
+    @core = core
+  end
+
+  # Forget the previous messages and their window without new storage.
+  def reset : Nil
+    raise "Inflater: reset is for a flushed stream" unless @core.pieces?
+    @core.reset_pieces
   end
 
   # A stream read from *io* after *head*, 64 KiB a read, until *io*
@@ -1321,6 +1361,15 @@ pub class Deflater
     raise "Deflater: window_bits #{window_bits} is not 8 to 15" if window_bits < 8 || window_bits > 15
     made_core = Encoder.new(@level, -1, 1 << window_bits)
     @core = made_core
+    @started = false
+    @finished = false
+    @check = @envelope == Envelope::Zlib ? 1_u32 : 0_u32
+    @size = 0_u32
+  end
+
+  # Start another stream in the same window and output storage.
+  def reset : Nil
+    @core.reset
     @started = false
     @finished = false
     @check = @envelope == Envelope::Zlib ? 1_u32 : 0_u32
@@ -1791,6 +1840,26 @@ class Encoder
     end
     made_out = BitWriter.new(hint >= 0 ? hint // 2 + 64 : 1024)
     @out = made_out
+  end
+
+  def reset : Nil
+    @wbase = WSIZE
+    @first = WSIZE
+    @strstart = WSIZE
+    @end = WSIZE
+    @block_start = WSIZE
+    @insert = 0
+    @match_length = MIN_MATCH - 1
+    @match_start = 0
+    @match_available = false
+    @nsyms = 0
+    @nrle = 0
+    @head.size.times { |i| @head[i] = 0 }
+    @prev.size.times { |i| @prev[i] = 0 }
+    @lfreq.size.times { |i| @lfreq[i] = 0 }
+    @dfreq.size.times { |i| @dfreq[i] = 0 }
+    @blfreq.size.times { |i| @blfreq[i] = 0 }
+    @out.reset
   end
 
   # *data* as one final stream.
