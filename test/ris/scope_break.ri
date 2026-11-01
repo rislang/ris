@@ -1,0 +1,21 @@
+# A `break` out of a block or loop frees its scratch on the way out, as
+# its normal end does (SPEC 1.1: every exit releases).
+def cur : UInt64
+  IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)
+end
+
+tape do
+  c0 = cur
+  2.times do
+    tape do
+      t = String.build(1) { |w| w.append("abc") }
+      break 9
+    end
+    puts "block break frees: #{cur == c0}"
+  end
+  got = while true
+    t = String.build(1) { |w| w.append("abc") }
+    break t.bytesize
+  end
+  puts "loop break frees: #{cur == c0} #{got}"
+end

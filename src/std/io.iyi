@@ -150,17 +150,23 @@ class ::IyiIO
   # SIGPIPE). Other targets keep an in-process queue of writes.
   def self.pipe : {Std::Io::PipeReader, Std::Io::PipeWriter}
     {% if flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64)) || flag?(:darwin) %}
-      fds = Std::Io::PipeSys.make
-      # Handles over pooled ends: a pipe end may be handed to a task, so
-      # it is not on the caller's tape; a closed end goes back to the pool
-      # and a handle kept past its close is refused.
-      {Std::Io::PipeReader.new(Std::Io::RisPipeEnd.take(fds[0], false)),
-       Std::Io::PipeWriter.new(Std::Io::RisPipeEnd.take(fds[1], true))}
+      pipe_of(Std::Io::PipeSys.make)
     {% else %}
       raise "IyiIO.pipe is only on Linux and macOS"
       {Std::Io::PipeReader.new, Std::Io::PipeWriter.new}
     {% end %}
   end
+
+  {% if flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64)) || flag?(:darwin) %}
+    # Handles over pooled ends: a pipe end may be handed to a task, so
+    # it is not on the caller's tape; a closed end goes back to the pool
+    # and a handle kept past its close is refused. The handles are built
+    # in the caller's destination, a tuple of calls (SPEC 1.5).
+    def self.pipe_of(fds) : {Std::Io::PipeReader, Std::Io::PipeWriter}
+      {Std::Io::PipeReader.new(Std::Io::RisPipeEnd.take(fds[0], false)),
+       Std::Io::PipeWriter.new(Std::Io::RisPipeEnd.take(fds[1], true))}
+    end
+  {% end %}
 end
 
 {% if flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64)) || flag?(:darwin) %}

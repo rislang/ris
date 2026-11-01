@@ -1,0 +1,34 @@
+# A holder struct that truncates the builder it holds, called in a loop
+# that reads the builder after: refused at compile time (SPEC 3.3).
+@[OnTape]
+struct IndexedBuilder
+  def initialize(@writer : String::Builder)
+  end
+
+  def truncate(count : Int32)
+    @writer.truncate(count)
+  end
+
+  def size : Int32
+    @writer.length
+  end
+
+  def [](index : Int32) : UInt8
+    @writer.finish[index]
+  end
+end
+
+def truncated(a : IndexedBuilder)
+  i = 0
+  while i < a.size
+    a.truncate(0)
+    a[i]
+    i += 1
+  end
+end
+
+tape do
+  builder = String::Builder.new(1)
+  builder.append("x")
+  truncated(IndexedBuilder.new(builder))
+end

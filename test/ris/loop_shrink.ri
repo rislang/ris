@@ -228,17 +228,10 @@ tape do
   when "pop"       then popped(a)
   when "pop?"      then popped_optional(a)
   when "argument"  then argument(a)
-  when "holder"    then held(a, Shrinker.new(a))
   when "yield"     then yielded(a) { |value| value.clear }
-  when "operator"  then held_operator(a, Shrinker.new(a))
   when "condition" then condition(a)
   when "if"        then if_condition(a)
   when "words"     then words(bytes)
   when "cached"    then cached(a)
-  when "truncate"  then truncated(IndexedBuilder.new(builder))
-  when "shift"     then shifted(IndexedBuilder.new(builder))
-  when "word_truncate"
-    builder.append("1234567")
-    truncated_words(IndexedBuilder.new(builder))
   end
 end

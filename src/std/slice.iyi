@@ -48,6 +48,15 @@ pub struct Slice(T)
     new(pointer, size, read_only: read_only)
   end
 
+  # *size* elements copied from *copy_of*, on the caller's tape: a `new`
+  # builds in its caller's destination (SPEC 1.5), which `dup` hands on.
+  def self.new(size : Int32, *, copy_of : Pointer(T), read_only : Bool) : self
+    pointer = Pointer(T).new(
+      RisRegion.tape_bytes(size.to_u64 * sizeof(T).to_u64))
+    pointer.copy_from(copy_of, size) if size > 0
+    new(pointer, size, read_only: read_only)
+  end
+
   # Allocates a slice of *size* elements initialized to *value*.
   #
   # These three answer `Slice(T)`, not `self`, as `Array.new` does: when the
@@ -380,9 +389,7 @@ pub struct Slice(T)
   # takes this slice's read-only flag: `copy_from` into a read-only copy
   # refused, so a read-only slice could not be duplicated at all.
   def dup : Slice(T)
-    ptr = Pointer(T).new(RisRegion.tape_bytes(@size.to_u64 * sizeof(T).to_u64))
-    ptr.copy_from(@pointer, @size) if @size > 0
-    Slice(T).new(ptr, @size, read_only: @read_only)
+    Slice(T).new(@size, copy_of: @pointer, read_only: @read_only)
   end
 
   # Returns a copy of this slice.

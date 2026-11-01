@@ -25,7 +25,8 @@ tape do
   20.times do
     tape do
       current = RisRegion.tape
-      check(current != saved)
+      # A nested tape block shares the tape (SPEC 1.5).
+      check(current == saved)
       first = current if first == 0_u64
       check(current == first)
       text = String.build(1) { |w| w.append(outer) }
@@ -40,7 +41,7 @@ tape do
   tape do
     current = RisRegion.tape
     tape do
-      check(RisRegion.tape != current)
+      check(RisRegion.tape == current)
       inner = String.build { |w| w.append("inner") }
       check(inner == "inner")
     end
@@ -48,9 +49,9 @@ tape do
   end
   tape do
     first_mapping = RisRegion.tape
-    # Force the local tape to grow onto a second mapping without touching
-    # 64 MiB of pages (the mapping is rounded up to a whole 64 KiB grain).
-    # Cleanup must release the whole chain, then restore.
+    # Force the tape to grow onto a second mapping without touching 64
+    # MiB of pages (the mapping is rounded up to a whole 64 KiB grain).
+    # The block's end must release the growth, then restore.
     RisRegion.tape_bytes(Tape::CAPACITY &+ RisRegion::GRAIN)
     check(RisRegion.tape != first_mapping)
   end
@@ -61,4 +62,4 @@ tape do
 end
 check(copy == "outer")
 check(RisRegion.tape != 0_u64)
-puts "PASS: local isolation, reuse, nested scopes, borrowed text, retained copy and early exits"
+puts "PASS: shared tape, reuse, nested scopes, borrowed text, retained copy and early exits"

@@ -42,9 +42,33 @@ struct ::Set(T)
 
   # A copy with the same elements in the same order.
   def dup : Set(T)
-    copy = Set(T).new
-    each { |v| copy.add(v) }
-    copy
+    Set(T).new(self, self, SET_COPY)
+  end
+
+  SET_COPY  = 0
+  SET_UNION = 1
+  SET_BOTH  = 2
+  SET_ONE   = 3
+
+  # The set *kind* makes of *a* and *b*: a copy of *a*, their union,
+  # intersection (in *a*'s order) or symmetric difference. A `new`, so it
+  # builds in its caller's destination (SPEC 1.5), which each operator
+  # hands on.
+  def self.new(a : Set(A), b : Set(B), kind : Int32) : Set(T) forall A, B
+    result = new
+    case kind
+    when SET_COPY
+      a.each { |v| result.add(v) }
+    when SET_UNION
+      a.each { |v| result.add(v) }
+      b.each { |v| result.add(v) }
+    when SET_BOTH
+      a.each { |v| result.add(v) if b.has_member?(v) }
+    else
+      a.each { |v| result.add(v) unless b.has_member?(v) }
+      b.each { |v| result.add(v) unless a.has_member?(v) }
+    end
+    result
   end
 
   # Union: everything in either, this set's elements first. The other set
@@ -56,10 +80,7 @@ struct ::Set(T)
   # `Set(Int32?) == Set(Int32)`, `&`, `^`, `subset_of?` and the rest, while
   # `Set(Int32) == Set(Int32?)` answered false for the same members.
   def |(other : Set(U)) : Set(T | U) forall U
-    result = Set(T | U).new
-    each { |v| result.add(v) }
-    other.each { |v| result.add(v) }
-    result
+    Set(T | U).new(self, other, SET_UNION)
   end
 
   # `+` is union: two sets added are one set.
@@ -69,17 +90,12 @@ struct ::Set(T)
 
   # Intersection: what is in both, in this set's order.
   def &(other : Set(U)) : Set(T) forall U
-    result = Set(T).new
-    each { |v| result.add(v) if other.has_member?(v) }
-    result
+    Set(T).new(self, other, SET_BOTH)
   end
 
   # Symmetric difference: what is in exactly one of the two.
   def ^(other : Set(U)) : Set(T | U) forall U
-    result = Set(T | U).new
-    each { |v| result.add(v) unless other.has_member?(v) }
-    other.each { |v| result.add(v) unless has_member?(v) }
-    result
+    Set(T | U).new(self, other, SET_ONE)
   end
 
   # Every element of this set is in other. The empty set is a subset of

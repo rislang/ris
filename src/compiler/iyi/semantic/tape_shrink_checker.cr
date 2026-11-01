@@ -2138,7 +2138,11 @@ class Iyi::TapeShrinkChecker
           @copied_roots << node.object_id if {"copy_to", "to_heap"}.includes?(node.name)
           # A struct `new` holds what its arguments give it: a value it
           # returns carries their storage (SPEC 1.9).
-          @allocating_structs << node.object_id if node.name == "new" && @graph.allocates?(node)
+          # (The constructor's own work, not its arguments': a struct
+          # holding a copied sentence is still a plain value.)
+          if node.name == "new" && @graph.targets(node).try(&.any? { |t| @graph.allocates?(t.body) })
+            @allocating_structs << node.object_id
+          end
           holder = node.name == "new" && struct_value?(node.object_id)
           borrowed = if @text_only && node.name.in?("new", "dup") &&
                         type_name(node.type) != "String"

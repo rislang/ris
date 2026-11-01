@@ -1,0 +1,27 @@
+# A holder struct that clears the Array it holds, called in a loop that
+# reads the Array after: the read's storage may be gone, refused at
+# compile time (SPEC 3.3), not left to the bounds check.
+@[OnTape]
+struct Shrinker
+  def initialize(@a : Array(Int32))
+  end
+
+  def clear : Bool
+    @a.clear
+    true
+  end
+end
+
+def held(a : Array(Int32), holder : Shrinker)
+  i = 0
+  while i < a.size
+    holder.clear
+    a[i]
+    i += 1
+  end
+end
+
+tape do
+  a = Array(Int32).new(1) { 42 }
+  held(a, Shrinker.new(a))
+end

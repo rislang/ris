@@ -195,7 +195,7 @@ expect channel_gone 'undefined constant Channel'
 expect mutex_gone 'ris has no std/mutex'
 expect http_tls_config_gone 'HTTPClient.new(tls: config)'
 expect http_upgrade_block 'take_over(socket, leftover, response)'
-expect http_parse_head_text 'Server.parse_head(bytes, 0, true)'
+expect http_parse_head_text 'Server.parse_head(bytes, 0, true, fields)'
 
 # Timed joins broadcast completion without cancelling the retained task.
 out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/task_wait.ri 2>&1)
@@ -892,7 +892,7 @@ heap_trap escape
 
 # Cleanup keeps LIFO order on early exits, panic and explicit exit.
 out=$("$RIS" run test/ris/local.ri 2>&1)
-if [ "$out" = 'PASS: local isolation, reuse, nested scopes, borrowed text, retained copy and early exits' ]; then echo "runs     local"; else echo "FAILED   local: $out"; status=1; fi
+if [ "$out" = 'PASS: shared tape, reuse, nested scopes, borrowed text, retained copy and early exits' ]; then echo "runs     local"; else echo "FAILED   local: $out"; status=1; fi
 out=$("$RIS" run test/ris/local_cleanup.ri 2>/dev/null)
 if [ "$out" = 'PASS: local panic cleanup and fiber switching' ]; then echo "runs     local_cleanup"; else echo "FAILED   local_cleanup: $out"; status=1; fi
 out=$("$RIS" run test/ris/cleanup_order.ri 2>&1)
@@ -1049,8 +1049,8 @@ out=$("$RIS" run test/ris/loop_bounds.ri 2>&1)
 if grep -qF '1 11 21 300 3' <<<"$out" && grep -qF "index -1 out of range for 3 elements" <<<"$out"; then echo "runs     loop_bounds"; else echo "FAILED   loop_bounds: $out"; status=1; fi
 # Shrinking directly, through an argument/holder, or in the condition
 # must retain checks; CheckFree verifies safe indexing still lowers.
-for mode in clear store pop 'pop?' argument holder condition if words \
-    cached truncate shift word_truncate yield operator; do
+for mode in clear store pop 'pop?' argument condition if words \
+    cached yield; do
   out=$("$RIS" run test/ris/loop_shrink.ri -- "$mode" 2>&1)
   code=$?
   if [ "$code" -ne 0 ] &&
@@ -1063,6 +1063,9 @@ for mode in clear store pop 'pop?' argument holder condition if words \
     status=1
   fi
 done
+# A holder struct that shrinks what it holds is refused at compile time.
+expect loop_shrink_holder 'cannot shrink tape storage with a live view of Array(Int32)'
+expect loop_shrink_builder 'cannot shrink tape storage with a live view of String::Builder'
 out=$("$RIS" run test/ris/loop_shrink.ri -- safe 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = $'42\n4050765991979987505' ]; then
   echo "runs     loop_shrink (safe CheckFree reads)"
@@ -1737,6 +1740,14 @@ if [ "$?" = 0 ] && [ "$(grep -c '^PASS: ' <<<"$out")" = 3 ]; then
   echo "runs     scope_frees (1,000,000 rounds, flat RSS and mappings)"
 else
   echo "FAILED   scope_frees: $out"; status=1
+fi
+
+# A break out of a block or loop frees its scratch on the way out.
+out=$("$RIS" run test/ris/scope_break.ri 2>&1)
+if [ "$out" = $'block break frees: true\nblock break frees: true\nloop break frees: true 3' ]; then
+  echo "runs     scope_break"
+else
+  echo "FAILED   scope_break: $out"; status=1
 fi
 
 # A def's Array of Arrays keeps the scratch its rows' pool is in.

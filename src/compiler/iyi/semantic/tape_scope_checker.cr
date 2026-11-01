@@ -29,6 +29,11 @@ class Iyi::TapeScopeChecker
     while body.is_a?(Expressions) && body.expressions.size == 1
       body = body.expressions.first
     end
+    # A tuple of calls is built where each call would be: in the caller's
+    # destination (a pipe's two ends).
+    if body.is_a?(TupleLiteral)
+      return !body.elements.empty? && body.elements.all? { |e| one_call?(e) }
+    end
     body.is_a?(Call) && body.name != "raise"
   end
 
@@ -142,7 +147,8 @@ class Iyi::TapeScopeChecker
   end
 
   # A loop round's `next` and `break` reset before they leave it; a
-  # block's `next` hands its value through RESULT. Nested loops, blocks
+  # block's `next` and `break`, and a loop's `break` with a value, hand
+  # their value through RESULT. Nested loops, blocks
   # and defs own their own marks.
   class Exits < Transformer
     def initialize(@mark : Var, @block : Bool)
@@ -159,9 +165,15 @@ class Iyi::TapeScopeChecker
       end
     end
 
+    # A `break` leaves the block (or loop) too: its scratch is freed on
+    # the way out, its value handed through RESULT (SPEC 1.1: every exit
+    # releases).
     def transform(node : Break)
-      return node if @block || node.exp
-      reset(node)
+      return reset(node) unless @block || node.exp
+      exp = node.exp || NilLiteral.new.at(node)
+      node.exp = Call.new(nil, RESULT, [@mark.clone, exp] of ASTNode,
+        global: true).at(node)
+      node
     end
 
     private def reset(node : ASTNode) : ASTNode
