@@ -873,7 +873,7 @@ expect writer_grow      "private method 'grow' called for String::Builder"
 expect tree_entry       "private constant RisTree::Entry(T) referenced"
 expect array_grow       "private method 'grow' called for Array(T)"
 expect array_append     "append requires Array(UInt8)"
-expect refill           "clear and refill a value made before"
+expect refill           'Empty it with `@items.clear`'
 expect not_flat "Holder is not flat"
 expect check_free "\`first\` is @[CheckFree], and this \`[]\` checks"
 

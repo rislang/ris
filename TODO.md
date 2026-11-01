@@ -64,7 +64,7 @@ Fix a checker hole below only when a cluster hits it.
    * regex (RxCompiler fields), big (BigInt results), png (chunk texts
      kept per round, PngInfo built in its def), zip, log (with_context
      fields), hpack, text_grow, roots_holders, iyimod_text_growth,
-     autocert, program_local_init, fix array_refill, secure_dns.
+     autocert, program_local_init, secure_dns.
 5. Benches: build each, group the refusals by message, fix per group.
 
 Checker holes found on the way (unknown must be refused, SPEC 3.6):

@@ -89,6 +89,9 @@ class Iyi::Program
         tape_graph = Prof.span("tape: call graph") { TapeCallGraph.new(self, tape_root) }
         Prof.span("tape: TapeOwnerChecker") { TapeOwnerChecker.new(self, tape_graph).run(tape_root) }
         Prof.span("tape: TapeProgramChecker") { TapeProgramChecker.new(self, tape_graph).run(tape_root) }
+        # Before the shrink checker: a new Array per call is refused with
+        # the refill message `ris fix` acts on, not as a scope store.
+        Prof.span("tape: TapeRefillChecker") { TapeRefillChecker.new(self).run(tape_root) }
         tape_shrink = TapeShrinkChecker.new(self, tape_graph)
         Prof.span("tape: shrink solve") { tape_shrink.solve }
         Prof.span("tape: TapeRecursionChecker") { TapeRecursionChecker.new(self, tape_graph).run(tape_root) }
@@ -103,7 +106,6 @@ class Iyi::Program
         Prof.span("tape: TapeEscapeChecker") { TapeEscapeChecker.new(self).run(tape_root) }
         Prof.span("tape: TapeScopeChecker") { TapeScopeChecker.new(self, tape_graph).run(tape_root) }
         Prof.span("tape: TapeCheckFreeChecker") { TapeCheckFreeChecker.new(self).run(tape_root) }
-        Prof.span("tape: TapeRefillChecker") { TapeRefillChecker.new(self).run(tape_root) }
         Prof.span("tape: TapeScannerHint") { TapeScannerHint.new(self).run(tape_root) }
       end
     end
