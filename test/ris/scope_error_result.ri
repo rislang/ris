@@ -1,0 +1,40 @@
+# A def's error result, a struct whose one tape field is its sentence,
+# moves the sentence down as a String result moves (SPEC 1.5): the
+# def's other scratch is freed, the sentence stays.
+@[OnTape]
+struct ScopeError
+  getter message : String
+  getter at : Int32
+
+  def initialize(@message : String, @at : Int32)
+  end
+end
+
+def cur : UInt64
+  IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)
+end
+
+def read(n : Int32) : String | ScopeError
+  scratch = String::Builder.new(65536)
+  scratch.push(65_u8)
+  return ScopeError.new("bad #{n}", n) if n > 2
+  "ok #{n}"
+end
+
+def refuse(n : Int32) : ScopeError
+  scratch = String::Builder.new(65536)
+  scratch.push(65_u8)
+  ScopeError.new("refused #{n}", n)
+end
+
+tape do
+  c0 = cur
+  a = read(5)
+  b = read(1)
+  c = refuse(7)
+  x = "overwrite #{3} #{4}"
+  puts a.is_a?(ScopeError) ? "#{a.message} #{a.at}" : "?"
+  puts b.is_a?(String) ? b : "?"
+  puts "#{c.message} #{c.at}"
+  puts cur - c0 < 1024
+end

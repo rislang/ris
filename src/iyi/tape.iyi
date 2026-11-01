@@ -2513,12 +2513,33 @@ def __iyi_scope_result(mark : RisScopeMark, value : T) : T forall T
     RisScopeMove.text(mark, value)
   {% elsif T.name.starts_with?("Array(") %}
     RisScopeMove.array(mark, value)
-  {% elsif T.union? && T.union_types.any? { |t| t == ::String || t.name.starts_with?("Array(") } %}
+  {% elsif T.struct? && !T.union? && T.instance_vars.select { |iv| iv.type == ::String }.size == 1 && T.instance_vars.all? { |iv| iv.type == ::String || iv.type < ::Number || iv.type == ::Bool || iv.type < ::Enum } %}
+    # A struct whose one tape field is a String moves it down.
+    moved = value
+    {% for iv in T.instance_vars %}
+      {% if iv.type == ::String %}
+        pointerof(moved.@{{iv.name}}).value = RisScopeMove.text(mark, moved.@{{iv.name}})
+      {% end %}
+    {% end %}
+    moved
+  {% elsif T.union? && T.union_types.any? { |t| t == ::String || t.name.starts_with?("Array(") || (t.struct? && !t.union? && t.instance_vars.select { |iv| iv.type == ::String }.size == 1 && t.instance_vars.all? { |iv| iv.type == ::String || iv.type < ::Number || iv.type == ::Bool || iv.type < ::Enum }) } %}
     {% for t in T.union_types %}
       {% if t == ::String %}
         return RisScopeMove.text(mark, value) if value.is_a?(::String)
       {% elsif t.name.starts_with?("Array(") %}
         return RisScopeMove.array(mark, value) if value.is_a?({{t}})
+      {% elsif t.struct? && !t.union? && t.instance_vars.select { |iv| iv.type == ::String }.size == 1 && t.instance_vars.all? { |iv| iv.type == ::String || iv.type < ::Number || iv.type == ::Bool || iv.type < ::Enum } %}
+        # A struct whose one tape field is a String (an error and its
+        # sentence): the String moves down as a String result does.
+        if value.is_a?({{t}})
+          moved = value
+          {% for iv in t.instance_vars %}
+            {% if iv.type == ::String %}
+              pointerof(moved.@{{iv.name}}).value = RisScopeMove.text(mark, moved.@{{iv.name}})
+            {% end %}
+          {% end %}
+          return moved
+        end
       {% end %}
     {% end %}
     __iyi_scope_reset(mark)

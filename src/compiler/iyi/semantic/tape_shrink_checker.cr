@@ -1166,8 +1166,8 @@ class Iyi::TapeShrinkChecker
         # A String that ends a def whose result is a union with String
         # moves down; the rest is checked.
         leaving = result
-        if union_with_text?(owner.type?)
-          leaving = merge(moved_text?(body) ? EMPTY : last, @kept_returns)
+        if union_with_text?(owner.type?) || owner.type?.try { |t| one_text_struct?(t.remove_typedef) }
+          leaving = merge(moved_text?(body) || ends_in_return?(body) ? EMPTY : last, @kept_returns)
         end
         check_leaving(owner.object_id, leaving, env, owner.type?, owner)
         @leaving = owner.object_id
@@ -1519,13 +1519,45 @@ class Iyi::TapeShrinkChecker
     while node.is_a?(Expressions) && !node.expressions.empty?
       node = node.expressions.last
     end
-    !!(t = node.type?) && !t.remove_typedef.is_a?(UnionType) &&
-      type_name(t.remove_typedef) == "String"
+    return false unless t = node.type?
+    t = t.remove_typedef
+    return false if t.is_a?(UnionType)
+    type_name(t) == "String" || one_text_struct?(t)
+  end
+
+  # A body whose last expression is a `return`: its value is a return's,
+  # judged with the others.
+  private def ends_in_return?(node : ASTNode) : Bool
+    while node.is_a?(Expressions) && !node.expressions.empty?
+      node = node.expressions.last
+    end
+    node.is_a?(Return)
+  end
+
+  # A struct whose one tape field is a String and whose others are plain
+  # numbers, booleans or enums: `__iyi_scope_result` moves its String
+  # down as a String result's (an error and its sentence).
+  private def one_text_struct?(type : Type) : Bool
+    return false unless type.struct? && type.is_a?(InstanceVarContainer)
+    texts = 0
+    type.all_instance_vars.each_value do |ivar|
+      it = ivar.type?.try(&.remove_typedef)
+      return false unless it
+      if type_name(it) == "String"
+        texts += 1
+      elsif TapeChecker.tape_in(@program, it) || !(it.is_a?(IntegerType) || it.is_a?(FloatType) || it.is_a?(BoolType) || it.is_a?(EnumType))
+        return false
+      end
+    end
+    texts == 1
   end
 
   private def union_with_text?(type : Type?) : Bool
     type = type.try(&.remove_typedef)
-    type.is_a?(UnionType) && type.union_types.any? { |t| type_name(t.remove_typedef) == "String" }
+    type.is_a?(UnionType) && type.union_types.any? { |t|
+      t = t.remove_typedef
+      type_name(t) == "String" || one_text_struct?(t)
+    }
   end
 
   private def text_result?(type : Type?) : Bool

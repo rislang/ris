@@ -1744,6 +1744,14 @@ else
   echo "FAILED   scope_frees: $out"; status=1
 fi
 
+# An error struct's sentence moves down as a String result does.
+out=$("$RIS" run test/ris/scope_error_result.ri 2>&1)
+if [ "$out" = $'bad 5 5\nok 1\nrefused 7 7\ntrue' ]; then
+  echo "runs     scope_error_result"
+else
+  echo "FAILED   scope_error_result: $out"; status=1
+fi
+
 # A break out of a block or loop frees its scratch on the way out.
 out=$("$RIS" run test/ris/scope_break.ri 2>&1)
 if [ "$out" = $'block break frees: true\nblock break frees: true\nloop break frees: true 3' ]; then
