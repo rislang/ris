@@ -7,8 +7,10 @@ uri = URI.parse(text).to_uri
 raise "parse" unless uri.user == "u:" && uri.password == "p@"
 raise "authority" unless uri.authority == "u%3A:p%40@EX%aFAMPLE:80"
 raise "normalize" unless uri.normalize.to_s == "http://u%3A:p%40@ex%AFample/a/c?q#f"
-uri.normalize_in_place
-raise "in place" unless uri.to_s == "http://u%3A:p%40@ex%AFample/a/c?q#f"
+# A URI is not normalized in place: its new texts would be made in the
+# call (SPEC 1.1). The normalized URI is a new one.
+uri = uri.normalize
+raise "normalized" unless uri.to_s == "http://u%3A:p%40@ex%AFample/a/c?q#f"
 raise "invalid" if URI.parse?("http://h:65536")
 raise "decode" unless URI.decode("%C3%A9+") == "é+"
 raise "invalid decode" if URI.decode?("%GG")

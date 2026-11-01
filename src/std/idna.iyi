@@ -190,13 +190,25 @@ pub struct Punycode
   # is none. Digits are read in either case; basic code points are kept
   # in the case they were written.
   def self.decode(text : String) : String | PunycodeError
+    answer(decoded(text))
+  end
+
+  # What `decoded` read, as the answer: a view of it. A choice of
+  # calls, built in the caller's destination (SPEC 1.5).
+  def self.answer(tagged : String) : String | PunycodeError
+    tagged.byte_at(0) == 1_u8 ? PunycodeError.new(tagged[1, tagged.bytesize - 1]) : tagged[1, tagged.bytesize - 1]
+  end
+
+  # The decoded text after a 0 byte, or the refusal's sentence after a
+  # 1: one flat String, which moves down to the caller (SPEC 1.5).
+  def self.decoded(text : String) : String
     bytes = text
     size = text.bytesize
     last = -1
     i = 0
     while i < size
       byte = bytes[i]
-      return PunycodeError.new("Punycode: byte #{i} is 0x#{byte.to_s(16).upcase}, which is not ASCII") if byte >= 128_u8
+      return "\u0001Punycode: byte #{i} is 0x#{byte.to_s(16).upcase}, which is not ASCII" if byte >= 128_u8
       last = i if byte == 45_u8
       i = i + 1
     end
@@ -222,28 +234,28 @@ pub struct Punycode
       w = 1_i64
       k = BASE
       while true
-        return PunycodeError.new("Punycode: the input ends inside a number") if at >= size
+        return "\u0001Punycode: the input ends inside a number" if at >= size
         value = digit_value(bytes[at])
-        return PunycodeError.new("Punycode: #{bytes[at].unsafe_chr.inspect} at byte #{at} is not a base-36 digit") if value < 0_i64
-        return PunycodeError.new("Punycode: the number at byte #{at} overflows") if value > (MAXINT - index) // w
+        return "\u0001Punycode: #{bytes[at].unsafe_chr.inspect} at byte #{at} is not a base-36 digit" if value < 0_i64
+        return "\u0001Punycode: the number at byte #{at} overflows" if value > (MAXINT - index) // w
         index = index + value * w
         t = threshold(k, bias)
         at = at + 1
         break if value < t
-        return PunycodeError.new("Punycode: the number at byte #{at - 1} overflows") if w > MAXINT // (BASE - t)
+        return "\u0001Punycode: the number at byte #{at - 1} overflows" if w > MAXINT // (BASE - t)
         w = w * (BASE - t)
         k = k + BASE
       end
       count = output.size.to_i64 + 1_i64
       bias = adapt(index - old, count, old == 0_i64)
-      return PunycodeError.new("Punycode: the number ending at byte #{at - 1} overflows") if index // count > MAXINT - n
+      return "\u0001Punycode: the number ending at byte #{at - 1} overflows" if index // count > MAXINT - n
       n = n + index // count
       index = index % count
       if n > 0x10FFFF_i64
-        return PunycodeError.new("Punycode: the number ending at byte #{at - 1} is code point #{IDNA.u_plus(n)}, past U+10FFFF")
+        return "\u0001Punycode: the number ending at byte #{at - 1} is code point #{IDNA.u_plus(n)}, past U+10FFFF"
       end
       if n >= 0xD800_i64 && n <= 0xDFFF_i64
-        return PunycodeError.new("Punycode: the number ending at byte #{at - 1} is #{IDNA.u_plus(n)}, a surrogate, which UTF-8 does not hold")
+        return "\u0001Punycode: the number ending at byte #{at - 1} is #{IDNA.u_plus(n)}, a surrogate, which UTF-8 does not hold"
       end
       output << 0_i64
       j = output.size - 1
@@ -255,6 +267,7 @@ pub struct Punycode
       index = index + 1_i64
     end
     io = ""
+    io << 0_u8.unsafe_chr
     output.each { |point| io << point.to_i32.unsafe_chr }
     io
   end
@@ -414,55 +427,97 @@ pub struct IDNA
   # The labels between the four full stops UTS #46 maps to `.`.
   private def self.split(name : String) : Array(String)
     labels = [] of String
-    current = String::Builder.new
-    name.each_char do |char|
-      cp = char.ord
-      if cp == 0x2E || cp == 0x3002 || cp == 0xFF0E || cp == 0xFF61
-        labels << current.to_s
-        current = String::Builder.new
-      else
-        current << char
-      end
-    end
-    labels << current.to_s
+    fill_labels(labels, name)
     labels
   end
 
+  # Each label of *name* into *labels*, a view of it: a full stop is
+  # `.` or U+3002, U+FF0E or U+FF61 (E3 80 82, EF BC 8E, EF BD A1).
+  private def self.fill_labels(labels : Array(String), name : String) : Nil
+    size = name.bytesize
+    start = 0
+    i = 0
+    while i < size
+      b = name.byte_at(i)
+      stop = 0
+      if b == 0x2E_u8
+        stop = 1
+      elsif i + 2 < size
+        b1 = name.byte_at(i + 1)
+        b2 = name.byte_at(i + 2)
+        if (b == 0xE3_u8 && b1 == 0x80_u8 && b2 == 0x82_u8) ||
+           (b == 0xEF_u8 && b1 == 0xBC_u8 && b2 == 0x8E_u8) ||
+           (b == 0xEF_u8 && b1 == 0xBD_u8 && b2 == 0xA1_u8)
+          stop = 3
+        end
+      end
+      if stop > 0
+        labels << name[start, i - start]
+        i = i + stop
+        start = i
+      else
+        i = i + 1
+      end
+    end
+    labels << name[start, size - start]
+  end
+
   private def self.convert(name : String, ascii : Bool) : String | IdnaError
-    return IdnaError.new("IDNA: #{name.inspect} is not UTF-8") unless Unicode.valid?(name)
+    answer(converted(name, ascii))
+  end
+
+  # What `converted` read, as the answer: a view of it. A choice of
+  # calls, built in the caller's destination (SPEC 1.5).
+  private def self.answer(tagged : String) : String | IdnaError
+    tagged.byte_at(0) == 1_u8 ? IdnaError.new(tagged[1, tagged.bytesize - 1]) : tagged[1, tagged.bytesize - 1]
+  end
+
+  # The name after a 0 byte, or the refusal's sentence after a 1: one
+  # flat String, which moves down to the caller (SPEC 1.5).
+  private def self.converted(name : String, ascii : Bool) : String
+    return "\u0001IDNA: #{name.inspect} is not UTF-8" unless Unicode.valid?(name)
     labels = split(name)
     trailing = labels.size > 1 && labels.last.empty?
     labels.pop if trailing
-    return IdnaError.new("IDNA: the name is empty") if labels.size == 1 && labels[0].empty?
-    a_labels = [] of String
-    u_labels = [] of String
+    return "\u0001IDNA: the name is empty" if labels.size == 1 && labels[0].empty?
+    a = String::Builder.new(name.bytesize * 4 + 8)
+    u = String::Builder.new(name.bytesize * 4 + 8)
+    a.push(0_u8)
+    u.push(0_u8)
     i = 0
     while i < labels.size
       text = labels[i]
-      return IdnaError.new("IDNA: label #{i + 1} of #{name.inspect} is empty") if text.empty?
-      pair = label(text)
-      return pair if pair.is_a?(IdnaError)
-      a_labels << pair[0]
-      u_labels << pair[1]
+      return "\u0001IDNA: label #{i + 1} of #{name.inspect} is empty" if text.empty?
+      if i > 0
+        a << "."
+        u << "."
+      end
+      refused = label(a, u, text)
+      return "\u0001" + refused if refused
       i = i + 1
     end
-    written = a_labels.join(".")
-    if written.bytesize > MAX_NAME
-      return IdnaError.new("IDNA: the name is #{written.bytesize} octets in ASCII, past the #{MAX_NAME} a DNS name holds")
+    if a.length - 1 > MAX_NAME
+      return "\u0001IDNA: the name is #{a.length - 1} octets in ASCII, past the #{MAX_NAME} a DNS name holds"
     end
-    (ascii ? written : u_labels.join(".")) + (trailing ? "." : "")
+    w = ascii ? a : u
+    w << "." if trailing
+    w.finish
   end
 
   # One label as its A-label and its U-label (the same lower-cased text
   # for an ASCII label), or why it is neither.
-  private def self.label(text : String) : Tuple(String, String) | IdnaError
+  # One label: its A-label written into *a* and its U-label into *u*
+  # (the same lower-cased text for an ASCII label), or why it is
+  # neither.
+  private def self.label(a : String::Builder, u : String::Builder,
+                         text : String) : String?
     lower = text.downcase
     if ascii?(lower)
       if lower.starts_with?("xn--")
         decoded = Punycode.decode(lower[4, lower.bytesize - 4])
-        return IdnaError.new("IDNA: label #{text.inspect} is not an A-label: #{decoded.message}") if decoded.is_a?(PunycodeError)
+        return "IDNA: label #{text.inspect} is not an A-label: #{decoded.message}" if decoded.is_a?(PunycodeError)
         if ascii?(decoded)
-          return IdnaError.new("IDNA: label #{text.inspect} is not an A-label: it decodes to #{decoded.inspect}, which is all ASCII")
+          return "IDNA: label #{text.inspect} is not an A-label: it decodes to #{decoded.inspect}, which is all ASCII"
         end
         # Section 5.4 asks that what an A-label decodes to encode back to
         # it. Punycode is one-to-one (RFC 3492 section 1) and the label is
@@ -473,14 +528,16 @@ pub struct IDNA
         return refused if refused
         long = too_long(lower)
         return long if long
-        return {lower, decoded}
+        a << lower
+        u << decoded
+        return nil
       end
       bytes = lower
       j = 0
       while j < lower.bytesize
         b = bytes[j]
         unless (b >= 97_u8 && b <= 122_u8) || (b >= 48_u8 && b <= 57_u8) || b == 45_u8 || b == 95_u8
-          return IdnaError.new("IDNA: label #{text.inspect} holds #{b.unsafe_chr.inspect}, which a host name does not")
+          return "IDNA: label #{text.inspect} holds #{b.unsafe_chr.inspect}, which a host name does not"
         end
         j = j + 1
       end
@@ -488,42 +545,46 @@ pub struct IDNA
       return refused if refused
       long = too_long(lower)
       return long if long
-      return {lower, lower}
+      a << lower
+      u << lower
+      return nil
     end
     refused = u_label_error(lower, text)
     return refused if refused
     written = "xn--" + Punycode.encode(lower)
     long = too_long(written)
     return long if long
-    {written, lower}
+    a << written
+    u << lower
+    nil
   end
 
-  private def self.too_long(written : String) : IdnaError?
+  private def self.too_long(written : String) : String?
     return nil if written.bytesize <= MAX_LABEL
-    IdnaError.new("IDNA: label #{written.inspect} is #{written.bytesize} octets, past the #{MAX_LABEL} a DNS label holds")
+    "IDNA: label #{written.inspect} is #{written.bytesize} octets, past the #{MAX_LABEL} a DNS label holds"
   end
 
   # RFC 5891 section 4.2.3.1.
-  private def self.hyphen_error(chars : Array(Char), shown : String) : IdnaError?
-    return IdnaError.new("IDNA: label #{shown.inspect} begins with a hyphen") if chars[0] == '-'
-    return IdnaError.new("IDNA: label #{shown.inspect} ends with a hyphen") if chars[chars.size - 1] == '-'
+  private def self.hyphen_error(chars : Array(Char), shown : String) : String?
+    return "IDNA: label #{shown.inspect} begins with a hyphen" if chars[0] == '-'
+    return "IDNA: label #{shown.inspect} ends with a hyphen" if chars[chars.size - 1] == '-'
     if chars.size >= 4 && chars[2] == '-' && chars[3] == '-'
-      return IdnaError.new("IDNA: label #{shown.inspect} has \"--\" at its third and fourth characters and is not an A-label")
+      return "IDNA: label #{shown.inspect} has \"--\" at its third and fourth characters and is not an A-label"
     end
     nil
   end
 
   # Why *label*, a lower-cased U-label, is not one; nil when it is.
   # *shown* is the label as the caller wrote it.
-  private def self.u_label_error(label : String, shown : String) : IdnaError?
+  private def self.u_label_error(label : String, shown : String) : String?
     unless Unicode.normalized?(label)
-      return IdnaError.new("IDNA: label #{shown.inspect} is not in NFC; its NFC form is #{Unicode.normalize(label).inspect}")
+      return "IDNA: label #{shown.inspect} is not in NFC; its NFC form is #{Unicode.normalize(label).inspect}"
     end
     chars = chars_of(label)
     refused = hyphen_error(chars, shown)
     return refused if refused
     if Unicode.mark?(chars[0])
-      return IdnaError.new("IDNA: label #{shown.inspect} begins with the combining mark #{u_plus(chars[0].ord.to_i64)}")
+      return "IDNA: label #{shown.inspect} begins with the combining mark #{u_plus(chars[0].ord.to_i64)}"
     end
     i = 0
     while i < chars.size
@@ -533,16 +594,16 @@ pub struct IDNA
       when IdnaProperty::Disallowed
         mapped = unstable(char)
         if mapped
-          return IdnaError.new("#{named}, which IDNA2008 does not allow; case folding and NFKC make it #{mapped.inspect}, which UTS #46 would map it to and this module does not")
+          return "#{named}, which IDNA2008 does not allow; case folding and NFKC make it #{mapped.inspect}, which UTS #46 would map it to and this module does not"
         end
-        return IdnaError.new("#{named}, which IDNA2008 does not allow")
+        return "#{named}, which IDNA2008 does not allow"
       when IdnaProperty::Unassigned
-        return IdnaError.new("#{named}, which Unicode #{Unicode::VERSION} has not assigned")
+        return "#{named}, which Unicode #{Unicode::VERSION} has not assigned"
       when IdnaProperty::ContextJ
-        return IdnaError.new("#{named}, a joiner whose context rule needs Joining_Type and Virama, which this module does not carry; it refuses the joiners")
+        return "#{named}, a joiner whose context rule needs Joining_Type and Virama, which this module does not carry; it refuses the joiners"
       when IdnaProperty::ContextO
         unless context_o?(chars, i)
-          return IdnaError.new("#{named} where RFC 5892's context rule for it does not allow it")
+          return "#{named} where RFC 5892's context rule for it does not allow it"
         end
       end
       i = i + 1

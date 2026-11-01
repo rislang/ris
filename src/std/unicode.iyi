@@ -3295,11 +3295,11 @@ pub struct Unicode
   # the tables `simple_fold` reads, in the order it reads them, so a code
   # point one table folds is not folded again by a later one.
   private def self.orbits : Hash(Int32, Array(Int32))
-    @@orbits ||= build_orbits.copy_to(Program.tape)
+    @@orbits ||= RisOrbits.new(0).map.copy_to(Program.tape)
   end
 
-  private def self.build_orbits : Hash(Int32, Array(Int32))
-    map = Hash(Int32, Array(Int32)).new
+  # Into *map*: see `orbits`.
+  protected def self.build_orbits(map : Hash(Int32, Array(Int32))) : Nil
     simple = simple_fold_table
     data = simple
     row = 0
@@ -3328,7 +3328,6 @@ pub struct Unicode
       row = row + 4
     end
     map.each_value { |members| members.sort_in_place }
-    map
   end
 
   private def self.join_orbit(map : Hash(Int32, Array(Int32)), folded : Int32, cp : Int32) : Nil
@@ -4020,5 +4019,21 @@ struct ::String
 
   def each_grapheme(& : String -> _) : Nil
     Std::Unicode::Unicode.each_grapheme(self) { |cluster| yield cluster }
+  end
+end
+
+# The simple foldings read backwards (`Unicode.orbits`), built by a
+# `new` in the caller's destination (SPEC 1.5), which copies them out.
+@[OnTape]
+struct RisOrbits
+  getter map : Hash(Int32, Array(Int32))
+
+  def initialize(@map : Hash(Int32, Array(Int32)))
+  end
+
+  def self.new(seed : Int32) : RisOrbits
+    map = Hash(Int32, Array(Int32)).new
+    Unicode.build_orbits(map)
+    new(map)
   end
 end

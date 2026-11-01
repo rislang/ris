@@ -79,6 +79,9 @@ class Iyi::TapeShrinkChecker
   @parents = Hash(UInt64, Tuple(UInt64, String)).new
   @next_root = 0_u64
   @returns = EMPTY
+  # The returns that are not a String: a String return of a def whose
+  # result is a union holding String moves down (`__iyi_scope_result`).
+  @kept_returns = EMPTY
   @callback_chain = [] of String
   @active_procs = Set(UInt64).new
   @guards = Guards.new
@@ -970,6 +973,7 @@ class Iyi::TapeShrinkChecker
         @uses.clear
         @shrinks.clear
         @returns = EMPTY
+        @kept_returns = EMPTY
         @retains.clear
         env = seed_env(target, old.seeds)
         result = merge(value(target.body, env), @returns)
@@ -1121,6 +1125,7 @@ class Iyi::TapeShrinkChecker
     @uses.clear
     @shrinks.clear
     @returns = EMPTY
+    @kept_returns = EMPTY
     @checking = true
     @unproved.clear
     @scopes.clear
@@ -1154,10 +1159,17 @@ class Iyi::TapeShrinkChecker
         end
       end
     end
-    result = merge(value(body, env), @returns)
+    last = value(body, env)
+    result = merge(last, @returns)
     if owner && !{"new", "initialize"}.includes?(owner.name)
       if marked
-        check_leaving(owner.object_id, result, env, owner.type?, owner)
+        # A String that ends a def whose result is a union with String
+        # moves down; the rest is checked.
+        leaving = result
+        if union_with_text?(owner.type?)
+          leaving = merge(moved_text?(body) ? EMPTY : last, @kept_returns)
+        end
+        check_leaving(owner.object_id, leaving, env, owner.type?, owner)
         @leaving = owner.object_id
       end
       boundary = fresh
@@ -1304,6 +1316,7 @@ class Iyi::TapeShrinkChecker
     start = @uses.size
     shrink_start = @shrinks.size
     returns = @returns
+    kept_returns = @kept_returns
     entry = loop_env(env, start)
     head = entry
     loop do
@@ -1318,6 +1331,7 @@ class Iyi::TapeShrinkChecker
       @uses.truncate(0, start)
       @shrinks.truncate(0, shrink_start)
       @returns = returns
+      @kept_returns = kept_returns
       break if updated == head
       head = updated
     end
@@ -1499,6 +1513,21 @@ class Iyi::TapeShrinkChecker
   end
 
   # A String, or a union whose only tape member is String.
+  # An expression whose value is a String itself (not a union): the
+  # last one of a body counts.
+  private def moved_text?(node : ASTNode) : Bool
+    while node.is_a?(Expressions) && !node.expressions.empty?
+      node = node.expressions.last
+    end
+    !!(t = node.type?) && !t.remove_typedef.is_a?(UnionType) &&
+      type_name(t.remove_typedef) == "String"
+  end
+
+  private def union_with_text?(type : Type?) : Bool
+    type = type.try(&.remove_typedef)
+    type.is_a?(UnionType) && type.union_types.any? { |t| type_name(t.remove_typedef) == "String" }
+  end
+
   private def text_result?(type : Type?) : Bool
     return false unless type
     type = type.remove_typedef
@@ -2258,6 +2287,7 @@ class Iyi::TapeShrinkChecker
     when Return
       result = node.exp.try { |exp| value(exp, env) } || EMPTY
       @returns = merge(@returns, result)
+      @kept_returns = merge(@kept_returns, result) unless node.exp.try { |e| moved_text?(e) }
       result
     when Primitive
       node.name == "allocate" ? Value.new([node.object_id], [] of View) : EMPTY

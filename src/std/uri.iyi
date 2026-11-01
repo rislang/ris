@@ -276,11 +276,9 @@ pub struct ParsedURI
     t
   end
 
+  # A `new`, so the URI is built in the caller's destination (SPEC 1.5).
   def to_uri : URI
-    result = URI.new(scheme: @scheme, host: @host, port: @port,
-      path: @path, query: @query, fragment: @fragment)
-    result.written_userinfo(@user, @password)
-    result
+    URI.new(self)
   end
 
   def to_s(w : String::Builder) : Nil
@@ -329,52 +327,75 @@ pub struct ParsedURI
     String.build { |writer| to_s(writer) }
   end
 
+  # The scheme and host lowercased, a default port dropped and dot
+  # segments removed. A `new`, so it builds in the caller's destination
+  # (SPEC 1.5); the new texts view one flat String read first.
   def normalize : ParsedURI
-    copy = self
-    copy.normalize_in_place
+    ParsedURI.new(self, normal_text)
   end
 
-  def normalize_in_place : ParsedURI
+  # The scheme, a 0 byte, the host, a 0 byte, then the path, normalized:
+  # one flat String, which moves down to the caller (SPEC 1.5).
+  def normal_text : String
+    w = String::Builder.new(@path.bytesize + 32)
     if scheme = @scheme
-      @scheme = lower(scheme, false)
+      lower(w, scheme, false)
     end
+    w.push(0_u8)
     if host = @host
-      @host = lower(host, true)
+      lower(w, host, true)
     end
-    if scheme = @scheme
-      default = case scheme
-                when "http", "ws" then 80
-                when "https", "wss" then 443
-                when "ftp" then 21
-                when "ssh" then 22
-                when "telnet" then 23
-                else nil
-                end
-      @port = nil if @port == default
-    end
-    relative = @scheme.nil? && @host.nil? && @user.nil? && @port.nil? && !@path.starts_with?("/")
-    @path = relative ? URI.remove_relative_dot_segments(@path) : URI.remove_dot_segments(@path)
-    self
+    w.push(0_u8)
+    port = @port
+    port = nil if port && port == default_port(w.finish)
+    relative = @scheme.nil? && @host.nil? && @user.nil? && port.nil? && !@path.starts_with?("/")
+    w << (relative ? URI.remove_relative_dot_segments(@path) : URI.remove_dot_segments(@path))
+    w.finish
   end
 
-  private def lower(text : String, escapes : Bool) : String
-    String.build(text.bytesize) do |w|
-      i = 0
-      while i < text.bytesize
-        b = text[i]
-        if escapes && b == 37_u8 && i + 2 < text.bytesize && hex?(text[i + 1]) && hex?(text[i + 2])
-          w.push(b)
-          j = i + 1
-          while j <= i + 2
-            c = text[j]
-            w.push(c >= 97_u8 && c <= 102_u8 ? c - 32_u8 : c)
-            j += 1
-          end
-          i += 3
-        else
-          w.push(b >= 65_u8 && b <= 90_u8 ? b + 32_u8 : b)
-          i += 1
+  # The port a scheme (lowercased, ended by a 0 byte) answers on unless
+  # told; nil for none known.
+  protected def default_port(text : String) : Int32?
+    cut = text.index('\0') || text.bytesize
+    case text[0, cut]
+    when "http", "ws" then 80
+    when "https", "wss" then 443
+    when "ftp" then 21
+    when "ssh" then 22
+    when "telnet" then 23
+    else nil
+    end
+  end
+
+  # *base* with what `normal_text` wrote of it, as views of *normal*.
+  def self.new(base : ParsedURI, normal : String) : ParsedURI
+    uri = base
+    a = normal.index('\0') || 0
+    b = normal.index('\0', a + 1) || a
+    uri.scheme = normal[0, a] if base.scheme
+    uri.host = normal[a + 1, b - a - 1] if base.host
+    port = base.port
+    uri.port = nil if port && port == uri.default_port(normal)
+    uri.path = normal[b + 1, normal.bytesize - b - 1]
+    uri
+  end
+
+  private def lower(w : String::Builder, text : String, escapes : Bool) : Nil
+    i = 0
+    while i < text.bytesize
+      b = text[i]
+      if escapes && b == 37_u8 && i + 2 < text.bytesize && hex?(text[i + 1]) && hex?(text[i + 2])
+        w.push(b)
+        j = i + 1
+        while j <= i + 2
+          c = text[j]
+          w.push(c >= 97_u8 && c <= 102_u8 ? c - 32_u8 : c)
+          j += 1
         end
+        i += 3
+      else
+        w.push(b >= 65_u8 && b <= 90_u8 ? b + 32_u8 : b)
+        i += 1
       end
     end
   end
@@ -418,6 +439,15 @@ pub class URI
     self.password = password
     @fragment = fragment
     self.host = host
+  end
+
+  # *parsed*'s fields, its user and password as written.
+  def self.new(parsed : ParsedURI) : URI
+    result = new(scheme: parsed.scheme, host: parsed.host,
+      port: parsed.port, path: parsed.path, query: parsed.query,
+      fragment: parsed.fragment)
+    result.written_userinfo(parsed.user, parsed.password)
+    result
   end
 
   def host : String?
@@ -1278,12 +1308,4 @@ pub class URI
     as_tape.normalize.to_uri
   end
 
-  def normalize_in_place : URI
-    normalized = normalize
-    @scheme = normalized.scheme
-    @host = normalized.host
-    @port = normalized.port
-    @path = normalized.path
-    self
-  end
 end
