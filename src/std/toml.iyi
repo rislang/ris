@@ -958,6 +958,7 @@ struct TapeReader
   @array_items : Array(TapeAny)
   @array_used : Int32
   @empty_path : Array(String)
+  @texts : String::Builder
   @path : Pointer(Array(String))
 
   def path : Array(String)
@@ -997,6 +998,9 @@ struct TapeReader
     @array_items = Array(TapeAny).new
     @array_used = 0
     @empty_path = Array(String).new
+    # Strings with escapes undone, one after another: each value is a
+    # view of it, so it outlives the def that read it (SPEC 1.1).
+    @texts = String::Builder.new(text.bytesize + 16)
   end
 
   def document : TapeAny | TOMLError
@@ -1041,7 +1045,11 @@ struct TapeReader
       end
       i = i + 1
     end
-    TOMLError.new(reason, line, column)
+    # The sentence is kept in the parser's text, which outlives the def
+    # that refuses (SPEC 1.1).
+    from = @texts.length
+    @texts << reason
+    TOMLError.new(@texts.finish[from, reason.bytesize], line, column)
   end
 
   # What is at byte `at`, for a sentence.
@@ -1304,14 +1312,16 @@ struct TapeReader
     mark = @key_used
     scratch_key!
     count = @key_used - mark
-    parts = KeySlice(String).new(@key_parts, mark, count)
-    starts = KeySlice(Int32).new(@key_starts, mark, count)
     unless pos < input_size && input[pos] == 61_u8
-      return no_equals(path, parts)
+      return no_equals(path, KeySlice(String).new(@key_parts, mark, count))
     end
     self.pos = pos + 1
     skip_blanks
-    item = value(table.depth + parts.size)!
+    # The key's views are taken after the value: a nested table's keys
+    # write the slots past this one's, which no view may outlive.
+    item = value(table.depth + count)!
+    parts = KeySlice(String).new(@key_parts, mark, count)
+    starts = KeySlice(Int32).new(@key_starts, mark, count)
     result = place(table, path, parts, starts, item)
     @key_used = mark
     result
@@ -1978,23 +1988,26 @@ struct TapeReader
     input_size = size
     start = pos
     self.pos = pos + 1
-    text = nil.as(String::Builder?)
+    # The parser's text: a string made here would be freed with this def
+    # (SPEC 1.1).
+    text = @texts
+    from = text.length
+    escaped = false
     run = pos
     while true
       return fail("a string that does not close", start) if pos >= input_size
       b = input[pos]
       if b == 34_u8
         self.pos = pos + 1
-        if writer = text
-          writer << input[run, pos - run - 1]
-          return writer.finish
+        if escaped
+          text << input[run, pos - run - 1]
+          return text.finish[from, text.length - from]
         end
         return input[start + 1, pos - start - 2]
       elsif b == 92_u8
-        writer = text || String::Builder.new
-        writer << input[run, pos - run]
-        escape(writer)!
-        text = writer
+        text << input[run, pos - run]
+        escape(text)!
+        escaped = true
         run = pos
       elsif b == 10_u8 || b == 13_u8
         return fail("a line break in a single-line string", pos)
@@ -2052,7 +2065,8 @@ struct TapeReader
     start = pos
     self.pos = pos + 3
     skip_first_break
-    text = String::Builder.new
+    text = @texts
+    from = text.length
     while true
       if pos >= input_size
         return fail("a multi-line string that does not close", start)
@@ -2071,7 +2085,7 @@ struct TapeReader
             i = i + 1
           end
           self.pos = pos + n
-          return text.finish
+          return text.finish[from, text.length - from]
         end
         i = 0
         while i < n
@@ -2134,7 +2148,8 @@ struct TapeReader
     start = pos
     self.pos = pos + 3
     skip_first_break
-    text = String::Builder.new
+    text = @texts
+    from = text.length
     while true
       if pos >= input_size
         return fail("a multi-line string that does not close", start)
@@ -2153,7 +2168,7 @@ struct TapeReader
             i = i + 1
           end
           self.pos = pos + n
-          return text.finish
+          return text.finish[from, text.length - from]
         end
         i = 0
         while i < n

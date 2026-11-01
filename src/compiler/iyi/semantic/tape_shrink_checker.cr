@@ -1520,8 +1520,18 @@ class Iyi::TapeShrinkChecker
       node = node.expressions.last
     end
     return false unless t = node.type?
-    t = t.remove_typedef
-    return false if t.is_a?(UnionType)
+    moved_type?(t.remove_typedef)
+  end
+
+  # A String, an error struct holding one, or a union of those and
+  # plain values: what `__iyi_scope_result` moves down whole.
+  private def moved_type?(t : Type) : Bool
+    if t.is_a?(UnionType)
+      return t.union_types.all? { |m|
+        m = m.remove_typedef
+        type_name(m) == "String" || one_text_struct?(m) || !TapeChecker.tape_in(@program, m)
+      }
+    end
     type_name(t) == "String" || one_text_struct?(t)
   end
 
@@ -1531,7 +1541,8 @@ class Iyi::TapeShrinkChecker
     while node.is_a?(Expressions) && !node.expressions.empty?
       node = node.expressions.last
     end
-    node.is_a?(Return)
+    # A `while true` that only returns ends no other way either.
+    node.is_a?(Return) || !!node.type?.try(&.no_return?)
   end
 
   # A struct whose one tape field is a String and whose others are plain

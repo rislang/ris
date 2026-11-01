@@ -45,6 +45,11 @@ Checker holes found on the way (unknown must be refused, SPEC 3.6):
 * A tape block in a constant's initializer (program_local_init:
   `INIT = tape { State.keep(String.new("x")) }`) stores block text into
   a class variable unrefused.
+* The call graph's `fresh?` takes a call's String-or-error union as
+  fresh when any path allocates (an error sentence's interpolation),
+  though every String it answers views the parser (toml's
+  basic_string now writes into the parser's @texts): scalar's
+  `TapeAny.new(basic_string!)` is refused. Narrow by summary.
 * Field paths fold at FIELD_DEPTH (now 6, was 4): a deeper path through
   a reader's own fields (entry.@reader.@inflater.@core.@chunk) conflates
   a refill with views of its siblings. Fold by type, not depth.

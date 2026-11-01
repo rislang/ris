@@ -132,6 +132,9 @@ pub struct Eiy
     @column_number : Int32
     @token : Token
     @error : String
+    # The sentence is written into a field made with the lexer, so it
+    # outlives the def that finds the fault (SPEC 1.1).
+    @error_text : String::Builder
 
     def initialize(@string : String)
       @bytes = @string.to_unsafe
@@ -141,6 +144,7 @@ pub struct Eiy
       @column_number = 1
       @token = Token.new
       @error = ""
+      @error_text = String::Builder.new(64)
     end
 
     # Why the last `next_token?` answered nil, or nil while it has not.
@@ -223,7 +227,10 @@ pub struct Eiy
       while true
         if @pos >= @len
           tag = is_output ? "<%=" : (is_escape ? "<%%" : "<%")
-          @error = "unterminated #{tag} tag at line #{open_line}, column #{open_column}"
+          from = @error_text.length
+          @error_text << "unterminated " << tag << " tag at line " <<
+            open_line.to_s << ", column " << open_column.to_s
+          @error = @error_text.finish[from, @error_text.length - from]
           return nil
         end
 
@@ -354,6 +361,9 @@ pub struct Eiy
     @column_number : Int32
     @token : Token
     @error : String
+    # The sentence is written into a field made with the lexer, so it
+    # outlives the def that finds the fault (SPEC 1.1).
+    @error_text : String::Builder
 
     def initialize(@string : String)
       @len = @string.bytesize
@@ -362,6 +372,7 @@ pub struct Eiy
       @column_number = 1
       @token = Token.new
       @error = ""
+      @error_text = String::Builder.new(64)
     end
 
     # Why the last `next_token?` answered nil, or nil while it has not.
@@ -444,7 +455,10 @@ pub struct Eiy
       while true
         if @pos >= @len
           tag = is_output ? "<%=" : (is_escape ? "<%%" : "<%")
-          @error = "unterminated #{tag} tag at line #{open_line}, column #{open_column}"
+          from = @error_text.length
+          @error_text << "unterminated " << tag << " tag at line " <<
+            open_line.to_s << ", column " << open_column.to_s
+          @error = @error_text.finish[from, @error_text.length - from]
           return nil
         end
 
