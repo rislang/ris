@@ -49,9 +49,6 @@ Fix a checker hole below only when a cluster hits it.
      (BodyReader's decoders, Response bodies, h2 state, hpack
      decode_fields, zstd). Make each holder an owner class built in its
      owner's scope (SPEC 2.1), so helpers fill its fields in place.
-   * After step 1: TlsSession keeps each ticket with
-     `copy_to(Program.tape)`, growing per ticket. Make the session an
-     owner class with a ticket field refilled in place.
    * socket_pair, socket_pieces, socket_race, smtp, mail: connect's
      attempt list (socket.iyi 248, 1066), ResolvConf parsing (dns.iyi
      1340s), `Resolver.system` made in a def.

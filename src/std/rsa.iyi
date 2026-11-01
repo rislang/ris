@@ -154,6 +154,75 @@ end
 
 @[OnTape]
 pub struct RsaPublicKey
+  private macro check_key_value(expression)
+    begin
+      %value = {{expression}}
+      if %value.is_a?(RsaError)
+        %message = %value.message
+        return %message[5, %message.bytesize - 5].dup
+      end
+      %value
+    end
+  end
+
+  private macro read_key_value(expression)
+    begin
+      %value = {{expression}}
+      raise %value.message if %value.is_a?(RsaError)
+      %value
+    end
+  end
+
+  def initialize(value : RsaPublicKey)
+    initialize(value.modulus, value.exponent, value.bits)
+  end
+
+  private def self.check_pkcs1(der : Array::View(UInt8)) : String?
+    value = check_key_value(RsaBytes.asn1_value(Der.parse(der)))
+    fields = check_key_value(RsaBytes.asn1_values(value.sequence))
+    return "an RSAPublicKey of #{fields.size} values, not 2" unless fields.size == 2
+    n = check_key_value(RsaBytes.asn1_bytes(fields[0].unsigned_integer))
+    e = check_key_value(RsaBytes.asn1_bytes(fields[1].unsigned_integer))
+    result = RsaPublicKey.new(n, e)
+    result.is_a?(RsaError) ? result.message[5, result.message.bytesize - 5].dup : nil
+  end
+
+  def initialize(der : Array::View(UInt8))
+    value = read_key_value(RsaBytes.asn1_value(Der.parse(der)))
+    fields = read_key_value(RsaBytes.asn1_values(value.sequence))
+    raise("an RSAPublicKey of #{fields.size} values, not 2") unless fields.size == 2
+    n = read_key_value(RsaBytes.asn1_bytes(fields[0].unsigned_integer))
+    e = read_key_value(RsaBytes.asn1_bytes(fields[1].unsigned_integer))
+    initialize(read_key_value(RsaPublicKey.new(n, e)))
+  end
+
+  private def self.check_spki(value : DerValue) : String?
+    fields = check_key_value(RsaBytes.asn1_values(value.sequence))
+    return "a SubjectPublicKeyInfo of #{fields.size} values, not 2" unless fields.size == 2
+    algorithm = check_key_value(RsaBytes.asn1_values(fields[0].sequence))
+    return "an AlgorithmIdentifier with no algorithm" if algorithm.empty?
+    oid = check_key_value(RsaBytes.asn1_text(algorithm[0].oid))
+    return "a key for #{oid}, not rsaEncryption (#{RSA_ENCRYPTION})" unless oid == RSA_ENCRYPTION
+    unless algorithm.size == 2 && algorithm[1].universal?(DerTag::NULL) && !algorithm[1].null.is_a?(Asn1Error)
+      return "rsaEncryption's parameters are not the NULL RFC 3279 gives it"
+    end
+    result = from_pkcs1(check_key_value(RsaBytes.asn1_bytes(fields[1].bit_string)))
+    result.is_a?(RsaError) ? result.message[5, result.message.bytesize - 5].dup : nil
+  end
+
+  def initialize(value : DerValue)
+    fields = read_key_value(RsaBytes.asn1_values(value.sequence))
+    raise("a SubjectPublicKeyInfo of #{fields.size} values, not 2") unless fields.size == 2
+    algorithm = read_key_value(RsaBytes.asn1_values(fields[0].sequence))
+    raise("an AlgorithmIdentifier with no algorithm") if algorithm.empty?
+    oid = read_key_value(RsaBytes.asn1_text(algorithm[0].oid))
+    raise("a key for #{oid}, not rsaEncryption (#{RSA_ENCRYPTION})") unless oid == RSA_ENCRYPTION
+    unless algorithm.size == 2 && algorithm[1].universal?(DerTag::NULL) && !algorithm[1].null.is_a?(Asn1Error)
+      raise("rsaEncryption's parameters are not the NULL RFC 3279 gives it")
+    end
+    initialize(read_key_value(RsaPublicKey.from_pkcs1(read_key_value(RsaBytes.asn1_bytes(fields[1].bit_string)))))
+  end
+
   getter modulus : BigInt
   getter exponent : BigInt
   # The modulus's length in bits, and in bytes: a signature's length.
@@ -185,31 +254,24 @@ pub struct RsaPublicKey
 
   # An RSAPublicKey (RFC 8017 appendix A.1.1): SEQUENCE { modulus, exponent }.
   def self.from_pkcs1(der : Array::View(UInt8)) : RsaPublicKey | RsaError
-    value = RsaBytes.asn1_value(Der.parse(der))!
-    fields = RsaBytes.asn1_values(value.sequence)!
-    return RsaError.new("an RSAPublicKey of #{fields.size} values, not 2") unless fields.size == 2
-    n = RsaBytes.asn1_bytes(fields[0].unsigned_integer)!
-    e = RsaBytes.asn1_bytes(fields[1].unsigned_integer)!
-    RsaPublicKey.new(n, e)
+    if why = check_pkcs1(der)
+      RsaError.new(why)
+    else
+      RsaPublicKey.new(der)
+    end
   end
 
   # A SubjectPublicKeyInfo (RFC 5280 section 4.1.2.7) naming rsaEncryption.
   def self.from_spki(der : Array::View(UInt8)) : RsaPublicKey | RsaError
-    value = RsaBytes.asn1_value(Der.parse(der))!
-    from_spki(value)
+    from_spki(RsaBytes.asn1_value(Der.parse(der))!)
   end
 
   def self.from_spki(value : DerValue) : RsaPublicKey | RsaError
-    fields = RsaBytes.asn1_values(value.sequence)!
-    return RsaError.new("a SubjectPublicKeyInfo of #{fields.size} values, not 2") unless fields.size == 2
-    algorithm = RsaBytes.asn1_values(fields[0].sequence)!
-    return RsaError.new("an AlgorithmIdentifier with no algorithm") if algorithm.empty?
-    oid = RsaBytes.asn1_text(algorithm[0].oid)!
-    return RsaError.new("a key for #{oid}, not rsaEncryption (#{RSA_ENCRYPTION})") unless oid == RSA_ENCRYPTION
-    unless algorithm.size == 2 && algorithm[1].universal?(DerTag::NULL) && !algorithm[1].null.is_a?(Asn1Error)
-      return RsaError.new("rsaEncryption's parameters are not the NULL RFC 3279 gives it")
+    if why = check_spki(value)
+      RsaError.new(why)
+    else
+      RsaPublicKey.new(value)
     end
-    from_pkcs1(RsaBytes.asn1_bytes(fields[1].bit_string)!)
   end
 
   # Whether *signature* is the PKCS #1 v1.5 signature (RSASSA-PKCS1-v1_5,
@@ -526,6 +588,10 @@ end
 # The lengths and the mask PSS needs, the HMAC signing draws on, and
 # std/asn1's errors as this one's.
 struct RsaBytes
+  private def self.borrow(value : T) : T forall T
+    value
+  end
+
   def self.mac(hash : RsaHash, key : Array::View(UInt8), data : Array::View(UInt8)) : Array(UInt8)
     case hash
     when RsaHash::SHA256 then HMAC.digest(SHA256, key, data)
@@ -582,18 +648,18 @@ struct RsaBytes
   # std/asn1's answer as this module's: the value, or an RsaError saying
   # what was not a key.
   def self.asn1_value(answer : DerValue | Asn1Error) : DerValue | RsaError
-    answer.is_a?(Asn1Error) ? RsaError.new(answer.message) : answer
+    answer.is_a?(Asn1Error) ? RsaError.new(answer.message) : borrow(answer)
   end
 
   def self.asn1_values(answer : Array(DerValue) | Asn1Error) : Array(DerValue) | RsaError
-    answer.is_a?(Asn1Error) ? RsaError.new(answer.message) : answer
+    answer.is_a?(Asn1Error) ? RsaError.new(answer.message) : borrow(answer)
   end
 
   def self.asn1_bytes(answer : Array(UInt8) | Asn1Error) : Array(UInt8) | RsaError
-    answer.is_a?(Asn1Error) ? RsaError.new(answer.message) : answer
+    answer.is_a?(Asn1Error) ? RsaError.new(answer.message) : borrow(answer)
   end
 
   def self.asn1_text(answer : String | Asn1Error) : String | RsaError
-    answer.is_a?(Asn1Error) ? RsaError.new(answer.message) : answer
+    answer.is_a?(Asn1Error) ? RsaError.new(answer.message) : borrow(answer)
   end
 end

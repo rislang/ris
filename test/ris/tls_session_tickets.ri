@@ -1,0 +1,175 @@
+# Fixed session slots must not retain a connection's ticket scratch.
+import std/int
+import std/time::{Time}
+import std/tls::{TlsConfig, TlsHeldTicket, TlsMadeUnder, TlsSession}
+import std/x509::{Certificate, X509Error}
+
+# Linux's resident pages and mappings, as in scope_frees.
+def resident : Int64
+  text = File.read("/proc/self/statm")
+  at = 0
+  while text[at] != 32_u8
+    at += 1
+  end
+  at += 1
+  pages = 0_i64
+  while text[at] != 32_u8
+    pages = pages * 10 + (text[at] - 48_u8).to_i64
+    at += 1
+  end
+  pages * 4096
+end
+
+def mappings : Int32
+  count = 0
+  File.read("/proc/self/maps").each_byte do |byte|
+    count += 1 if byte == 10_u8
+  end
+  count
+end
+
+def fill(session : TlsSession, config : TlsConfig, count : Int32) : Nil
+  at = 0
+  while at < count
+    # The snapshot and every byte buffer die at the end of this round.
+    under = TlsMadeUnder.new(config)
+    bytes = Array(UInt8).new(4096, (at % 251).to_u8)
+    psk = Array(UInt8).new(32, 7_u8)
+    host = "local#{at % 2}.test"
+    alpn = "h#{at % 2}"
+    held = TlsHeldTicket.new(bytes, psk, 0x1301, at.to_i64,
+      1_000_000_i64, 12_i64, host, 443, under, alpn,
+      [] of Certificate, 0_i64, 1024_i64)
+    session.keep(held)
+    at += 1
+  end
+end
+
+config = TlsConfig.new
+config.now = Time.from_unix(1_767_225_600_i64)
+session = TlsSession.new
+fill(session, config, 10_000)
+rss = resident
+maps = mappings
+fill(session, config, 100_000)
+raise "ticket RSS grew" unless resident - rss < 4_194_304
+raise "ticket mappings grew" unless mappings <= maps
+raise "ticket limit" unless session.size == TlsSession::MAX_TICKETS
+puts "PASS: 100000 session tickets, flat RSS and mappings"
+
+# Take must consume the newest match and preserve all its fields.
+held = session.take("local1.test", 443, config, 100_000_i64)
+raise "missing newest ticket" unless held
+raise "wrong newest ticket" unless held.ticket.size == 4096 &&
+                                   held.ticket[0] == (99_999 % 251).to_u8
+raise "wrong PSK" unless held.psk == Array(UInt8).new(32, 7_u8)
+raise "wrong fields" unless held.suite == 0x1301 &&
+                            held.received_ms == 99_999_i64 && held.lifetime_ms == 1_000_000_i64 &&
+                            held.age_add == 12_i64 && held.host == "local1.test" &&
+                            held.port == 443 && held.alpn == "h1" && held.max_early_data == 1024_i64
+raise "wrong trust" unless held.under.same?(config)
+raise "not consumed" unless session.size == TlsSession::MAX_TICKETS - 1
+
+expected = 99_997_i64
+while expected >= 99_993_i64
+  next_ticket = session.take("local1.test", 443, config, 100_000_i64)
+  raise "ticket order" unless next_ticket &&
+                              next_ticket.received_ms == expected
+  expected -= 2_i64
+end
+raise "oldest ticket was not evicted" if session.take("local1.test", 443, config, 100_000_i64)
+
+# Refilling every slot must leave a taken ticket independent of them.
+fill(session, config, 100)
+raise "taken bytes overwritten" unless held.ticket[0] ==
+                                         (99_999 % 251).to_u8 && held.host == "local1.test" && held.alpn == "h1"
+raise "wrong port accepted" if session.take("local1.test", 8443, config,
+                                 100_i64)
+other = TlsConfig.new
+raise "wrong config accepted" if session.take("local1.test", 443, other,
+                                   100_i64)
+config.require_staple = true
+raise "changed config accepted" if session.take("local1.test", 443, config,
+                                     100_i64)
+config.require_staple = false
+raise "expired tickets accepted" if session.take("local1.test", 443,
+                                      config, 2_000_000_i64)
+raise "expired tickets retained" unless session.size == 0
+puts "PASS: newest ticket, independent bytes, trust and expiry"
+
+# A deterministic Ed25519 certificate, valid until 2030-01-01.
+def certificate_der : Array(UInt8)
+  hex =
+    "3081ee3081a1a003020102020101300506032b65703014311230100603550403" +
+      "0c09746170652e74657374301e170d3230303130313030303030305a170d3330" +
+      "303130313030303030305a30143112301006035504030c09746170652e746573" +
+      "74302a300506032b657003210003a107bff3ce10be1d70dd18e74bc09967e4d6" +
+      "309ba50d5f1ddc8664125531b8a318301630140603551d11040d300b82097461" +
+      "70652e74657374300506032b657003410080db9509e50e4812710221dce57fe5" +
+      "1d34c2c061ab3d0c9e8bbe55d059bb18b516efe78763195527d5cb86a891553f" +
+      "b7831df85f02315110dc094625a8b3a00f"
+  bytes = Array(UInt8).new(hex.bytesize // 2, 0_u8)
+  at = 0
+  while at < hex.bytesize
+    digit = hex[at] <= 57_u8 ? hex[at] - 48_u8 : hex[at] - 87_u8
+    bytes[at // 2] = (bytes[at // 2] << 4) | digit
+    at += 1
+  end
+  bytes
+end
+
+def keep_certificate(session : TlsSession, config : TlsConfig) : Nil
+  certificate = Certificate.parse(certificate_der)
+  raise "fixture certificate" if certificate.is_a?(X509Error)
+  under = TlsMadeUnder.new(config)
+  chain = Array(Certificate).new(1, certificate)
+  held = TlsHeldTicket.new([42_u8], [7_u8], 0x1301, 0_i64,
+    1000_i64, 0_i64, "certificate.test", 443, under, nil, chain, 0_i64)
+  session.keep(held)
+end
+
+keep_certificate(session, config)
+rebuilt = session.take("certificate.test", 443, config, 1_i64)
+raise "missing certificate ticket" unless rebuilt
+chain = rebuilt.peer_certificates
+raise "wrong rebuilt chain" unless chain.size == 1 &&
+                                   chain[0].raw == certificate_der && chain[0].subject_name == "CN=tape.test"
+fill(session, config, 100)
+raise "rebuilt certificate overwritten" unless chain[0].dns_names[0] == "tape.test"
+
+# Zero capacity and expiration of the original authentication are bounded.
+none = TlsSession.new(0)
+fill(none, config, 10)
+raise "zero capacity retained tickets" unless none.size == 0
+old = TlsSession.new(1)
+fill(old, config, 10)
+raise "old authentication accepted" if old.take("local1.test", 443,
+                                         config, TlsSession::MAX_LIFETIME * 1000_i64)
+raise "old authentication retained" unless old.size == 0
+# A copied ECH snapshot must notice mutations of the config's bytes.
+ech = [1_u8, 2_u8]
+config.ech_configs = ech
+keep_certificate(session, config)
+ech[0] = 3_u8
+raise "changed ECH accepted" if session.take("certificate.test", 443, config, 1_i64)
+ech[0] = 1_u8
+raise "unchanged ECH refused" unless session.take("certificate.test", 443, config, 1_i64)
+config.ech_configs = nil
+
+certificate = Certificate.parse(certificate_der)
+raise "root fixture" if certificate.is_a?(X509Error)
+roots = [certificate]
+config.roots = roots
+keep_certificate(session, config)
+config.roots = [] of Certificate
+raise "changed roots accepted" if session.take("certificate.test", 443, config, 1_i64)
+config.roots = roots
+raise "unchanged roots refused" unless session.take("certificate.test", 443, config, 1_i64)
+config.roots = nil
+
+config.now = Time.from_unix(1_924_992_000_i64)
+keep_certificate(session, config)
+raise "expired leaf accepted" if session.take("certificate.test", 443, config, 1_i64)
+config.now = nil
+
+puts "PASS: certificate DER rebuilt on caller tape and session limits"

@@ -3526,13 +3526,13 @@ end
 # definition serves std/tls and std/http, so the two cannot come to
 # compare different parts.
 pub class TlsMadeUnder
-  @config : TlsConfig
-  @roots : Array(Certificate)?
-  @identity : TlsIdentity?
-  @now : Time?
-  @min_version : TlsVersion
-  @require_staple : Bool
-  @ech_configs : Array(UInt8)?
+  getter config : TlsConfig
+  getter roots : Array(Certificate)?
+  getter identity : TlsIdentity?
+  getter now : Time?
+  getter min_version : TlsVersion
+  getter require_staple : Bool
+  getter ech_configs : Array(UInt8)?
 
   def initialize(@config : TlsConfig)
     @roots = @config.roots
@@ -3608,52 +3608,206 @@ pub class TlsSession
   # a fresh key exchange both.
   PSK_DHE_KE = 1_u8
 
-  @tickets : Array(TlsHeldTicket) = [] of TlsHeldTicket
+  @slots : Array(RisTlsSessionSlot)
   @limit : Int32
+  @serial : Int64 = 0_i64
 
   # A session holding at most *limit* tickets, held to 0 ..
   # `MAX_TICKETS`: std/http's `HTTPClient` keeps fewer for each origin.
   def initialize(limit : Int32 = MAX_TICKETS)
     @limit = limit < 0 ? 0 : (limit > MAX_TICKETS ? MAX_TICKETS : limit)
+    @slots = Array(RisTlsSessionSlot).new(MAX_TICKETS)
+    {% for i in 0...MAX_TICKETS %}
+      slot{{i}} = RisTlsSessionSlot.new
+      @slots << slot{{i}}
+    {% end %}
   end
 
-  # How many tickets are held.
   def size : Int32
-    @tickets.size
+    count = 0
+    @slots.each { |slot| count += 1 if slot.used }
+    count
   end
 
-  # The newest ticket for *host* and *port* under *config* (the class's
-  # header says which fit), taken out, at *now_ms* by the monotonic clock.
-  # Those past their lifetimes or seven days from their full handshake go
-  # too, and so does one that fits but whose server certificate has
-  # expired.
-  def take(host : String, port : Int32, config : TlsConfig, now_ms : Int64) : TlsHeldTicket?
-    @tickets = @tickets.select { |held| now_ms - held.received_ms < held.lifetime_ms && now_ms - held.authenticated_ms < MAX_LIFETIME * 1000_i64 }
-    checked_at = config.now || Time.utc
-    at = @tickets.size - 1
-    while at >= 0
-      held = @tickets[at]
-      if held.host == host && held.port == port && held.under.same?(config)
-        kept = [] of TlsHeldTicket
-        @tickets.each_with_index { |other, i| kept << other unless i == at }
-        @tickets = kept
-        leaf = held.peer_certificates[0]?
-        return held unless leaf && checked_at > leaf.not_after
+  # Expire old tickets, then consume the newest matching one. Its bytes
+  # and parsed chain are rebuilt in the caller, independent of the slot.
+  def take(host : String, port : Int32, config : TlsConfig,
+           now_ms : Int64) : TlsHeldTicket?
+    decode(take_slot(host, port, config, now_ms), config)
+  end
+
+  private def decode(slot : RisTlsSessionSlot?, config : TlsConfig) : TlsHeldTicket?
+    slot ? TlsHeldTicket.new(slot, config) : nil
+  end
+
+  private def take_slot(host : String, port : Int32, config : TlsConfig,
+                        now_ms : Int64) : RisTlsSessionSlot?
+    found = nil.as(RisTlsSessionSlot?)
+    checked_at = (config.now || Time.utc).to_unix
+    @slots.each do |slot|
+      if slot.used
+        if now_ms - slot.received_ms >= slot.lifetime_ms ||
+           now_ms - slot.authenticated_ms >= MAX_LIFETIME * 1000_i64
+          slot.used = false
+        elsif slot.matches?(host, port, config)
+          expires = slot.leaf_expires
+          previous = found
+          if expires && checked_at > expires
+            slot.used = false
+          elsif previous.nil? || slot.serial > previous.serial
+            found = slot
+          end
+        end
       end
-      at = at - 1
     end
-    nil
+    if slot = found
+      slot.used = false
+      slot
+    else
+      nil
+    end
   end
 
-  # *ticket* held, the oldest gone past the session's limit. It is
-  # copied to the program's tape: a session outlives the connection that
-  # received it, and has no owner of its own yet (TODO), so each ticket
-  # kept stays until the program ends.
+  # Reuse a free slot, or overwrite the oldest. No ticket allocation is
+  # retained from the connection's scratch or on the program tape.
   def keep(ticket : TlsHeldTicket) : Nil
-    @tickets << ticket.copy_to(Program.tape)
-    while @tickets.size > @limit
-      @tickets.shift
+    return if @limit == 0 || ticket.ticket.size > MAX_TICKET ||
+              ticket.peer_certificates.size > X509::MAX_CHAIN
+    chosen = @slots[0]
+    at = 0
+    while at < @limit
+      slot = @slots[at]
+      if !slot.used
+        chosen = slot
+        break
+      end
+      chosen = slot if slot.serial < chosen.serial
+      at += 1
     end
+    @serial += 1
+    chosen.refill(ticket, @serial)
+  end
+end
+
+# Fixed storage for one session ticket. Trust objects are program-owned:
+# retain their identities and copy mutable settings into reusable fields.
+# No reference into the connection or its trust snapshot is retained.
+class RisTlsSessionSlot
+  property used : Bool = false
+  getter serial : Int64 = 0_i64
+  getter ticket : Array(UInt8)
+  getter psk : Array(UInt8)
+  getter host : Array(UInt8)
+  getter alpn : Array(UInt8)
+  getter has_alpn : Bool = false
+  getter chain : Array(UInt8)
+  getter offsets : Array(Int32)
+  getter suite : Int32 = 0
+  getter received_ms : Int64 = 0_i64
+  getter lifetime_ms : Int64 = 0_i64
+  getter authenticated_ms : Int64 = 0_i64
+  getter age_add : Int64 = 0_i64
+  getter port : Int32 = 0
+  getter max_early_data : Int64 = 0_i64
+  getter leaf_expires : Int64? = nil
+  @config_id : UInt64 = 0_u64
+  @root_ids : Array(UInt64)
+  @has_roots : Bool = false
+  @identity_id : UInt64? = nil
+  @now_seconds : Int64? = nil
+  @now_nanos : Int32 = 0
+  @min_version : TlsVersion = TlsVersion::TLS13
+  @require_staple : Bool = false
+  @ech_configs : Array(UInt8)
+  @has_ech : Bool = false
+
+  def initialize
+    @ticket = Array(UInt8).new(TlsSession::MAX_TICKET)
+    @psk = Array(UInt8).new(48)
+    @host = Array(UInt8).new(256)
+    @alpn = Array(UInt8).new(256)
+    @chain = Array(UInt8).new(4096)
+    @offsets = Array(Int32).new(X509::MAX_CHAIN + 1)
+    @root_ids = Array(UInt64).new
+    @ech_configs = Array(UInt8).new
+  end
+
+  def refill(held : TlsHeldTicket, @serial : Int64) : Nil
+    host = held.host.dup
+    protocol = held.alpn
+    alpn = protocol ? protocol.dup : nil
+    source_ech = held.under.ech_configs
+    ech = source_ech ? source_ech.dup : nil
+    @used = false
+    @ticket.clear
+    held.ticket.each { |byte| @ticket << byte }
+    @psk.clear
+    held.psk.each { |byte| @psk << byte }
+    @host.clear
+    host.each_byte { |byte| @host << byte }
+    @alpn.clear
+    @has_alpn = !alpn.nil?
+    alpn.each_byte { |byte| @alpn << byte } if alpn
+    @chain.clear
+    @offsets.clear
+    @offsets << 0
+    held.peer_certificates.each do |certificate|
+      certificate.raw.each { |byte| @chain << byte }
+      @offsets << @chain.size
+    end
+    leaf = held.peer_certificates[0]?
+    @leaf_expires = leaf ? leaf.not_after.to_unix : nil
+    @suite = held.suite
+    @received_ms = held.received_ms
+    @lifetime_ms = held.lifetime_ms
+    @authenticated_ms = held.authenticated_ms
+    @age_add = held.age_add
+    @port = held.port
+    @max_early_data = held.max_early_data
+    under = held.under
+    @config_id = under.config.object_id
+    @root_ids.clear
+    roots = under.roots
+    @has_roots = !roots.nil?
+    roots.each { |root| @root_ids << root.object_id } if roots
+    identity = under.identity
+    @identity_id = identity ? identity.object_id : nil
+    now = under.now
+    @now_seconds = now ? now.to_unix : nil
+    @now_nanos = now ? now.nanosecond : 0
+    @min_version = under.min_version
+    @require_staple = under.require_staple
+    @ech_configs.clear
+    @has_ech = !ech.nil?
+    ech.each { |byte| @ech_configs << byte } if ech
+    @used = true
+  end
+
+  private def same_roots?(roots : Array(Certificate)) : Bool
+    return false unless roots.size == @root_ids.size
+    at = 0
+    while at < roots.size
+      return false unless roots[at].object_id == @root_ids[at]
+      at += 1
+    end
+    true
+  end
+
+  def matches?(host : String, port : Int32, config : TlsConfig) : Bool
+    return false unless @host.bytes == host && @port == port
+    return false unless @config_id == config.object_id
+    roots = config.roots
+    return false unless @has_roots ? (!roots.nil? && same_roots?(roots)) : roots.nil?
+    identity = config.identity
+    held = @identity_id
+    return false unless held.nil? ? identity.nil? : (!identity.nil? && held == identity.object_id)
+    ech = config.ech_configs
+    return false unless @has_ech ? (!ech.nil? && @ech_configs == ech) : ech.nil?
+    now = config.now
+    seconds = @now_seconds
+    return false unless seconds.nil? ? now.nil? : (!now.nil? && seconds == now.to_unix && @now_nanos == now.nanosecond)
+    @min_version == config.min_version &&
+      @require_staple == config.require_staple
   end
 end
 
@@ -3681,6 +3835,29 @@ pub class TlsHeldTicket
   def initialize(@ticket : Array(UInt8), @psk : Array(UInt8), @suite : Int32, @received_ms : Int64, @lifetime_ms : Int64,
                  @age_add : Int64, @host : String, @port : Int32, @under : TlsMadeUnder, @alpn : String?,
                  @peer_certificates : Array(Certificate), @authenticated_ms : Int64, @max_early_data : Int64 = 0_i64)
+  end
+
+  # A consumed slot is decoded in the constructor's caller destination.
+  def initialize(slot : RisTlsSessionSlot, config : TlsConfig)
+    chain = Array(Certificate).new(slot.offsets.size - 1)
+    {% for i in 0...X509::MAX_CHAIN %}
+      if slot.offsets.size > {{i + 1}}
+        first{{i}} = slot.offsets[{{i}}]
+        der{{i}} = slot.chain[first{{i}},
+          slot.offsets[{{i + 1}}] - first{{i}}].to_a
+        certificate{{i}} = Certificate.parse(der{{i}})
+        if certificate{{i}}.is_a?(X509Error)
+          raise "tls: a stored certificate could not be parsed"
+        end
+        chain << certificate{{i}}
+      end
+    {% end %}
+    under = TlsMadeUnder.new(config)
+    initialize(slot.ticket.dup, slot.psk.dup, slot.suite,
+      slot.received_ms, slot.lifetime_ms, slot.age_add,
+      slot.host.bytes.dup, slot.port, under,
+      slot.has_alpn ? slot.alpn.bytes.dup : nil, chain,
+      slot.authenticated_ms, slot.max_early_data)
   end
 end
 

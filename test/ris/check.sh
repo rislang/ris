@@ -1721,6 +1721,28 @@ else
   echo "FAILED   scope_frees: $out"; status=1
 fi
 
+# A session reuses fixed ticket slots; take rebuilds caller-owned bytes
+# and certificates after the receiving connection's scope has ended.
+out=$(timeout 300 "$RIS" run test/ris/tls_session_tickets.ri 2>&1)
+if [ "$?" = 0 ] && [ "$(grep -c '^PASS: ' <<<"$out")" = 3 ]; then
+  echo 'runs     tls_session_tickets (100000 tickets, flat RSS, take)'
+else
+  echo "FAILED   tls_session_tickets: $out"; status=1
+fi
+
+# Every supported certificate key, extension fields, and exact rejection
+# sentences, including off-curve points judged by Python's cryptography.
+if python3 -c 'from cryptography import x509' 2>/dev/null; then
+  out=$(python3 test/ris/x509_parse_checks.py 2>&1)
+  if [ "$?" = 0 ] && grep -q '^PASS: x509 parse,' <<<"$out"; then
+    echo 'runs     x509_parse (key types, fields and rejection sentences)'
+  else
+    echo "FAILED   x509_parse: $out"; status=1
+  fi
+else
+  echo 'skips    x509_parse (needs Python cryptography)'
+fi
+
 # An error struct's sentence moves down as a String result does.
 out=$("$RIS" run test/ris/scope_error_result.ri 2>&1)
 if [ "$out" = $'bad 5 5\nok 1\nrefused 7 7\nmade 4 bc also abcd\nt abcd 3 ab\ntrue' ]; then

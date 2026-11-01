@@ -135,10 +135,101 @@ end
 
 @[OnTape]
 pub struct EcdsaPublicKey
+  private macro check_key_value(expression)
+    begin
+      %value = {{expression}}
+      if %value.is_a?(EcdsaError)
+        %message = %value.message
+        return %message[7, %message.bytesize - 7].dup
+      end
+      %value
+    end
+  end
+
+  private macro read_key_value(expression)
+    begin
+      %value = {{expression}}
+      raise %value.message if %value.is_a?(EcdsaError)
+      %value
+    end
+  end
+
+  def initialize(value : EcdsaPublicKey)
+    initialize(value.curve, value.x, value.y, value.curve_group)
+  end
+
+  private def self.check_point(curve : EcdsaCurve, point : Array(UInt8)) : String?
+    size = curve.size
+    if point.size == size + 1 && (point[0] == 2_u8 || point[0] == 3_u8)
+      return "a compressed point, which this does not take"
+    end
+    unless point.size == 2 * size + 1 && point[0] == 4_u8
+      return "a point of #{point.size} bytes, not the #{2 * size + 1} of an uncompressed #{curve} point"
+    end
+    x = BigInt.from_bytes(point[1, size])
+    y = BigInt.from_bytes(point[1 + size, size])
+    group = EcdsaGroup.of(curve)
+    return "a coordinate not below the field's prime" unless x < group.p && y < group.p
+    check = RisEcdsaPointCheck.new(x, y, group)
+    return "a point that is not on #{curve}" unless check.valid?
+    nil
+  end
+
+  def initialize(curve : EcdsaCurve, point : Array(UInt8))
+    size = curve.size
+    if point.size == size + 1 && (point[0] == 2_u8 || point[0] == 3_u8)
+      raise("a compressed point, which this does not take")
+    end
+    unless point.size == 2 * size + 1 && point[0] == 4_u8
+      raise("a point of #{point.size} bytes, not the #{2 * size + 1} of an uncompressed #{curve} point")
+    end
+    x = BigInt.from_bytes(point[1, size])
+    y = BigInt.from_bytes(point[1 + size, size])
+    group = EcdsaGroup.of(curve)
+    initialize(curve, x, y, group)
+  end
+
+  private def self.check_spki(value : DerValue) : String?
+    fields = check_key_value(EcdsaBytes.asn1_values(value.sequence))
+    return "a SubjectPublicKeyInfo of #{fields.size} values, not 2" unless fields.size == 2
+    algorithm = check_key_value(EcdsaBytes.asn1_values(fields[0].sequence))
+    return "an AlgorithmIdentifier with no algorithm" if algorithm.empty?
+    oid = check_key_value(EcdsaBytes.asn1_text(algorithm[0].oid))
+    return "a key for #{oid}, not id-ecPublicKey (#{EC_PUBLIC_KEY})" unless oid == EC_PUBLIC_KEY
+    unless algorithm.size == 2 && algorithm[1].universal?(DerTag::OBJECT_IDENTIFIER)
+      return "id-ecPublicKey's parameters are not a named curve"
+    end
+    named = check_key_value(EcdsaBytes.asn1_text(algorithm[1].oid))
+    curve = EcdsaCurve.from_oid(named)
+    return "a key on curve #{named}, not P-256, P-384 or P-521" unless curve
+    result = from_point(curve, check_key_value(EcdsaBytes.asn1_bytes(fields[1].bit_string)))
+    result.is_a?(EcdsaError) ? result.message[7, result.message.bytesize - 7].dup : nil
+  end
+
+  def initialize(value : DerValue)
+    fields = read_key_value(EcdsaBytes.asn1_values(value.sequence))
+    raise("a SubjectPublicKeyInfo of #{fields.size} values, not 2") unless fields.size == 2
+    algorithm = read_key_value(EcdsaBytes.asn1_values(fields[0].sequence))
+    raise("an AlgorithmIdentifier with no algorithm") if algorithm.empty?
+    oid = read_key_value(EcdsaBytes.asn1_text(algorithm[0].oid))
+    raise("a key for #{oid}, not id-ecPublicKey (#{EC_PUBLIC_KEY})") unless oid == EC_PUBLIC_KEY
+    unless algorithm.size == 2 && algorithm[1].universal?(DerTag::OBJECT_IDENTIFIER)
+      raise("id-ecPublicKey's parameters are not a named curve")
+    end
+    named = read_key_value(EcdsaBytes.asn1_text(algorithm[1].oid))
+    curve = EcdsaCurve.from_oid(named)
+    raise("a key on curve #{named}, not P-256, P-384 or P-521") unless curve
+    initialize(read_key_value(EcdsaPublicKey.from_point(curve, read_key_value(EcdsaBytes.asn1_bytes(fields[1].bit_string)))))
+  end
+
   getter curve : EcdsaCurve
   getter x : BigInt
   getter y : BigInt
   @group : EcdsaGroup
+
+  protected def curve_group : EcdsaGroup
+    @group
+  end
 
   EC_PUBLIC_KEY = "1.2.840.10045.2.1"
 
@@ -148,42 +239,25 @@ pub struct EcdsaPublicKey
   # The key from a point in SEC 1's uncompressed encoding (section 2.3.3):
   # 0x04, then x and y big-endian at the curve's width.
   def self.from_point(curve : EcdsaCurve, point : Array(UInt8)) : EcdsaPublicKey | EcdsaError
-    size = curve.size
-    if point.size == size + 1 && (point[0] == 2_u8 || point[0] == 3_u8)
-      return EcdsaError.new("a compressed point, which this does not take")
+    if why = check_point(curve, point)
+      EcdsaError.new(why)
+    else
+      EcdsaPublicKey.new(curve, point)
     end
-    unless point.size == 2 * size + 1 && point[0] == 4_u8
-      return EcdsaError.new("a point of #{point.size} bytes, not the #{2 * size + 1} of an uncompressed #{curve} point")
-    end
-    x = BigInt.from_bytes(point[1, size])
-    y = BigInt.from_bytes(point[1 + size, size])
-    group = EcdsaGroup.of(curve)
-    return EcdsaError.new("a coordinate not below the field's prime") unless x < group.p && y < group.p
-    return EcdsaError.new("a point that is not on #{curve}") unless group.on_curve?(x, y)
-    EcdsaPublicKey.new(curve, x, y, group)
   end
 
   # A SubjectPublicKeyInfo (RFC 5280 section 4.1.2.7) naming
   # id-ecPublicKey and one of the three curves (RFC 5480 section 2.1.1).
   def self.from_spki(der : Array(UInt8)) : EcdsaPublicKey | EcdsaError
-    value = EcdsaBytes.asn1_value(Der.parse(der))!
-    from_spki(value)
+    from_spki(EcdsaBytes.asn1_value(Der.parse(der))!)
   end
 
   def self.from_spki(value : DerValue) : EcdsaPublicKey | EcdsaError
-    fields = EcdsaBytes.asn1_values(value.sequence)!
-    return EcdsaError.new("a SubjectPublicKeyInfo of #{fields.size} values, not 2") unless fields.size == 2
-    algorithm = EcdsaBytes.asn1_values(fields[0].sequence)!
-    return EcdsaError.new("an AlgorithmIdentifier with no algorithm") if algorithm.empty?
-    oid = EcdsaBytes.asn1_text(algorithm[0].oid)!
-    return EcdsaError.new("a key for #{oid}, not id-ecPublicKey (#{EC_PUBLIC_KEY})") unless oid == EC_PUBLIC_KEY
-    unless algorithm.size == 2 && algorithm[1].universal?(DerTag::OBJECT_IDENTIFIER)
-      return EcdsaError.new("id-ecPublicKey's parameters are not a named curve")
+    if why = check_spki(value)
+      EcdsaError.new(why)
+    else
+      EcdsaPublicKey.new(value)
     end
-    named = EcdsaBytes.asn1_text(algorithm[1].oid)!
-    curve = EcdsaCurve.from_oid(named)
-    return EcdsaError.new("a key on curve #{named}, not P-256, P-384 or P-521") unless curve
-    from_point(curve, EcdsaBytes.asn1_bytes(fields[1].bit_string)!)
   end
 
   # Whether *signature*, the DER of an Ecdsa-Sig-Value, is this key's
@@ -1071,6 +1145,90 @@ struct EcdsaWnaf
   end
 end
 
+# Point validation keeps fixed limb scratch, without returning BigInt work.
+class RisEcdsaPointCheck
+  @prime : Array(UInt64)
+  @acc : Array(UInt64)
+  @term : Array(UInt64)
+  @ysq : Array(UInt64)
+  @xsq : Array(UInt64)
+  @rhs : Array(UInt64)
+  @width : Int32
+  @valid : Bool
+
+  def initialize(x : BigInt, y : BigInt, group : EcdsaGroup)
+    @width = group.p.limbs.size + 1
+    @prime = Array(UInt64).new(@width, 0_u64)
+    @acc = Array(UInt64).new(@width, 0_u64)
+    @term = Array(UInt64).new(@width, 0_u64)
+    @ysq = Array(UInt64).new(@width, 0_u64)
+    @xsq = Array(UInt64).new(@width, 0_u64)
+    @rhs = Array(UInt64).new(@width, 0_u64)
+    group.p.limbs.each_with_index { |word, at| @prime[at] = word }
+    multiply(y.limbs, y.limbs, @ysq)
+    multiply(x.limbs, x.limbs, @xsq)
+    multiply(@xsq.view, x.limbs, @rhs)
+    add_mod(@rhs.view, group.b.limbs, @rhs)
+    3.times { add_mod(@ysq.view, x.limbs, @ysq) }
+    @valid = @ysq == @rhs
+  end
+
+  def valid? : Bool
+    @valid
+  end
+
+  private def multiply(left : Array::View(UInt64),
+                       right : Array::View(UInt64), destination : Array(UInt64))
+    at = 0
+    while at < @width
+      @acc[at] = 0_u64
+      @term[at] = at < left.size ? left[at] : 0_u64
+      at += 1
+    end
+    bit = 0
+    while bit < right.size * 32
+      if (right[bit // 32] >> (bit % 32)) & 1_u64 != 0_u64
+        add_mod(@acc.view, @term.view, @acc)
+      end
+      add_mod(@term.view, @term.view, @term)
+      bit += 1
+    end
+    at = 0
+    while at < @width
+      destination[at] = @acc[at]
+      at += 1
+    end
+  end
+
+  private def add_mod(left : Array::View(UInt64),
+                      right : Array::View(UInt64), destination : Array(UInt64))
+    carry = 0_u64
+    at = 0
+    while at < @width
+      a = at < left.size ? left[at] : 0_u64
+      b = at < right.size ? right[at] : 0_u64
+      sum = a + b + carry
+      destination[at] = sum & 0xFFFFFFFF_u64
+      carry = sum >> 32
+      at += 1
+    end
+    at = @width - 1
+    while at > 0 && destination[at] == @prime[at]
+      at -= 1
+    end
+    return if destination[at] < @prime[at]
+    borrow = 0_u64
+    at = 0
+    while at < @width
+      sub = @prime[at] + borrow
+      value = destination[at]
+      destination[at] = (value &- sub) & 0xFFFFFFFF_u64
+      borrow = value < sub ? 1_u64 : 0_u64
+      at += 1
+    end
+  end
+end
+
 # A curve's numbers and its arithmetic: y^2 = x^3 - 3x + b over the
 # integers modulo the prime p, the group of order n generated by G.
 @[OnTape]
@@ -1086,31 +1244,46 @@ struct EcdsaGroup
   end
 
   # FIPS 186-5's domain parameters (SP 800-186 section 3.2.1).
+  private def self.parameter(hex : String) : BigInt
+    BigInt.from_bytes(parameter_bytes(hex).view)
+  end
+
+  private def self.parameter_bytes(hex : String) : Array(UInt8)
+    bytes = Array(UInt8).new((hex.bytesize + 1) // 2, 0_u8)
+    at = 0
+    while at < hex.bytesize
+      digit = hex[at] <= 57_u8 ? hex[at] - 48_u8 : hex[at] - 87_u8
+      index = (at + (hex.bytesize % 2)) // 2
+      bytes[index] = (bytes[index] << 4) | digit
+      at += 1
+    end
+    bytes
+  end
+
   def self.of(curve : EcdsaCurve) : EcdsaGroup
-    case curve
-    when EcdsaCurve::P256
+    if curve == EcdsaCurve::P256
       EcdsaGroup.new(
-        BigInt.from_hex("ffffffff00000001000000000000000000000000ffffffffffffffffffffffff"),
-        BigInt.from_hex("ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551"),
-        BigInt.from_hex("5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b"),
-        BigInt.from_hex("6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296"),
-        BigInt.from_hex("4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5"),
+        parameter("ffffffff00000001000000000000000000000000ffffffffffffffffffffffff"),
+        parameter("ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551"),
+        parameter("5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b"),
+        parameter("6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296"),
+        parameter("4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5"),
         curve.size)
-    when EcdsaCurve::P384
+    elsif curve == EcdsaCurve::P384
       EcdsaGroup.new(
-        BigInt.from_hex("fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000ffffffff"),
-        BigInt.from_hex("ffffffffffffffffffffffffffffffffffffffffffffffffc7634d81f4372ddf581a0db248b0a77aecec196accc52973"),
-        BigInt.from_hex("b3312fa7e23ee7e4988e056be3f82d19181d9c6efe8141120314088f5013875ac656398d8a2ed19d2a85c8edd3ec2aef"),
-        BigInt.from_hex("aa87ca22be8b05378eb1c71ef320ad746e1d3b628ba79b9859f741e082542a385502f25dbf55296c3a545e3872760ab7"),
-        BigInt.from_hex("3617de4a96262c6f5d9e98bf9292dc29f8f41dbd289a147ce9da3113b5f0b8c00a60b1ce1d7e819d7a431d7c90ea0e5f"),
+        parameter("fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000ffffffff"),
+        parameter("ffffffffffffffffffffffffffffffffffffffffffffffffc7634d81f4372ddf581a0db248b0a77aecec196accc52973"),
+        parameter("b3312fa7e23ee7e4988e056be3f82d19181d9c6efe8141120314088f5013875ac656398d8a2ed19d2a85c8edd3ec2aef"),
+        parameter("aa87ca22be8b05378eb1c71ef320ad746e1d3b628ba79b9859f741e082542a385502f25dbf55296c3a545e3872760ab7"),
+        parameter("3617de4a96262c6f5d9e98bf9292dc29f8f41dbd289a147ce9da3113b5f0b8c00a60b1ce1d7e819d7a431d7c90ea0e5f"),
         curve.size)
     else
       EcdsaGroup.new(
-        BigInt.from_hex("01ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"),
-        BigInt.from_hex("01fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffa51868783bf2f966b7fcc0148f709a5d03bb5c9b8899c47aebb6fb71e91386409"),
-        BigInt.from_hex("0051953eb9618e1c9a1f929a21a0b68540eea2da725b99b315f3b8b489918ef109e156193951ec7e937b1652c0bd3bb1bf073573df883d2c34f1ef451fd46b503f00"),
-        BigInt.from_hex("00c6858e06b70404e9cd9e3ecb662395b4429c648139053fb521f828af606b4d3dbaa14b5e77efe75928fe1dc127a2ffa8de3348b3c1856a429bf97e7e31c2e5bd66"),
-        BigInt.from_hex("011839296a789a3bc0045c8a5fb42c7d1bd998f54449579b446817afbd17273e662c97ee72995ef42640c550b9013fad0761353c7086a272c24088be94769fd16650"),
+        parameter("01ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"),
+        parameter("01fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffa51868783bf2f966b7fcc0148f709a5d03bb5c9b8899c47aebb6fb71e91386409"),
+        parameter("0051953eb9618e1c9a1f929a21a0b68540eea2da725b99b315f3b8b489918ef109e156193951ec7e937b1652c0bd3bb1bf073573df883d2c34f1ef451fd46b503f00"),
+        parameter("00c6858e06b70404e9cd9e3ecb662395b4429c648139053fb521f828af606b4d3dbaa14b5e77efe75928fe1dc127a2ffa8de3348b3c1856a429bf97e7e31c2e5bd66"),
+        parameter("011839296a789a3bc0045c8a5fb42c7d1bd998f54449579b446817afbd17273e662c97ee72995ef42640c550b9013fad0761353c7086a272c24088be94769fd16650"),
         curve.size)
     end
   end
@@ -1128,6 +1301,10 @@ end
 
 # Messages as bytes, and std/asn1's errors as this one's.
 struct EcdsaBytes
+  private def self.borrow(value : T) : T forall T
+    value
+  end
+
   def self.of(message : Array(UInt8) | String) : Array(UInt8)
     return message if message.is_a?(Array(UInt8))
     Array(UInt8).new(message.bytesize) { |i| message.byte_at(i) }
@@ -1136,18 +1313,18 @@ struct EcdsaBytes
   # One helper a type, as std/rsa has: an Asn1Error read as a key's
   # refusal.
   def self.asn1_value(answer : DerValue | Asn1Error) : DerValue | EcdsaError
-    answer.is_a?(Asn1Error) ? EcdsaError.new(answer.message) : answer
+    answer.is_a?(Asn1Error) ? EcdsaError.new(answer.message) : borrow(answer)
   end
 
   def self.asn1_values(answer : Array(DerValue) | Asn1Error) : Array(DerValue) | EcdsaError
-    answer.is_a?(Asn1Error) ? EcdsaError.new(answer.message) : answer
+    answer.is_a?(Asn1Error) ? EcdsaError.new(answer.message) : borrow(answer)
   end
 
   def self.asn1_bytes(answer : Array(UInt8) | Asn1Error) : Array(UInt8) | EcdsaError
-    answer.is_a?(Asn1Error) ? EcdsaError.new(answer.message) : answer
+    answer.is_a?(Asn1Error) ? EcdsaError.new(answer.message) : borrow(answer)
   end
 
   def self.asn1_text(answer : String | Asn1Error) : String | EcdsaError
-    answer.is_a?(Asn1Error) ? EcdsaError.new(answer.message) : answer
+    answer.is_a?(Asn1Error) ? EcdsaError.new(answer.message) : borrow(answer)
   end
 end

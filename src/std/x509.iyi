@@ -162,13 +162,13 @@ pub class Certificate
   getter extended_key_usage : Array(String)?
   # subjectAltName's dNSName and iPAddress entries.
   getter dns_names : Array(String)
-  getter ip_addresses : Array(Array(UInt8))
+  getter ip_addresses : Array(Array::View(UInt8))
   # nameConstraints: DNS names and IP ranges (address and mask), and
   # whether a constraint of any other kind is there.
   getter permitted_dns : Array(String)
   getter excluded_dns : Array(String)
-  getter permitted_ips : Array(Array(UInt8))
-  getter excluded_ips : Array(Array(UInt8))
+  getter permitted_ips : Array(Array::View(UInt8))
+  getter excluded_ips : Array(Array::View(UInt8))
   getter other_constraints : Bool
   getter subject_key_id : Array(UInt8)?
   getter authority_key_id : Array(UInt8)?
@@ -223,45 +223,68 @@ pub class Certificate
     @raw.hash
   end
 
-  # The certificate and parsing temporaries use the caller's tape.
+  # Validate with scratch only, then construct on the caller's tape.
   def self.parse(der : Array(UInt8)) : Certificate | X509Error
-    parse_on_tape(der)
+    if why = check(der)
+      X509Error.new(why)
+    else
+      Certificate.new(der)
+    end
   end
 
-  private def self.parse_on_tape(der : Array(UInt8)) : Certificate | X509Error
-    outer = X509Asn1.tape_values(X509Asn1.value(Der.parse(der))!.tape_sequence)!
-    return X509Error.new("a Certificate of #{outer.size} values, not 3") unless outer.size == 3
-    tbs = X509Asn1.tape_values(outer[0].tape_sequence)!
+  private macro check_value(expression)
+    begin
+      %value = {{expression}}
+      if %value.is_a?(X509Error)
+        %message = %value.message
+        return %message[6, %message.bytesize - 6].dup
+      end
+      %value
+    end
+  end
+
+  private macro read_value(expression)
+    begin
+      %value = {{expression}}
+      raise %value.message if %value.is_a?(X509Error)
+      %value
+    end
+  end
+
+  private def self.check(der : Array(UInt8)) : String?
+    outer = check_value(X509Asn1.tape_values(check_value(X509Asn1.value(Der.parse(der))).tape_sequence))
+    return "a Certificate of #{outer.size} values, not 3" unless outer.size == 3
+    tbs = check_value(X509Asn1.tape_values(outer[0].tape_sequence))
     at = 0
     version = 1
     if tbs.size > 0 && tbs[0].context?(0)
-      number = X509Asn1.int(X509Asn1.value(tbs[0].explicit(0))!.integer)!
-      return X509Error.new("a certificate of version #{number + 1}, past 3") unless number >= 0 && number <= 2
+      number = check_value(X509Asn1.int(check_value(X509Asn1.value(tbs[0].explicit(0))).integer))
+      return "a certificate of version #{number + 1}, past 3" unless number >= 0 && number <= 2
       version = (number + 1).to_i32
       at = 1
     end
-    return X509Error.new("a TBSCertificate of #{tbs.size} values, under the #{at + 6} it needs") if tbs.size < at + 6
-    serial = X509Asn1.bytes(tbs[at].integer_bytes)!
+    return "a TBSCertificate of #{tbs.size} values, under the #{at + 6} it needs" if tbs.size < at + 6
+    serial = check_value(X509Asn1.bytes(tbs[at].integer_bytes))
     inner_algorithm = tbs[at + 1]
     outer_algorithm = outer[1]
     unless inner_algorithm.same_raw?(outer_algorithm)
-      return X509Error.new("the signature algorithm signed differs from the one the signature is under")
+      return "the signature algorithm signed differs from the one the signature is under"
     end
-    algorithm = X509Asn1.tape_values(outer_algorithm.tape_sequence)!
-    return X509Error.new("an AlgorithmIdentifier with no algorithm") if algorithm.empty?
-    signature_algorithm = X509Asn1.text(algorithm[0].oid)!
+    algorithm = check_value(X509Asn1.tape_values(outer_algorithm.tape_sequence))
+    return "an AlgorithmIdentifier with no algorithm" if algorithm.empty?
+    signature_algorithm = check_value(X509Asn1.text(algorithm[0].oid))
     parameters = algorithm.size > 1 ? algorithm[1] : nil
     issuer = tbs[at + 2]
     subject = tbs[at + 4]
-    issuer_name = X509Names.describe(issuer)!
-    subject_name = X509Names.describe(subject)!
-    validity = X509Asn1.tape_values(tbs[at + 3].tape_sequence)!
-    return X509Error.new("a Validity of #{validity.size} values, not 2") unless validity.size == 2
-    not_before = X509Asn1.time(validity[0].time)!
-    not_after = X509Asn1.time(validity[1].time)!
-    key = X509Keys.read(tbs[at + 5])!
-    key_bits = X509Asn1.bytes(X509Asn1.tape_values(tbs[at + 5].tape_sequence)![1].bit_string)!
-    extensions = X509Extensions.new
+    issuer_name = check_value(X509Names.describe(issuer))
+    subject_name = check_value(X509Names.describe(subject))
+    validity = check_value(X509Asn1.tape_values(tbs[at + 3].tape_sequence))
+    return "a Validity of #{validity.size} values, not 2" unless validity.size == 2
+    not_before = check_value(X509Asn1.time(validity[0].time))
+    not_after = check_value(X509Asn1.time(validity[1].time))
+    key = check_value(X509Keys.read(tbs[at + 5]))
+    key_bits = check_value(X509Asn1.bytes(check_value(X509Asn1.tape_values(tbs[at + 5].tape_sequence))[1].bit_string))
+    extensions = X509Extensions.new(der)
     rest = at + 6
     # RFC 5280 section 4.1: issuerUniqueID [1], subjectUniqueID [2] and
     # extensions [3], each at most once and in that order. A second
@@ -273,19 +296,83 @@ pub class Certificate
     while rest < tbs.size
       field = tbs[rest]
       tag = field.context?(1) ? 1 : (field.context?(2) ? 2 : (field.context?(3) ? 3 : 0))
-      return X509Error.new("#{field.describe} where the TBSCertificate ends") if tag == 0
-      return X509Error.new("#{field.describe} after [#{last}], where RFC 5280 has each of [1], [2] and [3] once and in order") unless tag > last
+      return "#{field.describe} where the TBSCertificate ends" if tag == 0
+      return "#{field.describe} after [#{last}], where RFC 5280 has each of [1], [2] and [3] once and in order" unless tag > last
       last = tag
       if tag < 3
-        return X509Error.new("a unique identifier in a version 1 certificate") if version < 2
+        return "a unique identifier in a version 1 certificate" if version < 2
       else
-        return X509Error.new("extensions in a version #{version} certificate") unless version == 3
-        extensions.read(X509Asn1.value(field.explicit(3))!)!
+        return "extensions in a version #{version} certificate" unless version == 3
+        if why = extensions.read(check_value(X509Asn1.value(field.explicit(3))))
+          return why
+        end
       end
       rest = rest + 1
     end
-    signature = X509Asn1.bytes(outer[2].bit_string)!
-    Certificate.new(der, outer[0].raw, version, serial, issuer.raw, subject.raw, subject_name, issuer_name,
+    signature = check_value(X509Asn1.bytes(outer[2].bit_string))
+    nil
+  end
+
+  def initialize(der : Array(UInt8))
+    outer = read_value(X509Asn1.tape_values(read_value(X509Asn1.value(Der.parse(der))).tape_sequence))
+    raise("a Certificate of #{outer.size} values, not 3") unless outer.size == 3
+    tbs = read_value(X509Asn1.tape_values(outer[0].tape_sequence))
+    at = 0
+    version = 1
+    if tbs.size > 0 && tbs[0].context?(0)
+      number = read_value(X509Asn1.int(read_value(X509Asn1.value(tbs[0].explicit(0))).integer))
+      raise("a certificate of version #{number + 1}, past 3") unless number >= 0 && number <= 2
+      version = (number + 1).to_i32
+      at = 1
+    end
+    raise("a TBSCertificate of #{tbs.size} values, under the #{at + 6} it needs") if tbs.size < at + 6
+    serial = read_value(X509Asn1.bytes(tbs[at].integer_bytes))
+    inner_algorithm = tbs[at + 1]
+    outer_algorithm = outer[1]
+    unless inner_algorithm.same_raw?(outer_algorithm)
+      raise("the signature algorithm signed differs from the one the signature is under")
+    end
+    algorithm = read_value(X509Asn1.tape_values(outer_algorithm.tape_sequence))
+    raise("an AlgorithmIdentifier with no algorithm") if algorithm.empty?
+    signature_algorithm = read_value(X509Asn1.text(algorithm[0].oid))
+    parameters = algorithm.size > 1 ? algorithm[1] : nil
+    issuer = tbs[at + 2]
+    subject = tbs[at + 4]
+    issuer_name = read_value(X509Names.describe(issuer))
+    subject_name = read_value(X509Names.describe(subject))
+    validity = read_value(X509Asn1.tape_values(tbs[at + 3].tape_sequence))
+    raise("a Validity of #{validity.size} values, not 2") unless validity.size == 2
+    not_before = read_value(X509Asn1.time(validity[0].time))
+    not_after = read_value(X509Asn1.time(validity[1].time))
+    key = read_value(X509Keys.read(tbs[at + 5]))
+    key_bits = read_value(X509Asn1.bytes(read_value(X509Asn1.tape_values(tbs[at + 5].tape_sequence))[1].bit_string))
+    extensions = X509Extensions.new(der)
+    rest = at + 6
+    # RFC 5280 section 4.1: issuerUniqueID [1], subjectUniqueID [2] and
+    # extensions [3], each at most once and in that order. A second
+    # extensions block was read on top of the first, so a certificate
+    # whose second block said cA where its first did not was a CA here and
+    # not to a reader that stopped at the first; Python's cryptography and
+    # OpenSSL refuse to read one at all.
+    last = 0
+    while rest < tbs.size
+      field = tbs[rest]
+      tag = field.context?(1) ? 1 : (field.context?(2) ? 2 : (field.context?(3) ? 3 : 0))
+      raise("#{field.describe} where the TBSCertificate ends") if tag == 0
+      raise("#{field.describe} after [#{last}], where RFC 5280 has each of [1], [2] and [3] once and in order") unless tag > last
+      last = tag
+      if tag < 3
+        raise("a unique identifier in a version 1 certificate") if version < 2
+      else
+        raise("extensions in a version #{version} certificate") unless version == 3
+        if why = extensions.read(read_value(X509Asn1.value(field.explicit(3))))
+          raise why
+        end
+      end
+      rest = rest + 1
+    end
+    signature = read_value(X509Asn1.bytes(outer[2].bit_string))
+    initialize(der, outer[0].raw, version, serial, issuer.raw, subject.raw, subject_name, issuer_name,
       not_before, not_after, key, signature_algorithm, parameters, signature, key_bits, extensions)
   end
 
@@ -708,11 +795,11 @@ class X509Extensions
   property key_usage : Int32? = nil
   property extended_key_usage : Array(String)? = nil
   property dns_names : Array(String) = [] of String
-  property ip_addresses : Array(Array(UInt8)) = [] of Array(UInt8)
+  property ip_addresses : Array(Array::View(UInt8)) = [] of Array::View(UInt8)
   property permitted_dns : Array(String) = [] of String
   property excluded_dns : Array(String) = [] of String
-  property permitted_ips : Array(Array(UInt8)) = [] of Array(UInt8)
-  property excluded_ips : Array(Array(UInt8)) = [] of Array(UInt8)
+  property permitted_ips : Array(Array::View(UInt8)) = [] of Array::View(UInt8)
+  property excluded_ips : Array(Array::View(UInt8)) = [] of Array::View(UInt8)
   property other_constraints : Bool = false
   property subject_key_id : Array(UInt8)? = nil
   property authority_key_id : Array(UInt8)? = nil
@@ -720,79 +807,135 @@ class X509Extensions
   property tls_features : Array(Int32)? = nil
   property ocsp_nocheck : Bool = false
 
-  def initialize
+  @source : Array(UInt8)
+  @extension_base : Int32 = 0
+  @texts : String::Builder
+  @seen : Array(String)
+  @usages : Array(String)
+  @features : Array(Int32)
+  @subject_id : Array(UInt8)
+  @authority_id : Array(UInt8)
+
+  def initialize(@source : Array(UInt8))
+    @texts = String::Builder.new(256)
+    @seen = Array(String).new
+    @usages = Array(String).new
+    @features = Array(Int32).new
+    @subject_id = Array(UInt8).new
+    @authority_id = Array(UInt8).new
   end
 
-  def read(value : DerValue) : Nil | X509Error
-    seen = [] of String
-    X509Asn1.values(value.sequence)!.each do |extension|
-      fields = X509Asn1.values(extension.sequence)!
-      return X509Error.new("an Extension of #{fields.size} values") unless fields.size == 2 || fields.size == 3
-      oid = X509Asn1.text(fields[0].oid)!
-      return X509Error.new("extension #{oid} appears twice") if seen.includes?(oid)
-      seen << oid
-      critical = fields.size == 3 ? X509Asn1.bool(fields[1].boolean)! : false
-      body = X509Asn1.bytes(fields[fields.size - 1].octet_string)!
-      inner = X509Asn1.value(Der.parse(body))!
+  private def save_text(text : String) : String
+    start = @texts.length
+    @texts << text
+    @texts.finish[start, text.bytesize]
+  end
+
+  private macro check_problem(expression)
+    if %why = {{expression}}
+      return %why
+    end
+  end
+
+  private macro check_value(expression)
+    begin
+      %value = {{expression}}
+      if %value.is_a?(X509Error)
+        %message = %value.message
+        return %message[6, %message.bytesize - 6].dup
+      end
+      %value
+    end
+  end
+
+  def read(value : DerValue) : String?
+    @seen.clear
+    check_value(X509Asn1.values(value.sequence)).each do |extension|
+      fields = check_value(X509Asn1.values(extension.sequence))
+      return "an Extension of #{fields.size} values" unless fields.size == 2 || fields.size == 3
+      oid = check_value(X509Asn1.text(fields[0].oid))
+      return "extension #{oid} appears twice" if @seen.includes?(oid)
+      @seen << save_text(oid)
+      critical = fields.size == 3 ? check_value(X509Asn1.bool(fields[1].boolean)) : false
+      check_value(X509Asn1.bytes(fields[fields.size - 1].octet_string))
+      @extension_base = fields[fields.size - 1].content_offset
+      body = @source[@extension_base, fields[fields.size - 1].content_size]
+      inner = check_value(X509Asn1.value(Der.parse(body)))
       case oid
-      when X509Oids::BASIC_CONSTRAINTS then read_basic_constraints(inner)!
-      when X509Oids::KEY_USAGE         then read_key_usage(inner)!
+      when X509Oids::BASIC_CONSTRAINTS then check_problem(read_basic_constraints(inner))
+      when X509Oids::KEY_USAGE         then check_problem(read_key_usage(inner))
       when X509Oids::EXT_KEY_USAGE
-        usages = [] of String
-        X509Asn1.values(inner.sequence)!.each { |u| usages << X509Asn1.text(u.oid)! }
-        return X509Error.new("an empty extKeyUsage") if usages.empty?
-        @extended_key_usage = usages
-      when X509Oids::SUBJECT_ALT_NAME then read_alt_names(inner)!
-      when X509Oids::NAME_CONSTRAINTS then read_name_constraints(inner)!
-      when X509Oids::SUBJECT_KEY_ID   then @subject_key_id = X509Asn1.bytes(inner.octet_string)!
+        @usages.clear
+        check_value(X509Asn1.values(inner.sequence)).each { |u| @usages << save_text(check_value(X509Asn1.text(u.oid))) }
+        return "an empty extKeyUsage" if @usages.empty?
+        @extended_key_usage = @usages
+      when X509Oids::SUBJECT_ALT_NAME then check_problem(read_alt_names(inner))
+      when X509Oids::NAME_CONSTRAINTS then check_problem(read_name_constraints(inner))
+      when X509Oids::SUBJECT_KEY_ID
+        check_value(X509Asn1.bytes(inner.octet_string))
+        inner.content_view.each { |byte| @subject_id << byte }
+        @subject_key_id = @subject_id
       when X509Oids::AUTHORITY_KEY_ID
-        X509Asn1.values(inner.sequence)!.each do |field|
-          @authority_key_id = field.content if field.context?(0)
+        first = -1
+        count = 0
+        check_value(X509Asn1.values(inner.sequence)).each do |field|
+          if field.context?(0)
+            first = field.content_offset
+            count = field.content_size
+          end
+          nil
+        end
+        if first >= 0
+          @source[@extension_base + first, count].each do |byte|
+            @authority_id << byte
+          end
+          @authority_key_id = @authority_id
         end
       when X509Oids::CERTIFICATE_POLICIES
-        X509Asn1.values(inner.sequence)!
+        check_value(X509Asn1.values(inner.sequence))
       when X509Oids::TLS_FEATURE
         # RFC 7633 section 6: Features ::= SEQUENCE OF INTEGER, each a TLS
         # extension's number.
-        features = [] of Int32
-        X509Asn1.values(inner.sequence)!.each do |feature|
-          number = X509Asn1.int(feature.integer)!
-          return X509Error.new("a TLS feature of #{number}, which names no extension") if number < 0 || number > 65535
-          features << number.to_i32
+        @features.clear
+        check_value(X509Asn1.values(inner.sequence)).each do |feature|
+          number = check_value(X509Asn1.int(feature.integer))
+          return "a TLS feature of #{number}, which names no extension" if number < 0 || number > 65535
+          @features << number.to_i32
         end
-        @tls_features = features
+        @tls_features = @features
       when X509Oids::OCSP_NOCHECK
         # RFC 6960 section 4.2.2.2.1: its value is NULL.
         null = inner.null
-        return X509Error.new("an id-pkix-ocsp-nocheck that is not NULL: #{null.message}") if null.is_a?(Asn1Error)
+        return "an id-pkix-ocsp-nocheck that is not NULL: #{null.message}" if null.is_a?(Asn1Error)
         @ocsp_nocheck = true
       else
-        @unhandled_critical << oid if critical
+        @unhandled_critical << save_text(oid) if critical
       end
+      nil
     end
     nil
   end
 
-  private def read_basic_constraints(inner : DerValue) : Nil | X509Error
-    fields = X509Asn1.values(inner.sequence)!
+  private def read_basic_constraints(inner : DerValue) : String?
+    fields = check_value(X509Asn1.values(inner.sequence))
     at = 0
     @basic_constraints = true
     if at < fields.size && fields[at].universal?(DerTag::BOOLEAN)
-      @ca = X509Asn1.bool(fields[at].boolean)!
+      @ca = check_value(X509Asn1.bool(fields[at].boolean))
       at = at + 1
     end
     if at < fields.size
-      length = X509Asn1.int(fields[at].integer)!
-      return X509Error.new("a pathLenConstraint of #{length}") if length < 0 || length > 1000
+      length = check_value(X509Asn1.int(fields[at].integer))
+      return "a pathLenConstraint of #{length}" if length < 0 || length > 1000
       @path_length = length.to_i32
       at = at + 1
     end
-    return X509Error.new("basicConstraints of #{fields.size} values") unless at == fields.size
+    return "basicConstraints of #{fields.size} values" unless at == fields.size
     nil
   end
 
-  private def read_key_usage(inner : DerValue) : Nil | X509Error
-    bits = X509Asn1.bits(inner.bit_string_bits)!
+  private def read_key_usage(inner : DerValue) : String?
+    bits = check_value(X509Asn1.bits(inner.bit_string_bits))
     usage = 0
     bits[0].each_with_index do |byte, i|
       8.times do |k|
@@ -803,26 +946,27 @@ class X509Extensions
     nil
   end
 
-  private def read_alt_names(inner : DerValue) : Nil | X509Error
-    X509Asn1.values(inner.sequence)!.each do |name|
+  private def read_alt_names(inner : DerValue) : String?
+    check_value(X509Asn1.values(inner.sequence)).each do |name|
       if name.context?(2) && !name.constructed?
-        @dns_names << X509Names.ascii(name.content).downcase
+        @dns_names << save_text(X509Names.ascii(name.content).downcase)
       elsif name.context?(7) && !name.constructed?
-        address = name.content
-        return X509Error.new("an iPAddress of #{address.size} bytes") unless address.size == 4 || address.size == 16
+        address = @source[@extension_base + name.content_offset, name.content_size]
+        return "an iPAddress of #{address.size} bytes" unless address.size == 4 || address.size == 16
         @ip_addresses << address
       end
+      nil
     end
     nil
   end
 
-  private def read_name_constraints(inner : DerValue) : Nil | X509Error
-    X509Asn1.values(inner.sequence)!.each do |subtrees|
+  private def read_name_constraints(inner : DerValue) : String?
+    check_value(X509Asn1.values(inner.sequence)).each do |subtrees|
       permitted = subtrees.context?(0)
-      return X509Error.new("nameConstraints holding #{subtrees.describe}") unless permitted || subtrees.context?(1)
-      X509Asn1.values(subtrees.children)!.each do |subtree|
-        fields = X509Asn1.values(subtree.sequence)!
-        return X509Error.new("an empty GeneralSubtree") if fields.empty?
+      return "nameConstraints holding #{subtrees.describe}" unless permitted || subtrees.context?(1)
+      check_value(X509Asn1.values(subtrees.children)).each do |subtree|
+        fields = check_value(X509Asn1.values(subtree.sequence))
+        return "an empty GeneralSubtree" if fields.empty?
         base = fields[0]
         if fields.size > 1
           # minimum and maximum: RFC 5280 says absent; a range is a kind
@@ -830,22 +974,23 @@ class X509Extensions
           @other_constraints = true
         elsif base.context?(2) && !base.constructed?
           dns = X509Names.ascii(base.content).downcase
-          permitted ? @permitted_dns << dns : @excluded_dns << dns
+          permitted ? @permitted_dns << save_text(dns) : @excluded_dns << save_text(dns)
         elsif base.context?(7) && !base.constructed?
-          range = base.content
-          return X509Error.new("an iPAddress constraint of #{range.size} bytes") unless range.size == 8 || range.size == 32
+          range = @source[@extension_base + base.content_offset, base.content_size]
+          return "an iPAddress constraint of #{range.size} bytes" unless range.size == 8 || range.size == 32
           # RFC 5280 section 4.2.1.10 writes the range as CIDR (RFC 4632):
           # its mask is ones, then zeros. One with a hole in it was taken
           # and matched bit by bit, a range no CIDR reader sees; Go
           # refuses it, as Python's cryptography does.
           unless X509Names.prefix_mask?(range[range.size // 2, range.size // 2])
-            return X509Error.new("an iPAddress constraint whose mask is not a CIDR prefix")
+            return "an iPAddress constraint whose mask is not a CIDR prefix"
           end
           permitted ? @permitted_ips << range : @excluded_ips << range
         else
           @other_constraints = true
         end
       end
+      nil
     end
     nil
   end
@@ -854,29 +999,7 @@ end
 # Keys from a SubjectPublicKeyInfo, and RSASSA-PSS's parameters.
 struct X509Keys
   def self.read(spki : DerValue) : RsaPublicKey | EcdsaPublicKey | Ed25519PublicKey | X509Error
-    fields = X509Asn1.values(spki.sequence)!
-    return X509Error.new("a SubjectPublicKeyInfo of #{fields.size} values, not 2") unless fields.size == 2
-    algorithm = X509Asn1.values(fields[0].sequence)!
-    return X509Error.new("an AlgorithmIdentifier with no algorithm") if algorithm.empty?
-    oid = X509Asn1.text(algorithm[0].oid)!
-    case oid
-    when X509Oids::RSA_ENCRYPTION
-      key = RsaPublicKey.from_spki(spki)
-      return X509Error.new(key.message) if key.is_a?(RsaError)
-      key
-    when X509Oids::EC_PUBLIC_KEY
-      key = EcdsaPublicKey.from_spki(spki)
-      return X509Error.new(key.message) if key.is_a?(EcdsaError)
-      key
-    when X509Oids::ED25519
-      # RFC 8410 section 3: the parameters MUST be absent.
-      return X509Error.new("an Ed25519 key with parameters, which RFC 8410 says are absent") unless algorithm.size == 1
-      key = Ed25519PublicKey.from_bytes(X509Asn1.bytes(fields[1].bit_string)!)
-      return X509Error.new(key.message) if key.is_a?(CurveError)
-      key
-    else
-      X509Error.new("a key for #{oid}, which this does not read")
-    end
+    RisX509Key.new(spki).result
   end
 
   # A key's kind, for a sentence.
@@ -944,7 +1067,7 @@ end
 struct X509Names
   # `CN=..., O=...`, the attributes in the order written.
   def self.describe(name : DerValue) : String | X509Error
-    parts = [] of String
+    parts = String::Builder.new(name.content_size)
     X509Asn1.values(name.sequence)!.each do |rdn|
       attributes = X509Asn1.values(rdn.set)!
       # RelativeDistinguishedName ::= SET SIZE (1..MAX) (RFC 5280
@@ -956,10 +1079,12 @@ struct X509Names
         oid = X509Asn1.text(fields[0].oid)!
         text = fields[1].string
         value = text.is_a?(Asn1Error) ? "#" + fields[1].describe : text
-        parts << "#{short_name(oid)}=#{value}"
+        parts << ", " if parts.length > 0
+        parts << short_name(oid) << "=" << value
+        nil
       end
     end
-    parts.join(", ")
+    parts.finish
   end
 
   def self.short_name(oid : String) : String
@@ -1034,7 +1159,7 @@ struct X509Names
 
   # Whether an address falls in an address-and-mask constraint of its own
   # length.
-  def self.ip_within?(address : Array(UInt8), range : Array(UInt8)) : Bool
+  def self.ip_within?(address : Array(UInt8) | Array::View(UInt8), range : Array(UInt8) | Array::View(UInt8)) : Bool
     return false unless range.size == address.size * 2
     address.each_with_index do |byte, i|
       mask = range[address.size + i]
@@ -1043,15 +1168,21 @@ struct X509Names
     true
   end
 
-  def self.ip_text(address : Array(UInt8)) : String
-    return address.map(&.to_s).join(".") if address.size == 4
-    groups = [] of String
-    i = 0
-    while i < address.size
-      groups << ((address[i].to_i32 << 8) | address[i + 1].to_i32).to_s(16)
-      i = i + 2
+  def self.ip_text(address : Array(UInt8) | Array::View(UInt8)) : String
+    text = String::Builder.new(40)
+    at = 0
+    while at < address.size
+      if address.size == 4
+        text << "." if at > 0
+        text.append_int(address[at].to_i32)
+        at += 1
+      else
+        text << ":" if at > 0
+        text.append_int((address[at].to_i32 << 8) | address[at + 1].to_i32, 16)
+        at += 2
+      end
     end
-    groups.join(":")
+    text.finish
   end
 
   # *text* as an IPv4 address in dotted decimal or an IPv6 address
@@ -1190,40 +1321,44 @@ end
 
 # std/asn1's errors as this one's, one helper a type.
 struct X509Asn1
+  private def self.borrow(value : T) : T forall T
+    value
+  end
+
   def self.value(answer : DerValue | Asn1Error) : DerValue | X509Error
-    answer.is_a?(Asn1Error) ? X509Error.new(answer.message) : answer
+    answer.is_a?(Asn1Error) ? X509Error.new(answer.message) : borrow(answer)
   end
 
   def self.tape_values(answer : Array(DerValue) | Asn1Error) : Array(DerValue) | X509Error
-    answer.is_a?(Asn1Error) ? X509Error.new(answer.message) : answer
+    answer.is_a?(Asn1Error) ? X509Error.new(answer.message) : borrow(answer)
   end
 
   def self.values(answer : Array(DerValue) | Asn1Error) : Array(DerValue) | X509Error
-    answer.is_a?(Asn1Error) ? X509Error.new(answer.message) : answer
+    answer.is_a?(Asn1Error) ? X509Error.new(answer.message) : borrow(answer)
   end
 
   def self.bytes(answer : Array(UInt8) | Asn1Error) : Array(UInt8) | X509Error
-    answer.is_a?(Asn1Error) ? X509Error.new(answer.message) : answer
+    answer.is_a?(Asn1Error) ? X509Error.new(answer.message) : borrow(answer)
   end
 
   def self.bits(answer : {Array(UInt8), Int32} | Asn1Error) : {Array(UInt8), Int32} | X509Error
-    answer.is_a?(Asn1Error) ? X509Error.new(answer.message) : answer
+    answer.is_a?(Asn1Error) ? X509Error.new(answer.message) : borrow(answer)
   end
 
   def self.text(answer : String | Asn1Error) : String | X509Error
-    answer.is_a?(Asn1Error) ? X509Error.new(answer.message) : answer
+    answer.is_a?(Asn1Error) ? X509Error.new(answer.message) : borrow(answer)
   end
 
   def self.time(answer : Time | Asn1Error) : Time | X509Error
-    answer.is_a?(Asn1Error) ? X509Error.new(answer.message) : answer
+    answer.is_a?(Asn1Error) ? X509Error.new(answer.message) : borrow(answer)
   end
 
   def self.bool(answer : Bool | Asn1Error) : Bool | X509Error
-    answer.is_a?(Asn1Error) ? X509Error.new(answer.message) : answer
+    answer.is_a?(Asn1Error) ? X509Error.new(answer.message) : borrow(answer)
   end
 
   def self.int(answer : Int64 | Asn1Error) : Int64 | X509Error
-    answer.is_a?(Asn1Error) ? X509Error.new(answer.message) : answer
+    answer.is_a?(Asn1Error) ? X509Error.new(answer.message) : borrow(answer)
   end
 end
 
@@ -1599,5 +1734,55 @@ struct X509Der
 
   def self.bytes(text : String) : Array(UInt8)
     Array(UInt8).new(text.bytesize) { |i| text.byte_at(i) }
+  end
+end
+
+@[OnTape]
+struct RisX509Key
+  getter result : RsaPublicKey | EcdsaPublicKey | Ed25519PublicKey | X509Error
+
+  private def keep_result(value : RsaPublicKey | EcdsaPublicKey | Ed25519PublicKey | X509Error) : Nil
+    @result = value
+  end
+
+  private macro read_value(expression)
+    begin
+      %value = {{expression}}
+      if %value.is_a?(X509Error)
+        @result = %value
+        return
+      end
+      %value
+    end
+  end
+
+  def initialize(spki : DerValue)
+    @result = X509Error.new("a key was not read")
+    answer = begin
+      fields = read_value(X509Asn1.values(spki.sequence))
+      return keep_result(X509Error.new("a SubjectPublicKeyInfo of #{fields.size} values, not 2")) unless fields.size == 2
+      algorithm = read_value(X509Asn1.values(fields[0].sequence))
+      return keep_result(X509Error.new("an AlgorithmIdentifier with no algorithm")) if algorithm.empty?
+      oid = read_value(X509Asn1.text(algorithm[0].oid))
+      case oid
+      when X509Oids::RSA_ENCRYPTION
+        key = RsaPublicKey.from_spki(spki)
+        return keep_result(X509Error.new(key.message)) if key.is_a?(RsaError)
+        key
+      when X509Oids::EC_PUBLIC_KEY
+        key = EcdsaPublicKey.from_spki(spki)
+        return keep_result(X509Error.new(key.message)) if key.is_a?(EcdsaError)
+        key
+      when X509Oids::ED25519
+        # RFC 8410 section 3: the parameters MUST be absent.
+        return keep_result(X509Error.new("an Ed25519 key with parameters, which RFC 8410 says are absent")) unless algorithm.size == 1
+        key = Ed25519PublicKey.from_bytes(read_value(X509Asn1.bytes(fields[1].bit_string)))
+        return keep_result(X509Error.new(key.message)) if key.is_a?(CurveError)
+        key
+      else
+        X509Error.new("a key for #{oid}, which this does not read")
+      end
+    end
+    @result = answer
   end
 end

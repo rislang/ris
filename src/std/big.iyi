@@ -157,6 +157,10 @@ pub struct BigInt
   # coordinate as cryptography writes them. Four bytes a limb, the low
   # limb from the last four.
   def self.from_bytes(bytes : Array::View(UInt8)) : BigInt
+    BigInt.new(1, byte_limbs(bytes))
+  end
+
+  private def self.byte_limbs(bytes : Array::View(UInt8)) : Array(UInt64)
     limbs = Array(UInt64).new((bytes.size + 3) // 4, 0_u64)
     n = bytes.size
     i = 0
@@ -164,7 +168,7 @@ pub struct BigInt
       limbs[i // 4] = limbs[i // 4] | (bytes[n - 1 - i].to_u64 << ((i % 4) * 8))
       i = i + 1
     end
-    BigInt.new(1, limbs)
+    limbs
   end
 
   # The value big-endian in exactly *size* bytes, zeros in front: the

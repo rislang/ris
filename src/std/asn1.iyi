@@ -81,6 +81,11 @@ pub struct Asn1Error
     @message = "asn1: #{message} at offset #{@offset}"
   end
 
+  def initialize(other : Asn1Error)
+    @message = other.message
+    @offset = other.offset
+  end
+
   def to_s : String
     @message
   end
@@ -175,7 +180,7 @@ pub struct DerValue
   getter header_size : Int32
   getter content_size : Int32
   @constructed : Bool
-  @data : Array::View(UInt8)
+  getter data : Array::View(UInt8)
 
   def initialize(@data : Array::View(UInt8), @tag_class : DerClass, @constructed : Bool, @tag : Int32,
                  @offset : Int32, @header_size : Int32, @content_size : Int32)
@@ -207,6 +212,11 @@ pub struct DerValue
     Array(UInt8).new(@content_size) { |i| @data[content_offset + i] }
   end
 
+  # A byte view into the original DER, without a scratch copy.
+  def content_view : Array::View(UInt8)
+    @data[content_offset, @content_size]
+  end
+
   # The whole value as it was written, header included: what a signature
   # over a certificate's `tbsCertificate` is computed on.
   def raw : Array(UInt8)
@@ -215,38 +225,15 @@ pub struct DerValue
 
   # The values a constructed value holds, read one level down.
   def children : Array(DerValue) | Asn1Error
-    return Asn1Error.new("#{describe} is primitive and holds no values", @offset) unless @constructed
-    found = [] of DerValue
-    at = content_offset
-    stop = end_offset
-    while at < stop
-      child = DerValue.read(@data, at, stop)!
-      found << child
-      at = child.end_offset
-    end
-    found
+    RisDerChildren.new(self).result
   end
 
-  # `children` on the caller's tape: a parse's lists of values, which it
-  # reads and drops, go with the tape rather than to the heap. The values
-  # still view the same bytes.
   def tape_children : Array(DerValue) | Asn1Error
-    return Asn1Error.new("#{describe} is primitive and holds no values", @offset) unless @constructed
-    found = Array(DerValue).new
-    at = content_offset
-    stop = end_offset
-    while at < stop
-      child = DerValue.read(@data, at, stop)!
-      found << child
-      at = child.end_offset
-    end
-    found
+    children
   end
 
-  # `sequence` on the caller's tape (`tape_children`).
   def tape_sequence : Array(DerValue) | Asn1Error
-    expect_constructed(DerTag::SEQUENCE, "a SEQUENCE")!
-    tape_children
+    sequence
   end
 
   # Whether *other* is written with the same bytes, header included: `raw
@@ -269,25 +256,26 @@ pub struct DerValue
 
   # A SEQUENCE's elements: `children`, after checking it is one.
   def sequence : Array(DerValue) | Asn1Error
-    expect_constructed(DerTag::SEQUENCE, "a SEQUENCE")!
-    children
+    if why = expect_constructed(DerTag::SEQUENCE, "a SEQUENCE")
+      Asn1Error.new(why)
+    else
+      children
+    end
   end
 
   # A SET's elements.
   def set : Array(DerValue) | Asn1Error
-    expect_constructed(DerTag::SET, "a SET")!
-    children
+    if why = expect_constructed(DerTag::SET, "a SET")
+      Asn1Error.new(why)
+    else
+      children
+    end
   end
 
   # The one value inside an explicit context tag `[n]`, as X.509 writes a
   # certificate's version and extensions.
   def explicit(tag : Int32) : DerValue | Asn1Error
-    unless context?(tag) && @constructed
-      return Asn1Error.new("expected an explicit [#{tag}], found #{describe}", @offset)
-    end
-    inner = children!
-    return Asn1Error.new("an explicit [#{tag}] holds #{inner.size} values, not one", @offset) unless inner.size == 1
-    inner[0]
+    RisDerExplicit.new(self, tag).result
   end
 
   def boolean : Bool | Asn1Error
@@ -408,19 +396,7 @@ pub struct DerValue
   # A BIT STRING's bytes and how many bits at the end of the last are not
   # part of it, which DER sets to zero: a flags field such as keyUsage.
   def bit_string_bits : {Array(UInt8), Int32} | Asn1Error
-    expect_primitive(DerTag::BIT_STRING, "a BIT STRING")!
-    return Asn1Error.new("a BIT STRING with no bytes", @offset) if @content_size == 0
-    unused = @data[content_offset].to_i32
-    return Asn1Error.new("a BIT STRING with #{unused} unused bits, past 7", content_offset) if unused > 7
-    if @content_size == 1
-      return Asn1Error.new("an empty BIT STRING with #{unused} unused bits", content_offset) unless unused == 0
-      return {[] of UInt8, 0}
-    end
-    last = @data[end_offset - 1]
-    if unused > 0 && last & ((1_u8 << unused) - 1_u8) != 0_u8
-      return Asn1Error.new("a BIT STRING whose unused bits are not zero", end_offset - 1)
-    end
-    {Array(UInt8).new(@content_size - 1) { |i| @data[content_offset + 1 + i] }, unused}
+    RisDerBits.new(self).result
   end
 
   def octet_string : Array(UInt8) | Asn1Error
@@ -473,34 +449,7 @@ pub struct DerValue
 
   # A UTCTime or a GeneralizedTime, in the one form DER writes each.
   def time : Time | Asn1Error
-    return Asn1Error.new("expected a time, found #{describe}", @offset) unless @tag_class == DerClass::Universal
-    return Asn1Error.new("#{describe} written constructed", @offset) if @constructed
-    case @tag
-    when DerTag::UTC_TIME
-      return Asn1Error.new("a UTCTime of #{@content_size} bytes, where DER writes YYMMDDHHMMSSZ", @offset) unless @content_size == 13
-      return Asn1Error.new("a UTCTime that does not end in Z", end_offset - 1) unless @data[end_offset - 1] == 'Z'.ord.to_u8
-      yy = digits(content_offset, 2)!
-      year = yy >= 50 ? 1900 + yy : 2000 + yy
-      clock(year, content_offset + 2, 0)
-    when DerTag::GENERALIZED_TIME
-      return Asn1Error.new("a GeneralizedTime of #{@content_size} bytes, shorter than YYYYMMDDHHMMSSZ", @offset) if @content_size < 15
-      return Asn1Error.new("a GeneralizedTime that does not end in Z", end_offset - 1) unless @data[end_offset - 1] == 'Z'.ord.to_u8
-      year = digits(content_offset, 4)!
-      nanos = 0
-      if @content_size > 15
-        dot = content_offset + 14
-        return Asn1Error.new("a GeneralizedTime with text between the seconds and the Z", dot) unless @data[dot] == '.'.ord.to_u8
-        count = end_offset - 1 - (dot + 1)
-        return Asn1Error.new("a GeneralizedTime with a . and no fraction", dot) if count == 0
-        return Asn1Error.new("a GeneralizedTime fraction past nanoseconds", dot) if count > 9
-        return Asn1Error.new("a GeneralizedTime fraction that ends in 0", end_offset - 2) if @data[end_offset - 2] == '0'.ord.to_u8
-        nanos = digits(dot + 1, count)!
-        (9 - count).times { nanos = nanos * 10 }
-      end
-      clock(year, content_offset + 4, nanos)
-    else
-      Asn1Error.new("expected a time, found #{describe}", @offset)
-    end
+    RisDerTime.new(self).result
   end
 
   # The identifier, said the way an error names it: `INTEGER`,
@@ -606,7 +555,7 @@ pub struct DerValue
     value
   end
 
-  private def expect_primitive(tag : Int32, what : String) : Nil | Asn1Error
+  def expect_primitive(tag : Int32, what : String) : Nil | Asn1Error
     return Asn1Error.new("expected #{what}, found #{describe}", @offset) unless universal?(tag)
     return Asn1Error.new("#{what} written constructed", @offset) if @constructed
     nil
@@ -644,7 +593,7 @@ pub struct DerValue
   end
 
   # *count* ASCII digits at *at*, as a number.
-  private def digits(at : Int32, count : Int32) : Int32 | Asn1Error
+  def digits(at : Int32, count : Int32) : Int32 | Asn1Error
     value = 0
     count.times do |k|
       byte = @data[at + k]
@@ -655,7 +604,7 @@ pub struct DerValue
   end
 
   # MMDDHHMMSS at *at*, checked to be a moment that is there.
-  private def clock(year : Int32, at : Int32, nanos : Int32) : Time | Asn1Error
+  def clock(year : Int32, at : Int32, nanos : Int32) : Time | Asn1Error
     month = digits(at, 2)!
     day = digits(at + 2, 2)!
     hour = digits(at + 4, 2)!
@@ -727,5 +676,152 @@ struct DerText
       i = i + need + 1
     end
     true
+  end
+end
+
+# Lists and composite typed results are built by constructors on the
+# caller's tape. Errors retain their original text and input offset.
+@[OnTape]
+struct RisDerChildren
+  getter result : Array(DerValue) | Asn1Error
+
+  def initialize(value : DerValue)
+    @result = [] of DerValue
+    unless value.constructed?
+      @result = Asn1Error.new(
+        "#{value.describe} is primitive and holds no values", value.offset)
+      return
+    end
+    found = Array(DerValue).new(value.content_size // 2)
+    at = value.content_offset
+    stop = value.end_offset
+    while at < stop
+      child = DerValue.read(value.data, at, stop)
+      if child.is_a?(Asn1Error)
+        @result = child
+        return
+      end
+      found << child
+      at = child.end_offset
+    end
+    @result = found
+  end
+end
+
+@[OnTape]
+struct RisDerBits
+  getter result : {Array(UInt8), Int32} | Asn1Error
+
+  private def keep_result(value : {Array(UInt8), Int32} | Asn1Error) : Nil
+    @result = value
+  end
+
+  private macro read_value(expression)
+    begin
+      %value = {{expression}}
+      if %value.is_a?(Asn1Error)
+        @result = %value
+        return
+      end
+      %value
+    end
+  end
+
+  def initialize(value : DerValue)
+    @result = {[] of UInt8, 0}
+    answer = begin
+      read_value(value.expect_primitive(DerTag::BIT_STRING, "a BIT STRING"))
+      return keep_result(Asn1Error.new("a BIT STRING with no bytes", value.offset)) if value.content_size == 0
+      unused = value.data[value.content_offset].to_i32
+      return keep_result(Asn1Error.new("a BIT STRING with #{unused} unused bits, past 7", value.content_offset)) if unused > 7
+      if value.content_size == 1
+        return keep_result(Asn1Error.new("an empty BIT STRING with #{unused} unused bits", value.content_offset)) unless unused == 0
+        return keep_result({[] of UInt8, 0})
+      end
+      last = value.data[value.end_offset - 1]
+      if unused > 0 && last & ((1_u8 << unused) - 1_u8) != 0_u8
+        return keep_result(Asn1Error.new("a BIT STRING whose unused bits are not zero", value.end_offset - 1))
+      end
+      {Array(UInt8).new(value.content_size - 1) { |i| value.data[value.content_offset + 1 + i] }, unused}
+    end
+    @result = answer
+  end
+end
+
+@[OnTape]
+struct RisDerTime
+  getter result : Time | Asn1Error
+
+  private def keep_result(value : Time | Asn1Error) : Nil
+    @result = value
+  end
+
+  private macro read_value(expression)
+    begin
+      %value = {{expression}}
+      if %value.is_a?(Asn1Error)
+        @result = %value
+        return
+      end
+      %value
+    end
+  end
+
+  def initialize(value : DerValue)
+    @result = Asn1Error.new("a time was not read", value.offset)
+    answer = begin
+      return keep_result(Asn1Error.new("expected a time, found #{value.describe}", value.offset)) unless value.tag_class == DerClass::Universal
+      return keep_result(Asn1Error.new("#{value.describe} written constructed", value.offset)) if value.constructed?
+      case value.tag
+      when DerTag::UTC_TIME
+        return keep_result(Asn1Error.new("a UTCTime of #{value.content_size} bytes, where DER writes YYMMDDHHMMSSZ", value.offset)) unless value.content_size == 13
+        return keep_result(Asn1Error.new("a UTCTime that does not end in Z", value.end_offset - 1)) unless value.data[value.end_offset - 1] == 'Z'.ord.to_u8
+        yy = read_value(value.digits(value.content_offset, 2))
+        year = yy >= 50 ? 1900 + yy : 2000 + yy
+        value.clock(year, value.content_offset + 2, 0)
+      when DerTag::GENERALIZED_TIME
+        return keep_result(Asn1Error.new("a GeneralizedTime of #{value.content_size} bytes, shorter than YYYYMMDDHHMMSSZ", value.offset)) if value.content_size < 15
+        return keep_result(Asn1Error.new("a GeneralizedTime that does not end in Z", value.end_offset - 1)) unless value.data[value.end_offset - 1] == 'Z'.ord.to_u8
+        year = read_value(value.digits(value.content_offset, 4))
+        nanos = 0
+        if value.content_size > 15
+          dot = value.content_offset + 14
+          return keep_result(Asn1Error.new("a GeneralizedTime with text between the seconds and the Z", dot)) unless value.data[dot] == '.'.ord.to_u8
+          count = value.end_offset - 1 - (dot + 1)
+          return keep_result(Asn1Error.new("a GeneralizedTime with a . and no fraction", dot)) if count == 0
+          return keep_result(Asn1Error.new("a GeneralizedTime fraction past nanoseconds", dot)) if count > 9
+          return keep_result(Asn1Error.new("a GeneralizedTime fraction that ends in 0", value.end_offset - 2)) if value.data[value.end_offset - 2] == '0'.ord.to_u8
+          nanos = read_value(value.digits(dot + 1, count))
+          (9 - count).times { nanos = nanos * 10 }
+        end
+        value.clock(year, value.content_offset + 4, nanos)
+      else
+        Asn1Error.new("expected a time, found #{value.describe}", value.offset)
+      end
+    end
+    @result = answer
+  end
+end
+
+@[OnTape]
+struct RisDerExplicit
+  getter result : DerValue | Asn1Error
+
+  def initialize(value : DerValue, tag : Int32)
+    @result = value
+    unless value.context?(tag) && value.constructed?
+      @result = Asn1Error.new(
+        "expected an explicit [#{tag}], found #{value.describe}", value.offset)
+      return
+    end
+    inner = value.children
+    if inner.is_a?(Asn1Error)
+      @result = inner
+    elsif inner.size != 1
+      @result = Asn1Error.new(
+        "an explicit [#{tag}] holds #{inner.size} values, not one", value.offset)
+    else
+      @result = inner[0]
+    end
   end
 end
