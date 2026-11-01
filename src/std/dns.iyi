@@ -94,6 +94,20 @@ pub struct DnsError
     DnsError.new(@kind, name, server, @detail)
   end
 
+  # The same failure with its texts copied into *into*: what a loop round
+  # keeps past the round (the error that is the answer if nothing better
+  # comes).
+  def kept(into : String::Builder) : DnsError
+    DnsError.new(@kind, DnsError.keep(into, @name), DnsError.keep(into, @server),
+      DnsError.keep(into, @detail))
+  end
+
+  protected def self.keep(into : String::Builder, text : String) : String
+    from = into.length
+    into << text
+    into.finish[from, text.bytesize]
+  end
+
   # NXDOMAIN: the name does not exist.
   def not_found? : ::Bool
     @kind == NOT_FOUND
@@ -381,7 +395,34 @@ pub struct SvcbRecord
   getter keys : Array::View(Int32)
   getter values : Array::View(String)
 
-  def initialize(@owner : String, @priority : Int32, @target : String, @keys : Array::View(Int32), @values : Array::View(String))
+  # What does not fit, empty when all does (`checked` answers it).
+  @why : String
+
+  # The record in *data*, read by the constructor, which builds in the
+  # caller's scope: its target text and key and value Arrays are made
+  # here and the record views them.
+  def initialize(data : String, @owner : String)
+    @priority = 0
+    @target = "."
+    @why = ""
+    text = String::Builder.new(data.bytesize + 64)
+    keys = Array(Int32).new(8)
+    values = Array(String).new(8)
+    @keys = Array::View(Int32).new(keys, 0, 0)
+    @values = Array::View(String).new(values, 0, 0)
+    read(data, text, keys, values)
+  end
+
+  def self.checked(record : SvcbRecord) : SvcbRecord | DnsError
+    return record if record.@why.empty?
+    DnsTapeMessage.malformed(record.@why)
+  end
+
+  private def refuse(text : String::Builder, why : String) : Nil
+    from = text.length
+    text << why
+    @why = text.finish[from, why.bytesize]
+    nil
   end
 
   # AliasMode: the service is at the target's records of the same type.
@@ -460,63 +501,67 @@ pub struct SvcbRecord
   # The record in *data*, found at *owner*; or why it is malformed (see
   # the struct).
   def self.parse(data : String, owner : String = "") : SvcbRecord | DnsError
+    checked(new(data, owner))
+  end
+
+  private def read(data : String, text : String::Builder,
+                   keys : Array(Int32), values : Array(String)) : Nil
     size = data.bytesize
-    return DnsTapeMessage.malformed("a service binding of #{size} bytes, shorter than a priority and a target") if size < 3
+    return refuse(text, "a service binding of #{size} bytes, shorter than a priority and a target") if size < 3
     priority = (data.byte_at(0).to_i32 << 8) | data.byte_at(1).to_i32
     # The target, uncompressed: length-prefixed labels to the root's zero.
-    text = String::Builder.new
     at = 2
     wire = 0
     while true
-      return DnsTapeMessage.malformed("a service binding's target runs past its data") if at >= size
+      return refuse(text, "a service binding's target runs past its data") if at >= size
       length = data.byte_at(at).to_i32
       break if length == 0
-      return DnsTapeMessage.malformed("a service binding's target is compressed, which RFC 9460 2.2 forbids") if length & 0xC0 != 0
-      return DnsTapeMessage.malformed("a service binding's target runs past its data") if at + 1 + length > size
+      return refuse(text, "a service binding's target is compressed, which RFC 9460 2.2 forbids") if length & 0xC0 != 0
+      return refuse(text, "a service binding's target runs past its data") if at + 1 + length > size
       wire = wire + 1 + length
-      return DnsTapeMessage.malformed("a service binding's target is longer than 255 bytes") if wire > 254
+      return refuse(text, "a service binding's target is longer than 255 bytes") if wire > 254
       text << '.' if text.bytesize > 0
       index = 0
       while index < length
         byte = data.byte_at(at + 1 + index)
-        return DnsTapeMessage.malformed("a service binding's target has a label with a dot in it") if byte == 46_u8
+        return refuse(text, "a service binding's target has a label with a dot in it") if byte == 46_u8
         text.write_byte(byte)
         index = index + 1
       end
       at = at + 1 + length
     end
     at = at + 1
-    target = text.bytesize == 0 ? "." : text.to_s
-    keys = [] of Int32
-    values = [] of String
+    target = text.bytesize == 0 ? "." : text.finish[0, text.bytesize]
     while at < size
-      return DnsTapeMessage.malformed("a SvcParam cut short: #{size - at} bytes where its key and length take 4") if at + 4 > size
+      return refuse(text, "a SvcParam cut short: #{size - at} bytes where its key and length take 4") if at + 4 > size
       key = (data.byte_at(at).to_i32 << 8) | data.byte_at(at + 1).to_i32
       length = (data.byte_at(at + 2).to_i32 << 8) | data.byte_at(at + 3).to_i32
       unless keys.empty?
         last = keys[keys.size - 1]
-        return DnsTapeMessage.malformed("SvcParamKey #{key_name(key)} twice") if key == last
-        return DnsTapeMessage.malformed("SvcParamKey #{key_name(key)} after #{key_name(last)}: the keys are not in increasing order") if key < last
+        return refuse(text, "SvcParamKey #{SvcbRecord.key_name(key)} twice") if key == last
+        return refuse(text, "SvcParamKey #{SvcbRecord.key_name(key)} after #{SvcbRecord.key_name(last)}: the keys are not in increasing order") if key < last
       end
-      return DnsTapeMessage.malformed("SvcParamKey #{key_name(key)}'s value of #{length} bytes runs past the record") if at + 4 + length > size
+      return refuse(text, "SvcParamKey #{SvcbRecord.key_name(key)}'s value of #{length} bytes runs past the record") if at + 4 + length > size
       value = data[at + 4, length]
-      why = fault(key, value)
-      return DnsTapeMessage.malformed("SvcParamKey #{key_name(key)}: #{why}") if why
+      why = SvcbRecord.fault(key, value)
+      return refuse(text, "SvcParamKey #{SvcbRecord.key_name(key)}: #{why}") if why
       keys << key
       values << value
       at = at + 4 + length
     end
-    record = SvcbRecord.new(owner, priority, target, keys, values)
-    record.mandatory.each do |listed|
-      return DnsTapeMessage.malformed("mandatory lists #{key_name(listed)}, which the record does not carry") unless keys.includes?(listed)
+    @priority = priority
+    @target = target
+    @keys = Array::View(Int32).new(keys, 0, keys.size)
+    @values = Array::View(String).new(values, 0, values.size)
+    mandatory.each do |listed|
+      return refuse(text, "mandatory lists #{SvcbRecord.key_name(listed)}, which the record does not carry") unless keys.includes?(listed)
     end
-    return DnsTapeMessage.malformed("no-default-alpn without alpn") if keys.includes?(NO_DEFAULT_ALPN) && !keys.includes?(ALPN)
-    record
+    return refuse(text, "no-default-alpn without alpn") if keys.includes?(NO_DEFAULT_ALPN) && !keys.includes?(ALPN)
   end
 
   # Why *value* is not of *key*'s form, or nil when it is (or the key is
   # not one this module reads).
-  private def self.fault(key : Int32, value : String) : String?
+  protected def self.fault(key : Int32, value : String) : String?
     size = value.bytesize
     case key
     when MANDATORY
@@ -810,9 +855,8 @@ pub struct DnsTapeMessage
   # 6891 6.1.3); 0 without one.
   getter extended_rcode : Int32
 
-  def initialize(@id : UInt16, @flags : Int32, @question_name : String, @question_type : Int32,
-                 @question_class : Int32, @answers : Array::View(DnsTapeRecord), @extended_rcode : Int32 = 0)
-  end
+  # What does not fit, empty when all does: a view of the names' text.
+  @why : String
 
   def response? : ::Bool
     @flags & 0x8000 != 0
@@ -929,7 +973,9 @@ pub struct DnsTapeMessage
     at = 12
     index = 0
     while index < questions + records
-      read = read_name(packet, at)
+      # Each round's name is freed with the round.
+      names = String::Builder.new(256)
+      read = read_name(packet, at, names)
       return -1 if read.nil?
       at = read[1]
       if index < questions
@@ -952,57 +998,97 @@ pub struct DnsTapeMessage
   # 6.1.1), owned by the root. Anything that does not fit the bytes is
   # `DnsError` with `malformed?`, never a read past them.
   def self.parse(packet : String) : DnsTapeMessage | DnsError
+    checked(new(packet))
+  end
+
+  # The message `new` read, or what does not fit as a malformed
+  # `DnsError` (a view of the message's own text).
+  def self.checked(message : DnsTapeMessage) : DnsTapeMessage | DnsError
+    return message if message.@why.empty?
+    malformed(message.@why)
+  end
+
+  # The message in *packet*, read by its constructor, which builds in the
+  # caller's scope: names go into its own text, records into its own
+  # Array. What does not fit is `@why`, which `checked` answers.
+  def initialize(packet : String)
+    @id = 0_u16
+    @flags = 0
+    @question_name = ""
+    @question_type = 0
+    @question_class = 0
+    @extended_rcode = 0
+    @why = ""
+    # Made in the constructor, in the caller's scope; the message views
+    # them.
+    names = String::Builder.new(packet.bytesize + 64)
+    count = packet.bytesize >= 12 ? DnsTapeMessage.u16(packet, 6) : 0
+    records = Array(DnsTapeRecord).new(count > 0 ? count : 1)
+    @answers = Array::View(DnsTapeRecord).new(records, 0, 0)
+    read(packet, names, records)
+    @answers = Array::View(DnsTapeRecord).new(records, 0, records.size)
+  end
+
+  # *why* the message does not fit, kept in its own text.
+  private def refuse(names : String::Builder, why : String) : Nil
+    from = names.length
+    names << why
+    @why = names.finish[from, why.bytesize]
+    nil
+  end
+
+  private def read(packet : String, names : String::Builder,
+                   records : Array(DnsTapeRecord)) : Nil
     size = packet.bytesize
-    return malformed("#{size} bytes, shorter than a header") if size < 12
+    return refuse(names, "#{size} bytes, shorter than a header") if size < 12
     id = ((packet.byte_at(0).to_u16 << 8) | packet.byte_at(1).to_u16)
     flags = (packet.byte_at(2).to_i32 << 8) | packet.byte_at(3).to_i32
-    questions = u16(packet, 4)
-    count = u16(packet, 6)
-    return malformed("#{questions} questions; a query has one") if questions > 1
+    questions = DnsTapeMessage.u16(packet, 4)
+    count = DnsTapeMessage.u16(packet, 6)
+    return refuse(names, "#{questions} questions; a query has one") if questions > 1
     at = 12
-    question_name = String.new("")
+    question_name = ""
     question_type = 0
     question_class = 0
     if questions == 1
-      read = read_name(packet, at)
-      return malformed("the question's name") if read.nil?
+      read = DnsTapeMessage.read_name(packet, at, names)
+      return refuse(names, "the question's name") if read.nil?
       question_name, at = read
-      return malformed("the question runs past the message") if at + 4 > size
-      question_type = u16(packet, at)
-      question_class = u16(packet, at + 2)
+      return refuse(names, "the question runs past the message") if at + 4 > size
+      question_type = DnsTapeMessage.u16(packet, at)
+      question_class = DnsTapeMessage.u16(packet, at + 2)
       at = at + 4
     end
-    answers = Array(DnsTapeRecord).new(count > 0 ? count : 1)
     extended_rcode = 0
     if flags & 0x0200 == 0
       index = 0
       while index < count
-        read = read_name(packet, at)
-        return malformed("answer #{index + 1}'s name") if read.nil?
+        read = DnsTapeMessage.read_name(packet, at, names)
+        return refuse(names, "answer #{index + 1}'s name") if read.nil?
         owner, at = read
-        return malformed("answer #{index + 1} runs past the message") if at + 10 > size
-        type = u16(packet, at)
-        klass = u16(packet, at + 2)
+        return refuse(names, "answer #{index + 1} runs past the message") if at + 10 > size
+        type = DnsTapeMessage.u16(packet, at)
+        klass = DnsTapeMessage.u16(packet, at + 2)
         ttl = (packet.byte_at(at + 4).to_u32 << 24) | (packet.byte_at(at + 5).to_u32 << 16) |
               (packet.byte_at(at + 6).to_u32 << 8) | packet.byte_at(at + 7).to_u32
-        length = u16(packet, at + 8)
+        length = DnsTapeMessage.u16(packet, at + 8)
         at = at + 10
-        return malformed("answer #{index + 1}'s data runs past the message") if at + length > size
-        target = String.new("")
+        return refuse(names, "answer #{index + 1}'s data runs past the message") if at + length > size
+        target = ""
         if klass == DnsTapeRecord::IN
-          return malformed("an A record of #{length} bytes") if type == DnsTapeRecord::A && length != 4
-          return malformed("an AAAA record of #{length} bytes") if type == DnsTapeRecord::AAAA && length != 16
+          return refuse(names, "an A record of #{length} bytes") if type == DnsTapeRecord::A && length != 4
+          return refuse(names, "an AAAA record of #{length} bytes") if type == DnsTapeRecord::AAAA && length != 16
           if type == DnsTapeRecord::CNAME
             # Read where it sits in the message, not out of its data: its
             # compression pointers are offsets into the whole message. It
             # must end inside its own data.
-            alias_read = read_name(packet, at)
-            return malformed("answer #{index + 1}'s CNAME target") if alias_read.nil?
+            alias_read = DnsTapeMessage.read_name(packet, at, names)
+            return refuse(names, "answer #{index + 1}'s CNAME target") if alias_read.nil?
             target, ends = alias_read
-            return malformed("answer #{index + 1}'s CNAME target runs past its data") if ends > at + length
+            return refuse(names, "answer #{index + 1}'s CNAME target runs past its data") if ends > at + length
           end
         end
-        answers << DnsTapeRecord.new(owner, type, klass, ttl, packet[at, length], target)
+        records << DnsTapeRecord.new(owner, type, klass, ttl, packet[at, length], target)
         at = at + length
         index = index + 1
       end
@@ -1011,27 +1097,32 @@ pub struct DnsTapeMessage
       # record. Only that record's TTL is read - its top byte is the
       # extended RCODE (RFC 6891 6.1.3) - and its options, the server's
       # own padding among them, are not.
-      authority = u16(packet, 8)
-      others = authority + u16(packet, 10)
+      authority = DnsTapeMessage.u16(packet, 8)
+      others = authority + DnsTapeMessage.u16(packet, 10)
       seen_opt = false
       index = 0
       while index < others
-        read = read_name(packet, at)
-        return malformed("record #{count + index + 1}'s name") if read.nil?
+        read = DnsTapeMessage.read_name(packet, at, names)
+        return refuse(names, "record #{count + index + 1}'s name") if read.nil?
         owner, at = read
-        return malformed("record #{count + index + 1} runs past the message") if at + 10 > size
-        if index >= authority && u16(packet, at) == DnsTapeRecord::OPT
-          return malformed("a second OPT record") if seen_opt
-          return malformed("an OPT record owned by #{owner}, not the root") unless owner.empty?
+        return refuse(names, "record #{count + index + 1} runs past the message") if at + 10 > size
+        if index >= authority && DnsTapeMessage.u16(packet, at) == DnsTapeRecord::OPT
+          return refuse(names, "a second OPT record") if seen_opt
+          return refuse(names, "an OPT record owned by #{owner}, not the root") unless owner.empty?
           seen_opt = true
           extended_rcode = packet.byte_at(at + 4).to_i32
         end
-        at = at + 10 + u16(packet, at + 8)
-        return malformed("record #{count + index + 1}'s data runs past the message") if at > size
+        at = at + 10 + DnsTapeMessage.u16(packet, at + 8)
+        return refuse(names, "record #{count + index + 1}'s data runs past the message") if at > size
         index = index + 1
       end
     end
-    DnsTapeMessage.new(id, flags, question_name, question_type, question_class, answers, extended_rcode)
+    @id = id
+    @flags = flags
+    @question_name = question_name
+    @question_type = question_type
+    @question_class = question_class
+    @extended_rcode = extended_rcode
   end
 
   # Whether this is the answer to query *id* for *name* and *type*: a
@@ -1046,27 +1137,37 @@ pub struct DnsTapeMessage
   end
 
   # The data of the records of *type* this answer gives *name*, following
-  # CNAMEs: views of the message for the end of the chain, the name the
-  # chain ended at, and how many links it took. No records and a
-  # different name is a chain that left this answer before it ended,
-  # which the resolver asks about next. A chain of more than *budget*
+  # CNAMEs: views of the message for the end of the chain, put into
+  # *found*; the name the chain ended at, and how many links it took. No
+  # records and a different name is a chain that left this answer before
+  # it ended, which the resolver asks about next. A chain of more than *budget*
   # links is malformed.
-  def addresses(name : String, type : Int32, budget : Int32 = MAX_CNAMES) : Tuple(Array(String), String, Int32) | DnsError
+  def addresses(name : String, type : Int32, found : Array(String),
+                budget : Int32 = MAX_CNAMES) : Tuple(String, Int32) | DnsError
     target = name
     links = 0
     while true
-      found = [] of String
-      next_name = ""
-      @answers.each do |record|
+      # Refilled each link: the caller's Array holds the last one's.
+      found.clear
+      # The CNAME's index: its target is read after the round.
+      next_at = -1
+      # By index: a yielded record would be taken as the yielder's.
+      i = 0
+      while i < @answers.size
+        record = @answers[i]
+        i = i + 1
         next unless record.record_class == DnsTapeRecord::IN && DnsName.same?(record.name, target)
         found << record.data if record.type == type
-        next_name = record.target if record.type == DnsTapeRecord::CNAME && next_name.empty?
+        next_at = i - 1 if record.type == DnsTapeRecord::CNAME && next_at < 0 && !record.target.empty?
       end
-      return {found, target, links} unless found.empty? && !next_name.empty?
+      return {target, links} unless found.empty? && next_at >= 0
       links = links + 1
-      return DnsTapeMessage.malformed("a chain of more than #{budget} CNAMEs, or a loop of them") if links > budget
-      target = next_name
+      # The error is made after the loop: a round's text would be taken
+      # as kept past its round.
+      break if links > budget
+      target = @answers[next_at].target
     end
+    DnsTapeMessage.malformed("a chain of more than #{budget} CNAMEs, or a loop of them")
   end
 
   # The name at *at* in *packet*, and the offset just past it where it
@@ -1075,13 +1176,14 @@ pub struct DnsTapeMessage
   # the wire, and each compression pointer must point before the place the
   # name was last read from - RFC 1035 4.1.4's "prior occurrence" - so the
   # positions strictly fall and a loop cannot be written.
-  def self.read_name(packet : String, at : Int32) : Tuple(String, Int32)?
+  def self.read_name(packet : String, at : Int32,
+                     text : String::Builder) : Tuple(String, Int32)?
     size = packet.bytesize
+    from = text.length
     position = at
     floor = at
     ends = -1
     wire = 0
-    text = String::Builder.new
     while true
       return nil if position < 0 || position >= size
       length = packet.byte_at(position).to_i32
@@ -1094,7 +1196,7 @@ pub struct DnsTapeMessage
         return nil if position + 1 + length > size
         wire = wire + 1 + length
         return nil if wire > 254
-        text.push(46_u8) if text.length > 0
+        text.push(46_u8) if text.length > from
         index = 0
         while index < length
           byte = packet.byte_at(position + 1 + index)
@@ -1116,14 +1218,14 @@ pub struct DnsTapeMessage
         return nil
       end
     end
-    {text.finish, ends}
+    {text.finish[from, text.length - from], ends}
   end
 
   def self.malformed(why : String) : DnsError
     DnsError.new(DnsError::MALFORMED, "", "", why)
   end
 
-  private def self.u16(bytes : String, at : Int32) : Int32
+  protected def self.u16(bytes : String, at : Int32) : Int32
     (bytes.byte_at(at).to_i32 << 8) | bytes.byte_at(at + 1).to_i32
   end
 end

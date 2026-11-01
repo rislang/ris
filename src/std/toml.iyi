@@ -2136,7 +2136,7 @@ struct TapeReader
                    control?(c)
           self.pos = pos + 1
         end
-        text << input[run, pos - run]
+        @texts << input[run, pos - run]
       end
     end
   end

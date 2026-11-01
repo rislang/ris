@@ -271,7 +271,8 @@ pub class UdpSocket
       count.is_a?(Int32) ? count : 0
     end
     return Cancelled.new if cancelled
-    host, port = UdpSocket.format_address(addr)
+    host = UdpSocket.address_host(addr)
+    port = UdpSocket.address_port(addr)
     {writer.finish, host, port}
   end
 
@@ -284,7 +285,8 @@ pub class UdpSocket
     addr = pointerof(addr_room).as(Pointer(UInt8))
     count = receive_into(buffer.to_unsafe, buffer.size, addr)
     return count if count.is_a?(Cancelled)
-    host, port = UdpSocket.format_address(addr)
+    host = UdpSocket.address_host(addr)
+    port = UdpSocket.address_port(addr)
     {count, host, port}
   end
 
@@ -303,7 +305,8 @@ pub class UdpSocket
       count || 0
     end
     return nil if none
-    host, port = UdpSocket.format_address(addr)
+    host = UdpSocket.address_host(addr)
+    port = UdpSocket.address_port(addr)
     {writer.finish, host, port}
   end
 
@@ -314,7 +317,8 @@ pub class UdpSocket
     addr = pointerof(addr_room).as(Pointer(UInt8))
     count = receive_now(buffer.to_unsafe, buffer.size, addr)
     return nil if count.nil?
-    host, port = UdpSocket.format_address(addr)
+    host = UdpSocket.address_host(addr)
+    port = UdpSocket.address_port(addr)
     {count, host, port}
   end
 
@@ -408,7 +412,7 @@ pub class UdpSocket
     return @family == AF_INET6 ? "::" : "0.0.0.0" if res < 0 && UdpSocket.__unbound_now?
     raise "cannot get local address" if res < 0
 
-    host, _ = UdpSocket.format_address(addr)
+    host = UdpSocket.address_host(addr)
     host
   end
 
@@ -520,8 +524,14 @@ pub class UdpSocket
     SocketError.new("", code).reason
   end
 
-  def self.format_address(addr : Pointer(UInt8)) : Tuple(String, Int32)
-    port = (addr[2].to_i32 << 8) | addr[3].to_i32
+  # The port of the sockaddr at *addr*.
+  def self.address_port(addr : Pointer(UInt8)) : Int32
+    (addr[2].to_i32 << 8) | addr[3].to_i32
+  end
+
+  # The host of the sockaddr at *addr*, as text: one flat String, which
+  # moves down to the caller.
+  def self.address_host(addr : Pointer(UInt8)) : String
     family = {% if flag?(:darwin) %} addr[1].to_i32 {% else %} addr[0].to_i32 {% end %}
     is_v6 = {% if flag?(:darwin) %} family == 30 {% elsif flag?(:win32) %} family == 23 {% else %} family == 10 {% end %}
 
@@ -530,7 +540,7 @@ pub class UdpSocket
            else
              "#{addr[4]}.#{addr[5]}.#{addr[6]}.#{addr[7]}"
            end
-    {host, port}
+    host
   end
 
   # --- Platform System Call Bindings ---

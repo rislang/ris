@@ -1110,9 +1110,30 @@ pub struct IyiSocket
     connect_to(addr.to_unsafe, family, peer, ms)
   end
 
+  # One choice of two calls, so the socket is made in the caller's scope.
   def self.connect_to(addr : Pointer(UInt8), family : Int32, peer : String, ms : Int32 = -1) : IyiSocket | Cancelled | SocketError
+    (fd = connect_fd(addr, family, ms)) >= 0 ? IyiSocket.new(fd.to_i32, family) : refusal(fd, "connect to #{peer}")
+  end
+
+  # What `connect_fd` and `accept_fd` answer below 0: cancelled, timed
+  # out, or a failed step (FAILED_CREATE or FAILED_STEP) plus its code.
+  FD_CANCELLED  = -1_i64
+  FD_TIMED_OUT  = -2_i64
+  FAILED_CREATE = -(1_i64 << 32)
+  FAILED_STEP   = -(2_i64 << 32)
+
+  # The error a negative *fd* stands for, *operation* naming the step.
+  def self.refusal(fd : Int64, operation : String) : Cancelled | SocketError
+    return Cancelled.new if fd == FD_CANCELLED
+    return SocketError.timed_out(operation) if fd == FD_TIMED_OUT
+    return SocketError.new("create a socket", (FAILED_CREATE - fd).to_i32) if fd > FAILED_STEP
+    SocketError.new(operation, (FAILED_STEP - fd).to_i32)
+  end
+
+  # The connected descriptor, or what went wrong (see `refusal`).
+  def self.connect_fd(addr : Pointer(UInt8), family : Int32, ms : Int32) : Int64
     fd = __sys_socket(family)
-    return SocketError.new("create a socket", __sys_code(fd.to_i64)) if fd < 0
+    return FAILED_CREATE - __sys_code(fd.to_i64) if fd < 0
     __sys_no_sigpipe(fd)
     __send_at_once(fd, family)
     blocking = __sys_connects_blocking?(family)
@@ -1121,7 +1142,7 @@ pub struct IyiSocket
     if res < 0 && !__sys_in_progress?(res)
       code = __sys_code(res.to_i64)
       __sys_close(fd)
-      return SocketError.new("connect to #{peer}", code)
+      return FAILED_STEP - code
     end
     __sys_set_nonblock(fd) if blocking
     if res < 0
@@ -1130,21 +1151,26 @@ pub struct IyiSocket
       waited = IyiSocket.await_writable(fd, ms)
       if waited.is_a?(Cancelled)
         __sys_close(fd)
-        return waited
+        return FD_CANCELLED
       end
       unless waited
         __sys_close(fd)
-        return SocketError.timed_out("connect to #{peer}")
+        return FD_TIMED_OUT
       end
       if (code = __sys_sock_error(fd)) != 0
         __sys_close(fd)
-        return SocketError.new("connect to #{peer}", code)
+        return FAILED_STEP - code
       end
     end
-    IyiSocket.new(fd, family)
+    fd.to_i64
   end
 
   def accept : IyiSocket | Cancelled | SocketError
+    (fd = accept_fd) >= 0 ? IyiSocket.new(fd.to_i32, @state.value.family, task_owned: @state.value.task_owned) : IyiSocket.refusal(fd, "accept a connection")
+  end
+
+  # The accepted descriptor, or what went wrong (see `refusal`).
+  private def accept_fd : Int64
     raise "socket is closed" if @state.value.fd < 0
     # A `sockaddr_storage`'s room: the peer's address in whichever family.
     storage = uninitialized UInt8[128]
@@ -1156,15 +1182,14 @@ pub struct IyiSocket
         IyiSocket.__sys_no_sigpipe(client_fd)
         IyiSocket.__send_at_once(client_fd, @state.value.family)
         IyiSocket.__sys_set_nonblock(client_fd)
-        return IyiSocket.new(client_fd, @state.value.family,
-          task_owned: @state.value.task_owned)
+        return client_fd.to_i64
       end
       unless IyiSocket.__sys_would_block?(client_fd.to_i64)
-        error = SocketError.new("accept a connection", IyiSocket.__sys_code(client_fd.to_i64))
+        code = IyiSocket.__sys_code(client_fd.to_i64)
         # A client that left between its handshake and this accept is no
         # failure of the listener's: the next one is taken.
-        next if error.disconnected?
-        return error
+        next if SocketError.new("accept a connection", code).disconnected?
+        return IyiSocket::FAILED_STEP - code
       end
       # Closed by another fiber, which is the same answer whether it
       # happened under the accept or under the wait: the wait is over and
@@ -1173,10 +1198,10 @@ pub struct IyiSocket
       # itself the wait — a posted `AcceptEx` that a close completed comes
       # back here with the descriptor already gone, and a wait cannot be
       # asked about a socket that no longer exists.
-      return Cancelled.new if @state.value.fd < 0
+      return IyiSocket::FD_CANCELLED if @state.value.fd < 0
       waited = IyiSocket.await_readable(@state.value.fd)
-      return waited if waited.is_a?(Cancelled)
-      return Cancelled.new if @state.value.fd < 0
+      return IyiSocket::FD_CANCELLED if waited.is_a?(Cancelled)
+      return IyiSocket::FD_CANCELLED if @state.value.fd < 0
     end
   end
 
@@ -3693,6 +3718,8 @@ pub class Resolver
 
     nodata = nil.as(DnsError?)
     missing = nil.as(DnsError?)
+    # What a round's error keeps past the round.
+    notes = String::Builder.new(256)
     index = 0
     while candidate = DnsName.candidate(host, @search, @ndots, index)
       index = index + 1
@@ -3702,9 +3729,9 @@ pub class Resolver
       return got if got.is_a?(Array(IPAddress))
       return got.about(host, got.server) unless got.not_found? || got.no_address?
       if got.no_address?
-        nodata = got if nodata.nil?
+        nodata = got.kept(notes) if nodata.nil?
       else
-        missing = got if missing.nil?
+        missing = got.kept(notes) if missing.nil?
       end
     end
     # The name exists somewhere the search led, without an address: that
@@ -3893,9 +3920,10 @@ pub class Resolver
       return answered unless answered.is_a?(Tuple(DnsTapeMessage, String))
       message, label = answered
       answered = nil
-      read = message.addresses(target, type, budget)
+      found = [] of String
+      read = message.addresses(target, type, found, budget)
       return read.about(name, label) if read.is_a?(DnsError)
-      found, ends, links = read
+      ends, links = read
       return {found, ends, label} unless found.empty?
       return DnsError.new(DnsError::NO_ADDRESS, name, label, Resolver.missing(type)) if links == 0
       budget = budget - links

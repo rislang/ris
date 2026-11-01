@@ -93,7 +93,7 @@ def serve_udp(port : Int32) : Nil
     return unless got.is_a?(Std::Udp::Datagram)
     query = got.data
     type = query.byte_at(query.bytesize - 3).to_i32
-    name = DnsTapeMessage.read_name(query, 12)
+    name = DnsTapeMessage.read_name(query, 12, String::Builder.new(256))
     asked = name ? name[0] : "?"
     puts "udp #{asked} #{type}"
     reply = if asked == "big.example.test" && type == DnsTapeRecord::A
@@ -112,15 +112,16 @@ def serve_tcp(server : IyiSocket) : Nil
   conn = server.accept
   server.close
   return unless conn.is_a?(IyiSocket)
-  held = ""
-  while held.bytesize < 2 || held.bytesize < 2 + ((held.byte_at(0).to_i32 << 8) | held.byte_at(1).to_i32)
+  bytes = String::Builder.new(4096)
+  while bytes.bytesize < 2 || bytes.bytesize < 2 + ((bytes.finish.byte_at(0).to_i32 << 8) | bytes.finish.byte_at(1).to_i32)
     got = conn.read(4096)
     break unless got.is_a?(String)
     break if got.empty?
-    held = held + got
+    bytes << got
   end
+  held = bytes.finish
   query = held[2, held.bytesize - 2]
-  name = DnsTapeMessage.read_name(query, 12)
+  name = DnsTapeMessage.read_name(query, 12, String::Builder.new(256))
   puts "tcp #{name ? name[0] : "?"} #{query.byte_at(query.bytesize - 3)}"
   records = unhex("c00c000100010000003c0004c0000263")
   reply = answer(query, 0x8180, 1, records)
@@ -146,9 +147,10 @@ tape do
     puts m.answers?(0x1234_u16, "WWW.example.com.", DnsTapeRecord::A)
     puts m.answers?(0x1235_u16, "www.example.com", DnsTapeRecord::A)
     m.answers.each { |r| puts "  #{r.name} #{r.type} #{r.ttl} #{r.data.bytesize} #{r.target}" }
-    got = m.addresses("www.example.com", DnsTapeRecord::A)
-    if got.is_a?(Tuple(Array(String), String, Int32))
-      puts "#{got[0].map { |d| dotted(d) }.join(",")} at #{got[1]} after #{got[2]}"
+    found = [] of String
+    got = m.addresses("www.example.com", DnsTapeRecord::A, found)
+    if got.is_a?(Tuple(String, Int32))
+      puts "#{found.map { |d| dotted(d) }.join(",")} at #{got[0]} after #{got[1]}"
     end
     txt = m.answers[3]
     puts (DnsTapeRecord.character_strings(txt.data) || ["?"]).join("|")
