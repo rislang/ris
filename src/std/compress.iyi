@@ -610,6 +610,15 @@ class Inflate
 
   # The decoder `Inflater.new(envelope, io)` makes: pieces from *io*,
   # the buffer sliding as a stream's does.
+  # HTTP's deflate: a zlib stream, or the bare one some servers send
+  # under the name, told apart by its first two bytes (RFC 1950 §2.2:
+  # method 8, a multiple of 31) before any is taken.
+  @sniff : Bool = false
+
+  def sniff_bare : Nil
+    @sniff = true
+  end
+
   def over_io(io : IyiIO?) : Nil
     @io = io
     @grow = false
@@ -762,6 +771,14 @@ class Inflate
     b
   end
 
+  # The *k*th whole unread byte, from the accumulator or the piece in
+  # hand, not taken: `ahead?(k + 1)` has made sure of it.
+  private def peek_byte(k : Int32) : Int32
+    held = @count // 8
+    return (@bits.unsafe_shr(8 * k) & 255_u64).to_i32 if k < held
+    input_text.byte_at(@in_pos + k - held).to_i32
+  end
+
   # Whether *n* unread input bytes are in hand or can be had.
   private def ahead?(n : Int32) : Bool
     while @count // 8 + (@in_end - @in_pos) < n
@@ -881,6 +898,19 @@ class Inflate
   end
 
   private def head : Nil
+    if @sniff && @envelope == Envelope::Zlib
+      @sniff = false
+      if @count % 8 == 0 && ahead?(2)
+        cmf = peek_byte(0)
+        flg = peek_byte(1)
+        unless (cmf & 15) == 8 && ((cmf << 8) | flg) % 31 == 0
+          @envelope = Envelope::Raw
+          @check = 0_u32
+          @state = BLOCK
+          return
+        end
+      end
+    end
     if @envelope == Envelope::Zlib
       zlib_head
     else
@@ -1247,6 +1277,12 @@ pub class Inflater
   # Bytes the source gave beyond the end of the stream (gzip: after the
   # last member), for a caller that frames other data after it; "" before
   # the stream has ended.
+  # A zlib stream that may come bare (HTTP's deflate): see
+  # `Inflate#sniff_bare`. Before the first read.
+  def sniff_bare : Nil
+    @core.sniff_bare
+  end
+
   def leftover : String
     @core.leftover
   end
@@ -1759,7 +1795,8 @@ class Encoder
 
   # *data* as one final stream.
   def self.whole(data : String, level : Int32) : String
-    Encoder.new(level, data.bytesize).over(data)
+    encoder = Encoder.new(level, data.bytesize)
+    encoder.over(data)
   end
 
   # The string is copied into the window, which was sized for it.

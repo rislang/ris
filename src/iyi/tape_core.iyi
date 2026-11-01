@@ -566,6 +566,12 @@ struct SlicePool(T)
     end
     run
   end
+
+  # The run of *size* elements at *offset*, as `alloc_slice` answered it:
+  # kept as two numbers, a run is a flat value of its holder.
+  def run_at(offset : Int32, size : Int32) : Run(T)
+    run(offset, size)
+  end
 end
 
 struct SlicePool::Run(T)

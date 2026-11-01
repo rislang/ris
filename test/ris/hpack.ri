@@ -23,8 +23,9 @@ decoder = Decoder.new
     fields.push(TapeHeaderField.new(String.new("x-raw"),
       String.new("utf8: ü and NUL: \x00"), IndexingMode::WithoutIndexing))
     encoded = encoder.encode(fields)
-    decoded = decoder.decode(encoded)
-    raise decoded.message if decoded.is_a?(HpackError)
+    decoded = TapeHeaders.new(decoder.capacity(encoded))
+    failed = decoder.decode(encoded, decoded)
+    raise failed.message if failed
     raise "field count" unless decoded.size == 5
     k = 0
     decoded.each do |field|
@@ -37,17 +38,23 @@ end
 # Bad integers, index zero, truncated literals and Huffman padding.
 ["\x80", "\xff", "\x00\x03a", "\x00\x81\x00"].each do |text|
   tape do
-    decoded = Decoder.new.decode(text)
+    bad = Decoder.new
+    into = TapeHeaders.new(bad.capacity(text))
+    decoded = bad.decode(text, into)
     raise "accepted malformed block" unless decoded.is_a?(HpackError)
   end
 end
 # List limits must reject a valid indexed field before writing a slot.
 tape do
   text = "\x82"
-  count = Decoder.new(max_header_count: 0).decode(text)
+  counting = Decoder.new(max_header_count: 0)
+  counted = TapeHeaders.new(counting.capacity(text))
+  count = counting.decode(text, counted)
   raise "count limit" unless count.is_a?(HpackError)
   raise "count error" unless count.message.starts_with?("Decompression bomb")
-  size = Decoder.new(max_header_list_size: 41).decode(text)
+  sizing = Decoder.new(max_header_list_size: 41)
+  sized = TapeHeaders.new(sizing.capacity(text))
+  size = sizing.decode(text, sized)
   raise "size limit" unless size.is_a?(HpackError)
   raise "size error" unless size.message.starts_with?("Decompression bomb")
 end

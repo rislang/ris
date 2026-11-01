@@ -17,14 +17,20 @@ struct Big
     RisBoard.post(Listening.new)
   end
 
+  # One call: the Response is built in the server's scope (SPEC 1.5).
   def call(req : Request) : Response
+    Response.new(200, Big.text_for(req))
+  end
+
+  # A local grown in place, returned where it is.
+  def self.text_for(req : Request) : String
     head = req.header("X-Big")
     size = head ? head.bytesize : 0
     body = req.body
     answer = ""
     answer << size << " " << body.bytesize << " "
     answer << "y" * (body.bytesize // 2)
-    Response.new(200, answer)
+    answer
   end
 end
 
@@ -43,14 +49,14 @@ def answer(socket : IyiSocket) : String
       while got.bytesize < at + 4 + length
         piece = socket.read(65536).or_panic
         raise "closed early" if piece.empty?
-        got = got + piece
+        got << piece
       end
       raise "bytes past the answer" if got.bytesize > at + 4 + length
       return got[at + 4, length]
     end
     piece = socket.read(65536).or_panic
     raise "closed early" if piece.empty?
-    got = got + piece
+    got << piece
   end
 end
 

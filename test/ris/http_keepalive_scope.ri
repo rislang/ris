@@ -17,10 +17,16 @@ struct Echo
     RisBoard.post(Listening.new)
   end
 
+  # One call: the Response is built in the server's scope (SPEC 1.5).
   def call(req : Request) : Response
+    Response.new(200, Echo.text_for(req))
+  end
+
+  # A local grown in place, returned where it is.
+  def self.text_for(req : Request) : String
     answer = ""
     answer << req.path << " " << req.body.bytesize
-    Response.new(200, answer)
+    answer
   end
 end
 
@@ -40,7 +46,7 @@ def answer(socket : IyiSocket) : String
     end
     piece = socket.read(65536).or_panic
     raise "closed early" if piece.empty?
-    got = got + piece
+    got << piece
   end
 end
 

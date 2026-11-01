@@ -95,9 +95,19 @@ pub alias TapeHeaderField = HeaderField
 pub struct TapeHeaders
   @fields : Array(HeaderField)
   @capacity : Int32
+  # The texts of decoded fields, copied here: they live as the list does.
+  @texts : String::Builder
 
   def initialize(@capacity : Int32)
     @fields = Array(HeaderField).new(@capacity)
+    @texts = String::Builder.new(@capacity * 32 + 64)
+  end
+
+  # *text* copied into this list's own texts: a view of them.
+  def keep(text : String) : String
+    from = @texts.bytesize
+    @texts << text
+    @texts.finish[from, text.bytesize]
   end
 
   def size : Int32
@@ -263,32 +273,37 @@ pub class DynamicTable
   getter max_size : Int32
   getter settings_max_size : Int32
   getter size : Int32
-  @[OnTape]
+  # An entry's runs in `@bytes`, kept as offsets and sizes: a flat value.
   private struct StoredField
-    getter name_run : SlicePool::Run(UInt8)
-    getter value_run : SlicePool::Run(UInt8)
+    getter name_at : Int32
+    getter name_size : Int32
+    getter value_at : Int32
+    getter value_size : Int32
     getter indexing : IndexingMode
 
-    def initialize(@name_run : SlicePool::Run(UInt8),
-                   @value_run : SlicePool::Run(UInt8),
+    def initialize(name : SlicePool::Run(UInt8), value : SlicePool::Run(UInt8),
                    @indexing : IndexingMode)
-    end
-
-    def name : String
-      @name_run.string
-    end
-
-    def value : String
-      @value_run.string
+      @name_at = name.offset
+      @name_size = name.size
+      @value_at = value.offset
+      @value_size = value.size
     end
 
     def size : Int32
-      @name_run.size + @value_run.size + 32
+      @name_size + @value_size + 32
     end
+  end
 
-    def view : HeaderField
-      HeaderField.new(name, value, @indexing)
-    end
+  private def name_of(entry : StoredField) : String
+    @bytes.run_at(entry.name_at, entry.name_size).string
+  end
+
+  private def value_of(entry : StoredField) : String
+    @bytes.run_at(entry.value_at, entry.value_size).string
+  end
+
+  private def view_of(entry : StoredField) : HeaderField
+    HeaderField.new(name_of(entry), value_of(entry), entry.indexing)
   end
 
   @bytes : SlicePool(UInt8)
@@ -300,7 +315,7 @@ pub class DynamicTable
   end
 
   def entries : Array(HeaderField)
-    @entries.map { |entry| entry.view }
+    @entries.map { |entry| view_of(entry) }
   end
 
 
@@ -376,8 +391,8 @@ pub class DynamicTable
   private def evict_last : Nil
     removed = @entries[@entries.size - 1]
     bytes = removed.size
-    @bytes.free_slice(removed.name_run)
-    @bytes.free_slice(removed.value_run)
+    @bytes.free_slice(@bytes.run_at(removed.name_at, removed.name_size))
+    @bytes.free_slice(@bytes.run_at(removed.value_at, removed.value_size))
     @size -= bytes
     @entries.pop
     nil
@@ -395,7 +410,7 @@ pub class DynamicTable
 
   def get(relative_index : Int32) : HeaderField?
     if relative_index >= 1 && relative_index <= @entries.size
-      @entries[relative_index - 1].view
+      view_of(@entries[relative_index - 1])
     else
       nil
     end
@@ -407,8 +422,8 @@ pub class DynamicTable
     i = 0
     while i < @entries.size
       entry = @entries[i]
-      if name == entry.name
-        if value == entry.value
+      if name == name_of(entry)
+        if value == value_of(entry)
           return {i + 1, true}
         elsif name_idx == 0
           name_idx = i + 1
@@ -422,7 +437,7 @@ pub class DynamicTable
   def find_name(name : String) : Int32
     i = 0
     while i < @entries.size
-      if name == @entries[i].name
+      if name == name_of(@entries[i])
         return i + 1
       end
       i = i + 1
@@ -714,21 +729,26 @@ pub class Decoder
   end
 
   def decode(payload : Bytes) : Array(HeaderField) | HpackError
-    decode_fields(payload).as(Array(HeaderField) | HpackError)
+    headers = [] of HeaderField
+    failed = decode_fields(payload, headers)
+    return failed if failed
+    headers
   end
 
-  def decode(payload : String) : TapeHeaders | HpackError
-    decode_fields(payload).as(TapeHeaders | HpackError)
+  # The fields of *payload*, pushed into *headers*, the caller's: made
+  # with room for as many fields as `capacity(payload)` answers.
+  def decode(payload : String, headers : TapeHeaders) : HpackError?
+    decode_fields(payload, headers)
   end
 
-  private def decode_fields(payload : Bytes | String)
-    headers = if payload.is_a?(String)
-                capacity = payload.size
-                capacity = @max_header_count if capacity > @max_header_count
-                TapeHeaders.new(capacity > 0 ? capacity : 0)
-              else
-                [] of HeaderField
-              end
+  # The most fields *payload* can decode to under this decoder's limit.
+  def capacity(payload : String) : Int32
+    capacity = payload.size
+    capacity = @max_header_count if capacity > @max_header_count
+    capacity > 0 ? capacity : 0
+  end
+
+  private def decode_fields(payload : Bytes | String, headers : Array(HeaderField) | TapeHeaders) : HpackError?
     offset = 0_i32
     # Int64: with no list limit (Int32's largest), one 4 KB entry indexed
     # 600,000 times passed Int32 and panicked where it should count.
@@ -774,7 +794,7 @@ pub class Decoder
         end
 
         if headers.is_a?(TapeHeaders)
-          headers.push(field.copy_to(RisCurrentTape.new))
+          headers.push(HeaderField.new(headers.keep(field.name), headers.keep(field.value), field.indexing))
         else
           headers.push(field.copy_to(RisCurrentTape.new))
         end
@@ -824,12 +844,11 @@ pub class Decoder
           return HpackError.new("Decompression bomb: decoded header list exceeds #{@max_header_list_size} octets")
         end
 
-        owned = HeaderField.new(name, val).copy_to(RisCurrentTape.new)
-        @dynamic_table.add(owned.name, owned.value, false)
+        @dynamic_table.add(name, val, false)
         if headers.is_a?(TapeHeaders)
-          headers.push(TapeHeaderField.view(owned))
+          headers.push(HeaderField.new(headers.keep(name), headers.keep(val)))
         else
-          headers.push(owned)
+          headers.push(HeaderField.new(name, val).copy_to(RisCurrentTape.new))
         end
         seen_field = true
       elsif (b & 0x20_u8) != 0_u8
@@ -898,7 +917,7 @@ pub class Decoder
         end
 
         if headers.is_a?(TapeHeaders)
-          headers.push(TapeHeaderField.new(tape_view(name), tape_view(val),
+          headers.push(TapeHeaderField.new(headers.keep(name), headers.keep(val),
             IndexingMode::NeverIndexed))
         else
           headers.push(HeaderField.new(name, val,
@@ -951,7 +970,7 @@ pub class Decoder
         end
 
         if headers.is_a?(TapeHeaders)
-          headers.push(TapeHeaderField.new(tape_view(name), tape_view(val),
+          headers.push(TapeHeaderField.new(headers.keep(name), headers.keep(val),
             IndexingMode::WithoutIndexing))
         else
           headers.push(HeaderField.new(name, val,
@@ -961,7 +980,7 @@ pub class Decoder
       end
     end
 
-    headers
+    nil
   end
 
   private def tape_view(value : String) : String

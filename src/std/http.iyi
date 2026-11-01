@@ -146,6 +146,7 @@ import std/indexable
 import std/text
 
 import std/int
+import std/static_array
 
 import std/dns::{DnsError, DnsName, SvcbAnswer, SvcbRecord, SvcbStore}
 import std/socket::{IyiSocket, Resolver, SocketError}
@@ -294,7 +295,15 @@ struct Conn
     # been searched.
     property searched : Int32
     property ended : Bool
-    property failure : Cancelled | SocketError | Nil
+    # The first failure, kept as scalars and bytes in the state itself: it
+    # outlives the scope it happened in. 0 none, 1 cancelled, 2 a socket
+    # error, its code, operation and the layer's reason (-1: none).
+    property failure_kind : Int32 = 0
+    property failure_code : Int32 = 0
+    property failure_operation : ::StaticArray(UInt8, 64) = ::StaticArray(UInt8, 64).new(0_u8)
+    property failure_operation_size : Int32 = 0
+    property failure_layer : ::StaticArray(UInt8, 256) = ::StaticArray(UInt8, 256).new(0_u8)
+    property failure_layer_size : Int32 = -1
     property listener : IyiSocket?
     property idle : IdleConns?
     # Handed to an upgrade's protocol (`held`), which writes when it likes.
@@ -334,7 +343,7 @@ struct Conn
       @stop = 0
       @searched = 0
       @ended = false
-      @failure = nil
+      @failure_kind = 0
     end
   end
 
@@ -426,8 +435,51 @@ struct Conn
     @state.value.stream || @state.value.socket
   end
 
+  # The kept failure, its texts built on the caller's tape.
   def failure : Cancelled | SocketError | Nil
-    @state.value.failure
+    state = @state.value
+    return nil if state.failure_kind == 0
+    return Cancelled.new if state.failure_kind == 1
+    operation = String.build(state.failure_operation_size) do |into|
+      state.failure_operation_size.times { |i| into.push(state.failure_operation[i]) }
+      nil
+    end
+    return SocketError.new(operation, state.failure_code) if state.failure_layer_size < 0
+    layer = String.build(state.failure_layer_size) do |into|
+      state.failure_layer_size.times { |i| into.push(state.failure_layer[i]) }
+      nil
+    end
+    SocketError.new(operation, state.failure_code, nil, layer)
+  end
+
+  # Whether a failure is kept.
+  def failed? : Bool
+    @state.value.failure_kind != 0
+  end
+
+  # *fault* kept in the state, as scalars and bytes (`failure`); a text
+  # past its room is cut short.
+  private def keep_failure(fault : Cancelled | SocketError) : Nil
+    if fault.is_a?(Cancelled)
+      @state.value.failure_kind = 1
+      return
+    end
+    operation = ::StaticArray(UInt8, 64).new(0_u8)
+    size = fault.operation.bytesize < 64 ? fault.operation.bytesize : 64
+    size.times { |i| operation[i] = fault.operation.byte_at(i) }
+    @state.value.failure_operation = operation
+    @state.value.failure_operation_size = size
+    @state.value.failure_layer_size = -1
+    if reason = fault.layer_reason
+      layer = ::StaticArray(UInt8, 256).new(0_u8)
+      kept = reason.bytesize < 256 ? reason.bytesize : 256
+      kept.times { |i| layer[i] = reason.byte_at(i) }
+      @state.value.failure_layer = layer
+      @state.value.failure_layer_size = kept
+    end
+    @state.value.failure_code = fault.code
+    @state.value.failure_kind = 2
+    nil
   end
 
   # Whether the connection's TLS handshake resumed a session by a ticket
@@ -483,7 +535,7 @@ struct Conn
   # on a failure (kept in `failure`), and under `serve` once the listener
   # is closed.
   def fill : Bool
-    return false if @state.value.ended || !@state.value.failure.nil?
+    return false if @state.value.ended || @state.value.failure_kind != 0
     if listener = @state.value.listener
       return false if listener.closed?
     end
@@ -491,7 +543,7 @@ struct Conn
     if @state.value.deadline > 0_i64
       left = (@state.value.deadline - Time.monotonic_nanoseconds.to_i64) // 1000000_i64
       if left <= 0_i64
-        @state.value.failure = SocketError.timed_out(@state.value.deadline_whole ? "read a request" : "read a request's head")
+        keep_failure(SocketError.timed_out(@state.value.deadline_whole ? "read a request" : "read a request's head"))
         return false
       end
       # The pause a read may take still holds inside the deadline.
@@ -517,10 +569,10 @@ struct Conn
       @state.value.stop = @state.value.stop + got
       true
     in Cancelled
-      @state.value.failure = got
+      keep_failure(got)
       false
     in SocketError
-      @state.value.failure = got
+      keep_failure(got)
       false
     end
   end
@@ -722,7 +774,7 @@ struct Conn
     if h2 = @state.value.h2
       h2.goaway
     end
-    if @state.value.ended || !@state.value.failure.nil?
+    if @state.value.ended || @state.value.failure_kind != 0
       close_now
     elsif stream = @state.value.stream
       stream.close
@@ -942,7 +994,9 @@ pub class BodyReader
   @limit : Int64
   @total : Int64
   @finished : Bool
-  @fault : HTTPError | Cancelled | SocketError | Nil
+  # The kept fault, its texts in `@fault_text`; a cancellation is a flag.
+  @fault : HTTPError | SocketError | Nil
+  @cancelled : Bool = false
   # The kept fault's texts.
   # The caller owns and may reuse the fault text storage.
   @fault_text : String::Builder
@@ -952,14 +1006,18 @@ pub class BodyReader
   # server answers `Expect: 100-continue` there, and not before the body
   # is wanted.
   @continue_pending : Bool
-  # The coding undone as the body is read (`decode`, `decode_zstd`): the
-  # stream, and until it starts, the envelope it was asked for and the
-  # bytes read to tell deflate's two forms apart.
+  # The coding undone as the body is read: the decoder, made with the
+  # reader (`coding`, one of the CODED_ values).
+  CODED_NONE = 0
+  CODED_GZIP = 1
+  CODED_ZLIB = 2
+  CODED_ZSTD = 3
   @inflater : Inflater?
-  @coding : Envelope?
   @zstd : ZstdReader? = nil
 
-  def initialize(@fault_text : String::Builder, @conn : Conn?, @kind : Int32, length : Int64, @limit : Int64, @text : String = "", continue_pending : Bool = false)
+  def initialize(@fault_text : String::Builder, @conn : Conn?, @kind : Int32, length : Int64, @limit : Int64, @text : String = "", continue_pending : Bool = false, coding : Int32 = CODED_NONE, frames : H2Connection? = nil, frames_id : Int32 = 0)
+    @frames = frames
+    @frames_id = frames_id
     @left = @kind == CHUNKED ? -1_i64 : length
     @declared = length
     @total = 0_i64
@@ -968,7 +1026,22 @@ pub class BodyReader
     @at = 0
     @continue_pending = continue_pending
     @inflater = nil
-    @coding = nil
+    unless @finished
+      if coding == CODED_ZSTD
+        zstd = ZstdReader.new(BodyFeed.new(self), Zstd::WINDOW_LIMIT)
+        @zstd = zstd
+      elsif coding == CODED_GZIP || coding == CODED_ZLIB
+        envelope = coding == CODED_GZIP ? Envelope::Gzip : Envelope::Zlib
+        inflater = Inflater.new(envelope, BodyFeed.new(self), "")
+        inflater.sniff_bare if coding == CODED_ZLIB
+        @inflater = inflater
+      end
+    end
+  end
+
+  # Whether a decoder undoes the body's coding.
+  def decoding? : Bool
+    !@inflater.nil? || !@zstd.nil?
   end
 
   # A body that is a string already in hand.
@@ -977,15 +1050,8 @@ pub class BodyReader
   end
 
   # A body that arrives as an HTTP/2 stream's DATA: refused past *limit*.
-  protected def self.frames(fault_text : String::Builder, h2 : H2Connection, id : Int32, limit : Int64) : BodyReader
-    reader = BodyReader.new(fault_text, nil, FRAMES, 0_i64, limit)
-    reader.on_frames(h2, id)
-    reader
-  end
-
-  protected def on_frames(h2 : H2Connection, id : Int32) : Nil
-    @frames = h2
-    @frames_id = id
+  protected def self.frames(fault_text : String::Builder, h2 : H2Connection, id : Int32, limit : Int64, coding : Int32 = CODED_NONE) : BodyReader
+    BodyReader.new(fault_text, nil, FRAMES, 0_i64, limit, coding: coding, frames: h2, frames_id: id)
   end
 
   # Whether the body ends where the connection does: nothing can follow
@@ -996,7 +1062,7 @@ pub class BodyReader
 
   # Whether every byte of the body has been read, the framing's end too.
   def finished? : Bool
-    return false unless @finished && @coding.nil?
+    return false unless @finished
     if inflater = @inflater
       return inflater.finished?
     end
@@ -1006,37 +1072,13 @@ pub class BodyReader
     true
   end
 
-  # The body's coding undone from here on: `Envelope::Gzip` for gzip,
-  # `Envelope::Zlib` for HTTP's deflate - which some servers send as the
-  # bare stream instead, without zlib's two bytes of header, so the first
-  # two bytes are looked at first, and a pair that is not a zlib header
-  # (RFC 1950 §2.2: method 8, a multiple of 31) is read as the bare
-  # stream. A body that does not decode is an `HTTPError` naming the
-  # coding and why.
-  def decode(envelope : Envelope) : Nil
-    @coding = envelope
-  end
-
-  # The body's `zstd` coding (RFC 8878) undone from here on, by std/zstd's
-  # `ZstdReader` as the pieces arrive, frames one after another. A frame
-  # that asks for a window past *max_window* bytes is refused rather than
-  # given the memory (a window outside 1 KiB to 512 MiB is a panic), and a
-  # body that does not decode is an `HTTPError` naming the coding and why.
-  def decode_zstd(max_window : Int32 = Zstd::WINDOW_LIMIT) : Nil
-    @zstd = ZstdReader.new(BodyFeed.new(self), max_window)
-  end
-
   # The next piece of the body, at most *max* bytes; "" when it is done.
   def read(max : Int32 = 65536) : String | Cancelled | SocketError | HTTPError
+    return Cancelled.new if @cancelled
     if fault = @fault
       return fault
     end
     raise "BodyReader: a read of #{max} bytes" if max < 1
-    if coding = @coding
-      @coding = nil
-      started = start_inflater(coding)
-      return started unless started.nil?
-    end
     if inflater = @inflater
       return decoded(inflater.read(max))
     end
@@ -1062,28 +1104,11 @@ pub class BodyReader
       end
       return ""
     end
+    return Cancelled.new if @cancelled
     if fault = @fault
       return fault
     end
     remember(HTTPError.new("the body's coding: " + got.message))
-  end
-
-  private def start_inflater(coding : Envelope) : Cancelled | SocketError | HTTPError | Nil
-    envelope = coding
-    first = ""
-    if coding == Envelope::Zlib
-      while first.bytesize < 2
-        got = raw(65536)
-        return got unless got.is_a?(String)
-        break if got.bytesize == 0
-        # Grown in place: a round's text is freed with the round.
-        first << got
-      end
-      zlib = first.bytesize >= 2 && (first.byte_at(0) & 15_u8) == 8_u8 && ((first.byte_at(0).to_i32 << 8) | first.byte_at(1).to_i32) % 31 == 0
-      envelope = Envelope::Raw unless zlib
-    end
-    @inflater = Inflater.new(envelope, BodyFeed.new(self), first)
-    nil
   end
 
   # The decoder's next piece (`BodyFeed`): the framing's bytes, nil at
@@ -1092,7 +1117,7 @@ pub class BodyReader
   def feed_piece : String?
     got = raw(65536)
     unless got.is_a?(String)
-      @fault = got
+      remember(got)
       return nil
     end
     got.bytesize == 0 ? nil : got
@@ -1162,7 +1187,7 @@ pub class BodyReader
       @fault = said
       return said
     end
-    @fault = Cancelled.new
+    @cancelled = true
     fault
   end
 
@@ -1284,8 +1309,7 @@ pub class BodyReader
   private def failed(conn : Conn) : Cancelled | SocketError | Nil
     fault = conn.failure
     return nil if fault.nil?
-    @fault = fault
-    fault
+    remember(fault).as(Cancelled | SocketError)
   end
 
   # A chunk's size line (RFC 9112 §7.1): hexadecimal, extensions after
@@ -1344,12 +1368,18 @@ pub class BodyWriter
   @socket : IyiSocket | TlsStream | H2Out
   @chunked : Bool
   @deflater : Deflater?
-  @fault : Cancelled | SocketError | Nil
+  # The first failure, kept as scalars and bytes of the writer's own
+  # (`keep`): 0 none, 1 cancelled, 2 a socket error.
+  @fault_kind : Int32 = 0
+  @fault_code : Int32 = 0
+  @fault_operation : ::StaticArray(UInt8, 64) = ::StaticArray(UInt8, 64).new(0_u8)
+  @fault_operation_size : Int32 = 0
+  @fault_layer : ::StaticArray(UInt8, 256) = ::StaticArray(UInt8, 256).new(0_u8)
+  @fault_layer_size : Int32 = -1
   @written : Int64
   @done : Bool
 
   def initialize(@socket : IyiSocket | TlsStream | H2Out, @chunked : Bool, @deflater : Deflater? = nil)
-    @fault = nil
     @written = 0_i64
     @done = false
   end
@@ -1360,7 +1390,7 @@ pub class BodyWriter
   end
 
   def write(text : String) : Nil | Cancelled | SocketError
-    return fault_now unless @fault.nil?
+    return fault_now unless @fault_kind == 0
     raise "BodyWriter: a write after the body's end" if @done
     return nil if text.bytesize == 0
     @written = @written + text.bytesize.to_i64
@@ -1372,28 +1402,52 @@ pub class BodyWriter
     fault_now
   end
 
-  # The kept failure, copied onto the caller's tape: what a block is
-  # handed stays its own, not a view of this writer.
+  # The kept failure, its texts built on the caller's tape.
   private def fault_now : Nil | Cancelled | SocketError
-    case fault = @fault
-    in Nil       then nil
-    in Cancelled then Cancelled.new
-    in SocketError
-      fault.copy_to(RisCurrentTape.new)
+    return nil if @fault_kind == 0
+    return Cancelled.new if @fault_kind == 1
+    operation = String.build(@fault_operation_size) do |into|
+      @fault_operation_size.times { |i| into.push(@fault_operation[i]) }
+      nil
     end
+    return SocketError.new(operation, @fault_code) if @fault_layer_size < 0
+    layer = String.build(@fault_layer_size) do |into|
+      @fault_layer_size.times { |i| into.push(@fault_layer[i]) }
+      nil
+    end
+    SocketError.new(operation, @fault_code, nil, layer)
+  end
+
+  # *fault* kept as scalars and bytes; a text past its room is cut short.
+  private def keep(fault : Cancelled | SocketError) : Nil
+    if fault.is_a?(Cancelled)
+      @fault_kind = 1
+      return
+    end
+    size = fault.operation.bytesize < 64 ? fault.operation.bytesize : 64
+    size.times { |i| @fault_operation[i] = fault.operation.byte_at(i) }
+    @fault_operation_size = size
+    if reason = fault.layer_reason
+      kept = reason.bytesize < 256 ? reason.bytesize : 256
+      kept.times { |i| @fault_layer[i] = reason.byte_at(i) }
+      @fault_layer_size = kept
+    end
+    @fault_code = fault.code
+    @fault_kind = 2
+    nil
   end
 
   # The end of the body: the gzip trailer, and the last chunk with the
   # blank line after it. Once; the server's call after a block that
   # finished its own body writes nothing.
   def finish : Nil | Cancelled | SocketError
-    return fault_now unless @fault.nil?
+    return fault_now unless @fault_kind == 0
     return nil if @done
     @done = true
     if deflater = @deflater
       put(deflater.finish)
     end
-    send("0\r\n\r\n") if @chunked && @fault.nil?
+    send("0\r\n\r\n") if @chunked && @fault_kind == 0
     fault_now
   end
 
@@ -1420,10 +1474,10 @@ pub class BodyWriter
     in Int32
       true
     in Cancelled
-      @fault = got
+      keep(got)
       false
     in SocketError
-      @fault = got
+      keep(got)
       false
     end
   end
@@ -1435,6 +1489,11 @@ end
 # body that cannot be read - the client went, or sent one that is not
 # HTTP - ends the connection with that sentence rather than be answered as
 # if it were whole.
+# Request-owned certificate slots, made with the request.
+class RisHttpRequestState
+  property peer_certificates : Array(Certificate) = [] of Certificate
+end
+
 pub class Request
   getter method : String
   getter path : String
@@ -1449,7 +1508,17 @@ pub class Request
   # The client's certificate chain, leaf first, as std/tls checked it:
   # under `serve(tls:)` with `client_roots` set, the certificate the
   # client presented; empty otherwise.
-  property peer_certificates : Array(Certificate) = [] of Certificate
+  @state : RisHttpRequestState
+
+  def peer_certificates : Array(Certificate)
+    @state.peer_certificates
+  end
+
+  def peer_certificates=(chain : Array(Certificate)) : Nil
+    @state.peer_certificates.concat(chain)
+    nil
+  end
+
   @tls_resumed : Bool = false
   @reader : BodyReader
   @text : String?
@@ -1457,11 +1526,15 @@ pub class Request
   # A request whose body is in hand: what `parse_request` answers.
   def initialize(@method : String, @path : String, @query : String?, @headers : Hash(String, String), body : String, @version : String = "HTTP/1.1", @remote_address : String? = nil)
     @reader = BodyReader.text(String::Builder.new(256), body)
+    state = RisHttpRequestState.new
+    @state = state
     @text = body
   end
 
   # A request whose body is still on the connection.
   def initialize(@method : String, @path : String, @query : String?, @headers : Hash(String, String), @version : String, @reader : BodyReader, @remote_address : String? = nil)
+    state = RisHttpRequestState.new
+    @state = state
     @text = nil
   end
 
@@ -1551,25 +1624,48 @@ end
 #
 # What a client is handed: the status, reason and headers, and the body -
 # `body` whole, or `body_io` as it arrives inside `HTTP.open`'s block.
+class RisHttpResponseBody
+  getter headers : Hash(String, String)
+  property apart : Hash(String, Array(String))?
+
+  def initialize(@headers : Hash(String, String), @apart : Hash(String, Array(String))? = nil)
+  end
+
+  getter text : String::Builder = String::Builder.new(4096)
+  # A coded body (`Server.compressed`) and the header texts made for it.
+  getter coded : String::Builder = String::Builder.new(4096)
+  getter notes : String::Builder = String::Builder.new(64)
+
+  # *text* copied into `notes`: a view of this holder's own bytes.
+  def note(text : String) : String
+    from = @notes.bytesize
+    @notes << text
+    @notes.finish[from, text.bytesize]
+  end
+end
+
 pub class Response
   getter status : Int32
   getter reason : String
-  getter headers : Hash(String, String)
+  def headers : Hash(String, String)
+    @held.headers
+  end
   # The values of each field on more than one line, by its name in
   # `headers`, one entry a line.
-  @apart : Hash(String, Array(String))?
   @body : String
   @source : IyiIO?
   @writer : Proc(BodyWriter, Nil)?
   @upgrading : Bool = false
   @reader : BodyReader?
   # Where a body read from `@reader` is kept: made with the response.
-  @held : String::Builder? = nil
+  @held : RisHttpResponseBody
   @url : String?
   @decoded : Bool
   @tls_resumed : Bool = false
 
-  def initialize(@status : Int32, @reason : String, @headers : Hash(String, String), @body : String, @apart : Hash(String, Array(String))? = nil)
+  def initialize(@status : Int32, @reason : String, headers : Hash(String, String), @body : String, apart : Hash(String, Array(String))? = nil)
+    held = RisHttpResponseBody.new(headers, apart)
+    @held = held
     @source = nil
     @writer = nil
     @reader = nil
@@ -1579,20 +1675,22 @@ pub class Response
 
   # A response a client read: its body comes from *reader*, and *url* is
   # where it came from.
-  def initialize(@status : Int32, @reason : String, @headers : Hash(String, String), @apart : Hash(String, Array(String))?, reader : BodyReader, url : String, @decoded : Bool)
+  def initialize(@status : Int32, @reason : String, headers : Hash(String, String), apart : Hash(String, Array(String))?, reader : BodyReader, url : String, @decoded : Bool)
+    held = RisHttpResponseBody.new(headers, apart)
+    @held = held
     @body = ""
     @source = nil
     @writer = nil
     @reader = reader
-    @held = String::Builder.new(4096)
     @url = url
   end
 
   # A response to write: the reason is the status's own, the headers the
   # caller's. `Response.new(200, "hello")` is the common shape.
-  def initialize(@status : Int32, @body : String = "", @headers : Hash(String, String) = {} of String => String)
+  def initialize(@status : Int32, @body : String = "", headers : Hash(String, String) = {} of String => String)
+    held = RisHttpResponseBody.new(headers)
+    @held = held
     @reason = HTTP.reason_for(@status)
-    @apart = nil
     @source = nil
     @writer = nil
     @reader = nil
@@ -1602,10 +1700,11 @@ pub class Response
 
   # A response whose body is *source*, copied out by the server and
   # closed after.
-  def initialize(@status : Int32, source : IyiIO, @headers : Hash(String, String) = {} of String => String)
+  def initialize(@status : Int32, source : IyiIO, headers : Hash(String, String) = {} of String => String)
+    held = RisHttpResponseBody.new(headers)
+    @held = held
     @reason = HTTP.reason_for(@status)
     @body = ""
-    @apart = nil
     @source = source
     @writer = nil
     @reader = nil
@@ -1690,10 +1789,10 @@ pub class Response
   # time it is asked for, and a body that cannot be read panics with why;
   # `body_io` answers that as a value.
   def body : String
-    if (reader = @reader) && (held = @held)
-      got = reader.read_all_into(held)
+    if @reader
+      got = @reader.as(BodyReader).read_all_into(@held.text)
       raise got.message if got
-      @body = held.finish
+      @body = @held.text.finish
       @reader = nil
     end
     @body
@@ -1710,10 +1809,10 @@ pub class Response
   # The body read whole into the response, which is answered; why not,
   # when it cannot be.
   def load : Response | Cancelled | SocketError | HTTPError
-    if (reader = @reader) && (held = @held)
-      got = reader.read_all_into(held)
+    if @reader
+      got = @reader.as(BodyReader).read_all_into(@held.text)
       return got if got
-      @body = held.finish
+      @body = @held.text.finish
       @reader = nil
     end
     self
@@ -1723,7 +1822,7 @@ pub class Response
   # name is case-insensitive (RFC 9110 §5.1), and `content-length` is as
   # common on the wire as `Content-Length`.
   def header(name : String) : String?
-    @headers.each do |key, value|
+    @held.headers.each do |key, value|
       return value if HTTP.same_name?(key, name)
     end
     nil
@@ -1735,7 +1834,7 @@ pub class Response
   # read as "a=1; Expires=Wed, 21 Oct 2026 07:28:00 GMT, b=2", which no
   # split takes back apart. Empty for a field that is not there.
   def header_values(name : String) : Array(String)
-    if apart = @apart
+    if apart = @held.apart
       apart.each do |key, values|
         return values.dup if HTTP.same_name?(key, name)
       end
@@ -1749,24 +1848,51 @@ pub class Response
   # is part of a cookie's date.
   def add_header(name : String, value : String) : Nil
     spelled = name
-    @headers.each do |key, _|
+    @held.headers.each do |key, _|
       spelled = key if HTTP.same_name?(key, name)
     end
-    apart = @apart || {} of String => Array(String)
-    @apart = apart
-    if existing = @headers[spelled]?
+    apart = @held.apart || {} of String => Array(String)
+    @held.apart = apart
+    if existing = @held.headers[spelled]?
       apart[spelled] = [existing] unless apart.has_key?(spelled)
       apart[spelled] << value
-      @headers[spelled] = existing + ", " + value
+      @held.headers[spelled] = existing + ", " + value
     else
-      @headers[spelled] = value
+      @held.headers[spelled] = value
     end
   end
 
   # The lines of each field written on more than one, by its name in
   # `headers`; nil when every field is on one line.
   def apart : Hash(String, Array(String))?
-    @apart
+    @held.apart
+  end
+
+  # The headers of a body coded in *coding* (`gzip`, `zstd`), changed in
+  # place: the coding, and `Vary` so that a cache keeps the answers apart.
+  # A `Content-Length` the block gave is the plain body's, and goes.
+  protected def code_as(coding : String) : Nil
+    headers = @held.headers
+    headers.reject_in_place { |name, _| HTTP.same_name?(name, "Content-Length") }
+    vary = nil.as(String?)
+    headers.each { |name, _| vary = name if HTTP.same_name?(name, "Vary") }
+    if found = vary
+      # Copies: no key or value of the table is held while it changes.
+      name = @held.note(found)
+      value = @held.note(headers[name] + ", Accept-Encoding")
+      headers[name] = value unless HTTP.has_token?(headers[name], "Accept-Encoding")
+    else
+      headers["Vary"] = "Accept-Encoding"
+    end
+    headers["Content-Encoding"] = coding
+    nil
+  end
+
+  # *coded* as the body, copied into this response's own builder.
+  protected def body_coded(coded : String) : Nil
+    @held.coded << coded
+    @body = @held.coded.finish
+    nil
   end
 
   def success? : Bool
@@ -1947,7 +2073,9 @@ pub struct Server
             refuse(client, got)
             return
           end
-          head = request_head(got)
+          head_fields = {} of String => String
+          texts = String::Builder.new(256)
+          head = request_head(got, head_fields, texts)
           if head.is_a?(HTTPError)
             refuse(client, head)
             return
@@ -2321,8 +2449,8 @@ pub struct Server
       client.write_timeout_ms = timeout_ms
     end
     # Early data is never taken (the header says why).
-    secured = TlsServer.over(client, config, timeout_ms > 0 ? timeout_ms : TlsServer::HANDSHAKE_TIMEOUT_MS, early_data: false)
-    return if secured.is_a?(TlsError)
+    secured = TlsServer.new(client, config)
+    return if secured.accept(timeout_ms > 0 ? timeout_ms : TlsServer::HANDSHAKE_TIMEOUT_MS, early_data: false)
     serve_connection(client, TlsStream.new(secured, "the client"), handler, listener, idle, stream_bodies, compress, timeout_ms, request_timeout_ms)
   end
 
@@ -2380,7 +2508,9 @@ pub struct Server
           refuse(conn.transport, got)
           return true
         in String
-          parsed = request_head(got)
+          head_fields = {} of String => String
+          texts = String::Builder.new(256)
+          parsed = request_head(got, head_fields, texts)
           if parsed.is_a?(HTTPError)
             refuse(conn.transport, parsed)
             return true
@@ -2500,11 +2630,15 @@ pub struct Server
       id = h2.next_request
       conn.no_deadline
       return false unless id
-      req = h2.request(id, remote)
-      if req.nil?
+      headers = {} of String => String
+      parts = h2.request_head(id, headers)
+      if parts.nil?
         h2.done(id)
         return true
       end
+      method, path, query = parts
+      reader = h2.body_reader(id)
+      req = Request.new(method, path, query, headers, "HTTP/2", reader, remote)
       conn.deadline_at(whole, true) if whole > 0_i64
       unless stream_bodies
         body = req.body_io.read_all(MAX_BODY.to_i64)
@@ -2610,10 +2744,14 @@ pub struct Server
     response = Server.coded(response, "gzip") if gzip
     return false unless socket.write(format_head(response, head, closing, length, chunked)).is_a?(Int32)
     return !closing if head || bodiless
+    # Each piece is read into one builder, cleared and refilled a round.
+    held = String::Builder.new(65536)
     if want = length
       left = want
       while left > 0_i64
-        piece = source.read_bytes(left > 65536_i64 ? 65536 : left.to_i32)
+        held.clear
+        source.read_str(left > 65536_i64 ? 65536 : left.to_i32, held)
+        piece = held.finish
         return false if piece.bytesize == 0
         return false unless socket.write(piece).is_a?(Int32)
         left = left - piece.bytesize.to_i64
@@ -2622,7 +2760,9 @@ pub struct Server
     end
     writer = Server.writer_for(socket, chunked, gzip)
     while true
-      piece = source.read_bytes(65536)
+      held.clear
+      source.read_str(65536, held)
+      piece = held.finish
       break if piece.bytesize == 0
       return false unless writer.write(piece).nil?
     end
@@ -2672,34 +2812,21 @@ pub struct Server
     gzip > 0 ? "gzip" : nil
   end
 
-  # The headers a coded body goes with: the coding, and `Vary` so that a
-  # cache keeps the answers apart. A `Content-Length` the block gave is
-  # the plain body's, and goes.
+  # *response* with the headers a coded body goes with (`code_as`),
+  # changed in place.
   protected def self.coded(response : Response, coding : String) : Response
-    headers = {} of String => String
-    # `Vary` gains Accept-Encoding as it is copied: no key of this table
-    # is held while the table grows.
-    response.headers.each do |name, value|
-      next if HTTP.same_name?(name, "Content-Length")
-      if HTTP.same_name?(name, "Vary") && !HTTP.has_token?(value, "Accept-Encoding")
-        headers[name] = value + ", Accept-Encoding"
-      else
-        headers[name] = value
-      end
-    end
-    headers["Content-Encoding"] = coding
-    headers["Vary"] = "Accept-Encoding" if response.header("Vary").nil?
-    coded = Response.new(response.status, response.reason, headers, response.body, response.apart)
-    coded
+    response.code_as(coding)
+    response
   end
 
   # A string body compressed whole in *coding*, `zstd` or `gzip`, with
-  # the headers that say so. `Zstd.compress`'s frame needs a window of
-  # 1 MiB at most, inside the 8 MB RFC 9659 §3 holds an encoder to.
+  # the headers that say so, in place. `Zstd.compress`'s frame needs a
+  # window of 1 MiB at most, inside the 8 MB RFC 9659 §3 holds an encoder
+  # to.
   protected def self.compressed(response : Response, coding : String) : Response
-    coded = Server.coded(response, coding)
-    body = coding == "zstd" ? Zstd.compress(response.body) : HTTP.gzip(response.body)
-    Response.new(coded.status, coded.reason, coded.headers, body, coded.apart)
+    response.code_as(coding)
+    response.body_coded(coding == "zstd" ? Zstd.compress(response.body) : HTTP.gzip(response.body))
+    response
   end
 
   protected def self.writer_for(socket : IyiSocket | TlsStream, chunked : Bool, gzip : Bool) : BodyWriter
@@ -2715,7 +2842,9 @@ pub struct Server
       return ParsedRequest.new(nil, "request headers past #{MAX_HEAD} bytes", true, 0, 431) if text.bytesize - from > MAX_HEAD
       return ParsedRequest.new(nil, nil, false, 0)
     end
-    parsed = request_head(text[from, split_at - from])
+    head_fields = {} of String => String
+    texts = String::Builder.new(256)
+    parsed = request_head(text[from, split_at - from], head_fields, texts)
     return ParsedRequest.new(nil, parsed.reason, true, 0, parsed.status) if parsed.is_a?(HTTPError)
     head = parsed
     body_start = split_at + 4
@@ -2747,24 +2876,31 @@ pub struct Server
 
   # A request's head - the text before its blank line - read and checked,
   # or why it is not one, as the server's handlers take it.
-  # On the caller's tape: what it answers is made here (SPEC 3.2).
-  private def self.request_head(text : String) : RequestHead | HTTPError
+  # Its fields go into *headers* and the texts it makes into *texts*, the
+  # caller's: what it answers views them and *text*.
+  private def self.request_head(text : String, headers : Hash(String, String), texts : String::Builder) : RequestHead | HTTPError
     fields = Array(Field).new(16)
     case head = parse_head(text.as_tape, 0, true, fields)
     in ParsedHead
-      request_head_view(head)
+      request_head_view(head, headers, texts)
     in HeadError
-      HTTPError.new(head.message, head.status)
+      HTTPError.new(Server.held(texts, head.message), head.status)
     in Nil
       HTTPError.new("incomplete request")
     end
   end
 
-  private def self.request_head_view(head : ParsedHead) : RequestHead | HTTPError
+  # *text* copied into *texts*: a view of the caller's builder.
+  protected def self.held(texts : String::Builder, text : String) : String
+    from = texts.bytesize
+    texts << text
+    texts.finish[from, text.bytesize]
+  end
+
+  private def self.request_head_view(head : ParsedHead, headers : Hash(String, String), texts : String::Builder) : RequestHead | HTTPError
     method = head.method
     target = head.target
     version = head.version
-    headers = {} of String => String
     # The absolute form (RFC 9112 §3.2.2), which a server must accept,
     # names the path after the authority: `http://h/x?q` is path `/x` and
     # query `q`, as the other library reads it, where the block was handed
@@ -2780,10 +2916,10 @@ pub struct Server
       # http://b/` under `Host: a` asks b. The block reads it as the Host;
       # it was handed the line's, and had no way to the target's.
       named = target[authority, after_authority - authority]
-      return HTTPError.new("not a host: #{named.inspect}") unless named.bytesize > 0 && HTTP.host?(named)
+      return HTTPError.new(held(texts, "not a host: #{named.inspect}")) unless named.bytesize > 0 && HTTP.host?(named)
       host = named
       origin = target[after_authority, target.bytesize - after_authority]
-      origin = "/" + origin if origin.bytesize == 0 || origin.starts_with?("?")
+      origin = held(texts, "/" + origin) if origin.bytesize == 0 || origin.starts_with?("?")
     end
     # The table is filled once, the Host line's value replaced by the
     # target's authority: no key of the table is held while it grows.
@@ -2816,7 +2952,7 @@ pub struct Server
     end
     expects = version == "HTTP/1.1" && HTTP.same_name?(HTTP.trim(stub.header("Expect") || ""), "100-continue")
     if te = stub.header("Transfer-Encoding")
-      return HTTPError.new("transfer encoding #{te.inspect} is not chunked") unless HTTP.same_name?(HTTP.trim(te), "chunked")
+      return HTTPError.new(held(texts, "transfer encoding #{te.inspect} is not chunked")) unless HTTP.same_name?(HTTP.trim(te), "chunked")
       # A length beside the chunks, or chunks in HTTP/1.0, is framing that
       # a reader ahead of this one may have taken otherwise (RFC 9112 §6.1,
       # §6.3): the connection closes after the answer, where what followed
@@ -2827,10 +2963,10 @@ pub struct Server
     length = 0_i64
     if cl = stub.header("Content-Length")
       n = HTTP.content_length(cl)
-      return HTTPError.new("Content-Length is not a number: #{cl.inspect}") unless n
+      return HTTPError.new(held(texts, "Content-Length is not a number: #{cl.inspect}")) unless n
       # A length past 2147483647 is one too, read as one past it: it was
       # answered "not a number", where it is a body too large.
-      return HTTPError.new("body past #{MAX_BODY} bytes", 413) if n > MAX_BODY.to_i64
+      return HTTPError.new(held(texts, "body past #{MAX_BODY} bytes"), 413) if n > MAX_BODY.to_i64
       length = n
     end
     RequestHead.new(method, path, query, headers, version, close, false, length, expects)
@@ -3986,7 +4122,8 @@ pub struct HTTP
           socket, tls, config = by
           client.resumed if client && tls.resumed?
           conn = Conn.new(socket, stream: TlsStream.new(tls, host))
-          conn.made_under = TlsMadeUnder.new(config)
+          made_under = TlsMadeUnder.new(config)
+          conn.made_under = made_under
           speaks_h2 = tls.alpn_protocol == "h2"
         else
           socket = dialer.connect(client, dial_host, dial_port, wait)!
@@ -4026,7 +4163,8 @@ pub struct HTTP
             return HTTPError.new(tls.message) if tls.is_a?(TlsError)
             client.resumed if client && tls.resumed?
             conn = Conn.new(socket, stream: TlsStream.new(tls, host))
-            conn.made_under = TlsMadeUnder.new(under)
+            made_under_tls = TlsMadeUnder.new(under)
+            conn.made_under = made_under_tls
             speaks_h2 = upgrade.nil? && tls.alpn_protocol == "h2"
           else
             conn = Conn.new(socket)
@@ -4431,7 +4569,7 @@ pub struct HTTP
     id = h2.send_request(method, scheme, authority, path, sent, body)
     return id unless id.is_a?(Int32)
     fields = h2.answer_head(id)
-    unless fields.is_a?(Array(Std::Hpack::HeaderField))
+    unless fields.is_a?(SlicePool::List(Std::Hpack::HeaderField))
       h2.forget(id)
       return fields
     end
@@ -4449,8 +4587,13 @@ pub struct HTTP
         if apart.has_key?(f.name)
           apart[f.name] << f.value
         else
-          had = fields.find { |g| g.name == f.name }
-          apart[f.name] = [had ? had.value : "", f.value]
+          first = ""
+          k = fields.size - 1
+          while k >= 0
+            first = fields[k].value if fields[k].name == f.name
+            k = k - 1
+          end
+          apart[f.name] = [first, f.value]
         end
       else
         headers[f.name] = f.value
@@ -4460,15 +4603,10 @@ pub struct HTTP
     s = h2.stream(id)
     unlimited = 9223372036854775807_i64
     empty = head || bodiless?(status) || (!s.nil? && s.ended && s.drained?)
-    reader = empty ? BodyReader.new(String::Builder.new(256), nil, BodyReader::EMPTY, 0_i64, unlimited) : BodyReader.frames(String::Builder.new(256), h2, id, unlimited)
-    decoded = false
-    if asked && !reader.finished?
-      decoded = undo_coding(reader, headers)
-      if decoded.is_a?(HTTPError)
-        h2.forget(id)
-        return decoded
-      end
-    end
+    coding = asked && !empty ? coding_of(headers) : BodyReader::CODED_NONE
+    reader = empty ? BodyReader.new(String::Builder.new(256), nil, BodyReader::EMPTY, 0_i64, unlimited) : BodyReader.frames(String::Builder.new(256), h2, id, unlimited, coding)
+    decoded = reader.decoding?
+    drop_coding_fields(headers) if decoded
     response = Response.new(status, reason_for(status), headers, apart.empty? ? nil : apart, reader, url, decoded)
     if keeper = jar
       keeper.update(url, response)
@@ -4530,13 +4668,11 @@ pub struct HTTP
         return parsed if parsed.is_a?(HTTPError)
         status, reason, fields, apart = parsed
         next if status >= 100 && status < 200 && status != 101
-        reader = body_framing(conn, status, fields, head)
+        coding = asked ? coding_of(fields) : BodyReader::CODED_NONE
+        reader = body_framing(conn, status, fields, head, coding)
         return reader if reader.is_a?(HTTPError)
-        decoded = false
-        if asked && !reader.finished?
-          decoded = undo_coding(reader, fields)
-          return decoded if decoded.is_a?(HTTPError)
-        end
+        decoded = reader.decoding?
+        drop_coding_fields(fields) if decoded
         response = Response.new(status, reason, fields, apart, reader, url, decoded)
         if keeper = jar
           keeper.update(url, response)
@@ -4553,21 +4689,21 @@ pub struct HTTP
 
   # How an answer's body is framed (RFC 9112 §6.3): none for a HEAD, a
   # 1xx, a 204 or a 304; chunks; a length; or the connection's close.
-  private def self.body_framing(conn : Conn, status : Int32, fields : Hash(String, String), head : Bool) : BodyReader | HTTPError
+  private def self.body_framing(conn : Conn, status : Int32, fields : Hash(String, String), head : Bool, coding : Int32) : BodyReader | HTTPError
     unlimited = 9223372036854775807_i64
     return BodyReader.new(String::Builder.new(256), conn, BodyReader::EMPTY, 0_i64, unlimited) if head || bodiless?(status) || status == 101
     if te = header_in(fields, "Transfer-Encoding")
       if refused = coding_refused(te)
         return HTTPError.new(refused)
       end
-      return BodyReader.new(String::Builder.new(256), conn, BodyReader::CHUNKED, 0_i64, unlimited)
+      return BodyReader.new(String::Builder.new(256), conn, BodyReader::CHUNKED, 0_i64, unlimited, coding: coding)
     end
     if cl = header_in(fields, "Content-Length")
       n = content_length(cl)
       return HTTPError.new("Content-Length is not a number: #{cl.inspect}") unless n
-      return BodyReader.new(String::Builder.new(256), conn, BodyReader::LENGTH, n, unlimited)
+      return BodyReader.new(String::Builder.new(256), conn, BodyReader::LENGTH, n, unlimited, coding: coding)
     end
-    BodyReader.new(String::Builder.new(256), conn, BodyReader::CLOSE, 0_i64, unlimited)
+    BodyReader.new(String::Builder.new(256), conn, BodyReader::CLOSE, 0_i64, unlimited, coding: coding)
   end
 
   # The answer's `Content-Encoding` undone as the body is read, when it is
@@ -4576,27 +4712,22 @@ pub struct HTTP
   # stream some servers send under the name, told apart by zlib's header
   # check - or zstd, with a window of 8 MiB at most: RFC 9659 §3 holds
   # HTTP's zstd to that, and a frame that asks for more is refused rather
-  # than given the memory. The fields that described the coded body go.
-  # Another coding is left as it came, for the caller, with the headers
-  # that say so.
-  private def self.undo_coding(reader : BodyReader, fields : Hash(String, String)) : Bool | HTTPError
+  # than given the memory. Another coding is left as it came, for the
+  # caller, with the headers that say so.
+  private def self.coding_of(fields : Hash(String, String)) : Int32
     coding = header_in(fields, "Content-Encoding")
-    return false unless coding
+    return BodyReader::CODED_NONE unless coding
     name = trim(coding).downcase
-    if name == "zstd"
-      reader.decode_zstd(Zstd::WINDOW_LIMIT)
-    else
-      envelope = if name == "gzip" || name == "x-gzip"
-                   Envelope::Gzip
-                 elsif name == "deflate"
-                   Envelope::Zlib
-                 else
-                   return false
-                 end
-      reader.decode(envelope)
-    end
+    return BodyReader::CODED_ZSTD if name == "zstd"
+    return BodyReader::CODED_GZIP if name == "gzip" || name == "x-gzip"
+    return BodyReader::CODED_ZLIB if name == "deflate"
+    BodyReader::CODED_NONE
+  end
+
+  # The fields that described the coded body go once it is decoded.
+  private def self.drop_coding_fields(fields : Hash(String, String)) : Nil
     fields.reject_in_place { |key, _| same_name?(key, "Content-Encoding") || same_name?(key, "Content-Length") }
-    true
+    nil
   end
 
   def self.get(url : String, headers : Hash(String, String) = {} of String => String) : Response | Cancelled | SocketError | HTTPError
@@ -5728,34 +5859,158 @@ end
 # error it then is; priority signals are read and ignored (§5.3). A header
 # block - HEADERS and its CONTINUATIONs - past the limit on a head is
 # refused as it arrives, not after it has been held whole.
-class H2Stream
-  getter id : Int32
-  # The head, decoded: a request's, or an answer's final one.
-  property fields : Array(Std::Hpack::HeaderField)? = nil
-  # DATA arrived and not yet read, and the body's bytes so far.
-  property pieces : Array(String) = [] of String
-  # The next piece to read, and its bytes already read.
-  property head : Int32 = 0
-  property taken : Int32 = 0
-  property received : Int64 = 0_i64
-  # A `content-length` the head gave, -1 for none.
-  property declared : Int64 = -1_i64
-  # The peer's END_STREAM; a RST_STREAM's code (either side's), -1 for none.
-  property ended : Bool = false
-  property reset : Int32 = -1
-  property send_window : Int64
-  property recv_window : Int64
-  # This end's END_STREAM went out.
-  property sent_end : Bool = false
-  # A server's request past its limit on a body: answered 413.
-  property too_large : Bool = false
+# A stream's state lives in its connection's pool words, and its lists
+# are runs in the connection's pools (`SlicePool::List`): the handle is a
+# plain value the connection's Hash keeps, and every copy of it reads and
+# writes the same state.
+# One DATA piece of a stream: a run of its connection's `@data_pool`,
+# kept as two numbers.
+struct H2Piece
+  getter at : Int32
+  getter size : Int32
 
-  def initialize(@id : Int32, @send_window : Int64, @recv_window : Int64)
+  def initialize(@at : Int32, @size : Int32)
+  end
+end
+
+@[OnTape]
+struct H2Stream
+  @[OnTape]
+  struct State
+    property id : Int32
+    # DATA arrived and not yet read.
+    property pieces : SlicePool::List(H2Piece)
+    # The head, decoded: a request's, or an answer's final one.
+    property fields : SlicePool::List(Std::Hpack::HeaderField)? = nil
+    # The next piece to read, and its bytes already read.
+    property head : Int32 = 0
+    property taken : Int32 = 0
+    # The body's bytes so far.
+    property received : Int64 = 0_i64
+    # A `content-length` the head gave, -1 for none.
+    property declared : Int64 = -1_i64
+    # The peer's END_STREAM; a RST_STREAM's code (either side's), -1 for none.
+    property ended : Bool = false
+    property reset : Int32 = -1
+    property send_window : Int64 = 0_i64
+    property recv_window : Int64 = 0_i64
+    # This end's END_STREAM went out.
+    property sent_end : Bool = false
+    # A server's request past its limit on a body: answered 413.
+    property too_large : Bool = false
+
+    def initialize(@id : Int32, @send_window : Int64, @recv_window : Int64, @pieces : SlicePool::List(H2Piece))
+    end
+  end
+
+  @state : Pointer(State)
+
+  # A stream whose state is in *pool*'s words: it lives as long as the
+  # pool, not the scope that made it.
+  def initialize(id : Int32, send_window : Int64, recv_window : Int64, pool : SlicePool(H2Piece?))
+    @state = Pointer(State).new(pool.state_words(((sizeof(State) + 7) // 8).to_i32))
+    @state.value = State.new(id, send_window, recv_window, SlicePool::List(H2Piece).new(pool))
+  end
+
+  def id : Int32
+    @state.value.id
+  end
+
+  def pieces : SlicePool::List(H2Piece)
+    @state.value.pieces
+  end
+
+  def fields : SlicePool::List(Std::Hpack::HeaderField)?
+    @state.value.fields
+  end
+
+  def fields=(value : SlicePool::List(Std::Hpack::HeaderField)?) : SlicePool::List(Std::Hpack::HeaderField)?
+    @state.value.fields = value
+  end
+
+  def head : Int32
+    @state.value.head
+  end
+
+  def head=(value : Int32) : Int32
+    @state.value.head = value
+  end
+
+  def taken : Int32
+    @state.value.taken
+  end
+
+  def taken=(value : Int32) : Int32
+    @state.value.taken = value
+  end
+
+  def received : Int64
+    @state.value.received
+  end
+
+  def received=(value : Int64) : Int64
+    @state.value.received = value
+  end
+
+  def declared : Int64
+    @state.value.declared
+  end
+
+  def declared=(value : Int64) : Int64
+    @state.value.declared = value
+  end
+
+  def ended : Bool
+    @state.value.ended
+  end
+
+  def ended=(value : Bool) : Bool
+    @state.value.ended = value
+  end
+
+  def reset : Int32
+    @state.value.reset
+  end
+
+  def reset=(value : Int32) : Int32
+    @state.value.reset = value
+  end
+
+  def send_window : Int64
+    @state.value.send_window
+  end
+
+  def send_window=(value : Int64) : Int64
+    @state.value.send_window = value
+  end
+
+  def recv_window : Int64
+    @state.value.recv_window
+  end
+
+  def recv_window=(value : Int64) : Int64
+    @state.value.recv_window = value
+  end
+
+  def sent_end : Bool
+    @state.value.sent_end
+  end
+
+  def sent_end=(value : Bool) : Bool
+    @state.value.sent_end = value
+  end
+
+  def too_large : Bool
+    @state.value.too_large
+  end
+
+  def too_large=(value : Bool) : Bool
+    @state.value.too_large = value
   end
 
   # Every piece that arrived was read.
   def drained? : Bool
-    @head >= @pieces.size
+    head >= pieces.size
   end
 end
 
@@ -5844,8 +6099,15 @@ class H2Connection
   # Frames written and not yet sent: sent together before any read that
   # may wait, and once they pass PENDING - a frame a write had Nagle hold
   # each small one back for the last one's ACK, 40 ms a request.
-  @pending : Array(String)
+  @pending : String::Builder
   @pending_size : Int32
+  # The streams' lists: their DATA pieces and decoded heads.
+  @piece_pool : SlicePool(H2Piece?)
+  # The pieces' bytes, freed when their stream goes (`drop_stream`).
+  @data_pool : SlicePool(UInt8)
+  @field_pool : SlicePool(Std::Hpack::HeaderField?)
+  # The texts of the streams' heads, which live as long as the connection.
+  @head_text : String::Builder
 
   PENDING = 65536
   # A server's streams whose head has come, in order.
@@ -5873,7 +6135,11 @@ class H2Connection
     @block_mode = HEAD_BLOCK
     @current = 0
     @reset_lately = [] of Int32
-    @pending = [] of String
+    @pending = String::Builder.new(PENDING + 16384)
+    @piece_pool = SlicePool(H2Piece?).new(64)
+    @data_pool = SlicePool(UInt8).new(65536)
+    @field_pool = SlicePool(Std::Hpack::HeaderField?).new(64)
+    @head_text = String::Builder.new(16384)
     @pending_size = 0
     @ready = [] of Int32
     @goaway = -1
@@ -6021,7 +6287,7 @@ class H2Connection
     end
     # A server forgets the stream, unless its block is answering it and
     # finds out from the stream itself.
-    @streams.delete(id) if @server && id != @current
+    drop_stream(id) if @server && id != @current
     reset_lately(id)
     write_frame(RST_STREAM, 0, id, H2Connection.u32(code))
   end
@@ -6090,7 +6356,8 @@ class H2Connection
       s.head = s.pieces.size
       s.taken = 0
     elsif body.bytesize > 0
-      s.pieces << body.copy_to(RisCurrentTape.new)
+      run = @data_pool.store(body)
+      s.pieces << H2Piece.new(run.offset, run.size)
     end
     if flags & END_STREAM != 0
       s.ended = true
@@ -6118,7 +6385,7 @@ class H2Connection
         return fail(PROTOCOL_ERROR, "a stream opened with the even number #{id}") if id % 2 == 0
         if id > @highest
           @highest = id
-          s = H2Stream.new(id, @peer_window, WINDOW)
+          s = H2Stream.new(id, @peer_window, WINDOW, @piece_pool)
           @streams[id] = s
           # Past the streams a server takes at once, the head is still read -
           # the HPACK table is the connection's - and the stream refused.
@@ -6138,7 +6405,7 @@ class H2Connection
       mode = TRAILER_BLOCK
     end
     @block_stream = id
-    @block = [] of UInt8
+    @block.clear
     @block_end = flags & END_STREAM != 0
     @block_mode = mode
     return false unless gather(block)
@@ -6179,9 +6446,10 @@ class H2Connection
     bytes = String.build(@block.size) do |w|
       @block.each { |b| w.push(b) }
     end
-    @block = [] of UInt8
-    decoded = @decoder.decode(bytes)
-    return fail(COMPRESSION_ERROR, "a header block that does not decode: #{decoded.message}") if decoded.is_a?(Std::Hpack::HpackError)
+    @block.clear
+    decoded = Std::Hpack::TapeHeaders.new(@decoder.capacity(bytes))
+    failed = @decoder.decode(bytes, decoded)
+    return fail(COMPRESSION_ERROR, "a header block that does not decode: #{failed.message}") if failed
     s = @streams[id]?
     case @block_mode
     when IGNORED_BLOCK
@@ -6215,9 +6483,12 @@ class H2Connection
     end
     # Ready streams live on the connection until selected by the server.
     # This is the ownership boundary; rejected heads never copy out.
-    s.fields = Array(Std::Hpack::HeaderField).new(decoded.size) do |i|
-      decoded[i]
+    kept = SlicePool::List(Std::Hpack::HeaderField).new(@field_pool)
+    decoded.each do |field|
+      kept << Std::Hpack::HeaderField.new(keep_text(field.name), keep_text(field.value), field.indexing)
+      nil
     end
+    s.fields = kept
     if declared = H2Connection.field(decoded, "content-length")
       n = HTTP.content_length(declared)
       return refuse(id, PROTOCOL_ERROR) unless n
@@ -6230,6 +6501,26 @@ class H2Connection
     end
     @ready << id if @server
     true
+  end
+
+  # *text* copied into the connection's own head text.
+  private def keep_text(text : String) : String
+    from = @head_text.bytesize
+    @head_text << text
+    @head_text.finish[from, text.bytesize]
+  end
+
+  # Stream *id* gone from the connection, its pieces' bytes freed: no
+  # view of them is read after its request or answer is done.
+  private def drop_stream(id : Int32) : Nil
+    if s = @streams[id]?
+      s.pieces.each do |piece|
+        @data_pool.free_slice(@data_pool.run_at(piece.at, piece.size))
+        nil
+      end
+    end
+    @streams.delete(id)
+    nil
   end
 
   private def open_count : Int32
@@ -6350,30 +6641,26 @@ class H2Connection
                   payload : String) : Bool
     return false unless @fault == FAULT_NONE || (type == GOAWAY && @fault == FAULT_HTTP)
     n = payload.bytesize
-    head = String.new(9) do |b|
-      b[0] = ((n >> 16) & 0xFF).to_u8
-      b[1] = ((n >> 8) & 0xFF).to_u8
-      b[2] = (n & 0xFF).to_u8
-      b[3] = (type & 0xFF).to_u8
-      b[4] = (flags & 0xFF).to_u8
-      b[5] = (((id >> 24) & 0x7F) & 0xFF).to_u8
-      b[6] = ((id >> 16) & 0xFF).to_u8
-      b[7] = ((id >> 8) & 0xFF).to_u8
-      b[8] = (id & 0xFF).to_u8
-      nil
-    end
-    @pending << head
-    @pending << payload.copy_to(RisCurrentTape.new) if n > 0
+    # The head and payload are copied into the connection's own builder.
+    @pending.push(((n >> 16) & 0xFF).to_u8)
+    @pending.push(((n >> 8) & 0xFF).to_u8)
+    @pending.push((n & 0xFF).to_u8)
+    @pending.push((type & 0xFF).to_u8)
+    @pending.push((flags & 0xFF).to_u8)
+    @pending.push(((id >> 24) & 0x7F).to_u8)
+    @pending.push(((id >> 16) & 0xFF).to_u8)
+    @pending.push(((id >> 8) & 0xFF).to_u8)
+    @pending.push((id & 0xFF).to_u8)
+    @pending << payload if n > 0
     @pending_size = @pending_size + 9 + n
     @pending_size >= PENDING ? flush : true
   end
 
   # What has been written, sent in one write.
   def flush : Bool
-    return @fault == FAULT_NONE if @pending.empty?
-    whole = @pending.size == 1 ? @pending[0] : @pending.join("")
-    # Written before the clear: `whole` may be the first element.
-    got = @conn.transport.write(whole)
+    return @fault == FAULT_NONE if @pending.bytesize == 0
+    # Written before the clear, which reuses the builder's space.
+    got = @conn.transport.write(@pending.finish)
     @pending.clear
     @pending_size = 0
     return true if got.is_a?(Int32)
@@ -6474,7 +6761,8 @@ class H2Connection
       if s.head < s.pieces.size
         # Read from indexes, never shifting or storing back: a caller can
         # still hold views of the pieces read before.
-        piece = s.pieces[s.head]
+        held = s.pieces[s.head]
+        piece = @data_pool.run_at(held.at, held.size).string
         left = piece.bytesize - s.taken
         if left > max
           piece = piece[s.taken, max]
@@ -6515,7 +6803,7 @@ class H2Connection
           @current = id
           return id
         end
-        @streams.delete(id)
+        drop_stream(id)
       end
       return nil unless read_frame
     end
@@ -6523,7 +6811,9 @@ class H2Connection
 
   # The request stream *id* carries, its body to be read as it comes; nil
   # when its head is not one (it has been reset already).
-  def request(id : Int32, remote : String?) : Request?
+  # Stream *id*'s request head: its method, path and query, its fields
+  # put into *headers*, the caller's; nil when it has none.
+  def request_head(id : Int32, headers : Hash(String, String)) : {String, String, String?}?
     s = @streams[id]?
     return nil unless s
     fields = s.fields
@@ -6531,7 +6821,6 @@ class H2Connection
     method = ""
     target = ""
     authority = nil.as(String?)
-    headers = {} of String => String
     fields.each do |f|
       case f.name
       when ":method"    then method = f.value
@@ -6551,8 +6840,20 @@ class H2Connection
       path = target[0, mark]
       query = target[mark + 1, target.bytesize - mark - 1]
     end
-    reader = s.ended && s.drained? && !s.too_large ? BodyReader.new(String::Builder.new(256), nil, BodyReader::EMPTY, 0_i64, @limit) : BodyReader.frames(String::Builder.new(256), self, id, @limit)
-    Request.new(method, path, query, headers, "HTTP/2", reader, remote)
+    {method, path, query}
+  end
+
+  # Whether stream *id*'s body has all come and been read: none to wait for.
+  def body_done?(id : Int32) : Bool
+    s = @streams[id]?
+    return true unless s
+    s.ended && s.drained? && !s.too_large
+  end
+
+  # Stream *id*'s body reader: a choice of two calls, made in the
+  # caller's scope.
+  def body_reader(id : Int32) : BodyReader
+    body_done?(id) ? BodyReader.new(String::Builder.new(256), nil, BodyReader::EMPTY, 0_i64, @limit) : BodyReader.frames(String::Builder.new(256), self, id, @limit)
   end
 
   # The block's answer to stream *id*: its head, then its body as the
@@ -6589,13 +6890,18 @@ class H2Connection
       end
       gzip = false if length
       shown = gzip ? Server.coded(response, "gzip") : response
-      fields = H2Connection.answer_fields_on_tape(shown, length, head)
+      texts = String::Builder.new(256)
+      fields = Std::Hpack::TapeHeaders.new(H2Connection.answer_capacity(shown))
+      H2Connection.answer_fields_on_tape(shown, length, head, fields, texts)
       return false unless send_headers(id, fields, head || bodiless)
       return @fault == FAULT_NONE if head || bodiless
-      sink = H2Out.new(self, id)
+      sink = H2Out.new(@conn, id)
       writer = gzip ? HTTP.gzip_writer(sink, false) : BodyWriter.new(sink, false)
+      held = String::Builder.new(16384)
       while true
-        piece = source.read_bytes(16384)
+        held.clear
+        source.read_str(16384, held)
+        piece = held.finish
         break if piece.bytesize == 0
         break unless writer.write(piece).nil?
       end
@@ -6604,20 +6910,21 @@ class H2Connection
     end
     if block = response.writer
       shown = gzip ? Server.coded(response, "gzip") : response
-      fields = H2Connection.answer_fields_on_tape(shown, nil, head)
+      texts = String::Builder.new(256)
+      fields = Std::Hpack::TapeHeaders.new(H2Connection.answer_capacity(shown))
+      H2Connection.answer_fields_on_tape(shown, nil, head, fields, texts)
       return false unless send_headers(id, fields, head || bodiless)
       return @fault == FAULT_NONE if head || bodiless
-      sink = H2Out.new(self, id)
-      writer = gzip ? HTTP.gzip_writer(sink, false) : BodyWriter.new(sink, false)
-      block.call(writer)
-      writer.finish
+      H2Connection.stream_body(self, id, gzip, block)
       return finish_answer(id)
     end
     response = Server.compressed(response, coding) if coding && response.body.bytesize >= Server::COMPRESS_FROM
     body = response.body
     empty = head || bodiless || body.bytesize == 0
     length = bodiless ? nil : body.bytesize.to_i64
-    fields = H2Connection.answer_fields_on_tape(response, length, head)
+    texts = String::Builder.new(256)
+    fields = Std::Hpack::TapeHeaders.new(H2Connection.answer_capacity(response))
+    H2Connection.answer_fields_on_tape(response, length, head, fields, texts)
     return false unless send_headers(id, fields, empty)
     return @fault == FAULT_NONE if empty
     send_data(id, body, true)
@@ -6644,7 +6951,7 @@ class H2Connection
         write_frame(RST_STREAM, 0, id, H2Connection.u32(NO_ERROR))
       end
     end
-    @streams.delete(id)
+    drop_stream(id)
     @current = 0
   end
 
@@ -6671,7 +6978,7 @@ class H2Connection
     @refused = false
     id = @next_id
     @next_id = @next_id + 2
-    s = H2Stream.new(id, @peer_window, WINDOW)
+    s = H2Stream.new(id, @peer_window, WINDOW, @piece_pool)
     @streams[id] = s
     fields = [Std::Hpack::HeaderField.new(":method", method), Std::Hpack::HeaderField.new(":scheme", scheme),
               Std::Hpack::HeaderField.new(":authority", authority), Std::Hpack::HeaderField.new(":path", path)]
@@ -6716,7 +7023,7 @@ class H2Connection
   end
 
   # The final head of stream *id*'s answer: frames read until it comes.
-  def answer_head(id : Int32) : Array(Std::Hpack::HeaderField) | HTTPError | Cancelled | SocketError
+  def answer_head(id : Int32) : SlicePool::List(Std::Hpack::HeaderField) | HTTPError | Cancelled | SocketError
     while true
       s = @streams[id]?
       return HTTPError.new("HTTP/2: stream #{id} is gone") if s.nil?
@@ -6746,7 +7053,7 @@ class H2Connection
         write_frame(RST_STREAM, 0, id, H2Connection.u32(CANCEL))
       end
     end
-    @streams.delete(id)
+    drop_stream(id)
   end
 
   # -- what a head is
@@ -6892,19 +7199,42 @@ class H2Connection
     fields
   end
 
-  def self.answer_fields_on_tape(response : Response, length : Int64?,
-                                 head : Bool) : Std::Hpack::TapeHeaders
-    unless response.status >= 100 && response.status <= 999
-      raise "HTTP: not a status: #{response.status}"
-    end
+  # The writer of stream *id*'s body: a choice of two calls, made in the
+  # caller's scope.
+  def self.writer_for(h2 : H2Connection, id : Int32, gzip : Bool) : BodyWriter
+    gzip ? HTTP.gzip_writer(H2Out.new(h2.conn, id), false) : BodyWriter.new(H2Out.new(h2.conn, id), false)
+  end
+
+  # Stream *id*'s body, written by *block* as it goes.
+  def self.stream_body(h2 : H2Connection, id : Int32, gzip : Bool, block : Proc(BodyWriter, Nil)) : Nil
+    writer = H2Connection.writer_for(h2, id, gzip)
+    block.call(writer)
+    writer.finish
+    nil
+  end
+
+  # How many fields `answer_fields_on_tape` pushes at most.
+  def self.answer_capacity(response : Response) : Int32
     capacity = 2
     response.headers.each do |name, _value|
       lines = response.apart
       split = lines ? lines[name]? : nil
       capacity = capacity + (split ? split.size : 1)
     end
-    fields = Std::Hpack::TapeHeaders.new(capacity)
-    status = String.build(3) { |w| w.append_int(response.status) }
+    capacity
+  end
+
+  # The answer's fields pushed into *fields*, made with room for
+  # `answer_capacity`; the texts made for them go into *texts*.
+  def self.answer_fields_on_tape(response : Response, length : Int64?,
+                                 head : Bool, fields : Std::Hpack::TapeHeaders,
+                                 texts : String::Builder) : Nil
+    unless response.status >= 100 && response.status <= 999
+      raise "HTTP: not a status: #{response.status}"
+    end
+    from = texts.bytesize
+    texts.append_int(response.status)
+    status = texts.finish[from, texts.bytesize - from]
     fields.push(Std::Hpack::TapeHeaderField.new(
       ":status".as_tape, status))
     has_length = false
@@ -6917,11 +7247,11 @@ class H2Connection
       if HTTP.control?(value)
         raise "HTTP: header #{name} contains a control character"
       end
-      lower = String.build(name.bytesize) do |w|
-        name.each_byte do |b|
-          w.push(b >= 65_u8 && b <= 90_u8 ? b + 32_u8 : b)
-        end
+      at = texts.bytesize
+      name.each_byte do |b|
+        texts.push(b >= 65_u8 && b <= 90_u8 ? b + 32_u8 : b)
       end
+      lower = texts.finish[at, name.bytesize]
       if lower == "transfer-encoding"
         raise "HTTP: #{name} is not written; the body goes with its length"
       end
@@ -6950,12 +7280,14 @@ class H2Connection
     end
     if !has_length && !HTTP.bodiless?(response.status)
       if written = length
-        size = String.build(20) { |w| w.append_int(written) }
+        at = texts.bytesize
+        texts.append_int(written)
+        size = texts.finish[at, texts.bytesize - at]
         fields.push(Std::Hpack::TapeHeaderField.new(
           "content-length".as_tape, size))
       end
     end
-    fields
+    nil
   end
 
   def self.trimmed(value : String) : String
@@ -7051,15 +7383,18 @@ end
 
 # What a `BodyWriter` writes to for an HTTP/2 answer: DATA frames on one
 # stream, as its windows allow.
+# It reaches the connection through its `Conn`, a resource handle.
 class H2Out
-  def initialize(@h2 : H2Connection, @id : Int32)
+  def initialize(@conn : Conn, @id : Int32)
   end
 
   # Each write goes out at once: a block writing as it goes (events, a
   # progress line) is read as it writes.
   def write(text : String) : Int32 | Cancelled | SocketError
-    return text.bytesize if @h2.send_data(@id, text, false) && @h2.flush
-    fault = @h2.failure
+    h2 = @conn.h2
+    raise "H2Out: the connection speaks no HTTP/2" unless h2
+    return text.bytesize if h2.send_data(@id, text, false) && h2.flush
+    fault = h2.failure
     return fault if fault.is_a?(Cancelled) || fault.is_a?(SocketError)
     SocketError.layered("write an HTTP/2 answer", fault ? fault.message : "the client reset the stream")
   end

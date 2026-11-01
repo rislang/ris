@@ -118,7 +118,7 @@ import std/curve25519::{Ed25519PublicKey}
 import std/asn1::{Der, Asn1Error}
 import std/http::{HTTP, HTTPClient, HTTPError, Request, Response}
 import std/socket::{SocketError}
-import std/tls::{TlsServerConfig, TlsError}
+import std/tls::{TlsIdentity, TlsError}
 import std/json::{JSON, Any}
 import std/base64::{Base64}
 import std/digest::{SHA256}
@@ -893,7 +893,7 @@ pub class AcmeHttp01
 end
 
 # tls-alpn-01 (RFC 8737): the certificate a TLS server shows to a client
-# whose ALPN offers `acme-tls/1`, and a std/tls config that shows it.
+# whose ALPN offers `acme-tls/1`, and the std/tls identity that shows it.
 pub struct AcmeTlsAlpn01
   PROTOCOL = "acme-tls/1"
   # id-pe-acmeIdentifier (RFC 8737 section 6.1).
@@ -913,18 +913,17 @@ pub struct AcmeTlsAlpn01
     der
   end
 
-  # A std/tls server config that shows `certificate` for *domain*, under a
-  # P-256 key made for it, and speaks `acme-tls/1` alone by ALPN.
-  def self.config(domain : String, key_authorization : String) : TlsServerConfig | AcmeError
+  # The identity a std/tls server shows for *domain*: `certificate`
+  # under a P-256 key made for it. Its config is the caller's owner:
+  # `config = TlsServerConfig.new(identity)`, its `alpn` [PROTOCOL] alone.
+  def self.identity(domain : String, key_authorization : String) : TlsIdentity | AcmeError
     key = SigningKey.p256
     der = certificate(domain, key_authorization, key)!
     private_key = key.p256
     raise "acme: a P-256 SigningKey without its key" unless private_key
-    config = TlsServerConfig.from_der([der], private_key)
-    return AcmeError.new("the tls-alpn-01 config for #{domain}: #{config.message}") if config.is_a?(TlsError)
-    config.alpn = [PROTOCOL]
-    config.tickets = 0
-    config
+    identity = TlsIdentity.from_der([der], private_key)
+    return AcmeError.new("the tls-alpn-01 identity for #{domain}: #{identity.message}") if identity.is_a?(TlsError)
+    identity
   end
 end
 

@@ -41,7 +41,7 @@ def answer(socket : IyiSocket) : String
     end
     piece = socket.read(65536).or_panic
     raise "closed early" if piece.empty?
-    got = got + piece
+    got << piece
   end
 end
 

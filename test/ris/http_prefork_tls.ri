@@ -2,7 +2,7 @@
 module test/ris/http_prefork_tls
 
 import std/http::{Server, Request, Response}
-import std/tls::{TlsServerConfig}
+import std/tls::{TlsIdentity, TlsServerConfig}
 import std/socket::{IyiSocket}
 import std/signal::{Signal}
 import std/time::{Time}
@@ -15,8 +15,10 @@ class Handler
   @calls : Int32 = 0
 
   def initialize(paths : Tuple(String, String))
-    @tls_config = TlsServerConfig.from_pem(
+    identity = TlsIdentity.from_pem(
       File.read(paths[0].to_heap), File.read(paths[1].to_heap)).or_panic
+    config = TlsServerConfig.new(identity)
+    @tls_config = config
     @tls_config.alpn = ::Array(String){"h2".to_heap, "http/1.1".to_heap}
   end
 

@@ -43,12 +43,16 @@ Fix a checker hole below only when a cluster hits it.
    refill a field instead of a new value (TLS records, key updates); a
    struct or Tuple of texts and plain values moves down whole.
    Left, by cluster:
-   * After step 1: HTTP client and server (answer, http_*, server_*,
-     serve full loop, websocket_*, samples/ris/web, heap_check): objects
-     made in helpers and stored lazily into longer-lived ones
-     (BodyReader's decoders, Response bodies, h2 state, hpack
-     decode_fields, zstd). Make each holder an owner class built in its
-     owner's scope (SPEC 2.1), so helpers fill its fields in place.
+   * HTTP client and websocket (http_coding, websocket_reader,
+     websocket_handshake, http_prefork's TLS half): `TlsClient.over` and
+     `connect`, `TlsEchOffer`, `WebSocket.connect` and the ACME/TLS
+     factories return owners made in a def (SPEC 2.1): make the caller
+     declare them (`x = T.new`, then a method that fills it, as
+     `TlsServer#accept` does) and keep a client's pooled connections in
+     an owner built where the pool lives. WebSocket makes its Deflater
+     and Inflater lazily and keeps a close reason viewing a frame: build
+     them in `initialize`, reset them in place, copy the reason into a
+     builder of its own. TLS server identities need the big cluster.
    * socket_pair, socket_pieces, socket_race, smtp, mail: connect's
      attempt list (socket.iyi 248, 1066), ResolvConf parsing (dns.iyi
      1340s), `Resolver.system` made in a def.
@@ -61,6 +65,21 @@ Fix a checker hole below only when a cluster hits it.
 5. Benches: build each, group the refusals by message, fix per group.
 
 Checker holes found on the way (unknown must be refused, SPEC 3.6):
+
+* `IyiSocket.listen_result` answered a socket made after other work
+  inside a union (`IyiSocket | SocketError`), unrefused; the socket was
+  freed with the def and every worker accepted on fd 0. Refuse a class
+  instance made in a def and answered in a union after other work.
+* A field set to `nil` or to a flat value (`Cancelled.new`) is a store
+  with no roots, which a caller's summary reads as a fresh store into a
+  field of a non-flat union type: refused at the caller, though nothing
+  was kept. Judge the stored value's type, not the field's.
+* `x.copy_to(RisCurrentTape.new)` in a callee reads as a store into an
+  untyped root outside every scope, so a loop round calling it is
+  refused. Model it as a value on the running scope.
+* A store into `self`'s field inside a method is not checked against
+  the method's scope; the same store is refused at a caller that holds
+  the receiver in a local. Check it where it is made.
 
 * A spawn block's non-flat value (a Tuple or Hash, task_tape_result)
   is refused: the block frees its scratch before the task copy takes

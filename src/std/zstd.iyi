@@ -243,6 +243,11 @@ class Decoder
   # The stream more pieces come from, for `ZstdReader.new(io)`.
   @io : IyiIO? = nil
   @input : String
+  # A streamed piece and what was left of the one before, in the
+  # decoder's own builder (`more`): no piece is made in a def.
+  @streamed : Bool = false
+  @chunk : String::Builder = String::Builder.new(1)
+  @carry : Array(UInt8) = Array(UInt8).new
   @in_pos : Int32
   @in_end : Int32
   @exhausted : Bool
@@ -290,6 +295,7 @@ class Decoder
   @nc_syms : Int32
   @failed : Bool
   @error : ZstdError
+  @message : String::Builder = String::Builder.new(128)
 
   # The whole-string form until `over_io`: *data* is all the input there
   # is, and the output grows rather than slides.
@@ -329,7 +335,13 @@ class Decoder
     made_wfse = FseTable.new
     @wfse = made_wfse
     @codes = Codes.new
-    @pre = [Decoder.predefined(Codes::LL_NORM, 6), Decoder.predefined(Codes::OF_NORM, 5), Decoder.predefined(Codes::ML_NORM, 6)]
+    ll = FseTable.new
+    ll.build(Codes.fill(Codes::LL_NORM), Codes::LL_NORM.size, 6)
+    of = FseTable.new
+    of.build(Codes.fill(Codes::OF_NORM), Codes::OF_NORM.size, 5)
+    ml = FseTable.new
+    ml.build(Codes.fill(Codes::ML_NORM), Codes::ML_NORM.size, 6)
+    @pre = [ll, of, ml]
     @custom = [FseTable.new, FseTable.new, FseTable.new]
     @rles = [FseTable.new, FseTable.new, FseTable.new]
     @cur = [@pre[0], @pre[1], @pre[2]]
@@ -344,12 +356,6 @@ class Decoder
     @nc_syms = 0
     @failed = false
     @error = ZstdError.new("")
-  end
-
-  def self.predefined(norm, log : Int32) : FseTable
-    t = FseTable.new
-    t.build(Codes.fill(norm), norm.size, log)
-    t
   end
 
   def failed? : Bool
@@ -384,7 +390,7 @@ class Decoder
   def leftover : String
     return "" unless @state == DONE
     n = @in_end - @in_pos
-    input = @input
+    input = input_text
     from = @in_pos
     String.build(n) do |w|
       n.times { |k| w.push(input.byte_at(from + k)) }
@@ -412,7 +418,11 @@ class Decoder
   private def fail(message : String) : Nil
     return if @failed
     @failed = true
-    @error = ZstdError.new(message)
+    # The message is the decoder's, in its own builder: a decoder fails
+    # once, so the builder is never cleared.
+    @message << message
+    @error = ZstdError.new(@message.finish)
+    nil
   end
 
   # Pieces from *io*, the buffer sliding as a stream's does.
@@ -427,30 +437,36 @@ class Decoder
   private def more : Bool
     return false if @exhausted
     io = @io
-    chunk = io ? io.read_bytes(65536) : nil
-    unless chunk && chunk.bytesize > 0
+    unless io
       @exhausted = true
       return false
     end
     rest = @in_end - @in_pos
-    if rest > 0
-      input = @input
-      from = @in_pos
-      piece = chunk
-      chunk = String.build(rest + piece.bytesize) do |w|
-        rest.times { |k| w.push(input.byte_at(from + k)) }
-        w << piece
-      end
-    end
-    @input = chunk
+    @carry.clear
+    input = input_text
+    from = @in_pos
+    rest.times { |k| @carry << input.byte_at(from + k) }
+    @streamed = true
+    @chunk.clear
+    @carry.each { |b| @chunk.push(b) }
+    got = io.read_str(65536, @chunk)
     @in_pos = 0
-    @in_end = chunk.bytesize
+    @in_end = rest + got
+    if got == 0
+      @exhausted = true
+      return false
+    end
     true
+  end
+
+  # The piece in hand: the caller's data, or the chunk read from @io.
+  private def input_text : String
+    @streamed ? @chunk.finish : @input
   end
 
   # *n* bytes of the piece in hand, from `@in_pos` on, into *dst* at *at*.
   private def take(dst : Array(UInt8), at : Int32, n : Int32) : Nil
-    input = @input
+    input = input_text
     from = @in_pos
     n.times { |k| dst[at + k] = input.byte_at(from + k) }
   end
@@ -468,7 +484,7 @@ class Decoder
     v = 0_u64
     i = n - 1
     while i >= 0
-      v = v.unsafe_shl(8) | @input.byte_at(@in_pos + k + i).to_u64
+      v = v.unsafe_shl(8) | input_text.byte_at(@in_pos + k + i).to_u64
       i = i - 1
     end
     v
@@ -503,7 +519,7 @@ class Decoder
   # descriptor says.
   private def header : Nil
     return fail("zstd: the stream ends inside a frame header") unless ahead?(1)
-    fhd = @input.byte_at(@in_pos).to_i32
+    fhd = input_text.byte_at(@in_pos).to_i32
     fcs_flag = fhd >> 6
     single = (fhd & 0x20) != 0
     return fail("zstd: the frame header's reserved bit is set") if (fhd & 0x08) != 0
@@ -514,7 +530,7 @@ class Decoder
     k = 1
     window = 0_u64
     unless single
-      wd = @input.byte_at(@in_pos + 1).to_i32
+      wd = input_text.byte_at(@in_pos + 1).to_i32
       base = 1_u64.unsafe_shl(10 + (wd >> 3))
       window = base + base.unsafe_shr(3) * (wd & 7).to_u64
       k = 2
@@ -595,7 +611,7 @@ class Decoder
 
   private def rle : Nil
     return fail("zstd: the stream ends inside a block") unless ahead?(1)
-    b = @input.byte_at(@in_pos)
+    b = input_text.byte_at(@in_pos)
     @in_pos = @in_pos + 1
     buf = @buf
     at = @pos
@@ -1360,7 +1376,8 @@ pub struct Zstd
   # One frame of *data*, with its content size and checksum, that any
   # Zstandard decoder reads with a window of 1 MiB at most.
   def self.compress(data : String) : String
-    Encoder.new(data).frame
+    encoder = Encoder.new(data)
+    encoder.frame
   end
 end
 
@@ -1475,11 +1492,21 @@ class FseEncoder
   @delta_find : Array(Int32)
 
   def initialize(norm : Array(Int32), nsym : Int32, log : Int32)
+    @states = Array(Int32).new(512)
+    @delta_bits = Array(Int32).new(64)
+    @delta_find = Array(Int32).new(64)
+    @log = log
+    build(norm, nsym, log)
+  end
+
+  def build(norm : Array(Int32), nsym : Int32, log : Int32) : Nil
     @log = log
     size = 1 << log
-    @states = Array(Int32).new(size, 0)
-    @delta_bits = Array(Int32).new(nsym, 0)
-    @delta_find = Array(Int32).new(nsym, 0)
+    @states.clear
+    @delta_bits.clear
+    @delta_find.clear
+    size.times { @states << 0; nil }
+    nsym.times { @delta_bits << 0; @delta_find << 0; nil }
     symbol = Array(Int32).new(size, 0)
     cumul = Array(Int32).new((nsym + 1), 0)
     high = size - 1
@@ -1645,6 +1672,7 @@ class Encoder
   @codes : Codes
   @pre : Array(FseEncoder)
   @tables : Array(FseEncoder)
+  @custom : Array(FseEncoder)
   @llc : Array(Int32)
   @mlc : Array(Int32)
   @ofc : Array(Int32)
@@ -1672,10 +1700,17 @@ class Encoder
 
   def initialize(@data : String)
     @n = @data.bytesize
-    @sink = Sink.new(@n // 2 + 64)
+    sink = Sink.new(@n // 2 + 64)
+    @sink = sink
     @codes = Codes.new
-    @pre = [FseEncoder.new(Codes.fill(Codes::LL_NORM), 36, 6), FseEncoder.new(Codes.fill(Codes::OF_NORM), 29, 5),
-            FseEncoder.new(Codes.fill(Codes::ML_NORM), 53, 6)]
+    ll = FseEncoder.new(Codes.fill(Codes::LL_NORM), 36, 6)
+    of = FseEncoder.new(Codes.fill(Codes::OF_NORM), 29, 5)
+    ml = FseEncoder.new(Codes.fill(Codes::ML_NORM), 53, 6)
+    @pre = [ll, of, ml]
+    custom_ll = FseEncoder.new(Codes.fill(Codes::LL_NORM), 36, 6)
+    custom_of = FseEncoder.new(Codes.fill(Codes::OF_NORM), 29, 5)
+    custom_ml = FseEncoder.new(Codes.fill(Codes::ML_NORM), 53, 6)
+    @custom = [custom_ll, custom_of, custom_ml]
     @tables = [@pre[0], @pre[1], @pre[2]]
     @llc = Array(Int32).new((BLOCK_MAX // 4 + 1), 0)
     @mlc = Array(Int32).new((BLOCK_MAX // 4 + 1), 0)
@@ -2210,7 +2245,8 @@ class Encoder
     end
     FseEncoder.normalize(hist, top + 1, n, log, @norm)
     FseEncoder.describe(@sink, @norm, top + 1, log)
-    @tables[kind] = FseEncoder.new(@norm, top + 1, log)
+    @custom[kind].build(@norm, top + 1, log)
+    @tables[kind] = @custom[kind]
     2
   end
 

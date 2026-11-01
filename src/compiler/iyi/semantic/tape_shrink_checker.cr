@@ -469,6 +469,7 @@ class Iyi::TapeShrinkChecker
     return unless @checking && !@text_only
     return unless block = @tape_blocks.last?
     return unless roots.any? { |r| outside?(r, block) }
+    STDERR.puts "DBG refuse-fresh #{roots.map { |r| "#{root_name(r)}:#{@root_types[r]?}" }.join(",")} at #{node.location}" if ENV["RIS_DBG"]?
     refuse(node, scope_message(block))
   end
 
@@ -2093,6 +2094,7 @@ class Iyi::TapeShrinkChecker
                   if found = handed ? handed_effect(handed, true) : WHOLE
                     kept = found == WHOLE ? roots : roots.flat_map { |r| found.map { |f| handed_field(r, f) } }.uniq
                     @retains.concat(kept)
+                    STDERR.puts "DBG unproved-contract #{node.name} #{kept.map { |r| root_name(r) }.join(",")} at #{node.location}" if ENV["RIS_DBG"]? && @checking
                     @unproved << node if @checking
                   end
                 end
@@ -2139,6 +2141,7 @@ class Iyi::TapeShrinkChecker
             end
             retained = summary.retains.flat_map { |r| translate(r, summary, actuals) }
             @retains.concat(retained)
+            STDERR.puts "DBG unproved-summary #{node.name} #{retained.map { |r| root_name(r) }.join(",")} at #{node.location}" if ENV["RIS_DBG"]? && @checking && !retained.empty?
             @unproved << node if @checking && !retained.empty?
             # What the callee makes and answers is this call's allocation,
             # made here: inside any tape block around the call.
@@ -2162,6 +2165,7 @@ class Iyi::TapeShrinkChecker
               # Bytes pushed into a builder are copied into its own
               # reservation: its growth, not a store of what the callee made.
               builder = summary_root_type(root, summary, target).try { |t| type_name(t.remove_typedef) == "String::Builder" }
+              STDERR.puts "DBG fresh-store #{node.name} root=#{root} type=#{summary_root_type(root, summary, target)} at #{node.location}" if ENV["RIS_DBG"]? && contents.roots.empty? && contents.views.empty?
               refuse_fresh_store(destinations, node) if contents.roots.empty? && contents.views.empty? && !summary_marked?(target) && !destinations.all? { |d| flat_array_field?(d) } && !flat_field_type?(summary_root_type(root, summary, target), root) && !builder
               incoming = translated(contents, summary, actuals, node.object_id)
               # A marked callee's own scratch cannot reach its stores: it
@@ -2218,6 +2222,7 @@ class Iyi::TapeShrinkChecker
           roots = source_roots(v)
           shrink(roots.uniq, node, chain("#{node.name} (unknown)"))
           @retains.concat(roots)
+          STDERR.puts "DBG unproved #{node.name} #{roots.map { |r| root_name(r) }.join(",")} at #{node.location}" if ENV["RIS_DBG"]? && @checking && !roots.empty?
           @unproved << node if @checking && !roots.empty?
         end
       end

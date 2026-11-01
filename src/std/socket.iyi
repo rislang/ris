@@ -1530,25 +1530,48 @@ pub struct IyiSocket
 
   # A failed setup is a value so a supervisor can distinguish it from a
   # request panic. The socket is never published before setup succeeds.
-  @[TapeUnsafe]
   def self.listen_result(host : String, port : Int32,
                         backlog : Int32 = 128,
                         reuse_port : Bool = false,
                         task_owned : Bool = false) : IyiSocket | SocketError
+    # One call: the socket or its error is made in the caller's scope.
+    listen_made(listen_fd(host, port, backlog, reuse_port), task_owned)
+  end
+
+  # A listening fd packed with its family (`listen_fd`), made a socket,
+  # or the failure it packs: a choice of two calls.
+  private def self.listen_made(packed : Int64, task_owned : Bool) : IyiSocket | SocketError
+    packed >= 0 ? IyiSocket.new((packed & 0xFFFFFFFF_i64).to_i32, (packed >> 32).to_i32, task_owned: task_owned) : listen_error(packed)
+  end
+
+  private def self.listen_error(packed : Int64) : SocketError
+    failed = -packed
+    stage = failed >> 32
+    code = (failed & 0xFFFFFFFF_i64).to_i32
+    operation = stage == 1 ? "socket" : stage == 2 ? "SO_REUSEPORT" : stage == 3 ? "bind" : stage == 4 ? "listen" : "SO_REUSEPORT unsupported"
+    SocketError.new(operation, code)
+  end
+
+  # A socket bound to *host*:*port* and listening, nonblocking: its fd and
+  # family packed in one number (family << 32 | fd), or, negative, the
+  # stage that failed and the OS code (`listen_error`). Flat values only.
+  @[TapeUnsafe]
+  private def self.listen_fd(host : String, port : Int32, backlog : Int32,
+                             reuse_port : Bool) : Int64
     {% unless flag?(:linux) || flag?(:darwin) %}
-      return SocketError.new("SO_REUSEPORT unsupported", 0) if reuse_port
+      return -(5_i64 << 32) if reuse_port
     {% end %}
     addr = ""
     family = sockaddr(host, port, addr)
     fd = __sys_socket(family)
-    return SocketError.new("socket", __sys_code(fd.to_i64)) if fd < 0
+    return -((1_i64 << 32) | __sys_code(fd.to_i64).to_i64) if fd < 0
     __sys_set_reuseaddr(fd)
     if reuse_port
       option = __sys_set_reuseport(fd)
       if option < 0
         code = __sys_code(option.to_i64)
         __sys_close(fd)
-        return SocketError.new("SO_REUSEPORT", code)
+        return -((2_i64 << 32) | code.to_i64)
       end
     end
     __sys_set_v6only(fd) if family == AF_INET6
@@ -1558,16 +1581,16 @@ pub struct IyiSocket
     if bound < 0
       code = __sys_code(bound.to_i64)
       __sys_close(fd)
-      return SocketError.new("bind", code)
+      return -((3_i64 << 32) | code.to_i64)
     end
     listening = __sys_listen(fd, backlog)
     if listening < 0
       code = __sys_code(listening.to_i64)
       __sys_close(fd)
-      return SocketError.new("listen", code)
+      return -((4_i64 << 32) | code.to_i64)
     end
     __sys_set_nonblock(fd)
-    IyiSocket.new(fd, family, task_owned: task_owned)
+    (family.to_i64 << 32) | fd.to_i64
   end
 
   def self.listen(host : String, port : Int32, backlog : Int32 = 128,

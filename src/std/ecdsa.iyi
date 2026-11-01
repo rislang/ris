@@ -287,7 +287,8 @@ pub struct EcdsaPublicKey
     u1 = (e * w) % n
     u2 = (r * w) % n
     return EcdsaP256.check(@group, u1, u2, @x, @y, r) if @curve == EcdsaCurve::P256
-    EcdsaPlane.new(@group).check(u1, u2, @x, @y, r)
+    plane = EcdsaPlane.new(@group)
+    plane.check(u1, u2, @x, @y, r)
   end
 end
 

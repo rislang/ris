@@ -15,10 +15,12 @@
 #
 #     import std/tls::{TlsServer, TlsServerConfig}
 #
-#     config = TlsServerConfig.from_pem(File.read("chain.pem"),
+#     identity = TlsIdentity.from_pem(File.read("chain.pem"),
 # File.read("key.pem")).or_panic
+#     config = TlsServerConfig.new(identity)
 #     config.alpn = ["h2", "http/1.1"]
-#     conn = TlsServer.over(listener.accept.as(IyiSocket), config).or_panic
+#     conn = TlsServer.new(listener.accept.as(IyiSocket), config)
+#     conn.accept.try { |problem| raise problem.message }
 #     conn.read                                  # what the client sent
 #
 # TLS 1.3 only, by default: a peer that speaks TLS 1.2 or earlier is
@@ -121,7 +123,7 @@
 # has no KeyUpdate: at `key_limit` records its writes end. Its exporter
 # is RFC 5705's.
 #
-# The server. `TlsServerConfig.from_pem` takes the chain, leaf first, and
+# The server. `TlsIdentity.from_pem` takes the chain, leaf first, and
 # the leaf's private key: PKCS #8 (an Ed25519 key, RFC 8410 section 7, a
 # P-256 or P-384 one, or an RSA one), SEC 1 or PKCS #1; the key must be
 # the leaf's (a `TlsIdentity`, which a client presents the same way).
@@ -725,55 +727,61 @@ end
 # or TLS 1.2's, keyed from its key block.
 pub class TlsRecordCipher
   getter sequence : UInt64 = 0_u64
-  @gcm : AesGcm?
-  @chacha : ChaCha20Poly1305?
+  # Both AEADs, made with the cipher and rekeyed in place; *@uses_gcm*
+  # says which one this suite's records use.
+  @gcm : AesGcm
+  @chacha : ChaCha20Poly1305
+  @uses_gcm : Bool = true
   @iv : Array(UInt8)
   # TLS 1.2's records: the content type in the header, no padding.
   @tls12 : Bool = false
 
+  # A cipher not yet keyed: `configure` keys it.
+  def initialize
+    @iv = Array(UInt8).new(12, 0_u8)
+    zero = Array(UInt8).new(32, 0_u8)
+    gcm = AesGcm.new(zero)
+    chacha = ChaCha20Poly1305.new(zero)
+    @gcm = gcm
+    @chacha = chacha
+  end
+
   # TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384,
-  # TLS_CHACHA20_POLY1305_SHA256.
-  def initialize(suite : Int32, schedule : TlsKeySchedule, secret : Array(UInt8))
+  # TLS_CHACHA20_POLY1305_SHA256, keyed from *secret*, in place.
+  def configure(suite : Int32, schedule : TlsKeySchedule,
+                secret : Array(UInt8)) : Nil
     size = suite == TlsSuites::AES_128_GCM ? 16 : 32
     key = schedule.expand_label(secret, "key", [] of UInt8, size)
-    @iv = schedule.expand_label(secret, "iv", [] of UInt8, 12)
-    if suite == TlsSuites::CHACHA20_POLY1305
-      @chacha = ChaCha20Poly1305.new(key.bytes)
-    else
-      @gcm = AesGcm.new(key.bytes)
-    end
+    iv = schedule.expand_label(secret, "iv", [] of UInt8, 12)
+    configure(suite, key.view, iv.view, false)
   end
 
   # The same cipher under *secret*'s key and IV, its sequence back at 0:
   # a KeyUpdate (section 4.6.3), in place.
-  def rekey(suite : Int32, schedule : TlsKeySchedule, secret : Array(UInt8)) : Nil
-    size = suite == TlsSuites::AES_128_GCM ? 16 : 32
-    key = schedule.expand_label(secret, "key", [] of UInt8, size)
-    iv = schedule.expand_label(secret, "iv", [] of UInt8, 12)
-    @iv.clear
-    iv.each { |byte| @iv << byte }
-    if chacha = @chacha
-      chacha.rekey(key.bytes)
-    end
-    if gcm = @gcm
-      gcm.rekey(key.bytes)
-    end
-    @sequence = 0_u64
+  def rekey(suite : Int32, schedule : TlsKeySchedule,
+            secret : Array(UInt8)) : Nil
+    configure(suite, schedule, secret)
   end
 
   # TLS 1.2's (RFC 5246 section 6.2.3.3) for one of its AEAD suites, *key*
   # and *iv* from the key block: AES-GCM's four-byte salt, to which each
   # record's eight-byte explicit nonce is added (RFC 5288 section 3), or
   # ChaCha20-Poly1305's twelve bytes, XORed with the sequence number as TLS
-  # 1.3 does it (RFC 7905 section 2).
-  def initialize(suite : Int32, key : Array::View(UInt8), iv : Array::View(UInt8))
-    @iv = iv.to_a
-    @tls12 = true
+  # 1.3 does it (RFC 7905 section 2). *tls12* false: TLS 1.3's records.
+  def configure(suite : Int32, key : Array::View(UInt8),
+                iv : Array::View(UInt8), tls12 : Bool = true) : Nil
+    @iv.clear
+    iv.each { |byte| @iv << byte; nil }
+    @tls12 = tls12
+    @sequence = 0_u64
     if TlsSuites.chacha?(suite)
-      @chacha = ChaCha20Poly1305.new(key.bytes)
+      @uses_gcm = false
+      @chacha.rekey(key.bytes)
     else
-      @gcm = AesGcm.new(key.bytes)
+      @uses_gcm = true
+      @gcm.rekey(key.bytes)
     end
+    nil
   end
 
   def key_iv : Array(UInt8)
@@ -783,7 +791,7 @@ pub class TlsRecordCipher
   # The bytes before a record's content where `seal_at` seals it: the
   # header, and TLS 1.2 AES-GCM's explicit nonce.
   def prefix : Int32
-    @tls12 && @gcm ? 13 : 5
+    @tls12 && @uses_gcm ? 13 : 5
   end
 
   # The bytes a record sealed by `seal_at` takes past its content: the
@@ -813,20 +821,18 @@ pub class TlsRecordCipher
   end
 
   private def seal_with(buffer : Array(UInt8), at : Int32, size : Int32, aad : Array::View(UInt8)) : Nil
-    if gcm = @gcm
-      gcm.seal_at(@nonce, buffer, at, size, aad)
-    elsif chacha = @chacha
-      chacha.seal_at(@nonce, buffer, at, size, aad)
+    if @uses_gcm
+      @gcm.seal_at(@nonce, buffer, at, size, aad)
+    else
+      @chacha.seal_at(@nonce, buffer, at, size, aad)
     end
   end
 
   private def open_with(buffer : Array(UInt8), at : Int32, total : Int32, aad : Array::View(UInt8)) : Int32 | AeadError
-    if gcm = @gcm
-      gcm.open_at(@nonce, buffer, at, total, aad)
-    elsif chacha = @chacha
-      chacha.open_at(@nonce, buffer, at, total, aad)
+    if @uses_gcm
+      @gcm.open_at(@nonce, buffer, at, total, aad)
     else
-      AeadError.new("no cipher")
+      @chacha.open_at(@nonce, buffer, at, total, aad)
     end
   end
 
@@ -849,7 +855,7 @@ pub class TlsRecordCipher
       return 5 + length
     end
     set_aad12(type, size)
-    if @gcm
+    if @uses_gcm
       4.times { |i| @nonce[i] = @iv[i] }
       8.times { |i| @nonce[4 + i] = @aad[i] }
       8.times { |i| buffer[5 + i] = @aad[i] }
@@ -891,11 +897,11 @@ pub class TlsRecordCipher
       return {record[inner + last], 5, last}
     end
     type = record[at]
-    explicit = @gcm ? 8 : 0
+    explicit = @uses_gcm ? 8 : 0
     return TlsError.new("a protected record of #{length} bytes, short of its nonce and tag", TlsAlert::BAD_RECORD_MAC) if length < explicit + 16
     plain = length - explicit - 16
     set_aad12(type, plain)
-    if @gcm
+    if @uses_gcm
       4.times { |i| @nonce[i] = @iv[i] }
       8.times { |i| @nonce[4 + i] = record[at + 5 + i] }
     else
@@ -1088,6 +1094,8 @@ module RisTlsConnectionState
   @deadline_ns : Int64 = 0_i64
   @transcript : Array(UInt8) = [] of UInt8
   @schedule : TlsKeySchedule = TlsKeySchedule.new(false)
+  @read_cipher : TlsRecordCipher
+  @write_cipher : TlsRecordCipher
   @reader : TlsRecordCipher? = nil
   @writer : TlsRecordCipher? = nil
   @read_secret : Array(UInt8) = [] of UInt8
@@ -1878,14 +1886,16 @@ module RisTlsConnectionState
   # it to the whole handshake against the triple handshake attack - kept
   # with both randoms for the exporter (RFC 5705); and from its key block
   # (RFC 5246 section 6.3) the client's write cipher, then the server's.
-  private def keys12(secret : Array(UInt8), client_random : Array(UInt8), server_random : Array(UInt8)) : {Array(UInt8), TlsRecordCipher, TlsRecordCipher}
+  private def keys12(secret : Array(UInt8), client_random : Array(UInt8), server_random : Array(UInt8), client_cipher : TlsRecordCipher, server_cipher : TlsRecordCipher) : {Array(UInt8), TlsRecordCipher, TlsRecordCipher}
     master = @schedule.prf(secret, "extended master secret", @schedule.hash(@transcript), 48)
     size = TlsSuites.key_size(@suite)
     iv = TlsSuites.chacha?(@suite) ? 12 : 4
     block = @schedule.prf(master, "key expansion", server_random + client_random, 2 * size + 2 * iv)
     @master12 = master
     @randoms12 = client_random + server_random
-    {master, TlsRecordCipher.new(@suite, block[0, size], block[2 * size, iv]), TlsRecordCipher.new(@suite, block[size, size], block[2 * size + iv, iv])}
+    client_cipher.configure(@suite, block[0, size], block[2 * size, iv])
+    server_cipher.configure(@suite, block[size, size], block[2 * size + iv, iv])
+    {master, client_cipher, server_cipher}
   end
 
   # A TLS 1.2 Finished's verify_data (RFC 5246 section 7.4.9) over the
@@ -2252,6 +2262,7 @@ pub class TlsClient < TlsConnection
   @early_bytes : Array(UInt8)? = nil
   @early_sent : Bool = false
   @early_taken : Bool = false
+  @early_cipher : TlsRecordCipher
   @early_writer : TlsRecordCipher? = nil
   # Whether a HelloRetryRequest came, after which nothing is early.
   @retried : Bool = false
@@ -2268,7 +2279,13 @@ pub class TlsClient < TlsConnection
 
   def initialize(socket : IyiSocket, @host : String, @config : TlsConfig, @session : TlsSession? = nil)
     @socket = socket
+    read_cipher = TlsRecordCipher.new
+    write_cipher = TlsRecordCipher.new
+    @read_cipher = read_cipher
+    @write_cipher = write_cipher
     @peer = "the server"
+    early_cipher = TlsRecordCipher.new
+    @early_cipher = early_cipher
     @place = @host
   end
 
@@ -2375,7 +2392,8 @@ pub class TlsClient < TlsConnection
     ephemeral = nil.as(P256PrivateKey | P384PrivateKey | Nil)
     if held = @session
       @port = @socket.unix? ? 0 : (@socket.remote_port || 0)
-      @made_under = TlsMadeUnder.new(@config)
+      made_under = TlsMadeUnder.new(@config)
+      @made_under = made_under
       @offered = held.take(@host, @port, @config, TlsTime.now_ms)
     end
     # Early data goes when the ticket allows that much (section 4.6.1's
@@ -2585,10 +2603,12 @@ pub class TlsClient < TlsConnection
     handshake_secret = @schedule.handshake_secret(secret, psk)
     client_secret = @schedule.derive_secret(handshake_secret, "c hs traffic", @transcript)
     server_secret = @schedule.derive_secret(handshake_secret, "s hs traffic", @transcript)
-    @reader = TlsRecordCipher.new(@suite, @schedule, server_secret)
+    @read_cipher.configure(@suite, @schedule, server_secret)
+    @reader = @read_cipher
     # Written under from here, should the server's flight be refused: its
     # alert goes under these keys, which the server reads with.
-    @writer = TlsRecordCipher.new(@suite, @schedule, client_secret)
+    @write_cipher.configure(@suite, @schedule, client_secret)
+    @writer = @write_cipher
 
     problem = server_flight(server_secret)
     return problem if problem
@@ -2648,8 +2668,11 @@ pub class TlsClient < TlsConnection
     return sent if sent
     @resumption_secret = @schedule.derive_secret(master, "res master", @transcript + finished)
 
-    @reader = TlsRecordCipher.new(@suite, @schedule, server_application)
-    @writer = TlsRecordCipher.new(@suite, @schedule, client_application)
+    @read_cipher.configure(@suite, @schedule, server_application)
+
+    @reader = @read_cipher
+    @write_cipher.configure(@suite, @schedule, client_application)
+    @writer = @write_cipher
     @read_secret = server_application
     @write_secret = client_application
     # RFC 9849 section 6.1.6: a handshake on the ClientHelloOuter, done,
@@ -2674,7 +2697,8 @@ pub class TlsClient < TlsConnection
     data = @early_bytes
     return nil unless offered && data
     schedule = TlsKeySchedule.new(TlsSuites.sha384?(offered.suite))
-    writer = TlsRecordCipher.new(offered.suite, schedule, schedule.early_traffic(offered.psk, hello))
+    writer = @early_cipher
+    writer.configure(offered.suite, schedule, schedule.early_traffic(offered.psk, hello))
     @early_writer = writer
     records = [TlsRecords::CHANGE_CIPHER_SPEC, 3_u8, 3_u8, 0_u8, 1_u8, 1_u8]
     at = 0
@@ -3401,7 +3425,7 @@ pub class TlsClient < TlsConnection
     key_exchange = TlsBytes.message(16, [public.size.to_u8] + public)
     flight = flight + key_exchange
     @transcript = @transcript + key_exchange
-    master, writer, reader = keys12(secret, client_random, server_random)
+    master, writer, reader = keys12(secret, client_random, server_random, @write_cipher, @read_cipher)
     if identity && scheme
       signature = identity.sign(scheme, @transcript)
       verify = TlsBytes.message(15, TlsBytes.u16(scheme) + TlsBytes.u16(signature.size) + signature)
@@ -4318,35 +4342,19 @@ pub class TlsServerConfig
     seconds * 1000_i64
   end
 
-  # `TlsIdentity.from_pem`'s identity, as a server's.
-  def self.from_pem(certificates : String, private_key : String) : TlsServerConfig | TlsError
-    identity = TlsIdentity.from_pem(certificates, private_key)
-    return identity if identity.is_a?(TlsError)
-    TlsServerConfig.new(identity)
+  # A config is an owner (SPEC 2.1): a def does not make and return one.
+  def self.from_pem(certificates : String, private_key : String)
+    {% raise "TlsServerConfig.from_pem is gone: a config is an owner, made\n" +
+      "at a named declaration (SPEC 2.1). Write\n" +
+      "identity = TlsIdentity.from_pem(certificates, private_key)\n" +
+      "and then config = TlsServerConfig.new(identity)." %}
   end
 
-  def self.from_der(chain : Array(Array(UInt8)), seed : Array(UInt8)) : TlsServerConfig | TlsError
-    identity = TlsIdentity.from_der(chain, seed)
-    return identity if identity.is_a?(TlsError)
-    TlsServerConfig.new(identity)
-  end
-
-  def self.from_der(chain : Array(Array(UInt8)), key : P256PrivateKey) : TlsServerConfig | TlsError
-    identity = TlsIdentity.from_der(chain, key)
-    return identity if identity.is_a?(TlsError)
-    TlsServerConfig.new(identity)
-  end
-
-  def self.from_der(chain : Array(Array(UInt8)), key : P384PrivateKey) : TlsServerConfig | TlsError
-    identity = TlsIdentity.from_der(chain, key)
-    return identity if identity.is_a?(TlsError)
-    TlsServerConfig.new(identity)
-  end
-
-  def self.from_der(chain : Array(Array(UInt8)), key : RsaPrivateKey) : TlsServerConfig | TlsError
-    identity = TlsIdentity.from_der(chain, key)
-    return identity if identity.is_a?(TlsError)
-    TlsServerConfig.new(identity)
+  def self.from_der(chain : Array(Array(UInt8)), key)
+    {% raise "TlsServerConfig.from_der is gone: a config is an owner, made\n" +
+      "at a named declaration (SPEC 2.1). Write\n" +
+      "identity = TlsIdentity.from_der(chain, key)\n" +
+      "and then config = TlsServerConfig.new(identity)." %}
   end
 
   def chain : Array(Array(UInt8))
@@ -4785,6 +4793,10 @@ pub class TlsServer < TlsConnection
 
   def initialize(socket : IyiSocket, @config : TlsServerConfig)
     @socket = socket
+    read_cipher = TlsRecordCipher.new
+    write_cipher = TlsRecordCipher.new
+    @read_cipher = read_cipher
+    @write_cipher = write_cipher
     @peer = "the client"
     @place = "the client"
     @identity = @config.identity
@@ -4801,12 +4813,19 @@ pub class TlsServer < TlsConnection
   # answers once this side's Finished is sent, `read_early` reads the
   # early data, a write goes at once (0.5-RTT), and `finish` - which
   # `read` calls - reads the client's Finished.
-  def self.over(socket : IyiSocket, config : TlsServerConfig, timeout_ms : Int32 = HANDSHAKE_TIMEOUT_MS, early_data : Bool = true) : TlsServer | TlsError
-    server = TlsServer.new(socket, config)
-    server.takes_early = early_data
-    problem = server.within(timeout_ms) { server.handshake }
-    return problem if problem
-    server
+  #
+  # A server is an owner (SPEC 2.1), made at a named declaration in the
+  # scope the connection lives in: `server = TlsServer.new(socket, config)`,
+  # then `server.accept(timeout_ms, early_data)`, nil or why not.
+  def accept(timeout_ms : Int32 = HANDSHAKE_TIMEOUT_MS, early_data : Bool = true) : TlsError?
+    @takes_early = early_data
+    within(timeout_ms) { handshake }
+  end
+
+  def self.over(socket : IyiSocket, config : TlsServerConfig, timeout_ms : Int32 = HANDSHAKE_TIMEOUT_MS, early_data : Bool = true)
+    {% raise "TlsServer.over is gone: a server is an owner, made at a named\n" +
+      "declaration (SPEC 2.1). Write server = TlsServer.new(socket, config)\n" +
+      "and then problem = server.accept(timeout_ms, early_data)." %}
   end
 
   protected def takes_early=(takes : Bool) : Bool
@@ -4953,7 +4972,8 @@ pub class TlsServer < TlsConnection
         # its record.
         return tls_error("handshake bytes after EndOfEarlyData in its record", TlsAlert::UNEXPECTED_MESSAGE) unless handshake_left == 0
         @transcript = @transcript + message
-        @reader = TlsRecordCipher.new(@suite, @schedule, @client_handshake)
+        @read_cipher.configure(@suite, @schedule, @client_handshake)
+        @reader = @read_cipher
         @early_open = false
         return nil
       when TlsRecords::ALERT
@@ -5120,8 +5140,10 @@ pub class TlsServer < TlsConnection
     handshake_secret = @schedule.handshake_secret(secret, psk)
     client_secret = @schedule.derive_secret(handshake_secret, "c hs traffic", @transcript)
     server_secret = @schedule.derive_secret(handshake_secret, "s hs traffic", @transcript)
-    @writer = TlsRecordCipher.new(@suite, @schedule, server_secret)
-    @reader = TlsRecordCipher.new(@suite, @schedule, client_secret)
+    @write_cipher.configure(@suite, @schedule, server_secret)
+    @writer = @write_cipher
+    @read_cipher.configure(@suite, @schedule, client_secret)
+    @reader = @read_cipher
 
     # EncryptedExtensions, Certificate, CertificateVerify and Finished, in
     # as few records as hold them; in a resumption, EncryptedExtensions
@@ -5145,12 +5167,14 @@ pub class TlsServer < TlsConnection
     # This side's Finished is sent: what it writes from here, an alert
     # included, is under the application keys (section 7.3), as a client
     # reads it.
-    @writer = TlsRecordCipher.new(@suite, @schedule, server_application)
+    @write_cipher.configure(@suite, @schedule, server_application)
+    @writer = @write_cipher
     @write_secret = server_application
     if early = early_secret
       # The early data is read as the program asks (`read_early`), and
       # the client's Finished after it (`finish`).
-      @reader = TlsRecordCipher.new(@suite, @schedule, early)
+      @read_cipher.configure(@suite, @schedule, early)
+      @reader = @read_cipher
       @early_open = true
       @awaiting = true
       return nil
@@ -5183,7 +5207,9 @@ pub class TlsServer < TlsConnection
     @transcript = @transcript + message
     @resumption_secret = @schedule.derive_secret(@master, "res master", @transcript)
 
-    @reader = TlsRecordCipher.new(@suite, @schedule, @client_application)
+    @read_cipher.configure(@suite, @schedule, @client_application)
+
+    @reader = @read_cipher
     @read_secret = @client_application
     send_tickets
   end
@@ -5864,7 +5890,7 @@ pub class TlsServer < TlsConnection
       secret = TlsBytes.of(shared)
     end
     @transcript = @transcript + message
-    master, client_keys, server_keys = keys12(secret, offer.random, random)
+    master, client_keys, server_keys = keys12(secret, offer.random, random, @read_cipher, @write_cipher)
     unless @chain12.empty?
       verify = handshake_message(plain: true)
       return verify if verify.is_a?(TlsError)
