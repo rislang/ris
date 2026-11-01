@@ -11,6 +11,9 @@ pub class StringPool
   @slots : Array(Int32)
   @hashes : Array(UInt64)
   @values : Array(String)
+  # The interned bytes, one after another: each value is a view of it,
+  # made with the pool, so it outlives the `get` that adds it (SPEC 1.1).
+  @text : String::Builder
 
   def initialize(initial_capacity : Int32 = 8)
     cap = 8
@@ -21,6 +24,7 @@ pub class StringPool
     @slots = Array(Int32).new(cap, -1)
     @hashes = [] of UInt64
     @values = [] of String
+    @text = String::Builder.new(cap * 16)
   end
 
   def size : Int32
@@ -37,9 +41,9 @@ pub class StringPool
       return existing
     end
     rehash if size >= @capacity // 4 * 3
-    entry = String.build(str.bytesize > 0 ? str.bytesize : 1) do |writer|
-      str.each_byte { |byte| writer.push(byte) }
-    end
+    from = @text.length
+    @text << str
+    entry = @text.finish[from, str.bytesize]
     @hashes << h
     @values << entry
     insert(h, @values.size - 1)

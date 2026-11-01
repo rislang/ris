@@ -135,10 +135,22 @@ pub struct X25519
   # zero is the one thing that leaves the ladder by a branch, and it says
   # nothing of the private key: which keys give zero depends on the peer's.
   def self.shared(private_key : String | Array::View(UInt8), peer_public : String | Array::View(UInt8)) : String | CurveError
+    answer(shared_text(private_key, peer_public))
+  end
+
+  # What `shared_text` read, as the answer: a view of it. A choice of
+  # calls, built in the caller's destination (SPEC 1.5).
+  def self.answer(tagged : String) : String | CurveError
+    tagged.byte_at(0) == 1_u8 ? CurveError.new(tagged[1, tagged.bytesize - 1]) : tagged[1, tagged.bytesize - 1]
+  end
+
+  # The secret after a 0 byte, or the refusal's sentence after a 1: one
+  # flat String, which moves down to the caller (SPEC 1.5).
+  def self.shared_text(private_key : String | Array::View(UInt8), peer_public : String | Array::View(UInt8)) : String
     k, n = CurveBytes.of(private_key)
     raise "X25519: a private key is 32 bytes, not #{n}" unless n == 32
     u, m = CurveBytes.of(peer_public)
-    return CurveError.new("X25519: a public key is 32 bytes, not #{m}") unless m == 32
+    return "\u0001X25519: a public key is 32 bytes, not #{m}" unless m == 32
     result = CurveLadder.x25519(k, CurveField.from_bytes(u))
     secret = CurveBytes.text(32) { |buf| result.to_bytes(buf) }
     p = secret
@@ -149,9 +161,12 @@ pub struct X25519
       i = i + 1
     end
     if seen == 0_u8
-      return CurveError.new("X25519: the shared secret is all zero bytes: the peer's public key is a point of small order (RFC 7748 section 6.1)")
+      return "\u0001X25519: the shared secret is all zero bytes: the peer's public key is a point of small order (RFC 7748 section 6.1)"
     end
-    secret
+    tagged = ""
+    tagged << 0_u8.unsafe_chr
+    tagged << secret
+    tagged
   end
 end
 

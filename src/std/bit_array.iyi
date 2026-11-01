@@ -301,27 +301,33 @@ struct ::BitArray
     self
   end
 
+  # A `new`, so the copy is made in the caller's destination (SPEC 1.5).
   def dup : self
-    copy = BitArray.new(@size)
+    BitArray.new(copy_of: self)
+  end
+
+  def self.new(*, copy_of : BitArray) : self
+    copy = new(copy_of.size)
+    copy.copy_words(copy_of)
+    copy
+  end
+
+  protected def copy_words(other : BitArray) : Nil
     words = malloc_size
     i = 0
     while i < words
-      copy.@bits[i] = @bits[i]
+      @bits[i] = other.@bits[i]
       i += 1
     end
-    copy
   end
 
   def clone : self
     dup
   end
 
+  # One call, so the slice is made in the caller's destination.
   def to_slice : Std::Slice::Bytes
-    bytes = Std::Slice::Bytes.new(bytesize)
-    bytesize.times do |i|
-      bytes[i] = (@bits[i // 8] >> ((i % 8) * 8)).unsafe_to_u8
-    end
-    bytes
+    Std::Slice::Bytes.new(bytesize) { |i| (@bits[i // 8] >> ((i % 8) * 8)).unsafe_to_u8 }
   end
 
   def ==(other : BitArray) : Bool

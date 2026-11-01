@@ -2020,7 +2020,10 @@ class Iyi::TapeShrinkChecker
               # into an object from outside a tape block: the block's
               # scratch is not proved private. (A copy into an Array's own
               # pool shows no contents either; it keeps the block's tape.)
-              refuse_fresh_store(destinations, node) if contents.roots.empty? && contents.views.empty? && !summary_marked?(target) && !destinations.all? { |d| flat_array_field?(d) } && !flat_field_type?(summary_root_type(root, summary, target), root)
+              # Bytes pushed into a builder are copied into its own
+              # reservation: its growth, not a store of what the callee made.
+              builder = summary_root_type(root, summary, target).try { |t| type_name(t.remove_typedef) == "String::Builder" }
+              refuse_fresh_store(destinations, node) if contents.roots.empty? && contents.views.empty? && !summary_marked?(target) && !destinations.all? { |d| flat_array_field?(d) } && !flat_field_type?(summary_root_type(root, summary, target), root) && !builder
               incoming = translated(contents, summary, actuals, node.object_id)
               # A marked callee's own scratch cannot reach its stores: it
               # refused that itself. What it made and stored is not this

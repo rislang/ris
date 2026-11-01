@@ -77,54 +77,45 @@ pub struct VarInt
 
   # Encodes value into its canonical (minimum-length) QUIC varint representation.
   def self.encode(value : UInt64) : Bytes
-    size = encoded_size(value)
-    encode(value, size)
+    encode(value, encoded_size(value))
   end
 
   # Encodes value using an explicit length (1, 2, 4, or 8 bytes).
   # Used to produce canonical encodings or explicit multi-byte encodings as
   # specified in RFC 9000 Appendix A (e.g. 37 encoded in 2, 4, or 8 bytes).
   def self.encode(value : UInt64, length : Int32) : Bytes
+    # One call, so the bytes are made in the caller's destination.
+    Bytes.new(checked(value, length)) { |i| byte(value, length, i) }
+  end
+
+  # *length*, once it is one a varint has and *value* fits in it.
+  private def self.checked(value : UInt64, length : Int32) : Int32
     unless length == 1 || length == 2 || length == 4 || length == 8
       raise "invalid varint encoding length: #{length} (must be 1, 2, 4, or 8)"
     end
     if value > MAX
       raise "varint value exceeds maximum 62-bit integer (2^62 - 1): #{value}"
     end
-
-    buf = Bytes.new(length)
-    if length == 1
-      if value > MAX_1BYTE
-        raise "value #{value} does not fit in 1-byte varint"
-      end
-      buf[0] = value.to_u8
-    elsif length == 2
-      if value > MAX_2BYTE
-        raise "value #{value} does not fit in 2-byte varint"
-      end
-      buf[0] = (0x40_u8 | (value.unsafe_shr(8_u64) & 0x3f_u64).to_u8)
-      buf[1] = (value & 0xff_u64).to_u8
-    elsif length == 4
-      if value > MAX_4BYTE
-        raise "value #{value} does not fit in 4-byte varint"
-      end
-      buf[0] = (0x80_u8 | (value.unsafe_shr(24_u64) & 0x3f_u64).to_u8)
-      buf[1] = (value.unsafe_shr(16_u64) & 0xff_u64).to_u8
-      buf[2] = (value.unsafe_shr(8_u64) & 0xff_u64).to_u8
-      buf[3] = (value & 0xff_u64).to_u8
-    elsif length == 8
-      buf[0] = (0xc0_u8 | (value.unsafe_shr(56_u64) & 0x3f_u64).to_u8)
-      buf[1] = (value.unsafe_shr(48_u64) & 0xff_u64).to_u8
-      buf[2] = (value.unsafe_shr(40_u64) & 0xff_u64).to_u8
-      buf[3] = (value.unsafe_shr(32_u64) & 0xff_u64).to_u8
-      buf[4] = (value.unsafe_shr(24_u64) & 0xff_u64).to_u8
-      buf[5] = (value.unsafe_shr(16_u64) & 0xff_u64).to_u8
-      buf[6] = (value.unsafe_shr(8_u64) & 0xff_u64).to_u8
-      buf[7] = (value & 0xff_u64).to_u8
-    else
-      raise "invalid varint encoding length: #{length} (must be 1, 2, 4, or 8)"
+    if length == 1 && value > MAX_1BYTE
+      raise "value #{value} does not fit in 1-byte varint"
     end
-    buf
+    if length == 2 && value > MAX_2BYTE
+      raise "value #{value} does not fit in 2-byte varint"
+    end
+    if length == 4 && value > MAX_4BYTE
+      raise "value #{value} does not fit in 4-byte varint"
+    end
+    length
+  end
+
+  # Byte *i* of *value*'s varint of *length* bytes: big-endian, the two
+  # high bits of the first naming the length.
+  private def self.byte(value : UInt64, length : Int32, i : Int32) : UInt8
+    shift = ((length - 1 - i) * 8).to_u64
+    b = (value.unsafe_shr(shift) & 0xff_u64).to_u8
+    return b unless i == 0
+    prefix = length == 1 ? 0x00_u8 : (length == 2 ? 0x40_u8 : (length == 4 ? 0x80_u8 : 0xc0_u8))
+    prefix | (b & 0x3f_u8)
   end
 
   # Decodes a QUIC variable-length integer, returning nil if truncated, overlong, or reserved.

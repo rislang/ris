@@ -20,17 +20,17 @@ Breakage between steps is fine; no transition stages.
    `RIS_SCOPE_ERRORS=all ris build --no-codegen x.ri` lists every scope
    refusal. Done: csv/xz/tar/bzip2, query, http_head, uri, idna,
    socket's address parsing, base32, shlex, uuid, path, ini, mime, otp,
-   format, deque, set, slice. Patterns: read into one flat String
+   format, deque, set, slice, string_pool, json's writer, file info and
+   realpath, curve25519, mlkem, capsule, bit_array, time's RFC 3339. Patterns: read into one flat String
    (tagged with a 0 or 1 byte where an error may come back), then wrap
    it in a one-call def, a choice of two calls, or a `new`.
    Left, by test: socket.iyi's resolver (resolve, lookup, ask_upstreams,
    ask_upstream keep each round's answers: socket_pair, socket_pieces,
    websocket_*, smtp, mail, dns, secure_dns, udp, http_*, samples/ris/*),
    yaml/toml/xml/xpath parsers (values built across scopes), regex
-   (RxCompiler fields), hpack (decode_fields), zip, big, time parse,
-   mlkem, curve25519, capsule/bit_array, png, eiy, file info?, json,
-   string_pool, log (with_context fields), heap, roots_holders,
-   text_grow, slice_pool, file_metadata.
+   (RxCompiler fields), hpack (decode_fields), zip, big, png, eiy, log
+   (with_context fields), heap, roots_holders, text_grow, slice_pool,
+   task_* (spawn block values, see below).
 5. benches: build each, group the refusals by message, fix per group.
 
 Checker holes found on the way (unknown must be refused, SPEC 3.6):
@@ -38,6 +38,10 @@ Checker holes found on the way (unknown must be refused, SPEC 3.6):
 * A spawn block's non-flat value (a Tuple or Hash, task_tape_result)
   is refused: the block frees its scratch before the task copy takes
   the value. Copy the value at the boundary before the reset.
+* File::LibC.realpath (a @[TapeUnsafe] def in a `{% if %}` branch)
+  set outer locals to text made in a loop round, unrefused: the round
+  freed it and real_path answered garbage. Find why that body is not
+  checked (the same code in a program is refused).
 * A tape block in a constant's initializer (program_local_init:
   `INIT = tape { State.keep(String.new("x")) }`) stores block text into
   a class variable unrefused.

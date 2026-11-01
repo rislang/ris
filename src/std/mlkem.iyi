@@ -129,19 +129,38 @@ pub struct MlKem768
   # (m), or an `MlKemError`: a key that is not 1,184 bytes or fails the
   # modulus check of section 7.2.
   def self.encapsulate(encapsulation_key : String | Array::View(UInt8), randomness : String | Array::View(UInt8)) : {Array(UInt8), Array(UInt8)} | MlKemError
+    (why = refusal(encapsulation_key)).empty? ? split(sealed(encapsulation_key, randomness)) : MlKemError.new(why)
+  end
+
+  # Why *encapsulation_key* is refused, or "" (flat, SPEC 1.5).
+  def self.refusal(encapsulation_key : String | Array::View(UInt8)) : String
+    ek, n = MlKemBytes.of(encapsulation_key)
+    return "ML-KEM-768: an encapsulation key is 1184 bytes, not #{n}" unless n == ENCAPSULATION_KEY_SIZE
+    unless MlKemPke.modulus_ok?(ek)
+      return "ML-KEM-768: the encapsulation key fails the modulus check (FIPS 203 section 7.2): a coefficient is q or more"
+    end
+    ""
+  end
+
+  # The ciphertext and the shared secret, one after the other: one flat
+  # Array, which moves down to the caller (SPEC 1.5).
+  def self.sealed(encapsulation_key : String | Array::View(UInt8), randomness : String | Array::View(UInt8)) : Array(UInt8)
     mp, mn = MlKemBytes.of(randomness)
     raise "ML-KEM-768: the randomness of an encapsulation is 32 bytes, not #{mn}" unless mn == 32
     ek, n = MlKemBytes.of(encapsulation_key)
-    return MlKemError.new("ML-KEM-768: an encapsulation key is 1184 bytes, not #{n}") unless n == ENCAPSULATION_KEY_SIZE
-    unless MlKemPke.modulus_ok?(ek)
-      return MlKemError.new("ML-KEM-768: the encapsulation key fails the modulus check (FIPS 203 section 7.2): a coefficient is q or more")
-    end
     t = MlKemPke.decode_vector(ek)
     a = MlKemPke.expand(MlKemBytes.tail(ek, 1152))
     h = SHA3_256.new.update(ek, ENCAPSULATION_KEY_SIZE).final
     g = SHA3_512.new.update(mp, 32).update(h).final
     ciphertext = MlKemPke.encrypt(t, a, mp, MlKemBytes.tail(g, 32))
-    {ciphertext, g[0, 32].to_a}
+    32.times { |i| ciphertext << g[i] }
+    ciphertext
+  end
+
+  # What `sealed` made, as the ciphertext and the secret: a tuple of
+  # calls, built in the caller's destination (SPEC 1.5).
+  def self.split(sealed : Array(UInt8)) : {Array(UInt8), Array(UInt8)}
+    {sealed[0, CIPHERTEXT_SIZE].to_a, sealed[CIPHERTEXT_SIZE, SHARED_SECRET_SIZE].to_a}
   end
 end
 
@@ -164,6 +183,12 @@ pub struct MlKem768PrivateKey
   # The key pair of *seed*, d then z, 32 bytes each: FIPS 203 Algorithm 16
   # (ML-KEM.KeyGen_internal) over Algorithm 13 (K-PKE.KeyGen).
   def self.from_seed(seed : String | Array::View(UInt8)) : MlKem768PrivateKey
+    new(seed)
+  end
+
+  # A `new`, so the key's Arrays are made in the caller's destination
+  # (SPEC 1.5).
+  def self.new(seed : String | Array::View(UInt8)) : MlKem768PrivateKey
     sp, n = MlKemBytes.of(seed)
     raise "ML-KEM-768: a seed is 64 bytes (d, then z), not #{n}" unless n == 64
     k = 3_u8
@@ -206,8 +231,13 @@ pub struct MlKem768PrivateKey
   # size, or a stored H(ek) that is not the encapsulation key's hash (FIPS
   # 203 section 7.3).
   def self.from_bytes(bytes : String | Array::View(UInt8)) : MlKem768PrivateKey | MlKemError
+    (why = refusal(bytes)).empty? ? new(bytes, stored: true) : MlKemError.new(why)
+  end
+
+  # Why *bytes* is no decapsulation key, or "" (flat, SPEC 1.5).
+  def self.refusal(bytes : String | Array::View(UInt8)) : String
     dk, n = MlKemBytes.of(bytes)
-    return MlKemError.new("ML-KEM-768: a decapsulation key is 2400 bytes, not #{n}") unless n == MlKem768::DECAPSULATION_KEY_SIZE
+    return "ML-KEM-768: a decapsulation key is 2400 bytes, not #{n}" unless n == MlKem768::DECAPSULATION_KEY_SIZE
     ek = Array(UInt8).new(MlKem768::ENCAPSULATION_KEY_SIZE) { |x| dk[1152 + x] }
     h = SHA3_256.new.update(ek).final
     seen = 0_u8
@@ -217,8 +247,17 @@ pub struct MlKem768PrivateKey
       j = j + 1
     end
     unless seen == 0_u8
-      return MlKemError.new("ML-KEM-768: the decapsulation key fails the hash check (FIPS 203 section 7.3): its H(ek) is not the hash of its encapsulation key")
+      return "ML-KEM-768: the decapsulation key fails the hash check (FIPS 203 section 7.3): its H(ek) is not the hash of its encapsulation key"
     end
+    ""
+  end
+
+  # The key *bytes* holds, checked by `refusal` already: a `new`, so it
+  # is made in the caller's destination (SPEC 1.5).
+  def self.new(bytes : String | Array::View(UInt8), *, stored : Bool) : MlKem768PrivateKey
+    dk, n = MlKemBytes.of(bytes)
+    ek = Array(UInt8).new(MlKem768::ENCAPSULATION_KEY_SIZE) { |x| dk[1152 + x] }
+    h = SHA3_256.new.update(ek).final
     s = MlKemPke.decode_vector(dk)
     t = MlKemPke.decode_vector(ek)
     a = MlKemPke.expand(MlKemBytes.tail(ek, 1152))
@@ -247,8 +286,13 @@ pub struct MlKem768PrivateKey
   # implicit-rejection key J(z || c), chosen by masks: the caller cannot
   # tell the two apart, and neither can the time taken.
   def decapsulate(ciphertext : String | Array::View(UInt8)) : Array(UInt8) | MlKemError
+    (n = MlKemBytes.of(ciphertext)[1]) == MlKem768::CIPHERTEXT_SIZE ? opened(ciphertext) : MlKemError.new("ML-KEM-768: a ciphertext is 1088 bytes, not #{n}")
+  end
+
+  # The shared secret of a ciphertext of the right size: a flat Array,
+  # which moves down to the caller (SPEC 1.5).
+  def opened(ciphertext : String | Array::View(UInt8)) : Array(UInt8)
     c, n = MlKemBytes.of(ciphertext)
-    return MlKemError.new("ML-KEM-768: a ciphertext is 1088 bytes, not #{n}") unless n == MlKem768::CIPHERTEXT_SIZE
     m = MlKemPke.decrypt(@s, c)
     g = SHA3_512.new.update(m).update(@h).final
     rejected = SHAKE256.new.update(@z).update(c, n).read(32)
