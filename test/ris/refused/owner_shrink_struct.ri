@@ -1,0 +1,23 @@
+# Refused (SPEC 3.3), not yet: Compare: @[Owner] struct, loop reads while it clears.
+@[Owner]
+struct Vars
+  getter vals : Array(Int32)
+  def initialize
+    @vals = Array(Int32).new
+  end
+end
+
+def held(vars : Vars)
+  i = 0
+  while i < vars.vals.size
+    vars.vals.clear
+    puts vars.vals[i]
+    i += 1
+  end
+end
+
+tape do
+  v = Vars.new
+  v.vals << 1 << 2
+  held(v)
+end

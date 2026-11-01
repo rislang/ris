@@ -1,0 +1,29 @@
+# Refused (SPEC 3.3), not yet: Def through a context. A loop reads vars.vals[i] while another path clears it.
+class Vars
+  getter vals = Array(Int32).new
+end
+
+@[OnTape]
+struct Ctx
+  getter vars : Vars
+  def initialize(@vars); end
+end
+
+def reset(ctx : Ctx)
+  ctx.vars.vals.clear
+end
+def held(vars : Vars, other : Vars)
+
+  i = 0
+  while i < vars.vals.size
+    reset(Ctx.new(vars))
+    puts vars.vals[i]
+    i += 1
+  end
+end
+
+tape do
+  v = Vars.new
+  v.vals << 1 << 2
+  held(v, v)
+end

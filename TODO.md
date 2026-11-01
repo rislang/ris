@@ -107,6 +107,23 @@ Measured on the old rules (1,000,000 rounds in one `tape do`):
 
 ## Language and runtime
 
+* Owners are classes (SPEC 2.1, 2026-11-01). Remove @[Owner] structs:
+  a class with a growing field is the owner; build it only at a named
+  declaration or by copy_to, end it with that scope, refuse subclasses
+  and a def returning its own local owner, allow `b = a`, fields, Array
+  elements and nilables. Drop the struct-owner checks and
+  pass-by-pointer codegen (tape_owner_checker.cr, call.cr, fun.cr).
+  Move src/std/yaml.iyi and toml.iyi owners and test/ris/refused/
+  owner_*.ri to the new rules; rewrite doc/TAPE_API.md's owner section
+  (it also still says Str/Ary/Tre). Every refusal names its safe form.
+* Shrink through an owner's field (SPEC 3.3): test/ris/refused/
+  owner_shrink_*.ri compile today (a loop reads `vars.vals[i]` while the
+  field, or an alias of the owner, clears it; only the bounds check
+  stops it). Refuse each with 'cannot shrink tape storage with a live
+  view', then add them to check.sh. Same for
+  test/ris/refused/array_view_argument_shrink.ri: an Array::View a def
+  returns is not seen as live, and check.sh does not run the file.
+
 * RisScopeMove keeps a def's scratch when its fresh result does not fit
   on the marked mapping or its Array payload is on a mapping the scope
   grew onto; a loop's `break` with a value and a block's `break` skip

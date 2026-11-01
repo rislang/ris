@@ -1,0 +1,27 @@
+# Refused (SPEC 3.3), not yet: No alias. A loop reads vars.vals[i] while another path clears it.
+class Vars
+  getter vals = Array(Int32).new
+end
+
+@[OnTape]
+struct Ctx
+  getter vars : Vars
+  def initialize(@vars); end
+end
+
+
+def held(vars : Vars, other : Vars)
+
+  i = 0
+  while i < vars.vals.size
+    vars.vals.clear
+    puts vars.vals[i]
+    i += 1
+  end
+end
+
+tape do
+  v = Vars.new
+  v.vals << 1 << 2
+  held(v, v)
+end

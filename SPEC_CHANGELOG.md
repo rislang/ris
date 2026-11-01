@@ -4,6 +4,29 @@ Every change to SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one. Entries before 2026-10-31 name the file by its old name, TAPE_SPEC.md.
 
+## 2026-11-01: 2.1 an owner is a class with growing fields
+
+* Was: 2.1 made an owner an @[Owner] struct with one named binding: no
+  copy, alias, field, array element, union or stored borrow; a def's
+  argument was its only borrow. 2.3 refused any owner copy.
+* Now: an owner is a class with a growing field. It is built only at a
+  named declaration (or by copy_to) and ends with that scope; every other
+  use is a reference, as for any class: `b = a`, fields, Array elements,
+  nilables. 3.2 bounds every reference, 3.3 checks shrinks through every
+  alias. Owner classes are final. copy_to deep-copies an owner (2.3).
+  The header cites root_structs.md; Goose §1.3 moves to 2.2.
+* Why: compared with Goose's root struct, the struct owner had two gaps:
+  `b = a` was refused (Goose binds a non-fixed value by reference) and a
+  context struct could not hold an owner (Goose's `parser:
+  ParserState&`). ris has no `&`; a class is Crystal's reference, which
+  a Ruby programmer and an agent already know, and SPEC 1.3 already
+  checks class references like views. Alternatives were weighed: `&` (a
+  block in Crystal), @[Borrow] (fields only), Borrow(T) (a new type and
+  a wrapper per use). EGM review agreed on the class (B1: an owner is
+  never built in an Array, so 2.2 holds; B3: scope ends it). Probe
+  tests showed the shrink check misses owner fields today, struct or
+  class alike (test/ris/refused/owner_shrink_*.ri; TODO).
+
 ## 2026-10-31: 3.5 names a result under construction, not a pending one
 
 * Was: 3.5 refused a pending result live at a call into a cycle.

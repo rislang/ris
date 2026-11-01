@@ -57,19 +57,27 @@ section; a removed one leaves its number unused.
   refused, naming the forms that replace it: end the def with the call
   alone, append to a String or Array parameter, grow a local in place and
   return it, or write copy_to(owner). A copy is always written.
-## 2. Owners and stable growth (Goose §1.3, design/root_structs.md: planned)
-* 2.1 @[Owner] requires a named lexical/program declaration, built in place.
-  Arguments borrow; results may borrow an existing owner, never a local. Refuse
-  owner copies, moves, whole assignment, by-value calls, temporaries, nested
-  owning fields, owners in arrays/unions; suggest borrowing instead.
+## 2. Owners and stable growth (Goose design/root_structs.md: planned)
+* 2.1 A class with a growing field (Array, RisTree, a builder) is an owner,
+  Goose's root struct: each growing field has its own space (2.2). It is
+  built only by `x = T.new` at a named local or program declaration, or by
+  copy_to(owner); never as a temporary, argument, element or field
+  initializer. The instance and its space end with that declaration's
+  scope. Every other use is a reference, as for any class (1.3): `=`,
+  arguments, fields, Array elements and nilables alias it; 3.2 checks that
+  no reference outlives it, 3.3 checks shrinks through every alias. Owner
+  classes are not subclassed. A def may return a parameter's owner, never
+  its own local one. Owners are not Share (5.1). Each refusal names the
+  safe form: declare it with a name, pass it as an argument, copy_to(owner).
 * 2.2 Each live growing component owns stable space (sizes: backend policy;
-  disjoint lifetimes reuse it); growth never moves published elements. Its space
-  is an address-space reservation committed on use (Goose §1.2, §10.4), on every
-  platform; views stay valid across growth. A runtime-sized collection of
-  growing values is refused: use SlicePool. Roll back partial construction;
-  refuse grow/shrink of the target during in-place construction, via helpers or
-  aliases (Goose §4.2-4.3).
-* 2.3 No whole-owner byte image, raw copy/equality, FFI layout or transfer.
+  disjoint lifetimes reuse it); growth never moves published elements. Its
+  space is an address-space reservation committed on use (Goose §1.2, §1.3,
+  §10.4), on every platform; views stay valid across growth. A runtime-sized
+  collection of growing values is refused: use SlicePool. Roll back partial
+  construction; refuse grow/shrink of the target during in-place
+  construction, via helpers or aliases (Goose §4.2-4.3).
+* 2.3 No owner byte image, raw copy/equality, FFI layout or transfer;
+  copy_to(owner) deep-copies an owner into fresh space (1.7).
 ## 3. Roots (Goose §9.1-9.2)
 * 3.1 Track (owner, field path) through aliases, branches, holders, calls and
   results; joins keep every alternative; inexact roots bound lifetime only.
