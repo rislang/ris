@@ -1,4 +1,4 @@
-# Refused (SPEC 3.3), not yet: an owner class clears during a read loop.
+# Refused (SPEC 3.3): an owner class clears during a read loop.
 class Vars
   getter vals : Array(Int32)
   def initialize

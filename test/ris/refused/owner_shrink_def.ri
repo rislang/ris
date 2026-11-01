@@ -1,4 +1,5 @@
-# Refused (SPEC 3.3), not yet: Def through a context. A loop reads vars.vals[i] while another path clears it.
+# Refused (SPEC 3.3): Def through a context. A loop reads vars.vals[i] while
+# another path clears it.
 class Vars
   getter vals = Array(Int32).new
 end

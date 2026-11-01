@@ -70,6 +70,8 @@ class Iyi::TapeShrinkChecker
   @global_ids = Set(UInt64).new
   @pooled_roots = Set(UInt64).new
   @parameter_roots = Set(UInt64).new
+  @condition_storage : Array(UInt64)? = nil
+  @loop_storage = [] of View
   @uses = [] of Use
   @shrinks = [] of Shrink
 
@@ -711,7 +713,8 @@ class Iyi::TapeShrinkChecker
     end
   end
 
-  private def seed_env(target : Def, seeds : Array(UInt64)) : Env
+  private def seed_env(target : Def, seeds : Array(UInt64),
+                       owner_aliases = false) : Env
     env = Env.new
     env["self"] = Value.new([seeds[0]], [] of View)
     if owner = target.owner?
@@ -721,6 +724,17 @@ class Iyi::TapeShrinkChecker
     target.args.each_with_index do |arg, i|
       @root_types[seeds[i + 1]] = arg.type if arg.type?
       env[arg.name] = reference?(arg) ? Value.new([seeds[i + 1]], [] of View) : EMPTY
+    end
+    # Owner parameters are references: two compatible formals may name
+    # the same instance. Check that case without merging summary seeds.
+    if owner_aliases
+      seeds.each_with_index do |seed, i|
+        next unless type = @root_types[seed]?
+        next unless TapeOwnerChecker.owner?(@program, type)
+        roots = seeds.select { |other| @root_types[other]? == type }
+        name = i == 0 ? "self" : target.args[i - 1].name
+        env[name] = Value.new(roots, [] of View)
+      end
     end
     env
   end
@@ -1080,7 +1094,8 @@ class Iyi::TapeShrinkChecker
       # Check its effect and input at that call site, where the new
       # field value's provenance is available.
       next if @text_only && target.name.starts_with?("__ris_text_reset_") && target.args.empty?
-      check(target.body, seed_env(target, summary(target).not_nil!.seeds), target) unless TapeRules.unsafe?(@program, target)
+      check(target.body, seed_env(target, summary(target).not_nil!.seeds,
+        owner_aliases: true), target) unless TapeRules.unsafe?(@program, target)
     end
     check(node)
     @program.const_initializers.each { |i| check(i.value) }
@@ -1354,8 +1369,17 @@ class Iyi::TapeShrinkChecker
     round = head.dup
     result = EMPTY
     2.times do
+      # The loop condition lends an owner's field until this round ends.
+      # Re-reading the getter after a clear must not create a new borrow.
+      previous = @condition_storage
+      fields = [] of UInt64
+      @condition_storage = fields
       value(cond, round) if cond
+      @condition_storage = previous
+      outer_storage = @loop_storage
+      @loop_storage += fields.uniq.map { |r| view(r) }
       result = value(body, round)
+      @loop_storage = outer_storage
       round = loop_env(round)
     end
     # A while condition is evaluated once more on the exit edge.
@@ -1654,6 +1678,15 @@ class Iyi::TapeShrinkChecker
     result = evaluate(node, env)
     result = tape_text(node, result)
     result = handed_on(node, result)
+    if (fields = @condition_storage) && storage?(node)
+      result.roots.each do |root|
+        if parent = @parents[root]?
+          if type = root_type(parent[0])
+            fields << root if TapeOwnerChecker.owner?(@program, type)
+          end
+        end
+      end
+    end
     if node.is_a?(Call) && link_type?(node.type?) && !result.views.empty?
       result = Value.new(result.roots,
         result.views.map(&.copy_with(index: true)), result.procs,
@@ -1985,6 +2018,11 @@ class Iyi::TapeShrinkChecker
            end
          end &&
          {"[]", "[]?", "first", "first?", "last", "last?", "fetch", "__loop_fetch"}.includes?(node.name)
+        # An indexed read uses the field lent by the loop condition,
+        # including when a fresh getter call obtained the same handle.
+        use(Value.new([] of UInt64, @loop_storage.select { |v|
+          contains_root?(receiver.roots, v.root)
+        }), node)
         elements = receiver.roots.map { |r| field_root(r, "[]").as(UInt64) }
         if storage?(node)
           @pooled_roots.concat(elements)
@@ -2338,7 +2376,8 @@ class Iyi::TapeShrinkChecker
         end
         call_result = stored(call_result, env)
         views = call_result.views
-        unless storage?(node) || value_holder?(node.type?)
+        array_view = type_name(node.type).starts_with?("Array::View(")
+        unless storage?(node) || (value_holder?(node.type?) && !array_view)
           views += call_result.roots.reject { |r| env.slots.has_key?(r) }.map { |r| view(r) }
         end
         result = Value.new(call_result.roots, views)

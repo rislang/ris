@@ -539,6 +539,11 @@ for name in builder_clear builder_truncate builder_shift operand alias span \
     loop_entry loop_forever pool_run pool_run_pop pool_run_helper; do
   expect "shrink_$name" 'cannot shrink tape storage with a live view'
 done
+# Owner aliases share the field borrowed by a read loop.
+for name in array branch def field local nilable param struct; do
+  expect "owner_shrink_$name" 'cannot shrink tape storage with a live view'
+done
+expect array_view_argument_shrink 'cannot shrink tape storage with a live view'
 # Roots survive joins and holders; an emptied holder releases its view.
 for name in holder nested_holder merged_view array_holder owner_holder \
     case_view or_view read_back holder_alias inexact_holder deep_fields; do

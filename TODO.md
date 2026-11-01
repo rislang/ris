@@ -33,14 +33,6 @@ Fix a checker hole below only when a cluster hits it.
    in README.md, CONTRIBUTING.md, LEARN.md, UPSTREAM.md, LLVM.md,
    doc/TAPE_API.md, doc/STD_PORT.md and doc/MESSAGES.md (check each hit
    is the old type name). Lines at most 80 characters.
-3. Shrink through an owner's field (SPEC 3.3), after 1:
-   test/ris/refused/owner_shrink_*.ri compile today (a loop reads
-   `vars.vals[i]` while the field, or an alias of the owner, clears
-   it; only the bounds check stops it). Refuse each with 'cannot
-   shrink tape storage with a live view', then add them to check.sh.
-   Same for test/ris/refused/array_view_argument_shrink.ri: an
-   Array::View a def returns is not seen as live, and check.sh does
-   not run the file.
 4. Samples and tests, group by group, then one full check.sh.
    `RIS_SCOPE_ERRORS=all ris build --no-codegen x.ri` lists every scope
    refusal. check.sh: 41 FAILED. Patterns that work: read into one flat

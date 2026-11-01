@@ -66,5 +66,42 @@ def refill
   end
 end
 
-tape { refill }
+# Owner fields may shrink once the round's indexed read is finished.
+class RefillOwner
+  getter vals = Array(Int32).new
+end
+
+def refill_owner
+  owner = RefillOwner.new
+  owner.vals << 1 << 2
+  while owner.vals.size > 0
+    raise "owner read" unless owner.vals[0] == 1
+    owner.vals.clear
+  end
+  owner.vals << 3
+  while owner.vals.size > 0
+    owner.vals.pop
+  end
+  owner.vals << 4
+  owner.vals.clear
+  owner.vals << 5
+  raise "owner refill" unless owner.vals[0] == 5
+end
+
+def borrowed_view(values : Array::View(Int32)) : Array::View(Int32)
+  values
+end
+
+def consume_borrowed_view
+  values = [7]
+  view = borrowed_view(values)
+  raise "returned view" unless view[0] == 7
+  values.clear
+end
+
+tape do
+  refill
+  refill_owner
+  consume_borrowed_view
+end
 puts "PASS: shrink refill"
