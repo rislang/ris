@@ -3395,6 +3395,8 @@ class RisHttpClientExchange
   # What an `https://` request without a client is checked against and
   # offers: the system's roots and ALPN's `http/1.1`.
   getter default_tls : TlsConfig
+  # The machine's resolver, read afresh for each connection by name.
+  getter system_resolver : Resolver
   getter h2 : H2Connection
   getter reader : BodyReader
   getter exchange : Exchange
@@ -3418,6 +3420,8 @@ class RisHttpClientExchange
     default_tls = TlsConfig.new
     default_tls.alpn << "http/1.1"
     @default_tls = default_tls
+    system_resolver = Resolver.new
+    @system_resolver = system_resolver
     @h2 = h2
     fault = String::Builder.new(256)
     reader = BodyReader.new(fault, nil, BodyReader::EMPTY, 0_i64,
@@ -3621,6 +3625,7 @@ pub class HTTPClient
   # The configuration used without *tls*: the system's roots, and ALPN's
   # `http/1.1`. A program may change it in place.
   getter default_tls : TlsConfig
+  @system : Resolver
   # What turns a host name into addresses for this client's connections,
   # instead of `Resolver.system`: encrypted upstreams, or a hosts text
   # alone that pins a name to an address, as std/secure_dns's
@@ -3650,11 +3655,20 @@ pub class HTTPClient
     default_tls = TlsConfig.new
     default_tls.alpn << "http/1.1"
     @default_tls = default_tls
+    system = Resolver.new
+    @system = system
     @bound = Array(HttpsBound).new(BOUND)
     BOUND.times do
       @bound << HttpsBound.new
       nil
     end
+  end
+
+  # The machine's resolver, read afresh: what a connection by name uses
+  # where the client has no `resolver` of its own.
+  def system_resolver : Resolver
+    @system.read_system
+    @system
   end
 
   # Connections this client has opened, and requests sent over one it
@@ -4061,13 +4075,19 @@ struct ByName
     true
   end
 
-  def connect(client : HTTPClient?, host : String, port : Int32, wait : Int32) : IyiSocket | Cancelled | SocketError
-    # A choice of two calls, so the socket is made in the caller's scope.
-    (through = ByName.resolver_of(client)) ? IyiSocket.connect(host, port, through, wait) : IyiSocket.connect(host, port, wait)
+  # *system* is the exchange's own resolver, read afresh here when the
+  # client has none of its own.
+  def connect(client : HTTPClient?, host : String, port : Int32, wait : Int32, system : Resolver) : IyiSocket | Cancelled | SocketError
+    # One call, so the socket is made in the caller's scope.
+    IyiSocket.connect(host, port, ByName.resolver_of(client, system), wait)
   end
 
-  def self.resolver_of(client : HTTPClient?) : Resolver?
-    client ? client.resolver : nil
+  def self.resolver_of(client : HTTPClient?, system : Resolver) : Resolver
+    if client && (own = client.resolver)
+      return own
+    end
+    system.read_system
+    system
   end
 
   def by_records(client : HTTPClient, origin : String, host : String, port : Int32, base : TlsConfig, timeout_ms : Int32) : Tuple(IyiSocket, TlsClient, TlsConfig) | Cancelled | SocketError | HTTPError | Nil
@@ -4090,7 +4110,7 @@ struct AtAddress
     false
   end
 
-  def connect(client : HTTPClient?, host : String, port : Int32, wait : Int32) : IyiSocket | Cancelled | SocketError
+  def connect(client : HTTPClient?, host : String, port : Int32, wait : Int32, system : Resolver) : IyiSocket | Cancelled | SocketError
     IyiSocket.connect_address(@address, port, wait)
   end
 
@@ -4593,7 +4613,7 @@ pub struct HTTP
           conn.made_under = snapshot
           speaks_h2 = tls.alpn_protocol == "h2"
         else
-          socket = dialer.connect(client, dial_host, dial_port, wait)!
+          socket = dialer.connect(client, dial_host, dial_port, wait, state.system_resolver)!
           client.made if client
           if tunneled && (via = route)
             unopened = tunnel(socket, via, named + ":" + port.to_s, tunnel_credential, timeout_ms, secure)
@@ -4708,7 +4728,7 @@ pub struct HTTP
 
   private def self.connect_by_records(client : HTTPClient, origin : String, host : String, port : Int32, base : TlsConfig, through : Resolver?, timeout_ms : Int32) : Tuple(IyiSocket, TlsClient, TlsConfig) | Cancelled | SocketError | HTTPError | Nil
     return nil if IyiSocket.localhost?(host) || !DnsName.valid?(host)
-    resolver = through || Resolver.system
+    resolver = through || client.system_resolver
     store = SvcbStore.new
     found = resolver.https_records(host, port, store)
     return found if found.is_a?(Cancelled)

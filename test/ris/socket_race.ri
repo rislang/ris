@@ -17,18 +17,19 @@ def check(ok : Bool, what : String) : Nil
   raise "FAILED: #{what}" unless ok
 end
 
-def resolver(has_six : Bool) : Resolver
+# The hosts text; a resolver is an owner, declared where it is used.
+def hosts(has_six : Bool) : String
   hole = has_six ? "::1" : "127.0.0.2"
-  Resolver.new([] of String, hosts: "#{hole} slow.he.test\n127.0.0.1 slow.he.test\n" \
-                                    "127.0.0.1 gone.he.test\n#{hole} gone.he.test\n" \
-                                    "#{hole} hang.he.test\n#{hole} hang.he.test\n#{hole} hang.he.test\n")
+  "#{hole} slow.he.test\n127.0.0.1 slow.he.test\n" \
+  "127.0.0.1 gone.he.test\n#{hole} gone.he.test\n" \
+  "#{hole} hang.he.test\n#{hole} hang.he.test\n#{hole} hang.he.test\n"
 end
 
 probe = UdpSocket.bind?("::1", 0)
 has_six = probe.is_a?(UdpSocket)
 probe.close if probe.is_a?(UdpSocket)
 hole = has_six ? "::1" : "127.0.0.2"
-he = resolver(has_six)
+he = Resolver.new([] of String, hosts: hosts(has_six))
 
 nobody = IyiSocket.listen("127.0.0.1", 0)
 gone_port = nobody.local_port
@@ -75,7 +76,8 @@ puts "deadline: ok"
 
 result = group do |g|
   task = g.spawn do
-    got = IyiSocket.connect("hang.he.test", port, resolver(has_six), 10000)
+    own = Resolver.new([] of String, hosts: hosts(has_six))
+    got = IyiSocket.connect("hang.he.test", port, own, 10000)
     got.is_a?(Cancelled) ? 1 : 0
   end
   sleep 600

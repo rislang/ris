@@ -17,8 +17,12 @@ end
 
 big = ("b" * 1048576)
 def expected_text : String
-  text = "head:"
-  100.times { |i| text << i << (i.even? ? "" : ",") }
+  text = ""
+  text << "head:"
+  100.times do |i|
+    text << i << (i.even? ? "" : ",")
+    nil
+  end
   text << ("b" * 1048576) << "end"
   text
 end
@@ -35,13 +39,19 @@ group do |g|
     text == expected
   end
   tape do
-    pieces = Array(String).new(4)
+    pieces = Array(String).new(256)
+    # The numbers' texts live in one builder made before the loop; each
+    # piece views it, and growth never moves what it holds.
+    numbers = String::Builder.new(512)
     pieces << "head:"
     100.times do |i|
-      pieces << String.build(4) { |w| w.append_int(i) }
+      from = numbers.bytesize
+      numbers.append_int(i)
+      pieces << numbers.finish[from, numbers.bytesize - from]
       pieces << (i.even? ? "" : ",")
+      nil
     end
-    pieces << String.build(big.bytesize) { |w| w.append(big) }
+    pieces << big
     pieces << "end"
     written = conn.write(pieces).or_panic
     raise "wrote #{written}" unless written == expected_size

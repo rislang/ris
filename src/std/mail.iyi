@@ -1924,18 +1924,18 @@ pub struct Mail
   # its text and HTML, and its attachments.
   class Message
     property from : Address? = nil
-    getter to : Array(Address) = [] of Address
-    getter cc : Array(Address) = [] of Address
-    getter bcc : Array(Address) = [] of Address
-    getter reply_to : Array(Address) = [] of Address
+    getter to : Array(Address) = Array(Address).new(4)
+    getter cc : Array(Address) = Array(Address).new(4)
+    getter bcc : Array(Address) = Array(Address).new(4)
+    getter reply_to : Array(Address) = Array(Address).new(4)
     @subject : String? = nil
     @date : String? = nil
     @message_id : String? = nil
     @text : String? = nil
     @html : String? = nil
     # File name, media type, bytes.
-    @attachments : Array({String, String, String}) = [] of {String, String, String}
-    @extra : Array({String, String}) = [] of {String, String}
+    @attachments : Array({String, String, String}) = Array({String, String, String}).new(4)
+    @extra : Array({String, String}) = Array({String, String}).new(4)
 
     OWN = StaticArray["from", "to", "cc", "bcc", "reply-to", "subject", "date", "message-id", "mime-version"]
 

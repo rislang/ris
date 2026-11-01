@@ -369,7 +369,9 @@ pub class DnsOverHttps
       return at
     end
     return host unless IyiSocket.read_ipv4(host).is_a?(String) && IyiSocket.read_ipv6(host).is_a?(String)
-    found = Resolver.system.resolve(host)
+    resolver = Resolver.new
+    resolver.read_system
+    found = resolver.resolve(host)
     return DnsError.new(DnsError::UNREACHABLE, host, "#{url} over HTTPS", "the lookup was cancelled") if found.is_a?(Cancelled)
     return found if found.is_a?(DnsError)
     return DnsError.new(DnsError::NOT_FOUND, host) if found.empty?

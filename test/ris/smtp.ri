@@ -66,6 +66,33 @@ tape do
   puts SmtpClient.stuffed("").inspect
 end
 
+# The client's session, in a def of its own: what it makes is the def's.
+def session(port : Int32) : Nil
+  client = SmtpClient.connect("127.0.0.1", port, SmtpSecurity::Cleartext, helo: "client.test")
+  if client.is_a?(SmtpError)
+    puts client.message
+  else
+    puts "greeting #{client.greeting.code} #{client.greeting.text}"
+    puts "size #{client.extensions["SIZE"]?} tls #{client.tls?}"
+    puts (client.auth("u", "p") || SmtpError.new("none")).message
+    client.cleartext_auth = true
+    puts client.auth("u", "p").nil?
+    msg = Mail::Message.new
+    msg.from = Mail::Address.new("a@x.test")
+    msg.to << Mail::Address.new("b@y.test")
+    msg.bcc << Mail::Address.new("c@z.test")
+    msg.subject = "hi"
+    msg.date = Mail.date(0_i64)
+    msg.text = ".dot\nend"
+    puts client.send(msg).nil?
+    refused = client.send("a@x.test", ["no@y.test"], "x")
+    puts refused.message if refused
+    puts client.quit.nil?
+    puts client.closed?
+  end
+  nil
+end
+
 server = IyiSocket.listen("127.0.0.1", 0)
 port = server.local_port
 group do |g|
@@ -74,27 +101,6 @@ group do |g|
     0
   end
   tape do
-    client = SmtpClient.connect("127.0.0.1", port, SmtpSecurity::Cleartext, helo: "client.test")
-    if client.is_a?(SmtpError)
-      puts client.message
-    else
-      puts "greeting #{client.greeting.code} #{client.greeting.text}"
-      puts "size #{client.extensions["SIZE"]?} tls #{client.tls?}"
-      puts (client.auth("u", "p") || SmtpError.new("none")).message
-      client.cleartext_auth = true
-      puts client.auth("u", "p").nil?
-      msg = Mail::Message.new
-      msg.from = Mail::Address.new("a@x.test")
-      msg.to << Mail::Address.new("b@y.test")
-      msg.bcc << Mail::Address.new("c@z.test")
-      msg.subject = "hi"
-      msg.date = Mail.date(0_i64)
-      msg.text = ".dot\nend"
-      puts client.send(msg).nil?
-      refused = client.send("a@x.test", ["no@y.test"], "x")
-      puts refused.message if refused
-      puts client.quit.nil?
-      puts client.closed?
-    end
+    session(port)
   end
 end

@@ -114,7 +114,8 @@ import std/file::{File}
     # (measured on Windows, whose stream had the same shape).
     HEAD = 24_i64
 
-    def self.opendir(name : UInt8*) : Void*
+    # The descriptor alone; Dir keeps the records in its own buffer.
+    def self.open_fd(name : UInt8*) : Int64
       # x86_64: O_DIRECTORY 00200000 | O_CLOEXEC 02000000 = 0x90000
       # aarch64: O_DIRECTORY (1<<14)=0x4000 | O_CLOEXEC 02000000 = 0x84000
       # (arm64 fcntl.h overrides O_DIRECTORY; 0x90000 there is O_DIRECT|O_CLOEXEC.)
@@ -123,39 +124,7 @@ import std/file::{File}
       {% else %}
         fd = __iyi_openat(name, 0x84000, 0)
       {% end %}
-      return Pointer(Void).new(0_u64) if fd < 0_i64
-      stream = Pointer(UInt8).new(RisRegion.tape_bytes((HEAD + BUFFER).to_u64))
-      words = stream.as(Int64*)
-      words[0] = fd
-      words[1] = 0_i64
-      words[2] = 0_i64
-      stream.as(Void*)
-    end
-
-    def self.readdir(dirp : Void*) : Void*
-      words = dirp.as(Int64*)
-      records = dirp.as(UInt8*) + HEAD
-      if words[1] >= words[2]
-        n = sys(SYS_GETDENTS64, words[0], records.address.to_i64, BUFFER)
-        return Pointer(Void).new(0_u64) if n <= 0_i64
-        words[1] = 0_i64
-        words[2] = n
-      end
-      record = records + words[1]
-      words[1] = words[1] + record[16].to_i64 + (record[17].to_i64 << 8)
-      record.as(Void*)
-    end
-
-    def self.closedir(dirp : Void*) : Int32
-      __iyi_close(dirp.as(Int64*)[0])
-      0
-    end
-
-    def self.rewinddir(dirp : Void*) : Nil
-      words = dirp.as(Int64*)
-      sys(SYS_LSEEK, words[0], 0_i64, 0_i64)
-      words[1] = 0_i64
-      words[2] = 0_i64
+      fd
     end
 
     def self.getcwd(buf : UInt8*, size : UInt64) : UInt8*
@@ -182,6 +151,12 @@ pub class Dir
 
   @handle : Void*
   @closed : Bool
+  # Linux: the descriptor, and the records `getdents64` wrote into this
+  # directory's own buffer, read from `@at` to `@fill`.
+  @stream : Array(UInt8) = Array(UInt8).new({% if flag?(:linux) %}32768{% else %}0{% end %}, 0_u8)
+  @fd : Int64 = -1_i64
+  @at : Int32 = 0
+  @fill : Int32 = 0
 
   def initialize(path : String | Path)
     @path = path.to_s
@@ -202,7 +177,13 @@ pub class Dir
   @[TapeUnsafe("Borrow NUL-terminated text at the OS boundary")]
   private def open_dir(dir_path : String) : Void*
     {% if flag?(:darwin) || flag?(:linux) %}
-      p = LibC.opendir(Dir.c_str(dir_path).to_unsafe)
+      {% if flag?(:linux) %}
+        @fd = LibC.open_fd(Dir.c_str(dir_path).to_unsafe)
+        raise "Cannot open directory: #{dir_path}" if @fd < 0_i64
+        return Pointer(Void).new(0_u64)
+      {% else %}
+        p = LibC.opendir(Dir.c_str(dir_path).to_unsafe)
+      {% end %}
       if p.address == 0_u64
         raise "Cannot open directory: #{dir_path}"
       end
@@ -237,9 +218,36 @@ pub class Dir
     {% end %}
   end
 
+  # The next records into `@stream`: how many bytes, 0 at the end.
+  @[TapeUnsafe("getdents64 writes the records into this Dir's buffer")]
+  private def fill_stream : Int64
+    {% if flag?(:linux) %}
+      LibC.sys(LibC::SYS_GETDENTS64, @fd, @stream.to_unsafe.address.to_i64, @stream.size.to_i64)
+    {% else %}
+      0_i64
+    {% end %}
+  end
+
   def read : String?
     raise "Cannot read from closed Dir" if @closed
-    {% if flag?(:darwin) || flag?(:linux) %}
+    {% if flag?(:linux) %}
+      if @at >= @fill
+        n = fill_stream
+        return nil if n <= 0_i64
+        @at = 0
+        @fill = n.to_i32
+      end
+      record = @at
+      @at = @at + @stream[record + 16].to_i32 + (@stream[record + 17].to_i32 << 8)
+      start = record + 19
+      len = 0
+      while @stream[start + len] != 0_u8
+        len = len + 1
+      end
+      name = String::Builder.new(len)
+      len.times { |i| name.push(@stream[start + i]) }
+      name.finish
+    {% elsif flag?(:darwin) %}
       entry = LibC.readdir(@handle)
       return nil if entry.address == 0_u64
 
@@ -295,7 +303,11 @@ pub class Dir
 
   def rewind : self
     raise "Cannot rewind closed Dir" if @closed
-    {% if flag?(:darwin) || flag?(:linux) %}
+    {% if flag?(:linux) %}
+      LibC.sys(LibC::SYS_LSEEK, @fd, 0_i64, 0_i64)
+      @at = 0
+      @fill = 0
+    {% elsif flag?(:darwin) %}
       LibC.rewinddir(@handle)
     {% elsif flag?(:win32) %}
       # A find handle cannot be rewound: the search is closed and reopened,
@@ -319,7 +331,9 @@ pub class Dir
 
   def close : Nil
     return if @closed
-    {% if flag?(:darwin) || flag?(:linux) %}
+    {% if flag?(:linux) %}
+      __iyi_close(@fd)
+    {% elsif flag?(:darwin) %}
       LibC.closedir(@handle)
     {% elsif flag?(:win32) %}
       stream = @handle.as(Int64*)
@@ -501,7 +515,13 @@ pub class Dir
   @[TapeUnsafe("Borrow NUL-terminated text at the OS boundary")]
   def self.exists?(path : String | Path) : Bool
     p = path.to_s
-    {% if flag?(:darwin) || flag?(:linux) %}
+    {% if flag?(:linux) %}
+      # The descriptor alone: nothing is read.
+      fd = __iyi_openat(c_str(p).to_unsafe, {% if flag?(:x86_64) %}0x90000{% else %}0x84000{% end %}, 0)
+      return false if fd < 0_i64
+      __iyi_close(fd)
+      true
+    {% elsif flag?(:darwin) %}
       dirp = LibC.opendir(c_str(p).to_unsafe)
       if dirp.address != 0_u64
         LibC.closedir(dirp)

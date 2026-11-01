@@ -54,9 +54,13 @@ Fix a checker hole below only when a cluster hits it.
      round), tls.iyi 2871/2897 (exporter secret, client certificate
      entries) and WebSocket.connect. TLS server identities need the big
      cluster.
-   * socket_pair, socket_pieces, socket_race, smtp, mail: connect's
-     attempt list (socket.iyi 248, 1066), ResolvConf parsing (dns.iyi
-     1340s), `Resolver.system` made in a def.
+   * smtp, mail: `SmtpClient.connect` makes and returns its owner
+     (declare `client = SmtpClient.new(...)`, then a method that
+     connects); MailAddresses' parsers return lists and texts made in a
+     round (`phrase`, `list`, `addr_spec`, `params` with `quoted`): give
+     the scanner a texts builder and the caller's lists. In smtp.ri,
+     `msg.to << Address.new` reads as a program-tape store even inside a
+     def: find why.
    * regex (RxCompiler fields), big (BigInt results), png (chunk texts
      kept per round, PngInfo built in its def), zip, log (with_context
      fields), hpack, text_grow, roots_holders, iyimod_text_growth,
@@ -91,6 +95,9 @@ Checker holes found on the way (unknown must be refused, SPEC 3.6):
   though every String it answers views the parser (toml's
   basic_string now writes into the parser's @texts): scalar's
   `TapeAny.new(basic_string!)` is refused. Narrow by summary.
+* A String local that starts as a literal (`text = "head:"`) and grows
+  in a block (`100.times { text << i }`) fails at run time: "tape side
+  reservation exhausted: 20". `text = ""` then `text << "head:"` works.
 * A String local's `<<` is lowered to `__ris_append` unless the local is
   growing; that result views the argument, so a block appending to an
   outer String is refused. Lend the local to a builder parameter.

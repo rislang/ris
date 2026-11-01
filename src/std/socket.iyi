@@ -551,11 +551,10 @@ pub struct IyiSocket
   # blocking `poll` on the descriptor and never do, but the type is the
   # same, so a program reads the same everywhere.
 
-  # A host name is resolved by the machine's resolver (`Resolver.system`);
-  # a name that does not resolve is a `SocketError` whose `unresolved?` is
-  # true and whose sentence names the host. It panicked, "cannot resolve
-  # address: \"example.com\"", for every name but `localhost`, so
-  # `HTTP.get("http://example.com/")` could not run.
+  # A host name needs a resolver the caller declares (`connect(host,
+  # port, resolver)`; `resolver.read_system` reads the machine's): this
+  # form refuses one. A name that does not resolve is a `SocketError`
+  # whose `unresolved?` is true and whose sentence names the host.
   #
   # A name with more than one address is raced, Happy Eyeballs v2 (RFC
   # 8305): the first address is tried, the next `ATTEMPT_DELAY_MS` later
@@ -601,7 +600,15 @@ pub struct IyiSocket
     timeout_ms : Int32 = -1,
   ) : IyiSocket | Cancelled | SocketError
     # A choice of two calls, so the socket is made in the caller's scope.
-    IyiSocket.named_checked?(host, timeout_ms) ? connect_named(host, port, Resolver.system, timeout_ms) : connect_address(host, port, timeout_ms)
+    IyiSocket.named_checked?(host, timeout_ms) ? IyiSocket.needs_resolver(host) : connect_address(host, port, timeout_ms)
+  end
+
+  # A name without a resolver: a resolver is an owner the caller
+  # declares (SPEC 2.1), so this form takes addresses and `localhost`.
+  def self.needs_resolver(host : String) : NoReturn
+    raise "IyiSocket.connect: #{host.inspect} is a name; declare " \
+          "resolver = Resolver.new, call resolver.read_system, then " \
+          "IyiSocket.connect(host, port, resolver, timeout_ms)"
   end
 
   # Whether *host* is a name to look up; a negative timeout is refused.
@@ -1138,8 +1145,9 @@ pub struct IyiSocket
   # Every address *host* stands for, by the machine's resolver, in the
   # resolver's order (see `Resolver#resolve`); `connect` tries them in
   # `attempt_order`'s.
-  def self.resolve(host : String) : Array(IPAddress) | DnsError | Cancelled
-    Resolver.system.resolve(host)
+  macro resolve(host)
+    {% raise "IyiSocket.resolve is gone: declare resolver = Resolver.new, " \
+             "resolver.read_system, then resolver.resolve(host)" %}
   end
 
   # *host* and *port* as a message names them: an IPv6 literal in its
@@ -3645,6 +3653,13 @@ pub class Resolver
   @servers : Array::View(NameServer)
   # The servers' address bytes and labels, which each NameServer views.
   @server_text : String = ""
+  # What `refill` and `read_system` copy in: this resolver's own lists
+  # and texts, refilled in place (SPEC 2.1).
+  @own_names : Array(String) = Array(String).new(4)
+  @own_search : Array(String) = Array(String).new(8)
+  @own_servers : Array(NameServer) = Array(NameServer).new(4)
+  @own_upstreams : Array(DnsUpstream) = Array(DnsUpstream).new(4)
+  @own_text : String::Builder = String::Builder.new(4096)
 
   # *nameservers* are addresses, each with an optional port:
   # `"192.0.2.1"`, `"192.0.2.1:5353"`, `"2001:db8::1"`,
@@ -3673,38 +3688,116 @@ pub class Resolver
     @server_text = server_text.finish
   end
 
-  # A resolver from a parsed resolv.conf and a hosts file's text: see
-  # `from_config`.
-  def initialize(config : ResolvConf, hosts : String)
-    initialize(Resolver.usable(config), config.search, config.ndots, config.timeout_ms, config.attempts, hosts)
+  # An empty resolver - no servers, no hosts - to fill with `read_system`
+  # or `refill`. A resolver is an owner (SPEC 2.1): declared where it is
+  # used, `resolver = Resolver.new`, then filled; no def makes one.
+  def initialize
+    @nameservers = @own_names
+    @search = @own_search
+    @ndots = 1
+    @timeout_ms = 5000
+    @attempts = 2
+    @hosts = ""
+    @servers = @own_servers.view
+  end
+
+  # A resolver from a parsed resolv.conf and a hosts file's text, copied
+  # in. A `nameserver` line this resolver cannot use - an IPv6 address
+  # with a zone, a typo - is skipped as glibc skips one; with none left,
+  # the servers a machine without a configuration is assumed to run.
+  def refill(config : ResolvConf, hosts : String) : Nil
+    raise "a resolver's timeout is at least 1 ms, not #{config.timeout_ms}" if config.timeout_ms < 1
+    raise "a resolver asks at least once, not #{config.attempts} times" if config.attempts < 1
+    raise "a resolver's ndots is not negative: #{config.ndots}" if config.ndots < 0
+    @own_text.clear
+    @own_names.clear
+    @own_search.clear
+    @own_servers.clear
+    @own_upstreams.clear
+    config.nameservers.each do |text|
+      server = Resolver.server(text, @own_text)
+      if server.is_a?(NameServer)
+        @own_servers << server
+        at = @own_text.bytesize
+        @own_text << text
+        @own_names << @own_text.finish[at, text.bytesize]
+      end
+      nil
+    end
+    if @own_names.empty?
+      Resolver.fallback.each do |text|
+        server = Resolver.server(text, @own_text)
+        @own_servers << server if server.is_a?(NameServer)
+        @own_names << text
+        nil
+      end
+    end
+    config.search.each do |text|
+      at = @own_text.bytesize
+      @own_text << text
+      @own_search << @own_text.finish[at, text.bytesize]
+      nil
+    end
+    at = @own_text.bytesize
+    @own_text << hosts
+    @hosts = @own_text.finish[at, hosts.bytesize]
+    @nameservers = @own_names
+    @search = @own_search
+    @servers = @own_servers.view
+    @ndots = config.ndots
+    @timeout_ms = config.timeout_ms
+    @attempts = config.attempts
+    @upstreams = @own_upstreams.view
+    @plaintext_fallback = false
+    nil
+  end
+
+  # The machine's resolver, read afresh: a configuration the network
+  # manager rewrote is the one the next `read_system` reads.
+  def read_system : Nil
+    {% if flag?(:win32) %}
+      root = __iyi_win_env_get("SystemRoot".to_unsafe, 10) || "C:\\Windows"
+      refill(IyiSocket.__sys_dns_config, Resolver.read_text("#{root}\\System32\\drivers\\etc\\hosts") || "")
+    {% else %}
+      read_files(RESOLV_CONF, HOSTS)
+    {% end %}
+  end
+
+  # A resolv.conf and a hosts file at these paths. A file that is not
+  # there reads as empty, as it does to the C library.
+  def read_files(resolv_conf : String, hosts : String) : Nil
+    config = ResolvConf.new(Resolver.read_text(resolv_conf) || "")
+    refill(config, Resolver.read_text(hosts) || "")
   end
 
   # This resolver asking *upstreams* instead of its plaintext servers,
   # which are asked only with *plaintext_fallback*, and then only when no
   # upstream could be (see the class).
-  def encrypted(upstreams : Array(DnsUpstream), plaintext_fallback : Bool = false) : Resolver
-    Resolver.new(@nameservers, @search, @ndots, @timeout_ms, @attempts, @hosts,
-      Resolver.some(upstreams), plaintext_fallback)
-  end
-
-  # *upstreams*, which an encrypted resolver needs at least one of.
-  def self.some(upstreams : Array(DnsUpstream)) : Array(DnsUpstream)
+  def encrypt(upstreams : Array(DnsUpstream), plaintext_fallback : Bool = false) : Nil
     raise "an encrypted resolver asks at least one upstream" if upstreams.empty?
-    upstreams
+    @own_upstreams.clear
+    upstreams.each do |upstream|
+      @own_upstreams << upstream
+      nil
+    end
+    @upstreams = @own_upstreams.view
+    @plaintext_fallback = plaintext_fallback
+    nil
   end
 
-  def encrypted(upstream : DnsUpstream, plaintext_fallback : Bool = false) : Resolver
-    encrypted([upstream] of DnsUpstream, plaintext_fallback)
+  def encrypt(upstream : DnsUpstream, plaintext_fallback : Bool = false) : Nil
+    @own_upstreams.clear
+    @own_upstreams << upstream
+    @upstreams = @own_upstreams.view
+    @plaintext_fallback = plaintext_fallback
+    nil
   end
 
-  # The machine's resolver - its hosts file and search list - asking
-  # *upstreams*; its name servers only with *plaintext_fallback*.
-  def self.encrypted(upstreams : Array(DnsUpstream), plaintext_fallback : Bool = false) : Resolver
-    system.encrypted(upstreams, plaintext_fallback)
-  end
-
-  def self.encrypted(upstream : DnsUpstream, plaintext_fallback : Bool = false) : Resolver
-    system.encrypted(upstream, plaintext_fallback)
+  # A resolver is an owner: no def makes and returns one.
+  macro encrypted(*args, **options)
+    {% raise "Resolver#encrypted is gone: a resolver is an owner (SPEC 2.1). " \
+             "Declare resolver = Resolver.new, resolver.read_system, then " \
+             "resolver.encrypt(upstreams)" %}
   end
 
   # Every upstream's connections closed.
@@ -3712,53 +3805,26 @@ pub class Resolver
     @upstreams.each { |upstream| upstream.close }
   end
 
-  # A resolver from a parsed resolv.conf and a hosts file's text. A
-  # `nameserver` line this resolver cannot use - an IPv6 address with a
-  # zone, a typo - is skipped as glibc skips one; with none left, the
-  # servers a machine without a configuration is assumed to run.
-  def self.from_config(config : ResolvConf, hosts : String = "") : Resolver
-    Resolver.new(config, hosts)
+  macro system
+    {% raise "Resolver.system is gone: a resolver is an owner (SPEC 2.1). " \
+             "Declare resolver = Resolver.new, then resolver.read_system" %}
   end
 
-  # *config*'s name servers this resolver can use, or the fallback ones.
-  def self.usable(config : ResolvConf) : Array(String)
-    usable = [] of String
-    scratch = ""
-    config.nameservers.each { |text| usable << text if Resolver.usable?(text, scratch) }
-    return fallback if usable.empty?
-    usable
+  macro from_config(*args)
+    {% raise "Resolver.from_config is gone: declare resolver = " \
+             "Resolver.new, then resolver.refill(config, hosts)" %}
   end
 
-  # Whether *text* is a name server address; its bytes go to *scratch*.
-  def self.usable?(text : String, scratch : String::Builder) : Bool
-    Resolver.server(text, scratch).is_a?(NameServer)
+  macro from_files(*args)
+    {% raise "Resolver.from_files is gone: declare resolver = " \
+             "Resolver.new, then resolver.read_files(resolv_conf, hosts)" %}
   end
-
-  # A resolver from a resolv.conf and a hosts file at these paths. A file
-  # that is not there reads as empty, as it does to the C library.
-  def self.from_files(resolv_conf : String, hosts : String) : Resolver
-    from_config(ResolvConf.parse(read_text(resolv_conf) || ""), read_text(hosts) || "")
-  end
-
-  # The machine's resolver, read afresh each time: a configuration the
-  # network manager rewrote is the one the next lookup uses.
-  {% if flag?(:win32) %}
-    def self.system : Resolver
-      root = __iyi_win_env_get("SystemRoot".to_unsafe, 10) || "C:\\Windows"
-      from_config(IyiSocket.__sys_dns_config, read_text("#{root}\\System32\\drivers\\etc\\hosts") || "")
-    end
-  {% else %}
-    # One call: the resolver is made in the caller's scope.
-    def self.system : Resolver
-      from_files(RESOLV_CONF, HOSTS)
-    end
-  {% end %}
 
   # The servers asked when none is configured: glibc asks the loopback
   # address; on Linux the stub systemd-resolved listens on, 127.0.0.53,
   # goes first, since that is where a machine without a resolv.conf of its
   # own most often has one.
-  private def self.fallback : Array(String)
+  protected def self.fallback : Array(String)
     {% if flag?(:linux) %}
       ["127.0.0.53", "127.0.0.1"]
     {% else %}
@@ -3771,7 +3837,7 @@ pub class Resolver
   # machine, not a mistake.
   # The OS borrows the terminated path during open.
   @[TapeUnsafe]
-  private def self.read_text(path : String) : String?
+  protected def self.read_text(path : String) : String?
     fd = __iyi_open_read(IyiSocket.c_path(path).to_unsafe)
     return nil if fd < 0_i64
     io = IyiIO.new(fd, 4096, false)
