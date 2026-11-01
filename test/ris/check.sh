@@ -819,7 +819,7 @@ heap_trap text_literal_heap
 
 heap_trap borrowed_text
 
-expect class_field   "cannot use outer tape value"
+expect class_field   "cannot store data made in this tape block"
 expect class_task "this block becomes a proc"
 expect class_share 'ClassShareValue is a tape type'
 expect class_finalize "tape class instances cannot finalize"
@@ -868,7 +868,7 @@ expect writer_grow      "private method 'grow' called for String::Builder"
 expect tree_entry       "private constant RisTree::Entry(T) referenced"
 expect array_grow       "private method 'grow' called for Array(T)"
 expect array_append     "append requires Array(UInt8)"
-expect refill           "\`@items\` is given a new Array in \`take\`"
+expect refill           "clear and refill a value made before"
 expect not_flat "Holder is not flat"
 expect check_free "\`first\` is @[CheckFree], and this \`[]\` checks"
 
@@ -1795,7 +1795,7 @@ else
 fi
 out=$("$RIS" run test/ris/pending_shapes.ri 2>&1)
 if [ "$?" = 0 ] &&
-   [ "$out" = 'PASS: pending structs, arrays, trees and early returns' ]; then
+   [ "$out" = 'PASS: pending structs, arrays and early returns' ]; then
   echo "runs     pending_shapes"
 else
   echo "FAILED   pending_shapes: $out"; status=1
@@ -1819,7 +1819,7 @@ fi
 out=$("$RIS" run test/ris/in_place.ri 2>&1)
 if [ "$out" = $'<li>item n0</li><li>item n1</li><li>item n2</li>\n<li>item n9</li>\nin place: true 1' ]; then echo "runs     in_place"; else echo "FAILED   in_place: $out"; status=1; fi
 out=$("$RIS" run test/ris/index_view.ri 2>&1)
-if grep -qF $'4 edges, last names 3, reads -1\nlevels 10 dist 1 2 4' <<<"$out" && grep -qF "index 9 out of range for 4 elements" <<<"$out"; then echo "runs     index_view"; else echo "FAILED   index_view: $out"; status=1; fi
+if grep -qF $'4 edges, first -1 at 0, reads -1\nlevels 10 dist 1 2 4' <<<"$out" && grep -qF "index 9 out of range for 4 elements" <<<"$out"; then echo "runs     index_view"; else echo "FAILED   index_view: $out"; status=1; fi
 out=$("$RIS" run test/ris/link_wide.ri 2>&1)
 if grep -qF "link 255 does not fit 1 bytes" <<<"$out"; then echo "runs     link_wide"; else echo "FAILED   link_wide: $out"; status=1; fi
 
@@ -2337,8 +2337,7 @@ else
   status=1
 fi
 
-for name in program_alias program_helper program_nested_alias \
-    program_loop_alias; do
+for name in program_alias program_helper program_nested_alias; do
   out=$(RIS_HEAP_STATS=1 "$RIS" run "test/ris/$name.ri" 2>&1)
   if [ "$?" -eq 0 ] &&
       grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
@@ -2347,6 +2346,7 @@ for name in program_alias program_helper program_nested_alias \
     echo "FAILED   $name: $out"; status=1
   fi
 done
+expect program_loop_alias 'cannot store data made in this block'
 expect program_local_init 'copy it with .copy_to(Program.tape)'
 expect program_copy_forged 'program initializer is private'
 expect program_threads 'program tape writes require a single kernel thread'

@@ -53,8 +53,10 @@ tape do
   words = {5 => "five", 2 => "two",
            8 => "eight", 1 => "one", 9 => "nine"}
   text = String::Builder.new(32)
+  # Read before the block: `values` makes an Array, freed with its round.
+  values = words.values
   spans = Array(String::Span).new(words.size) do |i|
-    text.append_span(words.values[i])
+    text.append_span(values[i])
   end
   names = text.finish
   nodes = Array(Node).new(8)

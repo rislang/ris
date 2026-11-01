@@ -8,16 +8,19 @@ tape do
   s = StringScanner.new("let x = 42;")
   word = Regex.compile("[a-z]+")
   space = Regex.compile("\\s*")
-  toks = [] of String
+  # Each round's text is freed with the round: tokens are written into
+  # one String grown in place.
+  toks = ""
   while !s.eos?
     s.skip(space)
+    toks << " " unless toks.empty?
     if t = s.scan(word)
-      toks << "w:#{t}"
+      toks << "w:" << t
     elsif t = s.scan(Regex.compile("(?<n>\\d+)"))
-      toks << "n:#{t}:#{s["n"]}"
+      toks << "n:" << t << ":" << s["n"]
     elsif t = s.scan(1)
-      toks << "p:#{t}"
+      toks << "p:" << t
     end
   end
-  puts toks.join(" ")
+  puts toks
 end

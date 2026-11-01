@@ -6,13 +6,20 @@
     a = String::Builder.new(4)
     b = String::Builder.new(4)
     names = Array(String).new
+    # A round's own text is freed with the round: the names are views of
+    # a third writer, which outlives the loop.
+    digits = String::Builder.new(4)
     count = 300_000
     i = 0
     while i < count
       a.push((65 + i % 26).to_u8)
       b.push((97 + i % 26).to_u8)
       a.push(10_u8) if i % 100_000 == 99_999
-      names.push(String.build { |w| w.append_int(i) }) if i % 1000 == 0
+      if i % 1000 == 0
+        from = digits.length
+        digits.append_int(i)
+        names.push(digits.finish[from, digits.length - from])
+      end
       i += 1
     end
     x = a.finish

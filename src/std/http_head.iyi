@@ -182,8 +182,7 @@ pub struct Incoming
 
   # The query's parameters, read on the request's tape (`Query.parse`).
   def params : Query
-    q = @query
-    Query.parse(q ? q : @path[0, 0])
+    Query.parse(@query || @path[0, 0])
   end
 end
 

@@ -316,7 +316,9 @@ class Iyi::TapeShrinkChecker
   end
 
   private def source_roots(v : Value) : Array(UInt64)
-    v.roots.reject { |r| value_holder?(@root_types[r]?) } + v.views.map(&.root)
+    # A holder a one-call def handed on holds what the call made, which
+    # no slot view names: it is a source itself.
+    v.roots.reject { |r| value_holder?(@root_types[r]?) && !@handed.includes?(r) } + v.views.map(&.root)
   end
 
   private def source_scope(root : UInt64) : Array(UInt64)
@@ -1433,7 +1435,11 @@ class Iyi::TapeShrinkChecker
   # made here, so it cannot leave unchecked (unknown is refused).
   private def handed_on(node : ASTNode, result : Value) : Value
     return result unless @checking && !@text_only && !@tape_blocks.empty?
-    return result unless node.is_a?(Call) && result.roots.empty? && result.views.empty?
+    return result unless node.is_a?(Call) && result.views.empty?
+    # The call's own root, with no slot views behind it: a struct whose
+    # fields the summary does not name is no plain value either.
+    own = result.roots == [node.object_id]
+    return result unless result.roots.empty? || own
     type = node.type?
     return result unless type && TapeChecker.tape_in(@program, type) && !flat_result?(type)
     targets = @graph.targets(node)
@@ -1441,6 +1447,11 @@ class Iyi::TapeShrinkChecker
       !t.is_a?(External) && !t.name.in?("new", "initialize") &&
         TapeScopeChecker.parts(t.body).nil? && TapeScopeChecker.one_call?(t.body) &&
         !TapeRules.runtime?(@program, t.location)
+    end
+    if own
+      # Only a call that allocates can have put fresh storage in it.
+      @handed << node.object_id if targets.any? { |t| @graph.allocates?(t.body) }
+      return result
     end
     @root_scopes[node.object_id] = @scopes.dup
     @root_types[node.object_id] = type

@@ -20,9 +20,11 @@ tape do
   [1, 2, 3, 3].each { |e| adj.push(e) }
   dist = Array(Int32).new(4) { |i| i == 0 ? 0 : -1 }
   edges = dist.values_at(adj)
-  puts "#{edges.size} edges, last names #{edges.index(3)}, reads #{edges[3]}"
+  puts "#{edges.size} edges, first -1 at #{edges.index(-1)}, reads #{edges[3]}"
   puts "levels #{levels(edges, 1)} dist #{dist[1]} #{dist[2]} #{dist[3]}"
   bad = Array(Int32).new(1)
   bad.push(9)
   dist.values_at(bad)
+  # The block's value is not the view: it would outlive `bad` (SPEC 1.9).
+  nil
 end
