@@ -59,3 +59,6 @@ __pycache__/
 # ris: the bench scripts' work directories, so the probes they write are
 # std's exercises under bench/ (FfiBoundaryChecker).
 /bench/.work/
+
+# ris: EGM drift reports are worksheets, not committed.
+/*_DRIFT_REPORT.md

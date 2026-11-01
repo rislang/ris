@@ -62,6 +62,18 @@ broader suites. Check formatting of changed Crystal files with
 * Preserve the Apache 2.0 licence and inherited copyright notices:
   [LICENSE](LICENSE), [NOTICE.md](NOTICE.md).
 
+## Design checks
+
+Install EGM, Google's free design-review plugin:
+`claude plugin marketplace add google/elephant-goldfish-model`, then
+`claude plugin install egm@egm`; for Codex see its `docs/codex.md`.
+
+* A large SPEC change (a new rule or memory-model section): run
+  `/egm:egm-review SPEC.md` before coding.
+* After a SPEC change is committed: run `/egm:egm-drift-report` on
+  AGENTS.md, LEARN.md, README.md and UPSTREAM.md, and fix the drift in
+  the same round. The report is a worksheet: do not commit it.
+
 ## Inherited references
 
 [iyi's SPEC](doc/archive/iyi/SPEC.md) describes inherited language and
