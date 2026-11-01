@@ -119,7 +119,8 @@ check_count(before, 5_u64)
 
 before = copies
 field_reservations = reservations
-field = GrowingField.new.copy_to(Program.tape)
+made = GrowingField.new
+field = made.copy_to(Program.tape)
 10000.times do
   padding = String.new("displace")
   field.append("x")
@@ -182,14 +183,16 @@ check_count(before, 5_u64)
 
 # Pool handles keep object fields on the same owner as other tape data.
 pool = SlicePool(GrowingField).new
-run = pool.alloc_slice(1, GrowingField.new)
+seed = GrowingField.new
+run = pool.alloc_slice(1, seed)
 before = copies
 5.times { run[0].append("p") }
 raise "pool field" unless run[0].text == "oddppppp"
 check_count(before, 3_u64)
 
 # The lazy slot follows a deeply copied object's owner, not its caller.
-retained = GrowingField.new.copy_to(Program.tape)
+kept = GrowingField.new
+retained = kept.copy_to(Program.tape)
 before = copies
 tape do
   retained.append("?")

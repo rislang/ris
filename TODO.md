@@ -35,7 +35,7 @@ Fix a checker hole below only when a cluster hits it.
    is the old type name). Lines at most 80 characters.
 4. Samples and tests, group by group, then one full check.sh.
    `RIS_SCOPE_ERRORS=all ris build --no-codegen x.ri` lists every scope
-   refusal. check.sh: 41 FAILED. Patterns that work: read into one flat
+   refusal. check.sh: 19 FAILED. Patterns that work: read into one flat
    String (tagged where an error may come back) and wrap it in a one-call
    def, a choice of two calls, or a `new` (a constructor builds in the
    caller's scope: dns, SvcbRecord, json's document); keep a round's
@@ -95,6 +95,10 @@ Checker holes found on the way (unknown must be refused, SPEC 3.6):
   though every String it answers views the parser (toml's
   basic_string now writes into the parser's @texts): scalar's
   `TapeAny.new(basic_string!)` is refused. Narrow by summary.
+* text_grow: `field.take_event(Program.tape)` returns
+  `GrowingTextEvent.new(@text).copy_to(owner)`, yet the caller sees the
+  event as a live view of `field`'s text, so the later rebind is refused
+  as a shrink. A callee's copy_to result is not a view of its input.
 * A String local that starts as a literal (`text = "head:"`) and grows
   in a block (`100.times { text << i }`) fails at run time: "tape side
   reservation exhausted: 20". `text = ""` then `text << "head:"` works.
