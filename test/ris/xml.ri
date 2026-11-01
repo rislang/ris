@@ -36,8 +36,18 @@ tape do
   copied = doc.copy_to(Program.tape)
   puts copied.to_xml == rendered
 
+  held_tree = XmlTree.new
+  held_root = held_tree.document.add_element("held")
+  3.times do |i|
+    held_root.set_attribute("value", "temporary #{i}")
+    held_root.add_text("#{i}")
+    nil
+  end
+  exit 30 unless held_root["value"] == "temporary 2"
+  exit 31 unless held_root.text == "012"
+
   tree = XmlTree.new
-  built = TapeNode.document(tree)
+  built = tree.document
   top = built.add_element("list")
   top.set_attribute("kind", "a<b")
   entry = top.add_element("entry")

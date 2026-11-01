@@ -37,11 +37,20 @@ class Iyi::TapeScopeChecker
     # So is a choice between two calls: whichever runs builds there. What
     # the condition makes stays in the caller's scratch, freed with it.
     # A nil branch builds nothing.
+    # A branch that raises builds nothing either.
     if body.is_a?(If)
-      return {body.then, body.else}.all? { |b| b.is_a?(NilLiteral) || one_call?(b) } &&
-             !(body.then.is_a?(NilLiteral) && body.else.is_a?(NilLiteral))
+      return {body.then, body.else}.all? { |b| b.is_a?(NilLiteral) || raises?(b) || one_call?(b) } &&
+             !{body.then, body.else}.all? { |b| b.is_a?(NilLiteral) || raises?(b) }
     end
     body.is_a?(Call) && body.name != "raise"
+  end
+
+  # A body that is one `raise`.
+  def self.raises?(body : ASTNode) : Bool
+    while body.is_a?(Expressions) && body.expressions.size == 1
+      body = body.expressions.first
+    end
+    body.is_a?(Call) && body.name == "raise" && body.obj.nil?
   end
 
   # Named-argument wrappers are constructors too: their fields and

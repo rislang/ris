@@ -3705,6 +3705,14 @@ struct SlicePool::List(T)
     @state.value = State(T).new(pool)
   end
 
+  # A list over *pool* holding *first*: one call, so a def that answers
+  # it builds it where its caller keeps it.
+  def initialize(pool : SlicePool(T?), first : T)
+    @state = Pointer(State(T)).new(pool.state_words(((sizeof(State(T)) + 7) // 8).to_i32))
+    @state.value = State(T).new(pool)
+    self << first
+  end
+
   def __iyi_copy_into(target : Pointer(self), work : RisCopyWork) : Nil
     made = self.class.new(SlicePool(T?).new(size))
     each { |item| made << item }

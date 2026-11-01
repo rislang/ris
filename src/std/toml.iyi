@@ -765,9 +765,7 @@ pub struct TapeSlot
   end
 
   def self.tables(first : TapeTable, pool : SlicePool(TapeTable?)) : TapeSlot
-    list = SlicePool::List(TapeTable).new(pool)
-    list << first
-    new(TABLES, TapeAny.new(false), nil, list)
+    new(TABLES, TapeAny.new(false), nil, SlicePool::List(TapeTable).new(pool, first))
   end
 
   def to_any(scratch : TapeConversionScratch) : TapeAny
@@ -842,15 +840,16 @@ pub struct TapeTable
     @slots = TapeMap(TapeSlot).new(pool)
   end
 
-  def to_any : TapeAny
-    scratch = TapeConversionScratch.new
-    to_any(scratch)
+  # One call: the map's list lives in the scratch's pool, and the value is
+  # built where the caller keeps it.
+  def to_any(scratch : TapeConversionScratch) : TapeAny
+    TapeAny.new(fill(TapeMap(TapeAny).new(scratch.pairs), scratch))
   end
 
-  def to_any(scratch : TapeConversionScratch) : TapeAny
-    pairs = TapeMap(TapeAny).new(scratch.pairs)
+  # *pairs*, the caller's, filled with this table's values.
+  private def fill(pairs : TapeMap(TapeAny), scratch : TapeConversionScratch) : TapeMap(TapeAny)
     @slots.each { |key, slot| pairs[key] = slot.to_any(scratch) }
-    TapeAny.new(pairs)
+    pairs
   end
 end
 
@@ -954,6 +953,7 @@ struct TapeReader
   @slot_pool : SlicePool(TapePair(TapeSlot)?)
   @table_pool : SlicePool(TapeTable?)
   @value_pool : SlicePool(TapeAny)
+  @scratch : TapeConversionScratch
   @array_items : Array(TapeAny)
   @array_used : Int32
   @empty_path : Array(String)
@@ -988,6 +988,9 @@ struct TapeReader
     @slot_pool = SlicePool(TapePair(TapeSlot)?).new
     @table_pool = SlicePool(TapeTable?).new
     @value_pool = SlicePool(TapeAny).new
+    # The tables' conversion to TapeAny, the reader's own.
+    scratch = TapeConversionScratch.new
+    @scratch = scratch
     @root = TapeTable.new(0, true, false, @slot_pool)
     @current.value = @root
     @path.value = Array(String).new
@@ -1022,7 +1025,7 @@ struct TapeReader
         line_end!
       end
     end
-    @root.to_any
+    @root.to_any(@scratch)
   end
 
   # The error for `reason` at byte `at`: its line, and its column counted
@@ -1863,7 +1866,7 @@ struct TapeReader
     skip_blanks
     if pos < input_size && input[pos] == 125_u8
       self.pos = pos + 1
-      return table.to_any
+      return table.to_any(@scratch)
     end
     while true
       skip_blanks
@@ -1892,7 +1895,7 @@ struct TapeReader
                           "or '}' should be")
       end
     end
-    table.to_any
+    table.to_any(@scratch)
   end
 
   private def control?(b : UInt8) : Bool
@@ -2396,7 +2399,7 @@ end
 # types: a value whose type implements it, as a `derive
 # toml_serializable` type does.
 pub trait ToTOML
-  abstract def to_toml_any : TapeAny
+  abstract def to_toml_any(items : SlicePool(TapeAny), pairs : SlicePool(TapePair(TapeAny)?)) : TapeAny
 end
 
 # `derive toml_serializable`, in a struct or class whose fields are written
@@ -2426,14 +2429,24 @@ end
 # `initialize(toml : TapeAny)` of this module's `TapeAny`).
 pub macro toml_serializable(declaration)
   impl ::Std::Toml::ToTOML for {{ declaration[:name].id }}
+    # One call: the table is built in pools of the caller's.
     def to_toml_any : ::Std::Toml::TapeAny
-      toml_pairs = ::Std::Toml::TapeMap(::Std::Toml::TapeAny).new
+      to_toml_any(::SlicePool(::Std::Toml::TapeAny).new, ::SlicePool(::Std::Toml::TapePair(::Std::Toml::TapeAny)?).new)
+    end
+
+    # The table, its arrays in *items* and its tables in *pairs*.
+    def to_toml_any(items : ::SlicePool(::Std::Toml::TapeAny), pairs : ::SlicePool(::Std::Toml::TapePair(::Std::Toml::TapeAny)?)) : ::Std::Toml::TapeAny
+      ::Std::Toml::TapeAny.new(to_toml_pairs(::Std::Toml::TapeMap(::Std::Toml::TapeAny).new(pairs), items, pairs))
+    end
+
+    # *toml_pairs*, the caller's, filled with the fields that are set.
+    def to_toml_pairs(toml_pairs : ::Std::Toml::TapeMap(::Std::Toml::TapeAny), items : ::SlicePool(::Std::Toml::TapeAny), pairs : ::SlicePool(::Std::Toml::TapePair(::Std::Toml::TapeAny)?)) : ::Std::Toml::TapeMap(::Std::Toml::TapeAny)
       {% for field in declaration[:fields] %}
         unless {{ field[:name].id }}.nil?
-          toml_pairs[{{ field[:name][1..] }}] = ::Std::Toml::TOML.to_any({{ field[:name].id }})
+          toml_pairs[{{ field[:name][1..] }}] = ::Std::Toml::TOML.to_any({{ field[:name].id }}, items, pairs)
         end
       {% end %}
-      ::Std::Toml::TapeAny.new(toml_pairs)
+      toml_pairs
     end
   end
 
@@ -2468,6 +2481,19 @@ pub macro toml_serializable(declaration)
         raise "TOML for #{ {{ declaration[:name] }} } has no key #{ {{ field[:name][1..] }}.inspect }" if toml_found_{{ field[:name][1..].id }}.nil?
         {{ field[:name].id }} = ::Std::Toml::TOML.read_value(toml_found_{{ field[:name][1..].id }}, typeof({{ field[:name].id }}))
       \{% end %}
+    {% end %}
+  end
+end
+
+@[OnTape]
+struct RisDecoded(T)
+  getter value : T
+
+  def initialize(value : TapeAny)
+    @value = {% if T.nilable? %}
+      TOML.read_value(value, {{ T.union_types.reject { |u| u == ::Nil }.first }})
+    {% else %}
+      T.new(value)
     {% end %}
   end
 end
@@ -2512,32 +2538,39 @@ pub struct TOML
   # here, named, and a derived type leaves a nil field out before it gets
   # this far. Taken out before the rest dispatches, for the reason
   # std/json's `write_or_null` gives.
+  # One call: the pools are made where the caller keeps the value.
   def self.to_any(val : T) : TapeAny forall T
+    to_any(val, SlicePool(TapeAny).new, SlicePool(TapePair(TapeAny)?).new)
+  end
+
+  # The value, its arrays in *items* and its tables in *pairs*: pools the
+  # caller owns, so nothing it holds is this def's scratch.
+  def self.to_any(val : T, items : SlicePool(TapeAny), pairs : SlicePool(TapePair(TapeAny)?)) : TapeAny forall T
     if val.nil?
       raise "TOML has no null, so a nil cannot be written"
     else
-      write_value(val)
+      write_value(val, items, pairs)
     end
   end
 
-  def self.write_value(val : Bool) : TapeAny
+  def self.write_value(val : Bool, items : SlicePool(TapeAny), pairs : SlicePool(TapePair(TapeAny)?)) : TapeAny
     TapeAny.new(val)
   end
 
-  def self.write_value(val : Int32) : TapeAny
+  def self.write_value(val : Int32, items : SlicePool(TapeAny), pairs : SlicePool(TapePair(TapeAny)?)) : TapeAny
     TapeAny.new(val.to_i64)
   end
 
-  def self.write_value(val : Int64) : TapeAny
+  def self.write_value(val : Int64, items : SlicePool(TapeAny), pairs : SlicePool(TapePair(TapeAny)?)) : TapeAny
     TapeAny.new(val)
   end
 
-  def self.write_value(val : UInt8) : TapeAny
+  def self.write_value(val : UInt8, items : SlicePool(TapeAny), pairs : SlicePool(TapePair(TapeAny)?)) : TapeAny
     TapeAny.new(val.to_i64)
   end
 
   # A TOML integer is an `Int64`: a `UInt64` past it cannot be written.
-  def self.write_value(val : UInt64) : TapeAny
+  def self.write_value(val : UInt64, items : SlicePool(TapeAny), pairs : SlicePool(TapePair(TapeAny)?)) : TapeAny
     if val > 9223372036854775807_u64
       raise "the UInt64 #{val} is past 9223372036854775807, the largest " \
             "TOML integer"
@@ -2545,37 +2578,46 @@ pub struct TOML
     TapeAny.new(val.to_i64)
   end
 
-  def self.write_value(val : Float64) : TapeAny
+  def self.write_value(val : Float64, items : SlicePool(TapeAny), pairs : SlicePool(TapePair(TapeAny)?)) : TapeAny
     TapeAny.new(val)
   end
 
-  def self.write_value(val : String) : TapeAny
+  def self.write_value(val : String, items : SlicePool(TapeAny), pairs : SlicePool(TapePair(TapeAny)?)) : TapeAny
     TapeAny.new(val)
   end
 
-  def self.write_value(val : TOMLDateTime) : TapeAny
+  def self.write_value(val : TOMLDateTime, items : SlicePool(TapeAny), pairs : SlicePool(TapePair(TapeAny)?)) : TapeAny
     TapeAny.new(val)
   end
 
-  def self.write_value(val : TapeAny) : TapeAny
+  def self.write_value(val : TapeAny, items : SlicePool(TapeAny), pairs : SlicePool(TapePair(TapeAny)?)) : TapeAny
     val
   end
 
-  def self.write_value(val : Array(T)) : TapeAny forall T
-    items = SlicePool(TapeAny).new(val.size).alloc_slice(val.size)
-    val.each_with_index { |item, at| items[at] = to_any(item) }
-    TapeAny.new(items)
+  # One call: the run is in the caller's pool.
+  def self.write_value(val : Array(T), items : SlicePool(TapeAny), pairs : SlicePool(TapePair(TapeAny)?)) : TapeAny forall T
+    TapeAny.new(filled(items.alloc_slice(val.size), val, items, pairs))
+  end
+
+  # *run*, in the caller's pool, filled with *val*'s values.
+  private def self.filled(run : SlicePool::Run(TapeAny), val : Array(T), items : SlicePool(TapeAny), pairs : SlicePool(TapePair(TapeAny)?)) : SlicePool::Run(TapeAny) forall T
+    val.each_with_index { |item, at| run[at] = to_any(item, items, pairs) }
+    run
   end
 
   # TOML keys are strings, so a hash is written when its keys are.
-  def self.write_value(val : Hash(String, V)) : TapeAny forall V
-    pairs = TapeMap(TapeAny).new
-    val.each { |key, item| pairs[key] = to_any(item) }
-    TapeAny.new(pairs)
+  def self.write_value(val : Hash(String, V), items : SlicePool(TapeAny), pairs : SlicePool(TapePair(TapeAny)?)) : TapeAny forall V
+    TapeAny.new(filled(TapeMap(TapeAny).new(pairs), val, items, pairs))
   end
 
-  def self.write_value(val : T) : TapeAny forall T : ToTOML
-    val.to_toml_any
+  # *map*, over the caller's pool, filled with *val*'s values.
+  private def self.filled(map : TapeMap(TapeAny), val : Hash(String, V), items : SlicePool(TapeAny), pairs : SlicePool(TapePair(TapeAny)?)) : TapeMap(TapeAny) forall V
+    val.each { |key, item| map[key] = to_any(item, items, pairs) }
+    map
+  end
+
+  def self.write_value(val : T, items : SlicePool(TapeAny), pairs : SlicePool(TapePair(TapeAny)?)) : TapeAny forall T : ToTOML
+    val.to_toml_any(items, pairs)
   end
 
   def self.read_value(value : TapeAny, type : Bool.class) : Bool
@@ -2637,16 +2679,11 @@ pub struct TOML
     h
   end
 
-  # A type that reads itself, the `initialize(toml)` a `derive
-  # toml_serializable` wrote; a type that admits nil reads as the other
-  # type, since a value that is there is never null.
+  # Construct in the caller's scope, including nullable derived types.
   def self.read_value(value : TapeAny, type : T.class) : T forall T
-    {% if T.nilable? %}
-      read_value(value, typeof(nil.as(T) || raise("")))
-    {% else %}
-      T.new(value)
-    {% end %}
+    RisDecoded(T).new(value).value
   end
+
 end
 
 module TapeNumbers

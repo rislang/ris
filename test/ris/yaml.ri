@@ -15,9 +15,20 @@ pub struct Point
 end
 
 tape do
+  tagged = YAML.parse("a: !!int 12\nb: !!float 3\nc: !!bool true\n" \
+                      "d: !!null null\ne: !<tag:yaml.org,2002:str> 7\n")
+  exit 30 unless tagged["a"].as_i == 12
+  exit 31 unless tagged["b"].as_f == 3.0
+  exit 32 unless tagged["c"].as_bool && tagged["d"].null?
+  exit 33 unless tagged["e"].as_s == "7"
+  retained = YAML.parse("a: &a \"first\\ntext\"\nb: 'second'\nc: *a\n")
+  exit 34 unless retained["a"].as_s == "first\ntext"
+  exit 35 unless retained["c"] == retained["a"]
   text = "name: café\nlist: [1, true, null, 0.125]\nquoted: \"a\\nb\"\n"
   doc = YAML.parse(text)
   exit 14 unless YAML.parse("[1, 2]")[-1].as_i == 2
+  exit 36 unless YAML.read_value(doc["name"], String?) == "café"
+  exit 37 unless YAML.read_value(TapeValue.new(nil), Point?).nil?
   copied = doc.copy_to(Program.tape)
   exit 13 unless copied == doc
   exit 1 unless doc["name"].as_s == "café"

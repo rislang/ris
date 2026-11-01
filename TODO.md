@@ -56,8 +56,6 @@ Fix a checker hole below only when a cluster hits it.
    * socket_pair, socket_pieces, socket_race, smtp, mail: connect's
      attempt list (socket.iyi 248, 1066), ResolvConf parsing (dns.iyi
      1340s), `Resolver.system` made in a def.
-   * After step 1: yaml/toml/xml/xpath parsers: trees built across defs; toml's
-     SlicePool::List state now lives in its pool, the rest is open.
    * regex (RxCompiler fields), big (BigInt results), png (chunk texts
      kept per round, PngInfo built in its def), zip, log (with_context
      fields), hpack, text_grow, roots_holders, iyimod_text_growth,

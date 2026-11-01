@@ -255,8 +255,12 @@ pub class XmlTree
   getter attributes : Array(XmlLink(TapeAttribute))
   getter namespaces : Array(XmlLink(TapeNamespace))
   getter declaration : Array(XmlDeclaration)
+  # The texts of the tree's names, contents and attributes, copied here:
+  # they live as long as the tree, whatever scope made them.
+  @texts : String::Builder
 
   def initialize
+    @texts = String::Builder.new(256)
     @nodes = Array(XmlNodeData).new
     @attributes = Array(XmlLink(TapeAttribute)).new
     @namespaces = Array(XmlLink(TapeNamespace)).new
@@ -272,8 +276,16 @@ pub class XmlTree
 
   def add(kind : NodeType, name : String | String,
           content : String | String) : TapeNode
-    @nodes << XmlNodeData.new(kind, tape_view(name), tape_view(content))
+    @nodes << XmlNodeData.new(kind, keep(name), keep(content))
     TapeNode.new(self, @nodes.size - 1)
+  end
+
+  # *text* copied into the tree's own texts: a view of them.
+  def keep(text : String) : String
+    return "" if text.bytesize == 0
+    from = @texts.bytesize
+    @texts << text
+    @texts.finish[from, text.bytesize]
   end
 end
 
@@ -471,7 +483,7 @@ pub struct TapeNode
   def add_attribute(attr : TapeAttribute) : Nil
     d = data
     list = @tree.attributes
-    list << XmlLink(TapeAttribute).new(attr)
+    list << XmlLink(TapeAttribute).new(TapeAttribute.new(@tree.keep(attr.name), @tree.keep(attr.value), @tree.keep(attr.namespace_uri)))
     at = list.size - 1
     if d.attr_last < 0
       d.attr_first = at
@@ -486,18 +498,21 @@ pub struct TapeNode
 
   # Sets the attribute `name` (no namespace), replacing one given before.
   def set_attribute(name : String | String, value : String | String) : Nil
+    # The attribute found first, replaced after the walk: nothing made in
+    # a round of it is stored.
+    found = -1
     i = data.attr_first
-    while i >= 0
+    while i >= 0 && found < 0
       link = @tree.attributes[i]
-      if link.item.name == name
-        @tree.attributes[i] = XmlLink(TapeAttribute).new(
-          TapeAttribute.new(tape_view(name), tape_view(value)))
-        fixed = @tree.attributes[i]
-        fixed.next = link.next
-        @tree.attributes[i] = fixed
-        return
-      end
+      found = i if link.item.name == name
       i = link.next
+    end
+    if found >= 0
+      after = @tree.attributes[found].next
+      fixed = XmlLink(TapeAttribute).new(TapeAttribute.new(@tree.keep(name), @tree.keep(value)))
+      fixed.next = after
+      @tree.attributes[found] = fixed
+      return
     end
     add_attribute(TapeAttribute.new(tape_view(name), tape_view(value)))
   end
@@ -505,7 +520,7 @@ pub struct TapeNode
   def add_namespace(ns : TapeNamespace) : Nil
     d = data
     list = @tree.namespaces
-    list << XmlLink(TapeNamespace).new(ns)
+    list << XmlLink(TapeNamespace).new(TapeNamespace.new(@tree.keep(ns.prefix), @tree.keep(ns.uri)))
     at = list.size - 1
     if d.ns_last < 0
       d.ns_first = at
@@ -716,6 +731,7 @@ pub struct TapeNode
       # Escaping also preserves CDATA content containing a carriage return.
       Std::Xml.escape(content, writer, ascii)
     end
+    nil
   end
 
   def to_xml : String
@@ -817,14 +833,14 @@ struct TapeParser
   end
 
   def parse? : TapeNode?
-    doc = parse_document
-    @error.empty? ? doc : nil
+    parse_document
+    @error.empty? ? @tree.document : nil
   end
 
   def parse : TapeNode
-    doc = parse_document
+    parse_document
     raise @error unless @error.empty?
-    doc
+    @tree.document
   end
 
   # `\r\n` and a lone `\r` both mean `\n` (XML 1.0, 2.11).
@@ -857,7 +873,7 @@ struct TapeParser
 
   private def fail_at(line : Int32, col : Int32, message : String) : Nil
     return unless @error.empty?
-    @error = "#{message} at line #{line}, column #{col}"
+    @error = @tree.keep("#{message} at line #{line}, column #{col}")
     @pos = @len
   end
 
@@ -984,15 +1000,17 @@ struct TapeParser
 
   protected def self.hex4(value : Int32) : String
     digits = value.to_s(16).upcase
-    while digits.bytesize < 4
-      digits = "0" + digits
-    end
-    digits
+    # Grown in place and returned where it is.
+    text = ""
+    (4 - digits.bytesize).times { text << "0" }
+    text << digits
+    text
   end
 
   # -- the document --------------------------------------------------------
 
-  private def parse_document : TapeNode
+  # The document read into the tree; `@error` says why not.
+  private def parse_document : Nil
     doc = @tree.document
     # A UTF-16 file opens with its byte order mark, FF FE or FE FF - what
     # Windows PowerShell 5.1's `Out-File`, `>` and `Export-Clixml` write -
@@ -1000,7 +1018,7 @@ struct TapeParser
     # element at line 1, column 1", about a document that has none.
     if @len >= 2 && ((byte_at(0) == 0xFF_u8 && byte_at(1) == 0xFE_u8) || (byte_at(0) == 0xFE_u8 && byte_at(1) == 0xFF_u8))
       fail_at(1, 1, "encoding 'UTF-16' is not supported: the input is read as UTF-8")
-      return doc
+      return
     end
     @pos = 3 if match?("\u{FEFF}")
     if match?("<?xml") && @pos + 5 < @len && whitespace_byte?(byte_at(@pos + 5))
@@ -1042,7 +1060,7 @@ struct TapeParser
     end
 
     fail("document has no root element") if !has_root && !failed?
-    doc
+    nil
   end
 
   private def whitespace_byte?(b : UInt8) : Bool
@@ -1445,8 +1463,8 @@ struct TapeParser
 
     return unless attribute_decl(element, name).nil?
     value = TapeParser.collapse_spaces(value) if tokenized && has_value
-    @attribute_decls << XmlAttributeDecl.new(element, name, tokenized,
-      has_value, value)
+    @attribute_decls << XmlAttributeDecl.new(@tree.keep(element), @tree.keep(name), tokenized,
+      has_value, @tree.keep(value))
   end
 
   # The `(a|b)` of an enumerated type, name tokens, or of a NOTATION type,
@@ -1591,7 +1609,7 @@ struct TapeParser
     end
     value = parse_entity_value(name)
     return if failed?
-    @entities[name] = value if !parameter && !@entities.has_key?(name)
+    @entities[@tree.keep(name)] = @tree.keep(value) if !parameter && !@entities.has_key?(name)
     skip_whitespace
     unless consume(">")
       fail_at(start_line, start_col, "unclosed entity declaration for " \
@@ -1610,14 +1628,15 @@ struct TapeParser
       return "".as_tape
     end
     step
-    parts = Array(String).new
+    # Grown in place: each piece is copied in as it is read.
+    parts = ""
     run_start = @pos
     while @pos < @len
       b = byte_at(@pos)
       if b == quote
         parts << slice_from(run_start)
         step
-        return String.build { |w| parts.join(w) }
+        return parts
       elsif b == 60_u8
         fail("markup inside the value of entity '#{entity}' is not " \
              "supported")
@@ -1777,7 +1796,8 @@ struct TapeParser
       end
       attr_line = @line
       attr_col = @col
-      attr_name = parse_name
+      # Copied into the tree: the attribute lists outlive this round.
+      attr_name = @tree.keep(parse_name)
       return elem if failed?
       return elem unless qualified_name?(attr_name, attr_line, attr_col)
       if seen.has_key?(attr_name)
@@ -1795,6 +1815,7 @@ struct TapeParser
       attr_val = parse_attribute_value
       return elem if failed?
       attr_val = TapeParser.collapse_spaces(attr_val) if tokenized?(name, attr_name)
+      attr_val = @tree.keep(attr_val)
       raw_names << attr_name
       raw_values << attr_val
       raw_lines << attr_line
@@ -1908,14 +1929,16 @@ struct TapeParser
       return elem
     end
 
-    parts = Array(String).new
+    # The text between tags, copied in as it is read; the tree keeps its
+    # own copy (`flush_text`), and the builder is cleared and refilled.
+    parts = String::Builder.new(64)
     run_start = @pos
     while @pos < @len
       b = byte_at(@pos)
       if b == 60_u8
         parts << slice_from(run_start)
-        flush_text(elem, parts)
-        parts = Array(String).new
+        flush_text(elem, parts.finish)
+        parts.clear
         if match?("</")
           end_line = @line
           end_col = @col
@@ -2009,9 +2032,9 @@ struct TapeParser
     end
   end
 
-  private def flush_text(elem : TapeNode, parts : Array(String)) : Nil
+  private def flush_text(elem : TapeNode, parts : String) : Nil
     return if parts.empty?
-    text = String.build { |w| parts.join(w) }
+    text = parts
     elem.append_parsed(@tree.add(NodeType::Text, "", text)) unless text.empty?
   end
 
@@ -2026,14 +2049,15 @@ struct TapeParser
       return "".as_tape
     end
     step
-    parts = Array(String).new
+    # Grown in place: each piece is copied in as it is read.
+    parts = ""
     run_start = @pos
     while @pos < @len
       b = byte_at(@pos)
       if b == quote
         parts << slice_from(run_start)
         step
-        return String.build { |w| parts.join(w) }
+        return parts
       elsif b == 60_u8
         fail("raw '<' is not allowed in an attribute value")
         return "".as_tape
@@ -2680,12 +2704,25 @@ pub struct RisXPath
   def initialize(@absolute : Bool, @steps : Array(RisXPathStep), @predicates : Array(RisXPathPredicate))
   end
 
-  # *path* read, or why not.
+  # The path read, or a panic with why not: one call, as `parse` is.
+  def self.parse_checked(path : String) : RisXPath
+    checked(parse(path))
+  end
+
+  private def self.checked(read : RisXPath | String) : RisXPath
+    raise read if read.is_a?(String)
+    read
+  end
+
+  # The path read, or why not; step lists belong to the caller.
   def self.parse(path : String) : RisXPath | String
+    parsed(path, [] of RisXPathStep, [] of RisXPathPredicate)
+  end
+
+  # *path* read into *steps* and *predicates*, the caller's.
+  private def self.parsed(path : String, steps : Array(RisXPathStep), predicates : Array(RisXPathPredicate)) : RisXPath | String
     size = path.bytesize
     return "XPath: an empty path" if size == 0
-    steps = [] of RisXPathStep
-    predicates = [] of RisXPathPredicate
     at = 0
     absolute = path.byte_at(0) == 47_u8
     deep = false
@@ -2791,27 +2828,39 @@ pub struct RisXPath
   # The nodes the path selects from *context*, in document order, each
   # once. A path ending in text() answers the text nodes; one ending in
   # an attribute answers the elements that have it.
+  # The walk keeps node indexes, two lists cleared and refilled a step.
   def nodes(context : TapeNode) : Array(TapeNode)
-    current = [] of TapeNode
-    current << (@absolute ? context.tree.document : context)
+    tree = context.tree
+    current = [] of Int32
+    found = [] of Int32
+    current << (@absolute ? 0 : context.index)
     @steps.each do |step|
-      found = [] of TapeNode
-      current.each do |node|
+      found.clear
+      current.each do |at|
+        node = TapeNode.new(tree, at)
         if step.deep
           deep_step(node, step, found)
         else
           one_step(node, step, found)
         end
+        nil
       end
-      current = found
+      current.clear
+      current.concat(found)
+      nil
     end
-    current
+    Array(TapeNode).new(current.size) { |k| TapeNode.new(tree, current[k]) }
   end
 
   # The strings the path selects: an attribute's values, text() nodes'
   # text, or each selected node's whole text.
+  # One call: the list and its texts are made where the caller keeps them.
   def values(context : TapeNode) : Array(String)
-    texts = [] of String
+    values(context, [] of String, String::Builder.new(256))
+  end
+
+  # The strings, views of *held*, pushed into *texts*: both the caller's.
+  def values(context : TapeNode, texts : Array(String), held : String::Builder) : Array(String)
     last = @steps.empty? ? nil : @steps[@steps.size - 1]
     nodes(context).each do |node|
       if last && last.test == RisXPathStep::ATTR
@@ -2821,14 +2870,17 @@ pub struct RisXPath
           texts << value
         end
       else
-        texts << node.text
+        from = held.bytesize
+        node.text(held)
+        texts << held.finish[from, held.bytesize - from]
       end
+      nil
     end
     texts
   end
 
   # The step from *node* and from every element under it.
-  private def deep_step(node : TapeNode, step : RisXPathStep, found : Array(TapeNode)) : Nil
+  private def deep_step(node : TapeNode, step : RisXPathStep, found : Array(Int32)) : Nil
     one_step(node, step, found)
     node.each_child do |child|
       deep_step(child, step, found) if child.node_type.element?
@@ -2836,35 +2888,39 @@ pub struct RisXPath
   end
 
   # The step from *node*: its matches, the predicates applied in turn.
-  private def one_step(node : TapeNode, step : RisXPathStep, found : Array(TapeNode)) : Nil
+  private def one_step(node : TapeNode, step : RisXPathStep, found : Array(Int32)) : Nil
     case step.test
     when RisXPathStep::SELF
-      add(found, node) if keep?(step, node, 1, 1)
+      add(found, node.index) if keep?(step, node, 1, 1)
       return
     when RisXPathStep::PARENT
       if up = node.parent
-        add(found, up) if keep?(step, up, 1, 1)
+        add(found, up.index) if keep?(step, up, 1, 1)
       end
       return
     when RisXPathStep::ATTR
       if step.name == "*" ? node.attributes.size > 0 : node.has_attribute?(step.name)
-        add(found, node)
+        add(found, node.index)
       end
       return
     end
-    matched = [] of TapeNode
-    node.each_child { |child| matched << child if match?(step, child) }
+    tree = node.tree
+    matched = [] of Int32
+    kept = [] of Int32
+    node.each_child { |child| matched << child.index if match?(step, child); nil }
     index = 0
     while index < step.count
       predicate = @predicates[step.first + index]
-      kept = [] of TapeNode
-      matched.each_with_index do |child, place|
-        kept << child if holds?(predicate, child, place + 1, matched.size)
+      kept.clear
+      matched.each_with_index do |at, place|
+        kept << at if holds?(predicate, TapeNode.new(tree, at), place + 1, matched.size)
+        nil
       end
-      matched = kept
+      matched.clear
+      matched.concat(kept)
       index = index + 1
     end
-    matched.each { |child| add(found, child) }
+    matched.each { |at| add(found, at); nil }
   end
 
   private def match?(step : RisXPathStep, child : TapeNode) : ::Bool
@@ -2893,9 +2949,10 @@ pub struct RisXPath
     !predicate.compare || value == predicate.value
   end
 
-  private def add(found : Array(TapeNode), node : TapeNode) : Nil
-    found.each { |had| return if had == node }
-    found << node
+  private def add(found : Array(Int32), at : Int32) : Nil
+    found.each { |had| return if had == at }
+    found << at
+    nil
   end
 end
 
@@ -2903,22 +2960,17 @@ pub struct TapeNode
   # The nodes *path* (`RisXPath`) selects from this one; panics with the
   # reason when the path is not one it reads.
   def xpath(path : String) : Array(TapeNode)
-    read = RisXPath.parse(path)
-    raise read if read.is_a?(String)
-    read.nodes(self)
+    RisXPath.parse_checked(path).nodes(self)
   end
 
   # The first node *path* selects, or nil.
   def xpath_first(path : String) : TapeNode?
-    found = xpath(path)
-    found.empty? ? nil : found[0]
+    xpath(path).first?
   end
 
   # The strings *path* selects: attribute values for `@name`, text for
   # `text()` or any other last step.
   def xpath_values(path : String) : Array(String)
-    read = RisXPath.parse(path)
-    raise read if read.is_a?(String)
-    read.values(self)
+    RisXPath.parse_checked(path).values(self)
   end
 end

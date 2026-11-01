@@ -544,9 +544,11 @@ end
 @[OnTape]
 struct TapeBuffer
   @writer : String::Builder
+  @texts : String::Builder
 
   def initialize
     @writer = String::Builder.new
+    @texts = String::Builder.new
   end
 
   def size : Int32
@@ -585,8 +587,14 @@ struct TapeBuffer
     @writer << point.unsafe_chr
   end
 
+  def keep(text : String) : String
+    from = @texts.bytesize
+    @texts << text
+    @texts.finish[from, text.bytesize]
+  end
+
   def finish : String
-    @writer.finish.dup
+    keep(@writer.finish)
   end
 end
 
@@ -1172,7 +1180,7 @@ struct TapeParser
     elsif key_colon(@line) >= 0
       parse_block_mapping(indent)
     else
-      value = parse_inline_node(@heads[@line], parent, sequence_at_parent)
+      value = parse_inline_node(@heads[@line], parent, sequence_at_parent, nil)
       value
     end
   end
@@ -1182,7 +1190,7 @@ struct TapeParser
   # scalar, or (after properties alone) the block node on the lines below.
   # Requires the rest of the value's last line to be empty and steps past
   # it. `outer_tag` is a tag that stood alone on the line above.
-  private def parse_inline_node(pos : Int32, parent : Int32, sequence_at_parent : Bool, outer_tag : String? = nil) : TapeValue
+  private def parse_inline_node(pos : Int32, parent : Int32, sequence_at_parent : Bool, outer_tag : String?) : TapeValue
     anchor = nil.as(String?)
     tag = outer_tag
     anchor_pos = pos
@@ -1472,7 +1480,7 @@ struct TapeParser
         @line = @line + 1
         value = parse_block_node(indent, true)
       else
-        value = parse_inline_node(pos, indent, true)
+        value = parse_inline_node(pos, indent, true, nil)
       end
       break if @error
       if merge
@@ -1550,10 +1558,14 @@ struct TapeParser
     text = @bytes[pos, finish - pos]
     prefix = "!<tag:yaml.org,2002:"
     if text.starts_with?(prefix) && (text.bytesize > 0 && text[text.bytesize - 1] == 62_u8) && text.bytesize > prefix.bytesize + 1
-      short = ""
-      short << "!!" << text[prefix.bytesize,
-        text.bytesize - prefix.bytesize - 1]
-      return short if known_tag?(short)
+      name = text[prefix.bytesize, text.bytesize - prefix.bytesize - 1]
+      return "!!str" if name == "str"
+      return "!!int" if name == "int"
+      return "!!float" if name == "float"
+      return "!!bool" if name == "bool"
+      return "!!null" if name == "null"
+      return "!!seq" if name == "seq"
+      return "!!map" if name == "map"
     end
     text
   end
@@ -1584,17 +1596,17 @@ struct TapeParser
     resolved = TapeScalar.resolve(text)
     rk = resolved.kind
     if tag == "!!int"
-      return resolved if rk == TapeValue::KIND_INT
+      return TapeValue.new(resolved.as_i) if rk == TapeValue::KIND_INT
       fail("not an integer: #{text.inspect}", pos)
     elsif tag == "!!float"
-      return resolved if rk == TapeValue::KIND_FLOAT
+      return TapeValue.new(resolved.as_f) if rk == TapeValue::KIND_FLOAT
       return TapeValue.new(resolved.as_i.to_f64) if rk == TapeValue::KIND_INT
       fail("not a float: #{text.inspect}", pos)
     elsif tag == "!!bool"
-      return resolved if rk == TapeValue::KIND_BOOL
+      return TapeValue.new(resolved.as_bool) if rk == TapeValue::KIND_BOOL
       fail("not a boolean: #{text.inspect}", pos)
     else
-      return resolved if rk == TapeValue::KIND_NIL
+      return TapeValue.new(nil) if rk == TapeValue::KIND_NIL
       fail("not null: #{text.inspect}", pos)
     end
     value
@@ -2651,7 +2663,7 @@ end
 # `YAML.to_any` accept any value whose type implements it, as a `derive
 # yaml_serializable` type does.
 pub trait ToYAML
-  abstract def to_yaml_any : TapeValue
+  abstract def to_yaml_any(pool : SlicePool(TapeValue)) : TapeValue
 end
 
 # `derive yaml_serializable`, in a struct or class whose fields are written
@@ -2690,11 +2702,15 @@ end
 pub macro yaml_serializable(declaration)
   impl ::Std::Yaml::ToYAML for {{ declaration[:name].id }}
     def to_yaml_any : ::Std::Yaml::TapeValue
+      to_yaml_any(::SlicePool(::Std::Yaml::TapeValue).new)
+    end
+
+    def to_yaml_any(pool : ::SlicePool(::Std::Yaml::TapeValue)) : ::Std::Yaml::TapeValue
       yaml_pairs = ::Std::Yaml::TapeMap(::Std::Yaml::TapeValue, ::Std::Yaml::TapeValue).new
       {% for field in declaration[:fields] %}
-        yaml_pairs[::Std::Yaml::TapeValue.new({{ field[:name][1..] }})] = ::Std::Yaml::YAML.to_any({{ field[:name].id }})
+        yaml_pairs[::Std::Yaml::TapeValue.new({{ field[:name][1..] }})] = ::Std::Yaml::YAML.to_any({{ field[:name].id }}, pool)
       {% end %}
-      ::Std::Yaml::TapeValue.new(yaml_pairs.freeze(SlicePool(::Std::Yaml::TapeValue).new))
+      ::Std::Yaml::TapeValue.new(yaml_pairs.freeze(pool))
     end
   end
 
@@ -2735,6 +2751,19 @@ pub macro yaml_serializable(declaration)
   end
 end
 
+@[OnTape]
+struct RisDecoded(T)
+  getter value : T
+
+  def initialize(value : TapeValue)
+    @value = {% if T.nilable? %}
+      value.null? ? nil : YAML.read_value(value, {{ T.union_types.reject { |u| u == ::Nil }.first }})
+    {% else %}
+      T.new(value)
+    {% end %}
+  end
+end
+
 pub struct YAML
   # The parser is built in the caller's destination (SPEC 1.5): the value
   # views its pool, which the caller's scope frees.
@@ -2749,13 +2778,20 @@ pub struct YAML
   end
 
   def self.parse?(text : String) : TapeValue?
-    docs = TapeParser.new(text).parse_all
+    first?(TapeParser.new(text))
+  end
+
+  def self.first?(parser : TapeParser) : TapeValue?
+    docs = parser.parse_all
     return nil if docs.nil?
     docs.empty? ? TapeValue.new(nil) : docs[0]
   end
 
   def self.parse_all(text : String) : Array(TapeValue)
-    parser = TapeParser.new(text)
+    all(TapeParser.new(text))
+  end
+
+  def self.all(parser : TapeParser) : Array(TapeValue)
     docs = parser.parse_all
     raise parser.error || "invalid YAML" if docs.nil?
     docs
@@ -2793,70 +2829,74 @@ pub struct YAML
   # `write_value` whole, `Int32 | Nil` matches the `ToYAML` overload as
   # one type and does not build.
   def self.to_any(val : T) : TapeValue forall T
+    to_any(val, SlicePool(TapeValue).new)
+  end
+
+  def self.to_any(val : T, pool : SlicePool(TapeValue)) : TapeValue forall T
     if val.nil?
       TapeValue.new(nil)
     else
-      write_value(val)
+      write_value(val, pool)
     end
   end
 
-  def self.write_value(val : Nil) : TapeValue
+  def self.write_value(val : Nil, pool : SlicePool(TapeValue)) : TapeValue
     TapeValue.new(nil)
   end
 
-  def self.write_value(val : Bool) : TapeValue
+  def self.write_value(val : Bool, pool : SlicePool(TapeValue)) : TapeValue
     TapeValue.new(val)
   end
 
-  def self.write_value(val : Int32) : TapeValue
+  def self.write_value(val : Int32, pool : SlicePool(TapeValue)) : TapeValue
     TapeValue.new(val.to_i64)
   end
 
-  def self.write_value(val : Int64) : TapeValue
+  def self.write_value(val : Int64, pool : SlicePool(TapeValue)) : TapeValue
     TapeValue.new(val)
   end
 
-  def self.write_value(val : UInt8) : TapeValue
+  def self.write_value(val : UInt8, pool : SlicePool(TapeValue)) : TapeValue
     TapeValue.new(val.to_i64)
   end
 
   # A YAML integer is read as an `Int64`, and one past it as a float, so a
   # `UInt64` above 9223372036854775807 would read back as a different
   # number: it is refused rather than written.
-  def self.write_value(val : UInt64) : TapeValue
+  def self.write_value(val : UInt64, pool : SlicePool(TapeValue)) : TapeValue
     raise "the UInt64 #{val} is past 9223372036854775807, the largest integer YAML reads back" if val > 9223372036854775807_u64
     TapeValue.new(val.to_i64)
   end
 
-  def self.write_value(val : Float64) : TapeValue
+  def self.write_value(val : Float64, pool : SlicePool(TapeValue)) : TapeValue
     TapeValue.new(val)
   end
 
-  def self.write_value(val : String) : TapeValue
+  def self.write_value(val : String, pool : SlicePool(TapeValue)) : TapeValue
     TapeValue.new(val)
   end
 
-  def self.write_value(val : TapeValue) : TapeValue
+  def self.write_value(val : TapeValue, pool : SlicePool(TapeValue)) : TapeValue
     val
   end
 
-  def self.write_value(val : Array(T)) : TapeValue forall T
-    items = SlicePool(TapeValue).new(val.size).alloc_slice(val.size)
-    val.each_with_index { |item, at| items[at] = to_any(item) }
+  def self.write_value(val : Array(T), pool : SlicePool(TapeValue)) : TapeValue forall T
+    items = pool.alloc_slice(val.size)
+    val.each_with_index { |item, at| items[at] = to_any(item, pool) }
     TapeValue.new(items)
   end
 
   # A key of any type `to_any` writes as a scalar: YAML keys are typed,
   # so `Hash(Int32, String)` is written with integer keys and reads back
   # as itself. A collection key is refused by `dump`.
-  def self.write_value(val : Hash(K, V)) : TapeValue forall K, V
+  def self.write_value(val : Hash(K, V), pool : SlicePool(TapeValue)) : TapeValue forall K, V
     pairs = TapeMap(TapeValue, TapeValue).new
-    val.each { |key, item| pairs[to_any(key)] = to_any(item) }
-    TapeValue.new(pairs.freeze(SlicePool(TapeValue).new))
+    val.each { |key, item| pairs[to_any(key, pool)] = to_any(item, pool) }
+    TapeValue.new(pairs.freeze(pool))
   end
 
-  def self.write_value(val : T) : TapeValue forall T : ToYAML
-    val.to_yaml_any
+  def self.write_value(val : T, pool : SlicePool(TapeValue)) : TapeValue forall T : ToYAML
+    val.to_yaml_any(pool)
   end
 
   def self.read_value(value : TapeValue, type : Nil.class) : Nil
@@ -2915,14 +2955,9 @@ pub struct YAML
     h
   end
 
-  # A type that reads itself, the `initialize(yaml)` a `derive
-  # yaml_serializable` wrote; a type that admits nil reads null as the nil
-  # and anything else as the other type, as std/json's `read_value` does.
+  # Construct in the caller's scope, including nullable derived types.
   def self.read_value(value : TapeValue, type : T.class) : T forall T
-    {% if T.nilable? %}
-      value.null? ? nil : read_value(value, typeof(nil.as(T) || raise("")))
-    {% else %}
-      T.new(value)
-    {% end %}
+    RisDecoded(T).new(value).value
   end
+
 end

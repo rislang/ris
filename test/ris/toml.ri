@@ -20,6 +20,7 @@ tape do
   exit 2 unless parsed["title"].as_s == "café"
   exit 3 unless parsed["db"]["ports"][1].as_i == 443_i64
   exit 21 unless parsed["db"]["ports"][-1].as_i == 443
+  exit 30 unless TOML.read_value(parsed["title"], String?) == "café"
   copied = parsed.copy_to(Program.tape)
   exit 20 unless copied == parsed
   writer = String::Builder.new(1)

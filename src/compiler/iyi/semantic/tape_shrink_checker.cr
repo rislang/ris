@@ -2155,6 +2155,9 @@ class Iyi::TapeShrinkChecker
               @root_scopes[node.object_id] ||= @scopes.dup
               note_fresh(node.object_id) unless @root_tapes.has_key?(node.object_id)
             end
+            # What the callee builds and answers is built here: a store
+            # into it is a store into this scope's value.
+            @root_scopes[node.object_id] ||= @scopes.dup unless summary.stores.empty?
             summary.stores.each do |root, contents|
               destinations = translate(root, summary, actuals, node.object_id)
               # A store whose contents do not reach this call - an object or
@@ -2312,7 +2315,9 @@ class Iyi::TapeShrinkChecker
         source = node.name == "new" ? derived : receiver
         Value.new([] of UInt64,
           source.views + source.roots.map { |root| view(root) })
-      elsif node.name == "new" && type_name(node.type).starts_with?("SlicePool::Run(")
+      elsif node.name == "new" && (type_name(node.type).starts_with?("SlicePool::Run(") ||
+                                   type_name(node.type).starts_with?("SlicePool::List("))
+        # A list keeps its state in its pool's words: it views the pool.
         # A run borrows initialized slots from its Ary argument. Unlike
         # allocating constructors, it must retain that storage's lifetime.
         Value.new([] of UInt64,
