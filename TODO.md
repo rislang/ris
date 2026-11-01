@@ -12,11 +12,45 @@ How to work (fewer tokens, faster to the goal):
   git log. Remove an item when its guarantee passes its gate.
 * Linux x86_64 and aarch64 only (SPEC 7.1): no work for other targets.
 
-## Now: every scope frees (SPEC 1.1, 1.5, 1.9, 3.2, 3.5, 3.6)
+## Now: code to the new SPEC (1.1, 1.5, 1.9, 2.1, 3.2, 3.3, 3.5, 3.6)
 
-Breakage between steps is fine; no transition stages.
+Breakage between steps is fine; no transition stages. Steps 1 and 2
+and step 4's clusters not marked "After step 1" can run in parallel
+(different files); step 3 and the marked clusters follow 1.
 
-4. samples and tests, group by group, then one full check.sh.
+Fewest tokens: the compiler's refusals are the list. One task per
+clone (ris1/2/3) and per cluster below; build with
+`RIS_SCOPE_ERRORS=all ris build --no-codegen x.ri` to see every
+refusal of a file at once, fix by message, rerun only that cluster's
+files; one full check.sh on minitest per finished step, not per fix.
+Fix a checker hole below only when a cluster hits it.
+
+1. Owners are classes (SPEC 2.1, 2.3). A class with a growing field is
+   the owner: build it only at a named declaration or by copy_to, end
+   it with that scope, refuse subclasses and a def returning its own
+   local owner; allow `b = a`, fields, Array elements, nilables;
+   copy_to deep-copies it. Remove @[Owner] and the struct-owner checks
+   and pass-by-pointer codegen (tape_owner_checker.cr, call.cr,
+   fun.cr). Move src/std/yaml.iyi and toml.iyi owners and
+   test/ris/refused/owner_*.ri to the new rules. Every refusal names
+   its safe form. Gate: the owner_* refused tests and allowed.ri.
+2. Docs to the SPEC (doc-only: no build, no check.sh). Run
+   `/egm:egm-drift-report` on AGENTS.md, LEARN.md, README.md and
+   UPSTREAM.md (CONTRIBUTING.md, Design checks) and fix the drift; the
+   report is a worksheet, not committed. Also rewrite doc/TAPE_API.md's
+   owner section for 2.1 and rename Str/Ary/Tre to String/Array/RisTree
+   in README.md, CONTRIBUTING.md, LEARN.md, UPSTREAM.md, LLVM.md,
+   doc/TAPE_API.md, doc/STD_PORT.md and doc/MESSAGES.md (check each hit
+   is the old type name). Lines at most 80 characters.
+3. Shrink through an owner's field (SPEC 3.3), after 1:
+   test/ris/refused/owner_shrink_*.ri compile today (a loop reads
+   `vars.vals[i]` while the field, or an alias of the owner, clears
+   it; only the bounds check stops it). Refuse each with 'cannot
+   shrink tape storage with a live view', then add them to check.sh.
+   Same for test/ris/refused/array_view_argument_shrink.ri: an
+   Array::View a def returns is not seen as live, and check.sh does
+   not run the file.
+4. Samples and tests, group by group, then one full check.sh.
    `RIS_SCOPE_ERRORS=all ris build --no-codegen x.ri` lists every scope
    refusal. check.sh: 41 FAILED. Patterns that work: read into one flat
    String (tagged where an error may come back) and wrap it in a one-call
@@ -26,24 +60,25 @@ Breakage between steps is fine; no transition stages.
    refill a field instead of a new value (TLS records, key updates); a
    struct or Tuple of texts and plain values moves down whole.
    Left, by cluster:
-   * HTTP client and server (answer, http_*, server_*, serve full loop,
-     websocket_*, samples/ris/web, heap_check): objects made in helpers
-     and stored lazily into longer-lived ones (BodyReader's decoders,
-     Response bodies, h2 state, hpack decode_fields, zstd). Needs owner
-     regions (SPEC 2.1) or a rewrite so each is built by a constructor in
-     its owner's scope.
-   * TlsSession keeps each ticket with `copy_to(Program.tape)`: grows
-     with every ticket received. Give a session its own owner.
+   * After step 1: HTTP client and server (answer, http_*, server_*,
+     serve full loop, websocket_*, samples/ris/web, heap_check): objects
+     made in helpers and stored lazily into longer-lived ones
+     (BodyReader's decoders, Response bodies, h2 state, hpack
+     decode_fields, zstd). Make each holder an owner class built in its
+     owner's scope (SPEC 2.1), so helpers fill its fields in place.
+   * After step 1: TlsSession keeps each ticket with
+     `copy_to(Program.tape)`, growing per ticket. Make the session an
+     owner class with a ticket field refilled in place.
    * socket_pair, socket_pieces, socket_race, smtp, mail: connect's
      attempt list (socket.iyi 248, 1066), ResolvConf parsing (dns.iyi
      1340s), `Resolver.system` made in a def.
-   * yaml/toml/xml/xpath parsers: trees built across defs; toml's
+   * After step 1: yaml/toml/xml/xpath parsers: trees built across defs; toml's
      SlicePool::List state now lives in its pool, the rest is open.
    * regex (RxCompiler fields), big (BigInt results), png (chunk texts
      kept per round, PngInfo built in its def), zip, log (with_context
      fields), hpack, text_grow, roots_holders, iyimod_text_growth,
      autocert, program_local_init, fix array_refill, secure_dns.
-5. benches: build each, group the refusals by message, fix per group.
+5. Benches: build each, group the refusals by message, fix per group.
 
 Checker holes found on the way (unknown must be refused, SPEC 3.6):
 
@@ -88,41 +123,7 @@ Checker holes found on the way (unknown must be refused, SPEC 3.6):
   (interpolation, inspect) as a view of them; tape_text now adds a
   fresh root for an allocating String call not known to answer a view.
 
-Measured on the old rules (1,000,000 rounds in one `tape do`):
-
-* `t = a.first * 100` in a loop body: 2.1 GB RSS (`first` is not in
-  READS, so the body was taken to read outer tape and kept its
-  scratch). The same in a def: 266 MB. A def that frees: 7.6 MB.
-* A def's fresh result was staged by `__iyi_scope_result` and copied
-  back twice: `def f(p); File.read(p); end` on a 21 MB file took 41 ms
-  and 16,232 page faults, `File.read(p)` called directly 15 ms and
-  5,540. Same for `a + "x"`, interpolation, `String.new(a)`,
-  `Array(UInt8).new(n) { }`, `def f; g; end`. A local grown in place
-  (`w = ""; w << x; w`) lives in its own reservation and is not copied.
-* With only the one-call def's mark taken off, `def fwd(s); s + "x";
-  end` called in a loop turned the loop's mark off: each round's
-  String.build reservation stayed, `iyi: mapping failed` after ~500k
-  rounds. With the mark always on this cannot happen. Normalized
-  literals reach the checker as `::String.view("x")`.
-
 ## Language and runtime
-
-* Owners are classes (SPEC 2.1, 2026-11-01). Remove @[Owner] structs:
-  a class with a growing field is the owner; build it only at a named
-  declaration or by copy_to, end it with that scope, refuse subclasses
-  and a def returning its own local owner, allow `b = a`, fields, Array
-  elements and nilables. Drop the struct-owner checks and
-  pass-by-pointer codegen (tape_owner_checker.cr, call.cr, fun.cr).
-  Move src/std/yaml.iyi and toml.iyi owners and test/ris/refused/
-  owner_*.ri to the new rules; rewrite doc/TAPE_API.md's owner section
-  (it also still says Str/Ary/Tre). Every refusal names its safe form.
-* Shrink through an owner's field (SPEC 3.3): test/ris/refused/
-  owner_shrink_*.ri compile today (a loop reads `vars.vals[i]` while the
-  field, or an alias of the owner, clears it; only the bounds check
-  stops it). Refuse each with 'cannot shrink tape storage with a live
-  view', then add them to check.sh. Same for
-  test/ris/refused/array_view_argument_shrink.ri: an Array::View a def
-  returns is not seen as live, and check.sh does not run the file.
 
 * RisScopeMove keeps a def's scratch when its fresh result does not fit
   on the marked mapping or its Array payload is on a mapping the scope
