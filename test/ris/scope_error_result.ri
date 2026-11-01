@@ -10,6 +10,17 @@ struct ScopeError
   end
 end
 
+# Two sentences, one made here and one viewing the caller's text.
+@[OnTape]
+struct ScopePair
+  getter made : String
+  getter seen : String
+  getter also : String
+
+  def initialize(@made : String, @seen : String, @also : String)
+  end
+end
+
 def cur : UInt64
   IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)
 end
@@ -27,6 +38,13 @@ def refuse(n : Int32) : ScopeError
   ScopeError.new("refused #{n}", n)
 end
 
+def pair(input : String) : ScopePair | Int32
+  scratch = String::Builder.new(65536)
+  scratch.push(65_u8)
+  return ScopePair.new("made #{input.bytesize}", input[1, 2], "also #{input}") if input.bytesize > 1
+  0
+end
+
 tape do
   c0 = cur
   a = read(5)
@@ -36,5 +54,9 @@ tape do
   puts a.is_a?(ScopeError) ? "#{a.message} #{a.at}" : "?"
   puts b.is_a?(String) ? b : "?"
   puts "#{c.message} #{c.at}"
+  input = String.new("abcd")
+  d = pair(input)
+  y = "overwrite #{5} #{6} #{7}"
+  puts d.is_a?(ScopePair) ? "#{d.made} #{d.seen} #{d.also}" : "?"
   puts cur - c0 < 1024
 end

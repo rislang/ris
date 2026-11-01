@@ -2501,6 +2501,107 @@ def __iyi_pending_pop(guard : Pointer(RisPendingGuard)) : Nil
   {% end %}
 end
 
+# A struct result whose tape fields are texts - String, String?, or a
+# struct (or nil) of those one level down, the rest plain numbers,
+# booleans, chars or enums: an error and its sentences. Its texts move
+# down as a String result moves (RisScopeMove.texts); any other struct
+# views older storage and the scratch is released.
+def __iyi_text_move(mark : RisScopeMark, value : T) : T forall T
+  {% begin %}
+  {% ok = true %}
+  {% count = 0 %}
+  {% for iv in T.instance_vars %}
+    {% ty = iv.type %}
+    {% if ty == ::String || (ty.union? && ty.nilable? && ty.union_types.size == 2 && ty.union_types.includes?(::String)) %}
+      {% count = count + 1 %}
+    {% elsif ty < ::Number || ty == ::Bool || ty == ::Char || ty < ::Enum || ty == ::Nil %}
+    {% else %}
+      {% inner = ty.union? && ty.nilable? && ty.union_types.size == 2 ? ty.union_types.reject { |u| u == ::Nil }.first : ty %}
+      {% if inner.struct? && !inner.union? && !inner.instance_vars.empty? %}
+        {% for jv in inner.instance_vars %}
+          {% jt = jv.type %}
+          {% if jt == ::String || (jt.union? && jt.nilable? && jt.union_types.size == 2 && jt.union_types.includes?(::String)) %}
+            {% count = count + 1 %}
+          {% elsif jt < ::Number || jt == ::Bool || jt == ::Char || jt < ::Enum || jt == ::Nil %}
+          {% else %}
+            {% ok = false %}
+          {% end %}
+        {% end %}
+      {% else %}
+        {% ok = false %}
+      {% end %}
+    {% end %}
+  {% end %}
+  {% if ok && count > 0 %}
+    moved = value
+    slots = uninitialized StaticArray(String, {{count}})
+    at = pointerof(slots).as(Pointer(String))
+    {% k = 0 %}
+    {% for iv in T.instance_vars %}
+      {% ty = iv.type %}
+      {% if ty == ::String %}
+        at[{{k}}] = moved.@{{iv.name}}
+        {% k = k + 1 %}
+      {% elsif ty.union? && ty.nilable? && ty.union_types.size == 2 && ty.union_types.includes?(::String) %}
+        at[{{k}}] = moved.@{{iv.name}} || ""
+        {% k = k + 1 %}
+      {% elsif ty < ::Number || ty == ::Bool || ty == ::Char || ty < ::Enum || ty == ::Nil %}
+      {% else %}
+        {% inner = ty.union? ? ty.union_types.reject { |u| u == ::Nil }.first : ty %}
+        {% for jv in inner.instance_vars %}
+          {% jt = jv.type %}
+          {% if jt == ::String || (jt.union? && jt.union_types.includes?(::String)) %}
+            if held = moved.@{{iv.name}}
+              at[{{k}}] = held.@{{jv.name}}{% if jt != ::String %} || ""{% end %}
+            else
+              at[{{k}}] = ""
+            end
+            {% k = k + 1 %}
+          {% end %}
+        {% end %}
+      {% end %}
+    {% end %}
+    pointers = uninitialized StaticArray(Pointer(String), {{count}})
+    each = pointerof(pointers).as(Pointer(Pointer(String)))
+    {% for i in 0...count %}
+      each[{{i}}] = at + {{i}}
+    {% end %}
+    RisScopeMove.texts(mark, each, {{count}})
+    {% k = 0 %}
+    {% for iv in T.instance_vars %}
+      {% ty = iv.type %}
+      {% if ty == ::String %}
+        pointerof(moved.@{{iv.name}}).value = at[{{k}}]
+        {% k = k + 1 %}
+      {% elsif ty.union? && ty.nilable? && ty.union_types.size == 2 && ty.union_types.includes?(::String) %}
+        pointerof(moved.@{{iv.name}}).value = at[{{k}}] if moved.@{{iv.name}}
+        {% k = k + 1 %}
+      {% elsif ty < ::Number || ty == ::Bool || ty == ::Char || ty < ::Enum || ty == ::Nil %}
+      {% else %}
+        {% inner = ty.union? ? ty.union_types.reject { |u| u == ::Nil }.first : ty %}
+        if held = moved.@{{iv.name}}
+          {% for jv in inner.instance_vars %}
+            {% jt = jv.type %}
+            {% if jt == ::String %}
+              pointerof(held.@{{jv.name}}).value = at[{{k}}]
+              {% k = k + 1 %}
+            {% elsif jt.union? && jt.union_types.includes?(::String) %}
+              pointerof(held.@{{jv.name}}).value = at[{{k}}] if held.@{{jv.name}}
+              {% k = k + 1 %}
+            {% end %}
+          {% end %}
+          pointerof(moved.@{{iv.name}}).value = held
+        end
+      {% end %}
+    {% end %}
+    moved
+  {% else %}
+    __iyi_scope_reset(mark)
+    value
+  {% end %}
+  {% end %}
+end
+
 # A def's result where its scope ends (SPEC 1.5, 1.9). The scratch is
 # released either way. A String or Array made in it moves down to the
 # caller's boundary first: its bytes, or an Array's state block, with one
@@ -2513,33 +2614,16 @@ def __iyi_scope_result(mark : RisScopeMark, value : T) : T forall T
     RisScopeMove.text(mark, value)
   {% elsif T.name.starts_with?("Array(") %}
     RisScopeMove.array(mark, value)
-  {% elsif T.struct? && !T.union? && T.instance_vars.select { |iv| iv.type == ::String }.size == 1 && T.instance_vars.all? { |iv| iv.type == ::String || iv.type < ::Number || iv.type == ::Bool || iv.type < ::Enum } %}
-    # A struct whose one tape field is a String moves it down.
-    moved = value
-    {% for iv in T.instance_vars %}
-      {% if iv.type == ::String %}
-        pointerof(moved.@{{iv.name}}).value = RisScopeMove.text(mark, moved.@{{iv.name}})
-      {% end %}
-    {% end %}
-    moved
-  {% elsif T.union? && T.union_types.any? { |t| t == ::String || t.name.starts_with?("Array(") || (t.struct? && !t.union? && t.instance_vars.select { |iv| iv.type == ::String }.size == 1 && t.instance_vars.all? { |iv| iv.type == ::String || iv.type < ::Number || iv.type == ::Bool || iv.type < ::Enum }) } %}
+  {% elsif T.struct? && !T.union? %}
+    __iyi_text_move(mark, value)
+  {% elsif T.union? && T.union_types.any? { |t| t == ::String || t.name.starts_with?("Array(") || t.struct? } %}
     {% for t in T.union_types %}
       {% if t == ::String %}
         return RisScopeMove.text(mark, value) if value.is_a?(::String)
       {% elsif t.name.starts_with?("Array(") %}
         return RisScopeMove.array(mark, value) if value.is_a?({{t}})
-      {% elsif t.struct? && !t.union? && t.instance_vars.select { |iv| iv.type == ::String }.size == 1 && t.instance_vars.all? { |iv| iv.type == ::String || iv.type < ::Number || iv.type == ::Bool || iv.type < ::Enum } %}
-        # A struct whose one tape field is a String (an error and its
-        # sentence): the String moves down as a String result does.
-        if value.is_a?({{t}})
-          moved = value
-          {% for iv in t.instance_vars %}
-            {% if iv.type == ::String %}
-              pointerof(moved.@{{iv.name}}).value = RisScopeMove.text(mark, moved.@{{iv.name}})
-            {% end %}
-          {% end %}
-          return moved
-        end
+      {% elsif t.struct? && !t.union? %}
+        return __iyi_text_move(mark, value) if value.is_a?({{t}})
       {% end %}
     {% end %}
     __iyi_scope_reset(mark)
@@ -2603,6 +2687,79 @@ module RisScopeMove
     __iyi_scope_reset(boundary(mark, size))
     RisRegion.result_moved(size)
     String.new(Pointer(UInt8).new(mark.cursor), value.bytesize)
+  end
+
+  # The Strings at *fields* moved down as `text` moves one: those in
+  # the scratch go one after another from the mark, the scratch is then
+  # released. Strings that overlap, or that do not fit, keep the scratch
+  # (the caller's scope frees it).
+  def self.texts(mark : RisScopeMark, fields : Pointer(Pointer(String)), count : Int32) : Nil
+    limit = IyiHeap.read64(mark.region &+ RisRegion::OFF_CURSOR)
+    total = 0_u64
+    moving = 0
+    i = 0
+    while i < count
+      text = fields[i].value
+      if text.bytesize > 0 && scratch?(mark, text.to_unsafe.address)
+        total = total &+ text.bytesize.to_u64
+        moving += 1
+      end
+      i += 1
+    end
+    if moving == 0
+      __iyi_scope_reset(mark)
+      return
+    end
+    return unless room?(mark, total)
+    # Overlapping texts would be copied over each other: keep them.
+    i = 0
+    while i < count
+      a = fields[i].value
+      j = i + 1
+      while j < count
+        b = fields[j].value
+        if a.bytesize > 0 && b.bytesize > 0 &&
+           a.to_unsafe.address < b.to_unsafe.address &+ b.bytesize.to_u64 &&
+           b.to_unsafe.address < a.to_unsafe.address &+ a.bytesize.to_u64
+          return
+        end
+        j += 1
+      end
+      i += 1
+    end
+    cursor = mark.cursor
+    # First the texts on the marked mapping, lowest first, each copied
+    # down to where the one before ended; then those elsewhere.
+    pass = 0
+    while pass < 2
+      done = 0_u64
+      while true
+        best = -1
+        best_at = 0_u64
+        i = 0
+        while i < count
+          text = fields[i].value
+          at = text.to_unsafe.address
+          here = at >= mark.cursor && at < limit
+          if text.bytesize > 0 && at >= done &&
+             scratch?(mark, at) && (pass == 0 ? here : !here) &&
+             (best < 0 || at < best_at)
+            best = i
+            best_at = at
+          end
+          i += 1
+        end
+        break if best < 0
+        size = fields[best].value.bytesize
+        LibTapeCopy.memmove(Pointer(UInt8).new(cursor), Pointer(UInt8).new(best_at), size.to_u64, false)
+        fields[best].value = String.new(Pointer(UInt8).new(cursor), size)
+        cursor = cursor &+ size.to_u64
+        done = best_at &+ 1_u64
+      end
+      pass += 1
+    end
+    __iyi_scope_reset(boundary(mark, total))
+    RisRegion.result_moved(total)
   end
 
   def self.array(mark : RisScopeMark, value : T) : T forall T

@@ -1529,10 +1529,16 @@ class Iyi::TapeShrinkChecker
     if t.is_a?(UnionType)
       return t.union_types.all? { |m|
         m = m.remove_typedef
-        type_name(m) == "String" || one_text_struct?(m) || !TapeChecker.tape_in(@program, m)
+        type_name(m) == "String" || one_text_struct?(m) || flat_array?(m) || !TapeChecker.tape_in(@program, m)
       }
     end
-    type_name(t) == "String" || one_text_struct?(t)
+    type_name(t) == "String" || one_text_struct?(t) || flat_array?(t)
+  end
+
+  # An Array of plain values: `__iyi_scope_result` moves it down whole.
+  private def flat_array?(t : Type) : Bool
+    type_name(t).starts_with?("Array(") && t.is_a?(GenericClassInstanceType) &&
+      t.type_vars["T"]?.try { |v| (vt = v.as?(Var).try(&.type?)) && !TapeChecker.tape_in(@program, vt.remove_typedef) } == true
   end
 
   # A body whose last expression is a `return`: its value is a return's,
@@ -1545,8 +1551,8 @@ class Iyi::TapeShrinkChecker
     node.is_a?(Return) || !!node.type?.try(&.no_return?)
   end
 
-  # A struct whose one tape field is a String and whose others are plain
-  # numbers, booleans or enums: `__iyi_scope_result` moves its String
+  # A struct whose tape fields are Strings and whose others are plain
+  # numbers, booleans or enums: `__iyi_scope_result` moves its Strings
   # down as a String result's (an error and its sentence).
   private def one_text_struct?(type : Type) : Bool
     return false unless type.struct? && type.is_a?(InstanceVarContainer)
@@ -1560,14 +1566,14 @@ class Iyi::TapeShrinkChecker
         return false
       end
     end
-    texts == 1
+    texts >= 1
   end
 
   private def union_with_text?(type : Type?) : Bool
     type = type.try(&.remove_typedef)
     type.is_a?(UnionType) && type.union_types.any? { |t|
       t = t.remove_typedef
-      type_name(t) == "String" || one_text_struct?(t)
+      type_name(t) == "String" || one_text_struct?(t) || flat_array?(t)
     }
   end
 
