@@ -459,8 +459,16 @@ pub struct IyiSocket
   # The address family, the platform's number for it: an accepted
   # connection is its listener's, and on Windows the socket `AcceptEx`
   # fills in has to be made in it.
-  def initialize(fd : Int32, family : Int32 = AF_INET,
-                 task_owned : Bool = false)
+  # Its state on the program's storage: made in any scope, it outlives
+  # it, so a def may answer it after other work.
+  def initialize(fd : Int32, family : Int32 = AF_INET)
+    @state = Pointer(State).new(RisRegion.program_bytes(sizeof(State).to_u64))
+    @state.value = State.new(fd, family)
+  end
+
+  # A task's own socket (*task_owned*): its state on the running tape,
+  # released with the task, so it is made in the task's scope.
+  def initialize(fd : Int32, family : Int32, task_owned : Bool)
     address = task_owned ? RisRegion.tape_bytes(sizeof(State).to_u64) :
       RisRegion.program_bytes(sizeof(State).to_u64)
     @state = Pointer(State).new(address)
@@ -608,12 +616,26 @@ pub struct IyiSocket
     port : Int32,
     timeout_ms : Int32 = -1,
   ) : IyiSocket | Cancelled | SocketError
+    # A choice of two calls, so what fails is said in the caller's scope.
+    IyiSocket.local_address?(address, timeout_ms) ? race(address, port, loopback, timeout_ms) : connect_to(IyiSocket.packed(address, port), IyiSocket.family_of(address), endpoint(address, port), timeout_ms)
+  end
+
+  # Whether *address* is `localhost`; a name or a negative timeout is
+  # the program's mistake, and refused.
+  def self.local_address?(address : String, timeout_ms : Int32) : ::Bool
     raise "negative timeout: #{timeout_ms}" if timeout_ms < -1
     raise "#{address.inspect} is a name, not an address: connect(host, port) looks it up" if named?(address)
-    return race(address, port, loopback, timeout_ms) if localhost?(address)
-    addr = ""
-    family = sockaddr(address, port, addr)
-    connect_to(addr, family, endpoint(address, port), timeout_ms)
+    localhost?(address)
+  end
+
+  # *address* and *port* packed as the OS takes them.
+  def self.packed(address : String, port : Int32) : String
+    String.build(32) { |into| sockaddr(address, port, into) }
+  end
+
+  # The family *address* is in: IPv6 when bracketed or with a colon.
+  def self.family_of(address : String) : Int32
+    address.includes?(":") ? AF_INET6 : AF_INET
   end
 
   # The same, with a host name resolved by *resolver*: name servers, a
@@ -643,12 +665,25 @@ pub struct IyiSocket
   private def self.connect_named(host : String, port : Int32, resolver : Resolver, timeout_ms : Int32) : IyiSocket | Cancelled | SocketError
     # The port is refused before the name is asked about, as it is for an
     # address: a port that is not one is the program's mistake whatever
-    # the name turns out to be.
+    # the name turns out to be. A choice of two calls, so the socket or
+    # the failure is made in the caller's scope.
+    IyiSocket.found?(found = resolver.resolve(IyiSocket.port_checked(host, port))) ? race(host, port, attempt_order(found.as(Array(IPAddress))), timeout_ms) : IyiSocket.not_found(host, found)
+  end
+
+  # *host*, its *port* checked.
+  def self.port_checked(host : String, port : Int32) : String
     raise "port #{port} is not a port: 0 to 65535" if port < 0 || port > 65535
-    found = resolver.resolve(host)
-    return found if found.is_a?(Cancelled)
+    host
+  end
+
+  def self.found?(found : Array(IPAddress) | DnsError | Cancelled) : ::Bool
+    found.is_a?(Array(IPAddress))
+  end
+
+  # Why *host* has no address to connect to.
+  def self.not_found(host : String, found : Array(IPAddress) | DnsError | Cancelled) : Cancelled | SocketError
     return SocketError.new("resolve #{host}", 0, found) if found.is_a?(DnsError)
-    race(host, port, attempt_order(found), timeout_ms)
+    Cancelled.new
   end
 
   # What `localhost` stands for, in the order `connect` tries it.
@@ -713,12 +748,9 @@ pub struct IyiSocket
   # One address of *host*'s, connected to: a failure names the host and
   # the address, `cannot connect to example.com:443 (192.0.2.1): ...`.
   private def self.attempt(host : String, port : Int32, address : IPAddress, ms : Int32) : IyiSocket | Cancelled | SocketError
-    peer = "#{endpoint(host, port)} (#{address})"
-    if address.is_a?(IPv4Address)
-      connect_to(make_sockaddr_in(address, port), AF_INET, peer, ms)
-    else
-      connect_to(make_sockaddr_in6(address, port), AF_INET6, peer, ms)
-    end
+    # A choice of two calls: the failure's sentence is made in the
+    # caller's scope, where it is answered.
+    address.is_a?(IPv4Address) ? connect_to(make_sockaddr_in(address, port), AF_INET, "#{endpoint(host, port)} (#{address})", ms) : connect_to(make_sockaddr_in6(address.as(IPv6Address), port), AF_INET6, "#{endpoint(host, port)} (#{address})", ms)
   end
 
   {% if @top_level.has_constant?("IyiScheduler") %}
@@ -744,12 +776,24 @@ pub struct IyiSocket
     # took 19.3 us through `localhost`, raced, and 16.2 us to 127.0.0.1,
     # not (best of eight rounds of 1,000, release). A name with one
     # address is not raced, and pays nothing.
-    private def self.race(host : String, port : Int32, addresses : Array(IPAddress), timeout_ms : Int32) : IyiSocket | Cancelled | SocketError
+    {% if flag?(:linux) %}
+      # A choice of two calls: the socket or the failure is made in the
+      # caller's scope.
+      private def self.race(host : String, port : Int32, addresses : Array(IPAddress), timeout_ms : Int32) : IyiSocket | Cancelled | SocketError
+        IyiSocket.one_address?(port, addresses) ? attempt(host, port, addresses[0], timeout_ms) : race_polled(host, port, addresses, timeout_ms)
+      end
+    {% end %}
+
+    # Whether *addresses* is one, so there is no race; a port that is not
+    # one is refused.
+    def self.one_address?(port : Int32, addresses : Array(IPAddress)) : ::Bool
+      raise "port #{port} is not a port: 0 to 65535" if port < 0 || port > 65535
+      addresses.size == 1
+    end
+
+    private def self.race_tasks(host : String, port : Int32, addresses : Array(IPAddress), timeout_ms : Int32) : IyiSocket | Cancelled | SocketError
       raise "port #{port} is not a port: 0 to 65535" if port < 0 || port > 65535
       return attempt(host, port, addresses[0], timeout_ms) if addresses.size == 1
-      {% if flag?(:linux) %}
-        return race_polled(host, port, addresses, timeout_ms)
-      {% end %}
       count = addresses.size
       outcomes = Array(IyiSocket | Cancelled | SocketError | Nil).new(count, nil)
       tasks = Array(IyiTask(Attempt)).new(count)
@@ -910,7 +954,6 @@ pub struct IyiSocket
       # an interest of *poll* under *index*, or how it ended at once.
       @[TapeUnsafe("connect(2) reads the packed address during the call")]
       private def self.launch(host : String, port : Int32, address : IPAddress, poll : Int32, index : Int32) : Int32 | IyiSocket | SocketError
-        peer = "#{endpoint(host, port)} (#{address})"
         family = address.is_a?(IPv4Address) ? AF_INET : AF_INET6
         addr = address.is_a?(IPv4Address) ? make_sockaddr_in(address, port) :
           make_sockaddr_in6(address.as(IPv6Address), port)
@@ -924,7 +967,7 @@ pub struct IyiSocket
         unless __sys_in_progress?(res)
           code = __sys_code(res.to_i64)
           __sys_close(fd)
-          return SocketError.new("connect to #{peer}", code)
+          return SocketError.new("connect", code)
         end
         # EPOLLOUT (4); EPOLLERR and EPOLLHUP come unasked. The data is
         # the attempt's index.
@@ -935,7 +978,7 @@ pub struct IyiSocket
         added = __iyi_conc_syscall6(IYI_SYS_EPOLL_CTL, poll.to_i64, 1_i64, fd.to_i64, event.address.to_i64, 0_i64, 0_i64)
         if added < 0
           __sys_close(fd)
-          return SocketError.new("watch the connect to #{peer}", __sys_code(added))
+          return SocketError.new("watch the connect", __sys_code(added))
         end
         fd
       end
@@ -968,7 +1011,9 @@ pub struct IyiSocket
             outcomes[index] = IyiSocket.new(fd, family)
           else
             __sys_close(fd)
-            outcomes[index] = SocketError.new("connect to #{endpoint(host, port)} (#{address})", code)
+            # Only its code is read (`every_address_failed`): no sentence
+            # made in the round.
+            outcomes[index] = SocketError.new("connect", code)
           end
         end
         ended
@@ -1066,25 +1111,28 @@ pub struct IyiSocket
   # attempt failed on its own; the code is then a timeout's, and the first
   # attempt's otherwise, the most preferred address's failure.
   private def self.every_address_failed(host : String, port : Int32, addresses : Array(IPAddress), outcomes : Array(IyiSocket | Cancelled | SocketError | Nil), started : Int32, ran_out : Int32) : SocketError
-    parts = [] of String
+    # Grown in place: a round's text is freed with the round.
+    tried = ""
+    tried << "timed out after " << ran_out << " ms: " if ran_out >= 0
     code = 0
     index = 0
     while index < addresses.size
       outcome = outcomes[index]
-      said = if index >= started
-               "not tried"
-             elsif outcome.is_a?(SocketError)
-               outcome.reason
-             else
-               "timed out"
-             end
+      tried << "; " if index > 0
+      tried << endpoint(addresses[index].to_s, port) << " "
+      if index >= started
+        tried << "not tried"
+      elsif outcome.is_a?(SocketError)
+        tried << outcome.reason
+      else
+        tried << "timed out"
+      end
       code = outcome.code if index == 0 && outcome.is_a?(SocketError)
-      parts << "#{endpoint(addresses[index].to_s, port)} #{said}"
       index = index + 1
     end
     operation = "connect to #{endpoint(host, port)}"
-    return SocketError.every_address(operation, code, parts.join("; ")) if ran_out < 0
-    SocketError.every_address(operation, SocketError.timed_out(operation).code, "timed out after #{ran_out} ms: #{parts.join("; ")}")
+    code = SocketError.timed_out(operation).code if ran_out >= 0
+    SocketError.every_address(operation, code, tried)
   end
 
   # Every address *host* stands for, by the machine's resolver, in the
@@ -3668,14 +3716,17 @@ pub class Resolver
 
   # The machine's resolver, read afresh each time: a configuration the
   # network manager rewrote is the one the next lookup uses.
-  def self.system : Resolver
-    {% if flag?(:win32) %}
+  {% if flag?(:win32) %}
+    def self.system : Resolver
       root = __iyi_win_env_get("SystemRoot".to_unsafe, 10) || "C:\\Windows"
       from_config(IyiSocket.__sys_dns_config, read_text("#{root}\\System32\\drivers\\etc\\hosts") || "")
-    {% else %}
+    end
+  {% else %}
+    # One call: the resolver is made in the caller's scope.
+    def self.system : Resolver
       from_files(RESOLV_CONF, HOSTS)
-    {% end %}
-  end
+    end
+  {% end %}
 
   # The servers asked when none is configured: glibc asks the loopback
   # address; on Linux the stub systemd-resolved listens on, 127.0.0.53,

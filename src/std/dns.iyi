@@ -1332,11 +1332,20 @@ pub struct ResolvConf
   # glibc ignores it: a file other programs read too is not this module's
   # to refuse.
   def self.parse(text : String) : ResolvConf
-    nameservers = [] of String
-    search = [] of String
-    ndots = 1
-    timeout_ms = 5000
-    attempts = 2
+    new(text)
+  end
+
+  # Read by the constructor, which builds in the caller's scope: the
+  # names are views of *text*, the lists refilled rather than made anew
+  # in a line's block.
+  def initialize(text : String)
+    @nameservers = [] of String
+    @search = [] of String
+    @ndots = 1
+    @timeout_ms = 5000
+    @attempts = 2
+    nameservers = @nameservers
+    search = @search
     text.split('\n').each do |line|
       words = DnsText.words(line)
       next if words.empty?
@@ -1344,28 +1353,29 @@ pub struct ResolvConf
       when "nameserver"
         nameservers << words[1] if words.size > 1 && nameservers.size < MAX_NAMESERVERS
       when "domain"
-        search = words.size > 1 ? [words[1]] : [] of String
+        search.clear
+        search << words[1] if words.size > 1
       when "search"
-        search = words[1, words.size - 1].to_a
+        search.clear
+        (1...words.size).each { |at| search << words[at] }
       when "options"
         index = 1
         while index < words.size
           option = words[index]
           if option.starts_with?("ndots:")
             value = option[6, option.bytesize - 6].to_i?
-            ndots = value < 0 ? 0 : (value > 15 ? 15 : value) if value.is_a?(Int32)
+            @ndots = value < 0 ? 0 : (value > 15 ? 15 : value) if value.is_a?(Int32)
           elsif option.starts_with?("timeout:")
             value = option[8, option.bytesize - 8].to_i?
-            timeout_ms = (value < 1 ? 1 : (value > 30 ? 30 : value)) * 1000 if value.is_a?(Int32)
+            @timeout_ms = (value < 1 ? 1 : (value > 30 ? 30 : value)) * 1000 if value.is_a?(Int32)
           elsif option.starts_with?("attempts:")
             value = option[9, option.bytesize - 9].to_i?
-            attempts = value < 1 ? 1 : (value > 5 ? 5 : value) if value.is_a?(Int32)
+            @attempts = value < 1 ? 1 : (value > 5 ? 5 : value) if value.is_a?(Int32)
           end
           index = index + 1
         end
       end
     end
-    ResolvConf.new(nameservers, search, ndots, timeout_ms, attempts)
   end
 end
 
