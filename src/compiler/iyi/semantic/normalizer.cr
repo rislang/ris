@@ -901,7 +901,15 @@ module Iyi
       Expressions.new(lines).at(node)
     end
 
+    # A spawn's block runs on the task's own tape, which the task frees
+    # when it ends, after its value is copied to the spawner: it is not
+    # a scope of its own (a non-flat value could not leave one).
+    @ris_task_blocks = Set(UInt64).new
+
     def transform(node : Call)
+      if {"spawn", "spawn_parallel"}.includes?(node.name) && (block = node.block)
+        @ris_task_blocks << block.object_id
+      end
       if node.name == "new" && node.args.size == 1 &&
          (obj = node.obj).is_a?(Path) && obj.names == ["Hash"] &&
          ris_program_code?(node)
@@ -1886,8 +1894,9 @@ module Iyi
         end
         node.body = Expressions.new(slots + [node.body]).at(node) unless slots.empty?
       end
+      task = @ris_task_blocks.includes?(node.object_id)
       node = super
-      TapeScopeChecker.mark(program, node) if node.is_a?(Block) && @macro_code == 0
+      TapeScopeChecker.mark(program, node) if node.is_a?(Block) && @macro_code == 0 && !task
 
       unpacks = node.unpacks
       return node unless unpacks

@@ -3381,10 +3381,23 @@ end
 struct SlicePool(T)
   @data : Array(T)
   @free : Array(String::Span)
+  # The state blocks of the lists over this pool (`SlicePool::List`),
+  # in the pool's own reservation: growth never moves them, and they live
+  # as long as the pool, not the scope that made a list.
+  @words : Array(UInt64)
 
   def initialize(capacity : Int32 | Int64 = 4)
     @data = Array(T).new(capacity, storage: RisPoolStorage.new)
     @free = Array(String::Span).new
+    @words = Array(UInt64).new(0, storage: RisPoolStorage.new)
+  end
+
+  # *count* zeroed words of this pool's own, for a list's state: their
+  # address.
+  def state_words(count : Int32) : UInt64
+    at = @words.size
+    count.times { @words << 0_u64 }
+    @words.to_unsafe.address &+ (at.to_u64 &* 8_u64)
   end
 
   def size : Int32
@@ -3686,8 +3699,9 @@ struct SlicePool::List(T)
   @state : Pointer(State(T))
 
   def initialize(pool : SlicePool(T?))
-    @state = Pointer(State(T)).new(
-      RisRegion.tape_bytes(sizeof(State(T)).to_u64))
+    # In the pool's own words: a list made in a loop round or a def lives
+    # as long as its pool.
+    @state = Pointer(State(T)).new(pool.state_words(((sizeof(State(T)) + 7) // 8).to_i32))
     @state.value = State(T).new(pool)
   end
 

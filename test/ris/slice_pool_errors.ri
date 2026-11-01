@@ -33,4 +33,5 @@ tape do
   when "negative_realloc"
     pool.realloc_slice(run, -1)
   end
+  nil
 end

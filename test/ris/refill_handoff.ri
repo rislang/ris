@@ -26,10 +26,12 @@ struct Table
     @row.clear
   end
 
-  def take : Array(Int32)
-    batch = @row
-    @row = Array(Int32).new
-    batch
+  # The row handed to the caller's Array, then refilled: a new Array made
+  # here would be freed when the def ends.
+  def take(into : Array(Int32)) : Array(Int32)
+    @row.each { |value| into << value }
+    @row.clear
+    into
   end
 end
 
@@ -41,6 +43,6 @@ tape do
   table.add(3)
   table.end_row
   table.add(4)
-  last = table.take
+  last = table.take(Array(Int32).new)
   puts "#{table.rows.size} #{table.rows[0].size} #{table.rows[1][0]} #{last[0]}"
 end

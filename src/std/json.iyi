@@ -58,6 +58,11 @@ class StringBuffer
     @writer.push(byte)
   end
 
+  # What it holds, onto the end of *into*.
+  def write_to(into : String::Builder) : Nil
+    into << @writer.finish
+  end
+
   def append(str : String) : Nil
     @writer.append(str.as_tape)
   end
@@ -893,9 +898,26 @@ struct Lexer
   end
 
   private def fail(reason : String, line : Int32, col : Int32) : Nil
-    @error = "#{reason} at line #{line}, column #{col}" if @error.nil?
+    if @error.nil?
+      said = "#{reason} at line #{line}, column #{col}"
+      # Kept in the lexer's own text: a def's text is freed when it ends.
+      from = @error_text.bytesize
+      @error_text << said
+      @error = @error_text.finish[from, said.bytesize]
+    end
     @token.kind = TokenKind::Error
     nil
+  end
+
+  @error_text : String::Builder = String::Builder.new(128)
+
+  # Escaped strings read, which their tokens view.
+  @kept_text : String::Builder = String::Builder.new(256)
+
+  private def keep_text(buffer : StringBuffer) : String
+    from = @kept_text.bytesize
+    buffer.write_to(@kept_text)
+    @kept_text.finish[from, @kept_text.bytesize - from]
   end
 
   private def current_byte(input : String) : UInt8
@@ -1078,7 +1100,9 @@ struct Lexer
       if b == 34_u8 # '"'
         advance(input)
         set_token(TokenKind::String, line, col)
-        @token.string_value = buffer.to_s
+        # Kept in the lexer's own text, which lives as long as it: the
+        # buffer is refilled for the next string.
+        @token.string_value = keep_text(buffer)
         return
       elsif b == 92_u8 # '\\'
         esc_col = @column_number
@@ -2940,10 +2964,16 @@ pub struct DocumentParser
   private def fail(reason : String, line : Int32, col : Int32) : Nil
     if @error.nil?
       lexer_error = @lexer.error
-      @error = lexer_error.nil? ? "#{reason} at line #{line}, column #{col}" : lexer_error
+      said = lexer_error.nil? ? "#{reason} at line #{line}, column #{col}" : lexer_error
+      # Kept in the parser's own text: a def's text is freed when it ends.
+      from = @error_text.bytesize
+      @error_text << said
+      @error = @error_text.finish[from, said.bytesize]
     end
     nil
   end
+
+  @error_text : String::Builder = String::Builder.new(128)
 
   private def fail(reason : String) : Nil
     fail(reason, token.line_number, token.column_number)
@@ -3049,9 +3079,9 @@ pub struct DocumentParser
     return unless nest
     at = @tree.open(Node.new(Document::Kind::Object.value | flags, key_at, key_size, 0_i64))
     @lexer.next_token(@input) # '{'
-    # Past this many keys, the object's are looked up in a hash rather
-    # than compared one by one.
-    seen = nil.as(Hash(String, Bool)?)
+    # Past this many keys, the object's are looked up by a hash of their
+    # text in the parser's own table rather than compared one by one; a
+    # hash seen before is checked by comparing.
     count = 0
     if token.kind == TokenKind::EndObject
       @lexer.next_token(@input)
@@ -3061,22 +3091,22 @@ pub struct DocumentParser
         name_at = token.raw_start
         name_size = token.raw_size
         name_flags = token.escaped ? Node::ESCAPED_KEY : 0
-        if (set = seen)
-          name = key_s(name_at, name_size, name_flags)
-          return fail("duplicate key '#{name}'") if set.has_key?(name)
-          set[name] = true
+        if count >= 32
+          h = key_hash(at, name_at, name_size, name_flags)
+          if @key_hashes.has_key?(h) && duplicate?(at, name_at, name_size, name_flags)
+            return fail("duplicate key '#{key_s(name_at, name_size, name_flags)}'")
+          end
+          @key_hashes[h] = true
         else
           return fail("duplicate key '#{key_s(name_at, name_size, name_flags)}'") if duplicate?(at, name_at, name_size, name_flags)
-          if count == 32
-            set = {} of String => Bool
+          if count == 31
             child = at + 1
             while child < @tree.size
               node = @tree[child]
-              set[key_s(node.key_at, node.key_size, node.flags)] = true
+              @key_hashes[key_hash(at, node.key_at, node.key_size, node.flags)] = true
               child = @tree.stop(child)
             end
-            set[key_s(name_at, name_size, name_flags)] = true
-            seen = set
+            @key_hashes[key_hash(at, name_at, name_size, name_flags)] = true
           end
         end
         count = count + 1
@@ -3105,6 +3135,19 @@ pub struct DocumentParser
   # The key at *at* decoded into a String.
   private def key_s(at : Int32, size : Int32, flags : Int32) : String
     JSON.decoded(text(at, size), (flags & Node::ESCAPED_KEY) != 0)
+  end
+
+  # The keys of large objects, by `key_hash`: plain numbers, so a round
+  # may add to it.
+  @key_hashes : Hash(UInt64, Bool) = {} of UInt64 => Bool
+
+  # FNV-1a of the decoded key at *key_at* in the object at *object*.
+  private def key_hash(object : Int32, key_at : Int32, key_size : Int32, flags : Int32) : UInt64
+    h = 14695981039346656037_u64 ^ object.to_u64
+    key_s(key_at, key_size, flags).each_byte do |byte|
+      h = (h ^ byte.to_u64) &* 1099511628211_u64
+    end
+    h
   end
 
   # Whether the object opened at *at* already has a field with this key.
@@ -3159,8 +3202,14 @@ pub struct JSON
   # The document in *bytes* read onto the caller's tape, its strings views
   # into *bytes*; panics with the line and column of the first thing it
   # refuses, as `parse(String)` does.
+  # One call: the parser is made in the caller's scope, which the
+  # document lives in.
   def self.document(bytes : String) : Document
-    parser = DocumentParser.new(bytes)
+    JSON.parsed(DocumentParser.new(bytes))
+  end
+
+  # *parser*'s document; panics with what it refuses.
+  def self.parsed(parser : DocumentParser) : Document
     parser.parse
     failure = parser.error
     raise failure unless failure.nil?
@@ -3169,7 +3218,11 @@ pub struct JSON
 
   # The document in *bytes* on the tape, or `nil` when it is not one.
   def self.document?(bytes : String) : Document?
-    parser = DocumentParser.new(bytes)
+    JSON.parsed?(DocumentParser.new(bytes))
+  end
+
+  # *parser*'s document, or nil when it refuses the bytes.
+  def self.parsed?(parser : DocumentParser) : Document?
     parser.parse
     return nil unless parser.error.nil?
     parser.document

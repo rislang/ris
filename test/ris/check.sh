@@ -1712,6 +1712,8 @@ if [ "$?" -eq 0 ] &&
 else
   echo "FAILED   side_spares: $out"; status=1
 fi
+# A SlicePool's list states take a reservation of their own: one more
+# mapping, made once, not per round.
 out=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 "$RIS" run \
   test/ris/query_scope.ri 2>&1)
 code=$?
@@ -1719,7 +1721,7 @@ mappings=$(sed -n \
   's/^ris tape:.*scopes, \([0-9]*\) mappings made.*/\1/p' <<<"$out")
 if [ "$code" -eq 0 ] &&
     grep -qF 'PASS: query scopes reuse reservations' <<<"$out" &&
-    [ -n "$mappings" ] && [ "$mappings" -le 8 ] &&
+    [ -n "$mappings" ] && [ "$mappings" -le 9 ] &&
     grep -qF '0 side regions (0 transfer bytes copied)' <<<"$out" &&
     grep -qF '0 growth moves' <<<"$out" &&
     grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then

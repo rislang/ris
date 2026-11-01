@@ -70,26 +70,28 @@ def name_of(seed : UInt64) : String
   end
 end
 
-# A stock keeping unit: two letters and four digits.
-def sku_of(seed : UInt64) : String
+# A stock keeping unit: two letters and four digits, written onto the
+# end of *into*: a view of it.
+def sku_of(seed : UInt64, into : String::Builder) : String
+  from = into.bytesize
   r = xs_next(seed)
-  String.build(8) do |s|
-    s.push((65_i64 + xs_mod(r, 26_i64)).to_u8)
-    s.push((65_i64 + xs_mod(r >> 8, 26_i64)).to_u8)
-    i = 0
-    while i < 4
-      r = xs_next(r)
-      s.push((48_i64 + xs_mod(r, 10_i64)).to_u8)
-      i += 1
-    end
+  into.push((65_i64 + xs_mod(r, 26_i64)).to_u8)
+  into.push((65_i64 + xs_mod(r >> 8, 26_i64)).to_u8)
+  i = 0
+  while i < 4
+    r = xs_next(r)
+    into.push((48_i64 + xs_mod(r, 10_i64)).to_u8)
+    i += 1
   end
+  into.finish[from, 6]
 end
 
-def make_items(seed : UInt64, n : Int64) : Array(Item)
-  r = seed
+# One call, so the items are made in the caller's scope; each one's SKU
+# goes into the caller's *skus*, which it views.
+def make_items(seed : UInt64, n : Int64, skus : String::Builder) : Array(Item)
   Array(Item).new(n.to_i32) do
-    r = xs_next(r)
-    Item.new(sku_of(r), 1_i64 + xs_mod(r >> 8, 5_i64), 100_i64 + xs_mod(r >> 16, 99900_i64))
+    seed = xs_next(seed)
+    Item.new(sku_of(seed, skus), 1_i64 + xs_mod(seed >> 8, 5_i64), 100_i64 + xs_mod(seed >> 16, 99900_i64))
   end
 end
 
@@ -144,7 +146,8 @@ while i < N
   tape do
     r = xs_next(seed)
     n = 1_i64 + xs_mod(r, 8_i64)
-    resp = Resp.new(xs_mod(r >> 4, 1000000_i64), name_of(r >> 8), make_items(r >> 16, n))
+    skus = String::Builder.new(64)
+    resp = Resp.new(xs_mod(r >> 4, 1000000_i64), name_of(r >> 8), make_items(r >> 16, n, skus))
     out_text = render(resp)
     h = h ^ (fnv(out_text) &* 31_u64 &+ i.to_u64)
     bytes += out_text.bytesize.to_i64
