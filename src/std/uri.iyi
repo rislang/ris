@@ -168,9 +168,18 @@ pub struct Params
   # asked of text a program made.
   # Tape input returns the tape collection, with views where possible.
   def self.parse(query : String) : Params
-    params = Params.new
-    Query.parse(query).each { |key, value| params.add(key, value) }
-    params
+    new(query)
+  end
+
+  # *query*'s pairs, built by the constructor in its caller's scope: the
+  # names and values view the Query's decoded text, which lives as long.
+  def initialize(query : String)
+    @keys = [] of String
+    @values = [] of String
+    Query.parse(query).each do |key, value|
+      @keys << key
+      @values << value
+    end
   end
 
   # Encodes parameters to application/x-www-form-urlencoded string.

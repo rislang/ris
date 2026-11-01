@@ -174,19 +174,26 @@ pub struct IPv6Address
       end
       index = index + 1
     end
-    head = [] of String
-    tail = [] of String
+    text = ""
+    write_hextets(text, best, best_size)
+    text
+  end
+
+  # The hextets onto *into*, the run of zeros at *best* (none when below
+  # 0) written `::`.
+  private def write_hextets(into : String::Builder, best : Int32, best_size : Int32) : Nil
     index = 0
     while index < 8
-      if best < 0 || index < best
-        head << hextet(index).to_s(16)
-      elsif index >= best + best_size
-        tail << hextet(index).to_s(16)
+      if best >= 0 && index == best
+        into << "::"
+        index = best + best_size
+        next
       end
+      into << ":" if index > 0 && !(best >= 0 && index == best + best_size)
+      into << hextet(index).to_s(16)
       index = index + 1
     end
-    return head.join(":") if best < 0
-    "#{head.join(":")}::#{tail.join(":")}"
+    nil
   end
 end
 
@@ -588,7 +595,8 @@ pub struct IyiSocket
     raise "negative timeout: #{timeout_ms}" if timeout_ms < -1
     raise "#{address.inspect} is a name, not an address: connect(host, port) looks it up" if named?(address)
     return race(address, port, loopback, timeout_ms) if localhost?(address)
-    addr, family = sockaddr(address, port)
+    addr = ""
+    family = sockaddr(address, port, addr)
     connect_to(addr, family, endpoint(address, port), timeout_ms)
   end
 
@@ -1441,7 +1449,8 @@ pub struct IyiSocket
     {% unless flag?(:linux) || flag?(:darwin) %}
       return SocketError.new("SO_REUSEPORT unsupported", 0) if reuse_port
     {% end %}
-    addr, family = sockaddr(host, port)
+    addr = ""
+    family = sockaddr(host, port, addr)
     fd = __sys_socket(family)
     return SocketError.new("socket", __sys_code(fd.to_i64)) if fd < 0
     __sys_set_reuseaddr(fd)
@@ -1843,19 +1852,25 @@ pub struct IyiSocket
     -1
   end
 
-  # A host and port as the address a call takes, and its family: an IPv6
-  # literal bare or in brackets, anything else IPv4.
+  # A host and port as the address a call takes, onto *into*; its
+  # family: an IPv6 literal bare or in brackets, anything else IPv4.
   def self.sockaddr(
     host : String,
     port : Int32,
-  ) : Tuple(String, Int32)
+    into : String::Builder,
+  ) : Int32
     size = host.bytesize
     if size >= 2 && host.as_tape[0].chr == '[' &&
        host.as_tape[size - 1].chr == ']'
-      return {address_bytes(parse_ipv6(host[1, size - 2]), port), AF_INET6}
+      into << address_bytes(parse_ipv6(host[1, size - 2]), port)
+      return AF_INET6
     end
-    return {address_bytes(parse_ipv6(host), port), AF_INET6} if host.includes?(":")
-    {address_bytes(parse_ip(host), port), AF_INET}
+    if host.includes?(":")
+      into << address_bytes(parse_ipv6(host), port)
+      return AF_INET6
+    end
+    into << address_bytes(parse_ip(host), port)
+    AF_INET
   end
 
   # Packed addresses belong to the caller's tape, through the OS call.
@@ -3466,34 +3481,51 @@ pub class Resolver
   getter plaintext_fallback : Bool = false
 
   @servers : Array(NameServer)
+  # The servers' address bytes and labels, which each NameServer views.
+  @server_text : String::Builder = String::Builder.new(256)
 
   # *nameservers* are addresses, each with an optional port:
   # `"192.0.2.1"`, `"192.0.2.1:5353"`, `"2001:db8::1"`,
   # `"[2001:db8::1]:5353"`. One that is not is refused here, by name: it is
   # the program's own mistake. None at all is a resolver that reads only
   # *hosts*.
+  #
+  # *upstreams*, when given, are asked instead of the plaintext servers,
+  # which are asked only with *plaintext_fallback* (see `encrypted`).
   def initialize(nameservers : Array(String), @search : Array(String) = [] of String, @ndots : Int32 = 1,
-                 @timeout_ms : Int32 = 5000, @attempts : Int32 = 2, @hosts : String = "")
+                 @timeout_ms : Int32 = 5000, @attempts : Int32 = 2, @hosts : String = "",
+                 upstreams : Array(DnsUpstream) = [] of DnsUpstream, @plaintext_fallback : Bool = false)
     raise "a resolver's timeout is at least 1 ms, not #{timeout_ms}" if timeout_ms < 1
     raise "a resolver asks at least once, not #{attempts} times" if attempts < 1
     raise "a resolver's ndots is not negative: #{ndots}" if ndots < 0
     @nameservers = nameservers
+    @upstreams = upstreams.dup
     @servers = [] of NameServer
     nameservers.each do |text|
-      server = Resolver.server(text)
+      server = Resolver.server(text, @server_text)
       raise server if server.is_a?(String)
       @servers << server
     end
+  end
+
+  # A resolver from a parsed resolv.conf and a hosts file's text: see
+  # `from_config`.
+  def initialize(config : ResolvConf, hosts : String)
+    initialize(Resolver.usable(config), config.search, config.ndots, config.timeout_ms, config.attempts, hosts)
   end
 
   # This resolver asking *upstreams* instead of its plaintext servers,
   # which are asked only with *plaintext_fallback*, and then only when no
   # upstream could be (see the class).
   def encrypted(upstreams : Array(DnsUpstream), plaintext_fallback : Bool = false) : Resolver
+    Resolver.new(@nameservers, @search, @ndots, @timeout_ms, @attempts, @hosts,
+      Resolver.some(upstreams), plaintext_fallback)
+  end
+
+  # *upstreams*, which an encrypted resolver needs at least one of.
+  def self.some(upstreams : Array(DnsUpstream)) : Array(DnsUpstream)
     raise "an encrypted resolver asks at least one upstream" if upstreams.empty?
-    made = Resolver.new(@nameservers, @search, @ndots, @timeout_ms, @attempts, @hosts)
-    made.ask_upstreams_instead(upstreams.dup, plaintext_fallback)
-    made
+    upstreams
   end
 
   def encrypted(upstream : DnsUpstream, plaintext_fallback : Bool = false) : Resolver
@@ -3510,11 +3542,6 @@ pub class Resolver
     system.encrypted(upstream, plaintext_fallback)
   end
 
-  protected def ask_upstreams_instead(upstreams : Array(DnsUpstream), plaintext_fallback : Bool) : Nil
-    @upstreams = upstreams
-    @plaintext_fallback = plaintext_fallback
-  end
-
   # Every upstream's connections closed.
   def close : Nil
     @upstreams.each { |upstream| upstream.close }
@@ -3525,10 +3552,21 @@ pub class Resolver
   # zone, a typo - is skipped as glibc skips one; with none left, the
   # servers a machine without a configuration is assumed to run.
   def self.from_config(config : ResolvConf, hosts : String = "") : Resolver
+    Resolver.new(config, hosts)
+  end
+
+  # *config*'s name servers this resolver can use, or the fallback ones.
+  def self.usable(config : ResolvConf) : Array(String)
     usable = [] of String
-    config.nameservers.each { |text| usable << text if Resolver.server(text).is_a?(NameServer) }
-    usable = fallback if usable.empty?
-    Resolver.new(usable, config.search, config.ndots, config.timeout_ms, config.attempts, hosts)
+    scratch = ""
+    config.nameservers.each { |text| usable << text if Resolver.usable?(text, scratch) }
+    return fallback if usable.empty?
+    usable
+  end
+
+  # Whether *text* is a name server address; its bytes go to *scratch*.
+  def self.usable?(text : String, scratch : String::Builder) : Bool
+    Resolver.server(text, scratch).is_a?(NameServer)
   end
 
   # A resolver from a resolv.conf and a hosts file at these paths. A file
@@ -3574,9 +3612,10 @@ pub class Resolver
     io.read_failed? ? nil : text
   end
 
-  # A name server written as an address with an optional port, or the
+  # A name server written as an address with an optional port, its
+  # address bytes and label written onto *into*, which it views; or the
   # sentence saying why it is not one.
-  def self.server(text : String) : NameServer | String
+  def self.server(text : String, into : String::Builder) : NameServer | String
     host = text
     port = 53
     size = text.bytesize
@@ -3607,11 +3646,27 @@ pub class Resolver
     if host.includes?(":")
       six = IyiSocket.read_ipv6(host)
       return "not a name server address: #{six}" if six.is_a?(String)
-      return NameServer.new(IyiSocket.make_sockaddr_in6(six, port), IyiSocket::AF_INET6, "[#{host}]:#{port}")
+      at = into.bytesize
+      into << IyiSocket.make_sockaddr_in6(six, port)
+      size = into.bytesize - at
+      into << "[" << host << "]:"
+      into.append_int(port)
+      return Resolver.name_server(into.finish, at, size, IyiSocket::AF_INET6)
     end
     four = IyiSocket.read_ipv4(host)
     return "not a name server address: #{four}" if four.is_a?(String)
-    NameServer.new(IyiSocket.make_sockaddr_in(four, port), IyiSocket::AF_INET, "#{host}:#{port}")
+    at = into.bytesize
+    into << IyiSocket.make_sockaddr_in(four, port)
+    size = into.bytesize - at
+    into << host << ":"
+    into.append_int(port)
+    Resolver.name_server(into.finish, at, size, IyiSocket::AF_INET)
+  end
+
+  # The server whose address is *size* bytes of *text* from *at*, and
+  # whose label is the rest of *text*.
+  def self.name_server(text : String, at : Int32, size : Int32, family : Int32) : NameServer
+    NameServer.new(text[at, size], family, text[at + size, text.bytesize - at - size])
   end
 
   # Every address *host* stands for: see the class's comment for the

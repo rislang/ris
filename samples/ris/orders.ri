@@ -13,7 +13,7 @@ module samples/orders
 
 import std/int
 import std/text
-import std/http::{Server, ParsedHead}
+import std/http::{Server, ParsedHead, Field}
 import std/json::{JSON}
 
 N = 200000
@@ -55,7 +55,7 @@ end
 
 # The request in *bytes*, answered on the caller's tape; the answer's hash.
 def answer(bytes : String) : UInt64
-  head = Server.parse_head(bytes, 0, true)
+  head = Server.parse_head(bytes, 0, true, Array(Field).new(16))
   return 0_u64 unless head.is_a?(ParsedHead)
   size = head.content_length
   return 0_u64 unless size

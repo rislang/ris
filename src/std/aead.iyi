@@ -231,8 +231,15 @@ pub class AesGcm
   # decrypted.
   @[PointerUnsafe("the cipher core works on local blocks")]
   def open_at(nonce : String | Array::View(UInt8) | Array(UInt8), buffer : Array(UInt8), at : Int32, total : Int32, aad : String | Array::View(UInt8) | Array(UInt8)) : Int32 | AeadError
+    AeadBytes.opened(total, open_text(nonce, buffer, at, total, aad))
+  end
+
+  # What `open_at` does, answering "" or why it could not open: a flat
+  # String, which moves down (SPEC 1.5).
+  @[PointerUnsafe("the cipher core works on local blocks")]
+  private def open_text(nonce : String | Array::View(UInt8) | Array(UInt8), buffer : Array(UInt8), at : Int32, total : Int32, aad : String | Array::View(UInt8) | Array(UInt8)) : String
     AeadBytes.exactly(nonce, 12, "AesGcm: a nonce")
-    return AeadError.new("AesGcm: #{total} bytes cannot be sealed: the tag alone is 16") if total < 16
+    return "AesGcm: #{total} bytes cannot be sealed: the tag alone is 16" if total < 16
     size = total - 16
     local = uninitialized StaticArray(UInt8, 16)
     n = pointerof(local).as(Pointer(UInt8))
@@ -241,10 +248,10 @@ pub class AesGcm
     expected = pointerof(want).as(Pointer(UInt8))
     tag(n, aad, buffer, at, size, expected)
     unless AeadBytes.same_tag?(expected, buffer, at + size)
-      return AeadError.new("AesGcm: the tag does not match: the sealed bytes, the additional data, the nonce or the key is not what was sealed")
+      return "AesGcm: the tag does not match: the sealed bytes, the additional data, the nonce or the key is not what was sealed"
     end
     ctr(n, buffer, at, size)
-    size
+    ""
   end
 
   # The *size* bytes of *buffer* from *at*, XORed in place with the key
@@ -563,19 +570,26 @@ pub class ChaCha20Poly1305
   # decrypted.
   @[PointerUnsafe("the cipher core works on local blocks")]
   def open_at(nonce : String | Array::View(UInt8) | Array(UInt8), buffer : Array(UInt8), at : Int32, total : Int32, aad : String | Array::View(UInt8) | Array(UInt8)) : Int32 | AeadError
+    AeadBytes.opened(total, open_text(nonce, buffer, at, total, aad))
+  end
+
+  # What `open_at` does, answering "" or why it could not open: a flat
+  # String, which moves down (SPEC 1.5).
+  @[PointerUnsafe("the cipher core works on local blocks")]
+  private def open_text(nonce : String | Array::View(UInt8) | Array(UInt8), buffer : Array(UInt8), at : Int32, total : Int32, aad : String | Array::View(UInt8) | Array(UInt8)) : String
     words = uninitialized StaticArray(UInt32, 16)
     state = pointerof(words).as(Pointer(UInt32))
     start(state, nonce)
-    return AeadError.new("ChaCha20Poly1305: #{total} bytes cannot be sealed: the tag alone is 16") if total < 16
+    return "ChaCha20Poly1305: #{total} bytes cannot be sealed: the tag alone is 16" if total < 16
     size = total - 16
     want = uninitialized StaticArray(UInt64, 2)
     expected = pointerof(want).as(Pointer(UInt8))
     tag(state, aad, buffer, at, size, expected)
     unless AeadBytes.same_tag?(expected, buffer, at + size)
-      return AeadError.new("ChaCha20Poly1305: the tag does not match: the sealed bytes, the additional data, the nonce or the key is not what was sealed")
+      return "ChaCha20Poly1305: the tag does not match: the sealed bytes, the additional data, the nonce or the key is not what was sealed"
     end
     stream_xor(state, buffer, at, size)
-    size
+    ""
   end
 
   @[PointerUnsafe("the cipher core starts a local state")]
@@ -1599,6 +1613,13 @@ struct PolyCore
 end
 
 struct AeadBytes
+  # *total* sealed bytes opened: the plaintext's size, or the error *why*
+  # says when it is not "".
+  def self.opened(total : Int32, why : String) : Int32 | AeadError
+    return AeadError.new(why) unless why.empty?
+    total - 16
+  end
+
   alias Input = String | Array::View(UInt8) | Array(UInt8)
 
   def self.size(data : Input) : Int32

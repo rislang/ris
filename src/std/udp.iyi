@@ -139,7 +139,9 @@ pub class UdpSocket
   # error's `message` is the sentence `bind` raises.
   @[TapeUnsafe("Hand the sockaddr bytes to the OS")]
   def self.bind?(host : String, port : Int32) : UdpSocket | SocketError
-    addr, addrlen, family = make_sockaddr(host, port)
+    addr = ""
+    family = make_sockaddr(host, port, addr)
+    addrlen = sockaddr_size(family)
     fd = __sys_socket(family)
     return SocketError.new("create UDP socket", IyiSocket.__sys_code(fd.to_i64)) if fd < 0
 
@@ -184,7 +186,8 @@ pub class UdpSocket
   def send_to(buffer : Pointer(UInt8), count : Int32, host : String, port : Int32) : Int32
     check_open
     raise "negative count: #{count}" if count < 0
-    addr, addrlen, _ = UdpSocket.make_sockaddr(host, port)
+    addr = ""
+    addrlen = UdpSocket.sockaddr_size(UdpSocket.make_sockaddr(host, port, addr))
     while true
       res = UdpSocket.__sys_sendto(@fd, buffer, count.to_u64, 0, addr.to_unsafe, addrlen)
       return res.to_i32 if res >= 0_i64
@@ -335,7 +338,8 @@ pub class UdpSocket
   @[TapeUnsafe("Hand the sockaddr bytes to the OS")]
   def connect(host : String, port : Int32) : Nil
     check_open
-    addr, addrlen, _ = UdpSocket.make_sockaddr(host, port)
+    addr = ""
+    addrlen = UdpSocket.sockaddr_size(UdpSocket.make_sockaddr(host, port, addr))
     res = UdpSocket.__sys_connect(@fd, addr.to_unsafe, addrlen)
     raise "cannot connect UDP socket to #{IyiSocket.endpoint(host, port)}: #{UdpSocket.refusal(res.to_i64, false)}" if res < 0
   end
@@ -469,18 +473,25 @@ pub class UdpSocket
 
   # --- Address Parsing and Formatting ---
 
-  def self.make_sockaddr(host : String, port : Int32) : Tuple(String, SockLen, Int32)
+  # The address onto *into*; its family (AF_INET6 or 2).
+  def self.make_sockaddr(host : String, port : Int32, into : String::Builder) : Int32
     raise "port #{port} is not a port: 0 to 65535" if port < 0 || port > 65535
     # An IPv6 literal in its brackets too, as `IyiSocket.connect` reads
     # one: `"[::1]"` was "'[' is not a hex digit".
     size = host.bytesize
     host = host[1, size - 2] if size >= 2 && host[0] == '[' && host[size - 1] == ']'
     if host.includes?(":")
-      {IyiSocket.make_sockaddr_in6(IyiSocket.parse_ipv6(host), port), SOCKADDR_IN6_SIZE, AF_INET6}
+      into << IyiSocket.make_sockaddr_in6(IyiSocket.parse_ipv6(host), port)
+      AF_INET6
     else
-      ip = IyiSocket.parse_ip(host)
-      {IyiSocket.make_sockaddr_in(ip, port), SOCKADDR_IN_SIZE, 2}
+      into << IyiSocket.make_sockaddr_in(IyiSocket.parse_ip(host), port)
+      2
     end
+  end
+
+  # How long a family's address is.
+  def self.sockaddr_size(family : Int32) : SockLen
+    family == AF_INET6 ? SOCKADDR_IN6_SIZE : SOCKADDR_IN_SIZE
   end
 
   # Why a call failed: `std/socket`'s sentence for the platform's

@@ -335,12 +335,16 @@ class Iyi::TapeShrinkChecker
     if @checking && !@text_only
       destinations = root_scope(root)
       source_roots(v).each do |source|
+        # A struct is stored by value: its bytes are copied, and what its
+        # fields hold is checked through the value's views.
+        next if struct_value?(source) && !@handed.includes?(source)
         scope = source_scope(source)
         unless scope.all? { |part| destinations.includes?(part) }
           node.raise "cannot store a view beyond its owner scope; " \
                      "copy it with copy_to(owner) before storing it"
         end
         if (block = tape_of(source)) && !leaving?(source) && outside?(root, block)
+          STDERR.puts "DBG store #{root_name(source)} #{@root_types[source]?} sv=#{struct_value?(source)} dst=#{root_name(root)} at #{node.location}" if ENV["RIS_DBG"]?
           message = scope_message(block)
           # The store is in a method this call reaches (a handler's
           # `call`): point at that line, and name the call that reaches it.
@@ -409,10 +413,11 @@ class Iyi::TapeShrinkChecker
   # the walk ends: a migration sees them all at once, and still fails.
   @first_refusal : {ASTNode, String}? = nil
 
-  def refuse(node : ASTNode, message : String) : Nil
+  def refuse(node : ASTNode, message : String, holds : String = "") : Nil
     node.raise message unless ENV["RIS_SCOPE_ERRORS"]? == "all"
     loc = node.location
-    STDERR.puts "refused #{loc.try(&.original_filename)}:#{loc.try(&.line_number)}: #{message.lines.first}"
+    detail = holds.empty? ? "" : " [#{holds}]"
+    STDERR.puts "refused #{loc.try(&.original_filename)}:#{loc.try(&.line_number)}: #{message.lines.first}#{detail}"
     @first_refusal ||= {node, message}
   end
 
@@ -1394,7 +1399,7 @@ class Iyi::TapeShrinkChecker
                  "it would have to be copied out (SPEC 1.9).\nEnd the def " \
                  "with the call alone, append to a String or Array " \
                  "parameter, grow a local in place and return it, or " \
-                 "write copy_to(owner)"
+                 "write copy_to(owner)", root_name(source)
     end
   end
 
@@ -1454,12 +1459,26 @@ class Iyi::TapeShrinkChecker
       !!TapeChecker.tape_in(@program, type)
   end
 
+  # Struct values whose `new` allocated (a Params making its Arrays): what
+  # they hold was made with them, so they are no plain value.
+  @allocating_structs = Set(UInt64).new
+
   private def struct_value?(root : UInt64) : Bool
-    return false if @handed.includes?(root)
+    return false if @handed.includes?(root) || @allocating_structs.includes?(root)
     return false unless type = @root_types[root]?
-    type = type.remove_typedef
+    plain_struct?(type.remove_typedef)
+  end
+
+  # A struct holding no storage handle of its own (its tape fields have
+  # slots), or a union of such structs and Nil (an error or none).
+  private def plain_struct?(type : Type) : Bool
+    if type.is_a?(UnionType)
+      members = type.union_types.reject(&.nil_type?)
+      return !members.empty? && members.size < type.union_types.size + 1 &&
+        members.all? { |t| !t.is_a?(UnionType) && plain_struct?(t.remove_typedef) }
+    end
     type.struct? && !storage_type?(type) && type_name(type) != "String" &&
-      !type.is_a?(UnionType)
+      !type.is_a?(PrimitiveType)
   end
 
   private def foreign_view?(node : Call) : Bool
@@ -1526,13 +1545,16 @@ class Iyi::TapeShrinkChecker
     type.to_s.starts_with?("Array(")
   end
 
-  # A class instance's Array field is its own component, never a pool run:
-  # it grows in place in its own reservation (SPEC 2.2).
+  # A class instance's Array field, or any instance's builder, is its own
+  # component, never a pool run: it grows in place in its own
+  # reservation (SPEC 2.2).
   private def class_field_root?(root : UInt64) : Bool
     return false unless parent = @parents[root]?
     return false unless parent[1].starts_with?('@')
-    type = root_type(parent[0]).try(&.remove_typedef)
-    type.is_a?(NonGenericClassType) && !type.struct?
+    type = one_class(root_type(parent[0]))
+    return true if type.is_a?(NonGenericClassType) && !type.struct?
+    type.is_a?(InstanceVarContainer) &&
+      type_name(type.instance_vars[parent[1]]?.try(&.type?).try(&.remove_typedef) || type) == "String::Builder"
   end
 
   # *type* without its typedef, and a field that may be nil (a reader's
@@ -2116,6 +2138,7 @@ class Iyi::TapeShrinkChecker
           @copied_roots << node.object_id if {"copy_to", "to_heap"}.includes?(node.name)
           # A struct `new` holds what its arguments give it: a value it
           # returns carries their storage (SPEC 1.9).
+          @allocating_structs << node.object_id if node.name == "new" && @graph.allocates?(node)
           holder = node.name == "new" && struct_value?(node.object_id)
           borrowed = if @text_only && node.name.in?("new", "dup") &&
                         type_name(node.type) != "String"

@@ -1956,7 +1956,8 @@ pub struct Server
       # The three-argument form: the one-argument parse_head answers a
       # RequestHead, never a ParsedHead, and sent every request the slow
       # way.
-      head = parse_head(bytes, 0, false)
+      fields = Array(Field).new(16)
+      head = parse_head(bytes, 0, false, fields)
       return -1 if head.nil?
       if head.is_a?(ParsedHead) && !head.http10? && head.field("Transfer-Encoding").nil? && head.field("Expect").nil? &&
          HTTP.absolute_form(head.target).nil? &&
@@ -2023,9 +2024,17 @@ pub struct Server
     wrote.is_a?(Int32) && !close
   end
 
+  # The head at *from* in *bytes*; its fields go into *fields*, the
+  # caller's (`HeadParser.parse_head`).
   def self.parse_head(bytes : String, from : Int32,
-                      complete : Bool) : ParsedHead | HeadError | Nil
-    HeadParser.parse_head(bytes, from, complete)
+                      complete : Bool, fields : Array(Field)) : ParsedHead | HeadError | Nil
+    HeadParser.parse_head(bytes, from, complete, fields)
+  end
+
+  def self.parse_head(bytes : String, from : Int32, complete : Bool)
+    {% raise "Server.parse_head(bytes, from, complete) takes the fields'\n" +
+      "Array too: Server.parse_head(bytes, 0, true, fields), with\n" +
+      "fields = Array(Field).new(16) on the caller's tape." %}
   end
 
   # A header line an answer writes, checked: a name that is a token, a
@@ -2699,7 +2708,7 @@ pub struct Server
   # caller testing is_a?(ParsedHead) compiled and always failed.
   def self.parse_head(text : String)
     {% raise "Server.parse_head(text) is gone: call\n" +
-      "Server.parse_head(bytes, 0, true), which answers\n" +
+      "Server.parse_head(bytes, 0, true, fields), which answers\n" +
       "ParsedHead | HeadError | Nil, its fields views into bytes." %}
   end
 
@@ -2707,7 +2716,8 @@ pub struct Server
   # or why it is not one, as the server's handlers take it.
   # On the caller's tape: what it answers is made here (SPEC 3.2).
   private def self.request_head(text : String) : RequestHead | HTTPError
-    case head = parse_head(text.as_tape, 0, true)
+    fields = Array(Field).new(16)
+    case head = parse_head(text.as_tape, 0, true, fields)
     in ParsedHead
       request_head_view(head)
     in HeadError

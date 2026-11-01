@@ -9,7 +9,7 @@
 
 module samples/request
 
-import std/http::{Server, ParsedHead}
+import std/http::{Server, ParsedHead, Field}
 
 @[OnTape]
 struct User
@@ -49,7 +49,7 @@ end
 
 def handle(raw : String) : Nil
   tape do
-    head = Server.parse_head(raw, 0, true)
+    head = Server.parse_head(raw, 0, true, Array(Field).new(16))
     unless head.is_a?(ParsedHead)
       puts "400 Bad Request"
       return

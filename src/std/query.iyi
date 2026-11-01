@@ -3,47 +3,51 @@ module std/query
 
 # A query's parameters read on the caller's tape, as `Params.parse` reads
 # them: `&` and `;` part the pairs, `+` is a space, `%XX` the byte, and a
-# `%` before no two hex digits itself. A name or value with neither `+`
-# nor `%` is a view of the query; one with them is decoded onto the tape.
+# `%` before no two hex digits itself. Names and values are decoded into
+# the query's own text, which the pairs view.
 # The pairs are made at their final size, counted first.
 @[OnTape]
 pub struct Query
   getter pairs : Array(QueryPair)
-
-  def initialize(@pairs : Array(QueryPair))
-  end
+  # The decoded names and values, which the pairs view.
+  @text : String::Builder
 
   def self.parse(query : String) : Query
+    new(query)
+  end
+
+  # The pairs are made by the constructor, the query's own storage: what
+  # it decodes goes into its builder, which grows in place.
+  def initialize(query : String)
     from = query.bytesize > 0 && query[0] == 63_u8 ? 1 : 0
     count = 0
-    each_part(query, from) { |_, _| count += 1 }
+    Query.each_part(query, from) { |_, _| count += 1 }
     none = query[0, 0]
-    pairs = Array(QueryPair).new(count) { QueryPair.new(none, none) }
+    @pairs = Array(QueryPair).new(count) { QueryPair.new(none, none) }
+    @text = String::Builder.new(query.bytesize + 1)
     at = 0
-    each_part(query, from) do |start, stop|
+    Query.each_part(query, from) do |start, stop|
       eq = start
       while eq < stop && query[eq] != 61_u8
         eq += 1
       end
-      # Decoded here, not in a def: a def's fresh string is staged and
-      # copied back to its caller.
-      size = decoded_size(query, start, eq)
-      key = size < 0 ? query[start, eq - start] :
-        String.new(size) { |bytes| decode_into(query, start, eq, bytes) }
-      value = none
-      if eq < stop
-        size = decoded_size(query, eq + 1, stop)
-        value = size < 0 ? query[eq + 1, stop - eq - 1] :
-          String.new(size) { |bytes| decode_into(query, eq + 1, stop, bytes) }
-      end
-      pairs[at] = QueryPair.new(key, value)
+      key = decoded(query, start, eq)
+      value = eq < stop ? decoded(query, eq + 1, stop) : none
+      @pairs[at] = QueryPair.new(key, value)
       at += 1
     end
-    Query.new(pairs)
+  end
+
+  # The bytes from *start* to *stop* decoded into the query's text (plain
+  # ones copied as they are): a view of it.
+  private def decoded(query : String, start : Int32, stop : Int32) : String
+    at = @text.bytesize
+    Query.decode_onto(query, start, stop, @text)
+    @text.finish[at, @text.bytesize - at]
   end
 
   # The start and end of each part between `&` and `;` that is not empty.
-  private def self.each_part(query : String, from : Int32, & : Int32, Int32 -> Nil) : Nil
+  protected def self.each_part(query : String, from : Int32, & : Int32, Int32 -> Nil) : Nil
     start = from
     i = from
     size = query.bytesize
@@ -57,7 +61,7 @@ pub struct Query
   end
 
   # The decoded size, or -1 when the bytes have no `+` and no `%`.
-  private def self.decoded_size(query : String, start : Int32, stop : Int32) : Int32
+  protected def self.decoded_size(query : String, start : Int32, stop : Int32) : Int32
     plain = true
     size = 0
     i = start
@@ -98,6 +102,24 @@ pub struct Query
         i += 1
       end
       at += 1
+    end
+  end
+
+  # The bytes decoded onto *into*.
+  protected def self.decode_onto(query : String, start : Int32, stop : Int32, into : String::Builder) : Nil
+    i = start
+    while i < stop
+      b = query[i]
+      if b == 43_u8
+        into.push(32_u8)
+        i += 1
+      elsif b == 37_u8 && escape?(query, i, stop)
+        into.push(((hex(query[i + 1]) << 4) | hex(query[i + 2])).to_u8)
+        i += 3
+      else
+        into.push(b)
+        i += 1
+      end
     end
   end
 

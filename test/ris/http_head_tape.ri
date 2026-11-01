@@ -1,21 +1,23 @@
 module test/ris/http_head_tape
-import std/http_head::{HeadParser, ParsedHead, HeadError, Incoming}
+import std/http_head::{HeadParser, ParsedHead, HeadError, Incoming, Field}
 
 def refused(text : String, expected : String) : Nil
-  error = HeadParser.parse_head(text)
+  fields = Array(Field).new(4)
+  error = HeadParser.parse_head(text, 0, false, fields)
   raise "diagnostic" unless error.is_a?(HeadError) && error.message == expected
 end
 
 tape do
-  head = HeadParser.parse_head("GET /?q=hello+world&bad=%zz HTTP/1.1\r\nHost: x\r\n\r\n".as_tape)
+  fields = Array(Field).new(4)
+  head = HeadParser.parse_head("GET /?q=hello+world&bad=%zz HTTP/1.1\r\nHost: x\r\n\r\n".as_tape, 0, false, fields)
   raise "head" unless head.is_a?(ParsedHead)
   req = Incoming.new(head.method, "/", "q=hello+world&bad=%zz", head.fields, "")
   raise "params" unless req.params["q"]? == "hello world"
   raise "malformed escape" unless req.params["bad"]? == "%zz"
-  raise "incomplete" unless HeadParser.parse_head("GET".as_tape).nil?
-  error = HeadParser.parse_head("bad\xff\r\n\r\n".as_tape)
+  raise "incomplete" unless HeadParser.parse_head("GET".as_tape, 0, false, fields).nil?
+  error = HeadParser.parse_head("bad\xff\r\n\r\n".as_tape, 0, false, fields)
   raise "diagnostic" unless error.is_a?(HeadError) && error.message == "not a request line: \"bad\\xFF\""
-  error = HeadParser.parse_head("GET / HTTP/1.1\r\nHost: x\r\nHost: y\r\n\r\n".as_tape)
+  error = HeadParser.parse_head("GET / HTTP/1.1\r\nHost: x\r\nHost: y\r\n\r\n".as_tape, 0, false, fields)
   raise "duplicate host" unless error.is_a?(HeadError) && error.message == "Host on 2 lines"
   refused("G@T / HTTP/1.1\r\n\r\n", "not a method: \"G@T\"")
   refused("GET / HTTP/2\r\n\r\n", "not an HTTP/1 request: \"HTTP/2\"")
@@ -27,14 +29,14 @@ tape do
   refused("GET / HTTP/1.1\r\n\r\n", "an HTTP/1.1 request without Host")
   error = HeadParser.parse_head(String.build(HeadParser::MAX_HEAD + 1) do |w|
     (HeadParser::MAX_HEAD + 1).times { w << "x" }
-  end)
+  end, 0, false, fields)
   raise "limit" unless error.is_a?(HeadError) && error.status == 431 && error.message == "request headers past 1048576 bytes"
 
   joined = HeadParser.parse_head(
-    "GET / HTTP/1.1\r\nHost: x\r\nX: one\r\nX: two\r\n\r\n")
+    "GET / HTTP/1.1\r\nHost: x\r\nX: one\r\nX: two\r\n\r\n", 0, false, fields)
   raise "joined head" unless joined.is_a?(ParsedHead)
-  fields = String::Builder.new(64)
-  joined.each_field { |name, value| fields << name << ":" << value << ";" }
-  raise "joined values" unless fields.finish == "Host:x;X:one, two;"
+  seen = String::Builder.new(64)
+  joined.each_field { |name, value| seen << name << ":" << value << ";" }
+  raise "joined values" unless seen.finish == "Host:x;X:one, two;"
 end
 puts "HTTP head: zero heap"

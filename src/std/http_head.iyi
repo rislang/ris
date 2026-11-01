@@ -202,11 +202,53 @@ pub struct HeadParser
   MAX_HEAD = 1048576
 
   # A request head at *from* in *bytes*, read on the caller's tape: nil
-  # until the blank line that ends it has arrived. The parts and fields are
-  # views into *bytes*; temporaries go on the caller's `tape`.
+  # until the blank line that ends it has arrived. The parts are views
+  # into *bytes*; the fields go into the caller's *fields*, cleared first,
+  # each a view into *bytes* too.
   def self.parse_head(
-    bytes : String, from : Int32 = 0, complete : Bool = false,
+    bytes : String, from : Int32, complete : Bool, fields : Array(Field),
   ) : ParsedHead | HeadError | Nil
+    HeadParser.answer(bytes, from, complete, fields, HeadParser.head_why(bytes, from, complete, fields))
+  end
+
+  # What `head_why` found, as the answer: views of *bytes* and *why*.
+  def self.answer(bytes : String, from : Int32, complete : Bool, fields : Array(Field), why : String) : ParsedHead | HeadError | Nil
+    tag = why.byte_at(0)
+    return nil if tag == 119_u8
+    return HeadParser.head_of(bytes, from, complete, fields) if tag == 107_u8
+    HeadError.new(why[1, why.bytesize - 1], tag == 51_u8 ? 431 : 400)
+  end
+
+  # A head `head_why` passed: its request line's parts, views of *bytes*.
+  def self.head_of(bytes : String, from : Int32, complete : Bool, fields : Array(Field)) : ParsedHead
+    p = bytes
+    n = bytes.bytesize
+    while from + 1 < n && p[from] == 13_u8 && p[from + 1] == 10_u8
+      from = from + 2
+    end
+    split_at = -1
+    i = from
+    while i + 3 < n
+      if p[i] == 13_u8 && p[i + 1] == 10_u8 && p[i + 2] == 13_u8 && p[i + 3] == 10_u8
+        split_at = i
+        break
+      end
+      i = i + 1
+    end
+    split_at = n if split_at < 0
+    line_end = HeadParser.crlf_in(p, from, split_at)
+    sp1 = HeadParser.byte_in(p, from, line_end, 32_u8)
+    sp2 = HeadParser.byte_in(p, sp1 + 1, line_end, 32_u8)
+    ParsedHead.new(bytes[from, sp1 - from], bytes[sp1 + 1, sp2 - sp1 - 1],
+      bytes[sp2 + 1, line_end - sp2 - 1], fields, split_at + 4)
+  end
+
+  # What `parse_head` finds, one flat String that moves down (SPEC 1.5):
+  # "w" while the head is still coming, "k" for a head whose fields are
+  # now in *fields*, or "4" or "3" (431) and the refusal's sentence.
+  def self.head_why(
+    bytes : String, from : Int32, complete : Bool, fields : Array(Field),
+  ) : String
     p = bytes
     n = bytes.bytesize
     # Past the empty lines a client may send before a request: RFC 9112
@@ -228,13 +270,11 @@ pub struct HeadParser
     split_at = n if complete && split_at < 0
     if split_at < 0
       if n - from > MAX_HEAD
-        too_long = ""
-        too_long << "request headers past " << MAX_HEAD << " bytes"
-        return HeadError.new(too_long, 431)
+        return "3request headers past #{MAX_HEAD} bytes"
       end
-      return nil
+      return "w"
     end
-    return HeadError.new("empty request") if split_at == from
+    return "4empty request" if split_at == from
     line_end = HeadParser.crlf_in(p, from, split_at)
     sp1 = HeadParser.byte_in(p, from, line_end, 32_u8)
     sp2 = sp1 < line_end ? HeadParser.byte_in(p, sp1 + 1, line_end, 32_u8) : line_end
@@ -263,7 +303,7 @@ pub struct HeadParser
       capacity += 1
       at = HeadParser.crlf_in(p, at, split_at) + 2
     end
-    fields = Array(Field).new(capacity)
+    fields.clear
     hosts = 0
     at = line_end + 2
     while at < split_at
@@ -286,9 +326,7 @@ pub struct HeadParser
       name = bytes[at, colon - at]
       value = bytes[first, last - first]
       if HeadParser.control?(value)
-        control = ""
-        control << "header " << name << " contains a control character"
-        return HeadError.new(control)
+        return "4header #{name} contains a control character"
       end
       # Host (RFC 9112 §3.2): an HTTP/1.1 request names one, no request
       # names two, and what it names is a host; a server answers 400
@@ -303,21 +341,19 @@ pub struct HeadParser
       at = stop + 2
     end
     if hosts > 1
-      many_hosts = ""
-      many_hosts << "Host on " << hosts << " lines"
-      return HeadError.new(many_hosts)
+      return "4Host on #{hosts} lines"
     end
     if hosts == 0 && version == "HTTP/1.1"
-      return HeadError.new("an HTTP/1.1 request without Host")
+      return "4an HTTP/1.1 request without Host"
     end
-    ParsedHead.new(method, target, version, fields, split_at + 4)
+    "k"
   end
 
-  private def self.head_error(prefix : String, text : String) : HeadError
-    HeadError.new(String.build(prefix.bytesize + text.bytesize * 4 + 16) do |w|
-      w << prefix
-      text.inspect(w)
-    end)
+  private def self.head_error(prefix : String, text : String) : String
+    why = ""
+    why << "4" << prefix
+    text.inspect(why)
+    why
   end
 
   def self.same_name?(
