@@ -146,21 +146,21 @@ class Bzip2Table
   MAX_LEN  =  20
   MAX_SYMS = 258
 
-  getter count : Array(Int32)
-  getter first : Array(Int32)
-  getter offs : Array(Int32)
-  getter perm : Array(Int32)
+  getter count : Array::View(Int32)
+  getter first : Array::View(Int32)
+  getter offs : Array::View(Int32)
+  getter perm : Array::View(Int32)
   # (symbol << 5) | length for a code of `FAST` bits or fewer, by the
   # code's bits followed by any bits at all; 0 where the code is longer.
-  getter fast : Array(Int32)
+  getter fast : Array::View(Int32)
   getter max_len : Int32
 
   def initialize
-    @count = Array(Int32).new(MAX_LEN + 1, 0)
-    @first = Array(Int32).new(MAX_LEN + 1, 0)
-    @offs = Array(Int32).new(MAX_LEN + 1, 0)
-    @perm = Array(Int32).new(MAX_SYMS, 0)
-    @fast = Array(Int32).new(1 << FAST, 0)
+    @count = Array(Int32).new(MAX_LEN + 1, 0).view
+    @first = Array(Int32).new(MAX_LEN + 1, 0).view
+    @offs = Array(Int32).new(MAX_LEN + 1, 0).view
+    @perm = Array(Int32).new(MAX_SYMS, 0).view
+    @fast = Array(Int32).new(1 << FAST, 0).view
     @max_len = 0
   end
 
@@ -168,7 +168,7 @@ class Bzip2Table
   # would make the code ambiguous; libbzip2 builds such a table without
   # looking, and decodes noise its CRC then refuses. An incomplete code
   # is let through: a pattern no code has is refused when it is read.
-  def build(lengths : Array(Int32), base : Int32, alpha : Int32) : Bool
+  def build(lengths : Array::View(Int32), base : Int32, alpha : Int32) : Bool
     len = 0
     while len <= MAX_LEN
       @count[len] = 0
@@ -835,7 +835,8 @@ pub class Bzip2Reader
   # stream's end - except that the input ends only where no stream
   # follows, which takes a look at the next four bytes.
   def initialize(io : IyiIO?, head : String = "")
-    @core = Bzip2Decode.new(io, head)
+    made_core = Bzip2Decode.new(io, head)
+    @core = made_core
   end
 
   # Up to *max* decompressed bytes, 64 KiB at most; "" once every stream

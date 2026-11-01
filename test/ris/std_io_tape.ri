@@ -12,7 +12,8 @@ assert memory.read_bytes(2) == "he"
 assert memory.read_all == "llo"
 assert memory.to_s == "hello"
 
-sized = Sized.new(Memory.new("abcdef"), 3)
+sized_source = Memory.new("abcdef")
+sized = Sized.new(sized_source, 3)
 assert sized.read_all == "abc"
 source = Memory.new("one--two")
 delimited = Delimited.new(source, "--")

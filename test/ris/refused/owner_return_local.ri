@@ -1,5 +1,4 @@
-@[Owner]
-struct Workspace
+class Workspace
   getter left = Array(Int32).new
 end
 

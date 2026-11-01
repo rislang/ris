@@ -42,8 +42,7 @@ class InferredGrowingField
   end
 end
 
-@[Owner]
-struct OwnedGrowingField
+class OwnedGrowingField
   getter text : String = "owner"
 
   def append(value : String)

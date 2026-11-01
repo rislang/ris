@@ -1,6 +1,0 @@
-@[Owner]
-struct GrowingOwner
-  def initialize
-  end
-end
-tape { Array(GrowingOwner).new }

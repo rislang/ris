@@ -380,6 +380,17 @@ class Iyi::TapeShrinkChecker
     end
   end
 
+  private def copying_text?(node : ASTNode) : Bool
+    return false unless node.is_a?(Call) &&
+      {"build", "interpolate", "interpolation"}.includes?(node.name)
+    return false unless node.obj.try(&.type?).try { |t|
+      t.metaclass? && t.instance_type.to_s == "String"
+    }
+    targets = @graph.targets(node)
+    !!targets && !targets.empty? &&
+      targets.all? { |d| TapeRules.runtime?(@program, d.location) }
+  end
+
   # Text built inside a `tape` block - an interpolation, or a call that
   # allocates and answers a String viewing none of its inputs - is that
   # block's storage, as an allocated Array is.
@@ -393,6 +404,10 @@ class Iyi::TapeShrinkChecker
     return result if node.is_a?(Call) && {"copy_to", "to_heap"}.includes?(node.name)
     # Growing text answers the text grown, in its own reservation.
     return result if node.is_a?(Call) && node.obj.try(&.type?.try(&.to_s)) == "RisTextGrowth"
+    # These runtime constructors copy every input byte. Their output is
+    # independent even when the inputs view a local owner's fields.
+    copied_text = copying_text?(node)
+    result = EMPTY if copied_text
     viewing = !(result.roots.empty? && result.views.empty?)
     return result if viewing && node.is_a?(Call) &&
                      (VIEWS.includes?(node.name) || TEXT_VIEWS.includes?(node.name))
@@ -403,7 +418,7 @@ class Iyi::TapeShrinkChecker
        }
       return result
     end
-    made = node.is_a?(StringInterpolation) ||
+    made = copied_text || node.is_a?(StringInterpolation) ||
            (node.is_a?(Call) && !node.expanded && @graph.allocates?(node))
     return result unless made
     @root_scopes[node.object_id] = @scopes.dup
@@ -500,7 +515,7 @@ class Iyi::TapeShrinkChecker
       @root_scopes[target.object_id] = @scopes.dup
       env[binding] = Value.new([target.object_id], [] of View)
     end
-    if @checking && !@text_only &&
+    if @checking && !@text_only && reference?(target) &&
        !target.type?.try(&.remove_typedef.is_a?(PointerInstanceType))
       complete = stored(v, env)
       declaration.roots.each { |root| check_store(root, complete, node) }
@@ -1129,7 +1144,8 @@ class Iyi::TapeShrinkChecker
     @checking = true
     @unproved.clear
     @scopes.clear
-    @scopes << owner.object_id if owner
+    # Constructors build their locals and fields in the caller's scope.
+    @scopes << owner.object_id if owner && !TapeScopeChecker.constructor?(owner)
     @root_scopes.clear
     @root_births.clear
     @tape_blocks.clear
@@ -1138,7 +1154,7 @@ class Iyi::TapeShrinkChecker
     @dead.clear
     @leaving = nil
     # A marked def frees its scratch when it ends (SPEC 1.1).
-    marked = owner && !{"new", "initialize"}.includes?(owner.name) &&
+    marked = owner && !TapeScopeChecker.constructor?(owner) &&
              !TapeScopeChecker.parts(owner.body).nil?
     if owner && marked
       @tape_blocks << owner.object_id
@@ -1161,7 +1177,7 @@ class Iyi::TapeShrinkChecker
     end
     last = value(body, env)
     result = merge(last, @returns)
-    if owner && !{"new", "initialize"}.includes?(owner.name)
+    if owner && !TapeScopeChecker.constructor?(owner)
       if marked
         # A String that ends a def whose result is a union with String
         # moves down; the rest is checked.
@@ -1467,7 +1483,7 @@ class Iyi::TapeShrinkChecker
     return result unless type && TapeChecker.tape_in(@program, type) && !flat_result?(type)
     targets = @graph.targets(node)
     return result unless targets && targets.any? do |t|
-      !t.is_a?(External) && !t.name.in?("new", "initialize") &&
+      !t.is_a?(External) && !TapeScopeChecker.constructor?(t) &&
         TapeScopeChecker.parts(t.body).nil? && TapeScopeChecker.one_call?(t.body) &&
         !TapeRules.runtime?(@program, t.location)
     end
@@ -1787,6 +1803,15 @@ class Iyi::TapeShrinkChecker
                              end
       v.roots.each { |root| @root_types[root] ||= node.type }
       v = stored(v, env)
+      if node.is_a?(Var) && node.type?.try { |t| flat_array?(t.remove_typedef) }
+        # A narrowed Array of scalars cannot carry a sibling error arm's
+        # text storage. Keep Array roots and unknown storage unchanged.
+        text_arm = ->(root : UInt64) {
+          root_type(root).try { |t| {"String", "String::Builder"}.includes?(type_name(t.remove_typedef)) } == true
+        }
+        v = Value.new(v.roots.reject { |r| text_arm.call(r) },
+          v.views.reject { |view| text_arm.call(view.root) }, v.procs, v.unknown_proc)
+      end
       if @text_only && node.is_a?(InstanceVar) && TapeChecker.possible_string?(node.type?) &&
          @program.ris_growing_field_names.includes?(node.name)
         # A separately checked method may read an already-grown field.
@@ -1857,9 +1882,9 @@ class Iyi::TapeShrinkChecker
         return EMPTY
       end
       if node.name == "new"
-        # Ordinary tape allocations use the caller's tape. A named Owner
-        # has its own lexical storage, including each of its field paths.
-        @root_scopes[node.object_id] = storage?(node) || {"String", "String::Span"}.includes?(type_name(node.type)) ? [] of UInt64 : @scopes.dup
+        # A local container can hold an owner declared in the same scope.
+        # Parameter and program roots still carry their longer lifetimes.
+        @root_scopes[node.object_id] = @scopes.dup
         @root_types[node.object_id] = node.type
         @root_births[node.object_id] = @uses.size
         note_fresh(node.object_id)
@@ -2019,7 +2044,7 @@ class Iyi::TapeShrinkChecker
                 # A constructor's receiver is the value `new` just made:
                 # no view of it exists yet for the constructor's own field
                 # growth to move (an imported `initialize` filling Arrays).
-                constructing = i == 0 && target.name == "initialize" && !handed
+                constructing = i == 0 && TapeScopeChecker.constructor?(target) && !handed
                 if bits & TapeCallGraph::Contract::SHRINK != 0 && !constructing
                   if found = handed ? handed_effect(handed, false) : WHOLE
                     shrunk = found == WHOLE ? roots : roots.flat_map { |r| found.map { |f| handed_field(r, f) } }.uniq
@@ -2251,7 +2276,7 @@ class Iyi::TapeShrinkChecker
           (derived.views + derived.roots.map { |root| view(root) }).uniq)
       elsif {"copy_to", "dup", "to_heap", "new"}.includes?(node.name) || concatenated
         if reference?(node)
-          @root_scopes[node.object_id] = storage?(node) || {"String", "String::Span"}.includes?(type_name(node.type)) ? [] of UInt64 : @scopes.dup
+          @root_scopes[node.object_id] = {"copy_to", "to_heap"}.includes?(node.name) ? [] of UInt64 : @scopes.dup
           # copy_to and to_heap put the copy on its owner, not here.
           note_fresh(node.object_id) unless {"copy_to", "to_heap"}.includes?(node.name)
           @copied_roots << node.object_id if {"copy_to", "to_heap"}.includes?(node.name)
@@ -2275,6 +2300,14 @@ class Iyi::TapeShrinkChecker
         else
           EMPTY
         end
+      elsif copying_text?(node)
+        # Keep the same independence in call summaries as at call sites.
+        # Formatting reads its inputs; it retains none of their storage.
+        env.slots.reject! { |root, _| contains_root?([node.object_id], root) }
+        @root_types[node.object_id] = node.type
+        @root_scopes[node.object_id] = @scopes.dup
+        note_fresh(node.object_id)
+        Value.new([node.object_id], [] of View)
       elsif element_result && reference?(node)
         if storage?(node)
           element_result = merge(element_result,

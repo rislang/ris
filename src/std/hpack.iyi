@@ -698,7 +698,8 @@ pub class Decoder
   property max_header_count : Int32
 
   def initialize(max_table_size : Int32 = 4096, protocol_max_table_size : Int32 = 4096, max_header_list_size : Int32 = 65536, max_header_count : Int32 = 1000)
-    @dynamic_table = DynamicTable.new(max_table_size, protocol_max_table_size)
+    dynamic_table = DynamicTable.new(max_table_size, protocol_max_table_size)
+    @dynamic_table = dynamic_table
     @protocol_max_table_size = protocol_max_table_size
     @max_header_list_size = max_header_list_size
     @max_header_count = max_header_count
@@ -1047,7 +1048,8 @@ pub class Encoder
   property use_huffman : Bool
 
   def initialize(max_table_size : Int32 = 4096, protocol_max_table_size : Int32 = 4096, use_huffman : Bool = true)
-    @dynamic_table = DynamicTable.new(max_table_size, protocol_max_table_size)
+    dynamic_table = DynamicTable.new(max_table_size, protocol_max_table_size)
+    @dynamic_table = dynamic_table
     @protocol_max_table_size = protocol_max_table_size
     @use_huffman = use_huffman
     @pending_table_size_update = false

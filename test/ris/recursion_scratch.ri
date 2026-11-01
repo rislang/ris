@@ -41,8 +41,7 @@ def records(view : TextView, n : Int32) : Int32
   child + view.text.size
 end
 
-@[Owner]
-struct ScratchOwner
+class ScratchOwner
   getter data = Array(Int32).new
 end
 

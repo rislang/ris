@@ -1,5 +1,4 @@
-@[Owner]
-struct Scratch
+class Scratch
   getter data = Array(Int32).new
 end
 def descend(n : Int32) : Int32

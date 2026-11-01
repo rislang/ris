@@ -1,5 +1,4 @@
-@[Owner]
-struct Storage
+class Storage
   getter bytes = String::Builder.new
 
   def reset

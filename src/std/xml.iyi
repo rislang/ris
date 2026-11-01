@@ -288,9 +288,9 @@ pub struct TapeNode
   def initialize(@tree : XmlTree, @index : Int32)
   end
 
-  # A new document: a tree holding its document node alone.
-  def self.document : TapeNode
-    XmlTree.new.document
+  # The document view of the caller's named tree.
+  def self.document(tree : XmlTree) : TapeNode
+    tree.document
   end
 
   def ==(other : TapeNode) : Bool
@@ -791,7 +791,8 @@ struct TapeParser
   @tree : XmlTree
 
   def initialize(input : String, @max_depth : Int32 = 256, @max_expansions : Int32 = 1000)
-    @tree = XmlTree.new
+    tree = XmlTree.new
+    @tree = tree
     @input = TapeParser.normalize_line_ends(input)
     @len = @input.bytesize
     @pos = 0

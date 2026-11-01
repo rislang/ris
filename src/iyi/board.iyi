@@ -266,7 +266,7 @@ private module RisBoardCodec(T)
       {% for arm in T.union_types %}
         RisBoardCodec({{arm}}).check(P, Tuple(*A, T))
       {% end %}
-    {% elsif T.struct? && !T.annotation(Owner) && !T.name.starts_with?("Pointer(") && !T.name.starts_with?("Proc(") %}
+    {% elsif T.struct? && !T.name.starts_with?("Pointer(") && !T.name.starts_with?("Proc(") %}
       {% for field in T.instance_vars %}
         # A String field's growth companion is local storage, never sent.
         {% unless field.name.starts_with?("__ris_text_") %}

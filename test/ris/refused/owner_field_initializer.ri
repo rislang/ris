@@ -1,0 +1,9 @@
+class Workspace
+  getter items = Array(Int32).new
+end
+
+class Holder
+  getter owner = Workspace.new
+end
+
+holder = Holder.new

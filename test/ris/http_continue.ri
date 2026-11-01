@@ -148,7 +148,7 @@ def buffered_body(chunked : Bool) : Nil
     raise "buffer fill" unless conn.fill
   end
   kind = chunked ? BodyReader::CHUNKED : BodyReader::LENGTH
-  reader = BodyReader.new(conn, kind, 3_i64, 100_i64, "", true)
+  reader = BodyReader.new(String::Builder.new(256), conn, kind, 3_i64, 100_i64, "", true)
   raise "buffered body" unless reader.read_all.or_panic == "abc"
   server.close
   raise "early interim" unless read_to_close(client).empty?

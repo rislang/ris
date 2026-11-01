@@ -92,7 +92,7 @@ pub struct DnsError
   # The same failure, said about *name*: a failure found while reading
   # bytes knows no name, and the resolver that asked does.
   def about(name : String, server : String) : DnsError
-    DnsError.new(@kind, name, server, @detail)
+    DnsError.new(@kind, name, String.interpolate(server), String.interpolate(@detail))
   end
 
   # The same failure with its texts copied into *into*: what a loop round

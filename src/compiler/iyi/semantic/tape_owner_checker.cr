@@ -1,5 +1,4 @@
-# Owners have one named binding; codegen borrows ordinary def arguments.
-# Construction may copy a private temporary; initialize must not publish it.
+# Owners are classes built at a named declaration; all other uses alias.
 class Iyi::TapeOwnerChecker
   getter program : Program
 
@@ -10,8 +9,50 @@ class Iyi::TapeOwnerChecker
 
   def self.owner?(program : Program, type : Type) : Bool
     type = type.remove_typedef
-    type = type.generic_type if type.is_a?(GenericClassInstanceType)
-    type.is_a?(Annotatable) && !type.annotation(program.owner_annotation).nil?
+    type = type.base_type if type.is_a?(VirtualType)
+    return false unless TapeChecker.class_instance?(program, type)
+    return false unless type.is_a?(InstanceVarContainer)
+    type.instance_vars.each_value.any? do |field|
+      field.type?.try { |t| growing?(t) } == true && owns_storage?(field)
+    end
+  end
+
+  # A handle borrowed from initialize's caller is a reference, not a
+  # reservation belonging to the instance. Follow typed bindings to find
+  # construction, including defaults and locals assigned to fields.
+  private def self.owns_storage?(node : ASTNode,
+                                 seen = Set(UInt64).new) : Bool
+    return false unless seen.add?(node.object_id)
+    # Reading a receiver's field borrows that receiver's reservation.
+    return false if node.is_a?(InstanceVar)
+    if node.is_a?(Call)
+      return owns_storage?(node.expanded.not_nil!, seen) if node.expanded
+      return true if {"new", "copy_to", "dup"}.includes?(node.name) &&
+                     node.type?.try { |t| growing?(t) } == true
+    end
+    node.dependencies.any? { |source| owns_storage?(source, seen) }
+  end
+
+  private def self.growing?(type : Type, seen = Set(Type).new) : Bool
+    type = type.remove_typedef
+    return false unless seen.add?(type)
+    return true if type.to_s == "String::Builder"
+    if type.is_a?(GenericClassInstanceType)
+      return false if type.to_s.starts_with?("Array::View(") ||
+                      type.to_s.starts_with?("RisTree::View(") ||
+                      type.to_s.starts_with?("SlicePool::Run(")
+      return true if {"Array", "RisTree", "SlicePool"}.includes?(type.generic_type.name)
+    end
+    case type
+    when UnionType
+      type.union_types.any? { |t| growing?(t, seen) }
+    when InstanceVarContainer
+      type.struct? && type.instance_vars.each_value.any? do |field|
+        field.type?.try { |t| growing?(t, seen) } == true
+      end
+    else
+      false
+    end
   end
 
   def self.owner_in(program : Program, type : Type,
@@ -42,21 +83,28 @@ class Iyi::TapeOwnerChecker
   @seen = Set(UInt64).new
 
   def run(node : ASTNode) : Nil
+    check_initializers(@program)
+    @program.file_modules.each_value { |type| check_initializers(type) }
     @graph.defs.each_value { |target| reach(target) }
     node.accept Finder.new(self)
     @program.const_initializers.each { |i| i.value.accept Finder.new(self, initial: i.value) }
     @program.class_var_initializers.each { |i| i.node.accept Finder.new(self, initial: i.node) }
   end
 
-  def owner?(node : ASTNode) : Bool
-    node.type?.try { |t| TapeOwnerChecker.owner?(@program, t) } == true
+  private def check_initializers(type : Type)
+    if type.responds_to?(:instance_vars_initializers)
+      type.instance_vars_initializers.try &.each do |initializer|
+        initializer.value.accept Finder.new(self)
+      end
+    end
+    type.types?.try &.each_value { |nested| check_initializers(nested) }
+    if type.is_a?(GenericType)
+      type.each_instantiated_type { |instance| check_initializers(instance) }
+    end
   end
 
-  def composite?(node : ASTNode) : Bool
-    node.type?.try do |t|
-      !t.metaclass? && !TapeOwnerChecker.owner?(@program, t) &&
-        TapeOwnerChecker.owner_in(@program, t)
-    end == true
+  def owner?(node : ASTNode) : Bool
+    node.type?.try { |t| TapeOwnerChecker.owner?(@program, t) } == true
   end
 
   def reach(target : Def) : Nil
@@ -67,10 +115,9 @@ class Iyi::TapeOwnerChecker
     if target.name == "new" && target.type?.try { |t| TapeOwnerChecker.owner?(@program, t) }
       return
     end
-    if target.name == "initialize" && TapeOwnerChecker.owner?(@program, target.owner)
-      target.body.accept Initialization.new(self, target.owner)
-    end
-    target.body.accept Finder.new(self, target)
+    finder = Finder.new(self, target)
+    target.body.accept finder
+    finder.finish
   end
 
   def refuse(node : ASTNode, why : String) : NoReturn
@@ -78,139 +125,25 @@ class Iyi::TapeOwnerChecker
                "Declare one owner per scope"
   end
 
-  # Unoptimized LLVM builds new's temporary, then copies its header into
-  # the local/constant slot (owners.ri checks both addresses). Keep that
-  # temporary private, including through aliases and receiver helpers.
-  class Initialization < Visitor
-    @aliases = Set(String).new
-    @seen = Hash(UInt64, Int32).new
-
-    def initialize(@checker : TapeOwnerChecker, @owner : Type)
-    end
-
-    def rooted?(node : ASTNode) : Bool
-      roots = Roots.new(@checker.graph, @aliases, @owner)
-      node.accept roots
-      roots.found
-    end
-
-    class Roots < Visitor
-      getter found = false
-
-      def initialize(@graph : TapeCallGraph, @aliases : Set(String), @owner : Type)
-      end
-
-      def visit(node : Var)
-        @found ||= node.name == "self" || @aliases.includes?(node.name)
-        false
-      end
-
-      def visit(node : Call)
-        @found ||= !node.obj &&
-          @graph.targets(node).try(&.any? { |d| d.owner == @owner }) == true
-        true
-      end
-
-      def visit(node : InstanceVar)
-        @found = true
-        false
-      end
-
-      def visit(node : ASTNode)
-        true
-      end
-    end
-
-    def visit(node : Assign)
-      if node.target.is_a?(Var) && rooted?(node.value)
-        @aliases << node.target.as(Var).name
-      end
-      true
-    end
-
-    def visit(node : TypeDeclaration)
-      if (value = node.value) && node.var.is_a?(Var) && rooted?(value)
-        @aliases << node.var.as(Var).name
-      end
-      true
-    end
-
-    def visit(node : Yield)
-      if node.exps.any? { |e| view?(e) && rooted?(e) }
-        node.raise "cannot publish self or a field view from an owner's " \
-                   "initialize; call the owner's own methods until " \
-                   "construction finishes"
-      end
-      true
-    end
-
-    def visit(node : Call)
-      if expanded = node.expanded
-        expanded.accept self
-        return false
-      end
-      # The compiler's reset only copies bytes into the companion's
-      # captured owner (or returns its input while still lazy). It cannot
-      # publish an initializing owner's field to another user def.
-      if node.name == "__ris_text_reset" &&
-         node.obj.try(&.type?.try(&.to_s)) == "RisTextGrowth" &&
-         @checker.graph.targets(node).try(&.all? { |d| TapeRules.runtime?(@checker.program, d.location) })
-        return true
-      end
-      own = @checker.graph.targets(node).try &.all? { |d| d.owner == @owner }
-      # A field's own methods (`@left << 1`) fill it in place; passing a
-      # view on as an argument is what could publish the temporary.
-      exposes = node.args.any? { |a| view?(a) && rooted?(a) }
-      if exposes && !own
-        node.raise "cannot publish self or a field view from an owner's " \
-                   "initialize; call the owner's own methods until " \
-                   "construction finishes"
-      end
-      if own
-        @checker.graph.targets(node).try &.each do |d|
-          next if @checker.graph.opaque?(d)
-          d.args.zip(node.args) do |arg, value|
-            @aliases << arg.name if rooted?(value)
-          end
-          # Revisit when a later call gives a helper another rooted arg.
-          next if @seen[d.object_id]? == @aliases.size
-          @seen[d.object_id] = @aliases.size
-          d.body.accept self
-        end
-      end
-      true
-    end
-
-    private def view?(node : ASTNode) : Bool
-      node.type?.try do |t|
-        !!TapeChecker.tape_in(@checker.program, t) || t.is_a?(PointerInstanceType)
-      end == true
-    end
-
-    def visit(node : Def | Macro)
-      false
-    end
-
-    def visit(node : ASTNode)
-      true
-    end
-  end
-
   class Finder < Visitor
     @allowed = Set(UInt64).new
     @bindings = Set(String).new
+    @locals = Set(String).new
 
     def initialize(@checker : TapeOwnerChecker, @def : Def? = nil,
                    initial : ASTNode? = nil)
       @allowed << initial.object_id if initial
       @def.try do |d|
         d.args.each { |a| @bindings << a.name }
-        body = d.body
-        body = TapeScopeChecker.parts(body).try(&.[1]) || body
-        if @checker.owner?(body) && !owner_initialize?
-          refuse_return(body)
-        end
       end
+    end
+
+    def finish
+      return unless d = @def
+      return if TapeScopeChecker.constructor?(d)
+      return unless d.type?.try { |t| TapeOwnerChecker.owner_in(@checker.program, t) }
+      body = TapeScopeChecker.parts(d.body).try(&.[1]) || d.body
+      refuse_return(body) if local_owner?(body)
     end
 
     def visit_any(node)
@@ -219,9 +152,6 @@ class Iyi::TapeOwnerChecker
       # Check those bodies, not the probe's temporary union result.
       if node.is_a?(If) && node.iyi_definition_probe?
         return false
-      end
-      if @checker.composite?(node)
-        @checker.refuse(node, "cannot store an owner in a container, tuple or union: #{node.type?}")
       end
       true
     end
@@ -232,13 +162,6 @@ class Iyi::TapeOwnerChecker
     end
 
     def visit(node : TypeDeclaration)
-      if type = node.declared_type.type?
-        type = type.instance_type
-        if !TapeOwnerChecker.owner?(@checker.program, type) &&
-           TapeOwnerChecker.owner_in(@checker.program, type)
-          @checker.refuse(node, "cannot store an owner in a container, tuple or union")
-        end
-      end
       if value = node.value
         bind(node, node.var, value)
       end
@@ -246,21 +169,18 @@ class Iyi::TapeOwnerChecker
     end
 
     private def bind(node, target, value)
-      if @checker.composite?(target)
-        @checker.refuse(node, "cannot store an owner in a container, tuple or union")
-      end
-      if @checker.owner?(value)
-        if !value.is_a?(Call)
-          @checker.refuse(node, "cannot copy or reassign an owner")
-        end
+      if value.is_a?(Call) && value.name == "new" && @checker.owner?(value)
         if target.is_a?(Var)
-          @checker.refuse(node, "cannot copy or reassign an owner") unless @bindings.add?(target.name)
-        elsif target.is_a?(ClassVar)
-          @checker.refuse(node, "cannot copy or reassign an owner") if target.type?
-        elsif !target.is_a?(Path)
-          @checker.refuse(node, "cannot store an owner in a field")
+          unless @bindings.add?(target.name)
+            @checker.refuse(node, "owner construction requires a named declaration")
+          end
+        elsif !target.is_a?(Path) && !target.is_a?(ClassVar)
+          @checker.refuse(node, "owner construction requires a named declaration")
         end
         @allowed << value.object_id
+        @locals << target.name if target.is_a?(Var)
+      elsif target.is_a?(Var) && local_owner?(value)
+        @locals << target.name
       end
       value.accept self
     end
@@ -270,21 +190,12 @@ class Iyi::TapeOwnerChecker
         expanded.accept self
         return false
       end
-      if @checker.owner?(node) && !@allowed.includes?(node.object_id)
+      if node.name == "new" && @checker.owner?(node) && !@allowed.includes?(node.object_id)
         @checker.refuse(node, "owner temporary requires a named declaration")
-      end
-      @checker.graph.targets(node).try &.each do |d|
-        if node.args.any? { |a| @checker.owner?(a) } &&
-           (d.is_a?(External) || d.body.is_a?(Primitive))
-          @checker.refuse(node, "owner arguments require a direct def call")
-        end
       end
       if node.program_initializer?
         if block = node.block
           body = TapeScopeChecker.parts(block.body).try(&.[1]) || block.body
-          if @checker.owner?(body) && !body.is_a?(Call)
-            @checker.refuse(body, "cannot copy or reassign an owner")
-          end
           @allowed << body.object_id
         end
       end
@@ -302,20 +213,36 @@ class Iyi::TapeOwnerChecker
 
     private def owner_initialize? : Bool
       @def.try do |d|
-        d.name == "initialize" &&
-          TapeOwnerChecker.owner?(@checker.program, d.owner)
+        TapeScopeChecker.constructor?(d)
       end == true
+    end
+
+    private def local_owner?(node : ASTNode) : Bool
+      case node
+      when Expressions
+        node.expressions.last?.try { |last| local_owner?(last) } == true
+      when Var
+        @checker.owner?(node) && @locals.includes?(node.name)
+      when Call
+        node.name == "new" && @checker.owner?(node)
+      when If
+        local_owner?(node.then) || local_owner?(node.else)
+      else
+        false
+      end
     end
 
     private def refuse_return(node : ASTNode) : NoReturn
       node.raise "cannot return an owner from a def; " \
-                 "return a field view (String/Array) or " \
+                 "def #{@def.try(&.name)} must " \
+                 "copy_to(owner), return a field view (String/Array) or " \
                  "take the owner as an argument"
     end
 
     def visit(node : Return)
-      if (exp = node.exp) && @def && !owner_initialize?
-        refuse_return(node) if @checker.owner?(exp)
+      if (exp = node.exp) && (d = @def) && !owner_initialize? &&
+         d.type?.try { |t| TapeOwnerChecker.owner_in(@checker.program, t) }
+        refuse_return(node) if local_owner?(exp)
       end
       true
     end

@@ -944,7 +944,8 @@ pub class BodyReader
   @finished : Bool
   @fault : HTTPError | Cancelled | SocketError | Nil
   # The kept fault's texts.
-  @fault_text : String::Builder = String::Builder.new(256)
+  # The caller owns and may reuse the fault text storage.
+  @fault_text : String::Builder
   @text : String
   @at : Int32
   # Pending until the first read that has to wait on the socket: a
@@ -958,7 +959,7 @@ pub class BodyReader
   @coding : Envelope?
   @zstd : ZstdReader? = nil
 
-  def initialize(@conn : Conn?, @kind : Int32, length : Int64, @limit : Int64, @text : String = "", continue_pending : Bool = false)
+  def initialize(@fault_text : String::Builder, @conn : Conn?, @kind : Int32, length : Int64, @limit : Int64, @text : String = "", continue_pending : Bool = false)
     @left = @kind == CHUNKED ? -1_i64 : length
     @declared = length
     @total = 0_i64
@@ -971,13 +972,13 @@ pub class BodyReader
   end
 
   # A body that is a string already in hand.
-  def self.text(text : String) : BodyReader
-    BodyReader.new(nil, TEXT, text.bytesize.to_i64, 9223372036854775807_i64, text)
+  def self.text(fault_text : String::Builder, text : String) : BodyReader
+    BodyReader.new(fault_text, nil, TEXT, text.bytesize.to_i64, 9223372036854775807_i64, text)
   end
 
   # A body that arrives as an HTTP/2 stream's DATA: refused past *limit*.
-  protected def self.frames(h2 : H2Connection, id : Int32, limit : Int64) : BodyReader
-    reader = BodyReader.new(nil, FRAMES, 0_i64, limit)
+  protected def self.frames(fault_text : String::Builder, h2 : H2Connection, id : Int32, limit : Int64) : BodyReader
+    reader = BodyReader.new(fault_text, nil, FRAMES, 0_i64, limit)
     reader.on_frames(h2, id)
     reader
   end
@@ -1455,7 +1456,7 @@ pub class Request
 
   # A request whose body is in hand: what `parse_request` answers.
   def initialize(@method : String, @path : String, @query : String?, @headers : Hash(String, String), body : String, @version : String = "HTTP/1.1", @remote_address : String? = nil)
-    @reader = BodyReader.text(body)
+    @reader = BodyReader.text(String::Builder.new(256), body)
     @text = body
   end
 
@@ -1525,7 +1526,7 @@ pub class Request
     return nil unless type
     boundary = Multipart.boundary(type)
     return nil unless boundary
-    Multipart.new(@text ? BodyReader.text(@text || "") : @reader, boundary)
+    Multipart.new(@text ? BodyReader.text(String::Builder.new(256), @text || "") : @reader, boundary)
   end
 end
 
@@ -1703,7 +1704,7 @@ pub class Response
     if reader = @reader
       return reader
     end
-    BodyReader.text(@body)
+    BodyReader.text(String::Builder.new(256), @body)
   end
 
   # The body read whole into the response, which is answered; why not,
@@ -2539,16 +2540,17 @@ pub struct Server
   # second before every upload past a megabyte.
   private def self.body_reader(conn : Conn, head : RequestHead) : BodyReader
     if head.chunked
-      BodyReader.new(conn, BodyReader::CHUNKED, 0_i64, MAX_BODY.to_i64, "", head.expects)
+      BodyReader.new(String::Builder.new(256), conn, BodyReader::CHUNKED, 0_i64, MAX_BODY.to_i64, "", head.expects)
     elsif head.length > 0_i64
-      BodyReader.new(conn, BodyReader::LENGTH, head.length, MAX_BODY.to_i64, "", head.expects)
+      BodyReader.new(String::Builder.new(256), conn, BodyReader::LENGTH, head.length, MAX_BODY.to_i64, "", head.expects)
     else
-      BodyReader.new(conn, BodyReader::EMPTY, 0_i64, MAX_BODY.to_i64)
+      BodyReader.new(String::Builder.new(256), conn, BodyReader::EMPTY, 0_i64, MAX_BODY.to_i64)
     end
   end
 
   private def self.refuse(client : IyiSocket | TlsStream, error : HTTPError) : Nil
-    client.write(format_response(Response.new(error.status, error.reason + "\n"), false, true))
+    response = Response.new(error.status, error.reason + "\n")
+    client.write(format_response(response, false, true))
   end
 
   # The block's answer to *req*, written: whether the connection goes on.
@@ -4458,7 +4460,7 @@ pub struct HTTP
     s = h2.stream(id)
     unlimited = 9223372036854775807_i64
     empty = head || bodiless?(status) || (!s.nil? && s.ended && s.drained?)
-    reader = empty ? BodyReader.new(nil, BodyReader::EMPTY, 0_i64, unlimited) : BodyReader.frames(h2, id, unlimited)
+    reader = empty ? BodyReader.new(String::Builder.new(256), nil, BodyReader::EMPTY, 0_i64, unlimited) : BodyReader.frames(String::Builder.new(256), h2, id, unlimited)
     decoded = false
     if asked && !reader.finished?
       decoded = undo_coding(reader, headers)
@@ -4553,19 +4555,19 @@ pub struct HTTP
   # 1xx, a 204 or a 304; chunks; a length; or the connection's close.
   private def self.body_framing(conn : Conn, status : Int32, fields : Hash(String, String), head : Bool) : BodyReader | HTTPError
     unlimited = 9223372036854775807_i64
-    return BodyReader.new(conn, BodyReader::EMPTY, 0_i64, unlimited) if head || bodiless?(status) || status == 101
+    return BodyReader.new(String::Builder.new(256), conn, BodyReader::EMPTY, 0_i64, unlimited) if head || bodiless?(status) || status == 101
     if te = header_in(fields, "Transfer-Encoding")
       if refused = coding_refused(te)
         return HTTPError.new(refused)
       end
-      return BodyReader.new(conn, BodyReader::CHUNKED, 0_i64, unlimited)
+      return BodyReader.new(String::Builder.new(256), conn, BodyReader::CHUNKED, 0_i64, unlimited)
     end
     if cl = header_in(fields, "Content-Length")
       n = content_length(cl)
       return HTTPError.new("Content-Length is not a number: #{cl.inspect}") unless n
-      return BodyReader.new(conn, BodyReader::LENGTH, n, unlimited)
+      return BodyReader.new(String::Builder.new(256), conn, BodyReader::LENGTH, n, unlimited)
     end
-    BodyReader.new(conn, BodyReader::CLOSE, 0_i64, unlimited)
+    BodyReader.new(String::Builder.new(256), conn, BodyReader::CLOSE, 0_i64, unlimited)
   end
 
   # The answer's `Content-Encoding` undone as the body is read, when it is
@@ -6549,7 +6551,7 @@ class H2Connection
       path = target[0, mark]
       query = target[mark + 1, target.bytesize - mark - 1]
     end
-    reader = s.ended && s.drained? && !s.too_large ? BodyReader.new(nil, BodyReader::EMPTY, 0_i64, @limit) : BodyReader.frames(self, id, @limit)
+    reader = s.ended && s.drained? && !s.too_large ? BodyReader.new(String::Builder.new(256), nil, BodyReader::EMPTY, 0_i64, @limit) : BodyReader.frames(String::Builder.new(256), self, id, @limit)
     Request.new(method, path, query, headers, "HTTP/2", reader, remote)
   end
 

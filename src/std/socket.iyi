@@ -3614,14 +3614,14 @@ pub class Resolver
   getter hosts : String
   # The encrypted upstreams asked instead of `nameservers`; none for a
   # plaintext resolver.
-  getter upstreams : Array(DnsUpstream) = [] of DnsUpstream
+  getter upstreams : Array::View(DnsUpstream) = Array(DnsUpstream).new.view
   # Whether `nameservers` are asked when no upstream could be (RFC 8310's
   # opportunistic profile); false, the strict one, by default.
   getter plaintext_fallback : Bool = false
 
-  @servers : Array(NameServer)
+  @servers : Array::View(NameServer)
   # The servers' address bytes and labels, which each NameServer views.
-  @server_text : String::Builder = String::Builder.new(256)
+  @server_text : String = ""
 
   # *nameservers* are addresses, each with an optional port:
   # `"192.0.2.1"`, `"192.0.2.1:5353"`, `"2001:db8::1"`,
@@ -3638,13 +3638,16 @@ pub class Resolver
     raise "a resolver asks at least once, not #{attempts} times" if attempts < 1
     raise "a resolver's ndots is not negative: #{ndots}" if ndots < 0
     @nameservers = nameservers
-    @upstreams = upstreams.dup
-    @servers = [] of NameServer
+    @upstreams = upstreams.dup.view
+    servers = Array(NameServer).new(nameservers.size)
+    server_text = String::Builder.new(256)
     nameservers.each do |text|
-      server = Resolver.server(text, @server_text)
+      server = Resolver.server(text, server_text)
       raise server if server.is_a?(String)
-      @servers << server
+      servers << server
     end
+    @servers = servers.view
+    @server_text = server_text.finish
   end
 
   # A resolver from a parsed resolv.conf and a hosts file's text: see
@@ -3857,7 +3860,7 @@ pub class Resolver
     end
     # The name exists somewhere the search led, without an address: that
     # is the truer answer than "does not exist".
-    return DnsError.new(kind, host, server, detail) if kind >= 0
+    return DnsError.new(kind, host, String.interpolate(server), String.interpolate(detail)) if kind >= 0
     DnsError.new(DnsError::NOT_FOUND, host)
   end
 
@@ -3910,6 +3913,7 @@ pub class Resolver
   private def addresses(name : String, type : Int32, first : DnsReply | DnsError | Nil, at : DnsLookup) : Array(IPAddress) | DnsError | Cancelled
     found = [] of String
     got = records(name, type, first, at, found)
+    return got.about(name, got.server) if got.is_a?(DnsError)
     return got unless got.is_a?(DnsEnd)
     addresses = Array(IPAddress).new(found.size > 0 ? found.size : 1)
     found.each do |data|

@@ -1684,7 +1684,8 @@ pub class XzReader
     unless dict_limit >= 4096_i64 && dict_limit <= DICT_MAX
       raise "XzReader: a dictionary limit is 4 KiB to 1.5 GiB, not #{dict_limit} bytes"
     end
-    @core = XzCore.new(format, dict_limit, io, head)
+    made_core = XzCore.new(format, dict_limit, io, head)
+    @core = made_core
   end
 
   # Up to *max* decompressed bytes; "" once the stream has ended and

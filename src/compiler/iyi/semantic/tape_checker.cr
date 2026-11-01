@@ -134,8 +134,9 @@ class Iyi::TapeChecker
                       type.to_s.starts_with?("SlicePool::Run(")
       return true if {"Array", "RisTree", "SlicePool"}.includes?(type.generic_type.name)
     end
-    return true if type.to_s == "String::Builder" ||
-                   TapeOwnerChecker.owner?(@program, type)
+    # A class field is a fixed-size reference, including an owner alias.
+    return false if TapeChecker.class_instance?(@program, type)
+    return true if type.to_s == "String::Builder"
     case type
     when UnionType
       return type.union_types.any? { |t| growing_in(t, visiting) }
@@ -165,10 +166,13 @@ class Iyi::TapeChecker
   end
 
   def check_fields(type)
+    # Mixins have no instance storage; check their concrete includers.
+    return if type.is_a?(NonGenericModuleType) ||
+              type.is_a?(GenericModuleType) || type.is_a?(GenericModuleInstanceType)
     if type.is_a?(GenericClassInstanceType) &&
        {"Array", "RisTree"}.includes?(type.generic_type.name)
       type.type_vars.each_value do |var|
-        # An owner element gets the owner checker's own, more exact refusal.
+        # Owner elements are class references, not growing values.
         if var.is_a?(Var) && (element = var.type?) &&
            !TapeOwnerChecker.owner_in(@program, element) && growing_in(element) &&
            !(type.generic_type.name == "Array" &&
@@ -179,30 +183,8 @@ class Iyi::TapeChecker
         end
       end
     end
-    owner = TapeOwnerChecker.owner?(@program, type)
-    if owner && !type.struct?
-      fail type, nil, "@[Owner] requires a struct; declare one owner per scope"
-    end
-    if type.is_a?(InstanceVarContainer)
-      type.instance_vars.each_value do |ivar|
-        if field_type = ivar.type?
-          if TapeOwnerChecker.owner_in(@program, field_type)
-            # An owner held in an Array or RisTree (its own storage, or
-            # a SlicePool's) is in a container, not in a field.
-            container = [type, field_type].find do |held|
-              held.is_a?(GenericClassInstanceType) &&
-                {"Array", "RisTree"}.includes?(held.generic_type.name)
-            end
-            if container
-              fail type, nil, "cannot store an owner in a container, " \
-                              "tuple or union: #{container}; borrow it: " \
-                              "pass the owner variable"
-            end
-            fail type, ivar, "cannot store an owner in a field; " \
-                             "borrow it: pass the owner variable"
-          end
-        end
-      end
+    if type.is_a?(ClassType) && type.ancestors.any? { |t| TapeOwnerChecker.owner?(@program, t) }
+      fail type, nil, "cannot subclass an owner; use a field referencing a named owner"
     end
     tape = TapeChecker.tape?(@program, type)
     if tape && !type.struct? && !TapeChecker.class_instance?(@program, type)

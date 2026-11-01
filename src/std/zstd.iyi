@@ -149,24 +149,24 @@ end
 # to add to it.
 class FseTable
   getter log : Int32
-  getter symbol : Array(UInt8)
-  getter bits : Array(UInt8)
-  getter base : Array(Int32)
-  @next : Array(Int32)
+  getter symbol : Array::View(UInt8)
+  getter bits : Array::View(UInt8)
+  getter base : Array::View(Int32)
+  @next : Array::View(Int32)
 
   def initialize
     @log = 0
-    @symbol = Array(UInt8).new(512, 0_u8)
-    @bits = Array(UInt8).new(512, 0_u8)
-    @base = Array(Int32).new(512, 0)
-    @next = Array(Int32).new(256, 0)
+    @symbol = Array(UInt8).new(512, 0_u8).view
+    @bits = Array(UInt8).new(512, 0_u8).view
+    @base = Array(Int32).new(512, 0).view
+    @next = Array(Int32).new(256, 0).view
   end
 
   # From a normalized distribution whose probabilities fill the table:
   # the "less than one" symbols (-1) take the top cells, one each; the
   # rest are spread with the step the format fixes, so both ends of the
   # stream lay the table out the same.
-  def build(norm : Array(Int32), nsym : Int32, log : Int32) : Nil
+  def build(norm : Array::View(Int32), nsym : Int32, log : Int32) : Nil
     @log = log
     size = 1 << log
     high = size - 1
@@ -326,7 +326,8 @@ class Decoder
     @norm = Array(Int32).new(256, 0)
     @huf = Array(Int32).new(2048, 0)
     @huf_bits = 0
-    @wfse = FseTable.new
+    made_wfse = FseTable.new
+    @wfse = made_wfse
     @codes = Codes.new
     @pre = [Decoder.predefined(Codes::LL_NORM, 6), Decoder.predefined(Codes::OF_NORM, 5), Decoder.predefined(Codes::ML_NORM, 6)]
     @custom = [FseTable.new, FseTable.new, FseTable.new]
@@ -1308,7 +1309,8 @@ pub class ZstdReader
   # a frame that asks for more is refused rather than given the memory.
   # A limit outside 1 KiB to 512 MiB is a panic.
   def initialize(io : IyiIO?, max_window : Int32 = Zstd::WINDOW_LIMIT, head : String = "")
-    @core = Decoder.new(head, max_window)
+    core = Decoder.new(head, max_window)
+    @core = core
     @core.over_io(io)
   end
 

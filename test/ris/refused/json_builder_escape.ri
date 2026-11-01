@@ -2,6 +2,7 @@ import std/json::{Builder}
 
 kept = nil
 tape do
-  kept = Builder.new
+  local_builder = Builder.new
+  kept = local_builder
 end
 puts kept.nil?

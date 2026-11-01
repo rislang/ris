@@ -44,6 +44,13 @@ class Iyi::TapeScopeChecker
     body.is_a?(Call) && body.name != "raise"
   end
 
+  # Named-argument wrappers are constructors too: their fields and
+  # temporaries are built in the caller's destination.
+  def self.constructor?(node : Def) : Bool
+    node.name == "new" || node.name.starts_with?("new:") ||
+      node.name == "initialize" || node.name.starts_with?("initialize:")
+  end
+
   def self.mark(program : Program, node : While | Block | Def) : Nil
     return if !program.tape_scopes? || !program.tape_platform? ||
               TapeScopeRuntime.runtime?(node.location) ||
@@ -62,7 +69,7 @@ class Iyi::TapeScopeChecker
     return if parts(body)
     # A constructor builds in its caller's destination.
     return if node.is_a?(Def) &&
-              (node.abstract? || node.name == "initialize" || node.name == "new")
+              (node.abstract? || constructor?(node))
     return if node.is_a?(Def) && one_call?(body)
     # A block that declares methods or types is a macro's body (`record
     # ... do def ... end end`), not code that runs: wrapping it would put

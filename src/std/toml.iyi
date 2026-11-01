@@ -855,8 +855,7 @@ pub struct TapeTable
 end
 
 # Conversion arrays are accumulated outside the recursive table walk.
-@[Owner]
-struct TapeConversionScratch
+class TapeConversionScratch
   getter used : Int32
   getter pairs : SlicePool(TapePair(TapeAny)?)
 

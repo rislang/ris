@@ -17,7 +17,8 @@ def hex(v : UInt32) : String
 end
 
 def list(data : String) : Nil
-  reader = TarReader.new(Memory.new(data))
+  source = Memory.new(data)
+  reader = TarReader.new(source)
   while true
     entry = reader.next_entry
     if entry.is_a?(TarError)

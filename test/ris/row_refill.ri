@@ -35,4 +35,5 @@ def drive(reader : RowReader) : Nil
     puts got[0]
   end
 end
-drive(RowReader.new)
+driven = RowReader.new
+drive(driven)

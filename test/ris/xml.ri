@@ -1,6 +1,6 @@
 module test/xml_tape
 
-import std/xml::{parse, parse?, escape, unescape?, TapeNode}
+import std/xml::{parse, parse?, escape, unescape?, TapeNode, XmlTree}
 
 # std/xml on the caller's tape: a document read into one node array, its
 # names, attributes, namespaces and text, written back and read again,
@@ -36,7 +36,8 @@ tape do
   copied = doc.copy_to(Program.tape)
   puts copied.to_xml == rendered
 
-  built = TapeNode.document
+  tree = XmlTree.new
+  built = TapeNode.document(tree)
   top = built.add_element("list")
   top.set_attribute("kind", "a<b")
   entry = top.add_element("entry")

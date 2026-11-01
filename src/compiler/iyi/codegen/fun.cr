@@ -606,7 +606,7 @@ class Iyi::CodeGenVisitor
       if arg_type.void?
         llvm_arg_type = llvm_context.int8
       elsif indirect && !arg.special_var? &&
-            (TapeOwnerChecker.owner?(@program, arg_type) || passed_indirectly?(arg_type))
+            passed_indirectly?(arg_type)
         llvm_arg_type = llvm_context.void_pointer
       else
         llvm_arg_type = llvm_type(arg_type)
@@ -927,14 +927,6 @@ class Iyi::CodeGenVisitor
     # bytes (`LLVMTyper#passed_indirectly?`), which is the form `assign`
     # takes it in, and is copied from there into this function's own slot
     # before anything else runs. A block's arguments arrive the same way.
-    if !target_def.is_a?(External) &&
-       TapeOwnerChecker.owner?(@program, arg.type)
-      # Keep the caller's slot: copying the header loses field growth.
-      value = declare_debug_for_function_argument(arg.name, var_type, index + 1, value, location) unless target_def.naked?
-      context.vars[arg.name] = LLVMVar.new(value, var_type)
-      return
-    end
-
     in_memory = arg.type.passed_by_value? && value.type.kind.pointer?
 
     if closure_var = context.vars[arg.name]?

@@ -27,7 +27,8 @@ tape do
     puts "#{row.line} #{row["name"]}=#{row["says"].bytesize}"
   end
 
-  stream = CSVReader.new(Memory.new("a; b ;c\n x ;\"y\"\n"), separator: ';', strip: true)
+  stream_source = Memory.new("a; b ;c\n x ;\"y\"\n")
+  stream = CSVReader.new(stream_source, separator: ';', strip: true)
   while got = stream.next_row
     break if got.is_a?(CSVError)
     puts got.join("/")

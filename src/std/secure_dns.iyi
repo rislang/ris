@@ -119,7 +119,7 @@ pub class DnsOverTls
   @used_ms : Int64 = 0_i64
   # What the connection has delivered and no answer has taken yet.
   @pending : Array(UInt8) = [] of UInt8
-  @session : TlsSession = TlsSession.new
+  @session : TlsSession
 
   # *name* is what the server's certificate is checked for and *address*
   # where it is; *config* holds the roots it must chain to (the system's
@@ -127,6 +127,8 @@ pub class DnsOverTls
   # or an address that is not one, is the program's mistake and refused
   # here.
   def initialize(@name : String, @address : String, @port : Int32 = PORT, config : TlsConfig? = nil, @idle_ms : Int32 = IDLE_MS)
+    session = TlsSession.new
+    @session = session
     why = DnsName.why(@name)
     raise "DNS over TLS: #{@name.inspect} is not a name to check the server by: #{why}" if why.is_a?(String)
     read = @address.includes?(":") ? IyiSocket.read_ipv6(@address) : IyiSocket.read_ipv4(@address)

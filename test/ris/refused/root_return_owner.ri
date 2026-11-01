@@ -1,5 +1,4 @@
-@[Owner]
-struct ReturnOwner
+class ReturnOwner
   getter bytes = String::Builder.new
 end
 

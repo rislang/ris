@@ -1,8 +1,8 @@
 # A reusable cache entry owned by its server/session, not by a request.
 # Keep one named owner. Borrow it in handlers; copy incoming bytes into
 # its typed pool and write outgoing bytes into the caller's builder.
-@[Owner]
-struct RisByteCache
+@[OnTape]
+class RisByteCache
   @bytes : SlicePool(UInt8)
   @entry : SlicePool::Run(UInt8)?
 

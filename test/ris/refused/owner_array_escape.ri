@@ -1,0 +1,10 @@
+class Workspace
+  getter items = Array(Int32).new
+end
+
+owners = Array(Workspace).new
+tape do
+  owner = Workspace.new
+  owners << owner
+  nil
+end

@@ -1,6 +1,5 @@
 # initialize fills its own fields in place.
-@[Owner]
-struct Filled
+class Filled
   getter items = Array(Int32).new
 
   def initialize
@@ -8,8 +7,7 @@ struct Filled
   end
 end
 
-@[Owner]
-struct Workspace
+class Workspace
   getter left : Array(Int32)
   getter right : Array(Int32)
   property ticks = 0
@@ -39,9 +37,8 @@ struct Workspace
   end
 end
 
-# Exercise the memory-passed ABI as well as the small Workspace ABI.
-@[Owner]
-struct LargeWorkspace
+# Exercise a larger owner through ordinary class references.
+class LargeWorkspace
   getter padding = {
     0_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64,
     0_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64,
@@ -120,12 +117,11 @@ tape do
   grow(borrowed, effect)
   raise "argument storage" unless borrowed.ticks == 3
   raise "argument snapshot" unless count(borrowed) == 401
-  # At -O0 new returns a temporary header, copied into each final slot.
-  # Only numeric addresses escape initialize; no view may observe it.
-  raise "program construction copy" if ROOT.initial_header == ROOT.header_address
+  # Class construction initializes the final instance in place.
+  raise "program construction copy" unless ROOT.initial_header == ROOT.header_address
   raise "program owner" unless ROOT.left.empty?
   workspace = Workspace.new
-  raise "local construction copy" if workspace.initial_header == workspace.header_address
+  raise "local construction copy" unless workspace.initial_header == workspace.header_address
   100.times do |i|
     workspace.left << i
     workspace.right << i * 2

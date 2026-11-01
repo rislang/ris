@@ -369,8 +369,7 @@ pub struct AutocertOrder
 end
 
 # A view and its parsed identities belong to exactly one serving task.
-@[OnTape]
-pub class AutocertView
+module RisAutocertViewState
   ACCOUNT_KEY = "acme_account+key"
   MAX_RETRY_MS = 3600000_i64
   getter config : AutocertConfig
@@ -587,9 +586,19 @@ pub class AutocertView
   end
 end
 
+@[OnTape]
+pub class AutocertView
+  include RisAutocertViewState
+
+  def self.normalize(host : String) : String
+    RisAutocertViewState.normalize(host)
+  end
+end
+
 # Protocol state belongs to this flight alone. Only files cross tasks.
 @[OnTape]
-pub class AutocertIssuer < AutocertView
+pub class AutocertIssuer
+  include RisAutocertViewState
   @client : AcmeClient? = nil
   @transport : HTTPClient? = nil
   # Each challenge's failure, refilled per order: an order's protocol calls

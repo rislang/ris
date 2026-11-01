@@ -30,5 +30,7 @@ def exercise(outer : Outer) : Nil
 end
 
 tape do
-  exercise(Outer.new(Middle.new(String::Builder.new, Inner.new(String::Builder.new))))
+  inner = Inner.new(String::Builder.new)
+  middle = Middle.new(String::Builder.new, inner)
+  exercise(Outer.new(middle))
 end

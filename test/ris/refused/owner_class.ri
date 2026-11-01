@@ -1,4 +1,8 @@
-@[Owner]
-class Bad
+class Workspace
+  getter items = Array(Int32).new
 end
+
+class Bad < Workspace
+end
+
 bad = Bad.new

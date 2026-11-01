@@ -1,8 +1,7 @@
 # A panic in initialize must release both already-built fields with the
 # enclosing tape. Repeated task scopes must not retain their mappings.
 # Both growing fields reserve stable storage before initialize fails.
-@[Owner]
-struct BrokenOwner
+class BrokenOwner
   getter left : Array(Int32)
   getter right : Array(Int32)
 

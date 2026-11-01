@@ -706,8 +706,7 @@ module TapeScalar
 end
 
 # Conversion scratch belongs to the public entry, outside the view cycle.
-@[Owner]
-struct TapeViewScratch
+class TapeViewScratch
   getter items : Array(TapeValue)
   getter pool : SlicePool(TapeValue)
   property used : Int32

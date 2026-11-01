@@ -132,7 +132,8 @@ class BitWriter
   @cnt : Int32
 
   def initialize(cap : Int32)
-    @bytes = ByteBuffer.new(cap)
+    made_bytes = ByteBuffer.new(cap)
+    @bytes = made_bytes
     @acc = 0_u64
     @cnt = 0
   end
@@ -198,13 +199,13 @@ end
 # canonical code needs, and a table of the short codes. `Inflate#decode`
 # reads a symbol with them.
 class Huffman
-  getter count : Array(Int32)
-  getter symbol : Array(Int32)
+  getter count : Array::View(Int32)
+  getter symbol : Array::View(Int32)
   # Every code of `FAST` bits or fewer, by the next `FAST` bits of the
   # stream in the order they arrive: the symbol shifted up by four over
   # the code's length, or 0 where the code is longer. `decode` looked
   # every code up a bit at a time, which was most of inflating.
-  getter fast : Array(Int32)
+  getter fast : Array::View(Int32)
   # What the lengths leave of the 2^15 bit patterns: 0 for a complete
   # code, 2^15 for no codes at all, below 0 for lengths that claim more
   # patterns than there are.
@@ -217,10 +218,10 @@ class Huffman
   # The lengths are at most 15 by construction: the code-length code's
   # are three bits, and the symbols it decodes to are 0 to 15.
   # *n* lengths of *lengths* from *at*.
-  def initialize(lengths : Array(Int32), n : Int32, at : Int32 = 0)
-    @count = Array(Int32).new(16, 0)
-    @symbol = Array(Int32).new(n + 1, 0)
-    @fast = Array(Int32).new(1 << FAST, 0)
+  def initialize(lengths : Array::View(Int32), n : Int32, at : Int32 = 0)
+    @count = Array(Int32).new(16, 0).view
+    @symbol = Array(Int32).new(n + 1, 0).view
+    @fast = Array(Int32).new(1 << FAST, 0).view
     @left = 0
     build(lengths, n, at)
   end
@@ -228,18 +229,18 @@ class Huffman
   # Room for *n* symbols, built later with `build`: a decoder rebuilds
   # one table per dynamic block in place rather than making a new one.
   def initialize(n : Int32)
-    @count = Array(Int32).new(16, 0)
-    @symbol = Array(Int32).new(n + 1, 0)
-    @fast = Array(Int32).new(1 << FAST, 0)
+    @count = Array(Int32).new(16, 0).view
+    @symbol = Array(Int32).new(n + 1, 0).view
+    @fast = Array(Int32).new(1 << FAST, 0).view
     @left = 0
   end
 
   # The table for *n* lengths of *lengths* from *at*, over what it held;
   # *n* is at most the size it was made for.
-  def build(lengths : Array(Int32), n : Int32, at : Int32 = 0) : Nil
-    @count.fill(0)
-    @symbol.fill(0)
-    @fast.fill(0)
+  def build(lengths : Array::View(Int32), n : Int32, at : Int32 = 0) : Nil
+    @count.size.times { |i| @count[i] = 0 }
+    @symbol.size.times { |i| @symbol[i] = 0 }
+    @fast.size.times { |i| @fast[i] = 0 }
     i = 0
     while i < n
       @count[lengths[at + i]] = @count[lengths[at + i]] + 1
@@ -1282,7 +1283,8 @@ pub class Deflater
   # `max_window_bits`. Anything else for either is a panic.
   def initialize(@envelope : Envelope, @level : Int32 = 6, window_bits : Int32 = 15)
     raise "Deflater: window_bits #{window_bits} is not 8 to 15" if window_bits < 8 || window_bits > 15
-    @core = Encoder.new(@level, -1, 1 << window_bits)
+    made_core = Encoder.new(@level, -1, 1 << window_bits)
+    @core = made_core
     @started = false
     @finished = false
     @check = @envelope == Envelope::Zlib ? 1_u32 : 0_u32
@@ -1691,17 +1693,22 @@ class Encoder
     @lfreq = Array(Int32).new(288, 0)
     @dfreq = Array(Int32).new(32, 0)
     @blfreq = Array(Int32).new(32, 0)
-    @lit = Tree.new(286)
-    @dist = Tree.new(30)
-    @bl = Tree.new(19)
-    @fixed_lit = Tree.new(288)
+    made_lit = Tree.new(286)
+    @lit = made_lit
+    made_dist = Tree.new(30)
+    @dist = made_dist
+    made_bl = Tree.new(19)
+    @bl = made_bl
+    made_fixed_lit = Tree.new(288)
+    @fixed_lit = made_fixed_lit
     s = 0
     while s < 288
       @fixed_lit.len[s] = s < 144 ? 8 : (s < 256 ? 9 : (s < 280 ? 7 : 8))
       s = s + 1
     end
     @fixed_lit.assign_codes
-    @fixed_dist = Tree.new(30)
+    made_fixed_dist = Tree.new(30)
+    @fixed_dist = made_fixed_dist
     s = 0
     while s < 30
       @fixed_dist.len[s] = 5
@@ -1746,7 +1753,8 @@ class Encoder
       end
       code = code + 1
     end
-    @out = BitWriter.new(hint >= 0 ? hint // 2 + 64 : 1024)
+    made_out = BitWriter.new(hint >= 0 ? hint // 2 + 64 : 1024)
+    @out = made_out
   end
 
   # *data* as one final stream.

@@ -14,8 +14,7 @@ struct NestedText
   end
 end
 
-@[Owner]
-struct SeparateFields
+class SeparateFields
   property held : String = ""
   getter left = String::Builder.new
   getter right = String::Builder.new

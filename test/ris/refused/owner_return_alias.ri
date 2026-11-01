@@ -1,0 +1,11 @@
+class Workspace
+  getter items = Array(Int32).new
+end
+
+def escaped
+  owner = Workspace.new
+  alias_owner = owner
+  alias_owner
+end
+
+result = escaped

@@ -25,15 +25,6 @@ refusal of a file at once, fix by message, rerun only that cluster's
 files; one full check.sh on minitest per finished step, not per fix.
 Fix a checker hole below only when a cluster hits it.
 
-1. Owners are classes (SPEC 2.1, 2.3). A class with a growing field is
-   the owner: build it only at a named declaration or by copy_to, end
-   it with that scope, refuse subclasses and a def returning its own
-   local owner; allow `b = a`, fields, Array elements, nilables;
-   copy_to deep-copies it. Remove @[Owner] and the struct-owner checks
-   and pass-by-pointer codegen (tape_owner_checker.cr, call.cr,
-   fun.cr). Move src/std/yaml.iyi and toml.iyi owners and
-   test/ris/refused/owner_*.ri to the new rules. Every refusal names
-   its safe form. Gate: the owner_* refused tests and allowed.ri.
 2. Docs to the SPEC (doc-only: no build, no check.sh). Run
    `/egm:egm-drift-report` on AGENTS.md, LEARN.md, README.md and
    UPSTREAM.md (CONTRIBUTING.md, Design checks) and fix the drift; the

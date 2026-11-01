@@ -1,5 +1,4 @@
-@[Owner]
-struct ViewOwner
+class ViewOwner
   property text : String = ""
 end
 

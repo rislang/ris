@@ -1410,7 +1410,6 @@ module Iyi
       types["OnTape"] = @tape_annotation = AnnotationType.new self, self, "OnTape"
       types["TaskClosureUnsafe"] = @task_closure_unsafe_annotation =
         AnnotationType.new self, self, "TaskClosureUnsafe"
-      types["Owner"] = @owner_annotation = AnnotationType.new self, self, "Owner"
       # ris: `@[TapeToHeap]` on a def lets it copy a `Str` off the tape
       # with `to_s`; elsewhere `Iyi::TapeEscapeChecker` refuses that copy.
       types["TapeToHeap"] = @tape_to_heap_annotation =
@@ -1765,7 +1764,7 @@ module Iyi
                      always_inline_annotation naked_annotation returns_twice_annotation
                      raises_annotation primitive_annotation call_convention_annotation
                      flags_annotation link_annotation extern_annotation deprecated_annotation experimental_annotation
-                     share_annotation tape_annotation owner_annotation tape_to_heap_annotation check_free_annotation
+                     share_annotation tape_annotation tape_to_heap_annotation check_free_annotation
                      tape_unsafe_annotation task_closure_unsafe_annotation
                      error_trait) %}
       def {{name.id}}

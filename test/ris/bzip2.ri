@@ -28,7 +28,8 @@ tape do
     if got.is_a?(Bzip2Error)
       puts "#{pair[0]} #{got.message}"
     else
-      reader = Bzip2Reader.new(Memory.new(data))
+      source = Memory.new(data)
+      reader = Bzip2Reader.new(source)
       pieces = 0
       sum = 0_u32
       size = 0

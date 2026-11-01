@@ -2,8 +2,7 @@
 @[Ffi]
 module call_graph_target
 
-@[Owner]
-struct Workspace
+class Workspace
   getter bytes : Array(UInt8)
 
   def initialize

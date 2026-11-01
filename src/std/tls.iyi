@@ -1007,7 +1007,7 @@ end
 # What either end of a connection does once it has keys: records read and
 # written under them, alerts, KeyUpdate, close_notify. `TlsClient` and
 # `TlsServer` are its two ends; each runs its own half of the handshake.
-pub abstract class TlsConnection
+module RisTlsConnectionState
   # The protocol chosen by ALPN, if one was.
   getter alpn_protocol : String? = nil
   getter cipher_suite : String = ""
@@ -1164,7 +1164,7 @@ pub abstract class TlsConnection
   end
 
   private def group_name(group : Int32) : String
-    TlsConnection.group_name(group)
+    RisTlsConnectionState.group_name(group)
   end
 
   # An ephemeral key in *group*, secp256r1 or secp384r1: d drawn until it
@@ -1180,9 +1180,6 @@ pub abstract class TlsConnection
         return key if key.is_a?(P256PrivateKey)
       end
     end
-  end
-
-  def initialize(@socket : IyiSocket, @peer : String, @place : String)
   end
 
   # Whether this is the server's end.
@@ -1519,7 +1516,7 @@ pub abstract class TlsConnection
   # The peer's KeyUpdate taken: its next secret and the cipher under it,
   # both refilled in place (a def's new Array is freed when it ends).
   private def take_key_update : Nil
-    TlsConnection.refill(@read_secret, @schedule.next_secret(@read_secret))
+    RisTlsConnectionState.refill(@read_secret, @schedule.next_secret(@read_secret))
     if reader = @reader
       reader.rekey(@suite, @schedule, @read_secret)
     end
@@ -1534,7 +1531,7 @@ pub abstract class TlsConnection
   private def send_key_update(request : Bool) : TlsError?
     sent = send_protected(TlsRecords::HANDSHAKE, TlsBytes.message(24, [request ? 1_u8 : 0_u8]))
     return sent if sent
-    TlsConnection.refill(@write_secret, @schedule.next_secret(@write_secret))
+    RisTlsConnectionState.refill(@write_secret, @schedule.next_secret(@write_secret))
     if writer = @writer
       writer.rekey(@suite, @schedule, @write_secret)
     end
@@ -1994,7 +1991,7 @@ pub abstract class TlsConnection
         return passed if passed
         next
       end
-      TlsConnection.refill(@record_content, body)
+      RisTlsConnectionState.refill(@record_content, body)
       return type
     end
   end
@@ -2017,7 +2014,7 @@ pub abstract class TlsConnection
         next
       end
       if type == TlsRecords::ALERT && (@reader.nil? || @handshaking)
-        TlsConnection.refill(@record_content, body)
+        RisTlsConnectionState.refill(@record_content, body)
         return type
       end
       return tls_error("a record of type #{type} where a protected one belongs", TlsAlert::UNEXPECTED_MESSAGE) unless type == TlsRecords::APPLICATION_DATA
@@ -2198,8 +2195,38 @@ pub abstract class TlsConnection
   end
 end
 
+# The common interface owns no storage; concrete connections own theirs.
+pub abstract class TlsConnection
+  HELLO_RETRY = RisTlsConnectionState::HELLO_RETRY
+  DOWNGRADE_TLS12 = RisTlsConnectionState::DOWNGRADE_TLS12
+  DOWNGRADE_TLS11 = RisTlsConnectionState::DOWNGRADE_TLS11
+  MAX_HANDSHAKE = RisTlsConnectionState::MAX_HANDSHAKE
+  MAX_CCS = RisTlsConnectionState::MAX_CCS
+  HANDSHAKE_TIMEOUT_MS = RisTlsConnectionState::HANDSHAKE_TIMEOUT_MS
+  GROUP_X25519MLKEM768 = RisTlsConnectionState::GROUP_X25519MLKEM768
+  GROUP_X25519 = RisTlsConnectionState::GROUP_X25519
+  GROUP_SECP256R1 = RisTlsConnectionState::GROUP_SECP256R1
+  GROUP_SECP384R1 = RisTlsConnectionState::GROUP_SECP384R1
+  GROUPS12 = RisTlsConnectionState::GROUPS12
+  GROUPS = RisTlsConnectionState::GROUPS
+  HYBRID_CLIENT_SHARE = RisTlsConnectionState::HYBRID_CLIENT_SHARE
+  HYBRID_SERVER_SHARE = RisTlsConnectionState::HYBRID_SERVER_SHARE
+  OUTBOX_SIZE = RisTlsConnectionState::OUTBOX_SIZE
+  DRAIN_BYTES = RisTlsConnectionState::DRAIN_BYTES
+  DRAIN_GAP_MS = RisTlsConnectionState::DRAIN_GAP_MS
+  DRAIN_MS = RisTlsConnectionState::DRAIN_MS
+  LINGER_BYTES = RisTlsConnectionState::LINGER_BYTES
+  LINGER_MS = RisTlsConnectionState::LINGER_MS
+  INBOX_SIZE = RisTlsConnectionState::INBOX_SIZE
+
+  def self.group_name(group : Int32) : String
+    RisTlsConnectionState.group_name(group)
+  end
+end
+
 # A connection to a server, its handshake done.
 pub class TlsClient < TlsConnection
+  include RisTlsConnectionState
   @host : String
   @config : TlsConfig
   # *host* as server_name carries it and the certificate is checked for
@@ -2240,7 +2267,9 @@ pub class TlsClient < TlsConnection
   SIGNATURE_SCHEMES = StaticArray[0x0403, 0x0503, 0x0603, 0x0807, 0x0804, 0x0805, 0x0806, 0x0401, 0x0501, 0x0601]
 
   def initialize(socket : IyiSocket, @host : String, @config : TlsConfig, @session : TlsSession? = nil)
-    super(socket, "the server", @host)
+    @socket = socket
+    @peer = "the server"
+    @place = @host
   end
 
   # *host* in the form RFC 6066 section 3 gives server_name: "the
@@ -4004,7 +4033,7 @@ pub class TlsServerConfig
   # comes early must still be safe to act on twice.
   property max_early_data : Int32 = 0
   # What refuses early data a server has taken before (RFC 8446 section 8).
-  getter replay_guard : TlsReplayGuard = TlsReplayGuard.new
+  getter replay_guard : TlsReplayGuard
   # The keys an encrypted ClientHello (RFC 9849) is opened with, as a
   # client-facing server in shared mode, which is its own backend: one
   # whose ECHClientHello names a key's config_id and suite and opens under
@@ -4027,7 +4056,7 @@ pub class TlsServerConfig
   def group_codes : Array(Int32)
     codes = [] of Int32
     @groups.each do |name|
-      code = TlsConnection::GROUPS.find { |group| TlsConnection.group_name(group) == name }
+      code = RisTlsConnectionState::GROUPS.find { |group| RisTlsConnectionState.group_name(group) == name }
       codes << code if code && !codes.includes?(code)
     end
     codes
@@ -4059,6 +4088,8 @@ pub class TlsServerConfig
   end
 
   def initialize(@identity : TlsIdentity)
+    replay_guard = TlsReplayGuard.new
+    @replay_guard = replay_guard
   end
 
   # *identity* shown to a client asking for a host its certificate names.
@@ -4504,7 +4535,7 @@ class TlsOffer
   def chosen_group(preferred : Array(Int32)) : Int32
     preferred.each do |group|
       next unless @groups.includes?(group)
-      return group if group == TlsConnection::GROUP_X25519MLKEM768 || !share(group).nil?
+      return group if group == RisTlsConnectionState::GROUP_X25519MLKEM768 || !share(group).nil?
     end
     0
   end
@@ -4517,10 +4548,10 @@ class TlsOffer
 
   def share(group : Int32) : Array(UInt8)?
     case group
-    when TlsConnection::GROUP_X25519MLKEM768 then @hybrid
-    when TlsConnection::GROUP_X25519         then @x25519
-    when TlsConnection::GROUP_SECP256R1      then @p256
-    when TlsConnection::GROUP_SECP384R1      then @p384
+    when RisTlsConnectionState::GROUP_X25519MLKEM768 then @hybrid
+    when RisTlsConnectionState::GROUP_X25519         then @x25519
+    when RisTlsConnectionState::GROUP_SECP256R1      then @p256
+    when RisTlsConnectionState::GROUP_SECP384R1      then @p384
     else                                          nil
     end
   end
@@ -4554,6 +4585,7 @@ end
 # nothing newer - its certificate's key (Ed25519, P-256, P-384 or RSA)
 # signing for it.
 pub class TlsServer < TlsConnection
+  include RisTlsConnectionState
   # The host the client named (server_name, RFC 6066), if it named one.
   getter server_name : String? = nil
   # The certificate and key this connection was shown under: the config's
@@ -4575,7 +4607,9 @@ pub class TlsServer < TlsConnection
   MAX_HOST_NAME = 253
 
   def initialize(socket : IyiSocket, @config : TlsServerConfig)
-    super(socket, "the client", "the client")
+    @socket = socket
+    @peer = "the client"
+    @place = "the client"
     @identity = @config.identity
   end
 

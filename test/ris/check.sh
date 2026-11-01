@@ -469,7 +469,6 @@ done
 expect nested_run_overwrite 'cannot shrink tape storage with a live view'
 expect growing_tree 'use SlicePool(T)'
 expect growing_field 'use SlicePool(T)'
-expect growing_owner 'cannot store an owner in a container'
 expect growing_union 'use SlicePool(T)'
 expect growing_recursive 'use SlicePool(T)'
 expect shrink_element 'use SlicePool(T)'
@@ -480,8 +479,8 @@ out=$(
   graph_probe="$graph_dir/call_graph_target.ri"
   for checker in owner pointer; do
     if [ "$checker" = owner ]; then
-      operation='a = Workspace.new; b = a'
-      needle='cannot copy or reassign an owner'
+      operation='a = Workspace.new; a = Workspace.new'
+      needle='owner construction requires a named declaration'
     else
       operation='text = String.new("abc"); text.to_unsafe'
       needle='to_unsafe` of a String outside a @[TapeUnsafe] def'
@@ -682,31 +681,18 @@ else
   status=1
 fi
 
-# B1 storage restrictions; B2 ordinary def and receiver borrows.
+# Owners are classes; construction requires a named declaration.
 expect owner_temporary 'owner temporary requires a named declaration'
 expect owner_inline 'owner temporary requires a named declaration'
-expect owner_copy 'cannot copy or reassign an owner'
-expect owner_reassign 'cannot copy or reassign an owner'
-expect owner_field 'cannot store an owner in a field'
-expect owner_class_field 'cannot store an owner in a field'
-expect owner_ary 'cannot store an owner'
-expect owner_array 'cannot store an owner'
-expect owner_hash 'cannot store an owner'
-expect owner_tuple 'cannot store an owner in a container, tuple or union'
-expect owner_union 'cannot store an owner in a container, tuple or union'
-expect owner_return 'cannot return an owner from a def'
-expect owner_implicit_return 'cannot return an owner from a def'
-for name in param explicit_param program explicit_program self local; do
-  expect "owner_return_$name" \
-    'cannot return an owner from a def; return a field view (String/Array) or take the owner as an argument'
+expect owner_reassign 'owner construction requires a named declaration'
+for name in return implicit_return return_local; do
+  expect "owner_$name" 'cannot return an owner from a def'
 done
-expect owner_class 'requires a struct'
-expect owner_copy 'borrow it: pass the owner variable'
-expect owner_proc_argument 'owner arguments require a direct def call'
-for name in self field alias typed_alias getter helper; do
-  expect "owner_initialize_$name" \
-    "cannot publish self or a field view from an owner's initialize"
-done
+expect owner_class 'cannot subclass an owner'
+expect owner_element 'owner temporary requires a named declaration'
+expect owner_field_initializer 'owner temporary requires a named declaration'
+expect owner_return_alias 'cannot return an owner from a def'
+expect owner_array_escape 'cannot store a view beyond its owner scope'
 out=$("$RIS" run test/ris/owners.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = 'PASS: owner fields' ]; then
   echo "runs     owners"
@@ -732,22 +718,6 @@ else
   echo "FAILED   owner_construction_panic: $out"
   status=1
 fi
-
-# -O0 construction copies a private temporary into local/program storage.
-owner_ir=$(mktemp -d)
-if "$RIS" build --emit llvm-ir -o "$owner_ir/owners" \
-    test/ris/owners.ri >"$owner_ir/log" 2>&1 &&
-    grep -qE '^define internal %Workspace .*Workspace::new' \
-      "$owner_ir/owners.ll" &&
-    grep -qE 'Workspace#initialize.*ptr %_' "$owner_ir/owners.ll" &&
-    grep -qE 'store %Workspace .*ptr %workspace,' "$owner_ir/owners.ll" &&
-    grep -qE 'store %Workspace .*ptr @ROOT,' "$owner_ir/owners.ll"; then
-  echo "lowers   owners (private constructor copy)"
-else
-  echo "FAILED   owners (construction): $(cat "$owner_ir/log")"
-  status=1
-fi
-rm -rf "$owner_ir"
 
 # Deep copies preserve concrete and inherited fields, splitting sharing.
 out=$("$RIS" run test/ris/class_copy.ri 2>&1)

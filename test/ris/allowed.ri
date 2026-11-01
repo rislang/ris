@@ -41,3 +41,154 @@ tape do
   copied = page.items[0].user.copy_to(Program.tape)
 end
 puts copied
+
+# SPEC 2.1: owners have class reference semantics in every holder.
+pub class Workspace
+  getter items = Array(Int32).new
+
+  def initialize
+    # Passing the final instance and its fields does not copy the header.
+    accept(self)
+    accept_items(@items)
+  end
+
+  def accept(other : Workspace)
+    nil
+  end
+
+  def accept_items(items : Array(Int32))
+    nil
+  end
+
+  def identity
+    self
+  end
+end
+
+@[OnTape]
+struct OwnerHolder
+  getter owner : Workspace
+  def initialize(@owner); end
+end
+
+class OwnerClassHolder
+  getter owner : Workspace
+  def initialize(@owner); end
+end
+
+def owner_identity(w : Workspace)
+  w
+end
+
+def owner_explicit_identity(w : Workspace)
+  return w
+end
+
+ROOT_OWNER = Workspace.new
+
+def program_owner
+  ROOT_OWNER
+end
+
+def explicit_program_owner
+  return ROOT_OWNER
+end
+
+tape do
+  owner = Workspace.new
+  optional_new : Workspace? = Workspace.new
+  other = owner
+  other.items << 7
+  raise "owner alias" unless owner.items[0] == 7
+  holder = OwnerHolder.new(owner)
+  class_holder = OwnerClassHolder.new(owner)
+  owners = Array(Workspace).new
+  owners << owner
+  tuple = {owner, 1}
+  optional : Workspace? = owner
+  callback = ->(w : Workspace) { w.items.size }
+  raise "owner callback" unless callback.call(owner) == 1
+  raise "owner field" unless holder.owner.items[0] == 7
+  raise "owner class field" unless class_holder.owner.items[0] == 7
+  raise "owner element" unless owners[0].items[0] == 7
+  raise "owner tuple" unless tuple[0].items[0] == 7
+  raise "owner nilable" unless optional.items[0] == 7
+  raise "owner return" unless owner_identity(owner).items[0] == 7
+  raise "owner return" unless owner_explicit_identity(owner).items[0] == 7
+  raise "owner self" unless owner.identity.items[0] == 7
+  raise "program owner" unless program_owner.items.empty?
+  raise "program owner" unless explicit_program_owner.items.empty?
+  duplicate = owner.copy_to(Program.tape)
+  duplicate.items << 8
+  raise "owner deep copy" unless owner.items.size == 1
+  raise "owner deep copy" unless duplicate.items.size == 2
+end
+
+def copy_owner_from_local : Workspace
+  owner = Workspace.new
+  owner.items << 42
+  owner.copy_to(Program.tape)
+end
+
+retained_owner = copy_owner_from_local
+raise "retained owner copy" unless retained_owner.items[0] == 42
+
+# Borrowed growing handles and fixed-size views do not make an owner.
+class BorrowedArrayHolder
+  getter items : Array(Int32)
+  def initialize(@items); end
+end
+
+class BorrowedArrayChild < BorrowedArrayHolder
+end
+
+class FixedArrayHolder
+  getter items : Array::View(Int32)
+  def initialize
+    @items = Array(Int32).new(2, 3).view
+  end
+end
+
+class FixedArrayChild < FixedArrayHolder
+end
+
+raise "borrowed Array holder" unless BorrowedArrayChild.new([7]).items[0] == 7
+raise "fixed view holder" unless FixedArrayChild.new.items[0] == 3
+
+class ConstructorOwnerHolder
+  getter child : Workspace
+
+  def initialize(named : Bool = false)
+    child = Workspace.new
+    @child = child
+  end
+end
+
+holder_with_named_arg = ConstructorOwnerHolder.new(named: true)
+holder_with_named_arg.child.items << 11
+raise "constructor owner" unless holder_with_named_arg.child.items[0] == 11
+
+def fresh_owner_text : String
+  owner = Workspace.new
+  owner.items << 17
+  "#{owner.items[0]}"
+end
+
+raise "copied owner text" unless fresh_owner_text == "17"
+
+class BorrowedGetterHolder
+  getter items : Array(Int32)
+
+  def initialize(source : Workspace)
+    @items = source.items
+  end
+end
+
+class BorrowedGetterChild < BorrowedGetterHolder
+end
+
+tape do
+  source = Workspace.new
+  source.items << 23
+  raise "borrowed getter" unless BorrowedGetterChild.new(source).items[0] == 23
+end

@@ -1,0 +1,6 @@
+class Workspace
+  getter items = Array(Int32).new
+end
+
+owners = Array(Workspace).new
+owners << Workspace.new

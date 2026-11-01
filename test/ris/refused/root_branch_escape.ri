@@ -1,5 +1,4 @@
-@[Owner]
-struct BranchOwner
+class BranchOwner
   getter bytes = String::Builder.new
 end
 

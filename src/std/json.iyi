@@ -859,7 +859,8 @@ struct Lexer
     @line_number = 1
     @column_number = 1
     @token = Token.new
-    @string_buffer = StringBuffer.new(input.bytesize)
+    made_string_buffer = StringBuffer.new(input.bytesize)
+    @string_buffer = made_string_buffer
     @error = nil
     @spans = false
   end
@@ -2051,7 +2052,8 @@ pub class Builder
   property ascii_only : Bool
 
   def initialize
-    @buffer = StringBuffer.new(64)
+    made_buffer = StringBuffer.new(64)
+    @buffer = made_buffer
     @indent_str = nil
     @level = 0
     @states = [ROOT]

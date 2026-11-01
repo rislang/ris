@@ -3,8 +3,7 @@ struct StoreHolder
   property text : String = ""
 end
 
-@[Owner]
-struct StoreOwner
+class StoreOwner
   getter bytes = String::Builder.new
 end
 

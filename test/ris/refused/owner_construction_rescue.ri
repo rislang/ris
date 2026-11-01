@@ -1,5 +1,4 @@
-@[Owner]
-struct Broken
+class Broken
   getter left = Array(Int32).new(20000)
 
   def initialize(fail : Bool)

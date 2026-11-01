@@ -38,7 +38,7 @@ pub class HMAC
   @outer : Digest
   @inner_start : Digest
   @outer_start : Digest
-  @hashed : Array(UInt8)
+  @hashed : Array::View(UInt8)
   @finished : Bool
 
   def initialize(algorithm : H.class, key : String | Array::View(UInt8)) forall H
@@ -46,7 +46,7 @@ pub class HMAC
     @outer = algorithm.new
     @inner_start = algorithm.new
     @outer_start = algorithm.new
-    @hashed = Array(UInt8).new(@inner.digest_size, 0_u8)
+    @hashed = Array(UInt8).new(@inner.digest_size, 0_u8).view
     @finished = false
     block = @inner.block_size
     # A key longer than a block is its hash; then zeros to a block.

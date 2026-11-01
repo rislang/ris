@@ -6,4 +6,4 @@ class Kept
   end
 end
 
-Kept.new
+kept = Kept.new
