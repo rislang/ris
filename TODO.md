@@ -46,13 +46,14 @@ Fix a checker hole below only when a cluster hits it.
    * HTTP client and websocket (http_coding, websocket_handshake,
      http_prefork's TLS half). Done: HPKE/P-256/P-384 holders, TLS
      configs refilled, HTTPClient's HTTPS-record configs in slots, the
-     default TlsConfig per client. Left: TlsClient's handshake builds
-     its ClientHello and ECH parts with `+` and returns them after other
-     work (client_hello, TlsEch.parts, encode_inner, outer_extensions,
-     ech_grease): write them into a refilled field. Then the exchange
-     loop's fresh stores (an H2Stream per request, BodyReader and
-     socket per round) and WebSocket.connect. TLS server identities
-     need the big cluster.
+     default TlsConfig per client, ClientHello and ECH parts written
+     into the caller's arrays, the ServerHello a refilled slot. Left:
+     the certificate check reaches SystemRoots.load and Certificate
+     lists made in defs (roots_holders, x509); then the exchange loop's
+     fresh stores (an H2Stream per request, BodyReader and socket per
+     round), tls.iyi 2871/2897 (exporter secret, client certificate
+     entries) and WebSocket.connect. TLS server identities need the big
+     cluster.
    * socket_pair, socket_pieces, socket_race, smtp, mail: connect's
      attempt list (socket.iyi 248, 1066), ResolvConf parsing (dns.iyi
      1340s), `Resolver.system` made in a def.

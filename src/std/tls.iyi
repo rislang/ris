@@ -2379,6 +2379,8 @@ pub class TlsClient < TlsConnection
   include RisTlsConnectionState
   @host_text : String::Builder
   @name_text : String::Builder
+  # The ServerHello read, refilled per handshake.
+  @reply : TlsServerHello
   @public_name : Bool = false
   @early_storage : Array(UInt8)
   @config : TlsConfig
@@ -2437,6 +2439,8 @@ pub class TlsClient < TlsConnection
     @host_text = String::Builder.new(host.bytesize)
     @host_text << host
     @name_text = String::Builder.new(256)
+    reply = TlsServerHello.new
+    @reply = reply
     @early_storage = Array(UInt8).new(16384)
     @place = "the server"
     ech_slot = TlsEchOffer.new
@@ -2457,6 +2461,8 @@ pub class TlsClient < TlsConnection
     @host_text = String::Builder.new(host.bytesize)
     @host_text << host
     @name_text = String::Builder.new(256)
+    reply = TlsServerHello.new
+    @reply = reply
     @early_storage = Array(UInt8).new(16384)
     @place = "the server"
     ech_slot = TlsEchOffer.new
@@ -2668,7 +2674,9 @@ pub class TlsClient < TlsConnection
       ech = @ech_slot
       @ech = ech
     elsif @config.ech_grease
-      grease = ech_grease(client_hello(random, session, shares, nil, Array(UInt8).new, TlsEch::INNER))
+      made = Array(UInt8).new(512)
+      ech_grease(client_hello(random, session, shares, nil, Array(UInt8).new, TlsEch::INNER), made)
+      grease = made
       @grease_ech = true
     end
     hello = client_hello(random, session, shares, nil, Array(UInt8).new, ech ? TlsEch::INNER : grease)
@@ -2992,13 +3000,24 @@ pub class TlsClient < TlsConnection
   # toss, an X25519 key made for it alone as enc (the key_share's would
   # give it away), and as many random bytes as *inner*'s encoding, padded
   # as for a config whose maximum_name_length is 0, would seal to.
-  private def ech_grease(inner : Array(UInt8)) : Array(UInt8)
-    parts = TlsEch.parts(inner)
-    size = (parts ? TlsEch.encode_inner(parts, 0).size : 0) + 16
+  private def ech_grease(inner : Array(UInt8), into : Array(UInt8)) : Nil
+    entries = Array({Int32, Int32, Int32}).new(32)
+    parts = TlsEch.parts(inner, entries)
+    encoded = Array(UInt8).new(2048)
+    TlsEch.encode_inner(parts, 0, encoded) if parts
+    size = encoded.size + 16
     noise = Random::Secure.random_bytes(2 + size)
     aead = (noise[0] & 1_u8) == 0_u8 ? 0x0001 : 0x0003
     enc = TlsBytes.of(X25519.public_key(Random::Secure.random_bytes(32)))
-    [0_u8] + TlsBytes.u16(0x0001) + TlsBytes.u16(aead) + [noise[1]] + TlsBytes.u16(enc.size) + enc + TlsBytes.u16(size) + noise[2, size]
+    into << 0_u8
+    into.concat(TlsBytes.u16(0x0001))
+    into.concat(TlsBytes.u16(aead))
+    into << noise[1]
+    into.concat(TlsBytes.u16(enc.size))
+    into.concat(enc)
+    into.concat(TlsBytes.u16(size))
+    into.concat(noise[2, size])
+    nil
   end
 
   # The ClientHelloOuter that carries *inner* (sections 5.1 and 6.1.1):
@@ -3010,13 +3029,17 @@ pub class TlsClient < TlsConnection
   # (section 6.1.5) - or, after one that turned ECH down, carries the
   # first one's extension again, the outer being the handshake's now.
   private def ech_outer(ech : TlsEchOffer, inner : Array(UInt8)) : Array(UInt8) | TlsError
-    parts = TlsEch.parts(inner)
+    entries = Array({Int32, Int32, Int32}).new(32)
+    parts = TlsEch.parts(inner, entries)
     return tls_error("this client's own ClientHello does not read back", TlsAlert::INTERNAL_ERROR) unless parts
-    before, after = TlsEch.outer_extensions(parts, ech.config.public_name)
+    before = Array(UInt8).new(2048)
+    after = Array(UInt8).new(512)
+    TlsEch.outer_extensions(parts, ech.config.public_name, before, after)
     if ech.rejected
       return TlsEch.outer_message(parts, ech.outer_random, before + TlsBytes.extension(TlsEch::EXTENSION, ech.extension) + after)
     end
-    encoded = TlsEch.encode_inner(parts, ech.config.maximum_name_length)
+    encoded = Array(UInt8).new(2048)
+    TlsEch.encode_inner(parts, ech.config.maximum_name_length, encoded)
     enc = ech.extension.empty? ? ech.sender.enc : [] of UInt8
     head = [0_u8] + TlsBytes.u16(ech.suite.kdf.value) + TlsBytes.u16(ech.suite.aead.value) + [ech.config.config_id.to_u8] + TlsBytes.u16(enc.size) + enc
     size = encoded.size + ech.suite.aead.tag_size
@@ -3167,16 +3190,27 @@ pub class TlsClient < TlsConnection
   private def client_hello(random : Array(UInt8), session : Array(UInt8), shares : Array({Int32, Array::View(UInt8)}), cookie : Array(UInt8)?, prefix : Array::View(UInt8),
                            ech = nil) : Array(UInt8)
     tls12 = @config.min_version == TlsVersion::TLS12
-    body = [3_u8, 3_u8] + random + [32_u8] + session
+    body = Array(UInt8).new(512)
+    body << 3_u8 << 3_u8
+    body.concat(random)
+    body << 32_u8
+    body.concat(session)
     # TLS 1.3's suites, then TLS 1.2's when it is asked for.
     suites = [0x13_u8, 0x01_u8, 0x13_u8, 0x02_u8, 0x13_u8, 0x03_u8]
-    TlsSuites::TLS12.each { |suite| suites = suites + TlsBytes.u16(suite) } if tls12
-    body = body + TlsBytes.u16(suites.size) + suites + [1_u8, 0_u8]
-    extensions = [] of UInt8
+    if tls12
+      TlsSuites::TLS12.each do |suite|
+        suites.concat(TlsBytes.u16(suite))
+        nil
+      end
+    end
+    body.concat(TlsBytes.u16(suites.size))
+    body.concat(suites)
+    body << 1_u8 << 0_u8
+    extensions = Array(UInt8).new(1024)
     unless TlsBytes.ip_literal?(self.name)
       name = TlsBytes.of(self.name)
       entry = [0_u8] + TlsBytes.u16(name.size) + name
-      extensions = extensions + TlsBytes.extension(0, TlsBytes.u16(entry.size) + entry)
+      extensions.concat(TlsBytes.extension(0, TlsBytes.u16(entry.size) + entry))
     end
     # X25519MLKEM768 first when it is offered, then X25519, the shares sent;
     # secp256r1 and secp384r1 too, for a server that takes nothing else,
@@ -3185,42 +3219,62 @@ pub class TlsClient < TlsConnection
     # handshake a P-384 key made and dropped (0.35 ms, std/p384's header
     # measures).
     groups = @config.post_quantum ? [0_u8, 8_u8, 0x11_u8, 0xec_u8] : [0_u8, 6_u8]
-    extensions = extensions + TlsBytes.extension(10, groups + [0_u8, 0x1d_u8, 0_u8, 0x17_u8, 0_u8, 0x18_u8])
-    schemes = [] of UInt8
-    SIGNATURE_SCHEMES.each { |s| schemes = schemes + TlsBytes.u16(s) }
-    extensions = extensions + TlsBytes.extension(13, TlsBytes.u16(schemes.size) + schemes)
+    extensions.concat(TlsBytes.extension(10, groups + [0_u8, 0x1d_u8, 0_u8, 0x17_u8, 0_u8, 0x18_u8]))
+    schemes = Array(UInt8).new(64)
+    SIGNATURE_SCHEMES.each do |scheme|
+      schemes.concat(TlsBytes.u16(scheme))
+      nil
+    end
+    extensions.concat(TlsBytes.extension(13, TlsBytes.u16(schemes.size) + schemes))
     # status_request (RFC 6066 section 8): OCSP, no responder named and no
     # request extensions - a stapled response asked of every server.
-    extensions = extensions + TlsBytes.extension(5, [1_u8, 0_u8, 0_u8, 0_u8, 0_u8])
+    extensions.concat(TlsBytes.extension(5, [1_u8, 0_u8, 0_u8, 0_u8, 0_u8]))
     # TLS 1.3, then 1.2 when it is asked for.
-    extensions = extensions + TlsBytes.extension(43, tls12 ? [4_u8, 3_u8, 4_u8, 3_u8, 3_u8] : [2_u8, 3_u8, 4_u8])
-    entries = [] of UInt8
-    shares.each { |s| entries = entries + TlsBytes.u16(s[0]) + TlsBytes.u16(s[1].size) + s[1] }
-    extensions = extensions + TlsBytes.extension(51, TlsBytes.u16(entries.size) + entries)
+    extensions.concat(TlsBytes.extension(43, tls12 ? [4_u8, 3_u8, 4_u8, 3_u8, 3_u8] : [2_u8, 3_u8, 4_u8]))
+    entries = Array(UInt8).new(1536)
+    shares.each do |share|
+      entries.concat(TlsBytes.u16(share[0]))
+      entries.concat(TlsBytes.u16(share[1].size))
+      entries.concat(share[1])
+      nil
+    end
+    extensions.concat(TlsBytes.extension(51, TlsBytes.u16(entries.size) + entries))
     unless @config.alpn.empty?
-      names = [] of UInt8
+      names = Array(UInt8).new(64)
       @config.alpn.each do |protocol|
-        bytes = TlsBytes.of(protocol)
-        names = names + [bytes.size.to_u8] + bytes
+        names << protocol.bytesize.to_u8
+        protocol.each_byte { |byte| names << byte }
+        nil
       end
-      extensions = extensions + TlsBytes.extension(16, TlsBytes.u16(names.size) + names)
+      extensions.concat(TlsBytes.extension(16, TlsBytes.u16(names.size) + names))
     end
     # For a TLS 1.2 server: the extended master secret (RFC 7627), secure
     # renegotiation's empty renegotiated_connection (RFC 5746 section 3.4),
     # and uncompressed points alone (RFC 8422 section 5.1.2).
     if tls12
-      extensions = extensions + TlsBytes.extension(23, [] of UInt8)
-      extensions = extensions + TlsBytes.extension(0xff01, [0_u8])
-      extensions = extensions + TlsBytes.extension(11, [1_u8, 0_u8])
+      extensions.concat(TlsBytes.extension(23, [] of UInt8))
+      extensions.concat(TlsBytes.extension(0xff01, [0_u8]))
+      extensions.concat(TlsBytes.extension(11, [1_u8, 0_u8]))
     end
-    extensions = extensions + TlsBytes.extension(44, TlsBytes.u16(cookie.size) + cookie) if cookie
-    extensions = extensions + TlsBytes.extension(TlsEch::EXTENSION, ech) if ech
+    extensions.concat(TlsBytes.extension(44, TlsBytes.u16(cookie.size) + cookie)) if cookie
+    extensions.concat(TlsBytes.extension(TlsEch::EXTENSION, ech)) if ech
     offered = @offered
-    return TlsBytes.message(1, body + TlsBytes.u16(extensions.size) + extensions) unless offered
-    # early_data in the first ClientHello alone: never after a
-    # HelloRetryRequest (section 4.2.10).
-    extensions = extensions + TlsBytes.extension(42, [] of UInt8) if @early_sent && !@retried
-    extensions = extensions + TlsBytes.extension(45, [1_u8, TlsSession::PSK_DHE_KE])
+    if offered
+      # early_data in the first ClientHello alone: never after a
+      # HelloRetryRequest (section 4.2.10).
+      extensions.concat(TlsBytes.extension(42, [] of UInt8)) if @early_sent && !@retried
+      extensions.concat(TlsBytes.extension(45, [1_u8, TlsSession::PSK_DHE_KE]))
+    end
+    # A choice of two calls, so the ClientHello is made in the caller's
+    # scope.
+    offered ? psk_hello(offered, body, extensions, prefix) : TlsBytes.message(1, body + TlsBytes.u16(extensions.size) + extensions)
+  end
+
+  # The ClientHello offering *offered*'s ticket: its pre_shared_key last,
+  # its binder over *prefix* and the ClientHello to its binders.
+  private def psk_hello(offered : TlsHeldTicket, body : Array(UInt8),
+                        extensions : Array(UInt8),
+                        prefix : Array::View(UInt8)) : Array(UInt8)
     # The ticket's age as this side counts it, from its arrival, added to
     # its age_add modulo 2^32 (section 4.2.11.1).
     age = (TlsTime.now_ms - offered.received_ms + offered.age_add) & 0xFFFFFFFF_i64
@@ -3228,10 +3282,20 @@ pub class TlsClient < TlsConnection
     schedule = TlsKeySchedule.new(TlsSuites.sha384?(offered.suite))
     size = schedule.hash_size
     binders = TlsBytes.u16(1 + size) + [size.to_u8] + Array(UInt8).new(size, 0_u8)
-    extensions = extensions + TlsBytes.extension(41, TlsBytes.u16(identities.size) + identities + binders)
-    hello = TlsBytes.message(1, body + TlsBytes.u16(extensions.size) + extensions)
+    extensions.concat(TlsBytes.extension(41, TlsBytes.u16(identities.size) + identities + binders))
+    hello = Array(UInt8).new(4 + body.size + 2 + extensions.size)
+    TlsBytes.put_message(hello, 1, body.size + 2 + extensions.size)
+    hello.concat(body)
+    hello.concat(TlsBytes.u16(extensions.size))
+    hello.concat(extensions)
     binder = schedule.binder(offered.psk, prefix + hello[0, hello.size - binders.size])
-    hello[0, hello.size - size] + binder
+    # The zeroed binder replaced in place by the real one.
+    at = hello.size - size
+    binder.each_with_index do |byte, i|
+      hello[at + i] = byte
+      nil
+    end
+    hello
   end
 
   # A ServerHello or HelloRetryRequest read (section 4.1.3) - or a TLS 1.2
@@ -3242,18 +3306,18 @@ pub class TlsClient < TlsConnection
     body = message[4, message.size - 4]
     reader = TlsReader.new(body)
     version = reader.u16
-    random = reader.bytes(32)
-    echo = reader.bytes(reader.u8)
+    random = reader.view(32)
+    echo = reader.view(reader.u8)
     suite = reader.u16
     compression = reader.u8
-    extensions = reader.bytes(reader.u16)
+    extensions = reader.view(reader.u16)
     return tls_error("a ServerHello cut short", TlsAlert::DECODE_ERROR) if reader.short? || !reader.done?
     found = [] of {Int32, Array::View(UInt8)}
     seen = [] of Int32
     list = TlsReader.new(extensions)
     until list.done?
       type = list.u16
-      data = list.bytes(list.u16)
+      data = list.view(list.u16)
       return tls_error("ServerHello extensions cut short", TlsAlert::DECODE_ERROR) if list.short?
       return tls_error("extension #{type} twice in a ServerHello", TlsAlert::ILLEGAL_PARAMETER) if seen.includes?(type)
       seen << type
@@ -3265,17 +3329,15 @@ pub class TlsClient < TlsConnection
       return server_hello12(version, random, echo, suite, compression, found, session)
     end
     return tls_error("a ServerHello of legacy version #{version}", TlsAlert::PROTOCOL_VERSION) unless version == 0x0303
-    return tls_error("a ServerHello that does not echo the session id", TlsAlert::ILLEGAL_PARAMETER) unless echo == session
+    return tls_error("a ServerHello that does not echo the session id", TlsAlert::ILLEGAL_PARAMETER) unless echo == session.view
     unless suite == TlsSuites::AES_128_GCM || suite == TlsSuites::AES_256_GCM || suite == TlsSuites::CHACHA20_POLY1305
       return tls_error("the server chose cipher suite 0x#{suite.to_s(16)}, which was not offered", TlsAlert::ILLEGAL_PARAMETER)
     end
     return tls_error("a ServerHello with compression", TlsAlert::ILLEGAL_PARAMETER) unless compression == 0
     retry = TlsBytes.hex(random) == HELLO_RETRY
-    share = nil
+    hello = @reply
+    hello.begin(retry, suite, false, random)
     group = 0
-    cookie = nil
-    psk_identity = -1
-    confirmation = nil.as(Array(UInt8)?)
     found.each do |entry|
       type, data = entry
       field = TlsReader.new(data)
@@ -3298,8 +3360,9 @@ pub class TlsClient < TlsConnection
         else
           offered = group == GROUP_X25519 || group == GROUP_SECP256R1 || group == GROUP_SECP384R1 || (group == GROUP_X25519MLKEM768 && @config.post_quantum)
           return tls_error("a key share for group #{group}, which was not offered", TlsAlert::ILLEGAL_PARAMETER) unless offered
-          share = field.bytes(field.u16)
+          share = field.view(field.u16)
           return tls_error("a key share cut short", TlsAlert::DECODE_ERROR) if field.short? || !field.done?
+          hello.share = share
           return tls_error("an X25519 share of the wrong size", TlsAlert::ILLEGAL_PARAMETER) if group == GROUP_X25519 && share.size != 32
           # The draft's section 4.2: a ciphertext of the wrong size is
           # illegal_parameter.
@@ -3309,15 +3372,16 @@ pub class TlsClient < TlsConnection
         end
       when 44
         return tls_error("a cookie outside a HelloRetryRequest", TlsAlert::UNSUPPORTED_EXTENSION) unless retry
-        cookie = field.bytes(field.u16)
+        cookie = field.view(field.u16)
         return tls_error("an empty or cut cookie", TlsAlert::DECODE_ERROR) if field.short? || cookie.empty?
+        hello.cookie = cookie
       when 41
         # The identity a server resumes by, only of a ticket offered and not
         # in a HelloRetryRequest, which chooses none.
         if retry || @offered.nil?
           return tls_error("extension 41 in a #{retry ? "HelloRetryRequest" : "ServerHello"}, which was not offered", TlsAlert::UNSUPPORTED_EXTENSION)
         end
-        psk_identity = field.u16
+        hello.psk_identity = field.u16
         return tls_error("a ServerHello's pre_shared_key cut short", TlsAlert::DECODE_ERROR) if field.short? || !field.done?
       when TlsEch::EXTENSION
         # RFC 9849 sections 5 and 6.1.4: in a HelloRetryRequest to a
@@ -3328,15 +3392,13 @@ pub class TlsClient < TlsConnection
           return tls_error("an encrypted_client_hello in a #{retry ? "HelloRetryRequest" : "ServerHello"}, which was not offered there", TlsAlert::UNSUPPORTED_EXTENSION)
         end
         return tls_error("a HelloRetryRequest's encrypted_client_hello of #{data.size} bytes, not 8", TlsAlert::DECODE_ERROR) unless data.size == 8
-        confirmation = data.to_a
+        hello.confirmation = data
       else
         return tls_error("extension #{type} in a ServerHello, which was not offered", TlsAlert::UNSUPPORTED_EXTENSION)
       end
     end
     return tls_error("the server does not speak TLS 1.3", TlsAlert::PROTOCOL_VERSION) unless seen.includes?(43)
-    hello = TlsServerHello.new(retry, suite, group, share, cookie, false, random)
-    hello.psk_identity = psk_identity
-    hello.ech_confirmation = confirmation
+    hello.named_group = group
     hello
   end
 
@@ -3344,7 +3406,7 @@ pub class TlsClient < TlsConnection
   # session id of the server's own, an offered TLS 1.2 suite, and the
   # extended master secret among its extensions, which may answer what was
   # offered and nothing else.
-  private def server_hello12(version : Int32, random : Array(UInt8), echo : Array(UInt8), suite : Int32, compression : Int32,
+  private def server_hello12(version : Int32, random : Array::View(UInt8), echo : Array::View(UInt8), suite : Int32, compression : Int32,
                              extensions : Array({Int32, Array::View(UInt8)}), session : Array(UInt8)) : TlsServerHello | TlsError
     unless version == 0x0303
       return tls_error("the server chose version 0x#{version.to_s(16)}, before TLS 1.2, which this does not speak", TlsAlert::PROTOCOL_VERSION)
@@ -3396,7 +3458,9 @@ pub class TlsClient < TlsConnection
     unless extended
       return tls_error("the server does not do the extended master secret (RFC 7627), which a TLS 1.2 handshake here requires", TlsAlert::HANDSHAKE_FAILURE)
     end
-    TlsServerHello.new(false, suite, 0, nil, nil, true, random)
+    hello = @reply
+    hello.begin(false, suite, true, random)
+    hello
   end
 
   private def encrypted_extensions(message : Array(UInt8)) : TlsError?
@@ -3763,20 +3827,81 @@ end
 # group a share is in or a HelloRetryRequest asks for (0 for none), the
 # share, a cookie, whether it chose TLS 1.2, and its random.
 class TlsServerHello
-  getter retry : Bool
-  getter suite : Int32
-  getter named_group : Int32
-  getter share : Array(UInt8)?
-  getter cookie : Array(UInt8)?
-  getter tls12 : Bool
-  getter random : Array(UInt8)
+  getter retry : Bool = false
+  getter suite : Int32 = 0
+  getter named_group : Int32 = 0
+  getter tls12 : Bool = false
   # The PSK identity a ServerHello resumes by, -1 when none.
   property psk_identity : Int32 = -1
+  # A reply refilled per ServerHello: its byte fields own their storage.
+  @random : Array(UInt8)
+  @share : Array(UInt8)
+  @cookie : Array(UInt8)
+  @confirmation : Array(UInt8)
+  @has_share : Bool = false
+  @has_cookie : Bool = false
+  @has_confirmation : Bool = false
+
+  def initialize
+    @random = Array(UInt8).new(32)
+    @share = Array(UInt8).new(1536)
+    @cookie = Array(UInt8).new(512)
+    @confirmation = Array(UInt8).new(8)
+  end
+
+  def random : Array(UInt8)
+    @random
+  end
+
+  def share : Array(UInt8)?
+    @has_share ? @share : nil
+  end
+
+  def cookie : Array(UInt8)?
+    @has_cookie ? @cookie : nil
+  end
+
   # A HelloRetryRequest's encrypted_client_hello: RFC 9849 section 7.2.1's
   # confirmation, or what stands in its place.
-  property ech_confirmation : Array(UInt8)? = nil
+  def ech_confirmation : Array(UInt8)?
+    @has_confirmation ? @confirmation : nil
+  end
 
-  def initialize(@retry : Bool, @suite : Int32, @named_group : Int32, @share : Array(UInt8)?, @cookie : Array(UInt8)?, @tls12 : Bool, @random : Array(UInt8))
+  def begin(@retry : Bool, @suite : Int32, @tls12 : Bool,
+            random : Array::View(UInt8)) : Nil
+    @named_group = 0
+    @psk_identity = -1
+    @random.clear
+    @random.concat(random)
+    @has_share = false
+    @has_cookie = false
+    @has_confirmation = false
+    nil
+  end
+
+  def named_group=(@named_group : Int32) : Nil
+    nil
+  end
+
+  def share=(bytes : Array::View(UInt8)) : Nil
+    @share.clear
+    @share.concat(bytes)
+    @has_share = true
+    nil
+  end
+
+  def cookie=(bytes : Array::View(UInt8)) : Nil
+    @cookie.clear
+    @cookie.concat(bytes)
+    @has_cookie = true
+    nil
+  end
+
+  def confirmation=(bytes : Array::View(UInt8)) : Nil
+    @confirmation.clear
+    @confirmation.concat(bytes)
+    @has_confirmation = true
+    nil
   end
 end
 
@@ -5705,7 +5830,8 @@ pub class TlsServer < TlsConnection
   # extension does not read or is not of type outer, and one that opens to
   # an encoding section 5.1 or 7.1 refuses.
   private def ech_open(hello : Array(UInt8)) : Array(UInt8) | TlsError | Nil
-    parts = TlsEch.parts(hello)
+    entries = Array({Int32, Int32, Int32}).new(32)
+    parts = TlsEch.parts(hello, entries)
     # One that does not read is the ClientHello's reading's to refuse.
     return nil unless parts
     index = parts.index(TlsEch::EXTENSION)
@@ -5744,7 +5870,8 @@ pub class TlsServer < TlsConnection
   # otherwise), and opening as the context's second message
   # (decrypt_error otherwise).
   private def ech_reopen(hello : Array(UInt8)) : Array(UInt8) | TlsError
-    parts = TlsEch.parts(hello)
+    entries = Array({Int32, Int32, Int32}).new(32)
+    parts = TlsEch.parts(hello, entries)
     return tls_error("a second ClientHello cut short", TlsAlert::DECODE_ERROR) unless parts
     index = parts.index(TlsEch::EXTENSION)
     return tls_error("a second ClientHelloOuter without the encrypted_client_hello the first one's was taken by", TlsAlert::MISSING_EXTENSION) unless index
@@ -6736,7 +6863,8 @@ end
 
 # A ClientHello's fields, and its extensions by where they lie in it:
 # what a ClientHelloOuter is built from and read by.
-class TlsHelloParts
+@[OnTape]
+struct TlsHelloParts
   getter message : Array::View(UInt8)
   getter version : Array::View(UInt8)
   getter random : Array::View(UInt8)
@@ -6781,8 +6909,10 @@ struct TlsEch
     TlsBytes.of("tls ech") + [0_u8] + config.raw
   end
 
-  # *message*, a ClientHello, taken apart; nil when it does not read.
-  def self.parts(message : Array(UInt8)) : TlsHelloParts?
+  # *message*, a ClientHello, taken apart, its extensions listed in
+  # *extensions* (emptied first); nil when it does not read.
+  def self.parts(message : Array(UInt8), extensions : Array({Int32, Int32, Int32})) : TlsHelloParts?
+    extensions.clear
     size = message.size
     return nil if size < 4 + 35 || message[0] != 1_u8 || TlsBytes.u24_at(message, 1) != size - 4
     version = message[4, 2]
@@ -6806,7 +6936,6 @@ struct TlsEch
     at = at + count
     return nil unless u16_at(message, at) == size - at - 2
     at = at + 2
-    extensions = [] of {Int32, Int32, Int32}
     while at < size
       return nil if at + 4 > size
       type = u16_at(message, at)
@@ -6825,9 +6954,9 @@ struct TlsEch
   # after it - the name padded to *longest* bytes (or as much as a
   # server_name of that many bytes takes, where there is none), then the
   # whole to a multiple of 32 bytes.
-  def self.encode_inner(inner : TlsHelloParts, longest : Int32) : Array(UInt8)
-    extensions = [] of UInt8
-    named = [] of UInt8
+  def self.encode_inner(inner : TlsHelloParts, longest : Int32, into : Array(UInt8)) : Nil
+    extensions = Array(UInt8).new(2048)
+    named = Array(UInt8).new(16)
     at = -1
     run = false
     name = -1
@@ -6842,18 +6971,35 @@ struct TlsEch
         run = true
       else
         run = false
-        extensions.concat(TlsBytes.u16(type) + TlsBytes.u16(entry[2]) + inner.message[entry[1], entry[2]])
+        extensions.concat(TlsBytes.u16(type))
+        extensions.concat(TlsBytes.u16(entry[2]))
+        extensions.concat(inner.message[entry[1], entry[2]])
       end
+      nil
     end
-    unless named.empty?
+    start = into.size
+    into.concat(inner.version)
+    into.concat(inner.random)
+    into << 0_u8
+    into.concat(TlsBytes.u16(inner.suites.size))
+    into.concat(inner.suites)
+    into << inner.compression.size.to_u8
+    into.concat(inner.compression)
+    if named.empty?
+      into.concat(TlsBytes.u16(extensions.size))
+      into.concat(extensions)
+    else
+      # ech_outer_extensions where the compressed run began.
       reference = TlsBytes.extension(OUTER_EXTENSIONS, [named.size.to_u8] + named)
-      extensions = extensions[0, at] + reference + extensions[at, extensions.size - at]
+      into.concat(TlsBytes.u16(extensions.size + reference.size))
+      into.concat(extensions[0, at])
+      into.concat(reference)
+      into.concat(extensions[at, extensions.size - at])
     end
-    encoded = inner.version + inner.random + [0_u8] + TlsBytes.u16(inner.suites.size) + inner.suites +
-              [inner.compression.size.to_u8] + inner.compression + TlsBytes.u16(extensions.size) + extensions
     padding = name >= 0 ? (longest > name ? longest - name : 0) : longest + 9
-    padding = padding + 31 - ((encoded.size + padding - 1) % 32)
-    encoded + Array(UInt8).new(padding, 0_u8)
+    padding = padding + 31 - ((into.size - start + padding - 1) % 32)
+    padding.times { into << 0_u8 }
+    nil
   end
 
   # A ClientHelloOuter's extensions either side of its
@@ -6863,23 +7009,26 @@ struct TlsEch
   # ticket, its psk_key_exchange_modes and a GREASE pre_shared_key
   # (section 6.1.2) - random identities, ages and binders of the inner's
   # lengths. The inner's protocols (ALPN) stay in it alone.
-  def self.outer_extensions(inner : TlsHelloParts, public_name : String) : {Array(UInt8), Array(UInt8)}
+  def self.outer_extensions(inner : TlsHelloParts, public_name : String,
+                            before : Array(UInt8), after : Array(UInt8)) : Nil
     name = TlsBytes.of(public_name)
     entry = [0_u8] + TlsBytes.u16(name.size) + name
-    before = TlsBytes.extension(0, TlsBytes.u16(entry.size) + entry)
-    after = [] of UInt8
-    modes = [1_u8, TlsSession::PSK_DHE_KE]
+    before.concat(TlsBytes.extension(0, TlsBytes.u16(entry.size) + entry))
+    modes = -1
     inner.extensions.each_with_index do |extension, i|
       type = extension[0]
       if COMPRESSED.includes?(type) || type == 44 || type == 42
         before.concat(TlsBytes.extension(type, inner.data(i)))
       elsif type == 45
-        modes = inner.data(i)
+        modes = i
       elsif type == 41
-        after = TlsBytes.extension(45, modes) + TlsBytes.extension(41, grease_psk(inner.data(i)))
+        after.clear
+        after.concat(modes < 0 ? TlsBytes.extension(45, [1_u8, TlsSession::PSK_DHE_KE]) : TlsBytes.extension(45, inner.data(modes)))
+        after.concat(TlsBytes.extension(41, grease_psk(inner.data(i))))
       end
+      nil
     end
-    {before, after}
+    nil
   end
 
   # A pre_shared_key's body as *offered*'s is shaped, its bytes random.
@@ -7004,7 +7153,8 @@ struct TlsEch
     end
     message = TlsBytes.message(1, version + random + [outer.session.size.to_u8] + outer.session + TlsBytes.u16(suites.size) + suites +
                                   [compression.size.to_u8] + compression + TlsBytes.u16(extensions.size) + extensions)
-    parts = parts(message)
+    entries = Array({Int32, Int32, Int32}).new(32)
+    parts = parts(message, entries)
     return TlsError.new("a ClientHelloInner that does not read", TlsAlert::DECODE_ERROR) unless parts
     marker = parts.index(EXTENSION)
     inner = marker ? parts.data(marker) : nil
@@ -7197,6 +7347,13 @@ struct TlsBytes
     result << ((data.size >> 8) & 255).to_u8 << (data.size & 255).to_u8
     data.each { |byte| result << byte }
     result
+  end
+
+  # A handshake message's header onto *into*: its type and a 24-bit
+  # length.
+  def self.put_message(into : Array(UInt8), type : Int32, size : Int32) : Nil
+    into << type.to_u8 << ((size >> 16) & 0xFF).to_u8 << ((size >> 8) & 0xFF).to_u8 << (size & 0xFF).to_u8
+    nil
   end
 
   # A handshake message: its type, a 24-bit length, the body.
