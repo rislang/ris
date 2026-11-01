@@ -86,8 +86,9 @@ on one tape.
   SPEC.md is ris's specification; ris's own docs include CONTRIBUTING.md.
 * Change SPEC.md only with a dated entry and its reason in
   [SPEC_CHANGELOG.md](SPEC_CHANGELOG.md), in the same commit.
-* A SPEC change: EGM review before a large one, drift report after
-  ([CONTRIBUTING.md](CONTRIBUTING.md), Design checks).
+* EGM is required: every SPEC change or design proposal gets an EGM
+  review of its draft before SPEC.md or code changes, and a drift report
+  after ([CONTRIBUTING.md](CONTRIBUTING.md), Design checks).
 * Cite doc/reference/iyi/ for unchanged iyi rules, doc/reference/goose/
   for Goose designs, doc/reference/koja/ for messages between tasks.
   Record only ris differences; check snapshot versions.

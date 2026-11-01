@@ -68,11 +68,18 @@ Install EGM, Google's free design-review plugin:
 `claude plugin marketplace add google/elephant-goldfish-model`, then
 `claude plugin install egm@egm`; for Codex see its `docs/codex.md`.
 
-* A large SPEC change (a new rule or memory-model section): run
-  `/egm:egm-review SPEC.md` before coding.
+EGM is required for everyone who develops ris itself, human or agent:
+
+* Every SPEC change and every design proposal (a new type, annotation,
+  rule or memory-model change): write the draft first, outside SPEC.md,
+  and run `/egm:egm-review <draft>` before editing SPEC.md or coding.
+  Fix every Blocker, answer every Major in the draft or the changelog
+  entry; a review's claim about the compiler is checked against the
+  code (a probe test) before it is relied on.
+* The SPEC_CHANGELOG entry says what the review changed or decided.
 * After a SPEC change is committed: run `/egm:egm-drift-report` on
   AGENTS.md, LEARN.md, README.md and UPSTREAM.md, and fix the drift in
-  the same round. The report is a worksheet: do not commit it.
+  the same round. The reports are worksheets: do not commit them.
 
 ## Inherited references
 
