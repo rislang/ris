@@ -18,19 +18,31 @@ Breakage between steps is fine; no transition stages.
 
 4. samples and tests, group by group, then one full check.sh.
    `RIS_SCOPE_ERRORS=all ris build --no-codegen x.ri` lists every scope
-   refusal. Done: csv/xz/tar/bzip2, query, http_head, uri, idna,
-   socket's address parsing, base32, shlex, uuid, path, ini, mime, otp,
-   format, deque, set, slice, string_pool, json's writer, file info and
-   realpath, curve25519, mlkem, capsule, bit_array, time's RFC 3339. Patterns: read into one flat String
-   (tagged with a 0 or 1 byte where an error may come back), then wrap
-   it in a one-call def, a choice of two calls, or a `new`.
-   Left, by test: socket.iyi's resolver (resolve, lookup, ask_upstreams,
-   ask_upstream keep each round's answers: socket_pair, socket_pieces,
-   websocket_*, smtp, mail, dns, secure_dns, udp, http_*, samples/ris/*),
-   yaml/toml/xml/xpath parsers (values built across scopes), regex
-   (RxCompiler fields), hpack (decode_fields), zip, big, png, eiy, log
-   (with_context fields), heap, roots_holders, text_grow, slice_pool,
-   task_* (spawn block values, see below).
+   refusal. check.sh: 41 FAILED. Patterns that work: read into one flat
+   String (tagged where an error may come back) and wrap it in a one-call
+   def, a choice of two calls, or a `new` (a constructor builds in the
+   caller's scope: dns, SvcbRecord, json's document); keep a round's
+   texts in a builder made before the loop (`DnsLookup`, `kept`);
+   refill a field instead of a new value (TLS records, key updates); a
+   struct or Tuple of texts and plain values moves down whole.
+   Left, by cluster:
+   * HTTP client and server (answer, http_*, server_*, serve full loop,
+     websocket_*, samples/ris/web, heap_check): objects made in helpers
+     and stored lazily into longer-lived ones (BodyReader's decoders,
+     Response bodies, h2 state, hpack decode_fields, zstd). Needs owner
+     regions (SPEC 2.1) or a rewrite so each is built by a constructor in
+     its owner's scope.
+   * TlsSession keeps each ticket with `copy_to(Program.tape)`: grows
+     with every ticket received. Give a session its own owner.
+   * socket_pair, socket_pieces, socket_race, smtp, mail: connect's
+     attempt list (socket.iyi 248, 1066), ResolvConf parsing (dns.iyi
+     1340s), `Resolver.system` made in a def.
+   * yaml/toml/xml/xpath parsers: trees built across defs; toml's
+     SlicePool::List state now lives in its pool, the rest is open.
+   * regex (RxCompiler fields), big (BigInt results), png (chunk texts
+     kept per round, PngInfo built in its def), zip, log (with_context
+     fields), hpack, text_grow, roots_holders, iyimod_text_growth,
+     autocert, program_local_init, fix array_refill, secure_dns.
 5. benches: build each, group the refusals by message, fix per group.
 
 Checker holes found on the way (unknown must be refused, SPEC 3.6):
@@ -63,6 +75,15 @@ Checker holes found on the way (unknown must be refused, SPEC 3.6):
   but the block sees it as a view of the call's inputs, so it may store
   it outward (CSV.parse's row before this change): mark yielded values
   as the yielding scope's.
+* A value made in a `while` condition (`while got = f(...)`) is freed
+  with the round but not attributed to it: DnsName.candidates stored
+  each round's String in an outer Array unrefused and read garbage.
+* A class instance made in a def and returned after other work was
+  taken as flat (no tape fields): UdpSocket.bind? answered a freed
+  socket. Now refused; check other `flat_result?` callers.
+* A block's value that its yielder discards (`each`, `tape`) is still
+  checked as leaving: blocks end with `nil` to pass. Skip the check when
+  the yielder ignores the value.
 * Call summaries model text a callee builds from its inputs
   (interpolation, inspect) as a view of them; tape_text now adds a
   fresh root for an allocating String call not known to answer a view.
