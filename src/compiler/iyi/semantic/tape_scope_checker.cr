@@ -4,8 +4,8 @@
 # RESULT: a String or Array made in the scratch moves down to the
 # boundary (SPEC 1.5); any other tape value it returns views older
 # storage, as TapeShrinkChecker proves or refuses (SPEC 1.9, 3.6). A def
-# whose body is one call is not marked: the call builds its result where
-# the caller keeps it. `next` and `break` in a loop reset first; `next`
+# whose body is one call (or a choice between two, or a tuple of calls)
+# is not marked: the call builds its result where the caller keeps it. `next` and `break` in a loop reset first; `next`
 # in a block and `return` in a def hand their value through RESULT.
 class Iyi::TapeScopeChecker
   MARK   = "__iyi_scope_mark"
@@ -33,6 +33,13 @@ class Iyi::TapeScopeChecker
     # destination (a pipe's two ends).
     if body.is_a?(TupleLiteral)
       return !body.elements.empty? && body.elements.all? { |e| one_call?(e) }
+    end
+    # So is a choice between two calls: whichever runs builds there. What
+    # the condition makes stays in the caller's scratch, freed with it.
+    # A nil branch builds nothing.
+    if body.is_a?(If)
+      return {body.then, body.else}.all? { |b| b.is_a?(NilLiteral) || one_call?(b) } &&
+             !(body.then.is_a?(NilLiteral) && body.else.is_a?(NilLiteral))
     end
     body.is_a?(Call) && body.name != "raise"
   end

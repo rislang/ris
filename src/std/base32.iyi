@@ -93,10 +93,7 @@ pub struct Base32
 
   def self.decode(text : String,
                   writer : String::Builder) : Nil | Base32Error
-    decoded = decode(text)
-    return decoded if decoded.is_a?(Base32Error)
-    writer << decoded
-    nil
+    Base32Codec.put(decode(text), writer)
   end
 end
 
@@ -120,10 +117,7 @@ pub struct Base32Hex
 
   def self.decode(text : String,
                   writer : String::Builder) : Nil | Base32Error
-    decoded = decode(text)
-    return decoded if decoded.is_a?(Base32Error)
-    writer << decoded
-    nil
+    Base32Codec.put(decode(text), writer)
   end
 end
 
@@ -170,6 +164,29 @@ struct Base32Codec
   def self.decode(text : String, values : Array(Int32),
                   alphabet : String,
                   name : String) : String | Base32Error
+    answer(tagged(text, values, alphabet, name))
+  end
+
+  # *decoded* into *writer*, or its error: the decoded value is the
+  # caller's (SPEC 1.5).
+  def self.put(decoded : String | Base32Error,
+               writer : String::Builder) : Nil | Base32Error
+    return decoded if decoded.is_a?(Base32Error)
+    writer << decoded
+    nil
+  end
+
+  # What `tagged` read, as the answer: a view of it.
+  def self.answer(tagged : String) : String | Base32Error
+    text = tagged[1, tagged.bytesize - 1]
+    return Base32Error.new(text) if tagged.byte_at(0) == 1_u8
+    text
+  end
+
+  # The bytes after a 0 byte, or the error's sentence after a 1: one
+  # flat String, which moves down to the caller (SPEC 1.5).
+  def self.tagged(text : String, values : Array(Int32),
+                  alphabet : String, name : String) : String
     src = text
     n = text.bytesize
     table = values
@@ -178,14 +195,14 @@ struct Base32Codec
     data = 0
     while data < n && src[data] != 61_u8
       v = table[src[data].to_i32]
-      return Base32Error.new("#{name}: byte #{data} is #{show(src[data])}, which is not in the alphabet") if v < 0
+      return "\u0001#{name}: byte #{data} is #{show(src[data])}, which is not in the alphabet" if v < 0
       data = data + 1
     end
     j = data
     while j < n
       if src[j] != 61_u8
-        return Base32Error.new("#{name}: byte #{j} is #{show(src[j])}, which is not in the alphabet") if table[src[j].to_i32] < 0
-        return Base32Error.new("#{name}: data after the padding, at byte #{j}")
+        return "\u0001#{name}: byte #{j} is #{show(src[j])}, which is not in the alphabet" if table[src[j].to_i32] < 0
+        return "\u0001#{name}: data after the padding, at byte #{j}"
       end
       j = j + 1
     end
@@ -193,26 +210,27 @@ struct Base32Codec
     # Five bits a character: 2, 4, 5 and 7 characters are 1, 2, 3 and 4
     # bytes with 2, 4, 1 and 3 bits over; 1, 3 and 6 end inside a byte.
     if rest == 1 || rest == 3 || rest == 6
-      return Base32Error.new("#{name}: a last group of #{count(rest, "data character")} ends on no whole byte")
+      return "\u0001#{name}: a last group of #{count(rest, "data character")} ends on no whole byte"
     end
     pads = n - data
     wanted = (8 - rest) % 8
     if pads > 0 && wanted == 0
-      return Base32Error.new("#{name}: #{count(pads, "padding character")} after #{count(data, "data character")}, whose groups are already whole")
+      return "\u0001#{name}: #{count(pads, "padding character")} after #{count(data, "data character")}, whose groups are already whole"
     end
     if pads > 0 && pads != wanted
-      return Base32Error.new("#{name}: #{count(pads, "padding character")} after #{count(data, "data character")}, where #{wanted} close the group")
+      return "\u0001#{name}: #{count(pads, "padding character")} after #{count(data, "data character")}, where #{wanted} close the group"
     end
     over = rest * 5 % 8
     if over > 0
       last = table[src[data - 1].to_i32]
       clean = last & (31 ^ ((1 << over) - 1))
       if clean != last
-        return Base32Error.new("#{name}: the last data character, #{show(src[data - 1])} at byte #{data - 1}, sets bits past the data; canonically it is '#{alphabet[clean]}'")
+        return "\u0001#{name}: the last data character, #{show(src[data - 1])} at byte #{data - 1}, sets bits past the data; canonically it is '#{alphabet[clean]}'"
       end
     end
     size = data * 5 // 8
-    answer = String::Builder.new(size)
+    answer = String::Builder.new(size + 1)
+    answer.push(0_u8)
     acc = 0
     bits = 0
     o = 0

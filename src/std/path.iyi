@@ -528,7 +528,12 @@ pub struct Path
 
   def parents : Array(Path)
     result = Array(Path).new
-    return result if @name.empty?
+    fill_parents(result) unless @name.empty?
+    result
+  end
+
+  # Every parent of this path into *result*, the root first.
+  private def fill_parents(result : Array(Path)) : Nil
     child = self
     up = parent
     while up.name != child.name
@@ -545,7 +550,6 @@ pub struct Path
       first += 1
       last -= 1
     end
-    result
   end
 
   def each_part(& : String -> Nil) : Nil
@@ -557,20 +561,26 @@ pub struct Path
   end
 
   def join(part : String) : Path
-    return self if part.empty?
+    Path.new(join_text(part), @kind)
+  end
+
+  # The joined name: one flat String, which moves down to the caller
+  # (SPEC 1.5); `join` only wraps it.
+  private def join_text(part : String) : String
+    return @name if part.empty?
     other = Path.new(part, @kind)
-    return other if @name.empty?
+    return part if @name.empty?
     if other.anchor
       own = drive
       their = other.drive
       if own && their.nil?
-        return Path.new(concat(own, part), @kind)
+        return concat(own, part)
       end
       unless own && their && other.root.nil? && same?(own, their)
-        return other
+        return part
       end
       part = part[their.bytesize, part.bytesize - their.bytesize]
-      return self if part.empty?
+      return @name if part.empty?
     end
     drive_end, anchor_end = anchor_indices
     bare = drive_end == 2 && anchor_end == 2 && @name.bytesize == 2
@@ -578,7 +588,7 @@ pub struct Path
     joined << @name
     joined << separator unless ends_with_separator? || bare
     joined << part
-    Path.new(joined, @kind)
+    joined
   end
 
   def join(part : Path) : Path
@@ -611,8 +621,7 @@ pub struct Path
   end
 
   def normalize : Path
-    text = String.build { |writer| normalize(writer) }
-    Path.new(text, @kind)
+    Path.new(String.build { |writer| normalize(writer) }, @kind)
   end
 
   def normalize(writer : String::Builder) : Nil
@@ -763,13 +772,16 @@ pub struct Path
   end
 
   def to_posix : Path
-    return self if posix?
-    text = String.build do |writer|
+    Path.new(posix_text, Kind::POSIX)
+  end
+
+  private def posix_text : String
+    return @name if posix?
+    String.build do |writer|
       @name.each_byte do |byte|
         writer.push(byte == 92_u8 ? 47_u8 : byte)
       end
     end
-    Path.new(text, Kind::POSIX)
   end
 
   def to_windows : Path

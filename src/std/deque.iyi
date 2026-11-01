@@ -359,10 +359,18 @@ pub class Deque(T)
   end
 
   # `Deque{1, 2, 3}`, elements inspected.
+  # Each element's text is written as it is made: a round's text is
+  # freed when the round ends (SPEC 1.1).
   def to_s : String
-    parts = [] of String
-    each { |value| parts << value.inspect }
-    "Deque{" + parts.join(", ") + "}"
+    w = "Deque{"
+    first = true
+    each do |value|
+      w << ", " unless first
+      first = false
+      w << value.inspect
+    end
+    w << "}"
+    w
   end
 
   def inspect : String

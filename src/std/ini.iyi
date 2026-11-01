@@ -33,16 +33,15 @@ pub struct INI
   # declaration at line 1, column 8" at a `[section]` behind one, and the
   # first key of a file without a section kept it and never matched.
   def self.parse(string : String) : RisIni
-    text = string.starts_with?("\uFEFF") ? string[3, string.bytesize - 3] : string
-    parse_lines(text.split('\n'))
+    RisIni.new(string)
   end
 
   def self.parse(io : IO) : RisIni
     parse(io.read_all)
   end
 
-  private def self.parse_lines(lines : Array(String)) : RisIni
-    ini = RisIni.new(lines.size)
+  # Each line of *lines* into *ini*.
+  protected def self.fill(ini : RisIni, lines : Array(String)) : Nil
     current = ""
     lineno = 0
 
@@ -99,7 +98,6 @@ pub struct INI
         ini[current, key] = value
       end
     end
-    ini
   end
 
   # The 1-based character column of byte *index* in *line*: every byte
@@ -248,13 +246,24 @@ pub struct RisIni
   # again keeps its first place and takes the new value.
   @entries : Array({Int32, String, String})
   @section_at : Hash(String, Int32)
-  @entry_at : Hash(String, Int32)
+  # By section index and key: views of what was parsed, no new text.
+  @entry_at : Hash({Int32, String}, Int32)
+
+  # The sections and keys *string* holds. A `new`, so it builds in its
+  # caller's destination (SPEC 1.5); its names view *string*.
+  def self.new(string : String) : RisIni
+    text = string.starts_with?("\uFEFF") ? string[3, string.bytesize - 3] : string
+    lines = text.split('\n')
+    ini = new(lines.size)
+    INI.fill(ini, lines)
+    ini
+  end
 
   def initialize(lines : Int32 = 16)
     @sections = Array(String).new(lines + 1)
     @entries = Array({Int32, String, String}).new(lines + 1)
     @section_at = Hash(String, Int32).new
-    @entry_at = Hash(String, Int32).new
+    @entry_at = Hash({Int32, String}, Int32).new
   end
 
   # The section named *name*, added at the end when it is new.
@@ -269,7 +278,7 @@ pub struct RisIni
 
   def []=(section : String, key : String, value : String) : Nil
     at = add_section(section)
-    slot = "#{section}\n#{key}"
+    slot = {at, key}
     if found = @entry_at[slot]?
       @entries[found] = {at, key, value}
     else
@@ -279,7 +288,9 @@ pub struct RisIni
   end
 
   def []?(section : String, key : String) : String?
-    found = @entry_at["#{section}\n#{key}"]?
+    at = @section_at[section]?
+    return nil unless at
+    found = @entry_at[{at, key}]?
     return nil unless found
     @entries[found][2]
   end

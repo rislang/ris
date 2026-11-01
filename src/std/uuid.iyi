@@ -41,16 +41,22 @@ pub struct UUID
   # outputs do not give that state away, where a version 4 UUID promises
   # 122 bits nobody can predict.
   def self.v4 : UUID
+    UUID.new(v4_bytes)
+  end
+
+  # The bytes are one flat String, which moves down to the caller
+  # (SPEC 1.5); the UUID only wraps them.
+  def self.v4_bytes : String
     bytes = Random::Secure.random_bytes(16)
     bytes[6] = (bytes[6] & 0x0f_u8) | 0x40_u8
     bytes[8] = (bytes[8] & 0x3f_u8) | 0x80_u8
-    UUID.new(String.build(16) do |writer|
+    String.build(16) do |writer|
       i = 0
       while i < 16
         writer.push(bytes[i])
         i += 1
       end
-    end)
+    end
   end
 
   # The millisecond `v7` last stamped and the 12-bit counter beside it.
@@ -71,6 +77,10 @@ pub struct UUID
   # 62 bits after the counter are random every time, so two processes in
   # one millisecond still do not collide.
   def self.v7 : UUID
+    UUID.new(v7_bytes)
+  end
+
+  def self.v7_bytes : String
     bytes = Random::Secure.random_bytes(16)
     now = Time.utc.to_unix_ms
     if now > @@v7_ms
@@ -91,22 +101,26 @@ pub struct UUID
     bytes[6] = (0x70 | (@@v7_counter >> 8)).to_u8
     bytes[7] = (@@v7_counter & 255).to_u8
     bytes[8] = (bytes[8] & 0x3f_u8) | 0x80_u8
-    UUID.new(String.build(16) do |writer|
+    String.build(16) do |writer|
       i = 0
       while i < 16
         writer.push(bytes[i])
         i += 1
       end
-    end)
+    end
   end
 
   def self.parse(text : String) : UUID
+    UUID.new(parse_bytes(text))
+  end
+
+  def self.parse_bytes(text : String) : String
     n = text.bytesize
     unless n == 32 || (n == 36 && text[8] == 45_u8 &&
            text[13] == 45_u8 && text[18] == 45_u8 && text[23] == 45_u8)
       raise "UUID: not 32 hex digits: #{text}"
     end
-    bytes = String.build(16) do |w|
+    String.build(16) do |w|
       i = 0
       while i < n
         if n == 36 && (i == 8 || i == 13 || i == 18 || i == 23)
@@ -119,7 +133,6 @@ pub struct UUID
         i += 2
       end
     end
-    UUID.new(bytes)
   end
 
   def to_s : String

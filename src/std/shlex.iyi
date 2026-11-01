@@ -79,9 +79,49 @@ pub struct Shlex
   # them; with *comments*, `#` to the end of the line is skipped.
   def self.split(text : String,
                  comments : ::Bool = false) : Array(String) | ShlexError
+    answer(tagged(text, comments))
+  end
+
+  # What `tagged` read, as the answer: the words view it.
+  def self.answer(tagged : String) : Array(String) | ShlexError
+    tagged.byte_at(0) == 1_u8 ? refused(tagged) : words(tagged)
+  end
+
+  private def self.refused(tagged : String) : ShlexError
+    at = tagged.byte_at(1).to_i32 | (tagged.byte_at(2).to_i32 << 8) |
+         (tagged.byte_at(3).to_i32 << 16) | (tagged.byte_at(4).to_i32 << 24)
+    ShlexError.new(tagged[5, tagged.bytesize - 5], at)
+  end
+
+  # The words `tagged` wrote, each a view of *tagged*. Each is followed
+  # by its length, so they are read from the end, then put in order.
+  private def self.words(tagged : String) : Array(String)
+    words = Array(String).new
+    fill(words, tagged)
+    words
+  end
+
+  private def self.fill(words : Array(String), tagged : String) : Nil
+    i = tagged.bytesize
+    while i > 1
+      i -= 4
+      length = tagged.byte_at(i).to_i32 | (tagged.byte_at(i + 1).to_i32 << 8) |
+               (tagged.byte_at(i + 2).to_i32 << 16) | (tagged.byte_at(i + 3).to_i32 << 24)
+      i -= length
+      words << tagged[i, length]
+    end
+    words.reverse_in_place
+  end
+
+  # The words after a 0 byte, each followed by its length (4 bytes,
+  # little end first), or after a 1 the error's byte offset (4 bytes)
+  # and its sentence: one flat String, which moves down to the caller
+  # (SPEC 1.5).
+  def self.tagged(text : String, comments : ::Bool) : String
     raw = text
     n = text.bytesize
-    words = Array(String).new
+    words = String::Builder.new(n + 8)
+    words.push(0_u8)
     i = 0
     while i < n
       c = raw[i]
@@ -90,7 +130,7 @@ pub struct Shlex
       elsif comments && c == 35_u8
         i = past_line(raw, n, i)
       else
-        word = String::Builder.new
+        length = 0
         quoted = false
         while i < n
           c = raw[i]
@@ -105,7 +145,12 @@ pub struct Shlex
               close += 1
             end
             return unclosed(text, i) if close >= n
-            word << raw[i + 1, close - i - 1]
+            j = i + 1
+            while j < close
+              put(words, raw[j])
+              j += 1
+            end
+            length += close - i - 1
             i = close + 1
           elsif c == 34_u8
             quoted = true
@@ -120,27 +165,40 @@ pub struct Shlex
               elsif c == 92_u8
                 return dangling(text, i) if i + 1 >= n
                 after = raw[i + 1]
-                word.push(92_u8) unless after == 34_u8 || after == 92_u8
-                word.push(after)
+                unless after == 34_u8 || after == 92_u8
+                  put(words, 92_u8)
+                  length += 1
+                end
+                put(words, after)
+                length += 1
                 i += 2
               else
-                word.push(c)
+                put(words, c)
+                length += 1
                 i += 1
               end
             end
           elsif c == 92_u8
             return dangling(text, i) if i + 1 >= n
-            word.push(raw[i + 1])
+            put(words, raw[i + 1])
+            length += 1
             i += 2
           else
-            word.push(c)
+            put(words, c)
+            length += 1
             i += 1
           end
         end
-        words << word.finish if quoted || word.length > 0
+        if quoted || length > 0
+          4.times { |k| words.push(((length >> (8 * k)) & 255).to_u8) }
+        end
       end
     end
-    words
+    words.finish
+  end
+
+  private def self.put(words : String::Builder, byte : UInt8) : Nil
+    words.push(byte)
   end
 
   # *arg* as one shell word: as it is when every byte is a letter, a
@@ -212,16 +270,25 @@ pub struct Shlex
     i < n ? i + 1 : n
   end
 
-  private def self.unclosed(text : String, at : Int32) : ShlexError
-    quote = text[at] == 39_u8 ? "'" : "\""
-    ShlexError.new(
-      "shlex: no closing quotation: the #{quote} at byte #{at} is never " \
-      "closed", at)
+  # An error in `tagged`'s form.
+  private def self.refusal(at : Int32, sentence : String) : String
+    String.build(sentence.bytesize + 5) do |w|
+      w.push(1_u8)
+      4.times { |k| w.push(((at >> (8 * k)) & 255).to_u8) }
+      w << sentence
+    end
   end
 
-  private def self.dangling(text : String, at : Int32) : ShlexError
-    ShlexError.new(
+  private def self.unclosed(text : String, at : Int32) : String
+    quote = text[at] == 39_u8 ? "'" : "\""
+    refusal(at,
+      "shlex: no closing quotation: the #{quote} at byte #{at} is never " \
+      "closed")
+  end
+
+  private def self.dangling(text : String, at : Int32) : String
+    refusal(at,
       "shlex: no escaped character: the backslash at byte #{at} ends " \
-      "the text", at)
+      "the text")
   end
 end

@@ -173,6 +173,26 @@ class Iyi::TapeCallGraph
       target.name == "spawn_parallel"
   end
 
+  # Whether a node holds a `return`, `break` or `next`.
+  class Exits < Visitor
+    getter found = false
+
+    def self.any?(node : ASTNode) : Bool
+      scan = new
+      node.accept scan
+      scan.found
+    end
+
+    def visit(node : Return | Break | Next)
+      @found = true
+      false
+    end
+
+    def visit(node : ASTNode)
+      !@found
+    end
+  end
+
   class Effects < Visitor
     getter allocation = false
     getter suspension = false
@@ -227,6 +247,24 @@ class Iyi::TapeCallGraph
       false
     end
 
+    # A branch that ends in a raise never hands its storage on: what it
+    # builds (the refusal's sentence) is not the def's allocation. Its
+    # suspensions still count. A `return`, `break` or `next` in it may
+    # hand a value on, so such a branch counts in full.
+    def visit(node : If)
+      node.cond.accept self
+      {node.then, node.else}.each do |branch|
+        if branch.type?.try(&.no_return?) && !Exits.any?(branch)
+          saved = @allocation
+          branch.accept self
+          @allocation = saved
+        else
+          branch.accept self
+        end
+      end
+      false
+    end
+
     def visit(node : MacroIf | MacroFor | MacroExpression | MacroVerbatim)
       node.expanded.try &.accept(self)
       false
@@ -250,12 +288,52 @@ class Iyi::TapeCallGraph
   end
 
   def reach(target : Def)
-    return if opaque?(target)
+    if opaque?(target)
+      runtime_callbacks(target)
+      return
+    end
     return if @defs.has_key?(target.object_id)
     @defs[target.object_id] = target
     @effects[target.object_id] ||= Effect.new
     @edges[target.object_id] ||= Set(UInt64).new
     target.body.accept Graph.new(self, target)
+  end
+
+  @runtime_seen = Set(UInt64).new
+
+  # A runtime def is not checked, but what it calls outside the runtime
+  # is: `String.interpolate` calls a value's own `to_s` (SPEC 3.4).
+  private def runtime_callbacks(target : Def)
+    return if target.iyi_from_artifact? && !target.iyi_body_travelled?
+    return unless @runtime_seen.add?(target.object_id)
+    target.body.accept RuntimeCalls.new(self)
+  end
+
+  class RuntimeCalls < Visitor
+    def initialize(@graph : TapeCallGraph)
+    end
+
+    def visit(node : Call)
+      if expanded = node.expanded
+        expanded.accept self
+        return false
+      end
+      @graph.targets(node).try &.each { |t| @graph.reach(t) }
+      true
+    end
+
+    def visit(node : Def)
+      false
+    end
+
+    def visit(node : MacroIf | MacroFor | MacroExpression | MacroVerbatim)
+      node.expanded.try &.accept(self)
+      false
+    end
+
+    def visit(node : ASTNode)
+      true
+    end
   end
 
   def edge(owner : Def?, target : Def)

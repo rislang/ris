@@ -579,13 +579,16 @@ module ::IyiFormat
     digits = "0".as_tape
     if value != 0.0
       exp = IyiFloatText.dragon4(value.abs)[2] - 1
-      digits = exact_digits(value, places - exp)
+      # Each round measures its digits and frees them; only the exponent
+      # outlives the round.
+      count = exact_digits(value, places - exp).bytesize
       attempts = 0
-      while digits.bytesize != places + 1 && attempts < 4
-        exp += digits.bytesize > places + 1 ? 1 : -1
-        digits = exact_digits(value, places - exp)
+      while count != places + 1 && attempts < 4
+        exp += count > places + 1 ? 1 : -1
+        count = exact_digits(value, places - exp).bytesize
         attempts += 1
       end
+      digits = exact_digits(value, places - exp)
       tail = 1
       while tail < digits.bytesize && digits[tail] == 48_u8
         tail += 1

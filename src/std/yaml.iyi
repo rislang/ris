@@ -753,6 +753,7 @@ struct TapeParser
   @tabbed : Array(Bool)
   @line : Int32
   @error : String?
+  @error_text : String::Builder
   @anchors : TapeMap(String, TapeValue)
   @open_anchors : Array(String)
   # Nodes read so far, and per anchor how many nodes its value holds
@@ -789,6 +790,7 @@ struct TapeParser
     @tabbed = Array(Bool).new
     @line = 0
     @error = nil
+    @error_text = String::Builder.new(64)
     @anchors = TapeMap(String, TapeValue).new
     @open_anchors = Array(String).new
     @nodes = 0_i64
@@ -1036,7 +1038,11 @@ struct TapeParser
       column = column + 1 if (@bytes[at] & 192_u8) != 128_u8
       at = at + 1
     end
-    @error = "#{message} at line #{line + 1}, column #{column}"
+    # The sentence is written into a field made with the parser, so it
+    # outlives this def (SPEC 1.1).
+    @error_text << message << " at line " << (line + 1).to_s <<
+      ", column " << column.to_s
+    @error = @error_text.finish
   end
 
   private def skip_blank(pos : Int32) : Int32
@@ -2731,8 +2737,13 @@ pub macro yaml_serializable(declaration)
 end
 
 pub struct YAML
+  # The parser is built in the caller's destination (SPEC 1.5): the value
+  # views its pool, which the caller's scope frees.
   def self.parse(text : String) : TapeValue
-    parser = TapeParser.new(text)
+    first(TapeParser.new(text))
+  end
+
+  def self.first(parser : TapeParser) : TapeValue
     docs = parser.parse_all
     raise parser.error || "invalid YAML" if docs.nil?
     docs.empty? ? TapeValue.new(nil) : docs[0]

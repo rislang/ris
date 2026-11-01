@@ -245,24 +245,74 @@ pub struct OTPAuth
   end
 
   def self.parse(uri : String) : OTPAuth | OTPError
+    uri_answer(OTPText.read(uri))
+  end
+
+  # What `OTPText.read` wrote: the refusal after a 1 byte, or the URI's
+  # fields after a 0. A choice of calls, built in the caller's
+  # destination (SPEC 1.5).
+  def self.uri_answer(read : String) : OTPAuth | OTPError
+    read.byte_at(0) == 1_u8 ? OTPError.new(read[1, read.bytesize - 1]) : new(read)
+  end
+
+  # The fields `OTPText.read` wrote after its 0 byte: the algorithm (a
+  # byte), digits (a byte), the period and the counter (8 bytes each,
+  # little end first, a counter flag byte first), the account's and the
+  # issuer's lengths (4 bytes each), then the account, issuer and secret.
+  def self.new(read : String) : OTPAuth
+    algorithm = OTPAlgorithm.from_value?(read.byte_at(1).to_i32) || OTPAlgorithm::SHA1
+    digits = read.byte_at(2).to_i32
+    period = OTPText.int_at(read, 3).to_i32
+    counter = read.byte_at(11) == 1_u8 ? OTPText.int_at(read, 12) : nil
+    account_size = OTPText.int_at(read, 20).to_i32
+    issuer_size = OTPText.int_at(read, 28).to_i32
+    at = 36
+    account = read[at, account_size]
+    issuer = read[at + account_size, issuer_size]
+    from = at + account_size + issuer_size
+    key = Array(UInt8).new(read.bytesize - from) { |k| read.byte_at(from + k) }
+    new(key, account, issuer, algorithm, digits, period, counter)
+  end
+end
+
+struct OTPText
+  # The 8 bytes at *at*, little end first.
+  def self.int_at(text : String, at : Int32) : Int64
+    v = 0_i64
+    8.times { |k| v |= text.byte_at(at + k).to_i64 << (8 * k) }
+    v
+  end
+
+  private def self.put_int(w : String::Builder, v : Int64) : Nil
+    8.times { |k| w.push(((v >> (8 * k)) & 255_i64).to_u8) }
+  end
+
+  # *uri* read: after a 0 byte the fields `OTPAuth.new(read)` takes, or
+  # after a 1 the refusal's sentence. One flat String, which moves down
+  # to the caller (SPEC 1.5).
+  def self.read(uri : String) : String
     n = uri.bytesize
-    return OTPError.new("otpauth: the URI does not begin with otpauth://") unless n >= 10 && OTPText.slice(uri, 0, 10).downcase == "otpauth://"
-    slash = OTPText.find(uri, 47_u8, 10, n)
-    return OTPError.new("otpauth: no label after the type") if slash < 0
-    kind = OTPText.slice(uri, 10, slash).downcase
-    return OTPError.new("otpauth: the type is #{kind.inspect}, not totp or hotp") unless kind == "totp" || kind == "hotp"
-    question = OTPText.find(uri, 63_u8, slash + 1, n)
+    return refusal("otpauth: the URI does not begin with otpauth://") unless n >= 10 && slice(uri, 0, 10).downcase == "otpauth://"
+    slash = find(uri, 47_u8, 10, n)
+    return refusal("otpauth: no label after the type") if slash < 0
+    kind = slice(uri, 10, slash).downcase
+    return refusal("otpauth: the type is #{kind.inspect}, not totp or hotp") unless kind == "totp" || kind == "hotp"
+    question = find(uri, 63_u8, slash + 1, n)
     label_end = question < 0 ? n : question
-    label = OTPText.unescape(OTPText.slice(uri, slash + 1, label_end), false, "the label")
-    return label if label.is_a?(OTPError)
-    colon = OTPText.find(label, 58_u8, 0, label.bytesize)
-    label_issuer = colon < 0 ? "" : OTPText.slice(label, 0, colon)
-    account = colon < 0 ? label : OTPText.slice(label, colon + 1, label.bytesize)
+    # Unescaped texts are views of one builder, made before the loop
+    # whose rounds read them.
+    text = String::Builder.new(n)
+    label = unescape(text, slice(uri, slash + 1, label_end), false, "the label")
+    return label if label.byte_at(0) == 1_u8
+    label = label[1, label.bytesize - 1]
+    colon = find(label, 58_u8, 0, label.bytesize)
+    label_issuer = colon < 0 ? "" : slice(label, 0, colon)
+    account = colon < 0 ? label : slice(label, colon + 1, label.bytesize)
     while account.bytesize > 0 && account.byte_at(0) == 32_u8
-      account = OTPText.slice(account, 1, account.bytesize)
+      account = slice(account, 1, account.bytesize)
     end
-    return OTPError.new("otpauth: the label names no account") if account.bytesize == 0
-    return OTPError.new("otpauth: the account #{account.inspect} holds a colon") if OTPText.colon?(account)
+    return refusal("otpauth: the label names no account") if account.bytesize == 0
+    return refusal("otpauth: the account #{account.inspect} holds a colon") if colon?(account)
 
     secret_text = ""
     issuer_text = ""
@@ -273,16 +323,17 @@ pub struct OTPAuth
     seen = [] of String
     at = question < 0 ? n : question + 1
     while at < n
-      amp = OTPText.find(uri, 38_u8, at, n)
+      amp = find(uri, 38_u8, at, n)
       stop = amp < 0 ? n : amp
       if stop > at
-        eq = OTPText.find(uri, 61_u8, at, stop)
-        key = OTPText.slice(uri, at, eq < 0 ? stop : eq)
+        eq = find(uri, 61_u8, at, stop)
+        key = slice(uri, at, eq < 0 ? stop : eq)
         if key == "secret" || key == "issuer" || key == "algorithm" || key == "digits" || key == "period" || key == "counter"
-          return OTPError.new("otpauth: the #{key} parameter appears twice") if seen.includes?(key)
+          return refusal("otpauth: the #{key} parameter appears twice") if seen.includes?(key)
           seen << key
-          value = OTPText.unescape(eq < 0 ? "" : OTPText.slice(uri, eq + 1, stop), true, "the #{key} parameter")
-          return value if value.is_a?(OTPError)
+          value = unescape(text, eq < 0 ? "" : slice(uri, eq + 1, stop), true, "the #{key} parameter")
+          return value if value.byte_at(0) == 1_u8
+          value = value[1, value.bytesize - 1]
           if key == "secret"
             secret_text = value
           elsif key == "issuer"
@@ -301,18 +352,18 @@ pub struct OTPAuth
       at = stop + 1
     end
 
-    return OTPError.new("otpauth: no secret parameter") unless seen.includes?("secret")
+    return refusal("otpauth: no secret parameter") unless seen.includes?("secret")
     secret = Base32.decode(secret_text)
-    return OTPError.new("otpauth: the secret is not base32: #{secret.message}") if secret.is_a?(Base32Error)
-    return OTPError.new("otpauth: the secret is empty") if secret.size == 0
+    return refusal("otpauth: the secret is not base32: #{secret.message}") if secret.is_a?(Base32Error)
+    return refusal("otpauth: the secret is empty") if secret.size == 0
     issuer = label_issuer
     if seen.includes?("issuer")
       if colon >= 0 && label_issuer != issuer_text
-        return OTPError.new("otpauth: the label's issuer #{label_issuer.inspect} and the issuer parameter #{issuer_text.inspect} differ")
+        return refusal("otpauth: the label's issuer #{label_issuer.inspect} and the issuer parameter #{issuer_text.inspect} differ")
       end
       issuer = issuer_text
     end
-    return OTPError.new("otpauth: the issuer #{issuer.inspect} holds a colon") if OTPText.colon?(issuer)
+    return refusal("otpauth: the issuer #{issuer.inspect} holds a colon") if colon?(issuer)
     algorithm = OTPAlgorithm::SHA1
     if seen.includes?("algorithm")
       name = algorithm_text.upcase
@@ -321,37 +372,48 @@ pub struct OTPAuth
       elsif name == "SHA512"
         algorithm = OTPAlgorithm::SHA512
       elsif name != "SHA1"
-        return OTPError.new("otpauth: the algorithm is #{algorithm_text.inspect}, not SHA1, SHA256 or SHA512")
+        return refusal("otpauth: the algorithm is #{algorithm_text.inspect}, not SHA1, SHA256 or SHA512")
       end
     end
     digits = 6
     if seen.includes?("digits")
-      d = OTPText.number(digits_text, "digits", 2147483647_i64)
-      return d if d.is_a?(OTPError)
-      return OTPError.new("otpauth: digits must be from 6 to 10, not #{d}") if d < 6_i64 || d > 10_i64
+      d = number(digits_text, "digits", 2147483647_i64)
+      return refusal(d) if d.is_a?(String)
+      return refusal("otpauth: digits must be from 6 to 10, not #{d}") if d < 6_i64 || d > 10_i64
       digits = d.to_i32
     end
     period = 30
     counter = nil.as(Int64?)
     if kind == "totp"
       if seen.includes?("period")
-        p = OTPText.number(period_text, "the period", 2147483647_i64)
-        return p if p.is_a?(OTPError)
-        return OTPError.new("otpauth: the period must be at least 1 second, not 0") if p == 0_i64
+        p = number(period_text, "the period", 2147483647_i64)
+        return refusal(p) if p.is_a?(String)
+        return refusal("otpauth: the period must be at least 1 second, not 0") if p == 0_i64
         period = p.to_i32
       end
     else
-      return OTPError.new("otpauth: an hotp URI needs a counter parameter") unless seen.includes?("counter")
-      c = OTPText.number(counter_text, "the counter", 9223372036854775807_i64)
-      return c if c.is_a?(OTPError)
+      return refusal("otpauth: an hotp URI needs a counter parameter") unless seen.includes?("counter")
+      c = number(counter_text, "the counter", 9223372036854775807_i64)
+      return refusal(c) if c.is_a?(String)
       counter = c
     end
-    key = Array(UInt8).new(secret.bytesize) { |k| secret.byte_at(k) }
-    OTPAuth.new(key, account, issuer, algorithm, digits, period, counter)
+    w = String::Builder.new(36 + account.bytesize + issuer.bytesize + secret.bytesize)
+    w.push(0_u8)
+    w.push(algorithm.value.to_u8)
+    w.push(digits.to_u8)
+    put_int(w, period.to_i64)
+    w.push(counter ? 1_u8 : 0_u8)
+    put_int(w, counter || 0_i64)
+    put_int(w, account.bytesize.to_i64)
+    put_int(w, issuer.bytesize.to_i64)
+    w << account << issuer << secret
+    w.finish
   end
-end
 
-struct OTPText
+  private def self.refusal(sentence : String) : String
+    "\u0001" + sentence
+  end
+
   def self.colon?(text : String) : Bool
     find(text, 58_u8, 0, text.bytesize) >= 0
   end
@@ -390,11 +452,14 @@ struct OTPText
     end
   end
 
-  def self.unescape(text : String, plus : Bool, what : String) : String | OTPError
+  # *text* unescaped into *w*: a view of it after a 0 byte, or of the
+  # refusal's sentence after a 1.
+  def self.unescape(w : String::Builder, text : String, plus : Bool,
+                    what : String) : String
     src = text
     n = text.bytesize
-    buffer = Array(UInt8).new(n, 0_u8)
-    o = 0
+    from = w.length
+    w.push(0_u8)
     i = 0
     while i < n
       b = src.byte_at(i)
@@ -402,30 +467,33 @@ struct OTPText
         hi = i + 2 < n ? hex_value(src.byte_at(i + 1)) : -1
         lo = i + 2 < n ? hex_value(src.byte_at(i + 2)) : -1
         if hi < 0 || lo < 0
-          return OTPError.new("otpauth: the % at byte #{i} of #{what} is not followed by two hexadecimal digits")
+          from = w.length
+          w.push(1_u8)
+          w << "otpauth: the % at byte " << i.to_s << " of " << what <<
+            " is not followed by two hexadecimal digits"
+          return w.finish[from, w.length - from]
         end
-        buffer[o] = (hi * 16 + lo).to_u8
+        w.push((hi * 16 + lo).to_u8)
         i = i + 3
       else
-        buffer[o] = plus && b == 43_u8 ? 32_u8 : b
+        w.push(plus && b == 43_u8 ? 32_u8 : b)
         i = i + 1
       end
-      o = o + 1
     end
-    String.build(o) { |w| o.times { |k| w.push(buffer[k]) } }
+    w.finish[from, w.length - from]
   end
 
-  # A decimal number of ASCII digits, at most *max*.
-  def self.number(text : String, what : String, max : Int64) : Int64 | OTPError
+  # A decimal number of ASCII digits, at most *max*, or the refusal.
+  def self.number(text : String, what : String, max : Int64) : Int64 | String
     src = text
-    return OTPError.new("otpauth: #{what} is empty") if text.bytesize == 0
+    return ("otpauth: #{what} is empty") if text.bytesize == 0
     value = 0_i64
     i = 0
     while i < text.bytesize
       d = src.byte_at(i).to_i32 - 48
-      return OTPError.new("otpauth: #{what} is #{text.inspect}, not a number") if d < 0 || d > 9
+      return ("otpauth: #{what} is #{text.inspect}, not a number") if d < 0 || d > 9
       if value > (max - d.to_i64) // 10_i64
-        return OTPError.new("otpauth: #{what} is #{text}, past #{max}")
+        return ("otpauth: #{what} is #{text}, past #{max}")
       end
       value = value * 10_i64 + d.to_i64
       i = i + 1

@@ -255,43 +255,61 @@ pub struct MIME
   # any part is not a token, a parameter has no `=`, or a quote is left
   # open.
   def self.parse?(value : String) : RisMediaType?
+    RisMediaType.answer(normalized(value))
+  end
+
+  # *value* read: the type lowercased, then each parameter as a 0 byte,
+  # its lowercased name, a 0 byte and its value unescaped; "" when it
+  # does not parse. One flat String, which moves down to the caller
+  # (SPEC 1.5): `RisMediaType.answer` views it.
+  def self.normalized(value : String) : String
     bytes = value
     size = value.bytesize
     pos = skip_ows(bytes, 0, size)
     type_start = pos
     pos = skip_token(bytes, pos, size)
-    return nil if pos == type_start || pos >= size || bytes[pos] != '/'.ord.to_u8
+    return "" if pos == type_start || pos >= size || bytes[pos] != '/'.ord.to_u8
     pos = pos + 1
     sub_start = pos
     pos = skip_token(bytes, pos, size)
-    return nil if pos == sub_start
-    essence = lower(slice(value, type_start, pos - type_start))
-    params = RisParameters.new
+    return "" if pos == sub_start
+    w = String::Builder.new(size)
+    put_lower(w, value, type_start, pos)
     loop do
       pos = skip_ows(bytes, pos, size)
       break if pos >= size
-      return nil unless bytes[pos] == ';'.ord.to_u8
+      return "" unless bytes[pos] == ';'.ord.to_u8
       pos = skip_ows(bytes, pos + 1, size)
       # An empty parameter, as in `a/b;` or `a/b; ; c=d`, is allowed.
       next if pos >= size || bytes[pos] == ';'.ord.to_u8
       name_start = pos
       pos = skip_token(bytes, pos, size)
-      return nil if pos == name_start || pos >= size || bytes[pos] != '='.ord.to_u8
-      name = lower(slice(value, name_start, pos - name_start))
+      return "" if pos == name_start || pos >= size || bytes[pos] != '='.ord.to_u8
+      w.push(0_u8)
+      put_lower(w, value, name_start, pos)
+      w.push(0_u8)
       pos = pos + 1
       if pos < size && bytes[pos] == '"'.ord.to_u8
-        unquoted = unquote(value, pos)
-        return nil if unquoted.nil?
-        params[name] = unquoted[0]
-        pos = unquoted[1]
+        pos = unquote(w, value, pos)
+        return "" if pos < 0
       else
         value_start = pos
         pos = skip_token(bytes, pos, size)
-        return nil if pos == value_start
-        params[name] = slice(value, value_start, pos - value_start)
+        return "" if pos == value_start
+        w << value[value_start, pos - value_start]
       end
     end
-    RisMediaType.new(essence, params)
+    w.finish
+  end
+
+  private def self.put_lower(w : String::Builder, text : String,
+                             from : Int32, to : Int32) : Nil
+    i = from
+    while i < to
+      b = text[i]
+      w.push(b >= 'A'.ord.to_u8 && b <= 'Z'.ord.to_u8 ? b + 32_u8 : b)
+      i = i + 1
+    end
   end
 
   # The type and subtype lowercased, or nil when the value does not parse.
@@ -335,43 +353,27 @@ pub struct MIME
     text[start, count]
   end
 
-  # The quoted string opening at *start*, unescaped, and the position
-  # after its closing quote. A control byte other than a tab inside, or a
-  # string that never closes, is nil. The first pass measures and checks,
-  # the second copies, so the value is allocated once.
-  private def self.unquote(value : String,
-                           start : Int32) : {String, Int32}?
+  # The quoted string opening at *start*, unescaped into *w*, and the
+  # position after its closing quote. A control byte other than a tab
+  # inside, or a string that never closes, is -1.
+  private def self.unquote(w : String::Builder, value : String,
+                           start : Int32) : Int32
     bytes = value
     size = value.bytesize
     pos = start + 1
-    count = 0
-    close = -1
     while pos < size
       b = bytes[pos]
-      if b == '"'.ord.to_u8
-        close = pos
-        break
-      elsif b == '\\'.ord.to_u8
-        return nil if pos + 1 >= size
+      return pos + 1 if b == '"'.ord.to_u8
+      if b == '\\'.ord.to_u8
+        return -1 if pos + 1 >= size
         pos = pos + 1
         b = bytes[pos]
       end
-      return nil if (b < 0x20_u8 && b != '\t'.ord.to_u8) || b == 0x7f_u8
-      count = count + 1
+      return -1 if (b < 0x20_u8 && b != '\t'.ord.to_u8) || b == 0x7f_u8
+      w.push(b)
       pos = pos + 1
     end
-    return nil if close < 0
-    text = String.build(count) do |dst|
-      at = start + 1
-      i = 0
-      while at < close
-        at = at + 1 if bytes[at] == '\\'.ord.to_u8
-        dst.push(bytes[at])
-        i = i + 1
-        at = at + 1
-      end
-    end
-    {text, close + 1}
+    -1
   end
 end
 
@@ -438,6 +440,27 @@ pub struct RisMediaType
   getter params : RisParameters
 
   def initialize(@essence : String, @params : RisParameters)
+  end
+
+  # What `MIME.normalized` read, or nil for "". A choice of calls,
+  # so the type builds in the caller's destination (SPEC 1.5).
+  def self.answer(normal : String) : RisMediaType?
+    normal.empty? ? nil : new(normal)
+  end
+
+  # The type and parameters `MIME.normalized` wrote, as views of it.
+  def self.new(normal : String) : RisMediaType
+    cut = normal.index('\0') || normal.bytesize
+    params = RisParameters.new
+    at = cut
+    while at < normal.bytesize
+      name_end = normal.index('\0', at + 1) || normal.bytesize
+      value_end = normal.index('\0', name_end + 1) || normal.bytesize
+      params[normal[at + 1, name_end - at - 1]] =
+        normal[name_end + 1, value_end - name_end - 1]
+      at = value_end
+    end
+    new(normal[0, cut], params)
   end
 
 

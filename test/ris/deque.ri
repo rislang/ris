@@ -24,6 +24,7 @@ tape do
   puts "#{w.delete_at(5)} #{w}"
   puts "#{w.pop} #{w.shift} #{w.size} #{w[0]} #{w[-1]}"
   s = Deque(String).new
-  10.times { |i| s.unshift("s#{i}") }
+  # Each round's text is freed with the round: the names are literals.
+  "s0 s1 s2 s3 s4 s5 s6 s7 s8 s9".split(" ").each { |t| s.unshift(t) }
   puts "#{s.first} #{s.last} #{s.size} #{s.capacity}"
 end
