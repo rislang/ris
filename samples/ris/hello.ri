@@ -10,14 +10,11 @@ module samples/hello
 
 import shop/order::*
 
+# One call: the order is built in the caller's scope, so it lives until
+# that scope ends. Every def frees its own scratch when it ends; a def
+# that made the lines first and then the order would be refused.
 def make_order(id : Int64) : Order
-  name = ""
-  name << "ris"
-  lines = Array(Int64).new
-  lines.push(1200_i64)
-  lines.push(350_i64)
-  lines.push(99_i64)
-  Order.new(id, name, lines)
+  Order.new(id, "ris", [1200_i64, 350_i64, 99_i64])
 end
 
 # The caller's builder keeps the greeting past the order's tape.

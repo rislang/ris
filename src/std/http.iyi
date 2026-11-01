@@ -4110,7 +4110,9 @@ pub struct HTTP
         socket = IyiSocket.connect(address, endpoint.port, wait)
         return socket if socket.is_a?(Cancelled) || socket.is_a?(SocketError)
         client.made
-        config = client.https_config(origin, base, tls.retry_configs, endpoint.alpn)
+        sent = tls.retry_configs
+        retry = sent ? Array(UInt8).new(sent.bytesize) { |i| sent.byte_at(i) } : nil
+        config = client.https_config(origin, base, retry, endpoint.alpn)
         tls = records_handshake(client, origin, socket, host, config, timeout_ms)
       end
       return HTTPError.new(tls.message) if tls.is_a?(TlsError)

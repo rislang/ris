@@ -2517,7 +2517,9 @@ def __iyi_text_move(mark : RisScopeMark, value : T) : T forall T
     {% elsif ty < ::Number || ty == ::Bool || ty == ::Char || ty < ::Enum || ty == ::Nil %}
     {% else %}
       {% inner = ty.union? && ty.nilable? && ty.union_types.size == 2 ? ty.union_types.reject { |u| u == ::Nil }.first : ty %}
-      {% if inner.struct? && !inner.union? && !inner.instance_vars.empty? %}
+      {% if inner < ::Number || inner == ::Bool || inner == ::Char || inner < ::Enum %}
+        # A plain value or nil: nothing to move.
+      {% elsif inner.struct? && !inner.union? && !inner.instance_vars.empty? %}
         {% for jv in inner.instance_vars %}
           {% jt = jv.type %}
           {% if jt == ::String || (jt.union? && jt.nilable? && jt.union_types.size == 2 && jt.union_types.includes?(::String)) %}
@@ -2546,6 +2548,7 @@ def __iyi_text_move(mark : RisScopeMark, value : T) : T forall T
         at[{{k}}] = moved.@{{iv.name}} || ""
         {% k = k + 1 %}
       {% elsif ty < ::Number || ty == ::Bool || ty == ::Char || ty < ::Enum || ty == ::Nil %}
+      {% elsif ty.union? && (ty.union_types.reject { |u| u == ::Nil }.first < ::Number || ty.union_types.reject { |u| u == ::Nil }.first == ::Bool || ty.union_types.reject { |u| u == ::Nil }.first == ::Char || ty.union_types.reject { |u| u == ::Nil }.first < ::Enum) %}
       {% else %}
         {% inner = ty.union? ? ty.union_types.reject { |u| u == ::Nil }.first : ty %}
         {% for jv in inner.instance_vars %}
@@ -2577,6 +2580,7 @@ def __iyi_text_move(mark : RisScopeMark, value : T) : T forall T
         pointerof(moved.@{{iv.name}}).value = at[{{k}}] if moved.@{{iv.name}}
         {% k = k + 1 %}
       {% elsif ty < ::Number || ty == ::Bool || ty == ::Char || ty < ::Enum || ty == ::Nil %}
+      {% elsif ty.union? && (ty.union_types.reject { |u| u == ::Nil }.first < ::Number || ty.union_types.reject { |u| u == ::Nil }.first == ::Bool || ty.union_types.reject { |u| u == ::Nil }.first == ::Char || ty.union_types.reject { |u| u == ::Nil }.first < ::Enum) %}
       {% else %}
         {% inner = ty.union? ? ty.union_types.reject { |u| u == ::Nil }.first : ty %}
         if held = moved.@{{iv.name}}

@@ -463,11 +463,13 @@ pub struct TlsError
   # certificate was checked for the config's public_name: on an
   # ech_required refusal, and nil on any other - and on an ech_required
   # refusal whose server sent none, which turned ECH off for it.
-  getter retry_configs : Array(UInt8)?
+  # Its bytes are held in a String, so the refusal is texts and plain
+  # values only, and moves down as a String result does.
+  getter retry_configs : String?
 
   # *message*, the alert's name after it when there is one: the sentence
   # shows the alert, and the alert is the field, not the sentence.
-  def initialize(@text : String, @alert : UInt8? = nil, @timed_out : Bool = false, @cancelled : Bool = false, @retry_configs : Array(UInt8)? = nil)
+  def initialize(@text : String, @alert : UInt8? = nil, @timed_out : Bool = false, @cancelled : Bool = false, @retry_configs : String? = nil)
   end
 
   def message : String
@@ -740,6 +742,23 @@ pub class TlsRecordCipher
     else
       @gcm = AesGcm.new(key.bytes)
     end
+  end
+
+  # The same cipher under *secret*'s key and IV, its sequence back at 0:
+  # a KeyUpdate (section 4.6.3), in place.
+  def rekey(suite : Int32, schedule : TlsKeySchedule, secret : Array(UInt8)) : Nil
+    size = suite == TlsSuites::AES_128_GCM ? 16 : 32
+    key = schedule.expand_label(secret, "key", [] of UInt8, size)
+    iv = schedule.expand_label(secret, "iv", [] of UInt8, 12)
+    @iv.clear
+    iv.each { |byte| @iv << byte }
+    if chacha = @chacha
+      chacha.rekey(key.bytes)
+    end
+    if gcm = @gcm
+      gcm.rekey(key.bytes)
+    end
+    @sequence = 0_u64
   end
 
   # TLS 1.2's (RFC 5246 section 6.2.3.3) for one of its AEAD suites, *key*
@@ -1032,7 +1051,14 @@ pub abstract class TlsConnection
   protected def tls_error(text : String, alert : UInt8? = nil, timed_out : Bool = false, cancelled : Bool = false, retry_configs : Array(UInt8)? = nil) : TlsError
     start = @error_text.bytesize
     @error_text << text
-    TlsError.new(@error_text.finish[start, text.bytesize], alert, timed_out, cancelled, retry_configs)
+    said = @error_text.finish[start, text.bytesize]
+    retry = nil.as(String?)
+    if configs = retry_configs
+      from = @error_text.bytesize
+      configs.each { |byte| @error_text.push(byte) }
+      retry = @error_text.finish[from, configs.size]
+    end
+    TlsError.new(said, alert, timed_out, cancelled, retry)
   end
   @inbox_at : Int32 = 0
   @inbox_end : Int32 = 0
@@ -1474,11 +1500,28 @@ pub abstract class TlsConnection
     nil
   end
 
+  # The peer's KeyUpdate taken: its next secret and the cipher under it,
+  # both refilled in place (a def's new Array is freed when it ends).
+  private def take_key_update : Nil
+    TlsConnection.refill(@read_secret, @schedule.next_secret(@read_secret))
+    if reader = @reader
+      reader.rekey(@suite, @schedule, @read_secret)
+    end
+  end
+
+  # *into* cleared and refilled with *bytes*.
+  protected def self.refill(into : Array(UInt8), bytes : Array(UInt8)) : Nil
+    into.clear
+    bytes.each { |byte| into << byte }
+  end
+
   private def send_key_update(request : Bool) : TlsError?
     sent = send_protected(TlsRecords::HANDSHAKE, TlsBytes.message(24, [request ? 1_u8 : 0_u8]))
     return sent if sent
-    @write_secret = @schedule.next_secret(@write_secret)
-    @writer = TlsRecordCipher.new(@suite, @schedule, @write_secret)
+    TlsConnection.refill(@write_secret, @schedule.next_secret(@write_secret))
+    if writer = @writer
+      writer.rekey(@suite, @schedule, @write_secret)
+    end
     @update_owed = false
     nil
   end
@@ -1660,8 +1703,7 @@ pub abstract class TlsConnection
         return tls_error("a KeyUpdate of #{length} bytes", TlsAlert::DECODE_ERROR) unless length == 1
         # Section 4.6.3: a request_update of neither 0 nor 1.
         return tls_error("a KeyUpdate asking #{message[4]}", TlsAlert::ILLEGAL_PARAMETER) unless message[4] <= 1_u8
-        @read_secret = @schedule.next_secret(@read_secret)
-        @reader = TlsRecordCipher.new(@suite, @schedule, @read_secret)
+        take_key_update
         # update_requested: answered before this side's next application
         # data (section 4.6.3), by `write` - a read writes nothing.
         @update_owed = true if message[4] == 1_u8
@@ -3546,9 +3588,12 @@ pub class TlsSession
     nil
   end
 
-  # *ticket* held, the oldest gone past the session's limit.
+  # *ticket* held, the oldest gone past the session's limit. It is
+  # copied to the program's tape: a session outlives the connection that
+  # received it, and has no owner of its own yet (TODO), so each ticket
+  # kept stays until the program ends.
   def keep(ticket : TlsHeldTicket) : Nil
-    @tickets << ticket
+    @tickets << ticket.copy_to(Program.tape)
     while @tickets.size > @limit
       @tickets.shift
     end

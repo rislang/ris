@@ -161,10 +161,18 @@ pub class AesGcm
 
   @[PointerUnsafe("the cipher core expands the key into this object's words")]
   def initialize(key : String | Array::View(UInt8) | Array(UInt8))
-    size = AeadBytes.size(key)
-    raise "AesGcm: a key is 16, 24 or 32 bytes, not #{size}" unless size == 16 || size == 24 || size == 32
     @keys = uninitialized StaticArray(UInt64, 240)
     @powers = uninitialized StaticArray(UInt64, 24)
+    @rounds = 0
+    rekey(key)
+  end
+
+  # This cipher under *key*, in place: its expanded key and hash powers
+  # rewritten in its own words.
+  @[PointerUnsafe("the cipher core expands the key into this object's words")]
+  def rekey(key : String | Array::View(UInt8) | Array(UInt8)) : Nil
+    size = AeadBytes.size(key)
+    raise "AesGcm: a key is 16, 24 or 32 bytes, not #{size}" unless size == 16 || size == 24 || size == 32
     local = uninitialized StaticArray(UInt8, 32)
     bytes = pointerof(local).as(Pointer(UInt8))
     AeadBytes.load(key, 0, bytes, size)
@@ -529,6 +537,13 @@ pub class ChaCha20Poly1305
   def initialize(key : String | Array::View(UInt8) | Array(UInt8))
     AeadBytes.exactly(key, 32, "ChaCha20Poly1305: a key")
     @key = uninitialized StaticArray(UInt8, 32)
+    AeadBytes.load(key, 0, pointerof(@key).as(Pointer(UInt8)), 32)
+  end
+
+  # This cipher under *key*, in place.
+  @[PointerUnsafe("copies the key into this object's own bytes")]
+  def rekey(key : String | Array::View(UInt8) | Array(UInt8)) : Nil
+    AeadBytes.exactly(key, 32, "ChaCha20Poly1305: a key")
     AeadBytes.load(key, 0, pointerof(@key).as(Pointer(UInt8)), 32)
   end
 
