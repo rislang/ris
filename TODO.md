@@ -16,20 +16,31 @@ How to work (fewer tokens, faster to the goal):
 
 Breakage between steps is fine; no transition stages.
 
-4. samples and tests: RIS_CHECK_MATCH per group, then one full check.sh.
+4. samples and tests, group by group, then one full check.sh.
    `RIS_SCOPE_ERRORS=all ris build --no-codegen x.ri` lists every scope
-   refusal. Over test/ris and samples, 585 sites (2026-10-31): 293
-   "cannot return a value made in this def" (mostly `X | SomeError`
-   whose error struct holds an interpolated message: read into a flat
-   String or bits first, then wrap them in a one-call def, as
-   std/netip does), 125 loop-round stores, 73 def stores, 72 block
-   stores, 21 block values. By file: mail 55, x509 47, asn1 34,
-   regex 31, tls 27, socket 27, toml 25, bzip2 22, big 19, ...
-   Tests still calling `local_tape` move to `tape`.
+   refusal. Done: csv/xz/tar/bzip2, query, http_head, uri, idna,
+   socket's address parsing, base32, shlex, uuid, path, ini, mime, otp,
+   format, deque, set, slice. Patterns: read into one flat String
+   (tagged with a 0 or 1 byte where an error may come back), then wrap
+   it in a one-call def, a choice of two calls, or a `new`.
+   Left, by test: socket.iyi's resolver (resolve, lookup, ask_upstreams,
+   ask_upstream keep each round's answers: socket_pair, socket_pieces,
+   websocket_*, smtp, mail, dns, secure_dns, udp, http_*, samples/ris/*),
+   yaml/toml/xml/xpath parsers (values built across scopes), regex
+   (RxCompiler fields), hpack (decode_fields), zip, big, time parse,
+   mlkem, curve25519, capsule/bit_array, png, eiy, file info?, json,
+   string_pool, log (with_context fields), heap, roots_holders,
+   text_grow, slice_pool, file_metadata.
 5. benches: build each, group the refusals by message, fix per group.
 
 Checker holes found on the way (unknown must be refused, SPEC 3.6):
 
+* A spawn block's non-flat value (a Tuple or Hash, task_tape_result)
+  is refused: the block frees its scratch before the task copy takes
+  the value. Copy the value at the boundary before the reset.
+* A tape block in a constant's initializer (program_local_init:
+  `INIT = tape { State.keep(String.new("x")) }`) stores block text into
+  a class variable unrefused.
 * Field paths fold at FIELD_DEPTH (now 6, was 4): a deeper path through
   a reader's own fields (entry.@reader.@inflater.@core.@chunk) conflates
   a refill with views of its siblings. Fold by type, not depth.
@@ -117,11 +128,10 @@ After the Now steps; their refusals replace most of the old bench list.
 
 ## Known failures
 
-* check.sh (2026-10-31, 79bd829d2): 143 FAILED, 387 pass. Every scope
-  frees now; std, samples and tests that keep scratch past a scope or
-  return a non-flat value made in a def are refused until steps 3-5
-  migrate them (loop_shrink, http_*, samples/ris/*, yaml, toml, xml,
-  regex, tls-based ones, heap_check among them).
+* check.sh (2026-11-01, 3a4b4810b): 63 FAILED. Every scope frees now;
+  std, samples and tests that keep scratch past a scope or return a
+  non-flat value made in a def are refused until steps 4-5 migrate them
+  (see step 4's list).
 * check.sh (2026-10-31): samples/ris/web prints `000` (no answer);
   http_answer_scope panics `cannot create a socket: error 24` (EMFILE),
   also run alone and already at d056d2aa2.
