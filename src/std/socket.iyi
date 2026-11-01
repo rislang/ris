@@ -242,6 +242,22 @@ pub struct SocketError
     SocketError.new(operation, code, nil, nil, tried)
   end
 
+  # The same failure with its texts copied into *into*: what an object
+  # keeps past the scope that made it.
+  def kept(into : String::Builder) : SocketError
+    dns = @dns_error
+    layer = @layer_reason
+    tried = @tried
+    SocketError.new(SocketError.keep(into, @operation), @code, dns ? dns.kept(into) : nil,
+      layer ? SocketError.keep(into, layer) : nil, tried ? SocketError.keep(into, tried) : nil)
+  end
+
+  protected def self.keep(into : String::Builder, text : String) : String
+    from = into.bytesize
+    into << text
+    into.finish[from, text.bytesize]
+  end
+
   def initialize(@operation : String, @code : Int32, @dns_error : DnsError?, @layer_reason : String?, @tried : String?)
   end
 

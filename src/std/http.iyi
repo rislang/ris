@@ -943,6 +943,8 @@ pub class BodyReader
   @total : Int64
   @finished : Bool
   @fault : HTTPError | Cancelled | SocketError | Nil
+  # The kept fault's texts.
+  @fault_text : String::Builder = String::Builder.new(256)
   @text : String
   @at : Int32
   # Pending until the first read that has to wait on the socket: a
@@ -1073,7 +1075,8 @@ pub class BodyReader
         got = raw(65536)
         return got unless got.is_a?(String)
         break if got.bytesize == 0
-        first = first + got
+        # Grown in place: a round's text is freed with the round.
+        first << got
       end
       zlib = first.bytesize >= 2 && (first.byte_at(0) & 15_u8) == 8_u8 && ((first.byte_at(0).to_i32 << 8) | first.byte_at(1).to_i32) % 31 == 0
       envelope = Envelope::Raw unless zlib
@@ -1099,7 +1102,8 @@ pub class BodyReader
   # length a head declared was made before any of it had come, and a head
   # that declared 64 MB and sent two bytes cost the server 64 MB.
   def read_all(limit : Int64 = 2147483647_i64) : String | Cancelled | SocketError | HTTPError
-    pieces = [] of String
+    # Grown in place, in its own reservation: it moves down whole.
+    text = ""
     total = 0_i64
     while true
       got = read(65536)
@@ -1109,13 +1113,23 @@ pub class BodyReader
       if total > limit
         return remember(HTTPError.new("body past #{limit} bytes", 413))
       end
-      pieces << got
+      text << got
     end
-    return "" if pieces.empty?
-    return pieces[0] if pieces.size == 1
-    whole = ""
-    pieces.each { |piece| whole << piece }
-    whole
+    text
+  end
+
+  # The rest of the body onto the end of *into*; why not, when it cannot
+  # be read.
+  def read_all_into(into : String::Builder, limit : Int64 = 2147483647_i64) : Cancelled | SocketError | HTTPError | Nil
+    total = 0_i64
+    while true
+      got = read(65536)
+      return got unless got.is_a?(String)
+      return nil if got.bytesize == 0
+      total = total + got.bytesize.to_i64
+      return remember(HTTPError.new("body past #{limit} bytes", 413)) if total > limit
+      into << got
+    end
   end
 
   # Reads past the rest of the body, *limit* bytes at most: whether it
@@ -1132,8 +1146,22 @@ pub class BodyReader
     end
   end
 
+  # *fault* kept, its texts copied into the reader's own: every read
+  # after it answers the same.
   protected def remember(fault : HTTPError | Cancelled | SocketError) : HTTPError | Cancelled | SocketError
-    @fault = fault
+    if fault.is_a?(HTTPError)
+      from = @fault_text.bytesize
+      @fault_text << fault.reason
+      held = HTTPError.new(@fault_text.finish[from, fault.reason.bytesize], fault.status)
+      @fault = held
+      return held
+    end
+    if fault.is_a?(SocketError)
+      said = fault.kept(@fault_text)
+      @fault = said
+      return said
+    end
+    @fault = Cancelled.new
     fault
   end
 
@@ -1534,6 +1562,8 @@ pub class Response
   @writer : Proc(BodyWriter, Nil)?
   @upgrading : Bool = false
   @reader : BodyReader?
+  # Where a body read from `@reader` is kept: made with the response.
+  @held : String::Builder? = nil
   @url : String?
   @decoded : Bool
   @tls_resumed : Bool = false
@@ -1553,6 +1583,7 @@ pub class Response
     @source = nil
     @writer = nil
     @reader = reader
+    @held = String::Builder.new(4096)
     @url = url
   end
 
@@ -1658,10 +1689,10 @@ pub class Response
   # time it is asked for, and a body that cannot be read panics with why;
   # `body_io` answers that as a value.
   def body : String
-    if reader = @reader
-      got = reader.read_all
-      raise got.message unless got.is_a?(String)
-      @body = got
+    if (reader = @reader) && (held = @held)
+      got = reader.read_all_into(held)
+      raise got.message if got
+      @body = held.finish
       @reader = nil
     end
     @body
@@ -1678,10 +1709,10 @@ pub class Response
   # The body read whole into the response, which is answered; why not,
   # when it cannot be.
   def load : Response | Cancelled | SocketError | HTTPError
-    if reader = @reader
-      got = reader.read_all
-      return got unless got.is_a?(String)
-      @body = got
+    if (reader = @reader) && (held = @held)
+      got = reader.read_all_into(held)
+      return got if got
+      @body = held.finish
       @reader = nil
     end
     self
@@ -2865,6 +2896,8 @@ pub struct Server
           text << ": "
           text << line
           text << "\r\n"
+          # The block's value is nil, not the builder it wrote to.
+          nil
         end
       else
         text << name
@@ -2872,6 +2905,7 @@ pub struct Server
         text << value
         text << "\r\n"
       end
+      nil
     end
     unless has_length || HTTP.bodiless?(response.status)
       if chunked

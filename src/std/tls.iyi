@@ -923,12 +923,22 @@ pub class TlsRecordCipher
   # *header* and body *body*: opened by `open_at` in a copy.
   def open(header : Array::View(UInt8), body : Array::View(UInt8)) : {UInt8, Array(UInt8)} | TlsError
     record = Array(UInt8).new(5 + body.size, 0_u8)
-    5.times { |i| record[i] = header[i] }
-    body.each_with_index { |byte, i| record[5 + i] = byte }
-    opened = open_at(record, 0, body.size)
+    opened = open_into(header, body, record)
+    return opened if opened.is_a?(TlsError)
+    {opened, record}
+  end
+
+  # `open` into *into*, the caller's, refilled with the content: its type.
+  def open_into(header : Array::View(UInt8), body : Array::View(UInt8), into : Array(UInt8)) : UInt8 | TlsError
+    into.clear
+    5.times { |i| into << header[i] }
+    body.each { |byte| into << byte }
+    opened = open_at(into, 0, body.size)
     return opened if opened.is_a?(TlsError)
     type, offset, size = opened
-    {type, Array(UInt8).new(size) { |i| record[offset + i] }}
+    size.times { |i| into[i] = into[offset + i] }
+    into.truncate(size)
+    type
   end
 end
 
@@ -1062,6 +1072,11 @@ pub abstract class TlsConnection
   end
   @inbox_at : Int32 = 0
   @inbox_end : Int32 = 0
+  # The last record read, its header and body, and its content once
+  # opened: refilled for each record, never made anew (SPEC 1.1).
+  @record_header : Array(UInt8) = Array(UInt8).new(5, 0_u8)
+  @record_body : Array(UInt8) = Array(UInt8).new(5 + TlsRecords::MAX_CIPHERTEXT, 0_u8)
+  @record_content : Array(UInt8) = Array(UInt8).new(5 + TlsRecords::MAX_CIPHERTEXT, 0_u8)
   @handshake : Array(UInt8) = [] of UInt8
   @handshake_at : Int32 = 0
   # ChangeCipherSpec records passed over: a peer sends one (appendix D.4).
@@ -1304,7 +1319,8 @@ pub abstract class TlsConnection
       end
       record = next_record
       return read_failed(record) if record.is_a?(TlsError)
-      type, content = record
+      type = record
+      content = @record_content
       if type == TlsRecords::APPLICATION_DATA
         cut = cut_message(type)
         return fail(cut) if cut
@@ -1417,15 +1433,15 @@ pub abstract class TlsConnection
     nil
   end
 
-  # One record's room, made once per connection: its content goes at the
-  # write keys' prefix past the start.
-  @outbox : Array(UInt8)? = nil
   OUTBOX_SIZE = 13 + TlsRecords::MAX_PLAINTEXT + TlsRecordCipher::OVERHEAD
+  # One record's room, made with the connection (a def's new Array would
+  # be freed when it ends): its content goes at the write keys' prefix
+  # past the start.
+  @outbox : Array(UInt8) = Array(UInt8).new(OUTBOX_SIZE, 0_u8)
 
   private def outbox_room : {Array(UInt8), Int32}
-    outbox = @outbox || (@outbox = Array(UInt8).new(OUTBOX_SIZE, 0_u8))
     writer = @writer
-    {outbox, writer ? writer.prefix : 5}
+    {@outbox, writer ? writer.prefix : 5}
   end
 
   # The *size* bytes of application data in the outbox sealed and sent,
@@ -1815,7 +1831,8 @@ pub abstract class TlsConnection
     return tls_error("handshake bytes before #{@peer}'s ChangeCipherSpec", TlsAlert::UNEXPECTED_MESSAGE) unless handshake_left == 0
     record = next_plain_record
     return record if record.is_a?(TlsError)
-    type, content = record
+    type = record
+    content = @record_content
     case type
     when TlsRecords::CHANGE_CIPHER_SPEC
       return tls_error("a ChangeCipherSpec that is not 0x01", TlsAlert::UNEXPECTED_MESSAGE) unless content == [1_u8]
@@ -1891,7 +1908,8 @@ pub abstract class TlsConnection
       return message if message
       record = plain ? next_plain_record : next_record
       return record if record.is_a?(TlsError)
-      type, content = record
+      type = record
+      content = @record_content
       case type
       when TlsRecords::HANDSHAKE
         return tls_error("an empty handshake record", TlsAlert::UNEXPECTED_MESSAGE) if content.empty?
@@ -1955,11 +1973,13 @@ pub abstract class TlsConnection
   # that has refused early data passes over the client's protected records
   # here, where they come before a second ClientHello. In TLS 1.2 a
   # ChangeCipherSpec is the key change, not passed over: the caller has it.
-  private def next_plain_record : {UInt8, Array(UInt8)} | TlsError
+  # Its type; its content in `@record_content`.
+  private def next_plain_record : UInt8 | TlsError
     while true
       raw = read_record
-      return raw if raw.is_a?(TlsError)
-      header, body = raw
+      return raw if raw
+      header = @record_header
+      body = @record_body
       type = header[0]
       if type == TlsRecords::APPLICATION_DATA
         if @early_left > 0 && body.size <= @early_left
@@ -1974,17 +1994,20 @@ pub abstract class TlsConnection
         return passed if passed
         next
       end
-      return {type, body}
+      TlsConnection.refill(@record_content, body)
+      return type
     end
   end
 
   # The next record under the read keys: {inner type, content}; in TLS
   # 1.2, {type, content}.
-  private def next_record : {UInt8, Array(UInt8)} | TlsError
+  # Its type; its content in `@record_content`.
+  private def next_record : UInt8 | TlsError
     while true
       raw = read_record
-      return raw if raw.is_a?(TlsError)
-      header, body = raw
+      return raw if raw
+      header = @record_header
+      body = @record_body
       type = header[0]
       return tls12_record(header, body) if @tls12
       if type == TlsRecords::CHANGE_CIPHER_SPEC && @handshaking
@@ -1994,12 +2017,13 @@ pub abstract class TlsConnection
         next
       end
       if type == TlsRecords::ALERT && (@reader.nil? || @handshaking)
-        return {type, body}
+        TlsConnection.refill(@record_content, body)
+        return type
       end
       return tls_error("a record of type #{type} where a protected one belongs", TlsAlert::UNEXPECTED_MESSAGE) unless type == TlsRecords::APPLICATION_DATA
       reader = @reader
       return tls_error("a protected record before any keys", TlsAlert::UNEXPECTED_MESSAGE) unless reader
-      opened = reader.open(header, body)
+      opened = reader.open_into(header, body, @record_content)
       # Early data this server refused is under keys it does not have: a
       # record that does not open is passed over while the allowance lasts.
       if opened.is_a?(TlsError) && opened.alert == TlsAlert::BAD_RECORD_MAC && @early_left > 0 && body.size <= @early_left
@@ -2014,7 +2038,7 @@ pub abstract class TlsConnection
   # A TLS 1.2 record after the peer's ChangeCipherSpec: an alert, a
   # handshake message or application data, each under the keys, its type
   # in its header. A second ChangeCipherSpec is refused.
-  private def tls12_record(header : Array(UInt8), body : Array(UInt8)) : {UInt8, Array(UInt8)} | TlsError
+  private def tls12_record(header : Array(UInt8), body : Array(UInt8)) : UInt8 | TlsError
     type = header[0]
     return tls_error("a ChangeCipherSpec after the keys changed", TlsAlert::UNEXPECTED_MESSAGE) if type == TlsRecords::CHANGE_CIPHER_SPEC
     unless type == TlsRecords::ALERT || type == TlsRecords::HANDSHAKE || type == TlsRecords::APPLICATION_DATA
@@ -2022,23 +2046,27 @@ pub abstract class TlsConnection
     end
     reader = @reader
     return tls_error("a protected record before any keys", TlsAlert::UNEXPECTED_MESSAGE) unless reader
-    reader.open(header, body)
+    reader.open_into(header, body, @record_content)
   end
 
   # A record's header and body, as it came.
-  private def read_record : {Array(UInt8), Array(UInt8)} | TlsError
+  # Into `@record_header` and `@record_body`.
+  private def read_record : TlsError?
     filled = fill(5)
     return filled if filled
     inbox = inbox_room
-    header = Array(UInt8).new(5) { |i| inbox[@inbox_at + i] }
+    header = @record_header
+    5.times { |i| header[i] = inbox[@inbox_at + i] }
     return tls_error("a record with version #{header[1]}.#{header[2]}", TlsAlert::DECODE_ERROR) unless header[1] == 3_u8
     length = (header[3].to_i32 << 8) | header[4].to_i32
     return tls_error("a record of #{length} bytes, past the 2^14 + 256 allowed", TlsAlert::RECORD_OVERFLOW) if length > TlsRecords::MAX_CIPHERTEXT
     filled = fill(5 + length)
     return filled if filled
-    body = Array(UInt8).new(length) { |i| inbox[@inbox_at + 5 + i] }
+    body = @record_body
+    body.clear
+    length.times { |i| body << inbox[@inbox_at + 5 + i] }
     @inbox_at = @inbox_at + 5 + length
-    {header, body}
+    nil
   end
 
   INBOX_SIZE = 2 * (5 + TlsRecords::MAX_CIPHERTEXT)
@@ -4687,7 +4715,8 @@ pub class TlsServer < TlsConnection
     while true
       record = next_record
       return record if record.is_a?(TlsError)
-      type, content = record
+      type = record
+      content = @record_content
       case type
       when TlsRecords::APPLICATION_DATA
         # Section 5.1: nothing comes between a handshake message's pieces,
