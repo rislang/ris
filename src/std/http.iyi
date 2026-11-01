@@ -147,7 +147,7 @@ import std/text
 
 import std/int
 
-import std/dns::{DnsError, DnsName, SvcbAnswer, SvcbRecord}
+import std/dns::{DnsError, DnsName, SvcbAnswer, SvcbRecord, SvcbStore}
 import std/socket::{IyiSocket, Resolver, SocketError}
 import std/tls::{TlsAlert, TlsClient, TlsConfig, TlsConnection, TlsEchConfig, TlsError, TlsMadeUnder, TlsServer, TlsServerConfig, TlsSession}
 import std/x509::{Certificate}
@@ -4072,7 +4072,8 @@ pub struct HTTP
   private def self.connect_by_records(client : HTTPClient, origin : String, host : String, port : Int32, base : TlsConfig, through : Resolver?, timeout_ms : Int32) : Tuple(IyiSocket, TlsClient, TlsConfig) | Cancelled | SocketError | HTTPError | Nil
     return nil if IyiSocket.localhost?(host) || !DnsName.valid?(host)
     resolver = through || Resolver.system
-    found = resolver.https_records(host, port)
+    store = SvcbStore.new
+    found = resolver.https_records(host, port, store)
     return found if found.is_a?(Cancelled)
     if found.is_a?(DnsError)
       return nil if found.not_found? || found.no_address? || found.malformed? || resolver.upstreams.empty?

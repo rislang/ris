@@ -1746,7 +1746,7 @@ fi
 
 # An error struct's sentence moves down as a String result does.
 out=$("$RIS" run test/ris/scope_error_result.ri 2>&1)
-if [ "$out" = $'bad 5 5\nok 1\nrefused 7 7\nmade 4 bc also abcd\ntrue' ]; then
+if [ "$out" = $'bad 5 5\nok 1\nrefused 7 7\nmade 4 bc also abcd\nt abcd 3 ab\ntrue' ]; then
   echo "runs     scope_error_result"
 else
   echo "FAILED   scope_error_result: $out"; status=1

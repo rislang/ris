@@ -170,8 +170,12 @@ tape do
   end
   bad = SvcbRecord.parse(unhex("0001000003000100"))
   puts bad.is_a?(DnsError) ? bad.reason : "read"
-  puts DnsName.candidates("db", ["corp.test", "test."], 1).join(" ")
-  puts DnsName.candidates("a.b.", ["corp.test"], 5).join(" ")
+  names = [] of String
+  DnsName.candidates("db", ["corp.test", "test."], 1, names, String::Builder.new(64))
+  puts names.join(" ")
+  names.clear
+  DnsName.candidates("a.b.", ["corp.test"], 5, names, String::Builder.new(64))
+  puts names.join(" ")
 end
 
 tcp = IyiSocket.listen("127.0.0.1", 0)

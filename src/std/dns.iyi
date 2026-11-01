@@ -60,6 +60,7 @@ import std/static_array::{StaticArray}
 import std/int
 
 import std/base64::{Base64}
+import std/random::{Random}
 
 # Why a name was not resolved. One type with a question per answer, as
 # `SocketError` has, so a caller tells a name that does not exist
@@ -253,14 +254,18 @@ pub struct DnsName
   # least *ndots* dots is tried as it is first and then under each search
   # domain; one with fewer is tried under each search domain first and as
   # it is last. A candidate longer than a name can be is left out.
-  def self.candidates(name : String, search : Array(String), ndots : Int32) : Array(String)
-    answer = [] of String
+  def self.candidates(name : String, search : Array(String), ndots : Int32,
+                      into : Array(String), text : String::Builder) : Nil
     index = 0
     while got = candidate(name, search, ndots, index)
-      answer << got unless got.empty?
+      # Kept in *text*: a round's text is freed with the round.
+      unless got.empty?
+        from = text.bytesize
+        text << got
+        into << text.finish[from, got.bytesize]
+      end
       index = index + 1
     end
-    answer
   end
 
   # Place *index* of `candidates`, made on its own: empty for a place left
@@ -401,16 +406,23 @@ pub struct SvcbRecord
   # The record in *data*, read by the constructor, which builds in the
   # caller's scope: its target text and key and value Arrays are made
   # here and the record views them.
-  def initialize(data : String, @owner : String)
+  def initialize(data : String, owner : String)
+    initialize(data, owner, String::Builder.new(data.bytesize + 64),
+      Array(Int32).new(8), Array(String).new(8))
+  end
+
+  # The record in *data*, its target and reason put into *text* and its
+  # keys and values onto the end of *keys* and *values*, which it views
+  # (a `SvcbStore` keeps several records' in one).
+  def initialize(data : String, @owner : String, text : String::Builder,
+                 keys : Array(Int32), values : Array(String))
     @priority = 0
     @target = "."
     @why = ""
-    text = String::Builder.new(data.bytesize + 64)
-    keys = Array(Int32).new(8)
-    values = Array(String).new(8)
-    @keys = Array::View(Int32).new(keys, 0, 0)
-    @values = Array::View(String).new(values, 0, 0)
-    read(data, text, keys, values)
+    start = keys.size
+    @keys = Array::View(Int32).new(keys, start, 0)
+    @values = Array::View(String).new(values, start, 0)
+    read(data, text, keys, values, start)
   end
 
   def self.checked(record : SvcbRecord) : SvcbRecord | DnsError
@@ -505,7 +517,8 @@ pub struct SvcbRecord
   end
 
   private def read(data : String, text : String::Builder,
-                   keys : Array(Int32), values : Array(String)) : Nil
+                   keys : Array(Int32), values : Array(String), start : Int32) : Nil
+    from = text.bytesize
     size = data.bytesize
     return refuse(text, "a service binding of #{size} bytes, shorter than a priority and a target") if size < 3
     priority = (data.byte_at(0).to_i32 << 8) | data.byte_at(1).to_i32
@@ -520,7 +533,7 @@ pub struct SvcbRecord
       return refuse(text, "a service binding's target runs past its data") if at + 1 + length > size
       wire = wire + 1 + length
       return refuse(text, "a service binding's target is longer than 255 bytes") if wire > 254
-      text << '.' if text.bytesize > 0
+      text << '.' if text.bytesize > from
       index = 0
       while index < length
         byte = data.byte_at(at + 1 + index)
@@ -531,12 +544,12 @@ pub struct SvcbRecord
       at = at + 1 + length
     end
     at = at + 1
-    target = text.bytesize == 0 ? "." : text.finish[0, text.bytesize]
+    target = text.bytesize == from ? "." : text.finish[from, text.bytesize - from]
     while at < size
       return refuse(text, "a SvcParam cut short: #{size - at} bytes where its key and length take 4") if at + 4 > size
       key = (data.byte_at(at).to_i32 << 8) | data.byte_at(at + 1).to_i32
       length = (data.byte_at(at + 2).to_i32 << 8) | data.byte_at(at + 3).to_i32
-      unless keys.empty?
+      unless keys.size == start
         last = keys[keys.size - 1]
         return refuse(text, "SvcParamKey #{SvcbRecord.key_name(key)} twice") if key == last
         return refuse(text, "SvcParamKey #{SvcbRecord.key_name(key)} after #{SvcbRecord.key_name(last)}: the keys are not in increasing order") if key < last
@@ -551,12 +564,12 @@ pub struct SvcbRecord
     end
     @priority = priority
     @target = target
-    @keys = Array::View(Int32).new(keys, 0, keys.size)
-    @values = Array::View(String).new(values, 0, values.size)
+    @keys = Array::View(Int32).new(keys, start, keys.size - start)
+    @values = Array::View(String).new(values, start, values.size - start)
     mandatory.each do |listed|
-      return refuse(text, "mandatory lists #{SvcbRecord.key_name(listed)}, which the record does not carry") unless keys.includes?(listed)
+      return refuse(text, "mandatory lists #{SvcbRecord.key_name(listed)}, which the record does not carry") unless @keys.includes?(listed)
     end
-    return refuse(text, "no-default-alpn without alpn") if keys.includes?(NO_DEFAULT_ALPN) && !keys.includes?(ALPN)
+    return refuse(text, "no-default-alpn without alpn") if @keys.includes?(NO_DEFAULT_ALPN) && !@keys.includes?(ALPN)
   end
 
   # Why *value* is not of *key*'s form, or nil when it is (or the key is
@@ -801,6 +814,69 @@ pub struct SvcbAnswer
   # An AliasMode record's target was ".": the service says it is not there.
   def unavailable? : ::Bool
     @name == "."
+  end
+end
+
+# Where `Resolver#https_records` keeps what it finds, made by the caller
+# where the answer is to live: the records, their keys, values and texts.
+# The answer views it.
+@[OnTape]
+pub class SvcbStore
+  getter records : Array(SvcbRecord)
+  @text : String::Builder
+  @keys : Array(Int32)
+  @values : Array(String)
+
+  def initialize
+    @records = Array(SvcbRecord).new(8)
+    @text = String::Builder.new(1024)
+    @keys = Array(Int32).new(32)
+    @values = Array(String).new(32)
+  end
+
+  # *text* kept here.
+  def keep(text : String) : String
+    from = @text.bytesize
+    @text << text
+    @text.finish[from, text.bytesize]
+  end
+
+  # The record in *data*, kept here when it is one.
+  def parse(data : String, owner : String) : SvcbRecord | DnsError
+    record = SvcbRecord.checked(SvcbRecord.new(data, owner, @text, @keys, @values))
+    @records << record if record.is_a?(SvcbRecord)
+    record
+  end
+
+  # The records from *first* on by ascending priority, those of one
+  # priority shuffled (RFC 9460 2.4.1): *first*.
+  def order(first : Int32) : Int32
+    index = @records.size - 1
+    while index > first
+      other = first + Random::Secure.rand(index - first + 1)
+      held = @records[index]
+      @records[index] = @records[other]
+      @records[other] = held
+      index = index - 1
+    end
+    # Stable, so the shuffle stands within each priority.
+    at = first + 1
+    while at < @records.size
+      record = @records[at]
+      to = at
+      while to > first && @records[to - 1].priority > record.priority
+        @records[to] = @records[to - 1]
+        to = to - 1
+      end
+      @records[to] = record
+      at = at + 1
+    end
+    first
+  end
+
+  # The answer: *name*, kept here, and the records from *first* on.
+  def answer(name : String, aliases : Int32, first : Int32) : SvcbAnswer
+    SvcbAnswer.new(keep(name), aliases, Array::View(SvcbRecord).new(@records, first, @records.size - first))
   end
 end
 

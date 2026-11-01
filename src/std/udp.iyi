@@ -97,9 +97,7 @@ pub class UdpSocket
 
   # Creates an unbound UDP client socket.
   def self.client(family : Int32 = 2) : UdpSocket
-    fd = __sys_socket(family)
-    raise "cannot create UDP socket" if fd < 0
-    UdpSocket.new(fd, family)
+    UdpSocket.new(-1, family)
   end
 
   # Creates an unbound IPv6 UDP client socket.
@@ -128,7 +126,11 @@ pub class UdpSocket
   # second bind of a held port failed on Windows, measured, and went
   # through on Linux [INFERENCE: not run here].
   def self.bind(host : String, port : Int32) : UdpSocket
-    bound = bind?(host, port)
+    raised(bind?(host, port))
+  end
+
+  # *bound*, or its error raised.
+  def self.raised(bound : UdpSocket | SocketError) : UdpSocket
     raise bound.message if bound.is_a?(SocketError)
     bound
   end
@@ -137,24 +139,35 @@ pub class UdpSocket
   # held, reserved (Windows' excluded ranges answer "access denied"), or
   # the address not this machine's - so a program can pick another. An
   # error's `message` is the sentence `bind` raises.
-  @[TapeUnsafe("Hand the sockaddr bytes to the OS")]
+  # One choice of two calls, so the socket is made in the caller's scope.
   def self.bind?(host : String, port : Int32) : UdpSocket | SocketError
+    (got = bound(host, port)) >= 0 ? UdpSocket.new((got & 0xFFFFFFFF_i64).to_i32, (got >> 32).to_i32) : UdpSocket.bind_refusal(got, host, port)
+  end
+
+  # The bound descriptor with its family above it, or a failure:
+  # IyiSocket::FAILED_CREATE or FAILED_STEP plus the error's code.
+  @[TapeUnsafe("Hand the sockaddr bytes to the OS")]
+  def self.bound(host : String, port : Int32) : Int64
     addr = ""
     family = make_sockaddr(host, port, addr)
     addrlen = sockaddr_size(family)
     fd = __sys_socket(family)
-    return SocketError.new("create UDP socket", IyiSocket.__sys_code(fd.to_i64)) if fd < 0
-
+    return IyiSocket::FAILED_CREATE - IyiSocket.__sys_code(fd.to_i64) if fd < 0
     bound = __sys_bind(fd, addr.to_unsafe, addrlen)
     if bound < 0
       # Read before the close, which may leave its own errno.
       code = IyiSocket.__sys_code(bound.to_i64)
-      why = refusal(bound.to_i64, false)
       IyiSocket.__sys_close(fd)
-      return SocketError.new("bind UDP socket to #{IyiSocket.endpoint(host, port)}", code, nil, why)
+      return IyiSocket::FAILED_STEP - code
     end
+    fd.to_i64 | (family.to_i64 << 32)
+  end
 
-    UdpSocket.new(fd, family)
+  # The error a failed `bound` answered.
+  def self.bind_refusal(got : Int64, host : String, port : Int32) : SocketError
+    return SocketError.new("create UDP socket", (IyiSocket::FAILED_CREATE - got).to_i32) if got > IyiSocket::FAILED_STEP
+    code = (IyiSocket::FAILED_STEP - got).to_i32
+    SocketError.new("bind UDP socket to #{IyiSocket.endpoint(host, port)}", code, nil, UdpSocket.refusal_of(code, false))
   end
 
   # Binds a UDP socket to 0.0.0.0 and the specified port.
@@ -505,7 +518,11 @@ pub class UdpSocket
   # and an IPv6 address from an IPv4 socket all said only "cannot send to
   # H:P" or "cannot bind UDP socket to H:P" - measured on Windows.
   def self.refusal(res : Int64, sending : ::Bool) : String
-    code = IyiSocket.__sys_code(res)
+    refusal_of(IyiSocket.__sys_code(res), sending)
+  end
+
+  # `refusal` for the error code *code*.
+  def self.refusal_of(code : Int32, sending : ::Bool) : String
     # EACCES, EMSGSIZE and EAFNOSUPPORT, in the platform's numbers.
     denied = {% if flag?(:win32) %} 10013 {% else %} 13 {% end %}
     too_large = {% if flag?(:win32) %} 10040 {% elsif flag?(:darwin) %} 40 {% else %} 90 {% end %}

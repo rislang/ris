@@ -1427,9 +1427,18 @@ class Iyi::TapeShrinkChecker
     if type.is_a?(UnionType)
       return type.union_types.all? { |t| flat_result?(t) }
     end
+    # A class instance is on the tape it was made on, fields or not.
+    return false if class_instance?(type)
     return true unless TapeChecker.tape_in(@program, type)
     name = type_name(type)
     name == "String" || name.starts_with?("Array(")
+  end
+
+  # An instance of a class: `new` put it on the running tape (SPEC 1.3).
+  private def class_instance?(type : Type) : Bool
+    type.is_a?(InstanceVarContainer) && !type.struct? && !type.is_a?(PrimitiveType) &&
+      !type.is_a?(MetaclassType) && type_name(type) != "String" &&
+      !type.is_a?(UnionType) && !type.is_a?(VirtualMetaclassType)
   end
 
   # Whether *root* is storage the caller handed in or program data.
@@ -1554,15 +1563,33 @@ class Iyi::TapeShrinkChecker
   # A struct whose tape fields are Strings and whose others are plain
   # numbers, booleans or enums: `__iyi_scope_result` moves its Strings
   # down as a String result's (an error and its sentence).
-  private def one_text_struct?(type : Type) : Bool
-    return false unless type.struct? && type.is_a?(InstanceVarContainer)
+  private def one_text_struct?(type : Type, depth = 0) : Bool
+    # A Tuple of Strings and plain values moves the same way
+    # (`__iyi_tuple_move`).
+    if type.is_a?(TupleInstanceType)
+      members = type.tuple_types.map(&.remove_typedef)
+      return members.any? { |m| type_name(m) == "String" } && members.all? { |m|
+        type_name(m) == "String" || m.is_a?(IntegerType) || m.is_a?(FloatType) ||
+          m.is_a?(BoolType) || m.is_a?(EnumType) || m.is_a?(CharType) || m.nil_type?
+      }
+    end
+    return false unless type.struct? && type.is_a?(InstanceVarContainer) && !type.is_a?(UnionType)
     texts = 0
     type.all_instance_vars.each_value do |ivar|
       it = ivar.type?.try(&.remove_typedef)
       return false unless it
+      # `T?`: what `__iyi_text_move` moves as T (a String, or one level
+      # down a struct of texts).
+      if it.is_a?(UnionType)
+        members = it.union_types.map(&.remove_typedef).reject(&.nil_type?)
+        return false unless members.size == 1 && members.size < it.union_types.size
+        it = members.first
+      end
       if type_name(it) == "String"
         texts += 1
-      elsif TapeChecker.tape_in(@program, it) || !(it.is_a?(IntegerType) || it.is_a?(FloatType) || it.is_a?(BoolType) || it.is_a?(EnumType))
+      elsif depth == 0 && one_text_struct?(it, 1)
+        texts += 1
+      elsif TapeChecker.tape_in(@program, it) || !(it.is_a?(IntegerType) || it.is_a?(FloatType) || it.is_a?(BoolType) || it.is_a?(EnumType) || it.is_a?(CharType) || it.nil_type?)
         return false
       end
     end

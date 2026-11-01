@@ -90,7 +90,7 @@ import std/indexable
 import std/text
 
 import std/dns::{DnsError, DnsTapeMessage, DnsName}
-import std/socket::{DnsUpstream, IPv4Address, IPv6Address, IyiSocket, Resolver, SocketError}
+import std/socket::{DnsLookup, DnsUpstream, IPv4Address, IPv6Address, IyiSocket, Resolver, SocketError}
 import std/tls::{TlsClient, TlsConfig, TlsError, TlsSession}
 import std/http::{HTTP, HTTPClient, HTTPError, Response}
 import std/uri::{URI}
@@ -144,20 +144,21 @@ pub class DnsOverTls
     false
   end
 
-  def exchange(queries : Array(String), timeout_ms : Int32) : Array(String) | DnsError | Cancelled
-    got = nil.as(Array(String) | DnsError | Cancelled | Nil)
+  def exchange(queries : Array(String), timeout_ms : Int32, at : DnsLookup, replies : Array(String)) : DnsError | Cancelled | Nil
+    got = nil.as(Bool | DnsError | Cancelled | Nil)
     if kept = live
-      got = over(kept, queries, timeout_ms, true)
+      got = over(kept, queries, timeout_ms, true, at, replies)
     end
     # Nothing kept, or the kept one closed before a byte of an answer.
     if got.nil?
       fresh = open(timeout_ms)
       return fresh unless fresh.is_a?(TlsClient)
-      got = over(fresh, queries, timeout_ms, false)
+      got = over(fresh, queries, timeout_ms, false, at, replies)
     end
     return lost("the connection ended before an answer") if got.nil?
-    @used_ms = Resolver.now_ms if got.is_a?(Array(String))
-    got
+    return got unless got.is_a?(Bool)
+    @used_ms = Resolver.now_ms
+    nil
   end
 
   def close : Nil
@@ -201,8 +202,9 @@ pub class DnsOverTls
   # *queries* written in one go, each after its length, and an answer read
   # for each, matched by ID. Nil when *reused* and the connection turned
   # out closed before a byte of an answer: the caller asks again on a new
-  # one. Every failure closes the connection.
-  private def over(tls : TlsClient, queries : Array(String), timeout_ms : Int32, reused : Bool) : Array(String) | DnsError | Cancelled | Nil
+  # one. Every failure closes the connection. The answers are kept in
+  # *at* and put into *replies*; true when they all came.
+  private def over(tls : TlsClient, queries : Array(String), timeout_ms : Int32, reused : Bool, at : DnsLookup, replies : Array(String)) : Bool | DnsError | Cancelled | Nil
     framed = [] of UInt8
     ids = [] of Int32
     queries.each do |query|
@@ -246,12 +248,12 @@ pub class DnsOverTls
         close
         return DnsError.new(DnsError::MALFORMED, "", label, "an answer with the ID #{id}, which no query waiting on the connection has")
       end
-      answers[slot] = frame
+      answers[slot] = at.keep(frame)
       left = left - 1
     end
-    whole = [] of String
-    answers.each { |answer| whole << answer.as(String) }
-    whole
+    replies.clear
+    answers.each { |answer| replies << answer.as(String) }
+    true
   end
 
   # The next message: its two bytes of length, then that many. Nil when
@@ -382,14 +384,16 @@ pub class DnsOverHttps
     @client.connections_reused
   end
 
-  def exchange(queries : Array(String), timeout_ms : Int32) : Array(String) | DnsError | Cancelled
-    answers = [] of String
-    queries.each do |query|
-      one = ask(query, timeout_ms)
+  def exchange(queries : Array(String), timeout_ms : Int32, at : DnsLookup, replies : Array(String)) : DnsError | Cancelled | Nil
+    replies.clear
+    index = 0
+    while index < queries.size
+      one = ask(queries[index], timeout_ms)
+      index = index + 1
       return one unless one.is_a?(String)
-      answers << one
+      replies << at.keep(one)
     end
-    answers
+    nil
   end
 
   def close : Nil

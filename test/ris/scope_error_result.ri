@@ -45,6 +45,13 @@ def pair(input : String) : ScopePair | Int32
   0
 end
 
+# A Tuple of texts and a number: its texts move down.
+def tup(input : String) : Tuple(String, Int32, String)
+  scratch = String::Builder.new(65536)
+  scratch.push(65_u8)
+  {"t #{input}", 3, input[0, 2]}
+end
+
 tape do
   c0 = cur
   a = read(5)
@@ -58,5 +65,8 @@ tape do
   d = pair(input)
   y = "overwrite #{5} #{6} #{7}"
   puts d.is_a?(ScopePair) ? "#{d.made} #{d.seen} #{d.also}" : "?"
+  e = tup(input)
+  z = "overwrite #{8} #{9} #{10}"
+  puts "#{e[0]} #{e[1]} #{e[2]}"
   puts cur - c0 < 1024
 end

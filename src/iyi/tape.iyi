@@ -2602,6 +2602,35 @@ def __iyi_text_move(mark : RisScopeMark, value : T) : T forall T
   {% end %}
 end
 
+# A Tuple result of Strings and plain numbers, booleans, chars or enums:
+# its Strings move down as a struct's do (`__iyi_text_move`); any other
+# Tuple views older storage and the scratch is released.
+def __iyi_tuple_move(mark : RisScopeMark, value : T) : T forall T
+  {% begin %}
+  {% plain = T.type_vars.all? { |t| t == ::String || t < ::Number || t == ::Bool || t == ::Char || t < ::Enum || t == ::Nil } %}
+  {% count = T.type_vars.select { |t| t == ::String }.size %}
+  {% if plain && count > 0 %}
+    slots = uninitialized StaticArray(String, {{count}})
+    at = pointerof(slots).as(Pointer(String))
+    {% for t, i in T.type_vars %}
+      {% if t == ::String %}
+        at[{{T.type_vars[0...i].select { |u| u == ::String }.size}}] = value[{{i}}]
+      {% end %}
+    {% end %}
+    pointers = uninitialized StaticArray(Pointer(String), {{count}})
+    each = pointerof(pointers).as(Pointer(Pointer(String)))
+    {% for i in 0...count %}
+      each[{{i}}] = at + {{i}}
+    {% end %}
+    RisScopeMove.texts(mark, each, {{count}})
+    { {% for t, i in T.type_vars %}{% if i > 0 %}, {% end %}{% if t == ::String %}at[{{T.type_vars[0...i].select { |u| u == ::String }.size}}]{% else %}value[{{i}}]{% end %}{% end %} }
+  {% else %}
+    __iyi_scope_reset(mark)
+    value
+  {% end %}
+  {% end %}
+end
+
 # A def's result where its scope ends (SPEC 1.5, 1.9). The scratch is
 # released either way. A String or Array made in it moves down to the
 # caller's boundary first: its bytes, or an Array's state block, with one
@@ -2614,6 +2643,8 @@ def __iyi_scope_result(mark : RisScopeMark, value : T) : T forall T
     RisScopeMove.text(mark, value)
   {% elsif T.name.starts_with?("Array(") %}
     RisScopeMove.array(mark, value)
+  {% elsif T.name.starts_with?("Tuple(") %}
+    __iyi_tuple_move(mark, value)
   {% elsif T.struct? && !T.union? %}
     __iyi_text_move(mark, value)
   {% elsif T.union? && T.union_types.any? { |t| t == ::String || t.name.starts_with?("Array(") || t.struct? } %}
@@ -2622,6 +2653,8 @@ def __iyi_scope_result(mark : RisScopeMark, value : T) : T forall T
         return RisScopeMove.text(mark, value) if value.is_a?(::String)
       {% elsif t.name.starts_with?("Array(") %}
         return RisScopeMove.array(mark, value) if value.is_a?({{t}})
+      {% elsif t.name.starts_with?("Tuple(") %}
+        return __iyi_tuple_move(mark, value) if value.is_a?({{t}})
       {% elsif t.struct? && !t.union? %}
         return __iyi_text_move(mark, value) if value.is_a?({{t}})
       {% end %}
